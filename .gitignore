@@ -1,0 +1,17 @@
+# Build output
+*.obj
+*.exe
+*.pdb
+*.ilk
+*.lib
+*.exp
+build/
+# Editor / OS
+.vs/
+*.user
+Thumbs.db
+# Claude local (machine-specific) settings and worktrees
+.claude/settings.local.json
+.worktrees/
+# Runtime config copy (the shipped default lives in config/)
+/magnifier.ini
