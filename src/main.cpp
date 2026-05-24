@@ -88,6 +88,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     unsigned long long lastMtime = ConfigMTime(L"magnifier.ini");
     double sinceCheck = 0.0;
     double lastLevel = -1.0; int lastX = INT_MIN, lastY = INT_MIN;
+    double lastCx = -1e9, lastCy = -1e9;          // last-applied float center (updateMode 1)
+    int updateMode = cfg.updateMode;
+    int maxUpdateHz = (cfg.maxUpdateHz > 0) ? cfg.maxUpdateHz : 0;
+    double sinceEmit = 1.0;                        // seconds since last transform emit (throttle)
 
     // High-resolution pacing timer (replaces DwmFlush). DwmFlush forced a DWM
     // composition pass each frame; paired with a per-frame transform change it kicked
@@ -146,6 +150,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                 Config nc = LoadConfig(L"magnifier.ini");
                 zoom = ZoomController(1.0, nc.maxLevel, nc.fullRangeSeconds);
                 tracker = Tracker(sw, sh, nc.sensitivity);
+                updateMode = nc.updateMode;
+                maxUpdateHz = (nc.maxUpdateHz > 0) ? nc.maxUpdateHz : 0;
             }
         }
 
@@ -160,19 +166,37 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         int dx, dy; g_input.drainRaw(dx, dy);
         tracker.update(p.x, p.y, dx, dy);
 
-        Offset o = ComputeOffset(tracker.centerX(), tracker.centerY(), zoom.level(), sw, sh);
-        if (zoom.level() != lastLevel || o.x != lastX || o.y != lastY) {
+        double cx = tracker.centerX(), cy = tracker.centerY();
+        double lvl = zoom.level();
+        Offset o = ComputeOffset(cx, cy, lvl, sw, sh);
+
+        // Decide whether to push the transform to DWM this frame (see updateMode docs).
+        bool wantEmit;
+        if (updateMode == 2) {
+            wantEmit = (lvl > 1.0) || (lvl != lastLevel);          // continuous while zoomed
+        } else if (updateMode == 1) {
+            wantEmit = (lvl != lastLevel || cx != lastCx || cy != lastCy);
+        } else {
+            wantEmit = (lvl != lastLevel || o.x != lastX || o.y != lastY);
+        }
+        sinceEmit += dt;
+        // Optional throttle (never throttle a level change, e.g. returning to 1.0x).
+        if (maxUpdateHz > 0 && lvl == lastLevel && sinceEmit < 1.0 / maxUpdateHz)
+            wantEmit = false;
+
+        if (wantEmit) {
             if (diag) {
                 LARGE_INTEGER a, b;
                 QueryPerformanceCounter(&a);
-                engine.setTransform(zoom.level(), o.x, o.y);
+                engine.setTransform(lvl, o.x, o.y);
                 QueryPerformanceCounter(&b);
                 double stMs = double(b.QuadPart - a.QuadPart) / freq.QuadPart * 1000.0;
                 winStCalls++; winSumSt += stMs; if (stMs > winMaxSt) winMaxSt = stMs;
             } else {
-                engine.setTransform(zoom.level(), o.x, o.y);
+                engine.setTransform(lvl, o.x, o.y);
             }
-            lastLevel = zoom.level(); lastX = o.x; lastY = o.y;
+            lastLevel = lvl; lastX = o.x; lastY = o.y; lastCx = cx; lastCy = cy;
+            sinceEmit = 0.0;
         }
 
         if (diag) {
@@ -180,7 +204,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             winIters++; winSumDt += dtMs; if (dtMs > winMaxDt) winMaxDt = dtMs;
             winElapsed += dt;
             if (winElapsed >= 2.0 && diagOut) {
-                diagOut << "iters=" << winIters
+                diagOut << "mode=" << updateMode << " cap=" << maxUpdateHz
+                        << " iters=" << winIters
                         << " avgDt=" << (winIters ? winSumDt / winIters : 0.0)
                         << " maxDt=" << winMaxDt
                         << " stCalls=" << winStCalls

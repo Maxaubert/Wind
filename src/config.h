@@ -10,6 +10,12 @@ struct Config {
     double sensitivity      = 1.0;
     int    tickHzCap        = 144;
     int    diagnostics      = 0;     // 1 = log frame-timing to wind_diag.log
+    // Experimental (hot-reloadable): how often we push the transform to DWM.
+    // 0 = emit when the integer offset or level changes (skips sub-pixel frames);
+    // 1 = emit when the float center or level changes (every frame while moving);
+    // 2 = emit every frame while zoomed (continuous composition; avoids transitions).
+    int    updateMode       = 0;
+    int    maxUpdateHz      = 0;     // 0 = unlimited; else cap transform updates/sec
 };
 // Pure: parse INI text (key=value, ';' or '#' comments) into a Config, keeping
 // defaults for missing/malformed keys.
