@@ -1,0 +1,145 @@
+#include <windows.h>
+#include <dwmapi.h>
+#include <climits>
+#include "config.h"
+#include "magnifier_engine.h"
+#include "input_router.h"
+#include "transform.h"
+#include "tracker.h"
+#include "zoom_controller.h"
+#include "tray.h"
+
+using namespace wind;
+
+static InputRouter g_input;
+
+// Message-handler: decodes raw mouse movement (survives cursor lock) and routes
+// tray messages.
+static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_INPUT) {
+        UINT size = 0;
+        GetRawInputData((HRAWINPUT)lp, RID_INPUT, nullptr, &size, sizeof(RAWINPUTHEADER));
+        alignas(8) BYTE buf[128];
+        if (size > 0 && size <= sizeof(buf) &&
+            GetRawInputData((HRAWINPUT)lp, RID_INPUT, buf, &size, sizeof(RAWINPUTHEADER)) == size) {
+            auto* ri = reinterpret_cast<RAWINPUT*>(buf);
+            if (ri->header.dwType == RIM_TYPEMOUSE &&
+                (ri->data.mouse.usFlags & MOUSE_MOVE_RELATIVE) == MOUSE_MOVE_RELATIVE) {
+                AccumulateRaw(g_input, ri->data.mouse.lLastX, ri->data.mouse.lLastY);
+            }
+        }
+        return 0;
+    }
+    if (Tray::HandleMessage(hwnd, msg, wp, lp)) return 0;
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
+    // Single instance.
+    HANDLE mtx = CreateMutexW(nullptr, TRUE, L"Wind_Magnifier_SingleInstance");
+    if (GetLastError() == ERROR_ALREADY_EXISTS) return 0;
+
+    // Resolve magnifier.ini next to the exe (not the launch cwd) by anchoring cwd there.
+    wchar_t exePath[MAX_PATH];
+    if (GetModuleFileNameW(nullptr, exePath, MAX_PATH)) {
+        wchar_t* slash = wcsrchr(exePath, L'\\');
+        if (slash) { *slash = L'\0'; SetCurrentDirectoryW(exePath); }
+    }
+
+    Config cfg = LoadConfig(L"magnifier.ini");
+
+    // Hidden (never shown) normal window: owns the tray icon + menu and receives WM_INPUT.
+    WNDCLASSW wc{};
+    wc.lpfnWndProc = WndProc;
+    wc.hInstance = hInst;
+    wc.lpszClassName = L"WindMagnifierWnd";
+    RegisterClassW(&wc);
+    HWND hwnd = CreateWindowExW(0, wc.lpszClassName, L"Wind", WS_OVERLAPPED,
+                                0, 0, 0, 0, nullptr, nullptr, hInst, nullptr);
+    if (!hwnd) return 1;
+
+    // Raw Input for the mouse, delivered even when a game is foreground.
+    RAWINPUTDEVICE rid{};
+    rid.usUsagePage = 0x01; rid.usUsage = 0x02; // generic mouse
+    rid.dwFlags = RIDEV_INPUTSINK; rid.hwndTarget = hwnd;
+    RegisterRawInputDevices(&rid, 1, sizeof(rid));
+
+    if (!g_input.start(cfg.zoomInButton, cfg.zoomOutButton, /*swallow=*/true)) {
+        MessageBoxW(nullptr, L"Failed to install the mouse hook.", L"Wind", MB_ICONERROR);
+        return 1;
+    }
+
+    MagnifierEngine engine;
+    if (!engine.initialize()) {
+        MessageBoxW(nullptr, L"Magnification API failed to initialize.", L"Wind", MB_ICONERROR);
+        g_input.stop();
+        return 1;
+    }
+    Tray::Add(hwnd, hInst);
+
+    int sw = GetSystemMetrics(SM_CXSCREEN);
+    int sh = GetSystemMetrics(SM_CYSCREEN);
+    ZoomController zoom(1.0, cfg.maxLevel, cfg.fullRangeSeconds);
+    Tracker tracker(sw, sh, cfg.sensitivity);
+
+    LARGE_INTEGER freq, prev;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&prev);
+    unsigned long long lastMtime = ConfigMTime(L"magnifier.ini");
+    double sinceCheck = 0.0;
+    double lastLevel = -1.0; int lastX = INT_MIN, lastY = INT_MIN;
+
+    bool running = true;
+    while (running) {
+        MSG msg;
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            if (msg.message == WM_QUIT) { running = false; break; }
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+        if (!running) break;
+
+        DwmFlush(); // pace to the compositor (~refresh rate); blocks efficiently when idle
+
+        LARGE_INTEGER now;
+        QueryPerformanceCounter(&now);
+        double dt = double(now.QuadPart - prev.QuadPart) / double(freq.QuadPart);
+        prev = now;
+
+        // Config hot-reload (~once per second).
+        sinceCheck += dt;
+        if (sinceCheck > 1.0) {
+            sinceCheck = 0.0;
+            unsigned long long m = ConfigMTime(L"magnifier.ini");
+            if (m != lastMtime) {
+                lastMtime = m;
+                Config nc = LoadConfig(L"magnifier.ini");
+                zoom = ZoomController(1.0, nc.maxLevel, nc.fullRangeSeconds);
+                tracker = Tracker(sw, sh, nc.sensitivity);
+            }
+        }
+
+        // Watchdog-safe: derive direction from current physical button state each tick.
+        zoom.setDirection(ResolveDirection(g_input.state().inHeld.load(),
+                                           g_input.state().outHeld.load()));
+        zoom.tick(dt);
+
+        if (g_input.state().recenter.exchange(false)) tracker.recenter();
+
+        POINT p; GetCursorPos(&p);
+        int dx, dy; g_input.drainRaw(dx, dy);
+        tracker.update(p.x, p.y, dx, dy);
+
+        Offset o = ComputeOffset(tracker.centerX(), tracker.centerY(), zoom.level(), sw, sh);
+        if (zoom.level() != lastLevel || o.x != lastX || o.y != lastY) {
+            engine.setTransform(zoom.level(), o.x, o.y);
+            lastLevel = zoom.level(); lastX = o.x; lastY = o.y;
+        }
+    }
+
+    engine.shutdown();   // resets to 1x - never leave the screen zoomed
+    g_input.stop();
+    Tray::Remove();
+    ReleaseMutex(mtx);
+    return 0;
+}
