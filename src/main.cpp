@@ -12,6 +12,15 @@
 using namespace wind;
 
 static InputRouter g_input;
+static int g_zoomInBtnId = 2;   // XBUTTON id: 1 = XBUTTON1, 2 = XBUTTON2 (set from cfg)
+static int g_zoomOutBtnId = 1;
+
+// Set side-button state from a Raw Input transition. Mirrors the hook's id mapping so
+// the two state sources are interchangeable and idempotent.
+static void SetZoomButton(int xbuttonId, bool down) {
+    if (xbuttonId == g_zoomInBtnId)  g_input.state().inHeld.store(down);
+    if (xbuttonId == g_zoomOutBtnId) g_input.state().outHeld.store(down);
+}
 
 // Message-handler: decodes raw mouse movement (survives cursor lock) and routes
 // tray messages.
@@ -23,9 +32,21 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (size > 0 && size <= sizeof(buf) &&
             GetRawInputData((HRAWINPUT)lp, RID_INPUT, buf, &size, sizeof(RAWINPUTHEADER)) == size) {
             auto* ri = reinterpret_cast<RAWINPUT*>(buf);
-            if (ri->header.dwType == RIM_TYPEMOUSE &&
-                (ri->data.mouse.usFlags & MOUSE_MOVE_RELATIVE) == MOUSE_MOVE_RELATIVE) {
-                AccumulateRaw(g_input, ri->data.mouse.lLastX, ri->data.mouse.lLastY);
+            if (ri->header.dwType == RIM_TYPEMOUSE) {
+                const RAWMOUSE& m = ri->data.mouse;
+                if ((m.usFlags & MOUSE_MOVE_ABSOLUTE) == 0) {
+                    AccumulateRaw(g_input, m.lLastX, m.lLastY);
+                }
+                // Side-button state via Raw Input. This path is delivered even when an
+                // elevated window (Task Manager, UAC) is foreground, where the
+                // WH_MOUSE_LL hook is not invoked for a medium-IL process (UIPI). The
+                // hook still runs for normal windows (and swallows the buttons there);
+                // setting the same state from both sources is idempotent.
+                USHORT bf = m.usButtonFlags;
+                if (bf & RI_MOUSE_BUTTON_4_DOWN) SetZoomButton(1, true);
+                if (bf & RI_MOUSE_BUTTON_4_UP)   SetZoomButton(1, false);
+                if (bf & RI_MOUSE_BUTTON_5_DOWN) SetZoomButton(2, true);
+                if (bf & RI_MOUSE_BUTTON_5_UP)   SetZoomButton(2, false);
             }
         }
         return 0;
@@ -47,6 +68,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     }
 
     Config cfg = LoadConfig(L"magnifier.ini");
+    g_zoomInBtnId = cfg.zoomInButton;
+    g_zoomOutBtnId = cfg.zoomOutButton;
 
     // Hidden (never shown) normal window: owns the tray icon + menu and receives WM_INPUT.
     WNDCLASSW wc{};
@@ -116,6 +139,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     double winElapsed = 0.0; int winIters = 0;
     double winSumDt = 0.0, winMaxDt = 0.0;
     int winStCalls = 0; double winSumSt = 0.0, winMaxSt = 0.0;
+    int winLockedTicks = 0;   // ticks the tracker treated the cursor as locked
 
     bool running = true;
     while (running) {
@@ -202,6 +226,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         if (diag) {
             double dtMs = dt * 1000.0;
             winIters++; winSumDt += dtMs; if (dtMs > winMaxDt) winMaxDt = dtMs;
+            if (tracker.locked()) winLockedTicks++;
             winElapsed += dt;
             if (winElapsed >= 2.0 && diagOut) {
                 // Foreground-window title: confirms whether the game is still the
@@ -219,10 +244,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                         << " stCalls=" << winStCalls
                         << " avgSt=" << (winStCalls ? winSumSt / winStCalls : 0.0)
                         << " maxSt=" << winMaxSt
+                        << " lockedTicks=" << winLockedTicks << "/" << winIters
                         << " fg=\"" << fg << "\"\n";
                 diagOut.flush();
                 winElapsed = 0.0; winIters = 0; winSumDt = 0.0; winMaxDt = 0.0;
-                winStCalls = 0; winSumSt = 0.0; winMaxSt = 0.0;
+                winStCalls = 0; winSumSt = 0.0; winMaxSt = 0.0; winLockedTicks = 0;
             }
         }
     }
