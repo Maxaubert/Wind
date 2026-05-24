@@ -17,3 +17,5 @@ Thumbs.db
 /magnifier.ini
 # Diagnostic logs
 *.log
+# PresentMon / perf captures
+*.csv

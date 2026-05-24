@@ -204,13 +204,22 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             winIters++; winSumDt += dtMs; if (dtMs > winMaxDt) winMaxDt = dtMs;
             winElapsed += dt;
             if (winElapsed >= 2.0 && diagOut) {
+                // Foreground-window title: confirms whether the game is still the
+                // foreground window while we magnify (tests the "treated as bg" idea).
+                char fg[96] = "?";
+                if (HWND fgw = GetForegroundWindow()) {
+                    wchar_t wtitle[96] = L"";
+                    GetWindowTextW(fgw, wtitle, 95);
+                    WideCharToMultiByte(CP_UTF8, 0, wtitle, -1, fg, sizeof(fg), nullptr, nullptr);
+                }
                 diagOut << "mode=" << updateMode << " cap=" << maxUpdateHz
                         << " iters=" << winIters
                         << " avgDt=" << (winIters ? winSumDt / winIters : 0.0)
                         << " maxDt=" << winMaxDt
                         << " stCalls=" << winStCalls
                         << " avgSt=" << (winStCalls ? winSumSt / winStCalls : 0.0)
-                        << " maxSt=" << winMaxSt << "\n";
+                        << " maxSt=" << winMaxSt
+                        << " fg=\"" << fg << "\"\n";
                 diagOut.flush();
                 winElapsed = 0.0; winIters = 0; winSumDt = 0.0; winMaxDt = 0.0;
                 winStCalls = 0; winSumSt = 0.0; winMaxSt = 0.0;
