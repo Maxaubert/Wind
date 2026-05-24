@@ -1,5 +1,6 @@
 #include <windows.h>
 #include <climits>
+#include <fstream>
 #include "config.h"
 #include "magnifier_engine.h"
 #include "input_router.h"
@@ -98,6 +99,20 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     int hz = (cfg.tickHzCap > 0) ? cfg.tickHzCap : 144;
     LARGE_INTEGER due; due.QuadPart = -(10000000LL / hz); // relative due time, 100ns units
 
+    // Optional frame-timing diagnostics (config: diagnostics=1) -> wind_diag.log.
+    // Distinguishes a stall inside MagSetFullscreenTransform (maxSt high) from a stall
+    // in our loop/wait (maxDt high, maxSt low) from a DWM-side cost (both low).
+    bool diag = cfg.diagnostics != 0;
+    std::ofstream diagOut;
+    if (diag) {
+        diagOut.open("wind_diag.log", std::ios::app);
+        diagOut << "=== Wind diagnostics start (hz=" << hz << ") ===\n";
+        diagOut.flush();
+    }
+    double winElapsed = 0.0; int winIters = 0;
+    double winSumDt = 0.0, winMaxDt = 0.0;
+    int winStCalls = 0; double winSumSt = 0.0, winMaxSt = 0.0;
+
     bool running = true;
     while (running) {
         MSG msg;
@@ -147,11 +162,38 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
         Offset o = ComputeOffset(tracker.centerX(), tracker.centerY(), zoom.level(), sw, sh);
         if (zoom.level() != lastLevel || o.x != lastX || o.y != lastY) {
-            engine.setTransform(zoom.level(), o.x, o.y);
+            if (diag) {
+                LARGE_INTEGER a, b;
+                QueryPerformanceCounter(&a);
+                engine.setTransform(zoom.level(), o.x, o.y);
+                QueryPerformanceCounter(&b);
+                double stMs = double(b.QuadPart - a.QuadPart) / freq.QuadPart * 1000.0;
+                winStCalls++; winSumSt += stMs; if (stMs > winMaxSt) winMaxSt = stMs;
+            } else {
+                engine.setTransform(zoom.level(), o.x, o.y);
+            }
             lastLevel = zoom.level(); lastX = o.x; lastY = o.y;
+        }
+
+        if (diag) {
+            double dtMs = dt * 1000.0;
+            winIters++; winSumDt += dtMs; if (dtMs > winMaxDt) winMaxDt = dtMs;
+            winElapsed += dt;
+            if (winElapsed >= 2.0 && diagOut) {
+                diagOut << "iters=" << winIters
+                        << " avgDt=" << (winIters ? winSumDt / winIters : 0.0)
+                        << " maxDt=" << winMaxDt
+                        << " stCalls=" << winStCalls
+                        << " avgSt=" << (winStCalls ? winSumSt / winStCalls : 0.0)
+                        << " maxSt=" << winMaxSt << "\n";
+                diagOut.flush();
+                winElapsed = 0.0; winIters = 0; winSumDt = 0.0; winMaxDt = 0.0;
+                winStCalls = 0; winSumSt = 0.0; winMaxSt = 0.0;
+            }
         }
     }
 
+    if (diag && diagOut) diagOut.close();
     if (timer) CloseHandle(timer);
     engine.shutdown();   // resets to 1x - never leave the screen zoomed
     g_input.stop();

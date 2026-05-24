@@ -9,6 +9,11 @@ TEST_CASE("defaults when text is empty") {
     CHECK(c.maxLevel == doctest::Approx(8.0));
     CHECK(c.fullRangeSeconds == doctest::Approx(1.2));
     CHECK(c.sensitivity == doctest::Approx(1.0));
+    CHECK(c.diagnostics == 0);
+}
+TEST_CASE("parses diagnostics flag") {
+    Config c = ParseConfig("diagnostics=1\n");
+    CHECK(c.diagnostics == 1);
 }
 TEST_CASE("parses overrides and ignores comments/blank lines") {
     const char* ini =

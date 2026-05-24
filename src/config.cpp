@@ -28,6 +28,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "fullRangeSeconds") c.fullRangeSeconds = std::stod(val);
             else if (key == "sensitivity")      c.sensitivity = std::stod(val);
             else if (key == "tickHzCap")        c.tickHzCap = std::stoi(val);
+            else if (key == "diagnostics")      c.diagnostics = std::stoi(val);
         } catch (...) { /* keep default on bad value */ }
     }
     return c;
@@ -46,7 +47,9 @@ Config LoadConfig(const std::wstring& path) {
         std::ofstream out(path);
         out << "; Wind magnifier config. Edit and save; changes apply within ~1s.\n"
                "zoomInButton=2\nzoomOutButton=1\nrecenterVk=0\n"
-               "maxLevel=8.0\nfullRangeSeconds=1.2\nsensitivity=1.0\ntickHzCap=144\n";
+               "maxLevel=8.0\nfullRangeSeconds=1.2\nsensitivity=1.0\ntickHzCap=144\n"
+               "; diagnostics=1 logs frame timing to wind_diag.log (restart to apply)\n"
+               "diagnostics=0\n";
         return Config{};
     }
     std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
