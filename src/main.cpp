@@ -1,5 +1,4 @@
 #include <windows.h>
-#include <dwmapi.h>
 #include <climits>
 #include "config.h"
 #include "magnifier_engine.h"
@@ -89,6 +88,16 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     double sinceCheck = 0.0;
     double lastLevel = -1.0; int lastX = INT_MIN, lastY = INT_MIN;
 
+    // High-resolution pacing timer (replaces DwmFlush). DwmFlush forced a DWM
+    // composition pass each frame; paired with a per-frame transform change it kicked
+    // borderless games out of independent-flip into composed-flip (issue #2). A plain
+    // timer paces us at refresh rate without forcing composition, so the game keeps
+    // its fast path while we update the overlay transform.
+    HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr,
+        CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+    int hz = (cfg.tickHzCap > 0) ? cfg.tickHzCap : 144;
+    LARGE_INTEGER due; due.QuadPart = -(10000000LL / hz); // relative due time, 100ns units
+
     bool running = true;
     while (running) {
         MSG msg;
@@ -99,7 +108,13 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         }
         if (!running) break;
 
-        DwmFlush(); // pace to the compositor (~refresh rate); blocks efficiently when idle
+        // Pace the loop without forcing DWM composition (see timer setup above).
+        if (timer) {
+            SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);
+            WaitForSingleObject(timer, INFINITE);
+        } else {
+            Sleep(1000 / hz);  // fallback (pre-Win10 1803): coarser but functional
+        }
 
         LARGE_INTEGER now;
         QueryPerformanceCounter(&now);
@@ -137,6 +152,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         }
     }
 
+    if (timer) CloseHandle(timer);
     engine.shutdown();   // resets to 1x - never leave the screen zoomed
     g_input.stop();
     Tray::Remove();
