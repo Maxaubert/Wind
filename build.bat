@@ -22,6 +22,7 @@ if errorlevel 1 (echo [build] vcvars64.bat failed & exit /b 1)
 cd /d "%ROOT%"
 
 if /i "%1"=="test" goto :test
+if /i "%1"=="check" goto :check
 
 rem --- App build ------------------------------------------------------------
 cl /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE ^
@@ -40,4 +41,9 @@ cl /nologo /std:c++17 /EHsc /W4 /wd5285 /DWIND_TESTS /I third_party ^
    /Fe:wind_tests.exe
 if errorlevel 1 exit /b 1
 "%ROOT%wind_tests.exe"
+exit /b %errorlevel%
+
+rem --- Compile-only check (no link; verifies all sources compile) -----------
+:check
+cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c src\*.cpp
 exit /b %errorlevel%
