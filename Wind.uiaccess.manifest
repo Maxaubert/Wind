@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <!-- uiAccess=true grants the privilege to place our overlay in a z-order band ABOVE
+             the shell (CreateWindowInBand + zorderBand=16), so the Start menu / taskbar /
+             tray flyouts are covered by the magnified view instead of showing an unmagnified
+             copy. The OS only honours uiAccess for a code-signed binary run from a secure
+             location (C:\Program Files\Wind): build with `build.bat uiaccess`, then run
+             tools\uiaccess_setup.ps1 (elevated) to sign + deploy. An unsigned uiAccess build
+             will NOT launch ("A referral was returned from the server") - that is expected;
+             run the deployed copy. For casual use without shell coverage, the normal
+             `build.bat` (uiAccess=false) build runs from anywhere. -->
+        <requestedExecutionLevel level="asInvoker" uiAccess="true" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+    </windowsSettings>
+  </application>
+</assembly>

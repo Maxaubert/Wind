@@ -102,7 +102,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     bool useRender = (cfg.engine == "render");
     MagnifierEngine magEngine;
     RenderEngine    renderEngine;
-    if (useRender && !renderEngine.initialize(sw, sh)) {
+    if (useRender && !renderEngine.initialize(sw, sh, cfg.zorderBand)) {
         useRender = false;   // graceful fallback if D3D/DDA is unavailable
     }
     if (!useRender && !magEngine.initialize()) {

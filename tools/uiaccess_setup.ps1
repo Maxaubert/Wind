@@ -4,8 +4,11 @@ $ErrorActionPreference = 'Stop'
 $log = "C:\Users\Admin\Documents\Claude\Github\Wind\tools\uiaccess_setup.log"
 Start-Transcript -Path $log -Force
 try {
-    $src = "C:\Users\Admin\Documents\Claude\Github\Wind\Wind.exe"
-    if (-not (Test-Path $src)) { throw "Wind.exe not found - run build.bat first." }
+    $root = "C:\Users\Admin\Documents\Claude\Github\Wind"
+    $src = "$root\Wind.exe"
+    Write-Output "=== 0. build the UIAccess variant (uiAccess=true manifest) ==="
+    & cmd /c "`"$root\build.bat`" uiaccess"
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $src)) { throw "build.bat uiaccess failed." }
 
     $subject = "CN=Wind Dev Test Cert"
     Write-Output "=== 1. find-or-create self-signed code-signing cert ==="
@@ -48,17 +51,20 @@ try {
     New-Item -ItemType Directory -Force "C:\Program Files\Wind" | Out-Null
     Copy-Item $src "C:\Program Files\Wind\Wind.exe" -Force
     $ini = @"
+engine=render
 zoomInButton=2
 zoomOutButton=1
 recenterVk=0
 maxLevel=8.0
 fullRangeSeconds=1.2
-sensitivity=1.0
-centerDeadzone=0.0
+cursorSensitivity=1.0
+cursorSmoothing=0.5
+cursorScaleWithZoom=1
+bilinear=1
+motionBlur=0
+motionBlurStrength=1.0
+zorderBand=16
 tickHzCap=144
-diagnostics=0
-updateMode=0
-maxUpdateHz=0
 "@
     Set-Content -Path "C:\Program Files\Wind\magnifier.ini" -Value $ini -Encoding ASCII
 

@@ -29,6 +29,9 @@ struct Config {
     int    bilinear = 1;             // 1 = bilinear sampling (smooth), 0 = point (crisp pixels)
     int    motionBlur = 0;           // 1 = smear content along the pan (off by default)
     double motionBlurStrength = 1.0; // shutter: 1.0 = full inter-frame blur, lower = subtler
+    // z-order band for the overlay (needs the UIAccess build, run from Program Files):
+    // 0 = normal topmost; 16 = ZBID_SYSTEM_TOOLS (above the shell, covers Start/taskbar/tray).
+    int    zorderBand = 0;
 };
 // Pure: parse INI text (key=value, ';' or '#' comments) into a Config, keeping
 // defaults for missing/malformed keys.

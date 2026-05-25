@@ -23,14 +23,27 @@ cd /d "%ROOT%"
 
 if /i "%1"=="test" goto :test
 if /i "%1"=="check" goto :check
+if /i "%1"=="uiaccess" goto :uiaccess
 
-rem --- App build ------------------------------------------------------------
+rem --- App build (normal: uiAccess=false, runs from anywhere) ----------------
 cl /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE ^
    src\*.cpp ^
    /Fe:Wind.exe ^
    /link Magnification.lib Dwmapi.lib user32.lib shell32.lib gdi32.lib ^
    d3d11.lib dxgi.lib dxguid.lib d3dcompiler.lib windowscodecs.lib ole32.lib ^
    /MANIFEST:EMBED /MANIFESTUAC:NO /MANIFESTINPUT:Wind.manifest /SUBSYSTEM:WINDOWS
+exit /b %errorlevel%
+
+rem --- UIAccess build (uiAccess=true: must be signed + run from Program Files) -
+rem    Embeds Wind.uiaccess.manifest so the overlay can use a high z-band (zorderBand=16)
+rem    to cover the Start menu / taskbar / tray. Deploy via tools\uiaccess_setup.ps1.
+:uiaccess
+cl /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE ^
+   src\*.cpp ^
+   /Fe:Wind.exe ^
+   /link Magnification.lib Dwmapi.lib user32.lib shell32.lib gdi32.lib ^
+   d3d11.lib dxgi.lib dxguid.lib d3dcompiler.lib windowscodecs.lib ole32.lib ^
+   /MANIFEST:EMBED /MANIFESTUAC:NO /MANIFESTINPUT:Wind.uiaccess.manifest /SUBSYSTEM:WINDOWS
 exit /b %errorlevel%
 
 rem --- Test build (pure-logic sources only; no <windows.h>) -----------------

@@ -5,8 +5,11 @@ Design spec: `docs/superpowers/specs/2026-05-24-magnifier-design.md`.
 Plan: `docs/superpowers/plans/2026-05-24-wind-magnifier.md`.
 
 ## Commands
-- Build app: `build.bat`  (locates MSVC via vswhere, emits `Wind.exe`)
+- Build app: `build.bat`  (locates MSVC via vswhere, emits `Wind.exe`; uiAccess=false, runs anywhere)
 - Build + run tests: `build.bat test`  (runs the doctest binary; exit 0 = pass)
+- Build UIAccess variant: `build.bat uiaccess`  (uiAccess=true manifest; must be signed + run
+  from `C:\Program Files\Wind` - deploy via `tools\uiaccess_setup.ps1` elevated). Needed only
+  to cover the Start menu / taskbar / tray (overlay uses `CreateWindowInBand`, `zorderBand=16`).
 
 ## Stack
 C++17, MSVC cl.exe. DXGI Desktop Duplication + Direct3D 11 (own renderer); Windows

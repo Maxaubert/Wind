@@ -386,8 +386,17 @@ overlay is WDA_EXCLUDEFROMCAPTURE, so it can only be captured from inside the ap
   pixel read back red) on a layered window. Latency kept low via `SetMaximumFrameLatency(1)`.
   (`WindowFromPoint` is a misleading probe here - it ignores transparent windows differently
   than live click routing, so it returned the app below even when clicks were actually eaten.)
-- **Double taskbar-thumbnail preview** (zoomed + unmagnified copy): transient topmost popups
-  appeared above our overlay. Mitigated by re-asserting `HWND_TOPMOST` every ~15 frames.
+- **Shell surfaces showed an unmagnified copy** (Start menu, taskbar thumbnail previews, tray
+  flyouts): those live in Windows 11 immersive z-order *bands* above normal app windows, so a
+  plain `HWND_TOPMOST` overlay can't cover them (the re-assert didn't help). The fix - how
+  accessibility magnifiers (ZoomText, etc.) do it - is **UIAccess + a higher z-band**: build
+  `build.bat uiaccess` (uiAccess=true manifest), deploy signed to `C:\Program Files\Wind` via
+  `tools\uiaccess_setup.ps1`, and create the overlay via `CreateWindowInBand` with
+  `zorderBand=16` (ZBID_SYSTEM_TOOLS, above the shell bands). Falls back to a normal topmost
+  window when UIAccess/band is unavailable (casual `build.bat` build, zorderBand=0). The exact
+  band is config-tunable (`zorderBand`) since `CreateWindowInBand` is undocumented. (Games
+  cover the shell via *exclusive fullscreen*, a different mechanism that doesn't apply to a
+  desktop overlay.)
 
 ## Human-only checks (cannot be verified autonomously - please confirm)
 With `engine=render`, zoom in (hold the forward side button) and confirm:

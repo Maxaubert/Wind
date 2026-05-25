@@ -144,6 +144,7 @@ struct RenderEngine::State {
     ID3D11RenderTargetView* rtv = nullptr;
     int lastClickX = INT_MIN, lastClickY = INT_MIN;   // skip redundant SetCursorPos
     int topmostTick = 0;                       // throttle re-asserting topmost
+    bool inBand = false;                        // created in a high z-order band (CreateWindowInBand)
 
     // Desktop Duplication.
     IDXGIOutputDuplication* dupl = nullptr;
@@ -273,7 +274,7 @@ void RenderEngine::debugInfo(int& screenW, int& screenH, int& curW, int& curH, i
 }
 void RenderEngine::debugBlur(double& bx, double& by) const { bx = s_->lastBlurX; by = s_->lastBlurY; }
 
-bool RenderEngine::initialize(int screenW, int screenH) {
+bool RenderEngine::initialize(int screenW, int screenH, int zorderBand) {
     s_->sw = screenW;
     s_->sh = screenH;
 
@@ -284,15 +285,33 @@ bool RenderEngine::initialize(int screenW, int screenH) {
     wc.hInstance = GetModuleHandleW(nullptr);
     wc.lpszClassName = kClass;
     wc.hCursor = nullptr;            // we draw our own; never set an arrow on this window
-    RegisterClassW(&wc);
+    ATOM atom = RegisterClassW(&wc);
     // WS_EX_LAYERED is required for true cross-process click-through (WS_EX_TRANSPARENT +
     // HTTRANSPARENT alone only forwards to same-thread windows, so clicks to other apps were
     // being eaten). LAYERED rules out a flip swapchain, so we use a blt-model swapchain below
     // (verified to display via the redirection surface). LWA_ALPHA 255 = fully opaque.
-    s_->hwnd = CreateWindowExW(
-        WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
-        kClass, L"Wind Magnifier", WS_POPUP,
-        0, 0, screenW, screenH, nullptr, nullptr, wc.hInstance, nullptr);
+    const DWORD exStyle = WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST |
+                          WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
+    s_->hwnd = nullptr;
+    // Higher z-band (needs UIAccess) so we draw above the shell's immersive bands - the only
+    // way an overlay can cover the Start menu / taskbar / tray flyouts. Undocumented, so we
+    // load it dynamically and fall back to a normal topmost window if it's unavailable.
+    if (zorderBand > 0 && atom) {
+        using PFN_CWIB = HWND(WINAPI*)(DWORD, ATOM, LPCWSTR, DWORD, int, int, int, int,
+                                       HWND, HMENU, HINSTANCE, LPVOID, DWORD);
+        if (HMODULE u32 = GetModuleHandleW(L"user32.dll")) {
+            if (auto pCWIB = reinterpret_cast<PFN_CWIB>(GetProcAddress(u32, "CreateWindowInBand"))) {
+                s_->hwnd = pCWIB(exStyle, atom, L"Wind Magnifier", WS_POPUP,
+                                 0, 0, screenW, screenH, nullptr, nullptr, wc.hInstance, nullptr,
+                                 static_cast<DWORD>(zorderBand));
+                if (s_->hwnd) s_->inBand = true;
+            }
+        }
+    }
+    if (!s_->hwnd) {
+        s_->hwnd = CreateWindowExW(exStyle, kClass, L"Wind Magnifier", WS_POPUP,
+                                   0, 0, screenW, screenH, nullptr, nullptr, wc.hInstance, nullptr);
+    }
     if (!s_->hwnd) return false;
     SetLayeredWindowAttributes(s_->hwnd, 0, 255, LWA_ALPHA);
     // CRITICAL: exclude our own overlay from screen capture, or Desktop Duplication captures
@@ -506,8 +525,9 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
 bool RenderEngine::renderFrame(const RenderFrameParams& p) {
     if (!s_->ready) return false;
     // Stay above transient topmost popups (taskbar thumbnails, tooltips) so they don't show a
-    // second, unmagnified copy over our view. Throttled - re-asserting every frame is churny.
-    if (++s_->topmostTick >= 15) {
+    // second, unmagnified copy over our view. Skip when we're in a high z-band - the band
+    // already keeps us on top, and HWND_TOPMOST could demote us out of it.
+    if (!s_->inBand && ++s_->topmostTick >= 15) {
         s_->topmostTick = 0;
         SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0,
                      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);

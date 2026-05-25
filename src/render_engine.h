@@ -26,7 +26,11 @@ public:
     RenderEngine(const RenderEngine&) = delete;
     RenderEngine& operator=(const RenderEngine&) = delete;
 
-    bool initialize(int screenW, int screenH);    // D3D device, overlay window, swapchain
+    // zorderBand: 0 = normal topmost window; >0 = create in that z-order band via
+    // CreateWindowInBand (needs UIAccess; e.g. 16 = ZBID_SYSTEM_TOOLS, above the shell so the
+    // Start menu / taskbar flyouts don't show an unmagnified copy). Falls back to a normal
+    // window if the band can't be used.
+    bool initialize(int screenW, int screenH, int zorderBand = 0);
     bool renderFrame(const RenderFrameParams& p);  // capture (if changed) + scale + cursor + present
     void setVisible(bool visible);                 // show/hide the overlay (hidden at 1x)
     void hideSystemCursor(bool hide);              // MagShowSystemCursor wrapper + safe-restore net
