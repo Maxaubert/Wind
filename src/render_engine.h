@@ -46,8 +46,6 @@ public:
     bool ready() const;
     // Verification only: decoded cursor metrics + the screen size the engine is using.
     void debugInfo(int& screenW, int& screenH, int& curW, int& curH, int& hotX, int& hotY) const;
-    // Verification only: the last motion-blur vector (UV units) the shader received.
-    void debugBlur(double& bx, double& by) const;
     // Verification only: duplication surface format + output color space / bit depth (HDR).
     void debugHdr(unsigned& ddaFormat, int& colorSpace, int& bitsPerColor) const;
     // Verification only: copy the back-buffer to a 32bpp BGRA PNG.

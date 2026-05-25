@@ -10,8 +10,6 @@ TEST_CASE("defaults when text is empty") {
     CHECK(c.fullRangeSeconds == doctest::Approx(1.2));
     CHECK(c.sensitivity == doctest::Approx(1.0));
     CHECK(c.diagnostics == 0);
-    CHECK(c.updateMode == 0);
-    CHECK(c.maxUpdateHz == 0);
 }
 TEST_CASE("parses engine selection and renderer knobs") {
     Config c = ParseConfig(

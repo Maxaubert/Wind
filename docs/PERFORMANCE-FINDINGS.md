@@ -1,5 +1,12 @@
 # Wind - Performance Investigation & Limitations
 
+> **SUPERSEDED (issue #4):** this document analyzes the **Magnification-API** engine and
+> concludes a "build our own renderer" approach "measures the same or worse." That conclusion
+> was wrong for the desktop case: Wind subsequently shipped exactly that own DXGI capture +
+> D3D11 renderer as the default engine, which fixed the sub-pixel/pan smoothness this doc said
+> was unreachable. Kept for historical context (the in-game compositor ceiling analysis and
+> PresentMon methodology are still valid). The `mag` engine is now an unadvertised fallback.
+
 **Date:** 2026-05-24/25
 **Status:** Investigation complete. Conclusion: the in-game / high-zoom performance gap
 is a hard ceiling of the public Windows Magnification API and is **not fixable** from a

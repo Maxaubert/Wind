@@ -27,12 +27,6 @@ struct Config {
     // composite) - default ON. 1 = on (overrides vsync while zoomed), 0 = old vsync pacing.
     int    dwmFlush         = 1;
     int    diagnostics      = 0;     // 1 = log frame-timing to wind_diag.log
-    // Experimental (hot-reloadable): how often we push the transform to DWM.
-    // 0 = emit when the integer offset or level changes (skips sub-pixel frames);
-    // 1 = emit when the float center or level changes (every frame while moving);
-    // 2 = emit every frame while zoomed (continuous composition; avoids transitions).
-    int    updateMode       = 0;
-    int    maxUpdateHz      = 0;     // 0 = unlimited; else cap transform updates/sec
 
     // --- Own GPU renderer (engine=render) -----------------------------------
     std::string engine = "render";   // "render" = own capture+D3D renderer, "mag" = Magnification API

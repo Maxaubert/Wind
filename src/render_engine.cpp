@@ -262,7 +262,6 @@ struct RenderEngine::State {
     ID3D11SamplerState* sampPoint = nullptr;
     double prevSrcLeft = 0, prevSrcTop = 0;    // previous frame's source top-left (for blur)
     bool prevSrcValid = false;                 // reset on (re)show so we don't blur a jump
-    double lastBlurX = 0, lastBlurY = 0;       // last applied blur vector (diagnostics)
 
     // Cursor pass (live OS cursor decoded to a texture; works even while hidden).
     ID3D11VertexShader* cvs = nullptr;
@@ -279,13 +278,6 @@ struct RenderEngine::State {
     bool osCursorShowing = true;               // the focused app's cursor is visible (CURSOR_SHOWING)
 
     void updateCursorTexture();   // GetCursorInfo -> decode -> (re)upload cursorTex/SRV on change
-
-    // Cursor delivered separately by DDA.
-    bool ptrVisible = false;
-    int  ptrX = 0, ptrY = 0;                  // top-left of the cursor in desktop px
-    std::vector<BYTE> shapeBuf;               // cached cursor shape bytes
-    DXGI_OUTDUPL_POINTER_SHAPE_INFO shapeInfo{};
-    bool haveShape = false;
 
     bool magInited = false;
     bool cursorHidden = false;
@@ -416,23 +408,9 @@ bool RenderEngine::State::capture() {
             }
         }
         SafeRelease(tex);
-
-        if (fi.LastMouseUpdateTime.QuadPart != 0) {
-            ptrVisible = (fi.PointerPosition.Visible != 0);
-            ptrX = fi.PointerPosition.Position.x;
-            ptrY = fi.PointerPosition.Position.y;
-        }
-        // Pointer shape is delivered only when it changes; cache it for the cursor draw.
-        if (fi.PointerShapeBufferSize > 0) {
-            shapeBuf.resize(fi.PointerShapeBufferSize);
-            UINT required = 0;
-            DXGI_OUTDUPL_POINTER_SHAPE_INFO si{};
-            if (SUCCEEDED(dupl->GetFramePointerShape(
-                    (UINT)shapeBuf.size(), shapeBuf.data(), &required, &si))) {
-                shapeInfo = si;
-                haveShape = true;
-            }
-        }
+        // NB: DDA's pointer position/shape (fi.PointerPosition / GetFramePointerShape) is
+        // intentionally ignored - we draw the cursor from GetCursorInfo (works while hidden),
+        // so the captured desktop never needs the OS pointer baked in.
         SafeRelease(res);
         dupl->ReleaseFrame();
 
@@ -442,9 +420,9 @@ bool RenderEngine::State::capture() {
     return gotThisCall || haveDesktop;   // no frame within budget; keep whatever we had
 }
 
-// The overlay must pass clicks through to the apps beneath. WS_EX_TRANSPARENT plus an
-// explicit HTTRANSPARENT hit-test is the bulletproof click-through that still works with a
-// DXGI flip-model swapchain (which is incompatible with WS_EX_LAYERED).
+// The overlay must pass clicks through to the apps beneath. Cross-process click-through is
+// provided by the window's WS_EX_LAYERED | WS_EX_TRANSPARENT styles; this HTTRANSPARENT
+// hit-test is belt-and-braces (WS_EX_TRANSPARENT alone proved insufficient cross-process).
 static LRESULT CALLBACK OverlayProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (m == WM_NCHITTEST) return HTTRANSPARENT;
     return DefWindowProcW(h, m, w, l);
@@ -456,7 +434,6 @@ bool RenderEngine::ready() const { return s_ && s_->ready; }
 void RenderEngine::debugInfo(int& screenW, int& screenH, int& curW, int& curH, int& hotX, int& hotY) const {
     screenW = s_->sw; screenH = s_->sh; curW = s_->curW; curH = s_->curH; hotX = s_->hotX; hotY = s_->hotY;
 }
-void RenderEngine::debugBlur(double& bx, double& by) const { bx = s_->lastBlurX; by = s_->lastBlurY; }
 void RenderEngine::debugHdr(unsigned& ddaFormat, int& colorSpace, int& bitsPerColor) const {
     ddaFormat = s_->ddaFormat; colorSpace = s_->outColorSpace; bitsPerColor = s_->outBitsPerColor;
 }
@@ -718,7 +695,6 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
             if (blurY >  kMax) blurY =  kMax; else if (blurY < -kMax) blurY = -kMax;
         }
         prevSrcLeft = p.srcLeft; prevSrcTop = p.srcTop; prevSrcValid = true;
-        lastBlurX = blurX; lastBlurY = blurY;
 
         float bright = (p.brightness > 0.0) ? (float)p.brightness : 1.0f;
         float hdrMode = capFp16 ? 1.0f : 0.0f;
