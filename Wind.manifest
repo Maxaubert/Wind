@@ -10,7 +10,7 @@
              to sign + deploy. The unsigned dev build in the repo will NOT launch with
              this set ("A referral was returned from the server") - that is expected;
              run the deployed copy. -->
-        <requestedExecutionLevel level="asInvoker" uiAccess="true" />
+        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
       </requestedPrivileges>
     </security>
   </trustInfo>

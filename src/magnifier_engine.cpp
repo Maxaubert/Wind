@@ -44,6 +44,9 @@ void MagnifierEngine::setTransform(double level, int xOffset, int yOffset) {
         inputTransformOn_ = false;
     }
 }
+void MagnifierEngine::showSystemCursor(bool show) {
+    if (ready_) MagShowSystemCursor(show ? TRUE : FALSE);
+}
 void MagnifierEngine::shutdown() {
     if (!ready_) return;
     if (inputTransformOn_) {                        // never leave input remapped

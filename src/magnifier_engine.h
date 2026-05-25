@@ -5,6 +5,7 @@ public:
     bool initialize();                                  // MagInitialize
     void setTransform(double level, int xOffset, int yOffset);
     void shutdown();                                    // reset to 1x then MagUninitialize
+    void showSystemCursor(bool show);                   // hide/show the magnified cursor
     bool ready() const { return ready_; }
     // True if the most recent attempt to enable input routing succeeded. False means
     // MagSetInputTransform was rejected (typically no UIAccess) - clicks will misalign.

@@ -9,9 +9,9 @@ struct Config {
     double fullRangeSeconds = 1.2;
     double sensitivity      = 1.0;
     // Center leeway when zoomed: fraction of the half-view the cursor may glide before
-    // the view pans. 0 = rigidly centered (re-snaps every frame -> jittery at high zoom);
-    // 1 = cursor roams to the screen edge before panning. ~0.5 = smooth + roughly centered.
-    double centerDeadzone   = 0.5;
+    // the view pans. 0 = rigidly centered (the smooth-cursor overlay needs this); higher
+    // lets the cursor roam, but then the overlay cursor moves at L x speed - keep 0.
+    double centerDeadzone   = 0.0;
     int    tickHzCap        = 144;
     int    diagnostics      = 0;     // 1 = log frame-timing to wind_diag.log
     // Experimental (hot-reloadable): how often we push the transform to DWM.

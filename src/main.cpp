@@ -1,5 +1,6 @@
 #include <windows.h>
 #include <climits>
+#include <cmath>
 #include <fstream>
 #include "config.h"
 #include "magnifier_engine.h"
@@ -8,6 +9,7 @@
 #include "tracker.h"
 #include "zoom_controller.h"
 #include "tray.h"
+#include "cursor_overlay.h"
 
 using namespace wind;
 
@@ -99,6 +101,12 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         return 1;
     }
     Tray::Add(hwnd, hInst);
+
+    CursorOverlay overlay;
+    overlay.start(hInst);
+    bool overlayOn = false;
+    double smX = 0.0, smY = 0.0;            // low-pass-smoothed overlay cursor position
+    const double kCursorAlpha = 0.35;       // smoothing factor (higher = snappier)
 
     int sw = GetSystemMetrics(SM_CXSCREEN);
     int sh = GetSystemMetrics(SM_CYSCREEN);
@@ -201,6 +209,33 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         double cx = tracker.centerX(), cy = tracker.centerY();
         Offset o = ComputeOffset(cx, cy, lvl, sw, sh);
 
+        // Smooth custom cursor (free desktop use, zoomed): the magnified system cursor can
+        // only sit at integer source-pixel positions, so it hops L screen-px per
+        // mouse-px. Hide it and draw a crisp overlay cursor at a low-pass-smoothed
+        // position so it glides. Disabled at 1x and in locked (game) mode, where the game
+        // owns the cursor and a topmost overlay could disturb its fast path.
+        bool wantOverlay = (lvl > 1.0) && !tracker.locked() && overlay.ok();
+        if (wantOverlay) {
+            // Position from the *float* (un-rounded, clamped) offset, not the integer one
+            // the visual uses. At strict center this is exactly screen center and dead
+            // still (no +/- L/2 wiggle); near a screen edge it glides toward the edge.
+            double regionW = sw / lvl, regionH = sh / lvl;
+            double foX = cx - regionW / 2.0;
+            double foY = cy - regionH / 2.0;
+            if (foX < 0) foX = 0; else if (foX > sw - regionW) foX = sw - regionW;
+            if (foY < 0) foY = 0; else if (foY > sh - regionH) foY = sh - regionH;
+            double tx = (p.x - foX) * lvl;
+            double ty = (p.y - foY) * lvl;
+            if (!overlayOn) { smX = tx; smY = ty; engine.showSystemCursor(false); overlayOn = true; }
+            smX += (tx - smX) * kCursorAlpha;
+            smY += (ty - smY) * kCursorAlpha;
+            overlay.show(static_cast<int>(std::lround(smX)), static_cast<int>(std::lround(smY)));
+        } else if (overlayOn) {
+            overlay.hide();
+            engine.showSystemCursor(true);
+            overlayOn = false;
+        }
+
         // Decide whether to push the transform to DWM this frame (see updateMode docs).
         bool wantEmit;
         if (updateMode == 2) {
@@ -266,6 +301,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     if (diag && diagOut) diagOut.close();
     if (timer) CloseHandle(timer);
+    overlay.hide();
+    engine.showSystemCursor(true);   // never leave the real cursor hidden
+    overlay.stop();
     engine.shutdown();   // resets to 1x - never leave the screen zoomed
     g_input.stop();
     Tray::Remove();
