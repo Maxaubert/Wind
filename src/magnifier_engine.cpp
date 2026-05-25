@@ -38,7 +38,11 @@ void MagnifierEngine::setTransform(double level, int xOffset, int yOffset) {
                   static_cast<LONG>(yOffset / scale),
                   static_cast<LONG>((xOffset + sw / level) / scale),
                   static_cast<LONG>((yOffset + sh / level) / scale) };
+        SetLastError(0);
         inputTransformOk_ = (MagSetInputTransform(TRUE, &src, &dest) != 0);
+        lastItxErr_ = inputTransformOk_ ? 0 : GetLastError();
+        lastSl_ = src.left; lastSt_ = src.top; lastSr_ = src.right; lastSb_ = src.bottom;
+        lastDr_ = dest.right; lastDb_ = dest.bottom;
         inputTransformOn_ = true;
     } else if (inputTransformOn_) {
         RECT z{ 0, 0, sw, sh };

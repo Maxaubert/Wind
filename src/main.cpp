@@ -129,11 +129,18 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // Optional frame-timing diagnostics (config: diagnostics=1) -> wind_diag.log.
     // Distinguishes a stall inside MagSetFullscreenTransform (maxSt high) from a stall
     // in our loop/wait (maxDt high, maxSt low) from a DWM-side cost (both low).
-    bool diag = cfg.diagnostics != 0;
+    bool diag = true;  // DEBUG: forced on to capture input-transform diagnostics
     std::ofstream diagOut;
+    char diagPath[MAX_PATH];
+    {   // write to %TEMP% so the Program Files (read-only) install can still log
+        char tmp[MAX_PATH]; DWORD n = GetTempPathA(MAX_PATH, tmp);
+        if (n == 0 || n > MAX_PATH) tmp[0] = '\0';
+        lstrcpyA(diagPath, tmp); lstrcatA(diagPath, "wind_diag.log");
+    }
     if (diag) {
-        diagOut.open("wind_diag.log", std::ios::app);
-        diagOut << "=== Wind diagnostics start (hz=" << hz << ") ===\n";
+        diagOut.open(diagPath, std::ios::app);
+        diagOut << "=== Wind diagnostics start (hz=" << hz << ", dpi="
+                << GetDpiForSystem() << ") ===\n";
         diagOut.flush();
     }
     double winElapsed = 0.0; int winIters = 0;
@@ -237,15 +244,18 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                     GetWindowTextW(fgw, wtitle, 95);
                     WideCharToMultiByte(CP_UTF8, 0, wtitle, -1, fg, sizeof(fg), nullptr, nullptr);
                 }
-                diagOut << "mode=" << updateMode << " cap=" << maxUpdateHz
-                        << " iters=" << winIters
-                        << " avgDt=" << (winIters ? winSumDt / winIters : 0.0)
-                        << " maxDt=" << winMaxDt
-                        << " stCalls=" << winStCalls
-                        << " avgSt=" << (winStCalls ? winSumSt / winStCalls : 0.0)
-                        << " maxSt=" << winMaxSt
-                        << " lockedTicks=" << winLockedTicks << "/" << winIters
+                long sl, st, sr, sb, dr, db;
+                engine.lastInputRects(sl, st, sr, sb, dr, db);
+                diagOut << "iters=" << winIters
+                        << " lvl=" << lvl
+                        << " off=" << o.x << "," << o.y
+                        << " cur=" << p.x << "," << p.y
+                        << " ctr=" << (int)cx << "," << (int)cy
                         << " itxOk=" << (engine.inputTransformOk() ? 1 : 0)
+                        << " itxErr=" << engine.lastInputErr()
+                        << " src=" << sl << "," << st << "," << sr << "," << sb
+                        << " destWH=" << dr << "," << db
+                        << " lockedTicks=" << winLockedTicks << "/" << winIters
                         << " fg=\"" << fg << "\"\n";
                 diagOut.flush();
                 winElapsed = 0.0; winIters = 0; winSumDt = 0.0; winMaxDt = 0.0;
