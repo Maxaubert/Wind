@@ -363,9 +363,26 @@ engine). Spec: `docs/superpowers/specs/2026-05-25-own-renderer-design.md`.
   draw a generic arrow. Safe-restore net: `MagShowSystemCursor(TRUE)` + `MagUninitialize`
   on every exit path, plus `SystemParametersInfo(SPI_SETCURSORS,...)`.
 
-## Human-only checks (when you return)
-With `engine=render`, zoom in and confirm:
-1. Exactly ONE cursor is visible (not two). If two, the hide fallback is needed.
-2. The cursor stays centered and smooth while panning (no L-pixel hop).
-3. Clicks land where the centered cursor points.
-4. On exit, the cursor is back to normal everywhere.
+## Build/verification results (2026-05-25, autonomous)
+Verified by building + running on the 4K display and reading render-then-dump PNGs (the
+overlay is WDA_EXCLUDEFROMCAPTURE, so it can only be captured from inside the app):
+- D3D11 device + click-through overlay + flip swapchain present (Task 4).
+- DXGI Desktop Duplication capture, cursor excluded (Task 5).
+- Sub-pixel float-source-rect magnify shader, bilinear (Task 6) - after fixing a
+  capture-feedback loop via WDA_EXCLUDEFROMCAPTURE, a static-desktop first-frame retry,
+  and a render-then-dump-before-Present fix (FLIP_DISCARD back-buffer read is undefined).
+- Real cursor decoded (GetCursorInfo) + drawn centered, alpha-blended, scaled by zoom (Task 7).
+- Cursor hide + SetCursorPos click-sync + clean shutdown restore (Task 8).
+- End-to-end via the real app: `WIND_SELFTEST=1 Wind.exe` -> correct 4x magnified frame
+  with the cursor centered (Task 9/10).
+- 41 unit tests pass; full app builds with no warnings; launches without crashing.
+
+## Human-only checks (cannot be verified autonomously - please confirm)
+With `engine=render`, zoom in (hold the forward side button) and confirm:
+1. Exactly ONE cursor is visible (not two). If two, MagShowSystemCursor isn't hiding the
+   OS cursor here; swap to the SetSystemCursor-blank fallback (and draw a generic arrow).
+2. The cursor stays centered and SMOOTH while panning (no L-pixel hop) - the whole goal.
+3. Content pans smoothly at 8x (no judder).
+4. Clicks land where the centered cursor points.
+5. DRM video (Netflix) shows black in the magnified layer (known DDA limit).
+6. On exit, the cursor + screen are back to normal everywhere.

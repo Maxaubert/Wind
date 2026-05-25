@@ -107,6 +107,34 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     Tracker     tracker(sw, sh, cfg.sensitivity, cfg.centerDeadzone);     // mag path
     CursorMapper mapper(sw, sh, cfg.cursorSensitivity);                   // render path
 
+    // Autonomous verification hook: WIND_SELFTEST drives the real integrated render path at a
+    // forced zoom and dumps a PNG (the overlay is WDA_EXCLUDEFROMCAPTURE, so it can only be
+    // captured from inside the app), then exits. Not part of normal use.
+    if (useRender && GetEnvironmentVariableW(L"WIND_SELFTEST", nullptr, 0) > 0) {
+        POINT pt; GetCursorPos(&pt);
+        mapper.reset(pt.x, pt.y);
+        renderEngine.hideSystemCursor(true);
+        renderEngine.setVisible(true);
+        RenderFrameParams p{};
+        for (int i = 0; i < 20; ++i) {
+            MSG m; while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&m); DispatchMessageW(&m); }
+            MapResult r = mapper.update(0, 0, 4.0);
+            p.level = 4.0; p.srcLeft = r.srcLeft; p.srcTop = r.srcTop;
+            p.cursorScreenX = r.cursorScreenX; p.cursorScreenY = r.cursorScreenY;
+            p.clickDesktopX = r.clickDesktopX; p.clickDesktopY = r.clickDesktopY;
+            p.cursorScaleWithZoom = (cfg.cursorScaleWithZoom != 0);
+            p.bilinear = (cfg.bilinear != 0);
+            renderEngine.renderFrame(p);
+            Sleep(16);
+        }
+        renderEngine.dumpFrame(p, L"wind_selftest.png");
+        renderEngine.shutdown();
+        g_input.stop();
+        Tray::Remove();
+        ReleaseMutex(mtx);
+        return 0;
+    }
+
     LARGE_INTEGER freq, prev;
     QueryPerformanceFrequency(&freq);
     QueryPerformanceCounter(&prev);
