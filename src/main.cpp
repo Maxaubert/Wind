@@ -245,6 +245,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                         << " avgSt=" << (winStCalls ? winSumSt / winStCalls : 0.0)
                         << " maxSt=" << winMaxSt
                         << " lockedTicks=" << winLockedTicks << "/" << winIters
+                        << " itxOk=" << (engine.inputTransformOk() ? 1 : 0)
                         << " fg=\"" << fg << "\"\n";
                 diagOut.flush();
                 winElapsed = 0.0; winIters = 0; winSumDt = 0.0; winMaxDt = 0.0;

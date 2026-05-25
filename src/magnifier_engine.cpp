@@ -25,7 +25,7 @@ void MagnifierEngine::setTransform(double level, int xOffset, int yOffset) {
         RECT src{ xOffset, yOffset,                // the region being magnified
                   xOffset + static_cast<int>(sw / level),
                   yOffset + static_cast<int>(sh / level) };
-        MagSetInputTransform(TRUE, &src, &dest);
+        inputTransformOk_ = (MagSetInputTransform(TRUE, &src, &dest) != 0);
         inputTransformOn_ = true;
     } else if (inputTransformOn_) {
         RECT z{ 0, 0, sw, sh };
