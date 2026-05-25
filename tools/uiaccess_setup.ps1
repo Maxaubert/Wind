@@ -6,7 +6,10 @@ Start-Transcript -Path $log -Force
 try {
     $root = "C:\Users\Admin\Documents\Claude\Github\Wind"
     $src = "$root\Wind.exe"
-    Write-Output "=== 0. build the UIAccess variant (uiAccess=true manifest) ==="
+    Write-Output "=== 0a. stop any running Wind (dev or deployed) so the exe isn't locked for build ==="
+    Get-Process Wind -ErrorAction SilentlyContinue | Stop-Process -Force
+    Start-Sleep -Milliseconds 400
+    Write-Output "=== 0b. build the UIAccess variant (uiAccess=true manifest) ==="
     & cmd /c "`"$root\build.bat`" uiaccess"
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path $src)) { throw "build.bat uiaccess failed." }
 
