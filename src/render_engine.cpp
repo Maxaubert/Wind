@@ -140,10 +140,10 @@ struct RenderEngine::State {
     HWND hwnd = nullptr;
     ID3D11Device* device = nullptr;
     ID3D11DeviceContext* ctx = nullptr;
-    IDXGISwapChain1* swap = nullptr;
-    HANDLE frameLatencyWaitable = nullptr;     // signals when the swapchain can take a frame
+    IDXGISwapChain* swap = nullptr;            // blt-model (layered window needs the redirection surface)
     ID3D11RenderTargetView* rtv = nullptr;
     int lastClickX = INT_MIN, lastClickY = INT_MIN;   // skip redundant SetCursorPos
+    int topmostTick = 0;                       // throttle re-asserting topmost
 
     // Desktop Duplication.
     IDXGIOutputDuplication* dupl = nullptr;
@@ -285,11 +285,16 @@ bool RenderEngine::initialize(int screenW, int screenH) {
     wc.lpszClassName = kClass;
     wc.hCursor = nullptr;            // we draw our own; never set an arrow on this window
     RegisterClassW(&wc);
+    // WS_EX_LAYERED is required for true cross-process click-through (WS_EX_TRANSPARENT +
+    // HTTRANSPARENT alone only forwards to same-thread windows, so clicks to other apps were
+    // being eaten). LAYERED rules out a flip swapchain, so we use a blt-model swapchain below
+    // (verified to display via the redirection surface). LWA_ALPHA 255 = fully opaque.
     s_->hwnd = CreateWindowExW(
-        WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+        WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
         kClass, L"Wind Magnifier", WS_POPUP,
         0, 0, screenW, screenH, nullptr, nullptr, wc.hInstance, nullptr);
     if (!s_->hwnd) return false;
+    SetLayeredWindowAttributes(s_->hwnd, 0, 255, LWA_ALPHA);
     // CRITICAL: exclude our own overlay from screen capture, or Desktop Duplication captures
     // our presented frame and we magnify our own output -> a feedback loop (degenerates to
     // black). WDA_EXCLUDEFROMCAPTURE (Win10 2004+) keeps the window visible on screen but
@@ -305,41 +310,32 @@ bool RenderEngine::initialize(int screenW, int screenH) {
         &s_->device, &got, &s_->ctx);
     if (FAILED(hr)) return false;
 
-    // --- Flip swapchain on the overlay HWND ---
-    IDXGIDevice* dxgiDev = nullptr;
-    if (FAILED(s_->device->QueryInterface(__uuidof(IDXGIDevice), (void**)&dxgiDev))) return false;
+    // --- Blt-model swapchain on the layered overlay HWND (flip can't target layered) ---
+    IDXGIDevice1* dxgiDev = nullptr;
+    if (FAILED(s_->device->QueryInterface(__uuidof(IDXGIDevice1), (void**)&dxgiDev))) return false;
+    dxgiDev->SetMaximumFrameLatency(1);     // cap input-to-photon latency to ~1 frame
     IDXGIAdapter* adapter = nullptr;
     dxgiDev->GetAdapter(&adapter);
-    IDXGIFactory2* factory = nullptr;
-    adapter->GetParent(__uuidof(IDXGIFactory2), (void**)&factory);
+    IDXGIFactory* factory = nullptr;
+    if (adapter) adapter->GetParent(__uuidof(IDXGIFactory), (void**)&factory);
     SafeRelease(dxgiDev);
     SafeRelease(adapter);
     if (!factory) return false;
 
-    DXGI_SWAP_CHAIN_DESC1 scd{};
-    scd.Width = screenW;
-    scd.Height = screenH;
-    scd.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    DXGI_SWAP_CHAIN_DESC scd{};
+    scd.BufferDesc.Width = screenW;
+    scd.BufferDesc.Height = screenH;
+    scd.BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
     scd.SampleDesc.Count = 1;
     scd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    scd.BufferCount = 2;
-    scd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-    scd.Scaling = DXGI_SCALING_STRETCH;
-    scd.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
-    scd.Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;   // low-latency pacing
-    hr = factory->CreateSwapChainForHwnd(s_->device, s_->hwnd, &scd, nullptr, nullptr, &s_->swap);
+    scd.BufferCount = 1;
+    scd.OutputWindow = s_->hwnd;
+    scd.Windowed = TRUE;
+    scd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+    hr = factory->CreateSwapChain(s_->device, &scd, &s_->swap);
     factory->MakeWindowAssociation(s_->hwnd, DXGI_MWA_NO_ALT_ENTER);
     SafeRelease(factory);
     if (FAILED(hr)) return false;
-
-    // Cap queued frames to 1 and grab the waitable object. Waiting on it each frame keeps
-    // input-to-photon latency to ~1 frame (a default flip swapchain can queue ~3 -> laggy).
-    IDXGISwapChain2* swap2 = nullptr;
-    if (SUCCEEDED(s_->swap->QueryInterface(__uuidof(IDXGISwapChain2), (void**)&swap2)) && swap2) {
-        swap2->SetMaximumFrameLatency(1);
-        s_->frameLatencyWaitable = swap2->GetFrameLatencyWaitableObject();
-        swap2->Release();
-    }
 
     // --- Render target view from back-buffer 0 ---
     ID3D11Texture2D* back = nullptr;
@@ -509,9 +505,13 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
 
 bool RenderEngine::renderFrame(const RenderFrameParams& p) {
     if (!s_->ready) return false;
-    // Block until the swapchain can accept a new frame (caps latency to ~1 frame and paces
-    // to the display refresh). This is what makes the pan track the hand tightly.
-    if (s_->frameLatencyWaitable) WaitForSingleObjectEx(s_->frameLatencyWaitable, 100, FALSE);
+    // Stay above transient topmost popups (taskbar thumbnails, tooltips) so they don't show a
+    // second, unmagnified copy over our view. Throttled - re-asserting every frame is churny.
+    if (++s_->topmostTick >= 15) {
+        s_->topmostTick = 0;
+        SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
     // Keep the (hidden) OS cursor under the drawn cursor so clicks pass through the
     // transparent overlay to the app at the right desktop point. We drive the lens from raw
     // input (not GetCursorPos), so this SetCursorPos never feeds back into tracking. Only
@@ -578,7 +578,6 @@ void RenderEngine::shutdown() {
     SafeRelease(s_->dupl);
     SafeRelease(s_->desktopCopy);
     SafeRelease(s_->rtv);
-    if (s_->frameLatencyWaitable) { CloseHandle(s_->frameLatencyWaitable); s_->frameLatencyWaitable = nullptr; }
     SafeRelease(s_->swap);
     SafeRelease(s_->ctx);
     SafeRelease(s_->device);

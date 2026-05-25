@@ -125,9 +125,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         mapper.reset(pt.x, pt.y);
         renderEngine.hideSystemCursor(true);
         renderEngine.setVisible(true);
-        // Inject a steady rightward pan so the dumped frame exercises the motion-blur path.
         RenderFrameParams p{};
-        auto fill = [&](const MapResult& r) {
+        for (int i = 0; i < 20; ++i) {
+            MSG m; while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&m); DispatchMessageW(&m); }
+            MapResult r = mapper.update(0, 0, 4.0);
             p.level = 4.0; p.srcLeft = r.srcLeft; p.srcTop = r.srcTop;
             p.cursorScreenX = r.cursorScreenX; p.cursorScreenY = r.cursorScreenY;
             p.clickDesktopX = r.clickDesktopX; p.clickDesktopY = r.clickDesktopY;
@@ -135,19 +136,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             p.bilinear = (cfg.bilinear != 0);
             p.motionBlur = (cfg.motionBlur != 0);
             p.motionBlurStrength = cfg.motionBlurStrength;
-        };
-        for (int i = 0; i < 20; ++i) {
-            MSG m; while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&m); DispatchMessageW(&m); }
-            fill(mapper.update(40, 0, 4.0));   // pan right ~40 px/frame
             renderEngine.renderFrame(p);
             Sleep(16);
         }
-        fill(mapper.update(40, 0, 4.0));       // one more step so the dumped frame has velocity
         renderEngine.dumpFrame(p, L"wind_selftest.png");
-        double bx = 0, by = 0; renderEngine.debugBlur(bx, by);
-        FILE* df = nullptr; _wfopen_s(&df, L"wind_selftest_diag.txt", L"w");
-        if (df) { fprintf(df, "blurUV = %.6f, %.6f  (srcLeft=%.1f motionBlur=%d strength=%.2f)\n",
-                          bx, by, p.srcLeft, p.motionBlur ? 1 : 0, p.motionBlurStrength); fclose(df); }
         renderEngine.shutdown();
         g_input.stop();
         Tray::Remove();

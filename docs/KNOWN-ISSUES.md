@@ -377,6 +377,18 @@ overlay is WDA_EXCLUDEFROMCAPTURE, so it can only be captured from inside the ap
   with the cursor centered (Task 9/10).
 - 41 unit tests pass; full app builds with no warnings; launches without crashing.
 
+## Interaction fixes (2026-05-25, live testing on the render engine)
+- **Clicks were eaten while zoomed** (cursor "disabled"): the overlay was `WS_EX_TRANSPARENT`
+  + `WM_NCHITTEST -> HTTRANSPARENT`, but HTTRANSPARENT only forwards to *same-thread* windows,
+  so cross-process clicks went nowhere. Fixed by `WS_EX_LAYERED | WS_EX_TRANSPARENT` +
+  `LWA_ALPHA 255` (the documented cross-process click-through). That rules out a flip swapchain,
+  so the overlay now uses a BLT-model swapchain - standalone-tested to display (center screen
+  pixel read back red) on a layered window. Latency kept low via `SetMaximumFrameLatency(1)`.
+  (`WindowFromPoint` is a misleading probe here - it ignores transparent windows differently
+  than live click routing, so it returned the app below even when clicks were actually eaten.)
+- **Double taskbar-thumbnail preview** (zoomed + unmagnified copy): transient topmost popups
+  appeared above our overlay. Mitigated by re-asserting `HWND_TOPMOST` every ~15 frames.
+
 ## Human-only checks (cannot be verified autonomously - please confirm)
 With `engine=render`, zoom in (hold the forward side button) and confirm:
 1. Exactly ONE cursor is visible (not two). If two, MagShowSystemCursor isn't hiding the

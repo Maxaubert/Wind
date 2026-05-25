@@ -42,8 +42,12 @@ Spec: `docs/superpowers/specs/2026-05-25-own-renderer-design.md`. Issue #4.
 - RENDER ENGINE: the overlay MUST set `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` or
   Desktop Duplication captures our own presented frame -> we magnify our own output ->
   feedback loop (black). This is the #1 render-engine gotcha.
-- RENDER ENGINE: flip-model DXGI swapchains do NOT work on `WS_EX_LAYERED` windows. Use
-  `WS_EX_TRANSPARENT` + `WM_NCHITTEST -> HTTRANSPARENT` for click-through instead.
+- RENDER ENGINE: cross-process click-through needs `WS_EX_LAYERED | WS_EX_TRANSPARENT`
+  (+ `SetLayeredWindowAttributes(.,255,LWA_ALPHA)`). `WS_EX_TRANSPARENT` + HTTRANSPARENT
+  alone only forwards to *same-thread* windows, so clicks to other apps get eaten. Layered
+  rules out a flip swapchain, so the overlay uses a BLT-model swapchain (DXGI_SWAP_EFFECT_
+  DISCARD) - verified to display via the redirection surface. Latency capped with
+  `IDXGIDevice1::SetMaximumFrameLatency(1)`.
 - RENDER ENGINE: never leave the OS cursor hidden. `shutdown()` restores via
   `MagShowSystemCursor(TRUE)` + `MagUninitialize` + `SystemParametersInfo(SPI_SETCURSORS)`,
   plus a `SetUnhandledExceptionFilter` net for crashes.
