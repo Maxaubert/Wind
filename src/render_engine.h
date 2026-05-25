@@ -30,8 +30,11 @@ public:
     void hideSystemCursor(bool hide);              // MagShowSystemCursor wrapper + safe-restore net
     void shutdown();                               // restore cursor, destroy everything
     bool ready() const;
-    // Verification only: copy the last presented back-buffer to a 32bpp BGRA PNG.
+    // Verification only: copy the back-buffer to a 32bpp BGRA PNG.
     bool dumpBackbufferPng(const wchar_t* path);
+    // Verification only: render one frame and dump it before Present (so the PNG matches the
+    // drawn frame; a FLIP_DISCARD back-buffer read after Present is undefined).
+    bool dumpFrame(const RenderFrameParams& p, const wchar_t* path);
 
 private:
     struct State;

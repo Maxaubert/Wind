@@ -2,13 +2,16 @@
 #include <windows.h>
 #include <d3d11.h>
 #include <dxgi1_2.h>
+#include <d3dcompiler.h>
 #include <wincodec.h>
 #include <magnification.h>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
+#pragma comment(lib, "d3dcompiler.lib")
 #pragma comment(lib, "windowscodecs.lib")
 #pragma comment(lib, "Magnification.lib")
 #pragma comment(lib, "ole32.lib")
@@ -16,6 +19,36 @@
 namespace wind {
 
 template <class T> static void SafeRelease(T*& p) { if (p) { p->Release(); p = nullptr; } }
+
+// Constant buffer: normalized UV bounds of the source sub-rect (16-byte aligned).
+struct MagCB { float uvMinX, uvMinY, uvMaxX, uvMaxY; };
+
+// Fullscreen-triangle magnify shader. The VS generates a covering triangle from the vertex
+// id (no vertex buffer) and maps the visible [0,1] screen UV into the source sub-rect; the
+// PS samples the captured desktop. Bilinear sampling gives the sub-pixel-smooth scale.
+static const char* kMagHLSL = R"(
+cbuffer CB : register(b0) { float2 uvMin; float2 uvMax; };
+struct VSOut { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; };
+VSOut VSMain(uint id : SV_VertexID) {
+    float2 t = float2((id << 1) & 2, id & 2);   // (0,0),(2,0),(0,2)
+    VSOut o;
+    o.pos = float4(t * float2(2, -2) + float2(-1, 1), 0, 1);
+    o.uv  = lerp(uvMin, uvMax, t);               // visible region samples [uvMin, uvMax]
+    return o;
+}
+Texture2D tex : register(t0);
+SamplerState smp : register(s0);
+float4 PSMain(VSOut i) : SV_TARGET { return tex.Sample(smp, i.uv); }
+)";
+
+static ID3DBlob* CompileShader(const char* entry, const char* target) {
+    ID3DBlob* code = nullptr; ID3DBlob* err = nullptr;
+    HRESULT hr = D3DCompile(kMagHLSL, std::strlen(kMagHLSL), nullptr, nullptr, nullptr,
+                            entry, target, 0, 0, &code, &err);
+    if (err) err->Release();
+    if (FAILED(hr)) { SafeRelease(code); return nullptr; }
+    return code;
+}
 
 // ---------------------------------------------------------------------------
 struct RenderEngine::State {
@@ -29,7 +62,15 @@ struct RenderEngine::State {
     // Desktop Duplication.
     IDXGIOutputDuplication* dupl = nullptr;
     ID3D11Texture2D* desktopCopy = nullptr;   // SRV-able copy of the captured desktop (no cursor)
+    ID3D11ShaderResourceView* desktopSRV = nullptr;
     bool haveDesktop = false;
+
+    // Magnify pass.
+    ID3D11VertexShader* vs = nullptr;
+    ID3D11PixelShader* ps = nullptr;
+    ID3D11Buffer* cb = nullptr;                // uvMin/uvMax for the source sub-rect
+    ID3D11SamplerState* sampLinear = nullptr;
+    ID3D11SamplerState* sampPoint = nullptr;
 
     // Cursor delivered separately by DDA.
     bool ptrVisible = false;
@@ -44,6 +85,7 @@ struct RenderEngine::State {
 
     bool recreateDupl();
     bool capture();      // AcquireNextFrame -> desktopCopy (+ pointer info); handles loss/timeout
+    void render(const RenderFrameParams& p);  // draw into the back-buffer (no Present)
 };
 
 // Recreate the duplication interface (after ACCESS_LOST or first use).
@@ -71,38 +113,45 @@ bool RenderEngine::State::recreateDupl() {
 bool RenderEngine::State::capture() {
     if (!dupl && !recreateDupl()) return false;
 
-    IDXGIResource* res = nullptr;
-    DXGI_OUTDUPL_FRAME_INFO fi{};
-    HRESULT hr = dupl->AcquireNextFrame(15, &fi, &res);
-    if (hr == DXGI_ERROR_WAIT_TIMEOUT) return true;          // nothing changed; keep last frame
-    if (hr == DXGI_ERROR_ACCESS_LOST) { SafeRelease(dupl); return false; } // recreate next frame
-    if (FAILED(hr)) return false;
+    // Once we have a frame, a short timeout is fine (a static desktop -> keep the last copy,
+    // so we can still re-render on pan/zoom). For the very first frame, retry across a larger
+    // budget so a static desktop still yields the initial image instead of black.
+    const int attempts = haveDesktop ? 1 : 40;
+    const DWORD timeoutMs = haveDesktop ? 8 : 25;
+    for (int a = 0; a < attempts; ++a) {
+        IDXGIResource* res = nullptr;
+        DXGI_OUTDUPL_FRAME_INFO fi{};
+        HRESULT hr = dupl->AcquireNextFrame(timeoutMs, &fi, &res);
+        if (hr == DXGI_ERROR_WAIT_TIMEOUT) { SafeRelease(res); continue; }
+        if (hr == DXGI_ERROR_ACCESS_LOST) { SafeRelease(res); SafeRelease(dupl); return false; }
+        if (FAILED(hr)) { SafeRelease(res); return haveDesktop; }
 
-    ID3D11Texture2D* tex = nullptr;
-    if (res) res->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&tex);
-    if (tex && desktopCopy) { ctx->CopyResource(desktopCopy, tex); haveDesktop = true; }
-    SafeRelease(tex);
+        ID3D11Texture2D* tex = nullptr;
+        if (res) res->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&tex);
+        if (tex && desktopCopy) { ctx->CopyResource(desktopCopy, tex); haveDesktop = true; }
+        SafeRelease(tex);
 
-    // Pointer position (only valid when LastMouseUpdateTime advanced this frame).
-    if (fi.LastMouseUpdateTime.QuadPart != 0) {
-        ptrVisible = (fi.PointerPosition.Visible != 0);
-        ptrX = fi.PointerPosition.Position.x;
-        ptrY = fi.PointerPosition.Position.y;
-    }
-    // Pointer shape (delivered only when it changes); cache it for the cursor draw (Task 7).
-    if (fi.PointerShapeBufferSize > 0) {
-        shapeBuf.resize(fi.PointerShapeBufferSize);
-        UINT required = 0;
-        DXGI_OUTDUPL_POINTER_SHAPE_INFO si{};
-        if (SUCCEEDED(dupl->GetFramePointerShape(
-                (UINT)shapeBuf.size(), shapeBuf.data(), &required, &si))) {
-            shapeInfo = si;
-            haveShape = true;
+        if (fi.LastMouseUpdateTime.QuadPart != 0) {
+            ptrVisible = (fi.PointerPosition.Visible != 0);
+            ptrX = fi.PointerPosition.Position.x;
+            ptrY = fi.PointerPosition.Position.y;
         }
+        // Pointer shape is delivered only when it changes; cache it for the cursor draw.
+        if (fi.PointerShapeBufferSize > 0) {
+            shapeBuf.resize(fi.PointerShapeBufferSize);
+            UINT required = 0;
+            DXGI_OUTDUPL_POINTER_SHAPE_INFO si{};
+            if (SUCCEEDED(dupl->GetFramePointerShape(
+                    (UINT)shapeBuf.size(), shapeBuf.data(), &required, &si))) {
+                shapeInfo = si;
+                haveShape = true;
+            }
+        }
+        SafeRelease(res);
+        dupl->ReleaseFrame();
+        return true;
     }
-    SafeRelease(res);
-    dupl->ReleaseFrame();
-    return true;
+    return haveDesktop;   // no frame within budget; keep whatever we had
 }
 
 // The overlay must pass clicks through to the apps beneath. WS_EX_TRANSPARENT plus an
@@ -134,6 +183,11 @@ bool RenderEngine::initialize(int screenW, int screenH) {
         kClass, L"Wind Magnifier", WS_POPUP,
         0, 0, screenW, screenH, nullptr, nullptr, wc.hInstance, nullptr);
     if (!s_->hwnd) return false;
+    // CRITICAL: exclude our own overlay from screen capture, or Desktop Duplication captures
+    // our presented frame and we magnify our own output -> a feedback loop (degenerates to
+    // black). WDA_EXCLUDEFROMCAPTURE (Win10 2004+) keeps the window visible on screen but
+    // invisible to DDA, so we always capture the real desktop beneath it.
+    SetWindowDisplayAffinity(s_->hwnd, WDA_EXCLUDEFROMCAPTURE);
 
     // --- D3D11 device ---
     D3D_FEATURE_LEVEL got{};
@@ -183,6 +237,33 @@ bool RenderEngine::initialize(int screenW, int screenH) {
     dc.Format = DXGI_FORMAT_B8G8R8A8_UNORM; dc.SampleDesc.Count = 1;
     dc.Usage = D3D11_USAGE_DEFAULT; dc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
     if (FAILED(s_->device->CreateTexture2D(&dc, nullptr, &s_->desktopCopy))) return false;
+    if (FAILED(s_->device->CreateShaderResourceView(s_->desktopCopy, nullptr, &s_->desktopSRV)))
+        return false;
+
+    // --- Magnify shader pipeline ---
+    ID3DBlob* vsb = CompileShader("VSMain", "vs_5_0");
+    ID3DBlob* psb = CompileShader("PSMain", "ps_5_0");
+    if (!vsb || !psb) { SafeRelease(vsb); SafeRelease(psb); return false; }
+    hr = s_->device->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &s_->vs);
+    HRESULT hr2 = s_->device->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &s_->ps);
+    SafeRelease(vsb); SafeRelease(psb);
+    if (FAILED(hr) || FAILED(hr2)) return false;
+
+    D3D11_BUFFER_DESC cbd{};
+    cbd.ByteWidth = sizeof(MagCB);
+    cbd.Usage = D3D11_USAGE_DEFAULT;
+    cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    if (FAILED(s_->device->CreateBuffer(&cbd, nullptr, &s_->cb))) return false;
+
+    D3D11_SAMPLER_DESC samp{};
+    samp.AddressU = samp.AddressV = samp.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+    samp.ComparisonFunc = D3D11_COMPARISON_NEVER;
+    samp.MaxLOD = D3D11_FLOAT32_MAX;
+    samp.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    s_->device->CreateSamplerState(&samp, &s_->sampLinear);
+    samp.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+    s_->device->CreateSamplerState(&samp, &s_->sampPoint);
+    if (!s_->sampLinear || !s_->sampPoint) return false;
 
     // --- Desktop Duplication ---
     if (!s_->recreateDupl()) return false;
@@ -195,26 +276,48 @@ void RenderEngine::setVisible(bool visible) {
     if (s_ && s_->hwnd) ShowWindow(s_->hwnd, visible ? SW_SHOWNOACTIVATE : SW_HIDE);
 }
 
+void RenderEngine::State::render(const RenderFrameParams& p) {
+    capture();
+
+    ID3D11DeviceContext* c = ctx;
+    D3D11_VIEWPORT vp{}; vp.Width = (float)sw; vp.Height = (float)sh; vp.MaxDepth = 1.0f;
+    c->RSSetViewports(1, &vp);
+    c->OMSetRenderTargets(1, &rtv, nullptr);
+    const float clear[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+    c->ClearRenderTargetView(rtv, clear);
+
+    if (haveDesktop) {
+        double level = p.level < 1.0 ? 1.0 : p.level;
+        double viewW = sw / level, viewH = sh / level;
+        MagCB cbv{
+            (float)(p.srcLeft / sw), (float)(p.srcTop / sh),
+            (float)((p.srcLeft + viewW) / sw), (float)((p.srcTop + viewH) / sh) };
+        c->UpdateSubresource(cb, 0, nullptr, &cbv, 0, 0);
+
+        c->IASetInputLayout(nullptr);
+        c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        c->VSSetShader(vs, nullptr, 0);
+        c->VSSetConstantBuffers(0, 1, &cb);
+        c->PSSetShader(ps, nullptr, 0);
+        c->PSSetShaderResources(0, 1, &desktopSRV);
+        ID3D11SamplerState* samp = p.bilinear ? sampLinear : sampPoint;
+        c->PSSetSamplers(0, 1, &samp);
+        c->Draw(3, 0);
+    }
+}
+
 bool RenderEngine::renderFrame(const RenderFrameParams& p) {
     if (!s_->ready) return false;
-    (void)p;  // Task 5: capture + 1:1 blit to verify capture; scaling lands in Task 6.
-
-    s_->capture();
-
-    if (s_->haveDesktop) {
-        ID3D11Texture2D* back = nullptr;
-        if (SUCCEEDED(s_->swap->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&back)) && back) {
-            s_->ctx->CopyResource(back, s_->desktopCopy);
-            SafeRelease(back);
-        }
-    } else {
-        D3D11_VIEWPORT vp{}; vp.Width = (float)s_->sw; vp.Height = (float)s_->sh; vp.MaxDepth = 1.0f;
-        s_->ctx->RSSetViewports(1, &vp);
-        s_->ctx->OMSetRenderTargets(1, &s_->rtv, nullptr);
-        const float clear[4] = { 0.0f, 0.0f, 0.20f, 1.0f };
-        s_->ctx->ClearRenderTargetView(s_->rtv, clear);
-    }
+    s_->render(p);
     return SUCCEEDED(s_->swap->Present(1, 0));
+}
+
+// Render one frame and dump it WITHOUT presenting, so the PNG reflects exactly the drawn
+// frame (a FLIP_DISCARD back-buffer read after Present is undefined). Verification only.
+bool RenderEngine::dumpFrame(const RenderFrameParams& p, const wchar_t* path) {
+    if (!s_->ready) return false;
+    s_->render(p);
+    return dumpBackbufferPng(path);
 }
 
 void RenderEngine::hideSystemCursor(bool hide) {
@@ -235,6 +338,12 @@ void RenderEngine::shutdown() {
         s_->cursorHidden = false;
         SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, SPIF_SENDCHANGE);  // safety net
     }
+    SafeRelease(s_->sampPoint);
+    SafeRelease(s_->sampLinear);
+    SafeRelease(s_->cb);
+    SafeRelease(s_->ps);
+    SafeRelease(s_->vs);
+    SafeRelease(s_->desktopSRV);
     SafeRelease(s_->dupl);
     SafeRelease(s_->desktopCopy);
     SafeRelease(s_->rtv);
@@ -328,8 +437,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         eng.renderFrame(p);
         Sleep(16);
     }
-    eng.dumpBackbufferPng(L"render_smoke.png");
-    Sleep(300);
+    eng.dumpFrame(p, L"render_smoke.png");   // render-then-dump (pre-Present) for a true capture
+    Sleep(200);
     eng.shutdown();
     return 0;
 }
