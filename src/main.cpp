@@ -5,11 +5,8 @@
 #include <cstdarg>
 #include "config.h"
 #pragma comment(lib, "Dwmapi.lib")
-#include "magnifier_engine.h"
 #include "render_engine.h"
 #include "input_router.h"
-#include "transform.h"
-#include "tracker.h"
 #include "cursor_mapper.h"
 #include "zoom_controller.h"
 #include "tray.h"
@@ -44,28 +41,22 @@ static int DetectRefreshHz() {
 // the duration. The timer (set around the menu) dispatches WM_TIMER into WndProc, which ticks.
 struct TickState {
     RenderEngine&    renderEngine;
-    MagnifierEngine& magEngine;
-    bool useRender;
     int  sw, sh;
     Config         cfg;
     ZoomController zoom;
-    Tracker        tracker;
     CursorMapper   mapper;
     LARGE_INTEGER freq{}, prev{};
     double sinceCheck = 0.0;
     unsigned long long lastMtime = 0;
     double prevLvl = 1.0;
-    double lastLevel = -1.0;
-    int    lastX = INT_MIN, lastY = INT_MIN;   // mag emit-on-change
     int    hz = 60;                            // resolved tick/refresh rate (cfg.tickHzCap or detected)
     bool   recenterKeyWasDown = false;         // edge-detect the recenterVk key
     // Frame-pacing diagnostics (diagnostics=1): a 2 s window of loop-interval stats.
     double diagAccum = 0.0, diagSumDt = 0.0, diagMaxDt = 0.0;
     int    diagFrames = 0, diagHitches = 0;
-    TickState(RenderEngine& re, MagnifierEngine& me, bool ur, int w, int h, const Config& c)
-        : renderEngine(re), magEngine(me), useRender(ur), sw(w), sh(h), cfg(c),
+    TickState(RenderEngine& re, int w, int h, const Config& c)
+        : renderEngine(re), sw(w), sh(h), cfg(c),
           zoom(1.0, c.maxLevel, c.fullRangeSeconds),
-          tracker(w, h, c.sensitivity, c.centerDeadzone),
           mapper(w, h, c.cursorSensitivity, c.cursorSmoothing) {}
 };
 static TickState* g_tick = nullptr;
@@ -107,7 +98,6 @@ static void RunTick(TickState& t) {
             Config nc = LoadConfig(L"magnifier.ini");
             t.cfg = nc;   // pick up renderer knobs (smoothing, blur, filter, cursor scale)
             t.zoom = ZoomController(1.0, nc.maxLevel, nc.fullRangeSeconds);
-            t.tracker = Tracker(t.sw, t.sh, nc.sensitivity, nc.centerDeadzone);
             double ocx = t.mapper.centerX(), ocy = t.mapper.centerY();   // preserve position
             t.mapper = CursorMapper(t.sw, t.sh, nc.cursorSensitivity, nc.cursorSmoothing);
             t.mapper.reset(ocx, ocy);
@@ -130,48 +120,37 @@ static void RunTick(TickState& t) {
 
     int dx, dy; g_input.drainRaw(dx, dy);
 
-    if (t.useRender) {
-        if (lvl > 1.0) {
-            bool zoomIn = (t.prevLvl <= 1.0);             // zoom-in transition
-            if (zoomIn) {
-                POINT pt; GetCursorPos(&pt);
-                t.mapper.reset(pt.x, pt.y);
-                t.renderEngine.hideSystemCursor(true);
-                t.renderEngine.invalidateCapture();       // grab a live frame, not a stale cached one
-            }
-            if (recenter) { POINT pt; GetCursorPos(&pt); t.mapper.reset(pt.x, pt.y); }
-            MapResult r = t.mapper.update(dx, dy, lvl);
-            RenderFrameParams p{};
-            p.level = lvl;
-            p.srcLeft = r.srcLeft; p.srcTop = r.srcTop;
-            p.cursorScreenX = r.cursorScreenX; p.cursorScreenY = r.cursorScreenY;
-            p.clickDesktopX = r.clickDesktopX; p.clickDesktopY = r.clickDesktopY;
-            p.cursorScaleWithZoom = (t.cfg.cursorScaleWithZoom != 0);
-            p.bilinear = (t.cfg.bilinear != 0);
-            p.motionBlur = (t.cfg.motionBlur != 0);
-            p.motionBlurStrength = t.cfg.motionBlurStrength;
-            p.brightness = t.cfg.brightness;
-            p.cursorMode = CursorModeFromCfg(t.cfg);
-            // In DwmFlush mode we present immediately (no vsync block) and let DwmFlush() pace.
-            p.vsync = (t.cfg.vsync != 0 && t.cfg.dwmFlush == 0);
-            t.renderEngine.renderFrame(p);
-            // Reveal AFTER the live frame is presented: setVisible flips the layer alpha over the
-            // now-current front buffer, so the overlay never shows its retained previous-session
-            // frame (the alt-tab "previous window"). capture() also drained to the latest frame.
-            if (zoomIn) t.renderEngine.setVisible(true);
-        } else if (t.prevLvl > 1.0) {                     // zoom-out transition
-            t.renderEngine.setVisible(false);
-            t.renderEngine.hideSystemCursor(false);
+    if (lvl > 1.0) {
+        bool zoomIn = (t.prevLvl <= 1.0);             // zoom-in transition
+        if (zoomIn) {
+            POINT pt; GetCursorPos(&pt);
+            t.mapper.reset(pt.x, pt.y);
+            t.renderEngine.hideSystemCursor(true);
+            t.renderEngine.invalidateCapture();       // grab a live frame, not a stale cached one
         }
-    } else {
-        if (recenter) t.tracker.recenter();
-        POINT pt; GetCursorPos(&pt);
-        t.tracker.update(pt.x, pt.y, dx, dy, lvl);
-        Offset o = ComputeOffset(t.tracker.centerX(), t.tracker.centerY(), lvl, t.sw, t.sh);
-        if (lvl != t.lastLevel || o.x != t.lastX || o.y != t.lastY) {
-            t.magEngine.setTransform(lvl, o.x, o.y);
-            t.lastLevel = lvl; t.lastX = o.x; t.lastY = o.y;
-        }
+        if (recenter) { POINT pt; GetCursorPos(&pt); t.mapper.reset(pt.x, pt.y); }
+        MapResult r = t.mapper.update(dx, dy, lvl);
+        RenderFrameParams p{};
+        p.level = lvl;
+        p.srcLeft = r.srcLeft; p.srcTop = r.srcTop;
+        p.cursorScreenX = r.cursorScreenX; p.cursorScreenY = r.cursorScreenY;
+        p.clickDesktopX = r.clickDesktopX; p.clickDesktopY = r.clickDesktopY;
+        p.cursorScaleWithZoom = (t.cfg.cursorScaleWithZoom != 0);
+        p.bilinear = (t.cfg.bilinear != 0);
+        p.motionBlur = (t.cfg.motionBlur != 0);
+        p.motionBlurStrength = t.cfg.motionBlurStrength;
+        p.brightness = t.cfg.brightness;
+        p.cursorMode = CursorModeFromCfg(t.cfg);
+        // In DwmFlush mode we present immediately (no vsync block) and let DwmFlush() pace.
+        p.vsync = (t.cfg.vsync != 0 && t.cfg.dwmFlush == 0);
+        t.renderEngine.renderFrame(p);
+        // Reveal AFTER the live frame is presented: setVisible flips the layer alpha over the
+        // now-current front buffer, so the overlay never shows its retained previous-session
+        // frame (the alt-tab "previous window"). capture() also drained to the latest frame.
+        if (zoomIn) t.renderEngine.setVisible(true);
+    } else if (t.prevLvl > 1.0) {                     // zoom-out transition
+        t.renderEngine.setVisible(false);
+        t.renderEngine.hideSystemCursor(false);
     }
     t.prevLvl = lvl;
 
@@ -272,28 +251,24 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     int sw = GetSystemMetrics(SM_CXSCREEN);
     int sh = GetSystemMetrics(SM_CYSCREEN);
 
-    // --- Engine selection: own GPU renderer (default) or the Magnification API ---
-    bool useRender = (cfg.engine == "render");
-    MagnifierEngine magEngine;
-    RenderEngine    renderEngine;
-    if (useRender && !renderEngine.initialize(sw, sh, cfg.zorderBand, cfg.hdrTonemap != 0)) {
-        useRender = false;   // graceful fallback if D3D/DDA is unavailable
-    }
-    if (!useRender && !magEngine.initialize()) {
-        MessageBoxW(nullptr, L"No magnifier engine could start.", L"Wind", MB_ICONERROR);
+    // --- Own GPU renderer (DXGI Desktop Duplication + D3D11) ---
+    RenderEngine renderEngine;
+    if (!renderEngine.initialize(sw, sh, cfg.zorderBand, cfg.hdrTonemap != 0)) {
+        MessageBoxW(nullptr, L"Could not start the renderer (Direct3D 11 / Desktop Duplication "
+                             L"unavailable on this system).", L"Wind", MB_ICONERROR);
         g_input.stop();
         return 1;
     }
 
     Tray::Add(hwnd, hInst);
 
-    TickState ts(renderEngine, magEngine, useRender, sw, sh, cfg);
+    TickState ts(renderEngine, sw, sh, cfg);
     g_tick = &ts;   // so the WM_TIMER tick (during the tray menu's modal loop) can run
 
     // Autonomous verification hook: WIND_SELFTEST drives the real integrated render path at a
     // forced zoom and dumps a PNG (the overlay is WDA_EXCLUDEFROMCAPTURE, so it can only be
     // captured from inside the app), then exits. Not part of normal use.
-    if (useRender && GetEnvironmentVariableW(L"WIND_SELFTEST", nullptr, 0) > 0) {
+    if (GetEnvironmentVariableW(L"WIND_SELFTEST", nullptr, 0) > 0) {
         POINT pt; GetCursorPos(&pt);
         ts.mapper.reset(pt.x, pt.y);
         renderEngine.hideSystemCursor(true);
@@ -329,7 +304,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // Frame-pacing self-test: WIND_PACINGTEST runs the REAL present-paced render path at a forced
     // zoom with a simulated pan for ~4 s and logs loop-interval stats to %TEMP%\wind_diag.log -
     // to measure microstutter objectively (the normal loop needs the side button to zoom). Exits.
-    if (useRender && GetEnvironmentVariableW(L"WIND_PACINGTEST", nullptr, 0) > 0) {
+    if (GetEnvironmentVariableW(L"WIND_PACINGTEST", nullptr, 0) > 0) {
         POINT pt; GetCursorPos(&pt);
         ts.mapper.reset(pt.x, pt.y);
         renderEngine.hideSystemCursor(true);
@@ -392,16 +367,16 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         }
         if (!running) break;
 
-        // Pacing while the render engine is zoomed:
+        // Pacing while zoomed:
         //  - dwmFlush: present immediately, then DwmFlush() AFTER the tick aligns us 1:1 with the
         //    compositor (targets blt-model microstutter). No pre-tick wait.
         //  - vsync: Present(1,0) blocks to the refresh and paces the loop (skip the timer to
         //    avoid timer/vsync double-pacing).
         //  - else: Present(0,0) doesn't block, so the timer paces at tickHzCap.
-        // The mag path, and idle at 1x, use the timer.
-        bool zoomedRender = useRender && ts.prevLvl > 1.0;
-        bool dwmPaces = zoomedRender && ts.cfg.dwmFlush != 0;
-        bool renderPresentPaces = zoomedRender && ts.cfg.vsync != 0 && !dwmPaces;
+        // Idle at 1x uses the timer.
+        bool zoomed = ts.prevLvl > 1.0;
+        bool dwmPaces = zoomed && ts.cfg.dwmFlush != 0;
+        bool renderPresentPaces = zoomed && ts.cfg.vsync != 0 && !dwmPaces;
         if (!renderPresentPaces && !dwmPaces) {
             if (timer) {
                 SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);
@@ -419,8 +394,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     g_tick = nullptr;
     if (timer) CloseHandle(timer);
     UnregisterHotKey(hwnd, kQuitHotkeyId);
-    if (useRender) renderEngine.shutdown();   // restores cursor + tears down D3D/overlay
-    else           magEngine.shutdown();       // resets to 1x - never leave the screen zoomed
+    renderEngine.shutdown();   // restores cursor + tears down D3D/overlay
     g_input.stop();
     Tray::Remove();
     ReleaseMutex(mtx);

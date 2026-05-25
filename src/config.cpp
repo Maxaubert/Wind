@@ -28,13 +28,10 @@ Config ParseConfig(const std::string& text) {
             else if (key == "zoomOutVk")        c.zoomOutVk = std::stoi(val);
             else if (key == "maxLevel")         c.maxLevel = std::stod(val);
             else if (key == "fullRangeSeconds") c.fullRangeSeconds = std::stod(val);
-            else if (key == "sensitivity")      c.sensitivity = std::stod(val);
-            else if (key == "centerDeadzone")   c.centerDeadzone = std::stod(val);
             else if (key == "tickHzCap")        c.tickHzCap = std::stoi(val);
             else if (key == "vsync")            c.vsync = std::stoi(val);
             else if (key == "dwmFlush")         c.dwmFlush = std::stoi(val);
             else if (key == "diagnostics")      c.diagnostics = std::stoi(val);
-            else if (key == "engine")             c.engine = val;
             else if (key == "cursorSensitivity")  c.cursorSensitivity = std::stod(val);
             else if (key == "cursorSmoothing")    c.cursorSmoothing = std::stod(val);
             else if (key == "cursorScaleWithZoom")c.cursorScaleWithZoom = std::stoi(val);
@@ -70,9 +67,7 @@ Config LoadConfig(const std::wstring& path) {
                "zoomInVk=33\nzoomOutVk=34\n"
                "; recenterVk: tap to recenter the lens on the cursor (VK code; 0=unbound)\n"
                "recenterVk=0\n"
-               "maxLevel=8.0\nfullRangeSeconds=1.2\nsensitivity=1.0\n"
-               "; centerDeadzone: keep 0 (strict center) for the smooth-cursor overlay\n"
-               "centerDeadzone=0.0\n"
+               "maxLevel=8.0\nfullRangeSeconds=1.2\n"
                "; tickHzCap: 0=auto-detect display refresh rate (recommended); >0=explicit Hz cap\n"
                "tickHzCap=0\n"
                "; vsync: 1=present locked to display refresh (smooth, capped); 0=no vsync, paced by tickHzCap (restart to apply)\n"
@@ -81,8 +76,6 @@ Config LoadConfig(const std::wstring& path) {
                "dwmFlush=1\n"
                "; diagnostics=1 logs frame timing to %TEMP%\\wind_diag.log (restart to apply)\n"
                "diagnostics=0\n"
-               "; engine: render = own capture+GPU renderer (sub-pixel, smooth); mag = Magnification API\n"
-               "engine=render\n"
                "; cursorSensitivity: pan speed per raw count\n"
                "cursorSensitivity=1.0\n"
                "; cursorSmoothing: light inertia on the pan (0=off, ~0.5 light, higher=smoother+laggier)\n"

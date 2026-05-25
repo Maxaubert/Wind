@@ -56,9 +56,10 @@ try {
     New-Item -ItemType Directory -Force "C:\Program Files\Wind" | Out-Null
     Copy-Item $src "C:\Program Files\Wind\Wind.exe" -Force
     $ini = @"
-engine=render
 zoomInButton=2
 zoomOutButton=1
+zoomInVk=33
+zoomOutVk=34
 recenterVk=0
 maxLevel=8.0
 fullRangeSeconds=1.2
