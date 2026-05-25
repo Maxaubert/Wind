@@ -789,7 +789,10 @@ bool RenderEngine::renderFrame(const RenderFrameParams& p) {
         s_->lastClickX = p.clickDesktopX; s_->lastClickY = p.clickDesktopY;
     }
     s_->render(p);
-    return SUCCEEDED(s_->swap->Present(1, 0));
+    // vsync (sync interval 1) locks the present to the display refresh; 0 presents immediately
+    // (the caller must then pace the loop so it doesn't spin). DWM composites a blt-model
+    // swapchain either way, so 0 doesn't tear here - it just decouples from the vblank.
+    return SUCCEEDED(s_->swap->Present(p.vsync ? 1 : 0, 0));
 }
 
 // Render one frame and dump it WITHOUT presenting, so the PNG reflects exactly the drawn
