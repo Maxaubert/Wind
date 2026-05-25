@@ -1,12 +1,13 @@
 #include "render_engine.h"
 #include <windows.h>
 #include <d3d11.h>
-#include <dxgi1_2.h>
+#include <dxgi1_3.h>
 #include <d3dcompiler.h>
 #include <wincodec.h>
 #include <magnification.h>
 #include <cstdint>
 #include <cstring>
+#include <climits>
 #include <vector>
 
 #pragma comment(lib, "d3d11.lib")
@@ -129,7 +130,9 @@ struct RenderEngine::State {
     ID3D11Device* device = nullptr;
     ID3D11DeviceContext* ctx = nullptr;
     IDXGISwapChain1* swap = nullptr;
+    HANDLE frameLatencyWaitable = nullptr;     // signals when the swapchain can take a frame
     ID3D11RenderTargetView* rtv = nullptr;
+    int lastClickX = INT_MIN, lastClickY = INT_MIN;   // skip redundant SetCursorPos
 
     // Desktop Duplication.
     IDXGIOutputDuplication* dupl = nullptr;
@@ -308,10 +311,20 @@ bool RenderEngine::initialize(int screenW, int screenH) {
     scd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
     scd.Scaling = DXGI_SCALING_STRETCH;
     scd.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+    scd.Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;   // low-latency pacing
     hr = factory->CreateSwapChainForHwnd(s_->device, s_->hwnd, &scd, nullptr, nullptr, &s_->swap);
     factory->MakeWindowAssociation(s_->hwnd, DXGI_MWA_NO_ALT_ENTER);
     SafeRelease(factory);
     if (FAILED(hr)) return false;
+
+    // Cap queued frames to 1 and grab the waitable object. Waiting on it each frame keeps
+    // input-to-photon latency to ~1 frame (a default flip swapchain can queue ~3 -> laggy).
+    IDXGISwapChain2* swap2 = nullptr;
+    if (SUCCEEDED(s_->swap->QueryInterface(__uuidof(IDXGISwapChain2), (void**)&swap2)) && swap2) {
+        swap2->SetMaximumFrameLatency(1);
+        s_->frameLatencyWaitable = swap2->GetFrameLatencyWaitableObject();
+        swap2->Release();
+    }
 
     // --- Render target view from back-buffer 0 ---
     ID3D11Texture2D* back = nullptr;
@@ -464,10 +477,17 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
 
 bool RenderEngine::renderFrame(const RenderFrameParams& p) {
     if (!s_->ready) return false;
+    // Block until the swapchain can accept a new frame (caps latency to ~1 frame and paces
+    // to the display refresh). This is what makes the pan track the hand tightly.
+    if (s_->frameLatencyWaitable) WaitForSingleObjectEx(s_->frameLatencyWaitable, 100, FALSE);
     // Keep the (hidden) OS cursor under the drawn cursor so clicks pass through the
     // transparent overlay to the app at the right desktop point. We drive the lens from raw
-    // input (not GetCursorPos), so this SetCursorPos never feeds back into tracking.
-    SetCursorPos(p.clickDesktopX, p.clickDesktopY);
+    // input (not GetCursorPos), so this SetCursorPos never feeds back into tracking. Only
+    // when it actually moved (avoids redundant synthetic mouse events while idle).
+    if (p.clickDesktopX != s_->lastClickX || p.clickDesktopY != s_->lastClickY) {
+        SetCursorPos(p.clickDesktopX, p.clickDesktopY);
+        s_->lastClickX = p.clickDesktopX; s_->lastClickY = p.clickDesktopY;
+    }
     s_->render(p);
     return SUCCEEDED(s_->swap->Present(1, 0));
 }
@@ -526,6 +546,7 @@ void RenderEngine::shutdown() {
     SafeRelease(s_->dupl);
     SafeRelease(s_->desktopCopy);
     SafeRelease(s_->rtv);
+    if (s_->frameLatencyWaitable) { CloseHandle(s_->frameLatencyWaitable); s_->frameLatencyWaitable = nullptr; }
     SafeRelease(s_->swap);
     SafeRelease(s_->ctx);
     SafeRelease(s_->device);
