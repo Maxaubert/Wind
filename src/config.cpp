@@ -27,7 +27,21 @@ Config ParseConfig(const std::string& text) {
             else if (key == "maxLevel")         c.maxLevel = std::stod(val);
             else if (key == "fullRangeSeconds") c.fullRangeSeconds = std::stod(val);
             else if (key == "sensitivity")      c.sensitivity = std::stod(val);
+            else if (key == "centerDeadzone")   c.centerDeadzone = std::stod(val);
             else if (key == "tickHzCap")        c.tickHzCap = std::stoi(val);
+            else if (key == "diagnostics")      c.diagnostics = std::stoi(val);
+            else if (key == "updateMode")       c.updateMode = std::stoi(val);
+            else if (key == "maxUpdateHz")      c.maxUpdateHz = std::stoi(val);
+            else if (key == "engine")             c.engine = val;
+            else if (key == "cursorSensitivity")  c.cursorSensitivity = std::stod(val);
+            else if (key == "cursorSmoothing")    c.cursorSmoothing = std::stod(val);
+            else if (key == "cursorScaleWithZoom")c.cursorScaleWithZoom = std::stoi(val);
+            else if (key == "bilinear")           c.bilinear = std::stoi(val);
+            else if (key == "motionBlur")         c.motionBlur = std::stoi(val);
+            else if (key == "motionBlurStrength") c.motionBlurStrength = std::stod(val);
+            else if (key == "zorderBand")         c.zorderBand = std::stoi(val);
+            else if (key == "brightness")         c.brightness = std::stod(val);
+            else if (key == "hdrTonemap")         c.hdrTonemap = std::stoi(val);
         } catch (...) { /* keep default on bad value */ }
     }
     return c;
@@ -46,7 +60,32 @@ Config LoadConfig(const std::wstring& path) {
         std::ofstream out(path);
         out << "; Wind magnifier config. Edit and save; changes apply within ~1s.\n"
                "zoomInButton=2\nzoomOutButton=1\nrecenterVk=0\n"
-               "maxLevel=8.0\nfullRangeSeconds=1.2\nsensitivity=1.0\ntickHzCap=144\n";
+               "maxLevel=8.0\nfullRangeSeconds=1.2\nsensitivity=1.0\n"
+               "; centerDeadzone: keep 0 (strict center) for the smooth-cursor overlay\n"
+               "centerDeadzone=0.0\ntickHzCap=144\n"
+               "; diagnostics=1 logs frame timing to wind_diag.log (restart to apply)\n"
+               "diagnostics=0\n"
+               "; updateMode: 0=skip sub-pixel, 1=emit on float-center, 2=continuous while zoomed\n"
+               "updateMode=0\n"
+               "; maxUpdateHz: 0=unlimited, else cap transform updates/sec\n"
+               "maxUpdateHz=0\n"
+               "; engine: render = own capture+GPU renderer (sub-pixel, smooth); mag = Magnification API\n"
+               "engine=render\n"
+               "; cursorSensitivity: pan speed per raw count\n"
+               "cursorSensitivity=1.0\n"
+               "; cursorSmoothing: light inertia on the pan (0=off, ~0.5 light, higher=smoother+laggier)\n"
+               "cursorSmoothing=0.5\n"
+               "cursorScaleWithZoom=1\n"
+               "; bilinear: 1=smooth scaling, 0=crisp/point\n"
+               "bilinear=1\n"
+               "; motionBlur: 1=smear content along the pan (off by default)\n"
+               "motionBlur=0\nmotionBlurStrength=1.0\n"
+               "; zorderBand: 0=normal; 16=above shell (covers Start/taskbar/tray, needs UIAccess build)\n"
+               "zorderBand=0\n"
+               "; brightness: magnified-view output multiplier (1.0=unchanged; fine-tune for HDR)\n"
+               "brightness=1.0\n"
+               "; hdrTonemap: 1=HDR10->SDR tonemap when Windows HDR is on (no-op on SDR); 0=off\n"
+               "hdrTonemap=1\n";
         return Config{};
     }
     std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());

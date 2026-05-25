@@ -15,3 +15,7 @@ Thumbs.db
 .worktrees/
 # Runtime config copy (the shipped default lives in config/)
 /magnifier.ini
+# Diagnostic logs
+*.log
+# PresentMon / perf captures
+*.csv

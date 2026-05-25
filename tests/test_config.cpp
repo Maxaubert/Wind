@@ -9,6 +9,50 @@ TEST_CASE("defaults when text is empty") {
     CHECK(c.maxLevel == doctest::Approx(8.0));
     CHECK(c.fullRangeSeconds == doctest::Approx(1.2));
     CHECK(c.sensitivity == doctest::Approx(1.0));
+    CHECK(c.diagnostics == 0);
+    CHECK(c.updateMode == 0);
+    CHECK(c.maxUpdateHz == 0);
+}
+TEST_CASE("parses engine selection and renderer knobs") {
+    Config c = ParseConfig(
+        "engine=render\ncursorSensitivity=1.5\ncursorScaleWithZoom=0\nbilinear=1\n");
+    CHECK(c.engine == "render");
+    CHECK(c.cursorSensitivity == doctest::Approx(1.5));
+    CHECK(c.cursorScaleWithZoom == 0);
+    CHECK(c.bilinear == 1);
+}
+TEST_CASE("engine defaults to render; renderer knobs have sane defaults") {
+    Config c = ParseConfig("");
+    CHECK(c.engine == "render");
+    CHECK(c.cursorSensitivity == doctest::Approx(1.0));
+    CHECK(c.cursorScaleWithZoom == 1);
+    CHECK(c.bilinear == 1);
+    CHECK(c.cursorSmoothing == doctest::Approx(0.5));
+    CHECK(c.motionBlur == 0);                  // off by default
+    CHECK(c.motionBlurStrength == doctest::Approx(1.0));
+    CHECK(c.zorderBand == 0);                  // normal topmost by default
+    CHECK(c.brightness == doctest::Approx(1.0));
+    CHECK(c.hdrTonemap == 1);                  // on by default (no-op on SDR)
+}
+TEST_CASE("hdrTonemap can be disabled") {
+    Config c = ParseConfig("hdrTonemap=0\n");
+    CHECK(c.hdrTonemap == 0);
+}
+TEST_CASE("parses cursorSmoothing, motion blur, z-order band, brightness") {
+    Config c = ParseConfig("cursorSmoothing=0.7\nmotionBlur=1\nmotionBlurStrength=0.5\nzorderBand=16\nbrightness=0.85\n");
+    CHECK(c.cursorSmoothing == doctest::Approx(0.7));
+    CHECK(c.motionBlur == 1);
+    CHECK(c.motionBlurStrength == doctest::Approx(0.5));
+    CHECK(c.zorderBand == 16);
+    CHECK(c.brightness == doctest::Approx(0.85));
+}
+TEST_CASE("engine can select the Magnification API path") {
+    Config c = ParseConfig("engine=mag\n");
+    CHECK(c.engine == "mag");
+}
+TEST_CASE("parses diagnostics flag") {
+    Config c = ParseConfig("diagnostics=1\n");
+    CHECK(c.diagnostics == 1);
 }
 TEST_CASE("parses overrides and ignores comments/blank lines") {
     const char* ini =

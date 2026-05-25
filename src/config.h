@@ -8,7 +8,36 @@ struct Config {
     double maxLevel         = 8.0;
     double fullRangeSeconds = 1.2;
     double sensitivity      = 1.0;
+    // Center leeway when zoomed: fraction of the half-view the cursor may glide before
+    // the view pans. 0 = rigidly centered (the smooth-cursor overlay needs this); higher
+    // lets the cursor roam, but then the overlay cursor moves at L x speed - keep 0.
+    double centerDeadzone   = 0.0;
     int    tickHzCap        = 144;
+    int    diagnostics      = 0;     // 1 = log frame-timing to wind_diag.log
+    // Experimental (hot-reloadable): how often we push the transform to DWM.
+    // 0 = emit when the integer offset or level changes (skips sub-pixel frames);
+    // 1 = emit when the float center or level changes (every frame while moving);
+    // 2 = emit every frame while zoomed (continuous composition; avoids transitions).
+    int    updateMode       = 0;
+    int    maxUpdateHz      = 0;     // 0 = unlimited; else cap transform updates/sec
+
+    // --- Own GPU renderer (engine=render) -----------------------------------
+    std::string engine = "render";   // "render" = own capture+D3D renderer, "mag" = Magnification API
+    double cursorSensitivity = 1.0;  // lens pan speed per raw count
+    double cursorSmoothing = 0.5;    // light inertia on the pan: 0 = off, higher = smoother/laggier
+    int    cursorScaleWithZoom = 1;  // 1 = draw the cursor scaled by zoom, 0 = native size
+    int    bilinear = 1;             // 1 = bilinear sampling (smooth), 0 = point (crisp pixels)
+    int    motionBlur = 0;           // 1 = smear content along the pan (off by default)
+    double motionBlurStrength = 1.0; // shutter: 1.0 = full inter-frame blur, lower = subtler
+    // z-order band for the overlay (needs the UIAccess build, run from Program Files):
+    // 0 = normal topmost; 16 = ZBID_SYSTEM_TOOLS (above the shell, covers Start/taskbar/tray).
+    int    zorderBand = 0;
+    // Output brightness multiplier for the magnified view. 1.0 = unchanged. Hot-reloadable.
+    double brightness = 1.0;
+    // HDR->SDR tonemap. Only engages when Windows HDR is actually on (advancedColorEnabled);
+    // on SDR it's a no-op (plain BGRA8 passthrough), so it's safe on by default. Set 0 to
+    // force the legacy BGRA8 capture even on HDR. Applied at startup + on HDR toggle.
+    int    hdrTonemap = 1;
 };
 // Pure: parse INI text (key=value, ';' or '#' comments) into a Config, keeping
 // defaults for missing/malformed keys.
