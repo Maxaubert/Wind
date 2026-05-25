@@ -21,10 +21,23 @@ void MagnifierEngine::setTransform(double level, int xOffset, int yOffset) {
     const int sw = GetSystemMetrics(SM_CXSCREEN);
     const int sh = GetSystemMetrics(SM_CYSCREEN);
     if (level > 1.0) {
-        RECT dest{ 0, 0, sw, sh };                 // where the magnified view is shown
-        RECT src{ xOffset, yOffset,                // the region being magnified
-                  xOffset + static_cast<int>(sw / level),
-                  yOffset + static_cast<int>(sh / level) };
+        // Coordinate spaces differ between the two transforms on a scaled display:
+        //   - MagSetFullscreenTransform offsets are PHYSICAL pixels, DPI-independent
+        //     (documented), which is what xOffset/yOffset already are.
+        //   - MagSetInputTransform routes INPUT, which the OS maps in LOGICAL
+        //     (DPI-scaled) screen coordinates. Feeding it physical rects on, say, a
+        //     225% display makes them 2.25x too large, so the mapped click position
+        //     drifts further off the further it is from the origin (position-dependent
+        //     mis-clicks). Convert the magnified region to logical coordinates here.
+        // (Assumes the fullscreen magnifier's primary monitor; single-DPI.)
+        const double scale = GetDpiForSystem() / 96.0;   // 96 = 100%
+        RECT dest{ 0, 0,
+                   static_cast<LONG>(sw / scale),
+                   static_cast<LONG>(sh / scale) };
+        RECT src{ static_cast<LONG>(xOffset / scale),
+                  static_cast<LONG>(yOffset / scale),
+                  static_cast<LONG>((xOffset + sw / level) / scale),
+                  static_cast<LONG>((yOffset + sh / level) / scale) };
         inputTransformOk_ = (MagSetInputTransform(TRUE, &src, &dest) != 0);
         inputTransformOn_ = true;
     } else if (inputTransformOn_) {

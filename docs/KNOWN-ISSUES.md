@@ -1,16 +1,19 @@
 # Wind - Known Issues (behavior / interaction bugs)
 
 **Date opened:** 2026-05-25
-**Status:** Issue 3 (flicker) **fixed** (unit-tested), pending user confirmation. Issue 2
-**root cause CONFIRMED** by MS docs (missing `MagSetInputTransform`); the earlier
-tracker fix did **not** address it - real fix needs UIAccess + input transform. Issue 1
-fix (Raw Input) **failed** the live test; root cause re-opened. Issue 4 unchanged.
-See the per-issue "Resolution" notes.
+**Status:** Issue 1 **FIXED** (UIAccess). Issue 2 root cause confirmed (missing
+`MagSetInputTransform`) and then refined to a **DPI coordinate-space mismatch** at 225%
+scale; logical-coordinate fix implemented, pending test. Issue 3 (flicker) **fixed**
+(unit-tested), pending user confirmation. Issue 4 unchanged. See per-issue "Resolution".
 
-**Live-test result (2026-05-25):** user confirmed the interaction problem happens only
-when zoomed, persists when the mouse is held perfectly still, on non-elevated windows,
-and zoom buttons over a non-elevated Task Manager are still dead. This falsified the
-"same root cause as the flicker" and "UIPI/elevation" hypotheses.
+**Live-test results (2026-05-25):**
+- After UIAccess + `MagSetInputTransform`: **Issue 1 fixed** (zoom buttons now work over
+  Task Manager - confirms UIAccess engaged and input routing is active).
+- Issue 2 changed character: now **position-dependent** - which buttons are clickable
+  depends on where the window sits, and moving it changes which work; only when zoomed.
+  This is the signature of a scale mismatch (error grows from the origin).
+- Environment confirmed: **single 4K monitor at 225% scale** (AppliedDPI 216; physical
+  3840x2160, logical 1707x960). So the input rects must be in logical, not physical px.
 
 Fix branch: `fix/interaction-bugs`. Plan:
 [`superpowers/plans/2026-05-25-interaction-fixes.md`](superpowers/plans/2026-05-25-interaction-fixes.md).
@@ -26,8 +29,8 @@ problem (view flicker, Issue 3 below), not that FPS ceiling.
 
 | # | Issue | Where it shows up | Root cause | Status |
 |---|---|---|---|---|
-| 1 | Zoom side-buttons do nothing | Task Manager (reported non-elevated), some apps | **Re-opened.** Not UIPI/elevation (TM non-elevated). Raw Input fix did not help. Needs instrumentation; UIAccess may resolve it | Raw Input fix **failed** live test |
-| 2 | Can only partially interact while zoomed (can't focus input fields, no I-beam cursor, small targets unclickable) | File Explorer, Cyberpunk launcher, Task Manager, "some apps" | **CONFIRMED:** no `MagSetInputTransform`, so mouse input routes to *unmagnified* coordinates, not the magnified element (required since Win10 1703). Independent of cursor movement. | Needs **UIAccess + `MagSetInputTransform`** |
+| 1 | Zoom side-buttons do nothing | Task Manager, some apps | UIPI-class: input not reaching Wind over those windows. UIAccess resolved it. | **FIXED** (UIAccess) |
+| 2 | Partial / position-dependent clickability while zoomed (which targets work depends on window position) | Any window, when zoomed, at non-100% scale | `MagSetInputTransform` rects were passed in **physical** px, but input maps in **logical** (DPI-scaled) px. At 225% they were 2.25x too large -> click offset grows with screen position. | Logical-coordinate fix implemented; **pending test** |
 | 3 | Magnified view flickers / jumps while moving the cursor (off-centers and recenters rapidly) | GPU-rendered windows: Windows Terminal, browser, launcher | `Tracker::update` free/locked heuristic flip-flopped between snapping to `GetCursorPos` and integrating raw deltas | **Fixed** (hysteresis lock detector), unit-tested; user confirming |
 | 4 | Large FPS drop when panning/zooming in games | Borderless games (KCD2 etc.) | Public API scales in DWM, drops game off the GPU fast path | Unchanged (see PERFORMANCE-FINDINGS.md); direction decision open |
 
@@ -95,6 +98,13 @@ title/process, then press the zoom buttons over Task Manager and read the log. T
 say definitively whether the input reaches Wind at all. Plausible that committing to
 UIAccess (needed for Issue 2 anyway) also resolves this, since a UIAccess process can
 receive input destined for protected windows - to be confirmed by the instrumentation.
+
+### Resolution (FIXED via UIAccess)
+Confirmed: after signing + deploying the UIAccess build, the zoom side-buttons work over
+Task Manager. UIAccess is what was missing (the Raw Input button decode was harmless but
+not the fix). No instrumentation needed. The earlier UIPI/elevation framing was the wrong
+detail, but the broad class (input not reaching a non-UIAccess process over certain
+windows) was right, and UIAccess is the correct remedy.
 
 ---
 
@@ -166,6 +176,21 @@ secure location (`C:\Program Files\Wind`). Note: this is a *different* capabilit
 the perf test - UIAccess did nothing for performance, but it is mandatory for input
 routing, and we never actually called `MagSetInputTransform` before, which is why simply
 enabling UIAccess "looked the same."
+
+### Refinement after first deploy (DPI coordinate-space mismatch)
+With UIAccess + `MagSetInputTransform` active, the symptom changed from "small targets
+miss" to **position-dependent** clickability (which targets work depends on window
+position). That is a scale mismatch: input was being mapped through rectangles given in
+**physical** pixels, but the OS routes input in **logical** (DPI-scaled) coordinates. On
+this machine (225% scale, physical 3840x2160 vs logical 1707x960) the rects were 2.25x
+too large, so the click offset grew with distance from the screen origin.
+
+`MagSetFullscreenTransform` offsets are explicitly DPI-independent (physical), so the
+visual stayed correct; only the input transform needed conversion. **Fix:** in
+`MagnifierEngine::setTransform`, divide the input-transform rect coordinates by the DPI
+scale (`GetDpiForSystem()/96`) so they are in logical pixels, while leaving the visual
+transform in physical. Implemented; pending the user's click-test at 225%. (Assumes the
+primary monitor / single DPI; revisit for mixed-DPI multi-monitor.)
 
 ---
 
