@@ -36,7 +36,8 @@ public:
     // useDComp: false = blt-model swapchain on the layered HWND (default, paced by DwmFlush);
     // true = flip-model swapchain composed via DirectComposition (still WS_EX_LAYERED for
     // click-through), paced by vsync Present. Opt-in A/B backend.
-    bool initialize(int screenW, int screenH, int zorderBand = 0, bool hdrTonemap = false, bool useDComp = false);
+    bool initialize(int screenW, int screenH, int zorderBand = 0, bool hdrTonemap = false,
+                    bool useDComp = false, int gpuPriority = 0);
     bool renderFrame(const RenderFrameParams& p);  // capture (if changed) + scale + cursor + present
     void setVisible(bool visible);                 // show/hide the overlay (hidden at 1x)
     // Force the next frame to grab a fresh full-desktop capture (release+recreate the

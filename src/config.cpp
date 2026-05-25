@@ -32,6 +32,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "vsync")            c.vsync = std::stoi(val);
             else if (key == "dwmFlush")         c.dwmFlush = std::stoi(val);
             else if (key == "present")          c.present = val;
+            else if (key == "gpuPriority")      c.gpuPriority = std::stoi(val);
             else if (key == "diagnostics")      c.diagnostics = std::stoi(val);
             else if (key == "cursorSensitivity")  c.cursorSensitivity = std::stod(val);
             else if (key == "cursorSmoothing")    c.cursorSmoothing = std::stod(val);
@@ -78,6 +79,9 @@ Config LoadConfig(const std::wstring& path) {
                "; present: blt=default (blt swapchain + DwmFlush); dcomp=flip-model via DirectComposition\n"
                ";   (experimental, vsync-paced; restart to change)\n"
                "present=blt\n"
+               "; gpuPriority: GPU scheduling priority (-7..7). Higher keeps the zoom responsive when a\n"
+               ";   game runs in the background; lower if it hurts a foreground game (restart to apply)\n"
+               "gpuPriority=7\n"
                "; diagnostics=1 logs frame timing to %TEMP%\\wind_diag.log (restart to apply)\n"
                "diagnostics=0\n"
                "; cursorSensitivity: pan speed per raw count\n"

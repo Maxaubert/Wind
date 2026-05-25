@@ -25,6 +25,11 @@ struct Config {
     // (default); "dcomp" = flip-model swapchain via DirectComposition, paced by vsync Present
     // (experimental A/B - native flip pacing + lower latency, still click-through via layered).
     std::string present     = "blt";
+    // GPU scheduling priority for the magnifier's device (IDXGIDevice::SetGPUThreadPriority,
+    // clamped to [-7,7]). Higher = the GPU scheduler favors us over other apps, so the zoom
+    // stays responsive when a GPU-heavy app (a game) runs in the background. 0 = OS default.
+    // Lower it if it hurts a foreground game while zoomed.
+    int    gpuPriority      = 7;
     int    diagnostics      = 0;     // 1 = log frame-timing to wind_diag.log
 
     // --- Own GPU renderer ---------------------------------------------------
