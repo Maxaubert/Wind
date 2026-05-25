@@ -341,3 +341,31 @@ count (lock engaged).
 - When we move to fixing, mirror each issue as a GitHub issue -> branch -> PR per the
   project workflow (repo is currently local-only; create the issues once a remote
   exists, or track here in the meantime).
+
+---
+
+# Own renderer (issue #4, branch feat/own-renderer)
+
+A second engine that captures the desktop (DXGI Desktop Duplication) and renders the
+magnified view itself with Direct3D 11, for true sub-pixel pan and a smooth centered
+cursor. Selected with `engine=render` (default) vs `engine=mag` (the Magnification-API
+engine). Spec: `docs/superpowers/specs/2026-05-25-own-renderer-design.md`.
+
+## Cursor-hide spike (Task 0, 2026-05-25)
+- GUI / Magnification-API programs run in this session (D3D + DDA viable).
+- `MagShowSystemCursor(FALSE)` returns success and does NOT change the cursor shape
+  (`hCursor` unchanged), so DDA still reports the real sprite to draw.
+- `GetCursorInfo`'s `CURSOR_SHOWING` is unchanged by it (the hide, if any, is a
+  magnification-runtime effect GetCursorInfo doesn't expose) - so it cannot confirm the
+  visual hide. Verified instead via DDA `PointerPosition.Visible` in the capture task.
+- Decision: cursor-hide is a swappable strategy. Primary = `MagShowSystemCursor(FALSE)`
+  (shape-preserving). Fallback (if a double cursor appears) = `SetSystemCursor` blank +
+  draw a generic arrow. Safe-restore net: `MagShowSystemCursor(TRUE)` + `MagUninitialize`
+  on every exit path, plus `SystemParametersInfo(SPI_SETCURSORS,...)`.
+
+## Human-only checks (when you return)
+With `engine=render`, zoom in and confirm:
+1. Exactly ONE cursor is visible (not two). If two, the hide fallback is needed.
+2. The cursor stays centered and smooth while panning (no L-pixel hop).
+3. Clicks land where the centered cursor points.
+4. On exit, the cursor is back to normal everywhere.
