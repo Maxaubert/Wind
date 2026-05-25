@@ -234,7 +234,6 @@ struct RenderEngine::State {
     IDXGISwapChain* swap = nullptr;            // blt-model (layered window needs the redirection surface)
     ID3D11RenderTargetView* rtv = nullptr;
     int lastClickX = INT_MIN, lastClickY = INT_MIN;   // skip redundant SetCursorPos
-    int topmostTick = 0;                       // throttle re-asserting topmost
     bool inBand = false;                        // created in a high z-order band (CreateWindowInBand)
 
     // Desktop Duplication.
@@ -275,6 +274,7 @@ struct RenderEngine::State {
     int curW = 0, curH = 0, hotX = 0, hotY = 0;
     bool cursorReady = false;
     bool cursorInvert = false;                 // current cursor uses the invert blend
+    bool osCursorShowing = true;               // the focused app's cursor is visible (CURSOR_SHOWING)
 
     void updateCursorTexture();   // GetCursorInfo -> decode -> (re)upload cursorTex/SRV on change
 
@@ -617,12 +617,38 @@ bool RenderEngine::initialize(int screenW, int screenH, int zorderBand, bool hdr
 void RenderEngine::setVisible(bool visible) {
     if (!s_ || !s_->hwnd) return;
     ShowWindow(s_->hwnd, visible ? SW_SHOWNOACTIVATE : SW_HIDE);
-    if (visible) s_->prevSrcValid = false;   // don't motion-blur the jump into zoom
+    if (visible) {
+        s_->prevSrcValid = false;   // don't motion-blur the jump into zoom
+        // Pop above the window being magnified once per zoom-in. We deliberately do NOT keep
+        // re-asserting topmost every frame: that would also force us above always-on-top app
+        // overlays (e.g. RTSS FPS counters), making them show a magnified duplicate. Asserting
+        // once lets such overlays settle back on top of us (drawn at native size), while still
+        // clearing a non-topmost game window. Skipped for a banded window (the band already
+        // keeps us on top, and HWND_TOPMOST could demote us out of the band).
+        if (!s_->inBand)
+            SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+}
+
+// Drop the current duplication so the next capture() recreates it; the first AcquireNextFrame
+// after DuplicateOutput returns the entire current desktop, so the first zoomed frame shows
+// live content instead of a stale cached copy (the alt-tab "previous window" flash). Clearing
+// haveDesktop routes capture() through its blocking first-frame budget, which reliably lands
+// that full frame before we present.
+void RenderEngine::invalidateCapture() {
+    if (!s_) return;
+    SafeRelease(s_->dupl);
+    s_->haveDesktop = false;
 }
 
 void RenderEngine::State::updateCursorTexture() {
     CURSORINFO ci{ sizeof(ci) };
-    if (!GetCursorInfo(&ci) || !ci.hCursor) return;
+    if (!GetCursorInfo(&ci) || !ci.hCursor) { osCursorShowing = false; return; }
+    // Whether the focused app wants a cursor shown. Read every frame (not just on shape
+    // change) because a game can toggle it without changing the shape. Our own
+    // MagShowSystemCursor(FALSE) does NOT clear this flag, so it reflects the app's intent.
+    osCursorShowing = (ci.flags & CURSOR_SHOWING) != 0;
     if (ci.hCursor == lastCursor && cursorReady) return;   // unchanged; keep the texture
     std::vector<uint32_t> bgra; int w = 0, h = 0, hx = 0, hy = 0; bool inv = false;
     if (!DecodeCursorBGRA(ci.hCursor, bgra, w, h, hx, hy, inv)) return;
@@ -688,8 +714,12 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
         c->Draw(3, 0);
     }
 
-    // Cursor pass: alpha-blended quad at the centered hotspot, scaled by zoom.
-    if (cursorReady) {
+    // Cursor pass: alpha-blended quad at the centered hotspot, scaled by zoom. In auto mode
+    // (cursorMode 0) we skip it when the focused app hides its own cursor (games), so we don't
+    // paint a pointer the game intentionally hid. 1 = always draw, 2 = never draw.
+    bool drawCursor = cursorReady && p.cursorMode != 2 &&
+                      (p.cursorMode == 1 || osCursorShowing);
+    if (drawCursor) {
         double scale = p.cursorScaleWithZoom ? (p.level < 1.0 ? 1.0 : p.level) : 1.0;
         double drawW = curW * scale, drawH = curH * scale;
         double tlX = p.cursorScreenX - hotX * scale;   // top-left so the hotspot lands at cursorScreen
@@ -713,14 +743,11 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
 
 bool RenderEngine::renderFrame(const RenderFrameParams& p) {
     if (!s_->ready) return false;
-    // Stay above transient topmost popups (taskbar thumbnails, tooltips) so they don't show a
-    // second, unmagnified copy over our view. Skip when we're in a high z-band - the band
-    // already keeps us on top, and HWND_TOPMOST could demote us out of it.
-    if (!s_->inBand && ++s_->topmostTick >= 15) {
-        s_->topmostTick = 0;
-        SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0,
-                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-    }
+    // NB: we no longer re-assert HWND_TOPMOST every frame. Doing so forced us above app
+    // overlays that legitimately want to sit on top (RTSS FPS counters, etc.), which made
+    // them appear twice: once magnified in our view, once at native size on top. We assert
+    // topmost only on zoom-in (setVisible) to clear the magnified window; anything that
+    // re-asserts itself on top afterwards is left there. See setVisible().
     // Keep the (hidden) OS cursor under the drawn cursor so clicks pass through the
     // transparent overlay to the app at the right desktop point. We drive the lens from raw
     // input (not GetCursorPos), so this SetCursorPos never feeds back into tracking. Only

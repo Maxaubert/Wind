@@ -33,6 +33,12 @@ TEST_CASE("engine defaults to render; renderer knobs have sane defaults") {
     CHECK(c.zorderBand == 0);                  // normal topmost by default
     CHECK(c.brightness == doctest::Approx(1.0));
     CHECK(c.hdrTonemap == 1);                  // on by default (no-op on SDR)
+    CHECK(c.cursorVisibility == "auto");       // follow the focused app by default
+}
+TEST_CASE("parses cursorVisibility") {
+    CHECK(ParseConfig("cursorVisibility=always\n").cursorVisibility == "always");
+    CHECK(ParseConfig("cursorVisibility=never\n").cursorVisibility == "never");
+    CHECK(ParseConfig("cursorVisibility=auto\n").cursorVisibility == "auto");
 }
 TEST_CASE("hdrTonemap can be disabled") {
     Config c = ParseConfig("hdrTonemap=0\n");

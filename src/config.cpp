@@ -36,6 +36,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "cursorSensitivity")  c.cursorSensitivity = std::stod(val);
             else if (key == "cursorSmoothing")    c.cursorSmoothing = std::stod(val);
             else if (key == "cursorScaleWithZoom")c.cursorScaleWithZoom = std::stoi(val);
+            else if (key == "cursorVisibility")   c.cursorVisibility = val;
             else if (key == "bilinear")           c.bilinear = std::stoi(val);
             else if (key == "motionBlur")         c.motionBlur = std::stoi(val);
             else if (key == "motionBlurStrength") c.motionBlurStrength = std::stod(val);
@@ -76,6 +77,9 @@ Config LoadConfig(const std::wstring& path) {
                "; cursorSmoothing: light inertia on the pan (0=off, ~0.5 light, higher=smoother+laggier)\n"
                "cursorSmoothing=0.5\n"
                "cursorScaleWithZoom=1\n"
+               "; cursorVisibility: auto=hide our cursor when the focused app hides its own (games);\n"
+               ";   always=always draw it; never=never draw it\n"
+               "cursorVisibility=auto\n"
                "; bilinear: 1=smooth scaling, 0=crisp/point\n"
                "bilinear=1\n"
                "; motionBlur: 1=smear content along the pan (off by default)\n"

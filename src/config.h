@@ -26,6 +26,11 @@ struct Config {
     double cursorSensitivity = 1.0;  // lens pan speed per raw count
     double cursorSmoothing = 0.5;    // light inertia on the pan: 0 = off, higher = smoother/laggier
     int    cursorScaleWithZoom = 1;  // 1 = draw the cursor scaled by zoom, 0 = native size
+    // Cursor visibility while zoomed: "auto" = follow the focused app (don't draw a cursor
+    // when a game hides its own via ShowCursor(FALSE); detected with GetCursorInfo's
+    // CURSOR_SHOWING flag, which our own MagShowSystemCursor hide does NOT affect);
+    // "always" = always draw it; "never" = never draw it.
+    std::string cursorVisibility = "auto";
     int    bilinear = 1;             // 1 = bilinear sampling (smooth), 0 = point (crisp pixels)
     int    motionBlur = 0;           // 1 = smear content along the pan (off by default)
     double motionBlurStrength = 1.0; // shutter: 1.0 = full inter-frame blur, lower = subtler
