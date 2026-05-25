@@ -73,6 +73,10 @@ zorderBand=16
 brightness=1.0
 hdrTonemap=1
 tickHzCap=144
+vsync=1
+; dwmFlush: 1=pace the zoomed loop to DWM's composition (microstutter test). Hot-reloadable -
+;   edit this to 0 and save to compare (run notepad as admin, or via the tray "Edit config").
+dwmFlush=1
 "@
     Set-Content -Path "C:\Program Files\Wind\magnifier.ini" -Value $ini -Encoding ASCII
 
