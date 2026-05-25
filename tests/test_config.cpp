@@ -36,11 +36,13 @@ TEST_CASE("engine defaults to render; renderer knobs have sane defaults") {
     CHECK(c.cursorVisibility == "auto");       // follow the focused app by default
     CHECK(c.vsync == 1);                       // vsync on by default
     CHECK(c.dwmFlush == 1);                     // DwmFlush pacing on by default (the smooth path)
+    CHECK(c.tickHzCap == 0);                    // 0 = auto-detect display refresh rate
 }
-TEST_CASE("vsync and dwmFlush can be toggled") {
+TEST_CASE("vsync, dwmFlush, tickHzCap can be set") {
     CHECK(ParseConfig("vsync=0\n").vsync == 0);
     CHECK(ParseConfig("dwmFlush=0\n").dwmFlush == 0);
     CHECK(ParseConfig("dwmFlush=1\n").dwmFlush == 1);
+    CHECK(ParseConfig("tickHzCap=240\n").tickHzCap == 240);
 }
 TEST_CASE("parses cursorVisibility") {
     CHECK(ParseConfig("cursorVisibility=always\n").cursorVisibility == "always");

@@ -1,10 +1,12 @@
 # Wind UIAccess setup (run elevated). Creates a local self-signed code-signing cert,
 # trusts it, signs Wind.exe, and deploys to C:\Program Files\Wind so UIAccess activates.
 $ErrorActionPreference = 'Stop'
-$log = "C:\Users\Admin\Documents\Claude\Github\Wind\tools\uiaccess_setup.log"
+# Derive paths from the script's own location ($PSScriptRoot = the tools\ dir) so this runs
+# from any clone, not just the original dev machine.
+$log = Join-Path $PSScriptRoot 'uiaccess_setup.log'
 Start-Transcript -Path $log -Force
 try {
-    $root = "C:\Users\Admin\Documents\Claude\Github\Wind"
+    $root = Split-Path -Parent $PSScriptRoot
     $src = "$root\Wind.exe"
     Write-Output "=== 0a. stop any running Wind (dev or deployed) so the exe isn't locked for build ==="
     Get-Process Wind -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -72,7 +74,7 @@ motionBlurStrength=1.0
 zorderBand=16
 brightness=1.0
 hdrTonemap=1
-tickHzCap=144
+tickHzCap=0
 vsync=1
 ; dwmFlush: 1=pace the zoomed loop to DWM's composition (microstutter test). Hot-reloadable -
 ;   edit this to 0 and save to compare (run notepad as admin, or via the tray "Edit config").
