@@ -32,6 +32,10 @@ Config ParseConfig(const std::string& text) {
             else if (key == "diagnostics")      c.diagnostics = std::stoi(val);
             else if (key == "updateMode")       c.updateMode = std::stoi(val);
             else if (key == "maxUpdateHz")      c.maxUpdateHz = std::stoi(val);
+            else if (key == "engine")             c.engine = val;
+            else if (key == "cursorSensitivity")  c.cursorSensitivity = std::stod(val);
+            else if (key == "cursorScaleWithZoom")c.cursorScaleWithZoom = std::stoi(val);
+            else if (key == "bilinear")           c.bilinear = std::stoi(val);
         } catch (...) { /* keep default on bad value */ }
     }
     return c;
@@ -58,7 +62,13 @@ Config LoadConfig(const std::wstring& path) {
                "; updateMode: 0=skip sub-pixel, 1=emit on float-center, 2=continuous while zoomed\n"
                "updateMode=0\n"
                "; maxUpdateHz: 0=unlimited, else cap transform updates/sec\n"
-               "maxUpdateHz=0\n";
+               "maxUpdateHz=0\n"
+               "; engine: render = own capture+GPU renderer (sub-pixel, smooth); mag = Magnification API\n"
+               "engine=render\n"
+               "; cursorSensitivity: pan speed per raw count (scaled by 1/zoom internally)\n"
+               "cursorSensitivity=1.0\ncursorScaleWithZoom=1\n"
+               "; bilinear: 1=smooth scaling, 0=crisp/point\n"
+               "bilinear=1\n";
         return Config{};
     }
     std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());

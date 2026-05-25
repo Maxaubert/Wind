@@ -13,6 +13,25 @@ TEST_CASE("defaults when text is empty") {
     CHECK(c.updateMode == 0);
     CHECK(c.maxUpdateHz == 0);
 }
+TEST_CASE("parses engine selection and renderer knobs") {
+    Config c = ParseConfig(
+        "engine=render\ncursorSensitivity=1.5\ncursorScaleWithZoom=0\nbilinear=1\n");
+    CHECK(c.engine == "render");
+    CHECK(c.cursorSensitivity == doctest::Approx(1.5));
+    CHECK(c.cursorScaleWithZoom == 0);
+    CHECK(c.bilinear == 1);
+}
+TEST_CASE("engine defaults to render; renderer knobs have sane defaults") {
+    Config c = ParseConfig("");
+    CHECK(c.engine == "render");
+    CHECK(c.cursorSensitivity == doctest::Approx(1.0));
+    CHECK(c.cursorScaleWithZoom == 1);
+    CHECK(c.bilinear == 1);
+}
+TEST_CASE("engine can select the Magnification API path") {
+    Config c = ParseConfig("engine=mag\n");
+    CHECK(c.engine == "mag");
+}
 TEST_CASE("parses diagnostics flag") {
     Config c = ParseConfig("diagnostics=1\n");
     CHECK(c.diagnostics == 1);

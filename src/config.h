@@ -20,6 +20,12 @@ struct Config {
     // 2 = emit every frame while zoomed (continuous composition; avoids transitions).
     int    updateMode       = 0;
     int    maxUpdateHz      = 0;     // 0 = unlimited; else cap transform updates/sec
+
+    // --- Own GPU renderer (engine=render) -----------------------------------
+    std::string engine = "render";   // "render" = own capture+D3D renderer, "mag" = Magnification API
+    double cursorSensitivity = 1.0;  // lens pan speed per raw count (internally scaled by 1/level)
+    int    cursorScaleWithZoom = 1;  // 1 = draw the cursor scaled by zoom, 0 = native size
+    int    bilinear = 1;             // 1 = bilinear sampling (smooth), 0 = point (crisp pixels)
 };
 // Pure: parse INI text (key=value, ';' or '#' comments) into a Config, keeping
 // defaults for missing/malformed keys.
