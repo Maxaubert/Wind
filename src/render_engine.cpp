@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <d3d11.h>
 #include <dxgi1_6.h>
+#include <dcomp.h>
 #include <d3dcompiler.h>
 #include <wincodec.h>
 #include <magnification.h>
@@ -14,6 +15,7 @@
 
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
+#pragma comment(lib, "dcomp.lib")
 #pragma comment(lib, "d3dcompiler.lib")
 #pragma comment(lib, "windowscodecs.lib")
 #pragma comment(lib, "Magnification.lib")
@@ -136,7 +138,8 @@ float4 PSMain(VSOut i) : SV_TARGET {
         c.rgb = LinearToSrgb(max(c.rgb, 0.0) * scRgbScale);
     }
     c.rgb *= brightness;                         // optional fine-tune (default 1.0)
-    return c;
+    return float4(c.rgb, 1.0);                    // opaque: the overlay fully covers the screen when shown
+                                                 // (alpha now matters - premultiplied composition)
 }
 )";
 
@@ -231,7 +234,13 @@ struct RenderEngine::State {
     HWND hwnd = nullptr;
     ID3D11Device* device = nullptr;
     ID3D11DeviceContext* ctx = nullptr;
-    IDXGISwapChain* swap = nullptr;            // blt-model (layered window needs the redirection surface)
+    IDXGISwapChain1* swap = nullptr;           // flip-model, composed via DirectComposition
+    // DirectComposition presents a flip-model swapchain (smooth pacing, no blt-model microstutter)
+    // on a WS_EX_NOREDIRECTIONBITMAP window with per-pixel alpha (transparent when not zoomed),
+    // replacing the old WS_EX_LAYERED + blt-model swapchain.
+    IDCompositionDevice* dcomp = nullptr;
+    IDCompositionTarget* dcompTarget = nullptr;
+    IDCompositionVisual* dcompVisual = nullptr;
     ID3D11RenderTargetView* rtv = nullptr;
     int lastClickX = INT_MIN, lastClickY = INT_MIN;   // skip redundant SetCursorPos
     unsigned long long lastTopmostMs = 0;       // last HWND_TOPMOST re-assert (throttled)
@@ -475,11 +484,12 @@ bool RenderEngine::initialize(int screenW, int screenH, int zorderBand, bool hdr
     wc.lpszClassName = kClass;
     wc.hCursor = nullptr;            // we draw our own; never set an arrow on this window
     ATOM atom = RegisterClassW(&wc);
-    // WS_EX_LAYERED is required for true cross-process click-through (WS_EX_TRANSPARENT +
-    // HTTRANSPARENT alone only forwards to same-thread windows, so clicks to other apps were
-    // being eaten). LAYERED rules out a flip swapchain, so we use a blt-model swapchain below
-    // (verified to display via the redirection surface). LWA_ALPHA 255 = fully opaque.
-    const DWORD exStyle = WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST |
+    // WS_EX_NOREDIRECTIONBITMAP: no GDI redirection surface; content comes from DirectComposition
+    // (which lets us use a flip-model swapchain - smooth pacing, vs blt-model's microstutter).
+    // WS_EX_TRANSPARENT keeps cross-process click-through (verified in tools/dcomp_clickthrough_test:
+    // WindowFromPoint returns the window beneath, not us). Per-pixel alpha replaces the old
+    // WS_EX_LAYERED + LWA_ALPHA, so we draw transparent when idle and opaque when zoomed.
+    const DWORD exStyle = WS_EX_NOREDIRECTIONBITMAP | WS_EX_TRANSPARENT | WS_EX_TOPMOST |
                           WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
     s_->hwnd = nullptr;
     // Higher z-band (needs UIAccess) so we draw above the shell's immersive bands - the only
@@ -502,12 +512,6 @@ bool RenderEngine::initialize(int screenW, int screenH, int zorderBand, bool hdr
                                    0, 0, screenW, screenH, nullptr, nullptr, wc.hInstance, nullptr);
     }
     if (!s_->hwnd) return false;
-    // Start fully transparent (alpha 0 = invisible). We toggle the layer alpha to show/hide
-    // instead of SW_HIDE/SW_SHOW: a layered window that is hidden and re-shown makes DWM cache
-    // and re-display the frame from when it was last visible, which flashed the previous zoom
-    // session's window on the next zoom-in (most visibly right after an alt-tab). Keeping the
-    // window always shown lets a reveal just flip alpha over the already-current front buffer.
-    SetLayeredWindowAttributes(s_->hwnd, 0, 0, LWA_ALPHA);
     // CRITICAL: exclude our own overlay from screen capture, or Desktop Duplication captures
     // our presented frame and we magnify our own output -> a feedback loop (degenerates to
     // black). WDA_EXCLUDEFROMCAPTURE (Win10 2004+) keeps the window visible on screen but
@@ -523,34 +527,42 @@ bool RenderEngine::initialize(int screenW, int screenH, int zorderBand, bool hdr
         &s_->device, &got, &s_->ctx);
     if (FAILED(hr)) return false;
 
-    // --- Blt-model swapchain on the layered overlay HWND (flip can't target layered) ---
+    // --- Flip-model swapchain for composition (smooth pacing; blt-model microstuttered) ---
     IDXGIDevice1* dxgiDev = nullptr;
     if (FAILED(s_->device->QueryInterface(__uuidof(IDXGIDevice1), (void**)&dxgiDev))) return false;
     dxgiDev->SetMaximumFrameLatency(1);     // cap input-to-photon latency to ~1 frame
     IDXGIAdapter* adapter = nullptr;
     dxgiDev->GetAdapter(&adapter);
-    IDXGIFactory* factory = nullptr;
-    if (adapter) adapter->GetParent(__uuidof(IDXGIFactory), (void**)&factory);
-    SafeRelease(dxgiDev);
+    IDXGIFactory2* factory = nullptr;
+    if (adapter) adapter->GetParent(__uuidof(IDXGIFactory2), (void**)&factory);
     SafeRelease(adapter);
-    if (!factory) return false;
+    if (!factory) { SafeRelease(dxgiDev); return false; }
 
-    DXGI_SWAP_CHAIN_DESC scd{};
-    scd.BufferDesc.Width = screenW;
-    scd.BufferDesc.Height = screenH;
-    scd.BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    DXGI_SWAP_CHAIN_DESC1 scd{};
+    scd.Width = screenW;
+    scd.Height = screenH;
+    scd.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
     scd.SampleDesc.Count = 1;
     scd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    scd.BufferCount = 1;
-    scd.OutputWindow = s_->hwnd;
-    scd.Windowed = TRUE;
-    scd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
-    hr = factory->CreateSwapChain(s_->device, &scd, &s_->swap);
-    factory->MakeWindowAssociation(s_->hwnd, DXGI_MWA_NO_ALT_ENTER);
+    scd.BufferCount = 2;                              // flip-model needs >= 2
+    scd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+    scd.AlphaMode = DXGI_ALPHA_MODE_PREMULTIPLIED;    // per-pixel alpha for transparency
+    scd.Scaling = DXGI_SCALING_STRETCH;
+    hr = factory->CreateSwapChainForComposition(s_->device, &scd, nullptr, &s_->swap);
     SafeRelease(factory);
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) { SafeRelease(dxgiDev); RLog("CreateSwapChainForComposition failed hr=0x%08lX", (unsigned long)hr); return false; }
 
-    // --- Render target view from back-buffer 0 ---
+    // --- DirectComposition: device -> target(hwnd) -> visual(swapchain) -> commit ---
+    hr = DCompositionCreateDevice(dxgiDev, __uuidof(IDCompositionDevice), (void**)&s_->dcomp);
+    SafeRelease(dxgiDev);
+    if (FAILED(hr) || !s_->dcomp) { RLog("DCompositionCreateDevice failed hr=0x%08lX", (unsigned long)hr); return false; }
+    if (FAILED(s_->dcomp->CreateTargetForHwnd(s_->hwnd, TRUE, &s_->dcompTarget))) return false;
+    if (FAILED(s_->dcomp->CreateVisual(&s_->dcompVisual))) return false;
+    s_->dcompVisual->SetContent(s_->swap);
+    s_->dcompTarget->SetRoot(s_->dcompVisual);
+    if (FAILED(s_->dcomp->Commit())) return false;
+
+    // --- Render target view from back-buffer 0 (flip-model: reusable across Presents in D3D11) ---
     ID3D11Texture2D* back = nullptr;
     if (FAILED(s_->swap->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&back))) return false;
     hr = s_->device->CreateRenderTargetView(back, nullptr, &s_->rtv);
@@ -631,9 +643,17 @@ bool RenderEngine::initialize(int screenW, int screenH, int zorderBand, bool hdr
     if (s_->capFp16) s_->sdrWhiteNits = GetSDRWhiteNits();
     RLog("initialize done: capFp16=%d sdrWhiteNits=%.1f", (int)s_->capFp16, s_->sdrWhiteNits);
 
-    // Show the window now (invisible at alpha 0). It stays shown for the process lifetime; the
+    // Present one fully transparent frame, then show the window. It stays shown for the process
+    // lifetime; with per-pixel alpha it's see-through (invisible) until we draw the zoomed view,
+    // so there's no SW_HIDE/SW_SHOW (whose DWM frame caching caused the alt-tab flash, #8). The
     // overlay is transparent + click-through + capture-excluded + no-activate, so an always-on
     // invisible window doesn't interfere with apps or games beneath it.
+    {
+        const float clearT[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+        s_->ctx->OMSetRenderTargets(1, &s_->rtv, nullptr);
+        s_->ctx->ClearRenderTargetView(s_->rtv, clearT);
+        s_->swap->Present(0, 0);
+    }
     ShowWindow(s_->hwnd, SW_SHOWNOACTIVATE);
 
     s_->ready = true;
@@ -642,14 +662,19 @@ bool RenderEngine::initialize(int screenW, int screenH, int zorderBand, bool hdr
 
 void RenderEngine::setVisible(bool visible) {
     if (!s_ || !s_->hwnd) return;
-    // Reveal/hide via layer alpha over the always-shown window (see initialize): flip alpha
-    // rather than SW_HIDE/SW_SHOW, so a reveal shows the already-current front buffer instead
-    // of DWM's cached last-visible frame. Callers present the live frame BEFORE revealing.
-    SetLayeredWindowAttributes(s_->hwnd, 0, visible ? 255 : 0, LWA_ALPHA);
+    // The window is always shown; "visible" is just whether the overlay's pixels are opaque.
+    // Hiding presents one fully transparent frame so the overlay goes see-through (no SW_HIDE,
+    // so no DWM hide/show frame caching -> no alt-tab flash, #8). Showing is implicit: the next
+    // renderFrame draws the opaque zoomed view. We only assert topmost + reset blur history here.
     if (visible) {
         s_->prevSrcValid = false;   // don't motion-blur the jump into zoom
-        SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0,   // pop on top immediately on show
+        SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0,
                      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    } else if (s_->ctx && s_->rtv && s_->swap) {
+        const float clearT[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+        s_->ctx->OMSetRenderTargets(1, &s_->rtv, nullptr);
+        s_->ctx->ClearRenderTargetView(s_->rtv, clearT);
+        s_->swap->Present(0, 0);
     }
 }
 
@@ -850,6 +875,9 @@ void RenderEngine::shutdown() {
     SafeRelease(s_->dupl);
     SafeRelease(s_->desktopCopy);
     SafeRelease(s_->rtv);
+    SafeRelease(s_->dcompVisual);
+    SafeRelease(s_->dcompTarget);
+    SafeRelease(s_->dcomp);
     SafeRelease(s_->swap);
     SafeRelease(s_->ctx);
     SafeRelease(s_->device);

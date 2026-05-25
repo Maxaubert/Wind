@@ -12,9 +12,10 @@ Plan: `docs/superpowers/plans/2026-05-24-wind-magnifier.md`.
   to cover the Start menu / taskbar / tray (overlay uses `CreateWindowInBand`, `zorderBand=16`).
 
 ## Stack
-C++17, MSVC cl.exe. DXGI Desktop Duplication + Direct3D 11 (own renderer); Windows
-Magnification API (`Magnification.lib`); Raw Input, `WH_MOUSE_LL`, DWM (`Dwmapi.lib`),
-WIC. Tests: vendored `third_party/doctest.h`.
+C++17, MSVC cl.exe. DXGI Desktop Duplication + Direct3D 11 (own renderer) presented via
+DirectComposition + flip-model swapchain (`Dcomp.lib`); Windows Magnification API
+(`Magnification.lib`); Raw Input, `WH_MOUSE_LL`, DWM (`Dwmapi.lib`), WIC. Tests: vendored
+`third_party/doctest.h`.
 
 ## Architecture
 Pure logic (no `<windows.h>`): `src/transform` (+ float `ComputeOffsetF`),
@@ -45,20 +46,23 @@ Spec: `docs/superpowers/specs/2026-05-25-own-renderer-design.md`. Issue #4.
 - RENDER ENGINE: the overlay MUST set `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` or
   Desktop Duplication captures our own presented frame -> we magnify our own output ->
   feedback loop (black). This is the #1 render-engine gotcha.
-- RENDER ENGINE: cross-process click-through needs `WS_EX_LAYERED | WS_EX_TRANSPARENT`
-  (+ `SetLayeredWindowAttributes(.,255,LWA_ALPHA)`). `WS_EX_TRANSPARENT` + HTTRANSPARENT
-  alone only forwards to *same-thread* windows, so clicks to other apps get eaten. Layered
-  rules out a flip swapchain, so the overlay uses a BLT-model swapchain (DXGI_SWAP_EFFECT_
-  DISCARD) - verified to display via the redirection surface. Latency capped with
-  `IDXGIDevice1::SetMaximumFrameLatency(1)`.
+- RENDER ENGINE: the overlay uses **DirectComposition + a flip-model swapchain**
+  (`CreateSwapChainForComposition`, `DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL`, `ALPHA_MODE_PREMULTIPLIED`)
+  on a `WS_EX_NOREDIRECTIONBITMAP | WS_EX_TRANSPARENT` window (NOT `WS_EX_LAYERED`). Flip-model
+  is what gives smooth pacing - the old blt-model + layered swapchain microstuttered constantly
+  (our loop was proven clean at 144fps; the judder was DWM compositing blt-model). Per-pixel
+  alpha replaces `LWA_ALPHA`. Cross-process click-through still works via `WS_EX_TRANSPARENT`
+  (verified in `tools/dcomp_clickthrough_test.cpp`: WindowFromPoint returns the window beneath).
+  The magnify PS must output **alpha 1.0** (opaque) or premultiplied composition makes the
+  shown overlay see-through. Latency capped with `IDXGIDevice1::SetMaximumFrameLatency(1)`.
 - RENDER ENGINE: never leave the OS cursor hidden. `shutdown()` restores via
   `MagShowSystemCursor(TRUE)` + `MagUninitialize` + `SystemParametersInfo(SPI_SETCURSORS)`,
   plus a `SetUnhandledExceptionFilter` net for crashes.
-- RENDER ENGINE: show/hide the overlay by toggling the layer alpha (`SetLayeredWindowAttributes`
-  0/255), NOT `SW_HIDE`/`SW_SHOW`. A layered window that is hidden then re-shown makes DWM cache
-  and re-display the frame from when it was last visible, flashing the previous zoom session's
-  window on the next zoom-in (worst right after an alt-tab). The window is created shown at
-  alpha 0 and stays shown. On zoom-in, present the live frame FIRST, then flip alpha to 255.
+- RENDER ENGINE: show/hide by drawing transparent vs opaque, NOT `SW_HIDE`/`SW_SHOW`. The window
+  is always shown; "hide" (`setVisible(false)`) presents one fully transparent frame (clear to
+  `{0,0,0,0}`) so the overlay goes see-through; "show" is implicit (the next `renderFrame` draws
+  the opaque zoomed view). With per-pixel alpha + no hide/show there's no DWM frame caching, which
+  fixes the alt-tab zoom-in flash (#8). (Pre-DComp this was an `SW_HIDE`->`SW_SHOW` cache bug.)
 - RENDER ENGINE: stay above EVERYTHING - re-assert `HWND_TOPMOST` every frame in `renderFrame`
   (transparent + click-through + capture-excluded, so being on top is safe). If we sit below an
   always-on-top app overlay (RTSS, Task Manager), that window draws a second unmagnified copy
