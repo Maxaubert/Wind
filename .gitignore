@@ -13,7 +13,7 @@ Thumbs.db
 # Claude local (machine-specific) settings and worktrees
 .claude/settings.local.json
 .worktrees/
-# Runtime config copy (the shipped default lives in config/)
+# Runtime config copy (generated next to the exe by LoadConfig on first run)
 /magnifier.ini
 # Diagnostic logs
 *.log

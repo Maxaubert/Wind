@@ -41,7 +41,9 @@ Spec: `docs/superpowers/specs/2026-05-25-own-renderer-design.md`. Issue #4.
 - The lens-must-move-when-cursor-locked behavior is THE core feature. It relies on
   Raw Input deltas (HID-level, unaffected by ShowCursor/ClipCursor/SetCursorPos),
   NOT GetCursorPos, when a lock is detected. Do not "simplify" this away.
-- `MagSetInputTransform` is intentionally NOT used (needs UIAccess). Visual-only.
+- The RENDER engine routes clicks via `SetCursorPos` (not `MagSetInputTransform`). The `mag`
+  fallback does call `MagSetInputTransform` to align input while zoomed, but it needs UIAccess -
+  without it the call is a harmless no-op (so the mag fallback is visual-only on a normal build).
 - RENDER ENGINE: the overlay MUST set `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` or
   Desktop Duplication captures our own presented frame -> we magnify our own output ->
   feedback loop (black). This is the #1 render-engine gotcha.

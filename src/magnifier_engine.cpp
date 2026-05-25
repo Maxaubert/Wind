@@ -32,20 +32,13 @@ void MagnifierEngine::setTransform(double level, int xOffset, int yOffset) {
         RECT src{ xOffset, yOffset,
                   xOffset + static_cast<LONG>(sw / level),
                   yOffset + static_cast<LONG>(sh / level) };
-        SetLastError(0);
-        inputTransformOk_ = (MagSetInputTransform(TRUE, &src, &dest) != 0);
-        lastItxErr_ = inputTransformOk_ ? 0 : GetLastError();
-        lastSl_ = src.left; lastSt_ = src.top; lastSr_ = src.right; lastSb_ = src.bottom;
-        lastDr_ = dest.right; lastDb_ = dest.bottom;
+        MagSetInputTransform(TRUE, &src, &dest);   // no-op without UIAccess (harmless)
         inputTransformOn_ = true;
     } else if (inputTransformOn_) {
         RECT z{ 0, 0, sw, sh };
         MagSetInputTransform(FALSE, &z, &z);       // 1x: restore 1:1 input mapping
         inputTransformOn_ = false;
     }
-}
-void MagnifierEngine::showSystemCursor(bool show) {
-    if (ready_) MagShowSystemCursor(show ? TRUE : FALSE);
 }
 void MagnifierEngine::shutdown() {
     if (!ready_) return;
