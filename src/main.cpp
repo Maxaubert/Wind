@@ -201,6 +201,12 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         double lvl = zoom.level();
         Offset o = ComputeOffset(cx, cy, lvl, sw, sh);
 
+        // DEBUG per-frame trace (zoomed only): cursor, offset, raw delta. Lets us see
+        // whether the offset steps monotonically (quantization) or sign-flips (feedback).
+        if (diag && diagOut && lvl > 1.0)
+            diagOut << "F p=" << p.x << "," << p.y << " o=" << o.x << "," << o.y
+                    << " raw=" << dx << "," << dy << " L=" << lvl << "\n";
+
         // Decide whether to push the transform to DWM this frame (see updateMode docs).
         bool wantEmit;
         if (updateMode == 2) {
