@@ -3,9 +3,11 @@
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>
-        <!-- uiAccess=true: lets Wind capture input over elevated windows (Task Manager)
-             and use MagSetInputTransform. Requires a signed binary in a secure path. -->
-        <requestedExecutionLevel level="asInvoker" uiAccess="true" />
+        <!-- asInvoker / uiAccess=false: Wind runs as a normal medium-IL app. Side-button
+             zoom over elevated windows (Task Manager) comes from the Raw Input path,
+             which is delivered regardless of the foreground window's integrity level, so
+             no UIAccess (hence no code-signing / Program Files deployment) is required. -->
+        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
       </requestedPrivileges>
     </security>
   </trustInfo>
