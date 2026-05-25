@@ -619,27 +619,23 @@ void RenderEngine::setVisible(bool visible) {
     ShowWindow(s_->hwnd, visible ? SW_SHOWNOACTIVATE : SW_HIDE);
     if (visible) {
         s_->prevSrcValid = false;   // don't motion-blur the jump into zoom
-        // Pop above the window being magnified once per zoom-in. We deliberately do NOT keep
-        // re-asserting topmost every frame: that would also force us above always-on-top app
-        // overlays (e.g. RTSS FPS counters), making them show a magnified duplicate. Asserting
-        // once lets such overlays settle back on top of us (drawn at native size), while still
-        // clearing a non-topmost game window. Skipped for a banded window (the band already
-        // keeps us on top, and HWND_TOPMOST could demote us out of the band).
-        if (!s_->inBand)
-            SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0,
-                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0,   // pop on top immediately on show
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
 }
 
 // Drop the current duplication so the next capture() recreates it; the first AcquireNextFrame
-// after DuplicateOutput returns the entire current desktop, so the first zoomed frame shows
-// live content instead of a stale cached copy (the alt-tab "previous window" flash). Clearing
+// after DuplicateOutput returns the entire current desktop, so the first zoomed frame samples
+// live content instead of a stale cached copy (the alt-tab "previous window" content). Clearing
 // haveDesktop routes capture() through its blocking first-frame budget, which reliably lands
-// that full frame before we present.
+// that full frame. Pair this with showing the overlay only AFTER that frame is presented (see
+// main.cpp), since the swapchain otherwise displays its last presented frame the instant the
+// window becomes visible. Also drops the motion-blur history so we don't smear the jump in.
 void RenderEngine::invalidateCapture() {
     if (!s_) return;
     SafeRelease(s_->dupl);
     s_->haveDesktop = false;
+    s_->prevSrcValid = false;
 }
 
 void RenderEngine::State::updateCursorTexture() {
@@ -743,11 +739,13 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
 
 bool RenderEngine::renderFrame(const RenderFrameParams& p) {
     if (!s_->ready) return false;
-    // NB: we no longer re-assert HWND_TOPMOST every frame. Doing so forced us above app
-    // overlays that legitimately want to sit on top (RTSS FPS counters, etc.), which made
-    // them appear twice: once magnified in our view, once at native size on top. We assert
-    // topmost only on zoom-in (setVisible) to clear the magnified window; anything that
-    // re-asserts itself on top afterwards is left there. See setVisible().
+    // Keep the overlay above EVERYTHING, every frame. It's transparent, click-through and
+    // capture-excluded, so sitting on top of all windows - including other always-on-top app
+    // overlays (RTSS FPS counter, etc.) - is safe: clicks still pass through and there's no
+    // capture feedback. If we sit below such an overlay, its window draws a second, unmagnified
+    // copy over our magnified view. A banded window (CreateWindowInBand) stays in its band
+    // across SetWindowPos, so this just re-tops us within the band.
+    SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     // Keep the (hidden) OS cursor under the drawn cursor so clicks pass through the
     // transparent overlay to the app at the right desktop point. We drive the lens from raw
     // input (not GetCursorPos), so this SetCursorPos never feeds back into tracking. Only

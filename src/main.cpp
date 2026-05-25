@@ -94,11 +94,11 @@ static void RunTick(TickState& t) {
 
     if (t.useRender) {
         if (lvl > 1.0) {
-            if (t.prevLvl <= 1.0) {                       // zoom-in transition
+            bool zoomIn = (t.prevLvl <= 1.0);             // zoom-in transition
+            if (zoomIn) {
                 POINT pt; GetCursorPos(&pt);
                 t.mapper.reset(pt.x, pt.y);
                 t.renderEngine.hideSystemCursor(true);
-                t.renderEngine.setVisible(true);
                 t.renderEngine.invalidateCapture();       // grab a live frame, not a stale cached one
             }
             if (recenter) { POINT pt; GetCursorPos(&pt); t.mapper.reset(pt.x, pt.y); }
@@ -115,6 +115,10 @@ static void RunTick(TickState& t) {
             p.brightness = t.cfg.brightness;
             p.cursorMode = CursorModeFromCfg(t.cfg);
             t.renderEngine.renderFrame(p);
+            // Reveal the overlay only AFTER the first live frame is presented. The blt swapchain
+            // retains its last presented frame, so showing first would flash the previous
+            // session's content (the alt-tab "previous window") for one frame.
+            if (zoomIn) t.renderEngine.setVisible(true);
         } else if (t.prevLvl > 1.0) {                     // zoom-out transition
             t.renderEngine.setVisible(false);
             t.renderEngine.hideSystemCursor(false);

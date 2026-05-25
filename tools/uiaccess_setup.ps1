@@ -64,9 +64,9 @@ cursorVisibility=auto
 bilinear=1
 motionBlur=0
 motionBlurStrength=1.0
-; zorderBand: 0 = let app overlays (RTSS, etc.) sit on top; 16 = cover Start/taskbar/tray
-;   (needs this signed Program Files build; restart Wind after changing)
-zorderBand=0
+; zorderBand: 16 = sit above everything incl. Start/taskbar/tray and same-band app overlays
+;   (this signed Program Files build engages UIAccess for it); 0 = normal topmost only
+zorderBand=16
 brightness=1.0
 hdrTonemap=1
 tickHzCap=144
