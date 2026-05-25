@@ -12,11 +12,6 @@ struct Config {
     int    recenterVk       = 0;     // VK code; 0 = unbound. Tap to recenter the lens on the cursor.
     double maxLevel         = 8.0;
     double fullRangeSeconds = 1.2;
-    double sensitivity      = 1.0;
-    // Center leeway when zoomed: fraction of the half-view the cursor may glide before
-    // the view pans. 0 = rigidly centered (the smooth-cursor overlay needs this); higher
-    // lets the cursor roam, but then the overlay cursor moves at L x speed - keep 0.
-    double centerDeadzone   = 0.0;
     int    tickHzCap        = 0;     // 0 = auto-detect display refresh rate; >0 = explicit cap (Hz)
     // Present sync while zoomed (render engine): 1 = vsync (Present sync-interval 1, locked to
     // the display refresh); 0 = no vsync (Present 0), with the loop paced by tickHzCap instead.
@@ -28,8 +23,7 @@ struct Config {
     int    dwmFlush         = 1;
     int    diagnostics      = 0;     // 1 = log frame-timing to wind_diag.log
 
-    // --- Own GPU renderer (engine=render) -----------------------------------
-    std::string engine = "render";   // "render" = own capture+D3D renderer, "mag" = Magnification API
+    // --- Own GPU renderer ---------------------------------------------------
     double cursorSensitivity = 1.0;  // lens pan speed per raw count
     double cursorSmoothing = 0.5;    // light inertia on the pan: 0 = off, higher = smoother/laggier
     int    cursorScaleWithZoom = 1;  // 1 = draw the cursor scaled by zoom, 0 = native size

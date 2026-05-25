@@ -8,20 +8,17 @@ TEST_CASE("defaults when text is empty") {
     CHECK(c.zoomOutButton == 1);   // XBUTTON1
     CHECK(c.maxLevel == doctest::Approx(8.0));
     CHECK(c.fullRangeSeconds == doctest::Approx(1.2));
-    CHECK(c.sensitivity == doctest::Approx(1.0));
     CHECK(c.diagnostics == 0);
 }
-TEST_CASE("parses engine selection and renderer knobs") {
+TEST_CASE("parses renderer knobs") {
     Config c = ParseConfig(
-        "engine=render\ncursorSensitivity=1.5\ncursorScaleWithZoom=0\nbilinear=1\n");
-    CHECK(c.engine == "render");
+        "cursorSensitivity=1.5\ncursorScaleWithZoom=0\nbilinear=1\n");
     CHECK(c.cursorSensitivity == doctest::Approx(1.5));
     CHECK(c.cursorScaleWithZoom == 0);
     CHECK(c.bilinear == 1);
 }
-TEST_CASE("engine defaults to render; renderer knobs have sane defaults") {
+TEST_CASE("renderer knobs have sane defaults") {
     Config c = ParseConfig("");
-    CHECK(c.engine == "render");
     CHECK(c.cursorSensitivity == doctest::Approx(1.0));
     CHECK(c.cursorScaleWithZoom == 1);
     CHECK(c.bilinear == 1);
@@ -69,10 +66,6 @@ TEST_CASE("parses cursorSmoothing, motion blur, z-order band, brightness") {
     CHECK(c.zorderBand == 16);
     CHECK(c.brightness == doctest::Approx(0.85));
 }
-TEST_CASE("engine can select the Magnification API path") {
-    Config c = ParseConfig("engine=mag\n");
-    CHECK(c.engine == "mag");
-}
 TEST_CASE("parses diagnostics flag") {
     Config c = ParseConfig("diagnostics=1\n");
     CHECK(c.diagnostics == 1);
@@ -83,11 +76,11 @@ TEST_CASE("parses overrides and ignores comments/blank lines") {
         "maxLevel = 12.5\n"
         "\n"
         "zoomInButton=1\n"
-        "sensitivity = 0.5\n";
+        "cursorSensitivity = 0.5\n";
     Config c = ParseConfig(ini);
     CHECK(c.maxLevel == doctest::Approx(12.5));
     CHECK(c.zoomInButton == 1);
-    CHECK(c.sensitivity == doctest::Approx(0.5));
+    CHECK(c.cursorSensitivity == doctest::Approx(0.5));
     CHECK(c.fullRangeSeconds == doctest::Approx(1.2)); // untouched default
 }
 TEST_CASE("malformed lines are ignored, keep defaults") {

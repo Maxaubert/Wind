@@ -12,23 +12,21 @@ Plan: `docs/superpowers/plans/2026-05-24-wind-magnifier.md`.
   to cover the Start menu / taskbar / tray (overlay uses `CreateWindowInBand`, `zorderBand=16`).
 
 ## Stack
-C++17, MSVC cl.exe. DXGI Desktop Duplication + Direct3D 11 (own renderer); Windows
-Magnification API (`Magnification.lib`); Raw Input, `WH_MOUSE_LL`, DWM (`Dwmapi.lib`),
-WIC. Tests: vendored `third_party/doctest.h`.
+C++17, MSVC cl.exe. DXGI Desktop Duplication + Direct3D 11 (own renderer); Raw Input,
+`WH_MOUSE_LL`, DWM (`Dwmapi.lib`), WIC, `MagShowSystemCursor` (`Magnification.lib`, just to
+hide the OS cursor). Tests: vendored `third_party/doctest.h`.
 
 ## Architecture
-Pure logic (no `<windows.h>`): `src/transform` (+ float `ComputeOffsetF`),
-`src/zoom_controller`, `src/tracker`, `src/cursor_mapper`, parse half of `src/config`.
-Win32 I/O: `magnifier_engine`, `render_engine`, `input_router`, `tray`, `main`.
+Pure logic (no `<windows.h>`): `src/transform` (float `ComputeOffsetF`),
+`src/zoom_controller`, `src/cursor_mapper`, parse half of `src/config`.
+Win32 I/O: `render_engine`, `input_router`, `tray`, `main`.
 
-Two selectable engines (`engine=render|mag` in magnifier.ini), one paced tick loop:
-- `render` (default): `render_engine` - own DXGI Desktop Duplication capture + D3D11.
-  Magnifies a sub-pixel float source rect to a click-through, capture-excluded
-  (`WDA_EXCLUDEFROMCAPTURE`) fullscreen overlay; draws the real cursor (`GetCursorInfo`)
-  centered via `cursor_mapper`; hides the OS cursor (`MagShowSystemCursor`) and syncs
-  `SetCursorPos` for clicks. Sub-pixel pan + smooth centered cursor. No UIAccess needed.
-- `mag`: `magnifier_engine` - Windows Magnification API (`MagSetFullscreenTransform`),
-  kept for games (integer offset, rides DWM).
+One engine, one paced tick loop. `render_engine` = own DXGI Desktop Duplication capture +
+D3D11: magnifies a sub-pixel float source rect to a click-through, capture-excluded
+(`WDA_EXCLUDEFROMCAPTURE`) fullscreen overlay; draws the real cursor (`GetCursorInfo`) centered
+via `cursor_mapper`; hides the OS cursor (`MagShowSystemCursor`) and syncs `SetCursorPos` for
+clicks. Sub-pixel pan + smooth centered cursor. The old Magnification-API `engine=mag` fallback
+was removed (issue #20) - render is the only engine.
 Spec: `docs/superpowers/specs/2026-05-25-own-renderer-design.md`. Issue #4.
 
 ## IMPORTANT gotchas
@@ -36,14 +34,11 @@ Spec: `docs/superpowers/specs/2026-05-25-own-renderer-design.md`. Issue #4.
   The test build compiles only the pure `.cpp` files and defines `WIND_TESTS`.
 - Declare Per-Monitor-V2 DPI awareness (`Wind.manifest`) or offset pixel math is wrong
   on scaled displays.
-- Always reset to `MagSetFullscreenTransform(1.0,0,0)` + `MagUninitialize` on exit -
-  never leave the screen zoomed.
 - The lens-must-move-when-cursor-locked behavior is THE core feature. It relies on
   Raw Input deltas (HID-level, unaffected by ShowCursor/ClipCursor/SetCursorPos),
   NOT GetCursorPos, when a lock is detected. Do not "simplify" this away.
-- The RENDER engine routes clicks via `SetCursorPos` (not `MagSetInputTransform`). The `mag`
-  fallback does call `MagSetInputTransform` to align input while zoomed, but it needs UIAccess -
-  without it the call is a harmless no-op (so the mag fallback is visual-only on a normal build).
+- Clicks are routed by syncing `SetCursorPos` under the drawn cursor (NOT `MagSetInputTransform`,
+  which needed UIAccess and is no longer used anywhere).
 - RENDER ENGINE: the overlay MUST set `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` or
   Desktop Duplication captures our own presented frame -> we magnify our own output ->
   feedback loop (black). This is the #1 render-engine gotcha.

@@ -43,12 +43,14 @@ writes a default `magnifier.ini`. Launch `C:\Program Files\Wind\Wind.exe` from a
 (non-elevated) window so UIAccess engages.
 
 ## Config (`magnifier.ini`, hot-reloads where noted)
+- `zoomInButton`/`zoomOutButton` (mouse side-buttons) and `zoomInVk`/`zoomOutVk` (keyboard,
+  default PageUp/PageDown) - hold to zoom in/out.
 - `cursorSensitivity`, `cursorSmoothing` - pan speed and inertia.
 - `maxLevel`, `fullRangeSeconds` - max zoom and ramp time.
-- `bilinear`, `cursorScaleWithZoom` - smoothing and cursor scaling.
+- `bilinear`, `cursorScaleWithZoom`, `cursorVisibility` - smoothing, cursor scaling, when to draw the cursor.
 - `brightness` - optional output fine-tune (hot-reloads).
-- Advanced: `engine` (default `render`; `mag` is an unadvertised Magnification-API fallback
-  for exclusive-fullscreen games), `zorderBand`, `hdrTonemap`.
+- Pacing/perf: `dwmFlush` (default on, smooth), `vsync`, `tickHzCap` (0 = auto-detect refresh).
+- Advanced: `zorderBand`, `hdrTonemap`.
 
 ## Scope
 Single primary monitor. Covers the desktop, normal apps, and **borderless / windowed-fullscreen**
