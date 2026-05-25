@@ -44,10 +44,10 @@ TEST_CASE("vsync, dwmFlush, tickHzCap can be set") {
     CHECK(ParseConfig("dwmFlush=1\n").dwmFlush == 1);
     CHECK(ParseConfig("tickHzCap=240\n").tickHzCap == 240);
 }
-TEST_CASE("keyboard zoom / recenter Virtual-Key bindings parse; default unbound") {
+TEST_CASE("keyboard zoom defaults PageUp/PageDown; recenter unbound; all parseable") {
     Config d = ParseConfig("");
-    CHECK(d.zoomInVk == 0);
-    CHECK(d.zoomOutVk == 0);
+    CHECK(d.zoomInVk == 33);    // VK_PRIOR (PageUp)
+    CHECK(d.zoomOutVk == 34);   // VK_NEXT  (PageDown)
     CHECK(d.recenterVk == 0);
     Config c = ParseConfig("zoomInVk=33\nzoomOutVk=34\nrecenterVk=112\n");
     CHECK(c.zoomInVk == 33);

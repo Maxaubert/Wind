@@ -6,8 +6,9 @@ struct Config {
     int    zoomOutButton    = 1;
     // Keyboard hold-to-zoom (Virtual-Key codes; 0 = unbound). Polled via GetAsyncKeyState and
     // OR-combined with the mouse side-buttons, so the app is usable without side-buttons.
-    int    zoomInVk         = 0;
-    int    zoomOutVk        = 0;
+    // Default: PageUp (0x21=33) zoom in, PageDown (0x22=34) zoom out.
+    int    zoomInVk         = 33;    // VK_PRIOR (PageUp)
+    int    zoomOutVk        = 34;    // VK_NEXT  (PageDown)
     int    recenterVk       = 0;     // VK code; 0 = unbound. Tap to recenter the lens on the cursor.
     double maxLevel         = 8.0;
     double fullRangeSeconds = 1.2;
