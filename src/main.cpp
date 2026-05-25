@@ -1,8 +1,10 @@
 #include <windows.h>
+#include <dwmapi.h>
 #include <climits>
 #include <cstdio>
 #include <cstdarg>
 #include "config.h"
+#pragma comment(lib, "Dwmapi.lib")
 #include "magnifier_engine.h"
 #include "render_engine.h"
 #include "input_router.h"
@@ -130,7 +132,8 @@ static void RunTick(TickState& t) {
             p.motionBlurStrength = t.cfg.motionBlurStrength;
             p.brightness = t.cfg.brightness;
             p.cursorMode = CursorModeFromCfg(t.cfg);
-            p.vsync = (t.cfg.vsync != 0);
+            // In DwmFlush mode we present immediately (no vsync block) and let DwmFlush() pace.
+            p.vsync = (t.cfg.vsync != 0 && t.cfg.dwmFlush == 0);
             t.renderEngine.renderFrame(p);
             // Reveal AFTER the live frame is presented: setVisible flips the layer alpha over the
             // now-current front buffer, so the overlay never shows its retained previous-session
@@ -365,12 +368,17 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         }
         if (!running) break;
 
-        // Pacing: while the render engine is actively zoomed WITH vsync, its Present(1,0) paces
-        // the loop - so we skip the timer to avoid timer/vsync double-pacing (which beat against
-        // each other and caused microstutter). With vsync off, Present(0,0) doesn't block, so we
-        // fall back to the timer to pace at tickHzCap. The mag path, and idle at 1x, use the timer.
-        bool renderPresentPaces = useRender && ts.prevLvl > 1.0 && ts.cfg.vsync != 0;
-        if (!renderPresentPaces) {
+        // Pacing while the render engine is zoomed:
+        //  - dwmFlush: present immediately, then DwmFlush() AFTER the tick aligns us 1:1 with the
+        //    compositor (targets blt-model microstutter). No pre-tick wait.
+        //  - vsync: Present(1,0) blocks to the refresh and paces the loop (skip the timer to
+        //    avoid timer/vsync double-pacing).
+        //  - else: Present(0,0) doesn't block, so the timer paces at tickHzCap.
+        // The mag path, and idle at 1x, use the timer.
+        bool zoomedRender = useRender && ts.prevLvl > 1.0;
+        bool dwmPaces = zoomedRender && ts.cfg.dwmFlush != 0;
+        bool renderPresentPaces = zoomedRender && ts.cfg.vsync != 0 && !dwmPaces;
+        if (!renderPresentPaces && !dwmPaces) {
             if (timer) {
                 SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);
                 WaitForSingleObject(timer, INFINITE);
@@ -380,6 +388,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         }
 
         RunTick(ts);
+
+        if (dwmPaces) DwmFlush();   // block until DWM's next composite -> frames align with it
     }
 
     g_tick = nullptr;
