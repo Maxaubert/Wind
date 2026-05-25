@@ -84,8 +84,8 @@ Config LoadConfig(const std::wstring& path) {
                "zorderBand=0\n"
                "; brightness: magnified-view output multiplier (1.0=unchanged; fine-tune for HDR)\n"
                "brightness=1.0\n"
-               "; hdrTonemap: 1=proper HDR10->SDR tonemap (FP16 capture); 0=off. HDR displays only.\n"
-               "hdrTonemap=0\n";
+               "; hdrTonemap: 1=HDR10->SDR tonemap when Windows HDR is on (no-op on SDR); 0=off\n"
+               "hdrTonemap=1\n";
         return Config{};
     }
     std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());

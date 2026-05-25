@@ -34,9 +34,10 @@ struct Config {
     int    zorderBand = 0;
     // Output brightness multiplier for the magnified view. 1.0 = unchanged. Hot-reloadable.
     double brightness = 1.0;
-    // Opt-in HDR->SDR tonemap (capture FP16 scRGB + tonemap in-shader). Default off keeps the
-    // proven SDR capture path. Applied at startup (relaunch to change). HDR displays only.
-    int    hdrTonemap = 0;
+    // HDR->SDR tonemap. Only engages when Windows HDR is actually on (advancedColorEnabled);
+    // on SDR it's a no-op (plain BGRA8 passthrough), so it's safe on by default. Set 0 to
+    // force the legacy BGRA8 capture even on HDR. Applied at startup + on HDR toggle.
+    int    hdrTonemap = 1;
 };
 // Pure: parse INI text (key=value, ';' or '#' comments) into a Config, keeping
 // defaults for missing/malformed keys.

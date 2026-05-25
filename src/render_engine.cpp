@@ -34,6 +34,31 @@ static void RLog(const char* fmt, ...) {
     fputc('\n', f); fclose(f);
 }
 
+// Whether Windows HDR ("Use HDR") is actually ENABLED right now. This is the correct signal
+// for "is the content HDR" - some monitors keep the DXGI color space at HDR10 even when
+// Windows HDR is off, so colorSpace==G2084 is unreliable. DisplayConfig is queried live (not
+// DXGI-cached), so re-checking it on duplication-recreate also catches runtime HDR toggles.
+static bool GetHdrEnabled() {
+    UINT32 nPath = 0, nMode = 0;
+    if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &nPath, &nMode) != ERROR_SUCCESS)
+        return false;
+    std::vector<DISPLAYCONFIG_PATH_INFO> paths(nPath);
+    std::vector<DISPLAYCONFIG_MODE_INFO> modes(nMode);
+    if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &nPath, paths.data(), &nMode, modes.data(),
+                           nullptr) != ERROR_SUCCESS)
+        return false;
+    for (UINT32 i = 0; i < nPath; ++i) {
+        DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO ci{};
+        ci.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO;
+        ci.header.size = sizeof(ci);
+        ci.header.adapterId = paths[i].targetInfo.adapterId;
+        ci.header.id = paths[i].targetInfo.id;
+        if (DisplayConfigGetDeviceInfo(&ci.header) == ERROR_SUCCESS)
+            return ci.advancedColorEnabled != 0;
+    }
+    return false;
+}
+
 // SDR white level (nits) for the active HDR path, so HDR->SDR tonemapping matches the desktop
 // automatically. nits = SDRWhiteLevel / 1000 * 80. Returns a default if the query fails.
 static double GetSDRWhiteNits() {
@@ -290,7 +315,9 @@ bool RenderEngine::State::recreateDupl() {
         }
         output6->Release();
     }
-    bool isHdr = (outColorSpace == (int)DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020);  // 12
+    // Use Windows' actual HDR-enabled flag, not the DXGI color space (some monitors stay in
+    // HDR10 color space even when Windows HDR is off -> we'd wrongly tonemap SDR and dim it).
+    bool isHdr = GetHdrEnabled();
     HRESULT hr = E_FAIL;
     capFp16 = false;
 

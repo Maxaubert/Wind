@@ -65,7 +65,7 @@ motionBlur=0
 motionBlurStrength=1.0
 zorderBand=16
 brightness=1.0
-hdrTonemap=0
+hdrTonemap=1
 tickHzCap=144
 "@
     Set-Content -Path "C:\Program Files\Wind\magnifier.ini" -Value $ini -Encoding ASCII
