@@ -32,6 +32,11 @@ TEST_CASE("renderer knobs have sane defaults") {
     CHECK(c.vsync == 1);                       // vsync on by default
     CHECK(c.dwmFlush == 1);                     // DwmFlush pacing on by default (the smooth path)
     CHECK(c.tickHzCap == 0);                    // 0 = auto-detect display refresh rate
+    CHECK(c.present == "blt");                   // blt+DwmFlush backend by default
+}
+TEST_CASE("present backend selects blt or dcomp") {
+    CHECK(ParseConfig("present=dcomp\n").present == "dcomp");
+    CHECK(ParseConfig("present=blt\n").present == "blt");
 }
 TEST_CASE("vsync, dwmFlush, tickHzCap can be set") {
     CHECK(ParseConfig("vsync=0\n").vsync == 0);
