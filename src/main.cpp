@@ -255,7 +255,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     // --- Own GPU renderer (DXGI Desktop Duplication + D3D11) ---
     RenderEngine renderEngine;
-    if (!renderEngine.initialize(sw, sh, cfg.zorderBand, cfg.hdrTonemap != 0, cfg.present == "dcomp")) {
+    if (!renderEngine.initialize(sw, sh, cfg.zorderBand, cfg.hdrTonemap != 0, cfg.present == "dcomp", cfg.gpuPriority)) {
         MessageBoxW(nullptr, L"Could not start the renderer (Direct3D 11 / Desktop Duplication "
                              L"unavailable on this system).", L"Wind", MB_ICONERROR);
         g_input.stop();

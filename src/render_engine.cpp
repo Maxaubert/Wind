@@ -447,7 +447,7 @@ void RenderEngine::debugHdr(unsigned& ddaFormat, int& colorSpace, int& bitsPerCo
     ddaFormat = s_->ddaFormat; colorSpace = s_->outColorSpace; bitsPerColor = s_->outBitsPerColor;
 }
 
-bool RenderEngine::initialize(int screenW, int screenH, int zorderBand, bool hdrTonemap, bool useDComp) {
+bool RenderEngine::initialize(int screenW, int screenH, int zorderBand, bool hdrTonemap, bool useDComp, int gpuPriority) {
     s_->sw = screenW;
     s_->sh = screenH;
     s_->wantHdrTonemap = hdrTonemap;   // read before recreateDupl decides the capture format
@@ -513,6 +513,11 @@ bool RenderEngine::initialize(int screenW, int screenH, int zorderBand, bool hdr
     IDXGIDevice1* dxgiDev = nullptr;
     if (FAILED(s_->device->QueryInterface(__uuidof(IDXGIDevice1), (void**)&dxgiDev))) return false;
     dxgiDev->SetMaximumFrameLatency(1);     // cap input-to-photon latency to ~1 frame
+    if (gpuPriority != 0) {                 // favor the magnifier on the GPU vs background apps
+        int p = gpuPriority < -7 ? -7 : (gpuPriority > 7 ? 7 : gpuPriority);
+        dxgiDev->SetGPUThreadPriority(p);
+        RLog("SetGPUThreadPriority(%d)", p);
+    }
     IDXGIAdapter* adapter = nullptr;
     dxgiDev->GetAdapter(&adapter);
 
