@@ -80,13 +80,17 @@ static ID3DBlob* CompileShader(const char* src, const char* entry, const char* t
 }
 
 // Decode an HCURSOR into top-down 32bpp BGRA (matches B8G8R8A8_UNORM memory order).
-// Handles color cursors (per-pixel alpha, falling back to the AND mask) and monochrome
-// cursors (mask is double-height: AND then XOR). Returns size + hotspot.
+// Handles color cursors with per-pixel alpha (arrow, hand) and invert-style cursors with no
+// alpha (e.g. the I-beam, which inverts the pixels beneath it). For invert cursors, isInvert
+// is set and `out` is white where the glyph is / black elsewhere, to be drawn with an invert
+// blend (drawing those opaque made the I-beam vanish on white input fields). Returns size +
+// hotspot.
 static bool DecodeCursorBGRA(HCURSOR hc, std::vector<uint32_t>& out,
-                             int& w, int& h, int& hotX, int& hotY) {
+                             int& w, int& h, int& hotX, int& hotY, bool& isInvert) {
     ICONINFO ii{};
     if (!GetIconInfo(hc, &ii)) return false;
     hotX = (int)ii.xHotspot; hotY = (int)ii.yHotspot;
+    isInvert = false;
     HDC hdc = GetDC(nullptr);
     BITMAP bm{};
     bool ok = false;
@@ -100,13 +104,13 @@ static bool DecodeCursorBGRA(HCURSOR hc, std::vector<uint32_t>& out,
         GetDIBits(hdc, ii.hbmColor, 0, h, out.data(), &bi, DIB_RGB_COLORS);
         bool anyAlpha = false;
         for (uint32_t px : out) if (px & 0xFF000000u) { anyAlpha = true; break; }
-        if (!anyAlpha) {  // no per-pixel alpha: derive it from the AND mask (white = transparent)
-            std::vector<uint32_t> mask((size_t)w * h, 0);
-            GetDIBits(hdc, ii.hbmMask, 0, h, mask.data(), &bi, DIB_RGB_COLORS);
-            for (size_t i = 0; i < out.size(); ++i) {
-                bool transparent = (mask[i] & 0x00FFFFFFu) != 0;
-                out[i] = (out[i] & 0x00FFFFFFu) | (transparent ? 0u : 0xFF000000u);
-            }
+        if (!anyAlpha) {
+            // No alpha channel -> an invert/XOR cursor (the I-beam). Mark the glyph (any
+            // non-black color) white and the rest black; the invert blend turns white into
+            // "invert the background" and black into "leave it", so it shows on any color.
+            isInvert = true;
+            for (size_t i = 0; i < out.size(); ++i)
+                out[i] = (out[i] & 0x00FFFFFFu) ? 0xFFFFFFFFu : 0x00000000u;
         }
         ok = true;
     } else if (ii.hbmMask) {
@@ -166,12 +170,14 @@ struct RenderEngine::State {
     ID3D11VertexShader* cvs = nullptr;
     ID3D11PixelShader* cps = nullptr;
     ID3D11Buffer* ccb = nullptr;               // posClip/sizeClip for the cursor quad
-    ID3D11BlendState* blend = nullptr;         // alpha blend for the cursor
+    ID3D11BlendState* blend = nullptr;         // alpha blend for normal cursors
+    ID3D11BlendState* blendInvert = nullptr;   // invert blend for I-beam-style cursors
     ID3D11Texture2D* cursorTex = nullptr;
     ID3D11ShaderResourceView* cursorSRV = nullptr;
     HCURSOR lastCursor = nullptr;              // re-decode only when the OS cursor changes
     int curW = 0, curH = 0, hotX = 0, hotY = 0;
     bool cursorReady = false;
+    bool cursorInvert = false;                 // current cursor uses the invert blend
 
     void updateCursorTexture();   // GetCursorInfo -> decode -> (re)upload cursorTex/SRV on change
 
@@ -413,6 +419,20 @@ bool RenderEngine::initialize(int screenW, int screenH, int zorderBand) {
     bd.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
     if (FAILED(s_->device->CreateBlendState(&bd, &s_->blend))) return false;
 
+    // Invert blend for I-beam-style cursors: result = src*(1-dest) + dest*(1-src). A white
+    // glyph pixel (src=1) becomes 1-dest (inverts the background); black (src=0) leaves dest.
+    D3D11_BLEND_DESC ib{};
+    ib.RenderTarget[0].BlendEnable = TRUE;
+    ib.RenderTarget[0].SrcBlend = D3D11_BLEND_INV_DEST_COLOR;
+    ib.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_COLOR;
+    ib.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+    ib.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ZERO;
+    ib.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ONE;
+    ib.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+    ib.RenderTarget[0].RenderTargetWriteMask =
+        D3D11_COLOR_WRITE_ENABLE_RED | D3D11_COLOR_WRITE_ENABLE_GREEN | D3D11_COLOR_WRITE_ENABLE_BLUE;
+    if (FAILED(s_->device->CreateBlendState(&ib, &s_->blendInvert))) return false;
+
     D3D11_SAMPLER_DESC samp{};
     samp.AddressU = samp.AddressV = samp.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
     samp.ComparisonFunc = D3D11_COMPARISON_NEVER;
@@ -440,8 +460,9 @@ void RenderEngine::State::updateCursorTexture() {
     CURSORINFO ci{ sizeof(ci) };
     if (!GetCursorInfo(&ci) || !ci.hCursor) return;
     if (ci.hCursor == lastCursor && cursorReady) return;   // unchanged; keep the texture
-    std::vector<uint32_t> bgra; int w = 0, h = 0, hx = 0, hy = 0;
-    if (!DecodeCursorBGRA(ci.hCursor, bgra, w, h, hx, hy)) return;
+    std::vector<uint32_t> bgra; int w = 0, h = 0, hx = 0, hy = 0; bool inv = false;
+    if (!DecodeCursorBGRA(ci.hCursor, bgra, w, h, hx, hy, inv)) return;
+    cursorInvert = inv;
     SafeRelease(cursorSRV);
     SafeRelease(cursorTex);
     D3D11_TEXTURE2D_DESC td{};
@@ -511,7 +532,7 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
         float sizeClipY = (float)(-(drawH / sh * 2.0));   // clip-y up vs screen-y down
         float ccbv[4] = { posClipX, posClipY, sizeClipX, sizeClipY };
         c->UpdateSubresource(ccb, 0, nullptr, ccbv, 0, 0);
-        c->OMSetBlendState(blend, nullptr, 0xFFFFFFFF);
+        c->OMSetBlendState(cursorInvert ? blendInvert : blend, nullptr, 0xFFFFFFFF);
         c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
         c->VSSetShader(cvs, nullptr, 0);
         c->VSSetConstantBuffers(0, 1, &ccb);
@@ -585,6 +606,7 @@ void RenderEngine::shutdown() {
     }
     SafeRelease(s_->cursorSRV);
     SafeRelease(s_->cursorTex);
+    SafeRelease(s_->blendInvert);
     SafeRelease(s_->blend);
     SafeRelease(s_->ccb);
     SafeRelease(s_->cps);

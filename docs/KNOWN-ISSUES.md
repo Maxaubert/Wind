@@ -398,6 +398,22 @@ overlay is WDA_EXCLUDEFROMCAPTURE, so it can only be captured from inside the ap
   cover the shell via *exclusive fullscreen*, a different mechanism that doesn't apply to a
   desktop overlay.)
 
+- **I-beam / invert cursors went invisible** over text fields: the I-beam is a color cursor
+  with NO alpha channel (`anyAlpha=0`) - an invert-style cursor that shows by inverting the
+  pixels beneath it. The decoder was making it transparent/white -> invisible on a white field.
+  Fixed: no-alpha cursors are now drawn with an **invert blend** (`result = src*(1-dest) +
+  dest*(1-src)`; white glyph -> `1-dest`), so they show on any background. Arrow/hand (which
+  have alpha) keep the normal alpha blend. (Confirmed via `tools/cursor_decode_test.cpp`:
+  ARROW/HAND `anyAlpha=1`, IBEAM `anyAlpha=0`.)
+
+## Open / future: HDR brightness shift
+On an HDR display, zooming in (overlay shown) makes the screen slightly brighter; zooming out
+darkens it back. Cause: the overlay/capture path is SDR 8-bit (`B8G8R8A8_UNORM`), so the
+magnified frame is composited at the "SDR content brightness" white level, which differs from
+how the native HDR desktop was displayed. Proper fix = full HDR support (capture + FP16 scRGB
+swapchain + matching color space / white level), which was explicitly out of v1 scope and is
+uncertain on the layered/blt overlay. Tracked as a follow-up; the shift is minor.
+
 ## Human-only checks (cannot be verified autonomously - please confirm)
 With `engine=render`, zoom in (hold the forward side button) and confirm:
 1. Exactly ONE cursor is visible (not two). If two, MagShowSystemCursor isn't hiding the
