@@ -77,9 +77,9 @@ brightness=1.0
 hdrTonemap=1
 tickHzCap=0
 vsync=1
-; dwmFlush: 1=pace the zoomed loop to DWM's composition (microstutter test). Hot-reloadable -
-;   edit this to 0 and save to compare (run notepad as admin, or via the tray "Edit config").
-dwmFlush=1
+; dwmFlush: 0=plain vsync pacing (default, fewer stutters); 1=align to DWM's composition.
+;   Hot-reloadable - edit and save to compare (notepad as admin, or the tray "Edit config").
+dwmFlush=0
 "@
     Set-Content -Path "C:\Program Files\Wind\magnifier.ini" -Value $ini -Encoding ASCII
 

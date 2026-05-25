@@ -30,7 +30,7 @@ TEST_CASE("renderer knobs have sane defaults") {
     CHECK(c.hdrTonemap == 1);                  // on by default (no-op on SDR)
     CHECK(c.cursorVisibility == "auto");       // follow the focused app by default
     CHECK(c.vsync == 1);                       // vsync on by default
-    CHECK(c.dwmFlush == 1);                     // DwmFlush pacing on by default (the smooth path)
+    CHECK(c.dwmFlush == 0);                     // plain vsync pacing by default (fewer stutters)
     CHECK(c.tickHzCap == 0);                    // 0 = auto-detect display refresh rate
 }
 TEST_CASE("vsync, dwmFlush, tickHzCap can be set") {
