@@ -54,6 +54,7 @@ recenterVk=0
 maxLevel=8.0
 fullRangeSeconds=1.2
 sensitivity=1.0
+centerDeadzone=0.5
 tickHzCap=144
 diagnostics=0
 updateMode=0

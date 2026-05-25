@@ -20,17 +20,22 @@ public:
     // alias, and a one-time imperceptible delay when a real game lock engages.
     static constexpr int kLockEngageTicks = 6;
 
-    Tracker(int screenW, int screenH, double sensitivity);
+    // centerDeadzone: fraction of the half-view the cursor may glide (free mode, zoomed)
+    // before the view pans. 0 = rigidly centered, 1 = roam to the screen edge. See config.
+    Tracker(int screenW, int screenH, double sensitivity, double centerDeadzone = 0.0);
     // cursorX/Y: latest GetCursorPos. rawDx/Dy: summed WM_INPUT deltas since last call.
-    void update(int cursorX, int cursorY, int rawDx, int rawDy);
+    // level: current zoom (sets the deadzone width; ignored at <=1x and in locked mode).
+    void update(int cursorX, int cursorY, int rawDx, int rawDy, double level = 1.0);
     void recenter();                 // snap to screen center
     double centerX() const { return cx_; }
     double centerY() const { return cy_; }
     bool   locked()  const { return locked_; }   // exposed for diagnostics/tests
 private:
     void clamp();
+    void followWithDeadzone(int cursorX, int cursorY, double level);
     int screenW_, screenH_;
     double sensitivity_;
+    double deadzoneFrac_;
     double cx_, cy_;
     int lastCursorX_, lastCursorY_;
     bool haveCursor_ = false;

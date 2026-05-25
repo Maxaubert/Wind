@@ -95,6 +95,32 @@ TEST_CASE("clamps center to screen bounds in locked mode") {
     CHECK(t.centerY() == doctest::Approx(0));
 }
 
+// --- Center deadzone / leeway (smooth panning when zoomed) ---------------------
+
+TEST_CASE("center deadzone lets small moves glide without panning the view") {
+    Tracker t(1920, 1080, 1.0, 0.5);          // 50% deadzone; at 4x, half-band = 120px
+    t.update(960, 540, 0, 0, 4.0);            // establish near center
+    CHECK(t.centerX() == doctest::Approx(960));
+    t.update(1000, 540, 0, 0, 4.0);           // 40px move, inside the band
+    CHECK(t.centerX() == doctest::Approx(960));   // view held still -> cursor glides
+    t.update(1100, 540, 0, 0, 4.0);           // 140px from center > 120 -> pan to band edge
+    CHECK(t.centerX() == doctest::Approx(980));   // 1100 - 120
+}
+
+TEST_CASE("zero deadzone keeps the rigid centered behavior") {
+    Tracker t(1920, 1080, 1.0, 0.0);
+    t.update(960, 540, 0, 0, 4.0);
+    t.update(1000, 540, 0, 0, 4.0);
+    CHECK(t.centerX() == doctest::Approx(1000));  // snaps straight to the cursor
+}
+
+TEST_CASE("deadzone only applies when zoomed in") {
+    Tracker t(1920, 1080, 1.0, 0.5);
+    t.update(960, 540, 0, 0, 1.0);            // 1x: nothing magnified
+    t.update(1000, 540, 0, 0, 1.0);
+    CHECK(t.centerX() == doctest::Approx(1000));  // tracks the cursor directly at 1x
+}
+
 TEST_CASE("recenter snaps to screen center") {
     Tracker t(1920, 1080, 1.0);
     t.update(100, 100, 0, 0);

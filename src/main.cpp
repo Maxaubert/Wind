@@ -103,7 +103,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     int sw = GetSystemMetrics(SM_CXSCREEN);
     int sh = GetSystemMetrics(SM_CYSCREEN);
     ZoomController zoom(1.0, cfg.maxLevel, cfg.fullRangeSeconds);
-    Tracker tracker(sw, sh, cfg.sensitivity);
+    Tracker tracker(sw, sh, cfg.sensitivity, cfg.centerDeadzone);
 
     LARGE_INTEGER freq, prev;
     QueryPerformanceFrequency(&freq);
@@ -129,7 +129,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // Optional frame-timing diagnostics (config: diagnostics=1) -> wind_diag.log.
     // Distinguishes a stall inside MagSetFullscreenTransform (maxSt high) from a stall
     // in our loop/wait (maxDt high, maxSt low) from a DWM-side cost (both low).
-    bool diag = true;  // DEBUG: forced on to capture input-transform diagnostics
+    bool diag = cfg.diagnostics != 0;
     std::ofstream diagOut;
     char diagPath[MAX_PATH];
     {   // write to %TEMP% so the Program Files (read-only) install can still log
@@ -180,7 +180,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                 lastMtime = m;
                 Config nc = LoadConfig(L"magnifier.ini");
                 zoom = ZoomController(1.0, nc.maxLevel, nc.fullRangeSeconds);
-                tracker = Tracker(sw, sh, nc.sensitivity);
+                tracker = Tracker(sw, sh, nc.sensitivity, nc.centerDeadzone);
                 updateMode = nc.updateMode;
                 maxUpdateHz = (nc.maxUpdateHz > 0) ? nc.maxUpdateHz : 0;
             }
@@ -195,17 +195,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
         POINT p; GetCursorPos(&p);
         int dx, dy; g_input.drainRaw(dx, dy);
-        tracker.update(p.x, p.y, dx, dy);
+        double lvl = zoom.level();
+        tracker.update(p.x, p.y, dx, dy, lvl);
 
         double cx = tracker.centerX(), cy = tracker.centerY();
-        double lvl = zoom.level();
         Offset o = ComputeOffset(cx, cy, lvl, sw, sh);
-
-        // DEBUG per-frame trace (zoomed only): cursor, offset, raw delta. Lets us see
-        // whether the offset steps monotonically (quantization) or sign-flips (feedback).
-        if (diag && diagOut && lvl > 1.0)
-            diagOut << "F p=" << p.x << "," << p.y << " o=" << o.x << "," << o.y
-                    << " raw=" << dx << "," << dy << " L=" << lvl << "\n";
 
         // Decide whether to push the transform to DWM this frame (see updateMode docs).
         bool wantEmit;
