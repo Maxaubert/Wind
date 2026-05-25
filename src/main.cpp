@@ -27,6 +27,16 @@ static void SetZoomButton(int xbuttonId, bool down) {
     if (xbuttonId == g_zoomOutBtnId) g_input.state().outHeld.store(down);
 }
 
+// Current refresh rate (Hz) of the primary display, for pacing the idle/1x loop and the
+// vsync=0 path so we don't hardcode the dev's 144Hz. Falls back to 60 if the query fails or
+// reports a placeholder (some drivers report 0/1 for "hardware default").
+static int DetectRefreshHz() {
+    DEVMODEW dm{}; dm.dmSize = sizeof(dm);
+    if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &dm) && dm.dmDisplayFrequency > 1)
+        return (int)dm.dmDisplayFrequency;
+    return 60;
+}
+
 // --- Per-tick state -------------------------------------------------------------------------
 // All the state one magnifier tick mutates, in one struct so the tick can run from BOTH the
 // main loop AND a WM_TIMER. The tray context menu's TrackPopupMenu spins its own modal message
@@ -47,6 +57,7 @@ struct TickState {
     double prevLvl = 1.0;
     double lastLevel = -1.0;
     int    lastX = INT_MIN, lastY = INT_MIN;   // mag emit-on-change
+    int    hz = 60;                            // resolved tick/refresh rate (cfg.tickHzCap or detected)
     // Frame-pacing diagnostics (diagnostics=1): a 2 s window of loop-interval stats.
     double diagAccum = 0.0, diagSumDt = 0.0, diagMaxDt = 0.0;
     int    diagFrames = 0, diagHitches = 0;
@@ -159,7 +170,7 @@ static void RunTick(TickState& t) {
     // the on-screen frame interval, since Present(1,0) paces while zoomed). maxDt and the hitch
     // count expose microstutter that an average would hide.
     if (t.cfg.diagnostics) {
-        const double target = 1.0 / (t.cfg.tickHzCap > 0 ? t.cfg.tickHzCap : 144);
+        const double target = 1.0 / (t.hz > 0 ? t.hz : 60);
         t.diagSumDt += dt; t.diagFrames++; t.diagAccum += dt;
         if (dt > t.diagMaxDt) t.diagMaxDt = dt;
         if (dt > target * 1.5) t.diagHitches++;
@@ -314,7 +325,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         ts.mapper.reset(pt.x, pt.y);
         renderEngine.hideSystemCursor(true);
         LARGE_INTEGER f, a{}, b; QueryPerformanceFrequency(&f);
-        const double target = 1.0 / ((cfg.tickHzCap > 0) ? cfg.tickHzCap : 144);
+        const double target = 1.0 / ((cfg.tickHzCap > 0) ? cfg.tickHzCap : DetectRefreshHz());
         double elapsed = 0.0, sumDt = 0.0, maxDt = 0.0; int frames = 0, hitches = 0, big = 0;
         bool first = true;
         QueryPerformanceCounter(&a);
@@ -355,7 +366,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr,
         CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
-    int hz = (cfg.tickHzCap > 0) ? cfg.tickHzCap : 144;
+    // tickHzCap > 0 = explicit override; 0 (default) = auto-detect the display refresh rate so
+    // we never assume a fixed rate (the dev's 144Hz). Used to pace the idle/1x loop and the
+    // vsync=0 path; while zoomed, DwmFlush/vsync pace instead.
+    int hz = (cfg.tickHzCap > 0) ? cfg.tickHzCap : DetectRefreshHz();
+    ts.hz = hz;
     LARGE_INTEGER due; due.QuadPart = -(10000000LL / hz);
 
     bool running = true;
