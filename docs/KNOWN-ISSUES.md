@@ -1,9 +1,16 @@
 # Wind - Known Issues (behavior / interaction bugs)
 
 **Date opened:** 2026-05-25
-**Status:** Issues 2 and 3 root-caused and **fixed** (proven by unit tests). Issue 1
-fix **implemented**, pending one live test by the user. Issue 4 unchanged (API ceiling).
-See the per-issue "Resolution" notes and the live-test checklist at the bottom.
+**Status:** Issue 3 (flicker) **fixed** (unit-tested), pending user confirmation. Issue 2
+**root cause CONFIRMED** by MS docs (missing `MagSetInputTransform`); the earlier
+tracker fix did **not** address it - real fix needs UIAccess + input transform. Issue 1
+fix (Raw Input) **failed** the live test; root cause re-opened. Issue 4 unchanged.
+See the per-issue "Resolution" notes.
+
+**Live-test result (2026-05-25):** user confirmed the interaction problem happens only
+when zoomed, persists when the mouse is held perfectly still, on non-elevated windows,
+and zoom buttons over a non-elevated Task Manager are still dead. This falsified the
+"same root cause as the flicker" and "UIPI/elevation" hypotheses.
 
 Fix branch: `fix/interaction-bugs`. Plan:
 [`superpowers/plans/2026-05-25-interaction-fixes.md`](superpowers/plans/2026-05-25-interaction-fixes.md).
@@ -19,9 +26,9 @@ problem (view flicker, Issue 3 below), not that FPS ceiling.
 
 | # | Issue | Where it shows up | Root cause | Status |
 |---|---|---|---|---|
-| 1 | Zoom side-buttons do nothing | Task Manager, other elevated/protected windows | UIPI: a medium-IL `WH_MOUSE_LL` hook is not invoked for input while a higher-integrity window is foreground | **Fix implemented** (Raw Input button path), needs 1 live test |
-| 2 | Can only partially interact while zoomed (can't focus input fields, no I-beam cursor, some controls unclickable) | File Explorer, Cyberpunk launcher, "some apps, not all" | Magnified view center drifted off the real OS cursor (same root as #3), so the cursor was not where it appeared | **Fixed** via tracker fix; confirm by click-test |
-| 3 | Magnified view flickers / jumps while moving the cursor (off-centers and recenters rapidly) | GPU-rendered windows: Windows Terminal, browser, launcher | `Tracker::update` free/locked heuristic flip-flopped between snapping to `GetCursorPos` and integrating raw deltas | **Fixed** (hysteresis lock detector), unit-tested |
+| 1 | Zoom side-buttons do nothing | Task Manager (reported non-elevated), some apps | **Re-opened.** Not UIPI/elevation (TM non-elevated). Raw Input fix did not help. Needs instrumentation; UIAccess may resolve it | Raw Input fix **failed** live test |
+| 2 | Can only partially interact while zoomed (can't focus input fields, no I-beam cursor, small targets unclickable) | File Explorer, Cyberpunk launcher, Task Manager, "some apps" | **CONFIRMED:** no `MagSetInputTransform`, so mouse input routes to *unmagnified* coordinates, not the magnified element (required since Win10 1703). Independent of cursor movement. | Needs **UIAccess + `MagSetInputTransform`** |
+| 3 | Magnified view flickers / jumps while moving the cursor (off-centers and recenters rapidly) | GPU-rendered windows: Windows Terminal, browser, launcher | `Tracker::update` free/locked heuristic flip-flopped between snapping to `GetCursorPos` and integrating raw deltas | **Fixed** (hysteresis lock detector), unit-tested; user confirming |
 | 4 | Large FPS drop when panning/zooming in games | Borderless games (KCD2 etc.) | Public API scales in DWM, drops game off the GPU fast path | Unchanged (see PERFORMANCE-FINDINGS.md); direction decision open |
 
 Issues **2 and 3 are very likely the same root cause** (the tracker's center diverging
@@ -74,15 +81,20 @@ never fires while Task Manager is foreground, so the side-buttons appear dead.
   already register, `main.cpp:62-65`) rather than only the low-level hook, since Raw
   Input button state may arrive even when the hook is bypassed. Needs testing.
 
-### Resolution (implemented, pending one live test)
-Implemented the Raw Input button path: `WndProc`'s `WM_INPUT` handler now also decodes
-`RI_MOUSE_BUTTON_4/5` (XBUTTON1/2) and sets `inHeld`/`outHeld` (`src/main.cpp`). Raw
-Input INPUTSINK delivery is not gated by the UIPI rule that suppresses a medium-IL
-low-level hook over an elevated foreground window, so the zoom buttons should now work
-over Task Manager etc. The low-level hook is unchanged and still swallows the buttons on
-normal windows; both sources set the same state idempotently. **Not auto-verifiable** -
-needs the live test in the checklist below. Note: this works regardless of UIAccess, so
-the open UIAccess question (which binary was running) no longer blocks Issue 1.
+### Resolution attempt 1 (FAILED) + re-opened
+Implemented a Raw Input button path (`WndProc` decodes `RI_MOUSE_BUTTON_4/5` and sets
+`inHeld`/`outHeld`, `src/main.cpp`). **Live test: still dead over Task Manager**, and the
+user reports Task Manager is non-elevated - so the UIPI/elevation hypothesis is wrong and
+the Raw Input fix did not help. The button decode is harmless and stays in (it is the
+right architecture for elevated windows if UIPI ever is the cause), but it is not the
+root cause here.
+
+Root cause is **re-opened**. Next step is instrumentation, not another guess: log every
+`WH_MOUSE_LL` fire and every Raw Input button event together with the foreground window
+title/process, then press the zoom buttons over Task Manager and read the log. That will
+say definitively whether the input reaches Wind at all. Plausible that committing to
+UIAccess (needed for Issue 2 anyway) also resolves this, since a UIAccess process can
+receive input destined for protected windows - to be confirmed by the instrumentation.
 
 ---
 
@@ -132,14 +144,28 @@ This is why Issues 2 and 3 are probably one bug seen from two angles.
   all (locked-mode is meant for games that hide/clip/lock the cursor, not for normal
   windowed apps where the cursor is free).
 
-### Resolution (expected fixed via the Issue 3 fix; confirm by click-test)
-This was the same root cause as Issue 3: the lens center drifted off the true cursor, so
-the cursor was not where it visually appeared, which is why input fields would not focus
-and the I-beam did not show. With the tracker holding the center on the true cursor
-(visual-only magnification then maps clicks correctly), this should be gone. It cannot be
-unit-tested end to end (it depends on live hit-testing), so please confirm with the
-click-test in the checklist below. If mis-clicks persist after the fix, re-open with the
-specific app and a note on whether the cursor visibly sits where you click.
+### Resolution (root cause CONFIRMED; tracker fix did NOT address it)
+The "same root cause as Issue 3" hypothesis was **wrong** (falsified by the live test:
+the problem persists with the mouse held perfectly still, so it is not tracker drift).
+
+Confirmed root cause, per MS docs
+([MagSetInputTransform](https://learn.microsoft.com/en-us/windows/win32/api/magnification/nf-magnification-magsetinputtransform)):
+since Windows 10 1703, an app **must** call `MagSetInputTransform` for mouse input to
+route to the magnified element. Without it, "input is passed to the element located at
+the unmagnified screen coordinates, not to the item that appears in the magnified screen
+content." Wind uses `MagSetFullscreenTransform` (visual) but never sets the input
+transform, so while zoomed the cursor sits over the magnified target visually but the
+click/hit-test lands at the unmagnified coordinate. Small targets (input fields) miss;
+large targets happen to still land. Matches every observation.
+
+**Fix:** call `MagSetInputTransform(TRUE, &rcSource, &rcDest)` whenever the fullscreen
+transform changes, with `rcSource = [xOffset, yOffset, +W/level, +H/level]` and
+`rcDest = full screen` (disable it at 1x and on shutdown). **This API requires
+UIAccess** (fails with `ERROR_ACCESS_DENIED` otherwise), i.e. a signed binary run from a
+secure location (`C:\Program Files\Wind`). Note: this is a *different* capability than
+the perf test - UIAccess did nothing for performance, but it is mandatory for input
+routing, and we never actually called `MagSetInputTransform` before, which is why simply
+enabling UIAccess "looked the same."
 
 ---
 
