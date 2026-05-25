@@ -58,6 +58,7 @@ struct TickState {
     double lastLevel = -1.0;
     int    lastX = INT_MIN, lastY = INT_MIN;   // mag emit-on-change
     int    hz = 60;                            // resolved tick/refresh rate (cfg.tickHzCap or detected)
+    bool   recenterKeyWasDown = false;         // edge-detect the recenterVk key
     // Frame-pacing diagnostics (diagnostics=1): a 2 s window of loop-interval stats.
     double diagAccum = 0.0, diagSumDt = 0.0, diagMaxDt = 0.0;
     int    diagFrames = 0, diagHitches = 0;
@@ -113,10 +114,18 @@ static void RunTick(TickState& t) {
         }
     }
 
-    t.zoom.setDirection(ResolveDirection(g_input.state().inHeld.load(),
-                                         g_input.state().outHeld.load()));
+    // Effective held state = mouse side-button (set by the hook/raw input) OR keyboard key held
+    // (polled globally, no extra hook). Lets users without side-buttons zoom from the keyboard.
+    auto keyDown = [](int vk) { return vk != 0 && (GetAsyncKeyState(vk) & 0x8000) != 0; };
+    bool inHeld  = g_input.state().inHeld.load()  || keyDown(t.cfg.zoomInVk);
+    bool outHeld = g_input.state().outHeld.load() || keyDown(t.cfg.zoomOutVk);
+    t.zoom.setDirection(ResolveDirection(inHeld, outHeld));
     t.zoom.tick(dt);
     bool recenter = g_input.state().recenter.exchange(false);
+    // Recenter on a recenterVk key press (rising edge), in addition to any other source.
+    bool recenterDown = keyDown(t.cfg.recenterVk);
+    if (recenterDown && !t.recenterKeyWasDown) recenter = true;
+    t.recenterKeyWasDown = recenterDown;
     double lvl = t.zoom.level();
 
     int dx, dy; g_input.drainRaw(dx, dy);

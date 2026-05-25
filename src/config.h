@@ -4,7 +4,11 @@ namespace wind {
 struct Config {
     int    zoomInButton     = 2;     // 1 = XBUTTON1 (back), 2 = XBUTTON2 (forward)
     int    zoomOutButton    = 1;
-    int    recenterVk       = 0;     // 0 = unbound
+    // Keyboard hold-to-zoom (Virtual-Key codes; 0 = unbound). Polled via GetAsyncKeyState and
+    // OR-combined with the mouse side-buttons, so the app is usable without side-buttons.
+    int    zoomInVk         = 0;
+    int    zoomOutVk        = 0;
+    int    recenterVk       = 0;     // VK code; 0 = unbound. Tap to recenter the lens on the cursor.
     double maxLevel         = 8.0;
     double fullRangeSeconds = 1.2;
     double sensitivity      = 1.0;
