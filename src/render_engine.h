@@ -13,6 +13,7 @@ struct RenderFrameParams {
     bool   motionBlur;                   // smear content along the pan to smooth coarse motion
     double motionBlurStrength;           // shutter: 1.0 = full inter-frame, lower = subtler
     double brightness;                   // output multiplier (1.0 = unchanged; <1 dims for HDR)
+    int    cursorMode;                   // 0=auto (draw only when the app shows a cursor), 1=always, 2=never
 };
 
 // Own capture + Direct3D 11 renderer. Captures the desktop via DXGI Desktop Duplication
@@ -34,6 +35,11 @@ public:
     bool initialize(int screenW, int screenH, int zorderBand = 0, bool hdrTonemap = false);
     bool renderFrame(const RenderFrameParams& p);  // capture (if changed) + scale + cursor + present
     void setVisible(bool visible);                 // show/hide the overlay (hidden at 1x)
+    // Force the next frame to grab a fresh full-desktop capture (release+recreate the
+    // duplication, whose first AcquireNextFrame returns the whole current desktop). Call on
+    // zoom-in so a stale cached frame from a previous session isn't shown for one frame
+    // (e.g. the old window flashing after an alt-tab).
+    void invalidateCapture();
     void hideSystemCursor(bool hide);              // MagShowSystemCursor wrapper + safe-restore net
     void shutdown();                               // restore cursor, destroy everything
     bool ready() const;

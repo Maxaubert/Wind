@@ -234,7 +234,6 @@ struct RenderEngine::State {
     IDXGISwapChain* swap = nullptr;            // blt-model (layered window needs the redirection surface)
     ID3D11RenderTargetView* rtv = nullptr;
     int lastClickX = INT_MIN, lastClickY = INT_MIN;   // skip redundant SetCursorPos
-    int topmostTick = 0;                       // throttle re-asserting topmost
     bool inBand = false;                        // created in a high z-order band (CreateWindowInBand)
 
     // Desktop Duplication.
@@ -242,6 +241,7 @@ struct RenderEngine::State {
     ID3D11Texture2D* desktopCopy = nullptr;   // SRV-able copy of the captured desktop (no cursor)
     ID3D11ShaderResourceView* desktopSRV = nullptr;
     bool haveDesktop = false;
+    bool freshCapture = false;   // next capture() must drain to the latest desktop frame (zoom-in)
     // Diagnostics for the HDR investigation: the duplication's surface format + the output's
     // color space / bit depth (tells us whether the desktop is HDR and what we're capturing).
     UINT ddaFormat = 0;          // DXGI_FORMAT of the duplicated surface
@@ -275,6 +275,7 @@ struct RenderEngine::State {
     int curW = 0, curH = 0, hotX = 0, hotY = 0;
     bool cursorReady = false;
     bool cursorInvert = false;                 // current cursor uses the invert blend
+    bool osCursorShowing = true;               // the focused app's cursor is visible (CURSOR_SHOWING)
 
     void updateCursorTexture();   // GetCursorInfo -> decode -> (re)upload cursorTex/SRV on change
 
@@ -372,18 +373,29 @@ bool RenderEngine::State::ensureDesktopCopy(DXGI_FORMAT fmt) {
 bool RenderEngine::State::capture() {
     if (!dupl && !recreateDupl()) return false;
 
-    // Once we have a frame, poll non-blocking (0 ms): a static desktop returns WAIT_TIMEOUT
-    // immediately and we re-pan the cached copy, so panning is never gated on a desktop
-    // change. (An 8 ms wait here stalled every pan frame -> microstutter.) For the very first
-    // frame, retry across a larger budget so a static desktop still yields the initial image.
-    const int attempts = haveDesktop ? 1 : 40;
-    const DWORD timeoutMs = haveDesktop ? 0 : 25;
-    for (int a = 0; a < attempts; ++a) {
+    // A settled desktop polls non-blocking (0 ms, 1 attempt): a static screen returns
+    // WAIT_TIMEOUT immediately and we re-pan the cached copy, so panning is never gated on a
+    // desktop change. (An 8 ms wait here stalled every pan frame -> microstutter.)
+    //
+    // A "fresh" grab (first frame ever, or a forced refresh on zoom-in) instead retries to land
+    // the initial frame and then DRAINS to the most-recent frame: the first AcquireNextFrame
+    // after a (re)created duplication can briefly be a transitional composite - the window
+    // *underneath* the current one, before it has painted into the captured surface. Taking the
+    // first frame flashed that on reveal; draining past it to the latest avoids it. Bounded:
+    // once one frame is copied we only wait ~3 ms for a newer one, then stop.
+    const bool fresh = freshCapture || !haveDesktop;
+    freshCapture = false;
+    const int   firstAttempts = fresh ? 40 : 1;
+    const DWORD firstTimeout  = fresh ? 25 : 0;
+    bool gotThisCall = false;
+
+    for (int a = 0; a < firstAttempts; ++a) {
         IDXGIResource* res = nullptr;
         DXGI_OUTDUPL_FRAME_INFO fi{};
-        HRESULT hr = dupl->AcquireNextFrame(timeoutMs, &fi, &res);
-        if (hr == DXGI_ERROR_WAIT_TIMEOUT) { SafeRelease(res); continue; }
-        if (hr == DXGI_ERROR_ACCESS_LOST) { SafeRelease(res); SafeRelease(dupl); return false; }
+        const DWORD to = gotThisCall ? 3 : firstTimeout;   // after a copy, only briefly seek a newer frame
+        HRESULT hr = dupl->AcquireNextFrame(to, &fi, &res);
+        if (hr == DXGI_ERROR_WAIT_TIMEOUT) { SafeRelease(res); if (gotThisCall) break; continue; }
+        if (hr == DXGI_ERROR_ACCESS_LOST) { SafeRelease(res); SafeRelease(dupl); return gotThisCall || haveDesktop; }
         if (FAILED(hr)) { SafeRelease(res); return haveDesktop; }
 
         ID3D11Texture2D* tex = nullptr;
@@ -399,6 +411,7 @@ bool RenderEngine::State::capture() {
                     RLog("capture: first frame acquiredFormat=%u copyFormat=%u capFp16=%d",
                          (unsigned)td.Format, (unsigned)copyFormat, (int)capFp16);
                 haveDesktop = true;
+                gotThisCall = true;
             }
         }
         SafeRelease(tex);
@@ -421,9 +434,11 @@ bool RenderEngine::State::capture() {
         }
         SafeRelease(res);
         dupl->ReleaseFrame();
-        return true;
+
+        if (!fresh) return true;          // settled desktop: the single frame is enough
+        // fresh: keep looping to drain to the latest frame (the short `to` breaks us out)
     }
-    return haveDesktop;   // no frame within budget; keep whatever we had
+    return gotThisCall || haveDesktop;   // no frame within budget; keep whatever we had
 }
 
 // The overlay must pass clicks through to the apps beneath. WS_EX_TRANSPARENT plus an
@@ -486,7 +501,12 @@ bool RenderEngine::initialize(int screenW, int screenH, int zorderBand, bool hdr
                                    0, 0, screenW, screenH, nullptr, nullptr, wc.hInstance, nullptr);
     }
     if (!s_->hwnd) return false;
-    SetLayeredWindowAttributes(s_->hwnd, 0, 255, LWA_ALPHA);
+    // Start fully transparent (alpha 0 = invisible). We toggle the layer alpha to show/hide
+    // instead of SW_HIDE/SW_SHOW: a layered window that is hidden and re-shown makes DWM cache
+    // and re-display the frame from when it was last visible, which flashed the previous zoom
+    // session's window on the next zoom-in (most visibly right after an alt-tab). Keeping the
+    // window always shown lets a reveal just flip alpha over the already-current front buffer.
+    SetLayeredWindowAttributes(s_->hwnd, 0, 0, LWA_ALPHA);
     // CRITICAL: exclude our own overlay from screen capture, or Desktop Duplication captures
     // our presented frame and we magnify our own output -> a feedback loop (degenerates to
     // black). WDA_EXCLUDEFROMCAPTURE (Win10 2004+) keeps the window visible on screen but
@@ -610,19 +630,50 @@ bool RenderEngine::initialize(int screenW, int screenH, int zorderBand, bool hdr
     if (s_->capFp16) s_->sdrWhiteNits = GetSDRWhiteNits();
     RLog("initialize done: capFp16=%d sdrWhiteNits=%.1f", (int)s_->capFp16, s_->sdrWhiteNits);
 
+    // Show the window now (invisible at alpha 0). It stays shown for the process lifetime; the
+    // overlay is transparent + click-through + capture-excluded + no-activate, so an always-on
+    // invisible window doesn't interfere with apps or games beneath it.
+    ShowWindow(s_->hwnd, SW_SHOWNOACTIVATE);
+
     s_->ready = true;
     return true;
 }
 
 void RenderEngine::setVisible(bool visible) {
     if (!s_ || !s_->hwnd) return;
-    ShowWindow(s_->hwnd, visible ? SW_SHOWNOACTIVATE : SW_HIDE);
-    if (visible) s_->prevSrcValid = false;   // don't motion-blur the jump into zoom
+    // Reveal/hide via layer alpha over the always-shown window (see initialize): flip alpha
+    // rather than SW_HIDE/SW_SHOW, so a reveal shows the already-current front buffer instead
+    // of DWM's cached last-visible frame. Callers present the live frame BEFORE revealing.
+    SetLayeredWindowAttributes(s_->hwnd, 0, visible ? 255 : 0, LWA_ALPHA);
+    if (visible) {
+        s_->prevSrcValid = false;   // don't motion-blur the jump into zoom
+        SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0,   // pop on top immediately on show
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+}
+
+// Drop the current duplication so the next capture() recreates it; the first AcquireNextFrame
+// after DuplicateOutput returns the entire current desktop, so the first zoomed frame samples
+// live content instead of a stale cached copy (the alt-tab "previous window" content). Clearing
+// haveDesktop routes capture() through its blocking first-frame budget, which reliably lands
+// that full frame. Pair this with showing the overlay only AFTER that frame is presented (see
+// main.cpp), since the swapchain otherwise displays its last presented frame the instant the
+// window becomes visible. Also drops the motion-blur history so we don't smear the jump in.
+void RenderEngine::invalidateCapture() {
+    if (!s_) return;
+    SafeRelease(s_->dupl);
+    s_->haveDesktop = false;
+    s_->freshCapture = true;
+    s_->prevSrcValid = false;
 }
 
 void RenderEngine::State::updateCursorTexture() {
     CURSORINFO ci{ sizeof(ci) };
-    if (!GetCursorInfo(&ci) || !ci.hCursor) return;
+    if (!GetCursorInfo(&ci) || !ci.hCursor) { osCursorShowing = false; return; }
+    // Whether the focused app wants a cursor shown. Read every frame (not just on shape
+    // change) because a game can toggle it without changing the shape. Our own
+    // MagShowSystemCursor(FALSE) does NOT clear this flag, so it reflects the app's intent.
+    osCursorShowing = (ci.flags & CURSOR_SHOWING) != 0;
     if (ci.hCursor == lastCursor && cursorReady) return;   // unchanged; keep the texture
     std::vector<uint32_t> bgra; int w = 0, h = 0, hx = 0, hy = 0; bool inv = false;
     if (!DecodeCursorBGRA(ci.hCursor, bgra, w, h, hx, hy, inv)) return;
@@ -688,8 +739,12 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
         c->Draw(3, 0);
     }
 
-    // Cursor pass: alpha-blended quad at the centered hotspot, scaled by zoom.
-    if (cursorReady) {
+    // Cursor pass: alpha-blended quad at the centered hotspot, scaled by zoom. In auto mode
+    // (cursorMode 0) we skip it when the focused app hides its own cursor (games), so we don't
+    // paint a pointer the game intentionally hid. 1 = always draw, 2 = never draw.
+    bool drawCursor = cursorReady && p.cursorMode != 2 &&
+                      (p.cursorMode == 1 || osCursorShowing);
+    if (drawCursor) {
         double scale = p.cursorScaleWithZoom ? (p.level < 1.0 ? 1.0 : p.level) : 1.0;
         double drawW = curW * scale, drawH = curH * scale;
         double tlX = p.cursorScreenX - hotX * scale;   // top-left so the hotspot lands at cursorScreen
@@ -713,14 +768,13 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
 
 bool RenderEngine::renderFrame(const RenderFrameParams& p) {
     if (!s_->ready) return false;
-    // Stay above transient topmost popups (taskbar thumbnails, tooltips) so they don't show a
-    // second, unmagnified copy over our view. Skip when we're in a high z-band - the band
-    // already keeps us on top, and HWND_TOPMOST could demote us out of it.
-    if (!s_->inBand && ++s_->topmostTick >= 15) {
-        s_->topmostTick = 0;
-        SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0,
-                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-    }
+    // Keep the overlay above EVERYTHING, every frame. It's transparent, click-through and
+    // capture-excluded, so sitting on top of all windows - including other always-on-top app
+    // overlays (RTSS FPS counter, etc.) - is safe: clicks still pass through and there's no
+    // capture feedback. If we sit below such an overlay, its window draws a second, unmagnified
+    // copy over our magnified view. A banded window (CreateWindowInBand) stays in its band
+    // across SetWindowPos, so this just re-tops us within the band.
+    SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     // Keep the (hidden) OS cursor under the drawn cursor so clicks pass through the
     // transparent overlay to the app at the right desktop point. We drive the lens from raw
     // input (not GetCursorPos), so this SetCursorPos never feeds back into tracking. Only

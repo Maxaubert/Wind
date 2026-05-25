@@ -6,7 +6,10 @@ Start-Transcript -Path $log -Force
 try {
     $root = "C:\Users\Admin\Documents\Claude\Github\Wind"
     $src = "$root\Wind.exe"
-    Write-Output "=== 0. build the UIAccess variant (uiAccess=true manifest) ==="
+    Write-Output "=== 0a. stop any running Wind (dev or deployed) so the exe isn't locked for build ==="
+    Get-Process Wind -ErrorAction SilentlyContinue | Stop-Process -Force
+    Start-Sleep -Milliseconds 400
+    Write-Output "=== 0b. build the UIAccess variant (uiAccess=true manifest) ==="
     & cmd /c "`"$root\build.bat`" uiaccess"
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path $src)) { throw "build.bat uiaccess failed." }
 
@@ -60,9 +63,12 @@ fullRangeSeconds=1.2
 cursorSensitivity=1.0
 cursorSmoothing=0.5
 cursorScaleWithZoom=1
+cursorVisibility=auto
 bilinear=1
 motionBlur=0
 motionBlurStrength=1.0
+; zorderBand: 16 = sit above everything incl. Start/taskbar/tray and same-band app overlays
+;   (this signed Program Files build engages UIAccess for it); 0 = normal topmost only
 zorderBand=16
 brightness=1.0
 hdrTonemap=1

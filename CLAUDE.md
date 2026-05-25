@@ -54,6 +54,18 @@ Spec: `docs/superpowers/specs/2026-05-25-own-renderer-design.md`. Issue #4.
 - RENDER ENGINE: never leave the OS cursor hidden. `shutdown()` restores via
   `MagShowSystemCursor(TRUE)` + `MagUninitialize` + `SystemParametersInfo(SPI_SETCURSORS)`,
   plus a `SetUnhandledExceptionFilter` net for crashes.
+- RENDER ENGINE: show/hide the overlay by toggling the layer alpha (`SetLayeredWindowAttributes`
+  0/255), NOT `SW_HIDE`/`SW_SHOW`. A layered window that is hidden then re-shown makes DWM cache
+  and re-display the frame from when it was last visible, flashing the previous zoom session's
+  window on the next zoom-in (worst right after an alt-tab). The window is created shown at
+  alpha 0 and stays shown. On zoom-in, present the live frame FIRST, then flip alpha to 255.
+- RENDER ENGINE: stay above EVERYTHING - re-assert `HWND_TOPMOST` every frame in `renderFrame`
+  (transparent + click-through + capture-excluded, so being on top is safe). If we sit below an
+  always-on-top app overlay (RTSS, Task Manager), that window draws a second unmagnified copy
+  over our magnified view. `zorderBand=16` (signed UIAccess build) also covers shell + same-band.
+- RENDER ENGINE: on zoom-in, `invalidateCapture()` + `capture()` drains to the LATEST duplication
+  frame (not the first): the first AcquireNextFrame after (re)creating the duplication can be a
+  transitional composite (the window underneath), which otherwise flashed on reveal.
 - Verify the render overlay only from INSIDE the app (it is capture-excluded, so external
   screenshots can't see it): `WIND_SELFTEST=1 Wind.exe` dumps `wind_selftest.png`.
 
