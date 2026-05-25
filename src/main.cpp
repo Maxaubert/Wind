@@ -24,7 +24,13 @@ static void SetZoomButton(int xbuttonId, bool down) {
 }
 
 // Message-handler: decodes raw mouse movement (survives cursor lock) and routes tray msgs.
+// Global panic/quit hotkey id (Ctrl+Alt+Q). Quits cleanly from anywhere - even while the
+// render overlay covers the screen and the OS cursor is hidden - so there's always a
+// keyboard-only escape. The clean exit path restores the cursor and resets zoom to 1x.
+static const int kQuitHotkeyId = 0xB001;
+
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_HOTKEY && wp == kQuitHotkeyId) { PostQuitMessage(0); return 0; }
     if (msg == WM_INPUT) {
         UINT size = 0;
         GetRawInputData((HRAWINPUT)lp, RID_INPUT, nullptr, &size, sizeof(RAWINPUTHEADER));
@@ -79,6 +85,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     rid.usUsagePage = 0x01; rid.usUsage = 0x02; // generic mouse
     rid.dwFlags = RIDEV_INPUTSINK; rid.hwndTarget = hwnd;
     RegisterRawInputDevices(&rid, 1, sizeof(rid));
+
+    // Safety: global Ctrl+Alt+Q quits cleanly from anywhere (works even with the overlay up
+    // and the cursor hidden). If the combo is already taken, the tray Quit still works.
+    RegisterHotKey(hwnd, kQuitHotkeyId, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'Q');
 
     if (!g_input.start(cfg.zoomInButton, cfg.zoomOutButton, /*swallow=*/true)) {
         MessageBoxW(nullptr, L"Failed to install the mouse hook.", L"Wind", MB_ICONERROR);
@@ -227,6 +237,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     }
 
     if (timer) CloseHandle(timer);
+    UnregisterHotKey(hwnd, kQuitHotkeyId);
     if (useRender) renderEngine.shutdown();   // restores cursor + tears down D3D/overlay
     else           magEngine.shutdown();       // resets to 1x - never leave the screen zoomed
     g_input.stop();

@@ -3,6 +3,9 @@
 Build with `build.bat`, then run `Wind.exe` (it copies/creates `magnifier.ini` next
 to it on first run). Wind sits in the system tray. Then verify:
 
+**Safety:** press **Ctrl+Alt+Q** anytime to quit cleanly (restores the cursor + unzooms),
+even while the render overlay covers the screen. The tray right-click -> Quit also works.
+
 ## Desktop
 - [ ] Hold forward (XButton2): screen zooms in smoothly (no steps), follows the cursor.
 - [ ] Hold back (XButton1): zooms out smoothly; stops at 1.0x (screen back to normal).
