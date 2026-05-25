@@ -1,5 +1,7 @@
 #include <windows.h>
 #include <climits>
+#include <cstdio>
+#include <cstdarg>
 #include "config.h"
 #include "magnifier_engine.h"
 #include "render_engine.h"
@@ -43,6 +45,9 @@ struct TickState {
     double prevLvl = 1.0;
     double lastLevel = -1.0;
     int    lastX = INT_MIN, lastY = INT_MIN;   // mag emit-on-change
+    // Frame-pacing diagnostics (diagnostics=1): a 2 s window of loop-interval stats.
+    double diagAccum = 0.0, diagSumDt = 0.0, diagMaxDt = 0.0;
+    int    diagFrames = 0, diagHitches = 0;
     TickState(RenderEngine& re, MagnifierEngine& me, bool ur, int w, int h, const Config& c)
         : renderEngine(re), magEngine(me), useRender(ur), sw(w), sh(h), cfg(c),
           zoom(1.0, c.maxLevel, c.fullRangeSeconds),
@@ -56,6 +61,17 @@ static int CursorModeFromCfg(const Config& c) {
     if (c.cursorVisibility == "never")  return 2;
     if (c.cursorVisibility == "always") return 1;
     return 0;
+}
+
+// Append a line to %TEMP%\wind_diag.log (frame-pacing diagnostics; gated on diagnostics=1).
+// %TEMP% so it works for the Program Files deploy too (its own dir isn't writable).
+static void DiagLog(const char* fmt, ...) {
+    char path[MAX_PATH]; DWORD n = GetTempPathA(MAX_PATH, path);
+    if (n == 0 || n > MAX_PATH) return;
+    lstrcatA(path, "wind_diag.log");
+    FILE* f = nullptr; if (fopen_s(&f, path, "a") != 0 || !f) return;
+    va_list ap; va_start(ap, fmt); vfprintf(f, fmt, ap); va_end(ap);
+    fputc('\n', f); fclose(f);
 }
 
 // One magnifier tick: advance zoom, hot-reload config, then pan/draw (render engine) or push
@@ -134,6 +150,23 @@ static void RunTick(TickState& t) {
         }
     }
     t.prevLvl = lvl;
+
+    // Frame-pacing diagnostics: a 2 s window of loop-interval stats (dt = time between ticks =
+    // the on-screen frame interval, since Present(1,0) paces while zoomed). maxDt and the hitch
+    // count expose microstutter that an average would hide.
+    if (t.cfg.diagnostics) {
+        const double target = 1.0 / (t.cfg.tickHzCap > 0 ? t.cfg.tickHzCap : 144);
+        t.diagSumDt += dt; t.diagFrames++; t.diagAccum += dt;
+        if (dt > t.diagMaxDt) t.diagMaxDt = dt;
+        if (dt > target * 1.5) t.diagHitches++;
+        if (t.diagAccum >= 2.0 && t.diagFrames > 0) {
+            DiagLog("zoom=%.2f frames=%d ~fps=%.0f avgDt=%.2fms maxDt=%.2fms hitches>1.5x=%d",
+                    lvl, t.diagFrames, t.diagFrames / t.diagAccum,
+                    t.diagSumDt / t.diagFrames * 1000.0, t.diagMaxDt * 1000.0, t.diagHitches);
+            t.diagAccum = 0.0; t.diagSumDt = 0.0; t.diagMaxDt = 0.0;
+            t.diagFrames = 0; t.diagHitches = 0;
+        }
+    }
 }
 
 // Message-handler: decodes raw mouse movement (survives cursor lock) and routes tray msgs.
