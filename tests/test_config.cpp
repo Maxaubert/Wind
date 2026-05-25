@@ -32,6 +32,11 @@ TEST_CASE("engine defaults to render; renderer knobs have sane defaults") {
     CHECK(c.motionBlurStrength == doctest::Approx(1.0));
     CHECK(c.zorderBand == 0);                  // normal topmost by default
     CHECK(c.brightness == doctest::Approx(1.0));
+    CHECK(c.hdrTonemap == 0);                  // HDR tonemap opt-in, off by default
+}
+TEST_CASE("parses hdrTonemap opt-in") {
+    Config c = ParseConfig("hdrTonemap=1\n");
+    CHECK(c.hdrTonemap == 1);
 }
 TEST_CASE("parses cursorSmoothing, motion blur, z-order band, brightness") {
     Config c = ParseConfig("cursorSmoothing=0.7\nmotionBlur=1\nmotionBlurStrength=0.5\nzorderBand=16\nbrightness=0.85\n");

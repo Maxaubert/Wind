@@ -31,7 +31,7 @@ public:
     // CreateWindowInBand (needs UIAccess; e.g. 16 = ZBID_SYSTEM_TOOLS, above the shell so the
     // Start menu / taskbar flyouts don't show an unmagnified copy). Falls back to a normal
     // window if the band can't be used.
-    bool initialize(int screenW, int screenH, int zorderBand = 0);
+    bool initialize(int screenW, int screenH, int zorderBand = 0, bool hdrTonemap = false);
     bool renderFrame(const RenderFrameParams& p);  // capture (if changed) + scale + cursor + present
     void setVisible(bool visible);                 // show/hide the overlay (hidden at 1x)
     void hideSystemCursor(bool hide);              // MagShowSystemCursor wrapper + safe-restore net

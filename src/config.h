@@ -32,10 +32,11 @@ struct Config {
     // z-order band for the overlay (needs the UIAccess build, run from Program Files):
     // 0 = normal topmost; 16 = ZBID_SYSTEM_TOOLS (above the shell, covers Start/taskbar/tray).
     int    zorderBand = 0;
-    // Output brightness multiplier for the magnified view. 1.0 = unchanged. On an HDR
-    // display the SDR overlay can read slightly brighter than the desktop; lower this
-    // (e.g. 0.85) until the zoomed view matches. Hot-reloadable.
+    // Output brightness multiplier for the magnified view. 1.0 = unchanged. Hot-reloadable.
     double brightness = 1.0;
+    // Opt-in HDR->SDR tonemap (capture FP16 scRGB + tonemap in-shader). Default off keeps the
+    // proven SDR capture path. Applied at startup (relaunch to change). HDR displays only.
+    int    hdrTonemap = 0;
 };
 // Pure: parse INI text (key=value, ';' or '#' comments) into a Config, keeping
 // defaults for missing/malformed keys.
