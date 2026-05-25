@@ -21,14 +21,16 @@ namespace wind {
 
 template <class T> static void SafeRelease(T*& p) { if (p) { p->Release(); p = nullptr; } }
 
-// Constant buffer: normalized UV bounds of the source sub-rect (16-byte aligned).
-struct MagCB { float uvMinX, uvMinY, uvMaxX, uvMaxY; };
+// Constant buffer: source sub-rect UV bounds + the per-frame pan shift in UV (motion blur
+// vector). 32 bytes: uvMin+uvMax pack into one 16-byte register, blurUV+pad into the next.
+struct MagCB { float uvMinX, uvMinY, uvMaxX, uvMaxY, blurX, blurY, padA, padB; };
 
-// Fullscreen-triangle magnify shader. The VS generates a covering triangle from the vertex
-// id (no vertex buffer) and maps the visible [0,1] screen UV into the source sub-rect; the
-// PS samples the captured desktop. Bilinear sampling gives the sub-pixel-smooth scale.
+// Fullscreen-triangle magnify shader. The VS maps the visible [0,1] screen UV into the
+// source sub-rect; the PS samples the captured desktop. When panning, it integrates several
+// taps along the per-frame pan vector (blurUV) - motion blur that smears the big per-frame
+// step at high zoom into continuous motion, and collapses to a sharp single tap when still.
 static const char* kMagHLSL = R"(
-cbuffer CB : register(b0) { float2 uvMin; float2 uvMax; };
+cbuffer CB : register(b0) { float2 uvMin; float2 uvMax; float2 blurUV; float2 pad; };
 struct VSOut { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; };
 VSOut VSMain(uint id : SV_VertexID) {
     float2 t = float2((id << 1) & 2, id & 2);   // (0,0),(2,0),(0,2)
@@ -39,7 +41,16 @@ VSOut VSMain(uint id : SV_VertexID) {
 }
 Texture2D tex : register(t0);
 SamplerState smp : register(s0);
-float4 PSMain(VSOut i) : SV_TARGET { return tex.Sample(smp, i.uv); }
+float4 PSMain(VSOut i) : SV_TARGET {
+    if (abs(blurUV.x) + abs(blurUV.y) < 1e-6) return tex.Sample(smp, i.uv);  // still: sharp
+    const int N = 16;
+    float4 acc = 0;
+    [unroll] for (int k = 0; k < N; ++k) {
+        float t = (k / float(N - 1)) - 0.5;      // -0.5 .. +0.5 across the frame's motion
+        acc += tex.Sample(smp, i.uv + blurUV * t);
+    }
+    return acc / N;
+}
 )";
 
 // Cursor quad shader: a per-quad transform (top-left + size in clip space) places an
@@ -143,9 +154,12 @@ struct RenderEngine::State {
     // Magnify pass.
     ID3D11VertexShader* vs = nullptr;
     ID3D11PixelShader* ps = nullptr;
-    ID3D11Buffer* cb = nullptr;                // uvMin/uvMax for the source sub-rect
+    ID3D11Buffer* cb = nullptr;                // uvMin/uvMax + motion-blur vector
     ID3D11SamplerState* sampLinear = nullptr;
     ID3D11SamplerState* sampPoint = nullptr;
+    double prevSrcLeft = 0, prevSrcTop = 0;    // previous frame's source top-left (for blur)
+    bool prevSrcValid = false;                 // reset on (re)show so we don't blur a jump
+    double lastBlurX = 0, lastBlurY = 0;       // last applied blur vector (diagnostics)
 
     // Cursor pass (live OS cursor decoded to a texture; works even while hidden).
     ID3D11VertexShader* cvs = nullptr;
@@ -257,6 +271,7 @@ bool RenderEngine::ready() const { return s_ && s_->ready; }
 void RenderEngine::debugInfo(int& screenW, int& screenH, int& curW, int& curH, int& hotX, int& hotY) const {
     screenW = s_->sw; screenH = s_->sh; curW = s_->curW; curH = s_->curH; hotX = s_->hotX; hotY = s_->hotY;
 }
+void RenderEngine::debugBlur(double& bx, double& by) const { bx = s_->lastBlurX; by = s_->lastBlurY; }
 
 bool RenderEngine::initialize(int screenW, int screenH) {
     s_->sw = screenW;
@@ -401,7 +416,9 @@ bool RenderEngine::initialize(int screenW, int screenH) {
 }
 
 void RenderEngine::setVisible(bool visible) {
-    if (s_ && s_->hwnd) ShowWindow(s_->hwnd, visible ? SW_SHOWNOACTIVATE : SW_HIDE);
+    if (!s_ || !s_->hwnd) return;
+    ShowWindow(s_->hwnd, visible ? SW_SHOWNOACTIVATE : SW_HIDE);
+    if (visible) s_->prevSrcValid = false;   // don't motion-blur the jump into zoom
 }
 
 void RenderEngine::State::updateCursorTexture() {
@@ -438,14 +455,29 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
     if (haveDesktop) {
         double level = p.level < 1.0 ? 1.0 : p.level;
         double viewW = sw / level, viewH = sh / level;
+        // Motion-blur vector = this frame's source shift in full-texture UV, scaled by the
+        // shutter strength and clamped so a stray large jump can't over-smear.
+        double blurX = 0, blurY = 0;
+        if (p.motionBlur && p.motionBlurStrength > 0.0 && prevSrcValid) {
+            blurX = (p.srcLeft - prevSrcLeft) / sw * p.motionBlurStrength;
+            blurY = (p.srcTop  - prevSrcTop)  / sh * p.motionBlurStrength;
+            const double kMax = 0.08;   // cap ~8% of the texture
+            if (blurX >  kMax) blurX =  kMax; else if (blurX < -kMax) blurX = -kMax;
+            if (blurY >  kMax) blurY =  kMax; else if (blurY < -kMax) blurY = -kMax;
+        }
+        prevSrcLeft = p.srcLeft; prevSrcTop = p.srcTop; prevSrcValid = true;
+        lastBlurX = blurX; lastBlurY = blurY;
+
         MagCB cbv{
             (float)(p.srcLeft / sw), (float)(p.srcTop / sh),
-            (float)((p.srcLeft + viewW) / sw), (float)((p.srcTop + viewH) / sh) };
+            (float)((p.srcLeft + viewW) / sw), (float)((p.srcTop + viewH) / sh),
+            (float)blurX, (float)blurY, 0.0f, 0.0f };
         c->UpdateSubresource(cb, 0, nullptr, &cbv, 0, 0);
         c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         c->VSSetShader(vs, nullptr, 0);
         c->VSSetConstantBuffers(0, 1, &cb);
         c->PSSetShader(ps, nullptr, 0);
+        c->PSSetConstantBuffers(0, 1, &cb);     // PS needs blurUV (motion blur)
         c->PSSetShaderResources(0, 1, &desktopSRV);
         ID3D11SamplerState* samp = p.bilinear ? sampLinear : sampPoint;
         c->PSSetSamplers(0, 1, &samp);

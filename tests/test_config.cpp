@@ -27,6 +27,13 @@ TEST_CASE("engine defaults to render; renderer knobs have sane defaults") {
     CHECK(c.cursorSensitivity == doctest::Approx(1.0));
     CHECK(c.cursorScaleWithZoom == 1);
     CHECK(c.bilinear == 1);
+    CHECK(c.motionBlur == 1);
+    CHECK(c.motionBlurStrength == doctest::Approx(1.0));
+}
+TEST_CASE("parses motion blur knobs") {
+    Config c = ParseConfig("motionBlur=0\nmotionBlurStrength=0.5\n");
+    CHECK(c.motionBlur == 0);
+    CHECK(c.motionBlurStrength == doctest::Approx(0.5));
 }
 TEST_CASE("engine can select the Magnification API path") {
     Config c = ParseConfig("engine=mag\n");

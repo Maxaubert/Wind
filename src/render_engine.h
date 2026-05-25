@@ -10,6 +10,8 @@ struct RenderFrameParams {
     int    clickDesktopX, clickDesktopY; // SetCursorPos target (desktop px) for click hit-test
     bool   cursorScaleWithZoom;          // draw the cursor scaled by zoom vs native size
     bool   bilinear;                     // bilinear (smooth) vs point sampling
+    bool   motionBlur;                   // smear content along the pan to smooth coarse motion
+    double motionBlurStrength;           // shutter: 1.0 = full inter-frame, lower = subtler
 };
 
 // Own capture + Direct3D 11 renderer. Captures the desktop via DXGI Desktop Duplication
@@ -32,6 +34,8 @@ public:
     bool ready() const;
     // Verification only: decoded cursor metrics + the screen size the engine is using.
     void debugInfo(int& screenW, int& screenH, int& curW, int& curH, int& hotX, int& hotY) const;
+    // Verification only: the last motion-blur vector (UV units) the shader received.
+    void debugBlur(double& bx, double& by) const;
     // Verification only: copy the back-buffer to a 32bpp BGRA PNG.
     bool dumpBackbufferPng(const wchar_t* path);
     // Verification only: render one frame and dump it before Present (so the PNG matches the

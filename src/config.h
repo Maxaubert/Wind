@@ -26,6 +26,8 @@ struct Config {
     double cursorSensitivity = 1.0;  // lens pan speed per raw count (internally scaled by 1/level)
     int    cursorScaleWithZoom = 1;  // 1 = draw the cursor scaled by zoom, 0 = native size
     int    bilinear = 1;             // 1 = bilinear sampling (smooth), 0 = point (crisp pixels)
+    int    motionBlur = 1;           // 1 = smear content along the pan (smooths coarse motion)
+    double motionBlurStrength = 1.0; // shutter: 1.0 = full inter-frame blur, lower = subtler
 };
 // Pure: parse INI text (key=value, ';' or '#' comments) into a Config, keeping
 // defaults for missing/malformed keys.

@@ -36,6 +36,8 @@ Config ParseConfig(const std::string& text) {
             else if (key == "cursorSensitivity")  c.cursorSensitivity = std::stod(val);
             else if (key == "cursorScaleWithZoom")c.cursorScaleWithZoom = std::stoi(val);
             else if (key == "bilinear")           c.bilinear = std::stoi(val);
+            else if (key == "motionBlur")         c.motionBlur = std::stoi(val);
+            else if (key == "motionBlurStrength") c.motionBlurStrength = std::stod(val);
         } catch (...) { /* keep default on bad value */ }
     }
     return c;
@@ -68,7 +70,10 @@ Config LoadConfig(const std::wstring& path) {
                "; cursorSensitivity: pan speed per raw count (scaled by 1/zoom internally)\n"
                "cursorSensitivity=1.0\ncursorScaleWithZoom=1\n"
                "; bilinear: 1=smooth scaling, 0=crisp/point\n"
-               "bilinear=1\n";
+               "bilinear=1\n"
+               "; motionBlur: 1=smear content along the pan to smooth coarse high-zoom motion\n"
+               "motionBlur=1\n; motionBlurStrength: 1.0=full inter-frame, lower=subtler\n"
+               "motionBlurStrength=1.0\n";
         return Config{};
     }
     std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
