@@ -34,10 +34,12 @@ static void RLog(const char* fmt, ...) {
     fputc('\n', f); fclose(f);
 }
 
-// Whether Windows HDR ("Use HDR") is actually ENABLED right now. This is the correct signal
-// for "is the content HDR" - some monitors keep the DXGI color space at HDR10 even when
-// Windows HDR is off, so colorSpace==G2084 is unreliable. DisplayConfig is queried live (not
-// DXGI-cached), so re-checking it on duplication-recreate also catches runtime HDR toggles.
+// Whether Windows HDR ("Use HDR") is actually ON right now. Uses ADVANCED_COLOR_INFO_2's
+// activeColorMode (Win11 24H2+), which distinguishes SDR/WCG/HDR. The older
+// advancedColorEnabled flag is unreliable here - it reads true when Automatic Color Management
+// is on even though "Use HDR" is off (which made us wrongly tonemap and dim SDR). DisplayConfig
+// is queried live (not DXGI-cached), so re-checking on duplication-recreate also catches
+// runtime HDR toggles. Returns false if the API is unavailable (older Windows) -> SDR path.
 static bool GetHdrEnabled() {
     UINT32 nPath = 0, nMode = 0;
     if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &nPath, &nMode) != ERROR_SUCCESS)
@@ -48,13 +50,13 @@ static bool GetHdrEnabled() {
                            nullptr) != ERROR_SUCCESS)
         return false;
     for (UINT32 i = 0; i < nPath; ++i) {
-        DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO ci{};
-        ci.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO;
+        DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO_2 ci{};
+        ci.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO_2;
         ci.header.size = sizeof(ci);
         ci.header.adapterId = paths[i].targetInfo.adapterId;
         ci.header.id = paths[i].targetInfo.id;
         if (DisplayConfigGetDeviceInfo(&ci.header) == ERROR_SUCCESS)
-            return ci.advancedColorEnabled != 0;
+            return ci.activeColorMode == DISPLAYCONFIG_ADVANCED_COLOR_MODE_HDR;
     }
     return false;
 }
@@ -387,17 +389,15 @@ bool RenderEngine::State::capture() {
         ID3D11Texture2D* tex = nullptr;
         if (res) res->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&tex);
         if (tex) {
-            // Only switch the copy texture to the captured FP16 format when we're tonemapping;
-            // otherwise keep the BGRA8 copy (the proven default path - DXGI converts on copy).
-            bool ready = true;
-            if (capFp16) { D3D11_TEXTURE2D_DESC td{}; tex->GetDesc(&td); ready = ensureDesktopCopy(td.Format); }
-            if (ready && desktopCopy) {
+            // Match the copy texture to the captured format so CopyResource never mismatches
+            // (incl. after a runtime HDR toggle changes the duplication format). The tonemap
+            // is gated on capFp16, not on the format, so BGRA8 captures stay passthrough.
+            D3D11_TEXTURE2D_DESC td{}; tex->GetDesc(&td);
+            if (ensureDesktopCopy(td.Format) && desktopCopy) {
                 ctx->CopyResource(desktopCopy, tex);
-                if (!haveDesktop) {
-                    D3D11_TEXTURE2D_DESC td2{}; tex->GetDesc(&td2);
+                if (!haveDesktop)
                     RLog("capture: first frame acquiredFormat=%u copyFormat=%u capFp16=%d",
-                         (unsigned)td2.Format, (unsigned)copyFormat, (int)capFp16);
-                }
+                         (unsigned)td.Format, (unsigned)copyFormat, (int)capFp16);
                 haveDesktop = true;
             }
         }
