@@ -463,6 +463,10 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
 
 bool RenderEngine::renderFrame(const RenderFrameParams& p) {
     if (!s_->ready) return false;
+    // Keep the (hidden) OS cursor under the drawn cursor so clicks pass through the
+    // transparent overlay to the app at the right desktop point. We drive the lens from raw
+    // input (not GetCursorPos), so this SetCursorPos never feeds back into tracking.
+    SetCursorPos(p.clickDesktopX, p.clickDesktopY);
     s_->render(p);
     return SUCCEEDED(s_->swap->Present(1, 0));
 }
@@ -475,9 +479,21 @@ bool RenderEngine::dumpFrame(const RenderFrameParams& p, const wchar_t* path) {
     return dumpBackbufferPng(path);
 }
 
+// Crash safety net: if we go down while the cursor is hidden, force it visible again so the
+// user is never left without a pointer. The magnification runtime is process-scoped (so exit
+// usually restores it), but a hard crash mid-hide is exactly when this matters.
+static LONG WINAPI CursorRestoreFilter(EXCEPTION_POINTERS* ep) {
+    MagShowSystemCursor(TRUE);
+    SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, SPIF_SENDCHANGE);
+    return EXCEPTION_CONTINUE_SEARCH;   // let the default handler still report the crash
+}
+
 void RenderEngine::hideSystemCursor(bool hide) {
     if (!s_) return;
-    if (hide && !s_->magInited) { s_->magInited = (MagInitialize() != 0); }
+    if (hide && !s_->magInited) {
+        s_->magInited = (MagInitialize() != 0);
+        SetUnhandledExceptionFilter(CursorRestoreFilter);   // installed once, before first hide
+    }
     if (s_->magInited) {
         MagShowSystemCursor(hide ? FALSE : TRUE);
         s_->cursorHidden = hide;
@@ -592,7 +608,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     wind::RenderFrameParams p{};
     p.level = 4.0; p.srcLeft = sw * 0.375; p.srcTop = sh * 0.375;
     p.cursorScreenX = sw / 2.0; p.cursorScreenY = sh / 2.0;
+    p.clickDesktopX = sw / 2; p.clickDesktopY = sh / 2;
     p.cursorScaleWithZoom = true; p.bilinear = true;
+    eng.hideSystemCursor(true);     // exercise the hide path; shutdown restores it
     for (int i = 0; i < 20; ++i) {
         MSG m; while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&m); DispatchMessageW(&m); }
         eng.renderFrame(p);
