@@ -41,13 +41,85 @@ SamplerState smp : register(s0);
 float4 PSMain(VSOut i) : SV_TARGET { return tex.Sample(smp, i.uv); }
 )";
 
-static ID3DBlob* CompileShader(const char* entry, const char* target) {
+// Cursor quad shader: a per-quad transform (top-left + size in clip space) places an
+// alpha-blended textured quad. Drawn as a 4-vertex triangle strip from the vertex id.
+static const char* kCursorHLSL = R"(
+cbuffer CB : register(b0) { float2 posClip; float2 sizeClip; };
+struct VSOut { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; };
+VSOut VSMain(uint id : SV_VertexID) {
+    float2 q = float2(id & 1, (id >> 1) & 1);   // (0,0),(1,0),(0,1),(1,1)
+    VSOut o;
+    o.pos = float4(posClip + q * sizeClip, 0, 1);
+    o.uv  = q;
+    return o;
+}
+Texture2D tex : register(t0);
+SamplerState smp : register(s0);
+float4 PSMain(VSOut i) : SV_TARGET { return tex.Sample(smp, i.uv); }
+)";
+
+static ID3DBlob* CompileShader(const char* src, const char* entry, const char* target) {
     ID3DBlob* code = nullptr; ID3DBlob* err = nullptr;
-    HRESULT hr = D3DCompile(kMagHLSL, std::strlen(kMagHLSL), nullptr, nullptr, nullptr,
+    HRESULT hr = D3DCompile(src, std::strlen(src), nullptr, nullptr, nullptr,
                             entry, target, 0, 0, &code, &err);
     if (err) err->Release();
     if (FAILED(hr)) { SafeRelease(code); return nullptr; }
     return code;
+}
+
+// Decode an HCURSOR into top-down 32bpp BGRA (matches B8G8R8A8_UNORM memory order).
+// Handles color cursors (per-pixel alpha, falling back to the AND mask) and monochrome
+// cursors (mask is double-height: AND then XOR). Returns size + hotspot.
+static bool DecodeCursorBGRA(HCURSOR hc, std::vector<uint32_t>& out,
+                             int& w, int& h, int& hotX, int& hotY) {
+    ICONINFO ii{};
+    if (!GetIconInfo(hc, &ii)) return false;
+    hotX = (int)ii.xHotspot; hotY = (int)ii.yHotspot;
+    HDC hdc = GetDC(nullptr);
+    BITMAP bm{};
+    bool ok = false;
+    if (ii.hbmColor) {
+        GetObjectW(ii.hbmColor, sizeof(bm), &bm);
+        w = bm.bmWidth; h = bm.bmHeight;
+        out.assign((size_t)w * h, 0);
+        BITMAPINFO bi{}; bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bi.bmiHeader.biWidth = w; bi.bmiHeader.biHeight = -h;   // top-down
+        bi.bmiHeader.biPlanes = 1; bi.bmiHeader.biBitCount = 32; bi.bmiHeader.biCompression = BI_RGB;
+        GetDIBits(hdc, ii.hbmColor, 0, h, out.data(), &bi, DIB_RGB_COLORS);
+        bool anyAlpha = false;
+        for (uint32_t px : out) if (px & 0xFF000000u) { anyAlpha = true; break; }
+        if (!anyAlpha) {  // no per-pixel alpha: derive it from the AND mask (white = transparent)
+            std::vector<uint32_t> mask((size_t)w * h, 0);
+            GetDIBits(hdc, ii.hbmMask, 0, h, mask.data(), &bi, DIB_RGB_COLORS);
+            for (size_t i = 0; i < out.size(); ++i) {
+                bool transparent = (mask[i] & 0x00FFFFFFu) != 0;
+                out[i] = (out[i] & 0x00FFFFFFu) | (transparent ? 0u : 0xFF000000u);
+            }
+        }
+        ok = true;
+    } else if (ii.hbmMask) {
+        GetObjectW(ii.hbmMask, sizeof(bm), &bm);
+        w = bm.bmWidth; h = bm.bmHeight / 2;
+        std::vector<uint32_t> both((size_t)w * bm.bmHeight, 0);
+        BITMAPINFO bi{}; bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bi.bmiHeader.biWidth = w; bi.bmiHeader.biHeight = -bm.bmHeight;
+        bi.bmiHeader.biPlanes = 1; bi.bmiHeader.biBitCount = 32; bi.bmiHeader.biCompression = BI_RGB;
+        GetDIBits(hdc, ii.hbmMask, 0, bm.bmHeight, both.data(), &bi, DIB_RGB_COLORS);
+        out.assign((size_t)w * h, 0);
+        for (int y = 0; y < h; ++y) for (int x = 0; x < w; ++x) {
+            uint32_t andPx = both[(size_t)y * w + x] & 0xFFFFFFu;
+            uint32_t xorPx = both[(size_t)(y + h) * w + x] & 0xFFFFFFu;
+            uint32_t pix;
+            if (andPx) pix = xorPx ? 0xFFFFFFFFu : 0x00000000u;  // transparent, or invert->white
+            else       pix = xorPx ? 0xFFFFFFFFu : 0xFF000000u;  // white, or black
+            out[(size_t)y * w + x] = pix;
+        }
+        ok = true;
+    }
+    ReleaseDC(nullptr, hdc);
+    if (ii.hbmColor) DeleteObject(ii.hbmColor);
+    if (ii.hbmMask) DeleteObject(ii.hbmMask);
+    return ok && w > 0 && h > 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -71,6 +143,19 @@ struct RenderEngine::State {
     ID3D11Buffer* cb = nullptr;                // uvMin/uvMax for the source sub-rect
     ID3D11SamplerState* sampLinear = nullptr;
     ID3D11SamplerState* sampPoint = nullptr;
+
+    // Cursor pass (live OS cursor decoded to a texture; works even while hidden).
+    ID3D11VertexShader* cvs = nullptr;
+    ID3D11PixelShader* cps = nullptr;
+    ID3D11Buffer* ccb = nullptr;               // posClip/sizeClip for the cursor quad
+    ID3D11BlendState* blend = nullptr;         // alpha blend for the cursor
+    ID3D11Texture2D* cursorTex = nullptr;
+    ID3D11ShaderResourceView* cursorSRV = nullptr;
+    HCURSOR lastCursor = nullptr;              // re-decode only when the OS cursor changes
+    int curW = 0, curH = 0, hotX = 0, hotY = 0;
+    bool cursorReady = false;
+
+    void updateCursorTexture();   // GetCursorInfo -> decode -> (re)upload cursorTex/SRV on change
 
     // Cursor delivered separately by DDA.
     bool ptrVisible = false;
@@ -165,6 +250,9 @@ static LRESULT CALLBACK OverlayProc(HWND h, UINT m, WPARAM w, LPARAM l) {
 RenderEngine::RenderEngine() : s_(new State()) {}
 RenderEngine::~RenderEngine() { shutdown(); delete s_; s_ = nullptr; }
 bool RenderEngine::ready() const { return s_ && s_->ready; }
+void RenderEngine::debugInfo(int& screenW, int& screenH, int& curW, int& curH, int& hotX, int& hotY) const {
+    screenW = s_->sw; screenH = s_->sh; curW = s_->curW; curH = s_->curH; hotX = s_->hotX; hotY = s_->hotY;
+}
 
 bool RenderEngine::initialize(int screenW, int screenH) {
     s_->sw = screenW;
@@ -241,8 +329,8 @@ bool RenderEngine::initialize(int screenW, int screenH) {
         return false;
 
     // --- Magnify shader pipeline ---
-    ID3DBlob* vsb = CompileShader("VSMain", "vs_5_0");
-    ID3DBlob* psb = CompileShader("PSMain", "ps_5_0");
+    ID3DBlob* vsb = CompileShader(kMagHLSL, "VSMain", "vs_5_0");
+    ID3DBlob* psb = CompileShader(kMagHLSL, "PSMain", "ps_5_0");
     if (!vsb || !psb) { SafeRelease(vsb); SafeRelease(psb); return false; }
     hr = s_->device->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &s_->vs);
     HRESULT hr2 = s_->device->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &s_->ps);
@@ -254,6 +342,32 @@ bool RenderEngine::initialize(int screenW, int screenH) {
     cbd.Usage = D3D11_USAGE_DEFAULT;
     cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
     if (FAILED(s_->device->CreateBuffer(&cbd, nullptr, &s_->cb))) return false;
+
+    // --- Cursor shader pipeline ---
+    ID3DBlob* cvsb = CompileShader(kCursorHLSL, "VSMain", "vs_5_0");
+    ID3DBlob* cpsb = CompileShader(kCursorHLSL, "PSMain", "ps_5_0");
+    if (!cvsb || !cpsb) { SafeRelease(cvsb); SafeRelease(cpsb); return false; }
+    HRESULT hr3 = s_->device->CreateVertexShader(cvsb->GetBufferPointer(), cvsb->GetBufferSize(), nullptr, &s_->cvs);
+    HRESULT hr4 = s_->device->CreatePixelShader(cpsb->GetBufferPointer(), cpsb->GetBufferSize(), nullptr, &s_->cps);
+    SafeRelease(cvsb); SafeRelease(cpsb);
+    if (FAILED(hr3) || FAILED(hr4)) return false;
+
+    D3D11_BUFFER_DESC ccbd{};
+    ccbd.ByteWidth = 16;   // float2 posClip + float2 sizeClip
+    ccbd.Usage = D3D11_USAGE_DEFAULT;
+    ccbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    if (FAILED(s_->device->CreateBuffer(&ccbd, nullptr, &s_->ccb))) return false;
+
+    D3D11_BLEND_DESC bd{};
+    bd.RenderTarget[0].BlendEnable = TRUE;
+    bd.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
+    bd.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
+    bd.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+    bd.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+    bd.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
+    bd.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+    bd.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+    if (FAILED(s_->device->CreateBlendState(&bd, &s_->blend))) return false;
 
     D3D11_SAMPLER_DESC samp{};
     samp.AddressU = samp.AddressV = samp.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
@@ -276,8 +390,27 @@ void RenderEngine::setVisible(bool visible) {
     if (s_ && s_->hwnd) ShowWindow(s_->hwnd, visible ? SW_SHOWNOACTIVATE : SW_HIDE);
 }
 
+void RenderEngine::State::updateCursorTexture() {
+    CURSORINFO ci{ sizeof(ci) };
+    if (!GetCursorInfo(&ci) || !ci.hCursor) return;
+    if (ci.hCursor == lastCursor && cursorReady) return;   // unchanged; keep the texture
+    std::vector<uint32_t> bgra; int w = 0, h = 0, hx = 0, hy = 0;
+    if (!DecodeCursorBGRA(ci.hCursor, bgra, w, h, hx, hy)) return;
+    SafeRelease(cursorSRV);
+    SafeRelease(cursorTex);
+    D3D11_TEXTURE2D_DESC td{};
+    td.Width = w; td.Height = h; td.MipLevels = 1; td.ArraySize = 1;
+    td.Format = DXGI_FORMAT_B8G8R8A8_UNORM; td.SampleDesc.Count = 1;
+    td.Usage = D3D11_USAGE_IMMUTABLE; td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    D3D11_SUBRESOURCE_DATA srd{}; srd.pSysMem = bgra.data(); srd.SysMemPitch = w * 4;
+    if (FAILED(device->CreateTexture2D(&td, &srd, &cursorTex))) { cursorReady = false; return; }
+    if (FAILED(device->CreateShaderResourceView(cursorTex, nullptr, &cursorSRV))) { cursorReady = false; return; }
+    curW = w; curH = h; hotX = hx; hotY = hy; lastCursor = ci.hCursor; cursorReady = true;
+}
+
 void RenderEngine::State::render(const RenderFrameParams& p) {
     capture();
+    updateCursorTexture();
 
     ID3D11DeviceContext* c = ctx;
     D3D11_VIEWPORT vp{}; vp.Width = (float)sw; vp.Height = (float)sh; vp.MaxDepth = 1.0f;
@@ -285,6 +418,8 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
     c->OMSetRenderTargets(1, &rtv, nullptr);
     const float clear[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
     c->ClearRenderTargetView(rtv, clear);
+    c->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);     // opaque magnify pass
+    c->IASetInputLayout(nullptr);
 
     if (haveDesktop) {
         double level = p.level < 1.0 ? 1.0 : p.level;
@@ -293,8 +428,6 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
             (float)(p.srcLeft / sw), (float)(p.srcTop / sh),
             (float)((p.srcLeft + viewW) / sw), (float)((p.srcTop + viewH) / sh) };
         c->UpdateSubresource(cb, 0, nullptr, &cbv, 0, 0);
-
-        c->IASetInputLayout(nullptr);
         c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         c->VSSetShader(vs, nullptr, 0);
         c->VSSetConstantBuffers(0, 1, &cb);
@@ -303,6 +436,28 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
         ID3D11SamplerState* samp = p.bilinear ? sampLinear : sampPoint;
         c->PSSetSamplers(0, 1, &samp);
         c->Draw(3, 0);
+    }
+
+    // Cursor pass: alpha-blended quad at the centered hotspot, scaled by zoom.
+    if (cursorReady) {
+        double scale = p.cursorScaleWithZoom ? (p.level < 1.0 ? 1.0 : p.level) : 1.0;
+        double drawW = curW * scale, drawH = curH * scale;
+        double tlX = p.cursorScreenX - hotX * scale;   // top-left so the hotspot lands at cursorScreen
+        double tlY = p.cursorScreenY - hotY * scale;
+        float posClipX = (float)(tlX / sw * 2.0 - 1.0);
+        float posClipY = (float)(1.0 - tlY / sh * 2.0);
+        float sizeClipX = (float)(drawW / sw * 2.0);
+        float sizeClipY = (float)(-(drawH / sh * 2.0));   // clip-y up vs screen-y down
+        float ccbv[4] = { posClipX, posClipY, sizeClipX, sizeClipY };
+        c->UpdateSubresource(ccb, 0, nullptr, ccbv, 0, 0);
+        c->OMSetBlendState(blend, nullptr, 0xFFFFFFFF);
+        c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+        c->VSSetShader(cvs, nullptr, 0);
+        c->VSSetConstantBuffers(0, 1, &ccb);
+        c->PSSetShader(cps, nullptr, 0);
+        c->PSSetShaderResources(0, 1, &cursorSRV);
+        c->PSSetSamplers(0, 1, &sampLinear);
+        c->Draw(4, 0);
     }
 }
 
@@ -338,6 +493,12 @@ void RenderEngine::shutdown() {
         s_->cursorHidden = false;
         SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, SPIF_SENDCHANGE);  // safety net
     }
+    SafeRelease(s_->cursorSRV);
+    SafeRelease(s_->cursorTex);
+    SafeRelease(s_->blend);
+    SafeRelease(s_->ccb);
+    SafeRelease(s_->cps);
+    SafeRelease(s_->cvs);
     SafeRelease(s_->sampPoint);
     SafeRelease(s_->sampLinear);
     SafeRelease(s_->cb);
@@ -438,6 +599,17 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         Sleep(16);
     }
     eng.dumpFrame(p, L"render_smoke.png");   // render-then-dump (pre-Present) for a true capture
+    int dsw, dsh, cw, ch, hx, hy; eng.debugInfo(dsw, dsh, cw, ch, hx, hy);
+    FILE* f = nullptr; _wfopen_s(&f, L"render_smoke_diag.txt", L"w");
+    if (f) {
+        fprintf(f, "GetSystemMetrics sw=%d sh=%d\n", sw, sh);
+        fprintf(f, "engine sw=%d sh=%d\n", dsw, dsh);
+        fprintf(f, "cursor w=%d h=%d hotX=%d hotY=%d\n", cw, ch, hx, hy);
+        fprintf(f, "params cursorScreenX=%.1f cursorScreenY=%.1f level=%.1f\n",
+                p.cursorScreenX, p.cursorScreenY, p.level);
+        fprintf(f, "dpiForSystem=%u\n", GetDpiForSystem());
+        fclose(f);
+    }
     Sleep(200);
     eng.shutdown();
     return 0;

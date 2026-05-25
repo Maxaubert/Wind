@@ -30,6 +30,8 @@ public:
     void hideSystemCursor(bool hide);              // MagShowSystemCursor wrapper + safe-restore net
     void shutdown();                               // restore cursor, destroy everything
     bool ready() const;
+    // Verification only: decoded cursor metrics + the screen size the engine is using.
+    void debugInfo(int& screenW, int& screenH, int& curW, int& curH, int& hotX, int& hotY) const;
     // Verification only: copy the back-buffer to a 32bpp BGRA PNG.
     bool dumpBackbufferPng(const wchar_t* path);
     // Verification only: render one frame and dump it before Present (so the PNG matches the
