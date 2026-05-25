@@ -24,6 +24,8 @@ Config ParseConfig(const std::string& text) {
             if (key == "zoomInButton")          c.zoomInButton = std::stoi(val);
             else if (key == "zoomOutButton")    c.zoomOutButton = std::stoi(val);
             else if (key == "recenterVk")       c.recenterVk = std::stoi(val);
+            else if (key == "zoomInVk")         c.zoomInVk = std::stoi(val);
+            else if (key == "zoomOutVk")        c.zoomOutVk = std::stoi(val);
             else if (key == "maxLevel")         c.maxLevel = std::stod(val);
             else if (key == "fullRangeSeconds") c.fullRangeSeconds = std::stod(val);
             else if (key == "sensitivity")      c.sensitivity = std::stod(val);
@@ -62,7 +64,13 @@ Config LoadConfig(const std::wstring& path) {
         // Write defaults so the user has something to edit.
         std::ofstream out(path);
         out << "; Wind magnifier config. Edit and save; changes apply within ~1s.\n"
-               "zoomInButton=2\nzoomOutButton=1\nrecenterVk=0\n"
+               "zoomInButton=2\nzoomOutButton=1\n"
+               "; Keyboard hold-to-zoom (Virtual-Key codes, decimal; 0=unbound). Works without a\n"
+               ";   side-button mouse. The bound key still reaches the focused app, so pick one you\n"
+               ";   don't use in games. e.g. 33=PageUp 34=PageDown 112=F1 113=F2 145=ScrollLock.\n"
+               "zoomInVk=0\nzoomOutVk=0\n"
+               "; recenterVk: tap to recenter the lens on the cursor (VK code; 0=unbound)\n"
+               "recenterVk=0\n"
                "maxLevel=8.0\nfullRangeSeconds=1.2\nsensitivity=1.0\n"
                "; centerDeadzone: keep 0 (strict center) for the smooth-cursor overlay\n"
                "centerDeadzone=0.0\n"

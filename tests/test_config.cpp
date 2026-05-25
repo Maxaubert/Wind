@@ -44,6 +44,16 @@ TEST_CASE("vsync, dwmFlush, tickHzCap can be set") {
     CHECK(ParseConfig("dwmFlush=1\n").dwmFlush == 1);
     CHECK(ParseConfig("tickHzCap=240\n").tickHzCap == 240);
 }
+TEST_CASE("keyboard zoom / recenter Virtual-Key bindings parse; default unbound") {
+    Config d = ParseConfig("");
+    CHECK(d.zoomInVk == 0);
+    CHECK(d.zoomOutVk == 0);
+    CHECK(d.recenterVk == 0);
+    Config c = ParseConfig("zoomInVk=33\nzoomOutVk=34\nrecenterVk=112\n");
+    CHECK(c.zoomInVk == 33);
+    CHECK(c.zoomOutVk == 34);
+    CHECK(c.recenterVk == 112);
+}
 TEST_CASE("parses cursorVisibility") {
     CHECK(ParseConfig("cursorVisibility=always\n").cursorVisibility == "always");
     CHECK(ParseConfig("cursorVisibility=never\n").cursorVisibility == "never");
