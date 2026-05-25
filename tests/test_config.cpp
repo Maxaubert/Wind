@@ -32,14 +32,6 @@ TEST_CASE("renderer knobs have sane defaults") {
     CHECK(c.vsync == 1);                       // vsync on by default
     CHECK(c.dwmFlush == 1);                     // DwmFlush pacing on by default (the smooth path)
     CHECK(c.tickHzCap == 0);                    // 0 = auto-detect display refresh rate
-    CHECK(c.present == "blt");                   // blt+DwmFlush backend by default
-    CHECK(c.gpuPriority == 7);                    // favor the magnifier on the GPU by default
-}
-TEST_CASE("present backend and gpuPriority parse") {
-    CHECK(ParseConfig("present=dcomp\n").present == "dcomp");
-    CHECK(ParseConfig("present=blt\n").present == "blt");
-    CHECK(ParseConfig("gpuPriority=0\n").gpuPriority == 0);
-    CHECK(ParseConfig("gpuPriority=-7\n").gpuPriority == -7);
 }
 TEST_CASE("vsync, dwmFlush, tickHzCap can be set") {
     CHECK(ParseConfig("vsync=0\n").vsync == 0);
