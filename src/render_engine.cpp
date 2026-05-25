@@ -198,11 +198,12 @@ bool RenderEngine::State::recreateDupl() {
 bool RenderEngine::State::capture() {
     if (!dupl && !recreateDupl()) return false;
 
-    // Once we have a frame, a short timeout is fine (a static desktop -> keep the last copy,
-    // so we can still re-render on pan/zoom). For the very first frame, retry across a larger
-    // budget so a static desktop still yields the initial image instead of black.
+    // Once we have a frame, poll non-blocking (0 ms): a static desktop returns WAIT_TIMEOUT
+    // immediately and we re-pan the cached copy, so panning is never gated on a desktop
+    // change. (An 8 ms wait here stalled every pan frame -> microstutter.) For the very first
+    // frame, retry across a larger budget so a static desktop still yields the initial image.
     const int attempts = haveDesktop ? 1 : 40;
-    const DWORD timeoutMs = haveDesktop ? 8 : 25;
+    const DWORD timeoutMs = haveDesktop ? 0 : 25;
     for (int a = 0; a < attempts; ++a) {
         IDXGIResource* res = nullptr;
         DXGI_OUTDUPL_FRAME_INFO fi{};

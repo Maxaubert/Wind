@@ -15,14 +15,14 @@ TEST_CASE("centered: cursor sits at screen center, no raw movement") {
     CHECK(r.clickDesktopY == 540);
 }
 
-TEST_CASE("centered: raw movement pans the world, cursor stays centered") {
+TEST_CASE("centered: raw movement pans the world at desktop speed, cursor stays centered") {
     CursorMapper m(1920, 1080, 1.0);     // sensitivity 1.0
     m.reset(960, 540);
-    auto r = m.update(20, 0, 2.0);       // 20 raw * 1.0 / 2.0 level = +10 desktop px
-    CHECK(m.centerX() == doctest::Approx(970.0));
-    CHECK(r.srcLeft == doctest::Approx(490.0));        // 970 - 480
+    auto r = m.update(20, 0, 2.0);       // 20 raw * 1.0 = +20 desktop px (zoom-independent)
+    CHECK(m.centerX() == doctest::Approx(980.0));
+    CHECK(r.srcLeft == doctest::Approx(500.0));        // 980 - 480
     CHECK(r.cursorScreenX == doctest::Approx(960.0));  // still centered
-    CHECK(r.clickDesktopX == 970);                     // click point tracks lens center
+    CHECK(r.clickDesktopX == 980);                     // click point tracks lens center
 }
 
 TEST_CASE("edge: cursor shifts off-center when the view clamps at the desktop edge") {
@@ -46,16 +46,18 @@ TEST_CASE("lens center clamps to the desktop bounds") {
     CHECK(m.centerY() == doctest::Approx(1080.0));
 }
 
-TEST_CASE("sensitivity scales lens movement; higher zoom moves the lens less per raw count") {
+TEST_CASE("sensitivity scales lens movement; zoom level does NOT change desktop speed") {
     CursorMapper slow(1920, 1080, 0.5);
     slow.reset(960, 540);
-    slow.update(40, 0, 2.0);             // 40 * 0.5 / 2.0 = +10
-    CHECK(slow.centerX() == doctest::Approx(970.0));
+    slow.update(40, 0, 2.0);             // 40 * 0.5 = +20
+    CHECK(slow.centerX() == doctest::Approx(980.0));
 
-    CursorMapper z(1920, 1080, 1.0);
-    z.reset(960, 540);
-    z.update(40, 0, 8.0);                // 40 * 1.0 / 8.0 = +5
-    CHECK(z.centerX() == doctest::Approx(965.0));
+    // Same raw delta + sensitivity at a higher zoom moves the lens the SAME desktop amount
+    // (the world just scrolls faster on screen) - the fix for "cursor too slow when zoomed".
+    CursorMapper a(1920, 1080, 1.0);  a.reset(960, 540);  a.update(40, 0, 2.0);
+    CursorMapper b(1920, 1080, 1.0);  b.reset(960, 540);  b.update(40, 0, 8.0);
+    CHECK(a.centerX() == doctest::Approx(1000.0));
+    CHECK(b.centerX() == doctest::Approx(1000.0));     // zoom-independent
 }
 
 TEST_CASE("reset overrides the accumulated center") {

@@ -9,11 +9,12 @@ void CursorMapper::reset(double centerX, double centerY) { cx_ = centerX; cy_ = 
 
 MapResult CursorMapper::update(int rawDx, int rawDy, double level) {
     if (level < 1.0) level = 1.0;
-    // Sub-pixel lens integration. Dividing by level keeps the on-screen pan speed
-    // consistent across zoom: at 8x one raw count moves the world the same on-screen
-    // distance as at 2x, so panning never feels faster just because you zoomed in.
-    cx_ += rawDx * sens_ / level;
-    cy_ += rawDy * sens_ / level;
+    // Sub-pixel lens integration at *desktop* speed (not divided by zoom): the focus moves
+    // at the same hand-speed whether you're at 2x or 8x, matching Windows Magnifier. The
+    // world therefore scrolls faster on screen at higher zoom, which is the natural feel;
+    // dividing by level (an earlier try) made high zoom feel sluggish. Tune with sensitivity.
+    cx_ += rawDx * sens_;
+    cy_ += rawDy * sens_;
     if (cx_ < 0) cx_ = 0; else if (cx_ > sw_) cx_ = sw_;
     if (cy_ < 0) cy_ = 0; else if (cy_ > sh_) cy_ = sh_;
 

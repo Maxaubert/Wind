@@ -168,11 +168,18 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         }
         if (!running) break;
 
-        if (timer) {
-            SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);
-            WaitForSingleObject(timer, INFINITE);
-        } else {
-            Sleep(1000 / hz);
+        // Pacing: while the render engine is actively zoomed, its vsync Present(1,0) paces
+        // the loop - so we skip the timer here to avoid timer/vsync double-pacing (which
+        // beat against each other and caused microstutter). The mag path, and the render
+        // path while idle at 1x, use the timer to hit ~refresh rate without busy-spinning.
+        bool renderPresentPaces = useRender && prevLvl > 1.0;
+        if (!renderPresentPaces) {
+            if (timer) {
+                SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);
+                WaitForSingleObject(timer, INFINITE);
+            } else {
+                Sleep(1000 / hz);
+            }
         }
 
         LARGE_INTEGER now;
