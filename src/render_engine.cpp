@@ -21,17 +21,47 @@ namespace wind {
 
 template <class T> static void SafeRelease(T*& p) { if (p) { p->Release(); p = nullptr; } }
 
-// Constant buffer: source sub-rect UV bounds, the per-frame pan shift (motion blur), and an
-// output brightness multiplier (to match the magnified view to an HDR desktop's white level).
-// 32 bytes: uvMin+uvMax pack into register 0; blurUV+brightness+pad into register 1.
-struct MagCB { float uvMinX, uvMinY, uvMaxX, uvMaxY, blurX, blurY, brightness, padB; };
+// Query the OS "SDR content" white level (nits) for the active HDR path, so HDR->SDR
+// tonemapping matches the desktop automatically (no per-user brightness tweak). Returns a
+// sensible default if the query fails. nits = SDRWhiteLevel / 1000 * 80 (per MS docs).
+static double GetSDRWhiteNits() {
+    UINT32 nPath = 0, nMode = 0;
+    if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &nPath, &nMode) != ERROR_SUCCESS)
+        return 200.0;
+    std::vector<DISPLAYCONFIG_PATH_INFO> paths(nPath);
+    std::vector<DISPLAYCONFIG_MODE_INFO> modes(nMode);
+    if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &nPath, paths.data(), &nMode, modes.data(),
+                           nullptr) != ERROR_SUCCESS)
+        return 200.0;
+    for (UINT32 i = 0; i < nPath; ++i) {
+        DISPLAYCONFIG_SDR_WHITE_LEVEL wl{};
+        wl.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL;
+        wl.header.size = sizeof(wl);
+        wl.header.adapterId = paths[i].targetInfo.adapterId;
+        wl.header.id = paths[i].targetInfo.id;
+        if (DisplayConfigGetDeviceInfo(&wl.header) == ERROR_SUCCESS && wl.SDRWhiteLevel > 0)
+            return wl.SDRWhiteLevel / 1000.0 * 80.0;
+    }
+    return 200.0;
+}
+
+// Constant buffer: source sub-rect UV bounds, per-frame pan shift (motion blur), output
+// brightness, and HDR tonemap params. 48 bytes (three 16-byte registers).
+struct MagCB {
+    float uvMinX, uvMinY, uvMaxX, uvMaxY;   // reg 0
+    float blurX, blurY, brightness, hdrMode;// reg 1 (hdrMode: 0 = SDR passthrough, 1 = PQ->SDR)
+    float sdrWhiteNorm, pad0, pad1, pad2;   // reg 2 (sdrWhiteNorm = 10000 / SDR-white-nits)
+};
 
 // Fullscreen-triangle magnify shader. The VS maps the visible [0,1] screen UV into the
 // source sub-rect; the PS samples the captured desktop. When panning, it integrates several
 // taps along the per-frame pan vector (blurUV) - motion blur that smears the big per-frame
 // step at high zoom into continuous motion, and collapses to a sharp single tap when still.
 static const char* kMagHLSL = R"(
-cbuffer CB : register(b0) { float2 uvMin; float2 uvMax; float2 blurUV; float brightness; float pad; };
+cbuffer CB : register(b0) {
+    float2 uvMin; float2 uvMax; float2 blurUV; float brightness; float hdrMode;
+    float sdrWhiteNorm; float3 pad;
+};
 struct VSOut { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; };
 VSOut VSMain(uint id : SV_VertexID) {
     float2 t = float2((id << 1) & 2, id & 2);   // (0,0),(2,0),(0,2)
@@ -42,6 +72,19 @@ VSOut VSMain(uint id : SV_VertexID) {
 }
 Texture2D tex : register(t0);
 SamplerState smp : register(s0);
+
+// ST.2084 (PQ) EOTF: encoded [0,1] -> normalized linear where 1.0 = 10000 nits.
+float3 PQtoLinear(float3 e) {
+    const float m1 = 0.1593017578125, m2 = 78.84375;
+    const float c1 = 0.8359375, c2 = 18.8515625, c3 = 18.6875;
+    float3 ep = pow(max(e, 0.0), 1.0 / m2);
+    return pow(max(ep - c1, 0.0) / (c2 - c3 * ep), 1.0 / m1);
+}
+float3 LinearToSrgb(float3 l) {
+    l = saturate(l);
+    return (l <= 0.0031308) ? (l * 12.92) : (1.055 * pow(l, 1.0 / 2.4) - 0.055);
+}
+
 float4 PSMain(VSOut i) : SV_TARGET {
     float4 c;
     if (abs(blurUV.x) + abs(blurUV.y) < 1e-6) {
@@ -55,7 +98,18 @@ float4 PSMain(VSOut i) : SV_TARGET {
         }
         c = acc / N;
     }
-    c.rgb *= brightness;                         // match magnified output to the desktop white level
+    if (hdrMode > 0.5) {
+        // HDR10 source: PQ-decode, Rec.2020 -> Rec.709 gamut, scale so SDR white -> 1.0,
+        // then sRGB-encode. Reconstructs the SDR appearance the desktop shows on HDR.
+        float3 lin = PQtoLinear(c.rgb);
+        float3x3 m = float3x3( 1.6605, -0.5876, -0.0728,
+                              -0.1246,  1.1329, -0.0083,
+                              -0.0182, -0.1006,  1.1187 );
+        lin = mul(m, lin);
+        lin = max(lin, 0.0) * sdrWhiteNorm;      // SDR white -> 1.0
+        c.rgb = LinearToSrgb(lin);
+    }
+    c.rgb *= brightness;                         // optional fine-tune (default 1.0)
     return c;
 }
 )";
@@ -167,6 +221,8 @@ struct RenderEngine::State {
     UINT ddaFormat = 0;          // DXGI_FORMAT of the duplicated surface
     int  outColorSpace = -1;     // DXGI_COLOR_SPACE_TYPE of the output (12 = HDR10 G2084)
     int  outBitsPerColor = 0;
+    double sdrWhiteNits = 200.0; // OS SDR white level (for HDR->SDR tonemapping)
+    bool isHdr = false;          // output is HDR10 PQ -> tonemap to SDR in the shader
 
     // Magnify pass.
     ID3D11VertexShader* vs = nullptr;
@@ -306,8 +362,9 @@ void RenderEngine::debugInfo(int& screenW, int& screenH, int& curW, int& curH, i
     screenW = s_->sw; screenH = s_->sh; curW = s_->curW; curH = s_->curH; hotX = s_->hotX; hotY = s_->hotY;
 }
 void RenderEngine::debugBlur(double& bx, double& by) const { bx = s_->lastBlurX; by = s_->lastBlurY; }
-void RenderEngine::debugHdr(unsigned& ddaFormat, int& colorSpace, int& bitsPerColor) const {
+void RenderEngine::debugHdr(unsigned& ddaFormat, int& colorSpace, int& bitsPerColor, double& sdrWhiteNits) const {
     ddaFormat = s_->ddaFormat; colorSpace = s_->outColorSpace; bitsPerColor = s_->outBitsPerColor;
+    sdrWhiteNits = s_->sdrWhiteNits;
 }
 
 bool RenderEngine::initialize(int screenW, int screenH, int zorderBand) {
@@ -399,10 +456,17 @@ bool RenderEngine::initialize(int screenW, int screenH, int zorderBand) {
     SafeRelease(back);
     if (FAILED(hr)) return false;
 
-    // --- Desktop copy texture (SRV-able; DDA frames are copied into this) ---
+    // --- Desktop Duplication first, so we know the capture format + color space ---
+    if (!s_->recreateDupl()) return false;
+    s_->isHdr = (s_->outColorSpace == (int)DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020);  // 12
+    if (s_->isHdr) s_->sdrWhiteNits = GetSDRWhiteNits();
+
+    // --- Desktop copy texture: match the capture format (e.g. R10G10B10A2 on HDR) so the raw
+    //     PQ values survive for tonemapping; SRV samples it 0..1. ---
+    DXGI_FORMAT copyFmt = (s_->ddaFormat != 0) ? (DXGI_FORMAT)s_->ddaFormat : DXGI_FORMAT_B8G8R8A8_UNORM;
     D3D11_TEXTURE2D_DESC dc{};
     dc.Width = screenW; dc.Height = screenH; dc.MipLevels = 1; dc.ArraySize = 1;
-    dc.Format = DXGI_FORMAT_B8G8R8A8_UNORM; dc.SampleDesc.Count = 1;
+    dc.Format = copyFmt; dc.SampleDesc.Count = 1;
     dc.Usage = D3D11_USAGE_DEFAULT; dc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
     if (FAILED(s_->device->CreateTexture2D(&dc, nullptr, &s_->desktopCopy))) return false;
     if (FAILED(s_->device->CreateShaderResourceView(s_->desktopCopy, nullptr, &s_->desktopSRV)))
@@ -473,9 +537,6 @@ bool RenderEngine::initialize(int screenW, int screenH, int zorderBand) {
     s_->device->CreateSamplerState(&samp, &s_->sampPoint);
     if (!s_->sampLinear || !s_->sampPoint) return false;
 
-    // --- Desktop Duplication ---
-    if (!s_->recreateDupl()) return false;
-
     s_->ready = true;
     return true;
 }
@@ -535,10 +596,13 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
         lastBlurX = blurX; lastBlurY = blurY;
 
         float bright = (p.brightness > 0.0) ? (float)p.brightness : 1.0f;
+        float hdrMode = isHdr ? 1.0f : 0.0f;
+        float sdrWhiteNorm = (isHdr && sdrWhiteNits > 1.0) ? (float)(10000.0 / sdrWhiteNits) : 1.0f;
         MagCB cbv{
             (float)(p.srcLeft / sw), (float)(p.srcTop / sh),
             (float)((p.srcLeft + viewW) / sw), (float)((p.srcTop + viewH) / sh),
-            (float)blurX, (float)blurY, bright, 0.0f };
+            (float)blurX, (float)blurY, bright, hdrMode,
+            sdrWhiteNorm, 0.0f, 0.0f, 0.0f };
         c->UpdateSubresource(cb, 0, nullptr, &cbv, 0, 0);
         c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         c->VSSetShader(vs, nullptr, 0);

@@ -406,13 +406,21 @@ overlay is WDA_EXCLUDEFROMCAPTURE, so it can only be captured from inside the ap
   have alpha) keep the normal alpha blend. (Confirmed via `tools/cursor_decode_test.cpp`:
   ARROW/HAND `anyAlpha=1`, IBEAM `anyAlpha=0`.)
 
-## Open / future: HDR brightness shift
-On an HDR display, zooming in (overlay shown) makes the screen slightly brighter; zooming out
-darkens it back. Cause: the overlay/capture path is SDR 8-bit (`B8G8R8A8_UNORM`), so the
-magnified frame is composited at the "SDR content brightness" white level, which differs from
-how the native HDR desktop was displayed. Proper fix = full HDR support (capture + FP16 scRGB
-swapchain + matching color space / white level), which was explicitly out of v1 scope and is
-uncertain on the layered/blt overlay. Tracked as a follow-up; the shift is minor.
+## HDR tonemapping (fixed)
+On HDR10 displays (`outColorSpace=12`, R10G10B10A2, PQ) the magnified view was brighter and
+the colors blown out / shifted - we were treating PQ-encoded Rec.2020 values as plain SDR. A
+flat brightness multiplier couldn't fix it (it's a transfer-function + gamut mismatch, not a
+linear scale). Fixed with a real HDR->SDR tonemap in the magnify shader, applied only when the
+output is HDR10:
+- capture the raw 10-bit PQ (desktopCopy now matches the duplication format, e.g. R10G10B10A2),
+- PQ (ST.2084) decode -> normalized linear, Rec.2020 -> Rec.709 gamut, scale so the OS SDR
+  white level maps to 1.0, then sRGB-encode.
+- The SDR white level is queried automatically (`DisplayConfigGetDeviceInfo` /
+  `DISPLAYCONFIG_SDR_WHITE_LEVEL`), so no per-user tuning is needed (verified: 180 nits here).
+- The `brightness` config remains as an optional fine-tune (default 1.0). SDR displays are
+  unaffected (tonemap gated on the HDR10 color space).
+Note: HDR highlights above SDR white are hard-clipped (we reconstruct the SDR appearance, not
+a full HDR present, which would conflict with the layered/blt click-through overlay).
 
 ## Human-only checks (cannot be verified autonomously - please confirm)
 With `engine=render`, zoom in (hold the forward side button) and confirm:
