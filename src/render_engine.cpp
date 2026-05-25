@@ -501,7 +501,12 @@ bool RenderEngine::initialize(int screenW, int screenH, int zorderBand, bool hdr
                                    0, 0, screenW, screenH, nullptr, nullptr, wc.hInstance, nullptr);
     }
     if (!s_->hwnd) return false;
-    SetLayeredWindowAttributes(s_->hwnd, 0, 255, LWA_ALPHA);
+    // Start fully transparent (alpha 0 = invisible). We toggle the layer alpha to show/hide
+    // instead of SW_HIDE/SW_SHOW: a layered window that is hidden and re-shown makes DWM cache
+    // and re-display the frame from when it was last visible, which flashed the previous zoom
+    // session's window on the next zoom-in (most visibly right after an alt-tab). Keeping the
+    // window always shown lets a reveal just flip alpha over the already-current front buffer.
+    SetLayeredWindowAttributes(s_->hwnd, 0, 0, LWA_ALPHA);
     // CRITICAL: exclude our own overlay from screen capture, or Desktop Duplication captures
     // our presented frame and we magnify our own output -> a feedback loop (degenerates to
     // black). WDA_EXCLUDEFROMCAPTURE (Win10 2004+) keeps the window visible on screen but
@@ -625,13 +630,21 @@ bool RenderEngine::initialize(int screenW, int screenH, int zorderBand, bool hdr
     if (s_->capFp16) s_->sdrWhiteNits = GetSDRWhiteNits();
     RLog("initialize done: capFp16=%d sdrWhiteNits=%.1f", (int)s_->capFp16, s_->sdrWhiteNits);
 
+    // Show the window now (invisible at alpha 0). It stays shown for the process lifetime; the
+    // overlay is transparent + click-through + capture-excluded + no-activate, so an always-on
+    // invisible window doesn't interfere with apps or games beneath it.
+    ShowWindow(s_->hwnd, SW_SHOWNOACTIVATE);
+
     s_->ready = true;
     return true;
 }
 
 void RenderEngine::setVisible(bool visible) {
     if (!s_ || !s_->hwnd) return;
-    ShowWindow(s_->hwnd, visible ? SW_SHOWNOACTIVATE : SW_HIDE);
+    // Reveal/hide via layer alpha over the always-shown window (see initialize): flip alpha
+    // rather than SW_HIDE/SW_SHOW, so a reveal shows the already-current front buffer instead
+    // of DWM's cached last-visible frame. Callers present the live frame BEFORE revealing.
+    SetLayeredWindowAttributes(s_->hwnd, 0, visible ? 255 : 0, LWA_ALPHA);
     if (visible) {
         s_->prevSrcValid = false;   // don't motion-blur the jump into zoom
         SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0,   // pop on top immediately on show
