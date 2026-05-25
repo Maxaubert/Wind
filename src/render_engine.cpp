@@ -241,6 +241,7 @@ struct RenderEngine::State {
     ID3D11Texture2D* desktopCopy = nullptr;   // SRV-able copy of the captured desktop (no cursor)
     ID3D11ShaderResourceView* desktopSRV = nullptr;
     bool haveDesktop = false;
+    bool freshCapture = false;   // next capture() must drain to the latest desktop frame (zoom-in)
     // Diagnostics for the HDR investigation: the duplication's surface format + the output's
     // color space / bit depth (tells us whether the desktop is HDR and what we're capturing).
     UINT ddaFormat = 0;          // DXGI_FORMAT of the duplicated surface
@@ -372,18 +373,29 @@ bool RenderEngine::State::ensureDesktopCopy(DXGI_FORMAT fmt) {
 bool RenderEngine::State::capture() {
     if (!dupl && !recreateDupl()) return false;
 
-    // Once we have a frame, poll non-blocking (0 ms): a static desktop returns WAIT_TIMEOUT
-    // immediately and we re-pan the cached copy, so panning is never gated on a desktop
-    // change. (An 8 ms wait here stalled every pan frame -> microstutter.) For the very first
-    // frame, retry across a larger budget so a static desktop still yields the initial image.
-    const int attempts = haveDesktop ? 1 : 40;
-    const DWORD timeoutMs = haveDesktop ? 0 : 25;
-    for (int a = 0; a < attempts; ++a) {
+    // A settled desktop polls non-blocking (0 ms, 1 attempt): a static screen returns
+    // WAIT_TIMEOUT immediately and we re-pan the cached copy, so panning is never gated on a
+    // desktop change. (An 8 ms wait here stalled every pan frame -> microstutter.)
+    //
+    // A "fresh" grab (first frame ever, or a forced refresh on zoom-in) instead retries to land
+    // the initial frame and then DRAINS to the most-recent frame: the first AcquireNextFrame
+    // after a (re)created duplication can briefly be a transitional composite - the window
+    // *underneath* the current one, before it has painted into the captured surface. Taking the
+    // first frame flashed that on reveal; draining past it to the latest avoids it. Bounded:
+    // once one frame is copied we only wait ~3 ms for a newer one, then stop.
+    const bool fresh = freshCapture || !haveDesktop;
+    freshCapture = false;
+    const int   firstAttempts = fresh ? 40 : 1;
+    const DWORD firstTimeout  = fresh ? 25 : 0;
+    bool gotThisCall = false;
+
+    for (int a = 0; a < firstAttempts; ++a) {
         IDXGIResource* res = nullptr;
         DXGI_OUTDUPL_FRAME_INFO fi{};
-        HRESULT hr = dupl->AcquireNextFrame(timeoutMs, &fi, &res);
-        if (hr == DXGI_ERROR_WAIT_TIMEOUT) { SafeRelease(res); continue; }
-        if (hr == DXGI_ERROR_ACCESS_LOST) { SafeRelease(res); SafeRelease(dupl); return false; }
+        const DWORD to = gotThisCall ? 3 : firstTimeout;   // after a copy, only briefly seek a newer frame
+        HRESULT hr = dupl->AcquireNextFrame(to, &fi, &res);
+        if (hr == DXGI_ERROR_WAIT_TIMEOUT) { SafeRelease(res); if (gotThisCall) break; continue; }
+        if (hr == DXGI_ERROR_ACCESS_LOST) { SafeRelease(res); SafeRelease(dupl); return gotThisCall || haveDesktop; }
         if (FAILED(hr)) { SafeRelease(res); return haveDesktop; }
 
         ID3D11Texture2D* tex = nullptr;
@@ -399,6 +411,7 @@ bool RenderEngine::State::capture() {
                     RLog("capture: first frame acquiredFormat=%u copyFormat=%u capFp16=%d",
                          (unsigned)td.Format, (unsigned)copyFormat, (int)capFp16);
                 haveDesktop = true;
+                gotThisCall = true;
             }
         }
         SafeRelease(tex);
@@ -421,9 +434,11 @@ bool RenderEngine::State::capture() {
         }
         SafeRelease(res);
         dupl->ReleaseFrame();
-        return true;
+
+        if (!fresh) return true;          // settled desktop: the single frame is enough
+        // fresh: keep looping to drain to the latest frame (the short `to` breaks us out)
     }
-    return haveDesktop;   // no frame within budget; keep whatever we had
+    return gotThisCall || haveDesktop;   // no frame within budget; keep whatever we had
 }
 
 // The overlay must pass clicks through to the apps beneath. WS_EX_TRANSPARENT plus an
@@ -635,6 +650,7 @@ void RenderEngine::invalidateCapture() {
     if (!s_) return;
     SafeRelease(s_->dupl);
     s_->haveDesktop = false;
+    s_->freshCapture = true;
     s_->prevSrcValid = false;
 }
 

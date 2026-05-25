@@ -115,10 +115,15 @@ static void RunTick(TickState& t) {
             p.brightness = t.cfg.brightness;
             p.cursorMode = CursorModeFromCfg(t.cfg);
             t.renderEngine.renderFrame(p);
-            // Reveal the overlay only AFTER the first live frame is presented. The blt swapchain
-            // retains its last presented frame, so showing first would flash the previous
-            // session's content (the alt-tab "previous window") for one frame.
-            if (zoomIn) t.renderEngine.setVisible(true);
+            if (zoomIn) {
+                // Reveal only after a live frame is in the front buffer, then present once more
+                // now that we're visible - so the first frame DWM composites is guaranteed
+                // current, never the overlay's retained previous-session frame. capture() also
+                // drained to the latest frame above, so it isn't a transitional "underneath"
+                // composite either.
+                t.renderEngine.setVisible(true);
+                t.renderEngine.renderFrame(p);
+            }
         } else if (t.prevLvl > 1.0) {                     // zoom-out transition
             t.renderEngine.setVisible(false);
             t.renderEngine.hideSystemCursor(false);
