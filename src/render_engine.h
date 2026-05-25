@@ -41,9 +41,8 @@ public:
     void debugInfo(int& screenW, int& screenH, int& curW, int& curH, int& hotX, int& hotY) const;
     // Verification only: the last motion-blur vector (UV units) the shader received.
     void debugBlur(double& bx, double& by) const;
-    // Verification only: duplication surface format + output color space / bit depth + the
-    // queried SDR white level (nits) used for HDR->SDR tonemapping.
-    void debugHdr(unsigned& ddaFormat, int& colorSpace, int& bitsPerColor, double& sdrWhiteNits) const;
+    // Verification only: duplication surface format + output color space / bit depth (HDR).
+    void debugHdr(unsigned& ddaFormat, int& colorSpace, int& bitsPerColor) const;
     // Verification only: copy the back-buffer to a 32bpp BGRA PNG.
     bool dumpBackbufferPng(const wchar_t* path);
     // Verification only: render one frame and dump it before Present (so the PNG matches the

@@ -141,11 +141,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             Sleep(16);
         }
         renderEngine.dumpFrame(p, L"wind_selftest.png");
-        unsigned ddaFmt = 0; int cs = -1, bpc = 0; double white = 0;
-        renderEngine.debugHdr(ddaFmt, cs, bpc, white);
+        unsigned ddaFmt = 0; int cs = -1, bpc = 0; renderEngine.debugHdr(ddaFmt, cs, bpc);
         FILE* hf = nullptr; _wfopen_s(&hf, L"wind_hdr_diag.txt", L"w");
-        if (hf) { fprintf(hf, "ddaFormat=%u outColorSpace=%d bitsPerColor=%d sdrWhiteNits=%.1f\n",
-                          ddaFmt, cs, bpc, white); fclose(hf); }
+        if (hf) { fprintf(hf, "ddaFormat=%u outColorSpace=%d bitsPerColor=%d\n", ddaFmt, cs, bpc); fclose(hf); }
         renderEngine.shutdown();
         g_input.stop();
         Tray::Remove();
