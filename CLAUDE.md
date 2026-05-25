@@ -51,6 +51,13 @@ Spec: `docs/superpowers/specs/2026-05-25-own-renderer-design.md`. Issue #4.
   rules out a flip swapchain, so the overlay uses a BLT-model swapchain (DXGI_SWAP_EFFECT_
   DISCARD) - verified to display via the redirection surface. Latency capped with
   `IDXGIDevice1::SetMaximumFrameLatency(1)`.
+- RENDER ENGINE: blt-model present through DWM microstutters - a phase mismatch with DWM's
+  compositor, NOT our loop (proven clean at 144fps via `WIND_PACINGTEST`). Default pacing is
+  `dwmFlush=1`: present immediately (`Present(0,0)`) then `DwmFlush()` to block until DWM's next
+  composite, aligning our frames 1:1 with composition. `dwmFlush=0` = old vsync `Present(1,0)`;
+  both hot-reloadable. DirectComposition + flip-model would be smoother but requires dropping
+  `WS_EX_LAYERED`, which breaks cross-process click-through (tried in #11, reverted) - so it's a
+  dead end unless a non-layered click-through is found. Issue #9.
 - RENDER ENGINE: never leave the OS cursor hidden. `shutdown()` restores via
   `MagShowSystemCursor(TRUE)` + `MagUninitialize` + `SystemParametersInfo(SPI_SETCURSORS)`,
   plus a `SetUnhandledExceptionFilter` net for crashes.
