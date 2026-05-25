@@ -8,5 +8,6 @@ public:
     bool ready() const { return ready_; }
 private:
     bool ready_ = false;
+    bool inputTransformOn_ = false;   // MagSetInputTransform currently enabled
 };
 }

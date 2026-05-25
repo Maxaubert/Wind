@@ -5,26 +5,46 @@ $log = "C:\Users\Admin\Documents\Claude\Github\Wind\tools\uiaccess_setup.log"
 Start-Transcript -Path $log -Force
 try {
     $src = "C:\Users\Admin\Documents\Claude\Github\Wind\Wind.exe"
+    if (-not (Test-Path $src)) { throw "Wind.exe not found - run build.bat first." }
 
-    Write-Output "=== 1. create self-signed code-signing cert ==="
-    $cert = New-SelfSignedCertificate -Type CodeSigningCert `
-        -Subject "CN=Wind Dev Test Cert" `
-        -CertStoreLocation Cert:\LocalMachine\My `
-        -KeyExportPolicy Exportable -NotAfter (Get-Date).AddYears(2)
-    Write-Output "thumbprint=$($cert.Thumbprint)"
+    $subject = "CN=Wind Dev Test Cert"
+    Write-Output "=== 1. find-or-create self-signed code-signing cert ==="
+    # Reuse an existing valid cert so re-running this script does not pile up new certs.
+    $cert = Get-ChildItem Cert:\LocalMachine\My |
+        Where-Object { $_.Subject -eq $subject -and $_.NotAfter -gt (Get-Date) -and $_.HasPrivateKey } |
+        Sort-Object NotAfter -Descending | Select-Object -First 1
+    if ($cert) {
+        Write-Output "reusing existing cert thumbprint=$($cert.Thumbprint)"
+    } else {
+        $cert = New-SelfSignedCertificate -Type CodeSigningCert `
+            -Subject $subject `
+            -CertStoreLocation Cert:\LocalMachine\My `
+            -KeyExportPolicy Exportable -NotAfter (Get-Date).AddYears(2)
+        Write-Output "created cert thumbprint=$($cert.Thumbprint)"
+    }
 
-    Write-Output "=== 2. trust it (LocalMachine Root + TrustedPublisher) ==="
+    Write-Output "=== 2. trust it (LocalMachine Root + TrustedPublisher, if not already) ==="
     $cer = "$env:TEMP\winddev.cer"
     Export-Certificate -Cert $cert -FilePath $cer | Out-Null
-    Import-Certificate -FilePath $cer -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
-    Import-Certificate -FilePath $cer -CertStoreLocation Cert:\LocalMachine\TrustedPublisher | Out-Null
-    Write-Output "trusted ok"
+    foreach ($store in 'Root','TrustedPublisher') {
+        $present = Get-ChildItem "Cert:\LocalMachine\$store" |
+            Where-Object { $_.Thumbprint -eq $cert.Thumbprint }
+        if ($present) {
+            Write-Output "$store : already trusted"
+        } else {
+            Import-Certificate -FilePath $cer -CertStoreLocation "Cert:\LocalMachine\$store" | Out-Null
+            Write-Output "$store : imported"
+        }
+    }
 
     Write-Output "=== 3. sign Wind.exe ==="
     $sig = Set-AuthenticodeSignature -FilePath $src -Certificate $cert -HashAlgorithm SHA256
     Write-Output "sign status=$($sig.Status)"
 
     Write-Output "=== 4. deploy to C:\Program Files\Wind ==="
+    # Stop any running instance (dev or deployed) so the .exe is not locked for copy.
+    Get-Process Wind -ErrorAction SilentlyContinue | Stop-Process -Force
+    Start-Sleep -Milliseconds 300
     New-Item -ItemType Directory -Force "C:\Program Files\Wind" | Out-Null
     Copy-Item $src "C:\Program Files\Wind\Wind.exe" -Force
     $ini = @"
@@ -45,7 +65,12 @@ maxUpdateHz=0
     $v = Get-AuthenticodeSignature "C:\Program Files\Wind\Wind.exe"
     Write-Output "deployed verify status=$($v.Status)"
     Write-Output "signer=$($v.SignerCertificate.Subject)"
-    Write-Output "DONE"
+    Write-Output ""
+    Write-Output "DONE. Launch the SIGNED copy (not the dev build) from a NORMAL (non-elevated)"
+    Write-Output "shell so UIAccess engages:"
+    Write-Output '    Start-Process "C:\Program Files\Wind\Wind.exe"'
+    Write-Output "Verify UIAccess is active (should print 1):"
+    Write-Output '    (Get-Process Wind | Select-Object -First 1).Id  # then check TokenUIAccess via your tool of choice'
 } catch {
     Write-Output "ERROR: $($_.Exception.Message)"
 }

@@ -3,11 +3,14 @@
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>
-        <!-- asInvoker / uiAccess=false: Wind runs as a normal medium-IL app. Side-button
-             zoom over elevated windows (Task Manager) comes from the Raw Input path,
-             which is delivered regardless of the foreground window's integrity level, so
-             no UIAccess (hence no code-signing / Program Files deployment) is required. -->
-        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
+        <!-- uiAccess=true is REQUIRED for MagSetInputTransform, which routes mouse input
+             to the magnified element (fixes clicks/I-beam misaligning while zoomed). The
+             OS only honours this for a code-signed binary run from a secure location
+             (C:\Program Files\Wind). Build, then run tools\uiaccess_setup.ps1 (elevated)
+             to sign + deploy. The unsigned dev build in the repo will NOT launch with
+             this set ("A referral was returned from the server") - that is expected;
+             run the deployed copy. -->
+        <requestedExecutionLevel level="asInvoker" uiAccess="true" />
       </requestedPrivileges>
     </security>
   </trustInfo>
