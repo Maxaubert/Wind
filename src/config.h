@@ -13,6 +13,9 @@ struct Config {
     // lets the cursor roam, but then the overlay cursor moves at L x speed - keep 0.
     double centerDeadzone   = 0.0;
     int    tickHzCap        = 144;
+    // Present sync while zoomed (render engine): 1 = vsync (Present sync-interval 1, locked to
+    // the display refresh); 0 = no vsync (Present 0), with the loop paced by tickHzCap instead.
+    int    vsync            = 1;
     int    diagnostics      = 0;     // 1 = log frame-timing to wind_diag.log
     // Experimental (hot-reloadable): how often we push the transform to DWM.
     // 0 = emit when the integer offset or level changes (skips sub-pixel frames);

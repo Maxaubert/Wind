@@ -34,6 +34,10 @@ TEST_CASE("engine defaults to render; renderer knobs have sane defaults") {
     CHECK(c.brightness == doctest::Approx(1.0));
     CHECK(c.hdrTonemap == 1);                  // on by default (no-op on SDR)
     CHECK(c.cursorVisibility == "auto");       // follow the focused app by default
+    CHECK(c.vsync == 1);                       // vsync on by default
+}
+TEST_CASE("vsync can be disabled") {
+    CHECK(ParseConfig("vsync=0\n").vsync == 0);
 }
 TEST_CASE("parses cursorVisibility") {
     CHECK(ParseConfig("cursorVisibility=always\n").cursorVisibility == "always");

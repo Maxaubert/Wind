@@ -1,5 +1,7 @@
 #include <windows.h>
 #include <climits>
+#include <cstdio>
+#include <cstdarg>
 #include "config.h"
 #include "magnifier_engine.h"
 #include "render_engine.h"
@@ -43,6 +45,9 @@ struct TickState {
     double prevLvl = 1.0;
     double lastLevel = -1.0;
     int    lastX = INT_MIN, lastY = INT_MIN;   // mag emit-on-change
+    // Frame-pacing diagnostics (diagnostics=1): a 2 s window of loop-interval stats.
+    double diagAccum = 0.0, diagSumDt = 0.0, diagMaxDt = 0.0;
+    int    diagFrames = 0, diagHitches = 0;
     TickState(RenderEngine& re, MagnifierEngine& me, bool ur, int w, int h, const Config& c)
         : renderEngine(re), magEngine(me), useRender(ur), sw(w), sh(h), cfg(c),
           zoom(1.0, c.maxLevel, c.fullRangeSeconds),
@@ -56,6 +61,17 @@ static int CursorModeFromCfg(const Config& c) {
     if (c.cursorVisibility == "never")  return 2;
     if (c.cursorVisibility == "always") return 1;
     return 0;
+}
+
+// Append a line to %TEMP%\wind_diag.log (frame-pacing diagnostics; gated on diagnostics=1).
+// %TEMP% so it works for the Program Files deploy too (its own dir isn't writable).
+static void DiagLog(const char* fmt, ...) {
+    char path[MAX_PATH]; DWORD n = GetTempPathA(MAX_PATH, path);
+    if (n == 0 || n > MAX_PATH) return;
+    lstrcatA(path, "wind_diag.log");
+    FILE* f = nullptr; if (fopen_s(&f, path, "a") != 0 || !f) return;
+    va_list ap; va_start(ap, fmt); vfprintf(f, fmt, ap); va_end(ap);
+    fputc('\n', f); fclose(f);
 }
 
 // One magnifier tick: advance zoom, hot-reload config, then pan/draw (render engine) or push
@@ -114,6 +130,7 @@ static void RunTick(TickState& t) {
             p.motionBlurStrength = t.cfg.motionBlurStrength;
             p.brightness = t.cfg.brightness;
             p.cursorMode = CursorModeFromCfg(t.cfg);
+            p.vsync = (t.cfg.vsync != 0);
             t.renderEngine.renderFrame(p);
             // Reveal AFTER the live frame is presented: setVisible flips the layer alpha over the
             // now-current front buffer, so the overlay never shows its retained previous-session
@@ -134,6 +151,23 @@ static void RunTick(TickState& t) {
         }
     }
     t.prevLvl = lvl;
+
+    // Frame-pacing diagnostics: a 2 s window of loop-interval stats (dt = time between ticks =
+    // the on-screen frame interval, since Present(1,0) paces while zoomed). maxDt and the hitch
+    // count expose microstutter that an average would hide.
+    if (t.cfg.diagnostics) {
+        const double target = 1.0 / (t.cfg.tickHzCap > 0 ? t.cfg.tickHzCap : 144);
+        t.diagSumDt += dt; t.diagFrames++; t.diagAccum += dt;
+        if (dt > t.diagMaxDt) t.diagMaxDt = dt;
+        if (dt > target * 1.5) t.diagHitches++;
+        if (t.diagAccum >= 2.0 && t.diagFrames > 0) {
+            DiagLog("zoom=%.2f frames=%d ~fps=%.0f avgDt=%.2fms maxDt=%.2fms hitches>1.5x=%d",
+                    lvl, t.diagFrames, t.diagFrames / t.diagAccum,
+                    t.diagSumDt / t.diagFrames * 1000.0, t.diagMaxDt * 1000.0, t.diagHitches);
+            t.diagAccum = 0.0; t.diagSumDt = 0.0; t.diagMaxDt = 0.0;
+            t.diagFrames = 0; t.diagHitches = 0;
+        }
+    }
 }
 
 // Message-handler: decodes raw mouse movement (survives cursor lock) and routes tray msgs.
@@ -254,6 +288,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             p.motionBlurStrength = cfg.motionBlurStrength;
             p.brightness = cfg.brightness;
             p.cursorMode = 1;   // always draw the cursor in the selftest dump
+            p.vsync = true;
             renderEngine.renderFrame(p);
             Sleep(16);
         }
@@ -261,6 +296,49 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         unsigned ddaFmt = 0; int cs = -1, bpc = 0; renderEngine.debugHdr(ddaFmt, cs, bpc);
         FILE* hf = nullptr; _wfopen_s(&hf, L"wind_hdr_diag.txt", L"w");
         if (hf) { fprintf(hf, "ddaFormat=%u outColorSpace=%d bitsPerColor=%d\n", ddaFmt, cs, bpc); fclose(hf); }
+        renderEngine.shutdown();
+        g_input.stop();
+        Tray::Remove();
+        ReleaseMutex(mtx);
+        return 0;
+    }
+
+    // Frame-pacing self-test: WIND_PACINGTEST runs the REAL present-paced render path at a forced
+    // zoom with a simulated pan for ~4 s and logs loop-interval stats to %TEMP%\wind_diag.log -
+    // to measure microstutter objectively (the normal loop needs the side button to zoom). Exits.
+    if (useRender && GetEnvironmentVariableW(L"WIND_PACINGTEST", nullptr, 0) > 0) {
+        POINT pt; GetCursorPos(&pt);
+        ts.mapper.reset(pt.x, pt.y);
+        renderEngine.hideSystemCursor(true);
+        LARGE_INTEGER f, a{}, b; QueryPerformanceFrequency(&f);
+        const double target = 1.0 / ((cfg.tickHzCap > 0) ? cfg.tickHzCap : 144);
+        double elapsed = 0.0, sumDt = 0.0, maxDt = 0.0; int frames = 0, hitches = 0, big = 0;
+        bool first = true;
+        QueryPerformanceCounter(&a);
+        while (elapsed < 4.0) {
+            MSG m; while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&m); DispatchMessageW(&m); }
+            int dxp = ((frames / 20) % 2 == 0) ? 6 : -6;   // oscillate the pan so srcRect keeps moving
+            MapResult r = ts.mapper.update(dxp, 0, 4.0);
+            RenderFrameParams p{};
+            p.level = 4.0; p.srcLeft = r.srcLeft; p.srcTop = r.srcTop;
+            p.cursorScreenX = r.cursorScreenX; p.cursorScreenY = r.cursorScreenY;
+            p.clickDesktopX = r.clickDesktopX; p.clickDesktopY = r.clickDesktopY;
+            p.cursorScaleWithZoom = (cfg.cursorScaleWithZoom != 0);
+            p.bilinear = (cfg.bilinear != 0); p.motionBlur = false; p.motionBlurStrength = 1.0;
+            p.brightness = cfg.brightness; p.cursorMode = 1; p.vsync = (cfg.vsync != 0);
+            if (first) renderEngine.invalidateCapture();
+            renderEngine.renderFrame(p);
+            if (first) { renderEngine.setVisible(true); first = false; QueryPerformanceCounter(&a); continue; }
+            QueryPerformanceCounter(&b);
+            double dt = double(b.QuadPart - a.QuadPart) / f.QuadPart; a = b;
+            elapsed += dt; sumDt += dt; ++frames;
+            if (dt > maxDt) maxDt = dt;
+            if (dt > target * 1.5) ++hitches;
+            if (dt > target * 2.5) ++big;
+        }
+        DiagLog("PACINGTEST vsync=%d frames=%d ~fps=%.1f targetDt=%.2fms avgDt=%.2fms maxDt=%.2fms hitches>1.5x=%d big>2.5x=%d",
+                cfg.vsync, frames, frames / elapsed, target * 1000.0,
+                (frames ? sumDt / frames : 0.0) * 1000.0, maxDt * 1000.0, hitches, big);
         renderEngine.shutdown();
         g_input.stop();
         Tray::Remove();
@@ -287,11 +365,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         }
         if (!running) break;
 
-        // Pacing: while the render engine is actively zoomed, its vsync Present(1,0) paces
-        // the loop - so we skip the timer here to avoid timer/vsync double-pacing (which
-        // beat against each other and caused microstutter). The mag path, and the render
-        // path while idle at 1x, use the timer to hit ~refresh rate without busy-spinning.
-        bool renderPresentPaces = useRender && ts.prevLvl > 1.0;
+        // Pacing: while the render engine is actively zoomed WITH vsync, its Present(1,0) paces
+        // the loop - so we skip the timer to avoid timer/vsync double-pacing (which beat against
+        // each other and caused microstutter). With vsync off, Present(0,0) doesn't block, so we
+        // fall back to the timer to pace at tickHzCap. The mag path, and idle at 1x, use the timer.
+        bool renderPresentPaces = useRender && ts.prevLvl > 1.0 && ts.cfg.vsync != 0;
         if (!renderPresentPaces) {
             if (timer) {
                 SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);

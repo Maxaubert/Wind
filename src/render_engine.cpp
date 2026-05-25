@@ -234,6 +234,7 @@ struct RenderEngine::State {
     IDXGISwapChain* swap = nullptr;            // blt-model (layered window needs the redirection surface)
     ID3D11RenderTargetView* rtv = nullptr;
     int lastClickX = INT_MIN, lastClickY = INT_MIN;   // skip redundant SetCursorPos
+    unsigned long long lastTopmostMs = 0;       // last HWND_TOPMOST re-assert (throttled)
     bool inBand = false;                        // created in a high z-order band (CreateWindowInBand)
 
     // Desktop Duplication.
@@ -768,13 +769,17 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
 
 bool RenderEngine::renderFrame(const RenderFrameParams& p) {
     if (!s_->ready) return false;
-    // Keep the overlay above EVERYTHING, every frame. It's transparent, click-through and
-    // capture-excluded, so sitting on top of all windows - including other always-on-top app
-    // overlays (RTSS FPS counter, etc.) - is safe: clicks still pass through and there's no
-    // capture feedback. If we sit below such an overlay, its window draws a second, unmagnified
-    // copy over our magnified view. A banded window (CreateWindowInBand) stays in its band
-    // across SetWindowPos, so this just re-tops us within the band.
-    SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    // Keep the overlay above everything (transparent + click-through + capture-excluded, so
+    // being on top is safe; if we sit below an always-on-top app overlay like RTSS it draws a
+    // second, unmagnified copy over our view). Re-assert at most ~4x/sec, NOT every frame:
+    // per-frame SetWindowPos synchronizes with the window manager / DWM and caused a constant
+    // microstutter. ~250 ms reclaims top within a blink. A banded window stays in its band
+    // across SetWindowPos, so this only re-tops us within the band.
+    unsigned long long nowMs = GetTickCount64();
+    if (nowMs - s_->lastTopmostMs >= 250) {
+        s_->lastTopmostMs = nowMs;
+        SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
     // Keep the (hidden) OS cursor under the drawn cursor so clicks pass through the
     // transparent overlay to the app at the right desktop point. We drive the lens from raw
     // input (not GetCursorPos), so this SetCursorPos never feeds back into tracking. Only
@@ -784,7 +789,10 @@ bool RenderEngine::renderFrame(const RenderFrameParams& p) {
         s_->lastClickX = p.clickDesktopX; s_->lastClickY = p.clickDesktopY;
     }
     s_->render(p);
-    return SUCCEEDED(s_->swap->Present(1, 0));
+    // vsync (sync interval 1) locks the present to the display refresh; 0 presents immediately
+    // (the caller must then pace the loop so it doesn't spin). DWM composites a blt-model
+    // swapchain either way, so 0 doesn't tear here - it just decouples from the vblank.
+    return SUCCEEDED(s_->swap->Present(p.vsync ? 1 : 0, 0));
 }
 
 // Render one frame and dump it WITHOUT presenting, so the PNG reflects exactly the drawn
