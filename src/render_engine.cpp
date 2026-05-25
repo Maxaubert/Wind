@@ -1,7 +1,7 @@
 #include "render_engine.h"
 #include <windows.h>
 #include <d3d11.h>
-#include <dxgi1_3.h>
+#include <dxgi1_6.h>
 #include <d3dcompiler.h>
 #include <wincodec.h>
 #include <magnification.h>
@@ -21,16 +21,17 @@ namespace wind {
 
 template <class T> static void SafeRelease(T*& p) { if (p) { p->Release(); p = nullptr; } }
 
-// Constant buffer: source sub-rect UV bounds + the per-frame pan shift in UV (motion blur
-// vector). 32 bytes: uvMin+uvMax pack into one 16-byte register, blurUV+pad into the next.
-struct MagCB { float uvMinX, uvMinY, uvMaxX, uvMaxY, blurX, blurY, padA, padB; };
+// Constant buffer: source sub-rect UV bounds, the per-frame pan shift (motion blur), and an
+// output brightness multiplier (to match the magnified view to an HDR desktop's white level).
+// 32 bytes: uvMin+uvMax pack into register 0; blurUV+brightness+pad into register 1.
+struct MagCB { float uvMinX, uvMinY, uvMaxX, uvMaxY, blurX, blurY, brightness, padB; };
 
 // Fullscreen-triangle magnify shader. The VS maps the visible [0,1] screen UV into the
 // source sub-rect; the PS samples the captured desktop. When panning, it integrates several
 // taps along the per-frame pan vector (blurUV) - motion blur that smears the big per-frame
 // step at high zoom into continuous motion, and collapses to a sharp single tap when still.
 static const char* kMagHLSL = R"(
-cbuffer CB : register(b0) { float2 uvMin; float2 uvMax; float2 blurUV; float2 pad; };
+cbuffer CB : register(b0) { float2 uvMin; float2 uvMax; float2 blurUV; float brightness; float pad; };
 struct VSOut { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; };
 VSOut VSMain(uint id : SV_VertexID) {
     float2 t = float2((id << 1) & 2, id & 2);   // (0,0),(2,0),(0,2)
@@ -42,14 +43,20 @@ VSOut VSMain(uint id : SV_VertexID) {
 Texture2D tex : register(t0);
 SamplerState smp : register(s0);
 float4 PSMain(VSOut i) : SV_TARGET {
-    if (abs(blurUV.x) + abs(blurUV.y) < 1e-6) return tex.Sample(smp, i.uv);  // still: sharp
-    const int N = 16;
-    float4 acc = 0;
-    [unroll] for (int k = 0; k < N; ++k) {
-        float t = (k / float(N - 1)) - 0.5;      // -0.5 .. +0.5 across the frame's motion
-        acc += tex.Sample(smp, i.uv + blurUV * t);
+    float4 c;
+    if (abs(blurUV.x) + abs(blurUV.y) < 1e-6) {
+        c = tex.Sample(smp, i.uv);               // still: sharp
+    } else {
+        const int N = 16;
+        float4 acc = 0;
+        [unroll] for (int k = 0; k < N; ++k) {
+            float t = (k / float(N - 1)) - 0.5;  // -0.5 .. +0.5 across the frame's motion
+            acc += tex.Sample(smp, i.uv + blurUV * t);
+        }
+        c = acc / N;
     }
-    return acc / N;
+    c.rgb *= brightness;                         // match magnified output to the desktop white level
+    return c;
 }
 )";
 
@@ -155,6 +162,11 @@ struct RenderEngine::State {
     ID3D11Texture2D* desktopCopy = nullptr;   // SRV-able copy of the captured desktop (no cursor)
     ID3D11ShaderResourceView* desktopSRV = nullptr;
     bool haveDesktop = false;
+    // Diagnostics for the HDR investigation: the duplication's surface format + the output's
+    // color space / bit depth (tells us whether the desktop is HDR and what we're capturing).
+    UINT ddaFormat = 0;          // DXGI_FORMAT of the duplicated surface
+    int  outColorSpace = -1;     // DXGI_COLOR_SPACE_TYPE of the output (12 = HDR10 G2084)
+    int  outBitsPerColor = 0;
 
     // Magnify pass.
     ID3D11VertexShader* vs = nullptr;
@@ -210,12 +222,27 @@ bool RenderEngine::State::recreateDupl() {
     adapter->EnumOutputs(0, &output);
     SafeRelease(adapter);
     if (!output) return false;
+    // Diagnostics: the output's color space + bit depth (HDR detection).
+    IDXGIOutput6* output6 = nullptr;
+    if (SUCCEEDED(output->QueryInterface(__uuidof(IDXGIOutput6), (void**)&output6)) && output6) {
+        DXGI_OUTPUT_DESC1 od1{};
+        if (SUCCEEDED(output6->GetDesc1(&od1))) {
+            outColorSpace = (int)od1.ColorSpace;
+            outBitsPerColor = (int)od1.BitsPerColor;
+        }
+        output6->Release();
+    }
     IDXGIOutput1* output1 = nullptr;
     output->QueryInterface(__uuidof(IDXGIOutput1), (void**)&output1);
     SafeRelease(output);
     if (!output1) return false;
     HRESULT hr = output1->DuplicateOutput(device, &dupl);
     SafeRelease(output1);
+    if (SUCCEEDED(hr) && dupl) {
+        DXGI_OUTDUPL_DESC dd{};
+        dupl->GetDesc(&dd);
+        ddaFormat = (UINT)dd.ModeDesc.Format;
+    }
     return SUCCEEDED(hr);
 }
 
@@ -279,6 +306,9 @@ void RenderEngine::debugInfo(int& screenW, int& screenH, int& curW, int& curH, i
     screenW = s_->sw; screenH = s_->sh; curW = s_->curW; curH = s_->curH; hotX = s_->hotX; hotY = s_->hotY;
 }
 void RenderEngine::debugBlur(double& bx, double& by) const { bx = s_->lastBlurX; by = s_->lastBlurY; }
+void RenderEngine::debugHdr(unsigned& ddaFormat, int& colorSpace, int& bitsPerColor) const {
+    ddaFormat = s_->ddaFormat; colorSpace = s_->outColorSpace; bitsPerColor = s_->outBitsPerColor;
+}
 
 bool RenderEngine::initialize(int screenW, int screenH, int zorderBand) {
     s_->sw = screenW;
@@ -504,10 +534,11 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
         prevSrcLeft = p.srcLeft; prevSrcTop = p.srcTop; prevSrcValid = true;
         lastBlurX = blurX; lastBlurY = blurY;
 
+        float bright = (p.brightness > 0.0) ? (float)p.brightness : 1.0f;
         MagCB cbv{
             (float)(p.srcLeft / sw), (float)(p.srcTop / sh),
             (float)((p.srcLeft + viewW) / sw), (float)((p.srcTop + viewH) / sh),
-            (float)blurX, (float)blurY, 0.0f, 0.0f };
+            (float)blurX, (float)blurY, bright, 0.0f };
         c->UpdateSubresource(cb, 0, nullptr, &cbv, 0, 0);
         c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         c->VSSetShader(vs, nullptr, 0);

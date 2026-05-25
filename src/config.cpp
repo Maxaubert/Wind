@@ -40,6 +40,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "motionBlur")         c.motionBlur = std::stoi(val);
             else if (key == "motionBlurStrength") c.motionBlurStrength = std::stod(val);
             else if (key == "zorderBand")         c.zorderBand = std::stoi(val);
+            else if (key == "brightness")         c.brightness = std::stod(val);
         } catch (...) { /* keep default on bad value */ }
     }
     return c;
@@ -79,7 +80,9 @@ Config LoadConfig(const std::wstring& path) {
                "; motionBlur: 1=smear content along the pan (off by default)\n"
                "motionBlur=0\nmotionBlurStrength=1.0\n"
                "; zorderBand: 0=normal; 16=above shell (covers Start/taskbar/tray, needs UIAccess build)\n"
-               "zorderBand=0\n";
+               "zorderBand=0\n"
+               "; brightness: magnified-view output multiplier (1.0=unchanged; lower for HDR, e.g. 0.85)\n"
+               "brightness=1.0\n";
         return Config{};
     }
     std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());

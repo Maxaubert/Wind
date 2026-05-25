@@ -12,6 +12,7 @@ struct RenderFrameParams {
     bool   bilinear;                     // bilinear (smooth) vs point sampling
     bool   motionBlur;                   // smear content along the pan to smooth coarse motion
     double motionBlurStrength;           // shutter: 1.0 = full inter-frame, lower = subtler
+    double brightness;                   // output multiplier (1.0 = unchanged; <1 dims for HDR)
 };
 
 // Own capture + Direct3D 11 renderer. Captures the desktop via DXGI Desktop Duplication
@@ -40,6 +41,8 @@ public:
     void debugInfo(int& screenW, int& screenH, int& curW, int& curH, int& hotX, int& hotY) const;
     // Verification only: the last motion-blur vector (UV units) the shader received.
     void debugBlur(double& bx, double& by) const;
+    // Verification only: duplication surface format + output color space / bit depth (HDR).
+    void debugHdr(unsigned& ddaFormat, int& colorSpace, int& bitsPerColor) const;
     // Verification only: copy the back-buffer to a 32bpp BGRA PNG.
     bool dumpBackbufferPng(const wchar_t* path);
     // Verification only: render one frame and dump it before Present (so the PNG matches the

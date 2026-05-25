@@ -136,10 +136,14 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             p.bilinear = (cfg.bilinear != 0);
             p.motionBlur = (cfg.motionBlur != 0);
             p.motionBlurStrength = cfg.motionBlurStrength;
+            p.brightness = cfg.brightness;
             renderEngine.renderFrame(p);
             Sleep(16);
         }
         renderEngine.dumpFrame(p, L"wind_selftest.png");
+        unsigned ddaFmt = 0; int cs = -1, bpc = 0; renderEngine.debugHdr(ddaFmt, cs, bpc);
+        FILE* hf = nullptr; _wfopen_s(&hf, L"wind_hdr_diag.txt", L"w");
+        if (hf) { fprintf(hf, "ddaFormat=%u outColorSpace=%d bitsPerColor=%d\n", ddaFmt, cs, bpc); fclose(hf); }
         renderEngine.shutdown();
         g_input.stop();
         Tray::Remove();
@@ -233,6 +237,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                 p.bilinear = (cfg.bilinear != 0);
                 p.motionBlur = (cfg.motionBlur != 0);
                 p.motionBlurStrength = cfg.motionBlurStrength;
+                p.brightness = cfg.brightness;
                 renderEngine.renderFrame(p);
             } else if (prevLvl > 1.0) {                     // zoom-out transition
                 renderEngine.setVisible(false);
