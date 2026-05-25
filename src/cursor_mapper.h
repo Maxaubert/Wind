@@ -13,14 +13,19 @@ struct MapResult {
 // click through the transparent overlay lands exactly there.
 class CursorMapper {
 public:
-    CursorMapper(int screenW, int screenH, double sensitivity);
-    void reset(double centerX, double centerY);    // pin lens center (e.g. on zoom-in)
+    // smoothing 0..~0.95: light inertia on the lens. 0 = none (rendered center snaps to the
+    // raw-accumulated target); higher = the center eases toward the target over several
+    // frames, smoothing jerk and the uneven per-frame raw-delta steps (costs a little lag).
+    CursorMapper(int screenW, int screenH, double sensitivity, double smoothing = 0.0);
+    void reset(double centerX, double centerY);    // pin both target + rendered center
     MapResult update(int rawDx, int rawDy, double level);
-    double centerX() const { return cx_; }
+    double centerX() const { return cx_; }         // rendered (smoothed) center
     double centerY() const { return cy_; }
 private:
     int sw_, sh_;
     double sens_;
-    double cx_, cy_;
+    double alpha_;          // per-frame easing factor (1 - smoothing), clamped
+    double cx_, cy_;        // rendered center (eased)
+    double tx_, ty_;        // target center (raw-accumulated)
 };
 }

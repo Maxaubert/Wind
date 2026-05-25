@@ -60,6 +60,22 @@ TEST_CASE("sensitivity scales lens movement; zoom level does NOT change desktop 
     CHECK(b.centerX() == doctest::Approx(1000.0));     // zoom-independent
 }
 
+TEST_CASE("smoothing eases the rendered center toward the target (light inertia)") {
+    CursorMapper m(1920, 1080, 1.0, 0.5);    // alpha = 0.5
+    m.reset(960, 540);
+    m.update(40, 0, 2.0);    // target 1000; rendered = 960 + (1000-960)*0.5 = 980
+    CHECK(m.centerX() == doctest::Approx(980.0));
+    m.update(0, 0, 2.0);     // target still 1000; rendered = 980 + (1000-980)*0.5 = 990
+    CHECK(m.centerX() == doctest::Approx(990.0));
+}
+
+TEST_CASE("smoothing 0 snaps instantly (no inertia)") {
+    CursorMapper m(1920, 1080, 1.0, 0.0);
+    m.reset(960, 540);
+    m.update(40, 0, 2.0);
+    CHECK(m.centerX() == doctest::Approx(1000.0));   // straight to target
+}
+
 TEST_CASE("reset overrides the accumulated center") {
     CursorMapper m(1920, 1080, 1.0);
     m.reset(100, 100);

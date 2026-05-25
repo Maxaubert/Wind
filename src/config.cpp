@@ -34,6 +34,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "maxUpdateHz")      c.maxUpdateHz = std::stoi(val);
             else if (key == "engine")             c.engine = val;
             else if (key == "cursorSensitivity")  c.cursorSensitivity = std::stod(val);
+            else if (key == "cursorSmoothing")    c.cursorSmoothing = std::stod(val);
             else if (key == "cursorScaleWithZoom")c.cursorScaleWithZoom = std::stoi(val);
             else if (key == "bilinear")           c.bilinear = std::stoi(val);
             else if (key == "motionBlur")         c.motionBlur = std::stoi(val);
@@ -67,13 +68,15 @@ Config LoadConfig(const std::wstring& path) {
                "maxUpdateHz=0\n"
                "; engine: render = own capture+GPU renderer (sub-pixel, smooth); mag = Magnification API\n"
                "engine=render\n"
-               "; cursorSensitivity: pan speed per raw count (scaled by 1/zoom internally)\n"
-               "cursorSensitivity=1.0\ncursorScaleWithZoom=1\n"
+               "; cursorSensitivity: pan speed per raw count\n"
+               "cursorSensitivity=1.0\n"
+               "; cursorSmoothing: light inertia on the pan (0=off, ~0.5 light, higher=smoother+laggier)\n"
+               "cursorSmoothing=0.5\n"
+               "cursorScaleWithZoom=1\n"
                "; bilinear: 1=smooth scaling, 0=crisp/point\n"
                "bilinear=1\n"
-               "; motionBlur: 1=smear content along the pan to smooth coarse high-zoom motion\n"
-               "motionBlur=1\n; motionBlurStrength: 1.0=full inter-frame, lower=subtler\n"
-               "motionBlurStrength=1.0\n";
+               "; motionBlur: 1=smear content along the pan (off by default)\n"
+               "motionBlur=0\nmotionBlurStrength=1.0\n";
         return Config{};
     }
     std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());

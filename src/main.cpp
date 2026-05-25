@@ -115,7 +115,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     ZoomController zoom(1.0, cfg.maxLevel, cfg.fullRangeSeconds);
     Tracker     tracker(sw, sh, cfg.sensitivity, cfg.centerDeadzone);     // mag path
-    CursorMapper mapper(sw, sh, cfg.cursorSensitivity);                   // render path
+    CursorMapper mapper(sw, sh, cfg.cursorSensitivity, cfg.cursorSmoothing);  // render path
 
     // Autonomous verification hook: WIND_SELFTEST drives the real integrated render path at a
     // forced zoom and dumps a PNG (the overlay is WDA_EXCLUDEFROMCAPTURE, so it can only be
@@ -205,8 +205,12 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             if (m != lastMtime) {
                 lastMtime = m;
                 Config nc = LoadConfig(L"magnifier.ini");
+                cfg = nc;   // pick up renderer knobs (smoothing, blur, filter, cursor scale)
                 zoom = ZoomController(1.0, nc.maxLevel, nc.fullRangeSeconds);
                 tracker = Tracker(sw, sh, nc.sensitivity, nc.centerDeadzone);
+                double ocx = mapper.centerX(), ocy = mapper.centerY();   // preserve position
+                mapper = CursorMapper(sw, sh, nc.cursorSensitivity, nc.cursorSmoothing);
+                mapper.reset(ocx, ocy);
             }
         }
 

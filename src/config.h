@@ -23,10 +23,11 @@ struct Config {
 
     // --- Own GPU renderer (engine=render) -----------------------------------
     std::string engine = "render";   // "render" = own capture+D3D renderer, "mag" = Magnification API
-    double cursorSensitivity = 1.0;  // lens pan speed per raw count (internally scaled by 1/level)
+    double cursorSensitivity = 1.0;  // lens pan speed per raw count
+    double cursorSmoothing = 0.5;    // light inertia on the pan: 0 = off, higher = smoother/laggier
     int    cursorScaleWithZoom = 1;  // 1 = draw the cursor scaled by zoom, 0 = native size
     int    bilinear = 1;             // 1 = bilinear sampling (smooth), 0 = point (crisp pixels)
-    int    motionBlur = 1;           // 1 = smear content along the pan (smooths coarse motion)
+    int    motionBlur = 0;           // 1 = smear content along the pan (off by default)
     double motionBlurStrength = 1.0; // shutter: 1.0 = full inter-frame blur, lower = subtler
 };
 // Pure: parse INI text (key=value, ';' or '#' comments) into a Config, keeping
