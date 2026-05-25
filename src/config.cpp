@@ -30,6 +30,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "centerDeadzone")   c.centerDeadzone = std::stod(val);
             else if (key == "tickHzCap")        c.tickHzCap = std::stoi(val);
             else if (key == "vsync")            c.vsync = std::stoi(val);
+            else if (key == "dwmFlush")         c.dwmFlush = std::stoi(val);
             else if (key == "diagnostics")      c.diagnostics = std::stoi(val);
             else if (key == "updateMode")       c.updateMode = std::stoi(val);
             else if (key == "maxUpdateHz")      c.maxUpdateHz = std::stoi(val);
@@ -67,6 +68,8 @@ Config LoadConfig(const std::wstring& path) {
                "centerDeadzone=0.0\ntickHzCap=144\n"
                "; vsync: 1=present locked to display refresh (smooth, capped); 0=no vsync, paced by tickHzCap (restart to apply)\n"
                "vsync=1\n"
+               "; dwmFlush: 1=pace the zoomed loop to DWM's composition (smooth, default); 0=old vsync pacing\n"
+               "dwmFlush=1\n"
                "; diagnostics=1 logs frame timing to %TEMP%\\wind_diag.log (restart to apply)\n"
                "diagnostics=0\n"
                "; updateMode: 0=skip sub-pixel, 1=emit on float-center, 2=continuous while zoomed\n"

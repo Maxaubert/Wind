@@ -16,6 +16,11 @@ struct Config {
     // Present sync while zoomed (render engine): 1 = vsync (Present sync-interval 1, locked to
     // the display refresh); 0 = no vsync (Present 0), with the loop paced by tickHzCap instead.
     int    vsync            = 1;
+    // Pace the zoomed loop with DwmFlush() instead of vsync/timer: present immediately (no vsync
+    // block) then block until DWM's next composition, so our frames align 1:1 with the
+    // compositor. Fixes the blt-model microstutter (phase mismatch between our Present and DWM's
+    // composite) - default ON. 1 = on (overrides vsync while zoomed), 0 = old vsync pacing.
+    int    dwmFlush         = 1;
     int    diagnostics      = 0;     // 1 = log frame-timing to wind_diag.log
     // Experimental (hot-reloadable): how often we push the transform to DWM.
     // 0 = emit when the integer offset or level changes (skips sub-pixel frames);
