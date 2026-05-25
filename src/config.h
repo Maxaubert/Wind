@@ -21,6 +21,10 @@ struct Config {
     // compositor. Fixes the blt-model microstutter (phase mismatch between our Present and DWM's
     // composite) - default ON. 1 = on (overrides vsync while zoomed), 0 = old vsync pacing.
     int    dwmFlush         = 1;
+    // Presentation backend (restart to change): "blt" = blt-model swapchain paced by DwmFlush
+    // (default); "dcomp" = flip-model swapchain via DirectComposition, paced by vsync Present
+    // (experimental A/B - native flip pacing + lower latency, still click-through via layered).
+    std::string present     = "blt";
     int    diagnostics      = 0;     // 1 = log frame-timing to wind_diag.log
 
     // --- Own GPU renderer ---------------------------------------------------

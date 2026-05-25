@@ -42,6 +42,7 @@ static int DetectRefreshHz() {
 struct TickState {
     RenderEngine&    renderEngine;
     int  sw, sh;
+    bool useDComp;                             // flip-model backend (fixed at init; not hot-reloaded)
     Config         cfg;
     ZoomController zoom;
     CursorMapper   mapper;
@@ -55,7 +56,7 @@ struct TickState {
     double diagAccum = 0.0, diagSumDt = 0.0, diagMaxDt = 0.0;
     int    diagFrames = 0, diagHitches = 0;
     TickState(RenderEngine& re, int w, int h, const Config& c)
-        : renderEngine(re), sw(w), sh(h), cfg(c),
+        : renderEngine(re), sw(w), sh(h), useDComp(c.present == "dcomp"), cfg(c),
           zoom(1.0, c.maxLevel, c.fullRangeSeconds),
           mapper(w, h, c.cursorSensitivity, c.cursorSmoothing) {}
 };
@@ -141,8 +142,9 @@ static void RunTick(TickState& t) {
         p.motionBlurStrength = t.cfg.motionBlurStrength;
         p.brightness = t.cfg.brightness;
         p.cursorMode = CursorModeFromCfg(t.cfg);
-        // In DwmFlush mode we present immediately (no vsync block) and let DwmFlush() pace.
-        p.vsync = (t.cfg.vsync != 0 && t.cfg.dwmFlush == 0);
+        // dcomp backend: flip-model is paced natively by vsync Present(1,0). blt backend: in
+        // DwmFlush mode present immediately (no vsync block) and let DwmFlush() pace.
+        p.vsync = t.useDComp ? true : (t.cfg.vsync != 0 && t.cfg.dwmFlush == 0);
         t.renderEngine.renderFrame(p);
         // Reveal AFTER the live frame is presented: setVisible flips the layer alpha over the
         // now-current front buffer, so the overlay never shows its retained previous-session
@@ -253,7 +255,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     // --- Own GPU renderer (DXGI Desktop Duplication + D3D11) ---
     RenderEngine renderEngine;
-    if (!renderEngine.initialize(sw, sh, cfg.zorderBand, cfg.hdrTonemap != 0)) {
+    if (!renderEngine.initialize(sw, sh, cfg.zorderBand, cfg.hdrTonemap != 0, cfg.present == "dcomp")) {
         MessageBoxW(nullptr, L"Could not start the renderer (Direct3D 11 / Desktop Duplication "
                              L"unavailable on this system).", L"Wind", MB_ICONERROR);
         g_input.stop();
@@ -375,8 +377,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         //  - else: Present(0,0) doesn't block, so the timer paces at tickHzCap.
         // Idle at 1x uses the timer.
         bool zoomed = ts.prevLvl > 1.0;
-        bool dwmPaces = zoomed && ts.cfg.dwmFlush != 0;
-        bool renderPresentPaces = zoomed && ts.cfg.vsync != 0 && !dwmPaces;
+        bool dwmPaces = zoomed && !ts.useDComp && ts.cfg.dwmFlush != 0;
+        bool renderPresentPaces = zoomed && (ts.useDComp || (ts.cfg.vsync != 0 && !dwmPaces));
         if (!renderPresentPaces && !dwmPaces) {
             if (timer) {
                 SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);

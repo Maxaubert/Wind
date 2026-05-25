@@ -31,6 +31,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "tickHzCap")        c.tickHzCap = std::stoi(val);
             else if (key == "vsync")            c.vsync = std::stoi(val);
             else if (key == "dwmFlush")         c.dwmFlush = std::stoi(val);
+            else if (key == "present")          c.present = val;
             else if (key == "diagnostics")      c.diagnostics = std::stoi(val);
             else if (key == "cursorSensitivity")  c.cursorSensitivity = std::stod(val);
             else if (key == "cursorSmoothing")    c.cursorSmoothing = std::stod(val);
@@ -74,6 +75,9 @@ Config LoadConfig(const std::wstring& path) {
                "vsync=1\n"
                "; dwmFlush: 1=pace the zoomed loop to DWM's composition (smooth, default); 0=old vsync pacing\n"
                "dwmFlush=1\n"
+               "; present: blt=default (blt swapchain + DwmFlush); dcomp=flip-model via DirectComposition\n"
+               ";   (experimental, vsync-paced; restart to change)\n"
+               "present=blt\n"
                "; diagnostics=1 logs frame timing to %TEMP%\\wind_diag.log (restart to apply)\n"
                "diagnostics=0\n"
                "; cursorSensitivity: pan speed per raw count\n"
