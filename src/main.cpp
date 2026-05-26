@@ -14,15 +14,6 @@
 using namespace wind;
 
 static InputRouter g_input;
-static int g_zoomInBtnId = 2;   // XBUTTON id: 1 = XBUTTON1, 2 = XBUTTON2 (set from cfg)
-static int g_zoomOutBtnId = 1;
-
-// Set side-button state from a Raw Input transition. Mirrors the hook's id mapping so
-// the two state sources are interchangeable and idempotent.
-static void SetZoomButton(int xbuttonId, bool down) {
-    if (xbuttonId == g_zoomInBtnId)  g_input.state().inHeld.store(down);
-    if (xbuttonId == g_zoomOutBtnId) g_input.state().outHeld.store(down);
-}
 
 // Current refresh rate (Hz) of the primary display, for pacing the idle/1x loop and the
 // vsync=0 path so we don't hardcode the dev's 144Hz. Falls back to 60 if the query fails or
@@ -102,6 +93,26 @@ static int CursorModeFromCfg(const Config& c) {
     return 0;
 }
 
+// Fill a RenderFrameParams from the mapper result + config for the given monitor and zoom level
+// (the normal live-tick interpretation). The self-test harnesses call this, then override only
+// the few fields they deliberately differ on (cursorMode, vsync, motion blur).
+static void FillRenderParams(RenderFrameParams& p, const MapResult& r, const Config& cfg,
+                             const MonitorTarget& mon, double level) {
+    p.level = level;
+    p.srcLeft = r.srcLeft; p.srcTop = r.srcTop;
+    p.cursorScreenX = r.cursorScreenX; p.cursorScreenY = r.cursorScreenY;
+    // clickDesktop is local monitor px; SetCursorPos needs virtual-desktop coords.
+    p.clickDesktopX = r.clickDesktopX + mon.x; p.clickDesktopY = r.clickDesktopY + mon.y;
+    p.cursorScaleWithZoom = (cfg.cursorScaleWithZoom != 0);
+    p.bilinear = (cfg.bilinear != 0);
+    p.motionBlur = (cfg.motionBlur != 0);
+    p.motionBlurStrength = cfg.motionBlurStrength;
+    p.brightness = cfg.brightness;
+    p.cursorMode = CursorModeFromCfg(cfg);
+    // In DwmFlush mode we present immediately (no vsync block) and let DwmFlush() pace.
+    p.vsync = (cfg.vsync != 0 && cfg.dwmFlush == 0);
+}
+
 // Append a line to %TEMP%\wind_diag.log (frame-pacing diagnostics; gated on diagnostics=1).
 // %TEMP% so it works for the Program Files deploy too (its own dir isn't writable).
 static void DiagLog(const char* fmt, ...) {
@@ -175,19 +186,7 @@ static void RunTick(TickState& t) {
         if (recenter) { POINT pt; GetCursorPos(&pt); t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y); }
         MapResult r = t.mapper.update(dx, dy, lvl);
         RenderFrameParams p{};
-        p.level = lvl;
-        p.srcLeft = r.srcLeft; p.srcTop = r.srcTop;
-        p.cursorScreenX = r.cursorScreenX; p.cursorScreenY = r.cursorScreenY;
-        // clickDesktop is local monitor px; SetCursorPos needs virtual-desktop coords.
-        p.clickDesktopX = r.clickDesktopX + t.mon.x; p.clickDesktopY = r.clickDesktopY + t.mon.y;
-        p.cursorScaleWithZoom = (t.cfg.cursorScaleWithZoom != 0);
-        p.bilinear = (t.cfg.bilinear != 0);
-        p.motionBlur = (t.cfg.motionBlur != 0);
-        p.motionBlurStrength = t.cfg.motionBlurStrength;
-        p.brightness = t.cfg.brightness;
-        p.cursorMode = CursorModeFromCfg(t.cfg);
-        // In DwmFlush mode we present immediately (no vsync block) and let DwmFlush() pace.
-        p.vsync = (t.cfg.vsync != 0 && t.cfg.dwmFlush == 0);
+        FillRenderParams(p, r, t.cfg, t.mon, lvl);
         t.renderEngine.renderFrame(p);
         // Reveal AFTER the live frame is presented: setVisible flips the layer alpha over the
         // now-current front buffer, so the overlay never shows its retained previous-session
@@ -242,10 +241,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     AccumulateRaw(g_input, m.lLastX, m.lLastY);
                 }
                 USHORT bf = m.usButtonFlags;
-                if (bf & RI_MOUSE_BUTTON_4_DOWN) SetZoomButton(1, true);
-                if (bf & RI_MOUSE_BUTTON_4_UP)   SetZoomButton(1, false);
-                if (bf & RI_MOUSE_BUTTON_5_DOWN) SetZoomButton(2, true);
-                if (bf & RI_MOUSE_BUTTON_5_UP)   SetZoomButton(2, false);
+                if (bf & RI_MOUSE_BUTTON_4_DOWN) g_input.setButtonState(1, true);
+                if (bf & RI_MOUSE_BUTTON_4_UP)   g_input.setButtonState(1, false);
+                if (bf & RI_MOUSE_BUTTON_5_DOWN) g_input.setButtonState(2, true);
+                if (bf & RI_MOUSE_BUTTON_5_UP)   g_input.setButtonState(2, false);
             }
         }
         return 0;
@@ -266,8 +265,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     }
 
     Config cfg = LoadConfig(L"magnifier.ini");
-    g_zoomInBtnId = cfg.zoomInButton;
-    g_zoomOutBtnId = cfg.zoomOutButton;
 
     // Hidden window: owns the tray icon + menu and receives WM_INPUT.
     WNDCLASSW wc{};
@@ -323,14 +320,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         for (int i = 0; i < 20; ++i) {
             MSG m; while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&m); DispatchMessageW(&m); }
             MapResult r = ts.mapper.update(0, 0, 4.0);
-            p.level = 4.0; p.srcLeft = r.srcLeft; p.srcTop = r.srcTop;
-            p.cursorScreenX = r.cursorScreenX; p.cursorScreenY = r.cursorScreenY;
-            p.clickDesktopX = r.clickDesktopX + ts.mon.x; p.clickDesktopY = r.clickDesktopY + ts.mon.y;
-            p.cursorScaleWithZoom = (cfg.cursorScaleWithZoom != 0);
-            p.bilinear = (cfg.bilinear != 0);
-            p.motionBlur = (cfg.motionBlur != 0);
-            p.motionBlurStrength = cfg.motionBlurStrength;
-            p.brightness = cfg.brightness;
+            FillRenderParams(p, r, cfg, ts.mon, 4.0);
             p.cursorMode = 1;   // always draw the cursor in the selftest dump
             p.vsync = true;
             renderEngine.renderFrame(p);
@@ -364,12 +354,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             int dxp = ((frames / 20) % 2 == 0) ? 6 : -6;   // oscillate the pan so srcRect keeps moving
             MapResult r = ts.mapper.update(dxp, 0, 4.0);
             RenderFrameParams p{};
-            p.level = 4.0; p.srcLeft = r.srcLeft; p.srcTop = r.srcTop;
-            p.cursorScreenX = r.cursorScreenX; p.cursorScreenY = r.cursorScreenY;
-            p.clickDesktopX = r.clickDesktopX + ts.mon.x; p.clickDesktopY = r.clickDesktopY + ts.mon.y;
-            p.cursorScaleWithZoom = (cfg.cursorScaleWithZoom != 0);
-            p.bilinear = (cfg.bilinear != 0); p.motionBlur = false; p.motionBlurStrength = 1.0;
-            p.brightness = cfg.brightness; p.cursorMode = 1; p.vsync = (cfg.vsync != 0);
+            FillRenderParams(p, r, cfg, ts.mon, 4.0);
+            p.motionBlur = false; p.motionBlurStrength = 1.0;   // pacing test: no blur
+            p.cursorMode = 1; p.vsync = (cfg.vsync != 0);
             if (first) renderEngine.invalidateCapture();
             renderEngine.renderFrame(p);
             if (first) { renderEngine.setVisible(true); first = false; QueryPerformanceCounter(&a); continue; }

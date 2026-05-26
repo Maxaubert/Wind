@@ -1,9 +1,13 @@
 #include "render_engine.h"
+#include "com_util.h"
+#include "render_shaders.h"
+#include "hdr_info.h"
+#include "cursor_decode.h"
+#include "png_dump.h"
 #include <windows.h>
 #include <d3d11.h>
 #include <dxgi1_6.h>
 #include <d3dcompiler.h>
-#include <wincodec.h>
 #include <magnification.h>
 #include <cstdint>
 #include <cstring>
@@ -22,8 +26,6 @@
 
 namespace wind {
 
-template <class T> static void SafeRelease(T*& p) { if (p) { p->Release(); p = nullptr; } }
-
 // Diagnostic log to %TEMP%\wind_render.log (so we can see why the deployed UIAccess build
 // behaves a certain way - the overlay is capture-excluded and runs from Program Files).
 static void RLog(const char* fmt, ...) {
@@ -35,129 +37,6 @@ static void RLog(const char* fmt, ...) {
     fputc('\n', f); fclose(f);
 }
 
-// Whether Windows HDR ("Use HDR") is actually ON right now. Uses ADVANCED_COLOR_INFO_2's
-// activeColorMode (Win11 24H2+), which distinguishes SDR/WCG/HDR. The older
-// advancedColorEnabled flag is unreliable here - it reads true when Automatic Color Management
-// is on even though "Use HDR" is off (which made us wrongly tonemap and dim SDR). DisplayConfig
-// is queried live (not DXGI-cached), so re-checking on duplication-recreate also catches
-// runtime HDR toggles. Returns false if the API is unavailable (older Windows) -> SDR path.
-static bool GetHdrEnabled() {
-    UINT32 nPath = 0, nMode = 0;
-    if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &nPath, &nMode) != ERROR_SUCCESS)
-        return false;
-    std::vector<DISPLAYCONFIG_PATH_INFO> paths(nPath);
-    std::vector<DISPLAYCONFIG_MODE_INFO> modes(nMode);
-    if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &nPath, paths.data(), &nMode, modes.data(),
-                           nullptr) != ERROR_SUCCESS)
-        return false;
-    for (UINT32 i = 0; i < nPath; ++i) {
-        DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO_2 ci{};
-        ci.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO_2;
-        ci.header.size = sizeof(ci);
-        ci.header.adapterId = paths[i].targetInfo.adapterId;
-        ci.header.id = paths[i].targetInfo.id;
-        if (DisplayConfigGetDeviceInfo(&ci.header) == ERROR_SUCCESS)
-            return ci.activeColorMode == DISPLAYCONFIG_ADVANCED_COLOR_MODE_HDR;
-    }
-    return false;
-}
-
-// SDR white level (nits) for the active HDR path, so HDR->SDR tonemapping matches the desktop
-// automatically. nits = SDRWhiteLevel / 1000 * 80. Returns a default if the query fails.
-static double GetSDRWhiteNits() {
-    UINT32 nPath = 0, nMode = 0;
-    if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &nPath, &nMode) != ERROR_SUCCESS)
-        return 200.0;
-    std::vector<DISPLAYCONFIG_PATH_INFO> paths(nPath);
-    std::vector<DISPLAYCONFIG_MODE_INFO> modes(nMode);
-    if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &nPath, paths.data(), &nMode, modes.data(),
-                           nullptr) != ERROR_SUCCESS)
-        return 200.0;
-    for (UINT32 i = 0; i < nPath; ++i) {
-        DISPLAYCONFIG_SDR_WHITE_LEVEL wl{};
-        wl.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL;
-        wl.header.size = sizeof(wl);
-        wl.header.adapterId = paths[i].targetInfo.adapterId;
-        wl.header.id = paths[i].targetInfo.id;
-        if (DisplayConfigGetDeviceInfo(&wl.header) == ERROR_SUCCESS && wl.SDRWhiteLevel > 0)
-            return wl.SDRWhiteLevel / 1000.0 * 80.0;
-    }
-    return 200.0;
-}
-
-// Constant buffer: source sub-rect UV bounds, per-frame pan shift (motion blur), output
-// brightness, and HDR tonemap params. 48 bytes (three 16-byte registers).
-// hdrMode: 0 = SDR passthrough, 1 = scRGB (FP16 linear Rec.709) -> SDR.
-// scRgbScale = 80 / SDR-white-nits (scRGB 1.0 = 80 nits; SDR white maps to 1.0).
-struct MagCB {
-    float uvMinX, uvMinY, uvMaxX, uvMaxY;    // reg 0
-    float blurX, blurY, brightness, hdrMode; // reg 1
-    float scRgbScale, pad0, pad1, pad2;      // reg 2
-};
-
-// Fullscreen-triangle magnify shader. The VS maps the visible [0,1] screen UV into the
-// source sub-rect; the PS samples the captured desktop. When panning, it integrates several
-// taps along the per-frame pan vector (blurUV) - motion blur that smears the big per-frame
-// step at high zoom into continuous motion, and collapses to a sharp single tap when still.
-static const char* kMagHLSL = R"(
-cbuffer CB : register(b0) {
-    float2 uvMin; float2 uvMax; float2 blurUV; float brightness; float hdrMode;
-    float scRgbScale; float3 pad;
-};
-struct VSOut { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; };
-VSOut VSMain(uint id : SV_VertexID) {
-    float2 t = float2((id << 1) & 2, id & 2);   // (0,0),(2,0),(0,2)
-    VSOut o;
-    o.pos = float4(t * float2(2, -2) + float2(-1, 1), 0, 1);
-    o.uv  = lerp(uvMin, uvMax, t);               // visible region samples [uvMin, uvMax]
-    return o;
-}
-Texture2D tex : register(t0);
-SamplerState smp : register(s0);
-float3 LinearToSrgb(float3 l) {
-    l = saturate(l);
-    return (l <= 0.0031308) ? (l * 12.92) : (1.055 * pow(l, 1.0 / 2.4) - 0.055);
-}
-float4 PSMain(VSOut i) : SV_TARGET {
-    float4 c;
-    if (abs(blurUV.x) + abs(blurUV.y) < 1e-6) {
-        c = tex.Sample(smp, i.uv);               // still: sharp
-    } else {
-        const int N = 16;
-        float4 acc = 0;
-        [unroll] for (int k = 0; k < N; ++k) {
-            float t = (k / float(N - 1)) - 0.5;  // -0.5 .. +0.5 across the frame's motion
-            acc += tex.Sample(smp, i.uv + blurUV * t);
-        }
-        c = acc / N;
-    }
-    if (hdrMode > 0.5) {
-        // FP16 scRGB source (linear Rec.709, 1.0 = 80 nits): scale so SDR white -> 1.0,
-        // then sRGB-encode. Reconstructs the SDR appearance the HDR desktop shows.
-        c.rgb = LinearToSrgb(max(c.rgb, 0.0) * scRgbScale);
-    }
-    c.rgb *= brightness;                         // optional fine-tune (default 1.0)
-    return c;
-}
-)";
-
-// Cursor quad shader: a per-quad transform (top-left + size in clip space) places an
-// alpha-blended textured quad. Drawn as a 4-vertex triangle strip from the vertex id.
-static const char* kCursorHLSL = R"(
-cbuffer CB : register(b0) { float2 posClip; float2 sizeClip; };
-struct VSOut { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; };
-VSOut VSMain(uint id : SV_VertexID) {
-    float2 q = float2(id & 1, (id >> 1) & 1);   // (0,0),(1,0),(0,1),(1,1)
-    VSOut o;
-    o.pos = float4(posClip + q * sizeClip, 0, 1);
-    o.uv  = q;
-    return o;
-}
-Texture2D tex : register(t0);
-SamplerState smp : register(s0);
-float4 PSMain(VSOut i) : SV_TARGET { return tex.Sample(smp, i.uv); }
-)";
-
 static ID3DBlob* CompileShader(const char* src, const char* entry, const char* target) {
     ID3DBlob* code = nullptr; ID3DBlob* err = nullptr;
     HRESULT hr = D3DCompile(src, std::strlen(src), nullptr, nullptr, nullptr,
@@ -165,65 +44,6 @@ static ID3DBlob* CompileShader(const char* src, const char* entry, const char* t
     if (err) err->Release();
     if (FAILED(hr)) { SafeRelease(code); return nullptr; }
     return code;
-}
-
-// Decode an HCURSOR into top-down 32bpp BGRA (matches B8G8R8A8_UNORM memory order).
-// Handles color cursors with per-pixel alpha (arrow, hand) and invert-style cursors with no
-// alpha (e.g. the I-beam, which inverts the pixels beneath it). For invert cursors, isInvert
-// is set and `out` is white where the glyph is / black elsewhere, to be drawn with an invert
-// blend (drawing those opaque made the I-beam vanish on white input fields). Returns size +
-// hotspot.
-static bool DecodeCursorBGRA(HCURSOR hc, std::vector<uint32_t>& out,
-                             int& w, int& h, int& hotX, int& hotY, bool& isInvert) {
-    ICONINFO ii{};
-    if (!GetIconInfo(hc, &ii)) return false;
-    hotX = (int)ii.xHotspot; hotY = (int)ii.yHotspot;
-    isInvert = false;
-    HDC hdc = GetDC(nullptr);
-    BITMAP bm{};
-    bool ok = false;
-    if (ii.hbmColor) {
-        GetObjectW(ii.hbmColor, sizeof(bm), &bm);
-        w = bm.bmWidth; h = bm.bmHeight;
-        out.assign((size_t)w * h, 0);
-        BITMAPINFO bi{}; bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-        bi.bmiHeader.biWidth = w; bi.bmiHeader.biHeight = -h;   // top-down
-        bi.bmiHeader.biPlanes = 1; bi.bmiHeader.biBitCount = 32; bi.bmiHeader.biCompression = BI_RGB;
-        GetDIBits(hdc, ii.hbmColor, 0, h, out.data(), &bi, DIB_RGB_COLORS);
-        bool anyAlpha = false;
-        for (uint32_t px : out) if (px & 0xFF000000u) { anyAlpha = true; break; }
-        if (!anyAlpha) {
-            // No alpha channel -> an invert/XOR cursor (the I-beam). Mark the glyph (any
-            // non-black color) white and the rest black; the invert blend turns white into
-            // "invert the background" and black into "leave it", so it shows on any color.
-            isInvert = true;
-            for (size_t i = 0; i < out.size(); ++i)
-                out[i] = (out[i] & 0x00FFFFFFu) ? 0xFFFFFFFFu : 0x00000000u;
-        }
-        ok = true;
-    } else if (ii.hbmMask) {
-        GetObjectW(ii.hbmMask, sizeof(bm), &bm);
-        w = bm.bmWidth; h = bm.bmHeight / 2;
-        std::vector<uint32_t> both((size_t)w * bm.bmHeight, 0);
-        BITMAPINFO bi{}; bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-        bi.bmiHeader.biWidth = w; bi.bmiHeader.biHeight = -bm.bmHeight;
-        bi.bmiHeader.biPlanes = 1; bi.bmiHeader.biBitCount = 32; bi.bmiHeader.biCompression = BI_RGB;
-        GetDIBits(hdc, ii.hbmMask, 0, bm.bmHeight, both.data(), &bi, DIB_RGB_COLORS);
-        out.assign((size_t)w * h, 0);
-        for (int y = 0; y < h; ++y) for (int x = 0; x < w; ++x) {
-            uint32_t andPx = both[(size_t)y * w + x] & 0xFFFFFFu;
-            uint32_t xorPx = both[(size_t)(y + h) * w + x] & 0xFFFFFFu;
-            uint32_t pix;
-            if (andPx) pix = xorPx ? 0xFFFFFFFFu : 0x00000000u;  // transparent, or invert->white
-            else       pix = xorPx ? 0xFFFFFFFFu : 0xFF000000u;  // white, or black
-            out[(size_t)y * w + x] = pix;
-        }
-        ok = true;
-    }
-    ReleaseDC(nullptr, hdc);
-    if (ii.hbmColor) DeleteObject(ii.hbmColor);
-    if (ii.hbmMask) DeleteObject(ii.hbmMask);
-    return ok && w > 0 && h > 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -518,7 +338,7 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
                                    monitor.x, monitor.y, screenW, screenH, nullptr, nullptr,
                                    wc.hInstance, nullptr);
     }
-    if (!s_->hwnd) return false;
+    if (!s_->hwnd) { RLog("initialize: CreateWindow failed gle=%lu", (unsigned long)GetLastError()); return false; }
     // Start fully transparent (alpha 0 = invisible). We toggle the layer alpha to show/hide
     // instead of SW_HIDE/SW_SHOW: a layered window that is hidden and re-shown makes DWM cache
     // and re-display the frame from when it was last visible, which flashed the previous zoom
@@ -538,11 +358,11 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
         nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
         D3D11_CREATE_DEVICE_BGRA_SUPPORT, want, 2, D3D11_SDK_VERSION,
         &s_->device, &got, &s_->ctx);
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) { RLog("initialize: D3D11CreateDevice failed hr=0x%08lX", (unsigned long)hr); return false; }
 
     // --- Blt-model swapchain on the layered overlay HWND (flip can't target layered) ---
     IDXGIDevice1* dxgiDev = nullptr;
-    if (FAILED(s_->device->QueryInterface(__uuidof(IDXGIDevice1), (void**)&dxgiDev))) return false;
+    if (FAILED(s_->device->QueryInterface(__uuidof(IDXGIDevice1), (void**)&dxgiDev))) { RLog("initialize: QueryInterface(IDXGIDevice1) failed"); return false; }
     dxgiDev->SetMaximumFrameLatency(1);     // cap input-to-photon latency to ~1 frame
     IDXGIAdapter* adapter = nullptr;
     dxgiDev->GetAdapter(&adapter);
@@ -550,7 +370,7 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     if (adapter) adapter->GetParent(__uuidof(IDXGIFactory), (void**)&factory);
     SafeRelease(dxgiDev);
     SafeRelease(adapter);
-    if (!factory) return false;
+    if (!factory) { RLog("initialize: no IDXGIFactory from adapter"); return false; }
 
     DXGI_SWAP_CHAIN_DESC scd{};
     scd.BufferDesc.Width = screenW;
@@ -565,48 +385,48 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     hr = factory->CreateSwapChain(s_->device, &scd, &s_->swap);
     factory->MakeWindowAssociation(s_->hwnd, DXGI_MWA_NO_ALT_ENTER);
     SafeRelease(factory);
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) { RLog("initialize: CreateSwapChain failed hr=0x%08lX", (unsigned long)hr); return false; }
 
     // --- Render target view from back-buffer 0 ---
     ID3D11Texture2D* back = nullptr;
-    if (FAILED(s_->swap->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&back))) return false;
+    if (FAILED(s_->swap->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&back))) { RLog("initialize: swapchain GetBuffer(0) failed"); return false; }
     hr = s_->device->CreateRenderTargetView(back, nullptr, &s_->rtv);
     SafeRelease(back);
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) { RLog("initialize: CreateRenderTargetView failed hr=0x%08lX", (unsigned long)hr); return false; }
 
     // --- Desktop copy texture (SRV-able; DDA frames are copied into this). Starts BGRA8;
     //     capture() re-creates it to match the acquired format (e.g. FP16 scRGB on HDR). ---
-    if (!s_->ensureDesktopCopy(DXGI_FORMAT_B8G8R8A8_UNORM)) return false;
+    if (!s_->ensureDesktopCopy(DXGI_FORMAT_B8G8R8A8_UNORM)) { RLog("initialize: ensureDesktopCopy failed"); return false; }
 
     // --- Magnify shader pipeline ---
     ID3DBlob* vsb = CompileShader(kMagHLSL, "VSMain", "vs_5_0");
     ID3DBlob* psb = CompileShader(kMagHLSL, "PSMain", "ps_5_0");
-    if (!vsb || !psb) { SafeRelease(vsb); SafeRelease(psb); return false; }
+    if (!vsb || !psb) { RLog("initialize: magnify shader compile failed"); SafeRelease(vsb); SafeRelease(psb); return false; }
     hr = s_->device->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &s_->vs);
     HRESULT hr2 = s_->device->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &s_->ps);
     SafeRelease(vsb); SafeRelease(psb);
-    if (FAILED(hr) || FAILED(hr2)) return false;
+    if (FAILED(hr) || FAILED(hr2)) { RLog("initialize: magnify shader create failed hr=0x%08lX hr2=0x%08lX", (unsigned long)hr, (unsigned long)hr2); return false; }
 
     D3D11_BUFFER_DESC cbd{};
     cbd.ByteWidth = sizeof(MagCB);
     cbd.Usage = D3D11_USAGE_DEFAULT;
     cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    if (FAILED(s_->device->CreateBuffer(&cbd, nullptr, &s_->cb))) return false;
+    if (FAILED(s_->device->CreateBuffer(&cbd, nullptr, &s_->cb))) { RLog("initialize: CreateBuffer(magnify cb) failed"); return false; }
 
     // --- Cursor shader pipeline ---
     ID3DBlob* cvsb = CompileShader(kCursorHLSL, "VSMain", "vs_5_0");
     ID3DBlob* cpsb = CompileShader(kCursorHLSL, "PSMain", "ps_5_0");
-    if (!cvsb || !cpsb) { SafeRelease(cvsb); SafeRelease(cpsb); return false; }
+    if (!cvsb || !cpsb) { RLog("initialize: cursor shader compile failed"); SafeRelease(cvsb); SafeRelease(cpsb); return false; }
     HRESULT hr3 = s_->device->CreateVertexShader(cvsb->GetBufferPointer(), cvsb->GetBufferSize(), nullptr, &s_->cvs);
     HRESULT hr4 = s_->device->CreatePixelShader(cpsb->GetBufferPointer(), cpsb->GetBufferSize(), nullptr, &s_->cps);
     SafeRelease(cvsb); SafeRelease(cpsb);
-    if (FAILED(hr3) || FAILED(hr4)) return false;
+    if (FAILED(hr3) || FAILED(hr4)) { RLog("initialize: cursor shader create failed hr3=0x%08lX hr4=0x%08lX", (unsigned long)hr3, (unsigned long)hr4); return false; }
 
     D3D11_BUFFER_DESC ccbd{};
     ccbd.ByteWidth = 16;   // float2 posClip + float2 sizeClip
     ccbd.Usage = D3D11_USAGE_DEFAULT;
     ccbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    if (FAILED(s_->device->CreateBuffer(&ccbd, nullptr, &s_->ccb))) return false;
+    if (FAILED(s_->device->CreateBuffer(&ccbd, nullptr, &s_->ccb))) { RLog("initialize: CreateBuffer(cursor cb) failed"); return false; }
 
     D3D11_BLEND_DESC bd{};
     bd.RenderTarget[0].BlendEnable = TRUE;
@@ -617,7 +437,7 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     bd.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
     bd.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
     bd.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
-    if (FAILED(s_->device->CreateBlendState(&bd, &s_->blend))) return false;
+    if (FAILED(s_->device->CreateBlendState(&bd, &s_->blend))) { RLog("initialize: CreateBlendState(alpha) failed"); return false; }
 
     // Invert blend for I-beam-style cursors: result = src*(1-dest) + dest*(1-src). A white
     // glyph pixel (src=1) becomes 1-dest (inverts the background); black (src=0) leaves dest.
@@ -631,7 +451,7 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     ib.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
     ib.RenderTarget[0].RenderTargetWriteMask =
         D3D11_COLOR_WRITE_ENABLE_RED | D3D11_COLOR_WRITE_ENABLE_GREEN | D3D11_COLOR_WRITE_ENABLE_BLUE;
-    if (FAILED(s_->device->CreateBlendState(&ib, &s_->blendInvert))) return false;
+    if (FAILED(s_->device->CreateBlendState(&ib, &s_->blendInvert))) { RLog("initialize: CreateBlendState(invert) failed"); return false; }
 
     D3D11_SAMPLER_DESC samp{};
     samp.AddressU = samp.AddressV = samp.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
@@ -641,10 +461,10 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     s_->device->CreateSamplerState(&samp, &s_->sampLinear);
     samp.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
     s_->device->CreateSamplerState(&samp, &s_->sampPoint);
-    if (!s_->sampLinear || !s_->sampPoint) return false;
+    if (!s_->sampLinear || !s_->sampPoint) { RLog("initialize: CreateSamplerState failed"); return false; }
 
     // --- Desktop Duplication ---
-    if (!s_->recreateDupl()) return false;
+    if (!s_->recreateDupl()) { RLog("initialize: recreateDupl failed"); return false; }
     if (s_->capFp16) s_->sdrWhiteNits = GetSDRWhiteNits();
     RLog("initialize done: capFp16=%d sdrWhiteNits=%.1f", (int)s_->capFp16, s_->sdrWhiteNits);
 
@@ -942,65 +762,13 @@ void RenderEngine::shutdown() {
 }
 
 // ---------------------------------------------------------------------------
-// Verification helper: copy the back-buffer to a staging texture and WIC-encode a PNG.
+// Verification helper: copy back-buffer 0 to a PNG (WIC encode lives in png_dump).
 bool RenderEngine::dumpBackbufferPng(const wchar_t* path) {
     if (!s_->ready) return false;
     ID3D11Texture2D* back = nullptr;
     if (FAILED(s_->swap->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&back))) return false;
-    D3D11_TEXTURE2D_DESC td{};
-    back->GetDesc(&td);
-    D3D11_TEXTURE2D_DESC sd = td;
-    sd.Usage = D3D11_USAGE_STAGING;
-    sd.BindFlags = 0;
-    sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-    sd.MiscFlags = 0;
-    ID3D11Texture2D* stage = nullptr;
-    HRESULT hr = s_->device->CreateTexture2D(&sd, nullptr, &stage);
-    if (FAILED(hr)) { SafeRelease(back); return false; }
-    s_->ctx->CopyResource(stage, back);
+    bool ok = SaveTextureToPng(s_->device, s_->ctx, back, path);
     SafeRelease(back);
-
-    D3D11_MAPPED_SUBRESOURCE map{};
-    hr = s_->ctx->Map(stage, 0, D3D11_MAP_READ, 0, &map);
-    if (FAILED(hr)) { SafeRelease(stage); return false; }
-
-    bool ok = false;
-    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    IWICImagingFactory* wic = nullptr;
-    if (SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
-                                   __uuidof(IWICImagingFactory), (void**)&wic))) {
-        IWICBitmap* bmp = nullptr;
-        if (SUCCEEDED(wic->CreateBitmapFromMemory(td.Width, td.Height,
-                GUID_WICPixelFormat32bppBGRA, map.RowPitch,
-                map.RowPitch * td.Height, (BYTE*)map.pData, &bmp))) {
-            IWICStream* stream = nullptr;
-            wic->CreateStream(&stream);
-            if (stream && SUCCEEDED(stream->InitializeFromFilename(path, GENERIC_WRITE))) {
-                IWICBitmapEncoder* enc = nullptr;
-                wic->CreateEncoder(GUID_ContainerFormatPng, nullptr, &enc);
-                if (enc && SUCCEEDED(enc->Initialize(stream, WICBitmapEncoderNoCache))) {
-                    IWICBitmapFrameEncode* frame = nullptr;
-                    enc->CreateNewFrame(&frame, nullptr);
-                    if (frame && SUCCEEDED(frame->Initialize(nullptr))) {
-                        frame->SetSize(td.Width, td.Height);
-                        WICPixelFormatGUID pf = GUID_WICPixelFormat32bppBGRA;
-                        frame->SetPixelFormat(&pf);
-                        if (SUCCEEDED(frame->WriteSource(bmp, nullptr)) &&
-                            SUCCEEDED(frame->Commit()) && SUCCEEDED(enc->Commit())) {
-                            ok = true;
-                        }
-                    }
-                    SafeRelease(frame);
-                }
-                SafeRelease(enc);
-            }
-            SafeRelease(stream);
-            SafeRelease(bmp);
-        }
-        SafeRelease(wic);
-    }
-    s_->ctx->Unmap(stage, 0);
-    SafeRelease(stage);
     return ok;
 }
 
