@@ -23,7 +23,7 @@ MapResult CursorMapper::update(int dx, int dy, double level) {
     if (ty_ < 0) ty_ = 0; else if (ty_ > sh_) ty_ = sh_;
 
     // Light inertia: ease the rendered center toward the target. Smooths jerk and the uneven
-    // per-frame raw-delta steps; alpha_ = 1 means no smoothing (snaps to target).
+    // per-frame delta steps; alpha_ = 1 means no smoothing (snaps to target).
     cx_ += (tx_ - cx_) * alpha_;
     cy_ += (ty_ - cy_) * alpha_;
 

@@ -14,8 +14,8 @@ struct MapResult {
 class CursorMapper {
 public:
     // smoothing 0..~0.95: light inertia on the lens. 0 = none (rendered center snaps to the
-    // raw-accumulated target); higher = the center eases toward the target over several
-    // frames, smoothing jerk and the uneven per-frame raw-delta steps (costs a little lag).
+    // accumulated target); higher = the center eases toward the target over several frames,
+    // smoothing jerk and the uneven per-frame delta steps (costs a little lag).
     CursorMapper(int screenW, int screenH, double smoothing = 0.0);
     void reset(double centerX, double centerY);    // pin both target + rendered center
     // dx/dy: the pixel delta to apply to the lens center this tick (already resolved by the
@@ -27,6 +27,6 @@ private:
     int sw_, sh_;
     double alpha_;          // per-frame easing factor (1 - smoothing), clamped
     double cx_, cy_;        // rendered center (eased)
-    double tx_, ty_;        // target center (raw-accumulated)
+    double tx_, ty_;        // target center (delta-accumulated)
 };
 }
