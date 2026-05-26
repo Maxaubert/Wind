@@ -283,9 +283,16 @@ bool RenderEngine::State::capture() {
     freshCapture = false;
     const int   firstAttempts = fresh ? 40 : 1;
     const DWORD firstTimeout  = fresh ? 25 : 0;
+    // Bound the fresh-grab wall time. Without this, a desktop that delivers no first frame makes
+    // the loop wait firstAttempts*firstTimeout (~1s) on the render/main thread, stalling the whole
+    // tick + input sampling on zoom-in. Normally the first AcquireNextFrame returns immediately, so
+    // this only caps the pathological case; if we give up frameless, fresh stays true (haveDesktop
+    // unchanged) and the next tick retries.
+    const unsigned long long freshDeadlineMs = fresh ? GetTickCount64() + 100 : 0;
     bool gotThisCall = false;
 
     for (int a = 0; a < firstAttempts; ++a) {
+        if (fresh && !gotThisCall && GetTickCount64() >= freshDeadlineMs) break;   // budget spent, no frame yet
         IDXGIResource* res = nullptr;
         DXGI_OUTDUPL_FRAME_INFO fi{};
         const DWORD to = gotThisCall ? 3 : firstTimeout;   // after a copy, only briefly seek a newer frame
