@@ -7,6 +7,7 @@
 #include <magnification.h>
 #include <cstdint>
 #include <cstring>
+#include <cwchar>
 #include <climits>
 #include <cstdio>
 #include <cstdarg>
@@ -285,24 +286,52 @@ struct RenderEngine::State {
     bool cursorHidden = false;
     bool ready = false;
 
+    // Find the output on our D3D device's adapter whose DeviceName matches `device`. Returns an
+    // AddRef'd output, or (if fallbackToFirst) output 0, or nullptr. Used to capture a specific
+    // monitor and to validate a retarget before touching the window/swapchain.
+    IDXGIOutput* selectOutput(const wchar_t* deviceName, bool fallbackToFirst);
+
     bool recreateDupl();
     bool capture();      // AcquireNextFrame -> desktopCopy (+ pointer info); handles loss/timeout
     void render(const RenderFrameParams& p);  // draw into the back-buffer (no Present)
 };
 
-// Recreate the duplication interface (after ACCESS_LOST or first use).
-bool RenderEngine::State::recreateDupl() {
-    SafeRelease(dupl);
+IDXGIOutput* RenderEngine::State::selectOutput(const wchar_t* deviceName, bool fallbackToFirst) {
     IDXGIDevice* dxgiDev = nullptr;
-    if (FAILED(device->QueryInterface(__uuidof(IDXGIDevice), (void**)&dxgiDev))) return false;
+    if (FAILED(this->device->QueryInterface(__uuidof(IDXGIDevice), (void**)&dxgiDev))) return nullptr;
     IDXGIAdapter* adapter = nullptr;
     dxgiDev->GetAdapter(&adapter);
     SafeRelease(dxgiDev);
-    if (!adapter) return false;
-    IDXGIOutput* output = nullptr;
-    adapter->EnumOutputs(0, &output);
+    if (!adapter) return nullptr;
+
+    IDXGIOutput* match = nullptr;   // name match (preferred)
+    IDXGIOutput* first = nullptr;   // output 0 (fallback)
+    for (UINT i = 0; ; ++i) {
+        IDXGIOutput* o = nullptr;
+        if (adapter->EnumOutputs(i, &o) == DXGI_ERROR_NOT_FOUND || !o) break;
+        DXGI_OUTPUT_DESC od{};
+        if (deviceName && deviceName[0] && SUCCEEDED(o->GetDesc(&od)) && wcscmp(od.DeviceName, deviceName) == 0) {
+            match = o;              // keep this ref; stop searching
+            break;
+        }
+        if (i == 0) first = o;      // keep output 0 for the fallback
+        else o->Release();
+    }
     SafeRelease(adapter);
+    if (match) { SafeRelease(first); return match; }
+    if (fallbackToFirst) return first;   // may be nullptr if the adapter has no outputs
+    SafeRelease(first);
+    return nullptr;
+}
+
+// Recreate the duplication interface (after ACCESS_LOST or first use).
+bool RenderEngine::State::recreateDupl() {
+    SafeRelease(dupl);
+    // Capture the target monitor's output (matched by device name), falling back to the first
+    // output for the legacy single-monitor path (empty targetDevice) or any name mismatch.
+    IDXGIOutput* output = selectOutput(targetDevice, /*fallbackToFirst=*/true);
     if (!output) return false;
+    RLog("recreateDupl: targetDevice=%ls", targetDevice[0] ? targetDevice : L"(first)");
     // Diagnostics: the output's color space + bit depth (HDR detection).
     IDXGIOutput6* output6 = nullptr;
     if (SUCCEEDED(output->QueryInterface(__uuidof(IDXGIOutput6), (void**)&output6)) && output6) {
