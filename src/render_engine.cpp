@@ -9,6 +9,7 @@
 #include <dxgi1_6.h>
 #include <d3dcompiler.h>
 #include <magnification.h>
+#include <dwmapi.h>
 #include <cstdint>
 #include <cstring>
 #include <cwchar>
@@ -24,6 +25,7 @@
 #pragma comment(lib, "windowscodecs.lib")
 #pragma comment(lib, "Magnification.lib")
 #pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "Dwmapi.lib")
 
 namespace wind {
 
@@ -674,16 +676,39 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
     }
 }
 
+// True if a visible, non-cloaked window sits above our overlay in z-order and overlaps it - i.e.
+// we have been displaced and must re-assert topmost. Walks the windows above us (GW_HWNDPREV);
+// when we are already on top (the common case) the first GetWindow returns NULL and this is one
+// cheap syscall with no DWM round-trip. Cloaked windows (e.g. on another virtual desktop) and
+// windows that don't overlap our rect are ignored so we don't thrash SetWindowPos chasing them.
+static bool overlayDisplaced(HWND hwnd) {
+    HWND above = GetWindow(hwnd, GW_HWNDPREV);
+    if (!above) return false;
+    RECT self{};
+    if (!GetWindowRect(hwnd, &self)) return false;
+    for (; above; above = GetWindow(above, GW_HWNDPREV)) {
+        if (!IsWindowVisible(above)) continue;
+        int cloaked = 0;
+        if (SUCCEEDED(DwmGetWindowAttribute(above, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked)
+            continue;
+        RECT wr, inter;
+        if (GetWindowRect(above, &wr) && IntersectRect(&inter, &wr, &self)) return true;
+    }
+    return false;
+}
+
 bool RenderEngine::renderFrame(const RenderFrameParams& p) {
     if (!s_->ready) return false;
     // Keep the overlay above everything (transparent + click-through + capture-excluded, so
     // being on top is safe; if we sit below an always-on-top app overlay like RTSS it draws a
-    // second, unmagnified copy over our view). Re-assert at most ~4x/sec, NOT every frame:
-    // per-frame SetWindowPos synchronizes with the window manager / DWM and caused a constant
-    // microstutter. ~250 ms reclaims top within a blink. A banded window stays in its band
-    // across SetWindowPos, so this only re-tops us within the band.
+    // second, unmagnified copy over our view). Re-assert ONLY when actually displaced, NOT every
+    // frame: per-frame SetWindowPos synchronizes with the window manager / DWM and caused a
+    // constant microstutter. overlayDisplaced() is one cheap GetWindow when we are already on top
+    // (the common case), so steady-state ticks do no DWM z-order work, and reclaim is immediate
+    // when something does pop above us. The 1 s unconditional backstop self-heals if the displaced
+    // check ever misses a case. A banded window stays in its band across SetWindowPos.
     unsigned long long nowMs = GetTickCount64();
-    if (nowMs - s_->lastTopmostMs >= 250) {
+    if (overlayDisplaced(s_->hwnd) || nowMs - s_->lastTopmostMs >= 1000) {
         s_->lastTopmostMs = nowMs;
         SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
