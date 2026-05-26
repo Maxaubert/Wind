@@ -293,6 +293,7 @@ struct RenderEngine::State {
     IDXGIOutput* selectOutput(const wchar_t* deviceName, bool fallbackToFirst);
 
     bool recreateDupl();
+    bool recreateRtv();  // (re)create rtv from swapchain back-buffer 0 (after ResizeBuffers / as a restore)
     bool capture();      // AcquireNextFrame -> desktopCopy (+ pointer info); handles loss/timeout
     void render(const RenderFrameParams& p);  // draw into the back-buffer (no Present)
 };
@@ -684,6 +685,21 @@ void RenderEngine::invalidateCapture() {
     s_->prevSrcValid = false;
 }
 
+// (Re)create the render-target view from the swapchain's current back buffer (buffer 0). Used
+// after ResizeBuffers, and as a best-effort restore if a resize step fails.
+bool RenderEngine::State::recreateRtv() {
+    SafeRelease(rtv);
+    ID3D11Texture2D* back = nullptr;
+    if (FAILED(swap->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&back))) {
+        RLog("recreateRtv: GetBuffer failed");
+        return false;
+    }
+    HRESULT hr = device->CreateRenderTargetView(back, nullptr, &rtv);
+    SafeRelease(back);
+    if (FAILED(hr)) { RLog("recreateRtv: CreateRenderTargetView failed hr=0x%08lX", (unsigned long)hr); return false; }
+    return true;
+}
+
 bool RenderEngine::retarget(const MonitorTarget& m) {
     if (!s_ || !s_->ready || !s_->hwnd || !s_->swap) return false;
 
@@ -700,27 +716,30 @@ bool RenderEngine::retarget(const MonitorTarget& m) {
 
     const bool sizeChanged = (m.w != s_->sw || m.h != s_->sh);
 
-    // Move/resize the overlay. During a zoom-in the window is still at alpha 0 (invisible), so
-    // this never flashes. Keep it topmost.
-    SetWindowPos(s_->hwnd, HWND_TOPMOST, m.x, m.y, m.w, m.h, SWP_NOACTIVATE);
-
+    // Resize the swapchain to the new monitor FIRST (the only fallible step). The RTV is the sole
+    // back-buffer reference, so release it before ResizeBuffers, then recreate it. On any failure,
+    // best-effort restore the RTV from the current back buffer and bail WITHOUT moving the window
+    // or changing geometry, so the engine keeps rendering the current monitor (caller keeps it).
     if (sizeChanged) {
-        // ResizeBuffers requires all back-buffer references released first (the RTV holds one).
-        SafeRelease(s_->rtv);
+        SafeRelease(s_->rtv);   // ResizeBuffers requires all back-buffer refs released
         HRESULT hr = s_->swap->ResizeBuffers(1, m.w, m.h, DXGI_FORMAT_B8G8R8A8_UNORM, 0);
-        if (FAILED(hr)) { RLog("retarget: ResizeBuffers failed hr=0x%08lX", (unsigned long)hr); return false; }
-        ID3D11Texture2D* back = nullptr;
-        if (FAILED(s_->swap->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&back))) {
-            RLog("retarget: GetBuffer failed after ResizeBuffers"); return false;
+        if (FAILED(hr)) {
+            RLog("retarget: ResizeBuffers failed hr=0x%08lX; restoring RTV, keeping current monitor",
+                 (unsigned long)hr);
+            s_->recreateRtv();   // best-effort: keep the current monitor renderable
+            return false;
         }
-        hr = s_->device->CreateRenderTargetView(back, nullptr, &s_->rtv);
-        SafeRelease(back);
-        if (FAILED(hr)) { RLog("retarget: CreateRenderTargetView failed hr=0x%08lX", (unsigned long)hr); return false; }
+        if (!s_->recreateRtv()) {
+            RLog("retarget: RTV recreate failed after ResizeBuffers; keeping current monitor");
+            return false;
+        }
     }
 
-    // Adopt the new geometry + device, then force a fresh capture on the new output (same flags
-    // as invalidateCapture). The next capture() recreates the duplication via selectOutput and
-    // recreates desktopCopy at the new size (ensureDesktopCopy is size-aware).
+    // Committed (resize succeeded, or no resize needed): move/resize the overlay (still at alpha 0
+    // during zoom-in, so no flash), adopt the new geometry + device, and force a fresh capture on
+    // the new output (same flags as invalidateCapture). The next capture() rebinds the duplication
+    // via selectOutput and recreates desktopCopy at the new size (ensureDesktopCopy is size-aware).
+    SetWindowPos(s_->hwnd, HWND_TOPMOST, m.x, m.y, m.w, m.h, SWP_NOACTIVATE);
     s_->originX = m.x; s_->originY = m.y;
     s_->sw = m.w; s_->sh = m.h;
     lstrcpynW(s_->targetDevice, m.device, 32);
