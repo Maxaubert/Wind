@@ -338,7 +338,7 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
                                    monitor.x, monitor.y, screenW, screenH, nullptr, nullptr,
                                    wc.hInstance, nullptr);
     }
-    if (!s_->hwnd) return false;
+    if (!s_->hwnd) { RLog("initialize: CreateWindow failed gle=%lu", (unsigned long)GetLastError()); return false; }
     // Start fully transparent (alpha 0 = invisible). We toggle the layer alpha to show/hide
     // instead of SW_HIDE/SW_SHOW: a layered window that is hidden and re-shown makes DWM cache
     // and re-display the frame from when it was last visible, which flashed the previous zoom
@@ -358,11 +358,11 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
         nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
         D3D11_CREATE_DEVICE_BGRA_SUPPORT, want, 2, D3D11_SDK_VERSION,
         &s_->device, &got, &s_->ctx);
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) { RLog("initialize: D3D11CreateDevice failed hr=0x%08lX", (unsigned long)hr); return false; }
 
     // --- Blt-model swapchain on the layered overlay HWND (flip can't target layered) ---
     IDXGIDevice1* dxgiDev = nullptr;
-    if (FAILED(s_->device->QueryInterface(__uuidof(IDXGIDevice1), (void**)&dxgiDev))) return false;
+    if (FAILED(s_->device->QueryInterface(__uuidof(IDXGIDevice1), (void**)&dxgiDev))) { RLog("initialize: QueryInterface(IDXGIDevice1) failed"); return false; }
     dxgiDev->SetMaximumFrameLatency(1);     // cap input-to-photon latency to ~1 frame
     IDXGIAdapter* adapter = nullptr;
     dxgiDev->GetAdapter(&adapter);
@@ -370,7 +370,7 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     if (adapter) adapter->GetParent(__uuidof(IDXGIFactory), (void**)&factory);
     SafeRelease(dxgiDev);
     SafeRelease(adapter);
-    if (!factory) return false;
+    if (!factory) { RLog("initialize: no IDXGIFactory from adapter"); return false; }
 
     DXGI_SWAP_CHAIN_DESC scd{};
     scd.BufferDesc.Width = screenW;
@@ -385,48 +385,48 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     hr = factory->CreateSwapChain(s_->device, &scd, &s_->swap);
     factory->MakeWindowAssociation(s_->hwnd, DXGI_MWA_NO_ALT_ENTER);
     SafeRelease(factory);
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) { RLog("initialize: CreateSwapChain failed hr=0x%08lX", (unsigned long)hr); return false; }
 
     // --- Render target view from back-buffer 0 ---
     ID3D11Texture2D* back = nullptr;
-    if (FAILED(s_->swap->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&back))) return false;
+    if (FAILED(s_->swap->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&back))) { RLog("initialize: swapchain GetBuffer(0) failed"); return false; }
     hr = s_->device->CreateRenderTargetView(back, nullptr, &s_->rtv);
     SafeRelease(back);
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) { RLog("initialize: CreateRenderTargetView failed hr=0x%08lX", (unsigned long)hr); return false; }
 
     // --- Desktop copy texture (SRV-able; DDA frames are copied into this). Starts BGRA8;
     //     capture() re-creates it to match the acquired format (e.g. FP16 scRGB on HDR). ---
-    if (!s_->ensureDesktopCopy(DXGI_FORMAT_B8G8R8A8_UNORM)) return false;
+    if (!s_->ensureDesktopCopy(DXGI_FORMAT_B8G8R8A8_UNORM)) { RLog("initialize: ensureDesktopCopy failed"); return false; }
 
     // --- Magnify shader pipeline ---
     ID3DBlob* vsb = CompileShader(kMagHLSL, "VSMain", "vs_5_0");
     ID3DBlob* psb = CompileShader(kMagHLSL, "PSMain", "ps_5_0");
-    if (!vsb || !psb) { SafeRelease(vsb); SafeRelease(psb); return false; }
+    if (!vsb || !psb) { RLog("initialize: magnify shader compile failed"); SafeRelease(vsb); SafeRelease(psb); return false; }
     hr = s_->device->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &s_->vs);
     HRESULT hr2 = s_->device->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &s_->ps);
     SafeRelease(vsb); SafeRelease(psb);
-    if (FAILED(hr) || FAILED(hr2)) return false;
+    if (FAILED(hr) || FAILED(hr2)) { RLog("initialize: magnify shader create failed hr=0x%08lX hr2=0x%08lX", (unsigned long)hr, (unsigned long)hr2); return false; }
 
     D3D11_BUFFER_DESC cbd{};
     cbd.ByteWidth = sizeof(MagCB);
     cbd.Usage = D3D11_USAGE_DEFAULT;
     cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    if (FAILED(s_->device->CreateBuffer(&cbd, nullptr, &s_->cb))) return false;
+    if (FAILED(s_->device->CreateBuffer(&cbd, nullptr, &s_->cb))) { RLog("initialize: CreateBuffer(magnify cb) failed"); return false; }
 
     // --- Cursor shader pipeline ---
     ID3DBlob* cvsb = CompileShader(kCursorHLSL, "VSMain", "vs_5_0");
     ID3DBlob* cpsb = CompileShader(kCursorHLSL, "PSMain", "ps_5_0");
-    if (!cvsb || !cpsb) { SafeRelease(cvsb); SafeRelease(cpsb); return false; }
+    if (!cvsb || !cpsb) { RLog("initialize: cursor shader compile failed"); SafeRelease(cvsb); SafeRelease(cpsb); return false; }
     HRESULT hr3 = s_->device->CreateVertexShader(cvsb->GetBufferPointer(), cvsb->GetBufferSize(), nullptr, &s_->cvs);
     HRESULT hr4 = s_->device->CreatePixelShader(cpsb->GetBufferPointer(), cpsb->GetBufferSize(), nullptr, &s_->cps);
     SafeRelease(cvsb); SafeRelease(cpsb);
-    if (FAILED(hr3) || FAILED(hr4)) return false;
+    if (FAILED(hr3) || FAILED(hr4)) { RLog("initialize: cursor shader create failed hr3=0x%08lX hr4=0x%08lX", (unsigned long)hr3, (unsigned long)hr4); return false; }
 
     D3D11_BUFFER_DESC ccbd{};
     ccbd.ByteWidth = 16;   // float2 posClip + float2 sizeClip
     ccbd.Usage = D3D11_USAGE_DEFAULT;
     ccbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    if (FAILED(s_->device->CreateBuffer(&ccbd, nullptr, &s_->ccb))) return false;
+    if (FAILED(s_->device->CreateBuffer(&ccbd, nullptr, &s_->ccb))) { RLog("initialize: CreateBuffer(cursor cb) failed"); return false; }
 
     D3D11_BLEND_DESC bd{};
     bd.RenderTarget[0].BlendEnable = TRUE;
@@ -437,7 +437,7 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     bd.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
     bd.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
     bd.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
-    if (FAILED(s_->device->CreateBlendState(&bd, &s_->blend))) return false;
+    if (FAILED(s_->device->CreateBlendState(&bd, &s_->blend))) { RLog("initialize: CreateBlendState(alpha) failed"); return false; }
 
     // Invert blend for I-beam-style cursors: result = src*(1-dest) + dest*(1-src). A white
     // glyph pixel (src=1) becomes 1-dest (inverts the background); black (src=0) leaves dest.
@@ -451,7 +451,7 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     ib.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
     ib.RenderTarget[0].RenderTargetWriteMask =
         D3D11_COLOR_WRITE_ENABLE_RED | D3D11_COLOR_WRITE_ENABLE_GREEN | D3D11_COLOR_WRITE_ENABLE_BLUE;
-    if (FAILED(s_->device->CreateBlendState(&ib, &s_->blendInvert))) return false;
+    if (FAILED(s_->device->CreateBlendState(&ib, &s_->blendInvert))) { RLog("initialize: CreateBlendState(invert) failed"); return false; }
 
     D3D11_SAMPLER_DESC samp{};
     samp.AddressU = samp.AddressV = samp.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
@@ -461,10 +461,10 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     s_->device->CreateSamplerState(&samp, &s_->sampLinear);
     samp.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
     s_->device->CreateSamplerState(&samp, &s_->sampPoint);
-    if (!s_->sampLinear || !s_->sampPoint) return false;
+    if (!s_->sampLinear || !s_->sampPoint) { RLog("initialize: CreateSamplerState failed"); return false; }
 
     // --- Desktop Duplication ---
-    if (!s_->recreateDupl()) return false;
+    if (!s_->recreateDupl()) { RLog("initialize: recreateDupl failed"); return false; }
     if (s_->capFp16) s_->sdrWhiteNits = GetSDRWhiteNits();
     RLog("initialize done: capFp16=%d sdrWhiteNits=%.1f", (int)s_->capFp16, s_->sdrWhiteNits);
 
