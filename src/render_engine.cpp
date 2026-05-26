@@ -255,6 +255,7 @@ struct RenderEngine::State {
     bool capFp16 = false;        // capturing FP16 scRGB (tonemap active)
     double sdrWhiteNits = 200.0; // OS SDR white level for the tonemap scale
     DXGI_FORMAT copyFormat = DXGI_FORMAT_B8G8R8A8_UNORM;  // current desktopCopy format
+    int copyW = 0, copyH = 0;                             // current desktopCopy dimensions
     bool ensureDesktopCopy(DXGI_FORMAT fmt);  // (re)create desktopCopy+SRV to match the capture
 
     // Magnify pass.
@@ -380,7 +381,7 @@ bool RenderEngine::State::recreateDupl() {
 // (Re)create desktopCopy + its SRV to match the captured frame's actual format, so
 // CopyResource can never hit a format mismatch (which black-screened the magnify pass).
 bool RenderEngine::State::ensureDesktopCopy(DXGI_FORMAT fmt) {
-    if (desktopCopy && copyFormat == fmt) return true;
+    if (desktopCopy && copyFormat == fmt && copyW == sw && copyH == sh) return true;
     SafeRelease(desktopSRV);
     SafeRelease(desktopCopy);
     D3D11_TEXTURE2D_DESC dc{};
@@ -390,7 +391,8 @@ bool RenderEngine::State::ensureDesktopCopy(DXGI_FORMAT fmt) {
     if (FAILED(device->CreateTexture2D(&dc, nullptr, &desktopCopy))) { RLog("ensureDesktopCopy: tex fail fmt=%u", fmt); return false; }
     if (FAILED(device->CreateShaderResourceView(desktopCopy, nullptr, &desktopSRV))) { RLog("ensureDesktopCopy: srv fail fmt=%u", fmt); return false; }
     copyFormat = fmt;
-    RLog("ensureDesktopCopy: format=%u", (unsigned)fmt);
+    copyW = sw; copyH = sh;
+    RLog("ensureDesktopCopy: format=%u size=%dx%d", (unsigned)fmt, sw, sh);
     return true;
 }
 
