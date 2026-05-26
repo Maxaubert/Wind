@@ -1,4 +1,5 @@
 #include "render_engine.h"
+#include "com_util.h"
 #include <windows.h>
 #include <d3d11.h>
 #include <dxgi1_6.h>
@@ -21,8 +22,6 @@
 #pragma comment(lib, "ole32.lib")
 
 namespace wind {
-
-template <class T> static void SafeRelease(T*& p) { if (p) { p->Release(); p = nullptr; } }
 
 // Diagnostic log to %TEMP%\wind_render.log (so we can see why the deployed UIAccess build
 // behaves a certain way - the overlay is capture-excluded and runs from Program Files).
