@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <cstdarg>
 #include <vector>
+#include <wrl/client.h>
 
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -25,6 +26,8 @@
 #pragma comment(lib, "ole32.lib")
 
 namespace wind {
+
+using Microsoft::WRL::ComPtr;
 
 // Diagnostic log to %TEMP%\wind_render.log (so we can see why the deployed UIAccess build
 // behaves a certain way - the overlay is capture-excluded and runs from Program Files).
@@ -52,18 +55,18 @@ struct RenderEngine::State {
     int originX = 0, originY = 0;          // target monitor top-left in virtual-desktop pixels
     wchar_t targetDevice[32] = {};         // DXGI output DeviceName to capture ("" = first output)
     HWND hwnd = nullptr;
-    ID3D11Device* device = nullptr;
-    ID3D11DeviceContext* ctx = nullptr;
-    IDXGISwapChain* swap = nullptr;            // blt-model (layered window needs the redirection surface)
-    ID3D11RenderTargetView* rtv = nullptr;
+    ComPtr<ID3D11Device> device;
+    ComPtr<ID3D11DeviceContext> ctx;
+    ComPtr<IDXGISwapChain> swap;               // blt-model (layered window needs the redirection surface)
+    ComPtr<ID3D11RenderTargetView> rtv;
     int lastClickX = INT_MIN, lastClickY = INT_MIN;   // skip redundant SetCursorPos
     unsigned long long lastTopmostMs = 0;       // last HWND_TOPMOST re-assert (throttled)
     bool inBand = false;                        // created in a high z-order band (CreateWindowInBand)
 
     // Desktop Duplication.
-    IDXGIOutputDuplication* dupl = nullptr;
-    ID3D11Texture2D* desktopCopy = nullptr;   // SRV-able copy of the captured desktop (no cursor)
-    ID3D11ShaderResourceView* desktopSRV = nullptr;
+    ComPtr<IDXGIOutputDuplication> dupl;
+    ComPtr<ID3D11Texture2D> desktopCopy;      // SRV-able copy of the captured desktop (no cursor)
+    ComPtr<ID3D11ShaderResourceView> desktopSRV;
     bool haveDesktop = false;
     bool freshCapture = false;   // next capture() must drain to the latest desktop frame (zoom-in)
     // Diagnostics for the HDR investigation: the duplication's surface format + the output's
@@ -79,22 +82,22 @@ struct RenderEngine::State {
     bool ensureDesktopCopy(DXGI_FORMAT fmt);  // (re)create desktopCopy+SRV to match the capture
 
     // Magnify pass.
-    ID3D11VertexShader* vs = nullptr;
-    ID3D11PixelShader* ps = nullptr;
-    ID3D11Buffer* cb = nullptr;                // uvMin/uvMax + motion-blur vector
-    ID3D11SamplerState* sampLinear = nullptr;
-    ID3D11SamplerState* sampPoint = nullptr;
+    ComPtr<ID3D11VertexShader> vs;
+    ComPtr<ID3D11PixelShader> ps;
+    ComPtr<ID3D11Buffer> cb;                   // uvMin/uvMax + motion-blur vector
+    ComPtr<ID3D11SamplerState> sampLinear;
+    ComPtr<ID3D11SamplerState> sampPoint;
     double prevSrcLeft = 0, prevSrcTop = 0;    // previous frame's source top-left (for blur)
     bool prevSrcValid = false;                 // reset on (re)show so we don't blur a jump
 
     // Cursor pass (live OS cursor decoded to a texture; works even while hidden).
-    ID3D11VertexShader* cvs = nullptr;
-    ID3D11PixelShader* cps = nullptr;
-    ID3D11Buffer* ccb = nullptr;               // posClip/sizeClip for the cursor quad
-    ID3D11BlendState* blend = nullptr;         // alpha blend for normal cursors
-    ID3D11BlendState* blendInvert = nullptr;   // invert blend for I-beam-style cursors
-    ID3D11Texture2D* cursorTex = nullptr;
-    ID3D11ShaderResourceView* cursorSRV = nullptr;
+    ComPtr<ID3D11VertexShader> cvs;
+    ComPtr<ID3D11PixelShader> cps;
+    ComPtr<ID3D11Buffer> ccb;                  // posClip/sizeClip for the cursor quad
+    ComPtr<ID3D11BlendState> blend;            // alpha blend for normal cursors
+    ComPtr<ID3D11BlendState> blendInvert;      // invert blend for I-beam-style cursors
+    ComPtr<ID3D11Texture2D> cursorTex;
+    ComPtr<ID3D11ShaderResourceView> cursorSRV;
     HCURSOR lastCursor = nullptr;              // re-decode only when the OS cursor changes
     int curW = 0, curH = 0, hotX = 0, hotY = 0;
     bool cursorReady = false;
@@ -148,7 +151,7 @@ IDXGIOutput* RenderEngine::State::selectOutput(const wchar_t* deviceName, bool f
 
 // Recreate the duplication interface (after ACCESS_LOST or first use).
 bool RenderEngine::State::recreateDupl() {
-    SafeRelease(dupl);
+    dupl.Reset();
     // Capture the target monitor's output (matched by device name), falling back to the first
     // output for the legacy single-monitor path (empty targetDevice) or any name mismatch.
     IDXGIOutput* output = selectOutput(targetDevice, /*fallbackToFirst=*/true);
@@ -176,7 +179,7 @@ bool RenderEngine::State::recreateDupl() {
         IDXGIOutput5* output5 = nullptr;
         if (SUCCEEDED(output->QueryInterface(__uuidof(IDXGIOutput5), (void**)&output5)) && output5) {
             DXGI_FORMAT fmts[] = { DXGI_FORMAT_R16G16B16A16_FLOAT };
-            hr = output5->DuplicateOutput1(device, 0, ARRAYSIZE(fmts), fmts, &dupl);
+            hr = output5->DuplicateOutput1(device.Get(), 0, ARRAYSIZE(fmts), fmts, dupl.ReleaseAndGetAddressOf());
             output5->Release();
             if (SUCCEEDED(hr) && dupl) { capFp16 = true; RLog("recreateDupl: DuplicateOutput1 FP16 OK"); }
             else RLog("recreateDupl: DuplicateOutput1 FP16 failed hr=0x%08lX", (unsigned long)hr);
@@ -185,7 +188,7 @@ bool RenderEngine::State::recreateDupl() {
     if (FAILED(hr)) {  // SDR, not opted in, or FP16 unavailable -> plain duplication
         IDXGIOutput1* output1 = nullptr;
         output->QueryInterface(__uuidof(IDXGIOutput1), (void**)&output1);
-        if (output1) { hr = output1->DuplicateOutput(device, &dupl); output1->Release(); }
+        if (output1) { hr = output1->DuplicateOutput(device.Get(), dupl.ReleaseAndGetAddressOf()); output1->Release(); }
         RLog("recreateDupl: DuplicateOutput hr=0x%08lX capFp16=0", (unsigned long)hr);
     }
     SafeRelease(output);
@@ -203,14 +206,14 @@ bool RenderEngine::State::recreateDupl() {
 // CopyResource can never hit a format mismatch (which black-screened the magnify pass).
 bool RenderEngine::State::ensureDesktopCopy(DXGI_FORMAT fmt) {
     if (desktopCopy && copyFormat == fmt && copyW == sw && copyH == sh) return true;
-    SafeRelease(desktopSRV);
-    SafeRelease(desktopCopy);
+    desktopSRV.Reset();
+    desktopCopy.Reset();
     D3D11_TEXTURE2D_DESC dc{};
     dc.Width = sw; dc.Height = sh; dc.MipLevels = 1; dc.ArraySize = 1;
     dc.Format = fmt; dc.SampleDesc.Count = 1;
     dc.Usage = D3D11_USAGE_DEFAULT; dc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-    if (FAILED(device->CreateTexture2D(&dc, nullptr, &desktopCopy))) { RLog("ensureDesktopCopy: tex fail fmt=%u", fmt); return false; }
-    if (FAILED(device->CreateShaderResourceView(desktopCopy, nullptr, &desktopSRV))) { RLog("ensureDesktopCopy: srv fail fmt=%u", fmt); return false; }
+    if (FAILED(device->CreateTexture2D(&dc, nullptr, desktopCopy.ReleaseAndGetAddressOf()))) { RLog("ensureDesktopCopy: tex fail fmt=%u", fmt); return false; }
+    if (FAILED(device->CreateShaderResourceView(desktopCopy.Get(), nullptr, desktopSRV.ReleaseAndGetAddressOf()))) { RLog("ensureDesktopCopy: srv fail fmt=%u", fmt); return false; }
     copyFormat = fmt;
     copyW = sw; copyH = sh;
     RLog("ensureDesktopCopy: format=%u size=%dx%d", (unsigned)fmt, sw, sh);
@@ -242,7 +245,7 @@ bool RenderEngine::State::capture() {
         const DWORD to = gotThisCall ? 3 : firstTimeout;   // after a copy, only briefly seek a newer frame
         HRESULT hr = dupl->AcquireNextFrame(to, &fi, &res);
         if (hr == DXGI_ERROR_WAIT_TIMEOUT) { SafeRelease(res); if (gotThisCall) break; continue; }
-        if (hr == DXGI_ERROR_ACCESS_LOST) { SafeRelease(res); SafeRelease(dupl); return gotThisCall || haveDesktop; }
+        if (hr == DXGI_ERROR_ACCESS_LOST) { SafeRelease(res); dupl.Reset(); return gotThisCall || haveDesktop; }
         if (FAILED(hr)) { SafeRelease(res); return haveDesktop; }
 
         ID3D11Texture2D* tex = nullptr;
@@ -253,7 +256,7 @@ bool RenderEngine::State::capture() {
             // is gated on capFp16, not on the format, so BGRA8 captures stay passthrough.
             D3D11_TEXTURE2D_DESC td{}; tex->GetDesc(&td);
             if (ensureDesktopCopy(td.Format) && desktopCopy) {
-                ctx->CopyResource(desktopCopy, tex);
+                ctx->CopyResource(desktopCopy.Get(), tex);
                 if (!haveDesktop)
                     RLog("capture: first frame acquiredFormat=%u copyFormat=%u capFp16=%d",
                          (unsigned)td.Format, (unsigned)copyFormat, (int)capFp16);
@@ -357,7 +360,7 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     HRESULT hr = D3D11CreateDevice(
         nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
         D3D11_CREATE_DEVICE_BGRA_SUPPORT, want, 2, D3D11_SDK_VERSION,
-        &s_->device, &got, &s_->ctx);
+        s_->device.ReleaseAndGetAddressOf(), &got, s_->ctx.ReleaseAndGetAddressOf());
     if (FAILED(hr)) { RLog("initialize: D3D11CreateDevice failed hr=0x%08lX", (unsigned long)hr); return false; }
 
     // --- Blt-model swapchain on the layered overlay HWND (flip can't target layered) ---
@@ -382,7 +385,7 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     scd.OutputWindow = s_->hwnd;
     scd.Windowed = TRUE;
     scd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
-    hr = factory->CreateSwapChain(s_->device, &scd, &s_->swap);
+    hr = factory->CreateSwapChain(s_->device.Get(), &scd, s_->swap.ReleaseAndGetAddressOf());
     factory->MakeWindowAssociation(s_->hwnd, DXGI_MWA_NO_ALT_ENTER);
     SafeRelease(factory);
     if (FAILED(hr)) { RLog("initialize: CreateSwapChain failed hr=0x%08lX", (unsigned long)hr); return false; }
@@ -390,7 +393,7 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     // --- Render target view from back-buffer 0 ---
     ID3D11Texture2D* back = nullptr;
     if (FAILED(s_->swap->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&back))) { RLog("initialize: swapchain GetBuffer(0) failed"); return false; }
-    hr = s_->device->CreateRenderTargetView(back, nullptr, &s_->rtv);
+    hr = s_->device->CreateRenderTargetView(back, nullptr, s_->rtv.ReleaseAndGetAddressOf());
     SafeRelease(back);
     if (FAILED(hr)) { RLog("initialize: CreateRenderTargetView failed hr=0x%08lX", (unsigned long)hr); return false; }
 
@@ -402,8 +405,8 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     ID3DBlob* vsb = CompileShader(kMagHLSL, "VSMain", "vs_5_0");
     ID3DBlob* psb = CompileShader(kMagHLSL, "PSMain", "ps_5_0");
     if (!vsb || !psb) { RLog("initialize: magnify shader compile failed"); SafeRelease(vsb); SafeRelease(psb); return false; }
-    hr = s_->device->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &s_->vs);
-    HRESULT hr2 = s_->device->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &s_->ps);
+    hr = s_->device->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, s_->vs.ReleaseAndGetAddressOf());
+    HRESULT hr2 = s_->device->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, s_->ps.ReleaseAndGetAddressOf());
     SafeRelease(vsb); SafeRelease(psb);
     if (FAILED(hr) || FAILED(hr2)) { RLog("initialize: magnify shader create failed hr=0x%08lX hr2=0x%08lX", (unsigned long)hr, (unsigned long)hr2); return false; }
 
@@ -411,14 +414,14 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     cbd.ByteWidth = sizeof(MagCB);
     cbd.Usage = D3D11_USAGE_DEFAULT;
     cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    if (FAILED(s_->device->CreateBuffer(&cbd, nullptr, &s_->cb))) { RLog("initialize: CreateBuffer(magnify cb) failed"); return false; }
+    if (FAILED(s_->device->CreateBuffer(&cbd, nullptr, s_->cb.ReleaseAndGetAddressOf()))) { RLog("initialize: CreateBuffer(magnify cb) failed"); return false; }
 
     // --- Cursor shader pipeline ---
     ID3DBlob* cvsb = CompileShader(kCursorHLSL, "VSMain", "vs_5_0");
     ID3DBlob* cpsb = CompileShader(kCursorHLSL, "PSMain", "ps_5_0");
     if (!cvsb || !cpsb) { RLog("initialize: cursor shader compile failed"); SafeRelease(cvsb); SafeRelease(cpsb); return false; }
-    HRESULT hr3 = s_->device->CreateVertexShader(cvsb->GetBufferPointer(), cvsb->GetBufferSize(), nullptr, &s_->cvs);
-    HRESULT hr4 = s_->device->CreatePixelShader(cpsb->GetBufferPointer(), cpsb->GetBufferSize(), nullptr, &s_->cps);
+    HRESULT hr3 = s_->device->CreateVertexShader(cvsb->GetBufferPointer(), cvsb->GetBufferSize(), nullptr, s_->cvs.ReleaseAndGetAddressOf());
+    HRESULT hr4 = s_->device->CreatePixelShader(cpsb->GetBufferPointer(), cpsb->GetBufferSize(), nullptr, s_->cps.ReleaseAndGetAddressOf());
     SafeRelease(cvsb); SafeRelease(cpsb);
     if (FAILED(hr3) || FAILED(hr4)) { RLog("initialize: cursor shader create failed hr3=0x%08lX hr4=0x%08lX", (unsigned long)hr3, (unsigned long)hr4); return false; }
 
@@ -426,7 +429,7 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     ccbd.ByteWidth = 16;   // float2 posClip + float2 sizeClip
     ccbd.Usage = D3D11_USAGE_DEFAULT;
     ccbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    if (FAILED(s_->device->CreateBuffer(&ccbd, nullptr, &s_->ccb))) { RLog("initialize: CreateBuffer(cursor cb) failed"); return false; }
+    if (FAILED(s_->device->CreateBuffer(&ccbd, nullptr, s_->ccb.ReleaseAndGetAddressOf()))) { RLog("initialize: CreateBuffer(cursor cb) failed"); return false; }
 
     D3D11_BLEND_DESC bd{};
     bd.RenderTarget[0].BlendEnable = TRUE;
@@ -437,7 +440,7 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     bd.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
     bd.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
     bd.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
-    if (FAILED(s_->device->CreateBlendState(&bd, &s_->blend))) { RLog("initialize: CreateBlendState(alpha) failed"); return false; }
+    if (FAILED(s_->device->CreateBlendState(&bd, s_->blend.ReleaseAndGetAddressOf()))) { RLog("initialize: CreateBlendState(alpha) failed"); return false; }
 
     // Invert blend for I-beam-style cursors: result = src*(1-dest) + dest*(1-src). A white
     // glyph pixel (src=1) becomes 1-dest (inverts the background); black (src=0) leaves dest.
@@ -451,16 +454,16 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     ib.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
     ib.RenderTarget[0].RenderTargetWriteMask =
         D3D11_COLOR_WRITE_ENABLE_RED | D3D11_COLOR_WRITE_ENABLE_GREEN | D3D11_COLOR_WRITE_ENABLE_BLUE;
-    if (FAILED(s_->device->CreateBlendState(&ib, &s_->blendInvert))) { RLog("initialize: CreateBlendState(invert) failed"); return false; }
+    if (FAILED(s_->device->CreateBlendState(&ib, s_->blendInvert.ReleaseAndGetAddressOf()))) { RLog("initialize: CreateBlendState(invert) failed"); return false; }
 
     D3D11_SAMPLER_DESC samp{};
     samp.AddressU = samp.AddressV = samp.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
     samp.ComparisonFunc = D3D11_COMPARISON_NEVER;
     samp.MaxLOD = D3D11_FLOAT32_MAX;
     samp.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
-    s_->device->CreateSamplerState(&samp, &s_->sampLinear);
+    s_->device->CreateSamplerState(&samp, s_->sampLinear.ReleaseAndGetAddressOf());
     samp.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
-    s_->device->CreateSamplerState(&samp, &s_->sampPoint);
+    s_->device->CreateSamplerState(&samp, s_->sampPoint.ReleaseAndGetAddressOf());
     if (!s_->sampLinear || !s_->sampPoint) { RLog("initialize: CreateSamplerState failed"); return false; }
 
     // --- Desktop Duplication ---
@@ -499,7 +502,7 @@ void RenderEngine::setVisible(bool visible) {
 // window becomes visible. Also drops the motion-blur history so we don't smear the jump in.
 void RenderEngine::invalidateCapture() {
     if (!s_) return;
-    SafeRelease(s_->dupl);
+    s_->dupl.Reset();
     s_->haveDesktop = false;
     s_->freshCapture = true;
     s_->prevSrcValid = false;
@@ -508,13 +511,13 @@ void RenderEngine::invalidateCapture() {
 // (Re)create the render-target view from the swapchain's current back buffer (buffer 0). Used
 // after ResizeBuffers, and as a best-effort restore if a resize step fails.
 bool RenderEngine::State::recreateRtv() {
-    SafeRelease(rtv);
+    rtv.Reset();
     ID3D11Texture2D* back = nullptr;
     if (FAILED(swap->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&back))) {
         RLog("recreateRtv: GetBuffer failed");
         return false;
     }
-    HRESULT hr = device->CreateRenderTargetView(back, nullptr, &rtv);
+    HRESULT hr = device->CreateRenderTargetView(back, nullptr, rtv.ReleaseAndGetAddressOf());
     SafeRelease(back);
     if (FAILED(hr)) { RLog("recreateRtv: CreateRenderTargetView failed hr=0x%08lX", (unsigned long)hr); return false; }
     return true;
@@ -541,7 +544,7 @@ bool RenderEngine::retarget(const MonitorTarget& m) {
     // best-effort restore the RTV from the current back buffer and bail WITHOUT moving the window
     // or changing geometry, so the engine keeps rendering the current monitor (caller keeps it).
     if (sizeChanged) {
-        SafeRelease(s_->rtv);   // ResizeBuffers requires all back-buffer refs released
+        s_->rtv.Reset();        // ResizeBuffers requires all back-buffer refs released
         HRESULT hr = s_->swap->ResizeBuffers(1, m.w, m.h, DXGI_FORMAT_B8G8R8A8_UNORM, 0);
         if (FAILED(hr)) {
             RLog("retarget: ResizeBuffers failed hr=0x%08lX; restoring RTV, keeping current monitor",
@@ -563,7 +566,7 @@ bool RenderEngine::retarget(const MonitorTarget& m) {
     s_->originX = m.x; s_->originY = m.y;
     s_->sw = m.w; s_->sh = m.h;
     lstrcpynW(s_->targetDevice, m.device, 32);
-    SafeRelease(s_->dupl);
+    s_->dupl.Reset();
     s_->haveDesktop = false;
     s_->freshCapture = true;
     s_->prevSrcValid = false;
@@ -584,15 +587,15 @@ void RenderEngine::State::updateCursorTexture() {
     std::vector<uint32_t> bgra; int w = 0, h = 0, hx = 0, hy = 0; bool inv = false;
     if (!DecodeCursorBGRA(ci.hCursor, bgra, w, h, hx, hy, inv)) return;
     cursorInvert = inv;
-    SafeRelease(cursorSRV);
-    SafeRelease(cursorTex);
+    cursorSRV.Reset();
+    cursorTex.Reset();
     D3D11_TEXTURE2D_DESC td{};
     td.Width = w; td.Height = h; td.MipLevels = 1; td.ArraySize = 1;
     td.Format = DXGI_FORMAT_B8G8R8A8_UNORM; td.SampleDesc.Count = 1;
     td.Usage = D3D11_USAGE_IMMUTABLE; td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
     D3D11_SUBRESOURCE_DATA srd{}; srd.pSysMem = bgra.data(); srd.SysMemPitch = w * 4;
-    if (FAILED(device->CreateTexture2D(&td, &srd, &cursorTex))) { cursorReady = false; return; }
-    if (FAILED(device->CreateShaderResourceView(cursorTex, nullptr, &cursorSRV))) { cursorReady = false; return; }
+    if (FAILED(device->CreateTexture2D(&td, &srd, cursorTex.ReleaseAndGetAddressOf()))) { cursorReady = false; return; }
+    if (FAILED(device->CreateShaderResourceView(cursorTex.Get(), nullptr, cursorSRV.ReleaseAndGetAddressOf()))) { cursorReady = false; return; }
     curW = w; curH = h; hotX = hx; hotY = hy; lastCursor = ci.hCursor; cursorReady = true;
 }
 
@@ -600,12 +603,12 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
     capture();
     updateCursorTexture();
 
-    ID3D11DeviceContext* c = ctx;
+    ID3D11DeviceContext* c = ctx.Get();
     D3D11_VIEWPORT vp{}; vp.Width = (float)sw; vp.Height = (float)sh; vp.MaxDepth = 1.0f;
     c->RSSetViewports(1, &vp);
-    c->OMSetRenderTargets(1, &rtv, nullptr);
+    c->OMSetRenderTargets(1, rtv.GetAddressOf(), nullptr);
     const float clear[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
-    c->ClearRenderTargetView(rtv, clear);
+    c->ClearRenderTargetView(rtv.Get(), clear);
     c->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);     // opaque magnify pass
     c->IASetInputLayout(nullptr);
 
@@ -632,14 +635,14 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
             (float)((p.srcLeft + viewW) / sw), (float)((p.srcTop + viewH) / sh),
             (float)blurX, (float)blurY, bright, hdrMode,
             scRgbScale, 0.0f, 0.0f, 0.0f };
-        c->UpdateSubresource(cb, 0, nullptr, &cbv, 0, 0);
+        c->UpdateSubresource(cb.Get(), 0, nullptr, &cbv, 0, 0);
         c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        c->VSSetShader(vs, nullptr, 0);
-        c->VSSetConstantBuffers(0, 1, &cb);
-        c->PSSetShader(ps, nullptr, 0);
-        c->PSSetConstantBuffers(0, 1, &cb);     // PS needs blurUV (motion blur)
-        c->PSSetShaderResources(0, 1, &desktopSRV);
-        ID3D11SamplerState* samp = p.bilinear ? sampLinear : sampPoint;
+        c->VSSetShader(vs.Get(), nullptr, 0);
+        c->VSSetConstantBuffers(0, 1, cb.GetAddressOf());
+        c->PSSetShader(ps.Get(), nullptr, 0);
+        c->PSSetConstantBuffers(0, 1, cb.GetAddressOf());     // PS needs blurUV (motion blur)
+        c->PSSetShaderResources(0, 1, desktopSRV.GetAddressOf());
+        ID3D11SamplerState* samp = (p.bilinear ? sampLinear : sampPoint).Get();
         c->PSSetSamplers(0, 1, &samp);
         c->Draw(3, 0);
     }
@@ -659,14 +662,14 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
         float sizeClipX = (float)(drawW / sw * 2.0);
         float sizeClipY = (float)(-(drawH / sh * 2.0));   // clip-y up vs screen-y down
         float ccbv[4] = { posClipX, posClipY, sizeClipX, sizeClipY };
-        c->UpdateSubresource(ccb, 0, nullptr, ccbv, 0, 0);
-        c->OMSetBlendState(cursorInvert ? blendInvert : blend, nullptr, 0xFFFFFFFF);
+        c->UpdateSubresource(ccb.Get(), 0, nullptr, ccbv, 0, 0);
+        c->OMSetBlendState((cursorInvert ? blendInvert : blend).Get(), nullptr, 0xFFFFFFFF);
         c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-        c->VSSetShader(cvs, nullptr, 0);
-        c->VSSetConstantBuffers(0, 1, &ccb);
-        c->PSSetShader(cps, nullptr, 0);
-        c->PSSetShaderResources(0, 1, &cursorSRV);
-        c->PSSetSamplers(0, 1, &sampLinear);
+        c->VSSetShader(cvs.Get(), nullptr, 0);
+        c->VSSetConstantBuffers(0, 1, ccb.GetAddressOf());
+        c->PSSetShader(cps.Get(), nullptr, 0);
+        c->PSSetShaderResources(0, 1, cursorSRV.GetAddressOf());
+        c->PSSetSamplers(0, 1, sampLinear.GetAddressOf());
         c->Draw(4, 0);
     }
 }
@@ -738,25 +741,10 @@ void RenderEngine::shutdown() {
         s_->cursorHidden = false;
         SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, SPIF_SENDCHANGE);  // safety net
     }
-    SafeRelease(s_->cursorSRV);
-    SafeRelease(s_->cursorTex);
-    SafeRelease(s_->blendInvert);
-    SafeRelease(s_->blend);
-    SafeRelease(s_->ccb);
-    SafeRelease(s_->cps);
-    SafeRelease(s_->cvs);
-    SafeRelease(s_->sampPoint);
-    SafeRelease(s_->sampLinear);
-    SafeRelease(s_->cb);
-    SafeRelease(s_->ps);
-    SafeRelease(s_->vs);
-    SafeRelease(s_->desktopSRV);
-    SafeRelease(s_->dupl);
-    SafeRelease(s_->desktopCopy);
-    SafeRelease(s_->rtv);
-    SafeRelease(s_->swap);
-    SafeRelease(s_->ctx);
-    SafeRelease(s_->device);
+    // COM objects are ComPtr members of State; they release automatically when State is destroyed
+    // (in ~RenderEngine, immediately after this returns). `device` is declared first so it releases
+    // last; the windowed BLT-model swapchain has no fullscreen/HWND-outlives-swapchain constraint,
+    // so releasing it after DestroyWindow below is safe.
     if (s_->hwnd) { DestroyWindow(s_->hwnd); s_->hwnd = nullptr; }
     s_->ready = false;
 }
@@ -767,7 +755,7 @@ bool RenderEngine::dumpBackbufferPng(const wchar_t* path) {
     if (!s_->ready) return false;
     ID3D11Texture2D* back = nullptr;
     if (FAILED(s_->swap->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&back))) return false;
-    bool ok = SaveTextureToPng(s_->device, s_->ctx, back, path);
+    bool ok = SaveTextureToPng(s_->device.Get(), s_->ctx.Get(), back, path);
     SafeRelease(back);
     return ok;
 }
