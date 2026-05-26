@@ -7,6 +7,7 @@
 #include <magnification.h>
 #include <cstdint>
 #include <cstring>
+#include <cwchar>
 #include <climits>
 #include <cstdio>
 #include <cstdarg>
@@ -228,13 +229,15 @@ static bool DecodeCursorBGRA(HCURSOR hc, std::vector<uint32_t>& out,
 // ---------------------------------------------------------------------------
 struct RenderEngine::State {
     int sw = 0, sh = 0;
+    int originX = 0, originY = 0;          // target monitor top-left in virtual-desktop pixels
+    wchar_t targetDevice[32] = {};         // DXGI output DeviceName to capture ("" = first output)
     HWND hwnd = nullptr;
     ID3D11Device* device = nullptr;
     ID3D11DeviceContext* ctx = nullptr;
     IDXGISwapChain* swap = nullptr;            // blt-model (layered window needs the redirection surface)
     ID3D11RenderTargetView* rtv = nullptr;
     int lastClickX = INT_MIN, lastClickY = INT_MIN;   // skip redundant SetCursorPos
-    int topmostTick = 0;                       // throttle re-asserting topmost
+    unsigned long long lastTopmostMs = 0;       // last HWND_TOPMOST re-assert (throttled)
     bool inBand = false;                        // created in a high z-order band (CreateWindowInBand)
 
     // Desktop Duplication.
@@ -242,6 +245,7 @@ struct RenderEngine::State {
     ID3D11Texture2D* desktopCopy = nullptr;   // SRV-able copy of the captured desktop (no cursor)
     ID3D11ShaderResourceView* desktopSRV = nullptr;
     bool haveDesktop = false;
+    bool freshCapture = false;   // next capture() must drain to the latest desktop frame (zoom-in)
     // Diagnostics for the HDR investigation: the duplication's surface format + the output's
     // color space / bit depth (tells us whether the desktop is HDR and what we're capturing).
     UINT ddaFormat = 0;          // DXGI_FORMAT of the duplicated surface
@@ -251,6 +255,7 @@ struct RenderEngine::State {
     bool capFp16 = false;        // capturing FP16 scRGB (tonemap active)
     double sdrWhiteNits = 200.0; // OS SDR white level for the tonemap scale
     DXGI_FORMAT copyFormat = DXGI_FORMAT_B8G8R8A8_UNORM;  // current desktopCopy format
+    int copyW = 0, copyH = 0;                             // current desktopCopy dimensions
     bool ensureDesktopCopy(DXGI_FORMAT fmt);  // (re)create desktopCopy+SRV to match the capture
 
     // Magnify pass.
@@ -261,7 +266,6 @@ struct RenderEngine::State {
     ID3D11SamplerState* sampPoint = nullptr;
     double prevSrcLeft = 0, prevSrcTop = 0;    // previous frame's source top-left (for blur)
     bool prevSrcValid = false;                 // reset on (re)show so we don't blur a jump
-    double lastBlurX = 0, lastBlurY = 0;       // last applied blur vector (diagnostics)
 
     // Cursor pass (live OS cursor decoded to a texture; works even while hidden).
     ID3D11VertexShader* cvs = nullptr;
@@ -275,38 +279,61 @@ struct RenderEngine::State {
     int curW = 0, curH = 0, hotX = 0, hotY = 0;
     bool cursorReady = false;
     bool cursorInvert = false;                 // current cursor uses the invert blend
+    bool osCursorShowing = true;               // the focused app's cursor is visible (CURSOR_SHOWING)
 
     void updateCursorTexture();   // GetCursorInfo -> decode -> (re)upload cursorTex/SRV on change
-
-    // Cursor delivered separately by DDA.
-    bool ptrVisible = false;
-    int  ptrX = 0, ptrY = 0;                  // top-left of the cursor in desktop px
-    std::vector<BYTE> shapeBuf;               // cached cursor shape bytes
-    DXGI_OUTDUPL_POINTER_SHAPE_INFO shapeInfo{};
-    bool haveShape = false;
 
     bool magInited = false;
     bool cursorHidden = false;
     bool ready = false;
 
+    // Find the output on our D3D device's adapter whose DeviceName matches `device`. Returns an
+    // AddRef'd output, or (if fallbackToFirst) output 0, or nullptr. Used to capture a specific
+    // monitor and to validate a retarget before touching the window/swapchain.
+    IDXGIOutput* selectOutput(const wchar_t* deviceName, bool fallbackToFirst);
+
     bool recreateDupl();
+    bool recreateRtv();  // (re)create rtv from swapchain back-buffer 0 (after ResizeBuffers / as a restore)
     bool capture();      // AcquireNextFrame -> desktopCopy (+ pointer info); handles loss/timeout
     void render(const RenderFrameParams& p);  // draw into the back-buffer (no Present)
 };
 
-// Recreate the duplication interface (after ACCESS_LOST or first use).
-bool RenderEngine::State::recreateDupl() {
-    SafeRelease(dupl);
+IDXGIOutput* RenderEngine::State::selectOutput(const wchar_t* deviceName, bool fallbackToFirst) {
     IDXGIDevice* dxgiDev = nullptr;
-    if (FAILED(device->QueryInterface(__uuidof(IDXGIDevice), (void**)&dxgiDev))) return false;
+    if (FAILED(this->device->QueryInterface(__uuidof(IDXGIDevice), (void**)&dxgiDev))) return nullptr;
     IDXGIAdapter* adapter = nullptr;
     dxgiDev->GetAdapter(&adapter);
     SafeRelease(dxgiDev);
-    if (!adapter) return false;
-    IDXGIOutput* output = nullptr;
-    adapter->EnumOutputs(0, &output);
+    if (!adapter) return nullptr;
+
+    IDXGIOutput* match = nullptr;   // name match (preferred)
+    IDXGIOutput* first = nullptr;   // output 0 (fallback)
+    for (UINT i = 0; ; ++i) {
+        IDXGIOutput* o = nullptr;
+        if (adapter->EnumOutputs(i, &o) == DXGI_ERROR_NOT_FOUND || !o) break;
+        DXGI_OUTPUT_DESC od{};
+        if (deviceName && deviceName[0] && SUCCEEDED(o->GetDesc(&od)) && wcscmp(od.DeviceName, deviceName) == 0) {
+            match = o;              // keep this ref; stop searching
+            break;
+        }
+        if (i == 0) first = o;      // keep output 0 for the fallback
+        else o->Release();
+    }
     SafeRelease(adapter);
+    if (match) { SafeRelease(first); return match; }
+    if (fallbackToFirst) return first;   // may be nullptr if the adapter has no outputs
+    SafeRelease(first);
+    return nullptr;
+}
+
+// Recreate the duplication interface (after ACCESS_LOST or first use).
+bool RenderEngine::State::recreateDupl() {
+    SafeRelease(dupl);
+    // Capture the target monitor's output (matched by device name), falling back to the first
+    // output for the legacy single-monitor path (empty targetDevice) or any name mismatch.
+    IDXGIOutput* output = selectOutput(targetDevice, /*fallbackToFirst=*/true);
     if (!output) return false;
+    RLog("recreateDupl: targetDevice=%ls", targetDevice[0] ? targetDevice : L"(first)");
     // Diagnostics: the output's color space + bit depth (HDR detection).
     IDXGIOutput6* output6 = nullptr;
     if (SUCCEEDED(output->QueryInterface(__uuidof(IDXGIOutput6), (void**)&output6)) && output6) {
@@ -355,7 +382,7 @@ bool RenderEngine::State::recreateDupl() {
 // (Re)create desktopCopy + its SRV to match the captured frame's actual format, so
 // CopyResource can never hit a format mismatch (which black-screened the magnify pass).
 bool RenderEngine::State::ensureDesktopCopy(DXGI_FORMAT fmt) {
-    if (desktopCopy && copyFormat == fmt) return true;
+    if (desktopCopy && copyFormat == fmt && copyW == sw && copyH == sh) return true;
     SafeRelease(desktopSRV);
     SafeRelease(desktopCopy);
     D3D11_TEXTURE2D_DESC dc{};
@@ -365,25 +392,37 @@ bool RenderEngine::State::ensureDesktopCopy(DXGI_FORMAT fmt) {
     if (FAILED(device->CreateTexture2D(&dc, nullptr, &desktopCopy))) { RLog("ensureDesktopCopy: tex fail fmt=%u", fmt); return false; }
     if (FAILED(device->CreateShaderResourceView(desktopCopy, nullptr, &desktopSRV))) { RLog("ensureDesktopCopy: srv fail fmt=%u", fmt); return false; }
     copyFormat = fmt;
-    RLog("ensureDesktopCopy: format=%u", (unsigned)fmt);
+    copyW = sw; copyH = sh;
+    RLog("ensureDesktopCopy: format=%u size=%dx%d", (unsigned)fmt, sw, sh);
     return true;
 }
 
 bool RenderEngine::State::capture() {
     if (!dupl && !recreateDupl()) return false;
 
-    // Once we have a frame, poll non-blocking (0 ms): a static desktop returns WAIT_TIMEOUT
-    // immediately and we re-pan the cached copy, so panning is never gated on a desktop
-    // change. (An 8 ms wait here stalled every pan frame -> microstutter.) For the very first
-    // frame, retry across a larger budget so a static desktop still yields the initial image.
-    const int attempts = haveDesktop ? 1 : 40;
-    const DWORD timeoutMs = haveDesktop ? 0 : 25;
-    for (int a = 0; a < attempts; ++a) {
+    // A settled desktop polls non-blocking (0 ms, 1 attempt): a static screen returns
+    // WAIT_TIMEOUT immediately and we re-pan the cached copy, so panning is never gated on a
+    // desktop change. (An 8 ms wait here stalled every pan frame -> microstutter.)
+    //
+    // A "fresh" grab (first frame ever, or a forced refresh on zoom-in) instead retries to land
+    // the initial frame and then DRAINS to the most-recent frame: the first AcquireNextFrame
+    // after a (re)created duplication can briefly be a transitional composite - the window
+    // *underneath* the current one, before it has painted into the captured surface. Taking the
+    // first frame flashed that on reveal; draining past it to the latest avoids it. Bounded:
+    // once one frame is copied we only wait ~3 ms for a newer one, then stop.
+    const bool fresh = freshCapture || !haveDesktop;
+    freshCapture = false;
+    const int   firstAttempts = fresh ? 40 : 1;
+    const DWORD firstTimeout  = fresh ? 25 : 0;
+    bool gotThisCall = false;
+
+    for (int a = 0; a < firstAttempts; ++a) {
         IDXGIResource* res = nullptr;
         DXGI_OUTDUPL_FRAME_INFO fi{};
-        HRESULT hr = dupl->AcquireNextFrame(timeoutMs, &fi, &res);
-        if (hr == DXGI_ERROR_WAIT_TIMEOUT) { SafeRelease(res); continue; }
-        if (hr == DXGI_ERROR_ACCESS_LOST) { SafeRelease(res); SafeRelease(dupl); return false; }
+        const DWORD to = gotThisCall ? 3 : firstTimeout;   // after a copy, only briefly seek a newer frame
+        HRESULT hr = dupl->AcquireNextFrame(to, &fi, &res);
+        if (hr == DXGI_ERROR_WAIT_TIMEOUT) { SafeRelease(res); if (gotThisCall) break; continue; }
+        if (hr == DXGI_ERROR_ACCESS_LOST) { SafeRelease(res); SafeRelease(dupl); return gotThisCall || haveDesktop; }
         if (FAILED(hr)) { SafeRelease(res); return haveDesktop; }
 
         ID3D11Texture2D* tex = nullptr;
@@ -399,36 +438,25 @@ bool RenderEngine::State::capture() {
                     RLog("capture: first frame acquiredFormat=%u copyFormat=%u capFp16=%d",
                          (unsigned)td.Format, (unsigned)copyFormat, (int)capFp16);
                 haveDesktop = true;
+                gotThisCall = true;
             }
         }
         SafeRelease(tex);
-
-        if (fi.LastMouseUpdateTime.QuadPart != 0) {
-            ptrVisible = (fi.PointerPosition.Visible != 0);
-            ptrX = fi.PointerPosition.Position.x;
-            ptrY = fi.PointerPosition.Position.y;
-        }
-        // Pointer shape is delivered only when it changes; cache it for the cursor draw.
-        if (fi.PointerShapeBufferSize > 0) {
-            shapeBuf.resize(fi.PointerShapeBufferSize);
-            UINT required = 0;
-            DXGI_OUTDUPL_POINTER_SHAPE_INFO si{};
-            if (SUCCEEDED(dupl->GetFramePointerShape(
-                    (UINT)shapeBuf.size(), shapeBuf.data(), &required, &si))) {
-                shapeInfo = si;
-                haveShape = true;
-            }
-        }
+        // NB: DDA's pointer position/shape (fi.PointerPosition / GetFramePointerShape) is
+        // intentionally ignored - we draw the cursor from GetCursorInfo (works while hidden),
+        // so the captured desktop never needs the OS pointer baked in.
         SafeRelease(res);
         dupl->ReleaseFrame();
-        return true;
+
+        if (!fresh) return true;          // settled desktop: the single frame is enough
+        // fresh: keep looping to drain to the latest frame (the short `to` breaks us out)
     }
-    return haveDesktop;   // no frame within budget; keep whatever we had
+    return gotThisCall || haveDesktop;   // no frame within budget; keep whatever we had
 }
 
-// The overlay must pass clicks through to the apps beneath. WS_EX_TRANSPARENT plus an
-// explicit HTTRANSPARENT hit-test is the bulletproof click-through that still works with a
-// DXGI flip-model swapchain (which is incompatible with WS_EX_LAYERED).
+// The overlay must pass clicks through to the apps beneath. Cross-process click-through is
+// provided by the window's WS_EX_LAYERED | WS_EX_TRANSPARENT styles; this HTTRANSPARENT
+// hit-test is belt-and-braces (WS_EX_TRANSPARENT alone proved insufficient cross-process).
 static LRESULT CALLBACK OverlayProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (m == WM_NCHITTEST) return HTTRANSPARENT;
     return DefWindowProcW(h, m, w, l);
@@ -440,16 +468,20 @@ bool RenderEngine::ready() const { return s_ && s_->ready; }
 void RenderEngine::debugInfo(int& screenW, int& screenH, int& curW, int& curH, int& hotX, int& hotY) const {
     screenW = s_->sw; screenH = s_->sh; curW = s_->curW; curH = s_->curH; hotX = s_->hotX; hotY = s_->hotY;
 }
-void RenderEngine::debugBlur(double& bx, double& by) const { bx = s_->lastBlurX; by = s_->lastBlurY; }
 void RenderEngine::debugHdr(unsigned& ddaFormat, int& colorSpace, int& bitsPerColor) const {
     ddaFormat = s_->ddaFormat; colorSpace = s_->outColorSpace; bitsPerColor = s_->outBitsPerColor;
 }
 
-bool RenderEngine::initialize(int screenW, int screenH, int zorderBand, bool hdrTonemap) {
+bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool hdrTonemap) {
+    const int screenW = monitor.w, screenH = monitor.h;
     s_->sw = screenW;
     s_->sh = screenH;
+    s_->originX = monitor.x;
+    s_->originY = monitor.y;
+    lstrcpynW(s_->targetDevice, monitor.device, 32);   // "" = first output (legacy path)
     s_->wantHdrTonemap = hdrTonemap;   // read before recreateDupl decides the capture format
-    RLog("=== initialize sw=%d sh=%d band=%d hdrTonemap=%d ===", screenW, screenH, zorderBand, (int)hdrTonemap);
+    RLog("=== initialize device=%ls origin=(%d,%d) size=%dx%d band=%d hdrTonemap=%d ===",
+         s_->targetDevice, monitor.x, monitor.y, screenW, screenH, zorderBand, (int)hdrTonemap);
 
     // --- Overlay window: fullscreen, borderless, topmost, click-through, no-activate ---
     static const wchar_t* kClass = L"WindRenderOverlay";
@@ -475,18 +507,24 @@ bool RenderEngine::initialize(int screenW, int screenH, int zorderBand, bool hdr
         if (HMODULE u32 = GetModuleHandleW(L"user32.dll")) {
             if (auto pCWIB = reinterpret_cast<PFN_CWIB>(GetProcAddress(u32, "CreateWindowInBand"))) {
                 s_->hwnd = pCWIB(exStyle, atom, L"Wind Magnifier", WS_POPUP,
-                                 0, 0, screenW, screenH, nullptr, nullptr, wc.hInstance, nullptr,
-                                 static_cast<DWORD>(zorderBand));
+                                 monitor.x, monitor.y, screenW, screenH, nullptr, nullptr,
+                                 wc.hInstance, nullptr, static_cast<DWORD>(zorderBand));
                 if (s_->hwnd) s_->inBand = true;
             }
         }
     }
     if (!s_->hwnd) {
         s_->hwnd = CreateWindowExW(exStyle, kClass, L"Wind Magnifier", WS_POPUP,
-                                   0, 0, screenW, screenH, nullptr, nullptr, wc.hInstance, nullptr);
+                                   monitor.x, monitor.y, screenW, screenH, nullptr, nullptr,
+                                   wc.hInstance, nullptr);
     }
     if (!s_->hwnd) return false;
-    SetLayeredWindowAttributes(s_->hwnd, 0, 255, LWA_ALPHA);
+    // Start fully transparent (alpha 0 = invisible). We toggle the layer alpha to show/hide
+    // instead of SW_HIDE/SW_SHOW: a layered window that is hidden and re-shown makes DWM cache
+    // and re-display the frame from when it was last visible, which flashed the previous zoom
+    // session's window on the next zoom-in (most visibly right after an alt-tab). Keeping the
+    // window always shown lets a reveal just flip alpha over the already-current front buffer.
+    SetLayeredWindowAttributes(s_->hwnd, 0, 0, LWA_ALPHA);
     // CRITICAL: exclude our own overlay from screen capture, or Desktop Duplication captures
     // our presented frame and we magnify our own output -> a feedback loop (degenerates to
     // black). WDA_EXCLUDEFROMCAPTURE (Win10 2004+) keeps the window visible on screen but
@@ -610,19 +648,118 @@ bool RenderEngine::initialize(int screenW, int screenH, int zorderBand, bool hdr
     if (s_->capFp16) s_->sdrWhiteNits = GetSDRWhiteNits();
     RLog("initialize done: capFp16=%d sdrWhiteNits=%.1f", (int)s_->capFp16, s_->sdrWhiteNits);
 
+    // Show the window now (invisible at alpha 0). It stays shown for the process lifetime; the
+    // overlay is transparent + click-through + capture-excluded + no-activate, so an always-on
+    // invisible window doesn't interfere with apps or games beneath it.
+    ShowWindow(s_->hwnd, SW_SHOWNOACTIVATE);
+
     s_->ready = true;
     return true;
 }
 
 void RenderEngine::setVisible(bool visible) {
     if (!s_ || !s_->hwnd) return;
-    ShowWindow(s_->hwnd, visible ? SW_SHOWNOACTIVATE : SW_HIDE);
-    if (visible) s_->prevSrcValid = false;   // don't motion-blur the jump into zoom
+    // Reveal/hide via layer alpha over the always-shown window (see initialize): flip alpha
+    // rather than SW_HIDE/SW_SHOW, so a reveal shows the already-current front buffer instead
+    // of DWM's cached last-visible frame. Callers present the live frame BEFORE revealing.
+    SetLayeredWindowAttributes(s_->hwnd, 0, visible ? 255 : 0, LWA_ALPHA);
+    if (visible) {
+        s_->prevSrcValid = false;   // don't motion-blur the jump into zoom
+        SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0,   // pop on top immediately on show
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+}
+
+// Drop the current duplication so the next capture() recreates it; the first AcquireNextFrame
+// after DuplicateOutput returns the entire current desktop, so the first zoomed frame samples
+// live content instead of a stale cached copy (the alt-tab "previous window" content). Clearing
+// haveDesktop routes capture() through its blocking first-frame budget, which reliably lands
+// that full frame. Pair this with showing the overlay only AFTER that frame is presented (see
+// main.cpp), since the swapchain otherwise displays its last presented frame the instant the
+// window becomes visible. Also drops the motion-blur history so we don't smear the jump in.
+void RenderEngine::invalidateCapture() {
+    if (!s_) return;
+    SafeRelease(s_->dupl);
+    s_->haveDesktop = false;
+    s_->freshCapture = true;
+    s_->prevSrcValid = false;
+}
+
+// (Re)create the render-target view from the swapchain's current back buffer (buffer 0). Used
+// after ResizeBuffers, and as a best-effort restore if a resize step fails.
+bool RenderEngine::State::recreateRtv() {
+    SafeRelease(rtv);
+    ID3D11Texture2D* back = nullptr;
+    if (FAILED(swap->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&back))) {
+        RLog("recreateRtv: GetBuffer failed");
+        return false;
+    }
+    HRESULT hr = device->CreateRenderTargetView(back, nullptr, &rtv);
+    SafeRelease(back);
+    if (FAILED(hr)) { RLog("recreateRtv: CreateRenderTargetView failed hr=0x%08lX", (unsigned long)hr); return false; }
+    return true;
+}
+
+bool RenderEngine::retarget(const MonitorTarget& m) {
+    if (!s_ || !s_->ready || !s_->hwnd || !s_->swap) return false;
+
+    // Validate the target's output is on OUR adapter BEFORE touching the window/swapchain, so we
+    // never end up displaying one monitor's pixels on another monitor's overlay (multi-GPU).
+    if (m.device[0]) {
+        IDXGIOutput* probe = s_->selectOutput(m.device, /*fallbackToFirst=*/false);
+        if (!probe) {
+            RLog("retarget: device=%ls not on our adapter; keeping current monitor", m.device);
+            return false;
+        }
+        probe->Release();
+    }
+
+    const bool sizeChanged = (m.w != s_->sw || m.h != s_->sh);
+
+    // Resize the swapchain to the new monitor FIRST (the only fallible step). The RTV is the sole
+    // back-buffer reference, so release it before ResizeBuffers, then recreate it. On any failure,
+    // best-effort restore the RTV from the current back buffer and bail WITHOUT moving the window
+    // or changing geometry, so the engine keeps rendering the current monitor (caller keeps it).
+    if (sizeChanged) {
+        SafeRelease(s_->rtv);   // ResizeBuffers requires all back-buffer refs released
+        HRESULT hr = s_->swap->ResizeBuffers(1, m.w, m.h, DXGI_FORMAT_B8G8R8A8_UNORM, 0);
+        if (FAILED(hr)) {
+            RLog("retarget: ResizeBuffers failed hr=0x%08lX; restoring RTV, keeping current monitor",
+                 (unsigned long)hr);
+            s_->recreateRtv();   // best-effort: keep the current monitor renderable
+            return false;
+        }
+        if (!s_->recreateRtv()) {
+            RLog("retarget: RTV recreate failed after ResizeBuffers; keeping current monitor");
+            return false;
+        }
+    }
+
+    // Committed (resize succeeded, or no resize needed): move/resize the overlay (still at alpha 0
+    // during zoom-in, so no flash), adopt the new geometry + device, and force a fresh capture on
+    // the new output (same flags as invalidateCapture). The next capture() rebinds the duplication
+    // via selectOutput and recreates desktopCopy at the new size (ensureDesktopCopy is size-aware).
+    SetWindowPos(s_->hwnd, HWND_TOPMOST, m.x, m.y, m.w, m.h, SWP_NOACTIVATE);
+    s_->originX = m.x; s_->originY = m.y;
+    s_->sw = m.w; s_->sh = m.h;
+    lstrcpynW(s_->targetDevice, m.device, 32);
+    SafeRelease(s_->dupl);
+    s_->haveDesktop = false;
+    s_->freshCapture = true;
+    s_->prevSrcValid = false;
+    s_->lastClickX = s_->lastClickY = INT_MIN;   // don't skip the first SetCursorPos on the new monitor
+    RLog("retarget: device=%ls origin=(%d,%d) size=%dx%d sizeChanged=%d",
+         s_->targetDevice, m.x, m.y, m.w, m.h, (int)sizeChanged);
+    return true;
 }
 
 void RenderEngine::State::updateCursorTexture() {
     CURSORINFO ci{ sizeof(ci) };
-    if (!GetCursorInfo(&ci) || !ci.hCursor) return;
+    if (!GetCursorInfo(&ci) || !ci.hCursor) { osCursorShowing = false; return; }
+    // Whether the focused app wants a cursor shown. Read every frame (not just on shape
+    // change) because a game can toggle it without changing the shape. Our own
+    // MagShowSystemCursor(FALSE) does NOT clear this flag, so it reflects the app's intent.
+    osCursorShowing = (ci.flags & CURSOR_SHOWING) != 0;
     if (ci.hCursor == lastCursor && cursorReady) return;   // unchanged; keep the texture
     std::vector<uint32_t> bgra; int w = 0, h = 0, hx = 0, hy = 0; bool inv = false;
     if (!DecodeCursorBGRA(ci.hCursor, bgra, w, h, hx, hy, inv)) return;
@@ -666,7 +803,6 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
             if (blurY >  kMax) blurY =  kMax; else if (blurY < -kMax) blurY = -kMax;
         }
         prevSrcLeft = p.srcLeft; prevSrcTop = p.srcTop; prevSrcValid = true;
-        lastBlurX = blurX; lastBlurY = blurY;
 
         float bright = (p.brightness > 0.0) ? (float)p.brightness : 1.0f;
         float hdrMode = capFp16 ? 1.0f : 0.0f;
@@ -688,8 +824,12 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
         c->Draw(3, 0);
     }
 
-    // Cursor pass: alpha-blended quad at the centered hotspot, scaled by zoom.
-    if (cursorReady) {
+    // Cursor pass: alpha-blended quad at the centered hotspot, scaled by zoom. In auto mode
+    // (cursorMode 0) we skip it when the focused app hides its own cursor (games), so we don't
+    // paint a pointer the game intentionally hid. 1 = always draw, 2 = never draw.
+    bool drawCursor = cursorReady && p.cursorMode != 2 &&
+                      (p.cursorMode == 1 || osCursorShowing);
+    if (drawCursor) {
         double scale = p.cursorScaleWithZoom ? (p.level < 1.0 ? 1.0 : p.level) : 1.0;
         double drawW = curW * scale, drawH = curH * scale;
         double tlX = p.cursorScreenX - hotX * scale;   // top-left so the hotspot lands at cursorScreen
@@ -713,13 +853,16 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
 
 bool RenderEngine::renderFrame(const RenderFrameParams& p) {
     if (!s_->ready) return false;
-    // Stay above transient topmost popups (taskbar thumbnails, tooltips) so they don't show a
-    // second, unmagnified copy over our view. Skip when we're in a high z-band - the band
-    // already keeps us on top, and HWND_TOPMOST could demote us out of it.
-    if (!s_->inBand && ++s_->topmostTick >= 15) {
-        s_->topmostTick = 0;
-        SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0,
-                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    // Keep the overlay above everything (transparent + click-through + capture-excluded, so
+    // being on top is safe; if we sit below an always-on-top app overlay like RTSS it draws a
+    // second, unmagnified copy over our view). Re-assert at most ~4x/sec, NOT every frame:
+    // per-frame SetWindowPos synchronizes with the window manager / DWM and caused a constant
+    // microstutter. ~250 ms reclaims top within a blink. A banded window stays in its band
+    // across SetWindowPos, so this only re-tops us within the band.
+    unsigned long long nowMs = GetTickCount64();
+    if (nowMs - s_->lastTopmostMs >= 250) {
+        s_->lastTopmostMs = nowMs;
+        SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
     // Keep the (hidden) OS cursor under the drawn cursor so clicks pass through the
     // transparent overlay to the app at the right desktop point. We drive the lens from raw
@@ -730,7 +873,10 @@ bool RenderEngine::renderFrame(const RenderFrameParams& p) {
         s_->lastClickX = p.clickDesktopX; s_->lastClickY = p.clickDesktopY;
     }
     s_->render(p);
-    return SUCCEEDED(s_->swap->Present(1, 0));
+    // vsync (sync interval 1) locks the present to the display refresh; 0 presents immediately
+    // (the caller must then pace the loop so it doesn't spin). DWM composites a blt-model
+    // swapchain either way, so 0 doesn't tear here - it just decouples from the vblank.
+    return SUCCEEDED(s_->swap->Present(p.vsync ? 1 : 0, 0));
 }
 
 // Render one frame and dump it WITHOUT presenting, so the PNG reflects exactly the drawn
@@ -866,8 +1012,9 @@ bool RenderEngine::dumpBackbufferPng(const wchar_t* path) {
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     int sw = GetSystemMetrics(SM_CXSCREEN), sh = GetSystemMetrics(SM_CYSCREEN);
+    wind::MonitorTarget mon; mon.x = 0; mon.y = 0; mon.w = sw; mon.h = sh;
     wind::RenderEngine eng;
-    if (!eng.initialize(sw, sh)) { MessageBoxW(nullptr, L"init failed", L"smoke", 0); return 1; }
+    if (!eng.initialize(mon)) { MessageBoxW(nullptr, L"init failed", L"smoke", 0); return 1; }
     eng.setVisible(true);
     wind::RenderFrameParams p{};
     p.level = 4.0; p.srcLeft = sw * 0.375; p.srcTop = sh * 0.375;

@@ -1,0 +1,20 @@
+name: build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  windows-build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      # build.bat locates MSVC via vswhere (-all -prerelease) and runs vcvars64;
+      # the windows-latest runner ships Visual Studio with the C++ toolset + Windows SDK.
+      - name: Build app (compile + link + manifest)
+        shell: cmd
+        run: build.bat
+      - name: Build and run unit tests
+        shell: cmd
+        run: build.bat test

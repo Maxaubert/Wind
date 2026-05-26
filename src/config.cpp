@@ -24,24 +24,25 @@ Config ParseConfig(const std::string& text) {
             if (key == "zoomInButton")          c.zoomInButton = std::stoi(val);
             else if (key == "zoomOutButton")    c.zoomOutButton = std::stoi(val);
             else if (key == "recenterVk")       c.recenterVk = std::stoi(val);
+            else if (key == "zoomInVk")         c.zoomInVk = std::stoi(val);
+            else if (key == "zoomOutVk")        c.zoomOutVk = std::stoi(val);
             else if (key == "maxLevel")         c.maxLevel = std::stod(val);
             else if (key == "fullRangeSeconds") c.fullRangeSeconds = std::stod(val);
-            else if (key == "sensitivity")      c.sensitivity = std::stod(val);
-            else if (key == "centerDeadzone")   c.centerDeadzone = std::stod(val);
             else if (key == "tickHzCap")        c.tickHzCap = std::stoi(val);
+            else if (key == "vsync")            c.vsync = std::stoi(val);
+            else if (key == "dwmFlush")         c.dwmFlush = std::stoi(val);
             else if (key == "diagnostics")      c.diagnostics = std::stoi(val);
-            else if (key == "updateMode")       c.updateMode = std::stoi(val);
-            else if (key == "maxUpdateHz")      c.maxUpdateHz = std::stoi(val);
-            else if (key == "engine")             c.engine = val;
             else if (key == "cursorSensitivity")  c.cursorSensitivity = std::stod(val);
             else if (key == "cursorSmoothing")    c.cursorSmoothing = std::stod(val);
             else if (key == "cursorScaleWithZoom")c.cursorScaleWithZoom = std::stoi(val);
+            else if (key == "cursorVisibility")   c.cursorVisibility = val;
             else if (key == "bilinear")           c.bilinear = std::stoi(val);
             else if (key == "motionBlur")         c.motionBlur = std::stoi(val);
             else if (key == "motionBlurStrength") c.motionBlurStrength = std::stod(val);
             else if (key == "zorderBand")         c.zorderBand = std::stoi(val);
             else if (key == "brightness")         c.brightness = std::stod(val);
             else if (key == "hdrTonemap")         c.hdrTonemap = std::stoi(val);
+            else if (key == "multiMonitor")       c.multiMonitor = std::stoi(val);
         } catch (...) { /* keep default on bad value */ }
     }
     return c;
@@ -59,23 +60,31 @@ Config LoadConfig(const std::wstring& path) {
         // Write defaults so the user has something to edit.
         std::ofstream out(path);
         out << "; Wind magnifier config. Edit and save; changes apply within ~1s.\n"
-               "zoomInButton=2\nzoomOutButton=1\nrecenterVk=0\n"
-               "maxLevel=8.0\nfullRangeSeconds=1.2\nsensitivity=1.0\n"
-               "; centerDeadzone: keep 0 (strict center) for the smooth-cursor overlay\n"
-               "centerDeadzone=0.0\ntickHzCap=144\n"
-               "; diagnostics=1 logs frame timing to wind_diag.log (restart to apply)\n"
+               "zoomInButton=2\nzoomOutButton=1\n"
+               "; Keyboard hold-to-zoom (Virtual-Key codes, decimal; 0=unbound). Default PageUp/\n"
+               ";   PageDown. Works without a side-button mouse. The bound key still reaches the\n"
+               ";   focused app, so pick keys you don't use in games. e.g. 33=PageUp 34=PageDown\n"
+               ";   107/109=NumPad +/- 112=F1 113=F2 145=ScrollLock.\n"
+               "zoomInVk=33\nzoomOutVk=34\n"
+               "; recenterVk: tap to recenter the lens on the cursor (VK code; 0=unbound)\n"
+               "recenterVk=0\n"
+               "maxLevel=8.0\nfullRangeSeconds=1.2\n"
+               "; tickHzCap: 0=auto-detect display refresh rate (recommended); >0=explicit Hz cap\n"
+               "tickHzCap=0\n"
+               "; vsync: 1=present locked to display refresh (smooth, capped); 0=no vsync, paced by tickHzCap (restart to apply)\n"
+               "vsync=1\n"
+               "; dwmFlush: 0=plain vsync pacing (default, fewer stutters); 1=align to DWM's composition\n"
+               "dwmFlush=0\n"
+               "; diagnostics=1 logs frame timing to %TEMP%\\wind_diag.log (restart to apply)\n"
                "diagnostics=0\n"
-               "; updateMode: 0=skip sub-pixel, 1=emit on float-center, 2=continuous while zoomed\n"
-               "updateMode=0\n"
-               "; maxUpdateHz: 0=unlimited, else cap transform updates/sec\n"
-               "maxUpdateHz=0\n"
-               "; engine: render = own capture+GPU renderer (sub-pixel, smooth); mag = Magnification API\n"
-               "engine=render\n"
                "; cursorSensitivity: pan speed per raw count\n"
                "cursorSensitivity=1.0\n"
                "; cursorSmoothing: light inertia on the pan (0=off, ~0.5 light, higher=smoother+laggier)\n"
                "cursorSmoothing=0.5\n"
                "cursorScaleWithZoom=1\n"
+               "; cursorVisibility: auto=hide our cursor when the focused app hides its own (games);\n"
+               ";   always=always draw it; never=never draw it\n"
+               "cursorVisibility=auto\n"
                "; bilinear: 1=smooth scaling, 0=crisp/point\n"
                "bilinear=1\n"
                "; motionBlur: 1=smear content along the pan (off by default)\n"
@@ -85,7 +94,9 @@ Config LoadConfig(const std::wstring& path) {
                "; brightness: magnified-view output multiplier (1.0=unchanged; fine-tune for HDR)\n"
                "brightness=1.0\n"
                "; hdrTonemap: 1=HDR10->SDR tonemap when Windows HDR is on (no-op on SDR); 0=off\n"
-               "hdrTonemap=1\n";
+               "hdrTonemap=1\n"
+               "; multiMonitor: 1=magnify whichever monitor the cursor is on at zoom-in; 0=primary only\n"
+               "multiMonitor=1\n";
         return Config{};
     }
     std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());

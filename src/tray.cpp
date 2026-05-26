@@ -30,7 +30,12 @@ bool HandleMessage(HWND hwnd, UINT msg, WPARAM /*wp*/, LPARAM lp) {
         AppendMenuW(m, MF_STRING, ID_EDIT, L"Edit config");
         AppendMenuW(m, MF_STRING, ID_QUIT, L"Quit");
         SetForegroundWindow(hwnd);  // required so the menu dismisses on click-away
+        // TrackPopupMenu runs its own modal message loop that owns the thread until it closes.
+        // A timer keeps WM_TIMER (and thus the magnifier tick in WndProc) firing through it, so
+        // the zoom doesn't freeze while the menu is open. ~8 ms is clamped to the system minimum.
+        UINT_PTR tickTimer = SetTimer(hwnd, 0xC001, 8, nullptr);
         int cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, nullptr);
+        if (tickTimer) KillTimer(hwnd, 0xC001);
         PostMessageW(hwnd, WM_NULL, 0, 0);  // the documented dismiss fix
         DestroyMenu(m);
         if (cmd == ID_EDIT)
