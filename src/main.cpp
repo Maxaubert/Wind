@@ -62,6 +62,15 @@ static bool SameMonitor(const MonitorTarget& a, const MonitorTarget& b) {
     return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h && wcscmp(a.device, b.device) == 0;
 }
 
+// Virtual-desktop bounds (the union of all monitors), used per zoomed frame to detect a game
+// clipping the cursor. Cached because GetSystemMetrics is a syscall and these bounds change only
+// on a display-topology change; refreshed on each zoom-in (where we also retarget the monitor).
+struct VirtualBounds { int x, y, w, h; };
+static VirtualBounds QueryVirtualBounds() {
+    return { GetSystemMetrics(SM_XVIRTUALSCREEN),  GetSystemMetrics(SM_YVIRTUALSCREEN),
+             GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN) };
+}
+
 // --- Per-tick state -------------------------------------------------------------------------
 // All the state one magnifier tick mutates, in one struct so the tick can run from BOTH the
 // main loop AND a WM_TIMER. The tray context menu's TrackPopupMenu spins its own modal message
@@ -75,6 +84,7 @@ struct TickState {
     CursorMapper   mapper;
     LockDetector   detector;    // free vs game-locked cursor
     POINT          lastSetVirtual{};  // where we last SetCursorPos'd (virtual px); for the OS-cursor delta
+    VirtualBounds  vbounds{};   // cached virtual-screen bounds; refreshed on zoom-in (used for clip detect)
     LARGE_INTEGER freq{}, prev{};
     double sinceCheck = 0.0;
     unsigned long long lastMtime = 0;
@@ -198,6 +208,7 @@ static void RunTick(TickState& t) {
                     t.mapper = CursorMapper(nt.w, nt.h, t.cfg.cursorSmoothing);
                 }
             }
+            t.vbounds = QueryVirtualBounds();   // refresh cached clip-detect bounds (topology may have changed)
             POINT pt; GetCursorPos(&pt);
             t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y);   // virtual -> local monitor coords
             t.lastSetVirtual = pt;        // baseline for the OS-cursor delta (first delta = 0)
@@ -214,10 +225,9 @@ static void RunTick(TickState& t) {
         int curDx = cur.x - t.lastSetVirtual.x;
         int curDy = cur.y - t.lastSetVirtual.y;
         RECT clip{}; GetClipCursor(&clip);
-        int vsx = GetSystemMetrics(SM_XVIRTUALSCREEN), vsy = GetSystemMetrics(SM_YVIRTUALSCREEN);
-        int vsw = GetSystemMetrics(SM_CXVIRTUALSCREEN), vsh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
-        bool clipConfined = clip.left > vsx || clip.top > vsy ||
-                            clip.right < vsx + vsw || clip.bottom < vsy + vsh;
+        const VirtualBounds& vb = t.vbounds;   // cached at zoom-in (see QueryVirtualBounds)
+        bool clipConfined = clip.left > vb.x || clip.top > vb.y ||
+                            clip.right < vb.x + vb.w || clip.bottom < vb.y + vb.h;
         bool locked = t.detector.update(clipConfined,
                                         std::abs(rawDx) + std::abs(rawDy),
                                         std::abs(curDx) + std::abs(curDy));
