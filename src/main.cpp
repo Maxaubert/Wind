@@ -147,8 +147,10 @@ static void RunTick(TickState& t) {
     bool checkConfig = false;
     if (t.configWatch && t.configWatch != INVALID_HANDLE_VALUE) {
         if (WaitForSingleObject(t.configWatch, 0) == WAIT_OBJECT_0) {
-            FindNextChangeNotification(t.configWatch);   // re-arm for the next change
             checkConfig = true;
+            // Re-arm for the next change. If that fails (e.g. the watched dir vanished), drop to
+            // INVALID so the timed-poll fallback re-engages instead of silently never reloading.
+            if (!FindNextChangeNotification(t.configWatch)) t.configWatch = INVALID_HANDLE_VALUE;
         }
     } else {
         t.sinceCheck += dt;
