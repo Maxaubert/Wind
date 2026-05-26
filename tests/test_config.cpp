@@ -34,6 +34,11 @@ TEST_CASE("renderer knobs have sane defaults") {
     CHECK(c.tickHzCap == 0);                    // 0 = auto-detect display refresh rate
     CHECK(c.multiMonitor == 1);                // follow the cursor's monitor by default
     CHECK(c.cropCapture == 1);                 // crop the copy on full repaints by default
+    CHECK(c.smoothZoom == 0);                  // linear (current) by default
+    CHECK(c.zoomInSpeed == doctest::Approx(1.0));
+    CHECK(c.zoomOutSpeed == doctest::Approx(1.0));
+    CHECK(c.smoothZoomAccel == doctest::Approx(3.0));
+    CHECK(c.smoothZoomRamp == doctest::Approx(0.6));
 }
 TEST_CASE("vsync, dwmFlush, tickHzCap can be set") {
     CHECK(ParseConfig("vsync=0\n").vsync == 0);
@@ -96,4 +101,14 @@ TEST_CASE("multiMonitor can be set") {
 TEST_CASE("cropCapture can be set") {
     CHECK(ParseConfig("cropCapture=0\n").cropCapture == 0);
     CHECK(ParseConfig("cropCapture=1\n").cropCapture == 1);
+}
+TEST_CASE("zoom-speed and smooth-zoom knobs parse") {
+    Config c = ParseConfig(
+        "smoothZoom=1\nzoomInSpeed=2.0\nzoomOutSpeed=0.5\n"
+        "smoothZoomAccel=4.0\nsmoothZoomRamp=0.25\n");
+    CHECK(c.smoothZoom == 1);
+    CHECK(c.zoomInSpeed == doctest::Approx(2.0));
+    CHECK(c.zoomOutSpeed == doctest::Approx(0.5));
+    CHECK(c.smoothZoomAccel == doctest::Approx(4.0));
+    CHECK(c.smoothZoomRamp == doctest::Approx(0.25));
 }

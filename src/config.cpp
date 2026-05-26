@@ -28,6 +28,11 @@ Config ParseConfig(const std::string& text) {
             else if (key == "zoomOutVk")        c.zoomOutVk = std::stoi(val);
             else if (key == "maxLevel")         c.maxLevel = std::stod(val);
             else if (key == "fullRangeSeconds") c.fullRangeSeconds = std::stod(val);
+            else if (key == "zoomInSpeed")      c.zoomInSpeed = std::stod(val);
+            else if (key == "zoomOutSpeed")     c.zoomOutSpeed = std::stod(val);
+            else if (key == "smoothZoom")       c.smoothZoom = std::stoi(val);
+            else if (key == "smoothZoomAccel")  c.smoothZoomAccel = std::stod(val);
+            else if (key == "smoothZoomRamp")   c.smoothZoomRamp = std::stod(val);
             else if (key == "tickHzCap")        c.tickHzCap = std::stoi(val);
             else if (key == "vsync")            c.vsync = std::stoi(val);
             else if (key == "dwmFlush")         c.dwmFlush = std::stoi(val);
@@ -70,6 +75,14 @@ Config LoadConfig(const std::wstring& path) {
                "; recenterVk: tap to recenter the lens on the cursor (VK code; 0=unbound)\n"
                "recenterVk=0\n"
                "maxLevel=8.0\nfullRangeSeconds=1.2\n"
+               "; zoomInSpeed/zoomOutSpeed: zoom rate multipliers (1.0=default, 2.0=twice as fast, 0.5=half)\n"
+               "zoomInSpeed=1.0\nzoomOutSpeed=1.0\n"
+               "; smoothZoom: 0=linear constant speed (default); 1=zoom-IN accelerates the longer you hold\n"
+               "smoothZoom=0\n"
+               "; smoothZoomAccel: smooth-mode top zoom-in rate = zoomInSpeed * this (1=no accel)\n"
+               "smoothZoomAccel=3.0\n"
+               "; smoothZoomRamp: seconds of holding to reach the top zoom-in rate\n"
+               "smoothZoomRamp=0.6\n"
                "; tickHzCap: 0=auto-detect display refresh rate (recommended); >0=explicit Hz cap\n"
                "tickHzCap=0\n"
                "; vsync: 1=present locked to display refresh (smooth, capped); 0=no vsync, paced by tickHzCap (restart to apply)\n"

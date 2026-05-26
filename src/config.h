@@ -12,6 +12,16 @@ struct Config {
     int    recenterVk       = 0;     // VK code; 0 = unbound. Tap to recenter the lens on the cursor.
     double maxLevel         = 8.0;
     double fullRangeSeconds = 1.2;
+    // --- Zoom experience (see docs/superpowers/specs/2026-05-26-configurable-zoom-design.md) ---
+    // Per-direction rate multipliers (1.0 = today's speed); apply in BOTH linear and smooth modes.
+    double zoomInSpeed  = 1.0;       // 0.25-4.0
+    double zoomOutSpeed = 1.0;       // 0.25-4.0
+    // Smooth zoom: 0 = linear/constant (default); 1 = zoom-IN accelerates while held.
+    int    smoothZoom = 0;
+    // Smooth-mode top zoom-in rate = zoomInSpeed * smoothZoomAccel (>=1; 1 = no accel). 1.0-8.0.
+    double smoothZoomAccel = 3.0;
+    // Seconds of continuous holding to reach the top zoom-in rate. 0.1-3.0.
+    double smoothZoomRamp = 0.6;
     int    tickHzCap        = 0;     // 0 = auto-detect display refresh rate; >0 = explicit cap (Hz)
     // Present sync while zoomed (render engine): 1 = vsync (Present sync-interval 1, locked to
     // the display refresh); 0 = no vsync (Present 0), with the loop paced by tickHzCap instead.
