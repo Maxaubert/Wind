@@ -1,8 +1,8 @@
 #include "cursor_mapper.h"
 #include "transform.h"
 namespace wind {
-CursorMapper::CursorMapper(int screenW, int screenH, double sensitivity, double smoothing)
-    : sw_(screenW), sh_(screenH), sens_(sensitivity),
+CursorMapper::CursorMapper(int screenW, int screenH, double smoothing)
+    : sw_(screenW), sh_(screenH),
       cx_(screenW / 2.0), cy_(screenH / 2.0), tx_(screenW / 2.0), ty_(screenH / 2.0) {
     alpha_ = 1.0 - smoothing;
     if (alpha_ > 1.0) alpha_ = 1.0;
@@ -13,12 +13,12 @@ void CursorMapper::reset(double centerX, double centerY) {
     cx_ = tx_ = centerX; cy_ = ty_ = centerY;
 }
 
-MapResult CursorMapper::update(int rawDx, int rawDy, double level) {
+MapResult CursorMapper::update(int dx, int dy, double level) {
     if (level < 1.0) level = 1.0;
-    // Target moves at *desktop* speed (not divided by zoom): the focus reaches things at the
-    // same hand-speed whether at 2x or 8x, matching Windows Magnifier. Tune with sensitivity.
-    tx_ += rawDx * sens_;
-    ty_ += rawDy * sens_;
+    // Apply the caller-resolved pixel delta at *desktop* speed (not divided by zoom): the focus
+    // reaches things at the same hand-speed whether at 2x or 8x, matching Windows Magnifier.
+    tx_ += dx;
+    ty_ += dy;
     if (tx_ < 0) tx_ = 0; else if (tx_ > sw_) tx_ = sw_;
     if (ty_ < 0) ty_ = 0; else if (ty_ > sh_) ty_ = sh_;
 

@@ -82,7 +82,7 @@ struct TickState {
     TickState(RenderEngine& re, const MonitorTarget& m, const Config& c)
         : renderEngine(re), mon(m), cfg(c),
           zoom(1.0, c.maxLevel, c.fullRangeSeconds),
-          mapper(m.w, m.h, c.cursorSensitivity, c.cursorSmoothing) {}
+          mapper(m.w, m.h, c.cursorSmoothing) {}
 };
 static TickState* g_tick = nullptr;
 
@@ -144,7 +144,7 @@ static void RunTick(TickState& t) {
             t.cfg = nc;   // pick up renderer knobs (smoothing, blur, filter, cursor scale)
             t.zoom = ZoomController(1.0, nc.maxLevel, nc.fullRangeSeconds);
             double ocx = t.mapper.centerX(), ocy = t.mapper.centerY();   // preserve position
-            t.mapper = CursorMapper(t.mon.w, t.mon.h, nc.cursorSensitivity, nc.cursorSmoothing);
+            t.mapper = CursorMapper(t.mon.w, t.mon.h, nc.cursorSmoothing);
             t.mapper.reset(ocx, ocy);
         }
     }
@@ -175,7 +175,7 @@ static void RunTick(TickState& t) {
                 MonitorTarget nt = MonitorUnderCursor();
                 if (!SameMonitor(nt, t.mon) && t.renderEngine.retarget(nt)) {
                     t.mon = nt;
-                    t.mapper = CursorMapper(nt.w, nt.h, t.cfg.cursorSensitivity, t.cfg.cursorSmoothing);
+                    t.mapper = CursorMapper(nt.w, nt.h, t.cfg.cursorSmoothing);
                 }
             }
             POINT pt; GetCursorPos(&pt);
