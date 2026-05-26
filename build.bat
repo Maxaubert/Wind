@@ -51,7 +51,7 @@ rem --- Test build (pure-logic sources only; no <windows.h>) -----------------
 rem /wd5285 silences a known doctest 2.4.11 header warning under MSVC /W4.
 cl /nologo /std:c++17 /EHsc /W4 /wd5285 /DWIND_TESTS /I third_party ^
    tests\*.cpp ^
-   src\transform.cpp src\zoom_controller.cpp src\config.cpp src\cursor_mapper.cpp ^
+   src\transform.cpp src\zoom_controller.cpp src\config.cpp src\cursor_mapper.cpp src\lock_detector.cpp ^
    /Fe:wind_tests.exe
 if errorlevel 1 exit /b 1
 "%ROOT%wind_tests.exe"
