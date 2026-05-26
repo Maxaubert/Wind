@@ -2,7 +2,15 @@
 #include <windows.h>
 namespace wind {
 static InputRouter* g_router = nullptr;
-static HHOOK g_mouseHook = nullptr;
+static HHOOK   g_mouseHook    = nullptr;
+// The WH_MOUSE_LL hook lives on its OWN thread (see start()): Windows services a low-level hook on
+// the thread that installed it and holds each mouse event until that thread responds, so the hook
+// MUST sit on a thread that pumps messages constantly. On the main thread it was starved behind the
+// per-frame render/pacing block, batching all system mouse input by a frame (in-game microstutter).
+static HANDLE  g_hookThread   = nullptr;
+static DWORD   g_hookThreadId = 0;
+static HANDLE  g_hookReady    = nullptr;   // signaled by the thread once the hook is installed (or failed)
+static bool    g_hookOk       = false;     // result of SetWindowsHookExW, published via g_hookReady
 
 static int xbuttonIdFromHook(WPARAM wParam, LPARAM lParam) {
     auto* mi = reinterpret_cast<MSLLHOOKSTRUCT*>(lParam);
@@ -36,24 +44,54 @@ static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
     return CallNextHookEx(g_mouseHook, code, wParam, lParam);
 }
 
+// Dedicated hook thread: installs the LL mouse hook and does nothing but pump messages so the hook
+// is serviced with microsecond latency. A low-level hook callback is delivered while the owning
+// thread is in a message-retrieval call (GetMessage), so this loop services every event instantly.
+static DWORD WINAPI HookThreadProc(LPVOID) {
+    MSG msg;
+    PeekMessageW(&msg, nullptr, WM_USER, WM_USER, PM_NOREMOVE);   // force a message queue to exist
+    g_mouseHook = SetWindowsHookExW(WH_MOUSE_LL, MouseProc, GetModuleHandleW(nullptr), 0);
+    g_hookOk = (g_mouseHook != nullptr);
+    SetEvent(g_hookReady);                                        // publish the install result to start()
+    if (!g_mouseHook) return 1;
+    while (GetMessageW(&msg, nullptr, 0, 0) > 0) {                // WM_QUIT (posted by stop()) ends this
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+    UnhookWindowsHookEx(g_mouseHook);                            // unhook on the installing thread
+    g_mouseHook = nullptr;
+    return 0;
+}
+
 bool InputRouter::start(int inButtonId, int outButtonId, bool swallow) {
     g_router = this; inButtonId_ = inButtonId; outButtonId_ = outButtonId; swallow_ = swallow;
     // Diagnostic: WIND_NOHOOK=1 skips the low-level mouse hook entirely (button state still arrives
-    // via Raw Input). Used to confirm whether the WH_MOUSE_LL hook - which Windows services on the
-    // installing thread and which holds mouse input until that thread responds - is what batches
-    // system mouse input per frame (the main thread blocks each frame on the pacing wait), causing
-    // the in-game microstutter. If the stutter vanishes with this set, the hook is the cause.
+    // via Raw Input). Kept as a fallback / A-B toggle; side-button swallowing is disabled in it.
     if (GetEnvironmentVariableW(L"WIND_NOHOOK", nullptr, 0) > 0) {
         g_mouseHook = nullptr;
-        return true;   // run hookless; side-button swallowing is disabled in this mode
+        return true;
     }
-    g_mouseHook = SetWindowsHookExW(WH_MOUSE_LL, MouseProc, GetModuleHandleW(nullptr), 0);
-    return g_mouseHook != nullptr;
+    // Install the hook on its own thread (see HookThreadProc / g_hookThread comment). The hook must
+    // be installed by the thread that services it, so SetWindowsHookExW runs inside the thread proc;
+    // we block here only until it reports success/failure via g_hookReady.
+    g_hookReady = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (!g_hookReady) return false;
+    g_hookThread = CreateThread(nullptr, 0, HookThreadProc, nullptr, 0, &g_hookThreadId);
+    if (!g_hookThread) { CloseHandle(g_hookReady); g_hookReady = nullptr; return false; }
+    WaitForSingleObject(g_hookReady, INFINITE);
+    CloseHandle(g_hookReady); g_hookReady = nullptr;
+    return g_hookOk;
     // Raw Input registration (RIDEV_INPUTSINK) + WM_INPUT decoding live in main.cpp's
     // message-only window, which calls AccumulateRaw() with the decoded deltas.
 }
 void InputRouter::stop() {
-    if (g_mouseHook) { UnhookWindowsHookEx(g_mouseHook); g_mouseHook = nullptr; }
+    if (g_hookThread) {
+        PostThreadMessageW(g_hookThreadId, WM_QUIT, 0, 0);   // break the thread's GetMessage loop
+        WaitForSingleObject(g_hookThread, INFINITE);          // it unhooks itself on the way out
+        CloseHandle(g_hookThread); g_hookThread = nullptr; g_hookThreadId = 0;
+    } else if (g_mouseHook) {                                 // hookless/no-thread paths: unhook directly
+        UnhookWindowsHookEx(g_mouseHook); g_mouseHook = nullptr;
+    }
     g_router = nullptr;
 }
 void InputRouter::drainRaw(int& dx, int& dy) {
