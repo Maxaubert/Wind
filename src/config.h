@@ -24,7 +24,9 @@ struct Config {
     int    diagnostics      = 0;     // 1 = log frame-timing to wind_diag.log
 
     // --- Own GPU renderer ---------------------------------------------------
-    double cursorSensitivity = 1.0;  // lens pan speed per raw count
+    // Raw-input pan scale used ONLY while a game has locked the cursor (relative-mouse mode).
+    // Free desktop panning auto-matches the OS cursor (acceleration included) and ignores this.
+    double cursorSensitivity = 1.0;
     double cursorSmoothing = 0.5;    // light inertia on the pan: 0 = off, higher = smoother/laggier
     int    cursorScaleWithZoom = 1;  // 1 = draw the cursor scaled by zoom, 0 = native size
     // Cursor visibility while zoomed: "auto" = follow the focused app (don't draw a cursor
