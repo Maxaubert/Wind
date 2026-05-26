@@ -684,6 +684,56 @@ void RenderEngine::invalidateCapture() {
     s_->prevSrcValid = false;
 }
 
+bool RenderEngine::retarget(const MonitorTarget& m) {
+    if (!s_ || !s_->ready || !s_->hwnd || !s_->swap) return false;
+
+    // Validate the target's output is on OUR adapter BEFORE touching the window/swapchain, so we
+    // never end up displaying one monitor's pixels on another monitor's overlay (multi-GPU).
+    if (m.device[0]) {
+        IDXGIOutput* probe = s_->selectOutput(m.device, /*fallbackToFirst=*/false);
+        if (!probe) {
+            RLog("retarget: device=%ls not on our adapter; keeping current monitor", m.device);
+            return false;
+        }
+        probe->Release();
+    }
+
+    const bool sizeChanged = (m.w != s_->sw || m.h != s_->sh);
+
+    // Move/resize the overlay. During a zoom-in the window is still at alpha 0 (invisible), so
+    // this never flashes. Keep it topmost.
+    SetWindowPos(s_->hwnd, HWND_TOPMOST, m.x, m.y, m.w, m.h, SWP_NOACTIVATE);
+
+    if (sizeChanged) {
+        // ResizeBuffers requires all back-buffer references released first (the RTV holds one).
+        SafeRelease(s_->rtv);
+        HRESULT hr = s_->swap->ResizeBuffers(1, m.w, m.h, DXGI_FORMAT_B8G8R8A8_UNORM, 0);
+        if (FAILED(hr)) { RLog("retarget: ResizeBuffers failed hr=0x%08lX", (unsigned long)hr); return false; }
+        ID3D11Texture2D* back = nullptr;
+        if (FAILED(s_->swap->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&back))) {
+            RLog("retarget: GetBuffer failed after ResizeBuffers"); return false;
+        }
+        hr = s_->device->CreateRenderTargetView(back, nullptr, &s_->rtv);
+        SafeRelease(back);
+        if (FAILED(hr)) { RLog("retarget: CreateRenderTargetView failed hr=0x%08lX", (unsigned long)hr); return false; }
+    }
+
+    // Adopt the new geometry + device, then force a fresh capture on the new output (same flags
+    // as invalidateCapture). The next capture() recreates the duplication via selectOutput and
+    // recreates desktopCopy at the new size (ensureDesktopCopy is size-aware).
+    s_->originX = m.x; s_->originY = m.y;
+    s_->sw = m.w; s_->sh = m.h;
+    lstrcpynW(s_->targetDevice, m.device, 32);
+    SafeRelease(s_->dupl);
+    s_->haveDesktop = false;
+    s_->freshCapture = true;
+    s_->prevSrcValid = false;
+    s_->lastClickX = s_->lastClickY = INT_MIN;   // don't skip the first SetCursorPos on the new monitor
+    RLog("retarget: device=%ls origin=(%d,%d) size=%dx%d sizeChanged=%d",
+         s_->targetDevice, m.x, m.y, m.w, m.h, (int)sizeChanged);
+    return true;
+}
+
 void RenderEngine::State::updateCursorTexture() {
     CURSORINFO ci{ sizeof(ci) };
     if (!GetCursorInfo(&ci) || !ci.hCursor) { osCursorShowing = false; return; }

@@ -44,6 +44,12 @@ public:
     // Start menu / taskbar flyouts don't show an unmagnified copy). Falls back to a normal
     // window if the band can't be used.
     bool initialize(const MonitorTarget& monitor, int zorderBand = 0, bool hdrTonemap = false);
+    // Re-point the magnifier at a different monitor (call on zoom-in when the cursor's monitor
+    // changed; the overlay must still be hidden/alpha 0). Moves + resizes the overlay, resizes
+    // the swapchain if needed, and rebinds Desktop Duplication to the new output. Returns false
+    // and changes nothing if the monitor's output is not on our D3D device's adapter (multi-GPU)
+    // or a D3D step fails, so the caller can keep magnifying the current monitor.
+    bool retarget(const MonitorTarget& monitor);
     bool renderFrame(const RenderFrameParams& p);  // capture (if changed) + scale + cursor + present
     void setVisible(bool visible);                 // show/hide the overlay (hidden at 1x)
     // Force the next frame to grab a fresh full-desktop capture (release+recreate the
