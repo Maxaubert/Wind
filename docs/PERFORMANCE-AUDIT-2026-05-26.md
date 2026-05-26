@@ -39,18 +39,21 @@ hot-reload mtime poll (Finding #1).
 
 ## Bottom line
 
-The engine itself is clean (PACINGTEST proved it). The reported ~1 s idle spike is almost
-certainly **#1** (the once-a-second config file-stat on the render thread), with **#4** (a
-1 s-updating on-screen element triggering a capture) as the secondary environmental thing to rule
-out. **#2** adds a smaller 4/s jitter.
+The engine itself is clean (PACINGTEST proved it). The original hypothesis - that **#1** (the
+once-a-second config file-stat) caused the ~1 s idle spike - was **wrong**: fixing it (PR #41) did
+not remove the spike in live testing. The remaining suspect is **#4** (a ~1 s-updating on-screen
+element, e.g. a seconds-clock or an FPS/frametime overlay, triggering a DDA capture and, before
+this work, a full-screen copy). **#2** added a smaller 4/s jitter.
 
-**To confirm #1:** the fix (replacing the stat with a change-notification watch) should make the
-1 s spike vanish. **To rule out #4:** watch the frametime graph with a fully static desktop (no
-seconds-clock, close RTSS/Afterburner overlays).
+All four findings are now addressed (see backlog below). #4 in particular makes a tiny periodic
+on-screen update nearly free (dirty-rect copy), which should remove the spike if it is #4.
+**To confirm:** watch the frametime graph with a fully static desktop (no seconds-clock, close
+RTSS/Afterburner overlays) vs. with a 1 s-updating element, before and after #4.
 
 ## Optimization backlog (work through as desired)
 
-- [x] **#1** config-poll file stat -> dir-change watch (issue #40, in progress)
-- [ ] **#2** topmost re-assert interval / displaced-only re-assert
-- [ ] **#3** cache the 4 virtual-screen `GetSystemMetrics` per tick
-- [ ] **#4** confirm/handle the DDA-on-desktop-change environmental spike
+- [x] **#1** config-poll file stat -> dir-change watch (issue #40, PR #41). NOTE: this did NOT
+  fix the ~1s spike (live-tested), so #1 was not the cause - kept as a clean micro-opt only.
+- [x] **#2** topmost re-assert -> displaced-only check (`GW_HWNDPREV`) + 1s backstop (issue #42, PR #43)
+- [x] **#3** cache the 4 virtual-screen `GetSystemMetrics`, refresh on zoom-in (issue #42, PR #43)
+- [x] **#4** copy only DDA dirty rects + skip pointer-only frames; full-copy fallback (issue #44)
