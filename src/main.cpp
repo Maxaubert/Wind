@@ -185,6 +185,9 @@ static void RunTick(TickState& t) {
     auto keyDown = [](int vk) { return vk != 0 && (GetAsyncKeyState(vk) & 0x8000) != 0; };
     bool inHeld  = g_input.state().inHeld.load()  || keyDown(t.cfg.zoomInVk);
     bool outHeld = g_input.state().outHeld.load() || keyDown(t.cfg.zoomOutVk);
+    // Apply the live zoom profile every frame (free hot-reload; setProfile does not reset level).
+    t.zoom.setProfile(t.cfg.zoomInSpeed, t.cfg.zoomOutSpeed, t.cfg.smoothZoom != 0,
+                      t.cfg.smoothZoomAccel, t.cfg.smoothZoomRamp);
     t.zoom.setDirection(ResolveDirection(inHeld, outHeld));
     // Clamp the dt fed to the zoom so a single long tick (cold first capture, alt-tab, any hitch)
     // can't jump the zoom level mid-ramp - it should always ease in/out at a steady rate regardless
