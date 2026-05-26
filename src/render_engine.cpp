@@ -3,11 +3,11 @@
 #include "render_shaders.h"
 #include "hdr_info.h"
 #include "cursor_decode.h"
+#include "png_dump.h"
 #include <windows.h>
 #include <d3d11.h>
 #include <dxgi1_6.h>
 #include <d3dcompiler.h>
-#include <wincodec.h>
 #include <magnification.h>
 #include <cstdint>
 #include <cstring>
@@ -762,65 +762,13 @@ void RenderEngine::shutdown() {
 }
 
 // ---------------------------------------------------------------------------
-// Verification helper: copy the back-buffer to a staging texture and WIC-encode a PNG.
+// Verification helper: copy back-buffer 0 to a PNG (WIC encode lives in png_dump).
 bool RenderEngine::dumpBackbufferPng(const wchar_t* path) {
     if (!s_->ready) return false;
     ID3D11Texture2D* back = nullptr;
     if (FAILED(s_->swap->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&back))) return false;
-    D3D11_TEXTURE2D_DESC td{};
-    back->GetDesc(&td);
-    D3D11_TEXTURE2D_DESC sd = td;
-    sd.Usage = D3D11_USAGE_STAGING;
-    sd.BindFlags = 0;
-    sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-    sd.MiscFlags = 0;
-    ID3D11Texture2D* stage = nullptr;
-    HRESULT hr = s_->device->CreateTexture2D(&sd, nullptr, &stage);
-    if (FAILED(hr)) { SafeRelease(back); return false; }
-    s_->ctx->CopyResource(stage, back);
+    bool ok = SaveTextureToPng(s_->device, s_->ctx, back, path);
     SafeRelease(back);
-
-    D3D11_MAPPED_SUBRESOURCE map{};
-    hr = s_->ctx->Map(stage, 0, D3D11_MAP_READ, 0, &map);
-    if (FAILED(hr)) { SafeRelease(stage); return false; }
-
-    bool ok = false;
-    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    IWICImagingFactory* wic = nullptr;
-    if (SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
-                                   __uuidof(IWICImagingFactory), (void**)&wic))) {
-        IWICBitmap* bmp = nullptr;
-        if (SUCCEEDED(wic->CreateBitmapFromMemory(td.Width, td.Height,
-                GUID_WICPixelFormat32bppBGRA, map.RowPitch,
-                map.RowPitch * td.Height, (BYTE*)map.pData, &bmp))) {
-            IWICStream* stream = nullptr;
-            wic->CreateStream(&stream);
-            if (stream && SUCCEEDED(stream->InitializeFromFilename(path, GENERIC_WRITE))) {
-                IWICBitmapEncoder* enc = nullptr;
-                wic->CreateEncoder(GUID_ContainerFormatPng, nullptr, &enc);
-                if (enc && SUCCEEDED(enc->Initialize(stream, WICBitmapEncoderNoCache))) {
-                    IWICBitmapFrameEncode* frame = nullptr;
-                    enc->CreateNewFrame(&frame, nullptr);
-                    if (frame && SUCCEEDED(frame->Initialize(nullptr))) {
-                        frame->SetSize(td.Width, td.Height);
-                        WICPixelFormatGUID pf = GUID_WICPixelFormat32bppBGRA;
-                        frame->SetPixelFormat(&pf);
-                        if (SUCCEEDED(frame->WriteSource(bmp, nullptr)) &&
-                            SUCCEEDED(frame->Commit()) && SUCCEEDED(enc->Commit())) {
-                            ok = true;
-                        }
-                    }
-                    SafeRelease(frame);
-                }
-                SafeRelease(enc);
-            }
-            SafeRelease(stream);
-            SafeRelease(bmp);
-        }
-        SafeRelease(wic);
-    }
-    s_->ctx->Unmap(stage, 0);
-    SafeRelease(stage);
     return ok;
 }
 
