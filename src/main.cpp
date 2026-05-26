@@ -113,9 +113,9 @@ static void DiagLog(const char* fmt, ...) {
     fputc('\n', f); fclose(f);
 }
 
-// One magnifier tick: advance zoom, hot-reload config, then pan/draw (render engine) or push
-// the transform (mag engine). Pure of any pacing wait - the caller paces. Safe to call from
-// the main loop or from a WM_TIMER during a modal loop.
+// One magnifier tick: advance zoom, hot-reload config, then pan/draw via the render engine.
+// Pure of any pacing wait - the caller paces. Safe to call from the main loop or from a
+// WM_TIMER during a modal loop.
 static void RunTick(TickState& t) {
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
