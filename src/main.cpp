@@ -34,6 +34,17 @@ static int DetectRefreshHz() {
     return 60;
 }
 
+// The primary monitor as a MonitorTarget (origin 0,0, primary size, empty device name = first
+// DXGI output). This is the legacy single-monitor target and the universal fallback.
+static MonitorTarget PrimaryMonitor() {
+    MonitorTarget t;
+    t.x = 0; t.y = 0;
+    t.w = GetSystemMetrics(SM_CXSCREEN);
+    t.h = GetSystemMetrics(SM_CYSCREEN);
+    t.device[0] = L'\0';
+    return t;
+}
+
 // --- Per-tick state -------------------------------------------------------------------------
 // All the state one magnifier tick mutates, in one struct so the tick can run from BOTH the
 // main loop AND a WM_TIMER. The tray context menu's TrackPopupMenu spins its own modal message
@@ -248,12 +259,15 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         return 1;
     }
 
-    int sw = GetSystemMetrics(SM_CXSCREEN);
-    int sh = GetSystemMetrics(SM_CYSCREEN);
+    // Target monitor for this session. Task 6 swaps PrimaryMonitor() for the cursor's monitor
+    // when multiMonitor is on; for now both paths use the primary (behavior unchanged).
+    MonitorTarget startupMon = PrimaryMonitor();
+    int sw = startupMon.w;
+    int sh = startupMon.h;
 
     // --- Own GPU renderer (DXGI Desktop Duplication + D3D11) ---
     RenderEngine renderEngine;
-    if (!renderEngine.initialize(sw, sh, cfg.zorderBand, cfg.hdrTonemap != 0)) {
+    if (!renderEngine.initialize(startupMon, cfg.zorderBand, cfg.hdrTonemap != 0)) {
         MessageBoxW(nullptr, L"Could not start the renderer (Direct3D 11 / Desktop Duplication "
                              L"unavailable on this system).", L"Wind", MB_ICONERROR);
         g_input.stop();

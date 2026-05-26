@@ -1,5 +1,15 @@
 #pragma once
 namespace wind {
+// A target monitor for the magnifier overlay. All values are in physical pixels in the
+// virtual-desktop coordinate space (the process is Per-Monitor-V2 DPI aware). `device` is the
+// GDI/DXGI device name (\\.\DISPLAYn, 32 = CCHDEVICENAME) used to match the monitor to its DXGI
+// output by name. An empty `device` means "first output" (the legacy single-monitor path).
+struct MonitorTarget {
+    int     x = 0, y = 0;       // top-left in virtual-desktop pixels (monitor origin)
+    int     w = 0, h = 0;       // size in physical pixels
+    wchar_t device[32] = {};
+};
+
 // Per-frame inputs for the own GPU renderer (centered cursor mode). All pixel values are
 // in physical screen pixels (the process is Per-Monitor-V2 aware). Produced from
 // CursorMapper + the zoom level.
@@ -33,7 +43,7 @@ public:
     // CreateWindowInBand (needs UIAccess; e.g. 16 = ZBID_SYSTEM_TOOLS, above the shell so the
     // Start menu / taskbar flyouts don't show an unmagnified copy). Falls back to a normal
     // window if the band can't be used.
-    bool initialize(int screenW, int screenH, int zorderBand = 0, bool hdrTonemap = false);
+    bool initialize(const MonitorTarget& monitor, int zorderBand = 0, bool hdrTonemap = false);
     bool renderFrame(const RenderFrameParams& p);  // capture (if changed) + scale + cursor + present
     void setVisible(bool visible);                 // show/hide the overlay (hidden at 1x)
     // Force the next frame to grab a fresh full-desktop capture (release+recreate the

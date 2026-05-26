@@ -228,6 +228,8 @@ static bool DecodeCursorBGRA(HCURSOR hc, std::vector<uint32_t>& out,
 // ---------------------------------------------------------------------------
 struct RenderEngine::State {
     int sw = 0, sh = 0;
+    int originX = 0, originY = 0;          // target monitor top-left in virtual-desktop pixels
+    wchar_t targetDevice[32] = {};         // DXGI output DeviceName to capture ("" = first output)
     HWND hwnd = nullptr;
     ID3D11Device* device = nullptr;
     ID3D11DeviceContext* ctx = nullptr;
@@ -438,11 +440,16 @@ void RenderEngine::debugHdr(unsigned& ddaFormat, int& colorSpace, int& bitsPerCo
     ddaFormat = s_->ddaFormat; colorSpace = s_->outColorSpace; bitsPerColor = s_->outBitsPerColor;
 }
 
-bool RenderEngine::initialize(int screenW, int screenH, int zorderBand, bool hdrTonemap) {
+bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool hdrTonemap) {
+    const int screenW = monitor.w, screenH = monitor.h;
     s_->sw = screenW;
     s_->sh = screenH;
+    s_->originX = monitor.x;
+    s_->originY = monitor.y;
+    lstrcpynW(s_->targetDevice, monitor.device, 32);   // "" = first output (legacy path)
     s_->wantHdrTonemap = hdrTonemap;   // read before recreateDupl decides the capture format
-    RLog("=== initialize sw=%d sh=%d band=%d hdrTonemap=%d ===", screenW, screenH, zorderBand, (int)hdrTonemap);
+    RLog("=== initialize device=%ls origin=(%d,%d) size=%dx%d band=%d hdrTonemap=%d ===",
+         s_->targetDevice, monitor.x, monitor.y, screenW, screenH, zorderBand, (int)hdrTonemap);
 
     // --- Overlay window: fullscreen, borderless, topmost, click-through, no-activate ---
     static const wchar_t* kClass = L"WindRenderOverlay";
@@ -468,15 +475,16 @@ bool RenderEngine::initialize(int screenW, int screenH, int zorderBand, bool hdr
         if (HMODULE u32 = GetModuleHandleW(L"user32.dll")) {
             if (auto pCWIB = reinterpret_cast<PFN_CWIB>(GetProcAddress(u32, "CreateWindowInBand"))) {
                 s_->hwnd = pCWIB(exStyle, atom, L"Wind Magnifier", WS_POPUP,
-                                 0, 0, screenW, screenH, nullptr, nullptr, wc.hInstance, nullptr,
-                                 static_cast<DWORD>(zorderBand));
+                                 monitor.x, monitor.y, screenW, screenH, nullptr, nullptr,
+                                 wc.hInstance, nullptr, static_cast<DWORD>(zorderBand));
                 if (s_->hwnd) s_->inBand = true;
             }
         }
     }
     if (!s_->hwnd) {
         s_->hwnd = CreateWindowExW(exStyle, kClass, L"Wind Magnifier", WS_POPUP,
-                                   0, 0, screenW, screenH, nullptr, nullptr, wc.hInstance, nullptr);
+                                   monitor.x, monitor.y, screenW, screenH, nullptr, nullptr,
+                                   wc.hInstance, nullptr);
     }
     if (!s_->hwnd) return false;
     // Start fully transparent (alpha 0 = invisible). We toggle the layer alpha to show/hide
@@ -904,8 +912,9 @@ bool RenderEngine::dumpBackbufferPng(const wchar_t* path) {
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     int sw = GetSystemMetrics(SM_CXSCREEN), sh = GetSystemMetrics(SM_CYSCREEN);
+    wind::MonitorTarget mon; mon.x = 0; mon.y = 0; mon.w = sw; mon.h = sh;
     wind::RenderEngine eng;
-    if (!eng.initialize(sw, sh)) { MessageBoxW(nullptr, L"init failed", L"smoke", 0); return 1; }
+    if (!eng.initialize(mon)) { MessageBoxW(nullptr, L"init failed", L"smoke", 0); return 1; }
     eng.setVisible(true);
     wind::RenderFrameParams p{};
     p.level = 4.0; p.srcLeft = sw * 0.375; p.srcTop = sh * 0.375;
