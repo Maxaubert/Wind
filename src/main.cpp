@@ -185,7 +185,12 @@ static void RunTick(TickState& t) {
     bool inHeld  = g_input.state().inHeld.load()  || keyDown(t.cfg.zoomInVk);
     bool outHeld = g_input.state().outHeld.load() || keyDown(t.cfg.zoomOutVk);
     t.zoom.setDirection(ResolveDirection(inHeld, outHeld));
-    t.zoom.tick(dt);
+    // Clamp the dt fed to the zoom so a single long tick (cold first capture, alt-tab, any hitch)
+    // can't jump the zoom level mid-ramp - it should always ease in/out at a steady rate regardless
+    // of frame-time spikes. Raw dt is kept below for the diagnostics block (which must see true
+    // hitches) and the config-poll fallback. Normal ~7ms frames are unaffected.
+    const double kMaxZoomDt = 0.05;   // 50ms (~7 frames at 144Hz)
+    t.zoom.tick(dt < kMaxZoomDt ? dt : kMaxZoomDt);
     bool recenter = g_input.state().recenter.exchange(false);
     // Recenter on a recenterVk key press (rising edge), in addition to any other source.
     bool recenterDown = keyDown(t.cfg.recenterVk);
