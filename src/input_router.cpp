@@ -38,6 +38,15 @@ static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
 
 bool InputRouter::start(int inButtonId, int outButtonId, bool swallow) {
     g_router = this; inButtonId_ = inButtonId; outButtonId_ = outButtonId; swallow_ = swallow;
+    // Diagnostic: WIND_NOHOOK=1 skips the low-level mouse hook entirely (button state still arrives
+    // via Raw Input). Used to confirm whether the WH_MOUSE_LL hook - which Windows services on the
+    // installing thread and which holds mouse input until that thread responds - is what batches
+    // system mouse input per frame (the main thread blocks each frame on the pacing wait), causing
+    // the in-game microstutter. If the stutter vanishes with this set, the hook is the cause.
+    if (GetEnvironmentVariableW(L"WIND_NOHOOK", nullptr, 0) > 0) {
+        g_mouseHook = nullptr;
+        return true;   // run hookless; side-button swallowing is disabled in this mode
+    }
     g_mouseHook = SetWindowsHookExW(WH_MOUSE_LL, MouseProc, GetModuleHandleW(nullptr), 0);
     return g_mouseHook != nullptr;
     // Raw Input registration (RIDEV_INPUTSINK) + WM_INPUT decoding live in main.cpp's
