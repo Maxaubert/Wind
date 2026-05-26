@@ -27,7 +27,8 @@ struct Config {
     // Raw-input pan scale used ONLY while a game has locked the cursor (relative-mouse mode).
     // Free desktop panning auto-matches the OS cursor (acceleration included) and ignores this.
     double cursorSensitivity = 1.0;
-    double cursorSmoothing = 0.5;    // light inertia on the pan: 0 = off, higher = smoother/laggier
+    double cursorSmoothing = 0.8;    // light inertia on the pan: 0 = off, higher = smoother/laggier
+                                     // (0.8 default eases the 1px-step jitter visible at high zoom)
     int    cursorScaleWithZoom = 1;  // 1 = draw the cursor scaled by zoom, 0 = native size
     // Cursor visibility while zoomed: "auto" = follow the focused app (don't draw a cursor
     // when a game hides its own via ShowCursor(FALSE); detected with GetCursorInfo's

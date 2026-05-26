@@ -22,7 +22,7 @@ TEST_CASE("renderer knobs have sane defaults") {
     CHECK(c.cursorSensitivity == doctest::Approx(1.0));
     CHECK(c.cursorScaleWithZoom == 1);
     CHECK(c.bilinear == 1);
-    CHECK(c.cursorSmoothing == doctest::Approx(0.5));
+    CHECK(c.cursorSmoothing == doctest::Approx(0.8));
     CHECK(c.motionBlur == 0);                  // off by default
     CHECK(c.motionBlurStrength == doctest::Approx(1.0));
     CHECK(c.zorderBand == 0);                  // normal topmost by default
