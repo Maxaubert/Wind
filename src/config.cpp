@@ -42,6 +42,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "zorderBand")         c.zorderBand = std::stoi(val);
             else if (key == "brightness")         c.brightness = std::stod(val);
             else if (key == "hdrTonemap")         c.hdrTonemap = std::stoi(val);
+            else if (key == "multiMonitor")       c.multiMonitor = std::stoi(val);
         } catch (...) { /* keep default on bad value */ }
     }
     return c;
@@ -93,7 +94,9 @@ Config LoadConfig(const std::wstring& path) {
                "; brightness: magnified-view output multiplier (1.0=unchanged; fine-tune for HDR)\n"
                "brightness=1.0\n"
                "; hdrTonemap: 1=HDR10->SDR tonemap when Windows HDR is on (no-op on SDR); 0=off\n"
-               "hdrTonemap=1\n";
+               "hdrTonemap=1\n"
+               "; multiMonitor: 1=magnify whichever monitor the cursor is on at zoom-in; 0=primary only\n"
+               "multiMonitor=1\n";
         return Config{};
     }
     std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());

@@ -32,6 +32,7 @@ TEST_CASE("renderer knobs have sane defaults") {
     CHECK(c.vsync == 1);                       // vsync on by default
     CHECK(c.dwmFlush == 0);                     // plain vsync pacing by default (fewer stutters)
     CHECK(c.tickHzCap == 0);                    // 0 = auto-detect display refresh rate
+    CHECK(c.multiMonitor == 1);                // follow the cursor's monitor by default
 }
 TEST_CASE("vsync, dwmFlush, tickHzCap can be set") {
     CHECK(ParseConfig("vsync=0\n").vsync == 0);
@@ -86,4 +87,8 @@ TEST_CASE("parses overrides and ignores comments/blank lines") {
 TEST_CASE("malformed lines are ignored, keep defaults") {
     Config c = ParseConfig("garbage line\nmaxLevel\n=5\n");
     CHECK(c.maxLevel == doctest::Approx(8.0));
+}
+TEST_CASE("multiMonitor can be set") {
+    CHECK(ParseConfig("multiMonitor=0\n").multiMonitor == 0);
+    CHECK(ParseConfig("multiMonitor=1\n").multiMonitor == 1);
 }

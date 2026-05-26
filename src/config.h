@@ -44,6 +44,10 @@ struct Config {
     // on SDR it's a no-op (plain BGRA8 passthrough), so it's safe on by default. Set 0 to
     // force the legacy BGRA8 capture even on HDR. Applied at startup + on HDR toggle.
     int    hdrTonemap = 1;
+    // Multi-monitor: 1 (default) = on each zoom-in, magnify whichever monitor the cursor is
+    // on; 0 = legacy single-monitor behavior (primary monitor only). Hot-reloadable (applies
+    // on the next zoom-in). Kill-switch for the multi-monitor path.
+    int    multiMonitor = 1;
 };
 // Pure: parse INI text (key=value, ';' or '#' comments) into a Config, keeping
 // defaults for missing/malformed keys.
