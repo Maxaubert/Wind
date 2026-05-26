@@ -71,6 +71,7 @@ struct RenderEngine::State {
     ComPtr<ID3D11ShaderResourceView> desktopSRV;
     bool haveDesktop = false;
     bool freshCapture = false;   // next capture() must drain to the latest desktop frame (zoom-in)
+    std::vector<unsigned char> metaBuf;   // reused buffer for GetFrameMoveRects/GetFrameDirtyRects
     // Diagnostics for the HDR investigation: the duplication's surface format + the output's
     // color space / bit depth (tells us whether the desktop is HDR and what we're capturing).
     UINT ddaFormat = 0;          // DXGI_FORMAT of the duplicated surface
@@ -120,6 +121,9 @@ struct RenderEngine::State {
     bool recreateDupl();
     bool recreateRtv();  // (re)create rtv from swapchain back-buffer 0 (after ResizeBuffers / as a restore)
     bool capture();      // AcquireNextFrame -> desktopCopy (+ pointer info); handles loss/timeout
+    // Patch only DDA's changed (dirty) rects into desktopCopy from `src` (steady-state fast path).
+    // Returns false when a partial update isn't safe, so the caller does a full CopyResource.
+    bool copyChangedRegions(ID3D11Texture2D* src, const DXGI_OUTDUPL_FRAME_INFO& fi);
     void render(const RenderFrameParams& p);  // draw into the back-buffer (no Present)
 };
 
@@ -222,6 +226,42 @@ bool RenderEngine::State::ensureDesktopCopy(DXGI_FORMAT fmt) {
     return true;
 }
 
+// Patch only the regions DDA reports changed into desktopCopy, from the freshly acquired frame
+// `src`, leaving the rest of the cached copy intact. Returns false (caller then does a full
+// CopyResource) whenever a partial update isn't safe: no previous frame to patch onto, no/oversized
+// metadata, any move (scroll) rects present, no dirty rects, or a rect outside the texture. Must
+// run before ReleaseFrame() while `src` is still valid. A bail-out after some sub-copies is safe:
+// the caller's full copy overwrites everything anyway.
+bool RenderEngine::State::copyChangedRegions(ID3D11Texture2D* src, const DXGI_OUTDUPL_FRAME_INFO& fi) {
+    if (!haveDesktop) return false;                    // no valid previous frame to patch onto
+    const UINT meta = fi.TotalMetadataBufferSize;
+    if (meta == 0) return false;                       // no dirty/move metadata -> full copy
+    if (metaBuf.size() < meta) metaBuf.resize(meta);
+    // Move (scroll) rects reference the PREVIOUS frame's positions; we keep no move-temp, so if any
+    // are present fall back to a full copy (correct + simpler; a scroll changes a lot anyway). The
+    // buffer is shared with the dirty fetch below, which is fine since we only continue when there
+    // are zero move rects (so the buffer is unused at that point).
+    UINT moveBytes = 0;
+    if (FAILED(dupl->GetFrameMoveRects(meta, reinterpret_cast<DXGI_OUTDUPL_MOVE_RECT*>(metaBuf.data()), &moveBytes)))
+        return false;
+    if (moveBytes > 0) return false;
+    UINT dirtyBytes = 0;
+    if (FAILED(dupl->GetFrameDirtyRects(meta, reinterpret_cast<RECT*>(metaBuf.data()), &dirtyBytes)))
+        return false;
+    const UINT n = dirtyBytes / sizeof(RECT);
+    if (n == 0) return false;                          // image changed but no dirty rects -> full copy
+    const RECT* rects = reinterpret_cast<const RECT*>(metaBuf.data());
+    for (UINT i = 0; i < n; ++i) {
+        const RECT& r = rects[i];
+        if (r.right <= r.left || r.bottom <= r.top) continue;          // skip empty
+        if (r.left < 0 || r.top < 0 || r.right > sw || r.bottom > sh)  // out of range -> bail to full copy
+            return false;
+        D3D11_BOX box{ (UINT)r.left, (UINT)r.top, 0, (UINT)r.right, (UINT)r.bottom, 1 };
+        ctx->CopySubresourceRegion(desktopCopy.Get(), 0, r.left, r.top, 0, src, 0, &box);
+    }
+    return true;
+}
+
 bool RenderEngine::State::capture() {
     if (!dupl && !recreateDupl()) return false;
 
@@ -252,13 +292,20 @@ bool RenderEngine::State::capture() {
 
         ID3D11Texture2D* tex = nullptr;
         if (res) res->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&tex);
-        if (tex) {
-            // Match the copy texture to the captured format so CopyResource never mismatches
-            // (incl. after a runtime HDR toggle changes the duplication format). The tonemap
-            // is gated on capFp16, not on the format, so BGRA8 captures stay passthrough.
+        // LastPresentTime == 0 means only the pointer moved (no desktop image change). We ignore
+        // the OS pointer (drawn from GetCursorInfo), so the cached copy is still valid - copy
+        // nothing. This keeps a busy-pointer-but-static desktop from forcing any copy at all.
+        if (tex && fi.LastPresentTime.QuadPart != 0) {
+            // Match the copy texture to the captured format so the copy never mismatches (incl.
+            // after a runtime HDR toggle changes the duplication format). The tonemap is gated on
+            // capFp16, not on the format, so BGRA8 captures stay passthrough.
             D3D11_TEXTURE2D_DESC td{}; tex->GetDesc(&td);
             if (ensureDesktopCopy(td.Format) && desktopCopy) {
-                ctx->CopyResource(desktopCopy.Get(), tex);
+                // Steady state: copy only the rects DDA reports changed, so a tiny once-a-second
+                // on-screen element costs a tiny copy, not a full-screen one. Fall back to a full
+                // copy for fresh/zoom-in grabs, scrolling (move rects), or missing metadata.
+                if (fresh || !copyChangedRegions(tex, fi))
+                    ctx->CopyResource(desktopCopy.Get(), tex);
                 if (!haveDesktop)
                     RLog("capture: first frame acquiredFormat=%u copyFormat=%u capFp16=%d",
                          (unsigned)td.Format, (unsigned)copyFormat, (int)capFp16);
