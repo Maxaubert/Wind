@@ -72,6 +72,13 @@ Spec: `docs/superpowers/specs/2026-05-25-own-renderer-design.md`. Issue #4.
   transitional composite (the window underneath), which otherwise flashed on reveal.
 - Verify the render overlay only from INSIDE the app (it is capture-excluded, so external
   screenshots can't see it): `WIND_SELFTEST=1 Wind.exe` dumps `wind_selftest.png`.
+- MULTI-MONITOR: on each zoom-in we magnify the monitor the cursor is on (`multiMonitor=1`
+  default; `0` = primary only). The overlay is moved/resized and the DXGI output is re-selected
+  by device name (`render_engine` `retarget`/`selectOutput`); the pipeline works in LOCAL monitor
+  pixels with a `(originX,originY)` offset applied only at `GetCursorPos`/`SetCursorPos`. Limit:
+  if the cursor's monitor is on a DIFFERENT GPU than our D3D device, `retarget` returns false and
+  we keep the current monitor (no cross-adapter chase). While zoomed you stay on one monitor
+  (the OS cursor is pinned to it); switch by zooming out and back in on the other one.
 
 ## Toolchain notes (this machine)
 - VS 2026 Community is a prerelease channel, so `vswhere` needs `-all -prerelease`

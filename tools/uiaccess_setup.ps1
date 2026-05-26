@@ -80,6 +80,8 @@ vsync=1
 ; dwmFlush: 0=plain vsync pacing (default, fewer stutters); 1=align to DWM's composition.
 ;   Hot-reloadable - edit and save to compare (notepad as admin, or the tray "Edit config").
 dwmFlush=0
+; multiMonitor: 1=magnify whichever monitor the cursor is on at zoom-in; 0=primary only
+multiMonitor=1
 "@
     Set-Content -Path "C:\Program Files\Wind\magnifier.ini" -Value $ini -Encoding ASCII
 
