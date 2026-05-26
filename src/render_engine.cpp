@@ -212,6 +212,10 @@ bool RenderEngine::State::recreateDupl() {
 // CopyResource can never hit a format mismatch (which black-screened the magnify pass).
 bool RenderEngine::State::ensureDesktopCopy(DXGI_FORMAT fmt) {
     if (desktopCopy && copyFormat == fmt && copyW == sw && copyH == sh) return true;
+    // (Re)creating the copy yields a BLANK texture, so we no longer hold a valid cached desktop
+    // image: force the next capture to do a full CopyResource (copyChangedRegions bails on
+    // !haveDesktop) instead of patching dirty rects onto blank pixels (HDR toggle / size change).
+    haveDesktop = false;
     desktopSRV.Reset();
     desktopCopy.Reset();
     D3D11_TEXTURE2D_DESC dc{};
