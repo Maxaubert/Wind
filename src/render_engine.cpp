@@ -120,10 +120,15 @@ struct RenderEngine::State {
 
     bool recreateDupl();
     bool recreateRtv();  // (re)create rtv from swapchain back-buffer 0 (after ResizeBuffers / as a restore)
-    bool capture();      // AcquireNextFrame -> desktopCopy (+ pointer info); handles loss/timeout
+    // AcquireNextFrame -> desktopCopy (+ pointer info); handles loss/timeout. `view` is the
+    // magnified source rect (desktop px, clamped to screen); `crop` enables copying only it on a
+    // full-screen repaint.
+    bool capture(const RECT& view, bool crop);
     // Patch only DDA's changed (dirty) rects into desktopCopy from `src` (steady-state fast path).
-    // Returns false when a partial update isn't safe, so the caller does a full CopyResource.
-    bool copyChangedRegions(ID3D11Texture2D* src, const DXGI_OUTDUPL_FRAME_INFO& fi);
+    // Returns false when a partial update isn't safe, so the caller does a full CopyResource. When
+    // `crop` and the dirty area is a near-full repaint, copies only the parts within `view`.
+    bool copyChangedRegions(ID3D11Texture2D* src, const DXGI_OUTDUPL_FRAME_INFO& fi,
+                            const RECT& view, bool crop);
     void render(const RenderFrameParams& p);  // draw into the back-buffer (no Present)
 };
 
@@ -236,7 +241,8 @@ bool RenderEngine::State::ensureDesktopCopy(DXGI_FORMAT fmt) {
 // metadata, any move (scroll) rects present, no dirty rects, or a rect outside the texture. Must
 // run before ReleaseFrame() while `src` is still valid. A bail-out after some sub-copies is safe:
 // the caller's full copy overwrites everything anyway.
-bool RenderEngine::State::copyChangedRegions(ID3D11Texture2D* src, const DXGI_OUTDUPL_FRAME_INFO& fi) {
+bool RenderEngine::State::copyChangedRegions(ID3D11Texture2D* src, const DXGI_OUTDUPL_FRAME_INFO& fi,
+                                             const RECT& view, bool crop) {
     if (!haveDesktop) return false;                    // no valid previous frame to patch onto
     const UINT meta = fi.TotalMetadataBufferSize;
     if (meta == 0) return false;                       // no dirty/move metadata -> full copy
@@ -255,9 +261,27 @@ bool RenderEngine::State::copyChangedRegions(ID3D11Texture2D* src, const DXGI_OU
     const UINT n = dirtyBytes / sizeof(RECT);
     if (n == 0) return false;                          // image changed but no dirty rects -> full copy
     const RECT* rects = reinterpret_cast<const RECT*>(metaBuf.data());
+    // Crop the copy to the magnified `view` ONLY on a near-full repaint (a game redrawing the whole
+    // screen). Then copying just the view saves the most, and because the screen keeps fully
+    // repainting, regions panned-to are dirty again next frame -> no visible staleness. Small
+    // desktop changes (notifications, clocks) keep being copied in full, so panning to them later is
+    // never stale. Threshold: dirty area covers > 50% of the screen.
+    long long dirtyArea = 0;
     for (UINT i = 0; i < n; ++i) {
         const RECT& r = rects[i];
-        if (r.right <= r.left || r.bottom <= r.top) continue;          // skip empty
+        if (r.right > r.left && r.bottom > r.top)
+            dirtyArea += (long long)(r.right - r.left) * (r.bottom - r.top);
+    }
+    const bool cropNow = crop && dirtyArea * 2 > (long long)sw * sh;
+    for (UINT i = 0; i < n; ++i) {
+        RECT r = rects[i];
+        if (cropNow) {                          // clamp to the magnified view (skip if fully outside)
+            if (r.left   < view.left)   r.left   = view.left;
+            if (r.top    < view.top)    r.top    = view.top;
+            if (r.right  > view.right)  r.right  = view.right;
+            if (r.bottom > view.bottom) r.bottom = view.bottom;
+        }
+        if (r.right <= r.left || r.bottom <= r.top) continue;          // empty (or fully outside view)
         if (r.left < 0 || r.top < 0 || r.right > sw || r.bottom > sh)  // out of range -> bail to full copy
             return false;
         D3D11_BOX box{ (UINT)r.left, (UINT)r.top, 0, (UINT)r.right, (UINT)r.bottom, 1 };
@@ -266,7 +290,7 @@ bool RenderEngine::State::copyChangedRegions(ID3D11Texture2D* src, const DXGI_OU
     return true;
 }
 
-bool RenderEngine::State::capture() {
+bool RenderEngine::State::capture(const RECT& view, bool crop) {
     if (!dupl && !recreateDupl()) return false;
 
     // A settled desktop polls non-blocking (0 ms, 1 attempt): a static screen returns
@@ -315,7 +339,7 @@ bool RenderEngine::State::capture() {
                 // Steady state: copy only the rects DDA reports changed, so a tiny once-a-second
                 // on-screen element costs a tiny copy, not a full-screen one. Fall back to a full
                 // copy for fresh/zoom-in grabs, scrolling (move rects), or missing metadata.
-                if (fresh || !copyChangedRegions(tex, fi))
+                if (fresh || !copyChangedRegions(tex, fi, view, crop))
                     ctx->CopyResource(desktopCopy.Get(), tex);
                 if (!haveDesktop)
                     RLog("capture: first frame acquiredFormat=%u copyFormat=%u capFp16=%d",
@@ -660,7 +684,17 @@ void RenderEngine::State::updateCursorTexture() {
 }
 
 void RenderEngine::State::render(const RenderFrameParams& p) {
-    capture();
+    // Magnified source rect in desktop pixels (what the magnify pass samples below), clamped to the
+    // screen with a 1px margin for bilinear edge taps. capture() can copy only this region on a
+    // full-screen repaint to cut the 4K HDR copy.
+    double vlevel = p.level < 1.0 ? 1.0 : p.level;
+    double vw = sw / vlevel, vh = sh / vlevel;
+    double vl = p.srcLeft - 1.0, vt = p.srcTop - 1.0;
+    double vr = p.srcLeft + vw + 1.0, vb = p.srcTop + vh + 1.0;
+    if (vl < 0) vl = 0;            if (vt < 0) vt = 0;
+    if (vr > sw) vr = sw;          if (vb > sh) vb = sh;
+    RECT view{ (LONG)vl, (LONG)vt, (LONG)vr, (LONG)vb };
+    capture(view, p.cropCapture);
     updateCursorTexture();
 
     ID3D11DeviceContext* c = ctx.Get();

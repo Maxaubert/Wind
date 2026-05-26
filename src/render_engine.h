@@ -25,6 +25,7 @@ struct RenderFrameParams {
     double brightness;                   // output multiplier (1.0 = unchanged; <1 dims for HDR)
     int    cursorMode;                   // 0=auto (draw only when the app shows a cursor), 1=always, 2=never
     bool   vsync;                        // true = Present(1,0) vsync; false = Present(0,0) no vsync
+    bool   cropCapture;                  // on a full-screen repaint, copy only the magnified region (cuts 4K copy)
 };
 
 // Own capture + Direct3D 11 renderer. Captures the desktop via DXGI Desktop Duplication

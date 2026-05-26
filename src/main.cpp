@@ -127,6 +127,7 @@ static void FillRenderParams(RenderFrameParams& p, const MapResult& r, const Con
     p.cursorMode = CursorModeFromCfg(cfg);
     // In DwmFlush mode we present immediately (no vsync block) and let DwmFlush() pace.
     p.vsync = (cfg.vsync != 0 && cfg.dwmFlush == 0);
+    p.cropCapture = (cfg.cropCapture != 0);
 }
 
 // Append a line to %TEMP%\wind_diag.log (frame-pacing diagnostics; gated on diagnostics=1).

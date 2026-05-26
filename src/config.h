@@ -51,6 +51,11 @@ struct Config {
     // on; 0 = legacy single-monitor behavior (primary monitor only). Hot-reloadable (applies
     // on the next zoom-in). Kill-switch for the multi-monitor path.
     int    multiMonitor = 1;
+    // Capture optimization: 1 (default) = when the captured desktop does a near-full repaint (a
+    // game), copy only the magnified source region into the cache instead of the whole frame (cuts
+    // the GPU copy roughly by zoom^2 at 4K HDR). Small desktop changes are still copied in full, so
+    // panning to them is never stale. 0 = always copy all changed regions. Hot-reloadable.
+    int    cropCapture = 1;
 };
 // Pure: parse INI text (key=value, ';' or '#' comments) into a Config, keeping
 // defaults for missing/malformed keys.

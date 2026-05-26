@@ -33,6 +33,7 @@ TEST_CASE("renderer knobs have sane defaults") {
     CHECK(c.dwmFlush == 0);                     // plain vsync pacing by default (fewer stutters)
     CHECK(c.tickHzCap == 0);                    // 0 = auto-detect display refresh rate
     CHECK(c.multiMonitor == 1);                // follow the cursor's monitor by default
+    CHECK(c.cropCapture == 1);                 // crop the copy on full repaints by default
 }
 TEST_CASE("vsync, dwmFlush, tickHzCap can be set") {
     CHECK(ParseConfig("vsync=0\n").vsync == 0);
@@ -91,4 +92,8 @@ TEST_CASE("malformed lines are ignored, keep defaults") {
 TEST_CASE("multiMonitor can be set") {
     CHECK(ParseConfig("multiMonitor=0\n").multiMonitor == 0);
     CHECK(ParseConfig("multiMonitor=1\n").multiMonitor == 1);
+}
+TEST_CASE("cropCapture can be set") {
+    CHECK(ParseConfig("cropCapture=0\n").cropCapture == 0);
+    CHECK(ParseConfig("cropCapture=1\n").cropCapture == 1);
 }

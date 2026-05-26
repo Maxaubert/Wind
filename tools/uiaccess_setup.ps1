@@ -82,6 +82,8 @@ vsync=1
 dwmFlush=0
 ; multiMonitor: 1=magnify whichever monitor the cursor is on at zoom-in; 0=primary only
 multiMonitor=1
+; cropCapture: 1=on a full-screen repaint (games) copy only the magnified region (cuts 4K HDR copy)
+cropCapture=1
 "@
     Set-Content -Path "C:\Program Files\Wind\magnifier.ini" -Value $ini -Encoding ASCII
 
