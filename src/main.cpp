@@ -45,6 +45,29 @@ static MonitorTarget PrimaryMonitor() {
     return t;
 }
 
+// The monitor the cursor is currently on, as a MonitorTarget. Falls back to the primary if the
+// query fails. Used at startup and on each zoom-in (when multiMonitor is on).
+static MonitorTarget MonitorUnderCursor() {
+    POINT pt; GetCursorPos(&pt);
+    HMONITOR mon = MonitorFromPoint(pt, MONITOR_DEFAULTTOPRIMARY);
+    MONITORINFOEXW mi{}; mi.cbSize = sizeof(mi);
+    if (mon && GetMonitorInfoW(mon, &mi)) {
+        MonitorTarget t;
+        t.x = mi.rcMonitor.left;
+        t.y = mi.rcMonitor.top;
+        t.w = mi.rcMonitor.right - mi.rcMonitor.left;
+        t.h = mi.rcMonitor.bottom - mi.rcMonitor.top;
+        lstrcpynW(t.device, mi.szDevice, 32);
+        return t;
+    }
+    return PrimaryMonitor();
+}
+
+// Whether two targets are the same monitor (origin + size + device name).
+static bool SameMonitor(const MonitorTarget& a, const MonitorTarget& b) {
+    return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h && wcscmp(a.device, b.device) == 0;
+}
+
 // --- Per-tick state -------------------------------------------------------------------------
 // All the state one magnifier tick mutates, in one struct so the tick can run from BOTH the
 // main loop AND a WM_TIMER. The tray context menu's TrackPopupMenu spins its own modal message
@@ -52,7 +75,7 @@ static MonitorTarget PrimaryMonitor() {
 // the duration. The timer (set around the menu) dispatches WM_TIMER into WndProc, which ticks.
 struct TickState {
     RenderEngine&    renderEngine;
-    int  sw, sh;
+    MonitorTarget    mon;       // current target monitor (origin + size + device name)
     Config         cfg;
     ZoomController zoom;
     CursorMapper   mapper;
@@ -65,10 +88,10 @@ struct TickState {
     // Frame-pacing diagnostics (diagnostics=1): a 2 s window of loop-interval stats.
     double diagAccum = 0.0, diagSumDt = 0.0, diagMaxDt = 0.0;
     int    diagFrames = 0, diagHitches = 0;
-    TickState(RenderEngine& re, int w, int h, const Config& c)
-        : renderEngine(re), sw(w), sh(h), cfg(c),
+    TickState(RenderEngine& re, const MonitorTarget& m, const Config& c)
+        : renderEngine(re), mon(m), cfg(c),
           zoom(1.0, c.maxLevel, c.fullRangeSeconds),
-          mapper(w, h, c.cursorSensitivity, c.cursorSmoothing) {}
+          mapper(m.w, m.h, c.cursorSensitivity, c.cursorSmoothing) {}
 };
 static TickState* g_tick = nullptr;
 
@@ -110,7 +133,7 @@ static void RunTick(TickState& t) {
             t.cfg = nc;   // pick up renderer knobs (smoothing, blur, filter, cursor scale)
             t.zoom = ZoomController(1.0, nc.maxLevel, nc.fullRangeSeconds);
             double ocx = t.mapper.centerX(), ocy = t.mapper.centerY();   // preserve position
-            t.mapper = CursorMapper(t.sw, t.sh, nc.cursorSensitivity, nc.cursorSmoothing);
+            t.mapper = CursorMapper(t.mon.w, t.mon.h, nc.cursorSensitivity, nc.cursorSmoothing);
             t.mapper.reset(ocx, ocy);
         }
     }
@@ -134,18 +157,29 @@ static void RunTick(TickState& t) {
     if (lvl > 1.0) {
         bool zoomIn = (t.prevLvl <= 1.0);             // zoom-in transition
         if (zoomIn) {
+            // Follow the cursor's monitor (multiMonitor on). Only reconfigure when it actually
+            // changed; retarget() returns false on multi-GPU/failure, in which case we keep the
+            // current monitor. The overlay is still at alpha 0 here, so a move never flashes.
+            if (t.cfg.multiMonitor) {
+                MonitorTarget nt = MonitorUnderCursor();
+                if (!SameMonitor(nt, t.mon) && t.renderEngine.retarget(nt)) {
+                    t.mon = nt;
+                    t.mapper = CursorMapper(nt.w, nt.h, t.cfg.cursorSensitivity, t.cfg.cursorSmoothing);
+                }
+            }
             POINT pt; GetCursorPos(&pt);
-            t.mapper.reset(pt.x, pt.y);
+            t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y);   // virtual -> local monitor coords
             t.renderEngine.hideSystemCursor(true);
             t.renderEngine.invalidateCapture();       // grab a live frame, not a stale cached one
         }
-        if (recenter) { POINT pt; GetCursorPos(&pt); t.mapper.reset(pt.x, pt.y); }
+        if (recenter) { POINT pt; GetCursorPos(&pt); t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y); }
         MapResult r = t.mapper.update(dx, dy, lvl);
         RenderFrameParams p{};
         p.level = lvl;
         p.srcLeft = r.srcLeft; p.srcTop = r.srcTop;
         p.cursorScreenX = r.cursorScreenX; p.cursorScreenY = r.cursorScreenY;
-        p.clickDesktopX = r.clickDesktopX; p.clickDesktopY = r.clickDesktopY;
+        // clickDesktop is local monitor px; SetCursorPos needs virtual-desktop coords.
+        p.clickDesktopX = r.clickDesktopX + t.mon.x; p.clickDesktopY = r.clickDesktopY + t.mon.y;
         p.cursorScaleWithZoom = (t.cfg.cursorScaleWithZoom != 0);
         p.bilinear = (t.cfg.bilinear != 0);
         p.motionBlur = (t.cfg.motionBlur != 0);
@@ -259,11 +293,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         return 1;
     }
 
-    // Target monitor for this session. Task 6 swaps PrimaryMonitor() for the cursor's monitor
-    // when multiMonitor is on; for now both paths use the primary (behavior unchanged).
-    MonitorTarget startupMon = PrimaryMonitor();
-    int sw = startupMon.w;
-    int sh = startupMon.h;
+    // Target monitor for this session: the cursor's monitor when multiMonitor is on, else the
+    // primary. The first zoom-in re-checks and retargets if the cursor moved to another monitor.
+    MonitorTarget startupMon = (cfg.multiMonitor != 0) ? MonitorUnderCursor() : PrimaryMonitor();
 
     // --- Own GPU renderer (DXGI Desktop Duplication + D3D11) ---
     RenderEngine renderEngine;
@@ -276,7 +308,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     Tray::Add(hwnd, hInst);
 
-    TickState ts(renderEngine, sw, sh, cfg);
+    TickState ts(renderEngine, startupMon, cfg);
     g_tick = &ts;   // so the WM_TIMER tick (during the tray menu's modal loop) can run
 
     // Autonomous verification hook: WIND_SELFTEST drives the real integrated render path at a
@@ -284,7 +316,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // captured from inside the app), then exits. Not part of normal use.
     if (GetEnvironmentVariableW(L"WIND_SELFTEST", nullptr, 0) > 0) {
         POINT pt; GetCursorPos(&pt);
-        ts.mapper.reset(pt.x, pt.y);
+        ts.mapper.reset(pt.x - ts.mon.x, pt.y - ts.mon.y);
         renderEngine.hideSystemCursor(true);
         renderEngine.setVisible(true);
         RenderFrameParams p{};
@@ -293,7 +325,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             MapResult r = ts.mapper.update(0, 0, 4.0);
             p.level = 4.0; p.srcLeft = r.srcLeft; p.srcTop = r.srcTop;
             p.cursorScreenX = r.cursorScreenX; p.cursorScreenY = r.cursorScreenY;
-            p.clickDesktopX = r.clickDesktopX; p.clickDesktopY = r.clickDesktopY;
+            p.clickDesktopX = r.clickDesktopX + ts.mon.x; p.clickDesktopY = r.clickDesktopY + ts.mon.y;
             p.cursorScaleWithZoom = (cfg.cursorScaleWithZoom != 0);
             p.bilinear = (cfg.bilinear != 0);
             p.motionBlur = (cfg.motionBlur != 0);
@@ -320,7 +352,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // to measure microstutter objectively (the normal loop needs the side button to zoom). Exits.
     if (GetEnvironmentVariableW(L"WIND_PACINGTEST", nullptr, 0) > 0) {
         POINT pt; GetCursorPos(&pt);
-        ts.mapper.reset(pt.x, pt.y);
+        ts.mapper.reset(pt.x - ts.mon.x, pt.y - ts.mon.y);
         renderEngine.hideSystemCursor(true);
         LARGE_INTEGER f, a{}, b; QueryPerformanceFrequency(&f);
         const double target = 1.0 / ((cfg.tickHzCap > 0) ? cfg.tickHzCap : DetectRefreshHz());
@@ -334,7 +366,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             RenderFrameParams p{};
             p.level = 4.0; p.srcLeft = r.srcLeft; p.srcTop = r.srcTop;
             p.cursorScreenX = r.cursorScreenX; p.cursorScreenY = r.cursorScreenY;
-            p.clickDesktopX = r.clickDesktopX; p.clickDesktopY = r.clickDesktopY;
+            p.clickDesktopX = r.clickDesktopX + ts.mon.x; p.clickDesktopY = r.clickDesktopY + ts.mon.y;
             p.cursorScaleWithZoom = (cfg.cursorScaleWithZoom != 0);
             p.bilinear = (cfg.bilinear != 0); p.motionBlur = false; p.motionBlurStrength = 1.0;
             p.brightness = cfg.brightness; p.cursorMode = 1; p.vsync = (cfg.vsync != 0);
