@@ -78,6 +78,7 @@ struct TickState {
     LARGE_INTEGER freq{}, prev{};
     double sinceCheck = 0.0;
     unsigned long long lastMtime = 0;
+    HANDLE configWatch = nullptr;              // exe-dir change notification (replaces the 1Hz mtime poll)
     double prevLvl = 1.0;
     int    hz = 60;                            // resolved tick/refresh rate (cfg.tickHzCap or detected)
     bool   recenterKeyWasDown = false;         // edge-detect the recenterVk key
@@ -138,10 +139,22 @@ static void RunTick(TickState& t) {
     double dt = double(now.QuadPart - t.prev.QuadPart) / double(t.freq.QuadPart);
     t.prev = now;
 
-    // Config hot-reload (~1 Hz). Renderer knobs (sensitivity/filter) apply on restart.
-    t.sinceCheck += dt;
-    if (t.sinceCheck > 1.0) {
-        t.sinceCheck = 0.0;
+    // Config hot-reload. A directory-change notification tells us WHEN to re-check magnifier.ini,
+    // so the idle render thread does NO per-second filesystem stat (the old 1 Hz GetFileAttributesExW
+    // poll caused a ~1s frametime spike under AV/disk contention). WaitForSingleObject(h, 0) is a
+    // non-blocking in-process check; we stat + reload only when the exe dir actually changed. Falls
+    // back to the old ~1s timed poll if the watch handle is unavailable.
+    bool checkConfig = false;
+    if (t.configWatch && t.configWatch != INVALID_HANDLE_VALUE) {
+        if (WaitForSingleObject(t.configWatch, 0) == WAIT_OBJECT_0) {
+            FindNextChangeNotification(t.configWatch);   // re-arm for the next change
+            checkConfig = true;
+        }
+    } else {
+        t.sinceCheck += dt;
+        if (t.sinceCheck > 1.0) { t.sinceCheck = 0.0; checkConfig = true; }
+    }
+    if (checkConfig) {
         unsigned long long m = ConfigMTime(L"magnifier.ini");
         if (m != t.lastMtime) {
             t.lastMtime = m;
@@ -417,6 +430,12 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     QueryPerformanceFrequency(&ts.freq);
     QueryPerformanceCounter(&ts.prev);
     ts.lastMtime = ConfigMTime(L"magnifier.ini");
+    // Watch the exe directory so config hot-reload doesn't stat magnifier.ini every second on the
+    // render thread (see RunTick). `exePath` is the exe's directory (resolved at startup). LAST_WRITE
+    // catches in-place saves; FILE_NAME catches write-temp-then-rename saves. nullptr/INVALID on
+    // failure -> RunTick falls back to the timed poll.
+    ts.configWatch = FindFirstChangeNotificationW(exePath, FALSE,
+        FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_FILE_NAME);
 
     HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr,
         CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
@@ -463,6 +482,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     g_tick = nullptr;
     if (timer) CloseHandle(timer);
+    if (ts.configWatch && ts.configWatch != INVALID_HANDLE_VALUE) FindCloseChangeNotification(ts.configWatch);
     UnregisterHotKey(hwnd, kQuitHotkeyId);
     renderEngine.shutdown();   // restores cursor + tears down D3D/overlay
     g_input.stop();
