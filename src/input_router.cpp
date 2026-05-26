@@ -2,8 +2,6 @@
 #include <windows.h>
 namespace wind {
 static InputRouter* g_router = nullptr;
-static int  g_inButtonId = 2, g_outButtonId = 1;
-static bool g_swallow = true;
 static HHOOK g_mouseHook = nullptr;
 
 static int xbuttonIdFromHook(WPARAM wParam, LPARAM lParam) {
@@ -15,15 +13,23 @@ static int xbuttonIdFromHook(WPARAM wParam, LPARAM lParam) {
     return 0;
 }
 
+// Shared by the WH_MOUSE_LL hook (below) and main's WM_INPUT path: map an XBUTTON id to held.
+void InputRouter::setButtonState(int xbuttonId, bool down) {
+    if (xbuttonId == inButtonId_)  state_.inHeld.store(down);
+    if (xbuttonId == outButtonId_) state_.outHeld.store(down);
+}
+bool InputRouter::isZoomButton(int xbuttonId) const {
+    return xbuttonId == inButtonId_ || xbuttonId == outButtonId_;
+}
+
 static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
     if (code == HC_ACTION && g_router) {
         int id = xbuttonIdFromHook(wParam, lParam);
         bool down = (wParam == WM_XBUTTONDOWN);
         bool up   = (wParam == WM_XBUTTONUP);
         if (id != 0 && (down || up)) {
-            if (id == g_inButtonId)  g_router->state().inHeld.store(down);
-            if (id == g_outButtonId) g_router->state().outHeld.store(down);
-            if (g_swallow && (id == g_inButtonId || id == g_outButtonId))
+            g_router->setButtonState(id, down);
+            if (g_router->swallowEnabled() && g_router->isZoomButton(id))
                 return 1; // swallow so browser back/forward don't fire
         }
     }
@@ -31,7 +37,7 @@ static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
 }
 
 bool InputRouter::start(int inButtonId, int outButtonId, bool swallow) {
-    g_router = this; g_inButtonId = inButtonId; g_outButtonId = outButtonId; g_swallow = swallow;
+    g_router = this; inButtonId_ = inButtonId; outButtonId_ = outButtonId; swallow_ = swallow;
     g_mouseHook = SetWindowsHookExW(WH_MOUSE_LL, MouseProc, GetModuleHandleW(nullptr), 0);
     return g_mouseHook != nullptr;
     // Raw Input registration (RIDEV_INPUTSINK) + WM_INPUT decoding live in main.cpp's

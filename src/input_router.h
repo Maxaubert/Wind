@@ -19,8 +19,18 @@ public:
     InputState& state() { return state_; }
     // Atomically read and zero the accumulated raw deltas.
     void drainRaw(int& dx, int& dy);
+    // Map an XBUTTON id (1 = XBUTTON1, 2 = XBUTTON2) to the in/out held state, using the
+    // configured zoom buttons. Shared by the WH_MOUSE_LL hook and main's WM_INPUT path.
+    void setButtonState(int xbuttonId, bool down);
+    // Whether the id is one of the configured zoom buttons (used to decide swallowing).
+    bool isZoomButton(int xbuttonId) const;
+    // Whether the hook should swallow the configured zoom buttons (set in start()).
+    bool swallowEnabled() const { return swallow_; }
 private:
     InputState state_;
+    int inButtonId_ = 2;   // 1 = XBUTTON1, 2 = XBUTTON2 (set in start())
+    int outButtonId_ = 1;
+    bool swallow_ = true;
 };
 
 // Called from main.cpp's WM_INPUT handler with decoded relative mouse deltas.

@@ -14,15 +14,6 @@
 using namespace wind;
 
 static InputRouter g_input;
-static int g_zoomInBtnId = 2;   // XBUTTON id: 1 = XBUTTON1, 2 = XBUTTON2 (set from cfg)
-static int g_zoomOutBtnId = 1;
-
-// Set side-button state from a Raw Input transition. Mirrors the hook's id mapping so
-// the two state sources are interchangeable and idempotent.
-static void SetZoomButton(int xbuttonId, bool down) {
-    if (xbuttonId == g_zoomInBtnId)  g_input.state().inHeld.store(down);
-    if (xbuttonId == g_zoomOutBtnId) g_input.state().outHeld.store(down);
-}
 
 // Current refresh rate (Hz) of the primary display, for pacing the idle/1x loop and the
 // vsync=0 path so we don't hardcode the dev's 144Hz. Falls back to 60 if the query fails or
@@ -250,10 +241,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     AccumulateRaw(g_input, m.lLastX, m.lLastY);
                 }
                 USHORT bf = m.usButtonFlags;
-                if (bf & RI_MOUSE_BUTTON_4_DOWN) SetZoomButton(1, true);
-                if (bf & RI_MOUSE_BUTTON_4_UP)   SetZoomButton(1, false);
-                if (bf & RI_MOUSE_BUTTON_5_DOWN) SetZoomButton(2, true);
-                if (bf & RI_MOUSE_BUTTON_5_UP)   SetZoomButton(2, false);
+                if (bf & RI_MOUSE_BUTTON_4_DOWN) g_input.setButtonState(1, true);
+                if (bf & RI_MOUSE_BUTTON_4_UP)   g_input.setButtonState(1, false);
+                if (bf & RI_MOUSE_BUTTON_5_DOWN) g_input.setButtonState(2, true);
+                if (bf & RI_MOUSE_BUTTON_5_UP)   g_input.setButtonState(2, false);
             }
         }
         return 0;
@@ -274,8 +265,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     }
 
     Config cfg = LoadConfig(L"magnifier.ini");
-    g_zoomInBtnId = cfg.zoomInButton;
-    g_zoomOutBtnId = cfg.zoomOutButton;
 
     // Hidden window: owns the tray icon + menu and receives WM_INPUT.
     WNDCLASSW wc{};
