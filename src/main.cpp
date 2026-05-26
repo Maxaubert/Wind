@@ -1,6 +1,8 @@
 #include <windows.h>
 #include <dwmapi.h>
 #include <climits>
+#include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <cstdarg>
 #include "config.h"
@@ -10,6 +12,7 @@
 #include "cursor_mapper.h"
 #include "zoom_controller.h"
 #include "tray.h"
+#include "lock_detector.h"
 
 using namespace wind;
 
@@ -70,6 +73,8 @@ struct TickState {
     Config         cfg;
     ZoomController zoom;
     CursorMapper   mapper;
+    LockDetector   detector;    // free vs game-locked cursor
+    POINT          lastSetVirtual{};  // where we last SetCursorPos'd (virtual px); for the OS-cursor delta
     LARGE_INTEGER freq{}, prev{};
     double sinceCheck = 0.0;
     unsigned long long lastMtime = 0;
@@ -163,7 +168,7 @@ static void RunTick(TickState& t) {
     t.recenterKeyWasDown = recenterDown;
     double lvl = t.zoom.level();
 
-    int dx, dy; g_input.drainRaw(dx, dy);
+    int rawDx, rawDy; g_input.drainRaw(rawDx, rawDy);
 
     if (lvl > 1.0) {
         bool zoomIn = (t.prevLvl <= 1.0);             // zoom-in transition
@@ -180,14 +185,46 @@ static void RunTick(TickState& t) {
             }
             POINT pt; GetCursorPos(&pt);
             t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y);   // virtual -> local monitor coords
+            t.lastSetVirtual = pt;        // baseline for the OS-cursor delta (first delta = 0)
+            t.detector.reset();           // start free
             t.renderEngine.hideSystemCursor(true);
             t.renderEngine.invalidateCapture();       // grab a live frame, not a stale cached one
         }
-        if (recenter) { POINT pt; GetCursorPos(&pt); t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y); }
+        if (recenter) { POINT pt; GetCursorPos(&pt); t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y); t.lastSetVirtual = pt; }
+        // Resolve the pan delta. FREE: the OS cursor's own motion since we last placed it - Windows'
+        // pointer acceleration is already applied, so the magnifier matches the real cursor. LOCKED:
+        // a game has the cursor clipped/recentered, so pan from raw mickeys scaled by cursorSensitivity
+        // (acceleration doesn't apply to relative-mouse game input).
+        POINT cur; GetCursorPos(&cur);
+        int curDx = cur.x - t.lastSetVirtual.x;
+        int curDy = cur.y - t.lastSetVirtual.y;
+        RECT clip{}; GetClipCursor(&clip);
+        int vsx = GetSystemMetrics(SM_XVIRTUALSCREEN), vsy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        int vsw = GetSystemMetrics(SM_CXVIRTUALSCREEN), vsh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+        bool clipConfined = clip.left > vsx || clip.top > vsy ||
+                            clip.right < vsx + vsw || clip.bottom < vsy + vsh;
+        bool locked = t.detector.update(clipConfined,
+                                        std::abs(rawDx) + std::abs(rawDy),
+                                        std::abs(curDx) + std::abs(curDy));
+        int dx, dy;
+        if (locked) {
+            dx = (int)std::lround(rawDx * t.cfg.cursorSensitivity);
+            dy = (int)std::lround(rawDy * t.cfg.cursorSensitivity);
+        } else {
+            dx = curDx; dy = curDy;
+        }
+        // Defensive: bound one tick's pan to the monitor span so a stray cursor jump (e.g. the OS
+        // cursor briefly escaping to another monitor) cannot teleport the lens. cx_ also clamps.
+        if (dx >  t.mon.w) dx =  t.mon.w; else if (dx < -t.mon.w) dx = -t.mon.w;
+        if (dy >  t.mon.h) dy =  t.mon.h; else if (dy < -t.mon.h) dy = -t.mon.h;
         MapResult r = t.mapper.update(dx, dy, lvl);
         RenderFrameParams p{};
         FillRenderParams(p, r, t.cfg, t.mon, lvl);
         t.renderEngine.renderFrame(p);
+        // renderFrame SetCursorPos'd the OS cursor to clickDesktop+origin; remember it so next tick's
+        // GetCursorPos delta measures only the user's hand motion since.
+        t.lastSetVirtual.x = r.clickDesktopX + t.mon.x;
+        t.lastSetVirtual.y = r.clickDesktopY + t.mon.y;
         // Reveal AFTER the live frame is presented: setVisible flips the layer alpha over the
         // now-current front buffer, so the overlay never shows its retained previous-session
         // frame (the alt-tab "previous window"). capture() also drained to the latest frame.
