@@ -24,6 +24,7 @@ cd /d "%ROOT%"
 if /i "%1"=="test" goto :test
 if /i "%1"=="check" goto :check
 if /i "%1"=="uiaccess" goto :uiaccess
+if /i "%1"=="config" goto :config
 
 rem --- App build (normal: uiAccess=false, runs from anywhere) ----------------
 cl /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE ^
@@ -44,6 +45,22 @@ cl /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE ^
    /link Magnification.lib Dwmapi.lib user32.lib shell32.lib gdi32.lib ^
    d3d11.lib dxgi.lib dxguid.lib d3dcompiler.lib windowscodecs.lib ole32.lib ^
    /MANIFEST:EMBED /MANIFESTUAC:NO /MANIFESTINPUT:Wind.uiaccess.manifest /SUBSYSTEM:WINDOWS
+exit /b %errorlevel%
+
+rem --- Config UI host (WindConfig.exe). Builds the Svelte UI first if it exists. ----
+:config
+if exist "%ROOT%ui\package.json" (
+  pushd "%ROOT%ui"
+  if not exist node_modules ( call npm install || (popd & echo [build] npm install failed & exit /b 1) )
+  call npm run build || (popd & echo [build] ui build failed & exit /b 1)
+  popd
+)
+cl /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE ^
+   /I third_party\webview2\include ^
+   src\config_ui\main.cpp src\config_ui\ini_edit.cpp ^
+   /Fe:WindConfig.exe ^
+   /link third_party\webview2\x64\WebView2LoaderStatic.lib ^
+   user32.lib shell32.lib shlwapi.lib ole32.lib version.lib advapi32.lib ntdll.lib /SUBSYSTEM:WINDOWS
 exit /b %errorlevel%
 
 rem --- Test build (pure-logic sources only; no <windows.h>) -----------------
