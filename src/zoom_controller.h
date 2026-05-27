@@ -13,9 +13,10 @@ public:
     ZoomDir direction() const { return dir_; }
     // Speed/acceleration profile (hot-reloadable; does NOT reset the level):
     //   inSpeed/outSpeed - per-direction rate multipliers (1.0 = base; both modes)
-    //   smooth           - accelerate zoom-IN while held
-    //   accel            - smooth-mode top in-rate = inSpeed * accel (clamped >=1; 1 = no accel)
-    //   rampSeconds      - seconds of continuous zoom-in to reach the top in-rate (<=0 = instant)
+    //   smooth           - soft-start the zoom-IN while held (ease in up to the linear rate)
+    //   accel            - smooth ease-in depth: in-rate starts at inSpeed/accel and climbs to
+    //                      inSpeed (the linear cap, never exceeded); >1 (<=1 = no ease-in)
+    //   rampSeconds      - seconds of continuous zoom-in to reach the linear rate (<=0 = instant)
     void setProfile(double inSpeed, double outSpeed, bool smooth, double accel, double rampSeconds);
     void tick(double dtSeconds);   // ramp level multiplicatively toward bound
     double level() const { return level_; }

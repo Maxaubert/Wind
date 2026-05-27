@@ -16,7 +16,7 @@ void ZoomController::setProfile(double inSpeed, double outSpeed, bool smooth,
     accel_ = accel; rampSeconds_ = rampSeconds;
 }
 void ZoomController::tick(double dt) {
-    // Track continuous zoom-in hold time for the smooth-zoom accel ramp; any non-In direction
+    // Track continuous zoom-in hold time for the smooth-zoom ease-in; any non-In direction
     // (release or reverse) resets it, so each fresh zoom-in starts slow again.
     if (dir_ == ZoomDir::In && dt > 0.0) heldIn_ += dt;
     else if (dir_ != ZoomDir::In)        heldIn_ = 0.0;
@@ -24,12 +24,15 @@ void ZoomController::tick(double dt) {
 
     double speed;
     if (dir_ == ZoomDir::In) {
+        // Smooth zoom is a soft start: the in-rate climbs from a slow start up to the LINEAR rate
+        // (inSpeed) and never exceeds it. accelMult ramps from 1/accel to 1 over rampSeconds.
         double accelMult = 1.0;
-        if (smooth_ && accel_ > 1.0) {                 // accel<=1 -> no acceleration
+        if (smooth_ && accel_ > 1.0) {                 // accel<=1 -> no ease-in (pure linear)
             double t = (rampSeconds_ > 0.0 && heldIn_ < rampSeconds_)
-                         ? heldIn_ / rampSeconds_       // 0..1 ramp (ramp<=0 -> instant top)
+                         ? heldIn_ / rampSeconds_       // 0..1 ramp (ramp<=0 -> instant linear)
                          : 1.0;
-            accelMult = 1.0 + (accel_ - 1.0) * t;       // 1..accel
+            double startFrac = 1.0 / accel_;            // slow start = linear / accel
+            accelMult = startFrac + (1.0 - startFrac) * t;  // startFrac..1 (caps AT linear, never above)
         }
         speed = inSpeed_ * accelMult;
     } else {

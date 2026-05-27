@@ -61,25 +61,27 @@ TEST_CASE("zoomOutSpeed multiplies the out rate") {
     z.setDirection(ZoomDir::Out); z.tick(0.6); // 2x for 0.6s == full range back down
     CHECK(z.level() == doctest::Approx(1.0));
 }
-TEST_CASE("smooth zoom-in outpaces linear over the same hold") {
-    ZoomController lin(1.0, 1e9, 1.2);  // huge max so neither clamps
-    ZoomController sm (1.0, 1e9, 1.2);
+TEST_CASE("smooth zoom-in never exceeds linear (soft start, capped at linear)") {
+    ZoomController lin(1.0, 8.0, 100.0);  // slow base so neither clamps over the whole test
+    ZoomController sm (1.0, 8.0, 100.0);
     lin.setProfile(1.0, 1.0, false, 3.0, 0.2);
     sm .setProfile(1.0, 1.0, true,  3.0, 0.2);
     lin.setDirection(ZoomDir::In); sm.setDirection(ZoomDir::In);
-    for (int i = 0; i < 20; ++i) { lin.tick(0.05); sm.tick(0.05); }  // 1.0s, well past the 0.2s ramp
-    CHECK(sm.level() > lin.level());
+    lin.tick(0.01); sm.tick(0.01);          // first tick: smooth starts SLOWER than linear
+    CHECK(sm.level() < lin.level());
+    for (int i = 0; i < 200; ++i) { lin.tick(0.01); sm.tick(0.01); }  // long hold, well past the ramp
+    CHECK(sm.level() < lin.level());        // eased in below linear, so it never gets ahead
 }
-TEST_CASE("smooth zoom plateaus at inSpeed*accel rate") {
+TEST_CASE("smooth zoom plateaus at the linear rate (does not exceed it)") {
     ZoomController z(1.0, 8.0, 100.0);          // slow base so it won't clamp
-    z.setProfile(1.0, 1.0, true, 2.0, 0.1);     // accel 2x, ramp 0.1s
+    z.setProfile(1.0, 1.0, true, 3.0, 0.1);     // ease-in depth 3, ramp 0.1s
     z.setDirection(ZoomDir::In);
-    for (int i = 0; i < 5; ++i) z.tick(0.05);   // heldIn 0.25s, well past ramp -> plateau
+    for (int i = 0; i < 5; ++i) z.tick(0.05);   // heldIn 0.25s, well past ramp -> at linear rate
     double l1 = z.level();
     z.tick(0.1);
     double l2 = z.level();
-    // At plateau the per-tick factor is pow(R, dt*inSpeed*accel/T) with R=8, inSpeed=1, accel=2.
-    CHECK(l2 == doctest::Approx(l1 * std::pow(8.0, 0.1 * 2.0 / 100.0)));
+    // At the plateau the per-tick factor equals the LINEAR factor pow(R, dt*inSpeed/T) (accelMult==1).
+    CHECK(l2 == doctest::Approx(l1 * std::pow(8.0, 0.1 * 1.0 / 100.0)));
 }
 TEST_CASE("releasing resets the smooth ramp so the next in starts slow") {
     ZoomController z(1.0, 8.0, 100.0);

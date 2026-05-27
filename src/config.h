@@ -16,11 +16,12 @@ struct Config {
     // Per-direction rate multipliers (1.0 = today's speed); apply in BOTH linear and smooth modes.
     double zoomInSpeed  = 1.0;       // 0.25-4.0
     double zoomOutSpeed = 1.0;       // 0.25-4.0
-    // Smooth zoom: 0 = linear/constant (default); 1 = zoom-IN accelerates while held.
+    // Smooth zoom: 0 = linear/constant (default); 1 = zoom-IN soft-starts (eases up to linear).
     int    smoothZoom = 0;
-    // Smooth-mode top zoom-in rate = zoomInSpeed * smoothZoomAccel (>=1; 1 = no accel). 1.0-8.0.
+    // Smooth ease-in depth: zoom-in starts at zoomInSpeed/smoothZoomAccel and climbs to zoomInSpeed
+    // (the linear rate, never exceeded). Bigger = slower start. >1 (1 = no ease-in). 1.0-8.0.
     double smoothZoomAccel = 3.0;
-    // Seconds of continuous holding to reach the top zoom-in rate. 0.1-3.0.
+    // Seconds of continuous holding to reach the linear rate. 0.1-3.0.
     double smoothZoomRamp = 0.6;
     int    tickHzCap        = 0;     // 0 = auto-detect display refresh rate; >0 = explicit cap (Hz)
     // Present sync while zoomed (render engine): 1 = vsync (Present sync-interval 1, locked to
