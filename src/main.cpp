@@ -448,13 +448,15 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         return 0;
     }
 
-    // First launch: open the guided setup once (off the hot path). onboarded==0 also covers a
-    // freshly created ini. Non-blocking: spawn WindConfig.exe --onboard and continue to the tray.
+    // First launch: open the guided setup once (at startup, before the tick loop). onboarded==0
+    // covers a freshly created ini too. Non-blocking: spawn WindConfig.exe --onboard, then continue
+    // to the tray. Resolve by full path (exePath is our own dir) so it works regardless of the cwd.
     if (cfg.onboarded == 0) {
+        std::wstring configExe = std::wstring(exePath) + L"\\WindConfig.exe";
         wchar_t cmd[] = L"WindConfig.exe --onboard";
         STARTUPINFOW si{}; si.cb = sizeof(si);
         PROCESS_INFORMATION pi{};
-        if (CreateProcessW(L"WindConfig.exe", cmd, nullptr, nullptr, FALSE,
+        if (CreateProcessW(configExe.c_str(), cmd, nullptr, nullptr, FALSE,
                            0, nullptr, nullptr, &si, &pi)) {
             CloseHandle(pi.hThread);
             CloseHandle(pi.hProcess);
