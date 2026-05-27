@@ -3,7 +3,7 @@
 namespace wind { namespace Tray {
 static NOTIFYICONDATAW g_nid{};
 static const UINT WM_TRAY = WM_APP + 1;
-static const UINT ID_EDIT = 1001, ID_QUIT = 1002;
+static const UINT ID_SETTINGS = 1003, ID_EDIT = 1001, ID_QUIT = 1002;
 
 void Add(HWND hwnd, HINSTANCE /*hInst*/) {
     g_nid.cbSize = sizeof(g_nid);
@@ -27,7 +27,8 @@ bool HandleMessage(HWND hwnd, UINT msg, WPARAM /*wp*/, LPARAM lp) {
     if (msg == WM_TRAY && (lp == WM_RBUTTONUP || lp == WM_LBUTTONUP)) {
         POINT pt; GetCursorPos(&pt);
         HMENU m = CreatePopupMenu();
-        AppendMenuW(m, MF_STRING, ID_EDIT, L"Edit config");
+        AppendMenuW(m, MF_STRING, ID_SETTINGS, L"Open Settings");
+        AppendMenuW(m, MF_STRING, ID_EDIT, L"Edit config file");
         AppendMenuW(m, MF_STRING, ID_QUIT, L"Quit");
         SetForegroundWindow(hwnd);  // required so the menu dismisses on click-away
         // TrackPopupMenu runs its own modal message loop that owns the thread until it closes.
@@ -38,7 +39,9 @@ bool HandleMessage(HWND hwnd, UINT msg, WPARAM /*wp*/, LPARAM lp) {
         if (tickTimer) KillTimer(hwnd, 0xC001);
         PostMessageW(hwnd, WM_NULL, 0, 0);  // the documented dismiss fix
         DestroyMenu(m);
-        if (cmd == ID_EDIT)
+        if (cmd == ID_SETTINGS)
+            ShellExecuteW(nullptr, L"open", L"WindConfig.exe", nullptr, nullptr, SW_SHOW);
+        else if (cmd == ID_EDIT)
             ShellExecuteW(nullptr, L"open", L"notepad.exe", L"magnifier.ini", nullptr, SW_SHOW);
         else if (cmd == ID_QUIT)
             PostMessageW(hwnd, WM_CLOSE, 0, 0);
