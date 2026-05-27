@@ -90,14 +90,14 @@ struct TickState {
     unsigned long long lastMtime = 0;
     HANDLE configWatch = nullptr;              // exe-dir change notification (replaces the 1Hz mtime poll)
     double prevLvl = 1.0;
-    int    hz = 60;                            // resolved tick/refresh rate (cfg.tickHzCap or detected)
+    int    hz = 60;                            // resolved tick/refresh rate (auto-detected)
     bool   recenterKeyWasDown = false;         // edge-detect the recenterVk key
     // Frame-pacing diagnostics (diagnostics=1): a 2 s window of loop-interval stats.
     double diagAccum = 0.0, diagSumDt = 0.0, diagMaxDt = 0.0;
     int    diagFrames = 0, diagHitches = 0;
     TickState(RenderEngine& re, const MonitorTarget& m, const Config& c)
         : renderEngine(re), mon(m), cfg(c),
-          zoom(1.0, c.maxLevel, c.fullRangeSeconds),
+          zoom(1.0, c.maxLevel),
           mapper(m.w, m.h, c.cursorSmoothing) {}
 };
 static TickState* g_tick = nullptr;
@@ -111,7 +111,7 @@ static int CursorModeFromCfg(const Config& c) {
 
 // Fill a RenderFrameParams from the mapper result + config for the given monitor and zoom level
 // (the normal live-tick interpretation). The self-test harnesses call this, then override only
-// the few fields they deliberately differ on (cursorMode, vsync, motion blur).
+// the few fields they deliberately differ on (cursorMode, vsync).
 static void FillRenderParams(RenderFrameParams& p, const MapResult& r, const Config& cfg,
                              const MonitorTarget& mon, double level) {
     p.level = level;
@@ -121,8 +121,6 @@ static void FillRenderParams(RenderFrameParams& p, const MapResult& r, const Con
     p.clickDesktopX = r.clickDesktopX + mon.x; p.clickDesktopY = r.clickDesktopY + mon.y;
     p.cursorScaleWithZoom = (cfg.cursorScaleWithZoom != 0);
     p.bilinear = (cfg.bilinear != 0);
-    p.motionBlur = (cfg.motionBlur != 0);
-    p.motionBlurStrength = cfg.motionBlurStrength;
     p.brightness = cfg.brightness;
     p.cursorMode = CursorModeFromCfg(cfg);
     // In DwmFlush mode we present immediately (no vsync block) and let DwmFlush() pace.
@@ -172,8 +170,8 @@ static void RunTick(TickState& t) {
         if (m != t.lastMtime) {
             t.lastMtime = m;
             Config nc = LoadConfig(L"magnifier.ini");
-            t.cfg = nc;   // pick up renderer knobs (smoothing, blur, filter, cursor scale)
-            t.zoom = ZoomController(1.0, nc.maxLevel, nc.fullRangeSeconds);
+            t.cfg = nc;   // pick up renderer knobs (smoothing, filter, cursor scale, zoom speed)
+            t.zoom = ZoomController(1.0, nc.maxLevel);
             double ocx = t.mapper.centerX(), ocy = t.mapper.centerY();   // preserve position
             t.mapper = CursorMapper(t.mon.w, t.mon.h, nc.cursorSmoothing);
             t.mapper.reset(ocx, ocy);
@@ -185,6 +183,9 @@ static void RunTick(TickState& t) {
     auto keyDown = [](int vk) { return vk != 0 && (GetAsyncKeyState(vk) & 0x8000) != 0; };
     bool inHeld  = g_input.state().inHeld.load()  || keyDown(t.cfg.zoomInVk);
     bool outHeld = g_input.state().outHeld.load() || keyDown(t.cfg.zoomOutVk);
+    // Apply the live zoom profile every frame (free hot-reload; setProfile does not reset level).
+    t.zoom.setProfile(t.cfg.zoomInSpeed, t.cfg.zoomOutSpeed, t.cfg.smoothZoom != 0,
+                      t.cfg.smoothZoomAccel, t.cfg.smoothZoomRamp);
     t.zoom.setDirection(ResolveDirection(inHeld, outHeld));
     // Clamp the dt fed to the zoom so a single long tick (cold first capture, alt-tab, any hitch)
     // can't jump the zoom level mid-ramp - it should always ease in/out at a steady rate regardless
@@ -413,7 +414,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         ts.mapper.reset(pt.x - ts.mon.x, pt.y - ts.mon.y);
         renderEngine.hideSystemCursor(true);
         LARGE_INTEGER f, a{}, b; QueryPerformanceFrequency(&f);
-        const double target = 1.0 / ((cfg.tickHzCap > 0) ? cfg.tickHzCap : DetectRefreshHz());
+        const double target = 1.0 / DetectRefreshHz();
         double elapsed = 0.0, sumDt = 0.0, maxDt = 0.0; int frames = 0, hitches = 0, big = 0;
         bool first = true;
         QueryPerformanceCounter(&a);
@@ -423,7 +424,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             MapResult r = ts.mapper.update(dxp, 0, 4.0);
             RenderFrameParams p{};
             FillRenderParams(p, r, cfg, ts.mon, 4.0);
-            p.motionBlur = false; p.motionBlurStrength = 1.0;   // pacing test: no blur
             p.cursorMode = 1; p.vsync = (cfg.vsync != 0);
             if (first) renderEngine.invalidateCapture();
             renderEngine.renderFrame(p);
@@ -457,10 +457,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr,
         CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
-    // tickHzCap > 0 = explicit override; 0 (default) = auto-detect the display refresh rate so
-    // we never assume a fixed rate (the dev's 144Hz). Used to pace the idle/1x loop and the
-    // vsync=0 path; while zoomed, DwmFlush/vsync pace instead.
-    int hz = (cfg.tickHzCap > 0) ? cfg.tickHzCap : DetectRefreshHz();
+    // Auto-detect the display refresh rate so we never assume a fixed rate (the dev's 144Hz).
+    // Paces the idle/1x loop and the vsync=0 path; while zoomed, DwmFlush/vsync pace instead.
+    int hz = DetectRefreshHz();
     ts.hz = hz;
     LARGE_INTEGER due; due.QuadPart = -(10000000LL / hz);
 
@@ -479,7 +478,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         //    compositor (targets blt-model microstutter). No pre-tick wait.
         //  - vsync: Present(1,0) blocks to the refresh and paces the loop (skip the timer to
         //    avoid timer/vsync double-pacing).
-        //  - else: Present(0,0) doesn't block, so the timer paces at tickHzCap.
+        //  - else: Present(0,0) doesn't block, so the timer paces at the detected refresh rate.
         // Idle at 1x uses the timer.
         bool zoomed = ts.prevLvl > 1.0;
         bool dwmPaces = zoomed && ts.cfg.dwmFlush != 0;

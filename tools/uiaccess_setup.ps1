@@ -62,20 +62,21 @@ zoomInVk=33
 zoomOutVk=34
 recenterVk=0
 maxLevel=8.0
-fullRangeSeconds=1.2
+zoomInSpeed=1.0
+zoomOutSpeed=1.0
+smoothZoom=0
+smoothZoomAccel=3.0
+smoothZoomRamp=0.6
 cursorSensitivity=1.0
 cursorSmoothing=0.8
 cursorScaleWithZoom=1
 cursorVisibility=auto
 bilinear=1
-motionBlur=0
-motionBlurStrength=1.0
 ; zorderBand: 16 = sit above everything incl. Start/taskbar/tray and same-band app overlays
 ;   (this signed Program Files build engages UIAccess for it); 0 = normal topmost only
 zorderBand=16
 brightness=1.0
 hdrTonemap=1
-tickHzCap=0
 vsync=1
 ; dwmFlush: 0=plain vsync pacing (default, fewer stutters); 1=align to DWM's composition.
 ;   Hot-reloadable - edit and save to compare (notepad as admin, or the tray "Edit config").

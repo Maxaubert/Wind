@@ -27,8 +27,11 @@ Config ParseConfig(const std::string& text) {
             else if (key == "zoomInVk")         c.zoomInVk = std::stoi(val);
             else if (key == "zoomOutVk")        c.zoomOutVk = std::stoi(val);
             else if (key == "maxLevel")         c.maxLevel = std::stod(val);
-            else if (key == "fullRangeSeconds") c.fullRangeSeconds = std::stod(val);
-            else if (key == "tickHzCap")        c.tickHzCap = std::stoi(val);
+            else if (key == "zoomInSpeed")      c.zoomInSpeed = std::stod(val);
+            else if (key == "zoomOutSpeed")     c.zoomOutSpeed = std::stod(val);
+            else if (key == "smoothZoom")       c.smoothZoom = std::stoi(val);
+            else if (key == "smoothZoomAccel")  c.smoothZoomAccel = std::stod(val);
+            else if (key == "smoothZoomRamp")   c.smoothZoomRamp = std::stod(val);
             else if (key == "vsync")            c.vsync = std::stoi(val);
             else if (key == "dwmFlush")         c.dwmFlush = std::stoi(val);
             else if (key == "diagnostics")      c.diagnostics = std::stoi(val);
@@ -37,8 +40,6 @@ Config ParseConfig(const std::string& text) {
             else if (key == "cursorScaleWithZoom")c.cursorScaleWithZoom = std::stoi(val);
             else if (key == "cursorVisibility")   c.cursorVisibility = val;
             else if (key == "bilinear")           c.bilinear = std::stoi(val);
-            else if (key == "motionBlur")         c.motionBlur = std::stoi(val);
-            else if (key == "motionBlurStrength") c.motionBlurStrength = std::stod(val);
             else if (key == "zorderBand")         c.zorderBand = std::stoi(val);
             else if (key == "brightness")         c.brightness = std::stod(val);
             else if (key == "hdrTonemap")         c.hdrTonemap = std::stoi(val);
@@ -69,10 +70,19 @@ Config LoadConfig(const std::wstring& path) {
                "zoomInVk=33\nzoomOutVk=34\n"
                "; recenterVk: tap to recenter the lens on the cursor (VK code; 0=unbound)\n"
                "recenterVk=0\n"
-               "maxLevel=8.0\nfullRangeSeconds=1.2\n"
-               "; tickHzCap: 0=auto-detect display refresh rate (recommended); >0=explicit Hz cap\n"
-               "tickHzCap=0\n"
-               "; vsync: 1=present locked to display refresh (smooth, capped); 0=no vsync, paced by tickHzCap (restart to apply)\n"
+               "; maxLevel: how far you can zoom (does not affect zoom speed)\n"
+               "maxLevel=8.0\n"
+               "; zoomInSpeed/zoomOutSpeed: zoom rate multipliers (1.0=default, 2.0=twice as fast, 0.5=half);\n"
+               ";   speed is independent of maxLevel\n"
+               "zoomInSpeed=1.0\nzoomOutSpeed=1.0\n"
+               "; smoothZoom: 0=linear constant speed (default); 1=zoom-IN soft-starts, easing up to linear\n"
+               "smoothZoom=0\n"
+               "; smoothZoomAccel: ease-in depth - zoom-in starts at zoomInSpeed/this and climbs to\n"
+               ";   zoomInSpeed (never exceeds linear); bigger=slower start; 1=no ease-in\n"
+               "smoothZoomAccel=3.0\n"
+               "; smoothZoomRamp: seconds of holding to reach the linear rate\n"
+               "smoothZoomRamp=0.6\n"
+               "; vsync: 1=present locked to display refresh (smooth, capped); 0=no vsync (restart to apply)\n"
                "vsync=1\n"
                "; dwmFlush: 0=plain vsync pacing (default, fewer stutters); 1=align to DWM's composition\n"
                "dwmFlush=0\n"
@@ -89,8 +99,6 @@ Config LoadConfig(const std::wstring& path) {
                "cursorVisibility=auto\n"
                "; bilinear: 1=smooth scaling, 0=crisp/point\n"
                "bilinear=1\n"
-               "; motionBlur: 1=smear content along the pan (off by default)\n"
-               "motionBlur=0\nmotionBlurStrength=1.0\n"
                "; zorderBand: 0=normal; 16=above shell (covers Start/taskbar/tray, needs UIAccess build)\n"
                "zorderBand=0\n"
                "; brightness: magnified-view output multiplier (1.0=unchanged; fine-tune for HDR)\n"

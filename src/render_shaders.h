@@ -1,24 +1,22 @@
 #pragma once
 namespace wind {
 
-// Constant buffer: source sub-rect UV bounds, per-frame pan shift (motion blur), output
-// brightness, and HDR tonemap params. 48 bytes (three 16-byte registers).
+// Constant buffer: source sub-rect UV bounds, output brightness, and HDR tonemap params.
+// 32 bytes (two 16-byte registers).
 // hdrMode: 0 = SDR passthrough, 1 = scRGB (FP16 linear Rec.709) -> SDR.
 // scRgbScale = 80 / SDR-white-nits (scRGB 1.0 = 80 nits; SDR white maps to 1.0).
 struct MagCB {
-    float uvMinX, uvMinY, uvMaxX, uvMaxY;    // reg 0
-    float blurX, blurY, brightness, hdrMode; // reg 1
-    float scRgbScale, pad0, pad1, pad2;      // reg 2
+    float uvMinX, uvMinY, uvMaxX, uvMaxY;        // reg 0
+    float brightness, hdrMode, scRgbScale, pad0; // reg 1
 };
 
 // Fullscreen-triangle magnify shader. The VS maps the visible [0,1] screen UV into the
-// source sub-rect; the PS samples the captured desktop. When panning, it integrates several
-// taps along the per-frame pan vector (blurUV) - motion blur that smears the big per-frame
-// step at high zoom into continuous motion, and collapses to a sharp single tap when still.
+// source sub-rect; the PS samples the captured desktop and applies the optional HDR->SDR
+// tonemap and brightness.
 inline constexpr const char* kMagHLSL = R"(
 cbuffer CB : register(b0) {
-    float2 uvMin; float2 uvMax; float2 blurUV; float brightness; float hdrMode;
-    float scRgbScale; float3 pad;
+    float2 uvMin; float2 uvMax;
+    float brightness; float hdrMode; float scRgbScale; float pad0;
 };
 struct VSOut { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; };
 VSOut VSMain(uint id : SV_VertexID) {
@@ -35,18 +33,7 @@ float3 LinearToSrgb(float3 l) {
     return (l <= 0.0031308) ? (l * 12.92) : (1.055 * pow(l, 1.0 / 2.4) - 0.055);
 }
 float4 PSMain(VSOut i) : SV_TARGET {
-    float4 c;
-    if (abs(blurUV.x) + abs(blurUV.y) < 1e-6) {
-        c = tex.Sample(smp, i.uv);               // still: sharp
-    } else {
-        const int N = 16;
-        float4 acc = 0;
-        [unroll] for (int k = 0; k < N; ++k) {
-            float t = (k / float(N - 1)) - 0.5;  // -0.5 .. +0.5 across the frame's motion
-            acc += tex.Sample(smp, i.uv + blurUV * t);
-        }
-        c = acc / N;
-    }
+    float4 c = tex.Sample(smp, i.uv);
     if (hdrMode > 0.5) {
         // FP16 scRGB source (linear Rec.709, 1.0 = 80 nits): scale so SDR white -> 1.0,
         // then sRGB-encode. Reconstructs the SDR appearance the HDR desktop shows.

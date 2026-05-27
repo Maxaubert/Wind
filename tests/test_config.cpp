@@ -7,7 +7,6 @@ TEST_CASE("defaults when text is empty") {
     CHECK(c.zoomInButton  == 2);   // XBUTTON2
     CHECK(c.zoomOutButton == 1);   // XBUTTON1
     CHECK(c.maxLevel == doctest::Approx(8.0));
-    CHECK(c.fullRangeSeconds == doctest::Approx(1.2));
     CHECK(c.diagnostics == 0);
 }
 TEST_CASE("parses renderer knobs") {
@@ -23,23 +22,24 @@ TEST_CASE("renderer knobs have sane defaults") {
     CHECK(c.cursorScaleWithZoom == 1);
     CHECK(c.bilinear == 1);
     CHECK(c.cursorSmoothing == doctest::Approx(0.8));
-    CHECK(c.motionBlur == 0);                  // off by default
-    CHECK(c.motionBlurStrength == doctest::Approx(1.0));
     CHECK(c.zorderBand == 0);                  // normal topmost by default
     CHECK(c.brightness == doctest::Approx(1.0));
     CHECK(c.hdrTonemap == 1);                  // on by default (no-op on SDR)
     CHECK(c.cursorVisibility == "auto");       // follow the focused app by default
     CHECK(c.vsync == 1);                       // vsync on by default
     CHECK(c.dwmFlush == 0);                     // plain vsync pacing by default (fewer stutters)
-    CHECK(c.tickHzCap == 0);                    // 0 = auto-detect display refresh rate
     CHECK(c.multiMonitor == 1);                // follow the cursor's monitor by default
     CHECK(c.cropCapture == 1);                 // crop the copy on full repaints by default
+    CHECK(c.smoothZoom == 0);                  // linear (current) by default
+    CHECK(c.zoomInSpeed == doctest::Approx(1.0));
+    CHECK(c.zoomOutSpeed == doctest::Approx(1.0));
+    CHECK(c.smoothZoomAccel == doctest::Approx(3.0));
+    CHECK(c.smoothZoomRamp == doctest::Approx(0.6));
 }
-TEST_CASE("vsync, dwmFlush, tickHzCap can be set") {
+TEST_CASE("vsync and dwmFlush can be set") {
     CHECK(ParseConfig("vsync=0\n").vsync == 0);
     CHECK(ParseConfig("dwmFlush=0\n").dwmFlush == 0);
     CHECK(ParseConfig("dwmFlush=1\n").dwmFlush == 1);
-    CHECK(ParseConfig("tickHzCap=240\n").tickHzCap == 240);
 }
 TEST_CASE("keyboard zoom defaults PageUp/PageDown; recenter unbound; all parseable") {
     Config d = ParseConfig("");
@@ -60,11 +60,9 @@ TEST_CASE("hdrTonemap can be disabled") {
     Config c = ParseConfig("hdrTonemap=0\n");
     CHECK(c.hdrTonemap == 0);
 }
-TEST_CASE("parses cursorSmoothing, motion blur, z-order band, brightness") {
-    Config c = ParseConfig("cursorSmoothing=0.7\nmotionBlur=1\nmotionBlurStrength=0.5\nzorderBand=16\nbrightness=0.85\n");
+TEST_CASE("parses cursorSmoothing, z-order band, brightness") {
+    Config c = ParseConfig("cursorSmoothing=0.7\nzorderBand=16\nbrightness=0.85\n");
     CHECK(c.cursorSmoothing == doctest::Approx(0.7));
-    CHECK(c.motionBlur == 1);
-    CHECK(c.motionBlurStrength == doctest::Approx(0.5));
     CHECK(c.zorderBand == 16);
     CHECK(c.brightness == doctest::Approx(0.85));
 }
@@ -83,7 +81,7 @@ TEST_CASE("parses overrides and ignores comments/blank lines") {
     CHECK(c.maxLevel == doctest::Approx(12.5));
     CHECK(c.zoomInButton == 1);
     CHECK(c.cursorSensitivity == doctest::Approx(0.5));
-    CHECK(c.fullRangeSeconds == doctest::Approx(1.2)); // untouched default
+    CHECK(c.zoomInSpeed == doctest::Approx(1.0)); // untouched default
 }
 TEST_CASE("malformed lines are ignored, keep defaults") {
     Config c = ParseConfig("garbage line\nmaxLevel\n=5\n");
@@ -96,4 +94,14 @@ TEST_CASE("multiMonitor can be set") {
 TEST_CASE("cropCapture can be set") {
     CHECK(ParseConfig("cropCapture=0\n").cropCapture == 0);
     CHECK(ParseConfig("cropCapture=1\n").cropCapture == 1);
+}
+TEST_CASE("zoom-speed and smooth-zoom knobs parse") {
+    Config c = ParseConfig(
+        "smoothZoom=1\nzoomInSpeed=2.0\nzoomOutSpeed=0.5\n"
+        "smoothZoomAccel=4.0\nsmoothZoomRamp=0.25\n");
+    CHECK(c.smoothZoom == 1);
+    CHECK(c.zoomInSpeed == doctest::Approx(2.0));
+    CHECK(c.zoomOutSpeed == doctest::Approx(0.5));
+    CHECK(c.smoothZoomAccel == doctest::Approx(4.0));
+    CHECK(c.smoothZoomRamp == doctest::Approx(0.25));
 }
