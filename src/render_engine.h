@@ -20,8 +20,6 @@ struct RenderFrameParams {
     int    clickDesktopX, clickDesktopY; // SetCursorPos target (desktop px) for click hit-test
     bool   cursorScaleWithZoom;          // draw the cursor scaled by zoom vs native size
     bool   bilinear;                     // bilinear (smooth) vs point sampling
-    bool   motionBlur;                   // smear content along the pan to smooth coarse motion
-    double motionBlurStrength;           // shutter: 1.0 = full inter-frame, lower = subtler
     double brightness;                   // output multiplier (1.0 = unchanged; <1 dims for HDR)
     int    cursorMode;                   // 0=auto (draw only when the app shows a cursor), 1=always, 2=never
     bool   vsync;                        // true = Present(1,0) vsync; false = Present(0,0) no vsync

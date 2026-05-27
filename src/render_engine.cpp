@@ -87,11 +87,9 @@ struct RenderEngine::State {
     // Magnify pass.
     ComPtr<ID3D11VertexShader> vs;
     ComPtr<ID3D11PixelShader> ps;
-    ComPtr<ID3D11Buffer> cb;                   // uvMin/uvMax + motion-blur vector
+    ComPtr<ID3D11Buffer> cb;                   // uvMin/uvMax + brightness/HDR params
     ComPtr<ID3D11SamplerState> sampLinear;
     ComPtr<ID3D11SamplerState> sampPoint;
-    double prevSrcLeft = 0, prevSrcTop = 0;    // previous frame's source top-left (for blur)
-    bool prevSrcValid = false;                 // reset on (re)show so we don't blur a jump
 
     // Cursor pass (live OS cursor decoded to a texture; works even while hidden).
     ComPtr<ID3D11VertexShader> cvs;
@@ -571,7 +569,6 @@ void RenderEngine::setVisible(bool visible) {
     // of DWM's cached last-visible frame. Callers present the live frame BEFORE revealing.
     SetLayeredWindowAttributes(s_->hwnd, 0, visible ? 255 : 0, LWA_ALPHA);
     if (visible) {
-        s_->prevSrcValid = false;   // don't motion-blur the jump into zoom
         SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0,   // pop on top immediately on show
                      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
@@ -589,7 +586,6 @@ void RenderEngine::invalidateCapture() {
     s_->dupl.Reset();
     s_->haveDesktop = false;
     s_->freshCapture = true;
-    s_->prevSrcValid = false;
 }
 
 // (Re)create the render-target view from the swapchain's current back buffer (buffer 0). Used
@@ -653,7 +649,6 @@ bool RenderEngine::retarget(const MonitorTarget& m) {
     s_->dupl.Reset();
     s_->haveDesktop = false;
     s_->freshCapture = true;
-    s_->prevSrcValid = false;
     s_->lastClickX = s_->lastClickY = INT_MIN;   // don't skip the first SetCursorPos on the new monitor
     RLog("retarget: device=%ls origin=(%d,%d) size=%dx%d sizeChanged=%d",
          s_->targetDevice, m.x, m.y, m.w, m.h, (int)sizeChanged);
@@ -709,32 +704,19 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
     if (haveDesktop) {
         double level = p.level < 1.0 ? 1.0 : p.level;
         double viewW = sw / level, viewH = sh / level;
-        // Motion-blur vector = this frame's source shift in full-texture UV, scaled by the
-        // shutter strength and clamped so a stray large jump can't over-smear.
-        double blurX = 0, blurY = 0;
-        if (p.motionBlur && p.motionBlurStrength > 0.0 && prevSrcValid) {
-            blurX = (p.srcLeft - prevSrcLeft) / sw * p.motionBlurStrength;
-            blurY = (p.srcTop  - prevSrcTop)  / sh * p.motionBlurStrength;
-            const double kMax = 0.08;   // cap ~8% of the texture
-            if (blurX >  kMax) blurX =  kMax; else if (blurX < -kMax) blurX = -kMax;
-            if (blurY >  kMax) blurY =  kMax; else if (blurY < -kMax) blurY = -kMax;
-        }
-        prevSrcLeft = p.srcLeft; prevSrcTop = p.srcTop; prevSrcValid = true;
-
         float bright = (p.brightness > 0.0) ? (float)p.brightness : 1.0f;
         float hdrMode = capFp16 ? 1.0f : 0.0f;
         float scRgbScale = (capFp16 && sdrWhiteNits > 1.0) ? (float)(80.0 / sdrWhiteNits) : 1.0f;
         MagCB cbv{
             (float)(p.srcLeft / sw), (float)(p.srcTop / sh),
             (float)((p.srcLeft + viewW) / sw), (float)((p.srcTop + viewH) / sh),
-            (float)blurX, (float)blurY, bright, hdrMode,
-            scRgbScale, 0.0f, 0.0f, 0.0f };
+            bright, hdrMode, scRgbScale, 0.0f };
         c->UpdateSubresource(cb.Get(), 0, nullptr, &cbv, 0, 0);
         c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         c->VSSetShader(vs.Get(), nullptr, 0);
         c->VSSetConstantBuffers(0, 1, cb.GetAddressOf());
         c->PSSetShader(ps.Get(), nullptr, 0);
-        c->PSSetConstantBuffers(0, 1, cb.GetAddressOf());     // PS needs blurUV (motion blur)
+        c->PSSetConstantBuffers(0, 1, cb.GetAddressOf());     // PS needs brightness/HDR params
         c->PSSetShaderResources(0, 1, desktopSRV.GetAddressOf());
         ID3D11SamplerState* samp = (p.bilinear ? sampLinear : sampPoint).Get();
         c->PSSetSamplers(0, 1, &samp);

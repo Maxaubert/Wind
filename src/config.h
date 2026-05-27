@@ -10,10 +10,10 @@ struct Config {
     int    zoomInVk         = 33;    // VK_PRIOR (PageUp)
     int    zoomOutVk        = 34;    // VK_NEXT  (PageDown)
     int    recenterVk       = 0;     // VK code; 0 = unbound. Tap to recenter the lens on the cursor.
-    double maxLevel         = 8.0;
-    double fullRangeSeconds = 1.2;
+    double maxLevel         = 8.0;   // how FAR you can zoom (does not affect zoom SPEED)
     // --- Zoom experience (see docs/superpowers/specs/2026-05-26-configurable-zoom-design.md) ---
-    // Per-direction rate multipliers (1.0 = today's speed); apply in BOTH linear and smooth modes.
+    // Per-direction rate multipliers (1.0 = default speed); apply in BOTH linear and smooth modes.
+    // Speed is independent of maxLevel (a fixed doublings/sec base inside ZoomController).
     double zoomInSpeed  = 1.0;       // 0.25-4.0
     double zoomOutSpeed = 1.0;       // 0.25-4.0
     // Smooth zoom: 0 = linear/constant (default); 1 = zoom-IN soft-starts (eases up to linear).
@@ -23,9 +23,8 @@ struct Config {
     double smoothZoomAccel = 3.0;
     // Seconds of continuous holding to reach the linear rate. 0.1-3.0.
     double smoothZoomRamp = 0.6;
-    int    tickHzCap        = 0;     // 0 = auto-detect display refresh rate; >0 = explicit cap (Hz)
     // Present sync while zoomed (render engine): 1 = vsync (Present sync-interval 1, locked to
-    // the display refresh); 0 = no vsync (Present 0), with the loop paced by tickHzCap instead.
+    // the display refresh); 0 = no vsync (Present 0), with the loop paced by the timer instead.
     int    vsync            = 1;
     // Zoomed-loop pacing. 0 (default) = plain vsync Present(1,0); measured fewer stutters in
     // general (desktop + games), and it doesn't slip toward half-rate under a heavy fullscreen
@@ -47,8 +46,6 @@ struct Config {
     // "always" = always draw it; "never" = never draw it.
     std::string cursorVisibility = "auto";
     int    bilinear = 1;             // 1 = bilinear sampling (smooth), 0 = point (crisp pixels)
-    int    motionBlur = 0;           // 1 = smear content along the pan (off by default)
-    double motionBlurStrength = 1.0; // shutter: 1.0 = full inter-frame blur, lower = subtler
     // z-order band for the overlay (needs the UIAccess build, run from Program Files):
     // 0 = normal topmost; 16 = ZBID_SYSTEM_TOOLS (above the shell, covers Start/taskbar/tray).
     int    zorderBand = 0;

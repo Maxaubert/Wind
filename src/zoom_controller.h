@@ -8,7 +8,7 @@ ZoomDir ResolveDirection(bool inHeld, bool outHeld);
 
 class ZoomController {
 public:
-    ZoomController(double minLevel, double maxLevel, double fullRangeSeconds);
+    ZoomController(double minLevel, double maxLevel);
     void setDirection(ZoomDir d);
     ZoomDir direction() const { return dir_; }
     // Speed/acceleration profile (hot-reloadable; does NOT reset the level):
@@ -22,7 +22,7 @@ public:
     double level() const { return level_; }
     void reset();                  // level=min, dir=None, held cleared
 private:
-    double minLevel_, maxLevel_, fullRangeSeconds_;
+    double minLevel_, maxLevel_;
     double level_;
     ZoomDir dir_ = ZoomDir::None;
     double inSpeed_ = 1.0, outSpeed_ = 1.0;   // defaults reproduce today's behavior

@@ -6,9 +6,12 @@ ZoomDir ResolveDirection(bool inHeld, bool outHeld) {
     if (inHeld == outHeld) return ZoomDir::None; // neither, or both
     return inHeld ? ZoomDir::In : ZoomDir::Out;
 }
-ZoomController::ZoomController(double minLevel, double maxLevel, double fullRangeSeconds)
-    : minLevel_(minLevel), maxLevel_(maxLevel),
-      fullRangeSeconds_(fullRangeSeconds), level_(minLevel) {}
+// Base zoom rate, INDEPENDENT of maxLevel: at speed 1.0 the magnification doubles this many times
+// per second, so maxLevel only sets how FAR you can zoom, not how fast. 2.5/s reaches 8x in ~1.2s
+// at speed 1.0 (matches the original default feel); zoomInSpeed/zoomOutSpeed scale it.
+static constexpr double kZoomDoublingsPerSecond = 2.5;
+ZoomController::ZoomController(double minLevel, double maxLevel)
+    : minLevel_(minLevel), maxLevel_(maxLevel), level_(minLevel) {}
 void ZoomController::setDirection(ZoomDir d) { dir_ = d; }
 void ZoomController::setProfile(double inSpeed, double outSpeed, bool smooth,
                                 double accel, double rampSeconds) {
@@ -38,7 +41,7 @@ void ZoomController::tick(double dt) {
     } else {
         speed = outSpeed_;                              // out never accelerates
     }
-    double f = std::pow(maxLevel_ / minLevel_, dt * speed / fullRangeSeconds_);
+    double f = std::pow(2.0, dt * speed * kZoomDoublingsPerSecond);
     if (dir_ == ZoomDir::In)  level_ *= f;
     else                      level_ /= f;
     level_ = std::min(maxLevel_, std::max(minLevel_, level_));
