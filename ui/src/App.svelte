@@ -40,6 +40,8 @@
   :root{--bg:#fff;--fg:#111;--muted:#666;--border:#e5e5e5;--accent:#5b5bd6;--side:#f5f5f7}
   @media (prefers-color-scheme: dark){:root{--bg:#1a1a1a;--fg:#eee;--muted:#999;--border:#333;--side:#222}}
   :global(html,body){margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:system-ui,sans-serif}
+  /* Hardcode control accent to the tab-blue (not the OS theme accent) */
+  :global(input[type=checkbox]),:global(input[type=range]){accent-color:var(--accent)}
   .app{display:flex;height:100vh}
   nav{width:200px;background:var(--side);padding:16px 8px;display:flex;flex-direction:column;gap:4px}
   nav button{text-align:left;padding:10px 12px;border:0;border-radius:8px;background:transparent;color:var(--fg);cursor:pointer;font-size:1em}

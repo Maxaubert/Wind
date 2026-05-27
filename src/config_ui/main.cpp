@@ -62,6 +62,13 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
 }
 static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (m == WM_SIZE && g_controller) { RECT r; GetClientRect(h, &r); g_controller->put_Bounds(r); return 0; }
+    if (m == WM_GETMINMAXINFO) {   // enforce a minimum window size (DPI-scaled)
+        UINT dpi = GetDpiForWindow(h); if (!dpi) dpi = 96;
+        auto* mmi = reinterpret_cast<MINMAXINFO*>(l);
+        mmi->ptMinTrackSize.x = MulDiv(820, dpi, 96);
+        mmi->ptMinTrackSize.y = MulDiv(560, dpi, 96);
+        return 0;
+    }
     if (m == WM_DESTROY) { PostQuitMessage(0); return 0; }
     return DefWindowProcW(h, m, w, l);
 }
@@ -72,7 +79,14 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     WNDCLASSW wc{}; wc.lpfnWndProc = WndProc; wc.hInstance = hInst; wc.lpszClassName = L"WindConfigWnd";
     RegisterClassW(&wc);
     HWND hwnd = CreateWindowExW(0, wc.lpszClassName, L"Wind Settings", WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, 960, 680, nullptr, nullptr, hInst, nullptr);
+        CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, nullptr, nullptr, hInst, nullptr);
+    // Size to a sensible default (scaled for this monitor's DPI) and center on the work area.
+    UINT dpi = GetDpiForWindow(hwnd); if (!dpi) dpi = 96;
+    int ww = MulDiv(1040, dpi, 96), wh = MulDiv(740, dpi, 96);
+    RECT wa{}; SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
+    int wx = wa.left + ((wa.right - wa.left) - ww) / 2;
+    int wy = wa.top  + ((wa.bottom - wa.top) - wh) / 2;
+    SetWindowPos(hwnd, nullptr, wx, wy, ww, wh, SWP_NOZORDER);
     ShowWindow(hwnd, SW_SHOW);
     std::wstring uiDir = ExeDir() + L"\\ui\\dist";
     CreateCoreWebView2EnvironmentWithOptions(nullptr, nullptr, nullptr,
