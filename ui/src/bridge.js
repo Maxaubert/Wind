@@ -14,3 +14,11 @@ export function getConfig() {
   });
 }
 export function setConfig(key, value) { post({ type: 'setConfig', key, value: String(value) }); }
+// Launch mode: WindConfig.exe navigates to ...?mode=onboard for first-launch setup.
+export function getMode() {
+  return new URLSearchParams(location.search).get('mode') === 'onboard' ? 'onboard' : 'settings';
+}
+// Custom title bar buttons -> host runs ShowWindow(SW_MINIMIZE) / WM_CLOSE.
+export function windowControl(action) { post({ type: 'window', action }); }
+// "Edit config file" -> host opens magnifier.ini in the default editor.
+export function openIni() { post({ type: 'openIni' }); }
