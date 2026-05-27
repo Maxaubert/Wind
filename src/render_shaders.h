@@ -1,22 +1,26 @@
 #pragma once
 namespace wind {
 
-// Constant buffer: source sub-rect UV bounds, output brightness, and HDR tonemap params.
-// 32 bytes (two 16-byte registers).
+// Constant buffer: source sub-rect UV bounds, output brightness, HDR tonemap params, sharpening
+// strength, and the source texel size. 48 bytes (three 16-byte registers).
 // hdrMode: 0 = SDR passthrough, 1 = scRGB (FP16 linear Rec.709) -> SDR.
 // scRgbScale = 80 / SDR-white-nits (scRGB 1.0 = 80 nits; SDR white maps to 1.0).
+// sharpness: 0 = off (single tap, cheapest); >0 = adaptive sharpen strength.
+// texelW/texelH = 1/textureWidth, 1/textureHeight (for neighbor offsets).
 struct MagCB {
-    float uvMinX, uvMinY, uvMaxX, uvMaxY;        // reg 0
-    float brightness, hdrMode, scRgbScale, pad0; // reg 1
+    float uvMinX, uvMinY, uvMaxX, uvMaxY;             // reg 0
+    float brightness, hdrMode, scRgbScale, sharpness; // reg 1
+    float texelW, texelH, pad0, pad1;                 // reg 2
 };
 
 // Fullscreen-triangle magnify shader. The VS maps the visible [0,1] screen UV into the
-// source sub-rect; the PS samples the captured desktop and applies the optional HDR->SDR
-// tonemap and brightness.
+// source sub-rect; the PS samples the captured desktop, optionally sharpens (adaptive, clamped to
+// the local neighborhood so it doesn't halo), then applies the HDR->SDR tonemap and brightness.
 inline constexpr const char* kMagHLSL = R"(
 cbuffer CB : register(b0) {
     float2 uvMin; float2 uvMax;
-    float brightness; float hdrMode; float scRgbScale; float pad0;
+    float brightness; float hdrMode; float scRgbScale; float sharpness;
+    float texelW; float texelH; float2 pad;
 };
 struct VSOut { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; };
 VSOut VSMain(uint id : SV_VertexID) {
@@ -34,6 +38,19 @@ float3 LinearToSrgb(float3 l) {
 }
 float4 PSMain(VSOut i) : SV_TARGET {
     float4 c = tex.Sample(smp, i.uv);
+    if (sharpness > 0.0) {
+        // Clamped unsharp (CAS-flavored): sharpen at output resolution using 4 cross neighbors one
+        // output pixel away, then clamp to the local min/max so edges crisp up without halos.
+        float2 d = (uvMax - uvMin) * float2(texelW, texelH);   // UV step of one output pixel
+        float3 n = tex.Sample(smp, i.uv + float2(0.0, -d.y)).rgb;
+        float3 s = tex.Sample(smp, i.uv + float2(0.0,  d.y)).rgb;
+        float3 e = tex.Sample(smp, i.uv + float2( d.x, 0.0)).rgb;
+        float3 w = tex.Sample(smp, i.uv + float2(-d.x, 0.0)).rgb;
+        float3 sharp = c.rgb + sharpness * (4.0 * c.rgb - n - s - e - w);
+        float3 mn = min(c.rgb, min(min(n, s), min(e, w)));
+        float3 mx = max(c.rgb, max(max(n, s), max(e, w)));
+        c.rgb = clamp(sharp, mn, mx);
+    }
     if (hdrMode > 0.5) {
         // FP16 scRGB source (linear Rec.709, 1.0 = 80 nits): scale so SDR white -> 1.0,
         // then sRGB-encode. Reconstructs the SDR appearance the HDR desktop shows.

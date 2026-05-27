@@ -81,11 +81,12 @@ Spec: `docs/superpowers/specs/2026-05-25-own-renderer-design.md`. Issue #4.
   (the OS cursor is pinned to it); switch by zooming out and back in on the other one.
 - CURSOR SENSITIVITY auto-matches the real OS cursor: while zoomed (cursor hidden), each tick reads
   the OS cursor's own movement since our last `SetCursorPos` (Windows' pointer acceleration already
-  applied) and pans by that, so panning equals the user's normal cursor without reimplementing
-  ballistics. `GetCursorPos` works as this "oracle" only because we read it BEFORE re-setting it each
+  applied) and pans by that scaled by `cursorSensitivity` (default 1.0 = exact match), so panning
+  equals the user's normal cursor without reimplementing ballistics, with an optional speed multiplier
+  on top. `GetCursorPos` works as this "oracle" only because we read it BEFORE re-setting it each
   tick. Raw mickeys are kept solely to (a) feed `LockDetector` (a game clipping/recentering the cursor
   -> `GetClipCursor` confined, or raw-active-but-cursor-frozen with hysteresis) and (b) drive panning
-  while locked (scaled by `cursorSensitivity`). Both regimes integrate a DELTA into the same
+  while locked (also scaled by `cursorSensitivity`). Both regimes integrate a DELTA into the same
   accumulator, so a free/locked switch never snaps position (avoids the old Tracker flicker, issue #3).
   The click point, drawn cursor, and view all derive from the SMOOTHED center (`cx_`), so a click lands
   under the visible cursor; do not "fix" the click/warp point to the unsmoothed target (it would

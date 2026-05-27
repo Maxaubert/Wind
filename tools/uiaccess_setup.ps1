@@ -72,6 +72,7 @@ cursorSmoothing=0.8
 cursorScaleWithZoom=1
 cursorVisibility=auto
 bilinear=1
+sharpness=0.0
 ; zorderBand: 16 = sit above everything incl. Start/taskbar/tray and same-band app overlays
 ;   (this signed Program Files build engages UIAccess for it); 0 = normal topmost only
 zorderBand=16

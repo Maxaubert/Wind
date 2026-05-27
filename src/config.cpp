@@ -40,6 +40,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "cursorScaleWithZoom")c.cursorScaleWithZoom = std::stoi(val);
             else if (key == "cursorVisibility")   c.cursorVisibility = val;
             else if (key == "bilinear")           c.bilinear = std::stoi(val);
+            else if (key == "sharpness")          c.sharpness = std::stod(val);
             else if (key == "zorderBand")         c.zorderBand = std::stoi(val);
             else if (key == "brightness")         c.brightness = std::stod(val);
             else if (key == "hdrTonemap")         c.hdrTonemap = std::stoi(val);
@@ -88,8 +89,8 @@ Config LoadConfig(const std::wstring& path) {
                "dwmFlush=0\n"
                "; diagnostics=1 logs frame timing to %TEMP%\\wind_diag.log (restart to apply)\n"
                "diagnostics=0\n"
-               "; cursorSensitivity: raw-pan scale while a GAME locks the cursor; free desktop\n"
-               ";   panning auto-matches the OS cursor (incl. acceleration) and ignores this\n"
+               "; cursorSensitivity: pan speed multiplier - free panning auto-matches the OS cursor\n"
+               ";   (DPI+accel) then scales by this (1.0=exact match); also scales locked-game panning\n"
                "cursorSensitivity=1.0\n"
                "; cursorSmoothing: light inertia on the pan (0=off, 0.8 default eases high-zoom step jitter, higher=smoother+laggier)\n"
                "cursorSmoothing=0.8\n"
@@ -99,6 +100,8 @@ Config LoadConfig(const std::wstring& path) {
                "cursorVisibility=auto\n"
                "; bilinear: 1=smooth scaling, 0=crisp/point\n"
                "bilinear=1\n"
+               "; sharpness: 0=off; 0.1-1.0 sharpens the magnified image (crisper text/detail)\n"
+               "sharpness=0.0\n"
                "; zorderBand: 0=normal; 16=above shell (covers Start/taskbar/tray, needs UIAccess build)\n"
                "zorderBand=0\n"
                "; brightness: magnified-view output multiplier (1.0=unchanged; fine-tune for HDR)\n"

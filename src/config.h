@@ -34,8 +34,9 @@ struct Config {
     int    diagnostics      = 0;     // 1 = log frame-timing to wind_diag.log
 
     // --- Own GPU renderer ---------------------------------------------------
-    // Raw-input pan scale used ONLY while a game has locked the cursor (relative-mouse mode).
-    // Free desktop panning auto-matches the OS cursor (acceleration included) and ignores this.
+    // Pan speed multiplier. Free desktop panning auto-matches the OS cursor (DPI + acceleration) and
+    // is then scaled by this (1.0 = exact match, the default); it also scales the raw-input pan while
+    // a game has the cursor locked (relative-mouse mode).
     double cursorSensitivity = 1.0;
     double cursorSmoothing = 0.8;    // light inertia on the pan: 0 = off, higher = smoother/laggier
                                      // (0.8 default eases the 1px-step jitter visible at high zoom)
@@ -46,6 +47,9 @@ struct Config {
     // "always" = always draw it; "never" = never draw it.
     std::string cursorVisibility = "auto";
     int    bilinear = 1;             // 1 = bilinear sampling (smooth), 0 = point (crisp pixels)
+    // Adaptive sharpening of the magnified image (counters upscale blur; crisps text/detail).
+    // 0 = off (cheapest, single tap). 0.1-1.0 = strength. Folded into the magnify pass (no extra pass).
+    double sharpness = 0.0;
     // z-order band for the overlay (needs the UIAccess build, run from Program Files):
     // 0 = normal topmost; 16 = ZBID_SYSTEM_TOOLS (above the shell, covers Start/taskbar/tray).
     int    zorderBand = 0;
