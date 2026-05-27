@@ -27,6 +27,16 @@ to OS light/dark, be easy to restyle and extend, and leave room to add a user DB
 6. **Onboarding = guided essentials:** Welcome -> set zoom keybind -> zoom-speed + smooth-zoom ->
    "you're set (lives in the tray)".
 
+## Phasing
+
+**MVP (this plan):** functional settings end to end - `WindConfig.exe` host + bridge, the surgical
+ini module, a schema-driven Svelte settings screen with **live-apply**, the `build.bat config`
+target, and a tray **"Open Settings"** entry that launches it. Styling is clean-but-basic.
+
+**Later (separate plans):** the guided **onboarding** flow + first-launch auto-spawn (`onboarded`
+key), and the **visual polish** (full Tabby-style theming, light/dark tokens, sidebar sections).
+The MVP is built so these slot in without rework (schema-driven UI, mode flag reserved).
+
 ## Architecture & data flow
 
 ```
@@ -173,8 +183,8 @@ can affect zoom performance.
 
 ## File structure (new)
 
-- `WindConfig/` (or `src/config_ui/`): the C++ host - `main.cpp` (window + WebView2 + bridge),
-  `ini_edit.{h,cpp}` (pure surgical read/write, unit-tested).
+- `src/config_ui/`: the C++ host - `main.cpp` (window + WebView2 + bridge),
+  `ini_edit.{h,cpp}` (pure surgical read/write, unit-tested). Built to `WindConfig.exe`.
 - `ui/`: Svelte + Vite app - `src/` (App, Settings, Onboarding, components, `settings-schema.ts`,
   theme tokens), `package.json`, `vite.config.*`.
 - `tests/test_ini_edit.cpp`: host ini-module unit tests.
