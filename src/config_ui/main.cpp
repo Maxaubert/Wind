@@ -1,4 +1,5 @@
 #include <windows.h>
+#include <shellapi.h>
 #include <wrl.h>
 #include "WebView2.h"
 #include <shlwapi.h>
@@ -12,6 +13,7 @@
 using namespace Microsoft::WRL;
 static ComPtr<ICoreWebView2Controller> g_controller;
 static ComPtr<ICoreWebView2> g_webview;
+static HWND g_hwnd = nullptr;
 
 static std::wstring ExeDir() {
     wchar_t p[MAX_PATH]; GetModuleFileNameW(nullptr, p, MAX_PATH);
@@ -58,6 +60,12 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
     } else if (type == "setConfig") {
         std::string key = JsonField(j, "key"), value = JsonField(j, "value");
         if (!key.empty()) WriteFileAtomic(IniPath(), wind::UpdateIniText(ReadFileUtf8(IniPath()), key, value));
+    } else if (type == "window") {
+        std::string action = JsonField(j, "action");
+        if (action == "minimize") ShowWindow(g_hwnd, SW_MINIMIZE);
+        else if (action == "close") PostMessageW(g_hwnd, WM_CLOSE, 0, 0);
+    } else if (type == "openIni") {
+        ShellExecuteW(nullptr, L"open", L"notepad.exe", IniPath().c_str(), nullptr, SW_SHOWNORMAL);
     }
 }
 static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
@@ -72,7 +80,8 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (m == WM_DESTROY) { PostQuitMessage(0); return 0; }
     return DefWindowProcW(h, m, w, l);
 }
-int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
+int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
+    bool onboard = lpCmdLine && wcsstr(lpCmdLine, L"--onboard") != nullptr;
     // Per-monitor-V2 DPI awareness so WebView2 renders at native resolution (not bitmap-scaled,
     // which looked low-res/blurry). Must be set before any window is created.
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -88,13 +97,14 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     int wy = wa.top  + ((wa.bottom - wa.top) - wh) / 2;
     SetWindowPos(hwnd, nullptr, wx, wy, ww, wh, SWP_NOZORDER);
     ShowWindow(hwnd, SW_SHOW);
+    g_hwnd = hwnd;
     std::wstring uiDir = ExeDir() + L"\\ui\\dist";
     CreateCoreWebView2EnvironmentWithOptions(nullptr, nullptr, nullptr,
         Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
-        [hwnd, uiDir](HRESULT, ICoreWebView2Environment* env) -> HRESULT {
+        [hwnd, uiDir, onboard](HRESULT, ICoreWebView2Environment* env) -> HRESULT {
             env->CreateCoreWebView2Controller(hwnd,
                 Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
-                [hwnd, uiDir](HRESULT, ICoreWebView2Controller* controller) -> HRESULT {
+                [hwnd, uiDir, onboard](HRESULT, ICoreWebView2Controller* controller) -> HRESULT {
                     if (!controller) return S_OK;
                     g_controller = controller;
                     g_controller->get_CoreWebView2(&g_webview);
@@ -111,7 +121,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                             if (SUCCEEDED(args->get_WebMessageAsJson(&json)) && json) { HandleWebMessage(wv, json); CoTaskMemFree(json); }
                             return S_OK;
                         }).Get(), &tok);
-                    g_webview->Navigate(L"https://wind.config/index.html");
+                    g_webview->Navigate(onboard
+                        ? L"https://wind.config/index.html?mode=onboard"
+                        : L"https://wind.config/index.html");
                     return S_OK;
                 }).Get());
             return S_OK;
