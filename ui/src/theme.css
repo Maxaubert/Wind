@@ -26,4 +26,4 @@
 }
 html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
   font-family:"Segoe UI Variable","Segoe UI",system-ui,sans-serif;}
-:global(input[type=checkbox]),:global(input[type=range]){accent-color:var(--accent);}
+input[type=checkbox],input[type=range]{accent-color:var(--accent);}

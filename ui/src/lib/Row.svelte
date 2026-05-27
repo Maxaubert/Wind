@@ -1,5 +1,6 @@
 <script>
   export let row, value, onChange, disabled = false;
+  export let values = {};   // consumed in Task 7 (keybind rows); accepted now as a no-op
   const num = v => Number(v);
 </script>
 <div class="row" class:disabled>
