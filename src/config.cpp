@@ -46,6 +46,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "hdrTonemap")         c.hdrTonemap = std::stoi(val);
             else if (key == "multiMonitor")       c.multiMonitor = std::stoi(val);
             else if (key == "cropCapture")        c.cropCapture = std::stoi(val);
+            else if (key == "onboarded")          c.onboarded = std::stoi(val);
         } catch (...) { /* keep default on bad value */ }
     }
     return c;
@@ -112,7 +113,9 @@ Config LoadConfig(const std::wstring& path) {
                "multiMonitor=1\n"
                "; cropCapture: 1=on a full-screen repaint (games) copy only the magnified region (cuts\n"
                ";   4K HDR GPU copy ~zoom^2); 0=always copy all changed regions. Hot-reloadable.\n"
-               "cropCapture=1\n";
+               "cropCapture=1\n"
+               "; onboarded: 0 = run the first-launch setup once; set to 1 once finished\n"
+               "onboarded=0\n";
         return Config{};
     }
     std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());

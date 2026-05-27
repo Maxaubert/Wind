@@ -68,6 +68,9 @@ struct Config {
     // the GPU copy roughly by zoom^2 at 4K HDR). Small desktop changes are still copied in full, so
     // panning to them is never stale. 0 = always copy all changed regions. Hot-reloadable.
     int    cropCapture = 1;
+    // First-launch onboarding: 0 = not yet onboarded (also true of a freshly created ini), so the
+    // core spawns WindConfig.exe --onboard once; the onboarding flow sets this to 1 on completion.
+    int    onboarded = 0;
 };
 // Pure: parse INI text (key=value, ';' or '#' comments) into a Config, keeping
 // defaults for missing/malformed keys.

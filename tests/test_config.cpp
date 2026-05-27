@@ -96,6 +96,10 @@ TEST_CASE("cropCapture can be set") {
     CHECK(ParseConfig("cropCapture=0\n").cropCapture == 0);
     CHECK(ParseConfig("cropCapture=1\n").cropCapture == 1);
 }
+TEST_CASE("onboarded defaults to 0 and parses") {
+    CHECK(ParseConfig("").onboarded == 0);
+    CHECK(ParseConfig("onboarded=1\n").onboarded == 1);
+}
 TEST_CASE("zoom-speed and smooth-zoom knobs parse") {
     Config c = ParseConfig(
         "smoothZoom=1\nzoomInSpeed=2.0\nzoomOutSpeed=0.5\n"

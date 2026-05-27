@@ -448,6 +448,19 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         return 0;
     }
 
+    // First launch: open the guided setup once (off the hot path). onboarded==0 also covers a
+    // freshly created ini. Non-blocking: spawn WindConfig.exe --onboard and continue to the tray.
+    if (cfg.onboarded == 0) {
+        wchar_t cmd[] = L"WindConfig.exe --onboard";
+        STARTUPINFOW si{}; si.cb = sizeof(si);
+        PROCESS_INFORMATION pi{};
+        if (CreateProcessW(L"WindConfig.exe", cmd, nullptr, nullptr, FALSE,
+                           0, nullptr, nullptr, &si, &pi)) {
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+        }
+    }
+
     QueryPerformanceFrequency(&ts.freq);
     QueryPerformanceCounter(&ts.prev);
     ts.lastMtime = ConfigMTime(L"magnifier.ini");
