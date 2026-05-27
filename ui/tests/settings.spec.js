@@ -8,7 +8,7 @@ test.beforeEach(async ({ page }) => {
       addEventListener: (_e, fn) => listeners.add(fn),
       postMessage: (msg) => {
         if (msg.type === 'getConfig')
-          listeners.forEach(fn => fn({ data: { type: 'config', values: { zoomInSpeed: '1.2', smoothZoom: '0', uiTheme: 'auto' } } }));
+          listeners.forEach(fn => fn({ data: { type: 'config', values: { zoomInSpeed: '1.2', smoothZoom: '0', uiTheme: 'auto', zoomInButton: '2', zoomInVk: '33', zoomOutButton: '1', zoomOutVk: '34' } } }));
         if (msg.type === 'setConfig') window.__sets.push(msg);
       },
     }};
@@ -43,4 +43,13 @@ test('changes stage until Apply, then setConfig fires', async ({ page }) => {
   await page.getByRole('button', { name: 'Apply' }).click();
   const sets = await page.evaluate(() => window.__sets);
   expect(sets.some(s => s.key === 'smoothZoom' && s.value === '1')).toBeTruthy();
+});
+
+test('keybind capture writes a VK on keydown', async ({ page }) => {
+  await page.goto('/');
+  await page.getByText('Zoom in', { exact: true }).locator('xpath=../..').getByRole('button').click();
+  await page.keyboard.press('F2'); // keyCode 113
+  await page.getByRole('button', { name: 'Apply' }).click();
+  const sets = await page.evaluate(() => window.__sets);
+  expect(sets.some(s => s.key === 'zoomInVk' && s.value === '113')).toBeTruthy();
 });
