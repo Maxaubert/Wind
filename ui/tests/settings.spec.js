@@ -21,9 +21,12 @@ test('renders settings sections and rows', async ({ page }) => {
   await expect(page.getByText('Zoom-in speed')).toBeVisible();
 });
 
-test('toggling a setting emits setConfig with the right key', async ({ page }) => {
+test('changes stage until Apply, then setConfig fires with the right key', async ({ page }) => {
   await page.goto('/');
   await page.getByText('Smooth zoom', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();
+  // Staged, not yet written.
+  expect(await page.evaluate(() => window.__sets.length)).toBe(0);
+  await page.getByRole('button', { name: 'Apply' }).click();
   const sets = await page.evaluate(() => window.__sets);
   expect(sets.some(s => s.key === 'smoothZoom' && s.value === '1')).toBeTruthy();
 });
