@@ -14,7 +14,11 @@
     return 'Unbound';
   }
   function onKey(e) {
-    if (!armed) return; e.preventDefault();
+    if (!armed) return;
+    e.preventDefault();
+    if (e.key === 'Escape') { armed = false; return; }   // cancel capture, do not bind Escape
+    // e.keyCode is the Windows Virtual-Key code the core reads from magnifier.ini (intentional;
+    // e.key / e.code would need a reverse lookup). Deprecated in the DOM but stable in WebView2.
     onChange(row.vkKey, String(e.keyCode));
     onChange(row.buttonKey, '0');
     armed = false;
