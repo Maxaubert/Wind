@@ -1,4 +1,5 @@
 #include <windows.h>
+#include <windowsx.h>
 #include <shellapi.h>
 #include <wrl.h>
 #include "WebView2.h"
@@ -69,6 +70,39 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
     }
 }
 static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    if (m == WM_NCCALCSIZE && w == TRUE) {
+        // Remove the standard window frame so the client area spans the whole window (we draw our
+        // own title bar in the web UI). When maximized, inset by the frame so content is not clipped
+        // off-screen and the taskbar stays reachable.
+        if (IsZoomed(h)) {
+            UINT dpi = GetDpiForWindow(h); if (!dpi) dpi = 96;
+            int fx = GetSystemMetricsForDpi(SM_CXFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+            int fy = GetSystemMetricsForDpi(SM_CYFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+            auto* p = reinterpret_cast<NCCALCSIZE_PARAMS*>(l);
+            p->rgrc[0].left += fx; p->rgrc[0].right -= fx;
+            p->rgrc[0].top += fy; p->rgrc[0].bottom -= fy;
+        }
+        return 0;
+    }
+    if (m == WM_NCHITTEST) {
+        // Resize borders (8px DPI-scaled). Drag is handled by WebView2 non-client regions
+        // (CSS app-region: drag); fall back to HTCAPTION on the left of the title band if needed.
+        UINT dpi = GetDpiForWindow(h); if (!dpi) dpi = 96;
+        const int border = MulDiv(8, dpi, 96);
+        const int titleH = MulDiv(44, dpi, 96);
+        POINT pt{ GET_X_LPARAM(l), GET_Y_LPARAM(l) }; ScreenToClient(h, &pt);
+        RECT rc; GetClientRect(h, &rc);
+        bool left = pt.x < border, right = pt.x >= rc.right - border;
+        bool top = pt.y < border, bottom = pt.y >= rc.bottom - border;
+        if (top && left) return HTTOPLEFT;       if (top && right) return HTTOPRIGHT;
+        if (bottom && left) return HTBOTTOMLEFT;  if (bottom && right) return HTBOTTOMRIGHT;
+        if (left) return HTLEFT;   if (right) return HTRIGHT;
+        if (top) return HTTOP;     if (bottom) return HTBOTTOM;
+        // Fallback drag region: left part of the title band (buttons are top-right). With non-client
+        // region support enabled this is overridden by the web app-region; harmless either way.
+        if (pt.y < titleH && pt.x < rc.right - MulDiv(120, dpi, 96)) return HTCAPTION;
+        return HTCLIENT;
+    }
     if (m == WM_SIZE && g_controller) { RECT r; GetClientRect(h, &r); g_controller->put_Bounds(r); return 0; }
     if (m == WM_GETMINMAXINFO) {   // enforce a minimum window size (DPI-scaled)
         UINT dpi = GetDpiForWindow(h); if (!dpi) dpi = 96;
@@ -87,7 +121,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     WNDCLASSW wc{}; wc.lpfnWndProc = WndProc; wc.hInstance = hInst; wc.lpszClassName = L"WindConfigWnd";
     RegisterClassW(&wc);
-    HWND hwnd = CreateWindowExW(0, wc.lpszClassName, L"Wind Settings", WS_OVERLAPPEDWINDOW,
+    HWND hwnd = CreateWindowExW(0, wc.lpszClassName, L"Wind Settings",
+        WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CLIPCHILDREN,
         CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, nullptr, nullptr, hInst, nullptr);
     // Size to a sensible default (scaled for this monitor's DPI) and center on the work area.
     UINT dpi = GetDpiForWindow(hwnd); if (!dpi) dpi = 96;
@@ -108,6 +143,12 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
                     if (!controller) return S_OK;
                     g_controller = controller;
                     g_controller->get_CoreWebView2(&g_webview);
+                    { ComPtr<ICoreWebView2Settings> s0;
+                      if (SUCCEEDED(g_webview->get_Settings(&s0))) {
+                          ComPtr<ICoreWebView2Settings9> s9;
+                          if (SUCCEEDED(s0.As(&s9)) && s9)
+                              s9->put_IsNonClientRegionSupportEnabled(TRUE);
+                      } }
                     RECT r; GetClientRect(hwnd, &r); g_controller->put_Bounds(r);
                     { ComPtr<ICoreWebView2_3> wv3;
                       if (SUCCEEDED(g_webview.As(&wv3)))
