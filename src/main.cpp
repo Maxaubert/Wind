@@ -225,8 +225,9 @@ static void RunTick(TickState& t) {
         }
         if (recenter) { POINT pt; GetCursorPos(&pt); t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y); t.lastSetVirtual = pt; }
         // Resolve the pan delta. FREE: the OS cursor's own motion since we last placed it - Windows'
-        // pointer acceleration is already applied, so the magnifier matches the real cursor. LOCKED:
-        // a game has the cursor clipped/recentered, so pan from raw mickeys scaled by cursorSensitivity
+        // pointer acceleration is already applied, so we auto-match the real cursor (DPI/accel), then
+        // scale by cursorSensitivity as a speed knob (1.0 = exact match, the default). LOCKED: a game
+        // has the cursor clipped/recentered, so pan from raw mickeys scaled by the same cursorSensitivity
         // (acceleration doesn't apply to relative-mouse game input).
         POINT cur; GetCursorPos(&cur);
         int curDx = cur.x - t.lastSetVirtual.x;
@@ -243,7 +244,8 @@ static void RunTick(TickState& t) {
             dx = (int)std::lround(rawDx * t.cfg.cursorSensitivity);
             dy = (int)std::lround(rawDy * t.cfg.cursorSensitivity);
         } else {
-            dx = curDx; dy = curDy;
+            dx = (int)std::lround(curDx * t.cfg.cursorSensitivity);   // auto-matched OS delta, speed-scaled
+            dy = (int)std::lround(curDy * t.cfg.cursorSensitivity);
         }
         // Defensive: bound one tick's pan to the monitor span so a stray cursor jump (e.g. the OS
         // cursor briefly escaping to another monitor) cannot teleport the lens. cx_ also clamps.

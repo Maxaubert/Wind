@@ -27,7 +27,7 @@
   <div class="content">
     <main>
       <h1>{section.label}</h1>
-      {#each section.rows as r}<Row row={r} value={values[r.key]} onChange={v => change(r.key, v)} />{/each}
+      {#each section.rows as r}<Row row={r} value={values[r.key]} disabled={r.dependsOn && Number(values[r.dependsOn]) !== 1} onChange={v => change(r.key, v)} />{/each}
     </main>
     <footer>
       <span class="hint">{dirty ? 'Unsaved changes' : 'All changes saved'}</span>
