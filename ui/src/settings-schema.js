@@ -15,6 +15,7 @@ export const sections = [
   ]},
   { id: 'display', label: 'Display', rows: [
     { key: 'bilinear',    type: 'toggle', label: 'Smooth scaling', desc: 'Bilinear vs crisp pixels.', def: 1 },
+    { key: 'sharpness',   type: 'slider', label: 'Sharpness', desc: 'Crisps the magnified image (0 = off).', min: 0, max: 1, step: 0.05, def: 0.0 },
     { key: 'brightness',  type: 'slider', label: 'Brightness', min: 0.5, max: 1.5, step: 0.05, def: 1.0 },
     { key: 'hdrTonemap',  type: 'toggle', label: 'HDR tonemap', desc: 'HDR10 -> SDR when HDR is on.', def: 1 },
     { key: 'multiMonitor',type: 'toggle', label: 'Follow cursor monitor', def: 1 },

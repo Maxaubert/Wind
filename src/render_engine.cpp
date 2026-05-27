@@ -707,10 +707,12 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
         float bright = (p.brightness > 0.0) ? (float)p.brightness : 1.0f;
         float hdrMode = capFp16 ? 1.0f : 0.0f;
         float scRgbScale = (capFp16 && sdrWhiteNits > 1.0) ? (float)(80.0 / sdrWhiteNits) : 1.0f;
+        float sharp = (p.sharpness > 0.0) ? (float)p.sharpness : 0.0f;
         MagCB cbv{
             (float)(p.srcLeft / sw), (float)(p.srcTop / sh),
             (float)((p.srcLeft + viewW) / sw), (float)((p.srcTop + viewH) / sh),
-            bright, hdrMode, scRgbScale, 0.0f };
+            bright, hdrMode, scRgbScale, sharp,
+            (sw > 0 ? 1.0f / (float)sw : 0.0f), (sh > 0 ? 1.0f / (float)sh : 0.0f), 0.0f, 0.0f };
         c->UpdateSubresource(cb.Get(), 0, nullptr, &cbv, 0, 0);
         c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         c->VSSetShader(vs.Get(), nullptr, 0);

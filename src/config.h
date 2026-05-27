@@ -47,6 +47,9 @@ struct Config {
     // "always" = always draw it; "never" = never draw it.
     std::string cursorVisibility = "auto";
     int    bilinear = 1;             // 1 = bilinear sampling (smooth), 0 = point (crisp pixels)
+    // Adaptive sharpening of the magnified image (counters upscale blur; crisps text/detail).
+    // 0 = off (cheapest, single tap). 0.1-1.0 = strength. Folded into the magnify pass (no extra pass).
+    double sharpness = 0.0;
     // z-order band for the overlay (needs the UIAccess build, run from Program Files):
     // 0 = normal topmost; 16 = ZBID_SYSTEM_TOOLS (above the shell, covers Start/taskbar/tray).
     int    zorderBand = 0;

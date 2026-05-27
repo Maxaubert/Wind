@@ -121,6 +121,7 @@ static void FillRenderParams(RenderFrameParams& p, const MapResult& r, const Con
     p.clickDesktopX = r.clickDesktopX + mon.x; p.clickDesktopY = r.clickDesktopY + mon.y;
     p.cursorScaleWithZoom = (cfg.cursorScaleWithZoom != 0);
     p.bilinear = (cfg.bilinear != 0);
+    p.sharpness = cfg.sharpness;
     p.brightness = cfg.brightness;
     p.cursorMode = CursorModeFromCfg(cfg);
     // In DwmFlush mode we present immediately (no vsync block) and let DwmFlush() pace.
