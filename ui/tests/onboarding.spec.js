@@ -20,8 +20,11 @@ test('onboarding walks 3 steps, applies keys on advance, sets onboarded', async 
   await expect(page.getByRole('heading', { name: 'Welcome to Wind' })).toBeVisible();
   await page.getByRole('button', { name: 'Get started' }).click();
   await expect(page.getByRole('heading', { name: 'Set your zoom keys' })).toBeVisible();
+  // Capture a key for Zoom in (writes setConfig live; no Apply step in onboarding).
+  await page.getByText('Zoom in', { exact: true }).locator('xpath=../..').getByRole('button').click();
+  await page.keyboard.press('F2'); // keyCode 113
+  expect(await page.evaluate(() => window.__sets.some(s => s.key === 'zoomInVk' && s.value === '113'))).toBeTruthy();
   await page.getByRole('button', { name: 'Next' }).click();
-  expect(await page.evaluate(() => window.__sets.some(s => s.key === 'zoomInButton'))).toBeTruthy();
   await expect(page.getByRole('heading', { name: "You're all set" })).toBeVisible();
   await page.getByRole('button', { name: 'Open Settings' }).click();
   expect(await page.evaluate(() => window.__sets.some(s => s.key === 'onboarded' && s.value === '1'))).toBeTruthy();

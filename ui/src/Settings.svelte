@@ -23,6 +23,14 @@
     values = v; saved = { ...v };
     theme = currentTheme(cfg); applyTheme(theme);
   });
+  // Live setter for keybind rows: writes setConfig immediately AND updates both staged + saved
+  // so the rebind is effective at once (the core hot-reloads it, the hook stops swallowing the
+  // previous binding) and the Apply/Discard footer does NOT show keybind changes as dirty.
+  function live(patch) {
+    for (const k of Object.keys(patch)) setConfig(k, patch[k]);
+    values = { ...values, ...patch };
+    saved = { ...saved, ...patch };
+  }
   function change(keyOrPatch, val) {
     // Atomic multi-key form: change({k1:v1, k2:v2}) updates both in a single render. The keybind
     // capture uses this so its sibling-key update (vk + button) lands as one consistent state.
@@ -63,7 +71,7 @@
         <Section id={s.id} label={s.label} desc={s.desc}>
           {#each s.rows as r}
             {#if !r.requires || Number(values[r.requires]) === 1}
-              <Row row={r} value={values[r.key]} {values} set={change}
+              <Row row={r} value={values[r.key]} {values} set={change} {live}
                    disabled={r.dependsOn && Number(values[r.dependsOn]) !== 1}
                    onChange={(val) => change(r.key, val)} />
             {/if}

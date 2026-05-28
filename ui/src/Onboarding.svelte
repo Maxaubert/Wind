@@ -5,16 +5,14 @@
   export let onDone;
   let cur = 0;
   const N = 3;
-  // Staged key bindings (defaults match the core). Written on advancing past the keys step.
-  let keys = { zoomInButton:'2', zoomInVk:'33', zoomOutButton:'1', zoomOutVk:'34' };
-  // Accept (key, val) or (patch) so the keybind capture can write both sibling keys atomically.
-  function setKey(k, v) {
-    if (k && typeof k === 'object') { keys = { ...keys, ...k }; return; }
-    keys = { ...keys, [k]: v };
+  // Keybinds start blank (Unbound). The KeybindCapture below writes setConfig live as the user
+  // captures, so untouched bindings keep whatever the ini already had (defaults for a fresh ini).
+  let keys = { zoomInButton:'0', zoomInVk:'0', zoomOutButton:'0', zoomOutVk:'0' };
+  function live(patch) {
+    for (const k of Object.keys(patch)) setConfig(k, patch[k]);
+    keys = { ...keys, ...patch };
   }
-  function applyKeys() { for (const k of Object.keys(keys)) setConfig(k, keys[k]); }
   function next() {
-    if (cur === 1) applyKeys();          // leaving "Set your zoom keys" applies them
     if (cur === N - 1) { setConfig('onboarded', '1'); onDone(); return; }
     cur += 1;
   }
@@ -60,9 +58,9 @@
       <h2>Set your zoom keys</h2>
       <p>Pick the buttons you'll hold to zoom. Mouse side-buttons work great, or choose keyboard keys.</p>
       <div class="orow"><div class="ot"><div class="rlabel">Zoom in</div><div class="rdesc">Hold to magnify</div></div>
-        <div class="rctl"><KeybindCapture row={zoomInRow} values={keys} onChange={setKey} /></div></div>
+        <div class="rctl"><KeybindCapture row={zoomInRow} values={keys} onChange={live} /></div></div>
       <div class="orow"><div class="ot"><div class="rlabel">Zoom out</div><div class="rdesc">Hold to zoom back</div></div>
-        <div class="rctl"><KeybindCapture row={zoomOutRow} values={keys} onChange={setKey} /></div></div>
+        <div class="rctl"><KeybindCapture row={zoomOutRow} values={keys} onChange={live} /></div></div>
     </div>
     <!-- Step 2: You're all set. Ported .bigring check-ring SVG. -->
     <div class="step center" class:show={cur === 2}>

@@ -2,7 +2,8 @@
   import KeybindCapture from './KeybindCapture.svelte';
   export let row, value, onChange, disabled = false;
   export let values = {};   // keybind rows read sibling keys (e.g. zoomInVk) from here
-  export let set = () => {}; // two-arg setter set(key, val); used by keybind/button rows
+  export let set = () => {}; // two-arg setter set(key, val); used by button rows
+  export let live = () => {}; // live patch setter (writes setConfig immediately); used by keybind rows
   const num = v => Number(v);
 </script>
 {#if row.type === 'about'}
@@ -32,7 +33,7 @@
           {#each row.options as o}<option value={o}>{o}</option>{/each}
         </select>
       {:else if row.type === 'keybind'}
-        <KeybindCapture {row} {values} onChange={set} {disabled} />
+        <KeybindCapture {row} {values} onChange={live} {disabled} />
       {:else if row.type === 'button'}
         <button class="linkbtn" {disabled} on:click={() => set('__action', row.action)}>{row.btn}</button>
       {/if}

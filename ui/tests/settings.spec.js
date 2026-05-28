@@ -45,11 +45,12 @@ test('changes stage until Apply, then setConfig fires', async ({ page }) => {
   expect(sets.some(s => s.key === 'smoothZoom' && s.value === '1')).toBeTruthy();
 });
 
-test('keybind capture writes a VK on keyup', async ({ page }) => {
+test('keybind capture writes a VK on keyup (live, no Apply needed)', async ({ page }) => {
   await page.goto('/');
   await page.getByText('Zoom in', { exact: true }).locator('xpath=../..').getByRole('button').click();
   await page.keyboard.press('F2'); // keyCode 113; fires both keydown and keyup
-  await page.getByRole('button', { name: 'Apply' }).click();
+  // Keybind writes are live (KeybindCapture calls setConfig immediately so the magnifier core
+  // hot-reloads the new key and the hook stops swallowing the previous binding). No Apply step.
   const sets = await page.evaluate(() => window.__sets);
   expect(sets.some(s => s.key === 'zoomInVk' && s.value === '113')).toBeTruthy();
 });
