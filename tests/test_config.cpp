@@ -108,6 +108,14 @@ TEST_CASE("alternate zoom VK keys default 0 and parse") {
     CHECK(c.zoomInVk2 == 112);
     CHECK(c.zoomOutVk2 == 113);
 }
+TEST_CASE("hide cursor hotkey defaults 0 and parses") {
+    Config d = ParseConfig("");
+    CHECK(d.hideCursorVk == 0);
+    CHECK(d.hideCursorMods == 0);
+    Config c = ParseConfig("hideCursorVk=72\nhideCursorMods=1\n");
+    CHECK(c.hideCursorVk == 72);  // 'H'
+    CHECK(c.hideCursorMods == 1); // Ctrl
+}
 TEST_CASE("modifier masks default 0 and parse") {
     Config d = ParseConfig("");
     CHECK(d.zoomInMods == 0);  CHECK(d.zoomOutMods == 0);

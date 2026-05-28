@@ -22,6 +22,12 @@ struct Config {
     int    zoomInMods2      = 0;
     int    zoomOutMods2     = 0;
     int    recenterVk       = 0;     // VK code; 0 = unbound. Tap to recenter the lens on the cursor.
+    // Hotkey to toggle the magnified cursor's visibility while zoomed. Edge-detected in the tick
+    // loop and flips a runtime-only bool (NEVER written back to the ini), so pressing it does not
+    // trigger the config hot-reload and the zoom level is preserved. 0 = unbound. Modifier mask
+    // uses the same bit layout as the zoom combos.
+    int    hideCursorVk     = 0;
+    int    hideCursorMods   = 0;
     double maxLevel         = 8.0;   // how FAR you can zoom (does not affect zoom SPEED)
     // --- Zoom experience (see docs/superpowers/specs/2026-05-26-configurable-zoom-design.md) ---
     // Per-direction rate multipliers (1.0 = default speed); apply in BOTH linear and smooth modes.

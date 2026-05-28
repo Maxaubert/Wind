@@ -92,6 +92,8 @@ struct TickState {
     double prevLvl = 1.0;
     int    hz = 60;                            // resolved tick/refresh rate (auto-detected)
     bool   recenterKeyWasDown = false;         // edge-detect the recenterVk key
+    bool   cursorHidden       = false;         // runtime-only override (no ini write, no hot-reload)
+    HWND   hwnd               = nullptr;       // owning message window (for RegisterHotKey)
     // Frame-pacing diagnostics (diagnostics=1): a 2 s window of loop-interval stats.
     double diagAccum = 0.0, diagSumDt = 0.0, diagMaxDt = 0.0;
     int    diagFrames = 0, diagHitches = 0;
@@ -140,6 +142,10 @@ static void DiagLog(const char* fmt, ...) {
     fputc('\n', f); fclose(f);
 }
 
+// Forward-declared so RunTick can re-register the hide-cursor hotkey on config hot-reload;
+// the definition (with the static state it manages) lives near WndProc / kHideCursorHotkeyId.
+static void RegisterHideCursorHotkey(HWND hwnd, int vk, int mods);
+
 // One magnifier tick: advance zoom, hot-reload config, then pan/draw via the render engine.
 // Pure of any pacing wait - the caller paces. Safe to call from the main loop or from a
 // WM_TIMER during a modal loop.
@@ -176,6 +182,9 @@ static void RunTick(TickState& t) {
             // but the mouse mapping is captured once in g_input.start at app launch).
             if (nc.zoomInButton != t.cfg.zoomInButton || nc.zoomOutButton != t.cfg.zoomOutButton) {
                 g_input.setButtons(nc.zoomInButton, nc.zoomOutButton);
+            }
+            if (nc.hideCursorVk != t.cfg.hideCursorVk || nc.hideCursorMods != t.cfg.hideCursorMods) {
+                RegisterHideCursorHotkey(t.hwnd, nc.hideCursorVk, nc.hideCursorMods);
             }
             t.cfg = nc;   // pick up renderer knobs (smoothing, filter, cursor scale, zoom speed)
             t.zoom = ZoomController(1.0, nc.maxLevel);
@@ -219,6 +228,9 @@ static void RunTick(TickState& t) {
     bool recenterDown = keyDown(t.cfg.recenterVk);
     if (recenterDown && !t.recenterKeyWasDown) recenter = true;
     t.recenterKeyWasDown = recenterDown;
+    // Hide-cursor hotkey is registered via RegisterHotKey (WndProc WM_HOTKEY toggles cursorHidden);
+    // this both suppresses the key from reaching other apps and gives rising-edge semantics for
+    // free (MOD_NOREPEAT). No polled check needed here.
     double lvl = t.zoom.level();
 
     int rawDx, rawDy; g_input.drainRaw(rawDx, rawDy);
@@ -275,6 +287,7 @@ static void RunTick(TickState& t) {
         MapResult r = t.mapper.update(dx, dy, lvl);
         RenderFrameParams p{};
         FillRenderParams(p, r, t.cfg, t.mon, lvl);
+        if (t.cursorHidden) p.cursorMode = 2;   // hotkey override; FillRenderParams already set 0/1/2 from cfg
         t.renderEngine.renderFrame(p);
         // renderFrame SetCursorPos'd the OS cursor to clickDesktop+origin; remember it so next tick's
         // GetCursorPos delta measures only the user's hand motion since.
@@ -313,9 +326,39 @@ static void RunTick(TickState& t) {
 // render overlay covers the screen and the OS cursor is hidden - so there's always a
 // keyboard-only escape. The clean exit path restores the cursor and resets zoom to 1x.
 static const int kQuitHotkeyId = 0xB001;
+static const int kHideCursorHotkeyId = 0xB002;
+
+// Translate our bit mask (1=Ctrl, 2=Alt, 4=Shift, 8=Win) into Win32 MOD_* flags for RegisterHotKey.
+// MOD_NOREPEAT is always added so holding the key fires the hotkey once, not on auto-repeat.
+static UINT WinModsFromBitmask(int mods) {
+    UINT m = MOD_NOREPEAT;
+    if (mods & 1) m |= MOD_CONTROL;
+    if (mods & 2) m |= MOD_ALT;
+    if (mods & 4) m |= MOD_SHIFT;
+    if (mods & 8) m |= MOD_WIN;
+    return m;
+}
+
+// Hot-reloadable registration of the hide-cursor hotkey. RegisterHotKey suppresses the key from
+// reaching other apps and delivers WM_HOTKEY to the owning window. Re-register on config change.
+static int g_registeredHideVk = 0;
+static int g_registeredHideMods = 0;
+static void RegisterHideCursorHotkey(HWND hwnd, int vk, int mods) {
+    if (g_registeredHideVk != 0) {
+        UnregisterHotKey(hwnd, kHideCursorHotkeyId);
+        g_registeredHideVk = 0; g_registeredHideMods = 0;
+    }
+    if (vk != 0 && RegisterHotKey(hwnd, kHideCursorHotkeyId, WinModsFromBitmask(mods), vk)) {
+        g_registeredHideVk = vk; g_registeredHideMods = mods;
+    }
+}
 
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == WM_HOTKEY && wp == kQuitHotkeyId) { PostQuitMessage(0); return 0; }
+    if (msg == WM_HOTKEY && wp == kHideCursorHotkeyId) {
+        if (g_tick) g_tick->cursorHidden = !g_tick->cursorHidden;
+        return 0;
+    }
     // Keep ticking while a modal loop (the tray menu) owns the thread. The tray sets a timer
     // around TrackPopupMenu; its WM_TIMER lands here so the lens doesn't freeze. (No other
     // WM_TIMER exists in this process.)
@@ -376,6 +419,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // Safety: global Ctrl+Alt+Q quits cleanly from anywhere (works even with the overlay up
     // and the cursor hidden). If the combo is already taken, the tray Quit still works.
     RegisterHotKey(hwnd, kQuitHotkeyId, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'Q');
+    RegisterHideCursorHotkey(hwnd, cfg.hideCursorVk, cfg.hideCursorMods);
 
     if (!g_input.start(cfg.zoomInButton, cfg.zoomOutButton, /*swallow=*/true)) {
         MessageBoxW(nullptr, L"Failed to install the mouse hook.", L"Wind", MB_ICONERROR);
@@ -398,6 +442,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     Tray::Add(hwnd, hInst);
 
     TickState ts(renderEngine, startupMon, cfg);
+    ts.hwnd = hwnd;                       // so RunTick can re-register the hide-cursor hotkey
     g_tick = &ts;   // so the WM_TIMER tick (during the tray menu's modal loop) can run
 
     // Autonomous verification hook: WIND_SELFTEST drives the real integrated render path at a
@@ -539,6 +584,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     if (timer) CloseHandle(timer);
     if (ts.configWatch && ts.configWatch != INVALID_HANDLE_VALUE) FindCloseChangeNotification(ts.configWatch);
     UnregisterHotKey(hwnd, kQuitHotkeyId);
+    UnregisterHotKey(hwnd, kHideCursorHotkeyId);
     renderEngine.shutdown();   // restores cursor + tears down D3D/overlay
     g_input.stop();
     Tray::Remove();

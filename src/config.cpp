@@ -24,6 +24,8 @@ Config ParseConfig(const std::string& text) {
             if (key == "zoomInButton")          c.zoomInButton = std::stoi(val);
             else if (key == "zoomOutButton")    c.zoomOutButton = std::stoi(val);
             else if (key == "recenterVk")       c.recenterVk = std::stoi(val);
+            else if (key == "hideCursorVk")     c.hideCursorVk = std::stoi(val);
+            else if (key == "hideCursorMods")   c.hideCursorMods = std::stoi(val);
             else if (key == "zoomInVk")         c.zoomInVk = std::stoi(val);
             else if (key == "zoomOutVk")        c.zoomOutVk = std::stoi(val);
             else if (key == "zoomInVk2")        c.zoomInVk2 = std::stoi(val);
