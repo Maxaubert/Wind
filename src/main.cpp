@@ -171,6 +171,12 @@ static void RunTick(TickState& t) {
         if (m != t.lastMtime) {
             t.lastMtime = m;
             Config nc = LoadConfig(L"magnifier.ini");
+            // Re-bind the hook's button mapping if the user changed it via the config UI; without
+            // this the hook would keep firing the OLD button (the new VK works via GetAsyncKeyState
+            // but the mouse mapping is captured once in g_input.start at app launch).
+            if (nc.zoomInButton != t.cfg.zoomInButton || nc.zoomOutButton != t.cfg.zoomOutButton) {
+                g_input.setButtons(nc.zoomInButton, nc.zoomOutButton);
+            }
             t.cfg = nc;   // pick up renderer knobs (smoothing, filter, cursor scale, zoom speed)
             t.zoom = ZoomController(1.0, nc.maxLevel);
             double ocx = t.mapper.centerX(), ocy = t.mapper.centerY();   // preserve position

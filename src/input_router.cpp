@@ -23,11 +23,20 @@ static int xbuttonIdFromHook(WPARAM wParam, LPARAM lParam) {
 
 // Shared by the WH_MOUSE_LL hook (below) and main's WM_INPUT path: map an XBUTTON id to held.
 void InputRouter::setButtonState(int xbuttonId, bool down) {
-    if (xbuttonId == inButtonId_)  state_.inHeld.store(down);
-    if (xbuttonId == outButtonId_) state_.outHeld.store(down);
+    if (xbuttonId == inButtonId_.load(std::memory_order_relaxed))  state_.inHeld.store(down);
+    if (xbuttonId == outButtonId_.load(std::memory_order_relaxed)) state_.outHeld.store(down);
 }
 bool InputRouter::isZoomButton(int xbuttonId) const {
-    return xbuttonId == inButtonId_ || xbuttonId == outButtonId_;
+    return xbuttonId == inButtonId_.load(std::memory_order_relaxed)
+        || xbuttonId == outButtonId_.load(std::memory_order_relaxed);
+}
+void InputRouter::setButtons(int inButtonId, int outButtonId) {
+    inButtonId_.store(inButtonId, std::memory_order_relaxed);
+    outButtonId_.store(outButtonId, std::memory_order_relaxed);
+    // Clear any held state from the previous mapping (else a press of the OLD button that was in
+    // progress would never get its UP event matched and inHeld/outHeld would stick true).
+    state_.inHeld.store(false);
+    state_.outHeld.store(false);
 }
 
 static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
@@ -64,7 +73,10 @@ static DWORD WINAPI HookThreadProc(LPVOID) {
 }
 
 bool InputRouter::start(int inButtonId, int outButtonId, bool swallow) {
-    g_router = this; inButtonId_ = inButtonId; outButtonId_ = outButtonId; swallow_ = swallow;
+    g_router = this;
+    inButtonId_.store(inButtonId, std::memory_order_relaxed);
+    outButtonId_.store(outButtonId, std::memory_order_relaxed);
+    swallow_ = swallow;
     // Diagnostic: WIND_NOHOOK=1 skips the low-level mouse hook entirely (button state still arrives
     // via Raw Input). Kept as a fallback / A-B toggle; side-button swallowing is disabled in it.
     if (GetEnvironmentVariableW(L"WIND_NOHOOK", nullptr, 0) > 0) {

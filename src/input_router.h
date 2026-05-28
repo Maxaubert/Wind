@@ -26,10 +26,14 @@ public:
     bool isZoomButton(int xbuttonId) const;
     // Whether the hook should swallow the configured zoom buttons (set in start()).
     bool swallowEnabled() const { return swallow_; }
+    // Live-rebind the configured zoom buttons (called from the tick thread on hot-reload).
+    // Atomic so the hook thread's reads in setButtonState/isZoomButton stay race-free, and the
+    // held flags are cleared so a stale press of the previous button does not stick.
+    void setButtons(int inButtonId, int outButtonId);
 private:
     InputState state_;
-    int inButtonId_ = 2;   // 1 = XBUTTON1, 2 = XBUTTON2 (set in start())
-    int outButtonId_ = 1;
+    std::atomic<int> inButtonId_{2};   // 1 = XBUTTON1, 2 = XBUTTON2 (set in start())
+    std::atomic<int> outButtonId_{1};
     bool swallow_ = true;
 };
 
