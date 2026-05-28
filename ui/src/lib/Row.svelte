@@ -1,5 +1,6 @@
 <script>
   import KeybindCapture from './KeybindCapture.svelte';
+  import CustomSelect from './CustomSelect.svelte';
   export let row, value, onChange, disabled = false;
   export let values = {};   // keybind rows read sibling keys (e.g. zoomInVk) from here
   export let set = () => {}; // two-arg setter set(key, val); used by button rows
@@ -29,9 +30,7 @@
         <input type="range" {disabled} min={row.min} max={row.max} step={row.step} value={value} on:input={e => onChange(e.target.value)} />
         <span class="val">{value}</span>
       {:else if row.type === 'select'}
-        <select {disabled} value={value} on:change={e => onChange(e.target.value)}>
-          {#each row.options as o}<option value={o}>{o}</option>{/each}
-        </select>
+        <CustomSelect {value} options={row.options} {disabled} onChange={onChange} />
       {:else if row.type === 'keybind'}
         <KeybindCapture {row} {values} onChange={live} {disabled} />
       {:else if row.type === 'button'}
