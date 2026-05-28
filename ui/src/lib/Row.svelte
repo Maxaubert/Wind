@@ -5,27 +5,40 @@
   export let set = () => {}; // two-arg setter set(key, val); used by keybind/button rows
   const num = v => Number(v);
 </script>
-<div class="row" class:disabled>
-  <div class="meta">{#if row.label}<div class="label">{row.label}</div>{/if}{#if row.desc}<div class="desc">{row.desc}</div>{/if}</div>
-  <div class="ctl">
-    {#if row.type === 'toggle'}
-      <input type="checkbox" {disabled} checked={num(value) === 1} on:change={e => onChange(e.target.checked ? 1 : 0)} />
-    {:else if row.type === 'slider'}
-      <input type="range" {disabled} min={row.min} max={row.max} step={row.step} value={value} on:input={e => onChange(e.target.value)} />
-      <span class="val">{value}</span>
-    {:else if row.type === 'select'}
-      <select {disabled} value={value} on:change={e => onChange(e.target.value)}>
-        {#each row.options as o}<option value={o}>{o}</option>{/each}
-      </select>
-    {:else if row.type === 'keybind'}
-      <KeybindCapture {row} {values} onChange={set} {disabled} />
-    {:else if row.type === 'button'}
-      <button class="linkbtn" {disabled} on:click={() => set('__action', row.action)}>{row.btn}</button>
-    {:else if row.type === 'about'}
-      <div class="about">Wind, a fast magnifier. <a href="https://github.com/Maxaubert/Wind" target="_blank" rel="noopener">GitHub</a></div>
-    {/if}
+{#if row.type === 'about'}
+  <div class="about-hero">
+    <svg class="logo" viewBox="0 0 16 16" width="96" height="96" fill="none" stroke="currentColor"
+         stroke-width="1.5" stroke-linecap="round">
+      <path d="M2 5.5h8.5a2 2 0 1 0-2-2"/>
+      <path d="M2 9h11a2 2 0 1 1-2 2"/>
+      <path d="M2 12.5h6.5a1.7 1.7 0 1 1-1.7 1.7"/>
+    </svg>
+    <div class="name">Wind</div>
+    <p class="tag">A fast magnifier that lives in your tray.</p>
+    <p class="version">v0.9.0</p>
+    <a class="link" href="https://github.com/Maxaubert/Wind" target="_blank" rel="noopener">View on GitHub</a>
   </div>
-</div>
+{:else}
+  <div class="row" class:disabled>
+    <div class="meta">{#if row.label}<div class="label">{row.label}</div>{/if}{#if row.desc}<div class="desc">{row.desc}</div>{/if}</div>
+    <div class="ctl">
+      {#if row.type === 'toggle'}
+        <input type="checkbox" {disabled} checked={num(value) === 1} on:change={e => onChange(e.target.checked ? 1 : 0)} />
+      {:else if row.type === 'slider'}
+        <input type="range" {disabled} min={row.min} max={row.max} step={row.step} value={value} on:input={e => onChange(e.target.value)} />
+        <span class="val">{value}</span>
+      {:else if row.type === 'select'}
+        <select {disabled} value={value} on:change={e => onChange(e.target.value)}>
+          {#each row.options as o}<option value={o}>{o}</option>{/each}
+        </select>
+      {:else if row.type === 'keybind'}
+        <KeybindCapture {row} {values} onChange={set} {disabled} />
+      {:else if row.type === 'button'}
+        <button class="linkbtn" {disabled} on:click={() => set('__action', row.action)}>{row.btn}</button>
+      {/if}
+    </div>
+  </div>
+{/if}
 <style>
   .row{display:flex;justify-content:space-between;align-items:center;gap:24px;padding:14px 0;border-bottom:1px solid var(--line)}
   .label{font-weight:600} .desc{font-size:.85em;color:var(--muted)} .val{margin-left:8px;min-width:3ch;display:inline-block}
@@ -33,5 +46,13 @@
   /* .linkbtn ported from mockups/config-ui-onboarding.html. */
   .linkbtn{padding:5px 11px;border-radius:7px;border:1px solid var(--line);background:transparent;font-size:12px;color:var(--text);cursor:pointer}
   .linkbtn:disabled{opacity:.5;cursor:default}
-  .about{color:var(--muted)} .about a{color:var(--accent);text-decoration:none} .about a:hover{text-decoration:underline}
+  /* About hero: large centered Wind logo fills the section so it has real height (helps the
+     scroll-spy reach About) and the bottom of the scroll area isn't empty. */
+  .about-hero{padding:48px 0 64px;text-align:center;color:var(--text);display:flex;flex-direction:column;align-items:center}
+  .about-hero .logo{color:var(--accent-icon);margin:0 0 18px}
+  .about-hero .name{font-size:30px;font-weight:700;letter-spacing:-.4px;margin-bottom:6px}
+  .about-hero .tag{color:var(--muted);margin:0 0 4px;font-size:14px}
+  .about-hero .version{color:var(--muted);font-size:12.5px;margin:0 0 22px}
+  .about-hero .link{color:var(--accent);text-decoration:none;font-size:13px;padding:8px 16px;border:1px solid var(--line);border-radius:7px;display:inline-block}
+  .about-hero .link:hover{background:var(--hover)}
 </style>

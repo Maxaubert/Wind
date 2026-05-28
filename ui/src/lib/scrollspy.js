@@ -1,6 +1,9 @@
 // Svelte action on the scroll container. opts: { sectionIds, onActive }.
 // Click-to-scroll is done by the rail (it calls scrollToSection); this watches scroll and reports
 // the active section (the last one whose top has passed the 70px band), matching the mockup.
+// Bottom-of-scroll fallback: when the container is scrolled to the very bottom, force the last
+// section active so the rail still activates About even when its header cannot reach the top band
+// (the scroll has run out of room).
 export function scrollspy(node, opts) {
   let { sectionIds, onActive } = opts;
   function onScroll() {
@@ -8,6 +11,9 @@ export function scrollspy(node, opts) {
     for (const id of sectionIds) {
       const el = node.querySelector('#sec-' + id);
       if (el && el.offsetTop - node.scrollTop <= 70) cur = id;
+    }
+    if (node.scrollHeight - (node.scrollTop + node.clientHeight) < 4) {
+      cur = sectionIds[sectionIds.length - 1];
     }
     onActive(cur);
   }

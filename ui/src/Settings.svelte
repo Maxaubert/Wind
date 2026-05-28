@@ -76,10 +76,11 @@
   .tbtn { width: 46px; height: 100%; display: grid; place-items: center; color: var(--muted); border: 0; background: transparent; cursor: pointer; }
   .tbtn:hover { background: var(--hover); color: var(--text); }
   .tbtn.close:hover { background: #e81123; color: #fff; }
-  .scroll { flex: 1; overflow-y: auto; position: relative; padding: 0 30px 50vh; scroll-behavior: smooth; }
+  .scroll { flex: 1; overflow-y: auto; position: relative; padding: 0 30px 24px; scroll-behavior: smooth; }
   /* Extra breathing room between sections (Section.svelte's .sec lives in another scope,
-     so use :global to reach it). The 50vh padding-bottom above lets the last (short) section
-     scroll its header into the scroll-spy top band so the About rail icon can activate. */
+     so use :global to reach it). The About section's large logo hero gives the last section
+     real height so its header can reach the scroll-spy top band; the scrollspy also has a
+     bottom-of-scroll fallback that activates the last section when the container hits bottom. */
   :global(.sec + .sec) { margin-top: 40px; }
   footer { flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 12px 26px; border-top: 1px solid var(--line); }
   .hint { margin-right: auto; color: var(--muted); font-size: 11.5px; }
