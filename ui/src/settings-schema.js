@@ -19,6 +19,7 @@ export const sections = [
     { key:'cursorSmoothing',   type:'slider', label:'Pan smoothing', desc:'0 = off, higher = smoother.', min:0, max:0.95, step:0.05, def:0.8 },
     { key:'cursorScaleWithZoom', type:'toggle', label:'Scale cursor with zoom', def:1 },
     { key:'cursorVisibility', type:'select', label:'Cursor visibility', options:['auto','always','never'], def:'auto' },
+    { key:'__hideCursor', type:'keybind', label:'Hide cursor (hotkey)', desc:'Press to instantly toggle the magnified cursor. Does not reset zoom.', vkKey:'hideCursorVk', modsKey:'hideCursorMods' },
   ]},
   { id:'display', label:'Display', icon:'display', desc:'Image quality of the magnified view.', rows: [
     { key:'bilinear',    type:'toggle', label:'Smooth scaling', desc:'Bilinear vs crisp pixels.', def:1 },

@@ -92,6 +92,8 @@ struct TickState {
     double prevLvl = 1.0;
     int    hz = 60;                            // resolved tick/refresh rate (auto-detected)
     bool   recenterKeyWasDown = false;         // edge-detect the recenterVk key
+    bool   hideCursorKeyWasDown = false;       // edge-detect the hide-cursor hotkey
+    bool   cursorHidden       = false;         // runtime-only override (no ini write, no hot-reload)
     // Frame-pacing diagnostics (diagnostics=1): a 2 s window of loop-interval stats.
     double diagAccum = 0.0, diagSumDt = 0.0, diagMaxDt = 0.0;
     int    diagFrames = 0, diagHitches = 0;
@@ -219,6 +221,12 @@ static void RunTick(TickState& t) {
     bool recenterDown = keyDown(t.cfg.recenterVk);
     if (recenterDown && !t.recenterKeyWasDown) recenter = true;
     t.recenterKeyWasDown = recenterDown;
+    // Hide-cursor hotkey: rising edge toggles a runtime-only bool that overrides cursorMode at
+    // render time. No ini write, so the config hot-reload path never fires from this and the
+    // zoom level is preserved (click hotkey -> cursor disappears, zoom unchanged).
+    bool hideCursorDown = comboHeld(t.cfg.hideCursorVk, t.cfg.hideCursorMods);
+    if (hideCursorDown && !t.hideCursorKeyWasDown) t.cursorHidden = !t.cursorHidden;
+    t.hideCursorKeyWasDown = hideCursorDown;
     double lvl = t.zoom.level();
 
     int rawDx, rawDy; g_input.drainRaw(rawDx, rawDy);
@@ -275,6 +283,7 @@ static void RunTick(TickState& t) {
         MapResult r = t.mapper.update(dx, dy, lvl);
         RenderFrameParams p{};
         FillRenderParams(p, r, t.cfg, t.mon, lvl);
+        if (t.cursorHidden) p.cursorMode = 2;   // hotkey override; FillRenderParams already set 0/1/2 from cfg
         t.renderEngine.renderFrame(p);
         // renderFrame SetCursorPos'd the OS cursor to clickDesktop+origin; remember it so next tick's
         // GetCursorPos delta measures only the user's hand motion since.
