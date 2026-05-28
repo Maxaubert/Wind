@@ -17,7 +17,8 @@
     const cfg = await getConfig();
     const v = {};
     for (const s of sections) for (const r of s.rows) if (r.key[0] !== '_') v[r.key] = (r.key in cfg) ? cfg[r.key] : r.def;
-    const kbDefaults = { zoomInButton:'2', zoomInVk:'33', zoomOutButton:'1', zoomOutVk:'34' };
+    const kbDefaults = { zoomInButton:'2', zoomInVk:'33', zoomOutButton:'1', zoomOutVk:'34',
+                         zoomInVk2:'0', zoomOutVk2:'0' };
     for (const k of Object.keys(kbDefaults)) v[k] = (k in cfg) ? cfg[k] : kbDefaults[k];
     values = v; saved = { ...v };
     theme = currentTheme(cfg); applyTheme(theme);

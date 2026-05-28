@@ -182,8 +182,8 @@ static void RunTick(TickState& t) {
     // Effective held state = mouse side-button (set by the hook/raw input) OR keyboard key held
     // (polled globally, no extra hook). Lets users without side-buttons zoom from the keyboard.
     auto keyDown = [](int vk) { return vk != 0 && (GetAsyncKeyState(vk) & 0x8000) != 0; };
-    bool inHeld  = g_input.state().inHeld.load()  || keyDown(t.cfg.zoomInVk);
-    bool outHeld = g_input.state().outHeld.load() || keyDown(t.cfg.zoomOutVk);
+    bool inHeld  = g_input.state().inHeld.load()  || keyDown(t.cfg.zoomInVk)  || keyDown(t.cfg.zoomInVk2);
+    bool outHeld = g_input.state().outHeld.load() || keyDown(t.cfg.zoomOutVk) || keyDown(t.cfg.zoomOutVk2);
     // Apply the live zoom profile every frame (free hot-reload; setProfile does not reset level).
     t.zoom.setProfile(t.cfg.zoomInSpeed, t.cfg.zoomOutSpeed, t.cfg.smoothZoom != 0,
                       t.cfg.smoothZoomAccel, t.cfg.smoothZoomRamp);

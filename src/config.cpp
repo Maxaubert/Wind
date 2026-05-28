@@ -26,6 +26,8 @@ Config ParseConfig(const std::string& text) {
             else if (key == "recenterVk")       c.recenterVk = std::stoi(val);
             else if (key == "zoomInVk")         c.zoomInVk = std::stoi(val);
             else if (key == "zoomOutVk")        c.zoomOutVk = std::stoi(val);
+            else if (key == "zoomInVk2")        c.zoomInVk2 = std::stoi(val);
+            else if (key == "zoomOutVk2")       c.zoomOutVk2 = std::stoi(val);
             else if (key == "maxLevel")         c.maxLevel = std::stod(val);
             else if (key == "zoomInSpeed")      c.zoomInSpeed = std::stod(val);
             else if (key == "zoomOutSpeed")     c.zoomOutSpeed = std::stod(val);

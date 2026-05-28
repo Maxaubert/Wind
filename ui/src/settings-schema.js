@@ -1,7 +1,11 @@
 export const sections = [
+  { id:'keybinds', label:'Keybinds', icon:'keys', desc:'Hold to zoom. The primary slot accepts a mouse side-button or a key; the alternate is a keyboard key.', rows: [
+    { key:'__zoomIn',   type:'keybind', label:'Zoom in',  desc:'Hold to magnify',  buttonKey:'zoomInButton',  vkKey:'zoomInVk' },
+    { key:'__zoomIn2',  type:'keybind', label:'Zoom in (alternate)', desc:'Optional keyboard alternate', vkKey:'zoomInVk2' },
+    { key:'__zoomOut',  type:'keybind', label:'Zoom out', desc:'Hold to zoom back', buttonKey:'zoomOutButton', vkKey:'zoomOutVk' },
+    { key:'__zoomOut2', type:'keybind', label:'Zoom out (alternate)', desc:'Optional keyboard alternate', vkKey:'zoomOutVk2' },
+  ]},
   { id:'zoom', label:'Zoom', icon:'zoom', desc:'How magnification grows while you hold the zoom button.', rows: [
-    { key:'__zoomIn',  type:'keybind', label:'Zoom in',  desc:'Hold to magnify',  buttonKey:'zoomInButton',  vkKey:'zoomInVk' },
-    { key:'__zoomOut', type:'keybind', label:'Zoom out', desc:'Hold to zoom back', buttonKey:'zoomOutButton', vkKey:'zoomOutVk' },
     { key:'zoomInSpeed',  type:'slider', label:'Zoom-in speed',  desc:'Multiplier (1.0 = default).', min:0.25, max:4, step:0.05, def:1.0 },
     { key:'zoomOutSpeed', type:'slider', label:'Zoom-out speed', desc:'Multiplier (1.0 = default).', min:0.25, max:4, step:0.05, def:1.0 },
     { key:'smoothZoom',   type:'toggle', label:'Smooth zoom',    desc:'Zoom-in eases up to your speed.', def:0 },
@@ -22,13 +26,8 @@ export const sections = [
     { key:'hdrTonemap',  type:'toggle', label:'HDR tonemap', desc:'HDR10 to SDR when HDR is on.', def:1 },
     { key:'multiMonitor',type:'toggle', label:'Follow cursor monitor', def:1 },
   ]},
-  { id:'adv', label:'Advanced', icon:'adv', desc:'Pacing and diagnostics. Defaults are usually best.', rows: [
-    { key:'vsync',       type:'toggle', label:'VSync', def:1 },
-    { key:'dwmFlush',    type:'toggle', label:'DWM-flush pacing', def:0 },
-    { key:'cropCapture', type:'toggle', label:'Crop capture on full repaints', def:1 },
-    { key:'diagnostics', type:'toggle', label:'Frametime logging', def:0 },
-  ]},
   { id:'about', label:'About', icon:'about', desc:'', rows: [
+    { key:'diagnostics', type:'toggle', label:'Frametime logging', desc:'Write timing to a log file.', def:0 },
     { key:'__about', type:'about' },
   ]},
 ];

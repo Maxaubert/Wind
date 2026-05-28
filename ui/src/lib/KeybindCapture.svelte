@@ -5,10 +5,14 @@
   export let row, values, onChange, disabled = false;
   let armed = false;
   const VK_NAMES = { 33:'PageUp', 34:'PageDown', 112:'F1', 113:'F2', 145:'ScrollLock' };
+  // If row.buttonKey is missing, this is a keyboard-only slot (an alternate binding); the
+  // mouse-button handler short-circuits and the label/prompt drop the "side-button" wording.
   function label() {
-    const btn = Number(values[row.buttonKey] || 0);
-    if (btn === 2) return 'Mouse button 5';
-    if (btn === 1) return 'Mouse button 4';
+    if (row.buttonKey) {
+      const btn = Number(values[row.buttonKey] || 0);
+      if (btn === 2) return 'Mouse button 5';
+      if (btn === 1) return 'Mouse button 4';
+    }
     const vk = Number(values[row.vkKey] || 0);
     if (vk) return VK_NAMES[vk] || ('Key ' + vk);
     return 'Unbound';
@@ -20,18 +24,18 @@
     // e.keyCode is the Windows Virtual-Key code the core reads from magnifier.ini (intentional;
     // e.key / e.code would need a reverse lookup). Deprecated in the DOM but stable in WebView2.
     onChange(row.vkKey, String(e.keyCode));
-    onChange(row.buttonKey, '0');
+    if (row.buttonKey) onChange(row.buttonKey, '0');
     armed = false;
   }
   function onMouse(e) {
-    if (!armed) return;
+    if (!armed || !row.buttonKey) return;     // keyboard-only slot: ignore mouse
     if (e.button === 3) { onChange(row.buttonKey, '1'); onChange(row.vkKey, '0'); e.preventDefault(); armed = false; }
     else if (e.button === 4) { onChange(row.buttonKey, '2'); onChange(row.vkKey, '0'); e.preventDefault(); armed = false; }
   }
 </script>
 <svelte:window on:keydown={onKey} on:mousedown={onMouse} />
 <button class="keycap" class:armed {disabled} on:click={() => armed = true}>
-  {armed ? 'Press a key or side-button...' : label()}
+  {armed ? (row.buttonKey ? 'Press a key or side-button...' : 'Press a key...') : label()}
 </button>
 <style>
   /* Ported from mockups/config-ui-onboarding.html .keycap. */

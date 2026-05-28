@@ -9,6 +9,10 @@ struct Config {
     // Default: PageUp (0x21=33) zoom in, PageDown (0x22=34) zoom out.
     int    zoomInVk         = 33;    // VK_PRIOR (PageUp)
     int    zoomOutVk        = 34;    // VK_NEXT  (PageDown)
+    // Optional alternate keyboard binding (one per direction). OR-combined with the primary
+    // button/key so a user can have a mouse side-button AND a keyboard fallback. 0 = unbound.
+    int    zoomInVk2        = 0;
+    int    zoomOutVk2       = 0;
     int    recenterVk       = 0;     // VK code; 0 = unbound. Tap to recenter the lens on the cursor.
     double maxLevel         = 8.0;   // how FAR you can zoom (does not affect zoom SPEED)
     // --- Zoom experience (see docs/superpowers/specs/2026-05-26-configurable-zoom-design.md) ---
