@@ -36,7 +36,7 @@
 </script>
 <div class="win">
   <Rail sections={railItems} {active} onSelect={(id) => scrollToSection(scroller, id)}
-        {theme} onToggleTheme={toggleTheme} onOpenIni={openIni} />
+        {theme} onToggleTheme={toggleTheme} />
   <section class="content">
     <div class="caption" style="app-region:drag;-webkit-app-region:drag">
       <span class="ctitle">Wind Settings</span>
@@ -58,7 +58,6 @@
       {/each}
     </div>
     <footer>
-      <span class="hint">{dirty ? 'Unsaved changes' : 'All changes saved'}</span>
       <button class="btn" on:click={discard} disabled={!dirty}>Discard</button>
       <button class="btn primary" on:click={apply} disabled={!dirty}>Apply</button>
     </footer>

@@ -27,7 +27,6 @@ export const sections = [
     { key:'dwmFlush',    type:'toggle', label:'DWM-flush pacing', def:0 },
     { key:'cropCapture', type:'toggle', label:'Crop capture on full repaints', def:1 },
     { key:'diagnostics', type:'toggle', label:'Frametime logging', def:0 },
-    { key:'__openIni',   type:'button', label:'Config file', desc:'Open magnifier.ini in your editor.', action:'openIni', btn:'Edit config file' },
   ]},
   { id:'about', label:'About', icon:'about', desc:'', rows: [
     { key:'__about', type:'about' },

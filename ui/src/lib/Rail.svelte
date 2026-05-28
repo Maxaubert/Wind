@@ -1,6 +1,6 @@
 <script>
   import { ic } from './icons.js';
-  export let sections, active, onSelect, theme, onToggleTheme, onOpenIni;
+  export let sections, active, onSelect, theme, onToggleTheme;
 </script>
 <aside class="rail">
   <div class="rail-glyph" title="Wind">{@html ic.glyph}</div>
@@ -13,7 +13,6 @@
   <div class="rail-spacer"></div>
   <div class="rail-foot">
     <button class="ritem" title="Toggle theme" aria-label="Toggle theme" on:click={onToggleTheme}>{@html theme === 'light' ? ic.moon : ic.sun}</button>
-    <button class="ritem" title="Edit config file" aria-label="Edit config file" on:click={onOpenIni}>{@html ic.cog}</button>
     <div class="avatar" title="Account (coming soon)">{@html ic.person}</div>
   </div>
 </aside>
