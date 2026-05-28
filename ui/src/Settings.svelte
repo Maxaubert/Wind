@@ -87,7 +87,7 @@
      real height so its header can reach the scroll-spy top band; the scrollspy also has a
      bottom-of-scroll fallback that activates the last section when the container hits bottom. */
   :global(.sec + .sec) { margin-top: 40px; }
-  footer { flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 12px 26px; border-top: 1px solid var(--line); }
+  footer { flex-shrink: 0; display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 12px 26px; border-top: 1px solid var(--line); }
   .hint { margin-right: auto; color: var(--muted); font-size: 11.5px; }
   .btn { padding: 7px 16px; border-radius: 7px; border: 1px solid var(--line); background: transparent; color: var(--text); font-size: 12.5px; cursor: pointer; }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
