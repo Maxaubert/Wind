@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wind Config - mockup directions</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 34px 38px 64px;
+    background: #0d0d10; color: #e9e9ee;
+    font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  }
+  h1 { font-size: 22px; margin: 0 0 6px; font-weight: 600; }
+  .sub { color: #8a8a95; margin: 0 0 6px; font-size: 13px; max-width: 820px; line-height: 1.55; }
+  .legend { color:#6f6f7a; font-size:12px; margin: 0 0 30px; }
+  .legend b { color:#b9b9c4; font-weight:600; }
+
+  .block { margin-bottom: 46px; }
+  .block-title { font-size: 15px; font-weight: 600; color: #fff; margin: 0 0 3px; }
+  .block-desc { font-size: 12.5px; color: #8a8a95; margin: 0 0 16px; max-width: 720px; line-height:1.5; }
+  .pair { display: flex; gap: 26px; flex-wrap: wrap; }
+  .variant { }
+  .variant > .cap { font-size: 10.5px; color: #6f6f7a; margin-top: 9px; text-align: center;
+                    letter-spacing: .4px; text-transform: uppercase; }
+
+  /* ---------- window shell ---------- */
+  .win {
+    width: 564px; height: 432px; border-radius: 11px; overflow: hidden;
+    display: flex; flex-direction: column;
+    background: var(--bg); color: var(--text);
+    border: 1px solid rgba(255,255,255,.07);
+    box-shadow: 0 22px 60px rgba(0,0,0,.6);
+    font-size: 13px;
+    /* shared theme tokens (overridden per design) */
+    --bg:#1b1b20; --side:#202026; --line:#2c2c34; --text:#e9e9ee; --muted:#9a9aa6;
+    --accent:#5b5bd6; --accent-soft:rgba(91,91,214,.18); --card:#24242b; --cap-h:40px;
+  }
+  .design-b { --bg:#17171c; --side:#1d1d23; --card:#23232a; }
+  .design-c { --bg:#24242b; --side:#141417; --text:#edeef2; }
+  .design-d { --bg:#1a1a1f; --side:#1a1a1f; --line:#26262d; }
+  .tb-native { --cap-h:34px; }
+
+  .body { flex: 1; display: flex; min-height: 0; }
+
+  /* ---------- sidebar ---------- */
+  .side { width: 212px; flex-shrink: 0; background: var(--side);
+          display: flex; flex-direction: column; padding: 12px 10px; gap: 4px; }
+  .side-head { display: flex; align-items: center; gap: 9px; padding: 6px 8px 12px;
+               font-weight: 600; font-size: 14px; }
+  .side-head .glyph { color: var(--accent); display: grid; place-items: center; }
+  .search { display: flex; align-items: center; gap: 8px; margin: 0 2px 10px;
+            padding: 7px 10px; border-radius: 7px; background: rgba(255,255,255,.05);
+            color: var(--muted); font-size: 12px; }
+  .nav { display: flex; flex-direction: column; gap: 2px; }
+  .nav-item { display: flex; align-items: center; gap: 11px; padding: 8px 10px;
+              border-radius: 7px; color: var(--muted); cursor: pointer; }
+  .nav-item svg { flex-shrink: 0; }
+  .nav-item:hover { background: rgba(255,255,255,.05); color: var(--text); }
+  .nav-item.active { color: #fff; }
+  .side-foot { margin-top: auto; padding: 8px; font-size: 11px; color: var(--muted); opacity: .85;
+               display:flex; align-items:center; gap:6px; }
+
+  /* ---------- content ---------- */
+  .content { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
+  .caption { height: var(--cap-h); flex-shrink: 0; display: flex; align-items: center;
+             justify-content: flex-end; }              /* top strip flows into content */
+  .tbtns, .caps { display: flex; height: 100%; }
+  .tbtn { width: 44px; display: grid; place-items: center; color: var(--muted); }
+  .tbtn:hover { background: rgba(255,255,255,.08); color: #fff; }
+  .tbtn.close:hover { background: #e81123; color: #fff; }
+  .cap2 { width: 46px; display: grid; place-items: center; color: var(--muted); }
+  .cap2:hover { background: rgba(255,255,255,.08); color: #fff; }
+  .cap2.close:hover { background: #e81123; color: #fff; }
+
+  .scroll { flex: 1; overflow: auto; padding: 4px 26px 16px; }
+  .sec-head h2 { margin: 0 0 3px; font-size: 19px; font-weight: 600; }
+  .sec-head p { margin: 0 0 14px; color: var(--muted); font-size: 12.5px; }
+  .rows { display: flex; flex-direction: column; }
+  .row { display: flex; align-items: center; gap: 16px; padding: 13px 2px;
+         border-bottom: 1px solid var(--line); }
+  .row:last-child { border-bottom: 0; }
+  .rtext { flex: 1; min-width: 0; }
+  .rlabel { font-size: 13.5px; }
+  .rdesc { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+  .rctl { flex-shrink: 0; display: flex; align-items: center; gap: 10px; }
+
+  .slider { display: flex; align-items: center; gap: 11px; width: 178px; }
+  .track { position: relative; flex: 1; height: 4px; border-radius: 3px; background: rgba(255,255,255,.15); }
+  .fill { position: absolute; left: 0; top: 0; height: 100%; border-radius: 3px; background: var(--accent); }
+  .knob { position: absolute; top: 50%; width: 13px; height: 13px; border-radius: 50%; background: #fff;
+          transform: translate(-50%,-50%); box-shadow: 0 1px 3px rgba(0,0,0,.55); }
+  .val { width: 36px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+
+  .toggle { width: 38px; height: 21px; border-radius: 11px; border: 0; background: rgba(255,255,255,.22);
+            position: relative; cursor: pointer; padding: 0; }
+  .toggle .dot { position: absolute; top: 2px; left: 2px; width: 17px; height: 17px; border-radius: 50%; background: #fff; }
+  .toggle.on { background: var(--accent); }
+  .toggle.on .dot { left: 19px; }
+
+  .footer { flex-shrink: 0; display: flex; align-items: center; gap: 10px;
+            padding: 11px 24px; border-top: 1px solid var(--line); }
+  .fhint { margin-right: auto; color: var(--muted); font-size: 11.5px; }
+  .btn { padding: 7px 16px; border-radius: 7px; border: 1px solid var(--line);
+         background: transparent; color: var(--text); font-size: 12.5px; cursor: pointer; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  /* ====================== per-design character ====================== */
+  /* A - Tabby Faithful: subtle tinted active row, search, icons+labels, flat rows */
+  .design-a .nav-item.active { background: var(--accent-soft); color: #fff; }
+
+  /* B - Win11 Cards: full accent pill active, each row a card, airy */
+  .design-b .nav-item.active { background: var(--accent); color: #fff; }
+  .design-b .row { border-bottom: 0; background: var(--card); border: 1px solid rgba(255,255,255,.05);
+                   border-radius: 9px; padding: 13px 15px; margin-bottom: 8px; }
+  .design-b .sec-head h2 { font-size: 21px; }
+  .design-b .scroll { padding-top: 10px; }
+
+  /* C - Icon rail + two-tone: narrow icon-only rail, accent left bar, high contrast */
+  .design-c .side { width: 60px; padding: 12px 6px; align-items: center; }
+  .design-c .side-head .app { display: none; }
+  .design-c .search { display: none; }
+  .design-c .nav-item { justify-content: center; width: 44px; height: 44px; padding: 0; position: relative; }
+  .design-c .nav-item span { display: none; }
+  .design-c .nav-item.active { color: #fff; background: var(--accent-soft); }
+  .design-c .nav-item.active::before { content: ''; position: absolute; left: -6px; top: 9px; bottom: 9px;
+                                       width: 3px; border-radius: 2px; background: var(--accent); }
+  .design-c .side-foot { display: none; }
+  .design-c .sec-head h2 { font-size: 22px; }
+
+  /* D - Spacious Minimal: labels-only sidebar, big type, lots of air */
+  .design-d .nav-item svg { display: none; }
+  .design-d .search { display: none; }
+  .design-d .nav-item { padding: 9px 12px; position: relative; }
+  .design-d .nav-item.active { color: #fff; }
+  .design-d .nav-item.active::before { content: ''; position: absolute; left: -2px; top: 7px; bottom: 7px;
+                                       width: 3px; border-radius: 2px; background: var(--accent); }
+  .design-d .side { width: 198px; padding: 16px 12px; }
+  .design-d .side-head { font-size: 15px; }
+  .design-d .row { padding: 18px 2px; }
+  .design-d .rlabel { font-size: 14.5px; }
+  .design-d .sec-head h2 { font-size: 23px; }
+  .design-d .scroll { padding: 8px 34px 20px; }
+</style>
+</head>
+<body>
+  <h1>Wind Config &mdash; mockup directions</h1>
+  <p class="sub">Four sleek, Tabby-inspired directions for the settings window. Each is shown twice so you
+  can compare the title-bar treatments side by side. All dark with the indigo <b style="color:#8f8ff0">#5b5bd6</b>
+  accent (light mode is also supported). The Zoom section is shown with real settings.</p>
+  <p class="legend"><b>Custom integrated</b> = our own slim &minus; &times; buttons, no OS strip &nbsp;|&nbsp;
+  <b>Blended native</b> = Windows' real &minus; &square; &times; caption, background extended up. These are
+  throwaway HTML mockups for picking a direction, not the real build.</p>
+
+  <div id="gallery"></div>
+
+<script>
+  const ic = {
+    zoom:   '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.3"/><path d="M10.2 10.2 14 14"/></svg>',
+    cursor: '<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M3 2.2 12.4 7l-3.9 1.2L11 13.2 9.2 14 6.7 8.9 3 11.7z"/></svg>',
+    display:'<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.8" width="12" height="8" rx="1.2"/><path d="M6 13.5h4M8 10.8v2.7"/></svg>',
+    adv:    '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 4.3h12M2 8h12M2 11.7h12"/><circle cx="6" cy="4.3" r="1.7" fill="var(--side)"/><circle cx="10.5" cy="8" r="1.7" fill="var(--side)"/><circle cx="5" cy="11.7" r="1.7" fill="var(--side)"/></svg>',
+    about:  '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="6"/><path d="M8 7.3v3.4"/><circle cx="8" cy="5.1" r=".15" stroke-width="1.6"/></svg>',
+    search: '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.3"/><path d="M10.2 10.2 14 14"/></svg>',
+    glyph:  '<svg viewBox="0 0 16 16" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 5.5h8.5a2 2 0 1 0-2-2"/><path d="M2 9h11a2 2 0 1 1-2 2"/><path d="M2 12.5h6.5a1.7 1.7 0 1 1-1.7 1.7"/></svg>',
+    cog:    '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M12.6 3.4l-1.4 1.4M4.8 11.2l-1.4 1.4"/></svg>',
+    min:    '<svg viewBox="0 0 11 11" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.1"><path d="M1 5.5h9"/></svg>',
+    max:    '<svg viewBox="0 0 11 11" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.1"><rect x="1.3" y="1.3" width="8.4" height="8.4" rx="1"/></svg>',
+    close:  '<svg viewBox="0 0 11 11" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.1"><path d="M1.3 1.3 9.7 9.7M9.7 1.3 1.3 9.7"/></svg>',
+  };
+
+  function navItems() {
+    const items = [
+      ['zoom','Zoom',true], ['cursor','Cursor',false], ['display','Display',false],
+      ['adv','Advanced',false], ['about','About',false],
+    ];
+    return items.map(([k,label,on]) =>
+      `<div class="nav-item${on?' active':''}">${ic[k]}<span>${label}</span></div>`).join('');
+  }
+
+  function slider(pct, val) {
+    return `<div class="slider"><div class="track"><div class="fill" style="width:${pct}%"></div>
+      <div class="knob" style="left:${pct}%"></div></div><span class="val">${val}</span></div>`;
+  }
+  function toggle(on) { return `<button class="toggle${on?' on':''}" type="button"><span class="dot"></span></button>`; }
+  function row(label, desc, ctl) {
+    return `<div class="row"><div class="rtext"><div class="rlabel">${label}</div>
+      <div class="rdesc">${desc}</div></div><div class="rctl">${ctl}</div></div>`;
+  }
+  const zoomRows =
+    row('Zoom-in speed', 'How fast it zooms in while held', slider(58, '2.0&times;')) +
+    row('Zoom-out speed', 'Speed when zooming back out', slider(58, '2.0&times;')) +
+    row('Smooth zoom', 'Eases up to your speed instead of snapping', toggle(true)) +
+    row('Ease-in depth', 'Higher = gentler start', slider(52, '5.0')) +
+    row('Max zoom', 'How far in you can go', slider(82, '20&times;'));
+
+  function caption(variant) {
+    if (variant === 'tb-custom')
+      return `<div class="tbtns"><div class="tbtn">${ic.min}</div><div class="tbtn close">${ic.close}</div></div>`;
+    return `<div class="caps"><div class="cap2">${ic.min}</div><div class="cap2">${ic.max}</div>
+      <div class="cap2 close">${ic.close}</div></div>`;
+  }
+
+  function windowHTML(designCls, variant) {
+    return `<div class="win ${designCls} ${variant}">
+      <div class="body">
+        <aside class="side">
+          <div class="side-head"><span class="glyph">${ic.glyph}</span><span class="app">Wind</span></div>
+          <div class="search">${ic.search}<span>Search settings</span></div>
+          <nav class="nav">${navItems()}</nav>
+          <div class="side-foot">${ic.cog}<span>Edit config file</span></div>
+        </aside>
+        <section class="content">
+          <div class="caption">${caption(variant)}</div>
+          <div class="scroll">
+            <div class="sec-head"><h2>Zoom</h2><p>How magnification grows while you hold the zoom button.</p></div>
+            <div class="rows">${zoomRows}</div>
+          </div>
+          <div class="footer"><span class="fhint">All changes saved</span>
+            <button class="btn">Discard</button><button class="btn primary">Apply</button></div>
+        </section>
+      </div>
+    </div>`;
+  }
+
+  const designs = [
+    ['design-a', 'A &middot; Tabby Faithful',
+     'Closest replica of Tabby: full-height sidebar with search + icons, flat rows with hairline dividers, a quietly tinted active item. Calm and dense.'],
+    ['design-b', 'B &middot; Win11 Cards',
+     'Each setting sits in its own rounded card with breathing room; bigger section header; full-accent active item. Structured and airy, like Windows 11 Settings.'],
+    ['design-c', 'C &middot; Icon Rail + Two-tone',
+     'Narrow icon-only rail in a darker shade against a lighter content panel; accent bar marks the active section. High-contrast and app-like.'],
+    ['design-d', 'D &middot; Spacious Minimal',
+     'Generous whitespace, larger type, labels-only sidebar, hairline dividers, accent used sparingly. Premium and quiet.'],
+  ];
+  const variants = [
+    ['tb-custom', 'Custom integrated title bar'],
+    ['tb-native', 'Blended native title bar'],
+  ];
+
+  const galleryHTML = designs.map(([cls, name, desc]) =>
+    `<div class="block">
+      <div class="block-title">${name}</div>
+      <div class="block-desc">${desc}</div>
+      <div class="pair">
+        ${variants.map(([v, vcap]) =>
+          `<div class="variant">${windowHTML(cls, v)}<div class="cap">${vcap}</div></div>`).join('')}
+      </div>
+    </div>`).join('');
+
+  // Static literal markup parsed via DOMParser (safe DOM method, no innerHTML sink).
+  const parsed = new DOMParser().parseFromString(galleryHTML, 'text/html');
+  document.getElementById('gallery').append(...parsed.body.childNodes);
+</script>
+</body>
+</html>

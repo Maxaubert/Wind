@@ -171,6 +171,12 @@ static void RunTick(TickState& t) {
         if (m != t.lastMtime) {
             t.lastMtime = m;
             Config nc = LoadConfig(L"magnifier.ini");
+            // Re-bind the hook's button mapping if the user changed it via the config UI; without
+            // this the hook would keep firing the OLD button (the new VK works via GetAsyncKeyState
+            // but the mouse mapping is captured once in g_input.start at app launch).
+            if (nc.zoomInButton != t.cfg.zoomInButton || nc.zoomOutButton != t.cfg.zoomOutButton) {
+                g_input.setButtons(nc.zoomInButton, nc.zoomOutButton);
+            }
             t.cfg = nc;   // pick up renderer knobs (smoothing, filter, cursor scale, zoom speed)
             t.zoom = ZoomController(1.0, nc.maxLevel);
             double ocx = t.mapper.centerX(), ocy = t.mapper.centerY();   // preserve position
@@ -182,8 +188,22 @@ static void RunTick(TickState& t) {
     // Effective held state = mouse side-button (set by the hook/raw input) OR keyboard key held
     // (polled globally, no extra hook). Lets users without side-buttons zoom from the keyboard.
     auto keyDown = [](int vk) { return vk != 0 && (GetAsyncKeyState(vk) & 0x8000) != 0; };
-    bool inHeld  = g_input.state().inHeld.load()  || keyDown(t.cfg.zoomInVk);
-    bool outHeld = g_input.state().outHeld.load() || keyDown(t.cfg.zoomOutVk);
+    // Modifier mask: bit 1=Ctrl, 2=Alt, 4=Shift, 8=Win. 0 = no modifiers required. Extra modifiers
+    // never disqualify (so a "Ctrl+F1" combo still fires when Ctrl+Shift+F1 is held).
+    auto modsHeld = [](int mods) {
+        if ((mods & 1) && !(GetAsyncKeyState(VK_CONTROL) & 0x8000)) return false;
+        if ((mods & 2) && !(GetAsyncKeyState(VK_MENU)    & 0x8000)) return false;
+        if ((mods & 4) && !(GetAsyncKeyState(VK_SHIFT)   & 0x8000)) return false;
+        if ((mods & 8) && !((GetAsyncKeyState(VK_LWIN) & 0x8000) || (GetAsyncKeyState(VK_RWIN) & 0x8000))) return false;
+        return true;
+    };
+    auto comboHeld = [&](int vk, int mods) { return keyDown(vk) && modsHeld(mods); };
+    bool inHeld  = g_input.state().inHeld.load()
+        || comboHeld(t.cfg.zoomInVk,  t.cfg.zoomInMods)
+        || comboHeld(t.cfg.zoomInVk2, t.cfg.zoomInMods2);
+    bool outHeld = g_input.state().outHeld.load()
+        || comboHeld(t.cfg.zoomOutVk,  t.cfg.zoomOutMods)
+        || comboHeld(t.cfg.zoomOutVk2, t.cfg.zoomOutMods2);
     // Apply the live zoom profile every frame (free hot-reload; setProfile does not reset level).
     t.zoom.setProfile(t.cfg.zoomInSpeed, t.cfg.zoomOutSpeed, t.cfg.smoothZoom != 0,
                       t.cfg.smoothZoomAccel, t.cfg.smoothZoomRamp);
@@ -446,6 +466,21 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         Tray::Remove();
         ReleaseMutex(mtx);
         return 0;
+    }
+
+    // First launch: open the guided setup once (at startup, before the tick loop). onboarded==0
+    // covers a freshly created ini too. Non-blocking: spawn WindConfig.exe --onboard, then continue
+    // to the tray. Resolve by full path (exePath is our own dir) so it works regardless of the cwd.
+    if (cfg.onboarded == 0) {
+        std::wstring configExe = std::wstring(exePath) + L"\\WindConfig.exe";
+        wchar_t cmd[] = L"WindConfig.exe --onboard";
+        STARTUPINFOW si{}; si.cb = sizeof(si);
+        PROCESS_INFORMATION pi{};
+        if (CreateProcessW(configExe.c_str(), cmd, nullptr, nullptr, FALSE,
+                           0, nullptr, nullptr, &si, &pi)) {
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+        }
     }
 
     QueryPerformanceFrequency(&ts.freq);

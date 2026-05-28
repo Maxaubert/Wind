@@ -1,0 +1,29 @@
+:root {
+  --bg:#ffffff; --rail:#e9e9ee; --panel-line:rgba(0,0,0,.08);
+  --text:#1c1c22; --muted:#6c6c77; --line:#ededf1; --hover:rgba(0,0,0,.05);
+  --accent:#5b5bd6; --accent-icon:#5b5bd6; --accent-soft:rgba(91,91,214,.13);
+  --track:rgba(0,0,0,.14); --chip:rgba(0,0,0,.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not(.force-light) {
+    --bg:#0e0e12; --rail:#17171b; --panel-line:rgba(255,255,255,.06);
+    --text:#f3f3f6; --muted:#85858f; --line:#1f1f25; --hover:rgba(255,255,255,.07);
+    --accent:#5b5bd6; --accent-icon:#9090f2; --accent-soft:rgba(91,91,214,.22);
+    --track:rgba(255,255,255,.16); --chip:rgba(255,255,255,.06);
+  }
+}
+:root.force-dark {
+  --bg:#0e0e12; --rail:#17171b; --panel-line:rgba(255,255,255,.06);
+  --text:#f3f3f6; --muted:#85858f; --line:#1f1f25; --hover:rgba(255,255,255,.07);
+  --accent:#5b5bd6; --accent-icon:#9090f2; --accent-soft:rgba(91,91,214,.22);
+  --track:rgba(255,255,255,.16); --chip:rgba(255,255,255,.06);
+}
+:root.force-light {
+  --bg:#ffffff; --rail:#e9e9ee; --panel-line:rgba(0,0,0,.08);
+  --text:#1c1c22; --muted:#6c6c77; --line:#ededf1; --hover:rgba(0,0,0,.05);
+  --accent:#5b5bd6; --accent-icon:#5b5bd6; --accent-soft:rgba(91,91,214,.13);
+  --track:rgba(0,0,0,.14); --chip:rgba(0,0,0,.04);
+}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+  font-family:"Segoe UI Variable","Segoe UI",system-ui,sans-serif;}
+input[type=checkbox],input[type=range]{accent-color:var(--accent);}

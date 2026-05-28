@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wind Config - Icon Rail (dark + light)</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 34px 38px 64px; background: #232328; color: #e9e9ee;
+         font-family: "Segoe UI Variable","Segoe UI",system-ui,sans-serif; }
+  h1 { font-size: 22px; margin: 0 0 6px; font-weight: 600; }
+  .sub { color: #b9b9c4; margin: 0 0 26px; font-size: 13px; max-width: 820px; line-height: 1.55; }
+  .pair { display: flex; gap: 32px; flex-wrap: wrap; }
+  .variant > .cap { font-size: 11px; color: #b9b9c4; margin-top: 10px; text-align: center;
+                    letter-spacing: .4px; text-transform: uppercase; }
+
+  /* ---------------- theme tokens ---------------- */
+  .theme-dark {
+    --rail:#17171b; --bg:#0e0e12; --panel-line:rgba(255,255,255,.06);
+    --text:#f3f3f6; --muted:#85858f; --line:#1f1f25; --hover:rgba(255,255,255,.07);
+    --accent:#5b5bd6; --accent-icon:#9090f2; --accent-soft:rgba(91,91,214,.22);
+    --track:rgba(255,255,255,.16); --winborder:rgba(255,255,255,.08);
+    --shadow:0 24px 64px rgba(0,0,0,.7);
+  }
+  .theme-light {
+    --rail:#e9e9ee; --bg:#ffffff; --panel-line:rgba(0,0,0,.08);
+    --text:#1c1c22; --muted:#6c6c77; --line:#ededf1; --hover:rgba(0,0,0,.05);
+    --accent:#5b5bd6; --accent-icon:#5b5bd6; --accent-soft:rgba(91,91,214,.13);
+    --track:rgba(0,0,0,.14); --winborder:rgba(0,0,0,.1);
+    --shadow:0 24px 64px rgba(0,0,0,.2);
+  }
+
+  /* ---------------- window ---------------- */
+  .win { width: 600px; height: 466px; border-radius: 12px; overflow: hidden; display: flex;
+         background: var(--bg); color: var(--text); border: 1px solid var(--winborder);
+         box-shadow: var(--shadow); font-size: 13px; }
+
+  /* rail */
+  .rail { width: 64px; flex-shrink: 0; background: var(--rail); display: flex; flex-direction: column;
+          align-items: center; padding: 12px 0 14px; border-right: 1px solid var(--panel-line); }
+  .rail-glyph { width: 40px; height: 40px; display: grid; place-items: center; color: var(--accent-icon);
+                margin-bottom: 10px; }
+  .rail-nav { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+  .ritem { width: 42px; height: 42px; border-radius: 10px; display: grid; place-items: center;
+           color: var(--muted); cursor: pointer; position: relative; }
+  .ritem:hover { background: var(--hover); color: var(--text); }
+  .ritem.active { background: var(--accent-soft); color: var(--accent-icon); }
+  .ritem.active::before { content: ''; position: absolute; left: -12px; top: 11px; bottom: 11px;
+                          width: 3px; border-radius: 2px; background: var(--accent); }
+  .rail-spacer { flex: 1; }
+  .rail-foot { display: flex; flex-direction: column; gap: 8px; align-items: center; }
+  .avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--hover); color: var(--muted);
+            display: grid; place-items: center; }
+
+  /* main */
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .caption { height: 44px; flex-shrink: 0; display: flex; align-items: center;
+             justify-content: space-between; padding-left: 22px; }
+  .ctitle { font-size: 12.5px; color: var(--muted); font-weight: 500; }
+  .tbtns { display: flex; height: 100%; }
+  .tbtn { width: 46px; height: 100%; display: grid; place-items: center; color: var(--muted); }
+  .tbtn:hover { background: var(--hover); color: var(--text); }
+  .tbtn.close:hover { background: #e81123; color: #fff; }
+
+  .scroll { flex: 1; overflow: auto; padding: 4px 30px 16px; }
+  .sec-head h2 { margin: 0 0 4px; font-size: 22px; font-weight: 600; }
+  .sec-head p { margin: 0 0 16px; color: var(--muted); font-size: 13px; }
+  .row { display: flex; align-items: center; gap: 18px; padding: 14px 2px; border-bottom: 1px solid var(--line); }
+  .row:last-child { border-bottom: 0; }
+  .rtext { flex: 1; min-width: 0; }
+  .rlabel { font-size: 13.5px; }
+  .rdesc { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+  .rctl { flex-shrink: 0; display: flex; align-items: center; gap: 10px; }
+
+  .slider { display: flex; align-items: center; gap: 12px; width: 188px; }
+  .track { position: relative; flex: 1; height: 4px; border-radius: 3px; background: var(--track); }
+  .fill { position: absolute; left: 0; top: 0; height: 100%; border-radius: 3px; background: var(--accent); }
+  .knob { position: absolute; top: 50%; width: 13px; height: 13px; border-radius: 50%; background: #fff;
+          transform: translate(-50%,-50%); box-shadow: 0 1px 3px rgba(0,0,0,.45); }
+  .val { width: 38px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+
+  .toggle { width: 38px; height: 21px; border-radius: 11px; border: 0; background: var(--track);
+            position: relative; cursor: pointer; padding: 0; }
+  .toggle .dot { position: absolute; top: 2px; left: 2px; width: 17px; height: 17px; border-radius: 50%;
+                 background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.4); }
+  .toggle.on { background: var(--accent); }
+  .toggle.on .dot { left: 19px; }
+
+  .footer { flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 12px 26px;
+            border-top: 1px solid var(--line); }
+  .fhint { margin-right: auto; color: var(--muted); font-size: 11.5px; }
+  .btn { padding: 7px 16px; border-radius: 7px; border: 1px solid var(--line); background: transparent;
+         color: var(--text); font-size: 12.5px; cursor: pointer; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+</style>
+</head>
+<body>
+  <h1>Wind Config &mdash; Icon Rail + Two-tone</h1>
+  <p class="sub">Refined Design C with the custom integrated title bar. Dark mode is true black with a
+  faintly lifted content panel; light mode uses a soft-grey rail against white. Rail icons have tooltips
+  (hover), the active section gets an accent bar, and the bottom of the rail reserves a cog (edit config)
+  + an account avatar slot for the future licensing area.</p>
+
+  <div class="pair" id="pair"></div>
+
+<script>
+  const ic = {
+    zoom:   '<svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.3"/><path d="M10.2 10.2 14 14"/></svg>',
+    cursor: '<svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><path d="M3 2.2 12.4 7l-3.9 1.2L11 13.2 9.2 14 6.7 8.9 3 11.7z"/></svg>',
+    display:'<svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.8" width="12" height="8" rx="1.2"/><path d="M6 13.5h4M8 10.8v2.7"/></svg>',
+    adv:    '<svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 4.3h12M2 8h12M2 11.7h12"/><circle cx="6" cy="4.3" r="1.7"/><circle cx="10.5" cy="8" r="1.7"/><circle cx="5" cy="11.7" r="1.7"/></svg>',
+    about:  '<svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="6"/><path d="M8 7.3v3.4"/><path d="M8 5.1v.1"/></svg>',
+    glyph:  '<svg viewBox="0 0 16 16" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 5.5h8.5a2 2 0 1 0-2-2"/><path d="M2 9h11a2 2 0 1 1-2 2"/><path d="M2 12.5h6.5a1.7 1.7 0 1 1-1.7 1.7"/></svg>',
+    cog:    '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M12.6 3.4l-1.4 1.4M4.8 11.2l-1.4 1.4"/></svg>',
+    person: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="5.4" r="2.6"/><path d="M3.4 13.4a4.6 4.6 0 0 1 9.2 0"/></svg>',
+    min:    '<svg viewBox="0 0 11 11" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.1"><path d="M1 5.5h9"/></svg>',
+    close:  '<svg viewBox="0 0 11 11" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.1"><path d="M1.3 1.3 9.7 9.7M9.7 1.3 1.3 9.7"/></svg>',
+  };
+
+  function railNav() {
+    const items = [['zoom','Zoom',true],['cursor','Cursor',false],['display','Display',false],
+                   ['adv','Advanced',false],['about','About',false]];
+    return items.map(([k,label,on]) =>
+      `<div class="ritem${on?' active':''}" title="${label}">${ic[k]}</div>`).join('');
+  }
+  function slider(pct,val){ return `<div class="slider"><div class="track"><div class="fill" style="width:${pct}%"></div>
+    <div class="knob" style="left:${pct}%"></div></div><span class="val">${val}</span></div>`; }
+  function toggle(on){ return `<button class="toggle${on?' on':''}" type="button"><span class="dot"></span></button>`; }
+  function row(label,desc,ctl){ return `<div class="row"><div class="rtext"><div class="rlabel">${label}</div>
+    <div class="rdesc">${desc}</div></div><div class="rctl">${ctl}</div></div>`; }
+
+  const zoomRows =
+    row('Zoom-in speed','How fast it zooms in while held', slider(58,'2.0&times;')) +
+    row('Zoom-out speed','Speed when zooming back out', slider(58,'2.0&times;')) +
+    row('Smooth zoom','Eases up to your speed instead of snapping', toggle(true)) +
+    row('Ease-in depth','Higher = gentler start', slider(52,'5.0')) +
+    row('Max zoom','How far in you can go', slider(82,'20&times;'));
+
+  function win(theme){
+    return `<div class="win ${theme}">
+      <aside class="rail">
+        <div class="rail-glyph" title="Wind">${ic.glyph}</div>
+        <div class="rail-nav">${railNav()}</div>
+        <div class="rail-spacer"></div>
+        <div class="rail-foot">
+          <div class="ritem" title="Edit config file">${ic.cog}</div>
+          <div class="avatar" title="Account (coming soon)">${ic.person}</div>
+        </div>
+      </aside>
+      <section class="main">
+        <div class="caption"><span class="ctitle">Wind Settings</span>
+          <div class="tbtns"><div class="tbtn" title="Minimize">${ic.min}</div>
+            <div class="tbtn close" title="Close">${ic.close}</div></div></div>
+        <div class="scroll">
+          <div class="sec-head"><h2>Zoom</h2><p>How magnification grows while you hold the zoom button.</p></div>
+          <div class="rows">${zoomRows}</div>
+        </div>
+        <div class="footer"><span class="fhint">All changes saved</span>
+          <button class="btn">Discard</button><button class="btn primary">Apply</button></div>
+      </section>
+    </div>`;
+  }
+
+  const html =
+    `<div class="variant">${win('theme-dark')}<div class="cap">Dark (black)</div></div>` +
+    `<div class="variant">${win('theme-light')}<div class="cap">Light</div></div>`;
+
+  // Static literal markup parsed via DOMParser (safe DOM method, no innerHTML sink).
+  const parsed = new DOMParser().parseFromString(html, 'text/html');
+  document.getElementById('pair').append(...parsed.body.childNodes);
+</script>
+</body>
+</html>
