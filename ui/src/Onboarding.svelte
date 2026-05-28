@@ -7,7 +7,11 @@
   const N = 3;
   // Staged key bindings (defaults match the core). Written on advancing past the keys step.
   let keys = { zoomInButton:'2', zoomInVk:'33', zoomOutButton:'1', zoomOutVk:'34' };
-  function setKey(k, v) { keys = { ...keys, [k]: v }; }
+  // Accept (key, val) or (patch) so the keybind capture can write both sibling keys atomically.
+  function setKey(k, v) {
+    if (k && typeof k === 'object') { keys = { ...keys, ...k }; return; }
+    keys = { ...keys, [k]: v };
+  }
   function applyKeys() { for (const k of Object.keys(keys)) setConfig(k, keys[k]); }
   function next() {
     if (cur === 1) applyKeys();          // leaving "Set your zoom keys" applies them

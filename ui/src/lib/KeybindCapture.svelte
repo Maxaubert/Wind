@@ -1,14 +1,17 @@
 <script>
   // row.buttonKey = 'zoomInButton'|'zoomOutButton' (omit for keyboard-only slots);
   // row.vkKey = 'zoomInVk'|'zoomOutVk'|'zoomInVk2'|'zoomOutVk2'.
-  // `values` holds current { [buttonKey]: '1'|'2'|'0', [vkKey]: '<vk>' }; onChange(key, val) is the
-  // two-arg setter from Settings (stages the change; Apply writes it).
+  // `values` is the current staged map. `onChange(patch)` accepts a multi-key object so we can
+  // update both sibling keys atomically (avoids the "one key behind" symptom where two sequential
+  // single-key setter calls let one render see an inconsistent intermediate state).
   export let row, values, onChange, disabled = false;
   let armed = false;
   const VK_NAMES = { 33:'PageUp', 34:'PageDown', 112:'F1', 113:'F2', 145:'ScrollLock' };
-  // If row.buttonKey is missing, this is a keyboard-only slot (an alternate binding); the
-  // mouse-button handler short-circuits and the label/prompt drop the "side-button" wording.
-  function label() {
+
+  // Reactive label: $: ensures Svelte re-evaluates whenever row or values changes, which a plain
+  // `label()` function call in the template did not reliably do (Svelte's static analysis cannot
+  // see dependencies hidden inside a function body).
+  $: lbl = (function () {
     if (row.buttonKey) {
       const btn = Number(values[row.buttonKey] || 0);
       if (btn === 2) return 'Mouse button 5';
@@ -17,31 +20,33 @@
     const vk = Number(values[row.vkKey] || 0);
     if (vk) return VK_NAMES[vk] || ('Key ' + vk);
     return 'Unbound';
-  }
-  // Capture on keyup (not keydown). Keyup is the conventional moment for rebind UIs: the key has
-  // fully resolved, and keys with synthesized/0 keyCodes (Fn combos, IME, etc.) never write a
-  // bogus '0' over the existing binding (which was the "one key behind" symptom: the first press
-  // wrote '0' clearing it, the second press wrote the real VK).
+  })();
+
+  // Capture on keyup (the conventional moment for rebind UIs): the key has fully resolved, and
+  // keyCode === 0 events (Fn combos, IME, etc.) are skipped so they cannot wipe the binding.
   function onKey(e) {
     if (!armed) return;
     e.preventDefault();
     if (e.key === 'Escape') { armed = false; return; }
-    if (!e.keyCode) return;   // ignore keys with no VK code (Fn modifiers, IME composition, etc.)
-    // e.keyCode is the Windows Virtual-Key code the core reads from magnifier.ini (intentional;
-    // e.key / e.code would need a reverse lookup). Deprecated in the DOM but stable in WebView2.
-    onChange(row.vkKey, String(e.keyCode));
-    if (row.buttonKey) onChange(row.buttonKey, '0');
+    if (!e.keyCode) return;
+    const patch = { [row.vkKey]: String(e.keyCode) };
+    if (row.buttonKey) patch[row.buttonKey] = '0';
+    onChange(patch);
     armed = false;
   }
   function onMouse(e) {
     if (!armed || !row.buttonKey) return;     // keyboard-only slot: ignore mouse
-    if (e.button === 3) { onChange(row.buttonKey, '1'); onChange(row.vkKey, '0'); e.preventDefault(); armed = false; }
-    else if (e.button === 4) { onChange(row.buttonKey, '2'); onChange(row.vkKey, '0'); e.preventDefault(); armed = false; }
+    const btn = e.button === 3 ? '1' : e.button === 4 ? '2' : null;
+    if (!btn) return;
+    e.preventDefault();
+    onChange({ [row.buttonKey]: btn, [row.vkKey]: '0' });
+    armed = false;
   }
   // Right-click clears the binding (Unbound). Works whether or not the keycap is armed.
   function clear() {
-    onChange(row.vkKey, '0');
-    if (row.buttonKey) onChange(row.buttonKey, '0');
+    const patch = { [row.vkKey]: '0' };
+    if (row.buttonKey) patch[row.buttonKey] = '0';
+    onChange(patch);
     armed = false;
   }
 </script>
@@ -50,7 +55,7 @@
         on:click={() => armed = true}
         on:contextmenu|preventDefault={clear}
         title="Click to bind, right-click to clear">
-  {armed ? (row.buttonKey ? 'Press a key or side-button...' : 'Press a key...') : label()}
+  {armed ? (row.buttonKey ? 'Press a key or side-button...' : 'Press a key...') : lbl}
 </button>
 <style>
   /* Ported from mockups/config-ui-onboarding.html .keycap. */

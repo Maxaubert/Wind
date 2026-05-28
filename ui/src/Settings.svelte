@@ -23,7 +23,14 @@
     values = v; saved = { ...v };
     theme = currentTheme(cfg); applyTheme(theme);
   });
-  function change(key, val) {
+  function change(keyOrPatch, val) {
+    // Atomic multi-key form: change({k1:v1, k2:v2}) updates both in a single render. The keybind
+    // capture uses this so its sibling-key update (vk + button) lands as one consistent state.
+    if (keyOrPatch && typeof keyOrPatch === 'object') {
+      values = { ...values, ...keyOrPatch };
+      return;
+    }
+    const key = keyOrPatch;
     if (key === '__action') { if (val === 'openIni') openIni(); return; }
     const next = { ...values, [key]: val };
     // Disabling the alternate-keybinds toggle clears the alternate VK fields so any previously
