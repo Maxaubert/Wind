@@ -6,7 +6,7 @@
   const num = v => Number(v);
 </script>
 <div class="row" class:disabled>
-  <div class="meta"><div class="label">{row.label}</div>{#if row.desc}<div class="desc">{row.desc}</div>{/if}</div>
+  <div class="meta">{#if row.label}<div class="label">{row.label}</div>{/if}{#if row.desc}<div class="desc">{row.desc}</div>{/if}</div>
   <div class="ctl">
     {#if row.type === 'toggle'}
       <input type="checkbox" {disabled} checked={num(value) === 1} on:change={e => onChange(e.target.checked ? 1 : 0)} />
