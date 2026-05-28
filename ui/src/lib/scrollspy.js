@@ -24,7 +24,25 @@ export function scrollspy(node, opts) {
     destroy() { node.removeEventListener('scroll', onScroll); },
   };
 }
+// Faster, controllable scroll than the browser's default behavior:'smooth' (which is ~400-500ms in
+// Chromium). 220ms ease-out feels snappy; latest call cancels any in-flight animation so rapid
+// clicks between rail icons resolve to the latest target instead of fighting frame-by-frame.
+let raf = null;
+function smoothScrollTo(node, target, duration) {
+  if (raf) cancelAnimationFrame(raf);
+  const start = node.scrollTop;
+  const dist = target - start;
+  if (Math.abs(dist) < 1) { raf = null; return; }
+  const t0 = performance.now();
+  function step(now) {
+    const t = Math.min(1, (now - t0) / duration);
+    const eased = 1 - Math.pow(1 - t, 3);   // easeOutCubic
+    node.scrollTop = start + dist * eased;
+    raf = t < 1 ? requestAnimationFrame(step) : null;
+  }
+  raf = requestAnimationFrame(step);
+}
 export function scrollToSection(node, id) {
   const el = node.querySelector('#sec-' + id);
-  if (el) node.scrollTo({ top: el.offsetTop - 4, behavior: 'smooth' });
+  if (el) smoothScrollTo(node, el.offsetTop - 4, 220);
 }

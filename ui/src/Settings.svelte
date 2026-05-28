@@ -76,7 +76,13 @@
   .tbtn { width: 46px; height: 100%; display: grid; place-items: center; color: var(--muted); border: 0; background: transparent; cursor: pointer; }
   .tbtn:hover { background: var(--hover); color: var(--text); }
   .tbtn.close:hover { background: #e81123; color: #fff; }
-  .scroll { flex: 1; overflow-y: auto; position: relative; padding: 0 30px 24px; scroll-behavior: smooth; }
+  .scroll { flex: 1; overflow-y: auto; position: relative; padding: 0 30px 24px;
+            scrollbar-width: thin; scrollbar-color: var(--track) transparent; }
+  /* Slim themed scrollbar (Chromium/WebView2). The 'thin' rule above handles Firefox. */
+  .scroll::-webkit-scrollbar { width: 8px; }
+  .scroll::-webkit-scrollbar-track { background: transparent; }
+  .scroll::-webkit-scrollbar-thumb { background: var(--track); border-radius: 4px; border: 2px solid transparent; background-clip: padding-box; }
+  .scroll::-webkit-scrollbar-thumb:hover { background: var(--accent-icon); background-clip: padding-box; border: 2px solid transparent; }
   /* Extra breathing room between sections (Section.svelte's .sec lives in another scope,
      so use :global to reach it). The About section's large logo hero gives the last section
      real height so its header can reach the scroll-spy top band; the scrollspy also has a
