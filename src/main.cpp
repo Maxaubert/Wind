@@ -314,8 +314,14 @@ static void RunTick(TickState& t) {
 // keyboard-only escape. The clean exit path restores the cursor and resets zoom to 1x.
 static const int kQuitHotkeyId = 0xB001;
 
+// Cross-process quit signal: WindConfig posts this to our hidden tray window when the user
+// confirms "Close Wind?" from the config's title-bar X. WM_USER+1 keeps the contract tiny and
+// avoids registering a global message; the value is duplicated in src/config_ui/main.cpp.
+static const UINT kWindQuitMsg = WM_USER + 1;
+
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == WM_HOTKEY && wp == kQuitHotkeyId) { PostQuitMessage(0); return 0; }
+    if (msg == kWindQuitMsg) { PostQuitMessage(0); return 0; }
     // Keep ticking while a modal loop (the tray menu) owns the thread. The tray sets a timer
     // around TrackPopupMenu; its WM_TIMER lands here so the lens doesn't freeze. (No other
     // WM_TIMER exists in this process.)

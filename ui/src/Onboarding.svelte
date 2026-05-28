@@ -1,9 +1,11 @@
 <script>
-  import { setConfig, windowControl } from './bridge.js';
+  import { setConfig, windowControl, quitWind } from './bridge.js';
   import { ic } from './lib/icons.js';
   import KeybindCapture from './lib/KeybindCapture.svelte';
+  import ConfirmCloseDialog from './lib/ConfirmCloseDialog.svelte';
   export let onDone;
   let cur = 0;
+  let confirmClose = false;
   const N = 3;
   // Keybinds start blank (Unbound). The KeybindCapture below writes setConfig live as the user
   // captures, so untouched bindings keep whatever the ini already had (defaults for a fresh ini).
@@ -26,7 +28,7 @@
   <div class="caption" style="app-region:drag;-webkit-app-region:drag">
     <div class="tbtns" style="app-region:no-drag;-webkit-app-region:no-drag">
       <button class="tbtn" title="Minimize" aria-label="Minimize" on:click={() => windowControl('minimize')}>{@html ic.min}</button>
-      <button class="tbtn close" title="Close" aria-label="Close" on:click={() => windowControl('close')}>{@html ic.close}</button>
+      <button class="tbtn close" title="Close" aria-label="Close" on:click={() => confirmClose = true}>{@html ic.close}</button>
     </div>
   </div>
   <div class="wizbody">
@@ -79,6 +81,9 @@
     <button class="btn primary" on:click={next}>{cur === 0 ? 'Get started' : cur === N - 1 ? 'Open Settings' : 'Next'}</button>
   </div>
 </div>
+<ConfirmCloseDialog show={confirmClose}
+                    onCancel={() => confirmClose = false}
+                    onConfirm={() => { quitWind(); windowControl('close'); }} />
 <style>
   /* Ported from mockups/config-ui-onboarding.html. The .win is a full real window (100vw/100vh),
      not the mockup's fixed 560x500 demo card. Theme tokens (--bg/--text/--accent/...) come from

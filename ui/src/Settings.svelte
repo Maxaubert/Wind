@@ -1,7 +1,8 @@
 <script>
   import { onMount } from 'svelte';
   import { sections } from './settings-schema.js';
-  import { getConfig, setConfig, openIni, windowControl } from './bridge.js';
+  import { getConfig, setConfig, openIni, windowControl, quitWind } from './bridge.js';
+  import ConfirmCloseDialog from './lib/ConfirmCloseDialog.svelte';
   import { currentTheme, applyTheme, nextTheme, setTheme } from './theme.js';
   import Rail from './lib/Rail.svelte';
   import Section from './lib/Section.svelte';
@@ -10,6 +11,7 @@
   import { scrollspy, scrollToSection } from './lib/scrollspy.js';
 
   let values = {}, saved = {}, active = sections[0].id, theme = 'auto', scroller;
+  let confirmClose = false;
   const railItems = sections.map(s => ({ id: s.id, label: s.label, icon: s.icon }));
   const ids = sections.map(s => s.id);
 
@@ -63,7 +65,7 @@
       <span class="ctitle">Wind Settings</span>
       <div class="tbtns" style="app-region:no-drag;-webkit-app-region:no-drag">
         <button class="tbtn" title="Minimize" aria-label="Minimize" on:click={() => windowControl('minimize')}>{@html ic.min}</button>
-        <button class="tbtn close" title="Close" aria-label="Close" on:click={() => windowControl('close')}>{@html ic.close}</button>
+        <button class="tbtn close" title="Close" aria-label="Close" on:click={() => confirmClose = true}>{@html ic.close}</button>
       </div>
     </div>
     <div class="scroll" bind:this={scroller}
@@ -86,6 +88,9 @@
     </footer>
   </section>
 </div>
+<ConfirmCloseDialog show={confirmClose}
+                    onCancel={() => confirmClose = false}
+                    onConfirm={() => { quitWind(); windowControl('close'); }} />
 <style>
   /* Ported from mockups/config-ui-onepage.html (.win / .main->.content / .caption / .ctitle /
      .tbtns / .tbtn / .scroll / .footer / .fhint->.hint / .btn). */
