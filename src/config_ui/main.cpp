@@ -9,6 +9,7 @@
 #include <sstream>
 #include <map>
 #include "ini_edit.h"
+#include "../config_path.h"
 #pragma comment(lib, "shlwapi.lib")
 
 using namespace Microsoft::WRL;
@@ -20,7 +21,12 @@ static std::wstring ExeDir() {
     wchar_t p[MAX_PATH]; GetModuleFileNameW(nullptr, p, MAX_PATH);
     PathRemoveFileSpecW(p); return p;
 }
-static std::wstring IniPath() { return ExeDir() + L"\\magnifier.ini"; }
+// Resolved at first call (and cached) so reads and writes always land on the same file the Wind
+// core uses. Falls back to %LOCALAPPDATA%\Wind\magnifier.ini when the exe dir is read-only.
+static std::wstring IniPath() {
+    static std::wstring cached = wind::ResolveIniPath();
+    return cached;
+}
 static std::string ReadFileUtf8(const std::wstring& path) {
     std::ifstream f(path, std::ios::binary); if (!f) return "";
     std::stringstream ss; ss << f.rdbuf(); return ss.str();
