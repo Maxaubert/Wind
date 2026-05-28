@@ -22,6 +22,3 @@ export function getMode() {
 export function windowControl(action) { post({ type: 'window', action }); }
 // "Edit config file" -> host opens magnifier.ini in the default editor.
 export function openIni() { post({ type: 'openIni' }); }
-// Signals the magnifier core (Wind.exe) to quit. The host finds Wind's hidden tray window and
-// posts WM_USER+1, which Wind handles by PostQuitMessage(0).
-export function quitWind() { post({ type: 'quitWind' }); }
