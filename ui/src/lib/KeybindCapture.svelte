@@ -1,5 +1,6 @@
 <script>
-  // row.buttonKey = 'zoomInButton'|'zoomOutButton'; row.vkKey = 'zoomInVk'|'zoomOutVk'.
+  // row.buttonKey = 'zoomInButton'|'zoomOutButton' (omit for keyboard-only slots);
+  // row.vkKey = 'zoomInVk'|'zoomOutVk'|'zoomInVk2'|'zoomOutVk2'.
   // `values` holds current { [buttonKey]: '1'|'2'|'0', [vkKey]: '<vk>' }; onChange(key, val) is the
   // two-arg setter from Settings (stages the change; Apply writes it).
   export let row, values, onChange, disabled = false;
@@ -17,10 +18,15 @@
     if (vk) return VK_NAMES[vk] || ('Key ' + vk);
     return 'Unbound';
   }
+  // Capture on keyup (not keydown). Keyup is the conventional moment for rebind UIs: the key has
+  // fully resolved, and keys with synthesized/0 keyCodes (Fn combos, IME, etc.) never write a
+  // bogus '0' over the existing binding (which was the "one key behind" symptom: the first press
+  // wrote '0' clearing it, the second press wrote the real VK).
   function onKey(e) {
     if (!armed) return;
     e.preventDefault();
-    if (e.key === 'Escape') { armed = false; return; }   // cancel capture, do not bind Escape
+    if (e.key === 'Escape') { armed = false; return; }
+    if (!e.keyCode) return;   // ignore keys with no VK code (Fn modifiers, IME composition, etc.)
     // e.keyCode is the Windows Virtual-Key code the core reads from magnifier.ini (intentional;
     // e.key / e.code would need a reverse lookup). Deprecated in the DOM but stable in WebView2.
     onChange(row.vkKey, String(e.keyCode));
@@ -32,9 +38,18 @@
     if (e.button === 3) { onChange(row.buttonKey, '1'); onChange(row.vkKey, '0'); e.preventDefault(); armed = false; }
     else if (e.button === 4) { onChange(row.buttonKey, '2'); onChange(row.vkKey, '0'); e.preventDefault(); armed = false; }
   }
+  // Right-click clears the binding (Unbound). Works whether or not the keycap is armed.
+  function clear() {
+    onChange(row.vkKey, '0');
+    if (row.buttonKey) onChange(row.buttonKey, '0');
+    armed = false;
+  }
 </script>
-<svelte:window on:keydown={onKey} on:mousedown={onMouse} />
-<button class="keycap" class:armed {disabled} on:click={() => armed = true}>
+<svelte:window on:keyup={onKey} on:mousedown={onMouse} />
+<button class="keycap" class:armed {disabled}
+        on:click={() => armed = true}
+        on:contextmenu|preventDefault={clear}
+        title="Click to bind, right-click to clear">
   {armed ? (row.buttonKey ? 'Press a key or side-button...' : 'Press a key...') : label()}
 </button>
 <style>

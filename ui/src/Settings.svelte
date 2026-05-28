@@ -25,7 +25,11 @@
   });
   function change(key, val) {
     if (key === '__action') { if (val === 'openIni') openIni(); return; }
-    values = { ...values, [key]: val };
+    const next = { ...values, [key]: val };
+    // Disabling the alternate-keybinds toggle clears the alternate VK fields so any previously
+    // bound alt keys stop firing (Apply still has to be pressed to persist).
+    if (key === 'altKeybinds' && Number(val) === 0) { next.zoomInVk2 = '0'; next.zoomOutVk2 = '0'; }
+    values = next;
   }
   function apply() {
     for (const k of Object.keys(values)) if (String(values[k]) !== String(saved[k])) setConfig(k, values[k]);
@@ -51,9 +55,11 @@
       {#each sections as s}
         <Section id={s.id} label={s.label} desc={s.desc}>
           {#each s.rows as r}
-            <Row row={r} value={values[r.key]} {values} set={change}
-                 disabled={r.dependsOn && Number(values[r.dependsOn]) !== 1}
-                 onChange={(val) => change(r.key, val)} />
+            {#if !r.requires || Number(values[r.requires]) === 1}
+              <Row row={r} value={values[r.key]} {values} set={change}
+                   disabled={r.dependsOn && Number(values[r.dependsOn]) !== 1}
+                   onChange={(val) => change(r.key, val)} />
+            {/if}
           {/each}
         </Section>
       {/each}
