@@ -134,7 +134,20 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
     ShowWindow(hwnd, SW_SHOW);
     g_hwnd = hwnd;
     std::wstring uiDir = ExeDir() + L"\\ui\\dist";
-    CreateCoreWebView2EnvironmentWithOptions(nullptr, nullptr, nullptr,
+    // WebView2's user-data folder MUST be writable. The default sits next to the exe
+    // (<exeDir>\WindConfig.exe.WebView2), which is fine in dev but read-only when the exe is
+    // installed under Program Files - causing the environment to fail and the window to render
+    // as an empty shell. Force it to %LOCALAPPDATA%\Wind\WebView2 so it always works.
+    std::wstring userData;
+    {
+        wchar_t buf[MAX_PATH];
+        DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
+        if (n == 0 || n >= MAX_PATH) { GetTempPathW(MAX_PATH, buf); }
+        userData = std::wstring(buf) + L"\\Wind\\WebView2";
+        CreateDirectoryW((std::wstring(buf) + L"\\Wind").c_str(), nullptr);
+        CreateDirectoryW(userData.c_str(), nullptr);
+    }
+    CreateCoreWebView2EnvironmentWithOptions(nullptr, userData.c_str(), nullptr,
         Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
         [hwnd, uiDir, onboard](HRESULT, ICoreWebView2Environment* env) -> HRESULT {
             env->CreateCoreWebView2Controller(hwnd,
