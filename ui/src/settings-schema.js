@@ -1,10 +1,10 @@
 export const sections = [
   { id:'keybinds', label:'Keybinds', icon:'keys', desc:'Hold to zoom. The primary slot accepts a mouse side-button or a key. Right-click a binding to clear it.', rows: [
-    { key:'__zoomIn',   type:'keybind', label:'Zoom in',  desc:'Hold to magnify',  buttonKey:'zoomInButton',  vkKey:'zoomInVk' },
-    { key:'__zoomOut',  type:'keybind', label:'Zoom out', desc:'Hold to zoom back', buttonKey:'zoomOutButton', vkKey:'zoomOutVk' },
+    { key:'__zoomIn',   type:'keybind', label:'Zoom in',  desc:'Hold to magnify',  buttonKey:'zoomInButton',  vkKey:'zoomInVk',  modsKey:'zoomInMods' },
+    { key:'__zoomOut',  type:'keybind', label:'Zoom out', desc:'Hold to zoom back', buttonKey:'zoomOutButton', vkKey:'zoomOutVk', modsKey:'zoomOutMods' },
     { key:'altKeybinds', type:'toggle', label:'Enable alternate keybinds', desc:'Adds an optional second keyboard binding per direction.', def:0 },
-    { key:'__zoomIn2',  type:'keybind', label:'Zoom in (alternate)',  desc:'Optional keyboard key', vkKey:'zoomInVk2',  requires:'altKeybinds' },
-    { key:'__zoomOut2', type:'keybind', label:'Zoom out (alternate)', desc:'Optional keyboard key', vkKey:'zoomOutVk2', requires:'altKeybinds' },
+    { key:'__zoomIn2',  type:'keybind', label:'Zoom in (alternate)',  desc:'Optional keyboard combo', vkKey:'zoomInVk2',  modsKey:'zoomInMods2',  requires:'altKeybinds' },
+    { key:'__zoomOut2', type:'keybind', label:'Zoom out (alternate)', desc:'Optional keyboard combo', vkKey:'zoomOutVk2', modsKey:'zoomOutMods2', requires:'altKeybinds' },
   ]},
   { id:'zoom', label:'Zoom', icon:'zoom', desc:'How magnification grows while you hold the zoom button.', rows: [
     { key:'zoomInSpeed',  type:'slider', label:'Zoom-in speed',  desc:'Multiplier (1.0 = default).', min:0.25, max:4, step:0.05, def:1.0 },

@@ -45,7 +45,7 @@ test('changes stage until Apply, then setConfig fires', async ({ page }) => {
   expect(sets.some(s => s.key === 'smoothZoom' && s.value === '1')).toBeTruthy();
 });
 
-test('keybind capture writes a VK on keyup (live, no Apply needed)', async ({ page }) => {
+test('keybind capture writes a VK on keydown (live, no Apply needed)', async ({ page }) => {
   await page.goto('/');
   await page.getByText('Zoom in', { exact: true }).locator('xpath=../..').getByRole('button').click();
   await page.keyboard.press('F2'); // keyCode 113; fires both keydown and keyup

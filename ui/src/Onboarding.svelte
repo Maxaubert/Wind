@@ -7,7 +7,8 @@
   const N = 3;
   // Keybinds start blank (Unbound). The KeybindCapture below writes setConfig live as the user
   // captures, so untouched bindings keep whatever the ini already had (defaults for a fresh ini).
-  let keys = { zoomInButton:'0', zoomInVk:'0', zoomOutButton:'0', zoomOutVk:'0' };
+  let keys = { zoomInButton:'0', zoomInVk:'0', zoomOutButton:'0', zoomOutVk:'0',
+               zoomInMods:'0', zoomOutMods:'0' };
   function live(patch) {
     for (const k of Object.keys(patch)) setConfig(k, patch[k]);
     keys = { ...keys, ...patch };
@@ -18,8 +19,8 @@
   }
   function back() { if (cur > 0) cur -= 1; }
   function skip() { setConfig('onboarded', '1'); onDone(); }
-  const zoomInRow  = { label:'Zoom in',  desc:'Hold to magnify',  buttonKey:'zoomInButton',  vkKey:'zoomInVk' };
-  const zoomOutRow = { label:'Zoom out', desc:'Hold to zoom back', buttonKey:'zoomOutButton', vkKey:'zoomOutVk' };
+  const zoomInRow  = { label:'Zoom in',  desc:'Hold to magnify',  buttonKey:'zoomInButton',  vkKey:'zoomInVk',  modsKey:'zoomInMods' };
+  const zoomOutRow = { label:'Zoom out', desc:'Hold to zoom back', buttonKey:'zoomOutButton', vkKey:'zoomOutVk', modsKey:'zoomOutMods' };
 </script>
 <div class="win">
   <div class="caption" style="app-region:drag;-webkit-app-region:drag">

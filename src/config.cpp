@@ -28,6 +28,10 @@ Config ParseConfig(const std::string& text) {
             else if (key == "zoomOutVk")        c.zoomOutVk = std::stoi(val);
             else if (key == "zoomInVk2")        c.zoomInVk2 = std::stoi(val);
             else if (key == "zoomOutVk2")       c.zoomOutVk2 = std::stoi(val);
+            else if (key == "zoomInMods")       c.zoomInMods = std::stoi(val);
+            else if (key == "zoomOutMods")      c.zoomOutMods = std::stoi(val);
+            else if (key == "zoomInMods2")      c.zoomInMods2 = std::stoi(val);
+            else if (key == "zoomOutMods2")     c.zoomOutMods2 = std::stoi(val);
             else if (key == "maxLevel")         c.maxLevel = std::stod(val);
             else if (key == "zoomInSpeed")      c.zoomInSpeed = std::stod(val);
             else if (key == "zoomOutSpeed")     c.zoomOutSpeed = std::stod(val);

@@ -188,8 +188,22 @@ static void RunTick(TickState& t) {
     // Effective held state = mouse side-button (set by the hook/raw input) OR keyboard key held
     // (polled globally, no extra hook). Lets users without side-buttons zoom from the keyboard.
     auto keyDown = [](int vk) { return vk != 0 && (GetAsyncKeyState(vk) & 0x8000) != 0; };
-    bool inHeld  = g_input.state().inHeld.load()  || keyDown(t.cfg.zoomInVk)  || keyDown(t.cfg.zoomInVk2);
-    bool outHeld = g_input.state().outHeld.load() || keyDown(t.cfg.zoomOutVk) || keyDown(t.cfg.zoomOutVk2);
+    // Modifier mask: bit 1=Ctrl, 2=Alt, 4=Shift, 8=Win. 0 = no modifiers required. Extra modifiers
+    // never disqualify (so a "Ctrl+F1" combo still fires when Ctrl+Shift+F1 is held).
+    auto modsHeld = [](int mods) {
+        if ((mods & 1) && !(GetAsyncKeyState(VK_CONTROL) & 0x8000)) return false;
+        if ((mods & 2) && !(GetAsyncKeyState(VK_MENU)    & 0x8000)) return false;
+        if ((mods & 4) && !(GetAsyncKeyState(VK_SHIFT)   & 0x8000)) return false;
+        if ((mods & 8) && !((GetAsyncKeyState(VK_LWIN) & 0x8000) || (GetAsyncKeyState(VK_RWIN) & 0x8000))) return false;
+        return true;
+    };
+    auto comboHeld = [&](int vk, int mods) { return keyDown(vk) && modsHeld(mods); };
+    bool inHeld  = g_input.state().inHeld.load()
+        || comboHeld(t.cfg.zoomInVk,  t.cfg.zoomInMods)
+        || comboHeld(t.cfg.zoomInVk2, t.cfg.zoomInMods2);
+    bool outHeld = g_input.state().outHeld.load()
+        || comboHeld(t.cfg.zoomOutVk,  t.cfg.zoomOutMods)
+        || comboHeld(t.cfg.zoomOutVk2, t.cfg.zoomOutMods2);
     // Apply the live zoom profile every frame (free hot-reload; setProfile does not reset level).
     t.zoom.setProfile(t.cfg.zoomInSpeed, t.cfg.zoomOutSpeed, t.cfg.smoothZoom != 0,
                       t.cfg.smoothZoomAccel, t.cfg.smoothZoomRamp);

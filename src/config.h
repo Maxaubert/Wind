@@ -13,6 +13,14 @@ struct Config {
     // button/key so a user can have a mouse side-button AND a keyboard fallback. 0 = unbound.
     int    zoomInVk2        = 0;
     int    zoomOutVk2       = 0;
+    // Optional modifier mask for each VK binding (bit 1=Ctrl, 2=Alt, 4=Shift, 8=Win). 0 = no
+    // modifiers required (the key fires regardless of what else is held). When non-zero, the core
+    // additionally checks that all the listed modifiers are currently down (extra modifiers do not
+    // disqualify, matching standard hotkey behavior).
+    int    zoomInMods       = 0;
+    int    zoomOutMods      = 0;
+    int    zoomInMods2      = 0;
+    int    zoomOutMods2     = 0;
     int    recenterVk       = 0;     // VK code; 0 = unbound. Tap to recenter the lens on the cursor.
     double maxLevel         = 8.0;   // how FAR you can zoom (does not affect zoom SPEED)
     // --- Zoom experience (see docs/superpowers/specs/2026-05-26-configurable-zoom-design.md) ---

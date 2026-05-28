@@ -108,6 +108,14 @@ TEST_CASE("alternate zoom VK keys default 0 and parse") {
     CHECK(c.zoomInVk2 == 112);
     CHECK(c.zoomOutVk2 == 113);
 }
+TEST_CASE("modifier masks default 0 and parse") {
+    Config d = ParseConfig("");
+    CHECK(d.zoomInMods == 0);  CHECK(d.zoomOutMods == 0);
+    CHECK(d.zoomInMods2 == 0); CHECK(d.zoomOutMods2 == 0);
+    Config c = ParseConfig("zoomInMods=3\nzoomOutMods=1\nzoomInMods2=8\nzoomOutMods2=4\n");
+    CHECK(c.zoomInMods == 3);  CHECK(c.zoomOutMods == 1);   // Ctrl+Alt / Ctrl
+    CHECK(c.zoomInMods2 == 8); CHECK(c.zoomOutMods2 == 4);  // Win / Shift
+}
 TEST_CASE("zoom-speed and smooth-zoom knobs parse") {
     Config c = ParseConfig(
         "smoothZoom=1\nzoomInSpeed=2.0\nzoomOutSpeed=0.5\n"
