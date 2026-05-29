@@ -3,6 +3,44 @@
 This PR exists so a multi-agent code review (`/ultrareview`) can do a full performance pass
 on the Wind magnifier's runtime. There are no functional code changes; only this brief.
 
+## Priorities (calibrated)
+
+- **Scope:** broad sweep across all three regimes - rank findings by absolute impact, not by
+  category. The goal is making the whole program as fast as it can reasonably be.
+    1. **In-zoom smoothness / consistency** under a real workload (4K HDR over a game).
+    2. **Zoom-in latency** (key press to first correct magnified frame).
+    3. **Idle (1x) cost** when Wind is just sitting in the tray.
+- **Target workload:** **high-end desktop, 4K HDR, often over a game.** A heavy GPU copy
+  is the realistic per-frame cost; anything that scales with `zoom^2 * 4K * BGRA16` matters
+  much more than micro-CPU savings. The dev display is 144 Hz.
+- **Scope of acceptable fixes:** **anything goes, including big pivots.** Reviewers should
+  not limit themselves to tactical patches - propose architectural changes (capture on a
+  dedicated thread, compute-shader magnify, double-buffered DDA pipeline, etc.) if the win
+  is clear.
+- **Pivots explicitly on the table** (the kind of suggestion to make, not avoid):
+    - **DirectComposition + flip-model swapchain.** This was tried in #11 and reverted because
+      `WS_EX_LAYERED` (required for cross-process click-through) is incompatible with flip-model,
+      and dropping the layer broke clicks to other apps. CLAUDE.md has the full constraint
+      writeup. If the reviewers can find a way to keep cross-process click-through WITHOUT
+      `WS_EX_LAYERED` (alternative click-through hit-testing, message-only routing,
+      DirectComposition + `SetWindowCompositionAttribute`, etc.), this is the single biggest
+      potential win (eliminates the BLT-model + DWM phase mismatch microstutter).
+    - **Pipelined capture vs render** (DDA `AcquireNextFrame` on its own thread feeding a
+      double-buffered staging texture). Issue #47 deferred this (A). Worth revisiting.
+    - **Compute-shader magnify** (instead of the current pixel-shader full-screen pass) if it
+      saves measurable cycles on 4K HDR.
+    - **Restructured tick loop** if the current single-thread pattern is the bottleneck for
+      the 4K HDR / 144 Hz / game-on-top scenario.
+
+## Measurement bias
+
+Wind has a built-in objective measurement: `WIND_PACINGTEST=1 Wind.exe` runs the real
+present-paced render path at a forced zoom for ~4s with a simulated pan and logs interval
+stats (avg/max dt, hitch counts) to `%TEMP%\wind_diag.log`. `diagnostics=1` in
+`magnifier.ini` gives a 2 s sliding-window stats line during normal use. Suggested fixes
+that are measurable via either path are preferred; fixes that need a new benchmark, please
+say so and propose how.
+
 ## What to look for
 
 Heavy / wasteful runtime behavior in the magnifier's hot path:
