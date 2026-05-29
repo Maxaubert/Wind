@@ -107,6 +107,9 @@ struct TickState {
     // Frame-pacing diagnostics (diagnostics=1): a 2 s window of loop-interval stats.
     double diagAccum = 0.0, diagSumDt = 0.0, diagMaxDt = 0.0;
     int    diagFrames = 0, diagHitches = 0;
+    unsigned  diagPrevPresent = 0, diagPrevRefresh = 0;   // #69: last DXGI present-stats sample (dcomp)
+    long long diagPrevSyncQpc = 0;
+    bool      diagHaveStats = false;
     TickState(RenderEngine& re, const MonitorTarget& m, const Config& c)
         : renderEngine(re), mon(m), cfg(c),
           zoom(1.0, c.maxLevel),
@@ -382,6 +385,21 @@ static void RunTick(TickState& t) {
             DiagLog("zoom=%.2f frames=%d ~fps=%.0f avgDt=%.2fms maxDt=%.2fms hitches>1.5x=%d",
                     lvl, t.diagFrames, t.diagFrames / t.diagAccum,
                     t.diagSumDt / t.diagFrames * 1000.0, t.diagMaxDt * 1000.0, t.diagHitches);
+            // #69: actual on-screen rates from DXGI frame stats (dcomp only). displayRefreshHz is
+            // the real physical refresh during the window (SyncRefreshCount delta over SyncQPCTime
+            // delta) - if it drops to ~half while loop fps is throttled, the DISPLAY/VRR is idling
+            // down; if it stays at refresh while presentedHz drops, it's a DWM composite down-rate.
+            unsigned pc = 0, rc = 0; long long sq = 0;
+            if (t.renderEngine.presentStats(pc, rc, sq)) {
+                if (t.diagHaveStats && sq > t.diagPrevSyncQpc) {
+                    double sec = double(sq - t.diagPrevSyncQpc) / double(t.freq.QuadPart);
+                    if (sec > 0.0)
+                        DiagLog("  presentstats: presentedHz=%.0f displayRefreshHz=%.0f (presented=%u refreshes=%u over %.2fs)",
+                                double(pc - t.diagPrevPresent) / sec, double(rc - t.diagPrevRefresh) / sec,
+                                pc - t.diagPrevPresent, rc - t.diagPrevRefresh, sec);
+                }
+                t.diagPrevPresent = pc; t.diagPrevRefresh = rc; t.diagPrevSyncQpc = sq; t.diagHaveStats = true;
+            }
             t.diagAccum = 0.0; t.diagSumDt = 0.0; t.diagMaxDt = 0.0;
             t.diagFrames = 0; t.diagHitches = 0;
         }

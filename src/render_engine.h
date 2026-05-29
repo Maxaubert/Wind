@@ -75,6 +75,12 @@ public:
     void debugInfo(int& screenW, int& screenH, int& curW, int& curH, int& hotX, int& hotY) const;
     // Verification only: duplication surface format + output color space / bit depth (HDR).
     void debugHdr(unsigned& ddaFormat, int& colorSpace, int& bitsPerColor) const;
+    // Diagnostics (#69): the dcomp flip swapchain's DXGI present statistics. presentCount = our
+    // completed presents; syncRefreshCount = vblank counter at the last present; syncQpc = QPC of
+    // that vblank. Sampling deltas over a window gives the ACTUAL on-screen refresh rate (to tell
+    // a VRR/display down-rate apart from a DWM composite down-rate). Returns false in blt mode or
+    // if stats are unavailable.
+    bool presentStats(unsigned& presentCount, unsigned& syncRefreshCount, long long& syncQpc) const;
     // Verification only: copy the back-buffer to a 32bpp BGRA PNG.
     bool dumpBackbufferPng(const wchar_t* path);
     // Verification only: render one frame and dump it before Present (so the PNG matches the

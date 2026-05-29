@@ -405,6 +405,16 @@ void RenderEngine::debugHdr(unsigned& ddaFormat, int& colorSpace, int& bitsPerCo
     ddaFormat = s_->ddaFormat; colorSpace = s_->outColorSpace; bitsPerColor = s_->outBitsPerColor;
 }
 
+bool RenderEngine::presentStats(unsigned& presentCount, unsigned& syncRefreshCount, long long& syncQpc) const {
+    if (!s_ || s_->present != PresentMode::Dcomp || !s_->swapFlip) return false;
+    DXGI_FRAME_STATISTICS fs{};
+    if (FAILED(s_->swapFlip->GetFrameStatistics(&fs))) return false;
+    presentCount = fs.PresentCount;
+    syncRefreshCount = fs.SyncRefreshCount;
+    syncQpc = fs.SyncQPCTime.QuadPart;
+    return true;
+}
+
 bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool hdrTonemap,
                               PresentMode present) {
     const int screenW = monitor.w, screenH = monitor.h;
