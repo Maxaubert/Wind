@@ -91,6 +91,21 @@ Spec: `docs/superpowers/specs/2026-05-25-own-renderer-design.md`. Issue #4.
   The click point, drawn cursor, and view all derive from the SMOOTHED center (`cx_`), so a click lands
   under the visible cursor; do not "fix" the click/warp point to the unsmoothed target (it would
   misalign clicks) and do not revert to a fixed sensitivity multiplier.
+- PROGRAM FILES IS READ-ONLY FOR NON-ADMIN: any file the runtime needs to write MUST go to a
+  per-user-writable location, never next to the exe. The UIAccess build is installed to
+  `C:\Program Files\Wind\` and WindConfig.exe runs as a normal user, so an in-place write there
+  silently fails (Apply / live keybind capture / WebView2 init all break this way historically).
+    - magnifier.ini: ALWAYS resolve the path via `wind::ResolveIniPath()` (src/config_path.h),
+      used by both Wind.exe core and WindConfig.exe host. It probes whether the exe dir is
+      writable; dev keeps the ini next to the exe, Program Files transparently falls back to
+      `%LOCALAPPDATA%\Wind\magnifier.ini` and seeds it from the install template on first launch
+      so deploy-time defaults carry over. Never hardcode `L"magnifier.ini"` (it would re-break
+      the Program Files deploy on the next feature that touches the ini).
+    - WebView2 user-data folder: WindConfig.exe explicitly passes `%LOCALAPPDATA%\Wind\WebView2`
+      to `CreateCoreWebView2EnvironmentWithOptions`. The default (`<exeDir>\WindConfig.exe.WebView2`)
+      is read-only in Program Files, which makes the env creation fail and the window paint as
+      an empty shell. Keep the explicit path when touching the host's env setup.
+    - Diagnostics: `wind_diag.log` goes to `%TEMP%`; `wind_selftest.png` is dev-only (env-gated).
 
 ## Toolchain notes (this machine)
 - VS 2026 Community is a prerelease channel, so `vswhere` needs `-all -prerelease`
