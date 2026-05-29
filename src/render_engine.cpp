@@ -662,7 +662,8 @@ void RenderEngine::State::presentTransparent() {
     const float clear[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
     ctx->OMSetRenderTargets(1, rtv.GetAddressOf(), nullptr);
     ctx->ClearRenderTargetView(rtv.Get(), clear);
-    swapFlip->Present(1, 0);
+    swapFlip->Present(0, 0);   // just commit the blank frame; no need to pace (avoids a vblank
+                               //   stall when buildPresent runs on the main thread during hot-reload)
 }
 
 // (Re)create the render-target view from the swapchain's current back buffer (buffer 0). Used
