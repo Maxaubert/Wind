@@ -77,8 +77,9 @@ bool Overlay::init(PresentMode mode) {
     if (FAILED(hr)) return false;
 
     if (mode == PresentMode::Blt) {
-        ComPtr<IDXGIDevice1> dxgiDev; s_->dev.As(&dxgiDev);
-        dxgiDev->SetMaximumFrameLatency(1);
+        ComPtr<IDXGIDevice1> dxgiDev;
+        if (FAILED(s_->dev.As(&dxgiDev))) return false;   // need it for the latency cap below
+        dxgiDev->SetMaximumFrameLatency(1);               // match the shipping blt baseline
         ComPtr<IDXGIAdapter> adapter; dxgiDev->GetAdapter(&adapter);
         ComPtr<IDXGIFactory> factory; adapter->GetParent(IID_PPV_ARGS(&factory));
         DXGI_SWAP_CHAIN_DESC scd{};
