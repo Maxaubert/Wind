@@ -47,7 +47,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "cursorSmoothing")    c.cursorSmoothing = std::stod(val);
             else if (key == "cursorScaleWithZoom")c.cursorScaleWithZoom = std::stoi(val);
             else if (key == "cursorVisibility")   c.cursorVisibility = val;
-            else if (key == "present") c.present = (val == "dcomp") ? "dcomp" : "blt";
+            else if (key == "present") c.present = (val == "blt" || val == "dcomp" || val == "auto") ? val : "auto";
             else if (key == "bilinear")           c.bilinear = std::stoi(val);
             else if (key == "sharpness")          c.sharpness = std::stod(val);
             else if (key == "zorderBand")         c.zorderBand = std::stoi(val);
@@ -97,9 +97,10 @@ Config LoadConfig(const std::wstring& path) {
                "vsync=1\n"
                "; dwmFlush: 0=plain vsync pacing (default, fewer stutters); 1=align to DWM's composition\n"
                "dwmFlush=0\n"
-               "; present: blt=default (current path); dcomp=DirectComposition flip-model present.\n"
-               ";   Opt-in A/B for smoothness (#69). Change applies on the next zoom-in (no restart).\n"
-               "present=blt\n"
+               "; present: auto=default (dcomp when smooth, auto-fall-back to blt over a background\n"
+               ";   fullscreen game); dcomp=force DirectComposition flip-model; blt=force blt-model.\n"
+               ";   Change applies on the next zoom-in (no restart). #69\n"
+               "present=auto\n"
                "; diagnostics=1 logs frame timing to %TEMP%\\wind_diag.log (restart to apply)\n"
                "diagnostics=0\n"
                "; cursorSensitivity: pan speed multiplier - free panning auto-matches the OS cursor\n"
