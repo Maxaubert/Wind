@@ -46,14 +46,18 @@ TEST_CASE("foreground change that is NOT fullscreen does not re-probe") {
     CHECK(c == PresentChoice::Blt);
 }
 
-TEST_CASE("backstop re-probes dcomp after the timeout even if still throttled") {
+TEST_CASE("backstop re-probes dcomp only after ~60s, not before") {
     PresentPolicy p;
     for (int i = 0; i < 11; ++i) p.update(0.1, true, 60.0, 144, false, false);  // -> Blt
-    bool reprobed = false;
-    for (int i = 0; i < 700 && !reprobed; ++i)
-        if (p.update(0.1, true, 60.0, 144, false, false) == PresentChoice::Dcomp) reprobed = true;
-    CHECK(reprobed);
+    int ticks = 0;
+    while (p.choice() == PresentChoice::Blt && ticks < 700) {
+        p.update(0.1, true, 60.0, 144, false, false);   // still throttled, no cue
+        ++ticks;
+    }
+    CHECK(p.choice() == PresentChoice::Dcomp);
     CHECK(p.lastReason() == PresentReason::Backstop);
+    CHECK(ticks >= 590);   // did NOT fire early (60s / 0.1s ~= 600 ticks)
+    CHECK(ticks <= 610);
 }
 
 TEST_CASE("a failed probe returns to blt") {
@@ -71,4 +75,14 @@ TEST_CASE("reset returns to optimistic dcomp") {
     for (int i = 0; i < 11; ++i) p.update(0.1, true, 60.0, 144, false, false);  // -> Blt
     p.reset();
     CHECK(p.choice() == PresentChoice::Dcomp);
+}
+
+TEST_CASE("reset clears the throttle accumulator") {
+    PresentPolicy p;
+    for (int i = 0; i < 9; ++i) p.update(0.1, true, 60.0, 144, false, false);   // 0.9s below, not yet tripped
+    REQUIRE(p.choice() == PresentChoice::Dcomp);
+    p.reset();
+    // One more sub-threshold tick must NOT trip: if reset failed to clear belowSecs_ (0.9s),
+    // this tick would reach 1.0s and flip to Blt.
+    CHECK(p.update(0.1, true, 60.0, 144, false, false) == PresentChoice::Dcomp);
 }
