@@ -7,6 +7,8 @@
 #include <cstdio>
 #include <sstream>
 #include <string>
+#include <vector>
+#include <algorithm>
 
 static const char* kResults = "present_spike_results.log";
 
@@ -136,6 +138,44 @@ static void TestClickthrough(spike::PresentMode mode, bool dwmFlush) {
     ov.shutdown();
 }
 
+// Measure injection-to-receipt latency for clicks delivered to the probe, with the overlay
+// present (overlayPresent=true) or absent (baseline). N samples; reports median + p95.
+static void TestLatency(spike::PresentMode mode, bool overlayPresent, bool dwmFlush) {
+    int cx, cy;
+    if (!ProbeCenter(cx, cy)) {
+        spike::LogLine(kResults, "latency mode=%s ERROR no probe rect (run clickprobe.exe first)", ModeName(mode));
+        return;
+    }
+    spike::Overlay ov;
+    if (overlayPresent && !ov.init(mode)) { spike::LogLine(kResults, "latency mode=%s ERROR init failed", ModeName(mode)); return; }
+    if (overlayPresent) RenderFor(ov, 500, dwmFlush);
+
+    const int N = 30; const long long freq = spike::QpcFreq();
+    std::vector<double> lat; MSG m;
+    for (int i = 0; i < N; ++i) {
+        long long t0 = spike::QpcNow();
+        ClickAt(cx, cy);
+        long long deadline = t0 + 200LL * freq / 1000;   // give up after 200 ms
+        long long recv = 0;
+        while (spike::QpcNow() < deadline) {
+            while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&m); DispatchMessageW(&m); }
+            if (overlayPresent) ov.renderFrame((double)i, dwmFlush);
+            recv = FirstDownSince(t0);
+            if (recv) break;
+            Sleep(1);
+        }
+        if (recv) lat.push_back((double)(recv - t0) / freq * 1000.0);
+        Sleep(60);   // gap so clicks don't coalesce
+    }
+    std::sort(lat.begin(), lat.end());
+    double med = lat.empty() ? -1.0 : lat[lat.size() / 2];
+    double p95 = lat.empty() ? -1.0 : lat[(size_t)(lat.size() * 0.95)];
+    spike::LogLine(kResults, "latency mode=%s overlay=%d samples=%d medianMs=%.2f p95Ms=%.2f",
+                   overlayPresent ? ModeName(mode) : "none", overlayPresent ? 1 : 0,
+                   (int)lat.size(), med, p95);
+    if (overlayPresent) ov.shutdown();
+}
+
 int main(int argc, char** argv) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     if (argc < 3) {
@@ -157,8 +197,10 @@ int main(int argc, char** argv) {
         printf("skeleton done; see %%TEMP%%\\present_spike_results.log\n");
         return 0;
     }
-    if (strcmp(test, "clickthrough") == 0) { TestClickthrough(mode, dwmFlush); }
-    else if (strcmp(test, "pacing") == 0)  { TestPacing(mode, dwmFlush); }
+    if (strcmp(test, "clickthrough") == 0)          { TestClickthrough(mode, dwmFlush); }
+    else if (strcmp(test, "pacing") == 0)           { TestPacing(mode, dwmFlush); }
+    else if (strcmp(test, "latency") == 0)          { TestLatency(mode, true, dwmFlush); }
+    else if (strcmp(test, "latency-baseline") == 0) { TestLatency(mode, false, false); }
     else { printf("test '%s' not implemented yet\n", test); return 0; }
     printf("%s done; see %%TEMP%%\\present_spike_results.log\n", test);
     return 0;
