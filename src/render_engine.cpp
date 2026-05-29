@@ -385,20 +385,16 @@ PresentMode RenderEngine::presentMode() const { return s_->present; }
 bool RenderEngine::setPresentMode(PresentMode present) {
     if (!s_ || !s_->ready) return false;
     if (present == s_->present) return true;
-    const PresentMode prev = s_->present;
+    if (!s_->dcompVisual || !s_->dcomp) return false;   // both paths must be built (initialize)
+    // Instant switch: change only which swapchain the DComp visual shows. Both swapchains stay
+    // alive, so there is no rebuild -> hitch-free, never touches zoom, valid mid-zoom. The capture
+    // pipeline (desktopCopy) is independent of the present path, so it is NOT reset here.
+    HRESULT hr = s_->dcompVisual->SetContent(present == PresentMode::Dcomp ? static_cast<IUnknown*>(s_->swapFlip.Get()) : nullptr);
+    if (SUCCEEDED(hr)) hr = s_->dcomp->Commit();
+    if (FAILED(hr)) { RLog("setPresentMode: SetContent/Commit failed hr=0x%08lX; keeping %d", (unsigned long)hr, (int)s_->present); return false; }
     s_->present = present;
-    if (!s_->buildPresent()) {
-        RLog("setPresentMode: build of new mode failed; reverting to %d", (int)prev);
-        s_->present = prev;
-        s_->buildPresent();        // best-effort restore of the working pipeline
-        return false;
-    }
-    // New pipeline yields a blank back buffer and no valid cached desktop: force a fresh full
-    // capture so the next zoomed frame is live (same as invalidateCapture's contract).
-    s_->dupl.Reset();
-    s_->haveDesktop = false;
-    s_->freshCapture = true;
-    RLog("setPresentMode: switched %d -> %d", (int)prev, (int)present);
+    s_->rtv.Reset();   // next render() re-acquires the rtv from the now-active swapchain
+    RLog("setPresentMode: instant switch -> %d", (int)present);
     return true;
 }
 
@@ -685,19 +681,23 @@ bool RenderEngine::retarget(const MonitorTarget& m) {
     // best-effort restore the RTV from the current back buffer and bail WITHOUT moving the window
     // or changing geometry, so the engine keeps rendering the current monitor (caller keeps it).
     if (sizeChanged) {
-        s_->rtv.Reset();        // ResizeBuffers requires all back-buffer refs released
-        HRESULT hr;
-        if (s_->present == PresentMode::Dcomp)
-            hr = s_->swapFlip->ResizeBuffers(2, m.w, m.h, DXGI_FORMAT_B8G8R8A8_UNORM, 0);
-        else
-            hr = s_->swap->ResizeBuffers(1, m.w, m.h, DXGI_FORMAT_B8G8R8A8_UNORM, 0);
-        if (FAILED(hr)) {
-            RLog("retarget: ResizeBuffers failed hr=0x%08lX; restoring RTV, keeping current monitor",
-                 (unsigned long)hr);
-            if (s_->present == PresentMode::Dcomp) s_->acquireBackbufferRtv(); else s_->recreateRtv();
+        s_->rtv.Reset();   // release the back-buffer ref before any ResizeBuffers
+        // Detach the flip swapchain from the visual before resizing it, then reattach the active
+        // content afterward (ResizeBuffers on a swapchain bound as visual content is unsafe).
+        if (s_->dcompVisual) { s_->dcompVisual->SetContent(nullptr); s_->dcomp->Commit(); }
+        HRESULT hb = s_->swap->ResizeBuffers(1, m.w, m.h, DXGI_FORMAT_B8G8R8A8_UNORM, 0);
+        HRESULT hf = s_->swapFlip->ResizeBuffers(2, m.w, m.h, DXGI_FORMAT_B8G8R8A8_UNORM, 0);
+        if (s_->dcompVisual) {
+            s_->dcompVisual->SetContent(s_->present == PresentMode::Dcomp ? static_cast<IUnknown*>(s_->swapFlip.Get()) : nullptr);
+            s_->dcomp->Commit();
+        }
+        if (FAILED(hb) || FAILED(hf)) {
+            RLog("retarget: ResizeBuffers failed hb=0x%08lX hf=0x%08lX; keeping current monitor",
+                 (unsigned long)hb, (unsigned long)hf);
+            s_->acquireBackbufferRtv();   // best-effort restore of the active rtv
             return false;
         }
-        if (s_->present == PresentMode::Dcomp ? !s_->acquireBackbufferRtv() : !s_->recreateRtv()) {
+        if (!s_->acquireBackbufferRtv()) {
             RLog("retarget: RTV recreate failed after ResizeBuffers; keeping current monitor");
             return false;
         }
