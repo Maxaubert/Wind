@@ -104,28 +104,31 @@ int main(int argc, char** argv) {
 
     const long long freq = spike::QpcFreq();
     const long long end = spike::QpcNow() + (long long)seconds * freq;
-    bool showDcomp = false; long long lastFlip = 0;
+    int phase = 0; long long lastFlip = 0;   // 0=dcomp@255 BLUE, 1=dcomp@alpha0 (hidden?), 2=blt@255 RED
     MSG msg;
     while (spike::QpcNow() < end) {
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&msg); DispatchMessageW(&msg); }
         const long long now = spike::QpcNow();
-        if (now - lastFlip > freq * 3 / 2) {   // toggle every ~1.5s
-            lastFlip = now; showDcomp = !showDcomp;
-            if (showDcomp) {
-                fill(swapFlip.Get(), 0.0f, 0.0f, 1.0f);   // BLUE (premultiplied opaque)
-                swapFlip->Present(0, 0);
+        if (now - lastFlip > freq * 3 / 2) {   // advance phase every ~1.5s
+            lastFlip = now; phase = (phase + 1) % 3;
+            if (phase == 0) {
+                SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+                fill(swapFlip.Get(), 0.0f, 0.0f, 1.0f); swapFlip->Present(0, 0);
                 visual->SetContent(swapFlip.Get()); dcomp->Commit();
-                spike::LogLine(kLog, "flip -> DCOMP (expect BLUE)");
+                spike::LogLine(kLog, "phase DCOMP @alpha255 (expect BLUE)");
+            } else if (phase == 1) {
+                SetLayeredWindowAttributes(hwnd, 0, 0, LWA_ALPHA);   // visual still = flip(BLUE)
+                spike::LogLine(kLog, "phase DCOMP @alpha0 (expect HIDDEN/desktop if LWA hides dcomp)");
             } else {
-                visual->SetContent(nullptr); dcomp->Commit();   // empty visual: does blt show through?
-                fill(swapBlt.Get(), 1.0f, 0.0f, 0.0f);    // RED
-                swapBlt->Present(0, 0);
-                spike::LogLine(kLog, "flip -> BLT (expect RED if coexist; black/desktop if not)");
+                SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+                visual->SetContent(nullptr); dcomp->Commit();
+                fill(swapBlt.Get(), 1.0f, 0.0f, 0.0f); swapBlt->Present(0, 0);
+                spike::LogLine(kLog, "phase BLT @alpha255 (expect RED)");
             }
         }
-        // Keep the active path presenting so its content stays current.
-        if (showDcomp) { fill(swapFlip.Get(), 0.0f, 0.0f, 1.0f); swapFlip->Present(0, 0); }
-        else           { fill(swapBlt.Get(), 1.0f, 0.0f, 0.0f); swapBlt->Present(0, 0); }
+        // Keep the visible phases fresh (phase 1 is intentionally not re-presented).
+        if (phase == 0) { fill(swapFlip.Get(), 0.0f, 0.0f, 1.0f); swapFlip->Present(0, 0); }
+        else if (phase == 2) { fill(swapBlt.Get(), 1.0f, 0.0f, 0.0f); swapBlt->Present(0, 0); }
         Sleep(8);
     }
     spike::LogLine(kLog, "done");
