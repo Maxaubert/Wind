@@ -50,6 +50,10 @@ struct Config {
     // composition (overrides vsync while zoomed). Hot-reloadable.
     int    dwmFlush         = 0;
     int    diagnostics      = 0;     // 1 = log frame-timing to wind_diag.log
+    // Present backend while zoomed (render engine). "blt" (default) = blt-model swapchain on the
+    // layered overlay, paced by vsync/DwmFlush. "dcomp" = DirectComposition flip-model present
+    // (layered window kept for click-through). Applied at a zoom boundary, not per frame. #69.
+    std::string present = "blt";
 
     // --- Own GPU renderer ---------------------------------------------------
     // Pan speed multiplier. Free desktop panning auto-matches the OS cursor (DPI + acceleration) and
