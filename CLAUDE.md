@@ -10,6 +10,12 @@ Plan: `docs/superpowers/plans/2026-05-24-wind-magnifier.md`.
 - Build UIAccess variant: `build.bat uiaccess`  (uiAccess=true manifest; must be signed + run
   from `C:\Program Files\Wind` - deploy via `tools\uiaccess_setup.ps1` elevated). Needed only
   to cover the Start menu / taskbar / tray (overlay uses `CreateWindowInBand`, `zorderBand=16`).
+- Build config UI: `build.bat config`  (npm-builds the Svelte app under `ui/` to `ui/dist/`, then
+  compiles `src/config_ui/*.cpp` against the vendored WebView2 SDK -> `WindConfig.exe` next to
+  `Wind.exe`). Also run by `tools\uiaccess_setup.ps1`, which deploys `WindConfig.exe` + `ui/dist`
+  alongside the signed `Wind.exe`.
+- Deploy UIAccess build (elevated; from a normal shell):
+  `Start-Process powershell -Verb RunAs -ArgumentList '-NoExit','-ExecutionPolicy','Bypass','-File','tools\uiaccess_setup.ps1'`
 
 ## Stack
 C++17, MSVC cl.exe. DXGI Desktop Duplication + Direct3D 11 (own renderer); Raw Input,
@@ -28,6 +34,18 @@ via `cursor_mapper`; hides the OS cursor (`MagShowSystemCursor`) and syncs `SetC
 clicks. Sub-pixel pan + smooth centered cursor. The old Magnification-API `engine=mag` fallback
 was removed (issue #20) - render is the only engine.
 Spec: `docs/superpowers/specs/2026-05-25-own-renderer-design.md`. Issue #4.
+
+**Two binaries.** `Wind.exe` is the always-running tray magnifier (the perf-critical core
+described above). `WindConfig.exe` is an on-demand settings GUI: a thin C++ WebView2 host
+(`src/config_ui/main.cpp`) that loads a built Svelte app from `ui/dist/` and talks to the core
+only by writing `magnifier.ini` (the core dir-watches and hot-reloads it - no IPC). First
+launch also runs a short guided onboarding (wind-trails-into-logo intro -> set zoom keys ->
+done; sets `onboarded=1` so it never auto-opens again). The config process is non-admin, runs
+in a separate exe entirely, and has zero perf coupling to the magnifier loop. Settings spec:
+`docs/superpowers/specs/2026-05-27-config-ui-polish-onboarding-design.md`. UI source: `ui/src/`
+(Svelte + Vite). Bridge messages: `getConfig`, `setConfig`, `window` (minimize/close),
+`openIni`. Settings live-applies keybind changes (sync `values`+`saved`); other rows use the
+staged Apply/Discard footer.
 
 ## IMPORTANT gotchas
 - Pure-logic files MUST NOT include `<windows.h>` - keeps unit tests desktop-free.
