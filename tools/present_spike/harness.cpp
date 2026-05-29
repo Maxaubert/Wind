@@ -83,6 +83,40 @@ static long long FirstDownSince(long long since) {
     return 0;
 }
 
+static int DetectHz() {
+    DEVMODEW dm{}; dm.dmSize = sizeof(dm);
+    if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &dm) && dm.dmDisplayFrequency > 1)
+        return (int)dm.dmDisplayFrequency;
+    return 60;
+}
+
+static void TestPacing(spike::PresentMode mode, bool dwmFlush) {
+    spike::Overlay ov;
+    if (!ov.init(mode)) { spike::LogLine(kResults, "pacing mode=%s ERROR init failed", ModeName(mode)); return; }
+    RenderFor(ov, 400, dwmFlush);            // warmup
+
+    const int hz = DetectHz();
+    const double target = 1.0 / hz;
+    const long long freq = spike::QpcFreq();
+    double elapsed = 0, sum = 0, maxd = 0, phase = 0;
+    int frames = 0, hitch = 0, big = 0;
+    long long a = spike::QpcNow(); MSG m;
+    while (elapsed < 4.0) {
+        while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&m); DispatchMessageW(&m); }
+        ov.renderFrame(phase, dwmFlush); phase += 0.05;
+        long long b = spike::QpcNow();
+        double dt = (double)(b - a) / freq; a = b;
+        elapsed += dt; sum += dt; frames++;
+        if (dt > maxd) maxd = dt;
+        if (dt > target * 1.5) hitch++;
+        if (dt > target * 2.5) big++;
+    }
+    spike::LogLine(kResults,
+        "pacing mode=%s hz=%d frames=%d fps=%.1f avgMs=%.2f maxMs=%.2f hitch1.5x=%d big2.5x=%d",
+        ModeName(mode), hz, frames, frames / elapsed, sum / frames * 1000.0, maxd * 1000.0, hitch, big);
+    ov.shutdown();
+}
+
 static void TestClickthrough(spike::PresentMode mode, bool dwmFlush) {
     int cx, cy;
     if (!ProbeCenter(cx, cy)) {
@@ -124,6 +158,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (strcmp(test, "clickthrough") == 0) { TestClickthrough(mode, dwmFlush); }
+    else if (strcmp(test, "pacing") == 0)  { TestPacing(mode, dwmFlush); }
     else { printf("test '%s' not implemented yet\n", test); return 0; }
     printf("%s done; see %%TEMP%%\\present_spike_results.log\n", test);
     return 0;
