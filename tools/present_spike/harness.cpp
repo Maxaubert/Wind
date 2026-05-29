@@ -5,6 +5,8 @@
 #include "overlay.h"
 #include <cstring>
 #include <cstdio>
+#include <sstream>
+#include <string>
 
 static const char* kResults = "present_spike_results.log";
 
@@ -34,6 +36,72 @@ static void RenderFor(spike::Overlay& ov, int ms, bool dwmFlush) {
     }
 }
 
+// Read clickprobe's published client rect (screen coords); return its center.
+static bool ProbeCenter(int& cx, int& cy) {
+    std::string s = spike::ReadAll("present_spike_probe_rect.txt");
+    long l, t, r, b;
+    if (s.empty() || sscanf_s(s.c_str(), "%ld %ld %ld %ld", &l, &t, &r, &b) != 4) return false;
+    cx = (int)((l + r) / 2); cy = (int)((t + b) / 2);
+    return true;
+}
+
+// Synthesize an absolute left click at a screen point via SendInput (virtual-desktop normalized).
+static void ClickAt(int sx, int sy) {
+    int vx = GetSystemMetrics(SM_XVIRTUALSCREEN), vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    int vw = GetSystemMetrics(SM_CXVIRTUALSCREEN), vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    auto norm = [](int v, int origin, int span) { return (LONG)(((double)(v - origin) * 65535.0) / (span > 1 ? span - 1 : 1)); };
+    INPUT in[3] = {};
+    in[0].type = INPUT_MOUSE;
+    in[0].mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+    in[0].mi.dx = norm(sx, vx, vw); in[0].mi.dy = norm(sy, vy, vh);
+    in[1].type = INPUT_MOUSE; in[1].mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+    in[2].type = INPUT_MOUSE; in[2].mi.dwFlags = MOUSEEVENTF_LEFTUP;
+    SendInput(3, in, sizeof(INPUT));
+}
+
+// Count "<qpc> DOWN" lines in the probe log with qpc >= since.
+static int CountDownsSince(long long since) {
+    std::istringstream in(spike::ReadAll("present_spike_probe.log"));
+    std::string line; int count = 0;
+    while (std::getline(in, line)) {
+        long long q; char tag[16] = {};
+        if (sscanf_s(line.c_str(), "%lld %15s", &q, tag, (unsigned)sizeof(tag)) == 2)
+            if (q >= since && strcmp(tag, "DOWN") == 0) count++;
+    }
+    return count;
+}
+
+// Return the first "<qpc> DOWN" qpc >= since, or 0 if none yet.
+static long long FirstDownSince(long long since) {
+    std::istringstream in(spike::ReadAll("present_spike_probe.log"));
+    std::string line;
+    while (std::getline(in, line)) {
+        long long q; char tag[16] = {};
+        if (sscanf_s(line.c_str(), "%lld %15s", &q, tag, (unsigned)sizeof(tag)) == 2)
+            if (q >= since && strcmp(tag, "DOWN") == 0) return q;
+    }
+    return 0;
+}
+
+static void TestClickthrough(spike::PresentMode mode, bool dwmFlush) {
+    int cx, cy;
+    if (!ProbeCenter(cx, cy)) {
+        spike::LogLine(kResults, "clickthrough mode=%s ERROR no probe rect (run clickprobe.exe first)", ModeName(mode));
+        return;
+    }
+    spike::Overlay ov;
+    if (!ov.init(mode)) { spike::LogLine(kResults, "clickthrough mode=%s ERROR init failed", ModeName(mode)); return; }
+    RenderFor(ov, 500, dwmFlush);            // let the overlay compose on top of the probe
+    long long t0 = spike::QpcNow();
+    ClickAt(cx, cy);
+    RenderFor(ov, 300, dwmFlush);            // keep composing while the click propagates
+    Sleep(50);
+    int downs = CountDownsSince(t0);
+    spike::LogLine(kResults, "clickthrough mode=%s result=%s (probe DOWNs after click=%d)",
+                   ModeName(mode), downs > 0 ? "PASS" : "FAIL", downs);
+    ov.shutdown();
+}
+
 int main(int argc, char** argv) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     if (argc < 3) {
@@ -55,6 +123,8 @@ int main(int argc, char** argv) {
         printf("skeleton done; see %%TEMP%%\\present_spike_results.log\n");
         return 0;
     }
-    printf("test '%s' not implemented yet\n", test);
+    if (strcmp(test, "clickthrough") == 0) { TestClickthrough(mode, dwmFlush); }
+    else { printf("test '%s' not implemented yet\n", test); return 0; }
+    printf("%s done; see %%TEMP%%\\present_spike_results.log\n", test);
     return 0;
 }
