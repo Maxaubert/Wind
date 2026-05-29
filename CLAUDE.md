@@ -115,3 +115,7 @@ Spec: `docs/superpowers/specs/2026-05-25-own-renderer-design.md`. Issue #4.
 ## Workflow
 Feature/fix work: GitHub issue -> branch -> PR. README-only changes commit directly.
 Remote: `github.com/Maxaubert/Wind`. Own-renderer work is on `feat/own-renderer` (issue #4).
+
+## Style
+- NEVER use em-dashes (the "—" character) anywhere: code, comments, docs, commit messages,
+  and UI copy. Use en-dashes, commas, or rephrase. Avoid the `&mdash;` HTML entity in UI strings too.
