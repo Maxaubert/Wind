@@ -95,6 +95,7 @@ struct TickState {
     int    hz = 60;                            // resolved tick/refresh rate (auto-detected)
     bool   recenterKeyWasDown = false;         // edge-detect the recenterVk key
     bool   cursorHidden       = false;         // runtime-only override (no ini write, no hot-reload)
+    bool   presentChangePending = false;   // ini changed `present`; apply at the next zoom boundary
     HWND   hwnd               = nullptr;       // owning message window (for RegisterHotKey)
     // Frame-pacing diagnostics (diagnostics=1): a 2 s window of loop-interval stats.
     double diagAccum = 0.0, diagSumDt = 0.0, diagMaxDt = 0.0;
@@ -192,6 +193,11 @@ static void RunTick(TickState& t) {
             if (nc.hideCursorVk != t.cfg.hideCursorVk || nc.hideCursorMods != t.cfg.hideCursorMods) {
                 RegisterHideCursorHotkey(t.hwnd, nc.hideCursorVk, nc.hideCursorMods);
             }
+            if (nc.present != t.cfg.present) {
+                // Present-mode switch rebuilds the swapchain; never do that mid-zoom-frame. Mark it
+                // and apply at a zoom boundary (immediately if at 1x, else on the next zoom-in).
+                t.presentChangePending = true;
+            }
             t.cfg = nc;   // pick up renderer knobs (smoothing, filter, cursor scale, zoom speed)
             t.zoom = ZoomController(1.0, nc.maxLevel);
             double ocx = t.mapper.centerX(), ocy = t.mapper.centerY();   // preserve position
@@ -239,11 +245,24 @@ static void RunTick(TickState& t) {
     // free (MOD_NOREPEAT). No polled check needed here.
     double lvl = t.zoom.level();
 
+    // Apply a pending present-mode switch only while NOT zoomed (overlay hidden): rebuild is safe
+    // and invisible at 1x. If currently zoomed, it is applied on the next zoom-in (below).
+    if (t.presentChangePending && lvl <= 1.0 && t.prevLvl <= 1.0) {
+        PresentMode want = PresentModeFromCfg(t.cfg);
+        if (t.renderEngine.presentMode() != want) t.renderEngine.setPresentMode(want);
+        t.presentChangePending = false;
+    }
+
     int rawDx, rawDy; g_input.drainRaw(rawDx, rawDy);
 
     if (lvl > 1.0) {
         bool zoomIn = (t.prevLvl <= 1.0);             // zoom-in transition
         if (zoomIn) {
+            if (t.presentChangePending) {
+                PresentMode want = PresentModeFromCfg(t.cfg);
+                if (t.renderEngine.presentMode() != want) t.renderEngine.setPresentMode(want);
+                t.presentChangePending = false;
+            }
             // Follow the cursor's monitor (multiMonitor on). Only reconfigure when it actually
             // changed; retarget() returns false on multi-GPU/failure, in which case we keep the
             // current monitor. The overlay is still at alpha 0 here, so a move never flashes.
@@ -577,8 +596,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         //  - else: Present(0,0) doesn't block, so the timer paces at the detected refresh rate.
         // Idle at 1x uses the timer.
         bool zoomed = ts.prevLvl > 1.0;
-        bool dwmPaces = zoomed && ts.cfg.dwmFlush != 0;
-        bool renderPresentPaces = zoomed && ts.cfg.vsync != 0 && !dwmPaces;
+        bool dcompPaces = zoomed && renderEngine.presentMode() == PresentMode::Dcomp;
+        bool dwmPaces = zoomed && !dcompPaces && ts.cfg.dwmFlush != 0;
+        bool renderPresentPaces = zoomed && (dcompPaces || (ts.cfg.vsync != 0 && !dwmPaces));
         if (!renderPresentPaces && !dwmPaces) {
             if (timer) {
                 SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);
