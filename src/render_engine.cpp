@@ -386,8 +386,21 @@ PresentMode RenderEngine::presentMode() const { return s_->present; }
 bool RenderEngine::setPresentMode(PresentMode present) {
     if (!s_ || !s_->ready) return false;
     if (present == s_->present) return true;
+    const PresentMode prev = s_->present;
     s_->present = present;
-    return s_->buildPresent();
+    if (!s_->buildPresent()) {
+        RLog("setPresentMode: build of new mode failed; reverting to %d", (int)prev);
+        s_->present = prev;
+        s_->buildPresent();        // best-effort restore of the working pipeline
+        return false;
+    }
+    // New pipeline yields a blank back buffer and no valid cached desktop: force a fresh full
+    // capture so the next zoomed frame is live (same as invalidateCapture's contract).
+    s_->dupl.Reset();
+    s_->haveDesktop = false;
+    s_->freshCapture = true;
+    RLog("setPresentMode: switched %d -> %d", (int)prev, (int)present);
+    return true;
 }
 
 void RenderEngine::debugInfo(int& screenW, int& screenH, int& curW, int& curH, int& hotX, int& hotY) const {
