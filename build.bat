@@ -25,6 +25,7 @@ if /i "%1"=="test" goto :test
 if /i "%1"=="check" goto :check
 if /i "%1"=="uiaccess" goto :uiaccess
 if /i "%1"=="config" goto :config
+if /i "%1"=="spike" goto :spike
 
 rem --- App build (normal: uiAccess=false, runs from anywhere) ----------------
 cl /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE ^
@@ -77,4 +78,20 @@ exit /b %errorlevel%
 rem --- Compile-only check (no link; verifies all sources compile) -----------
 :check
 cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c src\*.cpp
+exit /b %errorlevel%
+
+rem --- Present spike harness (tools\present_spike): clickprobe.exe + harness.exe -----
+rem    Standalone DComp/blt present experiment for issue #69. Not part of Wind.exe.
+:spike
+cl /nologo /std:c++17 /EHsc /O2 /DUNICODE /D_UNICODE ^
+   tools\present_spike\clickprobe.cpp ^
+   /Fe:clickprobe.exe ^
+   /link user32.lib gdi32.lib
+if errorlevel 1 exit /b 1
+if exist tools\present_spike\harness.cpp (
+  cl /nologo /std:c++17 /EHsc /O2 /DUNICODE /D_UNICODE ^
+     tools\present_spike\harness.cpp tools\present_spike\overlay.cpp ^
+     /Fe:harness.exe ^
+     /link d3d11.lib dxgi.lib dcomp.lib dxguid.lib user32.lib gdi32.lib dwmapi.lib
+)
 exit /b %errorlevel%
