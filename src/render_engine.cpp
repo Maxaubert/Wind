@@ -7,6 +7,7 @@
 #include <windows.h>
 #include <d3d11.h>
 #include <dxgi1_6.h>
+#include <dcomp.h>
 #include <d3dcompiler.h>
 #include <magnification.h>
 #include <dwmapi.h>
@@ -26,6 +27,7 @@
 #pragma comment(lib, "Magnification.lib")
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "Dwmapi.lib")
+#pragma comment(lib, "dcomp.lib")
 
 namespace wind {
 
@@ -60,6 +62,11 @@ struct RenderEngine::State {
     ComPtr<ID3D11Device> device;
     ComPtr<ID3D11DeviceContext> ctx;
     ComPtr<IDXGISwapChain> swap;               // blt-model (layered window needs the redirection surface)
+    PresentMode present = PresentMode::Blt;     // active present backend
+    ComPtr<IDXGISwapChain1> swapFlip;           // dcomp flip-model swapchain (present==Dcomp)
+    ComPtr<IDCompositionDevice> dcomp;          // dcomp device/target/visual (present==Dcomp)
+    ComPtr<IDCompositionTarget> dcompTarget;
+    ComPtr<IDCompositionVisual> dcompVisual;
     ComPtr<ID3D11RenderTargetView> rtv;
     int lastClickX = INT_MIN, lastClickY = INT_MIN;   // skip redundant SetCursorPos
     unsigned long long lastTopmostMs = 0;       // last HWND_TOPMOST re-assert (throttled)
@@ -116,6 +123,10 @@ struct RenderEngine::State {
     // monitor and to validate a retarget before touching the window/swapchain.
     IDXGIOutput* selectOutput(const wchar_t* deviceName, bool fallbackToFirst);
 
+    bool buildPresent();          // create swapchain (+ dcomp objects) + rtv for s_->present
+    void releasePresent();        // drop rtv + swapchain(s) + dcomp objects (device kept)
+    bool acquireBackbufferRtv();  // (dcomp) re-point rtv at the current flip back buffer; blt no-op
+    void presentTransparent();    // (dcomp) clear to transparent + present one frame (hide)
     bool recreateDupl();
     bool recreateRtv();  // (re)create rtv from swapchain back-buffer 0 (after ResizeBuffers / as a restore)
     // AcquireNextFrame -> desktopCopy (+ pointer info); handles loss/timeout. `view` is the
@@ -370,6 +381,15 @@ static LRESULT CALLBACK OverlayProc(HWND h, UINT m, WPARAM w, LPARAM l) {
 RenderEngine::RenderEngine() : s_(new State()) {}
 RenderEngine::~RenderEngine() { shutdown(); delete s_; s_ = nullptr; }
 bool RenderEngine::ready() const { return s_ && s_->ready; }
+PresentMode RenderEngine::presentMode() const { return s_->present; }
+
+bool RenderEngine::setPresentMode(PresentMode present) {
+    if (!s_ || !s_->ready) return false;
+    if (present == s_->present) return true;
+    s_->present = present;
+    return s_->buildPresent();
+}
+
 void RenderEngine::debugInfo(int& screenW, int& screenH, int& curW, int& curH, int& hotX, int& hotY) const {
     screenW = s_->sw; screenH = s_->sh; curW = s_->curW; curH = s_->curH; hotX = s_->hotX; hotY = s_->hotY;
 }
@@ -377,7 +397,8 @@ void RenderEngine::debugHdr(unsigned& ddaFormat, int& colorSpace, int& bitsPerCo
     ddaFormat = s_->ddaFormat; colorSpace = s_->outColorSpace; bitsPerColor = s_->outBitsPerColor;
 }
 
-bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool hdrTonemap) {
+bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool hdrTonemap,
+                              PresentMode present) {
     const int screenW = monitor.w, screenH = monitor.h;
     s_->sw = screenW;
     s_->sh = screenH;
@@ -385,6 +406,7 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     s_->originY = monitor.y;
     lstrcpynW(s_->targetDevice, monitor.device, 32);   // "" = first output (legacy path)
     s_->wantHdrTonemap = hdrTonemap;   // read before recreateDupl decides the capture format
+    s_->present = present;
     RLog("=== initialize device=%ls origin=(%d,%d) size=%dx%d band=%d hdrTonemap=%d ===",
          s_->targetDevice, monitor.x, monitor.y, screenW, screenH, zorderBand, (int)hdrTonemap);
 
@@ -424,12 +446,6 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
                                    wc.hInstance, nullptr);
     }
     if (!s_->hwnd) { RLog("initialize: CreateWindow failed gle=%lu", (unsigned long)GetLastError()); return false; }
-    // Start fully transparent (alpha 0 = invisible). We toggle the layer alpha to show/hide
-    // instead of SW_HIDE/SW_SHOW: a layered window that is hidden and re-shown makes DWM cache
-    // and re-display the frame from when it was last visible, which flashed the previous zoom
-    // session's window on the next zoom-in (most visibly right after an alt-tab). Keeping the
-    // window always shown lets a reveal just flip alpha over the already-current front buffer.
-    SetLayeredWindowAttributes(s_->hwnd, 0, 0, LWA_ALPHA);
     // CRITICAL: exclude our own overlay from screen capture, or Desktop Duplication captures
     // our presented frame and we magnify our own output -> a feedback loop (degenerates to
     // black). WDA_EXCLUDEFROMCAPTURE (Win10 2004+) keeps the window visible on screen but
@@ -445,39 +461,7 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
         s_->device.ReleaseAndGetAddressOf(), &got, s_->ctx.ReleaseAndGetAddressOf());
     if (FAILED(hr)) { RLog("initialize: D3D11CreateDevice failed hr=0x%08lX", (unsigned long)hr); return false; }
 
-    // --- Blt-model swapchain on the layered overlay HWND (flip can't target layered) ---
-    IDXGIDevice1* dxgiDev = nullptr;
-    if (FAILED(s_->device->QueryInterface(__uuidof(IDXGIDevice1), (void**)&dxgiDev))) { RLog("initialize: QueryInterface(IDXGIDevice1) failed"); return false; }
-    dxgiDev->SetMaximumFrameLatency(1);     // cap input-to-photon latency to ~1 frame
-    IDXGIAdapter* adapter = nullptr;
-    dxgiDev->GetAdapter(&adapter);
-    IDXGIFactory* factory = nullptr;
-    if (adapter) adapter->GetParent(__uuidof(IDXGIFactory), (void**)&factory);
-    SafeRelease(dxgiDev);
-    SafeRelease(adapter);
-    if (!factory) { RLog("initialize: no IDXGIFactory from adapter"); return false; }
-
-    DXGI_SWAP_CHAIN_DESC scd{};
-    scd.BufferDesc.Width = screenW;
-    scd.BufferDesc.Height = screenH;
-    scd.BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-    scd.SampleDesc.Count = 1;
-    scd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    scd.BufferCount = 1;
-    scd.OutputWindow = s_->hwnd;
-    scd.Windowed = TRUE;
-    scd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
-    hr = factory->CreateSwapChain(s_->device.Get(), &scd, s_->swap.ReleaseAndGetAddressOf());
-    factory->MakeWindowAssociation(s_->hwnd, DXGI_MWA_NO_ALT_ENTER);
-    SafeRelease(factory);
-    if (FAILED(hr)) { RLog("initialize: CreateSwapChain failed hr=0x%08lX", (unsigned long)hr); return false; }
-
-    // --- Render target view from back-buffer 0 ---
-    ID3D11Texture2D* back = nullptr;
-    if (FAILED(s_->swap->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&back))) { RLog("initialize: swapchain GetBuffer(0) failed"); return false; }
-    hr = s_->device->CreateRenderTargetView(back, nullptr, s_->rtv.ReleaseAndGetAddressOf());
-    SafeRelease(back);
-    if (FAILED(hr)) { RLog("initialize: CreateRenderTargetView failed hr=0x%08lX", (unsigned long)hr); return false; }
+    if (!s_->buildPresent()) { RLog("initialize: buildPresent failed"); return false; }
 
     // --- Desktop copy texture (SRV-able; DDA frames are copied into this). Starts BGRA8;
     //     capture() re-creates it to match the acquired format (e.g. FP16 scRGB on HDR). ---
@@ -586,6 +570,95 @@ void RenderEngine::invalidateCapture() {
     s_->dupl.Reset();
     s_->haveDesktop = false;
     s_->freshCapture = true;
+}
+
+void RenderEngine::State::releasePresent() {
+    rtv.Reset();
+    dcompVisual.Reset();
+    dcompTarget.Reset();
+    dcomp.Reset();
+    swapFlip.Reset();
+    swap.Reset();
+}
+
+// Flip-model rotates the back buffer on Present, so the rtv must be re-pointed at buffer 0 each
+// frame before drawing. Blt's DISCARD buffer 0 is stable, so this is a no-op there.
+bool RenderEngine::State::acquireBackbufferRtv() {
+    if (present != PresentMode::Dcomp) return true;
+    ComPtr<ID3D11Texture2D> back;
+    if (FAILED(swapFlip->GetBuffer(0, IID_PPV_ARGS(&back)))) return false;
+    rtv.Reset();
+    return SUCCEEDED(device->CreateRenderTargetView(back.Get(), nullptr, rtv.ReleaseAndGetAddressOf()));
+}
+
+bool RenderEngine::State::buildPresent() {
+    releasePresent();
+    ComPtr<IDXGIDevice1> dxgiDev;
+    if (FAILED(device->QueryInterface(IID_PPV_ARGS(&dxgiDev)))) { RLog("buildPresent: QI IDXGIDevice1 failed"); return false; }
+    dxgiDev->SetMaximumFrameLatency(1);
+    ComPtr<IDXGIAdapter> adapter;
+    if (FAILED(dxgiDev->GetAdapter(&adapter))) { RLog("buildPresent: GetAdapter failed"); return false; }
+    ComPtr<IDXGIFactory2> factory;
+    if (FAILED(adapter->GetParent(IID_PPV_ARGS(&factory)))) { RLog("buildPresent: GetParent factory failed"); return false; }
+
+    if (present == PresentMode::Dcomp) {
+        DXGI_SWAP_CHAIN_DESC1 scd{};
+        scd.Width = sw; scd.Height = sh;
+        scd.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        scd.SampleDesc.Count = 1;
+        scd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+        scd.BufferCount = 2;
+        scd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+        scd.AlphaMode = DXGI_ALPHA_MODE_PREMULTIPLIED;
+        scd.Scaling = DXGI_SCALING_STRETCH;
+        HRESULT hr = factory->CreateSwapChainForComposition(device.Get(), &scd, nullptr, swapFlip.ReleaseAndGetAddressOf());
+        // Pass our DXGI device so DComp composites the swapchain on the same adapter (matches the
+        // spike). Visual tree: device -> target(hwnd) -> visual(swapFlip) -> commit.
+        if (SUCCEEDED(hr)) hr = DCompositionCreateDevice(dxgiDev.Get(), __uuidof(IDCompositionDevice), (void**)dcomp.ReleaseAndGetAddressOf());
+        if (SUCCEEDED(hr)) hr = dcomp->CreateTargetForHwnd(hwnd, TRUE, dcompTarget.ReleaseAndGetAddressOf());
+        if (SUCCEEDED(hr)) hr = dcomp->CreateVisual(dcompVisual.ReleaseAndGetAddressOf());
+        if (SUCCEEDED(hr)) hr = dcompVisual->SetContent(swapFlip.Get());
+        if (SUCCEEDED(hr)) hr = dcompTarget->SetRoot(dcompVisual.Get());
+        if (SUCCEEDED(hr)) hr = dcomp->Commit();
+        if (FAILED(hr)) { RLog("buildPresent: dcomp setup failed hr=0x%08lX", (unsigned long)hr); return false; }
+        // Layered window kept: hold window alpha at 255 so per-pixel (premultiplied) alpha governs.
+        SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+        if (!acquireBackbufferRtv()) { RLog("buildPresent: dcomp rtv failed"); return false; }
+        presentTransparent();   // start invisible (per-pixel), window stays shown
+        RLog("buildPresent: dcomp ok");
+        return true;
+    }
+
+    // Blt (default): blt-model DISCARD swapchain on the layered window.
+    DXGI_SWAP_CHAIN_DESC scd{};
+    scd.BufferDesc.Width = sw; scd.BufferDesc.Height = sh;
+    scd.BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    scd.SampleDesc.Count = 1;
+    scd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    scd.BufferCount = 1;
+    scd.OutputWindow = hwnd;
+    scd.Windowed = TRUE;
+    scd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+    HRESULT hr = factory->CreateSwapChain(device.Get(), &scd, swap.ReleaseAndGetAddressOf());
+    factory->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER);
+    if (FAILED(hr)) { RLog("buildPresent: blt CreateSwapChain failed hr=0x%08lX", (unsigned long)hr); return false; }
+    ComPtr<ID3D11Texture2D> back;
+    if (FAILED(swap->GetBuffer(0, IID_PPV_ARGS(&back)))) { RLog("buildPresent: blt GetBuffer failed"); return false; }
+    if (FAILED(device->CreateRenderTargetView(back.Get(), nullptr, rtv.ReleaseAndGetAddressOf()))) { RLog("buildPresent: blt CreateRenderTargetView failed"); return false; }
+    SetLayeredWindowAttributes(hwnd, 0, 0, LWA_ALPHA);   // start invisible (constant alpha 0)
+    RLog("buildPresent: blt ok");
+    return true;
+}
+
+// Hide path for dcomp: present a fully transparent frame (no magnify/cursor pass) so the visual
+// composites to nothing. The window stays shown (preserves the alt-tab no-flash invariant).
+void RenderEngine::State::presentTransparent() {
+    if (present != PresentMode::Dcomp || !swapFlip) return;
+    if (!acquireBackbufferRtv()) return;
+    const float clear[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+    ctx->OMSetRenderTargets(1, rtv.GetAddressOf(), nullptr);
+    ctx->ClearRenderTargetView(rtv.Get(), clear);
+    swapFlip->Present(1, 0);
 }
 
 // (Re)create the render-target view from the swapchain's current back buffer (buffer 0). Used

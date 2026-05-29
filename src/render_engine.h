@@ -1,5 +1,10 @@
 #pragma once
 namespace wind {
+
+// How the overlay presents its content. Blt = blt-model swapchain on the layered window (default,
+// paced by vsync/DwmFlush). Dcomp = DirectComposition flip-model present (layered window kept for
+// click-through). See docs/superpowers/specs/2026-05-29-dcomp-present-engine-design.md (#69).
+enum class PresentMode { Blt, Dcomp };
 // A target monitor for the magnifier overlay. All values are in physical pixels in the
 // virtual-desktop coordinate space (the process is Per-Monitor-V2 DPI aware). `device` is the
 // GDI/DXGI device name (\\.\DISPLAYn, 32 = CCHDEVICENAME) used to match the monitor to its DXGI
@@ -43,7 +48,8 @@ public:
     // CreateWindowInBand (needs UIAccess; e.g. 16 = ZBID_SYSTEM_TOOLS, above the shell so the
     // Start menu / taskbar flyouts don't show an unmagnified copy). Falls back to a normal
     // window if the band can't be used.
-    bool initialize(const MonitorTarget& monitor, int zorderBand = 0, bool hdrTonemap = false);
+    bool initialize(const MonitorTarget& monitor, int zorderBand = 0, bool hdrTonemap = false,
+                    PresentMode present = PresentMode::Blt);
     // Re-point the magnifier at a different monitor (call on zoom-in when the cursor's monitor
     // changed; the overlay must still be hidden/alpha 0). Resizes the swapchain, then moves the
     // overlay and rebinds Desktop Duplication to the new output. Returns false (and the caller
@@ -58,6 +64,10 @@ public:
     // zoom-in so a stale cached frame from a previous session isn't shown for one frame
     // (e.g. the old window flashing after an alt-tab).
     void invalidateCapture();
+    // Rebuild the present pipeline for a new mode at runtime (call at a zoom boundary, overlay
+    // hidden). Returns false and keeps a working pipeline on failure. Forces a fresh capture.
+    bool setPresentMode(PresentMode present);
+    PresentMode presentMode() const;
     void hideSystemCursor(bool hide);              // MagShowSystemCursor wrapper + safe-restore net
     void shutdown();                               // restore cursor, destroy everything
     bool ready() const;
