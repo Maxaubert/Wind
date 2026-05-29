@@ -286,8 +286,7 @@ static void RunTick(TickState& t) {
         bool fgChanged = (fg != t.lastForeground);
         t.lastForeground = fg;
         bool fgFull = ForegroundCoversMonitor(fg, t.mon);
-        double fps = dt > 0.0 ? 1.0 / dt : 0.0;
-        PresentChoice pc = t.presentPolicy.update(dt, lvl > 1.0, fps, t.hz, fgFull, fgChanged);
+        PresentChoice pc = t.presentPolicy.update(dt, lvl > 1.0, t.hz, fgFull, fgChanged);
         t.desiredPresent = (pc == PresentChoice::Dcomp) ? PresentMode::Dcomp : PresentMode::Blt;
     }
 
