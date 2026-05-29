@@ -548,13 +548,17 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
 
 void RenderEngine::setVisible(bool visible) {
     if (!s_ || !s_->hwnd) return;
-    // Reveal/hide via layer alpha over the always-shown window (see initialize): flip alpha
-    // rather than SW_HIDE/SW_SHOW, so a reveal shows the already-current front buffer instead
-    // of DWM's cached last-visible frame. Callers present the live frame BEFORE revealing.
+    if (s_->present == PresentMode::Dcomp) {
+        // Per-pixel alpha: hide by presenting a transparent frame; the reveal is the next opaque
+        // renderFrame (callers present the live frame before setVisible(true)). Window stays shown.
+        if (!visible) s_->presentTransparent();
+        else SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        return;
+    }
+    // Blt: toggle the layer's constant alpha (see initialize), present-then-reveal.
     SetLayeredWindowAttributes(s_->hwnd, 0, visible ? 255 : 0, LWA_ALPHA);
     if (visible) {
-        SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0,   // pop on top immediately on show
-                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
 }
 
@@ -677,7 +681,7 @@ bool RenderEngine::State::recreateRtv() {
 }
 
 bool RenderEngine::retarget(const MonitorTarget& m) {
-    if (!s_ || !s_->ready || !s_->hwnd || !s_->swap) return false;
+    if (!s_ || !s_->ready || !s_->hwnd || (!s_->swap && !s_->swapFlip)) return false;
 
     // Validate the target's output is on OUR adapter BEFORE touching the window/swapchain, so we
     // never end up displaying one monitor's pixels on another monitor's overlay (multi-GPU).
@@ -698,14 +702,18 @@ bool RenderEngine::retarget(const MonitorTarget& m) {
     // or changing geometry, so the engine keeps rendering the current monitor (caller keeps it).
     if (sizeChanged) {
         s_->rtv.Reset();        // ResizeBuffers requires all back-buffer refs released
-        HRESULT hr = s_->swap->ResizeBuffers(1, m.w, m.h, DXGI_FORMAT_B8G8R8A8_UNORM, 0);
+        HRESULT hr;
+        if (s_->present == PresentMode::Dcomp)
+            hr = s_->swapFlip->ResizeBuffers(2, m.w, m.h, DXGI_FORMAT_B8G8R8A8_UNORM, 0);
+        else
+            hr = s_->swap->ResizeBuffers(1, m.w, m.h, DXGI_FORMAT_B8G8R8A8_UNORM, 0);
         if (FAILED(hr)) {
             RLog("retarget: ResizeBuffers failed hr=0x%08lX; restoring RTV, keeping current monitor",
                  (unsigned long)hr);
-            s_->recreateRtv();   // best-effort: keep the current monitor renderable
+            if (s_->present == PresentMode::Dcomp) s_->acquireBackbufferRtv(); else s_->recreateRtv();
             return false;
         }
-        if (!s_->recreateRtv()) {
+        if (s_->present == PresentMode::Dcomp ? !s_->acquireBackbufferRtv() : !s_->recreateRtv()) {
             RLog("retarget: RTV recreate failed after ResizeBuffers; keeping current monitor");
             return false;
         }
@@ -752,6 +760,7 @@ void RenderEngine::State::updateCursorTexture() {
 }
 
 void RenderEngine::State::render(const RenderFrameParams& p) {
+    if (!acquireBackbufferRtv()) return;   // dcomp: bind the current flip back buffer; blt no-op
     // Magnified source rect in desktop pixels (what the magnify pass samples below), clamped to the
     // screen with a 1px margin for bilinear edge taps. capture() can copy only this region on a
     // full-screen repaint to cut the 4K HDR copy.
@@ -873,6 +882,8 @@ bool RenderEngine::renderFrame(const RenderFrameParams& p) {
     // vsync (sync interval 1) locks the present to the display refresh; 0 presents immediately
     // (the caller must then pace the loop so it doesn't spin). DWM composites a blt-model
     // swapchain either way, so 0 doesn't tear here - it just decouples from the vblank.
+    if (s_->present == PresentMode::Dcomp)
+        return SUCCEEDED(s_->swapFlip->Present(1, 0));   // flip-model paces natively (no DwmFlush)
     return SUCCEEDED(s_->swap->Present(p.vsync ? 1 : 0, 0));
 }
 
@@ -927,8 +938,10 @@ void RenderEngine::shutdown() {
 // Verification helper: copy back-buffer 0 to a PNG (WIC encode lives in png_dump).
 bool RenderEngine::dumpBackbufferPng(const wchar_t* path) {
     if (!s_->ready) return false;
+    // IDXGISwapChain1 (dcomp flip) derives IDXGISwapChain, so either works for GetBuffer.
+    IDXGISwapChain* sc = (s_->present == PresentMode::Dcomp) ? s_->swapFlip.Get() : s_->swap.Get();
     ID3D11Texture2D* back = nullptr;
-    if (FAILED(s_->swap->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&back))) return false;
+    if (!sc || FAILED(sc->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&back))) return false;
     bool ok = SaveTextureToPng(s_->device.Get(), s_->ctx.Get(), back, path);
     SafeRelease(back);
     return ok;

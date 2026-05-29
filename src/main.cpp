@@ -113,6 +113,10 @@ static int CursorModeFromCfg(const Config& c) {
     return 0;
 }
 
+static PresentMode PresentModeFromCfg(const Config& c) {
+    return (c.present == "dcomp") ? PresentMode::Dcomp : PresentMode::Blt;
+}
+
 // Fill a RenderFrameParams from the mapper result + config for the given monitor and zoom level
 // (the normal live-tick interpretation). The self-test harnesses call this, then override only
 // the few fields they deliberately differ on (cursorMode, vsync).
@@ -437,7 +441,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     // --- Own GPU renderer (DXGI Desktop Duplication + D3D11) ---
     RenderEngine renderEngine;
-    if (!renderEngine.initialize(startupMon, cfg.zorderBand, cfg.hdrTonemap != 0)) {
+    if (!renderEngine.initialize(startupMon, cfg.zorderBand, cfg.hdrTonemap != 0,
+                                 PresentModeFromCfg(cfg))) {
         MessageBoxW(nullptr, L"Could not start the renderer (Direct3D 11 / Desktop Duplication "
                              L"unavailable on this system).", L"Wind", MB_ICONERROR);
         g_input.stop();
