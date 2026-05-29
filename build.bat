@@ -93,5 +93,12 @@ if exist tools\present_spike\harness.cpp (
      tools\present_spike\harness.cpp tools\present_spike\overlay.cpp ^
      /Fe:harness.exe ^
      /link d3d11.lib dxgi.lib dcomp.lib dxguid.lib user32.lib gdi32.lib dwmapi.lib
+  if errorlevel 1 exit /b 1
+)
+if exist tools\present_spike\dualswap.cpp (
+  cl /nologo /std:c++17 /EHsc /O2 /DUNICODE /D_UNICODE ^
+     tools\present_spike\dualswap.cpp ^
+     /Fe:dualswap.exe ^
+     /link d3d11.lib dxgi.lib dcomp.lib dxguid.lib user32.lib gdi32.lib
 )
 exit /b %errorlevel%
