@@ -291,9 +291,10 @@ static void RunTick(TickState& t) {
         t.desiredPresent = (pc == PresentChoice::Dcomp) ? PresentMode::Dcomp : PresentMode::Blt;
     }
 
-    // Apply a present-mode switch only while NOT zoomed (overlay hidden): the swapchain rebuild is
-    // invisible at 1x and never resets the zoom. While zoomed, it waits for the next zoom-in.
-    if (lvl <= 1.0 && t.prevLvl <= 1.0 && t.renderEngine.presentMode() != t.desiredPresent) {
+    // Apply the desired present mode immediately whenever it differs. The switch is now an instant
+    // DComp visual flip (no rebuild) - hitch-free, never resets zoom, safe at any time (zoomed or
+    // not). This lets the auto policy fall back to blt mid-hold the moment it detects the throttle.
+    if (t.renderEngine.presentMode() != t.desiredPresent) {
         if (t.cfg.diagnostics)
             DiagLog("present: -> %s (%s)", t.desiredPresent == PresentMode::Dcomp ? "dcomp" : "blt",
                     t.presentAuto ? PresentReasonName(t.presentPolicy.lastReason()) : "ini");
@@ -305,13 +306,6 @@ static void RunTick(TickState& t) {
     if (lvl > 1.0) {
         bool zoomIn = (t.prevLvl <= 1.0);             // zoom-in transition
         if (zoomIn) {
-            if (t.renderEngine.presentMode() != t.desiredPresent) {
-                if (t.cfg.diagnostics)
-                    DiagLog("present: -> %s (%s) [zoom-in]",
-                            t.desiredPresent == PresentMode::Dcomp ? "dcomp" : "blt",
-                            t.presentAuto ? PresentReasonName(t.presentPolicy.lastReason()) : "ini");
-                t.renderEngine.setPresentMode(t.desiredPresent);
-            }
             // Follow the cursor's monitor (multiMonitor on). Only reconfigure when it actually
             // changed; retarget() returns false on multi-GPU/failure, in which case we keep the
             // current monitor. The overlay is still at alpha 0 here, so a move never flashes.
