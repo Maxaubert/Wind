@@ -895,11 +895,13 @@ bool RenderEngine::renderFrame(const RenderFrameParams& p) {
         s_->lastClickX = p.clickDesktopX; s_->lastClickY = p.clickDesktopY;
     }
     s_->render(p);
-    // vsync (sync interval 1) locks the present to the display refresh; 0 presents immediately
-    // (the caller must then pace the loop so it doesn't spin). DWM composites a blt-model
-    // swapchain either way, so 0 doesn't tear here - it just decouples from the vblank.
+    // p.vsync = (cfg.vsync && !cfg.dwmFlush): sync interval 1 locks the present to the refresh;
+    // 0 presents immediately and the caller paces via DwmFlush or the timer. dcomp honors the SAME
+    // knob as blt - flip-model Present(1,0) gets throttled to ~60Hz when a windowed app sits over a
+    // background fullscreen game, so dwmFlush=1 (Present(0,0) + DwmFlush) rides DWM's full-rate
+    // composite instead, which stays at the display refresh in that state (#69).
     if (s_->present == PresentMode::Dcomp)
-        return SUCCEEDED(s_->swapFlip->Present(1, 0));   // flip-model paces natively (no DwmFlush)
+        return SUCCEEDED(s_->swapFlip->Present(p.vsync ? 1 : 0, 0));
     return SUCCEEDED(s_->swap->Present(p.vsync ? 1 : 0, 0));
 }
 

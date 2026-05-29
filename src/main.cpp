@@ -596,9 +596,12 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         //  - else: Present(0,0) doesn't block, so the timer paces at the detected refresh rate.
         // Idle at 1x uses the timer.
         bool zoomed = ts.prevLvl > 1.0;
-        bool dcompPaces = zoomed && renderEngine.presentMode() == PresentMode::Dcomp;
-        bool dwmPaces = zoomed && !dcompPaces && ts.cfg.dwmFlush != 0;
-        bool renderPresentPaces = zoomed && (dcompPaces || (ts.cfg.vsync != 0 && !dwmPaces));
+        // Pacing is identical for blt and dcomp: dwmFlush=1 -> present immediately then DwmFlush
+        // (ride DWM's composite); else vsync=1 -> Present(1,0) blocks; else the timer paces. dcomp
+        // honors dwmFlush because flip-model Present(1,0) is throttled to ~60Hz when a windowed app
+        // covers a background fullscreen game, whereas DwmFlush rides the full-rate composite (#69).
+        bool dwmPaces = zoomed && ts.cfg.dwmFlush != 0;
+        bool renderPresentPaces = zoomed && !dwmPaces && ts.cfg.vsync != 0;
         if (!renderPresentPaces && !dwmPaces) {
             if (timer) {
                 SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);
