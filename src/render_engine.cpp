@@ -433,8 +433,10 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     ATOM atom = RegisterClassW(&wc);
     // WS_EX_LAYERED is required for true cross-process click-through (WS_EX_TRANSPARENT +
     // HTTRANSPARENT alone only forwards to same-thread windows, so clicks to other apps were
-    // being eaten). LAYERED rules out a flip swapchain, so we use a blt-model swapchain below
-    // (verified to display via the redirection surface). LWA_ALPHA 255 = fully opaque.
+    // being eaten). The default blt present path uses a blt-model swapchain on this layered
+    // window (LWA_ALPHA 255 = fully opaque). The opt-in present=dcomp path keeps this same
+    // layered window but drives it with a flip-model swapchain via DirectComposition (#69) -
+    // layered + DComp flip-model do coexist, so click-through is preserved either way.
     const DWORD exStyle = WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST |
                           WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
     s_->hwnd = nullptr;
