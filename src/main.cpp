@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdarg>
 #include "config.h"
+#include "config_path.h"
 #pragma comment(lib, "Dwmapi.lib")
 #include "render_engine.h"
 #include "input_router.h"
@@ -88,7 +89,8 @@ struct TickState {
     LARGE_INTEGER freq{}, prev{};
     double sinceCheck = 0.0;
     unsigned long long lastMtime = 0;
-    HANDLE configWatch = nullptr;              // exe-dir change notification (replaces the 1Hz mtime poll)
+    HANDLE configWatch = nullptr;              // ini-dir change notification (replaces the 1Hz mtime poll)
+    std::wstring iniPath;                      // full path to magnifier.ini, resolved at startup
     double prevLvl = 1.0;
     int    hz = 60;                            // resolved tick/refresh rate (auto-detected)
     bool   recenterKeyWasDown = false;         // edge-detect the recenterVk key
@@ -173,10 +175,10 @@ static void RunTick(TickState& t) {
         if (t.sinceCheck > 1.0) { t.sinceCheck = 0.0; checkConfig = true; }
     }
     if (checkConfig) {
-        unsigned long long m = ConfigMTime(L"magnifier.ini");
+        unsigned long long m = ConfigMTime(t.iniPath);
         if (m != t.lastMtime) {
             t.lastMtime = m;
-            Config nc = LoadConfig(L"magnifier.ini");
+            Config nc = LoadConfig(t.iniPath);
             // Re-bind the hook's button mapping if the user changed it via the config UI; without
             // this the hook would keep firing the OLD button (the new VK works via GetAsyncKeyState
             // but the mouse mapping is captured once in g_input.start at app launch).
@@ -399,7 +401,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         if (slash) { *slash = L'\0'; SetCurrentDirectoryW(exePath); }
     }
 
-    Config cfg = LoadConfig(L"magnifier.ini");
+    // Resolve magnifier.ini's runtime path (exe-dir if writable, else %LOCALAPPDATA%\Wind\). Same
+    // resolution is used by WindConfig.exe so both processes always touch the same file.
+    std::wstring iniPath = wind::ResolveIniPath();
+    Config cfg = LoadConfig(iniPath);
 
     // Hidden window: owns the tray icon + menu and receives WM_INPUT.
     WNDCLASSW wc{};
@@ -530,12 +535,15 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     QueryPerformanceFrequency(&ts.freq);
     QueryPerformanceCounter(&ts.prev);
-    ts.lastMtime = ConfigMTime(L"magnifier.ini");
-    // Watch the exe directory so config hot-reload doesn't stat magnifier.ini every second on the
-    // render thread (see RunTick). `exePath` is the exe's directory (resolved at startup). LAST_WRITE
-    // catches in-place saves; FILE_NAME catches write-temp-then-rename saves. nullptr/INVALID on
-    // failure -> RunTick falls back to the timed poll.
-    ts.configWatch = FindFirstChangeNotificationW(exePath, FALSE,
+    ts.iniPath = iniPath;
+    ts.lastMtime = ConfigMTime(iniPath);
+    // Watch the directory holding the ini so config hot-reload doesn't stat magnifier.ini every
+    // second on the render thread (see RunTick). LAST_WRITE catches in-place saves; FILE_NAME
+    // catches write-temp-then-rename saves. nullptr/INVALID on failure -> RunTick falls back to
+    // the timed poll. Watched dir is iniPath's parent (exe dir for dev, %LOCALAPPDATA%\Wind for
+    // a Program Files install).
+    std::wstring iniDir = iniPath.substr(0, iniPath.find_last_of(L"\\/"));
+    ts.configWatch = FindFirstChangeNotificationW(iniDir.c_str(), FALSE,
         FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_FILE_NAME);
 
     HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr,
