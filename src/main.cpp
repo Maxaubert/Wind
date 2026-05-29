@@ -14,6 +14,7 @@
 #include "zoom_controller.h"
 #include "tray.h"
 #include "lock_detector.h"
+#include "present_policy.h"
 
 using namespace wind;
 
@@ -95,7 +96,13 @@ struct TickState {
     int    hz = 60;                            // resolved tick/refresh rate (auto-detected)
     bool   recenterKeyWasDown = false;         // edge-detect the recenterVk key
     bool   cursorHidden       = false;         // runtime-only override (no ini write, no hot-reload)
-    bool   presentChangePending = false;   // ini changed `present`; apply at the next zoom boundary
+    // Present-mode switching (applied only at a zoom boundary -> hitch-free, never resets zoom).
+    // desiredPresent is the mode we want the engine to be; set by the ini (blt/dcomp) or, when
+    // presentAuto, by the adaptive policy. lastForeground feeds the policy's foreground-change cue.
+    bool        presentAuto = false;
+    PresentMode desiredPresent = PresentMode::Dcomp;
+    PresentPolicy presentPolicy;
+    HWND        lastForeground = nullptr;
     HWND   hwnd               = nullptr;       // owning message window (for RegisterHotKey)
     // Frame-pacing diagnostics (diagnostics=1): a 2 s window of loop-interval stats.
     double diagAccum = 0.0, diagSumDt = 0.0, diagMaxDt = 0.0;
@@ -114,8 +121,31 @@ static int CursorModeFromCfg(const Config& c) {
     return 0;
 }
 
+// Initial / pinned engine mode for a config. "auto" starts optimistic on dcomp (the policy may
+// switch it at runtime); "blt" pins blt; "dcomp" pins dcomp.
 static PresentMode PresentModeFromCfg(const Config& c) {
-    return (c.present == "dcomp") ? PresentMode::Dcomp : PresentMode::Blt;
+    return (c.present == "blt") ? PresentMode::Blt : PresentMode::Dcomp;
+}
+
+// True if the foreground window covers the target monitor (within a small margin) - the auto
+// policy's "a fullscreen app is in front" cue (game returned to the foreground).
+static bool ForegroundCoversMonitor(HWND fg, const MonitorTarget& mon) {
+    if (!fg) return false;
+    RECT r;
+    if (!GetWindowRect(fg, &r)) return false;
+    const int m = 2;
+    return r.left <= mon.x + m && r.top <= mon.y + m &&
+           r.right >= mon.x + mon.w - m && r.bottom >= mon.y + mon.h - m;
+}
+
+// PresentReason -> short tag for the diagnostics log.
+static const char* PresentReasonName(PresentReason r) {
+    switch (r) {
+        case PresentReason::Throttle: return "throttle";
+        case PresentReason::Cue:      return "cue";
+        case PresentReason::Backstop: return "backstop";
+        default:                      return "none";
+    }
 }
 
 // Fill a RenderFrameParams from the mapper result + config for the given monitor and zoom level
@@ -194,9 +224,11 @@ static void RunTick(TickState& t) {
                 RegisterHideCursorHotkey(t.hwnd, nc.hideCursorVk, nc.hideCursorMods);
             }
             if (nc.present != t.cfg.present) {
-                // Present-mode switch rebuilds the swapchain; never do that mid-zoom-frame. Mark it
-                // and apply at a zoom boundary (immediately if at 1x, else on the next zoom-in).
-                t.presentChangePending = true;
+                // Present-mode switch rebuilds the swapchain; apply at a zoom boundary (handled
+                // below). For a fixed mode, pin desiredPresent; for auto, the policy drives it.
+                t.presentAuto = (nc.present == "auto");
+                t.presentPolicy.reset();                 // start the policy clean on any change
+                if (!t.presentAuto) t.desiredPresent = PresentModeFromCfg(nc);
             }
             t.cfg = nc;   // pick up renderer knobs (smoothing, filter, cursor scale, zoom speed)
             t.zoom = ZoomController(1.0, nc.maxLevel);
@@ -245,12 +277,27 @@ static void RunTick(TickState& t) {
     // free (MOD_NOREPEAT). No polled check needed here.
     double lvl = t.zoom.level();
 
-    // Apply a pending present-mode switch only while NOT zoomed (overlay hidden): rebuild is safe
-    // and invisible at 1x. If currently zoomed, it is applied on the next zoom-in (below).
-    if (t.presentChangePending && lvl <= 1.0 && t.prevLvl <= 1.0) {
-        PresentMode want = PresentModeFromCfg(t.cfg);
-        if (t.renderEngine.presentMode() != want) t.renderEngine.setPresentMode(want);
-        t.presentChangePending = false;
+    // Adaptive present policy (present=auto): feed it this tick's signals; it returns the desired
+    // mode. dt is the real loop interval, so fps reflects the actual on-screen-paced rate - the
+    // bad-state throttle shows up as a sustained fps drop. Runs at 1x too, so a state-clear while
+    // idle is noticed and the next zoom-in comes up as dcomp.
+    if (t.presentAuto) {
+        HWND fg = GetForegroundWindow();
+        bool fgChanged = (fg != t.lastForeground);
+        t.lastForeground = fg;
+        bool fgFull = ForegroundCoversMonitor(fg, t.mon);
+        double fps = dt > 0.0 ? 1.0 / dt : 0.0;
+        PresentChoice pc = t.presentPolicy.update(dt, lvl > 1.0, fps, t.hz, fgFull, fgChanged);
+        t.desiredPresent = (pc == PresentChoice::Dcomp) ? PresentMode::Dcomp : PresentMode::Blt;
+    }
+
+    // Apply a present-mode switch only while NOT zoomed (overlay hidden): the swapchain rebuild is
+    // invisible at 1x and never resets the zoom. While zoomed, it waits for the next zoom-in.
+    if (lvl <= 1.0 && t.prevLvl <= 1.0 && t.renderEngine.presentMode() != t.desiredPresent) {
+        if (t.cfg.diagnostics)
+            DiagLog("present: -> %s (%s)", t.desiredPresent == PresentMode::Dcomp ? "dcomp" : "blt",
+                    t.presentAuto ? PresentReasonName(t.presentPolicy.lastReason()) : "ini");
+        t.renderEngine.setPresentMode(t.desiredPresent);
     }
 
     int rawDx, rawDy; g_input.drainRaw(rawDx, rawDy);
@@ -258,10 +305,12 @@ static void RunTick(TickState& t) {
     if (lvl > 1.0) {
         bool zoomIn = (t.prevLvl <= 1.0);             // zoom-in transition
         if (zoomIn) {
-            if (t.presentChangePending) {
-                PresentMode want = PresentModeFromCfg(t.cfg);
-                if (t.renderEngine.presentMode() != want) t.renderEngine.setPresentMode(want);
-                t.presentChangePending = false;
+            if (t.renderEngine.presentMode() != t.desiredPresent) {
+                if (t.cfg.diagnostics)
+                    DiagLog("present: -> %s (%s) [zoom-in]",
+                            t.desiredPresent == PresentMode::Dcomp ? "dcomp" : "blt",
+                            t.presentAuto ? PresentReasonName(t.presentPolicy.lastReason()) : "ini");
+                t.renderEngine.setPresentMode(t.desiredPresent);
             }
             // Follow the cursor's monitor (multiMonitor on). Only reconfigure when it actually
             // changed; retarget() returns false on multi-GPU/failure, in which case we keep the
@@ -472,6 +521,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     TickState ts(renderEngine, startupMon, cfg);
     ts.hwnd = hwnd;                       // so RunTick can re-register the hide-cursor hotkey
+    ts.presentAuto = (cfg.present == "auto");
+    ts.desiredPresent = PresentModeFromCfg(cfg);   // matches the engine's initial mode below
     g_tick = &ts;   // so the WM_TIMER tick (during the tray menu's modal loop) can run
 
     // Autonomous verification hook: WIND_SELFTEST drives the real integrated render path at a
