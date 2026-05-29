@@ -115,6 +115,18 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     return DefWindowProcW(h, m, w, l);
 }
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
+    // Single-instance: opening Settings from the tray (or any second launch) focuses the existing
+    // window instead of stacking another WindConfig.exe with its own WebView2.
+    HANDLE mtx = CreateMutexW(nullptr, TRUE, L"WindConfig_SingleInstance");
+    if (mtx && GetLastError() == ERROR_ALREADY_EXISTS) {
+        HWND existing = FindWindowW(L"WindConfigWnd", nullptr);
+        if (existing) {
+            if (IsIconic(existing)) ShowWindow(existing, SW_RESTORE);
+            SetForegroundWindow(existing);
+        }
+        CloseHandle(mtx);
+        return 0;
+    }
     bool onboard = lpCmdLine && wcsstr(lpCmdLine, L"--onboard") != nullptr;
     // Per-monitor-V2 DPI awareness so WebView2 renders at native resolution (not bitmap-scaled,
     // which looked low-res/blurry). Must be set before any window is created.

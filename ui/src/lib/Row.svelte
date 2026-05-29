@@ -41,7 +41,10 @@
 {/if}
 <style>
   .row{display:flex;justify-content:space-between;align-items:center;gap:24px;padding:14px 0;border-bottom:1px solid var(--line)}
-  .label{font-weight:600} .desc{font-size:.85em;color:var(--muted)} .val{margin-left:8px;min-width:3ch;display:inline-block}
+  .label{font-weight:600} .desc{font-size:.85em;color:var(--muted)}
+  /* Fixed width + tabular-nums + right-align so the readout doesn't widen as digits change
+     (1 -> 10 etc.), which would otherwise reflow the .ctl and visually shake the slider. */
+  .val{margin-left:8px;width:4ch;display:inline-block;text-align:right;font-variant-numeric:tabular-nums}
   .row.disabled{opacity:.45}
   /* .linkbtn ported from mockups/config-ui-onboarding.html. */
   .linkbtn{padding:5px 11px;border-radius:7px;border:1px solid var(--line);background:transparent;font-size:12px;color:var(--text);cursor:pointer}
@@ -49,7 +52,9 @@
   /* About hero: large centered Wind logo fills the section so it has real height (helps the
      scroll-spy reach About) and the bottom of the scroll area isn't empty. */
   .about-hero{padding:48px 0 64px;text-align:center;color:var(--text);display:flex;flex-direction:column;align-items:center}
-  .about-hero .logo{color:var(--accent-icon);margin:0 0 18px}
+  /* overflow:visible lets the bottom curl-arc render past the 16-unit viewBox (the stroke
+     extends ~1 unit below otherwise gets clipped, looked like 2-3px shaved off the bottom). */
+  .about-hero .logo{color:var(--accent-icon);margin:0 0 18px;overflow:visible}
   .about-hero .name{font-size:30px;font-weight:700;letter-spacing:-.4px;margin-bottom:6px}
   .about-hero .tag{color:var(--muted);margin:0 0 4px;font-size:14px}
   .about-hero .version{color:var(--muted);font-size:12.5px;margin:0 0 22px}
