@@ -62,27 +62,23 @@ staged Apply/Discard footer.
   feedback loop (black). This is the #1 render-engine gotcha.
 - RENDER ENGINE: cross-process click-through needs `WS_EX_LAYERED | WS_EX_TRANSPARENT`
   (+ `SetLayeredWindowAttributes(.,255,LWA_ALPHA)`). `WS_EX_TRANSPARENT` + HTTRANSPARENT
-  alone only forwards to *same-thread* windows, so clicks to other apps get eaten. A layered
-  window's own swapchain must be blt-model (`DXGI_SWAP_EFFECT_DISCARD`, via the DWM redirection
-  surface), but a flip-model swapchain is STILL reachable on the same layered HWND through a
-  DirectComposition visual (`CreateSwapChainForComposition` -> `IDCompositionVisual::SetContent`):
-  both swapchains live at once and `setPresentMode` instantly flips which one the visual shows (the
-  `present=` key, see below). Latency capped with `IDXGIDevice1::SetMaximumFrameLatency(1)`.
-- RENDER ENGINE: present path is the `present=` key (`blt` default | `dcomp` | `auto`). BLT is the
-  default because it is robust: its content goes through the DWM redirection surface, which DWM
-  always composites at vblank, so it NEVER tears. Its one artifact is a phase-mismatch microstutter
-  (NOT our loop - proven clean at 144fps via `WIND_PACINGTEST`), tamed by pacing: `dwmFlush=0`
-  (default) = plain vsync `Present(1,0)`; `dwmFlush=1` = present immediately (`Present(0,0)`) then
-  `DwmFlush()` to align 1:1 with composition. Both hot-reloadable.
-- RENDER ENGINE: `present=dcomp` (DirectComposition flip-model, opt-in) is smoother (no microstutter)
-  but carries two DWM-side costs the app cannot override, so it is NOT the default: (1) run UNDEPLOYED
-  (`zorderBand=0`) the flip visual is composite-throttled to ~57-64Hz over a background fullscreen
-  game; deploying the signed UIAccess build (`zorderBand=16`, above the shell) makes DWM composite it
-  at full rate in every scenario. (2) Even deployed, DWM can promote the fullscreen flip visual to an
-  independent-flip / MPO plane that scans out unsynced and TEARS, especially over a VRR/G-SYNC game.
-  blt hits neither (always composited). `present=auto` starts dcomp and falls back to blt on a
-  measured throttle. Do NOT add a DComp "composition pin" (a forever-animating child visual) to force
-  full-rate composite - it was tried and made the tearing worse (reverted). Issues #9, #69.
+  alone only forwards to *same-thread* windows, so clicks to other apps get eaten. The layered
+  window's swapchain is blt-model (`DXGI_SWAP_EFFECT_DISCARD`), composited through the DWM
+  redirection surface. Latency capped with `IDXGIDevice1::SetMaximumFrameLatency(1)`.
+- RENDER ENGINE: present pacing is the blt-model swapchain through DWM. It NEVER tears (DWM always
+  composites it at vblank). Its one artifact is a phase-mismatch microstutter (NOT our loop - proven
+  clean at 144fps via `WIND_PACINGTEST`), tamed by the `dwmFlush` knob: `dwmFlush=0` (default) =
+  plain vsync `Present(1,0)`; `dwmFlush=1` = present immediately (`Present(0,0)`) then `DwmFlush()`
+  to align 1:1 with composition. Both hot-reloadable.
+- RENDER ENGINE: DO NOT re-attempt a DirectComposition flip-model present path. It was tried and
+  abandoned TWICE (#11, #69): a flip-model swapchain on the layered HWND (via an `IDCompositionVisual`)
+  presents, but DWM promotes the fullscreen visual to an independent-flip / MPO plane that scans out
+  unsynced and TEARS on any frame hitch - badly on a VRR/G-SYNC display (confirmed via diagnostics:
+  tear correlates 1:1 with loop hitches at a steady physical refresh). Forcing it onto the composited
+  path with `dwmFlush=1` stops the tear but then chains us to the VRR-floated composite rate (drooped
+  to ~68Hz on a 23-143Hz panel). A "composition pin" (forever-animating child visual) was also tried
+  and made tearing worse. Net: dcomp is never a win over blt on this layered click-through overlay.
+  RTSS overlay is a quick tell - it shows over blt (hookable composited path), vanishes over dcomp.
 - RENDER ENGINE: never leave the OS cursor hidden. `shutdown()` restores via
   `MagShowSystemCursor(TRUE)` + `MagUninitialize` + `SystemParametersInfo(SPI_SETCURSORS)`,
   plus a `SetUnhandledExceptionFilter` net for crashes.

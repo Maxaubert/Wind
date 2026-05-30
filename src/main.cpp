@@ -16,7 +16,6 @@
 #include "zoom_controller.h"
 #include "tray.h"
 #include "lock_detector.h"
-#include "present_policy.h"
 
 using namespace wind;
 
@@ -102,20 +101,10 @@ struct TickState {
     int    hz = 60;                            // resolved tick/refresh rate (auto-detected)
     bool   recenterKeyWasDown = false;         // edge-detect the recenterVk key
     bool   cursorHidden       = false;         // runtime-only override (no ini write, no hot-reload)
-    // Present-mode switching (instant DComp visual flip -> hitch-free, never resets zoom, mid-zoom safe).
-    // desiredPresent is the mode we want the engine to be; set by the ini (blt/dcomp) or, when
-    // presentAuto, by the adaptive policy. lastForeground feeds the policy's foreground-change cue.
-    bool        presentAuto = false;
-    PresentMode desiredPresent = PresentMode::Dcomp;
-    PresentPolicy presentPolicy;
-    HWND        lastForeground = nullptr;
     HWND   hwnd               = nullptr;       // owning message window (for RegisterHotKey)
     // Frame-pacing diagnostics (diagnostics=1): a 2 s window of loop-interval stats.
     double diagAccum = 0.0, diagSumDt = 0.0, diagMaxDt = 0.0;
     int    diagFrames = 0, diagHitches = 0;
-    unsigned  diagPrevPresent = 0, diagPrevRefresh = 0;   // #69: last DXGI present-stats sample (dcomp)
-    long long diagPrevSyncQpc = 0;
-    bool      diagHaveStats = false;
     TickState(RenderEngine& re, const MonitorTarget& m, const Config& c)
         : renderEngine(re), mon(m), cfg(c),
           zoom(1.0, c.maxLevel),
@@ -128,33 +117,6 @@ static int CursorModeFromCfg(const Config& c) {
     if (c.cursorVisibility == "never")  return 2;
     if (c.cursorVisibility == "always") return 1;
     return 0;
-}
-
-// Initial / pinned engine mode for a config. "auto" starts optimistic on dcomp (the policy may
-// switch it at runtime); "blt" pins blt; "dcomp" pins dcomp.
-static PresentMode PresentModeFromCfg(const Config& c) {
-    return (c.present == "blt") ? PresentMode::Blt : PresentMode::Dcomp;
-}
-
-// True if the foreground window covers the target monitor (within a small margin) - the auto
-// policy's "a fullscreen app is in front" cue (game returned to the foreground).
-static bool ForegroundCoversMonitor(HWND fg, const MonitorTarget& mon) {
-    if (!fg) return false;
-    RECT r;
-    if (!GetWindowRect(fg, &r)) return false;
-    const int m = 2;
-    return r.left <= mon.x + m && r.top <= mon.y + m &&
-           r.right >= mon.x + mon.w - m && r.bottom >= mon.y + mon.h - m;
-}
-
-// PresentReason -> short tag for the diagnostics log.
-static const char* PresentReasonName(PresentReason r) {
-    switch (r) {
-        case PresentReason::Throttle: return "throttle";
-        case PresentReason::Cue:      return "cue";
-        case PresentReason::Backstop: return "backstop";
-        default:                      return "none";
-    }
 }
 
 // Fill a RenderFrameParams from the mapper result + config for the given monitor and zoom level
@@ -239,13 +201,6 @@ static void RunTick(TickState& t) {
             if (nc.hideCursorVk != t.cfg.hideCursorVk || nc.hideCursorMods != t.cfg.hideCursorMods) {
                 RegisterHideCursorHotkey(t.hwnd, nc.hideCursorVk, nc.hideCursorMods);
             }
-            if (nc.present != t.cfg.present) {
-                // Present-mode switch is an instant DComp visual flip (applied below, no rebuild).
-                // For a fixed mode, pin desiredPresent; for auto, the policy drives it.
-                t.presentAuto = (nc.present == "auto");
-                t.presentPolicy.reset();                 // start the policy clean on any change
-                if (!t.presentAuto) t.desiredPresent = PresentModeFromCfg(nc);
-            }
             t.cfg = nc;   // pick up renderer knobs (smoothing, filter, cursor scale, zoom speed)
             t.zoom = ZoomController(1.0, nc.maxLevel);
             double ocx = t.mapper.centerX(), ocy = t.mapper.centerY();   // preserve position
@@ -292,29 +247,6 @@ static void RunTick(TickState& t) {
     // this both suppresses the key from reaching other apps and gives rising-edge semantics for
     // free (MOD_NOREPEAT). No polled check needed here.
     double lvl = t.zoom.level();
-
-    // Adaptive present policy (present=auto): feed it this tick's signals; it returns the desired
-    // mode. dt is the real loop interval, so fps reflects the actual on-screen-paced rate - the
-    // bad-state throttle shows up as a sustained fps drop. Runs at 1x too, so a state-clear while
-    // idle is noticed and the next zoom-in comes up as dcomp.
-    if (t.presentAuto) {
-        HWND fg = GetForegroundWindow();
-        bool fgChanged = (fg != t.lastForeground);
-        t.lastForeground = fg;
-        bool fgFull = ForegroundCoversMonitor(fg, t.mon);
-        PresentChoice pc = t.presentPolicy.update(dt, lvl > 1.0, t.hz, fgFull, fgChanged);
-        t.desiredPresent = (pc == PresentChoice::Dcomp) ? PresentMode::Dcomp : PresentMode::Blt;
-    }
-
-    // Apply the desired present mode immediately whenever it differs. The switch is now an instant
-    // DComp visual flip (no rebuild) - hitch-free, never resets zoom, safe at any time (zoomed or
-    // not). This lets the auto policy fall back to blt mid-hold the moment it detects the throttle.
-    if (t.renderEngine.presentMode() != t.desiredPresent) {
-        if (t.cfg.diagnostics)
-            DiagLog("present: -> %s (%s)", t.desiredPresent == PresentMode::Dcomp ? "dcomp" : "blt",
-                    t.presentAuto ? PresentReasonName(t.presentPolicy.lastReason()) : "ini");
-        t.renderEngine.setPresentMode(t.desiredPresent);
-    }
 
     int rawDx, rawDy; g_input.drainRaw(rawDx, rawDy);
 
@@ -400,21 +332,6 @@ static void RunTick(TickState& t) {
             DiagLog("zoom=%.2f frames=%d ~fps=%.0f avgDt=%.2fms maxDt=%.2fms hitches>1.5x=%d",
                     lvl, t.diagFrames, t.diagFrames / t.diagAccum,
                     t.diagSumDt / t.diagFrames * 1000.0, t.diagMaxDt * 1000.0, t.diagHitches);
-            // #69: actual on-screen rates from DXGI frame stats (dcomp only). displayRefreshHz is
-            // the real physical refresh during the window (SyncRefreshCount delta over SyncQPCTime
-            // delta) - if it drops to ~half while loop fps is throttled, the DISPLAY/VRR is idling
-            // down; if it stays at refresh while presentedHz drops, it's a DWM composite down-rate.
-            unsigned pc = 0, rc = 0; long long sq = 0;
-            if (t.renderEngine.presentStats(pc, rc, sq)) {
-                if (t.diagHaveStats && sq > t.diagPrevSyncQpc) {
-                    double sec = double(sq - t.diagPrevSyncQpc) / double(t.freq.QuadPart);
-                    if (sec > 0.0)
-                        DiagLog("  presentstats: presentedHz=%.0f displayRefreshHz=%.0f (presented=%u refreshes=%u over %.2fs)",
-                                double(pc - t.diagPrevPresent) / sec, double(rc - t.diagPrevRefresh) / sec,
-                                pc - t.diagPrevPresent, rc - t.diagPrevRefresh, sec);
-                }
-                t.diagPrevPresent = pc; t.diagPrevRefresh = rc; t.diagPrevSyncQpc = sq; t.diagHaveStats = true;
-            }
             t.diagAccum = 0.0; t.diagSumDt = 0.0; t.diagMaxDt = 0.0;
             t.diagFrames = 0; t.diagHitches = 0;
         }
@@ -615,8 +532,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     // --- Own GPU renderer (DXGI Desktop Duplication + D3D11) ---
     RenderEngine renderEngine;
-    if (!renderEngine.initialize(startupMon, cfg.zorderBand, cfg.hdrTonemap != 0,
-                                 PresentModeFromCfg(cfg))) {
+    if (!renderEngine.initialize(startupMon, cfg.zorderBand, cfg.hdrTonemap != 0)) {
         MessageBoxW(nullptr, L"Could not start the renderer (Direct3D 11 / Desktop Duplication "
                              L"unavailable on this system).", L"Wind", MB_ICONERROR);
         g_input.stop();
@@ -627,8 +543,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     TickState ts(renderEngine, startupMon, cfg);
     ts.hwnd = hwnd;                       // so RunTick can re-register the hide-cursor hotkey
-    ts.presentAuto = (cfg.present == "auto");
-    ts.desiredPresent = PresentModeFromCfg(cfg);   // matches the engine's initial mode below
     g_tick = &ts;   // so the WM_TIMER tick (during the tray menu's modal loop) can run
 
     // Autonomous verification hook: WIND_SELFTEST drives the real integrated render path at a
@@ -762,10 +676,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         //  - else: Present(0,0) doesn't block, so the timer paces at the detected refresh rate.
         // Idle at 1x uses the timer.
         bool zoomed = ts.prevLvl > 1.0;
-        // Pacing is identical for blt and dcomp: dwmFlush=1 -> present immediately then DwmFlush
-        // (ride DWM's composite); else vsync=1 -> Present(1,0) blocks; else the timer paces. dcomp
-        // honors dwmFlush because flip-model Present(1,0) is throttled to ~60Hz when a windowed app
-        // covers a background fullscreen game, whereas DwmFlush rides the full-rate composite (#69).
+        // dwmFlush=1 -> present immediately then DwmFlush (align 1:1 with the compositor, targets the
+        // blt-model microstutter); else vsync=1 -> Present(1,0) blocks; else the timer paces.
         bool dwmPaces = zoomed && ts.cfg.dwmFlush != 0;
         bool renderPresentPaces = zoomed && !dwmPaces && ts.cfg.vsync != 0;
         if (!renderPresentPaces && !dwmPaces) {
