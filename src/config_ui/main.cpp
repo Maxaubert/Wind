@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <windowsx.h>
 #include <shellapi.h>
+#include <tlhelp32.h>
 #include <wrl.h>
 #include "WebView2.h"
 #include <shlwapi.h>
@@ -20,6 +21,22 @@ static HWND g_hwnd = nullptr;
 static std::wstring ExeDir() {
     wchar_t p[MAX_PATH]; GetModuleFileNameW(nullptr, p, MAX_PATH);
     PathRemoveFileSpecW(p); return p;
+}
+// Is the Wind.exe magnifier process running? Uses a Toolhelp process-name scan, which works across
+// integrity levels (the deployed Wind.exe is UIAccess/higher IL than this normal-IL config host, so
+// opening its single-instance mutex could be access-denied; reading process names is not). Lets us
+// launch Wind only when it is not already up, instead of relaunching (which would kill+restart it).
+static bool WindRunning() {
+    bool found = false;
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return false;
+    PROCESSENTRY32W pe{ sizeof(pe) };
+    if (Process32FirstW(snap, &pe)) {
+        do { if (_wcsicmp(pe.szExeFile, L"Wind.exe") == 0) { found = true; break; } }
+        while (Process32NextW(snap, &pe));
+    }
+    CloseHandle(snap);
+    return found;
 }
 // Resolved at first call (and cached) so reads and writes always land on the same file the Wind
 // core uses. Falls back to %LOCALAPPDATA%\Wind\magnifier.ini when the exe dir is read-only.
@@ -143,19 +160,25 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
         return 0;
     }
     bool onboard = lpCmdLine && wcsstr(lpCmdLine, L"--onboard") != nullptr;
-    // If Settings is opened before onboarding was completed (no --onboard flag and onboarded != 1),
-    // don't show Settings against a not-yet-live config - launch the Wind magnifier instead. Wind
-    // sees onboarded==0 at startup and runs the guided setup (re-spawning us with --onboard), so the
-    // user lands in onboarding. The --onboard guard prevents any launch loop. If Wind.exe can't be
-    // found we fall through and show Settings rather than dead-end.
+    // Settings should never run without the magnifier, and never show the config page against a
+    // not-yet-set-up config. So, when launched as Settings (no --onboard):
+    //   - NOT set up yet  -> launch Wind.exe and exit. Wind sees onboarded==0 and runs the guided
+    //     setup (re-spawning us with --onboard), so the user lands in onboarding, not the config page.
+    //   - set up, Wind not running -> launch Wind.exe, then show the config page.
+    //   - set up, Wind already running -> just show the config page.
+    // The --onboard guard prevents a launch loop. If Wind.exe can't be found we fall through to the
+    // config page rather than dead-end.
     if (!onboard) {
         auto vals = wind::ReadIniValues(ReadFileUtf8(IniPath()));
         auto it = vals.find("onboarded");
         bool onboarded = (it != vals.end() && it->second == "1");
+        std::wstring windExe = ExeDir() + L"\\Wind.exe";
         if (!onboarded) {
-            std::wstring windExe = ExeDir() + L"\\Wind.exe";
             HINSTANCE r = ShellExecuteW(nullptr, L"open", windExe.c_str(), nullptr, nullptr, SW_SHOW);
             if (reinterpret_cast<INT_PTR>(r) > 32) { if (mtx) CloseHandle(mtx); return 0; }
+        } else if (!WindRunning()) {
+            // Set up, but the magnifier isn't running: start it, then continue to the config page.
+            ShellExecuteW(nullptr, L"open", windExe.c_str(), nullptr, nullptr, SW_SHOW);
         }
     }
     // Per-monitor-V2 DPI awareness so WebView2 renders at native resolution (not bitmap-scaled,
