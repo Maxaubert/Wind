@@ -20,5 +20,5 @@ export function getMode() {
 }
 // Custom title bar buttons -> host runs ShowWindow(SW_MINIMIZE) / WM_CLOSE.
 export function windowControl(action) { post({ type: 'window', action }); }
-// "Edit config file" -> host opens magnifier.ini in the default editor.
+// "Edit config file" -> host opens magnifier.ini with the registered .ini handler (Notepad fallback).
 export function openIni() { post({ type: 'openIni' }); }

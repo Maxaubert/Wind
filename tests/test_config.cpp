@@ -88,6 +88,25 @@ TEST_CASE("malformed lines are ignored, keep defaults") {
     Config c = ParseConfig("garbage line\nmaxLevel\n=5\n");
     CHECK(c.maxLevel == doctest::Approx(12.0));
 }
+TEST_CASE("numeric fields are clamped to documented ranges") {
+    // maxLevel < 1 would invert ZoomController's clamp and disable zoom; must clamp up to 1.0.
+    CHECK(ParseConfig("maxLevel=0\n").maxLevel == doctest::Approx(1.0));
+    CHECK(ParseConfig("maxLevel=-5\n").maxLevel == doctest::Approx(1.0));
+    CHECK(ParseConfig("maxLevel=999\n").maxLevel == doctest::Approx(50.0));   // capped
+    // Speeds, accel, ramp, sensitivity, smoothing, sharpness, brightness clamp to their ranges.
+    CHECK(ParseConfig("zoomInSpeed=0\n").zoomInSpeed == doctest::Approx(0.25));
+    CHECK(ParseConfig("zoomOutSpeed=99\n").zoomOutSpeed == doctest::Approx(4.0));
+    CHECK(ParseConfig("smoothZoomAccel=0\n").smoothZoomAccel == doctest::Approx(1.0));
+    CHECK(ParseConfig("smoothZoomRamp=-1\n").smoothZoomRamp == doctest::Approx(0.1));
+    CHECK(ParseConfig("cursorSensitivity=10\n").cursorSensitivity == doctest::Approx(4.0));
+    CHECK(ParseConfig("cursorSmoothing=5\n").cursorSmoothing == doctest::Approx(0.95));
+    CHECK(ParseConfig("cursorSmoothing=-1\n").cursorSmoothing == doctest::Approx(0.0));
+    CHECK(ParseConfig("sharpness=9\n").sharpness == doctest::Approx(1.0));
+    CHECK(ParseConfig("brightness=0\n").brightness == doctest::Approx(0.5));
+    // In-range values pass through untouched.
+    CHECK(ParseConfig("maxLevel=8\n").maxLevel == doctest::Approx(8.0));
+    CHECK(ParseConfig("cursorSmoothing=0.4\n").cursorSmoothing == doctest::Approx(0.4));
+}
 TEST_CASE("multiMonitor can be set") {
     CHECK(ParseConfig("multiMonitor=0\n").multiMonitor == 0);
     CHECK(ParseConfig("multiMonitor=1\n").multiMonitor == 1);

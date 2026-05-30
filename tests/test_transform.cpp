@@ -21,3 +21,12 @@ TEST_CASE("ComputeOffsetF at 1x is origin") {
     CHECK(o.x == doctest::Approx(0.0));
     CHECK(o.y == doctest::Approx(0.0));
 }
+TEST_CASE("ComputeOffsetF clamps level below 1.0 to 1x (whole screen, origin)") {
+    // A level < 1.0 (e.g. from a bad/clamped config) must behave exactly like 1x, not invert.
+    wind::OffsetF a = wind::ComputeOffsetF(960.0, 540.0, 0.5, 1920, 1080);
+    wind::OffsetF b = wind::ComputeOffsetF(960.0, 540.0, 1.0, 1920, 1080);
+    CHECK(a.x == doctest::Approx(b.x));
+    CHECK(a.y == doctest::Approx(b.y));
+    CHECK(a.x == doctest::Approx(0.0));
+    CHECK(a.y == doctest::Approx(0.0));
+}

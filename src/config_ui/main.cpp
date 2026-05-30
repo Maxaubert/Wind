@@ -159,7 +159,12 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
             PostMessageW(g_hwnd, WM_CLOSE, 0, 0);
         }
     } else if (type == "openIni") {
-        ShellExecuteW(nullptr, L"open", L"notepad.exe", IniPath().c_str(), nullptr, SW_SHOWNORMAL);
+        // Open the ini with the registered .ini handler (usually Notepad), matching the bridge's
+        // "default editor" contract. Fall back to explicitly launching Notepad if no handler is
+        // associated (ShellExecute returns <= 32) so the button never silently does nothing.
+        HINSTANCE r = ShellExecuteW(nullptr, L"open", IniPath().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        if (reinterpret_cast<INT_PTR>(r) <= 32)
+            ShellExecuteW(nullptr, L"open", L"notepad.exe", IniPath().c_str(), nullptr, SW_SHOWNORMAL);
     }
 }
 static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
@@ -225,10 +230,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
     // not-yet-set-up config. So, when launched as Settings (no --onboard):
     //   - NOT set up yet  -> launch Wind.exe and exit. Wind sees onboarded==0 and runs the guided
     //     setup (re-spawning us with --onboard), so the user lands in onboarding, not the config page.
+    //     If launching Wind.exe FAILS, show onboarding ourselves rather than the config page (never
+    //     dead-end into the config UI against an unconfigured app).
     //   - set up, Wind not running -> launch Wind.exe, then show the config page.
     //   - set up, Wind already running -> just show the config page.
-    // The --onboard guard prevents a launch loop. If Wind.exe can't be found we fall through to the
-    // config page rather than dead-end.
+    // The --onboard guard prevents a launch loop.
     if (!onboard) {
         auto vals = wind::ReadIniValues(ReadFileUtf8(IniPath()));
         auto it = vals.find("onboarded");
@@ -237,6 +243,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
         if (!onboarded) {
             HINSTANCE r = ShellExecuteW(nullptr, L"open", windExe.c_str(), nullptr, nullptr, SW_SHOW);
             if (reinterpret_cast<INT_PTR>(r) > 32) { if (mtx) CloseHandle(mtx); return 0; }
+            onboard = true;   // couldn't launch Wind - run onboarding in THIS window, not the config page
         } else if (!WindRunning()) {
             // Set up, but the magnifier isn't running: start it, then continue to the config page.
             ShellExecuteW(nullptr, L"open", windExe.c_str(), nullptr, nullptr, SW_SHOW);

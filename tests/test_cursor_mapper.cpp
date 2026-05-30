@@ -75,6 +75,21 @@ TEST_CASE("smoothing 0 snaps instantly (no inertia)") {
     CHECK(m.centerX() == doctest::Approx(1000.0));   // straight to target
 }
 
+TEST_CASE("smoothing clamps: max smoothing still advances ~5%/tick (never fully stalls)") {
+    // alpha = 1 - smoothing, floored at 0.05 so the lens always makes progress.
+    CursorMapper m(1920, 1080, 1.0);    // smoothing 1.0 -> alpha clamped to 0.05
+    m.reset(960, 540);
+    m.update(40, 0, 2.0);               // 960 + (1000-960)*0.05 = 962
+    CHECK(m.centerX() == doctest::Approx(962.0));
+}
+
+TEST_CASE("smoothing out-of-range (negative) clamps to snap (alpha 1.0)") {
+    CursorMapper m(1920, 1080, -1.0);   // 1 - (-1) = 2 -> alpha clamped to 1.0
+    m.reset(960, 540);
+    m.update(40, 0, 2.0);
+    CHECK(m.centerX() == doctest::Approx(1000.0));   // snaps to target
+}
+
 TEST_CASE("reset overrides the accumulated center") {
     CursorMapper m(1920, 1080);
     m.reset(100, 100);

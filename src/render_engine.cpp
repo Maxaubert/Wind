@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstdarg>
 #include <vector>
+#include <unordered_map>
 #include <wrl/client.h>
 
 #pragma comment(lib, "d3d11.lib")
@@ -78,6 +79,7 @@ struct RenderEngine::State {
     int  outColorSpace = -1;     // DXGI_COLOR_SPACE_TYPE of the output (12 = HDR10 G2084)
     int  outBitsPerColor = 0;
     bool wantHdrTonemap = false; // config: opt-in HDR->SDR tonemap (default off = current path)
+    bool rotated = false;        // target output is portrait (90/270); capture not supported - logged
     bool capFp16 = false;        // capturing FP16 scRGB (tonemap active)
     double sdrWhiteNits = 200.0; // OS SDR white level for the tonemap scale
     DXGI_FORMAT copyFormat = DXGI_FORMAT_B8G8R8A8_UNORM;  // current desktopCopy format
@@ -97,15 +99,23 @@ struct RenderEngine::State {
     ComPtr<ID3D11Buffer> ccb;                  // posClip/sizeClip for the cursor quad
     ComPtr<ID3D11BlendState> blend;            // alpha blend for normal cursors
     ComPtr<ID3D11BlendState> blendInvert;      // invert blend for I-beam-style cursors
-    ComPtr<ID3D11Texture2D> cursorTex;
+    ComPtr<ID3D11Texture2D> cursorTex;         // the ACTIVE cursor's texture (an alias into the cache)
     ComPtr<ID3D11ShaderResourceView> cursorSRV;
     HCURSOR lastCursor = nullptr;              // re-decode only when the OS cursor changes
     int curW = 0, curH = 0, hotX = 0, hotY = 0;
     bool cursorReady = false;
     bool cursorInvert = false;                 // current cursor uses the invert blend
     bool osCursorShowing = true;               // the focused app's cursor is visible (CURSOR_SHOWING)
+    // Decoded-cursor cache keyed by HCURSOR. Animated cursors (busy spinner, AppStarting) cycle a
+    // fixed set of HCURSORs every frame; without a cache each frame re-did a GDI decode + a D3D
+    // texture upload. The OS reuses the same handles, so this hits the cache after the first cycle.
+    // Bounded (kCursorCacheMax) so a process that churns many distinct cursors can't grow unbounded.
+    struct CachedCursor { ComPtr<ID3D11Texture2D> tex; ComPtr<ID3D11ShaderResourceView> srv;
+                          int w=0,h=0,hotX=0,hotY=0; bool invert=false; };
+    std::unordered_map<HCURSOR, CachedCursor> cursorCache;
+    static constexpr size_t kCursorCacheMax = 16;
 
-    void updateCursorTexture();   // GetCursorInfo -> decode -> (re)upload cursorTex/SRV on change
+    void updateCursorTexture(int cursorMode);  // read osCursorShowing; decode/upload only if it'll be drawn
 
     bool magInited = false;
     bool cursorHidden = false;
@@ -212,8 +222,15 @@ bool RenderEngine::State::recreateDupl() {
         DXGI_OUTDUPL_DESC dd{};
         dupl->GetDesc(&dd);
         ddaFormat = (UINT)dd.ModeDesc.Format;
-        RLog("recreateDupl: ddaModeFormat=%u colorSpace=%d isHdr=%d wantTonemap=%d",
-             ddaFormat, outColorSpace, (int)isHdr, (int)wantHdrTonemap);
+        // A rotated (portrait 90/270) output delivers a transposed surface relative to the desktop
+        // rect; our copy/UV math assumes an unrotated surface, so it would magnify garbage. We don't
+        // (yet) support rotated capture - record it and log loudly so it's diagnosable rather than a
+        // silent wrong image. (Landscape, the overwhelmingly common case, is Rotation IDENTITY/0.)
+        rotated = (dd.Rotation == DXGI_MODE_ROTATION_ROTATE90 ||
+                   dd.Rotation == DXGI_MODE_ROTATION_ROTATE270);
+        RLog("recreateDupl: ddaModeFormat=%u colorSpace=%d isHdr=%d wantTonemap=%d rotation=%d%s",
+             ddaFormat, outColorSpace, (int)isHdr, (int)wantHdrTonemap, (int)dd.Rotation,
+             rotated ? " (ROTATED - capture unsupported, image may be wrong)" : "");
     }
     return SUCCEEDED(hr);
 }
@@ -392,6 +409,7 @@ bool RenderEngine::recoverDeviceLost() {
     s_->dupl.Reset();
     s_->desktopCopy.Reset(); s_->desktopSRV.Reset();
     s_->cursorTex.Reset(); s_->cursorSRV.Reset(); s_->cursorReady = false; s_->lastCursor = nullptr;
+    s_->cursorCache.clear();   // cached cursor textures belong to the dead device
     s_->vs.Reset(); s_->ps.Reset(); s_->cvs.Reset(); s_->cps.Reset();
     s_->cb.Reset(); s_->ccb.Reset();
     s_->blend.Reset(); s_->blendInvert.Reset(); s_->sampLinear.Reset(); s_->sampPoint.Reset();
@@ -688,27 +706,47 @@ bool RenderEngine::retarget(const MonitorTarget& m) {
     return true;
 }
 
-void RenderEngine::State::updateCursorTexture() {
+// cursorMode: 0=auto (draw only if the app shows its cursor), 1=always. We always read
+// osCursorShowing, but decode/upload only when the cursor will actually be drawn - a game that
+// hides its cursor and rapidly swaps shapes would otherwise pay the decode for a never-drawn sprite.
+void RenderEngine::State::updateCursorTexture(int cursorMode) {
     CURSORINFO ci{ sizeof(ci) };
     if (!GetCursorInfo(&ci) || !ci.hCursor) { osCursorShowing = false; return; }
     // Whether the focused app wants a cursor shown. Read every frame (not just on shape
     // change) because a game can toggle it without changing the shape. Our own
     // MagShowSystemCursor(FALSE) does NOT clear this flag, so it reflects the app's intent.
     osCursorShowing = (ci.flags & CURSOR_SHOWING) != 0;
-    if (ci.hCursor == lastCursor && cursorReady) return;   // unchanged; keep the texture
+    bool willDraw = (cursorMode == 1) || osCursorShowing;   // mode 0 draws only when the app shows it
+    if (!willDraw) return;                                  // won't be drawn - don't decode/upload
+    if (ci.hCursor == lastCursor && cursorReady) return;    // active cursor unchanged
+
+    // Cache hit: just re-point the active texture/SRV at the cached entry (no GDI decode, no upload).
+    auto it = cursorCache.find(ci.hCursor);
+    if (it != cursorCache.end()) {
+        const CachedCursor& cc = it->second;
+        cursorTex = cc.tex; cursorSRV = cc.srv;
+        curW = cc.w; curH = cc.h; hotX = cc.hotX; hotY = cc.hotY; cursorInvert = cc.invert;
+        lastCursor = ci.hCursor; cursorReady = true;
+        return;
+    }
+
     std::vector<uint32_t> bgra; int w = 0, h = 0, hx = 0, hy = 0; bool inv = false;
     if (!DecodeCursorBGRA(ci.hCursor, bgra, w, h, hx, hy, inv)) return;
-    cursorInvert = inv;
-    cursorSRV.Reset();
-    cursorTex.Reset();
+    if (w <= 0 || h <= 0 || w > 256 || h > 256) return;     // sanity-cap pathological/oversized cursors
+    CachedCursor cc; cc.w = w; cc.h = h; cc.hotX = hx; cc.hotY = hy; cc.invert = inv;
     D3D11_TEXTURE2D_DESC td{};
     td.Width = w; td.Height = h; td.MipLevels = 1; td.ArraySize = 1;
     td.Format = DXGI_FORMAT_B8G8R8A8_UNORM; td.SampleDesc.Count = 1;
     td.Usage = D3D11_USAGE_IMMUTABLE; td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
     D3D11_SUBRESOURCE_DATA srd{}; srd.pSysMem = bgra.data(); srd.SysMemPitch = w * 4;
-    if (FAILED(device->CreateTexture2D(&td, &srd, cursorTex.ReleaseAndGetAddressOf()))) { cursorReady = false; return; }
-    if (FAILED(device->CreateShaderResourceView(cursorTex.Get(), nullptr, cursorSRV.ReleaseAndGetAddressOf()))) { cursorReady = false; return; }
-    curW = w; curH = h; hotX = hx; hotY = hy; lastCursor = ci.hCursor; cursorReady = true;
+    if (FAILED(device->CreateTexture2D(&td, &srd, cc.tex.ReleaseAndGetAddressOf()))) { cursorReady = false; return; }
+    if (FAILED(device->CreateShaderResourceView(cc.tex.Get(), nullptr, cc.srv.ReleaseAndGetAddressOf()))) { cursorReady = false; return; }
+    // Bound the cache: a cheap eviction (clear all) when it grows past the cap. Animated sets are
+    // small (a few frames), so this effectively never fires in practice.
+    if (cursorCache.size() >= kCursorCacheMax) cursorCache.clear();
+    auto& stored = cursorCache[ci.hCursor] = cc;
+    cursorTex = stored.tex; cursorSRV = stored.srv;
+    curW = w; curH = h; hotX = hx; hotY = hy; cursorInvert = inv; lastCursor = ci.hCursor; cursorReady = true;
 }
 
 void RenderEngine::State::render(const RenderFrameParams& p) {
@@ -726,9 +764,10 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
     if (vr > sw) vr = sw;          if (vb > sh) vb = sh;
     RECT view{ (LONG)vl, (LONG)vt, (LONG)vr, (LONG)vb };
     capture(view, p.cropCapture);
-    // Cursor texture is only needed if we might draw it. cursorMode==2 (never draw) skips the
-    // GetCursorInfo syscall entirely; auto mode (0) still needs it to read osCursorShowing (#73).
-    if (p.cursorMode != 2) updateCursorTexture();
+    // cursorMode==2 (never draw) skips the GetCursorInfo syscall entirely. Otherwise update reads
+    // osCursorShowing and decodes/uploads only when the cursor will actually be drawn (mode 1, or
+    // mode 0 with the app showing its cursor) - so a game that hides its cursor pays no decode.
+    if (p.cursorMode != 2) updateCursorTexture(p.cursorMode);
 
     ID3D11DeviceContext* c = ctx.Get();
     D3D11_VIEWPORT vp{}; vp.Width = (float)sw; vp.Height = (float)sh; vp.MaxDepth = 1.0f;
