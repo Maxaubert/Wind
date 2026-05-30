@@ -1,7 +1,9 @@
 #include "config.h"
 #include <sstream>
 #include <string>
+#include <algorithm>
 namespace wind {
+static double clampd(double v, double lo, double hi) { return v < lo ? lo : (v > hi ? hi : v); }
 static std::string trim(const std::string& s) {
     size_t a = s.find_first_not_of(" \t\r\n");
     if (a == std::string::npos) return "";
@@ -57,6 +59,19 @@ Config ParseConfig(const std::string& text) {
             else if (key == "onboarded")          c.onboarded = std::stoi(val);
         } catch (...) { /* keep default on bad value */ }
     }
+    // Clamp numeric fields to their documented ranges. The ini is a hand-editable surface, and an
+    // out-of-range value (e.g. maxLevel=0, which would invert ZoomController's clamp and disable zoom,
+    // or a negative ramp) would otherwise silently break behavior with no feedback. Ranges mirror the
+    // config UI sliders / the struct-comment docs.
+    c.maxLevel        = clampd(c.maxLevel,        1.0, 50.0);   // must be >= the 1.0 min zoom level
+    c.zoomInSpeed     = clampd(c.zoomInSpeed,     0.25, 4.0);
+    c.zoomOutSpeed    = clampd(c.zoomOutSpeed,    0.25, 4.0);
+    c.smoothZoomAccel = clampd(c.smoothZoomAccel, 1.0, 8.0);
+    c.smoothZoomRamp  = clampd(c.smoothZoomRamp,  0.1, 3.0);
+    c.cursorSensitivity = clampd(c.cursorSensitivity, 0.25, 4.0);
+    c.cursorSmoothing = clampd(c.cursorSmoothing, 0.0, 0.95);
+    c.sharpness       = clampd(c.sharpness,       0.0, 1.0);
+    c.brightness      = clampd(c.brightness,      0.5, 1.5);
     return c;
 }
 }

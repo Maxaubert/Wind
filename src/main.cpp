@@ -178,9 +178,13 @@ static void RunTick(TickState& t) {
             t.sinceCheck = 0.0;
             if (WaitForSingleObject(t.configWatch, 0) == WAIT_OBJECT_0) {
                 checkConfig = true;
-                // Re-arm for the next change. If that fails (e.g. the watched dir vanished), drop to
-                // INVALID so the timed-poll fallback re-engages instead of silently never reloading.
-                if (!FindNextChangeNotification(t.configWatch)) t.configWatch = INVALID_HANDLE_VALUE;
+                // Re-arm for the next change. If that fails (e.g. the watched dir vanished), close
+                // the now-useless handle (don't leak it) and drop to INVALID so the timed-poll
+                // fallback re-engages instead of silently never reloading.
+                if (!FindNextChangeNotification(t.configWatch)) {
+                    FindCloseChangeNotification(t.configWatch);
+                    t.configWatch = INVALID_HANDLE_VALUE;
+                }
             }
         }
     } else {
@@ -392,11 +396,17 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 if ((m.usFlags & MOUSE_MOVE_ABSOLUTE) == 0) {
                     AccumulateRaw(g_input, m.lLastX, m.lLastY);
                 }
-                USHORT bf = m.usButtonFlags;
-                if (bf & RI_MOUSE_BUTTON_4_DOWN) g_input.setButtonState(1, true);
-                if (bf & RI_MOUSE_BUTTON_4_UP)   g_input.setButtonState(1, false);
-                if (bf & RI_MOUSE_BUTTON_5_DOWN) g_input.setButtonState(2, true);
-                if (bf & RI_MOUSE_BUTTON_5_UP)   g_input.setButtonState(2, false);
+                // Side-button held state: ONLY decode it here as the WIND_NOHOOK fallback. When the LL
+                // hook is active it is the sole authority - Raw Input still delivers the button
+                // transition even though the hook swallows the legacy message, so writing it here too
+                // would double-count and could momentarily disagree with the hook's view.
+                if (!g_input.hookActive()) {
+                    USHORT bf = m.usButtonFlags;
+                    if (bf & RI_MOUSE_BUTTON_4_DOWN) g_input.setButtonState(1, true);
+                    if (bf & RI_MOUSE_BUTTON_4_UP)   g_input.setButtonState(1, false);
+                    if (bf & RI_MOUSE_BUTTON_5_DOWN) g_input.setButtonState(2, true);
+                    if (bf & RI_MOUSE_BUTTON_5_UP)   g_input.setButtonState(2, false);
+                }
             }
         }
         return 0;

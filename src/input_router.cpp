@@ -1,5 +1,6 @@
 #include "input_router.h"
 #include <windows.h>
+#include <atomic>
 namespace wind {
 static InputRouter* g_router = nullptr;
 static HHOOK   g_mouseHook    = nullptr;
@@ -14,8 +15,10 @@ static bool    g_hookOk       = false;     // result of SetWindowsHookExW, publi
 // Per-side-button record of whether we swallowed the DOWN (index by id: 1=XBUTTON1, 2=XBUTTON2).
 // Only an UP whose DOWN we swallowed may be swallowed too, so the system's down/up view stays
 // balanced and a button can never be left believed-held. Reset on remap so a stale flag from a
-// previous binding can't cause a later UP to be wrongly swallowed.
-static bool    g_swallowedDown[3] = { false, false, false };
+// previous binding can't cause a later UP to be wrongly swallowed. ATOMIC: touched by three
+// contexts - the hook thread (MouseProc), the tick thread (setButtons on hot-reload), and the
+// teardown caller (ReleaseSwallowedButtons via stop()) - so plain bools would be a data race.
+static std::atomic<bool> g_swallowedDown[3] = {};
 
 static int xbuttonIdFromHook(WPARAM wParam, LPARAM lParam) {
     auto* mi = reinterpret_cast<MSLLHOOKSTRUCT*>(lParam);
@@ -44,7 +47,7 @@ void InputRouter::setButtons(int inButtonId, int outButtonId) {
     state_.outHeld.store(false);
     // Also clear the swallowed-DOWN records: a remap mid-press (exactly what keybind capture does)
     // must not let a stale flag cause a later, unrelated UP to be swallowed (-> stuck button).
-    g_swallowedDown[1] = false; g_swallowedDown[2] = false;
+    g_swallowedDown[1].store(false); g_swallowedDown[2].store(false);
 }
 
 static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
@@ -59,13 +62,12 @@ static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
                 // Swallow the DOWN only if it is a zoom button now; remember it so the matching UP
                 // is swallowed too (keeps the system's down/up view balanced).
                 if (g_router->swallowEnabled() && g_router->isZoomButton(id)) {
-                    g_swallowedDown[id] = true;
+                    g_swallowedDown[id].store(true);
                     swallow = true;
                 }
             } else { // up: swallow iff we swallowed its DOWN. Never swallow an UP whose DOWN the
                      // system already saw - that is exactly what left the button stuck-down.
-                if (g_swallowedDown[id]) {
-                    g_swallowedDown[id] = false;
+                if (g_swallowedDown[id].exchange(false)) {
                     swallow = true;
                 }
             }
@@ -114,6 +116,7 @@ bool InputRouter::start(int inButtonId, int outButtonId, bool swallow) {
     if (!g_hookThread) { CloseHandle(g_hookReady); g_hookReady = nullptr; return false; }
     WaitForSingleObject(g_hookReady, INFINITE);
     CloseHandle(g_hookReady); g_hookReady = nullptr;
+    hookActive_.store(g_hookOk);   // hook is now the sole button-state authority (see hookActive())
     return g_hookOk;
     // Raw Input registration (RIDEV_INPUTSINK) + WM_INPUT decoding live in main.cpp's
     // message-only window, which calls AccumulateRaw() with the decoded deltas.
@@ -125,8 +128,7 @@ bool InputRouter::start(int inButtonId, int outButtonId, bool swallow) {
 // system-wide. This GUARANTEES we never strand a button no matter how teardown is triggered.
 static void ReleaseSwallowedButtons() {
     for (int id = 1; id <= 2; ++id) {
-        if (!g_swallowedDown[id]) continue;
-        g_swallowedDown[id] = false;
+        if (!g_swallowedDown[id].exchange(false)) continue;
         INPUT in{};
         in.type = INPUT_MOUSE;
         in.mi.dwFlags = MOUSEEVENTF_XUP;
@@ -143,6 +145,7 @@ void InputRouter::stop() {
         UnhookWindowsHookEx(g_mouseHook); g_mouseHook = nullptr;
     }
     ReleaseSwallowedButtons();   // never leave a swallowed side-button stranded as held
+    hookActive_.store(false);
     g_router = nullptr;
 }
 void InputRouter::drainRaw(int& dx, int& dy) {

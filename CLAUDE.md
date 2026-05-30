@@ -96,8 +96,8 @@ staged Apply/Discard footer.
   transitional composite (the window underneath), which otherwise flashed on reveal.
 - Verify the render overlay only from INSIDE the app (it is capture-excluded, so external
   screenshots can't see it): `WIND_SELFTEST=1 Wind.exe` dumps `wind_selftest.png`.
-- MULTI-MONITOR: on each zoom-in we magnify the monitor the cursor is on (`multiMonitor=1`
-  default; `0` = primary only). The overlay is moved/resized and the DXGI output is re-selected
+- MULTI-MONITOR: `multiMonitor=1` magnifies the monitor the cursor is on at each zoom-in; `0`
+  (the shipped default) = primary only. The overlay is moved/resized and the DXGI output is re-selected
   by device name (`render_engine` `retarget`/`selectOutput`); the pipeline works in LOCAL monitor
   pixels with a `(originX,originY)` offset applied only at `GetCursorPos`/`SetCursorPos`. Limit:
   if the cursor's monitor is on a DIFFERENT GPU than our D3D device, `retarget` returns false and
