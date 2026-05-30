@@ -11,6 +11,11 @@ static HANDLE  g_hookThread   = nullptr;
 static DWORD   g_hookThreadId = 0;
 static HANDLE  g_hookReady    = nullptr;   // signaled by the thread once the hook is installed (or failed)
 static bool    g_hookOk       = false;     // result of SetWindowsHookExW, published via g_hookReady
+// Per-side-button record of whether we swallowed the DOWN (index by id: 1=XBUTTON1, 2=XBUTTON2).
+// Only an UP whose DOWN we swallowed may be swallowed too, so the system's down/up view stays
+// balanced and a button can never be left believed-held. Reset on remap so a stale flag from a
+// previous binding can't cause a later UP to be wrongly swallowed.
+static bool    g_swallowedDown[3] = { false, false, false };
 
 static int xbuttonIdFromHook(WPARAM wParam, LPARAM lParam) {
     auto* mi = reinterpret_cast<MSLLHOOKSTRUCT*>(lParam);
@@ -37,15 +42,10 @@ void InputRouter::setButtons(int inButtonId, int outButtonId) {
     // progress would never get its UP event matched and inHeld/outHeld would stick true).
     state_.inHeld.store(false);
     state_.outHeld.store(false);
+    // Also clear the swallowed-DOWN records: a remap mid-press (exactly what keybind capture does)
+    // must not let a stale flag cause a later, unrelated UP to be swallowed (-> stuck button).
+    g_swallowedDown[1] = false; g_swallowedDown[2] = false;
 }
-
-// Per-side-button record of whether we swallowed the DOWN (index by id: 1=XBUTTON1, 2=XBUTTON2).
-// We must ONLY swallow an UP whose DOWN we also swallowed; otherwise the system sees a DOWN with no
-// matching UP and believes the button is held forever, which breaks clicking system-wide. That
-// imbalance occurred during keybind capture: arming clears the binding so the DOWN passes through,
-// then the browser rebinds the button, so by UP-time it is a zoom button and the old code swallowed
-// only the UP -> stuck-down. Balancing on the swallowed-down record fixes it across rebinds.
-static bool g_swallowedDown[3] = { false, false, false };
 
 static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
     if (code == HC_ACTION && g_router) {
