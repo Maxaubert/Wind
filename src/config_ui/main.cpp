@@ -71,6 +71,15 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
         std::string action = JsonField(j, "action");
         if (action == "minimize") ShowWindow(g_hwnd, SW_MINIMIZE);
         else if (action == "close") PostMessageW(g_hwnd, WM_CLOSE, 0, 0);
+        else if (action == "quitWind") {
+            // Onboarding was closed (X) without completing: end the whole Wind app, not just this
+            // window. Signal the magnifier via a named event, NOT a window message: the deployed
+            // Wind.exe is UIAccess and UIPI silently blocks PostMessage from this non-UIAccess
+            // process. A kernel event isn't gated by UIPI and works in dev + deployed. Then close us.
+            HANDLE ev = OpenEventW(EVENT_MODIFY_STATE, FALSE, L"Local\\Wind_QuitRequest");
+            if (ev) { SetEvent(ev); CloseHandle(ev); }
+            PostMessageW(g_hwnd, WM_CLOSE, 0, 0);
+        }
     } else if (type == "openIni") {
         ShellExecuteW(nullptr, L"open", L"notepad.exe", IniPath().c_str(), nullptr, SW_SHOWNORMAL);
     }

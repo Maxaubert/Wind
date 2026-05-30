@@ -26,7 +26,10 @@
   <div class="caption" style="app-region:drag;-webkit-app-region:drag">
     <div class="tbtns" style="app-region:no-drag;-webkit-app-region:no-drag">
       <button class="tbtn" title="Minimize" aria-label="Minimize" on:click={() => windowControl('minimize')}>{@html ic.min}</button>
-      <button class="tbtn close" title="Close" aria-label="Close" on:click={() => windowControl('close')}>{@html ic.close}</button>
+      <!-- Closing onboarding without finishing it quits the whole Wind app (the host signals the
+           magnifier to exit). Completing or skipping instead sets onboarded=1 and goes to Settings,
+           leaving Wind running in the tray. -->
+      <button class="tbtn close" title="Close" aria-label="Close" on:click={() => windowControl('quitWind')}>{@html ic.close}</button>
     </div>
   </div>
   <div class="wizbody">

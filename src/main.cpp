@@ -632,6 +632,12 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     ts.configWatch = FindFirstChangeNotificationW(iniDir.c_str(), FALSE,
         FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_FILE_NAME);
 
+    // Quit-request channel for WindConfig.exe (onboarding close). A window message can't be used:
+    // the deployed Wind.exe is UIAccess, and UIPI silently blocks PostMessage from the non-UIAccess
+    // WindConfig. A named event is a kernel object (not gated by UIPI) and both run as the same user
+    // in the same session, so it works in dev and deployed. Auto-reset, initially unsignaled.
+    HANDLE quitEvent = CreateEventW(nullptr, FALSE, FALSE, L"Local\\Wind_QuitRequest");
+
     HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr,
         CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
     // Auto-detect the display refresh rate so we never assume a fixed rate (the dev's 144Hz).
@@ -649,6 +655,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             DispatchMessageW(&msg);
         }
         if (!running) break;
+        // External quit request (WindConfig onboarding close). Break to the clean shutdown below
+        // (restores cursor, resets zoom, removes the tray icon).
+        if (quitEvent && WaitForSingleObject(quitEvent, 0) == WAIT_OBJECT_0) { running = false; break; }
 
         // Pacing while zoomed:
         //  - dwmFlush: present immediately, then DwmFlush() AFTER the tick aligns us 1:1 with the
@@ -680,6 +689,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     g_tick = nullptr;
     if (timer) CloseHandle(timer);
+    if (quitEvent) CloseHandle(quitEvent);
     if (ts.configWatch && ts.configWatch != INVALID_HANDLE_VALUE) FindCloseChangeNotification(ts.configWatch);
     UnregisterHotKey(hwnd, kQuitHotkeyId);
     UnregisterHotKey(hwnd, kHideCursorHotkeyId);
