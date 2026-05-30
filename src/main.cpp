@@ -491,47 +491,73 @@ static void RestoreInputState() {
 // and only swallows side-buttons anyway. The damaging state (hidden/confined cursor) is undone here.
 static void AtExitRestore() { RestoreInputState(); }
 
-// Guarantee EXACTLY ONE Wind.exe. Signal any existing instance to quit cleanly (named event, crosses
-// UIPI), give it a grace period to tear down, then force-terminate any straggler (a zombie whose
-// message loop is dead). Finally restore input state in case a killed predecessor left it dirty.
-// This makes "launch again" reliably replace a stuck instance instead of stacking a second one -
-// two concurrent Wind processes mean two mouse hooks + two cursor-warp loops, which locks input.
-static void EnforceSingleInstance() {
-    HANDLE ev = OpenEventW(EVENT_MODIFY_STATE, FALSE, L"Local\\Wind_QuitRequest");
-    if (ev) { SetEvent(ev); CloseHandle(ev); }                  // ask it to exit cleanly first
+// One-line diagnostic to %TEMP%\wind_si.log (always on; only the single-instance startup path logs,
+// a few lines per launch). Lets us see exactly what the guard decided when something goes wrong.
+static void SiLog(const char* msg, unsigned long val) {
+    wchar_t p[MAX_PATH]; if (!GetTempPathW(MAX_PATH, p)) return; wcscat_s(p, L"wind_si.log");
+    FILE* f = nullptr; _wfopen_s(&f, p, L"a");
+    if (f) { fprintf(f, "[pid %lu] %s %lu\n", GetCurrentProcessId(), msg, val); fclose(f); }
+}
+
+// Force-kill every OTHER Wind.exe (best effort; OpenProcess may be denied across integrity levels).
+static void TerminateOtherWind() {
     const DWORD self = GetCurrentProcessId();
-    for (int attempt = 0; attempt < 20; ++attempt) {            // up to ~2s
-        bool anyOther = false;
-        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if (snap != INVALID_HANDLE_VALUE) {
-            PROCESSENTRY32W pe{ sizeof(pe) };
-            if (Process32FirstW(snap, &pe)) {
-                do {
-                    if (pe.th32ProcessID != self && _wcsicmp(pe.szExeFile, L"Wind.exe") == 0) {
-                        anyOther = true;
-                        if (attempt >= 5) {                     // grace elapsed: force-kill the straggler
-                            HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, pe.th32ProcessID);
-                            if (h) { TerminateProcess(h, 0); CloseHandle(h); }
-                        }
-                    }
-                } while (Process32NextW(snap, &pe));
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return;
+    PROCESSENTRY32W pe{ sizeof(pe) };
+    if (Process32FirstW(snap, &pe)) {
+        do {
+            if (pe.th32ProcessID != self && _wcsicmp(pe.szExeFile, L"Wind.exe") == 0) {
+                HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, pe.th32ProcessID);
+                SiLog("terminate pid", pe.th32ProcessID);
+                if (h) { BOOL ok = TerminateProcess(h, 0); SiLog("  terminate ok", ok);
+                         if (!ok) SiLog("  terminate err", GetLastError()); CloseHandle(h); }
+                else SiLog("  openprocess err", GetLastError());
             }
-            CloseHandle(snap);
-        }
-        if (!anyOther) break;
-        Sleep(100);
+        } while (Process32NextW(snap, &pe));
     }
-    RestoreInputState();   // heal anything a force-killed predecessor left behind
+    CloseHandle(snap);
+}
+
+// Guarantee EXACTLY ONE Wind.exe via a named mutex we OWN for our lifetime. This is the canonical,
+// integrity-independent guard: the kernel auto-releases the mutex when its owner dies (even on a
+// hard kill -> the next waiter gets WAIT_ABANDONED), so a zombie can NEVER permanently block a
+// relaunch. `mtx` receives the owned handle. Returns false only when another LIVE instance will not
+// yield - the caller then exits WITHOUT installing hooks, because two instances = two mouse hooks +
+// two cursor-warp loops = a system-wide input lock. (The previous kill-only version failed here:
+// TerminateProcess is blocked across the signed UIAccess build's integrity, and it had removed the
+// refuse-to-start backstop, so a second instance proceeded anyway and locked input.)
+static bool AcquireSingleInstance(HANDLE& mtx) {
+    mtx = CreateMutexW(nullptr, FALSE, L"Local\\Wind_Magnifier_SingleInstance");
+    SiLog("createmutex err", GetLastError());
+    if (!mtx) { SiLog("mutex null - proceeding unprotected", 0); return true; }   // rare; don't block
+    DWORD w = WaitForSingleObject(mtx, 0);   // WAIT_ABANDONED = prior owner died holding it -> ours now
+    if (w == WAIT_OBJECT_0 || w == WAIT_ABANDONED) { SiLog("acquired immediately w", w); return true; }
+    SiLog("busy - signaling quit, w", w);
+    HANDLE ev = OpenEventW(EVENT_MODIFY_STATE, FALSE, L"Local\\Wind_QuitRequest");
+    if (ev) { SetEvent(ev); CloseHandle(ev); SiLog("quit event set", 0); }
+    else SiLog("quit event open err", GetLastError());
+    w = WaitForSingleObject(mtx, 3000);                       // wait for it to release on clean exit
+    if (w == WAIT_OBJECT_0 || w == WAIT_ABANDONED) { SiLog("acquired after quit w", w); return true; }
+    SiLog("still busy after quit - terminating, w", w);
+    TerminateOtherWind();                                     // fallback: kill the straggler
+    w = WaitForSingleObject(mtx, 2000);
+    if (w == WAIT_OBJECT_0 || w == WAIT_ABANDONED) { SiLog("acquired after terminate w", w); return true; }
+    SiLog("REFUSING TO START - another instance alive, w", w);
+    CloseHandle(mtx); mtx = nullptr;
+    return false;                                             // never stack a second hook/cursor loop
 }
 
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
-    // Before claiming ownership: terminate any other Wind.exe (incl. zombies) and heal input state,
-    // so there is never more than one instance and a stuck predecessor can't hold the cursor. Then
-    // take the single-instance mutex purely as a fast-path marker (the kill above already cleared
-    // the field, so this normally succeeds). atexit installs the always-restore net for CRT exits.
-    EnforceSingleInstance();
+    // Heal any input state a previous (possibly killed) Wind left dirty, then claim SOLE ownership.
+    // If another live instance refuses to yield, exit WITHOUT installing hooks (two instances would
+    // mean two mouse hooks + two cursor loops = input lock). atexit is the always-restore net for
+    // CRT exit paths so no exit can leave the cursor hidden/confined.
+    SiLog("=== launch ===", 0);
+    RestoreInputState();
+    HANDLE mtx = nullptr;
+    if (!AcquireSingleInstance(mtx)) { RestoreInputState(); return 0; }
     atexit(AtExitRestore);
-    HANDLE mtx = CreateMutexW(nullptr, TRUE, L"Wind_Magnifier_SingleInstance");
 
     // Resolve magnifier.ini next to the exe (not the launch cwd).
     wchar_t exePath[MAX_PATH];
@@ -752,6 +778,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     renderEngine.shutdown();   // restores cursor + tears down D3D/overlay
     g_input.stop();
     Tray::Remove();
-    ReleaseMutex(mtx);
+    if (mtx) { ReleaseMutex(mtx); CloseHandle(mtx); }
     return 0;
 }
