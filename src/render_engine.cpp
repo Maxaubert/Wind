@@ -110,12 +110,17 @@ struct RenderEngine::State {
     bool magInited = false;
     bool cursorHidden = false;
     bool ready = false;
+    bool deviceLost = false;                   // set when Present/AcquireNextFrame reports DEVICE_REMOVED/RESET
 
     // Find the output on our D3D device's adapter whose DeviceName matches `device`. Returns an
     // AddRef'd output, or (if fallbackToFirst) output 0, or nullptr. Used to capture a specific
     // monitor and to validate a retarget before touching the window/swapchain.
     IDXGIOutput* selectOutput(const wchar_t* deviceName, bool fallbackToFirst);
 
+    // Create the D3D11 device and everything that hangs off it (swapchain+rtv, shaders, buffers,
+    // blend/sampler states, desktop-copy texture, Desktop Duplication). Shared by initialize() and
+    // the device-lost recovery path so the two can't drift. The HWND must already exist.
+    bool buildDeviceResources();
     bool buildPresent();          // create the blt-model swapchain + rtv
     void releasePresent();        // drop rtv + swapchain (device kept)
     bool acquireBackbufferRtv();  // (re)create rtv from the swapchain's back buffer (buffer 0)
@@ -323,6 +328,10 @@ bool RenderEngine::State::capture(const RECT& view, bool crop) {
         HRESULT hr = dupl->AcquireNextFrame(to, &fi, &res);
         if (hr == DXGI_ERROR_WAIT_TIMEOUT) { SafeRelease(res); if (gotThisCall) break; continue; }
         if (hr == DXGI_ERROR_ACCESS_LOST) { SafeRelease(res); dupl.Reset(); return gotThisCall || haveDesktop; }
+        if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
+            SafeRelease(res); deviceLost = true; RLog("capture: device lost hr=0x%08lX", (unsigned long)hr);
+            return gotThisCall || haveDesktop;
+        }
         if (FAILED(hr)) { SafeRelease(res); return haveDesktop; }
 
         ID3D11Texture2D* tex = nullptr;
@@ -372,6 +381,29 @@ static LRESULT CALLBACK OverlayProc(HWND h, UINT m, WPARAM w, LPARAM l) {
 RenderEngine::RenderEngine() : s_(new State()) {}
 RenderEngine::~RenderEngine() { shutdown(); delete s_; s_ = nullptr; }
 bool RenderEngine::ready() const { return s_ && s_->ready; }
+bool RenderEngine::deviceLost() const { return s_ && s_->deviceLost; }
+
+bool RenderEngine::recoverDeviceLost() {
+    if (!s_ || !s_->hwnd) return false;
+    // Release every device-dependent resource (the old device is dead), then rebuild the whole set
+    // against a fresh device. The HWND, monitor geometry, and zoom state are untouched. Cursor state
+    // is reset so updateCursorTexture re-uploads against the new device on the next frame.
+    s_->ready = false;
+    s_->dupl.Reset();
+    s_->desktopCopy.Reset(); s_->desktopSRV.Reset();
+    s_->cursorTex.Reset(); s_->cursorSRV.Reset(); s_->cursorReady = false; s_->lastCursor = nullptr;
+    s_->vs.Reset(); s_->ps.Reset(); s_->cvs.Reset(); s_->cps.Reset();
+    s_->cb.Reset(); s_->ccb.Reset();
+    s_->blend.Reset(); s_->blendInvert.Reset(); s_->sampLinear.Reset(); s_->sampPoint.Reset();
+    s_->releasePresent();              // rtv + swapchain
+    s_->ctx.Reset(); s_->device.Reset();
+    s_->haveDesktop = false; s_->freshCapture = true;
+    if (!s_->buildDeviceResources()) { RLog("recoverDeviceLost: rebuild failed (will retry)"); return false; }
+    ShowWindow(s_->hwnd, SW_SHOWNOACTIVATE);   // re-show in case the swapchain recreate hid it
+    s_->ready = true;
+    RLog("recoverDeviceLost: rebuilt OK");
+    return true;
+}
 
 void RenderEngine::debugInfo(int& screenW, int& screenH, int& curW, int& curH, int& hotX, int& hotY) const {
     screenW = s_->sw; screenH = s_->sh; curW = s_->curW; curH = s_->curH; hotX = s_->hotX; hotY = s_->hotY;
@@ -435,50 +467,65 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     // invisible to DDA, so we always capture the real desktop beneath it.
     SetWindowDisplayAffinity(s_->hwnd, WDA_EXCLUDEFROMCAPTURE);
 
+    if (!s_->buildDeviceResources()) return false;
+
+    // Show the window now (invisible at alpha 0). It stays shown for the process lifetime; the
+    // overlay is transparent + click-through + capture-excluded + no-activate, so an always-on
+    // invisible window doesn't interfere with apps or games beneath it.
+    ShowWindow(s_->hwnd, SW_SHOWNOACTIVATE);
+
+    s_->ready = true;
+    return true;
+}
+
+// Build the D3D11 device + all device-dependent resources. Extracted from initialize() so the
+// device-lost recovery path rebuilds exactly the same set. Assumes s_->hwnd already exists and the
+// geometry (sw/sh/origin/targetDevice/wantHdrTonemap) is set.
+bool RenderEngine::State::buildDeviceResources() {
     // --- D3D11 device ---
     D3D_FEATURE_LEVEL got{};
     const D3D_FEATURE_LEVEL want[] = { D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0 };
     HRESULT hr = D3D11CreateDevice(
         nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
         D3D11_CREATE_DEVICE_BGRA_SUPPORT, want, 2, D3D11_SDK_VERSION,
-        s_->device.ReleaseAndGetAddressOf(), &got, s_->ctx.ReleaseAndGetAddressOf());
-    if (FAILED(hr)) { RLog("initialize: D3D11CreateDevice failed hr=0x%08lX", (unsigned long)hr); return false; }
+        device.ReleaseAndGetAddressOf(), &got, ctx.ReleaseAndGetAddressOf());
+    if (FAILED(hr)) { RLog("buildDeviceResources: D3D11CreateDevice failed hr=0x%08lX", (unsigned long)hr); return false; }
 
-    if (!s_->buildPresent()) { RLog("initialize: buildPresent failed"); return false; }
+    if (!buildPresent()) { RLog("buildDeviceResources: buildPresent failed"); return false; }
 
     // --- Desktop copy texture (SRV-able; DDA frames are copied into this). Starts BGRA8;
     //     capture() re-creates it to match the acquired format (e.g. FP16 scRGB on HDR). ---
-    if (!s_->ensureDesktopCopy(DXGI_FORMAT_B8G8R8A8_UNORM)) { RLog("initialize: ensureDesktopCopy failed"); return false; }
+    if (!ensureDesktopCopy(DXGI_FORMAT_B8G8R8A8_UNORM)) { RLog("buildDeviceResources: ensureDesktopCopy failed"); return false; }
 
     // --- Magnify shader pipeline ---
     ID3DBlob* vsb = CompileShader(kMagHLSL, "VSMain", "vs_5_0");
     ID3DBlob* psb = CompileShader(kMagHLSL, "PSMain", "ps_5_0");
-    if (!vsb || !psb) { RLog("initialize: magnify shader compile failed"); SafeRelease(vsb); SafeRelease(psb); return false; }
-    hr = s_->device->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, s_->vs.ReleaseAndGetAddressOf());
-    HRESULT hr2 = s_->device->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, s_->ps.ReleaseAndGetAddressOf());
+    if (!vsb || !psb) { RLog("buildDeviceResources: magnify shader compile failed"); SafeRelease(vsb); SafeRelease(psb); return false; }
+    hr = device->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, vs.ReleaseAndGetAddressOf());
+    HRESULT hr2 = device->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, ps.ReleaseAndGetAddressOf());
     SafeRelease(vsb); SafeRelease(psb);
-    if (FAILED(hr) || FAILED(hr2)) { RLog("initialize: magnify shader create failed hr=0x%08lX hr2=0x%08lX", (unsigned long)hr, (unsigned long)hr2); return false; }
+    if (FAILED(hr) || FAILED(hr2)) { RLog("buildDeviceResources: magnify shader create failed hr=0x%08lX hr2=0x%08lX", (unsigned long)hr, (unsigned long)hr2); return false; }
 
     D3D11_BUFFER_DESC cbd{};
     cbd.ByteWidth = sizeof(MagCB);
     cbd.Usage = D3D11_USAGE_DEFAULT;
     cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    if (FAILED(s_->device->CreateBuffer(&cbd, nullptr, s_->cb.ReleaseAndGetAddressOf()))) { RLog("initialize: CreateBuffer(magnify cb) failed"); return false; }
+    if (FAILED(device->CreateBuffer(&cbd, nullptr, cb.ReleaseAndGetAddressOf()))) { RLog("buildDeviceResources: CreateBuffer(magnify cb) failed"); return false; }
 
     // --- Cursor shader pipeline ---
     ID3DBlob* cvsb = CompileShader(kCursorHLSL, "VSMain", "vs_5_0");
     ID3DBlob* cpsb = CompileShader(kCursorHLSL, "PSMain", "ps_5_0");
-    if (!cvsb || !cpsb) { RLog("initialize: cursor shader compile failed"); SafeRelease(cvsb); SafeRelease(cpsb); return false; }
-    HRESULT hr3 = s_->device->CreateVertexShader(cvsb->GetBufferPointer(), cvsb->GetBufferSize(), nullptr, s_->cvs.ReleaseAndGetAddressOf());
-    HRESULT hr4 = s_->device->CreatePixelShader(cpsb->GetBufferPointer(), cpsb->GetBufferSize(), nullptr, s_->cps.ReleaseAndGetAddressOf());
+    if (!cvsb || !cpsb) { RLog("buildDeviceResources: cursor shader compile failed"); SafeRelease(cvsb); SafeRelease(cpsb); return false; }
+    HRESULT hr3 = device->CreateVertexShader(cvsb->GetBufferPointer(), cvsb->GetBufferSize(), nullptr, cvs.ReleaseAndGetAddressOf());
+    HRESULT hr4 = device->CreatePixelShader(cpsb->GetBufferPointer(), cpsb->GetBufferSize(), nullptr, cps.ReleaseAndGetAddressOf());
     SafeRelease(cvsb); SafeRelease(cpsb);
-    if (FAILED(hr3) || FAILED(hr4)) { RLog("initialize: cursor shader create failed hr3=0x%08lX hr4=0x%08lX", (unsigned long)hr3, (unsigned long)hr4); return false; }
+    if (FAILED(hr3) || FAILED(hr4)) { RLog("buildDeviceResources: cursor shader create failed hr3=0x%08lX hr4=0x%08lX", (unsigned long)hr3, (unsigned long)hr4); return false; }
 
     D3D11_BUFFER_DESC ccbd{};
     ccbd.ByteWidth = 16;   // float2 posClip + float2 sizeClip
     ccbd.Usage = D3D11_USAGE_DEFAULT;
     ccbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    if (FAILED(s_->device->CreateBuffer(&ccbd, nullptr, s_->ccb.ReleaseAndGetAddressOf()))) { RLog("initialize: CreateBuffer(cursor cb) failed"); return false; }
+    if (FAILED(device->CreateBuffer(&ccbd, nullptr, ccb.ReleaseAndGetAddressOf()))) { RLog("buildDeviceResources: CreateBuffer(cursor cb) failed"); return false; }
 
     D3D11_BLEND_DESC bd{};
     bd.RenderTarget[0].BlendEnable = TRUE;
@@ -489,7 +536,7 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     bd.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
     bd.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
     bd.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
-    if (FAILED(s_->device->CreateBlendState(&bd, s_->blend.ReleaseAndGetAddressOf()))) { RLog("initialize: CreateBlendState(alpha) failed"); return false; }
+    if (FAILED(device->CreateBlendState(&bd, blend.ReleaseAndGetAddressOf()))) { RLog("buildDeviceResources: CreateBlendState(alpha) failed"); return false; }
 
     // Invert blend for I-beam-style cursors: result = src*(1-dest) + dest*(1-src). A white
     // glyph pixel (src=1) becomes 1-dest (inverts the background); black (src=0) leaves dest.
@@ -503,29 +550,23 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     ib.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
     ib.RenderTarget[0].RenderTargetWriteMask =
         D3D11_COLOR_WRITE_ENABLE_RED | D3D11_COLOR_WRITE_ENABLE_GREEN | D3D11_COLOR_WRITE_ENABLE_BLUE;
-    if (FAILED(s_->device->CreateBlendState(&ib, s_->blendInvert.ReleaseAndGetAddressOf()))) { RLog("initialize: CreateBlendState(invert) failed"); return false; }
+    if (FAILED(device->CreateBlendState(&ib, blendInvert.ReleaseAndGetAddressOf()))) { RLog("buildDeviceResources: CreateBlendState(invert) failed"); return false; }
 
     D3D11_SAMPLER_DESC samp{};
     samp.AddressU = samp.AddressV = samp.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
     samp.ComparisonFunc = D3D11_COMPARISON_NEVER;
     samp.MaxLOD = D3D11_FLOAT32_MAX;
     samp.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
-    s_->device->CreateSamplerState(&samp, s_->sampLinear.ReleaseAndGetAddressOf());
+    device->CreateSamplerState(&samp, sampLinear.ReleaseAndGetAddressOf());
     samp.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
-    s_->device->CreateSamplerState(&samp, s_->sampPoint.ReleaseAndGetAddressOf());
-    if (!s_->sampLinear || !s_->sampPoint) { RLog("initialize: CreateSamplerState failed"); return false; }
+    device->CreateSamplerState(&samp, sampPoint.ReleaseAndGetAddressOf());
+    if (!sampLinear || !sampPoint) { RLog("buildDeviceResources: CreateSamplerState failed"); return false; }
 
     // --- Desktop Duplication ---
-    if (!s_->recreateDupl()) { RLog("initialize: recreateDupl failed"); return false; }
-    if (s_->capFp16) s_->sdrWhiteNits = GetSDRWhiteNits();
-    RLog("initialize done: capFp16=%d sdrWhiteNits=%.1f", (int)s_->capFp16, s_->sdrWhiteNits);
-
-    // Show the window now (invisible at alpha 0). It stays shown for the process lifetime; the
-    // overlay is transparent + click-through + capture-excluded + no-activate, so an always-on
-    // invisible window doesn't interfere with apps or games beneath it.
-    ShowWindow(s_->hwnd, SW_SHOWNOACTIVATE);
-
-    s_->ready = true;
+    if (!recreateDupl()) { RLog("buildDeviceResources: recreateDupl failed"); return false; }
+    if (capFp16) sdrWhiteNits = GetSDRWhiteNits();
+    RLog("buildDeviceResources done: capFp16=%d sdrWhiteNits=%.1f", (int)capFp16, sdrWhiteNits);
+    deviceLost = false;
     return true;
 }
 
@@ -776,7 +817,7 @@ static bool overlayDisplaced(HWND hwnd) {
 }
 
 bool RenderEngine::renderFrame(const RenderFrameParams& p) {
-    if (!s_->ready) return false;
+    if (!s_->ready || s_->deviceLost) return false;   // device gone: skip until recoverDeviceLost()
     // Keep the overlay above everything (transparent + click-through + capture-excluded, so
     // being on top is safe; if we sit below an always-on-top app overlay like RTSS it draws a
     // second, unmagnified copy over our view). Re-assert ONLY when actually displaced, NOT every
@@ -801,7 +842,12 @@ bool RenderEngine::renderFrame(const RenderFrameParams& p) {
     s_->render(p);
     // p.vsync = (cfg.vsync && !cfg.dwmFlush): sync interval 1 locks the present to the refresh;
     // 0 presents immediately and the caller paces via DwmFlush or the timer.
-    return SUCCEEDED(s_->swap->Present(p.vsync ? 1 : 0, 0));
+    HRESULT hr = s_->swap->Present(p.vsync ? 1 : 0, 0);
+    if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
+        s_->deviceLost = true; RLog("present: device lost hr=0x%08lX", (unsigned long)hr);
+        return false;
+    }
+    return SUCCEEDED(hr);
 }
 
 // Render one frame and dump it WITHOUT presenting, so the PNG reflects exactly the drawn

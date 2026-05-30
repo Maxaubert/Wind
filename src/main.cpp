@@ -666,6 +666,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     LARGE_INTEGER due; due.QuadPart = -(10000000LL / pacedHz);
 
     bool running = true;
+    unsigned long long nextRecoverMs = 0;   // device-lost recovery backoff gate (GetTickCount64)
     while (running) {
         MSG msg;
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
@@ -677,6 +678,21 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         // External quit request (WindConfig onboarding close). Break to the clean shutdown below
         // (restores cursor, resets zoom, removes the tray icon).
         if (quitEvent && WaitForSingleObject(quitEvent, 0) == WAIT_OBJECT_0) { running = false; break; }
+
+        // Device-lost recovery (GPU TDR, driver update, adapter change). renderFrame() reported the
+        // D3D device was removed; rebuild it on a backoff so we don't spin (the driver may take a
+        // moment to return). Crucially, un-hide the OS cursor first so the user is never left without
+        // a pointer while we are unable to draw the magnified one. Skip the normal tick this iteration.
+        if (renderEngine.deviceLost()) {
+            renderEngine.hideSystemCursor(false);   // restore the real cursor while we can't render
+            unsigned long long now = GetTickCount64();
+            if (now >= nextRecoverMs) {
+                if (!renderEngine.recoverDeviceLost()) nextRecoverMs = now + 500;   // retry in 0.5s
+                else { ts.prevLvl = 1.0; ts.zoom = ZoomController(1.0, ts.cfg.maxLevel); }  // back to 1x, clean
+            }
+            Sleep(50);
+            continue;
+        }
 
         // Pacing while zoomed:
         //  - dwmFlush: present immediately, then DwmFlush() AFTER the tick aligns us 1:1 with the

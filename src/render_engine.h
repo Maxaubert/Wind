@@ -59,6 +59,14 @@ public:
     // zoom-in so a stale cached frame from a previous session isn't shown for one frame
     // (e.g. the old window flashing after an alt-tab).
     void invalidateCapture();
+    // True if a Present/AcquireNextFrame reported the D3D device was removed/reset (GPU TDR, driver
+    // update, adapter change). The caller should stop rendering and call recoverDeviceLost() (with
+    // backoff). Until recovery succeeds, renderFrame() is a no-op.
+    bool deviceLost() const;
+    // Rebuild the D3D device and all device-dependent resources after a device-lost. Returns true on
+    // success (rendering can resume). Cheap to retry; the caller paces retries (it can take a moment
+    // for the driver to come back). Does NOT touch the HWND or the hidden OS cursor.
+    bool recoverDeviceLost();
     void hideSystemCursor(bool hide);              // MagShowSystemCursor wrapper + safe-restore net
     void shutdown();                               // restore cursor, destroy everything
     bool ready() const;
