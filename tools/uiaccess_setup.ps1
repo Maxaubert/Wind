@@ -73,65 +73,15 @@ try {
     Copy-Item $uiSrc $uiDst -Recurse -Force
     Write-Output "deployed: Wind.exe, WindConfig.exe, ui\dist\"
 
-    Write-Output "=== 5. magnifier.ini: copy from dev if present, else write a sensible default ==="
-    # The deployed copy needs zorderBand=16 to engage the UIAccess high z-band. Preserve any other
-    # customizations by copying the dev ini and surgically setting zorderBand. If there is no dev
-    # ini, write a minimal default (Wind.exe's LoadConfig will fill in the rest on first run).
+    Write-Output "=== 5. magnifier.ini: NOT deployed - the app owns the single copy in %LOCALAPPDATA% ==="
+    # We intentionally do NOT write a magnifier.ini into Program Files. Wind.exe resolves its ini to
+    # %LOCALAPPDATA%\Wind\magnifier.ini (Program Files is read-only for the non-admin app/config UI),
+    # and LoadConfig creates it from the built-in defaults on first launch - which already ship
+    # zorderBand=16 and onboarded=0. So there is exactly one ini to manage, in %LOCALAPPDATA%. Remove
+    # any stale Program Files copy left by an older deploy so it can't cause confusion (it is never read).
     $iniDst = "$dst\magnifier.ini"
-    $iniSrc = "$root\magnifier.ini"
-    if (Test-Path $iniSrc) {
-        Copy-Item $iniSrc $iniDst -Force
-        $content = Get-Content $iniDst -Raw
-        if ($content -match '(?m)^zorderBand=') {
-            $content = [regex]::Replace($content, '(?m)^zorderBand=.*$', 'zorderBand=16')
-        } else {
-            if (-not $content.EndsWith("`n")) { $content += "`n" }
-            $content += "zorderBand=16`n"
-        }
-        # Make sure onboarded=1 so the Program Files copy does not re-launch onboarding every start.
-        if ($content -match '(?m)^onboarded=') {
-            $content = [regex]::Replace($content, '(?m)^onboarded=.*$', 'onboarded=1')
-        } else {
-            $content += "onboarded=1`n"
-        }
-        Set-Content -Path $iniDst -Value $content -Encoding ASCII -NoNewline
-        Write-Output "copied dev magnifier.ini and forced zorderBand=16 + onboarded=1"
-    } elseif (-not (Test-Path $iniDst)) {
-        $ini = @"
-; Wind magnifier config (deployed copy). Edit and save; changes apply within ~1s.
-zoomInButton=2
-zoomOutButton=1
-zoomInVk=33
-zoomOutVk=34
-recenterVk=0
-maxLevel=8.0
-zoomInSpeed=1.0
-zoomOutSpeed=1.0
-smoothZoom=0
-smoothZoomAccel=3.0
-smoothZoomRamp=0.6
-cursorSensitivity=1.0
-cursorSmoothing=0.8
-cursorScaleWithZoom=1
-cursorVisibility=auto
-bilinear=1
-sharpness=0.0
-brightness=1.0
-hdrTonemap=1
-vsync=1
-dwmFlush=0
-multiMonitor=1
-cropCapture=1
-; zorderBand=16 covers Start/taskbar/tray (this signed Program Files build engages UIAccess for it).
-zorderBand=16
-; onboarded=1 so the deployed copy does not auto-launch the onboarding flow.
-onboarded=1
-"@
-        Set-Content -Path $iniDst -Value $ini -Encoding ASCII
-        Write-Output "wrote default magnifier.ini (no dev ini found)"
-    } else {
-        Write-Output "kept existing deployed magnifier.ini"
-    }
+    if (Test-Path $iniDst) { Remove-Item $iniDst -Force; Write-Output "removed stale Program Files magnifier.ini" }
+    else { Write-Output "no Program Files ini (correct - it lives in %LOCALAPPDATA%)" }
 
     Write-Output "=== 6. verify deployed signature ==="
     $v = Get-AuthenticodeSignature "$dst\Wind.exe"

@@ -3,10 +3,11 @@
 // Returns the exe's directory if it is writable (dev workflow, repo dir), else
 // %LOCALAPPDATA%\Wind\magnifier.ini (deployed Program Files install, which is read-only for
 // non-admin processes - the config UI is normal user and would silently fail every setConfig
-// otherwise). On first run in the LOCALAPPDATA case, seeds the user copy from the read-only
-// template in the exe dir if one exists, so post-install customizations (zorderBand=16) carry
-// over. Same resolution is used by Wind.exe and WindConfig.exe so they always read/write the
-// same file.
+// otherwise). The deployed build ships NO ini in Program Files (the deploy script no longer writes
+// one), so in the LOCALAPPDATA case LoadConfig creates the file from the built-in defaults on first
+// launch - which already include zorderBand=16 and onboarded=0. If an exe-dir template DOES exist
+// (e.g. a portable/dev layout), it is still used as a seed. Same resolution is used by Wind.exe and
+// WindConfig.exe so they always read/write the same single file.
 #pragma once
 #include <string>
 
