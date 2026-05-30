@@ -1,14 +1,18 @@
 <script>
+  import { onMount } from 'svelte';
   import { setConfig, windowControl } from './bridge.js';
   import { ic } from './lib/icons.js';
   import KeybindCapture from './lib/KeybindCapture.svelte';
   export let onDone;
   let cur = 0;
   const N = 3;
-  // Keybinds start blank (Unbound). The KeybindCapture below writes setConfig live as the user
-  // captures, so untouched bindings keep whatever the ini already had (defaults for a fresh ini).
+  // Keybinds start blank (Unbound) and are ACTUALLY cleared in the ini on mount, not just shown as
+  // blank: a previous halted onboarding attempt may have written real keys, and showing "Unbound"
+  // while those stay live underneath is misleading. Writing 0 makes the display match reality; the
+  // KeybindCapture below then writes setConfig live as the user captures.
   let keys = { zoomInButton:'0', zoomInVk:'0', zoomOutButton:'0', zoomOutVk:'0',
                zoomInMods:'0', zoomOutMods:'0' };
+  onMount(() => { for (const k of Object.keys(keys)) setConfig(k, keys[k]); });
   function live(patch) {
     for (const k of Object.keys(patch)) setConfig(k, patch[k]);
     keys = { ...keys, ...patch };
