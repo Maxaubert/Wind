@@ -4,9 +4,9 @@ using namespace wind;
 
 TEST_CASE("defaults when text is empty") {
     Config c = ParseConfig("");
-    CHECK(c.zoomInButton  == 2);   // XBUTTON2
-    CHECK(c.zoomOutButton == 1);   // XBUTTON1
-    CHECK(c.maxLevel == doctest::Approx(8.0));
+    CHECK(c.zoomInButton  == 0);   // shipped unbound (onboarding captures it)
+    CHECK(c.zoomOutButton == 0);   // shipped unbound
+    CHECK(c.maxLevel == doctest::Approx(12.0));
     CHECK(c.diagnostics == 0);
 }
 TEST_CASE("parses renderer knobs") {
@@ -22,16 +22,16 @@ TEST_CASE("renderer knobs have sane defaults") {
     CHECK(c.cursorScaleWithZoom == 1);
     CHECK(c.bilinear == 1);
     CHECK(c.sharpness == doctest::Approx(0.0));   // off by default
-    CHECK(c.cursorSmoothing == doctest::Approx(0.8));
-    CHECK(c.zorderBand == 0);                  // normal topmost by default
+    CHECK(c.cursorSmoothing == doctest::Approx(0.4));
+    CHECK(c.zorderBand == 16);                 // shipped 16 (UIAccess high band; falls back if unavailable)
     CHECK(c.brightness == doctest::Approx(1.0));
     CHECK(c.hdrTonemap == 1);                  // on by default (no-op on SDR)
     CHECK(c.cursorVisibility == "auto");       // follow the focused app by default
     CHECK(c.vsync == 1);                       // vsync on by default
     CHECK(c.dwmFlush == 0);                     // plain vsync pacing by default (fewer stutters)
-    CHECK(c.multiMonitor == 1);                // follow the cursor's monitor by default
+    CHECK(c.multiMonitor == 0);                // shipped primary-only (follow-cursor opt-in)
     CHECK(c.cropCapture == 1);                 // crop the copy on full repaints by default
-    CHECK(c.smoothZoom == 0);                  // linear (current) by default
+    CHECK(c.smoothZoom == 1);                  // shipped on (eased-in zoom)
     CHECK(c.zoomInSpeed == doctest::Approx(1.0));
     CHECK(c.zoomOutSpeed == doctest::Approx(1.0));
     CHECK(c.smoothZoomAccel == doctest::Approx(3.0));
@@ -44,8 +44,8 @@ TEST_CASE("vsync and dwmFlush can be set") {
 }
 TEST_CASE("keyboard zoom defaults PageUp/PageDown; recenter unbound; all parseable") {
     Config d = ParseConfig("");
-    CHECK(d.zoomInVk == 33);    // VK_PRIOR (PageUp)
-    CHECK(d.zoomOutVk == 34);   // VK_NEXT  (PageDown)
+    CHECK(d.zoomInVk == 0);     // shipped unbound (onboarding captures it)
+    CHECK(d.zoomOutVk == 0);
     CHECK(d.recenterVk == 0);
     Config c = ParseConfig("zoomInVk=33\nzoomOutVk=34\nrecenterVk=112\n");
     CHECK(c.zoomInVk == 33);
@@ -86,7 +86,7 @@ TEST_CASE("parses overrides and ignores comments/blank lines") {
 }
 TEST_CASE("malformed lines are ignored, keep defaults") {
     Config c = ParseConfig("garbage line\nmaxLevel\n=5\n");
-    CHECK(c.maxLevel == doctest::Approx(8.0));
+    CHECK(c.maxLevel == doctest::Approx(12.0));
 }
 TEST_CASE("multiMonitor can be set") {
     CHECK(ParseConfig("multiMonitor=0\n").multiMonitor == 0);

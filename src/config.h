@@ -2,13 +2,13 @@
 #include <string>
 namespace wind {
 struct Config {
-    int    zoomInButton     = 2;     // 1 = XBUTTON1 (back), 2 = XBUTTON2 (forward)
-    int    zoomOutButton    = 1;
+    int    zoomInButton     = 0;     // 1 = XBUTTON1 (back), 2 = XBUTTON2 (forward); 0 = unbound
+    int    zoomOutButton    = 0;     // shipped unbound - onboarding captures the user's choice
     // Keyboard hold-to-zoom (Virtual-Key codes; 0 = unbound). Polled via GetAsyncKeyState and
     // OR-combined with the mouse side-buttons, so the app is usable without side-buttons.
     // Default: PageUp (0x21=33) zoom in, PageDown (0x22=34) zoom out.
-    int    zoomInVk         = 33;    // VK_PRIOR (PageUp)
-    int    zoomOutVk        = 34;    // VK_NEXT  (PageDown)
+    int    zoomInVk         = 0;     // shipped unbound (0); onboarding captures the user's choice
+    int    zoomOutVk        = 0;
     // Optional alternate keyboard binding (one per direction). OR-combined with the primary
     // button/key so a user can have a mouse side-button AND a keyboard fallback. 0 = unbound.
     int    zoomInVk2        = 0;
@@ -28,14 +28,14 @@ struct Config {
     // uses the same bit layout as the zoom combos.
     int    hideCursorVk     = 0;
     int    hideCursorMods   = 0;
-    double maxLevel         = 8.0;   // how FAR you can zoom (does not affect zoom SPEED)
+    double maxLevel         = 12.0;  // how FAR you can zoom (does not affect zoom SPEED)
     // --- Zoom experience (see docs/superpowers/specs/2026-05-26-configurable-zoom-design.md) ---
     // Per-direction rate multipliers (1.0 = default speed); apply in BOTH linear and smooth modes.
     // Speed is independent of maxLevel (a fixed doublings/sec base inside ZoomController).
     double zoomInSpeed  = 1.0;       // 0.25-4.0
     double zoomOutSpeed = 1.0;       // 0.25-4.0
-    // Smooth zoom: 0 = linear/constant (default); 1 = zoom-IN soft-starts (eases up to linear).
-    int    smoothZoom = 0;
+    // Smooth zoom: 0 = linear/constant; 1 = zoom-IN soft-starts (eases up to linear). Shipped on.
+    int    smoothZoom = 1;
     // Smooth ease-in depth: zoom-in starts at zoomInSpeed/smoothZoomAccel and climbs to zoomInSpeed
     // (the linear rate, never exceeded). Bigger = slower start. >1 (1 = no ease-in). 1.0-8.0.
     double smoothZoomAccel = 3.0;
@@ -62,8 +62,8 @@ struct Config {
     // is then scaled by this (1.0 = exact match, the default); it also scales the raw-input pan while
     // a game has the cursor locked (relative-mouse mode).
     double cursorSensitivity = 1.0;
-    double cursorSmoothing = 0.8;    // light inertia on the pan: 0 = off, higher = smoother/laggier
-                                     // (0.8 default eases the 1px-step jitter visible at high zoom)
+    double cursorSmoothing = 0.4;    // light inertia on the pan: 0 = off, higher = smoother/laggier
+                                     // (0.4 shipped: light smoothing, less lag than 0.8)
     int    cursorScaleWithZoom = 1;  // 1 = draw the cursor scaled by zoom, 0 = native size
     // Cursor visibility while zoomed: "auto" = follow the focused app (don't draw a cursor
     // when a game hides its own via ShowCursor(FALSE); detected with GetCursorInfo's
@@ -76,7 +76,9 @@ struct Config {
     double sharpness = 0.0;
     // z-order band for the overlay (needs the UIAccess build, run from Program Files):
     // 0 = normal topmost; 16 = ZBID_SYSTEM_TOOLS (above the shell, covers Start/taskbar/tray).
-    int    zorderBand = 0;
+    // Shipped 16: engages on the deployed UIAccess build; gracefully falls back to a normal topmost
+    // window (band 0) on a non-deployed/dev run where CreateWindowInBand can't use the high band.
+    int    zorderBand = 16;
     // Output brightness multiplier for the magnified view. 1.0 = unchanged. Hot-reloadable.
     double brightness = 1.0;
     // HDR->SDR tonemap. Only engages when Windows HDR is actually on (advancedColorEnabled);
@@ -86,7 +88,7 @@ struct Config {
     // Multi-monitor: 1 (default) = on each zoom-in, magnify whichever monitor the cursor is
     // on; 0 = legacy single-monitor behavior (primary monitor only). Hot-reloadable (applies
     // on the next zoom-in). Kill-switch for the multi-monitor path.
-    int    multiMonitor = 1;
+    int    multiMonitor = 0;
     // Capture optimization: 1 (default) = when the captured desktop does a near-full repaint (a
     // game), copy only the magnified source region into the cache instead of the whole frame (cuts
     // the GPU copy roughly by zoom^2 at 4K HDR). Small desktop changes are still copied in full, so
