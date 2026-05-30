@@ -25,13 +25,14 @@ if /i "%1"=="test" goto :test
 if /i "%1"=="check" goto :check
 if /i "%1"=="uiaccess" goto :uiaccess
 if /i "%1"=="config" goto :config
+if /i "%1"=="spike" goto :spike
 
 rem --- App build (normal: uiAccess=false, runs from anywhere) ----------------
 cl /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE ^
    src\*.cpp ^
    /Fe:Wind.exe ^
    /link Magnification.lib Dwmapi.lib user32.lib shell32.lib gdi32.lib ^
-   d3d11.lib dxgi.lib dxguid.lib d3dcompiler.lib windowscodecs.lib ole32.lib ^
+   d3d11.lib dxgi.lib dxguid.lib d3dcompiler.lib windowscodecs.lib ole32.lib dcomp.lib ^
    /MANIFEST:EMBED /MANIFESTUAC:NO /MANIFESTINPUT:Wind.manifest /SUBSYSTEM:WINDOWS
 exit /b %errorlevel%
 
@@ -43,7 +44,7 @@ cl /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE ^
    src\*.cpp ^
    /Fe:Wind.exe ^
    /link Magnification.lib Dwmapi.lib user32.lib shell32.lib gdi32.lib ^
-   d3d11.lib dxgi.lib dxguid.lib d3dcompiler.lib windowscodecs.lib ole32.lib ^
+   d3d11.lib dxgi.lib dxguid.lib d3dcompiler.lib windowscodecs.lib ole32.lib dcomp.lib ^
    /MANIFEST:EMBED /MANIFESTUAC:NO /MANIFESTINPUT:Wind.uiaccess.manifest /SUBSYSTEM:WINDOWS
 exit /b %errorlevel%
 
@@ -68,7 +69,7 @@ rem --- Test build (pure-logic sources only; no <windows.h>) -----------------
 rem /wd5285 silences a known doctest 2.4.11 header warning under MSVC /W4.
 cl /nologo /std:c++17 /EHsc /W4 /wd5285 /DWIND_TESTS /I third_party ^
    tests\*.cpp ^
-   src\transform.cpp src\zoom_controller.cpp src\config.cpp src\cursor_mapper.cpp src\lock_detector.cpp src\config_ui\ini_edit.cpp ^
+   src\transform.cpp src\zoom_controller.cpp src\config.cpp src\cursor_mapper.cpp src\lock_detector.cpp src\present_policy.cpp src\config_ui\ini_edit.cpp ^
    /Fe:wind_tests.exe
 if errorlevel 1 exit /b 1
 "%ROOT%wind_tests.exe"
@@ -77,4 +78,27 @@ exit /b %errorlevel%
 rem --- Compile-only check (no link; verifies all sources compile) -----------
 :check
 cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c src\*.cpp
+exit /b %errorlevel%
+
+rem --- Present spike harness (tools\present_spike): clickprobe.exe + harness.exe -----
+rem    Standalone DComp/blt present experiment for issue #69. Not part of Wind.exe.
+:spike
+cl /nologo /std:c++17 /EHsc /O2 /DUNICODE /D_UNICODE ^
+   tools\present_spike\clickprobe.cpp ^
+   /Fe:clickprobe.exe ^
+   /link user32.lib gdi32.lib
+if errorlevel 1 exit /b 1
+if exist tools\present_spike\harness.cpp (
+  cl /nologo /std:c++17 /EHsc /O2 /DUNICODE /D_UNICODE ^
+     tools\present_spike\harness.cpp tools\present_spike\overlay.cpp ^
+     /Fe:harness.exe ^
+     /link d3d11.lib dxgi.lib dcomp.lib dxguid.lib user32.lib gdi32.lib dwmapi.lib
+  if errorlevel 1 exit /b 1
+)
+if exist tools\present_spike\dualswap.cpp (
+  cl /nologo /std:c++17 /EHsc /O2 /DUNICODE /D_UNICODE ^
+     tools\present_spike\dualswap.cpp ^
+     /Fe:dualswap.exe ^
+     /link d3d11.lib dxgi.lib dcomp.lib dxguid.lib user32.lib gdi32.lib
+)
 exit /b %errorlevel%

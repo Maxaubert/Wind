@@ -57,7 +57,8 @@ float4 PSMain(VSOut i) : SV_TARGET {
         c.rgb = LinearToSrgb(max(c.rgb, 0.0) * scRgbScale);
     }
     c.rgb *= brightness;                         // optional fine-tune (default 1.0)
-    return c;
+    c.a = 1.0;                                   // opaque: governs DComp premultiplied composition;
+    return c;                                    //   no-op under blt (window alpha is LWA_ALPHA)
 }
 )";
 
