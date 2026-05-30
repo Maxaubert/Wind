@@ -143,6 +143,21 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
         return 0;
     }
     bool onboard = lpCmdLine && wcsstr(lpCmdLine, L"--onboard") != nullptr;
+    // If Settings is opened before onboarding was completed (no --onboard flag and onboarded != 1),
+    // don't show Settings against a not-yet-live config - launch the Wind magnifier instead. Wind
+    // sees onboarded==0 at startup and runs the guided setup (re-spawning us with --onboard), so the
+    // user lands in onboarding. The --onboard guard prevents any launch loop. If Wind.exe can't be
+    // found we fall through and show Settings rather than dead-end.
+    if (!onboard) {
+        auto vals = wind::ReadIniValues(ReadFileUtf8(IniPath()));
+        auto it = vals.find("onboarded");
+        bool onboarded = (it != vals.end() && it->second == "1");
+        if (!onboarded) {
+            std::wstring windExe = ExeDir() + L"\\Wind.exe";
+            HINSTANCE r = ShellExecuteW(nullptr, L"open", windExe.c_str(), nullptr, nullptr, SW_SHOW);
+            if (reinterpret_cast<INT_PTR>(r) > 32) { if (mtx) CloseHandle(mtx); return 0; }
+        }
+    }
     // Per-monitor-V2 DPI awareness so WebView2 renders at native resolution (not bitmap-scaled,
     // which looked low-res/blurry). Must be set before any window is created.
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
