@@ -754,14 +754,21 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
     if (vr > sw) vr = sw;          if (vb > sh) vb = sh;
     RECT view{ (LONG)vl, (LONG)vt, (LONG)vr, (LONG)vb };
     capture(view, p.cropCapture);
-    updateCursorTexture();
+    // Cursor texture is only needed if we might draw it. cursorMode==2 (never draw) skips the
+    // GetCursorInfo syscall entirely; auto mode (0) still needs it to read osCursorShowing (#73).
+    if (p.cursorMode != 2) updateCursorTexture();
 
     ID3D11DeviceContext* c = ctx.Get();
     D3D11_VIEWPORT vp{}; vp.Width = (float)sw; vp.Height = (float)sh; vp.MaxDepth = 1.0f;
     c->RSSetViewports(1, &vp);
     c->OMSetRenderTargets(1, rtv.GetAddressOf(), nullptr);
-    const float clear[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
-    c->ClearRenderTargetView(rtv.Get(), clear);
+    // The magnify pass is a full-screen opaque triangle that writes every output pixel, so the
+    // clear is only needed when there's no desktop to draw (else we'd show stale/garbage). Skipping
+    // it when haveDesktop drops a 4K-sized clear per zoomed frame (#72).
+    if (!haveDesktop) {
+        const float clear[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+        c->ClearRenderTargetView(rtv.Get(), clear);
+    }
     c->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);     // opaque magnify pass
     c->IASetInputLayout(nullptr);
 

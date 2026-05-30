@@ -25,9 +25,13 @@ static InputRouter g_input;
 // Current refresh rate (Hz) of the primary display, for pacing the idle/1x loop and the
 // vsync=0 path so we don't hardcode the dev's 144Hz. Falls back to 60 if the query fails or
 // reports a placeholder (some drivers report 0/1 for "hardware default").
-static int DetectRefreshHz() {
+// Refresh rate of a specific display (GDI device name, e.g. "\\.\DISPLAY2"); nullptr/empty = the
+// primary/current display. Re-queried on retarget so pacing tracks the monitor we're actually on
+// (a mixed-refresh multi-monitor setup would otherwise pace a 60Hz panel at the startup 144) (#74).
+static int DetectRefreshHz(const wchar_t* device = nullptr) {
     DEVMODEW dm{}; dm.dmSize = sizeof(dm);
-    if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &dm) && dm.dmDisplayFrequency > 1)
+    const wchar_t* dev = (device && device[0]) ? device : nullptr;
+    if (EnumDisplaySettingsW(dev, ENUM_CURRENT_SETTINGS, &dm) && dm.dmDisplayFrequency > 1)
         return (int)dm.dmDisplayFrequency;
     return 60;
 }
@@ -204,11 +208,18 @@ static void RunTick(TickState& t) {
     // back to the old ~1s timed poll if the watch handle is unavailable.
     bool checkConfig = false;
     if (t.configWatch && t.configWatch != INVALID_HANDLE_VALUE) {
-        if (WaitForSingleObject(t.configWatch, 0) == WAIT_OBJECT_0) {
-            checkConfig = true;
-            // Re-arm for the next change. If that fails (e.g. the watched dir vanished), drop to
-            // INVALID so the timed-poll fallback re-engages instead of silently never reloading.
-            if (!FindNextChangeNotification(t.configWatch)) t.configWatch = INVALID_HANDLE_VALUE;
+        // Poll the watch handle ~4x/s, not every tick: WaitForSingleObject is a kernel transition,
+        // and at 144Hz while zoomed that's ~144 needless syscalls/s. Config edits are user-initiated
+        // and rare, so ~250ms reload latency is imperceptible (#70).
+        t.sinceCheck += dt;
+        if (t.sinceCheck >= 0.25) {
+            t.sinceCheck = 0.0;
+            if (WaitForSingleObject(t.configWatch, 0) == WAIT_OBJECT_0) {
+                checkConfig = true;
+                // Re-arm for the next change. If that fails (e.g. the watched dir vanished), drop to
+                // INVALID so the timed-poll fallback re-engages instead of silently never reloading.
+                if (!FindNextChangeNotification(t.configWatch)) t.configWatch = INVALID_HANDLE_VALUE;
+            }
         }
     } else {
         t.sinceCheck += dt;
@@ -318,6 +329,8 @@ static void RunTick(TickState& t) {
                 if (!SameMonitor(nt, t.mon) && t.renderEngine.retarget(nt)) {
                     t.mon = nt;
                     t.mapper = CursorMapper(nt.w, nt.h, t.cfg.cursorSmoothing);
+                    int nhz = DetectRefreshHz(nt.device);   // pace off the new monitor's refresh (#74)
+                    if (nhz > 0) t.hz = nhz;
                 }
             }
             t.vbounds = QueryVirtualBounds();   // refresh cached clip-detect bounds (topology may have changed)
@@ -724,9 +737,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
     // Auto-detect the display refresh rate so we never assume a fixed rate (the dev's 144Hz).
     // Paces the idle/1x loop and the vsync=0 path; while zoomed, DwmFlush/vsync pace instead.
-    int hz = DetectRefreshHz();
-    ts.hz = hz;
-    LARGE_INTEGER due; due.QuadPart = -(10000000LL / hz);
+    ts.hz = DetectRefreshHz();
+    int pacedHz = ts.hz;                              // hz the timer interval below is computed for
+    LARGE_INTEGER due; due.QuadPart = -(10000000LL / pacedHz);
 
     bool running = true;
     while (running) {
@@ -756,11 +769,14 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         bool dwmPaces = zoomed && ts.cfg.dwmFlush != 0;
         bool renderPresentPaces = zoomed && !dwmPaces && ts.cfg.vsync != 0;
         if (!renderPresentPaces && !dwmPaces) {
+            // Recompute the timer interval if the paced refresh changed (retarget to a different-Hz
+            // monitor updates ts.hz). Cheap equality check; only recomputes on an actual change (#74).
+            if (ts.hz > 0 && ts.hz != pacedHz) { pacedHz = ts.hz; due.QuadPart = -(10000000LL / pacedHz); }
             if (timer) {
                 SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);
                 WaitForSingleObject(timer, INFINITE);
             } else {
-                Sleep(1000 / hz);
+                Sleep(1000 / pacedHz);
             }
         }
 
