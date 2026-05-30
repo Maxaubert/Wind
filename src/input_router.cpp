@@ -39,6 +39,14 @@ void InputRouter::setButtons(int inButtonId, int outButtonId) {
     state_.outHeld.store(false);
 }
 
+// Per-side-button record of whether we swallowed the DOWN (index by id: 1=XBUTTON1, 2=XBUTTON2).
+// We must ONLY swallow an UP whose DOWN we also swallowed; otherwise the system sees a DOWN with no
+// matching UP and believes the button is held forever, which breaks clicking system-wide. That
+// imbalance occurred during keybind capture: arming clears the binding so the DOWN passes through,
+// then the browser rebinds the button, so by UP-time it is a zoom button and the old code swallowed
+// only the UP -> stuck-down. Balancing on the swallowed-down record fixes it across rebinds.
+static bool g_swallowedDown[3] = { false, false, false };
+
 static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
     if (code == HC_ACTION && g_router) {
         int id = xbuttonIdFromHook(wParam, lParam);
@@ -46,8 +54,22 @@ static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
         bool up   = (wParam == WM_XBUTTONUP);
         if (id != 0 && (down || up)) {
             g_router->setButtonState(id, down);
-            if (g_router->swallowEnabled() && g_router->isZoomButton(id))
-                return 1; // swallow so browser back/forward don't fire
+            bool swallow = false;
+            if (down) {
+                // Swallow the DOWN only if it is a zoom button now; remember it so the matching UP
+                // is swallowed too (keeps the system's down/up view balanced).
+                if (g_router->swallowEnabled() && g_router->isZoomButton(id)) {
+                    g_swallowedDown[id] = true;
+                    swallow = true;
+                }
+            } else { // up: swallow iff we swallowed its DOWN. Never swallow an UP whose DOWN the
+                     // system already saw - that is exactly what left the button stuck-down.
+                if (g_swallowedDown[id]) {
+                    g_swallowedDown[id] = false;
+                    swallow = true;
+                }
+            }
+            if (swallow) return 1; // swallow so browser back/forward don't fire
         }
     }
     return CallNextHookEx(g_mouseHook, code, wParam, lParam);
