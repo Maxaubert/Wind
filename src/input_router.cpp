@@ -118,6 +118,22 @@ bool InputRouter::start(int inButtonId, int outButtonId, bool swallow) {
     // Raw Input registration (RIDEV_INPUTSINK) + WM_INPUT decoding live in main.cpp's
     // message-only window, which calls AccumulateRaw() with the decoded deltas.
 }
+// Synthesize an XBUTTON UP for any side-button whose DOWN we swallowed but whose UP we have not yet
+// seen/passed through. Called when the hook is torn down: if we vanish mid-press (e.g. another
+// instance signals us to quit while a side-button DOWN is outstanding, or shutdown races a press),
+// the system would otherwise be left believing the button is held forever, breaking clicks
+// system-wide. This GUARANTEES we never strand a button no matter how teardown is triggered.
+static void ReleaseSwallowedButtons() {
+    for (int id = 1; id <= 2; ++id) {
+        if (!g_swallowedDown[id]) continue;
+        g_swallowedDown[id] = false;
+        INPUT in{};
+        in.type = INPUT_MOUSE;
+        in.mi.dwFlags = MOUSEEVENTF_XUP;
+        in.mi.mouseData = (id == 1) ? XBUTTON1 : XBUTTON2;
+        SendInput(1, &in, sizeof(in));
+    }
+}
 void InputRouter::stop() {
     if (g_hookThread) {
         PostThreadMessageW(g_hookThreadId, WM_QUIT, 0, 0);   // break the thread's GetMessage loop
@@ -126,6 +142,7 @@ void InputRouter::stop() {
     } else if (g_mouseHook) {                                 // hookless/no-thread paths: unhook directly
         UnhookWindowsHookEx(g_mouseHook); g_mouseHook = nullptr;
     }
+    ReleaseSwallowedButtons();   // never leave a swallowed side-button stranded as held
     g_router = nullptr;
 }
 void InputRouter::drainRaw(int& dx, int& dy) {
