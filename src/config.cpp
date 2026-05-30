@@ -47,7 +47,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "cursorSmoothing")    c.cursorSmoothing = std::stod(val);
             else if (key == "cursorScaleWithZoom")c.cursorScaleWithZoom = std::stoi(val);
             else if (key == "cursorVisibility")   c.cursorVisibility = val;
-            else if (key == "present") c.present = (val == "blt" || val == "dcomp" || val == "auto") ? val : "auto";
+            else if (key == "present") c.present = (val == "blt" || val == "dcomp" || val == "auto") ? val : "blt";
             else if (key == "bilinear")           c.bilinear = std::stoi(val);
             else if (key == "sharpness")          c.sharpness = std::stod(val);
             else if (key == "zorderBand")         c.zorderBand = std::stoi(val);
@@ -97,10 +97,10 @@ Config LoadConfig(const std::wstring& path) {
                "vsync=1\n"
                "; dwmFlush: 0=plain vsync pacing (default, fewer stutters); 1=align to DWM's composition\n"
                "dwmFlush=0\n"
-               "; present: auto=default (dcomp when smooth, auto-fall-back to blt over a background\n"
-               ";   fullscreen game); dcomp=force DirectComposition flip-model; blt=force blt-model.\n"
-               ";   Change applies on the next zoom-in (no restart). #69\n"
-               "present=auto\n"
+               "; present: blt=default (robust, composited, never tears); dcomp=DirectComposition\n"
+               ";   flip-model (smoother but can tear and needs the deployed UIAccess build);\n"
+               ";   auto=start dcomp, fall back to blt on a throttle. Applies instantly. #69\n"
+               "present=blt\n"
                "; diagnostics=1 logs frame timing to %TEMP%\\wind_diag.log (restart to apply)\n"
                "diagnostics=0\n"
                "; cursorSensitivity: pan speed multiplier - free panning auto-matches the OS cursor\n"

@@ -62,17 +62,27 @@ staged Apply/Discard footer.
   feedback loop (black). This is the #1 render-engine gotcha.
 - RENDER ENGINE: cross-process click-through needs `WS_EX_LAYERED | WS_EX_TRANSPARENT`
   (+ `SetLayeredWindowAttributes(.,255,LWA_ALPHA)`). `WS_EX_TRANSPARENT` + HTTRANSPARENT
-  alone only forwards to *same-thread* windows, so clicks to other apps get eaten. Layered
-  rules out a flip swapchain, so the overlay uses a BLT-model swapchain (DXGI_SWAP_EFFECT_
-  DISCARD) - verified to display via the redirection surface. Latency capped with
-  `IDXGIDevice1::SetMaximumFrameLatency(1)`.
-- RENDER ENGINE: blt-model present through DWM microstutters - a phase mismatch with DWM's
-  compositor, NOT our loop (proven clean at 144fps via `WIND_PACINGTEST`). Default pacing is
-  `dwmFlush=1`: present immediately (`Present(0,0)`) then `DwmFlush()` to block until DWM's next
-  composite, aligning our frames 1:1 with composition. `dwmFlush=0` = old vsync `Present(1,0)`;
-  both hot-reloadable. DirectComposition + flip-model would be smoother but requires dropping
-  `WS_EX_LAYERED`, which breaks cross-process click-through (tried in #11, reverted) - so it's a
-  dead end unless a non-layered click-through is found. Issue #9.
+  alone only forwards to *same-thread* windows, so clicks to other apps get eaten. A layered
+  window's own swapchain must be blt-model (`DXGI_SWAP_EFFECT_DISCARD`, via the DWM redirection
+  surface), but a flip-model swapchain is STILL reachable on the same layered HWND through a
+  DirectComposition visual (`CreateSwapChainForComposition` -> `IDCompositionVisual::SetContent`):
+  both swapchains live at once and `setPresentMode` instantly flips which one the visual shows (the
+  `present=` key, see below). Latency capped with `IDXGIDevice1::SetMaximumFrameLatency(1)`.
+- RENDER ENGINE: present path is the `present=` key (`blt` default | `dcomp` | `auto`). BLT is the
+  default because it is robust: its content goes through the DWM redirection surface, which DWM
+  always composites at vblank, so it NEVER tears. Its one artifact is a phase-mismatch microstutter
+  (NOT our loop - proven clean at 144fps via `WIND_PACINGTEST`), tamed by pacing: `dwmFlush=0`
+  (default) = plain vsync `Present(1,0)`; `dwmFlush=1` = present immediately (`Present(0,0)`) then
+  `DwmFlush()` to align 1:1 with composition. Both hot-reloadable.
+- RENDER ENGINE: `present=dcomp` (DirectComposition flip-model, opt-in) is smoother (no microstutter)
+  but carries two DWM-side costs the app cannot override, so it is NOT the default: (1) run UNDEPLOYED
+  (`zorderBand=0`) the flip visual is composite-throttled to ~57-64Hz over a background fullscreen
+  game; deploying the signed UIAccess build (`zorderBand=16`, above the shell) makes DWM composite it
+  at full rate in every scenario. (2) Even deployed, DWM can promote the fullscreen flip visual to an
+  independent-flip / MPO plane that scans out unsynced and TEARS, especially over a VRR/G-SYNC game.
+  blt hits neither (always composited). `present=auto` starts dcomp and falls back to blt on a
+  measured throttle. Do NOT add a DComp "composition pin" (a forever-animating child visual) to force
+  full-rate composite - it was tried and made the tearing worse (reverted). Issues #9, #69.
 - RENDER ENGINE: never leave the OS cursor hidden. `shutdown()` restores via
   `MagShowSystemCursor(TRUE)` + `MagUninitialize` + `SystemParametersInfo(SPI_SETCURSORS)`,
   plus a `SetUnhandledExceptionFilter` net for crashes.

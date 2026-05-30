@@ -96,7 +96,7 @@ struct TickState {
     int    hz = 60;                            // resolved tick/refresh rate (auto-detected)
     bool   recenterKeyWasDown = false;         // edge-detect the recenterVk key
     bool   cursorHidden       = false;         // runtime-only override (no ini write, no hot-reload)
-    // Present-mode switching (applied only at a zoom boundary -> hitch-free, never resets zoom).
+    // Present-mode switching (instant DComp visual flip -> hitch-free, never resets zoom, mid-zoom safe).
     // desiredPresent is the mode we want the engine to be; set by the ini (blt/dcomp) or, when
     // presentAuto, by the adaptive policy. lastForeground feeds the policy's foreground-change cue.
     bool        presentAuto = false;
@@ -227,8 +227,8 @@ static void RunTick(TickState& t) {
                 RegisterHideCursorHotkey(t.hwnd, nc.hideCursorVk, nc.hideCursorMods);
             }
             if (nc.present != t.cfg.present) {
-                // Present-mode switch rebuilds the swapchain; apply at a zoom boundary (handled
-                // below). For a fixed mode, pin desiredPresent; for auto, the policy drives it.
+                // Present-mode switch is an instant DComp visual flip (applied below, no rebuild).
+                // For a fixed mode, pin desiredPresent; for auto, the policy drives it.
                 t.presentAuto = (nc.present == "auto");
                 t.presentPolicy.reset();                 // start the policy clean on any change
                 if (!t.presentAuto) t.desiredPresent = PresentModeFromCfg(nc);

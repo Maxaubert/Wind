@@ -50,10 +50,12 @@ struct Config {
     // composition (overrides vsync while zoomed). Hot-reloadable.
     int    dwmFlush         = 0;
     int    diagnostics      = 0;     // 1 = log frame-timing to wind_diag.log
-    // Present backend while zoomed (render engine). "auto" (default) = dcomp normally, auto-fall-back
-    // to blt when the flip-model composite is throttled (windowed app over a background fullscreen
-    // game), re-probing dcomp when that clears. "dcomp" / "blt" pin a fixed mode. #69.
-    std::string present = "auto";
+    // Present backend while zoomed (render engine). "blt" (default) is the robust path: composited
+    // by DWM, never tears (its only artifact, a microstutter, is tamed by dwmFlush). "dcomp" =
+    // DirectComposition flip-model: smoother but can tear (DWM independent-flip/MPO) and needs the
+    // deployed UIAccess build to avoid a composite throttle, so it is opt-in. "auto" = start dcomp,
+    // fall back to blt on a measured throttle. Hot-reloadable; the switch is instant. #69.
+    std::string present = "blt";
 
     // --- Own GPU renderer ---------------------------------------------------
     // Pan speed multiplier. Free desktop panning auto-matches the OS cursor (DPI + acceleration) and

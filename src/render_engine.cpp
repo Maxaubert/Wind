@@ -127,7 +127,6 @@ struct RenderEngine::State {
     void releasePresent();        // drop rtv + swapchain(s) + dcomp objects (device kept)
     bool acquireBackbufferRtv();  // re-point rtv at the ACTIVE swapchain's back buffer (buffer 0)
     bool recreateDupl();
-    bool recreateRtv();  // (re)create rtv from swapchain back-buffer 0 (after ResizeBuffers / as a restore)
     // AcquireNextFrame -> desktopCopy (+ pointer info); handles loss/timeout. `view` is the
     // magnified source rect (desktop px, clamped to screen); `crop` enables copying only it on a
     // full-screen repaint.
@@ -600,9 +599,10 @@ void RenderEngine::State::releasePresent() {
     swap.Reset();
 }
 
-// Re-point the rtv at the ACTIVE swapchain's back buffer (buffer 0). Both swapchains are alive;
-// only the active one is rendered. Called at the top of render() each frame (flip rotates buffers,
-// and a present-mode switch changes which swapchain is active), so the rtv always matches.
+// (Re)create the rtv from the ACTIVE swapchain's back buffer (buffer 0). Both swapchains are alive;
+// only the active one is rendered. Called on (re)build, a present-mode switch (setPresentMode Resets
+// rtv so the next render() re-acquires), and after a resize - NOT per frame: a D3D11 swapchain keeps
+// buffer 0 stable across Present, so one RTV is reused (the runtime rotates flip buffers internally).
 bool RenderEngine::State::acquireBackbufferRtv() {
     IDXGISwapChain* sc = (present == PresentMode::Dcomp) ? static_cast<IDXGISwapChain*>(swapFlip.Get())
                                                          : swap.Get();
@@ -652,21 +652,6 @@ bool RenderEngine::State::buildPresent() {
     SetLayeredWindowAttributes(hwnd, 0, 0, LWA_ALPHA);   // start hidden; LWA_ALPHA = unified visibility
     if (!acquireBackbufferRtv()) { RLog("buildPresent: rtv failed"); return false; }
     RLog("buildPresent: dual ok (active=%d)", (int)present);
-    return true;
-}
-
-// (Re)create the render-target view from the swapchain's current back buffer (buffer 0). Used
-// after ResizeBuffers, and as a best-effort restore if a resize step fails.
-bool RenderEngine::State::recreateRtv() {
-    rtv.Reset();
-    ID3D11Texture2D* back = nullptr;
-    if (FAILED(swap->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&back))) {
-        RLog("recreateRtv: GetBuffer failed");
-        return false;
-    }
-    HRESULT hr = device->CreateRenderTargetView(back, nullptr, rtv.ReleaseAndGetAddressOf());
-    SafeRelease(back);
-    if (FAILED(hr)) { RLog("recreateRtv: CreateRenderTargetView failed hr=0x%08lX", (unsigned long)hr); return false; }
     return true;
 }
 
@@ -754,7 +739,10 @@ void RenderEngine::State::updateCursorTexture() {
 }
 
 void RenderEngine::State::render(const RenderFrameParams& p) {
-    if (!acquireBackbufferRtv()) return;   // re-bind the active swapchain's back buffer before drawing
+    // RTV is cached: a D3D11 flip/blt swapchain keeps buffer 0 stable across Present (the runtime
+    // rotates flip buffers internally), so we create the RTV once and reuse it. acquireBackbufferRtv()
+    // runs only on (re)build, a present-mode switch (which Resets rtv), or a resize - not per frame.
+    if (!rtv && !acquireBackbufferRtv()) return;
     // Magnified source rect in desktop pixels (what the magnify pass samples below), clamped to the
     // screen with a 1px margin for bilinear edge taps. capture() can copy only this region on a
     // full-screen repaint to cut the 4K HDR copy.

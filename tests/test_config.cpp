@@ -124,12 +124,12 @@ TEST_CASE("modifier masks default 0 and parse") {
     CHECK(c.zoomInMods == 3);  CHECK(c.zoomOutMods == 1);   // Ctrl+Alt / Ctrl
     CHECK(c.zoomInMods2 == 8); CHECK(c.zoomOutMods2 == 4);  // Win / Shift
 }
-TEST_CASE("present mode parses; default auto; blt/dcomp/auto accepted") {
-    CHECK(ParseConfig("").present == "auto");                 // default
+TEST_CASE("present mode parses; default blt; blt/dcomp/auto accepted") {
+    CHECK(ParseConfig("").present == "blt");                  // default
     CHECK(ParseConfig("present=auto\n").present == "auto");
     CHECK(ParseConfig("present=dcomp\n").present == "dcomp");
     CHECK(ParseConfig("present=blt\n").present == "blt");
-    CHECK(ParseConfig("present=garbage\n").present == "auto"); // unknown -> auto
+    CHECK(ParseConfig("present=garbage\n").present == "blt");  // unknown -> blt
 }
 TEST_CASE("zoom-speed and smooth-zoom knobs parse") {
     Config c = ParseConfig(
