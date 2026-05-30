@@ -1,5 +1,7 @@
 #include <windows.h>
 #include <dwmapi.h>
+#include <tlhelp32.h>
+#include <magnification.h>
 #include <climits>
 #include <cmath>
 #include <cstdlib>
@@ -473,9 +475,63 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
+// Force-restore any global input state a previous Wind may have left dirty (cursor hidden, cursor
+// confined, a stuck show-count). Safe to call unconditionally at startup and at exit: every call
+// is idempotent. This is the net that guarantees a force-killed or crashed predecessor can never
+// leave the machine with a hidden/locked cursor - the next launch (and our own exit) heals it.
+static void RestoreInputState() {
+    ClipCursor(nullptr);                                         // release any cursor confinement
+    if (MagInitialize()) { MagShowSystemCursor(TRUE); MagUninitialize(); }   // un-hide the OS cursor
+    SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, SPIF_SENDCHANGE);      // reload system cursors
+    for (int i = 0; i < 8 && ShowCursor(TRUE) < 0; ++i) {}       // bump our show-count back to visible
+}
+
+// Minimal restore for abnormal CRT exit (atexit / ExitProcess). Non-blocking: must not touch the
+// hook thread (its stop() waits, which could hang during teardown); the hook dies with the process
+// and only swallows side-buttons anyway. The damaging state (hidden/confined cursor) is undone here.
+static void AtExitRestore() { RestoreInputState(); }
+
+// Guarantee EXACTLY ONE Wind.exe. Signal any existing instance to quit cleanly (named event, crosses
+// UIPI), give it a grace period to tear down, then force-terminate any straggler (a zombie whose
+// message loop is dead). Finally restore input state in case a killed predecessor left it dirty.
+// This makes "launch again" reliably replace a stuck instance instead of stacking a second one -
+// two concurrent Wind processes mean two mouse hooks + two cursor-warp loops, which locks input.
+static void EnforceSingleInstance() {
+    HANDLE ev = OpenEventW(EVENT_MODIFY_STATE, FALSE, L"Local\\Wind_QuitRequest");
+    if (ev) { SetEvent(ev); CloseHandle(ev); }                  // ask it to exit cleanly first
+    const DWORD self = GetCurrentProcessId();
+    for (int attempt = 0; attempt < 20; ++attempt) {            // up to ~2s
+        bool anyOther = false;
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snap != INVALID_HANDLE_VALUE) {
+            PROCESSENTRY32W pe{ sizeof(pe) };
+            if (Process32FirstW(snap, &pe)) {
+                do {
+                    if (pe.th32ProcessID != self && _wcsicmp(pe.szExeFile, L"Wind.exe") == 0) {
+                        anyOther = true;
+                        if (attempt >= 5) {                     // grace elapsed: force-kill the straggler
+                            HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, pe.th32ProcessID);
+                            if (h) { TerminateProcess(h, 0); CloseHandle(h); }
+                        }
+                    }
+                } while (Process32NextW(snap, &pe));
+            }
+            CloseHandle(snap);
+        }
+        if (!anyOther) break;
+        Sleep(100);
+    }
+    RestoreInputState();   // heal anything a force-killed predecessor left behind
+}
+
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
+    // Before claiming ownership: terminate any other Wind.exe (incl. zombies) and heal input state,
+    // so there is never more than one instance and a stuck predecessor can't hold the cursor. Then
+    // take the single-instance mutex purely as a fast-path marker (the kill above already cleared
+    // the field, so this normally succeeds). atexit installs the always-restore net for CRT exits.
+    EnforceSingleInstance();
+    atexit(AtExitRestore);
     HANDLE mtx = CreateMutexW(nullptr, TRUE, L"Wind_Magnifier_SingleInstance");
-    if (GetLastError() == ERROR_ALREADY_EXISTS) return 0;
 
     // Resolve magnifier.ini next to the exe (not the launch cwd).
     wchar_t exePath[MAX_PATH];
