@@ -66,9 +66,16 @@ std::string BuildSnapshot(const SystemInfo& si) {
 
 #ifndef WIND_TESTS
 #include <windows.h>
+#include <dxgi.h>
+#include <intrin.h>
+#include <shellscalingapi.h>
 #include <mutex>
 #include <cstdarg>
+#include <vector>
 #include "config_path.h"
+#include "version.h"
+#pragma comment(lib, "dxgi.lib")
+#pragma comment(lib, "shcore.lib")
 
 namespace wind {
 namespace {
@@ -133,6 +140,117 @@ void LogShutdown() {
         FlushFileBuffers(g_logFile);
         CloseHandle(g_logFile);
         g_logFile = INVALID_HANDLE_VALUE;
+    }
+}
+
+// RtlGetVersion gives the true build number (GetVersionEx lies without a manifest entry).
+typedef LONG (WINAPI *RtlGetVersionFn)(OSVERSIONINFOEXW*);
+
+static std::string OsBuildString() {
+    OSVERSIONINFOEXW v{}; v.dwOSVersionInfoSize = sizeof(v);
+    HMODULE nt = GetModuleHandleW(L"ntdll.dll");
+    auto fn = nt ? (RtlGetVersionFn)GetProcAddress(nt, "RtlGetVersion") : nullptr;
+    if (fn && fn(&v) == 0) {
+        char b[64];
+        std::snprintf(b, sizeof(b), "Windows %lu.%lu.%lu",
+                      v.dwMajorVersion, v.dwMinorVersion, v.dwBuildNumber);
+        return b;
+    }
+    return "Windows (unknown build)";
+}
+
+static std::string CpuBrandString() {
+    int regs[4] = {0};
+    char brand[0x40] = {0};
+    __cpuid(regs, 0x80000000);
+    if ((unsigned)regs[0] >= 0x80000004) {
+        for (unsigned f = 0x80000002, off = 0; f <= 0x80000004; ++f, off += 16) {
+            __cpuid(regs, (int)f);
+            memcpy(brand + off, regs, 16);
+        }
+        // Trim leading spaces some CPUs pad with.
+        std::string s(brand);
+        size_t a = s.find_first_not_of(' ');
+        return a == std::string::npos ? s : s.substr(a);
+    }
+    return "unknown CPU";
+}
+
+static void QueryGpu(std::string& gpuOut, std::string& driverOut) {
+    gpuOut = "unknown"; driverOut = "unknown";
+    IDXGIFactory* factory = nullptr;
+    if (FAILED(CreateDXGIFactory(__uuidof(IDXGIFactory), (void**)&factory)) || !factory) return;
+    IDXGIAdapter* adapter = nullptr;
+    if (factory->EnumAdapters(0, &adapter) == S_OK && adapter) {
+        DXGI_ADAPTER_DESC desc{};
+        if (SUCCEEDED(adapter->GetDesc(&desc))) {
+            char nm[256]; std::snprintf(nm, sizeof(nm), "%ls", desc.Description);
+            gpuOut = nm;
+        }
+        LARGE_INTEGER umd{};
+        if (SUCCEEDED(adapter->CheckInterfaceSupport(__uuidof(IDXGIDevice), &umd))) {
+            char dv[64];
+            std::snprintf(dv, sizeof(dv), "%u.%u.%u.%u",
+                HIWORD(umd.HighPart), LOWORD(umd.HighPart), HIWORD(umd.LowPart), LOWORD(umd.LowPart));
+            driverOut = dv;
+        }
+        adapter->Release();
+    }
+    factory->Release();
+}
+
+struct MonEnumCtx { std::vector<MonitorInfo>* out; };
+static BOOL CALLBACK MonEnumProc(HMONITOR hMon, HDC, LPRECT, LPARAM lp) {
+    auto* ctx = reinterpret_cast<MonEnumCtx*>(lp);
+    MONITORINFOEXW mi{}; mi.cbSize = sizeof(mi);
+    if (!GetMonitorInfoW(hMon, &mi)) return TRUE;
+    MonitorInfo m;
+    char nm[64]; std::snprintf(nm, sizeof(nm), "%ls", mi.szDevice); m.name = nm;
+    DEVMODEW dm{}; dm.dmSize = sizeof(dm);
+    if (EnumDisplaySettingsW(mi.szDevice, ENUM_CURRENT_SETTINGS, &dm)) {
+        m.w = (int)dm.dmPelsWidth; m.h = (int)dm.dmPelsHeight;
+        m.refreshHz = (int)dm.dmDisplayFrequency;
+        switch (dm.dmDisplayOrientation) {
+            case DMDO_90: m.rotationDeg = 90; break;
+            case DMDO_180: m.rotationDeg = 180; break;
+            case DMDO_270: m.rotationDeg = 270; break;
+            default: m.rotationDeg = 0; break;
+        }
+    }
+    UINT dx = 96, dy = 96;
+    if (SUCCEEDED(GetDpiForMonitor(hMon, MDT_EFFECTIVE_DPI, &dx, &dy)))
+        m.dpiPercent = (int)((dx * 100 + 48) / 96);
+    m.hdr = false;        // HDR/VRR are not uniformly queryable via this path; record conservatively.
+    m.vrr = "unknown";
+    ctx->out->push_back(m);
+    return TRUE;
+}
+
+void LogSystemSnapshot(const char* buildFlavor, const std::string& configDump) {
+    SystemInfo si;
+    si.windVersion = WIND_VERSION_STR;
+    si.buildFlavor = buildFlavor ? buildFlavor : "normal";
+    si.osBuild = OsBuildString();
+    si.cpu = CpuBrandString();
+    SYSTEM_INFO sinf{}; GetSystemInfo(&sinf); si.logicalCores = (int)sinf.dwNumberOfProcessors;
+    MEMORYSTATUSEX mem{}; mem.dwLength = sizeof(mem);
+    if (GlobalMemoryStatusEx(&mem)) si.ramBytes = mem.ullTotalPhys;
+    QueryGpu(si.gpu, si.driverVersion);
+    MonEnumCtx ctx{ &si.monitors };
+    EnumDisplayMonitors(nullptr, nullptr, MonEnumProc, (LPARAM)&ctx);
+    si.configDump = configDump;
+
+    std::string block = BuildSnapshot(si);
+    // Emit each line as its own event so the multi-line block is never truncated by Log's
+    // fixed 1024-char buffer. Lines containing '%' (e.g. "dpi=150%") are safe: they are passed
+    // as the %s ARGUMENT, never as the format string.
+    size_t start = 0;
+    while (true) {
+        size_t nl = block.find('\n', start);
+        std::string ln = block.substr(start, nl == std::string::npos ? std::string::npos : nl - start);
+        Log(LogLevel::Info, "snapshot", "%s", ln.c_str());
+        if (nl == std::string::npos) break;
+        start = nl + 1;
     }
 }
 

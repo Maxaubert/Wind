@@ -11,6 +11,7 @@
 #include <map>
 #include "ini_edit.h"
 #include "../config_path.h"
+#include "../logging.h"
 #include "../resource.h"
 #pragma comment(lib, "shlwapi.lib")
 
@@ -214,6 +215,9 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     return DefWindowProcW(h, m, w, l);
 }
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
+    wind::LogInit(L"config");
+    wind::LogSystemSnapshot("config", "");
+
     // Single-instance: opening Settings from the tray (or any second launch) focuses the existing
     // window instead of stacking another WindConfig.exe with its own WebView2.
     HANDLE mtx = CreateMutexW(nullptr, TRUE, L"WindConfig_SingleInstance");
@@ -318,5 +322,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
             return S_OK;
         }).Get());
     MSG msg; while (GetMessageW(&msg, nullptr, 0, 0)) { TranslateMessage(&msg); DispatchMessageW(&msg); }
+    wind::LogShutdown();
     return 0;
 }

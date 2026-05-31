@@ -61,4 +61,9 @@ void LogInit(const wchar_t* processTag);
 void Log(LogLevel lvl, const char* category, const char* fmt, ...);
 void LogShutdown();   // flush + close
 
+// Gather the machine/display/config snapshot and write it to the log. buildFlavor is "normal" or
+// "uiaccess"; configDump is the live config rendered as key=value lines (may be empty for the
+// config host). Safe to call once right after LogInit.
+void LogSystemSnapshot(const char* buildFlavor, const std::string& configDump);
+
 }  // namespace wind

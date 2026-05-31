@@ -44,7 +44,7 @@ rem    to cover the Start menu / taskbar / tray. Deploy via tools\uiaccess_setup
 :uiaccess
 rc /nologo /fo "%ROOT%src\wind.res" "%ROOT%src\wind.rc"
 if errorlevel 1 (echo [build] rc.exe failed & exit /b 1)
-cl /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE ^
+cl /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE /DWIND_UIACCESS ^
    src\*.cpp src\wind.res ^
    /Fe:Wind.exe ^
    /link Magnification.lib Dwmapi.lib user32.lib shell32.lib gdi32.lib ^
