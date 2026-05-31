@@ -70,6 +70,7 @@ std::string BuildSnapshot(const SystemInfo& si) {
 #include <dxgi.h>
 #include <intrin.h>
 #include <shellscalingapi.h>
+#include <shlobj.h>
 #include <algorithm>
 #include <mutex>
 #include <cstdarg>
@@ -79,6 +80,7 @@ std::string BuildSnapshot(const SystemInfo& si) {
 #pragma comment(lib, "dbghelp.lib")
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "shcore.lib")
+#pragma comment(lib, "shell32.lib")
 
 namespace wind {
 namespace {
@@ -369,6 +371,67 @@ void LogSystemSnapshot(const char* buildFlavor, const std::string& configDump) {
         if (nl == std::string::npos) break;
         start = nl + 1;
     }
+}
+
+bool ZipLogDir(const wchar_t* destZipPath) {
+    std::wstring dir = ResolveLogDir();
+    DeleteFileW(destZipPath);   // Compress-Archive -Force overwrites too; be explicit
+    // Temporarily release the log handle so Compress-Archive (PS7) can open the file.
+    // PS7's Compress-Archive uses FileShare.None by default and fails if we hold the handle.
+    // Close before the spawn, reopen for append once the zip process exits.
+    std::wstring savedLogPath;
+    {
+        std::lock_guard<std::mutex> lk(g_logMutex);
+        if (g_logFile != INVALID_HANDLE_VALUE) {
+            FlushFileBuffers(g_logFile);
+            savedLogPath = g_logPath;
+            CloseHandle(g_logFile);
+            g_logFile = INVALID_HANDLE_VALUE;
+        }
+    }
+    auto reopenLog = [&]() {
+        if (!savedLogPath.empty()) {
+            std::lock_guard<std::mutex> lk(g_logMutex);
+            if (g_logFile == INVALID_HANDLE_VALUE)
+                g_logFile = CreateFileW(savedLogPath.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ,
+                                        nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        }
+    };
+    // powershell -NoProfile -NonInteractive -Command "Compress-Archive -Path '<dir>\*' -DestinationPath '<dest>' -Force"
+    auto psQuote = [](const std::wstring& s) {
+        std::wstring out = L"'";
+        for (wchar_t c : s) { if (c == L'\'') out += L"''"; else out += c; }   // double embedded quotes
+        out += L"'";
+        return out;
+    };
+    std::wstring cmd = L"powershell.exe -NoProfile -NonInteractive -Command \"Compress-Archive -Path ";
+    cmd += psQuote(dir + L"\\*");
+    cmd += L" -DestinationPath ";
+    cmd += psQuote(destZipPath);
+    cmd += L" -Force\"";
+    std::vector<wchar_t> cmdBuf(cmd.begin(), cmd.end());
+    cmdBuf.push_back(L'\0');
+    STARTUPINFOW si{}; si.cb = sizeof(si);
+    PROCESS_INFORMATION pi{};
+    if (!CreateProcessW(nullptr, cmdBuf.data(), nullptr, nullptr, FALSE,
+                        CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+        reopenLog();
+        return false;
+    }
+    WaitForSingleObject(pi.hProcess, 30000);
+    DWORD code = 1; GetExitCodeProcess(pi.hProcess, &code);
+    CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+    reopenLog();
+    return code == 0 && GetFileAttributesW(destZipPath) != INVALID_FILE_ATTRIBUTES;
+}
+
+std::wstring ExportDiagnosticsToDesktop() {
+    wchar_t desktop[MAX_PATH];
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_DESKTOPDIRECTORY, nullptr, 0, desktop)))
+        return L"";
+    std::wstring dest = std::wstring(desktop) + L"\\Wind-diagnostics-" + std::to_wstring(NowMsUtc()) + L".zip";
+    if (!ZipLogDir(dest.c_str())) return L"";
+    return dest;
 }
 
 }  // namespace wind

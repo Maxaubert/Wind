@@ -168,6 +168,12 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
         HINSTANCE r = ShellExecuteW(nullptr, L"open", IniPath().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
         if (reinterpret_cast<INT_PTR>(r) <= 32)
             ShellExecuteW(nullptr, L"open", L"notepad.exe", IniPath().c_str(), nullptr, SW_SHOWNORMAL);
+    } else if (type == "exportDiagnostics") {
+        std::wstring zip = wind::ExportDiagnosticsToDesktop();
+        if (!zip.empty()) {
+            std::wstring args = L"/select,\"" + zip + L"\"";
+            ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
+        }
     }
 }
 static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {

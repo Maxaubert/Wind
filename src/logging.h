@@ -71,4 +71,11 @@ void LogSystemSnapshot(const char* buildFlavor, const std::string& configDump);
 // passed to the filter (typed as void* so the header stays <windows.h>-free).
 void WriteCrashReport(void* exceptionPointers);
 
+// Zip the entire log dir into destZipPath (overwrites). Returns true on success. The bundle is the
+// stable seam: today it lands on the Desktop; a future server build POSTs the same zip.
+bool ZipLogDir(const wchar_t* destZipPath);
+// Build "<Desktop>\Wind-diagnostics-<ts>.zip", zip the log dir into it, return the path written
+// (empty on failure). Tray item / config button call this then reveal it.
+std::wstring ExportDiagnosticsToDesktop();
+
 }  // namespace wind

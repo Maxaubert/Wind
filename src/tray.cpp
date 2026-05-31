@@ -1,10 +1,13 @@
 #include "tray.h"
 #include "resource.h"
+#include "logging.h"
 #include <shellapi.h>
+#include <string>
 namespace wind { namespace Tray {
 static NOTIFYICONDATAW g_nid{};
 static const UINT WM_TRAY = WM_APP + 1;
 static const UINT ID_SETTINGS = 1003, ID_QUIT = 1002;
+static const UINT ID_EXPORTDIAG = 1004;
 
 void Add(HWND hwnd, HINSTANCE hInst) {
     g_nid.cbSize = sizeof(g_nid);
@@ -35,6 +38,7 @@ bool HandleMessage(HWND hwnd, UINT msg, WPARAM /*wp*/, LPARAM lp) {
         POINT pt; GetCursorPos(&pt);
         HMENU m = CreatePopupMenu();
         AppendMenuW(m, MF_STRING, ID_SETTINGS, L"Open Settings");
+        AppendMenuW(m, MF_STRING, ID_EXPORTDIAG, L"Export diagnostics");
         AppendMenuW(m, MF_STRING, ID_QUIT, L"Quit");
         SetForegroundWindow(hwnd);  // required so the menu dismisses on click-away
         // TrackPopupMenu runs its own modal message loop that owns the thread until it closes.
@@ -47,6 +51,16 @@ bool HandleMessage(HWND hwnd, UINT msg, WPARAM /*wp*/, LPARAM lp) {
         DestroyMenu(m);
         if (cmd == ID_SETTINGS)
             ShellExecuteW(nullptr, L"open", L"WindConfig.exe", nullptr, nullptr, SW_SHOW);
+        else if (cmd == ID_EXPORTDIAG) {
+            std::wstring zip = wind::ExportDiagnosticsToDesktop();
+            if (!zip.empty()) {
+                std::wstring args = L"/select,\"" + zip + L"\"";
+                ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
+                Notify(L"Wind", L"Diagnostics exported to your Desktop.");
+            } else {
+                Notify(L"Wind", L"Could not export diagnostics.");
+            }
+        }
         else if (cmd == ID_QUIT)
             PostMessageW(hwnd, WM_CLOSE, 0, 0);
         return true;
