@@ -375,37 +375,36 @@ void LogSystemSnapshot(const char* buildFlavor, const std::string& configDump) {
 
 bool ZipLogDir(const wchar_t* destZipPath) {
     std::wstring dir = ResolveLogDir();
-    DeleteFileW(destZipPath);   // Compress-Archive -Force overwrites too; be explicit
-    // Temporarily release the log handle so Compress-Archive (PS7) can open the file.
-    // PS7's Compress-Archive uses FileShare.None by default and fails if we hold the handle.
-    // Close before the spawn, reopen for append once the zip process exits.
-    std::wstring savedLogPath;
-    {
-        std::lock_guard<std::mutex> lk(g_logMutex);
-        if (g_logFile != INVALID_HANDLE_VALUE) {
-            FlushFileBuffers(g_logFile);
-            savedLogPath = g_logPath;
-            CloseHandle(g_logFile);
-            g_logFile = INVALID_HANDLE_VALUE;
-        }
+    DeleteFileW(destZipPath);
+    // Stage-copy the log files to a temp dir, then zip that. CopyFileW can read a log file held
+    // open by THIS or the OTHER Wind process (handles use FILE_SHARE_READ), so the export works
+    // whether Wind.exe, WindConfig.exe, or both are running, and it never closes the live log
+    // handle (no dropped lines, no reopen race). Compress-Archive then operates only on the
+    // unheld staging copies.
+    wchar_t temp[MAX_PATH];
+    if (!GetTempPathW(MAX_PATH, temp)) return false;
+    std::wstring staging = std::wstring(temp) + L"wind-diag-" + std::to_wstring(NowMsUtc());
+    if (!CreateDirectoryW(staging.c_str(), nullptr)) return false;
+
+    WIN32_FIND_DATAW fd{};
+    HANDLE h = FindFirstFileW((dir + L"\\*").c_str(), &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+            CopyFileW((dir + L"\\" + fd.cFileName).c_str(),
+                      (staging + L"\\" + fd.cFileName).c_str(), FALSE);   // best-effort per file
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
     }
-    auto reopenLog = [&]() {
-        if (!savedLogPath.empty()) {
-            std::lock_guard<std::mutex> lk(g_logMutex);
-            if (g_logFile == INVALID_HANDLE_VALUE)
-                g_logFile = CreateFileW(savedLogPath.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ,
-                                        nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-        }
-    };
-    // powershell -NoProfile -NonInteractive -Command "Compress-Archive -Path '<dir>\*' -DestinationPath '<dest>' -Force"
+
     auto psQuote = [](const std::wstring& s) {
         std::wstring out = L"'";
-        for (wchar_t c : s) { if (c == L'\'') out += L"''"; else out += c; }   // double embedded quotes
+        for (wchar_t c : s) { if (c == L'\'') out += L"''"; else out += c; }
         out += L"'";
         return out;
     };
     std::wstring cmd = L"powershell.exe -NoProfile -NonInteractive -Command \"Compress-Archive -Path ";
-    cmd += psQuote(dir + L"\\*");
+    cmd += psQuote(staging + L"\\*");
     cmd += L" -DestinationPath ";
     cmd += psQuote(destZipPath);
     cmd += L" -Force\"";
@@ -413,22 +412,37 @@ bool ZipLogDir(const wchar_t* destZipPath) {
     cmdBuf.push_back(L'\0');
     STARTUPINFOW si{}; si.cb = sizeof(si);
     PROCESS_INFORMATION pi{};
-    if (!CreateProcessW(nullptr, cmdBuf.data(), nullptr, nullptr, FALSE,
-                        CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
-        reopenLog();
-        return false;
+    DWORD code = 1;
+    bool spawned = CreateProcessW(nullptr, cmdBuf.data(), nullptr, nullptr, FALSE,
+                                  CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+    if (spawned) {
+        if (WaitForSingleObject(pi.hProcess, 30000) == WAIT_TIMEOUT)
+            TerminateProcess(pi.hProcess, 1);   // never leave an orphaned powershell on a hang
+        GetExitCodeProcess(pi.hProcess, &code);
+        CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
     }
-    WaitForSingleObject(pi.hProcess, 30000);
-    DWORD code = 1; GetExitCodeProcess(pi.hProcess, &code);
-    CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
-    reopenLog();
-    return code == 0 && GetFileAttributesW(destZipPath) != INVALID_FILE_ATTRIBUTES;
+
+    // Clean up the staging dir (files then the dir).
+    HANDLE h2 = FindFirstFileW((staging + L"\\*").c_str(), &fd);
+    if (h2 != INVALID_HANDLE_VALUE) {
+        do {
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+            DeleteFileW((staging + L"\\" + fd.cFileName).c_str());
+        } while (FindNextFileW(h2, &fd));
+        FindClose(h2);
+    }
+    RemoveDirectoryW(staging.c_str());
+
+    return spawned && code == 0 && GetFileAttributesW(destZipPath) != INVALID_FILE_ATTRIBUTES;
 }
 
 std::wstring ExportDiagnosticsToDesktop() {
     wchar_t desktop[MAX_PATH];
     if (FAILED(SHGetFolderPathW(nullptr, CSIDL_DESKTOPDIRECTORY, nullptr, 0, desktop)))
         return L"";
+    // Flush our own buffered lines so the copy is current (other processes' written-but-unflushed
+    // lines are still readable by CopyFileW via the OS cache).
+    { std::lock_guard<std::mutex> lk(g_logMutex); if (g_logFile != INVALID_HANDLE_VALUE) FlushFileBuffers(g_logFile); }
     std::wstring dest = std::wstring(desktop) + L"\\Wind-diagnostics-" + std::to_wstring(NowMsUtc()) + L".zip";
     if (!ZipLogDir(dest.c_str())) return L"";
     return dest;
