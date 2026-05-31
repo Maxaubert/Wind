@@ -65,7 +65,7 @@ rc /nologo /fo "%ROOT%src\wind.res" "%ROOT%src\wind.rc"
 if errorlevel 1 (echo [build] rc.exe failed & exit /b 1)
 cl /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE ^
    /I third_party\webview2\include ^
-   src\config_ui\main.cpp src\config_ui\ini_edit.cpp src\wind.res ^
+   src\config_ui\main.cpp src\config_ui\ini_edit.cpp src\logging.cpp src\wind.res ^
    /Fe:WindConfig.exe ^
    /link third_party\webview2\x64\WebView2LoaderStatic.lib ^
    user32.lib shell32.lib shlwapi.lib ole32.lib version.lib advapi32.lib ntdll.lib /SUBSYSTEM:WINDOWS

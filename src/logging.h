@@ -53,4 +53,12 @@ struct SystemInfo {
 // Render the snapshot as a labelled multi-line block (each line ready to be logged).
 std::string BuildSnapshot(const SystemInfo& si);
 
+// --- Win32 runtime backend (excluded from WIND_TESTS) ---
+// processTag is a short, filename-safe tag: "core" -> wind-core.log, "config" -> wind-config.log.
+// Resolves the log dir, rotates if the existing file is at/over kLogMaxBytes, opens for append.
+void LogInit(const wchar_t* processTag);
+// Append one event line. Thread-safe. Flushes on Warn/Error. NEVER call from the per-frame path.
+void Log(LogLevel lvl, const char* category, const char* fmt, ...);
+void LogShutdown();   // flush + close
+
 }  // namespace wind
