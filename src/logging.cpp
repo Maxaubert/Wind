@@ -85,6 +85,7 @@ namespace {
     HANDLE      g_logFile = INVALID_HANDLE_VALUE;
     std::mutex  g_logMutex;
     std::wstring g_logPath;
+    wchar_t g_crashDir[MAX_PATH] = L"";   // crash dir pre-resolved at LogInit; handler builds paths heap-free
 
     unsigned long long NowMsUtc() {
         FILETIME ft; GetSystemTimeAsFileTime(&ft);   // 100ns ticks since 1601
@@ -166,6 +167,7 @@ void LogInit(const wchar_t* processTag) {
     std::lock_guard<std::mutex> lk(g_logMutex);
     if (g_logFile != INVALID_HANDLE_VALUE) return;        // idempotent: never leak a prior handle
     std::wstring dir  = ResolveLogDir();
+    wcsncpy_s(g_crashDir, dir.c_str(), _TRUNCATE);
     PruneOldCrashes(dir);
     PruneStrayPidLogs(dir);
     std::wstring stem = std::wstring(L"wind-") + processTag;
@@ -213,16 +215,15 @@ void LogShutdown() {
 
 void WriteCrashReport(void* exceptionPointers) {
     auto* ep = reinterpret_cast<EXCEPTION_POINTERS*>(exceptionPointers);
-    std::wstring dir = ResolveLogDir();
 
-    // Timestamped, sortable name.
+    // Heap-free path building -- g_crashDir was pre-resolved at LogInit.
     unsigned long long ts = NowMsUtc();
-    std::wstring stamp = std::to_wstring(ts);
-    std::wstring dmpPath = dir + L"\\wind-crash-" + stamp + L".dmp";
-    std::wstring txtPath = dir + L"\\wind-crash-" + stamp + L".txt";
+    wchar_t dmpPath[MAX_PATH], txtPath[MAX_PATH];
+    swprintf_s(dmpPath, L"%s\\wind-crash-%llu.dmp", g_crashDir, ts);
+    swprintf_s(txtPath, L"%s\\wind-crash-%llu.txt", g_crashDir, ts);
 
     // Minidump.
-    HANDLE f = CreateFileW(dmpPath.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+    HANDLE f = CreateFileW(dmpPath, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
                            FILE_ATTRIBUTE_NORMAL, nullptr);
     if (f != INVALID_HANDLE_VALUE) {
         MINIDUMP_EXCEPTION_INFORMATION mei{};
@@ -236,7 +237,7 @@ void WriteCrashReport(void* exceptionPointers) {
     }
 
     // Text summary.
-    HANDLE t = CreateFileW(txtPath.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+    HANDLE t = CreateFileW(txtPath, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
                            FILE_ATTRIBUTE_NORMAL, nullptr);
     if (t != INVALID_HANDLE_VALUE) {
         char buf[512];
@@ -256,10 +257,6 @@ void WriteCrashReport(void* exceptionPointers) {
         DWORD wrote = 0; if (n > 0) WriteFile(t, buf, (DWORD)n, &wrote, nullptr);
         CloseHandle(t);
     }
-
-    // Mirror a one-line marker into the main log so the timeline shows the crash.
-    Log(LogLevel::Error, "crash", "unhandled exception -> %ls", dmpPath.c_str());
-    LogShutdown();
 }
 
 // RtlGetVersion gives the true build number (GetVersionEx lies without a manifest entry).
