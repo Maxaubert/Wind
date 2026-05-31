@@ -5,6 +5,7 @@
 *.ilk
 *.lib
 *.exp
+*.res
 build/
 # Editor / OS
 .vs/

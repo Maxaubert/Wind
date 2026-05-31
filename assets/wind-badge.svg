@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- Wind app icon: filled badge version of the splash/onboarding logo.
+       Rounded square in the accent indigo with the three wind-swoosh strokes
+       knocked out in white. Source of truth; assets/wind.ico is generated from
+       this by tools/make_icon.mjs. The three paths match ui/src/SplashIntro.svelte. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6d6df0"/>
+      <stop offset="1" stop-color="#5151cb"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="url(#bg)"/>
+  <g transform="translate(50,50) scale(9.75)" fill="none" stroke="#ffffff"
+     stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M2 5.5h8.5a2 2 0 1 0-2-2"/>
+    <path d="M2 9h11a2 2 0 1 1-2 2"/>
+    <path d="M2 12.5h6.5a1.7 1.7 0 1 1-1.7 1.7"/>
+  </g>
+</svg>

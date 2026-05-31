@@ -1,0 +1,5 @@
+#include "resource.h"
+// Embeds the Wind logo (filled-badge variant) as the application icon. The .ico is
+// generated from assets/wind-badge.svg by tools/make_icon.mjs and committed, so the
+// normal build only needs rc.exe (Windows SDK, already on PATH via vcvars).
+IDI_WIND ICON "..\\assets\\wind.ico"
