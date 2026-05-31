@@ -112,11 +112,25 @@ namespace {
 
 void LogInit(const wchar_t* processTag) {
     std::lock_guard<std::mutex> lk(g_logMutex);
+    if (g_logFile != INVALID_HANDLE_VALUE) return;        // idempotent: never leak a prior handle
     std::wstring dir  = ResolveLogDir();
     std::wstring stem = std::wstring(L"wind-") + processTag;
-    RotateIfNeeded(dir, stem);
-    g_logPath = dir + L"\\" + stem + L".log";
-    g_logFile = CreateFileW(g_logPath.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ,
+    std::wstring base = dir + L"\\" + stem + L".log";
+    // Probe whether we can own the shared log. If another instance already holds it (the brief
+    // single-instance-refusal overlap), fall back to a per-PID file so we (a) never rotate or
+    // corrupt the active instance's log and (b) still capture our own startup/refusal trail.
+    HANDLE probe = CreateFileW(base.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ,
+                               nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (probe == INVALID_HANDLE_VALUE) {
+        g_logPath = dir + L"\\" + stem + L"-" + std::to_wstring(GetCurrentProcessId()) + L".log";
+        g_logFile = CreateFileW(g_logPath.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ,
+                                nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        return;
+    }
+    CloseHandle(probe);            // release before rotating (cannot rename a file we hold open)
+    RotateIfNeeded(dir, stem);     // safe: we are the sole owner of the base log
+    g_logPath = base;
+    g_logFile = CreateFileW(base.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ,
                             nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
 }
 
@@ -188,6 +202,7 @@ static void QueryGpu(std::string& gpuOut, std::string& driverOut) {
             gpuOut = nm;
         }
         LARGE_INTEGER umd{};
+        // UMD version is best-effort: may differ from Device Manager driver version; stays "unknown" on failure.
         if (SUCCEEDED(adapter->CheckInterfaceSupport(__uuidof(IDXGIDevice), &umd))) {
             char dv[64];
             std::snprintf(dv, sizeof(dv), "%u.%u.%u.%u",

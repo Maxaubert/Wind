@@ -496,6 +496,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // mean two mouse hooks + two cursor loops = input lock). atexit is the always-restore net for
     // CRT exit paths so no exit can leave the cursor hidden/confined.
     wind::LogInit(L"core");
+    atexit(wind::LogShutdown);
     SiLog("=== launch ===", 0);
     RestoreInputState();
     HANDLE mtx = nullptr;

@@ -3,6 +3,7 @@
 #include <shellapi.h>
 #include <tlhelp32.h>
 #include <wrl.h>
+#include <cstdlib>
 #include "WebView2.h"
 #include <shlwapi.h>
 #include <string>
@@ -216,6 +217,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
 }
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
     wind::LogInit(L"config");
+    atexit(wind::LogShutdown);
     wind::LogSystemSnapshot("config", "");
 
     // Single-instance: opening Settings from the tray (or any second launch) focuses the existing
