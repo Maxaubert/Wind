@@ -119,6 +119,14 @@ TEST_CASE("onboarded defaults to 0 and parses") {
     CHECK(ParseConfig("").onboarded == 0);
     CHECK(ParseConfig("onboarded=1\n").onboarded == 1);
 }
+TEST_CASE("alternate zoom side-buttons default 0 and parse") {
+    Config d = ParseConfig("");
+    CHECK(d.zoomInButton2 == 0);
+    CHECK(d.zoomOutButton2 == 0);
+    Config c = ParseConfig("zoomInButton2=2\nzoomOutButton2=1\n");
+    CHECK(c.zoomInButton2 == 2);
+    CHECK(c.zoomOutButton2 == 1);
+}
 TEST_CASE("alternate zoom VK keys default 0 and parse") {
     Config d = ParseConfig("");
     CHECK(d.zoomInVk2 == 0);

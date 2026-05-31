@@ -9,8 +9,13 @@ struct Config {
     // Default: PageUp (0x21=33) zoom in, PageDown (0x22=34) zoom out.
     int    zoomInVk         = 0;     // shipped unbound (0); onboarding captures the user's choice
     int    zoomOutVk        = 0;
-    // Optional alternate keyboard binding (one per direction). OR-combined with the primary
-    // button/key so a user can have a mouse side-button AND a keyboard fallback. 0 = unbound.
+    // Optional alternate binding (one per direction), OR-combined with the primary so a user can
+    // have e.g. a mouse side-button AND a keyboard fallback. The alternate slot is symmetric with
+    // the primary: it can hold either a side-button (zoomInButton2/zoomOutButton2) or a key
+    // (zoomInVk2/zoomOutVk2 + mods). 0 = unbound. Note: only two physical side-buttons exist, so a
+    // side-button here is only usable when a primary slot holds a key.
+    int    zoomInButton2    = 0;
+    int    zoomOutButton2   = 0;
     int    zoomInVk2        = 0;
     int    zoomOutVk2       = 0;
     // Optional modifier mask for each VK binding (bit 1=Ctrl, 2=Alt, 4=Shift, 8=Win). 0 = no

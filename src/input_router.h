@@ -12,9 +12,10 @@ struct InputState {
 
 class InputRouter {
 public:
-    // inButtonId/outButtonId: 1 = XBUTTON1, 2 = XBUTTON2. swallow: block the buttons
-    // from reaching other apps while running.
-    bool start(int inButtonId, int outButtonId, bool swallow);
+    // Each direction can have a primary AND an alternate side-button (1 = XBUTTON1, 2 = XBUTTON2,
+    // 0 = none); the two are OR-combined so either press zooms that direction. swallow: block the
+    // bound buttons from reaching other apps while running.
+    bool start(int inButtonId, int inButtonId2, int outButtonId, int outButtonId2, bool swallow);
     void stop();
     InputState& state() { return state_; }
     // Atomically read and zero the accumulated raw deltas.
@@ -34,11 +35,15 @@ public:
     // Live-rebind the configured zoom buttons (called from the tick thread on hot-reload).
     // Atomic so the hook thread's reads in setButtonState/isZoomButton stay race-free, and the
     // held flags are cleared so a stale press of the previous button does not stick.
-    void setButtons(int inButtonId, int outButtonId);
+    void setButtons(int inButtonId, int inButtonId2, int outButtonId, int outButtonId2);
 private:
     InputState state_;
-    std::atomic<int> inButtonId_{2};   // 1 = XBUTTON1, 2 = XBUTTON2 (set in start())
+    // Primary + alternate side-button per direction (1 = XBUTTON1, 2 = XBUTTON2, 0 = none); set in
+    // start(). A direction is "held" if either of its bound buttons is down (OR-combined).
+    std::atomic<int> inButtonId_{2};
+    std::atomic<int> inButtonId2_{0};
     std::atomic<int> outButtonId_{1};
+    std::atomic<int> outButtonId2_{0};
     bool swallow_ = true;
     std::atomic<bool> hookActive_{false};   // true once the LL hook is installed (not WIND_NOHOOK)
 };

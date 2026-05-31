@@ -199,8 +199,10 @@ static void RunTick(TickState& t) {
             // Re-bind the hook's button mapping if the user changed it via the config UI; without
             // this the hook would keep firing the OLD button (the new VK works via GetAsyncKeyState
             // but the mouse mapping is captured once in g_input.start at app launch).
-            if (nc.zoomInButton != t.cfg.zoomInButton || nc.zoomOutButton != t.cfg.zoomOutButton) {
-                g_input.setButtons(nc.zoomInButton, nc.zoomOutButton);
+            if (nc.zoomInButton != t.cfg.zoomInButton || nc.zoomOutButton != t.cfg.zoomOutButton
+             || nc.zoomInButton2 != t.cfg.zoomInButton2 || nc.zoomOutButton2 != t.cfg.zoomOutButton2) {
+                g_input.setButtons(nc.zoomInButton, nc.zoomInButton2,
+                                   nc.zoomOutButton, nc.zoomOutButton2);
             }
             if (nc.hideCursorVk != t.cfg.hideCursorVk || nc.hideCursorMods != t.cfg.hideCursorMods) {
                 RegisterHideCursorHotkey(t.hwnd, nc.hideCursorVk, nc.hideCursorMods);
@@ -531,7 +533,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     RegisterHotKey(hwnd, kQuitHotkeyId, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'Q');
     RegisterHideCursorHotkey(hwnd, cfg.hideCursorVk, cfg.hideCursorMods);
 
-    if (!g_input.start(cfg.zoomInButton, cfg.zoomOutButton, /*swallow=*/true)) {
+    if (!g_input.start(cfg.zoomInButton, cfg.zoomInButton2, cfg.zoomOutButton, cfg.zoomOutButton2,
+                       /*swallow=*/true)) {
         MessageBoxW(nullptr, L"Failed to install the mouse hook.", L"Wind", MB_ICONERROR);
         return 1;
     }
