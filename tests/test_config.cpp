@@ -30,7 +30,7 @@ TEST_CASE("renderer knobs have sane defaults") {
     CHECK(c.vsync == 1);                       // vsync on by default
     CHECK(c.dwmFlush == 0);                     // plain vsync pacing by default (fewer stutters)
     CHECK(c.multiMonitor == 0);                // shipped primary-only (follow-cursor opt-in)
-    CHECK(c.cropCapture == 1);                 // crop the copy on full repaints by default
+    CHECK(c.cropCapture == 0);                 // shipped off: always copy all changed regions (no edge staleness)
     CHECK(c.smoothZoom == 1);                  // shipped on (eased-in zoom)
     CHECK(c.zoomInSpeed == doctest::Approx(1.0));
     CHECK(c.zoomOutSpeed == doctest::Approx(1.0));
