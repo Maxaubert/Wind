@@ -39,4 +39,8 @@ std::string FormatLogLine(unsigned long long tsMsUtc, LogLevel lvl,
     return out;
 }
 
+bool ShouldRotate(unsigned long long currentSizeBytes, unsigned long long maxBytes) {
+    return currentSizeBytes >= maxBytes;
+}
+
 }  // namespace wind

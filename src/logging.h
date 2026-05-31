@@ -18,4 +18,13 @@ const char* LogLevelName(LogLevel lvl);
 std::string FormatLogLine(unsigned long long tsMsUtc, LogLevel lvl,
                           const char* category, const std::string& msg);
 
+// Rotation policy. Returns true if a file of `currentSizeBytes` should be rotated before the
+// next write. maxBytes is the per-file cap (the backend uses 1 MiB).
+bool ShouldRotate(unsigned long long currentSizeBytes, unsigned long long maxBytes);
+
+// The shipped limits (kept here so the backend and tests agree on one source).
+constexpr unsigned long long kLogMaxBytes   = 1024ULL * 1024ULL;  // 1 MiB per file
+constexpr int                kLogGenerations = 3;                  // wind-core.log + .1 + .2
+constexpr int                kCrashKeep      = 3;                  // most-recent crash pairs kept
+
 }  // namespace wind

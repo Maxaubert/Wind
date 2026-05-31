@@ -19,3 +19,10 @@ TEST_CASE("FormatLogLine has no trailing newline") {
     std::string line = FormatLogLine(0ULL, LogLevel::Info, "startup", "hi");
     CHECK(line.back() != '\n');
 }
+
+TEST_CASE("ShouldRotate triggers only at/over the cap") {
+    CHECK(ShouldRotate(0, kLogMaxBytes) == false);
+    CHECK(ShouldRotate(kLogMaxBytes - 1, kLogMaxBytes) == false);
+    CHECK(ShouldRotate(kLogMaxBytes, kLogMaxBytes) == true);
+    CHECK(ShouldRotate(kLogMaxBytes + 1, kLogMaxBytes) == true);
+}
