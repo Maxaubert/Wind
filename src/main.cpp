@@ -9,6 +9,7 @@
 #include <cstdarg>
 #include "config.h"
 #include "config_path.h"
+#include "logging.h"
 #pragma comment(lib, "Dwmapi.lib")
 #include "render_engine.h"
 #include "input_router.h"
@@ -434,12 +435,9 @@ static void RestoreInputState() {
 // and only swallows side-buttons anyway. The damaging state (hidden/confined cursor) is undone here.
 static void AtExitRestore() { RestoreInputState(); }
 
-// One-line diagnostic to %TEMP%\wind_si.log (always on; only the single-instance startup path logs,
-// a few lines per launch). Lets us see exactly what the guard decided when something goes wrong.
+// Single-instance startup events route through the unified logger (category "startup").
 static void SiLog(const char* msg, unsigned long val) {
-    wchar_t p[MAX_PATH]; if (!GetTempPathW(MAX_PATH, p)) return; wcscat_s(p, L"wind_si.log");
-    FILE* f = nullptr; _wfopen_s(&f, p, L"a");
-    if (f) { fprintf(f, "[pid %lu] %s %lu\n", GetCurrentProcessId(), msg, val); fclose(f); }
+    wind::Log(wind::LogLevel::Info, "startup", "%s %lu", msg, val);
 }
 
 // Force-kill every OTHER Wind.exe (best effort; OpenProcess may be denied across integrity levels).
