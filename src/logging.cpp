@@ -66,14 +66,17 @@ std::string BuildSnapshot(const SystemInfo& si) {
 
 #ifndef WIND_TESTS
 #include <windows.h>
+#include <dbghelp.h>
 #include <dxgi.h>
 #include <intrin.h>
 #include <shellscalingapi.h>
+#include <algorithm>
 #include <mutex>
 #include <cstdarg>
 #include <vector>
 #include "config_path.h"
 #include "version.h"
+#pragma comment(lib, "dbghelp.lib")
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "shcore.lib")
 
@@ -110,10 +113,61 @@ namespace {
     }
 }  // namespace
 
+// Delete all but the kCrashKeep most-recent crash dump+summary pairs.
+static void PruneOldCrashes(const std::wstring& dir) {
+    std::vector<std::wstring> dmps;
+    WIN32_FIND_DATAW fd{};
+    std::wstring pat = dir + L"\\wind-crash-*.dmp";
+    HANDLE h = FindFirstFileW(pat.c_str(), &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do { dmps.push_back(fd.cFileName); } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+    if ((int)dmps.size() <= kCrashKeep) return;
+    std::sort(dmps.begin(), dmps.end());   // timestamped names sort chronologically
+    for (size_t i = 0; i + (size_t)kCrashKeep < dmps.size(); ++i) {
+        std::wstring stem = dmps[i].substr(0, dmps[i].size() - 4);  // strip ".dmp"
+        DeleteFileW((dir + L"\\" + stem + L".dmp").c_str());
+        DeleteFileW((dir + L"\\" + stem + L".txt").c_str());
+    }
+}
+
+// Delete all but the kCrashKeep most-recent per-PID straggler log files.
+// Matches names like "wind-core-12345.log" (two dashes, all-digit suffix) but NOT
+// "wind-core.log" or "wind-core.1.log" (no dash before the numeric part).
+static void PruneStrayPidLogs(const std::wstring& dir) {
+    std::vector<std::wstring> pidLogs;
+    WIN32_FIND_DATAW fd{};
+    std::wstring pat = dir + L"\\wind-*-*.log";
+    HANDLE h = FindFirstFileW(pat.c_str(), &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            std::wstring name = fd.cFileName;
+            // Accept only names where the suffix after the last dash is all digits.
+            size_t lastDash = name.rfind(L'-');
+            if (lastDash == std::wstring::npos) continue;
+            size_t dotPos = name.rfind(L'.');
+            if (dotPos == std::wstring::npos || dotPos <= lastDash) continue;
+            std::wstring suffix = name.substr(lastDash + 1, dotPos - lastDash - 1);
+            bool allDigits = !suffix.empty();
+            for (wchar_t c : suffix) { if (c < L'0' || c > L'9') { allDigits = false; break; } }
+            if (allDigits) pidLogs.push_back(name);
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+    if ((int)pidLogs.size() <= kCrashKeep) return;
+    std::sort(pidLogs.begin(), pidLogs.end());
+    for (size_t i = 0; i + (size_t)kCrashKeep < pidLogs.size(); ++i) {
+        DeleteFileW((dir + L"\\" + pidLogs[i]).c_str());
+    }
+}
+
 void LogInit(const wchar_t* processTag) {
     std::lock_guard<std::mutex> lk(g_logMutex);
     if (g_logFile != INVALID_HANDLE_VALUE) return;        // idempotent: never leak a prior handle
     std::wstring dir  = ResolveLogDir();
+    PruneOldCrashes(dir);
+    PruneStrayPidLogs(dir);
     std::wstring stem = std::wstring(L"wind-") + processTag;
     std::wstring base = dir + L"\\" + stem + L".log";
     // Probe whether we can own the shared log. If another instance already holds it (the brief
@@ -155,6 +209,57 @@ void LogShutdown() {
         CloseHandle(g_logFile);
         g_logFile = INVALID_HANDLE_VALUE;
     }
+}
+
+void WriteCrashReport(void* exceptionPointers) {
+    auto* ep = reinterpret_cast<EXCEPTION_POINTERS*>(exceptionPointers);
+    std::wstring dir = ResolveLogDir();
+
+    // Timestamped, sortable name.
+    unsigned long long ts = NowMsUtc();
+    std::wstring stamp = std::to_wstring(ts);
+    std::wstring dmpPath = dir + L"\\wind-crash-" + stamp + L".dmp";
+    std::wstring txtPath = dir + L"\\wind-crash-" + stamp + L".txt";
+
+    // Minidump.
+    HANDLE f = CreateFileW(dmpPath.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                           FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (f != INVALID_HANDLE_VALUE) {
+        MINIDUMP_EXCEPTION_INFORMATION mei{};
+        mei.ThreadId = GetCurrentThreadId();
+        mei.ExceptionPointers = ep;
+        mei.ClientPointers = FALSE;
+        MINIDUMP_TYPE type = (MINIDUMP_TYPE)(MiniDumpWithThreadInfo | MiniDumpWithHandleData);
+        MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), f, type,
+                          ep ? &mei : nullptr, nullptr, nullptr);
+        CloseHandle(f);
+    }
+
+    // Text summary.
+    HANDLE t = CreateFileW(txtPath.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                           FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (t != INVALID_HANDLE_VALUE) {
+        char buf[512];
+        DWORD code = ep && ep->ExceptionRecord ? ep->ExceptionRecord->ExceptionCode : 0;
+        void* addr = ep && ep->ExceptionRecord ? ep->ExceptionRecord->ExceptionAddress : nullptr;
+        // Faulting module name from the exception address.
+        wchar_t modName[MAX_PATH] = L"(unknown)";
+        HMODULE mod = nullptr;
+        if (addr && GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                       GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                       (LPCWSTR)addr, &mod) && mod) {
+            GetModuleFileNameW(mod, modName, MAX_PATH);
+        }
+        int n = std::snprintf(buf, sizeof(buf),
+            "Wind crash\r\nversion=%s\r\nexceptionCode=0x%08lX\r\naddress=%p\r\nmodule=%ls\r\n",
+            WIND_VERSION_STR, code, addr, modName);
+        DWORD wrote = 0; if (n > 0) WriteFile(t, buf, (DWORD)n, &wrote, nullptr);
+        CloseHandle(t);
+    }
+
+    // Mirror a one-line marker into the main log so the timeline shows the crash.
+    Log(LogLevel::Error, "crash", "unhandled exception -> %ls", dmpPath.c_str());
+    LogShutdown();
 }
 
 // RtlGetVersion gives the true build number (GetVersionEx lies without a manifest entry).

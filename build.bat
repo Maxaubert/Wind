@@ -33,7 +33,7 @@ if errorlevel 1 (echo [build] rc.exe failed & exit /b 1)
 cl /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE ^
    src\*.cpp src\wind.res ^
    /Fe:Wind.exe ^
-   /link Magnification.lib Dwmapi.lib user32.lib shell32.lib gdi32.lib ^
+   /link Magnification.lib Dwmapi.lib user32.lib shell32.lib gdi32.lib Dbghelp.lib ^
    d3d11.lib dxgi.lib dxguid.lib d3dcompiler.lib windowscodecs.lib ole32.lib ^
    /MANIFEST:EMBED /MANIFESTUAC:NO /MANIFESTINPUT:Wind.manifest /SUBSYSTEM:WINDOWS
 exit /b %errorlevel%
@@ -47,7 +47,7 @@ if errorlevel 1 (echo [build] rc.exe failed & exit /b 1)
 cl /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE /DWIND_UIACCESS ^
    src\*.cpp src\wind.res ^
    /Fe:Wind.exe ^
-   /link Magnification.lib Dwmapi.lib user32.lib shell32.lib gdi32.lib ^
+   /link Magnification.lib Dwmapi.lib user32.lib shell32.lib gdi32.lib Dbghelp.lib ^
    d3d11.lib dxgi.lib dxguid.lib d3dcompiler.lib windowscodecs.lib ole32.lib ^
    /MANIFEST:EMBED /MANIFESTUAC:NO /MANIFESTINPUT:Wind.uiaccess.manifest /SUBSYSTEM:WINDOWS
 exit /b %errorlevel%

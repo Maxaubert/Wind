@@ -900,9 +900,9 @@ bool RenderEngine::dumpFrame(const RenderFrameParams& p, const wchar_t* path) {
 // user is never left without a pointer. The magnification runtime is process-scoped (so exit
 // usually restores it), but a hard crash mid-hide is exactly when this matters.
 static LONG WINAPI CursorRestoreFilter(EXCEPTION_POINTERS* ep) {
-    (void)ep;
     MagShowSystemCursor(TRUE);
     SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, SPIF_SENDCHANGE);
+    wind::WriteCrashReport(ep);          // minidump + text summary into the log dir
     return EXCEPTION_CONTINUE_SEARCH;   // let the default handler still report the crash
 }
 

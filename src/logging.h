@@ -66,4 +66,9 @@ void LogShutdown();   // flush + close
 // config host). Safe to call once right after LogInit.
 void LogSystemSnapshot(const char* buildFlavor, const std::string& configDump);
 
+// Write a minidump + text summary into the log dir for an unhandled exception. Safe to call from a
+// SetUnhandledExceptionFilter (does minimal, allocation-light work). ep is the EXCEPTION_POINTERS
+// passed to the filter (typed as void* so the header stays <windows.h>-free).
+void WriteCrashReport(void* exceptionPointers);
+
 }  // namespace wind
