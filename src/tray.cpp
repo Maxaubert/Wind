@@ -1,17 +1,24 @@
 #include "tray.h"
+#include "resource.h"
 #include <shellapi.h>
 namespace wind { namespace Tray {
 static NOTIFYICONDATAW g_nid{};
 static const UINT WM_TRAY = WM_APP + 1;
 static const UINT ID_SETTINGS = 1003, ID_QUIT = 1002;
 
-void Add(HWND hwnd, HINSTANCE /*hInst*/) {
+void Add(HWND hwnd, HINSTANCE hInst) {
     g_nid.cbSize = sizeof(g_nid);
     g_nid.hWnd = hwnd;
     g_nid.uID = 1;
     g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     g_nid.uCallbackMessage = WM_TRAY;
-    g_nid.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    // Our logo badge at the shell's small-icon size (picks the 16px frame from the multi-size .ico
+    // for a crisp tray render). Fall back to the generic app icon if the resource can't be loaded.
+    if (!hInst) hInst = GetModuleHandleW(nullptr);
+    g_nid.hIcon = (HICON)LoadImageW(hInst, MAKEINTRESOURCEW(IDI_WIND), IMAGE_ICON,
+                                    GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON),
+                                    LR_DEFAULTCOLOR);
+    if (!g_nid.hIcon) g_nid.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
     lstrcpyW(g_nid.szTip, L"Wind magnifier");
     Shell_NotifyIconW(NIM_ADD, &g_nid);
 }

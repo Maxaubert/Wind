@@ -16,6 +16,7 @@
 #include "zoom_controller.h"
 #include "tray.h"
 #include "lock_detector.h"
+#include "resource.h"
 
 using namespace wind;
 
@@ -518,6 +519,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInst;
     wc.lpszClassName = L"WindMagnifierWnd";
+    wc.hIcon = LoadIconW(hInst, MAKEINTRESOURCEW(IDI_WIND));  // logo badge for alt-tab/taskbar
     RegisterClassW(&wc);
     HWND hwnd = CreateWindowExW(0, wc.lpszClassName, L"Wind", WS_OVERLAPPED,
                                 0, 0, 0, 0, nullptr, nullptr, hInst, nullptr);
