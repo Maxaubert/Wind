@@ -25,6 +25,8 @@ Config ParseConfig(const std::string& text) {
         try {
             if (key == "zoomInButton")          c.zoomInButton = std::stoi(val);
             else if (key == "zoomOutButton")    c.zoomOutButton = std::stoi(val);
+            else if (key == "zoomInButton2")    c.zoomInButton2 = std::stoi(val);
+            else if (key == "zoomOutButton2")   c.zoomOutButton2 = std::stoi(val);
             else if (key == "recenterVk")       c.recenterVk = std::stoi(val);
             else if (key == "hideCursorVk")     c.hideCursorVk = std::stoi(val);
             else if (key == "hideCursorMods")   c.hideCursorMods = std::stoi(val);
@@ -97,8 +99,12 @@ Config LoadConfig(const std::wstring& path) {
                "; Modifier mask required with each zoom key (bit 1=Ctrl, 2=Alt, 4=Shift, 8=Win;\n"
                ";   0=no modifier). e.g. 3 = Ctrl+Alt. Extra modifiers held don't disqualify.\n"
                "zoomInMods=0\nzoomOutMods=0\n"
-               "; Optional SECOND keyboard binding per direction (VK + mods; 0=unbound), OR-combined\n"
-               ";   with the primary so you can have e.g. a side-button AND a keyboard fallback.\n"
+               "; Optional SECOND binding per direction, OR-combined with the primary so you can have\n"
+               ";   e.g. a side-button AND a keyboard fallback. Symmetric with the primary slot: it can\n"
+               ";   be a side-button (zoomInButton2/zoomOutButton2: 1/2/0) OR a key (zoomInVk2/zoomOutVk2\n"
+               ";   + mods). Only two physical side-buttons exist, so a side-button here is only usable\n"
+               ";   when a primary slot holds a key.\n"
+               "zoomInButton2=0\nzoomOutButton2=0\n"
                "zoomInVk2=0\nzoomOutVk2=0\nzoomInMods2=0\nzoomOutMods2=0\n"
                "; hideCursorVk/hideCursorMods: hotkey to toggle the magnified cursor on/off while\n"
                ";   zoomed (does not reset zoom). VK + mods, 0=unbound.\n"

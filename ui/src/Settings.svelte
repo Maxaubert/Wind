@@ -18,6 +18,7 @@
     const v = {};
     for (const s of sections) for (const r of s.rows) if (r.key[0] !== '_') v[r.key] = (r.key in cfg) ? cfg[r.key] : r.def;
     const kbDefaults = { zoomInButton:'2', zoomInVk:'33', zoomOutButton:'1', zoomOutVk:'34',
+                         zoomInButton2:'0', zoomOutButton2:'0',
                          zoomInVk2:'0', zoomOutVk2:'0',
                          zoomInMods:'0', zoomOutMods:'0', zoomInMods2:'0', zoomOutMods2:'0',
                          hideCursorVk:'0', hideCursorMods:'0' };
@@ -43,9 +44,12 @@
     const key = keyOrPatch;
     if (key === '__action') { if (val === 'openIni') openIni(); return; }
     const next = { ...values, [key]: val };
-    // Disabling the alternate-keybinds toggle clears the alternate VK fields so any previously
-    // bound alt keys stop firing (Apply still has to be pressed to persist).
-    if (key === 'altKeybinds' && Number(val) === 0) { next.zoomInVk2 = '0'; next.zoomOutVk2 = '0'; }
+    // Disabling the alternate-keybinds toggle clears the alternate bindings (side-button + key) so
+    // any previously bound alt input stops firing (Apply still has to be pressed to persist).
+    if (key === 'altKeybinds' && Number(val) === 0) {
+      next.zoomInVk2 = '0'; next.zoomOutVk2 = '0';
+      next.zoomInButton2 = '0'; next.zoomOutButton2 = '0';
+    }
     values = next;
   }
   function apply() {
