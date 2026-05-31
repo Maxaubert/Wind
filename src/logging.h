@@ -13,7 +13,7 @@ enum class LogLevel { Info, Warn, Error };
 const char* LogLevelName(LogLevel lvl);
 
 // One formatted log line WITHOUT a trailing newline.
-//   "2026-05-31T08:14:22.137Z  WARN  render   <msg>"
+//   "2026-05-31T08:14:22.137Z  WARN  render  <msg>"
 // tsMsUtc = milliseconds since the Unix epoch (UTC). category is a short tag.
 std::string FormatLogLine(unsigned long long tsMsUtc, LogLevel lvl,
                           const char* category, const std::string& msg);
@@ -25,7 +25,7 @@ bool ShouldRotate(unsigned long long currentSizeBytes, unsigned long long maxByt
 // The shipped limits (kept here so the backend and tests agree on one source).
 constexpr unsigned long long kLogMaxBytes   = 1024ULL * 1024ULL;  // 1 MiB per file
 constexpr int                kLogGenerations = 3;                  // wind-core.log + .1 + .2
-constexpr int                kCrashKeep      = 3;                  // most-recent crash pairs kept
+constexpr int                kCrashKeep      = 3;                  // used by the Win32 backend (crash-dump pruning); kept here so all log limits live together
 
 struct MonitorInfo {
     std::string name;          // e.g. "\\.\DISPLAY1"

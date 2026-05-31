@@ -47,3 +47,19 @@ TEST_CASE("BuildSnapshot includes version, OS, GPU and each monitor") {
     CHECK(s.find("vrr=on")                != std::string::npos);
     CHECK(s.find("maxLevel=20")           != std::string::npos);
 }
+
+TEST_CASE("BuildSnapshot with no monitors") {
+    SystemInfo si;
+    si.windVersion = "0.1.0"; si.buildFlavor = "normal";
+    si.osBuild = "Windows 10.0.26200"; si.cpu = "CPU"; si.logicalCores = 1;
+    si.ramBytes = 1024ULL * 1024ULL * 1024ULL; si.gpu = "GPU"; si.driverVersion = "1.0";
+    std::string s = BuildSnapshot(si);
+    CHECK(s.find("Monitors: 0") != std::string::npos);
+    CHECK(s.find("Wind 0.1.0 (normal)") != std::string::npos);
+}
+
+TEST_CASE("FormatLogLine tolerates a null category") {
+    std::string line = FormatLogLine(0ULL, LogLevel::Info, nullptr, "msg");
+    CHECK(line.find("INFO") != std::string::npos);
+    CHECK(line.find("msg")  != std::string::npos);
+}

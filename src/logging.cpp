@@ -2,7 +2,7 @@
 #include "logging.h"
 #include <cstdio>
 #include <ctime>
-#include <sstream>
+#include <sstream>  // used by BuildSnapshot
 
 namespace wind {
 
