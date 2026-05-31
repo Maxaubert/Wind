@@ -43,4 +43,23 @@ bool ShouldRotate(unsigned long long currentSizeBytes, unsigned long long maxByt
     return currentSizeBytes >= maxBytes;
 }
 
+std::string BuildSnapshot(const SystemInfo& si) {
+    std::ostringstream o;
+    o << "==== system snapshot ====\n";
+    o << "Wind " << si.windVersion << " (" << si.buildFlavor << ")\n";
+    o << "OS: " << si.osBuild << "\n";
+    o << "CPU: " << si.cpu << " (" << si.logicalCores << " logical cores)\n";
+    o << "RAM: " << (si.ramBytes / (1024ULL * 1024ULL)) << " MiB\n";
+    o << "GPU: " << si.gpu << "  driver " << si.driverVersion << "\n";
+    o << "Monitors: " << si.monitors.size() << "\n";
+    for (const auto& m : si.monitors) {
+        o << "  " << m.name << "  " << m.w << "x" << m.h << "@" << m.refreshHz
+          << "  dpi=" << m.dpiPercent << "%  rot=" << m.rotationDeg
+          << "  hdr=" << (m.hdr ? 1 : 0) << "  vrr=" << m.vrr << "\n";
+    }
+    o << "---- config ----\n" << si.configDump << "\n";
+    o << "=========================";
+    return o.str();
+}
+
 }  // namespace wind
