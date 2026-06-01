@@ -115,6 +115,7 @@ struct TickState {
     double sinceEngineCheck = 0.0;     // throttles the foreground poll (~2 Hz)
     int    zorderBand = 0; bool hdrTonemap = false;   // saved for re-initializing the render engine
     int    lastMagX = INT_MIN, lastMagY = INT_MIN;   // last Mag transform offset (skip redundant calls)
+    double magXOff = 0.0, magYOff = 0.0;             // tracked Mag source offset (dead-zone follow; float, rounded for the API)
     // Frame-pacing diagnostics (diagnostics=1): a 2 s window of loop-interval stats.
     double diagAccum = 0.0, diagSumDt = 0.0, diagMaxDt = 0.0;
     int    diagFrames = 0, diagHitches = 0;
@@ -305,23 +306,44 @@ static bool RunTick(TickState& t) {
 
     int rawDx, rawDy; g_input.drainRaw(rawDx, rawDy);
 
-    // Low-power mode: magnify via the Windows Magnification API instead of the own renderer. Center
-    // the cursor with an INTEGER source offset (the judder source, accepted here). No overlay, no
-    // Desktop Duplication, no SetCursorPos warp (MagSetInputTransform maps clicks in the UIAccess
-    // build), no drawn cursor (the Mag API scales the real one). Returns no-present; the loop
-    // timer-paces. Primary monitor only. In mode 2 (auto), SelectEngine switches to Mag when the
-    // desktop is foreground and back to Render when a fullscreen app is foreground; switch only at 1x.
+    // Low-power mode: magnify via the Windows Magnification API instead of the own renderer. No
+    // overlay, no Desktop Duplication, no SetCursorPos warp (MagSetInputTransform maps clicks in the
+    // UIAccess build), no drawn cursor (the Mag API scales the real one). Returns no-present; the
+    // loop timer-paces. Primary monitor only. In mode 2 (auto), SelectEngine switches engines at 1x.
+    //
+    // DEAD-ZONE FOLLOW (kills the cursor wobble): MagSetFullscreenTransform can only pan in integer
+    // source pixels at DWM's composite rate, while the OS cursor moves continuously and faster - so
+    // pinning the cursor to dead-center every frame makes it oscillate (the view jerks to catch the
+    // faster cursor, amplified by zoom). Instead we HOLD the source offset fixed while the cursor
+    // roams a central region (the view is static, so the cursor glides smoothly with zero wobble),
+    // and pan only when it reaches the region edge. While zooming in / ramping we keep it centered
+    // (the user is not panning then); the dead zone engages once the zoom level settles.
     if (t.active == TickState::Engine::Mag) {
         if (lvl > 1.0) {
             const int sw = GetSystemMetrics(SM_CXSCREEN);
             const int sh = GetSystemMetrics(SM_CYSCREEN);
-            const int viewW = (int)(sw / lvl);
-            const int viewH = (int)(sh / lvl);
+            const double viewW = sw / lvl, viewH = sh / lvl;
             POINT pt; GetCursorPos(&pt);
-            int xOff = pt.x - viewW / 2;
-            int yOff = pt.y - viewH / 2;
-            if (xOff < 0) xOff = 0; else if (xOff > sw - viewW) xOff = sw - viewW;
-            if (yOff < 0) yOff = 0; else if (yOff > sh - viewH) yOff = sh - viewH;
+            if (t.prevLvl <= 1.0 || t.lastMagX == INT_MIN || lvl != t.prevLvl) {
+                // Zoom-in or still ramping: keep the cursor centered.
+                t.magXOff = pt.x - viewW / 2.0;
+                t.magYOff = pt.y - viewH / 2.0;
+            } else {
+                // Settled: hold the offset while the cursor stays inside the central dead zone;
+                // pan only when it crosses the edge. kDeadZoneMargin = fraction of the screen kept
+                // as the pan margin on each side (0.30 -> the cursor roams the central ~40%).
+                const double kDeadZoneMargin = 0.30;
+                const double mx = sw * kDeadZoneMargin, my = sh * kDeadZoneMargin;
+                const double csx = (pt.x - t.magXOff) * lvl;   // cursor's current on-screen position
+                const double csy = (pt.y - t.magYOff) * lvl;
+                if (csx < mx)            t.magXOff = pt.x - mx / lvl;
+                else if (csx > sw - mx)  t.magXOff = pt.x - (sw - mx) / lvl;
+                if (csy < my)            t.magYOff = pt.y - my / lvl;
+                else if (csy > sh - my)  t.magYOff = pt.y - (sh - my) / lvl;
+            }
+            if (t.magXOff < 0) t.magXOff = 0; else if (t.magXOff > sw - viewW) t.magXOff = sw - viewW;
+            if (t.magYOff < 0) t.magYOff = 0; else if (t.magYOff > sh - viewH) t.magYOff = sh - viewH;
+            const int xOff = (int)(t.magXOff + 0.5), yOff = (int)(t.magYOff + 0.5);
             if (lvl != t.prevLvl || xOff != t.lastMagX || yOff != t.lastMagY) {
                 t.mag->setTransform(lvl, xOff, yOff);
                 t.lastMagX = xOff; t.lastMagY = yOff;
