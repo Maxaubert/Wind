@@ -4,6 +4,7 @@
 #include "hdr_info.h"
 #include "cursor_decode.h"
 #include "png_dump.h"
+#include "logging.h"
 #include <windows.h>
 #include <d3d11.h>
 #include <dxgi1_6.h>
@@ -32,15 +33,13 @@ namespace wind {
 
 using Microsoft::WRL::ComPtr;
 
-// Diagnostic log to %TEMP%\wind_render.log (so we can see why the deployed UIAccess build
-// behaves a certain way - the overlay is capture-excluded and runs from Program Files).
+// Render-engine events route through the unified logger (category "render").
 static void RLog(const char* fmt, ...) {
-    char path[MAX_PATH]; DWORD n = GetTempPathA(MAX_PATH, path);
-    if (n == 0 || n > MAX_PATH) return;
-    lstrcatA(path, "wind_render.log");
-    FILE* f = nullptr; if (fopen_s(&f, path, "a") != 0 || !f) return;
-    va_list ap; va_start(ap, fmt); vfprintf(f, fmt, ap); va_end(ap);
-    fputc('\n', f); fclose(f);
+    char msg[1024];
+    va_list ap; va_start(ap, fmt);
+    _vsnprintf_s(msg, sizeof(msg), _TRUNCATE, fmt, ap);
+    va_end(ap);
+    wind::Log(wind::LogLevel::Info, "render", "%s", msg);
 }
 
 static ID3DBlob* CompileShader(const char* src, const char* entry, const char* target) {
@@ -901,9 +900,11 @@ bool RenderEngine::dumpFrame(const RenderFrameParams& p, const wchar_t* path) {
 // user is never left without a pointer. The magnification runtime is process-scoped (so exit
 // usually restores it), but a hard crash mid-hide is exactly when this matters.
 static LONG WINAPI CursorRestoreFilter(EXCEPTION_POINTERS* ep) {
-    (void)ep;
+    static LONG s_inHandler = 0;
+    if (InterlockedExchange(&s_inHandler, 1)) return EXCEPTION_CONTINUE_SEARCH;
     MagShowSystemCursor(TRUE);
     SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, SPIF_SENDCHANGE);
+    wind::WriteCrashReport(ep);          // minidump + text summary into the log dir
     return EXCEPTION_CONTINUE_SEARCH;   // let the default handler still report the crash
 }
 

@@ -7,8 +7,10 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstdarg>
+#include <sstream>
 #include "config.h"
 #include "config_path.h"
+#include "logging.h"
 #pragma comment(lib, "Dwmapi.lib")
 #include "render_engine.h"
 #include "input_router.h"
@@ -434,12 +436,9 @@ static void RestoreInputState() {
 // and only swallows side-buttons anyway. The damaging state (hidden/confined cursor) is undone here.
 static void AtExitRestore() { RestoreInputState(); }
 
-// One-line diagnostic to %TEMP%\wind_si.log (always on; only the single-instance startup path logs,
-// a few lines per launch). Lets us see exactly what the guard decided when something goes wrong.
+// Single-instance startup events route through the unified logger (category "startup").
 static void SiLog(const char* msg, unsigned long val) {
-    wchar_t p[MAX_PATH]; if (!GetTempPathW(MAX_PATH, p)) return; wcscat_s(p, L"wind_si.log");
-    FILE* f = nullptr; _wfopen_s(&f, p, L"a");
-    if (f) { fprintf(f, "[pid %lu] %s %lu\n", GetCurrentProcessId(), msg, val); fclose(f); }
+    wind::Log(wind::LogLevel::Info, "startup", "%s %lu", msg, val);
 }
 
 // Force-kill every OTHER Wind.exe (best effort; OpenProcess may be denied across integrity levels).
@@ -496,6 +495,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // If another live instance refuses to yield, exit WITHOUT installing hooks (two instances would
     // mean two mouse hooks + two cursor loops = input lock). atexit is the always-restore net for
     // CRT exit paths so no exit can leave the cursor hidden/confined.
+    wind::LogInit(L"core");
+    atexit(wind::LogShutdown);
     SiLog("=== launch ===", 0);
     RestoreInputState();
     HANDLE mtx = nullptr;
@@ -513,6 +514,21 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // resolution is used by WindConfig.exe so both processes always touch the same file.
     std::wstring iniPath = wind::ResolveIniPath();
     Config cfg = LoadConfig(iniPath);
+
+    // Render the live config as key=value lines for the snapshot.
+    {
+        std::ostringstream cd;
+        cd << "maxLevel=" << cfg.maxLevel << "\nzoomInSpeed=" << cfg.zoomInSpeed
+           << "\nzoomOutSpeed=" << cfg.zoomOutSpeed << "\nmultiMonitor=" << cfg.multiMonitor
+           << "\ncropCapture=" << cfg.cropCapture << "\nvsync=" << cfg.vsync
+           << "\ndwmFlush=" << cfg.dwmFlush << "\nzorderBand=" << cfg.zorderBand
+           << "\ncursorVisibility=" << cfg.cursorVisibility << "\nhdrTonemap=" << cfg.hdrTonemap;
+    #ifdef WIND_UIACCESS
+        wind::LogSystemSnapshot("uiaccess", cd.str());
+    #else
+        wind::LogSystemSnapshot("normal", cd.str());
+    #endif
+    }
 
     // Hidden window: owns the tray icon + menu and receives WM_INPUT.
     WNDCLASSW wc{};
@@ -738,5 +754,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     g_input.stop();
     Tray::Remove();
     if (mtx) { ReleaseMutex(mtx); CloseHandle(mtx); }
+    wind::LogShutdown();
     return 0;
 }

@@ -3,6 +3,7 @@
 #include <shellapi.h>
 #include <tlhelp32.h>
 #include <wrl.h>
+#include <cstdlib>
 #include "WebView2.h"
 #include <shlwapi.h>
 #include <string>
@@ -11,6 +12,7 @@
 #include <map>
 #include "ini_edit.h"
 #include "../config_path.h"
+#include "../logging.h"
 #include "../resource.h"
 #pragma comment(lib, "shlwapi.lib")
 
@@ -166,6 +168,12 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
         HINSTANCE r = ShellExecuteW(nullptr, L"open", IniPath().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
         if (reinterpret_cast<INT_PTR>(r) <= 32)
             ShellExecuteW(nullptr, L"open", L"notepad.exe", IniPath().c_str(), nullptr, SW_SHOWNORMAL);
+    } else if (type == "exportDiagnostics") {
+        std::wstring zip = wind::ExportDiagnosticsToDesktop();
+        if (!zip.empty()) {
+            std::wstring args = L"/select,\"" + zip + L"\"";
+            ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
+        }
     }
 }
 static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
@@ -226,6 +234,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
         CloseHandle(mtx);
         return 0;
     }
+    wind::LogInit(L"config");
+    atexit(wind::LogShutdown);
+    wind::LogSystemSnapshot("config", "");
+
     bool onboard = lpCmdLine && wcsstr(lpCmdLine, L"--onboard") != nullptr;
     // Settings should never run without the magnifier, and never show the config page against a
     // not-yet-set-up config. So, when launched as Settings (no --onboard):
@@ -318,5 +330,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
             return S_OK;
         }).Get());
     MSG msg; while (GetMessageW(&msg, nullptr, 0, 0)) { TranslateMessage(&msg); DispatchMessageW(&msg); }
+    wind::LogShutdown();
     return 0;
 }

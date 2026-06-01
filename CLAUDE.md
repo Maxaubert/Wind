@@ -129,7 +129,12 @@ staged Apply/Discard footer.
       to `CreateCoreWebView2EnvironmentWithOptions`. The default (`<exeDir>\WindConfig.exe.WebView2`)
       is read-only in Program Files, which makes the env creation fail and the window paint as
       an empty shell. Keep the explicit path when touching the host's env setup.
-    - Diagnostics: `wind_diag.log` goes to `%TEMP%`; `wind_selftest.png` is dev-only (env-gated).
+    - Diagnostics: the unified logger writes rolling per-process logs (`wind-core.log` /
+      `wind-config.log`), the startup system snapshot, and crash dumps (`wind-crash-*.dmp/.txt`) to
+      `%LOCALAPPDATA%\Wind\logs\` (resolved via `wind::ResolveLogDir`; src/logging.*). The tray and
+      WindConfig "Export diagnostics" action zips that folder to the Desktop (Compress-Archive). The
+      opt-in `diagnostics=1` frame-pacing trace still goes to `%TEMP%\wind_diag.log` separately;
+      `wind_selftest.png` is dev-only (env-gated).
 
 ## Toolchain notes (this machine)
 - VS 2026 Community is a prerelease channel, so `vswhere` needs `-all -prerelease`

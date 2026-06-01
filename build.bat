@@ -30,12 +30,13 @@ rem --- App build (normal: uiAccess=false, runs from anywhere) ----------------
 rem Compile the app-icon resource (rc.exe ships with the Windows SDK, on PATH via vcvars).
 rc /nologo /fo "%ROOT%src\wind.res" "%ROOT%src\wind.rc"
 if errorlevel 1 (echo [build] rc.exe failed & exit /b 1)
-cl /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE ^
+cl /nologo /std:c++17 /EHsc /O2 /W4 /Zi /DUNICODE /D_UNICODE ^
    src\*.cpp src\wind.res ^
    /Fe:Wind.exe ^
-   /link Magnification.lib Dwmapi.lib user32.lib shell32.lib gdi32.lib ^
+   /link Magnification.lib Dwmapi.lib user32.lib shell32.lib gdi32.lib Dbghelp.lib ^
    d3d11.lib dxgi.lib dxguid.lib d3dcompiler.lib windowscodecs.lib ole32.lib ^
-   /MANIFEST:EMBED /MANIFESTUAC:NO /MANIFESTINPUT:Wind.manifest /SUBSYSTEM:WINDOWS
+   /MANIFEST:EMBED /MANIFESTUAC:NO /MANIFESTINPUT:Wind.manifest /SUBSYSTEM:WINDOWS ^
+   /DEBUG /OPT:REF /OPT:ICF
 exit /b %errorlevel%
 
 rem --- UIAccess build (uiAccess=true: must be signed + run from Program Files) -
@@ -44,12 +45,13 @@ rem    to cover the Start menu / taskbar / tray. Deploy via tools\uiaccess_setup
 :uiaccess
 rc /nologo /fo "%ROOT%src\wind.res" "%ROOT%src\wind.rc"
 if errorlevel 1 (echo [build] rc.exe failed & exit /b 1)
-cl /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE ^
+cl /nologo /std:c++17 /EHsc /O2 /W4 /Zi /DUNICODE /D_UNICODE /DWIND_UIACCESS ^
    src\*.cpp src\wind.res ^
    /Fe:Wind.exe ^
-   /link Magnification.lib Dwmapi.lib user32.lib shell32.lib gdi32.lib ^
+   /link Magnification.lib Dwmapi.lib user32.lib shell32.lib gdi32.lib Dbghelp.lib ^
    d3d11.lib dxgi.lib dxguid.lib d3dcompiler.lib windowscodecs.lib ole32.lib ^
-   /MANIFEST:EMBED /MANIFESTUAC:NO /MANIFESTINPUT:Wind.uiaccess.manifest /SUBSYSTEM:WINDOWS
+   /MANIFEST:EMBED /MANIFESTUAC:NO /MANIFESTINPUT:Wind.uiaccess.manifest /SUBSYSTEM:WINDOWS ^
+   /DEBUG /OPT:REF /OPT:ICF
 exit /b %errorlevel%
 
 rem --- Config UI host (WindConfig.exe). Builds the Svelte UI first if it exists. ----
@@ -65,7 +67,7 @@ rc /nologo /fo "%ROOT%src\wind.res" "%ROOT%src\wind.rc"
 if errorlevel 1 (echo [build] rc.exe failed & exit /b 1)
 cl /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE ^
    /I third_party\webview2\include ^
-   src\config_ui\main.cpp src\config_ui\ini_edit.cpp src\wind.res ^
+   src\config_ui\main.cpp src\config_ui\ini_edit.cpp src\logging.cpp src\wind.res ^
    /Fe:WindConfig.exe ^
    /link third_party\webview2\x64\WebView2LoaderStatic.lib ^
    user32.lib shell32.lib shlwapi.lib ole32.lib version.lib advapi32.lib ntdll.lib /SUBSYSTEM:WINDOWS
@@ -76,7 +78,7 @@ rem --- Test build (pure-logic sources only; no <windows.h>) -----------------
 rem /wd5285 silences a known doctest 2.4.11 header warning under MSVC /W4.
 cl /nologo /std:c++17 /EHsc /W4 /wd5285 /DWIND_TESTS /I third_party ^
    tests\*.cpp ^
-   src\transform.cpp src\zoom_controller.cpp src\config.cpp src\cursor_mapper.cpp src\lock_detector.cpp src\config_ui\ini_edit.cpp ^
+   src\transform.cpp src\zoom_controller.cpp src\config.cpp src\cursor_mapper.cpp src\lock_detector.cpp src\config_ui\ini_edit.cpp src\logging.cpp ^
    /Fe:wind_tests.exe
 if errorlevel 1 exit /b 1
 "%ROOT%wind_tests.exe"

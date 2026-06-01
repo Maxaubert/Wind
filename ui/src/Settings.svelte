@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { sections } from './settings-schema.js';
-  import { getConfig, setConfig, openIni, windowControl } from './bridge.js';
+  import { getConfig, setConfig, openIni, exportDiagnostics, windowControl } from './bridge.js';
   import { currentTheme, applyTheme, nextTheme, setTheme } from './theme.js';
   import Rail from './lib/Rail.svelte';
   import Section from './lib/Section.svelte';
@@ -86,6 +86,7 @@
       {/each}
     </div>
     <footer>
+      <button class="btn" on:click={exportDiagnostics}>Export diagnostics</button>
       <button class="btn" on:click={discard} disabled={!dirty}>Discard</button>
       <button class="btn primary" on:click={apply} disabled={!dirty}>Apply</button>
     </footer>

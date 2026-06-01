@@ -22,3 +22,5 @@ export function getMode() {
 export function windowControl(action) { post({ type: 'window', action }); }
 // "Edit config file" -> host opens magnifier.ini with the registered .ini handler (Notepad fallback).
 export function openIni() { post({ type: 'openIni' }); }
+// "Export diagnostics" -> host zips %LOCALAPPDATA%\Wind\logs to the Desktop and reveals it.
+export function exportDiagnostics() { post({ type: 'exportDiagnostics' }); }
