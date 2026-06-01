@@ -171,3 +171,8 @@ TEST_CASE("lowPower accepts 0/1/2 and clamps out-of-range") {
     CHECK(ParseConfig("lowPower=5\n").lowPower == 0);   // invalid -> off (own-renderer)
     CHECK(ParseConfig("lowPower=-1\n").lowPower == 0);
 }
+TEST_CASE("flipPresent defaults off, parses, clamps") {
+    CHECK(ParseConfig("").flipPresent == 0);
+    CHECK(ParseConfig("flipPresent=1\n").flipPresent == 1);
+    CHECK(ParseConfig("flipPresent=3\n").flipPresent == 0);   // invalid -> off
+}

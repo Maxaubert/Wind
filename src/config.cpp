@@ -60,6 +60,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "cropCapture")        c.cropCapture = std::stoi(val);
             else if (key == "lowPower")           c.lowPower = std::stoi(val);
             else if (key == "onboarded")          c.onboarded = std::stoi(val);
+            else if (key == "flipPresent")        c.flipPresent = std::stoi(val);
         } catch (...) { /* keep default on bad value */ }
     }
     // Clamp numeric fields to their documented ranges. The ini is a hand-editable surface, and an
@@ -67,6 +68,7 @@ Config ParseConfig(const std::string& text) {
     // or a negative ramp) would otherwise silently break behavior with no feedback. Ranges mirror the
     // config UI sliders / the struct-comment docs.
     if (c.lowPower < 0 || c.lowPower > 2) c.lowPower = 0;   // 0=own-renderer 1=low-power 2=auto; else off
+    if (c.flipPresent < 0 || c.flipPresent > 1) c.flipPresent = 0;
     c.maxLevel        = clampd(c.maxLevel,        1.0, 50.0);   // must be >= the 1.0 min zoom level
     c.zoomInSpeed     = clampd(c.zoomInSpeed,     0.25, 4.0);
     c.zoomOutSpeed    = clampd(c.zoomOutSpeed,    0.25, 4.0);
@@ -161,6 +163,10 @@ Config LoadConfig(const std::wstring& path) {
                ";   but the pan judders - integer offset); 2=auto (low-power on desktop, own-renderer in\n"
                ";   fullscreen games). Values outside 0..2 are treated as 0. Per-machine.\n"
                "lowPower=0\n"
+               "; flipPresent: 0=normal present (default); 1=DirectComposition flip-model present\n"
+               ";   (cheaper own-renderer on a fixed-refresh integrated GPU; TEARS on VRR/G-Sync,\n"
+               ";   so fixed-refresh monitors only).\n"
+               "flipPresent=0\n"
                "; onboarded: 0 = run the first-launch setup once; set to 1 once finished\n"
                "onboarded=0\n";
         return Config{};

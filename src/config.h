@@ -106,6 +106,11 @@ struct Config {
     // First-launch onboarding: 0 = not yet onboarded (also true of a freshly created ini), so the
     // core spawns WindConfig.exe --onboard once; the onboarding flow sets this to 1 on completion.
     int    onboarded = 0;
+    // Present backend for the own-renderer (default 0 = blt, composited by DWM, VRR-safe). 1 = a
+    // DirectComposition flip-model swapchain that a fixed-refresh display can scan out on an
+    // independent-flip / MPO plane (cheap, for a weak iGPU). FIXED-REFRESH MONITORS ONLY: it tears
+    // on a VRR / G-Sync display (why it was removed in #69). Per-machine; default off.
+    int    flipPresent = 0;
 };
 // Pure: parse INI text (key=value, ';' or '#' comments) into a Config, keeping
 // defaults for missing/malformed keys.
