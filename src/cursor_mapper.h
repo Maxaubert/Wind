@@ -23,6 +23,10 @@ public:
     MapResult update(int dx, int dy, double level);
     double centerX() const { return cx_; }         // rendered (smoothed) center
     double centerY() const { return cy_; }
+    // True when the rendered center has converged onto the delta-accumulated target (within a
+    // sub-pixel epsilon), i.e. smoothing inertia has nothing left to animate. The render loop uses
+    // this (together with "was there input this tick") to decide whether a redraw is still needed.
+    bool settled() const;
 private:
     int sw_, sh_;
     double alpha_;          // per-frame easing factor (1 - smoothing), clamped

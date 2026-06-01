@@ -98,3 +98,20 @@ TEST_CASE("reset overrides the accumulated center") {
     CHECK(m.centerX() == doctest::Approx(800.0));
     CHECK(m.centerY() == doctest::Approx(400.0));
 }
+
+TEST_CASE("settled: true at rest, false while easing, true once converged") {
+    CursorMapper m(1920, 1080, 0.5);   // smoothing 0.5 -> eases over several frames
+    m.reset(960, 540);
+    CHECK(m.settled());                 // at rest after reset
+    m.update(40, 0, 2.0);               // target jumps +40; rendered eased partway -> not settled
+    CHECK_FALSE(m.settled());
+    for (int i = 0; i < 50; ++i) m.update(0, 0, 2.0);   // no more input; ease to target
+    CHECK(m.settled());                 // converged
+}
+
+TEST_CASE("settled: snaps immediately with no smoothing") {
+    CursorMapper m(1920, 1080, 0.0);   // no inertia -> rendered == target after update
+    m.reset(960, 540);
+    m.update(40, 0, 2.0);
+    CHECK(m.settled());                 // already at target (the per-tick move still renders via dx!=0)
+}

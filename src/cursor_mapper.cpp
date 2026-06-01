@@ -1,5 +1,6 @@
 #include "cursor_mapper.h"
 #include "transform.h"
+#include <cmath>
 namespace wind {
 CursorMapper::CursorMapper(int screenW, int screenH, double smoothing)
     : sw_(screenW), sh_(screenH),
@@ -7,6 +8,12 @@ CursorMapper::CursorMapper(int screenW, int screenH, double smoothing)
     alpha_ = 1.0 - smoothing;
     if (alpha_ > 1.0) alpha_ = 1.0;
     if (alpha_ < 0.05) alpha_ = 0.05;     // never fully stall (keep responsiveness)
+}
+
+bool CursorMapper::settled() const {
+    // 0.5 px: once the rendered center is within half a pixel of the target, further easing is
+    // sub-pixel and produces no visible movement, so the view can stop redrawing.
+    return std::abs(cx_ - tx_) < 0.5 && std::abs(cy_ - ty_) < 0.5;
 }
 
 void CursorMapper::reset(double centerX, double centerY) {
