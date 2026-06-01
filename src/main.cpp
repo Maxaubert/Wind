@@ -341,8 +341,9 @@ static bool RunTick(TickState& t) {
     }
     t.prevLvl = lvl;
 
-    // Frame-pacing diagnostics: a 2 s window of loop-interval stats (dt = time between ticks =
-    // the on-screen frame interval, since Present(1,0) paces while zoomed). maxDt and the hitch
+    // Frame-pacing diagnostics: a 2 s window of loop-interval stats (dt = time between ticks). While
+    // zoomed and actively rendering, Present(1,0) paces; on render-on-demand idle ticks the loop is
+    // timer-paced at the refresh rate instead, so dt stays ~normal either way. maxDt and the hitch
     // count expose microstutter that an average would hide.
     if (t.cfg.diagnostics) {
         const double target = 1.0 / (t.hz > 0 ? t.hz : 60);

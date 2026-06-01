@@ -974,6 +974,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     p.cursorScreenX = sw / 2.0; p.cursorScreenY = sh / 2.0;
     p.clickDesktopX = sw / 2; p.clickDesktopY = sh / 2;
     p.cursorScaleWithZoom = true; p.bilinear = true;
+    p.forcePresent = true;          // smoke harness: always draw (no render-on-demand gating here)
     eng.hideSystemCursor(true);     // exercise the hide path; shutdown restores it
     for (int i = 0; i < 20; ++i) {
         MSG m; while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&m); DispatchMessageW(&m); }
