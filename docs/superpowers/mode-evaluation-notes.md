@@ -25,11 +25,16 @@ make composite-synced pacing the default for Mag mode; reduce residual via ~1-fr
 and/or lower zoom. Snapshot is identical every launch (3840x2160@144, 225% DPI, 1 monitor, single
 instance) - so the inconsistency was runtime VRR timing, not a config difference.
 
-**(B) Game FPS halving - still open.** With `dwmFlush=1`, games still run ~77 fps avg (was ~144).
-dwmFlush did NOT change it (it paces our updates, not whether the game is forced through DWM
-composition). Pending evidence to root-cause: does it halve with the cursor STILL (zero transform
-calls -> active-transform forces composition, likely a public-API limit WM dodges via private
-scanout) or only while moving (-> our update frequency, fixable)? Plus the Windows-Magnifier-
-fullscreen comparison in the same game.
+**(B) Game FPS - REFRAMED as stalls, not GPU load (likely FIXABLE).** Frame-graph capture (game main
+menu, zooming + panning, dwmFlush=1): GPU only **16%** (NOT GPU-bound), 81 fps avg but 1%-low 28,
+0.1%-low 13, with sharp periodic spikes in the frametime graph. So the in-game problem is NOT the
+inherent-composition GPU cost I'd feared - it is frame-time STALLS/hitches. Hypothesis: our rapid
+`MagSetFullscreenTransform` + `MagSetInputTransform` calls (one per cursor-pixel of pan + one per
+zoom-ramp tick) each force a synchronous DWM round-trip -> periodic hitches; spikes correlate with
+active zoom/pan. Windows Magnifier throttles/coalesces these. FIX direction: rate-limit/coalesce the
+Mag calls (cap at ~30-60Hz; do not call MagSetInputTransform every frame). PENDING confirmation:
+cursor-still-in-game should show the spikes clear (no calls -> no hitches), and a dwmFlush=0 in-game
+comparison (dwmFlush=1 adds a per-frame DwmFlush that may itself stall in-game even though it helped
+the desktop wobble).
 | 2 | `lowPower=2` | adaptive (Mag on desktop, own-renderer when a fullscreen game is foreground) | _pending_ | Desktop juddery+cheap; zoom inside a fullscreen game should be smooth + full FPS. |
 | 3 | `lowPower=0` + `flipPresent=1` | own-renderer via dcomp flip-model present | **heavy - no win on this machine** | "Also uses a lot of resources." On the dGPU/VRR main PC the dcomp present did NOT lower GPU vs blt - so either the driver did not promote it to a cheap MPO/independent-flip plane, or (likely) the DDA-capture + magnify cost dominates regardless of present path. Implication: flipPresent only helps if MPO promotion happens AND the composite was the bottleneck. Real verdict still pending on the fixed-refresh iGPU (different driver/MPO behavior) - UNTESTED there. |
