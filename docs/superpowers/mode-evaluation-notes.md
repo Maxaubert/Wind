@@ -47,11 +47,20 @@ FOLLOW-UPS (deployed UIAccess build):
   halving is NOT our calls / loop / input remap. It is the STANDING fullscreen transform (level>1
   active) forcing the focused fullscreen game off its fast present path and through DWM composition.
   Throttling anything cannot help - the only lever is "is the transform active," which is the feature.
-- REMAINING UNKNOWN that picks the fix: is the halving VRR-specific? This PC is G-Sync 144Hz; once DWM
-  composition is in the loop the composite rate floats down (~68-72Hz, exactly the dcomp-saga number) =
-  the observed "half." A FIXED-refresh display (the iGPU target) would composite at a steady rate, so
-  the game likely would NOT halve there. Decisive test: disable G-Sync/VRR and re-test the focused game.
-    - holds -> VRR artifact; Mag mode is stable in games on the fixed-refresh iGPU target (goal met there).
-    - still halves -> hard composition cap; public API cannot match WM's private scanout scaling.
+- MECHANISM (own-renderer counterexample resolved): the own-renderer keeps FULL game FPS on this same
+  G-Sync PC and ALSO forces composition - so composition per se is not the cause. Difference: the
+  own-renderer captures the game's swapchain ASYNCHRONOUSLY (game flips full-rate, we DDA-capture +
+  overlay), so the game's present is never gated. MagSetFullscreenTransform makes DWM magnify the
+  game's OWN surface SYNCHRONOUSLY in its present path -> gates the game's swapchain to the composite
+  rate -> halves (worse under VRR float). This coupling is intrinsic to the Mag API; no public flag
+  decouples it. MS Learn now steers devs away from the Magnification API toward DDA / WinRT capture.
+- KEY CONSEQUENCE: the public Magnification API is the same engine WM full-screen uses, so WM full-screen
+  should halve a focused fullscreen game on this display TOO. Likely we already MATCH WM and the goal's
+  premise ("WM stable in games") needs verifying. Two decisive readings (user, on this PC):
+    1. WM full-screen in the same focused game: FPS halved or full? (halved -> we already match WM).
+    2. G-Sync OFF, our Mag mode, focused game: FPS held or halved? (held -> VRR-only -> fine on the
+       fixed-refresh iGPU target, which is the actual goal hardware).
+  If WM also halves AND/OR G-Sync-off holds, "Mag stable in games" is satisfied for the real target;
+  full-FPS-on-VRR via the public API is not reachable (own-renderer is the only full-FPS path, by design).
 | 2 | `lowPower=2` | adaptive (Mag on desktop, own-renderer when a fullscreen game is foreground) | _pending_ | Desktop juddery+cheap; zoom inside a fullscreen game should be smooth + full FPS. |
 | 3 | `lowPower=0` + `flipPresent=1` | own-renderer via dcomp flip-model present | **heavy - no win on this machine** | "Also uses a lot of resources." On the dGPU/VRR main PC the dcomp present did NOT lower GPU vs blt - so either the driver did not promote it to a cheap MPO/independent-flip plane, or (likely) the DDA-capture + magnify cost dominates regardless of present path. Implication: flipPresent only helps if MPO promotion happens AND the composite was the bottleneck. Real verdict still pending on the fixed-refresh iGPU (different driver/MPO behavior) - UNTESTED there. |
