@@ -143,7 +143,7 @@ struct RenderEngine::State {
     // `crop` and the dirty area is a near-full repaint, copies only the parts within `view`.
     bool copyChangedRegions(ID3D11Texture2D* src, const DXGI_OUTDUPL_FRAME_INFO& fi,
                             const RECT& view, bool crop);
-    void render(const RenderFrameParams& p);  // draw into the back-buffer (no Present)
+    bool render(const RenderFrameParams& p);  // draw into the back-buffer (no Present)
 };
 
 IDXGIOutput* RenderEngine::State::selectOutput(const wchar_t* deviceName, bool fallbackToFirst) {
@@ -750,10 +750,10 @@ void RenderEngine::State::updateCursorTexture(int cursorMode) {
     curW = w; curH = h; hotX = hx; hotY = hy; cursorInvert = inv; lastCursor = ci.hCursor; cursorReady = true;
 }
 
-void RenderEngine::State::render(const RenderFrameParams& p) {
+bool RenderEngine::State::render(const RenderFrameParams& p) {
     // RTV is cached: the blt swapchain keeps buffer 0 stable across Present, so we create the RTV
     // once and reuse it. acquireBackbufferRtv() runs only on (re)build or resize, not per frame.
-    if (!rtv && !acquireBackbufferRtv()) return;
+    if (!rtv && !acquireBackbufferRtv()) return false;
     // Magnified source rect in desktop pixels (what the magnify pass samples below), clamped to the
     // screen with a 1px margin for bilinear edge taps. capture() can copy only this region on a
     // full-screen repaint to cut the 4K HDR copy.
@@ -764,7 +764,12 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
     if (vl < 0) vl = 0;            if (vt < 0) vt = 0;
     if (vr > sw) vr = sw;          if (vb > sh) vb = sh;
     RECT view{ (LONG)vl, (LONG)vt, (LONG)vr, (LONG)vb };
-    capture(view, p.cropCapture);
+    bool changed = capture(view, p.cropCapture);
+    // Render-on-demand: if the desktop did not change and the caller did not force a present (no
+    // lens motion, zoom settled, no forced refresh), skip the magnify + cursor passes entirely.
+    // The overlay keeps showing its last presented frame, which is still correct. This is what
+    // takes a static zoomed screen from full-rate redraw to near-idle GPU.
+    if (!p.forcePresent && !changed) return false;
     // cursorMode==2 (never draw) skips the GetCursorInfo syscall entirely. Otherwise update reads
     // osCursorShowing and decodes/uploads only when the cursor will actually be drawn (mode 1, or
     // mode 0 with the app showing its cursor) - so a game that hides its cursor pays no decode.
@@ -833,6 +838,7 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
         c->PSSetSamplers(0, 1, sampLinear.GetAddressOf());
         c->Draw(4, 0);
     }
+    return true;
 }
 
 // True if a visible, non-cloaked window sits above our overlay in z-order and overlaps it - i.e.
@@ -879,7 +885,7 @@ bool RenderEngine::renderFrame(const RenderFrameParams& p) {
         SetCursorPos(p.clickDesktopX, p.clickDesktopY);
         s_->lastClickX = p.clickDesktopX; s_->lastClickY = p.clickDesktopY;
     }
-    s_->render(p);
+    if (!s_->render(p)) return false;   // render-on-demand: nothing dirty -> no draw, no present this tick
     // p.vsync = (cfg.vsync && !cfg.dwmFlush): sync interval 1 locks the present to the refresh;
     // 0 presents immediately and the caller paces via DwmFlush or the timer.
     HRESULT hr = s_->swap->Present(p.vsync ? 1 : 0, 0);
@@ -894,7 +900,8 @@ bool RenderEngine::renderFrame(const RenderFrameParams& p) {
 // frame (a FLIP_DISCARD back-buffer read after Present is undefined). Verification only.
 bool RenderEngine::dumpFrame(const RenderFrameParams& p, const wchar_t* path) {
     if (!s_->ready) return false;
-    s_->render(p);
+    RenderFrameParams pf = p; pf.forcePresent = true;
+    s_->render(pf);
     return dumpBackbufferPng(path);
 }
 

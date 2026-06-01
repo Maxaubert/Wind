@@ -26,6 +26,8 @@ struct RenderFrameParams {
     int    cursorMode;                   // 0=auto (draw only when the app shows a cursor), 1=always, 2=never
     bool   vsync;                        // true = Present(1,0) vsync; false = Present(0,0) no vsync
     bool   cropCapture;                  // on a full-screen repaint, copy only the magnified region (cuts 4K copy)
+    bool   forcePresent;                 // render-on-demand: draw+present even if the desktop didn't change
+                                         // (set when the lens moved / zoom is animating / a forced refresh)
 };
 
 // Own capture + Direct3D 11 renderer. Captures the desktop via DXGI Desktop Duplication
