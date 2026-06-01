@@ -31,10 +31,22 @@ menu, zooming + panning, dwmFlush=1): GPU only **16%** (NOT GPU-bound), 81 fps a
 inherent-composition GPU cost I'd feared - it is frame-time STALLS/hitches. Hypothesis: our rapid
 `MagSetFullscreenTransform` + `MagSetInputTransform` calls (one per cursor-pixel of pan + one per
 zoom-ramp tick) each force a synchronous DWM round-trip -> periodic hitches; spikes correlate with
-active zoom/pan. Windows Magnifier throttles/coalesces these. FIX direction: rate-limit/coalesce the
-Mag calls (cap at ~30-60Hz; do not call MagSetInputTransform every frame). PENDING confirmation:
-cursor-still-in-game should show the spikes clear (no calls -> no hitches), and a dwmFlush=0 in-game
-comparison (dwmFlush=1 adds a per-frame DwmFlush that may itself stall in-game even though it helped
-the desktop wobble).
+active zoom/pan. Windows Magnifier throttles/coalesces these.
+
+FOLLOW-UPS (deployed UIAccess build):
+- SHIPPED: throttled MagSetInputTransform to ~20Hz + settle (commit). Result: "very smooth and low
+  cost" - the heavy input-remap spam is gone, panning stayed smooth. Did NOT fix the in-game FPS.
+- dwmFlush=0 in-game test: FPS still halves on pan/zoom -> NOT the dwmFlush half-rate trap. Ruled out.
+- DECISIVE NEW SIGNAL: the FPS halving happens ONLY when the game has FOCUS. Game backgrounded = smooth;
+  desktop = smooth. So a focused fullscreen game is on a fast present path (independent-flip / MPO /
+  exclusive) and active fullscreen magnification forces it back through DWM composition. WM comparison:
+  WM hitches on zoom-IN (level change, inherent - even WM can't avoid it) but pans free; we hitch on BOTH.
+  The pan delta is the fixable target.
+- OPEN FORK (one test): zoomed in a focused game, cursor STILL -> full FPS or halved?
+    - full-when-still -> it's our per-frame MagSetFullscreenTransform calls; fix = throttle the visual
+      transform rate, gated on a focused fullscreen game (WM-style trade: slightly choppier magnified
+      pan, full game FPS).
+    - halved-when-still -> the active magnification itself forces the focused game off its fast path;
+      public-API wall (WM uses private scanout scaling), throttling won't help.
 | 2 | `lowPower=2` | adaptive (Mag on desktop, own-renderer when a fullscreen game is foreground) | _pending_ | Desktop juddery+cheap; zoom inside a fullscreen game should be smooth + full FPS. |
 | 3 | `lowPower=0` + `flipPresent=1` | own-renderer via dcomp flip-model present | **heavy - no win on this machine** | "Also uses a lot of resources." On the dGPU/VRR main PC the dcomp present did NOT lower GPU vs blt - so either the driver did not promote it to a cheap MPO/independent-flip plane, or (likely) the DDA-capture + magnify cost dominates regardless of present path. Implication: flipPresent only helps if MPO promotion happens AND the composite was the bottleneck. Real verdict still pending on the fixed-refresh iGPU (different driver/MPO behavior) - UNTESTED there. |
