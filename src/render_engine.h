@@ -46,7 +46,10 @@ public:
     // CreateWindowInBand (needs UIAccess; e.g. 16 = ZBID_SYSTEM_TOOLS, above the shell so the
     // Start menu / taskbar flyouts don't show an unmagnified copy). Falls back to a normal
     // window if the band can't be used.
-    bool initialize(const MonitorTarget& monitor, int zorderBand = 0, bool hdrTonemap = false);
+    // flipPresent: false = blt-model swapchain (default, VRR-safe); true = DirectComposition
+    // flip-model swapchain (opt-in; fixed-refresh monitors only, tears on VRR / G-Sync).
+    bool initialize(const MonitorTarget& monitor, int zorderBand = 0, bool hdrTonemap = false,
+                    bool flipPresent = false);
     // Re-point the magnifier at a different monitor (call on zoom-in when the cursor's monitor
     // changed; the overlay must still be hidden/alpha 0). Resizes the swapchain, then moves the
     // overlay and rebinds Desktop Duplication to the new output. Returns false (and the caller
