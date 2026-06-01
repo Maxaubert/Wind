@@ -115,6 +115,8 @@ struct TickState {
     double sinceEngineCheck = 0.0;     // throttles the foreground poll (~2 Hz)
     int    zorderBand = 0; bool hdrTonemap = false; bool flipPresent = false;   // saved for re-initializing the render engine
     int    lastMagX = INT_MIN, lastMagY = INT_MIN;   // last Mag transform offset (skip redundant calls)
+    LARGE_INTEGER lastMagInput{};   // QPC of the last MagSetInputTransform sync (throttle the heavy remap)
+    bool   magInputDirty = false;   // visual offset moved since the last input-transform sync (resync on settle)
     // Frame-pacing diagnostics (diagnostics=1): a 2 s window of loop-interval stats.
     double diagAccum = 0.0, diagSumDt = 0.0, diagMaxDt = 0.0;
     int    diagFrames = 0, diagHitches = 0;
@@ -323,12 +325,24 @@ static bool RunTick(TickState& t) {
             if (xOff < 0) xOff = 0; else if (xOff > sw - viewW) xOff = sw - viewW;
             if (yOff < 0) yOff = 0; else if (yOff > sh - viewH) yOff = sh - viewH;
             if (lvl != t.prevLvl || xOff != t.lastMagX || yOff != t.lastMagY) {
-                t.mag->setTransform(lvl, xOff, yOff);
+                // Visual transform every frame (smooth pan); the heavy input remap only at ~20Hz
+                // (or first zoom-in) so a fast pan doesn't fire 144 system-wide input remaps/sec
+                // (the in-game frame-spike source). Flagged dirty so we resync once on settle.
+                double sinceInput = double(now.QuadPart - t.lastMagInput.QuadPart) / double(t.freq.QuadPart);
+                bool syncInput = (t.lastMagX == INT_MIN) || (sinceInput >= 0.05);
+                t.mag->setTransform(lvl, xOff, yOff, syncInput);
                 t.lastMagX = xOff; t.lastMagY = yOff;
+                if (syncInput) { t.lastMagInput = now; t.magInputDirty = false; }
+                else t.magInputDirty = true;
+            } else if (t.magInputDirty) {
+                // Cursor settled at a new spot with a stale input map (last move skipped the remap):
+                // lock the input transform to the resting offset now, so clicks land accurately.
+                t.mag->setTransform(lvl, t.lastMagX, t.lastMagY, true);
+                t.lastMagInput = now; t.magInputDirty = false;
             }
         } else if (t.prevLvl > 1.0) {
             t.mag->setTransform(1.0, 0, 0);     // zoom-out: reset to 1x
-            t.lastMagX = INT_MIN; t.lastMagY = INT_MIN;
+            t.lastMagX = INT_MIN; t.lastMagY = INT_MIN; t.magInputDirty = false;
         }
         t.prevLvl = lvl;
         return false;   // no Present; the loop's renderPresentPaces idle-wait paces this tick

@@ -6,9 +6,14 @@ bool MagnifierEngine::initialize() {
     ready_ = MagInitialize() ? true : false;
     return ready_;
 }
-void MagnifierEngine::setTransform(double level, int xOffset, int yOffset) {
+void MagnifierEngine::setTransform(double level, int xOffset, int yOffset, bool syncInput) {
     if (!ready_) return;
     MagSetFullscreenTransform(static_cast<float>(level), xOffset, yOffset);
+
+    // Skip the heavy input remap on a throttled pan tick. We still MUST do it the first time we
+    // pass 1x (inputTransformOn_ still false) so clicks map correctly from the first zoomed frame,
+    // and the caller forces syncInput=true on settle so the resting input map is always accurate.
+    if (level > 1.0 && !syncInput && inputTransformOn_) return;
 
     // Route mouse input to the magnified element. Since Windows 10 1703, without this
     // the OS sends clicks/hit-tests to the *unmagnified* coordinates, so while zoomed
