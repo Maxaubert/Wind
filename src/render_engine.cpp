@@ -938,10 +938,34 @@ void RenderEngine::shutdown() {
         s_->cursorHidden = false;
         SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, SPIF_SENDCHANGE);  // safety net
     }
-    // COM objects are ComPtr members of State; they release automatically when State is destroyed
-    // (in ~RenderEngine, immediately after this returns). `device` is declared first so it releases
-    // last; the windowed BLT-model swapchain has no fullscreen/HWND-outlives-swapchain constraint,
-    // so releasing it after DestroyWindow below is safe.
+    // Explicitly release all device-dependent resources before the device itself, then the device.
+    // This is required for re-init (adaptive engine tears down and rebuilds the engine): a
+    // subsequent initialize() must start from clean state so it does not reuse stale COM objects
+    // from the previous session's device (which was freed when ReleaseAndGetAddressOf created the
+    // new one). Order matters: release resources before the device that owns them.
+    s_->dupl.Reset();
+    s_->desktopSRV.Reset();
+    s_->desktopCopy.Reset();
+    s_->rtv.Reset();
+    s_->swap.Reset();
+    s_->vs.Reset(); s_->ps.Reset(); s_->cb.Reset();
+    s_->cvs.Reset(); s_->cps.Reset(); s_->ccb.Reset();
+    s_->blend.Reset(); s_->blendInvert.Reset();
+    s_->sampLinear.Reset(); s_->sampPoint.Reset();
+    s_->cursorTex.Reset(); s_->cursorSRV.Reset();
+    s_->cursorCache.clear();
+    s_->ctx.Reset();
+    s_->device.Reset();
+    // Reset state so the next initialize() rebuilds from scratch rather than skipping
+    // ensureDesktopCopy or any other guard that checks for non-null objects.
+    s_->haveDesktop = false;
+    s_->freshCapture = true;
+    s_->copyFormat = DXGI_FORMAT_B8G8R8A8_UNORM;
+    s_->copyW = 0; s_->copyH = 0;
+    s_->lastCursor = nullptr; s_->cursorReady = false;
+    s_->deviceLost = false;
+    s_->lastClickX = INT_MIN; s_->lastClickY = INT_MIN;
+    s_->lastTopmostMs = 0;
     if (s_->hwnd) { DestroyWindow(s_->hwnd); s_->hwnd = nullptr; }
     s_->ready = false;
 }
