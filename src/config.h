@@ -111,6 +111,12 @@ struct Config {
     // independent-flip / MPO plane (cheap, for a weak iGPU). FIXED-REFRESH MONITORS ONLY: it tears
     // on a VRR / G-Sync display (why it was removed in #69). Per-machine; default off.
     int    flipPresent = 0;
+    // Composition heartbeat for Mag mode (lowPower=1). 0 = off (default). 1 = while zoomed, present a
+    // tiny 1x1 flip swapchain every vblank so DWM composites at the full refresh; this pulls a focused
+    // fullscreen game - whose swapchain MagSetFullscreenTransform gates to the composite rate - back up
+    // from the VRR-floated rate to full FPS. Negligible GPU (no real drawing), only alive while zoomed.
+    // Hot-reloadable. No benefit on fixed-refresh displays (composite already steady there).
+    int    compositePin = 0;
 };
 // Pure: parse INI text (key=value, ';' or '#' comments) into a Config, keeping
 // defaults for missing/malformed keys.

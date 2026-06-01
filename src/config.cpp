@@ -61,6 +61,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "lowPower")           c.lowPower = std::stoi(val);
             else if (key == "onboarded")          c.onboarded = std::stoi(val);
             else if (key == "flipPresent")        c.flipPresent = std::stoi(val);
+            else if (key == "compositePin")       c.compositePin = std::stoi(val);
         } catch (...) { /* keep default on bad value */ }
     }
     // Clamp numeric fields to their documented ranges. The ini is a hand-editable surface, and an
@@ -69,6 +70,7 @@ Config ParseConfig(const std::string& text) {
     // config UI sliders / the struct-comment docs.
     if (c.lowPower < 0 || c.lowPower > 2) c.lowPower = 0;   // 0=own-renderer 1=low-power 2=auto; else off
     if (c.flipPresent < 0 || c.flipPresent > 1) c.flipPresent = 0;
+    if (c.compositePin < 0 || c.compositePin > 1) c.compositePin = 0;
     c.maxLevel        = clampd(c.maxLevel,        1.0, 50.0);   // must be >= the 1.0 min zoom level
     c.zoomInSpeed     = clampd(c.zoomInSpeed,     0.25, 4.0);
     c.zoomOutSpeed    = clampd(c.zoomOutSpeed,    0.25, 4.0);
@@ -167,6 +169,10 @@ Config LoadConfig(const std::wstring& path) {
                ";   (cheaper own-renderer on a fixed-refresh integrated GPU; TEARS on VRR/G-Sync,\n"
                ";   so fixed-refresh monitors only).\n"
                "flipPresent=0\n"
+               "; compositePin: 0=off (default); 1=in Mag mode (lowPower=1), present a tiny heartbeat\n"
+               ";   while zoomed so DWM composites at full refresh - pulls a focused game's gated FPS\n"
+               ";   back up on a VRR/G-Sync display. Negligible GPU; only active while zoomed. Hot-reloadable.\n"
+               "compositePin=0\n"
                "; onboarded: 0 = run the first-launch setup once; set to 1 once finished\n"
                "onboarded=0\n";
         return Config{};

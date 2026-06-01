@@ -15,6 +15,7 @@
 #pragma comment(lib, "Dwmapi.lib")
 #include "render_engine.h"
 #include "magnifier_engine.h"
+#include "composition_pin.h"
 #include "input_router.h"
 #include "cursor_mapper.h"
 #include "zoom_controller.h"
@@ -109,6 +110,7 @@ struct TickState {
     HWND   hwnd               = nullptr;       // owning message window (for RegisterHotKey)
     enum class Engine { Render, Mag };
     MagnifierEngine* mag = nullptr;    // set to &magEngine in wWinMain
+    CompositionPin* pin = nullptr;     // set to &compositionPin in wWinMain (Mag-mode compositePin heartbeat)
     Engine active = Engine::Render;    // currently-initialized engine
     int    engineMode = 0;             // cfg.lowPower: 0=render 1=mag 2=auto
     bool   renderInited = false, magInited = false;
@@ -117,6 +119,7 @@ struct TickState {
     int    lastMagX = INT_MIN, lastMagY = INT_MIN;   // last Mag transform offset (skip redundant calls)
     LARGE_INTEGER lastMagInput{};   // QPC of the last MagSetInputTransform sync (throttle the heavy remap)
     bool   magInputDirty = false;   // visual offset moved since the last input-transform sync (resync on settle)
+    bool   pinFailed = false;       // compositePin heartbeat failed to start; don't retry every tick
     // Frame-pacing diagnostics (diagnostics=1): a 2 s window of loop-interval stats.
     double diagAccum = 0.0, diagSumDt = 0.0, diagMaxDt = 0.0;
     int    diagFrames = 0, diagHitches = 0;
@@ -314,6 +317,7 @@ static bool RunTick(TickState& t) {
     // timer-paces. Primary monitor only. In mode 2 (auto), SelectEngine switches to Mag when the
     // desktop is foreground and back to Render when a fullscreen app is foreground; switch only at 1x.
     if (t.active == TickState::Engine::Mag) {
+        bool pinPresented = false;
         if (lvl > 1.0) {
             const int sw = GetSystemMetrics(SM_CXSCREEN);
             const int sh = GetSystemMetrics(SM_CYSCREEN);
@@ -340,12 +344,25 @@ static bool RunTick(TickState& t) {
                 t.mag->setTransform(lvl, t.lastMagX, t.lastMagY, true);
                 t.lastMagInput = now; t.magInputDirty = false;
             }
+            // Composition heartbeat (compositePin): while zoomed, present a 1x1 flip swapchain every
+            // vblank so DWM composites at the full refresh. A focused fullscreen game - whose own
+            // swapchain MagSetFullscreenTransform gates to the composite rate - is then pulled back up
+            // from the VRR-floated rate to full FPS. Lazily started; its Present(1,0) paces this tick
+            // (the loop skips its own wait when the pin is active).
+            if (t.cfg.compositePin && t.pin) {
+                if (!t.pin->active() && !t.pinFailed && !t.pin->begin()) t.pinFailed = true;
+                if (t.pin->active()) { t.pin->present(); pinPresented = true; }
+            } else if (t.pin && t.pin->active()) {
+                t.pin->end(); t.pinFailed = false;   // turned off via hot-reload while zoomed
+            }
         } else if (t.prevLvl > 1.0) {
             t.mag->setTransform(1.0, 0, 0);     // zoom-out: reset to 1x
             t.lastMagX = INT_MIN; t.lastMagY = INT_MIN; t.magInputDirty = false;
+            if (t.pin && t.pin->active()) t.pin->end();   // stop the heartbeat when not zoomed
+            t.pinFailed = false;
         }
         t.prevLvl = lvl;
-        return false;   // no Present; the loop's renderPresentPaces idle-wait paces this tick
+        return pinPresented;   // true only when the compositePin heartbeat's vsync present paced us
     }
 
     if (lvl > 1.0) {
@@ -684,6 +701,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // between them at runtime at 1x only. Exactly ONE engine is initialized at a time.
     RenderEngine renderEngine;
     MagnifierEngine magEngine;
+    CompositionPin compositionPin;     // Mag-mode composition heartbeat (compositePin); idle until zoomed
     bool wantMag = (cfg.lowPower == 1) || (cfg.lowPower == 2 && !wind::FullscreenAppForeground());
     bool engineOk;
     if (wantMag) { engineOk = magEngine.initialize(); if (engineOk) SetUnhandledExceptionFilter(LowPowerCrashFilter); }
@@ -699,6 +717,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     TickState ts(renderEngine, startupMon, cfg);
     ts.hwnd = hwnd;                       // so RunTick can re-register the hide-cursor hotkey
     ts.mag = &magEngine;
+    ts.pin = &compositionPin;
     ts.engineMode = cfg.lowPower;
     ts.zorderBand = cfg.zorderBand;
     ts.hdrTonemap = (cfg.hdrTonemap != 0);
@@ -858,11 +877,16 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         //  - else: Present(0,0) doesn't block, so the timer paces at the detected refresh rate.
         // Idle at 1x uses the timer.
         bool zoomed = ts.prevLvl > 1.0;
+        // compositePin heartbeat (Mag mode): its Present(1,0) inside the tick is the sole pacer while
+        // active, so disable the loop's own waits to avoid pacing at half rate. Reflects the prior
+        // tick's pin state (begin() runs inside RunTick), so a begin() failure falls back to the timer.
+        bool pinActive = zoomed && ts.active == TickState::Engine::Mag
+                         && ts.cfg.compositePin != 0 && ts.pin && ts.pin->active();
         // dwmFlush=1 -> present immediately then DwmFlush (align 1:1 with the compositor, targets the
         // blt-model microstutter); else vsync=1 -> Present(1,0) blocks; else the timer paces.
-        bool dwmPaces = zoomed && ts.cfg.dwmFlush != 0;
+        bool dwmPaces = zoomed && ts.cfg.dwmFlush != 0 && !pinActive;
         bool renderPresentPaces = zoomed && !dwmPaces && ts.cfg.vsync != 0;
-        if (!renderPresentPaces && !dwmPaces) {
+        if (!renderPresentPaces && !dwmPaces && !pinActive) {
             // Recompute the timer interval if the paced refresh changed (retarget to a different-Hz
             // monitor updates ts.hz). Cheap equality check; only recomputes on an actual change (#74).
             if (ts.hz > 0 && ts.hz != pacedHz) { pacedHz = ts.hz; due.QuadPart = -(10000000LL / pacedHz); }
