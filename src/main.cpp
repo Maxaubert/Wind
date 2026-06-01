@@ -10,6 +10,7 @@
 #include <sstream>
 #include "config.h"
 #include "config_path.h"
+#include "foreground_state.h"
 #include "logging.h"
 #pragma comment(lib, "Dwmapi.lib")
 #include "render_engine.h"
@@ -106,8 +107,13 @@ struct TickState {
     bool   recenterKeyWasDown = false;         // edge-detect the recenterVk key
     bool   cursorHidden       = false;         // runtime-only override (no ini write, no hot-reload)
     HWND   hwnd               = nullptr;       // owning message window (for RegisterHotKey)
-    MagnifierEngine* mag = nullptr;   // low-power Mag-API engine (set when lowPower); null otherwise
-    bool   lowPower = false;          // cfg.lowPower: use mag instead of the own renderer
+    enum class Engine { Render, Mag };
+    MagnifierEngine* mag = nullptr;    // set to &magEngine in wWinMain
+    Engine active = Engine::Render;    // currently-initialized engine
+    int    engineMode = 0;             // cfg.lowPower: 0=render 1=mag 2=auto
+    bool   renderInited = false, magInited = false;
+    double sinceEngineCheck = 0.0;     // throttles the foreground poll (~2 Hz)
+    int    zorderBand = 0; bool hdrTonemap = false;   // saved for re-initializing the render engine
     int    lastMagX = INT_MIN, lastMagY = INT_MIN;   // last Mag transform offset (skip redundant calls)
     // Frame-pacing diagnostics (diagnostics=1): a 2 s window of loop-interval stats.
     double diagAccum = 0.0, diagSumDt = 0.0, diagMaxDt = 0.0;
@@ -160,6 +166,37 @@ static void DiagLog(const char* fmt, ...) {
 // Forward-declared so RunTick can re-register the hide-cursor hotkey on config hot-reload;
 // the definition (with the static state it manages) lives near WndProc / kHideCursorHotkeyId.
 static void RegisterHideCursorHotkey(HWND hwnd, int vk, int mods);
+
+// Forward-declared crash filter needed by SelectEngine when arming the Mag path.
+static LONG WINAPI LowPowerCrashFilter(EXCEPTION_POINTERS* ep);
+
+// Adaptive engine selection. Polls the foreground at ~2 Hz and switches engines ONLY at 1x (never
+// mid-zoom), tearing down the old engine and initializing the desired one. mode 0/1 are fixed
+// (no switching); mode 2 picks Render when a fullscreen app is foreground, else Mag.
+static void SelectEngine(TickState& t, double dt, bool atRest) {
+    t.sinceEngineCheck += dt;
+    if (t.sinceEngineCheck < 0.5) return;          // ~2 Hz poll
+    t.sinceEngineCheck = 0.0;
+    if (t.engineMode != 2) return;                 // 0/1 never switch at runtime
+    if (!atRest) return;                           // only swap when zoomed out (no glitch)
+    TickState::Engine desired = wind::FullscreenAppForeground() ? TickState::Engine::Render
+                                                                 : TickState::Engine::Mag;
+    if (desired == t.active) return;
+    // Tear down the current engine.
+    if (t.active == TickState::Engine::Render) { if (t.renderInited) { t.renderEngine.shutdown(); t.renderInited = false; } }
+    else                                       { if (t.magInited)    { t.mag->shutdown();          t.magInited = false; } }
+    // Initialize the desired engine.
+    if (desired == TickState::Engine::Render) {
+        if (t.renderEngine.initialize(t.mon, t.zorderBand, t.hdrTonemap)) t.renderInited = true;
+        else { // init failed: fall back to Mag so we are never engine-less
+            if (t.mag->initialize()) { t.magInited = true; desired = TickState::Engine::Mag; }
+        }
+    } else {
+        if (t.mag->initialize()) { t.magInited = true; SetUnhandledExceptionFilter(LowPowerCrashFilter); }
+        else { if (t.renderEngine.initialize(t.mon, t.zorderBand, t.hdrTonemap)) { t.renderInited = true; desired = TickState::Engine::Render; } }
+    }
+    t.active = desired;
+}
 
 // One magnifier tick: advance zoom, hot-reload config, then pan/draw via the render engine.
 // Pure of any pacing wait - the caller paces. Safe to call from the main loop or from a
@@ -264,16 +301,17 @@ static bool RunTick(TickState& t) {
     // free (MOD_NOREPEAT). No polled check needed here.
     double lvl = t.zoom.level();
 
+    SelectEngine(t, dt, /*atRest=*/(lvl <= 1.0 && t.prevLvl <= 1.0));
+
     int rawDx, rawDy; g_input.drainRaw(rawDx, rawDy);
 
     // Low-power mode: magnify via the Windows Magnification API instead of the own renderer. Center
     // the cursor with an INTEGER source offset (the judder source, accepted here). No overlay, no
     // Desktop Duplication, no SetCursorPos warp (MagSetInputTransform maps clicks in the UIAccess
     // build), no drawn cursor (the Mag API scales the real one). Returns no-present; the loop
-    // timer-paces. Primary monitor only. t.lowPower is fixed at launch (engine selection is start-
-    // only by design - it is deliberately NOT hot-reloaded, since switching engines live would use
-    // an uninitialized engine; changing lowPower in the ini takes effect on the next restart).
-    if (t.lowPower) {
+    // timer-paces. Primary monitor only. In mode 2 (auto), SelectEngine switches to Mag when the
+    // desktop is foreground and back to Render when a fullscreen app is foreground; switch only at 1x.
+    if (t.active == TickState::Engine::Mag) {
         if (lvl > 1.0) {
             const int sw = GetSystemMetrics(SM_CXSCREEN);
             const int sh = GetSystemMetrics(SM_CYSCREEN);
@@ -625,22 +663,19 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // primary. The first zoom-in re-checks and retargets if the cursor moved to another monitor.
     MonitorTarget startupMon = (cfg.multiMonitor != 0) ? MonitorUnderCursor() : PrimaryMonitor();
 
-    // Magnifier engine. Low-power mode uses the Windows Magnification API (DWM does the scaling -
-    // no overlay surface, no Desktop Duplication, GPU-cheap for integrated graphics). Default mode
-    // uses the own DXGI+D3D renderer (smooth sub-pixel pan). Only ONE is initialized.
-    RenderEngine renderEngine;       // constructed always; initialized only in default mode
+    // Magnifier engine. Low-power mode (1) uses the Windows Magnification API (DWM does the scaling -
+    // no overlay surface, no Desktop Duplication, GPU-cheap for integrated graphics). Default mode (0)
+    // uses the own DXGI+D3D renderer (smooth sub-pixel pan). Auto mode (2) starts with Mag when the
+    // desktop is foreground and Render when a fullscreen game is foreground; SelectEngine switches
+    // between them at runtime at 1x only. Exactly ONE engine is initialized at a time.
+    RenderEngine renderEngine;
     MagnifierEngine magEngine;
-    if (cfg.lowPower != 0) {
-        if (!magEngine.initialize()) {
-            MessageBoxW(nullptr, L"Could not start the low-power magnifier (Magnification API "
-                                 L"unavailable).", L"Wind", MB_ICONERROR);
-            g_input.stop();
-            return 1;
-        }
-        SetUnhandledExceptionFilter(LowPowerCrashFilter);   // reset zoom on crash (no render-path filter here)
-    } else if (!renderEngine.initialize(startupMon, cfg.zorderBand, cfg.hdrTonemap != 0)) {
-        MessageBoxW(nullptr, L"Could not start the renderer (Direct3D 11 / Desktop Duplication "
-                             L"unavailable on this system).", L"Wind", MB_ICONERROR);
+    bool wantMag = (cfg.lowPower == 1) || (cfg.lowPower == 2 && !wind::FullscreenAppForeground());
+    bool engineOk;
+    if (wantMag) { engineOk = magEngine.initialize(); if (engineOk) SetUnhandledExceptionFilter(LowPowerCrashFilter); }
+    else         { engineOk = renderEngine.initialize(startupMon, cfg.zorderBand, cfg.hdrTonemap != 0); }
+    if (!engineOk) {
+        MessageBoxW(nullptr, L"Could not start the magnifier engine.", L"Wind", MB_ICONERROR);
         g_input.stop();
         return 1;
     }
@@ -649,8 +684,13 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     TickState ts(renderEngine, startupMon, cfg);
     ts.hwnd = hwnd;                       // so RunTick can re-register the hide-cursor hotkey
-    ts.lowPower = (cfg.lowPower != 0);
-    ts.mag = ts.lowPower ? &magEngine : nullptr;
+    ts.mag = &magEngine;
+    ts.engineMode = cfg.lowPower;
+    ts.zorderBand = cfg.zorderBand;
+    ts.hdrTonemap = (cfg.hdrTonemap != 0);
+    ts.active = wantMag ? TickState::Engine::Mag : TickState::Engine::Render;
+    ts.renderInited = !wantMag;
+    ts.magInited = wantMag;
     g_tick = &ts;   // so the WM_TIMER tick (during the tray menu's modal loop) can run
 
     // Autonomous verification hook: WIND_SELFTEST drives the real integrated render path at a
@@ -783,7 +823,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         // D3D device was removed; rebuild it on a backoff so we don't spin (the driver may take a
         // moment to return). Crucially, un-hide the OS cursor first so the user is never left without
         // a pointer while we are unable to draw the magnified one. Skip the normal tick this iteration.
-        if (!ts.lowPower && renderEngine.deviceLost()) {
+        if (ts.active == TickState::Engine::Render && ts.renderInited && renderEngine.deviceLost()) {
             renderEngine.hideSystemCursor(false);   // restore the real cursor while we can't render
             unsigned long long now = GetTickCount64();
             if (now >= nextRecoverMs) {
@@ -838,7 +878,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     if (ts.configWatch && ts.configWatch != INVALID_HANDLE_VALUE) FindCloseChangeNotification(ts.configWatch);
     UnregisterHotKey(hwnd, kQuitHotkeyId);
     UnregisterHotKey(hwnd, kHideCursorHotkeyId);
-    if (ts.lowPower) magEngine.shutdown(); else renderEngine.shutdown();   // restores cursor + tears down D3D/overlay or resets Mag API
+    if (ts.renderInited) renderEngine.shutdown();   // tears down D3D/overlay, restores cursor
+    if (ts.magInited)   magEngine.shutdown();       // resets Mag API fullscreen transform
     g_input.stop();
     Tray::Remove();
     if (mtx) { ReleaseMutex(mtx); CloseHandle(mtx); }
