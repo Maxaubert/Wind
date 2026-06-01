@@ -120,9 +120,14 @@ unwinding a fault. Cursor restoration remains.
   Desktop). The future server is a second delivery implementation (`POST` the same zip) selected at
   the call site. The bundle contents and layout are the stable contract; nothing else changes when
   the server arrives.
-- Zip creation uses a minimal vendored single-header zip writer (`miniz`, public domain) under
-  `third_party/`, matching the existing vendored-dependency pattern (`doctest`, WebView2). No new
-  runtime/DLL dependency is added to the shipped binaries.
+- Zip creation uses Windows' built-in PowerShell `Compress-Archive` (spawned via `CreateProcess`),
+  not a vendored zip library. Decision made during implementation: it avoids adding a ~250 KB
+  vendored dependency for a rare, user-initiated action, and the spawn cost (~300 ms, once per
+  click) is irrelevant for a manual export. To work when both `Wind.exe` and `WindConfig.exe` are
+  running (each holds its own log open), `ZipLogDir` first stage-copies the log files to a temp dir
+  with `CopyFileW` (which can read a file held open with `FILE_SHARE_READ` by another process), zips
+  that copy, then deletes it - so the live log handle is never closed and no lines are dropped. (The
+  original plan specified a vendored `miniz` writer; this is the recorded deviation.)
 
 ## Build changes
 

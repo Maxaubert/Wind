@@ -961,6 +961,11 @@ git commit -m "feat(logging): crash handler writes minidump + text summary; prun
 
 ## Task 10: Vendor miniz + zip helper
 
+> **Implemented differently (recorded deviation):** the shipped code does NOT vendor miniz. It zips
+> via Windows' built-in PowerShell `Compress-Archive`, stage-copying the logs to a temp dir first
+> (so it works while both binaries hold their logs open). See the design doc's "Export + the server
+> seam" section. The miniz steps below are the original plan, kept for history.
+
 **Files:**
 - Create: `third_party/miniz.h`
 - Create: `third_party/miniz.c`
