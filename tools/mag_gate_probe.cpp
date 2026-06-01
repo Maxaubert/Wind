@@ -118,26 +118,26 @@ static double MeasureGameFps(FakeGame& g, double seconds) {
     return n / (NowSec() - t0);
 }
 
-int main() {
-    if (!MagInitialize()) { printf("MagInitialize failed\n"); return 1; }
+static void RunProbe(FILE* out) {
+    if (!MagInitialize()) { fprintf(out, "MagInitialize failed\n"); return; }
     FakeGame g;
-    if (!MakeFakeGame(g)) { printf("fake-game create failed\n"); MagUninitialize(); return 1; }
-    Sleep(400);   // let it reach independent flip
+    if (!MakeFakeGame(g)) { fprintf(out, "fake-game create failed\n"); MagUninitialize(); return; }
+    Sleep(600);   // let it reach independent flip (no console window now to block it)
 
     double f1 = MeasureGameFps(g, 2.0);
-    printf("fake-game FPS, no magnification:        %.1f\n", f1);
+    fprintf(out, "fake-game FPS, no magnification:           %.1f\n", f1);
 
     MagSetFullscreenTransform(2.0f, 200, 200);
     Sleep(300);
     double f2 = MeasureGameFps(g, 2.0);
-    printf("fake-game FPS, magnified (no pin):      %.1f\n", f2);
+    fprintf(out, "fake-game FPS, magnified (no pin):         %.1f\n", f2);
 
     std::atomic<bool> stop{false}, ready{false};
     std::thread hb(Heartbeat, &stop, &ready);
     while (!ready.load()) Sleep(5);
     Sleep(200);
     double f3 = MeasureGameFps(g, 2.0);
-    printf("fake-game FPS, magnified + compositePin: %.1f\n", f3);
+    fprintf(out, "fake-game FPS, magnified + compositePin:   %.1f\n", f3);
     stop.store(true); hb.join();
 
     // Phase 4: magnified + Wind's standing footprint (LL mouse hook + 144Hz timer loop), no pin.
@@ -145,23 +145,36 @@ int main() {
     std::thread ph(ParasiteHook, &pstop), pl(ParasiteLoop, &pstop);
     Sleep(250);
     double f4 = MeasureGameFps(g, 2.0);
-    printf("fake-game FPS, magnified + Wind footprint: %.1f\n", f4);
+    fprintf(out, "fake-game FPS, magnified + Wind footprint: %.1f\n", f4);
     pstop.store(true); ph.join(); pl.join();
 
     MagSetFullscreenTransform(1.0f, 0, 0);
     MagUninitialize();
     if (g.hwnd) DestroyWindow(g.hwnd);
 
-    printf("\nREAD: ");
+    fprintf(out, "\nREAD: ");
     if (f2 < f1 * 0.75) {
-        printf("magnification GATES the fake game (%.0f -> %.0f). ", f1, f2);
-        if (f3 > f2 * 1.25) printf("compositePin RECOVERS it (%.0f -> %.0f) -> the fix works.\n", f2, f3);
-        else printf("compositePin does NOT recover it (%.0f -> %.0f).\n", f2, f3);
+        fprintf(out, "magnification GATES the fake game (%.0f -> %.0f). ", f1, f2);
+        if (f3 > f2 * 1.25) fprintf(out, "compositePin RECOVERS it (%.0f -> %.0f) -> the fix works.\n", f2, f3);
+        else fprintf(out, "compositePin does NOT recover it (%.0f -> %.0f).\n", f2, f3);
     } else if (f4 < f1 * 0.75) {
-        printf("magnify alone is fine (%.0f) but Wind's footprint halves it (%.0f) -> FIXABLE (hook/loop).\n", f2, f4);
+        fprintf(out, "magnify alone is fine (%.0f) but Wind's footprint halves it (%.0f) -> FIXABLE (hook/loop).\n", f2, f4);
     } else {
-        printf("no halving reproduced (no-mag %.0f, mag %.0f, +pin %.0f, +footprint %.0f); the fake game\n"
-               "likely never hit independent flip, so a synthetic repro isn't possible - needs the real game.\n", f1, f2, f3, f4);
+        fprintf(out, "no halving reproduced (no-mag %.0f, mag %.0f, +pin %.0f, +footprint %.0f); even as a\n"
+               "windowed app the fake game did not lose rate - so magnification does not blanket-halve a\n"
+               "fullscreen flip game; the real-game halving depends on that specific title's present path.\n", f1, f2, f3, f4);
     }
+}
+
+int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
+    wchar_t path[MAX_PATH]; DWORD n = GetTempPathW(MAX_PATH, path);
+    wchar_t file[MAX_PATH];
+    if (n && n < MAX_PATH) { lstrcpyW(file, path); lstrcatW(file, L"wind_gate_probe.txt"); }
+    else lstrcpyW(file, L"wind_gate_probe.txt");
+    FILE* out = nullptr;
+    _wfopen_s(&out, file, L"w");
+    if (!out) return 1;
+    RunProbe(out);
+    fclose(out);
     return 0;
 }

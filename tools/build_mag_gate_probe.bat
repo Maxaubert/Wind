@@ -16,5 +16,5 @@ cd /d "%ROOT%"
 cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE ^
    tools\mag_gate_probe.cpp ^
    /Fe:mag_gate_probe.exe ^
-   /link Magnification.lib d3d11.lib dxgi.lib user32.lib /SUBSYSTEM:CONSOLE
+   /link Magnification.lib d3d11.lib dxgi.lib user32.lib /SUBSYSTEM:WINDOWS
 exit /b %errorlevel%
