@@ -113,7 +113,7 @@ struct TickState {
     int    engineMode = 0;             // cfg.lowPower: 0=render 1=mag 2=auto
     bool   renderInited = false, magInited = false;
     double sinceEngineCheck = 0.0;     // throttles the foreground poll (~2 Hz)
-    int    zorderBand = 0; bool hdrTonemap = false;   // saved for re-initializing the render engine
+    int    zorderBand = 0; bool hdrTonemap = false; bool flipPresent = false;   // saved for re-initializing the render engine
     int    lastMagX = INT_MIN, lastMagY = INT_MIN;   // last Mag transform offset (skip redundant calls)
     // Frame-pacing diagnostics (diagnostics=1): a 2 s window of loop-interval stats.
     double diagAccum = 0.0, diagSumDt = 0.0, diagMaxDt = 0.0;
@@ -187,13 +187,13 @@ static void SelectEngine(TickState& t, double dt, bool atRest) {
     else                                       { if (t.magInited)    { t.mag->shutdown();          t.magInited = false; } }
     // Initialize the desired engine.
     if (desired == TickState::Engine::Render) {
-        if (t.renderEngine.initialize(t.mon, t.zorderBand, t.hdrTonemap)) t.renderInited = true;
+        if (t.renderEngine.initialize(t.mon, t.zorderBand, t.hdrTonemap, t.flipPresent)) t.renderInited = true;
         else { // init failed: fall back to Mag so we are never engine-less
             if (t.mag->initialize()) { t.magInited = true; desired = TickState::Engine::Mag; }
         }
     } else {
         if (t.mag->initialize()) { t.magInited = true; SetUnhandledExceptionFilter(LowPowerCrashFilter); }
-        else { if (t.renderEngine.initialize(t.mon, t.zorderBand, t.hdrTonemap)) { t.renderInited = true; desired = TickState::Engine::Render; } }
+        else { if (t.renderEngine.initialize(t.mon, t.zorderBand, t.hdrTonemap, t.flipPresent)) { t.renderInited = true; desired = TickState::Engine::Render; } }
     }
     t.active = desired;
 }
@@ -673,7 +673,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     bool wantMag = (cfg.lowPower == 1) || (cfg.lowPower == 2 && !wind::FullscreenAppForeground());
     bool engineOk;
     if (wantMag) { engineOk = magEngine.initialize(); if (engineOk) SetUnhandledExceptionFilter(LowPowerCrashFilter); }
-    else         { engineOk = renderEngine.initialize(startupMon, cfg.zorderBand, cfg.hdrTonemap != 0); }
+    else         { engineOk = renderEngine.initialize(startupMon, cfg.zorderBand, cfg.hdrTonemap != 0, cfg.flipPresent != 0); }
     if (!engineOk) {
         MessageBoxW(nullptr, L"Could not start the magnifier engine.", L"Wind", MB_ICONERROR);
         g_input.stop();
@@ -688,6 +688,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     ts.engineMode = cfg.lowPower;
     ts.zorderBand = cfg.zorderBand;
     ts.hdrTonemap = (cfg.hdrTonemap != 0);
+    ts.flipPresent = (cfg.flipPresent != 0);
+    if (cfg.flipPresent) wind::Log(wind::LogLevel::Warn, "present", "flipPresent=1 (dcomp): fixed-refresh monitors only; tears on VRR");
     ts.active = wantMag ? TickState::Engine::Mag : TickState::Engine::Render;
     ts.renderInited = !wantMag;
     ts.magInited = wantMag;
