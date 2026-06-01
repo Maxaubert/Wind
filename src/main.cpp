@@ -270,7 +270,9 @@ static bool RunTick(TickState& t) {
     // the cursor with an INTEGER source offset (the judder source, accepted here). No overlay, no
     // Desktop Duplication, no SetCursorPos warp (MagSetInputTransform maps clicks in the UIAccess
     // build), no drawn cursor (the Mag API scales the real one). Returns no-present; the loop
-    // timer-paces. Primary monitor only.
+    // timer-paces. Primary monitor only. t.lowPower is fixed at launch (engine selection is start-
+    // only by design - it is deliberately NOT hot-reloaded, since switching engines live would use
+    // an uninitialized engine; changing lowPower in the ini takes effect on the next restart).
     if (t.lowPower) {
         if (lvl > 1.0) {
             const int sw = GetSystemMetrics(SM_CXSCREEN);
@@ -467,14 +469,30 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 // Force-restore any global input state a previous Wind may have left dirty (cursor hidden, cursor
-// confined, a stuck show-count). Safe to call unconditionally at startup and at exit: every call
-// is idempotent. This is the net that guarantees a force-killed or crashed predecessor can never
-// leave the machine with a hidden/locked cursor - the next launch (and our own exit) heals it.
+// confined, a stuck show-count, OR a zoomed desktop from low-power mode). Safe to call
+// unconditionally at startup and at exit: every call is idempotent. This is the net that guarantees
+// a force-killed or crashed predecessor can never leave the machine with a hidden/locked cursor or a
+// permanently magnified screen - the next launch (and our own exit) heals it.
 static void RestoreInputState() {
     ClipCursor(nullptr);                                         // release any cursor confinement
-    if (MagInitialize()) { MagShowSystemCursor(TRUE); MagUninitialize(); }   // un-hide the OS cursor
+    if (MagInitialize()) {
+        MagSetFullscreenTransform(1.0f, 0, 0);                   // reset any leftover low-power zoom to 1x
+        MagShowSystemCursor(TRUE);                               // un-hide the OS cursor
+        MagUninitialize();
+    }
     SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, SPIF_SENDCHANGE);      // reload system cursors
     for (int i = 0; i < 8 && ShowCursor(TRUE) < 0; ++i) {}       // bump our show-count back to visible
+}
+
+// Crash net for low-power (Magnification API) mode: if we go down while the desktop is zoomed, reset
+// the fullscreen transform so the user is never left staring at a permanently magnified screen. The
+// render-path CursorRestoreFilter is NOT installed in low-power mode (we never call hideSystemCursor),
+// so this is the only filter armed then. The Mag runtime is already initialized (magEngine.initialize),
+// so the reset is a bare syscall (no allocation). Also writes the crash dump, like the render filter.
+static LONG WINAPI LowPowerCrashFilter(EXCEPTION_POINTERS* ep) {
+    MagSetFullscreenTransform(1.0f, 0, 0);   // never leave the desktop zoomed
+    wind::WriteCrashReport(ep);
+    return EXCEPTION_CONTINUE_SEARCH;        // let the default handler still report the crash
 }
 
 // Minimal restore for abnormal CRT exit (atexit / ExitProcess). Non-blocking: must not touch the
@@ -619,6 +637,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             g_input.stop();
             return 1;
         }
+        SetUnhandledExceptionFilter(LowPowerCrashFilter);   // reset zoom on crash (no render-path filter here)
     } else if (!renderEngine.initialize(startupMon, cfg.zorderBand, cfg.hdrTonemap != 0)) {
         MessageBoxW(nullptr, L"Could not start the renderer (Direct3D 11 / Desktop Duplication "
                              L"unavailable on this system).", L"Wind", MB_ICONERROR);
