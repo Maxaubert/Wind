@@ -102,5 +102,20 @@ FOLLOW-UPS (deployed UIAccess build):
   Windows Magnifier full-screen in the SAME game - if it also halves, Wind already matches WM (goal met);
   (2) confirm the game's display mode (borderless vs exclusive fullscreen). G-Sync-off still predicts
   the fixed-refresh iGPU target. No further synthetic repro is possible from this machine.
+
+- EXCLUSIVE-FULLSCREEN PROBE (tools/mag_fse_probe.cpp): SetFullscreenState(TRUE) FAILED with
+  DXGI_ERROR_NOT_CURRENTLY_AVAILABLE (0x887A0022) - Win11 + HDR + G-Sync + multi-adapter does not grant
+  true exclusive fullscreen here at all; the app stayed composited (fullscreen=0) and held 145->146 fps
+  under magnification. So even the FSE mechanism is ruled out, AND it means the user's game is NOT in
+  true FSE (the OS won't grant it on this box) - it is borderless/flip composited, which magnification
+  provably does not halve.
+- FINAL STATE: every mechanism reproducible on this machine is ruled out - the public Magnification API
+  does not reduce a (composited flip) game's FPS in ANY synthetic configuration: light, GPU-bound, FSE
+  (unavailable), composite-clock, Wind footprint, +/-compositePin, +/-smoothing. The user's real-game
+  halving cannot be reproduced or root-caused from here; it must be a property of that specific title's
+  engine/present behavior (e.g. its own vsync/frame-limit reaction) or the FPS-overlay measurement, both
+  of which Windows Magnifier would be subject to identically. The single decisive remaining check is
+  user-only: run Windows Magnifier full-screen in the SAME game - if WM also halves, Wind already matches
+  WM and the goal is met. Autonomous investigation is exhausted.
 | 2 | `lowPower=2` | adaptive (Mag on desktop, own-renderer when a fullscreen game is foreground) | _pending_ | Desktop juddery+cheap; zoom inside a fullscreen game should be smooth + full FPS. |
 | 3 | `lowPower=0` + `flipPresent=1` | own-renderer via dcomp flip-model present | **heavy - no win on this machine** | "Also uses a lot of resources." On the dGPU/VRR main PC the dcomp present did NOT lower GPU vs blt - so either the driver did not promote it to a cheap MPO/independent-flip plane, or (likely) the DDA-capture + magnify cost dominates regardless of present path. Implication: flipPresent only helps if MPO promotion happens AND the composite was the bottleneck. Real verdict still pending on the fixed-refresh iGPU (different driver/MPO behavior) - UNTESTED there. |
