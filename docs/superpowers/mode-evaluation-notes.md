@@ -42,11 +42,16 @@ FOLLOW-UPS (deployed UIAccess build):
   exclusive) and active fullscreen magnification forces it back through DWM composition. WM comparison:
   WM hitches on zoom-IN (level change, inherent - even WM can't avoid it) but pans free; we hitch on BOTH.
   The pan delta is the fixable target.
-- OPEN FORK (one test): zoomed in a focused game, cursor STILL -> full FPS or halved?
-    - full-when-still -> it's our per-frame MagSetFullscreenTransform calls; fix = throttle the visual
-      transform rate, gated on a focused fullscreen game (WM-style trade: slightly choppier magnified
-      pan, full game FPS).
-    - halved-when-still -> the active magnification itself forces the focused game off its fast path;
-      public-API wall (WM uses private scanout scaling), throttling won't help.
+- ROOT CAUSE CONFIRMED: cursor-still-in-focused-game STILL halves FPS (same as moving). When still we
+  make ZERO Mag API calls (offset unchanged -> the per-tick setTransform is guard-skipped), so the
+  halving is NOT our calls / loop / input remap. It is the STANDING fullscreen transform (level>1
+  active) forcing the focused fullscreen game off its fast present path and through DWM composition.
+  Throttling anything cannot help - the only lever is "is the transform active," which is the feature.
+- REMAINING UNKNOWN that picks the fix: is the halving VRR-specific? This PC is G-Sync 144Hz; once DWM
+  composition is in the loop the composite rate floats down (~68-72Hz, exactly the dcomp-saga number) =
+  the observed "half." A FIXED-refresh display (the iGPU target) would composite at a steady rate, so
+  the game likely would NOT halve there. Decisive test: disable G-Sync/VRR and re-test the focused game.
+    - holds -> VRR artifact; Mag mode is stable in games on the fixed-refresh iGPU target (goal met there).
+    - still halves -> hard composition cap; public API cannot match WM's private scanout scaling.
 | 2 | `lowPower=2` | adaptive (Mag on desktop, own-renderer when a fullscreen game is foreground) | _pending_ | Desktop juddery+cheap; zoom inside a fullscreen game should be smooth + full FPS. |
 | 3 | `lowPower=0` + `flipPresent=1` | own-renderer via dcomp flip-model present | **heavy - no win on this machine** | "Also uses a lot of resources." On the dGPU/VRR main PC the dcomp present did NOT lower GPU vs blt - so either the driver did not promote it to a cheap MPO/independent-flip plane, or (likely) the DDA-capture + magnify cost dominates regardless of present path. Implication: flipPresent only helps if MPO promotion happens AND the composite was the bottleneck. Real verdict still pending on the fixed-refresh iGPU (different driver/MPO behavior) - UNTESTED there. |
