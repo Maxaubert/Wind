@@ -103,6 +103,21 @@ FOLLOW-UPS (deployed UIAccess build):
   (2) confirm the game's display mode (borderless vs exclusive fullscreen). G-Sync-off still predicts
   the fixed-refresh iGPU target. No further synthetic repro is possible from this machine.
 
+- RESOLVED with real-game measurement (Kingdom Come: Deliverance II, main menu, PresentMon, identical
+  forced-foreground method for all three):
+    | condition                | game present | DISPLAYED | present mode                          |
+    | baseline (no magnifier)  | 143 fps      | 144 fps   | Hardware Composed: Independent Flip    |
+    | Wind Mag mode (12x)      | 436 fps      | 144 fps   | Composed: Flip                         |
+    | Windows Magnifier (16x)  | 432 fps      | 144 fps   | Composed: Flip                         |
+  Wind's Mag mode and Windows Magnifier are INDISTINGUISHABLE: both force the game off Independent Flip
+  into Composed: Flip and both hold it at the FULL 144 fps displayed. Neither halves it. The originally
+  reported "halving to ~77" was a measurement/VRR artifact, not a real deficit vs WM. GOAL MET: Mag mode
+  performs just as well as Windows Magnifier in games (and is near-zero cost on the desktop).
+  Test harness: tools/cap_wind.ps1 + tools/cap_wm.ps1 (forced-foreground PresentMon capture; the key was
+  keeping KCD2 genuinely foreground - when it loses foreground under magnification it self-throttles,
+  which had masqueraded as "halving"). The earlier autonomous probes were correct that the public Mag
+  API adds ~0 cost; the real game confirms it.
+
 - EXCLUSIVE-FULLSCREEN PROBE (tools/mag_fse_probe.cpp): SetFullscreenState(TRUE) FAILED with
   DXGI_ERROR_NOT_CURRENTLY_AVAILABLE (0x887A0022) - Win11 + HDR + G-Sync + multi-adapter does not grant
   true exclusive fullscreen here at all; the app stayed composited (fullscreen=0) and held 145->146 fps
