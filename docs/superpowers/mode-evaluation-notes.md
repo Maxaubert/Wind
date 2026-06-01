@@ -62,5 +62,18 @@ FOLLOW-UPS (deployed UIAccess build):
        fixed-refresh iGPU target, which is the actual goal hardware).
   If WM also halves AND/OR G-Sync-off holds, "Mag stable in games" is satisfied for the real target;
   full-FPS-on-VRR via the public API is not reachable (own-renderer is the only full-FPS path, by design).
+
+- compositePin EXPERIMENT (shipped, opt-in): present a 1x1 flip swapchain every vblank while zoomed to
+  force DWM to composite at full refresh, hoping to un-gate the focused game. Autonomous validation via
+  tools/composite_rate_probe.cpp (measures the real composite cadence with DwmFlush() return-rate, since
+  DwmGetCompositionTimingInfo().cFrame is a dead counter on Win11): with 2x magnification active on this
+  G-Sync desktop, the composite cadence is ALREADY 144Hz, heartbeat OFF and ON alike (144.1 -> 144.0).
+  So DWM is NOT floating the composite clock down on the magnified desktop -> the heartbeat has nothing
+  to raise -> compositePin likely will NOT help the in-game halving. The probe can't model a real game's
+  present path, so the deployed in-game test is still the decider, but the prior just dropped a lot.
+  REVISED mechanism: the halving is probably the game's own present forced to land every-other-vblank
+  through the synchronous magnify/composite step (a vsync-phase penalty), not a composite-clock float.
+  No public-API lever for that -> the own-renderer (async capture, never gates the game) remains the
+  only full-FPS path; Mag mode's full-FPS-in-games is likely unreachable on a high-refresh display.
 | 2 | `lowPower=2` | adaptive (Mag on desktop, own-renderer when a fullscreen game is foreground) | _pending_ | Desktop juddery+cheap; zoom inside a fullscreen game should be smooth + full FPS. |
 | 3 | `lowPower=0` + `flipPresent=1` | own-renderer via dcomp flip-model present | **heavy - no win on this machine** | "Also uses a lot of resources." On the dGPU/VRR main PC the dcomp present did NOT lower GPU vs blt - so either the driver did not promote it to a cheap MPO/independent-flip plane, or (likely) the DDA-capture + magnify cost dominates regardless of present path. Implication: flipPresent only helps if MPO promotion happens AND the composite was the bottleneck. Real verdict still pending on the fixed-refresh iGPU (different driver/MPO behavior) - UNTESTED there. |
