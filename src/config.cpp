@@ -66,6 +66,7 @@ Config ParseConfig(const std::string& text) {
     // out-of-range value (e.g. maxLevel=0, which would invert ZoomController's clamp and disable zoom,
     // or a negative ramp) would otherwise silently break behavior with no feedback. Ranges mirror the
     // config UI sliders / the struct-comment docs.
+    if (c.lowPower < 0 || c.lowPower > 2) c.lowPower = 0;   // 0=own-renderer 1=low-power 2=auto; else off
     c.maxLevel        = clampd(c.maxLevel,        1.0, 50.0);   // must be >= the 1.0 min zoom level
     c.zoomInSpeed     = clampd(c.zoomInSpeed,     0.25, 4.0);
     c.zoomOutSpeed    = clampd(c.zoomOutSpeed,    0.25, 4.0);
@@ -156,8 +157,9 @@ Config LoadConfig(const std::wstring& path) {
                ";   1=on a full-screen repaint (games) copy only the magnified region (cuts 4K HDR GPU\n"
                ";   copy ~zoom^2) but screen edges can briefly show a previous window after a switch.\n"
                "cropCapture=0\n"
-               "; lowPower: 1=magnify via the Windows Magnification API (cheap on integrated GPUs,\n"
-               ";   but the pan judders - integer offset); 0=own smooth renderer (default). Per-machine.\n"
+               "; lowPower: 0=own smooth renderer (default); 1=Magnification API (cheap on integrated GPUs,\n"
+               ";   but the pan judders - integer offset); 2=auto (low-power on desktop, own-renderer in\n"
+               ";   fullscreen games). Values outside 0..2 are treated as 0. Per-machine.\n"
                "lowPower=0\n"
                "; onboarded: 0 = run the first-launch setup once; set to 1 once finished\n"
                "onboarded=0\n";

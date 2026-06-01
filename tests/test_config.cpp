@@ -166,3 +166,8 @@ TEST_CASE("lowPower defaults off and parses") {
     CHECK(ParseConfig("lowPower=1\n").lowPower == 1);
     CHECK(ParseConfig("lowPower=0\n").lowPower == 0);
 }
+TEST_CASE("lowPower accepts 0/1/2 and clamps out-of-range") {
+    CHECK(ParseConfig("lowPower=2\n").lowPower == 2);
+    CHECK(ParseConfig("lowPower=5\n").lowPower == 0);   // invalid -> off (own-renderer)
+    CHECK(ParseConfig("lowPower=-1\n").lowPower == 0);
+}

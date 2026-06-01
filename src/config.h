@@ -100,6 +100,8 @@ struct Config {
     // scaling, no overlay surface, no Desktop Duplication) for integrated graphics, at the cost of
     // integer-offset pan judder. Set per-machine in the LOCALAPPDATA ini (e.g. on a weak iGPU);
     // capable hardware leaves it 0 and keeps the smooth own-renderer.
+    // 2 = auto (low-power on desktop, own-renderer in fullscreen games).
+    // Values outside 0..2 are clamped to 0.
     int    lowPower = 0;
     // First-launch onboarding: 0 = not yet onboarded (also true of a freshly created ini), so the
     // core spawns WindConfig.exe --onboard once; the onboarding flow sets this to 1 on completion.
