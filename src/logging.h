@@ -25,7 +25,7 @@ bool ShouldRotate(unsigned long long currentSizeBytes, unsigned long long maxByt
 // The shipped limits (kept here so the backend and tests agree on one source).
 constexpr unsigned long long kLogMaxBytes   = 1024ULL * 1024ULL;  // 1 MiB per file
 constexpr int                kLogGenerations = 3;                  // wind-core.log + .1 + .2
-constexpr int                kCrashKeep      = 3;                  // used by the Win32 backend (crash-dump pruning); kept here so all log limits live together
+constexpr int                kCrashKeep      = 3;                  // caps both crash dump pairs and stray per-PID logs; kept here so all log limits live together
 
 struct MonitorInfo {
     std::string name;          // e.g. "\\.\DISPLAY1"
@@ -44,8 +44,7 @@ struct SystemInfo {
     std::string cpu;           // brand string
     int         logicalCores = 0;
     unsigned long long ramBytes = 0;
-    std::string gpu;           // adapter description
-    std::string driverVersion;
+    std::vector<std::string> gpus;   // one per DXGI adapter: "Description  driver X.Y.Z.W"; [0] = default
     std::vector<MonitorInfo> monitors;
     std::string configDump;    // already-rendered "key=value" lines, newline-separated
 };

@@ -31,7 +31,7 @@ TEST_CASE("BuildSnapshot includes version, OS, GPU and each monitor") {
     SystemInfo si;
     si.windVersion = "0.1.0"; si.buildFlavor = "uiaccess";
     si.osBuild = "Windows 10.0.26200"; si.cpu = "TestCPU"; si.logicalCores = 8;
-    si.ramBytes = 17179869184ULL; si.gpu = "TestGPU"; si.driverVersion = "31.0.15.4601";
+    si.ramBytes = 17179869184ULL; si.gpus.push_back("TestGPU  driver 31.0.15.4601");
     MonitorInfo m; m.name = "\\\\.\\DISPLAY1"; m.w = 3840; m.h = 2160; m.refreshHz = 143;
     m.dpiPercent = 150; m.rotationDeg = 0; m.hdr = true; m.vrr = "on";
     si.monitors.push_back(m);
@@ -52,7 +52,7 @@ TEST_CASE("BuildSnapshot with no monitors") {
     SystemInfo si;
     si.windVersion = "0.1.0"; si.buildFlavor = "normal";
     si.osBuild = "Windows 10.0.26200"; si.cpu = "CPU"; si.logicalCores = 1;
-    si.ramBytes = 1024ULL * 1024ULL * 1024ULL; si.gpu = "GPU"; si.driverVersion = "1.0";
+    si.ramBytes = 1024ULL * 1024ULL * 1024ULL; si.gpus.push_back("GPU  driver 1.0");
     std::string s = BuildSnapshot(si);
     CHECK(s.find("Monitors: 0") != std::string::npos);
     CHECK(s.find("Wind 0.1.0 (normal)") != std::string::npos);

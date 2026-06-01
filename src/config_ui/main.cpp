@@ -222,10 +222,6 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     return DefWindowProcW(h, m, w, l);
 }
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
-    wind::LogInit(L"config");
-    atexit(wind::LogShutdown);
-    wind::LogSystemSnapshot("config", "");
-
     // Single-instance: opening Settings from the tray (or any second launch) focuses the existing
     // window instead of stacking another WindConfig.exe with its own WebView2.
     HANDLE mtx = CreateMutexW(nullptr, TRUE, L"WindConfig_SingleInstance");
@@ -238,6 +234,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
         CloseHandle(mtx);
         return 0;
     }
+    wind::LogInit(L"config");
+    atexit(wind::LogShutdown);
+    wind::LogSystemSnapshot("config", "");
+
     bool onboard = lpCmdLine && wcsstr(lpCmdLine, L"--onboard") != nullptr;
     // Settings should never run without the magnifier, and never show the config page against a
     // not-yet-set-up config. So, when launched as Settings (no --onboard):

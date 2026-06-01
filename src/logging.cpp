@@ -50,7 +50,9 @@ std::string BuildSnapshot(const SystemInfo& si) {
     o << "OS: " << si.osBuild << "\n";
     o << "CPU: " << si.cpu << " (" << si.logicalCores << " logical cores)\n";
     o << "RAM: " << (si.ramBytes / (1024ULL * 1024ULL)) << " MiB\n";
-    o << "GPU: " << si.gpu << "  driver " << si.driverVersion << "\n";
+    o << "GPUs: " << si.gpus.size() << "\n";
+    for (size_t i = 0; i < si.gpus.size(); ++i)
+        o << "  [" << i << "]" << (i == 0 ? " (default)" : "") << " " << si.gpus[i] << "\n";
     o << "Monitors: " << si.monitors.size() << "\n";
     for (const auto& m : si.monitors) {
         o << "  " << m.name << "  " << m.w << "x" << m.h << "@" << m.refreshHz
@@ -77,6 +79,7 @@ std::string BuildSnapshot(const SystemInfo& si) {
 #include <vector>
 #include "config_path.h"
 #include "version.h"
+#pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "dbghelp.lib")
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "shcore.lib")
@@ -268,13 +271,29 @@ static std::string OsBuildString() {
     OSVERSIONINFOEXW v{}; v.dwOSVersionInfoSize = sizeof(v);
     HMODULE nt = GetModuleHandleW(L"ntdll.dll");
     auto fn = nt ? (RtlGetVersionFn)GetProcAddress(nt, "RtlGetVersion") : nullptr;
+    std::string base;
     if (fn && fn(&v) == 0) {
         char b[64];
         std::snprintf(b, sizeof(b), "Windows %lu.%lu.%lu",
                       v.dwMajorVersion, v.dwMinorVersion, v.dwBuildNumber);
-        return b;
+        base = b;
+    } else {
+        base = "Windows (unknown build)";
     }
-    return "Windows (unknown build)";
+    // Append the edition/product name (e.g. "Windows 11 Pro"). RtlGetVersion already gave the
+    // accurate build number above; this adds the edition string for the snapshot.
+    HKEY k;
+    std::string edition;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
+                      0, KEY_READ, &k) == ERROR_SUCCESS) {
+        wchar_t pn[128]; DWORD sz = sizeof(pn);
+        if (RegQueryValueExW(k, L"ProductName", nullptr, nullptr, (LPBYTE)pn, &sz) == ERROR_SUCCESS) {
+            char nm[160]; std::snprintf(nm, sizeof(nm), "%ls", pn); edition = nm;
+        }
+        RegCloseKey(k);
+    }
+    if (!edition.empty()) return base + " (" + edition + ")";
+    return base;
 }
 
 static std::string CpuBrandString() {
@@ -294,26 +313,23 @@ static std::string CpuBrandString() {
     return "unknown CPU";
 }
 
-static void QueryGpu(std::string& gpuOut, std::string& driverOut) {
-    gpuOut = "unknown"; driverOut = "unknown";
+static void QueryGpus(std::vector<std::string>& out) {
     IDXGIFactory* factory = nullptr;
     if (FAILED(CreateDXGIFactory(__uuidof(IDXGIFactory), (void**)&factory)) || !factory) return;
     IDXGIAdapter* adapter = nullptr;
-    if (factory->EnumAdapters(0, &adapter) == S_OK && adapter) {
+    for (UINT i = 0; factory->EnumAdapters(i, &adapter) == S_OK; ++i) {
+        std::string line = "unknown";
         DXGI_ADAPTER_DESC desc{};
-        if (SUCCEEDED(adapter->GetDesc(&desc))) {
-            char nm[256]; std::snprintf(nm, sizeof(nm), "%ls", desc.Description);
-            gpuOut = nm;
-        }
+        if (SUCCEEDED(adapter->GetDesc(&desc))) { char nm[256]; std::snprintf(nm, sizeof(nm), "%ls", desc.Description); line = nm; }
         LARGE_INTEGER umd{};
-        // UMD version is best-effort: may differ from Device Manager driver version; stays "unknown" on failure.
+        // Best-effort UMD version (may differ from the Device Manager driver version; unreliable on some adapters).
         if (SUCCEEDED(adapter->CheckInterfaceSupport(__uuidof(IDXGIDevice), &umd))) {
-            char dv[64];
-            std::snprintf(dv, sizeof(dv), "%u.%u.%u.%u",
+            char dv[80]; std::snprintf(dv, sizeof(dv), "  driver %u.%u.%u.%u",
                 HIWORD(umd.HighPart), LOWORD(umd.HighPart), HIWORD(umd.LowPart), LOWORD(umd.LowPart));
-            driverOut = dv;
-        }
-        adapter->Release();
+            line += dv;
+        } else line += "  driver unknown";
+        out.push_back(line);
+        adapter->Release(); adapter = nullptr;
     }
     factory->Release();
 }
@@ -354,7 +370,7 @@ void LogSystemSnapshot(const char* buildFlavor, const std::string& configDump) {
     SYSTEM_INFO sinf{}; GetSystemInfo(&sinf); si.logicalCores = (int)sinf.dwNumberOfProcessors;
     MEMORYSTATUSEX mem{}; mem.dwLength = sizeof(mem);
     if (GlobalMemoryStatusEx(&mem)) si.ramBytes = mem.ullTotalPhys;
-    QueryGpu(si.gpu, si.driverVersion);
+    QueryGpus(si.gpus);
     MonEnumCtx ctx{ &si.monitors };
     EnumDisplayMonitors(nullptr, nullptr, MonEnumProc, (LPARAM)&ctx);
     si.configDump = configDump;
