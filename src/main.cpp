@@ -13,6 +13,7 @@
 #include "logging.h"
 #pragma comment(lib, "Dwmapi.lib")
 #include "render_engine.h"
+#include "magnifier_engine.h"
 #include "input_router.h"
 #include "cursor_mapper.h"
 #include "zoom_controller.h"
@@ -105,6 +106,9 @@ struct TickState {
     bool   recenterKeyWasDown = false;         // edge-detect the recenterVk key
     bool   cursorHidden       = false;         // runtime-only override (no ini write, no hot-reload)
     HWND   hwnd               = nullptr;       // owning message window (for RegisterHotKey)
+    MagnifierEngine* mag = nullptr;   // low-power Mag-API engine (set when lowPower); null otherwise
+    bool   lowPower = false;          // cfg.lowPower: use mag instead of the own renderer
+    int    lastMagX = INT_MIN, lastMagY = INT_MIN;   // last Mag transform offset (skip redundant calls)
     // Frame-pacing diagnostics (diagnostics=1): a 2 s window of loop-interval stats.
     double diagAccum = 0.0, diagSumDt = 0.0, diagMaxDt = 0.0;
     int    diagFrames = 0, diagHitches = 0;
@@ -261,6 +265,34 @@ static bool RunTick(TickState& t) {
     double lvl = t.zoom.level();
 
     int rawDx, rawDy; g_input.drainRaw(rawDx, rawDy);
+
+    // Low-power mode: magnify via the Windows Magnification API instead of the own renderer. Center
+    // the cursor with an INTEGER source offset (the judder source, accepted here). No overlay, no
+    // Desktop Duplication, no SetCursorPos warp (MagSetInputTransform maps clicks in the UIAccess
+    // build), no drawn cursor (the Mag API scales the real one). Returns no-present; the loop
+    // timer-paces. Primary monitor only.
+    if (t.lowPower) {
+        if (lvl > 1.0) {
+            const int sw = GetSystemMetrics(SM_CXSCREEN);
+            const int sh = GetSystemMetrics(SM_CYSCREEN);
+            const int viewW = (int)(sw / lvl);
+            const int viewH = (int)(sh / lvl);
+            POINT pt; GetCursorPos(&pt);
+            int xOff = pt.x - viewW / 2;
+            int yOff = pt.y - viewH / 2;
+            if (xOff < 0) xOff = 0; else if (xOff > sw - viewW) xOff = sw - viewW;
+            if (yOff < 0) yOff = 0; else if (yOff > sh - viewH) yOff = sh - viewH;
+            if (lvl != t.prevLvl || xOff != t.lastMagX || yOff != t.lastMagY) {
+                t.mag->setTransform(lvl, xOff, yOff);
+                t.lastMagX = xOff; t.lastMagY = yOff;
+            }
+        } else if (t.prevLvl > 1.0) {
+            t.mag->setTransform(1.0, 0, 0);     // zoom-out: reset to 1x
+            t.lastMagX = INT_MIN; t.lastMagY = INT_MIN;
+        }
+        t.prevLvl = lvl;
+        return false;   // no Present; the loop's renderPresentPaces idle-wait paces this tick
+    }
 
     if (lvl > 1.0) {
         bool zoomIn = (t.prevLvl <= 1.0);             // zoom-in transition
@@ -575,9 +607,19 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // primary. The first zoom-in re-checks and retargets if the cursor moved to another monitor.
     MonitorTarget startupMon = (cfg.multiMonitor != 0) ? MonitorUnderCursor() : PrimaryMonitor();
 
-    // --- Own GPU renderer (DXGI Desktop Duplication + D3D11) ---
-    RenderEngine renderEngine;
-    if (!renderEngine.initialize(startupMon, cfg.zorderBand, cfg.hdrTonemap != 0)) {
+    // Magnifier engine. Low-power mode uses the Windows Magnification API (DWM does the scaling -
+    // no overlay surface, no Desktop Duplication, GPU-cheap for integrated graphics). Default mode
+    // uses the own DXGI+D3D renderer (smooth sub-pixel pan). Only ONE is initialized.
+    RenderEngine renderEngine;       // constructed always; initialized only in default mode
+    MagnifierEngine magEngine;
+    if (cfg.lowPower != 0) {
+        if (!magEngine.initialize()) {
+            MessageBoxW(nullptr, L"Could not start the low-power magnifier (Magnification API "
+                                 L"unavailable).", L"Wind", MB_ICONERROR);
+            g_input.stop();
+            return 1;
+        }
+    } else if (!renderEngine.initialize(startupMon, cfg.zorderBand, cfg.hdrTonemap != 0)) {
         MessageBoxW(nullptr, L"Could not start the renderer (Direct3D 11 / Desktop Duplication "
                              L"unavailable on this system).", L"Wind", MB_ICONERROR);
         g_input.stop();
@@ -588,6 +630,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     TickState ts(renderEngine, startupMon, cfg);
     ts.hwnd = hwnd;                       // so RunTick can re-register the hide-cursor hotkey
+    ts.lowPower = (cfg.lowPower != 0);
+    ts.mag = ts.lowPower ? &magEngine : nullptr;
     g_tick = &ts;   // so the WM_TIMER tick (during the tray menu's modal loop) can run
 
     // Autonomous verification hook: WIND_SELFTEST drives the real integrated render path at a
@@ -720,7 +764,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         // D3D device was removed; rebuild it on a backoff so we don't spin (the driver may take a
         // moment to return). Crucially, un-hide the OS cursor first so the user is never left without
         // a pointer while we are unable to draw the magnified one. Skip the normal tick this iteration.
-        if (renderEngine.deviceLost()) {
+        if (!ts.lowPower && renderEngine.deviceLost()) {
             renderEngine.hideSystemCursor(false);   // restore the real cursor while we can't render
             unsigned long long now = GetTickCount64();
             if (now >= nextRecoverMs) {
@@ -775,7 +819,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     if (ts.configWatch && ts.configWatch != INVALID_HANDLE_VALUE) FindCloseChangeNotification(ts.configWatch);
     UnregisterHotKey(hwnd, kQuitHotkeyId);
     UnregisterHotKey(hwnd, kHideCursorHotkeyId);
-    renderEngine.shutdown();   // restores cursor + tears down D3D/overlay
+    if (ts.lowPower) magEngine.shutdown(); else renderEngine.shutdown();   // restores cursor + tears down D3D/overlay or resets Mag API
     g_input.stop();
     Tray::Remove();
     if (mtx) { ReleaseMutex(mtx); CloseHandle(mtx); }
