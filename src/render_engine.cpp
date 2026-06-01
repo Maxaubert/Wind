@@ -311,6 +311,8 @@ bool RenderEngine::State::copyChangedRegions(ID3D11Texture2D* src, const DXGI_OU
     return true;
 }
 
+// Returns true iff a NEW desktop frame was copied into desktopCopy during this call (used by
+// render() for render-on-demand). A static screen (WAIT_TIMEOUT) copies nothing and returns false.
 bool RenderEngine::State::capture(const RECT& view, bool crop) {
     if (!dupl && !recreateDupl()) return false;
 
@@ -343,12 +345,12 @@ bool RenderEngine::State::capture(const RECT& view, bool crop) {
         const DWORD to = gotThisCall ? 3 : firstTimeout;   // after a copy, only briefly seek a newer frame
         HRESULT hr = dupl->AcquireNextFrame(to, &fi, &res);
         if (hr == DXGI_ERROR_WAIT_TIMEOUT) { SafeRelease(res); if (gotThisCall) break; continue; }
-        if (hr == DXGI_ERROR_ACCESS_LOST) { SafeRelease(res); dupl.Reset(); return gotThisCall || haveDesktop; }
+        if (hr == DXGI_ERROR_ACCESS_LOST) { SafeRelease(res); dupl.Reset(); return gotThisCall; }
         if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
             SafeRelease(res); deviceLost = true; RLog("capture: device lost hr=0x%08lX", (unsigned long)hr);
-            return gotThisCall || haveDesktop;
+            return gotThisCall;
         }
-        if (FAILED(hr)) { SafeRelease(res); return haveDesktop; }
+        if (FAILED(hr)) { SafeRelease(res); return false; }
 
         ID3D11Texture2D* tex = nullptr;
         if (res) res->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&tex);
@@ -383,7 +385,7 @@ bool RenderEngine::State::capture(const RECT& view, bool crop) {
         if (!fresh) return true;          // settled desktop: the single frame is enough
         // fresh: keep looping to drain to the latest frame (the short `to` breaks us out)
     }
-    return gotThisCall || haveDesktop;   // no frame within budget; keep whatever we had
+    return gotThisCall;   // no frame within budget; keep whatever we had
 }
 
 // The overlay must pass clicks through to the apps beneath. Cross-process click-through is
