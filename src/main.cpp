@@ -159,8 +159,10 @@ static void RegisterHideCursorHotkey(HWND hwnd, int vk, int mods);
 
 // One magnifier tick: advance zoom, hot-reload config, then pan/draw via the render engine.
 // Pure of any pacing wait - the caller paces. Safe to call from the main loop or from a
-// WM_TIMER during a modal loop.
-static void RunTick(TickState& t) {
+// WM_TIMER during a modal loop. Returns true if a frame was presented this tick.
+static bool RunTick(TickState& t) {
+    bool presented = false;
+    bool configChanged = false;
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
     double dt = double(now.QuadPart - t.prev.QuadPart) / double(t.freq.QuadPart);
@@ -198,6 +200,7 @@ static void RunTick(TickState& t) {
         unsigned long long m = ConfigMTime(t.iniPath);
         if (m != t.lastMtime) {
             t.lastMtime = m;
+            configChanged = true;
             Config nc = LoadConfig(t.iniPath);
             // Re-bind the hook's button mapping if the user changed it via the config UI; without
             // this the hook would keep firing the OLD button (the new VK works via GetAsyncKeyState
@@ -314,7 +317,16 @@ static void RunTick(TickState& t) {
         RenderFrameParams p{};
         FillRenderParams(p, r, t.cfg, t.mon, lvl);
         if (t.cursorHidden) p.cursorMode = 2;   // hotkey override; FillRenderParams already set 0/1/2 from cfg
-        t.renderEngine.renderFrame(p);
+        // Render-on-demand dirty condition. Present a new frame only when something actually moved:
+        //  - input this tick (dx/dy != 0), or smoothing inertia is still easing toward the target;
+        //  - the zoom level is animating (ramping in/out);
+        //  - a forced refresh: zoom-in reveal, recenter, or a config hot-reload.
+        // The desktop-changed case is detected inside renderFrame (capture()), which OR-combines with
+        // forcePresent. When none hold, renderFrame skips the GPU work and returns false (no present).
+        bool lensDirty = (dx != 0 || dy != 0) || !t.mapper.settled();
+        bool zoomDirty = (lvl != t.prevLvl);
+        p.forcePresent = zoomIn || recenter || configChanged || lensDirty || zoomDirty;
+        presented = t.renderEngine.renderFrame(p);
         // renderFrame SetCursorPos'd the OS cursor to clickDesktop+origin; remember it so next tick's
         // GetCursorPos delta measures only the user's hand motion since.
         t.lastSetVirtual.x = r.clickDesktopX + t.mon.x;
@@ -345,6 +357,7 @@ static void RunTick(TickState& t) {
             t.diagFrames = 0; t.diagHitches = 0;
         }
     }
+    return presented;
 }
 
 // Message-handler: decodes raw mouse movement (survives cursor lock) and routes tray msgs.
@@ -591,6 +604,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             FillRenderParams(p, r, cfg, ts.mon, 4.0);
             p.cursorMode = 1;   // always draw the cursor in the selftest dump
             p.vsync = true;
+            p.forcePresent = true;   // selftest always renders
             renderEngine.renderFrame(p);
             Sleep(16);
         }
@@ -624,6 +638,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             RenderFrameParams p{};
             FillRenderParams(p, r, cfg, ts.mon, 4.0);
             p.cursorMode = 1; p.vsync = (cfg.vsync != 0);
+            p.forcePresent = true;   // pacingtest always renders (simulated constant pan)
             if (first) renderEngine.invalidateCapture();
             renderEngine.renderFrame(p);
             if (first) { renderEngine.setVisible(true); first = false; QueryPerformanceCounter(&a); continue; }
@@ -739,9 +754,18 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             }
         }
 
-        RunTick(ts);
+        bool presented = RunTick(ts);
 
-        if (dwmPaces) DwmFlush();   // block until DWM's next composite -> frames align with it
+        if (dwmPaces) {
+            DwmFlush();   // block until DWM's next composite -> frames align with it
+        } else if (renderPresentPaces && !presented) {
+            // Vsync-paced path, but this tick was idle (render-on-demand skipped the present), so
+            // Present(1,0) did not pace us. Pace the idle poll on the timer instead, so we do not
+            // busy-spin and we still poll the desktop + cursor at the refresh rate for responsiveness.
+            if (ts.hz > 0 && ts.hz != pacedHz) { pacedHz = ts.hz; due.QuadPart = -(10000000LL / pacedHz); }
+            if (timer) { SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE); WaitForSingleObject(timer, INFINITE); }
+            else Sleep(1000 / pacedHz);
+        }
     }
 
     g_tick = nullptr;
