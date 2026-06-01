@@ -84,18 +84,61 @@ pegs the iGPU:
 Bundle these behind a `lowPower` config profile rather than changing the default, so the dev
 machine's quality is untouched.
 
-### Experiment 3 (last resort): Magnification-API low-power mode
+### MEASUREMENT (2026-06-01): Experiment 1 did not move the needle
 
-A DWM-integrated path (what Windows Magnifier uses) is GPU-cheap by construction but reintroduces
-integer-offset judder. Only if Experiments 1-2 cannot get the iGPU acceptable. Would ship as an
-explicit opt-in "low-power / integrated-GPU" mode, never the default, preserving the smooth renderer
-for capable hardware. Scoped to its own later spec if reached.
+Deployed render-on-demand to the iGPU machine. Static zoomed reading with the mouse held perfectly
+still still pegs the iGPU at ~60% - only ~1 percentage point better than before. Since
+render-on-demand provably eliminates our redraw work when idle (the magnify pass, the desktop copy,
+and Present all skip - reviewed and traced), and idle GPU is essentially unchanged, **our redraw was
+never the cost.** The cost is architectural and runs whether or not we present:
 
-## Out of scope (for now)
+1. **The fullscreen layered overlay.** It is a 4K `WS_EX_LAYERED` alpha surface that DWM must blend
+   into every screen composite (driven by any on-screen change), regardless of our Present.
+2. **The live Desktop Duplication session**, which keeps the GPU producing frames and can block iGPU
+   power-saving.
 
-Experiments 2 and 3 are contingent on Experiment 1's measurements - they are described here for
-direction but each gets its own plan only if the measurements call for it. No default-behavior
-change for capable hardware unless a measurement justifies it.
+Windows Magnifier has neither - it scales inside DWM. So Experiment 2 (fps cap / cropCapture) is
+also moot: those reduce per-present cost, but the cost is present even with zero presents.
+Render-on-demand is kept anyway (correct, no regression, trims work/power on truly static screens),
+but the real fix is Experiment 3.
+
+### Experiment 3 (ACTIVE): Magnification-API low-power mode
+
+The only way to reach Windows-Magnifier GPU cost is the path Windows Magnifier itself uses: the
+public Magnification API (`MagSetFullscreenTransform`), where DWM does the scaling - no overlay
+surface, no Desktop Duplication. GPU-cheap by construction. The tradeoff is integer pixel offsets
+(`xOffset`/`yOffset`), so the pan judders (worse with zoom); this is exactly why the engine was
+removed in issue #20. Accepted for a low-power mode.
+
+**Design.**
+- Reintroduce `src/magnifier_engine.{h,cpp}` (recover verbatim from git `969c952^`, the commit before
+  its #20 removal). It is ~50 lines: `initialize()` = `MagInitialize`; `setTransform(level, xOffset,
+  yOffset)` = `MagSetFullscreenTransform` + `MagSetInputTransform` (maps clicks; needs UIAccess,
+  which the deployed build has, and is a harmless no-op otherwise); `shutdown()` resets to 1x and
+  `MagUninitialize`. It is Win32 (uses `<windows.h>`), so excluded from the pure test build.
+- Add a `lowPower` config flag (default 0). The ini lives per-machine in `%LOCALAPPDATA%`, so the
+  school iGPU sets `lowPower=1` while the dev machine stays 0 (smooth own-renderer untouched).
+- In `main.cpp`, when `lowPower=1`, drive `MagnifierEngine` instead of `RenderEngine`: do NOT create
+  the overlay / Desktop Duplication / D3D device at all; do NOT hide the OS cursor (the Mag API
+  magnifies the real cursor). Each zoomed tick, compute the integer source offset that centers the
+  cursor - `xOffset = clamp(round(cursorX - (sw/level)/2), 0, sw - sw/level)`, same for y - and call
+  `setTransform(level, xOffset, yOffset)`. On zoom-out, `setTransform(1.0, 0, 0)`. The zoom ramp,
+  hold-to-zoom input, and config hot-reload all stay as-is; only the per-tick "draw" call differs.
+- The render-on-demand idle gating is irrelevant in this mode (the Mag API does not redraw); it
+  remains for the own-renderer default path.
+
+**Success metric.** With `lowPower=1` on the iGPU, zoomed GPU usage (static AND panning) drops to
+Windows-Magnifier levels (well under 10%). Pan will judder (integer offset) - acceptable for the
+low-power mode; the smooth own-renderer remains the default for capable hardware.
+
+This experiment gets its own implementation plan: `docs/superpowers/plans/2026-06-01-lowpower-mag-engine.md`.
+
+## Out of scope
+
+No default-behavior change for capable hardware: `lowPower` defaults to 0 and the own-renderer
+remains the default. Games-while-locked panning in low-power mode (driving the offset from raw input
+when a game clips the cursor) is deferred - the low-power mode follows the OS cursor, which suits its
+target (desktop reading on weak/integrated GPUs).
 
 ## Testing / verification
 
