@@ -95,6 +95,12 @@ struct Config {
     // switch the screen edges can briefly show the previous window's pixels until a smaller change
     // triggers a full refresh; that staleness is why it defaults off. Hot-reloadable.
     int    cropCapture = 0;
+    // Low-power mode (opt-in, default off). 1 = magnify via the Windows Magnification API
+    // (MagSetFullscreenTransform) instead of the own DXGI+D3D renderer: GPU-cheap (DWM does the
+    // scaling, no overlay surface, no Desktop Duplication) for integrated graphics, at the cost of
+    // integer-offset pan judder. Set per-machine in the LOCALAPPDATA ini (e.g. on a weak iGPU);
+    // capable hardware leaves it 0 and keeps the smooth own-renderer.
+    int    lowPower = 0;
     // First-launch onboarding: 0 = not yet onboarded (also true of a freshly created ini), so the
     // core spawns WindConfig.exe --onboard once; the onboarding flow sets this to 1 on completion.
     int    onboarded = 0;

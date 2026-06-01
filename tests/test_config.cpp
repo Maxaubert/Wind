@@ -161,3 +161,8 @@ TEST_CASE("zoom-speed and smooth-zoom knobs parse") {
     CHECK(c.smoothZoomAccel == doctest::Approx(4.0));
     CHECK(c.smoothZoomRamp == doctest::Approx(0.25));
 }
+TEST_CASE("lowPower defaults off and parses") {
+    CHECK(ParseConfig("").lowPower == 0);
+    CHECK(ParseConfig("lowPower=1\n").lowPower == 1);
+    CHECK(ParseConfig("lowPower=0\n").lowPower == 0);
+}

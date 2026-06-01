@@ -58,6 +58,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "hdrTonemap")         c.hdrTonemap = std::stoi(val);
             else if (key == "multiMonitor")       c.multiMonitor = std::stoi(val);
             else if (key == "cropCapture")        c.cropCapture = std::stoi(val);
+            else if (key == "lowPower")           c.lowPower = std::stoi(val);
             else if (key == "onboarded")          c.onboarded = std::stoi(val);
         } catch (...) { /* keep default on bad value */ }
     }
@@ -155,6 +156,9 @@ Config LoadConfig(const std::wstring& path) {
                ";   1=on a full-screen repaint (games) copy only the magnified region (cuts 4K HDR GPU\n"
                ";   copy ~zoom^2) but screen edges can briefly show a previous window after a switch.\n"
                "cropCapture=0\n"
+               "; lowPower: 1=magnify via the Windows Magnification API (cheap on integrated GPUs,\n"
+               ";   but the pan judders - integer offset); 0=own smooth renderer (default). Per-machine.\n"
+               "lowPower=0\n"
                "; onboarded: 0 = run the first-launch setup once; set to 1 once finished\n"
                "onboarded=0\n";
         return Config{};
