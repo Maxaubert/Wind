@@ -103,6 +103,39 @@ FOLLOW-UPS (deployed UIAccess build):
   (2) confirm the game's display mode (borderless vs exclusive fullscreen). G-Sync-off still predicts
   the fixed-refresh iGPU target. No further synthetic repro is possible from this machine.
 
+### Mag mode (lowPower=1) - click DEAD-ZONE investigation (exhaustive, autonomous)
+
+User report: while zoomed, a horizontal band (above the taskbar, size proportional to zoom level)
+where clicks do nothing AND steal focus from the app (click lands elsewhere). Persisted across every
+fix below. Tools written: tools/click_probe.cpp, probe_lens.cpp, test_wind_clicks.cpp.
+
+Fixes tried on the Mag click path, ALL ineffective for the dead zone:
+  1. Throttle MagSetInputTransform to 20Hz; 2. magUpdateHz coalescing; 3. revert input throttle;
+  4. magInputTransform=0 (skip the remap); 5. clear stale MagSetInputTransform on startup + crash
+  (RestoreInputState/LowPowerCrashFilter - a real bug fix, kept); 6. cursor-warp model (own the cursor
+  via the GetCursorPos oracle + SetCursorPos, lens follows, no remap; gated on magInputTransform=0).
+
+Autonomous measurements (PMv2, physical 3840x2160, no human):
+  - click_probe: MagSetFullscreenTransform + SetCursorPos + NO remap -> injected clicks land EXACTLY
+    where aimed, to the very bottom (y=2120). No dead band.
+  - probe_lens: moving the lens offset does NOT move the cursor; the cursor-warp oracle loop reaches
+    every edge (magCursor.y -> 2159), no drift.
+  - test_wind_clicks (drives the LIVE deployed build): injected clicks land at the cursor EVERYWHERE
+    including the bottom, in BOTH magInputTransform=0 and =1. delta=(0,0) at all 19 sampled points.
+  - KEY: MagSetInputTransform only adjusts PEN/TOUCH input, not the mouse (MS docs + the =1/=0 results
+    being identical). So it was never the mouse-click dead-zone cause in either model.
+
+Conclusion: the dead zone is NOT reproducible via synthetic input - mouse clicks always land at the
+cursor and the cursor reaches every pixel. The only remaining mechanism consistent with everything is
+the OS-drawn magnified cursor's VISUAL position diverging from the real cursor near edges (user aims by
+the visual cursor; the click goes to the real one). That cannot be fixed in Mag mode: MagSetFullscreen-
+Transform re-magnifies anything we draw on top (drawing our own cursor was already proven infeasible,
+issue earlier in this project), and the public API gives no control over the OS magnifier's cursor.
+=> The Mag-API dead zone is either already fixed by the cursor-warp build (user tested a stale build)
+or structurally unfixable. The own-renderer owns its cursor end-to-end (drawn cursor + SetCursorPos)
+and has NO dead zone - it is the only guaranteed dead-zone-free path. NEEDS USER RETEST of the current
+cursor-warp build; if it persists, the dead-zone-free magnifier is the own-renderer.
+
 - RESOLVED with real-game measurement (Kingdom Come: Deliverance II, main menu, PresentMon, identical
   forced-foreground method for all three):
     | condition                | game present | DISPLAYED | present mode                          |
