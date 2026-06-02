@@ -347,6 +347,10 @@ static bool RunTick(TickState& t) {
                 SetCursorPos(t.magCursor.x, t.magCursor.y);
                 t.lastSetVirtual = t.magCursor;
                 cx = t.magCursor.x; cy = t.magCursor.y;
+                // Continuously wipe any stale system-wide MagSetInputTransform (left by a crashed/killed
+                // process) - it confines clicks to a zoom-shrinking box (the dead zone) even though we
+                // never set it ourselves in this mode.
+                t.mag->clearInputTransform();
             }
             int xOff = cx - viewW / 2;
             int yOff = cy - viewH / 2;

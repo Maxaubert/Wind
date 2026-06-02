@@ -39,6 +39,12 @@ void MagnifierEngine::setTransform(double level, int xOffset, int yOffset, bool 
         inputTransformOn_ = false;
     }
 }
+void MagnifierEngine::clearInputTransform() {
+    if (!ready_) return;
+    RECT z{ 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN) };
+    MagSetInputTransform(FALSE, &z, &z);   // wipe any (possibly stale, cross-process) input remap
+    inputTransformOn_ = false;
+}
 void MagnifierEngine::shutdown() {
     if (!ready_) return;
     if (inputTransformOn_) {                        // never leave input remapped

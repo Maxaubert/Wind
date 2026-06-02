@@ -136,6 +136,28 @@ or structurally unfixable. The own-renderer owns its cursor end-to-end (drawn cu
 and has NO dead zone - it is the only guaranteed dead-zone-free path. NEEDS USER RETEST of the current
 cursor-warp build; if it persists, the dead-zone-free magnifier is the own-renderer.
 
+### Mag dead-zone - RESOLVED conclusion (autonomous verification complete)
+
+More autonomous tests (tools/cursor_range.cpp via tools/range_test.ps1, run elevated to manage the
+UIAccess build):
+  - Cursor reachable range, BOTH magInputTransform=1 and =0: X[0..3839] Y[0..2159] = FULL SCREEN,
+    confined=0. The cursor is never confined; MagSetInputTransform does NOT confine the mouse.
+  - test_wind_clicks: clicks land at the OS cursor everywhere (delta=0), every zoom level, to the edges.
+  - Non-elevated Stop-Process can't kill the UIAccess build (Access denied) - relaunches relied on
+    Wind's own single-instance kill; verified only ONE instance runs (no stale old-build interference).
+User's refined symptom: clickable box shrinks with zoom; bottom dead band in ALL apps, top one only in
+File Explorer; "cursor hits exactly what's over it" inside the box.
+
+CONCLUSION: clicks land at the real cursor and the cursor reaches everywhere, so the dead zone is the
+OS-drawn MAGNIFIED CURSOR diverging from the real cursor near the clamped edges (user aims by the visual
+cursor; click goes to the real one). UNFIXABLE in Mag mode: we cannot control the OS magnifier's cursor,
+and we cannot draw our own over MagSetFullscreenTransform (it re-magnifies overlays - proven). This is
+the same wall as the FPS/judder issues: the public Mag API hands cursor+input to the OS magnifier.
+=> FIX: the own-renderer (lowPower=0) draws its own cursor and warps the real cursor to match, so the
+visual cursor IS the click point - no divergence, no dead zone, anywhere. It also keeps full game FPS
+and is sub-pixel smooth. On a discrete GPU it costs only ~8-10%. Switched this machine to lowPower=0.
+The Mag-API engine remains available for weak iGPUs (cheap, but with the unfixable cursor quirks).
+
 - RESOLVED with real-game measurement (Kingdom Come: Deliverance II, main menu, PresentMon, identical
   forced-foreground method for all three):
     | condition                | game present | DISPLAYED | present mode                          |
