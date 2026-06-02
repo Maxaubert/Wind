@@ -117,6 +117,20 @@ struct Config {
     // from the VRR-floated rate to full FPS. Negligible GPU (no real drawing), only alive while zoomed.
     // Hot-reloadable. No benefit on fixed-refresh displays (composite already steady there).
     int    compositePin = 0;
+    // Mag mode (lowPower=1): cap how often MagSetFullscreenTransform is pushed while panning. The Mag
+    // API call is comparatively heavy; firing it every frame (144Hz) during a fast pan - especially
+    // with a high-Hz mouse flooding raw input - caused frame-time spikes and could push DWM/GPU into a
+    // TDR (PC hang). We coalesce to the LATEST offset at this rate (the magnified view still follows the
+    // cursor, just updated at <=magUpdateHz). A level change and the first zoom always apply immediately.
+    // 0 = no cap (every frame, legacy). 15..240. Hot-reloadable. Windows Magnifier throttles similarly.
+    int    magUpdateHz = 60;
+    // Mag mode click routing. 1 (current) = use MagSetInputTransform to remap clicks into the magnified
+    // region. That remaps the system pointer, and because we also center the lens on GetCursorPos every
+    // tick, it forms a feedback loop that pins the pointer to center and leaves an unclickable dead band
+    // at every screen edge. 0 = do NOT call MagSetInputTransform: GetCursorPos then returns the raw
+    // cursor, the lens follows it freely to the edges, and a click lands at the real cursor position
+    // (the content shown under the magnified cursor) - so everything is clickable. Hot-reloadable.
+    int    magInputTransform = 1;
 };
 // Pure: parse INI text (key=value, ';' or '#' comments) into a Config, keeping
 // defaults for missing/malformed keys.

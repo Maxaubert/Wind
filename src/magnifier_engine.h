@@ -3,12 +3,11 @@ namespace wind {
 class MagnifierEngine {
 public:
     bool initialize();                                  // MagInitialize
-    // Updates the visual fullscreen transform every call (cheap). The input-routing transform
-    // (MagSetInputTransform - a UIAccess system-wide input remap, comparatively expensive) is
-    // refreshed only when syncInput is true, OR the first time we go past 1x (so clicks map from
-    // the first zoomed frame). Callers throttle syncInput during a pan and force it true on settle,
-    // so we never spam the heavy input remap at the full loop rate (that caused in-game frame spikes).
-    void setTransform(double level, int xOffset, int yOffset, bool syncInput = true);
+    // Updates the visual fullscreen transform every call. inputXform controls the input-routing
+    // transform (MagSetInputTransform): true = remap clicks into the magnified region; false = leave
+    // input un-remapped (the lens follows the raw cursor, clicks land at the real cursor position - no
+    // edge dead band from the recenter feedback loop). Either way, a stale transform is torn down.
+    void setTransform(double level, int xOffset, int yOffset, bool inputXform = true);
     void shutdown();                                    // reset to 1x then MagUninitialize
     bool ready() const { return ready_; }
 private:

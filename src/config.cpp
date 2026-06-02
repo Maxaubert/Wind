@@ -62,6 +62,8 @@ Config ParseConfig(const std::string& text) {
             else if (key == "onboarded")          c.onboarded = std::stoi(val);
             else if (key == "flipPresent")        c.flipPresent = std::stoi(val);
             else if (key == "compositePin")       c.compositePin = std::stoi(val);
+            else if (key == "magUpdateHz")        c.magUpdateHz = std::stoi(val);
+            else if (key == "magInputTransform")  c.magInputTransform = std::stoi(val);
         } catch (...) { /* keep default on bad value */ }
     }
     // Clamp numeric fields to their documented ranges. The ini is a hand-editable surface, and an
@@ -71,6 +73,8 @@ Config ParseConfig(const std::string& text) {
     if (c.lowPower < 0 || c.lowPower > 2) c.lowPower = 0;   // 0=own-renderer 1=low-power 2=auto; else off
     if (c.flipPresent < 0 || c.flipPresent > 1) c.flipPresent = 0;
     if (c.compositePin < 0 || c.compositePin > 1) c.compositePin = 0;
+    if (c.magUpdateHz != 0 && (c.magUpdateHz < 15 || c.magUpdateHz > 240)) c.magUpdateHz = 60;
+    if (c.magInputTransform < 0 || c.magInputTransform > 1) c.magInputTransform = 1;
     c.maxLevel        = clampd(c.maxLevel,        1.0, 50.0);   // must be >= the 1.0 min zoom level
     c.zoomInSpeed     = clampd(c.zoomInSpeed,     0.25, 4.0);
     c.zoomOutSpeed    = clampd(c.zoomOutSpeed,    0.25, 4.0);
@@ -173,6 +177,14 @@ Config LoadConfig(const std::wstring& path) {
                ";   while zoomed so DWM composites at full refresh - pulls a focused game's gated FPS\n"
                ";   back up on a VRR/G-Sync display. Negligible GPU; only active while zoomed. Hot-reloadable.\n"
                "compositePin=0\n"
+               "; magUpdateHz: Mag mode - cap how often the magnifier transform is pushed while panning\n"
+               ";   (0=every frame; 15-240; default 60). Lower = lighter on the Mag API, smoother under a\n"
+               ";   fast pan; too low looks choppy. Hot-reloadable.\n"
+               "magUpdateHz=60\n"
+               "; magInputTransform: Mag mode click routing. 1=remap clicks via MagSetInputTransform\n"
+               ";   (can leave an unclickable dead band at screen edges); 0=no remap, lens follows the\n"
+               ";   raw cursor and clicks land everywhere. Hot-reloadable.\n"
+               "magInputTransform=1\n"
                "; onboarded: 0 = run the first-launch setup once; set to 1 once finished\n"
                "onboarded=0\n";
         return Config{};

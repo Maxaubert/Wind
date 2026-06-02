@@ -119,6 +119,10 @@ struct TickState {
     int    lastMagX = INT_MIN, lastMagY = INT_MIN;   // last Mag transform offset (skip redundant calls)
     LARGE_INTEGER lastMagInput{};   // QPC of the last MagSetInputTransform sync (throttle the heavy remap)
     bool   magInputDirty = false;   // visual offset moved since the last input-transform sync (resync on settle)
+    LARGE_INTEGER lastMagVisual{};  // QPC of the last MagSetFullscreenTransform push (coalesce to magUpdateHz)
+    bool   magVisualPending = false;// a newer offset is waiting to be pushed at the next allowed tick
+    int    pendingMagX = 0, pendingMagY = 0;   // the latest (coalesced) offset to push
+    POINT  magCursor{};             // Mag cursor-warp model: the cursor position we own + SetCursorPos each tick
     bool   pinFailed = false;       // compositePin heartbeat failed to start; don't retry every tick
     // Frame-pacing diagnostics (diagnostics=1): a 2 s window of loop-interval stats.
     double diagAccum = 0.0, diagSumDt = 0.0, diagMaxDt = 0.0;
@@ -323,26 +327,34 @@ static bool RunTick(TickState& t) {
             const int sh = GetSystemMetrics(SM_CYSCREEN);
             const int viewW = (int)(sw / lvl);
             const int viewH = (int)(sh / lvl);
-            POINT pt; GetCursorPos(&pt);
-            int xOff = pt.x - viewW / 2;
-            int yOff = pt.y - viewH / 2;
+            int cx, cy;
+            if (t.cfg.magInputTransform != 0) {
+                // OLD model: lens centers on the OS cursor; MagSetInputTransform remaps clicks. Reading
+                // the magnifier-managed GetCursorPos and re-centering forms a feedback loop that leaves
+                // an unclickable dead band (scaling with zoom) at the screen edges.
+                POINT pt; GetCursorPos(&pt); cx = pt.x; cy = pt.y;
+            } else {
+                // CURSOR-WARP model (default): we own the cursor like the own-renderer does. Integrate
+                // the OS-accelerated movement since our last SetCursorPos (the "oracle"), warp the cursor
+                // to the new spot, and center the lens on it. Every pixel is reachable and a click lands
+                // exactly under the cursor - no MagSetInputTransform, no feedback loop, no edge dead band.
+                if (t.prevLvl <= 1.0) { GetCursorPos(&t.magCursor); t.lastSetVirtual = t.magCursor; }
+                POINT pt; GetCursorPos(&pt);
+                t.magCursor.x += (int)((pt.x - t.lastSetVirtual.x) * t.cfg.cursorSensitivity);
+                t.magCursor.y += (int)((pt.y - t.lastSetVirtual.y) * t.cfg.cursorSensitivity);
+                if (t.magCursor.x < 0) t.magCursor.x = 0; else if (t.magCursor.x > sw - 1) t.magCursor.x = sw - 1;
+                if (t.magCursor.y < 0) t.magCursor.y = 0; else if (t.magCursor.y > sh - 1) t.magCursor.y = sh - 1;
+                SetCursorPos(t.magCursor.x, t.magCursor.y);
+                t.lastSetVirtual = t.magCursor;
+                cx = t.magCursor.x; cy = t.magCursor.y;
+            }
+            int xOff = cx - viewW / 2;
+            int yOff = cy - viewH / 2;
             if (xOff < 0) xOff = 0; else if (xOff > sw - viewW) xOff = sw - viewW;
             if (yOff < 0) yOff = 0; else if (yOff > sh - viewH) yOff = sh - viewH;
             if (lvl != t.prevLvl || xOff != t.lastMagX || yOff != t.lastMagY) {
-                // Visual transform every frame (smooth pan); the heavy input remap only at ~20Hz
-                // (or first zoom-in) so a fast pan doesn't fire 144 system-wide input remaps/sec
-                // (the in-game frame-spike source). Flagged dirty so we resync once on settle.
-                double sinceInput = double(now.QuadPart - t.lastMagInput.QuadPart) / double(t.freq.QuadPart);
-                bool syncInput = (t.lastMagX == INT_MIN) || (sinceInput >= 0.05);
-                t.mag->setTransform(lvl, xOff, yOff, syncInput);
+                t.mag->setTransform(lvl, xOff, yOff, t.cfg.magInputTransform != 0);
                 t.lastMagX = xOff; t.lastMagY = yOff;
-                if (syncInput) { t.lastMagInput = now; t.magInputDirty = false; }
-                else t.magInputDirty = true;
-            } else if (t.magInputDirty) {
-                // Cursor settled at a new spot with a stale input map (last move skipped the remap):
-                // lock the input transform to the resting offset now, so clicks land accurately.
-                t.mag->setTransform(lvl, t.lastMagX, t.lastMagY, true);
-                t.lastMagInput = now; t.magInputDirty = false;
             }
             // Composition heartbeat (compositePin): while zoomed, present a 1x1 flip swapchain every
             // vblank so DWM composites at the full refresh. A focused fullscreen game - whose own
@@ -357,7 +369,7 @@ static bool RunTick(TickState& t) {
             }
         } else if (t.prevLvl > 1.0) {
             t.mag->setTransform(1.0, 0, 0);     // zoom-out: reset to 1x
-            t.lastMagX = INT_MIN; t.lastMagY = INT_MIN; t.magInputDirty = false;
+            t.lastMagX = INT_MIN; t.lastMagY = INT_MIN; t.magInputDirty = false; t.magVisualPending = false;
             if (t.pin && t.pin->active()) t.pin->end();   // stop the heartbeat when not zoomed
             t.pinFailed = false;
         }
@@ -546,6 +558,11 @@ static void RestoreInputState() {
     ClipCursor(nullptr);                                         // release any cursor confinement
     if (MagInitialize()) {
         MagSetFullscreenTransform(1.0f, 0, 0);                   // reset any leftover low-power zoom to 1x
+        // Clear any leftover input remap. MagSetInputTransform is system-global state; if a previous
+        // Wind crashed or was killed while zoomed it stays active and bends clicks in a band (a dead
+        // zone) until reset - which no relaunch did before. UIAccess is required (no-op without it).
+        RECT z{ 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN) };
+        MagSetInputTransform(FALSE, &z, &z);
         MagShowSystemCursor(TRUE);                               // un-hide the OS cursor
         MagUninitialize();
     }
@@ -560,6 +577,8 @@ static void RestoreInputState() {
 // so the reset is a bare syscall (no allocation). Also writes the crash dump, like the render filter.
 static LONG WINAPI LowPowerCrashFilter(EXCEPTION_POINTERS* ep) {
     MagSetFullscreenTransform(1.0f, 0, 0);   // never leave the desktop zoomed
+    RECT z{ 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN) };
+    MagSetInputTransform(FALSE, &z, &z);     // never leave a stale input remap (dead-zone clicks)
     wind::WriteCrashReport(ep);
     return EXCEPTION_CONTINUE_SEARCH;        // let the default handler still report the crash
 }

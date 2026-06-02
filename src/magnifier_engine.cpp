@@ -6,26 +6,20 @@ bool MagnifierEngine::initialize() {
     ready_ = MagInitialize() ? true : false;
     return ready_;
 }
-void MagnifierEngine::setTransform(double level, int xOffset, int yOffset, bool syncInput) {
+void MagnifierEngine::setTransform(double level, int xOffset, int yOffset, bool inputXform) {
     if (!ready_) return;
     MagSetFullscreenTransform(static_cast<float>(level), xOffset, yOffset);
 
-    // Skip the heavy input remap on a throttled pan tick. We still MUST do it the first time we
-    // pass 1x (inputTransformOn_ still false) so clicks map correctly from the first zoomed frame,
-    // and the caller forces syncInput=true on settle so the resting input map is always accurate.
-    if (level > 1.0 && !syncInput && inputTransformOn_) return;
-
-    // Route mouse input to the magnified element. Since Windows 10 1703, without this
-    // the OS sends clicks/hit-tests to the *unmagnified* coordinates, so while zoomed
-    // the cursor sits over the magnified target visually but input lands elsewhere -
-    // small targets (text fields) miss and show no I-beam. Keep the input rectangle
-    // matched to the visual transform on every update so they never diverge.
-    //
-    // MagSetInputTransform requires UIAccess; without it the call fails
-    // (ERROR_ACCESS_DENIED) and is a harmless no-op, leaving behavior as before.
+    // inputXform=false (magInputTransform=0): do NOT remap input. MagSetInputTransform repositions
+    // the system pointer into the magnified region; since the caller also re-centers the lens on
+    // GetCursorPos every tick, that forms a feedback loop pinning the pointer to center and leaving
+    // an unclickable dead band at every screen edge. With it off, GetCursorPos returns the raw cursor,
+    // the lens follows it freely to the edges, and a click lands at the real cursor position. We must
+    // still tear down any previously-set transform, so fall through to the (level<=1 || !inputXform)
+    // reset branch below.
     const int sw = GetSystemMetrics(SM_CXSCREEN);
     const int sh = GetSystemMetrics(SM_CYSCREEN);
-    if (level > 1.0) {
+    if (inputXform && level > 1.0) {
         // PHYSICAL pixels for both rects, matching MagSetFullscreenTransform's offsets
         // and Microsoft's fullscreen magnifier sample. The OS feeds input in physical
         // screen coordinates (GetCursorPos spans the full physical resolution for this
