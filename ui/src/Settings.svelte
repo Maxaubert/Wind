@@ -21,7 +21,8 @@
                          zoomInButton2:'0', zoomOutButton2:'0',
                          zoomInVk2:'0', zoomOutVk2:'0',
                          zoomInMods:'0', zoomOutMods:'0', zoomInMods2:'0', zoomOutMods2:'0',
-                         hideCursorVk:'0', hideCursorMods:'0' };
+                         hideCursorVk:'0', hideCursorMods:'0',
+                         quickZoomVk:'112', quickZoomMods:'0' };
     for (const k of Object.keys(kbDefaults)) v[k] = (k in cfg) ? cfg[k] : kbDefaults[k];
     values = v; saved = { ...v };
     theme = currentTheme(cfg); applyTheme(theme);
@@ -79,7 +80,7 @@
       {#each sections as s}
         <Section id={s.id} label={s.label} desc={s.desc}>
           {#each s.rows as r}
-            {#if (!r.requires || Number(values[r.requires]) === 1) && (!r.advanced || advancedOn)}
+            {#if (!r.requires || Number(values[r.requires]) === 1) && (!r.requiresNot || Number(values[r.requiresNot]) !== 1) && (!r.advanced || advancedOn)}
               <Row row={r} value={values[r.key]} {values} set={change} {live}
                    disabled={r.dependsOn && Number(values[r.dependsOn]) !== 1}
                    onChange={(val) => change(r.key, val)} />

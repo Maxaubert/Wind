@@ -61,6 +61,9 @@ Config ParseConfig(const std::string& text) {
             else if (key == "onboarded")          c.onboarded = std::stoi(val);
             else if (key == "quickZoomDefault")   c.quickZoomDefault = std::stod(val);
             else if (key == "quickZoomModifier")  c.quickZoomModifier = val;
+            else if (key == "quickZoomHotkeyMode") c.quickZoomHotkeyMode = std::stoi(val);
+            else if (key == "quickZoomVk")        c.quickZoomVk = std::stoi(val);
+            else if (key == "quickZoomMods")      c.quickZoomMods = std::stoi(val);
         } catch (...) { /* keep default on bad value */ }
     }
     // Clamp numeric fields to their documented ranges. The ini is a hand-editable surface, and an
@@ -126,9 +129,14 @@ Config LoadConfig(const std::wstring& path) {
                "smoothZoomAccel=3.0\n"
                "; smoothZoomRamp: seconds of holding to reach the linear rate\n"
                "smoothZoomRamp=0.6\n"
-               "; quickZoomModifier: hold this and tap a zoom key to toggle between 0% and your last\n"
-               ";   zoom level (above 200%). Ctrl, Alt, or Shift; None disables quick zoom.\n"
+               "; quickZoomHotkeyMode: 0 = modifier + zoom key; 1 = dedicated hotkey (quickZoomVk)\n"
+               "quickZoomHotkeyMode=0\n"
+               "; quickZoomModifier (modifier mode): hold this and tap a zoom key to toggle between 0%\n"
+               ";   and your last zoom level (above 200%). Ctrl, Alt, or Shift; None disables it.\n"
                "quickZoomModifier=Ctrl\n"
+               "; quickZoomVk/quickZoomMods (hotkey mode): dedicated quick-zoom hotkey (VK code +\n"
+               ";   modifier mask 1=Ctrl,2=Alt,4=Shift,8=Win). Default 112=F1. vk 0 = off.\n"
+               "quickZoomVk=112\nquickZoomMods=0\n"
                "; quickZoomDefault: level to jump to before you've set one (e.g. 4.0 = 400%)\n"
                "quickZoomDefault=4.0\n"
                "; vsync: 1=present locked to display refresh (smooth, capped); 0=no vsync (restart to apply)\n"

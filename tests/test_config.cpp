@@ -165,10 +165,16 @@ TEST_CASE("quick-zoom config parses and clamps") {
     Config def = ParseConfig("");
     CHECK(def.quickZoomDefault == doctest::Approx(4.0));
     CHECK(def.quickZoomModifier == "Ctrl");
+    CHECK(def.quickZoomHotkeyMode == 0);
+    CHECK(def.quickZoomVk == 112);   // F1
+    CHECK(def.quickZoomMods == 0);
 
-    Config c = ParseConfig("quickZoomDefault=6.0\nquickZoomModifier=Alt\n");
+    Config c = ParseConfig("quickZoomDefault=6.0\nquickZoomModifier=Alt\nquickZoomHotkeyMode=1\nquickZoomVk=120\nquickZoomMods=1\n");
     CHECK(c.quickZoomDefault == doctest::Approx(6.0));
     CHECK(c.quickZoomModifier == "Alt");
+    CHECK(c.quickZoomHotkeyMode == 1);
+    CHECK(c.quickZoomVk == 120);     // F9
+    CHECK(c.quickZoomMods == 1);     // Ctrl
 
     Config off = ParseConfig("quickZoomModifier=None\n");
     CHECK(off.quickZoomModifier == "None");
