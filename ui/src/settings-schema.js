@@ -13,7 +13,9 @@ export const sections = [
     { key:'smoothZoom',   type:'toggle', label:'Smooth zoom',    desc:'Zoom-in eases up to your speed.', def:0, advanced:true },
     { key:'smoothZoomAccel', type:'slider', label:'Smooth ease-in depth', desc:'Higher = slower start.', min:1, max:8, step:0.5, def:3.0, dependsOn:'smoothZoom', advanced:true },
     { key:'smoothZoomRamp',  type:'slider', label:'Smooth ramp (s)', desc:'Seconds to reach full speed.', min:0.1, max:3, step:0.1, def:0.6, dependsOn:'smoothZoom', advanced:true },
-    { key:'quickZoomModifier', type:'select', label:'Quick zoom', desc:'Hold this modifier and tap a zoom key to toggle between 0% and your last level (above 200%). None turns it off.', options:['None','Ctrl','Alt','Shift'], def:'Ctrl' },
+    { key:'quickZoomHotkeyMode', type:'segmented', label:'Quick zoom', desc:'Toggle 0% and your last level (above 200%). Choose the trigger.', seg:['Modifier','Hotkey'], def:0 },
+    { key:'quickZoomModifier', type:'select', label:'Modifier key', desc:'Hold this and tap a zoom key to toggle. None = off.', options:['None','Ctrl','Alt','Shift'], def:'Ctrl', requiresNot:'quickZoomHotkeyMode' },
+    { key:'__quickZoom', type:'keybind', label:'Quick-zoom hotkey', desc:'Press to toggle quick zoom. Right-click to clear (off). Default F1.', vkKey:'quickZoomVk', modsKey:'quickZoomMods', requires:'quickZoomHotkeyMode' },
   ]},
   { id:'cursor', label:'Cursor', icon:'cursor', desc:'Pointer movement and visibility while zoomed.', rows: [
     { key:'cursorSensitivity', type:'slider', label:'Cursor speed', desc:'Pan speed multiplier (1.0 = match your mouse).', min:0.25, max:4, step:0.05, def:1.0, advanced:true },

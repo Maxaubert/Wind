@@ -42,6 +42,13 @@
         <KeybindCapture {row} {values} onChange={live} {disabled} />
       {:else if row.type === 'button'}
         <button class="linkbtn" {disabled} on:click={() => set('__action', row.action)}>{row.btn}</button>
+      {:else if row.type === 'segmented'}
+        <div class="seg" class:disabled>
+          {#each row.seg as opt, i}
+            <button class="seg-opt" class:active={num(value) === i} {disabled}
+                    on:click={() => onChange(i)}>{opt}</button>
+          {/each}
+        </div>
       {/if}
     </div>
   </div>
@@ -53,6 +60,15 @@
      (1 -> 10 etc.), which would otherwise reflow the .ctl and visually shake the slider. */
   .val{margin-left:8px;width:4ch;display:inline-block;text-align:right;font-variant-numeric:tabular-nums}
   .row.disabled{opacity:.45}
+  /* Segmented pill switch (two labeled options): a subtle dark pill with a lighter grey knob over
+     the active option. Sleek/neutral to match the UI (no accent fill). */
+  .seg{display:inline-flex;background:var(--chip);border:1px solid var(--line);border-radius:999px;padding:3px;gap:2px}
+  .seg-opt{padding:6px 16px;border:0;background:transparent;color:var(--muted);font-size:12.5px;
+           font-weight:600;cursor:pointer;border-radius:999px;transition:background .15s,color .15s}
+  .seg-opt:hover:not(.active){color:var(--text)}
+  .seg-opt.active{background:var(--track);color:var(--text)}
+  .seg.disabled{opacity:.45}
+  .seg-opt:disabled{cursor:default}
   /* Animated SVG checkbox: a circular knob whose ring + check draw on when checked. Dark-grey
      fill (replacing the original purple) to fit the UI; white ring/check. */
   .checkbox-wrapper{position:relative;display:inline-block;width:26px;height:26px}

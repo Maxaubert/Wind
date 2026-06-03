@@ -106,6 +106,7 @@ struct TickState {
     double quickZoomStored    = 0.0;           // remembered quick-zoom level (0 = none yet); in-memory
     bool   prevInHeld         = false;         // for rising-edge detection of the zoom-in channel
     bool   prevOutHeld        = false;
+    std::atomic<bool> quickZoomHotkey{false};  // set by WM_HOTKEY (hotkey-mode quick zoom), consumed in RunTick
     bool   cursorHidden       = false;         // runtime-only override (no ini write, no hot-reload)
     HWND   hwnd               = nullptr;       // owning message window (for RegisterHotKey)
     // Frame-pacing diagnostics (diagnostics=1): a 2 s window of loop-interval stats.
@@ -159,6 +160,8 @@ static void DiagLog(const char* fmt, ...) {
 // Forward-declared so RunTick can re-register the hide-cursor hotkey on config hot-reload;
 // the definition (with the static state it manages) lives near WndProc / kHideCursorHotkeyId.
 static void RegisterHideCursorHotkey(HWND hwnd, int vk, int mods);
+// Same pattern for the quick-zoom hotkey (hotkey mode). Pass vk=0 to unregister.
+static void RegisterQuickZoomHotkey(HWND hwnd, int vk, int mods);
 
 // One magnifier tick: advance zoom, hot-reload config, then pan/draw via the render engine.
 // Pure of any pacing wait - the caller paces. Safe to call from the main loop or from a
@@ -213,6 +216,11 @@ static void RunTick(TickState& t) {
             if (nc.hideCursorVk != t.cfg.hideCursorVk || nc.hideCursorMods != t.cfg.hideCursorMods) {
                 RegisterHideCursorHotkey(t.hwnd, nc.hideCursorVk, nc.hideCursorMods);
             }
+            if (nc.quickZoomHotkeyMode != t.cfg.quickZoomHotkeyMode
+             || nc.quickZoomVk != t.cfg.quickZoomVk || nc.quickZoomMods != t.cfg.quickZoomMods) {
+                RegisterQuickZoomHotkey(t.hwnd, (nc.quickZoomHotkeyMode && nc.quickZoomVk) ? nc.quickZoomVk : 0,
+                                        nc.quickZoomMods);
+            }
             t.cfg = nc;   // pick up renderer knobs (smoothing, filter, cursor scale, zoom speed)
             t.zoom = ZoomController(1.0, nc.maxLevel);
             double ocx = t.mapper.centerX(), ocy = t.mapper.centerY();   // preserve position
@@ -243,15 +251,17 @@ static void RunTick(TickState& t) {
     // Apply the live zoom profile every frame (free hot-reload; setProfile does not reset level).
     t.zoom.setProfile(t.cfg.zoomInSpeed, t.cfg.zoomOutSpeed, t.cfg.smoothZoom != 0,
                       t.cfg.smoothZoomAccel, t.cfg.smoothZoomRamp);
-    // Quick-zoom modifier (Ctrl/Alt/Shift; "None" disables quick zoom). While it's held, a zoom-key
-    // press toggles quick zoom (below) instead of hold-zooming, so suppress the hold-zoom direction
-    // (the toggle snaps the level).
+    // Quick-zoom trigger. Modifier mode (quickZoomHotkeyMode==0): hold the configured modifier
+    // (Ctrl/Alt/Shift; "None" = off) and tap a zoom key. While the modifier is held it toggles quick
+    // zoom (below) instead of hold-zooming, so suppress the hold-zoom direction (the toggle snaps the
+    // level). Hotkey mode (==1): a dedicated hotkey toggles it and the modifier is inert here.
+    bool hotkeyMode = t.cfg.quickZoomHotkeyMode != 0;
     const std::string& qzMod = t.cfg.quickZoomModifier;
     int quickZoomModVk = VK_CONTROL;
     if      (_stricmp(qzMod.c_str(), "alt")   == 0) quickZoomModVk = VK_MENU;
     else if (_stricmp(qzMod.c_str(), "shift") == 0) quickZoomModVk = VK_SHIFT;
-    bool quickZoomOn = _stricmp(qzMod.c_str(), "none") != 0;
-    bool modKeyDown = quickZoomOn && (GetAsyncKeyState(quickZoomModVk) & 0x8000) != 0;
+    bool modifierActive = !hotkeyMode && _stricmp(qzMod.c_str(), "none") != 0;
+    bool modKeyDown = modifierActive && (GetAsyncKeyState(quickZoomModVk) & 0x8000) != 0;
     t.zoom.setDirection(modKeyDown ? ZoomDir::None : ResolveDirection(inHeld, outHeld));
     // Clamp the dt fed to the zoom so a single long tick (cold first capture, alt-tab, any hitch)
     // can't jump the zoom level mid-ramp - it should always ease in/out at a steady rate regardless
@@ -267,14 +277,16 @@ static void RunTick(TickState& t) {
     // Hide-cursor hotkey is registered via RegisterHotKey (WndProc WM_HOTKEY toggles cursorHidden);
     // this both suppresses the key from reaching other apps and gives rising-edge semantics for
     // free (MOD_NOREPEAT). No polled check needed here.
-    // Quick zoom toggles between 1.0x and a remembered level when the modifier is held and either
-    // zoom key has a rising edge (the modifier suppressed hold-zoom above). The snap flows into the
-    // SAME-tick zoom-in/out transitions below (which key off lvl vs prevLvl). prevInHeld/prevOutHeld
-    // update every tick (outside the enable gate) so re-enabling can't fire a stale edge.
+    // Quick zoom fires from either trigger: the dedicated hotkey (hotkey mode -> WM_HOTKEY set the
+    // flag) OR the modifier held + a rising edge of either zoom key (modifier mode). The snap flows
+    // into the SAME-tick zoom-in/out transitions below (which key off lvl vs prevLvl).
+    // prevInHeld/prevOutHeld update every tick (outside the gate) so re-enabling can't fire a stale edge.
     bool inEdge  = inHeld  && !t.prevInHeld;
     bool outEdge = outHeld && !t.prevOutHeld;
     t.prevInHeld = inHeld; t.prevOutHeld = outHeld;
-    if (modKeyDown && (inEdge || outEdge)) {   // modKeyDown already implies quick zoom is enabled
+    bool hotkeyTrigger = t.quickZoomHotkey.exchange(false);   // always consume (only set in hotkey mode)
+    bool modZoomTrigger = modKeyDown && (inEdge || outEdge);  // modKeyDown implies modifier mode + enabled
+    if (hotkeyTrigger || modZoomTrigger) {
         QuickZoomResult qr = ApplyQuickZoom(t.zoom.level(), t.quickZoomStored,
                                             t.cfg.quickZoomDefault, t.cfg.maxLevel);
         t.zoom.setLevel(qr.newLevel);
@@ -378,6 +390,7 @@ static void RunTick(TickState& t) {
 // keyboard-only escape. The clean exit path restores the cursor and resets zoom to 1x.
 static const int kQuitHotkeyId = 0xB001;
 static const int kHideCursorHotkeyId = 0xB002;
+static const int kQuickZoomHotkeyId = 0xB003;
 
 // Translate our bit mask (1=Ctrl, 2=Alt, 4=Shift, 8=Win) into Win32 MOD_* flags for RegisterHotKey.
 // MOD_NOREPEAT is always added so holding the key fires the hotkey once, not on auto-repeat.
@@ -404,10 +417,28 @@ static void RegisterHideCursorHotkey(HWND hwnd, int vk, int mods) {
     }
 }
 
+// Hot-reloadable registration of the quick-zoom hotkey (hotkey mode). Callers pass vk=0 to
+// unregister (modifier mode, or hotkey cleared), releasing the global key grab.
+static int g_registeredQuickVk = 0;
+static int g_registeredQuickMods = 0;
+static void RegisterQuickZoomHotkey(HWND hwnd, int vk, int mods) {
+    if (g_registeredQuickVk != 0) {
+        UnregisterHotKey(hwnd, kQuickZoomHotkeyId);
+        g_registeredQuickVk = 0; g_registeredQuickMods = 0;
+    }
+    if (vk != 0 && RegisterHotKey(hwnd, kQuickZoomHotkeyId, WinModsFromBitmask(mods), vk)) {
+        g_registeredQuickVk = vk; g_registeredQuickMods = mods;
+    }
+}
+
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == WM_HOTKEY && wp == kQuitHotkeyId) { PostQuitMessage(0); return 0; }
     if (msg == WM_HOTKEY && wp == kHideCursorHotkeyId) {
         if (g_tick) g_tick->cursorHidden = !g_tick->cursorHidden;
+        return 0;
+    }
+    if (msg == WM_HOTKEY && wp == kQuickZoomHotkeyId) {
+        if (g_tick) g_tick->quickZoomHotkey.store(true);   // RunTick consumes it (rising-edge via MOD_NOREPEAT)
         return 0;
     }
     // Keep ticking while a modal loop (the tray menu) owns the thread. The tray sets a timer
@@ -575,6 +606,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // and the cursor hidden). If the combo is already taken, the tray Quit still works.
     RegisterHotKey(hwnd, kQuitHotkeyId, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'Q');
     RegisterHideCursorHotkey(hwnd, cfg.hideCursorVk, cfg.hideCursorMods);
+    RegisterQuickZoomHotkey(hwnd, (cfg.quickZoomHotkeyMode && cfg.quickZoomVk) ? cfg.quickZoomVk : 0,
+                            cfg.quickZoomMods);
 
     if (!g_input.start(cfg.zoomInButton, cfg.zoomInButton2, cfg.zoomOutButton, cfg.zoomOutButton2,
                        /*swallow=*/true)) {
@@ -775,6 +808,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     if (ts.configWatch && ts.configWatch != INVALID_HANDLE_VALUE) FindCloseChangeNotification(ts.configWatch);
     UnregisterHotKey(hwnd, kQuitHotkeyId);
     UnregisterHotKey(hwnd, kHideCursorHotkeyId);
+    UnregisterHotKey(hwnd, kQuickZoomHotkeyId);
     renderEngine.shutdown();   // restores cursor + tears down D3D/overlay
     g_input.stop();
     Tray::Remove();

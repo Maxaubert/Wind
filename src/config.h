@@ -98,10 +98,16 @@ struct Config {
     // First-launch onboarding: 0 = not yet onboarded (also true of a freshly created ini), so the
     // core spawns WindConfig.exe --onboard once; the onboarding flow sets this to 1 on completion.
     int    onboarded = 0;
-    // Quick zoom: hold the modifier key and tap either zoom key to toggle between 1.0x ("0%") and a
-    // remembered level (above 200%). The modifier doubles as the on/off switch (case-insensitive):
-    // "Ctrl", "Alt", or "Shift" enables it; "None" disables quick zoom.
+    // Quick zoom: toggle between 1.0x ("0%") and a remembered level (above 200%). Two trigger modes:
+    //   quickZoomHotkeyMode = 0 -> hold the modifier (quickZoomModifier) and tap either zoom key;
+    //   quickZoomHotkeyMode = 1 -> press the dedicated hotkey (quickZoomVk/Mods).
+    int    quickZoomHotkeyMode = 0;
+    // Modifier mode key (case-insensitive): "Ctrl", "Alt", or "Shift" enables it; "None" = off.
     std::string quickZoomModifier = "Ctrl";
+    // Hotkey-mode dedicated hotkey: VK code + modifier mask (1=Ctrl,2=Alt,4=Shift,8=Win). Default
+    // 112 = F1. vk = 0 disables quick zoom in hotkey mode.
+    int    quickZoomVk         = 112;
+    int    quickZoomMods       = 0;
     double quickZoomDefault  = 4.0;   // level to snap to when nothing has been remembered yet
 };
 // Pure: parse INI text (key=value, ';' or '#' comments) into a Config, keeping
