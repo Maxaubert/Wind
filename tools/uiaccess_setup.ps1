@@ -55,10 +55,14 @@ try {
         }
     }
 
-    Write-Output "=== 3. sign Wind.exe (UIAccess requires this) ==="
+    Write-Output "=== 3. sign Wind.exe (UIAccess requires this) + WindConfig.exe ==="
     $sig = Set-AuthenticodeSignature -FilePath $src -Certificate $cert -HashAlgorithm SHA256
-    Write-Output "sign status=$($sig.Status)"
-    # WindConfig.exe is a normal user app (no UIAccess manifest), so it does not need to be signed.
+    Write-Output "Wind.exe sign status=$($sig.Status)"
+    # WindConfig.exe needs no UIAccess, but signing it with the same trusted cert stops Windows
+    # Defender from false-flagging the freshly built unsigned binary (Trojan:Win32/Wacatac.B!ml) and
+    # quarantining it out of Program Files, which broke the tray's "Open Settings" (issue #86).
+    $sigCfg = Set-AuthenticodeSignature -FilePath $cfgSrc -Certificate $cert -HashAlgorithm SHA256
+    Write-Output "WindConfig.exe sign status=$($sigCfg.Status)"
 
     Write-Output "=== 4. deploy Wind.exe, WindConfig.exe and ui\dist to C:\Program Files\Wind ==="
     Get-Process Wind,WindConfig -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -87,6 +91,8 @@ try {
     $v = Get-AuthenticodeSignature "$dst\Wind.exe"
     Write-Output "Wind.exe verify status=$($v.Status)"
     Write-Output "signer=$($v.SignerCertificate.Subject)"
+    $vc = Get-AuthenticodeSignature "$dst\WindConfig.exe"
+    Write-Output "WindConfig.exe verify status=$($vc.Status) present=$(Test-Path "$dst\WindConfig.exe")"
     Write-Output ""
     Write-Output "DONE. Launch the SIGNED copy (not the dev build) from a NORMAL (non-elevated)"
     Write-Output "shell so UIAccess engages:"
