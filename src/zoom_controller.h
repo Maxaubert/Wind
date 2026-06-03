@@ -31,4 +31,22 @@ private:
     double accel_ = 3.0, rampSeconds_ = 0.6;
     double heldIn_ = 0.0;                      // continuous seconds zoom-in held (drives accel ramp)
 };
+
+// Pure double-tap detector for quick zoom. Two independent channels (in, out): each remembers the
+// time of its last down-edge; two down-edges of the SAME channel within the window fire once.
+// A fire of either channel drives the same quick-zoom toggle (see ApplyQuickZoom). Fed rising edges
+// from the tick loop with a monotonic timestamp (QPC seconds in the app; arbitrary in tests).
+class QuickZoomDetector {
+public:
+    void setWindow(double seconds) { window_ = seconds; }
+    // inEdge/outEdge: that channel went down THIS tick. nowSeconds: a monotonic clock. Returns true
+    // exactly once when a double-tap completes (and consumes it, so a triple-tap restarts).
+    bool update(bool inEdge, bool outEdge, double nowSeconds);
+    void reset() { lastInDown_ = lastOutDown_ = kNever; }
+private:
+    static constexpr double kNever = -1e9;
+    double window_      = 0.3;
+    double lastInDown_  = kNever;
+    double lastOutDown_ = kNever;
+};
 }

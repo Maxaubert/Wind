@@ -50,4 +50,17 @@ void ZoomController::reset() { level_ = minLevel_; dir_ = ZoomDir::None; heldIn_
 void ZoomController::setLevel(double l) {
     level_ = std::min(maxLevel_, std::max(minLevel_, l));
 }
+
+bool QuickZoomDetector::update(bool inEdge, bool outEdge, double nowSeconds) {
+    bool fire = false;
+    if (inEdge) {
+        if (nowSeconds - lastInDown_ <= window_) { fire = true; lastInDown_ = kNever; }
+        else                                       lastInDown_ = nowSeconds;
+    }
+    if (outEdge) {
+        if (nowSeconds - lastOutDown_ <= window_) { fire = true; lastOutDown_ = kNever; }
+        else                                        lastOutDown_ = nowSeconds;
+    }
+    return fire;
+}
 }
