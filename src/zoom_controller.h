@@ -49,4 +49,12 @@ private:
     double lastInDown_  = kNever;
     double lastOutDown_ = kNever;
 };
+
+// Result of one quick-zoom toggle: the level to snap to, and the (possibly updated) remembered level.
+struct QuickZoomResult { double newLevel; double newStored; };
+// Pure toggle arithmetic. cur = current level, stored = remembered level (0 = none yet), def = the
+// configured default, maxLevel = ceiling. If zoomed (cur > 1.0): snap out to 1.0, remembering cur
+// only when it is above 200% (cur > 2.0). If at 1.0: snap in to stored (or def if none), clamped to
+// [1.0, maxLevel].
+QuickZoomResult ApplyQuickZoom(double cur, double stored, double def, double maxLevel);
 }
