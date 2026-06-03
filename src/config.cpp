@@ -59,6 +59,9 @@ Config ParseConfig(const std::string& text) {
             else if (key == "multiMonitor")       c.multiMonitor = std::stoi(val);
             else if (key == "cropCapture")        c.cropCapture = std::stoi(val);
             else if (key == "onboarded")          c.onboarded = std::stoi(val);
+            else if (key == "quickZoom")          c.quickZoom = std::stoi(val);
+            else if (key == "quickZoomWindowMs")  c.quickZoomWindowMs = std::stoi(val);
+            else if (key == "quickZoomDefault")   c.quickZoomDefault = std::stod(val);
         } catch (...) { /* keep default on bad value */ }
     }
     // Clamp numeric fields to their documented ranges. The ini is a hand-editable surface, and an
@@ -74,6 +77,8 @@ Config ParseConfig(const std::string& text) {
     c.cursorSmoothing = clampd(c.cursorSmoothing, 0.0, 0.95);
     c.sharpness       = clampd(c.sharpness,       0.0, 1.0);
     c.brightness      = clampd(c.brightness,      0.5, 1.5);
+    c.quickZoomWindowMs = (int)clampd(c.quickZoomWindowMs, 50.0, 2000.0);
+    c.quickZoomDefault  = clampd(c.quickZoomDefault,        1.0, 50.0);
     return c;
 }
 }
@@ -123,6 +128,13 @@ Config LoadConfig(const std::wstring& path) {
                "smoothZoomAccel=3.0\n"
                "; smoothZoomRamp: seconds of holding to reach the linear rate\n"
                "smoothZoomRamp=0.6\n"
+               "; quickZoom: double-tap either zoom key to toggle between 0% and your last level\n"
+               ";   (above 200%); 1=on, 0=off\n"
+               "quickZoom=1\n"
+               "; quickZoomWindowMs: max milliseconds between the two taps (50-2000)\n"
+               "quickZoomWindowMs=300\n"
+               "; quickZoomDefault: level to jump to before you've set one (e.g. 4.0 = 400%)\n"
+               "quickZoomDefault=4.0\n"
                "; vsync: 1=present locked to display refresh (smooth, capped); 0=no vsync (restart to apply)\n"
                "vsync=1\n"
                "; dwmFlush: 0=plain vsync pacing (default, fewer stutters); 1=align to DWM's composition\n"
