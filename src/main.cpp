@@ -103,6 +103,10 @@ struct TickState {
     double prevLvl = 1.0;
     int    hz = 60;                            // resolved tick/refresh rate (auto-detected)
     bool   recenterKeyWasDown = false;         // edge-detect the recenterVk key
+    double quickZoomStored    = 0.0;           // remembered quick-zoom level (0 = none yet); in-memory
+    bool   prevInHeld         = false;         // for rising-edge detection of the zoom-in channel
+    bool   prevOutHeld        = false;
+    QuickZoomDetector quickZoom;               // pure double-tap detector
     bool   cursorHidden       = false;         // runtime-only override (no ini write, no hot-reload)
     HWND   hwnd               = nullptr;       // owning message window (for RegisterHotKey)
     // Frame-pacing diagnostics (diagnostics=1): a 2 s window of loop-interval stats.
@@ -255,6 +259,24 @@ static void RunTick(TickState& t) {
     // Hide-cursor hotkey is registered via RegisterHotKey (WndProc WM_HOTKEY toggles cursorHidden);
     // this both suppresses the key from reaching other apps and gives rising-edge semantics for
     // free (MOD_NOREPEAT). No polled check needed here.
+    // Quick zoom: a double-tap of EITHER zoom channel toggles between 1.0x and a remembered level.
+    // Rising-edge-detect the already-computed held flags, feed the pure detector a QPC timestamp,
+    // and apply the toggle by snapping the level so the SAME-tick zoom-in/out transitions below
+    // (which key off lvl vs prevLvl) handle all the overlay/cursor work. Window is applied live
+    // (hot-reload), mirroring setProfile. The two-tap ramp is harmless: the snap overrides it.
+    bool inEdge  = inHeld  && !t.prevInHeld;
+    bool outEdge = outHeld && !t.prevOutHeld;
+    t.prevInHeld = inHeld; t.prevOutHeld = outHeld;
+    if (t.cfg.quickZoom) {
+        t.quickZoom.setWindow(t.cfg.quickZoomWindowMs / 1000.0);
+        double nowSec = double(now.QuadPart) / double(t.freq.QuadPart);
+        if (t.quickZoom.update(inEdge, outEdge, nowSec)) {
+            QuickZoomResult qr = ApplyQuickZoom(t.zoom.level(), t.quickZoomStored,
+                                                t.cfg.quickZoomDefault, t.cfg.maxLevel);
+            t.zoom.setLevel(qr.newLevel);
+            t.quickZoomStored = qr.newStored;
+        }
+    }
     double lvl = t.zoom.level();
 
     int rawDx, rawDy; g_input.drainRaw(rawDx, rawDy);
