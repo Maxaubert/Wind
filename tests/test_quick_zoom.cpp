@@ -49,3 +49,15 @@ TEST_CASE("reset clears pending taps") {
     d.reset();
     CHECK(d.update(true, false, 0.10) == false);   // first tap was cleared
 }
+TEST_CASE("a tap exactly at the window edge still fires (<= boundary)") {
+    QuickZoomDetector d;
+    d.setWindow(0.3);
+    CHECK(d.update(true, false, 0.00) == false);
+    CHECK(d.update(true, false, 0.30) == true);    // delta == window_ -> inclusive, fires
+}
+TEST_CASE("both channels edging in one call: a double-tap on either still fires") {
+    QuickZoomDetector d;
+    d.setWindow(0.3);
+    CHECK(d.update(true, true, 0.00) == false);     // first tap on both channels
+    CHECK(d.update(true, true, 0.10) == true);      // second tap within window on both
+}
