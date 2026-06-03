@@ -51,19 +51,6 @@ void ZoomController::setLevel(double l) {
     level_ = std::min(maxLevel_, std::max(minLevel_, l));
 }
 
-bool QuickZoomDetector::update(bool inEdge, bool outEdge, double nowSeconds) {
-    bool fire = false;
-    if (inEdge) {
-        if (nowSeconds - lastInDown_ <= window_) { fire = true; lastInDown_ = kNever; }
-        else                                       lastInDown_ = nowSeconds;
-    }
-    if (outEdge) {
-        if (nowSeconds - lastOutDown_ <= window_) { fire = true; lastOutDown_ = kNever; }
-        else                                        lastOutDown_ = nowSeconds;
-    }
-    return fire;
-}
-
 QuickZoomResult ApplyQuickZoom(double cur, double stored, double def, double maxLevel) {
     constexpr double kEps = 1e-6;
     constexpr double kStoreThreshold = 2.0;        // remember the level being left only if > 200%

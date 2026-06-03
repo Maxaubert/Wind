@@ -1,7 +1,21 @@
 # Quick zoom (double-tap toggle) - design
 
 Date: 2026-06-03
-Status: approved (brainstorm); pending implementation plan
+Status: shipped (with revisions below)
+
+## Shipped revisions (post-implementation, per user iteration)
+
+The toggle/store/restore arithmetic (`ApplyQuickZoom`, `ZoomController::setLevel`) shipped as
+designed, but the TRIGGER changed during testing:
+
+- The double-tap detector (`QuickZoomDetector`) was replaced. Quick zoom now fires on a held
+  MODIFIER key (Ctrl / Alt / Shift, configurable via `quickZoomModifier`) + a tap of either zoom
+  key. "None" disables quick zoom (it doubles as the on/off switch; the separate `quickZoom` enable
+  field was removed). The dedicated-hotkey variant that was briefly added was also removed.
+- `quickZoomDefault` stays at 4.0 (400%) and is no longer surfaced in the config UI (ini-only).
+- Unrelated addition this session: a "Show advanced settings" toggle (About section, key
+  `showAdvanced`) that hides rows flagged `advanced` in the config UI; plus an animated SVG checkbox
+  restyle. UI-only, no core coupling.
 Related: `src/zoom_controller.{h,cpp}`, `src/main.cpp` (`RunTick`), `src/config.{h,cpp}`,
 `ui/src/settings-schema.js`
 

@@ -163,19 +163,18 @@ TEST_CASE("zoom-speed and smooth-zoom knobs parse") {
 }
 TEST_CASE("quick-zoom config parses and clamps") {
     Config def = ParseConfig("");
-    CHECK(def.quickZoom == 1);
-    CHECK(def.quickZoomWindowMs == 300);
     CHECK(def.quickZoomDefault == doctest::Approx(4.0));
+    CHECK(def.quickZoomModifier == "Ctrl");
 
-    Config c = ParseConfig("quickZoom=0\nquickZoomWindowMs=250\nquickZoomDefault=6.0\n");
-    CHECK(c.quickZoom == 0);
-    CHECK(c.quickZoomWindowMs == 250);
+    Config c = ParseConfig("quickZoomDefault=6.0\nquickZoomModifier=Alt\n");
     CHECK(c.quickZoomDefault == doctest::Approx(6.0));
+    CHECK(c.quickZoomModifier == "Alt");
 
-    Config hi = ParseConfig("quickZoomWindowMs=99999\nquickZoomDefault=99\n");
-    CHECK(hi.quickZoomWindowMs == 2000);                 // clamped to max
+    Config off = ParseConfig("quickZoomModifier=None\n");
+    CHECK(off.quickZoomModifier == "None");
+
+    Config hi = ParseConfig("quickZoomDefault=99\n");
     CHECK(hi.quickZoomDefault == doctest::Approx(50.0)); // clamped to max
-    Config lo = ParseConfig("quickZoomWindowMs=1\nquickZoomDefault=0.1\n");
-    CHECK(lo.quickZoomWindowMs == 50);                   // clamped to min
+    Config lo = ParseConfig("quickZoomDefault=0.1\n");
     CHECK(lo.quickZoomDefault == doctest::Approx(1.0));  // clamped to min
 }
