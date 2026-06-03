@@ -25,7 +25,14 @@
     <div class="meta">{#if row.label}<div class="label">{row.label}</div>{/if}{#if row.desc}<div class="desc">{row.desc}</div>{/if}</div>
     <div class="ctl">
       {#if row.type === 'toggle'}
-        <input type="checkbox" {disabled} checked={num(value) === 1} on:change={e => onChange(e.target.checked ? 1 : 0)} />
+        <label class="checkbox-wrapper" class:disabled>
+          <input type="checkbox" {disabled} checked={num(value) === 1} on:change={e => onChange(e.target.checked ? 1 : 0)} />
+          <svg viewBox="0 0 35.6 35.6" aria-hidden="true">
+            <circle class="background" cx="17.8" cy="17.8" r="17.8"></circle>
+            <circle class="stroke" cx="17.8" cy="17.8" r="14.37"></circle>
+            <polyline class="check" points="11.78 18.12 15.55 22.23 25.17 12.87"></polyline>
+          </svg>
+        </label>
       {:else if row.type === 'slider'}
         <input type="range" {disabled} min={row.min} max={row.max} step={row.step} value={value} on:input={e => onChange(e.target.value)} />
         <span class="val">{value}</span>
@@ -46,6 +53,22 @@
      (1 -> 10 etc.), which would otherwise reflow the .ctl and visually shake the slider. */
   .val{margin-left:8px;width:4ch;display:inline-block;text-align:right;font-variant-numeric:tabular-nums}
   .row.disabled{opacity:.45}
+  /* Animated SVG checkbox: a circular knob whose ring + check draw on when checked. Dark-grey
+     fill (replacing the original purple) to fit the UI; white ring/check. */
+  .checkbox-wrapper{position:relative;display:inline-block;width:26px;height:26px}
+  .checkbox-wrapper.disabled{pointer-events:none}
+  .checkbox-wrapper .background{fill:#3a3a44;transition:ease all .6s}
+  .checkbox-wrapper .stroke{fill:none;stroke:#fff;stroke-miterlimit:10;stroke-width:2px;
+    stroke-dashoffset:100;stroke-dasharray:100;transition:ease all .6s}
+  .checkbox-wrapper .check{fill:none;stroke:#fff;stroke-linecap:round;stroke-linejoin:round;
+    stroke-width:2px;stroke-dashoffset:22;stroke-dasharray:22;transition:ease all .6s}
+  .checkbox-wrapper input[type=checkbox]{position:absolute;width:100%;height:100%;left:0;top:0;
+    margin:0;opacity:0;-webkit-appearance:none;appearance:none}
+  .checkbox-wrapper input[type=checkbox]:hover{cursor:pointer}
+  .checkbox-wrapper:hover .check{stroke-dashoffset:0}
+  .checkbox-wrapper input[type=checkbox]:checked + svg .background{fill:var(--accent)}
+  .checkbox-wrapper input[type=checkbox]:checked + svg .stroke{stroke-dashoffset:0}
+  .checkbox-wrapper input[type=checkbox]:checked + svg .check{stroke-dashoffset:0}
   /* .linkbtn ported from mockups/config-ui-onboarding.html. */
   .linkbtn{padding:5px 11px;border-radius:7px;border:1px solid var(--line);background:transparent;font-size:12px;color:var(--text);cursor:pointer}
   .linkbtn:disabled{opacity:.5;cursor:default}

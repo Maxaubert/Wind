@@ -59,6 +59,9 @@
   function discard() { values = { ...saved }; }
   function toggleTheme() { theme = nextTheme(theme); setTheme(theme); }
   $: dirty = Object.keys(values).some(k => String(values[k]) !== String(saved[k]));
+  // Advanced rows (schema `advanced:true`) are hidden unless "Show advanced settings" is on. Driven
+  // by the live `values` so toggling it reveals/hides rows immediately (before Apply).
+  $: advancedOn = Number(values.showAdvanced) === 1;
 </script>
 <div class="win">
   <Rail sections={railItems} {active} onSelect={(id) => scrollToSection(scroller, id)}
@@ -76,7 +79,7 @@
       {#each sections as s}
         <Section id={s.id} label={s.label} desc={s.desc}>
           {#each s.rows as r}
-            {#if !r.requires || Number(values[r.requires]) === 1}
+            {#if (!r.requires || Number(values[r.requires]) === 1) && (!r.advanced || advancedOn)}
               <Row row={r} value={values[r.key]} {values} set={change} {live}
                    disabled={r.dependsOn && Number(values[r.dependsOn]) !== 1}
                    onChange={(val) => change(r.key, val)} />

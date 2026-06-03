@@ -120,3 +120,12 @@ TEST_CASE("smooth-zoom guards: accel<1 and ramp=0 don't break the curve") {
     b.setDirection(ZoomDir::In); b.tick(0.01);
     CHECK(b.level() > 1.0);                      // finite, advanced (no NaN/inf)
 }
+TEST_CASE("setLevel snaps and clamps to bounds") {
+    ZoomController z(1.0, 8.0);
+    z.setLevel(4.0);
+    CHECK(z.level() == doctest::Approx(4.0));
+    z.setLevel(100.0);                 // above max -> clamps to 8.0
+    CHECK(z.level() == doctest::Approx(8.0));
+    z.setLevel(0.5);                   // below min -> clamps to 1.0
+    CHECK(z.level() == doctest::Approx(1.0));
+}

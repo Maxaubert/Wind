@@ -47,4 +47,23 @@ void ZoomController::tick(double dt) {
     level_ = std::min(maxLevel_, std::max(minLevel_, level_));
 }
 void ZoomController::reset() { level_ = minLevel_; dir_ = ZoomDir::None; heldIn_ = 0.0; }
+void ZoomController::setLevel(double l) {
+    level_ = std::min(maxLevel_, std::max(minLevel_, l));
+}
+
+QuickZoomResult ApplyQuickZoom(double cur, double stored, double def, double maxLevel) {
+    constexpr double kEps = 1e-6;
+    constexpr double kStoreThreshold = 2.0;        // remember the level being left only if > 200%
+    QuickZoomResult r{cur, stored};
+    if (cur > 1.0 + kEps) {                         // zoomed -> snap out to 0%
+        if (cur > kStoreThreshold) r.newStored = cur;
+        r.newLevel = 1.0;
+    } else {                                        // at 0% -> snap in
+        double target = (stored > 0.0) ? stored : def;
+        if (target > maxLevel) target = maxLevel;
+        if (target < 1.0)      target = 1.0;
+        r.newLevel = target;
+    }
+    return r;
+}
 }

@@ -161,3 +161,20 @@ TEST_CASE("zoom-speed and smooth-zoom knobs parse") {
     CHECK(c.smoothZoomAccel == doctest::Approx(4.0));
     CHECK(c.smoothZoomRamp == doctest::Approx(0.25));
 }
+TEST_CASE("quick-zoom config parses and clamps") {
+    Config def = ParseConfig("");
+    CHECK(def.quickZoomDefault == doctest::Approx(4.0));
+    CHECK(def.quickZoomModifier == "Ctrl");
+
+    Config c = ParseConfig("quickZoomDefault=6.0\nquickZoomModifier=Alt\n");
+    CHECK(c.quickZoomDefault == doctest::Approx(6.0));
+    CHECK(c.quickZoomModifier == "Alt");
+
+    Config off = ParseConfig("quickZoomModifier=None\n");
+    CHECK(off.quickZoomModifier == "None");
+
+    Config hi = ParseConfig("quickZoomDefault=99\n");
+    CHECK(hi.quickZoomDefault == doctest::Approx(50.0)); // clamped to max
+    Config lo = ParseConfig("quickZoomDefault=0.1\n");
+    CHECK(lo.quickZoomDefault == doctest::Approx(1.0));  // clamped to min
+}

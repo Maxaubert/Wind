@@ -21,6 +21,7 @@ public:
     void tick(double dtSeconds);   // ramp level multiplicatively toward bound
     double level() const { return level_; }
     void reset();                  // level=min, dir=None, held cleared
+    void setLevel(double l);       // instant snap to a level (clamped to [min,max]); dir_ untouched
 private:
     double minLevel_, maxLevel_;
     double level_;
@@ -30,4 +31,12 @@ private:
     double accel_ = 3.0, rampSeconds_ = 0.6;
     double heldIn_ = 0.0;                      // continuous seconds zoom-in held (drives accel ramp)
 };
+
+// Result of one quick-zoom toggle: the level to snap to, and the (possibly updated) remembered level.
+struct QuickZoomResult { double newLevel; double newStored; };
+// Pure toggle arithmetic. cur = current level, stored = remembered level (0 = none yet), def = the
+// configured default, maxLevel = ceiling. If zoomed (cur > 1.0): snap out to 1.0, remembering cur
+// only when it is above 200% (cur > 2.0). If at 1.0: snap in to stored (or def if none), clamped to
+// [1.0, maxLevel].
+QuickZoomResult ApplyQuickZoom(double cur, double stored, double def, double maxLevel);
 }
