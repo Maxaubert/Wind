@@ -13,6 +13,9 @@ export const sections = [
     { key:'smoothZoom',   type:'toggle', label:'Smooth zoom',    desc:'Zoom-in eases up to your speed.', def:0 },
     { key:'smoothZoomAccel', type:'slider', label:'Smooth ease-in depth', desc:'Higher = slower start.', min:1, max:8, step:0.5, def:3.0, dependsOn:'smoothZoom' },
     { key:'smoothZoomRamp',  type:'slider', label:'Smooth ramp (s)', desc:'Seconds to reach full speed.', min:0.1, max:3, step:0.1, def:0.6, dependsOn:'smoothZoom' },
+    { key:'quickZoom', type:'toggle', label:'Quick zoom (double-tap)', desc:'Double-tap a zoom key to toggle between 0% and your last level (above 200%).', def:1 },
+    { key:'quickZoomWindowMs', type:'slider', label:'Double-tap window (ms)', desc:'Max time between the two taps.', min:150, max:600, step:25, def:300, dependsOn:'quickZoom' },
+    { key:'quickZoomDefault', type:'slider', label:'Quick-zoom default', desc:'Level used before you set one (4 = 400%).', min:2, max:50, step:0.5, def:4.0, dependsOn:'quickZoom' },
   ]},
   { id:'cursor', label:'Cursor', icon:'cursor', desc:'Pointer movement and visibility while zoomed.', rows: [
     { key:'cursorSensitivity', type:'slider', label:'Cursor speed', desc:'Pan speed multiplier (1.0 = match your mouse).', min:0.25, max:4, step:0.05, def:1.0 },
