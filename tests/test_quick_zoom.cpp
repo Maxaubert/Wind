@@ -83,3 +83,12 @@ TEST_CASE("ApplyQuickZoom: at 0% with nothing stored uses the default") {
     CHECK(r.newLevel  == doctest::Approx(4.0));
     CHECK(r.newStored == doctest::Approx(0.0));    // memory unchanged on snap-in
 }
+TEST_CASE("ApplyQuickZoom: a default above maxLevel is clamped to maxLevel") {
+    QuickZoomResult r = ApplyQuickZoom(/*cur*/1.0, /*stored*/0.0, /*def*/20.0, /*max*/12.0);
+    CHECK(r.newLevel == doctest::Approx(12.0));
+}
+TEST_CASE("ApplyQuickZoom: exactly 200% is NOT remembered (boundary is strictly above)") {
+    QuickZoomResult r = ApplyQuickZoom(/*cur*/2.0, /*stored*/0.0, /*def*/4.0, /*max*/12.0);
+    CHECK(r.newLevel  == doctest::Approx(1.0));   // still snaps out
+    CHECK(r.newStored == doctest::Approx(0.0));   // 2.0 is not > 2.0, so not remembered
+}
