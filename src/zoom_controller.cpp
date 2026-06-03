@@ -47,4 +47,7 @@ void ZoomController::tick(double dt) {
     level_ = std::min(maxLevel_, std::max(minLevel_, level_));
 }
 void ZoomController::reset() { level_ = minLevel_; dir_ = ZoomDir::None; heldIn_ = 0.0; }
+void ZoomController::setLevel(double l) {
+    level_ = std::min(maxLevel_, std::max(minLevel_, l));
+}
 }

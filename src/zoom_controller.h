@@ -21,6 +21,7 @@ public:
     void tick(double dtSeconds);   // ramp level multiplicatively toward bound
     double level() const { return level_; }
     void reset();                  // level=min, dir=None, held cleared
+    void setLevel(double l);       // instant snap to a level (clamped to [min,max]); dir_ untouched
 private:
     double minLevel_, maxLevel_;
     double level_;
