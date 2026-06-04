@@ -598,6 +598,16 @@ void RenderEngine::setVisible(bool visible) {
     }
 }
 
+// Alpha 1 = imperceptible, but enough to make DWM pull a fullscreen game off its independent-flip /
+// MPO plane and composite it (see the header + issue #90). Crucially this does NOT block: the caller
+// keeps running normal frames, and a compositor cycle (or two) of ordinary ticks passes before the
+// full reveal - so the smooth-zoom ramp is never stalled the way a synchronous DwmFlush would stall it.
+void RenderEngine::primeReveal() {
+    if (!s_ || !s_->hwnd) return;
+    SetLayeredWindowAttributes(s_->hwnd, 0, 1, LWA_ALPHA);
+    SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
 // Drop the current duplication so the next capture() recreates it; the first AcquireNextFrame
 // after DuplicateOutput returns the entire current desktop, so the first zoomed frame samples
 // live content instead of a stale cached copy (the alt-tab "previous window" content). Clearing

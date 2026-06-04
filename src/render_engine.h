@@ -54,6 +54,12 @@ public:
     bool retarget(const MonitorTarget& monitor);
     bool renderFrame(const RenderFrameParams& p);  // capture (if changed) + scale + cursor + present
     void setVisible(bool visible);                 // show/hide the overlay (hidden at 1x)
+    // Set the overlay to alpha 1 (visually imperceptible - the user keeps seeing the screen beneath)
+    // WITHOUT a full reveal. A non-fully-transparent top window makes DWM stop granting a fullscreen
+    // game an independent-flip / MPO plane and composite it into the desktop, so Desktop Duplication
+    // can finally see it (issue #90). The caller primes on a fullscreen zoom-in, keeps rendering
+    // normally for a tick or two (NON-blocking - no DwmFlush/stall), then calls setVisible(true).
+    void primeReveal();
     // Force the next frame to grab a fresh full-desktop capture (release+recreate the
     // duplication, whose first AcquireNextFrame returns the whole current desktop). Call on
     // zoom-in so a stale cached frame from a previous session isn't shown for one frame
