@@ -72,6 +72,20 @@ static bool SameMonitor(const MonitorTarget& a, const MonitorTarget& b) {
     return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h && wcscmp(a.device, b.device) == 0;
 }
 
+// True when the foreground window covers the whole target monitor - i.e. a fullscreen / borderless
+// app (typically a game). Such an app is usually promoted to an independent-flip / MPO plane that
+// Desktop Duplication can't see until our overlay forces DWM to composite it, which is what makes
+// the first zoom-in flash the previously-focused window (issue #90). We use the bridged reveal only
+// in this case so ordinary desktop zoom-ins keep the instant path.
+static bool ForegroundCoversMonitor(const MonitorTarget& mon) {
+    HWND fg = GetForegroundWindow();
+    if (!fg) return false;
+    RECT wr{};
+    if (!GetWindowRect(fg, &wr)) return false;
+    return wr.left <= mon.x && wr.top <= mon.y &&
+           wr.right >= mon.x + mon.w && wr.bottom >= mon.y + mon.h;
+}
+
 // Virtual-desktop bounds (the union of all monitors), used per zoomed frame to detect a game
 // clipping the cursor. Cached because GetSystemMetrics is a syscall and these bounds change only
 // on a display-topology change; refreshed on each zoom-in (where we also retarget the monitor).
@@ -101,6 +115,7 @@ struct TickState {
     HANDLE configWatch = nullptr;              // ini-dir change notification (replaces the 1Hz mtime poll)
     std::wstring iniPath;                      // full path to magnifier.ini, resolved at startup
     double prevLvl = 1.0;
+    int    revealPending = 0;                  // ticks left before the deferred (game) reveal (issue #90)
     int    hz = 60;                            // resolved tick/refresh rate (auto-detected)
     bool   recenterKeyWasDown = false;         // edge-detect the recenterVk key
     double quickZoomStored    = 0.0;           // remembered quick-zoom level (0 = none yet); in-memory
@@ -351,18 +366,35 @@ static void RunTick(TickState& t) {
         RenderFrameParams p{};
         FillRenderParams(p, r, t.cfg, t.mon, lvl);
         if (t.cursorHidden) p.cursorMode = 2;   // hotkey override; FillRenderParams already set 0/1/2 from cfg
-        t.renderEngine.renderFrame(p);
+        t.renderEngine.renderFrame(p);          // render+present every zoomed tick (never blocks the ramp)
+        // Reveal AFTER the live frame is presented: setVisible flips the layer alpha over the
+        // now-current front buffer, so the overlay never shows its retained previous-session
+        // frame (the alt-tab "previous window"). capture() also drained to the latest frame.
+        if (zoomIn) {
+            if (ForegroundCoversMonitor(t.mon)) {
+                // Fullscreen app (a game on an independent-flip/MPO plane): Desktop Duplication can't
+                // see the game until our overlay forces DWM to composite it, so revealing now would
+                // flash the previously focused window (issue #90). Instead PRIME at alpha 1 (invisible
+                // - the user keeps seeing the real game) to force that composition, keep rendering
+                // normally, and defer the full reveal a couple ticks so the game is in the capture by
+                // then. This is non-blocking: the smooth-zoom ramp runs undisturbed (no DwmFlush stall).
+                t.renderEngine.primeReveal();
+                t.revealPending = 2;
+            } else {
+                t.renderEngine.setVisible(true);   // ordinary desktop zoom-in: reveal instantly
+                t.revealPending = 0;
+            }
+        } else if (t.revealPending > 0 && --t.revealPending == 0) {
+            t.renderEngine.setVisible(true);       // deferred game reveal: game is now composited+captured
+        }
         // renderFrame SetCursorPos'd the OS cursor to clickDesktop+origin; remember it so next tick's
         // GetCursorPos delta measures only the user's hand motion since.
         t.lastSetVirtual.x = r.clickDesktopX + t.mon.x;
         t.lastSetVirtual.y = r.clickDesktopY + t.mon.y;
-        // Reveal AFTER the live frame is presented: setVisible flips the layer alpha over the
-        // now-current front buffer, so the overlay never shows its retained previous-session
-        // frame (the alt-tab "previous window"). capture() also drained to the latest frame.
-        if (zoomIn) t.renderEngine.setVisible(true);
     } else if (t.prevLvl > 1.0) {                     // zoom-out transition
         t.renderEngine.setVisible(false);
         t.renderEngine.hideSystemCursor(false);
+        t.revealPending = 0;                          // a quick tap may zoom out before the deferred reveal
     }
     t.prevLvl = lvl;
 
