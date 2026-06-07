@@ -117,6 +117,12 @@ struct Config {
     int         outlineThickness = 4;
     // Outline color as hex RGB ("#rrggbb"; leading '#' optional). Default = Wind accent.
     std::string outlineColor     = "#5b5bd6";
+    // Low-zoom-only: show the outline only while level <= outlineLowZoomMax (when enabled).
+    int    outlineLowZoomOnly = 0;     // 1 = enable the cutoff
+    double outlineLowZoomMax  = 2.0;   // zoom cutoff (clamped [1.0, 50.0])
+    // Idle-hide: fade the outline out after outlineIdleSeconds of no cursor motion (when enabled).
+    int    outlineIdleHide    = 0;     // 1 = enable idle fade
+    double outlineIdleSeconds = 7.0;   // idle timeout before fade (clamped [0.5, 60.0])
 };
 // Pure: parse INI text (key=value, ';' or '#' comments) into a Config, keeping
 // defaults for missing/malformed keys.
@@ -125,6 +131,16 @@ Config ParseConfig(const std::string& text);
 // false on any malformed input (wrong length, non-hex), leaving the outputs untouched so the
 // caller keeps its fallback default.
 bool ParseHexColor(const std::string& s, float& r, float& g, float& b);
+
+// Pure: whether the edge outline should show at this zoom level, given the master `outline`
+// toggle and the optional low-zoom cutoff. (The "are we zoomed" level > 1.0 gate stays in the
+// render pass.)
+bool OutlineVisibleAtLevel(const Config& c, double level);
+
+// Pure: edge-outline idle-fade alpha. Returns 1.0 until `idleSeconds` reaches `threshold`, then
+// ramps linearly to 0.0 over `fadeDuration` seconds (clamped to [0,1]). fadeDuration <= 0 gives a
+// hard 1.0/0.0 step at the threshold. Deterministic so the fade ramp is unit-testable.
+double OutlineIdleAlpha(double idleSeconds, double threshold, double fadeDuration);
 
 // I/O (implemented in Task 10): read file -> ParseConfig; create with defaults if absent.
 Config LoadConfig(const std::wstring& path);

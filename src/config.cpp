@@ -27,6 +27,20 @@ bool ParseHexColor(const std::string& s, float& r, float& g, float& b) {
     b = (v[4] * 16 + v[5]) / 255.0f;
     return true;
 }
+bool OutlineVisibleAtLevel(const Config& c, double level) {
+    if (c.outline == 0) return false;
+    if (c.outlineLowZoomOnly != 0 && level > c.outlineLowZoomMax) return false;
+    return true;
+}
+
+double OutlineIdleAlpha(double idleSeconds, double threshold, double fadeDuration) {
+    if (fadeDuration <= 0.0) return idleSeconds >= threshold ? 0.0 : 1.0;
+    double over = (idleSeconds - threshold) / fadeDuration;
+    if (over <= 0.0) return 1.0;
+    if (over >= 1.0) return 0.0;
+    return 1.0 - over;
+}
+
 Config ParseConfig(const std::string& text) {
     Config c;
     std::istringstream in(text);
