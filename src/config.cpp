@@ -99,6 +99,10 @@ Config ParseConfig(const std::string& text) {
             else if (key == "outline")            c.outline = std::stoi(val);
             else if (key == "outlineThickness")   c.outlineThickness = std::stoi(val);
             else if (key == "outlineColor")       c.outlineColor = val;
+            else if (key == "outlineLowZoomOnly") c.outlineLowZoomOnly = std::stoi(val);
+            else if (key == "outlineLowZoomMax")  c.outlineLowZoomMax = std::stod(val);
+            else if (key == "outlineIdleHide")    c.outlineIdleHide = std::stoi(val);
+            else if (key == "outlineIdleSeconds") c.outlineIdleSeconds = std::stod(val);
         } catch (...) { /* keep default on bad value */ }
     }
     // Clamp numeric fields to their documented ranges. The ini is a hand-editable surface, and an
@@ -117,6 +121,8 @@ Config ParseConfig(const std::string& text) {
     c.quickZoomDefault  = clampd(c.quickZoomDefault, 1.0, 50.0);
     if (c.outlineThickness < 1)  c.outlineThickness = 1;
     if (c.outlineThickness > 40) c.outlineThickness = 40;
+    c.outlineLowZoomMax  = clampd(c.outlineLowZoomMax,  1.0, 50.0);
+    c.outlineIdleSeconds = clampd(c.outlineIdleSeconds, 0.5, 60.0);
     return c;
 }
 }
@@ -215,6 +221,14 @@ Config LoadConfig(const std::wstring& path) {
                "outlineThickness=4\n"
                "; outlineColor: outline color as hex RGB (e.g. #5b5bd6 = Wind accent)\n"
                "outlineColor=#5b5bd6\n"
+               "; outlineLowZoomOnly: 1 = show the outline only at/below outlineLowZoomMax; 0 = always\n"
+               "outlineLowZoomOnly=0\n"
+               "; outlineLowZoomMax: zoom cutoff for the above (2.0 = 200%); range 1.0-50.0\n"
+               "outlineLowZoomMax=2.0\n"
+               "; outlineIdleHide: 1 = fade the outline out after the mouse is still; 0 = stay shown\n"
+               "outlineIdleHide=0\n"
+               "; outlineIdleSeconds: seconds of no cursor movement before the fade; range 0.5-60.0\n"
+               "outlineIdleSeconds=7.0\n"
                "; onboarded: 0 = run the first-launch setup once; set to 1 once finished\n"
                "onboarded=0\n";
         return Config{};

@@ -248,3 +248,23 @@ TEST_CASE("OutlineIdleAlpha ramps from 1 to 0 across the fade window") {
     CHECK(OutlineIdleAlpha(6.9, 7.0, 0.0) == doctest::Approx(1.0));   // degenerate fade<=0 -> step
     CHECK(OutlineIdleAlpha(7.0, 7.0, 0.0) == doctest::Approx(0.0));
 }
+TEST_CASE("outline low-zoom + idle keys default and parse with clamps") {
+    Config d = ParseConfig("");
+    CHECK(d.outlineLowZoomOnly == 0);
+    CHECK(d.outlineLowZoomMax  == doctest::Approx(2.0));
+    CHECK(d.outlineIdleHide    == 0);
+    CHECK(d.outlineIdleSeconds == doctest::Approx(7.0));
+
+    Config c = ParseConfig(
+        "outlineLowZoomOnly=1\noutlineLowZoomMax=3.5\noutlineIdleHide=1\noutlineIdleSeconds=10\n");
+    CHECK(c.outlineLowZoomOnly == 1);
+    CHECK(c.outlineLowZoomMax  == doctest::Approx(3.5));
+    CHECK(c.outlineIdleHide    == 1);
+    CHECK(c.outlineIdleSeconds == doctest::Approx(10.0));
+
+    // Clamps: outlineLowZoomMax [1.0,50.0]; outlineIdleSeconds [0.5,60.0].
+    CHECK(ParseConfig("outlineLowZoomMax=0.2\n").outlineLowZoomMax == doctest::Approx(1.0));
+    CHECK(ParseConfig("outlineLowZoomMax=99\n").outlineLowZoomMax  == doctest::Approx(50.0));
+    CHECK(ParseConfig("outlineIdleSeconds=0\n").outlineIdleSeconds == doctest::Approx(0.5));
+    CHECK(ParseConfig("outlineIdleSeconds=120\n").outlineIdleSeconds == doctest::Approx(60.0));
+}
