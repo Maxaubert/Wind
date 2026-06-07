@@ -10,6 +10,22 @@ static std::string trim(const std::string& s) {
     size_t b = s.find_last_not_of(" \t\r\n");
     return s.substr(a, b - a + 1);
 }
+bool ParseHexColor(const std::string& s, float& r, float& g, float& b) {
+    size_t i = (!s.empty() && s[0] == '#') ? 1 : 0;
+    if (s.size() - i != 6) return false;
+    auto hexv = [](char ch, int& out) -> bool {
+        if (ch >= '0' && ch <= '9') { out = ch - '0'; return true; }
+        if (ch >= 'a' && ch <= 'f') { out = ch - 'a' + 10; return true; }
+        if (ch >= 'A' && ch <= 'F') { out = ch - 'A' + 10; return true; }
+        return false;
+    };
+    int v[6];
+    for (int k = 0; k < 6; ++k) if (!hexv(s[i + k], v[k])) return false;
+    r = (v[0] * 16 + v[1]) / 255.0f;
+    g = (v[2] * 16 + v[3]) / 255.0f;
+    b = (v[4] * 16 + v[5]) / 255.0f;
+    return true;
+}
 Config ParseConfig(const std::string& text) {
     Config c;
     std::istringstream in(text);
