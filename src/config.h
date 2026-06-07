@@ -109,6 +109,14 @@ struct Config {
     int    quickZoomVk         = 112;
     int    quickZoomMods       = 0;
     double quickZoomDefault  = 4.0;   // level to snap to when nothing has been remembered yet
+    // --- Edge outline (zoom indicator) -------------------------------------
+    // 1 = draw a solid outline around the screen edges while zoomed (an at-a-glance "you are
+    // zoomed" indicator, handy at low zoom); 0 = off (default). Hot-reloadable.
+    int         outline          = 0;
+    // Outline width in physical pixels (clamped 1-40).
+    int         outlineThickness = 4;
+    // Outline color as hex RGB ("#rrggbb"; leading '#' optional). Default = Wind accent.
+    std::string outlineColor     = "#5b5bd6";
 };
 // Pure: parse INI text (key=value, ';' or '#' comments) into a Config, keeping
 // defaults for missing/malformed keys.

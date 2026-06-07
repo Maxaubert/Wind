@@ -81,6 +81,9 @@ Config ParseConfig(const std::string& text) {
             else if (key == "quickZoomHotkeyMode") c.quickZoomHotkeyMode = std::stoi(val);
             else if (key == "quickZoomVk")        c.quickZoomVk = std::stoi(val);
             else if (key == "quickZoomMods")      c.quickZoomMods = std::stoi(val);
+            else if (key == "outline")            c.outline = std::stoi(val);
+            else if (key == "outlineThickness")   c.outlineThickness = std::stoi(val);
+            else if (key == "outlineColor")       c.outlineColor = val;
         } catch (...) { /* keep default on bad value */ }
     }
     // Clamp numeric fields to their documented ranges. The ini is a hand-editable surface, and an
@@ -97,6 +100,8 @@ Config ParseConfig(const std::string& text) {
     c.sharpness       = clampd(c.sharpness,       0.0, 1.0);
     c.brightness      = clampd(c.brightness,      0.5, 1.5);
     c.quickZoomDefault  = clampd(c.quickZoomDefault, 1.0, 50.0);
+    if (c.outlineThickness < 1)  c.outlineThickness = 1;
+    if (c.outlineThickness > 40) c.outlineThickness = 40;
     return c;
 }
 }

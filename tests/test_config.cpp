@@ -203,6 +203,20 @@ TEST_CASE("ParseHexColor parses 6-digit hex with and without leading #") {
     CHECK(g3 == doctest::Approx(0.0f));
     CHECK(b3 == doctest::Approx(0.0f));
 }
+TEST_CASE("outline keys default off with accent color") {
+    Config c = ParseConfig("");
+    CHECK(c.outline == 0);                  // off by default
+    CHECK(c.outlineThickness == 4);
+    CHECK(c.outlineColor == "#5b5bd6");     // Wind accent
+}
+TEST_CASE("outline keys parse and thickness clamps to [1,40]") {
+    Config c = ParseConfig("outline=1\noutlineThickness=8\noutlineColor=#ff0000\n");
+    CHECK(c.outline == 1);
+    CHECK(c.outlineThickness == 8);
+    CHECK(c.outlineColor == "#ff0000");
+    CHECK(ParseConfig("outlineThickness=0\n").outlineThickness == 1);     // clamp low
+    CHECK(ParseConfig("outlineThickness=999\n").outlineThickness == 40);  // clamp high
+}
 TEST_CASE("ParseHexColor rejects malformed input and leaves outputs untouched") {
     float r = 0.5f, g = 0.5f, b = 0.5f;
     CHECK(ParseHexColor("", r, g, b) == false);
