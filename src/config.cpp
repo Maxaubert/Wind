@@ -10,6 +10,7 @@ static std::string trim(const std::string& s) {
     size_t b = s.find_last_not_of(" \t\r\n");
     return s.substr(a, b - a + 1);
 }
+
 bool ParseHexColor(const std::string& s, float& r, float& g, float& b) {
     size_t i = (!s.empty() && s[0] == '#') ? 1 : 0;
     if (s.size() - i != 6) return false;
