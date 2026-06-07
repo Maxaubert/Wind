@@ -27,6 +27,7 @@ bool ParseHexColor(const std::string& s, float& r, float& g, float& b) {
     b = (v[4] * 16 + v[5]) / 255.0f;
     return true;
 }
+
 bool OutlineVisibleAtLevel(const Config& c, double level) {
     if (c.outline == 0) return false;
     if (c.outlineLowZoomOnly != 0 && level > c.outlineLowZoomMax) return false;
