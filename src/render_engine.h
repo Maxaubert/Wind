@@ -26,6 +26,9 @@ struct RenderFrameParams {
     int    cursorMode;                   // 0=auto (draw only when the app shows a cursor), 1=always, 2=never
     bool   vsync;                        // true = Present(1,0) vsync; false = Present(0,0) no vsync
     bool   cropCapture;                  // on a full-screen repaint, copy only the magnified region (cuts 4K copy)
+    bool   outline;             // draw the edge outline while zoomed (level > 1.0)
+    int    outlineThicknessPx;  // outline width in physical px (clamped in render())
+    float  outlineR, outlineG, outlineB;  // outline color 0..1, written straight to the backbuffer
 };
 
 // Own capture + Direct3D 11 renderer. Captures the desktop via DXGI Desktop Duplication
