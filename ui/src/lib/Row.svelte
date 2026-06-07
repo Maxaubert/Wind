@@ -49,6 +49,9 @@
                     on:click={() => onChange(i)}>{opt}</button>
           {/each}
         </div>
+      {:else if row.type === 'color'}
+        <input class="color" type="color" {disabled} value={value}
+               on:input={e => onChange(e.target.value)} />
       {/if}
     </div>
   </div>
@@ -88,6 +91,9 @@
   /* .linkbtn ported from mockups/config-ui-onboarding.html. */
   .linkbtn{padding:5px 11px;border-radius:7px;border:1px solid var(--line);background:transparent;font-size:12px;color:var(--text);cursor:pointer}
   .linkbtn:disabled{opacity:.5;cursor:default}
+  .color{width:42px;height:26px;padding:2px;border:1px solid var(--line);border-radius:7px;
+         background:transparent;cursor:pointer}
+  .color:disabled{opacity:.45;cursor:default}
   /* About hero: large centered Wind logo fills the section so it has real height (helps the
      scroll-spy reach About) and the bottom of the scroll area isn't empty. */
   .about-hero{padding:48px 0 64px;text-align:center;color:var(--text);display:flex;flex-direction:column;align-items:center}
