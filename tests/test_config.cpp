@@ -228,3 +228,43 @@ TEST_CASE("ParseHexColor rejects malformed input and leaves outputs untouched") 
     CHECK(g == doctest::Approx(0.5f));
     CHECK(b == doctest::Approx(0.5f));
 }
+TEST_CASE("OutlineVisibleAtLevel honors master toggle and low-zoom cutoff") {
+    Config c;                       // defaults: outline=0, outlineLowZoomOnly=0, outlineLowZoomMax=2.0
+    CHECK(OutlineVisibleAtLevel(c, 1.5) == false);   // master off
+    c.outline = 1;
+    CHECK(OutlineVisibleAtLevel(c, 1.5) == true);    // on, no cutoff
+    CHECK(OutlineVisibleAtLevel(c, 9.0) == true);    // on, cutoff disabled -> any level
+    c.outlineLowZoomOnly = 1;                        // cutoff at 2.0
+    CHECK(OutlineVisibleAtLevel(c, 1.5) == true);    // below cutoff
+    CHECK(OutlineVisibleAtLevel(c, 2.0) == true);    // exactly at cutoff (inclusive)
+    CHECK(OutlineVisibleAtLevel(c, 2.5) == false);   // above cutoff
+}
+TEST_CASE("OutlineIdleAlpha ramps from 1 to 0 across the fade window") {
+    CHECK(OutlineIdleAlpha(0.0, 7.0, 0.3) == doctest::Approx(1.0));   // not idle yet
+    CHECK(OutlineIdleAlpha(7.0, 7.0, 0.3) == doctest::Approx(1.0));   // at threshold, fade starts
+    CHECK(OutlineIdleAlpha(7.15, 7.0, 0.3) == doctest::Approx(0.5));  // ~mid-fade (0.5 within tolerance)
+    CHECK(OutlineIdleAlpha(7.3, 7.0, 0.3) == doctest::Approx(0.0));   // fully faded
+    CHECK(OutlineIdleAlpha(99.0, 7.0, 0.3) == doctest::Approx(0.0));  // stays faded
+    CHECK(OutlineIdleAlpha(6.9, 7.0, 0.0) == doctest::Approx(1.0));   // degenerate fade<=0 -> step
+    CHECK(OutlineIdleAlpha(7.0, 7.0, 0.0) == doctest::Approx(0.0));
+}
+TEST_CASE("outline low-zoom + idle keys default and parse with clamps") {
+    Config d = ParseConfig("");
+    CHECK(d.outlineLowZoomOnly == 0);
+    CHECK(d.outlineLowZoomMax  == doctest::Approx(2.0));
+    CHECK(d.outlineIdleHide    == 0);
+    CHECK(d.outlineIdleSeconds == doctest::Approx(7.0));
+
+    Config c = ParseConfig(
+        "outlineLowZoomOnly=1\noutlineLowZoomMax=3.5\noutlineIdleHide=1\noutlineIdleSeconds=10\n");
+    CHECK(c.outlineLowZoomOnly == 1);
+    CHECK(c.outlineLowZoomMax  == doctest::Approx(3.5));
+    CHECK(c.outlineIdleHide    == 1);
+    CHECK(c.outlineIdleSeconds == doctest::Approx(10.0));
+
+    // Clamps: outlineLowZoomMax [1.0,50.0]; outlineIdleSeconds [0.5,60.0].
+    CHECK(ParseConfig("outlineLowZoomMax=0.2\n").outlineLowZoomMax == doctest::Approx(1.0));
+    CHECK(ParseConfig("outlineLowZoomMax=99\n").outlineLowZoomMax  == doctest::Approx(50.0));
+    CHECK(ParseConfig("outlineIdleSeconds=0\n").outlineIdleSeconds == doctest::Approx(0.5));
+    CHECK(ParseConfig("outlineIdleSeconds=120\n").outlineIdleSeconds == doctest::Approx(60.0));
+}

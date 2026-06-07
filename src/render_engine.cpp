@@ -842,14 +842,14 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
     // Into the capture-excluded overlay, so it never feeds back into Desktop Duplication. Opaque
     // (no blend) for crisp edges. Gated on level > 1.0 (the overlay is only revealed while zoomed,
     // so this is belt-and-braces). Four trivial draws, only when enabled.
-    if (p.outline && p.level > 1.0 && haveDesktop) {
+    if (p.outline && p.level > 1.0 && haveDesktop && p.outlineAlpha > 0.0f) {
         int t = p.outlineThicknessPx;
         if (t < 1) t = 1;
         const int maxT = (sw < sh ? sw : sh) / 2;   // never let opposite edges overlap/invert
         if (t > maxT) t = maxT;
         if (t > 0) {
             const float r = p.outlineR, g = p.outlineG, b = p.outlineB;
-            c->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);   // opaque
+            c->OMSetBlendState(blend.Get(), nullptr, 0xFFFFFFFF);   // alpha blend (supports the idle fade)
             c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
             c->IASetInputLayout(nullptr);
             c->VSSetShader(bvs.Get(), nullptr, 0);
@@ -869,7 +869,7 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
                 const float posClipY  = (float)(1.0 - y / (double)sh * 2.0);
                 const float sizeClipX = (float)(w / (double)sw * 2.0);
                 const float sizeClipY = (float)(-(h / (double)sh * 2.0));   // clip-y up vs screen-y down
-                const float bcbv[8] = { posClipX, posClipY, sizeClipX, sizeClipY, r, g, b, 1.0f };
+                const float bcbv[8] = { posClipX, posClipY, sizeClipX, sizeClipY, r, g, b, p.outlineAlpha };
                 c->UpdateSubresource(bcb.Get(), 0, nullptr, bcbv, 0, 0);
                 c->Draw(4, 0);
             }
