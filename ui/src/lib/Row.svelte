@@ -93,7 +93,7 @@
   .linkbtn:disabled{opacity:.5;cursor:default}
   .color{width:42px;height:26px;padding:2px;border:1px solid var(--line);border-radius:7px;
          background:transparent;cursor:pointer}
-  .color:disabled{opacity:.45;cursor:default}
+  .color:disabled{cursor:default}   /* .row.disabled already dims the whole row; avoid compounding opacity */
   /* About hero: large centered Wind logo fills the section so it has real height (helps the
      scroll-spy reach About) and the bottom of the scroll area isn't empty. */
   .about-hero{padding:48px 0 64px;text-align:center;color:var(--text);display:flex;flex-direction:column;align-items:center}
