@@ -123,6 +123,7 @@ struct TickState {
     bool   prevOutHeld        = false;
     std::atomic<bool> quickZoomHotkey{false};  // set by WM_HOTKEY (hotkey-mode quick zoom), consumed in RunTick
     bool   cursorHidden       = false;         // runtime-only override (no ini write, no hot-reload)
+    double outlineIdleSec = 0.0;   // seconds the cursor has been still (drives the outline idle fade)
     HWND   hwnd               = nullptr;       // owning message window (for RegisterHotKey)
     // Frame-pacing diagnostics (diagnostics=1): a 2 s window of loop-interval stats.
     double diagAccum = 0.0, diagSumDt = 0.0, diagMaxDt = 0.0;
@@ -159,11 +160,12 @@ static void FillRenderParams(RenderFrameParams& p, const MapResult& r, const Con
     // In DwmFlush mode we present immediately (no vsync block) and let DwmFlush() pace.
     p.vsync = (cfg.vsync != 0 && cfg.dwmFlush == 0);
     p.cropCapture = (cfg.cropCapture != 0);
-    p.outline = (cfg.outline != 0);
+    p.outline = OutlineVisibleAtLevel(cfg, level);
     p.outlineThicknessPx = cfg.outlineThickness;
     float orr = 0.357f, og = 0.357f, ob = 0.839f;   // #5b5bd6 fallback (accent)
     ParseHexColor(cfg.outlineColor, orr, og, ob);
     p.outlineR = orr; p.outlineG = og; p.outlineB = ob;
+    p.outlineAlpha = 1.0f;   // RunTick lowers this when idle-hide is active
 }
 
 // Append a line to %TEMP%\wind_diag.log (frame-pacing diagnostics; gated on diagnostics=1).
@@ -319,6 +321,7 @@ static void RunTick(TickState& t) {
     if (lvl > 1.0) {
         bool zoomIn = (t.prevLvl <= 1.0);             // zoom-in transition
         if (zoomIn) {
+            t.outlineIdleSec = 0.0;   // each zoom-in starts with the outline fully shown
             // Follow the cursor's monitor (multiMonitor on). Only reconfigure when it actually
             // changed; retarget() returns false on multi-GPU/failure, in which case we keep the
             // current monitor. The overlay is still at alpha 0 here, so a move never flashes.
@@ -370,6 +373,16 @@ static void RunTick(TickState& t) {
         MapResult r = t.mapper.update(dx, dy, lvl);
         RenderFrameParams p{};
         FillRenderParams(p, r, t.cfg, t.mon, lvl);
+        // Idle-hide fade: when enabled and the outline is visible, accumulate idle time (reset on
+        // any hand motion - free OS-cursor delta or raw mickeys), then map it to the fade alpha.
+        // dt is the per-tick elapsed time computed at the top of RunTick. Fade duration is 0.3s.
+        const bool outlineMoved = (std::abs(curDx) + std::abs(curDy) + std::abs(rawDx) + std::abs(rawDy)) > 0;
+        if (t.cfg.outlineIdleHide && p.outline) {
+            t.outlineIdleSec = outlineMoved ? 0.0 : (t.outlineIdleSec + dt);
+            p.outlineAlpha = (float)OutlineIdleAlpha(t.outlineIdleSec, t.cfg.outlineIdleSeconds, 0.3);
+        } else {
+            t.outlineIdleSec = 0.0;   // keep ready for when idle-hide is toggled on mid-session
+        }
         if (t.cursorHidden) p.cursorMode = 2;   // hotkey override; FillRenderParams already set 0/1/2 from cfg
         t.renderEngine.renderFrame(p);          // render+present every zoomed tick (never blocks the ramp)
         // Reveal AFTER the live frame is presented: setVisible flips the layer alpha over the
