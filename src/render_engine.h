@@ -31,6 +31,7 @@ struct RenderFrameParams {
     float  outlineR, outlineG, outlineB; // outline color 0..1, written straight to the BGRA8 backbuffer
                                          // (no gamma correction; the magnify pass writes sRGB-encoded
                                          // pixels too, so the stored value matches the user's sRGB hex)
+    float  outlineAlpha;        // 0..1 fade for the outline (1 = solid); <= 0 skips the draw
 };
 
 // Own capture + Direct3D 11 renderer. Captures the desktop via DXGI Desktop Duplication
