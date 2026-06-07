@@ -193,6 +193,13 @@ Config LoadConfig(const std::wstring& path) {
                ";   1=on a full-screen repaint (games) copy only the magnified region (cuts 4K HDR GPU\n"
                ";   copy ~zoom^2) but screen edges can briefly show a previous window after a switch.\n"
                "cropCapture=0\n"
+               "; outline: 1 = draw a solid outline around the screen edges while zoomed (an\n"
+               ";   at-a-glance 'you are zoomed' indicator, handy at low zoom); 0 = off (default)\n"
+               "outline=0\n"
+               "; outlineThickness: outline width in pixels (1-40)\n"
+               "outlineThickness=4\n"
+               "; outlineColor: outline color as hex RGB (e.g. #5b5bd6 = Wind accent)\n"
+               "outlineColor=#5b5bd6\n"
                "; onboarded: 0 = run the first-launch setup once; set to 1 once finished\n"
                "onboarded=0\n";
         return Config{};
