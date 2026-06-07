@@ -96,6 +96,12 @@ struct RenderEngine::State {
     ComPtr<ID3D11VertexShader> cvs;
     ComPtr<ID3D11PixelShader> cps;
     ComPtr<ID3D11Buffer> ccb;                  // posClip/sizeClip for the cursor quad
+
+    // Border (edge-outline) pass: a solid-color quad pipeline reused for all four edges.
+    ComPtr<ID3D11VertexShader> bvs;
+    ComPtr<ID3D11PixelShader> bps;
+    ComPtr<ID3D11Buffer> bcb;                  // posClip/sizeClip + rgba for the outline quad
+
     ComPtr<ID3D11BlendState> blend;            // alpha blend for normal cursors
     ComPtr<ID3D11BlendState> blendInvert;      // invert blend for I-beam-style cursors
     ComPtr<ID3D11Texture2D> cursorTex;         // the ACTIVE cursor's texture (an alias into the cache)
@@ -411,6 +417,7 @@ bool RenderEngine::recoverDeviceLost() {
     s_->cursorCache.clear();   // cached cursor textures belong to the dead device
     s_->vs.Reset(); s_->ps.Reset(); s_->cvs.Reset(); s_->cps.Reset();
     s_->cb.Reset(); s_->ccb.Reset();
+    s_->bvs.Reset(); s_->bps.Reset(); s_->bcb.Reset();
     s_->blend.Reset(); s_->blendInvert.Reset(); s_->sampLinear.Reset(); s_->sampPoint.Reset();
     s_->releasePresent();              // rtv + swapchain
     s_->ctx.Reset(); s_->device.Reset();
@@ -543,6 +550,21 @@ bool RenderEngine::State::buildDeviceResources() {
     ccbd.Usage = D3D11_USAGE_DEFAULT;
     ccbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
     if (FAILED(device->CreateBuffer(&ccbd, nullptr, ccb.ReleaseAndGetAddressOf()))) { RLog("buildDeviceResources: CreateBuffer(cursor cb) failed"); return false; }
+
+    // --- Border (edge-outline) shader pipeline ---
+    ID3DBlob* bvsb = CompileShader(kBorderHLSL, "VSMain", "vs_5_0");
+    ID3DBlob* bpsb = CompileShader(kBorderHLSL, "PSMain", "ps_5_0");
+    if (!bvsb || !bpsb) { RLog("buildDeviceResources: border shader compile failed"); SafeRelease(bvsb); SafeRelease(bpsb); return false; }
+    HRESULT hr5 = device->CreateVertexShader(bvsb->GetBufferPointer(), bvsb->GetBufferSize(), nullptr, bvs.ReleaseAndGetAddressOf());
+    HRESULT hr6 = device->CreatePixelShader(bpsb->GetBufferPointer(), bpsb->GetBufferSize(), nullptr, bps.ReleaseAndGetAddressOf());
+    SafeRelease(bvsb); SafeRelease(bpsb);
+    if (FAILED(hr5) || FAILED(hr6)) { RLog("buildDeviceResources: border shader create failed hr5=0x%08lX hr6=0x%08lX", (unsigned long)hr5, (unsigned long)hr6); return false; }
+
+    D3D11_BUFFER_DESC bcbd{};
+    bcbd.ByteWidth = 32;   // float2 posClip + float2 sizeClip + float4 color
+    bcbd.Usage = D3D11_USAGE_DEFAULT;
+    bcbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    if (FAILED(device->CreateBuffer(&bcbd, nullptr, bcb.ReleaseAndGetAddressOf()))) { RLog("buildDeviceResources: CreateBuffer(border cb) failed"); return false; }
 
     D3D11_BLEND_DESC bd{};
     bd.RenderTarget[0].BlendEnable = TRUE;
@@ -814,6 +836,44 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
         ID3D11SamplerState* samp = (p.bilinear ? sampLinear : sampPoint).Get();
         c->PSSetSamplers(0, 1, &samp);
         c->Draw(3, 0);
+    }
+
+    // Edge-outline pass: four thin solid-color quads at the screen borders, drawn while zoomed.
+    // Into the capture-excluded overlay, so it never feeds back into Desktop Duplication. Opaque
+    // (no blend) for crisp edges. Gated on level > 1.0 (the overlay is only revealed while zoomed,
+    // so this is belt-and-braces). Four trivial draws, only when enabled.
+    if (p.outline && p.level > 1.0 && haveDesktop) {
+        int t = p.outlineThicknessPx;
+        if (t < 1) t = 1;
+        const int maxT = (sw < sh ? sw : sh) / 2;   // never let opposite edges overlap/invert
+        if (t > maxT) t = maxT;
+        if (t > 0) {
+            const float r = p.outlineR, g = p.outlineG, b = p.outlineB;
+            c->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);   // opaque
+            c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+            c->IASetInputLayout(nullptr);
+            c->VSSetShader(bvs.Get(), nullptr, 0);
+            c->VSSetConstantBuffers(0, 1, bcb.GetAddressOf());
+            c->PSSetShader(bps.Get(), nullptr, 0);
+            c->PSSetConstantBuffers(0, 1, bcb.GetAddressOf());
+            const int edges[4][4] = {              // {x, y, w, h} in physical px
+                { 0,      0,      sw,  t          },   // top
+                { 0,      sh - t, sw,  t          },   // bottom
+                { 0,      t,      t,   sh - 2 * t },   // left
+                { sw - t, t,      t,   sh - 2 * t },   // right
+            };
+            for (int e = 0; e < 4; ++e) {
+                const int x = edges[e][0], y = edges[e][1], w = edges[e][2], h = edges[e][3];
+                if (w <= 0 || h <= 0) continue;
+                const float posClipX  = (float)(x / (double)sw * 2.0 - 1.0);
+                const float posClipY  = (float)(1.0 - y / (double)sh * 2.0);
+                const float sizeClipX = (float)(w / (double)sw * 2.0);
+                const float sizeClipY = (float)(-(h / (double)sh * 2.0));   // clip-y up vs screen-y down
+                const float bcbv[8] = { posClipX, posClipY, sizeClipX, sizeClipY, r, g, b, 1.0f };
+                c->UpdateSubresource(bcb.Get(), 0, nullptr, bcbv, 0, 0);
+                c->Draw(4, 0);
+            }
+        }
     }
 
     // Cursor pass: alpha-blended quad at the centered hotspot, scaled by zoom. In auto mode

@@ -184,3 +184,47 @@ TEST_CASE("quick-zoom config parses and clamps") {
     Config lo = ParseConfig("quickZoomDefault=0.1\n");
     CHECK(lo.quickZoomDefault == doctest::Approx(1.0));  // clamped to min
 }
+TEST_CASE("ParseHexColor parses 6-digit hex with and without leading #") {
+    float r = -1, g = -1, b = -1;
+    CHECK(ParseHexColor("#5b5bd6", r, g, b) == true);
+    CHECK(r == doctest::Approx(91.0f / 255.0f));   // 0x5b
+    CHECK(g == doctest::Approx(91.0f / 255.0f));   // 0x5b
+    CHECK(b == doctest::Approx(214.0f / 255.0f));  // 0xd6
+
+    float r2, g2, b2;
+    CHECK(ParseHexColor("ffffff", r2, g2, b2) == true);
+    CHECK(r2 == doctest::Approx(1.0f));
+    CHECK(g2 == doctest::Approx(1.0f));
+    CHECK(b2 == doctest::Approx(1.0f));
+
+    float r3, g3, b3;
+    CHECK(ParseHexColor("FF0000", r3, g3, b3) == true);   // uppercase
+    CHECK(r3 == doctest::Approx(1.0f));
+    CHECK(g3 == doctest::Approx(0.0f));
+    CHECK(b3 == doctest::Approx(0.0f));
+}
+TEST_CASE("outline keys default off with accent color") {
+    Config c = ParseConfig("");
+    CHECK(c.outline == 0);                  // off by default
+    CHECK(c.outlineThickness == 4);
+    CHECK(c.outlineColor == "#5b5bd6");     // Wind accent
+}
+TEST_CASE("outline keys parse and thickness clamps to [1,40]") {
+    Config c = ParseConfig("outline=1\noutlineThickness=8\noutlineColor=#ff0000\n");
+    CHECK(c.outline == 1);
+    CHECK(c.outlineThickness == 8);
+    CHECK(c.outlineColor == "#ff0000");
+    CHECK(ParseConfig("outlineThickness=0\n").outlineThickness == 1);     // clamp low
+    CHECK(ParseConfig("outlineThickness=999\n").outlineThickness == 40);  // clamp high
+}
+TEST_CASE("ParseHexColor rejects malformed input and leaves outputs untouched") {
+    float r = 0.5f, g = 0.5f, b = 0.5f;
+    CHECK(ParseHexColor("", r, g, b) == false);
+    CHECK(ParseHexColor("#", r, g, b) == false);
+    CHECK(ParseHexColor("12345", r, g, b) == false);     // too short
+    CHECK(ParseHexColor("1234567", r, g, b) == false);   // too long
+    CHECK(ParseHexColor("gggggg", r, g, b) == false);    // non-hex
+    CHECK(r == doctest::Approx(0.5f));                    // unchanged on failure
+    CHECK(g == doctest::Approx(0.5f));
+    CHECK(b == doctest::Approx(0.5f));
+}

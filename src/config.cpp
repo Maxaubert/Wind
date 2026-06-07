@@ -10,6 +10,23 @@ static std::string trim(const std::string& s) {
     size_t b = s.find_last_not_of(" \t\r\n");
     return s.substr(a, b - a + 1);
 }
+
+bool ParseHexColor(const std::string& s, float& r, float& g, float& b) {
+    size_t i = (!s.empty() && s[0] == '#') ? 1 : 0;
+    if (s.size() - i != 6) return false;
+    auto hexv = [](char ch, int& out) -> bool {
+        if (ch >= '0' && ch <= '9') { out = ch - '0'; return true; }
+        if (ch >= 'a' && ch <= 'f') { out = ch - 'a' + 10; return true; }
+        if (ch >= 'A' && ch <= 'F') { out = ch - 'A' + 10; return true; }
+        return false;
+    };
+    int v[6];
+    for (int k = 0; k < 6; ++k) if (!hexv(s[i + k], v[k])) return false;
+    r = (v[0] * 16 + v[1]) / 255.0f;
+    g = (v[2] * 16 + v[3]) / 255.0f;
+    b = (v[4] * 16 + v[5]) / 255.0f;
+    return true;
+}
 Config ParseConfig(const std::string& text) {
     Config c;
     std::istringstream in(text);
@@ -64,6 +81,9 @@ Config ParseConfig(const std::string& text) {
             else if (key == "quickZoomHotkeyMode") c.quickZoomHotkeyMode = std::stoi(val);
             else if (key == "quickZoomVk")        c.quickZoomVk = std::stoi(val);
             else if (key == "quickZoomMods")      c.quickZoomMods = std::stoi(val);
+            else if (key == "outline")            c.outline = std::stoi(val);
+            else if (key == "outlineThickness")   c.outlineThickness = std::stoi(val);
+            else if (key == "outlineColor")       c.outlineColor = val;
         } catch (...) { /* keep default on bad value */ }
     }
     // Clamp numeric fields to their documented ranges. The ini is a hand-editable surface, and an
@@ -80,6 +100,8 @@ Config ParseConfig(const std::string& text) {
     c.sharpness       = clampd(c.sharpness,       0.0, 1.0);
     c.brightness      = clampd(c.brightness,      0.5, 1.5);
     c.quickZoomDefault  = clampd(c.quickZoomDefault, 1.0, 50.0);
+    if (c.outlineThickness < 1)  c.outlineThickness = 1;
+    if (c.outlineThickness > 40) c.outlineThickness = 40;
     return c;
 }
 }
@@ -171,6 +193,13 @@ Config LoadConfig(const std::wstring& path) {
                ";   1=on a full-screen repaint (games) copy only the magnified region (cuts 4K HDR GPU\n"
                ";   copy ~zoom^2) but screen edges can briefly show a previous window after a switch.\n"
                "cropCapture=0\n"
+               "; outline: 1 = draw a solid outline around the screen edges while zoomed (an\n"
+               ";   at-a-glance 'you are zoomed' indicator, handy at low zoom); 0 = off (default)\n"
+               "outline=0\n"
+               "; outlineThickness: outline width in pixels (1-40)\n"
+               "outlineThickness=4\n"
+               "; outlineColor: outline color as hex RGB (e.g. #5b5bd6 = Wind accent)\n"
+               "outlineColor=#5b5bd6\n"
                "; onboarded: 0 = run the first-launch setup once; set to 1 once finished\n"
                "onboarded=0\n";
         return Config{};

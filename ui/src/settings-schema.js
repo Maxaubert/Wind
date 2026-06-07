@@ -30,6 +30,12 @@ export const sections = [
     { key:'brightness',  type:'slider', label:'Brightness', min:0.5, max:1.5, step:0.05, def:1.0, advanced:true },
     { key:'hdrTonemap',  type:'toggle', label:'HDR tonemap', desc:'HDR10 to SDR when HDR is on.', def:1, advanced:true },
     { key:'multiMonitor',type:'toggle', label:'Follow cursor monitor', def:0 },
+    { key:'outline',          type:'toggle', label:'Edge outline',
+      desc:'Show an outline around the screen while zoomed.', def:0 },
+    { key:'outlineThickness', type:'slider', label:'Outline thickness',
+      desc:'Width in pixels.', min:1, max:40, step:1, def:4, dependsOn:'outline' },
+    { key:'outlineColor',     type:'color',  label:'Outline color',
+      def:'#5b5bd6', dependsOn:'outline' },
   ]},
   { id:'about', label:'About', icon:'about', desc:'', rows: [
     { key:'diagnostics', type:'toggle', label:'Frametime logging', desc:'Write timing to a log file.', def:0 },

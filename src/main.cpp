@@ -159,6 +159,11 @@ static void FillRenderParams(RenderFrameParams& p, const MapResult& r, const Con
     // In DwmFlush mode we present immediately (no vsync block) and let DwmFlush() pace.
     p.vsync = (cfg.vsync != 0 && cfg.dwmFlush == 0);
     p.cropCapture = (cfg.cropCapture != 0);
+    p.outline = (cfg.outline != 0);
+    p.outlineThicknessPx = cfg.outlineThickness;
+    float orr = 0.357f, og = 0.357f, ob = 0.839f;   // #5b5bd6 fallback (accent)
+    ParseHexColor(cfg.outlineColor, orr, og, ob);
+    p.outlineR = orr; p.outlineG = og; p.outlineB = ob;
 }
 
 // Append a line to %TEMP%\wind_diag.log (frame-pacing diagnostics; gated on diagnostics=1).
