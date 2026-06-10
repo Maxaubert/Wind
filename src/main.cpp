@@ -124,10 +124,12 @@ struct TickState {
     std::atomic<bool> quickZoomHotkey{false};  // set by WM_HOTKEY (hotkey-mode quick zoom), consumed in RunTick
     bool   cursorHidden       = false;         // runtime-only override (no ini write, no hot-reload)
     double outlineIdleSec = 0.0;   // seconds the cursor has been still (drives the outline idle fade)
+    bool   lastTickPresented = true;   // false = the zoomed tick skipped (timer paces, not Present)
+    bool   forceRenderOnce   = false;  // set on config hot-reload (visual knobs may have changed)
     HWND   hwnd               = nullptr;       // owning message window (for RegisterHotKey)
     // Frame-pacing diagnostics (diagnostics=1): a 2 s window of loop-interval stats.
     double diagAccum = 0.0, diagSumDt = 0.0, diagMaxDt = 0.0;
-    int    diagFrames = 0, diagHitches = 0;
+    int    diagFrames = 0, diagHitches = 0, diagRendered = 0, diagSkipped = 0;
     TickState(RenderEngine& re, const MonitorTarget& m, const Config& c)
         : renderEngine(re), mon(m), cfg(c),
           zoom(1.0, c.maxLevel),
@@ -244,6 +246,7 @@ static void RunTick(TickState& t) {
                                         nc.quickZoomMods);
             }
             t.cfg = nc;   // pick up renderer knobs (smoothing, filter, cursor scale, zoom speed)
+            t.forceRenderOnce = true;   // visual knobs (bilinear/sharpness/outline/...) may differ
             t.zoom = ZoomController(1.0, nc.maxLevel);
             double ocx = t.mapper.centerX(), ocy = t.mapper.centerY();   // preserve position
             t.mapper = CursorMapper(t.mon.w, t.mon.h, nc.cursorSmoothing);
@@ -384,7 +387,14 @@ static void RunTick(TickState& t) {
             t.outlineIdleSec = 0.0;   // keep ready for when idle-hide is toggled on mid-session
         }
         if (t.cursorHidden) p.cursorMode = 2;   // hotkey override; FillRenderParams already set 0/1/2 from cfg
-        t.renderEngine.renderFrame(p);          // render+present every zoomed tick (never blocks the ramp)
+        // Bypass the frame-skip gate when correctness depends on a present this exact tick:
+        // zoom-in (the reveal flips alpha over whatever was presented LAST - it must be live) and
+        // the deferred game-reveal window; plus one tick after a config reload (visual knobs).
+        p.forceRender = zoomIn || t.revealPending > 0 || t.forceRenderOnce;
+        t.forceRenderOnce = false;
+        RenderResult rr = t.renderEngine.renderFrame(p);   // skips when nothing changed
+        t.lastTickPresented = (rr != RenderResult::Skipped);
+        if (rr == RenderResult::Skipped) t.diagSkipped++; else t.diagRendered++;
         // Reveal AFTER the live frame is presented: setVisible flips the layer alpha over the
         // now-current front buffer, so the overlay never shows its retained previous-session
         // frame (the alt-tab "previous window"). capture() also drained to the latest frame.
@@ -413,6 +423,7 @@ static void RunTick(TickState& t) {
         t.renderEngine.setVisible(false);
         t.renderEngine.hideSystemCursor(false);
         t.revealPending = 0;                          // a quick tap may zoom out before the deferred reveal
+        t.lastTickPresented = true;   // 1x ticks are always timer-paced; reset for the next zoom-in
     }
     t.prevLvl = lvl;
 
@@ -425,11 +436,12 @@ static void RunTick(TickState& t) {
         if (dt > t.diagMaxDt) t.diagMaxDt = dt;
         if (dt > target * 1.5) t.diagHitches++;
         if (t.diagAccum >= 2.0 && t.diagFrames > 0) {
-            DiagLog("zoom=%.2f frames=%d ~fps=%.0f avgDt=%.2fms maxDt=%.2fms hitches>1.5x=%d",
+            DiagLog("zoom=%.2f frames=%d ~fps=%.0f avgDt=%.2fms maxDt=%.2fms hitches>1.5x=%d rendered=%d skipped=%d",
                     lvl, t.diagFrames, t.diagFrames / t.diagAccum,
-                    t.diagSumDt / t.diagFrames * 1000.0, t.diagMaxDt * 1000.0, t.diagHitches);
+                    t.diagSumDt / t.diagFrames * 1000.0, t.diagMaxDt * 1000.0, t.diagHitches,
+                    t.diagRendered, t.diagSkipped);
             t.diagAccum = 0.0; t.diagSumDt = 0.0; t.diagMaxDt = 0.0;
-            t.diagFrames = 0; t.diagHitches = 0;
+            t.diagFrames = 0; t.diagHitches = 0; t.diagRendered = 0; t.diagSkipped = 0;
         }
     }
 }
@@ -699,6 +711,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             FillRenderParams(p, r, cfg, ts.mon, 4.0);
             p.cursorMode = 1;   // always draw the cursor in the selftest dump
             p.vsync = true;
+            p.forceRender = true;   // the harness repeats static params; the gate must not skip
             renderEngine.renderFrame(p);
             Sleep(16);
         }
@@ -732,6 +745,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             RenderFrameParams p{};
             FillRenderParams(p, r, cfg, ts.mon, 4.0);
             p.cursorMode = 1; p.vsync = (cfg.vsync != 0);
+            p.forceRender = true;   // pacing harness measures the FULL render path every tick
             if (first) renderEngine.invalidateCapture();
             renderEngine.renderFrame(p);
             if (first) { renderEngine.setVisible(true); first = false; QueryPerformanceCounter(&a); continue; }
@@ -834,7 +848,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         // dwmFlush=1 -> present immediately then DwmFlush (align 1:1 with the compositor, targets the
         // blt-model microstutter); else vsync=1 -> Present(1,0) blocks; else the timer paces.
         bool dwmPaces = zoomed && ts.cfg.dwmFlush != 0;
-        bool renderPresentPaces = zoomed && !dwmPaces && ts.cfg.vsync != 0;
+        // vsync paces only if the LAST tick actually presented; a skipped tick issued no blocking
+        // Present, so the timer must pace this iteration or the loop would spin at CPU speed.
+        bool renderPresentPaces = zoomed && !dwmPaces && ts.cfg.vsync != 0 && ts.lastTickPresented;
         if (!renderPresentPaces && !dwmPaces) {
             // Recompute the timer interval if the paced refresh changed (retarget to a different-Hz
             // monitor updates ts.hz). Cheap equality check; only recomputes on an actual change (#74).
