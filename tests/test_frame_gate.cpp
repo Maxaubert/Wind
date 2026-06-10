@@ -71,3 +71,15 @@ TEST_CASE("SnapshotsDiffer: outline fade alpha change differs") {
     FrameSnapshot b = Base(); b.outlineAlpha = 0.5f;
     CHECK(wind::SnapshotsDiffer(Base(), b));
 }
+TEST_CASE("SnapshotsDiffer: srcTop independently respects the epsilon") {
+    FrameSnapshot b = Base(); b.srcTop += 0.0005;
+    CHECK_FALSE(wind::SnapshotsDiffer(Base(), b));
+}
+TEST_CASE("SnapshotsDiffer: cursorScreenY independently respects the epsilon") {
+    FrameSnapshot b = Base(); b.cursorScreenY += 0.02;
+    CHECK_FALSE(wind::SnapshotsDiffer(Base(), b));
+}
+TEST_CASE("RectsIntersect: negative coordinates (multi-monitor) work") {
+    CHECK(wind::RectsIntersect(GateRect{-200, -100, 0, 0}, GateRect{-50, -50, 50, 50}));
+    CHECK_FALSE(wind::RectsIntersect(GateRect{-200, -100, -150, -50}, GateRect{0, 0, 50, 50}));
+}

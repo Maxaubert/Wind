@@ -6,10 +6,11 @@ namespace wind {
 // draw+present entirely, so DWM has nothing to recomposite and idle-zoomed GPU drops to ~0
 // (the same render-on-change behavior that keeps Windows Magnifier at ~1%).
 
-// Plain rect, same layout/meaning as Win32 RECT: half-open [left,right) x [top,bottom).
+// Plain rect, same layout/meaning as Win32 RECT (fields: left, top, right, bottom).
+// Half-open: x in [left, right), y in [top, bottom). Empty/inverted rects never intersect.
 struct GateRect { long left, top, right, bottom; };
 
-// True if a and b overlap. Empty/inverted rects never intersect.
+// True if a and b overlap.
 bool RectsIntersect(const GateRect& a, const GateRect& b);
 
 // Everything that affects the rendered image for one tick, reduced to comparable values.
