@@ -54,7 +54,13 @@ bool IsPresentEcho(bool presentedSinceLastFrame, unsigned accumulatedFrames,
 // Hysteresis that tells a genuine idle echo from full-rate fullscreen content aliasing with the
 // echo signature. Feed it one event per acquire attempt: a non-echo-shaped image change
 // (noteRealChange), an AcquireNextFrame timeout (noteTimeout), or an echo-shaped frame
-// (onEchoShaped, which also returns the classification). CRITICAL: echo-shaped frames never
+// (onEchoShaped, which also returns the classification). The engine feeds noteRealChange ONLY
+// from changes whose dirty/move rects intersect the magnified view (or the conservative
+// no-metadata paths); a frame whose changes are all OFF-VIEW is neutral to the filter, so
+// content animating elsewhere on the monitor cannot build the streak, engage the bypass, and
+// defeat idle skipping over a static view (issue #96). An echo-shaped frame's rect equals the
+// overlay rect, which always covers the view, so echo classification is unaffected.
+// CRITICAL: echo-shaped frames never
 // reset the real streak - while halved, the stream is real, echo-shaped, timeout, real, ... and
 // the streak must build through them. Pointer-only frames (LastPresentTime == 0) must not touch
 // the filter at all. Decision: once kEchoBypassStreak real changes accumulate (only full-rate

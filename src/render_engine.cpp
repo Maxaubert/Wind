@@ -341,8 +341,10 @@ bool RenderEngine::State::copyChangedRegions(ID3D11Texture2D* src, const DXGI_OU
 bool RenderEngine::State::frameChangesView(const DXGI_OUTDUPL_FRAME_INFO& fi, const RECT& view, bool echoCandidate) {
     if (fi.LastPresentTime.QuadPart == 0) return false;     // pointer-only update: streak untouched
     const UINT meta = fi.TotalMetadataBufferSize;
-    // The conservative assume-changed paths (no metadata, fetch failure, scroll) are non-echo
-    // image changes too, so they feed the EchoFilter streak like an ordinary dirty frame.
+    // EchoFilter feeding rule: noteRealChange() fires if and only if this function returns true
+    // for a non-echo-shaped frame, so the bypass streak tracks VIEW-relevant changes only. The
+    // conservative assume-changed paths (no metadata, fetch failure, scroll) return true, so
+    // they feed the streak like a dirty frame that intersects the view.
     if (meta == 0) { echoFilter.noteRealChange(); return true; }   // no metadata: full change
     if (metaBuf.size() < meta) metaBuf.resize(meta);
     UINT moveBytes = 0;
@@ -378,12 +380,18 @@ bool RenderEngine::State::frameChangesView(const DXGI_OUTDUPL_FRAME_INFO& fi, co
         // skipped, and the filter's probe cadence breaks a stale bypass chain (see frame_gate.h).
         return echoFilter.onEchoShaped();
     }
-    echoFilter.noteRealChange();   // non-echo-shaped image change: the bypass streak builds
     const GateRect v{ view.left, view.top, view.right, view.bottom };
     for (UINT i = 0; i < n; ++i) {
         const GateRect r{ rects[i].left, rects[i].top, rects[i].right, rects[i].bottom };
-        if (RectsIntersect(r, v)) return true;
+        if (RectsIntersect(r, v)) {
+            echoFilter.noteRealChange();   // view-intersecting non-echo change: the streak builds
+            return true;
+        }
     }
+    // Every dirty rect lies OUTSIDE the view (content animating elsewhere on the monitor).
+    // NEUTRAL to the filter: no streak bump, no timeout-run clear, no decay. Feeding the streak
+    // here let any off-view ~50+ fps animation (a terminal spinner, a video) engage the bypass
+    // and chain our own present echoes at full rate over a static view (issue #96).
     return false;
 }
 
