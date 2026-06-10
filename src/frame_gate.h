@@ -79,17 +79,19 @@ bool IsPresentEcho(bool presentedSinceLastFrame, unsigned accumulatedFrames,
 //  - Once bypass engages, EVERY composite is echo-shaped (game dirt merges with our echo), so a
 //    game that stops would leave a self-sustaining present -> echo -> present chain that never
 //    times out. Every kEchoProbeInterval-th consecutive bypassed echo is deliberately classified
-//    echo as a PROBE (~1 held frame per ~0.9 s at 144 Hz) that also drops the streak just below
-//    the threshold: a live game re-proves itself on the very next composite (game-only, no echo
-//    expected, classified real -> re-engaged seamlessly), while a stale chain stops presenting,
-//    its late-echo trickle decays the streak, and the timeout run resets it, so idle skipping
-//    resumes within ~the interval instead of never.
+//    echo as a PROBE that also drops the streak just below the threshold: a live game re-proves
+//    itself on the very next composite (game-only, no echo expected, classified real -> re-engaged
+//    seamlessly), while a stale chain stops presenting, its late-echo trickle decays the streak,
+//    and the timeout run resets it, so idle skipping resumes within ~the interval instead of never.
+//    Trade-off: 128 held one frame per ~0.9 s at 144 Hz (noticeable stale-view microstutter in
+//    sensitive games); 512 extends to ~3.6 s apart, costs a longer bounded stale-chain tail after
+//    content stops (idle-only, delays frame-skip onset by up to ~3.6 s, no visual effect).
 // The engine also reset()s on fresh grabs (zoom-in/retarget) so a streak from a previous
 // context never leaks into a new zoom session.
 constexpr int kEchoBypassStreak   = 8;    // net streak needed to engage (~120 ms of halving)
 constexpr int kEchoTimeoutReset   = 4;    // consecutive timeouts = content gap -> streak resets
 constexpr int kEchoSkipDecay      = 2;    // skipped echoes since the last real per -1 decay
-constexpr int kEchoProbeInterval  = 128;  // bypassed echoes between liveness-probe re-proofs
+constexpr int kEchoProbeInterval  = 512;  // bypassed echoes between liveness-probe re-proofs
 class EchoFilter {
 public:
     void noteRealChange();                 // non-echo-shaped image change: streak builds (capped)

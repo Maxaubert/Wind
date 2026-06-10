@@ -217,11 +217,11 @@ TEST_CASE("EchoFilter: engaged bypass survives stray single timeouts between fra
     // clear the timeout run, so strays never accumulate into a reset. Only the probes skip,
     // and the live game re-proves on the composite right after each (modeled by the real).
     int skipped = 0;
-    for (int i = 0; i < 1000; ++i) {
+    for (int i = 0; i < 2000; ++i) {
         if (!f.onEchoShaped()) { ++skipped; f.noteRealChange(); }
         if (i % 5 == 0) f.noteTimeout();
     }
-    CHECK(skipped == 1000 / (wind::kEchoProbeInterval + 1));
+    CHECK(skipped == 2000 / (wind::kEchoProbeInterval + 1));
     CHECK(f.realStreak() >= wind::kEchoBypassStreak);   // never reset while engaged
 }
 
@@ -232,10 +232,10 @@ TEST_CASE("EchoFilter: probe - a live game re-proves and pays one held frame per
     // echo). The probe skips one frame and demands re-proof; the game supplies it at once
     // (the post-probe composite carries no echo expectation -> a real change).
     int probes = 0;
-    for (int i = 0; i < 1000; ++i) {
+    for (int i = 0; i < 2000; ++i) {
         if (!f.onEchoShaped()) { ++probes; f.noteRealChange(); }
     }
-    CHECK(probes == 1000 / (wind::kEchoProbeInterval + 1));   // exactly one per interval
+    CHECK(probes == 2000 / (wind::kEchoProbeInterval + 1));   // exactly one per interval
     CHECK(f.onEchoShaped());                      // still engaged at the end
 }
 
@@ -244,7 +244,9 @@ TEST_CASE("EchoFilter: probe - a stale chain cannot ride the old streak past the
     for (int i = 0; i < wind::kEchoBypassStreak; ++i) f.noteRealChange();
     // Content stopped right after engaging: only our own echoes keep arriving. They ride the
     // streak up to the probe...
-    for (int i = 0; i < wind::kEchoProbeInterval - 1; ++i) CHECK(f.onEchoShaped());
+    for (int i = 0; i < wind::kEchoProbeInterval - 1; ++i) {
+        CHECK(f.onEchoShaped());
+    }
     CHECK_FALSE(f.onEchoShaped());                // ...which skips and demands re-proof
     // No content = no re-proof: the late-echo trickle is skipped (and decays the streak)
     // instead of being ridden for another interval.
