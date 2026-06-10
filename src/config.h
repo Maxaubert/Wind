@@ -88,12 +88,13 @@ struct Config {
     // on; 0 = legacy single-monitor behavior (primary monitor only). Hot-reloadable (applies
     // on the next zoom-in). Kill-switch for the multi-monitor path.
     int    multiMonitor = 0;
-    // Capture optimization (opt-in). 0 (default) = always copy all changed regions, so the cached
-    // desktop copy is never stale. 1 = on a near-full repaint (a game redrawing the whole screen),
-    // copy only the magnified source region (cuts the GPU copy ~zoom^2 at 4K HDR). Caveat: with 1,
-    // regions OUTSIDE the magnified view are not refreshed on a near-full repaint, so after a window
-    // switch the screen edges can briefly show the previous window's pixels until a smaller change
-    // triggers a full refresh; that staleness is why it defaults off. Hot-reloadable.
+    // Capture optimization (opt-in, captureCopy=1 only). 0 (default) = always copy all changed
+    // regions, so the cached desktop copy is never stale. 1 = on a near-full repaint (a game
+    // redrawing the whole screen), copy only the magnified source region (cuts the GPU copy
+    // ~zoom^2 at 4K HDR). Caveat: with 1, regions OUTSIDE the magnified view are not refreshed
+    // on a near-full repaint, so after a window switch the screen edges can briefly show the
+    // previous window's pixels until a smaller change triggers a full refresh; that staleness is
+    // why it defaults off. Has no effect when captureCopy=0 (zero-copy path). Hot-reloadable.
     int    cropCapture = 0;
     // Capture mode (escape hatch). 0 (default) = zero-copy: the magnify pass samples the Desktop
     // Duplication frame directly (held across ticks, released right before the next acquire) - no

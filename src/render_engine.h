@@ -25,7 +25,7 @@ struct RenderFrameParams {
     double brightness;                   // output multiplier (1.0 = unchanged; <1 dims for HDR)
     int    cursorMode;                   // 0=auto (draw only when the app shows a cursor), 1=always, 2=never
     bool   vsync;                        // true = Present(1,0) vsync; false = Present(0,0) no vsync
-    bool   cropCapture;                  // on a full-screen repaint, copy only the magnified region (cuts 4K copy)
+    bool   cropCapture;                  // captureCopy=1 only: on a full-screen repaint, copy only the magnified region (cuts 4K copy)
     bool   captureCopy;          // true = legacy copy-based capture (escape hatch); false = zero-copy (default)
     bool   outline;                      // draw the edge outline while zoomed (level > 1.0)
     int    outlineThicknessPx;           // outline width in physical px (clamped in render())

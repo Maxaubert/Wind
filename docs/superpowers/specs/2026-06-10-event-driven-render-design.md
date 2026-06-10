@@ -87,10 +87,11 @@ stays in the code as the `captureCopy=1` fallback; the default path never touche
 Per-changed-frame cost on the default path drops from full-desktop copy + draw + present
 to draw + present.
 
-Escape hatch: a `captureCopy=1` ini knob (default 0) restores copy-based capture, cropped
-to the magnified source region, in case a driver misbehaves with held frames (texture
-invalidated while held, SRV creation rejected on the duplication surface). Hot-reloadable
-like other render knobs.
+Escape hatch: a `captureCopy=1` ini knob (default 0) restores copy-based capture in case
+a driver misbehaves with held frames (texture invalidated while held, SRV creation rejected
+on the duplication surface). The separate `cropCapture` knob (default 0) controls the
+copy-region optimization on that path; `captureCopy=1` alone does not enable cropping.
+Hot-reloadable like other render knobs.
 
 ### 3. Explicitly unchanged
 
@@ -107,6 +108,9 @@ knobs, shutdown cursor restore.
   duplication) extended to clear the held-frame state first.
 - Skip-gate epsilon too tight (visible stale cursor): epsilon is a named constant covered
   by tests; cursor-changed compares the rounded on-screen draw position, not raw floats.
+  Deviation from spec: the implementation compares raw float centers with a 0.05 px
+  epsilon rather than the rounded draw position -- functionally equivalent or stricter,
+  and doctest-covered.
 
 ## Verification
 

@@ -399,6 +399,9 @@ static void RunTick(TickState& t) {
         // Reveal AFTER the live frame is presented: setVisible flips the layer alpha over the
         // now-current front buffer, so the overlay never shows its retained previous-session
         // frame (the alt-tab "previous window"). capture() also drained to the latest frame.
+        // Edge: if capture dies exactly on this zoom-in tick (ACCESS_LOST), !haveDesktop triggers
+        // the Skipped guard in renderFrame, so the reveal below runs over the last-session frame
+        // rather than black; self-heals on the next good tick (old code black-flashed instead).
         if (zoomIn) {
             if (ForegroundCoversMonitor(t.mon)) {
                 // Fullscreen app (a game on an independent-flip/MPO plane): Desktop Duplication can't
@@ -848,7 +851,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         bool zoomed = ts.prevLvl > 1.0;
         // dwmFlush=1 -> present immediately then DwmFlush (align 1:1 with the compositor, targets the
         // blt-model microstutter); else vsync=1 -> Present(1,0) blocks; else the timer paces.
-        bool dwmPaces = zoomed && ts.cfg.dwmFlush != 0;
+        // dwmFlush paces only if the LAST tick actually presented; a skipped tick issued no Present,
+        // so DwmFlush would block on an unrelated desktop repaint - stalling input handling. Mirror
+        // the vsync fix: fall through to the timer when the previous tick was skipped.
+        bool dwmPaces = zoomed && ts.cfg.dwmFlush != 0 && ts.lastTickPresented;
         // vsync paces only if the LAST tick actually presented; a skipped tick issued no blocking
         // Present, so the timer must pace this iteration or the loop would spin at CPU speed.
         bool renderPresentPaces = zoomed && !dwmPaces && ts.cfg.vsync != 0 && ts.lastTickPresented;
