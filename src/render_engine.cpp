@@ -68,8 +68,20 @@ struct RenderEngine::State {
 
     // Desktop Duplication.
     ComPtr<IDXGIOutputDuplication> dupl;
-    ComPtr<ID3D11Texture2D> desktopCopy;      // SRV-able copy of the captured desktop (no cursor)
-    ComPtr<ID3D11ShaderResourceView> desktopSRV;
+    ComPtr<ID3D11Texture2D> desktopCopy;      // captureCopy=1 path: SRV-able copy of the desktop (no cursor)
+    ComPtr<ID3D11ShaderResourceView> desktopSRV;   // what the magnify pass samples (copy or held surface)
+    // Zero-copy capture (captureCopy=0, the default): the magnify pass samples the duplication's
+    // desktop surface directly; desktopCopy is unused. heldTex/desktopSRV point at the last
+    // acquired surface; frameHeld means ReleaseFrame is still pending (deferred to just before
+    // the next AcquireNextFrame - per the DDA docs the surface is invalid after release, so the
+    // frame stays HELD through the draw). ddaSrv caches one SRV per duplication surface (DDA
+    // cycles a small set). heldTex/ddaSrv/desktopSRV belong to the duplication: every teardown
+    // goes through dropDuplication() (release the held frame FIRST, then clear them).
+    ComPtr<ID3D11Texture2D> heldTex;
+    bool frameHeld = false;
+    std::unordered_map<ID3D11Texture2D*, ComPtr<ID3D11ShaderResourceView>> ddaSrv;
+    bool srvFailed = false;        // SRV creation rejected on a DDA surface -> copy mode for the session
+    bool lastCaptureCopy = false;  // detect a captureCopy hot-toggle (forces a clean rebuild)
     bool haveDesktop = false;
     bool freshCapture = false;   // next capture() must drain to the latest desktop frame (zoom-in)
     FrameSnapshot lastRendered;        // snapshot of the last PRESENTED frame (frame-skip gate)
@@ -147,10 +159,18 @@ struct RenderEngine::State {
     void releasePresent();        // drop rtv + swapchain (device kept)
     bool acquireBackbufferRtv();  // (re)create rtv from the swapchain's back buffer (buffer 0)
     bool recreateDupl();
-    // AcquireNextFrame -> desktopCopy (+ pointer info); handles loss/timeout. `view` is the
-    // magnified source rect (desktop px, clamped to screen); `crop` enables copying only it on a
-    // full-screen repaint.
-    bool capture(const RECT& view, bool crop, bool& changedInView);
+    void releaseHeldFrame();       // ReleaseFrame if pending (must precede any dupl teardown)
+    void dropDuplication();        // releaseHeldFrame + dupl.Reset + clear held texture/SRVs
+    bool setHeldTexture(ID3D11Texture2D* tex);  // point desktopSRV at tex (cached SRV); false on SRV fail
+    // Capture dispatcher: rebuilds capture state on a captureCopy hot-toggle, then routes to the
+    // zero-copy (default) or legacy copy path. `view` is the magnified source rect (desktop px,
+    // clamped to screen); `crop` enables copying only it on a full-screen repaint (copy path only).
+    bool capture(const RECT& view, bool crop, bool copyMode, bool& changedInView);
+    // Zero-copy: acquire -> metadata -> sample the surface directly; the frame stays held
+    // through the draw (ReleaseFrame deferred to the next call).
+    bool captureZeroCopy(const RECT& view, bool& changedInView);
+    // Legacy copy path (captureCopy=1 escape hatch): AcquireNextFrame -> desktopCopy -> ReleaseFrame.
+    bool captureViaCopy(const RECT& view, bool crop, bool& changedInView);
     // While the acquired frame is still owned: do its move/dirty rects touch `view`?
     // Conservative: no metadata, any move (scroll) rects, or any fetch failure count as changed.
     bool frameChangesView(const DXGI_OUTDUPL_FRAME_INFO& fi, const RECT& view, bool echoCandidate);
@@ -195,7 +215,9 @@ IDXGIOutput* RenderEngine::State::selectOutput(const wchar_t* deviceName, bool f
 
 // Recreate the duplication interface (after ACCESS_LOST or first use).
 bool RenderEngine::State::recreateDupl() {
+    releaseHeldFrame();   // never drop a duplication with its frame still acquired
     dupl.Reset();
+    ddaSrv.clear();       // cached SRVs pin the OLD duplication's surfaces; never returned again
     // A (re)created duplication starts a new echo context: a stale expectEcho from the last
     // present would make its first full-desktop frame look like our own echo and swallow the
     // present (stale view after UAC/secure-desktop/fullscreen transitions). Same for the streak.
@@ -395,7 +417,120 @@ bool RenderEngine::State::frameChangesView(const DXGI_OUTDUPL_FRAME_INFO& fi, co
     return false;
 }
 
-bool RenderEngine::State::capture(const RECT& view, bool crop, bool& changedInView) {
+void RenderEngine::State::releaseHeldFrame() {
+    if (frameHeld && dupl) dupl->ReleaseFrame();
+    frameHeld = false;
+}
+
+// Tear down the duplication AND everything that lives inside it. The held frame must be released
+// before the duplication is dropped, and the held desktop texture + SRVs belong to the duplication,
+// so they die with it (sampling them afterwards would be use-after-free).
+void RenderEngine::State::dropDuplication() {
+    releaseHeldFrame();
+    dupl.Reset();
+    heldTex.Reset();
+    ddaSrv.clear();
+    desktopSRV.Reset();
+    haveDesktop = false;
+}
+
+bool RenderEngine::State::setHeldTexture(ID3D11Texture2D* tex) {
+    auto it = ddaSrv.find(tex);
+    if (it == ddaSrv.end()) {
+        ComPtr<ID3D11ShaderResourceView> srv;
+        // nullptr desc: the SRV inherits the surface's format (FP16 scRGB included on HDR);
+        // the tonemap stays keyed on capFp16, exactly like the copy path.
+        if (FAILED(device->CreateShaderResourceView(tex, nullptr, srv.ReleaseAndGetAddressOf()))) {
+            RLog("zerocopy: CreateShaderResourceView on the DDA surface failed - copy mode for this session");
+            srvFailed = true;
+            return false;
+        }
+        if (ddaSrv.size() >= 8) ddaSrv.clear();   // DDA cycles a few surfaces; hard bound
+        it = ddaSrv.emplace(tex, srv).first;
+    }
+    heldTex = tex;
+    desktopSRV = it->second;
+    haveDesktop = true;
+    return true;
+}
+
+// Zero-copy capture: acquire -> read metadata -> point the SRV at the surface -> HOLD it through
+// the draw; ReleaseFrame is deferred to the start of the next call (per the DDA docs the surface
+// is invalid after release). WAIT_TIMEOUT (static desktop) keeps sampling the previous surface:
+// the duplication only rewrites it during AcquireNextFrame on this thread, never concurrently
+// with our draw, so that is benign in practice; captureCopy=1 is the escape hatch if a driver
+// disagrees. Same fresh-drain semantics as the copy path: a zoom-in drains to the latest frame
+// within a bounded budget so the reveal never shows a transitional composite.
+bool RenderEngine::State::captureZeroCopy(const RECT& view, bool& changedInView) {
+    const bool fresh = freshCapture || !haveDesktop;
+    freshCapture = false;
+    // New capture context (zoom-in/retarget): a bypass streak earned over previous content must
+    // not leak into this session (same rule as the copy path).
+    if (fresh) echoFilter.reset();
+    const int   firstAttempts = fresh ? 40 : 1;
+    const DWORD firstTimeout  = fresh ? 25 : 0;
+    const unsigned long long freshDeadlineMs = fresh ? GetTickCount64() + 100 : 0;
+    bool gotThisCall = false;
+
+    for (int a = 0; a < firstAttempts; ++a) {
+        if (fresh && !gotThisCall && GetTickCount64() >= freshDeadlineMs) break;  // budget spent, no frame yet
+        releaseHeldFrame();                       // deferred release: just before the next acquire
+        IDXGIResource* res = nullptr;
+        DXGI_OUTDUPL_FRAME_INFO fi{};
+        const DWORD to = gotThisCall ? 3 : firstTimeout;   // after a hold, only briefly seek a newer frame
+        HRESULT hr = dupl->AcquireNextFrame(to, &fi, &res);
+        if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
+            SafeRelease(res);
+            if (gotThisCall) break;
+            // Steady-state poll with no new composite: idle evidence for the echo-bypass streak
+            // (fresh-grab retries are not idle evidence - the duplication was just (re)created).
+            if (!fresh) { echoFilter.noteTimeout(); break; }
+            continue;
+        }
+        if (hr == DXGI_ERROR_ACCESS_LOST) {
+            // The held surface dies with the duplication, so this tick has nothing to sample (one
+            // possibly-black frame on UAC/secure-desktop/mode change; self-heals next tick).
+            SafeRelease(res); dropDuplication(); return false;
+        }
+        if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
+            SafeRelease(res); deviceLost = true;
+            RLog("captureZeroCopy: device lost hr=0x%08lX", (unsigned long)hr);
+            return haveDesktop;
+        }
+        if (FAILED(hr)) { SafeRelease(res); break; }
+        frameHeld = true;                         // owned until the next releaseHeldFrame()
+        ID3D11Texture2D* tex = nullptr;
+        if (res) res->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&tex);
+        if (tex) {
+            // Metadata must be read while the frame is owned. Pointer-only frames
+            // (LastPresentTime == 0) change nothing on screen but still swap the held surface
+            // (DDA may rotate surfaces between acquires); they do not consume expectEcho - the
+            // echo composite is an image frame by definition - and frameChangesView ignores them.
+            // Only the FIRST image frame after our own Present can be its echo: consumed here,
+            // once per acquired image frame, exactly like the copy path.
+            bool echoCandidate = false;
+            if (fi.LastPresentTime.QuadPart != 0) { echoCandidate = expectEcho; expectEcho = false; }
+            changedInView = changedInView || fresh || frameChangesView(fi, view, echoCandidate);
+            const bool firstFrame = !haveDesktop;
+            if (!setHeldTexture(tex)) {           // SRV refused: session falls back to copy mode
+                SafeRelease(tex); SafeRelease(res);
+                releaseHeldFrame();
+                return haveDesktop;
+            }
+            if (firstFrame)
+                RLog("captureZeroCopy: first frame held fmt(dda)=%u capFp16=%d fresh=%d",
+                     ddaFormat, (int)capFp16, (int)fresh);
+            gotThisCall = true;
+        }
+        SafeRelease(tex);
+        SafeRelease(res);
+        if (!fresh) break;                        // settled desktop: one check is enough
+        // fresh: keep looping to drain to the latest frame (the short `to` breaks us out)
+    }
+    return haveDesktop;
+}
+
+bool RenderEngine::State::captureViaCopy(const RECT& view, bool crop, bool& changedInView) {
     if (!dupl && !recreateDupl()) return false;
 
     // A settled desktop polls non-blocking (0 ms, 1 attempt): a static screen returns
@@ -489,6 +624,18 @@ bool RenderEngine::State::capture(const RECT& view, bool crop, bool& changedInVi
     return gotThisCall || haveDesktop;   // no frame within budget; keep whatever we had
 }
 
+bool RenderEngine::State::capture(const RECT& view, bool crop, bool copyMode, bool& changedInView) {
+    if (copyMode != lastCaptureCopy) {            // hot-toggled: rebuild capture state cleanly
+        lastCaptureCopy = copyMode;
+        dropDuplication();
+        freshCapture = true;
+        forceNextRender = true;
+    }
+    if (!dupl && !recreateDupl()) return false;
+    return copyMode ? captureViaCopy(view, crop, changedInView)
+                    : captureZeroCopy(view, changedInView);
+}
+
 // The overlay must pass clicks through to the apps beneath. Cross-process click-through is
 // provided by the window's WS_EX_LAYERED | WS_EX_TRANSPARENT styles; this HTTRANSPARENT
 // hit-test is belt-and-braces (WS_EX_TRANSPARENT alone proved insufficient cross-process).
@@ -508,8 +655,12 @@ bool RenderEngine::recoverDeviceLost() {
     // against a fresh device. The HWND, monitor geometry, and zoom state are untouched. Cursor state
     // is reset so updateCursorTexture re-uploads against the new device on the next frame.
     s_->ready = false;
-    s_->dupl.Reset();
-    s_->desktopCopy.Reset(); s_->desktopSRV.Reset();
+    // dropDuplication releases the held frame while the duplication object is still alive (on a
+    // dead device ReleaseFrame just fails harmlessly) and clears heldTex/ddaSrv/desktopSRV, which
+    // all belong to the dead duplication.
+    s_->dropDuplication();
+    s_->desktopCopy.Reset();
+    s_->srvFailed = false;   // new device: give zero-copy another chance
     s_->cursorTex.Reset(); s_->cursorSRV.Reset(); s_->cursorReady = false; s_->lastCursor = nullptr;
     s_->cursorCache.clear();   // cached cursor textures belong to the dead device
     s_->vs.Reset(); s_->ps.Reset(); s_->cvs.Reset(); s_->cps.Reset();
@@ -737,8 +888,7 @@ void RenderEngine::primeReveal() {
 // window becomes visible. Also drops the motion-blur history so we don't smear the jump in.
 void RenderEngine::invalidateCapture() {
     if (!s_) return;
-    s_->dupl.Reset();
-    s_->haveDesktop = false;
+    s_->dropDuplication();   // releases the held frame first; held texture/SRVs die with the dupl
     s_->freshCapture = true;
     s_->forceNextRender = true;
 }
@@ -827,8 +977,7 @@ bool RenderEngine::retarget(const MonitorTarget& m) {
     s_->originX = m.x; s_->originY = m.y;
     s_->sw = m.w; s_->sh = m.h;
     lstrcpynW(s_->targetDevice, m.device, 32);
-    s_->dupl.Reset();
-    s_->haveDesktop = false;
+    s_->dropDuplication();   // releases the held frame first; held texture/SRVs die with the dupl
     s_->freshCapture = true;
     s_->forceNextRender = true;
     s_->lastClickX = s_->lastClickY = INT_MIN;   // don't skip the first SetCursorPos on the new monitor
@@ -891,7 +1040,9 @@ bool RenderEngine::State::prepare(const RenderFrameParams& p) {
     if (vr > sw) vr = sw;          if (vb > sh) vb = sh;
     RECT view{ (LONG)vl, (LONG)vt, (LONG)vr, (LONG)vb };
     bool changedInView = false;
-    capture(view, p.cropCapture, changedInView);
+    // srvFailed: a DDA surface refused an SRV this session, so zero-copy can't sample it; force
+    // the copy path until the device is rebuilt (recoverDeviceLost clears it).
+    capture(view, p.cropCapture, p.captureCopy || srvFailed, changedInView);
     // cursorMode==2 (never draw) skips the GetCursorInfo syscall entirely. Otherwise update reads
     // osCursorShowing and decodes/uploads only when the cursor will actually be drawn.
     if (p.cursorMode != 2) updateCursorTexture(p.cursorMode);
@@ -1122,6 +1273,7 @@ void RenderEngine::hideSystemCursor(bool hide) {
 
 void RenderEngine::shutdown() {
     if (!s_) return;
+    s_->releaseHeldFrame();   // release the held DDA frame while the duplication is still alive
     if (s_->magInited) {
         MagShowSystemCursor(TRUE);          // never leave the cursor hidden
         MagUninitialize();
