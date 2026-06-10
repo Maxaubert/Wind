@@ -80,8 +80,9 @@ bool IsPresentEcho(bool presentedSinceLastFrame, unsigned accumulatedFrames,
 //    game that stops would leave a self-sustaining present -> echo -> present chain that never
 //    times out. Every kEchoProbeInterval-th consecutive bypassed echo is deliberately classified
 //    echo as a PROBE that also drops the streak just below the threshold: a live game re-proves
-//    itself on the very next composite (game-only, no echo expected, classified real -> re-engaged
-//    seamlessly), while a stale chain stops presenting, its late-echo trickle decays the streak,
+//    itself within a composite or two (the pre-probe present's echo can merge into the next one,
+//    so re-proof can land one composite later; classified real -> re-engaged seamlessly), while
+//    a stale chain stops presenting, its late-echo trickle decays the streak,
 //    and the timeout run resets it, so idle skipping resumes within ~the interval instead of never.
 //    Trade-off: 128 held one frame per ~0.9 s at 144 Hz (noticeable stale-view microstutter in
 //    sensitive games); 512 extends to ~3.6 s apart, costs a longer bounded stale-chain tail after

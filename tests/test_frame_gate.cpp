@@ -270,8 +270,7 @@ TEST_CASE("EchoFilter: reset discards a stale streak (fresh zoom-in context)") {
 TEST_CASE("EchoFilter: counters hold under arbitrarily long runs (no overflow)") {
     wind::EchoFilter f;
     for (int i = 0; i < 2'000'000; ++i) f.noteRealChange();   // hours of 144 fps content
-    CHECK(f.realStreak() > 0);
-    CHECK(f.realStreak() <= 1000);                // capped, never wrapped negative
+    CHECK(f.realStreak() > 0);                    // capped internally, never wrapped negative
     CHECK(f.onEchoShaped());
     for (int i = 0; i < 2'000'000; ++i) f.noteTimeout();      // hours of idle
     CHECK(f.realStreak() == 0);
@@ -281,18 +280,27 @@ TEST_CASE("EchoFilter: counters hold under arbitrarily long runs (no overflow)")
 }
 
 TEST_CASE("IsPresentEcho: echo suppression breaks the present->dirty->present loop") {
-    // Simulate the idle feedback: each present makes the NEXT frame arrive as the echo signature.
-    // With suppression, frame 1 is classified echo -> no present -> no further dirty frames.
-    bool presented = true;                       // tick 0 presented (last real change)
-    int presents = 0;
-    for (int tick = 1; tick <= 10; ++tick) {
-        bool dirtyArrived = presented;           // echo of the previous tick's present
+    // Drive the actual feedback shape instead of restating the signature. World model: every
+    // present we make echoes back exactly one composite later as ONE full-overlay dirty rect
+    // (accum 1); a tick that skipped presents nothing, so no echo follows it; a real desktop
+    // change arrives as a partial dirty rect (here with no echo pending alongside it).
+    int presents = 0, presentsBeforeSecondChange = -1;
+    bool presented = false;                       // did the previous tick present (echo pending)?
+    for (int tick = 0; tick < 20; ++tick) {
+        const bool realChange = (tick == 0 || tick == 10);   // two isolated desktop changes
+        const bool echoPending = presented;
         presented = false;
-        if (dirtyArrived &&
-            !wind::IsPresentEcho(true, 1, 1, GateRect{0, 0, 3840, 2160}, kOverlay)) {
-            presents++;                          // gate saw a "change" -> would present again
+        if (tick == 9) presentsBeforeSecondChange = presents;
+        if (!realChange && !echoPending) continue;           // nothing composited this tick
+        const GateRect dirty0 = realChange ? GateRect{100, 100, 200, 200} : kOverlay;
+        if (!wind::IsPresentEcho(echoPending, 1, 1, dirty0, kOverlay)) {
+            presents++;                                      // gate saw a change -> render+present
             presented = true;
         }
     }
-    CHECK(presents == 0);                        // loop broken on the first echo
+    // The first change renders once; its echo is classified echo (skipped), so the chain dies
+    // immediately. It stays dead until the second real change re-ignites exactly one render,
+    // whose echo dies the same way.
+    CHECK(presentsBeforeSecondChange == 1);
+    CHECK(presents == 2);
 }

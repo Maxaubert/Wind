@@ -196,6 +196,11 @@ IDXGIOutput* RenderEngine::State::selectOutput(const wchar_t* deviceName, bool f
 // Recreate the duplication interface (after ACCESS_LOST or first use).
 bool RenderEngine::State::recreateDupl() {
     dupl.Reset();
+    // A (re)created duplication starts a new echo context: a stale expectEcho from the last
+    // present would make its first full-desktop frame look like our own echo and swallow the
+    // present (stale view after UAC/secure-desktop/fullscreen transitions). Same for the streak.
+    expectEcho = false;
+    echoFilter.reset();
     // Capture the target monitor's output (matched by device name), falling back to the first
     // output for the legacy single-monitor path (empty targetDevice) or any name mismatch.
     IDXGIOutput* output = selectOutput(targetDevice, /*fallbackToFirst=*/true);
