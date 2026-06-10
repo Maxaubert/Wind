@@ -31,6 +31,7 @@ TEST_CASE("renderer knobs have sane defaults") {
     CHECK(c.dwmFlush == 0);                     // plain vsync pacing by default (fewer stutters)
     CHECK(c.multiMonitor == 0);                // shipped primary-only (follow-cursor opt-in)
     CHECK(c.cropCapture == 0);                 // shipped off: always copy all changed regions (no edge staleness)
+    CHECK(c.captureCopy == 0);   // shipped 0: zero-copy path (captureCopy=1 is the driver escape hatch)
     CHECK(c.smoothZoom == 1);                  // shipped on (eased-in zoom)
     CHECK(c.zoomInSpeed == doctest::Approx(1.0));
     CHECK(c.zoomOutSpeed == doctest::Approx(1.0));
@@ -269,7 +270,7 @@ TEST_CASE("outline low-zoom + idle keys default and parse with clamps") {
     CHECK(ParseConfig("outlineIdleSeconds=120\n").outlineIdleSeconds == doctest::Approx(60.0));
 }
 TEST_CASE("captureCopy parses and defaults to 0 (zero-copy)") {
-    CHECK(wind::ParseConfig("").captureCopy == 0);
-    CHECK(wind::ParseConfig("captureCopy=1\n").captureCopy == 1);
-    CHECK(wind::ParseConfig("captureCopy=0\n").captureCopy == 0);
+    CHECK(ParseConfig("").captureCopy == 0);
+    CHECK(ParseConfig("captureCopy=1\n").captureCopy == 1);
+    CHECK(ParseConfig("captureCopy=0\n").captureCopy == 0);
 }

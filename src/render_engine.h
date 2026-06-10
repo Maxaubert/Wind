@@ -26,7 +26,7 @@ struct RenderFrameParams {
     int    cursorMode;                   // 0=auto (draw only when the app shows a cursor), 1=always, 2=never
     bool   vsync;                        // true = Present(1,0) vsync; false = Present(0,0) no vsync
     bool   cropCapture;                  // on a full-screen repaint, copy only the magnified region (cuts 4K copy)
-    bool   captureCopy;                  // 1 = legacy copy-based capture (escape hatch); 0 = zero-copy
+    bool   captureCopy;          // true = legacy copy-based capture (escape hatch); false = zero-copy (default)
     bool   outline;                      // draw the edge outline while zoomed (level > 1.0)
     int    outlineThicknessPx;           // outline width in physical px (clamped in render())
     float  outlineR, outlineG, outlineB; // outline color 0..1, written straight to the BGRA8 backbuffer

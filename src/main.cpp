@@ -639,7 +639,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         std::ostringstream cd;
         cd << "maxLevel=" << cfg.maxLevel << "\nzoomInSpeed=" << cfg.zoomInSpeed
            << "\nzoomOutSpeed=" << cfg.zoomOutSpeed << "\nmultiMonitor=" << cfg.multiMonitor
-           << "\ncropCapture=" << cfg.cropCapture << "\nvsync=" << cfg.vsync
+           << "\ncropCapture=" << cfg.cropCapture << "\ncaptureCopy=" << cfg.captureCopy << "\nvsync=" << cfg.vsync
            << "\ndwmFlush=" << cfg.dwmFlush << "\nzorderBand=" << cfg.zorderBand
            << "\ncursorVisibility=" << cfg.cursorVisibility << "\nhdrTonemap=" << cfg.hdrTonemap;
     #ifdef WIND_UIACCESS
