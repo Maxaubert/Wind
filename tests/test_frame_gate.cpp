@@ -108,6 +108,176 @@ TEST_CASE("IsPresentEcho: a partial-screen dirty rect is a real change, not an e
     CHECK_FALSE(wind::IsPresentEcho(true, 1, 1, GateRect{0, 0, 3840, 2159}, kOverlay));   // off by 1
     CHECK_FALSE(wind::IsPresentEcho(true, 1, 1, GateRect{1, 0, 3840, 2160}, kOverlay));
 }
+// EchoFilter: real-change streak hysteresis. Full-rate fullscreen content can ALIAS with the
+// echo signature (its full-monitor dirty merges into the same composite as our echo); without
+// the bypass the gate would skip every other real frame (~72 fps capture on a 144 Hz panel).
+
+TEST_CASE("EchoFilter: idle convergence - sparse reals plus echoes never engage the bypass") {
+    wind::EchoFilter f;
+    // Idle desktop: an occasional real change (clock tick), its one echo afterwards, then
+    // timeouts until the next change. The streak never approaches the threshold.
+    for (int burst = 0; burst < 20; ++burst) {
+        f.noteRealChange();                       // sparse real change
+        CHECK_FALSE(f.onEchoShaped());            // its echo is classified echo (skipped)
+        for (int t = 0; t < 10; ++t) f.noteTimeout();   // static desktop between changes
+        CHECK(f.realStreak() == 0);
+        CHECK_FALSE(f.onEchoShaped());
+    }
+}
+
+TEST_CASE("EchoFilter: halved regime (real, echo-shaped, timeout cycle) engages the bypass") {
+    wind::EchoFilter f;
+    // The cycle measured in wind_diag.log: the loop polls ~200 Hz against 144 Hz composites, so
+    // while halved each game frame is followed by an echo-shaped merge and ONE poll timeout.
+    // Echo-shaped events and single timeouts MUST NOT reset the streak or the bypass could
+    // never engage (this exact pattern pinned the streak at 1 with reset-on-first-timeout).
+    int firstBypassedCycle = -1;
+    for (int cyc = 1; cyc <= 16; ++cyc) {
+        f.noteRealChange();                       // game-only composite (we skipped: no echo)
+        if (f.onEchoShaped() && firstBypassedCycle < 0) firstBypassedCycle = cyc;
+        f.noteTimeout();                          // poll outpaces the next composite
+    }
+    // The 8th cycle's real change reaches the threshold, so its echo-shaped frame is bypassed.
+    CHECK(firstBypassedCycle == wind::kEchoBypassStreak);
+    CHECK(f.onEchoShaped());                      // and it stays engaged while reals keep coming
+}
+
+TEST_CASE("EchoFilter: strict real/echo-shaped alternation engages the bypass too") {
+    wind::EchoFilter f;
+    int firstBypassedEvent = -1;
+    for (int ev = 1; ev <= 32; ++ev) {
+        if (ev % 2 == 1) f.noteRealChange();
+        else if (f.onEchoShaped() && firstBypassedEvent < 0) firstBypassedEvent = ev;
+    }
+    CHECK(firstBypassedEvent == 2 * wind::kEchoBypassStreak);
+}
+
+TEST_CASE("EchoFilter: one skipped echo per real and bypassed echoes never move the streak") {
+    wind::EchoFilter f;
+    for (int i = 0; i < 3; ++i) f.noteRealChange();
+    CHECK_FALSE(f.onEchoShaped());                // below threshold: classified echo...
+    CHECK(f.realStreak() == 3);                   // ...without moving the streak (1:1 ratio)
+    for (int i = 0; i < 20; ++i) f.noteRealChange();
+    const int streak = f.realStreak();
+    CHECK(f.onEchoShaped());                      // above threshold: bypassed...
+    CHECK(f.realStreak() == streak);              // ...still without moving the streak
+}
+
+TEST_CASE("EchoFilter: echo pile-up between reals decays the streak (ratio filter)") {
+    wind::EchoFilter f;
+    for (int i = 0; i < 6; ++i) f.noteRealChange();
+    // The observed idle ratio: ~13 skipped echoes per misclassified real. The pile-up decays
+    // the streak (-1 per kEchoSkipDecay echoes since the last real) faster than reals feed it,
+    // so this pattern can repeat forever without ever engaging the bypass.
+    for (int e = 0; e < 13; ++e) CHECK_FALSE(f.onEchoShaped());
+    CHECK(f.realStreak() == 0);
+    for (int i = 0; i < 200; ++i) {
+        f.noteRealChange();
+        for (int e = 0; e < 13; ++e) CHECK_FALSE(f.onEchoShaped());
+    }
+    CHECK(f.realStreak() == 0);
+}
+
+TEST_CASE("EchoFilter: recovery - a full timeout run resets, a single timeout does not") {
+    wind::EchoFilter f;
+    for (int i = 0; i < 50; ++i) f.noteRealChange();   // sustained full-rate content
+    CHECK(f.onEchoShaped());
+    // A short gap (a game hitch, or the poll simply outpacing composites) must keep the bypass.
+    for (int t = 0; t < wind::kEchoTimeoutReset - 1; ++t) f.noteTimeout();
+    CHECK(f.onEchoShaped());                      // gap too short: still engaged
+    CHECK(f.realStreak() == 50);                  // the echo-shaped frame cleared the run
+    // An unbroken run of kEchoTimeoutReset timeouts is a real content gap: streak resets.
+    for (int t = 0; t < wind::kEchoTimeoutReset; ++t) f.noteTimeout();
+    CHECK(f.realStreak() == 0);
+    CHECK_FALSE(f.onEchoShaped());                // echoes are skipped again
+    f.noteRealChange();                           // one fresh change does not re-engage
+    CHECK_FALSE(f.onEchoShaped());
+}
+
+TEST_CASE("EchoFilter: skipped echoes do not shield the streak from the timeout reset") {
+    wind::EchoFilter f;
+    // The empirically-observed idle trap: sparse desktop changes render, each present spawns
+    // echo frames that interleave the idle timeouts. Skipped echoes are NEUTRAL to the timeout
+    // run, so it still accumulates through them and the streak resets between sparse changes -
+    // the bypass must never engage no matter how long this pattern repeats.
+    for (int i = 0; i < 100; ++i) {
+        f.noteRealChange();                       // sparse change (clock tick, tray repaint)
+        CHECK_FALSE(f.onEchoShaped());            // echo of our response present: skipped
+        f.noteTimeout(); f.noteTimeout();
+        CHECK_FALSE(f.onEchoShaped());            // a late second echo: skipped, still neutral
+        f.noteTimeout(); f.noteTimeout();         // 4th CONSECUTIVE-through-echoes timeout
+        CHECK(f.realStreak() == 0);               // -> the run reset the streak
+    }
+}
+
+TEST_CASE("EchoFilter: engaged bypass survives stray single timeouts between frames") {
+    wind::EchoFilter f;
+    for (int i = 0; i < wind::kEchoBypassStreak; ++i) f.noteRealChange();
+    // Steady engaged cadence with an occasional poll outpacing the composite: bypassed echoes
+    // clear the timeout run, so strays never accumulate into a reset. Only the probes skip,
+    // and the live game re-proves on the composite right after each (modeled by the real).
+    int skipped = 0;
+    for (int i = 0; i < 1000; ++i) {
+        if (!f.onEchoShaped()) { ++skipped; f.noteRealChange(); }
+        if (i % 5 == 0) f.noteTimeout();
+    }
+    CHECK(skipped == 1000 / (wind::kEchoProbeInterval + 1));
+    CHECK(f.realStreak() >= wind::kEchoBypassStreak);   // never reset while engaged
+}
+
+TEST_CASE("EchoFilter: probe - a live game re-proves and pays one held frame per interval") {
+    wind::EchoFilter f;
+    for (int i = 0; i < wind::kEchoBypassStreak; ++i) f.noteRealChange();
+    // Post-bypass aliasing world: EVERY composite is echo-shaped (game dirt merged with our
+    // echo). The probe skips one frame and demands re-proof; the game supplies it at once
+    // (the post-probe composite carries no echo expectation -> a real change).
+    int probes = 0;
+    for (int i = 0; i < 1000; ++i) {
+        if (!f.onEchoShaped()) { ++probes; f.noteRealChange(); }
+    }
+    CHECK(probes == 1000 / (wind::kEchoProbeInterval + 1));   // exactly one per interval
+    CHECK(f.onEchoShaped());                      // still engaged at the end
+}
+
+TEST_CASE("EchoFilter: probe - a stale chain cannot ride the old streak past the probe") {
+    wind::EchoFilter f;
+    for (int i = 0; i < wind::kEchoBypassStreak; ++i) f.noteRealChange();
+    // Content stopped right after engaging: only our own echoes keep arriving. They ride the
+    // streak up to the probe...
+    for (int i = 0; i < wind::kEchoProbeInterval - 1; ++i) CHECK(f.onEchoShaped());
+    CHECK_FALSE(f.onEchoShaped());                // ...which skips and demands re-proof
+    // No content = no re-proof: the late-echo trickle is skipped (and decays the streak)
+    // instead of being ridden for another interval.
+    CHECK_FALSE(f.onEchoShaped());
+    CHECK_FALSE(f.onEchoShaped());
+    // And once nothing presents anymore, the timeout run resets the streak for good.
+    for (int t = 0; t < wind::kEchoTimeoutReset; ++t) f.noteTimeout();
+    CHECK(f.realStreak() == 0);
+    CHECK_FALSE(f.onEchoShaped());
+}
+
+TEST_CASE("EchoFilter: reset discards a stale streak (fresh zoom-in context)") {
+    wind::EchoFilter f;
+    for (int i = 0; i < 50; ++i) f.noteRealChange();
+    CHECK(f.onEchoShaped());
+    f.reset();
+    CHECK(f.realStreak() == 0);
+    CHECK_FALSE(f.onEchoShaped());
+}
+
+TEST_CASE("EchoFilter: counters hold under arbitrarily long runs (no overflow)") {
+    wind::EchoFilter f;
+    for (int i = 0; i < 2'000'000; ++i) f.noteRealChange();   // hours of 144 fps content
+    CHECK(f.realStreak() > 0);
+    CHECK(f.realStreak() <= 1000);                // capped, never wrapped negative
+    CHECK(f.onEchoShaped());
+    for (int i = 0; i < 2'000'000; ++i) f.noteTimeout();      // hours of idle
+    CHECK(f.realStreak() == 0);
+    CHECK_FALSE(f.onEchoShaped());
+    f.noteRealChange();                           // and the filter still responds normally
+    CHECK(f.realStreak() == 1);
+}
+
 TEST_CASE("IsPresentEcho: echo suppression breaks the present->dirty->present loop") {
     // Simulate the idle feedback: each present makes the NEXT frame arrive as the echo signature.
     // With suppression, frame 1 is classified echo -> no present -> no further dirty frames.

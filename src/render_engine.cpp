@@ -76,6 +76,8 @@ struct RenderEngine::State {
     bool havePresented = false;        // nothing presented yet -> never skip
     bool forceNextRender = false;      // one-shot render force (invalidate/retarget/recover)
     bool expectEcho = false;           // we presented; next acquired image frame may be our own echo
+    EchoFilter echoFilter;             // real-change streak hysteresis: full-rate content aliasing
+                                       // with the echo signature must still render (issue #96)
     std::vector<unsigned char> metaBuf;   // reused buffer for GetFrameMoveRects/GetFrameDirtyRects
     // Diagnostics for the HDR investigation: the duplication's surface format + the output's
     // color space / bit depth (tells us whether the desktop is HDR and what we're capturing).
@@ -332,20 +334,25 @@ bool RenderEngine::State::copyChangedRegions(ID3D11Texture2D* src, const DXGI_OU
 // ReleaseFrame (metadata is only readable while the frame is owned). Reuses metaBuf; safe because
 // copyChangedRegions re-fetches into it afterwards (the API allows repeated fetches while owned).
 bool RenderEngine::State::frameChangesView(const DXGI_OUTDUPL_FRAME_INFO& fi, const RECT& view, bool echoCandidate) {
-    if (fi.LastPresentTime.QuadPart == 0) return false;     // pointer-only update: image unchanged
+    if (fi.LastPresentTime.QuadPart == 0) return false;     // pointer-only update: streak untouched
     const UINT meta = fi.TotalMetadataBufferSize;
-    if (meta == 0) return true;                              // no metadata: assume a full change
+    // The conservative assume-changed paths (no metadata, fetch failure, scroll) are non-echo
+    // image changes too, so they feed the EchoFilter streak like an ordinary dirty frame.
+    if (meta == 0) { echoFilter.noteRealChange(); return true; }   // no metadata: full change
     if (metaBuf.size() < meta) metaBuf.resize(meta);
     UINT moveBytes = 0;
-    if (FAILED(dupl->GetFrameMoveRects(meta, reinterpret_cast<DXGI_OUTDUPL_MOVE_RECT*>(metaBuf.data()), &moveBytes)))
-        return true;
-    if (moveBytes > 0) return true;                          // scroll: treat as changed
+    if (FAILED(dupl->GetFrameMoveRects(meta, reinterpret_cast<DXGI_OUTDUPL_MOVE_RECT*>(metaBuf.data()), &moveBytes))) {
+        echoFilter.noteRealChange(); return true;
+    }
+    if (moveBytes > 0) { echoFilter.noteRealChange(); return true; }   // scroll: treat as changed
     UINT dirtyBytes = 0;
-    if (FAILED(dupl->GetFrameDirtyRects(meta, reinterpret_cast<RECT*>(metaBuf.data()), &dirtyBytes)))
-        return true;
+    if (FAILED(dupl->GetFrameDirtyRects(meta, reinterpret_cast<RECT*>(metaBuf.data()), &dirtyBytes))) {
+        echoFilter.noteRealChange(); return true;
+    }
     const UINT n = dirtyBytes / sizeof(RECT);
     // NB: zero dirty rects with a real present is "no image change" per the DDA contract, so the
     // gate says unchanged even though copyChangedRegions conservatively full-copies that case.
+    // Neither a real change nor an echo: the streak is left untouched.
     if (n == 0) return false;
     const RECT* rects = reinterpret_cast<const RECT*>(metaBuf.data());
     // Our own Present echoes back through DDA: the overlay is capture-EXCLUDED, yet the frame
@@ -354,7 +361,19 @@ bool RenderEngine::State::frameChangesView(const DXGI_OUTDUPL_FRAME_INFO& fi, co
     // present -> dirty -> present and idle frame-skip never engages (issue #96).
     const GateRect d0{ rects[0].left, rects[0].top, rects[0].right, rects[0].bottom };
     const GateRect overlay{ 0, 0, sw, sh };
-    if (IsPresentEcho(echoCandidate, fi.AccumulatedFrames, n, d0, overlay)) return false;
+    if (IsPresentEcho(echoCandidate, fi.AccumulatedFrames, n, d0, overlay)) {
+        // Echo-SHAPED, not necessarily an echo: a fullscreen app repainting the whole monitor
+        // every refresh merges its dirty rect into the same composite as our echo and aliases
+        // with the signature (empirically confirmed on this panel). Skipping those frames
+        // halves the capture rate (render-skip alternation = ~72 fps on a 144 Hz panel), which
+        // the spec forbids for in-game zoom. The EchoFilter streak tells the worlds apart:
+        // while we skip, every other composite is game-only (no echo expected) and classified
+        // real, so sustained full-rate content builds the streak and flips echo-shaped frames
+        // to real (full 144 fps) within ~120 ms. Idle echoes never build a streak and stay
+        // skipped, and the filter's probe cadence breaks a stale bypass chain (see frame_gate.h).
+        return echoFilter.onEchoShaped();
+    }
+    echoFilter.noteRealChange();   // non-echo-shaped image change: the bypass streak builds
     const GateRect v{ view.left, view.top, view.right, view.bottom };
     for (UINT i = 0; i < n; ++i) {
         const GateRect r{ rects[i].left, rects[i].top, rects[i].right, rects[i].bottom };
@@ -378,6 +397,9 @@ bool RenderEngine::State::capture(const RECT& view, bool crop, bool& changedInVi
     // once one frame is copied we only wait ~3 ms for a newer one, then stop.
     const bool fresh = freshCapture || !haveDesktop;
     freshCapture = false;
+    // New capture context (zoom-in/retarget): a bypass streak earned over previous content must
+    // not leak into this session, or a static-desktop zoom-in after a game could chain echoes.
+    if (fresh) echoFilter.reset();
     const int   firstAttempts = fresh ? 40 : 1;
     const DWORD firstTimeout  = fresh ? 25 : 0;
     // Bound the fresh-grab wall time. Without this, a desktop that delivers no first frame makes
@@ -394,7 +416,17 @@ bool RenderEngine::State::capture(const RECT& view, bool crop, bool& changedInVi
         DXGI_OUTDUPL_FRAME_INFO fi{};
         const DWORD to = gotThisCall ? 3 : firstTimeout;   // after a copy, only briefly seek a newer frame
         HRESULT hr = dupl->AcquireNextFrame(to, &fi, &res);
-        if (hr == DXGI_ERROR_WAIT_TIMEOUT) { SafeRelease(res); if (gotThisCall) break; continue; }
+        if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
+            SafeRelease(res);
+            if (gotThisCall) break;
+            // Steady-state poll with no new composite. A long-enough run of these means the
+            // full-rate content stopped, so the echo-bypass streak resets and idle echo skipping
+            // resumes (single timeouts interleave with full-rate content because this poll runs
+            // faster than DWM composites - the filter only resets on a full run). Fresh-grab
+            // retries are not idle evidence (the duplication was just (re)created): no feed.
+            if (!fresh) echoFilter.noteTimeout();
+            continue;
+        }
         if (hr == DXGI_ERROR_ACCESS_LOST) { SafeRelease(res); dupl.Reset(); return gotThisCall || haveDesktop; }
         if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
             SafeRelease(res); deviceLost = true; RLog("capture: device lost hr=0x%08lX", (unsigned long)hr);
