@@ -82,9 +82,10 @@ Details:
   existing `invalidateCapture` path. The zoom-in drain-to-latest loop is unchanged, it
   just ends holding the final frame instead of copying it.
 
-This deletes the cached desktop texture, `copyChangedRegions`, and the >50%-dirty crop
-heuristic. Per-changed-frame cost drops from full-desktop copy + draw + present to
-draw + present.
+The legacy copy path (desktopCopy + copyChangedRegions + the >50%-dirty crop heuristic)
+stays in the code as the `captureCopy=1` fallback; the default path never touches it.
+Per-changed-frame cost on the default path drops from full-desktop copy + draw + present
+to draw + present.
 
 Escape hatch: a `captureCopy=1` ini knob (default 0) restores copy-based capture, cropped
 to the magnified source region, in case a driver misbehaves with held frames (texture
@@ -125,5 +126,35 @@ knobs, shutdown cursor restore.
 One GitHub issue, one branch, one PR. Two independently testable stages:
 
 1. Frame-skip gate (pure decision function + main.cpp/render_engine wiring + counters).
-2. Zero-copy capture (deferred release + SRV sampling + copy-mode escape hatch + deletion
-   of the cached-texture path).
+2. Zero-copy capture (deferred release + SRV sampling + copy-mode escape hatch; the
+   cached-texture path is kept as that fallback).
+
+## Implementation notes (post-landing)
+
+Two things surfaced during implementation that the design above did not predict; both are
+now load-bearing (full detail in src/frame_gate.h and the CLAUDE.md render-engine gotchas):
+
+- Present echo. Each of our own Presents makes DWM emit a duplication frame whose single
+  dirty rect equals the overlay rect, even though the overlay is capture-excluded (the
+  pixels are excluded, the dirty region is not). Unfiltered, that chains
+  present -> dirty -> present forever and the idle gate never engages. `IsPresentEcho`
+  classifies the echo signature (`expectEcho` armed per Present, consumed once per
+  acquired image frame). Fullscreen content repainting at refresh rate merges its dirty
+  rect with the echo into an identical-looking frame (empirically confirmed), so an
+  `EchoFilter` real-change streak bypasses the classification while real changes stream.
+  The streak is fed only by changes whose rects intersect the magnified view (off-view
+  animation, like a terminal spinner, defeated idle skipping when it could feed the
+  streak), and a liveness probe every `kEchoProbeInterval` bypassed echoes breaks stale
+  self-sustaining chains after content stops. Echo state resets whenever the duplication
+  is recreated.
+- Keyed mutex on FP16 DDA surfaces. The HDR duplication surface (`DuplicateOutput1`,
+  FP16) carries `D3D11_RESOURCE_MISC_SHARED_KEYED_MUTEX`, and D3D11 silently discards
+  draws that bind such a resource un-acquired - the symptom is a black magnified view
+  while CopyResource still works. Deferred ticks (drawing from the held surface after
+  ReleaseFrame) must `AcquireSync(0,2)`/`ReleaseSync`; while the frame is owned,
+  AcquireNextFrame already holds the mutex and a second AcquireSync is an error.
+
+Measured on the dev machine (144 Hz panel): idle-zoomed 0.00% GPU (six 1 s samples),
+active panning ~2% GPU (was ~12%), `WIND_PACINGTEST` 144.0 fps with maxDt 6.96 ms and
+0 hitches, and a fullscreen flashing-content window rendered >= 276/288 frames per
+2 s window (full rate held through the echo filter).

@@ -94,6 +94,41 @@ staged Apply/Discard footer.
 - RENDER ENGINE: on zoom-in, `invalidateCapture()` + `capture()` drains to the LATEST duplication
   frame (not the first): the first AcquireNextFrame after (re)creating the duplication can be a
   transitional composite (the window underneath), which otherwise flashed on reveal.
+- RENDER ENGINE: frames are SKIPPED when nothing changed (no new DDA frame intersecting the view,
+  no cursor/pan/zoom/outline-fade change) - that skip is what keeps idle-zoomed GPU at ~0%
+  (Windows-Magnifier territory). `renderFrame` returns Skipped and issues NO Present, so the main
+  loop timer-paces those ticks (vsync can only pace ticks that presented). Anything that must
+  redraw outside the snapshot (new visual knob, new pass) either goes INTO `FrameSnapshot`
+  (src/frame_gate.h) or forces a render (config hot-reload sets `forceRenderOnce`).
+  `WIND_PACINGTEST` and `WIND_SELFTEST` set `forceRender` - the gate must never starve them.
+  Also: when `!haveDesktop` after a present has occurred (ACCESS_LOST / keyed-mutex failure edge),
+  `renderFrame` returns Skipped instead of drawing - keeps the last DWM frame on screen instead of
+  flashing fullscreen black while capture recovers.
+- RENDER ENGINE: our own Present makes DWM emit a duplication frame whose SINGLE dirty rect equals
+  the overlay rect, EVEN THOUGH the overlay is `WDA_EXCLUDEFROMCAPTURE` (the pixels are excluded,
+  the dirty region is not). Unfiltered, that echo chains present -> dirty -> present forever and
+  the idle frame-skip gate never engages. `IsPresentEcho` (src/frame_gate.h) classifies it
+  (`expectEcho` armed after each successful Present, consumed once per acquired image frame). But
+  fullscreen content repainting at refresh rate merges its dirty rect with the echo into an
+  identical-looking frame (empirically confirmed), so `EchoFilter` keeps a real-change streak that
+  bypasses echo classification while real changes stream - fed ONLY by changes whose rects
+  intersect the magnified view (off-view animation like a terminal spinner must never feed it;
+  that defeated idle skipping in testing), with a probe every `kEchoProbeInterval` bypassed echoes
+  to kill stale self-sustaining chains. Echo state (`expectEcho` + the filter) resets whenever the
+  duplication is recreated.
+- RENDER ENGINE: capture is ZERO-COPY by default (`captureCopy=0`): the magnify pass samples the
+  held Desktop Duplication surface directly; `ReleaseFrame` is deferred to just before the next
+  `AcquireNextFrame` (per the DDA docs the surface is invalid after release), and frame metadata
+  (dirty/move rects) MUST be read while the frame is owned. Every duplication teardown goes
+  through `dropDuplication()` - release the held frame FIRST, then clear
+  `heldTex`/`ddaSrv`/`desktopSRV` (they belong to the duplication; sampling after is
+  use-after-free). The FP16 HDR duplication surface (`DuplicateOutput1`) is a KEYED-MUTEX shared
+  resource and D3D11 SILENTLY DISCARDS draws that bind it un-acquired (symptom: black magnified
+  view while copies still work): deferred-tick draws `AcquireSync(0,2)`/`ReleaseSync` it; never
+  AcquireSync while the frame is owned (AcquireNextFrame already holds it - returns INVALID_CALL).
+  `captureCopy=1` = legacy copy path (escape hatch for drivers that misbehave with held frames;
+  its SRV lives in `copySRV` so zero-copy teardowns cannot strand it). Do not reintroduce a
+  per-frame CopyResource on the default path - that copy was the iGPU bottleneck.
 - Verify the render overlay only from INSIDE the app (it is capture-excluded, so external
   screenshots can't see it): `WIND_SELFTEST=1 Wind.exe` dumps `wind_selftest.png`.
 - MULTI-MONITOR: `multiMonitor=1` magnifies the monitor the cursor is on at each zoom-in; `0`
