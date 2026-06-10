@@ -83,3 +83,44 @@ TEST_CASE("RectsIntersect: negative coordinates (multi-monitor) work") {
     CHECK(wind::RectsIntersect(GateRect{-200, -100, 0, 0}, GateRect{-50, -50, 50, 50}));
     CHECK_FALSE(wind::RectsIntersect(GateRect{-200, -100, -150, -50}, GateRect{0, 0, 50, 50}));
 }
+
+// IsPresentEcho: the DDA frame after our own Present arrives with one dirty rect equal to the
+// capture-excluded overlay's rect; treating it as a desktop change chains present -> dirty ->
+// present forever and idle frame-skip never engages (issue #96).
+static const GateRect kOverlay{0, 0, 3840, 2160};
+
+TEST_CASE("IsPresentEcho: exact signature is an echo") {
+    CHECK(wind::IsPresentEcho(true, 1, 1, GateRect{0, 0, 3840, 2160}, kOverlay));
+    CHECK(wind::IsPresentEcho(true, 0, 1, GateRect{0, 0, 3840, 2160}, kOverlay));   // accum 0 tolerated
+}
+TEST_CASE("IsPresentEcho: not an echo without a preceding present") {
+    CHECK_FALSE(wind::IsPresentEcho(false, 1, 1, GateRect{0, 0, 3840, 2160}, kOverlay));
+}
+TEST_CASE("IsPresentEcho: merged composites are never an echo (may hide a real change)") {
+    CHECK_FALSE(wind::IsPresentEcho(true, 2, 1, GateRect{0, 0, 3840, 2160}, kOverlay));
+}
+TEST_CASE("IsPresentEcho: more than one dirty rect means a real change rode along") {
+    CHECK_FALSE(wind::IsPresentEcho(true, 1, 2, GateRect{0, 0, 3840, 2160}, kOverlay));
+    CHECK_FALSE(wind::IsPresentEcho(true, 1, 0, GateRect{0, 0, 3840, 2160}, kOverlay));
+}
+TEST_CASE("IsPresentEcho: a partial-screen dirty rect is a real change, not an echo") {
+    CHECK_FALSE(wind::IsPresentEcho(true, 1, 1, GateRect{100, 100, 200, 200}, kOverlay));
+    CHECK_FALSE(wind::IsPresentEcho(true, 1, 1, GateRect{0, 0, 3840, 2159}, kOverlay));   // off by 1
+    CHECK_FALSE(wind::IsPresentEcho(true, 1, 1, GateRect{1, 0, 3840, 2160}, kOverlay));
+}
+TEST_CASE("IsPresentEcho: echo suppression breaks the present->dirty->present loop") {
+    // Simulate the idle feedback: each present makes the NEXT frame arrive as the echo signature.
+    // With suppression, frame 1 is classified echo -> no present -> no further dirty frames.
+    bool presented = true;                       // tick 0 presented (last real change)
+    int presents = 0;
+    for (int tick = 1; tick <= 10; ++tick) {
+        bool dirtyArrived = presented;           // echo of the previous tick's present
+        presented = false;
+        if (dirtyArrived &&
+            !wind::IsPresentEcho(true, 1, 1, GateRect{0, 0, 3840, 2160}, kOverlay)) {
+            presents++;                          // gate saw a "change" -> would present again
+            presented = true;
+        }
+    }
+    CHECK(presents == 0);                        // loop broken on the first echo
+}

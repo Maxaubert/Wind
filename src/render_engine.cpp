@@ -75,6 +75,7 @@ struct RenderEngine::State {
     FrameSnapshot lastRendered;        // snapshot of the last PRESENTED frame (frame-skip gate)
     bool havePresented = false;        // nothing presented yet -> never skip
     bool forceNextRender = false;      // one-shot render force (invalidate/retarget/recover)
+    bool expectEcho = false;           // we presented; next acquired image frame may be our own echo
     std::vector<unsigned char> metaBuf;   // reused buffer for GetFrameMoveRects/GetFrameDirtyRects
     // Diagnostics for the HDR investigation: the duplication's surface format + the output's
     // color space / bit depth (tells us whether the desktop is HDR and what we're capturing).
@@ -150,7 +151,7 @@ struct RenderEngine::State {
     bool capture(const RECT& view, bool crop, bool& changedInView);
     // While the acquired frame is still owned: do its move/dirty rects touch `view`?
     // Conservative: no metadata, any move (scroll) rects, or any fetch failure count as changed.
-    bool frameChangesView(const DXGI_OUTDUPL_FRAME_INFO& fi, const RECT& view);
+    bool frameChangesView(const DXGI_OUTDUPL_FRAME_INFO& fi, const RECT& view, bool echoCandidate);
     // Compute the magnified source rect (1px bilinear margin), refresh capture + cursor texture.
     // Returns true when the desktop content inside the view changed this tick.
     bool prepare(const RenderFrameParams& p);
@@ -330,7 +331,7 @@ bool RenderEngine::State::copyChangedRegions(ID3D11Texture2D* src, const DXGI_OU
 // Gate input: does this acquired frame change pixels inside the magnified view? Must run before
 // ReleaseFrame (metadata is only readable while the frame is owned). Reuses metaBuf; safe because
 // copyChangedRegions re-fetches into it afterwards (the API allows repeated fetches while owned).
-bool RenderEngine::State::frameChangesView(const DXGI_OUTDUPL_FRAME_INFO& fi, const RECT& view) {
+bool RenderEngine::State::frameChangesView(const DXGI_OUTDUPL_FRAME_INFO& fi, const RECT& view, bool echoCandidate) {
     if (fi.LastPresentTime.QuadPart == 0) return false;     // pointer-only update: image unchanged
     const UINT meta = fi.TotalMetadataBufferSize;
     if (meta == 0) return true;                              // no metadata: assume a full change
@@ -347,6 +348,13 @@ bool RenderEngine::State::frameChangesView(const DXGI_OUTDUPL_FRAME_INFO& fi, co
     // gate says unchanged even though copyChangedRegions conservatively full-copies that case.
     if (n == 0) return false;
     const RECT* rects = reinterpret_cast<const RECT*>(metaBuf.data());
+    // Our own Present echoes back through DDA: the overlay is capture-EXCLUDED, yet the frame
+    // after each present arrives with one dirty rect equal to the overlay rect (the whole
+    // monitor) while the captured pixels are unchanged. Without this filter the gate chains
+    // present -> dirty -> present and idle frame-skip never engages (issue #96).
+    const GateRect d0{ rects[0].left, rects[0].top, rects[0].right, rects[0].bottom };
+    const GateRect overlay{ 0, 0, sw, sh };
+    if (IsPresentEcho(echoCandidate, fi.AccumulatedFrames, n, d0, overlay)) return false;
     const GateRect v{ view.left, view.top, view.right, view.bottom };
     for (UINT i = 0; i < n; ++i) {
         const GateRect r{ rects[i].left, rects[i].top, rects[i].right, rects[i].bottom };
@@ -400,7 +408,12 @@ bool RenderEngine::State::capture(const RECT& view, bool crop, bool& changedInVi
         // the OS pointer (drawn from GetCursorInfo), so the cached copy is still valid - copy
         // nothing. This keeps a busy-pointer-but-static desktop from forcing any copy at all.
         if (tex && fi.LastPresentTime.QuadPart != 0) {
-            changedInView = changedInView || fresh || frameChangesView(fi, view);
+            // Only the FIRST image frame after our own Present can be its echo; consume the flag
+            // here (pointer-only frames above do not consume it - the echo composite is an image
+            // frame by definition).
+            const bool echoCandidate = expectEcho;
+            expectEcho = false;
+            changedInView = changedInView || fresh || frameChangesView(fi, view, echoCandidate);
             // Match the copy texture to the captured format so the copy never mismatches (incl.
             // after a runtime HDR toggle changes the duplication format). The tonemap is gated on
             // capFp16, not on the format, so BGRA8 captures stay passthrough.
@@ -1025,6 +1038,7 @@ RenderResult RenderEngine::renderFrame(const RenderFrameParams& p) {
     s_->lastRendered = snap;
     s_->havePresented = true;
     s_->forceNextRender = false;
+    s_->expectEcho = true;   // the next acquired image frame may be this present's DDA echo
     return RenderResult::Presented;
 }
 

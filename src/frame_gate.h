@@ -33,4 +33,17 @@ struct FrameSnapshot {
 // of rendering forever); cursor 0.05 screen px; level 1e-9 (a ramp must always render).
 bool SnapshotsDiffer(const FrameSnapshot& a, const FrameSnapshot& b);
 
+// True when an acquired duplication frame is solely the DWM echo of our OWN previous Present.
+// The overlay is capture-EXCLUDED (its pixels never appear in the captured image), but DWM
+// still reports the overlay's window region as dirty in the next duplication frame after each
+// of our presents. Treating that echo as a desktop change chains present -> dirty -> present
+// forever, so the idle frame-skip gate never engages (it only broke when a tick's acquire
+// happened to race the composite). Signature of the echo, all required: we presented since the
+// last acquired image frame, exactly one accumulated composite (>1 may hide a real change
+// merged in), and exactly ONE dirty rect exactly equal to the overlay rect (a real change in
+// another window adds its own rect, and a partial change differs from the full overlay rect).
+// `dirty0` is the first dirty rect; only inspected when dirtyCount == 1.
+bool IsPresentEcho(bool presentedSinceLastFrame, unsigned accumulatedFrames,
+                   unsigned dirtyCount, const GateRect& dirty0, const GateRect& overlay);
+
 }

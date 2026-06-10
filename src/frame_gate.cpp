@@ -25,4 +25,13 @@ bool SnapshotsDiffer(const FrameSnapshot& a, const FrameSnapshot& b) {
     return false;
 }
 
+bool IsPresentEcho(bool presentedSinceLastFrame, unsigned accumulatedFrames,
+                   unsigned dirtyCount, const GateRect& dirty0, const GateRect& overlay) {
+    if (!presentedSinceLastFrame) return false;
+    if (accumulatedFrames > 1) return false;   // merged composites could hide a real change
+    if (dirtyCount != 1) return false;         // a real change elsewhere adds its own rect
+    return dirty0.left == overlay.left && dirty0.top == overlay.top &&
+           dirty0.right == overlay.right && dirty0.bottom == overlay.bottom;
+}
+
 }
