@@ -90,6 +90,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "hdrTonemap")         c.hdrTonemap = std::stoi(val);
             else if (key == "multiMonitor")       c.multiMonitor = std::stoi(val);
             else if (key == "cropCapture")        c.cropCapture = std::stoi(val);
+            else if (key == "captureCopy")        c.captureCopy = std::stoi(val);
             else if (key == "onboarded")          c.onboarded = std::stoi(val);
             else if (key == "quickZoomDefault")   c.quickZoomDefault = std::stod(val);
             else if (key == "quickZoomModifier")  c.quickZoomModifier = val;
@@ -214,6 +215,10 @@ Config LoadConfig(const std::wstring& path) {
                ";   1=on a full-screen repaint (games) copy only the magnified region (cuts 4K HDR GPU\n"
                ";   copy ~zoom^2) but screen edges can briefly show a previous window after a switch.\n"
                "cropCapture=0\n"
+               "; captureCopy (escape hatch): 0=zero-copy capture (sample the duplication frame\n"
+               ";   directly - no per-frame desktop copy, default); 1=legacy copy-based capture\n"
+               ";   for drivers that misbehave with held duplication frames\n"
+               "captureCopy=0\n"
                "; outline: 1 = draw a solid outline around the screen edges while zoomed (an\n"
                ";   at-a-glance 'you are zoomed' indicator, handy at low zoom); 0 = off (default)\n"
                "outline=0\n"

@@ -268,3 +268,8 @@ TEST_CASE("outline low-zoom + idle keys default and parse with clamps") {
     CHECK(ParseConfig("outlineIdleSeconds=0\n").outlineIdleSeconds == doctest::Approx(0.5));
     CHECK(ParseConfig("outlineIdleSeconds=120\n").outlineIdleSeconds == doctest::Approx(60.0));
 }
+TEST_CASE("captureCopy parses and defaults to 0 (zero-copy)") {
+    CHECK(wind::ParseConfig("").captureCopy == 0);
+    CHECK(wind::ParseConfig("captureCopy=1\n").captureCopy == 1);
+    CHECK(wind::ParseConfig("captureCopy=0\n").captureCopy == 0);
+}

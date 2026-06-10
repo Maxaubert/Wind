@@ -95,6 +95,11 @@ struct Config {
     // switch the screen edges can briefly show the previous window's pixels until a smaller change
     // triggers a full refresh; that staleness is why it defaults off. Hot-reloadable.
     int    cropCapture = 0;
+    // Capture mode (escape hatch). 0 (default) = zero-copy: the magnify pass samples the Desktop
+    // Duplication frame directly (held across ticks, released right before the next acquire) - no
+    // per-frame desktop copy. 1 = legacy copy-based capture (desktopCopy texture + dirty-rect
+    // patching), for drivers that misbehave with held DDA frames. Hot-reloadable.
+    int    captureCopy = 0;
     // First-launch onboarding: 0 = not yet onboarded (also true of a freshly created ini), so the
     // core spawns WindConfig.exe --onboard once; the onboarding flow sets this to 1 on completion.
     int    onboarded = 0;
