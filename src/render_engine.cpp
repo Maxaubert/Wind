@@ -69,6 +69,7 @@ struct RenderEngine::State {
     // Desktop Duplication.
     ComPtr<IDXGIOutputDuplication> dupl;
     ComPtr<ID3D11Texture2D> desktopCopy;      // captureCopy=1 path: SRV-able copy of the desktop (no cursor)
+    ComPtr<ID3D11ShaderResourceView> copySRV; // the copy path's OWN view of desktopCopy (survives dropDuplication)
     ComPtr<ID3D11ShaderResourceView> desktopSRV;   // what the magnify pass samples (copy or held surface)
     // Zero-copy capture (captureCopy=0, the default): the magnify pass samples the duplication's
     // desktop surface directly; desktopCopy is unused. heldTex/desktopSRV point at the last
@@ -87,7 +88,9 @@ struct RenderEngine::State {
     struct DdaView { ComPtr<ID3D11ShaderResourceView> srv; ComPtr<IDXGIKeyedMutex> mutex; };
     std::unordered_map<ID3D11Texture2D*, DdaView> ddaSrv;
     bool srvFailed = false;        // SRV creation rejected on a DDA surface -> copy mode for the session
-    bool lastCaptureCopy = false;  // detect a captureCopy hot-toggle (forces a clean rebuild)
+    int lastCaptureCopy = -1;      // detect a captureCopy hot-toggle (forces a clean rebuild);
+                                   // -1 = no dispatch yet, so a captureCopy=1 startup is not a "toggle"
+                                   // (it would discard the duplication buildDeviceResources just made)
     bool haveDesktop = false;
     bool freshCapture = false;   // next capture() must drain to the latest desktop frame (zoom-in)
     FrameSnapshot lastRendered;        // snapshot of the last PRESENTED frame (frame-skip gate)
@@ -158,8 +161,8 @@ struct RenderEngine::State {
     IDXGIOutput* selectOutput(const wchar_t* deviceName, bool fallbackToFirst);
 
     // Create the D3D11 device and everything that hangs off it (swapchain+rtv, shaders, buffers,
-    // blend/sampler states, desktop-copy texture, Desktop Duplication). Shared by initialize() and
-    // the device-lost recovery path so the two can't drift. The HWND must already exist.
+    // blend/sampler states, Desktop Duplication). Shared by initialize() and the device-lost
+    // recovery path so the two can't drift. The HWND must already exist.
     bool buildDeviceResources();
     bool buildPresent();          // create the blt-model swapchain + rtv
     void releasePresent();        // drop rtv + swapchain (device kept)
@@ -289,19 +292,26 @@ bool RenderEngine::State::recreateDupl() {
 // (Re)create desktopCopy + its SRV to match the captured frame's actual format, so
 // CopyResource can never hit a format mismatch (which black-screened the magnify pass).
 bool RenderEngine::State::ensureDesktopCopy(DXGI_FORMAT fmt) {
-    if (desktopCopy && copyFormat == fmt && copyW == sw && copyH == sh) return true;
+    // The SRV lives in the copy path's OWN slot (copySRV), never the shared desktopSRV: every
+    // entry into copy mode passes through dropDuplication() (hot-toggle, srvFailed fallback,
+    // invalidateCapture, retarget), which resets desktopSRV - keying the early-return on
+    // desktopCopy alone then left render() binding a null SRV forever on SDR (BGRA8 never
+    // changes format, so this never recreated it: permanent black). captureViaCopy re-points
+    // desktopSRV at copySRV on every successful capture instead.
+    if (desktopCopy && copySRV && copyFormat == fmt && copyW == sw && copyH == sh) return true;
     // (Re)creating the copy yields a BLANK texture, so we no longer hold a valid cached desktop
     // image: force the next capture to do a full CopyResource (copyChangedRegions bails on
     // !haveDesktop) instead of patching dirty rects onto blank pixels (HDR toggle / size change).
     haveDesktop = false;
     desktopSRV.Reset();
+    copySRV.Reset();
     desktopCopy.Reset();
     D3D11_TEXTURE2D_DESC dc{};
     dc.Width = sw; dc.Height = sh; dc.MipLevels = 1; dc.ArraySize = 1;
     dc.Format = fmt; dc.SampleDesc.Count = 1;
     dc.Usage = D3D11_USAGE_DEFAULT; dc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
     if (FAILED(device->CreateTexture2D(&dc, nullptr, desktopCopy.ReleaseAndGetAddressOf()))) { RLog("ensureDesktopCopy: tex fail fmt=%u", fmt); return false; }
-    if (FAILED(device->CreateShaderResourceView(desktopCopy.Get(), nullptr, desktopSRV.ReleaseAndGetAddressOf()))) { RLog("ensureDesktopCopy: srv fail fmt=%u", fmt); return false; }
+    if (FAILED(device->CreateShaderResourceView(desktopCopy.Get(), nullptr, copySRV.ReleaseAndGetAddressOf()))) { RLog("ensureDesktopCopy: srv fail fmt=%u", fmt); return false; }
     copyFormat = fmt;
     copyW = sw; copyH = sh;
     RLog("ensureDesktopCopy: format=%u size=%dx%d", (unsigned)fmt, sw, sh);
@@ -479,11 +489,15 @@ bool RenderEngine::State::setHeldTexture(ID3D11Texture2D* tex) {
 
 // Zero-copy capture: acquire -> read metadata -> point the SRV at the surface -> HOLD it through
 // the draw; ReleaseFrame is deferred to the start of the next call (per the DDA docs the surface
-// is invalid after release). WAIT_TIMEOUT (static desktop) keeps sampling the previous surface:
-// the duplication only rewrites it during AcquireNextFrame on this thread, never concurrently
-// with our draw, so that is benign in practice - BUT the surface carries a keyed mutex (see
-// setHeldTexture), so on those deferred ticks we must re-AcquireSync it ourselves or the magnify
-// draw is silently discarded (black); captureCopy=1 is the escape hatch if a driver disagrees.
+// is invalid after release). WAIT_TIMEOUT (static desktop) keeps sampling the previous surface.
+// Concurrency: while a frame is RELEASED the OS accumulates desktop updates INTO the shared
+// surface, so a producer write can overlap our in-flight draw between a timed-out acquire and
+// the present (the fresh drain's release-then-timeout iterations included). When the surface
+// carries a keyed mutex (see setHeldTexture) the exclusion is real - we must re-AcquireSync on
+// those deferred ticks anyway, since draws binding an un-acquired keyed-mutex resource are
+// silently discarded (black), and holding it keeps the producer out. Without a mutex (typical
+// SDR BGRA8) the worst case is one stale-or-torn tick, self-corrected on the next acquire (the
+// new frame forces a redraw); captureCopy=1 is the escape hatch if a driver makes that visible.
 // Same fresh-drain semantics as the copy path: a zoom-in drains to the latest frame within a
 // bounded budget so the reveal never shows a transitional composite.
 bool RenderEngine::State::captureZeroCopy(const RECT& view, bool& changedInView) {
@@ -497,11 +511,15 @@ bool RenderEngine::State::captureZeroCopy(const RECT& view, bool& changedInView)
     const int   firstAttempts = fresh ? 40 : 4;
     const DWORD firstTimeout  = fresh ? 25 : 0;
     const unsigned long long freshDeadlineMs = fresh ? GetTickCount64() + 100 : 0;
+    // Wall-clock budget for the non-fresh mutex-busy retries (mirrors freshDeadlineMs): bounds
+    // the worst case by construction instead of by attempts*timeouts arithmetic.
+    const unsigned long long busyDeadlineMs = fresh ? 0 : GetTickCount64() + 8;
     bool gotThisCall = false;
     DWORD retryTo = firstTimeout;
 
     for (int a = 0; a < firstAttempts; ++a) {
         if (fresh && !gotThisCall && GetTickCount64() >= freshDeadlineMs) break;  // budget spent, no frame yet
+        if (!fresh && a > 0 && GetTickCount64() >= busyDeadlineMs) break;         // busy-retry budget spent
         releaseHeldFrame();                       // deferred release: just before the next acquire
         IDXGIResource* res = nullptr;
         DXGI_OUTDUPL_FRAME_INFO fi{};
@@ -580,14 +598,19 @@ bool RenderEngine::State::captureZeroCopy(const RECT& view, bool& changedInView)
         if (mhr == S_OK) heldMutexAcquired = true;
         else {
             RLog("captureZeroCopy: keyed-mutex re-acquire failed hr=0x%08lX", (unsigned long)mhr);
-            haveDesktop = false;        // cannot legally sample this tick; recovers next acquire
+            // Cannot legally sample this tick. Drop the duplication (the proven ACCESS_LOST shape):
+            // a fresh grab on a RECREATED duplication lands a full frame immediately. Merely
+            // clearing haveDesktop kept the old duplication, and on a static desktop the next
+            // tick's fresh drain then burned its whole 100 ms budget waiting for a frame that
+            // never came - a repeated input stall until any desktop update.
+            dropDuplication();
         }
     }
     return haveDesktop;
 }
 
 bool RenderEngine::State::captureViaCopy(const RECT& view, bool crop, bool& changedInView) {
-    if (!dupl && !recreateDupl()) return false;
+    // NB: the dispatcher (capture()) guarantees dupl exists; no re-create guard needed here.
 
     // A settled desktop polls non-blocking (0 ms, 1 attempt): a static screen returns
     // WAIT_TIMEOUT immediately and we re-pan the cached copy, so panning is never gated on a
@@ -663,6 +686,7 @@ bool RenderEngine::State::captureViaCopy(const RECT& view, bool crop, bool& chan
                 if (!haveDesktop)
                     RLog("capture: first frame acquiredFormat=%u copyFormat=%u capFp16=%d",
                          (unsigned)td.Format, (unsigned)copyFormat, (int)capFp16);
+                desktopSRV = copySRV;   // re-point every capture: dropDuplication() clears the shared slot
                 haveDesktop = true;
                 gotThisCall = true;
             }
@@ -681,12 +705,14 @@ bool RenderEngine::State::captureViaCopy(const RECT& view, bool crop, bool& chan
 }
 
 bool RenderEngine::State::capture(const RECT& view, bool crop, bool copyMode, bool& changedInView) {
-    if (copyMode != lastCaptureCopy) {            // hot-toggled: rebuild capture state cleanly
-        lastCaptureCopy = copyMode;
+    // lastCaptureCopy < 0 = first dispatch: just record the mode (a captureCopy=1 startup must
+    // not look like a toggle and discard the duplication buildDeviceResources just created).
+    if (lastCaptureCopy >= 0 && (int)copyMode != lastCaptureCopy) {  // hot-toggled: rebuild cleanly
         dropDuplication();
         freshCapture = true;
         forceNextRender = true;
     }
+    lastCaptureCopy = (int)copyMode;
     if (!dupl && !recreateDupl()) return false;
     return copyMode ? captureViaCopy(view, crop, changedInView)
                     : captureZeroCopy(view, changedInView);
@@ -716,6 +742,7 @@ bool RenderEngine::recoverDeviceLost() {
     // all belong to the dead duplication.
     s_->dropDuplication();
     s_->desktopCopy.Reset();
+    s_->copySRV.Reset();     // belongs to the dead device; ensureDesktopCopy recreates both
     s_->srvFailed = false;   // new device: give zero-copy another chance
     s_->cursorTex.Reset(); s_->cursorSRV.Reset(); s_->cursorReady = false; s_->lastCursor = nullptr;
     s_->cursorCache.clear();   // cached cursor textures belong to the dead device
@@ -822,9 +849,9 @@ bool RenderEngine::State::buildDeviceResources() {
 
     if (!buildPresent()) { RLog("buildDeviceResources: buildPresent failed"); return false; }
 
-    // --- Desktop copy texture (SRV-able; DDA frames are copied into this). Starts BGRA8;
-    //     capture() re-creates it to match the acquired format (e.g. FP16 scRGB on HDR). ---
-    if (!ensureDesktopCopy(DXGI_FORMAT_B8G8R8A8_UNORM)) { RLog("buildDeviceResources: ensureDesktopCopy failed"); return false; }
+    // NB: no eager desktopCopy here - the zero-copy default never needs it, and captureViaCopy
+    // calls ensureDesktopCopy per acquired frame (sized to the actual captured format), so the
+    // first copy-mode frame creates the texture + copySRV on demand.
 
     // --- Magnify shader pipeline ---
     ID3DBlob* vsb = CompileShader(kMagHLSL, "VSMain", "vs_5_0");
@@ -1258,6 +1285,14 @@ RenderResult RenderEngine::renderFrame(const RenderFrameParams& p) {
         s_->lastClickX = p.clickDesktopX; s_->lastClickY = p.clickDesktopY;
     }
     const bool changedInView = s_->prepare(p);
+
+    // Desktop-lost edge tick (DDA ACCESS_LOST / keyed-mutex re-acquire failure): there is nothing
+    // to sample, so render() would clear to black and present a fullscreen black flash while
+    // zoomed. Keep the last presented frame on screen instead; the next good frame presents
+    // immediately - !haveDesktop makes the recovery tick a fresh capture (changedInView forced),
+    // and invalidate/retarget/hot-toggle also set forceNextRender. The !havePresented first-frame
+    // case still falls through: a black clear is correct when nothing was ever shown.
+    if (!s_->haveDesktop && s_->havePresented) return RenderResult::Skipped;
 
     // Frame-skip gate: present only when the image would differ from what is already on screen.
     // A skipped tick leaves the DWM redirection surface showing the last frame, which is correct
