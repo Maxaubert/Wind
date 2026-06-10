@@ -74,11 +74,14 @@ struct RenderEngine::State {
     // Zero-copy capture (captureCopy=0, the default): the magnify pass samples the duplication's
     // desktop surface directly; desktopCopy is unused. heldTex/desktopSRV point at the last
     // acquired surface; frameHeld means ReleaseFrame is still pending (deferred to just before
-    // the next AcquireNextFrame - per the DDA docs the surface is invalid after release, so the
-    // frame stays HELD through the draw). ddaSrv caches one SRV (+ keyed mutex) per duplication
-    // surface (DDA cycles a small set). The surface can carry a KEYED MUTEX: while the frame is
-    // held, AcquireNextFrame holds it for us; on deferred no-new-frame ticks we AcquireSync it
-    // ourselves (heldMutexAcquired) or draws binding it are silently discarded (black).
+    // the next AcquireNextFrame for mutex-less surfaces; released right after the draw is
+    // submitted when the surface carries a keyed mutex - see releaseCaptureHold). ddaSrv caches
+    // one SRV (+ keyed mutex) per duplication surface (DDA cycles a small set). The surface can
+    // carry a KEYED MUTEX: while the frame is held, AcquireNextFrame holds it for us; on
+    // deferred no-new-frame ticks we AcquireSync it ourselves (heldMutexAcquired) or draws
+    // binding it are silently discarded (black). Either way we give the mutex back the moment
+    // the draw is submitted (releaseCaptureHold) so the producer can keep writing desktop
+    // updates between ticks.
     // heldTex/heldMutex/ddaSrv/desktopSRV belong to the duplication: every teardown goes
     // through dropDuplication() (release the held frame FIRST, then clear them).
     ComPtr<ID3D11Texture2D> heldTex;
@@ -96,9 +99,24 @@ struct RenderEngine::State {
     FrameSnapshot lastRendered;        // snapshot of the last PRESENTED frame (frame-skip gate)
     bool havePresented = false;        // nothing presented yet -> never skip
     bool forceNextRender = false;      // one-shot render force (invalidate/retarget/recover)
-    bool expectEcho = false;           // we presented; next acquired image frame may be our own echo
-    EchoFilter echoFilter;             // real-change streak hysteresis: full-rate content aliasing
-                                       // with the echo signature must still render (issue #96)
+    // We presented; the next acquired image frame(s) may be our own echo. A BUDGET of 3, not a
+    // bool: one present is observed to spawn up to THREE duplication frames on the HDR desktop
+    // (the full-monitor dirty echo, then one or two work-area-shaped follow-ups - the wallpaper
+    // layer re-tonemapped under our overlay). A single-shot flag classified the follow-ups as
+    // real changes, which re-opened the EchoFilter grace and the present -> echo -> present
+    // chain never died on an idle desktop (issue #96).
+    int echoBudget = 0;
+    EchoFilter echoFilter;             // recent-activity grace: a real change merged into the same
+                                       // composite as our echo must still render (issue #96)
+    // Chain-death catch-up: when an echo-shaped frame is SKIPPED (grace expired), it could still
+    // carry a real change that merged into that exact composite (the stuck-Start-menu shape, one
+    // composite wide). The skipped composite's pixels are already in the sampled desktop surface,
+    // so ONE forced render right after presents them; lastPresentCatchUp breaks the cascade (the
+    // catch-up's own echo is skipped WITHOUT scheduling another catch-up, or the chain would
+    // never die). A change merged into the catch-up's own echo is the only remaining hole - one
+    // composite, one level deeper, and any further activity arrives as a real change anyway.
+    bool catchUpPending = false;       // skipped echo-shaped frame -> force one render next gate
+    bool lastPresentCatchUp = false;   // the latest present existed ONLY for the catch-up
     std::vector<unsigned char> metaBuf;   // reused buffer for GetFrameMoveRects/GetFrameDirtyRects
     // Diagnostics for the HDR investigation: the duplication's surface format + the output's
     // color space / bit depth (tells us whether the desktop is HDR and what we're capturing).
@@ -169,6 +187,7 @@ struct RenderEngine::State {
     bool acquireBackbufferRtv();  // (re)create rtv from the swapchain's back buffer (buffer 0)
     bool recreateDupl();
     void releaseHeldFrame();       // ReleaseFrame if pending (must precede any dupl teardown)
+    void releaseCaptureHold();     // post-draw: free the keyed mutex (and the held frame) for DWM
     void dropDuplication();        // releaseHeldFrame + dupl.Reset + clear held texture/SRVs
     bool setHeldTexture(ID3D11Texture2D* tex);  // point desktopSRV at tex (cached SRV); false on SRV fail
     // Capture dispatcher: rebuilds capture state on a captureCopy hot-toggle, then routes to the
@@ -227,11 +246,14 @@ bool RenderEngine::State::recreateDupl() {
     releaseHeldFrame();   // never drop a duplication with its frame still acquired
     dupl.Reset();
     ddaSrv.clear();       // cached SRVs pin the OLD duplication's surfaces; never returned again
-    // A (re)created duplication starts a new echo context: a stale expectEcho from the last
+    // A (re)created duplication starts a new echo context: a stale echo budget from the last
     // present would make its first full-desktop frame look like our own echo and swallow the
-    // present (stale view after UAC/secure-desktop/fullscreen transitions). Same for the streak.
-    expectEcho = false;
+    // present (stale view after UAC/secure-desktop/fullscreen transitions). Same for the grace
+    // and the catch-up flags.
+    echoBudget = 0;
     echoFilter.reset();
+    catchUpPending = false;
+    lastPresentCatchUp = false;
     // Capture the target monitor's output (matched by device name), falling back to the first
     // output for the legacy single-monitor path (empty targetDevice) or any name mismatch.
     IDXGIOutput* output = selectOutput(targetDevice, /*fallbackToFirst=*/true);
@@ -377,12 +399,12 @@ bool RenderEngine::State::copyChangedRegions(ID3D11Texture2D* src, const DXGI_OU
 // ReleaseFrame (metadata is only readable while the frame is owned). Reuses metaBuf; safe because
 // copyChangedRegions re-fetches into it afterwards (the API allows repeated fetches while owned).
 bool RenderEngine::State::frameChangesView(const DXGI_OUTDUPL_FRAME_INFO& fi, const RECT& view, bool echoCandidate) {
-    if (fi.LastPresentTime.QuadPart == 0) return false;     // pointer-only update: streak untouched
+    if (fi.LastPresentTime.QuadPart == 0) return false;     // pointer-only update: filter untouched
     const UINT meta = fi.TotalMetadataBufferSize;
     // EchoFilter feeding rule: noteRealChange() fires if and only if this function returns true
-    // for a non-echo-shaped frame, so the bypass streak tracks VIEW-relevant changes only. The
+    // for a non-echo-shaped frame, so the grace tracks VIEW-relevant changes only. The
     // conservative assume-changed paths (no metadata, fetch failure, scroll) return true, so
-    // they feed the streak like a dirty frame that intersects the view.
+    // they refresh the grace like a dirty frame that intersects the view.
     if (meta == 0) { echoFilter.noteRealChange(); return true; }   // no metadata: full change
     if (metaBuf.size() < meta) metaBuf.resize(meta);
     UINT moveBytes = 0;
@@ -397,50 +419,86 @@ bool RenderEngine::State::frameChangesView(const DXGI_OUTDUPL_FRAME_INFO& fi, co
     const UINT n = dirtyBytes / sizeof(RECT);
     // NB: zero dirty rects with a real present is "no image change" per the DDA contract, so the
     // gate says unchanged even though copyChangedRegions conservatively full-copies that case.
-    // Neither a real change nor an echo: the streak is left untouched.
+    // Neither a real change nor an echo: the filter is left untouched.
     if (n == 0) return false;
     const RECT* rects = reinterpret_cast<const RECT*>(metaBuf.data());
     // Our own Present echoes back through DDA: the overlay is capture-EXCLUDED, yet the frame
-    // after each present arrives with one dirty rect equal to the overlay rect (the whole
-    // monitor) while the captured pixels are unchanged. Without this filter the gate chains
-    // present -> dirty -> present and idle frame-skip never engages (issue #96).
-    const GateRect d0{ rects[0].left, rects[0].top, rects[0].right, rects[0].bottom };
-    const GateRect overlay{ 0, 0, sw, sh };
-    if (IsPresentEcho(echoCandidate, fi.AccumulatedFrames, n, d0, overlay)) {
-        // Echo-SHAPED, not necessarily an echo: a fullscreen app repainting the whole monitor
-        // every refresh merges its dirty rect into the same composite as our echo and aliases
-        // with the signature (empirically confirmed on this panel). Skipping those frames
-        // halves the capture rate (render-skip alternation = ~72 fps on a 144 Hz panel), which
-        // the spec forbids for in-game zoom. The EchoFilter streak tells the worlds apart:
-        // while we skip, every other composite is game-only (no echo expected) and classified
-        // real, so sustained full-rate content builds the streak and flips echo-shaped frames
-        // to real (full 144 fps) within ~120 ms. Idle echoes never build a streak and stay
-        // skipped, and the filter's probe cadence breaks a stale bypass chain (see frame_gate.h).
-        return echoFilter.onEchoShaped();
+    // after each present arrives with its dirty region covering the overlay (the whole monitor,
+    // sometimes clipped by the taskbar's band and/or split into rects - see frame_gate.h) while
+    // the captured pixels are unchanged. Without this filter the gate chains present -> dirty ->
+    // present and idle frame-skip never engages (issue #96).
+    long long dirtyArea = 0;
+    for (UINT i = 0; i < n; ++i) {
+        const RECT& r = rects[i];
+        if (r.right > r.left && r.bottom > r.top)
+            dirtyArea += (long long)(r.right - r.left) * (r.bottom - r.top);
+    }
+    if (IsPresentEcho(echoCandidate, dirtyArea, (long long)sw * sh)) {
+        // Echo-SHAPED, not necessarily an echo: ANY real change DWM merges into the same
+        // composite as our echo aliases with the signature (the dirty union is the overlay
+        // rect) - a fullscreen app repainting every refresh, but equally a SPORADIC transition
+        // (alt-tab commit, Start menu close) whose repaint rides the echo of the present it
+        // triggered. Skipping the sustained case halves the capture rate; skipping the sporadic
+        // case left the transition's LAST repaint stuck stale on screen until the next unrelated
+        // change (issue #96). The EchoFilter streak+grace hybrid resolves the alias: sustained
+        // content engages the streak bypass (full rate), sporadic merges render through the
+        // short grace, and idle echoes are skipped so the post-present chain always dies
+        // (see frame_gate.h).
+        if (echoFilter.onEchoShaped()) return true;
+        // Skipped as an echo. If it DID carry a merged real change (possible in exactly this
+        // composite - the grace just expired), the change's pixels are already in the desktop
+        // surface we sample: schedule one catch-up render so they reach the screen next tick.
+        // Never re-arm off the catch-up's own echo (cascade-breaker; see catchUpPending).
+        if (!lastPresentCatchUp) catchUpPending = true;
+        return false;
     }
     const GateRect v{ view.left, view.top, view.right, view.bottom };
     for (UINT i = 0; i < n; ++i) {
         const GateRect r{ rects[i].left, rects[i].top, rects[i].right, rects[i].bottom };
         if (RectsIntersect(r, v)) {
-            echoFilter.noteRealChange();   // view-intersecting non-echo change: the streak builds
+            echoFilter.noteRealChange();   // view-intersecting non-echo change: refresh the grace
             return true;
         }
     }
     // Every dirty rect lies OUTSIDE the view (content animating elsewhere on the monitor).
-    // NEUTRAL to the filter: no streak bump, no timeout-run clear, no decay. Feeding the streak
-    // here let any off-view ~50+ fps animation (a terminal spinner, a video) engage the bypass
-    // and chain our own present echoes at full rate over a static view (issue #96).
+    // NEUTRAL to the filter: no grace refresh, no burn. Refreshing the grace here would let any
+    // off-view ~50+ fps animation (a terminal spinner, a video) hold it open and chain our own
+    // present echoes at full rate over a static view (issue #96).
     return false;
 }
 
 void RenderEngine::State::releaseHeldFrame() {
-    // Give back our own keyed-mutex acquisition first (taken on deferred no-new-frame ticks);
-    // the mutex POINTER stays with heldTex (cleared in dropDuplication) so a later deferred tick
-    // can re-acquire it.
+    // Backstop: give back our own keyed-mutex acquisition first if a tick somehow still holds it
+    // (renderFrame normally releases it right after the draw - see releaseCaptureHold); the
+    // mutex POINTER stays with heldTex (cleared in dropDuplication) so a later deferred tick can
+    // re-acquire it.
     if (heldMutexAcquired && heldMutex) heldMutex->ReleaseSync(0);
     heldMutexAcquired = false;
     if (frameHeld && dupl) dupl->ReleaseFrame();
     frameHeld = false;
+}
+
+// Release the capture hold as soon as the tick's draw is SUBMITTED (and on skipped ticks,
+// immediately), but only where a keyed mutex makes that safe. Keyed mutexes order at GPU-command
+// granularity, so an early release is safe: the producer's subsequent writes are fenced behind
+// our already-submitted sampling draw. Two holds can block the producer:
+//  - the SELF-acquired mutex (deferred no-new-frame ticks AcquireSync it so the draw is not
+//    silently discarded): always released here;
+//  - the HELD FRAME itself, released early ONLY when the surface carries a keyed mutex
+//    (ReleaseFrame returns that mutex with the same fencing). A mutex-LESS surface (typical SDR
+//    BGRA8) keeps the deferred-release pattern (held to the next acquire): there the hold is the
+//    only protection against the producer overwriting an in-flight draw, and there is no mutex
+//    for DWM to block on, so holding it costs nothing.
+// Why this matters (issue #96): the producer only delivers a duplication frame when it can take
+// the keyed mutex, and it does not queue behind a busy one - it DROPS composites. Holding the
+// self-acquired mutex across the inter-tick window starved delivery to ~2 frames/s while zoomed:
+// desktop transitions (alt-tab, Start menu open/close) never reached the capture and the
+// magnified view kept stale fragments. Even the per-tick hold of a delivered frame cost ~12% of
+// composites under full-rate HDR content (~250 of 288 per 2 s window; ~277 with this release).
+void RenderEngine::State::releaseCaptureHold() {
+    if (heldMutexAcquired && heldMutex) heldMutex->ReleaseSync(0);
+    heldMutexAcquired = false;
+    if (frameHeld && heldMutex && dupl) { dupl->ReleaseFrame(); frameHeld = false; }
 }
 
 // Tear down the duplication AND everything that lives inside it. The held frame must be released
@@ -488,23 +546,29 @@ bool RenderEngine::State::setHeldTexture(ID3D11Texture2D* tex) {
 }
 
 // Zero-copy capture: acquire -> read metadata -> point the SRV at the surface -> HOLD it through
-// the draw; ReleaseFrame is deferred to the start of the next call (per the DDA docs the surface
-// is invalid after release). WAIT_TIMEOUT (static desktop) keeps sampling the previous surface.
+// the draw. ReleaseFrame timing depends on the surface: with a keyed mutex it is released right
+// after the draw is submitted (renderFrame -> releaseCaptureHold; the mutex's GPU-level fencing
+// protects the in-flight draw), without one it is deferred to the start of the next call (per
+// the DDA docs the surface is invalid after release). WAIT_TIMEOUT (static desktop) keeps
+// sampling the previous surface.
 // Concurrency: while a frame is RELEASED the OS accumulates desktop updates INTO the shared
 // surface, so a producer write can overlap our in-flight draw between a timed-out acquire and
 // the present (the fresh drain's release-then-timeout iterations included). When the surface
 // carries a keyed mutex (see setHeldTexture) the exclusion is real - we must re-AcquireSync on
 // those deferred ticks anyway, since draws binding an un-acquired keyed-mutex resource are
-// silently discarded (black), and holding it keeps the producer out. Without a mutex (typical
-// SDR BGRA8) the worst case is one stale-or-torn tick, self-corrected on the next acquire (the
-// new frame forces a redraw); captureCopy=1 is the escape hatch if a driver makes that visible.
+// silently discarded (black). CRITICAL: every keyed-mutex hold (self-acquired OR a held frame)
+// lasts only from here through the draw submission; holding one across the inter-tick window
+// starved DWM's surface writes and dropped desktop transitions (issue #96; see
+// releaseCaptureHold). Without a mutex (typical SDR BGRA8) the worst case is one stale-or-torn
+// tick, self-corrected on the next acquire (the new frame forces a redraw); captureCopy=1 is
+// the escape hatch if a driver makes that visible.
 // Same fresh-drain semantics as the copy path: a zoom-in drains to the latest frame within a
 // bounded budget so the reveal never shows a transitional composite.
 bool RenderEngine::State::captureZeroCopy(const RECT& view, bool& changedInView) {
     const bool fresh = freshCapture || !haveDesktop;
     freshCapture = false;
-    // New capture context (zoom-in/retarget): a bypass streak earned over previous content must
-    // not leak into this session (same rule as the copy path).
+    // New capture context (zoom-in/retarget): grace earned over previous content must not leak
+    // into this session (same rule as the copy path).
     if (fresh) echoFilter.reset();
     // Non-fresh ticks normally need a single non-blocking poll; the extra attempts only engage
     // for the mutex-pending race below (a new composite mid-handoff), with a short real wait.
@@ -538,7 +602,7 @@ bool RenderEngine::State::captureZeroCopy(const RECT& view, bool& changedInView)
                     if (heldMutex->AcquireSync(0, 2) == S_OK) heldMutexAcquired = true;
                     else { retryTo = 4; continue; }
                 }
-                // Steady-state poll with no new composite: idle evidence for the echo-bypass streak
+                // Steady-state poll with no new composite: idle evidence that burns the echo grace
                 // (fresh-grab retries are not idle evidence - the duplication was just (re)created).
                 echoFilter.noteTimeout();
                 break;
@@ -565,12 +629,13 @@ bool RenderEngine::State::captureZeroCopy(const RECT& view, bool& changedInView)
         if (tex) {
             // Metadata must be read while the frame is owned. Pointer-only frames
             // (LastPresentTime == 0) change nothing on screen but still swap the held surface
-            // (DDA may rotate surfaces between acquires); they do not consume expectEcho - the
-            // echo composite is an image frame by definition - and frameChangesView ignores them.
-            // Only the FIRST image frame after our own Present can be its echo: consumed here,
-            // once per acquired image frame, exactly like the copy path.
+            // (DDA may rotate surfaces between acquires); they do not consume the echo budget -
+            // the echo composites are image frames by definition - and frameChangesView ignores
+            // them. The first echoBudget image frames after our own Present can be its echoes
+            // (one present spawns up to two; see echoBudget): consumed one per acquired image
+            // frame, exactly like the copy path.
             bool echoCandidate = false;
-            if (fi.LastPresentTime.QuadPart != 0) { echoCandidate = expectEcho; expectEcho = false; }
+            if (fi.LastPresentTime.QuadPart != 0 && echoBudget > 0) { echoCandidate = true; --echoBudget; }
             changedInView = changedInView || fresh || frameChangesView(fi, view, echoCandidate);
             const bool firstFrame = !haveDesktop;
             if (!setHeldTexture(tex)) {           // SRV refused: session falls back to copy mode
@@ -624,8 +689,8 @@ bool RenderEngine::State::captureViaCopy(const RECT& view, bool crop, bool& chan
     // once one frame is copied we only wait ~3 ms for a newer one, then stop.
     const bool fresh = freshCapture || !haveDesktop;
     freshCapture = false;
-    // New capture context (zoom-in/retarget): a bypass streak earned over previous content must
-    // not leak into this session, or a static-desktop zoom-in after a game could chain echoes.
+    // New capture context (zoom-in/retarget): grace earned over previous content must not leak
+    // into this session, or a static-desktop zoom-in after a game could chain echoes.
     if (fresh) echoFilter.reset();
     const int   firstAttempts = fresh ? 40 : 1;
     const DWORD firstTimeout  = fresh ? 25 : 0;
@@ -646,10 +711,8 @@ bool RenderEngine::State::captureViaCopy(const RECT& view, bool crop, bool& chan
         if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
             SafeRelease(res);
             if (gotThisCall) break;
-            // Steady-state poll with no new composite. A long-enough run of these means the
-            // full-rate content stopped, so the echo-bypass streak resets and idle echo skipping
-            // resumes (single timeouts interleave with full-rate content because this poll runs
-            // faster than DWM composites - the filter only resets on a full run). Fresh-grab
+            // Steady-state poll with no new composite: idle evidence that burns the echo grace,
+            // so after content stops the echo chain dies and idle skipping resumes. Fresh-grab
             // retries are not idle evidence (the duplication was just (re)created): no feed.
             if (!fresh) echoFilter.noteTimeout();
             continue;
@@ -667,11 +730,11 @@ bool RenderEngine::State::captureViaCopy(const RECT& view, bool crop, bool& chan
         // the OS pointer (drawn from GetCursorInfo), so the cached copy is still valid - copy
         // nothing. This keeps a busy-pointer-but-static desktop from forcing any copy at all.
         if (tex && fi.LastPresentTime.QuadPart != 0) {
-            // Only the FIRST image frame after our own Present can be its echo; consume the flag
-            // here (pointer-only frames above do not consume it - the echo composite is an image
-            // frame by definition).
-            const bool echoCandidate = expectEcho;
-            expectEcho = false;
+            // The first echoBudget image frames after our own Present can be its echoes (one
+            // present spawns up to two; see echoBudget); consume one per image frame (pointer-
+            // only frames above do not consume - the echo composites are image frames).
+            const bool echoCandidate = echoBudget > 0;
+            if (echoBudget > 0) --echoBudget;
             changedInView = changedInView || fresh || frameChangesView(fi, view, echoCandidate);
             // Match the copy texture to the captured format so the copy never mismatches (incl.
             // after a runtime HDR toggle changes the duplication format). The tonemap is gated on
@@ -1307,10 +1370,16 @@ RenderResult RenderEngine::renderFrame(const RenderFrameParams& p) {
     snap.outlineAlpha = (p.outline && p.level > 1.0 && s_->haveDesktop) ? p.outlineAlpha : 0.0f;
 
     const bool force = p.forceRender || s_->forceNextRender || !s_->havePresented;
-    if (!force && !changedInView && !SnapshotsDiffer(s_->lastRendered, snap))
+    const bool naturalRender = force || changedInView || SnapshotsDiffer(s_->lastRendered, snap);
+    if (!naturalRender && !s_->catchUpPending) {
+        s_->releaseCaptureHold();   // no draw this tick: free the surface for the producer at once
         return RenderResult::Skipped;
-
+    }
     s_->render(p);
+    // Draw submitted: hand the keyed mutex back NOW so DWM can write desktop updates into the
+    // shared surface during the whole inter-tick window (see releaseCaptureHold for the starvation
+    // this prevents). GPU ordering is preserved by the mutex itself.
+    s_->releaseCaptureHold();
     // p.vsync = (cfg.vsync && !cfg.dwmFlush): sync interval 1 locks the present to the refresh;
     // 0 presents immediately and the caller paces via DwmFlush or the timer.
     HRESULT hr = s_->swap->Present(p.vsync ? 1 : 0, 0);
@@ -1325,7 +1394,11 @@ RenderResult RenderEngine::renderFrame(const RenderFrameParams& p) {
     s_->lastRendered = snap;
     s_->havePresented = true;
     s_->forceNextRender = false;
-    s_->expectEcho = true;   // the next acquired image frame may be this present's DDA echo
+    // A present that exists ONLY for the chain-death catch-up marks itself so its own echo
+    // cannot schedule another catch-up (see catchUpPending; the chain must die here).
+    s_->lastPresentCatchUp = !naturalRender;
+    s_->catchUpPending = false;
+    s_->echoBudget = 3;   // the next image frames may be this present's DDA echoes (up to three)
     return RenderResult::Presented;
 }
 
@@ -1335,6 +1408,7 @@ bool RenderEngine::dumpFrame(const RenderFrameParams& p, const wchar_t* path) {
     if (!s_->ready) return false;
     s_->prepare(p);
     s_->render(p);
+    s_->releaseCaptureHold();   // same post-draw release as renderFrame
     return dumpBackbufferPng(path);
 }
 

@@ -25,71 +25,87 @@ bool SnapshotsDiffer(const FrameSnapshot& a, const FrameSnapshot& b) {
     return false;
 }
 
-bool IsPresentEcho(bool presentedSinceLastFrame, unsigned accumulatedFrames,
-                   unsigned dirtyCount, const GateRect& dirty0, const GateRect& overlay) {
+bool IsPresentEcho(bool presentedSinceLastFrame, long long dirtyArea, long long overlayArea) {
     if (!presentedSinceLastFrame) return false;
-    if (accumulatedFrames > 1) return false;   // merged composites could hide a real change
-    if (dirtyCount != 1) return false;         // a real change elsewhere adds its own rect
-    return dirty0.left == overlay.left && dirty0.top == overlay.top &&
-           dirty0.right == overlay.right && dirty0.bottom == overlay.bottom;
+    if (overlayArea <= 0) return false;
+    // Coverage threshold, not exact rect equality (see the header: the echo arrives clipped by
+    // higher-band windows and/or split into multiple rects). A merged-in real change is rescued
+    // by the EchoFilter grace, not by rect/accum forensics.
+    return dirtyArea * kEchoCoverageDen >= overlayArea * kEchoCoverageNum;
 }
 
+// Streak + grace hybrid (see frame_gate.h for the full rationale).
 void EchoFilter::noteRealChange() {
     // Cap well above the bypass threshold; the exact bound is irrelevant, it only has to never
     // overflow during an arbitrarily long full-rate run.
     constexpr int kStreakCap = 1000;
     if (realStreak_ < kStreakCap) ++realStreak_;
     timeoutRun_ = 0;
-    skipDecay_  = 0;   // restart the decay window: 1:1 real/echo alternation never decays
+    skipDecay_  = 0;                  // restart the decay window
     bypassRun_  = 0;
+    graceLeft_  = kEchoGraceTicks;    // a merged follow-up may ride this change's present echo
 }
 
 void EchoFilter::noteTimeout() {
-    // Single timeouts interleave with full-rate content (the loop polls faster than DWM
-    // composites); only an unbroken run long enough to be a real content gap resets.
+    // NB: timeouts do NOT burn the grace - it is a per-change budget of echo-shaped frames, not
+    // a wall-clock window (burning it on timeouts halved its effective size, since the loop
+    // polls faster than DWM composites and timeouts interleave 1:1 with frames).
+    // Single timeouts interleave with full-rate content; only an unbroken run long enough to be
+    // a real content gap resets the streak.
     if (++timeoutRun_ >= kEchoTimeoutReset) {
         realStreak_ = 0;
         skipDecay_  = 0;
         bypassRun_  = 0;
+        graceLeft_  = 0;                   // the gap ended the change's follow-ups: budget over
         timeoutRun_ = kEchoTimeoutReset;   // clamp: an idle eternity must not overflow
     }
 }
 
-void EchoFilter::reset() { realStreak_ = 0; timeoutRun_ = 0; skipDecay_ = 0; bypassRun_ = 0; }
+void EchoFilter::reset() {
+    realStreak_ = 0; timeoutRun_ = 0; skipDecay_ = 0; bypassRun_ = 0; graceLeft_ = 0;
+}
 
 bool EchoFilter::onEchoShaped() {
-    if (realStreak_ < kEchoBypassStreak) {
-        // A SKIPPED echo is neutral to the timeout run AND decays the streak when echoes pile
-        // up between reals. Both are load-bearing on an idle desktop (observed empirically):
-        // every sparse rendered change spawns echoes of its own present, occasionally
-        // misclassified as real (a late second echo, a merged accum>1 composite). If echoes
-        // cleared the timeout run they would shield the streak from the reset; if they did not
-        // decay it, those ~9/s fake reals out-ran the ~25/s timeouts and ratcheted the streak
-        // to the threshold anyway. The genuine halved regime alternates real:echo 1:1 (the
-        // decay window restarts on every real, so it never fires and the streak builds at full
-        // speed); the idle echo stream outnumbers its fake reals ~13:1, decays ~6 per real,
-        // and stays pinned at 0.
-        if (++skipDecay_ >= kEchoSkipDecay) {
-            skipDecay_ = 0;
-            if (realStreak_ > 0) --realStreak_;
+    // Every echo-shaped frame burns the grace regardless of branch: it must measure distance
+    // from the last REAL change only, or leftover grace would let a stale post-probe chain
+    // ride past the probe's re-proof demand.
+    const bool gracedThisFrame = graceLeft_ > 0;
+    if (gracedThisFrame) --graceLeft_;
+    if (realStreak_ >= kEchoBypassStreak) {
+        // STREAK bypass engaged: sustained full-rate content; render every composite.
+        if (++bypassRun_ >= kEchoProbeInterval) {
+            // Liveness probe: skip this one frame AND drop the streak just below the threshold
+            // so the next event decides. A live game re-proves itself on the next composite
+            // (game-only, no echo pending -> real -> re-engaged), and the engine's catch-up
+            // render shows this skipped frame one tick late, so the probe costs ~nothing. A
+            // stale chain stops presenting here; its late-echo trickle decays the streak and
+            // the timeout run resets it for good.
+            bypassRun_  = 0;
+            realStreak_ = kEchoBypassStreak - 1;
+            skipDecay_  = 0;
+            return false;
         }
-        return false;
+        timeoutRun_ = 0;   // a bypassed echo is a full-rate cadence frame: stray single
+        return true;       // timeouts must not accumulate into a reset while engaged
     }
-    if (++bypassRun_ >= kEchoProbeInterval) {
-        // Liveness probe: skip this one frame AND drop the streak just below the threshold so
-        // the next event decides. A live game re-proves itself immediately (we skipped, so the
-        // next composite is game-only with no echo expectation -> classified real -> streak
-        // back over the threshold; total cost one held frame per interval). A stale chain has
-        // nothing to re-prove with: it stops presenting here, its late-echo trickle (which
-        // once defeated a plain probe by being misclassified real and re-arming a full
-        // interval) decays the streak, and the timeout run resets it for good.
-        bypassRun_  = 0;
-        realStreak_ = kEchoBypassStreak - 1;
-        skipDecay_  = 0;
-        return false;
+    if (gracedThisFrame) {
+        // GRACE bypass: a real change happened within the last kEchoGraceTicks events, so this
+        // frame may be that activity's follow-up merged into our echo - render it. Burning
+        // (never refreshing) the grace is what kills the pure-echo chain; clearing the timeout
+        // run mirrors the streak bypass (these are presents at composite cadence, and the
+        // interleaved single timeouts must not reset a streak that is mid-build).
+        timeoutRun_ = 0;
+        return true;
     }
-    timeoutRun_ = 0;   // a BYPASSED echo is a full-rate cadence frame: stray single timeouts
-    return true;       // (loop hitches) must not accumulate into a reset while engaged
+    // SKIPPED as an echo. Neutral to the timeout run AND decays the streak when echoes pile up
+    // between reals (both load-bearing on an idle desktop: if skipped echoes cleared the run
+    // they would shield the streak from the reset; if they did not decay it, sparse fake reals
+    // out-ran the timeouts and ratcheted the streak to the threshold).
+    if (++skipDecay_ >= kEchoSkipDecay) {
+        skipDecay_ = 0;
+        if (realStreak_ > 0) --realStreak_;
+    }
+    return false;
 }
 
 }

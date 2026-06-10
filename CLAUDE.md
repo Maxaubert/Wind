@@ -104,18 +104,35 @@ staged Apply/Discard footer.
   Also: when `!haveDesktop` after a present has occurred (ACCESS_LOST / keyed-mutex failure edge),
   `renderFrame` returns Skipped instead of drawing - keeps the last DWM frame on screen instead of
   flashing fullscreen black while capture recovers.
-- RENDER ENGINE: our own Present makes DWM emit a duplication frame whose SINGLE dirty rect equals
-  the overlay rect, EVEN THOUGH the overlay is `WDA_EXCLUDEFROMCAPTURE` (the pixels are excluded,
-  the dirty region is not). Unfiltered, that echo chains present -> dirty -> present forever and
-  the idle frame-skip gate never engages. `IsPresentEcho` (src/frame_gate.h) classifies it
-  (`expectEcho` armed after each successful Present, consumed once per acquired image frame). But
-  fullscreen content repainting at refresh rate merges its dirty rect with the echo into an
-  identical-looking frame (empirically confirmed), so `EchoFilter` keeps a real-change streak that
-  bypasses echo classification while real changes stream - fed ONLY by changes whose rects
-  intersect the magnified view (off-view animation like a terminal spinner must never feed it;
-  that defeated idle skipping in testing), with a probe every `kEchoProbeInterval` bypassed echoes
-  to kill stale self-sustaining chains. Echo state (`expectEcho` + the filter) resets whenever the
-  duplication is recreated.
+- RENDER ENGINE: our own Present makes DWM emit a duplication frame whose dirty region covers the
+  overlay, EVEN THOUGH the overlay is `WDA_EXCLUDEFROMCAPTURE` (the pixels are excluded, the
+  dirty region is not). Unfiltered, that echo chains present -> dirty -> present forever and the
+  idle frame-skip gate never engages. `IsPresentEcho` (src/frame_gate.h) classifies it by AREA
+  COVERAGE (>= 4/5 of the overlay; an `echoBudget` of 2 armed by each successful Present,
+  consumed one per acquired image frame - one present spawns up to TWO duplication frames, the
+  full-monitor echo plus a work-area-shaped follow-up, and a single-shot flag let the second one
+  re-ignite the chain) - NOT by exact rect equality or AccumulatedFrames: the echo also arrives
+  clipped by the taskbar's higher band (~95% coverage), split into rects, and merged accum>1;
+  the exact-rect version classified those as real and the chain never died. But
+  ANY real change DWM merges into the same composite as the echo looks IDENTICAL - fullscreen
+  content repainting at refresh rate, and equally a sporadic transition's last repaint (alt-tab
+  commit, Start menu close) riding the echo of the present it triggered; skipping the latter left
+  the stale picker/menu stuck on screen (issue #96). `EchoFilter` resolves the alias with a
+  STREAK + GRACE hybrid: a real-change streak bypasses echo classification while real changes
+  stream (sustained content keeps the full refresh rate; probe every `kEchoProbeInterval`), and
+  a short recent-activity GRACE (`kEchoGraceTicks`, ~30 ms) renders echo-shaped frames right
+  after a sporadic real change so its merged follow-ups are never swallowed. Only
+  view-intersecting non-echo changes feed the filter (off-view animation like a terminal spinner
+  must never feed it - that defeated idle skipping in testing); echo-shaped frames and timeouts
+  burn the grace, so the post-present echo chain always dies. A grace-ONLY filter (no streak)
+  was tried and rejected: long grace amplified every ambient few-Hz in-view change (wallpaper
+  repaint, blinking caret) into a grace-long render chain and defeated idle skipping; short
+  grace alone re-halved games. Whenever an echo-shaped frame IS skipped, ONE catch-up render
+  fires (`catchUpPending`): the skipped composite could carry a merged real change, and its
+  pixels are already in the sampled surface; the catch-up's own echo never re-arms it
+  (`lastPresentCatchUp` breaks the cascade), closing the swallow hole at every chain death and
+  making the probe's skipped frame appear one tick late instead of held. Echo state
+  (`expectEcho` + filter + catch-up flags) resets whenever the duplication is recreated.
 - RENDER ENGINE: capture is ZERO-COPY by default (`captureCopy=0`): the magnify pass samples the
   held Desktop Duplication surface directly; `ReleaseFrame` is deferred to just before the next
   `AcquireNextFrame` (per the DDA docs the surface is invalid after release), and frame metadata
@@ -124,8 +141,17 @@ staged Apply/Discard footer.
   `heldTex`/`ddaSrv`/`desktopSRV` (they belong to the duplication; sampling after is
   use-after-free). The FP16 HDR duplication surface (`DuplicateOutput1`) is a KEYED-MUTEX shared
   resource and D3D11 SILENTLY DISCARDS draws that bind it un-acquired (symptom: black magnified
-  view while copies still work): deferred-tick draws `AcquireSync(0,2)`/`ReleaseSync` it; never
-  AcquireSync while the frame is owned (AcquireNextFrame already holds it - returns INVALID_CALL).
+  view while copies still work): deferred-tick draws `AcquireSync(0,2)` it; never AcquireSync
+  while the frame is owned (AcquireNextFrame already holds it - returns INVALID_CALL). CRITICAL:
+  release EVERY keyed-mutex hold the moment the draw is SUBMITTED (`releaseCaptureHold`, called
+  from `renderFrame`): `ReleaseSync` the self-acquired mutex, and `ReleaseFrame` a held frame
+  early when (and only when) the surface has a keyed mutex - the mutex orders at GPU-command
+  level, so both are safe; a mutex-less surface keeps the deferred release as its only overwrite
+  protection. Holding the mutex across the inter-tick window STARVED DWM's writes into the shared
+  surface (the producer only delivers a duplication frame when it can take the mutex - it DROPS
+  composites it cannot write): desktop transitions never reached the capture (~2 delivered
+  frames/s), leaving stale fragments while zoomed, and even the per-tick held-frame hold cost
+  ~12% of composites under full-rate HDR content (issue #96).
   `captureCopy=1` = legacy copy path (escape hatch for drivers that misbehave with held frames;
   its SRV lives in `copySRV` so zero-copy teardowns cannot strand it). Do not reintroduce a
   per-frame CopyResource on the default path - that copy was the iGPU bottleneck.

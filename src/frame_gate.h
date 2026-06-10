@@ -33,86 +33,126 @@ struct FrameSnapshot {
 // of rendering forever); cursor 0.05 screen px; level 1e-9 (a ramp must always render).
 bool SnapshotsDiffer(const FrameSnapshot& a, const FrameSnapshot& b);
 
-// True when an acquired duplication frame is solely the DWM echo of our OWN previous Present.
-// The overlay is capture-EXCLUDED (its pixels never appear in the captured image), but DWM
-// still reports the overlay's window region as dirty in the next duplication frame after each
-// of our presents. Treating that echo as a desktop change chains present -> dirty -> present
-// forever, so the idle frame-skip gate never engages (it only broke when a tick's acquire
-// happened to race the composite). Signature of the echo, all required: we presented since the
-// last acquired image frame, exactly one accumulated composite (>1 may hide a real change
-// merged in), and exactly ONE dirty rect exactly equal to the overlay rect (a real change in
-// another window adds its own rect, and a partial change differs from the full overlay rect).
-// `dirty0` is the first dirty rect; only inspected when dirtyCount == 1.
-// CAVEAT: a fullscreen app repainting the whole monitor every refresh can ALIAS with this
-// signature (its full-monitor dirty rect merges into the same composite as our echo), so the
-// signature alone would skip every other real frame and halve the capture rate. EchoFilter
-// below bounds that to ~120 ms of engagement: sustained real changes build a streak that
-// bypasses the echo classification, so full-rate content keeps the full refresh rate.
-bool IsPresentEcho(bool presentedSinceLastFrame, unsigned accumulatedFrames,
-                   unsigned dirtyCount, const GateRect& dirty0, const GateRect& overlay);
+// True when an acquired duplication frame is SHAPED like the DWM echo of our OWN previous
+// Present. The overlay is capture-EXCLUDED (its pixels never appear in the captured image), but
+// DWM still reports the overlay's window region as dirty in the next duplication frame after
+// each of our presents. Treating that echo as a desktop change chains present -> dirty ->
+// present forever, so the idle frame-skip gate never engages (it only broke when a tick's
+// acquire happened to race the composite). Signature, both required: we presented since the
+// last acquired image frame, and the dirty rects cover >= kEchoCoverageNum/kEchoCoverageDen of
+// the overlay's area. COVERAGE, not exact rect equality: the observed echo shapes on a real
+// desktop are the exact overlay rect, the overlay MINUS a higher-band window's strip (the
+// taskbar's opaque region is subtracted from our dirty contribution, ~95% coverage), and that
+// same union split into two rects (work area + taskbar) - exact-equality classified the latter
+// two as real changes, which re-armed the grace below forever and the post-present chain never
+// died. AccumulatedFrames is deliberately NOT part of the signature either: while we present
+// every tick, two of our own echoes can merge into one accum>1 composite with the same shape.
+// A real change covering >= 80% of the monitor is exactly the aliasing class the grace below
+// arbitrates anyway; smaller changes (windows, dialogs, carets) stay real by area.
+// `dirtyArea` is the summed area of the frame's dirty rects (DDA dirty rects do not overlap).
+// CAVEAT: any real change that DWM merges into the same composite as our echo ALIASES with this
+// signature (the overlay region covers the whole monitor, so the union of echo + change is
+// still the echo's shape): fullscreen apps repainting every refresh, but also SPORADIC
+// transitions (alt-tab commit, Start menu close) whose repaint rides the echo of the present
+// they triggered. The signature alone would swallow those. EchoFilter below resolves the alias
+// with a recent-activity grace: echo-shaped frames render while real activity is fresh and are
+// skipped only once the desktop has actually gone quiet.
+constexpr long long kEchoCoverageNum = 4;   // dirty union covering >= 4/5 of the overlay area
+constexpr long long kEchoCoverageDen = 5;   // = echo-shaped (taskbar-clipped echoes are ~95%)
+bool IsPresentEcho(bool presentedSinceLastFrame, long long dirtyArea, long long overlayArea);
 
-// Hysteresis that tells a genuine idle echo from full-rate fullscreen content aliasing with the
-// echo signature. Feed it one event per acquire attempt: a non-echo-shaped image change
-// (noteRealChange), an AcquireNextFrame timeout (noteTimeout), or an echo-shaped frame
-// (onEchoShaped, which also returns the classification). The engine feeds noteRealChange ONLY
-// from changes whose dirty/move rects intersect the magnified view (or the conservative
-// no-metadata paths); a frame whose changes are all OFF-VIEW is neutral to the filter, so
-// content animating elsewhere on the monitor cannot build the streak, engage the bypass, and
-// defeat idle skipping over a static view (issue #96). An echo-shaped frame's rect equals the
-// overlay rect, which always covers the view, so echo classification is unaffected.
-// CRITICAL: echo-shaped frames never
-// reset the real streak - while halved, the stream is real, echo-shaped, timeout, real, ... and
-// the streak must build through them. Pointer-only frames (LastPresentTime == 0) must not touch
-// the filter at all. Decision: once kEchoBypassStreak real changes accumulate (only full-rate
-// content sustains that; idle changes like a clock are followed by long timeout runs, which
-// reset), echo-shaped frames are treated as real so every game frame renders.
-// Four empirically-driven details (verified against wind_diag.log on the 144 Hz panel):
-//  - The tick loop polls FASTER than DWM composites (timer-paced skipped ticks at ~200 Hz vs
-//    144 Hz vblank), so single WAIT_TIMEOUTs interleave even under full-rate content. Only
-//    kEchoTimeoutReset CONSECUTIVE timeouts (a real content gap, ~20 ms) reset the streak.
-//  - What clears the timeout run matters: real changes and BYPASSED echoes do (full-rate
-//    cadence frames; stray loop hitches must not accumulate into a reset while engaged), but a
-//    SKIPPED echo is neutral to it.
-//  - SKIPPED echoes DECAY the streak when they pile up between reals (-1 per kEchoSkipDecay of
-//    them since the last real; never a reset). The worlds differ in the real:skipped-echo
-//    RATIO: the genuine halved regime alternates 1:1 (the decay window restarts on every real,
-//    so the streak builds at full speed and engages in kEchoBypassStreak cycles, ~120 ms),
-//    while an idle desktop's echo stream outnumbers its misclassified "reals" (late second
-//    echoes of our own presents, merged accum>1 composites) by an order of magnitude, so decay
-//    pins the streak at 0. Without the decay those sparse fake reals ratcheted the streak to
-//    the threshold (timeouts alone were too sparse to reset between them) and ignited a
-//    permanent present -> echo -> present chain on a static desktop.
+// Hysteresis + grace that arbitrate echo-shaped frames. Feed it one event per acquire attempt:
+// a non-echo-shaped image change (noteRealChange), an AcquireNextFrame timeout (noteTimeout),
+// or an echo-shaped frame (onEchoShaped, which also returns the classification). The engine
+// feeds noteRealChange ONLY from changes whose dirty/move rects intersect the magnified view
+// (or the conservative no-metadata paths); a frame whose changes are all OFF-VIEW is neutral to
+// the filter, so content animating elsewhere on the monitor cannot engage it and defeat idle
+// skipping over a static view (issue #96). Pointer-only frames (LastPresentTime == 0) must not
+// touch the filter at all.
+// An echo-shaped frame is treated as REAL (rendered) when EITHER of two independent mechanisms
+// says so; otherwise it is skipped (and the engine schedules a one-shot catch-up render - see
+// catchUpPending in render_engine.cpp - so even a skipped composite's merged content reaches
+// the screen one tick late; that closes the classic swallow hole at every chain death).
+//
+// MECHANISM 1 - the real-change STREAK (sustained full-rate content). A fullscreen app
+// repainting every refresh merges its dirty region into the same composite as our echo and
+// aliases with the echo signature; skipping those halves the capture rate (forbidden in-game).
+// Once kEchoBypassStreak real changes accumulate without a content gap, echo-shaped frames are
+// bypassed (treated real) so every game frame renders. Empirically-driven details (verified
+// against wind_diag.log on the 144 Hz panel):
+//  - The tick loop polls FASTER than DWM composites, so single WAIT_TIMEOUTs interleave even
+//    under full-rate content. Only kEchoTimeoutReset CONSECUTIVE timeouts (a real content gap,
+//    ~20 ms) reset the streak; real changes and BYPASSED echoes (streak- or grace-) clear the
+//    run, but a SKIPPED echo is neutral to it.
+//  - SKIPPED echoes DECAY the streak when they pile up between reals (-1 per kEchoSkipDecay
+//    since the last real): the full-rate regime's real:skipped ratio is ~1:0 (grace bypasses
+//    the merges), while an idle desktop's sparse fake reals are outnumbered by their own echo
+//    tails and the streak pins at 0 instead of ratcheting up.
 //  - Once bypass engages, EVERY composite is echo-shaped (game dirt merges with our echo), so a
-//    game that stops would leave a self-sustaining present -> echo -> present chain that never
-//    times out. Every kEchoProbeInterval-th consecutive bypassed echo is deliberately classified
-//    echo as a PROBE that also drops the streak just below the threshold: a live game re-proves
-//    itself within a composite or two (the pre-probe present's echo can merge into the next one,
-//    so re-proof can land one composite later; classified real -> re-engaged seamlessly), while
-//    a stale chain stops presenting, its late-echo trickle decays the streak,
-//    and the timeout run resets it, so idle skipping resumes within ~the interval instead of never.
-//    Trade-off: 128 held one frame per ~0.9 s at 144 Hz (noticeable stale-view microstutter in
-//    sensitive games); 512 extends to ~3.6 s apart, costs a longer bounded stale-chain tail after
-//    content stops (idle-only, delays frame-skip onset by up to ~3.6 s, no visual effect).
-// The engine also reset()s on fresh grabs (zoom-in/retarget) so a streak from a previous
+//    game that stops would leave a self-sustaining present -> echo -> present chain. Every
+//    kEchoProbeInterval-th consecutive bypassed echo is deliberately skipped as a PROBE that
+//    drops the streak just below the threshold: a live game re-proves itself on the next
+//    composite (and the catch-up render shows the probe-skipped frame one tick late, so the
+//    probe no longer even holds a frame); a stale chain stops presenting and the timeout run
+//    resets the streak, so idle skipping resumes.
+//
+// MECHANISM 2 - the recent-activity GRACE (sporadic transitions; issue #96 second round). The
+// echo signature is IDENTICAL for a pure echo and for a real change that DWM merged into the
+// same composite as our echo (alt-tab commit, Start menu open/close). Such a merge can only
+// exist within one composite of our own present, i.e. immediately after real activity, so: the
+// first kEchoGraceTicks echo-shaped frames after a non-echo-shaped real change are treated as
+// REAL. Only noteRealChange refreshes the grace; echo-shaped frames burn it down (timeouts do
+// not - it is a per-change budget, not a wall-clock window) and an echo-triggered render must
+// NOT refresh it, or the present -> echo -> present chain would never die. The streak machinery
+// alone swallowed
+// these sporadic merges unboundedly (streak < threshold for an isolated transition, and if the
+// merged repaint was the LAST change the stale picker/menu stuck until the next unrelated
+// change); the grace alone (without the streak) amplified every ambient few-Hz desktop change
+// into a grace-window-long echo-render chain and defeated idle skipping. The hybrid keeps both
+// regimes correct, and the catch-up render covers the residual one-composite hole where the
+// grace expires exactly on a transition's final merged repaint.
+// Cost accounting: a sporadic change now costs 1 + kEchoGraceTicks + 1 (catch-up) presents
+// (~6); sustained content runs at full rate (streak bypass); after content stops the chain dies
+// within the grace + the timeout run, and idle skipping resumes.
+// The engine also reset()s on fresh grabs (zoom-in/retarget) so evidence from a previous
 // context never leaks into a new zoom session.
-constexpr int kEchoBypassStreak   = 8;    // net streak needed to engage (~120 ms of halving)
-constexpr int kEchoTimeoutReset   = 4;    // consecutive timeouts = content gap -> streak resets
-constexpr int kEchoSkipDecay      = 2;    // skipped echoes since the last real per -1 decay
+constexpr int kEchoBypassStreak   = 8;    // net streak needed to engage the full-rate bypass
+constexpr int kEchoTimeoutReset   = 6;    // consecutive timeouts = content gap -> streak and
+                                          // grace reset (6, not 4: the post-skip suspect
+                                          // stretch interleaves up to ~4 timeouts through
+                                          // skip-neutral echoes at the ~205-260 Hz poll rate,
+                                          // and that must not reset a mid-build streak; a
+                                          // genuine gap - wallpaper cadence, blink interval -
+                                          // is far longer than 6 polls)
+constexpr int kEchoSkipDecay      = 6;    // skipped echoes since the last real per -1 decay
+                                          // (6, not 2: each build-up cycle in the fully-merged
+                                          // regime skips 4 frames - one grace-exhausted skip
+                                          // plus the echo-budget drain after the catch-up - and
+                                          // those must not erase the cycle's +1 or the bypass
+                                          // never engages; the idle echo stream still
+                                          // outnumbers fake reals far beyond 6:1, and ambient
+                                          // few-Hz content is reset by its quiet gaps via
+                                          // kEchoTimeoutReset, so the streak stays pinned at 0)
 constexpr int kEchoProbeInterval  = 512;  // bypassed echoes between liveness-probe re-proofs
+constexpr int kEchoGraceTicks     = 4;    // echo-shaped frames rescued after each real change
 class EchoFilter {
 public:
-    void noteRealChange();                 // non-echo-shaped image change: streak builds (capped)
-    void noteTimeout();                    // no new composite this poll; resets after a full run
+    void noteRealChange();                 // non-echo-shaped view-relevant change: streak builds,
+                                           // grace refreshes
+    void noteTimeout();                    // no new composite this poll: a full consecutive run
+                                           // resets the streak (grace untouched)
     void reset();                          // new capture context: discard stale evidence
     // Classify an echo-shaped frame. True = treat it as a REAL change (render it); false =
-    // classify as echo (skip). Never touches the real streak; maintains the probe cadence.
+    // classify as echo (skip; the engine then schedules the one-shot catch-up render).
     bool onEchoShaped();
     int  realStreak() const { return realStreak_; }   // visibility for tests/diagnostics
+    int  graceLeft()  const { return graceLeft_;  }
 private:
-    int realStreak_ = 0;       // real changes since the last content gap / reset (echo-decayed)
-    int timeoutRun_ = 0;       // consecutive timeouts (cleared by reals and bypassed echoes ONLY)
-    int skipDecay_  = 0;       // skipped echoes since the last -1 streak decay
-    int bypassRun_  = 0;       // consecutive bypassed echoes since the last real change / probe
+    int realStreak_ = 0;   // real changes since the last content gap / reset (skip-decayed)
+    int timeoutRun_ = 0;   // consecutive timeouts (cleared by reals and bypassed echoes ONLY)
+    int skipDecay_  = 0;   // skipped echoes since the last -1 streak decay
+    int bypassRun_  = 0;   // consecutive streak-bypassed echoes since the last real / probe
+    int graceLeft_  = 0;   // events left in the merge-rescue window after a real change
 };
 
 }
