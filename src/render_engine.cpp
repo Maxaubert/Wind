@@ -74,12 +74,18 @@ struct RenderEngine::State {
     // desktop surface directly; desktopCopy is unused. heldTex/desktopSRV point at the last
     // acquired surface; frameHeld means ReleaseFrame is still pending (deferred to just before
     // the next AcquireNextFrame - per the DDA docs the surface is invalid after release, so the
-    // frame stays HELD through the draw). ddaSrv caches one SRV per duplication surface (DDA
-    // cycles a small set). heldTex/ddaSrv/desktopSRV belong to the duplication: every teardown
-    // goes through dropDuplication() (release the held frame FIRST, then clear them).
+    // frame stays HELD through the draw). ddaSrv caches one SRV (+ keyed mutex) per duplication
+    // surface (DDA cycles a small set). The surface can carry a KEYED MUTEX: while the frame is
+    // held, AcquireNextFrame holds it for us; on deferred no-new-frame ticks we AcquireSync it
+    // ourselves (heldMutexAcquired) or draws binding it are silently discarded (black).
+    // heldTex/heldMutex/ddaSrv/desktopSRV belong to the duplication: every teardown goes
+    // through dropDuplication() (release the held frame FIRST, then clear them).
     ComPtr<ID3D11Texture2D> heldTex;
+    ComPtr<IDXGIKeyedMutex> heldMutex;     // the held surface's keyed mutex (if it has one)
+    bool heldMutexAcquired = false;
     bool frameHeld = false;
-    std::unordered_map<ID3D11Texture2D*, ComPtr<ID3D11ShaderResourceView>> ddaSrv;
+    struct DdaView { ComPtr<ID3D11ShaderResourceView> srv; ComPtr<IDXGIKeyedMutex> mutex; };
+    std::unordered_map<ID3D11Texture2D*, DdaView> ddaSrv;
     bool srvFailed = false;        // SRV creation rejected on a DDA surface -> copy mode for the session
     bool lastCaptureCopy = false;  // detect a captureCopy hot-toggle (forces a clean rebuild)
     bool haveDesktop = false;
@@ -418,6 +424,11 @@ bool RenderEngine::State::frameChangesView(const DXGI_OUTDUPL_FRAME_INFO& fi, co
 }
 
 void RenderEngine::State::releaseHeldFrame() {
+    // Give back our own keyed-mutex acquisition first (taken on deferred no-new-frame ticks);
+    // the mutex POINTER stays with heldTex (cleared in dropDuplication) so a later deferred tick
+    // can re-acquire it.
+    if (heldMutexAcquired && heldMutex) heldMutex->ReleaseSync(0);
+    heldMutexAcquired = false;
     if (frameHeld && dupl) dupl->ReleaseFrame();
     frameHeld = false;
 }
@@ -429,6 +440,7 @@ void RenderEngine::State::dropDuplication() {
     releaseHeldFrame();
     dupl.Reset();
     heldTex.Reset();
+    heldMutex.Reset();
     ddaSrv.clear();
     desktopSRV.Reset();
     haveDesktop = false;
@@ -437,19 +449,30 @@ void RenderEngine::State::dropDuplication() {
 bool RenderEngine::State::setHeldTexture(ID3D11Texture2D* tex) {
     auto it = ddaSrv.find(tex);
     if (it == ddaSrv.end()) {
-        ComPtr<ID3D11ShaderResourceView> srv;
+        DdaView v;
         // nullptr desc: the SRV inherits the surface's format (FP16 scRGB included on HDR);
         // the tonemap stays keyed on capFp16, exactly like the copy path.
-        if (FAILED(device->CreateShaderResourceView(tex, nullptr, srv.ReleaseAndGetAddressOf()))) {
+        if (FAILED(device->CreateShaderResourceView(tex, nullptr, v.srv.ReleaseAndGetAddressOf()))) {
             RLog("zerocopy: CreateShaderResourceView on the DDA surface failed - copy mode for this session");
             srvFailed = true;
             return false;
         }
+        // DDA surfaces can carry D3D11_RESOURCE_MISC_SHARED_KEYED_MUTEX (observed with
+        // DuplicateOutput1 FP16): D3D11 silently DISCARDS draw calls that bind such a resource
+        // unless its keyed mutex is acquired, so sampling it un-acquired renders black. Cache the
+        // mutex with the SRV and hold it for as long as the frame is held.
+        tex->QueryInterface(__uuidof(IDXGIKeyedMutex), (void**)v.mutex.ReleaseAndGetAddressOf());
         if (ddaSrv.size() >= 8) ddaSrv.clear();   // DDA cycles a few surfaces; hard bound
-        it = ddaSrv.emplace(tex, srv).first;
+        it = ddaSrv.emplace(tex, v).first;
     }
+    // While the frame is HELD, AcquireNextFrame has already acquired the keyed mutex on this
+    // device (an AcquireSync here returns DXGI_ERROR_INVALID_CALL - already acquired), so draws
+    // are legal as-is. We self-acquire only on deferred ticks after ReleaseFrame (see the
+    // re-acquire below the capture loop).
+    heldMutex = it->second.mutex;
+    heldMutexAcquired = false;
     heldTex = tex;
-    desktopSRV = it->second;
+    desktopSRV = it->second.srv;
     haveDesktop = true;
     return true;
 }
@@ -458,33 +481,50 @@ bool RenderEngine::State::setHeldTexture(ID3D11Texture2D* tex) {
 // the draw; ReleaseFrame is deferred to the start of the next call (per the DDA docs the surface
 // is invalid after release). WAIT_TIMEOUT (static desktop) keeps sampling the previous surface:
 // the duplication only rewrites it during AcquireNextFrame on this thread, never concurrently
-// with our draw, so that is benign in practice; captureCopy=1 is the escape hatch if a driver
-// disagrees. Same fresh-drain semantics as the copy path: a zoom-in drains to the latest frame
-// within a bounded budget so the reveal never shows a transitional composite.
+// with our draw, so that is benign in practice - BUT the surface carries a keyed mutex (see
+// setHeldTexture), so on those deferred ticks we must re-AcquireSync it ourselves or the magnify
+// draw is silently discarded (black); captureCopy=1 is the escape hatch if a driver disagrees.
+// Same fresh-drain semantics as the copy path: a zoom-in drains to the latest frame within a
+// bounded budget so the reveal never shows a transitional composite.
 bool RenderEngine::State::captureZeroCopy(const RECT& view, bool& changedInView) {
     const bool fresh = freshCapture || !haveDesktop;
     freshCapture = false;
     // New capture context (zoom-in/retarget): a bypass streak earned over previous content must
     // not leak into this session (same rule as the copy path).
     if (fresh) echoFilter.reset();
-    const int   firstAttempts = fresh ? 40 : 1;
+    // Non-fresh ticks normally need a single non-blocking poll; the extra attempts only engage
+    // for the mutex-pending race below (a new composite mid-handoff), with a short real wait.
+    const int   firstAttempts = fresh ? 40 : 4;
     const DWORD firstTimeout  = fresh ? 25 : 0;
     const unsigned long long freshDeadlineMs = fresh ? GetTickCount64() + 100 : 0;
     bool gotThisCall = false;
+    DWORD retryTo = firstTimeout;
 
     for (int a = 0; a < firstAttempts; ++a) {
         if (fresh && !gotThisCall && GetTickCount64() >= freshDeadlineMs) break;  // budget spent, no frame yet
         releaseHeldFrame();                       // deferred release: just before the next acquire
         IDXGIResource* res = nullptr;
         DXGI_OUTDUPL_FRAME_INFO fi{};
-        const DWORD to = gotThisCall ? 3 : firstTimeout;   // after a hold, only briefly seek a newer frame
+        const DWORD to = gotThisCall ? 3 : retryTo;   // after a hold, only briefly seek a newer frame
         HRESULT hr = dupl->AcquireNextFrame(to, &fi, &res);
         if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
             SafeRelease(res);
             if (gotThisCall) break;
-            // Steady-state poll with no new composite: idle evidence for the echo-bypass streak
-            // (fresh-grab retries are not idle evidence - the duplication was just (re)created).
-            if (!fresh) { echoFilter.noteTimeout(); break; }
+            if (!fresh) {
+                // No new composite this tick: the draw keeps sampling the previously held surface,
+                // which needs its keyed mutex re-acquired (the loop top released it; un-acquired
+                // draws are silently discarded - black). If the mutex is BUSY, a new composite is
+                // mid-handoff: the producer holds it until the frame is delivered through
+                // AcquireNextFrame, so loop back and wait briefly for the frame itself.
+                if (haveDesktop && heldTex && heldMutex && !heldMutexAcquired) {
+                    if (heldMutex->AcquireSync(0, 2) == S_OK) heldMutexAcquired = true;
+                    else { retryTo = 4; continue; }
+                }
+                // Steady-state poll with no new composite: idle evidence for the echo-bypass streak
+                // (fresh-grab retries are not idle evidence - the duplication was just (re)created).
+                echoFilter.noteTimeout();
+                break;
+            }
             continue;
         }
         if (hr == DXGI_ERROR_ACCESS_LOST) {
@@ -497,7 +537,10 @@ bool RenderEngine::State::captureZeroCopy(const RECT& view, bool& changedInView)
             RLog("captureZeroCopy: device lost hr=0x%08lX", (unsigned long)hr);
             return haveDesktop;
         }
-        if (FAILED(hr)) { SafeRelease(res); break; }
+        if (FAILED(hr)) {
+            RLog("captureZeroCopy: AcquireNextFrame failed hr=0x%08lX", (unsigned long)hr);
+            SafeRelease(res); break;
+        }
         frameHeld = true;                         // owned until the next releaseHeldFrame()
         ID3D11Texture2D* tex = nullptr;
         if (res) res->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&tex);
@@ -526,6 +569,19 @@ bool RenderEngine::State::captureZeroCopy(const RECT& view, bool& changedInView)
         SafeRelease(res);
         if (!fresh) break;                        // settled desktop: one check is enough
         // fresh: keep looping to drain to the latest frame (the short `to` breaks us out)
+    }
+    // No-new-frame tick: the loop already gave the previous frame back (ReleaseFrame) before the
+    // acquire timed out, so nothing holds the surface's keyed mutex on this device anymore - and
+    // D3D11 silently DISCARDS draw calls that bind an un-acquired keyed-mutex resource (black
+    // magnify pass). Re-take the mutex ourselves for the draw; it is free unless a new composite
+    // is mid-write, in which case the next acquire lands a fresh frame anyway.
+    if (haveDesktop && heldTex && heldMutex && !frameHeld && !heldMutexAcquired) {
+        HRESULT mhr = heldMutex->AcquireSync(0, 2);
+        if (mhr == S_OK) heldMutexAcquired = true;
+        else {
+            RLog("captureZeroCopy: keyed-mutex re-acquire failed hr=0x%08lX", (unsigned long)mhr);
+            haveDesktop = false;        // cannot legally sample this tick; recovers next acquire
+        }
     }
     return haveDesktop;
 }
