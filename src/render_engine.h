@@ -32,7 +32,13 @@ struct RenderFrameParams {
                                          // (no gamma correction; the magnify pass writes sRGB-encoded
                                          // pixels too, so the stored value matches the user's sRGB hex)
     float  outlineAlpha;        // 0..1 fade for the outline (1 = solid); <= 0 skips the draw
+    bool   forceRender;         // bypass the frame-skip gate (zoom-in, config reload, self-tests)
 };
+
+// renderFrame outcome. Skipped = nothing changed, no draw/present issued (the previous frame
+// stays on screen via DWM; this is what drops idle-zoomed GPU to ~0). The caller must pace
+// skipped ticks with its timer (no blocking Present happened).
+enum class RenderResult { Failed = 0, Skipped, Presented };
 
 // Own capture + Direct3D 11 renderer. Captures the desktop via DXGI Desktop Duplication
 // (cursor delivered separately), scales the float source rect to a fullscreen
@@ -58,7 +64,7 @@ public:
     // (multi-GPU; validated before any change, so nothing is mutated) or a swapchain-resize step
     // fails (the overlay is not moved and the render target is best-effort restored).
     bool retarget(const MonitorTarget& monitor);
-    bool renderFrame(const RenderFrameParams& p);  // capture (if changed) + scale + cursor + present
+    RenderResult renderFrame(const RenderFrameParams& p);  // capture + gate + scale + cursor + present
     void setVisible(bool visible);                 // show/hide the overlay (hidden at 1x)
     // Set the overlay to alpha 1 (visually imperceptible - the user keeps seeing the screen beneath)
     // WITHOUT a full reveal. A non-fully-transparent top window makes DWM stop granting a fullscreen

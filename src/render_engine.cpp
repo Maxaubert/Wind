@@ -1,4 +1,5 @@
 #include "render_engine.h"
+#include "frame_gate.h"
 #include "com_util.h"
 #include "render_shaders.h"
 #include "hdr_info.h"
@@ -71,6 +72,9 @@ struct RenderEngine::State {
     ComPtr<ID3D11ShaderResourceView> desktopSRV;
     bool haveDesktop = false;
     bool freshCapture = false;   // next capture() must drain to the latest desktop frame (zoom-in)
+    FrameSnapshot lastRendered;        // snapshot of the last PRESENTED frame (frame-skip gate)
+    bool havePresented = false;        // nothing presented yet -> never skip
+    bool forceNextRender = false;      // one-shot render force (invalidate/retarget/recover)
     std::vector<unsigned char> metaBuf;   // reused buffer for GetFrameMoveRects/GetFrameDirtyRects
     // Diagnostics for the HDR investigation: the duplication's surface format + the output's
     // color space / bit depth (tells us whether the desktop is HDR and what we're capturing).
@@ -143,7 +147,13 @@ struct RenderEngine::State {
     // AcquireNextFrame -> desktopCopy (+ pointer info); handles loss/timeout. `view` is the
     // magnified source rect (desktop px, clamped to screen); `crop` enables copying only it on a
     // full-screen repaint.
-    bool capture(const RECT& view, bool crop);
+    bool capture(const RECT& view, bool crop, bool& changedInView);
+    // While the acquired frame is still owned: do its move/dirty rects touch `view`?
+    // Conservative: no metadata, any move (scroll) rects, or any fetch failure count as changed.
+    bool frameChangesView(const DXGI_OUTDUPL_FRAME_INFO& fi, const RECT& view);
+    // Compute the magnified source rect (1px bilinear margin), refresh capture + cursor texture.
+    // Returns true when the desktop content inside the view changed this tick.
+    bool prepare(const RenderFrameParams& p);
     // Patch only DDA's changed (dirty) rects into desktopCopy from `src` (steady-state fast path).
     // Returns false when a partial update isn't safe, so the caller does a full CopyResource. When
     // `crop` and the dirty area is a near-full repaint, copies only the parts within `view`.
@@ -317,7 +327,33 @@ bool RenderEngine::State::copyChangedRegions(ID3D11Texture2D* src, const DXGI_OU
     return true;
 }
 
-bool RenderEngine::State::capture(const RECT& view, bool crop) {
+// Gate input: does this acquired frame change pixels inside the magnified view? Must run before
+// ReleaseFrame (metadata is only readable while the frame is owned). Reuses metaBuf; safe because
+// copyChangedRegions re-fetches into it afterwards (the API allows repeated fetches while owned).
+bool RenderEngine::State::frameChangesView(const DXGI_OUTDUPL_FRAME_INFO& fi, const RECT& view) {
+    if (fi.LastPresentTime.QuadPart == 0) return false;     // pointer-only update: image unchanged
+    const UINT meta = fi.TotalMetadataBufferSize;
+    if (meta == 0) return true;                              // no metadata: assume a full change
+    if (metaBuf.size() < meta) metaBuf.resize(meta);
+    UINT moveBytes = 0;
+    if (FAILED(dupl->GetFrameMoveRects(meta, reinterpret_cast<DXGI_OUTDUPL_MOVE_RECT*>(metaBuf.data()), &moveBytes)))
+        return true;
+    if (moveBytes > 0) return true;                          // scroll: treat as changed
+    UINT dirtyBytes = 0;
+    if (FAILED(dupl->GetFrameDirtyRects(meta, reinterpret_cast<RECT*>(metaBuf.data()), &dirtyBytes)))
+        return true;
+    const UINT n = dirtyBytes / sizeof(RECT);
+    if (n == 0) return false;
+    const RECT* rects = reinterpret_cast<const RECT*>(metaBuf.data());
+    const GateRect v{ view.left, view.top, view.right, view.bottom };
+    for (UINT i = 0; i < n; ++i) {
+        const GateRect r{ rects[i].left, rects[i].top, rects[i].right, rects[i].bottom };
+        if (RectsIntersect(r, v)) return true;
+    }
+    return false;
+}
+
+bool RenderEngine::State::capture(const RECT& view, bool crop, bool& changedInView) {
     if (!dupl && !recreateDupl()) return false;
 
     // A settled desktop polls non-blocking (0 ms, 1 attempt): a static screen returns
@@ -362,6 +398,7 @@ bool RenderEngine::State::capture(const RECT& view, bool crop) {
         // the OS pointer (drawn from GetCursorInfo), so the cached copy is still valid - copy
         // nothing. This keeps a busy-pointer-but-static desktop from forcing any copy at all.
         if (tex && fi.LastPresentTime.QuadPart != 0) {
+            changedInView = changedInView || fresh || frameChangesView(fi, view);
             // Match the copy texture to the captured format so the copy never mismatches (incl.
             // after a runtime HDR toggle changes the duplication format). The tonemap is gated on
             // capFp16, not on the format, so BGRA8 captures stay passthrough.
@@ -422,6 +459,7 @@ bool RenderEngine::recoverDeviceLost() {
     s_->releasePresent();              // rtv + swapchain
     s_->ctx.Reset(); s_->device.Reset();
     s_->haveDesktop = false; s_->freshCapture = true;
+    s_->forceNextRender = true;
     if (!s_->buildDeviceResources()) { RLog("recoverDeviceLost: rebuild failed (will retry)"); return false; }
     ShowWindow(s_->hwnd, SW_SHOWNOACTIVATE);   // re-show in case the swapchain recreate hid it
     s_->ready = true;
@@ -642,6 +680,7 @@ void RenderEngine::invalidateCapture() {
     s_->dupl.Reset();
     s_->haveDesktop = false;
     s_->freshCapture = true;
+    s_->forceNextRender = true;
 }
 
 void RenderEngine::State::releasePresent() {
@@ -731,6 +770,7 @@ bool RenderEngine::retarget(const MonitorTarget& m) {
     s_->dupl.Reset();
     s_->haveDesktop = false;
     s_->freshCapture = true;
+    s_->forceNextRender = true;
     s_->lastClickX = s_->lastClickY = INT_MIN;   // don't skip the first SetCursorPos on the new monitor
     RLog("retarget: device=%ls origin=(%d,%d) size=%dx%d sizeChanged=%d",
          s_->targetDevice, m.x, m.y, m.w, m.h, (int)sizeChanged);
@@ -780,13 +820,9 @@ void RenderEngine::State::updateCursorTexture(int cursorMode) {
     curW = w; curH = h; hotX = hx; hotY = hy; cursorInvert = inv; lastCursor = ci.hCursor; cursorReady = true;
 }
 
-void RenderEngine::State::render(const RenderFrameParams& p) {
-    // RTV is cached: the blt swapchain keeps buffer 0 stable across Present, so we create the RTV
-    // once and reuse it. acquireBackbufferRtv() runs only on (re)build or resize, not per frame.
-    if (!rtv && !acquireBackbufferRtv()) return;
-    // Magnified source rect in desktop pixels (what the magnify pass samples below), clamped to the
-    // screen with a 1px margin for bilinear edge taps. capture() can copy only this region on a
-    // full-screen repaint to cut the 4K HDR copy.
+bool RenderEngine::State::prepare(const RenderFrameParams& p) {
+    // Magnified source rect in desktop pixels, clamped to the screen with a 1px margin for
+    // bilinear edge taps (same math render() used before the split).
     double vlevel = p.level < 1.0 ? 1.0 : p.level;
     double vw = sw / vlevel, vh = sh / vlevel;
     double vl = p.srcLeft - 1.0, vt = p.srcTop - 1.0;
@@ -794,11 +830,18 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
     if (vl < 0) vl = 0;            if (vt < 0) vt = 0;
     if (vr > sw) vr = sw;          if (vb > sh) vb = sh;
     RECT view{ (LONG)vl, (LONG)vt, (LONG)vr, (LONG)vb };
-    capture(view, p.cropCapture);
+    bool changedInView = false;
+    capture(view, p.cropCapture, changedInView);
     // cursorMode==2 (never draw) skips the GetCursorInfo syscall entirely. Otherwise update reads
-    // osCursorShowing and decodes/uploads only when the cursor will actually be drawn (mode 1, or
-    // mode 0 with the app showing its cursor) - so a game that hides its cursor pays no decode.
+    // osCursorShowing and decodes/uploads only when the cursor will actually be drawn.
     if (p.cursorMode != 2) updateCursorTexture(p.cursorMode);
+    return changedInView;
+}
+
+void RenderEngine::State::render(const RenderFrameParams& p) {
+    // RTV is cached: the blt swapchain keeps buffer 0 stable across Present, so we create the RTV
+    // once and reuse it. acquireBackbufferRtv() runs only on (re)build or resize, not per frame.
+    if (!rtv && !acquireBackbufferRtv()) return;
 
     ID3D11DeviceContext* c = ctx.Get();
     D3D11_VIEWPORT vp{}; vp.Width = (float)sw; vp.Height = (float)sh; vp.MaxDepth = 1.0f;
@@ -924,8 +967,8 @@ static bool overlayDisplaced(HWND hwnd) {
     return false;
 }
 
-bool RenderEngine::renderFrame(const RenderFrameParams& p) {
-    if (!s_->ready || s_->deviceLost) return false;   // device gone: skip until recoverDeviceLost()
+RenderResult RenderEngine::renderFrame(const RenderFrameParams& p) {
+    if (!s_->ready || s_->deviceLost) return RenderResult::Failed;   // device gone: skip until recoverDeviceLost()
     // Keep the overlay above everything (transparent + click-through + capture-excluded, so
     // being on top is safe; if we sit below an always-on-top app overlay like RTSS it draws a
     // second, unmagnified copy over our view). Re-assert ONLY when actually displaced, NOT every
@@ -947,21 +990,44 @@ bool RenderEngine::renderFrame(const RenderFrameParams& p) {
         SetCursorPos(p.clickDesktopX, p.clickDesktopY);
         s_->lastClickX = p.clickDesktopX; s_->lastClickY = p.clickDesktopY;
     }
+    const bool changedInView = s_->prepare(p);
+
+    // Frame-skip gate: present only when the image would differ from what is already on screen.
+    // A skipped tick leaves the DWM redirection surface showing the last frame, which is correct
+    // by construction, and costs no GPU work at all (this is the ~12% -> ~1-2% idle win).
+    FrameSnapshot snap;
+    snap.level = p.level < 1.0 ? 1.0 : p.level;
+    snap.srcLeft = p.srcLeft; snap.srcTop = p.srcTop;
+    snap.cursorScreenX = p.cursorScreenX; snap.cursorScreenY = p.cursorScreenY;
+    snap.cursorVisible = s_->cursorReady && p.cursorMode != 2 &&
+                         (p.cursorMode == 1 || s_->osCursorShowing);
+    snap.cursorShapeId = (unsigned long long)(uintptr_t)s_->lastCursor;
+    snap.outlineAlpha = (p.outline && p.level > 1.0 && s_->haveDesktop) ? p.outlineAlpha : 0.0f;
+
+    const bool force = p.forceRender || s_->forceNextRender || !s_->havePresented;
+    if (!force && !changedInView && !SnapshotsDiffer(s_->lastRendered, snap))
+        return RenderResult::Skipped;
+
     s_->render(p);
     // p.vsync = (cfg.vsync && !cfg.dwmFlush): sync interval 1 locks the present to the refresh;
     // 0 presents immediately and the caller paces via DwmFlush or the timer.
     HRESULT hr = s_->swap->Present(p.vsync ? 1 : 0, 0);
     if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
         s_->deviceLost = true; RLog("present: device lost hr=0x%08lX", (unsigned long)hr);
-        return false;
+        return RenderResult::Failed;
     }
-    return SUCCEEDED(hr);
+    if (FAILED(hr)) return RenderResult::Failed;
+    s_->lastRendered = snap;
+    s_->havePresented = true;
+    s_->forceNextRender = false;
+    return RenderResult::Presented;
 }
 
 // Render one frame and dump it WITHOUT presenting, so the PNG reflects exactly the drawn
 // frame (a FLIP_DISCARD back-buffer read after Present is undefined). Verification only.
 bool RenderEngine::dumpFrame(const RenderFrameParams& p, const wchar_t* path) {
     if (!s_->ready) return false;
+    s_->prepare(p);
     s_->render(p);
     return dumpBackbufferPng(path);
 }
@@ -1035,6 +1101,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     p.cursorScreenX = sw / 2.0; p.cursorScreenY = sh / 2.0;
     p.clickDesktopX = sw / 2; p.clickDesktopY = sh / 2;
     p.cursorScaleWithZoom = true; p.bilinear = true;
+    p.forceRender = true;   // the harness loops static params; the gate must not skip
     eng.hideSystemCursor(true);     // exercise the hide path; shutdown restores it
     for (int i = 0; i < 20; ++i) {
         MSG m; while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&m); DispatchMessageW(&m); }
