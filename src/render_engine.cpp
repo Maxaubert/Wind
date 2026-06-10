@@ -343,6 +343,8 @@ bool RenderEngine::State::frameChangesView(const DXGI_OUTDUPL_FRAME_INFO& fi, co
     if (FAILED(dupl->GetFrameDirtyRects(meta, reinterpret_cast<RECT*>(metaBuf.data()), &dirtyBytes)))
         return true;
     const UINT n = dirtyBytes / sizeof(RECT);
+    // NB: zero dirty rects with a real present is "no image change" per the DDA contract, so the
+    // gate says unchanged even though copyChangedRegions conservatively full-copies that case.
     if (n == 0) return false;
     const RECT* rects = reinterpret_cast<const RECT*>(metaBuf.data());
     const GateRect v{ view.left, view.top, view.right, view.bottom };
@@ -1016,7 +1018,10 @@ RenderResult RenderEngine::renderFrame(const RenderFrameParams& p) {
         s_->deviceLost = true; RLog("present: device lost hr=0x%08lX", (unsigned long)hr);
         return RenderResult::Failed;
     }
-    if (FAILED(hr)) return RenderResult::Failed;
+    // A failed (non-device-removed) Present must not swallow a desktop update: the DDA change
+    // edge was already consumed above, so without a re-force the gate would skip the retry and
+    // leave stale content on screen until the next unrelated change.
+    if (FAILED(hr)) { s_->forceNextRender = true; return RenderResult::Failed; }
     s_->lastRendered = snap;
     s_->havePresented = true;
     s_->forceNextRender = false;
