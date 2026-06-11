@@ -632,7 +632,7 @@ bool RenderEngine::State::captureZeroCopy(const RECT& view, bool& changedInView)
             // (DDA may rotate surfaces between acquires); they do not consume the echo budget -
             // the echo composites are image frames by definition - and frameChangesView ignores
             // them. The first echoBudget image frames after our own Present can be its echoes
-            // (one present spawns up to two; see echoBudget): consumed one per acquired image
+            // (one present spawns up to three; see echoBudget): consumed one per acquired image
             // frame, exactly like the copy path.
             bool echoCandidate = false;
             if (fi.LastPresentTime.QuadPart != 0 && echoBudget > 0) { echoCandidate = true; --echoBudget; }
@@ -731,7 +731,7 @@ bool RenderEngine::State::captureViaCopy(const RECT& view, bool crop, bool& chan
         // nothing. This keeps a busy-pointer-but-static desktop from forcing any copy at all.
         if (tex && fi.LastPresentTime.QuadPart != 0) {
             // The first echoBudget image frames after our own Present can be its echoes (one
-            // present spawns up to two; see echoBudget); consume one per image frame (pointer-
+            // present spawns up to three; see echoBudget); consume one per image frame (pointer-
             // only frames above do not consume - the echo composites are image frames).
             const bool echoCandidate = echoBudget > 0;
             if (echoBudget > 0) --echoBudget;

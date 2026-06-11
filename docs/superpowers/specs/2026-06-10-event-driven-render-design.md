@@ -142,8 +142,8 @@ now load-bearing (full detail in src/frame_gate.h and the CLAUDE.md render-engin
   region covers the overlay, even though the overlay is capture-excluded (the pixels are
   excluded, the dirty region is not). Unfiltered, that chains present -> dirty -> present
   forever and the idle gate never engages. `IsPresentEcho` classifies the echo signature
-  by AREA COVERAGE (>= 4/5 of the overlay; an `echoBudget` of 2 armed per Present,
-  consumed one per acquired image frame, because one present spawns up to TWO
+  by AREA COVERAGE (>= 4/5 of the overlay; an `echoBudget` of 3 armed per Present,
+  consumed one per acquired image frame, because one present spawns up to THREE
   duplication frames - the full-monitor echo plus a work-area-shaped follow-up - and a
   single-shot flag let the second re-ignite the chain) - not by exact rect equality or
   AccumulatedFrames, because the echo also arrives clipped by the taskbar's higher band

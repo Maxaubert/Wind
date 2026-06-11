@@ -108,8 +108,8 @@ staged Apply/Discard footer.
   overlay, EVEN THOUGH the overlay is `WDA_EXCLUDEFROMCAPTURE` (the pixels are excluded, the
   dirty region is not). Unfiltered, that echo chains present -> dirty -> present forever and the
   idle frame-skip gate never engages. `IsPresentEcho` (src/frame_gate.h) classifies it by AREA
-  COVERAGE (>= 4/5 of the overlay; an `echoBudget` of 2 armed by each successful Present,
-  consumed one per acquired image frame - one present spawns up to TWO duplication frames, the
+  COVERAGE (>= 4/5 of the overlay; an `echoBudget` of 3 armed by each successful Present,
+  consumed one per acquired image frame - one present spawns up to THREE duplication frames, the
   full-monitor echo plus a work-area-shaped follow-up, and a single-shot flag let the second one
   re-ignite the chain) - NOT by exact rect equality or AccumulatedFrames: the echo also arrives
   clipped by the taskbar's higher band (~95% coverage), split into rects, and merged accum>1;
