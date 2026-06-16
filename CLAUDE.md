@@ -61,6 +61,13 @@ staged Apply/Discard footer.
   (0x5B/0x5C) - enforced in three places: the hook never swallows them, `ParseConfig` sanitizes them
   out of the ini, and the config UI's keybind capture refuses them. Down/up swallows are balanced
   (only swallow an UP whose DOWN we swallowed) and released on teardown so a key is never stranded.
+  LIMITATION (by design, not fixable in user mode): LL hooks swallow only the legacy/cooked input
+  path (`WM_*`, `GetAsyncKeyState`) that desktop apps and browsers use. They CANNOT block Raw Input
+  (`WM_INPUT`), which most GAMES read directly - so a bound key/button still reaches a raw-input game
+  no matter what the hook returns. There is no user-mode API to suppress raw input to another
+  process; the only reliable fix is a kernel filter driver (e.g. Interception), which we deliberately
+  do NOT use (no-driver design + anti-cheat ban risk). Confirmed: swallowing works in normal apps,
+  not in raw-input games. Pick game keys/buttons you don't otherwise use.
 - Declare Per-Monitor-V2 DPI awareness (`Wind.manifest`) or offset pixel math is wrong
   on scaled displays.
 - The lens-must-move-when-cursor-locked behavior is THE core feature. It relies on
