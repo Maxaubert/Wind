@@ -11,6 +11,19 @@ static std::string trim(const std::string& s) {
     return s.substr(a, b - a + 1);
 }
 
+bool IsForbiddenBindVk(int vk) {
+    switch (vk) {
+        case 0x01: // VK_LBUTTON  (left click)
+        case 0x02: // VK_RBUTTON  (right click)
+        case 0x08: // VK_BACK     (Backspace)
+        case 0x5B: // VK_LWIN     (left Windows key)
+        case 0x5C: // VK_RWIN     (right Windows key)
+            return true;
+        default:
+            return false;
+    }
+}
+
 bool ParseHexColor(const std::string& s, float& r, float& g, float& b) {
     size_t i = (!s.empty() && s[0] == '#') ? 1 : 0;
     if (s.size() - i != 6) return false;
@@ -123,6 +136,15 @@ Config ParseConfig(const std::string& text) {
     if (c.outlineThickness > 40) c.outlineThickness = 40;
     c.outlineLowZoomMax  = clampd(c.outlineLowZoomMax,  1.0, 50.0);
     c.outlineIdleSeconds = clampd(c.outlineIdleSeconds, 0.5, 60.0);
+    // Reject keybinds to keys Wind must never swallow (see IsForbiddenBindVk). A bound key is
+    // eaten system-wide, so binding e.g. Backspace or the Windows key would make it unusable
+    // everywhere; treat a forbidden bind as unbound regardless of how it got into the ini.
+    auto sanitizeVk = [](int& vk) { if (IsForbiddenBindVk(vk)) vk = 0; };
+    sanitizeVk(c.zoomInVk);   sanitizeVk(c.zoomInVk2);
+    sanitizeVk(c.zoomOutVk);  sanitizeVk(c.zoomOutVk2);
+    sanitizeVk(c.recenterVk);
+    sanitizeVk(c.hideCursorVk);
+    sanitizeVk(c.quickZoomVk);
     return c;
 }
 }
@@ -142,8 +164,9 @@ Config LoadConfig(const std::wstring& path) {
                ";   forward, 0=unbound). Shipped unbound - the first-launch setup captures your choice.\n"
                "zoomInButton=0\nzoomOutButton=0\n"
                "; Keyboard hold-to-zoom (Virtual-Key codes, decimal; 0=unbound). Works without a\n"
-               ";   side-button mouse. The bound key still reaches the focused app, so pick keys you\n"
-               ";   don't use in games. e.g. 33=PageUp 34=PageDown 107/109=NumPad +/- 112=F1 145=ScrollLock.\n"
+               ";   side-button mouse. The bound key is SWALLOWED (it won't reach the focused app), so\n"
+               ";   it can't double-fire. Left/right click, Backspace, and the Windows keys can't be\n"
+               ";   bound (they'd be lost system-wide). e.g. 33=PageUp 34=PageDown 107/109=NumPad +/- 112=F1.\n"
                "zoomInVk=0\nzoomOutVk=0\n"
                "; Modifier mask required with each zoom key (bit 1=Ctrl, 2=Alt, 4=Shift, 8=Win;\n"
                ";   0=no modifier). e.g. 3 = Ctrl+Alt. Extra modifiers held don't disqualify.\n"

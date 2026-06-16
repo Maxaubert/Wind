@@ -70,12 +70,19 @@
   // Capture on keydown so a combo (Ctrl+Alt+F1) is captured the instant the main key fires while
   // all modifiers are held. Modifier-only presses (Ctrl/Alt/Shift/Win) are skipped so we wait for
   // the main key. keyCode 0 is ignored (Fn/IME/synthesized events would otherwise clear the binding).
+  // VKs the core refuses to bind (mirrors IsForbiddenBindVk in config.cpp): a bound key is swallowed
+  // system-wide, so binding one of these would make the user lose it everywhere. Left/right click
+  // (1/2) can't arrive here as a keyCode and the Win keys (91/92) are skipped below as modifier-only,
+  // but we list them all so the rule is explicit and Backspace (8) is rejected. Stay armed so the
+  // user can press a different key.
+  const FORBIDDEN_VK = new Set([1, 2, 8, 91, 92]);
   function onKey(e) {
     if (!armed) return;
     e.preventDefault();
     if (e.key === 'Escape') { cancel(); return; }
     if (!e.keyCode) return;
     if (e.keyCode === 16 || e.keyCode === 17 || e.keyCode === 18 || e.keyCode === 91 || e.keyCode === 92) return;
+    if (FORBIDDEN_VK.has(e.keyCode)) return;   // can't bind a key Wind must never swallow
     const mods = (e.ctrlKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.shiftKey ? 4 : 0) | (e.metaKey ? 8 : 0);
     const patch = { [row.vkKey]: String(e.keyCode) };
     if (row.modsKey)   patch[row.modsKey]   = String(mods);

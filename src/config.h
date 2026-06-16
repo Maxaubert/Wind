@@ -125,8 +125,17 @@ struct Config {
     double outlineIdleSeconds = 7.0;   // idle timeout before fade (clamped [0.5, 60.0])
 };
 // Pure: parse INI text (key=value, ';' or '#' comments) into a Config, keeping
-// defaults for missing/malformed keys.
+// defaults for missing/malformed keys. Any keybind VK that IsForbiddenBindVk() rejects is
+// sanitized to 0 (unbound) here, so a hand-edited ini can never bind a key Wind must not swallow.
 Config ParseConfig(const std::string& text);
+
+// Pure: Virtual-Key codes Wind refuses to bind to ANY action. Because a bound key is swallowed
+// system-wide (the WH_KEYBOARD_LL hook eats it so it never reaches the focused app), binding one of
+// these would make the user lose a key they cannot do without. Blocked: left/right mouse buttons
+// (1/2), Backspace (8), and the Windows keys (0x5B/0x5C). Enforced in THREE places (defense in
+// depth): the keyboard hook never swallows these, ParseConfig sanitizes them out of the ini, and
+// the config UI's keybind capture refuses them.
+bool IsForbiddenBindVk(int vk);
 // Pure: parse "#rrggbb" or "rrggbb" (case-insensitive) into r,g,b floats in [0,1]. Returns
 // false on any malformed input (wrong length, non-hex), leaving the outputs untouched so the
 // caller keeps its fallback default.

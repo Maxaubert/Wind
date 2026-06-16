@@ -235,6 +235,13 @@ static void RunTick(TickState& t) {
                 g_input.setButtons(nc.zoomInButton, nc.zoomInButton2,
                                    nc.zoomOutButton, nc.zoomOutButton2);
             }
+            // Re-bind the keyboard hook's tracked/swallowed keys when any keyboard zoom/recenter
+            // bind changed (else the hook keeps swallowing the OLD key and ignores the new one).
+            if (nc.zoomInVk != t.cfg.zoomInVk || nc.zoomOutVk != t.cfg.zoomOutVk
+             || nc.zoomInVk2 != t.cfg.zoomInVk2 || nc.zoomOutVk2 != t.cfg.zoomOutVk2
+             || nc.recenterVk != t.cfg.recenterVk) {
+                g_input.setKeys(nc.zoomInVk, nc.zoomInVk2, nc.zoomOutVk, nc.zoomOutVk2, nc.recenterVk);
+            }
             if (nc.hideCursorVk != t.cfg.hideCursorVk || nc.hideCursorMods != t.cfg.hideCursorMods) {
                 RegisterHideCursorHotkey(t.hwnd, nc.hideCursorVk, nc.hideCursorMods);
             }
@@ -251,9 +258,16 @@ static void RunTick(TickState& t) {
         }
     }
 
-    // Effective held state = mouse side-button (set by the hook/raw input) OR keyboard key held
-    // (polled globally, no extra hook). Lets users without side-buttons zoom from the keyboard.
-    auto keyDown = [](int vk) { return vk != 0 && (GetAsyncKeyState(vk) & 0x8000) != 0; };
+    // Effective held state = mouse side-button (set by the hook/raw input) OR keyboard key held.
+    // Lets users without side-buttons zoom from the keyboard. When the LL keyboard hook is active it
+    // is the authority for bound-key down-state (a swallowed key never appears in GetAsyncKeyState),
+    // so read keyPressed(); otherwise (hook install failed / WIND_NOHOOK) fall back to polling.
+    const bool kbHook = g_input.kbHookActive();
+    auto keyDown = [&](int vk) {
+        if (vk == 0) return false;
+        if (kbHook && g_input.isBoundKey(vk)) return g_input.keyPressed(vk);
+        return (GetAsyncKeyState(vk) & 0x8000) != 0;
+    };
     // Modifier mask: bit 1=Ctrl, 2=Alt, 4=Shift, 8=Win. 0 = no modifiers required. Extra modifiers
     // never disqualify (so a "Ctrl+F1" combo still fires when Ctrl+Shift+F1 is held).
     auto modsHeld = [](int mods) {
@@ -664,6 +678,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         MessageBoxW(nullptr, L"Failed to install the mouse hook.", L"Wind", MB_ICONERROR);
         return 1;
     }
+    // Configure the keyboard hook's bound keys (zoom in/out primary+alt + recenter) so it swallows
+    // them and tracks their state. Kept in sync on hot-reload below.
+    g_input.setKeys(cfg.zoomInVk, cfg.zoomInVk2, cfg.zoomOutVk, cfg.zoomOutVk2, cfg.recenterVk);
 
     // Target monitor for this session: the cursor's monitor when multiMonitor is on, else the
     // primary. The first zoom-in re-checks and retargets if the cursor moved to another monitor.

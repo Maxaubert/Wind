@@ -50,6 +50,17 @@ staged Apply/Discard footer.
 ## IMPORTANT gotchas
 - Pure-logic files MUST NOT include `<windows.h>` - keeps unit tests desktop-free.
   The test build compiles only the pure `.cpp` files and defines `WIND_TESTS`.
+- INPUT SWALLOWING: bound keybinds are eaten so they never double-fire into the focused app. Mouse
+  side-buttons go through the `WH_MOUSE_LL` hook; keyboard zoom/recenter binds go through a
+  `WH_KEYBOARD_LL` hook (both on the same dedicated hook thread, `input_router.cpp`). A swallowed key
+  never appears in `GetAsyncKeyState`, so the keyboard hook is the AUTHORITY for bound-key down-state
+  (`keyPressed()`); `main.cpp` reads it when `kbHookActive()`, else falls back to polling (install
+  failure / `WIND_NOHOOK`). hide-cursor + hotkey-mode quick-zoom are swallowed by `RegisterHotKey`
+  instead, not this hook. SAFETY: `IsForbiddenBindVk` (pure, in `config.cpp`) blocks binding keys
+  that would be catastrophic to lose system-wide - left/right click (1/2), Backspace (8), Win
+  (0x5B/0x5C) - enforced in three places: the hook never swallows them, `ParseConfig` sanitizes them
+  out of the ini, and the config UI's keybind capture refuses them. Down/up swallows are balanced
+  (only swallow an UP whose DOWN we swallowed) and released on teardown so a key is never stranded.
 - Declare Per-Monitor-V2 DPI awareness (`Wind.manifest`) or offset pixel math is wrong
   on scaled displays.
 - The lens-must-move-when-cursor-locked behavior is THE core feature. It relies on
