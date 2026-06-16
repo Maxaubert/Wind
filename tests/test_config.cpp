@@ -52,6 +52,31 @@ TEST_CASE("keyboard zoom defaults PageUp/PageDown; recenter unbound; all parseab
     CHECK(c.zoomOutVk == 34);
     CHECK(c.recenterVk == 112);
 }
+TEST_CASE("IsForbiddenBindVk blocks keys Wind must never swallow, allows the rest") {
+    CHECK(IsForbiddenBindVk(0x01));   // VK_LBUTTON (left click)
+    CHECK(IsForbiddenBindVk(0x02));   // VK_RBUTTON (right click)
+    CHECK(IsForbiddenBindVk(0x08));   // VK_BACK (Backspace)
+    CHECK(IsForbiddenBindVk(0x5B));   // VK_LWIN
+    CHECK(IsForbiddenBindVk(0x5C));   // VK_RWIN
+    // Common legitimate binds stay allowed.
+    CHECK_FALSE(IsForbiddenBindVk(0));     // unbound
+    CHECK_FALSE(IsForbiddenBindVk(33));    // PageUp
+    CHECK_FALSE(IsForbiddenBindVk(34));    // PageDown
+    CHECK_FALSE(IsForbiddenBindVk(112));   // F1
+    CHECK_FALSE(IsForbiddenBindVk(107));   // NumPad +
+}
+TEST_CASE("ParseConfig sanitizes forbidden keybinds to unbound (defense in depth)") {
+    // A hand-edited ini binding a forbidden key must come back as 0 (unbound), not the dangerous VK.
+    CHECK(ParseConfig("zoomInVk=8\n").zoomInVk == 0);        // Backspace
+    CHECK(ParseConfig("zoomOutVk=91\n").zoomOutVk == 0);     // LWin
+    CHECK(ParseConfig("zoomInVk2=2\n").zoomInVk2 == 0);      // right click
+    CHECK(ParseConfig("zoomOutVk2=1\n").zoomOutVk2 == 0);    // left click
+    CHECK(ParseConfig("recenterVk=92\n").recenterVk == 0);   // RWin
+    CHECK(ParseConfig("hideCursorVk=8\n").hideCursorVk == 0);
+    CHECK(ParseConfig("quickZoomVk=8\n").quickZoomVk == 0);
+    // A legitimate bind is preserved.
+    CHECK(ParseConfig("zoomInVk=33\n").zoomInVk == 33);
+}
 TEST_CASE("parses cursorVisibility") {
     CHECK(ParseConfig("cursorVisibility=always\n").cursorVisibility == "always");
     CHECK(ParseConfig("cursorVisibility=never\n").cursorVisibility == "never");

@@ -344,6 +344,37 @@ count (lock engaged).
 
 ---
 
+## Issue 5 - Bound keybinds not swallowed in games (raw-input limitation)
+
+**Date:** 2026-06-16. **Status:** Working as designed for normal apps; **games are an OS
+limitation, accepted + documented** (issue #99 / PR #100).
+
+### Reported behavior
+With a keyboard (or mouse side-button) zoom/recenter bind, the bind still fires inside
+**games** even while Wind zooms - "both things happen." In normal apps (browsers, Notepad,
+etc.) swallowing works correctly (user-confirmed).
+
+### Root cause (confirmed)
+Wind swallows input with low-level hooks (`WH_MOUSE_LL` + `WH_KEYBOARD_LL`,
+`src/input_router.cpp`). Returning 1 from a LL hook blocks only the **legacy/cooked** input
+path - `WM_KEYDOWN`/`WM_XBUTTONDOWN`, `GetAsyncKeyState`, the thread input queue - which
+desktop apps use. Games read input through the **Raw Input API** (`WM_INPUT`), which the OS
+delivers from the Raw Input Thread independently of the hook chain. **A low-level hook cannot
+block Raw Input**, and there is no user-mode API to suppress raw input destined for another
+process. (Wind itself relies on this: it reads raw mouse deltas a game can't hide.)
+
+### Resolution
+- Keyboard swallow added for the legacy path (issue #99 / PR #100): zoom in/out primary +
+  alternate and recenter are now swallowed in normal apps, matching the existing mouse
+  side-button behavior. Plus a safety blocklist (`IsForbiddenBindVk`) so left/right click,
+  Backspace, and the Windows keys can never be bound.
+- **Games: accepted as a limitation.** The only reliable fix is a kernel filter driver
+  (e.g. Interception), which we deliberately avoid: it breaks Wind's no-driver/no-injection
+  design and risks anti-cheat (EAC/BattlEye/Vanguard) bans. Guidance: pick game keys/buttons
+  you don't otherwise use.
+
+---
+
 # Own renderer (issue #4, branch feat/own-renderer)
 
 A second engine that captures the desktop (DXGI Desktop Duplication) and renders the

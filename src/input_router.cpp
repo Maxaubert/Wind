@@ -1,9 +1,20 @@
 #include "input_router.h"
+#include "config.h"     // IsForbiddenBindVk (keyboard-bind safety blocklist)
 #include <windows.h>
 #include <atomic>
 namespace wind {
 static InputRouter* g_router = nullptr;
 static HHOOK   g_mouseHook    = nullptr;
+static HHOOK   g_kbHook       = nullptr;   // WH_KEYBOARD_LL, shares g_hookThread with the mouse hook
+static bool    g_kbOk         = false;     // result of the keyboard SetWindowsHookExW, via g_hookReady
+// Per-VK keyboard state (index = Virtual-Key code, 0..255). Touched by the hook thread (KbProc), the
+// tick thread (setKeys / main's keyPressed reads), and teardown (ReleaseSwallowedKeys via stop()),
+// so they must be atomic. g_kbPressed = physical down-state (the authority while the hook is active,
+// since a swallowed key never appears in GetAsyncKeyState). g_kbSwallowedDown = whether we swallowed
+// the DOWN, so only the matching UP is swallowed too (keeps the system's down/up view balanced and a
+// key can never be left believed-held).
+static std::atomic<bool> g_kbPressed[256]      = {};
+static std::atomic<bool> g_kbSwallowedDown[256] = {};
 // The WH_MOUSE_LL hook lives on its OWN thread (see start()): Windows services a low-level hook on
 // the thread that installed it and holds each mouse event until that thread responds, so the hook
 // MUST sit on a thread that pumps messages constantly. On the main thread it was starved behind the
@@ -57,6 +68,57 @@ void InputRouter::setButtons(int inButtonId, int inButtonId2, int outButtonId, i
     g_swallowedDown[1].store(false); g_swallowedDown[2].store(false);
 }
 
+bool InputRouter::isBoundKey(int vk) const {
+    if (vk <= 0 || vk > 255 || IsForbiddenBindVk(vk)) return false;   // never track/swallow forbidden keys
+    return vk == kbZoomInVk_.load(std::memory_order_relaxed)
+        || vk == kbZoomInVk2_.load(std::memory_order_relaxed)
+        || vk == kbZoomOutVk_.load(std::memory_order_relaxed)
+        || vk == kbZoomOutVk2_.load(std::memory_order_relaxed)
+        || vk == kbRecenterVk_.load(std::memory_order_relaxed);
+}
+bool InputRouter::keyPressed(int vk) const {
+    if (vk <= 0 || vk > 255) return false;
+    return g_kbPressed[vk].load(std::memory_order_relaxed);
+}
+void InputRouter::setKeys(int zoomInVk, int zoomInVk2, int zoomOutVk, int zoomOutVk2, int recenterVk) {
+    kbZoomInVk_.store(zoomInVk,    std::memory_order_relaxed);
+    kbZoomInVk2_.store(zoomInVk2,  std::memory_order_relaxed);
+    kbZoomOutVk_.store(zoomOutVk,  std::memory_order_relaxed);
+    kbZoomOutVk2_.store(zoomOutVk2,std::memory_order_relaxed);
+    kbRecenterVk_.store(recenterVk,std::memory_order_relaxed);
+    // Clear per-key pressed + swallowed records so a remap mid-press (keybind capture clears the old
+    // binding) can't leave a held flag stuck or cause a later, unrelated UP to be swallowed.
+    for (int i = 0; i < 256; ++i) { g_kbPressed[i].store(false); g_kbSwallowedDown[i].store(false); }
+}
+
+static LRESULT CALLBACK KbProc(int code, WPARAM wParam, LPARAM lParam) {
+    if (code == HC_ACTION && g_router) {
+        auto* ks = reinterpret_cast<KBDLLHOOKSTRUCT*>(lParam);
+        int vk = static_cast<int>(ks->vkCode);
+        bool down = (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN);
+        bool up   = (wParam == WM_KEYUP   || wParam == WM_SYSKEYUP);
+        // Only bound (non-forbidden) keys are tracked/swallowed; every other keystroke passes through
+        // untouched. isBoundKey already range-checks vk and excludes IsForbiddenBindVk keys.
+        if ((down || up) && g_router->isBoundKey(vk)) {
+            bool swallow = false;
+            if (down) {
+                // Auto-repeat re-fires WM_KEYDOWN; storing true each time is idempotent. main reads
+                // this as the physical down-state and does its own rising-edge work for taps.
+                g_kbPressed[vk].store(true);
+                if (g_router->swallowEnabled()) {
+                    g_kbSwallowedDown[vk].store(true);
+                    swallow = true;
+                }
+            } else { // up: swallow iff we swallowed its DOWN, so the system's down/up view stays balanced.
+                g_kbPressed[vk].store(false);
+                if (g_kbSwallowedDown[vk].exchange(false)) swallow = true;
+            }
+            if (swallow) return 1; // eat the key so the focused app never sees the zoom/recenter bind
+        }
+    }
+    return CallNextHookEx(g_kbHook, code, wParam, lParam);
+}
+
 static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
     if (code == HC_ACTION && g_router) {
         int id = xbuttonIdFromHook(wParam, lParam);
@@ -90,16 +152,24 @@ static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
 static DWORD WINAPI HookThreadProc(LPVOID) {
     MSG msg;
     PeekMessageW(&msg, nullptr, WM_USER, WM_USER, PM_NOREMOVE);   // force a message queue to exist
-    g_mouseHook = SetWindowsHookExW(WH_MOUSE_LL, MouseProc, GetModuleHandleW(nullptr), 0);
+    HMODULE hmod = GetModuleHandleW(nullptr);
+    g_mouseHook = SetWindowsHookExW(WH_MOUSE_LL, MouseProc, hmod, 0);
+    // Keyboard hook shares this thread (keystrokes are far rarer than mouse moves, so it adds no
+    // meaningful latency to the mouse path). It swallows keyboard zoom/recenter binds. Best-effort:
+    // mouse-hook success still gates start()'s overall result; a missing keyboard hook just falls
+    // back to GetAsyncKeyState polling (no swallowing) via kbHookActive().
+    g_kbHook    = SetWindowsHookExW(WH_KEYBOARD_LL, KbProc, hmod, 0);
     g_hookOk = (g_mouseHook != nullptr);
+    g_kbOk   = (g_kbHook != nullptr);
     SetEvent(g_hookReady);                                        // publish the install result to start()
-    if (!g_mouseHook) return 1;
+    if (!g_mouseHook) { if (g_kbHook) { UnhookWindowsHookEx(g_kbHook); g_kbHook = nullptr; } return 1; }
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {                // WM_QUIT (posted by stop()) ends this
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
     UnhookWindowsHookEx(g_mouseHook);                            // unhook on the installing thread
     g_mouseHook = nullptr;
+    if (g_kbHook) { UnhookWindowsHookEx(g_kbHook); g_kbHook = nullptr; }
     return 0;
 }
 
@@ -125,7 +195,8 @@ bool InputRouter::start(int inButtonId, int inButtonId2, int outButtonId, int ou
     if (!g_hookThread) { CloseHandle(g_hookReady); g_hookReady = nullptr; return false; }
     WaitForSingleObject(g_hookReady, INFINITE);
     CloseHandle(g_hookReady); g_hookReady = nullptr;
-    hookActive_.store(g_hookOk);   // hook is now the sole button-state authority (see hookActive())
+    hookActive_.store(g_hookOk);     // hook is now the sole button-state authority (see hookActive())
+    kbHookActive_.store(g_kbOk);     // keyboard hook is the authority for bound-key state (see kbHookActive())
     return g_hookOk;
     // Raw Input registration (RIDEV_INPUTSINK) + WM_INPUT decoding live in main.cpp's
     // message-only window, which calls AccumulateRaw() with the decoded deltas.
@@ -145,6 +216,20 @@ static void ReleaseSwallowedButtons() {
         SendInput(1, &in, sizeof(in));
     }
 }
+// Keyboard analogue of ReleaseSwallowedButtons: synthesize a KEYUP for any bound key whose DOWN we
+// swallowed but whose UP we never passed through, so teardown mid-press can't leave any consumer
+// believing the key is held. A lone keyup with no matching down is harmless (apps ignore it).
+static void ReleaseSwallowedKeys() {
+    for (int vk = 0; vk < 256; ++vk) {
+        if (!g_kbSwallowedDown[vk].exchange(false)) continue;
+        INPUT in{};
+        in.type = INPUT_KEYBOARD;
+        in.ki.wVk = static_cast<WORD>(vk);
+        in.ki.dwFlags = KEYEVENTF_KEYUP;
+        SendInput(1, &in, sizeof(in));
+        g_kbPressed[vk].store(false);
+    }
+}
 void InputRouter::stop() {
     if (g_hookThread) {
         PostThreadMessageW(g_hookThreadId, WM_QUIT, 0, 0);   // break the thread's GetMessage loop
@@ -154,7 +239,9 @@ void InputRouter::stop() {
         UnhookWindowsHookEx(g_mouseHook); g_mouseHook = nullptr;
     }
     ReleaseSwallowedButtons();   // never leave a swallowed side-button stranded as held
+    ReleaseSwallowedKeys();      // ...nor a swallowed keyboard bind
     hookActive_.store(false);
+    kbHookActive_.store(false);
     g_router = nullptr;
 }
 void InputRouter::drainRaw(int& dx, int& dy) {

@@ -27,6 +27,20 @@ public:
     bool isZoomButton(int xbuttonId) const;
     // Whether the hook should swallow the configured zoom buttons (set in start()).
     bool swallowEnabled() const { return swallow_; }
+    // --- Keyboard binds (WH_KEYBOARD_LL hook) -------------------------------------------------
+    // Configure the keyboard VKs the keyboard hook tracks + swallows (zoom in/out primary+alt and
+    // recenter; 0 = unbound). Forbidden VKs (IsForbiddenBindVk) are stored but never acted on.
+    // Clears the per-key pressed/swallowed records so a remap mid-press can't strand a key.
+    void setKeys(int zoomInVk, int zoomInVk2, int zoomOutVk, int zoomOutVk2, int recenterVk);
+    // Whether vk is one of the configured (non-forbidden) keyboard binds: decides track+swallow.
+    bool isBoundKey(int vk) const;
+    // Physical down-state of a keyboard key, as tracked by the keyboard hook. This is the authority
+    // when kbHookActive() (a swallowed key never shows in GetAsyncKeyState), so main reads it instead
+    // of polling. Returns false for out-of-range vk.
+    bool keyPressed(int vk) const;
+    // True once the LL KEYBOARD hook is installed. When false (install failed or WIND_NOHOOK), main
+    // must fall back to GetAsyncKeyState and no keyboard swallowing happens.
+    bool kbHookActive() const { return kbHookActive_.load(std::memory_order_relaxed); }
     // True when the LL mouse hook is installed (the normal build). When true the hook is the SOLE
     // authority for side-button held state; main's WM_INPUT path must NOT also write button state
     // (Raw Input still delivers the transition even though the hook swallows the legacy message, so
@@ -46,6 +60,15 @@ private:
     std::atomic<int> outButtonId2_{0};
     bool swallow_ = true;
     std::atomic<bool> hookActive_{false};   // true once the LL hook is installed (not WIND_NOHOOK)
+    // Configured keyboard binds (VK codes; 0 = unbound). Atomic so the keyboard hook thread reads
+    // them race-free against setKeys() on the tick thread. hideCursor/quickZoom binds are NOT here:
+    // they use RegisterHotKey, which already suppresses the key from other apps.
+    std::atomic<int> kbZoomInVk_{0};
+    std::atomic<int> kbZoomInVk2_{0};
+    std::atomic<int> kbZoomOutVk_{0};
+    std::atomic<int> kbZoomOutVk2_{0};
+    std::atomic<int> kbRecenterVk_{0};
+    std::atomic<bool> kbHookActive_{false}; // true once the LL KEYBOARD hook is installed
 };
 
 // Called from main.cpp's WM_INPUT handler with decoded relative mouse deltas.
