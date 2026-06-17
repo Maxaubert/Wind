@@ -61,17 +61,20 @@ staged Apply/Discard footer.
   (0x5B/0x5C) - enforced in three places: the hook never swallows them, `ParseConfig` sanitizes them
   out of the ini, and the config UI's keybind capture refuses them. Down/up swallows are balanced
   (only swallow an UP whose DOWN we swallowed) and released on teardown so a key is never stranded.
-  `cursorLockVk` (Inspect mode) is VK-only (no mods), swallowed like `recenterVk`. Inspect mode is
-  just a crosshair-cursor toggle: pressing it swaps the OS arrow for a crosshair system-wide via
-  `SetSystemCursor` (a 32x32 white-core/black-outline HCURSOR built once in `main.cpp`), pressing
-  again reloads the defaults. The cursor stays a normal, free-moving cursor at every zoom - it never
-  freezes, locks, or intercepts clicks (the earlier freeze/ClipCursor/click-commit design was
-  scrapped). At 1x the native `SetSystemCursor` crosshair shows (overlay off); while zoomed the OS
-  cursor is hidden, so `render_engine` draws a matching 32x32 crosshair SPRITE (`crosshairSRV`, same
-  geometry, scaled by zoom) in place of the captured cursor when `RenderFrameParams.cursorLocked` is
-  set - so the crosshair looks identical across the zoom boundary. `SPI_SETCURSORS` restore nets
-  (toggle-off, atexit `RestoreInputState`, `shutdown`, the crash filter, and next-launch startup at
-  `main.cpp` `RestoreInputState`) guarantee the crosshair is never stranded as the system cursor.
+  `cursorLockVk` (Inspect mode) is VK-only (no mods), swallowed like `recenterVk`. Inspect mode is a
+  FREEZE-cursor + free-look reticle toggle (driven entirely in `main.cpp` RunTick, no mouse-hook
+  involvement): toggling on FREEZES the real OS cursor with a 1px `ClipCursor` at its current spot
+  (`frozenCursor`) and hides it, so any hover/tooltip stays alive. A crosshair "look point" is then
+  driven by Raw Input (the frozen cursor can't move, but HID mickeys still arrive): the look point IS
+  the `CursorMapper` center, so moving the mouse pans the magnified view and the crosshair sprite
+  (`render_engine` draws it when `RenderFrameParams.cursorLocked`, a 32x32 reticle scaled by zoom) is
+  drawn at `cursorScreen`. The overlay stays active while Inspect is on (`active = zoomed || inspect`),
+  so the reticle PERSISTS and roams the full screen at 1x (the mapper returns `cursorScreen == center`
+  at level 1.0, which is the roaming look point) - it never vanishes at 1x and never snaps across the
+  zoom boundary. A left click lands at the frozen point (the cursor is pinned there). Toggle off (or
+  zoom out to idle) releases the clip, warps the cursor to the look point, and resumes normal follow.
+  The 1px clip is released on every exit (toggle-off-while-zoomed, teardown-to-idle, device-lost
+  recovery, `shutdown`, the crash filter, atexit `RestoreInputState`) so it is never stranded.
   LIMITATION (by design, not fixable in user mode): LL hooks swallow only the legacy/cooked input
   path (`WM_*`, `GetAsyncKeyState`) that desktop apps and browsers use. They CANNOT block Raw Input
   (`WM_INPUT`), which most GAMES read directly - so a bound key/button still reaches a raw-input game

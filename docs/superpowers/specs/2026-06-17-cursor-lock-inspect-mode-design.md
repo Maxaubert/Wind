@@ -1,7 +1,14 @@
 # Inspect mode (cursor-lock): design
 
 Date: 2026-06-17
-Status: approved (brainstorm), pending implementation plan
+Status: SHIPPED (the design below is the original brainstorm; the behavior evolved through testing,
+see "Final shipped design" at the bottom of this file for what actually shipped).
+
+> NOTE: This document captures the original design. The feature went through several rounds of live
+> testing and the model changed materially (the center-reticle + click-to-commit was dropped; the
+> reticle became a persistent free-look look-point that works at 1x). The authoritative description of
+> the shipped behavior is the "Final shipped design" section at the end of this file and the Inspect
+> mode gotcha in `CLAUDE.md`.
 Related: render engine (`docs/superpowers/specs/2026-05-25-own-renderer-design.md`),
 auto cursor sensitivity (`docs/superpowers/specs/2026-05-26-auto-cursor-sensitivity-design.md`),
 `LockDetector` (game-lock heuristic, `src/lock_detector.*`).
@@ -163,3 +170,39 @@ commits).
 - A separate "frozen point" on-screen marker (chose the subtle arrow+ring indicator instead).
 - A hold-to-lock variant or a master enable flag: the single unbound-by-default toggle is the
   whole opt-in surface.
+
+## Final shipped design (supersedes the brainstorm above)
+
+After several rounds of live testing the model settled on a "freeze + free-look reticle" that works at
+every zoom level. The center-reticle aiming, the `WH_MOUSE_LL` click-to-commit, the hover-suppression
+overlay, and the brief `SetSystemCursor` experiment were all dropped.
+
+**Behavior**
+- Toggle on: the real OS cursor FREEZES in place (1px `ClipCursor` at `frozenCursor`) and is hidden, so
+  any hover/tooltip stays alive. A crosshair "look point" appears.
+- The look point is driven by Raw Input (the frozen cursor cannot move, but HID mickeys still arrive).
+  Moving the mouse moves the look point and pans the magnified view; the crosshair is drawn at the
+  look point.
+- It works at every zoom and PERSISTS at 1x: the overlay stays active while Inspect is on
+  (`active = zoomed || inspect`), the look point roams the full screen at 1x, and the crosshair never
+  vanishes or snaps across the zoom boundary.
+- A left click lands at the frozen point (the cursor is pinned there). Toggle off (or zoom out to idle)
+  releases the clip, warps the cursor to the look point, and resumes normal follow.
+
+**Implementation (all in `main.cpp` RunTick; no mouse hook)**
+- The look point IS the `CursorMapper` center: while Inspect is on the pan delta comes from raw mickeys
+  (not the OS-cursor delta), and the crosshair is drawn at the mapper's `cursorScreen` (centered when
+  the lens can center, toward an edge at the desktop boundary, and equal to the roaming center at level
+  1.0 - which is what makes the 1x look point roam the full screen).
+- The crosshair is `render_engine`'s own 32x32 reticle sprite (`crosshairSRV`), drawn when
+  `RenderFrameParams.cursorLocked` is set, scaled by zoom.
+- `CursorLockController` is a plain on/off toggle (`toggle`/`reset`/`locked`).
+- The 1px `ClipCursor` is released on every exit (toggle-off-while-zoomed, teardown-to-idle,
+  device-lost recovery, `shutdown`, the crash filter, atexit `RestoreInputState`); verified by an
+  adversarial clip-lifecycle trace - no stranded-clip path.
+
+**Considered and dropped during testing**
+- Inspect at 1x with the cursor still frozen-immovable (felt stuck) -> the look point must roam at 1x.
+- A plain crosshair *cursor* (no freeze) -> "just a normal cursor that looks like a crosshair".
+- Left-click-to-exit Inspect -> reverted as a regression; a click simply lands at the frozen point and
+  Inspect stays on until toggled off.
