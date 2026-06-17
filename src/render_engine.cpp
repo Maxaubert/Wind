@@ -1018,6 +1018,7 @@ static LONG WINAPI CursorRestoreFilter(EXCEPTION_POINTERS* ep) {
     static LONG s_inHandler = 0;
     if (InterlockedExchange(&s_inHandler, 1)) return EXCEPTION_CONTINUE_SEARCH;
     MagShowSystemCursor(TRUE);
+    ClipCursor(nullptr);                 // never leave the cursor clipped if we crash while Inspect-locked
     SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, SPIF_SENDCHANGE);
     wind::WriteCrashReport(ep);          // minidump + text summary into the log dir
     return EXCEPTION_CONTINUE_SEARCH;   // let the default handler still report the crash
@@ -1039,6 +1040,7 @@ void RenderEngine::shutdown() {
     if (!s_) return;
     if (s_->magInited) {
         MagShowSystemCursor(TRUE);          // never leave the cursor hidden
+        ClipCursor(nullptr);                // nor clipped (Inspect mode) - heal both on teardown
         MagUninitialize();
         s_->magInited = false;
         s_->cursorHidden = false;

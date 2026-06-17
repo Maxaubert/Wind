@@ -18,6 +18,7 @@
 #include "zoom_controller.h"
 #include "tray.h"
 #include "lock_detector.h"
+#include "cursor_lock.h"
 #include "resource.h"
 
 using namespace wind;
@@ -118,6 +119,10 @@ struct TickState {
     int    revealPending = 0;                  // ticks left before the deferred (game) reveal (issue #90)
     int    hz = 60;                            // resolved tick/refresh rate (auto-detected)
     bool   recenterKeyWasDown = false;         // edge-detect the recenterVk key
+    CursorLockController cursorLock;            // optional Inspect mode (manual cursor freeze)
+    bool   lockKeyWasDown = false;             // edge-detect the cursorLockVk toggle
+    bool   prevInspectLock = false;            // detect lock<->free transitions for ClipCursor freeze
+    POINT  frozenDesktop{};                    // where the cursor is pinned while locked (virtual px)
     double quickZoomStored    = 0.0;           // remembered quick-zoom level (0 = none yet); in-memory
     bool   prevInHeld         = false;         // for rising-edge detection of the zoom-in channel
     bool   prevOutHeld        = false;
@@ -240,8 +245,8 @@ static void RunTick(TickState& t) {
             // bind changed (else the hook keeps swallowing the OLD key and ignores the new one).
             if (nc.zoomInVk != t.cfg.zoomInVk || nc.zoomOutVk != t.cfg.zoomOutVk
              || nc.zoomInVk2 != t.cfg.zoomInVk2 || nc.zoomOutVk2 != t.cfg.zoomOutVk2
-             || nc.recenterVk != t.cfg.recenterVk) {
-                g_input.setKeys(nc.zoomInVk, nc.zoomInVk2, nc.zoomOutVk, nc.zoomOutVk2, nc.recenterVk);
+             || nc.recenterVk != t.cfg.recenterVk || nc.cursorLockVk != t.cfg.cursorLockVk) {
+                g_input.setKeys(nc.zoomInVk, nc.zoomInVk2, nc.zoomOutVk, nc.zoomOutVk2, nc.recenterVk, nc.cursorLockVk);
             }
             if (nc.hideCursorVk != t.cfg.hideCursorVk || nc.hideCursorMods != t.cfg.hideCursorMods) {
                 RegisterHideCursorHotkey(t.hwnd, nc.hideCursorVk, nc.hideCursorMods);
@@ -311,6 +316,12 @@ static void RunTick(TickState& t) {
     bool recenterDown = keyDown(t.cfg.recenterVk);
     if (recenterDown && !t.recenterKeyWasDown) recenter = true;
     t.recenterKeyWasDown = recenterDown;
+    // Inspect mode: toggle on the bound key's rising edge (only while zoomed); also unlock if the hook
+    // reported a click landed while locked.
+    bool lockDown = keyDown(t.cfg.cursorLockVk);
+    if (lockDown && !t.lockKeyWasDown) t.cursorLock.toggle(t.zoom.level() > 1.0);
+    t.lockKeyWasDown = lockDown;
+    if (g_input.state().commitClick.exchange(false)) t.cursorLock.commitClick();
     // Hide-cursor hotkey is registered via RegisterHotKey (WndProc WM_HOTKEY toggles cursorHidden);
     // this both suppresses the key from reaching other apps and gives rising-edge semantics for
     // free (MOD_NOREPEAT). No polled check needed here.
@@ -344,6 +355,7 @@ static void RunTick(TickState& t) {
                 MonitorTarget nt = MonitorUnderCursor();
                 if (!SameMonitor(nt, t.mon) && t.renderEngine.retarget(nt)) {
                     t.mon = nt;
+                    t.cursorLock.reset();    // can't stay locked across a monitor switch
                     t.mapper = CursorMapper(nt.w, nt.h, t.cfg.cursorSmoothing);
                     int nhz = DetectRefreshHz(nt.device);   // pace off the new monitor's refresh (#74)
                     if (nhz > 0) t.hz = nhz;
@@ -354,10 +366,11 @@ static void RunTick(TickState& t) {
             t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y);   // virtual -> local monitor coords
             t.lastSetVirtual = pt;        // baseline for the OS-cursor delta (first delta = 0)
             t.detector.reset();           // start free
+            t.cursorLock.reset();         // each zoom-in starts free
             t.renderEngine.hideSystemCursor(true);
             t.renderEngine.invalidateCapture();       // grab a live frame, not a stale cached one
         }
-        if (recenter) { POINT pt; GetCursorPos(&pt); t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y); t.lastSetVirtual = pt; }
+        if (recenter) { POINT pt; GetCursorPos(&pt); t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y); t.lastSetVirtual = pt; t.cursorLock.reset(); }
         // Resolve the pan delta. FREE: the OS cursor's own motion since we last placed it - Windows'
         // pointer acceleration is already applied, so we auto-match the real cursor (DPI/accel), then
         // scale by cursorSensitivity as a speed knob (1.0 = exact match, the default). LOCKED: a game
@@ -370,9 +383,14 @@ static void RunTick(TickState& t) {
         const VirtualBounds& vb = t.vbounds;   // cached at zoom-in (see QueryVirtualBounds)
         bool clipConfined = clip.left > vb.x || clip.top > vb.y ||
                             clip.right < vb.x + vb.w || clip.bottom < vb.y + vb.h;
-        bool locked = t.detector.update(clipConfined,
-                                        std::abs(rawDx) + std::abs(rawDy),
-                                        std::abs(curDx) + std::abs(curDy));
+        bool locked;
+        if (t.cursorLock.locked()) {
+            locked = true;                 // manual Inspect lock supersedes the game-lock heuristic
+        } else {
+            locked = t.detector.update(clipConfined,
+                                       std::abs(rawDx) + std::abs(rawDy),
+                                       std::abs(curDx) + std::abs(curDy));
+        }
         int dx, dy;
         if (locked) {
             dx = (int)std::lround(rawDx * t.cfg.cursorSensitivity);
@@ -388,6 +406,36 @@ static void RunTick(TickState& t) {
         MapResult r = t.mapper.update(dx, dy, lvl);
         RenderFrameParams p{};
         FillRenderParams(p, r, t.cfg, t.mon, lvl);
+        // Inspect-mode freeze transitions. Enter: pin the real cursor at its current spot (= the last
+        // SetCursorPos target = current lens center = whatever hover the user wants to keep) with a 1px
+        // ClipCursor so physical motion can't drift it and no WM_MOUSEMOVE dismisses the tooltip. Exit:
+        // release the clip and warp to the reticle (lens center), abandoning the frozen point.
+        bool nowLock = t.cursorLock.locked();
+        if (nowLock && !t.prevInspectLock) {
+            t.frozenDesktop = t.lastSetVirtual;
+            RECT fz{ t.frozenDesktop.x, t.frozenDesktop.y, t.frozenDesktop.x + 1, t.frozenDesktop.y + 1 };
+            ClipCursor(&fz);
+        } else if (!nowLock && t.prevInspectLock) {
+            ClipCursor(nullptr);
+            POINT lc{ r.clickDesktopX + t.mon.x, r.clickDesktopY + t.mon.y };
+            SetCursorPos(lc.x, lc.y);          // resume following at the reticle
+            t.lastSetVirtual = lc;
+        }
+        t.prevInspectLock = nowLock;
+        if (nowLock) {
+            // Pin renderFrame's SetCursorPos at the frozen point (inside the clip = a no-op move) so it
+            // never fights the freeze, re-assert the clip (Windows can drop it on focus changes), and
+            // draw the lock indicator.
+            RECT fz{ t.frozenDesktop.x, t.frozenDesktop.y, t.frozenDesktop.x + 1, t.frozenDesktop.y + 1 };
+            ClipCursor(&fz);
+            p.clickDesktopX = t.frozenDesktop.x;
+            p.clickDesktopY = t.frozenDesktop.y;
+            p.cursorLocked = true;
+        }
+        // Publish the reticle's desktop point + lock state for the mouse hook's click-to-commit.
+        g_input.state().lensCenterX.store(r.clickDesktopX + t.mon.x, std::memory_order_relaxed);
+        g_input.state().lensCenterY.store(r.clickDesktopY + t.mon.y, std::memory_order_relaxed);
+        g_input.state().cursorLocked.store(nowLock, std::memory_order_relaxed);
         // Idle-hide fade: when enabled and the outline is visible, accumulate idle time (reset on
         // any hand motion - free OS-cursor delta or raw mickeys), then map it to the fade alpha.
         // dt is the per-tick elapsed time computed at the top of RunTick. Fade duration is 0.3s.
@@ -427,6 +475,9 @@ static void RunTick(TickState& t) {
     } else if (t.prevLvl > 1.0) {                     // zoom-out transition
         t.renderEngine.setVisible(false);
         t.renderEngine.hideSystemCursor(false);
+        if (t.prevInspectLock) { ClipCursor(nullptr); t.prevInspectLock = false; }
+        t.cursorLock.reset();
+        g_input.state().cursorLocked.store(false, std::memory_order_relaxed);
         t.revealPending = 0;                          // a quick tap may zoom out before the deferred reveal
     }
     t.prevLvl = lvl;
@@ -681,7 +732,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     }
     // Configure the keyboard hook's bound keys (zoom in/out primary+alt + recenter) so it swallows
     // them and tracks their state. Kept in sync on hot-reload below.
-    g_input.setKeys(cfg.zoomInVk, cfg.zoomInVk2, cfg.zoomOutVk, cfg.zoomOutVk2, cfg.recenterVk);
+    g_input.setKeys(cfg.zoomInVk, cfg.zoomInVk2, cfg.zoomOutVk, cfg.zoomOutVk2, cfg.recenterVk, cfg.cursorLockVk);
 
     // Target monitor for this session: the cursor's monitor when multiMonitor is on, else the
     // primary. The first zoom-in re-checks and retargets if the cursor moved to another monitor.
