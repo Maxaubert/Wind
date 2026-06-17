@@ -65,6 +65,11 @@ staged Apply/Discard footer.
   freezes the real OS cursor with a 1px `ClipCursor` while Raw Input continues to pan the lens, so
   any active hover/tooltip stays alive; a left/right click while locked warps the cursor to the
   lens-center reticle, commits the click there, and unlocks -- driven from the `WH_MOUSE_LL` hook.
+  NOHOOK DEGRADATION: under `WIND_NOHOOK` or hook-install failure (`hookActive()` / `kbHookActive()`
+  false), click-to-commit is unavailable - the `WH_MOUSE_LL` hook provides the only warp-commit, so a
+  click while locked lands at the frozen point. The toggle key still works (it falls back to
+  `GetAsyncKeyState` polling), so the lock is always escapable via the toggle or by zooming out: no
+  stranding.
   LIMITATION (by design, not fixable in user mode): LL hooks swallow only the legacy/cooked input
   path (`WM_*`, `GetAsyncKeyState`) that desktop apps and browsers use. They CANNOT block Raw Input
   (`WM_INPUT`), which most GAMES read directly - so a bound key/button still reaches a raw-input game
@@ -171,5 +176,5 @@ Feature/fix work: GitHub issue -> branch -> PR. README-only changes commit direc
 Remote: `github.com/Maxaubert/Wind`. Own-renderer work is on `feat/own-renderer` (issue #4).
 
 ## Style
-- NEVER use em-dashes (the "—" character) anywhere: code, comments, docs, commit messages,
+- NEVER use em-dashes (the U+2014 character) anywhere: code, comments, docs, commit messages,
   and UI copy. Use en-dashes, commas, or rephrase. Avoid the `&mdash;` HTML entity in UI strings too.

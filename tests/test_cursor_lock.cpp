@@ -41,3 +41,20 @@ TEST_CASE("reset returns to free from any state") {
     c.reset();
     CHECK(!c.locked());
 }
+
+TEST_CASE("toggle while NOT zoomed does not clear an existing lock") {
+    CursorLockController c;
+    c.toggle(/*zoomedIn=*/true);
+    REQUIRE(c.locked());
+    c.toggle(/*zoomedIn=*/false);  // unzoom-toggle is a no-op; lock survives
+    CHECK(c.locked());
+    c.reset();                     // only reset() clears the lock
+    CHECK(!c.locked());
+}
+
+TEST_CASE("commitClick is idempotent while unlocked") {
+    CursorLockController c;
+    c.commitClick();
+    c.commitClick();
+    CHECK(!c.locked());
+}

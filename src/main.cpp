@@ -420,6 +420,10 @@ static void RunTick(TickState& t) {
             RECT fz{ t.frozenDesktop.x, t.frozenDesktop.y, t.frozenDesktop.x + 1, t.frozenDesktop.y + 1 };
             ClipCursor(&fz);
         } else if (!nowLock && t.prevInspectLock) {
+            // On this exit tick the 1px clip was still active when clipConfined was read earlier in the
+            // tick, so the detector reported locked and the stale lastSetVirtual delta was NOT used as a
+            // free-pan. The warp + lastSetVirtual = lc resync below makes the next free tick start clean
+            // (no position snap).
             ClipCursor(nullptr);
             POINT lc{ r.clickDesktopX + t.mon.x, r.clickDesktopY + t.mon.y };
             SetCursorPos(lc.x, lc.y);          // resume following at the reticle
@@ -437,6 +441,11 @@ static void RunTick(TickState& t) {
             p.cursorLocked = true;
         }
         // Publish the reticle's desktop point + lock state for the mouse hook's click-to-commit.
+        // A click-commit hook firing in the sub-microsecond window between the mid-loop commitClick
+        // re-drain above and this re-assert can re-clip for a single frame; it self-heals on the next
+        // tick (accepted). lensCenterX/lensCenterY are a relaxed atomic pair: a worst-case torn read by
+        // the hook is one frame of pan (a few px) on a mid-pan click, accepted and consistent with the
+        // all-relaxed InputState convention.
         g_input.state().lensCenterX.store(r.clickDesktopX + t.mon.x, std::memory_order_relaxed);
         g_input.state().lensCenterY.store(r.clickDesktopY + t.mon.y, std::memory_order_relaxed);
         g_input.state().cursorLocked.store(nowLock, std::memory_order_relaxed);

@@ -33,8 +33,9 @@ public:
     // Whether the hook should swallow the configured zoom buttons (set in start()).
     bool swallowEnabled() const { return swallow_; }
     // --- Keyboard binds (WH_KEYBOARD_LL hook) -------------------------------------------------
-    // Configure the keyboard VKs the keyboard hook tracks + swallows (zoom in/out primary+alt and
-    // recenter; 0 = unbound). Forbidden VKs (IsForbiddenBindVk) are stored but never acted on.
+    // Configure the keyboard VKs the keyboard hook tracks + swallows (zoom in/out primary+alt,
+    // recenter, and the Inspect-mode cursor-lock toggle; 0 = unbound). Forbidden VKs
+    // (IsForbiddenBindVk) are stored but never acted on.
     // Clears the per-key pressed/swallowed records so a remap mid-press can't strand a key.
     void setKeys(int zoomInVk, int zoomInVk2, int zoomOutVk, int zoomOutVk2, int recenterVk,
                  int cursorLockVk);

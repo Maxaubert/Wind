@@ -1,4 +1,4 @@
-# Inspect mode (cursor-lock) — design
+# Inspect mode (cursor-lock): design
 
 Date: 2026-06-17
 Status: approved (brainstorm), pending implementation plan
@@ -40,7 +40,7 @@ The frozen hover point is "live" only for the duration of the lock.
 
 ### State machine (pure, testable)
 
-New pure-logic unit `src/cursor_lock.{h,cpp}` — `CursorLockController` — following the
+New pure-logic unit `src/cursor_lock.{h,cpp}` (`CursorLockController`) following the
 existing pure pattern (`ZoomController`, `LockDetector`, `transform`): NO `<windows.h>`, so it
 compiles into the desktop-free `WIND_TESTS` build.
 
@@ -53,13 +53,14 @@ Per-tick / per-event inputs from `main.cpp`:
 - `recenter`, `monitorRetarget` (reset signals)
 
 Outputs the tick loop consumes:
-- `locked()` — am I locked.
-- `panFromRaw()` — pan source this tick: raw mickeys while locked, OS-cursor delta while free.
-- `suppressSetCursor()` — while locked, the tick must NOT `SetCursorPos` / update
-  `lastSetVirtual`, leaving the real cursor frozen.
-- `consumeWarpToReticle()` — one-shot, true on any lock→free transition (toggle-off or
-  click): the tick warps the OS cursor to the current lens-center desktop point and resyncs
-  `lastSetVirtual` before resuming follow.
+- `locked()` - is the lock engaged.
+- `panFromRaw()` - pan source this tick: raw mickeys while locked, OS-cursor delta while free.
+
+The freeze and the warp are NOT controller outputs; they live in `main.cpp`. The freeze is a
+1px `ClipCursor` asserted while `locked()` and released on every exit path. The lock->free warp
+to the reticle is `main.cpp`'s exit-edge `SetCursorPos`, and for a click-commit the `WH_MOUSE_LL`
+hook's synchronous warp. The controller is a pure toggle (`suppressSetCursor()` /
+`consumeWarpToReticle()` were design-only names that never shipped).
 
 Transitions:
 - **Toggle while zoomed:** flip lock.
@@ -67,7 +68,7 @@ Transitions:
   - locked→free: emit warp-to-reticle, resume follow.
 - **Click while locked:** emit warp-to-reticle, force lock OFF (the click itself is fired by
   the hook, see below).
-- **Auto-clear** on zoom-out, `recenter`, and `monitorRetarget` — the same reset points
+- **Auto-clear** on zoom-out, `recenter`, and `monitorRetarget`, the same reset points
   `LockDetector.reset()` is already called at. No warp on auto-clear (zoom-out tears down the
   overlay; recenter/retarget re-baseline the cursor anyway).
 - Toggle is **ignored when not zoomed**.
@@ -82,9 +83,10 @@ Reuses existing paths:
   cursor cannot drift). This is distinct from merely skipping `SetCursorPos`: a skipped
   `SetCursorPos` still allows the cursor to wander if anything else moves it; the 1px clip
   enforces the freeze at the OS level.
-- **Locked = skip the `SetCursorPos` + `lastSetVirtual` update** (`main.cpp:422-425`). The
-  real cursor stays frozen at the frozen point.
-- The reticle is the drawn cursor at lens center — already where it is drawn today
+- **Locked = the SetCursorPos target is overridden to the frozen point.** While locked,
+  `renderFrame`'s `SetCursorPos` target is the frozen point, a no-op inside the 1px clip, so it
+  never fights the freeze.
+- The reticle is the drawn cursor at lens center, already where it is drawn today
   (centered-cursor design), so no positioning change, only the lock indicator.
 - While `locked()`, **bypass `LockDetector`** entirely: manual lock supersedes the game-lock
   heuristic. Both regimes integrate a delta into the same accumulator, so toggling lock never
@@ -118,7 +120,7 @@ commits).
 ## Config & UI
 
 - One new keybind in `config.h`: `cursorLockVk` / `cursorLockMods` (VK + modifier mask, same
-  bit layout as the zoom combos). **Unbound by default (`0`)** — binding it is the opt-in, so
+  bit layout as the zoom combos). **Unbound by default (`0`)**, binding it is the opt-in, so
   no separate master enable flag (YAGNI). The bind is **VK-only (no modifier support)** to keep
   the keyboard-hook swallow simple and correct: the hook matches on VK alone, and modifier-combo
   swallows risk eating modifier keys in other apps. This matches `recenterVk` behavior.
@@ -140,13 +142,17 @@ commits).
 - **Hide-cursor mode:** reticle/indicator not drawn, lock still works (blind pan + commit).
 - **Forbidden keys / safety:** enforced in the same three places as other binds (hook never
   swallows them, `ParseConfig` sanitizes, config UI capture refuses).
+- **No-hook degradation (`WIND_NOHOOK` / hook-install failure):** with `hookActive()` false,
+  click-to-commit is unavailable (the `WH_MOUSE_LL` hook is the only warp-commit, so a click
+  while locked lands at the frozen point). The toggle key still works via the `GetAsyncKeyState`
+  polling fallback, so the lock is always escapable by toggling off or zooming out: no stranding.
 
 ## Testing
 
 - **Pure unit tests** `tests/test_cursor_lock.cpp` (doctest) for `CursorLockController`:
-  toggle / click / zoom-out / recenter / retarget sequences → expected `locked()`,
-  `panFromRaw()`, `suppressSetCursor()`, and one-shot `consumeWarpToReticle()`. No
-  `<windows.h>`; added to the `WIND_TESTS` source list.
+  `locked()` / `panFromRaw()` across toggle / commitClick / reset / zoom-gating sequences
+  (including the unzoom-toggle no-op and commitClick idempotence). No `<windows.h>`; added to
+  the `WIND_TESTS` source list.
 - **Manual verification:** `WIND_SELFTEST=1` for the indicator render; live testing for the
   click-to-commit warp timing (real thumbnail autoplay + a real tooltip), and that the toggle
   key is swallowed from the focused app.
@@ -155,5 +161,5 @@ commits).
 
 - The rejected hover-suppression overlay.
 - A separate "frozen point" on-screen marker (chose the subtle arrow+ring indicator instead).
-- A hold-to-lock variant or a master enable flag — the single unbound-by-default toggle is the
+- A hold-to-lock variant or a master enable flag: the single unbound-by-default toggle is the
   whole opt-in surface.
