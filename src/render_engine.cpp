@@ -1000,7 +1000,9 @@ bool RenderEngine::renderFrame(const RenderFrameParams& p) {
     // transparent overlay to the app at the right desktop point. We drive the lens from raw
     // input (not GetCursorPos), so this SetCursorPos never feeds back into tracking. Only
     // when it actually moved (avoids redundant synthetic mouse events while idle).
-    if (p.clickDesktopX != s_->lastClickX || p.clickDesktopY != s_->lastClickY) {
+    // warpCursor=false (Inspect mode at 1x: a free-moving crosshair) leaves the OS cursor wherever the
+    // user's hand put it - we never SetCursorPos it, so it stays as free as a normal cursor.
+    if (p.warpCursor && (p.clickDesktopX != s_->lastClickX || p.clickDesktopY != s_->lastClickY)) {
         SetCursorPos(p.clickDesktopX, p.clickDesktopY);
         s_->lastClickX = p.clickDesktopX; s_->lastClickY = p.clickDesktopY;
     }

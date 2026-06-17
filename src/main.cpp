@@ -173,6 +173,7 @@ static void FillRenderParams(RenderFrameParams& p, const MapResult& r, const Con
     p.outlineR = orr; p.outlineG = og; p.outlineB = ob;
     p.outlineAlpha = 1.0f;   // RunTick lowers this when idle-hide is active
     p.cursorLocked = false;   // main overrides to true while the inspect lock is engaged
+    p.warpCursor = true;      // main sets false only for the 1x free-crosshair (see RunTick)
 }
 
 // Append a line to %TEMP%\wind_diag.log (frame-pacing diagnostics; gated on diagnostics=1).
@@ -435,54 +436,53 @@ static void RunTick(TickState& t) {
         // the hook already released it (which would yank the cursor back to the frozen point).
         if (g_input.state().commitClick.exchange(false)) t.cursorLock.commitClick();
         bool nowLock = t.cursorLock.locked();
-        if (nowLock && !t.prevInspectLock) {
+        // The 1px FREEZE applies only while ZOOMED+locked (you hold the cursor still to pan the lens). At
+        // 1x there is no lens to pan, so Inspect there is just a free-moving crosshair cursor (no clip,
+        // normal clicks) - the cursor stays "as free as always". prevInspectLock tracks the FREEZE state.
+        bool freezing = zoomed && nowLock;
+        if (freezing && !t.prevInspectLock) {
             t.frozenDesktop = t.lastSetVirtual;
             RECT fz{ t.frozenDesktop.x, t.frozenDesktop.y, t.frozenDesktop.x + 1, t.frozenDesktop.y + 1 };
             ClipCursor(&fz);
-        } else if (!nowLock && t.prevInspectLock) {
-            // On this exit tick the 1px clip was still active when clipConfined was read earlier in the
-            // tick, so the detector reported locked and the stale lastSetVirtual delta was NOT used as a
-            // free-pan. The warp + lastSetVirtual = lc resync below makes the next free tick start clean
-            // (no position snap).
+        } else if (!freezing && t.prevInspectLock) {
+            // Leaving the freeze. Zoomed unlock: warp to the reticle and resume following. Zoom-out while
+            // locked: release the clip but LEAVE the cursor at the frozen point (the 1x crosshair below
+            // keeps it there, now free) - no warp.
             ClipCursor(nullptr);
-            POINT lc{ r.clickDesktopX + t.mon.x, r.clickDesktopY + t.mon.y };
-            SetCursorPos(lc.x, lc.y);          // resume following at the reticle
-            t.lastSetVirtual = lc;
+            if (zoomed) {
+                POINT lc{ r.clickDesktopX + t.mon.x, r.clickDesktopY + t.mon.y };
+                SetCursorPos(lc.x, lc.y);
+                t.lastSetVirtual = lc;
+            }
         }
-        t.prevInspectLock = nowLock;
-        if (nowLock) {
-            // Pin renderFrame's SetCursorPos at the frozen point (inside the clip = a no-op move) so it
-            // never fights the freeze, re-assert the clip (Windows can drop it on focus changes), and
-            // draw the lock indicator.
+        t.prevInspectLock = freezing;
+        if (freezing) {
+            // Pin renderFrame's SetCursorPos at the frozen point (a no-op inside the clip) so it never
+            // fights the freeze, re-assert the clip (Windows can drop it on focus changes), draw the reticle.
             RECT fz{ t.frozenDesktop.x, t.frozenDesktop.y, t.frozenDesktop.x + 1, t.frozenDesktop.y + 1 };
             ClipCursor(&fz);
             p.clickDesktopX = t.frozenDesktop.x;
             p.clickDesktopY = t.frozenDesktop.y;
             p.cursorLocked = true;
-            if (!zoomed) {                 // 1x Inspect: draw the crosshair at the frozen cursor's real
-                p.cursorScreenX = (double)(t.frozenDesktop.x - t.mon.x);   // screen spot (not lens-center),
-                p.cursorScreenY = (double)(t.frozenDesktop.y - t.mon.y);   // and no lens outline on the
-                p.outline = false;                                          // 1:1 view.
+        } else if (!zoomed) {
+            // 1x: the OS cursor is never warped (warpCursor=false), so it moves with the hand, freely.
+            // While locked, draw the crosshair at its LIVE position; keep the freeze baseline current in
+            // case the user then zooms in.
+            POINT live; GetCursorPos(&live);
+            if (nowLock) {
+                p.cursorScreenX = (double)(live.x - t.mon.x);
+                p.cursorScreenY = (double)(live.y - t.mon.y);
+                p.cursorLocked = true;
+                p.outline = false;
             }
+            p.warpCursor = false;
+            t.lastSetVirtual = live;
         }
-        if (!zoomed) {   // 1x: the OS cursor stays pinned at the frozen point, never warped to lens-center -
-            p.clickDesktopX = t.frozenDesktop.x;   // including the single unlock-transition tick before
-            p.clickDesktopY = t.frozenDesktop.y;   // teardown, so renderFrame never jumps it to screen center.
-        }
-        // Publish the reticle's desktop point + lock state for the mouse hook's click-to-commit.
-        // A click-commit hook firing in the sub-microsecond window between the mid-loop commitClick
-        // re-drain above and this re-assert can re-clip for a single frame; it self-heals on the next
-        // tick (accepted). lensCenterX/lensCenterY are a relaxed atomic pair: a worst-case torn read by
-        // the hook is one frame of pan (a few px) on a mid-pan click, accepted and consistent with the
-        // all-relaxed InputState convention.
-        if (nowLock && !zoomed) {   // 1x-locked: a click commits at the frozen point (= the crosshair)
-            g_input.state().lensCenterX.store(t.frozenDesktop.x, std::memory_order_relaxed);
-            g_input.state().lensCenterY.store(t.frozenDesktop.y, std::memory_order_relaxed);
-        } else {                    // zoomed: a click commits at the reticle (lens center)
-            g_input.state().lensCenterX.store(r.clickDesktopX + t.mon.x, std::memory_order_relaxed);
-            g_input.state().lensCenterY.store(r.clickDesktopY + t.mon.y, std::memory_order_relaxed);
-        }
-        g_input.state().cursorLocked.store(nowLock, std::memory_order_relaxed);
+        // Lock state for the mouse hook's click-to-commit: ONLY while FREEZING (zoomed). At 1x the crosshair
+        // is a normal cursor, so the hook must NOT intercept clicks; lensCenter is only read when freezing.
+        g_input.state().lensCenterX.store(r.clickDesktopX + t.mon.x, std::memory_order_relaxed);
+        g_input.state().lensCenterY.store(r.clickDesktopY + t.mon.y, std::memory_order_relaxed);
+        g_input.state().cursorLocked.store(freezing, std::memory_order_relaxed);
         // Idle-hide fade: when enabled and the outline is visible, accumulate idle time (reset on
         // any hand motion - free OS-cursor delta or raw mickeys), then map it to the fade alpha.
         // dt is the per-tick elapsed time computed at the top of RunTick. Fade duration is 0.3s.
