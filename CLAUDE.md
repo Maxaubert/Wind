@@ -61,15 +61,17 @@ staged Apply/Discard footer.
   (0x5B/0x5C) - enforced in three places: the hook never swallows them, `ParseConfig` sanitizes them
   out of the ini, and the config UI's keybind capture refuses them. Down/up swallows are balanced
   (only swallow an UP whose DOWN we swallowed) and released on teardown so a key is never stranded.
-  `cursorLockVk` (Inspect mode) is VK-only (no mods), swallowed like `recenterVk`. Inspect mode
-  freezes the real OS cursor with a 1px `ClipCursor` while Raw Input continues to pan the lens, so
-  any active hover/tooltip stays alive; a left/right click while locked warps the cursor to the
-  lens-center reticle, commits the click there, and unlocks -- driven from the `WH_MOUSE_LL` hook.
-  NOHOOK DEGRADATION: under `WIND_NOHOOK` or hook-install failure (`hookActive()` / `kbHookActive()`
-  false), click-to-commit is unavailable - the `WH_MOUSE_LL` hook provides the only warp-commit, so a
-  click while locked lands at the frozen point. The toggle key still works (it falls back to
-  `GetAsyncKeyState` polling), so the lock is always escapable via the toggle or by zooming out: no
-  stranding.
+  `cursorLockVk` (Inspect mode) is VK-only (no mods), swallowed like `recenterVk`. Inspect mode is
+  just a crosshair-cursor toggle: pressing it swaps the OS arrow for a crosshair system-wide via
+  `SetSystemCursor` (a 32x32 white-core/black-outline HCURSOR built once in `main.cpp`), pressing
+  again reloads the defaults. The cursor stays a normal, free-moving cursor at every zoom - it never
+  freezes, locks, or intercepts clicks (the earlier freeze/ClipCursor/click-commit design was
+  scrapped). At 1x the native `SetSystemCursor` crosshair shows (overlay off); while zoomed the OS
+  cursor is hidden, so `render_engine` draws a matching 32x32 crosshair SPRITE (`crosshairSRV`, same
+  geometry, scaled by zoom) in place of the captured cursor when `RenderFrameParams.cursorLocked` is
+  set - so the crosshair looks identical across the zoom boundary. `SPI_SETCURSORS` restore nets
+  (toggle-off, atexit `RestoreInputState`, `shutdown`, the crash filter, and next-launch startup at
+  `main.cpp` `RestoreInputState`) guarantee the crosshair is never stranded as the system cursor.
   LIMITATION (by design, not fixable in user mode): LL hooks swallow only the legacy/cooked input
   path (`WM_*`, `GetAsyncKeyState`) that desktop apps and browsers use. They CANNOT block Raw Input
   (`WM_INPUT`), which most GAMES read directly - so a bound key/button still reaches a raw-input game

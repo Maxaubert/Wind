@@ -172,6 +172,7 @@ static void FillRenderParams(RenderFrameParams& p, const MapResult& r, const Con
     ParseHexColor(cfg.outlineColor, orr, og, ob);
     p.outlineR = orr; p.outlineG = og; p.outlineB = ob;
     p.outlineAlpha = 1.0f;   // RunTick lowers this when idle-hide is active
+    p.cursorLocked = false;  // RunTick sets true while zoomed + Inspect mode (draw the crosshair sprite)
 }
 
 // Append a line to %TEMP%\wind_diag.log (frame-pacing diagnostics; gated on diagnostics=1).
@@ -489,6 +490,7 @@ static void RunTick(TickState& t) {
             t.outlineIdleSec = 0.0;   // keep ready for when idle-hide is toggled on mid-session
         }
         if (t.cursorHidden) p.cursorMode = 2;   // hotkey override; FillRenderParams already set 0/1/2 from cfg
+        if (t.cursorLock.locked()) p.cursorLocked = true;   // Inspect mode: draw the crosshair, not the arrow
         t.renderEngine.renderFrame(p);          // render+present every zoomed tick (never blocks the ramp)
         // Reveal AFTER the live frame is presented: setVisible flips the layer alpha over the
         // now-current front buffer, so the overlay never shows its retained previous-session

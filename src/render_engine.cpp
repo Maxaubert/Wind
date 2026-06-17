@@ -106,6 +106,7 @@ struct RenderEngine::State {
     ComPtr<ID3D11BlendState> blendInvert;      // invert blend for I-beam-style cursors
     ComPtr<ID3D11Texture2D> cursorTex;         // the ACTIVE cursor's texture (an alias into the cache)
     ComPtr<ID3D11ShaderResourceView> cursorSRV;
+    ComPtr<ID3D11ShaderResourceView> crosshairSRV;  // Inspect-mode crosshair sprite (32x32, built once)
     HCURSOR lastCursor = nullptr;              // re-decode only when the OS cursor changes
     int curW = 0, curH = 0, hotX = 0, hotY = 0;
     bool cursorReady = false;
@@ -414,6 +415,7 @@ bool RenderEngine::recoverDeviceLost() {
     s_->dupl.Reset();
     s_->desktopCopy.Reset(); s_->desktopSRV.Reset();
     s_->cursorTex.Reset(); s_->cursorSRV.Reset(); s_->cursorReady = false; s_->lastCursor = nullptr;
+    s_->crosshairSRV.Reset();   // device-dependent; rebuilt in buildDeviceResources
     s_->cursorCache.clear();   // cached cursor textures belong to the dead device
     s_->vs.Reset(); s_->ps.Reset(); s_->cvs.Reset(); s_->cps.Reset();
     s_->cb.Reset(); s_->ccb.Reset();
@@ -600,6 +602,33 @@ bool RenderEngine::State::buildDeviceResources() {
     samp.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
     device->CreateSamplerState(&samp, sampPoint.ReleaseAndGetAddressOf());
     if (!sampLinear || !sampPoint) { RLog("buildDeviceResources: CreateSamplerState failed"); return false; }
+
+    // --- Inspect-mode crosshair sprite (32x32, same geometry as the SetSystemCursor crosshair so the
+    // 1x native cursor and the magnified overlay crosshair look identical across the zoom boundary).
+    // White core + 1px black outline + center gap; drawn (scaled by zoom) in place of the cursor while
+    // Inspect mode is on and we are zoomed. ---
+    {
+        const int N = 32; const double cx = 15.5, cy = 15.5;
+        const double armLen = 14.0, gap = 4.0, coreHalf = 1.5, outlineHalf = 3.0;
+        std::vector<uint32_t> px((size_t)N * N, 0);
+        for (int yy = 0; yy < N; ++yy) for (int xx = 0; xx < N; ++xx) {
+            double adx = std::fabs(xx - cx), ady = std::fabs(yy - cy);
+            bool vArm = adx <= outlineHalf && ady <= armLen && ady >= gap;
+            bool hArm = ady <= outlineHalf && adx <= armLen && adx >= gap;
+            if (vArm || hArm) {
+                bool core = (vArm && adx <= coreHalf) || (hArm && ady <= coreHalf);
+                px[(size_t)yy * N + xx] = core ? 0xFFFFFFFFu : 0xFF000000u;   // white core / black outline
+            }
+        }
+        D3D11_TEXTURE2D_DESC td{}; td.Width = N; td.Height = N; td.MipLevels = 1; td.ArraySize = 1;
+        td.Format = DXGI_FORMAT_B8G8R8A8_UNORM; td.SampleDesc.Count = 1; td.Usage = D3D11_USAGE_IMMUTABLE;
+        td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        D3D11_SUBRESOURCE_DATA sd{}; sd.pSysMem = px.data(); sd.SysMemPitch = N * 4;
+        ComPtr<ID3D11Texture2D> tex;
+        if (SUCCEEDED(device->CreateTexture2D(&td, &sd, &tex)))
+            device->CreateShaderResourceView(tex.Get(), nullptr, crosshairSRV.ReleaseAndGetAddressOf());
+        if (!crosshairSRV) RLog("buildDeviceResources: crosshairSRV creation failed (non-fatal)");
+    }
 
     // --- Desktop Duplication ---
     if (!recreateDupl()) { RLog("buildDeviceResources: recreateDupl failed"); return false; }
@@ -883,21 +912,26 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
                       (p.cursorMode == 1 || osCursorShowing);
     if (drawCursor) {
         double scale = p.cursorScaleWithZoom ? (p.level < 1.0 ? 1.0 : p.level) : 1.0;
-        double drawW = curW * scale, drawH = curH * scale;
-        double tlX = p.cursorScreenX - hotX * scale;   // top-left so the hotspot lands at cursorScreen
-        double tlY = p.cursorScreenY - hotY * scale;
+        // Inspect mode while zoomed: draw the 32x32 crosshair sprite (centered, matching the 1x native
+        // SetSystemCursor crosshair) in place of the captured cursor. Otherwise draw the captured cursor.
+        bool useCross = p.cursorLocked && crosshairSRV;
+        double cw = useCross ? 32.0 : curW, ch = useCross ? 32.0 : curH;
+        double chx = useCross ? 16.0 : hotX, chy = useCross ? 16.0 : hotY;
+        double drawW = cw * scale, drawH = ch * scale;
+        double tlX = p.cursorScreenX - chx * scale;   // top-left so the hotspot lands at cursorScreen
+        double tlY = p.cursorScreenY - chy * scale;
         float posClipX = (float)(tlX / sw * 2.0 - 1.0);
         float posClipY = (float)(1.0 - tlY / sh * 2.0);
         float sizeClipX = (float)(drawW / sw * 2.0);
         float sizeClipY = (float)(-(drawH / sh * 2.0));   // clip-y up vs screen-y down
         float ccbv[4] = { posClipX, posClipY, sizeClipX, sizeClipY };
         c->UpdateSubresource(ccb.Get(), 0, nullptr, ccbv, 0, 0);
-        c->OMSetBlendState((cursorInvert ? blendInvert : blend).Get(), nullptr, 0xFFFFFFFF);
+        c->OMSetBlendState(((cursorInvert && !useCross) ? blendInvert : blend).Get(), nullptr, 0xFFFFFFFF);
         c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
         c->VSSetShader(cvs.Get(), nullptr, 0);
         c->VSSetConstantBuffers(0, 1, ccb.GetAddressOf());
         c->PSSetShader(cps.Get(), nullptr, 0);
-        c->PSSetShaderResources(0, 1, cursorSRV.GetAddressOf());
+        c->PSSetShaderResources(0, 1, useCross ? crosshairSRV.GetAddressOf() : cursorSRV.GetAddressOf());
         c->PSSetSamplers(0, 1, sampLinear.GetAddressOf());
         c->Draw(4, 0);
     }
