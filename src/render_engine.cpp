@@ -906,18 +906,15 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
     }
 
     // Cursor pass: alpha-blended quad at the centered hotspot, scaled by zoom. In auto mode
-    // (cursorMode 0) we skip the captured cursor when the focused app hides its own cursor (games), so
-    // we don't paint a pointer the game intentionally hid. 1 = always draw, 2 = never draw.
-    // Inspect mode is different: the crosshair is OUR look-point sprite (not the app's pointer), so it
-    // always draws (independent of osCursorShowing or whether a captured cursor is ready), as long as
-    // the cursor isn't force-hidden (mode 2).
-    bool drawCross    = p.cursorLocked && crosshairSRV && p.cursorMode != 2;
-    bool drawCaptured = cursorReady && p.cursorMode != 2 && (p.cursorMode == 1 || osCursorShowing);
-    bool drawCursor = drawCross || drawCaptured;
+    // (cursorMode 0) we skip it when the focused app hides its own cursor (games), so we don't
+    // paint a pointer the game intentionally hid. 1 = always draw, 2 = never draw.
+    bool drawCursor = cursorReady && p.cursorMode != 2 &&
+                      (p.cursorMode == 1 || osCursorShowing);
     if (drawCursor) {
         double scale = p.cursorScaleWithZoom ? (p.level < 1.0 ? 1.0 : p.level) : 1.0;
-        // Inspect mode: draw the 32x32 crosshair sprite (the look point) in place of the captured cursor.
-        bool useCross = drawCross;
+        // Inspect mode while zoomed: draw the 32x32 crosshair sprite (centered, matching the 1x native
+        // SetSystemCursor crosshair) in place of the captured cursor. Otherwise draw the captured cursor.
+        bool useCross = p.cursorLocked && crosshairSRV;
         double cw = useCross ? 32.0 : curW, ch = useCross ? 32.0 : curH;
         double chx = useCross ? 16.0 : hotX, chy = useCross ? 16.0 : hotY;
         double drawW = cw * scale, drawH = ch * scale;
