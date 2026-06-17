@@ -936,9 +936,11 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
     // pipeline (cvs/cps/sampLinear) with the pre-built crosshairSRV. Gated like the arrow (cursorMode
     // != 2 and, in auto mode, the app shows a cursor); cursorScreen is the exact commit point.
     if (p.cursorLocked && crosshairSRV && drawCursor) {
+        // Scale the reticle by the SAME factor as the cursor sprite (cursorScaleWithZoom): if the user's
+        // cursor grows with zoom, so does the crosshair; if the cursor stays fixed on screen, so does the
+        // crosshair. They then track each other at every zoom level instead of diverging.
         double zs = p.cursorScaleWithZoom ? (p.level < 1.0 ? 1.0 : p.level) : 1.0;
-        if (zs > 2.5) zs = 2.5;                       // clamp so the reticle never swallows the view
-        const double crossPx = 56.0 * zs;             // on-screen footprint
+        const double crossPx = 56.0 * zs;             // on-screen footprint (matches the cursor's scaling)
         double tlX = p.cursorScreenX - crossPx / 2.0; // center the crosshair on the hotspot (click point)
         double tlY = p.cursorScreenY - crossPx / 2.0;
         float posClipX  = (float)(tlX / sw * 2.0 - 1.0);
