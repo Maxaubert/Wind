@@ -5,8 +5,9 @@ namespace wind {
 // (ClipCursor) and reticle warp based on the locked() transitions; this class only owns the rules.
 class CursorLockController {
 public:
-    // Rising edge of the bound toggle key. Ignored unless zoomed in (lock is meaningless at 1x).
-    void toggle(bool zoomedIn);
+    // Rising edge of the bound toggle key. Flips the lock at ANY zoom - Inspect mode is available even
+    // at 1x (the tick keeps the overlay active while locked and renders a 1:1 view with the reticle).
+    void toggle();
     // A left/right click was observed while locked (by the mouse hook): unlock. The hook itself warps
     // the cursor to the reticle and lets the click land; this just drops the lock state.
     void commitClick();

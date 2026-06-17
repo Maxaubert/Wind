@@ -122,6 +122,7 @@ struct TickState {
     CursorLockController cursorLock;            // optional Inspect mode (manual cursor freeze)
     bool   lockKeyWasDown = false;             // edge-detect the cursorLockVk toggle
     bool   prevInspectLock = false;            // detect lock<->free transitions for ClipCursor freeze
+    bool   prevActive = false;                 // overlay was active last tick (zoomed OR inspect-locked)
     POINT  frozenDesktop{};                    // where the cursor is pinned while locked (virtual px)
     double quickZoomStored    = 0.0;           // remembered quick-zoom level (0 = none yet); in-memory
     bool   prevInHeld         = false;         // for rising-edge detection of the zoom-in channel
@@ -316,12 +317,27 @@ static void RunTick(TickState& t) {
     bool recenterDown = keyDown(t.cfg.recenterVk);
     if (recenterDown && !t.recenterKeyWasDown) recenter = true;
     t.recenterKeyWasDown = recenterDown;
-    // Inspect mode: toggle on the bound key's rising edge (only while zoomed); also unlock if the hook
-    // reported a click landed while locked.
+    // Inspect mode: toggle on the bound key's rising edge (works at any zoom, including 1x); also unlock
+    // if the hook reported a click landed while locked.
     bool lockDown = keyDown(t.cfg.cursorLockVk);
-    if (lockDown && !t.lockKeyWasDown) t.cursorLock.toggle(t.zoom.level() > 1.0);
+    if (lockDown && !t.lockKeyWasDown) t.cursorLock.toggle();
     t.lockKeyWasDown = lockDown;
     if (g_input.state().commitClick.exchange(false)) t.cursorLock.commitClick();
+    // Fire a committed click here, on the tick thread (the hook only swallows + signals - injecting from
+    // inside the LL hook callback lagged the click ~1s). The hook released the freeze clip and warped the
+    // OS cursor to the reticle/frozen point; re-assert that position, then send one atomic down+up so the
+    // app sees a clean click. Done unconditionally (works whether we stay active or tear down this tick,
+    // e.g. a click at 1x that drops us straight to idle).
+    if (int cb = g_input.state().commitButton.exchange(0)) {
+        POINT lc{ g_input.state().lensCenterX.load(std::memory_order_relaxed),
+                  g_input.state().lensCenterY.load(std::memory_order_relaxed) };
+        ClipCursor(nullptr);
+        SetCursorPos(lc.x, lc.y);
+        INPUT click[2] = {};
+        click[0].type = INPUT_MOUSE; click[0].mi.dwFlags = (cb == 1) ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_RIGHTDOWN;
+        click[1].type = INPUT_MOUSE; click[1].mi.dwFlags = (cb == 1) ? MOUSEEVENTF_LEFTUP   : MOUSEEVENTF_RIGHTUP;
+        SendInput(2, click, sizeof(INPUT));
+    }
     // Hide-cursor hotkey is registered via RegisterHotKey (WndProc WM_HOTKEY toggles cursorHidden);
     // this both suppresses the key from reaching other apps and gives rising-edge semantics for
     // free (MOD_NOREPEAT). No polled check needed here.
@@ -344,10 +360,12 @@ static void RunTick(TickState& t) {
 
     int rawDx, rawDy; g_input.drainRaw(rawDx, rawDy);
 
-    if (lvl > 1.0) {
-        bool zoomIn = (t.prevLvl <= 1.0);             // zoom-in transition
-        if (zoomIn) {
-            t.outlineIdleSec = 0.0;   // each zoom-in starts with the outline fully shown
+    bool zoomed = lvl > 1.0;
+    bool active = zoomed || t.cursorLock.locked();    // overlay runs while zoomed OR inspect-locked (incl 1x)
+    if (active) {
+        bool enterActive = !t.prevActive;             // idle -> active this tick (zoom-in OR lock-at-1x)
+        if (enterActive) {
+            t.outlineIdleSec = 0.0;   // each activation starts with the outline fully shown
             // Follow the cursor's monitor (multiMonitor on). Only reconfigure when it actually
             // changed; retarget() returns false on multi-GPU/failure, in which case we keep the
             // current monitor. The overlay is still at alpha 0 here, so a move never flashes.
@@ -355,7 +373,6 @@ static void RunTick(TickState& t) {
                 MonitorTarget nt = MonitorUnderCursor();
                 if (!SameMonitor(nt, t.mon) && t.renderEngine.retarget(nt)) {
                     t.mon = nt;
-                    t.cursorLock.reset();    // can't stay locked across a monitor switch
                     t.mapper = CursorMapper(nt.w, nt.h, t.cfg.cursorSmoothing);
                     int nhz = DetectRefreshHz(nt.device);   // pace off the new monitor's refresh (#74)
                     if (nhz > 0) t.hz = nhz;
@@ -366,7 +383,8 @@ static void RunTick(TickState& t) {
             t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y);   // virtual -> local monitor coords
             t.lastSetVirtual = pt;        // baseline for the OS-cursor delta (first delta = 0)
             t.detector.reset();           // start free
-            t.cursorLock.reset();         // each zoom-in starts free
+            // NOTE: do NOT reset the inspect lock on activation - entering via the toggle at 1x must keep
+            // the lock; entering via a fresh zoom-in from idle is already unlocked.
             t.renderEngine.hideSystemCursor(true);
             t.renderEngine.invalidateCapture();       // grab a live frame, not a stale cached one
         }
@@ -392,7 +410,9 @@ static void RunTick(TickState& t) {
                                        std::abs(curDx) + std::abs(curDy));
         }
         int dx, dy;
-        if (locked) {
+        if (!zoomed) {
+            dx = 0; dy = 0;                // at 1x there is no lens to pan (Inspect freeze at 1x)
+        } else if (locked) {
             dx = (int)std::lround(rawDx * t.cfg.cursorSensitivity);
             dy = (int)std::lround(rawDy * t.cfg.cursorSensitivity);
         } else {
@@ -414,20 +434,6 @@ static void RunTick(TickState& t) {
         // Applying it now keeps nowLock in sync so we don't re-assert the freeze clip for a frame after
         // the hook already released it (which would yank the cursor back to the frozen point).
         if (g_input.state().commitClick.exchange(false)) t.cursorLock.commitClick();
-        // Fire the committed click here, on the tick thread (the hook only swallows + signals - injecting
-        // from inside the LL hook callback lagged the click ~1s). The hook already released the freeze clip
-        // and warped to the reticle; re-assert the reticle position (guards a same-frame re-clip), then
-        // send one atomic down+up so the app sees a clean click exactly where the crosshair was aiming.
-        if (int cb = g_input.state().commitButton.exchange(0)) {
-            POINT lc{ g_input.state().lensCenterX.load(std::memory_order_relaxed),
-                      g_input.state().lensCenterY.load(std::memory_order_relaxed) };
-            ClipCursor(nullptr);
-            SetCursorPos(lc.x, lc.y);
-            INPUT click[2] = {};
-            click[0].type = INPUT_MOUSE; click[0].mi.dwFlags = (cb == 1) ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_RIGHTDOWN;
-            click[1].type = INPUT_MOUSE; click[1].mi.dwFlags = (cb == 1) ? MOUSEEVENTF_LEFTUP   : MOUSEEVENTF_RIGHTUP;
-            SendInput(2, click, sizeof(INPUT));
-        }
         bool nowLock = t.cursorLock.locked();
         if (nowLock && !t.prevInspectLock) {
             t.frozenDesktop = t.lastSetVirtual;
@@ -453,6 +459,15 @@ static void RunTick(TickState& t) {
             p.clickDesktopX = t.frozenDesktop.x;
             p.clickDesktopY = t.frozenDesktop.y;
             p.cursorLocked = true;
+            if (!zoomed) {                 // 1x Inspect: draw the crosshair at the frozen cursor's real
+                p.cursorScreenX = (double)(t.frozenDesktop.x - t.mon.x);   // screen spot (not lens-center),
+                p.cursorScreenY = (double)(t.frozenDesktop.y - t.mon.y);   // and no lens outline on the
+                p.outline = false;                                          // 1:1 view.
+            }
+        }
+        if (!zoomed) {   // 1x: the OS cursor stays pinned at the frozen point, never warped to lens-center -
+            p.clickDesktopX = t.frozenDesktop.x;   // including the single unlock-transition tick before
+            p.clickDesktopY = t.frozenDesktop.y;   // teardown, so renderFrame never jumps it to screen center.
         }
         // Publish the reticle's desktop point + lock state for the mouse hook's click-to-commit.
         // A click-commit hook firing in the sub-microsecond window between the mid-loop commitClick
@@ -460,8 +475,13 @@ static void RunTick(TickState& t) {
         // tick (accepted). lensCenterX/lensCenterY are a relaxed atomic pair: a worst-case torn read by
         // the hook is one frame of pan (a few px) on a mid-pan click, accepted and consistent with the
         // all-relaxed InputState convention.
-        g_input.state().lensCenterX.store(r.clickDesktopX + t.mon.x, std::memory_order_relaxed);
-        g_input.state().lensCenterY.store(r.clickDesktopY + t.mon.y, std::memory_order_relaxed);
+        if (nowLock && !zoomed) {   // 1x-locked: a click commits at the frozen point (= the crosshair)
+            g_input.state().lensCenterX.store(t.frozenDesktop.x, std::memory_order_relaxed);
+            g_input.state().lensCenterY.store(t.frozenDesktop.y, std::memory_order_relaxed);
+        } else {                    // zoomed: a click commits at the reticle (lens center)
+            g_input.state().lensCenterX.store(r.clickDesktopX + t.mon.x, std::memory_order_relaxed);
+            g_input.state().lensCenterY.store(r.clickDesktopY + t.mon.y, std::memory_order_relaxed);
+        }
         g_input.state().cursorLocked.store(nowLock, std::memory_order_relaxed);
         // Idle-hide fade: when enabled and the outline is visible, accumulate idle time (reset on
         // any hand motion - free OS-cursor delta or raw mickeys), then map it to the fade alpha.
@@ -478,7 +498,7 @@ static void RunTick(TickState& t) {
         // Reveal AFTER the live frame is presented: setVisible flips the layer alpha over the
         // now-current front buffer, so the overlay never shows its retained previous-session
         // frame (the alt-tab "previous window"). capture() also drained to the latest frame.
-        if (zoomIn) {
+        if (enterActive) {
             if (ForegroundCoversMonitor(t.mon)) {
                 // Fullscreen app (a game on an independent-flip/MPO plane): Desktop Duplication can't
                 // see the game until our overlay forces DWM to composite it, so revealing now would
@@ -496,10 +516,15 @@ static void RunTick(TickState& t) {
             t.renderEngine.setVisible(true);       // deferred game reveal: game is now composited+captured
         }
         // renderFrame SetCursorPos'd the OS cursor to clickDesktop+origin; remember it so next tick's
-        // GetCursorPos delta measures only the user's hand motion since.
-        t.lastSetVirtual.x = r.clickDesktopX + t.mon.x;
-        t.lastSetVirtual.y = r.clickDesktopY + t.mon.y;
-    } else if (t.prevLvl > 1.0) {                     // zoom-out transition
+        // GetCursorPos delta measures only the user's hand motion since. At 1x-locked the cursor is
+        // pinned at the frozen point instead, so track that.
+        if (zoomed) {
+            t.lastSetVirtual.x = r.clickDesktopX + t.mon.x;
+            t.lastSetVirtual.y = r.clickDesktopY + t.mon.y;
+        } else {
+            t.lastSetVirtual = t.frozenDesktop;
+        }
+    } else if (t.prevActive) {                        // active -> idle: tear the overlay down
         t.renderEngine.setVisible(false);
         t.renderEngine.hideSystemCursor(false);
         if (t.prevInspectLock) { ClipCursor(nullptr); t.prevInspectLock = false; }
@@ -508,6 +533,7 @@ static void RunTick(TickState& t) {
         t.revealPending = 0;                          // a quick tap may zoom out before the deferred reveal
     }
     t.prevLvl = lvl;
+    t.prevActive = active;
 
     // Frame-pacing diagnostics: a 2 s window of loop-interval stats (dt = time between ticks =
     // the on-screen frame interval, since Present(1,0) paces while zoomed). maxDt and the hitch
