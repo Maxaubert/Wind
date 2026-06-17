@@ -1,22 +1,17 @@
 #pragma once
 namespace wind {
-// Pure state machine for the optional "Inspect mode" cursor lock. No <windows.h> (compiles into the
-// desktop-free WIND_TESTS build). The tick (main.cpp) feeds it edge events and does the Win32 freeze
-// (ClipCursor) and reticle warp based on the locked() transitions; this class only owns the rules.
+// Pure on/off toggle for "Inspect mode". No <windows.h> (compiles into the desktop-free WIND_TESTS
+// build). Inspect mode is now just a crosshair-cursor toggle: the tick (main.cpp) swaps the system
+// cursor to a crosshair while locked() is true and restores the normal cursor when it is false. This
+// class only owns the boolean toggle state.
 class CursorLockController {
 public:
-    // Rising edge of the bound toggle key. Flips the lock at ANY zoom - Inspect mode is available even
-    // at 1x (the tick keeps the overlay active while locked and renders a 1:1 view with the reticle).
+    // Rising edge of the bound toggle key: flip the crosshair on/off.
     void toggle();
-    // A left/right click was observed while locked (by the mouse hook): unlock. The hook itself warps
-    // the cursor to the reticle and lets the click land; this just drops the lock state.
-    void commitClick();
-    // Back to free. Called on zoom-out, recenter, and monitor retarget (same resets as LockDetector).
+    // Back to free (crosshair off). Kept for teardown/safety callers.
     void reset();
 
     bool locked() const { return locked_; }
-    // While locked, pan from raw mickeys (the OS cursor is frozen, so its delta is not the pan source).
-    bool panFromRaw() const { return locked_; }
 private:
     bool locked_ = false;
 };

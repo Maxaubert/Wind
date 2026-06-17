@@ -8,12 +8,6 @@ struct InputState {
     std::atomic<bool> inHeld{false}; // zoom-in side button physically down
     std::atomic<bool> outHeld{false};
     std::atomic<bool> recenter{false};
-    // --- Inspect mode (cursor lock) cross-thread state (tick <-> WH_MOUSE_LL hook) ---
-    std::atomic<bool> cursorLocked{false};  // tick -> hook: lock is active; intercept clicks
-    std::atomic<int>  lensCenterX{0};       // tick -> hook: reticle desktop px (commit-click warp target)
-    std::atomic<int>  lensCenterY{0};
-    std::atomic<bool> commitClick{false};   // hook -> tick: a click landed while locked; unlock now
-    std::atomic<int>  commitButton{0};      // hook -> tick: which button to synthesize at the reticle (1=L,2=R)
 };
 
 class InputRouter {

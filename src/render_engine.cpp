@@ -106,7 +106,6 @@ struct RenderEngine::State {
     ComPtr<ID3D11BlendState> blendInvert;      // invert blend for I-beam-style cursors
     ComPtr<ID3D11Texture2D> cursorTex;         // the ACTIVE cursor's texture (an alias into the cache)
     ComPtr<ID3D11ShaderResourceView> cursorSRV;
-    ComPtr<ID3D11ShaderResourceView> crosshairSRV; // Inspect-mode crosshair reticle (40x40, built once)
     HCURSOR lastCursor = nullptr;              // re-decode only when the OS cursor changes
     int curW = 0, curH = 0, hotX = 0, hotY = 0;
     bool cursorReady = false;
@@ -414,7 +413,7 @@ bool RenderEngine::recoverDeviceLost() {
     s_->ready = false;
     s_->dupl.Reset();
     s_->desktopCopy.Reset(); s_->desktopSRV.Reset();
-    s_->cursorTex.Reset(); s_->cursorSRV.Reset(); s_->crosshairSRV.Reset(); s_->cursorReady = false; s_->lastCursor = nullptr;
+    s_->cursorTex.Reset(); s_->cursorSRV.Reset(); s_->cursorReady = false; s_->lastCursor = nullptr;
     s_->cursorCache.clear();   // cached cursor textures belong to the dead device
     s_->vs.Reset(); s_->ps.Reset(); s_->cvs.Reset(); s_->cps.Reset();
     s_->cb.Reset(); s_->ccb.Reset();
@@ -601,34 +600,6 @@ bool RenderEngine::State::buildDeviceResources() {
     samp.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
     device->CreateSamplerState(&samp, sampPoint.ReleaseAndGetAddressOf());
     if (!sampLinear || !sampPoint) { RLog("buildDeviceResources: CreateSamplerState failed"); return false; }
-
-    // --- Inspect-mode crosshair reticle (white cross + black outline + center gap; built once) ---
-    // Drawn (scaled) at the lens-center hotspot WHILE the cursor is locked, replacing the arrow, so the
-    // user has an unmistakable "Inspect mode" cue at exactly the point a click will commit. The black
-    // outline keeps it legible on any background; the center gap leaves the precise target point open.
-    {
-        const int N = 56; const double cx = 27.5, cy = 27.5;
-        const double armLen = 25.0, gap = 6.0, coreHalf = 2.0, outlineHalf = 4.0;
-        std::vector<uint32_t> px(N * N, 0);
-        for (int yy = 0; yy < N; ++yy) for (int xx = 0; xx < N; ++xx) {
-            double adx = std::fabs(xx - cx), ady = std::fabs(yy - cy);
-            bool vArm = adx <= outlineHalf && ady <= armLen && ady >= gap;
-            bool hArm = ady <= outlineHalf && adx <= armLen && adx >= gap;
-            if (vArm || hArm) {
-                bool core = (vArm && adx <= coreHalf) || (hArm && ady <= coreHalf);
-                px[yy * N + xx] = core ? 0xFFFFFFFFu    // opaque white core
-                                       : 0xFF000000u;   // opaque black outline
-            }
-        }
-        D3D11_TEXTURE2D_DESC td{}; td.Width = N; td.Height = N; td.MipLevels = 1; td.ArraySize = 1;
-        td.Format = DXGI_FORMAT_B8G8R8A8_UNORM; td.SampleDesc.Count = 1; td.Usage = D3D11_USAGE_IMMUTABLE;
-        td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-        D3D11_SUBRESOURCE_DATA rsd{}; rsd.pSysMem = px.data(); rsd.SysMemPitch = N * 4;
-        ComPtr<ID3D11Texture2D> crossTex;
-        if (SUCCEEDED(device->CreateTexture2D(&td, &rsd, &crossTex)))
-            device->CreateShaderResourceView(crossTex.Get(), nullptr, crosshairSRV.ReleaseAndGetAddressOf());
-        if (!crosshairSRV) RLog("buildDeviceResources: crosshairSRV creation failed (non-fatal)");
-    }
 
     // --- Desktop Duplication ---
     if (!recreateDupl()) { RLog("buildDeviceResources: recreateDupl failed"); return false; }
@@ -910,7 +881,7 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
     // paint a pointer the game intentionally hid. 1 = always draw, 2 = never draw.
     bool drawCursor = cursorReady && p.cursorMode != 2 &&
                       (p.cursorMode == 1 || osCursorShowing);
-    if (drawCursor && !p.cursorLocked) {            // while locked, the crosshair reticle replaces the arrow
+    if (drawCursor) {
         double scale = p.cursorScaleWithZoom ? (p.level < 1.0 ? 1.0 : p.level) : 1.0;
         double drawW = curW * scale, drawH = curH * scale;
         double tlX = p.cursorScreenX - hotX * scale;   // top-left so the hotspot lands at cursorScreen
@@ -927,34 +898,6 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
         c->VSSetConstantBuffers(0, 1, ccb.GetAddressOf());
         c->PSSetShader(cps.Get(), nullptr, 0);
         c->PSSetShaderResources(0, 1, cursorSRV.GetAddressOf());
-        c->PSSetSamplers(0, 1, sampLinear.GetAddressOf());
-        c->Draw(4, 0);
-    }
-
-    // Inspect-mode reticle: while locked, draw the crosshair centered on the lens-center hotspot in
-    // place of the arrow, scaled (clamped) with zoom so it stays a clear, unmissable target. Same quad
-    // pipeline (cvs/cps/sampLinear) with the pre-built crosshairSRV. Gated like the arrow (cursorMode
-    // != 2 and, in auto mode, the app shows a cursor); cursorScreen is the exact commit point.
-    if (p.cursorLocked && crosshairSRV && drawCursor) {
-        // Scale the reticle by the SAME factor as the cursor sprite (cursorScaleWithZoom): if the user's
-        // cursor grows with zoom, so does the crosshair; if the cursor stays fixed on screen, so does the
-        // crosshair. They then track each other at every zoom level instead of diverging.
-        double zs = p.cursorScaleWithZoom ? (p.level < 1.0 ? 1.0 : p.level) : 1.0;
-        const double crossPx = 56.0 * zs;             // on-screen footprint (matches the cursor's scaling)
-        double tlX = p.cursorScreenX - crossPx / 2.0; // center the crosshair on the hotspot (click point)
-        double tlY = p.cursorScreenY - crossPx / 2.0;
-        float posClipX  = (float)(tlX / sw * 2.0 - 1.0);
-        float posClipY  = (float)(1.0 - tlY / sh * 2.0);
-        float sizeClipX = (float)(crossPx / sw * 2.0);
-        float sizeClipY = (float)(-(crossPx / sh * 2.0));
-        float xcb[4] = { posClipX, posClipY, sizeClipX, sizeClipY };
-        c->UpdateSubresource(ccb.Get(), 0, nullptr, xcb, 0, 0);
-        c->OMSetBlendState(blend.Get(), nullptr, 0xFFFFFFFF);
-        c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-        c->VSSetShader(cvs.Get(), nullptr, 0);
-        c->VSSetConstantBuffers(0, 1, ccb.GetAddressOf());
-        c->PSSetShader(cps.Get(), nullptr, 0);
-        c->PSSetShaderResources(0, 1, crosshairSRV.GetAddressOf());
         c->PSSetSamplers(0, 1, sampLinear.GetAddressOf());
         c->Draw(4, 0);
     }
@@ -1000,9 +943,7 @@ bool RenderEngine::renderFrame(const RenderFrameParams& p) {
     // transparent overlay to the app at the right desktop point. We drive the lens from raw
     // input (not GetCursorPos), so this SetCursorPos never feeds back into tracking. Only
     // when it actually moved (avoids redundant synthetic mouse events while idle).
-    // warpCursor=false (Inspect mode at 1x: a free-moving crosshair) leaves the OS cursor wherever the
-    // user's hand put it - we never SetCursorPos it, so it stays as free as a normal cursor.
-    if (p.warpCursor && (p.clickDesktopX != s_->lastClickX || p.clickDesktopY != s_->lastClickY)) {
+    if (p.clickDesktopX != s_->lastClickX || p.clickDesktopY != s_->lastClickY) {
         SetCursorPos(p.clickDesktopX, p.clickDesktopY);
         s_->lastClickX = p.clickDesktopX; s_->lastClickY = p.clickDesktopY;
     }

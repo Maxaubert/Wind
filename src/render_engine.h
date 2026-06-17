@@ -32,8 +32,6 @@ struct RenderFrameParams {
                                          // (no gamma correction; the magnify pass writes sRGB-encoded
                                          // pixels too, so the stored value matches the user's sRGB hex)
     float  outlineAlpha;        // 0..1 fade for the outline (1 = solid); <= 0 skips the draw
-    bool   cursorLocked;        // Inspect mode active: replace the arrow with a crosshair reticle
-    bool   warpCursor;          // false = do NOT SetCursorPos the OS cursor (1x Inspect: free crosshair)
 };
 
 // Own capture + Direct3D 11 renderer. Captures the desktop via DXGI Desktop Duplication
