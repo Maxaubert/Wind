@@ -27,6 +27,9 @@ struct Config {
     int    zoomInMods2      = 0;
     int    zoomOutMods2     = 0;
     int    recenterVk       = 0;     // VK code; 0 = unbound. Tap to recenter the lens on the cursor.
+    int    cursorLockVk     = 0;     // VK code; 0 = unbound. Tap to toggle Inspect mode (cursor lock)
+                                     // while zoomed. Swallowed system-wide like recenterVk (VK only,
+                                     // no modifier - the keyboard hook swallows the bare key).
     // Hotkey to toggle the magnified cursor's visibility while zoomed. Edge-detected in the tick
     // loop and flips a runtime-only bool (NEVER written back to the ini), so pressing it does not
     // trigger the config hot-reload and the zoom level is preserved. 0 = unbound. Modifier mask

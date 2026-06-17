@@ -18,6 +18,7 @@
 #include "zoom_controller.h"
 #include "tray.h"
 #include "lock_detector.h"
+#include "cursor_lock.h"
 #include "resource.h"
 
 using namespace wind;
@@ -118,6 +119,11 @@ struct TickState {
     int    revealPending = 0;                  // ticks left before the deferred (game) reveal (issue #90)
     int    hz = 60;                            // resolved tick/refresh rate (auto-detected)
     bool   recenterKeyWasDown = false;         // edge-detect the recenterVk key
+    CursorLockController cursorLock;            // Inspect mode (freeze-cursor + free-look reticle toggle)
+    bool   lockKeyWasDown = false;             // edge-detect the cursorLockVk toggle
+    bool   prevInspect = false;     // Inspect was on last tick (detect freeze enter/exit)
+    bool   prevActive = false;      // overlay was active last tick (zoomed OR inspect)
+    POINT  frozenCursor{};          // where the real cursor is frozen while Inspect is on (virtual px)
     double quickZoomStored    = 0.0;           // remembered quick-zoom level (0 = none yet); in-memory
     bool   prevInHeld         = false;         // for rising-edge detection of the zoom-in channel
     bool   prevOutHeld        = false;
@@ -166,6 +172,7 @@ static void FillRenderParams(RenderFrameParams& p, const MapResult& r, const Con
     ParseHexColor(cfg.outlineColor, orr, og, ob);
     p.outlineR = orr; p.outlineG = og; p.outlineB = ob;
     p.outlineAlpha = 1.0f;   // RunTick lowers this when idle-hide is active
+    p.cursorLocked = false;  // RunTick sets true while zoomed + Inspect mode (draw the crosshair sprite)
 }
 
 // Append a line to %TEMP%\wind_diag.log (frame-pacing diagnostics; gated on diagnostics=1).
@@ -239,8 +246,8 @@ static void RunTick(TickState& t) {
             // bind changed (else the hook keeps swallowing the OLD key and ignores the new one).
             if (nc.zoomInVk != t.cfg.zoomInVk || nc.zoomOutVk != t.cfg.zoomOutVk
              || nc.zoomInVk2 != t.cfg.zoomInVk2 || nc.zoomOutVk2 != t.cfg.zoomOutVk2
-             || nc.recenterVk != t.cfg.recenterVk) {
-                g_input.setKeys(nc.zoomInVk, nc.zoomInVk2, nc.zoomOutVk, nc.zoomOutVk2, nc.recenterVk);
+             || nc.recenterVk != t.cfg.recenterVk || nc.cursorLockVk != t.cfg.cursorLockVk) {
+                g_input.setKeys(nc.zoomInVk, nc.zoomInVk2, nc.zoomOutVk, nc.zoomOutVk2, nc.recenterVk, nc.cursorLockVk);
             }
             if (nc.hideCursorVk != t.cfg.hideCursorVk || nc.hideCursorMods != t.cfg.hideCursorMods) {
                 RegisterHideCursorHotkey(t.hwnd, nc.hideCursorVk, nc.hideCursorMods);
@@ -310,6 +317,12 @@ static void RunTick(TickState& t) {
     bool recenterDown = keyDown(t.cfg.recenterVk);
     if (recenterDown && !t.recenterKeyWasDown) recenter = true;
     t.recenterKeyWasDown = recenterDown;
+    // Inspect mode: toggle on the bound key's rising edge (works at any zoom). The crosshair is
+    // overlay-drawn (render_engine draws the crosshair sprite when cursorLocked is set); the active
+    // block below freezes the real cursor (1px ClipCursor) and roams a raw-driven look point.
+    bool lockDown = keyDown(t.cfg.cursorLockVk);
+    if (lockDown && !t.lockKeyWasDown) t.cursorLock.toggle();
+    t.lockKeyWasDown = lockDown;
     // Hide-cursor hotkey is registered via RegisterHotKey (WndProc WM_HOTKEY toggles cursorHidden);
     // this both suppresses the key from reaching other apps and gives rising-edge semantics for
     // free (MOD_NOREPEAT). No polled check needed here.
@@ -332,14 +345,19 @@ static void RunTick(TickState& t) {
 
     int rawDx, rawDy; g_input.drainRaw(rawDx, rawDy);
 
-    if (lvl > 1.0) {
-        bool zoomIn = (t.prevLvl <= 1.0);             // zoom-in transition
-        if (zoomIn) {
-            t.outlineIdleSec = 0.0;   // each zoom-in starts with the outline fully shown
-            // Follow the cursor's monitor (multiMonitor on). Only reconfigure when it actually
-            // changed; retarget() returns false on multi-GPU/failure, in which case we keep the
-            // current monitor. The overlay is still at alpha 0 here, so a move never flashes.
-            if (t.cfg.multiMonitor) {
+    bool zoomed = lvl > 1.0;
+    bool inspect = t.cursorLock.locked();
+    bool active = zoomed || inspect;                 // overlay runs while zoomed OR Inspect-frozen
+
+    if (active) {
+        bool enterActive  = !t.prevActive;            // idle -> active (overlay just turned on)
+        bool inspectEnter = inspect && !t.prevInspect;
+        if (enterActive) {
+            t.outlineIdleSec = 0.0;   // each activation starts with the outline fully shown
+            // Follow the cursor's monitor (multiMonitor on, only when zoomed). Only reconfigure when
+            // it actually changed; retarget() returns false on multi-GPU/failure, in which case we keep
+            // the current monitor. The overlay is still at alpha 0 here, so a move never flashes.
+            if (zoomed && t.cfg.multiMonitor) {
                 MonitorTarget nt = MonitorUnderCursor();
                 if (!SameMonitor(nt, t.mon) && t.renderEngine.retarget(nt)) {
                     t.mon = nt;
@@ -356,29 +374,54 @@ static void RunTick(TickState& t) {
             t.renderEngine.hideSystemCursor(true);
             t.renderEngine.invalidateCapture();       // grab a live frame, not a stale cached one
         }
+        if (inspectEnter) {
+            // Freeze the real cursor where it is; the look point (mapper center) starts there.
+            POINT pt; GetCursorPos(&pt);
+            t.frozenCursor = pt;
+            t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y);
+            t.lastSetVirtual = pt;
+            RECT fz{ pt.x, pt.y, pt.x + 1, pt.y + 1 };
+            ClipCursor(&fz);
+            t.renderEngine.hideSystemCursor(true);   // hide the real cursor; we draw the crosshair
+            t.renderEngine.invalidateCapture();
+        }
+        bool inspectExit = !inspect && t.prevInspect;   // Inspect just turned off but overlay stays (zoomed)
+        if (inspectExit) {
+            ClipCursor(nullptr);
+            POINT lp{ (int)(t.mapper.centerX() + 0.5) + t.mon.x, (int)(t.mapper.centerY() + 0.5) + t.mon.y };
+            SetCursorPos(lp.x, lp.y);                    // warp the real cursor to the look point
+            t.lastSetVirtual = lp;
+        }
         if (recenter) { POINT pt; GetCursorPos(&pt); t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y); t.lastSetVirtual = pt; }
         // Resolve the pan delta. FREE: the OS cursor's own motion since we last placed it - Windows'
         // pointer acceleration is already applied, so we auto-match the real cursor (DPI/accel), then
         // scale by cursorSensitivity as a speed knob (1.0 = exact match, the default). LOCKED: a game
         // has the cursor clipped/recentered, so pan from raw mickeys scaled by the same cursorSensitivity
-        // (acceleration doesn't apply to relative-mouse game input).
+        // (acceleration doesn't apply to relative-mouse game input). INSPECT: the real cursor is frozen
+        // in place, so its delta is irrelevant; the look point roams from raw mickeys instead.
         POINT cur; GetCursorPos(&cur);
         int curDx = cur.x - t.lastSetVirtual.x;
         int curDy = cur.y - t.lastSetVirtual.y;
-        RECT clip{}; GetClipCursor(&clip);
-        const VirtualBounds& vb = t.vbounds;   // cached at zoom-in (see QueryVirtualBounds)
-        bool clipConfined = clip.left > vb.x || clip.top > vb.y ||
-                            clip.right < vb.x + vb.w || clip.bottom < vb.y + vb.h;
-        bool locked = t.detector.update(clipConfined,
-                                        std::abs(rawDx) + std::abs(rawDy),
-                                        std::abs(curDx) + std::abs(curDy));
         int dx, dy;
-        if (locked) {
+        if (inspect) {
+            // Look point moves from RAW mickeys; the real cursor is frozen so its delta is irrelevant.
             dx = (int)std::lround(rawDx * t.cfg.cursorSensitivity);
             dy = (int)std::lround(rawDy * t.cfg.cursorSensitivity);
         } else {
-            dx = (int)std::lround(curDx * t.cfg.cursorSensitivity);   // auto-matched OS delta, speed-scaled
-            dy = (int)std::lround(curDy * t.cfg.cursorSensitivity);
+            RECT clip{}; GetClipCursor(&clip);
+            const VirtualBounds& vb = t.vbounds;   // cached at activation (see QueryVirtualBounds)
+            bool clipConfined = clip.left > vb.x || clip.top > vb.y ||
+                                clip.right < vb.x + vb.w || clip.bottom < vb.y + vb.h;
+            bool locked = t.detector.update(clipConfined,
+                                            std::abs(rawDx) + std::abs(rawDy),
+                                            std::abs(curDx) + std::abs(curDy));
+            if (locked) {
+                dx = (int)std::lround(rawDx * t.cfg.cursorSensitivity);
+                dy = (int)std::lround(rawDy * t.cfg.cursorSensitivity);
+            } else {
+                dx = (int)std::lround(curDx * t.cfg.cursorSensitivity);   // auto-matched OS delta, speed-scaled
+                dy = (int)std::lround(curDy * t.cfg.cursorSensitivity);
+            }
         }
         // Defensive: bound one tick's pan to the monitor span so a stray cursor jump (e.g. the OS
         // cursor briefly escaping to another monitor) cannot teleport the lens. cx_ also clamps.
@@ -398,11 +441,22 @@ static void RunTick(TickState& t) {
             t.outlineIdleSec = 0.0;   // keep ready for when idle-hide is toggled on mid-session
         }
         if (t.cursorHidden) p.cursorMode = 2;   // hotkey override; FillRenderParams already set 0/1/2 from cfg
-        t.renderEngine.renderFrame(p);          // render+present every zoomed tick (never blocks the ramp)
+        if (inspect) {
+            // Re-assert the freeze (Windows can drop a clip on focus changes), pin renderFrame's
+            // SetCursorPos at the frozen point (a no-op inside the clip), and draw the crosshair at the
+            // look point (cursorScreen). No lens outline on the 1:1 view at 1x.
+            RECT fz{ t.frozenCursor.x, t.frozenCursor.y, t.frozenCursor.x + 1, t.frozenCursor.y + 1 };
+            ClipCursor(&fz);
+            p.clickDesktopX = t.frozenCursor.x;
+            p.clickDesktopY = t.frozenCursor.y;
+            p.cursorLocked = true;
+            if (!zoomed) p.outline = false;
+        }
+        t.renderEngine.renderFrame(p);          // render+present every active tick (never blocks the ramp)
         // Reveal AFTER the live frame is presented: setVisible flips the layer alpha over the
         // now-current front buffer, so the overlay never shows its retained previous-session
         // frame (the alt-tab "previous window"). capture() also drained to the latest frame.
-        if (zoomIn) {
+        if (enterActive) {
             if (ForegroundCoversMonitor(t.mon)) {
                 // Fullscreen app (a game on an independent-flip/MPO plane): Desktop Duplication can't
                 // see the game until our overlay forces DWM to composite it, so revealing now would
@@ -413,22 +467,35 @@ static void RunTick(TickState& t) {
                 t.renderEngine.primeReveal();
                 t.revealPending = 2;
             } else {
-                t.renderEngine.setVisible(true);   // ordinary desktop zoom-in: reveal instantly
+                t.renderEngine.setVisible(true);   // ordinary desktop activation: reveal instantly
                 t.revealPending = 0;
             }
         } else if (t.revealPending > 0 && --t.revealPending == 0) {
             t.renderEngine.setVisible(true);       // deferred game reveal: game is now composited+captured
         }
-        // renderFrame SetCursorPos'd the OS cursor to clickDesktop+origin; remember it so next tick's
-        // GetCursorPos delta measures only the user's hand motion since.
-        t.lastSetVirtual.x = r.clickDesktopX + t.mon.x;
-        t.lastSetVirtual.y = r.clickDesktopY + t.mon.y;
-    } else if (t.prevLvl > 1.0) {                     // zoom-out transition
+        // Bookkeeping for next tick's GetCursorPos delta. INSPECT: the real cursor stays frozen, so the
+        // baseline is the frozen point. Otherwise renderFrame SetCursorPos'd the OS cursor to
+        // clickDesktop+origin; remember it so next tick's delta measures only the user's hand motion.
+        if (inspect) {
+            t.lastSetVirtual = t.frozenCursor;
+        } else {
+            t.lastSetVirtual.x = r.clickDesktopX + t.mon.x;
+            t.lastSetVirtual.y = r.clickDesktopY + t.mon.y;
+        }
+    } else if (t.prevActive) {                        // active -> idle: tear the overlay down
         t.renderEngine.setVisible(false);
         t.renderEngine.hideSystemCursor(false);
+        if (t.prevInspect) {
+            ClipCursor(nullptr);
+            POINT lp{ (int)(t.mapper.centerX() + 0.5) + t.mon.x, (int)(t.mapper.centerY() + 0.5) + t.mon.y };
+            SetCursorPos(lp.x, lp.y);                  // resume at the look point
+            t.lastSetVirtual = lp;
+        }
         t.revealPending = 0;                          // a quick tap may zoom out before the deferred reveal
     }
     t.prevLvl = lvl;
+    t.prevActive = active;
+    t.prevInspect = inspect;
 
     // Frame-pacing diagnostics: a 2 s window of loop-interval stats (dt = time between ticks =
     // the on-screen frame interval, since Present(1,0) paces while zoomed). maxDt and the hitch
@@ -680,7 +747,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     }
     // Configure the keyboard hook's bound keys (zoom in/out primary+alt + recenter) so it swallows
     // them and tracks their state. Kept in sync on hot-reload below.
-    g_input.setKeys(cfg.zoomInVk, cfg.zoomInVk2, cfg.zoomOutVk, cfg.zoomOutVk2, cfg.recenterVk);
+    g_input.setKeys(cfg.zoomInVk, cfg.zoomInVk2, cfg.zoomOutVk, cfg.zoomOutVk2, cfg.recenterVk, cfg.cursorLockVk);
 
     // Target monitor for this session: the cursor's monitor when multiMonitor is on, else the
     // primary. The first zoom-in re-checks and retargets if the cursor moved to another monitor.

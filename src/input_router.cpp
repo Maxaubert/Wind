@@ -74,18 +74,21 @@ bool InputRouter::isBoundKey(int vk) const {
         || vk == kbZoomInVk2_.load(std::memory_order_relaxed)
         || vk == kbZoomOutVk_.load(std::memory_order_relaxed)
         || vk == kbZoomOutVk2_.load(std::memory_order_relaxed)
-        || vk == kbRecenterVk_.load(std::memory_order_relaxed);
+        || vk == kbRecenterVk_.load(std::memory_order_relaxed)
+        || vk == kbCursorLockVk_.load(std::memory_order_relaxed);
 }
 bool InputRouter::keyPressed(int vk) const {
     if (vk <= 0 || vk > 255) return false;
     return g_kbPressed[vk].load(std::memory_order_relaxed);
 }
-void InputRouter::setKeys(int zoomInVk, int zoomInVk2, int zoomOutVk, int zoomOutVk2, int recenterVk) {
+void InputRouter::setKeys(int zoomInVk, int zoomInVk2, int zoomOutVk, int zoomOutVk2, int recenterVk,
+                          int cursorLockVk) {
     kbZoomInVk_.store(zoomInVk,    std::memory_order_relaxed);
     kbZoomInVk2_.store(zoomInVk2,  std::memory_order_relaxed);
     kbZoomOutVk_.store(zoomOutVk,  std::memory_order_relaxed);
     kbZoomOutVk2_.store(zoomOutVk2,std::memory_order_relaxed);
     kbRecenterVk_.store(recenterVk,std::memory_order_relaxed);
+    kbCursorLockVk_.store(cursorLockVk, std::memory_order_relaxed);
     // Clear per-key pressed + swallowed records so a remap mid-press (keybind capture clears the old
     // binding) can't leave a held flag stuck or cause a later, unrelated UP to be swallowed.
     for (int i = 0; i < 256; ++i) { g_kbPressed[i].store(false); g_kbSwallowedDown[i].store(false); }
