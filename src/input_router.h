@@ -8,6 +8,11 @@ struct InputState {
     std::atomic<bool> inHeld{false}; // zoom-in side button physically down
     std::atomic<bool> outHeld{false};
     std::atomic<bool> recenter{false};
+    // --- Inspect mode (cursor lock) cross-thread state (tick <-> WH_MOUSE_LL hook) ---
+    std::atomic<bool> cursorLocked{false};  // tick -> hook: lock is active; intercept clicks
+    std::atomic<int>  lensCenterX{0};       // tick -> hook: reticle desktop px (commit-click warp target)
+    std::atomic<int>  lensCenterY{0};
+    std::atomic<bool> commitClick{false};   // hook -> tick: a click landed while locked; unlock now
 };
 
 class InputRouter {
@@ -31,7 +36,8 @@ public:
     // Configure the keyboard VKs the keyboard hook tracks + swallows (zoom in/out primary+alt and
     // recenter; 0 = unbound). Forbidden VKs (IsForbiddenBindVk) are stored but never acted on.
     // Clears the per-key pressed/swallowed records so a remap mid-press can't strand a key.
-    void setKeys(int zoomInVk, int zoomInVk2, int zoomOutVk, int zoomOutVk2, int recenterVk);
+    void setKeys(int zoomInVk, int zoomInVk2, int zoomOutVk, int zoomOutVk2, int recenterVk,
+                 int cursorLockVk);
     // Whether vk is one of the configured (non-forbidden) keyboard binds: decides track+swallow.
     bool isBoundKey(int vk) const;
     // Physical down-state of a keyboard key, as tracked by the keyboard hook. This is the authority
@@ -68,6 +74,7 @@ private:
     std::atomic<int> kbZoomOutVk_{0};
     std::atomic<int> kbZoomOutVk2_{0};
     std::atomic<int> kbRecenterVk_{0};
+    std::atomic<int> kbCursorLockVk_{0};
     std::atomic<bool> kbHookActive_{false}; // true once the LL KEYBOARD hook is installed
 };
 

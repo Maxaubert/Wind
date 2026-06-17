@@ -74,18 +74,21 @@ bool InputRouter::isBoundKey(int vk) const {
         || vk == kbZoomInVk2_.load(std::memory_order_relaxed)
         || vk == kbZoomOutVk_.load(std::memory_order_relaxed)
         || vk == kbZoomOutVk2_.load(std::memory_order_relaxed)
-        || vk == kbRecenterVk_.load(std::memory_order_relaxed);
+        || vk == kbRecenterVk_.load(std::memory_order_relaxed)
+        || vk == kbCursorLockVk_.load(std::memory_order_relaxed);
 }
 bool InputRouter::keyPressed(int vk) const {
     if (vk <= 0 || vk > 255) return false;
     return g_kbPressed[vk].load(std::memory_order_relaxed);
 }
-void InputRouter::setKeys(int zoomInVk, int zoomInVk2, int zoomOutVk, int zoomOutVk2, int recenterVk) {
+void InputRouter::setKeys(int zoomInVk, int zoomInVk2, int zoomOutVk, int zoomOutVk2, int recenterVk,
+                          int cursorLockVk) {
     kbZoomInVk_.store(zoomInVk,    std::memory_order_relaxed);
     kbZoomInVk2_.store(zoomInVk2,  std::memory_order_relaxed);
     kbZoomOutVk_.store(zoomOutVk,  std::memory_order_relaxed);
     kbZoomOutVk2_.store(zoomOutVk2,std::memory_order_relaxed);
     kbRecenterVk_.store(recenterVk,std::memory_order_relaxed);
+    kbCursorLockVk_.store(cursorLockVk, std::memory_order_relaxed);
     // Clear per-key pressed + swallowed records so a remap mid-press (keybind capture clears the old
     // binding) can't leave a held flag stuck or cause a later, unrelated UP to be swallowed.
     for (int i = 0; i < 256; ++i) { g_kbPressed[i].store(false); g_kbSwallowedDown[i].store(false); }
@@ -121,6 +124,19 @@ static LRESULT CALLBACK KbProc(int code, WPARAM wParam, LPARAM lParam) {
 
 static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
     if (code == HC_ACTION && g_router) {
+        // Inspect-mode click-to-commit: a left/right press while the cursor is locked snaps the real
+        // cursor to the lens-center reticle, releases the 1px freeze clip so the warp is not clamped,
+        // and lets the click land there. NOT swallowed (the app must receive the click). The matching
+        // UP follows because the cursor was physically moved. Clearing cursorLocked here stops a second
+        // warp on the UP; the tick drains commitClick and unlocks the controller next frame.
+        if (g_router->state().cursorLocked.load(std::memory_order_relaxed)
+            && (wParam == WM_LBUTTONDOWN || wParam == WM_RBUTTONDOWN)) {
+            ClipCursor(nullptr);
+            SetCursorPos(g_router->state().lensCenterX.load(std::memory_order_relaxed),
+                         g_router->state().lensCenterY.load(std::memory_order_relaxed));
+            g_router->state().cursorLocked.store(false, std::memory_order_relaxed);
+            g_router->state().commitClick.store(true,  std::memory_order_relaxed);
+        }
         int id = xbuttonIdFromHook(wParam, lParam);
         bool down = (wParam == WM_XBUTTONDOWN);
         bool up   = (wParam == WM_XBUTTONUP);
