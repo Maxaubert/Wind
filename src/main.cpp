@@ -414,6 +414,20 @@ static void RunTick(TickState& t) {
         // Applying it now keeps nowLock in sync so we don't re-assert the freeze clip for a frame after
         // the hook already released it (which would yank the cursor back to the frozen point).
         if (g_input.state().commitClick.exchange(false)) t.cursorLock.commitClick();
+        // Fire the committed click here, on the tick thread (the hook only swallows + signals - injecting
+        // from inside the LL hook callback lagged the click ~1s). The hook already released the freeze clip
+        // and warped to the reticle; re-assert the reticle position (guards a same-frame re-clip), then
+        // send one atomic down+up so the app sees a clean click exactly where the crosshair was aiming.
+        if (int cb = g_input.state().commitButton.exchange(0)) {
+            POINT lc{ g_input.state().lensCenterX.load(std::memory_order_relaxed),
+                      g_input.state().lensCenterY.load(std::memory_order_relaxed) };
+            ClipCursor(nullptr);
+            SetCursorPos(lc.x, lc.y);
+            INPUT click[2] = {};
+            click[0].type = INPUT_MOUSE; click[0].mi.dwFlags = (cb == 1) ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_RIGHTDOWN;
+            click[1].type = INPUT_MOUSE; click[1].mi.dwFlags = (cb == 1) ? MOUSEEVENTF_LEFTUP   : MOUSEEVENTF_RIGHTUP;
+            SendInput(2, click, sizeof(INPUT));
+        }
         bool nowLock = t.cursorLock.locked();
         if (nowLock && !t.prevInspectLock) {
             t.frozenDesktop = t.lastSetVirtual;
