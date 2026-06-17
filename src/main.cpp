@@ -123,6 +123,8 @@ struct TickState {
     bool   lockKeyWasDown = false;             // edge-detect the cursorLockVk toggle
     bool   prevInspect = false;     // Inspect was on last tick (detect freeze enter/exit)
     bool   prevActive = false;      // overlay was active last tick (zoomed OR inspect)
+    bool   lmbWasDown = false;      // edge-detect a left click (commit + exit Inspect)
+    bool   exitAtFrozen = false;    // this Inspect-exit was a click: leave the cursor at the frozen point
     POINT  frozenCursor{};          // where the real cursor is frozen while Inspect is on (virtual px)
     double quickZoomStored    = 0.0;           // remembered quick-zoom level (0 = none yet); in-memory
     bool   prevInHeld         = false;         // for rising-edge detection of the zoom-in channel
@@ -323,6 +325,12 @@ static void RunTick(TickState& t) {
     bool lockDown = keyDown(t.cfg.cursorLockVk);
     if (lockDown && !t.lockKeyWasDown) t.cursorLock.toggle();
     t.lockKeyWasDown = lockDown;
+    // A left click while Inspect-frozen commits at the frozen point (the cursor is pinned there), then
+    // exits Inspect back to the normal cursor - left where it clicked, so you keep interacting with what
+    // you clicked. Edge-detect the physical button (the click is not swallowed, so it already landed).
+    bool lmbDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+    if (lmbDown && !t.lmbWasDown && t.cursorLock.locked()) { t.cursorLock.reset(); t.exitAtFrozen = true; }
+    t.lmbWasDown = lmbDown;
     // Hide-cursor hotkey is registered via RegisterHotKey (WndProc WM_HOTKEY toggles cursorHidden);
     // this both suppresses the key from reaching other apps and gives rising-edge semantics for
     // free (MOD_NOREPEAT). No polled check needed here.
@@ -388,9 +396,14 @@ static void RunTick(TickState& t) {
         bool inspectExit = !inspect && t.prevInspect;   // Inspect just turned off but overlay stays (zoomed)
         if (inspectExit) {
             ClipCursor(nullptr);
-            POINT lp{ (int)(t.mapper.centerX() + 0.5) + t.mon.x, (int)(t.mapper.centerY() + 0.5) + t.mon.y };
-            SetCursorPos(lp.x, lp.y);                    // warp the real cursor to the look point
-            t.lastSetVirtual = lp;
+            if (t.exitAtFrozen) {                        // click-exit: leave the cursor where it clicked
+                t.exitAtFrozen = false;
+                t.lastSetVirtual = t.frozenCursor;
+            } else {                                     // key toggle-off: resume at the look point
+                POINT lp{ (int)(t.mapper.centerX() + 0.5) + t.mon.x, (int)(t.mapper.centerY() + 0.5) + t.mon.y };
+                SetCursorPos(lp.x, lp.y);
+                t.lastSetVirtual = lp;
+            }
         }
         if (recenter) { POINT pt; GetCursorPos(&pt); t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y); t.lastSetVirtual = pt; }
         // Resolve the pan delta. FREE: the OS cursor's own motion since we last placed it - Windows'
@@ -487,9 +500,14 @@ static void RunTick(TickState& t) {
         t.renderEngine.hideSystemCursor(false);
         if (t.prevInspect) {
             ClipCursor(nullptr);
-            POINT lp{ (int)(t.mapper.centerX() + 0.5) + t.mon.x, (int)(t.mapper.centerY() + 0.5) + t.mon.y };
-            SetCursorPos(lp.x, lp.y);                  // resume at the look point
-            t.lastSetVirtual = lp;
+            if (t.exitAtFrozen) {                     // click-exit at 1x: leave the cursor where it clicked
+                t.exitAtFrozen = false;
+                t.lastSetVirtual = t.frozenCursor;
+            } else {                                  // key toggle-off: resume at the look point
+                POINT lp{ (int)(t.mapper.centerX() + 0.5) + t.mon.x, (int)(t.mapper.centerY() + 0.5) + t.mon.y };
+                SetCursorPos(lp.x, lp.y);
+                t.lastSetVirtual = lp;
+            }
         }
         t.revealPending = 0;                          // a quick tap may zoom out before the deferred reveal
     }
@@ -898,6 +916,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         // a pointer while we are unable to draw the magnified one. Skip the normal tick this iteration.
         if (renderEngine.deviceLost()) {
             renderEngine.hideSystemCursor(false);   // restore the real cursor while we can't render
+            // If Inspect was frozen, release the 1px clip and exit Inspect: we can't render the crosshair
+            // while the device is lost, so don't leave the user with a visible-but-1px-clipped cursor.
+            if (ts.cursorLock.locked()) { ClipCursor(nullptr); ts.cursorLock.reset(); ts.prevInspect = false; ts.exitAtFrozen = false; }
             unsigned long long now = GetTickCount64();
             if (now >= nextRecoverMs) {
                 if (!renderEngine.recoverDeviceLost()) nextRecoverMs = now + 500;   // retry in 0.5s
