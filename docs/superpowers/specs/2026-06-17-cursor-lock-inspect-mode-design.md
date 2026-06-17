@@ -77,6 +77,11 @@ Transitions:
 Reuses existing paths:
 - **Locked pan** = the existing game-locked branch (`main.cpp:376`): `dx/dy` from
   `rawDx/rawDy * cursorSensitivity`. Lens moves with the hand; the OS cursor does not.
+- **Frozen cursor implementation:** the freeze is a 1px `ClipCursor` rect centered on the
+  freeze point (truly stationary -- no `WM_MOUSEMOVE` fires, no pointer ballistics, the OS
+  cursor cannot drift). This is distinct from merely skipping `SetCursorPos`: a skipped
+  `SetCursorPos` still allows the cursor to wander if anything else moves it; the 1px clip
+  enforces the freeze at the OS level.
 - **Locked = skip the `SetCursorPos` + `lastSetVirtual` update** (`main.cpp:422-425`). The
   real cursor stays frozen at the frozen point.
 - The reticle is the drawn cursor at lens center — already where it is drawn today
@@ -114,7 +119,9 @@ commits).
 
 - One new keybind in `config.h`: `cursorLockVk` / `cursorLockMods` (VK + modifier mask, same
   bit layout as the zoom combos). **Unbound by default (`0`)** — binding it is the opt-in, so
-  no separate master enable flag (YAGNI).
+  no separate master enable flag (YAGNI). The bind is **VK-only (no modifier support)** to keep
+  the keyboard-hook swallow simple and correct: the hook matches on VK alone, and modifier-combo
+  swallows risk eating modifier keys in other apps. This matches `recenterVk` behavior.
 - `config.cpp`: parse + sanitize through `IsForbiddenBindVk` (left/right click, Backspace,
   Win keys can never be bound). Round-trips in the ini like `recenterVk`.
 - Keyboard-hook swallow: add `cursorLockVk` to `g_input.setKeys(...)` and the re-bind check in

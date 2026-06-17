@@ -51,7 +51,7 @@ staged Apply/Discard footer.
 - Pure-logic files MUST NOT include `<windows.h>` - keeps unit tests desktop-free.
   The test build compiles only the pure `.cpp` files and defines `WIND_TESTS`.
 - INPUT SWALLOWING: bound keybinds are eaten so they never double-fire into the focused app. Mouse
-  side-buttons go through the `WH_MOUSE_LL` hook; keyboard zoom/recenter binds go through a
+  side-buttons go through the `WH_MOUSE_LL` hook; keyboard zoom/recenter/cursorLock binds go through a
   `WH_KEYBOARD_LL` hook (both on the same dedicated hook thread, `input_router.cpp`). A swallowed key
   never appears in `GetAsyncKeyState`, so the keyboard hook is the AUTHORITY for bound-key down-state
   (`keyPressed()`); `main.cpp` reads it when `kbHookActive()`, else falls back to polling (install
@@ -61,6 +61,10 @@ staged Apply/Discard footer.
   (0x5B/0x5C) - enforced in three places: the hook never swallows them, `ParseConfig` sanitizes them
   out of the ini, and the config UI's keybind capture refuses them. Down/up swallows are balanced
   (only swallow an UP whose DOWN we swallowed) and released on teardown so a key is never stranded.
+  `cursorLockVk` (Inspect mode) is VK-only (no mods), swallowed like `recenterVk`. Inspect mode
+  freezes the real OS cursor with a 1px `ClipCursor` while Raw Input continues to pan the lens, so
+  any active hover/tooltip stays alive; a left/right click while locked warps the cursor to the
+  lens-center reticle, commits the click there, and unlocks -- driven from the `WH_MOUSE_LL` hook.
   LIMITATION (by design, not fixable in user mode): LL hooks swallow only the legacy/cooked input
   path (`WM_*`, `GetAsyncKeyState`) that desktop apps and browsers use. They CANNOT block Raw Input
   (`WM_INPUT`), which most GAMES read directly - so a bound key/button still reaches a raw-input game
@@ -99,7 +103,10 @@ staged Apply/Discard footer.
   RTSS overlay is a quick tell - it shows over blt (hookable composited path), vanishes over dcomp.
 - RENDER ENGINE: never leave the OS cursor hidden. `shutdown()` restores via
   `MagShowSystemCursor(TRUE)` + `MagUninitialize` + `SystemParametersInfo(SPI_SETCURSORS)`,
-  plus a `SetUnhandledExceptionFilter` net for crashes.
+  plus a `SetUnhandledExceptionFilter` net for crashes. The Inspect-mode 1px freeze clip is
+  likewise released (`ClipCursor(nullptr)`) on every teardown path: zoom-out, toggle-off,
+  click-commit, recenter, shutdown, the crash filter, and device-lost (TDR) recovery -- so the
+  cursor is never stranded pinned to one pixel.
 - RENDER ENGINE: show/hide the overlay by toggling the layer alpha (`SetLayeredWindowAttributes`
   0/255), NOT `SW_HIDE`/`SW_SHOW`. A layered window that is hidden then re-shown makes DWM cache
   and re-display the frame from when it was last visible, flashing the previous zoom session's
