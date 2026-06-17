@@ -607,8 +607,8 @@ bool RenderEngine::State::buildDeviceResources() {
     // user has an unmistakable "Inspect mode" cue at exactly the point a click will commit. The black
     // outline keeps it legible on any background; the center gap leaves the precise target point open.
     {
-        const int N = 40; const double cx = 19.5, cy = 19.5;
-        const double armLen = 18.0, gap = 4.0, coreHalf = 1.5, outlineHalf = 3.0;
+        const int N = 56; const double cx = 27.5, cy = 27.5;
+        const double armLen = 25.0, gap = 6.0, coreHalf = 2.0, outlineHalf = 4.0;
         std::vector<uint32_t> px(N * N, 0);
         for (int yy = 0; yy < N; ++yy) for (int xx = 0; xx < N; ++xx) {
             double adx = std::fabs(xx - cx), ady = std::fabs(yy - cy);
@@ -938,7 +938,7 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
     if (p.cursorLocked && crosshairSRV && drawCursor) {
         double zs = p.cursorScaleWithZoom ? (p.level < 1.0 ? 1.0 : p.level) : 1.0;
         if (zs > 2.5) zs = 2.5;                       // clamp so the reticle never swallows the view
-        const double crossPx = 40.0 * zs;             // on-screen footprint
+        const double crossPx = 56.0 * zs;             // on-screen footprint
         double tlX = p.cursorScreenX - crossPx / 2.0; // center the crosshair on the hotspot (click point)
         double tlY = p.cursorScreenY - crossPx / 2.0;
         float posClipX  = (float)(tlX / sw * 2.0 - 1.0);
