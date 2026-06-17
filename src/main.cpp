@@ -410,6 +410,10 @@ static void RunTick(TickState& t) {
         // SetCursorPos target = current lens center = whatever hover the user wants to keep) with a 1px
         // ClipCursor so physical motion can't drift it and no WM_MOUSEMOVE dismisses the tooltip. Exit:
         // release the clip and warp to the reticle (lens center), abandoning the frozen point.
+        // Re-check for a click-commit the hook may have signalled AFTER this frame's top-of-loop drain.
+        // Applying it now keeps nowLock in sync so we don't re-assert the freeze clip for a frame after
+        // the hook already released it (which would yank the cursor back to the frozen point).
+        if (g_input.state().commitClick.exchange(false)) t.cursorLock.commitClick();
         bool nowLock = t.cursorLock.locked();
         if (nowLock && !t.prevInspectLock) {
             t.frozenDesktop = t.lastSetVirtual;
@@ -883,6 +887,13 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         // a pointer while we are unable to draw the magnified one. Skip the normal tick this iteration.
         if (renderEngine.deviceLost()) {
             renderEngine.hideSystemCursor(false);   // restore the real cursor while we can't render
+            // If Inspect mode was locked, the 1px freeze clip is still live. The tick below is skipped
+            // while the device is lost, and on recovery prevLvl is forced to 1x so neither the zoomed
+            // branch nor the zoom-out release branch runs again - the clip would strand the cursor at
+            // 1px for the rest of the session. Release it here (mirrors the zoom-out branch).
+            if (ts.prevInspectLock) { ClipCursor(nullptr); ts.prevInspectLock = false; }
+            ts.cursorLock.reset();
+            g_input.state().cursorLocked.store(false, std::memory_order_relaxed);
             unsigned long long now = GetTickCount64();
             if (now >= nextRecoverMs) {
                 if (!renderEngine.recoverDeviceLost()) nextRecoverMs = now + 500;   // retry in 0.5s
