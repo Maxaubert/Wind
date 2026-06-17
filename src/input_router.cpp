@@ -30,6 +30,11 @@ static bool    g_hookOk       = false;     // result of SetWindowsHookExW, publi
 // contexts - the hook thread (MouseProc), the tick thread (setButtons on hot-reload), and the
 // teardown caller (ReleaseSwallowedButtons via stop()) - so plain bools would be a data race.
 static std::atomic<bool> g_swallowedDown[3] = {};
+// Inspect-mode click-to-commit: a left/right press while the cursor is locked must produce a CLEAN
+// click at the reticle, not a drag from the clipped frozen point. We swallow the real DOWN, warp to
+// the reticle, and synthesize the click; g_commitBtn remembers which button so the matching real UP is
+// swallowed and re-synthesized too. Hook-thread-local (only touched by MouseProc / teardown).
+static int g_commitBtn = 0;   // 0=none, 1=left, 2=right
 
 static int xbuttonIdFromHook(WPARAM wParam, LPARAM lParam) {
     auto* mi = reinterpret_cast<MSLLHOOKSTRUCT*>(lParam);
@@ -124,18 +129,39 @@ static LRESULT CALLBACK KbProc(int code, WPARAM wParam, LPARAM lParam) {
 
 static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
     if (code == HC_ACTION && g_router) {
-        // Inspect-mode click-to-commit: a left/right press while the cursor is locked snaps the real
-        // cursor to the lens-center reticle, releases the 1px freeze clip so the warp is not clamped,
-        // and lets the click land there. NOT swallowed (the app must receive the click). The matching
-        // UP follows because the cursor was physically moved. Clearing cursorLocked here stops a second
-        // warp on the UP; the tick drains commitClick and unlocks the controller next frame.
-        if (g_router->state().cursorLocked.load(std::memory_order_relaxed)
-            && (wParam == WM_LBUTTONDOWN || wParam == WM_RBUTTONDOWN)) {
-            ClipCursor(nullptr);
-            SetCursorPos(g_router->state().lensCenterX.load(std::memory_order_relaxed),
-                         g_router->state().lensCenterY.load(std::memory_order_relaxed));
-            g_router->state().cursorLocked.store(false, std::memory_order_relaxed);
-            g_router->state().commitClick.store(true,  std::memory_order_relaxed);
+        auto* mi = reinterpret_cast<MSLLHOOKSTRUCT*>(lParam);
+        // Inspect-mode click-to-commit. While locked, the real OS cursor is clipped at the FROZEN point,
+        // so a real button event fires THERE. Warping the cursor mid-click does NOT relocate the already
+        // emitted DOWN, so the app would see DOWN @frozen + UP @reticle = a drag (text-select / marquee).
+        // Fix: swallow the real DOWN, release the clip, warp to the reticle, unlock, and SYNTHESIZE a
+        // fresh DOWN at the reticle; swallow + re-synthesize the matching UP too, so the app sees a clean
+        // press/release at the committed point. Our injected events carry LLMHF_INJECTED, so they skip
+        // this logic and pass straight through (no re-entrancy).
+        if (!(mi->flags & LLMHF_INJECTED)) {
+            bool lDown = (wParam == WM_LBUTTONDOWN), rDown = (wParam == WM_RBUTTONDOWN);
+            bool lUp   = (wParam == WM_LBUTTONUP),   rUp   = (wParam == WM_RBUTTONUP);
+            if (g_router->state().cursorLocked.load(std::memory_order_relaxed) && (lDown || rDown)) {
+                ClipCursor(nullptr);
+                SetCursorPos(g_router->state().lensCenterX.load(std::memory_order_relaxed),
+                             g_router->state().lensCenterY.load(std::memory_order_relaxed));
+                g_router->state().cursorLocked.store(false, std::memory_order_relaxed);
+                g_router->state().commitClick.store(true,  std::memory_order_relaxed);
+                g_commitBtn = lDown ? 1 : 2;
+                INPUT in{}; in.type = INPUT_MOUSE;
+                in.mi.dwFlags = lDown ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_RIGHTDOWN;
+                SendInput(1, &in, sizeof(in));
+                return 1;   // eat the real DOWN (it is at the frozen point)
+            }
+            if (g_commitBtn == 1 && lUp) {
+                INPUT in{}; in.type = INPUT_MOUSE; in.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+                SendInput(1, &in, sizeof(in)); g_commitBtn = 0;
+                return 1;   // eat the real UP; the synthesized UP lands at the committed point
+            }
+            if (g_commitBtn == 2 && rUp) {
+                INPUT in{}; in.type = INPUT_MOUSE; in.mi.dwFlags = MOUSEEVENTF_RIGHTUP;
+                SendInput(1, &in, sizeof(in)); g_commitBtn = 0;
+                return 1;
+            }
         }
         int id = xbuttonIdFromHook(wParam, lParam);
         bool down = (wParam == WM_XBUTTONDOWN);
@@ -246,6 +272,15 @@ static void ReleaseSwallowedKeys() {
         g_kbPressed[vk].store(false);
     }
 }
+// If we swallowed a click-commit DOWN but never saw its UP (teardown mid-press), release the
+// synthesized button so no consumer is left believing it is held.
+static void ReleaseCommitButton() {
+    if (g_commitBtn == 0) return;
+    INPUT in{}; in.type = INPUT_MOUSE;
+    in.mi.dwFlags = (g_commitBtn == 1) ? MOUSEEVENTF_LEFTUP : MOUSEEVENTF_RIGHTUP;
+    SendInput(1, &in, sizeof(in));
+    g_commitBtn = 0;
+}
 void InputRouter::stop() {
     if (g_hookThread) {
         PostThreadMessageW(g_hookThreadId, WM_QUIT, 0, 0);   // break the thread's GetMessage loop
@@ -256,6 +291,7 @@ void InputRouter::stop() {
     }
     ReleaseSwallowedButtons();   // never leave a swallowed side-button stranded as held
     ReleaseSwallowedKeys();      // ...nor a swallowed keyboard bind
+    ReleaseCommitButton();       // ...nor a synthesized click-commit button
     hookActive_.store(false);
     kbHookActive_.store(false);
     g_router = nullptr;
