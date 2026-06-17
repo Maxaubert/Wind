@@ -106,6 +106,7 @@ struct RenderEngine::State {
     ComPtr<ID3D11BlendState> blendInvert;      // invert blend for I-beam-style cursors
     ComPtr<ID3D11Texture2D> cursorTex;         // the ACTIVE cursor's texture (an alias into the cache)
     ComPtr<ID3D11ShaderResourceView> cursorSRV;
+    ComPtr<ID3D11ShaderResourceView> lockRingSRV;  // Inspect-mode lock ring (32x32 cyan annulus, built once)
     HCURSOR lastCursor = nullptr;              // re-decode only when the OS cursor changes
     int curW = 0, curH = 0, hotX = 0, hotY = 0;
     bool cursorReady = false;
@@ -413,7 +414,7 @@ bool RenderEngine::recoverDeviceLost() {
     s_->ready = false;
     s_->dupl.Reset();
     s_->desktopCopy.Reset(); s_->desktopSRV.Reset();
-    s_->cursorTex.Reset(); s_->cursorSRV.Reset(); s_->cursorReady = false; s_->lastCursor = nullptr;
+    s_->cursorTex.Reset(); s_->cursorSRV.Reset(); s_->lockRingSRV.Reset(); s_->cursorReady = false; s_->lastCursor = nullptr;
     s_->cursorCache.clear();   // cached cursor textures belong to the dead device
     s_->vs.Reset(); s_->ps.Reset(); s_->cvs.Reset(); s_->cps.Reset();
     s_->cb.Reset(); s_->ccb.Reset();
@@ -600,6 +601,27 @@ bool RenderEngine::State::buildDeviceResources() {
     samp.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
     device->CreateSamplerState(&samp, sampPoint.ReleaseAndGetAddressOf());
     if (!sampLinear || !sampPoint) { RLog("buildDeviceResources: CreateSamplerState failed"); return false; }
+
+    // --- Inspect-mode lock ring texture (32x32 cyan annulus, built once per device) ---
+    {
+        const int N = 32; const double rcx = 15.5, rcy = 15.5;
+        const double rOuter = 14.0, rInner = 9.0;
+        std::vector<uint32_t> px(N * N, 0);
+        for (int ry = 0; ry < N; ++ry) for (int rx = 0; rx < N; ++rx) {
+            double d = std::sqrt((rx - rcx) * (rx - rcx) + (ry - rcy) * (ry - rcy));
+            double a = (d <= rOuter && d >= rInner) ? 1.0 : 0.0;
+            uint8_t A = (uint8_t)(a * 255.0);
+            px[ry * N + rx] = ((uint32_t)A << 24) | 0x00E6FFFFu; // BGRA: B=FF G=FF R=E6 (cyan-white), A=ring alpha
+        }
+        D3D11_TEXTURE2D_DESC td{}; td.Width = N; td.Height = N; td.MipLevels = 1; td.ArraySize = 1;
+        td.Format = DXGI_FORMAT_B8G8R8A8_UNORM; td.SampleDesc.Count = 1; td.Usage = D3D11_USAGE_IMMUTABLE;
+        td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        D3D11_SUBRESOURCE_DATA rsd{}; rsd.pSysMem = px.data(); rsd.SysMemPitch = N * 4;
+        ComPtr<ID3D11Texture2D> ringTex;
+        if (SUCCEEDED(device->CreateTexture2D(&td, &rsd, &ringTex)))
+            device->CreateShaderResourceView(ringTex.Get(), nullptr, lockRingSRV.ReleaseAndGetAddressOf());
+        if (!lockRingSRV) RLog("buildDeviceResources: lockRingSRV creation failed (non-fatal)");
+    }
 
     // --- Desktop Duplication ---
     if (!recreateDupl()) { RLog("buildDeviceResources: recreateDupl failed"); return false; }
@@ -898,6 +920,29 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
         c->VSSetConstantBuffers(0, 1, ccb.GetAddressOf());
         c->PSSetShader(cps.Get(), nullptr, 0);
         c->PSSetShaderResources(0, 1, cursorSRV.GetAddressOf());
+        c->PSSetSamplers(0, 1, sampLinear.GetAddressOf());
+        c->Draw(4, 0);
+    }
+
+    // Inspect-mode indicator: a small ring just beyond the cursor hotspot. Reuses the cursor quad
+    // pipeline (cvs/cps/sampLinear) with the pre-built lockRingSRV annulus. Only drawn when the
+    // reticle arrow is also drawn (cursorMode != 2 and osCursorShowing in auto mode).
+    if (p.cursorLocked && lockRingSRV && drawCursor) {
+        const double ringPx = 18.0;               // ring footprint in screen px
+        double rx = p.cursorScreenX + 10.0;       // offset down-right of the pointer tip
+        double ry = p.cursorScreenY + 10.0;
+        float posClipX  = (float)(rx / sw * 2.0 - 1.0);
+        float posClipY  = (float)(1.0 - ry / sh * 2.0);
+        float sizeClipX = (float)(ringPx / sw * 2.0);
+        float sizeClipY = (float)(-(ringPx / sh * 2.0));
+        float rcb[4] = { posClipX, posClipY, sizeClipX, sizeClipY };
+        c->UpdateSubresource(ccb.Get(), 0, nullptr, rcb, 0, 0);
+        c->OMSetBlendState(blend.Get(), nullptr, 0xFFFFFFFF);
+        c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+        c->VSSetShader(cvs.Get(), nullptr, 0);
+        c->VSSetConstantBuffers(0, 1, ccb.GetAddressOf());
+        c->PSSetShader(cps.Get(), nullptr, 0);
+        c->PSSetShaderResources(0, 1, lockRingSRV.GetAddressOf());
         c->PSSetSamplers(0, 1, sampLinear.GetAddressOf());
         c->Draw(4, 0);
     }

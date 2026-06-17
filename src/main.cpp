@@ -166,6 +166,7 @@ static void FillRenderParams(RenderFrameParams& p, const MapResult& r, const Con
     ParseHexColor(cfg.outlineColor, orr, og, ob);
     p.outlineR = orr; p.outlineG = og; p.outlineB = ob;
     p.outlineAlpha = 1.0f;   // RunTick lowers this when idle-hide is active
+    p.cursorLocked = false;   // main overrides to true while the inspect lock is engaged
 }
 
 // Append a line to %TEMP%\wind_diag.log (frame-pacing diagnostics; gated on diagnostics=1).
