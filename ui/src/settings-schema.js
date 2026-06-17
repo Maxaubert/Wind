@@ -23,6 +23,7 @@ export const sections = [
     { key:'cursorScaleWithZoom', type:'toggle', label:'Scale cursor with zoom', def:1, advanced:true },
     { key:'cursorVisibility', type:'select', label:'Cursor visibility', options:['auto','always','never'], def:'auto', advanced:true },
     { key:'__hideCursor', type:'keybind', label:'Hide cursor (hotkey)', desc:'Press to instantly toggle the magnified cursor. Does not reset zoom.', vkKey:'hideCursorVk', modsKey:'hideCursorMods' },
+    { key:'__cursorLock', type:'keybind', label:'Inspect mode', desc:'Freeze the cursor to keep a hover or tooltip alive while you pan and read. Click while locked to commit there and unlock. Press to set, right-click to clear.', vkKey:'cursorLockVk' },
   ]},
   { id:'display', label:'Display', icon:'display', desc:'Image quality of the magnified view.', rows: [
     { key:'bilinear',    type:'toggle', label:'Smooth scaling', desc:'Bilinear vs crisp pixels.', def:1, advanced:true },
