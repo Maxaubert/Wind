@@ -102,6 +102,15 @@ staged Apply/Discard footer.
   clean at 144fps via `WIND_PACINGTEST`), tamed by the `dwmFlush` knob: `dwmFlush=0` (default) =
   plain vsync `Present(1,0)`; `dwmFlush=1` = present immediately (`Present(0,0)`) then `DwmFlush()`
   to align 1:1 with composition. Both hot-reloadable.
+- RENDER ENGINE: the blt-model present onto the WS_EX_LAYERED overlay can be mis-composited by DWM at
+  NON-INTEGER DPI (observed: 3840x2160 @ 225% on an RTX 5090). The surface gets a small intermittent
+  down-left offset, so the bottom/left edge of a full-screen draw (the zoom outline) is clipped off the
+  panel while top/right stay. This is driver/DWM-level (NOT our draw code - the outline is one
+  full-screen pass that paints all 4 bands; the present clips 2). It resets on a device rebuild (a GPU
+  driver update / TDR) and recurs. Do NOT chase it as a render-code bug. Mitigation if ever needed:
+  inset the outline a few px (a complete frame just in from the edge survives the clip); or integer DPI
+  avoids it. The per-edge constant-buffer fragility that ALSO dropped an edge (the bottom) is a real
+  code bug and was fixed (the outline is now a single full-screen pass, not 4 UpdateSubresource'd quads).
 - RENDER ENGINE: DO NOT re-attempt a DirectComposition flip-model present path. It was tried and
   abandoned TWICE (#11, #69): a flip-model swapchain on the layered HWND (via an `IDCompositionVisual`)
   presents, but DWM promotes the fullscreen visual to an independent-flip / MPO plane that scans out
