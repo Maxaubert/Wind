@@ -71,7 +71,15 @@ staged Apply/Discard footer.
   drawn at `cursorScreen`. The overlay stays active while Inspect is on (`active = zoomed || inspect`),
   so the reticle PERSISTS and roams the full screen at 1x (the mapper returns `cursorScreen == center`
   at level 1.0, which is the roaming look point) - it never vanishes at 1x and never snaps across the
-  zoom boundary. A left click lands at the frozen point (the cursor is pinned there). Toggle off (or
+  zoom boundary. A click is ROUTED TO THE LOOK POINT (the crosshair), not the frozen cursor: the
+  `WH_MOUSE_LL` hook swallows the real left/right press (and its matching up) while Inspect is on - it
+  would otherwise land at the frozen point - and `main.cpp` RunTick fires a clean ABSOLUTE click at the
+  look point (mapper center) so it registers where you aim, at any zoom. The 1px freeze clip is released
+  for a couple ticks around the click (`clickReleaseTicks`) so the synthesized click isn't clamped back
+  to the frozen pixel, then re-asserted; Inspect STAYS on (no auto-exit - that was a prior regression).
+  Safe by construction: the injected click carries `LLMHF_INJECTED` (the hook skips it) and its absolute
+  move is dropped by the raw accumulator (`WM_INPUT` ignores `MOUSE_MOVE_ABSOLUTE`), so the look point is
+  not disturbed; the raw zoom path reads only the side-buttons, never left/right. Toggle off (or
   zoom out to idle) releases the clip, warps the cursor to the look point, and resumes normal follow.
   The 1px clip is released on every exit (toggle-off-while-zoomed, teardown-to-idle, device-lost
   recovery, `shutdown`, the crash filter, atexit `RestoreInputState`) so it is never stranded.
