@@ -50,27 +50,32 @@ inline std::wstring ResolveIniPath() {
 // else %LOCALAPPDATA%\Wind\logs (the read-only Program Files deploy). Creates the directory.
 // Returns a path WITHOUT a trailing backslash.
 inline std::wstring ResolveLogDir() {
-    wchar_t exePathBuf[MAX_PATH];
-    GetModuleFileNameW(nullptr, exePathBuf, MAX_PATH);
-    wchar_t* slash = wcsrchr(exePathBuf, L'\\');
-    if (slash) *slash = L'\0';
-    std::wstring exeDir(exePathBuf);
+    // Resolve once: the exe location and its writability don't change over a process lifetime, so cache
+    // the result (and the create+delete sentinel probe / CreateDirectory) instead of redoing it per call.
+    static const std::wstring cached = [] {
+        wchar_t exePathBuf[MAX_PATH];
+        GetModuleFileNameW(nullptr, exePathBuf, MAX_PATH);
+        wchar_t* slash = wcsrchr(exePathBuf, L'\\');
+        if (slash) *slash = L'\0';
+        std::wstring exeDir(exePathBuf);
 
-    std::wstring sentinel = exeDir + L"\\.windwritetest";
-    HANDLE h = CreateFileW(sentinel.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
-                           FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
-    std::wstring base;
-    if (h != INVALID_HANDLE_VALUE) { CloseHandle(h); base = exeDir; }
-    else {
-        wchar_t buf[MAX_PATH];
-        DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
-        if (n == 0 || n >= MAX_PATH) { GetTempPathW(MAX_PATH, buf); }
-        base = std::wstring(buf) + L"\\Wind";
-        CreateDirectoryW(base.c_str(), nullptr);
-    }
-    std::wstring logs = base + L"\\logs";
-    CreateDirectoryW(logs.c_str(), nullptr);
-    return logs;
+        std::wstring sentinel = exeDir + L"\\.windwritetest";
+        HANDLE h = CreateFileW(sentinel.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                               FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
+        std::wstring base;
+        if (h != INVALID_HANDLE_VALUE) { CloseHandle(h); base = exeDir; }
+        else {
+            wchar_t buf[MAX_PATH];
+            DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
+            if (n == 0 || n >= MAX_PATH) { GetTempPathW(MAX_PATH, buf); }
+            base = std::wstring(buf) + L"\\Wind";
+            CreateDirectoryW(base.c_str(), nullptr);
+        }
+        std::wstring logs = base + L"\\logs";
+        CreateDirectoryW(logs.c_str(), nullptr);
+        return logs;
+    }();
+    return cached;
 }
 
 }  // namespace wind

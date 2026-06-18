@@ -124,7 +124,6 @@ struct RenderEngine::State {
     void updateCursorTexture(int cursorMode);  // read osCursorShowing; decode/upload only if it'll be drawn
 
     bool magInited = false;
-    bool cursorHidden = false;
     bool ready = false;
     bool deviceLost = false;                   // set when Present/AcquireNextFrame reports DEVICE_REMOVED/RESET
 
@@ -666,7 +665,7 @@ void RenderEngine::primeReveal() {
 // haveDesktop routes capture() through its blocking first-frame budget, which reliably lands
 // that full frame. Pair this with showing the overlay only AFTER that frame is presented (see
 // main.cpp), since the swapchain otherwise displays its last presented frame the instant the
-// window becomes visible. Also drops the motion-blur history so we don't smear the jump in.
+// window becomes visible.
 void RenderEngine::invalidateCapture() {
     if (!s_) return;
     s_->dupl.Reset();
@@ -845,15 +844,14 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
     c->IASetInputLayout(nullptr);
 
     if (haveDesktop) {
-        double level = p.level < 1.0 ? 1.0 : p.level;
-        double viewW = sw / level, viewH = sh / level;
+        // Reuse the view width/height computed above (vlevel/vw/vh) - same clamp + divisions.
         float bright = (p.brightness > 0.0) ? (float)p.brightness : 1.0f;
         float hdrMode = capFp16 ? 1.0f : 0.0f;
         float scRgbScale = (capFp16 && sdrWhiteNits > 1.0) ? (float)(80.0 / sdrWhiteNits) : 1.0f;
         float sharp = (p.sharpness > 0.0) ? (float)p.sharpness : 0.0f;
         MagCB cbv{
             (float)(p.srcLeft / sw), (float)(p.srcTop / sh),
-            (float)((p.srcLeft + viewW) / sw), (float)((p.srcTop + viewH) / sh),
+            (float)((p.srcLeft + vw) / sw), (float)((p.srcTop + vh) / sh),
             bright, hdrMode, scRgbScale, sharp,
             (sw > 0 ? 1.0f / (float)sw : 0.0f), (sh > 0 ? 1.0f / (float)sh : 0.0f), 0.0f, 0.0f };
         c->UpdateSubresource(cb.Get(), 0, nullptr, &cbv, 0, 0);
@@ -1010,7 +1008,6 @@ void RenderEngine::hideSystemCursor(bool hide) {
     }
     if (s_->magInited) {
         MagShowSystemCursor(hide ? FALSE : TRUE);
-        s_->cursorHidden = hide;
     }
 }
 
@@ -1021,7 +1018,6 @@ void RenderEngine::shutdown() {
         ClipCursor(nullptr);                // nor clipped (Inspect mode) - heal both on teardown
         MagUninitialize();
         s_->magInited = false;
-        s_->cursorHidden = false;
         SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, SPIF_SENDCHANGE);  // safety net
     }
     // COM objects are ComPtr members of State; they release automatically when State is destroyed

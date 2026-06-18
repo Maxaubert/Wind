@@ -2,7 +2,6 @@
 #include <dwmapi.h>
 #include <tlhelp32.h>
 #include <magnification.h>
-#include <climits>
 #include <cmath>
 #include <cstdlib>
 #include <cstdio>
@@ -170,9 +169,7 @@ static void FillRenderParams(RenderFrameParams& p, const MapResult& r, const Con
     p.cropCapture = (cfg.cropCapture != 0);
     p.outline = OutlineVisibleAtLevel(cfg, level);
     p.outlineThicknessPx = cfg.outlineThickness;
-    float orr = 0.357f, og = 0.357f, ob = 0.839f;   // #5b5bd6 fallback (accent)
-    ParseHexColor(cfg.outlineColor, orr, og, ob);
-    p.outlineR = orr; p.outlineG = og; p.outlineB = ob;
+    p.outlineR = cfg.outlineR; p.outlineG = cfg.outlineG; p.outlineB = cfg.outlineB;   // parsed once in ParseConfig
     p.outlineAlpha = 1.0f;   // RunTick lowers this when idle-hide is active
     p.cursorLocked = false;  // RunTick sets true while zoomed + Inspect mode (draw the crosshair sprite)
 }
@@ -314,8 +311,8 @@ static void RunTick(TickState& t) {
     // hitches) and the config-poll fallback. Normal ~7ms frames are unaffected.
     const double kMaxZoomDt = 0.05;   // 50ms (~7 frames at 144Hz)
     t.zoom.tick(dt < kMaxZoomDt ? dt : kMaxZoomDt);
-    bool recenter = g_input.state().recenter.exchange(false);
-    // Recenter on a recenterVk key press (rising edge), in addition to any other source.
+    // Recenter on a recenterVk key press (rising edge).
+    bool recenter = false;
     bool recenterDown = keyDown(t.cfg.recenterVk);
     if (recenterDown && !t.recenterKeyWasDown) recenter = true;
     t.recenterKeyWasDown = recenterDown;
