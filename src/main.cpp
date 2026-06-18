@@ -434,28 +434,34 @@ static void RunTick(TickState& t) {
         if (dx >  t.mon.w) dx =  t.mon.w; else if (dx < -t.mon.w) dx = -t.mon.w;
         if (dy >  t.mon.h) dy =  t.mon.h; else if (dy < -t.mon.h) dy = -t.mon.h;
         MapResult r = t.mapper.update(dx, dy, lvl);
-        // Inspect click-to-look-point: the hook swallowed a real click; fire a clean click at the
-        // crosshair (the mapper center = the look point) so it lands where you are aiming, at any zoom.
-        // ABSOLUTE coords make it immune to the re-freeze SetCursorPos below, and an absolute injected
-        // move is skipped by the raw accumulator (WM_INPUT ignores MOUSE_MOVE_ABSOLUTE), so the look
-        // point is not disturbed. Inspect stays on (no exit); the cursor re-freezes at frozenCursor.
-        if (int cb = g_input.state().commitButton.exchange(0)) {
-            ClipCursor(nullptr);   // release the 1px freeze so the absolute click can reach the look point
+        // Inspect click-to-look-point: the hook swallowed real click(s) and handed us per-button counts
+        // (counts, not a flag, so a fast double-click before this drains isn't lost). Fire a clean ABSOLUTE
+        // click at the crosshair (mapper center = look point) per pending press, so each lands where you
+        // aim, at any zoom. ABSOLUTE coords are immune to the re-freeze SetCursorPos below, and an absolute
+        // injected move is skipped by the raw accumulator (WM_INPUT ignores MOUSE_MOVE_ABSOLUTE), so the
+        // look point isn't disturbed. Inspect stays on; the cursor re-freezes at frozenCursor afterwards.
+        int nLeft  = g_input.state().commitLeft.exchange(0);
+        int nRight = g_input.state().commitRight.exchange(0);
+        if (nLeft + nRight > 0) {
+            ClipCursor(nullptr);       // release the 1px freeze so the absolute click can reach the look point
             t.clickReleaseTicks = 2;   // ...and keep it released a couple ticks before re-freezing (below)
-            int lx = r.clickDesktopX + t.mon.x, ly = r.clickDesktopY + t.mon.y;
-            int vx = GetSystemMetrics(SM_XVIRTUALSCREEN),  vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
-            int vw = GetSystemMetrics(SM_CXVIRTUALSCREEN), vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
-            if (vw > 1 && vh > 1) {
-                LONG ax = (LONG)((lx - vx) * 65535.0 / (vw - 1) + 0.5);
-                LONG ay = (LONG)((ly - vy) * 65535.0 / (vh - 1) + 0.5);
-                DWORD dn  = (cb == 1) ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_RIGHTDOWN;
-                DWORD upf = (cb == 1) ? MOUSEEVENTF_LEFTUP   : MOUSEEVENTF_RIGHTUP;
-                INPUT clk[3] = {};
-                for (int i = 0; i < 3; ++i) { clk[i].type = INPUT_MOUSE; clk[i].mi.dx = ax; clk[i].mi.dy = ay; }
-                clk[0].mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
-                clk[1].mi.dwFlags = dn  | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
-                clk[2].mi.dwFlags = upf | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
-                SendInput(3, clk, sizeof(INPUT));
+            const VirtualBounds& vb = t.vbounds;   // cached at activation; equals the SM_*VIRTUALSCREEN metrics
+            if (vb.w > 1 && vb.h > 1) {
+                int lx = r.clickDesktopX + t.mon.x, ly = r.clickDesktopY + t.mon.y;
+                LONG ax = (LONG)((lx - vb.x) * 65535.0 / (vb.w - 1) + 0.5);
+                LONG ay = (LONG)((ly - vb.y) * 65535.0 / (vb.h - 1) + 0.5);
+                auto fireClicks = [&](DWORD downF, DWORD upF, int count) {
+                    for (int k = 0; k < count; ++k) {
+                        INPUT clk[3] = {};
+                        for (int i = 0; i < 3; ++i) { clk[i].type = INPUT_MOUSE; clk[i].mi.dx = ax; clk[i].mi.dy = ay; }
+                        clk[0].mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+                        clk[1].mi.dwFlags = downF | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+                        clk[2].mi.dwFlags = upF   | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+                        SendInput(3, clk, sizeof(INPUT));
+                    }
+                };
+                fireClicks(MOUSEEVENTF_LEFTDOWN,  MOUSEEVENTF_LEFTUP,  nLeft);
+                fireClicks(MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, nRight);
             }
         }
         RenderFrameParams p{};
@@ -935,6 +941,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         // a pointer while we are unable to draw the magnified one. Skip the normal tick this iteration.
         if (renderEngine.deviceLost()) {
             renderEngine.hideSystemCursor(false);   // restore the real cursor while we can't render
+            // Inspect's 1px freeze clip must not survive a device-lost: release it and clear the toggle so
+            // the post-recovery tick can't re-clip the cursor to the stale frozen pixel (honors the
+            // documented "released on device-lost recovery" invariant; recovery returns to a clean 1x).
+            ClipCursor(nullptr);
+            if (ts.cursorLock.locked()) { ts.cursorLock.reset(); ts.clickReleaseTicks = 0; }
             unsigned long long now = GetTickCount64();
             if (now >= nextRecoverMs) {
                 if (!renderEngine.recoverDeviceLost()) nextRecoverMs = now + 500;   // retry in 0.5s

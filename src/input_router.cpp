@@ -32,9 +32,10 @@ static bool    g_hookOk       = false;     // result of SetWindowsHookExW, publi
 static std::atomic<bool> g_swallowedDown[3] = {};
 // Inspect-mode click routing: a real left/right press while Inspect is on is swallowed (it would land
 // at the frozen cursor, not where the crosshair is aiming); the tick fires a clean click at the look
-// point instead. g_commitBtn remembers which button so the matching real UP is swallowed too. The
-// tick's injected click carries LLMHF_INJECTED, so it is not re-swallowed. Hook-thread-local.
-static int g_commitBtn = 0;   // 0=none, 1=left, 2=right
+// point instead. g_commitDown[btn] remembers THAT button's swallowed DOWN so only its own matching UP is
+// swallowed - per-button, so a left+right chord can't strand a stray UP. Atomic because stop() clears it
+// off the tick thread. The tick's injected click carries LLMHF_INJECTED, so it is not re-swallowed.
+static std::atomic<bool> g_commitDown[3] = {};   // index 1=left, 2=right; [0] unused
 
 static int xbuttonIdFromHook(WPARAM wParam, LPARAM lParam) {
     auto* mi = reinterpret_cast<MSLLHOOKSTRUCT*>(lParam);
@@ -134,15 +135,17 @@ static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
         // and signal the tick, which fires a clean absolute click at the crosshair. Swallow the matching
         // real UP too. Our own injected click carries LLMHF_INJECTED, so it skips this and passes through.
         if (!(mi->flags & LLMHF_INJECTED)) {
-            bool lDown = (wParam == WM_LBUTTONDOWN), rDown = (wParam == WM_RBUTTONDOWN);
-            bool lUp   = (wParam == WM_LBUTTONUP),   rUp   = (wParam == WM_RBUTTONUP);
-            if (g_router->state().inspectActive.load(std::memory_order_relaxed) && (lDown || rDown)) {
-                g_router->state().commitButton.store(lDown ? 1 : 2, std::memory_order_relaxed);
-                g_commitBtn = lDown ? 1 : 2;
-                return 1;   // eat the real DOWN
+            int cDown = (wParam == WM_LBUTTONDOWN) ? 1 : (wParam == WM_RBUTTONDOWN) ? 2 : 0;
+            int cUp   = (wParam == WM_LBUTTONUP)   ? 1 : (wParam == WM_RBUTTONUP)   ? 2 : 0;
+            if (cDown && g_router->state().inspectActive.load(std::memory_order_relaxed)) {
+                g_commitDown[cDown].store(true, std::memory_order_relaxed);   // remember THIS button's DOWN
+                // Count the click (don't overwrite) so a fast second click before the tick drains isn't lost.
+                auto& pending = (cDown == 1) ? g_router->state().commitLeft : g_router->state().commitRight;
+                pending.fetch_add(1, std::memory_order_relaxed);
+                return 1;   // eat the real DOWN; the tick fires the click at the look point
             }
-            if (g_commitBtn == 1 && lUp) { g_commitBtn = 0; return 1; }   // eat the matching real UP
-            if (g_commitBtn == 2 && rUp) { g_commitBtn = 0; return 1; }
+            // Swallow an UP iff THIS button's DOWN was swallowed (per-button, so a chord never strands one).
+            if (cUp && g_commitDown[cUp].exchange(false, std::memory_order_relaxed)) return 1;
         }
         int id = xbuttonIdFromHook(wParam, lParam);
         bool down = (wParam == WM_XBUTTONDOWN);
@@ -263,7 +266,7 @@ void InputRouter::stop() {
     }
     ReleaseSwallowedButtons();   // never leave a swallowed side-button stranded as held
     ReleaseSwallowedKeys();      // ...nor a swallowed keyboard bind
-    g_commitBtn = 0;             // clear the inspect click-swallow latch (the click is atomic; nothing held)
+    for (auto& d : g_commitDown) d.store(false, std::memory_order_relaxed);   // clear inspect click latches
     hookActive_.store(false);
     kbHookActive_.store(false);
     g_router = nullptr;
