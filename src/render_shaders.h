@@ -79,19 +79,25 @@ SamplerState smp : register(s0);
 float4 PSMain(VSOut i) : SV_TARGET { return tex.Sample(smp, i.uv); }
 )";
 
-// Solid-color quad shader for the zoom edge outline. Same quad expansion as the cursor shader,
-// but the PS outputs a constant color (no texture). cb: posClip + sizeClip (clip-space placement)
-// + an rgba color. Drawn as a 4-vertex triangle strip, once per screen edge.
+// Zoom edge outline as a SINGLE full-screen quad: the pixel shader colors only pixels within
+// `thickness` px of a screen edge and discards the interior. One draw, no per-edge geometry - this
+// replaces an earlier four-quads-in-a-loop approach that dropped individual edges on some GPUs.
+// cb: rgba color + screen size (px) + thickness (px).
 inline constexpr const char* kBorderHLSL = R"(
-cbuffer CB : register(b0) { float2 posClip; float2 sizeClip; float4 color; };
+cbuffer CB : register(b0) { float4 color; float2 screen; float thickness; float pad; };
 struct VSOut { float4 pos : SV_POSITION; };
 VSOut VSMain(uint id : SV_VertexID) {
     float2 q = float2(id & 1, (id >> 1) & 1);   // (0,0),(1,0),(0,1),(1,1)
     VSOut o;
-    o.pos = float4(posClip + q * sizeClip, 0, 1);
+    o.pos = float4(q * float2(2.0, -2.0) + float2(-1.0, 1.0), 0, 1);   // full-screen quad
     return o;
 }
-float4 PSMain(VSOut i) : SV_TARGET { return color; }
+float4 PSMain(VSOut i) : SV_TARGET {
+    float2 p = i.pos.xy;   // pixel center in screen px
+    if (p.x >= thickness && p.x < screen.x - thickness &&
+        p.y >= thickness && p.y < screen.y - thickness) discard;   // interior -> not part of the border
+    return color;
+}
 )";
 
 }
