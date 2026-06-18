@@ -112,7 +112,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "quickZoomMods")      c.quickZoomMods = std::stoi(val);
             else if (key == "outline")            c.outline = std::stoi(val);
             else if (key == "outlineThickness")   c.outlineThickness = std::stoi(val);
-            else if (key == "outlineColor")       c.outlineColor = val;
+            else if (key == "outlineColor")     { c.outlineColor = val; ParseHexColor(val, c.outlineR, c.outlineG, c.outlineB); }
             else if (key == "outlineLowZoomOnly") c.outlineLowZoomOnly = std::stoi(val);
             else if (key == "outlineLowZoomMax")  c.outlineLowZoomMax = std::stod(val);
             else if (key == "outlineIdleHide")    c.outlineIdleHide = std::stoi(val);

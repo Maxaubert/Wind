@@ -7,7 +7,6 @@ struct InputState {
     std::atomic<int>  rawDy{0};
     std::atomic<bool> inHeld{false}; // zoom-in side button physically down
     std::atomic<bool> outHeld{false};
-    std::atomic<bool> recenter{false};
     // Inspect-mode click routing (tick <-> WH_MOUSE_LL hook). While Inspect is on the real cursor is
     // frozen elsewhere, so the hook swallows a real left/right click (it would land at the frozen point)
     // and hands the tick the button; the tick fires a clean click at the look point (the crosshair).

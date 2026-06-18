@@ -120,6 +120,9 @@ struct Config {
     int         outlineThickness = 4;
     // Outline color as hex RGB ("#rrggbb"; leading '#' optional). Default = Wind accent.
     std::string outlineColor     = "#5b5bd6";
+    // outlineColor pre-parsed to 0..1 floats (done once in ParseConfig so the per-frame render path
+    // doesn't re-scan the hex string). Defaults match #5b5bd6; a bad/empty hex leaves these unchanged.
+    float       outlineR = 0.357f, outlineG = 0.357f, outlineB = 0.839f;
     // Low-zoom-only: show the outline only while level <= outlineLowZoomMax (when enabled).
     int    outlineLowZoomOnly = 0;     // 1 = enable the cutoff
     double outlineLowZoomMax  = 2.0;   // zoom cutoff (clamped [1.0, 50.0])
