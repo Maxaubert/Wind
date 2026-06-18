@@ -296,7 +296,22 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
     }
     CreateCoreWebView2EnvironmentWithOptions(nullptr, userData.c_str(), nullptr,
         Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
-        [hwnd, uiDir, onboard](HRESULT, ICoreWebView2Environment* env) -> HRESULT {
+        [hwnd, uiDir, onboard](HRESULT hr, ICoreWebView2Environment* env) -> HRESULT {
+            if (FAILED(hr) || !env) {
+                // Env creation can fail if the Edge WebView2 Runtime is missing/corrupt or the user-data
+                // folder isn't writable; env is then null. Dereferencing it crashed the host - guard it,
+                // tell the user, and close instead of leaving a dead empty shell. (The inner controller
+                // handler below already has the symmetric `if (!controller)` guard.)
+                wind::Log(wind::LogLevel::Error, "config",
+                          "WebView2 environment creation failed hr=0x%08lX (is the Edge WebView2 Runtime installed?)",
+                          (unsigned long)hr);
+                MessageBoxW(hwnd,
+                    L"Wind Settings could not start WebView2.\n\n"
+                    L"Please install the Microsoft Edge WebView2 Runtime, then reopen Settings.",
+                    L"Wind", MB_ICONERROR | MB_OK);
+                PostQuitMessage(0);
+                return hr;
+            }
             env->CreateCoreWebView2Controller(hwnd,
                 Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
                 [hwnd, uiDir, onboard](HRESULT, ICoreWebView2Controller* controller) -> HRESULT {

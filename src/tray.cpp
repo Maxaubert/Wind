@@ -3,9 +3,11 @@
 #include "logging.h"
 #include <shellapi.h>
 #include <string>
+#include <thread>
 namespace wind { namespace Tray {
 static NOTIFYICONDATAW g_nid{};
 static const UINT WM_TRAY = WM_APP + 1;
+static const UINT WM_DIAGDONE = WM_APP + 2;   // posted from the export worker thread with the result
 static const UINT ID_SETTINGS = 1003, ID_QUIT = 1002;
 static const UINT ID_EXPORTDIAG = 1004;
 
@@ -33,7 +35,21 @@ void Notify(const wchar_t* title, const wchar_t* text) {
     Shell_NotifyIconW(NIM_MODIFY, &g_nid);
     g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
 }
-bool HandleMessage(HWND hwnd, UINT msg, WPARAM /*wp*/, LPARAM lp) {
+bool HandleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_DIAGDONE) {
+        // Export worker finished (off-thread). Reveal in Explorer + notify here, on the message thread,
+        // so all tray/UI state stays single-threaded. wp = success, lp = heap std::wstring* (the zip path).
+        std::wstring* zip = reinterpret_cast<std::wstring*>(lp);
+        if (wp && zip && !zip->empty()) {
+            std::wstring args = L"/select,\"" + *zip + L"\"";
+            ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
+            Notify(L"Wind", L"Diagnostics exported to your Desktop.");
+        } else {
+            Notify(L"Wind", L"Could not export diagnostics.");
+        }
+        delete zip;
+        return true;
+    }
     if (msg == WM_TRAY && (lp == WM_RBUTTONUP || lp == WM_LBUTTONUP)) {
         POINT pt; GetCursorPos(&pt);
         HMENU m = CreatePopupMenu();
@@ -52,14 +68,14 @@ bool HandleMessage(HWND hwnd, UINT msg, WPARAM /*wp*/, LPARAM lp) {
         if (cmd == ID_SETTINGS)
             ShellExecuteW(nullptr, L"open", L"WindConfig.exe", nullptr, nullptr, SW_SHOW);
         else if (cmd == ID_EXPORTDIAG) {
-            std::wstring zip = wind::ExportDiagnosticsToDesktop();
-            if (!zip.empty()) {
-                std::wstring args = L"/select,\"" + zip + L"\"";
-                ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
-                Notify(L"Wind", L"Diagnostics exported to your Desktop.");
-            } else {
-                Notify(L"Wind", L"Could not export diagnostics.");
-            }
+            // Run the zip OFF the message thread: ExportDiagnosticsToDesktop spawns powershell and waits
+            // up to 30s, and this WndProc is the same thread that drives the magnifier tick - doing it
+            // inline froze the overlay for the whole export. The worker posts the result back (below).
+            std::thread([hwnd]{
+                std::wstring zip = wind::ExportDiagnosticsToDesktop();
+                PostMessageW(hwnd, WM_DIAGDONE, zip.empty() ? 0 : 1,
+                             reinterpret_cast<LPARAM>(new std::wstring(std::move(zip))));
+            }).detach();
         }
         else if (cmd == ID_QUIT)
             PostMessageW(hwnd, WM_CLOSE, 0, 0);
