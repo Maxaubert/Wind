@@ -30,6 +30,11 @@ static bool    g_hookOk       = false;     // result of SetWindowsHookExW, publi
 // contexts - the hook thread (MouseProc), the tick thread (setButtons on hot-reload), and the
 // teardown caller (ReleaseSwallowedButtons via stop()) - so plain bools would be a data race.
 static std::atomic<bool> g_swallowedDown[3] = {};
+// Inspect-mode click routing: a real left/right press while Inspect is on is swallowed (it would land
+// at the frozen cursor, not where the crosshair is aiming); the tick fires a clean click at the look
+// point instead. g_commitBtn remembers which button so the matching real UP is swallowed too. The
+// tick's injected click carries LLMHF_INJECTED, so it is not re-swallowed. Hook-thread-local.
+static int g_commitBtn = 0;   // 0=none, 1=left, 2=right
 
 static int xbuttonIdFromHook(WPARAM wParam, LPARAM lParam) {
     auto* mi = reinterpret_cast<MSLLHOOKSTRUCT*>(lParam);
@@ -124,6 +129,21 @@ static LRESULT CALLBACK KbProc(int code, WPARAM wParam, LPARAM lParam) {
 
 static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
     if (code == HC_ACTION && g_router) {
+        auto* mi = reinterpret_cast<MSLLHOOKSTRUCT*>(lParam);
+        // Inspect-mode click-to-look-point. Swallow the real DOWN (it would land at the frozen cursor)
+        // and signal the tick, which fires a clean absolute click at the crosshair. Swallow the matching
+        // real UP too. Our own injected click carries LLMHF_INJECTED, so it skips this and passes through.
+        if (!(mi->flags & LLMHF_INJECTED)) {
+            bool lDown = (wParam == WM_LBUTTONDOWN), rDown = (wParam == WM_RBUTTONDOWN);
+            bool lUp   = (wParam == WM_LBUTTONUP),   rUp   = (wParam == WM_RBUTTONUP);
+            if (g_router->state().inspectActive.load(std::memory_order_relaxed) && (lDown || rDown)) {
+                g_router->state().commitButton.store(lDown ? 1 : 2, std::memory_order_relaxed);
+                g_commitBtn = lDown ? 1 : 2;
+                return 1;   // eat the real DOWN
+            }
+            if (g_commitBtn == 1 && lUp) { g_commitBtn = 0; return 1; }   // eat the matching real UP
+            if (g_commitBtn == 2 && rUp) { g_commitBtn = 0; return 1; }
+        }
         int id = xbuttonIdFromHook(wParam, lParam);
         bool down = (wParam == WM_XBUTTONDOWN);
         bool up   = (wParam == WM_XBUTTONUP);
@@ -243,6 +263,7 @@ void InputRouter::stop() {
     }
     ReleaseSwallowedButtons();   // never leave a swallowed side-button stranded as held
     ReleaseSwallowedKeys();      // ...nor a swallowed keyboard bind
+    g_commitBtn = 0;             // clear the inspect click-swallow latch (the click is atomic; nothing held)
     hookActive_.store(false);
     kbHookActive_.store(false);
     g_router = nullptr;

@@ -124,6 +124,8 @@ struct TickState {
     bool   prevInspect = false;     // Inspect was on last tick (detect freeze enter/exit)
     bool   prevActive = false;      // overlay was active last tick (zoomed OR inspect)
     POINT  frozenCursor{};          // where the real cursor is frozen while Inspect is on (virtual px)
+    int    clickReleaseTicks = 0;   // after a committed click: ticks to keep the freeze clip released so
+                                    //   the synthesized click reaches the look point (then re-freeze)
     double quickZoomStored    = 0.0;           // remembered quick-zoom level (0 = none yet); in-memory
     bool   prevInHeld         = false;         // for rising-edge detection of the zoom-in channel
     bool   prevOutHeld        = false;
@@ -323,6 +325,9 @@ static void RunTick(TickState& t) {
     bool lockDown = keyDown(t.cfg.cursorLockVk);
     if (lockDown && !t.lockKeyWasDown) t.cursorLock.toggle();
     t.lockKeyWasDown = lockDown;
+    // Tell the mouse hook whether Inspect is on (so it swallows real clicks and routes them to the look
+    // point - see the commitButton drain in the active block). Published every tick (also clears on off).
+    g_input.state().inspectActive.store(t.cursorLock.locked(), std::memory_order_relaxed);
     // Hide-cursor hotkey is registered via RegisterHotKey (WndProc WM_HOTKEY toggles cursorHidden);
     // this both suppresses the key from reaching other apps and gives rising-edge semantics for
     // free (MOD_NOREPEAT). No polled check needed here.
@@ -378,6 +383,7 @@ static void RunTick(TickState& t) {
             // Freeze the real cursor where it is; the look point (mapper center) starts there.
             POINT pt; GetCursorPos(&pt);
             t.frozenCursor = pt;
+            t.clickReleaseTicks = 0;   // start frozen (clear any stale click-release window)
             t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y);
             t.lastSetVirtual = pt;
             RECT fz{ pt.x, pt.y, pt.x + 1, pt.y + 1 };
@@ -428,6 +434,30 @@ static void RunTick(TickState& t) {
         if (dx >  t.mon.w) dx =  t.mon.w; else if (dx < -t.mon.w) dx = -t.mon.w;
         if (dy >  t.mon.h) dy =  t.mon.h; else if (dy < -t.mon.h) dy = -t.mon.h;
         MapResult r = t.mapper.update(dx, dy, lvl);
+        // Inspect click-to-look-point: the hook swallowed a real click; fire a clean click at the
+        // crosshair (the mapper center = the look point) so it lands where you are aiming, at any zoom.
+        // ABSOLUTE coords make it immune to the re-freeze SetCursorPos below, and an absolute injected
+        // move is skipped by the raw accumulator (WM_INPUT ignores MOUSE_MOVE_ABSOLUTE), so the look
+        // point is not disturbed. Inspect stays on (no exit); the cursor re-freezes at frozenCursor.
+        if (int cb = g_input.state().commitButton.exchange(0)) {
+            ClipCursor(nullptr);   // release the 1px freeze so the absolute click can reach the look point
+            t.clickReleaseTicks = 2;   // ...and keep it released a couple ticks before re-freezing (below)
+            int lx = r.clickDesktopX + t.mon.x, ly = r.clickDesktopY + t.mon.y;
+            int vx = GetSystemMetrics(SM_XVIRTUALSCREEN),  vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+            int vw = GetSystemMetrics(SM_CXVIRTUALSCREEN), vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+            if (vw > 1 && vh > 1) {
+                LONG ax = (LONG)((lx - vx) * 65535.0 / (vw - 1) + 0.5);
+                LONG ay = (LONG)((ly - vy) * 65535.0 / (vh - 1) + 0.5);
+                DWORD dn  = (cb == 1) ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_RIGHTDOWN;
+                DWORD upf = (cb == 1) ? MOUSEEVENTF_LEFTUP   : MOUSEEVENTF_RIGHTUP;
+                INPUT clk[3] = {};
+                for (int i = 0; i < 3; ++i) { clk[i].type = INPUT_MOUSE; clk[i].mi.dx = ax; clk[i].mi.dy = ay; }
+                clk[0].mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+                clk[1].mi.dwFlags = dn  | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+                clk[2].mi.dwFlags = upf | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+                SendInput(3, clk, sizeof(INPUT));
+            }
+        }
         RenderFrameParams p{};
         FillRenderParams(p, r, t.cfg, t.mon, lvl);
         // Idle-hide fade: when enabled and the outline is visible, accumulate idle time (reset on
@@ -442,15 +472,22 @@ static void RunTick(TickState& t) {
         }
         if (t.cursorHidden) p.cursorMode = 2;   // hotkey override; FillRenderParams already set 0/1/2 from cfg
         if (inspect) {
-            // Re-assert the freeze (Windows can drop a clip on focus changes), pin renderFrame's
-            // SetCursorPos at the frozen point (a no-op inside the clip), and draw the crosshair at the
-            // look point (cursorScreen). No lens outline on the 1:1 view at 1x.
-            RECT fz{ t.frozenCursor.x, t.frozenCursor.y, t.frozenCursor.x + 1, t.frozenCursor.y + 1 };
-            ClipCursor(&fz);
-            p.clickDesktopX = t.frozenCursor.x;
-            p.clickDesktopY = t.frozenCursor.y;
-            p.cursorLocked = true;
-            if (!zoomed) p.outline = false;
+            if (t.clickReleaseTicks > 0) {
+                // A click was just committed: keep the freeze released for these ticks so the synthesized
+                // absolute click reaches the look point (re-clamping to the 1px frozen rect would send the
+                // click to the frozen point instead). Leave p.clickDesktop at the look point so renderFrame
+                // holds the cursor there for the click; re-freeze once the window elapses.
+                --t.clickReleaseTicks;
+            } else {
+                // Re-assert the freeze (Windows can drop a clip on focus changes) and pin renderFrame's
+                // SetCursorPos at the frozen point (a no-op inside the clip).
+                RECT fz{ t.frozenCursor.x, t.frozenCursor.y, t.frozenCursor.x + 1, t.frozenCursor.y + 1 };
+                ClipCursor(&fz);
+                p.clickDesktopX = t.frozenCursor.x;
+                p.clickDesktopY = t.frozenCursor.y;
+            }
+            p.cursorLocked = true;        // draw the crosshair at the look point (cursorScreen)
+            if (!zoomed) p.outline = false;   // no lens outline on the 1:1 view at 1x
         }
         t.renderEngine.renderFrame(p);          // render+present every active tick (never blocks the ramp)
         // Reveal AFTER the live frame is presented: setVisible flips the layer alpha over the
