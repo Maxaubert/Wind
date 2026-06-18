@@ -564,7 +564,8 @@ bool RenderEngine::State::buildDeviceResources() {
 
     D3D11_BUFFER_DESC bcbd{};
     bcbd.ByteWidth = 32;   // float2 posClip + float2 sizeClip + float4 color
-    bcbd.Usage = D3D11_USAGE_DEFAULT;
+    bcbd.Usage = D3D11_USAGE_DYNAMIC;             // updated per-edge in a loop -> Map(WRITE_DISCARD)
+    bcbd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE; //   (a bound DEFAULT cb dropped edges; see the draw loop)
     bcbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
     if (FAILED(device->CreateBuffer(&bcbd, nullptr, bcb.ReleaseAndGetAddressOf()))) { RLog("buildDeviceResources: CreateBuffer(border cb) failed"); return false; }
 
@@ -867,41 +868,29 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
         c->Draw(3, 0);
     }
 
-    // Edge-outline pass: four thin solid-color quads at the screen borders, drawn while zoomed.
-    // Into the capture-excluded overlay, so it never feeds back into Desktop Duplication. Opaque
-    // (no blend) for crisp edges. Gated on level > 1.0 (the overlay is only revealed while zoomed,
-    // so this is belt-and-braces). Four trivial draws, only when enabled.
+    // Edge-outline pass: ONE full-screen quad whose pixel shader colors only the border band (within
+    // `t` px of an edge) and discards the interior. Into the capture-excluded overlay, so it never
+    // feeds back into Desktop Duplication. Alpha-blended (supports the idle fade). Gated on level > 1.0.
+    // (Replaces an earlier four-quads-in-a-loop draw that dropped individual edges on some GPUs.)
     if (p.outline && p.level > 1.0 && haveDesktop && p.outlineAlpha > 0.0f) {
         int t = p.outlineThicknessPx;
         if (t < 1) t = 1;
-        const int maxT = (sw < sh ? sw : sh) / 2;   // never let opposite edges overlap/invert
+        const int maxT = (sw < sh ? sw : sh) / 2;   // never let opposite edges overlap
         if (t > maxT) t = maxT;
-        if (t > 0) {
-            const float r = p.outlineR, g = p.outlineG, b = p.outlineB;
-            c->OMSetBlendState(blend.Get(), nullptr, 0xFFFFFFFF);   // alpha blend (supports the idle fade)
-            c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-            c->IASetInputLayout(nullptr);
-            c->VSSetShader(bvs.Get(), nullptr, 0);
-            c->VSSetConstantBuffers(0, 1, bcb.GetAddressOf());
-            c->PSSetShader(bps.Get(), nullptr, 0);
-            c->PSSetConstantBuffers(0, 1, bcb.GetAddressOf());
-            const int edges[4][4] = {              // {x, y, w, h} in physical px
-                { 0,      0,      sw,  t          },   // top
-                { 0,      sh - t, sw,  t          },   // bottom
-                { 0,      t,      t,   sh - 2 * t },   // left
-                { sw - t, t,      t,   sh - 2 * t },   // right
-            };
-            for (int e = 0; e < 4; ++e) {
-                const int x = edges[e][0], y = edges[e][1], w = edges[e][2], h = edges[e][3];
-                if (w <= 0 || h <= 0) continue;
-                const float posClipX  = (float)(x / (double)sw * 2.0 - 1.0);
-                const float posClipY  = (float)(1.0 - y / (double)sh * 2.0);
-                const float sizeClipX = (float)(w / (double)sw * 2.0);
-                const float sizeClipY = (float)(-(h / (double)sh * 2.0));   // clip-y up vs screen-y down
-                const float bcbv[8] = { posClipX, posClipY, sizeClipX, sizeClipY, r, g, b, p.outlineAlpha };
-                c->UpdateSubresource(bcb.Get(), 0, nullptr, bcbv, 0, 0);
-                c->Draw(4, 0);
-            }
+        c->OMSetBlendState(blend.Get(), nullptr, 0xFFFFFFFF);
+        c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+        c->IASetInputLayout(nullptr);
+        c->VSSetShader(bvs.Get(), nullptr, 0);
+        c->PSSetShader(bps.Get(), nullptr, 0);
+        c->PSSetConstantBuffers(0, 1, bcb.GetAddressOf());
+        // cb layout matches kBorderHLSL: rgba color, screen size (px), thickness (px), pad.
+        const float bcbv[8] = { p.outlineR, p.outlineG, p.outlineB, p.outlineAlpha,
+                                (float)sw, (float)sh, (float)t, 0.0f };
+        D3D11_MAPPED_SUBRESOURCE ms{};
+        if (SUCCEEDED(c->Map(bcb.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
+            memcpy(ms.pData, bcbv, sizeof(bcbv));
+            c->Unmap(bcb.Get(), 0);
+            c->Draw(4, 0);
         }
     }
 
