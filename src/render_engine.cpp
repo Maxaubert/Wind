@@ -874,16 +874,24 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
         int t = p.outlineThicknessPx;
         if (t < 1) t = 1;
         const int maxT = (sw < sh ? sw : sh) / 2;   // never let opposite edges overlap
-        if (t > maxT) t = maxT;
+        // Inset the outline frame a few px from the screen edge (fixed, physical px). At non-integer
+        // DPI the layered blt present can be DWM-shifted down-left by a few px, which clips a flush
+        // left/bottom band off the panel; a frame inset a few px in survives the shift. See the
+        // CLAUDE.md render-engine non-integer-DPI gotcha. Clamped so inset+thickness stays on-screen.
+        int inset = 6;
+        if (inset > maxT - 1) inset = (maxT > 1) ? maxT - 1 : 0;   // degenerate guard (tiny surfaces)
+        if (inset < 0) inset = 0;
+        if (t > maxT - inset) t = maxT - inset;                    // keep inset+thickness within half
+        if (t < 1) t = 1;
         c->OMSetBlendState(blend.Get(), nullptr, 0xFFFFFFFF);
         c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
         c->IASetInputLayout(nullptr);
         c->VSSetShader(bvs.Get(), nullptr, 0);
         c->PSSetShader(bps.Get(), nullptr, 0);
         c->PSSetConstantBuffers(0, 1, bcb.GetAddressOf());
-        // cb layout matches kBorderHLSL: rgba color, screen size (px), thickness (px), pad.
+        // cb layout matches kBorderHLSL: rgba color, screen size (px), thickness (px), inset (px).
         const float bcbv[8] = { p.outlineR, p.outlineG, p.outlineB, p.outlineAlpha,
-                                (float)sw, (float)sh, (float)t, 0.0f };
+                                (float)sw, (float)sh, (float)t, (float)inset };
         D3D11_MAPPED_SUBRESOURCE ms{};
         if (SUCCEEDED(c->Map(bcb.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
             memcpy(ms.pData, bcbv, sizeof(bcbv));
