@@ -131,6 +131,7 @@ struct TickState {
     std::atomic<bool> quickZoomHotkey{false};  // set by WM_HOTKEY (hotkey-mode quick zoom), consumed in RunTick
     bool   cursorHidden       = false;         // runtime-only override (no ini write, no hot-reload)
     double outlineIdleSec = 0.0;   // seconds the cursor has been still (drives the outline idle fade)
+    double outlineZoneSec = 0.0;   // seconds continuously in the low-zoom band (drives the show dwell)
     HWND   hwnd               = nullptr;       // owning message window (for RegisterHotKey)
     // Frame-pacing diagnostics (diagnostics=1): a 2 s window of loop-interval stats.
     double diagAccum = 0.0, diagSumDt = 0.0, diagMaxDt = 0.0;
@@ -463,6 +464,23 @@ static void RunTick(TickState& t) {
         }
         RenderFrameParams p{};
         FillRenderParams(p, r, t.cfg, t.mon, lvl);
+        // Low-zoom dwell: with "only at low zoom" on, show the outline only after the zoom settles
+        // at a STABLE level inside the band for kOutlineDwellSec. "Stable" = the level is unchanged
+        // since last tick (the controller freezes the level exactly when no zoom direction is held),
+        // so an actively-changing level - zooming through the band, or repeatedly nudging in/out -
+        // never accumulates: the countdown starts only once you stop on a level in the band. Any
+        // level change or leaving the band resets it (OutlineDwellSeconds returns 0 when !inBand).
+        // Always-on mode (lowZoomOnly off) is unaffected. The reset also fires on zoom-out to idle
+        // via the teardown branch below, so cycling 1x<->in-band can never bank partial dwell.
+        if (t.cfg.outline != 0 && t.cfg.outlineLowZoomOnly != 0) {
+            const double kOutlineDwellSec = 1.0;
+            bool stable = std::fabs(lvl - t.prevLvl) <= 1e-4;   // level held constant => settled
+            bool inBand = p.outline && lvl > 1.0 && stable;
+            t.outlineZoneSec = OutlineDwellSeconds(inBand, t.outlineZoneSec, dt, kOutlineDwellSec);
+            if (t.outlineZoneSec < kOutlineDwellSec) p.outline = false;   // not dwelled long enough yet
+        } else {
+            t.outlineZoneSec = 0.0;   // keep ready for when the cutoff is toggled on mid-session
+        }
         // Idle-hide fade: when enabled and the outline is visible, accumulate idle time (reset on
         // any hand motion - free OS-cursor delta or raw mickeys), then map it to the fade alpha.
         // dt is the per-tick elapsed time computed at the top of RunTick. Fade duration is 0.3s.
@@ -525,6 +543,7 @@ static void RunTick(TickState& t) {
     } else if (t.prevActive) {                        // active -> idle: tear the overlay down
         t.renderEngine.setVisible(false);
         t.renderEngine.hideSystemCursor(false);
+        t.outlineZoneSec = 0.0;                       // zoom-out clears the low-zoom dwell (no banked partial)
         if (t.prevInspect) {
             ClipCursor(nullptr);
             POINT lp{ (int)(t.mapper.centerX() + 0.5) + t.mon.x, (int)(t.mapper.centerY() + 0.5) + t.mon.y };

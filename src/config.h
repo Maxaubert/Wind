@@ -157,6 +157,13 @@ bool OutlineVisibleAtLevel(const Config& c, double level);
 // hard 1.0/0.0 step at the threshold. Deterministic so the fade ramp is unit-testable.
 double OutlineIdleAlpha(double idleSeconds, double threshold, double fadeDuration);
 
+// Pure: low-zoom dwell accumulator. Returns the updated count of seconds the zoom level has been
+// continuously inside the low-zoom band: prevSeconds + dt while inBand (capped at `threshold`, and
+// dt clamped to >= 0 so a hitch never decrements), reset to 0.0 the moment we leave the band. The
+// caller shows the outline once the result reaches `threshold`, so a sub-threshold pass-through
+// never flashes it. Deterministic for unit testing.
+double OutlineDwellSeconds(bool inBand, double prevSeconds, double dt, double threshold);
+
 // I/O (implemented in Task 10): read file -> ParseConfig; create with defaults if absent.
 Config LoadConfig(const std::wstring& path);
 // I/O: last write time as a comparable tick count; 0 if missing.

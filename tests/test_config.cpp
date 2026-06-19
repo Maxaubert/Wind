@@ -279,6 +279,22 @@ TEST_CASE("OutlineIdleAlpha ramps from 1 to 0 across the fade window") {
     CHECK(OutlineIdleAlpha(6.9, 7.0, 0.0) == doctest::Approx(1.0));   // degenerate fade<=0 -> step
     CHECK(OutlineIdleAlpha(7.0, 7.0, 0.0) == doctest::Approx(0.0));
 }
+TEST_CASE("OutlineDwellSeconds gates appearance until the band is held for the threshold") {
+    const double thr = 1.0;
+    double s = 0.0;
+    s = OutlineDwellSeconds(true, s, 0.4, thr); CHECK(s == doctest::Approx(0.4)); CHECK(s < thr);  // building
+    s = OutlineDwellSeconds(true, s, 0.4, thr); CHECK(s == doctest::Approx(0.8)); CHECK(s < thr);
+    s = OutlineDwellSeconds(true, s, 0.4, thr); CHECK(s == doctest::Approx(1.0)); CHECK(s >= thr); // capped, now shows
+    s = OutlineDwellSeconds(true, s, 0.4, thr); CHECK(s == doctest::Approx(1.0));                  // stays capped while in-band
+    s = OutlineDwellSeconds(false, s, 0.4, thr); CHECK(s == doctest::Approx(0.0)); CHECK(s < thr); // left band -> reset
+    // A quick pass-through (total in-band time < threshold) never reaches the gate.
+    double q = 0.0;
+    q = OutlineDwellSeconds(true, q, 0.3, thr);
+    q = OutlineDwellSeconds(false, q, 0.3, thr);   // left before 1s elapsed
+    CHECK(q == doctest::Approx(0.0)); CHECK(q < thr);
+    // Negative/zero dt never decrements the accumulator.
+    CHECK(OutlineDwellSeconds(true, 0.5, -0.2, thr) == doctest::Approx(0.5));
+}
 TEST_CASE("outline low-zoom + idle keys default and parse with clamps") {
     Config d = ParseConfig("");
     CHECK(d.outlineLowZoomOnly == 0);
