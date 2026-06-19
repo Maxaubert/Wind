@@ -147,6 +147,19 @@ static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
             // Swallow an UP iff THIS button's DOWN was swallowed (per-button, so a chord never strands one).
             if (cUp && g_commitDown[cUp].exchange(false, std::memory_order_relaxed)) return 1;
         }
+        // Diagnostics (issue #113): count every side-button transition the hook observes, including
+        // WM_XBUTTONDBLCLK (which replaces the 2nd DOWN of a fast double-press and is otherwise ignored
+        // by the held-state logic). Counters only - no I/O in the hook. The tick thread logs them.
+        if (wParam == WM_XBUTTONDOWN || wParam == WM_XBUTTONUP || wParam == WM_XBUTTONDBLCLK) {
+            WORD hi = HIWORD(mi->mouseData);
+            int bid = (hi == XBUTTON1) ? 1 : (hi == XBUTTON2 ? 2 : 0);
+            if (bid) {
+                auto& st = g_router->state();
+                if (wParam == WM_XBUTTONDOWN)      st.dbgHookDown[bid].fetch_add(1, std::memory_order_relaxed);
+                else if (wParam == WM_XBUTTONUP)   st.dbgHookUp[bid].fetch_add(1, std::memory_order_relaxed);
+                else                               st.dbgHookDbl[bid].fetch_add(1, std::memory_order_relaxed);
+            }
+        }
         int id = xbuttonIdFromHook(wParam, lParam);
         bool down = (wParam == WM_XBUTTONDOWN);
         bool up   = (wParam == WM_XBUTTONUP);

@@ -14,6 +14,16 @@ struct InputState {
     std::atomic<bool> inspectActive{false};  // tick -> hook: Inspect on, swallow clicks
     std::atomic<int>  commitLeft{0};         // hook -> tick: pending left clicks to fire at the look point
     std::atomic<int>  commitRight{0};        // hook -> tick: pending right clicks
+    // --- Diagnostics for the intermittent stuck-side-button (issue #113). Each side-button
+    // observation site bumps the matching counter (atomic fetch_add only - NO I/O, safe in the LL
+    // hook); the tick thread reads these and logs a snapshot on every held-state edge, so a stuck
+    // (a rising edge with no matching fall) is captured along with whether the hook and/or Raw Input
+    // ever saw the release. Index by xbutton id (1 = XBUTTON1, 2 = XBUTTON2); [0] unused.
+    std::atomic<unsigned> dbgHookDown[3]{};  // WM_XBUTTONDOWN seen by the LL mouse hook
+    std::atomic<unsigned> dbgHookUp[3]{};    // WM_XBUTTONUP   seen by the LL mouse hook
+    std::atomic<unsigned> dbgHookDbl[3]{};   // WM_XBUTTONDBLCLK seen by the hook (currently ignored by state)
+    std::atomic<unsigned> dbgRawDown[3]{};   // RI_MOUSE_BUTTON_4/5_DOWN seen in WM_INPUT
+    std::atomic<unsigned> dbgRawUp[3]{};     // RI_MOUSE_BUTTON_4/5_UP   seen in WM_INPUT
 };
 
 class InputRouter {
