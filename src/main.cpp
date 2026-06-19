@@ -128,6 +128,15 @@ struct TickState {
     double quickZoomStored    = 0.0;           // remembered quick-zoom level (0 = none yet); in-memory
     bool   prevInHeld         = false;         // for rising-edge detection of the zoom-in channel
     bool   prevOutHeld        = false;
+    // Diagnostics (issue #113): held-state edge logging for the intermittent stuck side-button. Track
+    // the previous-tick held flags + how long the current held episode has lasted, so we can log a
+    // snapshot (with the hook/raw event counters) on each rise/fall and flag a hold that overstays.
+    bool   dbgPrevInHeld      = false;
+    bool   dbgPrevOutHeld     = false;
+    double dbgInHeldSec       = 0.0;
+    double dbgOutHeldSec      = 0.0;
+    bool   dbgInOverstayLogged  = false;       // one overstay WARN per stuck episode
+    bool   dbgOutOverstayLogged = false;
     std::atomic<bool> quickZoomHotkey{false};  // set by WM_HOTKEY (hotkey-mode quick zoom), consumed in RunTick
     bool   cursorHidden       = false;         // runtime-only override (no ini write, no hot-reload)
     double outlineIdleSec = 0.0;   // seconds the cursor has been still (drives the outline idle fade)
@@ -556,6 +565,46 @@ static void RunTick(TickState& t) {
     t.prevActive = active;
     t.prevInspect = inspect;
 
+    // Diagnostics (issue #113): log the side-button held-state timeline so the intermittent stuck can
+    // be diagnosed from the log. On every rise/fall, dump the hook + Raw Input event counters and the
+    // held duration; a stuck shows as a rise with no matching fall (and the next event only on
+    // re-click). Also WARN once if a hold overstays 6 s (well past any hold-to-zoom, which caps in
+    // ~2 s) - that line, with static counters, pinpoints a stuck episode. Edges/overstay only, so
+    // Log() is never hit on the per-frame path.
+    {
+        auto& st = g_input.state();
+        auto snap = [&](const char* tag, bool held, bool& prev, double& secs, bool& warned) {
+            if (held != prev) {
+                // Edge: `secs` still holds the accumulated duration (meaningful on a fall; ~0 on a rise).
+                wind::Log(wind::LogLevel::Info, "input",
+                          "%sHeld %d->%d held=%.2fs hook[d=%u u=%u dbl=%u / d=%u u=%u dbl=%u] raw[d=%u u=%u / d=%u u=%u] hookActive=%d lvl=%.2f",
+                          tag, prev ? 1 : 0, held ? 1 : 0, secs,
+                          st.dbgHookDown[1].load(), st.dbgHookUp[1].load(), st.dbgHookDbl[1].load(),
+                          st.dbgHookDown[2].load(), st.dbgHookUp[2].load(), st.dbgHookDbl[2].load(),
+                          st.dbgRawDown[1].load(), st.dbgRawUp[1].load(),
+                          st.dbgRawDown[2].load(), st.dbgRawUp[2].load(),
+                          g_input.hookActive() ? 1 : 0, lvl);
+                warned = false;            // arm the overstay warning for the next episode
+                prev = held;
+            } else if (held && !warned && secs > 6.0) {
+                wind::Log(wind::LogLevel::Warn, "input",
+                          "%sHeld STUCK? held=%.1fs hook[d=%u u=%u dbl=%u / d=%u u=%u dbl=%u] raw[d=%u u=%u / d=%u u=%u] lvl=%.2f",
+                          tag, secs,
+                          st.dbgHookDown[1].load(), st.dbgHookUp[1].load(), st.dbgHookDbl[1].load(),
+                          st.dbgHookDown[2].load(), st.dbgHookUp[2].load(), st.dbgHookDbl[2].load(),
+                          st.dbgRawDown[1].load(), st.dbgRawUp[1].load(),
+                          st.dbgRawDown[2].load(), st.dbgRawUp[2].load(), lvl);
+                warned = true;
+            }
+            // Accumulate AFTER edge handling so a fall reports the pre-reset duration; cleared at 0 when up.
+            secs = held ? (secs + dt) : 0.0;
+        };
+        bool inHeldNow  = g_input.state().inHeld.load();
+        bool outHeldNow = g_input.state().outHeld.load();
+        snap("in",  inHeldNow,  t.dbgPrevInHeld,  t.dbgInHeldSec,  t.dbgInOverstayLogged);
+        snap("out", outHeldNow, t.dbgPrevOutHeld, t.dbgOutHeldSec, t.dbgOutOverstayLogged);
+    }
+
     // Frame-pacing diagnostics: a 2 s window of loop-interval stats (dt = time between ticks =
     // the on-screen frame interval, since Present(1,0) paces while zoomed). maxDt and the hitch
     // count expose microstutter that an average would hide.
@@ -664,6 +713,20 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 if (!g_input.hookActive()) {
                     if (bf & RI_MOUSE_BUTTON_4_DOWN) g_input.setButtonState(1, true);
                     if (bf & RI_MOUSE_BUTTON_5_DOWN) g_input.setButtonState(2, true);
+                }
+                // Diagnostics (issue #113): record whether Raw Input even reports this mouse's side
+                // buttons (some mice route them through a vendor HID collection and never raise
+                // RI_MOUSE_BUTTON_4/5). Bump counters + log ONLY on a side-button transition, never on
+                // a plain move, so this stays off the per-frame path.
+                {
+                    auto& st = g_input.state();
+                    if (bf & RI_MOUSE_BUTTON_4_DOWN) st.dbgRawDown[1].fetch_add(1, std::memory_order_relaxed);
+                    if (bf & RI_MOUSE_BUTTON_4_UP)   st.dbgRawUp[1].fetch_add(1, std::memory_order_relaxed);
+                    if (bf & RI_MOUSE_BUTTON_5_DOWN) st.dbgRawDown[2].fetch_add(1, std::memory_order_relaxed);
+                    if (bf & RI_MOUSE_BUTTON_5_UP)   st.dbgRawUp[2].fetch_add(1, std::memory_order_relaxed);
+                    if (bf & (RI_MOUSE_BUTTON_4_DOWN | RI_MOUSE_BUTTON_4_UP |
+                              RI_MOUSE_BUTTON_5_DOWN | RI_MOUSE_BUTTON_5_UP))
+                        wind::Log(wind::LogLevel::Info, "input", "raw xbtn bf=0x%04x", (unsigned)bf);
                 }
             }
         }
