@@ -131,6 +131,7 @@ struct TickState {
     std::atomic<bool> quickZoomHotkey{false};  // set by WM_HOTKEY (hotkey-mode quick zoom), consumed in RunTick
     bool   cursorHidden       = false;         // runtime-only override (no ini write, no hot-reload)
     double outlineIdleSec = 0.0;   // seconds the cursor has been still (drives the outline idle fade)
+    double outlineZoneSec = 0.0;   // seconds continuously in the low-zoom band (drives the show dwell)
     HWND   hwnd               = nullptr;       // owning message window (for RegisterHotKey)
     // Frame-pacing diagnostics (diagnostics=1): a 2 s window of loop-interval stats.
     double diagAccum = 0.0, diagSumDt = 0.0, diagMaxDt = 0.0;
@@ -463,6 +464,19 @@ static void RunTick(TickState& t) {
         }
         RenderFrameParams p{};
         FillRenderParams(p, r, t.cfg, t.mon, lvl);
+        // Low-zoom dwell: with "only at low zoom" on, zooming straight through the band on the way to
+        // a higher level would flash the outline for a fraction of a second. Require staying in the
+        // band (1x < level <= cutoff; OutlineVisibleAtLevel already enforces the cutoff) for kOutline
+        // DwellSec before showing it. A sub-second pass-through never reaches the gate; leaving the
+        // band resets it. Always-on mode (lowZoomOnly off) is unaffected.
+        if (t.cfg.outline != 0 && t.cfg.outlineLowZoomOnly != 0) {
+            const double kOutlineDwellSec = 1.0;
+            bool inBand = p.outline && lvl > 1.0;
+            t.outlineZoneSec = OutlineDwellSeconds(inBand, t.outlineZoneSec, dt, kOutlineDwellSec);
+            if (t.outlineZoneSec < kOutlineDwellSec) p.outline = false;   // not dwelled long enough yet
+        } else {
+            t.outlineZoneSec = 0.0;   // keep ready for when the cutoff is toggled on mid-session
+        }
         // Idle-hide fade: when enabled and the outline is visible, accumulate idle time (reset on
         // any hand motion - free OS-cursor delta or raw mickeys), then map it to the fade alpha.
         // dt is the per-tick elapsed time computed at the top of RunTick. Fade duration is 0.3s.

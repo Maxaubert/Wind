@@ -55,6 +55,12 @@ double OutlineIdleAlpha(double idleSeconds, double threshold, double fadeDuratio
     return 1.0 - over;
 }
 
+double OutlineDwellSeconds(bool inBand, double prevSeconds, double dt, double threshold) {
+    if (!inBand) return 0.0;                       // left the band -> require a fresh dwell next time
+    double s = prevSeconds + (dt > 0.0 ? dt : 0.0);
+    return s > threshold ? threshold : s;          // cap so the accumulator stays bounded
+}
+
 Config ParseConfig(const std::string& text) {
     Config c;
     std::istringstream in(text);
