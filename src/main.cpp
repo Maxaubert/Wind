@@ -628,16 +628,23 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 if ((m.usFlags & MOUSE_MOVE_ABSOLUTE) == 0) {
                     AccumulateRaw(g_input, m.lLastX, m.lLastY);
                 }
-                // Side-button held state: ONLY decode it here as the WIND_NOHOOK fallback. When the LL
-                // hook is active it is the sole authority - Raw Input still delivers the button
-                // transition even though the hook swallows the legacy message, so writing it here too
-                // would double-count and could momentarily disagree with the hook's view.
+                // Side-button held state. The button DOWN edge stays HOOK-authoritative when the
+                // LL hook is active (it owns the swallow/edge logic; writing DOWN here too would
+                // double-count and could momentarily disagree with the hook's view) - so DOWN is
+                // decoded here only as the WIND_NOHOOK fallback. The button UP, however, is ALWAYS
+                // honored from Raw Input: an LL hook can be silently skipped by Windows on a
+                // LowLevelHooksTimeout stall, and a dropped XBUTTON UP would otherwise strand the
+                // button as held (intermittent stuck-zoom, recovers only on a re-click). Raw Input
+                // is delivered through a path NOT subject to that timeout, and a UP can only CLEAR
+                // held-state, never set it, so processing it unconditionally is a pure safety net
+                // (idempotent with the hook's own clear; never falsely holds). It does not touch the
+                // hook's g_swallowedDown record, so swallowing is unaffected.
+                USHORT bf = m.usButtonFlags;
+                if (bf & RI_MOUSE_BUTTON_4_UP) g_input.setButtonState(1, false);
+                if (bf & RI_MOUSE_BUTTON_5_UP) g_input.setButtonState(2, false);
                 if (!g_input.hookActive()) {
-                    USHORT bf = m.usButtonFlags;
                     if (bf & RI_MOUSE_BUTTON_4_DOWN) g_input.setButtonState(1, true);
-                    if (bf & RI_MOUSE_BUTTON_4_UP)   g_input.setButtonState(1, false);
                     if (bf & RI_MOUSE_BUTTON_5_DOWN) g_input.setButtonState(2, true);
-                    if (bf & RI_MOUSE_BUTTON_5_UP)   g_input.setButtonState(2, false);
                 }
             }
         }
