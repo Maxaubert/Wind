@@ -84,7 +84,7 @@ float4 PSMain(VSOut i) : SV_TARGET { return tex.Sample(smp, i.uv); }
 // replaces an earlier four-quads-in-a-loop approach that dropped individual edges on some GPUs.
 // cb: rgba color + screen size (px) + thickness (px).
 inline constexpr const char* kBorderHLSL = R"(
-cbuffer CB : register(b0) { float4 color; float2 screen; float thickness; float pad; };
+cbuffer CB : register(b0) { float4 color; float2 screen; float thickness; float inset; };
 struct VSOut { float4 pos : SV_POSITION; };
 VSOut VSMain(uint id : SV_VertexID) {
     float2 q = float2(id & 1, (id >> 1) & 1);   // (0,0),(1,0),(0,1),(1,1)
@@ -94,8 +94,15 @@ VSOut VSMain(uint id : SV_VertexID) {
 }
 float4 PSMain(VSOut i) : SV_TARGET {
     float2 p = i.pos.xy;   // pixel center in screen px
-    if (p.x >= thickness && p.x < screen.x - thickness &&
-        p.y >= thickness && p.y < screen.y - thickness) discard;   // interior -> not part of the border
+    // Draw the band as a frame inset `inset` px from each screen edge, NOT flush to it. At
+    // non-integer DPI, DWM can mis-composite the layered blt present with a few-px down-left
+    // shift that clips a flush left/bottom band off the panel; a frame a few px in survives it.
+    // (See the CLAUDE.md render-engine non-integer-DPI gotcha.) inset=0 reproduces a flush border.
+    bool insideOuter = p.x >= inset && p.x < screen.x - inset &&
+                       p.y >= inset && p.y < screen.y - inset;
+    bool insideInner = p.x >= inset + thickness && p.x < screen.x - inset - thickness &&
+                       p.y >= inset + thickness && p.y < screen.y - inset - thickness;
+    if (!insideOuter || insideInner) discard;   // outside the inset frame, or in its hole -> not border
     return color;
 }
 )";
