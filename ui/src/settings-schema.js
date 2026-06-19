@@ -40,7 +40,7 @@ export const sections = [
     { key:'outlineLowZoomOnly', type:'toggle', label:'Only at low zoom',
       desc:'Hide the outline once you zoom past the cutoff.', def:0, dependsOn:'outline' },
     { key:'outlineLowZoomMax',  type:'slider', label:'Low-zoom cutoff',
-      desc:'Show only at or below this zoom (2 = 200%).', min:1.25, max:8, step:0.25, def:2,
+      desc:'Show only at or below this zoom (2 = 200%).', min:1.25, max:2, step:0.05, def:2,
       dependsOn:'outlineLowZoomOnly' },
     { key:'outlineIdleHide',    type:'toggle', label:'Hide when idle',
       desc:'Fade the outline out when the mouse is still.', def:0, dependsOn:'outline' },
