@@ -464,14 +464,18 @@ static void RunTick(TickState& t) {
         }
         RenderFrameParams p{};
         FillRenderParams(p, r, t.cfg, t.mon, lvl);
-        // Low-zoom dwell: with "only at low zoom" on, zooming straight through the band on the way to
-        // a higher level would flash the outline for a fraction of a second. Require staying in the
-        // band (1x < level <= cutoff; OutlineVisibleAtLevel already enforces the cutoff) for kOutline
-        // DwellSec before showing it. A sub-second pass-through never reaches the gate; leaving the
-        // band resets it. Always-on mode (lowZoomOnly off) is unaffected.
+        // Low-zoom dwell: with "only at low zoom" on, show the outline only after the zoom settles
+        // at a STABLE level inside the band for kOutlineDwellSec. "Stable" = the level is unchanged
+        // since last tick (the controller freezes the level exactly when no zoom direction is held),
+        // so an actively-changing level - zooming through the band, or repeatedly nudging in/out -
+        // never accumulates: the countdown starts only once you stop on a level in the band. Any
+        // level change or leaving the band resets it (OutlineDwellSeconds returns 0 when !inBand).
+        // Always-on mode (lowZoomOnly off) is unaffected. The reset also fires on zoom-out to idle
+        // via the teardown branch below, so cycling 1x<->in-band can never bank partial dwell.
         if (t.cfg.outline != 0 && t.cfg.outlineLowZoomOnly != 0) {
             const double kOutlineDwellSec = 1.0;
-            bool inBand = p.outline && lvl > 1.0;
+            bool stable = std::fabs(lvl - t.prevLvl) <= 1e-4;   // level held constant => settled
+            bool inBand = p.outline && lvl > 1.0 && stable;
             t.outlineZoneSec = OutlineDwellSeconds(inBand, t.outlineZoneSec, dt, kOutlineDwellSec);
             if (t.outlineZoneSec < kOutlineDwellSec) p.outline = false;   // not dwelled long enough yet
         } else {
@@ -539,6 +543,7 @@ static void RunTick(TickState& t) {
     } else if (t.prevActive) {                        // active -> idle: tear the overlay down
         t.renderEngine.setVisible(false);
         t.renderEngine.hideSystemCursor(false);
+        t.outlineZoneSec = 0.0;                       // zoom-out clears the low-zoom dwell (no banked partial)
         if (t.prevInspect) {
             ClipCursor(nullptr);
             POINT lp{ (int)(t.mapper.centerX() + 0.5) + t.mon.x, (int)(t.mapper.centerY() + 0.5) + t.mon.y };
