@@ -66,9 +66,18 @@ staged Apply/Discard footer.
   involvement): toggling on FREEZES the real OS cursor with a 1px `ClipCursor` at its current spot
   (`frozenCursor`) and hides it, so any hover/tooltip stays alive. A crosshair "look point" is then
   driven by Raw Input (the frozen cursor can't move, but HID mickeys still arrive): the look point IS
-  the `CursorMapper` center, so moving the mouse pans the magnified view and the crosshair sprite
-  (`render_engine` draws it when `RenderFrameParams.cursorLocked`, a 32x32 reticle scaled by zoom) is
-  drawn at `cursorScreen`. The overlay stays active while Inspect is on (`active = zoomed || inspect`),
+  the `CursorMapper` center, so moving the mouse pans the magnified view. SPEED MATCH: the freeze makes
+  the normal OS-cursor-delta oracle read ~0, so the look point pans from the raw mickeys run through
+  Windows pointer ballistics per `WM_INPUT` packet (`src/mouse_ballistics`, pure + unit-tested) so it
+  moves at the SAME speed/DPI as the desktop cursor: exact pointer-speed-slider multiplier + the
+  SmoothMouse acceleration curve, NORMALIZED so slow movement is 1:1 with the slider baseline and the
+  curve only adds gain above it (this cancels the undocumented DPI/refresh scaling constants), blended
+  at a reduced `accelStrength` because `WM_INPUT` can coalesce HID reports and otherwise over-accelerate.
+  `input_router` cooks each packet (only while `inspectActive`); RunTick drains the cooked delta with a
+  sub-pixel carry, still scaled by `cursorSensitivity`. The crosshair sprite (`render_engine` draws it
+  when `RenderFrameParams.cursorLocked`) is a 48x48 anti-aliased full-length thin cross - light-grey
+  core + black outline, lines run continuously through the center (no gap), built once with 4x4
+  supersampled coverage, scaled by zoom - drawn at `cursorScreen`. The overlay stays active while Inspect is on (`active = zoomed || inspect`),
   so the reticle PERSISTS and roams the full screen at 1x (the mapper returns `cursorScreen == center`
   at level 1.0, which is the roaming look point) - it never vanishes at 1x and never snaps across the
   zoom boundary. A click is ROUTED TO THE LOOK POINT (the crosshair), not the frozen cursor: the
@@ -160,9 +169,11 @@ staged Apply/Discard footer.
   applied) and pans by that scaled by `cursorSensitivity` (default 1.0 = exact match), so panning
   equals the user's normal cursor without reimplementing ballistics, with an optional speed multiplier
   on top. `GetCursorPos` works as this "oracle" only because we read it BEFORE re-setting it each
-  tick. Raw mickeys are kept solely to (a) feed `LockDetector` (a game clipping/recentering the cursor
-  -> `GetClipCursor` confined, or raw-active-but-cursor-frozen with hysteresis) and (b) drive panning
-  while locked (also scaled by `cursorSensitivity`). Both regimes integrate a DELTA into the same
+  tick. Raw mickeys are kept to (a) feed `LockDetector` (a game clipping/recentering the cursor
+  -> `GetClipCursor` confined, or raw-active-but-cursor-frozen with hysteresis), (b) drive panning
+  while locked (also scaled by `cursorSensitivity`), and (c) feed the Inspect-mode ballistics cooking
+  (the OS cursor is frozen there, so the oracle is unusable - see the Inspect notes). Both the free and
+  locked zoom regimes integrate a DELTA into the same
   accumulator, so a free/locked switch never snaps position (avoids the old Tracker flicker, issue #3).
   The click point, drawn cursor, and view all derive from the SMOOTHED center (`cx_`), so a click lands
   under the visible cursor; do not "fix" the click/warp point to the unsmoothed target (it would
