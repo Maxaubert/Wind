@@ -289,8 +289,21 @@ void InputRouter::drainRaw(int& dx, int& dy) {
     dy = state_.rawDy.exchange(0);
 }
 
+// Per-packet ballistic cooking for the Inspect-mode pan. Only needed while Inspect is on (the OS
+// cursor is frozen then, so raw mickeys drive the look point); skipped otherwise so it costs nothing
+// in the normal path. Windows accelerates per packet on each packet's magnitude, so cook here (one
+// WM_INPUT = one packet) and accumulate the sub-pixel result; the tick drains it via drainCooked.
+void InputRouter::cookPacket(int dx, int dy) {
+    if (!state_.inspectActive.load(std::memory_order_relaxed)) return;
+    double cx, cy;
+    CookMickeyPacket(ballistics_, dx, dy, cx, cy);
+    cookedX_ += cx;
+    cookedY_ += cy;
+}
+
 void AccumulateRaw(InputRouter& r, int dx, int dy) {
     r.state().rawDx.fetch_add(dx);
     r.state().rawDy.fetch_add(dy);
+    r.cookPacket(dx, dy);   // Inspect-mode speed match (no-op unless Inspect is active)
 }
 }

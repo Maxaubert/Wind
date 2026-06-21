@@ -1,5 +1,6 @@
 #pragma once
 #include <atomic>
+#include "mouse_ballistics.h"   // BallisticsConfig (pure; Inspect-mode speed match)
 namespace wind {
 // Holds input state shared between the hook/raw-input callbacks and the tick thread.
 struct InputState {
@@ -36,6 +37,15 @@ public:
     InputState& state() { return state_; }
     // Atomically read and zero the accumulated raw deltas.
     void drainRaw(int& dx, int& dy);
+    // Inspect-mode speed match: the OS cursor is frozen, so the look point pans from raw mickeys.
+    // Raw mickeys are pre-acceleration / pre-pointer-speed, so they feel slower than the desktop
+    // cursor. setBallistics() supplies the current Windows pointer-speed + acceleration settings;
+    // cookPacket() (called per WM_INPUT packet) converts that packet to cooked pixels and sums them
+    // while Inspect is active; drainCooked() reads and zeroes the accumulated cooked delta. All of
+    // this runs on the main thread (WM_INPUT, the tick, and the setters are all main-thread).
+    void setBallistics(const BallisticsConfig& c) { ballistics_ = c; }
+    void cookPacket(int dx, int dy);
+    void drainCooked(double& dx, double& dy) { dx = cookedX_; dy = cookedY_; cookedX_ = 0.0; cookedY_ = 0.0; }
     // Map an XBUTTON id (1 = XBUTTON1, 2 = XBUTTON2) to the in/out held state, using the
     // configured zoom buttons. Shared by the WH_MOUSE_LL hook and main's WM_INPUT path.
     void setButtonState(int xbuttonId, bool down);
@@ -88,6 +98,10 @@ private:
     std::atomic<int> kbRecenterVk_{0};
     std::atomic<int> kbCursorLockVk_{0};
     std::atomic<bool> kbHookActive_{false}; // true once the LL KEYBOARD hook is installed
+    // Inspect-mode cooked-pixel accumulator (main-thread only: WM_INPUT cooks, the tick drains).
+    BallisticsConfig ballistics_{};
+    double cookedX_ = 0.0;
+    double cookedY_ = 0.0;
 };
 
 // Called from main.cpp's WM_INPUT handler with decoded relative mouse deltas.
