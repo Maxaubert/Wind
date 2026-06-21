@@ -125,6 +125,8 @@ struct TickState {
     POINT  frozenCursor{};          // where the real cursor is frozen while Inspect is on (virtual px)
     int    clickReleaseTicks = 0;   // after a committed click: ticks to keep the freeze clip released so
                                     //   the synthesized click reaches the look point (then re-freeze)
+    double inspectPanRemX = 0.0;    // sub-pixel carry for the cooked Inspect-mode pan (slow motion not lost)
+    double inspectPanRemY = 0.0;
     double quickZoomStored    = 0.0;           // remembered quick-zoom level (0 = none yet); in-memory
     bool   prevInHeld         = false;         // for rising-edge detection of the zoom-in channel
     bool   prevOutHeld        = false;
@@ -200,6 +202,20 @@ static void DiagLog(const char* fmt, ...) {
 static void RegisterHideCursorHotkey(HWND hwnd, int vk, int mods);
 // Same pattern for the quick-zoom hotkey (hotkey mode). Pass vk=0 to unregister.
 static void RegisterQuickZoomHotkey(HWND hwnd, int vk, int mods);
+
+// Read the current Windows pointer-speed + acceleration settings into a BallisticsConfig so Inspect
+// mode pans the look point at the same speed as the desktop cursor. Refreshed on each Inspect entry
+// (these settings change rarely). SystemParametersInfo only: the SmoothMouse curve shape is the
+// standard hardcoded default (rarely customized) and is normalized to the slider baseline in
+// mouse_ballistics, so its absolute scale does not matter.
+static BallisticsConfig ReadMouseBallistics() {
+    BallisticsConfig c;   // xCurve/yCurve keep the standard Win10 "Enhance pointer precision" defaults
+    int speed = 10;
+    if (SystemParametersInfo(SPI_GETMOUSESPEED, 0, &speed, 0)) c.sliderMult = PointerSpeedMultiplier(speed);
+    int mp[3] = { 0, 0, 0 };
+    if (SystemParametersInfo(SPI_GETMOUSE, 0, mp, 0)) c.accelEnabled = (mp[2] != 0);
+    return c;
+}
 
 // One magnifier tick: advance zoom, hot-reload config, then pan/draw via the render engine.
 // Pure of any pacing wait - the caller paces. Safe to call from the main loop or from a
@@ -391,6 +407,11 @@ static void RunTick(TickState& t) {
             POINT pt; GetCursorPos(&pt);
             t.frozenCursor = pt;
             t.clickReleaseTicks = 0;   // start frozen (clear any stale click-release window)
+            // Match the desktop cursor speed: snapshot the OS pointer-speed/accel and baseline the
+            // cooked accumulator + sub-pixel carry so the first tick after entry pans by zero.
+            g_input.setBallistics(ReadMouseBallistics());
+            double cbx, cby; g_input.drainCooked(cbx, cby); (void)cbx; (void)cby;
+            t.inspectPanRemX = 0.0; t.inspectPanRemY = 0.0;
             t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y);
             t.lastSetVirtual = pt;
             RECT fz{ pt.x, pt.y, pt.x + 1, pt.y + 1 };
@@ -417,9 +438,16 @@ static void RunTick(TickState& t) {
         int curDy = cur.y - t.lastSetVirtual.y;
         int dx, dy;
         if (inspect) {
-            // Look point moves from RAW mickeys; the real cursor is frozen so its delta is irrelevant.
-            dx = (int)std::lround(rawDx * t.cfg.cursorSensitivity);
-            dy = (int)std::lround(rawDy * t.cfg.cursorSensitivity);
+            // The OS cursor is frozen, so pan the look point from the COOKED mickeys - Windows'
+            // pointer-speed + acceleration applied per packet (see mouse_ballistics) - not raw
+            // counts, so the look point moves at the same speed/DPI as the desktop cursor.
+            // cursorSensitivity stays a user multiplier on top; carry the sub-pixel remainder so
+            // slow precise motion is not quantized away.
+            double cdx, cdy; g_input.drainCooked(cdx, cdy);
+            t.inspectPanRemX += cdx * t.cfg.cursorSensitivity;
+            t.inspectPanRemY += cdy * t.cfg.cursorSensitivity;
+            dx = (int)t.inspectPanRemX; t.inspectPanRemX -= dx;   // truncate toward zero, carry the rest
+            dy = (int)t.inspectPanRemY; t.inspectPanRemY -= dy;
         } else {
             RECT clip{}; GetClipCursor(&clip);
             const VirtualBounds& vb = t.vbounds;   // cached at activation (see QueryVirtualBounds)

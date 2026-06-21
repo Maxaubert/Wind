@@ -603,22 +603,35 @@ bool RenderEngine::State::buildDeviceResources() {
     device->CreateSamplerState(&samp, sampPoint.ReleaseAndGetAddressOf());
     if (!sampLinear || !sampPoint) { RLog("buildDeviceResources: CreateSamplerState failed"); return false; }
 
-    // --- Inspect-mode crosshair sprite (32x32, same geometry as the SetSystemCursor crosshair so the
-    // 1x native cursor and the magnified overlay crosshair look identical across the zoom boundary).
-    // White core + 1px black outline + center gap; drawn (scaled by zoom) in place of the cursor while
-    // Inspect mode is on and we are zoomed. ---
+    // --- Inspect-mode crosshair sprite (48x48). Thin full-length cross: the vertical and horizontal
+    // lines run continuously through the center (no gap), a bit thinner and slightly larger than the
+    // old 32x32 sprite. Light-grey core + black outline so it reads on any background; drawn (scaled by
+    // zoom) in place of the cursor while Inspect mode is on. ---
     {
-        const int N = 32; const double cx = 15.5, cy = 15.5;
-        const double armLen = 14.0, gap = 4.0, coreHalf = 1.5, outlineHalf = 3.0;
+        const int N = 48; const double cx = 23.5, cy = 23.5;
+        // Very slightly thicker + ~1px shorter than before, tuned with sub-pixel precision via 4x4
+        // supersampled coverage (the half-pixel center makes a hard on/off sprite quantize thickness
+        // to 2px steps, too coarse for "very slight"). Each texel's alpha = covered fraction, and its
+        // grey/black mix = core-vs-outline coverage, so edges anti-alias cleanly under the alpha blend.
+        const double armLen = 22.5, gap = 0.0, coreHalf = 1.25, outlineHalf = 2.35;
+        const int SS = 4; const double inv = 1.0 / SS;
         std::vector<uint32_t> px((size_t)N * N, 0);
         for (int yy = 0; yy < N; ++yy) for (int xx = 0; xx < N; ++xx) {
-            double adx = std::fabs(xx - cx), ady = std::fabs(yy - cy);
-            bool vArm = adx <= outlineHalf && ady <= armLen && ady >= gap;
-            bool hArm = ady <= outlineHalf && adx <= armLen && adx >= gap;
-            if (vArm || hArm) {
-                bool core = (vArm && adx <= coreHalf) || (hArm && ady <= coreHalf);
-                px[(size_t)yy * N + xx] = core ? 0xFFFFFFFFu : 0xFF000000u;   // white core / black outline
+            int covered = 0, coreCov = 0;
+            for (int sy = 0; sy < SS; ++sy) for (int sx = 0; sx < SS; ++sx) {
+                double adx = std::fabs((xx + (sx + 0.5) * inv) - cx);
+                double ady = std::fabs((yy + (sy + 0.5) * inv) - cy);
+                bool vArm = adx <= outlineHalf && ady <= armLen && ady >= gap;
+                bool hArm = ady <= outlineHalf && adx <= armLen && adx >= gap;
+                if (vArm || hArm) {
+                    ++covered;
+                    if ((vArm && adx <= coreHalf) || (hArm && ady <= coreHalf)) ++coreCov;
+                }
             }
+            if (!covered) continue;                                  // fully transparent texel
+            unsigned a   = (unsigned)(covered * 255 / (SS * SS));
+            unsigned lum = (unsigned)(coreCov * 0xCC / covered);     // grey core vs black outline mix
+            px[(size_t)yy * N + xx] = (a << 24) | (lum << 16) | (lum << 8) | lum;   // straight-alpha BGRA
         }
         D3D11_TEXTURE2D_DESC td{}; td.Width = N; td.Height = N; td.MipLevels = 1; td.ArraySize = 1;
         td.Format = DXGI_FORMAT_B8G8R8A8_UNORM; td.SampleDesc.Count = 1; td.Usage = D3D11_USAGE_IMMUTABLE;
@@ -907,11 +920,11 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
                       (p.cursorMode == 1 || osCursorShowing);
     if (drawCursor) {
         double scale = p.cursorScaleWithZoom ? (p.level < 1.0 ? 1.0 : p.level) : 1.0;
-        // Inspect mode while zoomed: draw the 32x32 crosshair sprite (centered, matching the 1x native
-        // SetSystemCursor crosshair) in place of the captured cursor. Otherwise draw the captured cursor.
+        // Inspect mode while zoomed: draw the 48x48 thin full-length crosshair sprite (centered) in
+        // place of the captured cursor. Otherwise draw the captured cursor.
         bool useCross = p.cursorLocked && crosshairSRV;
-        double cw = useCross ? 32.0 : curW, ch = useCross ? 32.0 : curH;
-        double chx = useCross ? 16.0 : hotX, chy = useCross ? 16.0 : hotY;
+        double cw = useCross ? 46.0 : curW, ch = useCross ? 46.0 : curH;
+        double chx = useCross ? 23.0 : hotX, chy = useCross ? 23.0 : hotY;
         double drawW = cw * scale, drawH = ch * scale;
         double tlX = p.cursorScreenX - chx * scale;   // top-left so the hotspot lands at cursorScreen
         double tlY = p.cursorScreenY - chy * scale;
