@@ -1,8 +1,18 @@
-# Wind
+<div align="center">
+  <img src="assets/wind-badge.svg" alt="Wind" width="128">
 
-A lightweight fullscreen magnifier for Windows - "light as air". A replacement for the
-built-in Magnifier, with smooth continuous zoom that keeps tracking the mouse even when games
-hide, clip, or center-lock the cursor.
+  # Wind
+
+  A lightweight fullscreen magnifier for Windows - "light as air".
+
+  [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square)](https://github.com/Maxaubert/Wind)
+  [![Built with](https://img.shields.io/badge/C%2B%2B-Direct3D%2011-00599C?style=flat-square)](https://github.com/Maxaubert/Wind)
+</div>
+
+---
+
+A replacement for the built-in Magnifier, with smooth continuous zoom that keeps tracking the
+mouse even when games hide, clip, or center-lock the cursor.
 
 Wind renders the magnified view itself - capturing the desktop with DXGI Desktop Duplication
 and scaling it on the GPU (Direct3D 11) onto a click-through overlay. That gives sub-pixel
