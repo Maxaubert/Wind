@@ -59,6 +59,18 @@ struct Config {
     int    dwmFlush         = 0;
     int    diagnostics      = 0;     // 1 = log frame-timing to wind_diag.log
 
+    // --- Model selection ----------------------------------------------------
+    // Which magnification model runs. "render" (default) = the DXGI capture + D3D11 overlay.
+    // "transform" = the low-GPU DWM fullscreen-transform model (MagSetFullscreenTransform). An
+    // unknown value falls back to "render". Applied at launch (restart to switch; not hot-swapped).
+    std::string model = "render";
+    // Transform-model-only knobs (ignored by the render model):
+    int fastPan     = 1;  // 1 = pan via the private SetMagnificationDesktopMagnification channel
+                          //     (sub-pixel); falls back to the public API automatically if unavailable.
+    int smoothPan   = 0;  // 1 = hold the display composited while zoomed (1px pin) so flip-model games
+                          //     do not stutter while panning, at a capped frame rate while zoomed.
+    int cursorSprite = 1; // 1 = hide the OS cursor and draw a scene-locked sprite welded to the
+                          //     transform (fixes cursor/click divergence near screen edges).
     // --- Own GPU renderer ---------------------------------------------------
     // Pan speed multiplier. Free desktop panning auto-matches the OS cursor (DPI + acceleration) and
     // is then scaled by this (1.0 = exact match, the default); it also scales the raw-input pan while
