@@ -80,7 +80,7 @@
       {#each sections as s}
         <Section id={s.id} label={s.label} desc={s.desc}>
           {#each s.rows as r}
-            {#if (!r.requires || Number(values[r.requires]) === 1) && (!r.requiresNot || Number(values[r.requiresNot]) !== 1) && (!r.advanced || advancedOn)}
+            {#if (!r.requires || Number(values[r.requires]) === 1) && (!r.requiresNot || Number(values[r.requiresNot]) !== 1) && (!r.advanced || advancedOn) && (!r.showIf || values[r.showIf.key] === r.showIf.eq)}
               <Row row={r} value={values[r.key]} {values} set={change} {live}
                    disabled={r.dependsOn && Number(values[r.dependsOn]) !== 1}
                    onChange={(val) => change(r.key, val)} />
