@@ -28,6 +28,7 @@ void TransformModel::setActive(bool active) {
     if (!active) {
         host_.setTransform(1.0f, 0, 0, 0, 0, false);   // back to 1x
         pin_.hide();
+        haveLastClick_ = false;   // re-warp fresh on the next activation
     }
 }
 
@@ -37,13 +38,23 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     MagTransform m = ComputeMagTransform(r.srcLeft, r.srcTop, level);
     host_.setTransform((float)level, m.offX, m.offY, m.txX, m.txY, fastPan_);
 
+    // Weld the hidden OS cursor to the lens point, exactly as RenderEngine::render does. This keeps
+    // the scene-locked sprite on the real click point AND keeps RunTick's warp-and-measure pan
+    // tracking consistent (RunTick assumes the cursor was moved here each active tick). Deduped so an
+    // idle tick injects no synthetic mouse move. Inspect freeze pins the point via ex.clickOverride;
+    // otherwise clickDesktop is monitor-local, so add the monitor origin for desktop px.
+    int cx = ex.clickOverride ? ex.clickDesktopX : (r.clickDesktopX + mon_.x);
+    int cy = ex.clickOverride ? ex.clickDesktopY : (r.clickDesktopY + mon_.y);
+    if (!haveLastClick_ || cx != lastClickX_ || cy != lastClickY_) {
+        SetCursorPos(cx, cy);
+        lastClickX_ = cx; lastClickY_ = cy; haveLastClick_ = true;
+    }
+
     if (useSprite_ && sprite_ && ex.drawCursor) {
         CursorSprite::ShapeStatus st = sprite_->refreshShape();
         if (st == CursorSprite::ShapeStatus::Rendered) {
-            // The sprite lives in unmagnified desktop coords at the cursor's click point (the same
-            // point the transform maps to screen center-ish), so the transform magnifies it welded
-            // to the content. clickDesktop is monitor-local; add the monitor origin for desktop px.
-            sprite_->moveTo(r.clickDesktopX + mon_.x, r.clickDesktopY + mon_.y);
+            // The transform magnifies the sprite welded to the content at the same click point.
+            sprite_->moveTo(cx, cy);
             sprite_->show();
             if (sprite_->needsPolarity()) sprite_->setPolarity(true);   // dark ink; polarity sampling TBD
         } else {

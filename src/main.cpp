@@ -1037,6 +1037,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     bool running = true;
     unsigned long long nextRecoverMs = 0;   // device-lost recovery backoff gate (GetTickCount64)
+    // The transform model does no blocking present, so it can never self-pace via Present(1,0) or
+    // DwmFlush the way the render model does. It must always be timer-paced (like the idle/1x path),
+    // or the zoomed loop spins flat out and floods MagSetFullscreenTransform, backing up DWM's
+    // desktop-transform queue so the view lags ~1-2s behind input. Cache the model kind once.
+    const bool renderModelActive = dynamic_cast<RenderModel*>(model.get()) != nullptr;
     while (running) {
         MSG msg;
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
@@ -1079,8 +1084,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         bool zoomed = ts.prevLvl > 1.0;
         // dwmFlush=1 -> present immediately then DwmFlush (align 1:1 with the compositor, targets the
         // blt-model microstutter); else vsync=1 -> Present(1,0) blocks; else the timer paces.
-        bool dwmPaces = zoomed && ts.cfg.dwmFlush != 0;
-        bool renderPresentPaces = zoomed && !dwmPaces && ts.cfg.vsync != 0;
+        // Only the render model self-paces (its blocking Present / DwmFlush). The transform model
+        // has no blocking present, so force the timer path for it (both flags false).
+        bool dwmPaces = renderModelActive && zoomed && ts.cfg.dwmFlush != 0;
+        bool renderPresentPaces = renderModelActive && zoomed && !dwmPaces && ts.cfg.vsync != 0;
         if (!renderPresentPaces && !dwmPaces) {
             // Recompute the timer interval if the paced refresh changed (retarget to a different-Hz
             // monitor updates ts.hz). Cheap equality check; only recomputes on an actual change (#74).
