@@ -12,6 +12,7 @@
 #include "logging.h"
 #pragma comment(lib, "Dwmapi.lib")
 #include "render_engine.h"
+#include "render_model.h"
 #include "input_router.h"
 #include "cursor_mapper.h"
 #include "zoom_controller.h"
@@ -153,38 +154,6 @@ struct TickState {
           mapper(m.w, m.h, c.cursorSmoothing) {}
 };
 static TickState* g_tick = nullptr;
-
-// cursorVisibility config string -> render param: 0 = auto, 1 = always, 2 = never.
-static int CursorModeFromCfg(const Config& c) {
-    if (c.cursorVisibility == "never")  return 2;
-    if (c.cursorVisibility == "always") return 1;
-    return 0;
-}
-
-// Fill a RenderFrameParams from the mapper result + config for the given monitor and zoom level
-// (the normal live-tick interpretation). The self-test harnesses call this, then override only
-// the few fields they deliberately differ on (cursorMode, vsync).
-static void FillRenderParams(RenderFrameParams& p, const MapResult& r, const Config& cfg,
-                             const MonitorTarget& mon, double level) {
-    p.level = level;
-    p.srcLeft = r.srcLeft; p.srcTop = r.srcTop;
-    p.cursorScreenX = r.cursorScreenX; p.cursorScreenY = r.cursorScreenY;
-    // clickDesktop is local monitor px; SetCursorPos needs virtual-desktop coords.
-    p.clickDesktopX = r.clickDesktopX + mon.x; p.clickDesktopY = r.clickDesktopY + mon.y;
-    p.cursorScaleWithZoom = (cfg.cursorScaleWithZoom != 0);
-    p.bilinear = (cfg.bilinear != 0);
-    p.sharpness = cfg.sharpness;
-    p.brightness = cfg.brightness;
-    p.cursorMode = CursorModeFromCfg(cfg);
-    // In DwmFlush mode we present immediately (no vsync block) and let DwmFlush() pace.
-    p.vsync = (cfg.vsync != 0 && cfg.dwmFlush == 0);
-    p.cropCapture = (cfg.cropCapture != 0);
-    p.outline = OutlineVisibleAtLevel(cfg, level);
-    p.outlineThicknessPx = cfg.outlineThickness;
-    p.outlineR = cfg.outlineR; p.outlineG = cfg.outlineG; p.outlineB = cfg.outlineB;   // parsed once in ParseConfig
-    p.outlineAlpha = 1.0f;   // RunTick lowers this when idle-hide is active
-    p.cursorLocked = false;  // RunTick sets true while zoomed + Inspect mode (draw the crosshair sprite)
-}
 
 // Append a line to %TEMP%\wind_diag.log (frame-pacing diagnostics; gated on diagnostics=1).
 // %TEMP% so it works for the Program Files deploy too (its own dir isn't writable).
