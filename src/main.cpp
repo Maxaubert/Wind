@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstdarg>
+#include <memory>
 #include <sstream>
 #include "config.h"
 #include "config_path.h"
@@ -102,7 +103,7 @@ static VirtualBounds QueryVirtualBounds() {
 // loop that owns the thread until it closes; without a timer-driven tick the lens froze for
 // the duration. The timer (set around the menu) dispatches WM_TIMER into WndProc, which ticks.
 struct TickState {
-    RenderEngine&    renderEngine;
+    IMagnifierModel& model;
     MonitorTarget    mon;       // current target monitor (origin + size + device name)
     Config         cfg;
     ZoomController zoom;
@@ -148,8 +149,8 @@ struct TickState {
     // Frame-pacing diagnostics (diagnostics=1): a 2 s window of loop-interval stats.
     double diagAccum = 0.0, diagSumDt = 0.0, diagMaxDt = 0.0;
     int    diagFrames = 0, diagHitches = 0;
-    TickState(RenderEngine& re, const MonitorTarget& m, const Config& c)
-        : renderEngine(re), mon(m), cfg(c),
+    TickState(IMagnifierModel& mdl, const MonitorTarget& m, const Config& c)
+        : model(mdl), mon(m), cfg(c),
           zoom(1.0, c.maxLevel),
           mapper(m.w, m.h, c.cursorSmoothing) {}
 };
@@ -356,7 +357,7 @@ static void RunTick(TickState& t) {
             // the current monitor. The overlay is still at alpha 0 here, so a move never flashes.
             if (zoomed && t.cfg.multiMonitor) {
                 MonitorTarget nt = MonitorUnderCursor();
-                if (!SameMonitor(nt, t.mon) && t.renderEngine.retarget(nt)) {
+                if (!SameMonitor(nt, t.mon) && t.model.retarget(nt)) {
                     t.mon = nt;
                     t.mapper = CursorMapper(nt.w, nt.h, t.cfg.cursorSmoothing);
                     int nhz = DetectRefreshHz(nt.device);   // pace off the new monitor's refresh (#74)
@@ -368,8 +369,8 @@ static void RunTick(TickState& t) {
             t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y);   // virtual -> local monitor coords
             t.lastSetVirtual = pt;        // baseline for the OS-cursor delta (first delta = 0)
             t.detector.reset();           // start free
-            t.renderEngine.hideSystemCursor(true);
-            t.renderEngine.invalidateCapture();       // grab a live frame, not a stale cached one
+            t.model.hideSystemCursor(true);
+            t.model.onActivate();       // grab a live frame, not a stale cached one
         }
         if (inspectEnter) {
             // Freeze the real cursor where it is; the look point (mapper center) starts there.
@@ -385,8 +386,8 @@ static void RunTick(TickState& t) {
             t.lastSetVirtual = pt;
             RECT fz{ pt.x, pt.y, pt.x + 1, pt.y + 1 };
             ClipCursor(&fz);
-            t.renderEngine.hideSystemCursor(true);   // hide the real cursor; we draw the crosshair
-            t.renderEngine.invalidateCapture();
+            t.model.hideSystemCursor(true);   // hide the real cursor; we draw the crosshair
+            t.model.onActivate();
         }
         bool inspectExit = !inspect && t.prevInspect;   // Inspect just turned off but overlay stays (zoomed)
         if (inspectExit) {
@@ -468,8 +469,14 @@ static void RunTick(TickState& t) {
                 fireClicks(MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, nRight);
             }
         }
-        RenderFrameParams p{};
-        FillRenderParams(p, r, t.cfg, t.mon, lvl);
+        // Per-tick render-only overrides go through PresentExtras; the model's present() runs
+        // FillRenderParams and applies these on top. ex.outline seeds with the same base value
+        // FillRenderParams would compute, so the dwell/idle logic below reads an identical start.
+        PresentExtras ex;
+        ex.outline = OutlineVisibleAtLevel(t.cfg, lvl);
+        ex.outlineAlpha = 1.0f;
+        ex.cursorMode = CursorModeFromCfg(t.cfg);
+        ex.cursorLocked = false;
         // Low-zoom dwell: with "only at low zoom" on, show the outline only after the zoom settles
         // at a STABLE level inside the band for kOutlineDwellSec. "Stable" = the level is unchanged
         // since last tick (the controller freezes the level exactly when no zoom direction is held),
@@ -481,9 +488,9 @@ static void RunTick(TickState& t) {
         if (t.cfg.outline != 0 && t.cfg.outlineLowZoomOnly != 0) {
             const double kOutlineDwellSec = 1.0;
             bool stable = std::fabs(lvl - t.prevLvl) <= 1e-4;   // level held constant => settled
-            bool inBand = p.outline && lvl > 1.0 && stable;
+            bool inBand = ex.outline && lvl > 1.0 && stable;
             t.outlineZoneSec = OutlineDwellSeconds(inBand, t.outlineZoneSec, dt, kOutlineDwellSec);
-            if (t.outlineZoneSec < kOutlineDwellSec) p.outline = false;   // not dwelled long enough yet
+            if (t.outlineZoneSec < kOutlineDwellSec) ex.outline = false;   // not dwelled long enough yet
         } else {
             t.outlineZoneSec = 0.0;   // keep ready for when the cutoff is toggled on mid-session
         }
@@ -491,13 +498,13 @@ static void RunTick(TickState& t) {
         // any hand motion - free OS-cursor delta or raw mickeys), then map it to the fade alpha.
         // dt is the per-tick elapsed time computed at the top of RunTick. Fade duration is 0.3s.
         const bool outlineMoved = (std::abs(curDx) + std::abs(curDy) + std::abs(rawDx) + std::abs(rawDy)) > 0;
-        if (t.cfg.outlineIdleHide && p.outline) {
+        if (t.cfg.outlineIdleHide && ex.outline) {
             t.outlineIdleSec = outlineMoved ? 0.0 : (t.outlineIdleSec + dt);
-            p.outlineAlpha = (float)OutlineIdleAlpha(t.outlineIdleSec, t.cfg.outlineIdleSeconds, 0.3);
+            ex.outlineAlpha = (float)OutlineIdleAlpha(t.outlineIdleSec, t.cfg.outlineIdleSeconds, 0.3);
         } else {
             t.outlineIdleSec = 0.0;   // keep ready for when idle-hide is toggled on mid-session
         }
-        if (t.cursorHidden) p.cursorMode = 2;   // hotkey override; FillRenderParams already set 0/1/2 from cfg
+        if (t.cursorHidden) ex.cursorMode = 2;   // hotkey override; CursorModeFromCfg already set 0/1/2 from cfg
         if (inspect) {
             if (t.clickReleaseTicks > 0) {
                 // A click was just committed: keep the freeze released for these ticks so the synthesized
@@ -510,32 +517,39 @@ static void RunTick(TickState& t) {
                 // SetCursorPos at the frozen point (a no-op inside the clip).
                 RECT fz{ t.frozenCursor.x, t.frozenCursor.y, t.frozenCursor.x + 1, t.frozenCursor.y + 1 };
                 ClipCursor(&fz);
-                p.clickDesktopX = t.frozenCursor.x;
-                p.clickDesktopY = t.frozenCursor.y;
+                ex.clickOverride = true;
+                ex.clickDesktopX = t.frozenCursor.x;
+                ex.clickDesktopY = t.frozenCursor.y;
             }
-            p.cursorLocked = true;        // draw the crosshair at the look point (cursorScreen)
-            if (!zoomed) p.outline = false;   // no lens outline on the 1:1 view at 1x
+            ex.cursorLocked = true;        // draw the crosshair at the look point (cursorScreen)
+            if (!zoomed) ex.outline = false;   // no lens outline on the 1:1 view at 1x
         }
-        t.renderEngine.renderFrame(p);          // render+present every active tick (never blocks the ramp)
+        t.model.present(r, lvl, t.cfg, t.mon, ex);          // render+present every active tick (never blocks the ramp)
         // Reveal AFTER the live frame is presented: setVisible flips the layer alpha over the
         // now-current front buffer, so the overlay never shows its retained previous-session
         // frame (the alt-tab "previous window"). capture() also drained to the latest frame.
-        if (enterActive) {
-            if (ForegroundCoversMonitor(t.mon)) {
-                // Fullscreen app (a game on an independent-flip/MPO plane): Desktop Duplication can't
-                // see the game until our overlay forces DWM to composite it, so revealing now would
-                // flash the previously focused window (issue #90). Instead PRIME at alpha 1 (invisible
-                // - the user keeps seeing the real game) to force that composition, keep rendering
-                // normally, and defer the full reveal a couple ticks so the game is in the capture by
-                // then. This is non-blocking: the smooth-zoom ramp runs undisturbed (no DwmFlush stall).
-                t.renderEngine.primeReveal();
-                t.revealPending = 2;
-            } else {
-                t.renderEngine.setVisible(true);   // ordinary desktop activation: reveal instantly
-                t.revealPending = 0;
+        // Reveal/prime is render-specific (needs ForegroundCoversMonitor + capture priming); guard it
+        // behind the RenderModel downcast. A non-render model just reveals immediately on activation.
+        if (auto* rm = dynamic_cast<RenderModel*>(&t.model)) {
+            if (enterActive) {
+                if (ForegroundCoversMonitor(t.mon)) {
+                    // Fullscreen app (a game on an independent-flip/MPO plane): Desktop Duplication can't
+                    // see the game until our overlay forces DWM to composite it, so revealing now would
+                    // flash the previously focused window (issue #90). Instead PRIME at alpha 1 (invisible
+                    // - the user keeps seeing the real game) to force that composition, keep rendering
+                    // normally, and defer the full reveal a couple ticks so the game is in the capture by
+                    // then. This is non-blocking: the smooth-zoom ramp runs undisturbed (no DwmFlush stall).
+                    rm->primeReveal();
+                    t.revealPending = 2;
+                } else {
+                    rm->setActive(true);   // ordinary desktop activation: reveal instantly
+                    t.revealPending = 0;
+                }
+            } else if (t.revealPending > 0 && --t.revealPending == 0) {
+                rm->setActive(true);       // deferred game reveal: game is now composited+captured
             }
-        } else if (t.revealPending > 0 && --t.revealPending == 0) {
-            t.renderEngine.setVisible(true);       // deferred game reveal: game is now composited+captured
+        } else if (enterActive) {
+            t.model.setActive(true);   // transform: reveal immediately, no capture priming
         }
         // Bookkeeping for next tick's GetCursorPos delta. INSPECT: the real cursor stays frozen, so the
         // baseline is the frozen point. Otherwise renderFrame SetCursorPos'd the OS cursor to
@@ -547,8 +561,8 @@ static void RunTick(TickState& t) {
             t.lastSetVirtual.y = r.clickDesktopY + t.mon.y;
         }
     } else if (t.prevActive) {                        // active -> idle: tear the overlay down
-        t.renderEngine.setVisible(false);
-        t.renderEngine.hideSystemCursor(false);
+        t.model.setActive(false);
+        t.model.hideSystemCursor(false);
         t.outlineZoneSec = 0.0;                       // zoom-out clears the low-zoom dwell (no banked partial)
         if (t.prevInspect) {
             ClipCursor(nullptr);
@@ -879,9 +893,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // primary. The first zoom-in re-checks and retargets if the cursor moved to another monitor.
     MonitorTarget startupMon = (cfg.multiMonitor != 0) ? MonitorUnderCursor() : PrimaryMonitor();
 
-    // --- Own GPU renderer (DXGI Desktop Duplication + D3D11) ---
-    RenderEngine renderEngine;
-    if (!renderEngine.initialize(startupMon, cfg.zorderBand, cfg.hdrTonemap != 0)) {
+    // --- Magnifier model (render model: DXGI Desktop Duplication + D3D11 overlay) ---
+    // Only the RenderModel branch exists today; the TransformModel branch lands in Task 9.
+    std::unique_ptr<IMagnifierModel> model =
+        std::make_unique<RenderModel>(cfg.zorderBand, cfg.hdrTonemap != 0);
+    if (!model->initialize(startupMon)) {
         MessageBoxW(nullptr, L"Could not start the renderer (Direct3D 11 / Desktop Duplication "
                              L"unavailable on this system).", L"Wind", MB_ICONERROR);
         g_input.stop();
@@ -890,7 +906,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     Tray::Add(hwnd, hInst);
 
-    TickState ts(renderEngine, startupMon, cfg);
+    TickState ts(*model, startupMon, cfg);
     ts.hwnd = hwnd;                       // so RunTick can re-register the hide-cursor hotkey
     g_tick = &ts;   // so the WM_TIMER tick (during the tray menu's modal loop) can run
 
@@ -898,25 +914,29 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // forced zoom and dumps a PNG (the overlay is WDA_EXCLUDEFROMCAPTURE, so it can only be
     // captured from inside the app), then exits. Not part of normal use.
     if (GetEnvironmentVariableW(L"WIND_SELFTEST", nullptr, 0) > 0) {
-        POINT pt; GetCursorPos(&pt);
-        ts.mapper.reset(pt.x - ts.mon.x, pt.y - ts.mon.y);
-        renderEngine.hideSystemCursor(true);
-        renderEngine.setVisible(true);
-        RenderFrameParams p{};
-        for (int i = 0; i < 20; ++i) {
-            MSG m; while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&m); DispatchMessageW(&m); }
-            MapResult r = ts.mapper.update(0, 0, 4.0);
-            FillRenderParams(p, r, cfg, ts.mon, 4.0);
-            p.cursorMode = 1;   // always draw the cursor in the selftest dump
-            p.vsync = true;
-            renderEngine.renderFrame(p);
-            Sleep(16);
+        // Selftest drives the render path directly, so it only runs for the RenderModel.
+        if (auto* rm = dynamic_cast<RenderModel*>(model.get())) {
+            RenderEngine& renderEngine = rm->engine();
+            POINT pt; GetCursorPos(&pt);
+            ts.mapper.reset(pt.x - ts.mon.x, pt.y - ts.mon.y);
+            renderEngine.hideSystemCursor(true);
+            renderEngine.setVisible(true);
+            RenderFrameParams p{};
+            for (int i = 0; i < 20; ++i) {
+                MSG m; while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&m); DispatchMessageW(&m); }
+                MapResult r = ts.mapper.update(0, 0, 4.0);
+                FillRenderParams(p, r, cfg, ts.mon, 4.0);
+                p.cursorMode = 1;   // always draw the cursor in the selftest dump
+                p.vsync = true;
+                renderEngine.renderFrame(p);
+                Sleep(16);
+            }
+            renderEngine.dumpFrame(p, L"wind_selftest.png");
+            unsigned ddaFmt = 0; int cs = -1, bpc = 0; renderEngine.debugHdr(ddaFmt, cs, bpc);
+            FILE* hf = nullptr; _wfopen_s(&hf, L"wind_hdr_diag.txt", L"w");
+            if (hf) { fprintf(hf, "ddaFormat=%u outColorSpace=%d bitsPerColor=%d\n", ddaFmt, cs, bpc); fclose(hf); }
+            renderEngine.shutdown();
         }
-        renderEngine.dumpFrame(p, L"wind_selftest.png");
-        unsigned ddaFmt = 0; int cs = -1, bpc = 0; renderEngine.debugHdr(ddaFmt, cs, bpc);
-        FILE* hf = nullptr; _wfopen_s(&hf, L"wind_hdr_diag.txt", L"w");
-        if (hf) { fprintf(hf, "ddaFormat=%u outColorSpace=%d bitsPerColor=%d\n", ddaFmt, cs, bpc); fclose(hf); }
-        renderEngine.shutdown();
         g_input.stop();
         Tray::Remove();
         ReleaseMutex(mtx);
@@ -927,35 +947,39 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // zoom with a simulated pan for ~4 s and logs loop-interval stats to %TEMP%\wind_diag.log -
     // to measure microstutter objectively (the normal loop needs the side button to zoom). Exits.
     if (GetEnvironmentVariableW(L"WIND_PACINGTEST", nullptr, 0) > 0) {
-        POINT pt; GetCursorPos(&pt);
-        ts.mapper.reset(pt.x - ts.mon.x, pt.y - ts.mon.y);
-        renderEngine.hideSystemCursor(true);
-        LARGE_INTEGER f, a{}, b; QueryPerformanceFrequency(&f);
-        const double target = 1.0 / DetectRefreshHz();
-        double elapsed = 0.0, sumDt = 0.0, maxDt = 0.0; int frames = 0, hitches = 0, big = 0;
-        bool first = true;
-        QueryPerformanceCounter(&a);
-        while (elapsed < 4.0) {
-            MSG m; while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&m); DispatchMessageW(&m); }
-            int dxp = ((frames / 20) % 2 == 0) ? 6 : -6;   // oscillate the pan so srcRect keeps moving
-            MapResult r = ts.mapper.update(dxp, 0, 4.0);
-            RenderFrameParams p{};
-            FillRenderParams(p, r, cfg, ts.mon, 4.0);
-            p.cursorMode = 1; p.vsync = (cfg.vsync != 0);
-            if (first) renderEngine.invalidateCapture();
-            renderEngine.renderFrame(p);
-            if (first) { renderEngine.setVisible(true); first = false; QueryPerformanceCounter(&a); continue; }
-            QueryPerformanceCounter(&b);
-            double dt = double(b.QuadPart - a.QuadPart) / f.QuadPart; a = b;
-            elapsed += dt; sumDt += dt; ++frames;
-            if (dt > maxDt) maxDt = dt;
-            if (dt > target * 1.5) ++hitches;
-            if (dt > target * 2.5) ++big;
+        // Pacing test drives the render path directly, so it only runs for the RenderModel.
+        if (auto* rm = dynamic_cast<RenderModel*>(model.get())) {
+            RenderEngine& renderEngine = rm->engine();
+            POINT pt; GetCursorPos(&pt);
+            ts.mapper.reset(pt.x - ts.mon.x, pt.y - ts.mon.y);
+            renderEngine.hideSystemCursor(true);
+            LARGE_INTEGER f, a{}, b; QueryPerformanceFrequency(&f);
+            const double target = 1.0 / DetectRefreshHz();
+            double elapsed = 0.0, sumDt = 0.0, maxDt = 0.0; int frames = 0, hitches = 0, big = 0;
+            bool first = true;
+            QueryPerformanceCounter(&a);
+            while (elapsed < 4.0) {
+                MSG m; while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&m); DispatchMessageW(&m); }
+                int dxp = ((frames / 20) % 2 == 0) ? 6 : -6;   // oscillate the pan so srcRect keeps moving
+                MapResult r = ts.mapper.update(dxp, 0, 4.0);
+                RenderFrameParams p{};
+                FillRenderParams(p, r, cfg, ts.mon, 4.0);
+                p.cursorMode = 1; p.vsync = (cfg.vsync != 0);
+                if (first) renderEngine.invalidateCapture();
+                renderEngine.renderFrame(p);
+                if (first) { renderEngine.setVisible(true); first = false; QueryPerformanceCounter(&a); continue; }
+                QueryPerformanceCounter(&b);
+                double dt = double(b.QuadPart - a.QuadPart) / f.QuadPart; a = b;
+                elapsed += dt; sumDt += dt; ++frames;
+                if (dt > maxDt) maxDt = dt;
+                if (dt > target * 1.5) ++hitches;
+                if (dt > target * 2.5) ++big;
+            }
+            DiagLog("PACINGTEST vsync=%d frames=%d ~fps=%.1f targetDt=%.2fms avgDt=%.2fms maxDt=%.2fms hitches>1.5x=%d big>2.5x=%d",
+                    cfg.vsync, frames, frames / elapsed, target * 1000.0,
+                    (frames ? sumDt / frames : 0.0) * 1000.0, maxDt * 1000.0, hitches, big);
+            renderEngine.shutdown();
         }
-        DiagLog("PACINGTEST vsync=%d frames=%d ~fps=%.1f targetDt=%.2fms avgDt=%.2fms maxDt=%.2fms hitches>1.5x=%d big>2.5x=%d",
-                cfg.vsync, frames, frames / elapsed, target * 1000.0,
-                (frames ? sumDt / frames : 0.0) * 1000.0, maxDt * 1000.0, hitches, big);
-        renderEngine.shutdown();
         g_input.stop();
         Tray::Remove();
         ReleaseMutex(mtx);
@@ -1022,8 +1046,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         // D3D device was removed; rebuild it on a backoff so we don't spin (the driver may take a
         // moment to return). Crucially, un-hide the OS cursor first so the user is never left without
         // a pointer while we are unable to draw the magnified one. Skip the normal tick this iteration.
-        if (renderEngine.deviceLost()) {
-            renderEngine.hideSystemCursor(false);   // restore the real cursor while we can't render
+        if (auto* rm = dynamic_cast<RenderModel*>(model.get()); rm && rm->deviceLost()) {
+            rm->hideSystemCursor(false);   // restore the real cursor while we can't render
             // Inspect's 1px freeze clip must not survive a device-lost: release it and clear the toggle so
             // the post-recovery tick can't re-clip the cursor to the stale frozen pixel (honors the
             // documented "released on device-lost recovery" invariant; recovery returns to a clean 1x).
@@ -1031,7 +1055,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             if (ts.cursorLock.locked()) { ts.cursorLock.reset(); ts.clickReleaseTicks = 0; }
             unsigned long long now = GetTickCount64();
             if (now >= nextRecoverMs) {
-                if (!renderEngine.recoverDeviceLost()) nextRecoverMs = now + 500;   // retry in 0.5s
+                if (!rm->recoverDeviceLost()) nextRecoverMs = now + 500;   // retry in 0.5s
                 else { ts.prevLvl = 1.0; ts.zoom = ZoomController(1.0, ts.cfg.maxLevel); }  // back to 1x, clean
             }
             Sleep(50);
@@ -1074,7 +1098,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     UnregisterHotKey(hwnd, kQuitHotkeyId);
     UnregisterHotKey(hwnd, kHideCursorHotkeyId);
     UnregisterHotKey(hwnd, kQuickZoomHotkeyId);
-    renderEngine.shutdown();   // restores cursor + tears down D3D/overlay
+    model->shutdown();   // restores cursor + tears down D3D/overlay
     g_input.stop();
     Tray::Remove();
     if (mtx) { ReleaseMutex(mtx); CloseHandle(mtx); }
