@@ -14,6 +14,7 @@
 #pragma comment(lib, "Dwmapi.lib")
 #include "render_engine.h"
 #include "render_model.h"
+#include "transform_model.h"
 #include "input_router.h"
 #include "cursor_mapper.h"
 #include "zoom_controller.h"
@@ -891,12 +892,18 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     // Target monitor for this session: the cursor's monitor when multiMonitor is on, else the
     // primary. The first zoom-in re-checks and retargets if the cursor moved to another monitor.
-    MonitorTarget startupMon = (cfg.multiMonitor != 0) ? MonitorUnderCursor() : PrimaryMonitor();
+    // The transform model forces the primary monitor: r.srcLeft/srcTop stay in primary-screen
+    // coords, which the Magnification API (MagSetFullscreenTransform) expects. multiMonitor is a
+    // documented no-op for the transform model.
+    MonitorTarget startupMon = (cfg.model != "transform" && cfg.multiMonitor != 0)
+                                   ? MonitorUnderCursor() : PrimaryMonitor();
 
-    // --- Magnifier model (render model: DXGI Desktop Duplication + D3D11 overlay) ---
-    // Only the RenderModel branch exists today; the TransformModel branch lands in Task 9.
-    std::unique_ptr<IMagnifierModel> model =
-        std::make_unique<RenderModel>(cfg.zorderBand, cfg.hdrTonemap != 0);
+    // --- Magnifier model (render: DXGI Desktop Duplication + D3D11 overlay; transform: DWM) ---
+    std::unique_ptr<IMagnifierModel> model;
+    if (cfg.model == "transform")
+        model = std::make_unique<TransformModel>(cfg.fastPan != 0, cfg.smoothPan != 0, cfg.cursorSprite != 0);
+    else
+        model = std::make_unique<RenderModel>(cfg.zorderBand, cfg.hdrTonemap != 0);
     if (!model->initialize(startupMon)) {
         MessageBoxW(nullptr, L"Could not start the renderer (Direct3D 11 / Desktop Duplication "
                              L"unavailable on this system).", L"Wind", MB_ICONERROR);
