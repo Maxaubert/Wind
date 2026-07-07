@@ -901,7 +901,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // --- Magnifier model (render: DXGI Desktop Duplication + D3D11 overlay; transform: DWM) ---
     std::unique_ptr<IMagnifierModel> model;
     if (cfg.model == "transform")
-        model = std::make_unique<TransformModel>(cfg.fastPan != 0, cfg.smoothPan != 0, cfg.cursorSprite != 0);
+        model = std::make_unique<TransformModel>(cfg.fastPan != 0, cfg.smoothPan != 0, cfg.cursorSprite != 0, cfg.zorderBand);
     else
         model = std::make_unique<RenderModel>(cfg.zorderBand, cfg.hdrTonemap != 0);
     if (!model->initialize(startupMon)) {
@@ -1084,9 +1084,13 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         bool zoomed = ts.prevLvl > 1.0;
         // dwmFlush=1 -> present immediately then DwmFlush (align 1:1 with the compositor, targets the
         // blt-model microstutter); else vsync=1 -> Present(1,0) blocks; else the timer paces.
-        // Only the render model self-paces (its blocking Present / DwmFlush). The transform model
-        // has no blocking present, so force the timer path for it (both flags false).
-        bool dwmPaces = renderModelActive && zoomed && ts.cfg.dwmFlush != 0;
+        // The render model keeps its configurable self-pacing (blocking Present / DwmFlush). The
+        // transform model submits via MagSetFullscreenTransform (no blocking present), so DwmFlush is
+        // its ONLY coherent pace while zoomed: it blocks one composite per tick so the sprite update
+        // and the transform land in the SAME frame. A plain timer lets them drift into different
+        // composites, so the cursor beats against the panning view (the flicker) - exactly what
+        // DwmFlush prevents (and it paces at refresh, so no flood either). Bloom paces this way too.
+        bool dwmPaces = zoomed && (renderModelActive ? (ts.cfg.dwmFlush != 0) : true);
         bool renderPresentPaces = renderModelActive && zoomed && !dwmPaces && ts.cfg.vsync != 0;
         if (!renderPresentPaces && !dwmPaces) {
             // Recompute the timer interval if the paced refresh changed (retarget to a different-Hz

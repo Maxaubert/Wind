@@ -6,7 +6,7 @@ class CursorSprite {
 public:
     enum class ShapeStatus { Rendered, Hidden, Unsupported };
     explicit CursorSprite(const std::unordered_map<HCURSOR, HCURSOR>& originals) : originals_(originals) {}
-    bool create();
+    bool create(int zorderBand = 0);   // >0 -> CreateWindowInBand (above the shell; needs UIAccess)
     bool needsPolarity() const { return needsPolarity_; }
     ShapeStatus refreshShape();
     void setPolarity(bool darkCursor);

@@ -8,8 +8,8 @@
 namespace wind {
 class TransformModel : public IMagnifierModel {
 public:
-    TransformModel(bool fastPan, bool smoothPan, bool useSprite)
-        : fastPan_(fastPan), smoothPan_(smoothPan), useSprite_(useSprite) {}
+    TransformModel(bool fastPan, bool smoothPan, bool useSprite, int zorderBand)
+        : fastPan_(fastPan), smoothPan_(smoothPan), useSprite_(useSprite), zorderBand_(zorderBand) {}
     bool initialize(const MonitorTarget& monitor) override;
     void shutdown() override;
     bool ready() const override { return ready_; }
@@ -21,6 +21,7 @@ public:
     bool coversShell() const override { return false; }
 private:
     bool fastPan_, smoothPan_, useSprite_;
+    int  zorderBand_;                                // sprite z-band (above the shell); needs UIAccess
     bool ready_ = false;
     bool active_ = false;
     MonitorTarget mon_{};

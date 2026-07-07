@@ -10,7 +10,7 @@ bool TransformModel::initialize(const MonitorTarget& monitor) {
     if (useSprite_) {
         blanker_ = std::make_unique<CursorBlanker>();
         sprite_  = std::make_unique<CursorSprite>(blanker_->originals());
-        sprite_->create();
+        sprite_->create(zorderBand_);   // above the shell so the cursor covers the magnified taskbar
     }
     if (smoothPan_) pin_.create();
     ready_ = true;

@@ -13,19 +13,43 @@ static const wchar_t* kClassName = L"WindCursorSprite";
 // sprite together with the content beneath it, so cursor and view are
 // rigidly locked and cannot wobble against each other.
 
-bool CursorSprite::create() {
+bool CursorSprite::create(int zorderBand) {
     HINSTANCE hInst = GetModuleHandleW(nullptr);
-    WNDCLASSEXW wc{};
-    wc.cbSize = sizeof(wc);
-    wc.lpfnWndProc = DefWindowProcW;
-    wc.hInstance = hInst;
-    wc.lpszClassName = kClassName;
-    RegisterClassExW(&wc);   // benign if already registered (returns 0 with ERROR_CLASS_ALREADY_EXISTS)
+    // Register once and keep the atom: RegisterClassExW returns 0 on a re-register (class is
+    // process-global and never unregistered), and CreateWindowInBand needs a valid atom, so cache it.
+    static ATOM s_atom = 0;
+    if (!s_atom) {
+        WNDCLASSEXW wc{};
+        wc.cbSize = sizeof(wc);
+        wc.lpfnWndProc = DefWindowProcW;
+        wc.hInstance = hInst;
+        wc.lpszClassName = kClassName;
+        s_atom = RegisterClassExW(&wc);
+    }
 
     const DWORD exStyle = WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT
                         | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
-    hwnd_ = CreateWindowExW(exStyle, kClassName, L"WindCursor", WS_POPUP,
-                            0, 0, kSize, kSize, nullptr, nullptr, hInst, nullptr);
+    hwnd_ = nullptr;
+    // Match the render overlay's z-band (needs UIAccess) so the sprite draws above the shell's
+    // immersive bands - the only way the cursor can cover the magnified taskbar / Start / tray.
+    // Without it the sprite is an ordinary topmost window and the shell composites over it.
+    // Undocumented, so load it dynamically and fall back to a plain topmost window when the band
+    // API or UIAccess is unavailable (e.g. the non-elevated dev build).
+    if (zorderBand > 0 && s_atom) {
+        using PFN_CWIB = HWND(WINAPI*)(DWORD, ATOM, LPCWSTR, DWORD, int, int, int, int,
+                                       HWND, HMENU, HINSTANCE, LPVOID, DWORD);
+        if (HMODULE u32 = GetModuleHandleW(L"user32.dll")) {
+            if (auto pCWIB = reinterpret_cast<PFN_CWIB>(GetProcAddress(u32, "CreateWindowInBand"))) {
+                hwnd_ = pCWIB(exStyle, s_atom, L"WindCursor", WS_POPUP,
+                              0, 0, kSize, kSize, nullptr, nullptr, hInst, nullptr,
+                              static_cast<DWORD>(zorderBand));
+            }
+        }
+    }
+    if (!hwnd_) {
+        hwnd_ = CreateWindowExW(exStyle, kClassName, L"WindCursor", WS_POPUP,
+                                0, 0, kSize, kSize, nullptr, nullptr, hInst, nullptr);
+    }
     return hwnd_ != nullptr;
 }
 
