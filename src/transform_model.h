@@ -20,6 +20,8 @@ public:
                  const MonitorTarget& mon, const PresentExtras& ex) override;
     bool coversShell() const override { return false; }
 private:
+    void UpdatePanOffset(double cx, double cy, double level);   // edge-triggered pan + zoom anchor
+
     bool fastPan_, smoothPan_, useSprite_;
     int  zorderBand_;                                // sprite z-band (above the shell); needs UIAccess
     bool ready_ = false;
@@ -32,5 +34,13 @@ private:
     unsigned long long lastPinAssertMs_ = 0;
     bool haveLastClick_ = false;                     // dedup the OS-cursor recenter (SetCursorPos)
     int  lastClickX_ = 0, lastClickY_ = 0;
+
+    // --- edge-triggered pan ---
+    // The view holds still while the cursor roams, and only pans when the cursor reaches a margin at
+    // the screen edge. Held across ticks (unlike the render model, whose offset is a pure function of
+    // the cursor). Re-anchored on every zoom change so the point under the cursor stays put.
+    double offX_ = 0.0, offY_ = 0.0;
+    double lastLevel_ = 1.0;
+    bool   haveOff_ = false;                         // seeded on the first active tick
 };
 }

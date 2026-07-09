@@ -130,6 +130,8 @@ struct TickState {
                                     //   the synthesized click reaches the look point (then re-freeze)
     double inspectPanRemX = 0.0;    // sub-pixel carry for the cooked Inspect-mode pan (slow motion not lost)
     double inspectPanRemY = 0.0;
+    double tPanRemX = 0.0;          // sub-pixel carry for the transform model's delta/level scaling
+    double tPanRemY = 0.0;
     double quickZoomStored    = 0.0;           // remembered quick-zoom level (0 = none yet); in-memory
     bool   prevInHeld         = false;         // for rising-edge detection of the zoom-in channel
     bool   prevOutHeld        = false;
@@ -439,6 +441,19 @@ static void RunTick(TickState& t) {
         // cursor briefly escaping to another monitor) cannot teleport the lens. cx_ also clamps.
         if (dx >  t.mon.w) dx =  t.mon.w; else if (dx < -t.mon.w) dx = -t.mon.w;
         if (dy >  t.mon.h) dy =  t.mon.h; else if (dy < -t.mon.h) dy = -t.mon.h;
+        // The transform model DRAWS its cursor magnified (the sprite is a layered window, which DWM
+        // scales with the content), so the drawn cursor moves `lvl` times faster across the screen
+        // than the lens centre does across the desktop. Divide the delta by the level so it moves at
+        // hand speed, like an ordinary cursor; otherwise it reaches the screen edge almost at once and
+        // the view pans continuously. Carry the sub-pixel remainder so slow precise motion is not
+        // quantised away. The render model draws its cursor at a fixed screen point, so it needs none
+        // of this: its delta pans the lens at desktop speed, which is what it wants.
+        if (!dynamic_cast<RenderModel*>(&t.model) && lvl > 1.0) {
+            t.tPanRemX += dx / lvl;
+            t.tPanRemY += dy / lvl;
+            dx = (int)t.tPanRemX; t.tPanRemX -= dx;   // truncate toward zero, carry the rest
+            dy = (int)t.tPanRemY; t.tPanRemY -= dy;
+        }
         MapResult r = t.mapper.update(dx, dy, lvl);
         // Inspect click-to-look-point: the hook swallowed real click(s) and handed us per-button counts
         // (counts, not a flag, so a fast double-click before this drains isn't lost). Fire a clean ABSOLUTE

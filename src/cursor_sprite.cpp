@@ -1,4 +1,5 @@
 #include "cursor_sprite.h"
+#include "logging.h"
 #include <cstring>
 #include <cstdint>
 #include <algorithm>
@@ -71,23 +72,34 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
 
     if (info.hCursor == lastCursor_) return lastVerdict_;
 
-    // The on-screen object for standard cursors is blanked while
-    // magnifying; render from the original shape we captured before
-    // blanking instead. A handle not in the map is an app-custom cursor
-    // that was never blanked - it is drawn natively and visibly.
+    // Standard cursors are blanked in place by SetSystemCursor (the handle stays the same, the bitmap
+    // is replaced), so render those from the original copy captured before blanking. A handle NOT in
+    // the map is an app-custom cursor that was never blanked, so its live handle still carries the
+    // real bitmap: render straight from that.
+    //
+    // Never fall back to "let the real cursor show". The real cursor is composited outside the
+    // magnification, so it is drawn at the unmagnified click point while its target is drawn at
+    // T(click). Browsers switch to app-custom shapes over text and links, which is what produced the
+    // striping: bands where the sprite gave up and a misplaced real cursor took over.
     auto it = originals_.find(info.hCursor);
-    HCURSOR shapeSource = (it != originals_.end()) ? it->second : nullptr;
-    if (shapeSource == nullptr) {
-        lastCursor_ = info.hCursor;
-        lastVerdict_ = ShapeStatus::Unsupported;
-        return ShapeStatus::Unsupported;
-    }
+    const bool standard = (it != originals_.end());
+    HCURSOR shapeSource = standard ? it->second : info.hCursor;
+
+    // Logged only when the SHAPE CHANGES (guarded by the lastCursor_ early-out above), never per
+    // frame. Diagnostic for the sprite vanishing over browser text; remove once that is settled.
+    Log(LogLevel::Info, "sprite", "shape change hCursor=%p standard=%d", (void*)info.hCursor, (int)standard);
 
     HICON hIconCopy = CopyIcon((HICON)shapeSource);
-    if (hIconCopy == nullptr) return ShapeStatus::Hidden; // transient failure; don't imitate
+    if (hIconCopy == nullptr) {
+        Log(LogLevel::Warn, "sprite", "CopyIcon FAILED gle=%lu standard=%d",
+            (unsigned long)GetLastError(), (int)standard);
+        return ShapeStatus::Hidden;   // transient failure; don't imitate
+    }
 
     ICONINFO iconInfo{};
     if (!GetIconInfo(hIconCopy, &iconInfo)) {
+        Log(LogLevel::Warn, "sprite", "GetIconInfo FAILED gle=%lu standard=%d",
+            (unsigned long)GetLastError(), (int)standard);
         DestroyIcon(hIconCopy);
         return ShapeStatus::Hidden;
     }
@@ -154,6 +166,7 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
         lastCursor_ = info.hCursor;
         lastVerdict_ = ShapeStatus::Rendered;
         renderMaskShape();
+        Log(LogLevel::Info, "sprite", "rendered via MASK path (no per-pixel alpha) standard=%d", (int)standard);
         return ShapeStatus::Rendered;
     }
 
@@ -177,6 +190,7 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
     hotY_ = hotY;
     lastCursor_ = info.hCursor;
     lastVerdict_ = ShapeStatus::Rendered;
+    Log(LogLevel::Info, "sprite", "rendered via ALPHA path standard=%d hot=(%d,%d)", (int)standard, hotX, hotY);
     return ShapeStatus::Rendered;
 }
 

@@ -23,8 +23,14 @@ bool MagHost::setTransform(float zoom, int offX, int offY, int tx, int ty, bool 
     return MagSetFullscreenTransform(zoom, offX, offY) != FALSE;
 }
 
+void MagHost::showSystemCursor(bool show) {
+    if (!initialized_) return;
+    MagShowSystemCursor(show ? TRUE : FALSE);
+}
+
 void MagHost::shutdown() {
     if (!initialized_) return;
+    MagShowSystemCursor(TRUE);               // never leave the cursor hidden
     MagSetFullscreenTransform(1.0f, 0, 0);   // public reset restores shared state
     MagUninitialize();
     initialized_ = false;
