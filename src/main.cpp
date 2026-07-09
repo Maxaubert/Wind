@@ -769,6 +769,26 @@ static void RestoreInputState() {
 // and only swallows side-buttons anyway. The damaging state (hidden/confined cursor) is undone here.
 static void AtExitRestore() { RestoreInputState(); }
 
+// Crash safety net installed BEFORE the magnifier model is constructed, so it covers model=transform
+// too. RenderModel hides the OS cursor via the process-scoped Magnification API (auto-reverts on
+// process death), but TransformModel hides it via CursorBlanker's SetSystemCursor, which is
+// system-global and does NOT revert when the process dies - an unhandled exception while zoomed would
+// otherwise leave every standard cursor blank across the whole desktop until relaunch. Body mirrors
+// render_engine.cpp's CursorRestoreFilter (minimal, allocation-light, one-shot via InterlockedExchange,
+// returns EXCEPTION_CONTINUE_SEARCH so the default handler still reports the crash). RenderEngine::
+// hideSystemCursor installs its own filter on the render path's first cursor hide, which REPLACES
+// this one (SetUnhandledExceptionFilter keeps only the latest); that is safe because CursorRestoreFilter
+// does the identical restore + crash report, so nothing is lost by the replacement.
+static LONG WINAPI EarlyCursorRestoreFilter(EXCEPTION_POINTERS* ep) {
+    static LONG s_inHandler = 0;
+    if (InterlockedExchange(&s_inHandler, 1)) return EXCEPTION_CONTINUE_SEARCH;
+    MagShowSystemCursor(TRUE);           // no-op if the Magnification API was never initialized this run
+    ClipCursor(nullptr);                 // never leave the cursor clipped if we crash while Inspect-locked
+    SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, SPIF_SENDCHANGE);   // heals a blanked cursor scheme
+    wind::WriteCrashReport(ep);          // minidump + text summary into the log dir
+    return EXCEPTION_CONTINUE_SEARCH;   // let the default handler still report the crash
+}
+
 // Single-instance startup events route through the unified logger (category "startup").
 static void SiLog(const char* msg, unsigned long val) {
     wind::Log(wind::LogLevel::Info, "startup", "%s %lu", msg, val);
@@ -835,6 +855,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     HANDLE mtx = nullptr;
     if (!AcquireSingleInstance(mtx)) { RestoreInputState(); return 0; }
     atexit(AtExitRestore);
+    // Installed before either magnifier model is constructed so a crash under model=transform (which
+    // never touches RenderEngine, so RenderEngine's own filter is never installed) still heals a
+    // blanked system cursor. See EarlyCursorRestoreFilter for why the render path safely replaces this.
+    SetUnhandledExceptionFilter(EarlyCursorRestoreFilter);
 
     // Resolve magnifier.ini next to the exe (not the launch cwd).
     wchar_t exePath[MAX_PATH];
