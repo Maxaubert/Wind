@@ -178,6 +178,14 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             sprite_->hide();   // Hidden/Unsupported: show the real (or app-custom) cursor instead
             samplePolarity_.store(false, std::memory_order_relaxed);
         }
+    } else if (useSprite_ && sprite_) {
+        // cursorVisibility=never, or the hide-cursor hotkey. The block above is what MOVES the sprite,
+        // so skipping it is not enough: hideSystemCursor(true) already showed the sprite at activation
+        // and it would freeze on screen, visible and no longer tracking. Hide it explicitly. hide() is
+        // idempotent, and the real cursor stays blanked (CursorBlanker is independent of this flag),
+        // so nothing unmagnified reappears; zoom-out restores it via hideSystemCursor(false).
+        sprite_->hide();
+        samplePolarity_.store(false, std::memory_order_relaxed);
     }
 
     if (smoothPan_ && level > 1.0) {
