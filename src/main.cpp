@@ -506,6 +506,11 @@ static void RunTick(TickState& t) {
             t.outlineIdleSec = 0.0;   // keep ready for when idle-hide is toggled on mid-session
         }
         if (t.cursorHidden) ex.cursorMode = 2;   // hotkey override; CursorModeFromCfg already set 0/1/2 from cfg
+        // cursorMode is now final for this tick; derive drawCursor from it so the transform model
+        // (which only reads drawCursor, not cursorMode - see magnifier_model.h) also honours
+        // cursorVisibility=never and the hide-cursor hotkey. The render model never reads drawCursor
+        // (it reads cursorMode directly via FillRenderParams), so this cannot change render behaviour.
+        ex.drawCursor = (ex.cursorMode != 2);
         if (inspect) {
             if (t.clickReleaseTicks > 0) {
                 // A click was just committed: keep the freeze released for these ticks so the synthesized
