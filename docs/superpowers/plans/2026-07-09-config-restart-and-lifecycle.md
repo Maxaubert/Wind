@@ -183,20 +183,27 @@ Add immediately before the final `</div>` that closes `.win` (end of markup, bef
 
 - [ ] **Step 5: Add the modal styles**
 
-Append inside the existing `<style>` block:
+Append inside the existing `<style>` block. Use the theme tokens `theme.css` actually defines
+(`--bg`, `--text`, `--line`, `--accent`) so the modal tracks light/dark theme like the rest of the
+file, and mirror the existing footer `.btn` / `.btn.primary` declarations rather than inventing a
+button look. The backdrop scrim and box-shadow stay theme-independent on purpose.
 
 ```css
   .mbackdrop { position: fixed; inset: 0; background: rgba(0,0,0,.45);
                display: flex; align-items: center; justify-content: center; z-index: 50; }
-  .mbox { background: var(--card, #1e1e22); color: var(--fg, #eee); border-radius: 10px;
-          padding: 20px 22px; width: 380px; box-shadow: 0 12px 40px rgba(0,0,0,.5); }
+  .mbox { background: var(--bg); color: var(--text); border: 1px solid var(--line);
+          border-radius: 10px; padding: 20px 22px; width: 380px;
+          box-shadow: 0 12px 40px rgba(0,0,0,.5); }
   .mbox h2 { margin: 0 0 8px; font-size: 15px; }
   .mbox p { margin: 0 0 18px; font-size: 13px; opacity: .85; line-height: 1.45; }
   .mbtns { display: flex; gap: 8px; justify-content: flex-end; }
-  .mbtns button { padding: 7px 14px; border-radius: 6px; font-size: 13px; cursor: pointer;
-                  border: 1px solid var(--bd, #3a3a40); background: transparent; color: inherit; }
-  .mbtns button.primary { background: #5b5bd6; border-color: #5b5bd6; color: #fff; }
+  .mbtns button { padding: 7px 16px; border-radius: 7px; font-size: 12.5px; cursor: pointer;
+                  border: 1px solid var(--line); background: transparent; color: var(--text); }
+  .mbtns button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 ```
+
+Do NOT use `--card`, `--fg`, or `--bd`. They are not defined anywhere, so their `var()` fallbacks
+would always win and the modal would render as a fixed dark box in light theme.
 
 - [ ] **Step 6: Build**
 
