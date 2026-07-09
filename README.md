@@ -30,6 +30,30 @@ can't, and lets you keep clicking and using the screen while zoomed.
 - **Follows the mouse even when a game locks/hides the cursor** (HID-level Raw Input, no
   injection - anti-cheat safe).
 
+## Magnifier models (`model=`)
+Wind ships two magnifier implementations. They are selected with the `model` key, or from the
+model row in Settings. `model` is read once at launch, so **switching it restarts Wind** (Settings
+prompts you to confirm).
+
+- **`render`** (default) - captures the desktop with DXGI Desktop Duplication and redraws it into
+  a D3D11 overlay. The cursor is drawn into the same frame as the content, so it can never drift
+  against the view. This is the model every knob below was tuned for, and the only one that covers
+  the shell (Start / taskbar / tray) via the UIAccess z-order band.
+- **`transform`** - drives DWM's own fullscreen magnification (`MagSetFullscreenTransform`, plus a
+  private export for sub-pixel panning). It magnifies the real desktop rather than compositing a
+  copy, so it uses noticeably less GPU. Because there is no frame of our own to draw into, the
+  cursor is a separate topmost layered window positioned in unmagnified desktop coordinates, so
+  the same transform magnifies cursor and content together and they stay locked.
+
+The `transform` model is the primary monitor only (`multiMonitor` is a no-op for it), and it
+ignores the render-only knobs: `sharpness`, `hdrTonemap`, `bilinear`, `outline*`, `brightness`,
+`zorderBand` (it uses the band only to keep its cursor above the taskbar). Inspect mode's
+free-look crosshair is not supported under `transform`.
+
+Transform-only keys: `fastPan` (sub-pixel pan via the private channel; on by default), `smoothPan`
+(hold a game in composited present so panning does not stutter), `cursorSprite` (draw the
+scene-locked cursor; on by default).
+
 ## Controls (defaults, configurable in `magnifier.ini`)
 - Hold **mouse forward button (XButton2)** - zoom in (smooth ramp).
 - Hold **mouse back button (XButton1)** - zoom out.
@@ -60,7 +84,12 @@ writes a default `magnifier.ini`. Launch `C:\Program Files\Wind\Wind.exe` from a
 - `bilinear`, `cursorScaleWithZoom`, `cursorVisibility` - smoothing, cursor scaling, when to draw the cursor.
 - `brightness` - optional output fine-tune (hot-reloads).
 - Pacing/perf: `dwmFlush` (default on, smooth), `vsync`, `tickHzCap` (0 = auto-detect refresh).
+- `model` - `render` (default) or `transform`. See **Magnifier models** above. Restart to switch.
+- Transform-only: `fastPan`, `smoothPan`, `cursorSprite`. Ignored by the `render` model.
 - Advanced: `zorderBand`, `hdrTonemap`.
+
+The Settings app (tray -> Open Settings) writes the same `magnifier.ini`, shows only the rows that
+apply to the selected model, and closes itself if the magnifier exits.
 
 ## Scope
 Single primary monitor. Covers the desktop, normal apps, and **borderless / windowed-fullscreen**
