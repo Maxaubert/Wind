@@ -41,6 +41,15 @@ static bool WindRunning() {
     CloseHandle(snap);
     return found;
 }
+// Launch the magnifier that sits next to us. Returns false when ShellExecuteW failed (<= 32).
+// Relaunching while Wind is ALREADY running is how a model switch restarts it: the new instance
+// finds the single-instance mutex held, signals Local\Wind_QuitRequest to the incumbent, waits for
+// it to exit cleanly, then takes over (src/main.cpp:801-817). No extra IPC is needed here.
+static bool LaunchWind() {
+    std::wstring windExe = ExeDir() + L"\\Wind.exe";
+    HINSTANCE r = ShellExecuteW(nullptr, L"open", windExe.c_str(), nullptr, nullptr, SW_SHOW);
+    return reinterpret_cast<INT_PTR>(r) > 32;
+}
 // Resolved at first call (and cached) so reads and writes always land on the same file the Wind
 // core uses. Falls back to %LOCALAPPDATA%\Wind\magnifier.ini when the exe dir is read-only.
 static std::wstring IniPath() {
@@ -161,6 +170,14 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
             if (ev) { SetEvent(ev); CloseHandle(ev); }
             PostMessageW(g_hwnd, WM_CLOSE, 0, 0);
         }
+        else if (action == "restartWind") {
+            // `model` is read once at launch, so switching it needs a real restart. The UI has
+            // already written the new value to the ini. Just launch Wind again: the new instance
+            // evicts the incumbent via the Local\Wind_QuitRequest handshake. On failure the
+            // incumbent is untouched (it is only ever signalled BY a successfully started instance),
+            // so report back rather than leaving the user with a silently ignored button.
+            if (!LaunchWind()) wv->PostWebMessageAsJson(L"{\"type\":\"restartFailed\"}");
+        }
     } else if (type == "openIni") {
         // Open the ini with the registered .ini handler (usually Notepad), matching the bridge's
         // "default editor" contract. Fall back to explicitly launching Notepad if no handler is
@@ -252,14 +269,12 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
         auto vals = wind::ReadIniValues(ReadFileUtf8(IniPath()));
         auto it = vals.find("onboarded");
         bool onboarded = (it != vals.end() && it->second == "1");
-        std::wstring windExe = ExeDir() + L"\\Wind.exe";
         if (!onboarded) {
-            HINSTANCE r = ShellExecuteW(nullptr, L"open", windExe.c_str(), nullptr, nullptr, SW_SHOW);
-            if (reinterpret_cast<INT_PTR>(r) > 32) { if (mtx) CloseHandle(mtx); return 0; }
+            if (LaunchWind()) { if (mtx) CloseHandle(mtx); return 0; }
             onboard = true;   // couldn't launch Wind - run onboarding in THIS window, not the config page
         } else if (!WindRunning()) {
             // Set up, but the magnifier isn't running: start it, then continue to the config page.
-            ShellExecuteW(nullptr, L"open", windExe.c_str(), nullptr, nullptr, SW_SHOW);
+            LaunchWind();
         }
     }
     // Per-monitor-V2 DPI awareness so WebView2 renders at native resolution (not bitmap-scaled,
