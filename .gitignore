@@ -28,3 +28,6 @@ wind_hdr_diag.txt
 # Stray build-log redirects
 build_*.txt
 .superpowers/
+
+# graphify knowledge-graph output (generated)
+graphify-out/

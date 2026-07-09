@@ -6,12 +6,15 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstdarg>
+#include <memory>
 #include <sstream>
 #include "config.h"
 #include "config_path.h"
 #include "logging.h"
 #pragma comment(lib, "Dwmapi.lib")
 #include "render_engine.h"
+#include "render_model.h"
+#include "transform_model.h"
 #include "input_router.h"
 #include "cursor_mapper.h"
 #include "zoom_controller.h"
@@ -101,7 +104,7 @@ static VirtualBounds QueryVirtualBounds() {
 // loop that owns the thread until it closes; without a timer-driven tick the lens froze for
 // the duration. The timer (set around the menu) dispatches WM_TIMER into WndProc, which ticks.
 struct TickState {
-    RenderEngine&    renderEngine;
+    IMagnifierModel& model;
     MonitorTarget    mon;       // current target monitor (origin + size + device name)
     Config         cfg;
     ZoomController zoom;
@@ -147,44 +150,12 @@ struct TickState {
     // Frame-pacing diagnostics (diagnostics=1): a 2 s window of loop-interval stats.
     double diagAccum = 0.0, diagSumDt = 0.0, diagMaxDt = 0.0;
     int    diagFrames = 0, diagHitches = 0;
-    TickState(RenderEngine& re, const MonitorTarget& m, const Config& c)
-        : renderEngine(re), mon(m), cfg(c),
+    TickState(IMagnifierModel& mdl, const MonitorTarget& m, const Config& c)
+        : model(mdl), mon(m), cfg(c),
           zoom(1.0, c.maxLevel),
           mapper(m.w, m.h, c.cursorSmoothing) {}
 };
 static TickState* g_tick = nullptr;
-
-// cursorVisibility config string -> render param: 0 = auto, 1 = always, 2 = never.
-static int CursorModeFromCfg(const Config& c) {
-    if (c.cursorVisibility == "never")  return 2;
-    if (c.cursorVisibility == "always") return 1;
-    return 0;
-}
-
-// Fill a RenderFrameParams from the mapper result + config for the given monitor and zoom level
-// (the normal live-tick interpretation). The self-test harnesses call this, then override only
-// the few fields they deliberately differ on (cursorMode, vsync).
-static void FillRenderParams(RenderFrameParams& p, const MapResult& r, const Config& cfg,
-                             const MonitorTarget& mon, double level) {
-    p.level = level;
-    p.srcLeft = r.srcLeft; p.srcTop = r.srcTop;
-    p.cursorScreenX = r.cursorScreenX; p.cursorScreenY = r.cursorScreenY;
-    // clickDesktop is local monitor px; SetCursorPos needs virtual-desktop coords.
-    p.clickDesktopX = r.clickDesktopX + mon.x; p.clickDesktopY = r.clickDesktopY + mon.y;
-    p.cursorScaleWithZoom = (cfg.cursorScaleWithZoom != 0);
-    p.bilinear = (cfg.bilinear != 0);
-    p.sharpness = cfg.sharpness;
-    p.brightness = cfg.brightness;
-    p.cursorMode = CursorModeFromCfg(cfg);
-    // In DwmFlush mode we present immediately (no vsync block) and let DwmFlush() pace.
-    p.vsync = (cfg.vsync != 0 && cfg.dwmFlush == 0);
-    p.cropCapture = (cfg.cropCapture != 0);
-    p.outline = OutlineVisibleAtLevel(cfg, level);
-    p.outlineThicknessPx = cfg.outlineThickness;
-    p.outlineR = cfg.outlineR; p.outlineG = cfg.outlineG; p.outlineB = cfg.outlineB;   // parsed once in ParseConfig
-    p.outlineAlpha = 1.0f;   // RunTick lowers this when idle-hide is active
-    p.cursorLocked = false;  // RunTick sets true while zoomed + Inspect mode (draw the crosshair sprite)
-}
 
 // Append a line to %TEMP%\wind_diag.log (frame-pacing diagnostics; gated on diagnostics=1).
 // %TEMP% so it works for the Program Files deploy too (its own dir isn't writable).
@@ -387,7 +358,7 @@ static void RunTick(TickState& t) {
             // the current monitor. The overlay is still at alpha 0 here, so a move never flashes.
             if (zoomed && t.cfg.multiMonitor) {
                 MonitorTarget nt = MonitorUnderCursor();
-                if (!SameMonitor(nt, t.mon) && t.renderEngine.retarget(nt)) {
+                if (!SameMonitor(nt, t.mon) && t.model.retarget(nt)) {
                     t.mon = nt;
                     t.mapper = CursorMapper(nt.w, nt.h, t.cfg.cursorSmoothing);
                     int nhz = DetectRefreshHz(nt.device);   // pace off the new monitor's refresh (#74)
@@ -399,8 +370,8 @@ static void RunTick(TickState& t) {
             t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y);   // virtual -> local monitor coords
             t.lastSetVirtual = pt;        // baseline for the OS-cursor delta (first delta = 0)
             t.detector.reset();           // start free
-            t.renderEngine.hideSystemCursor(true);
-            t.renderEngine.invalidateCapture();       // grab a live frame, not a stale cached one
+            t.model.hideSystemCursor(true);
+            t.model.onActivate();       // grab a live frame, not a stale cached one
         }
         if (inspectEnter) {
             // Freeze the real cursor where it is; the look point (mapper center) starts there.
@@ -416,8 +387,8 @@ static void RunTick(TickState& t) {
             t.lastSetVirtual = pt;
             RECT fz{ pt.x, pt.y, pt.x + 1, pt.y + 1 };
             ClipCursor(&fz);
-            t.renderEngine.hideSystemCursor(true);   // hide the real cursor; we draw the crosshair
-            t.renderEngine.invalidateCapture();
+            t.model.hideSystemCursor(true);   // hide the real cursor; we draw the crosshair
+            t.model.onActivate();
         }
         bool inspectExit = !inspect && t.prevInspect;   // Inspect just turned off but overlay stays (zoomed)
         if (inspectExit) {
@@ -499,8 +470,14 @@ static void RunTick(TickState& t) {
                 fireClicks(MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, nRight);
             }
         }
-        RenderFrameParams p{};
-        FillRenderParams(p, r, t.cfg, t.mon, lvl);
+        // Per-tick render-only overrides go through PresentExtras; the model's present() runs
+        // FillRenderParams and applies these on top. ex.outline seeds with the same base value
+        // FillRenderParams would compute, so the dwell/idle logic below reads an identical start.
+        PresentExtras ex;
+        ex.outline = OutlineVisibleAtLevel(t.cfg, lvl);
+        ex.outlineAlpha = 1.0f;
+        ex.cursorMode = CursorModeFromCfg(t.cfg);
+        ex.cursorLocked = false;
         // Low-zoom dwell: with "only at low zoom" on, show the outline only after the zoom settles
         // at a STABLE level inside the band for kOutlineDwellSec. "Stable" = the level is unchanged
         // since last tick (the controller freezes the level exactly when no zoom direction is held),
@@ -512,9 +489,9 @@ static void RunTick(TickState& t) {
         if (t.cfg.outline != 0 && t.cfg.outlineLowZoomOnly != 0) {
             const double kOutlineDwellSec = 1.0;
             bool stable = std::fabs(lvl - t.prevLvl) <= 1e-4;   // level held constant => settled
-            bool inBand = p.outline && lvl > 1.0 && stable;
+            bool inBand = ex.outline && lvl > 1.0 && stable;
             t.outlineZoneSec = OutlineDwellSeconds(inBand, t.outlineZoneSec, dt, kOutlineDwellSec);
-            if (t.outlineZoneSec < kOutlineDwellSec) p.outline = false;   // not dwelled long enough yet
+            if (t.outlineZoneSec < kOutlineDwellSec) ex.outline = false;   // not dwelled long enough yet
         } else {
             t.outlineZoneSec = 0.0;   // keep ready for when the cutoff is toggled on mid-session
         }
@@ -522,13 +499,18 @@ static void RunTick(TickState& t) {
         // any hand motion - free OS-cursor delta or raw mickeys), then map it to the fade alpha.
         // dt is the per-tick elapsed time computed at the top of RunTick. Fade duration is 0.3s.
         const bool outlineMoved = (std::abs(curDx) + std::abs(curDy) + std::abs(rawDx) + std::abs(rawDy)) > 0;
-        if (t.cfg.outlineIdleHide && p.outline) {
+        if (t.cfg.outlineIdleHide && ex.outline) {
             t.outlineIdleSec = outlineMoved ? 0.0 : (t.outlineIdleSec + dt);
-            p.outlineAlpha = (float)OutlineIdleAlpha(t.outlineIdleSec, t.cfg.outlineIdleSeconds, 0.3);
+            ex.outlineAlpha = (float)OutlineIdleAlpha(t.outlineIdleSec, t.cfg.outlineIdleSeconds, 0.3);
         } else {
             t.outlineIdleSec = 0.0;   // keep ready for when idle-hide is toggled on mid-session
         }
-        if (t.cursorHidden) p.cursorMode = 2;   // hotkey override; FillRenderParams already set 0/1/2 from cfg
+        if (t.cursorHidden) ex.cursorMode = 2;   // hotkey override; CursorModeFromCfg already set 0/1/2 from cfg
+        // cursorMode is now final for this tick; derive drawCursor from it so the transform model
+        // (which only reads drawCursor, not cursorMode - see magnifier_model.h) also honours
+        // cursorVisibility=never and the hide-cursor hotkey. The render model never reads drawCursor
+        // (it reads cursorMode directly via FillRenderParams), so this cannot change render behaviour.
+        ex.drawCursor = (ex.cursorMode != 2);
         if (inspect) {
             if (t.clickReleaseTicks > 0) {
                 // A click was just committed: keep the freeze released for these ticks so the synthesized
@@ -541,32 +523,39 @@ static void RunTick(TickState& t) {
                 // SetCursorPos at the frozen point (a no-op inside the clip).
                 RECT fz{ t.frozenCursor.x, t.frozenCursor.y, t.frozenCursor.x + 1, t.frozenCursor.y + 1 };
                 ClipCursor(&fz);
-                p.clickDesktopX = t.frozenCursor.x;
-                p.clickDesktopY = t.frozenCursor.y;
+                ex.clickOverride = true;
+                ex.clickDesktopX = t.frozenCursor.x;
+                ex.clickDesktopY = t.frozenCursor.y;
             }
-            p.cursorLocked = true;        // draw the crosshair at the look point (cursorScreen)
-            if (!zoomed) p.outline = false;   // no lens outline on the 1:1 view at 1x
+            ex.cursorLocked = true;        // draw the crosshair at the look point (cursorScreen)
+            if (!zoomed) ex.outline = false;   // no lens outline on the 1:1 view at 1x
         }
-        t.renderEngine.renderFrame(p);          // render+present every active tick (never blocks the ramp)
+        t.model.present(r, lvl, t.cfg, t.mon, ex);          // render+present every active tick (never blocks the ramp)
         // Reveal AFTER the live frame is presented: setVisible flips the layer alpha over the
         // now-current front buffer, so the overlay never shows its retained previous-session
         // frame (the alt-tab "previous window"). capture() also drained to the latest frame.
-        if (enterActive) {
-            if (ForegroundCoversMonitor(t.mon)) {
-                // Fullscreen app (a game on an independent-flip/MPO plane): Desktop Duplication can't
-                // see the game until our overlay forces DWM to composite it, so revealing now would
-                // flash the previously focused window (issue #90). Instead PRIME at alpha 1 (invisible
-                // - the user keeps seeing the real game) to force that composition, keep rendering
-                // normally, and defer the full reveal a couple ticks so the game is in the capture by
-                // then. This is non-blocking: the smooth-zoom ramp runs undisturbed (no DwmFlush stall).
-                t.renderEngine.primeReveal();
-                t.revealPending = 2;
-            } else {
-                t.renderEngine.setVisible(true);   // ordinary desktop activation: reveal instantly
-                t.revealPending = 0;
+        // Reveal/prime is render-specific (needs ForegroundCoversMonitor + capture priming); guard it
+        // behind the RenderModel downcast. A non-render model just reveals immediately on activation.
+        if (auto* rm = dynamic_cast<RenderModel*>(&t.model)) {
+            if (enterActive) {
+                if (ForegroundCoversMonitor(t.mon)) {
+                    // Fullscreen app (a game on an independent-flip/MPO plane): Desktop Duplication can't
+                    // see the game until our overlay forces DWM to composite it, so revealing now would
+                    // flash the previously focused window (issue #90). Instead PRIME at alpha 1 (invisible
+                    // - the user keeps seeing the real game) to force that composition, keep rendering
+                    // normally, and defer the full reveal a couple ticks so the game is in the capture by
+                    // then. This is non-blocking: the smooth-zoom ramp runs undisturbed (no DwmFlush stall).
+                    rm->primeReveal();
+                    t.revealPending = 2;
+                } else {
+                    rm->setActive(true);   // ordinary desktop activation: reveal instantly
+                    t.revealPending = 0;
+                }
+            } else if (t.revealPending > 0 && --t.revealPending == 0) {
+                rm->setActive(true);       // deferred game reveal: game is now composited+captured
             }
-        } else if (t.revealPending > 0 && --t.revealPending == 0) {
-            t.renderEngine.setVisible(true);       // deferred game reveal: game is now composited+captured
+        } else if (enterActive) {
+            t.model.setActive(true);   // transform: reveal immediately, no capture priming
         }
         // Bookkeeping for next tick's GetCursorPos delta. INSPECT: the real cursor stays frozen, so the
         // baseline is the frozen point. Otherwise renderFrame SetCursorPos'd the OS cursor to
@@ -578,8 +567,8 @@ static void RunTick(TickState& t) {
             t.lastSetVirtual.y = r.clickDesktopY + t.mon.y;
         }
     } else if (t.prevActive) {                        // active -> idle: tear the overlay down
-        t.renderEngine.setVisible(false);
-        t.renderEngine.hideSystemCursor(false);
+        t.model.setActive(false);
+        t.model.hideSystemCursor(false);
         t.outlineZoneSec = 0.0;                       // zoom-out clears the low-zoom dwell (no banked partial)
         if (t.prevInspect) {
             ClipCursor(nullptr);
@@ -780,6 +769,26 @@ static void RestoreInputState() {
 // and only swallows side-buttons anyway. The damaging state (hidden/confined cursor) is undone here.
 static void AtExitRestore() { RestoreInputState(); }
 
+// Crash safety net installed BEFORE the magnifier model is constructed, so it covers model=transform
+// too. RenderModel hides the OS cursor via the process-scoped Magnification API (auto-reverts on
+// process death), but TransformModel hides it via CursorBlanker's SetSystemCursor, which is
+// system-global and does NOT revert when the process dies - an unhandled exception while zoomed would
+// otherwise leave every standard cursor blank across the whole desktop until relaunch. Body mirrors
+// render_engine.cpp's CursorRestoreFilter (minimal, allocation-light, one-shot via InterlockedExchange,
+// returns EXCEPTION_CONTINUE_SEARCH so the default handler still reports the crash). RenderEngine::
+// hideSystemCursor installs its own filter on the render path's first cursor hide, which REPLACES
+// this one (SetUnhandledExceptionFilter keeps only the latest); that is safe because CursorRestoreFilter
+// does the identical restore + crash report, so nothing is lost by the replacement.
+static LONG WINAPI EarlyCursorRestoreFilter(EXCEPTION_POINTERS* ep) {
+    static LONG s_inHandler = 0;
+    if (InterlockedExchange(&s_inHandler, 1)) return EXCEPTION_CONTINUE_SEARCH;
+    MagShowSystemCursor(TRUE);           // no-op if the Magnification API was never initialized this run
+    ClipCursor(nullptr);                 // never leave the cursor clipped if we crash while Inspect-locked
+    SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, SPIF_SENDCHANGE);   // heals a blanked cursor scheme
+    wind::WriteCrashReport(ep);          // minidump + text summary into the log dir
+    return EXCEPTION_CONTINUE_SEARCH;   // let the default handler still report the crash
+}
+
 // Single-instance startup events route through the unified logger (category "startup").
 static void SiLog(const char* msg, unsigned long val) {
     wind::Log(wind::LogLevel::Info, "startup", "%s %lu", msg, val);
@@ -846,6 +855,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     HANDLE mtx = nullptr;
     if (!AcquireSingleInstance(mtx)) { RestoreInputState(); return 0; }
     atexit(AtExitRestore);
+    // Installed before either magnifier model is constructed so a crash under model=transform (which
+    // never touches RenderEngine, so RenderEngine's own filter is never installed) still heals a
+    // blanked system cursor. See EarlyCursorRestoreFilter for why the render path safely replaces this.
+    SetUnhandledExceptionFilter(EarlyCursorRestoreFilter);
 
     // Resolve magnifier.ini next to the exe (not the launch cwd).
     wchar_t exePath[MAX_PATH];
@@ -908,11 +921,19 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     // Target monitor for this session: the cursor's monitor when multiMonitor is on, else the
     // primary. The first zoom-in re-checks and retargets if the cursor moved to another monitor.
-    MonitorTarget startupMon = (cfg.multiMonitor != 0) ? MonitorUnderCursor() : PrimaryMonitor();
+    // The transform model forces the primary monitor: r.srcLeft/srcTop stay in primary-screen
+    // coords, which the Magnification API (MagSetFullscreenTransform) expects. multiMonitor is a
+    // documented no-op for the transform model.
+    MonitorTarget startupMon = (cfg.model != "transform" && cfg.multiMonitor != 0)
+                                   ? MonitorUnderCursor() : PrimaryMonitor();
 
-    // --- Own GPU renderer (DXGI Desktop Duplication + D3D11) ---
-    RenderEngine renderEngine;
-    if (!renderEngine.initialize(startupMon, cfg.zorderBand, cfg.hdrTonemap != 0)) {
+    // --- Magnifier model (render: DXGI Desktop Duplication + D3D11 overlay; transform: DWM) ---
+    std::unique_ptr<IMagnifierModel> model;
+    if (cfg.model == "transform")
+        model = std::make_unique<TransformModel>(cfg.fastPan != 0, cfg.smoothPan != 0, cfg.cursorSprite != 0, cfg.zorderBand);
+    else
+        model = std::make_unique<RenderModel>(cfg.zorderBand, cfg.hdrTonemap != 0);
+    if (!model->initialize(startupMon)) {
         MessageBoxW(nullptr, L"Could not start the renderer (Direct3D 11 / Desktop Duplication "
                              L"unavailable on this system).", L"Wind", MB_ICONERROR);
         g_input.stop();
@@ -921,7 +942,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     Tray::Add(hwnd, hInst);
 
-    TickState ts(renderEngine, startupMon, cfg);
+    TickState ts(*model, startupMon, cfg);
     ts.hwnd = hwnd;                       // so RunTick can re-register the hide-cursor hotkey
     g_tick = &ts;   // so the WM_TIMER tick (during the tray menu's modal loop) can run
 
@@ -929,25 +950,29 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // forced zoom and dumps a PNG (the overlay is WDA_EXCLUDEFROMCAPTURE, so it can only be
     // captured from inside the app), then exits. Not part of normal use.
     if (GetEnvironmentVariableW(L"WIND_SELFTEST", nullptr, 0) > 0) {
-        POINT pt; GetCursorPos(&pt);
-        ts.mapper.reset(pt.x - ts.mon.x, pt.y - ts.mon.y);
-        renderEngine.hideSystemCursor(true);
-        renderEngine.setVisible(true);
-        RenderFrameParams p{};
-        for (int i = 0; i < 20; ++i) {
-            MSG m; while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&m); DispatchMessageW(&m); }
-            MapResult r = ts.mapper.update(0, 0, 4.0);
-            FillRenderParams(p, r, cfg, ts.mon, 4.0);
-            p.cursorMode = 1;   // always draw the cursor in the selftest dump
-            p.vsync = true;
-            renderEngine.renderFrame(p);
-            Sleep(16);
+        // Selftest drives the render path directly, so it only runs for the RenderModel.
+        if (auto* rm = dynamic_cast<RenderModel*>(model.get())) {
+            RenderEngine& renderEngine = rm->engine();
+            POINT pt; GetCursorPos(&pt);
+            ts.mapper.reset(pt.x - ts.mon.x, pt.y - ts.mon.y);
+            renderEngine.hideSystemCursor(true);
+            renderEngine.setVisible(true);
+            RenderFrameParams p{};
+            for (int i = 0; i < 20; ++i) {
+                MSG m; while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&m); DispatchMessageW(&m); }
+                MapResult r = ts.mapper.update(0, 0, 4.0);
+                FillRenderParams(p, r, cfg, ts.mon, 4.0);
+                p.cursorMode = 1;   // always draw the cursor in the selftest dump
+                p.vsync = true;
+                renderEngine.renderFrame(p);
+                Sleep(16);
+            }
+            renderEngine.dumpFrame(p, L"wind_selftest.png");
+            unsigned ddaFmt = 0; int cs = -1, bpc = 0; renderEngine.debugHdr(ddaFmt, cs, bpc);
+            FILE* hf = nullptr; _wfopen_s(&hf, L"wind_hdr_diag.txt", L"w");
+            if (hf) { fprintf(hf, "ddaFormat=%u outColorSpace=%d bitsPerColor=%d\n", ddaFmt, cs, bpc); fclose(hf); }
+            renderEngine.shutdown();
         }
-        renderEngine.dumpFrame(p, L"wind_selftest.png");
-        unsigned ddaFmt = 0; int cs = -1, bpc = 0; renderEngine.debugHdr(ddaFmt, cs, bpc);
-        FILE* hf = nullptr; _wfopen_s(&hf, L"wind_hdr_diag.txt", L"w");
-        if (hf) { fprintf(hf, "ddaFormat=%u outColorSpace=%d bitsPerColor=%d\n", ddaFmt, cs, bpc); fclose(hf); }
-        renderEngine.shutdown();
         g_input.stop();
         Tray::Remove();
         ReleaseMutex(mtx);
@@ -958,35 +983,39 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // zoom with a simulated pan for ~4 s and logs loop-interval stats to %TEMP%\wind_diag.log -
     // to measure microstutter objectively (the normal loop needs the side button to zoom). Exits.
     if (GetEnvironmentVariableW(L"WIND_PACINGTEST", nullptr, 0) > 0) {
-        POINT pt; GetCursorPos(&pt);
-        ts.mapper.reset(pt.x - ts.mon.x, pt.y - ts.mon.y);
-        renderEngine.hideSystemCursor(true);
-        LARGE_INTEGER f, a{}, b; QueryPerformanceFrequency(&f);
-        const double target = 1.0 / DetectRefreshHz();
-        double elapsed = 0.0, sumDt = 0.0, maxDt = 0.0; int frames = 0, hitches = 0, big = 0;
-        bool first = true;
-        QueryPerformanceCounter(&a);
-        while (elapsed < 4.0) {
-            MSG m; while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&m); DispatchMessageW(&m); }
-            int dxp = ((frames / 20) % 2 == 0) ? 6 : -6;   // oscillate the pan so srcRect keeps moving
-            MapResult r = ts.mapper.update(dxp, 0, 4.0);
-            RenderFrameParams p{};
-            FillRenderParams(p, r, cfg, ts.mon, 4.0);
-            p.cursorMode = 1; p.vsync = (cfg.vsync != 0);
-            if (first) renderEngine.invalidateCapture();
-            renderEngine.renderFrame(p);
-            if (first) { renderEngine.setVisible(true); first = false; QueryPerformanceCounter(&a); continue; }
-            QueryPerformanceCounter(&b);
-            double dt = double(b.QuadPart - a.QuadPart) / f.QuadPart; a = b;
-            elapsed += dt; sumDt += dt; ++frames;
-            if (dt > maxDt) maxDt = dt;
-            if (dt > target * 1.5) ++hitches;
-            if (dt > target * 2.5) ++big;
+        // Pacing test drives the render path directly, so it only runs for the RenderModel.
+        if (auto* rm = dynamic_cast<RenderModel*>(model.get())) {
+            RenderEngine& renderEngine = rm->engine();
+            POINT pt; GetCursorPos(&pt);
+            ts.mapper.reset(pt.x - ts.mon.x, pt.y - ts.mon.y);
+            renderEngine.hideSystemCursor(true);
+            LARGE_INTEGER f, a{}, b; QueryPerformanceFrequency(&f);
+            const double target = 1.0 / DetectRefreshHz();
+            double elapsed = 0.0, sumDt = 0.0, maxDt = 0.0; int frames = 0, hitches = 0, big = 0;
+            bool first = true;
+            QueryPerformanceCounter(&a);
+            while (elapsed < 4.0) {
+                MSG m; while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&m); DispatchMessageW(&m); }
+                int dxp = ((frames / 20) % 2 == 0) ? 6 : -6;   // oscillate the pan so srcRect keeps moving
+                MapResult r = ts.mapper.update(dxp, 0, 4.0);
+                RenderFrameParams p{};
+                FillRenderParams(p, r, cfg, ts.mon, 4.0);
+                p.cursorMode = 1; p.vsync = (cfg.vsync != 0);
+                if (first) renderEngine.invalidateCapture();
+                renderEngine.renderFrame(p);
+                if (first) { renderEngine.setVisible(true); first = false; QueryPerformanceCounter(&a); continue; }
+                QueryPerformanceCounter(&b);
+                double dt = double(b.QuadPart - a.QuadPart) / f.QuadPart; a = b;
+                elapsed += dt; sumDt += dt; ++frames;
+                if (dt > maxDt) maxDt = dt;
+                if (dt > target * 1.5) ++hitches;
+                if (dt > target * 2.5) ++big;
+            }
+            DiagLog("PACINGTEST vsync=%d frames=%d ~fps=%.1f targetDt=%.2fms avgDt=%.2fms maxDt=%.2fms hitches>1.5x=%d big>2.5x=%d",
+                    cfg.vsync, frames, frames / elapsed, target * 1000.0,
+                    (frames ? sumDt / frames : 0.0) * 1000.0, maxDt * 1000.0, hitches, big);
+            renderEngine.shutdown();
         }
-        DiagLog("PACINGTEST vsync=%d frames=%d ~fps=%.1f targetDt=%.2fms avgDt=%.2fms maxDt=%.2fms hitches>1.5x=%d big>2.5x=%d",
-                cfg.vsync, frames, frames / elapsed, target * 1000.0,
-                (frames ? sumDt / frames : 0.0) * 1000.0, maxDt * 1000.0, hitches, big);
-        renderEngine.shutdown();
         g_input.stop();
         Tray::Remove();
         ReleaseMutex(mtx);
@@ -1037,6 +1066,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     bool running = true;
     unsigned long long nextRecoverMs = 0;   // device-lost recovery backoff gate (GetTickCount64)
+    // The transform model does no blocking present, so it can never self-pace via Present(1,0) or
+    // DwmFlush the way the render model does. It must always be timer-paced (like the idle/1x path),
+    // or the zoomed loop spins flat out and floods MagSetFullscreenTransform, backing up DWM's
+    // desktop-transform queue so the view lags ~1-2s behind input. Cache the model kind once.
+    const bool renderModelActive = dynamic_cast<RenderModel*>(model.get()) != nullptr;
     while (running) {
         MSG msg;
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
@@ -1053,8 +1087,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         // D3D device was removed; rebuild it on a backoff so we don't spin (the driver may take a
         // moment to return). Crucially, un-hide the OS cursor first so the user is never left without
         // a pointer while we are unable to draw the magnified one. Skip the normal tick this iteration.
-        if (renderEngine.deviceLost()) {
-            renderEngine.hideSystemCursor(false);   // restore the real cursor while we can't render
+        if (auto* rm = dynamic_cast<RenderModel*>(model.get()); rm && rm->deviceLost()) {
+            rm->hideSystemCursor(false);   // restore the real cursor while we can't render
             // Inspect's 1px freeze clip must not survive a device-lost: release it and clear the toggle so
             // the post-recovery tick can't re-clip the cursor to the stale frozen pixel (honors the
             // documented "released on device-lost recovery" invariant; recovery returns to a clean 1x).
@@ -1062,7 +1096,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             if (ts.cursorLock.locked()) { ts.cursorLock.reset(); ts.clickReleaseTicks = 0; }
             unsigned long long now = GetTickCount64();
             if (now >= nextRecoverMs) {
-                if (!renderEngine.recoverDeviceLost()) nextRecoverMs = now + 500;   // retry in 0.5s
+                if (!rm->recoverDeviceLost()) nextRecoverMs = now + 500;   // retry in 0.5s
                 else { ts.prevLvl = 1.0; ts.zoom = ZoomController(1.0, ts.cfg.maxLevel); }  // back to 1x, clean
             }
             Sleep(50);
@@ -1079,8 +1113,14 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         bool zoomed = ts.prevLvl > 1.0;
         // dwmFlush=1 -> present immediately then DwmFlush (align 1:1 with the compositor, targets the
         // blt-model microstutter); else vsync=1 -> Present(1,0) blocks; else the timer paces.
-        bool dwmPaces = zoomed && ts.cfg.dwmFlush != 0;
-        bool renderPresentPaces = zoomed && !dwmPaces && ts.cfg.vsync != 0;
+        // The render model keeps its configurable self-pacing (blocking Present / DwmFlush). The
+        // transform model submits via MagSetFullscreenTransform (no blocking present), so DwmFlush is
+        // its ONLY coherent pace while zoomed: it blocks one composite per tick so the sprite update
+        // and the transform land in the SAME frame. A plain timer lets them drift into different
+        // composites, so the cursor beats against the panning view (the flicker) - exactly what
+        // DwmFlush prevents (and it paces at refresh, so no flood either). Bloom paces this way too.
+        bool dwmPaces = zoomed && (renderModelActive ? (ts.cfg.dwmFlush != 0) : true);
+        bool renderPresentPaces = renderModelActive && zoomed && !dwmPaces && ts.cfg.vsync != 0;
         if (!renderPresentPaces && !dwmPaces) {
             // Recompute the timer interval if the paced refresh changed (retarget to a different-Hz
             // monitor updates ts.hz). Cheap equality check; only recomputes on an actual change (#74).
@@ -1105,7 +1145,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     UnregisterHotKey(hwnd, kQuitHotkeyId);
     UnregisterHotKey(hwnd, kHideCursorHotkeyId);
     UnregisterHotKey(hwnd, kQuickZoomHotkeyId);
-    renderEngine.shutdown();   // restores cursor + tears down D3D/overlay
+    model->shutdown();   // restores cursor + tears down D3D/overlay
     g_input.stop();
     Tray::Remove();
     if (mtx) { ReleaseMutex(mtx); CloseHandle(mtx); }

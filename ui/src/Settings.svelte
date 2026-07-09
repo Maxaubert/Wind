@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { sections } from './settings-schema.js';
-  import { getConfig, setConfig, openIni, exportDiagnostics, windowControl } from './bridge.js';
+  import { getConfig, setConfig, openIni, exportDiagnostics, windowControl, onMessage } from './bridge.js';
   import { currentTheme, applyTheme, nextTheme, setTheme } from './theme.js';
   import Rail from './lib/Rail.svelte';
   import Section from './lib/Section.svelte';
@@ -35,6 +35,9 @@
     values = { ...values, ...patch };
     saved = { ...saved, ...patch };
   }
+  let restartOpen = false;
+  let restartError = false;
+  onMessage(m => { if (m && m.type === 'restartFailed') { restartError = true; restartOpen = true; } });
   function change(keyOrPatch, val) {
     // Atomic multi-key form: change({k1:v1, k2:v2}) updates both in a single render. The keybind
     // capture uses this so its sibling-key update (vk + button) lands as one consistent state.
@@ -53,10 +56,22 @@
     }
     values = next;
   }
-  function apply() {
+  function commit() {
     for (const k of Object.keys(values)) if (String(values[k]) !== String(saved[k])) setConfig(k, values[k]);
     saved = { ...values };
   }
+  // `model` is read once at Wind launch, so switching it needs a restart. Gate Apply behind a
+  // confirmation rather than writing a value the running process will ignore.
+  function apply() {
+    if (String(values.model) !== String(saved.model)) { restartError = false; restartOpen = true; return; }
+    commit();
+  }
+  // Write the new model FIRST (the relaunched Wind reads it at startup), then relaunch.
+  function confirmRestart() { restartOpen = false; commit(); windowControl('restartWind'); }
+  // Revert ONLY the model, then commit any other pending edits: cancelling a model switch must not
+  // silently discard unrelated changes. Keeping the ini's model equal to the RUNNING model also
+  // stops the schema's showIf gating from revealing rows for a model that is not loaded.
+  function cancelRestart() { restartOpen = false; values = { ...values, model: saved.model }; commit(); }
   function discard() { values = { ...saved }; }
   function toggleTheme() { theme = nextTheme(theme); setTheme(theme); }
   $: dirty = Object.keys(values).some(k => String(values[k]) !== String(saved[k]));
@@ -80,7 +95,7 @@
       {#each sections as s}
         <Section id={s.id} label={s.label} desc={s.desc}>
           {#each s.rows as r}
-            {#if (!r.requires || Number(values[r.requires]) === 1) && (!r.requiresNot || Number(values[r.requiresNot]) !== 1) && (!r.advanced || advancedOn)}
+            {#if (!r.requires || Number(values[r.requires]) === 1) && (!r.requiresNot || Number(values[r.requiresNot]) !== 1) && (!r.advanced || advancedOn) && (!r.showIf || values[r.showIf.key] === r.showIf.eq)}
               <Row row={r} value={values[r.key]} {values} set={change} {live}
                    disabled={r.dependsOn && Number(values[r.dependsOn]) !== 1}
                    onChange={(val) => change(r.key, val)} />
@@ -95,6 +110,24 @@
       <button class="btn primary" on:click={apply} disabled={!dirty}>Apply</button>
     </footer>
   </section>
+  {#if restartOpen}
+    <div class="mbackdrop">
+      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="rtitle">
+        {#if restartError}
+          <h2 id="rtitle">Couldn't restart Wind</h2>
+          <p>Wind.exe could not be launched. The magnifier is still running with the previous model.</p>
+          <div class="mbtns"><button class="primary" on:click={() => (restartOpen = false)}>Close</button></div>
+        {:else}
+          <h2 id="rtitle">Restart required</h2>
+          <p>Changing the magnifier model requires restarting Wind.</p>
+          <div class="mbtns">
+            <button on:click={cancelRestart}>Cancel</button>
+            <button class="primary" on:click={confirmRestart}>Restart Wind</button>
+          </div>
+        {/if}
+      </div>
+    </div>
+  {/if}
 </div>
 <style>
   /* Ported from mockups/config-ui-onepage.html (.win / .main->.content / .caption / .ctitle /
@@ -125,4 +158,14 @@
   .btn { padding: 7px 16px; border-radius: 7px; border: 1px solid var(--line); background: transparent; color: var(--text); font-size: 12.5px; cursor: pointer; }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   .btn:disabled { opacity: .5; cursor: default; }
+  .mbackdrop { position: fixed; inset: 0; background: rgba(0,0,0,.45);
+               display: flex; align-items: center; justify-content: center; z-index: 50; }
+  .mbox { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 10px;
+          padding: 20px 22px; width: 380px; box-shadow: 0 12px 40px rgba(0,0,0,.5); }
+  .mbox h2 { margin: 0 0 8px; font-size: 15px; }
+  .mbox p { margin: 0 0 18px; font-size: 13px; opacity: .85; line-height: 1.45; }
+  .mbtns { display: flex; gap: 8px; justify-content: flex-end; }
+  .mbtns button { padding: 7px 16px; border-radius: 7px; font-size: 12.5px; cursor: pointer;
+                  border: 1px solid var(--line); background: transparent; color: var(--text); }
+  .mbtns button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 </style>

@@ -11,6 +11,7 @@
 #include <sstream>
 #include <map>
 #include "ini_edit.h"
+#include "wind_watchdog.h"
 #include "../config_path.h"
 #include "../logging.h"
 #include "../resource.h"
@@ -40,6 +41,15 @@ static bool WindRunning() {
     }
     CloseHandle(snap);
     return found;
+}
+// Launch the magnifier that sits next to us. Returns false when ShellExecuteW failed (<= 32).
+// Relaunching while Wind is ALREADY running is how a model switch restarts it: the new instance
+// finds the single-instance mutex held, signals Local\Wind_QuitRequest to the incumbent, waits for
+// it to exit cleanly, then takes over (src/main.cpp:801-817). No extra IPC is needed here.
+static bool LaunchWind() {
+    std::wstring windExe = ExeDir() + L"\\Wind.exe";
+    HINSTANCE r = ShellExecuteW(nullptr, L"open", windExe.c_str(), nullptr, nullptr, SW_SHOW);
+    return reinterpret_cast<INT_PTR>(r) > 32;
 }
 // Resolved at first call (and cached) so reads and writes always land on the same file the Wind
 // core uses. Falls back to %LOCALAPPDATA%\Wind\magnifier.ini when the exe dir is read-only.
@@ -161,6 +171,14 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
             if (ev) { SetEvent(ev); CloseHandle(ev); }
             PostMessageW(g_hwnd, WM_CLOSE, 0, 0);
         }
+        else if (action == "restartWind") {
+            // `model` is read once at launch, so switching it needs a real restart. The UI has
+            // already written the new value to the ini. Just launch Wind again: the new instance
+            // evicts the incumbent via the Local\Wind_QuitRequest handshake. On failure the
+            // incumbent is untouched (it is only ever signalled BY a successfully started instance),
+            // so report back rather than leaving the user with a silently ignored button.
+            if (!LaunchWind()) wv->PostWebMessageAsJson(L"{\"type\":\"restartFailed\"}");
+        }
     } else if (type == "openIni") {
         // Open the ini with the registered .ini handler (usually Notepad), matching the bridge's
         // "default editor" contract. Fall back to explicitly launching Notepad if no handler is
@@ -176,6 +194,12 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
         }
     }
 }
+// Poll for the magnifier's exit (Ctrl+Alt+Q, tray Quit, or a crash) and take this window down with
+// it: "the config window should not exist if the magnifier is offline". A poll rather than an event
+// because a crash never signals an event, and rather than a process handle wait because that needs
+// OpenProcess against a higher-integrity UIAccess process. <= 1s latency is imperceptible here.
+static const UINT_PTR kWindWatchTimerId = 0xB100;
+static const UINT     kWindWatchPeriodMs = 1000;
 static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (m == WM_NCCALCSIZE && w == TRUE) {
         // Remove the standard window frame so the client area spans the whole window (we draw our
@@ -218,7 +242,14 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         mmi->ptMinTrackSize.y = MulDiv(560, dpi, 96);
         return 0;
     }
-    if (m == WM_DESTROY) { PostQuitMessage(0); return 0; }
+    if (m == WM_TIMER && w == kWindWatchTimerId) {
+        static bool armed = false;
+        static int  misses = 0;
+        if (wind::ShouldCloseOnWindGone(WindRunning(), armed, misses))
+            PostMessageW(h, WM_CLOSE, 0, 0);
+        return 0;
+    }
+    if (m == WM_DESTROY) { KillTimer(h, kWindWatchTimerId); PostQuitMessage(0); return 0; }
     return DefWindowProcW(h, m, w, l);
 }
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
@@ -252,14 +283,12 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
         auto vals = wind::ReadIniValues(ReadFileUtf8(IniPath()));
         auto it = vals.find("onboarded");
         bool onboarded = (it != vals.end() && it->second == "1");
-        std::wstring windExe = ExeDir() + L"\\Wind.exe";
         if (!onboarded) {
-            HINSTANCE r = ShellExecuteW(nullptr, L"open", windExe.c_str(), nullptr, nullptr, SW_SHOW);
-            if (reinterpret_cast<INT_PTR>(r) > 32) { if (mtx) CloseHandle(mtx); return 0; }
+            if (LaunchWind()) { if (mtx) CloseHandle(mtx); return 0; }
             onboard = true;   // couldn't launch Wind - run onboarding in THIS window, not the config page
         } else if (!WindRunning()) {
             // Set up, but the magnifier isn't running: start it, then continue to the config page.
-            ShellExecuteW(nullptr, L"open", windExe.c_str(), nullptr, nullptr, SW_SHOW);
+            LaunchWind();
         }
     }
     // Per-monitor-V2 DPI awareness so WebView2 renders at native resolution (not bitmap-scaled,
@@ -271,6 +300,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
     HWND hwnd = CreateWindowExW(0, wc.lpszClassName, L"Wind Settings",
         WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CLIPCHILDREN,
         CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, nullptr, nullptr, hInst, nullptr);
+    SetTimer(hwnd, kWindWatchTimerId, kWindWatchPeriodMs, nullptr);
     // Size to a sensible default (scaled for this monitor's DPI) and center on the work area.
     UINT dpi = GetDpiForWindow(hwnd); if (!dpi) dpi = 96;
     int ww = MulDiv(1040, dpi, 96), wh = MulDiv(740, dpi, 96);

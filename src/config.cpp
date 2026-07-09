@@ -103,6 +103,10 @@ Config ParseConfig(const std::string& text) {
             else if (key == "cursorSmoothing")    c.cursorSmoothing = std::stod(val);
             else if (key == "cursorScaleWithZoom")c.cursorScaleWithZoom = std::stoi(val);
             else if (key == "cursorVisibility")   c.cursorVisibility = val;
+            else if (key == "model")              c.model = val;
+            else if (key == "fastPan")            c.fastPan = std::stoi(val);
+            else if (key == "smoothPan")          c.smoothPan = std::stoi(val);
+            else if (key == "cursorSprite")       c.cursorSprite = std::stoi(val);
             else if (key == "bilinear")           c.bilinear = std::stoi(val);
             else if (key == "sharpness")          c.sharpness = std::stod(val);
             else if (key == "zorderBand")         c.zorderBand = std::stoi(val);
@@ -143,6 +147,7 @@ Config ParseConfig(const std::string& text) {
     if (c.outlineThickness > 40) c.outlineThickness = 40;
     c.outlineLowZoomMax  = clampd(c.outlineLowZoomMax,  1.0, 50.0);
     c.outlineIdleSeconds = clampd(c.outlineIdleSeconds, 0.5, 60.0);
+    if (c.model != "render" && c.model != "transform") c.model = "render";
     // Reject keybinds to keys Wind must never swallow (see IsForbiddenBindVk). A bound key is
     // eaten system-wide, so binding e.g. Backspace or the Windows key would make it unusable
     // everywhere; treat a forbidden bind as unbound regardless of how it got into the ini.
@@ -242,6 +247,18 @@ Config LoadConfig(const std::wstring& path) {
                "brightness=1.0\n"
                "; hdrTonemap: 1=HDR10->SDR tonemap when Windows HDR is on (no-op on SDR); 0=off\n"
                "hdrTonemap=1\n"
+               "; model: render = GPU capture+overlay (default, high fidelity). transform = low-GPU\n"
+               ";   DWM fullscreen-transform. Restart to switch. transform ignores the render-only\n"
+               ";   knobs below (sharpness, hdrTonemap, bilinear, outline, zorderBand) and cannot\n"
+               ";   cover the Start menu / taskbar.\n"
+               "model=render\n"
+               "; fastPan (transform only): 1 = private sub-pixel pan channel; auto-falls back if absent\n"
+               "fastPan=1\n"
+               "; smoothPan (transform only): 1 = keep the display composited while zoomed so flip-model\n"
+               ";   games do not stutter while panning (caps the frame rate while zoomed); 0 = off\n"
+               "smoothPan=0\n"
+               "; cursorSprite (transform only): 1 = scene-locked cursor sprite (recommended); 0 = OS cursor\n"
+               "cursorSprite=1\n"
                "; multiMonitor: 1=magnify whichever monitor the cursor is on at zoom-in; 0=primary only\n"
                "multiMonitor=0\n"
                "; cropCapture (opt-in): 0=always copy all changed regions (cache never stale, default);\n"
