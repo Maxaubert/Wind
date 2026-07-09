@@ -58,11 +58,10 @@ bool CursorSprite::create(int zorderBand) {
 // render comes back fully transparent (no per-pixel alpha - the modern
 // I-beam caret among them) are rendered with a two-pass mask/inversion
 // technique instead: opaque pixels keep their color, genuinely transparent
-// pixels stay transparent, and inverting pixels are painted with a solid
-// polarity color chosen from the desktop background (see needsPolarity()
-// and setPolarity()). The real system cursor is shown only while
-// ShapeStatus::Hidden is returned, i.e. the cursor is suppressed/hidden or
-// its shape could not be captured this tick.
+// pixels stay transparent, and inverting pixels are inked white and given a
+// black outline (see renderMaskShape). The real system cursor is shown only
+// while ShapeStatus::Hidden is returned, i.e. the cursor is suppressed/hidden
+// or its shape could not be captured this tick.
 CursorSprite::ShapeStatus CursorSprite::refreshShape() {
     CURSORINFO info{};
     info.cbSize = sizeof(CURSORINFO);
@@ -154,8 +153,7 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
         hotY_ = hotY;
         lastCursor_ = info.hCursor;
         lastVerdict_ = ShapeStatus::Rendered;
-        needsPolarity_ = true;
-        renderMaskShape(lastPolarityDark_);
+        renderMaskShape();
         return ShapeStatus::Rendered;
     }
 
@@ -179,16 +177,7 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
     hotY_ = hotY;
     lastCursor_ = info.hCursor;
     lastVerdict_ = ShapeStatus::Rendered;
-    needsPolarity_ = false;
     return ShapeStatus::Rendered;
-}
-
-// Re-renders the current mask shape if the polarity changed. darkCursor
-// true = draw inverting pixels black (light background).
-void CursorSprite::setPolarity(bool darkCursor) {
-    if (!needsPolarity_ || darkCursor == lastPolarityDark_) return;
-    lastPolarityDark_ = darkCursor;
-    renderMaskShape(darkCursor);
 }
 
 // Two-pass mask/inversion renderer for cursors whose single-pass render came
@@ -197,9 +186,19 @@ void CursorSprite::setPolarity(bool darkCursor) {
 // an opaque white-filled DIB: pixels where both renders agree are opaque
 // color pixels; pixels that stayed background-colored (white on black bg,
 // black on white bg) are transparent; pixels that inverted (black on the
-// white-bg render, white on the black-bg render) are the inverting/mask
-// pixels, painted solid with the given polarity color and no outline or halo.
-void CursorSprite::renderMaskShape(bool darkCursor) {
+// white-bg render, white on the black-bg render) are the inverting/mask pixels.
+//
+// An inverting pixel has no colour of its own, so the sprite replacing it must
+// choose one. Sampling the background to pick black or white ink cannot be made
+// stable: a mixed or mid-grey background sits near the decision threshold, so
+// the caret flicks between inks as it moves, and no dead-band or hysteresis
+// removes that (it only shrinks the band where it happens, and leaves the caret
+// low-contrast there). Instead paint the mask pixels white and synthesise a 1px
+// black outline around the shape, which is what the standard arrow cursor does.
+// Contrast then comes from the outline rather than from a guess about what lies
+// underneath, so the caret is legible on any background and there is no verdict
+// left to oscillate.
+void CursorSprite::renderMaskShape() {
     HDC screenDc = GetDC(nullptr);
     HDC memDc = CreateCompatibleDC(screenDc);
     BITMAPINFO bmi{};
@@ -230,18 +229,45 @@ void CursorSprite::renderMaskShape(bool darkCursor) {
     std::fill_n((uint32_t*)whiteBits, (size_t)kSize * kSize, 0xFFFFFFFFu);
     DrawIconEx(memDc, 0, 0, iconCopy_, 0, 0, 0, nullptr, DI_NORMAL);
 
-    uint32_t ink = darkCursor ? 0xFF000000u : 0xFFFFFFFFu; // opaque black or premultiplied opaque white
+    const uint32_t kOpaqueWhite = 0xFFFFFFFFu;   // premultiplied opaque white (the ink)
+    const uint32_t kOpaqueBlack = 0xFF000000u;   // premultiplied opaque black (the outline)
     uint32_t* black = (uint32_t*)blackBits;
     uint32_t* white = (uint32_t*)whiteBits;
+    // shape[i] = 1 for every opaque pixel of the cursor: a baked colour pixel, or an inverting
+    // pixel we are inking white. The outline pass below dilates this, so it must be recorded
+    // BEFORE the outline is drawn, or the outline would feed on itself and keep growing.
+    uint8_t shape[kSize * kSize];
     for (int i = 0; i < kSize * kSize; i++) {
         uint32_t rgbB = black[i] & 0x00FFFFFFu;
         uint32_t rgbW = white[i] & 0x00FFFFFFu;
         if (rgbB == rgbW) {
             white[i] = rgbB | 0xFF000000u; // opaque, alpha 255, premultiplied color from either render
+            shape[i] = 1;
         } else {
             int lumB = (int)(rgbB & 0xFFu) + (int)((rgbB >> 8) & 0xFFu) + (int)((rgbB >> 16) & 0xFFu);
             int lumW = (int)(rgbW & 0xFFu) + (int)((rgbW >> 8) & 0xFFu) + (int)((rgbW >> 16) & 0xFFu);
-            white[i] = lumB > lumW ? ink : 0u; // inverting -> polarity ink; else transparent
+            bool inverting = lumB > lumW;
+            white[i] = inverting ? kOpaqueWhite : 0u;
+            shape[i] = inverting ? 1 : 0;
+        }
+    }
+
+    // Outline: every transparent pixel touching the shape (8-neighbourhood) becomes opaque black.
+    // One desktop pixel thick, so the fullscreen transform magnifies it in step with the ink, the
+    // same way the arrow cursor's own outline scales.
+    for (int y = 0; y < kSize; y++) {
+        for (int x = 0; x < kSize; x++) {
+            int i = y * kSize + x;
+            if (shape[i]) continue;                  // already ink or baked colour
+            bool touches = false;
+            for (int dy = -1; dy <= 1 && !touches; dy++) {
+                for (int dx = -1; dx <= 1 && !touches; dx++) {
+                    int ny = y + dy, nx = x + dx;
+                    if (ny < 0 || nx < 0 || ny >= kSize || nx >= kSize) continue;
+                    if (shape[ny * kSize + nx]) touches = true;
+                }
+            }
+            if (touches) white[i] = kOpaqueBlack;
         }
     }
 
