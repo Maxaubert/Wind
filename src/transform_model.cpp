@@ -35,7 +35,14 @@ void TransformModel::setActive(bool active) {
 void TransformModel::present(const MapResult& r, double level, const Config& cfg,
                              const MonitorTarget& mon, const PresentExtras& ex) {
     (void)cfg; (void)mon;
-    MagTransform m = ComputeMagTransform(r.srcLeft, r.srcTop, level);
+    // Anchor the magnification AT the cursor, not centred on it. DWM composites the cursor and
+    // layered windows OUTSIDE the fullscreen magnification (measured: a layered window at desktop P
+    // stays at screen P, unscaled), so an unmagnified cursor drawn at L only sits on the content a
+    // click at L hits when T(L) == L. r.srcLeft/srcTop is the render model's CENTRED source rect,
+    // which makes T(L) the screen centre instead - the cause of the click drift and the edge dead
+    // zones. This offset never clamps, so the edges stay reachable. See ComputeFixedPointOffset.
+    OffsetF src = ComputeFixedPointOffset(r.centerX, r.centerY, level);
+    MagTransform m = ComputeMagTransform(src.x, src.y, level);
     host_.setTransform((float)level, m.offX, m.offY, m.txX, m.txY, fastPan_);
 
     // Weld the hidden OS cursor to the lens point, exactly as RenderEngine::render does. This keeps
@@ -53,7 +60,10 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     if (useSprite_ && sprite_ && ex.drawCursor) {
         CursorSprite::ShapeStatus st = sprite_->refreshShape();
         if (st == CursorSprite::ShapeStatus::Rendered) {
-            // The transform magnifies the sprite welded to the content at the same click point.
+            // Draw at the click point. DWM does NOT magnify this layered window (measured), so it is
+            // drawn at screen (cx, cy) unscaled - and because the transform is anchored at the cursor
+            // (T(cx,cy) == (cx,cy)), the content there is exactly the content a click at (cx, cy)
+            // hits. The sprite therefore sits on its own target at any zoom, anywhere on screen.
             sprite_->moveTo(cx, cy);
             sprite_->show();
         } else {

@@ -36,6 +36,8 @@ MapResult CursorMapper::update(int dx, int dy, double level) {
     r.cursorScreenY = (cy_ - o.y) * level;
     r.clickDesktopX = static_cast<int>(cx_ + 0.5);
     r.clickDesktopY = static_cast<int>(cy_ + 0.5);
+    r.centerX = cx_;   // un-rounded, for the transform model's fixed-point anchor
+    r.centerY = cy_;
     return r;
 }
 }
