@@ -9,9 +9,11 @@ namespace wind {
 //
 // Two guards, both load-bearing:
 //  - WindRunning() returns false when its process snapshot FAILS, not only when Wind is absent
-//    (src/config_ui/main.cpp:35). One transient false must never close the user's window.
+//    (see the CreateToolhelp32Snapshot failure check inside WindRunning in src/config_ui/main.cpp).
+//    One transient false must never close the user's window.
 //  - WindConfig can legitimately show a window while Wind is down: a failed Wind.exe launch falls
-//    back to onboarding (src/config_ui/main.cpp:246). Closing then would hide that very error.
+//    back to onboarding (see the `onboard = true` fallback in wWinMain in src/config_ui/main.cpp).
+//    Closing then would hide that very error.
 inline bool ShouldCloseOnWindGone(bool running, bool& armed, int& misses) {
     if (running) { armed = true; misses = 0; return false; }
     if (!armed) return false;
