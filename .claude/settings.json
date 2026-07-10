@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "permissions": {
+    "allow": [
+      "Bash(./build.bat*)",
+      "Bash(cmd //c build.bat*)",
+      "PowerShell(Start-Process powershell -Verb RunAs -Wait -PassThru -WorkingDirectory 'C:\\Users\\Admin\\Documents\\Claude\\Github\\Wind' -ArgumentList '-ExecutionPolicy','Bypass','-File','C:\\Users\\Admin\\Documents\\Claude\\Github\\Wind\\tools\\uiaccess_setup.ps1'*)",
+      "PowerShell(Start-Process \"C:\\Program Files\\Wind\\Wind.exe\"*)"
+    ]
+  }
+}

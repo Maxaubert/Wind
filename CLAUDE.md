@@ -210,6 +210,24 @@ staged Apply/Discard footer.
 Feature/fix work: GitHub issue -> branch -> PR. README-only changes commit directly.
 Remote: `github.com/Maxaubert/Wind`. Own-renderer work is on `feat/own-renderer` (issue #4).
 
+## Deploy for testing (STANDING RULE)
+Whenever you build something new the user should test/verify (a new feature, a behaviour change, a
+bug fix with a runtime effect), DEPLOY it to `C:\Program Files\Wind` so Max can test the real signed
+UIAccess build, then tell him it's live and what to check. Do NOT wait to be asked. Skip the deploy
+only for changes with no runtime surface (docs, tests, comments, build-script tweaks). The magnifier
+cannot be driven headlessly, so deploying IS how a change gets verified.
+- Deploy (elevated; UAC is silent on this machine, so it runs unattended - allowlisted in
+  `.claude/settings.json`):
+  `Start-Process powershell -Verb RunAs -Wait -PassThru -WorkingDirectory '<repo>' -ArgumentList '-ExecutionPolicy','Bypass','-File','<repo>\tools\uiaccess_setup.ps1'`
+  The elevated process starts in System32, so the `-File` path MUST be absolute (a relative
+  `tools\...` path silently fails to launch). The script builds `uiaccess` + `config`, signs both
+  exes, and copies to Program Files; it logs to `tools\uiaccess_setup.log` (read it to verify
+  `status=Valid` + `DONE`).
+- To test a WIP branch, build the tree that has the change checked out first (merge feature branches
+  into a throwaway integration branch if verifying several at once), then run the deploy.
+- Launch the SIGNED copy from a NORMAL (non-elevated) shell so UIAccess engages:
+  `Start-Process "C:\Program Files\Wind\Wind.exe"`.
+
 ## Style
 - NEVER use em-dashes (the U+2014 character) anywhere: code, comments, docs, commit messages,
   and UI copy. Use en-dashes, commas, or rephrase. Avoid the `&mdash;` HTML entity in UI strings too.
