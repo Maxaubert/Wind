@@ -1,4 +1,5 @@
 #include "cursor_sprite.h"
+#include "crosshair.h"
 #include <cstring>
 #include <cstdint>
 #include <algorithm>
@@ -155,6 +156,7 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
         lastCursor_ = info.hCursor;
         lastVerdict_ = ShapeStatus::Rendered;
         renderMaskShape();
+        crosshairMode_ = false;   // the window now holds the cursor shape again
         return ShapeStatus::Rendered;
     }
 
@@ -178,6 +180,7 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
     hotY_ = hotY;
     lastCursor_ = info.hCursor;
     lastVerdict_ = ShapeStatus::Rendered;
+    crosshairMode_ = false;   // the window now holds the cursor shape again
     return ShapeStatus::Rendered;
 }
 
@@ -329,6 +332,60 @@ void CursorSprite::keepOnTop() {
         lastTopmostMs_ = nowMs;
         SetWindowPos(hwnd_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
+}
+
+// Paints the Inspect crosshair (shared design: BuildCrosshairBGRA, same as the render model's
+// sprite) into the layered window, premultiplied for UpdateLayeredWindow. The design centers at
+// texel (kSize-2)/2's center, so the hotspot is that texel: moveTo() then puts the cross center
+// (within half a pixel) on the look point.
+void CursorSprite::renderCrosshair() {
+    HDC screenDc = GetDC(nullptr);
+    HDC memDc = CreateCompatibleDC(screenDc);
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = kSize;
+    bmi.bmiHeader.biHeight = -kSize; // top-down DIB
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+    void* bits = nullptr;
+    HBITMAP dib = CreateDIBSection(screenDc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    if (dib == nullptr || bits == nullptr) {
+        if (dib != nullptr) DeleteObject(dib);
+        DeleteDC(memDc);
+        ReleaseDC(nullptr, screenDc);
+        return;
+    }
+    HGDIOBJ oldBmp = SelectObject(memDc, dib);
+    std::vector<uint32_t> px = BuildCrosshairBGRA(kSize, /*premultiply=*/true);
+    memcpy(bits, px.data(), (size_t)kSize * kSize * 4);
+
+    BLENDFUNCTION blend{};
+    blend.BlendOp = AC_SRC_OVER;
+    blend.SourceConstantAlpha = 255;
+    blend.AlphaFormat = AC_SRC_ALPHA;
+    SIZE size{ kSize, kSize };
+    POINT srcPt{ 0, 0 };
+    UpdateLayeredWindow(hwnd_, nullptr, nullptr, &size, memDc, &srcPt, 0, &blend, ULW_ALPHA);
+
+    SelectObject(memDc, oldBmp);
+    DeleteObject(dib);
+    DeleteDC(memDc);
+    ReleaseDC(nullptr, screenDc);
+}
+
+void CursorSprite::showCrosshair() {
+    if (!hwnd_) return;
+    if (!crosshairMode_) {
+        renderCrosshair();
+        crosshairMode_ = true;
+        hotX_ = hotY_ = (kSize - 2) / 2;   // the cross centers on this texel (see BuildCrosshairBGRA)
+        // Invalidate the shape cache: the window no longer holds the cursor pixels, so the next
+        // refreshShape() (Inspect off) must repaint even if the cursor HANDLE never changed -
+        // otherwise its early-return would leave the crosshair on screen as the "cursor".
+        lastCursor_ = nullptr;
+    }
+    show();
 }
 
 void CursorSprite::show() { if (!visible_) { ShowWindow(hwnd_, SW_SHOWNOACTIVATE); visible_ = true; } }
