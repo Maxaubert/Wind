@@ -8,8 +8,10 @@
 #include <cstdarg>
 #include <memory>
 #include <sstream>
+#include <fstream>
 #include "config.h"
 #include "config_path.h"
+#include "config_ui/ini_edit.h"   // wind::UpdateIniText - flip the model key in place
 #include "logging.h"
 #pragma comment(lib, "Dwmapi.lib")
 #include "render_engine.h"
@@ -121,6 +123,9 @@ struct TickState {
     int    revealPending = 0;                  // ticks left before the deferred (game) reveal (issue #90)
     int    hz = 60;                            // resolved tick/refresh rate (auto-detected)
     bool   recenterKeyWasDown = false;         // edge-detect the recenterVk key
+    bool   swapKeyWasDown = false;             // edge-detect the swapModelVk key (model swap + restart)
+    bool   swapArmed = false;                  // swap fires only after the key is first seen UP (a key
+                                               //   held across a relaunch must not re-trigger a swap)
     CursorLockController cursorLock;            // Inspect mode (freeze-cursor + free-look reticle toggle)
     bool   lockKeyWasDown = false;             // edge-detect the cursorLockVk toggle
     bool   prevInspect = false;     // Inspect was on last tick (detect freeze enter/exit)
@@ -173,6 +178,9 @@ static void DiagLog(const char* fmt, ...) {
 static void RegisterHideCursorHotkey(HWND hwnd, int vk, int mods);
 // Same pattern for the quick-zoom hotkey (hotkey mode). Pass vk=0 to unregister.
 static void RegisterQuickZoomHotkey(HWND hwnd, int vk, int mods);
+// Forward-declared so RunTick can call it on the swapModelVk rising edge; the definition lives near
+// the single-instance helpers below (it relaunches Wind.exe, which drives the same eviction handshake).
+static void SwapModelAndRelaunch(const std::wstring& iniPath, const std::string& currentModel);
 
 // Read the current Windows pointer-speed + acceleration settings into a BallisticsConfig so Inspect
 // mode pans the look point at the same speed as the desktop cursor. Refreshed on each Inspect entry
@@ -242,8 +250,10 @@ static void RunTick(TickState& t) {
             // bind changed (else the hook keeps swallowing the OLD key and ignores the new one).
             if (nc.zoomInVk != t.cfg.zoomInVk || nc.zoomOutVk != t.cfg.zoomOutVk
              || nc.zoomInVk2 != t.cfg.zoomInVk2 || nc.zoomOutVk2 != t.cfg.zoomOutVk2
-             || nc.recenterVk != t.cfg.recenterVk || nc.cursorLockVk != t.cfg.cursorLockVk) {
-                g_input.setKeys(nc.zoomInVk, nc.zoomInVk2, nc.zoomOutVk, nc.zoomOutVk2, nc.recenterVk, nc.cursorLockVk);
+             || nc.recenterVk != t.cfg.recenterVk || nc.cursorLockVk != t.cfg.cursorLockVk
+             || nc.swapModelVk != t.cfg.swapModelVk) {
+                g_input.setKeys(nc.zoomInVk, nc.zoomInVk2, nc.zoomOutVk, nc.zoomOutVk2, nc.recenterVk,
+                                nc.cursorLockVk, nc.swapModelVk);
             }
             if (nc.hideCursorVk != t.cfg.hideCursorVk || nc.hideCursorMods != t.cfg.hideCursorMods) {
                 RegisterHideCursorHotkey(t.hwnd, nc.hideCursorVk, nc.hideCursorMods);
@@ -313,6 +323,17 @@ static void RunTick(TickState& t) {
     bool recenterDown = keyDown(t.cfg.recenterVk);
     if (recenterDown && !t.recenterKeyWasDown) recenter = true;
     t.recenterKeyWasDown = recenterDown;
+    // Swap the magnifier model on the swapModelVk rising edge (works zoomed or idle). This writes the
+    // flipped model to the ini and relaunches Wind; the relaunch evicts this instance, so nothing
+    // after this in the tick matters once it fires. Processed unconditionally (not gated on zoom).
+    bool swapDown = keyDown(t.cfg.swapModelVk);
+    // Arm only after the key has been observed UP once. A relaunch builds a fresh TickState, so a key
+    // still physically held across the restart would otherwise read as a new rising edge and swap
+    // again (a render<->transform restart storm while held). Requiring an observed release first means
+    // a held key produces exactly one swap; a plain tap is unaffected.
+    if (!swapDown) t.swapArmed = true;
+    if (t.swapArmed && swapDown && !t.swapKeyWasDown) SwapModelAndRelaunch(t.iniPath, t.cfg.model);
+    t.swapKeyWasDown = swapDown;
     // Inspect mode: toggle on the bound key's rising edge (works at any zoom). The crosshair is
     // overlay-drawn (render_engine draws the crosshair sprite when cursorLocked is set); the active
     // block below freezes the real cursor (1px ClipCursor) and roams a raw-driven look point.
@@ -814,6 +835,40 @@ static void TerminateOtherWind() {
     CloseHandle(snap);
 }
 
+// Swap the magnifier model (render <-> transform) by rewriting magnifier.ini's `model` in place and
+// relaunching Wind.exe: model is read once at launch, so a restart is the only way to switch it. The
+// freshly launched instance runs the single-instance eviction handshake (signals Wind_QuitRequest),
+// so THIS instance exits cleanly (cursor restore, tray removal, clip release) - no new IPC. On a
+// launch failure the ini is reverted so it never claims a model the live process is not running.
+static void SwapModelAndRelaunch(const std::wstring& iniPath, const std::string& currentModel) {
+    const std::string flipped = wind::FlipModel(currentModel);
+    // Read the ini text (UTF-8). If it can't be read, bail rather than clobber it.
+    std::string text;
+    { std::ifstream f(iniPath, std::ios::binary);
+      if (!f) { wind::Log(wind::LogLevel::Warn, "swap", "ini read failed; swap skipped"); return; }
+      text.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()); }
+    const std::string updated = wind::UpdateIniText(text, "model", flipped);
+    { std::ofstream out(iniPath, std::ios::binary | std::ios::trunc);
+      if (!out) { wind::Log(wind::LogLevel::Warn, "swap", "ini write failed; swap skipped"); return; }
+      out << updated; }
+    wind::Log(wind::LogLevel::Info, "swap", "model %s -> %s; relaunching",
+              currentModel.c_str(), flipped.c_str());
+    wchar_t exePath[MAX_PATH];
+    if (!GetModuleFileNameW(nullptr, exePath, MAX_PATH)) {
+        wind::Log(wind::LogLevel::Warn, "swap", "GetModuleFileName failed; reverting ini");
+        std::ofstream out(iniPath, std::ios::binary | std::ios::trunc); out << text; return;
+    }
+    HINSTANCE r = ShellExecuteW(nullptr, L"open", exePath, nullptr, nullptr, SW_SHOWNORMAL);
+    if (reinterpret_cast<INT_PTR>(r) <= 32) {
+        // Relaunch failed: stay on the current model and put the ini back so it matches reality.
+        wind::Log(wind::LogLevel::Warn, "swap", "relaunch failed (%lld); reverting ini",
+                  static_cast<long long>(reinterpret_cast<INT_PTR>(r)));
+        std::ofstream out(iniPath, std::ios::binary | std::ios::trunc); out << text;
+    }
+    // On success, do nothing else: the new instance signals Wind_QuitRequest and we exit via the
+    // normal quit path. (No self-terminate here - the handshake owns the teardown.)
+}
+
 // Guarantee EXACTLY ONE Wind.exe via a named mutex we OWN for our lifetime. This is the canonical,
 // integrity-independent guard: the kernel auto-releases the mutex when its owner dies (even on a
 // hard kill -> the next waiter gets WAIT_ABANDONED), so a zombie can NEVER permanently block a
@@ -915,9 +970,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         MessageBoxW(nullptr, L"Failed to install the mouse hook.", L"Wind", MB_ICONERROR);
         return 1;
     }
-    // Configure the keyboard hook's bound keys (zoom in/out primary+alt + recenter) so it swallows
-    // them and tracks their state. Kept in sync on hot-reload below.
-    g_input.setKeys(cfg.zoomInVk, cfg.zoomInVk2, cfg.zoomOutVk, cfg.zoomOutVk2, cfg.recenterVk, cfg.cursorLockVk);
+    // Configure the keyboard hook's bound keys (zoom in/out primary+alt, recenter, Inspect-mode
+    // cursor-lock, and magnifier-model swap) so it swallows them and tracks their state. Kept in
+    // sync on hot-reload below.
+    g_input.setKeys(cfg.zoomInVk, cfg.zoomInVk2, cfg.zoomOutVk, cfg.zoomOutVk2, cfg.recenterVk,
+                    cfg.cursorLockVk, cfg.swapModelVk);
 
     // Target monitor for this session: the cursor's monitor when multiMonitor is on, else the
     // primary. The first zoom-in re-checks and retargets if the cursor moved to another monitor.

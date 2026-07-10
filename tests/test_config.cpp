@@ -58,6 +58,16 @@ TEST_CASE("cursorLockVk: unbound by default, parseable, forbidden-sanitized") {
     CHECK(ParseConfig("cursorLockVk=113\n").cursorLockVk == 113);   // F2
     CHECK(ParseConfig("cursorLockVk=8\n").cursorLockVk == 0);       // Backspace -> sanitized to unbound
 }
+
+TEST_CASE("swapModelVk parses and defaults to unbound") {
+    CHECK(ParseConfig("").swapModelVk == 0);
+    CHECK(ParseConfig("swapModelVk=112\n").swapModelVk == 112);   // F1
+}
+
+TEST_CASE("swapModelVk rejects a forbidden bind") {
+    // 8 = VK_BACK (Backspace) is forbidden; must sanitize to 0.
+    CHECK(ParseConfig("swapModelVk=8\n").swapModelVk == 0);
+}
 TEST_CASE("IsForbiddenBindVk blocks keys Wind must never swallow, allows the rest") {
     CHECK(IsForbiddenBindVk(0x01));   // VK_LBUTTON (left click)
     CHECK(IsForbiddenBindVk(0x02));   // VK_RBUTTON (right click)

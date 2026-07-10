@@ -61,10 +61,12 @@ staged Apply/Discard footer.
   (0x5B/0x5C) - enforced in three places: the hook never swallows them, `ParseConfig` sanitizes them
   out of the ini, and the config UI's keybind capture refuses them. Down/up swallows are balanced
   (only swallow an UP whose DOWN we swallowed) and released on teardown so a key is never stranded.
-  `cursorLockVk` (Inspect mode) is VK-only (no mods), swallowed like `recenterVk`. Inspect mode is a
-  FREEZE-cursor + free-look reticle toggle (driven entirely in `main.cpp` RunTick, no mouse-hook
-  involvement): toggling on FREEZES the real OS cursor with a 1px `ClipCursor` at its current spot
-  (`frozenCursor`) and hides it, so any hover/tooltip stays alive. A crosshair "look point" is then
+  `cursorLockVk` (Inspect mode) is VK-only (no mods), swallowed like `recenterVk`. `swapModelVk` is
+  also VK-only, swallowed like the above -> when pressed, it writes the flipped `model` to the ini and
+  relaunches Wind via the single-instance eviction handshake so it boots on the other model.
+  Inspect mode is a FREEZE-cursor + free-look reticle toggle (driven entirely in `main.cpp` RunTick,
+  no mouse-hook involvement): toggling on FREEZES the real OS cursor with a 1px `ClipCursor` at its
+  current spot (`frozenCursor`) and hides it, so any hover/tooltip stays alive. A crosshair "look point" is then
   driven by Raw Input (the frozen cursor can't move, but HID mickeys still arrive): the look point IS
   the `CursorMapper` center, so moving the mouse pans the magnified view. SPEED MATCH: the freeze makes
   the normal OS-cursor-delta oracle read ~0, so the look point pans from the raw mickeys run through

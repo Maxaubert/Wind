@@ -23,3 +23,16 @@ TEST_CASE("unknown model value falls back to render") {
     Config c = ParseConfig("model=bogus\n");
     CHECK(c.model == "render");
 }
+
+TEST_CASE("FlipModel alternates render and transform") {
+    CHECK(FlipModel("render") == "transform");
+    CHECK(FlipModel("transform") == "render");
+    // round-trips
+    CHECK(FlipModel(FlipModel("render")) == "render");
+    CHECK(FlipModel(FlipModel("transform")) == "transform");
+}
+
+TEST_CASE("FlipModel maps an unknown value to transform") {
+    CHECK(FlipModel("bogus") == "transform");
+    CHECK(FlipModel("") == "transform");
+}

@@ -55,11 +55,11 @@ public:
     bool swallowEnabled() const { return swallow_; }
     // --- Keyboard binds (WH_KEYBOARD_LL hook) -------------------------------------------------
     // Configure the keyboard VKs the keyboard hook tracks + swallows (zoom in/out primary+alt,
-    // recenter, and the Inspect-mode cursor-lock toggle; 0 = unbound). Forbidden VKs
-    // (IsForbiddenBindVk) are stored but never acted on.
+    // recenter, Inspect-mode cursor-lock toggle, and magnifier-model swap; 0 = unbound).
+    // Forbidden VKs (IsForbiddenBindVk) are stored but never acted on.
     // Clears the per-key pressed/swallowed records so a remap mid-press can't strand a key.
     void setKeys(int zoomInVk, int zoomInVk2, int zoomOutVk, int zoomOutVk2, int recenterVk,
-                 int cursorLockVk);
+                 int cursorLockVk, int swapModelVk);
     // Whether vk is one of the configured (non-forbidden) keyboard binds: decides track+swallow.
     bool isBoundKey(int vk) const;
     // Physical down-state of a keyboard key, as tracked by the keyboard hook. This is the authority
@@ -97,6 +97,7 @@ private:
     std::atomic<int> kbZoomOutVk2_{0};
     std::atomic<int> kbRecenterVk_{0};
     std::atomic<int> kbCursorLockVk_{0};
+    std::atomic<int> kbSwapModelVk_{0};
     std::atomic<bool> kbHookActive_{false}; // true once the LL KEYBOARD hook is installed
     // Inspect-mode cooked-pixel accumulator (main-thread only: WM_INPUT cooks, the tick drains).
     BallisticsConfig ballistics_{};
