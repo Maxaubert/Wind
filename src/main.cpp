@@ -124,6 +124,8 @@ struct TickState {
     int    hz = 60;                            // resolved tick/refresh rate (auto-detected)
     bool   recenterKeyWasDown = false;         // edge-detect the recenterVk key
     bool   swapKeyWasDown = false;             // edge-detect the swapModelVk key (model swap + restart)
+    bool   swapArmed = false;                  // swap fires only after the key is first seen UP (a key
+                                               //   held across a relaunch must not re-trigger a swap)
     CursorLockController cursorLock;            // Inspect mode (freeze-cursor + free-look reticle toggle)
     bool   lockKeyWasDown = false;             // edge-detect the cursorLockVk toggle
     bool   prevInspect = false;     // Inspect was on last tick (detect freeze enter/exit)
@@ -325,7 +327,12 @@ static void RunTick(TickState& t) {
     // flipped model to the ini and relaunches Wind; the relaunch evicts this instance, so nothing
     // after this in the tick matters once it fires. Processed unconditionally (not gated on zoom).
     bool swapDown = keyDown(t.cfg.swapModelVk);
-    if (swapDown && !t.swapKeyWasDown) SwapModelAndRelaunch(t.iniPath, t.cfg.model);
+    // Arm only after the key has been observed UP once. A relaunch builds a fresh TickState, so a key
+    // still physically held across the restart would otherwise read as a new rising edge and swap
+    // again (a render<->transform restart storm while held). Requiring an observed release first means
+    // a held key produces exactly one swap; a plain tap is unaffected.
+    if (!swapDown) t.swapArmed = true;
+    if (t.swapArmed && swapDown && !t.swapKeyWasDown) SwapModelAndRelaunch(t.iniPath, t.cfg.model);
     t.swapKeyWasDown = swapDown;
     // Inspect mode: toggle on the bound key's rising edge (works at any zoom). The crosshair is
     // overlay-drawn (render_engine draws the crosshair sprite when cursorLocked is set); the active
