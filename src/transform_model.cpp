@@ -66,6 +66,9 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             // hits. The sprite therefore sits on its own target at any zoom, anywhere on screen.
             sprite_->moveTo(cx, cy);
             sprite_->show();
+            // Composited outside the magnification, so it must fight for real z-order: reclaim the top
+            // of our band when a popup (tray/context menu, flyout) has been raised over us. Throttled.
+            sprite_->keepOnTop();
         } else {
             sprite_->hide();   // Hidden/Unsupported: show the real (or app-custom) cursor instead
         }
