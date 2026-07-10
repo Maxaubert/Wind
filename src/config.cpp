@@ -61,6 +61,10 @@ double OutlineDwellSeconds(bool inBand, double prevSeconds, double dt, double th
     return s > threshold ? threshold : s;          // cap so the accumulator stays bounded
 }
 
+std::string FlipModel(const std::string& model) {
+    return model == "transform" ? "render" : "transform";
+}
+
 Config ParseConfig(const std::string& text) {
     Config c;
     std::istringstream in(text);

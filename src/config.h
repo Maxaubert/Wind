@@ -159,6 +159,10 @@ bool IsForbiddenBindVk(int vk);
 // caller keeps its fallback default.
 bool ParseHexColor(const std::string& s, float& r, float& g, float& b);
 
+// Pure: render <-> transform. "transform" -> "render"; anything else -> "transform" (so a corrupt
+// model value flips to a valid engine). Pure; used by the swap-model hotkey. No I/O, no <windows.h>.
+std::string FlipModel(const std::string& model);
+
 // Pure: whether the edge outline should show at this zoom level, given the master `outline`
 // toggle and the optional low-zoom cutoff. (The "are we zoomed" level > 1.0 gate stays in the
 // render pass.)
