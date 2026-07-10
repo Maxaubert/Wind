@@ -3,6 +3,7 @@
 #include "render_shaders.h"
 #include "hdr_info.h"
 #include "cursor_decode.h"
+#include "crosshair.h"
 #include "png_dump.h"
 #include "logging.h"
 #include <windows.h>
@@ -604,35 +605,13 @@ bool RenderEngine::State::buildDeviceResources() {
     if (!sampLinear || !sampPoint) { RLog("buildDeviceResources: CreateSamplerState failed"); return false; }
 
     // --- Inspect-mode crosshair sprite (48x48). Thin full-length cross: the vertical and horizontal
-    // lines run continuously through the center (no gap), a bit thinner and slightly larger than the
-    // old 32x32 sprite. Light-grey core + black outline so it reads on any background; drawn (scaled by
-    // zoom) in place of the cursor while Inspect mode is on. ---
+    // lines run continuously through the center (no gap), light-grey core + black outline so it reads
+    // on any background; drawn (scaled by zoom) in place of the cursor while Inspect mode is on. The
+    // pixel design lives in BuildCrosshairBGRA (src/crosshair.cpp, pure + unit-tested) and is shared
+    // with the transform model's layered-window crosshair, so the two models stay identical. ---
     {
-        const int N = 48; const double cx = 23.5, cy = 23.5;
-        // Very slightly thicker + ~1px shorter than before, tuned with sub-pixel precision via 4x4
-        // supersampled coverage (the half-pixel center makes a hard on/off sprite quantize thickness
-        // to 2px steps, too coarse for "very slight"). Each texel's alpha = covered fraction, and its
-        // grey/black mix = core-vs-outline coverage, so edges anti-alias cleanly under the alpha blend.
-        const double armLen = 22.5, gap = 0.0, coreHalf = 1.25, outlineHalf = 2.35;
-        const int SS = 4; const double inv = 1.0 / SS;
-        std::vector<uint32_t> px((size_t)N * N, 0);
-        for (int yy = 0; yy < N; ++yy) for (int xx = 0; xx < N; ++xx) {
-            int covered = 0, coreCov = 0;
-            for (int sy = 0; sy < SS; ++sy) for (int sx = 0; sx < SS; ++sx) {
-                double adx = std::fabs((xx + (sx + 0.5) * inv) - cx);
-                double ady = std::fabs((yy + (sy + 0.5) * inv) - cy);
-                bool vArm = adx <= outlineHalf && ady <= armLen && ady >= gap;
-                bool hArm = ady <= outlineHalf && adx <= armLen && adx >= gap;
-                if (vArm || hArm) {
-                    ++covered;
-                    if ((vArm && adx <= coreHalf) || (hArm && ady <= coreHalf)) ++coreCov;
-                }
-            }
-            if (!covered) continue;                                  // fully transparent texel
-            unsigned a   = (unsigned)(covered * 255 / (SS * SS));
-            unsigned lum = (unsigned)(coreCov * 0xCC / covered);     // grey core vs black outline mix
-            px[(size_t)yy * N + xx] = (a << 24) | (lum << 16) | (lum << 8) | lum;   // straight-alpha BGRA
-        }
+        const int N = 48;
+        std::vector<uint32_t> px = BuildCrosshairBGRA(N, /*premultiply=*/false);   // straight-alpha BGRA
         D3D11_TEXTURE2D_DESC td{}; td.Width = N; td.Height = N; td.MipLevels = 1; td.ArraySize = 1;
         td.Format = DXGI_FORMAT_B8G8R8A8_UNORM; td.SampleDesc.Count = 1; td.Usage = D3D11_USAGE_IMMUTABLE;
         td.BindFlags = D3D11_BIND_SHADER_RESOURCE;

@@ -57,7 +57,19 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         lastClickX_ = cx; lastClickY_ = cy; haveLastClick_ = true;
     }
 
-    if (useSprite_ && sprite_ && ex.drawCursor) {
+    if (useSprite_ && sprite_ && ex.cursorLocked && ex.drawCursor) {
+        // Inspect mode: the real cursor is frozen at the (overridden) click point, but the thing the
+        // user aims with is the LOOK POINT (mapper center). Repaint the sprite as the crosshair (the
+        // same design the render model draws) and put it on the look point, NOT on cx/cy - those are
+        // pinned to the frozen cursor while Inspect is on. The transform is anchored at the look
+        // point (T(L) == L) and this layered window composites unmagnified, so the crosshair sits
+        // exactly on the aimed content at any zoom, including the 1x roam. Without this branch the
+        // sprite kept drawing the arrow at the frozen point (visible, stationary) and no crosshair
+        // existed at all - the transform model used to ignore ex.cursorLocked.
+        sprite_->showCrosshair();
+        sprite_->moveTo(r.clickDesktopX + mon_.x, r.clickDesktopY + mon_.y);
+        sprite_->keepOnTop();
+    } else if (useSprite_ && sprite_ && ex.drawCursor) {
         CursorSprite::ShapeStatus st = sprite_->refreshShape();
         if (st == CursorSprite::ShapeStatus::Rendered) {
             // Draw at the click point. DWM does NOT magnify this layered window (measured), so it is

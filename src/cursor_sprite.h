@@ -17,9 +17,15 @@ public:
     // this it is raised once at create() and any topmost popup that appears later stays over it. Call
     // each active tick while shown. Mirrors RenderEngine's overlayDisplaced re-assert.
     void keepOnTop();
+    // Inspect mode: repaint the sprite as the crosshair (BuildCrosshairBGRA, the same design the
+    // render model draws) and show it. The hotspot becomes the cross center, so moveTo() places the
+    // crosshair ON the look point. Cached: repaints only on the first call after normal-cursor use;
+    // the next refreshShape() repaints the cursor shape, so leaving Inspect needs no explicit reset.
+    void showCrosshair();
     void destroy();
 private:
     void renderMaskShape();
+    void renderCrosshair();
     bool displaced() const;            // a visible, overlapping window sits above us in z-order
     static const int kSize = 64;
     const std::unordered_map<HCURSOR, HCURSOR>& originals_;
@@ -29,6 +35,7 @@ private:
     HICON   iconCopy_ = nullptr;
     int     hotX_ = 0, hotY_ = 0;
     bool    visible_ = false;
+    bool    crosshairMode_ = false;          // window currently holds the crosshair pixels
     unsigned long long lastTopmostMs_ = 0;   // last HWND_TOPMOST re-assert (throttled)
 };
 }
