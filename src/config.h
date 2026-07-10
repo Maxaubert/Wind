@@ -30,6 +30,10 @@ struct Config {
     int    cursorLockVk     = 0;     // VK code; 0 = unbound. Tap to toggle Inspect mode (cursor lock)
                                      // while zoomed. Swallowed system-wide like recenterVk (VK only,
                                      // no modifier - the keyboard hook swallows the bare key).
+    int    swapModelVk      = 0;     // VK code; 0 = unbound. Tap to swap the magnifier model
+                                     // (render <-> transform). Swallowed system-wide like
+                                     // cursorLockVk (VK only, no modifier). Pressing it restarts
+                                     // Wind onto the flipped model (model is not hot-swappable).
     // Hotkey to toggle the magnified cursor's visibility while zoomed. Edge-detected in the tick
     // loop and flips a runtime-only bool (NEVER written back to the ini), so pressing it does not
     // trigger the config hot-reload and the zoom level is preserved. 0 = unbound. Modifier mask
