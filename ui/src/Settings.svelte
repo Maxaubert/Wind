@@ -35,9 +35,21 @@
     values = { ...values, ...patch };
     saved = { ...saved, ...patch };
   }
-  let restartOpen = false;
+  // A model change is applied by writing the ini then relaunching Wind (model is read once at
+  // launch, so a hot-reload can't switch it). To the user a deliberate Apply and a hot-reload look
+  // identical, so there is no confirm step. restartError still surfaces a relaunch that failed.
   let restartError = false;
-  onMessage(m => { if (m && m.type === 'restartFailed') { restartError = true; restartOpen = true; } });
+  // The model that the LIVE process is running. Captured before commit() overwrites saved.model, so
+  // a failed relaunch can revert the ini + dropdown back to it (keeps ini model == running model).
+  let runningModel = '';
+  onMessage(m => {
+    if (m && m.type === 'restartFailed') {
+      values = { ...values, model: runningModel };
+      saved  = { ...saved,  model: runningModel };
+      setConfig('model', runningModel);   // rewrite the ini back to the model still running
+      restartError = true;
+    }
+  });
   function change(keyOrPatch, val) {
     // Atomic multi-key form: change({k1:v1, k2:v2}) updates both in a single render. The keybind
     // capture uses this so its sibling-key update (vk + button) lands as one consistent state.
@@ -60,18 +72,18 @@
     for (const k of Object.keys(values)) if (String(values[k]) !== String(saved[k])) setConfig(k, values[k]);
     saved = { ...values };
   }
-  // `model` is read once at Wind launch, so switching it needs a restart. Gate Apply behind a
-  // confirmation rather than writing a value the running process will ignore.
+  // `model` is read once at Wind launch, so switching it writes the ini (model FIRST - the relaunched
+  // Wind reads it at startup) then relaunches. No confirm: a restart and a hot-reload look the same.
   function apply() {
-    if (String(values.model) !== String(saved.model)) { restartError = false; restartOpen = true; return; }
+    if (String(values.model) !== String(saved.model)) {
+      runningModel = saved.model;   // remember what's live before commit() moves saved.model forward
+      restartError = false;
+      commit();
+      windowControl('restartWind');
+      return;
+    }
     commit();
   }
-  // Write the new model FIRST (the relaunched Wind reads it at startup), then relaunch.
-  function confirmRestart() { restartOpen = false; commit(); windowControl('restartWind'); }
-  // Revert ONLY the model, then commit any other pending edits: cancelling a model switch must not
-  // silently discard unrelated changes. Keeping the ini's model equal to the RUNNING model also
-  // stops the schema's showIf gating from revealing rows for a model that is not loaded.
-  function cancelRestart() { restartOpen = false; values = { ...values, model: saved.model }; commit(); }
   function discard() { values = { ...saved }; }
   function toggleTheme() { theme = nextTheme(theme); setTheme(theme); }
   $: dirty = Object.keys(values).some(k => String(values[k]) !== String(saved[k]));
@@ -110,21 +122,12 @@
       <button class="btn primary" on:click={apply} disabled={!dirty}>Apply</button>
     </footer>
   </section>
-  {#if restartOpen}
+  {#if restartError}
     <div class="mbackdrop">
       <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="rtitle">
-        {#if restartError}
-          <h2 id="rtitle">Couldn't restart Wind</h2>
-          <p>Wind.exe could not be launched. The magnifier is still running with the previous model.</p>
-          <div class="mbtns"><button class="primary" on:click={() => (restartOpen = false)}>Close</button></div>
-        {:else}
-          <h2 id="rtitle">Restart required</h2>
-          <p>Changing the magnifier model requires restarting Wind.</p>
-          <div class="mbtns">
-            <button on:click={cancelRestart}>Cancel</button>
-            <button class="primary" on:click={confirmRestart}>Restart Wind</button>
-          </div>
-        {/if}
+        <h2 id="rtitle">Couldn't restart Wind</h2>
+        <p>Wind.exe could not be launched. The magnifier is still running with the previous model.</p>
+        <div class="mbtns"><button class="primary" on:click={() => (restartError = false)}>Close</button></div>
       </div>
     </div>
   {/if}
