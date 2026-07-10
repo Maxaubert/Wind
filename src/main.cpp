@@ -963,8 +963,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         MessageBoxW(nullptr, L"Failed to install the mouse hook.", L"Wind", MB_ICONERROR);
         return 1;
     }
-    // Configure the keyboard hook's bound keys (zoom in/out primary+alt + recenter) so it swallows
-    // them and tracks their state. Kept in sync on hot-reload below.
+    // Configure the keyboard hook's bound keys (zoom in/out primary+alt, recenter, Inspect-mode
+    // cursor-lock, and magnifier-model swap) so it swallows them and tracks their state. Kept in
+    // sync on hot-reload below.
     g_input.setKeys(cfg.zoomInVk, cfg.zoomInVk2, cfg.zoomOutVk, cfg.zoomOutVk2, cfg.recenterVk,
                     cfg.cursorLockVk, cfg.swapModelVk);
 

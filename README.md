@@ -58,6 +58,7 @@ scene-locked cursor; on by default).
 - Hold **mouse forward button (XButton2)** - zoom in (smooth ramp).
 - Hold **mouse back button (XButton1)** - zoom out.
 - Release - zoom stays at the current level.
+- **Magnifier model swap** (unbound by default) - press to toggle between the `render` and `transform` magnifier models; Wind restarts onto the other model. Bind it in Settings under Display -> Magnifier model.
 - **Ctrl+Alt+Q** - quit from anywhere (also restores the cursor); or use the tray icon.
 
 ## Build
