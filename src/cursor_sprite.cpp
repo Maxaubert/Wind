@@ -2,6 +2,7 @@
 #include <cstring>
 #include <cstdint>
 #include <algorithm>
+#include <dwmapi.h>
 namespace wind {
 
 static const wchar_t* kClassName = L"WindCursorSprite";
@@ -291,6 +292,43 @@ void CursorSprite::renderMaskShape() {
 void CursorSprite::moveTo(int desktopX, int desktopY) {
     SetWindowPos(hwnd_, nullptr, desktopX - hotX_, desktopY - hotY_, 0, 0,
                  SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+// True if a visible, non-cloaked window overlapping the sprite sits above it in z-order - i.e. a
+// popup (tray/context menu, notification flyout, always-on-top app) has been raised over us. Walks
+// the windows above us (GW_HWNDPREV); when we are already on top (the common case) the first
+// GetWindow returns NULL and this is one cheap syscall. Same technique as RenderEngine's
+// overlayDisplaced, scoped to the sprite's own small rect. Cloaked windows (another virtual desktop)
+// and non-overlapping windows are ignored so we do not thrash SetWindowPos chasing them.
+bool CursorSprite::displaced() const {
+    if (!hwnd_) return false;
+    HWND above = GetWindow(hwnd_, GW_HWNDPREV);
+    if (!above) return false;
+    RECT self{};
+    if (!GetWindowRect(hwnd_, &self)) return false;
+    for (; above; above = GetWindow(above, GW_HWNDPREV)) {
+        if (!IsWindowVisible(above)) continue;
+        int cloaked = 0;
+        if (SUCCEEDED(DwmGetWindowAttribute(above, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked)
+            continue;
+        RECT wr, inter;
+        if (GetWindowRect(above, &wr) && IntersectRect(&inter, &wr, &self)) return true;
+    }
+    return false;
+}
+
+// Reclaim top-of-band when displaced (immediate), plus a 1s unconditional backstop that self-heals
+// if the displaced check ever misses a case. A banded window stays in its band across SetWindowPos,
+// so this raises us to the top of our z-band without leaving it. Not done every tick: a per-tick
+// z-order SetWindowPos synchronizes with the window manager and can microstutter (the same reason
+// RenderEngine gates its re-assert). moveTo keeps SWP_NOZORDER so the common idle move stays cheap.
+void CursorSprite::keepOnTop() {
+    if (!hwnd_ || !visible_) return;
+    unsigned long long nowMs = GetTickCount64();
+    if (displaced() || nowMs - lastTopmostMs_ >= 1000) {
+        lastTopmostMs_ = nowMs;
+        SetWindowPos(hwnd_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
 }
 
 void CursorSprite::show() { if (!visible_) { ShowWindow(hwnd_, SW_SHOWNOACTIVATE); visible_ = true; } }
