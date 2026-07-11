@@ -101,6 +101,16 @@ staged Apply/Discard footer.
   process; the only reliable fix is a kernel filter driver (e.g. Interception), which we deliberately
   do NOT use (no-driver design + anti-cheat ban risk). Confirmed: swallowing works in normal apps,
   not in raw-input games. Pick game keys/buttons you don't otherwise use.
+- TRANSFORM MODEL CURSOR GEOMETRY: DWM composites the cursor AND layered windows OUTSIDE the
+  fullscreen magnification (measured, PR #130), so the drawn cursor's window position IS its screen
+  position. Two self-consistent geometries exist and `transform_model.cpp` picks per tick:
+  CENTERED (default, `transformCenterCursor=1` + the sprite): source rect = the mapper's centered
+  clamped rect, sprite at `cursorScreen` (= T(C)), OS cursor welded to the lens center C - clicks
+  land exactly under the sprite. ANCHORED fallback (`ComputeFixedPointOffset`, T(L) == L): used for
+  app-custom cursor shapes that cannot be blanked, `cursorSprite=0`, or `transformCenterCursor=0` -
+  the ONLY geometry where a cursor drawn by DWM at its own desktop spot is correct. Do NOT weld the
+  sprite to the OS cursor position under a centered rect (that was the original click-drift bug,
+  issue #129), and do NOT scale the sprite with zoom (the failed `044257f` attempt).
 - Declare Per-Monitor-V2 DPI awareness (`Wind.manifest`) or offset pixel math is wrong
   on scaled displays.
 - The lens-must-move-when-cursor-locked behavior is THE core feature. It relies on

@@ -53,6 +53,7 @@ free-look crosshair is not supported under `transform`.
 Transform-only keys: `fastPan` (sub-pixel pan via the private channel; on by default), `smoothPan`
 (hold a game in composited present so panning does not stutter), `cursorSprite` (draw the
 scene-locked cursor; on by default).
+The transform model keeps the drawn cursor centered while the view pans under it (`transformCenterCursor=1`, default; needs the scene-locked cursor sprite); set 0 for the previous free cursor, anchored to the magnification.
 
 ## Controls (defaults, configurable in `magnifier.ini`)
 - Hold **mouse forward button (XButton2)** - zoom in (smooth ramp).
