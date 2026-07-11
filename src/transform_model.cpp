@@ -107,12 +107,15 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         float gl = 0.0f; int gx = 0, gy = 0;
         BOOL got = MagGetFullscreenTransform(&gl, &gx, &gy);
         POINT ap{}; GetCursorPos(&ap);
-        double tinvX = ap.x / level + src.x, tinvY = ap.y / level + src.y;
+        // The decisive probe: GetPhysicalCursorPos vs GetCursorPos exposes the OS input
+        // virtualization layer directly. If Windows remaps pointer input under the fullscreen
+        // transform, these two differ, and the difference IS the mapping - measured, not theorized.
+        POINT pp{}; BOOL gotPhys = GetPhysicalCursorPos(&pp);
         Log(LogLevel::Info, "cgeo",
             "L=%.2f centered=%d priv=%d src=(%.1f,%.1f) sent off=(%d,%d) readback ok=%d L=%.2f off=(%d,%d) "
-            "weld=(%d,%d) actual=(%ld,%ld) Tinv=(%.1f,%.1f) C=(%d,%d) curScr=(%.1f,%.1f)",
+            "weld=(%d,%d) logical=(%ld,%ld) phys ok=%d (%ld,%ld) C=(%d,%d) curScr=(%.1f,%.1f)",
             level, (int)centered, (int)host_.privateActive(), src.x, src.y, m.offX, m.offY,
-            (int)got, gl, gx, gy, wx, wy, ap.x, ap.y, tinvX, tinvY, cx, cy,
+            (int)got, gl, gx, gy, wx, wy, ap.x, ap.y, (int)gotPhys, pp.x, pp.y, cx, cy,
             r.cursorScreenX, r.cursorScreenY);
     }
 
