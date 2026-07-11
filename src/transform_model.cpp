@@ -78,24 +78,22 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     const int sx = centered ? (int)(r.cursorScreenX + 0.5) + mon_.x : cx;
     const int sy = centered ? (int)(r.cursorScreenY + 0.5) + mon_.y : cy;
 
-    // Weld the hidden OS cursor to the lens center C. Input acts at the RAW cursor position - this
-    // was MEASURED live (issue #139): GetCursorPos == GetPhysicalCursorPos at every probe, welded
-    // and mid-motion, so Windows runs NO input virtualization under the fullscreen transform. With
-    // the raw cursor at C, hover and clicks act on exactly the content shown under the drawn
-    // cursor (the sprite at cursorScreen == T(C) by the mapper identity). Do NOT weld at the
-    // sprite's screen position T(C) instead: that pins input to whatever desktop content sits at
-    // the sprite's raw coordinates - a fixed mid-screen desktop point in centered mode - which was
-    // tried on a wrong inverse-remap theory and produced exactly that bug.
-    // Re-pin whenever the cursor STRAYED from the weld point (the hand physically moves the raw
-    // cursor between ticks) rather than only when the target moved: this also emits a fresh
-    // WM_MOUSEMOVE at C after hand motion, keeping app hover state on C instead of the stray
-    // point. No syscall when idle. Inspect freeze pins the raw point via ex.clickOverride (the
-    // 1px ClipCursor holds it anyway).
+    // CENTERED mode is FREE-FOLLOW: the real cursor is NEVER moved by us (no weld, no synthetic
+    // input). RunTick snaps the lens center to the real cursor each tick, so C == the raw cursor
+    // and input acts natively on exactly the content shown under the sprite (input acts at the
+    // RAW cursor - measured: GetCursorPos == GetPhysicalCursorPos always, no OS input
+    // virtualization under the fullscreen transform). Do NOT reintroduce any SetCursorPos here in
+    // centered mode: a welding stream fights the hand's motion and intermittently breaks app hover
+    // tracking (issue #139 LEDGER, builds B1-B5). The weld remains only where WE own the cursor
+    // position: ANCHORED mode (realizes cursorSensitivity/smoothing, the old shipped behavior) and
+    // the Inspect freeze override.
     const int wx = ex.clickOverride ? ex.clickDesktopX : cx;
     const int wy = ex.clickOverride ? ex.clickDesktopY : cy;
-    POINT rawNow{};
-    GetCursorPos(&rawNow);
-    if (rawNow.x != wx || rawNow.y != wy) SetCursorPos(wx, wy);
+    if (!centered || ex.clickOverride) {
+        POINT rawNow{};
+        GetCursorPos(&rawNow);
+        if (rawNow.x != wx || rawNow.y != wy) SetCursorPos(wx, wy);
+    }
     lastWeldX_ = wx; lastWeldY_ = wy;
 
     // TEMP DIAGNOSTIC (issue #139): once per second while active, log sent vs applied transform

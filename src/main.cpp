@@ -460,7 +460,21 @@ static void RunTick(TickState& t) {
         // cursor briefly escaping to another monitor) cannot teleport the lens. cx_ also clamps.
         if (dx >  t.mon.w) dx =  t.mon.w; else if (dx < -t.mon.w) dx = -t.mon.w;
         if (dy >  t.mon.h) dy =  t.mon.h; else if (dy < -t.mon.h) dy = -t.mon.h;
-        MapResult r = t.mapper.update(dx, dy, lvl);
+        // TRANSFORM CENTERED MODE = FREE-FOLLOW: the real cursor is never touched (no weld, no
+        // synthetic input - hover, clicks, and tooltips act 100% natively at the real cursor);
+        // the ZOOM WINDOW follows IT. Snapping the lens center to the cursor every tick builds
+        // the centered rect around the real cursor, so the sprite lands at T(cursor) (screen
+        // center in the interior, edge-sliding at clamps) and the aim point IS the arrow's
+        // content by construction - alignment cannot break, there is nothing to synchronize.
+        // This replaced the weld-the-cursor-to-the-lens design, whose synthetic-move stream
+        // fought the hand and intermittently broke app hover tracking (issue #139 LEDGER).
+        // Trade-offs (this mode only): cursorSensitivity and cursorSmoothing do not apply
+        // (native cursor feel), and a game that clips the cursor freezes the view (anchored
+        // mode remains the right choice in games). Inspect keeps the frozen-cursor machinery.
+        const bool freeFollow = !inspect && t.cfg.model == "transform"
+                             && t.cfg.transformCenterCursor != 0 && t.cfg.cursorSprite != 0;
+        if (freeFollow) t.mapper.reset(cur.x - t.mon.x, cur.y - t.mon.y);
+        MapResult r = t.mapper.update(freeFollow ? 0 : dx, freeFollow ? 0 : dy, lvl);
         // Inspect click-to-look-point: the hook swallowed real click(s) and handed us per-button counts
         // (counts, not a flag, so a fast double-click before this drains isn't lost). Fire a clean ABSOLUTE
         // click at the crosshair (mapper center = look point) per pending press, so each lands where you
