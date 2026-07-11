@@ -30,6 +30,7 @@ private:
     std::unique_ptr<CursorBlanker> blanker_;
     std::unique_ptr<CursorSprite> sprite_;
     unsigned long long lastPinAssertMs_ = 0;
+    unsigned long long lastDiagMs_ = 0;             // TEMP diagnostic throttle (issue #139)
     bool haveLastClick_ = false;                     // dedup the OS-cursor recenter (SetCursorPos)
     int  lastClickX_ = 0, lastClickY_ = 0;
 };

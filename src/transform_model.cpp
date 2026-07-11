@@ -1,6 +1,8 @@
 #include "transform_model.h"
 #include "transform.h"   // ComputeMagTransform
+#include "logging.h"
 #include <windows.h>
+#include <magnification.h>   // TEMP diagnostic: MagGetFullscreenTransform read-back (issue #139)
 
 namespace wind {
 
@@ -73,6 +75,23 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     if (!haveLastClick_ || cx != lastClickX_ || cy != lastClickY_) {
         SetCursorPos(cx, cy);
         lastClickX_ = cx; lastClickY_ = cy; haveLastClick_ = true;
+    }
+
+    // TEMP DIAGNOSTIC (issue #139, centered-mode mixed-geometry report): once per second while
+    // active, log what we SENT vs what the OS says is APPLIED (MagGetFullscreenTransform read-back)
+    // and where the OS cursor actually sits after the weld. Removed once the report is explained.
+    unsigned long long nowDiag = GetTickCount64();
+    if (nowDiag - lastDiagMs_ >= 1000) {
+        lastDiagMs_ = nowDiag;
+        float gl = 0.0f; int gx = 0, gy = 0;
+        BOOL got = MagGetFullscreenTransform(&gl, &gx, &gy);
+        POINT ap{}; GetCursorPos(&ap);
+        Log(LogLevel::Info, "cgeo",
+            "L=%.2f centered=%d priv=%d src=(%.1f,%.1f) sent off=(%d,%d) tx=(%d,%d) "
+            "readback ok=%d L=%.2f off=(%d,%d) weld=(%d,%d) actual=(%ld,%ld) curScr=(%.1f,%.1f) click=(%d,%d)",
+            level, (int)centered, (int)host_.privateActive(), src.x, src.y, m.offX, m.offY,
+            m.txX, m.txY, (int)got, gl, gx, gy, cx, cy, ap.x, ap.y,
+            r.cursorScreenX, r.cursorScreenY, r.clickDesktopX, r.clickDesktopY);
     }
 
     // Where the drawn cursor goes on SCREEN. Centered: cursorScreen (= T(C), the screen point that
