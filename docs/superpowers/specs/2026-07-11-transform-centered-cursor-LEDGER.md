@@ -49,3 +49,25 @@ none yet tested:
 1. Confirm the transform model is live: cgeo lines must be appearing in the log DURING the test.
 2. Reproduce, then HOLD STILL 3s in the broken state so a probe line captures it.
 3. Read the log BEFORE forming any theory.
+
+## Final entry (2026-07-11): feature abandoned, reverted to main
+
+B6 (free-follow, 41f955d): no weld, view follows the free cursor. Correct by
+construction for input; misalignment persisted (sprite placement).
+B7 (compositing law, 391296b): sprite placed at the desktop point on the theory
+that BANDED windows are re-magnified with the desktop (787509f's old finding,
+consistent with the corner marker test). Tested live: STILL failed - the arrow
+did not ride the content. Either the banded-inside theory is wrong or a further
+unknown layer exists.
+
+Verdict: the transform model's centered cursor is UNSOLVED after 7 builds. The
+one unfalsified conclusion: ANCHORED (T(L) == L) is the only geometry that works
+on this system, because it is invariant to every unknown (input mapping, sprite
+compositing side, view mis-pan) - all of them coincide at the cursor's fixed
+point. Any future attempt MUST first build a way to SEE the composited output
+(phone-camera protocol or hardware capture), because every software measurement
+channel lies: transform read-back echoes stored values, screenshots capture the
+pre-magnified desktop, and the render model's selftest does not apply.
+
+Reverted: main redeployed (anchored free cursor). Branch feat/transform-centered-cursor
+preserved with this ledger. Issue #139 closed as not-planned with findings.
