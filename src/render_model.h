@@ -26,6 +26,7 @@ public:
     bool retarget(const MonitorTarget& m) override;
     void present(const MapResult& r, double level, const Config& cfg,
                  const MonitorTarget& mon, const PresentExtras& ex) override;
+    void lastWeld(int& x, int& y) const override { x = lastWeldX_; y = lastWeldY_; }
     bool coversShell() const override;
     RenderEngine& engine();   // escape hatch for render-only main-loop code (device-lost, priming, selftest)
     bool deviceLost() const;  // forwarded (main loop calls this)
@@ -37,5 +38,6 @@ private:
     int  zorderBand_;
     bool hdrTonemap_;
     bool primed_ = false;
+    int  lastWeldX_ = 0, lastWeldY_ = 0;   // where renderFrame welds the OS cursor (p.clickDesktop)
 };
 }

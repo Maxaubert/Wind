@@ -584,19 +584,29 @@ static void RunTick(TickState& t) {
         if (inspect) {
             t.lastSetVirtual = t.frozenCursor;
         } else {
-            t.lastSetVirtual.x = r.clickDesktopX + t.mon.x;
-            t.lastSetVirtual.y = r.clickDesktopY + t.mon.y;
+            // The baseline must be the ACTUAL weld point, which is model-specific: the render model
+            // welds at the lens center C; the transform model welds at the DRAWN cursor's screen
+            // position T(C), because an active fullscreen transform makes Windows deliver mouse
+            // input at T^-1(raw cursor) (see the weld comment in transform_model.cpp).
+            int wx = 0, wy = 0;
+            t.model.lastWeld(wx, wy);
+            t.lastSetVirtual.x = wx;
+            t.lastSetVirtual.y = wy;
         }
     } else if (t.prevActive) {                        // active -> idle: tear the overlay down
         t.model.setActive(false);
         t.model.hideSystemCursor(false);
         t.outlineZoneSec = 0.0;                       // zoom-out clears the low-zoom dwell (no banked partial)
-        if (t.prevInspect) {
-            ClipCursor(nullptr);
-            POINT lp{ (int)(t.mapper.centerX() + 0.5) + t.mon.x, (int)(t.mapper.centerY() + 0.5) + t.mon.y };
-            SetCursorPos(lp.x, lp.y);                  // resume at the look point
-            t.lastSetVirtual = lp;
-        }
+        if (t.prevInspect) ClipCursor(nullptr);       // release the Inspect freeze clip
+        // Land the cursor ON the aimed content (the lens center C). The transform model welds the
+        // raw cursor at the DRAWN cursor's screen position T(C) while zoomed (input-remap gotcha,
+        // see transform_model.cpp); at 1x that screen point no longer shows the aimed content, so
+        // without this warp zoom-out would strand the cursor on whatever sits at old T(C). For the
+        // render model (and Inspect exit, which resumes at the look point) the weld already equals
+        // C, so this is a no-op warp there.
+        POINT lp{ (int)(t.mapper.centerX() + 0.5) + t.mon.x, (int)(t.mapper.centerY() + 0.5) + t.mon.y };
+        SetCursorPos(lp.x, lp.y);
+        t.lastSetVirtual = lp;
         t.revealPending = 0;                          // a quick tap may zoom out before the deferred reveal
     }
     t.prevLvl = lvl;

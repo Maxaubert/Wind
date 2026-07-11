@@ -18,6 +18,7 @@ public:
     void onActivate() override {}                 // no capture to prime
     void present(const MapResult& r, double level, const Config& cfg,
                  const MonitorTarget& mon, const PresentExtras& ex) override;
+    void lastWeld(int& x, int& y) const override { x = lastWeldX_; y = lastWeldY_; }
     bool coversShell() const override { return false; }
 private:
     bool fastPan_, smoothPan_, useSprite_;
@@ -31,7 +32,6 @@ private:
     std::unique_ptr<CursorSprite> sprite_;
     unsigned long long lastPinAssertMs_ = 0;
     unsigned long long lastDiagMs_ = 0;             // TEMP diagnostic throttle (issue #139)
-    bool haveLastClick_ = false;                     // dedup the OS-cursor recenter (SetCursorPos)
-    int  lastClickX_ = 0, lastClickY_ = 0;
+    int  lastWeldX_ = 0, lastWeldY_ = 0;             // where present() welded the OS cursor (T(C))
 };
 }

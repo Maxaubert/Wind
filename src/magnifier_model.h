@@ -26,6 +26,13 @@ struct IMagnifierModel {
     virtual bool retarget(const MonitorTarget& m) { (void)m; return false; }  // render-only; false = unchanged
     virtual void present(const MapResult& r, double level, const Config& cfg,
                          const MonitorTarget& mon, const PresentExtras& ex) = 0;  // the per-tick draw
+    // Where present() placed (welded) the OS cursor this tick, virtual-desktop px. RunTick MUST use
+    // this as the baseline for the next tick's GetCursorPos pan delta - the baseline has to be the
+    // ACTUAL weld point, and the models weld differently: the render model welds at the lens center
+    // C (no DWM transform, so input acts at the raw cursor). The transform model welds at the DRAWN
+    // cursor's screen position T(C): while a fullscreen transform is active, Windows delivers mouse
+    // input at T^-1(raw cursor), so the cursor must sit at T(C) for input to act at C.
+    virtual void lastWeld(int& x, int& y) const = 0;
     virtual bool coversShell() const = 0;             // render true (uiAccess band) / transform false
 };
 }

@@ -36,7 +36,6 @@ void TransformModel::setActive(bool active) {
     if (!active) {
         host_.setTransform(1.0f, 0, 0, 0, 0, false);   // back to 1x
         pin_.hide();
-        haveLastClick_ = false;   // re-warp fresh on the next activation
     }
 }
 
@@ -69,41 +68,53 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     MagTransform m = ComputeMagTransform(src.x, src.y, level);
     host_.setTransform((float)level, m.offX, m.offY, m.txX, m.txY, fastPan_);
 
-    // Weld the hidden OS cursor to the lens point, exactly as RenderEngine::render does. This keeps
-    // clicks landing at the lens center AND keeps RunTick's warp-and-measure pan tracking consistent
-    // (RunTick assumes the cursor was moved here each active tick). Deduped so an idle tick injects
-    // no synthetic mouse move. Inspect freeze pins the point via ex.clickOverride; otherwise
-    // clickDesktop is monitor-local, so add the monitor origin for desktop px.
-    int cx = ex.clickOverride ? ex.clickDesktopX : (r.clickDesktopX + mon_.x);
-    int cy = ex.clickOverride ? ex.clickDesktopY : (r.clickDesktopY + mon_.y);
-    if (!haveLastClick_ || cx != lastClickX_ || cy != lastClickY_) {
-        SetCursorPos(cx, cy);
-        lastClickX_ = cx; lastClickY_ = cy; haveLastClick_ = true;
-    }
+    // The lens center C in virtual-desktop px: the point input should ACT at (clicks, hover).
+    int cx = r.clickDesktopX + mon_.x;
+    int cy = r.clickDesktopY + mon_.y;
 
-    // TEMP DIAGNOSTIC (issue #139, centered-mode mixed-geometry report): once per second while
-    // active, log what we SENT vs what the OS says is APPLIED (MagGetFullscreenTransform read-back)
-    // and where the OS cursor actually sits after the weld. Removed once the report is explained.
+    // Where the drawn cursor goes on SCREEN. Centered: cursorScreen (= T(C), the screen point that
+    // shows the lens-center content). Anchored: the click point itself (T(L) == L there). The
+    // layered sprite composites unmagnified, so its window position IS its screen position.
+    const int sx = centered ? (int)(r.cursorScreenX + 0.5) + mon_.x : cx;
+    const int sy = centered ? (int)(r.cursorScreenY + 0.5) + mon_.y : cy;
+
+    // Weld the hidden OS cursor to the DRAWN cursor's screen position (sx,sy) - NOT to the lens
+    // center C. THE key transform-model gotcha, found live (issue #139): while a DWM fullscreen
+    // transform is active, Windows delivers mouse input (hover + clicks) at T^-1(raw cursor), not
+    // at the raw cursor position. Welding at T(C) makes input act at T^-1(T(C)) = C, exactly the
+    // content under the drawn cursor. This is also why the anchored geometry was the only one that
+    // ever worked before (T(L) == L makes the remap the identity at the cursor), why the centered
+    // rect historically produced "click drift growing toward the edges" (T^-1(C) - C = centered
+    // offset - anchored offset), and why the 044257f attempt failed mysteriously. Under anchored,
+    // sx/sy == C, so this weld is byte-compatible with the old behavior there.
+    // Re-pin whenever the cursor STRAYED from the weld point (the hand physically moves the raw
+    // cursor between ticks): the target is nearly constant at screen center in centered mode, so
+    // the old dedup-on-target-change would stop re-pinning entirely. No syscall when idle.
+    // Inspect freeze pins the raw point via ex.clickOverride (the 1px ClipCursor holds it anyway).
+    const int wx = ex.clickOverride ? ex.clickDesktopX : sx;
+    const int wy = ex.clickOverride ? ex.clickDesktopY : sy;
+    POINT rawNow{};
+    GetCursorPos(&rawNow);
+    if (rawNow.x != wx || rawNow.y != wy) SetCursorPos(wx, wy);
+    lastWeldX_ = wx; lastWeldY_ = wy;
+
+    // TEMP DIAGNOSTIC (issue #139): once per second while active, log sent vs applied transform
+    // (MagGetFullscreenTransform read-back), the weld, and T^-1(weld) - which must equal the lens
+    // center C for input to act under the drawn cursor. Removed once verified live.
     unsigned long long nowDiag = GetTickCount64();
     if (nowDiag - lastDiagMs_ >= 1000) {
         lastDiagMs_ = nowDiag;
         float gl = 0.0f; int gx = 0, gy = 0;
         BOOL got = MagGetFullscreenTransform(&gl, &gx, &gy);
         POINT ap{}; GetCursorPos(&ap);
+        double tinvX = ap.x / level + src.x, tinvY = ap.y / level + src.y;
         Log(LogLevel::Info, "cgeo",
-            "L=%.2f centered=%d priv=%d src=(%.1f,%.1f) sent off=(%d,%d) tx=(%d,%d) "
-            "readback ok=%d L=%.2f off=(%d,%d) weld=(%d,%d) actual=(%ld,%ld) curScr=(%.1f,%.1f) click=(%d,%d)",
+            "L=%.2f centered=%d priv=%d src=(%.1f,%.1f) sent off=(%d,%d) readback ok=%d L=%.2f off=(%d,%d) "
+            "weld=(%d,%d) actual=(%ld,%ld) Tinv=(%.1f,%.1f) C=(%d,%d) curScr=(%.1f,%.1f)",
             level, (int)centered, (int)host_.privateActive(), src.x, src.y, m.offX, m.offY,
-            m.txX, m.txY, (int)got, gl, gx, gy, cx, cy, ap.x, ap.y,
-            r.cursorScreenX, r.cursorScreenY, r.clickDesktopX, r.clickDesktopY);
+            (int)got, gl, gx, gy, wx, wy, ap.x, ap.y, tinvX, tinvY, cx, cy,
+            r.cursorScreenX, r.cursorScreenY);
     }
-
-    // Where the drawn cursor goes on SCREEN. Centered: cursorScreen (= T(C), the screen point that
-    // shows the lens-center content - the sprite sits on exactly what a click at C hits). Anchored:
-    // the click point itself (T(L) == L there). The layered sprite composites unmagnified, so its
-    // window position IS its screen position.
-    const int sx = centered ? (int)(r.cursorScreenX + 0.5) + mon_.x : cx;
-    const int sy = centered ? (int)(r.cursorScreenY + 0.5) + mon_.y : cy;
 
     if (useSprite_ && sprite_ && inspect && ex.drawCursor) {
         // Inspect mode: the real cursor is frozen at the (overridden) click point, but the thing the

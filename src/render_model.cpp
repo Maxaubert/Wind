@@ -56,6 +56,7 @@ void RenderModel::present(const MapResult& r, double level, const Config& cfg,
     p.cursorLocked = ex.cursorLocked;
     p.cursorMode = ex.cursorMode;
     if (ex.clickOverride) { p.clickDesktopX = ex.clickDesktopX; p.clickDesktopY = ex.clickDesktopY; }
+    lastWeldX_ = p.clickDesktopX; lastWeldY_ = p.clickDesktopY;   // renderFrame welds the cursor here
     engine_.renderFrame(p);
 }
 }
