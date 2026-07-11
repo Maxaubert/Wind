@@ -112,6 +112,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "fastPan")            c.fastPan = std::stoi(val);
             else if (key == "smoothPan")          c.smoothPan = std::stoi(val);
             else if (key == "cursorSprite")       c.cursorSprite = std::stoi(val);
+            else if (key == "transformCenterCursor") c.transformCenterCursor = std::stoi(val);
             else if (key == "bilinear")           c.bilinear = std::stoi(val);
             else if (key == "sharpness")          c.sharpness = std::stod(val);
             else if (key == "zorderBand")         c.zorderBand = std::stoi(val);
@@ -268,6 +269,9 @@ Config LoadConfig(const std::wstring& path) {
                "smoothPan=0\n"
                "; cursorSprite (transform only): 1 = scene-locked cursor sprite (recommended); 0 = OS cursor\n"
                "cursorSprite=1\n"
+               "; transformCenterCursor (transform only): 1 = keep the drawn cursor centered and pan\n"
+               ";   the view under it (needs cursorSprite=1); 0 = free cursor anchored to the magnification\n"
+               "transformCenterCursor=1\n"
                "; multiMonitor: 1=magnify whichever monitor the cursor is on at zoom-in; 0=primary only\n"
                "multiMonitor=0\n"
                "; cropCapture (opt-in): 0=always copy all changed regions (cache never stale, default);\n"

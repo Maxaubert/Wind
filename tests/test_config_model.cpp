@@ -36,3 +36,9 @@ TEST_CASE("FlipModel maps an unknown value to transform") {
     CHECK(FlipModel("bogus") == "transform");
     CHECK(FlipModel("") == "transform");
 }
+
+TEST_CASE("transformCenterCursor parses and defaults on") {
+    CHECK(ParseConfig("").transformCenterCursor == 1);
+    CHECK(ParseConfig("transformCenterCursor=0\n").transformCenterCursor == 0);
+    CHECK(ParseConfig("transformCenterCursor=1\n").transformCenterCursor == 1);
+}

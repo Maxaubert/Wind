@@ -75,6 +75,10 @@ struct Config {
                           //     do not stutter while panning, at a capped frame rate while zoomed.
     int cursorSprite = 1; // 1 = hide the OS cursor and draw a scene-locked sprite welded to the
                           //     transform (fixes cursor/click divergence near screen edges).
+    int transformCenterCursor = 1; // 1 = center the drawn cursor (sprite) and pan the view under it,
+                                   //     falling back per tick to cursor-anchored whenever a visible
+                                   //     cursor exists we cannot place (app-custom shape, cursorSprite=0).
+                                   // 0 = always cursor-anchored (the free cursor). Hot-reloadable.
     // --- Own GPU renderer ---------------------------------------------------
     // Pan speed multiplier. Free desktop panning auto-matches the OS cursor (DPI + acceleration) and
     // is then scaled by this (1.0 = exact match, the default); it also scales the raw-input pan while
