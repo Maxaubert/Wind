@@ -2,6 +2,7 @@
 #include "../src/cursor_mapper.h"
 
 using wind::CursorMapper;
+using wind::MapResult;
 
 TEST_CASE("centered: cursor sits at screen center, no movement") {
     CursorMapper m(1920, 1080);
@@ -97,4 +98,26 @@ TEST_CASE("reset overrides the accumulated center") {
     m.reset(800, 400);
     CHECK(m.centerX() == doctest::Approx(800.0));
     CHECK(m.centerY() == doctest::Approx(400.0));
+}
+
+TEST_CASE("invariant: cursorScreen is T(center) under the clamped centered rect "
+          "(the transform model's centered mode places the sprite there)") {
+    CursorMapper m(1000, 800, 0.0);   // smoothing 0 = snap, so reset() fully determines the center
+    const double L = 4.0;
+    // Steady mid-screen: the rect centers, so the cursor sits at the screen center.
+    m.reset(500, 400);
+    MapResult r = m.update(0, 0, L);
+    CHECK(r.cursorScreenX == doctest::Approx((r.centerX - r.srcLeft) * L));
+    CHECK(r.cursorScreenY == doctest::Approx((r.centerY - r.srcTop) * L));
+    CHECK(r.cursorScreenX == doctest::Approx(500.0));
+    CHECK(r.cursorScreenY == doctest::Approx(400.0));
+    // Clamped corner: the rect stops at the desktop edge; cursorScreen slides toward the
+    // corner but the identity cursorScreen == (center - src) * level still holds, so a sprite
+    // drawn there still sits on the lens-center content.
+    m.reset(999, 799);
+    r = m.update(0, 0, L);
+    CHECK(r.cursorScreenX == doctest::Approx((r.centerX - r.srcLeft) * L));
+    CHECK(r.cursorScreenY == doctest::Approx((r.centerY - r.srcTop) * L));
+    CHECK(r.cursorScreenX > 900.0);   // pushed near the right edge, no longer centered
+    CHECK(r.cursorScreenY > 700.0);
 }
