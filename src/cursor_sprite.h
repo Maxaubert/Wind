@@ -10,6 +10,13 @@ public:
     enum class ShapeStatus { Rendered, Hidden };
     explicit CursorSprite(const std::unordered_map<HCURSOR, HCURSOR>& originals) : originals_(originals) {}
     bool create(int zorderBand = 0);   // >0 -> CreateWindowInBand (above the shell; needs UIAccess)
+    // True when the window was created in a high z-band (CreateWindowInBand succeeded). Placement
+    // law depends on this: BANDED windows are composited INSIDE the fullscreen magnification (they
+    // get re-magnified with the desktop - the old engine's 787509f finding), so the sprite must be
+    // placed at the DESKTOP point it represents and the transform carries its image. PLAIN layered
+    // windows composite OUTSIDE the magnification, unscaled at their raw position (PR #130's marker
+    // measurement), so they must be placed at the intended SCREEN position directly.
+    bool inBand() const { return inBand_; }
     ShapeStatus refreshShape();
     void moveTo(int desktopX, int desktopY);
     void show();
@@ -38,6 +45,7 @@ private:
     HICON   iconCopy_ = nullptr;
     int     hotX_ = 0, hotY_ = 0;
     bool    visible_ = false;
+    bool    inBand_ = false;                 // created via CreateWindowInBand (see inBand())
     bool    crosshairMode_ = false;          // window currently holds the crosshair pixels
     unsigned long long lastTopmostMs_ = 0;   // last HWND_TOPMOST re-assert (throttled)
 };

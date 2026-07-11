@@ -48,6 +48,7 @@ bool CursorSprite::create(int zorderBand) {
             }
         }
     }
+    inBand_ = (hwnd_ != nullptr);   // banded creation succeeded (composited INSIDE the magnification)
     if (!hwnd_) {
         hwnd_ = CreateWindowExW(exStyle, kClassName, L"WindCursor", WS_POPUP,
                                 0, 0, kSize, kSize, nullptr, nullptr, hInst, nullptr);

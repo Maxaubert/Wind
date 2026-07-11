@@ -72,11 +72,18 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     int cx = r.clickDesktopX + mon_.x;
     int cy = r.clickDesktopY + mon_.y;
 
-    // Where the drawn cursor goes on SCREEN. Centered: cursorScreen (= T(C), the screen point that
-    // shows the lens-center content). Anchored: the click point itself (T(L) == L there). The
-    // layered sprite composites unmagnified, so its window position IS its screen position.
-    const int sx = centered ? (int)(r.cursorScreenX + 0.5) + mon_.x : cx;
-    const int sy = centered ? (int)(r.cursorScreenY + 0.5) + mon_.y : cy;
+    // Sprite placement depends on the COMPOSITING LAW for the sprite's window kind (cursor_sprite.h
+    // inBand()): BANDED windows are re-magnified with the desktop, so the sprite is placed at the
+    // DESKTOP point it represents and the transform carries its image to T(point) - on the aimed
+    // content at every zoom, every position, clamps included (and scales it with zoom, like the
+    // render model's default). This invariant is unobservable under ANCHORED geometry (T(L) == L
+    // makes the placement a fixed point either way), which is why the banded re-magnification went
+    // undetected until centered mode separated the two laws (issue #139 marker test). PLAIN layered
+    // windows composite unmagnified at raw coords (PR #130 marker measurement), so they are placed
+    // at the intended SCREEN point directly.
+    const bool bandComposited = sprite_ && sprite_->inBand();
+    const int sx = bandComposited ? cx : (centered ? (int)(r.cursorScreenX + 0.5) + mon_.x : cx);
+    const int sy = bandComposited ? cy : (centered ? (int)(r.cursorScreenY + 0.5) + mon_.y : cy);
 
     // CENTERED mode is FREE-FOLLOW: the real cursor is NEVER moved by us (no weld, no synthetic
     // input). RunTick snaps the lens center to the real cursor each tick, so C == the raw cursor
