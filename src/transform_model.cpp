@@ -107,16 +107,24 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         float gl = 0.0f; int gx = 0, gy = 0;
         BOOL got = MagGetFullscreenTransform(&gl, &gx, &gy);
         POINT ap{}; GetCursorPos(&ap);
-        // The decisive probe: GetPhysicalCursorPos vs GetCursorPos exposes the OS input
-        // virtualization layer directly. If Windows remaps pointer input under the fullscreen
-        // transform, these two differ, and the difference IS the mapping - measured, not theorized.
         POINT pp{}; BOOL gotPhys = GetPhysicalCursorPos(&pp);
+        // What actually sits under the weld point (hover goes to this window), and whether a
+        // foreign/stale ClipCursor is clamping the weld - the two untested candidates for the
+        // "hover stops updating after panning a while" report (see the LEDGER doc).
+        HWND under = WindowFromPoint(ap);
+        wchar_t clsW[64] = L""; char cls[64] = "";
+        if (under) {
+            GetClassNameW(under, clsW, 64);
+            WideCharToMultiByte(CP_UTF8, 0, clsW, -1, cls, sizeof(cls), nullptr, nullptr);
+        }
+        RECT clip{}; GetClipCursor(&clip);
         Log(LogLevel::Info, "cgeo",
-            "L=%.2f centered=%d priv=%d src=(%.1f,%.1f) sent off=(%d,%d) readback ok=%d L=%.2f off=(%d,%d) "
-            "weld=(%d,%d) logical=(%ld,%ld) phys ok=%d (%ld,%ld) C=(%d,%d) curScr=(%.1f,%.1f)",
-            level, (int)centered, (int)host_.privateActive(), src.x, src.y, m.offX, m.offY,
-            (int)got, gl, gx, gy, wx, wy, ap.x, ap.y, (int)gotPhys, pp.x, pp.y, cx, cy,
-            r.cursorScreenX, r.cursorScreenY);
+            "L=%.2f centered=%d src=(%.1f,%.1f) readback ok=%d off=(%d,%d) weld=(%d,%d) "
+            "logical=(%ld,%ld) phys=(%d:%ld,%ld) C=(%d,%d) curScr=(%.1f,%.1f) "
+            "under=%p cls=%s clip=(%ld,%ld,%ld,%ld)",
+            level, (int)centered, src.x, src.y, (int)got, gx, gy, wx, wy,
+            ap.x, ap.y, (int)gotPhys, pp.x, pp.y, cx, cy, r.cursorScreenX, r.cursorScreenY,
+            (void*)under, cls, clip.left, clip.top, clip.right, clip.bottom);
     }
 
     if (useSprite_ && sprite_ && inspect && ex.drawCursor) {
