@@ -78,21 +78,21 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     const int sx = centered ? (int)(r.cursorScreenX + 0.5) + mon_.x : cx;
     const int sy = centered ? (int)(r.cursorScreenY + 0.5) + mon_.y : cy;
 
-    // Weld the hidden OS cursor to the DRAWN cursor's screen position (sx,sy) - NOT to the lens
-    // center C. THE key transform-model gotcha, found live (issue #139): while a DWM fullscreen
-    // transform is active, Windows delivers mouse input (hover + clicks) at T^-1(raw cursor), not
-    // at the raw cursor position. Welding at T(C) makes input act at T^-1(T(C)) = C, exactly the
-    // content under the drawn cursor. This is also why the anchored geometry was the only one that
-    // ever worked before (T(L) == L makes the remap the identity at the cursor), why the centered
-    // rect historically produced "click drift growing toward the edges" (T^-1(C) - C = centered
-    // offset - anchored offset), and why the 044257f attempt failed mysteriously. Under anchored,
-    // sx/sy == C, so this weld is byte-compatible with the old behavior there.
+    // Weld the hidden OS cursor to the lens center C. Input acts at the RAW cursor position - this
+    // was MEASURED live (issue #139): GetCursorPos == GetPhysicalCursorPos at every probe, welded
+    // and mid-motion, so Windows runs NO input virtualization under the fullscreen transform. With
+    // the raw cursor at C, hover and clicks act on exactly the content shown under the drawn
+    // cursor (the sprite at cursorScreen == T(C) by the mapper identity). Do NOT weld at the
+    // sprite's screen position T(C) instead: that pins input to whatever desktop content sits at
+    // the sprite's raw coordinates - a fixed mid-screen desktop point in centered mode - which was
+    // tried on a wrong inverse-remap theory and produced exactly that bug.
     // Re-pin whenever the cursor STRAYED from the weld point (the hand physically moves the raw
-    // cursor between ticks): the target is nearly constant at screen center in centered mode, so
-    // the old dedup-on-target-change would stop re-pinning entirely. No syscall when idle.
-    // Inspect freeze pins the raw point via ex.clickOverride (the 1px ClipCursor holds it anyway).
-    const int wx = ex.clickOverride ? ex.clickDesktopX : sx;
-    const int wy = ex.clickOverride ? ex.clickDesktopY : sy;
+    // cursor between ticks) rather than only when the target moved: this also emits a fresh
+    // WM_MOUSEMOVE at C after hand motion, keeping app hover state on C instead of the stray
+    // point. No syscall when idle. Inspect freeze pins the raw point via ex.clickOverride (the
+    // 1px ClipCursor holds it anyway).
+    const int wx = ex.clickOverride ? ex.clickDesktopX : cx;
+    const int wy = ex.clickOverride ? ex.clickDesktopY : cy;
     POINT rawNow{};
     GetCursorPos(&rawNow);
     if (rawNow.x != wx || rawNow.y != wy) SetCursorPos(wx, wy);

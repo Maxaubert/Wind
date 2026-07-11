@@ -598,12 +598,10 @@ static void RunTick(TickState& t) {
         t.model.hideSystemCursor(false);
         t.outlineZoneSec = 0.0;                       // zoom-out clears the low-zoom dwell (no banked partial)
         if (t.prevInspect) ClipCursor(nullptr);       // release the Inspect freeze clip
-        // Land the cursor ON the aimed content (the lens center C). The transform model welds the
-        // raw cursor at the DRAWN cursor's screen position T(C) while zoomed (input-remap gotcha,
-        // see transform_model.cpp); at 1x that screen point no longer shows the aimed content, so
-        // without this warp zoom-out would strand the cursor on whatever sits at old T(C). For the
-        // render model (and Inspect exit, which resumes at the look point) the weld already equals
-        // C, so this is a no-op warp there.
+        // Land the cursor ON the aimed content (the lens center C). Both models weld at C while
+        // active, so this is normally a no-op warp; it guarantees the cursor never strands away
+        // from the aimed content on teardown regardless of what the last active tick did (and it
+        // is what resumes at the look point after Inspect).
         POINT lp{ (int)(t.mapper.centerX() + 0.5) + t.mon.x, (int)(t.mapper.centerY() + 0.5) + t.mon.y };
         SetCursorPos(lp.x, lp.y);
         t.lastSetVirtual = lp;
