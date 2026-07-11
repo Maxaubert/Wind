@@ -4,7 +4,10 @@
 namespace wind {
 class CursorSprite {
 public:
-    enum class ShapeStatus { Rendered, Hidden, Unsupported };
+    // Rendered = the sprite window now shows the current cursor shape (standard shapes come from the
+    // pre-blank originals map; app-loaded private handles render live). Hidden = the cursor is
+    // suppressed/hidden or its shape could not be captured this tick - show nothing.
+    enum class ShapeStatus { Rendered, Hidden };
     explicit CursorSprite(const std::unordered_map<HCURSOR, HCURSOR>& originals) : originals_(originals) {}
     bool create(int zorderBand = 0);   // >0 -> CreateWindowInBand (above the shell; needs UIAccess)
     ShapeStatus refreshShape();

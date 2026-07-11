@@ -73,17 +73,14 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
 
     if (info.hCursor == lastCursor_) return lastVerdict_;
 
-    // The on-screen object for standard cursors is blanked while
-    // magnifying; render from the original shape we captured before
-    // blanking instead. A handle not in the map is an app-custom cursor
-    // that was never blanked - it is drawn natively and visibly.
+    // Standard cursors are blanked system-wide while magnifying (their shared handle's pixels are
+    // transparent), so render those from the pre-blank copy captured in the originals map. A handle
+    // NOT in the map is an app-loaded cursor (private handle - Explorer's hand, WinUI resize shapes,
+    // app-custom pointers): its pixels are live and correct, so render from the handle itself.
+    // MagShowSystemCursor(FALSE) hides the real cursor globally while the sprite is in use, so
+    // drawing a private shape here never doubles up with a natively drawn one.
     auto it = originals_.find(info.hCursor);
-    HCURSOR shapeSource = (it != originals_.end()) ? it->second : nullptr;
-    if (shapeSource == nullptr) {
-        lastCursor_ = info.hCursor;
-        lastVerdict_ = ShapeStatus::Unsupported;
-        return ShapeStatus::Unsupported;
-    }
+    HCURSOR shapeSource = (it != originals_.end()) ? it->second : info.hCursor;
 
     HICON hIconCopy = CopyIcon((HICON)shapeSource);
     if (hIconCopy == nullptr) return ShapeStatus::Hidden; // transient failure; don't imitate

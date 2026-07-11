@@ -2,7 +2,7 @@
 #include "transform.h"   // ComputeMagTransform
 #include "logging.h"
 #include <windows.h>
-#include <magnification.h>   // TEMP diagnostic: MagGetFullscreenTransform read-back (issue #139)
+#include <magnification.h>   // MagShowSystemCursor (global cursor hide) + TEMP MagGetFullscreenTransform diag
 
 namespace wind {
 
@@ -21,8 +21,14 @@ bool TransformModel::initialize(const MonitorTarget& monitor) {
 
 void TransformModel::hideSystemCursor(bool hide) {
     if (!useSprite_ || !blanker_) return;
-    if (hide) { blanker_->blank(); if (sprite_) sprite_->show(); }
-    else      { if (sprite_) sprite_->hide(); blanker_->restore(); }
+    // Two layers, both needed. The blanker blanks the STANDARD cursor scheme (so the sprite can
+    // render those shapes from its pre-blank originals), but apps that set privately-loaded cursor
+    // handles (Explorer's hand, WinUI resize shapes) are outside any scheme and stayed visible.
+    // MagShowSystemCursor hides the real cursor GLOBALLY, any handle, any shape - the same call the
+    // render model relies on. Restored on every teardown path (hide(false), shutdown, and main's
+    // crash/atexit/eviction nets, which already call MagShowSystemCursor(TRUE) + SPI_SETCURSORS).
+    if (hide) { blanker_->blank(); MagShowSystemCursor(FALSE); if (sprite_) sprite_->show(); }
+    else      { if (sprite_) sprite_->hide(); MagShowSystemCursor(TRUE); blanker_->restore(); }
 }
 
 void TransformModel::setActive(bool active) {
@@ -37,10 +43,9 @@ void TransformModel::setActive(bool active) {
 void TransformModel::present(const MapResult& r, double level, const Config& cfg,
                              const MonitorTarget& mon, const PresentExtras& ex) {
     (void)mon;
-    // Resolve the sprite verdict FIRST: it decides which offset this tick uses. During Inspect the
-    // sprite is our crosshair (always placeable), so refreshShape is only consulted for the normal
-    // cursor path.
     const bool inspect = ex.cursorLocked;
+    // Refresh the sprite's shape for this tick (repaints the layered window only when the shape
+    // actually changed). During Inspect the sprite is our crosshair, so this is skipped there.
     CursorSprite::ShapeStatus st = CursorSprite::ShapeStatus::Hidden;
     if (useSprite_ && sprite_ && ex.drawCursor && !inspect) st = sprite_->refreshShape();
 
@@ -50,15 +55,14 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     //  - CENTERED (the render model's): source rect = the mapper's centered clamped rect; the sprite
     //    is drawn at cursorScreen = T(C) (screen center in steady state, edge-shifted at clamps);
     //    the OS cursor is welded to the lens center C, so a click lands exactly on the content under
-    //    the sprite. Requires that the visible cursor is one WE place (the sprite or the Inspect
-    //    crosshair), or that no cursor is visible at all (drawCursor off / shape Hidden - the real
-    //    cursor is blanked or app-suppressed).
+    //    the sprite. The real cursor is hidden GLOBALLY (MagShowSystemCursor + the blanker) and the
+    //    sprite renders ANY shape (standard from the pre-blank originals, private handles live), so
+    //    the geometry is stable for the whole session - it must NEVER flip on a cursor-shape change
+    //    (that lurches the view and staled hover state; found live in issue #139 testing).
     //  - ANCHORED: off = L*(1 - 1/level) makes T(L) == L, so a real cursor drawn by DWM at its own
-    //    desktop spot sits on exactly what it clicks. Used when an app-custom shape (Unsupported)
-    //    cannot be blanked, when cursorSprite=0, and when transformCenterCursor=0.
-    // A standard<->custom shape transition steps the view once; rare and correct.
-    const bool centered = cfg.transformCenterCursor != 0 && useSprite_ && sprite_
-                       && (inspect || !ex.drawCursor || st != CursorSprite::ShapeStatus::Unsupported);
+    //    desktop spot sits on exactly what it clicks. The only correct geometry when we do not draw
+    //    the cursor ourselves: cursorSprite=0, or transformCenterCursor=0.
+    const bool centered = cfg.transformCenterCursor != 0 && useSprite_ && sprite_;
 
     OffsetF src = centered ? OffsetF{ r.srcLeft, r.srcTop }
                            : ComputeFixedPointOffset(r.centerX, r.centerY, level);
@@ -119,7 +123,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             // of our band when a popup (tray/context menu, flyout) has been raised over us. Throttled.
             sprite_->keepOnTop();
         } else {
-            sprite_->hide();   // Hidden/Unsupported: show the real (or app-custom) cursor instead
+            sprite_->hide();   // Hidden: suppressed/hidden cursor or capture failure - show nothing
         }
     } else if (useSprite_ && sprite_) {
         // cursorVisibility=never, or the hide-cursor hotkey. The block above is what MOVES the sprite,
@@ -140,6 +144,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
 
 void TransformModel::shutdown() {
     if (sprite_) sprite_->destroy();
+    if (useSprite_) MagShowSystemCursor(TRUE);   // never leave the OS cursor hidden (CLAUDE.md rule)
     if (blanker_) blanker_->restore();
     pin_.destroy();
     host_.shutdown();
