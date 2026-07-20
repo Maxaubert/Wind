@@ -120,7 +120,8 @@ struct TickState {
     HANDLE configWatch = nullptr;              // ini-dir change notification (replaces the 1Hz mtime poll)
     std::wstring iniPath;                      // full path to magnifier.ini, resolved at startup
     double prevLvl = 1.0;
-    int    revealPending = 0;                  // ticks left before the deferred (game) reveal (issue #90)
+    int    revealPending = 0;                  // fallback-cap ticks left on the deferred (game) reveal;
+                                               //   the reveal itself is evidence-gated (#90, #140)
     int    hz = 60;                            // resolved tick/refresh rate (auto-detected)
     bool   recenterKeyWasDown = false;         // edge-detect the recenterVk key
     bool   swapKeyWasDown = false;             // edge-detect the swapModelVk key (model swap + restart)
@@ -564,16 +565,31 @@ static void RunTick(TickState& t) {
                     // see the game until our overlay forces DWM to composite it, so revealing now would
                     // flash the previously focused window (issue #90). Instead PRIME at alpha 1 (invisible
                     // - the user keeps seeing the real game) to force that composition, keep rendering
-                    // normally, and defer the full reveal a couple ticks so the game is in the capture by
-                    // then. This is non-blocking: the smooth-zoom ramp runs undisturbed (no DwmFlush stall).
+                    // normally, and defer the full reveal until the game is provably in the capture.
+                    // This is non-blocking: the smooth-zoom ramp runs undisturbed (no DwmFlush stall).
                     rm->primeReveal();
-                    t.revealPending = 2;
+                    // The deferred reveal is EVIDENCE-gated (issue #140): it fires once a desktop
+                    // frame composited after the prime has been captured (the game is provably in
+                    // the capture), not on a fixed timer - under GPU load DWM can take far longer
+                    // than 2 ticks to de-promote + composite the game, and a timed reveal flashed
+                    // the stale pre-alt-tab window. revealPending is only the fallback cap (~250 ms)
+                    // so a pathological desktop (no composite ever seen) still reveals.
+                    t.revealPending = (t.hz > 0 ? t.hz : 60) / 4;
+                    if (t.revealPending < 2) t.revealPending = 2;
                 } else {
                     rm->setActive(true);   // ordinary desktop activation: reveal instantly
                     t.revealPending = 0;
                 }
-            } else if (t.revealPending > 0 && --t.revealPending == 0) {
-                rm->setActive(true);       // deferred game reveal: game is now composited+captured
+            } else if (t.revealPending > 0) {
+                --t.revealPending;
+                const bool evidence = rm->frameCompositedSincePrime();
+                if (evidence || t.revealPending == 0) {
+                    rm->setActive(true);   // deferred game reveal: game is composited+captured
+                    wind::Log(wind::LogLevel::Info, "render", "deferred reveal: %s (ticksLeft=%d)",
+                              evidence ? "post-prime frame captured" : "fallback cap expired",
+                              t.revealPending);
+                    t.revealPending = 0;
+                }
             }
         } else if (enterActive) {
             t.model.setActive(true);   // transform: reveal immediately, no capture priming

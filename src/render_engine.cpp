@@ -72,6 +72,8 @@ struct RenderEngine::State {
     ComPtr<ID3D11ShaderResourceView> desktopSRV;
     bool haveDesktop = false;
     bool freshCapture = false;   // next capture() must drain to the latest desktop frame (zoom-in)
+    LONGLONG primeQpc = 0;             // QPC at the last primeReveal() (evidence gate, issue #140)
+    LONGLONG lastCopiedPresentQpc = 0; // LastPresentTime of the newest desktop frame we copied
     std::vector<unsigned char> metaBuf;   // reused buffer for GetFrameMoveRects/GetFrameDirtyRects
     // Diagnostics for the HDR investigation: the duplication's surface format + the output's
     // color space / bit depth (tells us whether the desktop is HDR and what we're capturing).
@@ -378,6 +380,7 @@ bool RenderEngine::State::capture(const RECT& view, bool crop) {
                          (unsigned)td.Format, (unsigned)copyFormat, (int)capFp16);
                 haveDesktop = true;
                 gotThisCall = true;
+                lastCopiedPresentQpc = fi.LastPresentTime.QuadPart;   // when DWM composited this frame
             }
         }
         SafeRelease(tex);
@@ -647,8 +650,22 @@ void RenderEngine::setVisible(bool visible) {
 // full reveal - so the smooth-zoom ramp is never stalled the way a synchronous DwmFlush would stall it.
 void RenderEngine::primeReveal() {
     if (!s_ || !s_->hwnd) return;
+    // Timestamp BEFORE flipping the alpha: any desktop frame DWM composites after the prime then
+    // has LastPresentTime > primeQpc, which is what frameCompositedSincePrime() keys on.
+    LARGE_INTEGER now{};
+    QueryPerformanceCounter(&now);
+    s_->primeQpc = now.QuadPart;
     SetLayeredWindowAttributes(s_->hwnd, 0, 1, LWA_ALPHA);
     SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
+// Evidence gate for the deferred (game) reveal, issue #140: true once capture() has copied a
+// desktop frame whose LastPresentTime is newer than the last primeReveal() - i.e. DWM composited
+// the desktop AFTER the prime forced the fullscreen app off its independent-flip/MPO plane, so
+// the app is actually in our capture. A fixed tick deferral flashed the pre-alt-tab window under
+// GPU load, when DWM's de-promotion + first composite took longer than the timer.
+bool RenderEngine::frameCompositedSincePrime() const {
+    return s_ && s_->primeQpc != 0 && s_->lastCopiedPresentQpc > s_->primeQpc;
 }
 
 // Drop the current duplication so the next capture() recreates it; the first AcquireNextFrame

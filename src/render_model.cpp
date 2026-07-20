@@ -45,6 +45,7 @@ RenderEngine& RenderModel::engine() { return engine_; }
 bool RenderModel::deviceLost() const { return engine_.deviceLost(); }
 bool RenderModel::recoverDeviceLost() { return engine_.recoverDeviceLost(); }
 void RenderModel::primeReveal() { engine_.primeReveal(); }
+bool RenderModel::frameCompositedSincePrime() const { return engine_.frameCompositedSincePrime(); }
 void RenderModel::invalidateCapture() { engine_.invalidateCapture(); }
 
 void RenderModel::present(const MapResult& r, double level, const Config& cfg,
