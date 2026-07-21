@@ -65,8 +65,21 @@ public:
     // WITHOUT a full reveal. A non-fully-transparent top window makes DWM stop granting a fullscreen
     // game an independent-flip / MPO plane and composite it into the desktop, so Desktop Duplication
     // can finally see it (issue #90). The caller primes on a fullscreen zoom-in, keeps rendering
-    // normally for a tick or two (NON-blocking - no DwmFlush/stall), then calls setVisible(true).
+    // normally (NON-blocking - no DwmFlush/stall), and calls setVisible(true) once
+    // frameCompositedSincePrime() reports the app is in the capture (or a fallback cap expires).
     void primeReveal();
+    // True once a desktop frame composited AFTER the last primeReveal() has been captured - the
+    // evidence that the de-promoted fullscreen app is in the capture, so revealing cannot flash
+    // the stale pre-alt-tab composite (issue #140).
+    bool frameCompositedSincePrime() const;
+    // Arm the reveal fence for a new zoom-in: the next Present issues a GPU event query. Call on
+    // activation (alongside invalidateCapture), before the session's first present.
+    void armRevealFence();
+    // True once the armed frame's Present has EXECUTED on the GPU - the layered redirection
+    // surface provably holds this session's content, so flipping the alpha cannot show the
+    // previous session's retained frame (issue #140, second mechanism). spinBudgetMs > 0 polls up
+    // to that long (used on the activation tick so an idle GPU still reveals instantly).
+    bool revealFrameDone(double spinBudgetMs = 0.0);
     // Force the next frame to grab a fresh full-desktop capture (release+recreate the
     // duplication, whose first AcquireNextFrame returns the whole current desktop). Call on
     // zoom-in so a stale cached frame from a previous session isn't shown for one frame

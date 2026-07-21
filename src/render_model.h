@@ -31,6 +31,8 @@ public:
     bool deviceLost() const;  // forwarded (main loop calls this)
     bool recoverDeviceLost();
     void primeReveal();
+    bool frameCompositedSincePrime() const;
+    bool revealFrameDone(double spinBudgetMs = 0.0);
     void invalidateCapture();
 private:
     RenderEngine engine_;

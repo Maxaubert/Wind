@@ -72,6 +72,12 @@ struct RenderEngine::State {
     ComPtr<ID3D11ShaderResourceView> desktopSRV;
     bool haveDesktop = false;
     bool freshCapture = false;   // next capture() must drain to the latest desktop frame (zoom-in)
+    LONGLONG primeQpc = 0;             // QPC at the last primeReveal() (evidence gate, issue #140)
+    LONGLONG lastCopiedPresentQpc = 0; // LastPresentTime of the newest desktop frame we copied
+    ComPtr<ID3D11Query> revealFence;   // event query: has the reveal frame's Present executed on the GPU?
+    bool revealFenceArm    = false;    // issue the fence right after the next Present (set on activation)
+    bool revealFenceIssued = false;    // End() was called; GetData is meaningful
+    bool revealFenceDone   = false;    // cached S_OK so we stop polling once complete
     std::vector<unsigned char> metaBuf;   // reused buffer for GetFrameMoveRects/GetFrameDirtyRects
     // Diagnostics for the HDR investigation: the duplication's surface format + the output's
     // color space / bit depth (tells us whether the desktop is HDR and what we're capturing).
@@ -378,6 +384,7 @@ bool RenderEngine::State::capture(const RECT& view, bool crop) {
                          (unsigned)td.Format, (unsigned)copyFormat, (int)capFp16);
                 haveDesktop = true;
                 gotThisCall = true;
+                lastCopiedPresentQpc = fi.LastPresentTime.QuadPart;   // when DWM composited this frame
             }
         }
         SafeRelease(tex);
@@ -622,6 +629,15 @@ bool RenderEngine::State::buildDeviceResources() {
         if (!crosshairSRV) RLog("buildDeviceResources: crosshairSRV creation failed (non-fatal)");
     }
 
+    // --- Reveal fence (issue #140): event query issued after the first Present of a zoom-in so
+    //     the reveal can wait for that Present's GPU work (the blt into the layered redirection
+    //     surface) to complete. Non-fatal if unsupported; the caller's cap then paces the reveal. ---
+    {
+        D3D11_QUERY_DESC qd{ D3D11_QUERY_EVENT, 0 };
+        if (FAILED(device->CreateQuery(&qd, revealFence.ReleaseAndGetAddressOf())))
+            RLog("buildDeviceResources: reveal-fence CreateQuery failed (non-fatal)");
+    }
+
     // --- Desktop Duplication ---
     if (!recreateDupl()) { RLog("buildDeviceResources: recreateDupl failed"); return false; }
     if (capFp16) sdrWhiteNits = GetSDRWhiteNits();
@@ -636,6 +652,20 @@ void RenderEngine::setVisible(bool visible) {
     // re-display a stale frame). Window stays shown the whole time (alt-tab no-flash); callers
     // present the live frame before setVisible(true).
     SetLayeredWindowAttributes(s_->hwnd, 0, visible ? 255 : 0, LWA_ALPHA);
+    // On hide, leave a BLACK frame on the redirection surface (defense in depth for issue #140):
+    // the surface otherwise retains this session's last magnified frame forever, and any residual
+    // reveal race in a future zoom-in would flash that stale content. Black at worst. STRICTLY
+    // after the alpha-0 flip above: presenting first let DWM composite the black frame while the
+    // overlay was still visible - a guaranteed one-frame black flash on every zoom-out. With the
+    // alpha set first, any composite from here on shows nothing, and the black present lands on a
+    // hidden surface (the same present-while-hidden pattern the zoom-in reveal relies on).
+    if (!visible && s_->ready && !s_->deviceLost && s_->swap &&
+        (s_->rtv || s_->acquireBackbufferRtv())) {
+        const float clear[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+        s_->ctx->OMSetRenderTargets(1, s_->rtv.GetAddressOf(), nullptr);
+        s_->ctx->ClearRenderTargetView(s_->rtv.Get(), clear);
+        s_->swap->Present(0, 0);
+    }
     if (visible) {
         SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
@@ -647,8 +677,57 @@ void RenderEngine::setVisible(bool visible) {
 // full reveal - so the smooth-zoom ramp is never stalled the way a synchronous DwmFlush would stall it.
 void RenderEngine::primeReveal() {
     if (!s_ || !s_->hwnd) return;
+    // Timestamp BEFORE flipping the alpha: any desktop frame DWM composites after the prime then
+    // has LastPresentTime > primeQpc, which is what frameCompositedSincePrime() keys on.
+    LARGE_INTEGER now{};
+    QueryPerformanceCounter(&now);
+    s_->primeQpc = now.QuadPart;
     SetLayeredWindowAttributes(s_->hwnd, 0, 1, LWA_ALPHA);
     SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
+// Evidence gate for the deferred (game) reveal, issue #140: true once capture() has copied a
+// desktop frame whose LastPresentTime is newer than the last primeReveal() - i.e. DWM composited
+// the desktop AFTER the prime forced the fullscreen app off its independent-flip/MPO plane, so
+// the app is actually in our capture. A fixed tick deferral flashed the pre-alt-tab window under
+// GPU load, when DWM's de-promotion + first composite took longer than the timer.
+bool RenderEngine::frameCompositedSincePrime() const {
+    return s_ && s_->primeQpc != 0 && s_->lastCopiedPresentQpc > s_->primeQpc;
+}
+
+// Arm the reveal fence for a new zoom-in: the next Present issues the event query that
+// revealFrameDone() polls. Called on activation, before the session's first present.
+void RenderEngine::armRevealFence() {
+    if (!s_) return;
+    s_->revealFenceArm = true;
+    s_->revealFenceIssued = false;
+    s_->revealFenceDone = false;
+}
+
+// The other half of the issue #140 gate: true once the armed frame's Present has EXECUTED on the
+// GPU, so the layered window's redirection surface provably holds this session's content. The
+// alpha flip is a CPU call DWM honours at its next composite; under GPU load it used to win the
+// race against the queued Present blt, and DWM composited the surface's retained frame - the last
+// thing the PREVIOUS zoom session presented. spinBudgetMs > 0 polls up to that long so the common
+// idle-GPU zoom-in still reveals within the same tick. Returns true (never wedging the reveal) if
+// the query is unsupported or the device is failing; the caller's cap handles pathological waits.
+bool RenderEngine::revealFrameDone(double spinBudgetMs) {
+    if (!s_) return false;
+    if (s_->revealFenceDone) return true;
+    if (!s_->revealFence) return true;            // no query support: fall back to the old timing
+    if (!s_->revealFenceIssued) return false;     // armed but nothing presented yet
+    LARGE_INTEGER f{}, t0{}, now{};
+    QueryPerformanceFrequency(&f);
+    QueryPerformanceCounter(&t0);
+    for (;;) {
+        HRESULT hr = s_->ctx->GetData(s_->revealFence.Get(), nullptr, 0, 0);
+        if (hr == S_OK) { s_->revealFenceDone = true; return true; }
+        if (FAILED(hr)) return true;              // device lost/reset: don't wedge the reveal
+        if (spinBudgetMs <= 0.0) return false;
+        QueryPerformanceCounter(&now);
+        if ((now.QuadPart - t0.QuadPart) * 1000.0 / (double)f.QuadPart >= spinBudgetMs) return false;
+        YieldProcessor();
+    }
 }
 
 // Drop the current duplication so the next capture() recreates it; the first AcquireNextFrame
@@ -975,6 +1054,14 @@ bool RenderEngine::renderFrame(const RenderFrameParams& p) {
     if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
         s_->deviceLost = true; RLog("present: device lost hr=0x%08lX", (unsigned long)hr);
         return false;
+    }
+    // Reveal fence (issue #140): mark the GPU timeline right after the first Present of a zoom-in.
+    // The event completes only when everything queued before it - including this Present's blt into
+    // the layered redirection surface - has executed, which is what revealFrameDone() polls.
+    if (s_->revealFenceArm && s_->revealFence && SUCCEEDED(hr)) {
+        s_->ctx->End(s_->revealFence.Get());
+        s_->revealFenceArm = false;
+        s_->revealFenceIssued = true;
     }
     return SUCCEEDED(hr);
 }

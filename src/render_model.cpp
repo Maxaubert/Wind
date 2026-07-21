@@ -38,13 +38,18 @@ void RenderModel::shutdown() { engine_.shutdown(); }
 bool RenderModel::ready() const { return engine_.ready(); }
 void RenderModel::hideSystemCursor(bool hide) { engine_.hideSystemCursor(hide); }
 void RenderModel::setActive(bool active) { engine_.setVisible(active); }
-void RenderModel::onActivate() { engine_.invalidateCapture(); }   // reveal/prime stays in main loop (needs ForegroundCoversMonitor)
+void RenderModel::onActivate() {   // reveal/prime stays in main loop (needs ForegroundCoversMonitor)
+    engine_.invalidateCapture();
+    engine_.armRevealFence();      // gate the reveal on this session's first Present executing (#140)
+}
 bool RenderModel::retarget(const MonitorTarget& m) { return engine_.retarget(m); }
 bool RenderModel::coversShell() const { return true; }
 RenderEngine& RenderModel::engine() { return engine_; }
 bool RenderModel::deviceLost() const { return engine_.deviceLost(); }
 bool RenderModel::recoverDeviceLost() { return engine_.recoverDeviceLost(); }
 void RenderModel::primeReveal() { engine_.primeReveal(); }
+bool RenderModel::frameCompositedSincePrime() const { return engine_.frameCompositedSincePrime(); }
+bool RenderModel::revealFrameDone(double spinBudgetMs) { return engine_.revealFrameDone(spinBudgetMs); }
 void RenderModel::invalidateCapture() { engine_.invalidateCapture(); }
 
 void RenderModel::present(const MapResult& r, double level, const Config& cfg,
