@@ -150,6 +150,17 @@ staged Apply/Discard footer.
   and re-display the frame from when it was last visible, flashing the previous zoom session's
   window on the next zoom-in (worst right after an alt-tab). The window is created shown at
   alpha 0 and stays shown. On zoom-in, present the live frame FIRST, then flip alpha to 255.
+- RENDER ENGINE: presenting first is NOT enough - the reveal is GATED (issue #140, in `RunTick`):
+  Present's blt into the layered redirection surface is GPU work, but the alpha flip is a CPU call
+  DWM honours at its next composite, so under GPU load the flip wins the race and DWM shows the
+  surface's RETAINED frame (the previous zoom session's last present). Every zoom-in arms a D3D
+  event query fenced right after the session's first Present (`armRevealFence`/`revealFrameDone`);
+  the reveal waits for it (desktop path spins 3 ms to keep the same-tick instant feel; ~250 ms tick
+  cap as fallback). A fullscreen app additionally needs `frameCompositedSincePrime()` - a captured
+  frame composited AFTER the alpha-1 `primeReveal()` (issue #90: DDA can't see a game on an
+  independent-flip/MPO plane until the prime forces DWM to composite it). On hide, a black scrub
+  frame is presented STRICTLY AFTER the alpha-0 flip (scrub-then-hide flashed black on every
+  zoom-out); it scrubs the retained frame so any residual race can only ever flash black.
 - RENDER ENGINE: stay above EVERYTHING - re-assert `HWND_TOPMOST` every frame in `renderFrame`
   (transparent + click-through + capture-excluded, so being on top is safe). If we sit below an
   always-on-top app overlay (RTSS, Task Manager), that window draws a second unmagnified copy
