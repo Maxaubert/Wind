@@ -499,6 +499,13 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     // black). WDA_EXCLUDEFROMCAPTURE (Win10 2004+) keeps the window visible on screen but
     // invisible to DDA, so we always capture the real desktop beneath it.
     SetWindowDisplayAffinity(s_->hwnd, WDA_EXCLUDEFROMCAPTURE);
+    // Exempt the overlay from Aero Peek's glass-sheet treatment (taskbar thumbnail hover shows a
+    // full-screen preview). Peek is a compositor effect, not a window, so no z-order band can beat
+    // it: DWM hides every window except the previewed one - including this overlay, which made the
+    // preview cover the magnifier unmagnified. Excluded, the overlay stays visible during peek and
+    // keeps magnifying what Desktop Duplication captures (issue #141).
+    BOOL exPeek = TRUE;
+    DwmSetWindowAttribute(s_->hwnd, DWMWA_EXCLUDED_FROM_PEEK, &exPeek, sizeof(exPeek));
 
     if (!s_->buildDeviceResources()) return false;
 
