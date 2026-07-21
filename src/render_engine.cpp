@@ -651,9 +651,14 @@ void RenderEngine::setVisible(bool visible) {
     // Show/hide via LWA_ALPHA on the layered window (NOT SW_HIDE/SW_SHOW, which makes DWM cache and
     // re-display a stale frame). Window stays shown the whole time (alt-tab no-flash); callers
     // present the live frame before setVisible(true).
+    SetLayeredWindowAttributes(s_->hwnd, 0, visible ? 255 : 0, LWA_ALPHA);
     // On hide, leave a BLACK frame on the redirection surface (defense in depth for issue #140):
     // the surface otherwise retains this session's last magnified frame forever, and any residual
-    // reveal race in a future zoom-in would flash that stale content. Black at worst.
+    // reveal race in a future zoom-in would flash that stale content. Black at worst. STRICTLY
+    // after the alpha-0 flip above: presenting first let DWM composite the black frame while the
+    // overlay was still visible - a guaranteed one-frame black flash on every zoom-out. With the
+    // alpha set first, any composite from here on shows nothing, and the black present lands on a
+    // hidden surface (the same present-while-hidden pattern the zoom-in reveal relies on).
     if (!visible && s_->ready && !s_->deviceLost && s_->swap &&
         (s_->rtv || s_->acquireBackbufferRtv())) {
         const float clear[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
@@ -661,7 +666,6 @@ void RenderEngine::setVisible(bool visible) {
         s_->ctx->ClearRenderTargetView(s_->rtv.Get(), clear);
         s_->swap->Present(0, 0);
     }
-    SetLayeredWindowAttributes(s_->hwnd, 0, visible ? 255 : 0, LWA_ALPHA);
     if (visible) {
         SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
