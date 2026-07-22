@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <magnification.h>
 #include <shellapi.h>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -66,9 +67,59 @@ void ReadTransform(double& lvl, double& ox, double& oy) {
     else { lvl = 1.0; ox = 0.0; oy = 0.0; }
 }
 
+typedef LONG (NTAPI* PFN_NtProcOp)(HANDLE);
+PFN_NtProcOp NtSuspendFn() {
+    static auto p = (PFN_NtProcOp)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtSuspendProcess");
+    return p;
+}
+PFN_NtProcOp NtResumeFn() {
+    static auto p = (PFN_NtProcOp)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtResumeProcess");
+    return p;
+}
+
+// The process handle currently holding Magnify.exe suspended (null when none). Global so the
+// crash filter / atexit net can resume without a model instance.
+std::atomic<void*> g_suspendedMagnify{ nullptr };
+
 } // namespace
 
+void MagnifyEmergencyResume() {
+    if (void* h = g_suspendedMagnify.exchange(nullptr)) {
+        if (auto res = NtResumeFn()) res((HANDLE)h);
+    }
+}
+
 bool MagnifyModel::magnifierRunning() const { return MagnifierWindowPresent(); }
+
+void MagnifyModel::suspendMagnifier() {
+    if (suspended_) return;
+    HWND w = FindWindowW(L"MagUIClass", nullptr);
+    if (!w) return;                                  // not running: nothing to silence
+    DWORD pid = 0; GetWindowThreadProcessId(w, &pid);
+    if (pid != pid_ || !hProc_) {                    // (re)acquire: Magnifier may have restarted
+        if (hProc_) CloseHandle((HANDLE)hProc_);
+        hProc_ = OpenProcess(PROCESS_SUSPEND_RESUME, FALSE, pid);
+        pid_ = pid;
+    }
+    auto sus = NtSuspendFn();
+    if (hProc_ && sus && sus((HANDLE)hProc_) >= 0) {
+        suspended_ = true;
+        g_suspendedMagnify.store(hProc_, std::memory_order_relaxed);
+    } else if (!suspendWarned_) {
+        // Dev (non-UIAccess) build: opening a UIAccess process is denied. Degrade to
+        // re-assert-only ramps (a foreign write can flash for at most one tick).
+        suspendWarned_ = true;
+        wind::Log(wind::LogLevel::Warn, "magnify",
+                  "cannot suspend Magnify.exe (dev build?); ramps run re-assert-only");
+    }
+}
+
+void MagnifyModel::resumeMagnifier() {
+    if (!suspended_) return;
+    suspended_ = false;
+    g_suspendedMagnify.store(nullptr, std::memory_order_relaxed);
+    if (auto res = NtResumeFn()) res((HANDLE)hProc_);
+}
 
 void MagnifyModel::writeRegistryPct(int pct) {
     if (pct == lastRegPct_) return;   // same-value writes fire no notification anyway
@@ -119,44 +170,58 @@ void MagnifyModel::present(const MapResult&, double level, const Config&,
     double lvl = MagnifyClampLevel(level);
     double jump = std::fabs(lvl - lastLevel_);
     lastLevel_ = lvl;
+    int pct = MagnifyTargetPct(lvl);
     if (jump <= 1e-4) {
-        // Level is settled. Hand off to Magnifier once: snap the transform to the exact integer
-        // percent (so the registry value matches the actual transform bit-for-bit and the write
-        // is a visual no-op), write it, and give Magnifier its mouse-following back.
-        if (!synced_) {
-            int pct = MagnifyTargetPct(lvl);
-            if (!rampActive_) ReadTransform(curLvl_, curOx_, curOy_);
+        // Level is settled.
+        if (phase_ == Phase::Ramping) {
+            // Freeze the view on the exact integer percent (so the later registry value matches
+            // the actual transform bit-for-bit) and WAKE Magnifier. Do NOT write the registry
+            // yet: Magnifier's notification handler animates from its internally OBSERVED
+            // transform, and that observer was suspended with us mid-ramp - writing now would
+            // replay an animation from the stale pre-ramp level (measured, probe 5). Give the
+            // observer a few frames to see the settled transform first.
             POINT c; GetCursorPos(&c);
             MagnifyOffset off = MagnifyAnchorOffset(c.x, c.y, curLvl_, curOx_, curOy_,
                                                     pct / 100.0, mon.w, mon.h);
-            MagSetFullscreenTransform((float)(pct / 100.0),
-                                      (int)std::lround(off.x), (int)std::lround(off.y));
-            writeRegistryPct(pct);
-            WriteMagDword(L"FollowMouse", 1);
-            rampActive_ = false;
-            synced_ = true;
+            curLvl_ = pct / 100.0; curOx_ = off.x; curOy_ = off.y;
+            MagSetFullscreenTransform((float)curLvl_,
+                                      (int)std::lround(curOx_), (int)std::lround(curOy_));
+            resumeMagnifier();
+            phase_ = Phase::Handoff;
+            handoffTicks_ = 8;   // ~56 ms at 144 Hz: 4 ticks observer catch-up, write, 4 ticks guard
+        } else if (phase_ == Phase::Handoff) {
+            // Guard window around the silent sync: keep re-asserting the settled transform so a
+            // stale write from the just-woken Magnifier (e.g. a mouse-move handler firing before
+            // it processed the sync) can flash for at most one tick.
+            MagSetFullscreenTransform((float)curLvl_,
+                                      (int)std::lround(curOx_), (int)std::lround(curOy_));
+            --handoffTicks_;
+            if (handoffTicks_ == 4) writeRegistryPct(pct);   // observer now sees the settled level: no-op sync
+            if (handoffTicks_ <= 0) phase_ = Phase::Idle;    // Magnifier owns steady state (panning)
+        } else {
+            if (!magnifierRunning()) launchMagnifier();   // user closed it manually: bring it back
         }
-        if (!magnifierRunning()) launchMagnifier();   // user closed it manually: bring it back
         return;
     }
-    synced_ = false;
-    if (jump >= kSnapJump && MagnifyTargetPct(lvl) != lastRegPct_) {
+    if (jump >= kSnapJump && pct != lastRegPct_) {
         // Quick-zoom snap: let Magnifier's eased animation play it (measured: one registry write
-        // eases from the ACTUAL current transform to the target over ~280 ms, any distance).
-        if (rampActive_) { WriteMagDword(L"FollowMouse", 1); rampActive_ = false; }
-        writeRegistryPct(MagnifyTargetPct(lvl));
-        synced_ = true;   // the registry route both moves the view and syncs Magnifier
+        // eases from the observed current transform to the target over ~280 ms, any distance).
+        resumeMagnifier();
+        writeRegistryPct(pct);
+        phase_ = Phase::Idle;   // the registry route both moves the view and syncs Magnifier
         return;
     }
     // Active ramp tick: drive the transform directly - glass smooth, anchored at the cursor so
     // the view zooms toward/away from the point the user is looking at. Segment start reads the
-    // actual transform ONCE (wherever Magnifier's panning left it) and silences FollowMouse so
-    // Magnifier has no reason to write while we ramp; from then on the state is OURS - a foreign
-    // write can flash for at most one tick before the next re-assert, and can never be adopted.
-    if (!rampActive_) {
+    // actual transform ONCE (wherever Magnifier's panning left it) and SUSPENDS Magnify.exe: it
+    // cannot write a single thing while we ramp, whatever its triggers are. Registry writes are
+    // strictly forbidden in this phase - ANY value change on the ScreenMagnifier key (even
+    // FollowMouse) wakes Magnifier's watcher, which re-applies the stale registry level mid-ramp
+    // (measured: the constant stage-flicker + random release levels of the FollowMouse attempt).
+    if (phase_ != Phase::Ramping) {
         ReadTransform(curLvl_, curOx_, curOy_);
-        WriteMagDword(L"FollowMouse", 0);
-        rampActive_ = true;
+        suspendMagnifier();
+        phase_ = Phase::Ramping;
     }
     POINT c; GetCursorPos(&c);
     MagnifyOffset off = MagnifyAnchorOffset(c.x, c.y, curLvl_, curOx_, curOy_, lvl, mon.w, mon.h);
@@ -166,10 +231,12 @@ void MagnifyModel::present(const MapResult&, double level, const Config&,
 
 void MagnifyModel::setActive(bool active) {
     if (active) return;
-    // Zoom-out to idle. A hold-to-zoom ramp already walked the transform down through present(),
-    // so the residual is tiny: snap it to identity. A quick-zoom-out arrives here with the
-    // transform still high: route through the registry so Magnifier eases down (unless the
-    // registry already says 100 - a same-value write fires no notification - then snap).
+    // Zoom-out to idle. Wake Magnifier first (registry routes need its watcher alive). A
+    // hold-to-zoom ramp already walked the transform down through present(), so the residual is
+    // tiny: snap it to identity. A quick-zoom-out arrives here with the transform still high:
+    // route through the registry so Magnifier eases down (unless the registry already says 100 -
+    // a same-value write fires no notification - then snap).
+    resumeMagnifier();
     double cur, ox, oy; ReadTransform(cur, ox, oy);
     if (cur - 1.0 >= kSnapJump && lastRegPct_ != 100) {
         writeRegistryPct(100);
@@ -177,13 +244,13 @@ void MagnifyModel::setActive(bool active) {
         MagSetFullscreenTransform(1.0f, 0, 0);
         writeRegistryPct(100);
     }
-    if (rampActive_) { WriteMagDword(L"FollowMouse", 1); rampActive_ = false; }
     lastLevel_ = 1.0;
-    synced_ = true;
+    phase_ = Phase::Idle;
 }
 
 void MagnifyModel::shutdown() {
     if (!ready_) return;
+    resumeMagnifier();                       // never leave Magnify.exe suspended
     MagSetFullscreenTransform(1.0f, 0, 0);   // never leave the desktop zoomed
     if (magnifierRunning()) InjectWinChord(VK_ESCAPE);
     // Put the user's Magnifier settings back exactly as we found them (absent values were
@@ -202,6 +269,7 @@ void MagnifyModel::shutdown() {
         DeleteFileW(backupPath_.c_str());
         wind::Log(wind::LogLevel::Info, "magnify", "shutdown: Magnifier quit, registry restored");
     }
+    if (hProc_) { CloseHandle((HANDLE)hProc_); hProc_ = nullptr; pid_ = 0; }
     MagUninitialize();
     ready_ = false;
 }

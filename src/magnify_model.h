@@ -31,19 +31,36 @@ private:
     void launchMagnifier();
     void writeRegistryPct(int pct);               // tracked write (see lastRegPct_)
 
+    void suspendMagnifier();
+    void resumeMagnifier();
+
     bool ready_ = false;
     double lastLevel_ = 1.0;      // ramp detection: level seen by the previous present()
-    bool   synced_ = false;       // steady level has been handed off to Magnifier
+    // Phases: Idle (Magnifier owns steady state), Ramping (Magnify.exe SUSPENDED, we own the
+    // transform), Handoff (resumed; guard-assert the settled transform for a few ticks around
+    // the silent registry sync - see present() for the measured timing rationale).
+    enum class Phase { Idle, Ramping, Handoff };
+    Phase  phase_ = Phase::Idle;
+    int    handoffTicks_ = 0;
     // Ramp-segment state. The actual transform is read ONCE at segment start and then tracked in
-    // floats: never re-read mid-ramp, so a stale write Magnifier sneaks in can never be ADOPTED
-    // as our baseline (it gets overwritten by the next 144 Hz re-assert instead) and the anchor
-    // keeps sub-pixel continuity instead of round-tripping through the API's integer offsets.
-    bool   rampActive_ = false;
+    // floats: never re-read mid-ramp, so nothing foreign can be ADOPTED as our baseline, and the
+    // anchor keeps sub-pixel continuity instead of round-tripping through integer offsets.
     double curLvl_ = 1.0, curOx_ = 0.0, curOy_ = 0.0;
+    // Suspension bookkeeping (Magnify.exe is a UIAccess process: opening it for suspend/resume
+    // works from the deployed UIAccess build; the dev build falls back to re-assert-only).
+    void*  hProc_ = nullptr;
+    unsigned long pid_ = 0;
+    bool   suspended_ = false;
+    bool   suspendWarned_ = false;
     int    lastRegPct_ = 100;     // last value written to the registry: a same-value write fires
                                   //   NO notification, so routes that need Magnifier to act must
                                   //   check this first
     unsigned long long lastLaunchMs_ = 0;   // relaunch backoff (user may close Magnifier manually)
     std::wstring backupPath_;     // one-shot registry snapshot (restore on shutdown)
 };
+
+// Safety net for abnormal exits (crash filter, atexit): a suspended Magnify.exe must NEVER be
+// left behind - the user's system magnifier would be frozen until they kill it themselves.
+// Idempotent, callable from any thread, no-op when nothing is suspended.
+void MagnifyEmergencyResume();
 }

@@ -926,6 +926,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 // leave the machine with a hidden/locked cursor - the next launch (and our own exit) heals it.
 static void RestoreInputState() {
     ClipCursor(nullptr);                                         // release any cursor confinement
+    wind::MagnifyEmergencyResume();      // never leave Magnify.exe suspended (magnify-model ramps)
     if (MagInitialize()) { MagShowSystemCursor(TRUE); MagUninitialize(); }   // un-hide the OS cursor
     SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, SPIF_SENDCHANGE);      // reload system cursors
     for (int i = 0; i < 8 && ShowCursor(TRUE) < 0; ++i) {}       // bump our show-count back to visible
@@ -950,6 +951,7 @@ static LONG WINAPI EarlyCursorRestoreFilter(EXCEPTION_POINTERS* ep) {
     if (InterlockedExchange(&s_inHandler, 1)) return EXCEPTION_CONTINUE_SEARCH;
     MagShowSystemCursor(TRUE);           // no-op if the Magnification API was never initialized this run
     ClipCursor(nullptr);                 // never leave the cursor clipped if we crash while Inspect-locked
+    wind::MagnifyEmergencyResume();      // a crash mid-ramp must not strand Magnify.exe suspended
     SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, SPIF_SENDCHANGE);   // heals a blanked cursor scheme
     wind::WriteCrashReport(ep);          // minidump + text summary into the log dir
     return EXCEPTION_CONTINUE_SEARCH;   // let the default handler still report the crash
