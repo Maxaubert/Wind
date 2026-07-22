@@ -22,6 +22,14 @@ const wchar_t* kSnapshotValues[] = { L"Magnification", L"MagnificationMode",
 // the registry so Magnifier's eased animation plays it, instead of hard-setting the transform.
 const double kSnapJump = 0.75;
 
+// Minimum interval between fullscreen-transform writes. DWM applies desktop-transform updates
+// SLOWER than our 144 Hz tick; writing every tick backs up its transform queue and the VIEW
+// lags seconds behind input (the tap-keeps-zooming/stage-flicker/lottery-release symptoms; the
+// old transform model documented the same queue backup). Magnifier's own ease animates at
+// ~60 Hz (measured), so that is the known-absorbable rate. The ramp still SAMPLES at 144 Hz -
+// a throttled write always carries the newest level, so intermediates coalesce for free.
+const unsigned long long kSetIntervalMs = 15;
+
 int ReadMagDword(const wchar_t* name, int fallback) {
     DWORD v = 0, cb = sizeof(v);
     if (RegGetValueW(HKEY_CURRENT_USER, kMagKey, name, RRF_RT_REG_DWORD, nullptr, &v, &cb) == ERROR_SUCCESS)
@@ -192,8 +200,10 @@ bool MagnifyModel::initialize(const MonitorTarget&) {
 void MagnifyModel::present(const MapResult&, double level, const Config&,
                            const MonitorTarget& mon, const PresentExtras&) {
     double lvl = MagnifyClampLevel(level);
-    double jump = std::fabs(lvl - lastLevel_);
-    lastLevel_ = lvl;
+    // Ramp detection uses the UNCLAMPED level: a hold past the 16x ceiling must keep reading as
+    // "ramping" (clamped jump would read 0 and fire a premature mid-hold settle/handoff).
+    double jump = std::fabs(level - lastLevel_);
+    lastLevel_ = level;
     int pct = MagnifyTargetPct(lvl);
     if (jump <= 1e-4) {
         // Level is settled.
@@ -216,8 +226,13 @@ void MagnifyModel::present(const MapResult&, double level, const Config&,
         } else if (phase_ == Phase::Handoff) {
             // Guard window around the silent sync: keep re-asserting the settled transform so a
             // stale write from the just-woken Magnifier (e.g. a mouse-move handler firing before
-            // it processed the sync) can flash for at most one tick.
-            SetTransform(curLvl_, curOx_, curOy_);
+            // it processed the sync) can flash for at most one tick. Throttled like the ramp
+            // writes: these are same-value asserts, the queue must not be re-flooded here.
+            unsigned long long now = GetTickCount64();
+            if (now - lastSetMs_ >= kSetIntervalMs) {
+                lastSetMs_ = now;
+                SetTransform(curLvl_, curOx_, curOy_);
+            }
             --handoffTicks_;
             if (handoffTicks_ == 6) writeRegistryPct(pct);   // observer now sees the settled level: no-op sync
             if (handoffTicks_ <= 0) phase_ = Phase::Idle;    // Magnifier owns steady state (panning)
@@ -251,6 +266,12 @@ void MagnifyModel::present(const MapResult&, double level, const Config&,
         suspendMagnifier();
         phase_ = Phase::Ramping;
     }
+    // Throttled write (kSetIntervalMs): DWM absorbs ~60 transform updates/s; writing faster
+    // queues them and the VIEW lags seconds behind input. Skipped ticks lose nothing - the next
+    // write carries the newest level.
+    unsigned long long now = GetTickCount64();
+    if (now - lastSetMs_ < kSetIntervalMs) return;
+    lastSetMs_ = now;
     POINT c; GetCursorPos(&c);
     MagnifyOffset off = MagnifyAnchorOffset(c.x, c.y, curLvl_, curOx_, curOy_, lvl, mon.w, mon.h);
     SetTransform(lvl, off.x, off.y);
