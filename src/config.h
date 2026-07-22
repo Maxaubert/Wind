@@ -31,7 +31,7 @@ struct Config {
                                      // while zoomed. Swallowed system-wide like recenterVk (VK only,
                                      // no modifier - the keyboard hook swallows the bare key).
     int    swapModelVk      = 0;     // VK code; 0 = unbound. Tap to swap the magnifier model
-                                     // (render <-> transform). Swallowed system-wide like
+                                     // (render <-> magnify). Swallowed system-wide like
                                      // cursorLockVk (VK only, no modifier). Pressing it restarts
                                      // Wind onto the flipped model (model is not hot-swappable).
     // Hotkey to toggle the magnified cursor's visibility while zoomed. Edge-detected in the tick
@@ -65,16 +65,15 @@ struct Config {
 
     // --- Model selection ----------------------------------------------------
     // Which magnification model runs. "render" (default) = the DXGI capture + D3D11 overlay.
-    // "transform" = the low-GPU DWM fullscreen-transform model (MagSetFullscreenTransform). An
+    // "magnify" = drive the native Windows Magnifier (Magnify.exe) via injected Win+Plus/Minus;
+    // works over DRM-protected video that blanks under Desktop Duplication. A legacy "transform"
+    // value (the removed MagSetFullscreenTransform model it replaces) maps to "magnify"; any other
     // unknown value falls back to "render". Applied at launch (restart to switch; not hot-swapped).
     std::string model = "render";
-    // Transform-model-only knobs (ignored by the render model):
-    int fastPan     = 1;  // 1 = pan via the private SetMagnificationDesktopMagnification channel
-                          //     (sub-pixel); falls back to the public API automatically if unavailable.
-    int smoothPan   = 0;  // 1 = hold the display composited while zoomed (1px pin) so flip-model games
-                          //     do not stutter while panning, at a capped frame rate while zoomed.
-    int cursorSprite = 1; // 1 = hide the OS cursor and draw a scene-locked sprite welded to the
-                          //     transform (fixes cursor/click divergence near screen edges).
+    // Magnify-model-only: Windows Magnifier zoom increment in percent POINTS per wheel notch
+    // (written to the ScreenMagnifier registry; the user's original value is snapshot-restored
+    // on exit). Lower = smoother and slower zoom. Clamped 5..400. Live-applies (no restart).
+    int magnifyStep = 50;
     // --- Own GPU renderer ---------------------------------------------------
     // Pan speed multiplier. Free desktop panning auto-matches the OS cursor (DPI + acceleration) and
     // is then scaled by this (1.0 = exact match, the default); it also scales the raw-input pan while
@@ -163,7 +162,7 @@ bool IsForbiddenBindVk(int vk);
 // caller keeps its fallback default.
 bool ParseHexColor(const std::string& s, float& r, float& g, float& b);
 
-// Pure: render <-> transform. "transform" -> "render"; anything else -> "transform" (so a corrupt
+// Pure: render <-> magnify. "magnify" -> "render"; anything else -> "magnify" (so a corrupt
 // model value flips to a valid engine). Pure; used by the swap-model hotkey. No I/O, no <windows.h>.
 std::string FlipModel(const std::string& model);
 

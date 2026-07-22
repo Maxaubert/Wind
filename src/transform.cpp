@@ -14,28 +14,4 @@ OffsetF ComputeOffsetF(double centerX, double centerY, double level, int screenW
     if (y < 0) y = 0; else if (y > maxY) y = maxY;
     return OffsetF{ x, y };
 }
-
-OffsetF ComputeFixedPointOffset(double centerX, double centerY, double level) {
-    if (level < 1.0) level = 1.0;
-    // T(p) = (p - off) * level. Solving T(center) == center gives off = center * (1 - 1/level).
-    const double k = 1.0 - 1.0 / level;
-    return OffsetF{ centerX * k, centerY * k };
-}
-
-static int iround(double v) {
-    int lower = (int)(v >= 0 ? v : v - 1);
-    double frac = v - lower;
-    if (frac < 0.5) return lower;
-    if (frac > 0.5) return lower + 1;
-    // frac == 0.5, banker's rounding (round half to even)
-    return (lower & 1) ? lower + 1 : lower;
-}
-
-MagTransform ComputeMagTransform(double srcLeft, double srcTop, double level) {
-    if (level < 1.0) level = 1.0;
-    return MagTransform{
-        iround(srcLeft), iround(srcTop),
-        iround(-srcLeft * level), iround(-srcTop * level),
-    };
-}
 }

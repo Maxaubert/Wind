@@ -27,13 +27,42 @@ Pure logic (no `<windows.h>`): `src/transform` (float `ComputeOffsetF`),
 `src/zoom_controller`, `src/cursor_mapper`, parse half of `src/config`.
 Win32 I/O: `render_engine`, `input_router`, `tray`, `main`.
 
-One engine, one paced tick loop. `render_engine` = own DXGI Desktop Duplication capture +
-D3D11: magnifies a sub-pixel float source rect to a click-through, capture-excluded
-(`WDA_EXCLUDEFROMCAPTURE`) fullscreen overlay; draws the real cursor (`GetCursorInfo`) centered
-via `cursor_mapper`; hides the OS cursor (`MagShowSystemCursor`) and syncs `SetCursorPos` for
-clicks. Sub-pixel pan + smooth centered cursor. The old Magnification-API `engine=mag` fallback
-was removed (issue #20) - render is the only engine.
-Spec: `docs/superpowers/specs/2026-05-25-own-renderer-design.md`. Issue #4.
+One paced tick loop; two models behind `IMagnifierModel` (`model=` ini key, restart to switch,
+`swapModelVk` flips + relaunches). `model=render` (default): `render_engine` = own DXGI Desktop
+Duplication capture + D3D11: magnifies a sub-pixel float source rect to a click-through,
+capture-excluded (`WDA_EXCLUDEFROMCAPTURE`) fullscreen overlay; draws the real cursor
+(`GetCursorInfo`) centered via `cursor_mapper`; hides the OS cursor (`MagShowSystemCursor`) and
+syncs `SetCursorPos` for clicks. Sub-pixel pan + smooth centered cursor.
+`model=magnify` (issue #146): drives the NATIVE Windows Magnifier - the DRM-safe fallback
+(Netflix etc. blanks under Desktop Duplication). FINAL DESIGN = maximum simplicity: Wind holds
+NO zoom state and never touches the transform. `selfDrivenZoom()` on the model interface makes
+RunTick bypass the ENTIRE level pipeline (ZoomController pinned at 1x, overlay never activates,
+quick zoom / mapper / Inspect never run) and instead call `nativeZoomTick(dir, cfg)` every tick:
+while a zoom button is held it injects Ctrl+Alt+wheel notches (Magnifier's own wheel-zoom
+shortcut) every 60 ms; Magnifier does everything else natively (stepping by `magnifyStep` ->
+its ZoomIncrement, easing each notch, panning, cursor). `magnifyStep` (ini + Settings UI,
+5..400, default 50) is written to ZoomIncrement live on change. Init preps fullscreen mode +
+toolbar minimized + Magnification=100 and launches Magnify.exe; shutdown/model-swap injects
+Win+Esc and restores the user's Magnifier registry from a one-shot snapshot
+(`%LOCALAPPDATA%\Wind\magnifier_backup.ini`, written before first modify, kept across crashes
+so we never "restore" our own values). The KEYBOARD HOOK SKIPS INJECTED EVENTS in magnify mode
+(`setIgnoreInjectedKeys`) so our Ctrl/Alt/Esc chords are never swallowed by a user bind.
+DO NOT RE-ATTEMPT the smarter drives - all measured dead ends (probes + amendments in the
+spec): injected Win+Plus chord bursts drop ~half and animate each survivor (lag + zoom-after-
+release); streaming the `Magnification` registry faster than its ~280 ms animation window
+degenerates into ~40% snaps (ONE write eases beautifully - that part is real); injected
+Win+wheel is INERT (Ctrl+Alt+wheel is the real channel); driving MagSetFullscreenTransform
+ourselves during ramps IS glass-smooth and sticks while Magnify.exe runs, but Magnifier stomps
+its stale belief within ~7 ms of any wake with queued mouse moves, its registry handler
+animates from a STALE cached actual for writes queued while suspended, and the whole hybrid
+collapsed into flicker/racy release levels; suspending Magnify.exe mid-ramp is measurable-safe
+for input latency yet still lost the belief-sync races. Also: Magnification writes above 1600
+are silently IGNORED (not clamped), and a SAME-VALUE registry write fires no notification.
+The old Magnification-API `engine=mag` fallback was removed (issue #20); the
+MagSetFullscreenTransform `model=transform` was removed in favor of magnify (issue #146; a
+legacy `model=transform` ini value maps to `magnify`).
+Specs: `docs/superpowers/specs/2026-05-25-own-renderer-design.md` (render, issue #4),
+`docs/superpowers/specs/2026-07-22-magnify-model-design.md` (magnify).
 
 **Two binaries.** `Wind.exe` is the always-running tray magnifier (the perf-critical core
 described above). `WindConfig.exe` is an on-demand settings GUI: a thin C++ WebView2 host

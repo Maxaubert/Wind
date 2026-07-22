@@ -34,7 +34,7 @@ cl /nologo /std:c++17 /EHsc /O2 /W4 /Zi /DUNICODE /D_UNICODE ^
    src\*.cpp src\config_ui\ini_edit.cpp src\wind.res ^
    /Fe:Wind.exe ^
    /link Magnification.lib Dwmapi.lib user32.lib shell32.lib gdi32.lib Dbghelp.lib ^
-   d3d11.lib dxgi.lib dxguid.lib d3dcompiler.lib windowscodecs.lib ole32.lib ^
+   d3d11.lib dxgi.lib dxguid.lib d3dcompiler.lib windowscodecs.lib ole32.lib advapi32.lib ^
    /MANIFEST:EMBED /MANIFESTUAC:NO /MANIFESTINPUT:Wind.manifest /SUBSYSTEM:WINDOWS ^
    /DEBUG /OPT:REF /OPT:ICF
 exit /b %errorlevel%
@@ -49,7 +49,7 @@ cl /nologo /std:c++17 /EHsc /O2 /W4 /Zi /DUNICODE /D_UNICODE /DWIND_UIACCESS ^
    src\*.cpp src\config_ui\ini_edit.cpp src\wind.res ^
    /Fe:Wind.exe ^
    /link Magnification.lib Dwmapi.lib user32.lib shell32.lib gdi32.lib Dbghelp.lib ^
-   d3d11.lib dxgi.lib dxguid.lib d3dcompiler.lib windowscodecs.lib ole32.lib ^
+   d3d11.lib dxgi.lib dxguid.lib d3dcompiler.lib windowscodecs.lib ole32.lib advapi32.lib ^
    /MANIFEST:EMBED /MANIFESTUAC:NO /MANIFESTINPUT:Wind.uiaccess.manifest /SUBSYSTEM:WINDOWS ^
    /DEBUG /OPT:REF /OPT:ICF
 exit /b %errorlevel%
