@@ -101,6 +101,17 @@ staged Apply/Discard footer.
   process; the only reliable fix is a kernel filter driver (e.g. Interception), which we deliberately
   do NOT use (no-driver design + anti-cheat ban risk). Confirmed: swallowing works in normal apps,
   not in raw-input games. Pick game keys/buttons you don't otherwise use.
+  GAME-INSPECT (issue #144) sidesteps this for Inspect mode only: when Inspect is toggled while a
+  mouselook game holds the mouse (zoomed -> LockDetector locked; at 1x -> the cursor was hidden by
+  the app at the toggle edge; pure decision `ShouldGameInspect`, src/inspect_focus.h), main.cpp
+  steals foreground to an invisible 1x1 helper window (`WindFocusStealer`, layered alpha 0) - a
+  backgrounded game stops receiving raw input, so its camera freezes (the Snipping Tool effect)
+  while our RIDEV_INPUTSINK pan keeps working. The steal is DEFERRED one step past the reveal logic
+  (ForegroundCoversMonitor must read the game, not the helper), re-asserted if the game re-grabs
+  foreground (an alt-tab to a third app is respected), and foreground is handed back on every exit
+  path (toggle-off, teardown-to-idle, device-lost, shutdown). Click-to-look-point is DISCARDED in
+  game-inspect (a click would re-activate the game mid-inspect). Exclusive-fullscreen games may
+  minimize on focus loss; games that pause on focus loss show their paused frame - both by design.
 - Declare Per-Monitor-V2 DPI awareness (`Wind.manifest`) or offset pixel math is wrong
   on scaled displays.
 - The lens-must-move-when-cursor-locked behavior is THE core feature. It relies on

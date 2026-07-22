@@ -23,6 +23,7 @@
 #include "tray.h"
 #include "lock_detector.h"
 #include "cursor_lock.h"
+#include "inspect_focus.h"
 #include "resource.h"
 
 using namespace wind;
@@ -91,6 +92,62 @@ static bool ForegroundCoversMonitor(const MonitorTarget& mon) {
            wr.right >= mon.x + mon.w && wr.bottom >= mon.y + mon.h;
 }
 
+// --- Game-inspect focus steal (issue #144) ---------------------------------------------------
+// A mouselook game reads the mouse via Raw Input, which no user-mode hook can block from another
+// process (the documented LL-hook limitation): under Inspect the camera kept turning and the game
+// fought the 1px freeze clip by recentering every frame. Backgrounding the game is the one
+// user-mode lever that works - games register raw input without RIDEV_INPUTSINK and DirectInput's
+// foreground cooperative level drops too, so on focus loss the camera freezes and the game
+// releases its clip (exactly why Snipping Tool's overlay works over gameplay). Foreground goes to
+// this invisible 1x1 helper (layered alpha 0: never painted, never seen), NOT the overlay - the
+// overlay must stay WS_EX_NOACTIVATE + click-through. Wind's own pan is unaffected: raw input is
+// registered with RIDEV_INPUTSINK on a message-only window and arrives regardless of foreground.
+static HWND g_focusStealer = nullptr;
+static HWND EnsureFocusStealer(const MonitorTarget& mon) {
+    if (g_focusStealer && IsWindow(g_focusStealer)) {
+        SetWindowPos(g_focusStealer, nullptr, mon.x, mon.y, 1, 1,
+                     SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        return g_focusStealer;
+    }
+    static ATOM s_atom = 0;
+    if (!s_atom) {
+        WNDCLASSW wc{};
+        wc.lpfnWndProc = DefWindowProcW;
+        wc.hInstance = GetModuleHandleW(nullptr);
+        wc.lpszClassName = L"WindFocusStealer";
+        s_atom = RegisterClassW(&wc);
+    }
+    if (!s_atom) return nullptr;
+    // No WS_EX_NOACTIVATE (it exists to accept activation); TOOLWINDOW keeps it out of the
+    // taskbar and alt-tab list.
+    g_focusStealer = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
+                                     L"WindFocusStealer", L"Wind Inspect", WS_POPUP,
+                                     mon.x, mon.y, 1, 1, nullptr, nullptr,
+                                     GetModuleHandleW(nullptr), nullptr);
+    if (!g_focusStealer) return nullptr;
+    SetLayeredWindowAttributes(g_focusStealer, 0, 0, LWA_ALPHA);   // fully invisible
+    ShowWindow(g_focusStealer, SW_SHOWNOACTIVATE);   // shown (a hidden window can't take foreground)
+    return g_focusStealer;
+}
+
+// SetForegroundWindow can silently refuse under the foreground-lock rules (the signed UIAccess
+// build is exempt). Verify the result, then fall back to the AttachThreadInput handshake so the
+// unsigned dev build works too.
+static bool StealForeground(HWND w) {
+    if (!w) return false;
+    if (GetForegroundWindow() == w) return true;
+    SetForegroundWindow(w);
+    if (GetForegroundWindow() == w) return true;
+    HWND fg = GetForegroundWindow();
+    DWORD fgTid = fg ? GetWindowThreadProcessId(fg, nullptr) : 0;
+    DWORD myTid = GetCurrentThreadId();
+    if (fgTid && fgTid != myTid && AttachThreadInput(myTid, fgTid, TRUE)) {
+        SetForegroundWindow(w);
+        AttachThreadInput(myTid, fgTid, FALSE);
+    }
+    return GetForegroundWindow() == w;
+}
+
 // Virtual-desktop bounds (the union of all monitors), used per zoomed frame to detect a game
 // clipping the cursor. Cached because GetSystemMetrics is a syscall and these bounds change only
 // on a display-topology change; refreshed on each zoom-in (where we also retarget the monitor).
@@ -138,6 +195,11 @@ struct TickState {
                                     //   the synthesized click reaches the look point (then re-freeze)
     double inspectPanRemX = 0.0;    // sub-pixel carry for the cooked Inspect-mode pan (slow motion not lost)
     double inspectPanRemY = 0.0;
+    bool   inspectGame = false;         // game-inspect (issue #144): foreground stolen from a mouselook
+                                        //   game so its raw-input camera stops receiving the mouse
+    bool   inspectStealPending = false; // steal deferred past the reveal logic (it must read the true fg)
+    HWND   inspectPrevFg = nullptr;     // the game window foreground is handed back to on exit
+    bool   inspectCursorWasShowing = true; // cursor visibility at the toggle edge (the 1x mouselook tell)
     double quickZoomStored    = 0.0;           // remembered quick-zoom level (0 = none yet); in-memory
     bool   prevInHeld         = false;         // for rising-edge detection of the zoom-in channel
     bool   prevOutHeld        = false;
@@ -164,6 +226,22 @@ struct TickState {
           mapper(m.w, m.h, c.cursorSmoothing) {}
 };
 static TickState* g_tick = nullptr;
+
+// Hand foreground back to the game when game-inspect ends. Called on EVERY inspect exit path
+// (toggle-off, zoom-out teardown, device-lost recovery, shutdown), mirroring the ClipCursor
+// release invariant. Foreground is returned only if we still hold it - a user who alt-tabbed to
+// a third app mid-inspect keeps their choice.
+static void EndGameInspect(TickState& t) {
+    if (!t.inspectGame) return;
+    t.inspectGame = false;
+    t.inspectStealPending = false;
+    if (t.inspectPrevFg && IsWindow(t.inspectPrevFg) &&
+        g_focusStealer && GetForegroundWindow() == g_focusStealer) {
+        SetForegroundWindow(t.inspectPrevFg);
+    }
+    t.inspectPrevFg = nullptr;
+    wind::Log(wind::LogLevel::Info, "inspect", "game-inspect ended (foreground returned)");
+}
 
 // Append a line to %TEMP%\wind_diag.log (frame-pacing diagnostics; gated on diagnostics=1).
 // %TEMP% so it works for the Program Files deploy too (its own dir isn't writable).
@@ -341,7 +419,14 @@ static void RunTick(TickState& t) {
     // overlay-drawn (render_engine draws the crosshair sprite when cursorLocked is set); the active
     // block below freezes the real cursor (1px ClipCursor) and roams a raw-driven look point.
     bool lockDown = keyDown(t.cfg.cursorLockVk);
-    if (lockDown && !t.lockKeyWasDown) t.cursorLock.toggle();
+    if (lockDown && !t.lockKeyWasDown) {
+        // Snapshot cursor visibility at the toggle edge, BEFORE this tick's active block hides it:
+        // at 1x the only thing that can have hidden the cursor is the foreground app, so a
+        // not-showing cursor is the mouselook-gameplay tell for game-inspect (issue #144).
+        CURSORINFO ci{}; ci.cbSize = sizeof(ci);
+        t.inspectCursorWasShowing = GetCursorInfo(&ci) ? (ci.flags & CURSOR_SHOWING) != 0 : true;
+        t.cursorLock.toggle();
+    }
     t.lockKeyWasDown = lockDown;
     // Tell the mouse hook whether Inspect is on (so it swallows real clicks and routes them to the look
     // point - see the commitButton drain in the active block). Published every tick (also clears on off).
@@ -413,9 +498,24 @@ static void RunTick(TickState& t) {
             ClipCursor(&fz);
             t.model.hideSystemCursor(true);   // hide the real cursor; we draw the crosshair
             t.model.onActivate();
+            // Game-inspect (issue #144): if a mouselook game holds the mouse, the freeze alone is
+            // not enough - its raw-input camera still receives every mickey. Steal foreground to
+            // the invisible helper so the game stops getting input. Deferred via
+            // inspectStealPending: the reveal logic later this tick must still see the GAME as
+            // foreground (ForegroundCoversMonitor decides the composite-gated reveal).
+            t.inspectGame = wind::ShouldGameInspect(zoomed, t.detector.locked(),
+                                                    t.inspectCursorWasShowing);
+            if (t.inspectGame) {
+                t.inspectPrevFg = GetForegroundWindow();
+                t.inspectStealPending = true;
+                wind::Log(wind::LogLevel::Info, "inspect",
+                          "game-inspect engaged (zoomed=%d detLocked=%d cursorShown=%d)",
+                          (int)zoomed, (int)t.detector.locked(), (int)t.inspectCursorWasShowing);
+            }
         }
         bool inspectExit = !inspect && t.prevInspect;   // Inspect just turned off but overlay stays (zoomed)
         if (inspectExit) {
+            EndGameInspect(t);   // hand foreground back to the game before resuming normal follow
             ClipCursor(nullptr);
             POINT lp{ (int)(t.mapper.centerX() + 0.5) + t.mon.x, (int)(t.mapper.centerY() + 0.5) + t.mon.y };
             SetCursorPos(lp.x, lp.y);                    // warp the real cursor to the look point
@@ -472,7 +572,10 @@ static void RunTick(TickState& t) {
         // look point isn't disturbed. Inspect stays on; the cursor re-freezes at frozenCursor afterwards.
         int nLeft  = g_input.state().commitLeft.exchange(0);
         int nRight = g_input.state().commitRight.exchange(0);
-        if (nLeft + nRight > 0) {
+        // Game-inspect: drain but DISCARD clicks. A synthesized click over the game window would
+        // re-activate it (mouse clicks activate), re-engaging mouselook mid-inspect; with the game
+        // backgrounded and cursorless there is nothing meaningful to click anyway.
+        if (nLeft + nRight > 0 && !t.inspectGame) {
             ClipCursor(nullptr);       // release the 1px freeze so the absolute click can reach the look point
             t.clickReleaseTicks = 2;   // ...and keep it released a couple ticks before re-freezing (below)
             const VirtualBounds& vb = t.vbounds;   // cached at activation; equals the SM_*VIRTUALSCREEN metrics
@@ -599,6 +702,22 @@ static void RunTick(TickState& t) {
         } else if (enterActive) {
             t.model.setActive(true);   // transform: reveal immediately, no capture priming
         }
+        // Execute the deferred game-inspect steal now that the reveal logic has read the true
+        // foreground, and RE-assert it if the game pulled foreground back mid-inspect (some
+        // engines re-grab on their own timers; a user alt-tab to a THIRD app is respected).
+        // If the steal fails (unsigned dev build denied by the foreground lock), drop back to
+        // normal inspect: the camera moves again, but the state is never inconsistent.
+        if (inspect && t.inspectGame) {
+            HWND fg = GetForegroundWindow();
+            bool wantSteal = t.inspectStealPending || (t.inspectPrevFg && fg == t.inspectPrevFg);
+            t.inspectStealPending = false;
+            if (wantSteal && !StealForeground(EnsureFocusStealer(t.mon))) {
+                wind::Log(wind::LogLevel::Warn, "inspect",
+                          "game-inspect: foreground steal failed; falling back to normal inspect");
+                t.inspectGame = false;
+                t.inspectPrevFg = nullptr;
+            }
+        }
         // Bookkeeping for next tick's GetCursorPos delta. INSPECT: the real cursor stays frozen, so the
         // baseline is the frozen point. Otherwise renderFrame SetCursorPos'd the OS cursor to
         // clickDesktop+origin; remember it so next tick's delta measures only the user's hand motion.
@@ -613,6 +732,7 @@ static void RunTick(TickState& t) {
         t.model.hideSystemCursor(false);
         t.outlineZoneSec = 0.0;                       // zoom-out clears the low-zoom dwell (no banked partial)
         if (t.prevInspect) {
+            EndGameInspect(t);   // teardown-to-idle exits game-inspect too (foreground returned)
             ClipCursor(nullptr);
             POINT lp{ (int)(t.mapper.centerX() + 0.5) + t.mon.x, (int)(t.mapper.centerY() + 0.5) + t.mon.y };
             SetCursorPos(lp.x, lp.y);                  // resume at the look point
@@ -1172,6 +1292,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             // documented "released on device-lost recovery" invariant; recovery returns to a clean 1x).
             ClipCursor(nullptr);
             if (ts.cursorLock.locked()) { ts.cursorLock.reset(); ts.clickReleaseTicks = 0; }
+            EndGameInspect(ts);   // device-lost must not strand the game backgrounded
             unsigned long long now = GetTickCount64();
             if (now >= nextRecoverMs) {
                 if (!rm->recoverDeviceLost()) nextRecoverMs = now + 500;   // retry in 0.5s
@@ -1223,6 +1344,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     UnregisterHotKey(hwnd, kQuitHotkeyId);
     UnregisterHotKey(hwnd, kHideCursorHotkeyId);
     UnregisterHotKey(hwnd, kQuickZoomHotkeyId);
+    EndGameInspect(ts);  // quitting mid-game-inspect hands foreground back to the game
     model->shutdown();   // restores cursor + tears down D3D/overlay
     g_input.stop();
     Tray::Remove();
