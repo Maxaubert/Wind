@@ -109,6 +109,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "cursorScaleWithZoom")c.cursorScaleWithZoom = std::stoi(val);
             else if (key == "cursorVisibility")   c.cursorVisibility = val;
             else if (key == "model")              c.model = val;
+            else if (key == "magnifyStep")        c.magnifyStep = std::stoi(val);
             else if (key == "bilinear")           c.bilinear = std::stoi(val);
             else if (key == "sharpness")          c.sharpness = std::stod(val);
             else if (key == "zorderBand")         c.zorderBand = std::stoi(val);
@@ -153,6 +154,8 @@ Config ParseConfig(const std::string& text) {
     // the same role (DRM-safe magnification); anything else unknown falls back to render.
     if (c.model == "transform") c.model = "magnify";
     if (c.model != "render" && c.model != "magnify") c.model = "render";
+    if (c.magnifyStep < 5)   c.magnifyStep = 5;     // Windows Settings' own range is 5..400
+    if (c.magnifyStep > 400) c.magnifyStep = 400;
     // Reject keybinds to keys Wind must never swallow (see IsForbiddenBindVk). A bound key is
     // eaten system-wide, so binding e.g. Backspace or the Windows key would make it unusable
     // everywhere; treat a forbidden bind as unbound regardless of how it got into the ini.
@@ -262,6 +265,9 @@ Config LoadConfig(const std::wstring& path) {
                ";   the cursor itself, and ignores the render-only knobs (sharpness, hdrTonemap,\n"
                ";   bilinear, outline, cursor*, multiMonitor, Inspect mode). Max zoom 1600%.\n"
                "model=render\n"
+               "; magnifyStep (magnify only): Windows Magnifier zoom increment, percent points per\n"
+               ";   step (5-400). Lower = smoother and slower. Applies live.\n"
+               "magnifyStep=50\n"
                "; multiMonitor: 1=magnify whichever monitor the cursor is on at zoom-in; 0=primary only\n"
                "multiMonitor=0\n"
                "; cropCapture (opt-in): 0=always copy all changed regions (cache never stale, default);\n"

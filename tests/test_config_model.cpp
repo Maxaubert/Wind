@@ -13,6 +13,14 @@ TEST_CASE("model=magnify parses") {
     CHECK(c.model == "magnify");
 }
 
+TEST_CASE("magnifyStep parses and clamps to Windows' 5..400 range") {
+    CHECK(ParseConfig("").magnifyStep == 50);              // shipped default
+    CHECK(ParseConfig("magnifyStep=25\n").magnifyStep == 25);
+    CHECK(ParseConfig("magnifyStep=1\n").magnifyStep == 5);
+    CHECK(ParseConfig("magnifyStep=999\n").magnifyStep == 400);
+    CHECK(ParseConfig("magnifyStep=-10\n").magnifyStep == 5);
+}
+
 TEST_CASE("legacy model=transform maps to magnify") {
     // The removed transform model's role (DRM-safe magnification) is taken over by magnify;
     // an ini written by an older build must keep working without falling back to render.

@@ -26,12 +26,14 @@ public:
     bool coversShell() const override { return true; }   // Magnifier magnifies the shell too
     bool supportsInspect() const override { return false; }
     bool selfDrivenZoom() const override { return true; }
-    void nativeZoomTick(int dir) override;
+    void nativeZoomTick(int dir, const Config& cfg) override;
 private:
     void launchMagnifier();
 
     bool ready_ = false;
     int  lastDir_ = 0;                      // for start/stop logging only
+    int  lastStepPct_ = 0;                  // last ZoomIncrement written (write only on change;
+                                            //   0 = not yet written, forces the first write)
     unsigned long long lastNotchMs_ = 0;    // wheel-notch cadence gate
     unsigned long long lastLaunchMs_ = 0;   // relaunch backoff (user may close Magnifier manually)
     std::wstring backupPath_;               // one-shot registry snapshot (restore on shutdown)

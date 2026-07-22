@@ -13,7 +13,7 @@ const wchar_t* kMagKey = L"Software\\Microsoft\\ScreenMagnifier";
 // deliberately do NOT touch ZoomIncrement or FollowMouse: the whole point of this design is
 // that Magnifier behaves exactly as the user configured it in Windows Settings.
 const wchar_t* kSnapshotValues[] = { L"Magnification", L"MagnificationMode",
-                                     L"MagnifierUIWindowMinimized" };
+                                     L"MagnifierUIWindowMinimized", L"ZoomIncrement" };
 
 // Wheel-notch cadence. Measured (probe 7): 60 ms notches register 1:1 with no backlog and the
 // view settles ~150 ms after the last notch. Faster is unmeasured; slower feels sluggish.
@@ -101,7 +101,15 @@ bool MagnifyModel::initialize(const MonitorTarget&) {
     return true;
 }
 
-void MagnifyModel::nativeZoomTick(int dir) {
+void MagnifyModel::nativeZoomTick(int dir, const Config& cfg) {
+    // Live-apply the configured zoom increment (write only on change: same-value writes are
+    // pointless, and in this native design Magnifier's key-watch handler re-applying its OWN
+    // current Magnification value is a no-op, so an increment write while running is safe).
+    if (cfg.magnifyStep != lastStepPct_) {
+        WriteMagDword(L"ZoomIncrement", cfg.magnifyStep);
+        lastStepPct_ = cfg.magnifyStep;
+        wind::Log(wind::LogLevel::Info, "magnify", "zoom increment -> %d%%", cfg.magnifyStep);
+    }
     if (dir != lastDir_) {
         wind::Log(wind::LogLevel::Info, "magnify", "zoom %s",
                   dir > 0 ? "in (held)" : dir < 0 ? "out (held)" : "released");

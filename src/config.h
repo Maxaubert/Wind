@@ -70,6 +70,10 @@ struct Config {
     // value (the removed MagSetFullscreenTransform model it replaces) maps to "magnify"; any other
     // unknown value falls back to "render". Applied at launch (restart to switch; not hot-swapped).
     std::string model = "render";
+    // Magnify-model-only: Windows Magnifier zoom increment in percent POINTS per wheel notch
+    // (written to the ScreenMagnifier registry; the user's original value is snapshot-restored
+    // on exit). Lower = smoother and slower zoom. Clamped 5..400. Live-applies (no restart).
+    int magnifyStep = 50;
     // --- Own GPU renderer ---------------------------------------------------
     // Pan speed multiplier. Free desktop panning auto-matches the OS cursor (DPI + acceleration) and
     // is then scaled by this (1.0 = exact match, the default); it also scales the raw-input pan while

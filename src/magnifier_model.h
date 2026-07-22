@@ -34,6 +34,6 @@ struct IMagnifierModel {
     // nativeZoomTick(dir) every tick (dir: +1 zoom-in held, -1 zoom-out held, 0 idle) and skips
     // the rest of the zoom pipeline when selfDrivenZoom() is true.
     virtual bool selfDrivenZoom() const { return false; }
-    virtual void nativeZoomTick(int dir) { (void)dir; }
+    virtual void nativeZoomTick(int dir, const Config& cfg) { (void)dir; (void)cfg; }
 };
 }

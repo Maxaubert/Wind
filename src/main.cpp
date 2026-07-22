@@ -442,7 +442,7 @@ static void RunTick(TickState& t) {
     // diagnostics block at the bottom is skipped too; the magnify category logs direction edges.)
     if (t.model.selfDrivenZoom()) {
         int rdx, rdy; g_input.drainRaw(rdx, rdy);            // keep the raw accumulator drained
-        t.model.nativeZoomTick((inHeld ? 1 : 0) - (outHeld ? 1 : 0));
+        t.model.nativeZoomTick((inHeld ? 1 : 0) - (outHeld ? 1 : 0), t.cfg);
         t.prevInHeld = inHeld; t.prevOutHeld = outHeld;
         t.prevLvl = 1.0; t.prevActive = false; t.prevInspect = false;
         return;
