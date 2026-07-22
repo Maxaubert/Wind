@@ -189,32 +189,37 @@ void MagnifyModel::present(const MapResult&, double level, const Config&,
     if (jump <= 1e-4) {
         // Level is settled.
         if (phase_ == Phase::Ramping) {
-            // Freeze the view on the exact integer percent (so the later registry value matches
-            // the actual transform bit-for-bit) and WAKE Magnifier. Do NOT write the registry
-            // yet: Magnifier's notification handler animates from its internally OBSERVED
-            // transform, and that observer was suspended with us mid-ramp - writing now would
-            // replay an animation from the stale pre-ramp level (measured, probe 5). Give the
-            // observer a few frames to see the settled transform first.
+            // Freeze the view on the exact integer percent (so the registry value matches the
+            // actual transform bit-for-bit), WAKE Magnifier, and sync the registry IN THE SAME
+            // TICK. Magnifier's refined rules (instrumented live trace + probes): a registry
+            // change processed while it is AWAKE animates from the FRESH actual transform (equal
+            // here -> silent no-op, and its belief becomes pct); but until that write lands, any
+            // queued mouse move makes it stomp the transform at its STALE belief within ~7 ms of
+            // resume. Every millisecond between resume and the write is therefore a stomp
+            // window - the earlier 42-60 ms "observer catch-up" delays were themselves the
+            // per-zoom flicker. (The one order that must never happen: writing the registry
+            // WHILE suspended - the queued notification then animates from a stale cached
+            // actual; probe 5 T4b.)
             POINT c; GetCursorPos(&c);
             MagnifyOffset off = MagnifyAnchorOffset(c.x, c.y, curLvl_, curOx_, curOy_,
                                                     pct / 100.0, mon.w, mon.h);
             curLvl_ = pct / 100.0; curOx_ = off.x; curOy_ = off.y;
             SetTransform(curLvl_, curOx_, curOy_);
             resumeMagnifier();
+            writeRegistryPct(pct);
             wind::Log(wind::LogLevel::Info, "magnify",
-                      "ramp end: %.2f -> %.2f, %d sets in %llums; handoff to pct=%d",
+                      "ramp end: %.2f -> %.2f, %d sets in %llums; synced pct=%d",
                       rampStartLvl_, curLvl_, rampSets_,
                       GetTickCount64() - rampStartMs_, pct);
             phase_ = Phase::Handoff;
-            handoffTicks_ = 12;  // ~84 ms at 144 Hz: 6 ticks observer catch-up, write, 6 ticks guard
-                                 //   (>= 30 ms measured safe after resume; margin is free here)
+            handoffTicks_ = 12;  // pure guard window (~84 ms): re-assert while Magnifier drains
+                                 //   any mouse-moves queued during the suspension
         } else if (phase_ == Phase::Handoff) {
             // Guard window around the silent sync: keep re-asserting the settled transform so a
             // stale write from the just-woken Magnifier (e.g. a mouse-move handler firing before
             // it processed the sync) can flash for at most one tick.
             SetTransform(curLvl_, curOx_, curOy_);
             --handoffTicks_;
-            if (handoffTicks_ == 6) writeRegistryPct(pct);   // observer now sees the settled level: no-op sync
             if (handoffTicks_ <= 0) phase_ = Phase::Idle;    // Magnifier owns steady state (panning)
         } else {
             if (!magnifierRunning()) launchMagnifier();   // user closed it manually: bring it back
@@ -222,17 +227,12 @@ void MagnifyModel::present(const MapResult&, double level, const Config&,
         return;
     }
     if (jump >= kSnapJump && pct != lastRegPct_) {
-        // Quick-zoom snap: let Magnifier's eased animation play it (measured: one registry write
-        // eases from the observed current transform to the target over ~280 ms, any distance).
-        // If this interrupts a suspended ramp, the observer is STALE (frozen at the pre-ramp
-        // level); writing immediately would replay an ease from there (measured, probe 5 T4b).
-        // Give it the measured-safe catch-up pause first - a one-frame hitch on a snap is fine.
-        bool wasSuspended = suspended_;
+        // Quick-zoom snap: let Magnifier's eased animation play it. Resume-then-write in the
+        // same instant: processed awake, the ease starts from the FRESH actual transform (the
+        // stale-cache replay only happens for writes queued while suspended - probe 5 T4b).
         resumeMagnifier();
-        if (wasSuspended) Sleep(60);
         writeRegistryPct(pct);
-        wind::Log(wind::LogLevel::Info, "magnify", "snap route: jump=%.2f -> pct=%d (wasSuspended=%d)",
-                  jump, pct, (int)wasSuspended);
+        wind::Log(wind::LogLevel::Info, "magnify", "snap route: jump=%.2f -> pct=%d", jump, pct);
         phase_ = Phase::Idle;   // the registry route both moves the view and syncs Magnifier
         return;
     }
@@ -260,28 +260,22 @@ void MagnifyModel::present(const MapResult&, double level, const Config&,
 
 void MagnifyModel::setActive(bool active) {
     if (active) return;
-    // Zoom-out to idle. Wake Magnifier first (registry routes need its watcher alive). A
-    // hold-to-zoom ramp already walked the transform down through present(), so the residual is
-    // tiny: snap it to identity. A quick-zoom-out arrives here with the transform still high:
-    // route through the registry so Magnifier eases down (unless the registry already says 100 -
-    // a same-value write fires no notification - then snap).
-    bool wasSuspended = suspended_;
-    resumeMagnifier();
-    // THE zoom-out bug (measured): after a suspended zoom-out ramp, Magnifier's observer is
-    // frozen at the level the ramp STARTED from; a registry write before it catches up replays
-    // an ease from that stale high level - the view zooms back IN and out again. >= 30 ms after
-    // resume is measured clean; pause 60 ms (idle transition, imperceptible) before any write.
-    if (wasSuspended) Sleep(60);
+    // Zoom-out to idle. A hold-to-zoom ramp already walked the transform down through present(),
+    // so the residual is tiny: snap it to identity. A quick-zoom-out arrives here with the
+    // transform still high: route through the registry so Magnifier eases down (unless the
+    // registry already says 100 - a same-value write fires no notification - then snap).
+    // Order matters (refined rules, see present()): finalize the transform FIRST (still
+    // suspended, so nothing can stomp it), then resume and write the registry in the same
+    // instant - processed awake, the write starts from the fresh actual, so a walked-down ramp
+    // is a silent no-op and a quick-zoom-out gets one clean ease from where the view really is.
+    // Any delay here is a stomp window for queued mouse moves, not a safety margin.
     double cur, ox, oy; ReadTransform(cur, ox, oy);
     bool easeRoute = cur - 1.0 >= kSnapJump && lastRegPct_ != 100;
-    if (easeRoute) {
-        writeRegistryPct(100);
-    } else {
-        SetTransform(1.0, 0, 0);
-        writeRegistryPct(100);
-    }
-    wind::Log(wind::LogLevel::Info, "magnify", "idle: actual=%.2f route=%s (wasSuspended=%d)",
-              cur, easeRoute ? "registry-ease" : "snap", (int)wasSuspended);
+    if (!easeRoute) SetTransform(1.0, 0, 0);
+    resumeMagnifier();
+    writeRegistryPct(100);
+    wind::Log(wind::LogLevel::Info, "magnify", "idle: actual=%.2f route=%s",
+              cur, easeRoute ? "registry-ease" : "snap");
     lastLevel_ = 1.0;
     phase_ = Phase::Idle;
 }
