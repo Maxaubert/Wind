@@ -34,6 +34,12 @@ private:
     bool ready_ = false;
     double lastLevel_ = 1.0;      // ramp detection: level seen by the previous present()
     bool   synced_ = false;       // steady level has been handed off to Magnifier
+    // Ramp-segment state. The actual transform is read ONCE at segment start and then tracked in
+    // floats: never re-read mid-ramp, so a stale write Magnifier sneaks in can never be ADOPTED
+    // as our baseline (it gets overwritten by the next 144 Hz re-assert instead) and the anchor
+    // keeps sub-pixel continuity instead of round-tripping through the API's integer offsets.
+    bool   rampActive_ = false;
+    double curLvl_ = 1.0, curOx_ = 0.0, curOy_ = 0.0;
     int    lastRegPct_ = 100;     // last value written to the registry: a same-value write fires
                                   //   NO notification, so routes that need Magnifier to act must
                                   //   check this first

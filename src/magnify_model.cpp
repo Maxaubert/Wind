@@ -122,15 +122,18 @@ void MagnifyModel::present(const MapResult&, double level, const Config&,
     if (jump <= 1e-4) {
         // Level is settled. Hand off to Magnifier once: snap the transform to the exact integer
         // percent (so the registry value matches the actual transform bit-for-bit and the write
-        // is a visual no-op), then write it. From here Magnifier's own panning drives the view.
+        // is a visual no-op), write it, and give Magnifier its mouse-following back.
         if (!synced_) {
             int pct = MagnifyTargetPct(lvl);
-            double cur, ox, oy; ReadTransform(cur, ox, oy);
+            if (!rampActive_) ReadTransform(curLvl_, curOx_, curOy_);
             POINT c; GetCursorPos(&c);
-            MagnifyOffset off = MagnifyAnchorOffset(c.x, c.y, cur, ox, oy, pct / 100.0, mon.w, mon.h);
+            MagnifyOffset off = MagnifyAnchorOffset(c.x, c.y, curLvl_, curOx_, curOy_,
+                                                    pct / 100.0, mon.w, mon.h);
             MagSetFullscreenTransform((float)(pct / 100.0),
                                       (int)std::lround(off.x), (int)std::lround(off.y));
             writeRegistryPct(pct);
+            WriteMagDword(L"FollowMouse", 1);
+            rampActive_ = false;
             synced_ = true;
         }
         if (!magnifierRunning()) launchMagnifier();   // user closed it manually: bring it back
@@ -140,17 +143,25 @@ void MagnifyModel::present(const MapResult&, double level, const Config&,
     if (jump >= kSnapJump && MagnifyTargetPct(lvl) != lastRegPct_) {
         // Quick-zoom snap: let Magnifier's eased animation play it (measured: one registry write
         // eases from the ACTUAL current transform to the target over ~280 ms, any distance).
+        if (rampActive_) { WriteMagDword(L"FollowMouse", 1); rampActive_ = false; }
         writeRegistryPct(MagnifyTargetPct(lvl));
         synced_ = true;   // the registry route both moves the view and syncs Magnifier
         return;
     }
     // Active ramp tick: drive the transform directly - glass smooth, anchored at the cursor so
-    // the view zooms toward/away from the point the user is looking at (Magnifier's own idle
-    // writes are outpaced by this 144 Hz re-assert if they ever collide).
-    double cur, ox, oy; ReadTransform(cur, ox, oy);
+    // the view zooms toward/away from the point the user is looking at. Segment start reads the
+    // actual transform ONCE (wherever Magnifier's panning left it) and silences FollowMouse so
+    // Magnifier has no reason to write while we ramp; from then on the state is OURS - a foreign
+    // write can flash for at most one tick before the next re-assert, and can never be adopted.
+    if (!rampActive_) {
+        ReadTransform(curLvl_, curOx_, curOy_);
+        WriteMagDword(L"FollowMouse", 0);
+        rampActive_ = true;
+    }
     POINT c; GetCursorPos(&c);
-    MagnifyOffset off = MagnifyAnchorOffset(c.x, c.y, cur, ox, oy, lvl, mon.w, mon.h);
+    MagnifyOffset off = MagnifyAnchorOffset(c.x, c.y, curLvl_, curOx_, curOy_, lvl, mon.w, mon.h);
     MagSetFullscreenTransform((float)lvl, (int)std::lround(off.x), (int)std::lround(off.y));
+    curLvl_ = lvl; curOx_ = off.x; curOy_ = off.y;
 }
 
 void MagnifyModel::setActive(bool active) {
@@ -166,6 +177,7 @@ void MagnifyModel::setActive(bool active) {
         MagSetFullscreenTransform(1.0f, 0, 0);
         writeRegistryPct(100);
     }
+    if (rampActive_) { WriteMagDword(L"FollowMouse", 1); rampActive_ = false; }
     lastLevel_ = 1.0;
     synced_ = true;
 }
