@@ -1,6 +1,7 @@
 # Magnify model: replace the transform model with a driven Windows Magnifier
 
-Date: 2026-07-22. Status: proposed.
+Date: 2026-07-22. Status: implemented, AMENDED same day (see the amendment at the bottom: the
+control channel changed from injected hotkeys to live registry writes after measurement).
 
 ## Problem
 
@@ -89,3 +90,24 @@ The config UI shows only the relevant rows per model, as it does today.
   events, and Win keys are never swallowed by design.
 - **Registry restore on crash**: the on-disk snapshot file (written once, before first modify)
   survives crashes; the next clean run restores from it.
+
+## AMENDMENT (2026-07-22, after live testing)
+
+The injected-hotkey channel shipped first and failed live testing on all three fronts: Magnifier
+drops roughly HALF of a rapid Win+Plus burst (10 chords at 5 ms spacing -> ~5 applied) and
+animates each survivor, so the zoom lagged Wind's ramp ~4-5x and kept zooming for seconds after
+release (queued backlog); and the large-residual zoom-out path (Win+Esc + relaunch) made every
+zoom-in feel like a cold start.
+
+Measurement (scratchpad probes magdiag.cpp / magdiag2.cpp, MagGetFullscreenTransform as the
+sensor) found the correct channel: **Magnify.exe registry-watches the `Magnification` value and
+applies a bare RegSetValue LIVE** - picked up within ~10 ms, eased smoothly (~100 ms trailing),
+exact for arbitrary integer percents (137 -> 1.370), no broadcast needed. One trap: **writes
+above 1600 are silently IGNORED**, not clamped, so the model must clamp itself.
+
+The model now writes the ramped level as an integer percent whenever it changes (>= 1%), giving
+continuous smooth zoom at Wind's configured speed. Consequences:
+- `magnifyStep` / ZoomIncrement is irrelevant and was removed (config, UI, tests).
+- Zoom-out writes 100 and Magnifier stays running - the Esc+relaunch path is gone.
+- Keystroke injection remains ONLY for Win+Esc (quit on shutdown/model swap).
+- `magnify_steps.h` (step math) became `magnify_level.h` (percent mapping + the 1600 clamp).

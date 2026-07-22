@@ -1132,7 +1132,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // native Windows Magnifier via injected Win+Plus/Minus, the DRM-safe fallback) ---
     std::unique_ptr<IMagnifierModel> model;
     if (cfg.model == "magnify") {
-        model = std::make_unique<MagnifyModel>(cfg.magnifyStep);
+        model = std::make_unique<MagnifyModel>();
         // Our injected chords must never be swallowed/tracked by our own keyboard hook
         // (NumPad +/- are bindable zoom keys; see InputRouter::setIgnoreInjectedKeys).
         g_input.setIgnoreInjectedKeys(true);

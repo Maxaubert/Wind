@@ -109,7 +109,6 @@ Config ParseConfig(const std::string& text) {
             else if (key == "cursorScaleWithZoom")c.cursorScaleWithZoom = std::stoi(val);
             else if (key == "cursorVisibility")   c.cursorVisibility = val;
             else if (key == "model")              c.model = val;
-            else if (key == "magnifyStep")        c.magnifyStep = std::stoi(val);
             else if (key == "bilinear")           c.bilinear = std::stoi(val);
             else if (key == "sharpness")          c.sharpness = std::stod(val);
             else if (key == "zorderBand")         c.zorderBand = std::stoi(val);
@@ -154,9 +153,6 @@ Config ParseConfig(const std::string& text) {
     // the same role (DRM-safe magnification); anything else unknown falls back to render.
     if (c.model == "transform") c.model = "magnify";
     if (c.model != "render" && c.model != "magnify") c.model = "render";
-    // Windows Magnifier accepts a small fixed set of ZoomIncrement values; snap to the nearest
-    // supported step so the injected Win+Plus math always matches what Magnifier actually does.
-    c.magnifyStep = c.magnifyStep <= 7 ? 5 : c.magnifyStep <= 17 ? 10 : c.magnifyStep <= 37 ? 25 : 50;
     // Reject keybinds to keys Wind must never swallow (see IsForbiddenBindVk). A bound key is
     // eaten system-wide, so binding e.g. Backspace or the Windows key would make it unusable
     // everywhere; treat a forbidden bind as unbound regardless of how it got into the ini.
@@ -262,13 +258,10 @@ Config LoadConfig(const std::wstring& path) {
                "hdrTonemap=1\n"
                "; model: render = GPU capture+overlay (default, high fidelity). magnify = drive the\n"
                ";   native Windows Magnifier (works over DRM video like Netflix, which blanks in\n"
-               ";   render). Restart to switch. magnify zooms in steps (Windows Magnifier's limit),\n"
-               ";   handles the cursor itself, and ignores the render-only knobs (sharpness,\n"
-               ";   hdrTonemap, bilinear, outline, cursor*, multiMonitor, Inspect mode).\n"
+               ";   render). Restart to switch. magnify follows the same smooth zoom ramp, handles\n"
+               ";   the cursor itself, and ignores the render-only knobs (sharpness, hdrTonemap,\n"
+               ";   bilinear, outline, cursor*, multiMonitor, Inspect mode). Max zoom 1600%.\n"
                "model=render\n"
-               "; magnifyStep (magnify only): Windows Magnifier zoom step in percent (5/10/25/50).\n"
-               ";   Smaller = smoother ramp. 5 recommended.\n"
-               "magnifyStep=5\n"
                "; multiMonitor: 1=magnify whichever monitor the cursor is on at zoom-in; 0=primary only\n"
                "multiMonitor=0\n"
                "; cropCapture (opt-in): 0=always copy all changed regions (cache never stale, default);\n"

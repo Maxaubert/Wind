@@ -70,9 +70,6 @@ struct Config {
     // value (the removed MagSetFullscreenTransform model it replaces) maps to "magnify"; any other
     // unknown value falls back to "render". Applied at launch (restart to switch; not hot-swapped).
     std::string model = "render";
-    // Magnify-model-only knob (ignored by the render model): Windows Magnifier ZoomIncrement in
-    // percent. Smaller = smoother ramp (Magnifier can only zoom in steps). Sanitized to 5/10/25/50.
-    int magnifyStep = 5;
     // --- Own GPU renderer ---------------------------------------------------
     // Pan speed multiplier. Free desktop panning auto-matches the OS cursor (DPI + acceleration) and
     // is then scaled by this (1.0 = exact match, the default); it also scales the raw-input pan while

@@ -41,13 +41,12 @@ prompts you to confirm).
   the shell (Start / taskbar / tray) via the UIAccess z-order band.
 - **`magnify`** - drives the **native Windows Magnifier** with Wind's controls. This is the model
   for DRM-protected video (Netflix and friends), which shows black under `render`'s screen
-  capture. Wind preps Magnifier's settings (fullscreen mode, small zoom steps, toolbar
-  minimized), starts it on the first zoom-in, and paces injected `Win`+`Plus`/`Minus` presses so
-  your side-button hold-to-zoom, ramp, and quick-zoom work as usual. Windows Magnifier can only
-  zoom in steps (that is its hard limit), so `magnify` steps by `magnifyStep` percent (5% by
-  default - near-smooth) instead of scaling continuously. At 1x Magnifier stays running,
-  invisible, for an instant next zoom-in; quitting Wind (or swapping models) closes it and
-  restores your original Windows Magnifier settings.
+  capture. Wind streams the zoom level to Magnifier live (it follows Wind's normal smooth ramp
+  with a short trailing ease), so side-button hold-to-zoom, zoom speed settings, and quick-zoom
+  work as usual - continuous zoom, not the 100%-200%-300% jumps of the standalone Magnifier.
+  Magnifier starts on the first zoom-in; at 1x it stays running, invisible, for an instant next
+  zoom-in; quitting Wind (or swapping models) closes it and restores your original Windows
+  Magnifier settings. Max zoom is Magnifier's ceiling, 1600%.
 
 The `magnify` model hands the view and cursor to Windows Magnifier, so the render-only features
 do not apply there: `sharpness`, `hdrTonemap`, `bilinear`, `outline*`, `brightness`,
@@ -85,7 +84,6 @@ writes a default `magnifier.ini`. Launch `C:\Program Files\Wind\Wind.exe` from a
 - `brightness` - optional output fine-tune (hot-reloads).
 - Pacing/perf: `dwmFlush` (default on, smooth), `vsync`, `tickHzCap` (0 = auto-detect refresh).
 - `model` - `render` (default) or `magnify`. See **Magnifier models** above. Restart to switch.
-- Magnify-only: `magnifyStep` (Windows Magnifier percent per step: 5/10/25/50; default 5).
 - Advanced: `zorderBand`, `hdrTonemap`.
 
 The Settings app (tray -> Open Settings) writes the same `magnifier.ini`, shows only the rows that

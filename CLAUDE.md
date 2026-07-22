@@ -34,19 +34,25 @@ capture-excluded (`WDA_EXCLUDEFROMCAPTURE`) fullscreen overlay; draws the real c
 (`GetCursorInfo`) centered via `cursor_mapper`; hides the OS cursor (`MagShowSystemCursor`) and
 syncs `SetCursorPos` for clicks. Sub-pixel pan + smooth centered cursor.
 `model=magnify` (issue #146): drives the NATIVE Windows Magnifier - the DRM-safe fallback
-(Netflix etc. blanks under Desktop Duplication). `magnify_model.cpp` preps
-`HKCU\Software\Microsoft\ScreenMagnifier` (fullscreen mode, `ZoomIncrement=magnifyStep` (5%
-default), toolbar minimized, level 100), lazy-launches Magnify.exe on first zoom-in, and syncs
-Magnifier's stepped level to the smooth ZoomController level by injecting Win+Plus/Win+Minus
-chords (budgeted 3/tick; pure step math in `magnify_steps.h`). Magnifier can ONLY be driven in
-steps (its hotkeys are the sole live control; registry is read at its startup) - true smooth
-zoom is impossible there by design. Idle keeps Magnify.exe running at 100% (instant re-zoom);
+(Netflix etc. blanks under Desktop Duplication). KEY DISCOVERY (measured on this box): Magnify.exe
+registry-watches `HKCU\Software\Microsoft\ScreenMagnifier\Magnification` and applies a bare
+RegSetValue LIVE (picked up in ~10 ms, eased smoothly, exact for arbitrary integer percents -
+137 -> 1.370). So `magnify_model.cpp` simply writes the ramped ZoomController level as a percent
+whenever it changes by >= 1% (`magnify_level.h` pure math) - continuous smooth zoom at Wind's
+configured speed, no steps. Do NOT go back to injecting Win+Plus/Minus chords: measured dead end
+(Magnifier drops ~half of a rapid burst and animates each survivor -> lags the ramp, keeps
+zooming after release). CAUTION: a Magnification write above 1600 is silently IGNORED (not
+clamped) - the view freezes at the last accepted level - so `MagnifyTargetPct` clamps to
+[100, 1600] and that clamp is mandatory. Init preps fullscreen mode + FollowMouse + toolbar
+minimized (startup-read values) and quits a user-started Magnifier so the next launch adopts
+them; first zoom-in lazy-launches Magnify.exe (registry already holds the target pct). Idle
+keeps Magnify.exe running at 100% = identity transform, zero visual (instant re-zoom);
 shutdown/model-swap injects Win+Esc and restores the user's Magnifier registry from a one-shot
 snapshot file (`%LOCALAPPDATA%\Wind\magnifier_backup.ini`, written before first modify, kept
 across crashes so we never "restore" our own values). In magnify mode the KEYBOARD HOOK SKIPS
-INJECTED EVENTS (`setIgnoreInjectedKeys`): NumPad +/- are bindable zoom keys and swallowing our
-own injected chord would starve Magnifier AND feed back as a phantom zoom press. Inspect mode,
-cursor drawing/sensitivity, outline, and multiMonitor are render-only (`supportsInspect()`).
+INJECTED EVENTS (`setIgnoreInjectedKeys`) so the Win+Esc chord can never be swallowed by a user
+bind. Inspect mode, cursor drawing/sensitivity, outline, and multiMonitor are render-only
+(`supportsInspect()`).
 The old Magnification-API `engine=mag` fallback was removed (issue #20); the
 MagSetFullscreenTransform `model=transform` was removed in favor of magnify (issue #146; a
 legacy `model=transform` ini value maps to `magnify`).
