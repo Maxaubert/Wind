@@ -67,6 +67,30 @@ void ReadTransform(double& lvl, double& ox, double& oy) {
     else { lvl = 1.0; ox = 0.0; oy = 0.0; }
 }
 
+// Private user32 export the old transform model used (recovered, issue #146): pans the same DWM
+// fullscreen transform via a SCREEN-SPACE translation (-source * level), which is level-times
+// finer than MagSetFullscreenTransform's whole-pixel source offsets - at zoom N the public API
+// quantizes the view position to N-screen-pixel steps, a visible shimmer while the anchor moves
+// during a ramp. Auto-falls back to the public API permanently if the export breaks.
+typedef int (__stdcall* PFN_SetDeskMag)(double, int, int);
+PFN_SetDeskMag PrivPanFn() {
+    static auto p = (PFN_SetDeskMag)GetProcAddress(GetModuleHandleW(L"user32.dll"),
+                                                   "SetMagnificationDesktopMagnification");
+    return p;
+}
+bool g_privBroken = false;
+void SetTransform(double lvl, double ox, double oy) {
+    if (!g_privBroken) {
+        if (auto f = PrivPanFn()) {
+            if (f(lvl, (int)std::lround(-ox * lvl), (int)std::lround(-oy * lvl)) != 0) return;
+            g_privBroken = true;   // fall back permanently this session
+        } else {
+            g_privBroken = true;
+        }
+    }
+    MagSetFullscreenTransform((float)lvl, (int)std::lround(ox), (int)std::lround(oy));
+}
+
 typedef LONG (NTAPI* PFN_NtProcOp)(HANDLE);
 PFN_NtProcOp NtSuspendFn() {
     static auto p = (PFN_NtProcOp)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtSuspendProcess");
@@ -184,19 +208,18 @@ void MagnifyModel::present(const MapResult&, double level, const Config&,
             MagnifyOffset off = MagnifyAnchorOffset(c.x, c.y, curLvl_, curOx_, curOy_,
                                                     pct / 100.0, mon.w, mon.h);
             curLvl_ = pct / 100.0; curOx_ = off.x; curOy_ = off.y;
-            MagSetFullscreenTransform((float)curLvl_,
-                                      (int)std::lround(curOx_), (int)std::lround(curOy_));
+            SetTransform(curLvl_, curOx_, curOy_);
             resumeMagnifier();
             phase_ = Phase::Handoff;
-            handoffTicks_ = 8;   // ~56 ms at 144 Hz: 4 ticks observer catch-up, write, 4 ticks guard
+            handoffTicks_ = 12;  // ~84 ms at 144 Hz: 6 ticks observer catch-up, write, 6 ticks guard
+                                 //   (>= 30 ms measured safe after resume; margin is free here)
         } else if (phase_ == Phase::Handoff) {
             // Guard window around the silent sync: keep re-asserting the settled transform so a
             // stale write from the just-woken Magnifier (e.g. a mouse-move handler firing before
             // it processed the sync) can flash for at most one tick.
-            MagSetFullscreenTransform((float)curLvl_,
-                                      (int)std::lround(curOx_), (int)std::lround(curOy_));
+            SetTransform(curLvl_, curOx_, curOy_);
             --handoffTicks_;
-            if (handoffTicks_ == 4) writeRegistryPct(pct);   // observer now sees the settled level: no-op sync
+            if (handoffTicks_ == 6) writeRegistryPct(pct);   // observer now sees the settled level: no-op sync
             if (handoffTicks_ <= 0) phase_ = Phase::Idle;    // Magnifier owns steady state (panning)
         } else {
             if (!magnifierRunning()) launchMagnifier();   // user closed it manually: bring it back
@@ -206,7 +229,12 @@ void MagnifyModel::present(const MapResult&, double level, const Config&,
     if (jump >= kSnapJump && pct != lastRegPct_) {
         // Quick-zoom snap: let Magnifier's eased animation play it (measured: one registry write
         // eases from the observed current transform to the target over ~280 ms, any distance).
+        // If this interrupts a suspended ramp, the observer is STALE (frozen at the pre-ramp
+        // level); writing immediately would replay an ease from there (measured, probe 5 T4b).
+        // Give it the measured-safe catch-up pause first - a one-frame hitch on a snap is fine.
+        bool wasSuspended = suspended_;
         resumeMagnifier();
+        if (wasSuspended) Sleep(60);
         writeRegistryPct(pct);
         phase_ = Phase::Idle;   // the registry route both moves the view and syncs Magnifier
         return;
@@ -225,7 +253,7 @@ void MagnifyModel::present(const MapResult&, double level, const Config&,
     }
     POINT c; GetCursorPos(&c);
     MagnifyOffset off = MagnifyAnchorOffset(c.x, c.y, curLvl_, curOx_, curOy_, lvl, mon.w, mon.h);
-    MagSetFullscreenTransform((float)lvl, (int)std::lround(off.x), (int)std::lround(off.y));
+    SetTransform(lvl, off.x, off.y);
     curLvl_ = lvl; curOx_ = off.x; curOy_ = off.y;
 }
 
@@ -236,12 +264,18 @@ void MagnifyModel::setActive(bool active) {
     // tiny: snap it to identity. A quick-zoom-out arrives here with the transform still high:
     // route through the registry so Magnifier eases down (unless the registry already says 100 -
     // a same-value write fires no notification - then snap).
+    bool wasSuspended = suspended_;
     resumeMagnifier();
+    // THE zoom-out bug (measured): after a suspended zoom-out ramp, Magnifier's observer is
+    // frozen at the level the ramp STARTED from; a registry write before it catches up replays
+    // an ease from that stale high level - the view zooms back IN and out again. >= 30 ms after
+    // resume is measured clean; pause 60 ms (idle transition, imperceptible) before any write.
+    if (wasSuspended) Sleep(60);
     double cur, ox, oy; ReadTransform(cur, ox, oy);
     if (cur - 1.0 >= kSnapJump && lastRegPct_ != 100) {
         writeRegistryPct(100);
     } else {
-        MagSetFullscreenTransform(1.0f, 0, 0);
+        SetTransform(1.0, 0, 0);
         writeRegistryPct(100);
     }
     lastLevel_ = 1.0;
@@ -251,7 +285,7 @@ void MagnifyModel::setActive(bool active) {
 void MagnifyModel::shutdown() {
     if (!ready_) return;
     resumeMagnifier();                       // never leave Magnify.exe suspended
-    MagSetFullscreenTransform(1.0f, 0, 0);   // never leave the desktop zoomed
+    SetTransform(1.0, 0.0, 0.0);             // never leave the desktop zoomed
     if (magnifierRunning()) InjectWinChord(VK_ESCAPE);
     // Put the user's Magnifier settings back exactly as we found them (absent values were
     // snapshotted as -1: skip them rather than inventing a value).
