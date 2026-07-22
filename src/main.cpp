@@ -436,6 +436,17 @@ static void RunTick(TickState& t) {
     // Tell the mouse hook whether Inspect is on (so it swallows real clicks and routes them to the look
     // point - see the commitButton drain in the active block). Published every tick (also clears on off).
     g_input.state().inspectActive.store(t.cursorLock.locked(), std::memory_order_relaxed);
+    // Magnify model drives its own zoom natively (Windows Magnifier, wheel notches): feed it the
+    // held direction and bypass the ENTIRE level pipeline below - the ZoomController stays at 1x,
+    // the overlay never activates, quick zoom / recenter / mapper never run. (The side-button
+    // diagnostics block at the bottom is skipped too; the magnify category logs direction edges.)
+    if (t.model.selfDrivenZoom()) {
+        int rdx, rdy; g_input.drainRaw(rdx, rdy);            // keep the raw accumulator drained
+        t.model.nativeZoomTick((inHeld ? 1 : 0) - (outHeld ? 1 : 0));
+        t.prevInHeld = inHeld; t.prevOutHeld = outHeld;
+        t.prevLvl = 1.0; t.prevActive = false; t.prevInspect = false;
+        return;
+    }
     // Hide-cursor hotkey is registered via RegisterHotKey (WndProc WM_HOTKEY toggles cursorHidden);
     // this both suppresses the key from reaching other apps and gives rising-edge semantics for
     // free (MOD_NOREPEAT). No polled check needed here.
@@ -926,7 +937,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 // leave the machine with a hidden/locked cursor - the next launch (and our own exit) heals it.
 static void RestoreInputState() {
     ClipCursor(nullptr);                                         // release any cursor confinement
-    wind::MagnifyEmergencyResume();      // never leave Magnify.exe suspended (magnify-model ramps)
     if (MagInitialize()) { MagShowSystemCursor(TRUE); MagUninitialize(); }   // un-hide the OS cursor
     SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, SPIF_SENDCHANGE);      // reload system cursors
     for (int i = 0; i < 8 && ShowCursor(TRUE) < 0; ++i) {}       // bump our show-count back to visible
@@ -951,7 +961,6 @@ static LONG WINAPI EarlyCursorRestoreFilter(EXCEPTION_POINTERS* ep) {
     if (InterlockedExchange(&s_inHandler, 1)) return EXCEPTION_CONTINUE_SEARCH;
     MagShowSystemCursor(TRUE);           // no-op if the Magnification API was never initialized this run
     ClipCursor(nullptr);                 // never leave the cursor clipped if we crash while Inspect-locked
-    wind::MagnifyEmergencyResume();      // a crash mid-ramp must not strand Magnify.exe suspended
     SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, SPIF_SENDCHANGE);   // heals a blanked cursor scheme
     wind::WriteCrashReport(ep);          // minidump + text summary into the log dir
     return EXCEPTION_CONTINUE_SEARCH;   // let the default handler still report the crash

@@ -29,5 +29,11 @@ struct IMagnifierModel {
     virtual bool coversShell() const = 0;             // whether the magnified view covers the shell
     virtual bool supportsInspect() const { return true; }  // magnify model: false (Magnifier owns
                                                            //   the view/cursor; no freeze+reticle)
+    // Magnify model: the model drives its own zoom from raw held-direction and Wind's level
+    // machinery (ZoomController, mapper, overlay activation) is bypassed entirely. RunTick calls
+    // nativeZoomTick(dir) every tick (dir: +1 zoom-in held, -1 zoom-out held, 0 idle) and skips
+    // the rest of the zoom pipeline when selfDrivenZoom() is true.
+    virtual bool selfDrivenZoom() const { return false; }
+    virtual void nativeZoomTick(int dir) { (void)dir; }
 };
 }
