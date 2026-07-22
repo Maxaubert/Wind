@@ -3,17 +3,17 @@
 #include <string>
 namespace wind {
 // Drives the NATIVE Windows Magnifier (Magnify.exe) with Wind's controls. The DRM-safe model:
-// Magnifier uses the DWM fullscreen transform, so protected video (Netflix etc.) that blanks
-// under the render model's Desktop Duplication capture magnifies fine, and the OS implementation
-// owns the view, cursor tracking, and stability.
+// the DWM fullscreen transform magnifies protected video (Netflix etc.) that blanks under the
+// render model's Desktop Duplication capture, and Magnifier owns steady-state view/cursor
+// tracking (follow-the-mouse panning, input remap), which it does better than our removed
+// transform model ever did.
 //
-// Control channel (measured, see magnify_level.h): Magnifier watches the registry Magnification
-// value LIVE and eases to it smoothly with exact fidelity for arbitrary integer percents. Wind
-// writes the ramped ZoomController level whenever the integer percent changes, so hold-to-zoom
-// runs at Wind's configured speed, continuously - no steps, no keystroke injection. (Injected
-// Win+Plus chords were the first attempt and are a dead end: Magnifier drops roughly half of a
-// rapid burst and animates each survivor, which lagged the ramp and kept zooming after release.)
-// Spec: docs/superpowers/specs/2026-07-22-magnify-model-design.md (amended).
+// HYBRID control (measured; rationale + gotchas in magnify_level.h): while the level is actively
+// RAMPING, Wind sets the fullscreen transform directly each tick (MagSetFullscreenTransform,
+// cursor-anchored) - glass smooth at Wind's configured zoom speed. When the ramp settles, ONE
+// registry write hands the level to Magnifier (a visual no-op, since the actual transform
+// already matches) and its native panning takes over. Big single-tick jumps (quick zoom) are
+// routed through the registry instead, which buys Magnifier's ~280 ms eased animation for free.
 class MagnifyModel : public IMagnifierModel {
 public:
     bool initialize(const MonitorTarget& monitor) override;
@@ -29,9 +29,14 @@ public:
 private:
     bool magnifierRunning() const;
     void launchMagnifier();
+    void writeRegistryPct(int pct);               // tracked write (see lastRegPct_)
 
     bool ready_ = false;
-    int  lastWrittenPct_ = 100;   // last percent written to the registry (write only on change)
+    double lastLevel_ = 1.0;      // ramp detection: level seen by the previous present()
+    bool   synced_ = false;       // steady level has been handed off to Magnifier
+    int    lastRegPct_ = 100;     // last value written to the registry: a same-value write fires
+                                  //   NO notification, so routes that need Magnifier to act must
+                                  //   check this first
     unsigned long long lastLaunchMs_ = 0;   // relaunch backoff (user may close Magnifier manually)
     std::wstring backupPath_;     // one-shot registry snapshot (restore on shutdown)
 };

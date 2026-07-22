@@ -111,3 +111,23 @@ continuous smooth zoom at Wind's configured speed. Consequences:
 - Zoom-out writes 100 and Magnifier stays running - the Esc+relaunch path is gone.
 - Keystroke injection remains ONLY for Win+Esc (quit on shutdown/model swap).
 - `magnify_steps.h` (step math) became `magnify_level.h` (percent mapping + the 1600 clamp).
+
+## AMENDMENT 2 (2026-07-22, after second live test)
+
+Streaming per-1% registry writes also failed live: probe 3 (dense trajectory sampling) showed
+Magnifier consumes registry changes at ~280 ms animation-window boundaries, and writes arriving
+faster degenerate into INSTANT ~40% snaps at each boundary ("slight ease, then a massive step").
+The system animation-effects setting does not change this. A SINGLE write, however, eases
+beautifully over ~280 ms regardless of distance, and probe 4 established the hybrid facts:
+MagSetFullscreenTransform from Wind's process sticks while Magnify.exe runs (no stomping, even
+with mouse movement), and a registry write matching the actual transform is a visual no-op.
+
+Final design (implemented): during an active ramp Wind sets the fullscreen transform directly
+each tick, anchored at the cursor (`MagnifyAnchorOffset`: the desktop point under the cursor
+keeps its screen position, so the view zooms toward the pointer) - glass smooth at Wind's
+configured speed. When the ramp settles, the transform is snapped to the exact integer percent
+and ONE registry write hands the level to Magnifier (visual no-op) so its native panning owns
+steady state. Single-tick jumps >= 0.75x (quick zoom) route through the registry to play
+Magnifier's eased animation. Magnify.exe is launched at model initialize (never mid-ramp) and
+kept running at identity when idle. Extra trap encoded: a same-value registry write fires no
+notification, so no code path may rely on one to make Magnifier act.

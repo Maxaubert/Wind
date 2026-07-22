@@ -2,7 +2,9 @@
 #include "magnify_level.h"
 #include "logging.h"
 #include <windows.h>
+#include <magnification.h>
 #include <shellapi.h>
+#include <cmath>
 #include <cstdio>
 #include <fstream>
 
@@ -10,10 +12,14 @@ namespace wind {
 namespace {
 
 const wchar_t* kMagKey = L"Software\\Microsoft\\ScreenMagnifier";
-// The values we modify (and therefore snapshot + restore). Magnification is the LIVE zoom
+// The values we modify (and therefore snapshot + restore). Magnification is the live handoff
 // channel (Magnifier registry-watches it); the rest are read at Magnifier's startup.
 const wchar_t* kSnapshotValues[] = { L"Magnification", L"MagnificationMode",
                                      L"FollowMouse", L"MagnifierUIWindowMinimized" };
+
+// A single-tick level jump this big is a SNAP (quick zoom), not a ramp tick: route it through
+// the registry so Magnifier's eased animation plays it, instead of hard-setting the transform.
+const double kSnapJump = 0.75;
 
 int ReadMagDword(const wchar_t* name, int fallback) {
     DWORD v = 0, cb = sizeof(v);
@@ -53,9 +59,22 @@ void InjectWinChord(WORD vk) {
     SendInput(4, in, sizeof(INPUT));
 }
 
+// Current actual DWM fullscreen transform (level + source origin). Falls back to identity.
+void ReadTransform(double& lvl, double& ox, double& oy) {
+    float l = 1.0f; int x = 0, y = 0;
+    if (MagGetFullscreenTransform(&l, &x, &y)) { lvl = l; ox = x; oy = y; }
+    else { lvl = 1.0; ox = 0.0; oy = 0.0; }
+}
+
 } // namespace
 
 bool MagnifyModel::magnifierRunning() const { return MagnifierWindowPresent(); }
+
+void MagnifyModel::writeRegistryPct(int pct) {
+    if (pct == lastRegPct_) return;   // same-value writes fire no notification anyway
+    WriteMagDword(L"Magnification", pct);
+    lastRegPct_ = pct;
+}
 
 void MagnifyModel::launchMagnifier() {
     unsigned long long now = GetTickCount64();
@@ -67,6 +86,10 @@ void MagnifyModel::launchMagnifier() {
 }
 
 bool MagnifyModel::initialize(const MonitorTarget&) {
+    if (!MagInitialize()) {           // for MagGet/MagSetFullscreenTransform (the ramp channel)
+        wind::Log(wind::LogLevel::Warn, "magnify", "MagInitialize failed");
+        return false;
+    }
     backupPath_ = ResolveBackupPath();
     // One-shot snapshot of the user's Magnifier settings, BEFORE we modify anything. If the file
     // already exists we keep it: a previous Wind crashed before restoring, and re-snapshotting now
@@ -76,46 +99,80 @@ bool MagnifyModel::initialize(const MonitorTarget&) {
         for (const wchar_t* name : kSnapshotValues)
             f << name << L"=" << ReadMagDword(name, -1) << L"\n";   // -1 = value was absent
     }
-    // Startup-read values first; the live Magnification channel starts at 1x. If Magnifier is
-    // already running (the user's own session), quit it so the next launch picks these up.
-    WriteMagDword(L"MagnificationMode", 2);              // fullscreen
+    WriteMagDword(L"MagnificationMode", 2);              // fullscreen (read at Magnifier startup)
     WriteMagDword(L"FollowMouse", 1);
     WriteMagDword(L"MagnifierUIWindowMinimized", 1);     // keep the toolbar out of the way
     WriteMagDword(L"Magnification", 100);
-    lastWrittenPct_ = 100;
-    if (magnifierRunning()) InjectWinChord(VK_ESCAPE);
+    lastRegPct_ = 100;
+    // If the user's own Magnifier session is running it has stale startup-read settings; quit it
+    // and start ours. Launching NOW (not lazily at first zoom-in) means Magnify.exe can never
+    // initialize mid-ramp - unknown whether its startup would reset the transform we are driving.
+    if (magnifierRunning()) { InjectWinChord(VK_ESCAPE); Sleep(150); }
+    launchMagnifier();
     ready_ = true;
-    wind::Log(wind::LogLevel::Info, "magnify", "initialized (live registry drive)");
+    wind::Log(wind::LogLevel::Info, "magnify", "initialized (hybrid transform+registry drive)");
     return true;
 }
 
 void MagnifyModel::present(const MapResult&, double level, const Config&,
-                           const MonitorTarget&, const PresentExtras&) {
-    // The whole job: keep the registry Magnification equal to the ramped level's integer percent.
-    // Magnifier registry-watches the value and eases to it (~100 ms trailing), so the zoom runs
-    // at Wind's configured speed and stops when the user releases - no backlog, no steps.
-    int pct = MagnifyTargetPct(level);
-    if (pct != lastWrittenPct_) {
-        WriteMagDword(L"Magnification", pct);
-        lastWrittenPct_ = pct;
+                           const MonitorTarget& mon, const PresentExtras&) {
+    double lvl = MagnifyClampLevel(level);
+    double jump = std::fabs(lvl - lastLevel_);
+    lastLevel_ = lvl;
+    if (jump <= 1e-4) {
+        // Level is settled. Hand off to Magnifier once: snap the transform to the exact integer
+        // percent (so the registry value matches the actual transform bit-for-bit and the write
+        // is a visual no-op), then write it. From here Magnifier's own panning drives the view.
+        if (!synced_) {
+            int pct = MagnifyTargetPct(lvl);
+            double cur, ox, oy; ReadTransform(cur, ox, oy);
+            POINT c; GetCursorPos(&c);
+            MagnifyOffset off = MagnifyAnchorOffset(c.x, c.y, cur, ox, oy, pct / 100.0, mon.w, mon.h);
+            MagSetFullscreenTransform((float)(pct / 100.0),
+                                      (int)std::lround(off.x), (int)std::lround(off.y));
+            writeRegistryPct(pct);
+            synced_ = true;
+        }
+        if (!magnifierRunning()) launchMagnifier();   // user closed it manually: bring it back
+        return;
     }
-    // Lazy-launch on the first real zoom-in (and relaunch if the user closed Magnifier manually);
-    // it starts directly at the current pct since the registry is already written.
-    if (pct > 100 && !magnifierRunning()) launchMagnifier();
+    synced_ = false;
+    if (jump >= kSnapJump && MagnifyTargetPct(lvl) != lastRegPct_) {
+        // Quick-zoom snap: let Magnifier's eased animation play it (measured: one registry write
+        // eases from the ACTUAL current transform to the target over ~280 ms, any distance).
+        writeRegistryPct(MagnifyTargetPct(lvl));
+        synced_ = true;   // the registry route both moves the view and syncs Magnifier
+        return;
+    }
+    // Active ramp tick: drive the transform directly - glass smooth, anchored at the cursor so
+    // the view zooms toward/away from the point the user is looking at (Magnifier's own idle
+    // writes are outpaced by this 144 Hz re-assert if they ever collide).
+    double cur, ox, oy; ReadTransform(cur, ox, oy);
+    POINT c; GetCursorPos(&c);
+    MagnifyOffset off = MagnifyAnchorOffset(c.x, c.y, cur, ox, oy, lvl, mon.w, mon.h);
+    MagSetFullscreenTransform((float)lvl, (int)std::lround(off.x), (int)std::lround(off.y));
 }
 
 void MagnifyModel::setActive(bool active) {
     if (active) return;
-    // Zoom-out to idle: park the level at 1x and KEEP Magnifier running (user decision) - at 100%
-    // the fullscreen transform is identity (zero visual effect) and the next zoom-in is instant.
-    if (lastWrittenPct_ != 100) {
-        WriteMagDword(L"Magnification", 100);
-        lastWrittenPct_ = 100;
+    // Zoom-out to idle. A hold-to-zoom ramp already walked the transform down through present(),
+    // so the residual is tiny: snap it to identity. A quick-zoom-out arrives here with the
+    // transform still high: route through the registry so Magnifier eases down (unless the
+    // registry already says 100 - a same-value write fires no notification - then snap).
+    double cur, ox, oy; ReadTransform(cur, ox, oy);
+    if (cur - 1.0 >= kSnapJump && lastRegPct_ != 100) {
+        writeRegistryPct(100);
+    } else {
+        MagSetFullscreenTransform(1.0f, 0, 0);
+        writeRegistryPct(100);
     }
+    lastLevel_ = 1.0;
+    synced_ = true;
 }
 
 void MagnifyModel::shutdown() {
     if (!ready_) return;
+    MagSetFullscreenTransform(1.0f, 0, 0);   // never leave the desktop zoomed
     if (magnifierRunning()) InjectWinChord(VK_ESCAPE);
     // Put the user's Magnifier settings back exactly as we found them (absent values were
     // snapshotted as -1: skip them rather than inventing a value).
@@ -133,6 +190,7 @@ void MagnifyModel::shutdown() {
         DeleteFileW(backupPath_.c_str());
         wind::Log(wind::LogLevel::Info, "magnify", "shutdown: Magnifier quit, registry restored");
     }
+    MagUninitialize();
     ready_ = false;
 }
 }
