@@ -38,7 +38,10 @@ private:
     double lastLevel_ = 1.0;      // ramp detection: UNCLAMPED level seen by the previous present()
                                   //   (unclamped so a hold past Magnifier's 16x ceiling still
                                   //   reads as ramping, not as a premature settle/handoff)
-    unsigned long long lastSetMs_ = 0;   // transform-write throttle (see kSetIntervalMs)
+    // Per-ramp instrumentation (issue #146 tuning: one Info line per ramp segment, no hot-path spam).
+    int    rampSets_ = 0;
+    double rampStartLvl_ = 1.0;
+    unsigned long long rampStartMs_ = 0;
     // Phases: Idle (Magnifier owns steady state), Ramping (Magnify.exe SUSPENDED, we own the
     // transform), Handoff (resumed; guard-assert the settled transform for a few ticks around
     // the silent registry sync - see present() for the measured timing rationale).

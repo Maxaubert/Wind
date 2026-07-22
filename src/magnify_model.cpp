@@ -22,13 +22,6 @@ const wchar_t* kSnapshotValues[] = { L"Magnification", L"MagnificationMode",
 // the registry so Magnifier's eased animation plays it, instead of hard-setting the transform.
 const double kSnapJump = 0.75;
 
-// Minimum interval between fullscreen-transform writes. DWM applies desktop-transform updates
-// SLOWER than our 144 Hz tick; writing every tick backs up its transform queue and the VIEW
-// lags seconds behind input (the tap-keeps-zooming/stage-flicker/lottery-release symptoms; the
-// old transform model documented the same queue backup). Magnifier's own ease animates at
-// ~60 Hz (measured), so that is the known-absorbable rate. The ramp still SAMPLES at 144 Hz -
-// a throttled write always carries the newest level, so intermediates coalesce for free.
-const unsigned long long kSetIntervalMs = 15;
 
 int ReadMagDword(const wchar_t* name, int fallback) {
     DWORD v = 0, cb = sizeof(v);
@@ -75,27 +68,15 @@ void ReadTransform(double& lvl, double& ox, double& oy) {
     else { lvl = 1.0; ox = 0.0; oy = 0.0; }
 }
 
-// Private user32 export the old transform model used (recovered, issue #146): pans the same DWM
-// fullscreen transform via a SCREEN-SPACE translation (-source * level), which is level-times
-// finer than MagSetFullscreenTransform's whole-pixel source offsets - at zoom N the public API
-// quantizes the view position to N-screen-pixel steps, a visible shimmer while the anchor moves
-// during a ramp. Auto-falls back to the public API permanently if the export breaks.
-typedef int (__stdcall* PFN_SetDeskMag)(double, int, int);
-PFN_SetDeskMag PrivPanFn() {
-    static auto p = (PFN_SetDeskMag)GetProcAddress(GetModuleHandleW(L"user32.dll"),
-                                                   "SetMagnificationDesktopMagnification");
-    return p;
-}
-bool g_privBroken = false;
+// PUBLIC MagSetFullscreenTransform ONLY. The private SetMagnificationDesktopMagnification
+// export (what the Settings zoom slider drives) was tried for ramps and made everything WORSE:
+// display lag that ACCUMULATED across zooms (taps kept zooming long after release, escalating
+// with use) - consistent with each call starting a DWM-side eased animation, so calls faster
+// than the animation stack an ever-growing backlog. The public API applies immediately: the
+// old transform model shipped it per-tick at composite pace for months, and the first hybrid
+// build using it was the one whose zoom-in was judged "almost perfect". Do not reintroduce the
+// private channel for per-tick streaming.
 void SetTransform(double lvl, double ox, double oy) {
-    if (!g_privBroken) {
-        if (auto f = PrivPanFn()) {
-            if (f(lvl, (int)std::lround(-ox * lvl), (int)std::lround(-oy * lvl)) != 0) return;
-            g_privBroken = true;   // fall back permanently this session
-        } else {
-            g_privBroken = true;
-        }
-    }
     MagSetFullscreenTransform((float)lvl, (int)std::lround(ox), (int)std::lround(oy));
 }
 
@@ -220,19 +201,18 @@ void MagnifyModel::present(const MapResult&, double level, const Config&,
             curLvl_ = pct / 100.0; curOx_ = off.x; curOy_ = off.y;
             SetTransform(curLvl_, curOx_, curOy_);
             resumeMagnifier();
+            wind::Log(wind::LogLevel::Info, "magnify",
+                      "ramp end: %.2f -> %.2f, %d sets in %llums; handoff to pct=%d",
+                      rampStartLvl_, curLvl_, rampSets_,
+                      GetTickCount64() - rampStartMs_, pct);
             phase_ = Phase::Handoff;
             handoffTicks_ = 12;  // ~84 ms at 144 Hz: 6 ticks observer catch-up, write, 6 ticks guard
                                  //   (>= 30 ms measured safe after resume; margin is free here)
         } else if (phase_ == Phase::Handoff) {
             // Guard window around the silent sync: keep re-asserting the settled transform so a
             // stale write from the just-woken Magnifier (e.g. a mouse-move handler firing before
-            // it processed the sync) can flash for at most one tick. Throttled like the ramp
-            // writes: these are same-value asserts, the queue must not be re-flooded here.
-            unsigned long long now = GetTickCount64();
-            if (now - lastSetMs_ >= kSetIntervalMs) {
-                lastSetMs_ = now;
-                SetTransform(curLvl_, curOx_, curOy_);
-            }
+            // it processed the sync) can flash for at most one tick.
+            SetTransform(curLvl_, curOx_, curOy_);
             --handoffTicks_;
             if (handoffTicks_ == 6) writeRegistryPct(pct);   // observer now sees the settled level: no-op sync
             if (handoffTicks_ <= 0) phase_ = Phase::Idle;    // Magnifier owns steady state (panning)
@@ -251,6 +231,8 @@ void MagnifyModel::present(const MapResult&, double level, const Config&,
         resumeMagnifier();
         if (wasSuspended) Sleep(60);
         writeRegistryPct(pct);
+        wind::Log(wind::LogLevel::Info, "magnify", "snap route: jump=%.2f -> pct=%d (wasSuspended=%d)",
+                  jump, pct, (int)wasSuspended);
         phase_ = Phase::Idle;   // the registry route both moves the view and syncs Magnifier
         return;
     }
@@ -265,17 +247,15 @@ void MagnifyModel::present(const MapResult&, double level, const Config&,
         ReadTransform(curLvl_, curOx_, curOy_);
         suspendMagnifier();
         phase_ = Phase::Ramping;
+        rampSets_ = 0; rampStartLvl_ = curLvl_; rampStartMs_ = GetTickCount64();
+        wind::Log(wind::LogLevel::Info, "magnify", "ramp start: from %.2f (suspended=%d)",
+                  curLvl_, (int)suspended_);
     }
-    // Throttled write (kSetIntervalMs): DWM absorbs ~60 transform updates/s; writing faster
-    // queues them and the VIEW lags seconds behind input. Skipped ticks lose nothing - the next
-    // write carries the newest level.
-    unsigned long long now = GetTickCount64();
-    if (now - lastSetMs_ < kSetIntervalMs) return;
-    lastSetMs_ = now;
     POINT c; GetCursorPos(&c);
     MagnifyOffset off = MagnifyAnchorOffset(c.x, c.y, curLvl_, curOx_, curOy_, lvl, mon.w, mon.h);
     SetTransform(lvl, off.x, off.y);
     curLvl_ = lvl; curOx_ = off.x; curOy_ = off.y;
+    ++rampSets_;
 }
 
 void MagnifyModel::setActive(bool active) {
@@ -293,12 +273,15 @@ void MagnifyModel::setActive(bool active) {
     // resume is measured clean; pause 60 ms (idle transition, imperceptible) before any write.
     if (wasSuspended) Sleep(60);
     double cur, ox, oy; ReadTransform(cur, ox, oy);
-    if (cur - 1.0 >= kSnapJump && lastRegPct_ != 100) {
+    bool easeRoute = cur - 1.0 >= kSnapJump && lastRegPct_ != 100;
+    if (easeRoute) {
         writeRegistryPct(100);
     } else {
         SetTransform(1.0, 0, 0);
         writeRegistryPct(100);
     }
+    wind::Log(wind::LogLevel::Info, "magnify", "idle: actual=%.2f route=%s (wasSuspended=%d)",
+              cur, easeRoute ? "registry-ease" : "snap", (int)wasSuspended);
     lastLevel_ = 1.0;
     phase_ = Phase::Idle;
 }
