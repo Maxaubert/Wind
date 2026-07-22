@@ -69,6 +69,13 @@ public:
     // True once the LL KEYBOARD hook is installed. When false (install failed or WIND_NOHOOK), main
     // must fall back to GetAsyncKeyState and no keyboard swallowing happens.
     bool kbHookActive() const { return kbHookActive_.load(std::memory_order_relaxed); }
+    // Magnify model only: make the keyboard hook skip INJECTED events entirely. The magnify model
+    // drives Windows Magnifier by injecting Win+Plus/Win+Minus chords, and NumPad +/- are bindable
+    // zoom keys - without the skip, our own injection would be swallowed by our own hook and
+    // re-registered as a zoom press (a feedback loop). Off by default so tools that inject keys
+    // (e.g. AutoHotkey remaps) keep working with the render model.
+    void setIgnoreInjectedKeys(bool on) { ignoreInjectedKeys_.store(on, std::memory_order_relaxed); }
+    bool ignoreInjectedKeys() const { return ignoreInjectedKeys_.load(std::memory_order_relaxed); }
     // True when the LL mouse hook is installed (the normal build). When true the hook is the SOLE
     // authority for side-button held state; main's WM_INPUT path must NOT also write button state
     // (Raw Input still delivers the transition even though the hook swallows the legacy message, so
@@ -99,6 +106,7 @@ private:
     std::atomic<int> kbCursorLockVk_{0};
     std::atomic<int> kbSwapModelVk_{0};
     std::atomic<bool> kbHookActive_{false}; // true once the LL KEYBOARD hook is installed
+    std::atomic<bool> ignoreInjectedKeys_{false}; // magnify model: kb hook skips LLKHF_INJECTED
     // Inspect-mode cooked-pixel accumulator (main-thread only: WM_INPUT cooks, the tick drains).
     BallisticsConfig ballistics_{};
     double cookedX_ = 0.0;

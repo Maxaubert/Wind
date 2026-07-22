@@ -26,6 +26,8 @@ struct IMagnifierModel {
     virtual bool retarget(const MonitorTarget& m) { (void)m; return false; }  // render-only; false = unchanged
     virtual void present(const MapResult& r, double level, const Config& cfg,
                          const MonitorTarget& mon, const PresentExtras& ex) = 0;  // the per-tick draw
-    virtual bool coversShell() const = 0;             // render true (uiAccess band) / transform false
+    virtual bool coversShell() const = 0;             // whether the magnified view covers the shell
+    virtual bool supportsInspect() const { return true; }  // magnify model: false (Magnifier owns
+                                                           //   the view/cursor; no freeze+reticle)
 };
 }

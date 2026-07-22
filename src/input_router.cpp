@@ -105,6 +105,12 @@ void InputRouter::setKeys(int zoomInVk, int zoomInVk2, int zoomOutVk, int zoomOu
 static LRESULT CALLBACK KbProc(int code, WPARAM wParam, LPARAM lParam) {
     if (code == HC_ACTION && g_router) {
         auto* ks = reinterpret_cast<KBDLLHOOKSTRUCT*>(lParam);
+        // Magnify model: our own injected Win+Plus/Minus chords must never be swallowed or
+        // tracked (NumPad +/- are bindable zoom keys; swallowing our own injection would both
+        // starve Magnifier and feed back as a phantom zoom press). Gated on the model so
+        // injected keys from other tools keep working normally under the render model.
+        if ((ks->flags & LLKHF_INJECTED) && g_router->ignoreInjectedKeys())
+            return CallNextHookEx(g_kbHook, code, wParam, lParam);
         int vk = static_cast<int>(ks->vkCode);
         bool down = (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN);
         bool up   = (wParam == WM_KEYUP   || wParam == WM_SYSKEYUP);

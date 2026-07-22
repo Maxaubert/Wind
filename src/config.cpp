@@ -62,7 +62,7 @@ double OutlineDwellSeconds(bool inBand, double prevSeconds, double dt, double th
 }
 
 std::string FlipModel(const std::string& model) {
-    return model == "transform" ? "render" : "transform";
+    return model == "magnify" ? "render" : "magnify";
 }
 
 Config ParseConfig(const std::string& text) {
@@ -109,9 +109,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "cursorScaleWithZoom")c.cursorScaleWithZoom = std::stoi(val);
             else if (key == "cursorVisibility")   c.cursorVisibility = val;
             else if (key == "model")              c.model = val;
-            else if (key == "fastPan")            c.fastPan = std::stoi(val);
-            else if (key == "smoothPan")          c.smoothPan = std::stoi(val);
-            else if (key == "cursorSprite")       c.cursorSprite = std::stoi(val);
+            else if (key == "magnifyStep")        c.magnifyStep = std::stoi(val);
             else if (key == "bilinear")           c.bilinear = std::stoi(val);
             else if (key == "sharpness")          c.sharpness = std::stod(val);
             else if (key == "zorderBand")         c.zorderBand = std::stoi(val);
@@ -152,7 +150,13 @@ Config ParseConfig(const std::string& text) {
     if (c.outlineThickness > 40) c.outlineThickness = 40;
     c.outlineLowZoomMax  = clampd(c.outlineLowZoomMax,  1.0, 50.0);
     c.outlineIdleSeconds = clampd(c.outlineIdleSeconds, 0.5, 60.0);
-    if (c.model != "render" && c.model != "transform") c.model = "render";
+    // Legacy "transform" (the removed MagSetFullscreenTransform model) maps to its successor in
+    // the same role (DRM-safe magnification); anything else unknown falls back to render.
+    if (c.model == "transform") c.model = "magnify";
+    if (c.model != "render" && c.model != "magnify") c.model = "render";
+    // Windows Magnifier accepts a small fixed set of ZoomIncrement values; snap to the nearest
+    // supported step so the injected Win+Plus math always matches what Magnifier actually does.
+    c.magnifyStep = c.magnifyStep <= 7 ? 5 : c.magnifyStep <= 17 ? 10 : c.magnifyStep <= 37 ? 25 : 50;
     // Reject keybinds to keys Wind must never swallow (see IsForbiddenBindVk). A bound key is
     // eaten system-wide, so binding e.g. Backspace or the Windows key would make it unusable
     // everywhere; treat a forbidden bind as unbound regardless of how it got into the ini.
@@ -205,7 +209,7 @@ Config LoadConfig(const std::wstring& path) {
                "; cursorLockVk: tap to toggle Inspect mode - freeze the cursor (keeps a hover/tooltip\n"
                ";   alive) while you pan the lens. Click while locked commits there + unlocks. VK; 0=unbound.\n"
                "cursorLockVk=0\n"
-               "; swapModelVk: tap to swap the magnifier model (render <-> transform). Restarts Wind\n"
+               "; swapModelVk: tap to swap the magnifier model (render <-> magnify). Restarts Wind\n"
                ";   onto the other model. VK code; 0=unbound.\n"
                "swapModelVk=0\n"
                "; maxLevel: how far you can zoom (does not affect zoom speed)\n"
@@ -256,18 +260,15 @@ Config LoadConfig(const std::wstring& path) {
                "brightness=1.0\n"
                "; hdrTonemap: 1=HDR10->SDR tonemap when Windows HDR is on (no-op on SDR); 0=off\n"
                "hdrTonemap=1\n"
-               "; model: render = GPU capture+overlay (default, high fidelity). transform = low-GPU\n"
-               ";   DWM fullscreen-transform. Restart to switch. transform ignores the render-only\n"
-               ";   knobs below (sharpness, hdrTonemap, bilinear, outline, zorderBand) and cannot\n"
-               ";   cover the Start menu / taskbar.\n"
+               "; model: render = GPU capture+overlay (default, high fidelity). magnify = drive the\n"
+               ";   native Windows Magnifier (works over DRM video like Netflix, which blanks in\n"
+               ";   render). Restart to switch. magnify zooms in steps (Windows Magnifier's limit),\n"
+               ";   handles the cursor itself, and ignores the render-only knobs (sharpness,\n"
+               ";   hdrTonemap, bilinear, outline, cursor*, multiMonitor, Inspect mode).\n"
                "model=render\n"
-               "; fastPan (transform only): 1 = private sub-pixel pan channel; auto-falls back if absent\n"
-               "fastPan=1\n"
-               "; smoothPan (transform only): 1 = keep the display composited while zoomed so flip-model\n"
-               ";   games do not stutter while panning (caps the frame rate while zoomed); 0 = off\n"
-               "smoothPan=0\n"
-               "; cursorSprite (transform only): 1 = scene-locked cursor sprite (recommended); 0 = OS cursor\n"
-               "cursorSprite=1\n"
+               "; magnifyStep (magnify only): Windows Magnifier zoom step in percent (5/10/25/50).\n"
+               ";   Smaller = smoother ramp. 5 recommended.\n"
+               "magnifyStep=5\n"
                "; multiMonitor: 1=magnify whichever monitor the cursor is on at zoom-in; 0=primary only\n"
                "multiMonitor=0\n"
                "; cropCapture (opt-in): 0=always copy all changed regions (cache never stale, default);\n"

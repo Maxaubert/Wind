@@ -5,9 +5,8 @@ struct MapResult {
     double srcLeft, srcTop;              // float top-left of the source region (desktop px)
     double cursorScreenX, cursorScreenY; // where to draw the cursor sprite (screen px)
     int    clickDesktopX, clickDesktopY; // where to SetCursorPos for click hit-testing
-    // The un-rounded lens centre (desktop px). clickDesktop* is this rounded to a pixel, which is
-    // fine for SetCursorPos but would quantise the transform model's sub-pixel pan. The transform
-    // model anchors its magnification here (ComputeFixedPointOffset); the render model ignores it.
+    // The un-rounded lens centre (desktop px). clickDesktop* is this rounded to a pixel (fine for
+    // SetCursorPos); kept separately so sub-pixel consumers never re-derive it from the rounded pair.
     double centerX, centerY;
 };
 // Pure centered-mode mapper. Integrates per-tick pixel deltas into a float lens center

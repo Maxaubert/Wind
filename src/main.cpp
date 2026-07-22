@@ -16,7 +16,7 @@
 #pragma comment(lib, "Dwmapi.lib")
 #include "render_engine.h"
 #include "render_model.h"
-#include "transform_model.h"
+#include "magnify_model.h"
 #include "input_router.h"
 #include "cursor_mapper.h"
 #include "zoom_controller.h"
@@ -420,12 +420,17 @@ static void RunTick(TickState& t) {
     // block below freezes the real cursor (1px ClipCursor) and roams a raw-driven look point.
     bool lockDown = keyDown(t.cfg.cursorLockVk);
     if (lockDown && !t.lockKeyWasDown) {
-        // Snapshot cursor visibility at the toggle edge, BEFORE this tick's active block hides it:
-        // at 1x the only thing that can have hidden the cursor is the foreground app, so a
-        // not-showing cursor is the mouselook-gameplay tell for game-inspect (issue #144).
-        CURSORINFO ci{}; ci.cbSize = sizeof(ci);
-        t.inspectCursorWasShowing = GetCursorInfo(&ci) ? (ci.flags & CURSOR_SHOWING) != 0 : true;
-        t.cursorLock.toggle();
+        if (t.model.supportsInspect()) {
+            // Snapshot cursor visibility at the toggle edge, BEFORE this tick's active block hides it:
+            // at 1x the only thing that can have hidden the cursor is the foreground app, so a
+            // not-showing cursor is the mouselook-gameplay tell for game-inspect (issue #144).
+            CURSORINFO ci{}; ci.cbSize = sizeof(ci);
+            t.inspectCursorWasShowing = GetCursorInfo(&ci) ? (ci.flags & CURSOR_SHOWING) != 0 : true;
+            t.cursorLock.toggle();
+        } else {
+            // Magnify model: Windows Magnifier owns the view and cursor; no freeze+reticle exists.
+            wind::Log(wind::LogLevel::Info, "inspect", "Inspect not available in the magnify model");
+        }
     }
     t.lockKeyWasDown = lockDown;
     // Tell the mouse hook whether Inspect is on (so it swallows real clicks and routes them to the look
@@ -931,13 +936,12 @@ static void RestoreInputState() {
 // and only swallows side-buttons anyway. The damaging state (hidden/confined cursor) is undone here.
 static void AtExitRestore() { RestoreInputState(); }
 
-// Crash safety net installed BEFORE the magnifier model is constructed, so it covers model=transform
-// too. RenderModel hides the OS cursor via the process-scoped Magnification API (auto-reverts on
-// process death), but TransformModel hides it via CursorBlanker's SetSystemCursor, which is
-// system-global and does NOT revert when the process dies - an unhandled exception while zoomed would
-// otherwise leave every standard cursor blank across the whole desktop until relaunch. Body mirrors
-// render_engine.cpp's CursorRestoreFilter (minimal, allocation-light, one-shot via InterlockedExchange,
-// returns EXCEPTION_CONTINUE_SEARCH so the default handler still reports the crash). RenderEngine::
+// Crash safety net installed BEFORE the magnifier model is constructed. RenderModel hides the OS
+// cursor via the process-scoped Magnification API (auto-reverts on process death), and the magnify
+// model never touches the cursor, but the SPI_SETCURSORS reload is kept as a general heal for any
+// stale cursor scheme a crashed predecessor left behind. Body mirrors render_engine.cpp's
+// CursorRestoreFilter (minimal, allocation-light, one-shot via InterlockedExchange, returns
+// EXCEPTION_CONTINUE_SEARCH so the default handler still reports the crash). RenderEngine::
 // hideSystemCursor installs its own filter on the render path's first cursor hide, which REPLACES
 // this one (SetUnhandledExceptionFilter keeps only the latest); that is safe because CursorRestoreFilter
 // does the identical restore + crash report, so nothing is lost by the replacement.
@@ -1119,18 +1123,22 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     // Target monitor for this session: the cursor's monitor when multiMonitor is on, else the
     // primary. The first zoom-in re-checks and retargets if the cursor moved to another monitor.
-    // The transform model forces the primary monitor: r.srcLeft/srcTop stay in primary-screen
-    // coords, which the Magnification API (MagSetFullscreenTransform) expects. multiMonitor is a
-    // documented no-op for the transform model.
-    MonitorTarget startupMon = (cfg.model != "transform" && cfg.multiMonitor != 0)
+    // The magnify model has no overlay of its own (Windows Magnifier owns the view), so monitor
+    // targeting is a documented no-op there; it just gets the primary.
+    MonitorTarget startupMon = (cfg.model == "render" && cfg.multiMonitor != 0)
                                    ? MonitorUnderCursor() : PrimaryMonitor();
 
-    // --- Magnifier model (render: DXGI Desktop Duplication + D3D11 overlay; transform: DWM) ---
+    // --- Magnifier model (render: DXGI Desktop Duplication + D3D11 overlay; magnify: drive the
+    // native Windows Magnifier via injected Win+Plus/Minus, the DRM-safe fallback) ---
     std::unique_ptr<IMagnifierModel> model;
-    if (cfg.model == "transform")
-        model = std::make_unique<TransformModel>(cfg.fastPan != 0, cfg.smoothPan != 0, cfg.cursorSprite != 0, cfg.zorderBand);
-    else
+    if (cfg.model == "magnify") {
+        model = std::make_unique<MagnifyModel>(cfg.magnifyStep);
+        // Our injected chords must never be swallowed/tracked by our own keyboard hook
+        // (NumPad +/- are bindable zoom keys; see InputRouter::setIgnoreInjectedKeys).
+        g_input.setIgnoreInjectedKeys(true);
+    } else {
         model = std::make_unique<RenderModel>(cfg.zorderBand, cfg.hdrTonemap != 0);
+    }
     if (!model->initialize(startupMon)) {
         MessageBoxW(nullptr, L"Could not start the renderer (Direct3D 11 / Desktop Duplication "
                              L"unavailable on this system).", L"Wind", MB_ICONERROR);
