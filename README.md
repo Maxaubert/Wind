@@ -39,14 +39,13 @@ prompts you to confirm).
   a D3D11 overlay. The cursor is drawn into the same frame as the content, so it can never drift
   against the view. This is the model every knob below was tuned for, and the only one that covers
   the shell (Start / taskbar / tray) via the UIAccess z-order band.
-- **`magnify`** - drives the **native Windows Magnifier** with Wind's controls. This is the model
+- **`magnify`** - drives the **native Windows Magnifier** with Wind's buttons. This is the model
   for DRM-protected video (Netflix and friends), which shows black under `render`'s screen
-  capture. Wind streams the zoom level to Magnifier live (it follows Wind's normal smooth ramp
-  with a short trailing ease), so side-button hold-to-zoom, zoom speed settings, and quick-zoom
-  work as usual - continuous zoom, not the 100%-200%-300% jumps of the standalone Magnifier.
-  Magnifier starts on the first zoom-in; at 1x it stays running, invisible, for an instant next
-  zoom-in; quitting Wind (or swapping models) closes it and restores your original Windows
-  Magnifier settings. Max zoom is Magnifier's ceiling, 1600%.
+  capture. Holding a zoom button scroll-zooms Magnifier exactly like its own Ctrl+Alt+wheel
+  shortcut, stepping by `magnifyStep` percent per notch (Settings > Display > Zoom step; lower =
+  smoother and slower, applies live). Everything else is pure native Magnifier behavior: its
+  easing, its follow-the-mouse panning, its cursor. Quitting Wind (or swapping models) closes it
+  and restores your original Windows Magnifier settings. Max zoom is Magnifier's ceiling, 1600%.
 
 The `magnify` model hands the view and cursor to Windows Magnifier, so the render-only features
 do not apply there: `sharpness`, `hdrTonemap`, `bilinear`, `outline*`, `brightness`,

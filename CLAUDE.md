@@ -34,33 +34,30 @@ capture-excluded (`WDA_EXCLUDEFROMCAPTURE`) fullscreen overlay; draws the real c
 (`GetCursorInfo`) centered via `cursor_mapper`; hides the OS cursor (`MagShowSystemCursor`) and
 syncs `SetCursorPos` for clicks. Sub-pixel pan + smooth centered cursor.
 `model=magnify` (issue #146): drives the NATIVE Windows Magnifier - the DRM-safe fallback
-(Netflix etc. blanks under Desktop Duplication). HYBRID control, arrived at by MEASUREMENT
-(probes in the spec; full doctrine in `magnify_level.h` - read it before touching this model):
-  1. Injected Win+Plus/Minus chords are a DEAD END: Magnifier drops ~half of a rapid burst and
-     animates each survivor (lags the ramp ~4-5x, keeps zooming after release).
-  2. Magnify.exe registry-watches `...\ScreenMagnifier\Magnification`: ONE write eases
-     beautifully (~280 ms, any span, exact for arbitrary integer percents), but writes faster
-     than that window degenerate into INSTANT ~40% SNAPS at the window boundary - so streaming
-     the ramp through the registry is also a dead end.
-  3. `MagSetFullscreenTransform` from OUR process STICKS while Magnify.exe runs (no stomping,
-     even with mouse movement), and a registry write matching the actual transform is a visual
-     no-op -> seamless handoff.
-So `magnify_model.cpp`: during an active RAMP, set the transform directly per tick
-(cursor-anchored via `MagnifyAnchorOffset`, glass smooth at Wind's zoom speed); when the level
-settles, snap the transform to the exact integer percent and write the registry ONCE (visual
-no-op) so Magnifier's native follow-the-mouse panning owns steady state; a single-tick jump
->= 0.75 (quick zoom) routes through the registry instead to get Magnifier's eased animation.
-CAUTIONS: a Magnification write above 1600 is silently IGNORED (not clamped) - clamp is
-mandatory (`MagnifyClampLevel`); a SAME-VALUE registry write fires no notification (never rely
-on one to make Magnifier act). Init preps fullscreen mode + FollowMouse + toolbar minimized,
-quits a user-started Magnifier, and launches ours immediately (never mid-ramp); idle keeps
-Magnify.exe running at 100% = identity transform (instant re-zoom); shutdown/model-swap resets
-the transform, injects Win+Esc, and restores the user's Magnifier registry from a one-shot
-snapshot file (`%LOCALAPPDATA%\Wind\magnifier_backup.ini`, written before first modify, kept
-across crashes so we never "restore" our own values). In magnify mode the KEYBOARD HOOK SKIPS
-INJECTED EVENTS (`setIgnoreInjectedKeys`) so the Win+Esc chord can never be swallowed by a user
-bind. Inspect mode, cursor drawing/sensitivity, outline, and multiMonitor are render-only
-(`supportsInspect()`).
+(Netflix etc. blanks under Desktop Duplication). FINAL DESIGN = maximum simplicity: Wind holds
+NO zoom state and never touches the transform. `selfDrivenZoom()` on the model interface makes
+RunTick bypass the ENTIRE level pipeline (ZoomController pinned at 1x, overlay never activates,
+quick zoom / mapper / Inspect never run) and instead call `nativeZoomTick(dir, cfg)` every tick:
+while a zoom button is held it injects Ctrl+Alt+wheel notches (Magnifier's own wheel-zoom
+shortcut) every 60 ms; Magnifier does everything else natively (stepping by `magnifyStep` ->
+its ZoomIncrement, easing each notch, panning, cursor). `magnifyStep` (ini + Settings UI,
+5..400, default 50) is written to ZoomIncrement live on change. Init preps fullscreen mode +
+toolbar minimized + Magnification=100 and launches Magnify.exe; shutdown/model-swap injects
+Win+Esc and restores the user's Magnifier registry from a one-shot snapshot
+(`%LOCALAPPDATA%\Wind\magnifier_backup.ini`, written before first modify, kept across crashes
+so we never "restore" our own values). The KEYBOARD HOOK SKIPS INJECTED EVENTS in magnify mode
+(`setIgnoreInjectedKeys`) so our Ctrl/Alt/Esc chords are never swallowed by a user bind.
+DO NOT RE-ATTEMPT the smarter drives - all measured dead ends (probes + amendments in the
+spec): injected Win+Plus chord bursts drop ~half and animate each survivor (lag + zoom-after-
+release); streaming the `Magnification` registry faster than its ~280 ms animation window
+degenerates into ~40% snaps (ONE write eases beautifully - that part is real); injected
+Win+wheel is INERT (Ctrl+Alt+wheel is the real channel); driving MagSetFullscreenTransform
+ourselves during ramps IS glass-smooth and sticks while Magnify.exe runs, but Magnifier stomps
+its stale belief within ~7 ms of any wake with queued mouse moves, its registry handler
+animates from a STALE cached actual for writes queued while suspended, and the whole hybrid
+collapsed into flicker/racy release levels; suspending Magnify.exe mid-ramp is measurable-safe
+for input latency yet still lost the belief-sync races. Also: Magnification writes above 1600
+are silently IGNORED (not clamped), and a SAME-VALUE registry write fires no notification.
 The old Magnification-API `engine=mag` fallback was removed (issue #20); the
 MagSetFullscreenTransform `model=transform` was removed in favor of magnify (issue #146; a
 legacy `model=transform` ini value maps to `magnify`).

@@ -131,3 +131,21 @@ steady state. Single-tick jumps >= 0.75x (quick zoom) route through the registry
 Magnifier's eased animation. Magnify.exe is launched at model initialize (never mid-ramp) and
 kept running at identity when idle. Extra trap encoded: a same-value registry write fires no
 notification, so no code path may rely on one to make Magnifier act.
+
+## AMENDMENT 3 (2026-07-22, FINAL - shipped design)
+
+The hybrid (amendment 2) also failed live: Magnifier stomps its stale belief within ~7 ms of
+being woken when mouse moves are queued, and its registry handler animates from a stale cached
+actual for writes queued during suspension - every resume/sync ordering tried still produced
+per-zoom flicker or racy release levels, and an input-event storm ended the attempt.
+
+Shipped design, per user decision: NATIVE WHEEL-NOTCH DRIVE. Wind holds no zoom state. While a
+zoom button is held, it injects Ctrl+Alt+wheel notches (Magnifier's own wheel shortcut) at a
+measured 60 ms cadence; Magnifier natively steps by the user's ZoomIncrement, eases each notch,
+pans, and draws the cursor. Measured (probe 7): wheel notches register 1:1 with no backlog and
+settle ~150 ms after release; injected Win+wheel is inert. `selfDrivenZoom()` bypasses Wind's
+whole level pipeline (ZoomController pinned at 1x; quick zoom / mapper / Inspect inactive in
+this model). `magnifyStep` (ini + UI, 5..400, default 50) maps to ZoomIncrement, written live
+on change and snapshot-restored on exit. All the deleted machinery (suspension, phases,
+cursor-anchored transform driving, anchor math) is recorded here and in CLAUDE.md as measured
+dead ends - do not re-attempt without new evidence.
