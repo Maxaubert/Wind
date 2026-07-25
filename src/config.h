@@ -113,15 +113,19 @@ struct Config {
     // switch the screen edges can briefly show the previous window's pixels until a smaller change
     // triggers a full refresh; that staleness is why it defaults off. Hot-reloadable.
     int    cropCapture = 0;
-    // --- Game perf (issue #148): keep a GPU-saturated game smooth while zoomed over it ---
-    // EXPERIMENT KNOB, default 0 (off). 1 = Wind's GPU work runs at low WDDM scheduling priority
-    // (device GPU-thread priority -7 + process scheduling class "below normal"), so a game
-    // saturating the GPU wins every contention race against the magnifier's copies/draws.
-    // Measured: a saturated game can then starve Wind's GPU work for MINUTES - the present-fence
-    // gate keeps Wind responsive (it skips frames instead of blocking, so zoom-out and the cursor
-    // always work), but the zoomed view can freeze/lag badly in heavy scenes. That starvation
-    // wedged the whole app before the gate existed, which is why this defaults OFF now.
-    // Applied at device build (restart to apply).
+    // --- Game perf (issue #148): GPU scheduling priority of Wind's D3D work ---
+    // gpuPriority: -1 = low (Wind yields to a busy game; a saturated game can then STARVE the
+    // zoomed view - the present-fence gate keeps input/teardown responsive, but the view can
+    // freeze in heavy scenes; that starvation wedged the whole app before the gate existed);
+    // 0 = normal (default); +1 = high (Wind's small per-frame job jumps a saturated game's queue
+    // so the magnified view hits every vblank - the game donates a sliver of GPU time; the right
+    // trade when zoom-window smoothness outranks game fps). Uses IDXGIDevice::
+    // SetGPUThreadPriority(+/-7) plus D3DKMTSetProcessSchedulingPriorityClass (the process-class
+    // raise needs privileges and may be denied - logged, non-fatal; the device-level priority is
+    // the one that matters). Applied at device build (restart to apply).
+    int    gpuPriority = 0;
+    // Legacy alias (round-1 experiment): lowGpuPriority=1 acts as gpuPriority=-1 when gpuPriority
+    // itself is 0/unset. Kept so old inis keep meaning what they said.
     int    lowGpuPriority = 0;
     // 1 (default) = while the foreground window covers the target monitor (fullscreen/borderless
     // game), force the cropCapture behavior for the session regardless of the cropCapture key:
@@ -188,6 +192,10 @@ bool ParseHexColor(const std::string& s, float& r, float& g, float& b);
 // Pure: render <-> magnify. "magnify" -> "render"; anything else -> "magnify" (so a corrupt
 // model value flips to a valid engine). Pure; used by the swap-model hotkey. No I/O, no <windows.h>.
 std::string FlipModel(const std::string& model);
+
+// Pure: the effective GPU scheduling priority (-1 low / 0 normal / +1 high) after folding the
+// legacy lowGpuPriority alias into gpuPriority. gpuPriority wins when non-zero.
+int EffectiveGpuPriority(const Config& c);
 
 // Pure: whether the edge outline should show at this zoom level, given the master `outline`
 // toggle and the optional low-zoom cutoff. (The "are we zoomed" level > 1.0 gate stays in the

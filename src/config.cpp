@@ -65,6 +65,11 @@ std::string FlipModel(const std::string& model) {
     return model == "magnify" ? "render" : "magnify";
 }
 
+int EffectiveGpuPriority(const Config& c) {
+    if (c.gpuPriority != 0) return c.gpuPriority;      // explicit tri-state wins
+    return c.lowGpuPriority != 0 ? -1 : 0;             // legacy alias: lowGpuPriority=1 -> low
+}
+
 Config ParseConfig(const std::string& text) {
     Config c;
     std::istringstream in(text);
@@ -118,6 +123,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "multiMonitor")       c.multiMonitor = std::stoi(val);
             else if (key == "cropCapture")        c.cropCapture = std::stoi(val);
             else if (key == "lowGpuPriority")     c.lowGpuPriority = std::stoi(val);
+            else if (key == "gpuPriority")        c.gpuPriority = std::stoi(val);
             else if (key == "gameCrop")           c.gameCrop = std::stoi(val);
             else if (key == "gameFpsCap")         c.gameFpsCap = std::stoi(val);
             else if (key == "onboarded")          c.onboarded = std::stoi(val);
@@ -154,6 +160,8 @@ Config ParseConfig(const std::string& text) {
     c.outlineLowZoomMax  = clampd(c.outlineLowZoomMax,  1.0, 50.0);
     if (c.gameFpsCap < 0)   c.gameFpsCap = 0;      // 0 = off
     if (c.gameFpsCap > 240) c.gameFpsCap = 240;
+    if (c.gpuPriority < -1) c.gpuPriority = -1;    // tri-state: -1 low / 0 normal / +1 high
+    if (c.gpuPriority >  1) c.gpuPriority = 1;
     c.outlineIdleSeconds = clampd(c.outlineIdleSeconds, 0.5, 60.0);
     // Legacy "transform" (the removed MagSetFullscreenTransform model) maps to its successor in
     // the same role (DRM-safe magnification); anything else unknown falls back to render.
@@ -279,10 +287,11 @@ Config LoadConfig(const std::wstring& path) {
                ";   1=on a full-screen repaint (games) copy only the magnified region (cuts 4K HDR GPU\n"
                ";   copy ~zoom^2) but screen edges can briefly show a previous window after a switch.\n"
                "cropCapture=0\n"
-               "; lowGpuPriority (experiment, off by default): 1=Wind's GPU work yields to a busy\n"
-               ";   game. CAUTION: a saturated game can then starve the zoomed view (it freezes/lags\n"
-               ";   in heavy scenes; zoom-out and the cursor stay responsive). Restart to apply.\n"
-               "lowGpuPriority=0\n"
+               "; gpuPriority: GPU scheduling priority of Wind's render work. -1=low (yield to a\n"
+               ";   busy game; a saturated game can starve/freeze the zoomed view), 0=normal,\n"
+               ";   1=high (the zoomed view jumps a busy game's GPU queue - smoothest magnifier,\n"
+               ";   the game gives up a sliver). Restart to apply.\n"
+               "gpuPriority=0\n"
                "; gameCrop: 1=while a fullscreen game is foreground, always copy only the magnified\n"
                ";   region (safe there - the game repaints everything each frame; big HDR/4K win);\n"
                ";   0=only cropCapture decides\n"

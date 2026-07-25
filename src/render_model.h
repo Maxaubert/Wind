@@ -16,7 +16,7 @@ void FillRenderParams(RenderFrameParams& p, const MapResult& r, const Config& cf
 // render path behaves identically while RunTick moves behind the interface (Task 4).
 class RenderModel : public IMagnifierModel {
 public:
-    explicit RenderModel(int zorderBand, bool hdrTonemap, bool lowGpuPriority);
+    explicit RenderModel(int zorderBand, bool hdrTonemap, int gpuPriority);
     bool initialize(const MonitorTarget& m) override;
     void shutdown() override;
     bool ready() const override;
@@ -38,7 +38,7 @@ private:
     RenderEngine engine_;
     int  zorderBand_;
     bool hdrTonemap_;
-    bool lowGpuPriority_;
+    int  gpuPriority_;
     bool primed_ = false;
 };
 }

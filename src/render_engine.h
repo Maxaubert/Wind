@@ -59,11 +59,12 @@ public:
     // CreateWindowInBand (needs UIAccess; e.g. 16 = ZBID_SYSTEM_TOOLS, above the shell so the
     // Start menu / taskbar flyouts don't show an unmagnified copy). Falls back to a normal
     // window if the band can't be used.
-    // lowGpuPriority: run the device's GPU work at low WDDM scheduling priority (GPU-thread
-    // priority -7 + process scheduling class below-normal) so a GPU-saturated game wins every
-    // contention race against the magnifier; free on an idle GPU (issue #148).
+    // gpuPriority: WDDM scheduling priority of this device's GPU work. -1 = low (GPU-thread
+    // priority -7 + process class below-normal: a saturated game wins every race and can starve
+    // us), 0 = normal, +1 = high (GPU-thread priority +7 + best-effort process class raise: our
+    // small per-frame job jumps a saturated game's queue so the zoomed view hits every vblank).
     bool initialize(const MonitorTarget& monitor, int zorderBand = 0, bool hdrTonemap = false,
-                    bool lowGpuPriority = false);
+                    int gpuPriority = 0);
     // Re-point the magnifier at a different monitor (call on zoom-in when the cursor's monitor
     // changed; the overlay must still be hidden/alpha 0). Resizes the swapchain, then moves the
     // overlay and rebinds Desktop Duplication to the new output. Returns false (and the caller
@@ -112,6 +113,13 @@ public:
     void debugInfo(int& screenW, int& screenH, int& curW, int& curH, int& hotX, int& hotY) const;
     // Verification only: duplication surface format + output color space / bit depth (HDR).
     void debugHdr(unsigned& ddaFormat, int& colorSpace, int& bitsPerColor) const;
+    // Frame-perf counters since the last reset: CPU milliseconds spent building the frame
+    // (capture+draw submission) and spent blocked inside Present, sum + max, over `frames`
+    // presented frames plus `gateSkips` frames dropped by the present-fence gate. Present block
+    // time is where GPU contention with a game shows up (issue #148 diagnostics).
+    void debugPerf(double& renderSumMs, double& renderMaxMs,
+                   double& presentSumMs, double& presentMaxMs,
+                   int& frames, int& gateSkips, bool reset);
     // Verification only: copy the back-buffer to a 32bpp BGRA PNG.
     bool dumpBackbufferPng(const wchar_t* path);
     // Verification only: render one frame and dump it before Present (so the PNG matches the

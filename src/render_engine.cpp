@@ -92,7 +92,12 @@ struct RenderEngine::State {
     int  outColorSpace = -1;     // DXGI_COLOR_SPACE_TYPE of the output (12 = HDR10 G2084)
     int  outBitsPerColor = 0;
     bool wantHdrTonemap = false; // config: opt-in HDR->SDR tonemap (default off = current path)
-    bool lowGpuPri = false;      // config: run our GPU work below a game's priority (issue #148)
+    int  gpuPri = 0;             // config: -1 low / 0 normal / +1 high WDDM priority (issue #148)
+    // Frame-perf counters (issue #148 diagnostics): CPU ms building the frame vs blocked in
+    // Present, plus presented-frame and fence-gate-skip counts. Drained by debugPerf().
+    double perfRenderSumMs = 0.0, perfRenderMaxMs = 0.0;
+    double perfPresentSumMs = 0.0, perfPresentMaxMs = 0.0;
+    int    perfFrames = 0, perfGateSkips = 0;
     bool rotated = false;        // target output is portrait (90/270); capture not supported - logged
     bool capFp16 = false;        // capturing FP16 scRGB (tonemap active)
     double sdrWhiteNits = 200.0; // OS SDR white level for the tonemap scale
@@ -454,9 +459,21 @@ void RenderEngine::debugInfo(int& screenW, int& screenH, int& curW, int& curH, i
 void RenderEngine::debugHdr(unsigned& ddaFormat, int& colorSpace, int& bitsPerColor) const {
     ddaFormat = s_->ddaFormat; colorSpace = s_->outColorSpace; bitsPerColor = s_->outBitsPerColor;
 }
+void RenderEngine::debugPerf(double& renderSumMs, double& renderMaxMs,
+                             double& presentSumMs, double& presentMaxMs,
+                             int& frames, int& gateSkips, bool reset) {
+    renderSumMs = s_->perfRenderSumMs;   renderMaxMs = s_->perfRenderMaxMs;
+    presentSumMs = s_->perfPresentSumMs; presentMaxMs = s_->perfPresentMaxMs;
+    frames = s_->perfFrames; gateSkips = s_->perfGateSkips;
+    if (reset) {
+        s_->perfRenderSumMs = s_->perfRenderMaxMs = 0.0;
+        s_->perfPresentSumMs = s_->perfPresentMaxMs = 0.0;
+        s_->perfFrames = 0; s_->perfGateSkips = 0;
+    }
+}
 
 bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool hdrTonemap,
-                              bool lowGpuPriority) {
+                              int gpuPriority) {
     const int screenW = monitor.w, screenH = monitor.h;
     s_->sw = screenW;
     s_->sh = screenH;
@@ -464,10 +481,10 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     s_->originY = monitor.y;
     lstrcpynW(s_->targetDevice, monitor.device, 32);   // "" = first output (legacy path)
     s_->wantHdrTonemap = hdrTonemap;   // read before recreateDupl decides the capture format
-    s_->lowGpuPri = lowGpuPriority;    // read in buildPresent (device (re)build applies it)
-    RLog("=== initialize device=%ls origin=(%d,%d) size=%dx%d band=%d hdrTonemap=%d lowGpuPri=%d ===",
+    s_->gpuPri = gpuPriority;          // read in buildPresent (device (re)build applies it)
+    RLog("=== initialize device=%ls origin=(%d,%d) size=%dx%d band=%d hdrTonemap=%d gpuPri=%d ===",
          s_->targetDevice, monitor.x, monitor.y, screenW, screenH, zorderBand, (int)hdrTonemap,
-         (int)lowGpuPriority);
+         gpuPriority);
 
     // --- Overlay window: fullscreen, borderless, topmost, click-through, no-activate ---
     static const wchar_t* kClass = L"WindRenderOverlay";
@@ -789,23 +806,24 @@ bool RenderEngine::State::acquireBackbufferRtv() {
     return SUCCEEDED(device->CreateRenderTargetView(back.Get(), nullptr, rtv.ReleaseAndGetAddressOf()));
 }
 
-// Drop this PROCESS's WDDM scheduling class to below-normal (one-shot; lowering needs no
-// privilege, unlike raising). Together with the per-device SetGPUThreadPriority(-7) below, a
-// GPU-saturated game wins every scheduling race against the magnifier's copies/draws instead
-// of trading hitches with them (issue #148). D3DKMT* lives in gdi32 and is loaded dynamically
-// (it's a kernel-thunk API, not in any import lib we link).
-static void ApplyLowProcessGpuPriority() {
+// Set this PROCESS's WDDM scheduling class (one-shot). Lowering needs no privilege; RAISING
+// above normal needs increased-base-priority rights and may be denied - logged, non-fatal (the
+// per-device SetGPUThreadPriority below is the lever that matters). D3DKMT* lives in gdi32 and
+// is loaded dynamically (a kernel-thunk API, not in any import lib we link). Issue #148.
+static void ApplyProcessGpuPriority(int gpuPri) {
     static bool s_done = false;
     if (s_done) return;
     s_done = true;
-    enum KmtPriorityClass { KMT_PRIO_IDLE = 0, KMT_PRIO_BELOW_NORMAL = 1 };
+    enum KmtPriorityClass { KMT_PRIO_IDLE = 0, KMT_PRIO_BELOW_NORMAL = 1,
+                            KMT_PRIO_NORMAL = 2, KMT_PRIO_ABOVE_NORMAL = 3, KMT_PRIO_HIGH = 4 };
     using PFN_SetPrio = LONG(APIENTRY*)(HANDLE, int);
     if (HMODULE gdi = GetModuleHandleW(L"gdi32.dll")) {
         if (auto p = reinterpret_cast<PFN_SetPrio>(
                 GetProcAddress(gdi, "D3DKMTSetProcessSchedulingPriorityClass"))) {
-            LONG st = p(GetCurrentProcess(), KMT_PRIO_BELOW_NORMAL);
-            RLog("lowGpuPriority: process scheduling class below-normal status=0x%08lX",
-                 (unsigned long)st);
+            const int cls = gpuPri < 0 ? KMT_PRIO_BELOW_NORMAL : KMT_PRIO_ABOVE_NORMAL;
+            LONG st = p(GetCurrentProcess(), cls);
+            RLog("gpuPriority %d: process scheduling class %d status=0x%08lX",
+                 gpuPri, cls, (unsigned long)st);
         }
     }
 }
@@ -815,10 +833,11 @@ bool RenderEngine::State::buildPresent() {
     ComPtr<IDXGIDevice1> dxgiDev;
     if (FAILED(device->QueryInterface(IID_PPV_ARGS(&dxgiDev)))) { RLog("buildPresent: QI IDXGIDevice1 failed"); return false; }
     dxgiDev->SetMaximumFrameLatency(1);
-    if (lowGpuPri) {
-        HRESULT hp = dxgiDev->SetGPUThreadPriority(-7);   // lowest; lowering needs no privilege
-        ApplyLowProcessGpuPriority();
-        RLog("buildPresent: SetGPUThreadPriority(-7) hr=0x%08lX", (unsigned long)hp);
+    if (gpuPri != 0) {
+        const INT prio = gpuPri > 0 ? 7 : -7;
+        HRESULT hp = dxgiDev->SetGPUThreadPriority(prio);
+        ApplyProcessGpuPriority(gpuPri);
+        RLog("buildPresent: SetGPUThreadPriority(%d) hr=0x%08lX", prio, (unsigned long)hp);
     }
     ComPtr<IDXGIAdapter> adapter;
     if (FAILED(dxgiDev->GetAdapter(&adapter))) { RLog("buildPresent: GetAdapter failed"); return false; }
@@ -1118,12 +1137,30 @@ bool RenderEngine::renderFrame(const RenderFrameParams& p) {
     // device-removed properly.
     if (p.gatePresent && s_->presentFence && s_->presentFenceIssued &&
         s_->ctx->GetData(s_->presentFence.Get(), nullptr, 0, 0) == S_FALSE) {
+        s_->perfGateSkips++;
         return true;
     }
+    // Perf split (issue #148 diagnostics): time the CPU cost of building the frame (capture +
+    // draw submission) separately from the time blocked inside Present - the latter is where GPU
+    // contention with a game manifests. Two QPC reads per frame; negligible.
+    LARGE_INTEGER pf{}, t0{}, t1{}, t2{};
+    QueryPerformanceFrequency(&pf);
+    QueryPerformanceCounter(&t0);
     s_->render(p);
+    QueryPerformanceCounter(&t1);
     // p.vsync = (cfg.vsync && !cfg.dwmFlush): sync interval 1 locks the present to the refresh;
     // 0 presents immediately and the caller paces via DwmFlush or the timer.
     HRESULT hr = s_->swap->Present(p.vsync ? 1 : 0, 0);
+    QueryPerformanceCounter(&t2);
+    {
+        const double renderMs  = double(t1.QuadPart - t0.QuadPart) * 1000.0 / double(pf.QuadPart);
+        const double presentMs = double(t2.QuadPart - t1.QuadPart) * 1000.0 / double(pf.QuadPart);
+        s_->perfRenderSumMs += renderMs;
+        s_->perfPresentSumMs += presentMs;
+        if (renderMs  > s_->perfRenderMaxMs)  s_->perfRenderMaxMs  = renderMs;
+        if (presentMs > s_->perfPresentMaxMs) s_->perfPresentMaxMs = presentMs;
+        s_->perfFrames++;
+    }
     if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
         s_->deviceLost = true; RLog("present: device lost hr=0x%08lX", (unsigned long)hr);
         return false;

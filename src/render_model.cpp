@@ -30,11 +30,11 @@ void FillRenderParams(RenderFrameParams& p, const MapResult& r, const Config& cf
     p.cursorLocked = false;  // RunTick sets true while zoomed + Inspect mode (draw the crosshair sprite)
 }
 
-RenderModel::RenderModel(int zorderBand, bool hdrTonemap, bool lowGpuPriority)
-    : zorderBand_(zorderBand), hdrTonemap_(hdrTonemap), lowGpuPriority_(lowGpuPriority) {}
+RenderModel::RenderModel(int zorderBand, bool hdrTonemap, int gpuPriority)
+    : zorderBand_(zorderBand), hdrTonemap_(hdrTonemap), gpuPriority_(gpuPriority) {}
 
 bool RenderModel::initialize(const MonitorTarget& m) {
-    return engine_.initialize(m, zorderBand_, hdrTonemap_, lowGpuPriority_);
+    return engine_.initialize(m, zorderBand_, hdrTonemap_, gpuPriority_);
 }
 void RenderModel::shutdown() { engine_.shutdown(); }
 bool RenderModel::ready() const { return engine_.ready(); }

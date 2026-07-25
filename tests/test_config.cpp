@@ -344,3 +344,16 @@ TEST_CASE("game perf keys (issue #148) default and parse with clamps") {
     CHECK(b.lowGpuPriority == 0);
     CHECK(b.gameFpsCap == 0);
 }
+TEST_CASE("gpuPriority tri-state parses, clamps, and folds the legacy alias") {
+    CHECK(ParseConfig("").gpuPriority == 0);                    // default normal
+    CHECK(ParseConfig("gpuPriority=1\n").gpuPriority == 1);
+    CHECK(ParseConfig("gpuPriority=-1\n").gpuPriority == -1);
+    CHECK(ParseConfig("gpuPriority=7\n").gpuPriority == 1);     // clamped to tri-state
+    CHECK(ParseConfig("gpuPriority=-9\n").gpuPriority == -1);
+
+    // EffectiveGpuPriority: explicit gpuPriority wins; legacy lowGpuPriority=1 means low.
+    CHECK(EffectiveGpuPriority(ParseConfig("")) == 0);
+    CHECK(EffectiveGpuPriority(ParseConfig("gpuPriority=1\n")) == 1);
+    CHECK(EffectiveGpuPriority(ParseConfig("lowGpuPriority=1\n")) == -1);
+    CHECK(EffectiveGpuPriority(ParseConfig("gpuPriority=1\nlowGpuPriority=1\n")) == 1);
+}

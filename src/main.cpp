@@ -700,7 +700,7 @@ static void RunTick(TickState& t) {
         // reveal depends on frames reaching the redirection surface).
         bool doPresent = true;
         const bool gamePacing = fsGame && zoomed &&
-                                (t.cfg.lowGpuPriority != 0 || t.cfg.gameFpsCap > 0);
+                                (EffectiveGpuPriority(t.cfg) < 0 || t.cfg.gameFpsCap > 0);
         t.gamePacing = gamePacing;
         if (gamePacing) {
             ex.noVsync = true;
@@ -859,9 +859,17 @@ static void RunTick(TickState& t) {
         if (dt > t.diagMaxDt) t.diagMaxDt = dt;
         if (dt > target * 1.5) t.diagHitches++;
         if (t.diagAccum >= 2.0 && t.diagFrames > 0) {
-            DiagLog("zoom=%.2f frames=%d ~fps=%.0f avgDt=%.2fms maxDt=%.2fms hitches>1.5x=%d",
+            // Render/present CPU split from the engine (render model only): avg/max ms building
+            // the frame vs blocked inside Present - the present column is where GPU contention
+            // with a game shows up (issue #148).
+            double rSum = 0, rMax = 0, pSum = 0, pMax = 0; int pf = 0, skips = 0;
+            if (auto* rm = dynamic_cast<RenderModel*>(&t.model))
+                rm->engine().debugPerf(rSum, rMax, pSum, pMax, pf, skips, /*reset=*/true);
+            DiagLog("zoom=%.2f frames=%d ~fps=%.0f avgDt=%.2fms maxDt=%.2fms hitches>1.5x=%d "
+                    "render(avg=%.2f max=%.2f)ms present(avg=%.2f max=%.2f)ms presented=%d gateSkips=%d",
                     lvl, t.diagFrames, t.diagFrames / t.diagAccum,
-                    t.diagSumDt / t.diagFrames * 1000.0, t.diagMaxDt * 1000.0, t.diagHitches);
+                    t.diagSumDt / t.diagFrames * 1000.0, t.diagMaxDt * 1000.0, t.diagHitches,
+                    pf > 0 ? rSum / pf : 0.0, rMax, pf > 0 ? pSum / pf : 0.0, pMax, pf, skips);
             t.diagAccum = 0.0; t.diagSumDt = 0.0; t.diagMaxDt = 0.0;
             t.diagFrames = 0; t.diagHitches = 0;
         }
@@ -1199,7 +1207,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         g_input.setIgnoreInjectedKeys(true);
     } else {
         model = std::make_unique<RenderModel>(cfg.zorderBand, cfg.hdrTonemap != 0,
-                                              cfg.lowGpuPriority != 0);
+                                              EffectiveGpuPriority(cfg));
     }
     if (!model->initialize(startupMon)) {
         MessageBoxW(nullptr, L"Could not start the renderer (Direct3D 11 / Desktop Duplication "
