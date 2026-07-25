@@ -31,6 +31,7 @@ private:
     std::unique_ptr<CursorSprite> sprite_;
     unsigned long long lastPinAssertMs_ = 0;
     int  keepAliveTick_ = 0;                         // alternates the tx keep-alive (issue #148)
+    bool inputXformWarned_ = false;                  // one-shot warn when MagSetInputTransform fails
     int  lastOffX_ = 0, lastOffY_ = 0, lastTxX_ = 0, lastTxY_ = 0;   // last applied transform
     double lastLevel_ = 0.0;
     unsigned long long lastChangeMs_ = 0;            // when the transform last REALLY changed

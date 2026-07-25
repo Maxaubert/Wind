@@ -1,5 +1,6 @@
 #include "transform_model.h"
 #include "transform.h"   // ComputeMagTransform
+#include "logging.h"
 #include <windows.h>
 #include <magnification.h>
 
@@ -41,6 +42,8 @@ void TransformModel::setActive(bool active) {
         // invisible 1.0005 (sub-pixel across 4K) so the pipeline never parks. Idle cost for the
         // game measured before adopting (see issue notes).
         host_.setTransform(1.0005f, 0, 0, 0, 0, false);
+        RECT full{ 0, 0, mon_.w, mon_.h };
+        host_.setInputTransform(false, full, full);   // input mapping back to identity at 1x
         pin_.hide();
         haveLastClick_ = false;   // re-warp fresh on the next activation
     }
@@ -98,6 +101,23 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         txJitter = keepAliveTick_;
     }
     host_.setTransform((float)applyLevel, m.offX, m.offY, m.txX + txJitter, m.txY, fastPan_);
+    // Input transform (issue #148): teach the input stack the inverse mapping. Win32 mouse input
+    // is proven correct without it (instrumented), but pointer-stack apps (Explorer XAML lists,
+    // Chromium content) hit-test through this - without it they get level/edge-dependent dead
+    // zones. Needs UIAccess; on the dev build the call fails and is logged once.
+    if (changed) {
+        RECT src{ (LONG)(r.srcLeft + 0.5), (LONG)(r.srcTop + 0.5),
+                  (LONG)(r.srcLeft + mon_.w / applyLevel + 0.5),
+                  (LONG)(r.srcTop + mon_.h / applyLevel + 0.5) };
+        RECT dst{ 0, 0, mon_.w, mon_.h };
+        bool ok = host_.setInputTransform(applyLevel > 1.001, src, dst);
+        if (!ok && !inputXformWarned_) {
+            inputXformWarned_ = true;
+            wind::Log(wind::LogLevel::Warn, "transform",
+                      "MagSetInputTransform failed (no UIAccess?) - pointer-stack apps may "
+                      "have hit-test dead zones while zoomed");
+        }
+    }
     // FIELD-MEASURED (issue #148, this Windows build): DWM's fullscreen magnification DOES
     // magnify layered windows. So the sprite lives in DESKTOP coordinates at the lens center
     // (clickDesktop): the transform displays it AT the screen center (T(center) == cursorScreen,

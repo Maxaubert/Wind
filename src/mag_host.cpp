@@ -23,6 +23,11 @@ bool MagHost::setTransform(float zoom, int offX, int offY, int tx, int ty, bool 
     return MagSetFullscreenTransform(zoom, offX, offY) != FALSE;
 }
 
+bool MagHost::setInputTransform(bool active, const RECT& src, const RECT& dst) {
+    if (!initialized_) return false;
+    return MagSetInputTransform(active ? TRUE : FALSE, &src, &dst) != FALSE;
+}
+
 void MagHost::shutdown() {
     if (!initialized_) return;
     MagSetFullscreenTransform(1.0f, 0, 0);   // public reset restores shared state
