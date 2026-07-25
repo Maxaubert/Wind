@@ -37,7 +37,6 @@ private:
     int  lastOffX_ = 0, lastOffY_ = 0, lastTxX_ = 0, lastTxY_ = 0;   // last applied transform
     double lastLevel_ = 0.0;
     unsigned long long lastChangeMs_ = 0;            // when the transform last REALLY changed
-    bool haveLastClick_ = false;                     // dedup the OS-cursor recenter (SetCursorPos)
-    int  lastClickX_ = 0, lastClickY_ = 0;
+    int  lastSpriteX_ = INT_MIN, lastSpriteY_ = INT_MIN;   // dedup the game-session sprite move
 };
 }

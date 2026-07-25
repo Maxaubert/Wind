@@ -31,11 +31,32 @@ static int iround(double v) {
     return (lower & 1) ? lower + 1 : lower;
 }
 
-MagTransform ComputeMagTransform(double srcLeft, double srcTop, double level) {
+MagTransform ComputeMagTransform(double srcLeft, double srcTop, double level,
+                                 int screenW, int screenH) {
     if (level < 1.0) level = 1.0;
-    return MagTransform{
-        iround(srcLeft), iround(srcTop),
-        iround(-srcLeft * level), iround(-srcTop * level),
-    };
+    int offX = iround(srcLeft), offY = iround(srcTop);
+    int txX = iround(-srcLeft * level), txY = iround(-srcTop * level);
+    // Bound the source rect STRICTLY INSIDE the desktop (issue #148 trigger 2, see the header
+    // note) with a 2px safety margin. The margin matters: at the EXACT level cap (e.g. 12.0 on
+    // 3840: maxX = 3520 whole), a bare floor still lets the source rect END exactly at the
+    // texture edge, and the driver's scaler reading its filter neighborhood there walks off the
+    // texture - field-confirmed TDR that hit ONLY at max zoom in the right/bottom corner (the
+    // same corner passed at fractional mid-ramp levels, which the floor alone keeps inside).
+    // Public offsets: off + screenW/level <= screenW - margin.
+    // Private translations: the same bound in level-space, margin scaled by level.
+    const double kMargin = 2.0;
+    const double maxX = screenW - screenW / level - kMargin;
+    const double maxY = screenH - screenH / level - kMargin;
+    if (offX > (int)maxX) offX = (int)maxX;
+    if (offY > (int)maxY) offY = (int)maxY;
+    if (offX < 0) offX = 0;
+    if (offY < 0) offY = 0;
+    const double minTx = -((double)screenW * (level - 1.0)) + kMargin * level;
+    const double minTy = -((double)screenH * (level - 1.0)) + kMargin * level;
+    if (txX < (int)minTx) txX = (int)minTx;
+    if (txY < (int)minTy) txY = (int)minTy;
+    if (txX > 0) txX = 0;
+    if (txY > 0) txY = 0;
+    return MagTransform{ offX, offY, txX, txY };
 }
 }

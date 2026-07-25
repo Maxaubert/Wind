@@ -26,10 +26,10 @@ bool TransformModel::initialize(const MonitorTarget& monitor) {
 
 void TransformModel::hideSystemCursor(bool hide) {
     if (!useSprite_ || !blanker_) return;
-    // The blanker only blanks STANDARD cursors; a game's app-custom cursor stayed visible and
-    // roamed at its raw desktop position (issue #148 field report). MagShowSystemCursor hides
-    // the cursor plane wholesale - same call the render model relies on - so the sprite is the
-    // only visible cursor in every app. Both are applied; both are undone.
+    // FOLLOW design (issue #148): during NORMAL zoom the real cursor stays visible (DWM shows it
+    // magnified) and main.cpp never calls this. It is called only for INSPECT sessions, where the
+    // frozen real cursor must vanish under the crosshair: blanker for standard cursors,
+    // MagShowSystemCursor for the plane wholesale (app-custom cursors). Both are undone on exit.
     if (hide) { blanker_->blank(); MagShowSystemCursor(FALSE); if (sprite_) sprite_->show(); }
     else      { if (sprite_) sprite_->hide(); MagShowSystemCursor(TRUE); blanker_->restore(); }
 }
@@ -45,7 +45,6 @@ void TransformModel::setActive(bool active) {
         RECT full{ 0, 0, mon_.w, mon_.h };
         host_.setInputTransform(false, full, full);   // input mapping back to identity at 1x
         pin_.hide();
-        haveLastClick_ = false;   // re-warp fresh on the next activation
     }
 }
 
@@ -97,7 +96,11 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         srcL = o.x; srcT = o.y;
     }
     const bool ramping = applyLevel != level || (applyLevel != lastLevel_ && lastLevel_ > 0.0);
-    MagTransform m = ComputeMagTransform(srcL, srcT, applyLevel);
+    MagTransform m = ComputeMagTransform(srcL, srcT, applyLevel, mon_.w, mon_.h);
+    // pauseWrites (issue #148): a click's injected cursor move is in flight - a transform write
+    // racing a cursor-position update is the proven TDR, so those ticks write NOTHING. State is
+    // untouched; the next unpaused tick lands the same values.
+    if (!ex.pauseWrites) {
     const bool changed = m.offX != lastOffX_ || m.offY != lastOffY_ ||
                          m.txX != lastTxX_ || m.txY != lastTxY_ || applyLevel != lastLevel_;
     if (changed) {
@@ -137,6 +140,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         host_.setInputTransform(false, full, full);
     }
     if (changed) lastInputXformOn_ = cfg.magInputTransform != 0;
+    }   // !ex.pauseWrites
     // FIELD-MEASURED (issue #148, this Windows build): DWM's fullscreen magnification DOES
     // magnify layered windows. So the sprite lives in DESKTOP coordinates at the lens center
     // (clickDesktop): the transform displays it AT the screen center (T(center) == cursorScreen,
@@ -149,12 +153,18 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // tracking consistent (RunTick assumes the cursor was moved here each active tick). Deduped so an
     // idle tick injects no synthetic mouse move. Inspect freeze pins the point via ex.clickOverride;
     // otherwise clickDesktop is monitor-local, so add the monitor origin for desktop px.
-    int cx = ex.clickOverride ? ex.clickDesktopX : (r.clickDesktopX + mon_.x);
-    int cy = ex.clickOverride ? ex.clickDesktopY : (r.clickDesktopY + mon_.y);
-    if (!haveLastClick_ || cx != lastClickX_ || cy != lastClickY_) {
-        SetCursorPos(cx, cy);
-        lastClickX_ = cx; lastClickY_ = cy; haveLastClick_ = true;
-    }
+    // FOLLOW design (issue #148 TDR root cause): the transform model NEVER places the OS cursor.
+    // The per-tick SetCursorPos weld here was the driver killer: ANY programmatic ABSOLUTE cursor
+    // placement (SetCursorPos or SendInput-absolute) while DWM fullscreen magnification is active
+    // over a fullscreen game TDRs the NVIDIA driver within seconds - at any rate (20Hz died),
+    // even with the transform parked static. Repro-proven with an 88-line UIAccess tool (zoom+pan
+    // writes alone: 9.7k writes clean; add the weld: dead in 3.5s; lens-follows-read-cursor with
+    // hand-equivalent relative input: clean). Native Magnifier never places the cursor - it
+    // FOLLOWS it; so do we now: the real cursor stays visible (DWM displays it magnified, at
+    // T(cursor) = screen center by the mapper's centered geometry), RunTick feeds the mapper the
+    // READ cursor deltas 1:1, and hover + clicks are correct by construction (the displayed
+    // cursor always sits over its own content). DO NOT reintroduce any SetCursorPos /
+    // absolute-injection on this path, however tempting for alignment - it is the crash.
 
     if (useSprite_ && sprite_ && ex.cursorLocked && ex.drawCursor) {
         // Inspect mode: the real cursor is frozen at the (overridden) click point, but the thing the
@@ -168,25 +178,25 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         sprite_->showCrosshair();
         sprite_->moveTo(r.clickDesktopX + mon_.x, r.clickDesktopY + mon_.y);
         sprite_->keepOnTop();
-    } else if (useSprite_ && sprite_ && ex.drawCursor) {
+    } else if (useSprite_ && sprite_ && ex.gameFreeze && ex.drawCursor) {
+        // GAME session (frozen cursor): the sprite is the aim point at the lens center. Desktop
+        // coords; the transform displays it at the screen center. Deduped - the sprite parks at
+        // the center except during edge slides, so most ticks issue no window move at all.
         CursorSprite::ShapeStatus st = sprite_->refreshShape();
         if (st == CursorSprite::ShapeStatus::Rendered) {
-            // Desktop coords at the lens center: the (magnifying) transform displays the sprite
-            // at the screen center - the exact spot where the aimed content and the click land.
-            sprite_->moveTo(cx, cy);
+            int sx = r.clickDesktopX + mon_.x, sy = r.clickDesktopY + mon_.y;
+            if (sx != lastSpriteX_ || sy != lastSpriteY_) {
+                sprite_->moveTo(sx, sy);
+                lastSpriteX_ = sx; lastSpriteY_ = sy;
+            }
             sprite_->show();
-            // Composited outside the magnification, so it must fight for real z-order: reclaim the top
-            // of our band when a popup (tray/context menu, flyout) has been raised over us. Throttled.
             sprite_->keepOnTop();
         } else {
-            sprite_->hide();   // Hidden/Unsupported: show the real (or app-custom) cursor instead
+            sprite_->hide();   // Hidden/Unsupported shape: nothing sensible to draw
         }
     } else if (useSprite_ && sprite_) {
-        // cursorVisibility=never, or the hide-cursor hotkey. The block above is what MOVES the sprite,
-        // so skipping it is not enough: hideSystemCursor(true) already showed the sprite at activation
-        // and it would freeze on screen, visible and no longer tracking. Hide it explicitly. hide() is
-        // idempotent, and the real cursor stays blanked (CursorBlanker is independent of this flag),
-        // so nothing unmagnified reappears; zoom-out restores it via hideSystemCursor(false).
+        // Desktop FOLLOW: the real cursor is visible and magnified by DWM (native Magnifier's own
+        // look) - the sprite is only for the Inspect crosshair and the game-session aim point.
         sprite_->hide();
     }
 
