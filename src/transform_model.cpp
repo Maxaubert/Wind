@@ -105,7 +105,9 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // is proven correct without it (instrumented), but pointer-stack apps (Explorer XAML lists,
     // Chromium content) hit-test through this - without it they get level/edge-dependent dead
     // zones. Needs UIAccess; on the dev build the call fails and is logged once.
-    if (changed) {
+    // A/B knob (hot): magInputTransform=1 publishes the input transform; 0 (default) leaves the
+    // OS default. Unvalidated for mouse (docs scope it to pen/touch) - measured live by the user.
+    if (changed && cfg.magInputTransform != 0) {
         RECT src{ (LONG)(r.srcLeft + 0.5), (LONG)(r.srcTop + 0.5),
                   (LONG)(r.srcLeft + mon_.w / applyLevel + 0.5),
                   (LONG)(r.srcTop + mon_.h / applyLevel + 0.5) };
@@ -114,10 +116,13 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         if (!ok && !inputXformWarned_) {
             inputXformWarned_ = true;
             wind::Log(wind::LogLevel::Warn, "transform",
-                      "MagSetInputTransform failed (no UIAccess?) - pointer-stack apps may "
-                      "have hit-test dead zones while zoomed");
+                      "MagSetInputTransform failed (no UIAccess?)");
         }
+    } else if (changed && lastInputXformOn_) {
+        RECT full{ 0, 0, mon_.w, mon_.h };
+        host_.setInputTransform(false, full, full);
     }
+    if (changed) lastInputXformOn_ = cfg.magInputTransform != 0;
     // FIELD-MEASURED (issue #148, this Windows build): DWM's fullscreen magnification DOES
     // magnify layered windows. So the sprite lives in DESKTOP coordinates at the lens center
     // (clickDesktop): the transform displays it AT the screen center (T(center) == cursorScreen,

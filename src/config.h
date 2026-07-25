@@ -81,6 +81,8 @@ struct Config {
                           //     do not stutter while panning, at a capped frame rate while zoomed.
     int cursorSprite = 1; // 1 = hide the OS cursor and draw a scene-locked sprite welded to the
                           //     transform (fixes cursor/click divergence near screen edges).
+    int magInputTransform = 0; // 1 = publish MagSetInputTransform while zoomed (experiment;
+                          //     documented for pen/touch only - A/B knob, hot-reloadable).
     // Magnify-model-only: Windows Magnifier zoom increment in percent POINTS per wheel notch
     // (written to the ScreenMagnifier registry; the user's original value is snapshot-restored
     // on exit). Lower = smoother and slower zoom. Clamped 5..400. Live-applies (no restart).

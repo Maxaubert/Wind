@@ -118,6 +118,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "fastPan")            c.fastPan = std::stoi(val);
             else if (key == "smoothPan")          c.smoothPan = std::stoi(val);
             else if (key == "cursorSprite")       c.cursorSprite = std::stoi(val);
+            else if (key == "magInputTransform")  c.magInputTransform = std::stoi(val);
             else if (key == "bilinear")           c.bilinear = std::stoi(val);
             else if (key == "sharpness")          c.sharpness = std::stod(val);
             else if (key == "zorderBand")         c.zorderBand = std::stoi(val);
