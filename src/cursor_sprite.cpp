@@ -346,9 +346,11 @@ bool CursorSprite::displaced() const {
 // RenderEngine gates its re-assert). moveTo keeps SWP_NOZORDER so the common idle move stays cheap.
 void CursorSprite::keepOnTop() {
     if (!hwnd_ || !visible_) return;
-    unsigned long long nowMs = GetTickCount64();
-    if (displaced() || nowMs - lastTopmostMs_ >= 1000) {
-        lastTopmostMs_ = nowMs;
+    // Displaced-check only - NO periodic backstop: an unconditional SetWindowPos(TOPMOST) is a
+    // synchronous DWM z-order transaction that hitches a fullscreen game (issue #148; same fix
+    // as the render overlay's calm-topmost). The per-tick displaced() walk reclaims immediately.
+    if (displaced()) {
+        lastTopmostMs_ = GetTickCount64();
         SetWindowPos(hwnd_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
 }

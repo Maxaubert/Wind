@@ -69,7 +69,10 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // level==lastLevel_ (no ramp) and the 1x reset apply immediately.
     rampTick_++;
     double applyLevel = level;
-    if (lastLevel_ > 0.0 && level != lastLevel_ && level > 1.0 && (rampTick_ % 3) != 0)
+    // Adaptive divisor: DWM's re-scale cost grows with level, so the ramping level updates
+    // per-tick near 1x and only every ~5th tick near 16x (still a visually smooth ramp).
+    const int rampDiv = 1 + (int)(lastLevel_ / 4.0);
+    if (lastLevel_ > 0.0 && level != lastLevel_ && level > 1.0 && (rampTick_ % rampDiv) != 0)
         applyLevel = lastLevel_;
     // The mapper's srcLeft/srcTop were computed for `level`; when holding the previous level on a
     // ramp tick, recompute the source for the APPLIED level or the view oscillates between two
