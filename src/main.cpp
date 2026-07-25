@@ -164,7 +164,9 @@ static VirtualBounds QueryVirtualBounds() {
 // loop that owns the thread until it closes; without a timer-driven tick the lens froze for
 // the duration. The timer (set around the menu) dispatches WM_TIMER into WndProc, which ticks.
 struct TickState {
-    IMagnifierModel& model;
+    IMagnifierModel* model;                    // CURRENT engine (hybrid swaps at zoom-in)
+    IMagnifierModel* mRender = nullptr;        // hybrid: the two engines (null when not hybrid)
+    IMagnifierModel* mTransform = nullptr;
     MonitorTarget    mon;       // current target monitor (origin + size + device name)
     Config         cfg;
     ZoomController zoom;
@@ -227,7 +229,7 @@ struct TickState {
     // Frame-pacing diagnostics (diagnostics=1): a 2 s window of loop-interval stats.
     double diagAccum = 0.0, diagSumDt = 0.0, diagMaxDt = 0.0;
     int    diagFrames = 0, diagHitches = 0;
-    TickState(IMagnifierModel& mdl, const MonitorTarget& m, const Config& c)
+    TickState(IMagnifierModel* mdl, const MonitorTarget& m, const Config& c)
         : model(mdl), mon(m), cfg(c),
           zoom(1.0, c.maxLevel),
           mapper(m.w, m.h, c.cursorSmoothing) {}
@@ -427,7 +429,7 @@ static void RunTick(TickState& t) {
     // block below freezes the real cursor (1px ClipCursor) and roams a raw-driven look point.
     bool lockDown = keyDown(t.cfg.cursorLockVk);
     if (lockDown && !t.lockKeyWasDown) {
-        if (t.model.supportsInspect()) {
+        if (t.model->supportsInspect()) {
             // Snapshot cursor visibility at the toggle edge, BEFORE this tick's active block hides it:
             // at 1x the only thing that can have hidden the cursor is the foreground app, so a
             // not-showing cursor is the mouselook-gameplay tell for game-inspect (issue #144).
@@ -447,9 +449,9 @@ static void RunTick(TickState& t) {
     // held direction and bypass the ENTIRE level pipeline below - the ZoomController stays at 1x,
     // the overlay never activates, quick zoom / recenter / mapper never run. (The side-button
     // diagnostics block at the bottom is skipped too; the magnify category logs direction edges.)
-    if (t.model.selfDrivenZoom()) {
+    if (t.model->selfDrivenZoom()) {
         int rdx, rdy; g_input.drainRaw(rdx, rdy);            // keep the raw accumulator drained
-        t.model.nativeZoomTick((inHeld ? 1 : 0) - (outHeld ? 1 : 0), t.cfg);
+        t.model->nativeZoomTick((inHeld ? 1 : 0) - (outHeld ? 1 : 0), t.cfg);
         t.prevInHeld = inHeld; t.prevOutHeld = outHeld;
         t.prevLvl = 1.0; t.prevActive = false; t.prevInspect = false;
         return;
@@ -482,6 +484,21 @@ static void RunTick(TickState& t) {
 
     if (active) {
         bool enterActive  = !t.prevActive;            // idle -> active (overlay just turned on)
+        if (enterActive && t.mTransform) {
+            // Hybrid engine pick, per zoom-in session: fullscreen app foreground on the primary
+            // monitor -> transform path (compositor-internal, game-smooth); else render model.
+            // Only ever swapped here, at the idle->active edge, so every activation's teardown
+            // calls route to the same engine that activated.
+            const bool fs = ForegroundCoversMonitor(t.mon);
+            // Covering alone also matches MAXIMIZED desktop apps (documented trap); a GAME is a
+            // BORDERLESS cover (WS_POPUP fullscreen, no caption) - F11/fullscreen video too,
+            // which also prefers the transform path (DRM-safe, compositor-smooth).
+            HWND fgw = GetForegroundWindow();
+            const bool borderless = fgw && !(GetWindowLongPtrW(fgw, GWL_STYLE) & WS_CAPTION);
+            const bool primaryHere = t.mon.x == 0 && t.mon.y == 0;
+            IMagnifierModel* pick = (fs && borderless && primaryHere) ? t.mTransform : t.mRender;
+            if (pick && pick != t.model) t.model = pick;
+        }
         bool inspectEnter = inspect && !t.prevInspect;
         if (enterActive) {
             t.outlineIdleSec = 0.0;   // each activation starts with the outline fully shown
@@ -490,7 +507,7 @@ static void RunTick(TickState& t) {
             // the current monitor. The overlay is still at alpha 0 here, so a move never flashes.
             if (zoomed && t.cfg.multiMonitor) {
                 MonitorTarget nt = MonitorUnderCursor();
-                if (!SameMonitor(nt, t.mon) && t.model.retarget(nt)) {
+                if (!SameMonitor(nt, t.mon) && t.model->retarget(nt)) {
                     t.mon = nt;
                     t.mapper = CursorMapper(nt.w, nt.h, t.cfg.cursorSmoothing);
                     int nhz = DetectRefreshHz(nt.device);   // pace off the new monitor's refresh (#74)
@@ -502,8 +519,8 @@ static void RunTick(TickState& t) {
             t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y);   // virtual -> local monitor coords
             t.lastSetVirtual = pt;        // baseline for the OS-cursor delta (first delta = 0)
             t.detector.reset();           // start free
-            t.model.hideSystemCursor(true);
-            t.model.onActivate();       // grab a live frame, not a stale cached one
+            t.model->hideSystemCursor(true);
+            t.model->onActivate();       // grab a live frame, not a stale cached one
         }
         if (inspectEnter) {
             // Freeze the real cursor where it is; the look point (mapper center) starts there.
@@ -519,8 +536,8 @@ static void RunTick(TickState& t) {
             t.lastSetVirtual = pt;
             RECT fz{ pt.x, pt.y, pt.x + 1, pt.y + 1 };
             ClipCursor(&fz);
-            t.model.hideSystemCursor(true);   // hide the real cursor; we draw the crosshair
-            t.model.onActivate();
+            t.model->hideSystemCursor(true);   // hide the real cursor; we draw the crosshair
+            t.model->onActivate();
             // Game-inspect (issue #144): if a mouselook game holds the mouse, the freeze alone is
             // not enough - its raw-input camera still receives every mickey. Steal foreground to
             // the invisible helper so the game stops getting input. Deferred via
@@ -743,12 +760,12 @@ static void RunTick(TickState& t) {
             t.presentAccum = 0.0;
         }
         if (doPresent) {
-            t.model.present(r, lvl, t.cfg, t.mon, ex);      // render+present (never blocks the ramp)
+            t.model->present(r, lvl, t.cfg, t.mon, ex);      // render+present (never blocks the ramp)
         } else if (capVsync) {
             // Reduced-push skip tick: block to the next vblank so the loop cadence stays
             // vblank-locked (Present paces the present ticks, this paces the skips). Fallback
             // sleep if the output can't wait (device transition) so we never spin.
-            if (auto* rm = dynamic_cast<RenderModel*>(&t.model)) {
+            if (auto* rm = dynamic_cast<RenderModel*>(t.model)) {
                 if (!rm->waitVBlank()) Sleep(3);
             }
         }
@@ -757,7 +774,7 @@ static void RunTick(TickState& t) {
         // frame (the alt-tab "previous window"). capture() also drained to the latest frame.
         // Reveal/prime is render-specific (needs ForegroundCoversMonitor + capture priming); guard it
         // behind the RenderModel downcast. A non-render model just reveals immediately on activation.
-        if (auto* rm = dynamic_cast<RenderModel*>(&t.model)) {
+        if (auto* rm = dynamic_cast<RenderModel*>(t.model)) {
             if (enterActive) {
                 // EVERY reveal is gated on the session's first Present having EXECUTED on the GPU
                 // (revealFrameDone: an event query fenced right after Present). The blt into the
@@ -794,7 +811,7 @@ static void RunTick(TickState& t) {
                 }
             }
         } else if (enterActive) {
-            t.model.setActive(true);   // transform: reveal immediately, no capture priming
+            t.model->setActive(true);   // transform: reveal immediately, no capture priming
         }
         // Execute the deferred game-inspect steal now that the reveal logic has read the true
         // foreground, and RE-assert it if the game pulled foreground back mid-inspect (some
@@ -822,8 +839,8 @@ static void RunTick(TickState& t) {
             t.lastSetVirtual.y = r.clickDesktopY + t.mon.y;
         }
     } else if (t.prevActive) {                        // active -> idle: tear the overlay down
-        t.model.setActive(false);
-        t.model.hideSystemCursor(false);
+        t.model->setActive(false);
+        t.model->hideSystemCursor(false);
         t.outlineZoneSec = 0.0;                       // zoom-out clears the low-zoom dwell (no banked partial)
         t.gamePacing = false;                         // idle: normal timer pacing
         t.pushPhase = 0;
@@ -894,7 +911,7 @@ static void RunTick(TickState& t) {
             // the frame vs blocked inside Present - the present column is where GPU contention
             // with a game shows up (issue #148).
             double rSum = 0, rMax = 0, pSum = 0, pMax = 0; int pf = 0, skips = 0;
-            if (auto* rm = dynamic_cast<RenderModel*>(&t.model))
+            if (auto* rm = dynamic_cast<RenderModel*>(t.model))
                 rm->engine().debugPerf(rSum, rMax, pSum, pMax, pf, skips, /*reset=*/true);
             DiagLog("zoom=%.2f frames=%d ~fps=%.0f avgDt=%.2fms maxDt=%.2fms hitches>1.5x=%d "
                     "render(avg=%.2f max=%.2f)ms present(avg=%.2f max=%.2f)ms presented=%d gateSkips=%d",
@@ -1230,7 +1247,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     // --- Magnifier model (render: DXGI Desktop Duplication + D3D11 overlay; magnify: drive the
     // native Windows Magnifier via injected Win+Plus/Minus, the DRM-safe fallback) ---
-    std::unique_ptr<IMagnifierModel> model;
+    std::unique_ptr<IMagnifierModel> model;       // primary engine (also the hybrid's render half)
+    std::unique_ptr<IMagnifierModel> model2;      // hybrid only: the transform half
     if (cfg.model == "magnify") {
         model = std::make_unique<MagnifyModel>();
         // Our injected chords must never be swallowed/tracked by our own keyboard hook
@@ -1245,6 +1263,14 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     } else {
         model = std::make_unique<RenderModel>(cfg.zorderBand, cfg.hdrTonemap != 0,
                                               EffectiveGpuPriority(cfg));
+        if (cfg.model == "hybrid") {
+            // Hybrid (issue #148): render model on the desktop (centered cursor, unlimited
+            // levels), transform model whenever a fullscreen app is foreground at zoom-in
+            // (compositor-internal - the only path that stays smooth over a heavy game). The
+            // engine is picked per zoom-in session in RunTick; both stay initialized.
+            model2 = std::make_unique<TransformModel>(cfg.fastPan != 0, cfg.smoothPan != 0,
+                                                      cfg.cursorSprite != 0, cfg.zorderBand);
+        }
     }
     if (!model->initialize(startupMon)) {
         MessageBoxW(nullptr, L"Could not start the renderer (Direct3D 11 / Desktop Duplication "
@@ -1252,10 +1278,16 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         g_input.stop();
         return 1;
     }
+    if (model2 && !model2->initialize(PrimaryMonitor())) {
+        wind::Log(wind::LogLevel::Warn, "startup", "hybrid: transform half failed to init; render-only");
+        model2.reset();
+    }
 
     Tray::Add(hwnd, hInst);
 
-    TickState ts(*model, startupMon, cfg);
+    TickState ts(model.get(), startupMon, cfg);
+    ts.mRender = model.get();
+    ts.mTransform = model2.get();
     ts.hwnd = hwnd;                       // so RunTick can re-register the hide-cursor hotkey
     g_tick = &ts;   // so the WM_TIMER tick (during the tray menu's modal loop) can run
 
@@ -1383,7 +1415,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // DwmFlush the way the render model does. It must always be timer-paced (like the idle/1x path),
     // or the zoomed loop spins flat out and floods MagSetFullscreenTransform, backing up DWM's
     // desktop-transform queue so the view lags ~1-2s behind input. Cache the model kind once.
-    const bool renderModelActive = dynamic_cast<RenderModel*>(model.get()) != nullptr;
+    // hybrid swaps engines per zoom-in: current-engine check is per-iteration in the loop
     while (running) {
         MSG msg;
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
@@ -1400,7 +1432,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         // D3D device was removed; rebuild it on a backoff so we don't spin (the driver may take a
         // moment to return). Crucially, un-hide the OS cursor first so the user is never left without
         // a pointer while we are unable to draw the magnified one. Skip the normal tick this iteration.
-        if (auto* rm = dynamic_cast<RenderModel*>(model.get()); rm && rm->deviceLost()) {
+        if (auto* rm = dynamic_cast<RenderModel*>(ts.mRender); rm && rm->deviceLost()) {
             rm->hideSystemCursor(false);   // restore the real cursor while we can't render
             // Inspect's 1px freeze clip must not survive a device-lost: release it and clear the toggle so
             // the post-recovery tick can't re-clip the cursor to the stale frozen pixel (honors the
@@ -1425,6 +1457,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         //  - else: Present(0,0) doesn't block, so the timer paces at the detected refresh rate.
         // Idle at 1x uses the timer.
         bool zoomed = ts.prevLvl > 1.0;
+        const bool renderModelActive = dynamic_cast<RenderModel*>(ts.model) != nullptr;
         // dwmFlush=1 -> present immediately then DwmFlush (align 1:1 with the compositor, targets the
         // blt-model microstutter); else vsync=1 -> Present(1,0) blocks; else the timer paces.
         // The render model keeps its configurable self-pacing (blocking Present / DwmFlush). The
