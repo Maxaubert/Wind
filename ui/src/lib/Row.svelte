@@ -37,7 +37,7 @@
         <input type="range" {disabled} min={row.min} max={row.max} step={row.step} value={value} on:input={e => onChange(e.target.value)} />
         <span class="val">{value}</span>
       {:else if row.type === 'select'}
-        <CustomSelect {value} options={row.options} {disabled} onChange={onChange} />
+        <CustomSelect {value} options={row.options} labels={row.optionLabels} {disabled} onChange={onChange} />
       {:else if row.type === 'keybind'}
         <KeybindCapture {row} {values} onChange={live} {disabled} />
       {:else if row.type === 'button'}

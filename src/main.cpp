@@ -642,6 +642,33 @@ static void RunTick(TickState& t) {
         // our own present rate (gameFpsCap). Two cheap user32 reads per tick; also reused by the
         // enterActive reveal gating below (which needed the same answer anyway).
         const bool fsGame = ForegroundCoversMonitor(t.mon);
+        // Instant hybrid switch (hybridSwitch=1): re-pick the engine WHILE ZOOMED when the
+        // foreground changes, handing over mid-session. The controller and mapper are untouched,
+        // so the zoom level and lens position carry across the swap (render 8x -> tab into a
+        // game -> transform 8x). Inspect sessions are never switched under.
+        if (t.mTransform && t.cfg.hybridSwitch != 0 && !enterActive && !inspect) {
+            HWND fgw2 = GetForegroundWindow();
+            const bool borderless2 = fgw2 && !(GetWindowLongPtrW(fgw2, GWL_STYLE) & WS_CAPTION);
+            const bool primary2 = t.mon.x == 0 && t.mon.y == 0;
+            IMagnifierModel* want = (fsGame && borderless2 && primary2) ? t.mTransform : t.mRender;
+            if (want && want != t.model) {
+                t.model->setActive(false);
+                t.model->hideSystemCursor(false);
+                t.model = want;
+                t.model->hideSystemCursor(true);
+                t.model->onActivate();
+                if (auto* rm = dynamic_cast<RenderModel*>(t.model)) {
+                    t.revealNeedsComposite = ForegroundCoversMonitor(t.mon);
+                    if (t.revealNeedsComposite) rm->primeReveal();
+                    t.revealPending = (t.hz > 0 ? t.hz : 60) / 4;
+                    if (t.revealPending < 2) t.revealPending = 2;
+                } else {
+                    t.model->setActive(true);   // transform reveals instantly
+                }
+                wind::Log(wind::LogLevel::Info, "hybrid", "instant switch -> %s (level preserved)",
+                          dynamic_cast<RenderModel*>(t.model) ? "render" : "transform");
+            }
+        }
         // Per-tick render-only overrides go through PresentExtras; the model's present() runs
         // FillRenderParams and applies these on top. ex.outline seeds with the same base value
         // FillRenderParams would compute, so the dwell/idle logic below reads an identical start.
