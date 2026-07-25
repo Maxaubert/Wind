@@ -54,8 +54,9 @@ TEST_CASE("FlipModel maps an unknown value to magnify") {
     CHECK(FlipModel("bogus") == "magnify");
     CHECK(FlipModel("") == "magnify");
 }
-TEST_CASE("transform model caps maxLevel at 16 (DWM high-zoom safety)") {
-    CHECK(ParseConfig("model=transform\nmaxLevel=20\n").maxLevel == doctest::Approx(16.0));
+TEST_CASE("transform/hybrid cap maxLevel at 12 (GPU TDR safety, field-confirmed)") {
+    CHECK(ParseConfig("model=transform\nmaxLevel=20\n").maxLevel == doctest::Approx(12.0));
+    CHECK(ParseConfig("model=hybrid\nmaxLevel=16\n").maxLevel == doctest::Approx(12.0));
     CHECK(ParseConfig("model=transform\nmaxLevel=8\n").maxLevel == doctest::Approx(8.0));
     CHECK(ParseConfig("model=render\nmaxLevel=20\n").maxLevel == doctest::Approx(20.0));  // render unaffected
 }

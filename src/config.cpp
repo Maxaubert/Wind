@@ -170,10 +170,11 @@ Config ParseConfig(const std::string& text) {
     // zoom that stays smooth over heavy games); anything unknown falls back to render.
     if (c.model != "render" && c.model != "magnify" && c.model != "transform" &&
         c.model != "hybrid") c.model = "render";
-    // Transform-model safety: DWM magnification above ~16x can stress the compositor/driver hard
-    // (historically: GPU TDRs at high zoom over transparent content). Native Magnifier caps at
-    // 16x too. Applies to transform and to hybrid (whose game sessions run the transform path).
-    if ((c.model == "transform" || c.model == "hybrid") && c.maxLevel > 16.0) c.maxLevel = 16.0;
+    // Transform-model safety: DWM magnification cost grows steeply with level; above ~12x a
+    // re-scale colliding with a heavy game frame can exceed the 2s TDR watchdog and reset the
+    // GPU driver (field-confirmed 2026-07-25: nvlddmkm 153 events at ~14-16x in-game; 12x
+    // measured clean - locked 144Hz pan, zero hitches). Applies to transform and hybrid.
+    if ((c.model == "transform" || c.model == "hybrid") && c.maxLevel > 12.0) c.maxLevel = 12.0;
     if (c.magnifyStep < 5)   c.magnifyStep = 5;     // Windows Settings' own range is 5..400
     if (c.magnifyStep > 400) c.magnifyStep = 400;
     // Reject keybinds to keys Wind must never swallow (see IsForbiddenBindVk). A bound key is

@@ -37,7 +37,7 @@ path that stays smooth over a heavy game (native-Magnifier parity measured); cen
 sprite in DESKTOP coords at the lens center (DWM magnifies layered windows on this build);
 continuous per-tick level (big discrete jumps are what cost ~30-50ms game frames - do NOT
 re-quantize ramps), tx keep-alive 1.5s after changes (value-static = DWM parks, action-start
-spike), launch warm-up 1.001, rest at 1.0005, maxLevel capped 16 (TDR territory above; desktop
+spike), launch warm-up 1.001, rest at 1.0005, maxLevel capped 12 (TDR territory above - field-confirmed driver resets at ~14-16x in-game; desktop
 cliff ~4x per-window texture limits - why hybrid keeps render on desktop). Transform desktop
 hover accuracy is an OPEN issue (parked; hybrid avoids it). `swapModelVk` is fully retired: the ini key is IGNORED (field stays 0; hook never binds it; the RunTick swap edge is dead code). `model=render` (default): `render_engine` = own DXGI Desktop
 Duplication capture + D3D11: magnifies a sub-pixel float source rect to a click-through,
