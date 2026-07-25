@@ -25,7 +25,8 @@ bool MagHost::setTransform(float zoom, int offX, int offY, int tx, int ty, bool 
 
 bool MagHost::setInputTransform(bool active, const RECT& src, const RECT& dst) {
     if (!initialized_) return false;
-    return MagSetInputTransform(active ? TRUE : FALSE, &src, &dst) != FALSE;
+    RECT s = src, d = dst;   // API takes non-const LPRECT
+    return MagSetInputTransform(active ? TRUE : FALSE, &s, &d) != FALSE;
 }
 
 void MagHost::shutdown() {
