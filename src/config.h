@@ -131,8 +131,10 @@ struct Config {
     int    gameCrop = 1;
     // >0 = cap Wind's own render+present rate (fps) while zoomed over a fullscreen game; input
     // sampling and panning still run at full tick rate, only capture/draw/present are skipped, so
-    // the magnifier trades its own fluidity for game headroom. 0 (default) = off. Clamped 0..240.
-    // Hot-reloadable.
+    // the magnifier trades its own fluidity for game headroom. NOTE: engaging it (like
+    // lowGpuPriority) switches the zoomed loop off the vsync-locked present onto timer pacing,
+    // which has a slightly less even present cadence - that's inherent to decoupling presents
+    // from ticks. 0 (default) = off. Clamped 0..240. Hot-reloadable.
     int    gameFpsCap = 0;
     // First-launch onboarding: 0 = not yet onboarded (also true of a freshly created ini), so the
     // core spawns WindConfig.exe --onboard once; the onboarding flow sets this to 1 on completion.

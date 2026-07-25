@@ -684,19 +684,23 @@ static void RunTick(TickState& t) {
             ex.cursorLocked = true;        // draw the crosshair at the look point (cursorScreen)
             if (!zoomed) ex.outline = false;   // no lens outline on the 1:1 view at 1x
         }
-        // Game pacing (issue #148): while zoomed over a fullscreen game, the tick loop must never
-        // ride on a BLOCKING present - a saturated GPU can starve our present for minutes (measured
-        // with lowGpuPriority=1, but plain saturation can stall it too), and a wedged Present on
-        // this thread freezes input, teardown, and the cursor restore. So over a game: the main
-        // loop's timer paces (t.gamePacing), presents are Present(0,0) (ex.noVsync), and
-        // renderFrame skips the whole frame while the previous present hasn't executed on the GPU
-        // (ex.gatePresent). Skipped ticks still sample input and advance the mapper, so panning
-        // and zoom stay fully responsive no matter what the GPU is doing.
-        // gameFpsCap (optional, on top): present only every 1/cap seconds, freeing GPU headroom
-        // for the game. The activation and reveal-pending ticks always attempt a present (the
-        // gated reveal depends on frames reaching the redirection surface).
+        // Game pacing (issue #148): ONLY for the opt-in knobs. The default zoomed path keeps the
+        // vsync-locked blocking Present - it is what makes panning smooth (refresh-locked cadence),
+        // and at normal GPU priority it blocks a few frames at worst, never wedges. The timer-paced
+        // Present(0,0) + fence-gate mode below exists because lowGpuPriority=1 can starve our GPU
+        // work for MINUTES under a saturated game (a blocking present then wedges input, teardown,
+        // and the cursor restore), and because gameFpsCap needs presents decoupled from ticks. Both
+        // trade present cadence for safety/headroom, so they must never engage by default - an
+        // earlier build enabled this mode for every "foreground covers the monitor" case (which
+        // also matches any MAXIMIZED desktop window) and made panning judder everywhere.
+        // While engaged: the main-loop timer paces (t.gamePacing), presents are Present(0,0)
+        // (ex.noVsync), and renderFrame skips the whole frame while the previous present hasn't
+        // executed on the GPU (ex.gatePresent). Skipped ticks still sample input and advance the
+        // mapper. The activation and reveal-pending ticks always attempt a present (the gated
+        // reveal depends on frames reaching the redirection surface).
         bool doPresent = true;
-        const bool gamePacing = fsGame && zoomed;
+        const bool gamePacing = fsGame && zoomed &&
+                                (t.cfg.lowGpuPriority != 0 || t.cfg.gameFpsCap > 0);
         t.gamePacing = gamePacing;
         if (gamePacing) {
             ex.noVsync = true;
