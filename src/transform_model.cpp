@@ -36,7 +36,11 @@ void TransformModel::hideSystemCursor(bool hide) {
 void TransformModel::setActive(bool active) {
     active_ = active;
     if (!active) {
-        host_.setTransform(1.0f, 0, 0, 0, 0, false);   // back to 1x
+        // Rest-WARM (issue #148): resting at exactly 1.0 makes DWM leave magnification mode, and
+        // the next zoom-in pays a re-entry stall measured as 40-63ms GAME frames. Rest at an
+        // invisible 1.0005 (sub-pixel across 4K) so the pipeline never parks. Idle cost for the
+        // game measured before adopting (see issue notes).
+        host_.setTransform(1.0005f, 0, 0, 0, 0, false);
         pin_.hide();
         haveLastClick_ = false;   // re-warp fresh on the next activation
     }
@@ -72,36 +76,14 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // ramping level at most every 3rd tick (48Hz on a 144Hz panel - visually still a smooth ramp);
     // panning updates stay per-tick at the applied level so the geometry is always consistent.
     // level==lastLevel_ (no ramp) and the 1x reset apply immediately.
-    rampTick_++;
-    double applyLevel = level;
-    // Adaptive divisor: DWM's re-scale cost grows with level, so the ramping level updates
-    // per-tick near 1x and only every ~5th tick near 16x (still a visually smooth ramp).
-    // Zoom-IN: adaptive divisor (proven near-clean). Zoom-OUT: measured immune to update-rate
-    // changes (doubling the spacing changed nothing; cycle variance dominates), so it instead
-    // applies QUANTIZED steps - hold the displayed level until a full step (~18% of the current
-    // level) has accrued, so a 16x->1x ramp costs ~6 re-scales instead of ~200. When the
-    // controller stops moving between quanta, settle once to the exact level.
-    const bool levelMoving = level != prevTickLevel_;
-    if (lastLevel_ > 0.0 && level > 1.0 && level != lastLevel_) {
-        if (level > lastLevel_) {
-            const int rampDiv = 1 + (int)(lastLevel_ / 4.0);
-            if ((rampTick_ % rampDiv) != 0) applyLevel = lastLevel_;
-        } else if (levelMoving) {
-            const double stepQ = lastLevel_ * 0.18 > 0.75 ? lastLevel_ * 0.18 : 0.75;
-            if (lastLevel_ - level < stepQ) applyLevel = lastLevel_;
-        }
-    }
-    prevTickLevel_ = level;
-    // The mapper's srcLeft/srcTop were computed for `level`; when holding the previous level on a
-    // ramp tick, recompute the source for the APPLIED level or the view oscillates between two
-    // geometries at tick rate (field report: fast jitter/blur during ramps).
-    double srcL = r.srcLeft, srcT = r.srcTop;
-    if (applyLevel != level) {
-        OffsetF o = ComputeOffsetF(r.centerX, r.centerY, applyLevel, mon_.w, mon_.h);
-        srcL = o.x; srcT = o.y;
-    }
-    const bool ramping = (applyLevel != level);
-    MagTransform m = ComputeMagTransform(srcL, srcT, applyLevel);
+    // Level applies STRAIGHT, per tick, continuously (probe-measured over Foundation: a per-tick
+    // level ramp through the private channel costs the game ZERO >25ms frames at steady ~14ms
+    // frametimes - identical class to the native Magnifier's eased notches). The earlier
+    // quantization/divisor machinery created exactly the big discrete jumps that ARE expensive;
+    // small continuous deltas are the cheap pattern. (Quantization removed after A/B.)
+    const double applyLevel = level;
+    const bool ramping = level != lastLevel_ && lastLevel_ > 0.0;
+    MagTransform m = ComputeMagTransform(r.srcLeft, r.srcTop, applyLevel);
     const bool changed = m.offX != lastOffX_ || m.offY != lastOffY_ ||
                          m.txX != lastTxX_ || m.txY != lastTxY_ || applyLevel != lastLevel_;
     if (changed) {
