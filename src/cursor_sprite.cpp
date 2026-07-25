@@ -74,17 +74,13 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
 
     if (info.hCursor == lastCursor_) return lastVerdict_;
 
-    // The on-screen object for standard cursors is blanked while
-    // magnifying; render from the original shape we captured before
-    // blanking instead. A handle not in the map is an app-custom cursor
-    // that was never blanked - it is drawn natively and visibly.
+    // The on-screen object for standard cursors is blanked while magnifying; render from the
+    // original shape we captured before blanking. A handle not in the map is an APP-CUSTOM
+    // cursor (games!): it was never blanked, but the model hides the whole cursor plane via
+    // MagShowSystemCursor, so we must render it ourselves too - the handle itself is a valid
+    // shape source (issue #148: Foundation's cursor went unrendered and the raw cursor roamed).
     auto it = originals_.find(info.hCursor);
-    HCURSOR shapeSource = (it != originals_.end()) ? it->second : nullptr;
-    if (shapeSource == nullptr) {
-        lastCursor_ = info.hCursor;
-        lastVerdict_ = ShapeStatus::Unsupported;
-        return ShapeStatus::Unsupported;
-    }
+    HCURSOR shapeSource = (it != originals_.end()) ? it->second : info.hCursor;
 
     HICON hIconCopy = CopyIcon((HICON)shapeSource);
     if (hIconCopy == nullptr) return ShapeStatus::Hidden; // transient failure; don't imitate

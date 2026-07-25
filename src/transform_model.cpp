@@ -1,6 +1,7 @@
 #include "transform_model.h"
 #include "transform.h"   // ComputeMagTransform
 #include <windows.h>
+#include <magnification.h>
 
 namespace wind {
 
@@ -19,8 +20,12 @@ bool TransformModel::initialize(const MonitorTarget& monitor) {
 
 void TransformModel::hideSystemCursor(bool hide) {
     if (!useSprite_ || !blanker_) return;
-    if (hide) { blanker_->blank(); if (sprite_) sprite_->show(); }
-    else      { if (sprite_) sprite_->hide(); blanker_->restore(); }
+    // The blanker only blanks STANDARD cursors; a game's app-custom cursor stayed visible and
+    // roamed at its raw desktop position (issue #148 field report). MagShowSystemCursor hides
+    // the cursor plane wholesale - same call the render model relies on - so the sprite is the
+    // only visible cursor in every app. Both are applied; both are undone.
+    if (hide) { blanker_->blank(); MagShowSystemCursor(FALSE); if (sprite_) sprite_->show(); }
+    else      { if (sprite_) sprite_->hide(); MagShowSystemCursor(TRUE); blanker_->restore(); }
 }
 
 void TransformModel::setActive(bool active) {
@@ -51,11 +56,12 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // kills the sprite-lags-the-view wobble that plagued the anchored model during pans.
     MagTransform m = ComputeMagTransform(r.srcLeft, r.srcTop, level);
     host_.setTransform((float)level, m.offX, m.offY, m.txX, m.txY, fastPan_);
-    // The sprite composites unmagnified, so matching the zoom is our job (integer scale, capped).
-    if (useSprite_ && sprite_) {
-        int scale = cfg.cursorScaleWithZoom ? (int)(level + 0.5) : 1;
-        sprite_->setScale(scale);
-    }
+    // FIELD-MEASURED (issue #148, this Windows build): DWM's fullscreen magnification DOES
+    // magnify layered windows. So the sprite lives in DESKTOP coordinates at the lens center
+    // (clickDesktop): the transform displays it AT the screen center (T(center) == cursorScreen,
+    // including the edge zones where the mapper slides both), and it grows with zoom naturally,
+    // exactly like the native Magnifier's pointer. No self-scaling (that double-scaled).
+    (void)cfg;
 
     // Weld the hidden OS cursor to the lens point, exactly as RenderEngine::render does. This keeps
     // the scene-locked sprite on the real click point AND keeps RunTick's warp-and-measure pan
@@ -79,15 +85,14 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         // sprite kept drawing the arrow at the frozen point (visible, stationary) and no crosshair
         // existed at all - the transform model used to ignore ex.cursorLocked.
         sprite_->showCrosshair();
-        sprite_->moveTo((int)(r.cursorScreenX + 0.5) + mon_.x, (int)(r.cursorScreenY + 0.5) + mon_.y);
+        sprite_->moveTo(r.clickDesktopX + mon_.x, r.clickDesktopY + mon_.y);
         sprite_->keepOnTop();
     } else if (useSprite_ && sprite_ && ex.drawCursor) {
         CursorSprite::ShapeStatus st = sprite_->refreshShape();
         if (st == CursorSprite::ShapeStatus::Rendered) {
-            // Park the sprite at the mapper's cursorScreen: the screen center normally, sliding
-            // off-center at the edges in lockstep with the clamped source rect - the exact spot
-            // where the aimed content (and the hidden real cursor's click) lands.
-            sprite_->moveTo((int)(r.cursorScreenX + 0.5) + mon_.x, (int)(r.cursorScreenY + 0.5) + mon_.y);
+            // Desktop coords at the lens center: the (magnifying) transform displays the sprite
+            // at the screen center - the exact spot where the aimed content and the click land.
+            sprite_->moveTo(cx, cy);
             sprite_->show();
             // Composited outside the magnification, so it must fight for real z-order: reclaim the top
             // of our band when a popup (tray/context menu, flyout) has been raised over us. Throttled.
