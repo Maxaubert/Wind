@@ -72,7 +72,8 @@ void RenderModel::present(const MapResult& r, double level, const Config& cfg,
     if (ex.clickOverride) { p.clickDesktopX = ex.clickDesktopX; p.clickDesktopY = ex.clickDesktopY; }
     p.fsGame = ex.fsGame;                       // skip the periodic topmost backstop over a game
     if (ex.forceCrop) p.cropCapture = true;     // game session: crop the copy to the magnified view
-    if (ex.noVsync)   p.vsync = false;          // gameFpsCap: timer paces, Present(0,0)
+    if (ex.noVsync)   p.vsync = false;          // game pacing: timer paces, Present(0,0)
+    p.gatePresent = ex.gatePresent;             // never block the tick behind an in-flight present
     engine_.renderFrame(p);
 }
 }

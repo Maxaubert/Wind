@@ -36,6 +36,11 @@ struct RenderFrameParams {
     bool   fsGame;              // foreground covers the monitor (fullscreen/borderless game): skip the
                                 //   periodic topmost backstop (a synchronous DWM z-order transaction
                                 //   that hitches the game); the per-frame displaced check still reclaims
+    bool   gatePresent;         // skip the whole frame (capture/draw/present) while the PREVIOUS
+                                //   present hasn't executed on the GPU. Set while zoomed over a
+                                //   fullscreen game so a saturated/starving GPU can never block the
+                                //   main thread inside Present (issue #148 wedge: frozen input,
+                                //   no teardown, cursor stranded hidden). SetCursorPos still syncs.
 };
 
 // Own capture + Direct3D 11 renderer. Captures the desktop via DXGI Desktop Duplication

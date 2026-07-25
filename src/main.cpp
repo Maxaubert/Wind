@@ -201,7 +201,9 @@ struct TickState {
     HWND   inspectPrevFg = nullptr;     // the game window foreground is handed back to on exit
     bool   inspectCursorWasShowing = true; // cursor visibility at the toggle edge (the 1x mouselook tell)
     double presentAccum       = 0.0;           // gameFpsCap: seconds since the last presented frame
-    bool   gameCapPacing      = false;         // gameFpsCap engaged this tick -> main loop timer paces
+    bool   gamePacing         = false;         // zoomed over a fullscreen game -> main loop timer
+                                               //   paces (a blocking present must never pace: a
+                                               //   saturated GPU can starve it and wedge the tick)
     double quickZoomStored    = 0.0;           // remembered quick-zoom level (0 = none yet); in-memory
     bool   prevInHeld         = false;         // for rising-edge detection of the zoom-in channel
     bool   prevOutHeld        = false;
@@ -682,27 +684,34 @@ static void RunTick(TickState& t) {
             ex.cursorLocked = true;        // draw the crosshair at the look point (cursorScreen)
             if (!zoomed) ex.outline = false;   // no lens outline on the 1:1 view at 1x
         }
-        // gameFpsCap (issue #148): while zoomed over a fullscreen game, present only every
-        // 1/cap seconds - the skipped ticks still sample input and advance the mapper (pan stays
-        // full-rate responsive), but skip capture/draw/present entirely, freeing that GPU work for
-        // the game. The activation and reveal-pending ticks always present (the gated reveal
-        // depends on frames actually reaching the redirection surface). When engaged, presents use
-        // Present(0,0) (ex.noVsync) and the main loop's timer paces via t.gameCapPacing - a
-        // blocking vsync present on sparse ticks would double-pace against the timer.
+        // Game pacing (issue #148): while zoomed over a fullscreen game, the tick loop must never
+        // ride on a BLOCKING present - a saturated GPU can starve our present for minutes (measured
+        // with lowGpuPriority=1, but plain saturation can stall it too), and a wedged Present on
+        // this thread freezes input, teardown, and the cursor restore. So over a game: the main
+        // loop's timer paces (t.gamePacing), presents are Present(0,0) (ex.noVsync), and
+        // renderFrame skips the whole frame while the previous present hasn't executed on the GPU
+        // (ex.gatePresent). Skipped ticks still sample input and advance the mapper, so panning
+        // and zoom stay fully responsive no matter what the GPU is doing.
+        // gameFpsCap (optional, on top): present only every 1/cap seconds, freeing GPU headroom
+        // for the game. The activation and reveal-pending ticks always attempt a present (the
+        // gated reveal depends on frames reaching the redirection surface).
         bool doPresent = true;
-        const bool capActive = fsGame && zoomed && t.cfg.gameFpsCap > 0;
-        t.gameCapPacing = capActive;
-        if (capActive) {
+        const bool gamePacing = fsGame && zoomed;
+        t.gamePacing = gamePacing;
+        if (gamePacing) {
             ex.noVsync = true;
-            const double interval = 1.0 / (double)t.cfg.gameFpsCap;
-            t.presentAccum += dt;
-            if (enterActive || t.revealPending > 0) {
-                t.presentAccum = 0.0;                       // reveal path: present every tick
-            } else if (t.presentAccum >= interval) {
-                t.presentAccum -= interval;
-                if (t.presentAccum > interval) t.presentAccum = interval;  // hitch: no burst catch-up
-            } else {
-                doPresent = false;
+            ex.gatePresent = true;
+            if (t.cfg.gameFpsCap > 0) {
+                const double interval = 1.0 / (double)t.cfg.gameFpsCap;
+                t.presentAccum += dt;
+                if (enterActive || t.revealPending > 0) {
+                    t.presentAccum = 0.0;                   // reveal path: present every tick
+                } else if (t.presentAccum >= interval) {
+                    t.presentAccum -= interval;
+                    if (t.presentAccum > interval) t.presentAccum = interval;  // hitch: no burst catch-up
+                } else {
+                    doPresent = false;
+                }
             }
         } else {
             t.presentAccum = 0.0;
@@ -782,7 +791,7 @@ static void RunTick(TickState& t) {
         t.model.setActive(false);
         t.model.hideSystemCursor(false);
         t.outlineZoneSec = 0.0;                       // zoom-out clears the low-zoom dwell (no banked partial)
-        t.gameCapPacing = false;                      // idle: normal pacing (gameFpsCap is zoomed-only)
+        t.gamePacing = false;                         // idle: normal timer pacing
         t.presentAccum = 0.0;
         if (t.prevInspect) {
             EndGameInspect(t);   // teardown-to-idle exits game-inspect too (foreground returned)
@@ -1376,10 +1385,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         // composites, so the cursor beats against the panning view (the flicker) - exactly what
         // DwmFlush prevents (and it paces at refresh, so no flood either). Bloom paces this way too.
         bool dwmPaces = zoomed && (renderModelActive ? (ts.cfg.dwmFlush != 0) : true);
-        // gameFpsCap engaged: presents are sparse Present(0,0) frames, so the blocking-present
-        // pace is unavailable - fall through to the timer (full tick rate; presents skip inside).
+        // Game pacing engaged: presents are non-blocking Present(0,0) frames (and may be skipped
+        // by the fence gate), so the blocking-present pace is unavailable - fall through to the
+        // timer (full tick rate; frame work skips inside renderFrame as needed).
         bool renderPresentPaces = renderModelActive && zoomed && !dwmPaces && ts.cfg.vsync != 0 &&
-                                  !ts.gameCapPacing;
+                                  !ts.gamePacing;
         if (!renderPresentPaces && !dwmPaces) {
             // Recompute the timer interval if the paced refresh changed (retarget to a different-Hz
             // monitor updates ts.hz). Cheap equality check; only recomputes on an actual change (#74).

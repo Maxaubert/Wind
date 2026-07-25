@@ -114,11 +114,15 @@ struct Config {
     // triggers a full refresh; that staleness is why it defaults off. Hot-reloadable.
     int    cropCapture = 0;
     // --- Game perf (issue #148): keep a GPU-saturated game smooth while zoomed over it ---
-    // 1 (default) = Wind's GPU work runs at low WDDM scheduling priority (device GPU-thread
-    // priority -7 + process scheduling class "below normal"), so a game saturating the GPU wins
-    // every contention race against the magnifier's copies/draws. Costs nothing on an idle GPU
-    // (no contention to lose). 0 = normal priority. Applied at device build (restart to apply).
-    int    lowGpuPriority = 1;
+    // EXPERIMENT KNOB, default 0 (off). 1 = Wind's GPU work runs at low WDDM scheduling priority
+    // (device GPU-thread priority -7 + process scheduling class "below normal"), so a game
+    // saturating the GPU wins every contention race against the magnifier's copies/draws.
+    // Measured: a saturated game can then starve Wind's GPU work for MINUTES - the present-fence
+    // gate keeps Wind responsive (it skips frames instead of blocking, so zoom-out and the cursor
+    // always work), but the zoomed view can freeze/lag badly in heavy scenes. That starvation
+    // wedged the whole app before the gate existed, which is why this defaults OFF now.
+    // Applied at device build (restart to apply).
+    int    lowGpuPriority = 0;
     // 1 (default) = while the foreground window covers the target monitor (fullscreen/borderless
     // game), force the cropCapture behavior for the session regardless of the cropCapture key:
     // a game repaints the whole screen every frame, which is exactly when cropping the copy to

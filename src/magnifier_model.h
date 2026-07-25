@@ -17,7 +17,9 @@ struct PresentExtras {
     // Game perf (issue #148; render model only, others ignore):
     bool  fsGame = false;         // foreground covers the monitor -> skip the periodic topmost backstop
     bool  forceCrop = false;      // fsGame && gameCrop: crop the capture copy to the magnified region
-    bool  noVsync = false;        // gameFpsCap engaged: Present(0,0); the main loop's timer paces
+    bool  noVsync = false;        // game pacing engaged: Present(0,0); the main loop's timer paces
+    bool  gatePresent = false;    // skip the frame while the previous present hasn't executed on the
+                                  //   GPU (never block the main thread on a starved GPU)
 };
 struct IMagnifierModel {
     virtual ~IMagnifierModel() = default;

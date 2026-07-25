@@ -78,6 +78,13 @@ struct RenderEngine::State {
     bool revealFenceArm    = false;    // issue the fence right after the next Present (set on activation)
     bool revealFenceIssued = false;    // End() was called; GetData is meaningful
     bool revealFenceDone   = false;    // cached S_OK so we stop polling once complete
+    // Present-completion fence (issue #148): an event query issued after EVERY Present. When
+    // p.gatePresent is set (zoomed over a fullscreen game), renderFrame skips the whole frame
+    // (capture/draw/present) while the previous present hasn't executed on the GPU yet, so a
+    // starved/saturated GPU can never block the main thread inside Present - the wedge that froze
+    // input, teardown, and the cursor restore when the GPU scheduler starved our low-priority work.
+    ComPtr<ID3D11Query> presentFence;
+    bool presentFenceIssued = false;
     std::vector<unsigned char> metaBuf;   // reused buffer for GetFrameMoveRects/GetFrameDirtyRects
     // Diagnostics for the HDR investigation: the duplication's surface format + the output's
     // color space / bit depth (tells us whether the desktop is HDR and what we're capturing).
@@ -424,6 +431,8 @@ bool RenderEngine::recoverDeviceLost() {
     s_->desktopCopy.Reset(); s_->desktopSRV.Reset();
     s_->cursorTex.Reset(); s_->cursorSRV.Reset(); s_->cursorReady = false; s_->lastCursor = nullptr;
     s_->crosshairSRV.Reset();   // device-dependent; rebuilt in buildDeviceResources
+    s_->presentFence.Reset(); s_->presentFenceIssued = false;
+    s_->revealFence.Reset();
     s_->cursorCache.clear();   // cached cursor textures belong to the dead device
     s_->vs.Reset(); s_->ps.Reset(); s_->cvs.Reset(); s_->cps.Reset();
     s_->cb.Reset(); s_->ccb.Reset();
@@ -647,6 +656,9 @@ bool RenderEngine::State::buildDeviceResources() {
         D3D11_QUERY_DESC qd{ D3D11_QUERY_EVENT, 0 };
         if (FAILED(device->CreateQuery(&qd, revealFence.ReleaseAndGetAddressOf())))
             RLog("buildDeviceResources: reveal-fence CreateQuery failed (non-fatal)");
+        if (FAILED(device->CreateQuery(&qd, presentFence.ReleaseAndGetAddressOf())))
+            RLog("buildDeviceResources: present-fence CreateQuery failed (non-fatal)");
+        presentFenceIssued = false;
     }
 
     // --- Desktop Duplication ---
@@ -670,12 +682,19 @@ void RenderEngine::setVisible(bool visible) {
     // overlay was still visible - a guaranteed one-frame black flash on every zoom-out. With the
     // alpha set first, any composite from here on shows nothing, and the black present lands on a
     // hidden surface (the same present-while-hidden pattern the zoom-in reveal relies on).
+    // Same never-block rule as the gated renderFrame (issue #148): if the previous present is
+    // still in flight on a starved/saturated GPU, SKIP the scrub rather than let its Present block
+    // the teardown path (which must go on to restore the cursor). The retained frame then stays,
+    // but the reveal gating (#140) already protects the next zoom-in from flashing it.
     if (!visible && s_->ready && !s_->deviceLost && s_->swap &&
-        (s_->rtv || s_->acquireBackbufferRtv())) {
+        (s_->rtv || s_->acquireBackbufferRtv()) &&
+        !(s_->presentFence && s_->presentFenceIssued &&
+          s_->ctx->GetData(s_->presentFence.Get(), nullptr, 0, 0) == S_FALSE)) {
         const float clear[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
         s_->ctx->OMSetRenderTargets(1, s_->rtv.GetAddressOf(), nullptr);
         s_->ctx->ClearRenderTargetView(s_->rtv.Get(), clear);
         s_->swap->Present(0, 0);
+        if (s_->presentFence) { s_->ctx->End(s_->presentFence.Get()); s_->presentFenceIssued = true; }
     }
     if (visible) {
         SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
@@ -1089,6 +1108,18 @@ bool RenderEngine::renderFrame(const RenderFrameParams& p) {
         SetCursorPos(p.clickDesktopX, p.clickDesktopY);
         s_->lastClickX = p.clickDesktopX; s_->lastClickY = p.clickDesktopY;
     }
+    // Present-fence gate (issue #148): while zoomed over a fullscreen game, never queue a present
+    // behind one the GPU hasn't executed yet. With the previous present still in flight, a vsync'd
+    // or latency-limited Present BLOCKS the calling (main) thread until the GPU gets scheduled -
+    // and a saturated game can starve us for minutes, wedging input, teardown, and the cursor
+    // restore. Skipping the frame keeps the tick loop live; the view simply updates when the GPU
+    // next lets it. Cursor sync (above) and the displaced check already ran, so responsiveness of
+    // clicks/topmost is unaffected. A FAILED GetData falls through to Present, which reports
+    // device-removed properly.
+    if (p.gatePresent && s_->presentFence && s_->presentFenceIssued &&
+        s_->ctx->GetData(s_->presentFence.Get(), nullptr, 0, 0) == S_FALSE) {
+        return true;
+    }
     s_->render(p);
     // p.vsync = (cfg.vsync && !cfg.dwmFlush): sync interval 1 locks the present to the refresh;
     // 0 presents immediately and the caller paces via DwmFlush or the timer.
@@ -1104,6 +1135,12 @@ bool RenderEngine::renderFrame(const RenderFrameParams& p) {
         s_->ctx->End(s_->revealFence.Get());
         s_->revealFenceArm = false;
         s_->revealFenceIssued = true;
+    }
+    // Present-completion fence: mark the GPU timeline after every Present so the next gated frame
+    // (and the hide-scrub) can check whether this present has actually executed (issue #148).
+    if (s_->presentFence && SUCCEEDED(hr)) {
+        s_->ctx->End(s_->presentFence.Get());
+        s_->presentFenceIssued = true;
     }
     return SUCCEEDED(hr);
 }
