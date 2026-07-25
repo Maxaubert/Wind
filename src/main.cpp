@@ -642,11 +642,11 @@ static void RunTick(TickState& t) {
         // our own present rate (gameFpsCap). Two cheap user32 reads per tick; also reused by the
         // enterActive reveal gating below (which needed the same answer anyway).
         const bool fsGame = ForegroundCoversMonitor(t.mon);
-        // Instant hybrid switch (hybridSwitch=1): re-pick the engine WHILE ZOOMED when the
-        // foreground changes, handing over mid-session. The controller and mapper are untouched,
-        // so the zoom level and lens position carry across the swap (render 8x -> tab into a
-        // game -> transform 8x). Inspect sessions are never switched under.
-        if (t.mTransform && t.cfg.hybridSwitch != 0 && !enterActive && !inspect) {
+        // Instant hybrid switch (always on): re-pick the engine WHILE ZOOMED when the foreground
+        // changes, handing over mid-session. The controller and mapper are untouched, so the
+        // zoom level and lens position carry across the swap (render 8x -> tab into a game ->
+        // transform 8x). Inspect sessions are never switched under.
+        if (t.mTransform && !enterActive && !inspect) {
             HWND fgw2 = GetForegroundWindow();
             const bool borderless2 = fgw2 && !(GetWindowLongPtrW(fgw2, GWL_STYLE) & WS_CAPTION);
             const bool primary2 = t.mon.x == 0 && t.mon.y == 0;

@@ -30,8 +30,8 @@ Win32 I/O: `render_engine`, `input_router`, `tray`, `main`.
 One paced tick loop; models behind `IMagnifierModel` (`model=` ini key, restart to switch):
 `hybrid` (DEFAULT, "Auto" in the UI) constructs render + transform and picks per zoom-in at the
 idle->active edge - transform when the foreground covers the monitor AND is borderless (games,
-F11 video) on the primary, else render; `hybridSwitch=1` re-picks INSTANTLY while zoomed on
-foreground change, preserving level/lens (controller+mapper untouched). `transform` (revived
+F11 video) on the primary, else render; while ZOOMED it re-picks instantly (always on) when the
+foreground changes, preserving level/lens (controller+mapper untouched). `transform` (revived
 issue #148) = DWM fullscreen transform via MagSet/private channel: compositor-internal, the only
 path that stays smooth over a heavy game (native-Magnifier parity measured); centered cursor via
 sprite in DESKTOP coords at the lens center (DWM magnifies layered windows on this build);
