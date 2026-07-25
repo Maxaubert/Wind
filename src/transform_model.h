@@ -30,6 +30,7 @@ private:
     std::unique_ptr<CursorBlanker> blanker_;
     std::unique_ptr<CursorSprite> sprite_;
     unsigned long long lastPinAssertMs_ = 0;
+    int  keepAliveTick_ = 0;                         // alternates the epsilon keep-alive (issue #148)
     bool haveLastClick_ = false;                     // dedup the OS-cursor recenter (SetCursorPos)
     int  lastClickX_ = 0, lastClickY_ = 0;
 };

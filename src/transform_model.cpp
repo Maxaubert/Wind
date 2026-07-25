@@ -54,8 +54,15 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     //     so sprite, content, and click point stay welded there too.
     // Bonus vs the old anchored design: the sprite now barely MOVES (center, except at edges), which
     // kills the sprite-lags-the-view wobble that plagued the anchored model during pans.
-    MagTransform m = ComputeMagTransform(r.srcLeft, r.srcTop, level);
-    host_.setTransform((float)level, m.offX, m.offY, m.txX, m.txY, fastPan_);
+    // KEEP-ALIVE (issue #148 action-start spike): DWM discards its magnification resources when
+    // the transform VALUE sits still (we already call every tick - call frequency is not it) and
+    // pays a ~1fps rebuild spike on the next real change (zoom start, pan resume, direction
+    // change). Jitter the level by an invisible epsilon (0.01%, sub-pixel across the whole 4K
+    // frame) on alternating ticks so the value never goes static and the pipeline stays hot.
+    keepAliveTick_ ^= 1;
+    const double lvlKA = level + (keepAliveTick_ ? level * 0.0001 : 0.0);
+    MagTransform m = ComputeMagTransform(r.srcLeft, r.srcTop, lvlKA);
+    host_.setTransform((float)lvlKA, m.offX, m.offY, m.txX, m.txY, fastPan_);
     // FIELD-MEASURED (issue #148, this Windows build): DWM's fullscreen magnification DOES
     // magnify layered windows. So the sprite lives in DESKTOP coordinates at the lens center
     // (clickDesktop): the transform displays it AT the screen center (T(center) == cursorScreen,
