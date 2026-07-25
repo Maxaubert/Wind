@@ -37,11 +37,11 @@ void TransformModel::hideSystemCursor(bool hide) {
 void TransformModel::setActive(bool active) {
     active_ = active;
     if (!active) {
-        // Rest-WARM (issue #148): resting at exactly 1.0 makes DWM leave magnification mode, and
-        // the next zoom-in pays a re-entry stall measured as 40-63ms GAME frames. Rest at an
-        // invisible 1.0005 (sub-pixel across 4K) so the pipeline never parks. Idle cost for the
-        // game measured before adopting (see issue notes).
-        host_.setTransform(1.0005f, 0, 0, 0, 0, false);
+        // Rest at TRUE 1.0 (rest-warm 1.0005 REMOVED): keeping the magnification pipeline hot
+        // over a running game full-time is a standing GPU-TDR contributor (field: driver resets
+        // recurred even with the 12x cap), and the rest-warm measurably did not fix the entry
+        // spike anyway. One ~30ms entry blip per zoom-in is the safe trade.
+        host_.setTransform(1.0f, 0, 0, 0, 0, false);
         RECT full{ 0, 0, mon_.w, mon_.h };
         host_.setInputTransform(false, full, full);   // input mapping back to identity at 1x
         pin_.hide();
@@ -84,9 +84,20 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // frametimes - identical class to the native Magnifier's eased notches). The earlier
     // quantization/divisor machinery created exactly the big discrete jumps that ARE expensive;
     // small continuous deltas are the cheap pattern. (Quantization removed after A/B.)
-    const double applyLevel = level;
-    const bool ramping = level != lastLevel_ && lastLevel_ > 0.0;
-    MagTransform m = ComputeMagTransform(r.srcLeft, r.srcTop, applyLevel);
+    // TDR guard (field: driver resets even at <=12x): above 8x, apply the ramping level only on
+    // alternate ticks - halves the re-scale rate exactly where each re-scale is most expensive.
+    // Held ticks recompute the source for the applied level so the geometry stays consistent.
+    hiRampTick_ ^= 1;
+    double applyLevel = level;
+    if (lastLevel_ > 8.0 && level != lastLevel_ && level > 1.0 && hiRampTick_)
+        applyLevel = lastLevel_;
+    double srcL = r.srcLeft, srcT = r.srcTop;
+    if (applyLevel != level) {
+        OffsetF o = ComputeOffsetF(r.centerX, r.centerY, applyLevel, mon_.w, mon_.h);
+        srcL = o.x; srcT = o.y;
+    }
+    const bool ramping = applyLevel != level || (applyLevel != lastLevel_ && lastLevel_ > 0.0);
+    MagTransform m = ComputeMagTransform(srcL, srcT, applyLevel);
     const bool changed = m.offX != lastOffX_ || m.offY != lastOffY_ ||
                          m.txX != lastTxX_ || m.txY != lastTxY_ || applyLevel != lastLevel_;
     if (changed) {
@@ -96,7 +107,10 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         keepAliveTick_ = 0;
     }
     int txJitter = 0;
-    if (!changed && !ramping && GetTickCount64() - lastChangeMs_ < 1500) {
+    // Keep-alive window shortened and disabled above 8x: high-level re-composites are the
+    // expensive ones, and a parked pipeline is safer than a hot one next to a heavy game (TDR).
+    if (!changed && !ramping && applyLevel <= 8.0 &&
+        GetTickCount64() - lastChangeMs_ < 700) {
         keepAliveTick_ ^= 1;
         txJitter = keepAliveTick_;
     }
