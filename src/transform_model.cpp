@@ -71,7 +71,16 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     double applyLevel = level;
     if (lastLevel_ > 0.0 && level != lastLevel_ && level > 1.0 && (rampTick_ % 3) != 0)
         applyLevel = lastLevel_;
-    MagTransform m = ComputeMagTransform(r.srcLeft, r.srcTop, applyLevel);
+    // The mapper's srcLeft/srcTop were computed for `level`; when holding the previous level on a
+    // ramp tick, recompute the source for the APPLIED level or the view oscillates between two
+    // geometries at tick rate (field report: fast jitter/blur during ramps).
+    double srcL = r.srcLeft, srcT = r.srcTop;
+    if (applyLevel != level) {
+        OffsetF o = ComputeOffsetF(r.centerX, r.centerY, applyLevel, mon_.w, mon_.h);
+        srcL = o.x; srcT = o.y;
+    }
+    const bool ramping = (applyLevel != level);
+    MagTransform m = ComputeMagTransform(srcL, srcT, applyLevel);
     const bool changed = m.offX != lastOffX_ || m.offY != lastOffY_ ||
                          m.txX != lastTxX_ || m.txY != lastTxY_ || applyLevel != lastLevel_;
     if (changed) {
@@ -81,7 +90,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         keepAliveTick_ = 0;
     }
     int txJitter = 0;
-    if (!changed && GetTickCount64() - lastChangeMs_ < 1500) {
+    if (!changed && !ramping && GetTickCount64() - lastChangeMs_ < 1500) {
         keepAliveTick_ ^= 1;
         txJitter = keepAliveTick_;
     }
