@@ -1,5 +1,6 @@
 <script>
-  export let value, options, onChange, disabled = false;
+  export let value, options, onChange, disabled = false, labels = null;
+  const show = (o) => (labels && labels[o]) ? labels[o] : o;
   let open = false;
   let el;
   function toggle() { if (!disabled) open = !open; }
@@ -12,7 +13,7 @@
   <button class="trigger" type="button" {disabled}
           aria-haspopup="listbox" aria-expanded={open}
           on:click|stopPropagation={toggle}>
-    <span>{value}</span>
+    <span>{show(value)}</span>
     <svg viewBox="0 0 10 6" width="9" height="6" fill="none" stroke="currentColor"
          stroke-width="1.3" stroke-linecap="round"><path d="M1 1l4 4 4-4"/></svg>
   </button>
@@ -21,7 +22,7 @@
       {#each options as o}
         <button class="opt" class:selected={o === value} role="option"
                 aria-selected={o === value} type="button"
-                on:click|stopPropagation={() => pick(o)}>{o}</button>
+                on:click|stopPropagation={() => pick(o)}>{show(o)}</button>
       {/each}
     </div>
   {/if}

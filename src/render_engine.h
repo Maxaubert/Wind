@@ -33,6 +33,19 @@ struct RenderFrameParams {
                                          // pixels too, so the stored value matches the user's sRGB hex)
     float  outlineAlpha;        // 0..1 fade for the outline (1 = solid); <= 0 skips the draw
     bool   cursorLocked;        // Inspect mode on: draw the crosshair sprite in place of the captured cursor
+    bool   fsGame;              // foreground covers the monitor (fullscreen/borderless game): skip the
+                                //   periodic topmost backstop (a synchronous DWM z-order transaction
+                                //   that hitches the game); the per-frame displaced check still reclaims
+    bool   gatePresent;         // skip the whole frame (capture/draw/present) while the PREVIOUS
+                                //   present hasn't executed on the GPU. Set while zoomed over a
+                                //   fullscreen game so a saturated/starving GPU can never block the
+                                //   main thread inside Present (issue #148 wedge: frozen input,
+                                //   no teardown, cursor stranded hidden). SetCursorPos still syncs.
+    int    syncOverride;        // 0 = use `vsync`; N>0 = Present(N,0). 2 = vblank-locked HALF rate:
+                                //   under a saturated game DWM's composite runs 1-3 vblanks late
+                                //   ~10x/s (measured), so full-rate presents hitch irregularly; a
+                                //   locked half rate gives every frame 2 vblanks of slack and turns
+                                //   the cadence steady - steadiness is what reads as smooth (#148).
 };
 
 // Own capture + Direct3D 11 renderer. Captures the desktop via DXGI Desktop Duplication
@@ -51,7 +64,12 @@ public:
     // CreateWindowInBand (needs UIAccess; e.g. 16 = ZBID_SYSTEM_TOOLS, above the shell so the
     // Start menu / taskbar flyouts don't show an unmagnified copy). Falls back to a normal
     // window if the band can't be used.
-    bool initialize(const MonitorTarget& monitor, int zorderBand = 0, bool hdrTonemap = false);
+    // gpuPriority: WDDM scheduling priority of this device's GPU work. -1 = low (GPU-thread
+    // priority -7 + process class below-normal: a saturated game wins every race and can starve
+    // us), 0 = normal, +1 = high (GPU-thread priority +7 + best-effort process class raise: our
+    // small per-frame job jumps a saturated game's queue so the zoomed view hits every vblank).
+    bool initialize(const MonitorTarget& monitor, int zorderBand = 0, bool hdrTonemap = false,
+                    int gpuPriority = 0);
     // Re-point the magnifier at a different monitor (call on zoom-in when the cursor's monitor
     // changed; the overlay must still be hidden/alpha 0). Resizes the swapchain, then moves the
     // overlay and rebinds Desktop Duplication to the new output. Returns false (and the caller
@@ -94,12 +112,24 @@ public:
     // for the driver to come back). Does NOT touch the HWND or the hidden OS cursor.
     bool recoverDeviceLost();
     void hideSystemCursor(bool hide);              // MagShowSystemCursor wrapper + safe-restore net
+    // Block until the target output's next vblank (IDXGIOutput::WaitForVBlank). Used by the
+    // reduced-push game mode: skip ticks wait one vblank so the loop stays vblank-locked while
+    // presents are pushed BELOW the redirection path's service rate (issue #148). Returns false
+    // (caller should not spin on it) if no output is cached.
+    bool waitVBlank();
     void shutdown();                               // restore cursor, destroy everything
     bool ready() const;
     // Verification only: decoded cursor metrics + the screen size the engine is using.
     void debugInfo(int& screenW, int& screenH, int& curW, int& curH, int& hotX, int& hotY) const;
     // Verification only: duplication surface format + output color space / bit depth (HDR).
     void debugHdr(unsigned& ddaFormat, int& colorSpace, int& bitsPerColor) const;
+    // Frame-perf counters since the last reset: CPU milliseconds spent building the frame
+    // (capture+draw submission) and spent blocked inside Present, sum + max, over `frames`
+    // presented frames plus `gateSkips` frames dropped by the present-fence gate. Present block
+    // time is where GPU contention with a game shows up (issue #148 diagnostics).
+    void debugPerf(double& renderSumMs, double& renderMaxMs,
+                   double& presentSumMs, double& presentMaxMs,
+                   int& frames, int& gateSkips, bool reset);
     // Verification only: copy the back-buffer to a 32bpp BGRA PNG.
     bool dumpBackbufferPng(const wchar_t* path);
     // Verification only: render one frame and dump it before Present (so the PNG matches the

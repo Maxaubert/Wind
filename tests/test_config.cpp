@@ -325,3 +325,35 @@ TEST_CASE("outline low-zoom + idle keys default and parse with clamps") {
     CHECK(ParseConfig("outlineIdleSeconds=0\n").outlineIdleSeconds == doctest::Approx(0.5));
     CHECK(ParseConfig("outlineIdleSeconds=120\n").outlineIdleSeconds == doctest::Approx(60.0));
 }
+TEST_CASE("game perf keys (issue #148) default and parse with clamps") {
+    Config d = ParseConfig("");
+    CHECK(d.lowGpuPriority == 0);   // OFF by default: a saturated game can starve the zoomed view
+    CHECK(d.gameCrop == 1);         // on by default: crop is always safe on full-screen repaints
+    CHECK(d.gameFpsCap == 0);       // off by default: opt-in second lever
+
+    Config c = ParseConfig("lowGpuPriority=1\ngameCrop=0\ngameFpsCap=72\n");
+    CHECK(c.lowGpuPriority == 1);
+    CHECK(c.gameCrop == 0);
+    CHECK(c.gameFpsCap == 72);
+
+    // gameFpsCap clamps to [0, 240]; negative means off.
+    CHECK(ParseConfig("gameFpsCap=-5\n").gameFpsCap == 0);
+    CHECK(ParseConfig("gameFpsCap=999\n").gameFpsCap == 240);
+    // Bad values keep defaults.
+    Config b = ParseConfig("lowGpuPriority=x\ngameFpsCap=x\n");
+    CHECK(b.lowGpuPriority == 0);
+    CHECK(b.gameFpsCap == 0);
+}
+TEST_CASE("gpuPriority tri-state parses, clamps, and folds the legacy alias") {
+    CHECK(ParseConfig("").gpuPriority == 0);                    // default normal
+    CHECK(ParseConfig("gpuPriority=1\n").gpuPriority == 1);
+    CHECK(ParseConfig("gpuPriority=-1\n").gpuPriority == -1);
+    CHECK(ParseConfig("gpuPriority=7\n").gpuPriority == 1);     // clamped to tri-state
+    CHECK(ParseConfig("gpuPriority=-9\n").gpuPriority == -1);
+
+    // EffectiveGpuPriority: explicit gpuPriority wins; legacy lowGpuPriority=1 means low.
+    CHECK(EffectiveGpuPriority(ParseConfig("")) == 0);
+    CHECK(EffectiveGpuPriority(ParseConfig("gpuPriority=1\n")) == 1);
+    CHECK(EffectiveGpuPriority(ParseConfig("lowGpuPriority=1\n")) == -1);
+    CHECK(EffectiveGpuPriority(ParseConfig("gpuPriority=1\nlowGpuPriority=1\n")) == 1);
+}

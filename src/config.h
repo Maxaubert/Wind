@@ -65,11 +65,27 @@ struct Config {
 
     // --- Model selection ----------------------------------------------------
     // Which magnification model runs. "render" (default) = the DXGI capture + D3D11 overlay.
-    // "magnify" = drive the native Windows Magnifier (Magnify.exe) via injected Win+Plus/Minus;
-    // works over DRM-protected video that blanks under Desktop Duplication. A legacy "transform"
-    // value (the removed MagSetFullscreenTransform model it replaces) maps to "magnify"; any other
-    // unknown value falls back to "render". Applied at launch (restart to switch; not hot-swapped).
+    // "magnify" = drive the native Windows Magnifier (Magnify.exe) via injected wheel notches;
+    // works over DRM-protected video that blanks under Desktop Duplication. "transform" = the
+    // DWM fullscreen-transform model (MagSetFullscreenTransform, no Magnify.exe) - REVIVED for
+    // issue #148: it magnifies inside the compositor with zero app presents, the only path that
+    // stays smooth while a heavy game renders (Windows' present pipeline throttles every overlay
+    // app's frames to ~90/s under load; measured 139 transform updates/s rock-steady over the
+    // same game). Cursor is anchored (not centered) in this model. Unknown values fall back to
+    // "render". Applied at launch (restart to switch; not hot-swapped).
     std::string model = "render";
+    // Transform-model-only knobs (ignored by the other models):
+    int fastPan     = 1;  // 1 = pan via the private SetMagnificationDesktopMagnification channel
+                          //     (sub-pixel); falls back to the public API automatically if unavailable.
+    int smoothPan   = 0;  // 1 = hold the display composited while zoomed (1px pin) so flip-model games
+                          //     do not stutter while panning, at a capped frame rate while zoomed.
+    int cursorSprite = 1; // 1 = hide the OS cursor and draw a scene-locked sprite welded to the
+                          //     transform (fixes cursor/click divergence near screen edges).
+    int magInputTransform = 0; // 1 = publish MagSetInputTransform while zoomed (experiment;
+                          //     documented for pen/touch only - A/B knob, hot-reloadable).
+    int hybridSwitch = 0; // hybrid only: 0 = engine picked at zoom-in only (a switch never
+                          //     disturbs an active zoom); 1 = instant - re-pick while zoomed when
+                          //     the foreground changes, preserving the zoom level across the swap.
     // Magnify-model-only: Windows Magnifier zoom increment in percent POINTS per wheel notch
     // (written to the ScreenMagnifier registry; the user's original value is snapshot-restored
     // on exit). Lower = smoother and slower zoom. Clamped 5..400. Live-applies (no restart).
@@ -113,6 +129,33 @@ struct Config {
     // switch the screen edges can briefly show the previous window's pixels until a smaller change
     // triggers a full refresh; that staleness is why it defaults off. Hot-reloadable.
     int    cropCapture = 0;
+    // --- Game perf (issue #148): GPU scheduling priority of Wind's D3D work ---
+    // gpuPriority: -1 = low (Wind yields to a busy game; a saturated game can then STARVE the
+    // zoomed view - the present-fence gate keeps input/teardown responsive, but the view can
+    // freeze in heavy scenes; that starvation wedged the whole app before the gate existed);
+    // 0 = normal (default); +1 = high (Wind's small per-frame job jumps a saturated game's queue
+    // so the magnified view hits every vblank - the game donates a sliver of GPU time; the right
+    // trade when zoom-window smoothness outranks game fps). Uses IDXGIDevice::
+    // SetGPUThreadPriority(+/-7) plus D3DKMTSetProcessSchedulingPriorityClass (the process-class
+    // raise needs privileges and may be denied - logged, non-fatal; the device-level priority is
+    // the one that matters). Applied at device build (restart to apply).
+    int    gpuPriority = 0;
+    // Legacy alias (round-1 experiment): lowGpuPriority=1 acts as gpuPriority=-1 when gpuPriority
+    // itself is 0/unset. Kept so old inis keep meaning what they said.
+    int    lowGpuPriority = 0;
+    // 1 (default) = while the foreground window covers the target monitor (fullscreen/borderless
+    // game), force the cropCapture behavior for the session regardless of the cropCapture key:
+    // a game repaints the whole screen every frame, which is exactly when cropping the copy to
+    // the magnified region is both safe (everything is dirty again next frame) and the biggest
+    // win (full-screen 4K FP16 copies otherwise). 0 = only the cropCapture key decides. Hot-reload.
+    int    gameCrop = 1;
+    // >0 = cap Wind's own render+present rate (fps) while zoomed over a fullscreen game; input
+    // sampling and panning still run at full tick rate, only capture/draw/present are skipped, so
+    // the magnifier trades its own fluidity for game headroom. NOTE: engaging it (like
+    // lowGpuPriority) switches the zoomed loop off the vsync-locked present onto timer pacing,
+    // which has a slightly less even present cadence - that's inherent to decoupling presents
+    // from ticks. 0 (default) = off. Clamped 0..240. Hot-reloadable.
+    int    gameFpsCap = 0;
     // First-launch onboarding: 0 = not yet onboarded (also true of a freshly created ini), so the
     // core spawns WindConfig.exe --onboard once; the onboarding flow sets this to 1 on completion.
     int    onboarded = 0;
@@ -165,6 +208,10 @@ bool ParseHexColor(const std::string& s, float& r, float& g, float& b);
 // Pure: render <-> magnify. "magnify" -> "render"; anything else -> "magnify" (so a corrupt
 // model value flips to a valid engine). Pure; used by the swap-model hotkey. No I/O, no <windows.h>.
 std::string FlipModel(const std::string& model);
+
+// Pure: the effective GPU scheduling priority (-1 low / 0 normal / +1 high) after folding the
+// legacy lowGpuPriority alias into gpuPriority. gpuPriority wins when non-zero.
+int EffectiveGpuPriority(const Config& c);
 
 // Pure: whether the edge outline should show at this zoom level, given the master `outline`
 // toggle and the optional low-zoom cutoff. (The "are we zoomed" level > 1.0 gate stays in the

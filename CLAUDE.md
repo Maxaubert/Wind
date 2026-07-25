@@ -27,8 +27,20 @@ Pure logic (no `<windows.h>`): `src/transform` (float `ComputeOffsetF`),
 `src/zoom_controller`, `src/cursor_mapper`, parse half of `src/config`.
 Win32 I/O: `render_engine`, `input_router`, `tray`, `main`.
 
-One paced tick loop; two models behind `IMagnifierModel` (`model=` ini key, restart to switch,
-`swapModelVk` flips + relaunches). `model=render` (default): `render_engine` = own DXGI Desktop
+One paced tick loop; models behind `IMagnifierModel` (`model=` ini key, restart to switch):
+`hybrid` (DEFAULT, "Auto" in the UI) constructs render + transform and picks per zoom-in at the
+idle->active edge - transform when the foreground covers the monitor AND is borderless (games,
+F11 video) on the primary, else render; `hybridSwitch=1` re-picks INSTANTLY while zoomed on
+foreground change, preserving level/lens (controller+mapper untouched). `transform` (revived
+issue #148) = DWM fullscreen transform via MagSet/private channel: compositor-internal, the only
+path that stays smooth over a heavy game (native-Magnifier parity measured); centered cursor via
+sprite in DESKTOP coords at the lens center (DWM magnifies layered windows on this build);
+continuous per-tick level (big discrete jumps are what cost ~30-50ms game frames - do NOT
+re-quantize ramps), tx keep-alive 1.5s after changes (value-static = DWM parks, action-start
+spike), launch warm-up 1.001, rest at 1.0005, maxLevel capped 16 (TDR territory above; desktop
+cliff ~4x per-window texture limits - why hybrid keeps render on desktop). Transform desktop
+hover accuracy is an OPEN issue (parked; hybrid avoids it). `swapModelVk` hotkey removed from
+the Settings UI (legacy ini key still parsed). `model=render` (default): `render_engine` = own DXGI Desktop
 Duplication capture + D3D11: magnifies a sub-pixel float source rect to a click-through,
 capture-excluded (`WDA_EXCLUDEFROMCAPTURE`) fullscreen overlay; draws the real cursor
 (`GetCursorInfo`) centered via `cursor_mapper`; hides the OS cursor (`MagShowSystemCursor`) and

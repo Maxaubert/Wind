@@ -21,11 +21,20 @@ TEST_CASE("magnifyStep parses and clamps to Windows' 5..400 range") {
     CHECK(ParseConfig("magnifyStep=-10\n").magnifyStep == 5);
 }
 
-TEST_CASE("legacy model=transform maps to magnify") {
-    // The removed transform model's role (DRM-safe magnification) is taken over by magnify;
-    // an ini written by an older build must keep working without falling back to render.
+TEST_CASE("model=transform is a first-class model again (issue #148 revival)") {
     Config c = ParseConfig("model=transform\n");
-    CHECK(c.model == "magnify");
+    CHECK(c.model == "transform");
+}
+
+TEST_CASE("transform-model knobs default and parse") {
+    Config d = ParseConfig("");
+    CHECK(d.fastPan == 1);
+    CHECK(d.smoothPan == 0);
+    CHECK(d.cursorSprite == 1);
+    Config c = ParseConfig("fastPan=0\nsmoothPan=1\ncursorSprite=0\n");
+    CHECK(c.fastPan == 0);
+    CHECK(c.smoothPan == 1);
+    CHECK(c.cursorSprite == 0);
 }
 
 TEST_CASE("unknown model value falls back to render") {
@@ -44,4 +53,9 @@ TEST_CASE("FlipModel alternates render and magnify") {
 TEST_CASE("FlipModel maps an unknown value to magnify") {
     CHECK(FlipModel("bogus") == "magnify");
     CHECK(FlipModel("") == "magnify");
+}
+TEST_CASE("transform model caps maxLevel at 16 (DWM high-zoom safety)") {
+    CHECK(ParseConfig("model=transform\nmaxLevel=20\n").maxLevel == doctest::Approx(16.0));
+    CHECK(ParseConfig("model=transform\nmaxLevel=8\n").maxLevel == doctest::Approx(8.0));
+    CHECK(ParseConfig("model=render\nmaxLevel=20\n").maxLevel == doctest::Approx(20.0));  // render unaffected
 }

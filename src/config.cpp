@@ -65,6 +65,11 @@ std::string FlipModel(const std::string& model) {
     return model == "magnify" ? "render" : "magnify";
 }
 
+int EffectiveGpuPriority(const Config& c) {
+    if (c.gpuPriority != 0) return c.gpuPriority;      // explicit tri-state wins
+    return c.lowGpuPriority != 0 ? -1 : 0;             // legacy alias: lowGpuPriority=1 -> low
+}
+
 Config ParseConfig(const std::string& text) {
     Config c;
     std::istringstream in(text);
@@ -110,6 +115,11 @@ Config ParseConfig(const std::string& text) {
             else if (key == "cursorVisibility")   c.cursorVisibility = val;
             else if (key == "model")              c.model = val;
             else if (key == "magnifyStep")        c.magnifyStep = std::stoi(val);
+            else if (key == "fastPan")            c.fastPan = std::stoi(val);
+            else if (key == "smoothPan")          c.smoothPan = std::stoi(val);
+            else if (key == "cursorSprite")       c.cursorSprite = std::stoi(val);
+            else if (key == "magInputTransform")  c.magInputTransform = std::stoi(val);
+            else if (key == "hybridSwitch")       c.hybridSwitch = std::stoi(val);
             else if (key == "bilinear")           c.bilinear = std::stoi(val);
             else if (key == "sharpness")          c.sharpness = std::stod(val);
             else if (key == "zorderBand")         c.zorderBand = std::stoi(val);
@@ -117,6 +127,10 @@ Config ParseConfig(const std::string& text) {
             else if (key == "hdrTonemap")         c.hdrTonemap = std::stoi(val);
             else if (key == "multiMonitor")       c.multiMonitor = std::stoi(val);
             else if (key == "cropCapture")        c.cropCapture = std::stoi(val);
+            else if (key == "lowGpuPriority")     c.lowGpuPriority = std::stoi(val);
+            else if (key == "gpuPriority")        c.gpuPriority = std::stoi(val);
+            else if (key == "gameCrop")           c.gameCrop = std::stoi(val);
+            else if (key == "gameFpsCap")         c.gameFpsCap = std::stoi(val);
             else if (key == "onboarded")          c.onboarded = std::stoi(val);
             else if (key == "quickZoomDefault")   c.quickZoomDefault = std::stod(val);
             else if (key == "quickZoomModifier")  c.quickZoomModifier = val;
@@ -149,11 +163,19 @@ Config ParseConfig(const std::string& text) {
     if (c.outlineThickness < 1)  c.outlineThickness = 1;
     if (c.outlineThickness > 40) c.outlineThickness = 40;
     c.outlineLowZoomMax  = clampd(c.outlineLowZoomMax,  1.0, 50.0);
+    if (c.gameFpsCap < 0)   c.gameFpsCap = 0;      // 0 = off
+    if (c.gameFpsCap > 240) c.gameFpsCap = 240;
+    if (c.gpuPriority < -1) c.gpuPriority = -1;    // tri-state: -1 low / 0 normal / +1 high
+    if (c.gpuPriority >  1) c.gpuPriority = 1;
     c.outlineIdleSeconds = clampd(c.outlineIdleSeconds, 0.5, 60.0);
-    // Legacy "transform" (the removed MagSetFullscreenTransform model) maps to its successor in
-    // the same role (DRM-safe magnification); anything else unknown falls back to render.
-    if (c.model == "transform") c.model = "magnify";
-    if (c.model != "render" && c.model != "magnify") c.model = "render";
+    // "transform" is a first-class model again (revived for issue #148: the compositor-internal
+    // zoom that stays smooth over heavy games); anything unknown falls back to render.
+    if (c.model != "render" && c.model != "magnify" && c.model != "transform" &&
+        c.model != "hybrid") c.model = "render";
+    // Transform-model safety: DWM magnification above ~16x can stress the compositor/driver hard
+    // (historically: GPU TDRs at high zoom over transparent content). Native Magnifier caps at
+    // 16x too. Applies to transform and to hybrid (whose game sessions run the transform path).
+    if ((c.model == "transform" || c.model == "hybrid") && c.maxLevel > 16.0) c.maxLevel = 16.0;
     if (c.magnifyStep < 5)   c.magnifyStep = 5;     // Windows Settings' own range is 5..400
     if (c.magnifyStep > 400) c.magnifyStep = 400;
     // Reject keybinds to keys Wind must never swallow (see IsForbiddenBindVk). A bound key is
@@ -274,6 +296,19 @@ Config LoadConfig(const std::wstring& path) {
                ";   1=on a full-screen repaint (games) copy only the magnified region (cuts 4K HDR GPU\n"
                ";   copy ~zoom^2) but screen edges can briefly show a previous window after a switch.\n"
                "cropCapture=0\n"
+               "; gpuPriority: GPU scheduling priority of Wind's render work. -1=low (yield to a\n"
+               ";   busy game; a saturated game can starve/freeze the zoomed view), 0=normal,\n"
+               ";   1=high (the zoomed view jumps a busy game's GPU queue - smoothest magnifier,\n"
+               ";   the game gives up a sliver). Restart to apply.\n"
+               "gpuPriority=0\n"
+               "; gameCrop: 1=while a fullscreen game is foreground, always copy only the magnified\n"
+               ";   region (safe there - the game repaints everything each frame; big HDR/4K win);\n"
+               ";   0=only cropCapture decides\n"
+               "gameCrop=1\n"
+               "; gameFpsCap: cap Wind's own render rate (fps) while zoomed over a fullscreen game,\n"
+               ";   freeing GPU headroom for the game (input/pan sampling stays at full rate).\n"
+               ";   0=off (default); try 72 on a 144Hz display if the game still stutters.\n"
+               "gameFpsCap=0\n"
                "; outline: 1 = draw a solid outline around the screen edges while zoomed (an\n"
                ";   at-a-glance 'you are zoomed' indicator, handy at low zoom); 0 = off (default)\n"
                "outline=0\n"

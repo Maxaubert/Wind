@@ -68,6 +68,7 @@ struct RenderEngine::State {
 
     // Desktop Duplication.
     ComPtr<IDXGIOutputDuplication> dupl;
+    ComPtr<IDXGIOutput> waitOutput;           // target output, cached for waitVBlank (issue #148)
     ComPtr<ID3D11Texture2D> desktopCopy;      // SRV-able copy of the captured desktop (no cursor)
     ComPtr<ID3D11ShaderResourceView> desktopSRV;
     bool haveDesktop = false;
@@ -78,6 +79,13 @@ struct RenderEngine::State {
     bool revealFenceArm    = false;    // issue the fence right after the next Present (set on activation)
     bool revealFenceIssued = false;    // End() was called; GetData is meaningful
     bool revealFenceDone   = false;    // cached S_OK so we stop polling once complete
+    // Present-completion fence (issue #148): an event query issued after EVERY Present. When
+    // p.gatePresent is set (zoomed over a fullscreen game), renderFrame skips the whole frame
+    // (capture/draw/present) while the previous present hasn't executed on the GPU yet, so a
+    // starved/saturated GPU can never block the main thread inside Present - the wedge that froze
+    // input, teardown, and the cursor restore when the GPU scheduler starved our low-priority work.
+    ComPtr<ID3D11Query> presentFence;
+    bool presentFenceIssued = false;
     std::vector<unsigned char> metaBuf;   // reused buffer for GetFrameMoveRects/GetFrameDirtyRects
     // Diagnostics for the HDR investigation: the duplication's surface format + the output's
     // color space / bit depth (tells us whether the desktop is HDR and what we're capturing).
@@ -85,6 +93,12 @@ struct RenderEngine::State {
     int  outColorSpace = -1;     // DXGI_COLOR_SPACE_TYPE of the output (12 = HDR10 G2084)
     int  outBitsPerColor = 0;
     bool wantHdrTonemap = false; // config: opt-in HDR->SDR tonemap (default off = current path)
+    int  gpuPri = 0;             // config: -1 low / 0 normal / +1 high WDDM priority (issue #148)
+    // Frame-perf counters (issue #148 diagnostics): CPU ms building the frame vs blocked in
+    // Present, plus presented-frame and fence-gate-skip counts. Drained by debugPerf().
+    double perfRenderSumMs = 0.0, perfRenderMaxMs = 0.0;
+    double perfPresentSumMs = 0.0, perfPresentMaxMs = 0.0;
+    int    perfFrames = 0, perfGateSkips = 0;
     bool rotated = false;        // target output is portrait (90/270); capture not supported - logged
     bool capFp16 = false;        // capturing FP16 scRGB (tonemap active)
     double sdrWhiteNits = 200.0; // OS SDR white level for the tonemap scale
@@ -229,6 +243,7 @@ bool RenderEngine::State::recreateDupl() {
         if (output1) { hr = output1->DuplicateOutput(device.Get(), dupl.ReleaseAndGetAddressOf()); output1->Release(); }
         RLog("recreateDupl: DuplicateOutput hr=0x%08lX capFp16=0", (unsigned long)hr);
     }
+    waitOutput = output;          // keep a ref for waitVBlank (released with the device set)
     SafeRelease(output);
     if (SUCCEEDED(hr) && dupl) {
         DXGI_OUTDUPL_DESC dd{};
@@ -420,9 +435,12 @@ bool RenderEngine::recoverDeviceLost() {
     // is reset so updateCursorTexture re-uploads against the new device on the next frame.
     s_->ready = false;
     s_->dupl.Reset();
+    s_->waitOutput.Reset();
     s_->desktopCopy.Reset(); s_->desktopSRV.Reset();
     s_->cursorTex.Reset(); s_->cursorSRV.Reset(); s_->cursorReady = false; s_->lastCursor = nullptr;
     s_->crosshairSRV.Reset();   // device-dependent; rebuilt in buildDeviceResources
+    s_->presentFence.Reset(); s_->presentFenceIssued = false;
+    s_->revealFence.Reset();
     s_->cursorCache.clear();   // cached cursor textures belong to the dead device
     s_->vs.Reset(); s_->ps.Reset(); s_->cvs.Reset(); s_->cps.Reset();
     s_->cb.Reset(); s_->ccb.Reset();
@@ -444,8 +462,21 @@ void RenderEngine::debugInfo(int& screenW, int& screenH, int& curW, int& curH, i
 void RenderEngine::debugHdr(unsigned& ddaFormat, int& colorSpace, int& bitsPerColor) const {
     ddaFormat = s_->ddaFormat; colorSpace = s_->outColorSpace; bitsPerColor = s_->outBitsPerColor;
 }
+void RenderEngine::debugPerf(double& renderSumMs, double& renderMaxMs,
+                             double& presentSumMs, double& presentMaxMs,
+                             int& frames, int& gateSkips, bool reset) {
+    renderSumMs = s_->perfRenderSumMs;   renderMaxMs = s_->perfRenderMaxMs;
+    presentSumMs = s_->perfPresentSumMs; presentMaxMs = s_->perfPresentMaxMs;
+    frames = s_->perfFrames; gateSkips = s_->perfGateSkips;
+    if (reset) {
+        s_->perfRenderSumMs = s_->perfRenderMaxMs = 0.0;
+        s_->perfPresentSumMs = s_->perfPresentMaxMs = 0.0;
+        s_->perfFrames = 0; s_->perfGateSkips = 0;
+    }
+}
 
-bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool hdrTonemap) {
+bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool hdrTonemap,
+                              int gpuPriority) {
     const int screenW = monitor.w, screenH = monitor.h;
     s_->sw = screenW;
     s_->sh = screenH;
@@ -453,8 +484,10 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     s_->originY = monitor.y;
     lstrcpynW(s_->targetDevice, monitor.device, 32);   // "" = first output (legacy path)
     s_->wantHdrTonemap = hdrTonemap;   // read before recreateDupl decides the capture format
-    RLog("=== initialize device=%ls origin=(%d,%d) size=%dx%d band=%d hdrTonemap=%d ===",
-         s_->targetDevice, monitor.x, monitor.y, screenW, screenH, zorderBand, (int)hdrTonemap);
+    s_->gpuPri = gpuPriority;          // read in buildPresent (device (re)build applies it)
+    RLog("=== initialize device=%ls origin=(%d,%d) size=%dx%d band=%d hdrTonemap=%d gpuPri=%d ===",
+         s_->targetDevice, monitor.x, monitor.y, screenW, screenH, zorderBand, (int)hdrTonemap,
+         gpuPriority);
 
     // --- Overlay window: fullscreen, borderless, topmost, click-through, no-activate ---
     static const wchar_t* kClass = L"WindRenderOverlay";
@@ -470,8 +503,13 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     // surface (LWA_ALPHA 255 = fully opaque). A DirectComposition flip-model present was tried
     // twice (#11, #69) and abandoned: it tears on a VRR display and droops to the VRR-floated
     // composite rate when forced onto DwmFlush, so blt is the only present path.
-    const DWORD exStyle = WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST |
+    // WIND_NOLAYERED=1: measurement-only diagnostic (issue #148) - drop WS_EX_LAYERED to test
+    // whether DWM's layered-window update path is what throttles present consumption under a
+    // game. BREAKS click-through and alpha show/hide; never ship a session with it set.
+    const bool noLayered = GetEnvironmentVariableW(L"WIND_NOLAYERED", nullptr, 0) > 0;
+    const DWORD exStyle = (noLayered ? 0 : WS_EX_LAYERED) | WS_EX_TRANSPARENT | WS_EX_TOPMOST |
                           WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
+    if (noLayered) RLog("initialize: WIND_NOLAYERED diagnostic build path (no WS_EX_LAYERED)");
     s_->hwnd = nullptr;
     // Higher z-band (needs UIAccess) so we draw above the shell's immersive bands - the only
     // way an overlay can cover the Start menu / taskbar / tray flyouts. Undocumented, so we
@@ -643,6 +681,9 @@ bool RenderEngine::State::buildDeviceResources() {
         D3D11_QUERY_DESC qd{ D3D11_QUERY_EVENT, 0 };
         if (FAILED(device->CreateQuery(&qd, revealFence.ReleaseAndGetAddressOf())))
             RLog("buildDeviceResources: reveal-fence CreateQuery failed (non-fatal)");
+        if (FAILED(device->CreateQuery(&qd, presentFence.ReleaseAndGetAddressOf())))
+            RLog("buildDeviceResources: present-fence CreateQuery failed (non-fatal)");
+        presentFenceIssued = false;
     }
 
     // --- Desktop Duplication ---
@@ -666,12 +707,19 @@ void RenderEngine::setVisible(bool visible) {
     // overlay was still visible - a guaranteed one-frame black flash on every zoom-out. With the
     // alpha set first, any composite from here on shows nothing, and the black present lands on a
     // hidden surface (the same present-while-hidden pattern the zoom-in reveal relies on).
+    // Same never-block rule as the gated renderFrame (issue #148): if the previous present is
+    // still in flight on a starved/saturated GPU, SKIP the scrub rather than let its Present block
+    // the teardown path (which must go on to restore the cursor). The retained frame then stays,
+    // but the reveal gating (#140) already protects the next zoom-in from flashing it.
     if (!visible && s_->ready && !s_->deviceLost && s_->swap &&
-        (s_->rtv || s_->acquireBackbufferRtv())) {
+        (s_->rtv || s_->acquireBackbufferRtv()) &&
+        !(s_->presentFence && s_->presentFenceIssued &&
+          s_->ctx->GetData(s_->presentFence.Get(), nullptr, 0, 0) == S_FALSE)) {
         const float clear[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
         s_->ctx->OMSetRenderTargets(1, s_->rtv.GetAddressOf(), nullptr);
         s_->ctx->ClearRenderTargetView(s_->rtv.Get(), clear);
         s_->swap->Present(0, 0);
+        if (s_->presentFence) { s_->ctx->End(s_->presentFence.Get()); s_->presentFenceIssued = true; }
     }
     if (visible) {
         SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
@@ -766,11 +814,39 @@ bool RenderEngine::State::acquireBackbufferRtv() {
     return SUCCEEDED(device->CreateRenderTargetView(back.Get(), nullptr, rtv.ReleaseAndGetAddressOf()));
 }
 
+// Set this PROCESS's WDDM scheduling class (one-shot). Lowering needs no privilege; RAISING
+// above normal needs increased-base-priority rights and may be denied - logged, non-fatal (the
+// per-device SetGPUThreadPriority below is the lever that matters). D3DKMT* lives in gdi32 and
+// is loaded dynamically (a kernel-thunk API, not in any import lib we link). Issue #148.
+static void ApplyProcessGpuPriority(int gpuPri) {
+    static bool s_done = false;
+    if (s_done) return;
+    s_done = true;
+    enum KmtPriorityClass { KMT_PRIO_IDLE = 0, KMT_PRIO_BELOW_NORMAL = 1,
+                            KMT_PRIO_NORMAL = 2, KMT_PRIO_ABOVE_NORMAL = 3, KMT_PRIO_HIGH = 4 };
+    using PFN_SetPrio = LONG(APIENTRY*)(HANDLE, int);
+    if (HMODULE gdi = GetModuleHandleW(L"gdi32.dll")) {
+        if (auto p = reinterpret_cast<PFN_SetPrio>(
+                GetProcAddress(gdi, "D3DKMTSetProcessSchedulingPriorityClass"))) {
+            const int cls = gpuPri < 0 ? KMT_PRIO_BELOW_NORMAL : KMT_PRIO_ABOVE_NORMAL;
+            LONG st = p(GetCurrentProcess(), cls);
+            RLog("gpuPriority %d: process scheduling class %d status=0x%08lX",
+                 gpuPri, cls, (unsigned long)st);
+        }
+    }
+}
+
 bool RenderEngine::State::buildPresent() {
     releasePresent();
     ComPtr<IDXGIDevice1> dxgiDev;
     if (FAILED(device->QueryInterface(IID_PPV_ARGS(&dxgiDev)))) { RLog("buildPresent: QI IDXGIDevice1 failed"); return false; }
     dxgiDev->SetMaximumFrameLatency(1);
+    if (gpuPri != 0) {
+        const INT prio = gpuPri > 0 ? 7 : -7;
+        HRESULT hp = dxgiDev->SetGPUThreadPriority(prio);
+        ApplyProcessGpuPriority(gpuPri);
+        RLog("buildPresent: SetGPUThreadPriority(%d) hr=0x%08lX", prio, (unsigned long)hp);
+    }
     ComPtr<IDXGIAdapter> adapter;
     if (FAILED(dxgiDev->GetAdapter(&adapter))) { RLog("buildPresent: GetAdapter failed"); return false; }
     ComPtr<IDXGIFactory2> factory;
@@ -1041,8 +1117,13 @@ bool RenderEngine::renderFrame(const RenderFrameParams& p) {
     // (the common case), so steady-state ticks do no DWM z-order work, and reclaim is immediate
     // when something does pop above us. The 1 s unconditional backstop self-heals if the displaced
     // check ever misses a case. A banded window stays in its band across SetWindowPos.
+    // The 1 s unconditional backstop is SKIPPED while a fullscreen game is foreground (p.fsGame):
+    // SetWindowPos over a game is a synchronous DWM z-order transaction that hitches it once a
+    // second, and nothing that isn't caught by overlayDisplaced can displace us over a fullscreen
+    // app anyway (issue #148). The displaced check still runs every frame, so real displacement
+    // (RTSS et al.) is reclaimed immediately in both cases.
     unsigned long long nowMs = GetTickCount64();
-    if (overlayDisplaced(s_->hwnd) || nowMs - s_->lastTopmostMs >= 1000) {
+    if (overlayDisplaced(s_->hwnd) || (!p.fsGame && nowMs - s_->lastTopmostMs >= 1000)) {
         s_->lastTopmostMs = nowMs;
         SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
@@ -1054,10 +1135,44 @@ bool RenderEngine::renderFrame(const RenderFrameParams& p) {
         SetCursorPos(p.clickDesktopX, p.clickDesktopY);
         s_->lastClickX = p.clickDesktopX; s_->lastClickY = p.clickDesktopY;
     }
+    // Present-fence gate (issue #148): while zoomed over a fullscreen game, never queue a present
+    // behind one the GPU hasn't executed yet. With the previous present still in flight, a vsync'd
+    // or latency-limited Present BLOCKS the calling (main) thread until the GPU gets scheduled -
+    // and a saturated game can starve us for minutes, wedging input, teardown, and the cursor
+    // restore. Skipping the frame keeps the tick loop live; the view simply updates when the GPU
+    // next lets it. Cursor sync (above) and the displaced check already ran, so responsiveness of
+    // clicks/topmost is unaffected. A FAILED GetData falls through to Present, which reports
+    // device-removed properly.
+    if (p.gatePresent && s_->presentFence && s_->presentFenceIssued &&
+        s_->ctx->GetData(s_->presentFence.Get(), nullptr, 0, 0) == S_FALSE) {
+        s_->perfGateSkips++;
+        return true;
+    }
+    // Perf split (issue #148 diagnostics): time the CPU cost of building the frame (capture +
+    // draw submission) separately from the time blocked inside Present - the latter is where GPU
+    // contention with a game manifests. Two QPC reads per frame; negligible.
+    LARGE_INTEGER pf{}, t0{}, t1{}, t2{};
+    QueryPerformanceFrequency(&pf);
+    QueryPerformanceCounter(&t0);
     s_->render(p);
+    QueryPerformanceCounter(&t1);
     // p.vsync = (cfg.vsync && !cfg.dwmFlush): sync interval 1 locks the present to the refresh;
-    // 0 presents immediately and the caller paces via DwmFlush or the timer.
-    HRESULT hr = s_->swap->Present(p.vsync ? 1 : 0, 0);
+    // 0 presents immediately and the caller paces via DwmFlush or the timer. syncOverride > 0
+    // forces that interval (2 = the steady half-rate game mode).
+    const UINT si = p.syncOverride > 0 ? (UINT)p.syncOverride : (p.vsync ? 1u : 0u);
+    static UINT s_lastSi = 99;
+    if (si != s_lastSi) { s_lastSi = si; RLog("present: sync interval -> %u", si); }
+    HRESULT hr = s_->swap->Present(si, 0);
+    QueryPerformanceCounter(&t2);
+    {
+        const double renderMs  = double(t1.QuadPart - t0.QuadPart) * 1000.0 / double(pf.QuadPart);
+        const double presentMs = double(t2.QuadPart - t1.QuadPart) * 1000.0 / double(pf.QuadPart);
+        s_->perfRenderSumMs += renderMs;
+        s_->perfPresentSumMs += presentMs;
+        if (renderMs  > s_->perfRenderMaxMs)  s_->perfRenderMaxMs  = renderMs;
+        if (presentMs > s_->perfPresentMaxMs) s_->perfPresentMaxMs = presentMs;
+        s_->perfFrames++;
+    }
     if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
         s_->deviceLost = true; RLog("present: device lost hr=0x%08lX", (unsigned long)hr);
         return false;
@@ -1069,6 +1184,12 @@ bool RenderEngine::renderFrame(const RenderFrameParams& p) {
         s_->ctx->End(s_->revealFence.Get());
         s_->revealFenceArm = false;
         s_->revealFenceIssued = true;
+    }
+    // Present-completion fence: mark the GPU timeline after every Present so the next gated frame
+    // (and the hide-scrub) can check whether this present has actually executed (issue #148).
+    if (s_->presentFence && SUCCEEDED(hr)) {
+        s_->ctx->End(s_->presentFence.Get());
+        s_->presentFenceIssued = true;
     }
     return SUCCEEDED(hr);
 }
@@ -1092,6 +1213,11 @@ static LONG WINAPI CursorRestoreFilter(EXCEPTION_POINTERS* ep) {
     SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, SPIF_SENDCHANGE);
     wind::WriteCrashReport(ep);          // minidump + text summary into the log dir
     return EXCEPTION_CONTINUE_SEARCH;   // let the default handler still report the crash
+}
+
+bool RenderEngine::waitVBlank() {
+    if (!s_ || !s_->waitOutput) return false;
+    return SUCCEEDED(s_->waitOutput->WaitForVBlank());
 }
 
 void RenderEngine::hideSystemCursor(bool hide) {

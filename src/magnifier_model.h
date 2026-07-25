@@ -14,6 +14,13 @@ struct PresentExtras {
     int   clickDesktopY = 0;
     bool  clickOverride = false;  // true when clickDesktop* should replace the mapper's click point
     bool  drawCursor = true;      // whether a cursor should be shown at all this frame
+    // Game perf (issue #148; render model only, others ignore):
+    bool  fsGame = false;         // foreground covers the monitor -> skip the periodic topmost backstop
+    bool  forceCrop = false;      // fsGame && gameCrop: crop the capture copy to the magnified region
+    bool  noVsync = false;        // game pacing engaged: Present(0,0); the main loop's timer paces
+    bool  gatePresent = false;    // skip the frame while the previous present hasn't executed on the
+                                  //   GPU (never block the main thread on a starved GPU)
+    int   syncOverride = 0;       // 0 = cfg-driven; 2 = vblank-locked half-rate presents (game mode)
 };
 struct IMagnifierModel {
     virtual ~IMagnifierModel() = default;

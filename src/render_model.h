@@ -16,7 +16,7 @@ void FillRenderParams(RenderFrameParams& p, const MapResult& r, const Config& cf
 // render path behaves identically while RunTick moves behind the interface (Task 4).
 class RenderModel : public IMagnifierModel {
 public:
-    explicit RenderModel(int zorderBand, bool hdrTonemap);
+    explicit RenderModel(int zorderBand, bool hdrTonemap, int gpuPriority);
     bool initialize(const MonitorTarget& m) override;
     void shutdown() override;
     bool ready() const override;
@@ -34,10 +34,12 @@ public:
     bool frameCompositedSincePrime() const;
     bool revealFrameDone(double spinBudgetMs = 0.0);
     void invalidateCapture();
+    bool waitVBlank();        // reduced-push game mode: skip ticks block to the next vblank
 private:
     RenderEngine engine_;
     int  zorderBand_;
     bool hdrTonemap_;
+    int  gpuPriority_;
     bool primed_ = false;
 };
 }
