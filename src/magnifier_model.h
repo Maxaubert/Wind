@@ -20,6 +20,7 @@ struct PresentExtras {
     bool  noVsync = false;        // game pacing engaged: Present(0,0); the main loop's timer paces
     bool  gatePresent = false;    // skip the frame while the previous present hasn't executed on the
                                   //   GPU (never block the main thread on a starved GPU)
+    int   syncOverride = 0;       // 0 = cfg-driven; 2 = vblank-locked half-rate presents (game mode)
 };
 struct IMagnifierModel {
     virtual ~IMagnifierModel() = default;

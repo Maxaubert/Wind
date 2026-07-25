@@ -204,6 +204,8 @@ struct TickState {
     bool   gamePacing         = false;         // zoomed over a fullscreen game -> main loop timer
                                                //   paces (a blocking present must never pace: a
                                                //   saturated GPU can starve it and wedge the tick)
+    bool   gameCapVsync       = false;         // gameFpsCap engaged with vsync: timer at ~cap rate
+                                               //   + blocking present snaps each frame to a vblank
     double quickZoomStored    = 0.0;           // remembered quick-zoom level (0 = none yet); in-memory
     bool   prevInHeld         = false;         // for rising-edge detection of the zoom-in channel
     bool   prevOutHeld        = false;
@@ -699,7 +701,18 @@ static void RunTick(TickState& t) {
         // mapper. The activation and reveal-pending ticks always attempt a present (the gated
         // reveal depends on frames reaching the redirection surface).
         bool doPresent = true;
-        const bool gamePacing = fsGame && zoomed &&
+        // Reduced-rate game mode (issue #148): lab-measured, a saturated game makes DWM's
+        // composite run 1-3 vblanks late ~10x/s, so full-rate presents hitch irregularly
+        // (7,7,21,7,14... ms) - and it's the IRREGULARITY that reads as stutter. gameFpsCap>0
+        // over a fullscreen game runs the loop at a steady reduced rate instead: the main-loop
+        // timer paces slightly FASTER than the cap and the blocking Present(1,0) snaps each
+        // frame to the next vblank (timer = rate, vsync = phase lock; DXGI ignores sync
+        // interval 2 on a windowed blt swapchain, so this is the only way to hold a locked
+        // divisor cadence). Every frame gets ~2 vblanks of slack to absorb late composites.
+        const bool capVsync = fsGame && zoomed && t.cfg.gameFpsCap > 0 &&
+                              t.cfg.vsync != 0 && t.cfg.dwmFlush == 0;
+        t.gameCapVsync = capVsync;
+        const bool gamePacing = fsGame && zoomed && !capVsync &&
                                 (EffectiveGpuPriority(t.cfg) < 0 || t.cfg.gameFpsCap > 0);
         t.gamePacing = gamePacing;
         if (gamePacing) {
@@ -796,6 +809,7 @@ static void RunTick(TickState& t) {
         t.model.hideSystemCursor(false);
         t.outlineZoneSec = 0.0;                       // zoom-out clears the low-zoom dwell (no banked partial)
         t.gamePacing = false;                         // idle: normal timer pacing
+        t.gameCapVsync = false;
         t.presentAccum = 0.0;
         if (t.prevInspect) {
             EndGameInspect(t);   // teardown-to-idle exits game-inspect too (foreground returned)
@@ -1400,12 +1414,20 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         // Game pacing engaged: presents are non-blocking Present(0,0) frames (and may be skipped
         // by the fence gate), so the blocking-present pace is unavailable - fall through to the
         // timer (full tick rate; frame work skips inside renderFrame as needed).
+        // gameCapVsync engaged: the timer paces at ~1.17x the cap and the blocking Present(1,0)
+        // inside the tick snaps each frame to the next vblank - a steady vblank-locked divisor
+        // cadence (the timer alone would drift against the refresh; the present phase-locks it).
         bool renderPresentPaces = renderModelActive && zoomed && !dwmPaces && ts.cfg.vsync != 0 &&
-                                  !ts.gamePacing;
+                                  !ts.gamePacing && !ts.gameCapVsync;
         if (!renderPresentPaces && !dwmPaces) {
-            // Recompute the timer interval if the paced refresh changed (retarget to a different-Hz
-            // monitor updates ts.hz). Cheap equality check; only recomputes on an actual change (#74).
-            if (ts.hz > 0 && ts.hz != pacedHz) { pacedHz = ts.hz; due.QuadPart = -(10000000LL / pacedHz); }
+            // Recompute the timer interval if the paced rate changed (retarget to a different-Hz
+            // monitor updates ts.hz; entering/leaving the capped game mode switches rates) (#74).
+            int wantHz = ts.hz;
+            if (ts.gameCapVsync && ts.cfg.gameFpsCap > 0) {
+                wantHz = ts.cfg.gameFpsCap + ts.cfg.gameFpsCap / 6;   // ~1.17x: arrive early, vblank snaps
+                if (wantHz > ts.hz) wantHz = ts.hz;
+            }
+            if (wantHz > 0 && wantHz != pacedHz) { pacedHz = wantHz; due.QuadPart = -(10000000LL / pacedHz); }
             if (timer) {
                 SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);
                 WaitForSingleObject(timer, INFINITE);

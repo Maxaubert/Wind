@@ -41,6 +41,11 @@ struct RenderFrameParams {
                                 //   fullscreen game so a saturated/starving GPU can never block the
                                 //   main thread inside Present (issue #148 wedge: frozen input,
                                 //   no teardown, cursor stranded hidden). SetCursorPos still syncs.
+    int    syncOverride;        // 0 = use `vsync`; N>0 = Present(N,0). 2 = vblank-locked HALF rate:
+                                //   under a saturated game DWM's composite runs 1-3 vblanks late
+                                //   ~10x/s (measured), so full-rate presents hitch irregularly; a
+                                //   locked half rate gives every frame 2 vblanks of slack and turns
+                                //   the cadence steady - steadiness is what reads as smooth (#148).
 };
 
 // Own capture + Direct3D 11 renderer. Captures the desktop via DXGI Desktop Duplication

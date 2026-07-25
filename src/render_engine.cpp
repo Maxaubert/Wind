@@ -1149,8 +1149,12 @@ bool RenderEngine::renderFrame(const RenderFrameParams& p) {
     s_->render(p);
     QueryPerformanceCounter(&t1);
     // p.vsync = (cfg.vsync && !cfg.dwmFlush): sync interval 1 locks the present to the refresh;
-    // 0 presents immediately and the caller paces via DwmFlush or the timer.
-    HRESULT hr = s_->swap->Present(p.vsync ? 1 : 0, 0);
+    // 0 presents immediately and the caller paces via DwmFlush or the timer. syncOverride > 0
+    // forces that interval (2 = the steady half-rate game mode).
+    const UINT si = p.syncOverride > 0 ? (UINT)p.syncOverride : (p.vsync ? 1u : 0u);
+    static UINT s_lastSi = 99;
+    if (si != s_lastSi) { s_lastSi = si; RLog("present: sync interval -> %u", si); }
+    HRESULT hr = s_->swap->Present(si, 0);
     QueryPerformanceCounter(&t2);
     {
         const double renderMs  = double(t1.QuadPart - t0.QuadPart) * 1000.0 / double(pf.QuadPart);

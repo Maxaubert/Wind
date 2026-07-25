@@ -74,6 +74,7 @@ void RenderModel::present(const MapResult& r, double level, const Config& cfg,
     if (ex.forceCrop) p.cropCapture = true;     // game session: crop the copy to the magnified view
     if (ex.noVsync)   p.vsync = false;          // game pacing: timer paces, Present(0,0)
     p.gatePresent = ex.gatePresent;             // never block the tick behind an in-flight present
+    p.syncOverride = ex.syncOverride;           // 2 = steady half-rate vblank lock (game mode)
     engine_.renderFrame(p);
 }
 }
