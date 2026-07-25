@@ -30,7 +30,11 @@ private:
     std::unique_ptr<CursorBlanker> blanker_;
     std::unique_ptr<CursorSprite> sprite_;
     unsigned long long lastPinAssertMs_ = 0;
-    int  keepAliveTick_ = 0;                         // alternates the epsilon keep-alive (issue #148)
+    int  keepAliveTick_ = 0;                         // alternates the tx keep-alive (issue #148)
+    int  rampTick_ = 0;                              // level-ramp divisor counter (issue #148)
+    int  lastOffX_ = 0, lastOffY_ = 0, lastTxX_ = 0, lastTxY_ = 0;   // last applied transform
+    double lastLevel_ = 0.0;
+    unsigned long long lastChangeMs_ = 0;            // when the transform last REALLY changed
     bool haveLastClick_ = false;                     // dedup the OS-cursor recenter (SetCursorPos)
     int  lastClickX_ = 0, lastClickY_ = 0;
 };

@@ -54,15 +54,38 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     //     so sprite, content, and click point stay welded there too.
     // Bonus vs the old anchored design: the sprite now barely MOVES (center, except at edges), which
     // kills the sprite-lags-the-view wobble that plagued the anchored model during pans.
-    // KEEP-ALIVE (issue #148 action-start spike): DWM discards its magnification resources when
-    // the transform VALUE sits still (we already call every tick - call frequency is not it) and
-    // pays a ~1fps rebuild spike on the next real change (zoom start, pan resume, direction
-    // change). Jitter the level by an invisible epsilon (0.01%, sub-pixel across the whole 4K
-    // frame) on alternating ticks so the value never goes static and the pipeline stays hot.
-    keepAliveTick_ ^= 1;
-    const double lvlKA = level + (keepAliveTick_ ? level * 0.0001 : 0.0);
-    MagTransform m = ComputeMagTransform(r.srcLeft, r.srcTop, lvlKA);
-    host_.setTransform((float)lvlKA, m.offX, m.offY, m.txX, m.txY, fastPan_);
+    // KEEP-ALIVE v2 (issue #148 action-start spike): DWM discards its magnification resources
+    // when the transform VALUE sits still and pays a ~1fps rebuild on the next real change.
+    // v1 jittered the LEVEL by an epsilon - that forced a full re-SCALE of every cached surface
+    // every tick, whose cost grows with zoom (constant ~1fps at 16x: the cure was the disease).
+    // v2 jitters only the private-channel TRANSLATION by 1 screen px on alternating ticks - a
+    // re-COMPOSITE of already-scaled surfaces, cheap at any level - and only while within 1.5s
+    // of the last REAL change: brief pauses (the pan-stop-pan pattern) stay hot, while true idle
+    // lets DWM park legitimately (one spike after a long idle is acceptable; one per pause was not).
+    // Ramp cost limiter (measured: 150-215ms spikes during zoom ramps at high level): every LEVEL
+    // change makes DWM re-scale its cached surfaces, and the cost grows with the level. Apply the
+    // ramping level at most every 3rd tick (48Hz on a 144Hz panel - visually still a smooth ramp);
+    // panning updates stay per-tick at the applied level so the geometry is always consistent.
+    // level==lastLevel_ (no ramp) and the 1x reset apply immediately.
+    rampTick_++;
+    double applyLevel = level;
+    if (lastLevel_ > 0.0 && level != lastLevel_ && level > 1.0 && (rampTick_ % 3) != 0)
+        applyLevel = lastLevel_;
+    MagTransform m = ComputeMagTransform(r.srcLeft, r.srcTop, applyLevel);
+    const bool changed = m.offX != lastOffX_ || m.offY != lastOffY_ ||
+                         m.txX != lastTxX_ || m.txY != lastTxY_ || applyLevel != lastLevel_;
+    if (changed) {
+        lastOffX_ = m.offX; lastOffY_ = m.offY; lastTxX_ = m.txX; lastTxY_ = m.txY;
+        lastLevel_ = applyLevel;
+        lastChangeMs_ = GetTickCount64();
+        keepAliveTick_ = 0;
+    }
+    int txJitter = 0;
+    if (!changed && GetTickCount64() - lastChangeMs_ < 1500) {
+        keepAliveTick_ ^= 1;
+        txJitter = keepAliveTick_;
+    }
+    host_.setTransform((float)applyLevel, m.offX, m.offY, m.txX + txJitter, m.txY, fastPan_);
     // FIELD-MEASURED (issue #148, this Windows build): DWM's fullscreen magnification DOES
     // magnify layered windows. So the sprite lives in DESKTOP coordinates at the lens center
     // (clickDesktop): the transform displays it AT the screen center (T(center) == cursorScreen,
