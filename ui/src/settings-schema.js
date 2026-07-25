@@ -27,7 +27,7 @@ export const sections = [
   ]},
   { id:'display', label:'Display', icon:'display', desc:'Image quality of the magnified view.', rows: [
     { key:'model', type:'select', label:'Magnifier model',
-      desc:'Auto picks per zoom: Render on the desktop (centered cursor), Transform over fullscreen games (compositor-smooth). Render = GPU overlay. Transform = DWM fullscreen zoom. Windows Magnifier = native Magnify.exe, for DRM video (Netflix). Restart to switch.',
+      desc:'The engine that runs the magnifier. Auto picks the best one for the app in front. Restart to switch.',
       options:['hybrid','render','transform','magnify'],
       optionLabels:{ hybrid:'Auto', render:'Render', transform:'Transform', magnify:'Windows Magnifier' },
       def:'hybrid' },

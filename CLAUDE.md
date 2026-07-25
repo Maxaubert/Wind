@@ -39,8 +39,7 @@ continuous per-tick level (big discrete jumps are what cost ~30-50ms game frames
 re-quantize ramps), tx keep-alive 1.5s after changes (value-static = DWM parks, action-start
 spike), launch warm-up 1.001, rest at 1.0005, maxLevel capped 16 (TDR territory above; desktop
 cliff ~4x per-window texture limits - why hybrid keeps render on desktop). Transform desktop
-hover accuracy is an OPEN issue (parked; hybrid avoids it). `swapModelVk` hotkey removed from
-the Settings UI (legacy ini key still parsed). `model=render` (default): `render_engine` = own DXGI Desktop
+hover accuracy is an OPEN issue (parked; hybrid avoids it). `swapModelVk` is fully retired: the ini key is IGNORED (field stays 0; hook never binds it; the RunTick swap edge is dead code). `model=render` (default): `render_engine` = own DXGI Desktop
 Duplication capture + D3D11: magnifies a sub-pixel float source rect to a click-through,
 capture-excluded (`WDA_EXCLUDEFROMCAPTURE`) fullscreen overlay; draws the real cursor
 (`GetCursorInfo`) centered via `cursor_mapper`; hides the OS cursor (`MagShowSystemCursor`) and

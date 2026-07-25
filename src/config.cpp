@@ -89,7 +89,6 @@ Config ParseConfig(const std::string& text) {
             else if (key == "zoomOutButton2")   c.zoomOutButton2 = std::stoi(val);
             else if (key == "recenterVk")       c.recenterVk = std::stoi(val);
             else if (key == "cursorLockVk")     c.cursorLockVk = std::stoi(val);
-            else if (key == "swapModelVk")      c.swapModelVk = std::stoi(val);
             else if (key == "hideCursorVk")     c.hideCursorVk = std::stoi(val);
             else if (key == "hideCursorMods")   c.hideCursorMods = std::stoi(val);
             else if (key == "zoomInVk")         c.zoomInVk = std::stoi(val);
@@ -229,9 +228,6 @@ Config LoadConfig(const std::wstring& path) {
                "; cursorLockVk: tap to toggle Inspect mode - freeze the cursor (keeps a hover/tooltip\n"
                ";   alive) while you pan the lens. Click while locked commits there + unlocks. VK; 0=unbound.\n"
                "cursorLockVk=0\n"
-               "; swapModelVk: tap to swap the magnifier model (render <-> magnify). Restarts Wind\n"
-               ";   onto the other model. VK code; 0=unbound.\n"
-               "swapModelVk=0\n"
                "; maxLevel: how far you can zoom (does not affect zoom speed)\n"
                "maxLevel=12.0\n"
                "; zoomInSpeed/zoomOutSpeed: zoom rate multipliers (1.0=default, 2.0=twice as fast, 0.5=half);\n"
