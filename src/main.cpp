@@ -388,7 +388,16 @@ static void RunTick(TickState& t) {
         || comboHeld(t.cfg.zoomOutVk,  t.cfg.zoomOutMods)
         || comboHeld(t.cfg.zoomOutVk2, t.cfg.zoomOutMods2);
     // Apply the live zoom profile every frame (free hot-reload; setProfile does not reset level).
-    t.zoom.setProfile(t.cfg.zoomInSpeed, t.cfg.zoomOutSpeed, t.cfg.smoothZoom != 0,
+    // TDR guard (issue #148): transform sessions ramp at <=1.0x speed. Fast ramps (user speed
+    // 2.2x) fire large level deltas per tick, each an expensive DWM re-scale; a game hitch
+    // mid-flood stacks past the 2s GPU watchdog (driver resets recurred through the level cap
+    // and load-shedding rounds). Render/desktop sessions keep the user's full speed.
+    double zin = t.cfg.zoomInSpeed, zout = t.cfg.zoomOutSpeed;
+    if (dynamic_cast<TransformModel*>(t.model)) {
+        if (zin > 1.0)  zin = 1.0;
+        if (zout > 1.0) zout = 1.0;
+    }
+    t.zoom.setProfile(zin, zout, t.cfg.smoothZoom != 0,
                       t.cfg.smoothZoomAccel, t.cfg.smoothZoomRamp);
     // Quick-zoom trigger. Modifier mode (quickZoomHotkeyMode==0): hold the configured modifier
     // (Ctrl/Alt/Shift; "None" = off) and tap a zoom key. While the modifier is held it toggles quick
