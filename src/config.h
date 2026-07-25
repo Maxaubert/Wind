@@ -83,9 +83,6 @@ struct Config {
                           //     transform (fixes cursor/click divergence near screen edges).
     int magInputTransform = 0; // 1 = publish MagSetInputTransform while zoomed (experiment;
                           //     documented for pen/touch only - A/B knob, hot-reloadable).
-    int hybridSwitch = 0; // hybrid only: 0 = engine picked at zoom-in only (a switch never
-                          //     disturbs an active zoom); 1 = instant - re-pick while zoomed when
-                          //     the foreground changes, preserving the zoom level across the swap.
     // Magnify-model-only: Windows Magnifier zoom increment in percent POINTS per wheel notch
     // (written to the ScreenMagnifier registry; the user's original value is snapshot-restored
     // on exit). Lower = smoother and slower zoom. Clamped 5..400. Live-applies (no restart).
