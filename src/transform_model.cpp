@@ -34,16 +34,28 @@ void TransformModel::setActive(bool active) {
 
 void TransformModel::present(const MapResult& r, double level, const Config& cfg,
                              const MonitorTarget& mon, const PresentExtras& ex) {
-    (void)cfg; (void)mon;
-    // Anchor the magnification AT the cursor, not centred on it. DWM composites the cursor and
-    // layered windows OUTSIDE the fullscreen magnification (measured: a layered window at desktop P
-    // stays at screen P, unscaled), so an unmagnified cursor drawn at L only sits on the content a
-    // click at L hits when T(L) == L. r.srcLeft/srcTop is the render model's CENTRED source rect,
-    // which makes T(L) the screen centre instead - the cause of the click drift and the edge dead
-    // zones. This offset never clamps, so the edges stay reachable. See ComputeFixedPointOffset.
-    OffsetF src = ComputeFixedPointOffset(r.centerX, r.centerY, level);
-    MagTransform m = ComputeMagTransform(src.x, src.y, level);
+    (void)mon;
+    // CENTERED-CURSOR geometry (issue #148 revival). The original model anchored the transform at
+    // the cursor (ComputeFixedPointOffset) because a sprite AT the cursor's real position only sits
+    // on correct content when T(L) == L. But Wind's identity is the centered cursor, and the render
+    // model's mapper already solves the whole centered geometry - including the edge zones, where
+    // cursorScreen slides away from the center as the source rect clamps. So use the mapper's
+    // CENTERED source rect for the transform and park the sprite at r.cursorScreen (screen px;
+    // layered windows composite OUTSIDE the magnification, so screen coords are its native space):
+    //   - content at the lens center (r.centerX/Y) displays at screen center; the sprite sits there;
+    //   - the hidden REAL cursor is SetCursorPos'd to clickDesktop (= the lens center rounded), so a
+    //     click lands exactly on the aimed content - same invariant as the render model;
+    //   - at the edges the mapper moves cursorScreen off-center in lockstep with the clamped source,
+    //     so sprite, content, and click point stay welded there too.
+    // Bonus vs the old anchored design: the sprite now barely MOVES (center, except at edges), which
+    // kills the sprite-lags-the-view wobble that plagued the anchored model during pans.
+    MagTransform m = ComputeMagTransform(r.srcLeft, r.srcTop, level);
     host_.setTransform((float)level, m.offX, m.offY, m.txX, m.txY, fastPan_);
+    // The sprite composites unmagnified, so matching the zoom is our job (integer scale, capped).
+    if (useSprite_ && sprite_) {
+        int scale = cfg.cursorScaleWithZoom ? (int)(level + 0.5) : 1;
+        sprite_->setScale(scale);
+    }
 
     // Weld the hidden OS cursor to the lens point, exactly as RenderEngine::render does. This keeps
     // the scene-locked sprite on the real click point AND keeps RunTick's warp-and-measure pan
@@ -67,16 +79,15 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         // sprite kept drawing the arrow at the frozen point (visible, stationary) and no crosshair
         // existed at all - the transform model used to ignore ex.cursorLocked.
         sprite_->showCrosshair();
-        sprite_->moveTo(r.clickDesktopX + mon_.x, r.clickDesktopY + mon_.y);
+        sprite_->moveTo((int)(r.cursorScreenX + 0.5) + mon_.x, (int)(r.cursorScreenY + 0.5) + mon_.y);
         sprite_->keepOnTop();
     } else if (useSprite_ && sprite_ && ex.drawCursor) {
         CursorSprite::ShapeStatus st = sprite_->refreshShape();
         if (st == CursorSprite::ShapeStatus::Rendered) {
-            // Draw at the click point. DWM does NOT magnify this layered window (measured), so it is
-            // drawn at screen (cx, cy) unscaled - and because the transform is anchored at the cursor
-            // (T(cx,cy) == (cx,cy)), the content there is exactly the content a click at (cx, cy)
-            // hits. The sprite therefore sits on its own target at any zoom, anywhere on screen.
-            sprite_->moveTo(cx, cy);
+            // Park the sprite at the mapper's cursorScreen: the screen center normally, sliding
+            // off-center at the edges in lockstep with the clamped source rect - the exact spot
+            // where the aimed content (and the hidden real cursor's click) lands.
+            sprite_->moveTo((int)(r.cursorScreenX + 0.5) + mon_.x, (int)(r.cursorScreenY + 0.5) + mon_.y);
             sprite_->show();
             // Composited outside the magnification, so it must fight for real z-order: reclaim the top
             // of our band when a popup (tray/context menu, flyout) has been raised over us. Throttled.

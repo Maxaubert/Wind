@@ -169,6 +169,10 @@ Config ParseConfig(const std::string& text) {
     // "transform" is a first-class model again (revived for issue #148: the compositor-internal
     // zoom that stays smooth over heavy games); anything unknown falls back to render.
     if (c.model != "render" && c.model != "magnify" && c.model != "transform") c.model = "render";
+    // Transform-model safety: DWM magnification above ~16x can stress the compositor/driver hard
+    // (historically: GPU TDRs at high zoom over transparent content). Native Magnifier caps at
+    // 16x too. Applies only to this model; render keeps the full range.
+    if (c.model == "transform" && c.maxLevel > 16.0) c.maxLevel = 16.0;
     if (c.magnifyStep < 5)   c.magnifyStep = 5;     // Windows Settings' own range is 5..400
     if (c.magnifyStep > 400) c.magnifyStep = 400;
     // Reject keybinds to keys Wind must never swallow (see IsForbiddenBindVk). A bound key is

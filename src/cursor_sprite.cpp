@@ -3,6 +3,7 @@
 #include <cstring>
 #include <cstdint>
 #include <algorithm>
+#include <vector>
 #include <dwmapi.h>
 namespace wind {
 
@@ -93,20 +94,29 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
         DestroyIcon(hIconCopy);
         return ShapeStatus::Hidden;
     }
-    // These mask/color bitmaps are owned by us once GetIconInfo returns; we only
-    // need the hotspot, so free them immediately - otherwise they leak every tick
-    // the cursor shape changes.
+    // These mask/color bitmaps are owned by us once GetIconInfo returns; read the native size
+    // (needed to scale DrawIconEx) and the hotspot, then free them immediately - otherwise they
+    // leak every tick the cursor shape changes. Mask-only cursors report a double-height mask.
+    BITMAP bm{};
+    if (iconInfo.hbmColor && GetObjectW(iconInfo.hbmColor, sizeof(bm), &bm)) {
+        natW_ = bm.bmWidth; natH_ = bm.bmHeight;
+    } else if (iconInfo.hbmMask && GetObjectW(iconInfo.hbmMask, sizeof(bm), &bm)) {
+        natW_ = bm.bmWidth; natH_ = bm.bmHeight / 2;
+    }
+    if (natW_ <= 0 || natW_ > kSize) natW_ = 32;
+    if (natH_ <= 0 || natH_ > kSize) natH_ = 32;
     if (iconInfo.hbmMask) DeleteObject(iconInfo.hbmMask);
     if (iconInfo.hbmColor) DeleteObject(iconInfo.hbmColor);
-    int hotX = (int)iconInfo.xHotspot;
-    int hotY = (int)iconInfo.yHotspot;
+    int hotX = (int)iconInfo.xHotspot * scale_;   // hotspots live in FINAL (scaled) pixels
+    int hotY = (int)iconInfo.yHotspot * scale_;
 
+    const int S = bufSize();
     HDC screenDc = GetDC(nullptr);
     HDC memDc = CreateCompatibleDC(screenDc);
     BITMAPINFO bmi{};
     bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = kSize;
-    bmi.bmiHeader.biHeight = -kSize; // top-down DIB
+    bmi.bmiHeader.biWidth = S;
+    bmi.bmiHeader.biHeight = -S; // top-down DIB
     bmi.bmiHeader.biPlanes = 1;
     bmi.bmiHeader.biBitCount = 32;
     bmi.bmiHeader.biCompression = BI_RGB;
@@ -128,8 +138,9 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
     // usable premultiplied alpha for cursors that carry their own
     // per-pixel alpha channel - this single pass is tried for every
     // cursor, regardless of whether GetIconInfo reported an hbmColor.
-    memset(bits, 0, (size_t)kSize * kSize * 4);
-    DrawIconEx(memDc, 0, 0, hIconCopy, 0, 0, 0, nullptr, DI_NORMAL);
+    // Drawn at native * scale_ so the sprite matches the zoom level.
+    memset(bits, 0, (size_t)S * S * 4);
+    DrawIconEx(memDc, 0, 0, hIconCopy, natW_ * scale_, natH_ * scale_, 0, nullptr, DI_NORMAL);
 
     // Some cursors (the modern I-beam among them) report a color bitmap
     // via GetIconInfo, but that color bitmap's alpha channel is empty, so
@@ -139,7 +150,7 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
     // mask/inversion renderer for these mask cursors.
     bool anyAlpha = false;
     uint32_t* pixels = (uint32_t*)bits;
-    for (int i = 0; i < kSize * kSize; i++) {
+    for (int i = 0; i < S * S; i++) {
         if ((pixels[i] & 0xFF000000u) != 0) { anyAlpha = true; break; }
     }
 
@@ -165,7 +176,7 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
     blend.BlendFlags = 0;
     blend.SourceConstantAlpha = 255;
     blend.AlphaFormat = AC_SRC_ALPHA;
-    SIZE size{ kSize, kSize };
+    SIZE size{ S, S };
     POINT srcPt{ 0, 0 };
     UpdateLayeredWindow(hwnd_, nullptr, nullptr, &size, memDc, &srcPt, 0, &blend, ULW_ALPHA);
 
@@ -182,6 +193,17 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
     lastVerdict_ = ShapeStatus::Rendered;
     crosshairMode_ = false;   // the window now holds the cursor shape again
     return ShapeStatus::Rendered;
+}
+
+// Change the sprite's integer zoom scale. Invalidates the shape cache so the next
+// refreshShape()/showCrosshair() re-renders at the new size (hotspot recomputes too).
+void CursorSprite::setScale(int s) {
+    if (s < 1) s = 1;
+    if (s > 8) s = 8;
+    if (s == scale_) return;
+    scale_ = s;
+    lastCursor_ = nullptr;
+    crosshairMode_ = false;
 }
 
 // Two-pass mask/inversion renderer for cursors whose single-pass render came
@@ -203,12 +225,13 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
 // underneath, so the caret is legible on any background and there is no verdict
 // left to oscillate.
 void CursorSprite::renderMaskShape() {
+    const int S = bufSize();
     HDC screenDc = GetDC(nullptr);
     HDC memDc = CreateCompatibleDC(screenDc);
     BITMAPINFO bmi{};
     bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = kSize;
-    bmi.bmiHeader.biHeight = -kSize; // top-down DIB
+    bmi.bmiHeader.biWidth = S;
+    bmi.bmiHeader.biHeight = -S; // top-down DIB
     bmi.bmiHeader.biPlanes = 1;
     bmi.bmiHeader.biBitCount = 32;
     bmi.bmiHeader.biCompression = BI_RGB;
@@ -226,12 +249,12 @@ void CursorSprite::renderMaskShape() {
     }
 
     HGDIOBJ oldBmp = SelectObject(memDc, blackDib);
-    std::fill_n((uint32_t*)blackBits, (size_t)kSize * kSize, 0xFF000000u);
-    DrawIconEx(memDc, 0, 0, iconCopy_, 0, 0, 0, nullptr, DI_NORMAL);
+    std::fill_n((uint32_t*)blackBits, (size_t)S * S, 0xFF000000u);
+    DrawIconEx(memDc, 0, 0, iconCopy_, natW_ * scale_, natH_ * scale_, 0, nullptr, DI_NORMAL);
 
     SelectObject(memDc, whiteDib);
-    std::fill_n((uint32_t*)whiteBits, (size_t)kSize * kSize, 0xFFFFFFFFu);
-    DrawIconEx(memDc, 0, 0, iconCopy_, 0, 0, 0, nullptr, DI_NORMAL);
+    std::fill_n((uint32_t*)whiteBits, (size_t)S * S, 0xFFFFFFFFu);
+    DrawIconEx(memDc, 0, 0, iconCopy_, natW_ * scale_, natH_ * scale_, 0, nullptr, DI_NORMAL);
 
     const uint32_t kOpaqueWhite = 0xFFFFFFFFu;   // premultiplied opaque white (the ink)
     const uint32_t kOpaqueBlack = 0xFF000000u;   // premultiplied opaque black (the outline)
@@ -240,8 +263,8 @@ void CursorSprite::renderMaskShape() {
     // shape[i] = 1 for every opaque pixel of the cursor: a baked colour pixel, or an inverting
     // pixel we are inking white. The outline pass below dilates this, so it must be recorded
     // BEFORE the outline is drawn, or the outline would feed on itself and keep growing.
-    uint8_t shape[kSize * kSize];
-    for (int i = 0; i < kSize * kSize; i++) {
+    std::vector<uint8_t> shape((size_t)S * S);   // heap: S*S is up to 512x512 at max scale
+    for (int i = 0; i < S * S; i++) {
         uint32_t rgbB = black[i] & 0x00FFFFFFu;
         uint32_t rgbW = white[i] & 0x00FFFFFFu;
         if (rgbB == rgbW) {
@@ -259,16 +282,16 @@ void CursorSprite::renderMaskShape() {
     // Outline: every transparent pixel touching the shape (8-neighbourhood) becomes opaque black.
     // One desktop pixel thick, so the fullscreen transform magnifies it in step with the ink, the
     // same way the arrow cursor's own outline scales.
-    for (int y = 0; y < kSize; y++) {
-        for (int x = 0; x < kSize; x++) {
-            int i = y * kSize + x;
+    for (int y = 0; y < S; y++) {
+        for (int x = 0; x < S; x++) {
+            int i = y * S + x;
             if (shape[i]) continue;                  // already ink or baked colour
             bool touches = false;
             for (int dy = -1; dy <= 1 && !touches; dy++) {
                 for (int dx = -1; dx <= 1 && !touches; dx++) {
                     int ny = y + dy, nx = x + dx;
-                    if (ny < 0 || nx < 0 || ny >= kSize || nx >= kSize) continue;
-                    if (shape[ny * kSize + nx]) touches = true;
+                    if (ny < 0 || nx < 0 || ny >= S || nx >= S) continue;
+                    if (shape[ny * S + nx]) touches = true;
                 }
             }
             if (touches) white[i] = kOpaqueBlack;
@@ -280,7 +303,7 @@ void CursorSprite::renderMaskShape() {
     blend.BlendFlags = 0;
     blend.SourceConstantAlpha = 255;
     blend.AlphaFormat = AC_SRC_ALPHA;
-    SIZE size{ kSize, kSize };
+    SIZE size{ S, S };
     POINT srcPt{ 0, 0 };
     UpdateLayeredWindow(hwnd_, nullptr, nullptr, &size, memDc, &srcPt, 0, &blend, ULW_ALPHA);
 
@@ -339,12 +362,13 @@ void CursorSprite::keepOnTop() {
 // texel (kSize-2)/2's center, so the hotspot is that texel: moveTo() then puts the cross center
 // (within half a pixel) on the look point.
 void CursorSprite::renderCrosshair() {
+    const int S = bufSize();   // crosshair fills the whole (scaled) canvas: it grows with zoom too
     HDC screenDc = GetDC(nullptr);
     HDC memDc = CreateCompatibleDC(screenDc);
     BITMAPINFO bmi{};
     bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = kSize;
-    bmi.bmiHeader.biHeight = -kSize; // top-down DIB
+    bmi.bmiHeader.biWidth = S;
+    bmi.bmiHeader.biHeight = -S; // top-down DIB
     bmi.bmiHeader.biPlanes = 1;
     bmi.bmiHeader.biBitCount = 32;
     bmi.bmiHeader.biCompression = BI_RGB;
@@ -357,14 +381,14 @@ void CursorSprite::renderCrosshair() {
         return;
     }
     HGDIOBJ oldBmp = SelectObject(memDc, dib);
-    std::vector<uint32_t> px = BuildCrosshairBGRA(kSize, /*premultiply=*/true);
-    memcpy(bits, px.data(), (size_t)kSize * kSize * 4);
+    std::vector<uint32_t> px = BuildCrosshairBGRA(S, /*premultiply=*/true);
+    memcpy(bits, px.data(), (size_t)S * S * 4);
 
     BLENDFUNCTION blend{};
     blend.BlendOp = AC_SRC_OVER;
     blend.SourceConstantAlpha = 255;
     blend.AlphaFormat = AC_SRC_ALPHA;
-    SIZE size{ kSize, kSize };
+    SIZE size{ S, S };
     POINT srcPt{ 0, 0 };
     UpdateLayeredWindow(hwnd_, nullptr, nullptr, &size, memDc, &srcPt, 0, &blend, ULW_ALPHA);
 
@@ -379,7 +403,7 @@ void CursorSprite::showCrosshair() {
     if (!crosshairMode_) {
         renderCrosshair();
         crosshairMode_ = true;
-        hotX_ = hotY_ = (kSize - 2) / 2;   // the cross centers on this texel (see BuildCrosshairBGRA)
+        hotX_ = hotY_ = (bufSize() - 2) / 2;   // the cross centers on this texel (see BuildCrosshairBGRA)
         // Invalidate the shape cache: the window no longer holds the cursor pixels, so the next
         // refreshShape() (Inspect off) must repaint even if the cursor HANDLE never changed -
         // otherwise its early-return would leave the crosshair on screen as the "cursor".

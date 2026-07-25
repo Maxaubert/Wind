@@ -22,18 +22,25 @@ public:
     // crosshair ON the look point. Cached: repaints only on the first call after normal-cursor use;
     // the next refreshShape() repaints the cursor shape, so leaving Inspect needs no explicit reset.
     void showCrosshair();
+    // Integer zoom scale for the sprite (1..8). The sprite composites OUTSIDE the fullscreen
+    // magnification (unmagnified), so matching the zoom is our job: the cursor/crosshair is
+    // re-rendered scale x larger on change (issue #148: "cursor should grow as you zoom").
+    void setScale(int s);
     void destroy();
 private:
     void renderMaskShape();
     void renderCrosshair();
     bool displaced() const;            // a visible, overlapping window sits above us in z-order
-    static const int kSize = 64;
+    static const int kSize = 64;       // base (1x) logical canvas; buffers are kSize * scale_
+    int bufSize() const { return kSize * scale_; }
     const std::unordered_map<HCURSOR, HCURSOR>& originals_;
     HWND    hwnd_ = nullptr;
     HCURSOR lastCursor_ = nullptr;
     ShapeStatus lastVerdict_ = ShapeStatus::Hidden;
     HICON   iconCopy_ = nullptr;
-    int     hotX_ = 0, hotY_ = 0;
+    int     hotX_ = 0, hotY_ = 0;      // in FINAL (scaled) sprite pixels
+    int     natW_ = 0, natH_ = 0;      // icon's native size (DrawIconEx scales to nat * scale_)
+    int     scale_ = 1;                // current integer zoom scale (1..8)
     bool    visible_ = false;
     bool    crosshairMode_ = false;          // window currently holds the crosshair pixels
     unsigned long long lastTopmostMs_ = 0;   // last HWND_TOPMOST re-assert (throttled)
