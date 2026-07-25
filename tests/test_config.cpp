@@ -325,3 +325,22 @@ TEST_CASE("outline low-zoom + idle keys default and parse with clamps") {
     CHECK(ParseConfig("outlineIdleSeconds=0\n").outlineIdleSeconds == doctest::Approx(0.5));
     CHECK(ParseConfig("outlineIdleSeconds=120\n").outlineIdleSeconds == doctest::Approx(60.0));
 }
+TEST_CASE("game perf keys (issue #148) default and parse with clamps") {
+    Config d = ParseConfig("");
+    CHECK(d.lowGpuPriority == 1);   // on by default: free on an idle GPU, wins under a game
+    CHECK(d.gameCrop == 1);         // on by default: crop is always safe on full-screen repaints
+    CHECK(d.gameFpsCap == 0);       // off by default: opt-in second lever
+
+    Config c = ParseConfig("lowGpuPriority=0\ngameCrop=0\ngameFpsCap=72\n");
+    CHECK(c.lowGpuPriority == 0);
+    CHECK(c.gameCrop == 0);
+    CHECK(c.gameFpsCap == 72);
+
+    // gameFpsCap clamps to [0, 240]; negative means off.
+    CHECK(ParseConfig("gameFpsCap=-5\n").gameFpsCap == 0);
+    CHECK(ParseConfig("gameFpsCap=999\n").gameFpsCap == 240);
+    // Bad values keep defaults.
+    Config b = ParseConfig("lowGpuPriority=x\ngameFpsCap=x\n");
+    CHECK(b.lowGpuPriority == 1);
+    CHECK(b.gameFpsCap == 0);
+}

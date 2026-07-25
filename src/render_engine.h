@@ -33,6 +33,9 @@ struct RenderFrameParams {
                                          // pixels too, so the stored value matches the user's sRGB hex)
     float  outlineAlpha;        // 0..1 fade for the outline (1 = solid); <= 0 skips the draw
     bool   cursorLocked;        // Inspect mode on: draw the crosshair sprite in place of the captured cursor
+    bool   fsGame;              // foreground covers the monitor (fullscreen/borderless game): skip the
+                                //   periodic topmost backstop (a synchronous DWM z-order transaction
+                                //   that hitches the game); the per-frame displaced check still reclaims
 };
 
 // Own capture + Direct3D 11 renderer. Captures the desktop via DXGI Desktop Duplication
@@ -51,7 +54,11 @@ public:
     // CreateWindowInBand (needs UIAccess; e.g. 16 = ZBID_SYSTEM_TOOLS, above the shell so the
     // Start menu / taskbar flyouts don't show an unmagnified copy). Falls back to a normal
     // window if the band can't be used.
-    bool initialize(const MonitorTarget& monitor, int zorderBand = 0, bool hdrTonemap = false);
+    // lowGpuPriority: run the device's GPU work at low WDDM scheduling priority (GPU-thread
+    // priority -7 + process scheduling class below-normal) so a GPU-saturated game wins every
+    // contention race against the magnifier; free on an idle GPU (issue #148).
+    bool initialize(const MonitorTarget& monitor, int zorderBand = 0, bool hdrTonemap = false,
+                    bool lowGpuPriority = false);
     // Re-point the magnifier at a different monitor (call on zoom-in when the cursor's monitor
     // changed; the overlay must still be hidden/alpha 0). Resizes the swapchain, then moves the
     // overlay and rebinds Desktop Duplication to the new output. Returns false (and the caller

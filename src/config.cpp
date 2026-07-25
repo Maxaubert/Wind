@@ -117,6 +117,9 @@ Config ParseConfig(const std::string& text) {
             else if (key == "hdrTonemap")         c.hdrTonemap = std::stoi(val);
             else if (key == "multiMonitor")       c.multiMonitor = std::stoi(val);
             else if (key == "cropCapture")        c.cropCapture = std::stoi(val);
+            else if (key == "lowGpuPriority")     c.lowGpuPriority = std::stoi(val);
+            else if (key == "gameCrop")           c.gameCrop = std::stoi(val);
+            else if (key == "gameFpsCap")         c.gameFpsCap = std::stoi(val);
             else if (key == "onboarded")          c.onboarded = std::stoi(val);
             else if (key == "quickZoomDefault")   c.quickZoomDefault = std::stod(val);
             else if (key == "quickZoomModifier")  c.quickZoomModifier = val;
@@ -149,6 +152,8 @@ Config ParseConfig(const std::string& text) {
     if (c.outlineThickness < 1)  c.outlineThickness = 1;
     if (c.outlineThickness > 40) c.outlineThickness = 40;
     c.outlineLowZoomMax  = clampd(c.outlineLowZoomMax,  1.0, 50.0);
+    if (c.gameFpsCap < 0)   c.gameFpsCap = 0;      // 0 = off
+    if (c.gameFpsCap > 240) c.gameFpsCap = 240;
     c.outlineIdleSeconds = clampd(c.outlineIdleSeconds, 0.5, 60.0);
     // Legacy "transform" (the removed MagSetFullscreenTransform model) maps to its successor in
     // the same role (DRM-safe magnification); anything else unknown falls back to render.
@@ -274,6 +279,17 @@ Config LoadConfig(const std::wstring& path) {
                ";   1=on a full-screen repaint (games) copy only the magnified region (cuts 4K HDR GPU\n"
                ";   copy ~zoom^2) but screen edges can briefly show a previous window after a switch.\n"
                "cropCapture=0\n"
+               "; lowGpuPriority: 1=Wind's GPU work yields to a busy game (keeps the game smooth while\n"
+               ";   zoomed; costs nothing on an idle GPU); 0=normal priority. Restart to apply.\n"
+               "lowGpuPriority=1\n"
+               "; gameCrop: 1=while a fullscreen game is foreground, always copy only the magnified\n"
+               ";   region (safe there - the game repaints everything each frame; big HDR/4K win);\n"
+               ";   0=only cropCapture decides\n"
+               "gameCrop=1\n"
+               "; gameFpsCap: cap Wind's own render rate (fps) while zoomed over a fullscreen game,\n"
+               ";   freeing GPU headroom for the game (input/pan sampling stays at full rate).\n"
+               ";   0=off (default); try 72 on a 144Hz display if the game still stutters.\n"
+               "gameFpsCap=0\n"
                "; outline: 1 = draw a solid outline around the screen edges while zoomed (an\n"
                ";   at-a-glance 'you are zoomed' indicator, handy at low zoom); 0 = off (default)\n"
                "outline=0\n"

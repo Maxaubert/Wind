@@ -200,6 +200,8 @@ struct TickState {
     bool   inspectStealPending = false; // steal deferred past the reveal logic (it must read the true fg)
     HWND   inspectPrevFg = nullptr;     // the game window foreground is handed back to on exit
     bool   inspectCursorWasShowing = true; // cursor visibility at the toggle edge (the 1x mouselook tell)
+    double presentAccum       = 0.0;           // gameFpsCap: seconds since the last presented frame
+    bool   gameCapPacing      = false;         // gameFpsCap engaged this tick -> main loop timer paces
     double quickZoomStored    = 0.0;           // remembered quick-zoom level (0 = none yet); in-memory
     bool   prevInHeld         = false;         // for rising-edge detection of the zoom-in channel
     bool   prevOutHeld        = false;
@@ -613,10 +615,17 @@ static void RunTick(TickState& t) {
                 fireClicks(MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, nRight);
             }
         }
+        // Fullscreen-game tell for the per-tick perf levers (issue #148): crop the capture copy to
+        // the magnified region (gameCrop), skip the periodic topmost backstop, and optionally cap
+        // our own present rate (gameFpsCap). Two cheap user32 reads per tick; also reused by the
+        // enterActive reveal gating below (which needed the same answer anyway).
+        const bool fsGame = ForegroundCoversMonitor(t.mon);
         // Per-tick render-only overrides go through PresentExtras; the model's present() runs
         // FillRenderParams and applies these on top. ex.outline seeds with the same base value
         // FillRenderParams would compute, so the dwell/idle logic below reads an identical start.
         PresentExtras ex;
+        ex.fsGame = fsGame;
+        ex.forceCrop = fsGame && t.cfg.gameCrop != 0;
         ex.outline = OutlineVisibleAtLevel(t.cfg, lvl);
         ex.outlineAlpha = 1.0f;
         ex.cursorMode = CursorModeFromCfg(t.cfg);
@@ -673,7 +682,33 @@ static void RunTick(TickState& t) {
             ex.cursorLocked = true;        // draw the crosshair at the look point (cursorScreen)
             if (!zoomed) ex.outline = false;   // no lens outline on the 1:1 view at 1x
         }
-        t.model.present(r, lvl, t.cfg, t.mon, ex);          // render+present every active tick (never blocks the ramp)
+        // gameFpsCap (issue #148): while zoomed over a fullscreen game, present only every
+        // 1/cap seconds - the skipped ticks still sample input and advance the mapper (pan stays
+        // full-rate responsive), but skip capture/draw/present entirely, freeing that GPU work for
+        // the game. The activation and reveal-pending ticks always present (the gated reveal
+        // depends on frames actually reaching the redirection surface). When engaged, presents use
+        // Present(0,0) (ex.noVsync) and the main loop's timer paces via t.gameCapPacing - a
+        // blocking vsync present on sparse ticks would double-pace against the timer.
+        bool doPresent = true;
+        const bool capActive = fsGame && zoomed && t.cfg.gameFpsCap > 0;
+        t.gameCapPacing = capActive;
+        if (capActive) {
+            ex.noVsync = true;
+            const double interval = 1.0 / (double)t.cfg.gameFpsCap;
+            t.presentAccum += dt;
+            if (enterActive || t.revealPending > 0) {
+                t.presentAccum = 0.0;                       // reveal path: present every tick
+            } else if (t.presentAccum >= interval) {
+                t.presentAccum -= interval;
+                if (t.presentAccum > interval) t.presentAccum = interval;  // hitch: no burst catch-up
+            } else {
+                doPresent = false;
+            }
+        } else {
+            t.presentAccum = 0.0;
+        }
+        if (doPresent)
+            t.model.present(r, lvl, t.cfg, t.mon, ex);      // render+present (never blocks the ramp)
         // Reveal AFTER the live frame is presented: setVisible flips the layer alpha over the
         // now-current front buffer, so the overlay never shows its retained previous-session
         // frame (the alt-tab "previous window"). capture() also drained to the latest frame.
@@ -692,7 +727,7 @@ static void RunTick(TickState& t) {
                 // Desktop Duplication can't see the game until the alpha-1 prime forces DWM to
                 // composite it. All non-blocking - the smooth-zoom ramp runs undisturbed;
                 // revealPending is only the fallback cap (~250 ms) so nothing can wedge the reveal.
-                t.revealNeedsComposite = ForegroundCoversMonitor(t.mon);
+                t.revealNeedsComposite = fsGame;   // same ForegroundCoversMonitor read, this tick
                 if (t.revealNeedsComposite) rm->primeReveal();
                 t.revealPending = (t.hz > 0 ? t.hz : 60) / 4;
                 if (t.revealPending < 2) t.revealPending = 2;
@@ -747,6 +782,8 @@ static void RunTick(TickState& t) {
         t.model.setActive(false);
         t.model.hideSystemCursor(false);
         t.outlineZoneSec = 0.0;                       // zoom-out clears the low-zoom dwell (no banked partial)
+        t.gameCapPacing = false;                      // idle: normal pacing (gameFpsCap is zoomed-only)
+        t.presentAccum = 0.0;
         if (t.prevInspect) {
             EndGameInspect(t);   // teardown-to-idle exits game-inspect too (foreground returned)
             ClipCursor(nullptr);
@@ -1148,7 +1185,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         // (NumPad +/- are bindable zoom keys; see InputRouter::setIgnoreInjectedKeys).
         g_input.setIgnoreInjectedKeys(true);
     } else {
-        model = std::make_unique<RenderModel>(cfg.zorderBand, cfg.hdrTonemap != 0);
+        model = std::make_unique<RenderModel>(cfg.zorderBand, cfg.hdrTonemap != 0,
+                                              cfg.lowGpuPriority != 0);
     }
     if (!model->initialize(startupMon)) {
         MessageBoxW(nullptr, L"Could not start the renderer (Direct3D 11 / Desktop Duplication "
@@ -1338,7 +1376,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         // composites, so the cursor beats against the panning view (the flicker) - exactly what
         // DwmFlush prevents (and it paces at refresh, so no flood either). Bloom paces this way too.
         bool dwmPaces = zoomed && (renderModelActive ? (ts.cfg.dwmFlush != 0) : true);
-        bool renderPresentPaces = renderModelActive && zoomed && !dwmPaces && ts.cfg.vsync != 0;
+        // gameFpsCap engaged: presents are sparse Present(0,0) frames, so the blocking-present
+        // pace is unavailable - fall through to the timer (full tick rate; presents skip inside).
+        bool renderPresentPaces = renderModelActive && zoomed && !dwmPaces && ts.cfg.vsync != 0 &&
+                                  !ts.gameCapPacing;
         if (!renderPresentPaces && !dwmPaces) {
             // Recompute the timer interval if the paced refresh changed (retarget to a different-Hz
             // monitor updates ts.hz). Cheap equality check; only recomputes on an actual change (#74).

@@ -113,6 +113,23 @@ struct Config {
     // switch the screen edges can briefly show the previous window's pixels until a smaller change
     // triggers a full refresh; that staleness is why it defaults off. Hot-reloadable.
     int    cropCapture = 0;
+    // --- Game perf (issue #148): keep a GPU-saturated game smooth while zoomed over it ---
+    // 1 (default) = Wind's GPU work runs at low WDDM scheduling priority (device GPU-thread
+    // priority -7 + process scheduling class "below normal"), so a game saturating the GPU wins
+    // every contention race against the magnifier's copies/draws. Costs nothing on an idle GPU
+    // (no contention to lose). 0 = normal priority. Applied at device build (restart to apply).
+    int    lowGpuPriority = 1;
+    // 1 (default) = while the foreground window covers the target monitor (fullscreen/borderless
+    // game), force the cropCapture behavior for the session regardless of the cropCapture key:
+    // a game repaints the whole screen every frame, which is exactly when cropping the copy to
+    // the magnified region is both safe (everything is dirty again next frame) and the biggest
+    // win (full-screen 4K FP16 copies otherwise). 0 = only the cropCapture key decides. Hot-reload.
+    int    gameCrop = 1;
+    // >0 = cap Wind's own render+present rate (fps) while zoomed over a fullscreen game; input
+    // sampling and panning still run at full tick rate, only capture/draw/present are skipped, so
+    // the magnifier trades its own fluidity for game headroom. 0 (default) = off. Clamped 0..240.
+    // Hot-reloadable.
+    int    gameFpsCap = 0;
     // First-launch onboarding: 0 = not yet onboarded (also true of a freshly created ini), so the
     // core spawns WindConfig.exe --onboard once; the onboarding flow sets this to 1 on completion.
     int    onboarded = 0;

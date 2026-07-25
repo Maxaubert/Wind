@@ -85,6 +85,7 @@ struct RenderEngine::State {
     int  outColorSpace = -1;     // DXGI_COLOR_SPACE_TYPE of the output (12 = HDR10 G2084)
     int  outBitsPerColor = 0;
     bool wantHdrTonemap = false; // config: opt-in HDR->SDR tonemap (default off = current path)
+    bool lowGpuPri = false;      // config: run our GPU work below a game's priority (issue #148)
     bool rotated = false;        // target output is portrait (90/270); capture not supported - logged
     bool capFp16 = false;        // capturing FP16 scRGB (tonemap active)
     double sdrWhiteNits = 200.0; // OS SDR white level for the tonemap scale
@@ -445,7 +446,8 @@ void RenderEngine::debugHdr(unsigned& ddaFormat, int& colorSpace, int& bitsPerCo
     ddaFormat = s_->ddaFormat; colorSpace = s_->outColorSpace; bitsPerColor = s_->outBitsPerColor;
 }
 
-bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool hdrTonemap) {
+bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool hdrTonemap,
+                              bool lowGpuPriority) {
     const int screenW = monitor.w, screenH = monitor.h;
     s_->sw = screenW;
     s_->sh = screenH;
@@ -453,8 +455,10 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     s_->originY = monitor.y;
     lstrcpynW(s_->targetDevice, monitor.device, 32);   // "" = first output (legacy path)
     s_->wantHdrTonemap = hdrTonemap;   // read before recreateDupl decides the capture format
-    RLog("=== initialize device=%ls origin=(%d,%d) size=%dx%d band=%d hdrTonemap=%d ===",
-         s_->targetDevice, monitor.x, monitor.y, screenW, screenH, zorderBand, (int)hdrTonemap);
+    s_->lowGpuPri = lowGpuPriority;    // read in buildPresent (device (re)build applies it)
+    RLog("=== initialize device=%ls origin=(%d,%d) size=%dx%d band=%d hdrTonemap=%d lowGpuPri=%d ===",
+         s_->targetDevice, monitor.x, monitor.y, screenW, screenH, zorderBand, (int)hdrTonemap,
+         (int)lowGpuPriority);
 
     // --- Overlay window: fullscreen, borderless, topmost, click-through, no-activate ---
     static const wchar_t* kClass = L"WindRenderOverlay";
@@ -766,11 +770,37 @@ bool RenderEngine::State::acquireBackbufferRtv() {
     return SUCCEEDED(device->CreateRenderTargetView(back.Get(), nullptr, rtv.ReleaseAndGetAddressOf()));
 }
 
+// Drop this PROCESS's WDDM scheduling class to below-normal (one-shot; lowering needs no
+// privilege, unlike raising). Together with the per-device SetGPUThreadPriority(-7) below, a
+// GPU-saturated game wins every scheduling race against the magnifier's copies/draws instead
+// of trading hitches with them (issue #148). D3DKMT* lives in gdi32 and is loaded dynamically
+// (it's a kernel-thunk API, not in any import lib we link).
+static void ApplyLowProcessGpuPriority() {
+    static bool s_done = false;
+    if (s_done) return;
+    s_done = true;
+    enum KmtPriorityClass { KMT_PRIO_IDLE = 0, KMT_PRIO_BELOW_NORMAL = 1 };
+    using PFN_SetPrio = LONG(APIENTRY*)(HANDLE, int);
+    if (HMODULE gdi = GetModuleHandleW(L"gdi32.dll")) {
+        if (auto p = reinterpret_cast<PFN_SetPrio>(
+                GetProcAddress(gdi, "D3DKMTSetProcessSchedulingPriorityClass"))) {
+            LONG st = p(GetCurrentProcess(), KMT_PRIO_BELOW_NORMAL);
+            RLog("lowGpuPriority: process scheduling class below-normal status=0x%08lX",
+                 (unsigned long)st);
+        }
+    }
+}
+
 bool RenderEngine::State::buildPresent() {
     releasePresent();
     ComPtr<IDXGIDevice1> dxgiDev;
     if (FAILED(device->QueryInterface(IID_PPV_ARGS(&dxgiDev)))) { RLog("buildPresent: QI IDXGIDevice1 failed"); return false; }
     dxgiDev->SetMaximumFrameLatency(1);
+    if (lowGpuPri) {
+        HRESULT hp = dxgiDev->SetGPUThreadPriority(-7);   // lowest; lowering needs no privilege
+        ApplyLowProcessGpuPriority();
+        RLog("buildPresent: SetGPUThreadPriority(-7) hr=0x%08lX", (unsigned long)hp);
+    }
     ComPtr<IDXGIAdapter> adapter;
     if (FAILED(dxgiDev->GetAdapter(&adapter))) { RLog("buildPresent: GetAdapter failed"); return false; }
     ComPtr<IDXGIFactory2> factory;
@@ -1041,8 +1071,13 @@ bool RenderEngine::renderFrame(const RenderFrameParams& p) {
     // (the common case), so steady-state ticks do no DWM z-order work, and reclaim is immediate
     // when something does pop above us. The 1 s unconditional backstop self-heals if the displaced
     // check ever misses a case. A banded window stays in its band across SetWindowPos.
+    // The 1 s unconditional backstop is SKIPPED while a fullscreen game is foreground (p.fsGame):
+    // SetWindowPos over a game is a synchronous DWM z-order transaction that hitches it once a
+    // second, and nothing that isn't caught by overlayDisplaced can displace us over a fullscreen
+    // app anyway (issue #148). The displaced check still runs every frame, so real displacement
+    // (RTSS et al.) is reclaimed immediately in both cases.
     unsigned long long nowMs = GetTickCount64();
-    if (overlayDisplaced(s_->hwnd) || nowMs - s_->lastTopmostMs >= 1000) {
+    if (overlayDisplaced(s_->hwnd) || (!p.fsGame && nowMs - s_->lastTopmostMs >= 1000)) {
         s_->lastTopmostMs = nowMs;
         SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
