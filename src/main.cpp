@@ -208,6 +208,8 @@ struct TickState {
                                     //   can race a transform write in DWM/the driver (the proven crash)
     POINT  freezePoint{};           // where the cursor is frozen during a transform game session
     int    freezePauseTicks = 0;    // ticks to skip transform writes around an injected click move
+    bool   freezeStealPending = false;   // tdrTest=3: steal foreground on the next freeze tick
+    HWND   freezePrevFg = nullptr;       // tdrTest=3: window to hand foreground back to
     HCURSOR lastFgCursor = nullptr; // churn valve: last seen foreground cursor SHAPE handle
     int    churnCount = 0;          //   handle changes inside the rolling window
     unsigned long long churnWinStart = 0;
@@ -307,6 +309,17 @@ static void MarkChurnyApp(const std::wstring& exe, const char* why) {
 static bool IsChurnyFg(HWND fg) {
     if (g_churnyApps.empty()) return false;
     return g_churnyApps.count(ExeNameOf(fg)) != 0;
+}
+
+// tdrTest=3 (issue #148 harness): hand foreground back when a stolen-foreground freeze session
+// ends. Only if we still hold it - an alt-tab to a third app is respected.
+static void EndFreezeSteal(TickState& t) {
+    t.freezeStealPending = false;
+    if (t.freezePrevFg && IsWindow(t.freezePrevFg) &&
+        g_focusStealer && GetForegroundWindow() == g_focusStealer) {
+        SetForegroundWindow(t.freezePrevFg);
+    }
+    t.freezePrevFg = nullptr;
 }
 
 // Hand foreground back to the game when game-inspect ends. Called on EVERY inspect exit path
@@ -561,6 +574,12 @@ static void RunTick(TickState& t) {
         t.quickZoomStored = qr.newStored;
     }
     double lvl = t.zoom.level();
+    // tdrTest=1 (issue #148 harness): clamp transform GAME sessions to 8x - the field crashes
+    // were level-dependent (mid zoom fine, max zoom fatal); this probes the threshold in vivo.
+    if (t.cfg.tdrTest == 1 && t.gameFreeze && lvl > 8.0) {
+        t.zoom.setLevel(8.0);
+        lvl = 8.0;
+    }
 
     int rawDx, rawDy; g_input.drainRaw(rawDx, rawDy);
 
@@ -583,7 +602,9 @@ static void RunTick(TickState& t) {
             const bool borderless = fgw && !(GetWindowLongPtrW(fgw, GWL_STYLE) & WS_CAPTION);
             const bool primaryHere = t.mon.x == 0 && t.mon.y == 0;
             // Churny apps (learned cursor-shape churners, issue #148) always get render.
-            IMagnifierModel* pick = (fs && borderless && primaryHere && !IsChurnyFg(fgw))
+            // tdrTest>0 (field-test harness) bypasses the list to force transform experiments.
+            IMagnifierModel* pick = (fs && borderless && primaryHere &&
+                                     (t.cfg.tdrTest > 0 || !IsChurnyFg(fgw)))
                                         ? t.mTransform : t.mRender;
             if (pick && pick != t.model) t.model = pick;
         }
@@ -629,6 +650,7 @@ static void RunTick(TickState& t) {
                     t.model->hideSystemCursor(true);
                     t.freezeExe = ExeNameOf(ffg);
                     t.churnCount = 0; t.churnWinStart = GetTickCount64(); t.lastFgCursor = nullptr;
+                    t.freezeStealPending = (t.cfg.tdrTest == 3);
                     wind::Log(wind::LogLevel::Info, "freeze",
                               "game freeze ENGAGED at (%ld,%ld)", fp.x, fp.y);
                 } else {
@@ -803,11 +825,13 @@ static void RunTick(TickState& t) {
         // transform 8x). Inspect sessions are never switched under.
         if (t.mTransform && !enterActive && !inspect) {
             HWND fgw2 = GetForegroundWindow();
+            const bool fgIsStealer = fgw2 && fgw2 == g_focusStealer;   // tdrTest=3 holds foreground
             const bool borderless2 = fgw2 && !(GetWindowLongPtrW(fgw2, GWL_STYLE) & WS_CAPTION);
             const bool primary2 = t.mon.x == 0 && t.mon.y == 0;
-            IMagnifierModel* want = (fsGame && borderless2 && primary2 && !IsChurnyFg(fgw2))
+            IMagnifierModel* want = (fsGame && borderless2 && primary2 &&
+                                     (t.cfg.tdrTest > 0 || !IsChurnyFg(fgw2)))
                                         ? t.mTransform : t.mRender;
-            if (want && want != t.model) {
+            if (want && want != t.model && !fgIsStealer) {
                 t.model->setActive(false);
                 t.model->hideSystemCursor(false);
                 t.model = want;
@@ -834,7 +858,8 @@ static void RunTick(TickState& t) {
         if (!enterActive && !inspect) {
             HWND ffg2 = GetForegroundWindow();
             const bool blz = ffg2 && !(GetWindowLongPtrW(ffg2, GWL_STYLE) & WS_CAPTION);
-            const bool wantFreeze = dynamic_cast<TransformModel*>(t.model) && fsGame && blz;
+            bool wantFreeze = dynamic_cast<TransformModel*>(t.model) && fsGame && blz;
+            if (ffg2 && ffg2 == g_focusStealer && t.gameFreeze) wantFreeze = true;   // tdrTest=3: we hold fg
             if (wantFreeze && !t.gameFreeze) {
                 POINT fp; GetCursorPos(&fp);
                 t.freezePoint = fp;
@@ -845,11 +870,13 @@ static void RunTick(TickState& t) {
                 t.gameFreeze = true;
                 t.freezeExe = ExeNameOf(ffg2);
                 t.churnCount = 0; t.churnWinStart = GetTickCount64(); t.lastFgCursor = nullptr;
+                t.freezeStealPending = (t.cfg.tdrTest == 3);
                 wind::Log(wind::LogLevel::Info, "freeze",
                           "game freeze engaged mid-zoom at (%ld,%ld)", fp.x, fp.y);
             } else if (!wantFreeze && t.gameFreeze) {
                 ClipCursor(nullptr);
                 t.gameFreeze = false;
+                EndFreezeSteal(t);
                 if (dynamic_cast<TransformModel*>(t.model)) {
                     // Still transform, now over the desktop: resume FOLLOW at the cursor (the lens
                     // must sit ON the visible cursor, so a reset here is the correct jump).
@@ -937,6 +964,13 @@ static void RunTick(TickState& t) {
             ex.pauseWrites = t.freezePauseTicks > 0;
             if (t.freezePauseTicks > 0) --t.freezePauseTicks;
             t.lastFreezeActiveMs = GetTickCount64();
+            if (t.cfg.tdrTest == 3 && t.freezeStealPending) {
+                // tdrTest=3: background the game while zoomed - it stops receiving input, so
+                // its cursor/hover machinery goes quiet (the Snipping Tool effect, issue #144).
+                HWND curFg = GetForegroundWindow();
+                if (curFg && curFg != g_focusStealer) t.freezePrevFg = curFg;
+                if (StealForeground(EnsureFocusStealer(t.mon))) t.freezeStealPending = false;
+            }
             // Churn valve (issue #148 trigger 3, rig-proven): the app's cursor SHAPE changing
             // under our transform writes is the driver killer we cannot prevent - detect it
             // (read-only poll) and hand this session to render; the app is remembered so future
@@ -1110,6 +1144,7 @@ static void RunTick(TickState& t) {
         if (t.gameFreeze) {
             ClipCursor(nullptr);
             t.gameFreeze = false;
+            EndFreezeSteal(t);
             wind::Log(wind::LogLevel::Info, "freeze", "game freeze released (zoom-out)");
             if (!t.prevInspect) {
                 // Transform rested to 1.0 in setActive(false) above, so a one-shot placement at
@@ -1724,6 +1759,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             // documented "released on device-lost recovery" invariant; recovery returns to a clean 1x).
             ClipCursor(nullptr);
             ts.gameFreeze = false;   // the game-session freeze clip is the same invariant
+            EndFreezeSteal(ts);      // tdrTest=3 must not strand the game backgrounded either
             if (ts.cursorLock.locked()) { ts.cursorLock.reset(); ts.clickReleaseTicks = 0; }
             EndGameInspect(ts);   // device-lost must not strand the game backgrounded
             unsigned long long now = GetTickCount64();

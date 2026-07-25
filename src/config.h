@@ -83,6 +83,13 @@ struct Config {
                           //     transform (fixes cursor/click divergence near screen edges).
     int magInputTransform = 0; // 1 = publish MagSetInputTransform while zoomed (experiment;
                           //     documented for pen/touch only - A/B knob, hot-reloadable).
+    int tdrTest = 0;      // issue #148 field-test harness (hot-reloadable, diagnostic only).
+                          //   0 = normal; >0 forces the transform path for games (bypasses the
+                          //   churny-app list) with one experiment active:
+                          //   1 = clamp transform GAME sessions to 8x (level-threshold probe)
+                          //   2 = clamp |tx| <= 32000 (right-region/overflow probe)
+                          //   3 = steal foreground while zoomed over a game (silences the game's
+                          //       input/cursor activity; read-only-zoom prototype)
     // Magnify-model-only: Windows Magnifier zoom increment in percent POINTS per wheel notch
     // (written to the ScreenMagnifier registry; the user's original value is snapshot-restored
     // on exit). Lower = smoother and slower zoom. Clamped 5..400. Live-applies (no restart).

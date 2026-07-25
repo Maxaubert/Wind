@@ -128,6 +128,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "lowGpuPriority")     c.lowGpuPriority = std::stoi(val);
             else if (key == "gpuPriority")        c.gpuPriority = std::stoi(val);
             else if (key == "gameCrop")           c.gameCrop = std::stoi(val);
+            else if (key == "tdrTest")            c.tdrTest = std::stoi(val);
             else if (key == "gameFpsCap")         c.gameFpsCap = std::stoi(val);
             else if (key == "onboarded")          c.onboarded = std::stoi(val);
             else if (key == "quickZoomDefault")   c.quickZoomDefault = std::stod(val);
@@ -165,6 +166,8 @@ Config ParseConfig(const std::string& text) {
     if (c.gameFpsCap > 240) c.gameFpsCap = 240;
     if (c.gpuPriority < -1) c.gpuPriority = -1;    // tri-state: -1 low / 0 normal / +1 high
     if (c.gpuPriority >  1) c.gpuPriority = 1;
+    if (c.tdrTest < 0) c.tdrTest = 0;              // diagnostic harness (issue #148)
+    if (c.tdrTest > 3) c.tdrTest = 3;
     c.outlineIdleSeconds = clampd(c.outlineIdleSeconds, 0.5, 60.0);
     // "transform" is a first-class model again (revived for issue #148: the compositor-internal
     // zoom that stays smooth over heavy games); anything unknown falls back to render.

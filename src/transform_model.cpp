@@ -97,6 +97,14 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     }
     const bool ramping = applyLevel != level || (applyLevel != lastLevel_ && lastLevel_ > 0.0);
     MagTransform m = ComputeMagTransform(srcL, srcT, applyLevel, mon_.w, mon_.h);
+    if (cfg.tdrTest == 2) {
+        // Overflow probe (issue #148 harness): keep the level-space translation inside a signed
+        // 16-bit range. If the far-right max-zoom crashes vanish with this, some DWM/driver
+        // layer packs the translation into 16 bits and the real fix is this clamp (or less).
+        const int maxOff = (int)(32000.0 / applyLevel);
+        if (m.offX > maxOff) m.offX = maxOff;
+        if (m.txX < -32000) m.txX = -32000;
+    }
     // pauseWrites (issue #148): a click's injected cursor move is in flight - a transform write
     // racing a cursor-position update is the proven TDR, so those ticks write NOTHING. State is
     // untouched; the next unpaused tick lands the same values.
