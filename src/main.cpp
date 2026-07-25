@@ -17,6 +17,7 @@
 #include "render_engine.h"
 #include "render_model.h"
 #include "magnify_model.h"
+#include "transform_model.h"
 #include "input_router.h"
 #include "cursor_mapper.h"
 #include "zoom_controller.h"
@@ -1235,6 +1236,12 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         // Our injected chords must never be swallowed/tracked by our own keyboard hook
         // (NumPad +/- are bindable zoom keys; see InputRouter::setIgnoreInjectedKeys).
         g_input.setIgnoreInjectedKeys(true);
+    } else if (cfg.model == "transform") {
+        // Revived for issue #148: the DWM-internal fullscreen transform - zero app presents, so
+        // it holds compositor-rate smoothness over a heavy game where every overlay present path
+        // throttles (measured). Cursor is anchored, not centered (documented model tradeoff).
+        model = std::make_unique<TransformModel>(cfg.fastPan != 0, cfg.smoothPan != 0,
+                                                 cfg.cursorSprite != 0, cfg.zorderBand);
     } else {
         model = std::make_unique<RenderModel>(cfg.zorderBand, cfg.hdrTonemap != 0,
                                               EffectiveGpuPriority(cfg));

@@ -115,6 +115,9 @@ Config ParseConfig(const std::string& text) {
             else if (key == "cursorVisibility")   c.cursorVisibility = val;
             else if (key == "model")              c.model = val;
             else if (key == "magnifyStep")        c.magnifyStep = std::stoi(val);
+            else if (key == "fastPan")            c.fastPan = std::stoi(val);
+            else if (key == "smoothPan")          c.smoothPan = std::stoi(val);
+            else if (key == "cursorSprite")       c.cursorSprite = std::stoi(val);
             else if (key == "bilinear")           c.bilinear = std::stoi(val);
             else if (key == "sharpness")          c.sharpness = std::stod(val);
             else if (key == "zorderBand")         c.zorderBand = std::stoi(val);
@@ -163,10 +166,9 @@ Config ParseConfig(const std::string& text) {
     if (c.gpuPriority < -1) c.gpuPriority = -1;    // tri-state: -1 low / 0 normal / +1 high
     if (c.gpuPriority >  1) c.gpuPriority = 1;
     c.outlineIdleSeconds = clampd(c.outlineIdleSeconds, 0.5, 60.0);
-    // Legacy "transform" (the removed MagSetFullscreenTransform model) maps to its successor in
-    // the same role (DRM-safe magnification); anything else unknown falls back to render.
-    if (c.model == "transform") c.model = "magnify";
-    if (c.model != "render" && c.model != "magnify") c.model = "render";
+    // "transform" is a first-class model again (revived for issue #148: the compositor-internal
+    // zoom that stays smooth over heavy games); anything unknown falls back to render.
+    if (c.model != "render" && c.model != "magnify" && c.model != "transform") c.model = "render";
     if (c.magnifyStep < 5)   c.magnifyStep = 5;     // Windows Settings' own range is 5..400
     if (c.magnifyStep > 400) c.magnifyStep = 400;
     // Reject keybinds to keys Wind must never swallow (see IsForbiddenBindVk). A bound key is

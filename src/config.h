@@ -65,11 +65,22 @@ struct Config {
 
     // --- Model selection ----------------------------------------------------
     // Which magnification model runs. "render" (default) = the DXGI capture + D3D11 overlay.
-    // "magnify" = drive the native Windows Magnifier (Magnify.exe) via injected Win+Plus/Minus;
-    // works over DRM-protected video that blanks under Desktop Duplication. A legacy "transform"
-    // value (the removed MagSetFullscreenTransform model it replaces) maps to "magnify"; any other
-    // unknown value falls back to "render". Applied at launch (restart to switch; not hot-swapped).
+    // "magnify" = drive the native Windows Magnifier (Magnify.exe) via injected wheel notches;
+    // works over DRM-protected video that blanks under Desktop Duplication. "transform" = the
+    // DWM fullscreen-transform model (MagSetFullscreenTransform, no Magnify.exe) - REVIVED for
+    // issue #148: it magnifies inside the compositor with zero app presents, the only path that
+    // stays smooth while a heavy game renders (Windows' present pipeline throttles every overlay
+    // app's frames to ~90/s under load; measured 139 transform updates/s rock-steady over the
+    // same game). Cursor is anchored (not centered) in this model. Unknown values fall back to
+    // "render". Applied at launch (restart to switch; not hot-swapped).
     std::string model = "render";
+    // Transform-model-only knobs (ignored by the other models):
+    int fastPan     = 1;  // 1 = pan via the private SetMagnificationDesktopMagnification channel
+                          //     (sub-pixel); falls back to the public API automatically if unavailable.
+    int smoothPan   = 0;  // 1 = hold the display composited while zoomed (1px pin) so flip-model games
+                          //     do not stutter while panning, at a capped frame rate while zoomed.
+    int cursorSprite = 1; // 1 = hide the OS cursor and draw a scene-locked sprite welded to the
+                          //     transform (fixes cursor/click divergence near screen edges).
     // Magnify-model-only: Windows Magnifier zoom increment in percent POINTS per wheel notch
     // (written to the ScreenMagnifier registry; the user's original value is snapshot-restored
     // on exit). Lower = smoother and slower zoom. Clamped 5..400. Live-applies (no restart).
