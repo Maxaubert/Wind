@@ -8,6 +8,11 @@ namespace wind {
 bool TransformModel::initialize(const MonitorTarget& monitor) {
     mon_ = monitor;
     if (!host_.initialize()) return false;
+    // Warm-up (issue #148): the SESSION'S first real zoom paid a ~110ms cold-start while DWM
+    // built its magnification machinery. Touch it once at launch with an invisible 0.1% level
+    // (sub-pixel everywhere), then reset - the first user zoom starts from a warm pipeline.
+    host_.setTransform(1.001f, 0, 0, 0, 0, false);
+    host_.setTransform(1.0f, 0, 0, 0, 0, false);
     if (useSprite_) {
         blanker_ = std::make_unique<CursorBlanker>();
         sprite_  = std::make_unique<CursorSprite>(blanker_->originals());
@@ -71,9 +76,22 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     double applyLevel = level;
     // Adaptive divisor: DWM's re-scale cost grows with level, so the ramping level updates
     // per-tick near 1x and only every ~5th tick near 16x (still a visually smooth ramp).
-    const int rampDiv = 1 + (int)(lastLevel_ / 4.0);
-    if (lastLevel_ > 0.0 && level != lastLevel_ && level > 1.0 && (rampTick_ % rampDiv) != 0)
-        applyLevel = lastLevel_;
+    // Zoom-IN: adaptive divisor (proven near-clean). Zoom-OUT: measured immune to update-rate
+    // changes (doubling the spacing changed nothing; cycle variance dominates), so it instead
+    // applies QUANTIZED steps - hold the displayed level until a full step (~18% of the current
+    // level) has accrued, so a 16x->1x ramp costs ~6 re-scales instead of ~200. When the
+    // controller stops moving between quanta, settle once to the exact level.
+    const bool levelMoving = level != prevTickLevel_;
+    if (lastLevel_ > 0.0 && level > 1.0 && level != lastLevel_) {
+        if (level > lastLevel_) {
+            const int rampDiv = 1 + (int)(lastLevel_ / 4.0);
+            if ((rampTick_ % rampDiv) != 0) applyLevel = lastLevel_;
+        } else if (levelMoving) {
+            const double stepQ = lastLevel_ * 0.18 > 0.75 ? lastLevel_ * 0.18 : 0.75;
+            if (lastLevel_ - level < stepQ) applyLevel = lastLevel_;
+        }
+    }
+    prevTickLevel_ = level;
     // The mapper's srcLeft/srcTop were computed for `level`; when holding the previous level on a
     // ramp tick, recompute the source for the APPLIED level or the view oscillates between two
     // geometries at tick rate (field report: fast jitter/blur during ramps).

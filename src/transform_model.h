@@ -32,6 +32,7 @@ private:
     unsigned long long lastPinAssertMs_ = 0;
     int  keepAliveTick_ = 0;                         // alternates the tx keep-alive (issue #148)
     int  rampTick_ = 0;                              // level-ramp divisor counter (issue #148)
+    double prevTickLevel_ = 0.0;                     // controller level last tick (ramp-motion edge)
     int  lastOffX_ = 0, lastOffY_ = 0, lastTxX_ = 0, lastTxY_ = 0;   // last applied transform
     double lastLevel_ = 0.0;
     unsigned long long lastChangeMs_ = 0;            // when the transform last REALLY changed
