@@ -112,6 +112,11 @@ public:
     // for the driver to come back). Does NOT touch the HWND or the hidden OS cursor.
     bool recoverDeviceLost();
     void hideSystemCursor(bool hide);              // MagShowSystemCursor wrapper + safe-restore net
+    // Block until the target output's next vblank (IDXGIOutput::WaitForVBlank). Used by the
+    // reduced-push game mode: skip ticks wait one vblank so the loop stays vblank-locked while
+    // presents are pushed BELOW the redirection path's service rate (issue #148). Returns false
+    // (caller should not spin on it) if no output is cached.
+    bool waitVBlank();
     void shutdown();                               // restore cursor, destroy everything
     bool ready() const;
     // Verification only: decoded cursor metrics + the screen size the engine is using.

@@ -34,6 +34,7 @@ public:
     bool frameCompositedSincePrime() const;
     bool revealFrameDone(double spinBudgetMs = 0.0);
     void invalidateCapture();
+    bool waitVBlank();        // reduced-push game mode: skip ticks block to the next vblank
 private:
     RenderEngine engine_;
     int  zorderBand_;

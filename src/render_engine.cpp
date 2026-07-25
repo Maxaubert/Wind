@@ -68,6 +68,7 @@ struct RenderEngine::State {
 
     // Desktop Duplication.
     ComPtr<IDXGIOutputDuplication> dupl;
+    ComPtr<IDXGIOutput> waitOutput;           // target output, cached for waitVBlank (issue #148)
     ComPtr<ID3D11Texture2D> desktopCopy;      // SRV-able copy of the captured desktop (no cursor)
     ComPtr<ID3D11ShaderResourceView> desktopSRV;
     bool haveDesktop = false;
@@ -242,6 +243,7 @@ bool RenderEngine::State::recreateDupl() {
         if (output1) { hr = output1->DuplicateOutput(device.Get(), dupl.ReleaseAndGetAddressOf()); output1->Release(); }
         RLog("recreateDupl: DuplicateOutput hr=0x%08lX capFp16=0", (unsigned long)hr);
     }
+    waitOutput = output;          // keep a ref for waitVBlank (released with the device set)
     SafeRelease(output);
     if (SUCCEEDED(hr) && dupl) {
         DXGI_OUTDUPL_DESC dd{};
@@ -433,6 +435,7 @@ bool RenderEngine::recoverDeviceLost() {
     // is reset so updateCursorTexture re-uploads against the new device on the next frame.
     s_->ready = false;
     s_->dupl.Reset();
+    s_->waitOutput.Reset();
     s_->desktopCopy.Reset(); s_->desktopSRV.Reset();
     s_->cursorTex.Reset(); s_->cursorSRV.Reset(); s_->cursorReady = false; s_->lastCursor = nullptr;
     s_->crosshairSRV.Reset();   // device-dependent; rebuilt in buildDeviceResources
@@ -500,8 +503,13 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     // surface (LWA_ALPHA 255 = fully opaque). A DirectComposition flip-model present was tried
     // twice (#11, #69) and abandoned: it tears on a VRR display and droops to the VRR-floated
     // composite rate when forced onto DwmFlush, so blt is the only present path.
-    const DWORD exStyle = WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST |
+    // WIND_NOLAYERED=1: measurement-only diagnostic (issue #148) - drop WS_EX_LAYERED to test
+    // whether DWM's layered-window update path is what throttles present consumption under a
+    // game. BREAKS click-through and alpha show/hide; never ship a session with it set.
+    const bool noLayered = GetEnvironmentVariableW(L"WIND_NOLAYERED", nullptr, 0) > 0;
+    const DWORD exStyle = (noLayered ? 0 : WS_EX_LAYERED) | WS_EX_TRANSPARENT | WS_EX_TOPMOST |
                           WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
+    if (noLayered) RLog("initialize: WIND_NOLAYERED diagnostic build path (no WS_EX_LAYERED)");
     s_->hwnd = nullptr;
     // Higher z-band (needs UIAccess) so we draw above the shell's immersive bands - the only
     // way an overlay can cover the Start menu / taskbar / tray flyouts. Undocumented, so we
@@ -1205,6 +1213,11 @@ static LONG WINAPI CursorRestoreFilter(EXCEPTION_POINTERS* ep) {
     SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, SPIF_SENDCHANGE);
     wind::WriteCrashReport(ep);          // minidump + text summary into the log dir
     return EXCEPTION_CONTINUE_SEARCH;   // let the default handler still report the crash
+}
+
+bool RenderEngine::waitVBlank() {
+    if (!s_ || !s_->waitOutput) return false;
+    return SUCCEEDED(s_->waitOutput->WaitForVBlank());
 }
 
 void RenderEngine::hideSystemCursor(bool hide) {

@@ -60,6 +60,7 @@ void RenderModel::primeReveal() { engine_.primeReveal(); }
 bool RenderModel::frameCompositedSincePrime() const { return engine_.frameCompositedSincePrime(); }
 bool RenderModel::revealFrameDone(double spinBudgetMs) { return engine_.revealFrameDone(spinBudgetMs); }
 void RenderModel::invalidateCapture() { engine_.invalidateCapture(); }
+bool RenderModel::waitVBlank() { return engine_.waitVBlank(); }
 
 void RenderModel::present(const MapResult& r, double level, const Config& cfg,
                           const MonitorTarget& mon, const PresentExtras& ex) {
