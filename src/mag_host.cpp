@@ -16,6 +16,10 @@ bool MagHost::initialize() {
 
 bool MagHost::setTransform(float zoom, int offX, int offY, int tx, int ty, bool fastPan) {
     if (!initialized_) return false;
+    // (A 16-bit-translation theory for the issue #148 corner TDRs was tested and DISPROVEN:
+    // routing big-|tx| writes through the public API crashed identically. The real lethal
+    // condition is magnifying the far-right source region above ~9x over a heavy game - see
+    // the hybrid level threshold in main.cpp. No channel guard needed here.)
     if (fastPan && !privateBroken_ && setMagDesktop_) {
         if (setMagDesktop_(zoom, tx, ty) != 0) return true;
         privateBroken_ = true;   // fall back permanently this session

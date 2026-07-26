@@ -21,6 +21,15 @@ MapResult CursorMapper::update(int dx, int dy, double level) {
     ty_ += dy;
     if (tx_ < 0) tx_ = 0; else if (tx_ > sw_) tx_ = sw_;
     if (ty_ < 0) ty_ = 0; else if (ty_ > sh_) ty_ = sh_;
+    // Pan wall (issue #148): keep the SOURCE left edge at or under maxSrcX_ by bounding the
+    // center. Bounds the eased center too: during a zoom ramp at the right edge the wall
+    // moves inward with the level, and the rendered center must follow it the same tick.
+    if (maxSrcX_ >= 0.0) {
+        double centerMax = maxSrcX_ + (sw_ / level) / 2.0;
+        if (centerMax > sw_) centerMax = sw_;
+        if (tx_ > centerMax) tx_ = centerMax;
+        if (cx_ > centerMax) cx_ = centerMax;
+    }
 
     // Light inertia: ease the rendered center toward the target. Smooths jerk and the uneven
     // per-frame delta steps; alpha_ = 1 means no smoothing (snaps to target).

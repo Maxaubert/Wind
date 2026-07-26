@@ -32,6 +32,25 @@ using namespace wind;
 
 static InputRouter g_input;
 
+// Issue #148 ROOT CAUSE (proven 2026-07-26 via the MPO-off experiment): NVIDIA's multiplane-
+// overlay (MPO) plane programming packs DWM's magnification translation into a 16-bit field.
+// With a game surface on a hardware plane, |srcX*level| > 32767 (= the far-right strip above
+// ~9.3x on 3840) wraps and resets the driver (nvlddmkm 153). With MPO disabled
+// (HKLM\...\Dwm\OverlayTestMode=5) the identical writes are clean at full range - DWM
+// composites in float. The pan wall below therefore applies ONLY while MPO is enabled.
+static constexpr double kMaxSafeTxMagnitude = 32000.0;
+static bool g_mpoDisabled = false;   // boot state of OverlayTestMode (read once at startup)
+
+static void DetectMpoDisabled() {
+    DWORD v = 0, sz = sizeof(v);
+    if (RegGetValueW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\Dwm",
+                     L"OverlayTestMode", RRF_RT_REG_DWORD, nullptr, &v, &sz) == ERROR_SUCCESS)
+        g_mpoDisabled = (v == 5);
+    wind::Log(wind::LogLevel::Info, "startup", "MPO %s (OverlayTestMode=%lu) -> pan wall %s",
+              g_mpoDisabled ? "DISABLED" : "enabled", (unsigned long)v,
+              g_mpoDisabled ? "off (full range)" : "on (right-strip bound above ~9.3x)");
+}
+
 // Current refresh rate (Hz) of the primary display, for pacing the idle/1x loop and the
 // vsync=0 path so we don't hardcode the dev's 144Hz. Falls back to 60 if the query fails or
 // reports a placeholder (some drivers report 0/1 for "hardware default").
@@ -183,6 +202,11 @@ struct TickState {
     double prevLvl = 1.0;
     int    revealPending = 0;                  // fallback-cap ticks left on the gated reveal; the
                                                //   reveal itself is evidence-gated (#90, #140)
+    IMagnifierModel* restAfterReveal = nullptr; // instant-switch handover: the OUTGOING engine
+                                               //   stays live until the incoming one is on screen
+                                               //   plus a small overlap (else a bare unmagnified
+                                               //   composite flashes through the channel gap)
+    int    restOverlapTicks = 0;               // overlap countdown once the handover condition met
     bool   revealNeedsComposite = false;       // fullscreen-app zoom-in: also require a post-prime
                                                //   composite in the capture before revealing
     int    hz = 60;                            // resolved tick/refresh rate (auto-detected)
@@ -474,16 +498,9 @@ static void RunTick(TickState& t) {
         || comboHeld(t.cfg.zoomOutVk,  t.cfg.zoomOutMods)
         || comboHeld(t.cfg.zoomOutVk2, t.cfg.zoomOutMods2);
     // Apply the live zoom profile every frame (free hot-reload; setProfile does not reset level).
-    // Transform sessions ramp at <=1.0x speed (issue #148): fast ramps fire large level deltas
-    // per tick, each an expensive DWM re-scale that lands as a 30-50ms game hitch. (The GPU
-    // driver resets once blamed here were really the cursor weld - fixed by the follow design
-    // in transform_model.cpp - but the hitch law stands, so the cap stays for smoothness.)
-    double zin = t.cfg.zoomInSpeed, zout = t.cfg.zoomOutSpeed;
-    if (dynamic_cast<TransformModel*>(t.model)) {
-        if (zin > 1.0)  zin = 1.0;
-        if (zout > 1.0) zout = 1.0;
-    }
-    t.zoom.setProfile(zin, zout, t.cfg.smoothZoom != 0,
+    // (The old transform <=1.0x ramp-speed cap was a blind TDR mitigation; the resets were
+    // root-caused elsewhere - issue #148 - so the user's configured speed applies everywhere.)
+    t.zoom.setProfile(t.cfg.zoomInSpeed, t.cfg.zoomOutSpeed, t.cfg.smoothZoom != 0,
                       t.cfg.smoothZoomAccel, t.cfg.smoothZoomRamp);
     // Quick-zoom trigger. Modifier mode (quickZoomHotkeyMode==0): hold the configured modifier
     // (Ctrl/Alt/Shift; "None" = off) and tap a zoom key. While the modifier is held it toggles quick
@@ -603,6 +620,10 @@ static void RunTick(TickState& t) {
             const bool primaryHere = t.mon.x == 0 && t.mon.y == 0;
             // Churny apps (learned cursor-shape churners, issue #148) always get render.
             // tdrTest>0 (field-test harness) bypasses the list to force transform experiments.
+            // (The driver's far-right high-zoom TDR is handled INSIDE the transform session by
+            // the mapper's pan wall - see setMaxSourceLeft below - so games keep the transform
+            // path at every level; a 9x engine-crossover was tried and its handover flash was
+            // worse than the wall.)
             IMagnifierModel* pick = (fs && borderless && primaryHere &&
                                      (t.cfg.tdrTest > 0 || !IsChurnyFg(fgw)))
                                         ? t.mTransform : t.mRender;
@@ -772,6 +793,12 @@ static void RunTick(TickState& t) {
         // cursor briefly escaping to another monitor) cannot teleport the lens. cx_ also clamps.
         if (dx >  t.mon.w) dx =  t.mon.w; else if (dx < -t.mon.w) dx = -t.mon.w;
         if (dy >  t.mon.h) dy =  t.mon.h; else if (dy < -t.mon.h) dy = -t.mon.h;
+        // Pan wall (issue #148 final fix): transform GAME sessions keep the source rect's left
+        // edge under the driver-safe bound; the far-right strip becomes smoothly unreachable
+        // above ~9.3x instead of resetting the GPU. Desktop/F11 transform sessions are
+        // unrestricted (field-clean at full range). Y never overflows on this geometry.
+        t.mapper.setMaxSourceLeft((t.gameFreeze && !g_mpoDisabled && t.cfg.tdrTest != 4)
+                                      ? kMaxSafeTxMagnitude / lvl : -1.0);
         MapResult r = t.mapper.update(dx, dy, lvl);
         // Inspect click-to-look-point: the hook swallowed real click(s) and handed us per-button counts
         // (counts, not a flag, so a fast double-click before this drains isn't lost). Fire a clean ABSOLUTE
@@ -832,8 +859,13 @@ static void RunTick(TickState& t) {
                                      (t.cfg.tdrTest > 0 || !IsChurnyFg(fgw2)))
                                         ? t.mTransform : t.mRender;
             if (want && want != t.model && !fgIsStealer) {
-                t.model->setActive(false);
-                t.model->hideSystemCursor(false);
+                if (t.restAfterReveal) {   // rapid double-switch: settle the previous handover
+                    t.restAfterReveal->setActive(false);
+                    t.restAfterReveal = nullptr;
+                    t.restOverlapTicks = 0;
+                }
+                IMagnifierModel* old = t.model;
+                old->hideSystemCursor(false);
                 t.model = want;
                 // FOLLOW design (issue #148): only render hides + welds; transform keeps the real
                 // cursor visible. On render->transform the cursor reappears exactly at the lens
@@ -845,8 +877,21 @@ static void RunTick(TickState& t) {
                     if (t.revealNeedsComposite) rm->primeReveal();
                     t.revealPending = (t.hz > 0 ? t.hz : 60) / 4;
                     if (t.revealPending < 2) t.revealPending = 2;
+                    // SEAMLESS HANDOVER (field report: a bare-desktop frame flashed at the 9x
+                    // crossover): the transform keeps the screen magnified while the overlay's
+                    // evidence-gated reveal is pending, and RESTS A FEW TICKS AFTER the reveal
+                    // lands - the rest write and the alpha flip travel different DWM channels,
+                    // so a same-tick rest still left a one-composite unmagnified gap. The
+                    // overlap's worst case is a ~14ms over-zoom pulse (still magnified content),
+                    // never a bare desktop.
+                    t.restAfterReveal = old;
+                    t.restOverlapTicks = 0;   // armed when the reveal actually fires
                 } else {
-                    t.model->setActive(true);   // transform reveals instantly
+                    // render -> transform: activate the transform THIS tick, keep the overlay up
+                    // for the same short overlap, then drop it.
+                    t.model->setActive(true);
+                    t.restAfterReveal = old;
+                    t.restOverlapTicks = 3;
                 }
                 wind::Log(wind::LogLevel::Info, "hybrid", "instant switch -> %s (level preserved)",
                           dynamic_cast<RenderModel*>(t.model) ? "render" : "transform");
@@ -1090,6 +1135,7 @@ static void RunTick(TickState& t) {
                 if (!t.revealNeedsComposite && rm->revealFrameDone(3.0)) {
                     rm->setActive(true);
                     t.revealPending = 0;
+                    if (t.restAfterReveal) t.restOverlapTicks = 3;   // overlap, then rest
                 }
             } else if (t.revealPending > 0) {
                 --t.revealPending;
@@ -1101,10 +1147,17 @@ static void RunTick(TickState& t) {
                               "deferred reveal: frameDone=%d composited=%d ticksLeft=%d",
                               (int)frameDone, (int)composited, t.revealPending);
                     t.revealPending = 0;
+                    if (t.restAfterReveal) t.restOverlapTicks = 3;   // overlap, then rest
                 }
             }
         } else if (enterActive) {
             t.model->setActive(true);   // transform: reveal immediately, no capture priming
+        }
+        // Handover overlap: the outgoing engine rests a few ticks after the incoming one is
+        // live, so the crossover never composites a bare unmagnified frame (see instant switch).
+        if (t.restAfterReveal && t.restOverlapTicks > 0 && --t.restOverlapTicks == 0) {
+            t.restAfterReveal->setActive(false);
+            t.restAfterReveal = nullptr;
         }
         // Execute the deferred game-inspect steal now that the reveal logic has read the true
         // foreground, and RE-assert it if the game pulled foreground back mid-inspect (some
@@ -1135,6 +1188,7 @@ static void RunTick(TickState& t) {
             t.lastSetVirtual.y = r.clickDesktopY + t.mon.y;
         }
     } else if (t.prevActive) {                        // active -> idle: tear the overlay down
+        if (t.restAfterReveal) { t.restAfterReveal->setActive(false); t.restAfterReveal = nullptr; }
         t.model->setActive(false);
         t.model->hideSystemCursor(false);
         t.outlineZoneSec = 0.0;                       // zoom-out clears the low-zoom dwell (no banked partial)
@@ -1480,6 +1534,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     atexit(wind::LogShutdown);
     SiLog("=== launch ===", 0);
     LoadChurnyApps();   // issue #148: learned cursor-churning apps (transform -> render for them)
+    DetectMpoDisabled();   // issue #148: MPO boot state decides whether the pan wall is needed
     RestoreInputState();
     HANDLE mtx = nullptr;
     if (!AcquireSingleInstance(mtx)) { RestoreInputState(); return 0; }
@@ -1760,6 +1815,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             ClipCursor(nullptr);
             ts.gameFreeze = false;   // the game-session freeze clip is the same invariant
             EndFreezeSteal(ts);      // tdrTest=3 must not strand the game backgrounded either
+            if (ts.restAfterReveal) { ts.restAfterReveal->setActive(false); ts.restAfterReveal = nullptr; }
             if (ts.cursorLock.locked()) { ts.cursorLock.reset(); ts.clickReleaseTicks = 0; }
             EndGameInspect(ts);   // device-lost must not strand the game backgrounded
             unsigned long long now = GetTickCount64();

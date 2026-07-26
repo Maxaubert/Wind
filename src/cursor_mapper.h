@@ -21,6 +21,12 @@ public:
     // smoothing jerk and the uneven per-frame delta steps (costs a little lag).
     CursorMapper(int screenW, int screenH, double smoothing = 0.0);
     void reset(double centerX, double centerY);    // pin both target + rendered center
+    // Pan wall (issue #148): upper bound for the source rect's LEFT edge (desktop px), or a
+    // negative value for no bound. Transform GAME sessions set 32000/level each tick: the
+    // driver resets when the far-right strip is magnified above ~9.3x (field-bisected, both
+    // API channels), so the lens smoothly stops short of it instead. Enforced on the center
+    // clamp so lens, sprite, and click point all agree (no post-hoc snapping).
+    void setMaxSourceLeft(double maxSrcX) { maxSrcX_ = maxSrcX; }
     // dx/dy: the pixel delta to apply to the lens center this tick (already resolved by the
     // caller - the OS cursor's own motion when free, or scaled raw input when a game locks it).
     MapResult update(int dx, int dy, double level);
@@ -31,5 +37,6 @@ private:
     double alpha_;          // per-frame easing factor (1 - smoothing), clamped
     double cx_, cy_;        // rendered center (eased)
     double tx_, ty_;        // target center (delta-accumulated)
+    double maxSrcX_ = -1.0; // pan wall: max source-left (desktop px); <0 = unbounded
 };
 }

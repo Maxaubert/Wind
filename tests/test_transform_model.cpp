@@ -1,7 +1,27 @@
 #include "doctest.h"
 #include "../src/transform.h"
+#include "../src/cursor_mapper.h"
 
 using namespace wind;
+
+TEST_CASE("CursorMapper pan wall: source left never exceeds the bound (issue #148)") {
+    // Transform game sessions set maxSourceLeft = 32000/level each tick: the driver resets
+    // when the far-right strip is magnified above ~9.3x. Pan hard right at 12x and assert the
+    // source rect's left edge stays at/under the wall while Y (never overflowing) reaches max.
+    CursorMapper m(3840, 2160, 0.0);
+    m.reset(1920.0, 1080.0);
+    const double level = 12.0;
+    m.setMaxSourceLeft(32000.0 / level);
+    MapResult r{};
+    for (int i = 0; i < 400; ++i) r = m.update(20, 12, level);   // grind toward bottom-right
+    CHECK(r.srcLeft <= 32000.0 / level + 1e-6);
+    CHECK(r.srcLeft * level <= 32000.0 + 1e-3);                  // the actual driver-safe bound
+    CHECK(r.srcTop > 1970.0);                                    // Y unrestricted: reaches its max
+    // The wall follows the level: zooming OUT to 8x makes the whole edge reachable again.
+    m.setMaxSourceLeft(-1.0);
+    for (int i = 0; i < 400; ++i) r = m.update(20, 0, 8.0);
+    CHECK(r.srcLeft > 3300.0);                                   // full-range clamp only (w - w/L)
+}
 
 TEST_CASE("ComputeMagTransform: public offset rounds the source top-left") {
     MagTransform m = ComputeMagTransform(100.4, 200.6, 2.0, 3840, 2160);

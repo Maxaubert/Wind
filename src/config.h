@@ -90,6 +90,9 @@ struct Config {
                           //   2 = clamp |tx| <= 32000 (right-region/overflow probe)
                           //   3 = steal foreground while zoomed over a game (silences the game's
                           //       input/cursor activity; read-only-zoom prototype)
+                          //   4 = DISABLE the pan wall (full right-edge range at any level) -
+                          //       for the MPO-off experiment: with hardware overlay planes
+                          //       disabled the 16-bit plane-programming overflow should be gone
     // Magnify-model-only: Windows Magnifier zoom increment in percent POINTS per wheel notch
     // (written to the ScreenMagnifier registry; the user's original value is snapshot-restored
     // on exit). Lower = smoother and slower zoom. Clamped 5..400. Live-applies (no restart).
