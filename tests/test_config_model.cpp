@@ -54,9 +54,11 @@ TEST_CASE("FlipModel maps an unknown value to magnify") {
     CHECK(FlipModel("bogus") == "magnify");
     CHECK(FlipModel("") == "magnify");
 }
-TEST_CASE("transform/hybrid cap maxLevel at 12 (GPU TDR safety, field-confirmed)") {
-    CHECK(ParseConfig("model=transform\nmaxLevel=20\n").maxLevel == doctest::Approx(12.0));
-    CHECK(ParseConfig("model=hybrid\nmaxLevel=16\n").maxLevel == doctest::Approx(12.0));
+TEST_CASE("maxLevel is one shared setting - no per-model clamp (issue #148 root-caused)") {
+    // The old transform/hybrid <=12 cap guarded what turned out to be the NVIDIA 16-bit MPO
+    // overflow; the mapper's pan wall handles that at any level, so all models share maxLevel.
+    CHECK(ParseConfig("model=transform\nmaxLevel=20\n").maxLevel == doctest::Approx(20.0));
+    CHECK(ParseConfig("model=hybrid\nmaxLevel=16\n").maxLevel == doctest::Approx(16.0));
     CHECK(ParseConfig("model=transform\nmaxLevel=8\n").maxLevel == doctest::Approx(8.0));
-    CHECK(ParseConfig("model=render\nmaxLevel=20\n").maxLevel == doctest::Approx(20.0));  // render unaffected
+    CHECK(ParseConfig("model=render\nmaxLevel=20\n").maxLevel == doctest::Approx(20.0));
 }

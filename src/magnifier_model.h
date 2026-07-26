@@ -14,6 +14,10 @@ struct PresentExtras {
     int   clickDesktopY = 0;
     bool  clickOverride = false;  // true when clickDesktop* should replace the mapper's click point
     bool  drawCursor = true;      // whether a cursor should be shown at all this frame
+    bool  gameFreeze = false;     // transform game session (issue #148): cursor frozen; sprite marks
+                                  //   the aim point at the lens center
+    bool  pauseWrites = false;    // skip transform writes this tick (serializes an injected cursor
+                                  //   move so no write can race it - the proven TDR)
     // Game perf (issue #148; render model only, others ignore):
     bool  fsGame = false;         // foreground covers the monitor -> skip the periodic topmost backstop
     bool  forceCrop = false;      // fsGame && gameCrop: crop the capture copy to the magnified region

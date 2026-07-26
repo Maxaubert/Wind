@@ -26,6 +26,12 @@ OffsetF ComputeFixedPointOffset(double centerX, double centerY, double level);
 // offset the public MagSetFullscreenTransform takes; tx* is the screen-space translation
 // (-source * level) the private SetMagnificationDesktopMagnification channel takes, which pans
 // level-times more finely so slow sub-pixel drift still moves ~1px/frame instead of stalling.
+// screenW/H bound the result (issue #148 trigger 2): the mapper clamps the FLOAT source to
+// maxX = w - w/level, which is fractional at any mid-ramp level; naive round-to-nearest can push
+// the integer offset (or the private translation) past it, so the magnified source rect samples
+// OUTSIDE the desktop texture - field-confirmed GPU driver reset (TDR), always at the right or
+// bottom edge (left/top clamp to exact 0 and cannot overshoot). Clamp AFTER rounding, downward.
 struct MagTransform { int offX; int offY; int txX; int txY; };
-MagTransform ComputeMagTransform(double srcLeft, double srcTop, double level);
+MagTransform ComputeMagTransform(double srcLeft, double srcTop, double level,
+                                 int screenW, int screenH);
 }

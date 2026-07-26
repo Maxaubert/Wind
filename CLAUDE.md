@@ -31,15 +31,38 @@ One paced tick loop; models behind `IMagnifierModel` (`model=` ini key, restart 
 `hybrid` (DEFAULT, "Auto" in the UI) constructs render + transform and picks per zoom-in at the
 idle->active edge - transform when the foreground covers the monitor AND is borderless (games,
 F11 video) on the primary, else render; while ZOOMED it re-picks instantly (always on) when the
-foreground changes, preserving level/lens (controller+mapper untouched). `transform` (revived
-issue #148) = DWM fullscreen transform via MagSet/private channel: compositor-internal, the only
-path that stays smooth over a heavy game (native-Magnifier parity measured); centered cursor via
-sprite in DESKTOP coords at the lens center (DWM magnifies layered windows on this build);
-continuous per-tick level (big discrete jumps are what cost ~30-50ms game frames - do NOT
-re-quantize ramps), tx keep-alive 1.5s after changes (value-static = DWM parks, action-start
-spike), launch warm-up 1.001, rest at 1.0005, maxLevel capped 12 (TDR territory above - field-confirmed driver resets at ~14-16x in-game; desktop
-cliff ~4x per-window texture limits - why hybrid keeps render on desktop). Transform desktop
-hover accuracy is an OPEN issue (parked; hybrid avoids it). `swapModelVk` is fully retired: the ini key is IGNORED (field stays 0; hook never binds it; the RunTick swap edge is dead code). `model=render` (default): `render_engine` = own DXGI Desktop
+foreground changes, preserving level/lens (controller+mapper untouched; the OUTGOING engine
+rests a few ticks AFTER the incoming one is live - restAfterReveal - so a handover never
+composites a bare unmagnified frame). `transform` (revived issue #148) = DWM fullscreen
+transform via MagSet/private channel: compositor-internal, the only path that stays smooth over
+a heavy game (native-Magnifier parity measured); continuous per-tick level (big discrete jumps
+are what cost ~30-50ms game frames - do NOT re-quantize ramps), tx keep-alive after changes
+(value-static = DWM parks, action-start spike), launch warm-up 1.001, rest at TRUE 1.0.
+maxLevel is ONE SHARED setting across models (no per-model cap; the old 12x cap guarded what
+turned out to be the MPO bug below). Desktop cliff ~4x per-window texture limits - why hybrid
+keeps render on desktop.
+TRANSFORM CURSOR LAW (issue #148 root causes - NEVER regress): the transform model NEVER places
+the cursor. Programmatic ABSOLUTE placement (SetCursorPos / SendInput-absolute) or per-tick
+ClipCursor while the fullscreen transform is live over a game RESETS THE GPU DRIVER in seconds
+(repro-proven: any rate, even with the transform parked; the old per-tick click weld was this).
+DESKTOP transform sessions FOLLOW the visible cursor (DWM shows it magnified; hover + clicks
+native-correct - the old hover dead zones are GONE, issue closed); GAME sessions (borderless
+cover) FREEZE it (Inspect-style 1px clip -> LockDetector reads it as locked -> raw-mickey pan),
+the sprite marks the aim point, and clicks are hook-swallowed + fired as write-paused absolute
+injections at the aim point (re-freezing there). ClipCursor re-asserts are DEDUPED via
+GetClipCursor reads (same TDR class as SetCursorPos). ComputeMagTransform clamps offsets AND
+private-channel translations with a 2px right/bottom margin (rounding overshoot = TDR class).
+NVIDIA MPO BUG (issue #148 final root cause, proven by the MPO-off experiment): the driver
+packs DWM's magnification translation into a 16-bit field when a game surface rides a hardware
+overlay plane; |srcX*level| > 32767 (the far-right strip above ~9.3x on 3840) wraps and TDRs -
+both API channels, only over real games. With MPO disabled (HKLM\SOFTWARE\Microsoft\Windows\Dwm
+OverlayTestMode=5 DWORD, reboot) the same writes are clean at full range. Wind reads the MPO
+boot state at startup: MPO on -> the mapper pan wall (setMaxSourceLeft, srcX*level <= 32000)
+bounds transform GAME sessions; MPO off -> full range. CHURN VALVE: apps churning cursor SHAPES
+per frame (rig-proven TDR at any write rate) are detected via GetCursorInfo handle polling,
+instant-switched to render, and persisted in %LOCALAPPDATA%\Wind\churny_apps.txt; the render
+device-lost path is the learn-once backstop. `tdrTest` ini knob (0-4, hot) = the #148 field
+harness. RTSS tell while zoomed: doubled overlay = render session, single = transform. `swapModelVk` is fully retired: the ini key is IGNORED (field stays 0; hook never binds it; the RunTick swap edge is dead code). `model=render` (default): `render_engine` = own DXGI Desktop
 Duplication capture + D3D11: magnifies a sub-pixel float source rect to a click-through,
 capture-excluded (`WDA_EXCLUDEFROMCAPTURE`) fullscreen overlay; draws the real cursor
 (`GetCursorInfo`) centered via `cursor_mapper`; hides the OS cursor (`MagShowSystemCursor`) and
