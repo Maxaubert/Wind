@@ -6,6 +6,7 @@
 #include "crosshair.h"
 #include "png_dump.h"
 #include "logging.h"
+#include "mag_host.h"   // shared Magnification-runtime refcount (both models use the API)
 #include <windows.h>
 #include <d3d11.h>
 #include <dxgi1_6.h>
@@ -1222,12 +1223,20 @@ bool RenderEngine::waitVBlank() {
 
 void RenderEngine::hideSystemCursor(bool hide) {
     if (!s_) return;
-    if (hide && !s_->magInited) {
-        s_->magInited = (MagInitialize() != 0);
-        SetUnhandledExceptionFilter(CursorRestoreFilter);   // installed once, before first hide
-    }
-    if (s_->magInited) {
-        MagShowSystemCursor(hide ? FALSE : TRUE);
+    // Shared refcount, NOT a private MagInitialize: the transform model uses the same
+    // process-wide runtime, and independent init/uninit pairs break each other (mag_host.h).
+    // Symmetric - the reference is held only while the cursor is actually hidden, so an idle
+    // desktop leaves the runtime released (which is what keeps DWM out of magnification mode).
+    if (hide) {
+        if (!s_->magInited) {
+            s_->magInited = wind::MagApiAcquire();
+            SetUnhandledExceptionFilter(CursorRestoreFilter);   // installed once, before first hide
+        }
+        if (s_->magInited) MagShowSystemCursor(FALSE);
+    } else if (s_->magInited) {
+        MagShowSystemCursor(TRUE);
+        wind::MagApiRelease();
+        s_->magInited = false;
     }
 }
 
@@ -1236,7 +1245,7 @@ void RenderEngine::shutdown() {
     if (s_->magInited) {
         MagShowSystemCursor(TRUE);          // never leave the cursor hidden
         ClipCursor(nullptr);                // nor clipped (Inspect mode) - heal both on teardown
-        MagUninitialize();
+        wind::MagApiRelease();
         s_->magInited = false;
         SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, SPIF_SENDCHANGE);  // safety net
     }

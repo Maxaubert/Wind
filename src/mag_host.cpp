@@ -4,8 +4,26 @@
 
 namespace wind {
 
+// Process-wide Magnification runtime refcount (see mag_host.h). Single-threaded by contract:
+// only the tick thread touches the Magnification API (it is thread-affine anyway).
+static int g_magRefs = 0;
+
+bool MagApiAcquire() {
+    if (g_magRefs > 0) { ++g_magRefs; return true; }
+    if (!MagInitialize()) return false;
+    g_magRefs = 1;
+    return true;
+}
+
+void MagApiRelease() {
+    if (g_magRefs <= 0) return;
+    if (--g_magRefs == 0) MagUninitialize();
+}
+
+bool MagApiAlive() { return g_magRefs > 0; }
+
 bool MagHost::initialize() {
-    initialized_ = MagInitialize();
+    initialized_ = MagApiAcquire();
     privateBroken_ = false;   // re-probe the private channel on every (re-)init, not once ever
     if (initialized_) {
         HMODULE u32 = GetModuleHandleW(L"user32.dll");
@@ -37,7 +55,7 @@ bool MagHost::setInputTransform(bool active, const RECT& src, const RECT& dst) {
 void MagHost::shutdown() {
     if (!initialized_) return;
     MagSetFullscreenTransform(1.0f, 0, 0);   // public reset restores shared state
-    MagUninitialize();
+    MagApiRelease();
     initialized_ = false;
 }
 }
