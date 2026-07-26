@@ -111,6 +111,21 @@ in a separate exe entirely, and has zero perf coupling to the magnifier loop. Se
 staged Apply/Discard footer.
 
 ## IMPORTANT gotchas
+- THE MAGNIFICATION RUNTIME IS PROCESS-SCOPED AND SHARED. Both models use it (transform: the
+  fullscreen transform; render: `MagShowSystemCursor`), so NEVER call `MagInitialize` /
+  `MagUninitialize` directly - go through `wind::MagApiAcquire()` / `MagApiRelease()`
+  (src/mag_host.*), which refcounts it. Independent pairs break each other silently: the
+  transform's idle release killed render's cursor hiding (real pointer reappears beside the
+  drawn one = TWO CURSORS), and render's teardown killed the transform context (every write
+  returns FALSE - the magnifier "stops zooming" while the cursor still moves, since the tick
+  loop is healthy). Holds must be symmetric: take one when you start needing it, drop it the
+  moment you stop, or an idle desktop keeps DWM in magnification-aware compositing (issue #148).
+- A LIVE MAGNIFICATION CONTEXT TAXES EVERY CURSOR CHANGE ANY APP MAKES. While one exists, DWM
+  composites magnification-aware and each cursor visibility/shape change costs a re-composite -
+  a game that toggles its pointer on middle-click hitches even at 1x (Foundation: 25 visibility
+  flips per 20s; measured 13-24 spike frames per 14 wheel-clicks, 0 with no context). Writing
+  level 1.0 does NOT leave the mode; only releasing the runtime does. Hence the transform model
+  creates its context on a session's first write and releases it ~1.2s after the zoom ends.
 - CURSOR SIZE IS CONSTANT, ALWAYS (product rule, no exceptions): the pointer must keep the SAME
   on-screen size at every zoom level, in every model and every zoom we ever build. It must never
   scale with the zoom - a cursor that grows with the level is a bug, not a look. (The transform

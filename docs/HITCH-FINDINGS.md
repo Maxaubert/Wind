@@ -84,6 +84,18 @@ All three run the same deployed build; switch with the `model` key (restart Wind
 Correctness gate for A (`validate.ps1`, teardown between every session): PASS - 6/6 sessions
 reach 12x, 6 releases, cursor never stranded.
 
+## Auto-mode lockup (fixed 2026-07-26)
+
+Field repro: zoom in a game, alt-tab to the settings UI, zoom out and back in -> two cursors;
+return to the game and zoom is dead. Cause: the process-scoped Magnification runtime was
+initialized and uninitialized independently by both models, so whichever released first broke
+the other. Fixed with the `MagApiAcquire`/`MagApiRelease` refcount (see CLAUDE.md). Confirmed
+fixed in the field.
+
+Diagnostic tells for this class: **two cursors** = something released the runtime while the
+render model had the pointer hidden; **cursor moves but nothing magnifies** = transform writes
+returning FALSE (`txwrite ... fails=N` in wind-core.log, N == writes).
+
 ## Open items
 
 - Zoom-ramp spikes (~1 per cycle, 45 ms) - DWM re-scale cost during the ramp.
