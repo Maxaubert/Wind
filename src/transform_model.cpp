@@ -175,7 +175,7 @@ void TransformModel::setActive(bool active) {
 void TransformModel::idleTick() {
     if (!magUp_ || active_ || idleSinceMs_ == 0) return;
     const unsigned long long since = GetTickCount64() - idleSinceMs_;
-    if (since < kIdleReleaseMs) return;
+    if (since < (unsigned long long)idleReleaseMs_) return;
     // The identity park already happened at session end (see setActive); releasing the context
     // afterwards measures 1-2ms, so this is just the "user really stopped zooming" delay.
     teardownMag();
@@ -232,6 +232,18 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         const double rel = std::abs(level - lastLevel_) / lastLevel_;
         if (rel < cfg.txLevelStep / 1000.0) applyLevel = lastLevel_;
     }
+    // txMaxStepPct: rate-limit the APPLIED level change per tick. Each change makes DWM re-scale
+    // its cached surfaces and that cost grows with the level, so an unclamped fast ramp demands
+    // the most expensive re-scales back to back exactly at the top - the suspected cause of the
+    // occasional huge spike at max zoom. The applied level trails and catches up within a few
+    // ticks of the ramp stopping; the source rect below is recomputed for whatever we apply.
+    if (cfg.txMaxStepPct > 0 && lastLevel_ > 1.0 && applyLevel > 1.0) {
+        const double maxRel = cfg.txMaxStepPct / 1000.0;
+        const double up = lastLevel_ * (1.0 + maxRel);
+        const double down = lastLevel_ / (1.0 + maxRel);
+        if (applyLevel > up) applyLevel = up;
+        else if (applyLevel < down) applyLevel = down;
+    }
     // txGrid: snap to a fixed GEOMETRIC ladder (1.0 * g^k) so every zoom reuses the same small
     // set of scale factors instead of minting ~200 fresh ones - DWM's per-factor surface cache
     // then hits instead of missing. Applied on the ramp only; the settled level snaps too (a
@@ -248,6 +260,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         OffsetF o = ComputeOffsetF(r.centerX, r.centerY, applyLevel, mon_.w, mon_.h);
         srcL = o.x; srcT = o.y;
     }
+    idleReleaseMs_ = cfg.txIdleReleaseMs;   // hot-reloadable release window
     if (!ensureMag()) return;   // lazy context: the session's first write brings DWM up
     if (level > sessionMaxLevel_) sessionMaxLevel_ = level;
     const bool ramping = applyLevel != level || (applyLevel != lastLevel_ && lastLevel_ > 0.0);

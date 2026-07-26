@@ -20,6 +20,7 @@ public:
     void setActive(bool active) override;
     void onActivate() override {}                 // no capture to prime
     void idleTick() override;                     // tears the mag context down once idle (#148)
+    void setIdleReleaseMs(int ms) { idleReleaseMs_ = ms < 0 ? 0 : ms; }
     void present(const MapResult& r, double level, const Config& cfg,
                  const MonitorTarget& mon, const PresentExtras& ex) override;
     bool coversShell() const override { return false; }
@@ -52,6 +53,7 @@ private:
     bool magUp_ = false;
     bool cursorHidden_ = false;                      // we called MagShowSystemCursor(FALSE)
     unsigned long long idleSinceMs_ = 0;             // when the last session ended (0 = none)
+    int  idleReleaseMs_ = 1200;                      // cfg.txIdleReleaseMs (hot)
     bool identityParked_ = false;                    // phase 1 of the release done (see idleTick)
     unsigned long long parkedAtMs_ = 0;
     bool ensureMag();

@@ -129,6 +129,9 @@ Config ParseConfig(const std::string& text) {
             else if (key == "gpuPriority")        c.gpuPriority = std::stoi(val);
             else if (key == "gameCrop")           c.gameCrop = std::stoi(val);
             else if (key == "tdrTest")            c.tdrTest = std::stoi(val);
+            else if (key == "freezeNoClip")       c.freezeNoClip = std::stoi(val);
+            else if (key == "txIdleReleaseMs")    c.txIdleReleaseMs = std::stoi(val);
+            else if (key == "txMaxStepPct")       c.txMaxStepPct = std::stoi(val);
             else if (key == "txLevelStep")        c.txLevelStep = std::stoi(val);
             else if (key == "txGrid")             c.txGrid = std::stoi(val);
             else if (key == "gameFpsCap")         c.gameFpsCap = std::stoi(val);

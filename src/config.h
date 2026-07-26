@@ -94,6 +94,21 @@ struct Config {
     int txLevelStep = 0;  // Minimum RELATIVE level change (per mille) before a ramp re-writes
                           //     the level. MEASURED NO BETTER than continuous once sample size
                           //     was adequate (big sporadic stalls appear in every setting).
+    int freezeNoClip = 0; // diagnostic (issue #148): 1 = freeze sessions skip the 1px ClipCursor.
+                          //     Tests whether the clip/unclip cycle is what makes a game's own
+                          //     cursor work expensive after a zoom (middle-click spikes).
+    int txMaxStepPct = 0; // cap the per-tick RELATIVE level change the transform applies (per
+                          //     mille; 25 = 2.5%). DWM re-scales on every level change and the
+                          //     cost grows with the level, so a fast ramp asks for the most
+                          //     expensive work at the highest rate right at the top - the
+                          //     suspected source of the occasional huge spike at max zoom. The
+                          //     applied level trails the controller by a few ticks and catches
+                          //     up when the ramp stops. 0 = uncapped. Hot-reloadable.
+    int txIdleReleaseMs = 1200;  // how long the DWM magnification context lingers after a zoom
+                          //     ends before it is released. Longer = repeat zooms skip the
+                          //     rebuild (fewer big entry spikes) but DWM stays magnification-
+                          //     aware, which taxes cursor changes; shorter = the reverse.
+                          //     Hot-reloadable.
     int tdrTest = 0;      // issue #148 field-test harness (hot-reloadable, diagnostic only).
                           //   0 = normal; >0 forces the transform path for games (bypasses the
                           //   churny-app list) with one experiment active:

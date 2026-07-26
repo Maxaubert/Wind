@@ -1,4 +1,5 @@
 #include "mag_host.h"
+#include "logging.h"
 #include <windows.h>
 #include <magnification.h>
 
@@ -9,15 +10,28 @@ namespace wind {
 static int g_magRefs = 0;
 
 bool MagApiAcquire() {
-    if (g_magRefs > 0) { ++g_magRefs; return true; }
-    if (!MagInitialize()) return false;
+    if (g_magRefs > 0) {
+        ++g_magRefs;
+        wind::Log(wind::LogLevel::Info, "magapi", "acquire -> refs=%d (already up)", g_magRefs);
+        return true;
+    }
+    if (!MagInitialize()) {
+        wind::Log(wind::LogLevel::Warn, "magapi", "MagInitialize FAILED");
+        return false;
+    }
     g_magRefs = 1;
+    wind::Log(wind::LogLevel::Info, "magapi", "MagInitialize -> refs=1 (DWM now magnification-aware)");
     return true;
 }
 
 void MagApiRelease() {
     if (g_magRefs <= 0) return;
-    if (--g_magRefs == 0) MagUninitialize();
+    if (--g_magRefs == 0) {
+        MagUninitialize();
+        wind::Log(wind::LogLevel::Info, "magapi", "MagUninitialize -> refs=0 (runtime released)");
+    } else {
+        wind::Log(wind::LogLevel::Info, "magapi", "release -> refs=%d (still held)", g_magRefs);
+    }
 }
 
 bool MagApiAlive() { return g_magRefs > 0; }

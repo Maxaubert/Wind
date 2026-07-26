@@ -680,7 +680,7 @@ static void RunTick(TickState& t) {
                     t.freezePoint = fp;
                     t.clickReleaseTicks = 0;
                     RECT fz{ fp.x, fp.y, fp.x + 1, fp.y + 1 };
-                    ClipCursor(&fz);
+                    if (!t.cfg.freezeNoClip) ClipCursor(&fz);
                     t.model->hideSystemCursor(true);
                     t.freezeExe = ExeNameOf(ffg);
                     t.churnCount = 0; t.churnWinStart = GetTickCount64(); t.lastFgCursor = nullptr;
@@ -1059,8 +1059,9 @@ static void RunTick(TickState& t) {
                 --t.clickReleaseTicks;
             } else {
                 RECT have{}; GetClipCursor(&have);
-                if (have.left != t.freezePoint.x || have.top != t.freezePoint.y ||
-                    have.right != t.freezePoint.x + 1 || have.bottom != t.freezePoint.y + 1) {
+                if (!t.cfg.freezeNoClip &&
+                    (have.left != t.freezePoint.x || have.top != t.freezePoint.y ||
+                     have.right != t.freezePoint.x + 1 || have.bottom != t.freezePoint.y + 1)) {
                     RECT fz{ t.freezePoint.x, t.freezePoint.y,
                              t.freezePoint.x + 1, t.freezePoint.y + 1 };
                     ClipCursor(&fz);
