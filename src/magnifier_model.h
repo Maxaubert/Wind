@@ -33,7 +33,11 @@ struct IMagnifierModel {
     virtual bool ready() const = 0;
     virtual void hideSystemCursor(bool hide) = 0;
     virtual void setActive(bool active) = 0;          // reveal/hide overlay, or enable/disable transform
-    virtual void onActivate() {}                      // called on idle->active (render: invalidateCapture/prime)
+    virtual void onActivate() {}
+    // Called every tick while IDLE (not zoomed). The transform model uses it to expire its
+    // rest-warm: keeping DWM's magnification pipeline hot forever taxes every composite
+    // (field-reported hitching at 1x with MPO off), so it parks after a short cooldown.
+    virtual void idleTick() {}                      // called on idle->active (render: invalidateCapture/prime)
     virtual bool retarget(const MonitorTarget& m) { (void)m; return false; }  // render-only; false = unchanged
     virtual void present(const MapResult& r, double level, const Config& cfg,
                          const MonitorTarget& mon, const PresentExtras& ex) = 0;  // the per-tick draw

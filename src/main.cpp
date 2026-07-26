@@ -810,6 +810,11 @@ static void RunTick(TickState& t) {
         // unrestricted (field-clean at full range). Y never overflows on this geometry.
         t.mapper.setMaxSourceLeft((t.gameFreeze && !g_mpoDisabled && t.cfg.tdrTest != 4)
                                       ? kMaxSafeTxMagnitude / lvl : -1.0);
+        // Transform FOLLOW sessions track the real cursor EXACTLY (no easing) - see
+        // CursorMapper::setSmoothing. Freeze sessions and the render model keep the user's
+        // cursorSmoothing (there the drawn cursor is pinned, so easing only smooths the view).
+        t.mapper.setSmoothing((dynamic_cast<TransformModel*>(t.model) && !t.gameFreeze && !inspect)
+                                  ? 0.0 : t.cfg.cursorSmoothing);
         MapResult r = t.mapper.update(dx, dy, lvl);
         // Inspect click-to-look-point: the hook swallowed real click(s) and handed us per-button counts
         // (counts, not a flag, so a fast double-click before this drains isn't lost). Fire a clean ABSOLUTE
@@ -1236,6 +1241,13 @@ static void RunTick(TickState& t) {
             t.lastSetVirtual = lp;
         }
         t.revealPending = 0;                          // a quick tap may zoom out before the deferred reveal
+    } else {
+        // Idle: let the transform model tear its magnification context down after the cooldown
+        // so an idle desktop (or a game the user is merely playing) pays nothing - DWM stays in
+        // magnification-aware compositing until MagUninitialize (issue #148). Both the current
+        // model and hybrid's transform half get the tick; the others no-op.
+        t.model->idleTick();
+        if (t.mTransform && t.mTransform != t.model) t.mTransform->idleTick();
     }
     t.prevLvl = lvl;
     t.prevActive = active;
