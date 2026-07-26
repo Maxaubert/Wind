@@ -337,6 +337,19 @@ static bool IsChurnyFg(HWND fg) {
     return g_churnyApps.count(ExeNameOf(fg)) != 0;
 }
 
+// Auto/hybrid exclusion: an app on cfg.transformExclude never gets the transform engine even when
+// it is fullscreen and borderless. Fullscreen browser video is indistinguishable from a game by
+// the foreground test, but it wants render (constant-size cursor, desktop-style behaviour).
+static bool IsTransformExcluded(HWND fg, const Config& cfg) {
+    if (cfg.transformExclude.empty()) return false;
+    const std::wstring exeW = ExeNameOf(fg);
+    if (exeW.empty()) return false;
+    std::string exe;
+    exe.reserve(exeW.size());
+    for (wchar_t ch : exeW) exe.push_back((char)(ch < 128 ? ch : '?'));
+    return wind::IsExeInList(exe, cfg.transformExclude);
+}
+
 // tdrTest=3 (issue #148 harness): hand foreground back when a stolen-foreground freeze session
 // ends. Only if we still hold it - an alt-tab to a third app is respected.
 static void EndFreezeSteal(TickState& t) {
@@ -627,6 +640,7 @@ static void RunTick(TickState& t) {
             // path at every level; a 9x engine-crossover was tried and its handover flash was
             // worse than the wall.)
             IMagnifierModel* pick = (fs && borderless && primaryHere &&
+                                     !IsTransformExcluded(fgw, t.cfg) &&
                                      (t.cfg.tdrTest > 0 || !IsChurnyFg(fgw)))
                                         ? t.mTransform : t.mRender;
             if (pick && pick != t.model) t.model = pick;
@@ -857,6 +871,7 @@ static void RunTick(TickState& t) {
             const bool borderless2 = fgw2 && !(GetWindowLongPtrW(fgw2, GWL_STYLE) & WS_CAPTION);
             const bool primary2 = t.mon.x == 0 && t.mon.y == 0;
             IMagnifierModel* want = (fsGame && borderless2 && primary2 &&
+                                     !IsTransformExcluded(fgw2, t.cfg) &&
                                      (t.cfg.tdrTest > 0 || !IsChurnyFg(fgw2)))
                                         ? t.mTransform : t.mRender;
             // STICKY (field: the engine flapped render<->transform inside one zoom session, and

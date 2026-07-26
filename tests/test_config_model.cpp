@@ -54,6 +54,24 @@ TEST_CASE("FlipModel maps an unknown value to magnify") {
     CHECK(FlipModel("bogus") == "magnify");
     CHECK(FlipModel("") == "magnify");
 }
+TEST_CASE("transformExclude keeps fullscreen browsers on the render engine (Auto mode)") {
+    // Default list ships the common browsers: fullscreen video looks like a game to the
+    // foreground test but wants render (constant-size cursor, desktop-style behaviour).
+    Config d = ParseConfig("");
+    CHECK(IsExeInList("zen.exe", d.transformExclude));
+    CHECK(IsExeInList("CHROME.EXE", d.transformExclude));       // case-insensitive
+    CHECK(IsExeInList("msedge.exe", d.transformExclude));
+    CHECK_FALSE(IsExeInList("foundation.exe", d.transformExclude));   // games still get transform
+    // User-supplied lists: whitespace tolerated, exact name match only (no substrings).
+    Config c = ParseConfig("transformExclude=vlc.exe, mpv.exe\n");
+    CHECK(IsExeInList("mpv.exe", c.transformExclude));
+    CHECK(IsExeInList("vlc.exe", c.transformExclude));
+    CHECK_FALSE(IsExeInList("lc.exe", c.transformExclude));      // not a substring match
+    CHECK_FALSE(IsExeInList("chrome.exe", c.transformExclude));  // replaced, not merged
+    // An empty list excludes nothing.
+    CHECK_FALSE(IsExeInList("zen.exe", ""));
+}
+
 TEST_CASE("maxLevel is one shared setting - no per-model clamp (issue #148 root-caused)") {
     // The old transform/hybrid <=12 cap guarded what turned out to be the NVIDIA 16-bit MPO
     // overflow; the mapper's pan wall handles that at any level, so all models share maxLevel.

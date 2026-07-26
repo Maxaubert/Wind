@@ -74,6 +74,13 @@ struct Config {
     // same game). Cursor is anchored (not centered) in this model. Unknown values fall back to
     // "render". Applied at launch (restart to switch; not hot-swapped).
     std::string model = "render";
+    // Auto/hybrid exclusion list: exe names (comma-separated, case-insensitive) that must NEVER
+    // get the transform engine, even when they are fullscreen and borderless. Fullscreen browser
+    // video looks exactly like a game to the foreground test, but it wants the render engine (a
+    // constant-size cursor and desktop-style behaviour); the transform path is there for games.
+    // Empty string = exclude nothing.
+    std::string transformExclude =
+        "zen.exe,firefox.exe,chrome.exe,msedge.exe,brave.exe,opera.exe,opera_gx.exe,vivaldi.exe";
     // Transform-model-only knobs (ignored by the other models):
     int fastPan     = 1;  // 1 = pan via the private SetMagnificationDesktopMagnification channel
                           //     (sub-pixel); falls back to the public API automatically if unavailable.
@@ -233,6 +240,9 @@ Config ParseConfig(const std::string& text);
 // depth): the keyboard hook never swallows these, ParseConfig sanitizes them out of the ini, and
 // the config UI's keybind capture refuses them.
 bool IsForbiddenBindVk(int vk);
+// True when exeName (bare file name, any case) appears in a comma-separated list. Used for the
+// Auto/hybrid transform exclusion (fullscreen browser video must stay on the render engine).
+bool IsExeInList(const std::string& exeName, const std::string& list);
 // Pure: parse "#rrggbb" or "rrggbb" (case-insensitive) into r,g,b floats in [0,1]. Returns
 // false on any malformed input (wrong length, non-hex), leaving the outputs untouched so the
 // caller keeps its fallback default.

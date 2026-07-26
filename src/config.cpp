@@ -2,6 +2,7 @@
 #include <sstream>
 #include <string>
 #include <algorithm>
+#include <cctype>
 namespace wind {
 static double clampd(double v, double lo, double hi) { return v < lo ? lo : (v > hi ? hi : v); }
 static std::string trim(const std::string& s) {
@@ -22,6 +23,27 @@ bool IsForbiddenBindVk(int vk) {
         default:
             return false;
     }
+}
+
+bool IsExeInList(const std::string& exeName, const std::string& list) {
+    if (exeName.empty() || list.empty()) return false;
+    auto lower = [](std::string s) {
+        for (auto& ch : s) ch = (char)std::tolower((unsigned char)ch);
+        return s;
+    };
+    const std::string needle = lower(exeName);
+    std::string haystack = lower(list);
+    size_t pos = 0;
+    while (pos <= haystack.size()) {
+        size_t comma = haystack.find(',', pos);
+        std::string item = haystack.substr(pos, comma == std::string::npos ? std::string::npos
+                                                                          : comma - pos);
+        item = trim(item);
+        if (!item.empty() && item == needle) return true;
+        if (comma == std::string::npos) break;
+        pos = comma + 1;
+    }
+    return false;
 }
 
 bool ParseHexColor(const std::string& s, float& r, float& g, float& b) {
@@ -113,6 +135,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "cursorScaleWithZoom")c.cursorScaleWithZoom = std::stoi(val);
             else if (key == "cursorVisibility")   c.cursorVisibility = val;
             else if (key == "model")              c.model = val;
+            else if (key == "transformExclude")   c.transformExclude = val;
             else if (key == "magnifyStep")        c.magnifyStep = std::stoi(val);
             else if (key == "fastPan")            c.fastPan = std::stoi(val);
             else if (key == "smoothPan")          c.smoothPan = std::stoi(val);
@@ -295,6 +318,11 @@ Config LoadConfig(const std::wstring& path) {
                ";   the cursor itself, and ignores the render-only knobs (sharpness, hdrTonemap,\n"
                ";   bilinear, outline, cursor*, multiMonitor, Inspect mode). Max zoom 1600%.\n"
                "model=render\n"
+               "; transformExclude (Auto/hybrid only): exe names that must never get the transform\n"
+               ";   engine even when fullscreen+borderless. Fullscreen browser video looks exactly\n"
+               ";   like a game to the foreground test but wants the render engine. Comma-separated,\n"
+               ";   case-insensitive, exact name match. Empty = exclude nothing.\n"
+               "transformExclude=zen.exe,firefox.exe,chrome.exe,msedge.exe,brave.exe,opera.exe,opera_gx.exe,vivaldi.exe\n"
                "; magnifyStep (magnify only): Windows Magnifier zoom increment, percent points per\n"
                ";   step (5-400). Lower = smoother and slower. Applies live.\n"
                "magnifyStep=50\n"
