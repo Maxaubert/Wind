@@ -27,15 +27,6 @@ public:
     // API channels), so the lens smoothly stops short of it instead. Enforced on the center
     // clamp so lens, sprite, and click point all agree (no post-hoc snapping).
     void setMaxSourceLeft(double maxSrcX) { maxSrcX_ = maxSrcX; }
-    // Live smoothing override. Transform FOLLOW sessions set 0 (exact tracking): there the lens
-    // must sit ON the real visible cursor, so any easing shows up as the cursor drifting
-    // off-centre and springing back (field-reported wobble). Easing is for models that DRAW the
-    // cursor at the centre themselves.
-    void setSmoothing(double smoothing) {
-        alpha_ = 1.0 - smoothing;
-        if (alpha_ > 1.0) alpha_ = 1.0;
-        if (alpha_ < 0.05) alpha_ = 0.05;
-    }
     // dx/dy: the pixel delta to apply to the lens center this tick (already resolved by the
     // caller - the OS cursor's own motion when free, or scaled raw input when a game locks it).
     MapResult update(int dx, int dy, double level);

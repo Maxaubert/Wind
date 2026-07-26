@@ -7,31 +7,14 @@
 
 namespace wind {
 
-bool TransformModel::ensureMag() {
-    if (magUp_) return true;
-    if (!host_.initialize()) return false;
-    magUp_ = true;
-    return true;
-}
-
-void TransformModel::teardownMag() {
-    if (!magUp_) return;
-    host_.setTransform(1.0f, 0, 0, 0, 0, false);
-    host_.shutdown();          // MagUninitialize - the ONLY way DWM leaves magnification mode
-    magUp_ = false;
-    restWarmMs_ = 0;
-    lastLevel_ = 0.0; lastOffX_ = lastOffY_ = lastTxX_ = lastTxY_ = 0;   // next session re-primes
-}
-
 bool TransformModel::initialize(const MonitorTarget& monitor) {
     mon_ = monitor;
-    // LAZY magnification context (issue #148 idle hitching): merely having the fullscreen
-    // transform initialized-and-written puts DWM in magnification-aware compositing for the
-    // whole session, and every input event a game generates then pays that path (field: ~20
-    // spike frames per 15 middle-click drags at 1x, zero without it - and writing level 1.0 is
-    // NOT enough to leave the mode; only MagUninitialize is). So: no context and no write until
-    // a zoom actually starts, full teardown once idle (see idleTick). The old launch warm-up
-    // write is gone for the same reason; the cost it saved is now covered by the idle cooldown.
+    if (!host_.initialize()) return false;
+    // Warm-up (issue #148): the SESSION'S first real zoom paid a ~110ms cold-start while DWM
+    // built its magnification machinery. Touch it once at launch with an invisible 0.1% level
+    // (sub-pixel everywhere), then reset - the first user zoom starts from a warm pipeline.
+    host_.setTransform(1.001f, 0, 0, 0, 0, false);
+    host_.setTransform(1.0f, 0, 0, 0, 0, false);
     if (useSprite_) {
         blanker_ = std::make_unique<CursorBlanker>();
         sprite_  = std::make_unique<CursorSprite>(blanker_->originals());
@@ -90,29 +73,18 @@ void TransformModel::hideSystemCursor(bool hide) {
 
 void TransformModel::setActive(bool active) {
     active_ = active;
-    if (active) { ensureMag(); return; }
-    if (!magUp_) return;
-    wind::Log(wind::LogLevel::Info, "txsession", "session end maxLevel=%.2f", sessionMaxLevel_);
-    sessionMaxLevel_ = 0.0;
-    // Rest-warm 1.0005 for a COOLDOWN only (idleTick tears the context down after it): warm
-    // makes a re-zoom within a few seconds instant - flicks through 1x paid a 190-340ms
-    // park/unpark stall without it - while staying warm indefinitely leaves DWM in
-    // magnification mode, which taxes every composite (the idle hitching).
-    host_.setTransform(1.0005f, 0, 0, 0, 0, false);
-    restWarmMs_ = GetTickCount64();
-    RECT full{ 0, 0, mon_.w, mon_.h };
-    host_.setInputTransform(false, full, full);   // input mapping back to identity at 1x
-    pin_.hide();
-}
-
-void TransformModel::idleTick() {
-    // Tear the magnification context DOWN once the cooldown expires: re-zooming within the
-    // window stays instant (a flick through 1x paid a 190-340ms park/unpark stall otherwise),
-    // and after it DWM is fully out of magnification mode, so an idle desktop or a game the
-    // user is merely playing pays nothing at all.
-    if (!magUp_ || active_ || restWarmMs_ == 0) return;
-    if (GetTickCount64() - restWarmMs_ < 5000) return;
-    teardownMag();
+    if (!active) {
+        // REST-WARM 1.0005 (re-tested ALONE under MPO-off): rapid flicks through 1x pay a
+        // ~200-340ms park/unpark stall per cycle when resting at TRUE 1.0 (harness-measured,
+        // aggressive-flick recipe). The round-1 regression was the keep-alive change bundled
+        // with this, not the rest-warm itself.
+        wind::Log(wind::LogLevel::Info, "txsession", "session end maxLevel=%.2f", sessionMaxLevel_);
+        sessionMaxLevel_ = 0.0;
+        host_.setTransform(1.0005f, 0, 0, 0, 0, false);
+        RECT full{ 0, 0, mon_.w, mon_.h };
+        host_.setInputTransform(false, full, full);   // input mapping back to identity at 1x
+        pin_.hide();
+    }
 }
 
 void TransformModel::present(const MapResult& r, double level, const Config& cfg,
@@ -215,7 +187,6 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         keepAliveTick_ ^= 1;
         txJitter = keepAliveTick_;
     }
-    if (!ensureMag()) return;   // lazy context: a session's first write brings DWM up
     writeTransform((float)applyLevel, m.offX, m.offY, m.txX + txJitter, m.txY, fastPan_, false);
     // Input transform (issue #148): teach the input stack the inverse mapping. Win32 mouse input
     // is proven correct without it (instrumented), but pointer-stack apps (Explorer XAML lists,
@@ -311,7 +282,7 @@ void TransformModel::shutdown() {
     if (sprite_) sprite_->destroy();
     if (blanker_) blanker_->restore();
     pin_.destroy();
-    teardownMag();
+    host_.shutdown();
     ready_ = false;
 }
 }

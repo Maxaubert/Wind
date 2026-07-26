@@ -19,7 +19,6 @@ public:
     void hideSystemCursor(bool hide) override;
     void setActive(bool active) override;
     void onActivate() override {}                 // no capture to prime
-    void idleTick() override;                     // expire the rest-warm (see magnifier_model.h)
     void present(const MapResult& r, double level, const Config& cfg,
                  const MonitorTarget& mon, const PresentExtras& ex) override;
     bool coversShell() const override { return false; }
@@ -42,10 +41,6 @@ private:
     double lastLevel_ = 0.0;
     double lastRequestedLevel_ = 0.0;   // detect "ramp stopped" so the final level always lands
     double sessionMaxLevel_ = 0.0;      // logged at teardown: scripted-run engagement proof
-    unsigned long long restWarmMs_ = 0; // when the rest-warm started (0 = parked / not warm)
-    bool magUp_ = false;                // magnification context alive (lazy; see ensureMag)
-    bool ensureMag();                   // bring the context up on demand (first write of a zoom)
-    void teardownMag();                 // MagUninitialize - leaves DWM's magnification mode
     unsigned long long lastChangeMs_ = 0;            // when the transform last REALLY changed
     int  lastSpriteX_ = INT_MIN, lastSpriteY_ = INT_MIN;   // dedup the game-session sprite move
     // Transform WRITE path (issue #148 hitch hunt): the DWM call can block for tens of ms, which
