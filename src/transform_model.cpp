@@ -144,6 +144,14 @@ void TransformModel::setActive(bool active) {
         return;
     }
     if (!magUp_) return;
+    // Give the real pointer back the moment the zoom ends (the follow-session sprite above hid
+    // it). Done here, while the context is still alive - MagShowSystemCursor needs one.
+    if (cursorHidden_) {
+        if (sprite_) sprite_->hide();
+        MagShowSystemCursor(TRUE);
+        if (blanker_) blanker_->restore();
+        cursorHidden_ = false;
+    }
     idleSinceMs_ = GetTickCount64();   // start the release countdown (idleTick)
     wind::Log(wind::LogLevel::Info, "txsession", "session end maxLevel=%.2f", sessionMaxLevel_);
     sessionMaxLevel_ = 0.0;

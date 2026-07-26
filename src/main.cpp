@@ -234,6 +234,8 @@ struct TickState {
     int    freezePauseTicks = 0;    // ticks to skip transform writes around an injected click move
     bool   freezeStealPending = false;   // tdrTest=3: steal foreground on the next freeze tick
     HWND   freezePrevFg = nullptr;       // tdrTest=3: window to hand foreground back to
+    IMagnifierModel* wantModel = nullptr;   // hybrid stickiness: candidate engine and how long it
+    unsigned long long wantSinceMs = 0;     //   has been the candidate (debounces foreground reads)
     HCURSOR lastFgCursor = nullptr; // churn valve: last seen foreground cursor SHAPE handle
     int    churnCount = 0;          //   handle changes inside the rolling window
     unsigned long long churnWinStart = 0;
@@ -666,7 +668,12 @@ static void RunTick(TickState& t) {
                 // the full FOLLOW design like the desktop: visible cursor, native hover,
                 // clicks, and drags. MPO on -> freeze + pan wall remain the safe fallback.
                 HWND ffg = GetForegroundWindow();
-                t.gameFreeze = !g_mpoDisabled && ForegroundCoversMonitor(t.mon) && ffg &&
+                // FREEZE for games regardless of MPO (field-preferred cursor): the frozen cursor
+                // + centred sprite is the look that worked. Follow mode was tried when MPO went
+                // off and produced a small pointer sitting away from the content it addresses
+                // (the system pointer draws at its real screen position while that content is
+                // displayed at the lens point), plus wobble - both gone with freeze.
+                t.gameFreeze = ForegroundCoversMonitor(t.mon) && ffg &&
                                !(GetWindowLongPtrW(ffg, GWL_STYLE) & WS_CAPTION);
                 if (t.gameFreeze) {
                     POINT fp; GetCursorPos(&fp);
@@ -869,7 +876,12 @@ static void RunTick(TickState& t) {
             IMagnifierModel* want = (fsGame && borderless2 && primary2 &&
                                      (t.cfg.tdrTest > 0 || !IsChurnyFg(fgw2)))
                                         ? t.mTransform : t.mRender;
-            if (want && want != t.model && !fgIsStealer) {
+            // STICKY (field: the engine flapped render<->transform inside one zoom session, and
+            // each flip releases and rebuilds DWM's magnification context - a stall every time).
+            // A real alt-tab still switches; a one-frame wobble in the foreground reads does not.
+            if (want != t.wantModel) { t.wantModel = want; t.wantSinceMs = GetTickCount64(); }
+            const bool wantSettled = GetTickCount64() - t.wantSinceMs >= 350;
+            if (want && want != t.model && wantSettled && !fgIsStealer) {
                 if (t.restAfterReveal) {   // rapid double-switch: settle the previous handover
                     t.restAfterReveal->setActive(false);
                     t.restAfterReveal = nullptr;
@@ -914,8 +926,7 @@ static void RunTick(TickState& t) {
         if (!enterActive && !inspect) {
             HWND ffg2 = GetForegroundWindow();
             const bool blz = ffg2 && !(GetWindowLongPtrW(ffg2, GWL_STYLE) & WS_CAPTION);
-            bool wantFreeze = !g_mpoDisabled &&
-                              dynamic_cast<TransformModel*>(t.model) && fsGame && blz;
+            bool wantFreeze = dynamic_cast<TransformModel*>(t.model) && fsGame && blz;
             if (ffg2 && ffg2 == g_focusStealer && t.gameFreeze) wantFreeze = true;   // tdrTest=3: we hold fg
             if (wantFreeze && !t.gameFreeze) {
                 POINT fp; GetCursorPos(&fp);
@@ -1032,15 +1043,12 @@ static void RunTick(TickState& t) {
             // under our transform writes is the driver killer we cannot prevent - detect it
             // (read-only poll) and hand this session to render; the app is remembered so future
             // zoom-ins skip transform entirely. 4+ handle changes inside a rolling second.
-            CURSORINFO ci{}; ci.cbSize = sizeof(ci);
-            if (GetCursorInfo(&ci)) {
-                ULONGLONG nowMs = GetTickCount64();
-                if (nowMs - t.churnWinStart > 1000) { t.churnWinStart = nowMs; t.churnCount = 0; }
-                if (ci.hCursor != t.lastFgCursor) {
-                    t.lastFgCursor = ci.hCursor;
-                    if (++t.churnCount >= 4) MarkChurnyApp(t.freezeExe, "cursor churn");
-                }
-            }
+            // (The live cursor-churn valve is DISABLED. It was built when app cursor churn looked
+            // like the TDR/hitch cause; the real cause turned out to be the magnification context
+            // itself, now released between sessions. Worse, the freeze design's own cursor
+            // hiding/sprite refresh reads AS churn, so the valve kept demoting the user's game to
+            // the render engine mid-session. The device-lost backstop below still marks an app
+            // after an actual driver reset - one crash, never twice.)
             // NO HOVER SYNC (tried 2026-07-26, REVERTED same night): injecting one absolute
             // move per pan-rest to update the game's hover point TDR'd the driver even with
             // MPO disabled - absolute-placement injection is its own independent trigger, and
