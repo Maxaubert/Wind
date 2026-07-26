@@ -37,10 +37,9 @@ void TransformModel::hideSystemCursor(bool hide) {
 void TransformModel::setActive(bool active) {
     active_ = active;
     if (!active) {
-        // Rest at TRUE 1.0 (rest-warm 1.0005 REMOVED): keeping the magnification pipeline hot
-        // over a running game full-time is a standing GPU-TDR contributor (field: driver resets
-        // recurred even with the 12x cap), and the rest-warm measurably did not fix the entry
-        // spike anyway. One ~30ms entry blip per zoom-in is the safe trade.
+        // Rest at TRUE 1.0. (Rest-warm 1.0005 was re-tried under MPO-off 2026-07-26 and
+        // measured WORSE - with software compositing, an idle-warm pipeline taxes every
+        // desktop frame and did not shrink the zoom-in spike.)
         host_.setTransform(1.0f, 0, 0, 0, 0, false);
         RECT full{ 0, 0, mon_.w, mon_.h };
         host_.setInputTransform(false, full, full);   // input mapping back to identity at 1x
@@ -83,13 +82,11 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // frametimes - identical class to the native Magnifier's eased notches). The earlier
     // quantization/divisor machinery created exactly the big discrete jumps that ARE expensive;
     // small continuous deltas are the cheap pattern. (Quantization removed after A/B.)
-    // TDR guard (field: driver resets even at <=12x): above 8x, apply the ramping level only on
-    // alternate ticks - halves the re-scale rate exactly where each re-scale is most expensive.
-    // Held ticks recompute the source for the applied level so the geometry stays consistent.
-    hiRampTick_ ^= 1;
+    // (The old >8x alternate-tick level divisor is GONE: it was a blind TDR mitigation - the
+    // resets were root-caused elsewhere, #148 - and it DOUBLED the per-write level step right
+    // where each re-scale is most expensive; big discrete jumps are the measured-costly
+    // pattern, small continuous ones the cheap one.)
     double applyLevel = level;
-    if (lastLevel_ > 8.0 && level != lastLevel_ && level > 1.0 && hiRampTick_)
-        applyLevel = lastLevel_;
     double srcL = r.srcLeft, srcT = r.srcTop;
     if (applyLevel != level) {
         OffsetF o = ComputeOffsetF(r.centerX, r.centerY, applyLevel, mon_.w, mon_.h);
@@ -118,8 +115,10 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         keepAliveTick_ = 0;
     }
     int txJitter = 0;
-    // Keep-alive window shortened and disabled above 8x: high-level re-composites are the
-    // expensive ones, and a parked pipeline is safer than a hot one next to a heavy game (TDR).
+    // Keep-alive: 700ms window, <=8x only. (The original 1.5s/all-levels spec was re-tried
+    // under MPO-off 2026-07-26 and measured WORSE - 360ms worst spike vs 198ms baseline. With
+    // MPO disabled the desktop composites in software, so a hot magnification pipeline taxes
+    // every frame; keep the window short and the high-zoom pipeline parked.)
     if (!changed && !ramping && applyLevel <= 8.0 &&
         GetTickCount64() - lastChangeMs_ < 700) {
         keepAliveTick_ ^= 1;

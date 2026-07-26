@@ -659,8 +659,14 @@ static void RunTick(TickState& t) {
             //    hover and clicks are native-correct. Desktop never TDR'd all night.
             // Only the render model still hides + welds (no DWM magnification there - safe).
             if (dynamic_cast<TransformModel*>(t.model)) {
+                // With MPO DISABLED the game-session freeze is unnecessary: the freeze guarded
+                // cursor-position updates racing the MPO plane programming, and a REAL hand
+                // moving the cursor was always safe (native-Magnifier control test; only
+                // INJECTED absolute placement is independently toxic). So MPO off -> games get
+                // the full FOLLOW design like the desktop: visible cursor, native hover,
+                // clicks, and drags. MPO on -> freeze + pan wall remain the safe fallback.
                 HWND ffg = GetForegroundWindow();
-                t.gameFreeze = ForegroundCoversMonitor(t.mon) && ffg &&
+                t.gameFreeze = !g_mpoDisabled && ForegroundCoversMonitor(t.mon) && ffg &&
                                !(GetWindowLongPtrW(ffg, GWL_STYLE) & WS_CAPTION);
                 if (t.gameFreeze) {
                     POINT fp; GetCursorPos(&fp);
@@ -675,8 +681,13 @@ static void RunTick(TickState& t) {
                     wind::Log(wind::LogLevel::Info, "freeze",
                               "game freeze ENGAGED at (%ld,%ld)", fp.x, fp.y);
                 } else {
+                    // FOLLOW session: both system-cursor copies stay VISIBLE. (Hiding the raw
+                    // copy was tried: MagShowSystemCursor has no raw-only mode - FALSE removes
+                    // the magnified copy too, and a sprite replacement re-adds machinery. The
+                    // double is tolerable at low cursorSmoothing; revisit only if field
+                    // feedback demands it.)
                     wind::Log(wind::LogLevel::Info, "freeze",
-                              "transform session WITHOUT freeze (desktop follow)");
+                              "transform session WITHOUT freeze (follow)");
                 }
             } else {
                 t.gameFreeze = false;
@@ -729,7 +740,7 @@ static void RunTick(TickState& t) {
                     t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y);
                     t.lastSetVirtual = pt;
                 } else {
-                    // Desktop FOLLOW: NEVER SetCursorPos while the fullscreen transform is live
+                    // FOLLOW: NEVER SetCursorPos while the fullscreen transform is live
                     // (the TDR). Resume the lens AT the unfrozen cursor and show it again.
                     ClipCursor(nullptr);
                     POINT pt; GetCursorPos(&pt);
@@ -903,7 +914,8 @@ static void RunTick(TickState& t) {
         if (!enterActive && !inspect) {
             HWND ffg2 = GetForegroundWindow();
             const bool blz = ffg2 && !(GetWindowLongPtrW(ffg2, GWL_STYLE) & WS_CAPTION);
-            bool wantFreeze = dynamic_cast<TransformModel*>(t.model) && fsGame && blz;
+            bool wantFreeze = !g_mpoDisabled &&
+                              dynamic_cast<TransformModel*>(t.model) && fsGame && blz;
             if (ffg2 && ffg2 == g_focusStealer && t.gameFreeze) wantFreeze = true;   // tdrTest=3: we hold fg
             if (wantFreeze && !t.gameFreeze) {
                 POINT fp; GetCursorPos(&fp);
