@@ -7,14 +7,73 @@
 
 namespace wind {
 
+// How long the magnification context lingers after a zoom ends. Long enough that zoom-out /
+// zoom-in flicks stay instant, short enough that going back to playing is clean almost at once.
+static constexpr unsigned long long kIdleReleaseMs = 1200;
+
+void TransformModel::resetTransformState() {
+    // Everything the write path caches must be forgotten across a teardown, or the next session
+    // compares against values DWM no longer holds and skips the writes that would re-apply them.
+    lastLevel_ = 0.0; lastRequestedLevel_ = 0.0;
+    lastOffX_ = lastOffY_ = lastTxX_ = lastTxY_ = 0;
+    lastChangeMs_ = 0; keepAliveTick_ = 0; hiRampTick_ = 0;
+    lastInputXformOn_ = false;
+    lastSpriteX_ = INT_MIN; lastSpriteY_ = INT_MIN;
+}
+
+bool TransformModel::ensureMag() {
+    if (magUp_) return true;
+    LARGE_INTEGER fr, a, b;
+    QueryPerformanceFrequency(&fr); QueryPerformanceCounter(&a);
+    const bool ok = host_.initialize();
+    QueryPerformanceCounter(&b);
+    const double ms = double(b.QuadPart - a.QuadPart) * 1000.0 / fr.QuadPart;
+    if (!ok) {
+        wind::Log(wind::LogLevel::Warn, "transform", "MagInitialize failed; zoom unavailable");
+        return false;
+    }
+    if (ms > 2.0)
+        wind::Log(wind::LogLevel::Info, "transform", "MagInitialize took %.1fms", ms);
+    magUp_ = true;
+    idleSinceMs_ = 0;
+    resetTransformState();
+    return true;
+}
+
+void TransformModel::teardownMag() {
+    if (!magUp_) { identityParked_ = false; return; }
+    LARGE_INTEGER fr, a, b;
+    QueryPerformanceFrequency(&fr); QueryPerformanceCounter(&a);
+    // Cursor state FIRST: MagShowSystemCursor needs a live context, so undoing it after
+    // MagUninitialize would silently fail and strand the pointer hidden.
+    if (cursorHidden_) { MagShowSystemCursor(TRUE); cursorHidden_ = false; }
+    if (sprite_) sprite_->hide();
+    if (blanker_) blanker_->restore();
+    host_.setTransform(1.0f, 0, 0, 0, 0, false);   // leave DWM at identity before releasing
+    RECT full{ 0, 0, mon_.w, mon_.h };
+    host_.setInputTransform(false, full, full);
+    host_.shutdown();                              // MagUninitialize: DWM leaves magnification mode
+    magUp_ = false;
+    idleSinceMs_ = 0;
+    identityParked_ = false;
+    resetTransformState();
+    QueryPerformanceCounter(&b);
+    wind::Log(wind::LogLevel::Info, "transform", "magnification context released in %.1fms",
+              double(b.QuadPart - a.QuadPart) * 1000.0 / fr.QuadPart);
+}
+
 bool TransformModel::initialize(const MonitorTarget& monitor) {
     mon_ = monitor;
-    if (!host_.initialize()) return false;
-    // Warm-up (issue #148): the SESSION'S first real zoom paid a ~110ms cold-start while DWM
-    // built its magnification machinery. Touch it once at launch with an invisible 0.1% level
-    // (sub-pixel everywhere), then reset - the first user zoom starts from a warm pipeline.
-    host_.setTransform(1.001f, 0, 0, 0, 0, false);
-    host_.setTransform(1.0f, 0, 0, 0, 0, false);
+    // NO magnification context at startup, and no warm-up write (issue #148): a live context puts
+    // DWM in magnification-aware compositing, which taxes every cursor change any app makes.
+    // The context is created on the first zoom and released again once idle (see idleTick).
+    // NO launch warm-up write (issue #148, field-measured): the FIRST fullscreen-transform write
+    // puts DWM into magnification-aware compositing, and from then on every cursor visibility or
+    // shape change an app makes pays that path - a game that hides/shows the pointer on each
+    // middle-click (Foundation: 25 visibility flips per test) then hitches while Wind merely
+    // RUNS at 1x. Harness: 15 middle-click drags = 24 spike frames with the warm-up, 0 without.
+    // The old justification (hiding a ~110ms cold start on the session's first zoom) is not
+    // worth taxing every frame of every game the user plays without zooming.
     if (useSprite_) {
         blanker_ = std::make_unique<CursorBlanker>();
         sprite_  = std::make_unique<CursorSprite>(blanker_->originals());
@@ -63,6 +122,8 @@ void TransformModel::writeTransform(float lvl, int offX, int offY, int tx, int t
 
 void TransformModel::hideSystemCursor(bool hide) {
     if (!useSprite_ || !blanker_) return;
+    if (hide && !ensureMag()) return;   // MagShowSystemCursor needs a live context
+    cursorHidden_ = hide;
     // FOLLOW design (issue #148): during NORMAL zoom the real cursor stays visible (DWM shows it
     // magnified) and main.cpp never calls this. It is called only for INSPECT sessions, where the
     // frozen real cursor must vanish under the crosshair: blanker for standard cursors,
@@ -73,18 +134,35 @@ void TransformModel::hideSystemCursor(bool hide) {
 
 void TransformModel::setActive(bool active) {
     active_ = active;
-    if (!active) {
-        // REST-WARM 1.0005 (re-tested ALONE under MPO-off): rapid flicks through 1x pay a
-        // ~200-340ms park/unpark stall per cycle when resting at TRUE 1.0 (harness-measured,
-        // aggressive-flick recipe). The round-1 regression was the keep-alive change bundled
-        // with this, not the rest-warm itself.
-        wind::Log(wind::LogLevel::Info, "txsession", "session end maxLevel=%.2f", sessionMaxLevel_);
-        sessionMaxLevel_ = 0.0;
-        host_.setTransform(1.0005f, 0, 0, 0, 0, false);
-        RECT full{ 0, 0, mon_.w, mon_.h };
-        host_.setInputTransform(false, full, full);   // input mapping back to identity at 1x
-        pin_.hide();
-    }
+    if (active) { ensureMag(); idleSinceMs_ = 0; return; }
+    if (!magUp_) return;
+    idleSinceMs_ = GetTickCount64();   // start the release countdown (idleTick)
+    wind::Log(wind::LogLevel::Info, "txsession", "session end maxLevel=%.2f", sessionMaxLevel_);
+    sessionMaxLevel_ = 0.0;
+    // Park at EXACT identity right here, at the end of the zoom-out. Returning DWM to identity
+    // costs a ~150ms compositor stall no matter when it happens (measured), so pay it while the
+    // user is still in zoom motion and expects movement - not 1.2s later while they are playing.
+    LARGE_INTEGER fr, pa, pb;
+    QueryPerformanceFrequency(&fr); QueryPerformanceCounter(&pa);
+    host_.setTransform(1.0f, 0, 0, 0, 0, false);
+    QueryPerformanceCounter(&pb);
+    identityParked_ = true;
+    parkedAtMs_ = GetTickCount64();
+    const double parkMs = double(pb.QuadPart - pa.QuadPart) * 1000.0 / fr.QuadPart;
+    if (parkMs > 5.0)
+        wind::Log(wind::LogLevel::Info, "transform", "identity park took %.1fms", parkMs);
+    RECT full{ 0, 0, mon_.w, mon_.h };
+    host_.setInputTransform(false, full, full);   // input mapping back to identity at 1x
+    pin_.hide();
+}
+
+void TransformModel::idleTick() {
+    if (!magUp_ || active_ || idleSinceMs_ == 0) return;
+    const unsigned long long since = GetTickCount64() - idleSinceMs_;
+    if (since < kIdleReleaseMs) return;
+    // The identity park already happened at session end (see setActive); releasing the context
+    // afterwards measures 1-2ms, so this is just the "user really stopped zooming" delay.
+    teardownMag();
 }
 
 void TransformModel::present(const MapResult& r, double level, const Config& cfg,
@@ -154,6 +232,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         OffsetF o = ComputeOffsetF(r.centerX, r.centerY, applyLevel, mon_.w, mon_.h);
         srcL = o.x; srcT = o.y;
     }
+    if (!ensureMag()) return;   // lazy context: the session's first write brings DWM up
     if (level > sessionMaxLevel_) sessionMaxLevel_ = level;
     const bool ramping = applyLevel != level || (applyLevel != lastLevel_ && lastLevel_ > 0.0);
     MagTransform m = ComputeMagTransform(srcL, srcT, applyLevel, mon_.w, mon_.h);
@@ -279,10 +358,10 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
 }
 
 void TransformModel::shutdown() {
+    teardownMag();
     if (sprite_) sprite_->destroy();
     if (blanker_) blanker_->restore();
     pin_.destroy();
-    host_.shutdown();
     ready_ = false;
 }
 }

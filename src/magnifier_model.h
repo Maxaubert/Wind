@@ -34,6 +34,10 @@ struct IMagnifierModel {
     virtual void hideSystemCursor(bool hide) = 0;
     virtual void setActive(bool active) = 0;          // reveal/hide overlay, or enable/disable transform
     virtual void onActivate() {}                      // called on idle->active (render: invalidateCapture/prime)
+    // Called every tick while IDLE (not zoomed, no Inspect). The transform model releases its
+    // magnification context here: a live context keeps DWM in magnification-aware compositing,
+    // where every cursor change an app makes costs a re-composite (issue #148).
+    virtual void idleTick() {}
     virtual bool retarget(const MonitorTarget& m) { (void)m; return false; }  // render-only; false = unchanged
     virtual void present(const MapResult& r, double level, const Config& cfg,
                          const MonitorTarget& mon, const PresentExtras& ex) = 0;  // the per-tick draw

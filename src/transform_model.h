@@ -19,6 +19,7 @@ public:
     void hideSystemCursor(bool hide) override;
     void setActive(bool active) override;
     void onActivate() override {}                 // no capture to prime
+    void idleTick() override;                     // tears the mag context down once idle (#148)
     void present(const MapResult& r, double level, const Config& cfg,
                  const MonitorTarget& mon, const PresentExtras& ex) override;
     bool coversShell() const override { return false; }
@@ -43,6 +44,19 @@ private:
     double sessionMaxLevel_ = 0.0;      // logged at teardown: scripted-run engagement proof
     unsigned long long lastChangeMs_ = 0;            // when the transform last REALLY changed
     int  lastSpriteX_ = INT_MIN, lastSpriteY_ = INT_MIN;   // dedup the game-session sprite move
+    // Magnification context lifetime (issue #148). While a context is alive DWM composites
+    // magnification-aware, so every cursor visibility/shape change an app makes costs a
+    // re-composite: a game that toggles its pointer on middle-click hitches even at 1x
+    // (measured 17 spike frames per 14 clicks after a zoom; 0 with no context, 0 while actually
+    // zoomed). So the context lives only around real zoom sessions.
+    bool magUp_ = false;
+    bool cursorHidden_ = false;                      // we called MagShowSystemCursor(FALSE)
+    unsigned long long idleSinceMs_ = 0;             // when the last session ended (0 = none)
+    bool identityParked_ = false;                    // phase 1 of the release done (see idleTick)
+    unsigned long long parkedAtMs_ = 0;
+    bool ensureMag();
+    void teardownMag();
+    void resetTransformState();                      // forget cached values across a teardown
     // Transform WRITE path (issue #148 hitch hunt): the DWM call can block for tens of ms, which
     // stalls our whole tick (measured: 34-86ms tick stalls coinciding with 31-59ms game frames).
     // asyncTx=1 hands the write to a dedicated thread with latest-value coalescing so the tick

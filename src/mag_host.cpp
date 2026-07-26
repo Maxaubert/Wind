@@ -6,6 +6,7 @@ namespace wind {
 
 bool MagHost::initialize() {
     initialized_ = MagInitialize();
+    privateBroken_ = false;   // re-probe the private channel on every (re-)init, not once ever
     if (initialized_) {
         HMODULE u32 = GetModuleHandleW(L"user32.dll");
         setMagDesktop_ = reinterpret_cast<int(__stdcall*)(double, int, int)>(

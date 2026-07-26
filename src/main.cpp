@@ -1236,6 +1236,14 @@ static void RunTick(TickState& t) {
             t.lastSetVirtual = lp;
         }
         t.revealPending = 0;                          // a quick tap may zoom out before the deferred reveal
+    } else {
+        // Idle: let the transform model release its magnification context shortly after a zoom
+        // ends. While a context is alive, DWM composites magnification-aware and every cursor
+        // change an app makes costs a re-composite - a game that toggles its pointer on
+        // middle-click hitches at 1x (issue #148). Both the active model and hybrid's transform
+        // half get the tick (in model=transform the transform IS t.model); others no-op.
+        t.model->idleTick();
+        if (t.mTransform && t.mTransform != t.model) t.mTransform->idleTick();
     }
     t.prevLvl = lvl;
     t.prevActive = active;
