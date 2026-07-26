@@ -52,6 +52,8 @@ private:
     // zoomed). So the context lives only around real zoom sessions.
     bool magUp_ = false;
     bool cursorHidden_ = false;                      // we called MagShowSystemCursor(FALSE)
+    bool haveLastClick_ = false;                     // dedup the per-tick cursor weld
+    int  lastClickX_ = 0, lastClickY_ = 0;
     unsigned long long idleSinceMs_ = 0;             // when the last session ended (0 = none)
     int  idleReleaseMs_ = 1200;                      // cfg.txIdleReleaseMs (hot)
     bool identityParked_ = false;                    // phase 1 of the release done (see idleTick)

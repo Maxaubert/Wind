@@ -668,13 +668,12 @@ static void RunTick(TickState& t) {
                 // the full FOLLOW design like the desktop: visible cursor, native hover,
                 // clicks, and drags. MPO on -> freeze + pan wall remain the safe fallback.
                 HWND ffg = GetForegroundWindow();
-                // FREEZE for games regardless of MPO (field-preferred cursor): the frozen cursor
-                // + centred sprite is the look that worked. Follow mode was tried when MPO went
-                // off and produced a small pointer sitting away from the content it addresses
-                // (the system pointer draws at its real screen position while that content is
-                // displayed at the lens point), plus wobble - both gone with freeze.
-                t.gameFreeze = ForegroundCoversMonitor(t.mon) && ffg &&
-                               !(GetWindowLongPtrW(ffg, GWL_STYLE) & WS_CAPTION);
+                // No freeze: the transform model welds the REAL cursor to the lens point (see
+                // transform_model.cpp), so the pointer is a genuine cursor - native hover,
+                // native dragging, clicks that need no re-routing. Freezing it was what made
+                // hover and drag impossible; the sprite/click-routing machinery it needed is
+                // only used by Inspect now.
+                t.gameFreeze = false;
                 if (t.gameFreeze) {
                     POINT fp; GetCursorPos(&fp);
                     t.freezePoint = fp;
@@ -926,7 +925,7 @@ static void RunTick(TickState& t) {
         if (!enterActive && !inspect) {
             HWND ffg2 = GetForegroundWindow();
             const bool blz = ffg2 && !(GetWindowLongPtrW(ffg2, GWL_STYLE) & WS_CAPTION);
-            bool wantFreeze = dynamic_cast<TransformModel*>(t.model) && fsGame && blz;
+            bool wantFreeze = false;   // the transform model welds the real cursor (see above)
             if (ffg2 && ffg2 == g_focusStealer && t.gameFreeze) wantFreeze = true;   // tdrTest=3: we hold fg
             if (wantFreeze && !t.gameFreeze) {
                 POINT fp; GetCursorPos(&fp);
@@ -1208,9 +1207,9 @@ static void RunTick(TickState& t) {
         // user's hand. RENDER: renderFrame SetCursorPos'd the OS cursor to clickDesktop+origin.
         if (inspect) {
             t.lastSetVirtual = t.frozenCursor;
-        } else if (dynamic_cast<TransformModel*>(t.model)) {
-            t.lastSetVirtual = cur;
         } else {
+            // Both models now WELD the real cursor to the lens point each tick, so the baseline
+            // for next tick's delta is that point (the delta then measures only the hand).
             t.lastSetVirtual.x = r.clickDesktopX + t.mon.x;
             t.lastSetVirtual.y = r.clickDesktopY + t.mon.y;
         }

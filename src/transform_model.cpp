@@ -19,6 +19,7 @@ void TransformModel::resetTransformState() {
     lastChangeMs_ = 0; keepAliveTick_ = 0; hiRampTick_ = 0;
     lastInputXformOn_ = false;
     lastSpriteX_ = INT_MIN; lastSpriteY_ = INT_MIN;
+    haveLastClick_ = false;
 }
 
 bool TransformModel::ensureMag() {
@@ -331,7 +332,24 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // tracking consistent (RunTick assumes the cursor was moved here each active tick). Deduped so an
     // idle tick injects no synthetic mouse move. Inspect freeze pins the point via ex.clickOverride;
     // otherwise clickDesktop is monitor-local, so add the monitor origin for desktop px.
-    // FOLLOW design (issue #148 TDR root cause): the transform model NEVER places the OS cursor.
+    // WELD the REAL cursor to the lens point, exactly as the render model does. This is what
+    // makes the pointer a genuine cursor: the app sees it move, so hover fires instantly,
+    // dragging works, and clicks land where you aim - no synthesized clicks, no sprite standing
+    // in for a pointer. Deduped so an idle tick injects nothing. Inspect pins it via
+    // clickOverride; otherwise clickDesktop is monitor-local, so add the monitor origin.
+    // (History: welding was removed when it was believed to reset the GPU driver. That was
+    // measured with MPO enabled AND the native Windows Magnifier running - both since
+    // eliminated - so it is being re-tested rather than engineered around. If driver resets
+    // return, the weld is the first suspect and docs/HITCH-FINDINGS.md has the bisect.)
+    {
+        int cx = ex.clickOverride ? ex.clickDesktopX : (r.clickDesktopX + mon_.x);
+        int cy = ex.clickOverride ? ex.clickDesktopY : (r.clickDesktopY + mon_.y);
+        if (!haveLastClick_ || cx != lastClickX_ || cy != lastClickY_) {
+            SetCursorPos(cx, cy);
+            lastClickX_ = cx; lastClickY_ = cy; haveLastClick_ = true;
+        }
+    }
+    // (old note) FOLLOW design (issue #148 TDR root cause): the transform model NEVER places the OS cursor.
     // The per-tick SetCursorPos weld here was the driver killer: ANY programmatic ABSOLUTE cursor
     // placement (SetCursorPos or SendInput-absolute) while DWM fullscreen magnification is active
     // over a fullscreen game TDRs the NVIDIA driver within seconds - at any rate (20Hz died),
@@ -371,6 +389,36 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             sprite_->keepOnTop();
         } else {
             sprite_->hide();   // Hidden/Unsupported shape: nothing sensible to draw
+        }
+    } else if (useSprite_ && sprite_ && ex.drawCursor && level > 1.001) {
+        // The REAL cursor is welded to the lens point above, so input is entirely native - but
+        // the hardware pointer is not magnified and is drawn at its raw desktop position, which
+        // reads as a small cursor sitting away from the content it addresses. So hide it and
+        // draw the marker at cursorScreen: the screen point where that content actually appears.
+        // Composited outside the magnification, so it keeps a CONSTANT on-screen size at every
+        // zoom level (the standing product rule).
+        if (!cursorHidden_) {
+            blanker_->blank();
+            MagShowSystemCursor(FALSE);
+            cursorHidden_ = true;
+        }
+        if (sprite_->refreshShape() == CursorSprite::ShapeStatus::Rendered) {
+            // DESKTOP coords, not screen: DWM magnifies layered windows too, so the sprite must
+            // live at the lens point in desktop space - the transform then displays it exactly
+            // where that content appears. (Placing it in screen space put it off-screen once
+            // transformed, which is why the pointer vanished at high zoom.) The consequence is
+            // that the marker grows with the zoom, like the native Magnifier's pointer.
+            const int sx = r.clickDesktopX + mon_.x;
+            const int sy = r.clickDesktopY + mon_.y;
+            if (sx != lastSpriteX_ || sy != lastSpriteY_) {
+                sprite_->moveTo(sx, sy);
+                lastSpriteX_ = sx; lastSpriteY_ = sy;
+            }
+            sprite_->show();
+            sprite_->keepOnTop();
+        } else {
+            sprite_->hide();   // shape we cannot render: fall back to the system pointer
+            if (cursorHidden_) { MagShowSystemCursor(TRUE); blanker_->restore(); cursorHidden_ = false; }
         }
     } else if (useSprite_ && sprite_) {
         // Desktop FOLLOW: the real cursor is visible and magnified by DWM (native Magnifier's own
