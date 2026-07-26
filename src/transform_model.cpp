@@ -37,10 +37,11 @@ void TransformModel::hideSystemCursor(bool hide) {
 void TransformModel::setActive(bool active) {
     active_ = active;
     if (!active) {
-        // Rest at TRUE 1.0. (Rest-warm 1.0005 was re-tried under MPO-off 2026-07-26 and
-        // measured WORSE - with software compositing, an idle-warm pipeline taxes every
-        // desktop frame and did not shrink the zoom-in spike.)
-        host_.setTransform(1.0f, 0, 0, 0, 0, false);
+        // REST-WARM 1.0005 (re-tested ALONE under MPO-off): rapid flicks through 1x pay a
+        // ~200-340ms park/unpark stall per cycle when resting at TRUE 1.0 (harness-measured,
+        // aggressive-flick recipe). The round-1 regression was the keep-alive change bundled
+        // with this, not the rest-warm itself.
+        host_.setTransform(1.0005f, 0, 0, 0, 0, false);
         RECT full{ 0, 0, mon_.w, mon_.h };
         host_.setInputTransform(false, full, full);   // input mapping back to identity at 1x
         pin_.hide();
