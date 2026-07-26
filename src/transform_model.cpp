@@ -134,7 +134,15 @@ void TransformModel::hideSystemCursor(bool hide) {
 
 void TransformModel::setActive(bool active) {
     active_ = active;
-    if (active) { ensureMag(); idleSinceMs_ = 0; return; }
+    if (active) {
+        // (A sub-pixel "session warm-up" write here was tried and measured WORSE: 4 spike frames
+        // per 3 cycles vs 2, and it added zoom-out spikes. Entering magnification costs ~36ms
+        // once per zoom-in regardless - that is DWM building its machinery.)
+        ensureMag();
+        identityParked_ = false;
+        idleSinceMs_ = 0;
+        return;
+    }
     if (!magUp_) return;
     idleSinceMs_ = GetTickCount64();   // start the release countdown (idleTick)
     wind::Log(wind::LogLevel::Info, "txsession", "session end maxLevel=%.2f", sessionMaxLevel_);
