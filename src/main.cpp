@@ -735,31 +735,15 @@ static void RunTick(TickState& t) {
         bool inspectExit = !inspect && t.prevInspect;   // Inspect just turned off but overlay stays (zoomed)
         if (inspectExit) {
             EndGameInspect(t);   // hand foreground back to the game before resuming normal follow
-            if (dynamic_cast<TransformModel*>(t.model)) {
-                if (t.gameFreeze) {
-                    // Game session continues: stay frozen (the cursor is at the Inspect freeze
-                    // point) - just adopt it as the freeze point and keep the clip + hidden cursor.
-                    POINT pt; GetCursorPos(&pt);
-                    t.freezePoint = pt;
-                    RECT fz{ pt.x, pt.y, pt.x + 1, pt.y + 1 };
-                    ClipCursor(&fz);
-                    t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y);
-                    t.lastSetVirtual = pt;
-                } else {
-                    // FOLLOW: NEVER SetCursorPos while the fullscreen transform is live
-                    // (the TDR). Resume the lens AT the unfrozen cursor and show it again.
-                    ClipCursor(nullptr);
-                    POINT pt; GetCursorPos(&pt);
-                    t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y);
-                    t.lastSetVirtual = pt;
-                    t.model->hideSystemCursor(false);
-                }
-            } else {
-                ClipCursor(nullptr);
-                POINT lp{ (int)(t.mapper.centerX() + 0.5) + t.mon.x, (int)(t.mapper.centerY() + 0.5) + t.mon.y };
-                SetCursorPos(lp.x, lp.y);                // warp the real cursor to the look point
-                t.lastSetVirtual = lp;
-            }
+            // Leaving Inspect resumes at the LOOK POINT for BOTH models: the crosshair is what the
+            // user was aiming with, so the cursor belongs there - snapping back to the pre-Inspect
+            // position (which the transform model used to do, because it was forbidden from
+            // placing the cursor) throws away the aim the user just spent the mode establishing.
+            ClipCursor(nullptr);
+            POINT lp{ (int)(t.mapper.centerX() + 0.5) + t.mon.x,
+                      (int)(t.mapper.centerY() + 0.5) + t.mon.y };
+            SetCursorPos(lp.x, lp.y);
+            t.lastSetVirtual = lp;
         }
         if (recenter) { POINT pt; GetCursorPos(&pt); t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y); t.lastSetVirtual = pt; }
         // Resolve the pan delta. FREE: the OS cursor's own motion since we last placed it - Windows'
