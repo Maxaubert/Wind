@@ -6,7 +6,6 @@ struct Config {
     int    zoomOutButton    = 0;     // shipped unbound - onboarding captures the user's choice
     // Keyboard hold-to-zoom (Virtual-Key codes; 0 = unbound). Polled via GetAsyncKeyState and
     // OR-combined with the mouse side-buttons, so the app is usable without side-buttons.
-    // Default: PageUp (0x21=33) zoom in, PageDown (0x22=34) zoom out.
     int    zoomInVk         = 0;     // shipped unbound (0); onboarding captures the user's choice
     int    zoomOutVk        = 0;
     // Optional alternate binding (one per direction), OR-combined with the primary so a user can
