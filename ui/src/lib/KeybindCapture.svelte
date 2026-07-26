@@ -37,16 +37,25 @@
     return [m, v].filter(Boolean).join('+');
   }
 
+  // A slot can hold a side-button AND a key at once, and the core OR-combines them (main.cpp:
+  // inHeld = button || comboHeld(vk...)), so both genuinely fire. The label must therefore list
+  // EVERY live binding rather than returning on the first one found: a binding the label hides is
+  // one the user can neither see nor clear. That is exactly how a stale zoomInVk=33/zoomOutVk=34
+  // kept PageUp/PageDown zooming while the row read "Mouse button 5" (right-click clears both).
   $: lbl = (function () {
+    const parts = [];
     if (row.buttonKey) {
       const btn = Number(values[row.buttonKey] || 0);
-      if (btn === 2) return 'Mouse button 5';
-      if (btn === 1) return 'Mouse button 4';
+      if (btn === 2) parts.push('Mouse button 5');
+      else if (btn === 1) parts.push('Mouse button 4');
     }
     const vk = Number(values[row.vkKey] || 0);
     const mods = row.modsKey ? Number(values[row.modsKey] || 0) : 0;
-    if (vk || mods) return comboName(mods, vk) || 'Unbound';
-    return 'Unbound';
+    if (vk || mods) {
+      const combo = comboName(mods, vk);
+      if (combo) parts.push(combo);
+    }
+    return parts.join(' + ') || 'Unbound';
   })();
 
   // Arming: snapshot the current binding (for Escape restore) and live-clear it so the magnifier

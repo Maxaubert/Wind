@@ -46,6 +46,17 @@ test('changes stage until Apply, then setConfig fires', async ({ page }) => {
   expect(sets.some(s => s.key === 'smoothZoom' && s.value === '1')).toBeTruthy();
 });
 
+test('a slot holding both a side-button and a key shows BOTH bindings', async ({ page }) => {
+  await page.goto('/');
+  // The mock binds zoom-in to Mouse button 5 AND PageUp (zoomInButton=2, zoomInVk=33). The core
+  // OR-combines the two, so both really fire - the keycap must list both. Showing only the button
+  // hid the key binding, which is how PageUp/PageDown kept zooming while Settings read
+  // "Mouse button 5" and offered nothing to clear.
+  const cap = page.getByText('Zoom in', { exact: true }).locator('xpath=../..').getByRole('button');
+  await expect(cap).toHaveText(/Mouse button 5/);
+  await expect(cap).toHaveText(/PageUp/);
+});
+
 test('keybind capture writes a VK on keydown (live, no Apply needed)', async ({ page }) => {
   await page.goto('/');
   await page.getByText('Zoom in', { exact: true }).locator('xpath=../..').getByRole('button').click();

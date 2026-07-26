@@ -17,7 +17,11 @@
     const cfg = await getConfig();
     const v = {};
     for (const s of sections) for (const r of s.rows) if (r.key[0] !== '_') v[r.key] = (r.key in cfg) ? cfg[r.key] : r.def;
-    const kbDefaults = { zoomInButton:'2', zoomInVk:'33', zoomOutButton:'1', zoomOutVk:'34',
+    // These must match the core's shipped defaults (src/config.h + the ini template in config.cpp),
+    // which are ALL unbound - onboarding captures the user's choice. Seeding a key here that the
+    // core does not default to (this used to be PageUp 33 / PageDown 34) invents a binding the user
+    // never chose and can write it into the ini on the next Apply.
+    const kbDefaults = { zoomInButton:'0', zoomInVk:'0', zoomOutButton:'0', zoomOutVk:'0',
                          zoomInButton2:'0', zoomOutButton2:'0',
                          zoomInVk2:'0', zoomOutVk2:'0',
                          zoomInMods:'0', zoomOutMods:'0', zoomInMods2:'0', zoomOutMods2:'0',
