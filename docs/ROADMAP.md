@@ -22,7 +22,23 @@ in the referenced issues/specs.
   registry route before the installer ships (evidence it works: the render model's alpha-1
   primeReveal forces exactly this demotion, issue #90).
 
-## Next session - start here (2026-07-26)
+## Next session - start here (2026-07-26, updated at checkpoint 8a52040)
+
+**Cursor is DONE and field-verified**: the transform model welds the real OS cursor to the lens
+point, so hover, dragging and clicks are all native. Items 1 below is therefore closed; what
+remains of the cursor work is the SIZE decision:
+
+- With the transform engine a pointer can be **correctly placed OR constant size, never both**.
+  DWM magnifies layered windows too, so a screen-space marker lands off-screen once transformed
+  (verified: the pointer vanished at high zoom); in desktop space it sits exactly on target but
+  grows with the zoom, like the native Magnifier. The hardware pointer is the only constant-size
+  surface and it draws at its raw desktop position - the wrong place.
+- So the standing "constant on-screen size" rule cannot be met by the transform engine. The
+  render engine does meet it (it draws its own frame) but runs its own loop at ~92fps with many
+  hitches while panning, versus 144fps/1 hitch for transform. **Max to decide**: live with a
+  growing pointer in games, or use render there.
+
+## Superseded (kept for the reasoning)
 
 1. **Drag does not work in transform game sessions (top priority, field-blocking).** The freeze
    design pins the cursor and re-fires clicks at the aim point, so press-move-release never
