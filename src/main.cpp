@@ -1029,6 +1029,12 @@ static void RunTick(TickState& t) {
                     if (++t.churnCount >= 4) MarkChurnyApp(t.freezeExe, "cursor churn");
                 }
             }
+            // NO HOVER SYNC (tried 2026-07-26, REVERTED same night): injecting one absolute
+            // move per pan-rest to update the game's hover point TDR'd the driver even with
+            // MPO disabled - absolute-placement injection is its own independent trigger, and
+            // rest-frequency rolls the dice several times a second (clicks survive only by
+            // being rare). The write-pause gaps also read as stutter. Hover therefore follows
+            // only on CLICK in game sessions, by design; see docs/ROADMAP.md for alternatives.
             if (t.clickReleaseTicks > 0) {
                 --t.clickReleaseTicks;
             } else {

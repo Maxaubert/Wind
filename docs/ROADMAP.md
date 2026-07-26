@@ -23,6 +23,12 @@ in the referenced issues/specs.
   primeReveal forces exactly this demotion, issue #90).
 
 ## Transform model polish
+- Hover-follows-aim in game sessions: TRIED AND REVERTED (2026-07-26) - injecting one absolute
+  cursor move per pan-rest TDRs the NVIDIA driver even with MPO off (absolute-placement
+  injection is an independent trigger; clicks survive only by being rare). Hover updates on
+  CLICK only, by design. Viable future routes: the MPO-buster/composited path might also
+  neutralize this trigger (test when built), or WM_MOUSEMOVE posted directly to the game
+  window (no cursor state touched - hit-test only; many engines honor it).
 - Small-cursor option for game sessions: the aim-point sprite is DWM-magnified with the scene
   (grows with zoom). A constant-size cursor needs a compensating sprite scale or a different
   compositing band; parked as cosmetic.
