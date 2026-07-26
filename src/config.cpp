@@ -129,6 +129,8 @@ Config ParseConfig(const std::string& text) {
             else if (key == "gpuPriority")        c.gpuPriority = std::stoi(val);
             else if (key == "gameCrop")           c.gameCrop = std::stoi(val);
             else if (key == "tdrTest")            c.tdrTest = std::stoi(val);
+            else if (key == "txLevelStep")        c.txLevelStep = std::stoi(val);
+            else if (key == "txGrid")             c.txGrid = std::stoi(val);
             else if (key == "gameFpsCap")         c.gameFpsCap = std::stoi(val);
             else if (key == "onboarded")          c.onboarded = std::stoi(val);
             else if (key == "quickZoomDefault")   c.quickZoomDefault = std::stod(val);
@@ -168,6 +170,10 @@ Config ParseConfig(const std::string& text) {
     if (c.gpuPriority >  1) c.gpuPriority = 1;
     if (c.tdrTest < 0) c.tdrTest = 0;              // diagnostic harness (issue #148)
     if (c.tdrTest > 4) c.tdrTest = 4;
+    if (c.txLevelStep < 0)   c.txLevelStep = 0;    // per mille; 0 = per-tick level writes
+    if (c.txLevelStep > 200) c.txLevelStep = 200;
+    if (c.txGrid < 0)   c.txGrid = 0;              // per mille geometric grid; 0 = continuous
+    if (c.txGrid > 250) c.txGrid = 250;
     c.outlineIdleSeconds = clampd(c.outlineIdleSeconds, 0.5, 60.0);
     // "transform" is a first-class model again (revived for issue #148: the compositor-internal
     // zoom that stays smooth over heavy games); anything unknown falls back to render.

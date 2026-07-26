@@ -83,6 +83,17 @@ struct Config {
                           //     transform (fixes cursor/click divergence near screen edges).
     int magInputTransform = 0; // 1 = publish MagSetInputTransform while zoomed (experiment;
                           //     documented for pen/touch only - A/B knob, hot-reloadable).
+    // Two measured-NEGATIVE hitch experiments, kept as diagnostics only (issue #148, harness
+    // runs of 15-20 zoom cycles over Foundation). LEAVE BOTH AT 0 - continuous per-tick level
+    // ramping is the best configuration measured.
+    int txGrid = 0;       // Snap the applied level to a geometric ladder (per mille; 50 = 5%).
+                          //     Theory: DWM caches scaled surfaces per scale factor, so reusing
+                          //     a small factor set should hit that cache. MEASURED MUCH WORSE:
+                          //     grid off = 0 spikes / 22ms worst; 3% = 8 spike-seconds / 551ms;
+                          //     6% = 7 / 583ms. Discrete jumps cost, cache reuse does not pay.
+    int txLevelStep = 0;  // Minimum RELATIVE level change (per mille) before a ramp re-writes
+                          //     the level. MEASURED NO BETTER than continuous once sample size
+                          //     was adequate (big sporadic stalls appear in every setting).
     int tdrTest = 0;      // issue #148 field-test harness (hot-reloadable, diagnostic only).
                           //   0 = normal; >0 forces the transform path for games (bypasses the
                           //   churny-app list) with one experiment active:

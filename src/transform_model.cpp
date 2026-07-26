@@ -3,6 +3,7 @@
 #include "logging.h"
 #include <windows.h>
 #include <magnification.h>
+#include <cmath>
 
 namespace wind {
 
@@ -24,6 +25,42 @@ bool TransformModel::initialize(const MonitorTarget& monitor) {
     return true;
 }
 
+void TransformModel::noteWrite(double ms, bool ok) {
+    std::lock_guard<std::mutex> lk(statMx_);
+    ++statCount_;
+    statSumMs_ += ms;
+    if (ms > statMaxMs_) statMaxMs_ = ms;
+    if (ms > 5.0) ++statOver5_;
+    if (!ok) ++statFails_;
+    unsigned long long now = GetTickCount64();
+    if (statLogMs_ == 0) statLogMs_ = now;
+    if (now - statLogMs_ >= 1000) {
+        if (statMaxMs_ > 5.0 || statFails_ > 0) {
+            wind::Log(wind::LogLevel::Info, "txwrite",
+                      "writes=%d avg=%.2fms MAX=%.1fms over5ms=%d fails=%d",
+                      statCount_, statCount_ ? statSumMs_ / statCount_ : 0.0,
+                      statMaxMs_, statOver5_, statFails_);
+        }
+        statLogMs_ = now; statMaxMs_ = 0.0; statSumMs_ = 0.0;
+        statCount_ = 0; statOver5_ = 0; statFails_ = 0;
+    }
+}
+
+// ASYNC WRITES ARE IMPOSSIBLE (tried 2026-07-26, issue #148): the Magnification API is
+// thread-affine, so a writer thread's calls ALL FAIL (measured: fails=144/144) - Wind believed
+// it was zoomed while DWM applied nothing. It is also pointless: the write call measures
+// 0.02ms avg / 0.5ms max, so it never stalls the tick. The hitch is DWM's ASYNCHRONOUS
+// re-scale work, addressed by txLevelStep. Writes stay on the tick thread; only the timing
+// instrumentation remains.
+void TransformModel::writeTransform(float lvl, int offX, int offY, int tx, int ty,
+                                    bool fast, bool) {
+    LARGE_INTEGER fr, a, b;
+    QueryPerformanceFrequency(&fr); QueryPerformanceCounter(&a);
+    bool ok = host_.setTransform(lvl, offX, offY, tx, ty, fast);
+    QueryPerformanceCounter(&b);
+    noteWrite(double(b.QuadPart - a.QuadPart) * 1000.0 / fr.QuadPart, ok);
+}
+
 void TransformModel::hideSystemCursor(bool hide) {
     if (!useSprite_ || !blanker_) return;
     // FOLLOW design (issue #148): during NORMAL zoom the real cursor stays visible (DWM shows it
@@ -41,6 +78,8 @@ void TransformModel::setActive(bool active) {
         // ~200-340ms park/unpark stall per cycle when resting at TRUE 1.0 (harness-measured,
         // aggressive-flick recipe). The round-1 regression was the keep-alive change bundled
         // with this, not the rest-warm itself.
+        wind::Log(wind::LogLevel::Info, "txsession", "session end maxLevel=%.2f", sessionMaxLevel_);
+        sessionMaxLevel_ = 0.0;
         host_.setTransform(1.0005f, 0, 0, 0, 0, false);
         RECT full{ 0, 0, mon_.w, mon_.h };
         host_.setInputTransform(false, full, full);   // input mapping back to identity at 1x
@@ -88,11 +127,34 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // where each re-scale is most expensive; big discrete jumps are the measured-costly
     // pattern, small continuous ones the cheap one.)
     double applyLevel = level;
+    // txLevelStep (issue #148 hitch work): every LEVEL write makes DWM re-scale its cached
+    // surfaces asynchronously - that async work is the hitch (the write call itself measures
+    // 0.02ms). Skip level updates whose relative change is under the knob while a ramp is
+    // running; the ramp's FINAL level always lands (level == the last requested level means
+    // the ramp stopped). Pan/translation keeps updating per tick.
+    const bool rampStopped = (level == lastRequestedLevel_);
+    lastRequestedLevel_ = level;
+    if (cfg.txLevelStep > 0 && !rampStopped && lastLevel_ > 1.0 && level > 1.0) {
+        const double rel = std::abs(level - lastLevel_) / lastLevel_;
+        if (rel < cfg.txLevelStep / 1000.0) applyLevel = lastLevel_;
+    }
+    // txGrid: snap to a fixed GEOMETRIC ladder (1.0 * g^k) so every zoom reuses the same small
+    // set of scale factors instead of minting ~200 fresh ones - DWM's per-factor surface cache
+    // then hits instead of missing. Applied on the ramp only; the settled level snaps too (a
+    // grid level IS the resting level, so the view never drifts off-grid).
+    if (cfg.txGrid > 0 && applyLevel > 1.0) {
+        const double g = 1.0 + cfg.txGrid / 1000.0;
+        const double k = std::log(applyLevel) / std::log(g);
+        double snapped = std::pow(g, std::floor(k + 0.5));
+        if (snapped < 1.0) snapped = 1.0;
+        applyLevel = snapped;
+    }
     double srcL = r.srcLeft, srcT = r.srcTop;
     if (applyLevel != level) {
         OffsetF o = ComputeOffsetF(r.centerX, r.centerY, applyLevel, mon_.w, mon_.h);
         srcL = o.x; srcT = o.y;
     }
+    if (level > sessionMaxLevel_) sessionMaxLevel_ = level;
     const bool ramping = applyLevel != level || (applyLevel != lastLevel_ && lastLevel_ > 0.0);
     MagTransform m = ComputeMagTransform(srcL, srcT, applyLevel, mon_.w, mon_.h);
     if (cfg.tdrTest == 2) {
@@ -125,7 +187,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         keepAliveTick_ ^= 1;
         txJitter = keepAliveTick_;
     }
-    host_.setTransform((float)applyLevel, m.offX, m.offY, m.txX + txJitter, m.txY, fastPan_);
+    writeTransform((float)applyLevel, m.offX, m.offY, m.txX + txJitter, m.txY, fastPan_, false);
     // Input transform (issue #148): teach the input stack the inverse mapping. Win32 mouse input
     // is proven correct without it (instrumented), but pointer-stack apps (Explorer XAML lists,
     // Chromium content) hit-test through this - without it they get level/edge-dependent dead

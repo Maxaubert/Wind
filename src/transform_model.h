@@ -5,6 +5,9 @@
 #include "cursor_blanker.h"
 #include "cursor_sprite.h"
 #include <memory>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
 namespace wind {
 class TransformModel : public IMagnifierModel {
 public:
@@ -36,7 +39,19 @@ private:
     int  hiRampTick_ = 0;                            // >8x ramp divisor (TDR guard, issue #148)
     int  lastOffX_ = 0, lastOffY_ = 0, lastTxX_ = 0, lastTxY_ = 0;   // last applied transform
     double lastLevel_ = 0.0;
+    double lastRequestedLevel_ = 0.0;   // detect "ramp stopped" so the final level always lands
+    double sessionMaxLevel_ = 0.0;      // logged at teardown: scripted-run engagement proof
     unsigned long long lastChangeMs_ = 0;            // when the transform last REALLY changed
     int  lastSpriteX_ = INT_MIN, lastSpriteY_ = INT_MIN;   // dedup the game-session sprite move
+    // Transform WRITE path (issue #148 hitch hunt): the DWM call can block for tens of ms, which
+    // stalls our whole tick (measured: 34-86ms tick stalls coinciding with 31-59ms game frames).
+    // asyncTx=1 hands the write to a dedicated thread with latest-value coalescing so the tick
+    // never waits. Instrumentation logs per-second max/avg write time either way.
+    void writeTransform(float lvl, int offX, int offY, int tx, int ty, bool fast, bool unusedAsync);
+    void noteWrite(double ms, bool ok);
+    std::mutex statMx_;
+    unsigned long long statLogMs_ = 0;
+    double statMaxMs_ = 0.0, statSumMs_ = 0.0;
+    int    statCount_ = 0, statFails_ = 0, statOver5_ = 0;
 };
 }
