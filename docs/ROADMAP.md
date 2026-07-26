@@ -32,6 +32,11 @@ in the referenced issues/specs.
    motion - injected absolute placement is a proven driver-reset trigger), let the real button-up
    pass through, and re-freeze at the cursor's resting position on release. Needs the hook's
    swallow bookkeeping to let the UP through while a drag is live.
+   DO NOT "fix" this by switching game sessions to follow mode - tried 2026-07-26 and it is
+   worse: with the cursor free, the marker has to sit at the lens point while the user's hand is
+   elsewhere, so the pointer reads as not tracking the view at all. Freeze and follow each break
+   one half of the problem; only moving the real cursor with the lens would satisfy both, and
+   that is the proven driver-reset trigger. Hence the press-then-unclip design above.
 2. **Intermittent huge spike near max zoom - still unexplained.** Every plausible Wind-side cause
    has been individually ruled out in the field (see docs/HITCH-FINDINGS.md "negative results"),
    and the passive flight recorder (scratchpad/spikewatch.ps1) is the tool for catching one in
