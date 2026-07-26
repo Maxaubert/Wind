@@ -111,6 +111,10 @@ in a separate exe entirely, and has zero perf coupling to the magnifier loop. Se
 staged Apply/Discard footer.
 
 ## IMPORTANT gotchas
+- CURSOR SIZE IS CONSTANT, ALWAYS (product rule, no exceptions): the pointer must keep the SAME
+  on-screen size at every zoom level, in every model and every zoom we ever build. It must never
+  scale with the zoom - a cursor that grows with the level is a bug, not a look. (The transform
+  model's DWM-magnified pointer violates this; that is the open item, not a design choice.)
 - Pure-logic files MUST NOT include `<windows.h>` - keeps unit tests desktop-free.
   The test build compiles only the pure `.cpp` files and defines `WIND_TESTS`.
 - INPUT SWALLOWING: bound keybinds are eaten so they never double-fire into the focused app. Mouse
