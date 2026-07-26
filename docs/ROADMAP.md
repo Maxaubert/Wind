@@ -22,6 +22,26 @@ in the referenced issues/specs.
   registry route before the installer ships (evidence it works: the render model's alpha-1
   primeReveal forces exactly this demotion, issue #90).
 
+## Next session - start here (2026-07-26)
+
+1. **Drag does not work in transform game sessions (top priority, field-blocking).** The freeze
+   design pins the cursor and re-fires clicks at the aim point, so press-move-release never
+   happens: no dragging a scrollbar, a slider, or anything else. Proposed design: on the
+   swallowed press, inject the absolute move + BUTTON DOWN at the aim point (as today), then
+   RELEASE the 1px clip so the user's own hand drags the real cursor from there (no injected
+   motion - injected absolute placement is a proven driver-reset trigger), let the real button-up
+   pass through, and re-freeze at the cursor's resting position on release. Needs the hook's
+   swallow bookkeeping to let the UP through while a drag is live.
+2. **Intermittent huge spike near max zoom - still unexplained.** Every plausible Wind-side cause
+   has been individually ruled out in the field (see docs/HITCH-FINDINGS.md "negative results"),
+   and the passive flight recorder (scratchpad/spikewatch.ps1) is the tool for catching one in
+   the act: it logs the spike size, GPU memory/utilisation and Wind's activity in that second.
+   If the record shows no Wind activity at the spike, the honest conclusion is DWM magnification
+   cost colliding with the game's GPU load - the lever is headroom or a lower ceiling, not code.
+3. **Cursor size rule** (constant on-screen size at every zoom) still unmet by the transform
+   model - see the entry below; needs the session lifecycle handled inside the model and one
+   visual check from Max.
+
 ## Transform model polish
 - Hover-follows-aim in game sessions: TRIED AND REVERTED (2026-07-26) - injecting one absolute
   cursor move per pan-rest TDRs the NVIDIA driver even with MPO off (absolute-placement
