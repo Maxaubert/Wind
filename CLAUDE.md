@@ -184,8 +184,12 @@ staged Apply/Discard footer.
   do NOT use (no-driver design + anti-cheat ban risk). Confirmed: swallowing works in normal apps,
   not in raw-input games. Pick game keys/buttons you don't otherwise use.
   GAME-INSPECT (issue #144) sidesteps this for Inspect mode only: when Inspect is toggled while a
-  mouselook game holds the mouse (zoomed -> LockDetector locked; at 1x -> the cursor was hidden by
-  the app at the toggle edge; pure decision `ShouldGameInspect`, src/inspect_focus.h), main.cpp
+  mouselook game holds the mouse (pure decision `ShouldGameInspect`, src/inspect_focus.h: a cursor
+  hidden at the toggle edge by the APP is the tell, valid whenever WE are not hiding it too - i.e.
+  at 1x and in transform FOLLOW sessions; a LockDetector lock also engages on its own; render
+  sessions hide + weld so only the detector is usable there. Do NOT make the zoomed path
+  detector-only again, issue #158: a raw-input game never clips or recenters the pointer, so the
+  detector reads FREE right through mouselook), main.cpp
   steals foreground to an invisible 1x1 helper window (`WindFocusStealer`, layered alpha 0) - a
   backgrounded game stops receiving raw input, so its camera freezes (the Snipping Tool effect)
   while our RIDEV_INPUTSINK pan keeps working. The steal is DEFERRED one step past the reveal logic
