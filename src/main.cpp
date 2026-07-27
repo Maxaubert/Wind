@@ -491,6 +491,27 @@ static void RunTick(TickState& t) {
     // Lets users without side-buttons zoom from the keyboard. When the LL keyboard hook is active it
     // is the authority for bound-key down-state (a swallowed key never appears in GetAsyncKeyState),
     // so read keyPressed(); otherwise (hook install failed / WIND_NOHOOK) fall back to polling.
+    // Suspend the LL keyboard hook while a borderless fullscreen app (a game) is foreground.
+    //
+    // A WH_KEYBOARD_LL hook taxes the SYSTEM's input pipeline, not just ours: the raw input thread
+    // dispatches every keystroke to the hooking thread and waits for it to return before delivering
+    // any further input, INCLUDING mouse movement to the foreground game. Holding a key in a game
+    // (auto-repeat, ~30/s) therefore punches a stall into the mouse stream on every repeat - the
+    // "panning is smooth until I hold a key" stutter. The cost is the hook's EXISTENCE: an unbound
+    // key like Ctrl stalls identically, swallowing is irrelevant, and the stutter disappeared
+    // completely in the field whenever Windows had evicted the hook (and returned the instant the
+    // watchdog healed it). It is also why the native Windows Magnifier shows the same stutter.
+    //
+    // Swallowing buys nothing in a game anyway: an LL hook cannot block raw input, which is what
+    // games read (documented limitation above), so the hook is pure cost there. Suspend it over a
+    // fullscreen borderless foreground and restore it on the desktop, where swallowing does work.
+    // Binds keep working while suspended - nothing swallows them, so keyDown's GetAsyncKeyState
+    // fallback reads them correctly. Same borderless-cover test the hybrid model uses to spot games.
+    {
+        HWND fgw = GetForegroundWindow();
+        const bool borderless = fgw && !(GetWindowLongPtrW(fgw, GWL_STYLE) & WS_CAPTION);
+        g_input.setKeyboardHookWanted(!(borderless && ForegroundCoversMonitor(t.mon)));
+    }
     // LL keyboard-hook watchdog (issue #156). Windows SILENTLY evicts a low-level hook whose
     // callback misses LowLevelHooksTimeout: no notification, no error, the handle stays valid and
     // KbProc simply never fires again. A game's launch load spike is exactly when that happens -

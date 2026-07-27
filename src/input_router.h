@@ -83,8 +83,21 @@ public:
     // once - then asks the hook thread to re-install (a hook must be installed by the thread that
     // pumps it, so this posts rather than calling SetWindowsHookEx here).
     void requestKbHookReinstall();
-    // Hook thread -> published result of that re-install attempt.
-    void onKbHookReinstalled(bool ok);
+    // Hook thread -> publish the new installed state after an install/uninstall.
+    void onKbHookStateChanged(bool active);
+    // --- Keyboard-hook suspension in games -----------------------------------------------------
+    // A WH_KEYBOARD_LL hook taxes the SYSTEM's input pipeline, not just ours: the raw input thread
+    // dispatches every keystroke to the hooking thread and waits for it to return before delivering
+    // any further input - including mouse movement to the foreground game. Holding a key in a game
+    // (auto-repeat, ~30/s) therefore punches a stall into the mouse stream on every repeat: the
+    // "panning is smooth until I hold a key" stutter. The cost is the hook's EXISTENCE, not our
+    // callback (atomics-only) and not swallowing - an unbound key like Ctrl stalls identically, and
+    // the stutter vanished entirely whenever Windows had evicted the hook.
+    //
+    // Swallowing a keyboard bind is worthless in a raw-input game anyway (documented limitation: an
+    // LL hook cannot block raw input, which is what games read), so the hook buys nothing there
+    // while costing the game its pacing. Idempotent: only posts to the hook thread on a change.
+    void setKeyboardHookWanted(bool want);
     // Count of successful re-installs this session (diagnostics / tests).
     unsigned kbHookReinstalls() const { return kbHookReinstalls_.load(std::memory_order_relaxed); }
     // Magnify model only: make the keyboard hook skip INJECTED events entirely. The magnify model
@@ -125,6 +138,8 @@ private:
     std::atomic<int> kbSwapModelVk_{0};
     std::atomic<bool> kbHookActive_{false}; // true once the LL KEYBOARD hook is installed
     std::atomic<unsigned> kbHookReinstalls_{0};  // watchdog recoveries this session
+    std::atomic<bool> kbHookWanted_{true};       // false while a fullscreen game is foreground
+    std::atomic<bool> kbHookRecovering_{false};  // distinguishes watchdog recovery from a resume
     std::atomic<bool> ignoreInjectedKeys_{false}; // magnify model: kb hook skips LLKHF_INJECTED
     // Inspect-mode cooked-pixel accumulator (main-thread only: WM_INPUT cooks, the tick drains).
     BallisticsConfig ballistics_{};

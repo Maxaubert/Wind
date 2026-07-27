@@ -197,8 +197,10 @@ static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
 // Dedicated hook thread: installs the LL mouse hook and does nothing but pump messages so the hook
 // is serviced with microsecond latency. A low-level hook callback is delivered while the owning
 // thread is in a message-retrieval call (GetMessage), so this loop services every event instantly.
-// Tick thread -> hook thread: re-install the evicted keyboard hook (see requestKbHookReinstall).
-static constexpr UINT kMsgRehookKeyboard = WM_APP + 11;
+// Tick thread -> hook thread: set the keyboard hook's installed state. wParam != 0 installs
+// (watchdog recovery, or leaving a game), wParam == 0 uninstalls (entering a game). A low-level
+// hook is bound to the message queue of the thread that installs it, so both must happen there.
+static constexpr UINT kMsgSetKbHook = WM_APP + 11;
 
 static DWORD WINAPI HookThreadProc(LPVOID) {
     MSG msg;
@@ -227,13 +229,16 @@ static DWORD WINAPI HookThreadProc(LPVOID) {
         // Watchdog recovery: re-install the keyboard hook Windows evicted from under us. Must run
         // HERE - a low-level hook is bound to the message queue of the thread that installs it, so
         // installing from the tick thread would produce a hook nothing ever pumps.
-        if (msg.message == kMsgRehookKeyboard) {
+        if (msg.message == kMsgSetKbHook) {
+            const bool want = msg.wParam != 0;
             if (g_kbHook) { UnhookWindowsHookEx(g_kbHook); g_kbHook = nullptr; }   // may already be gone
-            g_kbHook = SetWindowsHookExW(WH_KEYBOARD_LL, KbProc, hmod, 0);
-            // Any key we had swallowed is stale across the gap: the eviction means the matching UP
-            // was never seen, so clear the records rather than let a later UP be eaten (stuck key).
+            // Per-key records are stale across the gap either way: an eviction means the matching UP
+            // was never seen, and a deliberate uninstall means later UPs arrive unhooked. Clear them
+            // rather than let a stale record eat an unrelated UP later (stuck key). No synthetic UP
+            // is needed: we only ever swallow our OWN binds, so no other app saw the DOWN.
             for (int vk = 0; vk < 256; ++vk) { g_kbSwallowedDown[vk].store(false); g_kbPressed[vk].store(false); }
-            if (g_router) g_router->onKbHookReinstalled(g_kbHook != nullptr);
+            if (want) g_kbHook = SetWindowsHookExW(WH_KEYBOARD_LL, KbProc, hmod, 0);
+            if (g_router) g_router->onKbHookStateChanged(want && g_kbHook != nullptr);
             continue;
         }
         TranslateMessage(&msg);
@@ -304,24 +309,40 @@ static void ReleaseSwallowedKeys() {
 }
 // Watchdog entry points (issue #156). See the header for why an evicted hook is invisible.
 void InputRouter::requestKbHookReinstall() {
+    if (!kbHookWanted_.load(std::memory_order_relaxed)) return;   // deliberately suspended, not dead
     // Drop the authority claim FIRST so main's keyDown falls back to GetAsyncKeyState on the very
     // next tick. A dead hook swallows nothing, so polling sees the real key state and the binds
     // work again immediately - the re-install below only restores swallowing.
     kbHookActive_.store(false, std::memory_order_relaxed);
-    if (g_hookThreadId) PostThreadMessageW(g_hookThreadId, kMsgRehookKeyboard, 0, 0);
+    kbHookRecovering_.store(true, std::memory_order_relaxed);
+    if (g_hookThreadId) PostThreadMessageW(g_hookThreadId, kMsgSetKbHook, 1, 0);
 }
 
-void InputRouter::onKbHookReinstalled(bool ok) {
-    kbHookActive_.store(ok, std::memory_order_relaxed);
-    if (ok) {
+void InputRouter::setKeyboardHookWanted(bool want) {
+    if (kbHookWanted_.exchange(want, std::memory_order_relaxed) == want) return;   // no change
+    // Stop claiming authority the moment we ask for a suspend, so the very next tick already polls
+    // (binds keep working: with the hook gone nothing swallows them, so GetAsyncKeyState is right).
+    if (!want) kbHookActive_.store(false, std::memory_order_relaxed);
+    if (g_hookThreadId) PostThreadMessageW(g_hookThreadId, kMsgSetKbHook, want ? 1 : 0, 0);
+}
+
+void InputRouter::onKbHookStateChanged(bool active) {
+    kbHookActive_.store(active, std::memory_order_relaxed);
+    const bool recovering = kbHookRecovering_.exchange(false, std::memory_order_relaxed);
+    if (!kbHookWanted_.load(std::memory_order_relaxed)) {
+        wind::Log(wind::LogLevel::Info, "input",
+                  "keyboard hook SUSPENDED (fullscreen game foreground); binds poll instead");
+    } else if (active && recovering) {
         unsigned n = kbHookReinstalls_.fetch_add(1, std::memory_order_relaxed) + 1;
         wind::Log(wind::LogLevel::Warn, "input",
                   "keyboard hook was evicted by Windows; re-installed (recovery #%u)", n);
+    } else if (active) {
+        wind::Log(wind::LogLevel::Info, "input", "keyboard hook resumed (no fullscreen game foreground)");
     } else {
         // Left false: main keeps polling, which still works (nothing is swallowing). The next
         // detected divergence retries, so a transient failure heals on the following press.
         wind::Log(wind::LogLevel::Error, "input",
-                  "keyboard hook re-install FAILED gle=%lu; polling fallback stays active",
+                  "keyboard hook install FAILED gle=%lu; polling fallback stays active",
                   (unsigned long)GetLastError());
     }
 }
