@@ -52,6 +52,10 @@
       {:else if row.type === 'color'}
         <input class="color" type="color" {disabled} value={value}
                on:input={e => onChange(e.target.value)} />
+      {:else if row.type === 'text'}
+        <input class="text" type="text" {disabled} value={value ?? ''}
+               placeholder={row.placeholder || ''} spellcheck="false"
+               on:input={e => onChange(e.target.value)} />
       {/if}
     </div>
   </div>
@@ -94,6 +98,13 @@
   .color{width:42px;height:26px;padding:2px;border:1px solid var(--line);border-radius:7px;
          background:transparent;cursor:pointer}
   .color:disabled{cursor:default}   /* .row.disabled already dims the whole row; avoid compounding opacity */
+  /* Free-text row (comma-separated exe lists). Sized to fit a couple of names without pushing the
+     .meta column narrow; matches the chip/line treatment of the other controls. */
+  .text{width:250px;padding:6px 10px;border-radius:7px;border:1px solid var(--line);
+        background:var(--chip);color:var(--text);font-size:12.5px}
+  .text::placeholder{color:var(--muted);opacity:.7}
+  .text:focus{outline:2px solid var(--accent);outline-offset:-1px}
+  .text:disabled{cursor:default}
   /* About hero: large centered Wind logo fills the section so it has real height (helps the
      scroll-spy reach About) and the bottom of the scroll area isn't empty. */
   .about-hero{padding:48px 0 64px;text-align:center;color:var(--text);display:flex;flex-direction:column;align-items:center}

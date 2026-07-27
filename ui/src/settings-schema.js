@@ -5,6 +5,15 @@ export const sections = [
     { key:'altKeybinds', type:'toggle', label:'Enable alternate keybinds', desc:'Adds an optional second binding (side-button or key) per direction.', def:0 },
     { key:'__zoomIn2',  type:'keybind', label:'Zoom in (alternate)',  desc:'Optional side-button or key', buttonKey:'zoomInButton2',  vkKey:'zoomInVk2',  modsKey:'zoomInMods2',  requires:'altKeybinds' },
     { key:'__zoomOut2', type:'keybind', label:'Zoom out (alternate)', desc:'Optional side-button or key', buttonKey:'zoomOutButton2', vkKey:'zoomOutVk2', modsKey:'zoomOutMods2', requires:'altKeybinds' },
+    // Keyboard-hook suspension (issue #156). Watching the keyboard makes Windows hand Wind every
+    // keystroke and wait before delivering anything else, including mouse movement to the game, so
+    // holding a key stalls panning ~30x/s. Off by default: this trades key-swallowing for smooth
+    // panning, and that is the user's call per app.
+    { key:'noSwallowGames', type:'toggle', label:'Release keys in fullscreen games',
+      desc:'Stops Wind intercepting keyboard binds while a fullscreen game is in front. Intercepting makes Windows pause input on every key repeat, which stutters panning. The game will also see the key.', def:0 },
+    { key:'noSwallowApps', type:'text', label:'Release keys in these apps',
+      desc:'Same, but only for the apps you name. Comma-separated program names; applies whether they run fullscreen or windowed.',
+      def:'', placeholder:'RDR2.exe, eldenring.exe' },
   ]},
   { id:'zoom', label:'Zoom', icon:'zoom', desc:'How magnification grows while you hold the zoom button.', rows: [
     { key:'zoomInSpeed',  type:'slider', label:'Zoom-in speed',  desc:'Multiplier (1.0 = default).', min:0.25, max:4, step:0.05, def:1.0 },
