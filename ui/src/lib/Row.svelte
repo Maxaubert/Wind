@@ -2,6 +2,7 @@
   import KeybindCapture from './KeybindCapture.svelte';
   import CustomSelect from './CustomSelect.svelte';
   import { pickExe } from '../bridge.js';
+  import AppListModal from './AppListModal.svelte';
   export let row, value, onChange, disabled = false;
   export let values = {};   // keybind rows read sibling keys (e.g. zoomInVk) from here
   export let set = () => {}; // two-arg setter set(key, val); used by button rows
@@ -12,6 +13,10 @@
   // IsExeInList). Split for display, re-join on every edit, so the stored shape never changes.
   $: items = String(value ?? '').split(',').map(s => s.trim()).filter(Boolean);
   const joined = arr => arr.join(',');
+  let listOpen = false;
+  // Keep the configured state visible on the row itself; a bare "Manage list" button would hide
+  // whether anything is set at all. One entry is worth naming, more than that only worth counting.
+  $: summary = items.length === 0 ? 'None' : items.length === 1 ? items[0] : `${items.length} apps`;
   async function addApp() {
     const name = await pickExe();                       // '' when the user cancels
     if (!name) return;
@@ -70,18 +75,15 @@
         <input class="color" type="color" {disabled} value={value}
                on:input={e => onChange(e.target.value)} />
       {:else if row.type === 'applist'}
-        <div class="applist">
-          {#each items as name (name)}
-            <span class="chip">{name}<button class="chipx" {disabled} title="Remove {name}"
-                                             aria-label="Remove {name}"
-                                             on:click={() => removeApp(name)}>&#215;</button></span>
-          {/each}
-          <button class="addbtn" {disabled} title="Add a program" aria-label="Add a program"
-                  on:click={addApp}>+</button>
-        </div>
+        <span class="listsummary">{summary}</span>
+        <button class="linkbtn" {disabled} on:click={() => (listOpen = true)}>Manage list</button>
       {/if}
     </div>
   </div>
+  {#if listOpen}
+    <AppListModal title={row.label} {items} onAdd={addApp} onRemove={removeApp}
+                  onClose={() => (listOpen = false)} />
+  {/if}
 {/if}
 <style>
   .row{display:flex;justify-content:space-between;align-items:center;gap:24px;padding:14px 0;border-bottom:1px solid var(--line)}
@@ -123,26 +125,11 @@
   .color:disabled{cursor:default}   /* .row.disabled already dims the whole row; avoid compounding opacity */
   /* App list: one chip per exe plus a "+" that opens the host's file picker. Wraps and is
      right-aligned so a growing list pushes downward instead of squeezing the .meta column. */
-  /* min-width matters: .ctl is a flex item next to the description, so its automatic minimum is
-     min-content. With wrapping enabled that collapses to ONE chip wide and pushes the "+" onto its
-     own line, which reads as a misaligned control. The floor keeps chip and button on one row until
-     there are genuinely several, and only then does it wrap as a block. */
-  .applist{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;align-items:center;
-           max-width:300px;min-width:170px}
-  /* Chip and "+" share an explicit 26px box (the checkbox control's height) with border-box sizing,
-     so they line up exactly instead of differing by their padding/border. */
-  .chip{display:inline-flex;align-items:center;gap:2px;height:26px;box-sizing:border-box;
-        padding:0 5px 0 10px;border-radius:999px;
-        border:1px solid var(--line);background:var(--chip);color:var(--text);font-size:12px}
-  .chipx{display:grid;place-items:center;width:18px;height:18px;border:0;background:transparent;
-         color:var(--muted);cursor:pointer;font-size:14px;line-height:1;border-radius:999px}
-  .chipx:hover{color:var(--text);background:var(--hover)}
-  .chipx:disabled{cursor:default}
-  .addbtn{width:26px;height:26px;box-sizing:border-box;display:grid;place-items:center;
-          border-radius:999px;border:1px dashed var(--line);background:transparent;
-          color:var(--muted);font-size:15px;line-height:1;cursor:pointer}
-  .addbtn:hover:not(:disabled){color:var(--text);border-color:var(--accent);border-style:solid}
-  .addbtn:disabled{cursor:default}
+  /* Current state beside the Manage button. nowrap + a max width so a long exe name truncates
+     instead of wrapping the control onto a second line (which is what the old inline chips did). */
+  .listsummary{color:var(--muted);font-size:12px;margin-right:10px;max-width:180px;
+               display:inline-block;vertical-align:middle;overflow:hidden;text-overflow:ellipsis;
+               white-space:nowrap}
   /* About hero: large centered Wind logo fills the section so it has real height (helps the
      scroll-spy reach About) and the bottom of the scroll area isn't empty. */
   .about-hero{padding:48px 0 64px;text-align:center;color:var(--text);display:flex;flex-direction:column;align-items:center}
