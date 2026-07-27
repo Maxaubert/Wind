@@ -352,6 +352,20 @@ static bool IsTransformExcluded(HWND fg, const Config& cfg) {
     return wind::IsExeInList(exe, cfg.transformExclude);
 }
 
+// Keyboard-hook suspension list (issue #156): while one of these apps is foreground the LL keyboard
+// hook is uninstalled, so Windows' input thread stops round-tripping every keystroke through us and
+// the mouse stream to that app is never stalled. Unlike the transform exclusion this does NOT
+// require fullscreen: the user named the app, so honour it whenever it is in front.
+static bool IsNoSwallowApp(HWND fg, const Config& cfg) {
+    if (cfg.noSwallowApps.empty()) return false;
+    const std::wstring exeW = ExeNameOf(fg);
+    if (exeW.empty()) return false;
+    std::string exe;
+    exe.reserve(exeW.size());
+    for (wchar_t ch : exeW) exe.push_back((char)(ch < 128 ? ch : '?'));
+    return wind::IsExeInList(exe, cfg.noSwallowApps);
+}
+
 // tdrTest=3 (issue #148 harness): hand foreground back when a stolen-foreground freeze session
 // ends. Only if we still hold it - an alt-tab to a third app is respected.
 static void EndFreezeSteal(TickState& t) {
@@ -511,13 +525,28 @@ static void RunTick(TickState& t) {
     // Throttled to ~10 Hz: foreground changes are human-speed events, so probing them every tick
     // (display refresh) would burn a few window queries 144x a second to answer a question that
     // changes maybe once a minute. Worst case the swap lands 100 ms late, which nobody can feel.
-    {
+    // OPT-IN, both off by default: unconfigured, the hook stays installed and keys are swallowed
+    // everywhere exactly as before, and this costs a single string check per tick (no window
+    // queries at all). Configure noSwallowApps (per-app) or noSwallowGames=1 (any borderless
+    // fullscreen) to trade swallowing for smooth panning in that app.
+    if (t.cfg.noSwallowApps.empty() && !t.cfg.noSwallowGames) {
+        g_input.setKeyboardHookWanted(true);   // idempotent: only posts on an actual change
+    } else {
         const unsigned long long nowMs = GetTickCount64();
         if (nowMs - t.lastFgProbeMs >= 100) {
             t.lastFgProbeMs = nowMs;
             HWND fgw = GetForegroundWindow();
-            const bool borderless = fgw && !(GetWindowLongPtrW(fgw, GWL_STYLE) & WS_CAPTION);
-            g_input.setKeyboardHookWanted(!(borderless && ForegroundCoversMonitor(t.mon)));
+            bool suspend = false;
+            if (fgw) {
+                // The explicit list wins and does NOT require fullscreen: if the user named the app,
+                // honour it whenever that app is in front (windowed play, borderless, either way).
+                if (IsNoSwallowApp(fgw, t.cfg)) suspend = true;
+                else if (t.cfg.noSwallowGames) {
+                    const bool borderless = !(GetWindowLongPtrW(fgw, GWL_STYLE) & WS_CAPTION);
+                    suspend = borderless && ForegroundCoversMonitor(t.mon);
+                }
+            }
+            g_input.setKeyboardHookWanted(!suspend);
         }
     }
     // LL keyboard-hook watchdog (issue #156). Windows SILENTLY evicts a low-level hook whose

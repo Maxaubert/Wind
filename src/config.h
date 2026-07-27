@@ -80,6 +80,21 @@ struct Config {
     // Empty string = exclude nothing.
     std::string transformExclude =
         "zen.exe,firefox.exe,chrome.exe,msedge.exe,brave.exe,opera.exe,opera_gx.exe,vivaldi.exe";
+    // Keyboard-hook suspension (issue #156). A WH_KEYBOARD_LL hook makes Windows' input thread hand
+    // every keystroke to us and WAIT for the reply before delivering anything else - including mouse
+    // movement to the foreground app. Holding a key auto-repeats ~30x/s, so it stalls the mouse
+    // stream that often: the "panning is smooth until I hold a key" stutter. Suspending the hook
+    // over the affected app removes the stall completely; the cost is that the app then also sees
+    // the zoom key (which was ALREADY true for raw-input games, where swallowing never worked).
+    //
+    // Both default to off, so out of the box the hook stays installed and keys are swallowed
+    // everywhere, exactly as before. Opt in per app with the list, or blanket-enable for games.
+    // noSwallowApps: exe names (comma-separated, case-insensitive) whose foreground suspends the
+    // keyboard hook. Matched whenever the app is foreground, fullscreen or not. Empty = none.
+    std::string noSwallowApps = "";
+    // noSwallowGames: 1 = also suspend for ANY borderless fullscreen foreground (the generic game
+    // test the hybrid model uses). Independent of the list above; either one suspends.
+    int noSwallowGames = 0;
     // Transform-model-only knobs (ignored by the other models):
     int fastPan     = 1;  // 1 = pan via the private SetMagnificationDesktopMagnification channel
                           //     (sub-pixel); falls back to the public API automatically if unavailable.
