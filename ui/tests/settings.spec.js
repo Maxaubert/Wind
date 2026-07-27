@@ -67,17 +67,25 @@ test('a slot holding both a side-button and a key shows BOTH bindings', async ({
 
 // Issue #156: releasing keys trades swallowing for smooth panning, so it must be visible in the UI
 // (an ini-only knob is one nobody finds) and must ship OFF - the mock config sets neither key.
-test('the app list starts empty and offers only an add button', async ({ page }) => {
+// The row shows the current state plus one button; everything else lives in the dialog, so the
+// row stays one line however many programs are listed.
+test('the app row summarises an empty list and opens a dialog', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByRole('button', { name: 'Add a program' })).toBeVisible();
-  await expect(page.getByRole('button', { name: /^Remove / })).toHaveCount(0);
+  const row = page.getByText("Don't swallow keys in these apps", { exact: true }).locator('xpath=../..');
+  await expect(row.getByText('None', { exact: true })).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await row.getByRole('button', { name: 'Manage list' }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
 });
 
-test('adding a program stages a chip until Apply, then setConfig fires', async ({ page }) => {
+test('adding a program stages it until Apply, then setConfig fires', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Add a program' }).click();   // mock picks RDR2.exe
-  await expect(page.getByRole('button', { name: 'Remove RDR2.exe' })).toBeVisible();
+  await page.getByRole('button', { name: 'Manage list' }).click();
+  await page.getByRole('button', { name: 'Add program...' }).click();   // mock picks RDR2.exe
+  await expect(page.getByRole('dialog').getByText('RDR2.exe')).toBeVisible();
   expect(await page.evaluate(() => window.__sets.filter(s => s.key === 'noSwallowApps').length)).toBe(0);
+  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
   await page.getByRole('button', { name: 'Apply' }).click();
   const sets = await page.evaluate(() => window.__sets);
   expect(sets.some(s => s.key === 'noSwallowApps' && s.value === 'RDR2.exe')).toBeTruthy();
@@ -87,30 +95,39 @@ test('adding a program stages a chip until Apply, then setConfig fires', async (
 // effect while the list looked broken. The add path has to reject the duplicate outright.
 test('adding the same program twice is ignored, regardless of case', async ({ page }) => {
   await page.goto('/');
-  const add = page.getByRole('button', { name: 'Add a program' });
+  await page.getByRole('button', { name: 'Manage list' }).click();
+  const add = page.getByRole('button', { name: 'Add program...' });
   await add.click();
   await page.evaluate(() => { window.__pick = 'rdr2.EXE'; });   // same program, different case
   await add.click();
   await expect(page.getByRole('button', { name: /^Remove / })).toHaveCount(1);
 });
 
-// The "+" wrapped onto its own line below the chip, because .ctl is a flex item beside the
-// description and its automatic minimum size collapsed to one chip wide. Assert the geometry:
-// same centre line, button after the chip.
-test('the add button shares a line with the chips and is vertically centred', async ({ page }) => {
+test('removing a program empties the list again', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Add a program' }).click();
-  const chip = await page.getByRole('button', { name: 'Remove RDR2.exe' }).boundingBox();
-  const add  = await page.getByRole('button', { name: 'Add a program' }).boundingBox();
-  expect(Math.abs((chip.y + chip.height / 2) - (add.y + add.height / 2))).toBeLessThan(2);
-  expect(add.x).toBeGreaterThan(chip.x);
+  await page.getByRole('button', { name: 'Manage list' }).click();
+  await page.getByRole('button', { name: 'Add program...' }).click();
+  await page.getByRole('button', { name: 'Remove RDR2.exe' }).click();
+  await expect(page.getByRole('dialog').getByText('No apps yet')).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
+  await expect(page.getByText('None', { exact: true })).toBeVisible();
 });
 
-test('removing a program drops its chip', async ({ page }) => {
+// Closing is the only way out now that the confirm button is gone, so all three routes are load
+// bearing: the X, Escape, and a backdrop click.
+test('the backdrop closes the dialog', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Add a program' }).click();
-  await page.getByRole('button', { name: 'Remove RDR2.exe' }).click();
-  await expect(page.getByRole('button', { name: /^Remove / })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Manage list' }).click();
+  await page.mouse.click(8, 8);   // outside the box, on the backdrop
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
+test('Escape closes the dialog', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Manage list' }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
 });
 
 test('keybind capture writes a VK on keydown (live, no Apply needed)', async ({ page }) => {
