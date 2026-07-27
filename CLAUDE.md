@@ -253,7 +253,13 @@ staged Apply/Discard footer.
   created shown at startup in every model. PresentMon on RDR2, same session, no game restart:
   3% -> 99.8% `Hardware: Independent Flip`, mean frametime 12.28 -> 7.26 ms, p99 18.3 -> 9.5 ms.
   DWM re-promotes on its own as soon as nothing covers the game, so there is no latch to work around.
-  Park by MOVING the window, never `SW_HIDE` (that reintroduces the stale-frame flash below).
+  Park by MOVING the window off the virtual desktop. NOT `SW_HIDE` (reintroduces the stale-frame
+  flash below) and NOT a resize: shrinking to 1x1 makes DWM reallocate the redirection surface, and
+  the freshly allocated area is undefined until presented into, which showed as a one-frame BLACK
+  flash per zoom over a game. A move leaves the surface and swapchain untouched. Each park/unpark is
+  also a `SetWindowPos` over the game, i.e. a synchronous DWM z-order transaction (see the hitch note
+  in `renderFrame`), so two per zoom session is the floor - do not add more. `WIND_NOPARK=1` disables
+  parking entirely for A/B.
 - RENDER ENGINE: presenting first is NOT enough - the reveal is GATED (issue #140, in `RunTick`):
   Present's blt into the layered redirection surface is GPU work, but the alpha flip is a CPU call
   DWM honours at its next composite, so under GPU load the flip wins the race and DWM shows the

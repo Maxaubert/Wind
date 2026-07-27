@@ -720,12 +720,27 @@ bool RenderEngine::State::buildDeviceResources() {
 // while parked, because every present path unparks first.
 void RenderEngine::setParked(bool park) {
     if (!s_ || !s_->hwnd || s_->parked == park) return;
+    // WIND_NOPARK=1: A/B diagnostic - never park, i.e. the pre-parking behaviour where the overlay
+    // sits fullscreen over whatever is beneath it for the whole session. Costs the game its
+    // independent-flip plane; kept so a parking-related artifact can be isolated in one run.
+    static const bool noPark = GetEnvironmentVariableW(L"WIND_NOPARK", nullptr, 0) > 0;
+    if (noPark) return;
     s_->parked = park;
-    // Keep the parked window on the target monitor (its origin) so a later unpark is a pure
-    // resize and the window never briefly lands on the wrong display.
-    const int w = park ? 1 : s_->sw;
-    const int h = park ? 1 : s_->sh;
-    SetWindowPos(s_->hwnd, HWND_TOPMOST, s_->originX, s_->originY, w, h, SWP_NOACTIVATE);
+    // MOVE the window off-screen rather than RESIZING it to 1x1. Both stop it covering the game,
+    // but a resize forces DWM to reallocate the window's redirection surface, and the freshly
+    // allocated area is undefined until we present into it - one black frame on the next composite.
+    // A move keeps the surface (and the swapchain, which is never resized either) exactly as it is.
+    // It also matters that this is a SetWindowPos over a fullscreen game at all: renderFrame already
+    // documents that as a synchronous DWM z-order transaction that hitches the game, which is why
+    // its periodic topmost re-assert is skipped while a game is foreground. Two per zoom session is
+    // the floor; do not add more.
+    //
+    // Park just past the right edge of the VIRTUAL desktop so the overlay cannot land on another
+    // monitor (parking it directly above the target monitor would sit on whatever is up there and
+    // demote a fullscreen app on THAT display instead).
+    const int parkX = GetSystemMetrics(SM_XVIRTUALSCREEN) + GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    const int x = park ? parkX : s_->originX;
+    SetWindowPos(s_->hwnd, HWND_TOPMOST, x, s_->originY, s_->sw, s_->sh, SWP_NOACTIVATE);
 }
 
 void RenderEngine::setVisible(bool visible) {
@@ -954,8 +969,10 @@ bool RenderEngine::retarget(const MonitorTarget& m) {
     // new monitor rather than re-covering it at full size (setParked).
     s_->originX = m.x; s_->originY = m.y;
     s_->sw = m.w; s_->sh = m.h;
-    SetWindowPos(s_->hwnd, HWND_TOPMOST, m.x, m.y,
-                 s_->parked ? 1 : m.w, s_->parked ? 1 : m.h, SWP_NOACTIVATE);
+    // Full size either way (parking is a MOVE, not a resize - see setParked); only the x differs.
+    const int px = s_->parked ? (GetSystemMetrics(SM_XVIRTUALSCREEN) + GetSystemMetrics(SM_CXVIRTUALSCREEN))
+                              : m.x;
+    SetWindowPos(s_->hwnd, HWND_TOPMOST, px, m.y, m.w, m.h, SWP_NOACTIVATE);
     lstrcpynW(s_->targetDevice, m.device, 32);
     s_->dupl.Reset();
     s_->haveDesktop = false;
