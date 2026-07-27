@@ -339,11 +339,8 @@ static bool IsChurnyFg(HWND fg) {
     return g_churnyApps.count(ExeNameOf(fg)) != 0;
 }
 
-// Auto/hybrid exclusion: an app on cfg.transformExclude never gets the transform engine even when
-// it is fullscreen and borderless. Fullscreen browser video is indistinguishable from a game by
-// the foreground test, but it wants render (constant-size cursor, desktop-style behaviour).
-// Is the foreground window's exe named in a comma-separated config list? Shared by every
-// exe-list setting (transformExclude, noSwallowApps, autoIgnoreApps) so they all match identically:
+// Is the foreground window's exe named in a comma-separated list? Shared by every exe-list check
+// (transformExclude, noSwallowApps, the built-in overlay names) so they all match identically:
 // bare file name, case-insensitive, exact - never a path.
 static bool FgExeInList(HWND fg, const std::string& list) {
     if (list.empty()) return false;
@@ -354,18 +351,41 @@ static bool FgExeInList(HWND fg, const std::string& list) {
     for (wchar_t ch : exeW) exe.push_back((char)(ch < 128 ? ch : '?'));
     return wind::IsExeInList(exe, list);
 }
+// Auto/hybrid exclusion: an app on cfg.transformExclude never gets the transform engine even when
+// it is fullscreen and borderless. Fullscreen browser video is indistinguishable from a game by
+// the foreground test, but it wants render (constant-size cursor, desktop-style behaviour).
 static bool IsTransformExcluded(HWND fg, const Config& cfg) {
     return FgExeInList(fg, cfg.transformExclude);
 }
-// Auto/hybrid ignore list: while one of these is foreground the engine choice is FROZEN.
-// Transient overlays (a snip tool, a TTS/dialogue reader, an IME panel) hold foreground for a
-// couple of seconds and hand it straight back. Re-picking on them costs TWO engine handovers
-// within seconds, and each one releases and rebuilds DWM's magnification context, so a tool that
-// is only on screen briefly produces a pair of stalls. The 350ms stickiness below does not help:
-// these are visible for far longer than that. Ignoring them leaves the candidate state untouched,
-// so when foreground comes back nothing has changed and no handover ever happens.
-static bool IsAutoIgnoredApp(HWND fg, const Config& cfg) {
-    return FgExeInList(fg, cfg.autoIgnoreApps);
+// Overlays that cover the screen, look exactly like a game to the foreground test, and are gone
+// again in a couple of seconds. Hard-coded on purpose: these are system surfaces, not something a
+// user can sensibly pick out of a file browser, and a second user-managed list is not worth the
+// settings surface. Only consulted for windows that already failed the free style test below.
+static const char* kOverlayExes =
+    "SnippingTool.exe,ScreenSketch.exe,ScreenClippingHost.exe,TextInputHost.exe";
+
+// Is the foreground an overlay rather than a real app? While one is up the Auto engine choice is
+// FROZEN: such a tool holds foreground for a couple of seconds and hands it straight back, so
+// re-picking on it costs TWO engine handovers within seconds, and each one releases and rebuilds
+// DWM's magnification context - a pair of stalls exactly when the user is trying to read the
+// screen. The 350ms stickiness cannot help; these are visible for far longer than that.
+//
+// Deliberately cheap: no hook, no polling, nothing that loops.
+//   1. WS_EX_LAYERED on the foreground window - one GetWindowLongPtr, right next to the GWL_STYLE
+//      read the caller already makes. A game does not use a layered top-level window (it would
+//      cost it the redirection surface and its independent-flip plane); capture tools, dimmers and
+//      click-through HUDs do. This alone catches most of them for free.
+//   2. Only if that misses, the small built-in name list, which needs a process handle.
+// Memoised on the HWND so step 2 costs one lookup per foreground CHANGE rather than one per tick.
+static bool IsOverlayFg(HWND fg) {
+    if (!fg) return false;
+    if (GetWindowLongPtrW(fg, GWL_EXSTYLE) & WS_EX_LAYERED) return true;
+    static HWND s_lastFg = nullptr;
+    static bool s_lastResult = false;
+    if (fg == s_lastFg) return s_lastResult;
+    s_lastFg = fg;
+    s_lastResult = FgExeInList(fg, kOverlayExes);
+    return s_lastResult;
 }
 
 // Keyboard-hook suspension list (issue #156): while one of these apps is foreground the LL keyboard
@@ -958,11 +978,11 @@ static void RunTick(TickState& t) {
         // zoom level and lens position carry across the swap (render 8x -> tab into a game ->
         // transform 8x). Inspect sessions are never switched under.
         HWND fgw2 = GetForegroundWindow();
-        // Freeze the engine choice while an ignored overlay is in front (see IsAutoIgnoredApp).
-        // Skipping the whole block, rather than just the swap, is deliberate: it leaves wantModel /
-        // wantSinceMs untouched, so the overlay never becomes the settled candidate and handing
-        // foreground back is a no-op instead of a second handover.
-        if (t.mTransform && !enterActive && !inspect && !IsAutoIgnoredApp(fgw2, t.cfg)) {
+        // Freeze the engine choice while an overlay is in front (see IsOverlayFg). Skipping the
+        // whole block, rather than just the swap, is deliberate: it leaves wantModel/wantSinceMs
+        // untouched, so the overlay never becomes the settled candidate and handing foreground back
+        // is a no-op instead of a second handover.
+        if (t.mTransform && !enterActive && !inspect && !IsOverlayFg(fgw2)) {
             const bool fgIsStealer = fgw2 && fgw2 == g_focusStealer;   // tdrTest=3 holds foreground
             const bool borderless2 = fgw2 && !(GetWindowLongPtrW(fgw2, GWL_STYLE) & WS_CAPTION);
             const bool primary2 = t.mon.x == 0 && t.mon.y == 0;

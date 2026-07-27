@@ -38,25 +38,15 @@ TEST_CASE("noSwallowApps parses") {
     CHECK(c.noSwallowApps == "RDR2.exe,eldenring.exe");
 }
 
-// Auto/hybrid ignore list: freezes the engine choice while a transient overlay is foreground, so a
-// tool that is only up for a couple of seconds cannot cause a swap out and straight back.
-TEST_CASE("autoIgnoreApps ships Windows' transient overlays and parses") {
-    Config d = ParseConfig("");
-    CHECK(wind::IsExeInList("SnippingTool.exe", d.autoIgnoreApps));
-    CHECK(wind::IsExeInList("TextInputHost.exe", d.autoIgnoreApps));
-    CHECK_FALSE(wind::IsExeInList("RDR2.exe", d.autoIgnoreApps));
-    // "key=" with nothing after it must CLEAR the list, not fall back to the default. This is what
-    // the config UI writes when the last entry is removed, and the generic parser skips empty
-    // values (stoi("") throws), so the lists are handled ahead of that guard.
-    Config e = ParseConfig("autoIgnoreApps=\n");
-    CHECK(e.autoIgnoreApps.empty());
-    CHECK_FALSE(wind::IsExeInList("SnippingTool.exe", e.autoIgnoreApps));
+// "key=" with nothing after it must CLEAR an exe list, not fall back to the shipped default. That
+// is exactly what the config UI writes when the last entry is removed, and the generic parser skips
+// empty values (stoi("") throws on the numeric settings), so the lists are handled ahead of that
+// guard. Without this, clearing a list wrote the ini correctly and the core silently kept the old
+// value - and a list with defaults could never be emptied at all.
+TEST_CASE("an empty value clears an exe list instead of keeping the default") {
     CHECK(ParseConfig("transformExclude=\n").transformExclude.empty());
     CHECK(ParseConfig("noSwallowApps=RDR2.exe\nnoSwallowApps=\n").noSwallowApps.empty());
-    // Interpreter-hosted tools are named by the interpreter (a .pyw dialogue reader is pythonw.exe).
-    Config c = ParseConfig("autoIgnoreApps=pythonw.exe,AutoHotkey64.exe\n");
-    CHECK(wind::IsExeInList("pythonw.exe", c.autoIgnoreApps));
-    CHECK(wind::IsExeInList("autohotkey64.EXE", c.autoIgnoreApps));
+    CHECK_FALSE(ParseConfig("").transformExclude.empty());   // absent still means the default
 }
 
 // The list is matched with the same helper the transform exclusion uses, so it inherits
