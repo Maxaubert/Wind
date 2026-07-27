@@ -243,6 +243,17 @@ staged Apply/Discard footer.
   and re-display the frame from when it was last visible, flashing the previous zoom session's
   window on the next zoom-in (worst right after an alt-tab). The window is created shown at
   alpha 0 and stays shown. On zoom-in, present the live frame FIRST, then flip alpha to 255.
+- RENDER ENGINE: the overlay is PARKED at 1x1 whenever we are not rendering, and restored to full
+  monitor bounds before any present (`setParked`, called from initialize/renderFrame/primeReveal/
+  setVisible/retarget). A shown fullscreen topmost LAYERED window keeps a fullscreen game off its
+  independent-flip plane by geometry alone - even at alpha 0 - which is the same lever `primeReveal`
+  pulls deliberately at alpha 1. Left unparked, a game ran DWM-composited for its WHOLE session just
+  because Wind sat idle in the tray, and it looked model-independent and "sticky" (switching to
+  render or restarting Wind never helped, only restarting the game seemed to) because the overlay is
+  created shown at startup in every model. PresentMon on RDR2, same session, no game restart:
+  3% -> 99.8% `Hardware: Independent Flip`, mean frametime 12.28 -> 7.26 ms, p99 18.3 -> 9.5 ms.
+  DWM re-promotes on its own as soon as nothing covers the game, so there is no latch to work around.
+  Park by MOVING the window, never `SW_HIDE` (that reintroduces the stale-frame flash below).
 - RENDER ENGINE: presenting first is NOT enough - the reveal is GATED (issue #140, in `RunTick`):
   Present's blt into the layered redirection surface is GPU work, but the alpha flip is a CPU call
   DWM honours at its next composite, so under GPU load the flip wins the race and DWM shows the
