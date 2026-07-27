@@ -69,6 +69,24 @@ public:
     // True once the LL KEYBOARD hook is installed. When false (install failed or WIND_NOHOOK), main
     // must fall back to GetAsyncKeyState and no keyboard swallowing happens.
     bool kbHookActive() const { return kbHookActive_.load(std::memory_order_relaxed); }
+    // --- LL keyboard hook watchdog (issue #156) ------------------------------------------------
+    // Windows SILENTLY evicts a low-level hook whose callback misses LowLevelHooksTimeout. There is
+    // no notification and no error: the hook handle stays non-null, KbProc simply never fires again.
+    // A game's launch load spike is exactly when that happens, which is why "start Wind, then launch
+    // the game" left every keyboard bind dead while the mouse binds survived - and why rebinding a
+    // key then looked like a broken ini hot-reload (the reload DID apply; the dead hook just never
+    // reported the key, and kbHookActive() still claimed the hook was the authority).
+    //
+    // Called from the tick thread when it detects the eviction (see the watchdog in main.cpp).
+    // Immediately clears kbHookActive_ so main falls back to GetAsyncKeyState polling on the very
+    // next tick - a dead hook swallows nothing, so polling is correct and the binds work again at
+    // once - then asks the hook thread to re-install (a hook must be installed by the thread that
+    // pumps it, so this posts rather than calling SetWindowsHookEx here).
+    void requestKbHookReinstall();
+    // Hook thread -> published result of that re-install attempt.
+    void onKbHookReinstalled(bool ok);
+    // Count of successful re-installs this session (diagnostics / tests).
+    unsigned kbHookReinstalls() const { return kbHookReinstalls_.load(std::memory_order_relaxed); }
     // Magnify model only: make the keyboard hook skip INJECTED events entirely. The magnify model
     // drives Windows Magnifier by injecting Win+Plus/Win+Minus chords, and NumPad +/- are bindable
     // zoom keys - without the skip, our own injection would be swallowed by our own hook and
@@ -106,6 +124,7 @@ private:
     std::atomic<int> kbCursorLockVk_{0};
     std::atomic<int> kbSwapModelVk_{0};
     std::atomic<bool> kbHookActive_{false}; // true once the LL KEYBOARD hook is installed
+    std::atomic<unsigned> kbHookReinstalls_{0};  // watchdog recoveries this session
     std::atomic<bool> ignoreInjectedKeys_{false}; // magnify model: kb hook skips LLKHF_INJECTED
     // Inspect-mode cooked-pixel accumulator (main-thread only: WM_INPUT cooks, the tick drains).
     BallisticsConfig ballistics_{};

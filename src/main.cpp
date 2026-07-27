@@ -238,6 +238,7 @@ struct TickState {
     unsigned long long wantSinceMs = 0;     //   has been the candidate (debounces foreground reads)
     HCURSOR lastFgCursor = nullptr; // churn valve: last seen foreground cursor SHAPE handle
     int    churnCount = 0;          //   handle changes inside the rolling window
+    unsigned long long kbHookDivergentSinceMs = 0;  // LL keyboard-hook watchdog dwell (issue #156)
     unsigned long long churnWinStart = 0;
     std::wstring freezeExe;         // exe of the app under the current/last transform game session
     unsigned long long lastFreezeActiveMs = 0;   // TDR-backstop window (device-lost attribution)
@@ -490,6 +491,38 @@ static void RunTick(TickState& t) {
     // Lets users without side-buttons zoom from the keyboard. When the LL keyboard hook is active it
     // is the authority for bound-key down-state (a swallowed key never appears in GetAsyncKeyState),
     // so read keyPressed(); otherwise (hook install failed / WIND_NOHOOK) fall back to polling.
+    // LL keyboard-hook watchdog (issue #156). Windows SILENTLY evicts a low-level hook whose
+    // callback misses LowLevelHooksTimeout: no notification, no error, the handle stays valid and
+    // KbProc simply never fires again. A game's launch load spike is exactly when that happens -
+    // launching a heavily modded RDR2 with Wind already running killed every keyboard bind while
+    // the mouse binds survived, and rebinding a key then looked like a broken ini hot-reload (the
+    // reload DID apply; the dead hook just never reported the key, and kbHookActive() still claimed
+    // the hook was the authority, so keyDown below asked it and always got "up").
+    //
+    // The tell needs no extra bookkeeping: while the hook is alive it SWALLOWS every bound key, so
+    // GetAsyncKeyState can NEVER see one. Poller sees a bound key held + hook still reports it up
+    // => the hook is gone. The dwell keeps the ordinary press-before-callback race from
+    // false-positiving; the magnify model is excluded outright because its hook deliberately skips
+    // the injected chords it drives Windows Magnifier with (those are unswallowed by design).
+    constexpr unsigned long long kKbHookDeadMs = 250;
+    if (g_input.kbHookActive() && g_input.swallowEnabled() && !g_input.ignoreInjectedKeys()) {
+        const int watched[] = { t.cfg.zoomInVk, t.cfg.zoomInVk2, t.cfg.zoomOutVk, t.cfg.zoomOutVk2,
+                                t.cfg.recenterVk, t.cfg.cursorLockVk, t.cfg.swapModelVk };
+        bool divergent = false;
+        for (int vk : watched) {
+            if (vk == 0 || !g_input.isBoundKey(vk)) continue;
+            if ((GetAsyncKeyState(vk) & 0x8000) && !g_input.keyPressed(vk)) { divergent = true; break; }
+        }
+        const unsigned long long nowMs = GetTickCount64();
+        if (!divergent)                             t.kbHookDivergentSinceMs = 0;
+        else if (t.kbHookDivergentSinceMs == 0)     t.kbHookDivergentSinceMs = nowMs;
+        else if (nowMs - t.kbHookDivergentSinceMs >= kKbHookDeadMs) {
+            t.kbHookDivergentSinceMs = 0;
+            g_input.requestKbHookReinstall();   // logs, and polling takes over on the next tick
+        }
+    } else {
+        t.kbHookDivergentSinceMs = 0;
+    }
     const bool kbHook = g_input.kbHookActive();
     auto keyDown = [&](int vk) {
         if (vk == 0) return false;
