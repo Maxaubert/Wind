@@ -87,14 +87,12 @@ struct Config {
     // over the affected app removes the stall completely; the cost is that the app then also sees
     // the zoom key (which was ALREADY true for raw-input games, where swallowing never worked).
     //
-    // Both default to off, so out of the box the hook stays installed and keys are swallowed
-    // everywhere, exactly as before. Opt in per app with the list, or blanket-enable for games.
-    // noSwallowApps: exe names (comma-separated, case-insensitive) whose foreground suspends the
-    // keyboard hook. Matched whenever the app is foreground, fullscreen or not. Empty = none.
+    // Empty by default, so out of the box the hook stays installed and keys are swallowed
+    // everywhere, exactly as before. Named apps only (no blanket "all games" switch): the trade is
+    // per app, and applying it to everything fullscreen would silently stop swallowing in apps the
+    // user never considered. Exe names, comma-separated, case-insensitive, matched whenever one is
+    // foreground - fullscreen or windowed, since the user named it explicitly.
     std::string noSwallowApps = "";
-    // noSwallowGames: 1 = also suspend for ANY borderless fullscreen foreground (the generic game
-    // test the hybrid model uses). Independent of the list above; either one suspends.
-    int noSwallowGames = 0;
     // Transform-model-only knobs (ignored by the other models):
     int fastPan     = 1;  // 1 = pan via the private SetMagnificationDesktopMagnification channel
                           //     (sub-pixel); falls back to the public API automatically if unavailable.

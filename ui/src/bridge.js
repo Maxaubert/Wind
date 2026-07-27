@@ -24,3 +24,11 @@ export function windowControl(action) { post({ type: 'window', action }); }
 export function openIni() { post({ type: 'openIni' }); }
 // "Export diagnostics" -> host zips %LOCALAPPDATA%\Wind\logs to the Desktop and reveals it.
 export function exportDiagnostics() { post({ type: 'exportDiagnostics' }); }
+// "+" on an app list -> host shows a file picker and replies with the bare exe NAME (not a path:
+// the core matches on file name only). Resolves to '' when the user cancels.
+export function pickExe() {
+  return new Promise(resolve => {
+    const off = onMessage(m => { if (m && m.type === 'exePicked') { off(); resolve(m.name || ''); } });
+    post({ type: 'pickExe' });
+  });
+}

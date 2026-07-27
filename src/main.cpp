@@ -529,24 +529,15 @@ static void RunTick(TickState& t) {
     // everywhere exactly as before, and this costs a single string check per tick (no window
     // queries at all). Configure noSwallowApps (per-app) or noSwallowGames=1 (any borderless
     // fullscreen) to trade swallowing for smooth panning in that app.
-    if (t.cfg.noSwallowApps.empty() && !t.cfg.noSwallowGames) {
+    if (t.cfg.noSwallowApps.empty()) {
         g_input.setKeyboardHookWanted(true);   // idempotent: only posts on an actual change
     } else {
         const unsigned long long nowMs = GetTickCount64();
         if (nowMs - t.lastFgProbeMs >= 100) {
             t.lastFgProbeMs = nowMs;
-            HWND fgw = GetForegroundWindow();
-            bool suspend = false;
-            if (fgw) {
-                // The explicit list wins and does NOT require fullscreen: if the user named the app,
-                // honour it whenever that app is in front (windowed play, borderless, either way).
-                if (IsNoSwallowApp(fgw, t.cfg)) suspend = true;
-                else if (t.cfg.noSwallowGames) {
-                    const bool borderless = !(GetWindowLongPtrW(fgw, GWL_STYLE) & WS_CAPTION);
-                    suspend = borderless && ForegroundCoversMonitor(t.mon);
-                }
-            }
-            g_input.setKeyboardHookWanted(!suspend);
+            // Does NOT require fullscreen: the user named the app, so honour it whenever that app
+            // is in front (windowed play, borderless, either way).
+            g_input.setKeyboardHookWanted(!IsNoSwallowApp(GetForegroundWindow(), t.cfg));
         }
     }
     // LL keyboard-hook watchdog (issue #156). Windows SILENTLY evicts a low-level hook whose
