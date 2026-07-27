@@ -136,6 +136,8 @@ Config ParseConfig(const std::string& text) {
             else if (key == "cursorVisibility")   c.cursorVisibility = val;
             else if (key == "model")              c.model = val;
             else if (key == "transformExclude")   c.transformExclude = val;
+            else if (key == "noSwallowApps")      c.noSwallowApps = val;
+            else if (key == "noSwallowGames")     c.noSwallowGames = std::stoi(val);
             else if (key == "magnifyStep")        c.magnifyStep = std::stoi(val);
             else if (key == "fastPan")            c.fastPan = std::stoi(val);
             else if (key == "smoothPan")          c.smoothPan = std::stoi(val);
@@ -323,6 +325,19 @@ Config LoadConfig(const std::wstring& path) {
                ";   like a game to the foreground test but wants the render engine. Comma-separated,\n"
                ";   case-insensitive, exact name match. Empty = exclude nothing.\n"
                "transformExclude=zen.exe,firefox.exe,chrome.exe,msedge.exe,brave.exe,opera.exe,opera_gx.exe,vivaldi.exe\n"
+               "; noSwallowApps / noSwallowGames: where to SUSPEND the keyboard hook.\n"
+               ";   Watching the keyboard makes Windows hand us every keystroke and WAIT before it\n"
+               ";   delivers anything else - including mouse movement to the game. Holding a key\n"
+               ";   auto-repeats ~30x/s, so it stalls the mouse that often: panning is smooth until\n"
+               ";   you hold a key, then it stutters. Suspending the hook removes the stall.\n"
+               ";   Trade-off: the app then also SEES the zoom key. In a raw-input game that was\n"
+               ";   already true (a hook cannot block raw input), so there you lose nothing.\n"
+               ";   noSwallowApps: comma-separated exe names, case-insensitive, exact match, matched\n"
+               ";     whenever that app is foreground.  Example: noSwallowApps=RDR2.exe\n"
+               ";   noSwallowGames=1: also suspend for ANY borderless fullscreen foreground.\n"
+               ";   Both off by default: keys stay swallowed everywhere, as before.\n"
+               "noSwallowApps=\n"
+               "noSwallowGames=0\n"
                "; magnifyStep (magnify only): Windows Magnifier zoom increment, percent points per\n"
                ";   step (5-400). Lower = smoother and slower. Applies live.\n"
                "magnifyStep=50\n"
