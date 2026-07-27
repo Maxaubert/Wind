@@ -137,6 +137,11 @@ public:
     bool dumpFrame(const RenderFrameParams& p, const wchar_t* path);
 
 private:
+    // Shrink the overlay to 1x1 while idle / restore full monitor bounds before we render.
+    // A shown fullscreen topmost layered window keeps a fullscreen game off its independent-flip
+    // plane even at alpha 0, so leaving it at full size while idle taxes the game for the whole
+    // session. See the definition in the .cpp for the full reasoning.
+    void setParked(bool park);
     struct State;
     State* s_;
 };
