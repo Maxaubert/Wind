@@ -30,15 +30,12 @@ TEST_CASE("model=transform is a first-class model again (issue #148 revival)") {
 // the target app. It must be OPT-IN, so an empty/absent config has to leave both off - that is what
 // keeps the shipped behaviour (swallow everywhere) unchanged for anyone who never configures it.
 TEST_CASE("keyboard-hook suspension is off by default") {
-    Config d = ParseConfig("");
-    CHECK(d.noSwallowApps.empty());
-    CHECK(d.noSwallowGames == 0);
+    CHECK(ParseConfig("").noSwallowApps.empty());
 }
 
-TEST_CASE("noSwallowApps / noSwallowGames parse") {
-    Config c = ParseConfig("noSwallowApps=RDR2.exe,eldenring.exe\nnoSwallowGames=1\n");
+TEST_CASE("noSwallowApps parses") {
+    Config c = ParseConfig("noSwallowApps=RDR2.exe,eldenring.exe\n");
     CHECK(c.noSwallowApps == "RDR2.exe,eldenring.exe");
-    CHECK(c.noSwallowGames == 1);
 }
 
 // The list is matched with the same helper the transform exclusion uses, so it inherits

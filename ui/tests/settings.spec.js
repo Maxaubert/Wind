@@ -15,6 +15,10 @@ test.beforeEach(async ({ page }) => {
           // model fails that check (undefined !== 'render'), hiding the row the same way.
           listeners.forEach(fn => fn({ data: { type: 'config', values: { zoomInSpeed: '1.2', smoothZoom: '0', uiTheme: 'auto', showAdvanced: '1', model: 'render', zoomInButton: '2', zoomInVk: '33', zoomOutButton: '1', zoomOutVk: '34' } } }));
         if (msg.type === 'setConfig') window.__sets.push(msg);
+        // The host shows a native file picker and replies with the bare exe name. Stand in for it
+        // with a settable name so a test can drive what the "picker" returns.
+        if (msg.type === 'pickExe')
+          listeners.forEach(fn => fn({ data: { type: 'exePicked', name: window.__pick || 'RDR2.exe' } }));
       },
     }};
   });
@@ -63,23 +67,38 @@ test('a slot holding both a side-button and a key shows BOTH bindings', async ({
 
 // Issue #156: releasing keys trades swallowing for smooth panning, so it must be visible in the UI
 // (an ini-only knob is one nobody finds) and must ship OFF - the mock config sets neither key.
-test('key-release settings are visible and default to off', async ({ page }) => {
+test('the app list starts empty and offers only an add button', async ({ page }) => {
   await page.goto('/');
-  const box = page.getByPlaceholder('RDR2.exe, eldenring.exe');
-  await expect(box).toBeVisible();
-  await expect(box).toHaveValue('');
-  const toggle = page.getByText('Release keys in fullscreen games', { exact: true })
-                     .locator('xpath=../..').getByRole('checkbox');
-  await expect(toggle).not.toBeChecked();
+  await expect(page.getByRole('button', { name: 'Add a program' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Remove / })).toHaveCount(0);
 });
 
-test('the app list stages until Apply, then setConfig fires', async ({ page }) => {
+test('adding a program stages a chip until Apply, then setConfig fires', async ({ page }) => {
   await page.goto('/');
-  await page.getByPlaceholder('RDR2.exe, eldenring.exe').fill('RDR2.exe');
+  await page.getByRole('button', { name: 'Add a program' }).click();   // mock picks RDR2.exe
+  await expect(page.getByRole('button', { name: 'Remove RDR2.exe' })).toBeVisible();
   expect(await page.evaluate(() => window.__sets.filter(s => s.key === 'noSwallowApps').length)).toBe(0);
   await page.getByRole('button', { name: 'Apply' }).click();
   const sets = await page.evaluate(() => window.__sets);
   expect(sets.some(s => s.key === 'noSwallowApps' && s.value === 'RDR2.exe')).toBeTruthy();
+});
+
+// The core matches exe names case-insensitively, so two spellings of one program would both take
+// effect while the list looked broken. The add path has to reject the duplicate outright.
+test('adding the same program twice is ignored, regardless of case', async ({ page }) => {
+  await page.goto('/');
+  const add = page.getByRole('button', { name: 'Add a program' });
+  await add.click();
+  await page.evaluate(() => { window.__pick = 'rdr2.EXE'; });   // same program, different case
+  await add.click();
+  await expect(page.getByRole('button', { name: /^Remove / })).toHaveCount(1);
+});
+
+test('removing a program drops its chip', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Add a program' }).click();
+  await page.getByRole('button', { name: 'Remove RDR2.exe' }).click();
+  await expect(page.getByRole('button', { name: /^Remove / })).toHaveCount(0);
 });
 
 test('keybind capture writes a VK on keydown (live, no Apply needed)', async ({ page }) => {

@@ -1,11 +1,28 @@
 <script>
   import KeybindCapture from './KeybindCapture.svelte';
   import CustomSelect from './CustomSelect.svelte';
+  import { pickExe } from '../bridge.js';
   export let row, value, onChange, disabled = false;
   export let values = {};   // keybind rows read sibling keys (e.g. zoomInVk) from here
   export let set = () => {}; // two-arg setter set(key, val); used by button rows
   export let live = () => {}; // live patch setter (writes setConfig immediately); used by keybind rows
   const num = v => Number(v);
+
+  // 'applist' rows hold a comma-separated exe list in one config string (the core parses it with
+  // IsExeInList). Split for display, re-join on every edit, so the stored shape never changes.
+  $: items = String(value ?? '').split(',').map(s => s.trim()).filter(Boolean);
+  const joined = arr => arr.join(',');
+  async function addApp() {
+    const name = await pickExe();                       // '' when the user cancels
+    if (!name) return;
+    // Case-insensitive dedupe: the core matches case-insensitively, so two spellings of one exe
+    // would both "work" while looking like a broken list.
+    if (items.some(i => i.toLowerCase() === name.toLowerCase())) return;
+    onChange(joined([...items, name]));
+  }
+  function removeApp(name) {
+    onChange(joined(items.filter(i => i !== name)));
+  }
 </script>
 {#if row.type === 'about'}
   <div class="about-hero">
@@ -52,10 +69,16 @@
       {:else if row.type === 'color'}
         <input class="color" type="color" {disabled} value={value}
                on:input={e => onChange(e.target.value)} />
-      {:else if row.type === 'text'}
-        <input class="text" type="text" {disabled} value={value ?? ''}
-               placeholder={row.placeholder || ''} spellcheck="false"
-               on:input={e => onChange(e.target.value)} />
+      {:else if row.type === 'applist'}
+        <div class="applist">
+          {#each items as name (name)}
+            <span class="chip">{name}<button class="chipx" {disabled} title="Remove {name}"
+                                             aria-label="Remove {name}"
+                                             on:click={() => removeApp(name)}>&#215;</button></span>
+          {/each}
+          <button class="addbtn" {disabled} title="Add a program" aria-label="Add a program"
+                  on:click={addApp}>+</button>
+        </div>
       {/if}
     </div>
   </div>
@@ -98,13 +121,21 @@
   .color{width:42px;height:26px;padding:2px;border:1px solid var(--line);border-radius:7px;
          background:transparent;cursor:pointer}
   .color:disabled{cursor:default}   /* .row.disabled already dims the whole row; avoid compounding opacity */
-  /* Free-text row (comma-separated exe lists). Sized to fit a couple of names without pushing the
-     .meta column narrow; matches the chip/line treatment of the other controls. */
-  .text{width:250px;padding:6px 10px;border-radius:7px;border:1px solid var(--line);
-        background:var(--chip);color:var(--text);font-size:12.5px}
-  .text::placeholder{color:var(--muted);opacity:.7}
-  .text:focus{outline:2px solid var(--accent);outline-offset:-1px}
-  .text:disabled{cursor:default}
+  /* App list: one chip per exe plus a "+" that opens the host's file picker. Wraps and is
+     right-aligned so a growing list pushes downward instead of squeezing the .meta column. */
+  .applist{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;max-width:280px}
+  .chip{display:inline-flex;align-items:center;gap:4px;padding:4px 6px 4px 10px;border-radius:999px;
+        border:1px solid var(--line);background:var(--chip);color:var(--text);font-size:12px}
+  .chipx{border:0;background:transparent;color:var(--muted);cursor:pointer;font-size:14px;
+         line-height:1;padding:0 2px;border-radius:999px}
+  .chipx:hover{color:var(--text)}
+  .chipx:disabled{cursor:default}
+  /* Same 26px box as the checkbox control so rows with either keep an identical control height. */
+  .addbtn{width:26px;height:26px;display:grid;place-items:center;border-radius:999px;
+          border:1px dashed var(--line);background:transparent;color:var(--muted);
+          font-size:15px;line-height:1;cursor:pointer}
+  .addbtn:hover:not(:disabled){color:var(--text);border-color:var(--accent);border-style:solid}
+  .addbtn:disabled{cursor:default}
   /* About hero: large centered Wind logo fills the section so it has real height (helps the
      scroll-spy reach About) and the bottom of the scroll area isn't empty. */
   .about-hero{padding:48px 0 64px;text-align:center;color:var(--text);display:flex;flex-direction:column;align-items:center}

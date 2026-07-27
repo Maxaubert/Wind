@@ -7,13 +7,11 @@ export const sections = [
     { key:'__zoomOut2', type:'keybind', label:'Zoom out (alternate)', desc:'Optional side-button or key', buttonKey:'zoomOutButton2', vkKey:'zoomOutVk2', modsKey:'zoomOutMods2', requires:'altKeybinds' },
     // Keyboard-hook suspension (issue #156). Watching the keyboard makes Windows hand Wind every
     // keystroke and wait before delivering anything else, including mouse movement to the game, so
-    // holding a key stalls panning ~30x/s. Off by default: this trades key-swallowing for smooth
-    // panning, and that is the user's call per app.
-    { key:'noSwallowGames', type:'toggle', label:'Release keys in fullscreen games',
-      desc:'Stops Wind intercepting keyboard binds while a fullscreen game is in front. Intercepting makes Windows pause input on every key repeat, which stutters panning. The game will also see the key.', def:0 },
-    { key:'noSwallowApps', type:'text', label:'Release keys in these apps',
-      desc:'Same, but only for the apps you name. Comma-separated program names; applies whether they run fullscreen or windowed.',
-      def:'', placeholder:'RDR2.exe, eldenring.exe' },
+    // holding a key stalls panning ~30x/s. Named apps only: this trades key-swallowing for smooth
+    // panning, which is a per-app call rather than something to apply to everything at once.
+    { key:'noSwallowApps', type:'applist', label:'Release keys in these apps',
+      desc:'Wind stops intercepting its keyboard binds while one of these programs is in front. Intercepting makes Windows pause input on every key repeat, which stutters panning in games. The program will also see the key.',
+      def:'' },
   ]},
   { id:'zoom', label:'Zoom', icon:'zoom', desc:'How magnification grows while you hold the zoom button.', rows: [
     { key:'zoomInSpeed',  type:'slider', label:'Zoom-in speed',  desc:'Multiplier (1.0 = default).', min:0.25, max:4, step:0.05, def:1.0 },
