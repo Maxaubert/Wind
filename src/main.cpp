@@ -239,6 +239,7 @@ struct TickState {
     HCURSOR lastFgCursor = nullptr; // churn valve: last seen foreground cursor SHAPE handle
     int    churnCount = 0;          //   handle changes inside the rolling window
     unsigned long long kbHookDivergentSinceMs = 0;  // LL keyboard-hook watchdog dwell (issue #156)
+    unsigned long long lastFgProbeMs = 0;           // throttles the game-foreground probe to ~10Hz
     unsigned long long churnWinStart = 0;
     std::wstring freezeExe;         // exe of the app under the current/last transform game session
     unsigned long long lastFreezeActiveMs = 0;   // TDR-backstop window (device-lost attribution)
@@ -507,10 +508,17 @@ static void RunTick(TickState& t) {
     // fullscreen borderless foreground and restore it on the desktop, where swallowing does work.
     // Binds keep working while suspended - nothing swallows them, so keyDown's GetAsyncKeyState
     // fallback reads them correctly. Same borderless-cover test the hybrid model uses to spot games.
+    // Throttled to ~10 Hz: foreground changes are human-speed events, so probing them every tick
+    // (display refresh) would burn a few window queries 144x a second to answer a question that
+    // changes maybe once a minute. Worst case the swap lands 100 ms late, which nobody can feel.
     {
-        HWND fgw = GetForegroundWindow();
-        const bool borderless = fgw && !(GetWindowLongPtrW(fgw, GWL_STYLE) & WS_CAPTION);
-        g_input.setKeyboardHookWanted(!(borderless && ForegroundCoversMonitor(t.mon)));
+        const unsigned long long nowMs = GetTickCount64();
+        if (nowMs - t.lastFgProbeMs >= 100) {
+            t.lastFgProbeMs = nowMs;
+            HWND fgw = GetForegroundWindow();
+            const bool borderless = fgw && !(GetWindowLongPtrW(fgw, GWL_STYLE) & WS_CAPTION);
+            g_input.setKeyboardHookWanted(!(borderless && ForegroundCoversMonitor(t.mon)));
+        }
     }
     // LL keyboard-hook watchdog (issue #156). Windows SILENTLY evicts a low-level hook whose
     // callback misses LowLevelHooksTimeout: no notification, no error, the handle stays valid and
