@@ -342,14 +342,30 @@ static bool IsChurnyFg(HWND fg) {
 // Auto/hybrid exclusion: an app on cfg.transformExclude never gets the transform engine even when
 // it is fullscreen and borderless. Fullscreen browser video is indistinguishable from a game by
 // the foreground test, but it wants render (constant-size cursor, desktop-style behaviour).
-static bool IsTransformExcluded(HWND fg, const Config& cfg) {
-    if (cfg.transformExclude.empty()) return false;
+// Is the foreground window's exe named in a comma-separated config list? Shared by every
+// exe-list setting (transformExclude, noSwallowApps, autoIgnoreApps) so they all match identically:
+// bare file name, case-insensitive, exact - never a path.
+static bool FgExeInList(HWND fg, const std::string& list) {
+    if (list.empty()) return false;
     const std::wstring exeW = ExeNameOf(fg);
     if (exeW.empty()) return false;
     std::string exe;
     exe.reserve(exeW.size());
     for (wchar_t ch : exeW) exe.push_back((char)(ch < 128 ? ch : '?'));
-    return wind::IsExeInList(exe, cfg.transformExclude);
+    return wind::IsExeInList(exe, list);
+}
+static bool IsTransformExcluded(HWND fg, const Config& cfg) {
+    return FgExeInList(fg, cfg.transformExclude);
+}
+// Auto/hybrid ignore list: while one of these is foreground the engine choice is FROZEN.
+// Transient overlays (a snip tool, a TTS/dialogue reader, an IME panel) hold foreground for a
+// couple of seconds and hand it straight back. Re-picking on them costs TWO engine handovers
+// within seconds, and each one releases and rebuilds DWM's magnification context, so a tool that
+// is only on screen briefly produces a pair of stalls. The 350ms stickiness below does not help:
+// these are visible for far longer than that. Ignoring them leaves the candidate state untouched,
+// so when foreground comes back nothing has changed and no handover ever happens.
+static bool IsAutoIgnoredApp(HWND fg, const Config& cfg) {
+    return FgExeInList(fg, cfg.autoIgnoreApps);
 }
 
 // Keyboard-hook suspension list (issue #156): while one of these apps is foreground the LL keyboard
@@ -357,13 +373,7 @@ static bool IsTransformExcluded(HWND fg, const Config& cfg) {
 // the mouse stream to that app is never stalled. Unlike the transform exclusion this does NOT
 // require fullscreen: the user named the app, so honour it whenever it is in front.
 static bool IsNoSwallowApp(HWND fg, const Config& cfg) {
-    if (cfg.noSwallowApps.empty()) return false;
-    const std::wstring exeW = ExeNameOf(fg);
-    if (exeW.empty()) return false;
-    std::string exe;
-    exe.reserve(exeW.size());
-    for (wchar_t ch : exeW) exe.push_back((char)(ch < 128 ? ch : '?'));
-    return wind::IsExeInList(exe, cfg.noSwallowApps);
+    return FgExeInList(fg, cfg.noSwallowApps);
 }
 
 // tdrTest=3 (issue #148 harness): hand foreground back when a stolen-foreground freeze session
@@ -947,8 +957,12 @@ static void RunTick(TickState& t) {
         // changes, handing over mid-session. The controller and mapper are untouched, so the
         // zoom level and lens position carry across the swap (render 8x -> tab into a game ->
         // transform 8x). Inspect sessions are never switched under.
-        if (t.mTransform && !enterActive && !inspect) {
-            HWND fgw2 = GetForegroundWindow();
+        HWND fgw2 = GetForegroundWindow();
+        // Freeze the engine choice while an ignored overlay is in front (see IsAutoIgnoredApp).
+        // Skipping the whole block, rather than just the swap, is deliberate: it leaves wantModel /
+        // wantSinceMs untouched, so the overlay never becomes the settled candidate and handing
+        // foreground back is a no-op instead of a second handover.
+        if (t.mTransform && !enterActive && !inspect && !IsAutoIgnoredApp(fgw2, t.cfg)) {
             const bool fgIsStealer = fgw2 && fgw2 == g_focusStealer;   // tdrTest=3 holds foreground
             const bool borderless2 = fgw2 && !(GetWindowLongPtrW(fgw2, GWL_STYLE) & WS_CAPTION);
             const bool primary2 = t.mon.x == 0 && t.mon.y == 0;

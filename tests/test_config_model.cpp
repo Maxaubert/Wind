@@ -38,6 +38,27 @@ TEST_CASE("noSwallowApps parses") {
     CHECK(c.noSwallowApps == "RDR2.exe,eldenring.exe");
 }
 
+// Auto/hybrid ignore list: freezes the engine choice while a transient overlay is foreground, so a
+// tool that is only up for a couple of seconds cannot cause a swap out and straight back.
+TEST_CASE("autoIgnoreApps ships Windows' transient overlays and parses") {
+    Config d = ParseConfig("");
+    CHECK(wind::IsExeInList("SnippingTool.exe", d.autoIgnoreApps));
+    CHECK(wind::IsExeInList("TextInputHost.exe", d.autoIgnoreApps));
+    CHECK_FALSE(wind::IsExeInList("RDR2.exe", d.autoIgnoreApps));
+    // "key=" with nothing after it must CLEAR the list, not fall back to the default. This is what
+    // the config UI writes when the last entry is removed, and the generic parser skips empty
+    // values (stoi("") throws), so the lists are handled ahead of that guard.
+    Config e = ParseConfig("autoIgnoreApps=\n");
+    CHECK(e.autoIgnoreApps.empty());
+    CHECK_FALSE(wind::IsExeInList("SnippingTool.exe", e.autoIgnoreApps));
+    CHECK(ParseConfig("transformExclude=\n").transformExclude.empty());
+    CHECK(ParseConfig("noSwallowApps=RDR2.exe\nnoSwallowApps=\n").noSwallowApps.empty());
+    // Interpreter-hosted tools are named by the interpreter (a .pyw dialogue reader is pythonw.exe).
+    Config c = ParseConfig("autoIgnoreApps=pythonw.exe,AutoHotkey64.exe\n");
+    CHECK(wind::IsExeInList("pythonw.exe", c.autoIgnoreApps));
+    CHECK(wind::IsExeInList("autohotkey64.EXE", c.autoIgnoreApps));
+}
+
 // The list is matched with the same helper the transform exclusion uses, so it inherits
 // case-insensitive exact-name matching. Guard that here: a substring match would suspend the hook
 // for unrelated apps (e.g. "rdr2.exe" must not be matched by "dr2.exe").
