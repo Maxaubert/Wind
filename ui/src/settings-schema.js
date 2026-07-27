@@ -9,8 +9,8 @@ export const sections = [
     // keystroke and wait before delivering anything else, including mouse movement to the game, so
     // holding a key stalls panning ~30x/s. Named apps only: this trades key-swallowing for smooth
     // panning, which is a per-app call rather than something to apply to everything at once.
-    { key:'noSwallowApps', type:'applist', label:'Release keys in these apps',
-      desc:'Wind stops intercepting its keyboard binds while one of these programs is in front. Intercepting makes Windows pause input on every key repeat, which stutters panning in games. The program will also see the key.',
+    { key:'noSwallowApps', type:'applist', label:"Don't swallow keys in these apps",
+      desc:'Fixes stuttery panning in games. These programs will also see the key.',
       def:'' },
   ]},
   { id:'zoom', label:'Zoom', icon:'zoom', desc:'How magnification grows while you hold the zoom button.', rows: [

@@ -94,6 +94,18 @@ test('adding the same program twice is ignored, regardless of case', async ({ pa
   await expect(page.getByRole('button', { name: /^Remove / })).toHaveCount(1);
 });
 
+// The "+" wrapped onto its own line below the chip, because .ctl is a flex item beside the
+// description and its automatic minimum size collapsed to one chip wide. Assert the geometry:
+// same centre line, button after the chip.
+test('the add button shares a line with the chips and is vertically centred', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Add a program' }).click();
+  const chip = await page.getByRole('button', { name: 'Remove RDR2.exe' }).boundingBox();
+  const add  = await page.getByRole('button', { name: 'Add a program' }).boundingBox();
+  expect(Math.abs((chip.y + chip.height / 2) - (add.y + add.height / 2))).toBeLessThan(2);
+  expect(add.x).toBeGreaterThan(chip.x);
+});
+
 test('removing a program drops its chip', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Add a program' }).click();
