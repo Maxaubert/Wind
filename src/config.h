@@ -93,6 +93,13 @@ struct Config {
     // user never considered. Exe names, comma-separated, case-insensitive, matched whenever one is
     // foreground - fullscreen or windowed, since the user named it explicitly.
     std::string noSwallowApps = "";
+    // Auto/hybrid ignore list: while one of these is foreground the engine choice is FROZEN, so a
+    // brief overlay cannot cause a swap out and straight back. Each swap rebuilds DWM's
+    // magnification context, so a tool on screen for two seconds otherwise costs two stalls. The
+    // shipped defaults are Windows' own transient overlays; add anything that surfaces briefly
+    // over a game (a TTS/dialogue reader, a capture tool). Same matching as the other exe lists.
+    std::string autoIgnoreApps =
+        "SnippingTool.exe,ScreenSketch.exe,ScreenClippingHost.exe,TextInputHost.exe";
     // Transform-model-only knobs (ignored by the other models):
     int fastPan     = 1;  // 1 = pan via the private SetMagnificationDesktopMagnification channel
                           //     (sub-pixel); falls back to the public API automatically if unavailable.

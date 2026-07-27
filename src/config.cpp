@@ -103,7 +103,17 @@ Config ParseConfig(const std::string& text) {
         if (eq == std::string::npos) continue;
         std::string key = trim(t.substr(0, eq));
         std::string val = trim(t.substr(eq + 1));
-        if (key.empty() || val.empty()) continue;
+        if (key.empty()) continue;
+        // The exe LISTS must accept an empty value: "key=" with nothing after it is how the user
+        // clears one, and it is exactly what the config UI writes when the last entry is removed.
+        // They are handled before the empty-value guard below, which exists because the numeric
+        // settings cannot take one (stoi("") throws). Without this, clearing a list in the UI wrote
+        // the ini correctly and the core silently kept the previous value - including the shipped
+        // defaults, so a list with defaults could never be emptied at all.
+        if (key == "transformExclude") { c.transformExclude = val; continue; }
+        if (key == "noSwallowApps")    { c.noSwallowApps    = val; continue; }
+        if (key == "autoIgnoreApps")   { c.autoIgnoreApps   = val; continue; }
+        if (val.empty()) continue;
         try {
             if (key == "zoomInButton")          c.zoomInButton = std::stoi(val);
             else if (key == "zoomOutButton")    c.zoomOutButton = std::stoi(val);
@@ -135,8 +145,6 @@ Config ParseConfig(const std::string& text) {
             else if (key == "cursorScaleWithZoom")c.cursorScaleWithZoom = std::stoi(val);
             else if (key == "cursorVisibility")   c.cursorVisibility = val;
             else if (key == "model")              c.model = val;
-            else if (key == "transformExclude")   c.transformExclude = val;
-            else if (key == "noSwallowApps")      c.noSwallowApps = val;
             else if (key == "magnifyStep")        c.magnifyStep = std::stoi(val);
             else if (key == "fastPan")            c.fastPan = std::stoi(val);
             else if (key == "smoothPan")          c.smoothPan = std::stoi(val);
@@ -336,6 +344,15 @@ Config LoadConfig(const std::wstring& path) {
                ";   Empty (default) = keys stay swallowed everywhere, as before. The Settings UI\n"
                ";   manages this list (Keybinds -> Release keys in these apps).\n"
                "noSwallowApps=\n"
+               "; autoIgnoreApps (Auto/hybrid only): while one of these is foreground the engine\n"
+               ";   choice is FROZEN. A transient overlay (snip tool, TTS/dialogue reader, IME\n"
+               ";   panel) takes foreground for a couple of seconds and hands it straight back,\n"
+               ";   which would otherwise mean TWO engine handovers within seconds - and each one\n"
+               ";   rebuilds DWM's magnification context, so it reads as a pair of stalls.\n"
+               ";   Same matching as the lists above. Note apps run through an interpreter are\n"
+               ";   named by THAT exe (a .pyw tool is pythonw.exe, an AutoHotkey script is\n"
+               ";   AutoHotkey64.exe), which also catches anything else using it.\n"
+               "autoIgnoreApps=SnippingTool.exe,ScreenSketch.exe,ScreenClippingHost.exe,TextInputHost.exe\n"
                "; magnifyStep (magnify only): Windows Magnifier zoom increment, percent points per\n"
                ";   step (5-400). Lower = smoother and slower. Applies live.\n"
                "magnifyStep=50\n"
