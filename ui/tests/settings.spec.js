@@ -9,7 +9,11 @@ test.beforeEach(async ({ page }) => {
       addEventListener: (_e, fn) => listeners.add(fn),
       postMessage: (msg) => {
         if (msg.type === 'getConfig')
-          listeners.forEach(fn => fn({ data: { type: 'config', values: { zoomInSpeed: '1.2', smoothZoom: '0', uiTheme: 'auto', zoomInButton: '2', zoomInVk: '33', zoomOutButton: '1', zoomOutVk: '34' } } }));
+          // showAdvanced=1: 'Cursor speed' and 'Smooth zoom' are advanced:true rows, so without it
+          // they never render and the tests asserting on them time out looking for a hidden row.
+          // model=render: 'Sharpness' additionally carries showIf {model:'render'}, and an unset
+          // model fails that check (undefined !== 'render'), hiding the row the same way.
+          listeners.forEach(fn => fn({ data: { type: 'config', values: { zoomInSpeed: '1.2', smoothZoom: '0', uiTheme: 'auto', showAdvanced: '1', model: 'render', zoomInButton: '2', zoomInVk: '33', zoomOutButton: '1', zoomOutVk: '34' } } }));
         if (msg.type === 'setConfig') window.__sets.push(msg);
       },
     }};
@@ -55,6 +59,27 @@ test('a slot holding both a side-button and a key shows BOTH bindings', async ({
   const cap = page.getByText('Zoom in', { exact: true }).locator('xpath=../..').getByRole('button');
   await expect(cap).toHaveText(/Mouse button 5/);
   await expect(cap).toHaveText(/PageUp/);
+});
+
+// Issue #156: releasing keys trades swallowing for smooth panning, so it must be visible in the UI
+// (an ini-only knob is one nobody finds) and must ship OFF - the mock config sets neither key.
+test('key-release settings are visible and default to off', async ({ page }) => {
+  await page.goto('/');
+  const box = page.getByPlaceholder('RDR2.exe, eldenring.exe');
+  await expect(box).toBeVisible();
+  await expect(box).toHaveValue('');
+  const toggle = page.getByText('Release keys in fullscreen games', { exact: true })
+                     .locator('xpath=../..').getByRole('checkbox');
+  await expect(toggle).not.toBeChecked();
+});
+
+test('the app list stages until Apply, then setConfig fires', async ({ page }) => {
+  await page.goto('/');
+  await page.getByPlaceholder('RDR2.exe, eldenring.exe').fill('RDR2.exe');
+  expect(await page.evaluate(() => window.__sets.filter(s => s.key === 'noSwallowApps').length)).toBe(0);
+  await page.getByRole('button', { name: 'Apply' }).click();
+  const sets = await page.evaluate(() => window.__sets);
+  expect(sets.some(s => s.key === 'noSwallowApps' && s.value === 'RDR2.exe')).toBeTruthy();
 });
 
 test('keybind capture writes a VK on keydown (live, no Apply needed)', async ({ page }) => {
