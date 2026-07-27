@@ -243,7 +243,11 @@ struct TickState {
     unsigned long long churnWinStart = 0;
     std::wstring freezeExe;         // exe of the app under the current/last transform game session
     unsigned long long lastFreezeActiveMs = 0;   // TDR-backstop window (device-lost attribution)
-    bool   inspectCursorWasShowing = true; // cursor visibility at the toggle edge (the 1x mouselook tell)
+    bool   inspectCursorWasShowing = true; // cursor visibility at the toggle edge (the mouselook tell)
+    bool   cursorHiddenByUs = false;      // WE currently hide the OS cursor (render zoom / Inspect).
+                                          //   A transform FOLLOW session leaves it alone, so the app's
+                                          //   own hiding stays readable - see ShouldGameInspect.
+    bool   inspectMagHidCursor = false;   // snapshot of the above at the Inspect toggle edge
     double presentAccum       = 0.0;           // gameFpsCap: seconds since the last presented frame
     bool   gamePacing         = false;         // zoomed over a fullscreen game -> main loop timer
                                                //   paces (a blocking present must never pace: a
@@ -394,6 +398,15 @@ static bool IsOverlayFg(HWND fg) {
 // require fullscreen: the user named the app, so honour it whenever it is in front.
 static bool IsNoSwallowApp(HWND fg, const Config& cfg) {
     return FgExeInList(fg, cfg.noSwallowApps);
+}
+
+// Every cursor hide/show the tick loop performs goes through here, so cursorHiddenByUs is always an
+// exact record of whether WE are the reason the OS cursor is invisible. game-inspect needs that: a
+// hidden cursor is the mouselook tell, but only when we did not hide it ourselves (ShouldGameInspect).
+static void SetSystemCursorHidden(TickState& t, IMagnifierModel* m, bool hide) {
+    if (!m) return;
+    m->hideSystemCursor(hide);
+    t.cursorHiddenByUs = hide;
 }
 
 // tdrTest=3 (issue #148 harness): hand foreground back when a stolen-foreground freeze session
@@ -669,11 +682,14 @@ static void RunTick(TickState& t) {
     bool lockDown = keyDown(t.cfg.cursorLockVk);
     if (lockDown && !t.lockKeyWasDown) {
         if (t.model->supportsInspect()) {
-            // Snapshot cursor visibility at the toggle edge, BEFORE this tick's active block hides it:
-            // at 1x the only thing that can have hidden the cursor is the foreground app, so a
-            // not-showing cursor is the mouselook-gameplay tell for game-inspect (issue #144).
+            // Snapshot cursor visibility at the toggle edge, BEFORE this tick's active block hides it,
+            // together with whether WE are already hiding it. A not-showing cursor that we did not
+            // hide is the mouselook-gameplay tell for game-inspect (issue #144) - true at 1x and, in
+            // a transform FOLLOW session, true while zoomed as well. Both are read here so the pair
+            // describes the same instant.
             CURSORINFO ci{}; ci.cbSize = sizeof(ci);
             t.inspectCursorWasShowing = GetCursorInfo(&ci) ? (ci.flags & CURSOR_SHOWING) != 0 : true;
+            t.inspectMagHidCursor = t.cursorHiddenByUs;
             t.cursorLock.toggle();
         } else {
             // Magnify model: Windows Magnifier owns the view and cursor; no freeze+reticle exists.
@@ -806,7 +822,7 @@ static void RunTick(TickState& t) {
                     t.clickReleaseTicks = 0;
                     RECT fz{ fp.x, fp.y, fp.x + 1, fp.y + 1 };
                     if (!t.cfg.freezeNoClip) ClipCursor(&fz);
-                    t.model->hideSystemCursor(true);
+                    SetSystemCursorHidden(t, t.model, true);
                     t.freezeExe = ExeNameOf(ffg);
                     t.churnCount = 0; t.churnWinStart = GetTickCount64(); t.lastFgCursor = nullptr;
                     t.freezeStealPending = (t.cfg.tdrTest == 3);
@@ -823,7 +839,7 @@ static void RunTick(TickState& t) {
                 }
             } else {
                 t.gameFreeze = false;
-                t.model->hideSystemCursor(true);
+                SetSystemCursorHidden(t, t.model, true);
             }
             t.model->onActivate();       // grab a live frame, not a stale cached one
         }
@@ -841,7 +857,7 @@ static void RunTick(TickState& t) {
             t.lastSetVirtual = pt;
             RECT fz{ pt.x, pt.y, pt.x + 1, pt.y + 1 };
             ClipCursor(&fz);
-            t.model->hideSystemCursor(true);   // hide the real cursor; we draw the crosshair
+            SetSystemCursorHidden(t, t.model, true);   // hide the real cursor; we draw the crosshair
             t.model->onActivate();
             // Game-inspect (issue #144): if a mouselook game holds the mouse, the freeze alone is
             // not enough - its raw-input camera still receives every mickey. Steal foreground to
@@ -849,14 +865,19 @@ static void RunTick(TickState& t) {
             // inspectStealPending: the reveal logic later this tick must still see the GAME as
             // foreground (ForegroundCoversMonitor decides the composite-gated reveal).
             t.inspectGame = wind::ShouldGameInspect(zoomed, t.detector.locked(),
-                                                    t.inspectCursorWasShowing);
+                                                    t.inspectCursorWasShowing,
+                                                    t.inspectMagHidCursor);
             if (t.inspectGame) {
                 t.inspectPrevFg = GetForegroundWindow();
                 t.inspectStealPending = true;
-                wind::Log(wind::LogLevel::Info, "inspect",
-                          "game-inspect engaged (zoomed=%d detLocked=%d cursorShown=%d)",
-                          (int)zoomed, (int)t.detector.locked(), (int)t.inspectCursorWasShowing);
             }
+            // Logged either way: a DECLINE is the interesting case in the field (the camera keeps
+            // moving), and without the inputs there is nothing to diagnose it from.
+            wind::Log(wind::LogLevel::Info, "inspect",
+                      "game-inspect %s (zoomed=%d detLocked=%d cursorShown=%d weHid=%d)",
+                      t.inspectGame ? "engaged" : "DECLINED", (int)zoomed,
+                      (int)t.detector.locked(), (int)t.inspectCursorWasShowing,
+                      (int)t.inspectMagHidCursor);
         }
         bool inspectExit = !inspect && t.prevInspect;   // Inspect just turned off but overlay stays (zoomed)
         if (inspectExit) {
@@ -1002,12 +1023,12 @@ static void RunTick(TickState& t) {
                     t.restOverlapTicks = 0;
                 }
                 IMagnifierModel* old = t.model;
-                old->hideSystemCursor(false);
+                SetSystemCursorHidden(t, old, false);
                 t.model = want;
                 // FOLLOW design (issue #148): only render hides + welds; transform keeps the real
                 // cursor visible. On render->transform the cursor reappears exactly at the lens
                 // point render welded it to, so the handover is seamless.
-                if (dynamic_cast<RenderModel*>(t.model)) t.model->hideSystemCursor(true);
+                if (dynamic_cast<RenderModel*>(t.model)) SetSystemCursorHidden(t, t.model, true);
                 t.model->onActivate();
                 if (auto* rm = dynamic_cast<RenderModel*>(t.model)) {
                     t.revealNeedsComposite = ForegroundCoversMonitor(t.mon);
@@ -1048,7 +1069,7 @@ static void RunTick(TickState& t) {
                 t.clickReleaseTicks = 0;
                 RECT fz{ fp.x, fp.y, fp.x + 1, fp.y + 1 };
                 ClipCursor(&fz);
-                t.model->hideSystemCursor(true);
+                SetSystemCursorHidden(t, t.model, true);
                 t.gameFreeze = true;
                 t.freezeExe = ExeNameOf(ffg2);
                 t.churnCount = 0; t.churnWinStart = GetTickCount64(); t.lastFgCursor = nullptr;
@@ -1062,7 +1083,7 @@ static void RunTick(TickState& t) {
                 if (dynamic_cast<TransformModel*>(t.model)) {
                     // Still transform, now over the desktop: resume FOLLOW at the cursor (the lens
                     // must sit ON the visible cursor, so a reset here is the correct jump).
-                    t.model->hideSystemCursor(false);
+                    SetSystemCursorHidden(t, t.model, false);
                     POINT pt; GetCursorPos(&pt);
                     t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y);
                     t.lastSetVirtual = pt;
@@ -1331,7 +1352,7 @@ static void RunTick(TickState& t) {
     } else if (t.prevActive) {                        // active -> idle: tear the overlay down
         if (t.restAfterReveal) { t.restAfterReveal->setActive(false); t.restAfterReveal = nullptr; }
         t.model->setActive(false);
-        t.model->hideSystemCursor(false);
+        SetSystemCursorHidden(t, t.model, false);
         t.outlineZoneSec = 0.0;                       // zoom-out clears the low-zoom dwell (no banked partial)
         t.gamePacing = false;                         // idle: normal timer pacing
         t.pushPhase = 0;
@@ -1957,7 +1978,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                 GetTickCount64() - ts.lastFreezeActiveMs < 30000) {
                 MarkChurnyApp(ts.freezeExe, "device-lost backstop");
             }
-            rm->hideSystemCursor(false);   // restore the real cursor while we can't render
+            SetSystemCursorHidden(ts, rm, false);   // restore the real cursor while we can't render
             // Inspect's 1px freeze clip must not survive a device-lost: release it and clear the toggle so
             // the post-recovery tick can't re-clip the cursor to the stale frozen pixel (honors the
             // documented "released on device-lost recovery" invariant; recovery returns to a clean 1x).
