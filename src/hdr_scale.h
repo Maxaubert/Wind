@@ -24,11 +24,12 @@ inline double AcceptSdrWhiteNits(double queried, double previous) {
     return (queried > 1.0) ? queried : previous;
 }
 
-// Throttle for the live re-read while rendering. The DisplayConfig round trip costs ~0.2 ms, far
-// too much to pay per frame at 144 Hz, and the slider is a human-speed control - a couple of
-// refreshes a second converges a drag invisibly. Only the FP16 HDR capture path uses the scale at
-// all, so an SDR desktop never pays the query. Unsigned arithmetic on a monotonic tick count, so
-// lastMs == 0 (never sampled) fires immediately.
+// Throttle for the live re-read while rendering. The DisplayConfig round trip measures ~0.007 ms
+// on this box - cheap, but it is a syscall over global display state and the hot loop earns nothing
+// from running it per frame: the slider is a human-speed control, so a few reads a second track a
+// drag invisibly. Only the FP16 HDR capture path uses the scale at all, so an SDR desktop never
+// pays the query. Unsigned arithmetic on a monotonic tick count, so lastMs == 0 (never sampled)
+// fires immediately.
 inline bool ShouldRefreshSdrWhite(bool capFp16, unsigned long long nowMs,
                                   unsigned long long lastMs, unsigned long long intervalMs) {
     return capFp16 && (nowMs - lastMs) >= intervalMs;

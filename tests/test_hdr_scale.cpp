@@ -50,9 +50,10 @@ TEST_CASE("a failed white-level query keeps the last known good value") {
 }
 
 TEST_CASE("the live re-read is throttled, and only on the FP16 HDR capture path") {
-    // ~0.2 ms per DisplayConfig round trip: far too costly to pay per frame at 144 Hz.
-    CHECK(ShouldRefreshSdrWhite(true, 1000, 0, 500));         // never sampled yet -> go
-    CHECK(ShouldRefreshSdrWhite(true, 1500, 1000, 500));      // interval elapsed -> go
-    CHECK_FALSE(ShouldRefreshSdrWhite(true, 1499, 1000, 500));// inside the interval -> skip
-    CHECK_FALSE(ShouldRefreshSdrWhite(false, 9999, 0, 500));  // SDR/BGRA8 capture -> never query
+    // ~0.007 ms per DisplayConfig round trip - cheap, but a human-speed slider earns nothing from
+    // a per-frame syscall over global display state.
+    CHECK(ShouldRefreshSdrWhite(true, 1000, 0, 250));         // never sampled yet -> go
+    CHECK(ShouldRefreshSdrWhite(true, 1250, 1000, 250));      // interval elapsed -> go
+    CHECK_FALSE(ShouldRefreshSdrWhite(true, 1249, 1000, 250));// inside the interval -> skip
+    CHECK_FALSE(ShouldRefreshSdrWhite(false, 9999, 0, 250));  // SDR/BGRA8 capture -> never query
 }

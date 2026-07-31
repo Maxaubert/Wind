@@ -211,7 +211,7 @@ IDXGIOutput* RenderEngine::State::selectOutput(const wchar_t* deviceName, bool f
 }
 
 // Re-read the OS SDR white level for the monitor we magnify and fold it into the cached value
-// (a failed query keeps the last known good one). Cheap but not free (~0.2 ms of DisplayConfig
+// (a failed query keeps the last known good one). Cheap but not free (~0.007 ms of DisplayConfig
 // round trip), so callers gate it: per duplication rebuild, and on a throttle while rendering.
 void RenderEngine::State::refreshSdrWhite() {
     lastSdrWhiteMs = GetTickCount64();
@@ -1148,9 +1148,9 @@ bool RenderEngine::renderFrame(const RenderFrameParams& p) {
     // (RTSS et al.) is reclaimed immediately in both cases.
     unsigned long long nowMs = GetTickCount64();
     // Track the "SDR content brightness" slider while we render, so dragging it mid-zoom converges
-    // instead of leaving the magnified view off until the next zoom-in. Throttled (the query is
-    // ~0.2 ms and the slider is a human-speed control) and skipped entirely off the HDR path.
-    if (ShouldRefreshSdrWhite(s_->capFp16, nowMs, s_->lastSdrWhiteMs, 500)) s_->refreshSdrWhite();
+    // instead of leaving the magnified view off until the next zoom-in. Throttled to 4 Hz (a
+    // human-speed control needs no more) and skipped entirely off the HDR path.
+    if (ShouldRefreshSdrWhite(s_->capFp16, nowMs, s_->lastSdrWhiteMs, 250)) s_->refreshSdrWhite();
     if (overlayDisplaced(s_->hwnd) || (!p.fsGame && nowMs - s_->lastTopmostMs >= 1000)) {
         s_->lastTopmostMs = nowMs;
         SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
