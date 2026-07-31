@@ -208,6 +208,16 @@ staged Apply/Discard footer.
 - RENDER ENGINE: the overlay MUST set `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` or
   Desktop Duplication captures our own presented frame -> we magnify our own output ->
   feedback loop (black). This is the #1 render-engine gotcha.
+- RENDER ENGINE / HDR: NEVER cache the OS SDR white level (issue #160). On an HDR desktop we capture
+  FP16 scRGB and divide by Windows' "SDR content brightness" level so SDR white lands on 1.0; DWM
+  re-applies that SAME level when it composites our SDR overlay, so the round trip is exact only
+  while our scale tracks the LIVE slider. It was sampled once per device build, so any later slider
+  move left a permanent brightness step of actual/cached on every zoom-in and zoom-out (darker below
+  the cached point, brighter above, matching only at it). Re-read per duplication rebuild + on a
+  4 Hz throttle while rendering (`refreshSdrWhite`; ~0.007 ms/query), match the path by GDI device
+  name (multi-monitor displays differ), and keep the last known good value on a failed query - a
+  default would be its own step. Pure math + throttle in `src/hdr_scale.h`. Render-model-only:
+  transform/magnify magnify inside DWM, so they never convert color.
 - RENDER ENGINE: cross-process click-through needs `WS_EX_LAYERED | WS_EX_TRANSPARENT`
   (+ `SetLayeredWindowAttributes(.,255,LWA_ALPHA)`). `WS_EX_TRANSPARENT` + HTTRANSPARENT
   alone only forwards to *same-thread* windows, so clicks to other apps get eaten. The layered
