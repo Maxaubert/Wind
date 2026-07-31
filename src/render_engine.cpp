@@ -2,6 +2,7 @@
 #include "com_util.h"
 #include "render_shaders.h"
 #include "hdr_info.h"
+#include "hdr_scale.h"
 #include "cursor_decode.h"
 #include "crosshair.h"
 #include "png_dump.h"
@@ -102,7 +103,14 @@ struct RenderEngine::State {
     int    perfFrames = 0, perfGateSkips = 0;
     bool rotated = false;        // target output is portrait (90/270); capture not supported - logged
     bool capFp16 = false;        // capturing FP16 scRGB (tonemap active)
-    double sdrWhiteNits = 200.0; // OS SDR white level for the tonemap scale
+    // OS SDR white level ("SDR content brightness") driving the tonemap scale. The user can move
+    // that slider at any time and DWM re-applies the new level to our SDR overlay immediately, so a
+    // cached value shows up as a brightness step on every zoom-in/out (see hdr_scale.h). Re-read on
+    // each duplication rebuild (i.e. every zoom-in) and on a throttle while rendering; the 200.0
+    // seed only ever shows before the first successful query.
+    double sdrWhiteNits = 200.0;
+    unsigned long long lastSdrWhiteMs = 0;   // throttle stamp for the live re-read
+    void refreshSdrWhite();                  // re-query + fold in (keeps last known good on failure)
     DXGI_FORMAT copyFormat = DXGI_FORMAT_B8G8R8A8_UNORM;  // current desktopCopy format
     int copyW = 0, copyH = 0;                             // current desktopCopy dimensions
     bool ensureDesktopCopy(DXGI_FORMAT fmt);  // (re)create desktopCopy+SRV to match the capture
@@ -202,6 +210,19 @@ IDXGIOutput* RenderEngine::State::selectOutput(const wchar_t* deviceName, bool f
     return nullptr;
 }
 
+// Re-read the OS SDR white level for the monitor we magnify and fold it into the cached value
+// (a failed query keeps the last known good one). Cheap but not free (~0.007 ms of DisplayConfig
+// round trip), so callers gate it: per duplication rebuild, and on a throttle while rendering.
+void RenderEngine::State::refreshSdrWhite() {
+    lastSdrWhiteMs = GetTickCount64();
+    double queried = GetSDRWhiteNits(targetDevice);
+    double next = AcceptSdrWhiteNits(queried, sdrWhiteNits);
+    if (next != sdrWhiteNits) {
+        RLog("refreshSdrWhite: %.1f -> %.1f nits (scale %.4f)", sdrWhiteNits, next, ScRgbScale(next));
+        sdrWhiteNits = next;
+    }
+}
+
 // Recreate the duplication interface (after ACCESS_LOST or first use).
 bool RenderEngine::State::recreateDupl() {
     dupl.Reset();
@@ -256,6 +277,9 @@ bool RenderEngine::State::recreateDupl() {
         // silent wrong image. (Landscape, the overwhelmingly common case, is Rotation IDENTITY/0.)
         rotated = (dd.Rotation == DXGI_MODE_ROTATION_ROTATE90 ||
                    dd.Rotation == DXGI_MODE_ROTATION_ROTATE270);
+        // The duplication is rebuilt on every zoom-in (invalidateCapture) and on ACCESS_LOST, so
+        // this is where a session picks up the current slider position before its first frame.
+        if (capFp16) refreshSdrWhite();
         RLog("recreateDupl: ddaModeFormat=%u colorSpace=%d isHdr=%d wantTonemap=%d rotation=%d%s",
              ddaFormat, outColorSpace, (int)isHdr, (int)wantHdrTonemap, (int)dd.Rotation,
              rotated ? " (ROTATED - capture unsupported, image may be wrong)" : "");
@@ -689,7 +713,6 @@ bool RenderEngine::State::buildDeviceResources() {
 
     // --- Desktop Duplication ---
     if (!recreateDupl()) { RLog("buildDeviceResources: recreateDupl failed"); return false; }
-    if (capFp16) sdrWhiteNits = GetSDRWhiteNits();
     RLog("buildDeviceResources done: capFp16=%d sdrWhiteNits=%.1f", (int)capFp16, sdrWhiteNits);
     deviceLost = false;
     return true;
@@ -1002,7 +1025,7 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
         // Reuse the view width/height computed above (vlevel/vw/vh) - same clamp + divisions.
         float bright = (p.brightness > 0.0) ? (float)p.brightness : 1.0f;
         float hdrMode = capFp16 ? 1.0f : 0.0f;
-        float scRgbScale = (capFp16 && sdrWhiteNits > 1.0) ? (float)(80.0 / sdrWhiteNits) : 1.0f;
+        float scRgbScale = capFp16 ? ScRgbScale(sdrWhiteNits) : 1.0f;
         float sharp = (p.sharpness > 0.0) ? (float)p.sharpness : 0.0f;
         MagCB cbv{
             (float)(p.srcLeft / sw), (float)(p.srcTop / sh),
@@ -1124,6 +1147,10 @@ bool RenderEngine::renderFrame(const RenderFrameParams& p) {
     // app anyway (issue #148). The displaced check still runs every frame, so real displacement
     // (RTSS et al.) is reclaimed immediately in both cases.
     unsigned long long nowMs = GetTickCount64();
+    // Track the "SDR content brightness" slider while we render, so dragging it mid-zoom converges
+    // instead of leaving the magnified view off until the next zoom-in. Throttled to 4 Hz (a
+    // human-speed control needs no more) and skipped entirely off the HDR path.
+    if (ShouldRefreshSdrWhite(s_->capFp16, nowMs, s_->lastSdrWhiteMs, 250)) s_->refreshSdrWhite();
     if (overlayDisplaced(s_->hwnd) || (!p.fsGame && nowMs - s_->lastTopmostMs >= 1000)) {
         s_->lastTopmostMs = nowMs;
         SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
