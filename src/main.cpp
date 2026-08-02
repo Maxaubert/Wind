@@ -1390,14 +1390,28 @@ static void RunTick(TickState& t) {
         if (inspect) {
             t.lastSetVirtual = t.frozenCursor;
         } else {
-            POINT after; GetCursorPos(&after);
-            t.lastSetVirtual = after;
+            // Parked -> the park point: hand motion after the park (including during the Present
+            // block) is measured next tick from there. Not parked (weld deduped/suppressed,
+            // transform FOLLOW, skipped frame) -> THIS tick's start-of-tick read `cur`: motion
+            // after that read is measured next tick. NEVER a fresh post-present read - Present
+            // blocks ~a frame at vsync, and a read taken after it swallows all hand motion that
+            // occurred during the block, so the lens pans slower than the hand and the weld drags
+            // the pointer backwards (field-reported as stalling/slowed cursor; first shipped
+            // version of this fix had exactly that bug).
+            auto* rmodel = dynamic_cast<RenderModel*>(t.model);
+            const bool parkedNow = doPresent && rmodel && rmodel->engine().parkedLastFrame();
+            if (parkedNow) {
+                t.lastSetVirtual.x = r.clickDesktopX + t.mon.x;
+                t.lastSetVirtual.y = r.clickDesktopY + t.mon.y;
+            } else {
+                t.lastSetVirtual = cur;
+            }
             // Divergence diagnostics (issue #169, diagnostics=1 only): once a second, log how far
             // the pointer sits from the lens centre and how many ticks drag-followed. If any
             // oscillation survives the fix, this pinpoints the fighting pair from the field log.
             if (t.cfg.diagnostics) {
-                const double divX = after.x - (double)(r.clickDesktopX + t.mon.x);
-                const double divY = after.y - (double)(r.clickDesktopY + t.mon.y);
+                const double divX = t.lastSetVirtual.x - (double)(r.clickDesktopX + t.mon.x);
+                const double divY = t.lastSetVirtual.y - (double)(r.clickDesktopY + t.mon.y);
                 const double div = std::sqrt(divX * divX + divY * divY);
                 if (div > t.dbgMaxDivergence) t.dbgMaxDivergence = div;
                 if (dragFollow) t.dbgDragFollowTicks++;

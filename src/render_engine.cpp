@@ -66,6 +66,7 @@ struct RenderEngine::State {
     ComPtr<IDXGISwapChain> swap;               // blt-model (layered window needs the redirection surface)
     ComPtr<ID3D11RenderTargetView> rtv;
     int lastClickX = INT_MIN, lastClickY = INT_MIN;   // skip redundant SetCursorPos
+    bool parkedLastFrame = false;               // did the last renderFrame SetCursorPos? (#169)
     unsigned long long lastTopmostMs = 0;       // last HWND_TOPMOST re-assert (throttled)
     bool inBand = false;                        // created in a high z-order band (CreateWindowInBand)
     bool parked = false;                        // overlay shrunk to 1x1 while idle (see setParked)
@@ -454,6 +455,8 @@ RenderEngine::RenderEngine() : s_(new State()) {}
 RenderEngine::~RenderEngine() { shutdown(); delete s_; s_ = nullptr; }
 bool RenderEngine::ready() const { return s_ && s_->ready; }
 bool RenderEngine::deviceLost() const { return s_ && s_->deviceLost; }
+
+bool RenderEngine::parkedLastFrame() const { return s_ && s_->parkedLastFrame; }
 
 bool RenderEngine::recoverDeviceLost() {
     if (!s_ || !s_->hwnd) return false;
@@ -1192,6 +1195,7 @@ static bool overlayDisplaced(HWND hwnd) {
 }
 
 bool RenderEngine::renderFrame(const RenderFrameParams& p) {
+    s_->parkedLastFrame = false;   // set true only if the weld below actually fires (#169)
     if (!s_->ready || s_->deviceLost) return false;   // device gone: skip until recoverDeviceLost()
     // Keep the overlay above everything (transparent + click-through + capture-excluded, so
     // being on top is safe; if we sit below an always-on-top app overlay like RTSS it draws a
@@ -1232,6 +1236,7 @@ bool RenderEngine::renderFrame(const RenderFrameParams& p) {
     } else if (p.clickDesktopX != s_->lastClickX || p.clickDesktopY != s_->lastClickY) {
         SetCursorPos(p.clickDesktopX, p.clickDesktopY);
         s_->lastClickX = p.clickDesktopX; s_->lastClickY = p.clickDesktopY;
+        s_->parkedLastFrame = true;
     }
     // Present-fence gate (issue #148): while zoomed over a fullscreen game, never queue a present
     // behind one the GPU hasn't executed yet. With the previous present still in flight, a vsync'd
