@@ -6,7 +6,9 @@
         <!-- uiAccess=true grants the privilege to place our overlay in a z-order band ABOVE
              the shell (CreateWindowInBand + zorderBand=16), so the Start menu / taskbar /
              tray flyouts are covered by the magnified view instead of showing an unmagnified
-             copy. The OS only honours uiAccess for a code-signed binary run from a secure
+             copy. That band is OPT-IN since issue #162 (shipped zorderBand=0): a banded
+             overlay is covered by the Snipping Tool capture overlay, which costs the drawn
+             cursor entirely. The OS only honours uiAccess for a code-signed binary run from a secure
              location (C:\Program Files\Wind): build with `build.bat uiaccess`, then run
              tools\uiaccess_setup.ps1 (elevated) to sign + deploy. An unsigned uiAccess build
              will NOT launch ("A referral was returned from the server") - that is expected;

@@ -146,11 +146,23 @@ struct Config {
     // Adaptive sharpening of the magnified image (counters upscale blur; crisps text/detail).
     // 0 = off (cheapest, single tap). 0.1-1.0 = strength. Folded into the magnify pass (no extra pass).
     double sharpness = 0.0;
-    // z-order band for the overlay (needs the UIAccess build, run from Program Files):
-    // 0 = normal topmost; 16 = ZBID_SYSTEM_TOOLS (above the shell, covers Start/taskbar/tray).
-    // Shipped 16: engages on the deployed UIAccess build; gracefully falls back to a normal topmost
-    // window (band 0) on a non-deployed/dev run where CreateWindowInBand can't use the high band.
-    int    zorderBand = 16;
+    // z-order band for the overlay (a band >0 needs the UIAccess build, run from Program Files):
+    // 0 = ordinary topmost window; 16 = ZBID_SYSTEM_TOOLS (above the shell's immersive bands).
+    //
+    // SHIPPED 0 (issue #162). This is a genuine trade-off, not an obvious win, so do not "restore"
+    // 16 without re-testing both halves:
+    //   band 16  - covers the Start menu / taskbar thumbnails / tray flyouts (they otherwise draw
+    //              an unmagnified copy over the view), BUT the Snipping Tool capture overlay
+    //              composites over US. Zooming under Win+Shift+S then shows the unmagnified screen
+    //              with NO cursor at all, in every model - we hide the OS cursor plane and draw a
+    //              replacement, so covering the replacement leaves nothing. Measured on the rig.
+    //   band 0   - the snip overlay works (view magnified, cursor visible), at the cost of the
+    //              shell surfaces above.
+    // Band 17 (ZBID_LOCK) would be the "cover both" answer and is REJECTED by CreateWindowInBand
+    // on Windows 11 26200 - it silently falls through, which is what made band 17 look like the
+    // fix at first (the old code's only fallback was an unbanded window, i.e. this default).
+    // The accessibility cost of a missing cursor beat the cost of an unmagnified Start menu.
+    int    zorderBand = 0;
     // Output brightness multiplier for the magnified view. 1.0 = unchanged. Hot-reloadable.
     double brightness = 1.0;
     // HDR->SDR tonemap. Only engages when Windows HDR is actually on (advancedColorEnabled);

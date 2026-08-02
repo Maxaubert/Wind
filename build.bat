@@ -40,8 +40,9 @@ cl /nologo /std:c++17 /EHsc /O2 /W4 /Zi /DUNICODE /D_UNICODE ^
 exit /b %errorlevel%
 
 rem --- UIAccess build (uiAccess=true: must be signed + run from Program Files) -
-rem    Embeds Wind.uiaccess.manifest so the overlay can use a high z-band (zorderBand=16)
-rem    to cover the Start menu / taskbar / tray. Deploy via tools\uiaccess_setup.ps1.
+rem    Embeds Wind.uiaccess.manifest so the overlay CAN use a high z-band (opt-in zorderBand=16)
+rem    to cover the Start menu / taskbar / tray. Shipped default is 0 - see issue #162.
+rem    Deploy via tools\uiaccess_setup.ps1.
 :uiaccess
 rc /nologo /fo "%ROOT%src\wind.res" "%ROOT%src\wind.rc"
 if errorlevel 1 (echo [build] rc.exe failed & exit /b 1)
