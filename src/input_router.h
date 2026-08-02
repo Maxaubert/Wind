@@ -66,6 +66,13 @@ public:
     // when kbHookActive() (a swallowed key never shows in GetAsyncKeyState), so main reads it instead
     // of polling. Returns false for out-of-range vk.
     bool keyPressed(int vk) const;
+    // Raw Input safety net (issue #167): clear a key's held/swallowed records from a WM_INPUT key
+    // UP. Raw Input is NOT subject to LowLevelHooksTimeout, so it still arrives when Windows has
+    // silently evicted the hook mid-hold - the case that otherwise strands a keyboard zoom bind as
+    // held forever. UP only: it can only ever clear held state, never set it, so it cannot falsely
+    // hold a key and is idempotent with the hook's own clear. The mouse side-buttons have had the
+    // same net since #113; this is the keyboard half.
+    void rawKeyUp(int vk);
     // True once the LL KEYBOARD hook is installed. When false (install failed or WIND_NOHOOK), main
     // must fall back to GetAsyncKeyState and no keyboard swallowing happens.
     bool kbHookActive() const { return kbHookActive_.load(std::memory_order_relaxed); }

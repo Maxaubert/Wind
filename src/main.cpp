@@ -1419,7 +1419,13 @@ static void RunTick(TickState& t) {
                           g_input.hookActive() ? 1 : 0, lvl);
                 warned = false;            // arm the overstay warning for the next episode
                 prev = held;
-            } else if (held && !warned && secs > 6.0) {
+            // Re-fire every 5 s while a hold overstays, not once. A stuck hold has no falling edge,
+            // so a single sample can never show HOW FAST the runaway zoom is climbing - and that
+            // rate (reported slower than the configured zoomInSpeed) is the open half of #167. A
+            // series of lvl= samples 5 s apart makes it computable from the log. Gated on the
+            // 5 s window rather than a flag, so it costs no extra state and cannot spam per tick.
+            } else if (held && secs > 6.0 &&
+                       static_cast<int>(secs / 5.0) != static_cast<int>((secs - dt) / 5.0)) {
                 wind::Log(wind::LogLevel::Warn, "input",
                           "%sHeld STUCK? held=%.1fs hook[d=%u u=%u dbl=%u / d=%u u=%u dbl=%u] raw[d=%u u=%u / d=%u u=%u] lvl=%.2f",
                           tag, secs,
@@ -1432,10 +1438,13 @@ static void RunTick(TickState& t) {
             // Accumulate AFTER edge handling so a fall reports the pre-reset duration; cleared at 0 when up.
             secs = held ? (secs + dt) : 0.0;
         };
-        bool inHeldNow  = g_input.state().inHeld.load();
-        bool outHeldNow = g_input.state().outHeld.load();
-        snap("in",  inHeldNow,  t.dbgPrevInHeld,  t.dbgInHeldSec,  t.dbgInOverstayLogged);
-        snap("out", outHeldNow, t.dbgPrevOutHeld, t.dbgOutHeldSec, t.dbgOutOverstayLogged);
+        // Watch the EFFECTIVE held state - side-buttons OR keyboard binds - not just the
+        // side-button half (issue #167). A stuck KEYBOARD bind drove a runaway zoom that this
+        // detector could not see, which is why episodes of #167 never left a STUCK? line in the
+        // log despite being hit repeatedly. inHeld/outHeld are the same values that drive the
+        // zoom, so the diagnostic now reports what actually happened rather than half of it.
+        snap("in",  inHeld,  t.dbgPrevInHeld,  t.dbgInHeldSec,  t.dbgInOverstayLogged);
+        snap("out", outHeld, t.dbgPrevOutHeld, t.dbgOutHeldSec, t.dbgOutOverstayLogged);
     }
 
     // Frame-pacing diagnostics: a 2 s window of loop-interval stats (dt = time between ticks =
@@ -1532,7 +1541,22 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (size > 0 && size <= sizeof(buf) &&
             GetRawInputData((HRAWINPUT)lp, RID_INPUT, buf, &size, sizeof(RAWINPUTHEADER)) == size) {
             auto* ri = reinterpret_cast<RAWINPUT*>(buf);
-            if (ri->header.dwType == RIM_TYPEMOUSE) {
+            if (ri->header.dwType == RIM_TYPEKEYBOARD) {
+                // Keyboard UP only, and deliberately the exact mirror of the side-button rule
+                // below (issue #167). A key UP can only ever CLEAR held state, never set it, so
+                // honoring it unconditionally is a pure safety net: idempotent with the hook's own
+                // clear, and incapable of falsely holding a key. DOWN stays hook-authoritative -
+                // the hook owns the swallow decision and the rising edge, and setting DOWN here
+                // would double-count and could disagree with it for a tick.
+                //
+                // Without this, a hook evicted mid-hold (a heavy process's first load spike is
+                // long enough to blow LowLevelHooksTimeout) never sees the release: the zoom then
+                // runs forever and the stale "held" bit also hides the dead hook from the watchdog
+                // above, since a live hook swallows bound keys so the poller can never see one.
+                const RAWKEYBOARD& kb = ri->data.keyboard;
+                if ((kb.Flags & RI_KEY_BREAK) && kb.VKey > 0 && kb.VKey < 256)
+                    g_input.rawKeyUp(static_cast<int>(kb.VKey));
+            } else if (ri->header.dwType == RIM_TYPEMOUSE) {
                 const RAWMOUSE& m = ri->data.mouse;
                 if ((m.usFlags & MOUSE_MOVE_ABSOLUTE) == 0) {
                     AccumulateRaw(g_input, m.lLastX, m.lLastY);
@@ -1757,10 +1781,17 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                                 0, 0, 0, 0, nullptr, nullptr, hInst, nullptr);
     if (!hwnd) return 1;
 
-    RAWINPUTDEVICE rid{};
-    rid.usUsagePage = 0x01; rid.usUsage = 0x02; // generic mouse
-    rid.dwFlags = RIDEV_INPUTSINK; rid.hwndTarget = hwnd;
-    RegisterRawInputDevices(&rid, 1, sizeof(rid));
+    // Mouse AND keyboard (issue #167). The keyboard registration exists for exactly one reason: an
+    // LL hook can be silently evicted mid-hold, and the key UP then reaches nobody, stranding a
+    // keyboard zoom bind as held forever. Raw Input is not subject to LowLevelHooksTimeout, so it
+    // still delivers that UP. This is the same safety net the side-buttons have had since #113;
+    // keyboard binds never got it. RIDEV_INPUTSINK so it arrives regardless of foreground.
+    RAWINPUTDEVICE rid[2]{};
+    rid[0].usUsagePage = 0x01; rid[0].usUsage = 0x02; // generic mouse
+    rid[0].dwFlags = RIDEV_INPUTSINK; rid[0].hwndTarget = hwnd;
+    rid[1].usUsagePage = 0x01; rid[1].usUsage = 0x06; // generic keyboard
+    rid[1].dwFlags = RIDEV_INPUTSINK; rid[1].hwndTarget = hwnd;
+    RegisterRawInputDevices(rid, 2, sizeof(rid[0]));
 
     // Safety: global Ctrl+Alt+Q quits cleanly from anywhere (works even with the overlay up
     // and the cursor hidden). If the combo is already taken, the tray Quit still works.

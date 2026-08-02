@@ -89,6 +89,15 @@ bool InputRouter::keyPressed(int vk) const {
     if (vk <= 0 || vk > 255) return false;
     return g_kbPressed[vk].load(std::memory_order_relaxed);
 }
+// Raw Input safety net for a key whose UP the hook never saw (issue #167) - see the WM_INPUT
+// handler in main.cpp for why. Clearing BOTH records is the point: g_kbPressed unsticks the held
+// state main reads, and g_kbSwallowedDown stops a later, unrelated UP from being swallowed on the
+// strength of a DOWN whose UP already went past us. Idempotent with the hook's own clear.
+void InputRouter::rawKeyUp(int vk) {
+    if (vk <= 0 || vk > 255) return;
+    g_kbPressed[vk].store(false, std::memory_order_relaxed);
+    g_kbSwallowedDown[vk].store(false, std::memory_order_relaxed);
+}
 void InputRouter::setKeys(int zoomInVk, int zoomInVk2, int zoomOutVk, int zoomOutVk2, int recenterVk,
                           int cursorLockVk, int swapModelVk) {
     kbZoomInVk_.store(zoomInVk,    std::memory_order_relaxed);
@@ -310,6 +319,10 @@ static void ReleaseSwallowedKeys() {
 // Watchdog entry points (issue #156). See the header for why an evicted hook is invisible.
 void InputRouter::requestKbHookReinstall() {
     if (!kbHookWanted_.load(std::memory_order_relaxed)) return;   // deliberately suspended, not dead
+    // The hook we are replacing is dead, so anything it recorded as held can never be released by
+    // it (issue #167). Drop those records before the new hook goes in, or recovery inherits a
+    // phantom hold and the zoom runs away the moment the hook is authoritative again.
+    ReleaseSwallowedKeys();
     // Drop the authority claim FIRST so main's keyDown falls back to GetAsyncKeyState on the very
     // next tick. A dead hook swallows nothing, so polling sees the real key state and the binds
     // work again immediately - the re-install below only restores swallowing.
@@ -322,7 +335,12 @@ void InputRouter::setKeyboardHookWanted(bool want) {
     if (kbHookWanted_.exchange(want, std::memory_order_relaxed) == want) return;   // no change
     // Stop claiming authority the moment we ask for a suspend, so the very next tick already polls
     // (binds keep working: with the hook gone nothing swallows them, so GetAsyncKeyState is right).
-    if (!want) kbHookActive_.store(false, std::memory_order_relaxed);
+    // Release whatever it was holding at the same time (issue #167): suspending mid-press leaves a
+    // DOWN the hook will never see the UP for, and that record survives to poison the next resume.
+    if (!want) {
+        kbHookActive_.store(false, std::memory_order_relaxed);
+        ReleaseSwallowedKeys();
+    }
     if (g_hookThreadId) PostThreadMessageW(g_hookThreadId, kMsgSetKbHook, want ? 1 : 0, 0);
 }
 
