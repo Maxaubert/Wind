@@ -33,6 +33,9 @@ struct RenderFrameParams {
                                          // pixels too, so the stored value matches the user's sRGB hex)
     float  outlineAlpha;        // 0..1 fade for the outline (1 = solid); <= 0 skips the draw
     bool   cursorLocked;        // Inspect mode on: draw the crosshair sprite in place of the captured cursor
+    bool   suppressCursorSync;  // drag-follow (issue #169): a button is held, the pointer owns the
+                                //   interaction - skip the SetCursorPos weld this frame entirely
+                                //   (the lens follows the pointer instead of the reverse)
     bool   fsGame;              // foreground covers the monitor (fullscreen/borderless game): skip the
                                 //   periodic topmost backstop (a synchronous DWM z-order transaction
                                 //   that hitches the game); the per-frame displaced check still reclaims

@@ -19,6 +19,11 @@ struct PresentExtras {
     bool  pauseWrites = false;    // skip transform writes this tick (serializes an injected cursor
                                   //   move so no write can race it - the proven TDR)
     // Game perf (issue #148; render model only, others ignore):
+    // Drag-follow (issue #169): a mouse button is held in a FREE render session, so the pointer IS
+    // the interaction (window drag / text selection). The render model must NOT weld it to the lens
+    // centre this tick - the weld would fight the hand and the dragged content flickers between the
+    // two positions. The lens follows the pointer instead (RunTick feeds unscaled deltas).
+    bool  suppressCursorSync = false;
     bool  fsGame = false;         // foreground covers the monitor -> skip the periodic topmost backstop
     bool  forceCrop = false;      // fsGame && gameCrop: crop the capture copy to the magnified region
     bool  noVsync = false;        // game pacing engaged: Present(0,0); the main loop's timer paces

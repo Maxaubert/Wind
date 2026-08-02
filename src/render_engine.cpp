@@ -1219,10 +1219,17 @@ bool RenderEngine::renderFrame(const RenderFrameParams& p) {
         SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
     // Keep the (hidden) OS cursor under the drawn cursor so clicks pass through the
-    // transparent overlay to the app at the right desktop point. We drive the lens from raw
-    // input (not GetCursorPos), so this SetCursorPos never feeds back into tracking. Only
-    // when it actually moved (avoids redundant synthetic mouse events while idle).
-    if (p.clickDesktopX != s_->lastClickX || p.clickDesktopY != s_->lastClickY) {
+    // transparent overlay to the app at the right desktop point. Only when it actually moved
+    // (avoids redundant synthetic mouse events while idle).
+    // DRAG-FOLLOW (issue #169): while a mouse button is held, the pointer IS the interaction (a
+    // window drag, a text selection) - welding it to the lens centre every tick fights the hand,
+    // and the dragged content flickers between the hand's position and the weld's (probe-measured
+    // ~85 px square wave). So mid-drag the weld is suspended entirely and the lens follows the
+    // pointer instead (RunTick feeds unscaled pointer deltas). lastClick is invalidated so the
+    // first frame after release always re-parks, even onto an unchanged centre pixel.
+    if (p.suppressCursorSync) {
+        s_->lastClickX = INT_MIN; s_->lastClickY = INT_MIN;
+    } else if (p.clickDesktopX != s_->lastClickX || p.clickDesktopY != s_->lastClickY) {
         SetCursorPos(p.clickDesktopX, p.clickDesktopY);
         s_->lastClickX = p.clickDesktopX; s_->lastClickY = p.clickDesktopY;
     }

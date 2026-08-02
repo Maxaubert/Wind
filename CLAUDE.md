@@ -331,6 +331,21 @@ staged Apply/Discard footer.
   The click point, drawn cursor, and view all derive from the SMOOTHED center (`cx_`), so a click lands
   under the visible cursor; do not "fix" the click/warp point to the unsmoothed target (it would
   misalign clicks) and do not revert to a fixed sensitivity multiplier.
+  TWO INVARIANTS ON THE ORACLE (issue #169, both violated once - the window-drag flicker):
+  1. THE BASELINE IS MEASURED, NEVER ASSUMED. `lastSetVirtual` is a fresh post-present
+     `GetCursorPos`, not the point the weld was ASKED to park at. The park can be deduped
+     (unchanged centre pixel), suppressed (drag-follow), skipped (gatePresent / fps-cap ticks), or
+     absent by design (transform FOLLOW). Assuming it landed makes the next delta measure
+     hand + (pointer-centre gap); the mapper integrates the gap, the centre overshoots the pointer,
+     the sign flips, and the loop oscillates at an amplitude proportional to hand speed.
+  2. NEVER WELD WHILE A MOUSE BUTTON IS HELD (drag-follow). Mid-drag the pointer IS the interaction
+     (window drag, text selection); re-parking it each tick fights the hand and the dragged content
+     flickers between the two positions (probe-measured ~85 px square wave). `ShouldDragFollow`
+     (src/drag_follow.h, pure + unit-tested) suspends the weld for exactly the button-hold and the
+     lens follows the pointer 1:1 UNSCALED (like transform FOLLOW - scaling would desync the lens
+     from the pointer that owns the drag). The press landed under the welded cursor before the
+     button went down; the release lands where pointer and content both are. Weld resumes on
+     release (renderFrame invalidates its park dedupe so the first post-release frame re-parks).
 - PROGRAM FILES IS READ-ONLY FOR NON-ADMIN: any file the runtime needs to write MUST go to a
   per-user-writable location, never next to the exe. The UIAccess build is installed to
   `C:\Program Files\Wind\` and WindConfig.exe runs as a normal user, so an in-place write there

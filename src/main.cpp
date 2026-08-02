@@ -12,6 +12,7 @@
 #include <fstream>
 #include "config.h"
 #include "config_path.h"
+#include "drag_follow.h"
 #include "mpo_boot.h"
 #include "config_ui/ini_edit.h"   // wind::UpdateIniText - flip the model key in place
 #include "logging.h"
@@ -197,7 +198,13 @@ struct TickState {
     ZoomController zoom;
     CursorMapper   mapper;
     LockDetector   detector;    // free vs game-locked cursor
-    POINT          lastSetVirtual{};  // where we last SetCursorPos'd (virtual px); for the OS-cursor delta
+    POINT          lastSetVirtual{};  // MEASURED post-present pointer position (virtual px), the
+                                      // baseline for the next tick's hand delta (issue #169: never
+                                      // assume the weld landed - measure)
+    // Divergence diagnostics (issue #169; diagnostics=1 only): 1 Hz aggregate while zoomed.
+    double             dbgMaxDivergence = 0.0;
+    unsigned           dbgDragFollowTicks = 0;
+    unsigned long long dbgDivergenceLogMs = 0;
     VirtualBounds  vbounds{};   // cached virtual-screen bounds; refreshed on zoom-in (used for clip detect)
     LARGE_INTEGER freq{}, prev{};
     double sinceCheck = 0.0;
@@ -908,6 +915,7 @@ static void RunTick(TickState& t) {
         int curDx = cur.x - t.lastSetVirtual.x;
         int curDy = cur.y - t.lastSetVirtual.y;
         int dx, dy;
+        bool dragFollow = false;   // set in the free render branch below; drives ex.suppressCursorSync
         if (inspect) {
             // The OS cursor is frozen, so pan the look point from the COOKED mickeys - Windows'
             // pointer-speed + acceleration applied per packet (see mouse_ballistics) - not raw
@@ -938,8 +946,26 @@ static void RunTick(TickState& t) {
                 dx = curDx;
                 dy = curDy;
             } else {
-                dx = (int)std::lround(curDx * t.cfg.cursorSensitivity);   // auto-matched OS delta, speed-scaled
-                dy = (int)std::lround(curDy * t.cfg.cursorSensitivity);
+                // Drag-follow (issue #169): while a mouse button is physically held, the pointer IS
+                // the interaction (window drag, text selection) - the per-tick weld would fight the
+                // hand and the dragged content flickers between the two positions. Suspend the weld
+                // (ex.suppressCursorSync below) and follow the pointer 1:1, unscaled like the
+                // transform FOLLOW: scaling would desync the lens from the pointer that owns the
+                // drag. The press itself landed under the welded cursor (the weld was live until
+                // the button went down), and the release lands where the pointer and the dragged
+                // content both are - correct by construction. Weld resumes on release.
+                const bool anyButtonDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) ||
+                                           (GetAsyncKeyState(VK_RBUTTON) & 0x8000) ||
+                                           (GetAsyncKeyState(VK_MBUTTON) & 0x8000);
+                dragFollow = wind::ShouldDragFollow(dynamic_cast<RenderModel*>(t.model) != nullptr,
+                                                    locked, t.gameFreeze, inspect, anyButtonDown);
+                if (dragFollow) {
+                    dx = curDx;
+                    dy = curDy;
+                } else {
+                    dx = (int)std::lround(curDx * t.cfg.cursorSensitivity);   // auto-matched OS delta, speed-scaled
+                    dy = (int)std::lround(curDy * t.cfg.cursorSensitivity);
+                }
             }
         }
         // Defensive: bound one tick's pan to the monitor span so a stray cursor jump (e.g. the OS
@@ -1138,6 +1164,9 @@ static void RunTick(TickState& t) {
         // cursorVisibility=never and the hide-cursor hotkey. The render model never reads drawCursor
         // (it reads cursorMode directly via FillRenderParams), so this cannot change render behaviour.
         ex.drawCursor = (ex.cursorMode != 2);
+        // Drag-follow (issue #169): the pan resolve above chose to follow the pointer this tick, so
+        // the render model must not weld it back to the lens centre - suspend the SetCursorPos.
+        ex.suppressCursorSync = dragFollow;
         if (inspect) {
             if (t.clickReleaseTicks > 0) {
                 // A click was just committed: keep the freeze released for these ticks so the synthesized
@@ -1342,17 +1371,44 @@ static void RunTick(TickState& t) {
                 t.inspectPrevFg = nullptr;
             }
         }
-        // Bookkeeping for next tick's GetCursorPos delta. INSPECT: the real cursor stays frozen, so
-        // the baseline is the frozen point. TRANSFORM (follow design, issue #148): nothing was
-        // placed - the baseline is where the cursor actually is, so the next delta is purely the
-        // user's hand. RENDER: renderFrame SetCursorPos'd the OS cursor to clickDesktop+origin.
+        // Bookkeeping for next tick's GetCursorPos delta. INSPECT keeps the explicit frozen point
+        // (the 1px clip pins the pointer there; explicit is immune to the click-release window).
+        // Everything else uses a MEASURED read (issue #169) - the baseline must be where the
+        // pointer actually IS after this tick's present, never where we intended to put it:
+        //  - render, welded: SetCursorPos is synchronous, so the read equals the park point -
+        //    identical to the old assumed baseline.
+        //  - render, weld deduped/suppressed (unchanged centre pixel, drag-follow, gatePresent or
+        //    fps-cap skip ticks), and transform FOLLOW (never places the cursor): the old code
+        //    assumed the park landed anyway and baselined on the lens centre. The next delta then
+        //    measured hand + (pointer - centre) gap, the mapper integrated the gap, the centre
+        //    overshot the pointer, and the sign flipped every tick: an unstable servo, oscillating
+        //    with amplitude proportional to hand speed. That was the #169 window-drag flicker.
         if (inspect) {
             t.lastSetVirtual = t.frozenCursor;
         } else {
-            // Both models now WELD the real cursor to the lens point each tick, so the baseline
-            // for next tick's delta is that point (the delta then measures only the hand).
-            t.lastSetVirtual.x = r.clickDesktopX + t.mon.x;
-            t.lastSetVirtual.y = r.clickDesktopY + t.mon.y;
+            POINT after; GetCursorPos(&after);
+            t.lastSetVirtual = after;
+            // Divergence diagnostics (issue #169, diagnostics=1 only): once a second, log how far
+            // the pointer sits from the lens centre and how many ticks drag-followed. If any
+            // oscillation survives the fix, this pinpoints the fighting pair from the field log.
+            if (t.cfg.diagnostics) {
+                const double divX = after.x - (double)(r.clickDesktopX + t.mon.x);
+                const double divY = after.y - (double)(r.clickDesktopY + t.mon.y);
+                const double div = std::sqrt(divX * divX + divY * divY);
+                if (div > t.dbgMaxDivergence) t.dbgMaxDivergence = div;
+                if (dragFollow) t.dbgDragFollowTicks++;
+                const unsigned long long nowD = GetTickCount64();
+                if (nowD - t.dbgDivergenceLogMs >= 1000) {
+                    if (t.dbgDivergenceLogMs != 0) {
+                        wind::Log(wind::LogLevel::Info, "cursor",
+                                  "divergence max=%.0fpx dragFollowTicks=%u lvl=%.2f",
+                                  t.dbgMaxDivergence, t.dbgDragFollowTicks, lvl);
+                    }
+                    t.dbgDivergenceLogMs = nowD;
+                    t.dbgMaxDivergence = 0.0;
+                    t.dbgDragFollowTicks = 0;
+                }
+            }
         }
     } else if (t.prevActive) {                        // active -> idle: tear the overlay down
         if (t.restAfterReveal) { t.restAfterReveal->setActive(false); t.restAfterReveal = nullptr; }

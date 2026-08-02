@@ -28,6 +28,7 @@ void FillRenderParams(RenderFrameParams& p, const MapResult& r, const Config& cf
     p.outlineR = cfg.outlineR; p.outlineG = cfg.outlineG; p.outlineB = cfg.outlineB;   // parsed once in ParseConfig
     p.outlineAlpha = 1.0f;   // RunTick lowers this when idle-hide is active
     p.cursorLocked = false;  // RunTick sets true while zoomed + Inspect mode (draw the crosshair sprite)
+    p.suppressCursorSync = false;  // RunTick sets true mid-drag (issue #169; see PresentExtras)
 }
 
 RenderModel::RenderModel(int zorderBand, bool hdrTonemap, int gpuPriority)
@@ -71,6 +72,7 @@ void RenderModel::present(const MapResult& r, double level, const Config& cfg,
     p.cursorLocked = ex.cursorLocked;
     p.cursorMode = ex.cursorMode;
     if (ex.clickOverride) { p.clickDesktopX = ex.clickDesktopX; p.clickDesktopY = ex.clickDesktopY; }
+    p.suppressCursorSync = ex.suppressCursorSync;   // mid-drag: the pointer owns the interaction (#169)
     p.fsGame = ex.fsGame;                       // skip the periodic topmost backstop over a game
     if (ex.forceCrop) p.cropCapture = true;     // game session: crop the copy to the magnified view
     if (ex.noVsync)   p.vsync = false;          // game pacing: timer paces, Present(0,0)
