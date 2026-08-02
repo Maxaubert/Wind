@@ -929,9 +929,13 @@ static void RunTick(TickState& t) {
             dy = (int)t.inspectPanRemY; t.inspectPanRemY -= dy;
         } else {
             RECT clip{}; GetClipCursor(&clip);
-            const VirtualBounds& vb = t.vbounds;   // cached at activation (see QueryVirtualBounds)
-            bool clipConfined = clip.left > vb.x || clip.top > vb.y ||
-                                clip.right < vb.x + vb.w || clip.bottom < vb.y + vb.h;
+            // A clip is a lock signal only when it is meaningfully SMALLER than the monitor
+            // (issue #169): a machine-wide work-area clip (desktop minus taskbar, ~95%) is
+            // desktop-like, not a game confining the pointer - the old any-clip test made every
+            // zoomed desktop session run the locked path on this rig. See ClipRectConfines.
+            bool clipConfined = wind::ClipRectConfines((int)(clip.right - clip.left),
+                                                       (int)(clip.bottom - clip.top),
+                                                       t.mon.w, t.mon.h);
             bool locked = t.detector.update(clipConfined,
                                             std::abs(rawDx) + std::abs(rawDy),
                                             std::abs(curDx) + std::abs(curDy));

@@ -481,12 +481,24 @@ overlay is WDA_EXCLUDEFROMCAPTURE, so it can only be captured from inside the ap
      interaction, and re-parking it every tick made everything following it flicker. Fixed:
      drag-follow (`src/drag_follow.h`) suspends the weld for exactly the button-hold; the lens
      follows the pointer 1:1 unscaled, and the weld resumes on release.
+  3. THE GATING DEFECT (found when 1+2 alone changed nothing in the field): the LockDetector
+     treated ANY ClipCursor rect smaller than the virtual desktop as a game lock - and this
+     machine has a permanent machine-wide WORK-AREA clip (desktop minus taskbar, ~95% of the
+     monitor; an external taskbar utility). Every zoomed desktop session therefore ran the LOCKED
+     path from the first tick: panning from unaccelerated raw mickeys while the pointer moved with
+     ballistics, the weld re-parking the pointer to the slower lens centre - the measured fight -
+     and drag-follow could never engage because the free branch never ran. Fixed:
+     `ClipRectConfines` (lock_detector.h, pure) - a clip is a lock signal only when meaningfully
+     smaller than the monitor (<90% in either dimension). A game clipping to a FULL monitor never
+     needed the clip signal; the raw-active-but-cursor-frozen detection catches mouselook there.
   Diagnostic traps from the hunt, so nobody re-treads them: it was NOT the z-band (A/B'd), NOT
   capture (transform showed it too), NOT pointer quantization (didn't scale with zoom), NOT a live
   magnification context (bare MagInitialize held 20 s: smooth), NOT the LL mouse hook
   (WIND_NOHOOK: no change), and NOT cursorSmoothing - smoothing OFF made it 3x WORSE because the
-  inertia was DAMPING the servo oscillation, not causing it. A magnify-model sighting remains
-  unexplained (Wind touches nothing cursor-related there); re-verify before treating it as real.
+  inertia was DAMPING the servo oscillation, not causing it. When testing cursor regimes on this
+  rig, remember the permanent work-area clip: GetClipCursor never returns the full desktop here.
+  A magnify-model sighting remains unexplained (Wind touches nothing cursor-related there);
+  re-verify before treating it as real.
 
 - **I-beam / invert cursors went invisible** over text fields: the I-beam is a color cursor
   with NO alpha channel (`anyAlpha=0`) - an invert-style cursor that shows by inverting the

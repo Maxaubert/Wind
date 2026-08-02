@@ -331,7 +331,12 @@ staged Apply/Discard footer.
   The click point, drawn cursor, and view all derive from the SMOOTHED center (`cx_`), so a click lands
   under the visible cursor; do not "fix" the click/warp point to the unsmoothed target (it would
   misalign clicks) and do not revert to a fixed sensitivity multiplier.
-  TWO INVARIANTS ON THE ORACLE (issue #169, both violated once - the window-drag flicker):
+  THREE INVARIANTS ON THE ORACLE (issue #169, all violated at once - the window-drag flicker):
+  0. A CLIP IS A LOCK SIGNAL ONLY WHEN MEANINGFULLY SMALLER THAN THE MONITOR (`ClipRectConfines`,
+     lock_detector.h; <90% in either dimension). THIS RIG HAS A PERMANENT MACHINE-WIDE WORK-AREA
+     CLIP (desktop minus taskbar, ~95%, external utility) - GetClipCursor NEVER returns the full
+     desktop here. The old any-clip test therefore ran every zoomed desktop session on the locked
+     path (raw-mickey panning + weld = the flicker), and masked the two defects below.
   1. THE BASELINE IS MEASURED, NEVER ASSUMED. `lastSetVirtual` is a fresh post-present
      `GetCursorPos`, not the point the weld was ASKED to park at. The park can be deduped
      (unchanged centre pixel), suppressed (drag-follow), skipped (gatePresent / fps-cap ticks), or

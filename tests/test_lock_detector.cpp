@@ -66,3 +66,25 @@ TEST_CASE("reset returns to free") {
     d.reset();
     CHECK(!d.locked());
 }
+
+// issue #169: a clip rect is a lock signal only when meaningfully smaller than the monitor. A
+// machine-wide work-area clip (desktop minus taskbar) misclassified as a game lock put every
+// zoomed desktop session on the locked path - the window-drag flicker.
+TEST_CASE("ClipRectConfines separates game clips from desktop-like clips") {
+    // Full monitor (unclipped GetCursorClip on a single monitor): free.
+    CHECK(!wind::ClipRectConfines(3840, 2160, 3840, 2160));
+    // Work-area clip: full width, ~95% height (taskbar shaved off): still desktop-like.
+    CHECK(!wind::ClipRectConfines(3840, 2052, 3840, 2160));
+    // Multi-monitor virtual desktop clip is LARGER than one monitor: free.
+    CHECK(!wind::ClipRectConfines(7680, 2160, 3840, 2160));
+    // A windowed game clipping to its window: confined.
+    CHECK(wind::ClipRectConfines(1920, 1080, 3840, 2160));
+    // Narrow-only or short-only clips still confine (either dimension under 90%).
+    CHECK(wind::ClipRectConfines(3000, 2160, 3840, 2160));
+    CHECK(wind::ClipRectConfines(3840, 1700, 3840, 2160));
+    // The 1px freeze clip: confined.
+    CHECK(wind::ClipRectConfines(1, 1, 3840, 2160));
+    // Degenerate/empty clip rect: confined; missing monitor info: never claim a lock.
+    CHECK(wind::ClipRectConfines(0, 0, 3840, 2160));
+    CHECK(!wind::ClipRectConfines(1920, 1080, 0, 0));
+}
