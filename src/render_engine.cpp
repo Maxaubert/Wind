@@ -66,6 +66,7 @@ struct RenderEngine::State {
     ComPtr<IDXGISwapChain> swap;               // blt-model (layered window needs the redirection surface)
     ComPtr<ID3D11RenderTargetView> rtv;
     int lastClickX = INT_MIN, lastClickY = INT_MIN;   // skip redundant SetCursorPos
+    bool parkedLastFrame = false;               // did the last renderFrame SetCursorPos? (#169)
     unsigned long long lastTopmostMs = 0;       // last HWND_TOPMOST re-assert (throttled)
     bool inBand = false;                        // created in a high z-order band (CreateWindowInBand)
     bool parked = false;                        // overlay shrunk to 1x1 while idle (see setParked)
@@ -454,6 +455,8 @@ RenderEngine::RenderEngine() : s_(new State()) {}
 RenderEngine::~RenderEngine() { shutdown(); delete s_; s_ = nullptr; }
 bool RenderEngine::ready() const { return s_ && s_->ready; }
 bool RenderEngine::deviceLost() const { return s_ && s_->deviceLost; }
+
+bool RenderEngine::parkedLastFrame() const { return s_ && s_->parkedLastFrame; }
 
 bool RenderEngine::recoverDeviceLost() {
     if (!s_ || !s_->hwnd) return false;
@@ -1192,6 +1195,7 @@ static bool overlayDisplaced(HWND hwnd) {
 }
 
 bool RenderEngine::renderFrame(const RenderFrameParams& p) {
+    s_->parkedLastFrame = false;   // set true only if the weld below actually fires (#169)
     if (!s_->ready || s_->deviceLost) return false;   // device gone: skip until recoverDeviceLost()
     // Keep the overlay above everything (transparent + click-through + capture-excluded, so
     // being on top is safe; if we sit below an always-on-top app overlay like RTSS it draws a
@@ -1219,12 +1223,20 @@ bool RenderEngine::renderFrame(const RenderFrameParams& p) {
         SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
     // Keep the (hidden) OS cursor under the drawn cursor so clicks pass through the
-    // transparent overlay to the app at the right desktop point. We drive the lens from raw
-    // input (not GetCursorPos), so this SetCursorPos never feeds back into tracking. Only
-    // when it actually moved (avoids redundant synthetic mouse events while idle).
-    if (p.clickDesktopX != s_->lastClickX || p.clickDesktopY != s_->lastClickY) {
+    // transparent overlay to the app at the right desktop point. Only when it actually moved
+    // (avoids redundant synthetic mouse events while idle).
+    // DRAG-FOLLOW (issue #169): while a mouse button is held, the pointer IS the interaction (a
+    // window drag, a text selection) - welding it to the lens centre every tick fights the hand,
+    // and the dragged content flickers between the hand's position and the weld's (probe-measured
+    // ~85 px square wave). So mid-drag the weld is suspended entirely and the lens follows the
+    // pointer instead (RunTick feeds unscaled pointer deltas). lastClick is invalidated so the
+    // first frame after release always re-parks, even onto an unchanged centre pixel.
+    if (p.suppressCursorSync) {
+        s_->lastClickX = INT_MIN; s_->lastClickY = INT_MIN;
+    } else if (p.clickDesktopX != s_->lastClickX || p.clickDesktopY != s_->lastClickY) {
         SetCursorPos(p.clickDesktopX, p.clickDesktopY);
         s_->lastClickX = p.clickDesktopX; s_->lastClickY = p.clickDesktopY;
+        s_->parkedLastFrame = true;
     }
     // Present-fence gate (issue #148): while zoomed over a fullscreen game, never queue a present
     // behind one the GPU hasn't executed yet. With the previous present still in flight, a vsync'd

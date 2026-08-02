@@ -33,6 +33,9 @@ struct RenderFrameParams {
                                          // pixels too, so the stored value matches the user's sRGB hex)
     float  outlineAlpha;        // 0..1 fade for the outline (1 = solid); <= 0 skips the draw
     bool   cursorLocked;        // Inspect mode on: draw the crosshair sprite in place of the captured cursor
+    bool   suppressCursorSync;  // drag-follow (issue #169): a button is held, the pointer owns the
+                                //   interaction - skip the SetCursorPos weld this frame entirely
+                                //   (the lens follows the pointer instead of the reverse)
     bool   fsGame;              // foreground covers the monitor (fullscreen/borderless game): skip the
                                 //   periodic topmost backstop (a synchronous DWM z-order transaction
                                 //   that hitches the game); the per-frame displaced check still reclaims
@@ -107,6 +110,13 @@ public:
     // update, adapter change). The caller should stop rendering and call recoverDeviceLost() (with
     // backoff). Until recovery succeeds, renderFrame() is a no-op.
     bool deviceLost() const;
+    // Did the LAST renderFrame call actually SetCursorPos the pointer? (issue #169) The pan
+    // oracle's baseline must be the park point when a park landed and the pointer's true position
+    // when it did not (weld deduped on an unchanged pixel, drag-follow suppressed, device lost).
+    // Guessing wrong either direction breaks the servo: assuming a park that never landed
+    // integrates the pointer-centre gap (oscillation); assuming no park after one landed loses the
+    // hand motion the park absorbed. So the engine reports the truth per frame.
+    bool parkedLastFrame() const;
     // Rebuild the D3D device and all device-dependent resources after a device-lost. Returns true on
     // success (rendering can resume). Cheap to retry; the caller paces retries (it can take a moment
     // for the driver to come back). Does NOT touch the HWND or the hidden OS cursor.

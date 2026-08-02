@@ -466,6 +466,40 @@ overlay is WDA_EXCLUDEFROMCAPTURE, so it can only be captured from inside the ap
   - The snip overlay is **not** `WS_EX_LAYERED`, so `IsOverlayFg`'s cheap first test misses it and
     only the built-in name list catches it.
 
+- **Dragging a window while zoomed flickered between two positions** (issue #169, fixed
+  2026-08-02): the dragged window ping-ponged ~85 px while Wind's own drawn cursor stayed smooth.
+  Probe data showed the WINDOW's position tracking the pointer 1:1 at full rate - nothing was slow;
+  the OS pointer itself oscillated between two coherent tracks (the hand's position and the lens
+  centre), amplitude scaling with hand speed. Two defects, one structural, one behavioural:
+  1. The pan oracle's baseline was ASSUMED (`lastSetVirtual = clickDesktop`, "the weld landed")
+     rather than measured. Wherever no park actually landed - transform FOLLOW never places the
+     cursor, render's park is deduped on an unchanged centre pixel, gatePresent/fps-cap ticks skip
+     the frame - the next delta measured hand + (pointer-centre gap), the mapper integrated the
+     gap, and the loop became an unstable servo. Fixed: the baseline is a fresh post-present
+     `GetCursorPos`, correct in every park-landed/skipped/absent case.
+  2. The weld itself fights the hand mid-drag: while a button is held the pointer IS the
+     interaction, and re-parking it every tick made everything following it flicker. Fixed:
+     drag-follow (`src/drag_follow.h`) suspends the weld for exactly the button-hold; the lens
+     follows the pointer 1:1 unscaled, and the weld resumes on release.
+  3. THE GATING DEFECT (found when 1+2 alone changed nothing in the field): the LockDetector
+     treated ANY ClipCursor rect smaller than the virtual desktop as a game lock - and this
+     machine has a permanent machine-wide WORK-AREA clip (desktop minus taskbar, ~95% of the
+     monitor; an external taskbar utility). Every zoomed desktop session therefore ran the LOCKED
+     path from the first tick: panning from unaccelerated raw mickeys while the pointer moved with
+     ballistics, the weld re-parking the pointer to the slower lens centre - the measured fight -
+     and drag-follow could never engage because the free branch never ran. Fixed:
+     `ClipRectConfines` (lock_detector.h, pure) - a clip is a lock signal only when meaningfully
+     smaller than the monitor (<90% in either dimension). A game clipping to a FULL monitor never
+     needed the clip signal; the raw-active-but-cursor-frozen detection catches mouselook there.
+  Diagnostic traps from the hunt, so nobody re-treads them: it was NOT the z-band (A/B'd), NOT
+  capture (transform showed it too), NOT pointer quantization (didn't scale with zoom), NOT a live
+  magnification context (bare MagInitialize held 20 s: smooth), NOT the LL mouse hook
+  (WIND_NOHOOK: no change), and NOT cursorSmoothing - smoothing OFF made it 3x WORSE because the
+  inertia was DAMPING the servo oscillation, not causing it. When testing cursor regimes on this
+  rig, remember the permanent work-area clip: GetClipCursor never returns the full desktop here.
+  A magnify-model sighting remains unexplained (Wind touches nothing cursor-related there);
+  re-verify before treating it as real.
+
 - **I-beam / invert cursors went invisible** over text fields: the I-beam is a color cursor
   with NO alpha channel (`anyAlpha=0`) - an invert-style cursor that shows by inverting the
   pixels beneath it. The decoder was making it transparent/white -> invisible on a white field.
