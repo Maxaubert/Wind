@@ -12,6 +12,7 @@
 #include <fstream>
 #include "config.h"
 #include "config_path.h"
+#include "mpo_boot.h"
 #include "config_ui/ini_edit.h"   // wind::UpdateIniText - flip the model key in place
 #include "logging.h"
 #pragma comment(lib, "Dwmapi.lib")
@@ -49,6 +50,10 @@ static void DetectMpoDisabled() {
     wind::Log(wind::LogLevel::Info, "startup", "MPO %s (OverlayTestMode=%lu) -> pan wall %s",
               g_mpoDisabled ? "DISABLED" : "enabled", (unsigned long)v,
               g_mpoDisabled ? "off (full range)" : "on (right-strip bound above ~9.3x)");
+    // Persist the earliest post-boot reading so the Settings "Disable MPO" row can tell a change
+    // that genuinely needs a restart from one that merely puts the registry back to what DWM
+    // already loaded (issue #164). No-ops if this boot is already recorded.
+    wind::RecordMpoBootState(g_mpoDisabled);
 }
 
 // Current refresh rate (Hz) of the primary display, for pacing the idle/1x loop and the

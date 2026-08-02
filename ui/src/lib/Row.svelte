@@ -88,7 +88,10 @@
              empty inline-block checkbox baselines at its bottom edge, which sat the chip visibly
              below the toggle. -->
         <div class="mpoctl">
-          {#if extra.mpoKnown && extra.mpoStaged !== extra.mpoLive}
+          <!-- Driven by staged-vs-BOOT, not staged-vs-registry: the chip answers "will a restart
+               change anything", which is also why it can show with nothing staged (the registry
+               already holds a value DWM has not loaded yet). -->
+          {#if extra.mpoNeedsRestart}
             <span class="tag">Requires restart</span>
           {/if}
           <label class="checkbox-wrapper" class:disabled={disabled || !extra.mpoKnown}>

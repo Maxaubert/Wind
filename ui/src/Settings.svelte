@@ -33,16 +33,25 @@
     values = v; saved = { ...v };
     theme = currentTheme(cfg); applyTheme(theme);
     // MPO lives in the registry, not the ini, so it is fetched separately and staged separately.
-    const disabled = await getMpoState();
-    mpoLive = disabled; mpoStaged = disabled; mpoKnown = true;
+    const s = await getMpoState();
+    mpoLive = s.disabled; mpoStaged = s.disabled; mpoKnown = true;
+    // No record for this boot -> assume the registry is what DWM loaded. That is the old
+    // behaviour, and the worst it does is offer a restart that turns out to be unnecessary.
+    mpoBoot = s.bootKnown ? s.atBoot : s.disabled;
   });
   // --- MPO (issue #164) -----------------------------------------------------
-  // mpoLive  = what the registry says right now. mpoStaged = what the toggle shows.
-  // They differ only while a change is staged; Apply reconciles them through an elevated write.
-  let mpoLive = false, mpoStaged = false, mpoKnown = false;
+  // Three distinct values, and conflating any two of them is a bug:
+  //   mpoLive   - what the registry says right now      -> decides whether Apply must WRITE
+  //   mpoStaged - what the toggle shows                 -> what the user wants
+  //   mpoBoot   - what DWM actually loaded at boot      -> decides whether a RESTART is required
+  // Comparing staged against the registry (the original mistake) demanded a restart for a change
+  // that merely restored the value DWM already had, and would equally have stayed silent about one
+  // that really needed a reboot.
+  let mpoLive = false, mpoStaged = false, mpoBoot = false, mpoKnown = false;
   let mpoRestartPrompt = false, mpoFailed = false;
   $: mpoDirty = mpoKnown && mpoStaged !== mpoLive;
-  $: extra = { mpoKnown, mpoLive, mpoStaged };
+  $: mpoNeedsRestart = mpoKnown && mpoStaged !== mpoBoot;
+  $: extra = { mpoKnown, mpoLive, mpoStaged, mpoNeedsRestart };
   // Live setter for keybind rows: writes setConfig immediately AND updates both staged + saved
   // so the rebind is effective at once (the core hot-reloads it, the hook stops swallowing the
   // previous binding) and the Apply/Discard footer does NOT show keybind changes as dirty.
@@ -99,8 +108,11 @@
       const want = mpoStaged;
       const res = await setMpoDisabled(want);
       mpoLive = res.disabled; mpoStaged = res.disabled;
-      if (res.ok && res.disabled === want) mpoRestartPrompt = true;   // reboot for DWM to read it
-      else mpoFailed = true;
+      // Prompt only when the new value differs from what DWM actually loaded. Writing the value
+      // back to the boot state changes the registry but changes nothing about the running session,
+      // so demanding a reboot there is just noise.
+      if (!res.ok || res.disabled !== want) mpoFailed = true;
+      else if (res.disabled !== mpoBoot) mpoRestartPrompt = true;
     }
     if (String(values.model) !== String(saved.model)) {
       runningModel = saved.model;   // remember what's live before commit() moves saved.model forward

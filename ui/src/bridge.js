@@ -29,9 +29,16 @@ export function setDirty(v) { post({ type: 'dirty', value: v ? '1' : '0' }); }
 // MPO (Multi-Plane Overlay) lives in HKLM, so reading is free but writing needs elevation.
 // getMpoState is a plain read; setMpoDisabled raises a UAC prompt in the host and resolves with the
 // RE-READ state, so a cancelled prompt reverts the row rather than showing a change that never was.
+// Resolves { disabled, bootKnown, atBoot }. `atBoot` is what DWM actually loaded at boot, which is
+// the only honest thing to compare against when deciding whether a restart is required.
 export function getMpoState() {
   return new Promise(resolve => {
-    const off = onMessage(m => { if (m && m.type === 'mpoState') { off(); resolve(!!m.disabled); } });
+    const off = onMessage(m => {
+      if (m && m.type === 'mpoState') {
+        off();
+        resolve({ disabled: !!m.disabled, bootKnown: !!m.bootKnown, atBoot: !!m.atBoot });
+      }
+    });
     post({ type: 'mpoState' });
   });
 }

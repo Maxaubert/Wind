@@ -18,7 +18,12 @@ test.beforeEach(async ({ page }) => {
         // MPO lives in the registry, not the ini. __mpoDisabled drives what the "registry" reports;
         // __mpoOk drives whether the elevated write is accepted (false = UAC dismissed).
         if (msg.type === 'mpoState')
-          listeners.forEach(fn => fn({ data: { type: 'mpoState', disabled: !!window.__mpoDisabled } }));
+          // __mpoAtBoot defaults to the current value, i.e. "the registry is what DWM loaded".
+          // Set it separately to model a registry that has already moved away from the boot state.
+          listeners.forEach(fn => fn({ data: { type: 'mpoState',
+            disabled: !!window.__mpoDisabled,
+            bootKnown: window.__mpoBootKnown !== false,
+            atBoot: window.__mpoAtBoot !== undefined ? !!window.__mpoAtBoot : !!window.__mpoDisabled } }));
         if (msg.type === 'setMpoDisabled') {
           const ok = window.__mpoOk !== false;
           if (ok) window.__mpoDisabled = msg.value === '1';
@@ -178,11 +183,11 @@ test('staging MPO shows "Requires restart" and prompts to reboot on Apply', asyn
   await expect(page.getByText('Requires restart')).toBeVisible();
   await page.getByRole('button', { name: 'Apply' }).click();
   await expect(page.getByRole('dialog')).toContainText('Restart to finish');
-  // Cancel must leave the registry change in place - only the reboot is deferred - so the toggle
-  // stays ticked and nothing is left staged.
+  // Cancel leaves the registry change in place and only defers the reboot, so the toggle stays
+  // ticked AND the chip stays up: the value is written but DWM is still running the old one.
   await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
   await expect(mpoBox(page)).toBeChecked();
-  await expect(page.getByText('Requires restart')).toHaveCount(0);
+  await expect(page.getByText('Requires restart')).toBeVisible();
 });
 
 test('a dismissed admin prompt reverts the MPO toggle', async ({ page }) => {
@@ -224,4 +229,31 @@ test('closing with nothing staged does not prompt', async ({ page }) => {
   await expect(page.getByRole('dialog')).toHaveCount(0);
   const sets = await page.evaluate(() => window.__sets);
   expect(sets.some(s => s.type === 'window' && s.action === 'close')).toBeTruthy();
+});
+
+// The bug this pair guards (issue #164, caught in use): DWM reads OverlayTestMode once, at boot.
+// Comparing the staged value against the REGISTRY made restoring the boot value demand a pointless
+// reboot. The comparison is against the BOOT state, so restoring it is a no-op and a real change
+// still prompts.
+test('putting MPO back to the boot state needs no restart', async ({ page }) => {
+  // DWM booted with MPO disabled; the registry has since been changed to enabled.
+  await page.addInitScript(() => { window.__mpoDisabled = false; window.__mpoAtBoot = true; });
+  await page.goto('/');
+  // Nothing staged yet, but the registry already disagrees with what is running - say so.
+  await expect(page.getByText('Requires restart')).toBeVisible();
+  await mpoBox(page).check();                       // back to the boot state
+  await expect(page.getByText('Requires restart')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Apply' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);   // written, but nothing to reboot for
+  await expect(mpoBox(page)).toBeChecked();
+});
+
+test('moving MPO away from the boot state still prompts to restart', async ({ page }) => {
+  await page.addInitScript(() => { window.__mpoDisabled = true; window.__mpoAtBoot = true; });
+  await page.goto('/');
+  await expect(page.getByText('Requires restart')).toHaveCount(0);
+  await mpoBox(page).uncheck();
+  await expect(page.getByText('Requires restart')).toBeVisible();
+  await page.getByRole('button', { name: 'Apply' }).click();
+  await expect(page.getByRole('dialog')).toContainText('Restart to finish');
 });

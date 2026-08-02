@@ -14,6 +14,7 @@
 #include "ini_edit.h"
 #include "wind_watchdog.h"
 #include "mpo.h"
+#include "../mpo_boot.h"
 #include "../config_path.h"
 #include "../logging.h"
 #include "../resource.h"
@@ -170,9 +171,15 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
         if (!key.empty()) WriteFileAtomic(IniPath(), wind::UpdateIniText(ReadFileUtf8(IniPath()), key, value));
     } else if (type == "mpoState") {
         // Read-only probe: HKLM reads do not need elevation, so the Advanced row can always show
-        // the true state (and flag it when MPO is enabled) without ever prompting.
+        // the true state without ever prompting. `atBoot` is what DWM actually loaded (see
+        // mpo_boot.h); bootKnown=false means no record for this boot, and the UI then falls back to
+        // comparing against the registry rather than inventing an answer.
+        bool atBoot = false;
+        const bool bootKnown = wind::MpoStateAtBoot(atBoot);
         std::string out = std::string("{\"type\":\"mpoState\",\"disabled\":") +
-                          (wind::MpoDisabledInRegistry() ? "true" : "false") + "}";
+                          (wind::MpoDisabledInRegistry() ? "true" : "false") +
+                          ",\"bootKnown\":" + (bootKnown ? "true" : "false") +
+                          ",\"atBoot\":" + (atBoot ? "true" : "false") + "}";
         wv->PostWebMessageAsJson(Widen(out).c_str());
     } else if (type == "setMpoDisabled") {
         // Applied only from the Apply button, never on the toggle itself: this raises UAC and
