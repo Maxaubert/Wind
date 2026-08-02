@@ -15,6 +15,21 @@ test.beforeEach(async ({ page }) => {
           // model fails that check (undefined !== 'render'), hiding the row the same way.
           listeners.forEach(fn => fn({ data: { type: 'config', values: { zoomInSpeed: '1.2', smoothZoom: '0', uiTheme: 'auto', showAdvanced: '1', model: 'render', zoomInButton: '2', zoomInVk: '33', zoomOutButton: '1', zoomOutVk: '34' } } }));
         if (msg.type === 'setConfig') window.__sets.push(msg);
+        // MPO lives in the registry, not the ini. __mpoDisabled drives what the "registry" reports;
+        // __mpoOk drives whether the elevated write is accepted (false = UAC dismissed).
+        if (msg.type === 'mpoState')
+          // __mpoAtBoot defaults to the current value, i.e. "the registry is what DWM loaded".
+          // Set it separately to model a registry that has already moved away from the boot state.
+          listeners.forEach(fn => fn({ data: { type: 'mpoState',
+            disabled: !!window.__mpoDisabled,
+            bootKnown: window.__mpoBootKnown !== false,
+            atBoot: window.__mpoAtBoot !== undefined ? !!window.__mpoAtBoot : !!window.__mpoDisabled } }));
+        if (msg.type === 'setMpoDisabled') {
+          const ok = window.__mpoOk !== false;
+          if (ok) window.__mpoDisabled = msg.value === '1';
+          listeners.forEach(fn => fn({ data: { type: 'mpoApplied', ok, disabled: !!window.__mpoDisabled } }));
+        }
+        if (msg.type === 'window') window.__sets.push(msg);
         // The host shows a native file picker and replies with the bare exe name. Stand in for it
         // with a settable name so a test can drive what the "picker" returns.
         if (msg.type === 'pickExe')
@@ -138,4 +153,107 @@ test('keybind capture writes a VK on keydown (live, no Apply needed)', async ({ 
   // hot-reloads the new key and the hook stops swallowing the previous binding). No Apply step.
   const sets = await page.evaluate(() => window.__sets);
   expect(sets.some(s => s.key === 'zoomInVk' && s.value === '113')).toBeTruthy();
+});
+
+// --- MPO row + unsaved-changes guard (issue #164) ---------------------------
+// The MPO row reflects HKLM, not the ini, so it stages and applies on its own path. The TOGGLE is
+// the detector - unticked means MPO is on - so these assert on its checked state rather than on any
+// badge beside it. A badge saying the same thing was removed: it read as an action, not a state.
+const mpoBox = page => page.getByText('Disable MPO').locator('xpath=../..').getByRole('checkbox');
+
+test('MPO row shows unticked when MPO is still enabled', async ({ page }) => {
+  await page.addInitScript(() => { window.__mpoDisabled = false; });
+  await page.goto('/');
+  await expect(page.getByText('Disable MPO')).toBeVisible();
+  await expect(mpoBox(page)).not.toBeChecked();
+  await expect(page.getByText('Requires restart')).toHaveCount(0);
+});
+
+test('MPO row shows ticked once MPO is disabled', async ({ page }) => {
+  await page.addInitScript(() => { window.__mpoDisabled = true; });
+  await page.goto('/');
+  await expect(mpoBox(page)).toBeChecked();
+  await expect(page.getByText('Requires restart')).toHaveCount(0);
+});
+
+test('staging MPO shows "Requires restart" and prompts to reboot on Apply', async ({ page }) => {
+  await page.addInitScript(() => { window.__mpoDisabled = false; });
+  await page.goto('/');
+  await mpoBox(page).check();
+  await expect(page.getByText('Requires restart')).toBeVisible();
+  await page.getByRole('button', { name: 'Apply' }).click();
+  await expect(page.getByRole('dialog')).toContainText('Restart to finish');
+  // Cancel leaves the registry change in place and only defers the reboot, so the toggle stays
+  // ticked AND the chip stays up: the value is written but DWM is still running the old one.
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
+  await expect(mpoBox(page)).toBeChecked();
+  await expect(page.getByText('Requires restart')).toBeVisible();
+});
+
+test('a dismissed admin prompt reverts the MPO toggle', async ({ page }) => {
+  await page.addInitScript(() => { window.__mpoDisabled = false; window.__mpoOk = false; });
+  await page.goto('/');
+  await mpoBox(page).check();
+  await page.getByRole('button', { name: 'Apply' }).click();
+  await expect(page.getByRole('dialog')).toContainText('MPO change not applied');
+  // Scoped to the dialog: the title bar also has a button named Close.
+  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
+  // Reverted: back to unticked, with nothing left staged.
+  await expect(mpoBox(page)).not.toBeChecked();
+  await expect(page.getByText('Requires restart')).toHaveCount(0);
+});
+
+test('closing with unsaved changes asks before discarding', async ({ page }) => {
+  await page.goto('/');
+  // The title-bar X, not the footer Discard: both a footer button and the dialog are named
+  // "Discard", so every button here is located precisely.
+  const titleClose = page.locator('button.tbtn.close');
+  await page.getByText('Smooth zoom', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();
+  await titleClose.click();
+  await expect(page.getByRole('dialog')).toContainText('Settings not applied');
+  // Cancel keeps the window and the staged change.
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  let sets = await page.evaluate(() => window.__sets);
+  expect(sets.some(s => s.type === 'window' && s.action === 'close')).toBeFalsy();
+  // Discard closes for real, with force so the host guard does not re-ask.
+  await titleClose.click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Discard' }).click();
+  sets = await page.evaluate(() => window.__sets);
+  expect(sets.some(s => s.type === 'window' && s.action === 'close' && s.force === '1')).toBeTruthy();
+});
+
+test('closing with nothing staged does not prompt', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('button.tbtn.close').click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const sets = await page.evaluate(() => window.__sets);
+  expect(sets.some(s => s.type === 'window' && s.action === 'close')).toBeTruthy();
+});
+
+// The bug this pair guards (issue #164, caught in use): DWM reads OverlayTestMode once, at boot.
+// Comparing the staged value against the REGISTRY made restoring the boot value demand a pointless
+// reboot. The comparison is against the BOOT state, so restoring it is a no-op and a real change
+// still prompts.
+test('putting MPO back to the boot state needs no restart', async ({ page }) => {
+  // DWM booted with MPO disabled; the registry has since been changed to enabled.
+  await page.addInitScript(() => { window.__mpoDisabled = false; window.__mpoAtBoot = true; });
+  await page.goto('/');
+  // Nothing staged yet, but the registry already disagrees with what is running - say so.
+  await expect(page.getByText('Requires restart')).toBeVisible();
+  await mpoBox(page).check();                       // back to the boot state
+  await expect(page.getByText('Requires restart')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Apply' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);   // written, but nothing to reboot for
+  await expect(mpoBox(page)).toBeChecked();
+});
+
+test('moving MPO away from the boot state still prompts to restart', async ({ page }) => {
+  await page.addInitScript(() => { window.__mpoDisabled = true; window.__mpoAtBoot = true; });
+  await page.goto('/');
+  await expect(page.getByText('Requires restart')).toHaveCount(0);
+  await mpoBox(page).uncheck();
+  await expect(page.getByText('Requires restart')).toBeVisible();
+  await page.getByRole('button', { name: 'Apply' }).click();
+  await expect(page.getByRole('dialog')).toContainText('Restart to finish');
 });
