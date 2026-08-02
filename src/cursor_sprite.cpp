@@ -1,5 +1,6 @@
 #include "cursor_sprite.h"
 #include "crosshair.h"
+#include "band_window.h"
 #include <cstring>
 #include <cstdint>
 #include <algorithm>
@@ -34,21 +35,13 @@ bool CursorSprite::create(int zorderBand) {
                         | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
     hwnd_ = nullptr;
     // Match the render overlay's z-band (needs UIAccess) so the sprite draws above the shell's
-    // immersive bands - the only way the cursor can cover the magnified taskbar / Start / tray.
-    // Without it the sprite is an ordinary topmost window and the shell composites over it.
-    // Undocumented, so load it dynamically and fall back to a plain topmost window when the band
-    // API or UIAccess is unavailable (e.g. the non-elevated dev build).
-    if (zorderBand > 0 && s_atom) {
-        using PFN_CWIB = HWND(WINAPI*)(DWORD, ATOM, LPCWSTR, DWORD, int, int, int, int,
-                                       HWND, HMENU, HINSTANCE, LPVOID, DWORD);
-        if (HMODULE u32 = GetModuleHandleW(L"user32.dll")) {
-            if (auto pCWIB = reinterpret_cast<PFN_CWIB>(GetProcAddress(u32, "CreateWindowInBand"))) {
-                hwnd_ = pCWIB(exStyle, s_atom, L"WindCursor", WS_POPUP,
-                              0, 0, kSize, kSize, nullptr, nullptr, hInst, nullptr,
-                              static_cast<DWORD>(zorderBand));
-            }
-        }
-    }
+    // immersive bands - the only way the cursor can cover the magnified taskbar / Start / tray,
+    // and (band 17, issue #162) the Snipping Tool capture overlay. Without it the sprite is an
+    // ordinary topmost window and the shell composites over it. Undocumented, so it is loaded
+    // dynamically and cascades down to band 16 then plain topmost; see band_window.h.
+    int usedBand = 0;
+    hwnd_ = wind::CreateBandedWindow(exStyle, s_atom, L"WindCursor", WS_POPUP,
+                                     0, 0, kSize, kSize, hInst, zorderBand, &usedBand);
     if (!hwnd_) {
         hwnd_ = CreateWindowExW(exStyle, kClassName, L"WindCursor", WS_POPUP,
                                 0, 0, kSize, kSize, nullptr, nullptr, hInst, nullptr);

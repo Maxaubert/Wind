@@ -81,7 +81,7 @@ try {
     # We intentionally do NOT write a magnifier.ini into Program Files. Wind.exe resolves its ini to
     # %LOCALAPPDATA%\Wind\magnifier.ini (Program Files is read-only for the non-admin app/config UI),
     # and LoadConfig creates it from the built-in defaults on first launch - which already ship
-    # zorderBand=16 and onboarded=0. So there is exactly one ini to manage, in %LOCALAPPDATA%. Remove
+    # zorderBand=0 and onboarded=0. So there is exactly one ini to manage, in %LOCALAPPDATA%. Remove
     # any stale Program Files copy left by an older deploy so it can't cause confusion (it is never read).
     $iniDst = "$dst\magnifier.ini"
     if (Test-Path $iniDst) { Remove-Item $iniDst -Force; Write-Output "removed stale Program Files magnifier.ini" }
