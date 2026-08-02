@@ -425,9 +425,46 @@ overlay is WDA_EXCLUDEFROMCAPTURE, so it can only be captured from inside the ap
   `tools\uiaccess_setup.ps1`, and create the overlay via `CreateWindowInBand` with
   `zorderBand=16` (ZBID_SYSTEM_TOOLS, above the shell bands). Falls back to a normal topmost
   window when UIAccess/band is unavailable (casual `build.bat` build, zorderBand=0). The exact
-  band is config-tunable (`zorderBand`) since `CreateWindowInBand` is undocumented. (Games
+  band is config-tunable (`zorderBand`) since `CreateWindowInBand` is undocumented. **Superseded
+  by issue #162: the band is now OPT-IN and the shipped default is 0, because a banded overlay is
+  covered by the Snipping Tool capture overlay. See the #162 entry below for the trade-off.**
+  (Games
   cover the shell via *exclusive fullscreen*, a different mechanism that doesn't apply to a
   desktop overlay.)
+
+- **No cursor and an unmagnified view under the Snipping Tool overlay** (issue #162, fixed
+  2026-08-02): with the Win+Shift+S capture overlay up, zooming showed the *unmagnified* screen
+  and **no cursor at all**, in every model. `ScreenClippingHost.exe` composites above
+  `ZBID_SYSTEM_TOOLS` (16), so both the render overlay and the transform model's cursor sprite
+  were covered - and since Wind hides the OS cursor plane and draws its own replacement, covering
+  that replacement leaves nothing at all.
+
+  **Fixed by shipping `zorderBand=0` (unbanded).** This is a TRADE-OFF, not a strict improvement,
+  and it partially reverses the shell-surface fix above:
+
+  | | Start / taskbar / tray | Snipping Tool overlay |
+  |---|---|---|
+  | band 16 (old default) | covered correctly | **covers us; no cursor at all** |
+  | band 0 (new default) | may show an unmagnified copy | works |
+  | band 17 (ZBID_LOCK) | would cover both | **rejected by `CreateWindowInBand` on 26200** |
+
+  A missing cursor is an accessibility failure; an unmagnified Start menu is a cosmetic one, so
+  band 0 wins by default and band 16 stays available via the `zorderBand` knob.
+
+  Band 17 is the trap in this bug. `CreateWindowInBand` refuses it and the old code's only
+  fallback was an unbanded window, so asking for 17 *silently produced band 0* - which is why
+  setting 17 appeared to fix it and a "proper" 17 -> 16 cascade then reintroduced the bug.
+  `wind::CreateBandedWindow` (`src/band_window.h`) now logs when a requested band is refused.
+
+  **Diagnostic traps, all hit while chasing this:**
+  - `ScreenClippingHost` holds the foreground but has **no visible top-level window**. A z-order
+    walk reports Wind's sprite at index 0 (topmost) while it is plainly covered, so z-order
+    enumeration cannot confirm or refute a band problem here.
+  - `CURSOR_SHOWING` stays 1 for the whole snip, so this is not the `cursorVisibility=auto` gate.
+  - It is not a cursor-decode failure either: `transform_model.cpp:419` falls back to the real
+    system pointer for any shape it cannot render, so a decode failure shows a cursor, not none.
+  - The snip overlay is **not** `WS_EX_LAYERED`, so `IsOverlayFg`'s cheap first test misses it and
+    only the built-in name list catches it.
 
 - **I-beam / invert cursors went invisible** over text fields: the I-beam is a color cursor
   with NO alpha channel (`anyAlpha=0`) - an invert-style cursor that shows by inverting the

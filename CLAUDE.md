@@ -9,7 +9,8 @@ Plan: `docs/superpowers/plans/2026-05-24-wind-magnifier.md`.
 - Build + run tests: `build.bat test`  (runs the doctest binary; exit 0 = pass)
 - Build UIAccess variant: `build.bat uiaccess`  (uiAccess=true manifest; must be signed + run
   from `C:\Program Files\Wind` - deploy via `tools\uiaccess_setup.ps1` elevated). Needed only
-  to cover the Start menu / taskbar / tray (overlay uses `CreateWindowInBand`, `zorderBand=16`).
+  to OPTIONALLY cover the Start menu / taskbar / tray (overlay uses `CreateWindowInBand`,
+  opt-in `zorderBand=16`; shipped default is 0, see the band note below).
 - Build config UI: `build.bat config`  (npm-builds the Svelte app under `ui/` to `ui/dist/`, then
   compiles `src/config_ui/*.cpp` against the vendored WebView2 SDK -> `WindConfig.exe` next to
   `Wind.exe`). Also run by `tools\uiaccess_setup.ps1`, which deploys `WindConfig.exe` + `ui/dist`
@@ -289,6 +290,21 @@ staged Apply/Discard footer.
   (transparent + click-through + capture-excluded, so being on top is safe). If we sit below an
   always-on-top app overlay (RTSS, Task Manager), that window draws a second unmagnified copy
   over our magnified view. `zorderBand=16` (signed UIAccess build) also covers shell + same-band.
+  BAND CHOICE IS A TRADE-OFF (issue #162) - the shipped default is **0, unbanded**, and restoring
+  16 without re-testing BOTH halves is a regression:
+  - band 16 covers the Start menu / taskbar thumbnails / tray flyouts, but the **Snipping Tool**
+    capture overlay then composites over US: zooming under Win+Shift+S shows the unmagnified
+    screen with **NO cursor at all**, in every model (we hide the OS cursor plane and draw a
+    replacement, so covering the replacement leaves nothing). Rig-measured both ways.
+  - band 0 makes the snip overlay work; the shell surfaces above are the price.
+  - band 17 (ZBID_LOCK) would cover both and **is rejected by `CreateWindowInBand` on 26200**. It
+    fell through silently to unbanded, which is exactly why it looked like the fix at first.
+  Both bandable windows (render overlay + transform cursor sprite) go through
+  `wind::CreateBandedWindow` (src/band_window.h), which cascades the requested band -> 16 ->
+  unbanded and LOGS when the request was refused - never let a refused band be silent again.
+  DIAGNOSTIC TRAP: `ScreenClippingHost.exe` holds foreground with no visible top-level window, so
+  a z-order walk shows us at index 0 while we are plainly covered. Do not "verify" band problems
+  that way. `CURSOR_SHOWING` also stays 1 throughout, so it is not the `cursorVisibility` gate.
 - RENDER ENGINE: on zoom-in, `invalidateCapture()` + `capture()` drains to the LATEST duplication
   frame (not the first): the first AcquireNextFrame after (re)creating the duplication can be a
   transitional composite (the window underneath), which otherwise flashed on reveal.

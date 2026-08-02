@@ -7,6 +7,7 @@
 #include "crosshair.h"
 #include "png_dump.h"
 #include "logging.h"
+#include "band_window.h"
 #include "mag_host.h"   // shared Magnification-runtime refcount (both models use the API)
 #include <windows.h>
 #include <d3d11.h>
@@ -538,19 +539,16 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     if (noLayered) RLog("initialize: WIND_NOLAYERED diagnostic build path (no WS_EX_LAYERED)");
     s_->hwnd = nullptr;
     // Higher z-band (needs UIAccess) so we draw above the shell's immersive bands - the only
-    // way an overlay can cover the Start menu / taskbar / tray flyouts. Undocumented, so we
-    // load it dynamically and fall back to a normal topmost window if it's unavailable.
-    if (zorderBand > 0 && atom) {
-        using PFN_CWIB = HWND(WINAPI*)(DWORD, ATOM, LPCWSTR, DWORD, int, int, int, int,
-                                       HWND, HMENU, HINSTANCE, LPVOID, DWORD);
-        if (HMODULE u32 = GetModuleHandleW(L"user32.dll")) {
-            if (auto pCWIB = reinterpret_cast<PFN_CWIB>(GetProcAddress(u32, "CreateWindowInBand"))) {
-                s_->hwnd = pCWIB(exStyle, atom, L"Wind Magnifier", WS_POPUP,
-                                 monitor.x, monitor.y, screenW, screenH, nullptr, nullptr,
-                                 wc.hInstance, nullptr, static_cast<DWORD>(zorderBand));
-                if (s_->hwnd) s_->inBand = true;
-            }
-        }
+    // way an overlay can cover the Start menu / taskbar / tray flyouts, and (band 17, issue #162)
+    // the Snipping Tool capture overlay. Undocumented, so it is loaded dynamically and cascades
+    // down to band 16 and then to a normal topmost window; see band_window.h.
+    int usedBand = 0;
+    s_->hwnd = wind::CreateBandedWindow(exStyle, atom, L"Wind Magnifier", WS_POPUP,
+                                        monitor.x, monitor.y, screenW, screenH, wc.hInstance,
+                                        zorderBand, &usedBand);
+    if (s_->hwnd) s_->inBand = true;
+    if (zorderBand > 0 && usedBand != zorderBand) {
+        RLog("initialize: z-band %d unavailable, using %d", zorderBand, usedBand);
     }
     if (!s_->hwnd) {
         s_->hwnd = CreateWindowExW(exStyle, kClass, L"Wind Magnifier", WS_POPUP,

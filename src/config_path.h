@@ -5,7 +5,7 @@
 // non-admin processes - the config UI is normal user and would silently fail every setConfig
 // otherwise). The deployed build ships NO ini in Program Files (the deploy script no longer writes
 // one), so in the LOCALAPPDATA case LoadConfig creates the file from the built-in defaults on first
-// launch - which already include zorderBand=16 and onboarded=0. If an exe-dir template DOES exist
+// launch - which already include zorderBand=0 and onboarded=0. If an exe-dir template DOES exist
 // (e.g. a portable/dev layout), it is still used as a seed. Same resolution is used by Wind.exe and
 // WindConfig.exe so they always read/write the same single file.
 #pragma once
@@ -38,7 +38,7 @@ inline std::wstring ResolveIniPath() {
     std::wstring lapIni = dir + L"\\magnifier.ini";
 
     // Seed the user copy from the install template on first run, so deploy-time defaults
-    // (zorderBand=16, the user's previous bindings) carry over to the writable location.
+    // (zorderBand, the user's previous bindings) carry over to the writable location.
     if (GetFileAttributesW(lapIni.c_str()) == INVALID_FILE_ATTRIBUTES &&
         GetFileAttributesW(exeIni.c_str()) != INVALID_FILE_ATTRIBUTES) {
         CopyFileW(exeIni.c_str(), lapIni.c_str(), FALSE);
