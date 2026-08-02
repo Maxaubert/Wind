@@ -151,47 +151,50 @@ test('keybind capture writes a VK on keydown (live, no Apply needed)', async ({ 
 });
 
 // --- MPO row + unsaved-changes guard (issue #164) ---------------------------
-// The MPO row reflects HKLM, not the ini, so it stages and applies on its own path. These cover the
-// three states that are easy to get wrong: the detector flag, the staged "requires restart" tag,
-// and a dismissed UAC prompt having to revert the toggle instead of showing a phantom change.
+// The MPO row reflects HKLM, not the ini, so it stages and applies on its own path. The TOGGLE is
+// the detector - unticked means MPO is on - so these assert on its checked state rather than on any
+// badge beside it. A badge saying the same thing was removed: it read as an action, not a state.
+const mpoBox = page => page.getByText('Disable MPO').locator('xpath=../..').getByRole('checkbox');
 
-test('MPO row flags when MPO is still enabled', async ({ page }) => {
+test('MPO row shows unticked when MPO is still enabled', async ({ page }) => {
   await page.addInitScript(() => { window.__mpoDisabled = false; });
   await page.goto('/');
   await expect(page.getByText('Disable MPO')).toBeVisible();
-  await expect(page.getByText('MPO on')).toBeVisible();
+  await expect(mpoBox(page)).not.toBeChecked();
   await expect(page.getByText('Requires restart')).toHaveCount(0);
 });
 
-test('MPO row shows no warning once MPO is disabled', async ({ page }) => {
+test('MPO row shows ticked once MPO is disabled', async ({ page }) => {
   await page.addInitScript(() => { window.__mpoDisabled = true; });
   await page.goto('/');
-  await expect(page.getByText('Disable MPO')).toBeVisible();
-  await expect(page.getByText('MPO on')).toHaveCount(0);
+  await expect(mpoBox(page)).toBeChecked();
+  await expect(page.getByText('Requires restart')).toHaveCount(0);
 });
 
 test('staging MPO shows "Requires restart" and prompts to reboot on Apply', async ({ page }) => {
   await page.addInitScript(() => { window.__mpoDisabled = false; });
   await page.goto('/');
-  await page.getByText('Disable MPO').locator('xpath=../..').getByRole('checkbox').check();
+  await mpoBox(page).check();
   await expect(page.getByText('Requires restart')).toBeVisible();
   await page.getByRole('button', { name: 'Apply' }).click();
   await expect(page.getByRole('dialog')).toContainText('Restart to finish');
-  // Cancel must leave the registry change in place - only the reboot is deferred.
-  await page.getByRole('button', { name: 'Cancel' }).click();
-  await expect(page.getByText('MPO on')).toHaveCount(0);
+  // Cancel must leave the registry change in place - only the reboot is deferred - so the toggle
+  // stays ticked and nothing is left staged.
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
+  await expect(mpoBox(page)).toBeChecked();
+  await expect(page.getByText('Requires restart')).toHaveCount(0);
 });
 
 test('a dismissed admin prompt reverts the MPO toggle', async ({ page }) => {
   await page.addInitScript(() => { window.__mpoDisabled = false; window.__mpoOk = false; });
   await page.goto('/');
-  await page.getByText('Disable MPO').locator('xpath=../..').getByRole('checkbox').check();
+  await mpoBox(page).check();
   await page.getByRole('button', { name: 'Apply' }).click();
   await expect(page.getByRole('dialog')).toContainText('MPO change not applied');
   // Scoped to the dialog: the title bar also has a button named Close.
   await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
-  // Reverted: the warning is back and nothing is left staged.
-  await expect(page.getByText('MPO on')).toBeVisible();
+  // Reverted: back to unticked, with nothing left staged.
+  await expect(mpoBox(page)).not.toBeChecked();
   await expect(page.getByText('Requires restart')).toHaveCount(0);
 });
 

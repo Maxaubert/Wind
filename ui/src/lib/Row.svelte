@@ -82,25 +82,25 @@
         <span class="listsummary">{summary}</span>
         <button class="linkbtn" {disabled} on:click={() => (listOpen = true)}>Manage list</button>
       {:else if row.type === 'mpo'}
-        <!-- Two states worth showing beside the toggle: a WARNING while MPO is still enabled (this
-             is the whole point of the detector - it went unnoticed through a Windows repair install
-             that silently re-enabled it), and a "Requires restart" tag once the toggle is staged
-             away from the live registry state. -->
-        {#if extra.mpoKnown && !extra.mpoStaged && !extra.mpoLive}
-          <span class="warn" title="MPO is enabled">MPO on</span>
-        {/if}
-        {#if extra.mpoKnown && extra.mpoStaged !== extra.mpoLive}
-          <span class="tag">Requires restart</span>
-        {/if}
-        <label class="checkbox-wrapper" class:disabled={disabled || !extra.mpoKnown}>
-          <input type="checkbox" disabled={disabled || !extra.mpoKnown} checked={!!extra.mpoStaged}
-                 on:change={e => set('__mpoStaged', e.target.checked)} />
-          <svg viewBox="0 0 35.6 35.6" aria-hidden="true">
-            <circle class="background" cx="17.8" cy="17.8" r="17.8"></circle>
-            <circle class="stroke" cx="17.8" cy="17.8" r="14.37"></circle>
-            <polyline class="check" points="11.78 18.12 15.55 22.23 25.17 12.87"></polyline>
-          </svg>
-        </label>
+        <!-- The toggle IS the detector: unticked means MPO is on. An extra "MPO on" badge beside it
+             said the same thing twice and made the row read as an action button rather than a state,
+             so the only chip here is the staged "Requires restart" note. Flex-wrapped because an
+             empty inline-block checkbox baselines at its bottom edge, which sat the chip visibly
+             below the toggle. -->
+        <div class="mpoctl">
+          {#if extra.mpoKnown && extra.mpoStaged !== extra.mpoLive}
+            <span class="tag">Requires restart</span>
+          {/if}
+          <label class="checkbox-wrapper" class:disabled={disabled || !extra.mpoKnown}>
+            <input type="checkbox" disabled={disabled || !extra.mpoKnown} checked={!!extra.mpoStaged}
+                   on:change={e => set('__mpoStaged', e.target.checked)} />
+            <svg viewBox="0 0 35.6 35.6" aria-hidden="true">
+              <circle class="background" cx="17.8" cy="17.8" r="17.8"></circle>
+              <circle class="stroke" cx="17.8" cy="17.8" r="14.37"></circle>
+              <polyline class="check" points="11.78 18.12 15.55 22.23 25.17 12.87"></polyline>
+            </svg>
+          </label>
+        </div>
       {/if}
     </div>
   </div>
@@ -154,13 +154,11 @@
   .listsummary{color:var(--muted);font-size:12px;margin-right:10px;max-width:180px;
                display:inline-block;vertical-align:middle;overflow:hidden;text-overflow:ellipsis;
                white-space:nowrap}
-  /* MPO row chips. .warn is the detector flag (amber, stated as a fact rather than an alarm);
-     .tag is the neutral "this needs a reboot" note once the toggle is staged. */
-  .warn{background:rgba(224,150,40,.16);color:#e09628;border:1px solid rgba(224,150,40,.35);
-        border-radius:999px;padding:3px 9px;font-size:11px;font-weight:600;margin-right:10px;
-        vertical-align:middle}
+  /* MPO row: flex so the "Requires restart" chip centres on the TOGGLE rather than baselining
+     against the row's description text. */
+  .mpoctl{display:flex;align-items:center;gap:10px}
   .tag{background:var(--chip);color:var(--muted);border:1px solid var(--line);border-radius:999px;
-       padding:3px 9px;font-size:11px;margin-right:10px;vertical-align:middle}
+       padding:3px 9px;font-size:11px;line-height:1.4;white-space:nowrap}
   /* About hero: large centered Wind logo fills the section so it has real height (helps the
      scroll-spy reach About) and the bottom of the scroll area isn't empty. */
   .about-hero{padding:48px 0 64px;text-align:center;color:var(--text);display:flex;flex-direction:column;align-items:center}
