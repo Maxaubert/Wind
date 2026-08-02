@@ -16,6 +16,9 @@ static bool    g_kbOk         = false;     // result of the keyboard SetWindowsH
 // key can never be left believed-held).
 static std::atomic<bool> g_kbPressed[256]      = {};
 static std::atomic<bool> g_kbSwallowedDown[256] = {};
+// Raw Input physical-key shadow (issue #167): set/cleared from WM_INPUT make/break in main. Immune
+// to hook eviction and suspension; used by EffectiveKeyDown to veto stuck "held" readings.
+static std::atomic<bool> g_rawKbDown[256]       = {};
 // The WH_MOUSE_LL hook lives on its OWN thread (see start()): Windows services a low-level hook on
 // the thread that installed it and holds each mouse event until that thread responds, so the hook
 // MUST sit on a thread that pumps messages constantly. On the main thread it was starved behind the
@@ -89,14 +92,26 @@ bool InputRouter::keyPressed(int vk) const {
     if (vk <= 0 || vk > 255) return false;
     return g_kbPressed[vk].load(std::memory_order_relaxed);
 }
-// Raw Input safety net for a key whose UP the hook never saw (issue #167) - see the WM_INPUT
-// handler in main.cpp for why. Clearing BOTH records is the point: g_kbPressed unsticks the held
-// state main reads, and g_kbSwallowedDown stops a later, unrelated UP from being swallowed on the
-// strength of a DOWN whose UP already went past us. Idempotent with the hook's own clear.
-void InputRouter::rawKeyUp(int vk) {
+// Raw Input keyboard shadow (issue #167). Raw input is immune to hook eviction, hook suspension,
+// and LowLevelHooksTimeout, and auto-repeat re-delivers makes - so this is the most trustworthy
+// physical-key-state source we have. A break additionally clears the hook's records: g_kbPressed
+// unsticks the held state main reads, and g_kbSwallowedDown stops a later, unrelated UP from being
+// swallowed on the strength of a DOWN whose UP already went past us. Idempotent with the hook's
+// own clear. The shadow itself feeds EffectiveKeyDown (key_state.h), which lets it VETO a stuck
+// "held" reading from any authority - the first shipped #167 fix cleared the hook records on a
+// break but could not help when the stranded latch was elsewhere; the veto covers every source.
+void InputRouter::rawKeyEvent(int vk, bool down) {
     if (vk <= 0 || vk > 255) return;
-    g_kbPressed[vk].store(false, std::memory_order_relaxed);
-    g_kbSwallowedDown[vk].store(false, std::memory_order_relaxed);
+    rawKbSeen_.store(true, std::memory_order_relaxed);
+    g_rawKbDown[vk].store(down, std::memory_order_relaxed);
+    if (!down) {
+        g_kbPressed[vk].store(false, std::memory_order_relaxed);
+        g_kbSwallowedDown[vk].store(false, std::memory_order_relaxed);
+    }
+}
+bool InputRouter::rawKeyDown(int vk) const {
+    if (vk <= 0 || vk > 255) return false;
+    return g_rawKbDown[vk].load(std::memory_order_relaxed);
 }
 void InputRouter::setKeys(int zoomInVk, int zoomInVk2, int zoomOutVk, int zoomOutVk2, int recenterVk,
                           int cursorLockVk, int swapModelVk) {

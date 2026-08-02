@@ -13,6 +13,7 @@
 #include "config.h"
 #include "config_path.h"
 #include "drag_follow.h"
+#include "key_state.h"
 #include "mpo_boot.h"
 #include "config_ui/ini_edit.h"   // wind::UpdateIniText - flip the model key in place
 #include "logging.h"
@@ -628,10 +629,19 @@ static void RunTick(TickState& t) {
         t.kbHookDivergentSinceMs = 0;
     }
     const bool kbHook = g_input.kbHookActive();
+    // Every authority is subject to the Raw-Input shadow's VETO (issue #167, EffectiveKeyDown): a
+    // launch hitch can strand a "held" reading in the hook's tracked state or the async state, and
+    // the zoom then creeps forever. Raw input survives hook eviction/suspension and queue stalls
+    // (auto-repeat re-delivers makes), so "raw says the key is up" outranks everything. The veto
+    // can only release a key, never press one, and is disabled until raw keyboard input has been
+    // observed at all (registration failure keeps the old behaviour).
+    const bool rawSeen = g_input.rawKbSeen();
     auto keyDown = [&](int vk) {
         if (vk == 0) return false;
-        if (kbHook && g_input.isBoundKey(vk)) return g_input.keyPressed(vk);
-        return (GetAsyncKeyState(vk) & 0x8000) != 0;
+        const bool primary = (kbHook && g_input.isBoundKey(vk))
+                                 ? g_input.keyPressed(vk)
+                                 : (GetAsyncKeyState(vk) & 0x8000) != 0;
+        return wind::EffectiveKeyDown(primary, rawSeen, g_input.rawKeyDown(vk));
     };
     // Modifier mask: bit 1=Ctrl, 2=Alt, 4=Shift, 8=Win. 0 = no modifiers required. Extra modifiers
     // never disqualify (so a "Ctrl+F1" combo still fires when Ctrl+Shift+F1 is held).
@@ -1500,9 +1510,23 @@ static void RunTick(TickState& t) {
             // 5 s window rather than a flag, so it costs no extra state and cannot spam per tick.
             } else if (held && secs > 6.0 &&
                        static_cast<int>(secs / 5.0) != static_cast<int>((secs - dt) / 5.0)) {
+                // Per-source breakdown for the four zoom vks (issue #167): bit i of each mask is
+                // {inVk, inVk2, outVk, outVk2}. Names which authority claims "held" during a stuck
+                // episode - the piece of evidence every prior episode failed to leave behind.
+                const int vks[4] = { t.cfg.zoomInVk, t.cfg.zoomInVk2,
+                                     t.cfg.zoomOutVk, t.cfg.zoomOutVk2 };
+                unsigned mAsync = 0, mHook = 0, mRaw = 0;
+                for (int i = 0; i < 4; ++i) {
+                    if (vks[i] <= 0) continue;
+                    if (GetAsyncKeyState(vks[i]) & 0x8000) mAsync |= 1u << i;
+                    if (g_input.keyPressed(vks[i]))        mHook  |= 1u << i;
+                    if (g_input.rawKeyDown(vks[i]))        mRaw   |= 1u << i;
+                }
                 wind::Log(wind::LogLevel::Warn, "input",
-                          "%sHeld STUCK? held=%.1fs hook[d=%u u=%u dbl=%u / d=%u u=%u dbl=%u] raw[d=%u u=%u / d=%u u=%u] lvl=%.2f",
-                          tag, secs,
+                          "%sHeld STUCK? held=%.1fs src[async=%X hook=%X raw=%X kbHookActive=%d rawSeen=%d] "
+                          "hook[d=%u u=%u dbl=%u / d=%u u=%u dbl=%u] raw[d=%u u=%u / d=%u u=%u] lvl=%.2f",
+                          tag, secs, mAsync, mHook, mRaw,
+                          g_input.kbHookActive() ? 1 : 0, g_input.rawKbSeen() ? 1 : 0,
                           st.dbgHookDown[1].load(), st.dbgHookUp[1].load(), st.dbgHookDbl[1].load(),
                           st.dbgHookDown[2].load(), st.dbgHookUp[2].load(), st.dbgHookDbl[2].load(),
                           st.dbgRawDown[1].load(), st.dbgRawUp[1].load(),
@@ -1628,8 +1652,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 // runs forever and the stale "held" bit also hides the dead hook from the watchdog
                 // above, since a live hook swallows bound keys so the poller can never see one.
                 const RAWKEYBOARD& kb = ri->data.keyboard;
-                if ((kb.Flags & RI_KEY_BREAK) && kb.VKey > 0 && kb.VKey < 256)
-                    g_input.rawKeyUp(static_cast<int>(kb.VKey));
+                if (kb.VKey > 0 && kb.VKey < 256)
+                    g_input.rawKeyEvent(static_cast<int>(kb.VKey), !(kb.Flags & RI_KEY_BREAK));
             } else if (ri->header.dwType == RIM_TYPEMOUSE) {
                 const RAWMOUSE& m = ri->data.mouse;
                 if ((m.usFlags & MOUSE_MOVE_ABSOLUTE) == 0) {

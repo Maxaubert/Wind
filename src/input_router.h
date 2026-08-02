@@ -66,13 +66,16 @@ public:
     // when kbHookActive() (a swallowed key never shows in GetAsyncKeyState), so main reads it instead
     // of polling. Returns false for out-of-range vk.
     bool keyPressed(int vk) const;
-    // Raw Input safety net (issue #167): clear a key's held/swallowed records from a WM_INPUT key
-    // UP. Raw Input is NOT subject to LowLevelHooksTimeout, so it still arrives when Windows has
-    // silently evicted the hook mid-hold - the case that otherwise strands a keyboard zoom bind as
-    // held forever. UP only: it can only ever clear held state, never set it, so it cannot falsely
-    // hold a key and is idempotent with the hook's own clear. The mouse side-buttons have had the
-    // same net since #113; this is the keyboard half.
-    void rawKeyUp(int vk);
+    // Raw Input keyboard shadow (issue #167): every WM_INPUT make/break lands here. Raw Input is
+    // NOT subject to LowLevelHooksTimeout, so it still arrives when Windows has silently evicted
+    // the hook mid-hold. A break clears the hook's held/swallowed records (the #168 net), and the
+    // shadow itself lets EffectiveKeyDown (key_state.h) veto a stuck "held" reading from ANY
+    // authority. rawKeyDown reads the shadow; rawKbSeen gates the veto so a machine where raw
+    // keyboard input never arrives keeps the pre-shadow behaviour. Side-buttons have the
+    // equivalent net since #113.
+    void rawKeyEvent(int vk, bool down);
+    bool rawKeyDown(int vk) const;
+    bool rawKbSeen() const { return rawKbSeen_.load(std::memory_order_relaxed); }
     // True once the LL KEYBOARD hook is installed. When false (install failed or WIND_NOHOOK), main
     // must fall back to GetAsyncKeyState and no keyboard swallowing happens.
     bool kbHookActive() const { return kbHookActive_.load(std::memory_order_relaxed); }
@@ -144,6 +147,7 @@ private:
     std::atomic<int> kbCursorLockVk_{0};
     std::atomic<int> kbSwapModelVk_{0};
     std::atomic<bool> kbHookActive_{false}; // true once the LL KEYBOARD hook is installed
+    std::atomic<bool> rawKbSeen_{false};    // any WM_INPUT keyboard event ever observed (#167)
     std::atomic<unsigned> kbHookReinstalls_{0};  // watchdog recoveries this session
     std::atomic<bool> kbHookWanted_{true};       // false while a fullscreen game is foreground
     std::atomic<bool> kbHookRecovering_{false};  // distinguishes watchdog recovery from a resume
