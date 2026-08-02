@@ -7,6 +7,7 @@
 #include "crosshair.h"
 #include "png_dump.h"
 #include "logging.h"
+#include "band_window.h"
 #include "mag_host.h"   // shared Magnification-runtime refcount (both models use the API)
 #include <windows.h>
 #include <d3d11.h>
@@ -67,6 +68,7 @@ struct RenderEngine::State {
     int lastClickX = INT_MIN, lastClickY = INT_MIN;   // skip redundant SetCursorPos
     unsigned long long lastTopmostMs = 0;       // last HWND_TOPMOST re-assert (throttled)
     bool inBand = false;                        // created in a high z-order band (CreateWindowInBand)
+    bool parked = false;                        // overlay shrunk to 1x1 while idle (see setParked)
 
     // Desktop Duplication.
     ComPtr<IDXGIOutputDuplication> dupl;
@@ -537,19 +539,16 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     if (noLayered) RLog("initialize: WIND_NOLAYERED diagnostic build path (no WS_EX_LAYERED)");
     s_->hwnd = nullptr;
     // Higher z-band (needs UIAccess) so we draw above the shell's immersive bands - the only
-    // way an overlay can cover the Start menu / taskbar / tray flyouts. Undocumented, so we
-    // load it dynamically and fall back to a normal topmost window if it's unavailable.
-    if (zorderBand > 0 && atom) {
-        using PFN_CWIB = HWND(WINAPI*)(DWORD, ATOM, LPCWSTR, DWORD, int, int, int, int,
-                                       HWND, HMENU, HINSTANCE, LPVOID, DWORD);
-        if (HMODULE u32 = GetModuleHandleW(L"user32.dll")) {
-            if (auto pCWIB = reinterpret_cast<PFN_CWIB>(GetProcAddress(u32, "CreateWindowInBand"))) {
-                s_->hwnd = pCWIB(exStyle, atom, L"Wind Magnifier", WS_POPUP,
-                                 monitor.x, monitor.y, screenW, screenH, nullptr, nullptr,
-                                 wc.hInstance, nullptr, static_cast<DWORD>(zorderBand));
-                if (s_->hwnd) s_->inBand = true;
-            }
-        }
+    // way an overlay can cover the Start menu / taskbar / tray flyouts, and (band 17, issue #162)
+    // the Snipping Tool capture overlay. Undocumented, so it is loaded dynamically and cascades
+    // down to band 16 and then to a normal topmost window; see band_window.h.
+    int usedBand = 0;
+    s_->hwnd = wind::CreateBandedWindow(exStyle, atom, L"Wind Magnifier", WS_POPUP,
+                                        monitor.x, monitor.y, screenW, screenH, wc.hInstance,
+                                        zorderBand, &usedBand);
+    if (s_->hwnd) s_->inBand = true;
+    if (zorderBand > 0 && usedBand != zorderBand) {
+        RLog("initialize: z-band %d unavailable, using %d", zorderBand, usedBand);
     }
     if (!s_->hwnd) {
         s_->hwnd = CreateWindowExW(exStyle, kClass, L"Wind Magnifier", WS_POPUP,
@@ -576,6 +575,9 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     // overlay is transparent + click-through + capture-excluded + no-activate, so an always-on
     // invisible window doesn't interfere with apps or games beneath it.
     ShowWindow(s_->hwnd, SW_SHOWNOACTIVATE);
+    // ...but parked at 1x1 until the first zoom. Shown-and-fullscreen from startup is what kept a
+    // fullscreen game DWM-composited for its whole session while Wind merely sat idle (setParked).
+    setParked(true);
 
     s_->ready = true;
     return true;
@@ -718,6 +720,50 @@ bool RenderEngine::State::buildDeviceResources() {
     return true;
 }
 
+// Park the overlay (1x1) while idle, restore full monitor bounds before we render.
+//
+// The overlay is a fullscreen, topmost, LAYERED window that is shown for the whole process
+// lifetime (see initialize). primeReveal() already documents the consequence: a top window that
+// is not fully transparent makes DWM stop granting a fullscreen game its independent-flip plane.
+// The part that was missed is that the window's mere GEOMETRY costs the game too - DWM keeps a
+// fullscreen game composited while a fullscreen topmost layered window is stacked over it, so a
+// game ran DWM-composited for its entire session merely because Wind sat idle in the tray, and
+// every promote/demote transition between "Hardware: Independent Flip" and "Composed: Flip" costs
+// the game a frame (PresentMon-measured on RDR2: transition frames of 15-27 ms against an 8 ms
+// baseline). That is the stutter, and it explains why quitting Wind did not fix it: once the game
+// is demoted, DWM only re-promotes on its own terms, so the session stays composited.
+//
+// Parking MOVES the window instead of hiding it. SW_HIDE/SW_SHOW is NOT usable here: a layered
+// window that is hidden and re-shown makes DWM cache and re-display the frame from when it was
+// last visible, flashing the previous zoom session on the next zoom-in (see setVisible). A 1x1
+// window is still "shown", so none of that machinery changes - it just stops covering the game.
+// The swapchain is left at full size (no ResizeBuffers, no device churn); nothing is presented
+// while parked, because every present path unparks first.
+void RenderEngine::setParked(bool park) {
+    if (!s_ || !s_->hwnd || s_->parked == park) return;
+    // WIND_NOPARK=1: A/B diagnostic - never park, i.e. the pre-parking behaviour where the overlay
+    // sits fullscreen over whatever is beneath it for the whole session. Costs the game its
+    // independent-flip plane; kept so a parking-related artifact can be isolated in one run.
+    static const bool noPark = GetEnvironmentVariableW(L"WIND_NOPARK", nullptr, 0) > 0;
+    if (noPark) return;
+    s_->parked = park;
+    // MOVE the window off-screen rather than RESIZING it to 1x1. Both stop it covering the game,
+    // but a resize forces DWM to reallocate the window's redirection surface, and the freshly
+    // allocated area is undefined until we present into it - one black frame on the next composite.
+    // A move keeps the surface (and the swapchain, which is never resized either) exactly as it is.
+    // It also matters that this is a SetWindowPos over a fullscreen game at all: renderFrame already
+    // documents that as a synchronous DWM z-order transaction that hitches the game, which is why
+    // its periodic topmost re-assert is skipped while a game is foreground. Two per zoom session is
+    // the floor; do not add more.
+    //
+    // Park just past the right edge of the VIRTUAL desktop so the overlay cannot land on another
+    // monitor (parking it directly above the target monitor would sit on whatever is up there and
+    // demote a fullscreen app on THAT display instead).
+    const int parkX = GetSystemMetrics(SM_XVIRTUALSCREEN) + GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    const int x = park ? parkX : s_->originX;
+    SetWindowPos(s_->hwnd, HWND_TOPMOST, x, s_->originY, s_->sw, s_->sh, SWP_NOACTIVATE);
+}
+
 void RenderEngine::setVisible(bool visible) {
     if (!s_ || !s_->hwnd) return;
     // Show/hide via LWA_ALPHA on the layered window (NOT SW_HIDE/SW_SHOW, which makes DWM cache and
@@ -746,7 +792,12 @@ void RenderEngine::setVisible(bool visible) {
         if (s_->presentFence) { s_->ctx->End(s_->presentFence.Get()); s_->presentFenceIssued = true; }
     }
     if (visible) {
+        setParked(false);   // defensive: renderFrame already unparked before the frame we revealed
         SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    } else {
+        // Session over: stop covering whatever is underneath. STRICTLY after the black scrub above,
+        // so the scrub still lands on a full-size surface and leaves no stale frame behind.
+        setParked(true);
     }
 }
 
@@ -761,6 +812,9 @@ void RenderEngine::primeReveal() {
     LARGE_INTEGER now{};
     QueryPerformanceCounter(&now);
     s_->primeQpc = now.QuadPart;
+    // The prime only de-promotes the fullscreen app if we actually cover it, so restore full
+    // bounds first (idle parks the overlay at 1x1 - see setParked).
+    setParked(false);
     SetLayeredWindowAttributes(s_->hwnd, 0, 1, LWA_ALPHA);
     SetWindowPos(s_->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
@@ -931,9 +985,15 @@ bool RenderEngine::retarget(const MonitorTarget& m) {
     // during zoom-in, so no flash), adopt the new geometry + device, and force a fresh capture on
     // the new output (same flags as invalidateCapture). The next capture() rebinds the duplication
     // via selectOutput and recreates desktopCopy at the new size (ensureDesktopCopy is size-aware).
-    SetWindowPos(s_->hwnd, HWND_TOPMOST, m.x, m.y, m.w, m.h, SWP_NOACTIVATE);
+    // Adopt the new geometry BEFORE moving the window, so a retarget that happens while we are
+    // parked (idle, e.g. the cursor changed monitor between zooms) keeps the overlay at 1x1 on the
+    // new monitor rather than re-covering it at full size (setParked).
     s_->originX = m.x; s_->originY = m.y;
     s_->sw = m.w; s_->sh = m.h;
+    // Full size either way (parking is a MOVE, not a resize - see setParked); only the x differs.
+    const int px = s_->parked ? (GetSystemMetrics(SM_XVIRTUALSCREEN) + GetSystemMetrics(SM_CXVIRTUALSCREEN))
+                              : m.x;
+    SetWindowPos(s_->hwnd, HWND_TOPMOST, px, m.y, m.w, m.h, SWP_NOACTIVATE);
     lstrcpynW(s_->targetDevice, m.device, 32);
     s_->dupl.Reset();
     s_->haveDesktop = false;
@@ -1146,6 +1206,9 @@ bool RenderEngine::renderFrame(const RenderFrameParams& p) {
     // second, and nothing that isn't caught by overlayDisplaced can displace us over a fullscreen
     // app anyway (issue #148). The displaced check still runs every frame, so real displacement
     // (RTSS et al.) is reclaimed immediately in both cases.
+    // Full monitor bounds before anything is presented: while idle the overlay is parked at 1x1 so
+    // it does not hold a fullscreen game off independent flip (setParked). Cheap no-op once live.
+    setParked(false);
     unsigned long long nowMs = GetTickCount64();
     // Track the "SDR content brightness" slider while we render, so dragging it mid-zoom converges
     // instead of leaving the magnified view off until the next zoom-in. Throttled to 4 Hz (a

@@ -9,7 +9,8 @@ Plan: `docs/superpowers/plans/2026-05-24-wind-magnifier.md`.
 - Build + run tests: `build.bat test`  (runs the doctest binary; exit 0 = pass)
 - Build UIAccess variant: `build.bat uiaccess`  (uiAccess=true manifest; must be signed + run
   from `C:\Program Files\Wind` - deploy via `tools\uiaccess_setup.ps1` elevated). Needed only
-  to cover the Start menu / taskbar / tray (overlay uses `CreateWindowInBand`, `zorderBand=16`).
+  to OPTIONALLY cover the Start menu / taskbar / tray (overlay uses `CreateWindowInBand`,
+  opt-in `zorderBand=16`; shipped default is 0, see the band note below).
 - Build config UI: `build.bat config`  (npm-builds the Svelte app under `ui/` to `ui/dist/`, then
   compiles `src/config_ui/*.cpp` against the vendored WebView2 SDK -> `WindConfig.exe` next to
   `Wind.exe`). Also run by `tools\uiaccess_setup.ps1`, which deploys `WindConfig.exe` + `ui/dist`
@@ -184,8 +185,12 @@ staged Apply/Discard footer.
   do NOT use (no-driver design + anti-cheat ban risk). Confirmed: swallowing works in normal apps,
   not in raw-input games. Pick game keys/buttons you don't otherwise use.
   GAME-INSPECT (issue #144) sidesteps this for Inspect mode only: when Inspect is toggled while a
-  mouselook game holds the mouse (zoomed -> LockDetector locked; at 1x -> the cursor was hidden by
-  the app at the toggle edge; pure decision `ShouldGameInspect`, src/inspect_focus.h), main.cpp
+  mouselook game holds the mouse (pure decision `ShouldGameInspect`, src/inspect_focus.h: a cursor
+  hidden at the toggle edge by the APP is the tell, valid whenever WE are not hiding it too - i.e.
+  at 1x and in transform FOLLOW sessions; a LockDetector lock also engages on its own; render
+  sessions hide + weld so only the detector is usable there. Do NOT make the zoomed path
+  detector-only again, issue #158: a raw-input game never clips or recenters the pointer, so the
+  detector reads FREE right through mouselook), main.cpp
   steals foreground to an invisible 1x1 helper window (`WindFocusStealer`, layered alpha 0) - a
   backgrounded game stops receiving raw input, so its camera freezes (the Snipping Tool effect)
   while our RIDEV_INPUTSINK pan keeps working. The steal is DEFERRED one step past the reveal logic
@@ -253,6 +258,23 @@ staged Apply/Discard footer.
   and re-display the frame from when it was last visible, flashing the previous zoom session's
   window on the next zoom-in (worst right after an alt-tab). The window is created shown at
   alpha 0 and stays shown. On zoom-in, present the live frame FIRST, then flip alpha to 255.
+- RENDER ENGINE: the overlay is PARKED at 1x1 whenever we are not rendering, and restored to full
+  monitor bounds before any present (`setParked`, called from initialize/renderFrame/primeReveal/
+  setVisible/retarget). A shown fullscreen topmost LAYERED window keeps a fullscreen game off its
+  independent-flip plane by geometry alone - even at alpha 0 - which is the same lever `primeReveal`
+  pulls deliberately at alpha 1. Left unparked, a game ran DWM-composited for its WHOLE session just
+  because Wind sat idle in the tray, and it looked model-independent and "sticky" (switching to
+  render or restarting Wind never helped, only restarting the game seemed to) because the overlay is
+  created shown at startup in every model. PresentMon on RDR2, same session, no game restart:
+  3% -> 99.8% `Hardware: Independent Flip`, mean frametime 12.28 -> 7.26 ms, p99 18.3 -> 9.5 ms.
+  DWM re-promotes on its own as soon as nothing covers the game, so there is no latch to work around.
+  Park by MOVING the window off the virtual desktop. NOT `SW_HIDE` (reintroduces the stale-frame
+  flash below) and NOT a resize: shrinking to 1x1 makes DWM reallocate the redirection surface, and
+  the freshly allocated area is undefined until presented into, which showed as a one-frame BLACK
+  flash per zoom over a game. A move leaves the surface and swapchain untouched. Each park/unpark is
+  also a `SetWindowPos` over the game, i.e. a synchronous DWM z-order transaction (see the hitch note
+  in `renderFrame`), so two per zoom session is the floor - do not add more. `WIND_NOPARK=1` disables
+  parking entirely for A/B.
 - RENDER ENGINE: presenting first is NOT enough - the reveal is GATED (issue #140, in `RunTick`):
   Present's blt into the layered redirection surface is GPU work, but the alpha flip is a CPU call
   DWM honours at its next composite, so under GPU load the flip wins the race and DWM shows the
@@ -268,6 +290,21 @@ staged Apply/Discard footer.
   (transparent + click-through + capture-excluded, so being on top is safe). If we sit below an
   always-on-top app overlay (RTSS, Task Manager), that window draws a second unmagnified copy
   over our magnified view. `zorderBand=16` (signed UIAccess build) also covers shell + same-band.
+  BAND CHOICE IS A TRADE-OFF (issue #162) - the shipped default is **0, unbanded**, and restoring
+  16 without re-testing BOTH halves is a regression:
+  - band 16 covers the Start menu / taskbar thumbnails / tray flyouts, but the **Snipping Tool**
+    capture overlay then composites over US: zooming under Win+Shift+S shows the unmagnified
+    screen with **NO cursor at all**, in every model (we hide the OS cursor plane and draw a
+    replacement, so covering the replacement leaves nothing). Rig-measured both ways.
+  - band 0 makes the snip overlay work; the shell surfaces above are the price.
+  - band 17 (ZBID_LOCK) would cover both and **is rejected by `CreateWindowInBand` on 26200**. It
+    fell through silently to unbanded, which is exactly why it looked like the fix at first.
+  Both bandable windows (render overlay + transform cursor sprite) go through
+  `wind::CreateBandedWindow` (src/band_window.h), which cascades the requested band -> 16 ->
+  unbanded and LOGS when the request was refused - never let a refused band be silent again.
+  DIAGNOSTIC TRAP: `ScreenClippingHost.exe` holds foreground with no visible top-level window, so
+  a z-order walk shows us at index 0 while we are plainly covered. Do not "verify" band problems
+  that way. `CURSOR_SHOWING` also stays 1 throughout, so it is not the `cursorVisibility` gate.
 - RENDER ENGINE: on zoom-in, `invalidateCapture()` + `capture()` drains to the LATEST duplication
   frame (not the first): the first AcquireNextFrame after (re)creating the duplication can be a
   transitional composite (the window underneath), which otherwise flashed on reveal.

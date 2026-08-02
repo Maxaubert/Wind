@@ -103,7 +103,16 @@ Config ParseConfig(const std::string& text) {
         if (eq == std::string::npos) continue;
         std::string key = trim(t.substr(0, eq));
         std::string val = trim(t.substr(eq + 1));
-        if (key.empty() || val.empty()) continue;
+        if (key.empty()) continue;
+        // The exe LISTS must accept an empty value: "key=" with nothing after it is how the user
+        // clears one, and it is exactly what the config UI writes when the last entry is removed.
+        // They are handled before the empty-value guard below, which exists because the numeric
+        // settings cannot take one (stoi("") throws). Without this, clearing a list in the UI wrote
+        // the ini correctly and the core silently kept the previous value - including the shipped
+        // defaults, so a list with defaults could never be emptied at all.
+        if (key == "transformExclude") { c.transformExclude = val; continue; }
+        if (key == "noSwallowApps")    { c.noSwallowApps    = val; continue; }
+        if (val.empty()) continue;
         try {
             if (key == "zoomInButton")          c.zoomInButton = std::stoi(val);
             else if (key == "zoomOutButton")    c.zoomOutButton = std::stoi(val);
@@ -135,7 +144,6 @@ Config ParseConfig(const std::string& text) {
             else if (key == "cursorScaleWithZoom")c.cursorScaleWithZoom = std::stoi(val);
             else if (key == "cursorVisibility")   c.cursorVisibility = val;
             else if (key == "model")              c.model = val;
-            else if (key == "transformExclude")   c.transformExclude = val;
             else if (key == "magnifyStep")        c.magnifyStep = std::stoi(val);
             else if (key == "fastPan")            c.fastPan = std::stoi(val);
             else if (key == "smoothPan")          c.smoothPan = std::stoi(val);
@@ -305,9 +313,11 @@ Config LoadConfig(const std::wstring& path) {
                "bilinear=1\n"
                "; sharpness: 0=off; 0.1-1.0 sharpens the magnified image (crisper text/detail)\n"
                "sharpness=0.0\n"
-               "; zorderBand: 0=normal; 16=above shell (covers Start/taskbar/tray, needs UIAccess build;\n"
-               ";   falls back to normal topmost on a non-deployed run)\n"
-               "zorderBand=16\n"
+               "; zorderBand: 0=ordinary topmost (shipped): the Snipping Tool capture overlay works -\n"
+               ";   magnified view and cursor stay visible under Win+Shift+S. 16=above the shell\n"
+               ";   (needs the UIAccess build): covers the Start menu / taskbar / tray flyouts, but\n"
+               ";   the snip overlay then covers US and a zoom there shows no cursor at all.\n"
+               "zorderBand=0\n"
                "; brightness: magnified-view output multiplier (1.0=unchanged; fine-tune for HDR)\n"
                "brightness=1.0\n"
                "; hdrTonemap: 1=HDR10->SDR tonemap when Windows HDR is on (no-op on SDR); 0=off\n"
@@ -323,6 +333,18 @@ Config LoadConfig(const std::wstring& path) {
                ";   like a game to the foreground test but wants the render engine. Comma-separated,\n"
                ";   case-insensitive, exact name match. Empty = exclude nothing.\n"
                "transformExclude=zen.exe,firefox.exe,chrome.exe,msedge.exe,brave.exe,opera.exe,opera_gx.exe,vivaldi.exe\n"
+               "; noSwallowApps: programs where Wind stops intercepting its keyboard binds.\n"
+               ";   Watching the keyboard makes Windows hand us every keystroke and WAIT before it\n"
+               ";   delivers anything else - including mouse movement to the game. Holding a key\n"
+               ";   auto-repeats ~30x/s, so it stalls the mouse that often: panning is smooth until\n"
+               ";   you hold a key, then it stutters. Suspending the hook removes the stall.\n"
+               ";   Trade-off: the app then also SEES the zoom key. In a raw-input game that was\n"
+               ";   already true (a hook cannot block raw input), so there you lose nothing.\n"
+               ";   Comma-separated exe names, case-insensitive, exact name match, applied whenever\n"
+               ";   one of them is foreground.  Example: noSwallowApps=RDR2.exe,eldenring.exe\n"
+               ";   Empty (default) = keys stay swallowed everywhere, as before. The Settings UI\n"
+               ";   manages this list (Keybinds -> Release keys in these apps).\n"
+               "noSwallowApps=\n"
                "; magnifyStep (magnify only): Windows Magnifier zoom increment, percent points per\n"
                ";   step (5-400). Lower = smoother and slower. Applies live.\n"
                "magnifyStep=50\n"

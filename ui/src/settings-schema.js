@@ -5,6 +5,13 @@ export const sections = [
     { key:'altKeybinds', type:'toggle', label:'Enable alternate keybinds', desc:'Adds an optional second binding (side-button or key) per direction.', def:0 },
     { key:'__zoomIn2',  type:'keybind', label:'Zoom in (alternate)',  desc:'Optional side-button or key', buttonKey:'zoomInButton2',  vkKey:'zoomInVk2',  modsKey:'zoomInMods2',  requires:'altKeybinds' },
     { key:'__zoomOut2', type:'keybind', label:'Zoom out (alternate)', desc:'Optional side-button or key', buttonKey:'zoomOutButton2', vkKey:'zoomOutVk2', modsKey:'zoomOutMods2', requires:'altKeybinds' },
+    // Keyboard-hook suspension (issue #156). Watching the keyboard makes Windows hand Wind every
+    // keystroke and wait before delivering anything else, including mouse movement to the game, so
+    // holding a key stalls panning ~30x/s. Named apps only: this trades key-swallowing for smooth
+    // panning, which is a per-app call rather than something to apply to everything at once.
+    { key:'noSwallowApps', type:'applist', label:"Don't swallow keys in these apps",
+      desc:'Fixes stuttery panning in games. These programs will also see the key.',
+      def:'' },
   ]},
   { id:'zoom', label:'Zoom', icon:'zoom', desc:'How magnification grows while you hold the zoom button.', rows: [
     { key:'zoomInSpeed',  type:'slider', label:'Zoom-in speed',  desc:'Multiplier (1.0 = default).', min:0.25, max:4, step:0.05, def:1.0 },
@@ -39,6 +46,13 @@ export const sections = [
     { key:'brightness',  type:'slider', label:'Brightness', min:0.5, max:1.5, step:0.05, def:1.0, advanced:true, showIf:{ key:'model', eq:'render' } },
     { key:'hdrTonemap',  type:'toggle', label:'HDR tonemap', desc:'HDR10 to SDR when HDR is on.', def:1, advanced:true, showIf:{ key:'model', eq:'render' } },
     { key:'multiMonitor',type:'toggle', label:'Follow cursor monitor', def:0 },
+    // Not an ini setting: this row reflects HKLM\...\Dwm\OverlayTestMode. MPO makes the driver pack
+    // DWM's magnification translation into a 16-bit field over a game surface (the issue #148 TDR
+    // trigger and the reason the transform model needs a pan wall), and measurably costs transform
+    // smoothness in-game. Advanced because it changes a system-wide display setting and needs UAC.
+    { key:'__mpo', type:'mpo', label:'Disable MPO',
+      desc:'Multi-plane overlay can stutter or reset the display driver while zoomed in games. Needs admin and a Windows restart.',
+      advanced:true },
     { key:'outline',          type:'toggle', label:'Edge outline',
       desc:'Show an outline around the screen while zoomed.', def:0, showIf:{ key:'model', eq:'render' } },
     { key:'outlineThickness', type:'slider', label:'Outline thickness',

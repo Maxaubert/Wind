@@ -23,7 +23,8 @@ TEST_CASE("renderer knobs have sane defaults") {
     CHECK(c.bilinear == 1);
     CHECK(c.sharpness == doctest::Approx(0.0));   // off by default
     CHECK(c.cursorSmoothing == doctest::Approx(0.4));
-    CHECK(c.zorderBand == 16);                 // shipped 16 (UIAccess high band; falls back if unavailable)
+    CHECK(c.zorderBand == 0);                  // shipped unbanded (issue #162): band 16 sat UNDER the
+                                               // Snipping Tool overlay, which cost the cursor entirely
     CHECK(c.brightness == doctest::Approx(1.0));
     CHECK(c.hdrTonemap == 1);                  // on by default (no-op on SDR)
     CHECK(c.cursorVisibility == "auto");       // follow the focused app by default

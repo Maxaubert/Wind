@@ -6,14 +6,24 @@ namespace wind {
 // by stealing foreground to an invisible helper window - a backgrounded game stops receiving mouse
 // raw input, which is exactly why external overlay tools (Snipping Tool) work over gameplay.
 //
-// Signals, chosen so the working menu/desktop Inspect path is never disturbed:
-//  - zoomed: the LockDetector is live and already distinguishes the two regimes (a game menu with a
-//    visible free cursor reads free; mouselook's clip/recenter reads locked). The raw cursor-showing
-//    flag is unusable here - the magnifier itself hides the OS cursor while zoomed.
-//  - at 1x: the detector is idle, but nothing has hidden the cursor except the foreground app, so a
-//    not-showing cursor at the toggle edge is the mouselook tell (menus/desktop keep it visible).
-inline bool ShouldGameInspect(bool zoomed, bool detectorLocked, bool cursorWasShowing) {
-    if (zoomed) return detectorLocked;
-    return !cursorWasShowing;
+// The tell is that a mouselook game HIDES the OS cursor. That reading is only trustworthy when
+// nothing of ours has hidden it too, which is what magnifierHidCursor tracks:
+//  - render sessions hide + weld the cursor for the whole zoom, so its visibility says nothing
+//    about the app. There the LockDetector is the only usable signal: it already separates the two
+//    regimes (a game menu with a visible free cursor reads free; mouselook's clip/recenter reads
+//    locked).
+//  - transform sessions (the FOLLOW design, issue #148) and plain 1x leave the cursor completely
+//    alone, so the app's own hiding is directly observable and is the signal. This matters because
+//    a raw-input game (RDR2) never clips or recenters the pointer, so the detector reads FREE right
+//    through mouselook - detector-only declined game-inspect for exactly the games it exists for.
+// A detected lock still engages on its own: it is positive evidence of capture either way.
+//
+// The detector is deliberately not consulted at 1x - it only updates while the overlay is active,
+// so an idle Wind holds the last session's stale verdict.
+inline bool ShouldGameInspect(bool zoomed, bool detectorLocked, bool cursorWasShowing,
+                              bool magnifierHidCursor) {
+    if (!zoomed) return !cursorWasShowing;
+    if (detectorLocked) return true;
+    return !magnifierHidCursor && !cursorWasShowing;
 }
 }

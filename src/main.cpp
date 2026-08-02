@@ -12,6 +12,7 @@
 #include <fstream>
 #include "config.h"
 #include "config_path.h"
+#include "mpo_boot.h"
 #include "config_ui/ini_edit.h"   // wind::UpdateIniText - flip the model key in place
 #include "logging.h"
 #pragma comment(lib, "Dwmapi.lib")
@@ -49,6 +50,10 @@ static void DetectMpoDisabled() {
     wind::Log(wind::LogLevel::Info, "startup", "MPO %s (OverlayTestMode=%lu) -> pan wall %s",
               g_mpoDisabled ? "DISABLED" : "enabled", (unsigned long)v,
               g_mpoDisabled ? "off (full range)" : "on (right-strip bound above ~9.3x)");
+    // Persist the earliest post-boot reading so the Settings "Disable MPO" row can tell a change
+    // that genuinely needs a restart from one that merely puts the registry back to what DWM
+    // already loaded (issue #164). No-ops if this boot is already recorded.
+    wind::RecordMpoBootState(g_mpoDisabled);
 }
 
 // Current refresh rate (Hz) of the primary display, for pacing the idle/1x loop and the
@@ -238,10 +243,16 @@ struct TickState {
     unsigned long long wantSinceMs = 0;     //   has been the candidate (debounces foreground reads)
     HCURSOR lastFgCursor = nullptr; // churn valve: last seen foreground cursor SHAPE handle
     int    churnCount = 0;          //   handle changes inside the rolling window
+    unsigned long long kbHookDivergentSinceMs = 0;  // LL keyboard-hook watchdog dwell (issue #156)
+    unsigned long long lastFgProbeMs = 0;           // throttles the game-foreground probe to ~10Hz
     unsigned long long churnWinStart = 0;
     std::wstring freezeExe;         // exe of the app under the current/last transform game session
     unsigned long long lastFreezeActiveMs = 0;   // TDR-backstop window (device-lost attribution)
-    bool   inspectCursorWasShowing = true; // cursor visibility at the toggle edge (the 1x mouselook tell)
+    bool   inspectCursorWasShowing = true; // cursor visibility at the toggle edge (the mouselook tell)
+    bool   cursorHiddenByUs = false;      // WE currently hide the OS cursor (render zoom / Inspect).
+                                          //   A transform FOLLOW session leaves it alone, so the app's
+                                          //   own hiding stays readable - see ShouldGameInspect.
+    bool   inspectMagHidCursor = false;   // snapshot of the above at the Inspect toggle edge
     double presentAccum       = 0.0;           // gameFpsCap: seconds since the last presented frame
     bool   gamePacing         = false;         // zoomed over a fullscreen game -> main loop timer
                                                //   paces (a blocking present must never pace: a
@@ -337,17 +348,70 @@ static bool IsChurnyFg(HWND fg) {
     return g_churnyApps.count(ExeNameOf(fg)) != 0;
 }
 
-// Auto/hybrid exclusion: an app on cfg.transformExclude never gets the transform engine even when
-// it is fullscreen and borderless. Fullscreen browser video is indistinguishable from a game by
-// the foreground test, but it wants render (constant-size cursor, desktop-style behaviour).
-static bool IsTransformExcluded(HWND fg, const Config& cfg) {
-    if (cfg.transformExclude.empty()) return false;
+// Is the foreground window's exe named in a comma-separated list? Shared by every exe-list check
+// (transformExclude, noSwallowApps, the built-in overlay names) so they all match identically:
+// bare file name, case-insensitive, exact - never a path.
+static bool FgExeInList(HWND fg, const std::string& list) {
+    if (list.empty()) return false;
     const std::wstring exeW = ExeNameOf(fg);
     if (exeW.empty()) return false;
     std::string exe;
     exe.reserve(exeW.size());
     for (wchar_t ch : exeW) exe.push_back((char)(ch < 128 ? ch : '?'));
-    return wind::IsExeInList(exe, cfg.transformExclude);
+    return wind::IsExeInList(exe, list);
+}
+// Auto/hybrid exclusion: an app on cfg.transformExclude never gets the transform engine even when
+// it is fullscreen and borderless. Fullscreen browser video is indistinguishable from a game by
+// the foreground test, but it wants render (constant-size cursor, desktop-style behaviour).
+static bool IsTransformExcluded(HWND fg, const Config& cfg) {
+    return FgExeInList(fg, cfg.transformExclude);
+}
+// Overlays that cover the screen, look exactly like a game to the foreground test, and are gone
+// again in a couple of seconds. Hard-coded on purpose: these are system surfaces, not something a
+// user can sensibly pick out of a file browser, and a second user-managed list is not worth the
+// settings surface. Only consulted for windows that already failed the free style test below.
+static const char* kOverlayExes =
+    "SnippingTool.exe,ScreenSketch.exe,ScreenClippingHost.exe,TextInputHost.exe";
+
+// Is the foreground an overlay rather than a real app? While one is up the Auto engine choice is
+// FROZEN: such a tool holds foreground for a couple of seconds and hands it straight back, so
+// re-picking on it costs TWO engine handovers within seconds, and each one releases and rebuilds
+// DWM's magnification context - a pair of stalls exactly when the user is trying to read the
+// screen. The 350ms stickiness cannot help; these are visible for far longer than that.
+//
+// Deliberately cheap: no hook, no polling, nothing that loops.
+//   1. WS_EX_LAYERED on the foreground window - one GetWindowLongPtr, right next to the GWL_STYLE
+//      read the caller already makes. A game does not use a layered top-level window (it would
+//      cost it the redirection surface and its independent-flip plane); capture tools, dimmers and
+//      click-through HUDs do. This alone catches most of them for free.
+//   2. Only if that misses, the small built-in name list, which needs a process handle.
+// Memoised on the HWND so step 2 costs one lookup per foreground CHANGE rather than one per tick.
+static bool IsOverlayFg(HWND fg) {
+    if (!fg) return false;
+    if (GetWindowLongPtrW(fg, GWL_EXSTYLE) & WS_EX_LAYERED) return true;
+    static HWND s_lastFg = nullptr;
+    static bool s_lastResult = false;
+    if (fg == s_lastFg) return s_lastResult;
+    s_lastFg = fg;
+    s_lastResult = FgExeInList(fg, kOverlayExes);
+    return s_lastResult;
+}
+
+// Keyboard-hook suspension list (issue #156): while one of these apps is foreground the LL keyboard
+// hook is uninstalled, so Windows' input thread stops round-tripping every keystroke through us and
+// the mouse stream to that app is never stalled. Unlike the transform exclusion this does NOT
+// require fullscreen: the user named the app, so honour it whenever it is in front.
+static bool IsNoSwallowApp(HWND fg, const Config& cfg) {
+    return FgExeInList(fg, cfg.noSwallowApps);
+}
+
+// Every cursor hide/show the tick loop performs goes through here, so cursorHiddenByUs is always an
+// exact record of whether WE are the reason the OS cursor is invisible. game-inspect needs that: a
+// hidden cursor is the mouselook tell, but only when we did not hide it ourselves (ShouldGameInspect).
+static void SetSystemCursorHidden(TickState& t, IMagnifierModel* m, bool hide) {
+    if (!m) return;
+    m->hideSystemCursor(hide);
+    t.cursorHiddenByUs = hide;
 }
 
 // tdrTest=3 (issue #148 harness): hand foreground back when a stolen-foreground freeze session
@@ -490,6 +554,72 @@ static void RunTick(TickState& t) {
     // Lets users without side-buttons zoom from the keyboard. When the LL keyboard hook is active it
     // is the authority for bound-key down-state (a swallowed key never appears in GetAsyncKeyState),
     // so read keyPressed(); otherwise (hook install failed / WIND_NOHOOK) fall back to polling.
+    // Suspend the LL keyboard hook while a borderless fullscreen app (a game) is foreground.
+    //
+    // A WH_KEYBOARD_LL hook taxes the SYSTEM's input pipeline, not just ours: the raw input thread
+    // dispatches every keystroke to the hooking thread and waits for it to return before delivering
+    // any further input, INCLUDING mouse movement to the foreground game. Holding a key in a game
+    // (auto-repeat, ~30/s) therefore punches a stall into the mouse stream on every repeat - the
+    // "panning is smooth until I hold a key" stutter. The cost is the hook's EXISTENCE: an unbound
+    // key like Ctrl stalls identically, swallowing is irrelevant, and the stutter disappeared
+    // completely in the field whenever Windows had evicted the hook (and returned the instant the
+    // watchdog healed it). It is also why the native Windows Magnifier shows the same stutter.
+    //
+    // Swallowing buys nothing in a game anyway: an LL hook cannot block raw input, which is what
+    // games read (documented limitation above), so the hook is pure cost there. Suspend it over a
+    // fullscreen borderless foreground and restore it on the desktop, where swallowing does work.
+    // Binds keep working while suspended - nothing swallows them, so keyDown's GetAsyncKeyState
+    // fallback reads them correctly. Same borderless-cover test the hybrid model uses to spot games.
+    // Throttled to ~10 Hz: foreground changes are human-speed events, so probing them every tick
+    // (display refresh) would burn a few window queries 144x a second to answer a question that
+    // changes maybe once a minute. Worst case the swap lands 100 ms late, which nobody can feel.
+    // OPT-IN, both off by default: unconfigured, the hook stays installed and keys are swallowed
+    // everywhere exactly as before, and this costs a single string check per tick (no window
+    // queries at all). Configure noSwallowApps (per-app) or noSwallowGames=1 (any borderless
+    // fullscreen) to trade swallowing for smooth panning in that app.
+    if (t.cfg.noSwallowApps.empty()) {
+        g_input.setKeyboardHookWanted(true);   // idempotent: only posts on an actual change
+    } else {
+        const unsigned long long nowMs = GetTickCount64();
+        if (nowMs - t.lastFgProbeMs >= 100) {
+            t.lastFgProbeMs = nowMs;
+            // Does NOT require fullscreen: the user named the app, so honour it whenever that app
+            // is in front (windowed play, borderless, either way).
+            g_input.setKeyboardHookWanted(!IsNoSwallowApp(GetForegroundWindow(), t.cfg));
+        }
+    }
+    // LL keyboard-hook watchdog (issue #156). Windows SILENTLY evicts a low-level hook whose
+    // callback misses LowLevelHooksTimeout: no notification, no error, the handle stays valid and
+    // KbProc simply never fires again. A game's launch load spike is exactly when that happens -
+    // launching a heavily modded RDR2 with Wind already running killed every keyboard bind while
+    // the mouse binds survived, and rebinding a key then looked like a broken ini hot-reload (the
+    // reload DID apply; the dead hook just never reported the key, and kbHookActive() still claimed
+    // the hook was the authority, so keyDown below asked it and always got "up").
+    //
+    // The tell needs no extra bookkeeping: while the hook is alive it SWALLOWS every bound key, so
+    // GetAsyncKeyState can NEVER see one. Poller sees a bound key held + hook still reports it up
+    // => the hook is gone. The dwell keeps the ordinary press-before-callback race from
+    // false-positiving; the magnify model is excluded outright because its hook deliberately skips
+    // the injected chords it drives Windows Magnifier with (those are unswallowed by design).
+    constexpr unsigned long long kKbHookDeadMs = 250;
+    if (g_input.kbHookActive() && g_input.swallowEnabled() && !g_input.ignoreInjectedKeys()) {
+        const int watched[] = { t.cfg.zoomInVk, t.cfg.zoomInVk2, t.cfg.zoomOutVk, t.cfg.zoomOutVk2,
+                                t.cfg.recenterVk, t.cfg.cursorLockVk, t.cfg.swapModelVk };
+        bool divergent = false;
+        for (int vk : watched) {
+            if (vk == 0 || !g_input.isBoundKey(vk)) continue;
+            if ((GetAsyncKeyState(vk) & 0x8000) && !g_input.keyPressed(vk)) { divergent = true; break; }
+        }
+        const unsigned long long nowMs = GetTickCount64();
+        if (!divergent)                             t.kbHookDivergentSinceMs = 0;
+        else if (t.kbHookDivergentSinceMs == 0)     t.kbHookDivergentSinceMs = nowMs;
+        else if (nowMs - t.kbHookDivergentSinceMs >= kKbHookDeadMs) {
+            t.kbHookDivergentSinceMs = 0;
+            g_input.requestKbHookReinstall();   // logs, and polling takes over on the next tick
+        }
+    } else {
+        t.kbHookDivergentSinceMs = 0;
+    }
     const bool kbHook = g_input.kbHookActive();
     auto keyDown = [&](int vk) {
         if (vk == 0) return false;
@@ -557,11 +687,14 @@ static void RunTick(TickState& t) {
     bool lockDown = keyDown(t.cfg.cursorLockVk);
     if (lockDown && !t.lockKeyWasDown) {
         if (t.model->supportsInspect()) {
-            // Snapshot cursor visibility at the toggle edge, BEFORE this tick's active block hides it:
-            // at 1x the only thing that can have hidden the cursor is the foreground app, so a
-            // not-showing cursor is the mouselook-gameplay tell for game-inspect (issue #144).
+            // Snapshot cursor visibility at the toggle edge, BEFORE this tick's active block hides it,
+            // together with whether WE are already hiding it. A not-showing cursor that we did not
+            // hide is the mouselook-gameplay tell for game-inspect (issue #144) - true at 1x and, in
+            // a transform FOLLOW session, true while zoomed as well. Both are read here so the pair
+            // describes the same instant.
             CURSORINFO ci{}; ci.cbSize = sizeof(ci);
             t.inspectCursorWasShowing = GetCursorInfo(&ci) ? (ci.flags & CURSOR_SHOWING) != 0 : true;
+            t.inspectMagHidCursor = t.cursorHiddenByUs;
             t.cursorLock.toggle();
         } else {
             // Magnify model: Windows Magnifier owns the view and cursor; no freeze+reticle exists.
@@ -694,7 +827,7 @@ static void RunTick(TickState& t) {
                     t.clickReleaseTicks = 0;
                     RECT fz{ fp.x, fp.y, fp.x + 1, fp.y + 1 };
                     if (!t.cfg.freezeNoClip) ClipCursor(&fz);
-                    t.model->hideSystemCursor(true);
+                    SetSystemCursorHidden(t, t.model, true);
                     t.freezeExe = ExeNameOf(ffg);
                     t.churnCount = 0; t.churnWinStart = GetTickCount64(); t.lastFgCursor = nullptr;
                     t.freezeStealPending = (t.cfg.tdrTest == 3);
@@ -711,7 +844,7 @@ static void RunTick(TickState& t) {
                 }
             } else {
                 t.gameFreeze = false;
-                t.model->hideSystemCursor(true);
+                SetSystemCursorHidden(t, t.model, true);
             }
             t.model->onActivate();       // grab a live frame, not a stale cached one
         }
@@ -729,7 +862,7 @@ static void RunTick(TickState& t) {
             t.lastSetVirtual = pt;
             RECT fz{ pt.x, pt.y, pt.x + 1, pt.y + 1 };
             ClipCursor(&fz);
-            t.model->hideSystemCursor(true);   // hide the real cursor; we draw the crosshair
+            SetSystemCursorHidden(t, t.model, true);   // hide the real cursor; we draw the crosshair
             t.model->onActivate();
             // Game-inspect (issue #144): if a mouselook game holds the mouse, the freeze alone is
             // not enough - its raw-input camera still receives every mickey. Steal foreground to
@@ -737,14 +870,19 @@ static void RunTick(TickState& t) {
             // inspectStealPending: the reveal logic later this tick must still see the GAME as
             // foreground (ForegroundCoversMonitor decides the composite-gated reveal).
             t.inspectGame = wind::ShouldGameInspect(zoomed, t.detector.locked(),
-                                                    t.inspectCursorWasShowing);
+                                                    t.inspectCursorWasShowing,
+                                                    t.inspectMagHidCursor);
             if (t.inspectGame) {
                 t.inspectPrevFg = GetForegroundWindow();
                 t.inspectStealPending = true;
-                wind::Log(wind::LogLevel::Info, "inspect",
-                          "game-inspect engaged (zoomed=%d detLocked=%d cursorShown=%d)",
-                          (int)zoomed, (int)t.detector.locked(), (int)t.inspectCursorWasShowing);
             }
+            // Logged either way: a DECLINE is the interesting case in the field (the camera keeps
+            // moving), and without the inputs there is nothing to diagnose it from.
+            wind::Log(wind::LogLevel::Info, "inspect",
+                      "game-inspect %s (zoomed=%d detLocked=%d cursorShown=%d weHid=%d)",
+                      t.inspectGame ? "engaged" : "DECLINED", (int)zoomed,
+                      (int)t.detector.locked(), (int)t.inspectCursorWasShowing,
+                      (int)t.inspectMagHidCursor);
         }
         bool inspectExit = !inspect && t.prevInspect;   // Inspect just turned off but overlay stays (zoomed)
         if (inspectExit) {
@@ -865,8 +1003,12 @@ static void RunTick(TickState& t) {
         // changes, handing over mid-session. The controller and mapper are untouched, so the
         // zoom level and lens position carry across the swap (render 8x -> tab into a game ->
         // transform 8x). Inspect sessions are never switched under.
-        if (t.mTransform && !enterActive && !inspect) {
-            HWND fgw2 = GetForegroundWindow();
+        HWND fgw2 = GetForegroundWindow();
+        // Freeze the engine choice while an overlay is in front (see IsOverlayFg). Skipping the
+        // whole block, rather than just the swap, is deliberate: it leaves wantModel/wantSinceMs
+        // untouched, so the overlay never becomes the settled candidate and handing foreground back
+        // is a no-op instead of a second handover.
+        if (t.mTransform && !enterActive && !inspect && !IsOverlayFg(fgw2)) {
             const bool fgIsStealer = fgw2 && fgw2 == g_focusStealer;   // tdrTest=3 holds foreground
             const bool borderless2 = fgw2 && !(GetWindowLongPtrW(fgw2, GWL_STYLE) & WS_CAPTION);
             const bool primary2 = t.mon.x == 0 && t.mon.y == 0;
@@ -886,12 +1028,12 @@ static void RunTick(TickState& t) {
                     t.restOverlapTicks = 0;
                 }
                 IMagnifierModel* old = t.model;
-                old->hideSystemCursor(false);
+                SetSystemCursorHidden(t, old, false);
                 t.model = want;
                 // FOLLOW design (issue #148): only render hides + welds; transform keeps the real
                 // cursor visible. On render->transform the cursor reappears exactly at the lens
                 // point render welded it to, so the handover is seamless.
-                if (dynamic_cast<RenderModel*>(t.model)) t.model->hideSystemCursor(true);
+                if (dynamic_cast<RenderModel*>(t.model)) SetSystemCursorHidden(t, t.model, true);
                 t.model->onActivate();
                 if (auto* rm = dynamic_cast<RenderModel*>(t.model)) {
                     t.revealNeedsComposite = ForegroundCoversMonitor(t.mon);
@@ -932,7 +1074,7 @@ static void RunTick(TickState& t) {
                 t.clickReleaseTicks = 0;
                 RECT fz{ fp.x, fp.y, fp.x + 1, fp.y + 1 };
                 ClipCursor(&fz);
-                t.model->hideSystemCursor(true);
+                SetSystemCursorHidden(t, t.model, true);
                 t.gameFreeze = true;
                 t.freezeExe = ExeNameOf(ffg2);
                 t.churnCount = 0; t.churnWinStart = GetTickCount64(); t.lastFgCursor = nullptr;
@@ -946,7 +1088,7 @@ static void RunTick(TickState& t) {
                 if (dynamic_cast<TransformModel*>(t.model)) {
                     // Still transform, now over the desktop: resume FOLLOW at the cursor (the lens
                     // must sit ON the visible cursor, so a reset here is the correct jump).
-                    t.model->hideSystemCursor(false);
+                    SetSystemCursorHidden(t, t.model, false);
                     POINT pt; GetCursorPos(&pt);
                     t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y);
                     t.lastSetVirtual = pt;
@@ -1215,7 +1357,7 @@ static void RunTick(TickState& t) {
     } else if (t.prevActive) {                        // active -> idle: tear the overlay down
         if (t.restAfterReveal) { t.restAfterReveal->setActive(false); t.restAfterReveal = nullptr; }
         t.model->setActive(false);
-        t.model->hideSystemCursor(false);
+        SetSystemCursorHidden(t, t.model, false);
         t.outlineZoneSec = 0.0;                       // zoom-out clears the low-zoom dwell (no banked partial)
         t.gamePacing = false;                         // idle: normal timer pacing
         t.pushPhase = 0;
@@ -1841,7 +1983,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                 GetTickCount64() - ts.lastFreezeActiveMs < 30000) {
                 MarkChurnyApp(ts.freezeExe, "device-lost backstop");
             }
-            rm->hideSystemCursor(false);   // restore the real cursor while we can't render
+            SetSystemCursorHidden(ts, rm, false);   // restore the real cursor while we can't render
             // Inspect's 1px freeze clip must not survive a device-lost: release it and clear the toggle so
             // the post-recovery tick can't re-clip the cursor to the stale frozen pixel (honors the
             // documented "released on device-lost recovery" invariant; recovery returns to a clean 1x).

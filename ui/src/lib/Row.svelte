@@ -1,11 +1,37 @@
 <script>
   import KeybindCapture from './KeybindCapture.svelte';
   import CustomSelect from './CustomSelect.svelte';
+  import { pickExe } from '../bridge.js';
+  import AppListModal from './AppListModal.svelte';
   export let row, value, onChange, disabled = false;
   export let values = {};   // keybind rows read sibling keys (e.g. zoomInVk) from here
   export let set = () => {}; // two-arg setter set(key, val); used by button rows
   export let live = () => {}; // live patch setter (writes setConfig immediately); used by keybind rows
+  // Non-config state owned by Settings.svelte. The MPO row reflects a REGISTRY value, not an ini
+  // key, so it must not travel through `values` - anything in there is diffed against `saved` and
+  // written to the ini on Apply, which would put a junk key in magnifier.ini.
+  export let extra = {};
   const num = v => Number(v);
+
+  // 'applist' rows hold a comma-separated exe list in one config string (the core parses it with
+  // IsExeInList). Split for display, re-join on every edit, so the stored shape never changes.
+  $: items = String(value ?? '').split(',').map(s => s.trim()).filter(Boolean);
+  const joined = arr => arr.join(',');
+  let listOpen = false;
+  // Keep the configured state visible on the row itself; a bare "Manage list" button would hide
+  // whether anything is set at all. One entry is worth naming, more than that only worth counting.
+  $: summary = items.length === 0 ? 'None' : items.length === 1 ? items[0] : `${items.length} apps`;
+  async function addApp() {
+    const name = await pickExe();                       // '' when the user cancels
+    if (!name) return;
+    // Case-insensitive dedupe: the core matches case-insensitively, so two spellings of one exe
+    // would both "work" while looking like a broken list.
+    if (items.some(i => i.toLowerCase() === name.toLowerCase())) return;
+    onChange(joined([...items, name]));
+  }
+  function removeApp(name) {
+    onChange(joined(items.filter(i => i !== name)));
+  }
 </script>
 {#if row.type === 'about'}
   <div class="about-hero">
@@ -52,9 +78,39 @@
       {:else if row.type === 'color'}
         <input class="color" type="color" {disabled} value={value}
                on:input={e => onChange(e.target.value)} />
+      {:else if row.type === 'applist'}
+        <span class="listsummary">{summary}</span>
+        <button class="linkbtn" {disabled} on:click={() => (listOpen = true)}>Manage list</button>
+      {:else if row.type === 'mpo'}
+        <!-- The toggle IS the detector: unticked means MPO is on. An extra "MPO on" badge beside it
+             said the same thing twice and made the row read as an action button rather than a state,
+             so the only chip here is the staged "Requires restart" note. Flex-wrapped because an
+             empty inline-block checkbox baselines at its bottom edge, which sat the chip visibly
+             below the toggle. -->
+        <div class="mpoctl">
+          <!-- Driven by staged-vs-BOOT, not staged-vs-registry: the chip answers "will a restart
+               change anything", which is also why it can show with nothing staged (the registry
+               already holds a value DWM has not loaded yet). -->
+          {#if extra.mpoNeedsRestart}
+            <span class="tag">Requires restart</span>
+          {/if}
+          <label class="checkbox-wrapper" class:disabled={disabled || !extra.mpoKnown}>
+            <input type="checkbox" disabled={disabled || !extra.mpoKnown} checked={!!extra.mpoStaged}
+                   on:change={e => set('__mpoStaged', e.target.checked)} />
+            <svg viewBox="0 0 35.6 35.6" aria-hidden="true">
+              <circle class="background" cx="17.8" cy="17.8" r="17.8"></circle>
+              <circle class="stroke" cx="17.8" cy="17.8" r="14.37"></circle>
+              <polyline class="check" points="11.78 18.12 15.55 22.23 25.17 12.87"></polyline>
+            </svg>
+          </label>
+        </div>
       {/if}
     </div>
   </div>
+  {#if listOpen}
+    <AppListModal title={row.label} {items} onAdd={addApp} onRemove={removeApp}
+                  onClose={() => (listOpen = false)} />
+  {/if}
 {/if}
 <style>
   .row{display:flex;justify-content:space-between;align-items:center;gap:24px;padding:14px 0;border-bottom:1px solid var(--line)}
@@ -94,6 +150,18 @@
   .color{width:42px;height:26px;padding:2px;border:1px solid var(--line);border-radius:7px;
          background:transparent;cursor:pointer}
   .color:disabled{cursor:default}   /* .row.disabled already dims the whole row; avoid compounding opacity */
+  /* App list: one chip per exe plus a "+" that opens the host's file picker. Wraps and is
+     right-aligned so a growing list pushes downward instead of squeezing the .meta column. */
+  /* Current state beside the Manage button. nowrap + a max width so a long exe name truncates
+     instead of wrapping the control onto a second line (which is what the old inline chips did). */
+  .listsummary{color:var(--muted);font-size:12px;margin-right:10px;max-width:180px;
+               display:inline-block;vertical-align:middle;overflow:hidden;text-overflow:ellipsis;
+               white-space:nowrap}
+  /* MPO row: flex so the "Requires restart" chip centres on the TOGGLE rather than baselining
+     against the row's description text. */
+  .mpoctl{display:flex;align-items:center;gap:10px}
+  .tag{background:var(--chip);color:var(--muted);border:1px solid var(--line);border-radius:999px;
+       padding:3px 9px;font-size:11px;line-height:1.4;white-space:nowrap}
   /* About hero: large centered Wind logo fills the section so it has real height (helps the
      scroll-spy reach About) and the bottom of the scroll area isn't empty. */
   .about-hero{padding:48px 0 64px;text-align:center;color:var(--text);display:flex;flex-direction:column;align-items:center}

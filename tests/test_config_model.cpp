@@ -26,6 +26,42 @@ TEST_CASE("model=transform is a first-class model again (issue #148 revival)") {
     CHECK(c.model == "transform");
 }
 
+// Issue #156: suspending the LL keyboard hook trades key-swallowing for a smooth mouse stream in
+// the target app. It must be OPT-IN, so an empty/absent config has to leave both off - that is what
+// keeps the shipped behaviour (swallow everywhere) unchanged for anyone who never configures it.
+TEST_CASE("keyboard-hook suspension is off by default") {
+    CHECK(ParseConfig("").noSwallowApps.empty());
+}
+
+TEST_CASE("noSwallowApps parses") {
+    Config c = ParseConfig("noSwallowApps=RDR2.exe,eldenring.exe\n");
+    CHECK(c.noSwallowApps == "RDR2.exe,eldenring.exe");
+}
+
+// "key=" with nothing after it must CLEAR an exe list, not fall back to the shipped default. That
+// is exactly what the config UI writes when the last entry is removed, and the generic parser skips
+// empty values (stoi("") throws on the numeric settings), so the lists are handled ahead of that
+// guard. Without this, clearing a list wrote the ini correctly and the core silently kept the old
+// value - and a list with defaults could never be emptied at all.
+TEST_CASE("an empty value clears an exe list instead of keeping the default") {
+    CHECK(ParseConfig("transformExclude=\n").transformExclude.empty());
+    CHECK(ParseConfig("noSwallowApps=RDR2.exe\nnoSwallowApps=\n").noSwallowApps.empty());
+    CHECK_FALSE(ParseConfig("").transformExclude.empty());   // absent still means the default
+}
+
+// The list is matched with the same helper the transform exclusion uses, so it inherits
+// case-insensitive exact-name matching. Guard that here: a substring match would suspend the hook
+// for unrelated apps (e.g. "rdr2.exe" must not be matched by "dr2.exe").
+TEST_CASE("noSwallowApps matching is case-insensitive and exact") {
+    const std::string list = "RDR2.exe,eldenring.exe";
+    CHECK(IsExeInList("rdr2.exe", list));
+    CHECK(IsExeInList("RDR2.EXE", list));
+    CHECK(IsExeInList("eldenring.exe", list));
+    CHECK_FALSE(IsExeInList("dr2.exe", list));
+    CHECK_FALSE(IsExeInList("notepad.exe", list));
+    CHECK_FALSE(IsExeInList("rdr2.exe", ""));
+}
+
 TEST_CASE("transform-model knobs default and parse") {
     Config d = ParseConfig("");
     CHECK(d.fastPan == 1);

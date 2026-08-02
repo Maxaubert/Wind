@@ -6,21 +6,32 @@
 #include <cstdlib>
 #include "WebView2.h"
 #include <shlwapi.h>
+#include <commdlg.h>
 #include <string>
 #include <fstream>
 #include <sstream>
 #include <map>
 #include "ini_edit.h"
 #include "wind_watchdog.h"
+#include "mpo.h"
+#include "../mpo_boot.h"
 #include "../config_path.h"
 #include "../logging.h"
 #include "../resource.h"
 #pragma comment(lib, "shlwapi.lib")
+#pragma comment(lib, "comdlg32.lib")
 
 using namespace Microsoft::WRL;
 static ComPtr<ICoreWebView2Controller> g_controller;
 static ComPtr<ICoreWebView2> g_webview;
 static HWND g_hwnd = nullptr;
+// Unsaved-changes guard (issue #164). The UI owns "dirty" (it knows what is staged vs saved), so it
+// mirrors the flag here and WM_CLOSE asks the UI to confirm instead of closing. Kept in the host
+// rather than purely in the web layer because Alt+F4 and the system menu never reach the web UI's
+// own title-bar button. g_forceClose is the escape hatch for closes that must NOT be blocked:
+// "Discard" from the confirm dialog, and the watchdog closing us because Wind itself exited.
+static bool g_dirty = false;
+static bool g_forceClose = false;
 
 static std::wstring ExeDir() {
     wchar_t p[MAX_PATH]; GetModuleFileNameW(nullptr, p, MAX_PATH);
@@ -158,10 +169,43 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
     } else if (type == "setConfig") {
         std::string key = JsonField(j, "key"), value = JsonField(j, "value");
         if (!key.empty()) WriteFileAtomic(IniPath(), wind::UpdateIniText(ReadFileUtf8(IniPath()), key, value));
+    } else if (type == "mpoState") {
+        // Read-only probe: HKLM reads do not need elevation, so the Advanced row can always show
+        // the true state without ever prompting. `atBoot` is what DWM actually loaded (see
+        // mpo_boot.h); bootKnown=false means no record for this boot, and the UI then falls back to
+        // comparing against the registry rather than inventing an answer.
+        bool atBoot = false;
+        const bool bootKnown = wind::MpoStateAtBoot(atBoot);
+        std::string out = std::string("{\"type\":\"mpoState\",\"disabled\":") +
+                          (wind::MpoDisabledInRegistry() ? "true" : "false") +
+                          ",\"bootKnown\":" + (bootKnown ? "true" : "false") +
+                          ",\"atBoot\":" + (atBoot ? "true" : "false") + "}";
+        wv->PostWebMessageAsJson(Widen(out).c_str());
+    } else if (type == "setMpoDisabled") {
+        // Applied only from the Apply button, never on the toggle itself: this raises UAC and
+        // changes a system-wide display setting, so it follows the same staged model as every other
+        // setting. Reply with the RE-READ state, so a cancelled UAC prompt reverts the row instead
+        // of leaving it showing a change that never happened.
+        const bool want = JsonField(j, "value") == "1";
+        const bool ok = wind::SetMpoDisabled(want, g_hwnd);
+        std::string out = std::string("{\"type\":\"mpoApplied\",\"ok\":") + (ok ? "true" : "false") +
+                          ",\"disabled\":" + (wind::MpoDisabledInRegistry() ? "true" : "false") + "}";
+        wv->PostWebMessageAsJson(Widen(out).c_str());
+    } else if (type == "rebootNow") {
+        // Offered only after an MPO change, which DWM reads at boot. shutdown.exe rather than
+        // ExitWindowsEx: it handles acquiring SE_SHUTDOWN_NAME for us, and /t 0 with no /f lets
+        // other apps object so the user never loses unsaved work elsewhere.
+        ShellExecuteW(nullptr, L"open", L"shutdown.exe", L"/r /t 0", nullptr, SW_HIDE);
+    } else if (type == "dirty") {
+        g_dirty = JsonField(j, "value") == "1";
     } else if (type == "window") {
         std::string action = JsonField(j, "action");
         if (action == "minimize") ShowWindow(g_hwnd, SW_MINIMIZE);
-        else if (action == "close") PostMessageW(g_hwnd, WM_CLOSE, 0, 0);
+        else if (action == "close") {
+            // "force" is the Discard path from the confirm dialog: skip the guard, do not re-ask.
+            if (JsonField(j, "force") == "1") { g_forceClose = true; g_dirty = false; }
+            PostMessageW(g_hwnd, WM_CLOSE, 0, 0);
+        }
         else if (action == "quitWind") {
             // Onboarding was closed (X) without completing: end the whole Wind app, not just this
             // window. Signal the magnifier via a named event, NOT a window message: the deployed
@@ -179,6 +223,29 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
             // so report back rather than leaving the user with a silently ignored button.
             if (!LaunchWind()) wv->PostWebMessageAsJson(L"{\"type\":\"restartFailed\"}");
         }
+    } else if (type == "pickExe") {
+        // "+" on the key-release app list: browse for a program and hand back just its FILE NAME.
+        // The core matches on the bare exe name (IsExeInList), never a full path, so returning the
+        // path would silently never match. Replies with an empty name on cancel so the UI can
+        // simply ignore it rather than having to distinguish cancel from failure.
+        wchar_t file[MAX_PATH] = L"";
+        OPENFILENAMEW ofn{};
+        ofn.lStructSize = sizeof(ofn);
+        ofn.hwndOwner   = g_hwnd;
+        ofn.lpstrFile   = file;
+        ofn.nMaxFile    = MAX_PATH;
+        ofn.lpstrFilter = L"Programs\0*.exe\0All files\0*.*\0";
+        ofn.lpstrTitle  = L"Select a program";
+        // NOCHANGEDIR matters: without it the dialog moves this process's working directory, which
+        // would break every later relative path the host resolves.
+        ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_EXPLORER;
+        std::string name;
+        if (GetOpenFileNameW(&ofn)) {
+            const wchar_t* base = PathFindFileNameW(file);
+            if (base) name = Narrow(base);
+        }
+        wv->PostWebMessageAsJson(
+            Widen("{\"type\":\"exePicked\",\"name\":\"" + JsonEscape(name) + "\"}").c_str());
     } else if (type == "openIni") {
         // Open the ini with the registered .ini handler (usually Notepad), matching the bridge's
         // "default editor" contract. Fall back to explicitly launching Notepad if no handler is
@@ -245,8 +312,19 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (m == WM_TIMER && w == kWindWatchTimerId) {
         static bool armed = false;
         static int  misses = 0;
-        if (wind::ShouldCloseOnWindGone(WindRunning(), armed, misses))
+        if (wind::ShouldCloseOnWindGone(WindRunning(), armed, misses)) {
+            // Wind is gone, so this window must go too - never hold it open on the unsaved-changes
+            // guard (there would be nothing left to apply the settings to).
+            g_forceClose = true;
             PostMessageW(h, WM_CLOSE, 0, 0);
+        }
+        return 0;
+    }
+    if (m == WM_CLOSE && g_dirty && !g_forceClose && g_webview) {
+        // Unsaved staged settings: hand the decision to the UI (Cancel / Discard) rather than
+        // silently dropping them. Covers Alt+F4 and the system menu as well as our own title-bar
+        // button, which is why the guard lives here and not only in the web layer.
+        g_webview->PostWebMessageAsJson(L"{\"type\":\"confirmClose\"}");
         return 0;
     }
     if (m == WM_DESTROY) { KillTimer(h, kWindWatchTimerId); PostQuitMessage(0); return 0; }
