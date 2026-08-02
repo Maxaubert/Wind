@@ -46,6 +46,13 @@ export const sections = [
     { key:'brightness',  type:'slider', label:'Brightness', min:0.5, max:1.5, step:0.05, def:1.0, advanced:true, showIf:{ key:'model', eq:'render' } },
     { key:'hdrTonemap',  type:'toggle', label:'HDR tonemap', desc:'HDR10 to SDR when HDR is on.', def:1, advanced:true, showIf:{ key:'model', eq:'render' } },
     { key:'multiMonitor',type:'toggle', label:'Follow cursor monitor', def:0 },
+    // Not an ini setting: this row reflects HKLM\...\Dwm\OverlayTestMode. MPO makes the driver pack
+    // DWM's magnification translation into a 16-bit field over a game surface (the issue #148 TDR
+    // trigger and the reason the transform model needs a pan wall), and measurably costs transform
+    // smoothness in-game. Advanced because it changes a system-wide display setting and needs UAC.
+    { key:'__mpo', type:'mpo', label:'Disable MPO',
+      desc:'Multi-plane overlay can stutter or reset the display driver while zoomed in games. Needs admin and a Windows restart.',
+      advanced:true },
     { key:'outline',          type:'toggle', label:'Edge outline',
       desc:'Show an outline around the screen while zoomed.', def:0, showIf:{ key:'model', eq:'render' } },
     { key:'outlineThickness', type:'slider', label:'Outline thickness',

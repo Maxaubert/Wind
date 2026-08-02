@@ -1,7 +1,8 @@
 <script>
   import { onMount } from 'svelte';
   import { sections } from './settings-schema.js';
-  import { getConfig, setConfig, openIni, exportDiagnostics, windowControl, onMessage } from './bridge.js';
+  import { getConfig, setConfig, openIni, exportDiagnostics, windowControl, onMessage,
+           getMpoState, setMpoDisabled, rebootNow, setDirty } from './bridge.js';
   import { currentTheme, applyTheme, nextTheme, setTheme } from './theme.js';
   import Rail from './lib/Rail.svelte';
   import Section from './lib/Section.svelte';
@@ -31,7 +32,17 @@
     for (const k of Object.keys(kbDefaults)) v[k] = (k in cfg) ? cfg[k] : kbDefaults[k];
     values = v; saved = { ...v };
     theme = currentTheme(cfg); applyTheme(theme);
+    // MPO lives in the registry, not the ini, so it is fetched separately and staged separately.
+    const disabled = await getMpoState();
+    mpoLive = disabled; mpoStaged = disabled; mpoKnown = true;
   });
+  // --- MPO (issue #164) -----------------------------------------------------
+  // mpoLive  = what the registry says right now. mpoStaged = what the toggle shows.
+  // They differ only while a change is staged; Apply reconciles them through an elevated write.
+  let mpoLive = false, mpoStaged = false, mpoKnown = false;
+  let mpoRestartPrompt = false, mpoFailed = false;
+  $: mpoDirty = mpoKnown && mpoStaged !== mpoLive;
+  $: extra = { mpoKnown, mpoLive, mpoStaged };
   // Live setter for keybind rows: writes setConfig immediately AND updates both staged + saved
   // so the rebind is effective at once (the core hot-reloads it, the hook stops swallowing the
   // previous binding) and the Apply/Discard footer does NOT show keybind changes as dirty.
@@ -64,6 +75,8 @@
     }
     const key = keyOrPatch;
     if (key === '__action') { if (val === 'openIni') openIni(); return; }
+    // Staged only - the elevated write happens in apply(), like every other setting.
+    if (key === '__mpoStaged') { mpoStaged = !!val; return; }
     const next = { ...values, [key]: val };
     // Disabling the alternate-keybinds toggle clears the alternate bindings (side-button + key) so
     // any previously bound alt input stops firing (Apply still has to be pressed to persist).
@@ -79,7 +92,16 @@
   }
   // `model` is read once at Wind launch, so switching it writes the ini (model FIRST - the relaunched
   // Wind reads it at startup) then relaunches. No confirm: a restart and a hot-reload look the same.
-  function apply() {
+  async function apply() {
+    // MPO first and awaited: it raises a UAC prompt, and a cancelled prompt must revert the toggle
+    // rather than leave the row claiming a change that never reached the registry.
+    if (mpoDirty) {
+      const want = mpoStaged;
+      const res = await setMpoDisabled(want);
+      mpoLive = res.disabled; mpoStaged = res.disabled;
+      if (res.ok && res.disabled === want) mpoRestartPrompt = true;   // reboot for DWM to read it
+      else mpoFailed = true;
+    }
     if (String(values.model) !== String(saved.model)) {
       runningModel = saved.model;   // remember what's live before commit() moves saved.model forward
       restartError = false;
@@ -89,9 +111,18 @@
     }
     commit();
   }
-  function discard() { values = { ...saved }; }
+  function discard() { values = { ...saved }; mpoStaged = mpoLive; }
+  // --- Unsaved-changes guard (issue #164) -----------------------------------
+  // The host mirrors `dirty` and bounces WM_CLOSE back as confirmClose, so Alt+F4 and the system
+  // menu get the same prompt as our own title-bar button. Closing to the tray still loses staged
+  // edits, which is exactly why it is worth asking.
+  let closePrompt = false;
+  function requestClose() { if (dirty) closePrompt = true; else windowControl('close'); }
+  function discardAndClose() { closePrompt = false; windowControl('close', true); }
+  onMessage(m => { if (m && m.type === 'confirmClose') closePrompt = true; });
   function toggleTheme() { theme = nextTheme(theme); setTheme(theme); }
-  $: dirty = Object.keys(values).some(k => String(values[k]) !== String(saved[k]));
+  $: dirty = Object.keys(values).some(k => String(values[k]) !== String(saved[k])) || mpoDirty;
+  $: setDirty(dirty);   // keep the host's WM_CLOSE guard in step with the staged state
   // Advanced rows (schema `advanced:true`) are hidden unless "Show advanced settings" is on. Driven
   // by the live `values` so toggling it reveals/hides rows immediately (before Apply).
   $: advancedOn = Number(values.showAdvanced) === 1;
@@ -104,7 +135,7 @@
       <span class="ctitle">Wind Settings</span>
       <div class="tbtns" style="app-region:no-drag;-webkit-app-region:no-drag">
         <button class="tbtn" title="Minimize" aria-label="Minimize" on:click={() => windowControl('minimize')}>{@html ic.min}</button>
-        <button class="tbtn close" title="Close" aria-label="Close" on:click={() => windowControl('close')}>{@html ic.close}</button>
+        <button class="tbtn close" title="Close" aria-label="Close" on:click={requestClose}>{@html ic.close}</button>
       </div>
     </div>
     <div class="scroll" bind:this={scroller}
@@ -113,7 +144,7 @@
         <Section id={s.id} label={s.label} desc={s.desc}>
           {#each s.rows as r}
             {#if (!r.requires || Number(values[r.requires]) === 1) && (!r.requiresNot || Number(values[r.requiresNot]) !== 1) && (!r.advanced || advancedOn) && (!r.showIf || values[r.showIf.key] === r.showIf.eq)}
-              <Row row={r} value={values[r.key]} {values} set={change} {live}
+              <Row row={r} value={values[r.key]} {values} {extra} set={change} {live}
                    disabled={r.dependsOn && Number(values[r.dependsOn]) !== 1}
                    onChange={(val) => change(r.key, val)} />
             {/if}
@@ -133,6 +164,45 @@
         <h2 id="rtitle">Couldn't restart Wind</h2>
         <p>Wind.exe could not be launched. The magnifier is still running with the previous model.</p>
         <div class="mbtns"><button class="primary" on:click={() => (restartError = false)}>Close</button></div>
+      </div>
+    </div>
+  {/if}
+  {#if mpoRestartPrompt}
+    <div class="mbackdrop">
+      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="mtitle">
+        <h2 id="mtitle">Restart to finish</h2>
+        <p>
+          MPO is now {mpoLive ? 'disabled' : 'enabled'} in the registry. Windows only reads this
+          setting when it starts, so it takes effect after a restart.
+        </p>
+        <div class="mbtns">
+          <button on:click={() => (mpoRestartPrompt = false)}>Cancel</button>
+          <button class="primary" on:click={() => { mpoRestartPrompt = false; rebootNow(); }}>Restart now</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+  {#if mpoFailed}
+    <div class="mbackdrop">
+      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="ftitle">
+        <h2 id="ftitle">MPO change not applied</h2>
+        <p>
+          The registry was not changed. This happens if the administrator prompt was dismissed.
+          Nothing else in your settings was affected.
+        </p>
+        <div class="mbtns"><button class="primary" on:click={() => (mpoFailed = false)}>Close</button></div>
+      </div>
+    </div>
+  {/if}
+  {#if closePrompt}
+    <div class="mbackdrop">
+      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="ctitle">
+        <h2 id="ctitle">Settings not applied</h2>
+        <p>You have changes that haven't been applied. Closing now discards them.</p>
+        <div class="mbtns">
+          <button on:click={() => (closePrompt = false)}>Cancel</button>
+          <button class="primary" on:click={discardAndClose}>Discard</button>
+        </div>
       </div>
     </div>
   {/if}
