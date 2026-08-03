@@ -26,6 +26,7 @@
 #include "zoom_controller.h"
 #include "tray.h"
 #include "lock_detector.h"
+#include "shell_desktop.h"
 #include "cursor_lock.h"
 #include "inspect_focus.h"
 #include "resource.h"
@@ -404,6 +405,19 @@ static bool IsOverlayFg(HWND fg) {
     return s_lastResult;
 }
 
+// Shell desktop (issue #172): after Win+D / "show desktop", foreground goes to Progman (or a
+// WorkerW when a live-wallpaper tool has re-parented SHELLDLL_DefView) - a caption-less window
+// covering the whole monitor, indistinguishable from a game by the style test alone. The desktop
+// always wants render, so both engine picks exclude it. Class test, not exe: excluding all of
+// explorer.exe would be broader than needed, and the class also covers the Wallpaper Engine
+// WorkerW case where the foreground window is not explorer's.
+static bool IsShellDesktopFg(HWND fg) {
+    if (!fg) return false;
+    char cls[16]{};   // "Progman"/"WorkerW" fit; a longer class truncates and simply won't match
+    GetClassNameA(fg, cls, sizeof(cls));
+    return wind::IsShellDesktopClass(cls);
+}
+
 // Keyboard-hook suspension list (issue #156): while one of these apps is foreground the LL keyboard
 // hook is uninstalled, so Windows' input thread stops round-tripping every keystroke through us and
 // the mouse stream to that app is never stalled. Unlike the transform exclusion this does NOT
@@ -780,6 +794,7 @@ static void RunTick(TickState& t) {
             // path at every level; a 9x engine-crossover was tried and its handover flash was
             // worse than the wall.)
             IMagnifierModel* pick = (fs && borderless && primaryHere &&
+                                     !IsShellDesktopFg(fgw) &&
                                      !IsTransformExcluded(fgw, t.cfg) &&
                                      (t.cfg.tdrTest > 0 || !IsChurnyFg(fgw)))
                                         ? t.mTransform : t.mRender;
@@ -1043,6 +1058,7 @@ static void RunTick(TickState& t) {
             const bool borderless2 = fgw2 && !(GetWindowLongPtrW(fgw2, GWL_STYLE) & WS_CAPTION);
             const bool primary2 = t.mon.x == 0 && t.mon.y == 0;
             IMagnifierModel* want = (fsGame && borderless2 && primary2 &&
+                                     !IsShellDesktopFg(fgw2) &&
                                      !IsTransformExcluded(fgw2, t.cfg) &&
                                      (t.cfg.tdrTest > 0 || !IsChurnyFg(fgw2)))
                                         ? t.mTransform : t.mRender;
