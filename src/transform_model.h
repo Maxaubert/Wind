@@ -24,6 +24,13 @@ public:
     void present(const MapResult& r, double level, const Config& cfg,
                  const MonitorTarget& mon, const PresentExtras& ex) override;
     bool coversShell() const override { return false; }
+    // Whether THIS present() actually moved the OS cursor (the deduped weld fired). RunTick's
+    // pan-oracle baseline must be the WELD POINT on those ticks (oracle invariant #1: the
+    // baseline is measured, never assumed). Taking the pre-weld read instead counts the weld
+    // displacement as hand motion next tick, and the lens chases its own output: a constant-
+    // velocity cursor+view drift that survives hands-off until a zoom change re-aligns it
+    // (issue #174). Exact mirror of RenderEngine::parkedLastFrame() for the render park.
+    bool weldedLastPresent() const { return weldedLastPresent_; }
 private:
     bool fastPan_, smoothPan_, useSprite_;
     int  zorderBand_;                                // sprite z-band (above the shell); needs UIAccess
@@ -54,6 +61,7 @@ private:
     bool cursorHidden_ = false;                      // we called MagShowSystemCursor(FALSE)
     bool haveLastClick_ = false;                     // dedup the per-tick cursor weld
     int  lastClickX_ = 0, lastClickY_ = 0;
+    bool weldedLastPresent_ = false;                 // this present() called SetCursorPos (#174)
     unsigned long long idleSinceMs_ = 0;             // when the last session ended (0 = none)
     int  idleReleaseMs_ = 1200;                      // cfg.txIdleReleaseMs (hot)
     bool identityParked_ = false;                    // phase 1 of the release done (see idleTick)

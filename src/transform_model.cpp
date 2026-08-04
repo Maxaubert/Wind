@@ -185,6 +185,7 @@ void TransformModel::idleTick() {
 void TransformModel::present(const MapResult& r, double level, const Config& cfg,
                              const MonitorTarget& mon, const PresentExtras& ex) {
     (void)mon;
+    weldedLastPresent_ = false;   // set true only if the deduped weld below fires (#174)
     // CENTERED-CURSOR geometry (issue #148 revival). The original model anchored the transform at
     // the cursor (ComputeFixedPointOffset) because a sprite AT the cursor's real position only sits
     // on correct content when T(L) == L. But Wind's identity is the centered cursor, and the render
@@ -347,6 +348,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         if (!haveLastClick_ || cx != lastClickX_ || cy != lastClickY_) {
             SetCursorPos(cx, cy);
             lastClickX_ = cx; lastClickY_ = cy; haveLastClick_ = true;
+            weldedLastPresent_ = true;   // RunTick baselines the oracle at this point (#174)
         }
     }
     // (old note) FOLLOW design (issue #148 TDR root cause): the transform model NEVER places the OS cursor.
