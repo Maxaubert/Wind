@@ -42,16 +42,17 @@ are what cost ~30-50ms game frames - do NOT re-quantize ramps), tx keep-alive af
 maxLevel is ONE SHARED setting across models (no per-model cap; the old 12x cap guarded what
 turned out to be the MPO bug below). Desktop cliff ~4x per-window texture limits - why hybrid
 keeps render on desktop.
-TRANSFORM CURSOR LAW (issue #148 root causes - NEVER regress): the transform model NEVER places
-the cursor. Programmatic ABSOLUTE placement (SetCursorPos / SendInput-absolute) or per-tick
-ClipCursor while the fullscreen transform is live over a game RESETS THE GPU DRIVER in seconds
-(repro-proven: any rate, even with the transform parked; the old per-tick click weld was this).
-DESKTOP transform sessions FOLLOW the visible cursor (DWM shows it magnified; hover + clicks
-native-correct - the old hover dead zones are GONE, issue closed); GAME sessions (borderless
-cover) FREEZE it (Inspect-style 1px clip -> LockDetector reads it as locked -> raw-mickey pan),
-the sprite marks the aim point, and clicks are hook-swallowed + fired as write-paused absolute
-injections at the aim point (re-freezing there). ClipCursor re-asserts are DEDUPED via
-GetClipCursor reads (same TDR class as SetCursorPos). ComputeMagTransform clamps offsets AND
+TRANSFORM CURSOR (issue #148 history, revised for the MPO-off era): the "never place the
+cursor" law and the game FREEZE were guards against the per-tick weld TDRing the NVIDIA driver
+- measured with MPO ENABLED (and originally with native Magnifier running). With MPO disabled
+at boot (Wind detects this at startup) the weld is field-clean, so transform sessions now run
+the CENTERED design on BOTH desktop and games: mapper's centered source rect, sprite at
+cursorScreen, and the REAL cursor WELDED per tick to clickDesktop (transform_model.cpp,
+deduped; "History" note there has the re-test rationale). If driver resets return, the weld is
+the first suspect and docs/HITCH-FINDINGS.md has the bisect; MPO ON -> freeze + pan wall remain
+the safe fallback. THE WELD IS AN ORACLE EVENT: RunTick must baseline `lastSetVirtual` at the
+weld point on ticks where it fired (`weldedLastPresent()`, issue #174) - see invariant 1 below.
+ComputeMagTransform clamps offsets AND
 private-channel translations with a 2px right/bottom margin (rounding overshoot = TDR class).
 NVIDIA MPO BUG (issue #148 final root cause, proven by the MPO-off experiment): the driver
 packs DWM's magnification translation into a 16-bit field when a game surface rides a hardware
@@ -337,12 +338,16 @@ staged Apply/Discard footer.
      CLIP (desktop minus taskbar, ~95%, external utility) - GetClipCursor NEVER returns the full
      desktop here. The old any-clip test therefore ran every zoomed desktop session on the locked
      path (raw-mickey panning + weld = the flicker), and masked the two defects below.
-  1. THE BASELINE IS MEASURED, NEVER ASSUMED. `lastSetVirtual` is a fresh post-present
-     `GetCursorPos`, not the point the weld was ASKED to park at. The park can be deduped
-     (unchanged centre pixel), suppressed (drag-follow), skipped (gatePresent / fps-cap ticks), or
-     absent by design (transform FOLLOW). Assuming it landed makes the next delta measure
-     hand + (pointer-centre gap); the mapper integrates the gap, the centre overshoots the pointer,
-     the sign flips, and the loop oscillates at an amplitude proportional to hand speed.
+  1. THE BASELINE TRACKS THE PLACEMENT, TICK BY TICK. When THIS tick's present actually placed
+     the cursor (render park via `parkedLastFrame()`, transform weld via `weldedLastPresent()` -
+     BOTH models place now, issue #174), `lastSetVirtual` is that placed point; when it did not
+     (park/weld deduped, drag-follow suppressed, gatePresent / fps-cap skip), it is the
+     start-of-tick `GetCursorPos` read. NEVER a post-present read (Present blocks ~a frame; a
+     read after it swallows the hand motion made during the block - shipped once, field-reported
+     as a stalling cursor) and NEVER `cur` on a tick that placed (the placement displacement then
+     reads as hand motion next tick and the lens chases its own output - shipped once too, the
+     issue #174 hands-off constant-velocity drift, cleared only by a zoom change). Missing either
+     side of this ledger is the same bug in opposite directions.
   2. NEVER WELD WHILE A MOUSE BUTTON IS HELD (drag-follow). Mid-drag the pointer IS the interaction
      (window drag, text selection); re-parking it each tick fights the hand and the dragged content
      flickers between the two positions (probe-measured ~85 px square wave). `ShouldDragFollow`

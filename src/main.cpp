@@ -1406,17 +1406,24 @@ static void RunTick(TickState& t) {
         if (inspect) {
             t.lastSetVirtual = t.frozenCursor;
         } else {
-            // Parked -> the park point: hand motion after the park (including during the Present
-            // block) is measured next tick from there. Not parked (weld deduped/suppressed,
-            // transform FOLLOW, skipped frame) -> THIS tick's start-of-tick read `cur`: motion
-            // after that read is measured next tick. NEVER a fresh post-present read - Present
-            // blocks ~a frame at vsync, and a read taken after it swallows all hand motion that
+            // Placed -> the placed point: hand motion after the park/weld (including during the
+            // Present block) is measured next tick from there. Not placed (park/weld deduped or
+            // suppressed, skipped frame) -> THIS tick's start-of-tick read `cur`: motion after
+            // that read is measured next tick. NEVER a fresh post-present read - Present blocks
+            // ~a frame at vsync, and a read taken after it swallows all hand motion that
             // occurred during the block, so the lens pans slower than the hand and the weld drags
             // the pointer backwards (field-reported as stalling/slowed cursor; first shipped
             // version of this fix had exactly that bug).
+            // BOTH models place the cursor now (issue #174): the render park AND the transform
+            // weld are the same oracle event. The first ship of this fix baselined only the
+            // render park - the transform weld's displacement then read as hand motion each
+            // tick, and the lens chased its own output: a constant-velocity cursor+view drift,
+            // hands-off, until a zoom change re-aligned it (the field "cursor drift" report).
             auto* rmodel = dynamic_cast<RenderModel*>(t.model);
+            auto* tmodel = dynamic_cast<TransformModel*>(t.model);
             const bool parkedNow = doPresent && rmodel && rmodel->engine().parkedLastFrame();
-            if (parkedNow) {
+            const bool weldedNow = doPresent && tmodel && tmodel->weldedLastPresent();
+            if (parkedNow || weldedNow) {
                 t.lastSetVirtual.x = r.clickDesktopX + t.mon.x;
                 t.lastSetVirtual.y = r.clickDesktopY + t.mon.y;
             } else {
