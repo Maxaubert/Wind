@@ -25,6 +25,11 @@ struct Config {
     int    zoomOutMods      = 0;
     int    zoomInMods2      = 0;
     int    zoomOutMods2     = 0;
+    int    bindDebounceMs   = 25;    // keyboard zoom binds must read held this long (ms) before the
+                                     // zoom moves (issue #176). A stranded receiver-phantom key is
+                                     // exposed to polling in ~8 ms hook-reinstall windows; those
+                                     // pulses must never zoom. Shortest real press on record: 40 ms.
+                                     // 0 = off. Mouse side-buttons are never debounced.
     int    recenterVk       = 0;     // VK code; 0 = unbound. Tap to recenter the lens on the cursor.
     int    cursorLockVk     = 0;     // VK code; 0 = unbound. Tap to toggle Inspect mode (cursor lock)
                                      // while zoomed. Swallowed system-wide like recenterVk (VK only,

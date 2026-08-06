@@ -13,6 +13,8 @@
 #include "config.h"
 #include "config_path.h"
 #include "drag_follow.h"
+#include "bind_debounce.h"
+#include "reinstall_gate.h"
 #include "mpo_boot.h"
 #include "config_ui/ini_edit.h"   // wind::UpdateIniText - flip the model key in place
 #include "logging.h"
@@ -252,6 +254,11 @@ struct TickState {
     HCURSOR lastFgCursor = nullptr; // churn valve: last seen foreground cursor SHAPE handle
     int    churnCount = 0;          //   handle changes inside the rolling window
     unsigned long long kbHookDivergentSinceMs = 0;  // LL keyboard-hook watchdog dwell (issue #156)
+    wind::ReinstallGate kbReinstallGate;       // caps reinstall cadence (issue #176)
+    int      kbStrandCandidateVk = 0;          // vk divergent when the last reinstall was requested
+    unsigned kbReinstallsAtRequest = 0;        // reinstall counter snapshot at that request
+    wind::BindDebounce inBindDebounce;         // keyboard zoom-bind debounce (issue #176)
+    wind::BindDebounce outBindDebounce;
     unsigned long long lastFgProbeMs = 0;           // throttles the game-foreground probe to ~10Hz
     unsigned long long churnWinStart = 0;
     std::wstring freezeExe;         // exe of the app under the current/last transform game session
@@ -482,6 +489,20 @@ static void RegisterQuickZoomHotkey(HWND hwnd, int vk, int mods);
 // the single-instance helpers below (it relaunches Wind.exe, which drives the same eviction handshake).
 static void SwapModelAndRelaunch(const std::wstring& iniPath, const std::string& currentModel);
 
+// Inject a key-UP for a stranded bind key (issue #176): the receiver phantom leaves a DOWN in the
+// async state that no device will ever release. UP only - it can clear a held state but never set
+// one, so it is idempotent and safe by construction. Our own keyboard hook passes it through
+// (swallow balance: only an UP whose DOWN we swallowed is eaten), so it reaches the async state.
+static void InjectKeyUp(int vk) {
+    INPUT in{};
+    in.type = INPUT_KEYBOARD;
+    in.ki.wVk = (WORD)vk;
+    UINT sc = MapVirtualKeyW((UINT)vk, MAPVK_VK_TO_VSC_EX);
+    in.ki.wScan = (WORD)(sc & 0xFF);
+    in.ki.dwFlags = KEYEVENTF_KEYUP | ((((sc >> 8) & 0xFF) == 0xE0) ? KEYEVENTF_EXTENDEDKEY : 0);
+    SendInput(1, &in, sizeof(INPUT));
+}
+
 // Read the current Windows pointer-speed + acceleration settings into a BallisticsConfig so Inspect
 // mode pans the look point at the same speed as the desktop cursor. Refreshed on each Inspect entry
 // (these settings change rarely). SystemParametersInfo only: the SmoothMouse curve shape is the
@@ -626,20 +647,44 @@ static void RunTick(TickState& t) {
     if (g_input.kbHookActive() && g_input.swallowEnabled() && !g_input.ignoreInjectedKeys()) {
         const int watched[] = { t.cfg.zoomInVk, t.cfg.zoomInVk2, t.cfg.zoomOutVk, t.cfg.zoomOutVk2,
                                 t.cfg.recenterVk, t.cfg.cursorLockVk, t.cfg.swapModelVk };
-        bool divergent = false;
+        int divergentVk = 0;
         for (int vk : watched) {
             if (vk == 0 || !g_input.isBoundKey(vk)) continue;
-            if ((GetAsyncKeyState(vk) & 0x8000) && !g_input.keyPressed(vk)) { divergent = true; break; }
+            if ((GetAsyncKeyState(vk) & 0x8000) && !g_input.keyPressed(vk)) { divergentVk = vk; break; }
         }
         const unsigned long long nowMs = GetTickCount64();
-        if (!divergent)                             t.kbHookDivergentSinceMs = 0;
+        if (!divergentVk) {
+            t.kbHookDivergentSinceMs = 0;
+            t.kbStrandCandidateVk = 0;   // only a CONTINUOUS divergence carries across a reinstall
+        }
         else if (t.kbHookDivergentSinceMs == 0)     t.kbHookDivergentSinceMs = nowMs;
         else if (nowMs - t.kbHookDivergentSinceMs >= kKbHookDeadMs) {
             t.kbHookDivergentSinceMs = 0;
-            g_input.requestKbHookReinstall();   // logs, and polling takes over on the next tick
+            // The tell (async down + hook up) is AMBIGUOUS (issue #176): an evicted hook and a
+            // STRANDED async key (a receiver phantom whose DOWN landed while the hook was dead
+            // and whose UP was lost) look identical - and a stranded key satisfies it forever,
+            // so the unlimited reinstall loop rhythmically exposed the key to the polling
+            // fallback: the field "zoom crawl". Surviving a reinstall disambiguates: a LIVE
+            // hook would have seen the key's events, so if the SAME key is still divergent
+            // after a completed reinstall, it is stranded - clear it instead of reinstalling.
+            const unsigned reinstalls = g_input.kbHookReinstalls();
+            if (t.kbStrandCandidateVk == divergentVk && reinstalls > t.kbReinstallsAtRequest) {
+                t.kbStrandCandidateVk = 0;
+                InjectKeyUp(divergentVk);   // flips the async bit; the divergence ends with it
+                wind::Log(wind::LogLevel::Warn, "input",
+                          "stranded bind key vk=0x%02X cleared (receiver phantom, not an eviction)",
+                          divergentVk);
+            } else if (t.kbReinstallGate.allow(nowMs)) {
+                t.kbStrandCandidateVk = divergentVk;
+                t.kbReinstallsAtRequest = reinstalls;
+                g_input.requestKbHookReinstall();   // logs, and polling takes over on the next tick
+            }
+            // Gate denied: wait out the dwell again; either the divergence clears, or a
+            // completed earlier reinstall lets the stranded branch fire next time.
         }
     } else {
         t.kbHookDivergentSinceMs = 0;
+        t.kbStrandCandidateVk = 0;
     }
     const bool kbHook = g_input.kbHookActive();
     auto keyDown = [&](int vk) {
@@ -657,12 +702,20 @@ static void RunTick(TickState& t) {
         return true;
     };
     auto comboHeld = [&](int vk, int mods) { return keyDown(vk) && modsHeld(mods); };
-    bool inHeld  = g_input.state().inHeld.load()
-        || comboHeld(t.cfg.zoomInVk,  t.cfg.zoomInMods)
-        || comboHeld(t.cfg.zoomInVk2, t.cfg.zoomInMods2);
-    bool outHeld = g_input.state().outHeld.load()
-        || comboHeld(t.cfg.zoomOutVk,  t.cfg.zoomOutMods)
-        || comboHeld(t.cfg.zoomOutVk2, t.cfg.zoomOutMods2);
+    // Keyboard zoom binds are DEBOUNCED (issue #176): a stranded receiver-phantom key is exposed
+    // to the polling fallback in ~8 ms hook-reinstall windows, and each exposure advanced the
+    // zoom one tick - the crawl. Requiring a continuous bindDebounceMs hold makes those pulses
+    // arithmetically incapable of zooming; the shortest real press on record is 40 ms, so a
+    // 25 ms floor is imperceptible. Mouse side-buttons stay instant (no phantom history, #113).
+    const unsigned long long bindNowMs = GetTickCount64();
+    const bool kbIn = t.inBindDebounce.update(
+        comboHeld(t.cfg.zoomInVk, t.cfg.zoomInMods) || comboHeld(t.cfg.zoomInVk2, t.cfg.zoomInMods2),
+        bindNowMs, t.cfg.bindDebounceMs);
+    const bool kbOut = t.outBindDebounce.update(
+        comboHeld(t.cfg.zoomOutVk, t.cfg.zoomOutMods) || comboHeld(t.cfg.zoomOutVk2, t.cfg.zoomOutMods2),
+        bindNowMs, t.cfg.bindDebounceMs);
+    bool inHeld  = g_input.state().inHeld.load()  || kbIn;
+    bool outHeld = g_input.state().outHeld.load() || kbOut;
     // Apply the live zoom profile every frame (free hot-reload; setProfile does not reset level).
     // (The old transform <=1.0x ramp-speed cap was a blind TDR mitigation; the resets were
     // root-caused elsewhere - issue #148 - so the user's configured speed applies everywhere.)
