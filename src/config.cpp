@@ -164,6 +164,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "txIdleReleaseMs")    c.txIdleReleaseMs = std::stoi(val);
             else if (key == "txMaxStepPct")       c.txMaxStepPct = std::stoi(val);
             else if (key == "txLevelStep")        c.txLevelStep = std::stoi(val);
+            else if (key == "bindDebounceMs")     c.bindDebounceMs = std::stoi(val);
             else if (key == "txGrid")             c.txGrid = std::stoi(val);
             else if (key == "gameFpsCap")         c.gameFpsCap = std::stoi(val);
             else if (key == "onboarded")          c.onboarded = std::stoi(val);
@@ -206,6 +207,8 @@ Config ParseConfig(const std::string& text) {
     if (c.tdrTest > 4) c.tdrTest = 4;
     if (c.txLevelStep < 0)   c.txLevelStep = 0;    // per mille; 0 = per-tick level writes
     if (c.txLevelStep > 200) c.txLevelStep = 200;
+    if (c.bindDebounceMs < 0)   c.bindDebounceMs = 0;    // 0 = off (issue #176)
+    if (c.bindDebounceMs > 500) c.bindDebounceMs = 500;  // past half a second it is just broken input
     if (c.txGrid < 0)   c.txGrid = 0;              // per mille geometric grid; 0 = continuous
     if (c.txGrid > 250) c.txGrid = 250;
     c.outlineIdleSeconds = clampd(c.outlineIdleSeconds, 0.5, 60.0);

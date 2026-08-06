@@ -139,7 +139,18 @@ staged Apply/Discard footer.
   never appears in `GetAsyncKeyState`, so the keyboard hook is the AUTHORITY for bound-key down-state
   (`keyPressed()`); `main.cpp` reads it when `kbHookActive()`, else falls back to polling (install
   failure / `WIND_NOHOOK`). hide-cursor + hotkey-mode quick-zoom are swallowed by `RegisterHotKey`
-  instead, not this hook. SAFETY: `IsForbiddenBindVk` (pure, in `config.cpp`) blocks binding keys
+  instead, not this hook.
+  KB-HOOK WATCHDOG (issue #156, revised #176): Windows silently evicts a LL hook that misses
+  LowLevelHooksTimeout; the tell is async-down + hook-up sustained 250ms. THE TELL IS AMBIGUOUS: a
+  STRANDED async key (receiver phantom - DOWN landed while the hook was dead, UP lost forever)
+  satisfies it identically and FOREVER. Unlimited reinstalls therefore pulsed at 4Hz and each ~8ms
+  reinstall window exposed the stranded key to the polling fallback - the field "zoom crawl"
+  (GTA V capture 2026-08-06). Disambiguation: a divergence that SURVIVES a completed reinstall
+  with the hook alive cannot be an eviction -> inject that key's UP once (stranded-key clear).
+  Reinstalls are rate-limited (`ReinstallGate`, pure: 1 per 2s, 3 per 30s then 30s cooldown) and
+  keyboard zoom binds are debounced (`BindDebounce`, pure; ini `bindDebounceMs` default 25ms,
+  0=off) so sub-25ms exposure pulses can never move the zoom (shortest real press on record:
+  40ms). Mouse side-buttons are never debounced. SAFETY: `IsForbiddenBindVk` (pure, in `config.cpp`) blocks binding keys
   that would be catastrophic to lose system-wide - left/right click (1/2), Backspace (8), Win
   (0x5B/0x5C) - enforced in three places: the hook never swallows them, `ParseConfig` sanitizes them
   out of the ini, and the config UI's keybind capture refuses them. Down/up swallows are balanced
