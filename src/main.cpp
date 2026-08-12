@@ -391,6 +391,20 @@ static const char* kOverlayExes =
 //      click-through HUDs do. This alone catches most of them for free.
 //   2. Only if that misses, the small built-in name list, which needs a process handle.
 // Memoised on the HWND so step 2 costs one lookup per foreground CHANGE rather than one per tick.
+// Shell surfaces that grab foreground for a moment and hand it straight back: the taskbar and
+// its preview/tray flyouts (issue #180 - clicking a taskbar preview button over a transform
+// session ping-ponged the engine, and every handover shows the over-zoom pulse), the Win10
+// thumbnail flyout, and the Start/search CoreWindow. Matched by CLASS, not exe: these all live
+// in explorer.exe, and excluding all of explorer would swallow real File Explorer windows.
+static bool IsShellTransientClass(const wchar_t* cls) {
+    return lstrcmpiW(cls, L"Shell_TrayWnd") == 0 ||
+           lstrcmpiW(cls, L"Shell_SecondaryTrayWnd") == 0 ||
+           lstrcmpiW(cls, L"TaskListThumbnailWnd") == 0 ||                 // Win10 preview flyout
+           lstrcmpiW(cls, L"XamlExplorerHostIslandWindow") == 0 ||        // Win11 flyouts/alt-tab
+           lstrcmpiW(cls, L"TopLevelWindowForOverflowXamlIsland") == 0 || // Win11 tray overflow
+           lstrcmpiW(cls, L"Windows.UI.Core.CoreWindow") == 0;            // Start menu / search
+}
+
 static bool IsOverlayFg(HWND fg) {
     if (!fg) return false;
     if (GetWindowLongPtrW(fg, GWL_EXSTYLE) & WS_EX_LAYERED) return true;
@@ -398,7 +412,9 @@ static bool IsOverlayFg(HWND fg) {
     static bool s_lastResult = false;
     if (fg == s_lastFg) return s_lastResult;
     s_lastFg = fg;
-    s_lastResult = FgExeInList(fg, kOverlayExes);
+    wchar_t cls[64]{};   // longest listed class is 35 chars; longer real classes truncate + miss
+    GetClassNameW(fg, cls, 64);
+    s_lastResult = IsShellTransientClass(cls) || FgExeInList(fg, kOverlayExes);
     return s_lastResult;
 }
 
@@ -1056,8 +1072,14 @@ static void RunTick(TickState& t) {
                     t.restAfterReveal = old;
                     t.restOverlapTicks = 3;
                 }
-                wind::Log(wind::LogLevel::Info, "hybrid", "instant switch -> %s (level preserved)",
-                          dynamic_cast<RenderModel*>(t.model) ? "render" : "transform");
+                // Name the trigger: if another transient surface ever ping-pongs the engine the
+                // way the taskbar flyout did (issue #180), the log identifies it directly.
+                wchar_t fgCls[64]{};
+                if (fgTick) GetClassNameW(fgTick, fgCls, 64);
+                wind::Log(wind::LogLevel::Info, "hybrid",
+                          "instant switch -> %s (level preserved; fg cls=%ls exe=%ls)",
+                          dynamic_cast<RenderModel*>(t.model) ? "render" : "transform",
+                          fgCls, ExeNameOf(fgTick).c_str());
             }
         }
         // Per-tick render-only overrides go through PresentExtras; the model's present() runs
