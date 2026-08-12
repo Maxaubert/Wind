@@ -2,7 +2,10 @@
   import { onMount } from 'svelte';
   import { sections } from './settings-schema.js';
   import { getConfig, setConfig, openIni, exportDiagnostics, windowControl, onMessage,
-           getMpoState, setMpoDisabled, rebootNow, setDirty } from './bridge.js';
+           getMpoState, setMpoDisabled, rebootNow, setDirty,
+           listProfiles, switchProfile, createProfile, renameProfile, duplicateProfile,
+           deleteProfile } from './bridge.js';
+  import ProfileMenu from './lib/ProfileMenu.svelte';
   import { currentTheme, applyTheme, nextTheme, setTheme } from './theme.js';
   import Rail from './lib/Rail.svelte';
   import Section from './lib/Section.svelte';
@@ -14,7 +17,9 @@
   const railItems = sections.map(s => ({ id: s.id, label: s.label, icon: s.icon }));
   const ids = sections.map(s => s.id);
 
-  onMount(async () => {
+  // Reusable so a profile switch/create/delete can re-pull the whole config after the host
+  // rewrites the live ini (the staged/saved state is replaced wholesale on purpose).
+  async function loadValues() {
     const cfg = await getConfig();
     const v = {};
     for (const s of sections) for (const r of s.rows) if (r.key[0] !== '_') v[r.key] = (r.key in cfg) ? cfg[r.key] : r.def;
@@ -32,6 +37,10 @@
     for (const k of Object.keys(kbDefaults)) v[k] = (k in cfg) ? cfg[k] : kbDefaults[k];
     values = v; saved = { ...v };
     theme = currentTheme(cfg); applyTheme(theme);
+  }
+  onMount(async () => {
+    await loadValues();
+    profiles = await listProfiles();
     // MPO lives in the registry, not the ini, so it is fetched separately and staged separately.
     const s = await getMpoState();
     mpoLive = s.disabled; mpoStaged = s.disabled; mpoKnown = true;
@@ -124,6 +133,60 @@
     commit();
   }
   function discard() { values = { ...saved }; mpoStaged = mpoLive; }
+  // --- Profiles (spec 2026-08-12) -------------------------------------------
+  let profiles = { names: [], active: '' };
+  let profileError = '';
+  // Switching/creating replaces the staged settings wholesale, so route every profile action
+  // through the unsaved-changes guard (same UX as closing, issue #164). Rename/duplicate do not
+  // touch the staged values, so they skip the guard.
+  let profilePrompt = null;   // pending {kind, payload} while the guard is up
+  function profileAction(kind, payload) {
+    // Only actions that replace the staged settings need the guard: switch, create, and deleting
+    // the ACTIVE profile (which switches away). Deleting another profile, rename, and duplicate
+    // leave the staged values untouched.
+    const deletesActive = kind === 'delete' &&
+      payload.name.toLowerCase() === profiles.active.toLowerCase();
+    const mutates = kind === 'switch' || kind === 'create' || deletesActive;
+    if (mutates && dirty) { profilePrompt = { kind, payload }; return; }
+    runProfileAction(kind, payload);
+  }
+  function discardAndRunProfile() {
+    const p = profilePrompt; profilePrompt = null; discard(); runProfileAction(p.kind, p.payload);
+  }
+  async function runProfileAction(kind, payload) {
+    profileError = '';
+    const prevActive = profiles.active;
+    let r;
+    if (kind === 'switch')         r = await switchProfile(payload.name);
+    else if (kind === 'create')    r = await createProfile(payload.name);
+    else if (kind === 'rename')    r = await renameProfile(payload.from, payload.to);
+    else if (kind === 'duplicate') r = await duplicateProfile(payload.name);
+    else if (kind === 'delete')    r = await deleteProfile(payload.name);
+    else return;
+    profiles = { names: r.names, active: r.active };
+    // Reload BEFORE the error check: a failed op can still have rewritten the live ini (e.g. the
+    // switch landed but the model restart failed), and stale staged values would then Apply the
+    // OLD profile's settings on top of the new one.
+    if (kind === 'switch' || kind === 'create' || (kind === 'delete' && r.active !== prevActive))
+      await loadValues();
+    if (!r.ok) { profileError = r.error || 'Profile operation failed'; return; }
+    // A fresh factory-defaults profile has no zoom keys bound (keybinds are per-profile):
+    // put the user right where fixing that starts.
+    if (kind === 'create') scrollToSection(scroller, 'keybinds');
+  }
+  // Unsolicited host push: the tray switched profiles under this window. Refresh the titlebar and,
+  // unless the user has staged edits, the values too (a stale Apply would mirror the OLD profile's
+  // settings into the NEW profile's file). With staged edits, surface it instead of silently
+  // discarding the user's work.
+  onMessage(async m => {
+    if (!m || m.type !== 'profiles' || !m.push) return;
+    const changed = m.active !== profiles.active;
+    profiles = { names: m.names, active: m.active };
+    if (!changed) return;
+    if (!dirty) await loadValues();
+    else profileNotice = 'The active profile was switched to "' + m.active + '" from the tray. Your staged changes now apply to that profile; Discard them to load its settings instead.';
+  });
+  let profileNotice = '';
   // --- Unsaved-changes guard (issue #164) -----------------------------------
   // The host mirrors `dirty` and bounces WM_CLOSE back as confirmClose, so Alt+F4 and the system
   // menu get the same prompt as our own title-bar button. Closing to the tray still loses staged
@@ -145,6 +208,8 @@
   <section class="content">
     <div class="caption" style="app-region:drag;-webkit-app-region:drag">
       <span class="ctitle">Wind Settings</span>
+      <ProfileMenu active={profiles.active} names={profiles.names} onAction={profileAction} />
+      <div class="spacer" style="flex:1"></div>
       <div class="tbtns" style="app-region:no-drag;-webkit-app-region:no-drag">
         <button class="tbtn" title="Minimize" aria-label="Minimize" on:click={() => windowControl('minimize')}>{@html ic.min}</button>
         <button class="tbtn close" title="Close" aria-label="Close" on:click={requestClose}>{@html ic.close}</button>
@@ -215,6 +280,36 @@
           <button on:click={() => (closePrompt = false)}>Cancel</button>
           <button class="primary" on:click={discardAndClose}>Discard</button>
         </div>
+      </div>
+    </div>
+  {/if}
+  {#if profilePrompt}
+    <div class="mbackdrop">
+      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="ptitle">
+        <h2 id="ptitle">Unsaved changes</h2>
+        <p>You have settings that were not applied. Switching profiles will discard them.</p>
+        <div class="mbtns">
+          <button on:click={() => (profilePrompt = null)}>Keep editing</button>
+          <button class="primary" on:click={discardAndRunProfile}>Discard and continue</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+  {#if profileError}
+    <div class="mbackdrop">
+      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="petitle">
+        <h2 id="petitle">Profile action failed</h2>
+        <p>{profileError}</p>
+        <div class="mbtns"><button class="primary" on:click={() => (profileError = '')}>Close</button></div>
+      </div>
+    </div>
+  {/if}
+  {#if profileNotice}
+    <div class="mbackdrop">
+      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="pntitle">
+        <h2 id="pntitle">Profile changed</h2>
+        <p>{profileNotice}</p>
+        <div class="mbtns"><button class="primary" on:click={() => (profileNotice = '')}>OK</button></div>
       </div>
     </div>
   {/if}

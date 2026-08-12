@@ -68,7 +68,7 @@ rc /nologo /fo "%ROOT%src\wind.res" "%ROOT%src\wind.rc"
 if errorlevel 1 (echo [build] rc.exe failed & exit /b 1)
 cl /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE ^
    /I third_party\webview2\include ^
-   src\config_ui\main.cpp src\config_ui\ini_edit.cpp src\logging.cpp src\wind.res ^
+   src\config_ui\main.cpp src\config_ui\ini_edit.cpp src\profiles.cpp src\config.cpp src\logging.cpp src\wind.res ^
    /Fe:WindConfig.exe ^
    /link third_party\webview2\x64\WebView2LoaderStatic.lib ^
    user32.lib shell32.lib shlwapi.lib ole32.lib version.lib advapi32.lib ntdll.lib /SUBSYSTEM:WINDOWS
@@ -79,7 +79,7 @@ rem --- Test build (pure-logic sources only; no <windows.h>) -----------------
 rem /wd5285 silences a known doctest 2.4.11 header warning under MSVC /W4.
 cl /nologo /std:c++17 /EHsc /W4 /wd5285 /DWIND_TESTS /I third_party ^
    tests\*.cpp ^
-   src\transform.cpp src\zoom_controller.cpp src\config.cpp src\cursor_mapper.cpp src\lock_detector.cpp src\cursor_lock.cpp src\mouse_ballistics.cpp src\crosshair.cpp src\config_ui\ini_edit.cpp src\logging.cpp ^
+   src\transform.cpp src\zoom_controller.cpp src\config.cpp src\profiles.cpp src\cursor_mapper.cpp src\lock_detector.cpp src\cursor_lock.cpp src\mouse_ballistics.cpp src\crosshair.cpp src\config_ui\ini_edit.cpp src\logging.cpp ^
    /Fe:wind_tests.exe
 if errorlevel 1 exit /b 1
 "%ROOT%wind_tests.exe"

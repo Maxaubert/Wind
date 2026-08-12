@@ -99,6 +99,20 @@ legacy `model=transform` ini value maps to `magnify`).
 Specs: `docs/superpowers/specs/2026-05-25-own-renderer-design.md` (render, issue #4),
 `docs/superpowers/specs/2026-07-22-magnify-model-design.md` (magnify).
 
+**Profiles** (issue #178, spec `docs/superpowers/specs/2026-08-12-profiles-design.md`): named
+full-snapshot settings profiles (keybinds included). Each is `profiles\<Name>.ini` next to the
+resolved `magnifier.ini`; the live ini stays the single config both exes use, plus `profile=<name>`.
+GLOBAL keys never travel with a profile: `profile`, `onboarded`, `uiTheme`, `showAdvanced`
+(`IsGlobalProfileKey`, src/profiles.* pure + tested; I/O in src/profiles_io.h). Switching =
+`MakeLiveText` (profile keys over live, globals preserved) + hot-reload; a `model` change relaunches
+Wind via the eviction handshake. An EMPTY profile file = factory defaults (absent keys fall back to
+ParseConfig defaults) - that is how "create new profile" works. The active profile is LIVE-BOUND:
+every host `setConfig` mirrors the profile-scoped snapshot back into its file. First run seeds
+`Default` from current settings (`EnsureProfilesSeeded`). Surfaces: tray `Profiles` submenu
+(switch only, IDs 1100..1131) and the settings-UI titlebar dropdown (switch/create/rename/
+duplicate/delete; bridge messages `listProfiles`/`switchProfile`/`createProfile`/`renameProfile`/
+`duplicateProfile`/`deleteProfile`, each replying the refreshed list).
+
 **Two binaries.** `Wind.exe` is the always-running tray magnifier (the perf-critical core
 described above). `WindConfig.exe` is an on-demand settings GUI: a thin C++ WebView2 host
 (`src/config_ui/main.cpp`) that loads a built Svelte app from `ui/dist/` and talks to the core
