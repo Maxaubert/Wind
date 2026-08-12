@@ -1,15 +1,22 @@
 #include "tray.h"
 #include "resource.h"
 #include "logging.h"
+#include "config_path.h"
+#include "profiles_io.h"
+#include "config.h"
+#include "config_ui/ini_edit.h"
 #include <shellapi.h>
 #include <string>
 #include <thread>
 #include <mutex>
+#include <vector>
 namespace wind { namespace Tray {
 static NOTIFYICONDATAW g_nid{};
 static const UINT WM_TRAY = WM_APP + 1;
 static const UINT ID_SETTINGS = 1003, ID_QUIT = 1002;
 static const UINT ID_EXPORTDIAG = 1004;
+static const UINT ID_PROFILE_BASE = 1100;      // 1100..1131: one per profile menu item
+static const UINT kMaxProfileMenuItems = 32;
 
 // Diagnostics-export completion signal. The worker thread does NOT smuggle a heap pointer through the
 // window message (any local process could PostMessage a forged LPARAM -> controlled deref/free). Instead
@@ -45,6 +52,36 @@ void Notify(const wchar_t* title, const wchar_t* text) {
     Shell_NotifyIconW(NIM_MODIFY, &g_nid);
     g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
 }
+// Switch the active profile from the tray: rewrite the live ini from the profile file (globals
+// preserved); the core's dir-watch hot-reloads everything except `model`, which is read once at
+// launch - a model change relaunches Wind.exe (the new instance evicts us via the single-instance
+// handshake, same as the swap-model path in main.cpp).
+static void SwitchToProfile(const std::wstring& ini, const std::wstring& nameW) {
+    const std::wstring profPath = wind::ProfilesDirFromIni(ini) + L"\\" + nameW + L".ini";
+    if (GetFileAttributesW(profPath.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        Notify(L"Wind", L"That profile's file is missing; settings unchanged.");
+        return;
+    }
+    const std::string oldLive = wind::ReadTextFile(ini);
+    const std::string newLive =
+        wind::MakeLiveText(wind::ReadTextFile(profPath), oldLive, wind::NarrowUtf8(nameW));
+    if (!wind::WriteTextFileAtomic(ini, newLive)) {
+        Notify(L"Wind", L"Could not switch profile (config file is locked).");
+        return;
+    }
+    // Model is not hot-swappable: relaunch so the new instance boots on the profile's model.
+    if (wind::ParseConfig(oldLive).model != wind::ParseConfig(newLive).model) {
+        wchar_t exe[MAX_PATH];
+        if (GetModuleFileNameW(nullptr, exe, MAX_PATH) &&
+            reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", exe, nullptr, nullptr,
+                                                    SW_SHOWNORMAL)) > 32) {
+            Notify(L"Wind", (L"Switched to \"" + nameW + L"\" (restarting for its model).").c_str());
+        } else {
+            Notify(L"Wind", L"Profile switched, but the restart for its model failed.");
+        }
+    }
+}
+
 bool HandleMessage(HWND hwnd, UINT msg, WPARAM /*wp*/, LPARAM lp) {
     if (msg == DiagDoneMsg()) {
         // Export worker finished (off-thread). Read the result from the guarded slot - the message params
@@ -65,6 +102,23 @@ bool HandleMessage(HWND hwnd, UINT msg, WPARAM /*wp*/, LPARAM lp) {
     if (msg == WM_TRAY && (lp == WM_RBUTTONUP || lp == WM_LBUTTONUP)) {
         POINT pt; GetCursorPos(&pt);
         HMENU m = CreatePopupMenu();
+        // Profiles submenu: enumerated fresh on every open so external edits show up. Radio-checked
+        // active entry; capped at 32 (IDs 1100..1131). Management (rename/duplicate/delete) lives in
+        // the Settings UI only.
+        const std::wstring ini = wind::ResolveIniPath();
+        std::vector<std::wstring> profNames = wind::ListProfileFiles(wind::ProfilesDirFromIni(ini));
+        if (profNames.size() > kMaxProfileMenuItems) profNames.resize(kMaxProfileMenuItems);
+        const std::wstring active = wind::WidenUtf8(
+            wind::ReadIniValues(wind::ReadTextFile(ini))["profile"]);
+        HMENU pm = CreatePopupMenu();
+        for (UINT i = 0; i < (UINT)profNames.size(); ++i)
+            AppendMenuW(pm, MF_STRING | (_wcsicmp(profNames[i].c_str(), active.c_str()) == 0
+                                             ? MF_CHECKED : 0u),
+                        ID_PROFILE_BASE + i, profNames[i].c_str());
+        if (!profNames.empty())
+            AppendMenuW(m, MF_POPUP, reinterpret_cast<UINT_PTR>(pm), L"Profiles");
+        else
+            DestroyMenu(pm);   // no profiles dir yet (pre-migration): keep the menu as before
         AppendMenuW(m, MF_STRING, ID_SETTINGS, L"Open Settings");
         AppendMenuW(m, MF_STRING, ID_EXPORTDIAG, L"Export diagnostics");
         AppendMenuW(m, MF_STRING, ID_QUIT, L"Quit");
@@ -98,6 +152,8 @@ bool HandleMessage(HWND hwnd, UINT msg, WPARAM /*wp*/, LPARAM lp) {
         }
         else if (cmd == ID_QUIT)
             PostMessageW(hwnd, WM_CLOSE, 0, 0);
+        else if (cmd >= (int)ID_PROFILE_BASE && cmd < (int)(ID_PROFILE_BASE + profNames.size()))
+            SwitchToProfile(ini, profNames[cmd - ID_PROFILE_BASE]);
         return true;
     }
     if (msg == WM_CLOSE)  { DestroyWindow(hwnd); return true; }
