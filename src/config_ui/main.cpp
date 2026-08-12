@@ -16,7 +16,10 @@
 #include "mpo.h"
 #include "../mpo_boot.h"
 #include "../config_path.h"
+#include "../profiles.h"
+#include "../profiles_io.h"
 #include "../logging.h"
+#include <vector>
 #include "../resource.h"
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "comdlg32.lib")
@@ -156,6 +159,58 @@ static std::string JsonUnescape(const std::string& s) {
     }
     return o;
 }
+// ---- Profiles (spec 2026-08-12): the host owns all profile file ops ------------------------------
+// Current profile list as UTF-8 names + the active pointer from the live ini.
+static std::vector<std::string> ProfileNamesUtf8() {
+    std::vector<std::string> out;
+    for (const auto& w : wind::ListProfileFiles(wind::ProfilesDirFromIni(IniPath())))
+        out.push_back(wind::NarrowUtf8(w));
+    return out;
+}
+static std::wstring ProfilePath(const std::string& name) {
+    return wind::ProfilesDirFromIni(IniPath()) + L"\\" + wind::WidenUtf8(name) + L".ini";
+}
+// Every profile mutation replies with the refreshed list so the UI never has to guess.
+static void PostProfiles(ICoreWebView2* wv, bool ok, const std::string& err) {
+    std::string out = "{\"type\":\"profiles\",\"names\":[";
+    bool first = true;
+    for (const auto& n : ProfileNamesUtf8()) {
+        if (!first) out += ",";
+        first = false;
+        out += "\"" + JsonEscape(n) + "\"";
+    }
+    auto vals = wind::ReadIniValues(ReadFileUtf8(IniPath()));
+    out += "],\"active\":\"" + JsonEscape(vals["profile"]) + "\",\"ok\":" + (ok ? "true" : "false") +
+           ",\"error\":\"" + JsonEscape(err) + "\"}";
+    wv->PostWebMessageAsJson(Widen(out).c_str());
+}
+// Rewrite the live ini from a profile file (globals preserved). The core hot-reloads; a model
+// change additionally relaunches Wind (LaunchWind: the new instance evicts the incumbent).
+static std::string DoSwitchProfile(const std::string& name) {
+    const std::wstring pp = ProfilePath(name);
+    if (GetFileAttributesW(pp.c_str()) == INVALID_FILE_ATTRIBUTES) return "Profile file is missing";
+    const std::string oldLive = ReadFileUtf8(IniPath());
+    const std::string newLive = wind::MakeLiveText(wind::ReadTextFile(pp), oldLive, name);
+    WriteFileAtomic(IniPath(), newLive);
+    // Verify by parsed key/value maps, not raw text, so a comment difference never false-fails.
+    if (wind::ReadIniValues(ReadFileUtf8(IniPath())) != wind::ReadIniValues(newLive))
+        return "Could not write the config file";
+    auto oldV = wind::ReadIniValues(oldLive), newV = wind::ReadIniValues(newLive);
+    auto model = [](std::map<std::string, std::string>& v) {
+        auto it = v.find("model");
+        return it == v.end() ? std::string("render") : it->second;
+    };
+    if (model(oldV) != model(newV) && !LaunchWind()) return "Switched, but restarting Wind failed";
+    return "";
+}
+// Shared create/rename validation: trimmed name must pass the pure rules and be unique.
+static std::string ValidateNewName(const std::string& name) {
+    std::string err = wind::ProfileNameError(name);
+    if (!err.empty()) return err;
+    if (wind::ProfileNameTaken(name, ProfileNamesUtf8())) return "A profile with that name already exists";
+    return "";
+}
+
 static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
     std::string j = Narrow(jsonW);
     std::string type = JsonField(j, "type");
@@ -259,6 +314,62 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
             std::wstring args = L"/select,\"" + zip + L"\"";
             ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
         }
+    } else if (type == "listProfiles") {
+        PostProfiles(wv, true, "");
+    } else if (type == "switchProfile") {
+        const std::string err = DoSwitchProfile(JsonField(j, "name"));
+        PostProfiles(wv, err.empty(), err);
+    } else if (type == "createProfile") {
+        // Factory defaults by design (spec): the file holds NO keys, so switching to it drops every
+        // profile-scoped key from the live ini and ParseConfig falls back to built-in defaults.
+        // Globals (onboarded=1, uiTheme, showAdvanced) are carried over by MakeLiveText.
+        const std::string name = JsonField(j, "name");
+        std::string err = ValidateNewName(name);
+        if (err.empty()) {
+            CreateDirectoryW(wind::ProfilesDirFromIni(IniPath()).c_str(), nullptr);
+            if (!wind::WriteTextFileAtomic(ProfilePath(name),
+                    "; Wind profile. Keys absent here fall back to Wind's built-in defaults.\n"))
+                err = "Could not create the profile file";
+            else err = DoSwitchProfile(name);
+        }
+        PostProfiles(wv, err.empty(), err);
+    } else if (type == "renameProfile") {
+        const std::string from = JsonField(j, "from"), to = JsonField(j, "to");
+        std::string err;
+        auto vals = wind::ReadIniValues(ReadFileUtf8(IniPath()));
+        // Renaming to a different casing of itself is allowed; any other collision is not.
+        if (_stricmp(from.c_str(), to.c_str()) == 0) err = wind::ProfileNameError(to);
+        else err = ValidateNewName(to);
+        if (err.empty() && !MoveFileExW(ProfilePath(from).c_str(), ProfilePath(to).c_str(),
+                                        MOVEFILE_REPLACE_EXISTING))
+            err = "Could not rename the profile file";
+        if (err.empty() && vals["profile"] == from)
+            WriteFileAtomic(IniPath(), wind::UpdateIniText(ReadFileUtf8(IniPath()), "profile", to));
+        PostProfiles(wv, err.empty(), err);
+    } else if (type == "duplicateProfile") {
+        const std::string name = JsonField(j, "name");
+        std::string err;
+        const std::string copy = wind::NextCopyName(name, ProfileNamesUtf8());
+        if (!wind::ProfileNameError(copy).empty()) err = "The copy's name would be invalid";
+        else if (!CopyFileW(ProfilePath(name).c_str(), ProfilePath(copy).c_str(), TRUE))
+            err = "Could not copy the profile file";
+        PostProfiles(wv, err.empty(), err);
+    } else if (type == "deleteProfile") {
+        const std::string name = JsonField(j, "name");
+        std::string err;
+        auto names = ProfileNamesUtf8();
+        if (names.size() <= 1) err = "The last profile cannot be deleted";
+        else {
+            auto vals = wind::ReadIniValues(ReadFileUtf8(IniPath()));
+            if (vals["profile"] == name) {
+                // Deleting the active profile: land on the first remaining one (spec).
+                for (const auto& n : names)
+                    if (_stricmp(n.c_str(), name.c_str()) != 0) { err = DoSwitchProfile(n); break; }
+            }
+            if (err.empty() && !DeleteFileW(ProfilePath(name).c_str()))
+                err = "Could not delete the profile file";
+        }
+        PostProfiles(wv, err.empty(), err);
     }
 }
 // Poll for the magnifier's exit (Ctrl+Alt+Q, tray Quit, or a crash) and take this window down with
