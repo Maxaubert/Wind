@@ -254,6 +254,7 @@ struct TickState {
     HWND fgCacheHwnd = nullptr;
     bool fgCacheShell = false, fgCacheExcluded = false, fgCacheChurny = false;
     bool probePrevLDown = false;    // dead-zone probe (probeClicks=1): left-click edge detect
+    unsigned probeTraceTick = 0;    // dead-zone probe (probeClicks=2): trace decimation counter
     bool   inspectCursorWasShowing = true; // cursor visibility at the toggle edge (the mouselook tell)
     bool   cursorHiddenByUs = false;      // WE currently hide the OS cursor (render zoom / Inspect).
                                           //   A transform FOLLOW session leaves it alone, so the app's
@@ -973,6 +974,20 @@ static void RunTick(TickState& t) {
         // pointer, so a divergence between the weld point, the applied DWM transform, and the
         // hit-test target names itself. Zero cost unless the knob is on AND transform is active.
         if (t.cfg.probeClicks && dynamic_cast<TransformModel*>(t.model)) {
+            // Mode 2: continuous trace (every 4th tick ~36Hz) of the physical pre-weld cursor vs
+            // the weld target - the physical stream is what pointer-framework apps perceive
+            // (SetCursorPos emits no pointer frames; rig-proven), so a divergence here IS the
+            // hover input XAML actually gets.
+            if (t.cfg.probeClicks == 2 && (++t.probeTraceTick & 3) == 0) {
+                auto* tw = dynamic_cast<TransformModel*>(t.model);
+                wind::Log(wind::LogLevel::Info, "ptrace",
+                          "lvl=%.2f pre=(%ld,%ld) weld=(%d,%d) d=(%ld,%ld) welded=%d src=(%.1f,%.1f) cs=(%.1f,%.1f)",
+                          lvl, cur.x, cur.y,
+                          r.clickDesktopX + t.mon.x, r.clickDesktopY + t.mon.y,
+                          cur.x - (r.clickDesktopX + t.mon.x), cur.y - (r.clickDesktopY + t.mon.y),
+                          tw && tw->weldedLastFrame() ? 1 : 0,
+                          r.srcLeft, r.srcTop, r.cursorScreenX, r.cursorScreenY);
+            }
             const bool lDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
             if (lDown && !t.probePrevLDown) {
                 const bool dead = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
