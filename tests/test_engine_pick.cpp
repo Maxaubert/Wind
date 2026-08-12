@@ -82,3 +82,10 @@ TEST_CASE("games keep working without the desktop flags (non-UIAccess builds unc
     in.coversMonitor = true; in.borderless = true; in.primaryMonitor = true;
     CHECK(ShouldPickTransform(in));            // desktop flags default false: game path intact
 }
+
+TEST_CASE("the desktop path is vetoed off the primary monitor (multiMonitor secondaries: render)") {
+    EnginePickInputs in;
+    in.desktopTransformOptIn = true; in.inputTransformOk = true;
+    in.primaryMonitor = false;
+    CHECK_FALSE(ShouldPickTransform(in));
+}

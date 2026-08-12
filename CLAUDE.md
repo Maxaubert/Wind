@@ -51,7 +51,8 @@ legacy apps unaffected. `magInputTransform=1`. HARD DEPENDENCY: needs UIAccess -
 (dev builds) the publish fails and transform desktop sessions keep the dead zones, so render
 stays the desktop engine unless the publish verifiably succeeds. Identity or no publish =
 dead zones (measured); do not "simplify" the source rect away. `desktopTransform=1` (hot,
-advanced UI toggle for Auto) lets hybrid pick the transform on the DESKTOP too, gated on the
+advanced UI toggle for Auto) lets hybrid pick the transform on the DESKTOP too (primary
+monitor only - multiMonitor secondaries stay on render), gated on the
 availability probe (`TransformModel::inputTransformAvailable`, probed at init via a
 teardown-shaped acquire/release). `spriteBand16=1` (restart) = the P2 constant-size cursor
 experiment (band-16 SCREEN-space sprite; two historical layered-window measurements

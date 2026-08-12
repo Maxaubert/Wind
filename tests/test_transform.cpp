@@ -115,3 +115,9 @@ TEST_CASE("input-transform rects: near-1x extent approaches the full monitor; su
     auto r2 = wind::ComputeInputTransformRects(10.6, 20.4, 4.0, 0, 0, 3840, 2160);
     CHECK(r2.sl == 11); CHECK(r2.st == 20);
 }
+
+TEST_CASE("input-transform rects: level below 1 clamps to 1 (the math is total)") {
+    auto r = wind::ComputeInputTransformRects(0.0, 0.0, 0.5, 0, 0, 3840, 2160);
+    CHECK(r.sr - r.sl == 3840);
+    CHECK(r.sb - r.st == 2160);
+}

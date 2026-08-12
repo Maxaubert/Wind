@@ -7,6 +7,10 @@ public:
     enum class ShapeStatus { Rendered, Hidden, Unsupported };
     explicit CursorSprite(const std::unordered_map<HCURSOR, HCURSOR>& originals) : originals_(originals) {}
     bool create(int zorderBand = 0);   // >0 -> CreateWindowInBand (above the shell; needs UIAccess)
+    // The band the window ACTUALLY got (the cascade can refuse the request; band_window logs
+    // it). Callers keying behavior to a band (spriteBand16 screen-space positioning) must read
+    // this, never the requested value - a refused band with requested-keyed behavior mispositions.
+    int usedBand() const { return usedBand_; }
     ShapeStatus refreshShape();
     void moveTo(int desktopX, int desktopY);
     void show();
@@ -28,6 +32,7 @@ public:
     void setScale(int s);
     void destroy();
 private:
+    int usedBand_ = 0;
     void renderMaskShape();
     void renderCrosshair();
     bool displaced() const;            // a visible, overlapping window sits above us in z-order

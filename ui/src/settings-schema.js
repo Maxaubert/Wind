@@ -42,7 +42,7 @@ export const sections = [
       desc:'Windows Magnifier zoom increment, percent per step. Lower = smoother and slower. Applies live.',
       options:['5','10','25','50','100'], def:'50', showIf:{ key:'model', eq:'magnify' } },
     { key:'desktopTransform', type:'toggle', label:'Game engine on the desktop',
-      desc:'Experimental: use the compositor engine everywhere, not just in games. Needs the signed install.',
+      desc:'Experimental: use the compositor engine on the primary monitor everywhere, not just in games. Needs the signed install.',
       def:0, advanced:true, showIf:{ key:'model', eq:'hybrid' } },
     { key:'bilinear',    type:'toggle', label:'Smooth scaling', desc:'Bilinear vs crisp pixels.', def:1, advanced:true, showIf:{ key:'model', eq:'render' } },
     { key:'sharpness',   type:'slider', label:'Sharpness', desc:'Crisps the magnified image (0 = off).', min:0, max:1, step:0.05, def:0.0, advanced:true, showIf:{ key:'model', eq:'render' } },

@@ -81,20 +81,37 @@ bool TransformModel::initialize(const MonitorTarget& monitor) {
         // P2 experiment (spriteBand16): band 16, positioned in SCREEN space - testing whether
         // high-band windows escape the DWM fullscreen transform (constant-size cursor).
         sprite_->create(spriteBand16_ ? 16 : zorderBand_);
+        // Positioning keys off the ACHIEVED band, never the request: a refused band with
+        // screen-space positioning would misplace the sprite AND read as a false experiment
+        // verdict (the cascade already logs the refusal - band_window.h).
+        if (spriteBand16_ && sprite_->usedBand() < 16) {
+            spriteBand16_ = false;
+            wind::Log(wind::LogLevel::Warn, "transform",
+                      "spriteBand16 requested but band 16 refused (got %d) - experiment inert",
+                      sprite_->usedBand());
+        }
     }
     if (smoothPan_) pin_.create();
-    // Input-transform availability probe (issue #185): MagSetInputTransform needs UIAccess, and
-    // the hybrid DESKTOP pick must know availability BEFORE any session exists (a transform
-    // desktop session without it has the pointer-framework dead zones). One-shot acquire ->
-    // disabled-identity publish -> release, the exact shape of a session teardown, which is
-    // field-proven to leave DWM out of magnification-aware compositing (no warm-up law).
-    if (host_.initialize()) {
-        RECT full{ mon_.x, mon_.y, mon_.x + mon_.w, mon_.y + mon_.h };
-        inputTransformAvailable_ = host_.setInputTransform(false, full, full);
-        host_.shutdown();
-        wind::Log(wind::LogLevel::Info, "transform", "input transform %s (UIAccess %s)",
+    // Input-transform availability (issue #185): MagSetInputTransform's ENABLED publish needs
+    // UIAccess, and the hybrid DESKTOP pick must know availability BEFORE any session exists (a
+    // transform desktop session without it has the pointer-framework dead zones). Read the
+    // process token's UIAccess bit directly - ZERO Magnification calls at startup. Two probe
+    // shapes are BANNED here (self-review, rig-measured): a DISABLED MagSetInputTransform
+    // succeeds WITHOUT UIAccess (false positive), and any Mag acquire/release at startup runs
+    // MagHost::shutdown's identity transform WRITE - violating the no-warm-up law above and
+    // resetting a running native Magnifier's zoom. The in-session enabled publish remains the
+    // authority: its first failure clears this flag (self-heal in present()).
+    {
+        HANDLE tok = nullptr;
+        if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &tok)) {
+            DWORD uiAccess = 0, len = 0;
+            if (GetTokenInformation(tok, TokenUIAccess, &uiAccess, sizeof(uiAccess), &len))
+                inputTransformAvailable_ = uiAccess != 0;
+            CloseHandle(tok);
+        }
+        wind::Log(wind::LogLevel::Info, "transform", "input transform %s (token UIAccess=%d)",
                   inputTransformAvailable_ ? "AVAILABLE" : "unavailable",
-                  inputTransformAvailable_ ? "present" : "absent?");
+                  inputTransformAvailable_ ? 1 : 0);
     }
     ready_ = true;
     return true;
@@ -312,28 +329,33 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         txJitter = keepAliveTick_;
     }
     writeTransform((float)applyLevel, m.offX, m.offY, m.txX + txJitter, m.txY, fastPan_, false);
-    // Input transform (issue #148): teach the input stack the inverse mapping. Win32 mouse input
-    // is proven correct without it (instrumented), but pointer-stack apps (Explorer XAML lists,
-    // Chromium content) hit-test through this - without it they get level/edge-dependent dead
-    // zones. Needs UIAccess; on the dev build the call fails and is logged once.
-    // A/B knob (hot): magInputTransform=1 publishes the input transform; 0 (default) leaves the
-    // OS default. Unvalidated for mouse (docs scope it to pen/touch) - measured live by the user.
+    // Input transform. Mode 1 (THE SHIPPED DEFAULT; field-verified 4x-20x,
+    // POINTER-HITTEST-FINDINGS.md): publish the visual source rect on every change, exactly
+    // like native Magnifier. Pointer-framework apps (Explorer/Settings/shell) hit-test mouse
+    // input through this; without it the welded cursor has hard hover dead zones. Mode 2 =
+    // enabled identity (diagnostic; measured DEAD). Mode 0 = off (diagnostic; measured DEAD).
+    // Both rects in VIRTUAL-SCREEN coordinates (the old 0,0-based dst was wrong off-primary).
+    // Needs UIAccess: the ENABLED publish fails without it (rig-measured ERROR_ACCESS_DENIED;
+    // the DISABLED call succeeds regardless - never probe availability with the disable shape).
     if (changed && cfg.magInputTransform != 0) {
-        // Mode 1 (THE SHIPPED DEFAULT; field-verified 4x-20x, POINTER-HITTEST-FINDINGS.md):
-        // publish the visual source rect on every change, exactly like native Magnifier.
-        // Pointer-framework apps (Explorer/Settings/shell) hit-test mouse input through this;
-        // without it the welded cursor has hard hover dead zones. Mode 2 = enabled identity
-        // (diagnostic; measured DEAD). Mode 0 = off (diagnostic; measured DEAD). Both rects in
-        // VIRTUAL-SCREEN coordinates (the old 0,0-based dst was wrong off-primary).
+        // srcL/srcT, not r.srcLeft/srcTop: when the ramp limiters make applyLevel != level the
+        // VISUAL transform uses the recomputed origin (line above), and the input mapping must
+        // describe what is actually on screen or pointer hit-testing is briefly wrong mid-ramp.
         InputTransformRects ir = ComputeInputTransformRects(
-            r.srcLeft, r.srcTop, applyLevel, mon_.x, mon_.y, mon_.w, mon_.h);
+            srcL, srcT, applyLevel, mon_.x, mon_.y, mon_.w, mon_.h);
         RECT dst{ ir.dl, ir.dt, ir.dr, ir.db };
         RECT src = (cfg.magInputTransform == 2) ? dst : RECT{ ir.sl, ir.st, ir.sr, ir.sb };
         bool ok = host_.setInputTransform(applyLevel > 1.001, src, dst);
-        if (!ok && !inputXformWarned_) {
-            inputXformWarned_ = true;
-            wind::Log(wind::LogLevel::Warn, "transform",
-                      "MagSetInputTransform failed (no UIAccess?)");
+        if (!ok) {
+            // Self-heal (spec constraint 1): a failed ENABLED publish means this build cannot
+            // fix the pointer-framework dead zones - the DESKTOP pick must stop choosing the
+            // transform. Games are unaffected (legacy input surfaces).
+            inputTransformAvailable_ = false;
+            if (!inputXformWarned_) {
+                inputXformWarned_ = true;
+                wind::Log(wind::LogLevel::Warn, "transform",
+                          "MagSetInputTransform failed (no UIAccess?) - desktop pick disabled");
+            }
         }
     } else if (changed && lastInputXformOn_) {
         RECT full{ 0, 0, mon_.w, mon_.h };
@@ -387,7 +409,13 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         // sprite kept drawing the arrow at the frozen point (visible, stationary) and no crosshair
         // existed at all - the transform model used to ignore ex.cursorLocked.
         sprite_->showCrosshair();
-        sprite_->moveTo(r.clickDesktopX + mon_.x, r.clickDesktopY + mon_.y);
+        // spriteBand16: the one sprite window lives in the band the experiment put it in, so
+        // the crosshair must use the same coordinate space as the marker branch below.
+        if (spriteBand16_)
+            sprite_->moveTo((int)(r.cursorScreenX + 0.5) + mon_.x,
+                            (int)(r.cursorScreenY + 0.5) + mon_.y);
+        else
+            sprite_->moveTo(r.clickDesktopX + mon_.x, r.clickDesktopY + mon_.y);
         sprite_->keepOnTop();
     } else if (useSprite_ && sprite_ && ex.drawCursor && level > 1.001) {
         // The REAL cursor is welded to the lens point above, so input is entirely native - but
