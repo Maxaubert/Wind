@@ -109,6 +109,8 @@ Profiles (tray -> Profiles, or the Settings titlebar) snapshot the whole file pe
 - Pacing/perf: `vsync` (default on), `dwmFlush` (default 0), `gameFpsCap`, `gpuPriority`.
 - `model` - `hybrid` (default) / `render` / `transform` / `magnify`. Restart to switch.
 - `multiMonitor` - 0 (default, primary only) or 1 (follow the cursor's monitor per zoom-in).
+- `desktopTransform` - experimental: use the game (compositor) engine on the desktop too
+  (signed install only; Settings > Display, advanced, Auto model).
 - Advanced: `zorderBand`, `transformExclude`, `noSwallowApps`, `profile`.
 
 ## Scope
