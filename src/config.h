@@ -99,6 +99,11 @@ struct Config {
                           //     do not stutter while panning, at a capped frame rate while zoomed.
     int cursorSprite = 1; // 1 = hide the OS cursor and draw a scene-locked sprite welded to the
                           //     transform (fixes cursor/click divergence near screen edges).
+    // Desktop opt-in for the transform engine (issue #185, hot): 1 = hybrid picks the transform
+    // on the DESKTOP too (not just games) WHEN the input transform is verified available
+    // (UIAccess). 0 (default) = desktop stays on render. Experimental until the P3 endurance
+    // gates pass; see docs/superpowers/specs/2026-08-12-one-model-transform-design.md.
+    int desktopTransform = 0;
     int magInputTransform = 1; // publish MagSetInputTransform while zoomed (hot; needs UIAccess).
                           //     1 (DEFAULT) = the visual source rect per change - native-
                           //     Magnifier parity, THE fix for the pointer-framework hover dead

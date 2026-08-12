@@ -45,3 +45,40 @@ TEST_CASE("a windowed or partial foreground never picks transform") {
     auto in = game(); in.coversMonitor = false;
     CHECK_FALSE(ShouldPickTransform(in));
 }
+
+// --- Desktop opt-in (issue #185) --------------------------------------------------------------
+TEST_CASE("desktop pick requires BOTH the opt-in knob and a verified input transform") {
+    EnginePickInputs in;                       // a plain desktop foreground: no cover, captioned
+    in.primaryMonitor = true;
+    CHECK_FALSE(ShouldPickTransform(in));
+    in.desktopTransformOptIn = true;
+    CHECK_FALSE(ShouldPickTransform(in));      // opt-in without UIAccess-verified publish: render
+    in.inputTransformOk = true;
+    CHECK(ShouldPickTransform(in));            // both -> transform on the desktop
+    in.desktopTransformOptIn = false;
+    CHECK_FALSE(ShouldPickTransform(in));      // availability alone never opts the user in
+}
+
+TEST_CASE("the shell desktop (Win+D) is allowed on the DESKTOP path, still vetoed as a game") {
+    EnginePickInputs in;
+    in.primaryMonitor = true; in.shellDesktop = true;
+    in.coversMonitor = true; in.borderless = true;    // what #172 saw: desktop reads as a game
+    CHECK_FALSE(ShouldPickTransform(in));             // game path stays vetoed
+    in.desktopTransformOptIn = true; in.inputTransformOk = true;
+    CHECK(ShouldPickTransform(in));                   // desktop opt-in: that IS the desktop
+}
+
+TEST_CASE("exclusions and the churny list veto the desktop path too") {
+    EnginePickInputs in;
+    in.primaryMonitor = true; in.desktopTransformOptIn = true; in.inputTransformOk = true;
+    in.excluded = true;
+    CHECK_FALSE(ShouldPickTransform(in));
+    in.excluded = false; in.churny = true;
+    CHECK_FALSE(ShouldPickTransform(in));
+}
+
+TEST_CASE("games keep working without the desktop flags (non-UIAccess builds unchanged)") {
+    EnginePickInputs in;
+    in.coversMonitor = true; in.borderless = true; in.primaryMonitor = true;
+    CHECK(ShouldPickTransform(in));            // desktop flags default false: game path intact
+}

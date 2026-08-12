@@ -797,6 +797,7 @@ static void RunTick(TickState& t) {
                 // activation's teardown calls route to the same engine that activated.
                 HWND fgw = GetForegroundWindow();
                 RefreshFgCache(t, fgw);
+                auto* tAvail = dynamic_cast<TransformModel*>(t.mTransform);
                 EnginePickInputs pin;
                 pin.coversMonitor  = ForegroundCoversMonitor(t.mon);
                 pin.borderless     = fgw && !(GetWindowLongPtrW(fgw, GWL_STYLE) & WS_CAPTION);
@@ -805,6 +806,8 @@ static void RunTick(TickState& t) {
                 pin.excluded       = t.fgCacheExcluded;
                 pin.churny         = t.fgCacheChurny;
                 pin.tdrHarness     = t.cfg.tdrTest > 0;
+                pin.desktopTransformOptIn = t.cfg.desktopTransform != 0;
+                pin.inputTransformOk      = tAvail && tAvail->inputTransformAvailable();
                 IMagnifierModel* pick = ShouldPickTransform(pin) ? t.mTransform : t.mRender;
                 if (pick && pick != t.model) t.model = pick;
             }
@@ -1074,6 +1077,7 @@ static void RunTick(TickState& t) {
             // longer drift apart. Exe-derived inputs come from the per-HWND cache: this block
             // runs every zoomed tick and the process-open per tick was measurable waste.
             RefreshFgCache(t, fgTick);
+            auto* tAvail = dynamic_cast<TransformModel*>(t.mTransform);
             EnginePickInputs pin;
             pin.coversMonitor  = fsCover;
             pin.borderless     = fgBorderless;
@@ -1082,6 +1086,8 @@ static void RunTick(TickState& t) {
             pin.excluded       = t.fgCacheExcluded;
             pin.churny         = t.fgCacheChurny;
             pin.tdrHarness     = t.cfg.tdrTest > 0;
+            pin.desktopTransformOptIn = t.cfg.desktopTransform != 0;
+            pin.inputTransformOk      = tAvail && tAvail->inputTransformAvailable();
             IMagnifierModel* want = ShouldPickTransform(pin) ? t.mTransform : t.mRender;
             // STICKY (field: the engine flapped render<->transform inside one zoom session, and
             // each flip releases and rebuilds DWM's magnification context - a stall every time).

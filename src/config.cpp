@@ -158,6 +158,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "gameCrop")           c.gameCrop = std::stoi(val);
             else if (key == "tdrTest")            c.tdrTest = std::stoi(val);
             else if (key == "probeClicks")        c.probeClicks = std::stoi(val);
+            else if (key == "desktopTransform")   c.desktopTransform = std::stoi(val);
             else if (key == "txIdleReleaseMs")    c.txIdleReleaseMs = std::stoi(val);
             else if (key == "txMaxStepPct")       c.txMaxStepPct = std::stoi(val);
             else if (key == "txLevelStep")        c.txLevelStep = std::stoi(val);
