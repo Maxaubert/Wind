@@ -99,8 +99,12 @@ struct Config {
                           //     do not stutter while panning, at a capped frame rate while zoomed.
     int cursorSprite = 1; // 1 = hide the OS cursor and draw a scene-locked sprite welded to the
                           //     transform (fixes cursor/click divergence near screen edges).
-    int magInputTransform = 0; // 1 = publish MagSetInputTransform while zoomed (experiment;
-                          //     documented for pen/touch only - A/B knob, hot-reloadable).
+    int magInputTransform = 0; // publish MagSetInputTransform while zoomed (hot A/B knob; needs
+                          //     UIAccess). 0 = off. 1 = the visual source rect (native-Magnifier
+                          //     parity; right for a FREE cursor). 2 = enabled IDENTITY (right for
+                          //     the WELDED cursor: its raw position already is the content point,
+                          //     and the explicit identity stops the pointer pipeline's implicit
+                          //     inverse mapping - the pointer-framework hover dead zones).
     // Two measured-NEGATIVE hitch experiments, kept as diagnostics only (issue #148, harness
     // runs of 15-20 zoom cycles over Foundation). LEAVE BOTH AT 0 - continuous per-tick level
     // ramping is the best configuration measured.
