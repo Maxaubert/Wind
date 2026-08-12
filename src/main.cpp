@@ -253,6 +253,7 @@ struct TickState {
     // WINDOW changes. covers/borderless stay per-tick (cheap user32 reads, genuinely dynamic).
     HWND fgCacheHwnd = nullptr;
     bool fgCacheShell = false, fgCacheExcluded = false, fgCacheChurny = false;
+    bool probePrevLDown = false;    // dead-zone probe (probeClicks=1): left-click edge detect
     bool   inspectCursorWasShowing = true; // cursor visibility at the toggle edge (the mouselook tell)
     bool   cursorHiddenByUs = false;      // WE currently hide the OS cursor (render zoom / Inspect).
                                           //   A transform FOLLOW session leaves it alone, so the app's
@@ -966,6 +967,43 @@ static void RunTick(TickState& t) {
                                       ? kMaxSafeTxMagnitude / lvl : -1.0);
         if (transformGame) t.lastTransformGameMs = GetTickCount64();   // device-lost backstop window
         MapResult r = t.mapper.update(dx, dy, lvl);
+        // Dead-zone probe (probeClicks=1, diagnostic): the field annotates hover dead zones by
+        // clicking. Plain click = "hover works here" (OK), Ctrl+click = "dead here" (DEAD). Each
+        // click logs every coordinate space in the chain plus what Windows hit-tests at the
+        // pointer, so a divergence between the weld point, the applied DWM transform, and the
+        // hit-test target names itself. Zero cost unless the knob is on AND transform is active.
+        if (t.cfg.probeClicks && dynamic_cast<TransformModel*>(t.model)) {
+            const bool lDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+            if (lDown && !t.probePrevLDown) {
+                const bool dead = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+                POINT cp{}; GetCursorPos(&cp);
+                RECT clip{}; GetClipCursor(&clip);
+                float mLvl = 0.f; int mOffX = 0, mOffY = 0;
+                MagGetFullscreenTransform(&mLvl, &mOffX, &mOffY);
+                HWND under = WindowFromPoint(cp);
+                wchar_t ucls[64]{}; if (under) GetClassNameW(under, ucls, 64);
+                DWORD upid = 0; if (under) GetWindowThreadProcessId(under, &upid);
+                // Cross-space check: what sits at the SCREEN position where the aim point is
+                // DISPLAYED (if hover follows this instead of the weld point, spaces are mixed).
+                POINT sp{ (int)(r.cursorScreenX + 0.5) + t.mon.x, (int)(r.cursorScreenY + 0.5) + t.mon.y };
+                HWND underS = WindowFromPoint(sp);
+                wchar_t scls[64]{}; if (underS) GetClassNameW(underS, scls, 64);
+                DWORD spid = 0; if (underS) GetWindowThreadProcessId(underS, &spid);
+                const DWORD ourPid = GetCurrentProcessId();
+                wind::Log(wind::LogLevel::Info, "probe",
+                    "%s lvl=%.2f weld=(%d,%d) cur=(%ld,%ld) src=(%.1f,%.1f) center=(%.1f,%.1f) "
+                    "cursorScreen=(%.1f,%.1f) dwm(lvl=%.2f off=%d,%d) clip=(%ld,%ld)-(%ld,%ld) "
+                    "underCur=%ls%s underScreen=%ls%s",
+                    dead ? "DEAD" : "OK", lvl,
+                    r.clickDesktopX + t.mon.x, r.clickDesktopY + t.mon.y, cp.x, cp.y,
+                    r.srcLeft, r.srcTop, r.centerX, r.centerY,
+                    r.cursorScreenX, r.cursorScreenY, mLvl, mOffX, mOffY,
+                    clip.left, clip.top, clip.right, clip.bottom,
+                    ucls, upid == ourPid ? L" (OURS)" : L"",
+                    scls, spid == ourPid ? L" (OURS)" : L"");
+            }
+            t.probePrevLDown = lDown;
+        }
         // Inspect click-to-look-point: the hook swallowed real click(s) and handed us per-button counts
         // (counts, not a flag, so a fast double-click before this drains isn't lost). Fire a clean ABSOLUTE
         // click at the crosshair (mapper center = look point) per pending press, so each lands where you

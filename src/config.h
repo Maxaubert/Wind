@@ -124,6 +124,11 @@ struct Config {
                           //     rebuild (fewer big entry spikes) but DWM stays magnification-
                           //     aware, which taxes cursor changes; shorter = the reverse.
                           //     Hot-reloadable.
+    int probeClicks = 0;  // dead-zone probe (hot, diagnostic): while a TRANSFORM session is
+                          //   zoomed, every left-click logs a full coordinate-chain snapshot to
+                          //   wind-core.log tagged OK, or DEAD when Ctrl is held - the field
+                          //   annotates hover dead zones by clicking working spots plainly and
+                          //   Ctrl-clicking broken ones. No effect outside transform sessions.
     int tdrTest = 0;      // issue #148 field-test harness (hot-reloadable, diagnostic only).
                           //   0 = normal; >0 forces the transform path for games (bypasses the
                           //   churny-app list). Live experiments:
