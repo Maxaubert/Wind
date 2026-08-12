@@ -40,14 +40,17 @@ a heavy game (native-Magnifier parity measured); continuous per-tick level (big 
 are what cost ~30-50ms game frames - do NOT re-quantize ramps), tx keep-alive after changes
 (value-static = DWM parks, action-start spike), launch warm-up 1.001, rest at TRUE 1.0.
 maxLevel is ONE SHARED setting across models (no per-model cap; the old 12x cap guarded what
-turned out to be the MPO bug below). WHY HYBRID KEEPS RENDER ON THE DESKTOP (root-caused
+turned out to be the MPO bug below). TRANSFORM ON THE DESKTOP (root-caused AND solved
 2026-08-12, docs/POINTER-HITTEST-FINDINGS.md): pointer-input frameworks (XAML/DirectUI -
-Explorer, Settings, shell) hit-test wrongly under a fullscreen DWM transform with a WELDED
-cursor - hard hover dead zones, input-side fully exonerated by measurement (positions/frames/
-coords all correct; MagSetInputTransform is pen/touch-only and inert for mouse). A transform
-session supports a FREE cursor (native-Magnifier parity, correct everywhere) or a welded one
-(legacy apps only). Centered cursor on desktop therefore REQUIRES the render engine - "one
-model for everything" via the transform is not achievable on current Windows.
+Explorer, Settings, shell) hit-test through the fullscreen transform and produce hard hover
+dead zones under a welded cursor UNLESS the SOURCE-RECT input transform is published
+per change (`MagSetInputTransform(TRUE, srcRect, monitorRect)` - what native Magnifier does
+continuously; MSDN's "pen/touch only" scoping is wrong, mouse pointer hit-testing consumes
+it). Field-verified 4x-20x: weld + source-rect input transform = correct hover everywhere,
+legacy apps unaffected. `magInputTransform=1`. HARD DEPENDENCY: needs UIAccess - where absent
+(dev builds) the publish fails and transform desktop sessions keep the dead zones, so render
+stays the desktop engine unless the publish verifiably succeeds. Identity or no publish =
+dead zones (measured); do not "simplify" the source rect away.
 TRANSFORM CURSOR: WELDED (re-test of the #148 weld, commit 8a52040; supersedes the retired
 FOLLOW+FREEZE design - git history has that machinery). The transform welds the REAL cursor to
 the lens point per tick (transform_model.cpp; deduped, suspended by drag-follow), exposes
