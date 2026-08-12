@@ -43,9 +43,11 @@ bool CursorSprite::create(int zorderBand) {
     hwnd_ = wind::CreateBandedWindow(exStyle, s_atom, L"WindCursor", WS_POPUP,
                                      0, 0, kSize, kSize, hInst, zorderBand, &usedBand);
     if (!hwnd_) {
+        usedBand = 0;
         hwnd_ = CreateWindowExW(exStyle, kClassName, L"WindCursor", WS_POPUP,
                                 0, 0, kSize, kSize, nullptr, nullptr, hInst, nullptr);
     }
+    usedBand_ = hwnd_ ? usedBand : 0;
     return hwnd_ != nullptr;
 }
 

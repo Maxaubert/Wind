@@ -78,9 +78,41 @@ bool TransformModel::initialize(const MonitorTarget& monitor) {
     if (useSprite_) {
         blanker_ = std::make_unique<CursorBlanker>();
         sprite_  = std::make_unique<CursorSprite>(blanker_->originals());
-        sprite_->create(zorderBand_);   // above the shell so the cursor covers the magnified taskbar
+        // P2 experiment (spriteBand16): band 16, positioned in SCREEN space - testing whether
+        // high-band windows escape the DWM fullscreen transform (constant-size cursor).
+        sprite_->create(spriteBand16_ ? 16 : zorderBand_);
+        // Positioning keys off the ACHIEVED band, never the request: a refused band with
+        // screen-space positioning would misplace the sprite AND read as a false experiment
+        // verdict (the cascade already logs the refusal - band_window.h).
+        if (spriteBand16_ && sprite_->usedBand() < 16) {
+            spriteBand16_ = false;
+            wind::Log(wind::LogLevel::Warn, "transform",
+                      "spriteBand16 requested but band 16 refused (got %d) - experiment inert",
+                      sprite_->usedBand());
+        }
     }
     if (smoothPan_) pin_.create();
+    // Input-transform availability (issue #185): MagSetInputTransform's ENABLED publish needs
+    // UIAccess, and the hybrid DESKTOP pick must know availability BEFORE any session exists (a
+    // transform desktop session without it has the pointer-framework dead zones). Read the
+    // process token's UIAccess bit directly - ZERO Magnification calls at startup. Two probe
+    // shapes are BANNED here (self-review, rig-measured): a DISABLED MagSetInputTransform
+    // succeeds WITHOUT UIAccess (false positive), and any Mag acquire/release at startup runs
+    // MagHost::shutdown's identity transform WRITE - violating the no-warm-up law above and
+    // resetting a running native Magnifier's zoom. The in-session enabled publish remains the
+    // authority: its first failure clears this flag (self-heal in present()).
+    {
+        HANDLE tok = nullptr;
+        if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &tok)) {
+            DWORD uiAccess = 0, len = 0;
+            if (GetTokenInformation(tok, TokenUIAccess, &uiAccess, sizeof(uiAccess), &len))
+                inputTransformAvailable_ = uiAccess != 0;
+            CloseHandle(tok);
+        }
+        wind::Log(wind::LogLevel::Info, "transform", "input transform %s (token UIAccess=%d)",
+                  inputTransformAvailable_ ? "AVAILABLE" : "unavailable",
+                  inputTransformAvailable_ ? 1 : 0);
+    }
     ready_ = true;
     return true;
 }
@@ -297,32 +329,33 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         txJitter = keepAliveTick_;
     }
     writeTransform((float)applyLevel, m.offX, m.offY, m.txX + txJitter, m.txY, fastPan_, false);
-    // Input transform (issue #148): teach the input stack the inverse mapping. Win32 mouse input
-    // is proven correct without it (instrumented), but pointer-stack apps (Explorer XAML lists,
-    // Chromium content) hit-test through this - without it they get level/edge-dependent dead
-    // zones. Needs UIAccess; on the dev build the call fails and is logged once.
-    // A/B knob (hot): magInputTransform=1 publishes the input transform; 0 (default) leaves the
-    // OS default. Unvalidated for mouse (docs scope it to pen/touch) - measured live by the user.
+    // Input transform. Mode 1 (THE SHIPPED DEFAULT; field-verified 4x-20x,
+    // POINTER-HITTEST-FINDINGS.md): publish the visual source rect on every change, exactly
+    // like native Magnifier. Pointer-framework apps (Explorer/Settings/shell) hit-test mouse
+    // input through this; without it the welded cursor has hard hover dead zones. Mode 2 =
+    // enabled identity (diagnostic; measured DEAD). Mode 0 = off (diagnostic; measured DEAD).
+    // Both rects in VIRTUAL-SCREEN coordinates (the old 0,0-based dst was wrong off-primary).
+    // Needs UIAccess: the ENABLED publish fails without it (rig-measured ERROR_ACCESS_DENIED;
+    // the DISABLED call succeeds regardless - never probe availability with the disable shape).
     if (changed && cfg.magInputTransform != 0) {
-        RECT dst{ 0, 0, mon_.w, mon_.h };
-        RECT src = dst;
-        if (cfg.magInputTransform == 1) {
-            // Mode 1: publish the visual source rect (what native Magnifier does). Correct for a
-            // FREE cursor, where the pointer's raw position is a screen position that needs
-            // unmapping to the content point.
-            src = RECT{ (LONG)(r.srcLeft + 0.5), (LONG)(r.srcTop + 0.5),
-                        (LONG)(r.srcLeft + mon_.w / applyLevel + 0.5),
-                        (LONG)(r.srcTop + mon_.h / applyLevel + 0.5) };
-        }
-        // Mode 2: publish an ENABLED IDENTITY (src == dst == monitor). Correct for the WELDED
-        // cursor, whose raw position already IS the content point: an explicit identity stops the
-        // pointer pipeline from inverse-mapping it through the visual transform (the suspected
-        // default when no input transform is set - the #180-adjacent hover dead zones).
+        // srcL/srcT, not r.srcLeft/srcTop: when the ramp limiters make applyLevel != level the
+        // VISUAL transform uses the recomputed origin (line above), and the input mapping must
+        // describe what is actually on screen or pointer hit-testing is briefly wrong mid-ramp.
+        InputTransformRects ir = ComputeInputTransformRects(
+            srcL, srcT, applyLevel, mon_.x, mon_.y, mon_.w, mon_.h);
+        RECT dst{ ir.dl, ir.dt, ir.dr, ir.db };
+        RECT src = (cfg.magInputTransform == 2) ? dst : RECT{ ir.sl, ir.st, ir.sr, ir.sb };
         bool ok = host_.setInputTransform(applyLevel > 1.001, src, dst);
-        if (!ok && !inputXformWarned_) {
-            inputXformWarned_ = true;
-            wind::Log(wind::LogLevel::Warn, "transform",
-                      "MagSetInputTransform failed (no UIAccess?)");
+        if (!ok) {
+            // Self-heal (spec constraint 1): a failed ENABLED publish means this build cannot
+            // fix the pointer-framework dead zones - the DESKTOP pick must stop choosing the
+            // transform. Games are unaffected (legacy input surfaces).
+            inputTransformAvailable_ = false;
+            if (!inputXformWarned_) {
+                inputXformWarned_ = true;
+                wind::Log(wind::LogLevel::Warn, "transform",
+                          "MagSetInputTransform failed (no UIAccess?) - desktop pick disabled");
+            }
         }
     } else if (changed && lastInputXformOn_) {
         RECT full{ 0, 0, mon_.w, mon_.h };
@@ -376,7 +409,13 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         // sprite kept drawing the arrow at the frozen point (visible, stationary) and no crosshair
         // existed at all - the transform model used to ignore ex.cursorLocked.
         sprite_->showCrosshair();
-        sprite_->moveTo(r.clickDesktopX + mon_.x, r.clickDesktopY + mon_.y);
+        // spriteBand16: the one sprite window lives in the band the experiment put it in, so
+        // the crosshair must use the same coordinate space as the marker branch below.
+        if (spriteBand16_)
+            sprite_->moveTo((int)(r.cursorScreenX + 0.5) + mon_.x,
+                            (int)(r.cursorScreenY + 0.5) + mon_.y);
+        else
+            sprite_->moveTo(r.clickDesktopX + mon_.x, r.clickDesktopY + mon_.y);
         sprite_->keepOnTop();
     } else if (useSprite_ && sprite_ && ex.drawCursor && level > 1.001) {
         // The REAL cursor is welded to the lens point above, so input is entirely native - but
@@ -401,8 +440,13 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             // where that content appears. (Placing it in screen space put it off-screen once
             // transformed, which is why the pointer vanished at high zoom.) The consequence is
             // that the marker grows with the zoom, like the native Magnifier's pointer.
-            const int sx = r.clickDesktopX + mon_.x;
-            const int sy = r.clickDesktopY + mon_.y;
+            // P2 experiment (spriteBand16): SCREEN space + band 16 instead - if high-band windows
+            // escape the transform, cursorScreen is exactly where the aim point displays, at a
+            // constant size (the product rule met on the transform path).
+            const int sx = spriteBand16_ ? (int)(r.cursorScreenX + 0.5) + mon_.x
+                                         : r.clickDesktopX + mon_.x;
+            const int sy = spriteBand16_ ? (int)(r.cursorScreenY + 0.5) + mon_.y
+                                         : r.clickDesktopY + mon_.y;
             if (sx != lastSpriteX_ || sy != lastSpriteY_) {
                 sprite_->moveTo(sx, sy);
                 lastSpriteX_ = sx; lastSpriteY_ = sy;

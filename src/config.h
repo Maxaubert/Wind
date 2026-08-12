@@ -99,12 +99,24 @@ struct Config {
                           //     do not stutter while panning, at a capped frame rate while zoomed.
     int cursorSprite = 1; // 1 = hide the OS cursor and draw a scene-locked sprite welded to the
                           //     transform (fixes cursor/click divergence near screen edges).
-    int magInputTransform = 0; // publish MagSetInputTransform while zoomed (hot A/B knob; needs
-                          //     UIAccess). 0 = off. 1 = the visual source rect (native-Magnifier
-                          //     parity; right for a FREE cursor). 2 = enabled IDENTITY (right for
-                          //     the WELDED cursor: its raw position already is the content point,
-                          //     and the explicit identity stops the pointer pipeline's implicit
-                          //     inverse mapping - the pointer-framework hover dead zones).
+    // Desktop opt-in for the transform engine (issue #185, hot): 1 = hybrid picks the transform
+    // on the DESKTOP too (not just games) WHEN the input transform is verified available
+    // (UIAccess). 0 (default) = desktop stays on render. Experimental until the P3 endurance
+    // gates pass; see docs/superpowers/specs/2026-08-12-one-model-transform-design.md.
+    int desktopTransform = 0;
+    // P2 experiment (issue #185, restart-applied, UIAccess build): create the transform cursor
+    // sprite in band 16 positioned in SCREEN space. Hypothesis: high-band windows escape the DWM
+    // fullscreen transform (native Magnifier's own fullscreen UI stays unmagnified), giving a
+    // crisp CONSTANT-SIZE centered cursor. Two prior field measurements about layered windows
+    // under the transform CONTRADICT each other (transform.h header vs transform_model.cpp), so
+    // this needs one visual verdict from the field: zoomed, is the sprite unmagnified?
+    int spriteBand16 = 0;
+    int magInputTransform = 1; // publish MagSetInputTransform while zoomed (hot; needs UIAccess).
+                          //     1 (DEFAULT) = the visual source rect per change - native-
+                          //     Magnifier parity, THE fix for the pointer-framework hover dead
+                          //     zones (field-verified 4x-20x; POINTER-HITTEST-FINDINGS.md).
+                          //     Diagnostics: 0 = off, 2 = enabled identity - BOTH measured to
+                          //     reproduce the dead zones; never ship either.
     // Two measured-NEGATIVE hitch experiments, kept as diagnostics only (issue #148, harness
     // runs of 15-20 zoom cycles over Foundation). LEAVE BOTH AT 0 - continuous per-tick level
     // ramping is the best configuration measured.

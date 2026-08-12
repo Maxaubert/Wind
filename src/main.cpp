@@ -241,6 +241,12 @@ struct TickState {
     HWND   inspectPrevFg = nullptr;     // the game window foreground is handed back to on exit
     int    clickPauseTicks = 0;     // ticks to skip transform writes around an Inspect click's
                                     //   injected absolute move (a write racing it is the TDR class)
+    int    quiesceTicks = 0;        // launch quiesce: a FRESH process took over as a borderless
+                                    //   cover while a transform session is live - hold ALL
+                                    //   transform mutations (writes, input transform, weld) while
+                                    //   the compositor digests the takeover (dwmcore APPCRASH,
+                                    //   RDR2 launch @20x, 2026-08-12)
+    HWND   lastCoverFg = nullptr;   // edge-detect cover-takeover foregrounds
     IMagnifierModel* wantModel = nullptr;   // hybrid stickiness: candidate engine and how long it
     unsigned long long wantSinceMs = 0;     //   has been the candidate (debounces foreground reads)
     unsigned long long kbHookDivergentSinceMs = 0;  // LL keyboard-hook watchdog dwell (issue #156)
@@ -448,6 +454,25 @@ static void SetSystemCursorHidden(TickState& t, IMagnifierModel* m, bool hide) {
     if (!m) return;
     m->hideSystemCursor(hide);
     t.cursorHiddenByUs = hide;
+}
+
+// Whether the foreground window's PROCESS started within the last `ms` milliseconds - the tell
+// for a game LAUNCH taking over (vs an alt-tab into a long-running one).
+static bool FgProcessYoungerThanMs(HWND fg, unsigned long long ms) {
+    DWORD pid = 0;
+    if (!fg || !GetWindowThreadProcessId(fg, &pid) || !pid) return false;
+    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!h) return false;
+    FILETIME created{}, exit_{}, kern{}, user{};
+    bool young = false;
+    if (GetProcessTimes(h, &created, &exit_, &kern, &user)) {
+        FILETIME nowFt{}; GetSystemTimeAsFileTime(&nowFt);
+        ULARGE_INTEGER c{ created.dwLowDateTime, created.dwHighDateTime };
+        ULARGE_INTEGER n{ nowFt.dwLowDateTime, nowFt.dwHighDateTime };
+        young = n.QuadPart > c.QuadPart && (n.QuadPart - c.QuadPart) / 10000ULL < ms;
+    }
+    CloseHandle(h);
+    return young;
 }
 
 // Refresh the per-HWND cache of exe-derived pick predicates. Only re-resolves when the foreground
@@ -797,6 +822,7 @@ static void RunTick(TickState& t) {
                 // activation's teardown calls route to the same engine that activated.
                 HWND fgw = GetForegroundWindow();
                 RefreshFgCache(t, fgw);
+                auto* tAvail = dynamic_cast<TransformModel*>(t.mTransform);
                 EnginePickInputs pin;
                 pin.coversMonitor  = ForegroundCoversMonitor(t.mon);
                 pin.borderless     = fgw && !(GetWindowLongPtrW(fgw, GWL_STYLE) & WS_CAPTION);
@@ -805,6 +831,8 @@ static void RunTick(TickState& t) {
                 pin.excluded       = t.fgCacheExcluded;
                 pin.churny         = t.fgCacheChurny;
                 pin.tdrHarness     = t.cfg.tdrTest > 0;
+                pin.desktopTransformOptIn = t.cfg.desktopTransform != 0;
+                pin.inputTransformOk      = tAvail && tAvail->inputTransformAvailable();
                 IMagnifierModel* pick = ShouldPickTransform(pin) ? t.mTransform : t.mRender;
                 if (pick && pick != t.model) t.model = pick;
             }
@@ -967,6 +995,24 @@ static void RunTick(TickState& t) {
         t.mapper.setMaxSourceLeft((transformGame && !g_mpoDisabled && t.cfg.tdrTest != 4)
                                       ? kMaxSafeTxMagnitude / lvl : -1.0);
         if (transformGame) t.lastTransformGameMs = GetTickCount64();   // device-lost backstop window
+        // Launch quiesce (dwmcore APPCRASH, 2026-08-12): a FRESHLY STARTED process taking over as
+        // a borderless cover means a game is LAUNCHING - mode switches and surface churn hammer
+        // the compositor exactly while it is least able to also service magnification mutations
+        // (dwm.exe died in dwmcore.dll during an RDR2 launch under a live 20x transform ramp).
+        // Native Magnifier survives launches because its transform sits STATIC then; match that:
+        // hold every transform-side mutation for ~1.5s. Age-gated so alt-tabbing into a RUNNING
+        // game never freezes the lens.
+        if (fsCover && fgBorderless && fgTick != t.lastCoverFg) {
+            t.lastCoverFg = fgTick;
+            if (dynamic_cast<TransformModel*>(t.model) && FgProcessYoungerThanMs(fgTick, 60000)) {
+                t.quiesceTicks = (t.hz > 0 ? t.hz : 60) * 3 / 2;
+                wind::Log(wind::LogLevel::Info, "transform",
+                          "launch quiesce: fresh cover %ls - holding writes ~1.5s",
+                          ExeNameOf(fgTick).c_str());
+            }
+        } else if (!fsCover || !fgBorderless) {
+            t.lastCoverFg = nullptr;
+        }
         MapResult r = t.mapper.update(dx, dy, lvl);
         // Dead-zone probe (probeClicks=1, diagnostic): the field annotates hover dead zones by
         // clicking. Plain click = "hover works here" (OK), Ctrl+click = "dead here" (DEAD). Each
@@ -1074,6 +1120,7 @@ static void RunTick(TickState& t) {
             // longer drift apart. Exe-derived inputs come from the per-HWND cache: this block
             // runs every zoomed tick and the process-open per tick was measurable waste.
             RefreshFgCache(t, fgTick);
+            auto* tAvail = dynamic_cast<TransformModel*>(t.mTransform);
             EnginePickInputs pin;
             pin.coversMonitor  = fsCover;
             pin.borderless     = fgBorderless;
@@ -1082,6 +1129,8 @@ static void RunTick(TickState& t) {
             pin.excluded       = t.fgCacheExcluded;
             pin.churny         = t.fgCacheChurny;
             pin.tdrHarness     = t.cfg.tdrTest > 0;
+            pin.desktopTransformOptIn = t.cfg.desktopTransform != 0;
+            pin.inputTransformOk      = tAvail && tAvail->inputTransformAvailable();
             IMagnifierModel* want = ShouldPickTransform(pin) ? t.mTransform : t.mRender;
             // STICKY (field: the engine flapped render<->transform inside one zoom session, and
             // each flip releases and rebuilds DWM's magnification context - a stall every time).
@@ -1183,7 +1232,9 @@ static void RunTick(TickState& t) {
         ex.suppressCursorSync = dragFollow;
         // Serialize transform writes around an Inspect click's injected absolute move (issue #148
         // TDR class): the injection and a transform write racing each other is the proven trigger.
-        ex.pauseWrites = t.clickPauseTicks > 0;
+        // The launch quiesce holds writes AND the weld for its whole window (see above).
+        ex.pauseWrites = t.clickPauseTicks > 0 || t.quiesceTicks > 0;
+        if (t.quiesceTicks > 0) { ex.suppressCursorSync = true; --t.quiesceTicks; }
         if (t.clickPauseTicks > 0) --t.clickPauseTicks;
         if (inspect) {
             if (t.clickReleaseTicks > 0) {
@@ -1839,7 +1890,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         // it holds compositor-rate smoothness over a heavy game where every overlay present path
         // throttles (measured). Cursor is anchored, not centered (documented model tradeoff).
         auto tm = std::make_unique<TransformModel>(cfg.fastPan != 0, cfg.smoothPan != 0,
-                                                   cfg.cursorSprite != 0, cfg.zorderBand);
+                                                   cfg.cursorSprite != 0, cfg.zorderBand,
+                                                   cfg.spriteBand16 != 0);
         tm->setIdleReleaseMs(cfg.txIdleReleaseMs);
         model = std::move(tm);
     } else {
@@ -1851,7 +1903,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             // (compositor-internal - the only path that stays smooth over a heavy game). The
             // engine is picked per zoom-in session in RunTick; both stay initialized.
             auto tm2 = std::make_unique<TransformModel>(cfg.fastPan != 0, cfg.smoothPan != 0,
-                                                        cfg.cursorSprite != 0, cfg.zorderBand);
+                                                        cfg.cursorSprite != 0, cfg.zorderBand,
+                                                        cfg.spriteBand16 != 0);
             tm2->setIdleReleaseMs(cfg.txIdleReleaseMs);
             model2 = std::move(tm2);
         }

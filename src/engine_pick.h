@@ -21,11 +21,21 @@ struct EnginePickInputs {
     bool excluded       = false;  // exe listed in transformExclude (issue #148)
     bool churny         = false;  // exe learned in churny_apps.txt
     bool tdrHarness     = false;  // cfg.tdrTest > 0: bypass the churny list for field experiments
+    // Desktop opt-in (issue #185): transform on the DESKTOP requires both - the user's
+    // desktopTransform knob AND a verified MagSetInputTransform (without it, pointer-framework
+    // apps have hover dead zones; needs UIAccess - POINTER-HITTEST-FINDINGS.md).
+    bool desktopTransformOptIn = false;
+    bool inputTransformOk      = false;
 };
 
 inline bool ShouldPickTransform(const EnginePickInputs& in) {
-    return in.coversMonitor && in.borderless && in.primaryMonitor &&
-           !in.shellDesktop && !in.excluded && (in.tdrHarness || !in.churny);
+    // The GAME path: a borderless cover that is not the shell desktop (issue #172 - Win+D is
+    // not a game). The DESKTOP path: explicit opt-in + verified input transform; the shell
+    // desktop is fine there (that IS the desktop). Exclusions and the churny list veto both.
+    const bool game    = in.coversMonitor && in.borderless && !in.shellDesktop;
+    const bool desktop = in.desktopTransformOptIn && in.inputTransformOk;
+    return (game || desktop) && in.primaryMonitor &&
+           !in.excluded && (in.tdrHarness || !in.churny);
 }
 
 }  // namespace wind

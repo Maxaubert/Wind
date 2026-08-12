@@ -444,3 +444,13 @@ test('a failed relaunch reverts the model dropdown and the ini', async ({ page }
   const last = sets.filter(s => s.key === 'model').pop();
   expect(last.value).toBe('render');
 });
+
+test('desktopTransform row shows only for the Auto model (advanced)', async ({ page }) => {
+  await page.goto('/');
+  // Mock config has model=render + showAdvanced=1: the row must be hidden.
+  await expect(page.getByText('Game engine on the desktop')).toHaveCount(0);
+  const row = page.getByText('Magnifier model', { exact: true }).locator('xpath=../..');
+  await row.getByRole('button').first().click();
+  await page.getByRole('option', { name: 'Auto' }).click();
+  await expect(page.getByText('Game engine on the desktop')).toBeVisible();
+});

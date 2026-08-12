@@ -11,8 +11,10 @@
 namespace wind {
 class TransformModel : public IMagnifierModel {
 public:
-    TransformModel(bool fastPan, bool smoothPan, bool useSprite, int zorderBand)
-        : fastPan_(fastPan), smoothPan_(smoothPan), useSprite_(useSprite), zorderBand_(zorderBand) {}
+    TransformModel(bool fastPan, bool smoothPan, bool useSprite, int zorderBand,
+                   bool spriteBand16 = false)
+        : fastPan_(fastPan), smoothPan_(smoothPan), useSprite_(useSprite),
+          zorderBand_(zorderBand), spriteBand16_(spriteBand16) {}
     bool initialize(const MonitorTarget& monitor) override;
     void shutdown() override;
     bool ready() const override { return ready_; }
@@ -28,9 +30,14 @@ public:
     // suppressed by drag-follow). RunTick's #169 measured-baseline logic reads it exactly like
     // RenderEngine::parkedLastFrame(): baseline on the weld point only when the weld really fired.
     bool weldedLastFrame() const { return weldedLastFrame_; }
+    // Whether MagSetInputTransform is usable (probed once at initialize; needs UIAccess). The
+    // hybrid DESKTOP pick requires this: without the source-rect input transform, transform
+    // desktop sessions have the pointer-framework hover dead zones (POINTER-HITTEST-FINDINGS.md).
+    bool inputTransformAvailable() const { return inputTransformAvailable_; }
 private:
     bool fastPan_, smoothPan_, useSprite_;
     int  zorderBand_;                                // sprite z-band (above the shell); needs UIAccess
+    bool spriteBand16_ = false;                      // P2 experiment: band-16 SCREEN-space sprite
     bool ready_ = false;
     bool active_ = false;
     MonitorTarget mon_{};
@@ -59,6 +66,7 @@ private:
     bool haveLastClick_ = false;                     // dedup the per-tick cursor weld
     int  lastClickX_ = 0, lastClickY_ = 0;
     bool weldedLastFrame_ = false;                   // SetCursorPos ran in the last present()
+    bool inputTransformAvailable_ = false;           // MagSetInputTransform probe (UIAccess)
     unsigned long long idleSinceMs_ = 0;             // when the last session ended (0 = none)
     int  idleReleaseMs_ = 1200;                      // cfg.txIdleReleaseMs (hot)
     bool identityParked_ = false;                    // phase 1 of the release done (see idleTick)
