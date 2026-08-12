@@ -81,6 +81,19 @@ bool TransformModel::initialize(const MonitorTarget& monitor) {
         sprite_->create(zorderBand_);   // above the shell so the cursor covers the magnified taskbar
     }
     if (smoothPan_) pin_.create();
+    // Input-transform availability probe (issue #185): MagSetInputTransform needs UIAccess, and
+    // the hybrid DESKTOP pick must know availability BEFORE any session exists (a transform
+    // desktop session without it has the pointer-framework dead zones). One-shot acquire ->
+    // disabled-identity publish -> release, the exact shape of a session teardown, which is
+    // field-proven to leave DWM out of magnification-aware compositing (no warm-up law).
+    if (host_.initialize()) {
+        RECT full{ mon_.x, mon_.y, mon_.x + mon_.w, mon_.y + mon_.h };
+        inputTransformAvailable_ = host_.setInputTransform(false, full, full);
+        host_.shutdown();
+        wind::Log(wind::LogLevel::Info, "transform", "input transform %s (UIAccess %s)",
+                  inputTransformAvailable_ ? "AVAILABLE" : "unavailable",
+                  inputTransformAvailable_ ? "present" : "absent?");
+    }
     ready_ = true;
     return true;
 }
@@ -304,20 +317,16 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // A/B knob (hot): magInputTransform=1 publishes the input transform; 0 (default) leaves the
     // OS default. Unvalidated for mouse (docs scope it to pen/touch) - measured live by the user.
     if (changed && cfg.magInputTransform != 0) {
-        RECT dst{ 0, 0, mon_.w, mon_.h };
-        RECT src = dst;
-        if (cfg.magInputTransform == 1) {
-            // Mode 1: publish the visual source rect (what native Magnifier does). Correct for a
-            // FREE cursor, where the pointer's raw position is a screen position that needs
-            // unmapping to the content point.
-            src = RECT{ (LONG)(r.srcLeft + 0.5), (LONG)(r.srcTop + 0.5),
-                        (LONG)(r.srcLeft + mon_.w / applyLevel + 0.5),
-                        (LONG)(r.srcTop + mon_.h / applyLevel + 0.5) };
-        }
-        // Mode 2: publish an ENABLED IDENTITY (src == dst == monitor). Correct for the WELDED
-        // cursor, whose raw position already IS the content point: an explicit identity stops the
-        // pointer pipeline from inverse-mapping it through the visual transform (the suspected
-        // default when no input transform is set - the #180-adjacent hover dead zones).
+        // Mode 1 (THE SHIPPED DEFAULT; field-verified 4x-20x, POINTER-HITTEST-FINDINGS.md):
+        // publish the visual source rect on every change, exactly like native Magnifier.
+        // Pointer-framework apps (Explorer/Settings/shell) hit-test mouse input through this;
+        // without it the welded cursor has hard hover dead zones. Mode 2 = enabled identity
+        // (diagnostic; measured DEAD). Mode 0 = off (diagnostic; measured DEAD). Both rects in
+        // VIRTUAL-SCREEN coordinates (the old 0,0-based dst was wrong off-primary).
+        InputTransformRects ir = ComputeInputTransformRects(
+            r.srcLeft, r.srcTop, applyLevel, mon_.x, mon_.y, mon_.w, mon_.h);
+        RECT dst{ ir.dl, ir.dt, ir.dr, ir.db };
+        RECT src = (cfg.magInputTransform == 2) ? dst : RECT{ ir.sl, ir.st, ir.sr, ir.sb };
         bool ok = host_.setInputTransform(applyLevel > 1.001, src, dst);
         if (!ok && !inputXformWarned_) {
             inputXformWarned_ = true;
