@@ -223,7 +223,19 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
         wv->PostWebMessageAsJson(Widen(out).c_str());
     } else if (type == "setConfig") {
         std::string key = JsonField(j, "key"), value = JsonField(j, "value");
-        if (!key.empty()) WriteFileAtomic(IniPath(), wind::UpdateIniText(ReadFileUtf8(IniPath()), key, value));
+        if (!key.empty()) {
+            WriteFileAtomic(IniPath(), wind::UpdateIniText(ReadFileUtf8(IniPath()), key, value));
+            // Live-bound profiles: the active profile IS the settings, so every ini write is
+            // mirrored (as the full profile-scoped snapshot) into its file. Global keys never
+            // land there (MakeProfileText strips them). Missing profile/dir = pre-migration
+            // state; skip silently, the core seeds it on next launch.
+            const std::string live = ReadFileUtf8(IniPath());
+            auto vals = wind::ReadIniValues(live);
+            const std::string active = vals.count("profile") ? vals["profile"] : "";
+            if (!active.empty() &&
+                GetFileAttributesW(ProfilePath(active).c_str()) != INVALID_FILE_ATTRIBUTES)
+                wind::WriteTextFileAtomic(ProfilePath(active), wind::MakeProfileText(live));
+        }
     } else if (type == "mpoState") {
         // Read-only probe: HKLM reads do not need elevation, so the Advanced row can always show
         // the true state without ever prompting. `atBoot` is what DWM actually loaded (see
