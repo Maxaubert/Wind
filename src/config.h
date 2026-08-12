@@ -29,10 +29,9 @@ struct Config {
     int    cursorLockVk     = 0;     // VK code; 0 = unbound. Tap to toggle Inspect mode (cursor lock)
                                      // while zoomed. Swallowed system-wide like recenterVk (VK only,
                                      // no modifier - the keyboard hook swallows the bare key).
-    int    swapModelVk      = 0;     // VK code; 0 = unbound. Tap to swap the magnifier model
-                                     // (render <-> magnify). Swallowed system-wide like
-                                     // cursorLockVk (VK only, no modifier). Pressing it restarts
-                                     // Wind onto the flipped model (model is not hot-swappable).
+    int    swapModelVk      = 0;     // RETIRED (the hybrid "Auto" model replaced it). The field
+                                     // stays only so ParseConfig can keep asserting the ini key
+                                     // is IGNORED; nothing binds, swallows, or reads it.
     // Hotkey to toggle the magnified cursor's visibility while zoomed. Edge-detected in the tick
     // loop and flips a runtime-only bool (NEVER written back to the ini), so pressing it does not
     // trigger the config hot-reload and the zoom level is preserved. 0 = unbound. Modifier mask
@@ -113,9 +112,6 @@ struct Config {
     int txLevelStep = 0;  // Minimum RELATIVE level change (per mille) before a ramp re-writes
                           //     the level. MEASURED NO BETTER than continuous once sample size
                           //     was adequate (big sporadic stalls appear in every setting).
-    int freezeNoClip = 0; // diagnostic (issue #148): 1 = freeze sessions skip the 1px ClipCursor.
-                          //     Tests whether the clip/unclip cycle is what makes a game's own
-                          //     cursor work expensive after a zoom (middle-click spikes).
     int txMaxStepPct = 0; // cap the per-tick RELATIVE level change the transform applies (per
                           //     mille; 25 = 2.5%). DWM re-scales on every level change and the
                           //     cost grows with the level, so a fast ramp asks for the most
@@ -130,14 +126,13 @@ struct Config {
                           //     Hot-reloadable.
     int tdrTest = 0;      // issue #148 field-test harness (hot-reloadable, diagnostic only).
                           //   0 = normal; >0 forces the transform path for games (bypasses the
-                          //   churny-app list) with one experiment active:
-                          //   1 = clamp transform GAME sessions to 8x (level-threshold probe)
+                          //   churny-app list). Live experiments:
                           //   2 = clamp |tx| <= 32000 (right-region/overflow probe)
-                          //   3 = steal foreground while zoomed over a game (silences the game's
-                          //       input/cursor activity; read-only-zoom prototype)
                           //   4 = DISABLE the pan wall (full right-edge range at any level) -
                           //       for the MPO-off experiment: with hardware overlay planes
                           //       disabled the 16-bit plane-programming overflow should be gone
+                          //   (modes 1 and 3 acted through the retired game-session freeze and
+                          //   are inert; numbers kept reserved so old field notes stay readable)
     // Magnify-model-only: Windows Magnifier zoom increment in percent POINTS per wheel notch
     // (written to the ScreenMagnifier registry; the user's original value is snapshot-restored
     // on exit). Lower = smoother and slower zoom. Clamped 5..400. Live-applies (no restart).
@@ -272,9 +267,6 @@ bool IsExeInList(const std::string& exeName, const std::string& list);
 // caller keeps its fallback default.
 bool ParseHexColor(const std::string& s, float& r, float& g, float& b);
 
-// Pure: render <-> magnify. "magnify" -> "render"; anything else -> "magnify" (so a corrupt
-// model value flips to a valid engine). Pure; used by the swap-model hotkey. No I/O, no <windows.h>.
-std::string FlipModel(const std::string& model);
 
 // Pure: the effective GPU scheduling priority (-1 low / 0 normal / +1 high) after folding the
 // legacy lowGpuPriority alias into gpuPriority. gpuPriority wins when non-zero.

@@ -78,18 +78,6 @@ TEST_CASE("unknown model value falls back to render") {
     CHECK(c.model == "render");
 }
 
-TEST_CASE("FlipModel alternates render and magnify") {
-    CHECK(FlipModel("render") == "magnify");
-    CHECK(FlipModel("magnify") == "render");
-    // round-trips
-    CHECK(FlipModel(FlipModel("render")) == "render");
-    CHECK(FlipModel(FlipModel("magnify")) == "magnify");
-}
-
-TEST_CASE("FlipModel maps an unknown value to magnify") {
-    CHECK(FlipModel("bogus") == "magnify");
-    CHECK(FlipModel("") == "magnify");
-}
 TEST_CASE("transformExclude keeps fullscreen browsers on the render engine (Auto mode)") {
     // Default list ships the common browsers: fullscreen video looks like a game to the
     // foreground test but wants render (constant-size cursor, desktop-style behaviour).

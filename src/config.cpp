@@ -83,9 +83,6 @@ double OutlineDwellSeconds(bool inBand, double prevSeconds, double dt, double th
     return s > threshold ? threshold : s;          // cap so the accumulator stays bounded
 }
 
-std::string FlipModel(const std::string& model) {
-    return model == "magnify" ? "render" : "magnify";
-}
 
 int EffectiveGpuPriority(const Config& c) {
     if (c.gpuPriority != 0) return c.gpuPriority;      // explicit tri-state wins
@@ -160,7 +157,6 @@ Config ParseConfig(const std::string& text) {
             else if (key == "gpuPriority")        c.gpuPriority = std::stoi(val);
             else if (key == "gameCrop")           c.gameCrop = std::stoi(val);
             else if (key == "tdrTest")            c.tdrTest = std::stoi(val);
-            else if (key == "freezeNoClip")       c.freezeNoClip = std::stoi(val);
             else if (key == "txIdleReleaseMs")    c.txIdleReleaseMs = std::stoi(val);
             else if (key == "txMaxStepPct")       c.txMaxStepPct = std::stoi(val);
             else if (key == "txLevelStep")        c.txLevelStep = std::stoi(val);
@@ -228,7 +224,6 @@ Config ParseConfig(const std::string& text) {
     sanitizeVk(c.zoomOutVk);  sanitizeVk(c.zoomOutVk2);
     sanitizeVk(c.recenterVk);
     sanitizeVk(c.cursorLockVk);
-    sanitizeVk(c.swapModelVk);
     sanitizeVk(c.hideCursorVk);
     sanitizeVk(c.quickZoomVk);
     return c;
