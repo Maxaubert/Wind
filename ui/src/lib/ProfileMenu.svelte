@@ -63,33 +63,37 @@
   {#if open}
     <div class="pmenu" role="menu">
       {#each names as n (n)}
-        <div class="prow" class:activerow={n.toLowerCase() === active.toLowerCase()}
-             role="menuitem" tabindex="0"
-             on:click={() => pick(n)}
-             on:keydown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) { e.preventDefault(); pick(n); } }}
-             on:contextmenu|preventDefault={() => { ctxFor = ctxFor === n ? '' : n; confirmDelete = ''; }}>
-          <span class="pcheck">{#if n.toLowerCase() === active.toLowerCase()}&#10003;{/if}</span>
-          <span class="plabel">{n}</span>
-          <button class="pdots" title="Profile actions" aria-label="Profile actions for {n}"
-                  on:click|stopPropagation={() => { ctxFor = ctxFor === n ? '' : n; confirmDelete = ''; }}>&#8943;</button>
-        </div>
-        {#if ctxFor === n}
-          <div class="pctx" role="menu">
-            {#if confirmDelete === n}
-              <div class="pconfirm">
-                <span>Delete "{n}"?</span>
-                <button class="pact danger" on:click={() => doDelete(n)}>Delete</button>
-                <button class="pact" on:click={() => (confirmDelete = '')}>Cancel</button>
-              </div>
-            {:else}
-              <button class="pact" on:click={() => startRename(n)}>Rename</button>
-              <button class="pact" on:click={() => { onAction('duplicate', { name: n }); ctxFor = ''; }}>Duplicate</button>
-              <button class="pact danger" disabled={names.length <= 1}
-                      title={names.length <= 1 ? 'The last profile cannot be deleted' : ''}
-                      on:click={() => (confirmDelete = n)}>Delete</button>
-            {/if}
+        <div class="pitem">
+          <div class="prow" class:activerow={n.toLowerCase() === active.toLowerCase()}
+               role="menuitem" tabindex="0"
+               on:click={() => pick(n)}
+               on:keydown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) { e.preventDefault(); pick(n); } }}
+               on:contextmenu|preventDefault={() => { ctxFor = ctxFor === n ? '' : n; confirmDelete = ''; }}>
+            <span class="pcheck">{#if n.toLowerCase() === active.toLowerCase()}&#10003;{/if}</span>
+            <span class="plabel">{n}</span>
+            <button class="pdots" title="Profile actions" aria-label="Profile actions for {n}"
+                    on:click|stopPropagation={() => { ctxFor = ctxFor === n ? '' : n; confirmDelete = ''; }}>&#8943;</button>
           </div>
-        {/if}
+          {#if ctxFor === n}
+            <!-- Flyout to the RIGHT of the row, absolutely positioned: it overlays instead of
+                 reflowing, so opening it can never change the dropdown's width or height. -->
+            <div class="pctx" role="menu">
+              {#if confirmDelete === n}
+                <div class="pconfirm">
+                  <span class="pconfirmq">Delete "{n}"?</span>
+                  <button class="pact danger" on:click={() => doDelete(n)}>Delete</button>
+                  <button class="pact" on:click={() => (confirmDelete = '')}>Cancel</button>
+                </div>
+              {:else}
+                <button class="pact" on:click={() => startRename(n)}>Rename</button>
+                <button class="pact" on:click={() => { onAction('duplicate', { name: n }); ctxFor = ''; }}>Duplicate</button>
+                <button class="pact danger" disabled={names.length <= 1}
+                        title={names.length <= 1 ? 'The last profile cannot be deleted' : ''}
+                        on:click={() => (confirmDelete = n)}>Delete</button>
+              {/if}
+            </div>
+          {/if}
+        </div>
       {/each}
       <div class="psep"></div>
       {#if editMode}
@@ -136,13 +140,21 @@
   .pdots { border: 0; background: transparent; color: var(--muted); cursor: pointer;
            border-radius: 4px; padding: 0 4px; }
   .pdots:hover { background: var(--hover); color: var(--text); }
-  .pctx { display: flex; gap: 4px; padding: 2px 8px 6px 28px; }
-  .pact { border: 1px solid var(--hover); background: transparent; color: var(--text);
-          border-radius: 6px; padding: 3px 8px; font-size: 12px; cursor: pointer; }
+  .pitem { position: relative; }
+  /* Flyout submenu: overlays to the right of the row (its own panel, like .pmenu), so it never
+     reflows the dropdown. */
+  .pctx { position: absolute; left: calc(100% + 2px); top: 0; z-index: 41; min-width: 130px;
+          display: flex; flex-direction: column; gap: 2px; padding: 4px;
+          background: var(--bg, #fff); border: 1px solid var(--hover); border-radius: 8px;
+          box-shadow: 0 8px 28px rgba(0,0,0,.25); box-sizing: border-box; }
+  .pact { border: 0; background: transparent; color: var(--text); width: 100%; text-align: left;
+          border-radius: 6px; padding: 5px 8px; font-size: 12.5px; cursor: pointer;
+          box-sizing: border-box; }
   .pact:hover:not(:disabled) { background: var(--hover); }
   .pact:disabled { opacity: .45; cursor: default; }
   .pact.danger { color: #e05656; }
-  .pconfirm { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+  .pconfirm { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+  .pconfirmq { padding: 4px 8px 2px; color: var(--muted); white-space: nowrap; }
   .psep { height: 1px; background: var(--hover); margin: 4px 2px; }
   .pcreate { color: var(--muted); }
   .pedit { padding: 4px 6px; display: flex; gap: 6px; flex-wrap: wrap; }
