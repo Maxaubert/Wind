@@ -123,7 +123,10 @@
   .ptrigger:hover { background: var(--hover); color: var(--text); }
   .pmenu { position: absolute; top: 30px; left: 0; min-width: 220px; z-index: 40;
            background: var(--bg, #fff); color: var(--text); border: 1px solid var(--hover);
-           border-radius: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.25); padding: 6px; }
+           border-radius: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.25); padding: 6px;
+           box-sizing: border-box; }
+  /* border-box everywhere in the menu: width:100% + padding must not overflow the container */
+  .prow, .pedit, .pedit input, .pctx, .pact { box-sizing: border-box; }
   .prow { display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 8px;
           border-radius: 6px; cursor: pointer; border: 0; background: transparent;
           color: var(--text); font-size: 13px; text-align: left; }

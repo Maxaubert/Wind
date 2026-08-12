@@ -133,11 +133,11 @@ bool HandleMessage(HWND hwnd, UINT msg, WPARAM /*wp*/, LPARAM lp) {
         if (activeIdx >= 0)   // radio bullet (not a checkmark) on the active profile
             CheckMenuRadioItem(pm, ID_PROFILE_BASE, ID_PROFILE_BASE + (UINT)profNames.size() - 1,
                                ID_PROFILE_BASE + (UINT)activeIdx, MF_BYCOMMAND);
-        if (!profNames.empty())
+        AppendMenuW(m, MF_STRING, ID_SETTINGS, L"Open Settings");
+        if (!profNames.empty())   // second entry, right under Open Settings
             AppendMenuW(m, MF_POPUP, reinterpret_cast<UINT_PTR>(pm), L"Profiles");
         else
             DestroyMenu(pm);   // no profiles dir yet (pre-migration): keep the menu as before
-        AppendMenuW(m, MF_STRING, ID_SETTINGS, L"Open Settings");
         AppendMenuW(m, MF_STRING, ID_EXPORTDIAG, L"Export diagnostics");
         AppendMenuW(m, MF_STRING, ID_QUIT, L"Quit");
         SetForegroundWindow(hwnd);  // required so the menu dismisses on click-away
