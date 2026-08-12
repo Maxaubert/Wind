@@ -34,4 +34,15 @@ OffsetF ComputeFixedPointOffset(double centerX, double centerY, double level);
 struct MagTransform { int offX; int offY; int txX; int txY; };
 MagTransform ComputeMagTransform(double srcLeft, double srcTop, double level,
                                  int screenW, int screenH);
+
+// MagSetInputTransform rects (issue #185; docs/POINTER-HITTEST-FINDINGS.md): pointer-framework
+// apps hit-test mouse input through the system input transform under a fullscreen
+// magnification, so every transform change must publish src = the magnified source region and
+// dst = the monitor rect - BOTH in virtual-screen coordinates (srcLeft/srcTop arrive
+// monitor-local; monX/monY are the monitor origin). Rounding nearest; extent = monitor/level.
+// At level <= 1.001 the caller disables the transform instead (enabled=false), so no special
+// case here: the math is total.
+struct InputTransformRects { int sl, st, sr, sb; int dl, dt, dr, db; };
+InputTransformRects ComputeInputTransformRects(double srcLeft, double srcTop, double level,
+                                               int monX, int monY, int monW, int monH);
 }

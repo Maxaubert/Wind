@@ -59,4 +59,17 @@ MagTransform ComputeMagTransform(double srcLeft, double srcTop, double level,
     if (txY > 0) txY = 0;
     return MagTransform{ offX, offY, txX, txY };
 }
+
+InputTransformRects ComputeInputTransformRects(double srcLeft, double srcTop, double level,
+                                               int monX, int monY, int monW, int monH) {
+    if (level < 1.0) level = 1.0;
+    InputTransformRects r{};
+    r.sl = monX + iround(srcLeft);
+    r.st = monY + iround(srcTop);
+    r.sr = monX + iround(srcLeft + monW / level);
+    r.sb = monY + iround(srcTop + monH / level);
+    r.dl = monX; r.dt = monY;
+    r.dr = monX + monW; r.db = monY + monH;
+    return r;
+}
 }

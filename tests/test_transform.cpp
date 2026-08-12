@@ -88,3 +88,30 @@ TEST_CASE("centred offset does NOT fix the cursor, which is the click-drift bug"
     wind::OffsetF fp = wind::ComputeFixedPointOffset(700.0, 400.0, level);
     CHECK(T(700.0, fp.x, level) == doctest::Approx(700.0));
 }
+
+// --- MagSetInputTransform rects (issue #185; POINTER-HITTEST-FINDINGS.md) -------------------
+TEST_CASE("input-transform rects: 4x on the primary matches the native-Magnifier-measured shape") {
+    // Native at 400% on 3840x2160 published src extents of exactly 960x540 (field-sampled).
+    auto r = wind::ComputeInputTransformRects(200.0, 100.0, 4.0, 0, 0, 3840, 2160);
+    CHECK(r.sl == 200); CHECK(r.st == 100);
+    CHECK(r.sr == 200 + 960); CHECK(r.sb == 100 + 540);
+    CHECK(r.dl == 0); CHECK(r.dt == 0); CHECK(r.dr == 3840); CHECK(r.db == 2160);
+}
+
+TEST_CASE("input-transform rects: monitor origin offsets BOTH rects (virtual-screen coords)") {
+    // A secondary monitor at (3840, 0): srcLeft/srcTop are monitor-local, the system wants
+    // virtual-screen coordinates for both rects - the 0,0-dst bug this function replaces.
+    auto r = wind::ComputeInputTransformRects(100.0, 50.0, 2.0, 3840, 0, 1920, 1080);
+    CHECK(r.sl == 3840 + 100); CHECK(r.st == 50);
+    CHECK(r.sr == 3840 + 100 + 960); CHECK(r.sb == 50 + 540);
+    CHECK(r.dl == 3840); CHECK(r.dr == 3840 + 1920);
+    CHECK(r.dt == 0); CHECK(r.db == 1080);
+}
+
+TEST_CASE("input-transform rects: near-1x extent approaches the full monitor; sub-pixel rounds nearest") {
+    auto r = wind::ComputeInputTransformRects(0.0, 0.0, 1.001, 0, 0, 3840, 2160);
+    CHECK(r.sr - r.sl == 3836);   // 3840/1.001 = 3836.16 -> 3836
+    CHECK(r.sb - r.st == 2158);   // 2160/1.001 = 2157.8 -> 2158
+    auto r2 = wind::ComputeInputTransformRects(10.6, 20.4, 4.0, 0, 0, 3840, 2160);
+    CHECK(r2.sl == 11); CHECK(r2.st == 20);
+}
