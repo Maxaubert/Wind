@@ -34,6 +34,28 @@ test.beforeEach(async ({ page }) => {
         // with a settable name so a test can drive what the "picker" returns.
         if (msg.type === 'pickExe')
           listeners.forEach(fn => fn({ data: { type: 'exePicked', name: window.__pick || 'RDR2.exe' } }));
+        // Profiles: an in-page stand-in for the host's file ops, same reply shape as the C++ host.
+        if (String(msg.type || '').match(/Profile$|^listProfiles$/)) window.__sets.push(msg);
+        window.__profiles = window.__profiles || { names: ['Default', 'Gaming'], active: 'Default' };
+        const reply = (ok = true, error = '') => listeners.forEach(fn => fn({ data: {
+          type: 'profiles', names: [...window.__profiles.names],
+          active: window.__profiles.active, ok, error } }));
+        if (msg.type === 'listProfiles') reply();
+        if (msg.type === 'switchProfile') { window.__profiles.active = msg.name; reply(); }
+        if (msg.type === 'createProfile') {
+          window.__profiles.names.push(msg.name); window.__profiles.active = msg.name; reply();
+        }
+        if (msg.type === 'renameProfile') {
+          window.__profiles.names = window.__profiles.names.map(n => n === msg.from ? msg.to : n);
+          if (window.__profiles.active === msg.from) window.__profiles.active = msg.to;
+          reply();
+        }
+        if (msg.type === 'duplicateProfile') { window.__profiles.names.push(msg.name + ' copy'); reply(); }
+        if (msg.type === 'deleteProfile') {
+          window.__profiles.names = window.__profiles.names.filter(n => n !== msg.name);
+          if (window.__profiles.active === msg.name) window.__profiles.active = window.__profiles.names[0];
+          reply();
+        }
       },
     }};
   });
@@ -256,4 +278,66 @@ test('moving MPO away from the boot state still prompts to restart', async ({ pa
   await expect(page.getByText('Requires restart')).toBeVisible();
   await page.getByRole('button', { name: 'Apply' }).click();
   await expect(page.getByRole('dialog')).toContainText('Restart to finish');
+});
+
+// --- Profiles (spec 2026-08-12): titlebar dropdown ---------------------------
+test('titlebar shows the active profile and lists all profiles on click', async ({ page }) => {
+  await page.goto('/');
+  const trigger = page.getByRole('button', { name: /Default/ });
+  await expect(trigger).toBeVisible();
+  await trigger.click();
+  await expect(page.getByRole('menuitem', { name: /Gaming/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Create new profile/ })).toBeVisible();
+});
+
+test('clicking another profile switches and reloads', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /Default/ }).click();
+  await page.getByRole('menuitem', { name: /Gaming/ }).click();
+  await expect(page.getByRole('button', { name: /Gaming/ })).toBeVisible();
+  const sets = await page.evaluate(() => window.__sets);
+  expect(sets.some(s => s.type === 'switchProfile' && s.name === 'Gaming')).toBeTruthy();
+});
+
+test('create validates the name inline and sends createProfile when valid', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /Default/ }).click();
+  await page.getByRole('button', { name: /Create new profile/ }).click();
+  const input = page.getByPlaceholder('New profile name');
+  await input.fill('Gaming');                       // duplicate
+  await page.getByRole('button', { name: 'Create', exact: true }).click();
+  await expect(page.getByText(/already exists/)).toBeVisible();
+  await input.fill('Movies');
+  await page.getByRole('button', { name: 'Create', exact: true }).click();
+  const sets = await page.evaluate(() => window.__sets);
+  expect(sets.some(s => s.type === 'createProfile' && s.name === 'Movies')).toBeTruthy();
+});
+
+test('right-click opens rename/duplicate/delete; rename round-trips', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /Default/ }).click();
+  await page.getByRole('menuitem', { name: /Gaming/ }).click({ button: 'right' });
+  await page.getByRole('button', { name: 'Rename' }).click();
+  await page.getByPlaceholder('New name').fill('Games');
+  await page.getByRole('button', { name: 'Rename', exact: true }).click();
+  const sets = await page.evaluate(() => window.__sets);
+  expect(sets.some(s => s.type === 'renameProfile' && s.from === 'Gaming' && s.to === 'Games')).toBeTruthy();
+});
+
+test('delete asks for confirmation and is disabled on the last profile', async ({ page }) => {
+  await page.addInitScript(() => { window.__profiles = { names: ['Solo'], active: 'Solo' }; });
+  await page.goto('/');
+  await page.getByRole('button', { name: /Solo/ }).click();
+  await page.getByRole('menuitem', { name: /Solo/ }).click({ button: 'right' });
+  await expect(page.getByRole('button', { name: 'Delete' })).toBeDisabled();
+});
+
+test('switching with staged changes raises the unsaved-changes guard', async ({ page }) => {
+  await page.goto('/');
+  await page.getByText('Smooth zoom', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();
+  await page.getByRole('button', { name: /Default/ }).click();
+  await page.getByRole('menuitem', { name: /Gaming/ }).click();
+  await expect(page.getByText('Unsaved changes')).toBeVisible();
+  await page.getByRole('button', { name: 'Discard and continue' }).click();
+  await expect(page.getByRole('button', { name: /Gaming/ })).toBeVisible();
 });
