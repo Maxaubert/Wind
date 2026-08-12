@@ -62,22 +62,36 @@ static void SwitchToProfile(const std::wstring& ini, const std::wstring& nameW) 
         Notify(L"Wind", L"That profile's file is missing; settings unchanged.");
         return;
     }
+    // A read failure must NOT masquerade as an empty profile: empty legitimately means factory
+    // defaults, so silently treating a locked/corrupt file as empty would wipe the live settings.
+    std::string profText;
+    if (!wind::ReadTextFileOk(profPath, profText)) {
+        Notify(L"Wind", L"Could not read that profile's file; settings unchanged.");
+        return;
+    }
+    if (!wind::ProfileTextError(profText).empty()) {
+        Notify(L"Wind", L"That profile's file looks corrupt; settings unchanged.");
+        return;
+    }
     const std::string oldLive = wind::ReadTextFile(ini);
-    const std::string newLive =
-        wind::MakeLiveText(wind::ReadTextFile(profPath), oldLive, wind::NarrowUtf8(nameW));
+    const std::string newLive = wind::MakeLiveText(profText, oldLive, wind::NarrowUtf8(nameW));
     if (!wind::WriteTextFileAtomic(ini, newLive)) {
         Notify(L"Wind", L"Could not switch profile (config file is locked).");
         return;
     }
     // Model is not hot-swappable: relaunch so the new instance boots on the profile's model.
-    if (wind::ParseConfig(oldLive).model != wind::ParseConfig(newLive).model) {
+    const std::string oldModel = wind::ParseConfig(oldLive).model;
+    if (oldModel != wind::ParseConfig(newLive).model) {
         wchar_t exe[MAX_PATH];
         if (GetModuleFileNameW(nullptr, exe, MAX_PATH) &&
             reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", exe, nullptr, nullptr,
                                                     SW_SHOWNORMAL)) > 32) {
             Notify(L"Wind", (L"Switched to \"" + nameW + L"\" (restarting for its model).").c_str());
         } else {
-            Notify(L"Wind", L"Profile switched, but the restart for its model failed.");
+            // Keep the "ini model == running model" invariant (same rule as SwapModelAndRelaunch
+            // and the Settings restartFailed path): the switch stays, only the model is kept.
+            wind::WriteTextFileAtomic(ini, wind::UpdateIniText(newLive, "model", oldModel));
+            Notify(L"Wind", L"Profile switched; kept the current model (restart failed).");
         }
     }
 }
@@ -111,10 +125,14 @@ bool HandleMessage(HWND hwnd, UINT msg, WPARAM /*wp*/, LPARAM lp) {
         const std::wstring active = wind::WidenUtf8(
             wind::ReadIniValues(wind::ReadTextFile(ini))["profile"]);
         HMENU pm = CreatePopupMenu();
-        for (UINT i = 0; i < (UINT)profNames.size(); ++i)
-            AppendMenuW(pm, MF_STRING | (_wcsicmp(profNames[i].c_str(), active.c_str()) == 0
-                                             ? MF_CHECKED : 0u),
-                        ID_PROFILE_BASE + i, profNames[i].c_str());
+        int activeIdx = -1;
+        for (UINT i = 0; i < (UINT)profNames.size(); ++i) {
+            if (_wcsicmp(profNames[i].c_str(), active.c_str()) == 0) activeIdx = (int)i;
+            AppendMenuW(pm, MF_STRING, ID_PROFILE_BASE + i, profNames[i].c_str());
+        }
+        if (activeIdx >= 0)   // radio bullet (not a checkmark) on the active profile
+            CheckMenuRadioItem(pm, ID_PROFILE_BASE, ID_PROFILE_BASE + (UINT)profNames.size() - 1,
+                               ID_PROFILE_BASE + (UINT)activeIdx, MF_BYCOMMAND);
         if (!profNames.empty())
             AppendMenuW(m, MF_POPUP, reinterpret_cast<UINT_PTR>(pm), L"Profiles");
         else

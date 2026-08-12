@@ -68,7 +68,9 @@ export function pickExe() {
 // error}; each helper resolves that raw reply so the caller can refresh its list and surface errors.
 function profileRequest(msg) {
   return new Promise(resolve => {
-    const off = onMessage(m => { if (m && m.type === 'profiles') { off(); resolve(m); } });
+    // Skip push:true messages: those are unsolicited host updates (the tray switched profiles
+    // under us), not the reply to this request.
+    const off = onMessage(m => { if (m && m.type === 'profiles' && !m.push) { off(); resolve(m); } });
     post(msg);
   });
 }

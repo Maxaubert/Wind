@@ -40,6 +40,8 @@ test.beforeEach(async ({ page }) => {
         const reply = (ok = true, error = '') => listeners.forEach(fn => fn({ data: {
           type: 'profiles', names: [...window.__profiles.names],
           active: window.__profiles.active, ok, error } }));
+        // __profileFail = '<messageType>' forces that operation to reply ok=false.
+        if (window.__profileFail && msg.type === window.__profileFail) { reply(false, 'Simulated failure'); return; }
         if (msg.type === 'listProfiles') reply();
         if (msg.type === 'switchProfile') { window.__profiles.active = msg.name; reply(); }
         if (msg.type === 'createProfile') {
@@ -340,4 +342,45 @@ test('switching with staged changes raises the unsaved-changes guard', async ({ 
   await expect(page.getByText('Unsaved changes')).toBeVisible();
   await page.getByRole('button', { name: 'Discard and continue' }).click();
   await expect(page.getByRole('button', { name: /Gaming/ })).toBeVisible();
+});
+
+test('a failed profile action surfaces a visible error dialog', async ({ page }) => {
+  await page.addInitScript(() => { window.__profileFail = 'switchProfile'; });
+  await page.goto('/');
+  await page.getByRole('button', { name: /Default/ }).click();
+  await page.getByRole('menuitem', { name: /Gaming/ }).click();
+  await expect(page.getByText('Profile action failed')).toBeVisible();
+  await expect(page.getByText('Simulated failure')).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
+  await expect(page.getByText('Profile action failed')).toHaveCount(0);
+});
+
+test('deleting a NON-active profile with staged changes skips the guard', async ({ page }) => {
+  await page.goto('/');
+  await page.getByText('Smooth zoom', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();
+  await page.getByRole('button', { name: /Default/ }).click();
+  await page.getByRole('menuitem', { name: /Gaming/ }).click({ button: 'right' });
+  await page.getByRole('button', { name: 'Delete' }).click();          // arm confirm
+  await page.getByRole('button', { name: 'Delete', exact: true }).first().click();  // confirm
+  await expect(page.getByText('Unsaved changes')).toHaveCount(0);      // no guard
+  const sets = await page.evaluate(() => window.__sets);
+  expect(sets.some(s => s.type === 'deleteProfile' && s.name === 'Gaming')).toBeTruthy();
+});
+
+test('a leading-dot name is rejected inline before reaching the host', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /Default/ }).click();
+  await page.getByRole('button', { name: /Create new profile/ }).click();
+  await page.getByPlaceholder('New profile name').fill('.hidden');
+  await page.getByRole('button', { name: 'Create', exact: true }).click();
+  await expect(page.getByText(/space or dot/)).toBeVisible();
+  expect(await page.evaluate(() => window.__sets.filter(s => s.type === 'createProfile').length)).toBe(0);
+});
+
+test('Escape closes the profile dropdown', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /Default/ }).click();
+  await expect(page.getByRole('menuitem', { name: /Gaming/ })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menuitem', { name: /Gaming/ })).toHaveCount(0);
 });

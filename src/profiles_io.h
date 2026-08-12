@@ -42,13 +42,22 @@ inline std::vector<std::wstring> ListProfileFiles(const std::wstring& dir) {
               [](const std::wstring& a, const std::wstring& b) { return _wcsicmp(a.c_str(), b.c_str()) < 0; });
     return names;
 }
-inline std::string ReadTextFile(const std::wstring& path) {
+// False when the file exists but could not be opened (locked, permissions) OR is missing; `out` is
+// only written on success. Callers that must distinguish "missing" pre-check GetFileAttributesW.
+inline bool ReadTextFileOk(const std::wstring& path, std::string& out) {
     std::ifstream f(path, std::ios::binary);
-    if (!f) return "";
-    std::stringstream ss; ss << f.rdbuf(); return ss.str();
+    if (!f) return false;
+    std::stringstream ss; ss << f.rdbuf(); out = ss.str(); return true;
+}
+inline std::string ReadTextFile(const std::wstring& path) {
+    std::string out;
+    ReadTextFileOk(path, out);
+    return out;
 }
 inline bool WriteTextFileAtomic(const std::wstring& path, const std::string& text) {
-    std::wstring tmp = path + L".tmp";
+    // Per-process temp name: Wind.exe (tray switch) and WindConfig.exe both write magnifier.ini
+    // through this path, and a shared "<ini>.tmp" would let their temp writes clobber each other.
+    std::wstring tmp = path + L"." + std::to_wstring(GetCurrentProcessId()) + L".tmp";
     { std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
       if (!f) return false;
       f.write(text.data(), (std::streamsize)text.size()); }
@@ -60,13 +69,18 @@ inline bool WriteTextFileAtomic(const std::wstring& path, const std::string& tex
 }
 // First-run migration: no profiles dir -> the user's current settings BECOME "Default" and the live
 // ini gets profile=Default. Runs before the tick loop records the ini mtime, so the write does not
-// trigger a spurious hot-reload. Idempotent: the dir existing (even empty) means never seed again.
+// trigger a spurious hot-reload. Idempotent: the dir existing (even empty) means never seed again -
+// which is why a failed Default.ini capture rolls the (still empty) dir back, so the seed retries on
+// the next launch instead of leaving a permanent half-migrated state.
 inline void EnsureProfilesSeeded(const std::wstring& iniPath) {
     std::wstring dir = ProfilesDirFromIni(iniPath);
     if (GetFileAttributesW(dir.c_str()) != INVALID_FILE_ATTRIBUTES) return;
     if (!CreateDirectoryW(dir.c_str(), nullptr)) return;
     std::string live = ReadTextFile(iniPath);
-    WriteTextFileAtomic(dir + L"\\Default.ini", MakeProfileText(live));
+    if (!WriteTextFileAtomic(dir + L"\\Default.ini", MakeProfileText(live))) {
+        RemoveDirectoryW(dir.c_str());   // dir is still empty; retry the whole seed next launch
+        return;
+    }
     WriteTextFileAtomic(iniPath, UpdateIniText(live, "profile", "Default"));
 }
 }  // namespace wind

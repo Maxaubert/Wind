@@ -6,7 +6,6 @@
   export let active = '';
   export let names = [];
   export let onAction = () => {};
-  export let busyError = '';
 
   let open = false;
   let ctxFor = '';            // profile name whose context menu is showing ('' = none)
@@ -24,7 +23,7 @@
     if (!t) return 'Name cannot be empty';
     if (t.length > 40) return 'Name is too long (max 40 characters)';
     if (forbidden.test(t) || [...t].some(c => c.charCodeAt(0) < 32)) return 'Name contains a forbidden character';
-    if (t !== t.trim() || t.endsWith('.')) return 'Name cannot start/end with a space or end with a dot';
+    if (t !== t.trim() || t.startsWith('.') || t.endsWith('.')) return 'Name cannot start/end with a space or dot';
     if (reserved.test(t)) return 'That name is reserved by Windows';
     const clash = names.some(x => x.toLowerCase() === t.toLowerCase() &&
                                   x.toLowerCase() !== allowSelf.toLowerCase());
@@ -67,7 +66,7 @@
         <div class="prow" class:activerow={n.toLowerCase() === active.toLowerCase()}
              role="menuitem" tabindex="0"
              on:click={() => pick(n)}
-             on:keydown={(e) => e.key === 'Enter' && pick(n)}
+             on:keydown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) { e.preventDefault(); pick(n); } }}
              on:contextmenu|preventDefault={() => { ctxFor = ctxFor === n ? '' : n; confirmDelete = ''; }}>
           <span class="pcheck">{#if n.toLowerCase() === active.toLowerCase()}&#10003;{/if}</span>
           <span class="plabel">{n}</span>
@@ -104,10 +103,17 @@
       {:else}
         <button class="prow pcreate" on:click={startCreate}>Create new profile&#8230;</button>
       {/if}
-      {#if busyError}<div class="perr">{busyError}</div>{/if}
     </div>
   {/if}
 </div>
+
+<svelte:window on:keydown={(e) => {
+  // Escape closes like every other popup: first press cancels an in-progress edit, next closes.
+  if (!open || e.key !== 'Escape') return;
+  e.preventDefault();
+  if (editMode || ctxFor || confirmDelete) reset();
+  else { open = false; reset(); }
+}} />
 
 <style>
   .pmwrap { position: relative; margin-left: 10px; }

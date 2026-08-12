@@ -141,7 +141,12 @@
   // touch the staged values, so they skip the guard.
   let profilePrompt = null;   // pending {kind, payload} while the guard is up
   function profileAction(kind, payload) {
-    const mutates = kind === 'switch' || kind === 'create' || kind === 'delete';
+    // Only actions that replace the staged settings need the guard: switch, create, and deleting
+    // the ACTIVE profile (which switches away). Deleting another profile, rename, and duplicate
+    // leave the staged values untouched.
+    const deletesActive = kind === 'delete' &&
+      payload.name.toLowerCase() === profiles.active.toLowerCase();
+    const mutates = kind === 'switch' || kind === 'create' || deletesActive;
     if (mutates && dirty) { profilePrompt = { kind, payload }; return; }
     runProfileAction(kind, payload);
   }
@@ -150,6 +155,7 @@
   }
   async function runProfileAction(kind, payload) {
     profileError = '';
+    const prevActive = profiles.active;
     let r;
     if (kind === 'switch')         r = await switchProfile(payload.name);
     else if (kind === 'create')    r = await createProfile(payload.name);
@@ -158,12 +164,29 @@
     else if (kind === 'delete')    r = await deleteProfile(payload.name);
     else return;
     profiles = { names: r.names, active: r.active };
+    // Reload BEFORE the error check: a failed op can still have rewritten the live ini (e.g. the
+    // switch landed but the model restart failed), and stale staged values would then Apply the
+    // OLD profile's settings on top of the new one.
+    if (kind === 'switch' || kind === 'create' || (kind === 'delete' && r.active !== prevActive))
+      await loadValues();
     if (!r.ok) { profileError = r.error || 'Profile operation failed'; return; }
-    if (kind === 'switch' || kind === 'create' || kind === 'delete') await loadValues();
     // A fresh factory-defaults profile has no zoom keys bound (keybinds are per-profile):
     // put the user right where fixing that starts.
     if (kind === 'create') scrollToSection(scroller, 'keybinds');
   }
+  // Unsolicited host push: the tray switched profiles under this window. Refresh the titlebar and,
+  // unless the user has staged edits, the values too (a stale Apply would mirror the OLD profile's
+  // settings into the NEW profile's file). With staged edits, surface it instead of silently
+  // discarding the user's work.
+  onMessage(async m => {
+    if (!m || m.type !== 'profiles' || !m.push) return;
+    const changed = m.active !== profiles.active;
+    profiles = { names: m.names, active: m.active };
+    if (!changed) return;
+    if (!dirty) await loadValues();
+    else profileNotice = 'The active profile was switched to "' + m.active + '" from the tray. Your staged changes now apply to that profile; Discard them to load its settings instead.';
+  });
+  let profileNotice = '';
   // --- Unsaved-changes guard (issue #164) -----------------------------------
   // The host mirrors `dirty` and bounces WM_CLOSE back as confirmClose, so Alt+F4 and the system
   // menu get the same prompt as our own title-bar button. Closing to the tray still loses staged
@@ -185,8 +208,7 @@
   <section class="content">
     <div class="caption" style="app-region:drag;-webkit-app-region:drag">
       <span class="ctitle">Wind Settings</span>
-      <ProfileMenu active={profiles.active} names={profiles.names}
-                   onAction={profileAction} busyError={profileError} />
+      <ProfileMenu active={profiles.active} names={profiles.names} onAction={profileAction} />
       <div class="spacer" style="flex:1"></div>
       <div class="tbtns" style="app-region:no-drag;-webkit-app-region:no-drag">
         <button class="tbtn" title="Minimize" aria-label="Minimize" on:click={() => windowControl('minimize')}>{@html ic.min}</button>
@@ -270,6 +292,24 @@
           <button on:click={() => (profilePrompt = null)}>Keep editing</button>
           <button class="primary" on:click={discardAndRunProfile}>Discard and continue</button>
         </div>
+      </div>
+    </div>
+  {/if}
+  {#if profileError}
+    <div class="mbackdrop">
+      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="petitle">
+        <h2 id="petitle">Profile action failed</h2>
+        <p>{profileError}</p>
+        <div class="mbtns"><button class="primary" on:click={() => (profileError = '')}>Close</button></div>
+      </div>
+    </div>
+  {/if}
+  {#if profileNotice}
+    <div class="mbackdrop">
+      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="pntitle">
+        <h2 id="pntitle">Profile changed</h2>
+        <p>{profileNotice}</p>
+        <div class="mbtns"><button class="primary" on:click={() => (profileNotice = '')}>OK</button></div>
       </div>
     </div>
   {/if}

@@ -21,6 +21,15 @@ std::string MakeProfileText(const std::string& liveText);
 // to the built-in ParseConfig default (this is how "new profile = factory defaults" works).
 std::string MakeLiveText(const std::string& profileText, const std::string& oldLiveText,
                          const std::string& name);
-// "<base> copy", then "<base> copy 2", ...: first name not taken (case-insensitive).
+// "<base> copy", then "<base> copy 2", ...: first name not taken (case-insensitive). The base is
+// truncated as needed so the result always passes ProfileNameError's 40-char cap.
 std::string NextCopyName(const std::string& base, const std::vector<std::string>& names);
+// ASCII case-insensitive profile-name equality (profile identity is case-insensitive everywhere:
+// NTFS file names, the tray checkmark, ProfileNameTaken).
+bool SameProfileName(const std::string& a, const std::string& b);
+// "" when `text` is plausible profile-file content, else a short reason. Accepts empty or
+// comment-only text (the legitimate factory-defaults profile) but rejects binary content (NUL
+// bytes), absurd size (> 256 KB), and text that has non-comment lines yet parses to zero keys -
+// so a corrupt file can never be silently applied as "factory defaults" on switch.
+std::string ProfileTextError(const std::string& text);
 }

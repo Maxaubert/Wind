@@ -25,7 +25,7 @@ std::string ProfileNameError(const std::string& name) {
             return "Name cannot contain \\ / : * ? \" < > |";
     }
     if (name.front() == ' ' || name.back() == ' ') return "Name cannot start or end with a space";
-    if (name.back() == '.') return "Name cannot end with a dot";
+    if (name.front() == '.' || name.back() == '.') return "Name cannot start or end with a dot";
     static const char* reserved[] = {"con","prn","aux","nul",
         "com1","com2","com3","com4","com5","com6","com7","com8","com9",
         "lpt1","lpt2","lpt3","lpt4","lpt5","lpt6","lpt7","lpt8","lpt9"};
@@ -65,9 +65,29 @@ std::string MakeLiveText(const std::string& profileText, const std::string& oldL
     return UpdateIniText(out, "profile", name);
 }
 std::string NextCopyName(const std::string& base, const std::vector<std::string>& names) {
-    std::string cand = base + " copy";
+    // Truncate the base so "<base><suffix>" always fits the 40-char cap (the suffix grows with N).
+    auto fit = [&](const std::string& suffix) {
+        std::string b = base;
+        if (b.size() + suffix.size() > 40) b = trim(b.substr(0, 40 - suffix.size()));
+        return b + suffix;
+    };
+    std::string cand = fit(" copy");
     for (int i = 2; ProfileNameTaken(cand, names); ++i)
-        cand = base + " copy " + std::to_string(i);
+        cand = fit(" copy " + std::to_string(i));
     return cand;
+}
+bool SameProfileName(const std::string& a, const std::string& b) { return lower(a) == lower(b); }
+std::string ProfileTextError(const std::string& text) {
+    if (text.size() > 256 * 1024) return "Profile file is unreasonably large";
+    if (text.find('\0') != std::string::npos) return "Profile file is not a text file";
+    if (!ReadIniValues(text).empty()) return "";
+    // Zero keys parsed: fine only if every line is blank or a comment (factory defaults).
+    std::istringstream in(text);
+    std::string line;
+    while (std::getline(in, line)) {
+        std::string t = trim(line);
+        if (!t.empty() && t[0] != ';' && t[0] != '#') return "Profile file is not a Wind profile";
+    }
+    return "";
 }
 }

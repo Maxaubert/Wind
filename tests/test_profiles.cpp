@@ -117,3 +117,32 @@ TEST_CASE("NextCopyName picks the first free suffix, case-insensitively") {
     CHECK(NextCopyName("Gaming", {"Gaming", "Gaming copy"}) == "Gaming copy 2");
     CHECK(NextCopyName("Gaming", {"Gaming", "gaming copy", "Gaming copy 2"}) == "Gaming copy 3");
 }
+
+TEST_CASE("NextCopyName keeps the result inside the 40-char name cap") {
+    const std::string base(40, 'x');   // itself at the cap
+    const std::string c1 = NextCopyName(base, {base});
+    CHECK(ProfileNameError(c1) == "");
+    CHECK(c1.size() <= 40);
+    const std::string c2 = NextCopyName(base, {base, c1});
+    CHECK(ProfileNameError(c2) == "");
+    CHECK(c2 != c1);
+}
+
+TEST_CASE("leading dots are rejected like trailing ones") {
+    CHECK(ProfileNameError(".hidden") != "");
+    CHECK(ProfileNameError("a.b") == "");   // interior dots stay fine
+}
+
+TEST_CASE("SameProfileName is ASCII case-insensitive equality") {
+    CHECK(SameProfileName("Gaming", "gAMING"));
+    CHECK_FALSE(SameProfileName("Gaming", "Gaming 2"));
+}
+
+TEST_CASE("ProfileTextError accepts real and factory-default profiles, rejects garbage") {
+    CHECK(ProfileTextError("") == "");                            // factory defaults
+    CHECK(ProfileTextError("; comment only\n") == "");            // factory defaults
+    CHECK(ProfileTextError("maxLevel=8.0\n") == "");              // normal profile
+    CHECK(ProfileTextError(std::string("bin\0ary", 7)) != "");    // NUL byte
+    CHECK(ProfileTextError("this is not an ini\nat all\n") != ""); // lines but zero keys
+    CHECK(ProfileTextError(std::string(300 * 1024, 'a')) != "");  // absurd size
+}
