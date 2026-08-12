@@ -64,3 +64,17 @@ export function pickExe() {
     post({ type: 'pickExe' });
   });
 }
+// Profiles (spec 2026-08-12). Every profile message replies {type:'profiles', names, active, ok,
+// error}; each helper resolves that raw reply so the caller can refresh its list and surface errors.
+function profileRequest(msg) {
+  return new Promise(resolve => {
+    const off = onMessage(m => { if (m && m.type === 'profiles') { off(); resolve(m); } });
+    post(msg);
+  });
+}
+export const listProfiles     = ()         => profileRequest({ type: 'listProfiles' });
+export const switchProfile    = (name)     => profileRequest({ type: 'switchProfile', name });
+export const createProfile    = (name)     => profileRequest({ type: 'createProfile', name });
+export const renameProfile    = (from, to) => profileRequest({ type: 'renameProfile', from, to });
+export const duplicateProfile = (name)     => profileRequest({ type: 'duplicateProfile', name });
+export const deleteProfile    = (name)     => profileRequest({ type: 'deleteProfile', name });
