@@ -12,6 +12,7 @@
 #include <fstream>
 #include "config.h"
 #include "config_path.h"
+#include "profiles_io.h"
 #include "drag_follow.h"
 #include "mpo_boot.h"
 #include "config_ui/ini_edit.h"   // wind::UpdateIniText - flip the model key in place
@@ -1844,6 +1845,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // resolution is used by WindConfig.exe so both processes always touch the same file.
     std::wstring iniPath = wind::ResolveIniPath();
     Config cfg = LoadConfig(iniPath);
+
+    // Profiles (spec 2026-08-12): first launch after the update seeds profiles\Default.ini from the
+    // user's current settings, so existing installs get a "Default" profile with zero user action.
+    EnsureProfilesSeeded(iniPath);
 
     // Render the live config as key=value lines for the snapshot.
     {
