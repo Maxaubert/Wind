@@ -22,7 +22,14 @@
   async function loadValues() {
     const cfg = await getConfig();
     const v = {};
-    for (const s of sections) for (const r of s.rows) if (r.key[0] !== '_') v[r.key] = (r.key in cfg) ? cfg[r.key] : r.def;
+    for (const s of sections) for (const r of s.rows) {
+      if (r.key[0] !== '_') v[r.key] = (r.key in cfg) ? cfg[r.key] : r.def;
+      // Keybind rows store their real state under buttonKey/vkKey/modsKey, not row.key ('__x'):
+      // every one of those must be loaded too, or the row displays "Unbound" over a live binding
+      // and a capture/clear through the lying row destroys the user's real bind (the Inspect row
+      // had exactly this bug - cursorLockVk was never loaded).
+      for (const k of [r.buttonKey, r.vkKey, r.modsKey]) if (k) v[k] = (k in cfg) ? cfg[k] : '0';
+    }
     // These must match the core's shipped defaults (src/config.h + the ini template in config.cpp),
     // which are ALL unbound - onboarding captures the user's choice. Seeding a key here that the
     // core does not default to (this used to be PageUp 33 / PageDown 34) invents a binding the user
@@ -131,7 +138,16 @@
     }
     commit();
   }
-  function discard() { values = { ...saved }; mpoStaged = mpoLive; }
+  // When a push arrived while edits were staged (the tray switched profiles under us), `saved`
+  // still holds the OLD profile's snapshot - restoring it would show a clean-looking page that is
+  // wholesale wrong for the now-active profile. Discard must then RELOAD from the live ini, which
+  // is exactly what the push notice promises ("Discard them to load its settings instead").
+  let pendingReload = false;
+  async function discard() {
+    mpoStaged = mpoLive;
+    if (pendingReload) { pendingReload = false; await loadValues(); }
+    else values = { ...saved };
+  }
   // --- Profiles (spec 2026-08-12) -------------------------------------------
   let profiles = { names: [], active: '' };
   let profileError = '';
@@ -149,8 +165,8 @@
     if (mutates && dirty) { profilePrompt = { kind, payload }; return; }
     runProfileAction(kind, payload);
   }
-  function discardAndRunProfile() {
-    const p = profilePrompt; profilePrompt = null; discard(); runProfileAction(p.kind, p.payload);
+  async function discardAndRunProfile() {
+    const p = profilePrompt; profilePrompt = null; await discard(); runProfileAction(p.kind, p.payload);
   }
   async function runProfileAction(kind, payload) {
     profileError = '';
@@ -183,7 +199,10 @@
     profiles = { names: m.names, active: m.active };
     if (!changed) return;
     if (!dirty) await loadValues();
-    else profileNotice = 'The active profile was switched to "' + m.active + '" from the tray. Your staged changes now apply to that profile; Discard them to load its settings instead.';
+    else {
+      pendingReload = true;   // Discard now reloads the NEW profile instead of the stale snapshot
+      profileNotice = 'The active profile was switched to "' + m.active + '" from the tray. Your staged changes now apply to that profile; Discard them to load its settings instead.';
+    }
   });
   let profileNotice = '';
   // --- Unsaved-changes guard (issue #164) -----------------------------------

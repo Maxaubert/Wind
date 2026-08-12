@@ -62,16 +62,16 @@ struct Config {
     int    diagnostics      = 0;     // 1 = log frame-timing to wind_diag.log
 
     // --- Model selection ----------------------------------------------------
-    // Which magnification model runs. "render" (default) = the DXGI capture + D3D11 overlay.
-    // "magnify" = drive the native Windows Magnifier (Magnify.exe) via injected wheel notches;
-    // works over DRM-protected video that blanks under Desktop Duplication. "transform" = the
-    // DWM fullscreen-transform model (MagSetFullscreenTransform, no Magnify.exe) - REVIVED for
-    // issue #148: it magnifies inside the compositor with zero app presents, the only path that
-    // stays smooth while a heavy game renders (Windows' present pipeline throttles every overlay
-    // app's frames to ~90/s under load; measured 139 transform updates/s rock-steady over the
-    // same game). Cursor is anchored (not centered) in this model. Unknown values fall back to
-    // "render". Applied at launch (restart to switch; not hot-swapped).
-    std::string model = "render";
+    // Which magnification model runs. "hybrid" (DEFAULT, "Auto" in the UI) constructs render +
+    // transform and picks per zoom-in (engine_pick.h). "render" = the DXGI capture + D3D11
+    // overlay. "magnify" = drive the native Windows Magnifier (Magnify.exe) via injected wheel
+    // notches; works over DRM-protected video that blanks under Desktop Duplication.
+    // "transform" = the DWM fullscreen-transform model (MagSetFullscreenTransform, no
+    // Magnify.exe) - revived for issue #148: it magnifies inside the compositor with zero app
+    // presents, the only path that stays smooth while a heavy game renders. Missing or unknown
+    // values fall back to "hybrid" (the product default; the UI schema and new-profile seeding
+    // agree - keep all three in sync). Applied at launch (restart to switch; not hot-swapped).
+    std::string model = "hybrid";
     // Auto/hybrid exclusion list: exe names (comma-separated, case-insensitive) that must NEVER
     // get the transform engine, even when they are fullscreen and borderless. Fullscreen browser
     // video looks exactly like a game to the foreground test, but it wants the render engine (a
@@ -144,7 +144,9 @@ struct Config {
     double cursorSensitivity = 1.0;
     double cursorSmoothing = 0.4;    // light inertia on the pan: 0 = off, higher = smoother/laggier
                                      // (0.4 shipped: light smoothing, less lag than 0.8)
-    int    cursorScaleWithZoom = 1;  // 1 = draw the cursor scaled by zoom, 0 = native size
+    int    cursorScaleWithZoom = 0;  // 0 = constant on-screen size at every zoom (the product
+                                     //   rule: "cursor size is constant, always"); 1 = opt-in
+                                     //   scale-with-zoom look
     // Cursor visibility while zoomed: "auto" = follow the focused app (don't draw a cursor
     // when a game hides its own via ShowCursor(FALSE); detected with GetCursorInfo's
     // CURSOR_SHOWING flag, which our own MagShowSystemCursor hide does NOT affect);
@@ -177,9 +179,8 @@ struct Config {
     // on SDR it's a no-op (plain BGRA8 passthrough), so it's safe on by default. Set 0 to
     // force the legacy BGRA8 capture even on HDR. Applied at startup + on HDR toggle.
     int    hdrTonemap = 1;
-    // Multi-monitor: 1 (default) = on each zoom-in, magnify whichever monitor the cursor is
-    // on; 0 = legacy single-monitor behavior (primary monitor only). Hot-reloadable (applies
-    // on the next zoom-in). Kill-switch for the multi-monitor path.
+    // Multi-monitor: 0 (the shipped default) = primary monitor only; 1 = on each zoom-in,
+    // magnify whichever monitor the cursor is on. Hot-reloadable (applies on the next zoom-in).
     int    multiMonitor = 0;
     // Capture optimization (opt-in). 0 (default) = always copy all changed regions, so the cached
     // desktop copy is never stale. 1 = on a near-full repaint (a game redrawing the whole screen),

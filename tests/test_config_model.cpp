@@ -3,9 +3,9 @@
 
 using namespace wind;
 
-TEST_CASE("model defaults to render") {
+TEST_CASE("model defaults to hybrid (the product default, 'Auto' in the UI)") {
     Config c = ParseConfig("");
-    CHECK(c.model == "render");
+    CHECK(c.model == "hybrid");
 }
 
 TEST_CASE("model=magnify parses") {
@@ -73,9 +73,11 @@ TEST_CASE("transform-model knobs default and parse") {
     CHECK(c.cursorSprite == 0);
 }
 
-TEST_CASE("unknown model value falls back to render") {
-    Config c = ParseConfig("model=bogus\n");
-    CHECK(c.model == "render");
+TEST_CASE("unknown model value falls back to hybrid, same as a missing key") {
+    CHECK(ParseConfig("model=bogus\n").model == "hybrid");
+    // The three-way default (core struct, unknown-value fallback, UI schema def) must never
+    // fork again: an ini without a model key runs the same engine the UI displays.
+    CHECK(ParseConfig("model=bogus\n").model == ParseConfig("").model);
 }
 
 TEST_CASE("transformExclude keeps fullscreen browsers on the render engine (Auto mode)") {

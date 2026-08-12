@@ -247,6 +247,12 @@ struct TickState {
     unsigned long long lastFgProbeMs = 0;           // throttles the game-foreground probe to ~10Hz
     std::wstring transformExe;      // exe of the app under the current/last transform game session
     unsigned long long lastTransformGameMs = 0;  // TDR-backstop window (device-lost attribution)
+    // Per-HWND cache for the exe-derived pick predicates (shell class, exclusion list, churny
+    // list). The instant re-pick runs every zoomed tick; opening the foreground process and
+    // building exe-name strings 144x/s answered a question that only changes when the foreground
+    // WINDOW changes. covers/borderless stay per-tick (cheap user32 reads, genuinely dynamic).
+    HWND fgCacheHwnd = nullptr;
+    bool fgCacheShell = false, fgCacheExcluded = false, fgCacheChurny = false;
     bool   inspectCursorWasShowing = true; // cursor visibility at the toggle edge (the mouselook tell)
     bool   cursorHiddenByUs = false;      // WE currently hide the OS cursor (render zoom / Inspect).
                                           //   A transform FOLLOW session leaves it alone, so the app's
@@ -426,6 +432,16 @@ static void SetSystemCursorHidden(TickState& t, IMagnifierModel* m, bool hide) {
     t.cursorHiddenByUs = hide;
 }
 
+// Refresh the per-HWND cache of exe-derived pick predicates. Only re-resolves when the foreground
+// WINDOW changed; a null fgw clears to safe defaults (no transform pick without a foreground).
+static void RefreshFgCache(TickState& t, HWND fgw) {
+    if (fgw == t.fgCacheHwnd) return;
+    t.fgCacheHwnd = fgw;
+    t.fgCacheShell    = IsShellDesktopFg(fgw);
+    t.fgCacheExcluded = IsTransformExcluded(fgw, t.cfg);
+    t.fgCacheChurny   = IsChurnyFg(fgw);
+}
+
 // Hand foreground back to the game when game-inspect ends. Called on EVERY inspect exit path
 // (toggle-off, zoom-out teardown, device-lost recovery, shutdown), mirroring the ClipCursor
 // release invariant. Foreground is returned only if we still hold it - a user who alt-tabbed to
@@ -539,7 +555,13 @@ static void RunTick(TickState& t) {
                 RegisterQuickZoomHotkey(t.hwnd, (nc.quickZoomHotkeyMode && nc.quickZoomVk) ? nc.quickZoomVk : 0,
                                         nc.quickZoomMods);
             }
+            // txIdleReleaseMs is documented hot-reloadable; push it into whichever transform
+            // model exists (pure-transform t.model or hybrid's t.mTransform - never both).
+            if (auto* tmHot = dynamic_cast<TransformModel*>(
+                    t.mTransform ? t.mTransform : t.model))
+                tmHot->setIdleReleaseMs(nc.txIdleReleaseMs);
             t.cfg = nc;   // pick up renderer knobs (smoothing, filter, cursor scale, zoom speed)
+            t.fgCacheHwnd = nullptr;   // transformExclude may have changed: re-resolve predicates
             t.zoom = ZoomController(1.0, nc.maxLevel);
             double ocx = t.mapper.centerX(), ocy = t.mapper.centerY();   // preserve position
             t.mapper = CursorMapper(t.mon.w, t.mon.h, nc.cursorSmoothing);
@@ -756,13 +778,14 @@ static void RunTick(TickState& t) {
                 // Only ever swapped here or in the settled instant-switch below, so every
                 // activation's teardown calls route to the same engine that activated.
                 HWND fgw = GetForegroundWindow();
+                RefreshFgCache(t, fgw);
                 EnginePickInputs pin;
                 pin.coversMonitor  = ForegroundCoversMonitor(t.mon);
                 pin.borderless     = fgw && !(GetWindowLongPtrW(fgw, GWL_STYLE) & WS_CAPTION);
                 pin.primaryMonitor = t.mon.x == 0 && t.mon.y == 0;
-                pin.shellDesktop   = IsShellDesktopFg(fgw);
-                pin.excluded       = IsTransformExcluded(fgw, t.cfg);
-                pin.churny         = IsChurnyFg(fgw);
+                pin.shellDesktop   = t.fgCacheShell;
+                pin.excluded       = t.fgCacheExcluded;
+                pin.churny         = t.fgCacheChurny;
                 pin.tdrHarness     = t.cfg.tdrTest > 0;
                 IMagnifierModel* pick = ShouldPickTransform(pin) ? t.mTransform : t.mRender;
                 if (pick && pick != t.model) t.model = pick;
@@ -979,14 +1002,16 @@ static void RunTick(TickState& t) {
         // is a no-op instead of a second handover.
         if (t.mTransform && !enterActive && !inspect && !IsOverlayFg(fgTick)) {
             // Same pure predicate as the zoom-in pick (engine_pick.h) - the two sites can no
-            // longer drift apart.
+            // longer drift apart. Exe-derived inputs come from the per-HWND cache: this block
+            // runs every zoomed tick and the process-open per tick was measurable waste.
+            RefreshFgCache(t, fgTick);
             EnginePickInputs pin;
             pin.coversMonitor  = fsCover;
             pin.borderless     = fgBorderless;
             pin.primaryMonitor = t.mon.x == 0 && t.mon.y == 0;
-            pin.shellDesktop   = IsShellDesktopFg(fgTick);
-            pin.excluded       = IsTransformExcluded(fgTick, t.cfg);
-            pin.churny         = IsChurnyFg(fgTick);
+            pin.shellDesktop   = t.fgCacheShell;
+            pin.excluded       = t.fgCacheExcluded;
+            pin.churny         = t.fgCacheChurny;
             pin.tdrHarness     = t.cfg.tdrTest > 0;
             IMagnifierModel* want = ShouldPickTransform(pin) ? t.mTransform : t.mRender;
             // STICKY (field: the engine flapped render<->transform inside one zoom session, and
@@ -1471,11 +1496,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     // WM_TIMER exists in this process.)
     if (msg == WM_TIMER) { if (g_tick) RunTick(*g_tick); return 0; }
     if (msg == WM_INPUT) {
-        UINT size = 0;
-        GetRawInputData((HRAWINPUT)lp, RID_INPUT, nullptr, &size, sizeof(RAWINPUTHEADER));
+        // One syscall, not two: RAWINPUT for mouse/keyboard always fits the fixed buffer, so the
+        // size-query round trip per packet (hundreds/s while panning) bought nothing.
         alignas(8) BYTE buf[128];
-        if (size > 0 && size <= sizeof(buf) &&
-            GetRawInputData((HRAWINPUT)lp, RID_INPUT, buf, &size, sizeof(RAWINPUTHEADER)) == size) {
+        UINT size = sizeof(buf);
+        UINT got = GetRawInputData((HRAWINPUT)lp, RID_INPUT, buf, &size, sizeof(RAWINPUTHEADER));
+        if (got != (UINT)-1 && got > 0) {
             auto* ri = reinterpret_cast<RAWINPUT*>(buf);
             if (ri->header.dwType == RIM_TYPEKEYBOARD) {
                 // Keyboard UP only, and deliberately the exact mirror of the side-button rule
@@ -1737,8 +1763,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         // Revived for issue #148: the DWM-internal fullscreen transform - zero app presents, so
         // it holds compositor-rate smoothness over a heavy game where every overlay present path
         // throttles (measured). Cursor is anchored, not centered (documented model tradeoff).
-        model = std::make_unique<TransformModel>(cfg.fastPan != 0, cfg.smoothPan != 0,
-                                                 cfg.cursorSprite != 0, cfg.zorderBand);
+        auto tm = std::make_unique<TransformModel>(cfg.fastPan != 0, cfg.smoothPan != 0,
+                                                   cfg.cursorSprite != 0, cfg.zorderBand);
+        tm->setIdleReleaseMs(cfg.txIdleReleaseMs);
+        model = std::move(tm);
     } else {
         model = std::make_unique<RenderModel>(cfg.zorderBand, cfg.hdrTonemap != 0,
                                               EffectiveGpuPriority(cfg));
@@ -1747,8 +1775,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             // levels), transform model whenever a fullscreen app is foreground at zoom-in
             // (compositor-internal - the only path that stays smooth over a heavy game). The
             // engine is picked per zoom-in session in RunTick; both stay initialized.
-            model2 = std::make_unique<TransformModel>(cfg.fastPan != 0, cfg.smoothPan != 0,
-                                                      cfg.cursorSprite != 0, cfg.zorderBand);
+            auto tm2 = std::make_unique<TransformModel>(cfg.fastPan != 0, cfg.smoothPan != 0,
+                                                        cfg.cursorSprite != 0, cfg.zorderBand);
+            tm2->setIdleReleaseMs(cfg.txIdleReleaseMs);
+            model2 = std::move(tm2);
         }
     }
     if (!model->initialize(startupMon)) {
@@ -1795,8 +1825,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             unsigned ddaFmt = 0; int cs = -1, bpc = 0; renderEngine.debugHdr(ddaFmt, cs, bpc);
             FILE* hf = nullptr; _wfopen_s(&hf, L"wind_hdr_diag.txt", L"w");
             if (hf) { fprintf(hf, "ddaFormat=%u outColorSpace=%d bitsPerColor=%d\n", ddaFmt, cs, bpc); fclose(hf); }
-            renderEngine.shutdown();
         }
+        // Unconditional MODEL shutdown (not just the render engine): a non-render model still
+        // holds cursor/runtime state that must be restored on this early exit path.
+        model->shutdown();
+        if (model2) model2->shutdown();
         g_input.stop();
         Tray::Remove();
         ReleaseMutex(mtx);
@@ -1838,8 +1871,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             DiagLog("PACINGTEST vsync=%d frames=%d ~fps=%.1f targetDt=%.2fms avgDt=%.2fms maxDt=%.2fms hitches>1.5x=%d big>2.5x=%d",
                     cfg.vsync, frames, frames / elapsed, target * 1000.0,
                     (frames ? sumDt / frames : 0.0) * 1000.0, maxDt * 1000.0, hitches, big);
-            renderEngine.shutdown();
         }
+        // Unconditional MODEL shutdown, same as the selftest exit above.
+        model->shutdown();
+        if (model2) model2->shutdown();
         g_input.stop();
         Tray::Remove();
         ReleaseMutex(mtx);
@@ -1920,7 +1955,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                 GetTickCount64() - ts.lastTransformGameMs < 30000) {
                 MarkChurnyApp(ts.transformExe, "device-lost backstop");
             }
-            SetSystemCursorHidden(ts, rm, false);   // restore the real cursor while we can't render
+            // Restore through the ACTIVE model: in a transform session the transform half (not
+            // the render engine) hid the cursor, and only it restores its blanker state too.
+            SetSystemCursorHidden(ts, ts.model, false);
             // Inspect's 1px freeze clip must not survive a device-lost: release it and clear the toggle so
             // the post-recovery tick can't re-clip the cursor to the stale frozen pixel (honors the
             // documented "released on device-lost recovery" invariant; recovery returns to a clean 1x).
@@ -1995,6 +2032,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     UnregisterHotKey(hwnd, kQuickZoomHotkeyId);
     EndGameInspect(ts);  // quitting mid-game-inspect hands foreground back to the game
     model->shutdown();   // restores cursor + tears down D3D/overlay
+    // Hybrid holds TWO models; quitting while zoomed in (or shortly after) a transform session
+    // left the transform half's magnification context + cursor state untouched without this.
+    if (model2) model2->shutdown();
     g_input.stop();
     Tray::Remove();
     if (mtx) { ReleaseMutex(mtx); CloseHandle(mtx); }

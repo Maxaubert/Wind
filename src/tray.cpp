@@ -47,8 +47,10 @@ void Add(HWND hwnd, HINSTANCE hInst) {
 void Remove() { Shell_NotifyIconW(NIM_DELETE, &g_nid); }
 void Notify(const wchar_t* title, const wchar_t* text) {
     g_nid.uFlags = NIF_INFO;
-    lstrcpyW(g_nid.szInfoTitle, title);
-    lstrcpyW(g_nid.szInfo, text);
+    // Bounded copies: szInfoTitle is 64 wchars, szInfo 256; profile names travel through here,
+    // so an unbounded lstrcpyW was a caller-controlled overflow of the fixed NOTIFYICONDATA.
+    lstrcpynW(g_nid.szInfoTitle, title, ARRAYSIZE(g_nid.szInfoTitle));
+    lstrcpynW(g_nid.szInfo, text, ARRAYSIZE(g_nid.szInfo));
     Shell_NotifyIconW(NIM_MODIFY, &g_nid);
     g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
 }
@@ -74,6 +76,8 @@ static void SwitchToProfile(const std::wstring& ini, const std::wstring& nameW) 
         return;
     }
     const std::string oldLive = wind::ReadTextFile(ini);
+    // Capture hand edits (openIni) into the outgoing profile before the live ini is replaced.
+    wind::MirrorLiveToActiveProfile(ini, oldLive);
     const std::string newLive = wind::MakeLiveText(profText, oldLive, wind::NarrowUtf8(nameW));
     if (!wind::WriteTextFileAtomic(ini, newLive)) {
         Notify(L"Wind", L"Could not switch profile (config file is locked).");

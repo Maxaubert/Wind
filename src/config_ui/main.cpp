@@ -72,23 +72,16 @@ static std::wstring IniPath() {
     static std::wstring cached = wind::ResolveIniPath();
     return cached;
 }
-static std::string ReadFileUtf8(const std::wstring& path) {
-    std::ifstream f(path, std::ios::binary); if (!f) return "";
-    std::stringstream ss; ss << f.rdbuf(); return ss.str();
-}
+// ReadFileUtf8/WriteFileAtomic/Widen/Narrow are thin aliases over the shared profiles_io.h
+// helpers so both binaries keep ONE implementation of each (they diverged once already).
+static std::string ReadFileUtf8(const std::wstring& path) { return wind::ReadTextFile(path); }
 // Delegates to the shared helper so both processes use the same per-process temp naming (Wind.exe's
 // tray switch writes the same ini; a shared "<ini>.tmp" would let the temp writes clobber each other).
 static void WriteFileAtomic(const std::wstring& path, const std::string& text) {
     wind::WriteTextFileAtomic(path, text);
 }
-static std::wstring Widen(const std::string& s) {
-    int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0);
-    std::wstring w(n, L'\0'); if (n) MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), &w[0], n); return w;
-}
-static std::string Narrow(const std::wstring& w) {
-    int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), nullptr, 0, nullptr, nullptr);
-    std::string s(n, '\0'); if (n) WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), &s[0], n, nullptr, nullptr); return s;
-}
+static std::wstring Widen(const std::string& s) { return wind::WidenUtf8(s); }
+static std::string Narrow(const std::wstring& w) { return wind::NarrowUtf8(w); }
 static std::string JsonUnescape(const std::string& s);   // defined below; used by JsonField
 static std::string JsonField(const std::string& j, const std::string& key) {
     // Find "key" as an object key (preceded by { or , so a value containing the literal text of a
@@ -197,6 +190,8 @@ static std::string DoSwitchProfile(const std::string& name) {
     if (!wind::ReadTextFileOk(pp, profText)) return "Could not read the profile file";
     { std::string terr = wind::ProfileTextError(profText); if (!terr.empty()) return terr; }
     const std::string oldLive = ReadFileUtf8(IniPath());
+    // Capture hand edits (openIni) into the outgoing profile before the live ini is replaced.
+    wind::MirrorLiveToActiveProfile(IniPath(), oldLive);
     const std::string newLive = wind::MakeLiveText(profText, oldLive, name);
     WriteFileAtomic(IniPath(), newLive);
     // Verify by parsed key/value maps, not raw text, so a comment difference never false-fails.

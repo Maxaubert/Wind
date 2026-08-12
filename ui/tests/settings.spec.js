@@ -13,7 +13,7 @@ test.beforeEach(async ({ page }) => {
           // they never render and the tests asserting on them time out looking for a hidden row.
           // model=render: 'Sharpness' additionally carries showIf {model:'render'}, and an unset
           // model fails that check (undefined !== 'render'), hiding the row the same way.
-          listeners.forEach(fn => fn({ data: { type: 'config', values: { zoomInSpeed: '1.2', smoothZoom: '0', uiTheme: 'auto', showAdvanced: '1', model: 'render', zoomInButton: '2', zoomInVk: '33', zoomOutButton: '1', zoomOutVk: '34' } } }));
+          listeners.forEach(fn => fn({ data: { type: 'config', values: { zoomInSpeed: '1.2', smoothZoom: '0', uiTheme: 'auto', showAdvanced: '1', model: 'render', zoomInButton: '2', zoomInVk: '33', zoomOutButton: '1', zoomOutVk: '34', cursorLockVk: '113' } } }));
         if (msg.type === 'setConfig') window.__sets.push(msg);
         // MPO lives in the registry, not the ini. __mpoDisabled drives what the "registry" reports;
         // __mpoOk drives whether the elevated write is accepted (false = UAC dismissed).
@@ -29,7 +29,12 @@ test.beforeEach(async ({ page }) => {
           if (ok) window.__mpoDisabled = msg.value === '1';
           listeners.forEach(fn => fn({ data: { type: 'mpoApplied', ok, disabled: !!window.__mpoDisabled } }));
         }
-        if (msg.type === 'window') window.__sets.push(msg);
+        if (msg.type === 'window') {
+          window.__sets.push(msg);
+          // __restartFail: the host failed to relaunch Wind after a model change.
+          if (msg.action === 'restartWind' && window.__restartFail)
+            listeners.forEach(fn => fn({ data: { type: 'restartFailed' } }));
+        }
         // The host shows a native file picker and replies with the bare exe name. Stand in for it
         // with a settable name so a test can drive what the "picker" returns.
         if (msg.type === 'pickExe')
@@ -389,4 +394,53 @@ test('the Default profile cannot be deleted even among many', async ({ page }) =
   await page.getByRole('button', { name: /Default/ }).click();
   await page.getByRole('button', { name: 'Profile actions for Default' }).click();
   await expect(page.getByRole('button', { name: 'Delete' })).toBeDisabled();
+});
+
+// --- Review fixes (issue #182) ----------------------------------------------
+test('the Inspect row shows its real binding (cursorLockVk is loaded)', async ({ page }) => {
+  await page.goto('/');
+  // Mock binds cursorLockVk=113 (F2). The row lied ("Unbound") before the fix because
+  // vkKey-only rows were never loaded into values.
+  const cap = page.getByText('Inspect mode', { exact: true }).locator('xpath=../..').getByRole('button');
+  await expect(cap).toHaveText(/F2/);
+});
+
+test('forbidden keys are refused during keybind capture and capture stays armed', async ({ page }) => {
+  await page.goto('/');
+  await page.getByText('Zoom in', { exact: true }).locator('xpath=../..').getByRole('button').click();
+  await page.keyboard.press('Backspace');   // forbidden (would be swallowed system-wide)
+  // Arming live-clears the previous binding (one zoomInVk=0 write is expected); the forbidden
+  // key itself must never be written.
+  expect(await page.evaluate(() =>
+    window.__sets.filter(s => s.key === 'zoomInVk' && s.value !== '0').length)).toBe(0);
+  await page.keyboard.press('F2');          // capture must still be armed
+  const sets = await page.evaluate(() => window.__sets);
+  expect(sets.some(s => s.key === 'zoomInVk' && s.value === '113')).toBeTruthy();
+});
+
+test('a model change writes the ini BEFORE requesting the relaunch', async ({ page }) => {
+  await page.goto('/');
+  const row = page.getByText('Magnifier model', { exact: true }).locator('xpath=../..');
+  await row.getByRole('button').first().click();
+  await page.getByRole('option', { name: 'Windows Magnifier' }).click();
+  await page.getByRole('button', { name: 'Apply' }).click();
+  const sets = await page.evaluate(() => window.__sets);
+  const iModel = sets.findIndex(s => s.key === 'model' && s.value === 'magnify');
+  const iRestart = sets.findIndex(s => s.type === 'window' && s.action === 'restartWind');
+  expect(iModel).toBeGreaterThanOrEqual(0);
+  expect(iRestart).toBeGreaterThan(iModel);   // the relaunched Wind reads the ini at startup
+});
+
+test('a failed relaunch reverts the model dropdown and the ini', async ({ page }) => {
+  await page.addInitScript(() => { window.__restartFail = true; });
+  await page.goto('/');
+  const row = page.getByText('Magnifier model', { exact: true }).locator('xpath=../..');
+  await row.getByRole('button').first().click();
+  await page.getByRole('option', { name: 'Windows Magnifier' }).click();
+  await page.getByRole('button', { name: 'Apply' }).click();
+  await expect(page.getByText("Couldn't restart Wind")).toBeVisible();
+  const sets = await page.evaluate(() => window.__sets);
+  // The revert write puts the RUNNING model back after the failed switch attempt.
+  const last = sets.filter(s => s.key === 'model').pop();
+  expect(last.value).toBe('render');
 });
