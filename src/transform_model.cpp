@@ -78,7 +78,9 @@ bool TransformModel::initialize(const MonitorTarget& monitor) {
     if (useSprite_) {
         blanker_ = std::make_unique<CursorBlanker>();
         sprite_  = std::make_unique<CursorSprite>(blanker_->originals());
-        sprite_->create(zorderBand_);   // above the shell so the cursor covers the magnified taskbar
+        // P2 experiment (spriteBand16): band 16, positioned in SCREEN space - testing whether
+        // high-band windows escape the DWM fullscreen transform (constant-size cursor).
+        sprite_->create(spriteBand16_ ? 16 : zorderBand_);
     }
     if (smoothPan_) pin_.create();
     // Input-transform availability probe (issue #185): MagSetInputTransform needs UIAccess, and
@@ -410,8 +412,13 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             // where that content appears. (Placing it in screen space put it off-screen once
             // transformed, which is why the pointer vanished at high zoom.) The consequence is
             // that the marker grows with the zoom, like the native Magnifier's pointer.
-            const int sx = r.clickDesktopX + mon_.x;
-            const int sy = r.clickDesktopY + mon_.y;
+            // P2 experiment (spriteBand16): SCREEN space + band 16 instead - if high-band windows
+            // escape the transform, cursorScreen is exactly where the aim point displays, at a
+            // constant size (the product rule met on the transform path).
+            const int sx = spriteBand16_ ? (int)(r.cursorScreenX + 0.5) + mon_.x
+                                         : r.clickDesktopX + mon_.x;
+            const int sy = spriteBand16_ ? (int)(r.cursorScreenY + 0.5) + mon_.y
+                                         : r.clickDesktopY + mon_.y;
             if (sx != lastSpriteX_ || sy != lastSpriteY_) {
                 sprite_->moveTo(sx, sy);
                 lastSpriteX_ = sx; lastSpriteY_ = sy;

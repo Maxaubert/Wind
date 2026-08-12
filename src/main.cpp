@@ -1845,7 +1845,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         // it holds compositor-rate smoothness over a heavy game where every overlay present path
         // throttles (measured). Cursor is anchored, not centered (documented model tradeoff).
         auto tm = std::make_unique<TransformModel>(cfg.fastPan != 0, cfg.smoothPan != 0,
-                                                   cfg.cursorSprite != 0, cfg.zorderBand);
+                                                   cfg.cursorSprite != 0, cfg.zorderBand,
+                                                   cfg.spriteBand16 != 0);
         tm->setIdleReleaseMs(cfg.txIdleReleaseMs);
         model = std::move(tm);
     } else {
@@ -1857,7 +1858,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             // (compositor-internal - the only path that stays smooth over a heavy game). The
             // engine is picked per zoom-in session in RunTick; both stay initialized.
             auto tm2 = std::make_unique<TransformModel>(cfg.fastPan != 0, cfg.smoothPan != 0,
-                                                        cfg.cursorSprite != 0, cfg.zorderBand);
+                                                        cfg.cursorSprite != 0, cfg.zorderBand,
+                                                        cfg.spriteBand16 != 0);
             tm2->setIdleReleaseMs(cfg.txIdleReleaseMs);
             model2 = std::move(tm2);
         }

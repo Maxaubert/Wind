@@ -104,6 +104,13 @@ struct Config {
     // (UIAccess). 0 (default) = desktop stays on render. Experimental until the P3 endurance
     // gates pass; see docs/superpowers/specs/2026-08-12-one-model-transform-design.md.
     int desktopTransform = 0;
+    // P2 experiment (issue #185, restart-applied, UIAccess build): create the transform cursor
+    // sprite in band 16 positioned in SCREEN space. Hypothesis: high-band windows escape the DWM
+    // fullscreen transform (native Magnifier's own fullscreen UI stays unmagnified), giving a
+    // crisp CONSTANT-SIZE centered cursor. Two prior field measurements about layered windows
+    // under the transform CONTRADICT each other (transform.h header vs transform_model.cpp), so
+    // this needs one visual verdict from the field: zoomed, is the sprite unmagnified?
+    int spriteBand16 = 0;
     int magInputTransform = 1; // publish MagSetInputTransform while zoomed (hot; needs UIAccess).
                           //     1 (DEFAULT) = the visual source rect per change - native-
                           //     Magnifier parity, THE fix for the pointer-framework hover dead
