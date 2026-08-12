@@ -59,8 +59,12 @@ void Notify(const wchar_t* title, const wchar_t* text) {
 // launch - a model change relaunches Wind.exe (the new instance evicts us via the single-instance
 // handshake, same as the swap-model path in main.cpp).
 static void SwitchToProfile(const std::wstring& ini, const std::wstring& nameW) {
+    // Every step logs (issue #184: a field switch failed with no trace - the balloon is
+    // transient, the log is not).
+    wind::Log(wind::LogLevel::Info, "profile", "tray switch -> %ls", nameW.c_str());
     const std::wstring profPath = wind::ProfilesDirFromIni(ini) + L"\\" + nameW + L".ini";
     if (GetFileAttributesW(profPath.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        wind::Log(wind::LogLevel::Warn, "profile", "switch aborted: file missing");
         Notify(L"Wind", L"That profile's file is missing; settings unchanged.");
         return;
     }
@@ -68,32 +72,46 @@ static void SwitchToProfile(const std::wstring& ini, const std::wstring& nameW) 
     // defaults, so silently treating a locked/corrupt file as empty would wipe the live settings.
     std::string profText;
     if (!wind::ReadTextFileOk(profPath, profText)) {
+        wind::Log(wind::LogLevel::Warn, "profile", "switch aborted: read failed (err=%lu)", GetLastError());
         Notify(L"Wind", L"Could not read that profile's file; settings unchanged.");
         return;
     }
-    if (!wind::ProfileTextError(profText).empty()) {
+    { std::string terr = wind::ProfileTextError(profText);
+      if (!terr.empty()) {
+        wind::Log(wind::LogLevel::Warn, "profile", "switch aborted: %s", terr.c_str());
         Notify(L"Wind", L"That profile's file looks corrupt; settings unchanged.");
         return;
-    }
+    } }
     const std::string oldLive = wind::ReadTextFile(ini);
     // Capture hand edits (openIni) into the outgoing profile before the live ini is replaced.
     wind::MirrorLiveToActiveProfile(ini, oldLive);
     const std::string newLive = wind::MakeLiveText(profText, oldLive, wind::NarrowUtf8(nameW));
     if (!wind::WriteTextFileAtomic(ini, newLive)) {
+        wind::Log(wind::LogLevel::Warn, "profile", "switch aborted: live ini write failed (err=%lu)", GetLastError());
         Notify(L"Wind", L"Could not switch profile (config file is locked).");
         return;
     }
     // Model is not hot-swappable: relaunch so the new instance boots on the profile's model.
     const std::string oldModel = wind::ParseConfig(oldLive).model;
-    if (oldModel != wind::ParseConfig(newLive).model) {
+    const std::string newModel = wind::ParseConfig(newLive).model;
+    wind::Log(wind::LogLevel::Info, "profile", "switch applied: model %s -> %s%s",
+              oldModel.c_str(), newModel.c_str(),
+              oldModel != newModel ? " (relaunching)" : " (hot)");
+    if (oldModel != newModel) {
         wchar_t exe[MAX_PATH];
-        if (GetModuleFileNameW(nullptr, exe, MAX_PATH) &&
-            reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", exe, nullptr, nullptr,
-                                                    SW_SHOWNORMAL)) > 32) {
+        const bool haveExe = GetModuleFileNameW(nullptr, exe, MAX_PATH) != 0;
+        INT_PTR rc = haveExe
+            ? reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", exe, nullptr, nullptr,
+                                                      SW_SHOWNORMAL))
+            : 0;
+        if (rc > 32) {
             Notify(L"Wind", (L"Switched to \"" + nameW + L"\" (restarting for its model).").c_str());
         } else {
-            // Keep the "ini model == running model" invariant (same rule as SwapModelAndRelaunch
-            // and the Settings restartFailed path): the switch stays, only the model is kept.
+            // Keep the "ini model == running model" invariant (same rule as the Settings
+            // restartFailed path): the switch stays, only the model is kept.
+            wind::Log(wind::LogLevel::Warn, "profile",
+                      "relaunch FAILED (rc=%lld haveExe=%d); reverting model to %s",
+                      static_cast<long long>(rc), (int)haveExe, oldModel.c_str());
             wind::WriteTextFileAtomic(ini, wind::UpdateIniText(newLive, "model", oldModel));
             Notify(L"Wind", L"Profile switched; kept the current model (restart failed).");
         }
