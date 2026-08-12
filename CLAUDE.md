@@ -40,30 +40,45 @@ a heavy game (native-Magnifier parity measured); continuous per-tick level (big 
 are what cost ~30-50ms game frames - do NOT re-quantize ramps), tx keep-alive after changes
 (value-static = DWM parks, action-start spike), launch warm-up 1.001, rest at TRUE 1.0.
 maxLevel is ONE SHARED setting across models (no per-model cap; the old 12x cap guarded what
-turned out to be the MPO bug below). Desktop cliff ~4x per-window texture limits - why hybrid
-keeps render on desktop.
-TRANSFORM CURSOR LAW (issue #148 root causes - NEVER regress): the transform model NEVER places
-the cursor. Programmatic ABSOLUTE placement (SetCursorPos / SendInput-absolute) or per-tick
-ClipCursor while the fullscreen transform is live over a game RESETS THE GPU DRIVER in seconds
-(repro-proven: any rate, even with the transform parked; the old per-tick click weld was this).
-DESKTOP transform sessions FOLLOW the visible cursor (DWM shows it magnified; hover + clicks
-native-correct - the old hover dead zones are GONE, issue closed); GAME sessions (borderless
-cover) FREEZE it (Inspect-style 1px clip -> LockDetector reads it as locked -> raw-mickey pan),
-the sprite marks the aim point, and clicks are hook-swallowed + fired as write-paused absolute
-injections at the aim point (re-freezing there). ClipCursor re-asserts are DEDUPED via
-GetClipCursor reads (same TDR class as SetCursorPos). ComputeMagTransform clamps offsets AND
-private-channel translations with a 2px right/bottom margin (rounding overshoot = TDR class).
+turned out to be the MPO bug below). TRANSFORM ON THE DESKTOP (root-caused AND solved
+2026-08-12, docs/POINTER-HITTEST-FINDINGS.md): pointer-input frameworks (XAML/DirectUI -
+Explorer, Settings, shell) hit-test through the fullscreen transform and produce hard hover
+dead zones under a welded cursor UNLESS the SOURCE-RECT input transform is published
+per change (`MagSetInputTransform(TRUE, srcRect, monitorRect)` - what native Magnifier does
+continuously; MSDN's "pen/touch only" scoping is wrong, mouse pointer hit-testing consumes
+it). Field-verified 4x-20x: weld + source-rect input transform = correct hover everywhere,
+legacy apps unaffected. `magInputTransform=1`. HARD DEPENDENCY: needs UIAccess - where absent
+(dev builds) the publish fails and transform desktop sessions keep the dead zones, so render
+stays the desktop engine unless the publish verifiably succeeds. Identity or no publish =
+dead zones (measured); do not "simplify" the source rect away.
+TRANSFORM CURSOR: WELDED (re-test of the #148 weld, commit 8a52040; supersedes the retired
+FOLLOW+FREEZE design - git history has that machinery). The transform welds the REAL cursor to
+the lens point per tick (transform_model.cpp; deduped, suspended by drag-follow), exposes
+`weldedLastFrame()` so RunTick's #169 measured baseline treats it exactly like the render park,
+and hides the raw pointer behind the sprite while zoomed >1.001x. The original weld-TDR
+verdicts were measured with MPO enabled AND native Magnifier running - both since eliminated -
+so the weld is being re-tested rather than engineered around; if driver resets return, the weld
+is the FIRST suspect (docs/HITCH-FINDINGS.md has the bisect). Still true regardless of design:
+ClipCursor re-asserts are DEDUPED via GetClipCursor reads, Inspect's injected absolute clicks
+pause transform writes for ~3 ticks (ex.pauseWrites), and ComputeMagTransform clamps offsets
+AND private-channel translations with a 2px right/bottom margin (rounding overshoot = TDR class).
 NVIDIA MPO BUG (issue #148 final root cause, proven by the MPO-off experiment): the driver
 packs DWM's magnification translation into a 16-bit field when a game surface rides a hardware
 overlay plane; |srcX*level| > 32767 (the far-right strip above ~9.3x on 3840) wraps and TDRs -
 both API channels, only over real games. With MPO disabled (HKLM\SOFTWARE\Microsoft\Windows\Dwm
 OverlayTestMode=5 DWORD, reboot) the same writes are clean at full range. Wind reads the MPO
 boot state at startup: MPO on -> the mapper pan wall (setMaxSourceLeft, srcX*level <= 32000)
-bounds transform GAME sessions; MPO off -> full range. CHURN VALVE: apps churning cursor SHAPES
-per frame (rig-proven TDR at any write rate) are detected via GetCursorInfo handle polling,
-instant-switched to render, and persisted in %LOCALAPPDATA%\Wind\churny_apps.txt; the render
-device-lost path is the learn-once backstop. `tdrTest` ini knob (0-4, hot) = the #148 field
-harness. RTSS tell while zoomed: doubled overlay = render session, single = transform. `swapModelVk` is fully retired: the ini key is IGNORED (field stays 0; hook never binds it; the RunTick swap edge is dead code). `model=render` (default): `render_engine` = own DXGI Desktop
+bounds transform GAME sessions - keyed to the SESSION TYPE (transform + borderless cover), not
+any cursor state; MPO off (this rig) -> full range. CHURNY APPS: the live GetCursorInfo churn
+valve was retired (it mis-fired on our own cursor work); what remains is the DEVICE-LOST
+BACKSTOP - a render device-lost within 30s of a transform game session marks that session's exe
+in %LOCALAPPDATA%\Wind\churny_apps.txt, and future zoom-ins over it pick render (one crash,
+never two). `tdrTest` ini knob (hot) = the #148 field harness: >0 forces transform past the
+churny list; mode 2 = |tx| clamp probe, mode 4 = pan wall off; modes 1/3 are retired. The
+engine pick itself is PURE (`src/engine_pick.h`, doctested) and shared by the zoom-in pick and
+the mid-zoom instant switch. RTSS tell while zoomed: doubled overlay = render session, single =
+transform. `swapModelVk` is fully retired: the ini key is IGNORED (nothing binds or reads it).
+`model=render`: `render_engine` = own DXGI Desktop
 Duplication capture + D3D11: magnifies a sub-pixel float source rect to a click-through,
 capture-excluded (`WDA_EXCLUDEFROMCAPTURE`) fullscreen overlay; draws the real cursor
 (`GetCursorInfo`) centered via `cursor_mapper`; hides the OS cursor (`MagShowSystemCursor`) and
@@ -93,9 +108,10 @@ animates from a STALE cached actual for writes queued while suspended, and the w
 collapsed into flicker/racy release levels; suspending Magnify.exe mid-ramp is measurable-safe
 for input latency yet still lost the belief-sync races. Also: Magnification writes above 1600
 are silently IGNORED (not clamped), and a SAME-VALUE registry write fires no notification.
-The old Magnification-API `engine=mag` fallback was removed (issue #20); the
-MagSetFullscreenTransform `model=transform` was removed in favor of magnify (issue #146; a
-legacy `model=transform` ini value maps to `magnify`).
+The old Magnification-API `engine=mag` fallback was removed (issue #20). History: `model=
+transform` was removed for issue #146, then REVIVED as a first-class model for issue #148 -
+there is NO transform->magnify aliasing; a `model=transform` ini value runs the real transform
+model. Missing/unknown model values fall back to `hybrid` (the product default, "Auto").
 Specs: `docs/superpowers/specs/2026-05-25-own-renderer-design.md` (render, issue #4),
 `docs/superpowers/specs/2026-07-22-magnify-model-design.md` (magnify).
 
@@ -121,9 +137,12 @@ launch also runs a short guided onboarding (wind-trails-into-logo intro -> set z
 done; sets `onboarded=1` so it never auto-opens again). The config process is non-admin, runs
 in a separate exe entirely, and has zero perf coupling to the magnifier loop. Settings spec:
 `docs/superpowers/specs/2026-05-27-config-ui-polish-onboarding-design.md`. UI source: `ui/src/`
-(Svelte + Vite). Bridge messages: `getConfig`, `setConfig`, `window` (minimize/close),
-`openIni`. Settings live-applies keybind changes (sync `values`+`saved`); other rows use the
-staged Apply/Discard footer.
+(Svelte + Vite). Bridge messages: `getConfig`, `setConfig`, `window` (minimize/close/quitWind/
+restartWind), `dirty`, `openIni`, `exportDiagnostics`, `pickExe`, `mpoState`, `setMpoDisabled`,
+`rebootNow`, and the six profile messages (`listProfiles`/`switchProfile`/`createProfile`/
+`renameProfile`/`duplicateProfile`/`deleteProfile`) - see `HandleWebMessage` in
+`src/config_ui/main.cpp` for the authoritative set. Settings live-applies keybind changes (sync
+`values`+`saved`); other rows use the staged Apply/Discard footer.
 
 ## IMPORTANT gotchas
 - THE MAGNIFICATION RUNTIME IS PROCESS-SCOPED AND SHARED. Both models use it (transform: the
@@ -143,8 +162,10 @@ staged Apply/Discard footer.
   creates its context on a session's first write and releases it ~1.2s after the zoom ends.
 - CURSOR SIZE IS CONSTANT, ALWAYS (product rule, no exceptions): the pointer must keep the SAME
   on-screen size at every zoom level, in every model and every zoom we ever build. It must never
-  scale with the zoom - a cursor that grows with the level is a bug, not a look. (The transform
-  model's DWM-magnified pointer violates this; that is the open item, not a design choice.)
+  scale with the zoom - a cursor that grows with the level is a bug, not a look. Accordingly
+  `cursorScaleWithZoom` ships 0 (scaling is the opt-in exception the user owns). (The transform
+  model's sprite lives in desktop space, so DWM magnifies it with the zoom - that is the open
+  item, not a design choice.)
 - Pure-logic files MUST NOT include `<windows.h>` - keeps unit tests desktop-free.
   The test build compiles only the pure `.cpp` files and defines `WIND_TESTS`.
 - INPUT SWALLOWING: bound keybinds are eaten so they never double-fire into the focused app. Mouse
@@ -158,9 +179,7 @@ staged Apply/Discard footer.
   (0x5B/0x5C) - enforced in three places: the hook never swallows them, `ParseConfig` sanitizes them
   out of the ini, and the config UI's keybind capture refuses them. Down/up swallows are balanced
   (only swallow an UP whose DOWN we swallowed) and released on teardown so a key is never stranded.
-  `cursorLockVk` (Inspect mode) is VK-only (no mods), swallowed like `recenterVk`. `swapModelVk` is
-  also VK-only, swallowed like the above -> when pressed, it writes the flipped `model` to the ini and
-  relaunches Wind via the single-instance eviction handshake so it boots on the other model.
+  `cursorLockVk` (Inspect mode) is VK-only (no mods), swallowed like `recenterVk`.
   Inspect mode is a FREEZE-cursor + free-look reticle toggle (driven entirely in `main.cpp` RunTick,
   no mouse-hook involvement): toggling on FREEZES the real OS cursor with a 1px `ClipCursor` at its
   current spot (`frozenCursor`) and hides it, so any hover/tooltip stays alive. A crosshair "look point" is then
@@ -353,8 +372,9 @@ staged Apply/Discard footer.
      path (raw-mickey panning + weld = the flicker), and masked the two defects below.
   1. THE BASELINE IS MEASURED, NEVER ASSUMED. `lastSetVirtual` is a fresh post-present
      `GetCursorPos`, not the point the weld was ASKED to park at. The park can be deduped
-     (unchanged centre pixel), suppressed (drag-follow), skipped (gatePresent / fps-cap ticks), or
-     absent by design (transform FOLLOW). Assuming it landed makes the next delta measure
+     (unchanged centre pixel), suppressed (drag-follow), or skipped (gatePresent / fps-cap
+     ticks) - and BOTH engines report whether it really ran (render `parkedLastFrame()`,
+     transform `weldedLastFrame()`). Assuming it landed makes the next delta measure
      hand + (pointer-centre gap); the mapper integrates the gap, the centre overshoots the pointer,
      the sign flips, and the loop oscillates at an amplitude proportional to hand speed.
   2. NEVER WELD WHILE A MOUSE BUTTON IS HELD (drag-follow). Mid-drag the pointer IS the interaction

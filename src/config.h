@@ -29,10 +29,9 @@ struct Config {
     int    cursorLockVk     = 0;     // VK code; 0 = unbound. Tap to toggle Inspect mode (cursor lock)
                                      // while zoomed. Swallowed system-wide like recenterVk (VK only,
                                      // no modifier - the keyboard hook swallows the bare key).
-    int    swapModelVk      = 0;     // VK code; 0 = unbound. Tap to swap the magnifier model
-                                     // (render <-> magnify). Swallowed system-wide like
-                                     // cursorLockVk (VK only, no modifier). Pressing it restarts
-                                     // Wind onto the flipped model (model is not hot-swappable).
+    int    swapModelVk      = 0;     // RETIRED (the hybrid "Auto" model replaced it). The field
+                                     // stays only so ParseConfig can keep asserting the ini key
+                                     // is IGNORED; nothing binds, swallows, or reads it.
     // Hotkey to toggle the magnified cursor's visibility while zoomed. Edge-detected in the tick
     // loop and flips a runtime-only bool (NEVER written back to the ini), so pressing it does not
     // trigger the config hot-reload and the zoom level is preserved. 0 = unbound. Modifier mask
@@ -63,16 +62,16 @@ struct Config {
     int    diagnostics      = 0;     // 1 = log frame-timing to wind_diag.log
 
     // --- Model selection ----------------------------------------------------
-    // Which magnification model runs. "render" (default) = the DXGI capture + D3D11 overlay.
-    // "magnify" = drive the native Windows Magnifier (Magnify.exe) via injected wheel notches;
-    // works over DRM-protected video that blanks under Desktop Duplication. "transform" = the
-    // DWM fullscreen-transform model (MagSetFullscreenTransform, no Magnify.exe) - REVIVED for
-    // issue #148: it magnifies inside the compositor with zero app presents, the only path that
-    // stays smooth while a heavy game renders (Windows' present pipeline throttles every overlay
-    // app's frames to ~90/s under load; measured 139 transform updates/s rock-steady over the
-    // same game). Cursor is anchored (not centered) in this model. Unknown values fall back to
-    // "render". Applied at launch (restart to switch; not hot-swapped).
-    std::string model = "render";
+    // Which magnification model runs. "hybrid" (DEFAULT, "Auto" in the UI) constructs render +
+    // transform and picks per zoom-in (engine_pick.h). "render" = the DXGI capture + D3D11
+    // overlay. "magnify" = drive the native Windows Magnifier (Magnify.exe) via injected wheel
+    // notches; works over DRM-protected video that blanks under Desktop Duplication.
+    // "transform" = the DWM fullscreen-transform model (MagSetFullscreenTransform, no
+    // Magnify.exe) - revived for issue #148: it magnifies inside the compositor with zero app
+    // presents, the only path that stays smooth while a heavy game renders. Missing or unknown
+    // values fall back to "hybrid" (the product default; the UI schema and new-profile seeding
+    // agree - keep all three in sync). Applied at launch (restart to switch; not hot-swapped).
+    std::string model = "hybrid";
     // Auto/hybrid exclusion list: exe names (comma-separated, case-insensitive) that must NEVER
     // get the transform engine, even when they are fullscreen and borderless. Fullscreen browser
     // video looks exactly like a game to the foreground test, but it wants the render engine (a
@@ -100,8 +99,12 @@ struct Config {
                           //     do not stutter while panning, at a capped frame rate while zoomed.
     int cursorSprite = 1; // 1 = hide the OS cursor and draw a scene-locked sprite welded to the
                           //     transform (fixes cursor/click divergence near screen edges).
-    int magInputTransform = 0; // 1 = publish MagSetInputTransform while zoomed (experiment;
-                          //     documented for pen/touch only - A/B knob, hot-reloadable).
+    int magInputTransform = 0; // publish MagSetInputTransform while zoomed (hot A/B knob; needs
+                          //     UIAccess). 0 = off. 1 = the visual source rect (native-Magnifier
+                          //     parity; right for a FREE cursor). 2 = enabled IDENTITY (right for
+                          //     the WELDED cursor: its raw position already is the content point,
+                          //     and the explicit identity stops the pointer pipeline's implicit
+                          //     inverse mapping - the pointer-framework hover dead zones).
     // Two measured-NEGATIVE hitch experiments, kept as diagnostics only (issue #148, harness
     // runs of 15-20 zoom cycles over Foundation). LEAVE BOTH AT 0 - continuous per-tick level
     // ramping is the best configuration measured.
@@ -113,9 +116,6 @@ struct Config {
     int txLevelStep = 0;  // Minimum RELATIVE level change (per mille) before a ramp re-writes
                           //     the level. MEASURED NO BETTER than continuous once sample size
                           //     was adequate (big sporadic stalls appear in every setting).
-    int freezeNoClip = 0; // diagnostic (issue #148): 1 = freeze sessions skip the 1px ClipCursor.
-                          //     Tests whether the clip/unclip cycle is what makes a game's own
-                          //     cursor work expensive after a zoom (middle-click spikes).
     int txMaxStepPct = 0; // cap the per-tick RELATIVE level change the transform applies (per
                           //     mille; 25 = 2.5%). DWM re-scales on every level change and the
                           //     cost grows with the level, so a fast ramp asks for the most
@@ -128,16 +128,20 @@ struct Config {
                           //     rebuild (fewer big entry spikes) but DWM stays magnification-
                           //     aware, which taxes cursor changes; shorter = the reverse.
                           //     Hot-reloadable.
+    int probeClicks = 0;  // dead-zone probe (hot, diagnostic): while a TRANSFORM session is
+                          //   zoomed, every left-click logs a full coordinate-chain snapshot to
+                          //   wind-core.log tagged OK, or DEAD when Ctrl is held - the field
+                          //   annotates hover dead zones by clicking working spots plainly and
+                          //   Ctrl-clicking broken ones. No effect outside transform sessions.
     int tdrTest = 0;      // issue #148 field-test harness (hot-reloadable, diagnostic only).
                           //   0 = normal; >0 forces the transform path for games (bypasses the
-                          //   churny-app list) with one experiment active:
-                          //   1 = clamp transform GAME sessions to 8x (level-threshold probe)
+                          //   churny-app list). Live experiments:
                           //   2 = clamp |tx| <= 32000 (right-region/overflow probe)
-                          //   3 = steal foreground while zoomed over a game (silences the game's
-                          //       input/cursor activity; read-only-zoom prototype)
                           //   4 = DISABLE the pan wall (full right-edge range at any level) -
                           //       for the MPO-off experiment: with hardware overlay planes
                           //       disabled the 16-bit plane-programming overflow should be gone
+                          //   (modes 1 and 3 acted through the retired game-session freeze and
+                          //   are inert; numbers kept reserved so old field notes stay readable)
     // Magnify-model-only: Windows Magnifier zoom increment in percent POINTS per wheel notch
     // (written to the ScreenMagnifier registry; the user's original value is snapshot-restored
     // on exit). Lower = smoother and slower zoom. Clamped 5..400. Live-applies (no restart).
@@ -149,7 +153,9 @@ struct Config {
     double cursorSensitivity = 1.0;
     double cursorSmoothing = 0.4;    // light inertia on the pan: 0 = off, higher = smoother/laggier
                                      // (0.4 shipped: light smoothing, less lag than 0.8)
-    int    cursorScaleWithZoom = 1;  // 1 = draw the cursor scaled by zoom, 0 = native size
+    int    cursorScaleWithZoom = 0;  // 0 = constant on-screen size at every zoom (the product
+                                     //   rule: "cursor size is constant, always"); 1 = opt-in
+                                     //   scale-with-zoom look
     // Cursor visibility while zoomed: "auto" = follow the focused app (don't draw a cursor
     // when a game hides its own via ShowCursor(FALSE); detected with GetCursorInfo's
     // CURSOR_SHOWING flag, which our own MagShowSystemCursor hide does NOT affect);
@@ -182,9 +188,8 @@ struct Config {
     // on SDR it's a no-op (plain BGRA8 passthrough), so it's safe on by default. Set 0 to
     // force the legacy BGRA8 capture even on HDR. Applied at startup + on HDR toggle.
     int    hdrTonemap = 1;
-    // Multi-monitor: 1 (default) = on each zoom-in, magnify whichever monitor the cursor is
-    // on; 0 = legacy single-monitor behavior (primary monitor only). Hot-reloadable (applies
-    // on the next zoom-in). Kill-switch for the multi-monitor path.
+    // Multi-monitor: 0 (the shipped default) = primary monitor only; 1 = on each zoom-in,
+    // magnify whichever monitor the cursor is on. Hot-reloadable (applies on the next zoom-in).
     int    multiMonitor = 0;
     // Capture optimization (opt-in). 0 (default) = always copy all changed regions, so the cached
     // desktop copy is never stale. 1 = on a near-full repaint (a game redrawing the whole screen),
@@ -272,9 +277,6 @@ bool IsExeInList(const std::string& exeName, const std::string& list);
 // caller keeps its fallback default.
 bool ParseHexColor(const std::string& s, float& r, float& g, float& b);
 
-// Pure: render <-> magnify. "magnify" -> "render"; anything else -> "magnify" (so a corrupt
-// model value flips to a valid engine). Pure; used by the swap-model hotkey. No I/O, no <windows.h>.
-std::string FlipModel(const std::string& model);
 
 // Pure: the effective GPU scheduling priority (-1 low / 0 normal / +1 high) after folding the
 // legacy lowGpuPriority alias into gpuPriority. gpuPriority wins when non-zero.

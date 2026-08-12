@@ -24,6 +24,10 @@ public:
     void present(const MapResult& r, double level, const Config& cfg,
                  const MonitorTarget& mon, const PresentExtras& ex) override;
     bool coversShell() const override { return false; }
+    // True when THIS present actually called SetCursorPos (weld executed; not deduped, not
+    // suppressed by drag-follow). RunTick's #169 measured-baseline logic reads it exactly like
+    // RenderEngine::parkedLastFrame(): baseline on the weld point only when the weld really fired.
+    bool weldedLastFrame() const { return weldedLastFrame_; }
 private:
     bool fastPan_, smoothPan_, useSprite_;
     int  zorderBand_;                                // sprite z-band (above the shell); needs UIAccess
@@ -54,6 +58,7 @@ private:
     bool cursorHidden_ = false;                      // we called MagShowSystemCursor(FALSE)
     bool haveLastClick_ = false;                     // dedup the per-tick cursor weld
     int  lastClickX_ = 0, lastClickY_ = 0;
+    bool weldedLastFrame_ = false;                   // SetCursorPos ran in the last present()
     unsigned long long idleSinceMs_ = 0;             // when the last session ended (0 = none)
     int  idleReleaseMs_ = 1200;                      // cfg.txIdleReleaseMs (hot)
     bool identityParked_ = false;                    // phase 1 of the release done (see idleTick)

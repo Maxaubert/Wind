@@ -55,11 +55,11 @@ public:
     bool swallowEnabled() const { return swallow_; }
     // --- Keyboard binds (WH_KEYBOARD_LL hook) -------------------------------------------------
     // Configure the keyboard VKs the keyboard hook tracks + swallows (zoom in/out primary+alt,
-    // recenter, Inspect-mode cursor-lock toggle, and magnifier-model swap; 0 = unbound).
+    // recenter, and the Inspect-mode cursor-lock toggle; 0 = unbound).
     // Forbidden VKs (IsForbiddenBindVk) are stored but never acted on.
     // Clears the per-key pressed/swallowed records so a remap mid-press can't strand a key.
     void setKeys(int zoomInVk, int zoomInVk2, int zoomOutVk, int zoomOutVk2, int recenterVk,
-                 int cursorLockVk, int swapModelVk);
+                 int cursorLockVk);
     // Whether vk is one of the configured (non-forbidden) keyboard binds: decides track+swallow.
     bool isBoundKey(int vk) const;
     // Physical down-state of a keyboard key, as tracked by the keyboard hook. This is the authority
@@ -73,6 +73,13 @@ public:
     // hold a key and is idempotent with the hook's own clear. The mouse side-buttons have had the
     // same net since #113; this is the keyboard half.
     void rawKeyUp(int vk);
+    // Same safety net for the side-buttons: honor a WM_INPUT button UP unless the live hook saw a
+    // DOWN for that button within the last ~30 ms (a queued raw UP processed after the hook's next
+    // DOWN would cancel a hold that is physically down - no auto-repeat re-asserts a button).
+    void rawButtonUp(int xbuttonId);
+    // Hook-thread recency stamps consumed by the two guards above.
+    void noteHookKeyDown(int vk);
+    void noteHookButtonDown(int xbuttonId);
     // True once the LL KEYBOARD hook is installed. When false (install failed or WIND_NOHOOK), main
     // must fall back to GetAsyncKeyState and no keyboard swallowing happens.
     bool kbHookActive() const { return kbHookActive_.load(std::memory_order_relaxed); }
@@ -142,7 +149,9 @@ private:
     std::atomic<int> kbZoomOutVk2_{0};
     std::atomic<int> kbRecenterVk_{0};
     std::atomic<int> kbCursorLockVk_{0};
-    std::atomic<int> kbSwapModelVk_{0};
+    // Recency stamps for the raw-UP reordering guards (see rawKeyUp/rawButtonUp).
+    std::atomic<unsigned long long> kbLastHookDownMs_[256]{};
+    std::atomic<unsigned long long> btnLastHookDownMs_[3]{};
     std::atomic<bool> kbHookActive_{false}; // true once the LL KEYBOARD hook is installed
     std::atomic<unsigned> kbHookReinstalls_{0};  // watchdog recoveries this session
     std::atomic<bool> kbHookWanted_{true};       // false while a fullscreen game is foreground

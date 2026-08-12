@@ -83,9 +83,6 @@ double OutlineDwellSeconds(bool inBand, double prevSeconds, double dt, double th
     return s > threshold ? threshold : s;          // cap so the accumulator stays bounded
 }
 
-std::string FlipModel(const std::string& model) {
-    return model == "magnify" ? "render" : "magnify";
-}
 
 int EffectiveGpuPriority(const Config& c) {
     if (c.gpuPriority != 0) return c.gpuPriority;      // explicit tri-state wins
@@ -160,7 +157,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "gpuPriority")        c.gpuPriority = std::stoi(val);
             else if (key == "gameCrop")           c.gameCrop = std::stoi(val);
             else if (key == "tdrTest")            c.tdrTest = std::stoi(val);
-            else if (key == "freezeNoClip")       c.freezeNoClip = std::stoi(val);
+            else if (key == "probeClicks")        c.probeClicks = std::stoi(val);
             else if (key == "txIdleReleaseMs")    c.txIdleReleaseMs = std::stoi(val);
             else if (key == "txMaxStepPct")       c.txMaxStepPct = std::stoi(val);
             else if (key == "txLevelStep")        c.txLevelStep = std::stoi(val);
@@ -210,9 +207,10 @@ Config ParseConfig(const std::string& text) {
     if (c.txGrid > 250) c.txGrid = 250;
     c.outlineIdleSeconds = clampd(c.outlineIdleSeconds, 0.5, 60.0);
     // "transform" is a first-class model again (revived for issue #148: the compositor-internal
-    // zoom that stays smooth over heavy games); anything unknown falls back to render.
+    // zoom that stays smooth over heavy games); anything unknown falls back to hybrid, the
+    // product default ("Auto" in the UI) - same fallback as a missing key (struct default).
     if (c.model != "render" && c.model != "magnify" && c.model != "transform" &&
-        c.model != "hybrid") c.model = "render";
+        c.model != "hybrid") c.model = "hybrid";
     // (The old transform/hybrid maxLevel<=12 clamp is GONE: the "TDR territory above 12x" was
     // root-caused 2026-07-26 to NVIDIA's 16-bit MPO plane-programming overflow - see issue
     // #148 - which the mapper's MPO-aware pan wall now guards at ANY level, so maxLevel is one
@@ -228,7 +226,6 @@ Config ParseConfig(const std::string& text) {
     sanitizeVk(c.zoomOutVk);  sanitizeVk(c.zoomOutVk2);
     sanitizeVk(c.recenterVk);
     sanitizeVk(c.cursorLockVk);
-    sanitizeVk(c.swapModelVk);
     sanitizeVk(c.hideCursorVk);
     sanitizeVk(c.quickZoomVk);
     return c;
@@ -305,7 +302,9 @@ Config LoadConfig(const std::wstring& path) {
                "cursorSensitivity=1.0\n"
                "; cursorSmoothing: light inertia on the pan (0=off, higher=smoother+laggier; 0.4 shipped: light)\n"
                "cursorSmoothing=0.4\n"
-               "cursorScaleWithZoom=1\n"
+               "; cursorScaleWithZoom: 0=constant on-screen cursor size at every zoom (the product\n"
+               ";   rule); 1=draw the cursor scaled by the zoom level (opt-in look)\n"
+               "cursorScaleWithZoom=0\n"
                "; cursorVisibility: auto=hide our cursor when the focused app hides its own (games);\n"
                ";   always=always draw it; never=never draw it\n"
                "cursorVisibility=auto\n"
@@ -322,12 +321,13 @@ Config LoadConfig(const std::wstring& path) {
                "brightness=1.0\n"
                "; hdrTonemap: 1=HDR10->SDR tonemap when Windows HDR is on (no-op on SDR); 0=off\n"
                "hdrTonemap=1\n"
-               "; model: render = GPU capture+overlay (default, high fidelity). magnify = drive the\n"
-               ";   native Windows Magnifier (works over DRM video like Netflix, which blanks in\n"
-               ";   render). Restart to switch. magnify follows the same smooth zoom ramp, handles\n"
-               ";   the cursor itself, and ignores the render-only knobs (sharpness, hdrTonemap,\n"
-               ";   bilinear, outline, cursor*, multiMonitor, Inspect mode). Max zoom 1600%.\n"
-               "model=render\n"
+               "; model: hybrid = Auto (default): picks render or transform per zoom-in (games get\n"
+               ";   the compositor-internal transform, everything else the GPU overlay).\n"
+               ";   render = GPU capture+overlay (high fidelity). transform = DWM fullscreen\n"
+               ";   transform only. magnify = drive the native Windows Magnifier (works over DRM\n"
+               ";   video like Netflix, which blanks in render; handles its own cursor; ignores\n"
+               ";   the render-only knobs; max zoom 1600%). Restart to switch.\n"
+               "model=hybrid\n"
                "; transformExclude (Auto/hybrid only): exe names that must never get the transform\n"
                ";   engine even when fullscreen+borderless. Fullscreen browser video looks exactly\n"
                ";   like a game to the foreground test but wants the render engine. Comma-separated,\n"

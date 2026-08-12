@@ -19,7 +19,7 @@ TEST_CASE("parses renderer knobs") {
 TEST_CASE("renderer knobs have sane defaults") {
     Config c = ParseConfig("");
     CHECK(c.cursorSensitivity == doctest::Approx(1.0));
-    CHECK(c.cursorScaleWithZoom == 1);
+    CHECK(c.cursorScaleWithZoom == 0);         // constant cursor size (the product rule); scaling is opt-in
     CHECK(c.bilinear == 1);
     CHECK(c.sharpness == doctest::Approx(0.0));   // off by default
     CHECK(c.cursorSmoothing == doctest::Approx(0.4));
@@ -43,7 +43,7 @@ TEST_CASE("vsync and dwmFlush can be set") {
     CHECK(ParseConfig("dwmFlush=0\n").dwmFlush == 0);
     CHECK(ParseConfig("dwmFlush=1\n").dwmFlush == 1);
 }
-TEST_CASE("keyboard zoom defaults PageUp/PageDown; recenter unbound; all parseable") {
+TEST_CASE("keyboard zoom ships unbound (onboarding captures it); recenter unbound; all parseable") {
     Config d = ParseConfig("");
     CHECK(d.zoomInVk == 0);     // shipped unbound (onboarding captures it)
     CHECK(d.zoomOutVk == 0);

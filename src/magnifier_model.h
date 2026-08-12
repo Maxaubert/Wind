@@ -14,10 +14,9 @@ struct PresentExtras {
     int   clickDesktopY = 0;
     bool  clickOverride = false;  // true when clickDesktop* should replace the mapper's click point
     bool  drawCursor = true;      // whether a cursor should be shown at all this frame
-    bool  gameFreeze = false;     // transform game session (issue #148): cursor frozen; sprite marks
-                                  //   the aim point at the lens center
-    bool  pauseWrites = false;    // skip transform writes this tick (serializes an injected cursor
-                                  //   move so no write can race it - the proven TDR)
+    bool  pauseWrites = false;    // skip transform writes this tick (serializes an Inspect click's
+                                  //   injected absolute move so no write can race it - the proven
+                                  //   TDR class, issue #148)
     // Game perf (issue #148; render model only, others ignore):
     // Drag-follow (issue #169): a mouse button is held in a FREE render session, so the pointer IS
     // the interaction (window drag / text selection). The render model must NOT weld it to the lens

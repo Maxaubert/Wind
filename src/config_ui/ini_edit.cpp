@@ -27,15 +27,17 @@ std::string UpdateIniText(const std::string& text, const std::string& key, const
     bool replaced = false;
     const bool endsWithNewline = !text.empty() && text.back() == '\n';
     while (std::getline(in, line)) {
-        if (!replaced) {
-            std::string t = trim(line);
-            const bool comment = t.empty() || t[0] == ';' || t[0] == '#';
-            size_t eq = t.find('=');
-            if (!comment && eq != std::string::npos && trim(t.substr(0, eq)) == key) {
-                out += key + "=" + value + "\n";
-                replaced = true;
-                continue;
-            }
+        std::string t = trim(line);
+        const bool comment = t.empty() || t[0] == ';' || t[0] == '#';
+        size_t eq = t.find('=');
+        if (!comment && eq != std::string::npos && trim(t.substr(0, eq)) == key) {
+            // Replace the FIRST occurrence and DROP any later duplicates: every reader
+            // (ReadIniValues, the core's ParseConfig) is last-wins, so leaving a later duplicate
+            // untouched made this write invisible - the value visibly snapped back on the next
+            // read and every subsequent update of the key was a permanent no-op (duplicates get
+            // into a hand-edited ini easily via the "Edit config file" button).
+            if (!replaced) { out += key + "=" + value + "\n"; replaced = true; }
+            continue;
         }
         out += line + "\n";
     }

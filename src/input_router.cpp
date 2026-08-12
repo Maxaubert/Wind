@@ -82,8 +82,7 @@ bool InputRouter::isBoundKey(int vk) const {
         || vk == kbZoomOutVk_.load(std::memory_order_relaxed)
         || vk == kbZoomOutVk2_.load(std::memory_order_relaxed)
         || vk == kbRecenterVk_.load(std::memory_order_relaxed)
-        || vk == kbCursorLockVk_.load(std::memory_order_relaxed)
-        || vk == kbSwapModelVk_.load(std::memory_order_relaxed);
+        || vk == kbCursorLockVk_.load(std::memory_order_relaxed);
 }
 bool InputRouter::keyPressed(int vk) const {
     if (vk <= 0 || vk > 255) return false;
@@ -95,18 +94,41 @@ bool InputRouter::keyPressed(int vk) const {
 // strength of a DOWN whose UP already went past us. Idempotent with the hook's own clear.
 void InputRouter::rawKeyUp(int vk) {
     if (vk <= 0 || vk > 255) return;
+    // Cross-thread reordering guard: WM_INPUT events are drained up to a tick late, so a raw UP
+    // from a fast release-press can be processed AFTER the live hook already recorded the NEXT
+    // press's DOWN - clearing here would then cancel a hold that is physically down (and wipe the
+    // swallow record, leaking the eventual real UP to the focused app). While the hook is alive it
+    // delivers UPs itself, so the net is only needed when the hook is gone or stalled; skip the
+    // clear when the hook saw a DOWN for this key within the last ~30 ms (auto-repeat keeps the
+    // stamp fresh through a real hold; an evicted hook stops stamping, so the net still fires).
+    if (kbHookActive() &&
+        GetTickCount64() - kbLastHookDownMs_[vk].load(std::memory_order_relaxed) < 30) return;
     g_kbPressed[vk].store(false, std::memory_order_relaxed);
     g_kbSwallowedDown[vk].store(false, std::memory_order_relaxed);
 }
+void InputRouter::rawButtonUp(int xbuttonId) {
+    if (xbuttonId != 1 && xbuttonId != 2) return;
+    // Same reordering guard as rawKeyUp: no auto-repeat exists for a side-button, so a stale raw
+    // UP landing after the hook's next DOWN would silently end a zoom hold until re-pressed.
+    if (hookActive() &&
+        GetTickCount64() - btnLastHookDownMs_[xbuttonId].load(std::memory_order_relaxed) < 30) return;
+    setButtonState(xbuttonId, false);
+}
+void InputRouter::noteHookKeyDown(int vk) {
+    if (vk > 0 && vk < 256) kbLastHookDownMs_[vk].store(GetTickCount64(), std::memory_order_relaxed);
+}
+void InputRouter::noteHookButtonDown(int xbuttonId) {
+    if (xbuttonId == 1 || xbuttonId == 2)
+        btnLastHookDownMs_[xbuttonId].store(GetTickCount64(), std::memory_order_relaxed);
+}
 void InputRouter::setKeys(int zoomInVk, int zoomInVk2, int zoomOutVk, int zoomOutVk2, int recenterVk,
-                          int cursorLockVk, int swapModelVk) {
+                          int cursorLockVk) {
     kbZoomInVk_.store(zoomInVk,    std::memory_order_relaxed);
     kbZoomInVk2_.store(zoomInVk2,  std::memory_order_relaxed);
     kbZoomOutVk_.store(zoomOutVk,  std::memory_order_relaxed);
     kbZoomOutVk2_.store(zoomOutVk2,std::memory_order_relaxed);
     kbRecenterVk_.store(recenterVk,std::memory_order_relaxed);
     kbCursorLockVk_.store(cursorLockVk, std::memory_order_relaxed);
-    kbSwapModelVk_.store(swapModelVk, std::memory_order_relaxed);
     // Clear per-key pressed + swallowed records so a remap mid-press (keybind capture clears the old
     // binding) can't leave a held flag stuck or cause a later, unrelated UP to be swallowed.
     for (int i = 0; i < 256; ++i) { g_kbPressed[i].store(false); g_kbSwallowedDown[i].store(false); }
@@ -132,6 +154,7 @@ static LRESULT CALLBACK KbProc(int code, WPARAM wParam, LPARAM lParam) {
                 // Auto-repeat re-fires WM_KEYDOWN; storing true each time is idempotent. main reads
                 // this as the physical down-state and does its own rising-edge work for taps.
                 g_kbPressed[vk].store(true);
+                g_router->noteHookKeyDown(vk);   // recency guard for the raw UP safety net
                 if (g_router->swallowEnabled()) {
                     g_kbSwallowedDown[vk].store(true);
                     swallow = true;
@@ -182,6 +205,7 @@ static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
         bool down = (wParam == WM_XBUTTONDOWN);
         bool up   = (wParam == WM_XBUTTONUP);
         if (id != 0 && (down || up)) {
+            if (down) g_router->noteHookButtonDown(id);   // recency guard for the raw UP safety net
             g_router->setButtonState(id, down);
             bool swallow = false;
             if (down) {

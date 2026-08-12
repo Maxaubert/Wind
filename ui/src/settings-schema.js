@@ -27,7 +27,7 @@ export const sections = [
   { id:'cursor', label:'Cursor', icon:'cursor', desc:'Pointer movement and visibility while zoomed.', rows: [
     { key:'cursorSensitivity', type:'slider', label:'Cursor speed', desc:'Pan speed multiplier (1.0 = match your mouse).', min:0.25, max:4, step:0.05, def:1.0, advanced:true },
     { key:'cursorSmoothing',   type:'slider', label:'Cursor inertia smoothing', desc:'0 = off, higher = smoother.', min:0, max:0.95, step:0.05, def:0.4 },
-    { key:'cursorScaleWithZoom', type:'toggle', label:'Scale cursor with zoom', def:1, advanced:true },
+    { key:'cursorScaleWithZoom', type:'toggle', label:'Scale cursor with zoom', def:0, advanced:true },
     { key:'cursorVisibility', type:'select', label:'Cursor visibility', options:['auto','always','never'], def:'auto', advanced:true },
     { key:'__hideCursor', type:'keybind', label:'Hide cursor (hotkey)', desc:'Press to instantly toggle the magnified cursor. Does not reset zoom.', vkKey:'hideCursorVk', modsKey:'hideCursorMods' },
     { key:'__cursorLock', type:'keybind', label:'Inspect mode', desc:'Freeze the cursor (keeps a hover or tooltip alive) and free-look around with a crosshair that pans the view, at any zoom. Press to set, right-click to clear.', vkKey:'cursorLockVk' },

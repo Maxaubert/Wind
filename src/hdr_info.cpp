@@ -9,7 +9,9 @@ namespace wind {
 // is on even though "Use HDR" is off (which made us wrongly tonemap and dim SDR). DisplayConfig
 // is queried live (not DXGI-cached), so re-checking on duplication-recreate also catches
 // runtime HDR toggles. Returns false if the API is unavailable (older Windows) -> SDR path.
-bool GetHdrEnabled() {
+static bool PathIsDevice(const DISPLAYCONFIG_PATH_INFO& p, const wchar_t* gdiDeviceName);
+
+bool GetHdrEnabled(const wchar_t* gdiDeviceName) {
     UINT32 nPath = 0, nMode = 0;
     if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &nPath, &nMode) != ERROR_SUCCESS)
         return false;
@@ -18,14 +20,28 @@ bool GetHdrEnabled() {
     if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &nPath, paths.data(), &nMode, modes.data(),
                            nullptr) != ERROR_SUCCESS)
         return false;
-    for (UINT32 i = 0; i < nPath; ++i) {
+    auto pathHdr = [](const DISPLAYCONFIG_PATH_INFO& p, bool& out) {
         DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO_2 ci{};
         ci.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO_2;
         ci.header.size = sizeof(ci);
-        ci.header.adapterId = paths[i].targetInfo.adapterId;
-        ci.header.id = paths[i].targetInfo.id;
-        if (DisplayConfigGetDeviceInfo(&ci.header) == ERROR_SUCCESS)
-            return ci.activeColorMode == DISPLAYCONFIG_ADVANCED_COLOR_MODE_HDR;
+        ci.header.adapterId = p.targetInfo.adapterId;
+        ci.header.id = p.targetInfo.id;
+        if (DisplayConfigGetDeviceInfo(&ci.header) != ERROR_SUCCESS) return false;
+        out = ci.activeColorMode == DISPLAYCONFIG_ADVANCED_COLOR_MODE_HDR;
+        return true;
+    };
+    // Prefer the magnified monitor's own path (mixed HDR/SDR setups differ per display).
+    if (gdiDeviceName && gdiDeviceName[0]) {
+        for (UINT32 i = 0; i < nPath; ++i)
+            if (PathIsDevice(paths[i], gdiDeviceName)) {
+                bool hdr = false;
+                if (pathHdr(paths[i], hdr)) return hdr;
+                break;   // right monitor, no answer -> first path that answers
+            }
+    }
+    for (UINT32 i = 0; i < nPath; ++i) {
+        bool hdr = false;
+        if (pathHdr(paths[i], hdr)) return hdr;
     }
     return false;
 }

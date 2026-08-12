@@ -67,6 +67,20 @@ inline bool WriteTextFileAtomic(const std::wstring& path, const std::string& tex
     }
     return true;
 }
+// Live-bound contract, switch-time half: capture the CURRENT live settings into the OUTGOING
+// profile's file before a switch overwrites the live ini. The setConfig mirror covers every write
+// made through the Settings app, but hand edits via the "Edit config file" button reach only the
+// live ini - without this capture a profile switch would silently discard them. Skips cleanly when
+// there is no active profile or its file is gone (pre-migration / externally deleted).
+inline void MirrorLiveToActiveProfile(const std::wstring& iniPath, const std::string& liveText) {
+    auto vals = ReadIniValues(liveText);
+    auto it = vals.find("profile");
+    if (it == vals.end() || it->second.empty()) return;
+    std::wstring pp = ProfilesDirFromIni(iniPath) + L"\\" + WidenUtf8(it->second) + L".ini";
+    if (GetFileAttributesW(pp.c_str()) == INVALID_FILE_ATTRIBUTES) return;
+    WriteTextFileAtomic(pp, MakeProfileText(liveText));
+}
+
 // First-run migration: no profiles dir -> the user's current settings BECOME "Default" and the live
 // ini gets profile=Default. Runs before the tick loop records the ini mtime, so the write does not
 // trigger a spurious hot-reload. Idempotent: the dir existing (even empty) means never seed again -

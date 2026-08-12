@@ -150,9 +150,16 @@ struct RenderEngine::State {
     // texture upload. The OS reuses the same handles, so this hits the cache after the first cycle.
     // Bounded (kCursorCacheMax) so a process that churns many distinct cursors can't grow unbounded.
     struct CachedCursor { ComPtr<ID3D11Texture2D> tex; ComPtr<ID3D11ShaderResourceView> srv;
-                          int w=0,h=0,hotX=0,hotY=0; bool invert=false; };
+                          int w=0,h=0,hotX=0,hotY=0; bool invert=false;
+                          unsigned long long bornMs=0; };
     std::unordered_map<HCURSOR, CachedCursor> cursorCache;
     static constexpr size_t kCursorCacheMax = 16;
+    // Staleness bound: HCURSOR values are recycled by the OS, so a cache entry (or the lastCursor
+    // early-out) can silently keep drawing an old shape for a NEW cursor that got the same handle.
+    // Entries older than this are re-decoded on next use - one GDI decode every few seconds at
+    // worst, invisible next to the per-frame work it protects.
+    static constexpr unsigned long long kCursorMaxAgeMs = 5000;
+    unsigned long long lastCursorRefreshMs = 0;
 
     void updateCursorTexture(int cursorMode);  // read osCursorShowing; decode/upload only if it'll be drawn
 
@@ -246,7 +253,8 @@ bool RenderEngine::State::recreateDupl() {
     }
     // Use Windows' actual HDR-enabled flag, not the DXGI color space (some monitors stay in
     // HDR10 color space even when Windows HDR is off -> we'd wrongly tonemap SDR and dim it).
-    bool isHdr = GetHdrEnabled();
+    // Matched to THIS output's device so a multiMonitor retarget answers for its own display.
+    bool isHdr = GetHdrEnabled(targetDevice[0] ? targetDevice : nullptr);
     HRESULT hr = E_FAIL;
     capFp16 = false;
 
@@ -1019,15 +1027,23 @@ void RenderEngine::State::updateCursorTexture(int cursorMode) {
     osCursorShowing = (ci.flags & CURSOR_SHOWING) != 0;
     bool willDraw = (cursorMode == 1) || osCursorShowing;   // mode 0 draws only when the app shows it
     if (!willDraw) return;                                  // won't be drawn - don't decode/upload
-    if (ci.hCursor == lastCursor && cursorReady) return;    // active cursor unchanged
+    const unsigned long long nowMs = GetTickCount64();
+    if (ci.hCursor == lastCursor && cursorReady &&
+        nowMs - lastCursorRefreshMs < kCursorMaxAgeMs) return;   // active cursor unchanged + fresh
 
-    // Cache hit: just re-point the active texture/SRV at the cached entry (no GDI decode, no upload).
+    // Cache hit: just re-point the active texture/SRV at the cached entry (no GDI decode, no
+    // upload) - unless the entry is old enough that the handle may have been recycled.
     auto it = cursorCache.find(ci.hCursor);
+    if (it != cursorCache.end() && nowMs - it->second.bornMs >= kCursorMaxAgeMs) {
+        cursorCache.erase(it);
+        it = cursorCache.end();
+    }
     if (it != cursorCache.end()) {
         const CachedCursor& cc = it->second;
         cursorTex = cc.tex; cursorSRV = cc.srv;
         curW = cc.w; curH = cc.h; hotX = cc.hotX; hotY = cc.hotY; cursorInvert = cc.invert;
         lastCursor = ci.hCursor; cursorReady = true;
+        lastCursorRefreshMs = nowMs;
         return;
     }
 
@@ -1045,9 +1061,11 @@ void RenderEngine::State::updateCursorTexture(int cursorMode) {
     // Bound the cache: a cheap eviction (clear all) when it grows past the cap. Animated sets are
     // small (a few frames), so this effectively never fires in practice.
     if (cursorCache.size() >= kCursorCacheMax) cursorCache.clear();
+    cc.bornMs = nowMs;
     auto& stored = cursorCache[ci.hCursor] = cc;
     cursorTex = stored.tex; cursorSRV = stored.srv;
     curW = w; curH = h; hotX = hx; hotY = hy; cursorInvert = inv; lastCursor = ci.hCursor; cursorReady = true;
+    lastCursorRefreshMs = nowMs;
 }
 
 void RenderEngine::State::render(const RenderFrameParams& p) {
