@@ -402,6 +402,9 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
         const std::string name = JsonField(j, "name");
         std::string err;
         if (!SafeName(name)) err = "Invalid profile name";
+        // The seeded home profile is permanently protected (the UI disables its Delete too).
+        if (err.empty() && wind::SameProfileName(name, "Default"))
+            err = "The Default profile cannot be deleted";
         auto names = ProfileNamesUtf8();
         if (err.empty() && names.size() <= 1) err = "The last profile cannot be deleted";
         else if (err.empty()) {

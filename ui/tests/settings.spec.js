@@ -326,7 +326,7 @@ test('right-click opens rename/duplicate/delete; rename round-trips', async ({ p
   expect(sets.some(s => s.type === 'renameProfile' && s.from === 'Gaming' && s.to === 'Games')).toBeTruthy();
 });
 
-test('delete asks for confirmation and is disabled on the last profile', async ({ page }) => {
+test('delete is disabled on the last profile', async ({ page }) => {
   await page.addInitScript(() => { window.__profiles = { names: ['Solo'], active: 'Solo' }; });
   await page.goto('/');
   await page.getByRole('button', { name: /Solo/ }).click();
@@ -360,8 +360,7 @@ test('deleting a NON-active profile with staged changes skips the guard', async 
   await page.getByText('Smooth zoom', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();
   await page.getByRole('button', { name: /Default/ }).click();
   await page.getByRole('menuitem', { name: /Gaming/ }).click({ button: 'right' });
-  await page.getByRole('button', { name: 'Delete' }).click();          // arm confirm
-  await page.getByRole('button', { name: 'Delete', exact: true }).first().click();  // confirm
+  await page.getByRole('button', { name: 'Delete' }).click();          // one-click delete
   await expect(page.getByText('Unsaved changes')).toHaveCount(0);      // no guard
   const sets = await page.evaluate(() => window.__sets);
   expect(sets.some(s => s.type === 'deleteProfile' && s.name === 'Gaming')).toBeTruthy();
@@ -383,4 +382,11 @@ test('Escape closes the profile dropdown', async ({ page }) => {
   await expect(page.getByRole('menuitem', { name: /Gaming/ })).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('menuitem', { name: /Gaming/ })).toHaveCount(0);
+});
+
+test('the Default profile cannot be deleted even among many', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /Default/ }).click();
+  await page.getByRole('button', { name: 'Profile actions for Default' }).click();
+  await expect(page.getByRole('button', { name: 'Delete' })).toBeDisabled();
 });

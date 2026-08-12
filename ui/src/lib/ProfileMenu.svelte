@@ -13,8 +13,10 @@
   let editFrom = '';          // rename source
   let editName = '';
   let editError = '';
-  let confirmDelete = '';     // profile name pending delete confirmation ('' = none)
   let inputEl;
+
+  // "Default" is the seeded home profile and can never be deleted (host enforces this too).
+  const isDefault = (n) => n.toLowerCase() === 'default';
 
   const forbidden = /[\\/:*?"<>|]/;
   const reserved = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
@@ -31,7 +33,7 @@
     return '';
   }
   function toggle() { open = !open; if (!open) reset(); }
-  function reset() { ctxFor = ''; editMode = ''; editName = ''; editError = ''; confirmDelete = ''; }
+  function reset() { ctxFor = ''; editMode = ''; editName = ''; editError = ''; }
   function startCreate() { editMode = 'create'; editName = ''; editError = ''; ctxFor = ''; focusSoon(); }
   function startRename(n) { editMode = 'rename'; editFrom = n; editName = n; editError = ''; ctxFor = ''; focusSoon(); }
   function focusSoon() { setTimeout(() => inputEl && inputEl.focus(), 0); }
@@ -68,29 +70,22 @@
                role="menuitem" tabindex="0"
                on:click={() => pick(n)}
                on:keydown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) { e.preventDefault(); pick(n); } }}
-               on:contextmenu|preventDefault={() => { ctxFor = ctxFor === n ? '' : n; confirmDelete = ''; }}>
+               on:contextmenu|preventDefault={() => { ctxFor = ctxFor === n ? '' : n; }}>
             <span class="pcheck">{#if n.toLowerCase() === active.toLowerCase()}&#10003;{/if}</span>
             <span class="plabel">{n}</span>
             <button class="pdots" title="Profile actions" aria-label="Profile actions for {n}"
-                    on:click|stopPropagation={() => { ctxFor = ctxFor === n ? '' : n; confirmDelete = ''; }}>&#8943;</button>
+                    on:click|stopPropagation={() => { ctxFor = ctxFor === n ? '' : n; }}>&#8943;</button>
           </div>
           {#if ctxFor === n}
             <!-- Flyout to the RIGHT of the row, absolutely positioned: it overlays instead of
                  reflowing, so opening it can never change the dropdown's width or height. -->
             <div class="pctx" role="menu">
-              {#if confirmDelete === n}
-                <div class="pconfirm">
-                  <span class="pconfirmq">Delete "{n}"?</span>
-                  <button class="pact danger" on:click={() => doDelete(n)}>Delete</button>
-                  <button class="pact" on:click={() => (confirmDelete = '')}>Cancel</button>
-                </div>
-              {:else}
-                <button class="pact" on:click={() => startRename(n)}>Rename</button>
-                <button class="pact" on:click={() => { onAction('duplicate', { name: n }); ctxFor = ''; }}>Duplicate</button>
-                <button class="pact danger" disabled={names.length <= 1}
-                        title={names.length <= 1 ? 'The last profile cannot be deleted' : ''}
-                        on:click={() => (confirmDelete = n)}>Delete</button>
-              {/if}
+              <button class="pact" on:click={() => startRename(n)}>Rename</button>
+              <button class="pact" on:click={() => { onAction('duplicate', { name: n }); ctxFor = ''; }}>Duplicate</button>
+              <button class="pact danger" disabled={names.length <= 1 || isDefault(n)}
+                      title={isDefault(n) ? 'The Default profile cannot be deleted'
+                             : names.length <= 1 ? 'The last profile cannot be deleted' : ''}
+                      on:click={() => doDelete(n)}>Delete</button>
             </div>
           {/if}
         </div>
@@ -115,7 +110,7 @@
   // Escape closes like every other popup: first press cancels an in-progress edit, next closes.
   if (!open || e.key !== 'Escape') return;
   e.preventDefault();
-  if (editMode || ctxFor || confirmDelete) reset();
+  if (editMode || ctxFor) reset();
   else { open = false; reset(); }
 }} />
 
@@ -153,8 +148,6 @@
   .pact:hover:not(:disabled) { background: var(--hover); }
   .pact:disabled { opacity: .45; cursor: default; }
   .pact.danger { color: #e05656; }
-  .pconfirm { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
-  .pconfirmq { padding: 4px 8px 2px; color: var(--muted); white-space: nowrap; }
   .psep { height: 1px; background: var(--hover); margin: 4px 2px; }
   .pcreate { color: var(--muted); }
   .pedit { padding: 4px 6px; display: flex; gap: 6px; flex-wrap: wrap; }
