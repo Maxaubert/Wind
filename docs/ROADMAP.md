@@ -3,6 +3,15 @@
 Items that are agreed direction but not yet scheduled. One line of context each; details live
 in the referenced issues/specs.
 
+## One default engine (agreed direction, 2026-08-13)
+Converge on the TRANSFORM engine as the single DEFAULT for every use case; the other models
+stay shipped as deliberate alternatives ("second best"), never deleted. Prerequisites before
+flipping any default: extended field testing of `desktopTransform=1` (endurance, the #189 perf
+levers validated: ixDecimate / txKeepAliveMaxLevel / txMaxStepPct A/Bs), the spriteBand16
+constant-size-cursor verdict, and the launch-quiesce (#187) holding across more game launches.
+Spec: `docs/superpowers/specs/2026-08-12-one-model-transform-design.md` (P3/P4);
+mechanism record: `docs/POINTER-HITTEST-FINDINGS.md`.
+
 ## Installer / public release
 - **Bundle the NVIDIA MPO mitigation** (issue #148). The transform model's full zoom range over
   games requires MPO hardware overlay planes to be OFF on NVIDIA systems; otherwise the driver's
