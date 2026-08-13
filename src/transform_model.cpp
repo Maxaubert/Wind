@@ -368,11 +368,19 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         POINT pc{};
         GetCursorPos(&pc);
         const double px = pc.x - mon_.x, py = pc.y - mon_.y;
-        const unsigned long long nowE = GetTickCount64();
+        // QPC, not GetTickCount64 (field regression 2026-08-13): tick-count granularity is
+        // ~16ms against ~7ms ticks, so dt read 0 and 16 alternately - the easing froze and
+        // double-stepped frame to frame, beating against the composite clock (started fine,
+        // degraded into snapping and heavy wobble as the phases drifted).
+        LARGE_INTEGER eFr, eNow;
+        QueryPerformanceFrequency(&eFr);
+        QueryPerformanceCounter(&eNow);
+        const unsigned long long nowE = (unsigned long long)(eNow.QuadPart * 1000000LL / eFr.QuadPart);
         if (!easeValid_) { easeCx_ = px; easeCy_ = py; easeValid_ = true; lastEaseMs_ = nowE; }
-        double dtE = (nowE - lastEaseMs_) / 1000.0;
+        double dtE = (nowE - lastEaseMs_) / 1e6;   // us -> s
         lastEaseMs_ = nowE;
         if (dtE > 0.05) dtE = 0.05;   // a hitch must not teleport the view
+        if (dtE < 0.0) dtE = 0.0;
         const double lvlForTau = applyLevel > 1.0 ? applyLevel : 1.0;
         const double tau = cfg.txFollowEaseMs > 0 ? (cfg.txFollowEaseMs / 1000.0) / lvlForTau : 0.0;
         const double aE = tau > 0.0 ? 1.0 - std::exp(-dtE / tau) : 1.0;
