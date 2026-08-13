@@ -552,6 +552,17 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         else
             sprite_->moveTo(r.clickDesktopX + mon_.x, r.clickDesktopY + mon_.y);
         sprite_->keepOnTop();
+    } else if (useSprite_ && sprite_ && ex.drawCursor && level > 1.001 && cfg.txCursorProbe != 0) {
+        // CURSOR PROBE (issue #195): leave the REAL cursor visible and draw nothing ourselves.
+        // Native Magnifier's magnified pointer is the system cursor plane composited by DWM
+        // (window-enumeration probe: no cursor window, CURSOR_SHOWING=1) - atomic with the
+        // transform and high-quality. Field question this knob answers: does OUR session get
+        // that DWM cursor treatment (magnified, at the welded lens point -> screen centre), and
+        // does the answer depend on the channel (fastPan)? The weld keeps running either way.
+        sprite_->hide();
+        if (cursorHidden_) { MagShowSystemCursor(TRUE); cursorHidden_ = false; }
+        if (blanker_) blanker_->restore();   // undo the setActive pre-blank (idempotent): the
+                                             // probe needs the real arrow visible, not blanks
     } else if (useSprite_ && sprite_ && ex.drawCursor && level > 1.001) {
         // The REAL cursor is welded to the lens point above, so input is entirely native - but
         // the hardware pointer is not magnified and is drawn at its raw desktop position, which

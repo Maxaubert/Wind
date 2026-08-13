@@ -116,6 +116,13 @@ struct Config {
     // rests - so hover hit-testing is exact whenever the view is still, and stale by at most
     // ~N ticks of pan mid-gesture. Cuts the per-tick DWM message rate during ramps/pans.
     int ixDecimate = 4;
+    // Cursor probe (issue #195, hot, diagnostic): 1 = transform sessions leave the REAL system
+    // cursor visible instead of hiding it behind the sprite. Native Magnifier's magnified
+    // pointer IS the real cursor plane composited by DWM (probed 2026-08-13: no cursor window
+    // exists, CURSOR_SHOWING stays 1) - atomic with the transform, high-quality scaling. Our
+    // old "draws raw/untransformed" measurement predates the channel split; this knob tests
+    // whether the cursor plane transforms under our session (pair with fastPan=0/1).
+    int txCursorProbe = 0;
     // Sprite/transform skew compensation (issue #195, hot, A/B): the cursor sprite (a layered
     // window) and the magnification transform are separate DWM state; if one consistently
     // applies a composite later than the other, the cursor leads/trails the view by
