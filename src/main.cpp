@@ -1294,7 +1294,6 @@ static void RunTick(TickState& t) {
         // Drag-follow (issue #169): the pan resolve above chose to follow the pointer this tick, so
         // neither engine may weld it back to the lens centre - suspend the SetCursorPos.
         ex.suppressCursorSync = dragFollow;
-        ex.moveSignals = g_input.state().moveSignals.exchange(0, std::memory_order_relaxed);
         // Serialize transform writes around an Inspect click's injected absolute move (issue #148
         // TDR class): the injection and a transform write racing each other is the proven trigger.
         // The launch quiesce holds writes AND the weld until its deadline (anchored at cover
@@ -2118,10 +2117,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     ts.hz = DetectRefreshHz();
     int pacedHz = ts.hz;                              // hz the timer interval below is computed for
     LARGE_INTEGER due; due.QuadPart = -(10000000LL / pacedHz);
-    // Measured composite cadence (issue #195): the repan spin budgets against THIS, not the
-    // reported refresh rate. EMA over DwmFlush returns; 0 until the first two flushes land.
-    long long compIntervalUs = 0;
-    long long lastFlushQpc = 0;
 
     bool running = true;
     unsigned long long nextRecoverMs = 0;   // device-lost recovery backoff gate (GetTickCount64)
@@ -2218,78 +2213,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             }
         }
 
-        // Tick start = just after the previous composite (the loop tail's DwmFlush returned
-        // here), so the repan spin below can budget against the real frame boundary. The
-        // interval itself is measured at the DwmFlush return (compIntervalUs) rather than taken
-        // from the reported refresh rate, which was wrong enough on this VRR panel to make the
-        // spin swallow two composites per tick.
-        LARGE_INTEGER tickStartQpc;
-        QueryPerformanceCounter(&tickStartQpc);
         RunTick(ts);
 
-        // CONTINUOUS REPAN, RUN BEFORE THE COMPOSITE (issue #195, measured).
-        // The Magnification API is thread-affine, so every write must stay on this thread (an
-        // async writer is measured-negative) - hence a spin here rather than a hook-side write.
-        //
-        // DWM latches the magnification transform at a moment we cannot observe, so a single
-        // write per tick leaves whichever composites fall after it using a stale offset - the
-        // displayed offset alternated fresh / ~15ms-stale, which IS the wobble. Refreshing on a
-        // ~1ms spin fixes that, but WHERE the spin sits in the loop decides whether we then miss
-        // composites: spinning 3/4 of the frame right AFTER DwmFlush left too little time for
-        // RunTick, so ticks overran the next composite and 18% of frames took a >20 desktop-px
-        // lurch (native: 5%, and its ordinary jitter is 1-5px, which is invisible). So spin in
-        // the gap that remains AFTER RunTick and stop short of the composite: the last write is
-        // ~1.5ms before the latch, and DwmFlush is always reached in time.
-        if (dwmPaces && ts.prevLvl > 1.001 && ts.cfg.txCursorPollHz > 0) {
-            if (auto* tmFast = dynamic_cast<TransformModel*>(ts.model)) {
-                LARGE_INTEGER pf; QueryPerformanceFrequency(&pf);
-                // Frame time comes from the MEASURED composite interval, never from the reported
-                // refresh rate: on this VRR panel the reported rate disagreed badly with reality
-                // and the spin sized itself to ~15.6ms instead of ~6.9ms, so every tick consumed
-                // TWO composites - the offset then updated at 64Hz against a 142Hz display, in
-                // 21-122 desktop-px steps (measured with an offset trace). That staircase was the
-                // wobble. Self-calibrating here is immune to whatever the display reports.
-                const long long frameUs = compIntervalUs > 0 ? compIntervalUs : (1000000LL / (ts.hz > 0 ? ts.hz : 60));
-                long long deadlineUs = frameUs - 1500;   // leave 1.5ms to reach DwmFlush
-                if (deadlineUs < 1000) deadlineUs = 1000;
-                const long long stepUs = 1000000LL / (ts.cfg.txCursorPollHz > 0 ? ts.cfg.txCursorPollHz : 1000);
-                long long nextUs = 0;
-                int idleSpins = 0;
-                for (;;) {
-                    LARGE_INTEGER pb; QueryPerformanceCounter(&pb);
-                    const long long spent = (pb.QuadPart - tickStartQpc.QuadPart) * 1000000LL / pf.QuadPart;
-                    if (spent >= deadlineUs) break;
-                    if (spent >= nextUs) {
-                        nextUs = spent + stepUs;
-                        // fastCursorRepan reports POINTER ACTIVITY (moved or wrote), so this
-                        // bail-out triggers only on a genuinely still hand (~20ms), keeping an
-                        // idle zoomed session free. Keying it on writes instead quit the spin
-                        // during slow pans and put the wobble straight back (measured).
-                        if (tmFast->fastCursorRepan(ts.cfg)) idleSpins = 0;
-                        else if (++idleSpins >= 20) break;
-                    } else {
-                        YieldProcessor();
-                    }
-                }
-            }
-        }
-
-        if (dwmPaces) {
-            DwmFlush();   // block until DWM's next composite -> frames align with it
-            // Measure the real composite interval (EMA) for the repan budget above. Sampled at
-            // the DwmFlush return, which is the only observable frame boundary we get.
-            LARGE_INTEGER nowQpc, freqQpc;
-            QueryPerformanceCounter(&nowQpc);
-            QueryPerformanceFrequency(&freqQpc);
-            if (lastFlushQpc != 0) {
-                const long long dUs = (nowQpc.QuadPart - lastFlushQpc) * 1000000LL / freqQpc.QuadPart;
-                if (dUs > 2000 && dUs < 40000)   // ignore hitches and absurd gaps
-                    compIntervalUs = compIntervalUs > 0 ? (compIntervalUs * 7 + dUs) / 8 : dUs;
-            }
-            lastFlushQpc = nowQpc.QuadPart;
-        } else {
-            lastFlushQpc = 0;
-        }
+        if (dwmPaces) DwmFlush();   // block until DWM's next composite -> frames align with it
     }
 
     g_tick = nullptr;

@@ -12,7 +12,6 @@ struct InputState {
     // frozen elsewhere, so the hook swallows a real left/right click (it would land at the frozen point)
     // and hands the tick PER-BUTTON pending counts; the tick fires a clean click at the look point per
     // pending press (counts, not a single flag, so a fast second click before the tick drains isn't lost).
-    std::atomic<unsigned> moveSignals{0};    // hook -> tick: WM_MOUSEMOVE seen (repan wake, #195)
     std::atomic<bool> inspectActive{false};  // tick -> hook: Inspect on, swallow clicks
     std::atomic<int>  commitLeft{0};         // hook -> tick: pending left clicks to fire at the look point
     std::atomic<int>  commitRight{0};        // hook -> tick: pending right clicks
@@ -36,14 +35,6 @@ public:
     bool start(int inButtonId, int inButtonId2, int outButtonId, int outButtonId2, bool swallow);
     void stop();
     InputState& state() { return state_; }
-    // Auto-reset event pulsed by the LL mouse hook on every REAL (non-injected) pointer move
-    // (issue #195). The transform model's pan write must be coherent with the cursor sample
-    // that caused it - native writes from inside its hook; the Magnification API is
-    // thread-affine, so the tick thread waits on this instead and writes the moment the
-    // pointer really moved. Never signalled for injected moves (our own weld/click warps).
-    // Valid between start() and stop(); null when the hook is not installed (WIND_NOHOOK).
-    // void*, not HANDLE: this header stays free of <windows.h> (pure-logic build rule).
-    void* mouseMoveEvent() const { return mouseMoveEvent_; }
     // Atomically read and zero the accumulated raw deltas.
     void drainRaw(int& dx, int& dy);
     // Inspect-mode speed match: the OS cursor is frozen, so the look point pans from raw mickeys.
@@ -148,7 +139,6 @@ private:
     std::atomic<int> outButtonId_{1};
     std::atomic<int> outButtonId2_{0};
     bool swallow_ = true;
-    void*  mouseMoveEvent_ = nullptr;       // pulsed by the mouse hook on real pointer motion (#195)
     std::atomic<bool> hookActive_{false};   // true once the LL hook is installed (not WIND_NOHOOK)
     // Configured keyboard binds (VK codes; 0 = unbound). Atomic so the keyboard hook thread reads
     // them race-free against setKeys() on the tick thread. hideCursor/quickZoom binds are NOT here:

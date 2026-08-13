@@ -20,10 +20,6 @@ void TransformModel::resetTransformState() {
     lastInputXformOn_ = false;
     ixTick_ = 0; ixPending_ = false;
     lastSpriteX_ = INT_MIN; lastSpriteY_ = INT_MIN;
-    lastCenterX_ = -1e9; lastCenterY_ = -1e9;   // txSpriteLead velocity baseline (issue #195)
-    easeValid_ = false;                          // free-cursor view easing re-seeds per session
-    frozenViewValid_ = false;                    // frozen-view diagnostic re-anchors per session
-    publicSessionOpened_ = false;                // next session re-opens on the public channel
     samplingApplied_ = false;                    // re-apply sampling mode per fresh context
     haveLastClick_ = false;
 }
@@ -222,7 +218,6 @@ void TransformModel::setActive(bool active) {
         idleSinceMs_ = 0;
         return;
     }
-    HookPan().active = 0;   // hook-driven pan (#195) stops with the session
     if (!magUp_) return;
     // MPO buster: hide strictly AFTER the identity park below would be wrong - the park writes
     // identity while the game may still be mid-demotion-return; hiding HERE (before the park)
@@ -350,85 +345,6 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         OffsetF o = ComputeOffsetF(r.centerX, r.centerY, applyLevel, mon_.w, mon_.h);
         srcL = o.x; srcT = o.y;
     }
-    // Real-cursor mode (issue #195): the visible pointer is the REAL cursor, DWM-composited
-    // magnified (field-verified: native treatment on the public channel). It is WELDED to the
-    // integer clickDesktop point - so the transform must be anchored to that SAME integer
-    // point, or the +-frac residual between round(cx) and float cx displays as a
-    // +-0.5px*level re-centering sawtooth on the cursor (the reported wobble). Anchoring here
-    // makes T(weld) == screen centre EXACT by construction; the view inherits the integer
-    // grid (level-px steps at slow pan), exactly like native Magnifier's cursor-driven view.
-    if (cfg.txCursorProbe == 3 && !ex.cursorLocked) {
-        // FROZEN-VIEW DIAGNOSTIC (issue #195): magnify, but never pan - the source rect is
-        // captured once and reused. The cursor then glides across a completely static magnified
-        // image, which splits the wobble question in two with one look:
-        //   cursor glides smoothly  -> the view/pan path owns the wobble (our writes);
-        //   cursor still judders    -> DWM's magnified CURSOR rendering owns it, and no amount
-        //                              of pan work can ever fix it (native would show it too).
-        if (!frozenViewValid_) {
-            POINT pc{};
-            GetCursorPos(&pc);
-            OffsetF o = ComputeOffsetF((double)(pc.x - mon_.x), (double)(pc.y - mon_.y),
-                                       applyLevel, mon_.w, mon_.h);
-            frozenSrcL_ = std::trunc(o.x); frozenSrcT_ = std::trunc(o.y);
-            frozenViewValid_ = true;
-        }
-        srcL = frozenSrcL_; srcT = frozenSrcT_;
-    } else if (cfg.txCursorProbe == 4 && !ex.cursorLocked) {
-        // HOOK-DRIVEN PAN (issue #195): the LL mouse hook writes the offset itself, straight
-        // from each mouse event (HookPanWrite) - native's architecture exactly. The tick only
-        // publishes the session parameters and leaves the pan alone, so there is no second
-        // writer on a different clock to beat against.
-        HookPanState& hp = HookPan();
-        hp.level = applyLevel;
-        hp.monX = mon_.x; hp.monY = mon_.y; hp.monW = mon_.w; hp.monH = mon_.h;
-        hp.active = 1;
-        POINT pc{};
-        GetCursorPos(&pc);
-        OffsetF o = ComputeOffsetF((double)(pc.x - mon_.x), (double)(pc.y - mon_.y),
-                                   applyLevel, mon_.w, mon_.h);
-        srcL = std::trunc(o.x); srcT = std::trunc(o.y);
-    } else if (cfg.txCursorProbe == 2 && !ex.cursorLocked) {
-        // FREE-CURSOR mode (the native design, issue #195): no weld at all - the cursor moves
-        // freely under the user's hand, and the VIEW pursues it with EASING. Exact per-tick
-        // centering was field-tested and still wobbled: pinning the cursor to center each
-        // frame makes the per-composite timing noise between DWM's live cursor sampling and
-        // our transform writes the ONLY relative motion left - pure visible jitter. Easing the
-        // view (native centered mode does the same) low-passes our src trajectory, so the
-        // cursor-vs-view motion is a smooth deliberate glide that swallows the noise: solid at
-        // rest, a soft speed-proportional lead in motion. tau is level-normalized so the
-        // ON-SCREEN feel is the same at every zoom. Hover/clicks/drags stay native-correct by
-        // construction (the cursor IS at its true position - the FOLLOW-era no-dead-zones law).
-        POINT pc{};
-        GetCursorPos(&pc);
-        double px = pc.x - mon_.x, py = pc.y - mon_.y;
-        predictCursor(cfg, px, py);   // cancel the fixed cursor-vs-content pipeline latency
-        // QPC, not GetTickCount64 (field regression 2026-08-13): tick-count granularity is
-        // ~16ms against ~7ms ticks, so dt read 0 and 16 alternately - the easing froze and
-        // double-stepped frame to frame, beating against the composite clock (started fine,
-        // degraded into snapping and heavy wobble as the phases drifted).
-        LARGE_INTEGER eFr, eNow;
-        QueryPerformanceFrequency(&eFr);
-        QueryPerformanceCounter(&eNow);
-        const unsigned long long nowE = (unsigned long long)(eNow.QuadPart * 1000000LL / eFr.QuadPart);
-        if (!easeValid_) { easeCx_ = px; easeCy_ = py; easeValid_ = true; lastEaseMs_ = nowE; }
-        double dtE = (nowE - lastEaseMs_) / 1e6;   // us -> s
-        lastEaseMs_ = nowE;
-        if (dtE > 0.05) dtE = 0.05;   // a hitch must not teleport the view
-        if (dtE < 0.0) dtE = 0.0;
-        const double lvlForTau = applyLevel > 1.0 ? applyLevel : 1.0;
-        const double tau = cfg.txFollowEaseMs > 0 ? (cfg.txFollowEaseMs / 1000.0) / lvlForTau : 0.0;
-        const double aE = tau > 0.0 ? 1.0 - std::exp(-dtE / tau) : 1.0;
-        easeCx_ += (px - easeCx_) * aE;
-        easeCy_ += (py - easeCy_) * aE;
-        OffsetF o = ComputeOffsetF(easeCx_, easeCy_, applyLevel, mon_.w, mon_.h);
-        // Whole-pixel offsets, exactly like native (see fastCursorRepan): no fractional
-        // residual means no level-amplified shimmer on the magnified cursor.
-        srcL = std::trunc(o.x); srcT = std::trunc(o.y);
-    } else if (cfg.txCursorProbe != 0) {
-        OffsetF o = ComputeOffsetF((double)r.clickDesktopX, (double)r.clickDesktopY,
-                                   applyLevel, mon_.w, mon_.h);
-        srcL = o.x; srcT = o.y;
-    }
     idleReleaseMs_ = cfg.txIdleReleaseMs;   // hot-reloadable release window
     if (!ensureMag()) return;   // lazy context: the session's first write brings DWM up
     // Bitmap smoothing (issue #195): apply once per context via the safe Magnification.dll
@@ -442,24 +358,6 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
                   "bitmap smoothing %d applied=%d", cfg.txSamplingMode, ok ? 1 : 0);
     }
     if (level > sessionMaxLevel_) sessionMaxLevel_ = level;
-    // Repan rate proof (issue #195). Logged from the TICK path, not the write path: a counter
-    // dumped only when a write happens cannot report the case that matters (writes not
-    // happening), and its "per second" would be divided by an unknown interval.
-    {
-        ++tickCount_;
-        const unsigned long long nowR = GetTickCount64();
-        if (repanLogMs_ == 0) repanLogMs_ = nowR;
-        else if (nowR - repanLogMs_ >= 1000) {
-            // TICKS/S is the number that matters (issue #195): the view can never update faster
-            // than present() runs, and the field wobble is the view stepping ~64 times a second
-            // against a 142Hz display. Everything else here is secondary.
-            wind::Log(wind::LogLevel::Info, "transform",
-                      "ticks=%d/s repanWrites=%d/s calls=%d/s dedupe=%d/s hookMoves=%u/s (level=%.2f)",
-                      tickCount_, repanCount_, repanCalls_, repanDedupe_, ex.moveSignals, level);
-            tickCount_ = 0;
-            repanCount_ = 0; repanCalls_ = 0; repanDedupe_ = 0; repanLogMs_ = nowR;
-        }
-    }
     const bool ramping = applyLevel != level || (applyLevel != lastLevel_ && lastLevel_ > 0.0);
     MagTransform m = ComputeMagTransform(srcL, srcT, applyLevel, mon_.w, mon_.h);
     // 2D write-site 16-bit backstop (issue #191): when the session is MPO-exposed AND the ghost
@@ -500,20 +398,6 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         lastChangeMs_ = GetTickCount64();
         keepAliveTick_ = 0;
     }
-    // Cadence throttle (issue #195): hold the pan at a fixed interval instead of writing every
-    // tick. Level changes (ramps) always pass so zooming never stutters.
-    bool cadenceHold = false;
-    if (cfg.txWriteIntervalMs > 0 && changed && !ramping && applyLevel == lastWrittenLevel_) {
-        // QPC, not GetTickCount64: its ~15.6ms granularity turned a 16ms interval into 25-35ms
-        // (measured 40Hz instead of the intended 64Hz).
-        LARGE_INTEGER cFr, cNow;
-        QueryPerformanceFrequency(&cFr);
-        QueryPerformanceCounter(&cNow);
-        const unsigned long long nowUs = (unsigned long long)(cNow.QuadPart * 1000000LL / cFr.QuadPart);
-        if (nowUs - lastPanWriteMs_ < (unsigned long long)cfg.txWriteIntervalMs * 1000ULL) cadenceHold = true;
-        else lastPanWriteMs_ = nowUs;
-    }
-    lastWrittenLevel_ = applyLevel;
     int txJitter = 0;
     // Keep-alive: 700ms window, <=8x only. (The original 1.5s/all-levels spec was re-tried
     // under MPO-off 2026-07-26 and measured WORSE - 360ms worst spike vs 198ms baseline. With
@@ -529,11 +413,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // Same-value hygiene (issue #189): once the keep-alive window has lapsed (or above its level
     // gate), a zoomed-idle tick would push an identical write 144x/s. DWM parks on static values
     // anyway (measured), so skipping is free; the next changed/keep-alive tick writes as before.
-    // Mode 3 (frozen-view diagnostic) forces the write every tick: the dedupe would otherwise
-    // stop all writes once the value settles, and the field shows the magnified cursor
-    // disappearing when writes stop - so the diagnostic must keep the write stream alive to
-    // isolate CURSOR smoothness from PAN smoothness.
-    if ((changed && !cadenceHold) || keepAliveActive || cfg.txCursorProbe == 3) {
+    if (changed || keepAliveActive) {
         // First-write instrumentation (#191 review): the ~36ms "DWM builds its machinery" cost was
         // a code-comment estimate with no log evidence - 57% of the field day's zoom-ins were cold
         // and the zoom-in edge is exactly where sluggishness is judged. Make it a number.
@@ -541,26 +421,14 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             timeFirstWrite_ = false;
             LARGE_INTEGER ffr, fa, fb;
             QueryPerformanceFrequency(&ffr); QueryPerformanceCounter(&fa);
-            // Public channel for the session's first write - see the hybrid-channel note below.
-            writeTransform((float)applyLevel, m.offX, m.offY, m.txX + txJitter, m.txY, false, false);
-            publicSessionOpened_ = true;
+            writeTransform((float)applyLevel, m.offX, m.offY, m.txX + txJitter, m.txY, fastPan_, false);
             QueryPerformanceCounter(&fb);
             wind::Log(wind::LogLevel::Info, "transform", "first write took %.1fms (%s context)",
                       double(fb.QuadPart - fa.QuadPart) * 1000.0 / ffr.QuadPart,
                       coldContext_ ? "cold" : "warm");
             coldContext_ = false;
         } else {
-            // HYBRID CHANNEL (issue #195): the session's FIRST write goes through the PUBLIC API,
-            // which is what puts DWM into cursor-magnifying mode (a session opened on the private
-            // channel leaves the pointer unmagnified - field-verified twice). Every later pan then
-            // rides the PRIVATE channel, measured at 0.09ms against the public API's 3-9ms. That
-            // cost is the reason the view could only step 64 times a second against a 142Hz
-            // display, in 22-123 desktop-px jumps, which is the wobble the frozen-view test
-            // isolated: the cursor glides continuously while the scene lurches.
-            const bool usePrivate = fastPan_ && publicSessionOpened_;
-            writeTransform((float)applyLevel, m.offX, m.offY, m.txX + txJitter, m.txY,
-                           usePrivate, false);
-            publicSessionOpened_ = true;
+            writeTransform((float)applyLevel, m.offX, m.offY, m.txX + txJitter, m.txY, fastPan_, false);
         }
     }
     // Input transform. Mode 1 (THE SHIPPED DEFAULT; field-verified 4x-20x,
@@ -571,12 +439,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // Both rects in VIRTUAL-SCREEN coordinates (the old 0,0-based dst was wrong off-primary).
     // Needs UIAccess: the ENABLED publish fails without it (rig-measured ERROR_ACCESS_DENIED;
     // the DISABLED call succeeds regardless - never probe availability with the disable shape).
-    // The magnified CURSOR depends on this publish being kept alive (field-proven by the frozen
-    // view diagnostic: stop publishing and the cursor instantly reverts to unmagnified/tiny,
-    // even though the view stays magnified). So mode 3 republishes every tick despite nothing
-    // changing - and it means a publish GAP is visible as a cursor that drops out of
-    // magnification, which is a prime suspect for the field wobble.
-    if (cfg.magInputTransform != 0 && (changed || ixPending_ || cfg.txCursorProbe == 3)) {
+    if (cfg.magInputTransform != 0 && (changed || ixPending_)) {
         // Decimation (issue #189): the publish exists for pointer-framework HOVER hit-testing
         // (clicks ride the welded cursor and never consult it), so it does not need the 144Hz
         // motion rate - every Nth changed tick suffices, with a GUARANTEED publish the moment
@@ -585,14 +448,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         // (this call postdates every hitch baseline and was fully uninstrumented until now).
         if (changed) ixPending_ = true;
         const bool rest = !changed;
-        // REAL-CURSOR mode publishes on EVERY change (issue #195): DWM positions the magnified
-        // cursor from the input transform, so decimating it starves the cursor between view
-        // updates - measured, large per-frame cursor lurches fell from 24% of frames to 10%
-        // when this went to every-change, and the spread dropped below native's. The #189
-        // decimation stays for the welded/sprite designs, where the publish only feeds
-        // pointer-framework hover hit-testing and 4x fewer publishes is a free perf win.
-        const int ixEvery = (cfg.txCursorProbe == 2) ? 1 : cfg.ixDecimate;
-        if (rest || ++ixTick_ >= ixEvery) {
+        if (rest || ++ixTick_ >= cfg.ixDecimate) {
             ixTick_ = 0;
             ixPending_ = false;
             // srcL/srcT, not r.srcLeft/srcTop: when the ramp limiters make applyLevel != level
@@ -671,10 +527,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // records whether SetCursorPos REALLY ran, so RunTick can baseline on the weld point only
     // when it did (#169 measured-baseline law; assuming it landed is the unstable-servo bug).
     weldedLastFrame_ = false;
-    // Free-cursor mode (txCursorProbe=2): NEVER weld - the whole point is that nothing snaps
-    // the cursor against the hand. RunTick's oracle baselines on the measured cursor when
-    // weldedLastFrame() stays false, so the pipeline stays consistent.
-    if (!ex.suppressCursorSync && cfg.txCursorProbe != 2) {
+    if (!ex.suppressCursorSync) {
         int cx = ex.clickOverride ? ex.clickDesktopX : (r.clickDesktopX + mon_.x);
         int cy = ex.clickOverride ? ex.clickDesktopY : (r.clickDesktopY + mon_.y);
         if (!haveLastClick_ || cx != lastClickX_ || cy != lastClickY_) {
@@ -709,17 +562,6 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         else
             sprite_->moveTo(r.clickDesktopX + mon_.x, r.clickDesktopY + mon_.y);
         sprite_->keepOnTop();
-    } else if (useSprite_ && sprite_ && ex.drawCursor && level > 1.001 && cfg.txCursorProbe != 0) {
-        // CURSOR PROBE (issue #195): leave the REAL cursor visible and draw nothing ourselves.
-        // Native Magnifier's magnified pointer is the system cursor plane composited by DWM
-        // (window-enumeration probe: no cursor window, CURSOR_SHOWING=1) - atomic with the
-        // transform and high-quality. Field question this knob answers: does OUR session get
-        // that DWM cursor treatment (magnified, at the welded lens point -> screen centre), and
-        // does the answer depend on the channel (fastPan)? The weld keeps running either way.
-        sprite_->hide();
-        if (cursorHidden_) { MagShowSystemCursor(TRUE); cursorHidden_ = false; }
-        if (blanker_) blanker_->restore();   // undo the setActive pre-blank (idempotent): the
-                                             // probe needs the real arrow visible, not blanks
     } else if (useSprite_ && sprite_ && ex.drawCursor && level > 1.001) {
         // The REAL cursor is welded to the lens point above, so input is entirely native - but
         // the hardware pointer is not magnified and is drawn at its raw desktop position, which
@@ -762,15 +604,8 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
                 // magnified into a +-10px re-centering wobble at 20x is gone, and an integer
                 // crossing can never split across composites. The welded REAL cursor stays on
                 // clickDesktop (integer) for clicks; the <=0.5px visual offset between them is
-                // sub-display-pixel at any level. txSpriteLead (A/B) cancels a constant
-                // sprite-vs-transform composite skew, if the field shows one.
-                double sxF = r.centerX, syF = r.centerY;
-                if (cfg.txSpriteLead != 0.0 && lastCenterX_ > -1e8) {
-                    sxF += (r.centerX - lastCenterX_) * cfg.txSpriteLead;
-                    syF += (r.centerY - lastCenterY_) * cfg.txSpriteLead;
-                }
-                lastCenterX_ = r.centerX; lastCenterY_ = r.centerY;
-                sprite_->moveToSubpixel(sxF + mon_.x, syF + mon_.y);
+                // sub-display-pixel at any level.
+                sprite_->moveToSubpixel(r.centerX + mon_.x, r.centerY + mon_.y);
             }
             sprite_->show();
             sprite_->keepOnTop();
@@ -811,108 +646,6 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         mpoGhost_.hide();
         ghostWasSettled_ = false;   // next session logs its own first settle (no log here: routine)
     }
-}
-
-// Cursor lead prediction (issue #195, the velocity-proportional wobble/lead fix).
-//
-// Measured dead end that motivates this: repanning at ~300 writes/s (every ~3ms, well inside a
-// 7ms frame) changed the error not at all, so the offset DWM uses is NOT stale because of our
-// write cadence. What remains is a PIPELINE mismatch - DWM latches the cursor plane late (near
-// scanout) while the magnified content it is composited against was produced earlier - so the
-// view lags the pointer by velocity * pipelineLatency * level no matter how fresh our write is.
-// The error is therefore proportional to hand speed, which is exactly the field report ("more
-// dramatic the faster I pan") and why every freshness/easing attempt failed.
-//
-// A FIXED latency is cancelled by aiming where the cursor WILL be when the frame is displayed:
-// aim = position + velocity * txCursorLeadMs. Velocity is estimated from the sampled positions
-// with a short EMA (raw per-sample velocity is quantized noise; heavy smoothing would reintroduce
-// lag). The lead displacement is capped at a quarter view so a flick can never fling the view.
-void TransformModel::predictCursor(const Config& cfg, double& x, double& y) {
-    LARGE_INTEGER fr, now;
-    QueryPerformanceFrequency(&fr);
-    QueryPerformanceCounter(&now);
-    const double t = (double)now.QuadPart / (double)fr.QuadPart;
-    if (velValid_) {
-        const double dt = t - velT_;
-        if (dt > 1e-5 && dt < 0.1) {
-            const double vx = (x - velX_) / dt, vy = (y - velY_) / dt;
-            // EMA over ~25ms of samples: enough to reject per-sample quantization, short
-            // enough that the estimate still turns with the hand.
-            const double a = dt / (dt + 0.025);
-            velEmaX_ += (vx - velEmaX_) * a;
-            velEmaY_ += (vy - velEmaY_) * a;
-        }
-    }
-    velX_ = x; velY_ = y; velT_ = t; velValid_ = true;
-    if (cfg.txCursorLeadMs == 0) return;   // negative = deliberately TRAIL (native runs ~15ms behind)
-    const double lead = cfg.txCursorLeadMs / 1000.0;
-    double dx = velEmaX_ * lead, dy = velEmaY_ * lead;
-    const double capX = (mon_.w / lastLevel_) / 4.0, capY = (mon_.h / lastLevel_) / 4.0;
-    if (dx > capX) dx = capX; else if (dx < -capX) dx = -capX;
-    if (dy > capY) dy = capY; else if (dy < -capY) dy = -capY;
-    x += dx; y += dy;
-}
-
-// High-rate cursor repan (issue #195): recompute the free-cursor offset from the CURRENT
-// cursor and write it, between composites. Deliberately minimal - no level ramp, no input
-// transform, no sprite, no weld: only the pan value DWM is about to sample, so the offset it
-// pairs with the live cursor plane is fresh (the wobble/lead fix). Deduped, so a still hand
-// costs one GetCursorPos. Runs only in free-cursor mode on a live, active, >1x session.
-bool TransformModel::fastCursorRepan(const Config& cfg) {
-    ++repanCalls_;
-    if (cfg.txCursorProbe != 2 || !magUp_ || !active_) return false;
-    if (lastLevel_ <= 1.001) return false;           // idle / ramping into a session
-    if (cfg.txFollowEaseMs > 0) return false;        // easing owns the trajectory in that mode
-    POINT pc{};
-    if (!GetCursorPos(&pc)) return false;
-    // "Active" = the POINTER moved, not merely "we wrote". During a slow pan most 1ms polls find
-    // no whole-pixel change yet the hand is clearly moving; keying the caller's idle bail-out on
-    // writes made it quit the spin after 3 polls and put the wobble straight back (measured).
-    const bool cursorMoved = (pc.x != lastRepanCx_ || pc.y != lastRepanCy_);
-    lastRepanCx_ = pc.x; lastRepanCy_ = pc.y;
-    double aimX = pc.x - mon_.x, aimY = pc.y - mon_.y;
-    predictCursor(cfg, aimX, aimY);
-    OffsetF o = ComputeOffsetF(aimX, aimY, lastLevel_, mon_.w, mon_.h);
-    // Native's exact arithmetic (disassembly): offset = cursor - trunc(halfScreen / level),
-    // TRUNCATED to a whole desktop pixel. Both the cursor plane position and the offset are
-    // then integers, so (cursor - offset) is an exact integer and the cursor's magnified
-    // screen position carries NO fractional residual at any zoom. A sub-pixel offset leaves
-    // frac(off)*level of shimmer that re-randomises on every write - up to 20 screen px at
-    // 20x, at our write rate.
-    o.x = std::trunc(o.x); o.y = std::trunc(o.y);
-    MagTransform m = ComputeMagTransform(o.x, o.y, lastLevel_, mon_.w, mon_.h);
-    // Same 16-bit backstop the main write path enforces (issue #191): this path writes the
-    // same channel, so it must honour the same never-exceed invariant.
-    if (mpoExposed_ && !mpoGhost_.settled(GetTickCount64())) {
-        bool clamped = false;
-        if (m.txX < -32000) { m.txX = -32000; clamped = true; }
-        if (m.txY < -32000) { m.txY = -32000; clamped = true; }
-        if (clamped) { m.offX = (int)(-m.txX / lastLevel_); m.offY = (int)(-m.txY / lastLevel_); }
-    }
-    if (m.offX == lastOffX_ && m.offY == lastOffY_ && m.txX == lastTxX_ && m.txY == lastTxY_) {
-        ++repanDedupe_;
-        return cursorMoved;   // still "active": keep the caller spinning while the hand moves
-    }
-    lastOffX_ = m.offX; lastOffY_ = m.offY; lastTxX_ = m.txX; lastTxY_ = m.txY;
-    lastChangeMs_ = GetTickCount64();
-    keepAliveTick_ = 0;
-    writeTransform((float)lastLevel_, m.offX, m.offY, m.txX, m.txY, fastPan_, false);
-    // Publish the MATCHING input transform in the same breath (issue #195). DWM positions the
-    // magnified cursor from this mapping, so a view write without it moves the scene while the
-    // cursor stays placed by the previous rect - the pair desyncs by exactly one repan step,
-    // which is the relative jump the field sees while panning. magnify.exe always writes the
-    // transform and republishes the input rects together; matching that is the whole point.
-    if (cfg.magInputTransform != 0) {
-        InputTransformRects ir = ComputeInputTransformRects(
-            o.x, o.y, lastLevel_, mon_.x, mon_.y, mon_.w, mon_.h);
-        RECT dst{ ir.dl, ir.dt, ir.dr, ir.db };
-        RECT src = (cfg.magInputTransform == 2) ? dst : RECT{ ir.sl, ir.st, ir.sr, ir.sb };
-        host_.setInputTransform(true, src, dst);
-        ixPending_ = false;
-        ixTick_ = 0;
-    }
-    ++repanCount_;
-    return true;
 }
 
 void TransformModel::shutdown() {

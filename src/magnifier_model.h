@@ -23,7 +23,6 @@ struct PresentExtras {
     // centre this tick - the weld would fight the hand and the dragged content flickers between the
     // two positions. The lens follows the pointer instead (RunTick feeds unscaled deltas).
     bool  suppressCursorSync = false;
-    unsigned moveSignals = 0;     // hook WM_MOUSEMOVE count this second (repan wake proof, #195)
     bool  fsGame = false;         // foreground covers the monitor -> skip the periodic topmost backstop
     bool  forceCrop = false;      // fsGame && gameCrop: crop the capture copy to the magnified region
     bool  noVsync = false;        // game pacing engaged: Present(0,0); the main loop's timer paces

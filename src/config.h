@@ -116,15 +116,12 @@ struct Config {
     // rests - so hover hit-testing is exact whenever the view is still, and stale by at most
     // ~N ticks of pan mid-gesture. Cuts the per-tick DWM message rate during ramps/pans.
     int ixDecimate = 4;
-    // Cursor probe (issue #195, hot, diagnostic): transform sessions leave the REAL system
-    // cursor visible instead of hiding it behind the sprite. Native Magnifier's magnified
-    // pointer IS the real cursor plane composited by DWM (probed 2026-08-13: no cursor window
-    // exists, CURSOR_SHOWING stays 1) - atomic with the transform, high-quality scaling.
-    // Field-verified on this rig: OUR session gets the same DWM cursor treatment (public
-    // channel confirmed; private under test). 1 = welded real cursor, view anchored to the
-    // weld pixel (field verdict: residual wobble - the weld itself fights the hand).
-    // 2 = FREE cursor, view centres on the actual cursor position, no weld (native design).
-    int txCursorProbe = 0;
+    // (Issue #195 removed a family of real-cursor probe knobs - txCursorProbe/txCursorPollHz/
+    // txCursorLeadMs/txFollowEaseMs/txWriteIntervalMs/txSpriteLead. DWM can magnify the REAL
+    // pointer at native quality, but it lives in DWM's cursor plane and is drawn continuously
+    // while our view steps, so it wobbles against the scene at high zoom - unfixable from our
+    // side, see CLAUDE.md. The in-scene sprite cannot wobble by construction and is the shipped
+    // design; the probes only cost performance, so they are gone.)
     // Magnification bitmap smoothing (issue #195, applied at session start): 1 (default) =
     // MagSetFullscreenUseBitmapSmoothing(TRUE) via Magnification.dll ordinal 1 - the
     // undocumented call behind native Magnifier's "smooth edges of images and text"
@@ -133,43 +130,6 @@ struct Config {
     // nearest; -1 = leave untouched. (Never call the raw user32 sampling-mode setter
     // by value - it takes a pointer and access-violates; mag_host owns the safe wrapper.)
     int txSamplingMode = 1;
-    // View write cadence (issue #195, hot): minimum ms between pan writes, 0 = every tick.
-    // Counterintuitive but field-measured: native Magnifier updates its view only ~64 times a
-    // second (15.6ms - its threadpool timer at the default resolution) in BIGGER steps than
-    // ours at 144Hz, and looks smoother. The magnified cursor appears locked to native's view
-    // updates while ours is drawn live, so our cursor moves against the view between writes;
-    // matching native's cadence tests whether a slower, locked-looking view beats a faster one.
-    int txWriteIntervalMs = 0;
-    // Cursor lead prediction (issue #195, hot): milliseconds of cursor motion to aim AHEAD of
-    // the sampled position in free-cursor mode. DWM latches the cursor plane late while the
-    // magnified content it composites against is older, so the view lags the pointer by
-    // velocity * that fixed latency * level - the wobble that grows with pan speed, and it
-    // survives any write-freshness fix (repanning at ~300/s changed nothing, measured).
-    // Predicting forward by the latency cancels it. Try 8/12/16; 0 = off (DEFAULT - native does
-    // no prediction at all and itself runs 12-18ms behind at speed, measured; a noisy velocity
-    // estimate would add variance, and VARIANCE is the wobble. Enable only to trade a smooth
-    // constant lead for a shorter one.)
-    int txCursorLeadMs = 0;
-    // High-rate cursor repan (issue #195, hot): poll rate in Hz for re-panning the free-cursor
-    // view between composites. DWM composites the cursor from its live position but uses the
-    // last offset we wrote, so a once-per-frame write is up to a frame stale -> view lag =
-    // hand-speed * staleness * level (the lead), and its jitter is the wobble. Native writes
-    // from a mouse hook at sub-ms staleness; this matches it. 0 = off (one write per tick).
-    int txCursorPollHz = 1000;
-    // Free-cursor view easing (issue #195, hot): time constant in ms for the view's pursuit of
-    // the free cursor, NORMALIZED BY LEVEL (tau_eff = txFollowEaseMs / level) so the on-screen
-    // feel is identical at every zoom. Exact per-tick centering makes the per-composite timing
-    // noise between DWM's cursor sampling and our transform writes the ONLY relative motion -
-    // i.e. pure visible wobble; easing turns it into a smooth native-style glide that swallows
-    // the noise. 0 = no easing (the wobbling exact-center probe).
-    int txFollowEaseMs = 200;
-    // Sprite/transform skew compensation (issue #195, hot, A/B): the cursor sprite (a layered
-    // window) and the magnification transform are separate DWM state; if one consistently
-    // applies a composite later than the other, the cursor leads/trails the view by
-    // per-tick-velocity * level while panning. This knob offsets the sprite by
-    // velocity * txSpriteLead ticks to cancel a measured constant skew: +1 if the sprite
-    // trails the view (shake in the pan direction), -1 if it leads. 0 (default) = off.
-    double txSpriteLead = 0.0;
     // MPO buster (issue #191, hot): 1 (default) = during transform GAME sessions on MPO-ENABLED
     // machines, show a fullscreen alpha-1 click-through ghost that demotes the game off its
     // hardware overlay plane - off the plane there is no 16-bit translation field to overflow,

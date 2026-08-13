@@ -41,14 +41,6 @@ public:
     void setMpoBusterWanted(bool wanted) { mpoBusterWanted_ = wanted; }
     void setMpoExposed(bool exposed) { mpoExposed_ = exposed; }
     bool mpoGhostSettled() const { return mpoGhost_.settled(GetTickCount64()); }
-    // Free-cursor repan between composites (issue #195): keeps the offset DWM samples fresh
-    // against the live cursor plane. Returns true when it actually wrote. Tick thread only.
-    bool fastCursorRepan(const Config& cfg);
-private:
-    // Aim point = cursor + velocity * txCursorLeadMs (issue #195): cancels the fixed
-    // cursor-plane-vs-content latency whose product with hand speed IS the observed wobble.
-    void predictCursor(const Config& cfg, double& x, double& y);
-public:
 private:
     bool fastPan_, smoothPan_, useSprite_;
     int  zorderBand_;                                // sprite z-band (above the shell); needs UIAccess
@@ -78,24 +70,7 @@ private:
     double sessionMaxLevel_ = 0.0;      // logged at teardown: scripted-run engagement proof
     unsigned long long lastChangeMs_ = 0;            // when the transform last REALLY changed
     int  lastSpriteX_ = INT_MIN, lastSpriteY_ = INT_MIN;   // dedup the game-session sprite move
-    double lastCenterX_ = -1e9, lastCenterY_ = -1e9;       // txSpriteLead velocity baseline (#195)
-    double easeCx_ = 0.0, easeCy_ = 0.0;                   // free-cursor eased view centre (#195)
-    bool   easeValid_ = false;
-    double frozenSrcL_ = 0.0, frozenSrcT_ = 0.0;           // frozen-view diagnostic (#195)
-    bool   frozenViewValid_ = false;
-    bool   publicSessionOpened_ = false;         // first write of a session went public (#195)
-    unsigned long long lastEaseMs_ = 0;
     bool   samplingApplied_ = false;                       // sampling mode set for this context
-    int    repanCount_ = 0;                                // repan rate proof (#195)
-    int    repanCalls_ = 0, repanDedupe_ = 0;              // how often it is invoked vs deduped
-    int    tickCount_ = 0;                                 // present() calls per second (#195)
-    unsigned long long lastPanWriteMs_ = 0;                // txWriteIntervalMs cadence throttle
-    double lastWrittenLevel_ = 0.0;
-    int    lastRepanCx_ = INT_MIN, lastRepanCy_ = INT_MIN; // pointer-movement idle detection
-    unsigned long long repanLogMs_ = 0;
-    double velX_ = 0.0, velY_ = 0.0, velT_ = 0.0;          // cursor velocity estimator (#195)
-    double velEmaX_ = 0.0, velEmaY_ = 0.0;
-    bool   velValid_ = false;
     // Magnification context lifetime (issue #148). While a context is alive DWM composites
     // magnification-aware, so every cursor visibility/shape change an app makes costs a
     // re-composite: a game that toggles its pointer on middle-click hitches even at 1x

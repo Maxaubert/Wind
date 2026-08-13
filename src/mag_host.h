@@ -12,22 +12,9 @@ bool MagApiAcquire();
 void MagApiRelease();
 bool MagApiAlive();
 
-// HOOK-THREAD PAN (issue #195). Native Magnifier writes its magnification offset from inside
-// its own low-level mouse hook, so the offset it publishes is paired with exactly the cursor
-// sample that event carried - no tick clock in between. Replicating that needs a write callable
-// off the tick thread, which is only safe on the PRIVATE channel (measured 0.09ms per write vs
-// ~4ms for the public API - a public write inside a hook would stall the whole input pipeline).
-// The tick thread publishes the session parameters here; the hook thread reads them and writes.
-struct HookPanState {
-    volatile long  active = 0;      // 1 while a free-cursor transform session wants hook panning
-    volatile double level = 1.0;
-    volatile long  monX = 0, monY = 0, monW = 0, monH = 0;
-};
-HookPanState& HookPan();
-// Called from the LL mouse hook on a real pointer move. Computes native's exact offset
-// (cursor - trunc(halfScreen/level), clamped) and writes it on the private channel. No-op
-// unless HookPan().active. Returns true if it wrote.
-bool HookPanWrite(int cursorX, int cursorY);
+// (A hook-thread pan experiment lived here for issue #195 - writing the offset from inside the
+// LL mouse hook, native-style. Removed: the Magnification API is thread-affine, so the
+// input-transform publish silently failed off the tick thread and left the cursor unmagnified.)
 class MagHost {
 public:
     bool initialize();
