@@ -388,7 +388,9 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         easeCx_ += (px - easeCx_) * aE;
         easeCy_ += (py - easeCy_) * aE;
         OffsetF o = ComputeOffsetF(easeCx_, easeCy_, applyLevel, mon_.w, mon_.h);
-        srcL = o.x; srcT = o.y;
+        // Whole-pixel offsets, exactly like native (see fastCursorRepan): no fractional
+        // residual means no level-amplified shimmer on the magnified cursor.
+        srcL = std::trunc(o.x); srcT = std::trunc(o.y);
     } else if (cfg.txCursorProbe != 0) {
         OffsetF o = ComputeOffsetF((double)r.clickDesktopX, (double)r.clickDesktopY,
                                    applyLevel, mon_.w, mon_.h);
@@ -772,6 +774,13 @@ bool TransformModel::fastCursorRepan(const Config& cfg) {
     double aimX = pc.x - mon_.x, aimY = pc.y - mon_.y;
     predictCursor(cfg, aimX, aimY);
     OffsetF o = ComputeOffsetF(aimX, aimY, lastLevel_, mon_.w, mon_.h);
+    // Native's exact arithmetic (disassembly): offset = cursor - trunc(halfScreen / level),
+    // TRUNCATED to a whole desktop pixel. Both the cursor plane position and the offset are
+    // then integers, so (cursor - offset) is an exact integer and the cursor's magnified
+    // screen position carries NO fractional residual at any zoom. A sub-pixel offset leaves
+    // frac(off)*level of shimmer that re-randomises on every write - up to 20 screen px at
+    // 20x, at our write rate.
+    o.x = std::trunc(o.x); o.y = std::trunc(o.y);
     MagTransform m = ComputeMagTransform(o.x, o.y, lastLevel_, mon_.w, mon_.h);
     // Same 16-bit backstop the main write path enforces (issue #191): this path writes the
     // same channel, so it must honour the same never-exceed invariant.

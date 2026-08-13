@@ -2223,22 +2223,33 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         // async writer was measured-negative) - hence polling here rather than in the hook.
         if (dwmPaces && ts.cfg.txCursorPollHz > 0 && ts.prevLvl > 1.001) {
             auto* tmFast = dynamic_cast<TransformModel*>(ts.model);
-            if (tmFast && timer) {
+            HANDLE mv = (HANDLE)g_input.mouseMoveEvent();
+            if (tmFast) {
                 const int hzNow = ts.hz > 0 ? ts.hz : 60;
-                // Spend most of the frame polling, then let DwmFlush land the resync. Leaving
+                // Spend most of the frame here, then let DwmFlush land the resync. Leaving
                 // headroom is what keeps us from overshooting into the NEXT composite (which
                 // would halve the tick rate).
                 const long long budgetUs = (1000000LL / hzNow) * 3 / 4;
-                const long long stepUs = 1000000LL / ts.cfg.txCursorPollHz;
                 LARGE_INTEGER pf, pa, pb;
                 QueryPerformanceFrequency(&pf);
                 QueryPerformanceCounter(&pa);
                 for (;;) {
                     QueryPerformanceCounter(&pb);
-                    if ((pb.QuadPart - pa.QuadPart) * 1000000LL / pf.QuadPart >= budgetUs) break;
-                    LARGE_INTEGER step; step.QuadPart = -(stepUs * 10);   // 100ns units
-                    if (SetWaitableTimer(timer, &step, 0, nullptr, nullptr, FALSE))
-                        WaitForSingleObject(timer, 5);
+                    const long long spent = (pb.QuadPart - pa.QuadPart) * 1000000LL / pf.QuadPart;
+                    if (spent >= budgetUs) break;
+                    // Wait for the NEXT REAL POINTER MOVE, then repan immediately: the offset we
+                    // publish is paired with the cursor sample that same motion produced, which
+                    // is what native gets by writing from inside its hook. A timer-paced poll
+                    // pairs offsets with samples of random staleness = variable lead = wobble
+                    // (measured: 300 writes/s changed nothing). Bounded wait so a still hand
+                    // still reaches DwmFlush on time; no hook (WIND_NOHOOK) falls back to it too.
+                    const DWORD waitMs = (DWORD)((budgetUs - spent) / 1000) + 1;
+                    if (mv) WaitForSingleObject(mv, waitMs);
+                    else if (timer) {
+                        LARGE_INTEGER step; step.QuadPart = -10000;   // 1ms
+                        if (SetWaitableTimer(timer, &step, 0, nullptr, nullptr, FALSE))
+                            WaitForSingleObject(timer, 5);
+                    }
                     tmFast->fastCursorRepan(ts.cfg);
                 }
             }

@@ -138,8 +138,11 @@ struct Config {
     // magnified content it composites against is older, so the view lags the pointer by
     // velocity * that fixed latency * level - the wobble that grows with pan speed, and it
     // survives any write-freshness fix (repanning at ~300/s changed nothing, measured).
-    // Predicting forward by the latency cancels it. Try 8/12/16; 0 = off.
-    int txCursorLeadMs = 12;
+    // Predicting forward by the latency cancels it. Try 8/12/16; 0 = off (DEFAULT - native does
+    // no prediction at all and itself runs 12-18ms behind at speed, measured; a noisy velocity
+    // estimate would add variance, and VARIANCE is the wobble. Enable only to trade a smooth
+    // constant lead for a shorter one.)
+    int txCursorLeadMs = 0;
     // High-rate cursor repan (issue #195, hot): poll rate in Hz for re-panning the free-cursor
     // view between composites. DWM composites the cursor from its live position but uses the
     // last offset we wrote, so a once-per-frame write is up to a frame stale -> view lag =

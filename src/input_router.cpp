@@ -172,6 +172,19 @@ static LRESULT CALLBACK KbProc(int code, WPARAM wParam, LPARAM lParam) {
 static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
     if (code == HC_ACTION && g_router) {
         auto* mi = reinterpret_cast<MSLLHOOKSTRUCT*>(lParam);
+        // Pan coherence (issue #195): signal the tick thread the instant the pointer actually
+        // moves. Native Magnifier writes its magnification offset from inside its own mouse
+        // hook, so the offset it publishes is paired with exactly the cursor sample that event
+        // produced. A free-running poll instead pairs each offset with a sample of RANDOM
+        // staleness - variable lead, which is what the eye reads as wobble (measured: raising
+        // the poll rate to ~300/s changed nothing, it only re-rolled the dice faster). The
+        // Magnification API is thread-affine, so the write itself must stay on the tick thread:
+        // this event wakes it immediately instead. Injected moves are skipped - our own
+        // SetCursorPos must never drive a repan (that is the weld tug-of-war, self-inflicted).
+        if (wParam == WM_MOUSEMOVE && !(mi->flags & LLMHF_INJECTED)) {
+            HANDLE mv = (HANDLE)g_router->mouseMoveEvent();
+            if (mv) SetEvent(mv);
+        }
         // Inspect-mode click-to-look-point. Swallow the real DOWN (it would land at the frozen cursor)
         // and signal the tick, which fires a clean absolute click at the crosshair. Swallow the matching
         // real UP too. Our own injected click carries LLMHF_INJECTED, so it skips this and passes through.
@@ -290,6 +303,9 @@ bool InputRouter::start(int inButtonId, int inButtonId2, int outButtonId, int ou
     outButtonId_.store(outButtonId, std::memory_order_relaxed);
     outButtonId2_.store(outButtonId2, std::memory_order_relaxed);
     swallow_ = swallow;
+    // Pan-coherence wake event (issue #195). Auto-reset: the tick thread consumes one signal
+    // per real pointer move. Created before the hook thread so the hook never races a null.
+    if (!mouseMoveEvent_) mouseMoveEvent_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     // Diagnostic: WIND_NOHOOK=1 skips the low-level mouse hook entirely (button state still arrives
     // via Raw Input). Kept as a fallback / A-B toggle; side-button swallowing is disabled in it.
     if (GetEnvironmentVariableW(L"WIND_NOHOOK", nullptr, 0) > 0) {
@@ -402,7 +418,8 @@ void InputRouter::stop() {
     for (auto& d : g_commitDown) d.store(false, std::memory_order_relaxed);   // clear inspect click latches
     hookActive_.store(false);
     kbHookActive_.store(false);
-    g_router = nullptr;
+    g_router = nullptr;   // cleared BEFORE closing the event: the hook reads it through g_router
+    if (mouseMoveEvent_) { CloseHandle(mouseMoveEvent_); mouseMoveEvent_ = nullptr; }
 }
 void InputRouter::drainRaw(int& dx, int& dy) {
     dx = state_.rawDx.exchange(0);
