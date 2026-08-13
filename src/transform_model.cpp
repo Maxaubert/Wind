@@ -345,6 +345,18 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         OffsetF o = ComputeOffsetF(r.centerX, r.centerY, applyLevel, mon_.w, mon_.h);
         srcL = o.x; srcT = o.y;
     }
+    // Real-cursor mode (issue #195): the visible pointer is the REAL cursor, DWM-composited
+    // magnified (field-verified: native treatment on the public channel). It is WELDED to the
+    // integer clickDesktop point - so the transform must be anchored to that SAME integer
+    // point, or the +-frac residual between round(cx) and float cx displays as a
+    // +-0.5px*level re-centering sawtooth on the cursor (the reported wobble). Anchoring here
+    // makes T(weld) == screen centre EXACT by construction; the view inherits the integer
+    // grid (level-px steps at slow pan), exactly like native Magnifier's cursor-driven view.
+    if (cfg.txCursorProbe != 0) {
+        OffsetF o = ComputeOffsetF((double)r.clickDesktopX, (double)r.clickDesktopY,
+                                   applyLevel, mon_.w, mon_.h);
+        srcL = o.x; srcT = o.y;
+    }
     idleReleaseMs_ = cfg.txIdleReleaseMs;   // hot-reloadable release window
     if (!ensureMag()) return;   // lazy context: the session's first write brings DWM up
     if (level > sessionMaxLevel_) sessionMaxLevel_ = level;
