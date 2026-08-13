@@ -61,6 +61,27 @@ as a diagnostic only. The SHIPPED transform cursor is the desktop-space sprite w
 sub-pixel residual baked into its content per tick (`moveToSubpixel`, issue #195) - in-scene,
 grows naturally with the zoom, and wobble-free (an integer-positioned layered window under the
 transform wobbles +-0.5px * level otherwise).
+WHY THE CURSOR IS A SPRITE AND NOT THE REAL POINTER (issue #195, field-settled 2026-08-13 after
+a full day of A/Bs): DWM CAN magnify the real cursor - it looks native-quality and unpixelated,
+and it is what `txCursorProbe=1/2` demonstrate. But the real pointer lives in DWM's own CURSOR
+PLANE, drawn continuously from the live position, while our view moves in discrete steps: the
+relative motion is a sawtooth of (hand movement per view update) x level, which reads as a
+cursor that WOBBLES, badly, at high zoom. It is not fixable from our side - eliminated by
+measurement: both write channels, write rates 30-1000/s, write phase, easing, prediction,
+trailing, integer vs sub-pixel offsets, welded vs free cursor, hook-thread writes, and matching
+native's own cadence (which is SLOWER than ours: 64Hz/12-44px steps vs our 144Hz/5-19px, measured
+with a 1kHz injector - "pan finer and more often" is the wrong target). Slowing our cadence only
+slows the wobble. The frozen-view diagnostic (`txCursorProbe=3`) isolates it: with the view
+static the real cursor is perfectly smooth, so the cursor rendering is fine and the stepping view
+is what it beats against. The DESKTOP-SPACE SPRITE has none of this by construction - it is IN
+the scene, so DWM magnifies it together with the content and it cannot move against it. The price
+is pixelation (a 32px bitmap blown up by the zoom) and that is the accepted trade: a rock-steady
+blocky cursor beats a crisp wobbling one. `txCursorProbe` (0=sprite, the SHIPPED default; 1=welded
+real cursor; 2=free real cursor; 3=frozen-view diagnostic; 4=hook-thread pan, dead end - the
+Magnification API is thread-affine so the input-transform publish silently fails there) is kept
+for re-testing on future Windows builds. NOTE: `fastPan` is read at model CONSTRUCTION - an ini
+change needs a RESTART, and the private channel does NOT magnify the real cursor (probe modes
+need `fastPan=0`; the sprite modes are free to use the fast private channel).
 TRANSFORM CURSOR: WELDED (re-test of the #148 weld, commit 8a52040; supersedes the retired
 FOLLOW+FREEZE design - git history has that machinery). The transform welds the REAL cursor to
 the lens point per tick (transform_model.cpp; deduped, suspended by drag-follow), exposes
