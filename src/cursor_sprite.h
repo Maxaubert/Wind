@@ -59,7 +59,7 @@ private:
     std::vector<uint32_t> nativeShape_;   // cached native-res premultiplied shape (compose source)
     int     nsW_ = 0, nsH_ = 0;           // cached shape dimensions
     double  fracX_ = 0.0, fracY_ = 0.0;   // sub-pixel residual baked into the content
-    int     lastBaseX_ = INT_MIN, lastBaseY_ = INT_MIN;   // dedupe the integer SetWindowPos
+    int     baseX_ = INT_MIN, baseY_ = INT_MIN;   // integer base; applied atomically in the ULW
     bool    visible_ = false;
     bool    crosshairMode_ = false;          // window currently holds the crosshair pixels
     unsigned long long lastTopmostMs_ = 0;   // last HWND_TOPMOST re-assert (throttled)

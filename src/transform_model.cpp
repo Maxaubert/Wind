@@ -20,6 +20,7 @@ void TransformModel::resetTransformState() {
     lastInputXformOn_ = false;
     ixTick_ = 0; ixPending_ = false;
     lastSpriteX_ = INT_MIN; lastSpriteY_ = INT_MIN;
+    lastCenterX_ = -1e9; lastCenterY_ = -1e9;   // txSpriteLead velocity baseline (issue #195)
     haveLastClick_ = false;
 }
 
@@ -587,12 +588,21 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             } else {
                 // Sub-pixel positioning (issue #195, the wobble fix): the CONTINUOUS lens
                 // centre, not the rounded click point. The fractional residual is baked into
-                // the sprite content (moveToSubpixel), so the displayed cursor sits exactly at
-                // screen centre at any zoom - the integer-window-position quantization that the
-                // transform magnified into a +-10px re-centering wobble at 20x is gone. The
-                // welded REAL cursor stays on clickDesktop (integer) for clicks; the <=0.5px
-                // visual offset between them is sub-display-pixel at any level.
-                sprite_->moveToSubpixel(r.centerX + mon_.x, r.centerY + mon_.y);
+                // the sprite content and position+content travel in ONE atomic ULW
+                // (moveToSubpixel), so the displayed cursor sits exactly at screen centre at
+                // any zoom - the integer-window-position quantization that the transform
+                // magnified into a +-10px re-centering wobble at 20x is gone, and an integer
+                // crossing can never split across composites. The welded REAL cursor stays on
+                // clickDesktop (integer) for clicks; the <=0.5px visual offset between them is
+                // sub-display-pixel at any level. txSpriteLead (A/B) cancels a constant
+                // sprite-vs-transform composite skew, if the field shows one.
+                double sxF = r.centerX, syF = r.centerY;
+                if (cfg.txSpriteLead != 0.0 && lastCenterX_ > -1e8) {
+                    sxF += (r.centerX - lastCenterX_) * cfg.txSpriteLead;
+                    syF += (r.centerY - lastCenterY_) * cfg.txSpriteLead;
+                }
+                lastCenterX_ = r.centerX; lastCenterY_ = r.centerY;
+                sprite_->moveToSubpixel(sxF + mon_.x, syF + mon_.y);
             }
             sprite_->show();
             sprite_->keepOnTop();

@@ -116,6 +116,13 @@ struct Config {
     // rests - so hover hit-testing is exact whenever the view is still, and stale by at most
     // ~N ticks of pan mid-gesture. Cuts the per-tick DWM message rate during ramps/pans.
     int ixDecimate = 4;
+    // Sprite/transform skew compensation (issue #195, hot, A/B): the cursor sprite (a layered
+    // window) and the magnification transform are separate DWM state; if one consistently
+    // applies a composite later than the other, the cursor leads/trails the view by
+    // per-tick-velocity * level while panning. This knob offsets the sprite by
+    // velocity * txSpriteLead ticks to cancel a measured constant skew: +1 if the sprite
+    // trails the view (shake in the pan direction), -1 if it leads. 0 (default) = off.
+    double txSpriteLead = 0.0;
     // MPO buster (issue #191, hot): 1 (default) = during transform GAME sessions on MPO-ENABLED
     // machines, show a fullscreen alpha-1 click-through ghost that demotes the game off its
     // hardware overlay plane - off the plane there is no 16-bit translation field to overflow,

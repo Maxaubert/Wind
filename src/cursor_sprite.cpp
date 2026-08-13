@@ -274,32 +274,37 @@ void CursorSprite::composeAndPresent() {
     blend.AlphaFormat = AC_SRC_ALPHA;
     SIZE size{ S, S };
     POINT srcPt{ 0, 0 };
-    UpdateLayeredWindow(hwnd_, nullptr, nullptr, &size, memDc, &srcPt, 0, &blend, ULW_ALPHA);
+    // Sub-pixel desktop mode: position + content move ATOMICALLY in this one call (see
+    // moveToSubpixel). Other modes (crosshair, band-16) position via moveTo/SetWindowPos and
+    // must not have a stale base applied here.
+    POINT dstPt{ baseX_ - hotX_, baseY_ - hotY_ };
+    const bool atomicPos = !crosshairMode_ && scale_ == 1 && baseX_ != INT_MIN;
+    UpdateLayeredWindow(hwnd_, nullptr, atomicPos ? &dstPt : nullptr, &size, memDc, &srcPt,
+                        0, &blend, ULW_ALPHA);
     SelectObject(memDc, oldBmp);
     DeleteObject(dib);
     DeleteDC(memDc);
     ReleaseDC(nullptr, screenDc);
 }
 
-// Sub-pixel positioning for the desktop-space mode (issue #195): integer base via SetWindowPos
-// (deduped), fractional residual baked into the content (deduped on the fraction - an idle
-// tick re-presents nothing). The hotspot lands exactly on (desktopX, desktopY) in continuous
-// coordinates, so under the fullscreen transform the cursor sits pixel-exactly on the lens
-// point at any zoom - no wobble, no stick-then-jump.
+// Sub-pixel positioning for the desktop-space mode (issue #195): the integer base position and
+// the fractional residual baked into the content travel in ONE UpdateLayeredWindow call
+// (composeAndPresent passes pptDst), so DWM can never composite a frame holding the new
+// position with the old content or vice versa. That split was field-visible: an integer
+// crossing whose SetWindowPos and content ULW landed in different composites flashed the
+// cursor a full pixel * level off (20px at 20x) - during a pan, crossings happen every tick
+// or two, which read as constant shaking. The hotspot lands exactly on (desktopX, desktopY)
+// in continuous coordinates, so under the fullscreen transform the cursor sits pixel-exactly
+// on the lens point at any zoom.
 void CursorSprite::moveToSubpixel(double desktopX, double desktopY) {
     if (hwnd_ == nullptr) return;
     const int bx = (int)std::floor(desktopX);
     const int by = (int)std::floor(desktopY);
     const double fx = desktopX - bx, fy = desktopY - by;
-    if (bx != lastBaseX_ || by != lastBaseY_) {
-        lastBaseX_ = bx; lastBaseY_ = by;
-        SetWindowPos(hwnd_, nullptr, bx - hotX_, by - hotY_, 0, 0,
-                     SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
-    }
-    if (!crosshairMode_ && scale_ == 1 && (fx != fracX_ || fy != fracY_)) {
-        fracX_ = fx; fracY_ = fy;
-        composeAndPresent();
-    }
+    if (bx == baseX_ && by == baseY_ && fx == fracX_ && fy == fracY_) return;   // idle tick
+    baseX_ = bx; baseY_ = by;
+    fracX_ = fx; fracY_ = fy;
+    composeAndPresent();
 }
 
 // Change the sprite's integer zoom scale. Invalidates the shape cache so the next
