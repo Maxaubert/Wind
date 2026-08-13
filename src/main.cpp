@@ -1049,7 +1049,13 @@ static void RunTick(TickState& t) {
         // model + borderless cover), not any cursor state: the wall must hold in the welded
         // design too. MPO off (this rig), or render/desktop sessions: unrestricted (field-clean).
         auto* tmWall = dynamic_cast<TransformModel*>(t.model);
-        const bool transformGame = tmWall != nullptr && fsCover && fgBorderless;
+        // A GAME session, not merely "something covers the monitor": the DESKTOP also presents
+        // as a borderless full-monitor foreground, so without the shell test every desktop zoom
+        // ran the MPO machinery - a fullscreen alpha-1 ghost window in the composition path plus
+        // a pan wall that engages whenever the ghost's settle evidence lapses. That clamp
+        // flickering on and off is a wobble generator, and the #148 overflow it guards only
+        // happens with a GAME surface on a hardware overlay plane (issue #195 field hunt).
+        const bool transformGame = tmWall != nullptr && fsCover && fgBorderless && !t.fgCacheShell;
         const bool mpoExposed = transformGame && !g_mpoDisabled;
         // MPO buster (issue #191): a fullscreen alpha-1 ghost window demotes the game off its
         // hardware overlay plane by geometry (the parking law, PresentMon-proven) - no plane, no
