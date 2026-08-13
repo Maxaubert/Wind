@@ -22,6 +22,7 @@ void TransformModel::resetTransformState() {
     lastSpriteX_ = INT_MIN; lastSpriteY_ = INT_MIN;
     lastCenterX_ = -1e9; lastCenterY_ = -1e9;   // txSpriteLead velocity baseline (issue #195)
     easeValid_ = false;                          // free-cursor view easing re-seeds per session
+    samplingApplied_ = false;                    // re-apply sampling mode per fresh context
     haveLastClick_ = false;
 }
 
@@ -386,6 +387,17 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     }
     idleReleaseMs_ = cfg.txIdleReleaseMs;   // hot-reloadable release window
     if (!ensureMag()) return;   // lazy context: the session's first write brings DWM up
+    // Sampling quality (issue #195): apply once per context. WM's smooth-edges state is
+    // system-wide DWM sampling; setting it makes the magnified scene AND the DWM cursor scale
+    // smoothly instead of blocky (field: launching WM alongside smoothed our session live).
+    if (cfg.txSamplingMode >= 0 && !samplingApplied_) {
+        samplingApplied_ = true;
+        unsigned prev = ~0u;
+        host_.getSamplingMode(&prev);
+        const bool ok = host_.setSamplingMode((unsigned)cfg.txSamplingMode);
+        wind::Log(wind::LogLevel::Info, "transform",
+                  "sampling mode %d applied=%d (was %u)", cfg.txSamplingMode, ok ? 1 : 0, prev);
+    }
     if (level > sessionMaxLevel_) sessionMaxLevel_ = level;
     const bool ramping = applyLevel != level || (applyLevel != lastLevel_ && lastLevel_ > 0.0);
     MagTransform m = ComputeMagTransform(srcL, srcT, applyLevel, mon_.w, mon_.h);

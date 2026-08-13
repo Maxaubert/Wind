@@ -43,8 +43,22 @@ bool MagHost::initialize() {
         HMODULE u32 = GetModuleHandleW(L"user32.dll");
         setMagDesktop_ = reinterpret_cast<int(__stdcall*)(double, int, int)>(
             u32 ? GetProcAddress(u32, "SetMagnificationDesktopMagnification") : nullptr);
+        setSampling_ = reinterpret_cast<int(__stdcall*)(unsigned)>(
+            u32 ? GetProcAddress(u32, "SetMagnificationDesktopSamplingMode") : nullptr);
+        getSampling_ = reinterpret_cast<int(__stdcall*)(unsigned*)>(
+            u32 ? GetProcAddress(u32, "GetMagnificationDesktopSamplingMode") : nullptr);
     }
     return initialized_;
+}
+
+bool MagHost::setSamplingMode(unsigned mode) {
+    if (!initialized_ || !setSampling_) return false;
+    return setSampling_(mode) != 0;
+}
+
+bool MagHost::getSamplingMode(unsigned* mode) {
+    if (!initialized_ || !getSampling_ || !mode) return false;
+    return getSampling_(mode) != 0;
 }
 
 bool MagHost::setTransform(float zoom, int offX, int offY, int tx, int ty, bool fastPan) {

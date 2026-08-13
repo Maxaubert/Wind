@@ -125,6 +125,12 @@ struct Config {
     // weld pixel (field verdict: residual wobble - the weld itself fights the hand).
     // 2 = FREE cursor, view centres on the actual cursor position, no weld (native design).
     int txCursorProbe = 0;
+    // Magnification sampling quality (issue #195, hot, applied at session start): 1 (default) =
+    // set the DWM desktop-magnification sampling mode to SMOOTH at each transform session start
+    // (the undocumented SetMagnificationDesktopSamplingMode - what native Magnifier's "smooth
+    // edges of images and text" flips; field evidence: launching WM made OUR magnified cursor
+    // turn smooth instantly, so the state is system-wide). 0 = set nearest; -1 = leave alone.
+    int txSamplingMode = 1;
     // Free-cursor view easing (issue #195, hot): time constant in ms for the view's pursuit of
     // the free cursor, NORMALIZED BY LEVEL (tau_eff = txFollowEaseMs / level) so the on-screen
     // feel is identical at every zoom. Exact per-tick centering makes the per-composite timing

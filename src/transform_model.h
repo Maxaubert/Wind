@@ -74,6 +74,7 @@ private:
     double easeCx_ = 0.0, easeCy_ = 0.0;                   // free-cursor eased view centre (#195)
     bool   easeValid_ = false;
     unsigned long long lastEaseMs_ = 0;
+    bool   samplingApplied_ = false;                       // sampling mode set for this context
     // Magnification context lifetime (issue #148). While a context is alive DWM composites
     // magnification-aware, so every cursor visibility/shape change an app makes costs a
     // re-composite: a game that toggles its pointer on middle-click hitches even at 1x
