@@ -81,6 +81,8 @@ private:
     double lastCenterX_ = -1e9, lastCenterY_ = -1e9;       // txSpriteLead velocity baseline (#195)
     double easeCx_ = 0.0, easeCy_ = 0.0;                   // free-cursor eased view centre (#195)
     bool   easeValid_ = false;
+    double frozenSrcL_ = 0.0, frozenSrcT_ = 0.0;           // frozen-view diagnostic (#195)
+    bool   frozenViewValid_ = false;
     unsigned long long lastEaseMs_ = 0;
     bool   samplingApplied_ = false;                       // sampling mode set for this context
     int    repanCount_ = 0;                                // repan rate proof (#195)

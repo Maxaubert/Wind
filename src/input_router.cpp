@@ -1,6 +1,7 @@
 #include "input_router.h"
 #include "config.h"     // IsForbiddenBindVk (keyboard-bind safety blocklist)
 #include "logging.h"    // hook-watchdog events (issue #156)
+#include "mag_host.h"   // HookPanWrite: pan from the mouse event itself (issue #195)
 #include <windows.h>
 #include <atomic>
 namespace wind {
@@ -187,6 +188,12 @@ static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
         // SendInput exercises exactly the path a real hand does (issue #195 wobble probe).
         if (wParam == WM_MOUSEMOVE) {
             g_router->state().moveSignals.fetch_add(1, std::memory_order_relaxed);
+            // Pan RIGHT HERE, from the event itself - native's architecture (issue #195). The
+            // offset written is paired with exactly this cursor sample, with no tick clock in
+            // between, which is the one structural difference left between us and magnify.exe.
+            // Private channel only (0.09ms); a ~4ms public write here would stall input.
+            // No-op unless a free-cursor transform session armed it.
+            wind::HookPanWrite(mi->pt.x, mi->pt.y);
             HANDLE mv = (HANDLE)g_router->mouseMoveEvent();
             if (mv) SetEvent(mv);
         }

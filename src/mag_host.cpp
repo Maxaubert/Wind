@@ -36,6 +36,47 @@ void MagApiRelease() {
 
 bool MagApiAlive() { return g_magRefs > 0; }
 
+// Hook-thread pan (issue #195). The private setter is resolved once by MagHost::initialize and
+// cached here so the hook thread never touches GetProcAddress or the MagHost object.
+static int (__stdcall* g_setMagDesktopShared)(double, int, int) = nullptr;
+
+HookPanState& HookPan() {
+    static HookPanState s;
+    return s;
+}
+
+bool HookPanWrite(int cursorX, int cursorY) {
+    HookPanState& hp = HookPan();
+    if (!hp.active || !g_setMagDesktopShared || !MagApiAlive()) return false;
+    const double level = hp.level;
+    if (level <= 1.001) return false;
+    const int w = hp.monW, h = hp.monH;
+    if (w <= 0 || h <= 0) return false;
+    // Native's exact arithmetic: offset = cursor - trunc(halfScreen / level), clamped to the
+    // desktop, truncated to whole desktop pixels (so cursor - offset is an exact integer and
+    // the magnified cursor carries no fractional residual).
+    const double halfW = (double)(int)(w / (2.0 * level));
+    const double halfH = (double)(int)(h / (2.0 * level));
+    double srcL = (double)(cursorX - hp.monX) - halfW;
+    double srcT = (double)(cursorY - hp.monY) - halfH;
+    const double maxL = w - w / level, maxT = h - h / level;
+    if (srcL < 0.0) srcL = 0.0; else if (srcL > maxL) srcL = maxL;
+    if (srcT < 0.0) srcT = 0.0; else if (srcT > maxT) srcT = maxT;
+    srcL = (double)(int)srcL; srcT = (double)(int)srcT;
+    const int tx = (int)(-srcL * level), ty = (int)(-srcT * level);
+    const bool ok = g_setMagDesktopShared(level, tx, ty) != 0;
+    // Publish the MATCHING input transform in the same breath. Field-proven necessity: the
+    // magnified cursor exists only while the input transform agrees with the applied view
+    // transform - drive the view from the hook while the tick publishes the rects on its own
+    // clock and the cursor drops to unmagnified permanently. Any momentary disagreement is
+    // therefore visible on the cursor, which is why the two must always travel together.
+    RECT src{ (LONG)(hp.monX + srcL), (LONG)(hp.monY + srcT),
+              (LONG)(hp.monX + srcL + w / level), (LONG)(hp.monY + srcT + h / level) };
+    RECT dst{ (LONG)hp.monX, (LONG)hp.monY, (LONG)(hp.monX + w), (LONG)(hp.monY + h) };
+    MagSetInputTransform(TRUE, &src, &dst);
+    return ok;
+}
+
 bool MagHost::initialize() {
     initialized_ = MagApiAcquire();
     privateBroken_ = false;   // re-probe the private channel on every (re-)init, not once ever
@@ -43,6 +84,7 @@ bool MagHost::initialize() {
         HMODULE u32 = GetModuleHandleW(L"user32.dll");
         setMagDesktop_ = reinterpret_cast<int(__stdcall*)(double, int, int)>(
             u32 ? GetProcAddress(u32, "SetMagnificationDesktopMagnification") : nullptr);
+        g_setMagDesktopShared = setMagDesktop_;   // hook thread writes through this
         // Bitmap smoothing (issue #195): Magnification.dll ORDINAL 1 = the undocumented
         // MagSetFullscreenUseBitmapSmoothing(BOOL) that Magnify.exe imports - the "smooth
         // edges of images and text" filter (sampling mode 0 = nearest, 1 = edge-preserving).
