@@ -43,22 +43,23 @@ bool MagHost::initialize() {
         HMODULE u32 = GetModuleHandleW(L"user32.dll");
         setMagDesktop_ = reinterpret_cast<int(__stdcall*)(double, int, int)>(
             u32 ? GetProcAddress(u32, "SetMagnificationDesktopMagnification") : nullptr);
-        setSampling_ = reinterpret_cast<int(__stdcall*)(unsigned)>(
-            u32 ? GetProcAddress(u32, "SetMagnificationDesktopSamplingMode") : nullptr);
-        getSampling_ = reinterpret_cast<int(__stdcall*)(unsigned*)>(
-            u32 ? GetProcAddress(u32, "GetMagnificationDesktopSamplingMode") : nullptr);
+        // Bitmap smoothing (issue #195): Magnification.dll ORDINAL 1 = the undocumented
+        // MagSetFullscreenUseBitmapSmoothing(BOOL) that Magnify.exe imports - the "smooth
+        // edges of images and text" filter (sampling mode 0 = nearest, 1 = edge-preserving).
+        // Rig-verified: callable without UIAccess, needs a live MagInitialize. NEVER call the
+        // raw user32 SetMagnificationDesktopSamplingMode directly - it takes a DWORD POINTER
+        // and a by-value call access-violates (field crash 2026-08-13); this wrapper is the
+        // safe, disassembly-verified entry.
+        HMODULE magDll = GetModuleHandleW(L"Magnification.dll");
+        setBitmapSmoothing_ = reinterpret_cast<int(__stdcall*)(int)>(
+            magDll ? GetProcAddress(magDll, MAKEINTRESOURCEA(1)) : nullptr);
     }
     return initialized_;
 }
 
 bool MagHost::setSamplingMode(unsigned mode) {
-    if (!initialized_ || !setSampling_) return false;
-    return setSampling_(mode) != 0;
-}
-
-bool MagHost::getSamplingMode(unsigned* mode) {
-    if (!initialized_ || !getSampling_ || !mode) return false;
-    return getSampling_(mode) != 0;
+    if (!initialized_ || !setBitmapSmoothing_) return false;
+    return setBitmapSmoothing_(mode != 0 ? 1 : 0) != 0;
 }
 
 bool MagHost::setTransform(float zoom, int offX, int offY, int tx, int ty, bool fastPan) {

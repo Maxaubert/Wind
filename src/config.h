@@ -125,13 +125,14 @@ struct Config {
     // weld pixel (field verdict: residual wobble - the weld itself fights the hand).
     // 2 = FREE cursor, view centres on the actual cursor position, no weld (native design).
     int txCursorProbe = 0;
-    // Magnification sampling quality (issue #195, applied at session start): the undocumented
-    // SetMagnificationDesktopSamplingMode - what native Magnifier's "smooth edges of images and
-    // text" flips; field evidence: launching WM made OUR magnified cursor turn smooth instantly
-    // (system-wide state). -1 (DEFAULT) = do not touch: calling the export with a guessed
-    // signature CRASHED in user32 (0xC0000005, field 2026-08-13) - it must stay off until the
-    // real signature is confirmed. 1 = smooth, 0 = nearest (only after the signature is known).
-    int txSamplingMode = -1;
+    // Magnification bitmap smoothing (issue #195, applied at session start): 1 (default) =
+    // MagSetFullscreenUseBitmapSmoothing(TRUE) via Magnification.dll ordinal 1 - the
+    // undocumented call behind native Magnifier's "smooth edges of images and text"
+    // (disassembly-verified on this rig; per-process, no UIAccess needed). A session that
+    // never sets it samples NEAREST = the pixelated magnified scene/cursor. 0 = force
+    // nearest; -1 = leave untouched. (Never call the raw user32 sampling-mode setter
+    // by value - it takes a pointer and access-violates; mag_host owns the safe wrapper.)
+    int txSamplingMode = 1;
     // Free-cursor view easing (issue #195, hot): time constant in ms for the view's pursuit of
     // the free cursor, NORMALIZED BY LEVEL (tau_eff = txFollowEaseMs / level) so the on-screen
     // feel is identical at every zoom. Exact per-tick centering makes the per-composite timing

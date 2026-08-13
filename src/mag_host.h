@@ -20,19 +20,16 @@ public:
     // (XAML/Explorer, Chromium) consult it for hit-testing too (issue #148 desktop dead zones).
     // Needs UIAccess: fails harmlessly on the dev build (logged once by the caller's model).
     bool setInputTransform(bool active, const RECT& src, const RECT& dst);
-    // Magnification sampling quality (issue #195): the undocumented sibling of the private
-    // magnification setter. Field evidence: merely launching native Magnifier makes the
-    // DWM-magnified cursor (and scene) turn smooth in OUR session too - WM flips a
-    // system-wide DWM sampling state (its "smooth edges of images and text" option). Returns
-    // false when the export is missing (logged by the caller); previous mode via the getter.
+    // Magnification sampling quality (issue #195): MagSetFullscreenUseBitmapSmoothing,
+    // Magnification.dll ordinal 1 (undocumented; Magnify.exe imports it - its "smooth edges
+    // of images and text"). 0 = nearest (the pixelated default of every plain session),
+    // nonzero = the edge-preserving filter. Per-process state; call after initialize().
     bool setSamplingMode(unsigned mode);
-    bool getSamplingMode(unsigned* mode);
     void shutdown();
 private:
     bool initialized_ = false;
     bool privateBroken_ = false;
     int  (__stdcall* setMagDesktop_)(double, int, int) = nullptr;
-    int  (__stdcall* setSampling_)(unsigned) = nullptr;
-    int  (__stdcall* getSampling_)(unsigned*) = nullptr;
+    int  (__stdcall* setBitmapSmoothing_)(int) = nullptr;
 };
 }

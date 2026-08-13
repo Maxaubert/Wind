@@ -395,16 +395,15 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     }
     idleReleaseMs_ = cfg.txIdleReleaseMs;   // hot-reloadable release window
     if (!ensureMag()) return;   // lazy context: the session's first write brings DWM up
-    // Sampling quality (issue #195): apply once per context. WM's smooth-edges state is
-    // system-wide DWM sampling; setting it makes the magnified scene AND the DWM cursor scale
-    // smoothly instead of blocky (field: launching WM alongside smoothed our session live).
+    // Bitmap smoothing (issue #195): apply once per context via the safe Magnification.dll
+    // ordinal-1 wrapper. Every session that never sets it runs NEAREST (mode 0) - the exact
+    // pixelation the field compared against native's crisp cursor/scene; Magnify.exe sets it
+    // at startup, which is why launching WM alongside smoothed our session live.
     if (cfg.txSamplingMode >= 0 && !samplingApplied_) {
         samplingApplied_ = true;
-        unsigned prev = ~0u;
-        host_.getSamplingMode(&prev);
         const bool ok = host_.setSamplingMode((unsigned)cfg.txSamplingMode);
         wind::Log(wind::LogLevel::Info, "transform",
-                  "sampling mode %d applied=%d (was %u)", cfg.txSamplingMode, ok ? 1 : 0, prev);
+                  "bitmap smoothing %d applied=%d", cfg.txSamplingMode, ok ? 1 : 0);
     }
     if (level > sessionMaxLevel_) sessionMaxLevel_ = level;
     const bool ramping = applyLevel != level || (applyLevel != lastLevel_ && lastLevel_ > 0.0);
