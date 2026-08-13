@@ -133,6 +133,13 @@ struct Config {
     // nearest; -1 = leave untouched. (Never call the raw user32 sampling-mode setter
     // by value - it takes a pointer and access-violates; mag_host owns the safe wrapper.)
     int txSamplingMode = 1;
+    // Cursor lead prediction (issue #195, hot): milliseconds of cursor motion to aim AHEAD of
+    // the sampled position in free-cursor mode. DWM latches the cursor plane late while the
+    // magnified content it composites against is older, so the view lags the pointer by
+    // velocity * that fixed latency * level - the wobble that grows with pan speed, and it
+    // survives any write-freshness fix (repanning at ~300/s changed nothing, measured).
+    // Predicting forward by the latency cancels it. Try 8/12/16; 0 = off.
+    int txCursorLeadMs = 12;
     // High-rate cursor repan (issue #195, hot): poll rate in Hz for re-panning the free-cursor
     // view between composites. DWM composites the cursor from its live position but uses the
     // last offset we wrote, so a once-per-frame write is up to a frame stale -> view lag =

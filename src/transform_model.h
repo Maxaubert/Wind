@@ -45,6 +45,11 @@ public:
     // against the live cursor plane. Returns true when it actually wrote. Tick thread only.
     bool fastCursorRepan(const Config& cfg);
 private:
+    // Aim point = cursor + velocity * txCursorLeadMs (issue #195): cancels the fixed
+    // cursor-plane-vs-content latency whose product with hand speed IS the observed wobble.
+    void predictCursor(const Config& cfg, double& x, double& y);
+public:
+private:
     bool fastPan_, smoothPan_, useSprite_;
     int  zorderBand_;                                // sprite z-band (above the shell); needs UIAccess
     bool spriteBand16_ = false;                      // P2 experiment: band-16 SCREEN-space sprite
@@ -78,6 +83,11 @@ private:
     bool   easeValid_ = false;
     unsigned long long lastEaseMs_ = 0;
     bool   samplingApplied_ = false;                       // sampling mode set for this context
+    int    repanCount_ = 0;                                // repan rate proof (#195)
+    unsigned long long repanLogMs_ = 0;
+    double velX_ = 0.0, velY_ = 0.0, velT_ = 0.0;          // cursor velocity estimator (#195)
+    double velEmaX_ = 0.0, velEmaY_ = 0.0;
+    bool   velValid_ = false;
     // Magnification context lifetime (issue #148). While a context is alive DWM composites
     // magnification-aware, so every cursor visibility/shape change an app makes costs a
     // re-composite: a game that toggles its pointer on middle-click hitches even at 1x

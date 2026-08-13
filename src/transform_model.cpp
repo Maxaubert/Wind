@@ -367,7 +367,8 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         // construction (the cursor IS at its true position - the FOLLOW-era no-dead-zones law).
         POINT pc{};
         GetCursorPos(&pc);
-        const double px = pc.x - mon_.x, py = pc.y - mon_.y;
+        double px = pc.x - mon_.x, py = pc.y - mon_.y;
+        predictCursor(cfg, px, py);   // cancel the fixed cursor-vs-content pipeline latency
         // QPC, not GetTickCount64 (field regression 2026-08-13): tick-count granularity is
         // ~16ms against ~7ms ticks, so dt read 0 and 16 alternately - the easing froze and
         // double-stepped frame to frame, beating against the composite clock (started fine,
@@ -717,6 +718,46 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     }
 }
 
+// Cursor lead prediction (issue #195, the velocity-proportional wobble/lead fix).
+//
+// Measured dead end that motivates this: repanning at ~300 writes/s (every ~3ms, well inside a
+// 7ms frame) changed the error not at all, so the offset DWM uses is NOT stale because of our
+// write cadence. What remains is a PIPELINE mismatch - DWM latches the cursor plane late (near
+// scanout) while the magnified content it is composited against was produced earlier - so the
+// view lags the pointer by velocity * pipelineLatency * level no matter how fresh our write is.
+// The error is therefore proportional to hand speed, which is exactly the field report ("more
+// dramatic the faster I pan") and why every freshness/easing attempt failed.
+//
+// A FIXED latency is cancelled by aiming where the cursor WILL be when the frame is displayed:
+// aim = position + velocity * txCursorLeadMs. Velocity is estimated from the sampled positions
+// with a short EMA (raw per-sample velocity is quantized noise; heavy smoothing would reintroduce
+// lag). The lead displacement is capped at a quarter view so a flick can never fling the view.
+void TransformModel::predictCursor(const Config& cfg, double& x, double& y) {
+    LARGE_INTEGER fr, now;
+    QueryPerformanceFrequency(&fr);
+    QueryPerformanceCounter(&now);
+    const double t = (double)now.QuadPart / (double)fr.QuadPart;
+    if (velValid_) {
+        const double dt = t - velT_;
+        if (dt > 1e-5 && dt < 0.1) {
+            const double vx = (x - velX_) / dt, vy = (y - velY_) / dt;
+            // EMA over ~25ms of samples: enough to reject per-sample quantization, short
+            // enough that the estimate still turns with the hand.
+            const double a = dt / (dt + 0.025);
+            velEmaX_ += (vx - velEmaX_) * a;
+            velEmaY_ += (vy - velEmaY_) * a;
+        }
+    }
+    velX_ = x; velY_ = y; velT_ = t; velValid_ = true;
+    if (cfg.txCursorLeadMs <= 0) return;
+    const double lead = cfg.txCursorLeadMs / 1000.0;
+    double dx = velEmaX_ * lead, dy = velEmaY_ * lead;
+    const double capX = (mon_.w / lastLevel_) / 4.0, capY = (mon_.h / lastLevel_) / 4.0;
+    if (dx > capX) dx = capX; else if (dx < -capX) dx = -capX;
+    if (dy > capY) dy = capY; else if (dy < -capY) dy = -capY;
+    x += dx; y += dy;
+}
+
 // High-rate cursor repan (issue #195): recompute the free-cursor offset from the CURRENT
 // cursor and write it, between composites. Deliberately minimal - no level ramp, no input
 // transform, no sprite, no weld: only the pan value DWM is about to sample, so the offset it
@@ -728,8 +769,9 @@ bool TransformModel::fastCursorRepan(const Config& cfg) {
     if (cfg.txFollowEaseMs > 0) return false;        // easing owns the trajectory in that mode
     POINT pc{};
     if (!GetCursorPos(&pc)) return false;
-    OffsetF o = ComputeOffsetF((double)(pc.x - mon_.x), (double)(pc.y - mon_.y),
-                               lastLevel_, mon_.w, mon_.h);
+    double aimX = pc.x - mon_.x, aimY = pc.y - mon_.y;
+    predictCursor(cfg, aimX, aimY);
+    OffsetF o = ComputeOffsetF(aimX, aimY, lastLevel_, mon_.w, mon_.h);
     MagTransform m = ComputeMagTransform(o.x, o.y, lastLevel_, mon_.w, mon_.h);
     // Same 16-bit backstop the main write path enforces (issue #191): this path writes the
     // same channel, so it must honour the same never-exceed invariant.
@@ -745,6 +787,17 @@ bool TransformModel::fastCursorRepan(const Config& cfg) {
     lastChangeMs_ = GetTickCount64();
     keepAliveTick_ = 0;
     writeTransform((float)lastLevel_, m.offX, m.offY, m.txX, m.txY, fastPan_, false);
+    // Rate proof (issue #195): is the repan actually running, and at what rate? Without this
+    // the wobble diagnosis is guesswork - a poll that never fires looks exactly like a poll
+    // that fires and does not help.
+    ++repanCount_;
+    const unsigned long long nowR = GetTickCount64();
+    if (repanLogMs_ == 0) repanLogMs_ = nowR;
+    else if (nowR - repanLogMs_ >= 1000) {
+        wind::Log(wind::LogLevel::Info, "transform", "repan writes=%d/s (level=%.2f)",
+                  repanCount_, lastLevel_);
+        repanCount_ = 0; repanLogMs_ = nowR;
+    }
     return true;
 }
 
