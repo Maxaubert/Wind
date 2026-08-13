@@ -54,6 +54,7 @@ private:
     bool mpoBusterWanted_ = false;                   // show the ghost this session
     bool mpoExposed_ = false;                        // apply the 16-bit write clamp
     unsigned long long lastGhostAssertMs_ = 0;       // 500ms assert cadence
+    bool samplingApplied_ = false;                   // bitmap smoothing set for this context
     std::unique_ptr<CursorBlanker> blanker_;
     std::unique_ptr<CursorSprite> sprite_;
     unsigned long long lastPinAssertMs_ = 0;

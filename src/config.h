@@ -116,6 +116,13 @@ struct Config {
     // rests - so hover hit-testing is exact whenever the view is still, and stale by at most
     // ~N ticks of pan mid-gesture. Cuts the per-tick DWM message rate during ramps/pans.
     int ixDecimate = 4;
+    // Magnification bitmap smoothing (applied once per transform session): 1 (default) =
+    // MagSetFullscreenUseBitmapSmoothing(TRUE), the undocumented call behind native Magnifier's
+    // "smooth edges of images and text". Without it DWM samples NEAREST NEIGHBOUR and the
+    // magnified image and cursor look blocky. The state is global to DWM and resets when DWM
+    // restarts (that is why smoothing seemed to come and go between builds), so it is re-applied
+    // every session. 0 = force nearest; -1 = leave whatever is set alone.
+    int txSamplingMode = 1;
     // MPO buster (issue #191, hot): 1 (default) = during transform GAME sessions on MPO-ENABLED
     // machines, show a fullscreen alpha-1 click-through ghost that demotes the game off its
     // hardware overlay plane - off the plane there is no 16-bit translation field to overflow,

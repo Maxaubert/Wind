@@ -43,8 +43,16 @@ bool MagHost::initialize() {
         HMODULE u32 = GetModuleHandleW(L"user32.dll");
         setMagDesktop_ = reinterpret_cast<int(__stdcall*)(double, int, int)>(
             u32 ? GetProcAddress(u32, "SetMagnificationDesktopMagnification") : nullptr);
+        HMODULE magDll = GetModuleHandleW(L"Magnification.dll");
+        setBitmapSmoothing_ = reinterpret_cast<int(__stdcall*)(int)>(
+            magDll ? GetProcAddress(magDll, MAKEINTRESOURCEA(1)) : nullptr);
     }
     return initialized_;
+}
+
+bool MagHost::setSamplingMode(unsigned mode) {
+    if (!initialized_ || !setBitmapSmoothing_) return false;
+    return setBitmapSmoothing_(mode != 0 ? 1 : 0) != 0;
 }
 
 bool MagHost::setTransform(float zoom, int offX, int offY, int tx, int ty, bool fastPan) {

@@ -21,6 +21,7 @@ void TransformModel::resetTransformState() {
     ixTick_ = 0; ixPending_ = false;
     lastSpriteX_ = INT_MIN; lastSpriteY_ = INT_MIN;
     haveLastClick_ = false;
+    samplingApplied_ = false;   // re-apply bitmap smoothing on the next context (DWM-global state)
 }
 
 bool TransformModel::ensureMag() {
@@ -341,6 +342,16 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     }
     idleReleaseMs_ = cfg.txIdleReleaseMs;   // hot-reloadable release window
     if (!ensureMag()) return;   // lazy context: the session's first write brings DWM up
+    // Bitmap smoothing, once per magnification context. Without it DWM magnifies with nearest
+    // neighbour and the whole view - cursor included - is blocky; native Magnifier sets this at
+    // startup, which is why running it alongside used to smooth our session too. The flag is
+    // DWM-global and dies with a DWM restart, hence per-context rather than once per process.
+    if (cfg.txSamplingMode >= 0 && !samplingApplied_) {
+        samplingApplied_ = true;
+        const bool ok = host_.setSamplingMode((unsigned)cfg.txSamplingMode);
+        wind::Log(wind::LogLevel::Info, "transform", "bitmap smoothing %d applied=%d",
+                  cfg.txSamplingMode, ok ? 1 : 0);
+    }
     if (level > sessionMaxLevel_) sessionMaxLevel_ = level;
     const bool ramping = applyLevel != level || (applyLevel != lastLevel_ && lastLevel_ > 0.0);
     MagTransform m = ComputeMagTransform(srcL, srcT, applyLevel, mon_.w, mon_.h);
