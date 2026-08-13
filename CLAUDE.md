@@ -238,6 +238,20 @@ restartWind), `dirty`, `openIni`, `exportDiagnostics`, `pickExe`, `mpoState`, `s
   path (toggle-off, teardown-to-idle, device-lost, shutdown). Click-to-look-point is DISCARDED in
   game-inspect (a click would re-activate the game mid-inspect). Exclusive-fullscreen games may
   minimize on focus loss; games that pause on focus loss show their paused frame - both by design.
+- MAGNIFIED IMAGE QUALITY IS CAPPED BY A DWM BUG, NOT BY OUR CODE (issue #197, field-settled
+  2026-08-13). DWM magnifies with NEAREST NEIGHBOUR unless something calls the undocumented
+  `MagSetFullscreenUseBitmapSmoothing` (Magnification.dll ORDINAL 1 - what native Magnifier's
+  "smooth edges of images and text" flips; callable without UIAccess; the raw user32
+  `SetMagnificationDesktopSamplingMode` takes a DWORD POINTER and a by-value call
+  access-violates). Turning it on looks dramatically better AND CRASHES dwm.exe in dwmcore.dll
+  over complex Mica/acrylic geometry at high zoom - two first-try reproductions in a browser,
+  zero with nearest, A/B'd back and forth. The sampling modes 2/3/4 that the kernel also accepts
+  were field-tested and are ALIASES OF NEAREST, so there is no cheaper middle filter. Native
+  sets the flag too but never pans a high-zoom view the way we do, so it likely never stresses
+  the faulting path. `txSamplingMode` ships 0 (nearest): a slightly blocky magnified image is the
+  correct trade against a compositor that dies. The flag is DWM-GLOBAL and survives the process
+  that set it until DWM restarts - which is why smoothing appeared to come and go between builds
+  and why a stale "smooth" state can make an innocent build look like it caused a crash.
 - Declare Per-Monitor-V2 DPI awareness (`Wind.manifest`) or offset pixel math is wrong
   on scaled displays.
 - The lens-must-move-when-cursor-locked behavior is THE core feature. It relies on

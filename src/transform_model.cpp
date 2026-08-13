@@ -21,6 +21,7 @@ void TransformModel::resetTransformState() {
     ixTick_ = 0; ixPending_ = false;
     lastSpriteX_ = INT_MIN; lastSpriteY_ = INT_MIN;
     haveLastClick_ = false;
+    samplingApplied_ = false;   // re-apply bitmap smoothing on the next context (DWM-global state)
 }
 
 bool TransformModel::ensureMag() {
@@ -55,6 +56,7 @@ void TransformModel::teardownMag() {
     RECT full{ 0, 0, mon_.w, mon_.h };
     host_.setInputTransform(false, full, full);
     host_.shutdown();                              // MagUninitialize: DWM leaves magnification mode
+    mpoGhost_.hide();                              // never stranded shown across a teardown
     magUp_ = false;
     idleSinceMs_ = 0;
     identityParked_ = false;
@@ -93,6 +95,12 @@ bool TransformModel::initialize(const MonitorTarget& monitor) {
         }
     }
     if (smoothPan_) pin_.create();
+    // MPO buster ghost (issue #191, scope widened in #197): created once at monitor bounds,
+    // shown during any MPO-exposed transform session (main.cpp gates via setMpoBusterWanted) -
+    // browsers and desktop windows ride overlay planes too, not only games. Creation failure is
+    // non-fatal: the fail-closed pan walls simply never lift.
+    if (!mpoGhost_.create(mon_.x, mon_.y, mon_.w, mon_.h))
+        wind::Log(wind::LogLevel::Warn, "transform", "MpoGhost create failed - walls stay up");
     // Input-transform availability (issue #185): MagSetInputTransform's ENABLED publish needs
     // UIAccess, and the hybrid DESKTOP pick must know availability BEFORE any session exists (a
     // transform desktop session without it has the pointer-framework dead zones). Read the
@@ -207,6 +215,11 @@ void TransformModel::setActive(bool active) {
         return;
     }
     if (!magUp_) return;
+    // MPO buster: hide strictly AFTER the identity park below would be wrong - the park writes
+    // identity while the game may still be mid-demotion-return; hiding HERE (before the park)
+    // is also wrong for the same reason in reverse. Order chosen: park first (identity is a
+    // safe value at any plane state), then hide the ghost - the game re-promotes to its plane
+    // against a parked-identity transform, never against a live translation.
     // Give the real pointer back the moment the zoom ends (the follow-session sprite above hid
     // it). Done here, while the context is still alive - MagShowSystemCursor needs one.
     if (cursorHidden_) {
@@ -236,6 +249,7 @@ void TransformModel::setActive(bool active) {
     RECT full{ 0, 0, mon_.w, mon_.h };
     host_.setInputTransform(false, full, full);   // input mapping back to identity at 1x
     pin_.hide();
+    mpoGhost_.hide();   // after the identity park: re-promotion happens against a parked value
 }
 
 void TransformModel::idleTick() {
@@ -328,9 +342,37 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     }
     idleReleaseMs_ = cfg.txIdleReleaseMs;   // hot-reloadable release window
     if (!ensureMag()) return;   // lazy context: the session's first write brings DWM up
+    // Bitmap smoothing, once per magnification context. Without it DWM magnifies with nearest
+    // neighbour and the whole view - cursor included - is blocky; native Magnifier sets this at
+    // startup, which is why running it alongside used to smooth our session too. The flag is
+    // DWM-global and dies with a DWM restart, hence per-context rather than once per process.
+    if (cfg.txSamplingMode >= 0 && !samplingApplied_) {
+        samplingApplied_ = true;
+        const bool ok = host_.setSamplingMode((unsigned)cfg.txSamplingMode);
+        wind::Log(wind::LogLevel::Info, "transform", "bitmap smoothing %d applied=%d",
+                  cfg.txSamplingMode, ok ? 1 : 0);
+    }
     if (level > sessionMaxLevel_) sessionMaxLevel_ = level;
     const bool ramping = applyLevel != level || (applyLevel != lastLevel_ && lastLevel_ > 0.0);
     MagTransform m = ComputeMagTransform(srcL, srcT, applyLevel, mon_.w, mon_.h);
+    // 2D write-site 16-bit backstop (issue #191): when the session is MPO-exposed AND the ghost
+    // is not verifiably holding the game off its overlay plane, the never-exceed-32767 invariant
+    // is enforced HERE, structurally, regardless of the mapper walls (which divide by the
+    // CONTROLLER level while this write uses the ramp-limited applyLevel - step-limit drift
+    // otherwise spends the headroom on faith). Checked fresh at write time - a ghost that died
+    // mid-session re-arms the clamp on the very next write, one tick before the wall re-engages.
+    // Both channels recomputed so offsets and translations describe the same rect. MUST share the
+    // wall's evidence gate: clamping while the walls are lifted would pin the view at the 32000
+    // line while the mapper (and welded cursor) pan on past it.
+    if (mpoExposed_ && !mpoGhost_.settled(GetTickCount64())) {
+        bool clamped = false;
+        if (m.txX < -32000) { m.txX = -32000; clamped = true; }
+        if (m.txY < -32000) { m.txY = -32000; clamped = true; }
+        if (clamped) {
+            m.offX = (int)(-m.txX / applyLevel);
+            m.offY = (int)(-m.txY / applyLevel);
+        }
+    }
     if (cfg.tdrTest == 2) {
         // Overflow probe (issue #148 harness): keep the level-space translation inside a signed
         // 16-bit range. If the far-right max-zoom crashes vanish with this, some DWM/driver
@@ -525,6 +567,15 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     } else {
         pin_.hide();
     }
+    // MPO buster (issue #191): keep the ghost asserted while wanted (500ms cadence; assert_
+    // also shows it on the first wanted tick). Hidden promptly when the session stops being
+    // MPO-exposed (alt-tab to the desktop mid-zoom, knob turned off).
+    if (mpoBusterWanted_ && level > 1.001) {
+        unsigned long long nowG = GetTickCount64();
+        if (nowG - lastGhostAssertMs_ >= 500) { lastGhostAssertMs_ = nowG; mpoGhost_.assert_(); }
+    } else {
+        mpoGhost_.hide();
+    }
 }
 
 void TransformModel::shutdown() {
@@ -532,6 +583,7 @@ void TransformModel::shutdown() {
     if (sprite_) sprite_->destroy();
     if (blanker_) blanker_->restore();
     pin_.destroy();
+    mpoGhost_.destroy();
     ready_ = false;
 }
 }

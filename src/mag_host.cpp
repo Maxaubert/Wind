@@ -43,8 +43,32 @@ bool MagHost::initialize() {
         HMODULE u32 = GetModuleHandleW(L"user32.dll");
         setMagDesktop_ = reinterpret_cast<int(__stdcall*)(double, int, int)>(
             u32 ? GetProcAddress(u32, "SetMagnificationDesktopMagnification") : nullptr);
+        HMODULE magDll = GetModuleHandleW(L"Magnification.dll");
+        setBitmapSmoothing_ = reinterpret_cast<int(__stdcall*)(int)>(
+            magDll ? GetProcAddress(magDll, MAKEINTRESOURCEA(1)) : nullptr);
+        setSamplingRaw_ = reinterpret_cast<int(__stdcall*)(DWORD*)>(
+            u32 ? GetProcAddress(u32, "SetMagnificationDesktopSamplingMode") : nullptr);
     }
     return initialized_;
+}
+
+bool MagHost::setSamplingMode(unsigned mode) {
+    if (!initialized_) return false;
+    // Modes 0/1 go through Magnification.dll ordinal 1 (the documented-shape BOOL wrapper that
+    // native Magnifier uses). Modes 2-4 exist only on the raw user32 setter: the kernel accepts
+    // and round-trips 0..4 though the wrapper exposes just two, and nothing is published about
+    // what the extra three do. They are worth trying because mode 1's edge-preserving filter is
+    // a confirmed dwmcore crash trigger over complex (Mica/acrylic) geometry at high zoom -
+    // a cheaper filter may look smooth without taking the compositor down.
+    // The raw setter takes a DWORD POINTER, not a value: passing the value by mistake
+    // dereferences it and access-violates (field crash 2026-08-13).
+    if (mode >= 2) {
+        if (!setSamplingRaw_) return false;
+        DWORD m = mode;
+        return setSamplingRaw_(&m) != 0;
+    }
+    if (!setBitmapSmoothing_) return false;
+    return setBitmapSmoothing_(mode != 0 ? 1 : 0) != 0;
 }
 
 bool MagHost::setTransform(float zoom, int offX, int offY, int tx, int ty, bool fastPan) {

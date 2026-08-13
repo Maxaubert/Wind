@@ -20,10 +20,21 @@ public:
     // (XAML/Explorer, Chromium) consult it for hit-testing too (issue #148 desktop dead zones).
     // Needs UIAccess: fails harmlessly on the dev build (logged once by the caller's model).
     bool setInputTransform(bool active, const RECT& src, const RECT& dst);
+    // Magnification bitmap smoothing: MagSetFullscreenUseBitmapSmoothing, Magnification.dll
+    // ORDINAL 1 (undocumented, no header - Magnify.exe imports it; it is what the "smooth edges
+    // of images and text" option flips). A session that never sets it samples NEAREST NEIGHBOUR,
+    // which is the blocky magnified image/cursor. Callable without UIAccess, needs a live
+    // MagInitialize. NEVER call the raw user32 SetMagnificationDesktopSamplingMode instead - it
+    // takes a DWORD POINTER and a by-value call access-violates (field crash 2026-08-13).
+    // NOTE: the state is not ours alone - it survives our process and is reset when DWM restarts,
+    // which is why smoothing appeared to come and go across builds. Set it every session.
+    bool setSamplingMode(unsigned mode);
     void shutdown();
 private:
     bool initialized_ = false;
     bool privateBroken_ = false;
     int  (__stdcall* setMagDesktop_)(double, int, int) = nullptr;
+    int  (__stdcall* setBitmapSmoothing_)(int) = nullptr;
+    int  (__stdcall* setSamplingRaw_)(DWORD*) = nullptr;   // modes 2-4 (undocumented)
 };
 }
