@@ -825,6 +825,20 @@ bool TransformModel::fastCursorRepan(const Config& cfg) {
     lastChangeMs_ = GetTickCount64();
     keepAliveTick_ = 0;
     writeTransform((float)lastLevel_, m.offX, m.offY, m.txX, m.txY, fastPan_, false);
+    // Publish the MATCHING input transform in the same breath (issue #195). DWM positions the
+    // magnified cursor from this mapping, so a view write without it moves the scene while the
+    // cursor stays placed by the previous rect - the pair desyncs by exactly one repan step,
+    // which is the relative jump the field sees while panning. magnify.exe always writes the
+    // transform and republishes the input rects together; matching that is the whole point.
+    if (cfg.magInputTransform != 0) {
+        InputTransformRects ir = ComputeInputTransformRects(
+            o.x, o.y, lastLevel_, mon_.x, mon_.y, mon_.w, mon_.h);
+        RECT dst{ ir.dl, ir.dt, ir.dr, ir.db };
+        RECT src = (cfg.magInputTransform == 2) ? dst : RECT{ ir.sl, ir.st, ir.sr, ir.sb };
+        host_.setInputTransform(true, src, dst);
+        ixPending_ = false;
+        ixTick_ = 0;
+    }
     ++repanCount_;
     return true;
 }
