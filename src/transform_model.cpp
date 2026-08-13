@@ -352,7 +352,22 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // +-0.5px*level re-centering sawtooth on the cursor (the reported wobble). Anchoring here
     // makes T(weld) == screen centre EXACT by construction; the view inherits the integer
     // grid (level-px steps at slow pan), exactly like native Magnifier's cursor-driven view.
-    if (cfg.txCursorProbe != 0) {
+    if (cfg.txCursorProbe == 2) {
+        // FREE-CURSOR mode (the native design, issue #195): no weld at all - the cursor moves
+        // freely under the user's hand, and the VIEW centres on wherever the cursor actually
+        // is. The mode-1 residual wobble was the weld itself: each tick SetCursorPos yanked
+        // the visible real cursor back against the hand's push, a per-tick tug-of-war
+        // amplified by the level. With nothing snapping the cursor, motion is continuous;
+        // the view trails by at most one tick, smoothly and speed-proportionally - exactly
+        // native Magnifier's behavior (probe-verified: native never parks its cursor either).
+        // Hover/clicks/drags are all native-correct by construction (the cursor IS at its
+        // true position), which is also why FOLLOW-era sessions had no pointer dead zones.
+        POINT pc{};
+        GetCursorPos(&pc);
+        OffsetF o = ComputeOffsetF((double)(pc.x - mon_.x), (double)(pc.y - mon_.y),
+                                   applyLevel, mon_.w, mon_.h);
+        srcL = o.x; srcT = o.y;
+    } else if (cfg.txCursorProbe != 0) {
         OffsetF o = ComputeOffsetF((double)r.clickDesktopX, (double)r.clickDesktopY,
                                    applyLevel, mon_.w, mon_.h);
         srcL = o.x; srcT = o.y;
@@ -529,7 +544,10 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // records whether SetCursorPos REALLY ran, so RunTick can baseline on the weld point only
     // when it did (#169 measured-baseline law; assuming it landed is the unstable-servo bug).
     weldedLastFrame_ = false;
-    if (!ex.suppressCursorSync) {
+    // Free-cursor mode (txCursorProbe=2): NEVER weld - the whole point is that nothing snaps
+    // the cursor against the hand. RunTick's oracle baselines on the measured cursor when
+    // weldedLastFrame() stays false, so the pipeline stays consistent.
+    if (!ex.suppressCursorSync && cfg.txCursorProbe != 2) {
         int cx = ex.clickOverride ? ex.clickDesktopX : (r.clickDesktopX + mon_.x);
         int cy = ex.clickOverride ? ex.clickDesktopY : (r.clickDesktopY + mon_.y);
         if (!haveLastClick_ || cx != lastClickX_ || cy != lastClickY_) {
