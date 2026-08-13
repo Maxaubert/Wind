@@ -41,6 +41,9 @@ public:
     void setMpoBusterWanted(bool wanted) { mpoBusterWanted_ = wanted; }
     void setMpoExposed(bool exposed) { mpoExposed_ = exposed; }
     bool mpoGhostSettled() const { return mpoGhost_.settled(GetTickCount64()); }
+    // Free-cursor repan between composites (issue #195): keeps the offset DWM samples fresh
+    // against the live cursor plane. Returns true when it actually wrote. Tick thread only.
+    bool fastCursorRepan(const Config& cfg);
 private:
     bool fastPan_, smoothPan_, useSprite_;
     int  zorderBand_;                                // sprite z-band (above the shell); needs UIAccess

@@ -2209,6 +2209,41 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
         RunTick(ts);
 
+        // HIGH-RATE CURSOR REPAN (issue #195, the wobble fix). DWM draws the magnified cursor
+        // from its LIVE position at composite time, but uses the offset we last WROTE. At one
+        // write per composite that offset is up to a frame stale, so the view trails the cursor
+        // by hand-speed * staleness * level: the visible lead while moving, and - because the
+        // write-to-composite gap jitters frame to frame - the residual wobble, both growing
+        // with zoom exactly as reported. Native has the same algebra but writes from a
+        // low-level mouse hook, i.e. sub-millisecond staleness (agent disassembly: threadpool
+        // timer + WH_MOUSE_LL, no compositor sync). Match that by polling the cursor through
+        // the pre-composite wait and re-panning on change, so what DWM samples is always fresh.
+        // Cost while the hand is still: one GetCursorPos per poll and no write at all.
+        // The Magnification API is thread-affine, so this must stay on the tick thread (an
+        // async writer was measured-negative) - hence polling here rather than in the hook.
+        if (dwmPaces && ts.cfg.txCursorPollHz > 0 && ts.prevLvl > 1.001) {
+            auto* tmFast = dynamic_cast<TransformModel*>(ts.model);
+            if (tmFast && timer) {
+                const int hzNow = ts.hz > 0 ? ts.hz : 60;
+                // Spend most of the frame polling, then let DwmFlush land the resync. Leaving
+                // headroom is what keeps us from overshooting into the NEXT composite (which
+                // would halve the tick rate).
+                const long long budgetUs = (1000000LL / hzNow) * 3 / 4;
+                const long long stepUs = 1000000LL / ts.cfg.txCursorPollHz;
+                LARGE_INTEGER pf, pa, pb;
+                QueryPerformanceFrequency(&pf);
+                QueryPerformanceCounter(&pa);
+                for (;;) {
+                    QueryPerformanceCounter(&pb);
+                    if ((pb.QuadPart - pa.QuadPart) * 1000000LL / pf.QuadPart >= budgetUs) break;
+                    LARGE_INTEGER step; step.QuadPart = -(stepUs * 10);   // 100ns units
+                    if (SetWaitableTimer(timer, &step, 0, nullptr, nullptr, FALSE))
+                        WaitForSingleObject(timer, 5);
+                    tmFast->fastCursorRepan(ts.cfg);
+                }
+            }
+        }
+
         if (dwmPaces) DwmFlush();   // block until DWM's next composite -> frames align with it
     }
 

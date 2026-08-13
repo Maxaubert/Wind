@@ -133,6 +133,12 @@ struct Config {
     // nearest; -1 = leave untouched. (Never call the raw user32 sampling-mode setter
     // by value - it takes a pointer and access-violates; mag_host owns the safe wrapper.)
     int txSamplingMode = 1;
+    // High-rate cursor repan (issue #195, hot): poll rate in Hz for re-panning the free-cursor
+    // view between composites. DWM composites the cursor from its live position but uses the
+    // last offset we wrote, so a once-per-frame write is up to a frame stale -> view lag =
+    // hand-speed * staleness * level (the lead), and its jitter is the wobble. Native writes
+    // from a mouse hook at sub-ms staleness; this matches it. 0 = off (one write per tick).
+    int txCursorPollHz = 1000;
     // Free-cursor view easing (issue #195, hot): time constant in ms for the view's pursuit of
     // the free cursor, NORMALIZED BY LEVEL (tau_eff = txFollowEaseMs / level) so the on-screen
     // feel is identical at every zoom. Exact per-tick centering makes the per-composite timing

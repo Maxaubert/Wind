@@ -717,6 +717,37 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     }
 }
 
+// High-rate cursor repan (issue #195): recompute the free-cursor offset from the CURRENT
+// cursor and write it, between composites. Deliberately minimal - no level ramp, no input
+// transform, no sprite, no weld: only the pan value DWM is about to sample, so the offset it
+// pairs with the live cursor plane is fresh (the wobble/lead fix). Deduped, so a still hand
+// costs one GetCursorPos. Runs only in free-cursor mode on a live, active, >1x session.
+bool TransformModel::fastCursorRepan(const Config& cfg) {
+    if (cfg.txCursorProbe != 2 || !magUp_ || !active_) return false;
+    if (lastLevel_ <= 1.001) return false;           // idle / ramping into a session
+    if (cfg.txFollowEaseMs > 0) return false;        // easing owns the trajectory in that mode
+    POINT pc{};
+    if (!GetCursorPos(&pc)) return false;
+    OffsetF o = ComputeOffsetF((double)(pc.x - mon_.x), (double)(pc.y - mon_.y),
+                               lastLevel_, mon_.w, mon_.h);
+    MagTransform m = ComputeMagTransform(o.x, o.y, lastLevel_, mon_.w, mon_.h);
+    // Same 16-bit backstop the main write path enforces (issue #191): this path writes the
+    // same channel, so it must honour the same never-exceed invariant.
+    if (mpoExposed_ && !mpoGhost_.settled(GetTickCount64())) {
+        bool clamped = false;
+        if (m.txX < -32000) { m.txX = -32000; clamped = true; }
+        if (m.txY < -32000) { m.txY = -32000; clamped = true; }
+        if (clamped) { m.offX = (int)(-m.txX / lastLevel_); m.offY = (int)(-m.txY / lastLevel_); }
+    }
+    if (m.offX == lastOffX_ && m.offY == lastOffY_ && m.txX == lastTxX_ && m.txY == lastTxY_)
+        return false;
+    lastOffX_ = m.offX; lastOffY_ = m.offY; lastTxX_ = m.txX; lastTxY_ = m.txY;
+    lastChangeMs_ = GetTickCount64();
+    keepAliveTick_ = 0;
+    writeTransform((float)lastLevel_, m.offX, m.offY, m.txX, m.txY, fastPan_, false);
+    return true;
+}
+
 void TransformModel::shutdown() {
     teardownMag();
     if (sprite_) sprite_->destroy();
