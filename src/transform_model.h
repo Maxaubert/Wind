@@ -58,9 +58,12 @@ private:
     std::unique_ptr<CursorSprite> sprite_;
     unsigned long long lastPinAssertMs_ = 0;
     int  keepAliveTick_ = 0;                         // alternates the tx keep-alive (issue #148)
-    bool inputXformWarned_ = false;                  // one-shot warn when MagSetInputTransform fails
+    bool inputXformWarned_ = false;                  // one-shot warn when the availability latch trips
+    int  ixConsecFails_ = 0;                         // enabled-publish failure streak (latch needs 2)
     bool lastInputXformOn_ = false;                  // knob edge: disable the OS transform on 1->0
-    int  hiRampTick_ = 0;                            // >8x ramp divisor (TDR guard, issue #148)
+    bool ghostWasSettled_ = false;                   // settle-transition log edge (#191 review)
+    bool timeFirstWrite_ = false;                    // instrument the session's first write
+    bool coldContext_ = false;                       // that first write rides a fresh mag context
     int  lastOffX_ = 0, lastOffY_ = 0, lastTxX_ = 0, lastTxY_ = 0;   // last applied transform
     double lastLevel_ = 0.0;
     double lastRequestedLevel_ = 0.0;   // detect "ramp stopped" so the final level always lands

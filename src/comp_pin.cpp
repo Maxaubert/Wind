@@ -64,12 +64,25 @@ bool MpoGhost::create(int x, int y, int w, int h) {
 
 void MpoGhost::assert_() {
     if (!hwnd_) return;
-    SetWindowPos(hwnd_, HWND_TOPMOST, x_, y_, w_, h_, SWP_NOACTIVATE);
-    if (!visible_) {
-        ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
-        visible_ = true;
-        shownAtMs_ = GetTickCount64();
+    // CALM re-assert (field review, 2026-08-13): an unconditional SetWindowPos(TOPMOST) is a
+    // synchronous DWM z-order transaction that hitches a fullscreen game - the same law that made
+    // CursorSprite::keepOnTop and the render overlay read-first. READ the evidence and transact
+    // only when it actually regressed: hidden, rect drifted, or the TOPMOST bit stripped. The
+    // demotion needs only "shown fullscreen above the game", which WS_EX_TOPMOST preserves on its
+    // own, so the steady-state cadence costs three reads and zero transactions.
+    if (visible_ && IsWindowVisible(hwnd_)) {
+        RECT rc{};
+        const bool rectOk = GetWindowRect(hwnd_, &rc) && rc.left == x_ && rc.top == y_ &&
+                            rc.right == x_ + w_ && rc.bottom == y_ + h_;
+        const bool topmost = (GetWindowLongPtrW(hwnd_, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+        if (rectOk && topmost) return;
     }
+    SetWindowPos(hwnd_, HWND_TOPMOST, x_, y_, w_, h_, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    visible_ = true;
+    // ANY transacted assert re-arms the settle clock (first show or a regression repair): the
+    // plane demotion may need to re-happen, and settled() must not claim old evidence for a
+    // freshly repaired window (fail-closed).
+    shownAtMs_ = GetTickCount64();
 }
 
 void MpoGhost::hide() {

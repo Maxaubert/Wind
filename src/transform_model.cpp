@@ -16,7 +16,7 @@ void TransformModel::resetTransformState() {
     // compares against values DWM no longer holds and skips the writes that would re-apply them.
     lastLevel_ = 0.0; lastRequestedLevel_ = 0.0;
     lastOffX_ = lastOffY_ = lastTxX_ = lastTxY_ = 0;
-    lastChangeMs_ = 0; keepAliveTick_ = 0; hiRampTick_ = 0;
+    lastChangeMs_ = 0; keepAliveTick_ = 0;
     lastInputXformOn_ = false;
     ixTick_ = 0; ixPending_ = false;
     lastSpriteX_ = INT_MIN; lastSpriteY_ = INT_MIN;
@@ -38,6 +38,11 @@ bool TransformModel::ensureMag() {
         wind::Log(wind::LogLevel::Info, "transform", "MagInitialize took %.1fms", ms);
     magUp_ = true;
     idleSinceMs_ = 0;
+    // First-write instrumentation (#191 review). Armed HERE and at session end (setActive(false)),
+    // never at setActive(true): on the enter-active tick present() runs BEFORE setActive(true)
+    // (reveal-first), so arming there would time the session's SECOND write.
+    coldContext_ = true;
+    timeFirstWrite_ = true;
     resetTransformState();
     return true;
 }
@@ -248,6 +253,7 @@ void TransformModel::setActive(bool active) {
     host_.setInputTransform(false, full, full);   // input mapping back to identity at 1x
     pin_.hide();
     mpoGhost_.hide();   // after the identity park: re-promotion happens against a parked value
+    timeFirstWrite_ = true;   // next session (warm context) times its first write too
 }
 
 void TransformModel::idleTick() {
@@ -396,8 +402,24 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // Same-value hygiene (issue #189): once the keep-alive window has lapsed (or above its level
     // gate), a zoomed-idle tick would push an identical write 144x/s. DWM parks on static values
     // anyway (measured), so skipping is free; the next changed/keep-alive tick writes as before.
-    if (changed || keepAliveActive)
-        writeTransform((float)applyLevel, m.offX, m.offY, m.txX + txJitter, m.txY, fastPan_, false);
+    if (changed || keepAliveActive) {
+        // First-write instrumentation (#191 review): the ~36ms "DWM builds its machinery" cost was
+        // a code-comment estimate with no log evidence - 57% of the field day's zoom-ins were cold
+        // and the zoom-in edge is exactly where sluggishness is judged. Make it a number.
+        if (timeFirstWrite_) {
+            timeFirstWrite_ = false;
+            LARGE_INTEGER ffr, fa, fb;
+            QueryPerformanceFrequency(&ffr); QueryPerformanceCounter(&fa);
+            writeTransform((float)applyLevel, m.offX, m.offY, m.txX + txJitter, m.txY, fastPan_, false);
+            QueryPerformanceCounter(&fb);
+            wind::Log(wind::LogLevel::Info, "transform", "first write took %.1fms (%s context)",
+                      double(fb.QuadPart - fa.QuadPart) * 1000.0 / ffr.QuadPart,
+                      coldContext_ ? "cold" : "warm");
+            coldContext_ = false;
+        } else {
+            writeTransform((float)applyLevel, m.offX, m.offY, m.txX + txJitter, m.txY, fastPan_, false);
+        }
+    }
     // Input transform. Mode 1 (THE SHIPPED DEFAULT; field-verified 4x-20x,
     // POINTER-HITTEST-FINDINGS.md): publish the visual source rect on every change, exactly
     // like native Magnifier. Pointer-framework apps (Explorer/Settings/shell) hit-test mouse
@@ -425,20 +447,40 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
                 srcL, srcT, applyLevel, mon_.x, mon_.y, mon_.w, mon_.h);
             RECT dst{ ir.dl, ir.dt, ir.dr, ir.db };
             RECT src = (cfg.magInputTransform == 2) ? dst : RECT{ ir.sl, ir.st, ir.sr, ir.sb };
+            const bool enabledPublish = applyLevel > 1.001;
             LARGE_INTEGER fr, a, b;
             QueryPerformanceFrequency(&fr); QueryPerformanceCounter(&a);
-            bool ok = host_.setInputTransform(applyLevel > 1.001, src, dst);
+            bool ok = host_.setInputTransform(enabledPublish, src, dst);
             QueryPerformanceCounter(&b);
             noteIxWrite(double(b.QuadPart - a.QuadPart) * 1000.0 / fr.QuadPart, ok);
-            if (!ok) {
-                // Self-heal (spec constraint 1): a failed ENABLED publish means this build
-                // cannot fix the pointer-framework dead zones - the DESKTOP pick must stop
-                // choosing the transform. Games are unaffected (legacy input surfaces).
-                inputTransformAvailable_ = false;
-                if (!inputXformWarned_) {
-                    inputXformWarned_ = true;
-                    wind::Log(wind::LogLevel::Warn, "transform",
-                              "MagSetInputTransform failed (no UIAccess?) - desktop pick disabled");
+            // Availability latch (issue #185, softened after the #191 field review): the log
+            // caught ONE teardown-adjacent enabled publish failing on a UIAccess build (mid
+            // zoom-out at ~16x, likely racing the context release), and the old first-failure
+            // latch then silently downgraded every desktop session to render until relaunch.
+            // Require 2 CONSECUTIVE enabled-publish failures to latch, and let any later
+            // enabled-publish SUCCESS re-arm availability (game sessions keep publishing through
+            // the latch, so a spurious trip self-heals on the next game zoom). Fail-closed per
+            // session is preserved: the desktop pick still never runs without verified success.
+            // Only the ENABLED shape counts either way - the disabled publish succeeds without
+            // UIAccess (rig-measured) and must never feed the latch.
+            if (enabledPublish) {
+                if (!ok) {
+                    if (++ixConsecFails_ >= 2 && inputTransformAvailable_) {
+                        inputTransformAvailable_ = false;
+                        if (!inputXformWarned_) {
+                            inputXformWarned_ = true;
+                            wind::Log(wind::LogLevel::Warn, "transform",
+                                      "MagSetInputTransform failed twice (no UIAccess?) - desktop pick disabled");
+                        }
+                    }
+                } else {
+                    ixConsecFails_ = 0;
+                    if (!inputTransformAvailable_) {
+                        inputTransformAvailable_ = true;
+                        inputXformWarned_ = false;
+                        wind::Log(wind::LogLevel::Info, "transform",
+                                  "MagSetInputTransform succeeded - desktop pick re-armed");
+                    }
                 }
             }
         }
@@ -555,14 +597,25 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     } else {
         pin_.hide();
     }
-    // MPO buster (issue #191): keep the ghost asserted while wanted (500ms cadence; assert_
-    // also shows it on the first wanted tick). Hidden promptly when the session stops being
-    // MPO-exposed (alt-tab to the desktop mid-zoom, knob turned off).
+    // MPO buster (issue #191): keep the ghost asserted while wanted (500ms cadence of READS -
+    // assert_ is calm and only transacts on first show or a regression). Hidden promptly when
+    // the session stops being MPO-exposed (alt-tab to the desktop mid-zoom, knob turned off).
     if (mpoBusterWanted_ && level > 1.001) {
         unsigned long long nowG = GetTickCount64();
         if (nowG - lastGhostAssertMs_ >= 500) { lastGhostAssertMs_ = nowG; mpoGhost_.assert_(); }
+        // Settle-state transition log (#191 review): without it there is NO way to tell from the
+        // field whether the walls are lifted (ghost holding) or engaged (ghost not settled) - the
+        // two mutually exclusive regimes feel completely different at high zoom.
+        const bool settledNow = mpoGhost_.settled(nowG);
+        if (settledNow != ghostWasSettled_) {
+            ghostWasSettled_ = settledNow;
+            wind::Log(wind::LogLevel::Info, "transform",
+                      settledNow ? "MpoGhost settled - pan walls lifted (full range)"
+                                 : "MpoGhost not settled - pan walls engaged");
+        }
     } else {
         mpoGhost_.hide();
+        ghostWasSettled_ = false;   // next session logs its own first settle (no log here: routine)
     }
 }
 
