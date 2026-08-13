@@ -526,14 +526,11 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         }
     }
 
-    // Band-16 screen-space sprite scaling (issue #195): the band-16 window escapes the
-    // fullscreen transform (the experiment's premise - the field verdict tells us if not), so
-    // matching the zoom is OUR job. cursorScaleWithZoom=1 (this user's preference) re-renders
-    // the sprite at the level's integer scale - smooth bilinear from a native-size render, so
-    // high zoom means big-and-clean, not big-and-blocky; 0 keeps it constant-size (the product
-    // rule met on the transform path). Integer steps only: a 1->20x ramp re-renders ~19 times,
-    // the expensive top sizes landing near the ramp's end where a couple of ms do not read.
-    // Desktop-space mode (spriteBand16=0) never calls this: DWM scales the sprite there.
+    // Band-16 screen-space sprite scaling (P2 experiment). FIELD VERDICT 2026-08-13: band-16
+    // windows do NOT escape the DWM fullscreen transform on this build - the self-scaled sprite
+    // ballooned (double-scaled) and detached from the lens. The desktop-space sub-pixel sprite
+    // below is the shipped design; this branch stays only as the diagnostic for re-testing the
+    // band question on future Windows builds. Do not re-enable spriteBand16 expecting a win.
     if (spriteBand16_ && sprite_)
         sprite_->setScale(cfg.cursorScaleWithZoom != 0 ? (int)(level + 0.5) : 1);
     if (useSprite_ && sprite_ && ex.cursorLocked && ex.drawCursor) {
@@ -580,13 +577,22 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             // P2 experiment (spriteBand16): SCREEN space + band 16 instead - if high-band windows
             // escape the transform, cursorScreen is exactly where the aim point displays, at a
             // constant size (the product rule met on the transform path).
-            const int sx = spriteBand16_ ? (int)(r.cursorScreenX + 0.5) + mon_.x
-                                         : r.clickDesktopX + mon_.x;
-            const int sy = spriteBand16_ ? (int)(r.cursorScreenY + 0.5) + mon_.y
-                                         : r.clickDesktopY + mon_.y;
-            if (sx != lastSpriteX_ || sy != lastSpriteY_) {
-                sprite_->moveTo(sx, sy);
-                lastSpriteX_ = sx; lastSpriteY_ = sy;
+            if (spriteBand16_) {
+                const int sx = (int)(r.cursorScreenX + 0.5) + mon_.x;
+                const int sy = (int)(r.cursorScreenY + 0.5) + mon_.y;
+                if (sx != lastSpriteX_ || sy != lastSpriteY_) {
+                    sprite_->moveTo(sx, sy);
+                    lastSpriteX_ = sx; lastSpriteY_ = sy;
+                }
+            } else {
+                // Sub-pixel positioning (issue #195, the wobble fix): the CONTINUOUS lens
+                // centre, not the rounded click point. The fractional residual is baked into
+                // the sprite content (moveToSubpixel), so the displayed cursor sits exactly at
+                // screen centre at any zoom - the integer-window-position quantization that the
+                // transform magnified into a +-10px re-centering wobble at 20x is gone. The
+                // welded REAL cursor stays on clickDesktop (integer) for clicks; the <=0.5px
+                // visual offset between them is sub-display-pixel at any level.
+                sprite_->moveToSubpixel(r.centerX + mon_.x, r.centerY + mon_.y);
             }
             sprite_->show();
             sprite_->keepOnTop();

@@ -54,9 +54,13 @@ dead zones (measured); do not "simplify" the source rect away. `desktopTransform
 advanced UI toggle for Auto) lets hybrid pick the transform on the DESKTOP too (primary
 monitor only - multiMonitor secondaries stay on render), gated on the
 availability probe (`TransformModel::inputTransformAvailable`, probed at init via a
-teardown-shaped acquire/release). `spriteBand16=1` (restart) = the P2 constant-size cursor
-experiment (band-16 SCREEN-space sprite; two historical layered-window measurements
-contradict each other, so it needs one field verdict).
+teardown-shaped acquire/release). `spriteBand16=1` (restart) = the P2 band-16 SCREEN-space
+sprite experiment - FIELD VERDICT 2026-08-13: band-16 windows do NOT escape the fullscreen
+transform (self-scaled sprite ballooned/double-scaled and detached from the lens); knob kept
+as a diagnostic only. The SHIPPED transform cursor is the desktop-space sprite with the
+sub-pixel residual baked into its content per tick (`moveToSubpixel`, issue #195) - in-scene,
+grows naturally with the zoom, and wobble-free (an integer-positioned layered window under the
+transform wobbles +-0.5px * level otherwise).
 TRANSFORM CURSOR: WELDED (re-test of the #148 weld, commit 8a52040; supersedes the retired
 FOLLOW+FREEZE design - git history has that machinery). The transform welds the REAL cursor to
 the lens point per tick (transform_model.cpp; deduped, suspended by drag-follow), exposes

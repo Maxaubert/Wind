@@ -140,6 +140,105 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
     int hotX = (int)iconInfo.xHotspot * scale_;   // hotspots live in FINAL (scaled) pixels
     int hotY = (int)iconInfo.yHotspot * scale_;
 
+    // Render the shape ONCE at NATIVE size into a small DIB and cache the premultiplied pixels
+    // (issue #195): every presented frame is then COMPOSED from this cache - bilinear-upscaled
+    // in the self-scaling screen-space mode, or sub-pixel-shifted in the desktop-space mode
+    // (the wobble fix) - so presentation never re-renders the icon.
+    HDC screenDc = GetDC(nullptr);
+    BITMAPINFO smi{};
+    smi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    smi.bmiHeader.biWidth = natW_;
+    smi.bmiHeader.biHeight = -natH_; // top-down DIB
+    smi.bmiHeader.biPlanes = 1;
+    smi.bmiHeader.biBitCount = 32;
+    smi.bmiHeader.biCompression = BI_RGB;
+    void* sbits = nullptr;
+    HBITMAP sdib = CreateDIBSection(screenDc, &smi, DIB_RGB_COLORS, &sbits, nullptr, 0);
+    if (sdib == nullptr || sbits == nullptr) {
+        if (sdib != nullptr) DeleteObject(sdib);
+        ReleaseDC(nullptr, screenDc);
+        DestroyIcon(hIconCopy);
+        return ShapeStatus::Hidden;
+    }
+    HDC sdc = CreateCompatibleDC(screenDc);
+    HGDIOBJ sOld = SelectObject(sdc, sdib);
+    // Zero before drawing so unpainted pixels are transparent. DrawIconEx with DI_NORMAL onto
+    // a zeroed 32bpp DIB gives usable premultiplied alpha for cursors that carry their own
+    // per-pixel alpha channel - this single pass is tried for every cursor, regardless of
+    // whether GetIconInfo reported an hbmColor.
+    memset(sbits, 0, (size_t)natW_ * natH_ * 4);
+    DrawIconEx(sdc, 0, 0, hIconCopy, natW_, natH_, 0, nullptr, DI_NORMAL);
+    // Mask/inversion cursors (the modern I-beam among them) come back fully transparent from
+    // the single pass and fall to renderMaskShape below (detected by output, not by type).
+    bool anyAlpha = false;
+    const uint32_t* sp = (const uint32_t*)sbits;
+    for (int i = 0; i < natW_ * natH_ && !anyAlpha; i++)
+        if ((sp[i] & 0xFF000000u) != 0) anyAlpha = true;
+    if (anyAlpha) {
+        nativeShape_.assign(sp, sp + (size_t)natW_ * natH_);
+        nsW_ = natW_; nsH_ = natH_;
+    }
+    SelectObject(sdc, sOld);
+    DeleteDC(sdc);
+    DeleteObject(sdib);
+    ReleaseDC(nullptr, screenDc);
+
+    DestroyIcon(iconCopy_); // destroy the previous copy we were holding
+    iconCopy_ = hIconCopy;
+    hotX_ = hotX;
+    hotY_ = hotY;
+    lastCursor_ = info.hCursor;
+    lastVerdict_ = ShapeStatus::Rendered;
+    crosshairMode_ = false;   // the window now holds the cursor shape again
+    if (!anyAlpha)
+        renderMaskShape();     // fills nativeShape_ from the mask classification, then composes
+    else
+        composeAndPresent();
+    return ShapeStatus::Rendered;
+}
+
+// Sub-pixel shift of a premultiplied BGRA buffer into the top-left of a larger canvas
+// (issue #195, the desktop-space wobble fix): dst(x,y) samples src at (x - fx, y - fy),
+// bilinear, outside = transparent. A layered window can only sit on INTEGER desktop pixels,
+// and under the fullscreen transform that residual (up to half a pixel) is magnified by the
+// level - the +-10px-at-20x re-centering wobble the field reported. Baking the fraction into
+// the CONTENT makes the sprite's effective position continuous, so the displayed cursor sits
+// exactly on the lens point at any zoom.
+static void ComposeShiftedPremul(const uint32_t* src, int sw, int sh,
+                                 uint32_t* dst, int dstStride, int dw, int dh,
+                                 double fx, double fy) {
+    for (int y = 0; y < dh; y++) {
+        const double sy = y - fy;
+        const int y0 = (int)std::floor(sy);
+        const double wy = sy - y0;
+        for (int x = 0; x < dw; x++) {
+            const double sx = x - fx;
+            const int x0 = (int)std::floor(sx);
+            const double wx = sx - x0;
+            auto at = [&](int yy, int xx) -> uint32_t {
+                return (yy < 0 || xx < 0 || yy >= sh || xx >= sw) ? 0u : src[yy * sw + xx];
+            };
+            const uint32_t p00 = at(y0, x0),     p01 = at(y0, x0 + 1);
+            const uint32_t p10 = at(y0 + 1, x0), p11 = at(y0 + 1, x0 + 1);
+            uint32_t out = 0;
+            for (int sh8 = 0; sh8 < 32; sh8 += 8) {
+                const double c = ((p00 >> sh8) & 0xFFu) * (1.0 - wx) * (1.0 - wy) +
+                                 ((p01 >> sh8) & 0xFFu) * wx * (1.0 - wy) +
+                                 ((p10 >> sh8) & 0xFFu) * (1.0 - wx) * wy +
+                                 ((p11 >> sh8) & 0xFFu) * wx * wy;
+                out |= ((uint32_t)(c + 0.5) & 0xFFu) << sh8;
+            }
+            dst[y * dstStride + x] = out;
+        }
+    }
+}
+
+// Present the cached native-res shape into the layered window: bilinear-upscaled when
+// self-scaling (band-16 screen-space mode), sub-pixel-shifted at scale 1 (desktop-space mode).
+// Cheap by construction - the icon render itself happens only in refreshShape/renderMaskShape;
+// this is a small resample plus a 64px-class UpdateLayeredWindow (per tick during pans).
+void CursorSprite::composeAndPresent() {
+    if (hwnd_ == nullptr || nativeShape_.empty() || nsW_ <= 0 || nsH_ <= 0) return;
     const int S = bufSize();
     HDC screenDc = GetDC(nullptr);
     HDC memDc = CreateCompatibleDC(screenDc);
@@ -150,84 +249,24 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
     bmi.bmiHeader.biPlanes = 1;
     bmi.bmiHeader.biBitCount = 32;
     bmi.bmiHeader.biCompression = BI_RGB;
-
     void* bits = nullptr;
     HBITMAP dib = CreateDIBSection(screenDc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
     if (dib == nullptr || bits == nullptr) {
         if (dib != nullptr) DeleteObject(dib);
         DeleteDC(memDc);
         ReleaseDC(nullptr, screenDc);
-        DestroyIcon(hIconCopy);
-        return ShapeStatus::Hidden;
+        return;
     }
     HGDIOBJ oldBmp = SelectObject(memDc, dib);
-
-    // Zero the bits buffer before drawing so unpainted pixels are
-    // transparent rather than whatever garbage the allocation happened to
-    // contain. DrawIconEx with DI_NORMAL onto a zeroed 32bpp DIB gives
-    // usable premultiplied alpha for cursors that carry their own
-    // per-pixel alpha channel - this single pass is tried for every
-    // cursor, regardless of whether GetIconInfo reported an hbmColor.
-    // At scale 1 the icon is drawn straight into the canvas. At higher scales it is drawn at
-    // NATIVE size into a small DIB and bilinear-upscaled into the canvas (issue #195):
-    // DrawIconEx's own stretch is nearest-neighbor, which turned the arrow into visible blocks
-    // at high zoom, while the smooth upscale matches the native Magnifier's pointer look.
     memset(bits, 0, (size_t)S * S * 4);
-    bool anyAlpha = false;
-    if (scale_ == 1) {
-        DrawIconEx(memDc, 0, 0, hIconCopy, natW_, natH_, 0, nullptr, DI_NORMAL);
-        const uint32_t* pixels = (const uint32_t*)bits;
-        for (int i = 0; i < S * S && !anyAlpha; i++)
-            if ((pixels[i] & 0xFF000000u) != 0) anyAlpha = true;
+    uint32_t* canvas = (uint32_t*)bits;
+    if (scale_ > 1) {
+        const int dw = (std::min)(S, nsW_ * scale_), dh = (std::min)(S, nsH_ * scale_);
+        UpscaleBilinearPremul(nativeShape_.data(), nsW_, nsH_, canvas, S, dw, dh);
     } else {
-        BITMAPINFO smi{};
-        smi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-        smi.bmiHeader.biWidth = natW_;
-        smi.bmiHeader.biHeight = -natH_; // top-down DIB
-        smi.bmiHeader.biPlanes = 1;
-        smi.bmiHeader.biBitCount = 32;
-        smi.bmiHeader.biCompression = BI_RGB;
-        void* sbits = nullptr;
-        HBITMAP sdib = CreateDIBSection(screenDc, &smi, DIB_RGB_COLORS, &sbits, nullptr, 0);
-        if (sdib != nullptr && sbits != nullptr) {
-            HDC sdc = CreateCompatibleDC(screenDc);
-            HGDIOBJ sOld = SelectObject(sdc, sdib);
-            memset(sbits, 0, (size_t)natW_ * natH_ * 4);
-            DrawIconEx(sdc, 0, 0, hIconCopy, natW_, natH_, 0, nullptr, DI_NORMAL);
-            const uint32_t* sp = (const uint32_t*)sbits;
-            for (int i = 0; i < natW_ * natH_ && !anyAlpha; i++)
-                if ((sp[i] & 0xFF000000u) != 0) anyAlpha = true;
-            if (anyAlpha)
-                UpscaleBilinearPremul(sp, natW_, natH_, (uint32_t*)bits, S,
-                                      natW_ * scale_, natH_ * scale_);
-            SelectObject(sdc, sOld);
-            DeleteDC(sdc);
-        }
-        if (sdib != nullptr) DeleteObject(sdib);
+        const int dw = (std::min)(S, nsW_ + 1), dh = (std::min)(S, nsH_ + 1);
+        ComposeShiftedPremul(nativeShape_.data(), nsW_, nsH_, canvas, S, dw, dh, fracX_, fracY_);
     }
-
-    // Some cursors (the modern I-beam among them) report a color bitmap via GetIconInfo, but
-    // that color bitmap's alpha channel is empty, so the single pass above yields a fully
-    // transparent result. The all-transparent case falls back to the two-pass mask/inversion
-    // renderer (detected by output rather than by type).
-
-    if (!anyAlpha) {
-        SelectObject(memDc, oldBmp);
-        DeleteObject(dib);
-        DeleteDC(memDc);
-        ReleaseDC(nullptr, screenDc);
-
-        DestroyIcon(iconCopy_); // destroy the previous copy we were holding
-        iconCopy_ = hIconCopy;
-        hotX_ = hotX;
-        hotY_ = hotY;
-        lastCursor_ = info.hCursor;
-        lastVerdict_ = ShapeStatus::Rendered;
-        renderMaskShape();
-        crosshairMode_ = false;   // the window now holds the cursor shape again
-        return ShapeStatus::Rendered;
-    }
-
     BLENDFUNCTION blend{};
     blend.BlendOp = AC_SRC_OVER;
     blend.BlendFlags = 0;
@@ -236,20 +275,31 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
     SIZE size{ S, S };
     POINT srcPt{ 0, 0 };
     UpdateLayeredWindow(hwnd_, nullptr, nullptr, &size, memDc, &srcPt, 0, &blend, ULW_ALPHA);
-
     SelectObject(memDc, oldBmp);
     DeleteObject(dib);
     DeleteDC(memDc);
     ReleaseDC(nullptr, screenDc);
+}
 
-    DestroyIcon(iconCopy_); // destroy the previous copy we were holding
-    iconCopy_ = hIconCopy;
-    hotX_ = hotX;
-    hotY_ = hotY;
-    lastCursor_ = info.hCursor;
-    lastVerdict_ = ShapeStatus::Rendered;
-    crosshairMode_ = false;   // the window now holds the cursor shape again
-    return ShapeStatus::Rendered;
+// Sub-pixel positioning for the desktop-space mode (issue #195): integer base via SetWindowPos
+// (deduped), fractional residual baked into the content (deduped on the fraction - an idle
+// tick re-presents nothing). The hotspot lands exactly on (desktopX, desktopY) in continuous
+// coordinates, so under the fullscreen transform the cursor sits pixel-exactly on the lens
+// point at any zoom - no wobble, no stick-then-jump.
+void CursorSprite::moveToSubpixel(double desktopX, double desktopY) {
+    if (hwnd_ == nullptr) return;
+    const int bx = (int)std::floor(desktopX);
+    const int by = (int)std::floor(desktopY);
+    const double fx = desktopX - bx, fy = desktopY - by;
+    if (bx != lastBaseX_ || by != lastBaseY_) {
+        lastBaseX_ = bx; lastBaseY_ = by;
+        SetWindowPos(hwnd_, nullptr, bx - hotX_, by - hotY_, 0, 0,
+                     SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+    if (!crosshairMode_ && scale_ == 1 && (fx != fracX_ || fy != fracY_)) {
+        fracX_ = fx; fracY_ = fy;
+        composeAndPresent();
+    }
 }
 
 // Change the sprite's integer zoom scale. Invalidates the shape cache so the next
@@ -284,7 +334,6 @@ void CursorSprite::setScale(int s) {
 // underneath, so the caret is legible on any background and there is no verdict
 // left to oscillate.
 void CursorSprite::renderMaskShape() {
-    const int S = bufSize();
     const int nw = natW_, nh = natH_;
     HDC screenDc = GetDC(nullptr);
     HDC memDc = CreateCompatibleDC(screenDc);
@@ -363,39 +412,17 @@ void CursorSprite::renderMaskShape() {
         }
     }
 
-    // Compose the output canvas: the finished native-res result copied (scale 1) or
-    // bilinear-upscaled (scale > 1) into the S x S ULW surface.
-    void* canvasBits = nullptr;
-    BITMAPINFO cmi = bmi;
-    cmi.bmiHeader.biWidth = S;
-    cmi.bmiHeader.biHeight = -S;
-    HBITMAP canvasDib = CreateDIBSection(screenDc, &cmi, DIB_RGB_COLORS, &canvasBits, nullptr, 0);
-    if (canvasDib != nullptr && canvasBits != nullptr) {
-        memset(canvasBits, 0, (size_t)S * S * 4);
-        uint32_t* canvas = (uint32_t*)canvasBits;
-        if (scale_ == 1) {
-            for (int y = 0; y < nh; y++)
-                memcpy(canvas + (size_t)y * S, white + (size_t)y * nw, (size_t)nw * 4);
-        } else {
-            UpscaleBilinearPremul(white, nw, nh, canvas, S, nw * scale_, nh * scale_);
-        }
-        SelectObject(memDc, canvasDib);
-        BLENDFUNCTION blend{};
-        blend.BlendOp = AC_SRC_OVER;
-        blend.BlendFlags = 0;
-        blend.SourceConstantAlpha = 255;
-        blend.AlphaFormat = AC_SRC_ALPHA;
-        SIZE size{ S, S };
-        POINT srcPt{ 0, 0 };
-        UpdateLayeredWindow(hwnd_, nullptr, nullptr, &size, memDc, &srcPt, 0, &blend, ULW_ALPHA);
-    }
+    // Cache the finished native-res result; composeAndPresent owns all presentation
+    // (copy / upscale / sub-pixel shift) from here.
+    nativeShape_.assign(white, white + (size_t)nw * nh);
+    nsW_ = nw; nsH_ = nh;
 
     SelectObject(memDc, oldBmp);
-    if (canvasDib != nullptr) DeleteObject(canvasDib);
     DeleteObject(whiteDib);
     DeleteObject(blackDib);
     DeleteDC(memDc);
     ReleaseDC(nullptr, screenDc);
+    composeAndPresent();
 }
 
 // Moves the sprite so its hotspot sits at the given desktop point.

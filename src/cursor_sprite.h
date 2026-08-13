@@ -1,6 +1,8 @@
 #pragma once
 #include <windows.h>
 #include <unordered_map>
+#include <cstdint>
+#include <vector>
 namespace wind {
 class CursorSprite {
 public:
@@ -13,6 +15,11 @@ public:
     int usedBand() const { return usedBand_; }
     ShapeStatus refreshShape();
     void moveTo(int desktopX, int desktopY);
+    // Desktop-space positioning with the fractional residual baked into the sprite CONTENT
+    // (issue #195): a layered window sits on integer desktop pixels, and under the fullscreen
+    // transform that half-pixel residual is magnified by the level - the re-centering wobble /
+    // stick-then-jump inertia the field reported. The hotspot lands on the continuous point.
+    void moveToSubpixel(double desktopX, double desktopY);
     void show();
     void hide();
     // Re-assert HWND_TOPMOST when a window has been displaced above us, throttled with a 1s backstop.
@@ -37,6 +44,7 @@ private:
     int usedBand_ = 0;
     void renderMaskShape();
     void renderCrosshair();
+    void composeAndPresent();          // present the cached native shape (upscale / sub-pixel shift)
     bool displaced() const;            // a visible, overlapping window sits above us in z-order
     static const int kSize = 64;       // base (1x) logical canvas; buffers are kSize * scale_
     int bufSize() const { return kSize * scale_; }
@@ -48,6 +56,10 @@ private:
     int     hotX_ = 0, hotY_ = 0;      // in FINAL (scaled) sprite pixels
     int     natW_ = 0, natH_ = 0;      // icon's native size (DrawIconEx scales to nat * scale_)
     int     scale_ = 1;                // current integer zoom scale (1..20)
+    std::vector<uint32_t> nativeShape_;   // cached native-res premultiplied shape (compose source)
+    int     nsW_ = 0, nsH_ = 0;           // cached shape dimensions
+    double  fracX_ = 0.0, fracY_ = 0.0;   // sub-pixel residual baked into the content
+    int     lastBaseX_ = INT_MIN, lastBaseY_ = INT_MIN;   // dedupe the integer SetWindowPos
     bool    visible_ = false;
     bool    crosshairMode_ = false;          // window currently holds the crosshair pixels
     unsigned long long lastTopmostMs_ = 0;   // last HWND_TOPMOST re-assert (throttled)
