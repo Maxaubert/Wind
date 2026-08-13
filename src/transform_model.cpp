@@ -23,6 +23,7 @@ void TransformModel::resetTransformState() {
     lastCenterX_ = -1e9; lastCenterY_ = -1e9;   // txSpriteLead velocity baseline (issue #195)
     easeValid_ = false;                          // free-cursor view easing re-seeds per session
     frozenViewValid_ = false;                    // frozen-view diagnostic re-anchors per session
+    publicSessionOpened_ = false;                // next session re-opens on the public channel
     samplingApplied_ = false;                    // re-apply sampling mode per fresh context
     haveLastClick_ = false;
 }
@@ -445,13 +446,17 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // dumped only when a write happens cannot report the case that matters (writes not
     // happening), and its "per second" would be divided by an unknown interval.
     {
+        ++tickCount_;
         const unsigned long long nowR = GetTickCount64();
         if (repanLogMs_ == 0) repanLogMs_ = nowR;
         else if (nowR - repanLogMs_ >= 1000) {
-            if (repanCalls_ > 0 || repanCount_ > 0)
-                wind::Log(wind::LogLevel::Info, "transform",
-                          "repan writes=%d/s calls=%d/s dedupe=%d/s hookMoves=%u/s (level=%.2f)",
-                          repanCount_, repanCalls_, repanDedupe_, ex.moveSignals, level);
+            // TICKS/S is the number that matters (issue #195): the view can never update faster
+            // than present() runs, and the field wobble is the view stepping ~64 times a second
+            // against a 142Hz display. Everything else here is secondary.
+            wind::Log(wind::LogLevel::Info, "transform",
+                      "ticks=%d/s repanWrites=%d/s calls=%d/s dedupe=%d/s hookMoves=%u/s (level=%.2f)",
+                      tickCount_, repanCount_, repanCalls_, repanDedupe_, ex.moveSignals, level);
+            tickCount_ = 0;
             repanCount_ = 0; repanCalls_ = 0; repanDedupe_ = 0; repanLogMs_ = nowR;
         }
     }
@@ -495,6 +500,20 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         lastChangeMs_ = GetTickCount64();
         keepAliveTick_ = 0;
     }
+    // Cadence throttle (issue #195): hold the pan at a fixed interval instead of writing every
+    // tick. Level changes (ramps) always pass so zooming never stutters.
+    bool cadenceHold = false;
+    if (cfg.txWriteIntervalMs > 0 && changed && !ramping && applyLevel == lastWrittenLevel_) {
+        // QPC, not GetTickCount64: its ~15.6ms granularity turned a 16ms interval into 25-35ms
+        // (measured 40Hz instead of the intended 64Hz).
+        LARGE_INTEGER cFr, cNow;
+        QueryPerformanceFrequency(&cFr);
+        QueryPerformanceCounter(&cNow);
+        const unsigned long long nowUs = (unsigned long long)(cNow.QuadPart * 1000000LL / cFr.QuadPart);
+        if (nowUs - lastPanWriteMs_ < (unsigned long long)cfg.txWriteIntervalMs * 1000ULL) cadenceHold = true;
+        else lastPanWriteMs_ = nowUs;
+    }
+    lastWrittenLevel_ = applyLevel;
     int txJitter = 0;
     // Keep-alive: 700ms window, <=8x only. (The original 1.5s/all-levels spec was re-tried
     // under MPO-off 2026-07-26 and measured WORSE - 360ms worst spike vs 198ms baseline. With
@@ -514,7 +533,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // stop all writes once the value settles, and the field shows the magnified cursor
     // disappearing when writes stop - so the diagnostic must keep the write stream alive to
     // isolate CURSOR smoothness from PAN smoothness.
-    if (changed || keepAliveActive || cfg.txCursorProbe == 3) {
+    if ((changed && !cadenceHold) || keepAliveActive || cfg.txCursorProbe == 3) {
         // First-write instrumentation (#191 review): the ~36ms "DWM builds its machinery" cost was
         // a code-comment estimate with no log evidence - 57% of the field day's zoom-ins were cold
         // and the zoom-in edge is exactly where sluggishness is judged. Make it a number.
@@ -522,14 +541,26 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             timeFirstWrite_ = false;
             LARGE_INTEGER ffr, fa, fb;
             QueryPerformanceFrequency(&ffr); QueryPerformanceCounter(&fa);
-            writeTransform((float)applyLevel, m.offX, m.offY, m.txX + txJitter, m.txY, fastPan_, false);
+            // Public channel for the session's first write - see the hybrid-channel note below.
+            writeTransform((float)applyLevel, m.offX, m.offY, m.txX + txJitter, m.txY, false, false);
+            publicSessionOpened_ = true;
             QueryPerformanceCounter(&fb);
             wind::Log(wind::LogLevel::Info, "transform", "first write took %.1fms (%s context)",
                       double(fb.QuadPart - fa.QuadPart) * 1000.0 / ffr.QuadPart,
                       coldContext_ ? "cold" : "warm");
             coldContext_ = false;
         } else {
-            writeTransform((float)applyLevel, m.offX, m.offY, m.txX + txJitter, m.txY, fastPan_, false);
+            // HYBRID CHANNEL (issue #195): the session's FIRST write goes through the PUBLIC API,
+            // which is what puts DWM into cursor-magnifying mode (a session opened on the private
+            // channel leaves the pointer unmagnified - field-verified twice). Every later pan then
+            // rides the PRIVATE channel, measured at 0.09ms against the public API's 3-9ms. That
+            // cost is the reason the view could only step 64 times a second against a 142Hz
+            // display, in 22-123 desktop-px jumps, which is the wobble the frozen-view test
+            // isolated: the cursor glides continuously while the scene lurches.
+            const bool usePrivate = fastPan_ && publicSessionOpened_;
+            writeTransform((float)applyLevel, m.offX, m.offY, m.txX + txJitter, m.txY,
+                           usePrivate, false);
+            publicSessionOpened_ = true;
         }
     }
     // Input transform. Mode 1 (THE SHIPPED DEFAULT; field-verified 4x-20x,

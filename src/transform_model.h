@@ -83,10 +83,14 @@ private:
     bool   easeValid_ = false;
     double frozenSrcL_ = 0.0, frozenSrcT_ = 0.0;           // frozen-view diagnostic (#195)
     bool   frozenViewValid_ = false;
+    bool   publicSessionOpened_ = false;         // first write of a session went public (#195)
     unsigned long long lastEaseMs_ = 0;
     bool   samplingApplied_ = false;                       // sampling mode set for this context
     int    repanCount_ = 0;                                // repan rate proof (#195)
     int    repanCalls_ = 0, repanDedupe_ = 0;              // how often it is invoked vs deduped
+    int    tickCount_ = 0;                                 // present() calls per second (#195)
+    unsigned long long lastPanWriteMs_ = 0;                // txWriteIntervalMs cadence throttle
+    double lastWrittenLevel_ = 0.0;
     int    lastRepanCx_ = INT_MIN, lastRepanCy_ = INT_MIN; // pointer-movement idle detection
     unsigned long long repanLogMs_ = 0;
     double velX_ = 0.0, velY_ = 0.0, velT_ = 0.0;          // cursor velocity estimator (#195)

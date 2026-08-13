@@ -133,6 +133,13 @@ struct Config {
     // nearest; -1 = leave untouched. (Never call the raw user32 sampling-mode setter
     // by value - it takes a pointer and access-violates; mag_host owns the safe wrapper.)
     int txSamplingMode = 1;
+    // View write cadence (issue #195, hot): minimum ms between pan writes, 0 = every tick.
+    // Counterintuitive but field-measured: native Magnifier updates its view only ~64 times a
+    // second (15.6ms - its threadpool timer at the default resolution) in BIGGER steps than
+    // ours at 144Hz, and looks smoother. The magnified cursor appears locked to native's view
+    // updates while ours is drawn live, so our cursor moves against the view between writes;
+    // matching native's cadence tests whether a slower, locked-looking view beats a faster one.
+    int txWriteIntervalMs = 0;
     // Cursor lead prediction (issue #195, hot): milliseconds of cursor motion to aim AHEAD of
     // the sampled position in free-cursor mode. DWM latches the cursor plane late while the
     // magnified content it composites against is older, so the view lags the pointer by
