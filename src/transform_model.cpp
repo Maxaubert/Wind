@@ -526,6 +526,16 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         }
     }
 
+    // Band-16 screen-space sprite scaling (issue #195): the band-16 window escapes the
+    // fullscreen transform (the experiment's premise - the field verdict tells us if not), so
+    // matching the zoom is OUR job. cursorScaleWithZoom=1 (this user's preference) re-renders
+    // the sprite at the level's integer scale - smooth bilinear from a native-size render, so
+    // high zoom means big-and-clean, not big-and-blocky; 0 keeps it constant-size (the product
+    // rule met on the transform path). Integer steps only: a 1->20x ramp re-renders ~19 times,
+    // the expensive top sizes landing near the ramp's end where a couple of ms do not read.
+    // Desktop-space mode (spriteBand16=0) never calls this: DWM scales the sprite there.
+    if (spriteBand16_ && sprite_)
+        sprite_->setScale(cfg.cursorScaleWithZoom != 0 ? (int)(level + 0.5) : 1);
     if (useSprite_ && sprite_ && ex.cursorLocked && ex.drawCursor) {
         // Inspect mode: the real cursor is frozen at the (overridden) click point, but the thing the
         // user aims with is the LOOK POINT (mapper center). Repaint the sprite as the crosshair (the

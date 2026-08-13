@@ -3,12 +3,51 @@
 #include "band_window.h"
 #include <cstring>
 #include <cstdint>
+#include <cmath>
 #include <algorithm>
 #include <vector>
 #include <dwmapi.h>
 namespace wind {
 
 static const wchar_t* kClassName = L"WindCursorSprite";
+
+// Bilinear upscale of a premultiplied BGRA buffer into the top-left of a larger canvas
+// (issue #195). Premultiplied alpha makes the per-channel lerp correct (no color fringing at
+// the edges). Used when the sprite self-scales (band-16 screen-space mode): DrawIconEx's own
+// stretch is nearest-neighbor, which reads as "pixelated" the moment the scale is large -
+// native Magnifier's pointer is smooth at any zoom, so render at native size and match it.
+static void UpscaleBilinearPremul(const uint32_t* src, int sw, int sh,
+                                  uint32_t* dst, int dstStride, int dw, int dh) {
+    for (int y = 0; y < dh; y++) {
+        const double fy = (y + 0.5) * sh / (double)dh - 0.5;
+        int y0 = (int)std::floor(fy);
+        const double wy = fy - y0;
+        int y1 = y0 + 1;
+        if (y0 < 0) y0 = 0;
+        if (y0 > sh - 1) y0 = sh - 1;
+        if (y1 > sh - 1) y1 = sh - 1;
+        for (int x = 0; x < dw; x++) {
+            const double fx = (x + 0.5) * sw / (double)dw - 0.5;
+            int x0 = (int)std::floor(fx);
+            const double wx = fx - x0;
+            int x1 = x0 + 1;
+            if (x0 < 0) x0 = 0;
+            if (x0 > sw - 1) x0 = sw - 1;
+            if (x1 > sw - 1) x1 = sw - 1;
+            const uint32_t p00 = src[y0 * sw + x0], p01 = src[y0 * sw + x1];
+            const uint32_t p10 = src[y1 * sw + x0], p11 = src[y1 * sw + x1];
+            uint32_t out = 0;
+            for (int sh8 = 0; sh8 < 32; sh8 += 8) {
+                const double c = ((p00 >> sh8) & 0xFFu) * (1.0 - wx) * (1.0 - wy) +
+                                 ((p01 >> sh8) & 0xFFu) * wx * (1.0 - wy) +
+                                 ((p10 >> sh8) & 0xFFu) * (1.0 - wx) * wy +
+                                 ((p11 >> sh8) & 0xFFu) * wx * wy;
+                out |= ((uint32_t)(c + 0.5) & 0xFFu) << sh8;
+            }
+            dst[y * dstStride + x] = out;
+        }
+    }
+}
 
 // A topmost click-through layered window that mirrors the system cursor.
 // While magnifying, the real cursor is hidden and this sprite is positioned
@@ -129,21 +168,48 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
     // usable premultiplied alpha for cursors that carry their own
     // per-pixel alpha channel - this single pass is tried for every
     // cursor, regardless of whether GetIconInfo reported an hbmColor.
-    // Drawn at native * scale_ so the sprite matches the zoom level.
+    // At scale 1 the icon is drawn straight into the canvas. At higher scales it is drawn at
+    // NATIVE size into a small DIB and bilinear-upscaled into the canvas (issue #195):
+    // DrawIconEx's own stretch is nearest-neighbor, which turned the arrow into visible blocks
+    // at high zoom, while the smooth upscale matches the native Magnifier's pointer look.
     memset(bits, 0, (size_t)S * S * 4);
-    DrawIconEx(memDc, 0, 0, hIconCopy, natW_ * scale_, natH_ * scale_, 0, nullptr, DI_NORMAL);
-
-    // Some cursors (the modern I-beam among them) report a color bitmap
-    // via GetIconInfo, but that color bitmap's alpha channel is empty, so
-    // the single pass above yields a fully transparent result (every
-    // pixel's alpha byte is 0). Detect the all-transparent case here, by
-    // output rather than by type, and fall back to the two-pass
-    // mask/inversion renderer for these mask cursors.
     bool anyAlpha = false;
-    uint32_t* pixels = (uint32_t*)bits;
-    for (int i = 0; i < S * S; i++) {
-        if ((pixels[i] & 0xFF000000u) != 0) { anyAlpha = true; break; }
+    if (scale_ == 1) {
+        DrawIconEx(memDc, 0, 0, hIconCopy, natW_, natH_, 0, nullptr, DI_NORMAL);
+        const uint32_t* pixels = (const uint32_t*)bits;
+        for (int i = 0; i < S * S && !anyAlpha; i++)
+            if ((pixels[i] & 0xFF000000u) != 0) anyAlpha = true;
+    } else {
+        BITMAPINFO smi{};
+        smi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        smi.bmiHeader.biWidth = natW_;
+        smi.bmiHeader.biHeight = -natH_; // top-down DIB
+        smi.bmiHeader.biPlanes = 1;
+        smi.bmiHeader.biBitCount = 32;
+        smi.bmiHeader.biCompression = BI_RGB;
+        void* sbits = nullptr;
+        HBITMAP sdib = CreateDIBSection(screenDc, &smi, DIB_RGB_COLORS, &sbits, nullptr, 0);
+        if (sdib != nullptr && sbits != nullptr) {
+            HDC sdc = CreateCompatibleDC(screenDc);
+            HGDIOBJ sOld = SelectObject(sdc, sdib);
+            memset(sbits, 0, (size_t)natW_ * natH_ * 4);
+            DrawIconEx(sdc, 0, 0, hIconCopy, natW_, natH_, 0, nullptr, DI_NORMAL);
+            const uint32_t* sp = (const uint32_t*)sbits;
+            for (int i = 0; i < natW_ * natH_ && !anyAlpha; i++)
+                if ((sp[i] & 0xFF000000u) != 0) anyAlpha = true;
+            if (anyAlpha)
+                UpscaleBilinearPremul(sp, natW_, natH_, (uint32_t*)bits, S,
+                                      natW_ * scale_, natH_ * scale_);
+            SelectObject(sdc, sOld);
+            DeleteDC(sdc);
+        }
+        if (sdib != nullptr) DeleteObject(sdib);
     }
+
+    // Some cursors (the modern I-beam among them) report a color bitmap via GetIconInfo, but
+    // that color bitmap's alpha channel is empty, so the single pass above yields a fully
+    // transparent result. The all-transparent case falls back to the two-pass mask/inversion
+    // renderer (detected by output rather than by type).
 
     if (!anyAlpha) {
         SelectObject(memDc, oldBmp);
@@ -188,9 +254,11 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
 
 // Change the sprite's integer zoom scale. Invalidates the shape cache so the next
 // refreshShape()/showCrosshair() re-renders at the new size (hotspot recomputes too).
+// Cap 20 = maxLevel's ceiling (the band-16 screen-space mode self-scales to the zoom level,
+// issue #195); a 64*20 canvas is a 1280px layered surface, re-rendered only on integer steps.
 void CursorSprite::setScale(int s) {
     if (s < 1) s = 1;
-    if (s > 8) s = 8;
+    if (s > 20) s = 20;
     if (s == scale_) return;
     scale_ = s;
     lastCursor_ = nullptr;
@@ -217,12 +285,18 @@ void CursorSprite::setScale(int s) {
 // left to oscillate.
 void CursorSprite::renderMaskShape() {
     const int S = bufSize();
+    const int nw = natW_, nh = natH_;
     HDC screenDc = GetDC(nullptr);
     HDC memDc = CreateCompatibleDC(screenDc);
+    // Classification runs at NATIVE size (issue #195): the two probe renders, the ink verdicts,
+    // and the outline are all computed at the cursor's own resolution, then the finished premul
+    // result is bilinear-upscaled into the canvas. Classifying an already-nearest-stretched
+    // render would blockify the ink AND misplace the outline; this way the outline thickens with
+    // the zoom smoothly, the same way the arrow's baked outline scales.
     BITMAPINFO bmi{};
     bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = S;
-    bmi.bmiHeader.biHeight = -S; // top-down DIB
+    bmi.bmiHeader.biWidth = nw;
+    bmi.bmiHeader.biHeight = -nh; // top-down DIB
     bmi.bmiHeader.biPlanes = 1;
     bmi.bmiHeader.biBitCount = 32;
     bmi.bmiHeader.biCompression = BI_RGB;
@@ -240,12 +314,12 @@ void CursorSprite::renderMaskShape() {
     }
 
     HGDIOBJ oldBmp = SelectObject(memDc, blackDib);
-    std::fill_n((uint32_t*)blackBits, (size_t)S * S, 0xFF000000u);
-    DrawIconEx(memDc, 0, 0, iconCopy_, natW_ * scale_, natH_ * scale_, 0, nullptr, DI_NORMAL);
+    std::fill_n((uint32_t*)blackBits, (size_t)nw * nh, 0xFF000000u);
+    DrawIconEx(memDc, 0, 0, iconCopy_, nw, nh, 0, nullptr, DI_NORMAL);
 
     SelectObject(memDc, whiteDib);
-    std::fill_n((uint32_t*)whiteBits, (size_t)S * S, 0xFFFFFFFFu);
-    DrawIconEx(memDc, 0, 0, iconCopy_, natW_ * scale_, natH_ * scale_, 0, nullptr, DI_NORMAL);
+    std::fill_n((uint32_t*)whiteBits, (size_t)nw * nh, 0xFFFFFFFFu);
+    DrawIconEx(memDc, 0, 0, iconCopy_, nw, nh, 0, nullptr, DI_NORMAL);
 
     const uint32_t kOpaqueWhite = 0xFFFFFFFFu;   // premultiplied opaque white (the ink)
     const uint32_t kOpaqueBlack = 0xFF000000u;   // premultiplied opaque black (the outline)
@@ -254,8 +328,8 @@ void CursorSprite::renderMaskShape() {
     // shape[i] = 1 for every opaque pixel of the cursor: a baked colour pixel, or an inverting
     // pixel we are inking white. The outline pass below dilates this, so it must be recorded
     // BEFORE the outline is drawn, or the outline would feed on itself and keep growing.
-    std::vector<uint8_t> shape((size_t)S * S);   // heap: S*S is up to 512x512 at max scale
-    for (int i = 0; i < S * S; i++) {
+    std::vector<uint8_t> shape((size_t)nw * nh);
+    for (int i = 0; i < nw * nh; i++) {
         uint32_t rgbB = black[i] & 0x00FFFFFFu;
         uint32_t rgbW = white[i] & 0x00FFFFFFu;
         if (rgbB == rgbW) {
@@ -271,34 +345,53 @@ void CursorSprite::renderMaskShape() {
     }
 
     // Outline: every transparent pixel touching the shape (8-neighbourhood) becomes opaque black.
-    // One desktop pixel thick, so the fullscreen transform magnifies it in step with the ink, the
-    // same way the arrow cursor's own outline scales.
-    for (int y = 0; y < S; y++) {
-        for (int x = 0; x < S; x++) {
-            int i = y * S + x;
+    // One native pixel thick; the upscale below (or the fullscreen transform in desktop-space
+    // mode) thickens it in step with the ink, the same way the arrow's own outline scales.
+    for (int y = 0; y < nh; y++) {
+        for (int x = 0; x < nw; x++) {
+            int i = y * nw + x;
             if (shape[i]) continue;                  // already ink or baked colour
             bool touches = false;
             for (int dy = -1; dy <= 1 && !touches; dy++) {
                 for (int dx = -1; dx <= 1 && !touches; dx++) {
                     int ny = y + dy, nx = x + dx;
-                    if (ny < 0 || nx < 0 || ny >= S || nx >= S) continue;
-                    if (shape[ny * S + nx]) touches = true;
+                    if (ny < 0 || nx < 0 || ny >= nh || nx >= nw) continue;
+                    if (shape[ny * nw + nx]) touches = true;
                 }
             }
             if (touches) white[i] = kOpaqueBlack;
         }
     }
 
-    BLENDFUNCTION blend{};
-    blend.BlendOp = AC_SRC_OVER;
-    blend.BlendFlags = 0;
-    blend.SourceConstantAlpha = 255;
-    blend.AlphaFormat = AC_SRC_ALPHA;
-    SIZE size{ S, S };
-    POINT srcPt{ 0, 0 };
-    UpdateLayeredWindow(hwnd_, nullptr, nullptr, &size, memDc, &srcPt, 0, &blend, ULW_ALPHA);
+    // Compose the output canvas: the finished native-res result copied (scale 1) or
+    // bilinear-upscaled (scale > 1) into the S x S ULW surface.
+    void* canvasBits = nullptr;
+    BITMAPINFO cmi = bmi;
+    cmi.bmiHeader.biWidth = S;
+    cmi.bmiHeader.biHeight = -S;
+    HBITMAP canvasDib = CreateDIBSection(screenDc, &cmi, DIB_RGB_COLORS, &canvasBits, nullptr, 0);
+    if (canvasDib != nullptr && canvasBits != nullptr) {
+        memset(canvasBits, 0, (size_t)S * S * 4);
+        uint32_t* canvas = (uint32_t*)canvasBits;
+        if (scale_ == 1) {
+            for (int y = 0; y < nh; y++)
+                memcpy(canvas + (size_t)y * S, white + (size_t)y * nw, (size_t)nw * 4);
+        } else {
+            UpscaleBilinearPremul(white, nw, nh, canvas, S, nw * scale_, nh * scale_);
+        }
+        SelectObject(memDc, canvasDib);
+        BLENDFUNCTION blend{};
+        blend.BlendOp = AC_SRC_OVER;
+        blend.BlendFlags = 0;
+        blend.SourceConstantAlpha = 255;
+        blend.AlphaFormat = AC_SRC_ALPHA;
+        SIZE size{ S, S };
+        POINT srcPt{ 0, 0 };
+        UpdateLayeredWindow(hwnd_, nullptr, nullptr, &size, memDc, &srcPt, 0, &blend, ULW_ALPHA);
+    }
 
     SelectObject(memDc, oldBmp);
+    if (canvasDib != nullptr) DeleteObject(canvasDib);
     DeleteObject(whiteDib);
     DeleteObject(blackDib);
     DeleteDC(memDc);

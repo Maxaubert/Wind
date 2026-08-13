@@ -26,9 +26,11 @@ public:
     // crosshair ON the look point. Cached: repaints only on the first call after normal-cursor use;
     // the next refreshShape() repaints the cursor shape, so leaving Inspect needs no explicit reset.
     void showCrosshair();
-    // Integer zoom scale for the sprite (1..8). The sprite composites OUTSIDE the fullscreen
-    // magnification (unmagnified), so matching the zoom is our job: the cursor/crosshair is
-    // re-rendered scale x larger on change (issue #148: "cursor should grow as you zoom").
+    // Integer zoom scale for the sprite (1..20). Only meaningful when the sprite composites
+    // OUTSIDE the fullscreen magnification (band-16 screen-space mode) - there, matching the
+    // zoom is our job: the cursor/crosshair is re-rendered scale x larger on integer change,
+    // bilinear-upscaled from a native-size render so it stays smooth, never blocky (#195).
+    // In desktop-space mode DWM magnifies the sprite itself; leave scale at 1 there.
     void setScale(int s);
     void destroy();
 private:
@@ -45,7 +47,7 @@ private:
     HICON   iconCopy_ = nullptr;
     int     hotX_ = 0, hotY_ = 0;      // in FINAL (scaled) sprite pixels
     int     natW_ = 0, natH_ = 0;      // icon's native size (DrawIconEx scales to nat * scale_)
-    int     scale_ = 1;                // current integer zoom scale (1..8)
+    int     scale_ = 1;                // current integer zoom scale (1..20)
     bool    visible_ = false;
     bool    crosshairMode_ = false;          // window currently holds the crosshair pixels
     unsigned long long lastTopmostMs_ = 0;   // last HWND_TOPMOST re-assert (throttled)
