@@ -48,16 +48,33 @@ static bool g_mpoDisabled = false;   // boot state of OverlayTestMode (read once
 
 static void DetectMpoDisabled() {
     DWORD v = 0, sz = sizeof(v);
+    bool regDisabled = false;
     if (RegGetValueW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\Dwm",
                      L"OverlayTestMode", RRF_RT_REG_DWORD, nullptr, &v, &sz) == ERROR_SUCCESS)
-        g_mpoDisabled = (v == 5);
-    wind::Log(wind::LogLevel::Info, "startup", "MPO %s (OverlayTestMode=%lu) -> pan wall %s",
-              g_mpoDisabled ? "DISABLED" : "enabled", (unsigned long)v,
-              g_mpoDisabled ? "off (full range)" : "on (right-strip bound above ~9.3x)");
-    // Persist the earliest post-boot reading so the Settings "Disable MPO" row can tell a change
-    // that genuinely needs a restart from one that merely puts the registry back to what DWM
-    // already loaded (issue #164). No-ops if this boot is already recorded.
+        regDisabled = (v == 5);
+    g_mpoDisabled = regDisabled;
+    // Persist the earliest post-boot reading (issue #164). No-ops if this boot is already recorded.
     wind::RecordMpoBootState(g_mpoDisabled);
+    // THE WALL MUST FOLLOW WHAT DWM ACTUALLY LOADED, NOT THE LIVE REGISTRY (issue #197, field
+    // 2026-08-13: five dwm.exe crashes in dwmcore.dll in 20 minutes). DWM reads OverlayTestMode
+    // ONCE at boot. Writing 5 mid-session therefore disables nothing until the next restart - but
+    // Wind read the fresh value, concluded "MPO disabled", and dropped the pan wall while MPO was
+    // still live in the compositor. That is exactly the unguarded 16-bit overflow condition, and
+    // it crashed DWM repeatedly (a Mica-backdrop browser at high zoom reproduces it readily -
+    // desktop-class windows get overlay planes too, not just games). The boot record is the only
+    // honest answer to "what is DWM running with"; the live value is merely what the NEXT boot
+    // will use. Fall back to the live read only when there is no record for this boot.
+    bool bootDisabled = false;
+    const bool haveBoot = wind::MpoStateAtBoot(bootDisabled);
+    if (haveBoot) g_mpoDisabled = bootDisabled;
+    wind::Log(wind::LogLevel::Info, "startup",
+              "MPO %s (registry OverlayTestMode=%lu, boot state %s) -> pan wall %s",
+              g_mpoDisabled ? "DISABLED" : "enabled", (unsigned long)v,
+              haveBoot ? (bootDisabled ? "disabled" : "enabled") : "unknown",
+              g_mpoDisabled ? "off (full range)" : "on (right-strip bound above ~9.3x)");
+    if (haveBoot && bootDisabled != regDisabled)
+        wind::Log(wind::LogLevel::Warn, "startup",
+                  "OverlayTestMode was changed since boot - guarding per the BOOT state until restart");
 }
 
 // Current refresh rate (Hz) of the primary display, for pacing the idle/1x loop and the
