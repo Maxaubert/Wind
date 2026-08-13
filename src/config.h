@@ -116,13 +116,20 @@ struct Config {
     // rests - so hover hit-testing is exact whenever the view is still, and stale by at most
     // ~N ticks of pan mid-gesture. Cuts the per-tick DWM message rate during ramps/pans.
     int ixDecimate = 4;
-    // Magnification bitmap smoothing (applied once per transform session): 1 (default) =
-    // MagSetFullscreenUseBitmapSmoothing(TRUE), the undocumented call behind native Magnifier's
-    // "smooth edges of images and text". Without it DWM samples NEAREST NEIGHBOUR and the
-    // magnified image and cursor look blocky. The state is global to DWM and resets when DWM
-    // restarts (that is why smoothing seemed to come and go between builds), so it is re-applied
-    // every session. 0 = force nearest; -1 = leave whatever is set alone.
-    int txSamplingMode = 1;
+    // Magnification sampling mode (applied once per transform session).
+    //   0 = NEAREST (the DEFAULT, and the safe one)
+    //   1 = the edge-preserving smooth filter behind native Magnifier's "smooth edges of images
+    //       and text" - looks far better, but FIELD-CONFIRMED to crash dwm.exe in dwmcore.dll
+    //       over complex Mica/acrylic geometry at high zoom (two first-try reproductions in a
+    //       browser; zero with nearest). Do not ship 1 without re-testing that case.
+    //   2..4 = undocumented modes the kernel accepts and round-trips. FIELD-TESTED 2026-08-13:
+    //       all three render IDENTICALLY to nearest, i.e. they are aliases, not cheaper filters.
+    //       Mode 1 is the only real smooth path and it is the one that crashes. Do not re-test
+    //       these hoping for a middle ground - there isn't one on this Windows build.
+    //   -1 = leave whatever DWM currently has alone.
+    // The state is global to DWM and resets when DWM restarts, which is why smoothing appeared
+    // to come and go between builds; it is re-applied per magnification context.
+    int txSamplingMode = 0;
     // MPO buster (issue #191, hot): 1 (default) = during transform GAME sessions on MPO-ENABLED
     // machines, show a fullscreen alpha-1 click-through ghost that demotes the game off its
     // hardware overlay plane - off the plane there is no 16-bit translation field to overflow,
