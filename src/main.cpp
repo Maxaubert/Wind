@@ -2112,6 +2112,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     ts.hz = DetectRefreshHz();
     int pacedHz = ts.hz;                              // hz the timer interval below is computed for
     LARGE_INTEGER due; due.QuadPart = -(10000000LL / pacedHz);
+    // Measured composite cadence (issue #195): the repan spin budgets against THIS, not the
+    // reported refresh rate. EMA over DwmFlush returns; 0 until the first two flushes land.
+    long long compIntervalUs = 0;
+    long long lastFlushQpc = 0;
 
     bool running = true;
     unsigned long long nextRecoverMs = 0;   // device-lost recovery backoff gate (GetTickCount64)
@@ -2208,60 +2212,53 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             }
         }
 
+        // Tick start = just after the previous composite (the loop tail's DwmFlush returned
+        // here), so the repan spin below can budget against the real frame boundary. The
+        // interval itself is measured at the DwmFlush return (compIntervalUs) rather than taken
+        // from the reported refresh rate, which was wrong enough on this VRR panel to make the
+        // spin swallow two composites per tick.
+        LARGE_INTEGER tickStartQpc;
+        QueryPerformanceCounter(&tickStartQpc);
         RunTick(ts);
 
-        // HIGH-RATE CURSOR REPAN (issue #195, the wobble fix). DWM draws the magnified cursor
-        // from its LIVE position at composite time, but uses the offset we last WROTE. At one
-        // write per composite that offset is up to a frame stale, so the view trails the cursor
-        // by hand-speed * staleness * level: the visible lead while moving, and - because the
-        // write-to-composite gap jitters frame to frame - the residual wobble, both growing
-        // with zoom exactly as reported. Native has the same algebra but writes from a
-        // low-level mouse hook, i.e. sub-millisecond staleness (agent disassembly: threadpool
-        // timer + WH_MOUSE_LL, no compositor sync). Match that by polling the cursor through
-        // the pre-composite wait and re-panning on change, so what DWM samples is always fresh.
-        // Cost while the hand is still: one GetCursorPos per poll and no write at all.
-        // The Magnification API is thread-affine, so this must stay on the tick thread (an
-        // async writer was measured-negative) - hence polling here rather than in the hook.
-        if (dwmPaces) DwmFlush();   // block until DWM's next composite -> frames align with it
-
-        // FIXED-PHASE REPAN (issue #195, measured). DwmFlush returns immediately after a
-        // composite, so writing HERE pins the pan write to a stable point in the frame - and a
-        // stable write-to-latch distance is what makes the cursor sit still. Measured why this
-        // shape: the wobble was always ~one frame of TIME jitter (5.8-7.6ms) no matter the write
-        // rate (30/s, 300/s, 1000/s all identical), i.e. it is not staleness but PHASE variance -
-        // our single per-frame write landed wherever the tick happened to end. The old
-        // event-driven poll could not fix that: instrumentation showed the hook delivering ~1
-        // move per tick, so the loop simply waited out its budget and wrote once anyway.
-        // The constant lead this leaves (one frame) is cancelled by txCursorLeadMs prediction,
-        // which is exactly the quantity a fixed phase makes predictable.
+        // CONTINUOUS REPAN, RUN BEFORE THE COMPOSITE (issue #195, measured).
+        // The Magnification API is thread-affine, so every write must stay on this thread (an
+        // async writer is measured-negative) - hence a spin here rather than a hook-side write.
+        //
+        // DWM latches the magnification transform at a moment we cannot observe, so a single
+        // write per tick leaves whichever composites fall after it using a stale offset - the
+        // displayed offset alternated fresh / ~15ms-stale, which IS the wobble. Refreshing on a
+        // ~1ms spin fixes that, but WHERE the spin sits in the loop decides whether we then miss
+        // composites: spinning 3/4 of the frame right AFTER DwmFlush left too little time for
+        // RunTick, so ticks overran the next composite and 18% of frames took a >20 desktop-px
+        // lurch (native: 5%, and its ordinary jitter is 1-5px, which is invisible). So spin in
+        // the gap that remains AFTER RunTick and stop short of the composite: the last write is
+        // ~1.5ms before the latch, and DwmFlush is always reached in time.
         if (dwmPaces && ts.prevLvl > 1.001 && ts.cfg.txCursorPollHz > 0) {
             if (auto* tmFast = dynamic_cast<TransformModel*>(ts.model)) {
-                // Repan through the frame on a SPIN cadence, not an event and not a waitable
-                // timer: the mouse-move event proved to deliver ~1 wake per tick (instrumented),
-                // and a 1ms waitable timer only achieved ~3ms in practice. Composite-synced
-                // measurement showed the displayed offset alternating between fresh and ~15ms
-                // stale, so what matters is that a RECENT value is always in place whenever DWM
-                // latches - i.e. small worst-case staleness, not average write rate. Spinning is
-                // affordable here (zoomed transform sessions only) and gives ~1ms worst case.
-                const int hzNow = ts.hz > 0 ? ts.hz : 60;
-                const long long budgetUs = (1000000LL / hzNow) * 3 / 4;
+                LARGE_INTEGER pf; QueryPerformanceFrequency(&pf);
+                // Frame time comes from the MEASURED composite interval, never from the reported
+                // refresh rate: on this VRR panel the reported rate disagreed badly with reality
+                // and the spin sized itself to ~15.6ms instead of ~6.9ms, so every tick consumed
+                // TWO composites - the offset then updated at 64Hz against a 142Hz display, in
+                // 21-122 desktop-px steps (measured with an offset trace). That staircase was the
+                // wobble. Self-calibrating here is immune to whatever the display reports.
+                const long long frameUs = compIntervalUs > 0 ? compIntervalUs : (1000000LL / (ts.hz > 0 ? ts.hz : 60));
+                long long deadlineUs = frameUs - 1500;   // leave 1.5ms to reach DwmFlush
+                if (deadlineUs < 1000) deadlineUs = 1000;
                 const long long stepUs = 1000000LL / (ts.cfg.txCursorPollHz > 0 ? ts.cfg.txCursorPollHz : 1000);
-                LARGE_INTEGER pf, pa, pb;
-                QueryPerformanceFrequency(&pf);
-                QueryPerformanceCounter(&pa);
                 long long nextUs = 0;
                 int idleSpins = 0;
                 for (;;) {
-                    QueryPerformanceCounter(&pb);
-                    const long long spent = (pb.QuadPart - pa.QuadPart) * 1000000LL / pf.QuadPart;
-                    if (spent >= budgetUs) break;
+                    LARGE_INTEGER pb; QueryPerformanceCounter(&pb);
+                    const long long spent = (pb.QuadPart - tickStartQpc.QuadPart) * 1000000LL / pf.QuadPart;
+                    if (spent >= deadlineUs) break;
                     if (spent >= nextUs) {
                         nextUs = spent + stepUs;
-                        // A still hand needs no refresh: bail out of the spin once several
-                        // consecutive repans find nothing to write, so an idle zoomed session
-                        // costs nothing. Any motion resumes it on the next frame.
-                        // fastCursorRepan reports POINTER ACTIVITY (moved or wrote), so the
-                        // bail-out only triggers on a genuinely still hand - ~20ms of no motion.
+                        // fastCursorRepan reports POINTER ACTIVITY (moved or wrote), so this
+                        // bail-out triggers only on a genuinely still hand (~20ms), keeping an
+                        // idle zoomed session free. Keying it on writes instead quit the spin
+                        // during slow pans and put the wobble straight back (measured).
                         if (tmFast->fastCursorRepan(ts.cfg)) idleSpins = 0;
                         else if (++idleSpins >= 20) break;
                     } else {
@@ -2269,6 +2266,23 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                     }
                 }
             }
+        }
+
+        if (dwmPaces) {
+            DwmFlush();   // block until DWM's next composite -> frames align with it
+            // Measure the real composite interval (EMA) for the repan budget above. Sampled at
+            // the DwmFlush return, which is the only observable frame boundary we get.
+            LARGE_INTEGER nowQpc, freqQpc;
+            QueryPerformanceCounter(&nowQpc);
+            QueryPerformanceFrequency(&freqQpc);
+            if (lastFlushQpc != 0) {
+                const long long dUs = (nowQpc.QuadPart - lastFlushQpc) * 1000000LL / freqQpc.QuadPart;
+                if (dUs > 2000 && dUs < 40000)   // ignore hitches and absurd gaps
+                    compIntervalUs = compIntervalUs > 0 ? (compIntervalUs * 7 + dUs) / 8 : dUs;
+            }
+            lastFlushQpc = nowQpc.QuadPart;
+        } else {
+            lastFlushQpc = 0;
         }
     }
 

@@ -513,7 +513,14 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         // (this call postdates every hitch baseline and was fully uninstrumented until now).
         if (changed) ixPending_ = true;
         const bool rest = !changed;
-        if (rest || ++ixTick_ >= cfg.ixDecimate) {
+        // REAL-CURSOR mode publishes on EVERY change (issue #195): DWM positions the magnified
+        // cursor from the input transform, so decimating it starves the cursor between view
+        // updates - measured, large per-frame cursor lurches fell from 24% of frames to 10%
+        // when this went to every-change, and the spread dropped below native's. The #189
+        // decimation stays for the welded/sprite designs, where the publish only feeds
+        // pointer-framework hover hit-testing and 4x fewer publishes is a free perf win.
+        const int ixEvery = (cfg.txCursorProbe == 2) ? 1 : cfg.ixDecimate;
+        if (rest || ++ixTick_ >= ixEvery) {
             ixTick_ = 0;
             ixPending_ = false;
             // srcL/srcT, not r.srcLeft/srcTop: when the ramp limiters make applyLevel != level
