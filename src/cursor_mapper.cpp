@@ -30,6 +30,13 @@ MapResult CursorMapper::update(int dx, int dy, double level) {
         if (tx_ > centerMax) tx_ = centerMax;
         if (cx_ > centerMax) cx_ = centerMax;
     }
+    // Y wall (issue #191): identical shape - the 16-bit wrap is per-axis and Y was unguarded.
+    if (maxSrcY_ >= 0.0) {
+        double centerMaxY = maxSrcY_ + (sh_ / level) / 2.0;
+        if (centerMaxY > sh_) centerMaxY = sh_;
+        if (ty_ > centerMaxY) ty_ = centerMaxY;
+        if (cy_ > centerMaxY) cy_ = centerMaxY;
+    }
 
     // Light inertia: ease the rendered center toward the target. Smooths jerk and the uneven
     // per-frame delta steps; alpha_ = 1 means no smoothing (snaps to target).

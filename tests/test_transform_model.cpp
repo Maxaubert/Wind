@@ -23,6 +23,35 @@ TEST_CASE("CursorMapper pan wall: source left never exceeds the bound (issue #14
     CHECK(r.srcLeft > 3300.0);                                   // full-range clamp only (w - w/L)
 }
 
+TEST_CASE("CursorMapper pan wall Y: source top never exceeds the bound (issue #191)") {
+    // The shipped wall was X-only: |srcY*level| overflows the SAME 16-bit plane field, and the
+    // bottom strip above ~16.2x on 2160 was reachable-lethal. Grind toward the bottom-right at
+    // 20x with BOTH walls set and assert both axes hold the driver-safe bound.
+    CursorMapper m(3840, 2160, 0.0);
+    m.reset(1920.0, 1080.0);
+    const double level = 20.0;
+    m.setMaxSourceLeft(32000.0 / level);
+    m.setMaxSourceTop(32000.0 / level);
+    MapResult r{};
+    for (int i = 0; i < 600; ++i) r = m.update(20, 12, level);
+    CHECK(r.srcLeft * level <= 32000.0 + 1e-3);
+    CHECK(r.srcTop * level <= 32000.0 + 1e-3);
+    // Lifting the walls (ghost settled / MPO off) restores the full range on both axes.
+    m.setMaxSourceLeft(-1.0);
+    m.setMaxSourceTop(-1.0);
+    for (int i = 0; i < 600; ++i) r = m.update(20, 12, level);
+    CHECK(r.srcLeft > 3600.0);                                   // ~ w - w/L = 3648
+    CHECK(r.srcTop > 2000.0);                                    // ~ h - h/L = 2052
+}
+
+TEST_CASE("CursorMapper pan wall Y: unset by default (desktop/render sessions unrestricted)") {
+    CursorMapper m(3840, 2160, 0.0);
+    m.reset(1920.0, 1080.0);
+    MapResult r{};
+    for (int i = 0; i < 600; ++i) r = m.update(0, 12, 18.0);
+    CHECK(r.srcTop * 18.0 > 32767.0);                            // past the 16-bit line: allowed
+}
+
 TEST_CASE("ComputeMagTransform: public offset rounds the source top-left") {
     MagTransform m = ComputeMagTransform(100.4, 200.6, 2.0, 3840, 2160);
     CHECK(m.offX == 100);

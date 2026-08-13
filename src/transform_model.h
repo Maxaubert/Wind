@@ -34,6 +34,13 @@ public:
     // hybrid DESKTOP pick requires this: without the source-rect input transform, transform
     // desktop sessions have the pointer-framework hover dead zones (POINTER-HITTEST-FINDINGS.md).
     bool inputTransformAvailable() const { return inputTransformAvailable_; }
+    // MPO buster (issue #191). Wanted = show the fullscreen alpha-1 ghost this session (MPO-
+    // exposed game session + the mpoBuster knob); exposed = the session could overflow the
+    // 16-bit plane field, so the write-site clamp applies whenever the ghost is not verifiably
+    // settled. ghostSettled = the fail-closed evidence the pan-wall lift requires.
+    void setMpoBusterWanted(bool wanted) { mpoBusterWanted_ = wanted; }
+    void setMpoExposed(bool exposed) { mpoExposed_ = exposed; }
+    bool mpoGhostSettled() const { return mpoGhost_.settled(GetTickCount64()); }
 private:
     bool fastPan_, smoothPan_, useSprite_;
     int  zorderBand_;                                // sprite z-band (above the shell); needs UIAccess
@@ -43,6 +50,10 @@ private:
     MonitorTarget mon_{};
     MagHost host_;
     CompositionPin pin_;
+    MpoGhost mpoGhost_;                              // MPO buster (issue #191)
+    bool mpoBusterWanted_ = false;                   // show the ghost this session
+    bool mpoExposed_ = false;                        // apply the 16-bit write clamp
+    unsigned long long lastGhostAssertMs_ = 0;       // 500ms assert cadence
     std::unique_ptr<CursorBlanker> blanker_;
     std::unique_ptr<CursorSprite> sprite_;
     unsigned long long lastPinAssertMs_ = 0;

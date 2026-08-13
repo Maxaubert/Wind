@@ -161,6 +161,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "desktopTransform")   c.desktopTransform = std::stoi(val);
             else if (key == "spriteBand16")       c.spriteBand16 = std::stoi(val);
             else if (key == "ixDecimate")         c.ixDecimate = std::stoi(val);
+            else if (key == "mpoBuster")          c.mpoBuster = std::stoi(val);
             else if (key == "txKeepAliveMaxLevel")c.txKeepAliveMaxLevel = std::stoi(val);
             else if (key == "txIdleReleaseMs")    c.txIdleReleaseMs = std::stoi(val);
             else if (key == "txMaxStepPct")       c.txMaxStepPct = std::stoi(val);

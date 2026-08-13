@@ -116,6 +116,13 @@ struct Config {
     // rests - so hover hit-testing is exact whenever the view is still, and stale by at most
     // ~N ticks of pan mid-gesture. Cuts the per-tick DWM message rate during ramps/pans.
     int ixDecimate = 4;
+    // MPO buster (issue #191, hot): 1 (default) = during transform GAME sessions on MPO-ENABLED
+    // machines, show a fullscreen alpha-1 click-through ghost that demotes the game off its
+    // hardware overlay plane - off the plane there is no 16-bit translation field to overflow,
+    // so the #148 corner TDR cannot fire and the pan walls LIFT (full zoom range, no registry
+    // edit). Fail-closed: the walls lift only while the ghost is verifiably shown + settled.
+    // 0 = walls-only (the pre-#191 fence behavior). No effect when MPO is off.
+    int mpoBuster = 1;
     // Keep-alive level gate (issue #189, hot): the 1px keep-alive jitter runs only at or below
     // this level (the shipped 8 is the field-measured MPO-off optimum for games; raising it keeps
     // DWM's magnification pipeline warm at high zoom on the DESKTOP so pan-resume skips the

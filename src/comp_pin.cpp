@@ -37,4 +37,56 @@ void CompositionPin::destroy() {
     hide();
     if (hwnd_) { DestroyWindow(hwnd_); hwnd_ = nullptr; }
 }
+
+// --- MpoGhost (issue #191) ----------------------------------------------------------------
+
+static const wchar_t* kGhostClass = L"WindMpoGhost";
+
+bool MpoGhost::create(int x, int y, int w, int h) {
+    HINSTANCE hInst = GetModuleHandleW(nullptr);
+    WNDCLASSEXW wc{};
+    wc.cbSize = sizeof(wc);
+    wc.lpfnWndProc = DefWindowProcW;
+    wc.hInstance = hInst;
+    wc.lpszClassName = kGhostClass;
+    RegisterClassExW(&wc);   // benign if already registered
+
+    const DWORD exStyle = WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT
+                        | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
+    x_ = x; y_ = y; w_ = w; h_ = h;
+    hwnd_ = CreateWindowExW(exStyle, kGhostClass, L"WindMpoGhost", WS_POPUP,
+                            x, y, w, h, nullptr, nullptr, hInst, nullptr);
+    if (!hwnd_) return false;
+    SetLayeredWindowAttributes(hwnd_, 0, 1, LWA_ALPHA);   // alpha 1, never 0 (DWM drops 0)
+    SetWindowDisplayAffinity(hwnd_, WDA_EXCLUDEFROMCAPTURE);   // invisible to DDA/screenshots
+    return true;
+}
+
+void MpoGhost::assert_() {
+    if (!hwnd_) return;
+    SetWindowPos(hwnd_, HWND_TOPMOST, x_, y_, w_, h_, SWP_NOACTIVATE);
+    if (!visible_) {
+        ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
+        visible_ = true;
+        shownAtMs_ = GetTickCount64();
+    }
+}
+
+void MpoGhost::hide() {
+    if (hwnd_ && visible_) { ShowWindow(hwnd_, SW_HIDE); visible_ = false; shownAtMs_ = 0; }
+}
+
+void MpoGhost::destroy() {
+    hide();
+    if (hwnd_) { DestroyWindow(hwnd_); hwnd_ = nullptr; }
+}
+
+bool MpoGhost::settled(unsigned long long nowMs) const {
+    if (!hwnd_ || !visible_ || shownAtMs_ == 0) return false;
+    if (nowMs - shownAtMs_ < 350) return false;      // plane-demotion settle window
+    if (!IsWindowVisible(hwnd_)) return false;       // verify, never assume (fail-closed)
+    RECT rc{};
+    if (!GetWindowRect(hwnd_, &rc)) return false;
+    return rc.left == x_ && rc.top == y_ && rc.right == x_ + w_ && rc.bottom == y_ + h_;
+}
 }

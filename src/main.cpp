@@ -990,10 +990,24 @@ static void RunTick(TickState& t) {
         // (the far-right strip above ~9.3x) wraps and TDRs. Keyed to the SESSION TYPE (transform
         // model + borderless cover), not any cursor state: the wall must hold in the welded
         // design too. MPO off (this rig), or render/desktop sessions: unrestricted (field-clean).
-        const bool transformGame = dynamic_cast<TransformModel*>(t.model) != nullptr &&
-                                   fsCover && fgBorderless;
-        t.mapper.setMaxSourceLeft((transformGame && !g_mpoDisabled && t.cfg.tdrTest != 4)
-                                      ? kMaxSafeTxMagnitude / lvl : -1.0);
+        auto* tmWall = dynamic_cast<TransformModel*>(t.model);
+        const bool transformGame = tmWall != nullptr && fsCover && fgBorderless;
+        const bool mpoExposed = transformGame && !g_mpoDisabled;
+        // MPO buster (issue #191): a fullscreen alpha-1 ghost window demotes the game off its
+        // hardware overlay plane by geometry (the parking law, PresentMon-proven) - no plane, no
+        // 16-bit field, no overflow. The walls lift ONLY on verified evidence (ghost shown +
+        // settled >=350ms + rect intact), never on intent: any doubt keeps them up (fail-closed).
+        // tdrTest=4 is the field harness override (walls off regardless, for the repro probe).
+        const bool wallNeeded = mpoExposed && t.cfg.tdrTest != 4 &&
+                                !(t.cfg.mpoBuster != 0 && tmWall->mpoGhostSettled());
+        t.mapper.setMaxSourceLeft(wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0);
+        // Y wall too (issue #191): |srcY*level| overflows the same 16-bit field - the bottom
+        // strip above ~16.2x on 2160 was reachable-lethal with the X-only wall.
+        t.mapper.setMaxSourceTop(wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0);
+        if (tmWall) {
+            tmWall->setMpoBusterWanted(mpoExposed && t.cfg.mpoBuster != 0);
+            tmWall->setMpoExposed(mpoExposed);
+        }
         if (transformGame) t.lastTransformGameMs = GetTickCount64();   // device-lost backstop window
         // Launch quiesce (dwmcore APPCRASH, 2026-08-12): a FRESHLY STARTED process taking over as
         // a borderless cover means a game is LAUNCHING - mode switches and surface churn hammer
