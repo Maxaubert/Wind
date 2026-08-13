@@ -125,6 +125,13 @@ struct Config {
     // weld pixel (field verdict: residual wobble - the weld itself fights the hand).
     // 2 = FREE cursor, view centres on the actual cursor position, no weld (native design).
     int txCursorProbe = 0;
+    // Free-cursor view easing (issue #195, hot): time constant in ms for the view's pursuit of
+    // the free cursor, NORMALIZED BY LEVEL (tau_eff = txFollowEaseMs / level) so the on-screen
+    // feel is identical at every zoom. Exact per-tick centering makes the per-composite timing
+    // noise between DWM's cursor sampling and our transform writes the ONLY relative motion -
+    // i.e. pure visible wobble; easing turns it into a smooth native-style glide that swallows
+    // the noise. 0 = no easing (the wobbling exact-center probe).
+    int txFollowEaseMs = 200;
     // Sprite/transform skew compensation (issue #195, hot, A/B): the cursor sprite (a layered
     // window) and the magnification transform are separate DWM state; if one consistently
     // applies a composite later than the other, the cursor leads/trails the view by

@@ -164,6 +164,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "mpoBuster")          c.mpoBuster = std::stoi(val);
             else if (key == "txSpriteLead")       c.txSpriteLead = std::stod(val);
             else if (key == "txCursorProbe")      c.txCursorProbe = std::stoi(val);
+            else if (key == "txFollowEaseMs")     c.txFollowEaseMs = std::stoi(val);
             else if (key == "txKeepAliveMaxLevel")c.txKeepAliveMaxLevel = std::stoi(val);
             else if (key == "txIdleReleaseMs")    c.txIdleReleaseMs = std::stoi(val);
             else if (key == "txMaxStepPct")       c.txMaxStepPct = std::stoi(val);

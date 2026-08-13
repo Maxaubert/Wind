@@ -71,6 +71,9 @@ private:
     unsigned long long lastChangeMs_ = 0;            // when the transform last REALLY changed
     int  lastSpriteX_ = INT_MIN, lastSpriteY_ = INT_MIN;   // dedup the game-session sprite move
     double lastCenterX_ = -1e9, lastCenterY_ = -1e9;       // txSpriteLead velocity baseline (#195)
+    double easeCx_ = 0.0, easeCy_ = 0.0;                   // free-cursor eased view centre (#195)
+    bool   easeValid_ = false;
+    unsigned long long lastEaseMs_ = 0;
     // Magnification context lifetime (issue #148). While a context is alive DWM composites
     // magnification-aware, so every cursor visibility/shape change an app makes costs a
     // re-composite: a game that toggles its pointer on middle-click hitches even at 1x

@@ -21,6 +21,7 @@ void TransformModel::resetTransformState() {
     ixTick_ = 0; ixPending_ = false;
     lastSpriteX_ = INT_MIN; lastSpriteY_ = INT_MIN;
     lastCenterX_ = -1e9; lastCenterY_ = -1e9;   // txSpriteLead velocity baseline (issue #195)
+    easeValid_ = false;                          // free-cursor view easing re-seeds per session
     haveLastClick_ = false;
 }
 
@@ -352,20 +353,31 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // +-0.5px*level re-centering sawtooth on the cursor (the reported wobble). Anchoring here
     // makes T(weld) == screen centre EXACT by construction; the view inherits the integer
     // grid (level-px steps at slow pan), exactly like native Magnifier's cursor-driven view.
-    if (cfg.txCursorProbe == 2) {
+    if (cfg.txCursorProbe == 2 && !ex.cursorLocked) {
         // FREE-CURSOR mode (the native design, issue #195): no weld at all - the cursor moves
-        // freely under the user's hand, and the VIEW centres on wherever the cursor actually
-        // is. The mode-1 residual wobble was the weld itself: each tick SetCursorPos yanked
-        // the visible real cursor back against the hand's push, a per-tick tug-of-war
-        // amplified by the level. With nothing snapping the cursor, motion is continuous;
-        // the view trails by at most one tick, smoothly and speed-proportionally - exactly
-        // native Magnifier's behavior (probe-verified: native never parks its cursor either).
-        // Hover/clicks/drags are all native-correct by construction (the cursor IS at its
-        // true position), which is also why FOLLOW-era sessions had no pointer dead zones.
+        // freely under the user's hand, and the VIEW pursues it with EASING. Exact per-tick
+        // centering was field-tested and still wobbled: pinning the cursor to center each
+        // frame makes the per-composite timing noise between DWM's live cursor sampling and
+        // our transform writes the ONLY relative motion left - pure visible jitter. Easing the
+        // view (native centered mode does the same) low-passes our src trajectory, so the
+        // cursor-vs-view motion is a smooth deliberate glide that swallows the noise: solid at
+        // rest, a soft speed-proportional lead in motion. tau is level-normalized so the
+        // ON-SCREEN feel is the same at every zoom. Hover/clicks/drags stay native-correct by
+        // construction (the cursor IS at its true position - the FOLLOW-era no-dead-zones law).
         POINT pc{};
         GetCursorPos(&pc);
-        OffsetF o = ComputeOffsetF((double)(pc.x - mon_.x), (double)(pc.y - mon_.y),
-                                   applyLevel, mon_.w, mon_.h);
+        const double px = pc.x - mon_.x, py = pc.y - mon_.y;
+        const unsigned long long nowE = GetTickCount64();
+        if (!easeValid_) { easeCx_ = px; easeCy_ = py; easeValid_ = true; lastEaseMs_ = nowE; }
+        double dtE = (nowE - lastEaseMs_) / 1000.0;
+        lastEaseMs_ = nowE;
+        if (dtE > 0.05) dtE = 0.05;   // a hitch must not teleport the view
+        const double lvlForTau = applyLevel > 1.0 ? applyLevel : 1.0;
+        const double tau = cfg.txFollowEaseMs > 0 ? (cfg.txFollowEaseMs / 1000.0) / lvlForTau : 0.0;
+        const double aE = tau > 0.0 ? 1.0 - std::exp(-dtE / tau) : 1.0;
+        easeCx_ += (px - easeCx_) * aE;
+        easeCy_ += (py - easeCy_) * aE;
+        OffsetF o = ComputeOffsetF(easeCx_, easeCy_, applyLevel, mon_.w, mon_.h);
         srcL = o.x; srcT = o.y;
     } else if (cfg.txCursorProbe != 0) {
         OffsetF o = ComputeOffsetF((double)r.clickDesktopX, (double)r.clickDesktopY,
