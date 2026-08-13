@@ -1288,6 +1288,7 @@ static void RunTick(TickState& t) {
         // Drag-follow (issue #169): the pan resolve above chose to follow the pointer this tick, so
         // neither engine may weld it back to the lens centre - suspend the SetCursorPos.
         ex.suppressCursorSync = dragFollow;
+        ex.moveSignals = g_input.state().moveSignals.exchange(0, std::memory_order_relaxed);
         // Serialize transform writes around an Inspect click's injected absolute move (issue #148
         // TDR class): the injection and a transform write racing each other is the proven trigger.
         // The launch quiesce holds writes AND the weld until its deadline (anchored at cover
@@ -2221,41 +2222,54 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         // Cost while the hand is still: one GetCursorPos per poll and no write at all.
         // The Magnification API is thread-affine, so this must stay on the tick thread (an
         // async writer was measured-negative) - hence polling here rather than in the hook.
-        if (dwmPaces && ts.cfg.txCursorPollHz > 0 && ts.prevLvl > 1.001) {
-            auto* tmFast = dynamic_cast<TransformModel*>(ts.model);
-            HANDLE mv = (HANDLE)g_input.mouseMoveEvent();
-            if (tmFast) {
+        if (dwmPaces) DwmFlush();   // block until DWM's next composite -> frames align with it
+
+        // FIXED-PHASE REPAN (issue #195, measured). DwmFlush returns immediately after a
+        // composite, so writing HERE pins the pan write to a stable point in the frame - and a
+        // stable write-to-latch distance is what makes the cursor sit still. Measured why this
+        // shape: the wobble was always ~one frame of TIME jitter (5.8-7.6ms) no matter the write
+        // rate (30/s, 300/s, 1000/s all identical), i.e. it is not staleness but PHASE variance -
+        // our single per-frame write landed wherever the tick happened to end. The old
+        // event-driven poll could not fix that: instrumentation showed the hook delivering ~1
+        // move per tick, so the loop simply waited out its budget and wrote once anyway.
+        // The constant lead this leaves (one frame) is cancelled by txCursorLeadMs prediction,
+        // which is exactly the quantity a fixed phase makes predictable.
+        if (dwmPaces && ts.prevLvl > 1.001 && ts.cfg.txCursorPollHz > 0) {
+            if (auto* tmFast = dynamic_cast<TransformModel*>(ts.model)) {
+                // Repan through the frame on a SPIN cadence, not an event and not a waitable
+                // timer: the mouse-move event proved to deliver ~1 wake per tick (instrumented),
+                // and a 1ms waitable timer only achieved ~3ms in practice. Composite-synced
+                // measurement showed the displayed offset alternating between fresh and ~15ms
+                // stale, so what matters is that a RECENT value is always in place whenever DWM
+                // latches - i.e. small worst-case staleness, not average write rate. Spinning is
+                // affordable here (zoomed transform sessions only) and gives ~1ms worst case.
                 const int hzNow = ts.hz > 0 ? ts.hz : 60;
-                // Spend most of the frame here, then let DwmFlush land the resync. Leaving
-                // headroom is what keeps us from overshooting into the NEXT composite (which
-                // would halve the tick rate).
                 const long long budgetUs = (1000000LL / hzNow) * 3 / 4;
+                const long long stepUs = 1000000LL / (ts.cfg.txCursorPollHz > 0 ? ts.cfg.txCursorPollHz : 1000);
                 LARGE_INTEGER pf, pa, pb;
                 QueryPerformanceFrequency(&pf);
                 QueryPerformanceCounter(&pa);
+                long long nextUs = 0;
+                int idleSpins = 0;
                 for (;;) {
                     QueryPerformanceCounter(&pb);
                     const long long spent = (pb.QuadPart - pa.QuadPart) * 1000000LL / pf.QuadPart;
                     if (spent >= budgetUs) break;
-                    // Wait for the NEXT REAL POINTER MOVE, then repan immediately: the offset we
-                    // publish is paired with the cursor sample that same motion produced, which
-                    // is what native gets by writing from inside its hook. A timer-paced poll
-                    // pairs offsets with samples of random staleness = variable lead = wobble
-                    // (measured: 300 writes/s changed nothing). Bounded wait so a still hand
-                    // still reaches DwmFlush on time; no hook (WIND_NOHOOK) falls back to it too.
-                    const DWORD waitMs = (DWORD)((budgetUs - spent) / 1000) + 1;
-                    if (mv) WaitForSingleObject(mv, waitMs);
-                    else if (timer) {
-                        LARGE_INTEGER step; step.QuadPart = -10000;   // 1ms
-                        if (SetWaitableTimer(timer, &step, 0, nullptr, nullptr, FALSE))
-                            WaitForSingleObject(timer, 5);
+                    if (spent >= nextUs) {
+                        nextUs = spent + stepUs;
+                        // A still hand needs no refresh: bail out of the spin once several
+                        // consecutive repans find nothing to write, so an idle zoomed session
+                        // costs nothing. Any motion resumes it on the next frame.
+                        // fastCursorRepan reports POINTER ACTIVITY (moved or wrote), so the
+                        // bail-out only triggers on a genuinely still hand - ~20ms of no motion.
+                        if (tmFast->fastCursorRepan(ts.cfg)) idleSpins = 0;
+                        else if (++idleSpins >= 20) break;
+                    } else {
+                        YieldProcessor();
                     }
-                    tmFast->fastCursorRepan(ts.cfg);
                 }
             }
         }
-
-        if (dwmPaces) DwmFlush();   // block until DWM's next composite -> frames align with it
     }
 
     g_tick = nullptr;

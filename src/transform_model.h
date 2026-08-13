@@ -84,6 +84,8 @@ private:
     unsigned long long lastEaseMs_ = 0;
     bool   samplingApplied_ = false;                       // sampling mode set for this context
     int    repanCount_ = 0;                                // repan rate proof (#195)
+    int    repanCalls_ = 0, repanDedupe_ = 0;              // how often it is invoked vs deduped
+    int    lastRepanCx_ = INT_MIN, lastRepanCy_ = INT_MIN; // pointer-movement idle detection
     unsigned long long repanLogMs_ = 0;
     double velX_ = 0.0, velY_ = 0.0, velT_ = 0.0;          // cursor velocity estimator (#195)
     double velEmaX_ = 0.0, velEmaY_ = 0.0;

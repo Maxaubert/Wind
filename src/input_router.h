@@ -12,6 +12,7 @@ struct InputState {
     // frozen elsewhere, so the hook swallows a real left/right click (it would land at the frozen point)
     // and hands the tick PER-BUTTON pending counts; the tick fires a clean click at the look point per
     // pending press (counts, not a single flag, so a fast second click before the tick drains isn't lost).
+    std::atomic<unsigned> moveSignals{0};    // hook -> tick: WM_MOUSEMOVE seen (repan wake, #195)
     std::atomic<bool> inspectActive{false};  // tick -> hook: Inspect on, swallow clicks
     std::atomic<int>  commitLeft{0};         // hook -> tick: pending left clicks to fire at the look point
     std::atomic<int>  commitRight{0};        // hook -> tick: pending right clicks

@@ -181,7 +181,12 @@ static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
         // Magnification API is thread-affine, so the write itself must stay on the tick thread:
         // this event wakes it immediately instead. Injected moves are skipped - our own
         // SetCursorPos must never drive a repan (that is the weld tug-of-war, self-inflicted).
-        if (wParam == WM_MOUSEMOVE && !(mi->flags & LLMHF_INJECTED)) {
+        // Injected moves signal too: the only consumer (TransformModel::fastCursorRepan) runs
+        // exclusively in FREE-cursor mode, where we never SetCursorPos - so there is no weld
+        // for our own warps to fight, and a measurement harness that drives the pointer with
+        // SendInput exercises exactly the path a real hand does (issue #195 wobble probe).
+        if (wParam == WM_MOUSEMOVE) {
+            g_router->state().moveSignals.fetch_add(1, std::memory_order_relaxed);
             HANDLE mv = (HANDLE)g_router->mouseMoveEvent();
             if (mv) SetEvent(mv);
         }

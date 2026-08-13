@@ -409,6 +409,20 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
                   "bitmap smoothing %d applied=%d", cfg.txSamplingMode, ok ? 1 : 0);
     }
     if (level > sessionMaxLevel_) sessionMaxLevel_ = level;
+    // Repan rate proof (issue #195). Logged from the TICK path, not the write path: a counter
+    // dumped only when a write happens cannot report the case that matters (writes not
+    // happening), and its "per second" would be divided by an unknown interval.
+    {
+        const unsigned long long nowR = GetTickCount64();
+        if (repanLogMs_ == 0) repanLogMs_ = nowR;
+        else if (nowR - repanLogMs_ >= 1000) {
+            if (repanCalls_ > 0 || repanCount_ > 0)
+                wind::Log(wind::LogLevel::Info, "transform",
+                          "repan writes=%d/s calls=%d/s dedupe=%d/s hookMoves=%u/s (level=%.2f)",
+                          repanCount_, repanCalls_, repanDedupe_, ex.moveSignals, level);
+            repanCount_ = 0; repanCalls_ = 0; repanDedupe_ = 0; repanLogMs_ = nowR;
+        }
+    }
     const bool ramping = applyLevel != level || (applyLevel != lastLevel_ && lastLevel_ > 0.0);
     MagTransform m = ComputeMagTransform(srcL, srcT, applyLevel, mon_.w, mon_.h);
     // 2D write-site 16-bit backstop (issue #191): when the session is MPO-exposed AND the ghost
@@ -751,7 +765,7 @@ void TransformModel::predictCursor(const Config& cfg, double& x, double& y) {
         }
     }
     velX_ = x; velY_ = y; velT_ = t; velValid_ = true;
-    if (cfg.txCursorLeadMs <= 0) return;
+    if (cfg.txCursorLeadMs == 0) return;   // negative = deliberately TRAIL (native runs ~15ms behind)
     const double lead = cfg.txCursorLeadMs / 1000.0;
     double dx = velEmaX_ * lead, dy = velEmaY_ * lead;
     const double capX = (mon_.w / lastLevel_) / 4.0, capY = (mon_.h / lastLevel_) / 4.0;
@@ -766,11 +780,17 @@ void TransformModel::predictCursor(const Config& cfg, double& x, double& y) {
 // pairs with the live cursor plane is fresh (the wobble/lead fix). Deduped, so a still hand
 // costs one GetCursorPos. Runs only in free-cursor mode on a live, active, >1x session.
 bool TransformModel::fastCursorRepan(const Config& cfg) {
+    ++repanCalls_;
     if (cfg.txCursorProbe != 2 || !magUp_ || !active_) return false;
     if (lastLevel_ <= 1.001) return false;           // idle / ramping into a session
     if (cfg.txFollowEaseMs > 0) return false;        // easing owns the trajectory in that mode
     POINT pc{};
     if (!GetCursorPos(&pc)) return false;
+    // "Active" = the POINTER moved, not merely "we wrote". During a slow pan most 1ms polls find
+    // no whole-pixel change yet the hand is clearly moving; keying the caller's idle bail-out on
+    // writes made it quit the spin after 3 polls and put the wobble straight back (measured).
+    const bool cursorMoved = (pc.x != lastRepanCx_ || pc.y != lastRepanCy_);
+    lastRepanCx_ = pc.x; lastRepanCy_ = pc.y;
     double aimX = pc.x - mon_.x, aimY = pc.y - mon_.y;
     predictCursor(cfg, aimX, aimY);
     OffsetF o = ComputeOffsetF(aimX, aimY, lastLevel_, mon_.w, mon_.h);
@@ -790,23 +810,15 @@ bool TransformModel::fastCursorRepan(const Config& cfg) {
         if (m.txY < -32000) { m.txY = -32000; clamped = true; }
         if (clamped) { m.offX = (int)(-m.txX / lastLevel_); m.offY = (int)(-m.txY / lastLevel_); }
     }
-    if (m.offX == lastOffX_ && m.offY == lastOffY_ && m.txX == lastTxX_ && m.txY == lastTxY_)
-        return false;
+    if (m.offX == lastOffX_ && m.offY == lastOffY_ && m.txX == lastTxX_ && m.txY == lastTxY_) {
+        ++repanDedupe_;
+        return cursorMoved;   // still "active": keep the caller spinning while the hand moves
+    }
     lastOffX_ = m.offX; lastOffY_ = m.offY; lastTxX_ = m.txX; lastTxY_ = m.txY;
     lastChangeMs_ = GetTickCount64();
     keepAliveTick_ = 0;
     writeTransform((float)lastLevel_, m.offX, m.offY, m.txX, m.txY, fastPan_, false);
-    // Rate proof (issue #195): is the repan actually running, and at what rate? Without this
-    // the wobble diagnosis is guesswork - a poll that never fires looks exactly like a poll
-    // that fires and does not help.
     ++repanCount_;
-    const unsigned long long nowR = GetTickCount64();
-    if (repanLogMs_ == 0) repanLogMs_ = nowR;
-    else if (nowR - repanLogMs_ >= 1000) {
-        wind::Log(wind::LogLevel::Info, "transform", "repan writes=%d/s (level=%.2f)",
-                  repanCount_, lastLevel_);
-        repanCount_ = 0; repanLogMs_ = nowR;
-    }
     return true;
 }
 
