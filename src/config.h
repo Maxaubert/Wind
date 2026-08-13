@@ -111,6 +111,16 @@ struct Config {
     // under the transform CONTRADICT each other (transform.h header vs transform_model.cpp), so
     // this needs one visual verdict from the field: zoomed, is the sprite unmagnified?
     int spriteBand16 = 0;
+    // Input-transform publish decimation (issue #189, hot): publish every Nth CHANGED tick during
+    // motion (1 = every tick, the pre-#189 behavior), with a guaranteed publish the moment motion
+    // rests - so hover hit-testing is exact whenever the view is still, and stale by at most
+    // ~N ticks of pan mid-gesture. Cuts the per-tick DWM message rate during ramps/pans.
+    int ixDecimate = 4;
+    // Keep-alive level gate (issue #189, hot): the 1px keep-alive jitter runs only at or below
+    // this level (the shipped 8 is the field-measured MPO-off optimum for games; raising it keeps
+    // DWM's magnification pipeline warm at high zoom on the DESKTOP so pan-resume skips the
+    // park-rebuild spike - A/B knob, the 700ms window itself is measured and untouched).
+    int txKeepAliveMaxLevel = 8;
     int magInputTransform = 1; // publish MagSetInputTransform while zoomed (hot; needs UIAccess).
                           //     1 (DEFAULT) = the visual source rect per change - native-
                           //     Magnifier parity, THE fix for the pointer-framework hover dead

@@ -80,9 +80,15 @@ private:
     // never waits. Instrumentation logs per-second max/avg write time either way.
     void writeTransform(float lvl, int offX, int offY, int tx, int ty, bool fast, bool unusedAsync);
     void noteWrite(double ms, bool ok);
+    void noteIxWrite(double ms, bool ok);            // input-transform publish stats (issue #189)
     std::mutex statMx_;
     unsigned long long statLogMs_ = 0;
     double statMaxMs_ = 0.0, statSumMs_ = 0.0;
     int    statCount_ = 0, statFails_ = 0, statOver5_ = 0;
+    unsigned long long ixLogMs_ = 0;                 // input-transform publish stats (issue #189)
+    double ixMaxMs_ = 0.0, ixSumMs_ = 0.0;
+    int    ixCount_ = 0, ixFails_ = 0;
+    int    ixTick_ = 0;                              // decimation counter (cfg.ixDecimate)
+    bool   ixPending_ = false;                       // motion changed since the last publish
 };
 }

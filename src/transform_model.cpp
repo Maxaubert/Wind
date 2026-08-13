@@ -18,6 +18,7 @@ void TransformModel::resetTransformState() {
     lastOffX_ = lastOffY_ = lastTxX_ = lastTxY_ = 0;
     lastChangeMs_ = 0; keepAliveTick_ = 0; hiRampTick_ = 0;
     lastInputXformOn_ = false;
+    ixTick_ = 0; ixPending_ = false;
     lastSpriteX_ = INT_MIN; lastSpriteY_ = INT_MIN;
     haveLastClick_ = false;
 }
@@ -117,6 +118,27 @@ bool TransformModel::initialize(const MonitorTarget& monitor) {
     return true;
 }
 
+// Rolling stats for the input-transform publish (issue #189), mirroring noteWrite: this call
+// postdated every hitch baseline and had zero timing until now. Logged once a second only when
+// something is interesting (slow publish or a failure).
+void TransformModel::noteIxWrite(double ms, bool ok) {
+    std::lock_guard<std::mutex> lk(statMx_);
+    ++ixCount_;
+    ixSumMs_ += ms;
+    if (ms > ixMaxMs_) ixMaxMs_ = ms;
+    if (!ok) ++ixFails_;
+    unsigned long long now = GetTickCount64();
+    if (ixLogMs_ == 0) ixLogMs_ = now;
+    if (now - ixLogMs_ >= 1000) {
+        if (ixMaxMs_ > 5.0 || ixFails_ > 0) {
+            wind::Log(wind::LogLevel::Info, "ixwrite",
+                      "publishes=%d avg=%.2fms MAX=%.1fms fails=%d",
+                      ixCount_, ixCount_ ? ixSumMs_ / ixCount_ : 0.0, ixMaxMs_, ixFails_);
+        }
+        ixLogMs_ = now; ixMaxMs_ = 0.0; ixSumMs_ = 0.0; ixCount_ = 0; ixFails_ = 0;
+    }
+}
+
 void TransformModel::noteWrite(double ms, bool ok) {
     std::lock_guard<std::mutex> lk(statMx_);
     ++statCount_;
@@ -168,6 +190,14 @@ void TransformModel::hideSystemCursor(bool hide) {
 void TransformModel::setActive(bool active) {
     active_ = active;
     if (active) {
+        // Blank the system cursor set BEFORE the magnification context exists (issue #189): the
+        // blanker swaps 14 system cursors, and under a LIVE context every cursor change costs a
+        // DWM re-composite (the documented per-change tax) - running the burst inside the fresh
+        // context stacked ~14 taxed swaps onto the ~36ms context build, exactly the reported
+        // zoom-in hitch. Plain SetSystemCursor needs no context, so it is free out here. The
+        // present() hide branch keeps its blank() call as the fallback (idempotent) and still
+        // owns MagShowSystemCursor + cursorHidden_ bookkeeping.
+        if (useSprite_ && blanker_) blanker_->blank();
         // (A sub-pixel "session warm-up" write here was tried and measured WORSE: 4 spike frames
         // per 3 cycles vs 2, and it added zoom-out spikes. Entering magnification costs ~36ms
         // once per zoom-in regardless - that is DWM building its machinery.)
@@ -182,9 +212,12 @@ void TransformModel::setActive(bool active) {
     if (cursorHidden_) {
         if (sprite_) sprite_->hide();
         MagShowSystemCursor(TRUE);
-        if (blanker_) blanker_->restore();
         cursorHidden_ = false;
     }
+    // Unconditional (and idempotent): setActive(true) pre-blanks BEFORE the context exists, so
+    // a session that never entered the draw branch (cursorVisibility=never, hide-hotkey) still
+    // has blanked system cursors to give back even though cursorHidden_ never went true.
+    if (blanker_) blanker_->restore();
     idleSinceMs_ = GetTickCount64();   // start the release countdown (idleTick)
     wind::Log(wind::LogLevel::Info, "txsession", "session end maxLevel=%.2f", sessionMaxLevel_);
     sessionMaxLevel_ = 0.0;
@@ -323,12 +356,18 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // under MPO-off 2026-07-26 and measured WORSE - 360ms worst spike vs 198ms baseline. With
     // MPO disabled the desktop composites in software, so a hot magnification pipeline taxes
     // every frame; keep the window short and the high-zoom pipeline parked.)
-    if (!changed && !ramping && applyLevel <= 8.0 &&
+    bool keepAliveActive = false;
+    if (!changed && !ramping && applyLevel <= (double)cfg.txKeepAliveMaxLevel &&
         GetTickCount64() - lastChangeMs_ < 700) {
         keepAliveTick_ ^= 1;
         txJitter = keepAliveTick_;
+        keepAliveActive = true;   // BOTH parities must write (the return-to-true-value half too)
     }
-    writeTransform((float)applyLevel, m.offX, m.offY, m.txX + txJitter, m.txY, fastPan_, false);
+    // Same-value hygiene (issue #189): once the keep-alive window has lapsed (or above its level
+    // gate), a zoomed-idle tick would push an identical write 144x/s. DWM parks on static values
+    // anyway (measured), so skipping is free; the next changed/keep-alive tick writes as before.
+    if (changed || keepAliveActive)
+        writeTransform((float)applyLevel, m.offX, m.offY, m.txX + txJitter, m.txY, fastPan_, false);
     // Input transform. Mode 1 (THE SHIPPED DEFAULT; field-verified 4x-20x,
     // POINTER-HITTEST-FINDINGS.md): publish the visual source rect on every change, exactly
     // like native Magnifier. Pointer-framework apps (Explorer/Settings/shell) hit-test mouse
@@ -337,24 +376,40 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // Both rects in VIRTUAL-SCREEN coordinates (the old 0,0-based dst was wrong off-primary).
     // Needs UIAccess: the ENABLED publish fails without it (rig-measured ERROR_ACCESS_DENIED;
     // the DISABLED call succeeds regardless - never probe availability with the disable shape).
-    if (changed && cfg.magInputTransform != 0) {
-        // srcL/srcT, not r.srcLeft/srcTop: when the ramp limiters make applyLevel != level the
-        // VISUAL transform uses the recomputed origin (line above), and the input mapping must
-        // describe what is actually on screen or pointer hit-testing is briefly wrong mid-ramp.
-        InputTransformRects ir = ComputeInputTransformRects(
-            srcL, srcT, applyLevel, mon_.x, mon_.y, mon_.w, mon_.h);
-        RECT dst{ ir.dl, ir.dt, ir.dr, ir.db };
-        RECT src = (cfg.magInputTransform == 2) ? dst : RECT{ ir.sl, ir.st, ir.sr, ir.sb };
-        bool ok = host_.setInputTransform(applyLevel > 1.001, src, dst);
-        if (!ok) {
-            // Self-heal (spec constraint 1): a failed ENABLED publish means this build cannot
-            // fix the pointer-framework dead zones - the DESKTOP pick must stop choosing the
-            // transform. Games are unaffected (legacy input surfaces).
-            inputTransformAvailable_ = false;
-            if (!inputXformWarned_) {
-                inputXformWarned_ = true;
-                wind::Log(wind::LogLevel::Warn, "transform",
-                          "MagSetInputTransform failed (no UIAccess?) - desktop pick disabled");
+    if (cfg.magInputTransform != 0 && (changed || ixPending_)) {
+        // Decimation (issue #189): the publish exists for pointer-framework HOVER hit-testing
+        // (clicks ride the welded cursor and never consult it), so it does not need the 144Hz
+        // motion rate - every Nth changed tick suffices, with a GUARANTEED publish the moment
+        // motion rests (changed goes false with one pending) so a stationary aim is always
+        // exact. Halves-or-better the per-tick DWM magnification-message rate during ramps/pans
+        // (this call postdates every hitch baseline and was fully uninstrumented until now).
+        if (changed) ixPending_ = true;
+        const bool rest = !changed;
+        if (rest || ++ixTick_ >= cfg.ixDecimate) {
+            ixTick_ = 0;
+            ixPending_ = false;
+            // srcL/srcT, not r.srcLeft/srcTop: when the ramp limiters make applyLevel != level
+            // the VISUAL transform uses the recomputed origin, and the input mapping must
+            // describe what is actually on screen.
+            InputTransformRects ir = ComputeInputTransformRects(
+                srcL, srcT, applyLevel, mon_.x, mon_.y, mon_.w, mon_.h);
+            RECT dst{ ir.dl, ir.dt, ir.dr, ir.db };
+            RECT src = (cfg.magInputTransform == 2) ? dst : RECT{ ir.sl, ir.st, ir.sr, ir.sb };
+            LARGE_INTEGER fr, a, b;
+            QueryPerformanceFrequency(&fr); QueryPerformanceCounter(&a);
+            bool ok = host_.setInputTransform(applyLevel > 1.001, src, dst);
+            QueryPerformanceCounter(&b);
+            noteIxWrite(double(b.QuadPart - a.QuadPart) * 1000.0 / fr.QuadPart, ok);
+            if (!ok) {
+                // Self-heal (spec constraint 1): a failed ENABLED publish means this build
+                // cannot fix the pointer-framework dead zones - the DESKTOP pick must stop
+                // choosing the transform. Games are unaffected (legacy input surfaces).
+                inputTransformAvailable_ = false;
+                if (!inputXformWarned_) {
+                    inputXformWarned_ = true;
+                    wind::Log(wind::LogLevel::Warn, "transform",
+                              "MagSetInputTransform failed (no UIAccess?) - desktop pick disabled");
+                }
             }
         }
     } else if (changed && lastInputXformOn_) {
@@ -458,8 +513,9 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             if (cursorHidden_) { MagShowSystemCursor(TRUE); blanker_->restore(); cursorHidden_ = false; }
         }
     } else if (useSprite_ && sprite_) {
-        // Desktop FOLLOW: the real cursor is visible and magnified by DWM (native Magnifier's own
-        // look) - the sprite is only for the Inspect crosshair and the game-session aim point.
+        // Reached only when the cursor is not drawn at all this tick (cursorVisibility=never,
+        // the hide-cursor hotkey) or at <=1.001x. The welded design draws the sprite in every
+        // normal zoomed session; the retired FOLLOW look (visible magnified real cursor) is gone.
         sprite_->hide();
     }
 

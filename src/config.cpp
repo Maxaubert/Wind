@@ -160,6 +160,8 @@ Config ParseConfig(const std::string& text) {
             else if (key == "probeClicks")        c.probeClicks = std::stoi(val);
             else if (key == "desktopTransform")   c.desktopTransform = std::stoi(val);
             else if (key == "spriteBand16")       c.spriteBand16 = std::stoi(val);
+            else if (key == "ixDecimate")         c.ixDecimate = std::stoi(val);
+            else if (key == "txKeepAliveMaxLevel")c.txKeepAliveMaxLevel = std::stoi(val);
             else if (key == "txIdleReleaseMs")    c.txIdleReleaseMs = std::stoi(val);
             else if (key == "txMaxStepPct")       c.txMaxStepPct = std::stoi(val);
             else if (key == "txLevelStep")        c.txLevelStep = std::stoi(val);
@@ -203,6 +205,10 @@ Config ParseConfig(const std::string& text) {
     if (c.gpuPriority >  1) c.gpuPriority = 1;
     if (c.tdrTest < 0) c.tdrTest = 0;              // diagnostic harness (issue #148)
     if (c.tdrTest > 4) c.tdrTest = 4;
+    if (c.ixDecimate < 1)  c.ixDecimate = 1;       // 1 = publish every changed tick
+    if (c.ixDecimate > 16) c.ixDecimate = 16;
+    if (c.txKeepAliveMaxLevel < 1)  c.txKeepAliveMaxLevel = 1;
+    if (c.txKeepAliveMaxLevel > 50) c.txKeepAliveMaxLevel = 50;
     if (c.txLevelStep < 0)   c.txLevelStep = 0;    // per mille; 0 = per-tick level writes
     if (c.txLevelStep > 200) c.txLevelStep = 200;
     if (c.txGrid < 0)   c.txGrid = 0;              // per mille geometric grid; 0 = continuous
