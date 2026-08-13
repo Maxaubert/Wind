@@ -258,12 +258,13 @@ struct TickState {
     HWND   inspectPrevFg = nullptr;     // the game window foreground is handed back to on exit
     int    clickPauseTicks = 0;     // ticks to skip transform writes around an Inspect click's
                                     //   injected absolute move (a write racing it is the TDR class)
-    int    quiesceTicks = 0;        // launch quiesce: a FRESH process took over as a borderless
-                                    //   cover while a transform session is live - hold ALL
-                                    //   transform mutations (writes, input transform, weld) while
-                                    //   the compositor digests the takeover (dwmcore APPCRASH,
-                                    //   RDR2 launch @20x, 2026-08-12)
+    unsigned long long quiesceUntilMs = 0;  // launch quiesce (dwmcore APPCRASH, RDR2 @20x): hold
+                                    //   ALL transform mutations while the compositor digests a
+                                    //   LAUNCHING game's takeover. DEADLINE anchored at cover
+                                    //   SIGHT time, never at zoom-in (issue #199).
+    DWORD  quiescedPid = 0;         // fires at most once per process instance
     HWND   lastCoverFg = nullptr;   // edge-detect cover-takeover foregrounds
+    unsigned long long lastCoverProbeMs = 0;   // throttles the idle-tick cover watch to ~4Hz
     IMagnifierModel* wantModel = nullptr;   // hybrid stickiness: candidate engine and how long it
     unsigned long long wantSinceMs = 0;     //   has been the candidate (debounces foreground reads)
     unsigned long long kbHookDivergentSinceMs = 0;  // LL keyboard-hook watchdog dwell (issue #156)
@@ -492,6 +493,43 @@ static bool FgProcessYoungerThanMs(HWND fg, unsigned long long ms) {
     return young;
 }
 
+// Launch-quiesce cover tracking (dwmcore APPCRASH, RDR2 @20x; re-scoped for issue #199).
+//
+// The ~1.5s transform-write hold exists to sit out a LAUNCHING game's mode-switch and surface
+// churn, which is when the compositor is least able to also service magnification mutations.
+// The clock is anchored when the young cover is FIRST SEEN - idle ticks probe at ~4Hz, active
+// ticks call per tick - NOT at zoom-in. The old zoom-in-anchored version started its full window
+// exactly when the user pressed zoom, so the whole hold landed on the first press: the screen sat
+// frozen for up to 1.5s while the level silently ramped (log-proven, foundation.exe: the quiesce
+// line and the session start share a millisecond). Armed at most once per PROCESS INSTANCE, so
+// alt-tabbing back into a game inside its first 60s never re-pays it - which is exactly how the
+// field reproduced the freeze. In the common case (zooming more than 1.5s after the game window
+// appears) the window has already burned down and the hold is zero.
+static void TrackLaunchCover(TickState& t, HWND fg, bool fsCover, bool fgBorderless) {
+    if (fsCover && fgBorderless) {
+        if (fg != t.lastCoverFg) {
+            t.lastCoverFg = fg;
+            DWORD pid = 0;
+            GetWindowThreadProcessId(fg, &pid);
+            if (pid && pid != t.quiescedPid && FgProcessYoungerThanMs(fg, 60000)) {
+                t.quiescedPid = pid;
+                t.quiesceUntilMs = GetTickCount64() + 1500;
+                wind::Log(wind::LogLevel::Info, "transform",
+                          "launch quiesce: fresh cover %ls - transform writes held ~1.5s from sighting",
+                          ExeNameOf(fg).c_str());
+            }
+        }
+    } else {
+        t.lastCoverFg = nullptr;
+    }
+}
+
+// Whether the hold is live THIS tick. Transform only - it protects DWM's magnification path.
+static bool QuiesceHoldActive(const TickState& t) {
+    return t.quiesceUntilMs != 0 && GetTickCount64() < t.quiesceUntilMs &&
+           dynamic_cast<TransformModel*>(t.model) != nullptr;
+}
+
 // Refresh the per-HWND cache of exe-derived pick predicates. Only re-resolves when the foreground
 // WINDOW changed; a null fgw clears to safe defaults (no transform pick without a foreground).
 static void RefreshFgCache(TickState& t, HWND fgw) {
@@ -656,6 +694,19 @@ static void RunTick(TickState& t) {
     // everywhere exactly as before, and this costs a single string check per tick (no window
     // queries at all). Configure noSwallowApps (per-app, the only knob) to trade swallowing for
     // smooth panning in that app.
+    {   // Launch-quiesce cover watch (see TrackLaunchCover): probe at ~4Hz so a launching game's
+        // cover is SIGHTED while the user is still idle and the 1.5s hold burns down before any
+        // zoom-in. Cheap: two window queries per probe, and the process-age check only runs on an
+        // actual foreground change.
+        const unsigned long long nowMs = GetTickCount64();
+        if (nowMs - t.lastCoverProbeMs >= 250) {
+            t.lastCoverProbeMs = nowMs;
+            HWND fg = GetForegroundWindow();
+            const bool cover = ForegroundCoversMonitor(t.mon);
+            const bool borderless = fg && !(GetWindowLongPtrW(fg, GWL_STYLE) & WS_CAPTION);
+            TrackLaunchCover(t, fg, cover, borderless);
+        }
+    }
     if (t.cfg.noSwallowApps.empty()) {
         g_input.setKeyboardHookWanted(true);   // idempotent: only posts on an actual change
     } else {
@@ -743,7 +794,14 @@ static void RunTick(TickState& t) {
     // of frame-time spikes. Raw dt is kept below for the diagnostics block (which must see true
     // hitches) and the config-poll fallback. Normal ~7ms frames are unaffected.
     const double kMaxZoomDt = 0.05;   // 50ms (~7 frames at 144Hz)
-    t.zoom.tick(dt < kMaxZoomDt ? dt : kMaxZoomDt);
+    // Ramp freeze during the launch quiesce (issue #199): while the hold pauses transform writes
+    // the controller must NOT keep integrating, or the level accrued invisibly and landed as ONE
+    // discrete jump when writes resumed - the measured 30-50ms game-frame class, aimed at a game
+    // that is still loading. Freezing here makes the ramp START when writes resume: a normal
+    // smooth ramp, merely delayed. Gated on level > 1.0 so the session still enters and the
+    // freeze holds it at ~1.01 until the hold expires.
+    const bool quiesceFreeze = QuiesceHoldActive(t) && t.zoom.level() > 1.0;
+    if (!quiesceFreeze) t.zoom.tick(dt < kMaxZoomDt ? dt : kMaxZoomDt);
     // Recenter on a recenterVk key press (rising edge).
     bool recenter = false;
     bool recenterDown = keyDown(t.cfg.recenterVk);
@@ -1027,24 +1085,10 @@ static void RunTick(TickState& t) {
             tmWall->setMpoExposed(mpoExposed);
         }
         if (transformGame) t.lastTransformGameMs = GetTickCount64();   // device-lost backstop window
-        // Launch quiesce (dwmcore APPCRASH, 2026-08-12): a FRESHLY STARTED process taking over as
-        // a borderless cover means a game is LAUNCHING - mode switches and surface churn hammer
-        // the compositor exactly while it is least able to also service magnification mutations
-        // (dwm.exe died in dwmcore.dll during an RDR2 launch under a live 20x transform ramp).
-        // Native Magnifier survives launches because its transform sits STATIC then; match that:
-        // hold every transform-side mutation for ~1.5s. Age-gated so alt-tabbing into a RUNNING
-        // game never freezes the lens.
-        if (fsCover && fgBorderless && fgTick != t.lastCoverFg) {
-            t.lastCoverFg = fgTick;
-            if (dynamic_cast<TransformModel*>(t.model) && FgProcessYoungerThanMs(fgTick, 60000)) {
-                t.quiesceTicks = (t.hz > 0 ? t.hz : 60) * 3 / 2;
-                wind::Log(wind::LogLevel::Info, "transform",
-                          "launch quiesce: fresh cover %ls - holding writes ~1.5s",
-                          ExeNameOf(fgTick).c_str());
-            }
-        } else if (!fsCover || !fgBorderless) {
-            t.lastCoverFg = nullptr;
-        }
+        // Launch quiesce: per-tick cover tracking while zoomed (a mid-session takeover by a
+        // launching game must still arm the hold). Anchoring and the once-per-process rule live
+        // in TrackLaunchCover; the hold is consumed via QuiesceHoldActive below.
+        TrackLaunchCover(t, fgTick, fsCover, fgBorderless);
         MapResult r = t.mapper.update(dx, dy, lvl);
         // Dead-zone probe (probeClicks=1, diagnostic): the field annotates hover dead zones by
         // clicking. Plain click = "hover works here" (OK), Ctrl+click = "dead here" (DEAD). Each
@@ -1265,8 +1309,11 @@ static void RunTick(TickState& t) {
         // Serialize transform writes around an Inspect click's injected absolute move (issue #148
         // TDR class): the injection and a transform write racing each other is the proven trigger.
         // The launch quiesce holds writes AND the weld for its whole window (see above).
-        ex.pauseWrites = t.clickPauseTicks > 0 || t.quiesceTicks > 0;
-        if (t.quiesceTicks > 0) { ex.suppressCursorSync = true; --t.quiesceTicks; }
+        // Deadline-based, so a short press can never strand leftover hold into the next session
+        // (the old tick countdown only decremented while zoomed, which did exactly that).
+        const bool quiesceHold = QuiesceHoldActive(t);
+        ex.pauseWrites = t.clickPauseTicks > 0 || quiesceHold;
+        if (quiesceHold) ex.suppressCursorSync = true;
         if (t.clickPauseTicks > 0) --t.clickPauseTicks;
         if (inspect) {
             if (t.clickReleaseTicks > 0) {
