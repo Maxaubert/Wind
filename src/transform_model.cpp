@@ -94,8 +94,9 @@ bool TransformModel::initialize(const MonitorTarget& monitor) {
         }
     }
     if (smoothPan_) pin_.create();
-    // MPO buster ghost (issue #191): created once at monitor bounds, shown only during MPO-
-    // exposed game sessions (main.cpp gates via setMpoBusterWanted). Creation failure is
+    // MPO buster ghost (issue #191, scope widened in #197): created once at monitor bounds,
+    // shown during any MPO-exposed transform session (main.cpp gates via setMpoBusterWanted) -
+    // browsers and desktop windows ride overlay planes too, not only games. Creation failure is
     // non-fatal: the fail-closed pan walls simply never lift.
     if (!mpoGhost_.create(mon_.x, mon_.y, mon_.w, mon_.h))
         wind::Log(wind::LogLevel::Warn, "transform", "MpoGhost create failed - walls stay up");

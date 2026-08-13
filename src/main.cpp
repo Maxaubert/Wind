@@ -1001,15 +1001,16 @@ static void RunTick(TickState& t) {
         HWND fgTick = GetForegroundWindow();
         const bool fsCover = ForegroundCoversMonitor(t.mon);
         const bool fgBorderless = fgTick && !(GetWindowLongPtrW(fgTick, GWL_STYLE) & WS_CAPTION);
-        // Pan wall (issue #148 final fix): transform GAME sessions on an MPO-ENABLED machine keep
-        // the source rect's left edge under the driver-safe bound - the driver packs DWM's
-        // magnification translation into a 16-bit overlay-plane field, so |srcX*level| > 32767
-        // (the far-right strip above ~9.3x) wraps and TDRs. Keyed to the SESSION TYPE (transform
-        // model + borderless cover), not any cursor state: the wall must hold in the welded
-        // design too. MPO off (this rig), or render/desktop sessions: unrestricted (field-clean).
+        // Pan wall (issue #148) - EVERY transform session on an MPO-enabled machine, not just
+        // games (issue #197). The driver packs DWM's magnification translation into a 16-bit
+        // overlay-plane field, so |src*level| > 32767 wraps and takes the compositor or the
+        // driver down. #148 assumed only fullscreen GAMES ride overlay planes; the field
+        // disproved it - a Mica-backdrop BROWSER at high zoom crashed dwm.exe in dwmcore.dll
+        // five times in twenty minutes. Desktop-class windows get planes too, so the guard is
+        // keyed to the ENGINE and the MPO boot state alone.
         auto* tmWall = dynamic_cast<TransformModel*>(t.model);
         const bool transformGame = tmWall != nullptr && fsCover && fgBorderless;
-        const bool mpoExposed = transformGame && !g_mpoDisabled;
+        const bool mpoExposed = tmWall != nullptr && !g_mpoDisabled;
         // MPO buster (issue #191): a fullscreen alpha-1 ghost window demotes the game off its
         // hardware overlay plane by geometry (the parking law, PresentMon-proven) - no plane, no
         // 16-bit field, no overflow. The walls lift ONLY on verified evidence (ghost shown +
