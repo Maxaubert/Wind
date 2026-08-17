@@ -14,6 +14,7 @@
   let editName = '';
   let editError = '';
   let inputEl;
+  const uid = 'pm-' + Math.random().toString(36).slice(2, 8);
 
   // "Default" is the seeded home profile and can never be deleted (host enforces this too).
   const isDefault = (n) => n.toLowerCase() === 'default';
@@ -32,7 +33,7 @@
     if (clash) return 'A profile with that name already exists';
     return '';
   }
-  function toggle() { open = !open; if (!open) reset(); }
+  function toggle() { open = !open; if (open) focusMenuSoon(); else reset(); }
   function reset() { ctxFor = ''; editMode = ''; editName = ''; editError = ''; }
   function startCreate() { editMode = 'create'; editName = ''; editError = ''; ctxFor = ''; focusSoon(); }
   function startRename(n) { editMode = 'rename'; editFrom = n; editName = n; editError = ''; ctxFor = ''; focusSoon(); }
@@ -50,6 +51,30 @@
     open = false; reset();
   }
   function doDelete(n) { onAction('delete', { name: n }); open = false; reset(); }
+  // Menu keyboard navigation (issue #201). role="menu" carries a contract - arrows move between
+  // items, Home/End jump - and none of it existed: the rows were divs with tabindex=0 that answered
+  // only to Enter, and each one WRAPPED a button, which is invalid (a menuitem cannot contain an
+  // interactive child). Rows and their "..." buttons are now siblings, both real menuitems, moved
+  // between with a roving tabindex.
+  let menuEl;
+  function menuItems() {
+    return menuEl ? [...menuEl.querySelectorAll('[role^="menuitem"]:not([disabled])')] : [];
+  }
+  function menuKey(e) {
+    const items = menuItems();
+    if (!items.length) return;
+    const i = items.indexOf(document.activeElement);
+    let next = null;
+    if (e.key === 'ArrowDown')    next = i < 0 ? 0 : (i + 1) % items.length;
+    else if (e.key === 'ArrowUp') next = i < 0 ? items.length - 1 : (i - 1 + items.length) % items.length;
+    else if (e.key === 'Home')    next = 0;
+    else if (e.key === 'End')     next = items.length - 1;
+    if (next === null) return;
+    e.preventDefault();
+    items[next].focus();
+  }
+  // Opening with the keyboard has to land focus in the menu, or Tab would walk into the page behind.
+  function focusMenuSoon() { setTimeout(() => { const i = menuItems()[0]; if (i) i.focus(); }, 0); }
   function clickOutside(node) {
     const h = (e) => { if (!node.contains(e.target)) { open = false; reset(); } };
     document.addEventListener('mousedown', h, true);
@@ -63,26 +88,33 @@
     <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
   </button>
   {#if open}
-    <div class="pmenu" role="menu">
+    <!-- tabindex="-1" on the container: focus lives on the items (roving), never on the menu box,
+         but the menu must stay programmatically focusable. -->
+    <div class="pmenu" role="menu" aria-label="Profiles" tabindex="-1"
+         bind:this={menuEl} on:keydown={menuKey}>
       {#each names as n (n)}
         <div class="pitem">
-          <div class="prow" class:activerow={n.toLowerCase() === active.toLowerCase()}
-               role="menuitem" tabindex="0"
-               on:click={() => pick(n)}
-               on:keydown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) { e.preventDefault(); pick(n); } }}
-               on:contextmenu|preventDefault={() => { ctxFor = ctxFor === n ? '' : n; }}>
-            <span class="pcheck">{#if n.toLowerCase() === active.toLowerCase()}&#10003;{/if}</span>
+          <!-- menuitemradio, not menuitem: exactly one profile is active, and the tick beside it
+               was a sighted-only signal before. aria-checked exposes the same fact. -->
+          <button class="prow" type="button" class:activerow={n.toLowerCase() === active.toLowerCase()}
+                  role="menuitemradio" aria-checked={n.toLowerCase() === active.toLowerCase()}
+                  tabindex="-1"
+                  on:click={() => pick(n)}
+                  on:contextmenu|preventDefault={() => { ctxFor = ctxFor === n ? '' : n; }}>
+            <span class="pcheck" aria-hidden="true">{#if n.toLowerCase() === active.toLowerCase()}&#10003;{/if}</span>
             <span class="plabel">{n}</span>
-            <button class="pdots" title="Profile actions" aria-label="Profile actions for {n}"
-                    on:click|stopPropagation={() => { ctxFor = ctxFor === n ? '' : n; }}>&#8943;</button>
-          </div>
+          </button>
+          <button class="pdots" type="button" role="menuitem" tabindex="-1"
+                  title="Profile actions" aria-label="Profile actions for {n}"
+                  aria-haspopup="menu" aria-expanded={ctxFor === n}
+                  on:click|stopPropagation={() => { ctxFor = ctxFor === n ? '' : n; }}>&#8943;</button>
           {#if ctxFor === n}
             <!-- Flyout to the RIGHT of the row, absolutely positioned: it overlays instead of
                  reflowing, so opening it can never change the dropdown's width or height. -->
-            <div class="pctx" role="menu">
-              <button class="pact" on:click={() => startRename(n)}>Rename</button>
-              <button class="pact" on:click={() => { onAction('duplicate', { name: n }); ctxFor = ''; }}>Duplicate</button>
-              <button class="pact danger" disabled={names.length <= 1 || isDefault(n)}
+            <div class="pctx" role="menu" aria-label="Profile actions for {n}">
+              <button class="pact" type="button" role="menuitem" on:click={() => startRename(n)}>Rename</button>
+              <button class="pact" type="button" role="menuitem" on:click={() => { onAction('duplicate', { name: n }); ctxFor = ''; }}>Duplicate</button>
+              <button class="pact danger" type="button" role="menuitem" disabled={names.length <= 1 || isDefault(n)}
                       title={isDefault(n) ? 'The Default profile cannot be deleted'
                              : names.length <= 1 ? 'The last profile cannot be deleted' : ''}
                       on:click={() => doDelete(n)}>Delete</button>
@@ -93,14 +125,21 @@
       <div class="psep"></div>
       {#if editMode}
         <div class="pedit">
-          <input bind:this={inputEl} bind:value={editName} maxlength="40"
+          <!-- The error belongs to the field (aria-describedby + aria-invalid + role=alert), so it
+               is read while focus is still in the input instead of being an orphaned red line. -->
+          <label class="sr-only" for="{uid}-name">{editMode === 'create' ? 'New profile name' : 'New name'}</label>
+          <input id="{uid}-name" bind:this={inputEl} bind:value={editName} maxlength="40"
+                 autocomplete="off" spellcheck="false"
+                 aria-invalid={editError ? 'true' : undefined}
+                 aria-describedby={editError ? uid + '-err' : undefined}
                  placeholder={editMode === 'create' ? 'New profile name' : 'New name'}
                  on:keydown={(e) => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') reset(); }} />
-          <button class="pact" on:click={commitEdit}>{editMode === 'create' ? 'Create' : 'Rename'}</button>
-          {#if editError}<div class="perr">{editError}</div>{/if}
+          <button class="pact" type="button" on:click={commitEdit}>{editMode === 'create' ? 'Create' : 'Rename'}</button>
+          {#if editError}<div class="perr" id="{uid}-err" role="alert">{editError}</div>{/if}
         </div>
       {:else}
-        <button class="prow pcreate" on:click={startCreate}>Create new profile&#8230;</button>
+        <button class="prow pcreate" type="button" role="menuitem" tabindex="-1"
+                on:click={startCreate}>Create new profile&#8230;</button>
       {/if}
     </div>
   {/if}
@@ -128,12 +167,17 @@
   .prow, .pedit, .pedit input, .pctx, .pact { box-sizing: border-box; }
   .prow { display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 8px;
           border-radius: 6px; cursor: pointer; border: 0; background: transparent;
-          color: var(--text); font-size: 13px; text-align: left; }
+          color: var(--text); font-size: 13px; text-align: left; font-family: inherit; }
+  /* Room for the overlaid "..." so a long profile name cannot run under it. */
+  .pitem > .prow { padding-right: 26px; }
   .prow:hover { background: var(--hover); }
   .pcheck { width: 14px; }
   .plabel { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pdots { border: 0; background: transparent; color: var(--muted); cursor: pointer;
-           border-radius: 4px; padding: 0 4px; }
+  /* Absolutely placed over the row: the "..." used to be nested INSIDE it, which is invalid inside
+     a menuitem. Sibling + overlay keeps the layout pixel-identical. */
+  .pdots { position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+           border: 0; background: transparent; color: var(--muted); cursor: pointer;
+           border-radius: 4px; padding: 0 4px; line-height: 1; }
   .pdots:hover { background: var(--hover); color: var(--text); }
   .pitem { position: relative; }
   /* Flyout submenu: overlays to the right of the row (its own panel, like .pmenu), so it never

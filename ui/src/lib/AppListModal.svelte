@@ -6,11 +6,14 @@
   // Purely presentational: the parent Row owns the value and passes handlers, so this file has no
   // knowledge of the config shape or the bridge.
   export let title, items, onAdd, onRemove, onClose;
+  import { dialog } from './dialog.js';
 </script>
-<svelte:window on:keydown={e => { if (e.key === 'Escape') onClose(); }} />
-<!-- Click the backdrop (but not the box) to dismiss, matching the restart dialog in Settings. -->
+<!-- Click the backdrop (but not the box) to dismiss, matching the restart dialog in Settings.
+     Escape is handled by the `dialog` action on the box (issue #201), not a window listener: the
+     action also moves focus INTO the dialog, traps Tab, and hands focus back on close. -->
 <div class="backdrop" role="presentation" on:click|self={onClose}>
-  <div class="box" role="dialog" aria-modal="true" aria-labelledby="applist-title">
+  <div class="box" role="dialog" aria-modal="true" aria-labelledby="applist-title"
+       use:dialog={{ onClose }}>
     <div class="head">
       <h2 id="applist-title">{title}</h2>
       <button class="x" on:click={onClose} title="Close" aria-label="Close">&#215;</button>
@@ -30,7 +33,7 @@
     <!-- No confirm button: edits apply as they are made, so there is nothing to accept. Closing is
          the X, Escape, or the backdrop, which is why the one action here is Add. -->
     <div class="btns">
-      <button class="primary" on:click={onAdd}>Add program...</button>
+      <button class="primary" data-autofocus on:click={onAdd}>Add program...</button>
     </div>
   </div>
 </div>

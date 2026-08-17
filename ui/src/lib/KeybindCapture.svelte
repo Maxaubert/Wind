@@ -7,8 +7,16 @@
   // global hook swallows the bound key/button; without an immediate clear, pressing the OLD
   // bound key to re-bind it would be intercepted by the hook and never reach this UI.
   export let row, values, onChange, disabled = false;
+  // Naming from the owning Row (issue #201): `labelledby` lists the row label AND the value span,
+  // so the keycap reads "Zoom in, Mouse button 5 + PageUp" instead of a bare binding with no
+  // indication of which slot it belongs to.
+  export let labelledby = undefined, describedby = undefined, valueId = undefined;
   let armed = false;
   let preCapture = null;
+  // The armed state used to be conveyed by the visible label alone, with the instructions in a
+  // `title` tooltip - which is never announced on keyboard focus. This region speaks it.
+  let liveMsg = '';
+  const uid = 'kc-' + Math.random().toString(36).slice(2, 8);
 
   // VK -> readable name. Covers the common cases; falls back to "Key N" for the rest.
   function vkName(vk) {
@@ -63,6 +71,9 @@
   // no-op so the snapshot is not overwritten by the cleared values.
   function arm() {
     if (disabled || armed) return;
+    liveMsg = row.buttonKey
+      ? 'Listening. Press a key, a combination, or a mouse side-button. Escape cancels, Tab leaves.'
+      : 'Listening. Press a key or a combination. Escape cancels, Tab leaves.';
     preCapture = { [row.vkKey]: String(values[row.vkKey] ?? '0') };
     if (row.buttonKey) preCapture[row.buttonKey] = String(values[row.buttonKey] ?? '0');
     if (row.modsKey)   preCapture[row.modsKey]   = String(values[row.modsKey]   ?? '0');
@@ -75,6 +86,7 @@
   function cancel() {
     if (preCapture) onChange(preCapture);
     armed = false; preCapture = null;
+    liveMsg = 'Cancelled. Binding unchanged.';
   }
   // Capture on keydown so a combo (Ctrl+Alt+F1) is captured the instant the main key fires while
   // all modifiers are held. Modifier-only presses (Ctrl/Alt/Shift/Win) are skipped so we wait for
@@ -87,8 +99,12 @@
   const FORBIDDEN_VK = new Set([1, 2, 8, 91, 92]);
   function onKey(e) {
     if (!armed) return;
+    if (e.key === 'Escape') { e.preventDefault(); cancel(); return; }
+    // Tab must stay a navigation key. It is bindable in principle (keyCode 9 is not forbidden), so
+    // capturing it meant a keyboard user who armed a row had no way out except Escape - which is
+    // undiscoverable. Let the browser move focus; the blur handler below cancels the capture.
+    if (e.key === 'Tab') return;
     e.preventDefault();
-    if (e.key === 'Escape') { cancel(); return; }
     if (!e.keyCode) return;
     if (e.keyCode === 16 || e.keyCode === 17 || e.keyCode === 18 || e.keyCode === 91 || e.keyCode === 92) return;
     if (FORBIDDEN_VK.has(e.keyCode)) return;   // can't bind a key Wind must never swallow
@@ -98,6 +114,7 @@
     if (row.buttonKey) patch[row.buttonKey] = '0';
     onChange(patch);
     armed = false; preCapture = null;
+    liveMsg = 'Bound to ' + (comboName(mods, e.keyCode) || vkName(e.keyCode));
   }
   function onMouse(e) {
     if (!armed || !row.buttonKey) return;     // keyboard-only slot: ignore mouse
@@ -108,6 +125,7 @@
     if (row.modsKey) patch[row.modsKey] = '0';
     onChange(patch);
     armed = false; preCapture = null;
+    liveMsg = 'Bound to mouse button ' + (btn === '2' ? '5' : '4');
   }
   // Right-click clears the binding (Unbound). Works whether or not the keycap is armed.
   function clear() {
@@ -116,16 +134,24 @@
     if (row.modsKey)   patch[row.modsKey]   = '0';
     onChange(patch);
     armed = false; preCapture = null;
+    liveMsg = 'Binding cleared. Unbound.';
   }
 </script>
 <svelte:window on:keydown={onKey} on:mousedown={onMouse} />
-<button class="keycap" class:armed {disabled}
+<!-- The instructions were `title`-only, which a screen reader never reads on keyboard focus.
+     They are a real description now, appended to the row's own. -->
+<button class="keycap" type="button" class:armed {disabled} id={valueId}
+        aria-labelledby={labelledby} aria-describedby="{describedby ?? ''} {uid}-hint"
         on:click={arm}
         on:blur={() => { if (armed) cancel(); }}
         on:contextmenu|preventDefault={clear}
         title="Click to bind (combos like Ctrl+Alt+F1 work), right-click to clear">
   {armed ? (row.buttonKey ? 'Press a key, combo, or side-button...' : 'Press a key or combo...') : lbl}
 </button>
+<span class="sr-only" id="{uid}-hint" aria-hidden="true">
+  Activate to rebind{row.buttonKey ? ', then press a key, a combination, or a mouse side-button' : ', then press a key or a combination'}. Escape cancels. Right-click, or use the context-menu key, to clear the binding.
+</span>
+<span class="sr-only" role="status" aria-live="assertive">{liveMsg}</span>
 <style>
   /* Ported from mockups/config-ui-onboarding.html .keycap. */
   .keycap { padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--chip); font-size: 11.5px; color: var(--text); cursor: pointer; }

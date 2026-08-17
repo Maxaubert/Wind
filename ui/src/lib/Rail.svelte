@@ -3,17 +3,23 @@
   export let sections, active, onSelect, theme, onToggleTheme;
 </script>
 <aside class="rail">
-  <div class="rail-glyph" title="Wind">{@html ic.glyph}</div>
-  <div class="rail-nav">
+  <div class="rail-glyph" aria-hidden="true">{@html ic.glyph}</div>
+  <!-- A real navigation landmark (issue #201): this was a bare <div> of buttons, so a screen
+       reader had no way to reach or identify the section switcher. aria-current marks the section
+       being viewed - the CSS `active` class was the only signal before, i.e. sighted-only. -->
+  <nav class="rail-nav" aria-label="Settings sections">
     {#each sections as s}
-      <button class="ritem" class:active={s.id === active} title={s.label} aria-label={s.label}
+      <button class="ritem" type="button" class:active={s.id === active} title={s.label}
+              aria-label={s.label} aria-current={s.id === active ? 'true' : undefined}
               on:click={() => onSelect(s.id)}>{@html ic[s.icon]}</button>
     {/each}
-  </div>
+  </nav>
   <div class="rail-spacer"></div>
   <div class="rail-foot">
-    <button class="ritem" title="Toggle theme" aria-label="Toggle theme" on:click={onToggleTheme}>{@html theme === 'light' ? ic.moon : ic.sun}</button>
-    <div class="avatar" title="Account (coming soon)">{@html ic.person}</div>
+    <button class="ritem" type="button" title="Toggle theme"
+            aria-label="Toggle theme (currently {theme})"
+            on:click={onToggleTheme}>{@html theme === 'light' ? ic.moon : ic.sun}</button>
+    <div class="avatar" title="Account (coming soon)" aria-hidden="true">{@html ic.person}</div>
   </div>
 </aside>
 <style>
