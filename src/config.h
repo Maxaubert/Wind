@@ -141,7 +141,37 @@ struct Config {
     // this level (the shipped 8 is the field-measured MPO-off optimum for games; raising it keeps
     // DWM's magnification pipeline warm at high zoom on the DESKTOP so pan-resume skips the
     // park-rebuild spike - A/B knob, the 700ms window itself is measured and untouched).
+    // 0 (DEFAULT) = OFF. Traced against native Magnifier (issue #204): native never writes a
+    // value it does not mean - when the view is static it simply stops writing. Our keep-alive
+    // alternated the translation by 1px at TICK rate to stop DWM parking, i.e. a deliberate 1px
+    // shimmer 144x/s during every pause in a pan. Set >0 to re-enable up to that level.
+    // Back to 8 pending the free-cursor work: with the weld in place the 1px jitter is not the
+    // dominant artefact, and changing two things at once made the A/B unreadable.
     int txKeepAliveMaxLevel = 8;
+    // Transform write cadence (issue #204). Measured: native Magnifier writes ~59/s while ramping
+    // and ~49/s while panning; we wrote 120/s and 92/s because we write per tick on a 144Hz panel.
+    // Every write makes DWM redo work proportional to the level, and our timing was MORE regular
+    // than native's (p95 interval 7.56ms vs 31.44ms), so the extra writes were not buying
+    // smoothness - they were saturating the compositor. 0 = per-tick (the old behaviour).
+    // SHIPS 0 (per-tick). Field verdict 2026-08-17: capping the write rate made things WORSE -
+    // "definitely running in like 60 fps, feels very choppy, the cursor is super jumpy, not
+    // centering well when panning". Root cause of that regression: Wind WELDS the cursor with
+    // SetCursorPos every tick, so throttling the VIEW while the pointer keeps moving at full rate
+    // desynchronises the two. Per-tick writing is load-bearing for the welded design - which is
+    // precisely why native Magnifier can afford ~50Hz and we cannot: it does not weld at all.
+    // Kept as an A/B knob because the MEASUREMENT was sound even though the conclusion was not.
+    // Free cursor (issue #205, hot): drive the transform's view straight from the real cursor
+    // position the way native Magnifier does, instead of integrating smoothed deltas and welding
+    // the pointer to the lens centre with SetCursorPos. Native's geometry was measured, not
+    // assumed - see the comment at the use site in main.cpp. 0 = the welded delta model.
+    // cursorSensitivity / cursorSmoothing have no effect while this is on, by construction.
+    int txFreeCursor = 1;
+    int txWriteHz = 0;
+    // Minimum destination-space (screen px) movement before a PAN-ONLY write goes out. Native's
+    // median pan step is 2.24px; ours was 1.41px, and a THIRD of all our writes moved the image by
+    // exactly one pixel. Sub-threshold movement is coalesced, never dropped: a residual still
+    // lands within kSettleMs so the view can never rest visibly offset. 0 = write every change.
+    int txMinOffsetPx = 0;   // ships off for the same reason as txWriteHz above.
     int magInputTransform = 1; // publish MagSetInputTransform while zoomed (hot; needs UIAccess).
                           //     1 (DEFAULT) = the visual source rect per change - native-
                           //     Magnifier parity, THE fix for the pointer-framework hover dead
