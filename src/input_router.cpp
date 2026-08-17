@@ -1,5 +1,6 @@
 #include "input_router.h"
 #include "mag_thread.h"   // the hook thread owns the Magnification runtime (issue #206)
+#include "hook_transform.h" // ...and writes the transform inline from MouseProc (#206 stage 2)
 #include "config.h"     // IsForbiddenBindVk (keyboard-bind safety blocklist)
 #include "logging.h"    // hook-watchdog events (issue #156)
 #include <windows.h>
@@ -173,6 +174,20 @@ static LRESULT CALLBACK KbProc(int code, WPARAM wParam, LPARAM lParam) {
 static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
     if (code == HC_ACTION && g_router) {
         auto* mi = reinterpret_cast<MSLLHOOKSTRUCT*>(lParam);
+        // THE LATENCY PATH (issue #206). Measured 4.36ms median cursor-to-view against native
+        // Magnifier's 0.58ms, our spread uniform across exactly one tick - we were purely waiting
+        // for the tick to notice. This thread owns the Magnification runtime (stage 1), so the
+        // write happens here, inline, against the position the event itself carries.
+        //
+        // Deliberately FIRST in the callback: everything below is bookkeeping that can wait, and
+        // any of it running first would add its own microseconds to the number we are cutting.
+        // Armed only for free-cursor transform sessions, and the arm check is a relaxed atomic
+        // read, so an idle hook pays a single load. The private write channel measures 0.09-0.24ms;
+        // the PUBLIC one is 3-9ms and must never be routed here - a slow low-level hook callback
+        // delays input for every process on the machine, and Windows silently evicts hooks that
+        // exceed LowLevelHooksTimeout.
+        if (wParam == WM_MOUSEMOVE && wind::HookTransformArmed())
+            wind::WriteHookTransformFromEvent(mi->pt.x, mi->pt.y);
         // Inspect-mode click-to-look-point. Swallow the real DOWN (it would land at the frozen cursor)
         // and signal the tick, which fires a clean absolute click at the crosshair. Swallow the matching
         // real UP too. Our own injected click carries LLMHF_INJECTED, so it skips this and passes through.

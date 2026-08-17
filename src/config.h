@@ -165,6 +165,24 @@ struct Config {
     // the pointer to the lens centre with SetCursorPos. Native's geometry was measured, not
     // assumed - see the comment at the use site in main.cpp. 0 = the welded delta model.
     // cursorSensitivity / cursorSmoothing have no effect while this is on, by construction.
+    // Write the transform from inside the mouse hook (issue #206, hot). SHIPS 0 - PARKED.
+    //
+    // It does what it claimed on the metric: cursor-to-view latency 4.36ms median -> 0.37ms, p95
+    // 0.83ms, better than native Magnifier's 0.58ms, with the tick verified out of the way
+    // (hook 665 writes/s, tick 0/s). And the field verdict was still "bad, the cursor being the
+    // main visible issue".
+    //
+    // Best explanation: the hook writes per mouse EVENT, so at 434-685/s against a 144Hz
+    // compositor the view position was being rewritten 4-5 times per displayed frame. Whichever
+    // write happened to land before DWM sampled decided that frame, while the cursor is drawn by
+    // DWM from its own sample - so content and cursor came from different instants and the cursor
+    // swam against the content. Same family as the wobble #205 fixed: two things on different
+    // clocks. Native's ~49 writes/s sits BELOW refresh, so every frame gets one settled position.
+    //
+    // The lesson worth keeping: time-to-write is not the metric that matters. Frame coherence is.
+    // Do not re-enable this without a mechanism that bounds writes to at most one per composited
+    // frame AND keeps content and cursor sampled at the same instant.
+    int txHookWrite = 0;
     int txFreeCursor = 1;
     int txWriteHz = 0;
     // Minimum destination-space (screen px) movement before a PAN-ONLY write goes out. Native's

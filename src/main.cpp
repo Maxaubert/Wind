@@ -15,6 +15,8 @@
 #include "profiles_io.h"
 #include "drag_follow.h"
 #include "engine_pick.h"
+#include "hook_transform.h"   // inline transform writes from the mouse hook (issue #206)
+#include "mag_thread.h"
 #include "mpo_boot.h"
 #include "config_ui/ini_edit.h"   // wind::UpdateIniText - flip the model key in place
 #include "logging.h"
@@ -264,7 +266,8 @@ struct TickState {
                                     //   SIGHT time, never at zoom-in (issue #199).
     DWORD  quiescedPid = 0;         // fires at most once per process instance
     HWND   lastCoverFg = nullptr;   // edge-detect cover-takeover foregrounds
-    unsigned long long lastCoverProbeMs = 0;   // throttles the idle-tick cover watch to ~4Hz
+    unsigned long long lastCoverProbeMs = 0;
+    double prevTickLevel = 0.0;      // hook-write arming: only while the level is settled (#206)   // throttles the idle-tick cover watch to ~4Hz
     IMagnifierModel* wantModel = nullptr;   // hybrid stickiness: candidate engine and how long it
     unsigned long long wantSinceMs = 0;     //   has been the candidate (debounces foreground reads)
     unsigned long long kbHookDivergentSinceMs = 0;  // LL keyboard-hook watchdog dwell (issue #156)
@@ -1340,6 +1343,35 @@ static void RunTick(TickState& t) {
         // view already positioned so the pointer lands centre-screen, SetCursorPos has nothing to
         // correct and only reintroduces the feedback loop.
         ex.suppressCursorSync = dragFollow || freeCursor;
+        // HOOK WRITE PATH (issue #206). When free cursor is active the view is a pure function of
+        // the cursor, so the mouse hook can compute and write it inline - 0.58ms-class latency
+        // instead of waiting up to a full 6.94ms tick. Publish what the hook needs, then let it be
+        // the SINGLE writer: two writers sampling the cursor at different instants would alternate
+        // between positions at tick rate, which is exactly the wobble #205 removed.
+        // Arm ONLY while the level is settled. During a ramp the level changes every tick and the
+        // hook would have to be fed a fresh level per tick anyway, so there is nothing to win and a
+        // second writer to lose by; the transform model keeps the ramp exactly as it is today. The
+        // latency that matters is panning at a steady level, which is what this arms for.
+        const bool levelSettled = (lvl == t.prevTickLevel);
+        t.prevTickLevel = lvl;
+        const bool hookWrite = freeCursor && t.cfg.txHookWrite != 0 && wind::MagThreadOwned() &&
+                               tmWall != nullptr && lvl > 1.0 && levelSettled;
+        if (hookWrite) {
+            wind::HookTransformState hs;
+            hs.armed = true;
+            hs.level = lvl;
+            hs.monX = t.mon.x; hs.monY = t.mon.y; hs.monW = t.mon.w; hs.monH = t.mon.h;
+            // Same pan wall the mapper got above, so the hook cannot pan somewhere the tick would
+            // have refused (the issue #148/#191 16-bit overflow).
+            hs.maxSrcX = wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0;
+            hs.maxSrcY = wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0;
+            hs.fastPan = t.cfg.fastPan != 0;
+            hs.host = tmWall->magHost();
+            wind::PublishHookTransform(hs);
+        } else {
+            wind::DisarmHookTransform();
+        }
+        ex.suppressTransformWrite = hookWrite;
         // Serialize transform writes around an Inspect click's injected absolute move (issue #148
         // TDR class): the injection and a transform write racing each other is the proven trigger.
         // The launch quiesce holds writes AND the weld for its whole window (see above).
@@ -1431,6 +1463,11 @@ static void RunTick(TickState& t) {
         }
         if (doPresent) {
             t.model->present(r, lvl, t.cfg, t.mon, ex);      // render+present (never blocks the ramp)
+            // The hook covers cursor MOVEMENT; this covers everything else that must still land -
+            // a level ramp, or a settled view with the mouse held still. Same function, same
+            // formula, same dedupe cache as the hook path, so it writes only when the hook has not
+            // already put those exact values in (and therefore cannot fight it).
+            if (ex.suppressTransformWrite && !ex.pauseWrites) wind::RequestHookTransformWrite();
         } else if (capVsync) {
             // Reduced-push skip tick: block to the next vblank so the loop cadence stays
             // vblank-locked (Present paces the present ticks, this paces the skips). Fallback

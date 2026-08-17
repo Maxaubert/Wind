@@ -23,6 +23,11 @@ struct PresentExtras {
     // centre this tick - the weld would fight the hand and the dragged content flickers between the
     // two positions. The lens follows the pointer instead (RunTick feeds unscaled deltas).
     bool  suppressCursorSync = false;
+    // The mouse hook owns transform writes this tick (issue #206). SINGLE WRITER: two writers
+    // sampling the cursor at different instants alternate between two positions at tick rate,
+    // which is the wobble class #205 removed. The tick still triggers writes, but through the
+    // hook's own function so there is one formula.
+    bool  suppressTransformWrite = false;
     bool  fsGame = false;         // foreground covers the monitor -> skip the periodic topmost backstop
     bool  forceCrop = false;      // fsGame && gameCrop: crop the capture copy to the magnified region
     bool  noVsync = false;        // game pacing engaged: Present(0,0); the main loop's timer paces
