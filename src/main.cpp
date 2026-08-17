@@ -1089,7 +1089,38 @@ static void RunTick(TickState& t) {
         // launching game must still arm the hold). Anchoring and the once-per-process rule live
         // in TrackLaunchCover; the hold is consumed via QuiesceHoldActive below.
         TrackLaunchCover(t, fgTick, fsCover, fgBorderless);
-        MapResult r = t.mapper.update(dx, dy, lvl);
+        // FREE CURSOR (issue #205) - native Magnifier's model, measured not assumed.
+        //
+        // tools/mag_formula_probe.ps1 + mag_trackmode_probe.ps1 drove the real Magnifier and read
+        // back what it wrote via MagGetFullscreenTransform:
+        //   offset = clamp(cursor - screen/(2*level), 0, screen - screen/level), truncated
+        // and it tracks the pointer CONTINUOUSLY, 1:1 (45/45 twelve-pixel steps moved the view by
+        // exactly twelve, none left it still). Its view position is a PURE FUNCTION of the current
+        // cursor position - no integration, no smoothing, no state.
+        //
+        // Ours was structurally different: integrate per-tick deltas into a SMOOTHED centre, then
+        // WELD the pointer to that centre with SetCursorPos. The cursor position then depends on
+        // the centre and the centre depends on cursor deltas - a feedback loop, which is what
+        // issue #169 chased and what the long-standing wobble is. Native has no loop to oscillate.
+        //
+        // Pinning the mapper to the real cursor each tick reproduces native's formula exactly (the
+        // mapper already clamps the source rect the same way) and leaves nothing to feed back.
+        // cursorSensitivity and cursorSmoothing do NOT apply here by construction: the pointer IS
+        // the input, so there is no delta to scale and no target to ease toward.
+        //
+        // Gated OFF wherever the OS cursor is not the truth:
+        //   - Inspect mode freezes the pointer and pans from raw mickeys, so reading it would pin
+        //     the view solid;
+        //   - a mouselook game clips/recentres the pointer, which is exactly why the locked path
+        //     integrates raw deltas instead (issue #3 / #158).
+        const bool freeCursor = t.cfg.txFreeCursor != 0 && !inspect && !t.detector.locked() &&
+                                dynamic_cast<TransformModel*>(t.model) != nullptr;
+        if (freeCursor) {
+            POINT cp;
+            if (GetCursorPos(&cp))
+                t.mapper.reset(double(cp.x - t.mon.x), double(cp.y - t.mon.y));
+        }
+        MapResult r = t.mapper.update(freeCursor ? 0 : dx, freeCursor ? 0 : dy, lvl);
         // Dead-zone probe (probeClicks=1, diagnostic): the field annotates hover dead zones by
         // clicking. Plain click = "hover works here" (OK), Ctrl+click = "dead here" (DEAD). Each
         // click logs every coordinate space in the chain plus what Windows hit-tests at the
@@ -1305,7 +1336,10 @@ static void RunTick(TickState& t) {
         ex.drawCursor = (ex.cursorMode != 2);
         // Drag-follow (issue #169): the pan resolve above chose to follow the pointer this tick, so
         // neither engine may weld it back to the lens centre - suspend the SetCursorPos.
-        ex.suppressCursorSync = dragFollow;
+        // freeCursor: never weld. The weld is what the whole native-model change removes - with the
+        // view already positioned so the pointer lands centre-screen, SetCursorPos has nothing to
+        // correct and only reintroduces the feedback loop.
+        ex.suppressCursorSync = dragFollow || freeCursor;
         // Serialize transform writes around an Inspect click's injected absolute move (issue #148
         // TDR class): the injection and a transform write racing each other is the proven trigger.
         // The launch quiesce holds writes AND the weld for its whole window (see above).
