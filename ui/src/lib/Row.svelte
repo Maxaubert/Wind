@@ -13,6 +13,25 @@
   export let extra = {};
   const num = v => Number(v);
 
+  // ACCESSIBLE NAMING (issue #201). Every control in this file used to be anonymous: the label and
+  // description are sibling <div>s, so a screen reader announced "checkbox, checked" / "slider, 1.2"
+  // with no indication of WHICH setting it had landed on. The whole schema flows through this file,
+  // so wiring the ids here names every row at once. Rules:
+  //   - a control whose own text is NOT its name (checkbox, slider, colour) -> aria-labelledby=label
+  //   - a control whose text is its VALUE (select trigger, keycap, Manage list) -> labelledby lists
+  //     BOTH ids, so it reads "Magnifier model, Render" instead of losing one half or the other.
+  // row.key is unique across the schema, and the '__' prefixed keys are valid id characters.
+  $: rid = 'row-' + String(row.key).replace(/[^A-Za-z0-9_-]/g, '');
+  $: labelId = row.label ? rid + '-l' : undefined;
+  $: descId = row.desc ? rid + '-d' : undefined;
+  // Value-bearing controls: name = "<label> <current value>". filter(Boolean) keeps this correct for
+  // the label-less rows (outlineColor has no desc, __about has neither).
+  $: valueId = rid + '-v';
+  $: labelledByWithValue = [labelId, valueId].filter(Boolean).join(' ');
+  // Sliders read as a bare number without this ("Smooth ramp (s)" -> "0.6"). row.unit carries the
+  // spoken unit; rows without one keep the plain number.
+  $: valueText = row.unit ? `${value} ${row.unit}` : undefined;
+
   // 'applist' rows hold a comma-separated exe list in one config string (the core parses it with
   // IsExeInList). Split for display, re-join on every edit, so the stored shape never changes.
   $: items = String(value ?? '').split(',').map(s => s.trim()).filter(Boolean);
@@ -32,11 +51,34 @@
   function removeApp(name) {
     onChange(joined(items.filter(i => i !== name)));
   }
+  // Segmented control = a radio group, so arrows move the selection (the ARIA radiogroup contract)
+  // while Tab enters and leaves it as a single stop. Without this the two options were plain
+  // buttons and nothing exposed which one was active.
+  let segEl;
+  // Which radio carries tabindex=0. Normally the selected one, but a value outside the option range
+  // (an unset or junk ini key) would otherwise leave EVERY radio at -1, making the whole group
+  // unreachable by keyboard - so it falls back to the first.
+  $: segFocusIdx = row.seg && num(value) >= 0 && num(value) < row.seg.length ? num(value) : 0;
+  function segKey(e) {
+    if (disabled) return;
+    const n = row.seg.length;
+    const cur = num(value);
+    let next = null;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (cur + 1) % n;
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (cur - 1 + n) % n;
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = n - 1;
+    if (next === null) return;
+    e.preventDefault();
+    onChange(next);
+    // Focus follows selection in a radio group; the button does not exist until Svelte re-renders.
+    setTimeout(() => segEl && segEl.querySelectorAll('button')[next]?.focus(), 0);
+  }
 </script>
 {#if row.type === 'about'}
   <div class="about-hero">
     <svg class="logo" viewBox="0 0 16 16" width="96" height="96" fill="none" stroke="currentColor"
-         stroke-width="1.5" stroke-linecap="round">
+         stroke-width="1.5" stroke-linecap="round" aria-hidden="true" focusable="false">
       <path d="M2 5.5h8.5a2 2 0 1 0-2-2"/>
       <path d="M2 9h11a2 2 0 1 1-2 2"/>
       <path d="M2 12.5h6.5a1.7 1.7 0 1 1-1.7 1.7"/>
@@ -48,39 +90,56 @@
   </div>
 {:else}
   <div class="row" class:disabled>
-    <div class="meta">{#if row.label}<div class="label">{row.label}</div>{/if}{#if row.desc}<div class="desc">{row.desc}</div>{/if}</div>
+    <div class="meta">{#if row.label}<div class="label" id={labelId}>{row.label}</div>{/if}{#if row.desc}<div class="desc" id={descId}>{row.desc}</div>{/if}</div>
     <div class="ctl">
       {#if row.type === 'toggle'}
         <label class="checkbox-wrapper" class:disabled>
-          <input type="checkbox" {disabled} checked={num(value) === 1} on:change={e => onChange(e.target.checked ? 1 : 0)} />
-          <svg viewBox="0 0 35.6 35.6" aria-hidden="true">
+          <input type="checkbox" {disabled} checked={num(value) === 1}
+                 aria-labelledby={labelId} aria-describedby={descId}
+                 on:change={e => onChange(e.target.checked ? 1 : 0)} />
+          <svg viewBox="0 0 35.6 35.6" aria-hidden="true" focusable="false">
             <circle class="background" cx="17.8" cy="17.8" r="17.8"></circle>
             <circle class="stroke" cx="17.8" cy="17.8" r="14.37"></circle>
             <polyline class="check" points="11.78 18.12 15.55 22.23 25.17 12.87"></polyline>
           </svg>
         </label>
       {:else if row.type === 'slider'}
-        <input type="range" {disabled} min={row.min} max={row.max} step={row.step} value={value} on:input={e => onChange(e.target.value)} />
-        <span class="val">{value}</span>
+        <input type="range" {disabled} min={row.min} max={row.max} step={row.step} value={value}
+               aria-labelledby={labelId} aria-describedby={descId} aria-valuetext={valueText}
+               on:input={e => onChange(e.target.value)} />
+        <span class="val" aria-hidden="true">{value}</span>
       {:else if row.type === 'select'}
-        <CustomSelect {value} options={row.options} labels={row.optionLabels} {disabled} onChange={onChange} />
+        <CustomSelect {value} options={row.options} labels={row.optionLabels} {disabled} onChange={onChange}
+                      labelledby={labelledByWithValue} describedby={descId} {valueId} />
       {:else if row.type === 'keybind'}
-        <KeybindCapture {row} {values} onChange={live} {disabled} />
+        <KeybindCapture {row} {values} onChange={live} {disabled}
+                        labelledby={labelledByWithValue} describedby={descId} {valueId} />
       {:else if row.type === 'button'}
-        <button class="linkbtn" {disabled} on:click={() => set('__action', row.action)}>{row.btn}</button>
+        <button class="linkbtn" type="button" {disabled} id={valueId}
+                aria-labelledby={labelledByWithValue} aria-describedby={descId}
+                on:click={() => set('__action', row.action)}>{row.btn}</button>
       {:else if row.type === 'segmented'}
-        <div class="seg" class:disabled>
+        <!-- tabindex="-1" on the group itself: the roving tabindex lives on the radios, so the
+             group is one Tab stop and arrows move within it. -->
+        <div class="seg" class:disabled bind:this={segEl} role="radiogroup" tabindex="-1"
+             aria-labelledby={labelId} aria-describedby={descId} on:keydown={segKey}>
           {#each row.seg as opt, i}
-            <button class="seg-opt" class:active={num(value) === i} {disabled}
+            <button class="seg-opt" type="button" class:active={num(value) === i} {disabled}
+                    role="radio" aria-checked={num(value) === i} tabindex={i === segFocusIdx ? 0 : -1}
                     on:click={() => onChange(i)}>{opt}</button>
           {/each}
         </div>
       {:else if row.type === 'color'}
         <input class="color" type="color" {disabled} value={value}
+               aria-labelledby={labelId} aria-describedby={descId}
                on:input={e => onChange(e.target.value)} />
       {:else if row.type === 'applist'}
-        <span class="listsummary">{summary}</span>
-        <button class="linkbtn" {disabled} on:click={() => (listOpen = true)}>Manage list</button>
+        <span class="listsummary" id={valueId}>{summary}</span>
+        <!-- Name is "<row label>, <summary>, Manage list": which list, what is in it, what the
+             button does. The bare "Manage list" repeated on every applist row otherwise. -->
+        <button class="linkbtn" type="button" {disabled} id={rid + '-b'}
+                aria-labelledby="{labelledByWithValue} {rid}-b" aria-describedby={descId}
+                on:click={() => (listOpen = true)}>Manage list</button>
       {:else if row.type === 'mpo'}
         <!-- The toggle IS the detector: unticked means MPO is on. An extra "MPO on" badge beside it
              said the same thing twice and made the row read as an action button rather than a state,
@@ -92,12 +151,17 @@
                change anything", which is also why it can show with nothing staged (the registry
                already holds a value DWM has not loaded yet). -->
           {#if extra.mpoNeedsRestart}
-            <span class="tag">Requires restart</span>
+            <span class="tag" id={rid + '-t'}>Requires restart</span>
           {/if}
           <label class="checkbox-wrapper" class:disabled={disabled || !extra.mpoKnown}>
+            <!-- The "Requires restart" chip joins the description when it is showing: it is the
+                 only signal that an applied change has not taken effect yet, and sighted users
+                 read it right next to the toggle. -->
             <input type="checkbox" disabled={disabled || !extra.mpoKnown} checked={!!extra.mpoStaged}
+                   aria-labelledby={labelId}
+                   aria-describedby={extra.mpoNeedsRestart ? `${descId ?? ''} ${rid}-t`.trim() : descId}
                    on:change={e => set('__mpoStaged', e.target.checked)} />
-            <svg viewBox="0 0 35.6 35.6" aria-hidden="true">
+            <svg viewBox="0 0 35.6 35.6" aria-hidden="true" focusable="false">
               <circle class="background" cx="17.8" cy="17.8" r="17.8"></circle>
               <circle class="stroke" cx="17.8" cy="17.8" r="14.37"></circle>
               <polyline class="check" points="11.78 18.12 15.55 22.23 25.17 12.87"></polyline>
@@ -140,6 +204,11 @@
   .checkbox-wrapper input[type=checkbox]{position:absolute;width:100%;height:100%;left:0;top:0;
     margin:0;opacity:0;-webkit-appearance:none;appearance:none}
   .checkbox-wrapper input[type=checkbox]:hover{cursor:pointer}
+  /* The real checkbox is opacity:0 on top of the SVG, so its own focus ring is invisible too.
+     Put the ring on the wrapper instead. :has(:focus-visible) (not :focus-within) so a mouse
+     click does not leave a ring behind. */
+  .checkbox-wrapper:has(input[type=checkbox]:focus-visible){outline:2px solid var(--focus);
+    outline-offset:3px;border-radius:50%}
   .checkbox-wrapper:hover .check{stroke-dashoffset:0}
   .checkbox-wrapper input[type=checkbox]:checked + svg .background{fill:var(--accent)}
   .checkbox-wrapper input[type=checkbox]:checked + svg .stroke{stroke-dashoffset:0}

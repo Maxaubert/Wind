@@ -2,28 +2,53 @@
   --bg:#ffffff; --rail:#e9e9ee; --panel-line:rgba(0,0,0,.08);
   --text:#1c1c22; --muted:#6c6c77; --line:#ededf1; --hover:rgba(0,0,0,.05);
   --accent:#5b5bd6; --accent-icon:#5b5bd6; --accent-soft:rgba(91,91,214,.13);
-  --track:rgba(0,0,0,.14); --chip:rgba(0,0,0,.04);
+  --track:rgba(0,0,0,.14); --chip:rgba(0,0,0,.04); --focus:#4a4ac9;
 }
 @media (prefers-color-scheme: dark) {
   :root:not(.force-light) {
     --bg:#0e0e12; --rail:#17171b; --panel-line:rgba(255,255,255,.06);
     --text:#f3f3f6; --muted:#85858f; --line:#1f1f25; --hover:rgba(255,255,255,.07);
     --accent:#5b5bd6; --accent-icon:#9090f2; --accent-soft:rgba(91,91,214,.22);
-    --track:rgba(255,255,255,.16); --chip:rgba(255,255,255,.06);
+    --track:rgba(255,255,255,.16); --chip:rgba(255,255,255,.06); --focus:#a5a5ff;
   }
 }
 :root.force-dark {
   --bg:#0e0e12; --rail:#17171b; --panel-line:rgba(255,255,255,.06);
   --text:#f3f3f6; --muted:#85858f; --line:#1f1f25; --hover:rgba(255,255,255,.07);
   --accent:#5b5bd6; --accent-icon:#9090f2; --accent-soft:rgba(91,91,214,.22);
-  --track:rgba(255,255,255,.16); --chip:rgba(255,255,255,.06);
+  --track:rgba(255,255,255,.16); --chip:rgba(255,255,255,.06); --focus:#a5a5ff;
 }
 :root.force-light {
   --bg:#ffffff; --rail:#e9e9ee; --panel-line:rgba(0,0,0,.08);
   --text:#1c1c22; --muted:#6c6c77; --line:#ededf1; --hover:rgba(0,0,0,.05);
   --accent:#5b5bd6; --accent-icon:#5b5bd6; --accent-soft:rgba(91,91,214,.13);
-  --track:rgba(0,0,0,.14); --chip:rgba(0,0,0,.04);
+  --track:rgba(0,0,0,.14); --chip:rgba(0,0,0,.04); --focus:#4a4ac9;
 }
 html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
   font-family:"Segoe UI Variable","Segoe UI",system-ui,sans-serif;}
 input[type=checkbox],input[type=range]{accent-color:var(--accent);}
+
+/* Focus (issue #201). The app defined NO focus rules at all, leaving Chromium's default
+   outline:auto 1px, which computes to rgb(16,16,16) against the dark theme's rgb(14,14,18)
+   background - i.e. a keyboard user could not see where they were. --focus is a deliberately
+   high-contrast tint of the accent per theme, not --accent itself (#5b5bd6 is too dark on
+   #0e0e12). :focus-visible so pointer users never see a ring. */
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* Text for screen readers only. Used for the live-announcement region and the page h1: both must
+   be in the accessibility tree but neither has a place in this layout. Not display:none, which
+   would remove them from the tree entirely. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+
+/* Every animation in this UI is decorative (the onboarding wind trails, the checkbox draw-on, the
+   rail transitions). Honour the OS "reduce motion" setting - a magnifier's own settings window is
+   exactly where a motion-sensitive user is likely to be. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important; animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important; scroll-behavior: auto !important;
+  }
+}

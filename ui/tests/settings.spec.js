@@ -293,14 +293,14 @@ test('titlebar shows the active profile and lists all profiles on click', async 
   const trigger = page.getByRole('button', { name: /Default/ });
   await expect(trigger).toBeVisible();
   await trigger.click();
-  await expect(page.getByRole('menuitem', { name: /Gaming/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: /Create new profile/ })).toBeVisible();
+  await expect(page.getByRole('menuitemradio', { name: /Gaming/ })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: /Create new profile/ })).toBeVisible();
 });
 
 test('clicking another profile switches and reloads', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: /Default/ }).click();
-  await page.getByRole('menuitem', { name: /Gaming/ }).click();
+  await page.getByRole('menuitemradio', { name: /Gaming/ }).click();
   await expect(page.getByRole('button', { name: /Gaming/ })).toBeVisible();
   const sets = await page.evaluate(() => window.__sets);
   expect(sets.some(s => s.type === 'switchProfile' && s.name === 'Gaming')).toBeTruthy();
@@ -309,7 +309,7 @@ test('clicking another profile switches and reloads', async ({ page }) => {
 test('create validates the name inline and sends createProfile when valid', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: /Default/ }).click();
-  await page.getByRole('button', { name: /Create new profile/ }).click();
+  await page.getByRole('menuitem', { name: /Create new profile/ }).click();
   const input = page.getByPlaceholder('New profile name');
   await input.fill('Gaming');                       // duplicate
   await page.getByRole('button', { name: 'Create', exact: true }).click();
@@ -323,8 +323,8 @@ test('create validates the name inline and sends createProfile when valid', asyn
 test('right-click opens rename/duplicate/delete; rename round-trips', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: /Default/ }).click();
-  await page.getByRole('menuitem', { name: /Gaming/ }).click({ button: 'right' });
-  await page.getByRole('button', { name: 'Rename' }).click();
+  await page.getByRole('menuitemradio', { name: /Gaming/ }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Rename' }).click();
   await page.getByPlaceholder('New name').fill('Games');
   await page.getByRole('button', { name: 'Rename', exact: true }).click();
   const sets = await page.evaluate(() => window.__sets);
@@ -335,15 +335,15 @@ test('delete is disabled on the last profile', async ({ page }) => {
   await page.addInitScript(() => { window.__profiles = { names: ['Solo'], active: 'Solo' }; });
   await page.goto('/');
   await page.getByRole('button', { name: /Solo/ }).click();
-  await page.getByRole('menuitem', { name: /Solo/ }).click({ button: 'right' });
-  await expect(page.getByRole('button', { name: 'Delete' })).toBeDisabled();
+  await page.getByRole('menuitemradio', { name: /Solo/ }).click({ button: 'right' });
+  await expect(page.getByRole('menuitem', { name: 'Delete' })).toBeDisabled();
 });
 
 test('switching with staged changes raises the unsaved-changes guard', async ({ page }) => {
   await page.goto('/');
   await page.getByText('Smooth zoom', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();
   await page.getByRole('button', { name: /Default/ }).click();
-  await page.getByRole('menuitem', { name: /Gaming/ }).click();
+  await page.getByRole('menuitemradio', { name: /Gaming/ }).click();
   await expect(page.getByText('Unsaved changes')).toBeVisible();
   await page.getByRole('button', { name: 'Discard and continue' }).click();
   await expect(page.getByRole('button', { name: /Gaming/ })).toBeVisible();
@@ -353,7 +353,7 @@ test('a failed profile action surfaces a visible error dialog', async ({ page })
   await page.addInitScript(() => { window.__profileFail = 'switchProfile'; });
   await page.goto('/');
   await page.getByRole('button', { name: /Default/ }).click();
-  await page.getByRole('menuitem', { name: /Gaming/ }).click();
+  await page.getByRole('menuitemradio', { name: /Gaming/ }).click();
   await expect(page.getByText('Profile action failed')).toBeVisible();
   await expect(page.getByText('Simulated failure')).toBeVisible();
   await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
@@ -364,8 +364,8 @@ test('deleting a NON-active profile with staged changes skips the guard', async 
   await page.goto('/');
   await page.getByText('Smooth zoom', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();
   await page.getByRole('button', { name: /Default/ }).click();
-  await page.getByRole('menuitem', { name: /Gaming/ }).click({ button: 'right' });
-  await page.getByRole('button', { name: 'Delete' }).click();          // one-click delete
+  await page.getByRole('menuitemradio', { name: /Gaming/ }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Delete' }).click();          // one-click delete
   await expect(page.getByText('Unsaved changes')).toHaveCount(0);      // no guard
   const sets = await page.evaluate(() => window.__sets);
   expect(sets.some(s => s.type === 'deleteProfile' && s.name === 'Gaming')).toBeTruthy();
@@ -374,7 +374,7 @@ test('deleting a NON-active profile with staged changes skips the guard', async 
 test('a leading-dot name is rejected inline before reaching the host', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: /Default/ }).click();
-  await page.getByRole('button', { name: /Create new profile/ }).click();
+  await page.getByRole('menuitem', { name: /Create new profile/ }).click();
   await page.getByPlaceholder('New profile name').fill('.hidden');
   await page.getByRole('button', { name: 'Create', exact: true }).click();
   await expect(page.getByText(/space or dot/)).toBeVisible();
@@ -384,16 +384,16 @@ test('a leading-dot name is rejected inline before reaching the host', async ({ 
 test('Escape closes the profile dropdown', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: /Default/ }).click();
-  await expect(page.getByRole('menuitem', { name: /Gaming/ })).toBeVisible();
+  await expect(page.getByRole('menuitemradio', { name: /Gaming/ })).toBeVisible();
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('menuitem', { name: /Gaming/ })).toHaveCount(0);
+  await expect(page.getByRole('menuitemradio', { name: /Gaming/ })).toHaveCount(0);
 });
 
 test('the Default profile cannot be deleted even among many', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: /Default/ }).click();
-  await page.getByRole('button', { name: 'Profile actions for Default' }).click();
-  await expect(page.getByRole('button', { name: 'Delete' })).toBeDisabled();
+  await page.getByRole('menuitem', { name: 'Profile actions for Default' }).click();
+  await expect(page.getByRole('menuitem', { name: 'Delete' })).toBeDisabled();
 });
 
 // --- Review fixes (issue #182) ----------------------------------------------
@@ -421,7 +421,7 @@ test('forbidden keys are refused during keybind capture and capture stays armed'
 test('a model change writes the ini BEFORE requesting the relaunch', async ({ page }) => {
   await page.goto('/');
   const row = page.getByText('Magnifier model', { exact: true }).locator('xpath=../..');
-  await row.getByRole('button').first().click();
+  await row.getByRole('combobox').click();
   await page.getByRole('option', { name: 'Windows Magnifier' }).click();
   await page.getByRole('button', { name: 'Apply' }).click();
   const sets = await page.evaluate(() => window.__sets);
@@ -435,7 +435,7 @@ test('a failed relaunch reverts the model dropdown and the ini', async ({ page }
   await page.addInitScript(() => { window.__restartFail = true; });
   await page.goto('/');
   const row = page.getByText('Magnifier model', { exact: true }).locator('xpath=../..');
-  await row.getByRole('button').first().click();
+  await row.getByRole('combobox').click();
   await page.getByRole('option', { name: 'Windows Magnifier' }).click();
   await page.getByRole('button', { name: 'Apply' }).click();
   await expect(page.getByText("Couldn't restart Wind")).toBeVisible();
@@ -450,7 +450,7 @@ test('desktopTransform row shows only for the Auto model (advanced)', async ({ p
   // Mock config has model=render + showAdvanced=1: the row must be hidden.
   await expect(page.getByText('Game engine on the desktop')).toHaveCount(0);
   const row = page.getByText('Magnifier model', { exact: true }).locator('xpath=../..');
-  await row.getByRole('button').first().click();
+  await row.getByRole('combobox').click();
   await page.getByRole('option', { name: 'Auto' }).click();
   await expect(page.getByText('Game engine on the desktop')).toBeVisible();
 });

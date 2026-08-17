@@ -12,6 +12,7 @@
   import Row from './lib/Row.svelte';
   import { ic } from './lib/icons.js';
   import { scrollspy, scrollToSection } from './lib/scrollspy.js';
+  import { dialog } from './lib/dialog.js';
 
   let values = {}, saved = {}, active = sections[0].id, theme = 'auto', scroller;
   const railItems = sections.map(s => ({ id: s.id, label: s.label, icon: s.icon }));
@@ -90,6 +91,22 @@
       restartError = true;
     }
   });
+  // --- Screen-reader announcements (issue #201) -----------------------------
+  // Anything that changes the page without moving focus has to be spoken, or it did not happen as
+  // far as a screen reader user is concerned. Re-assigning the same string would NOT re-announce
+  // (the region's text has not changed), so repeats get a zero-width space appended.
+  let announcement = '';
+  function announce(msg) {
+    announcement = announcement === msg ? msg + '​' : msg;
+  }
+  // The rail scrolled the pane but left focus on the rail button, so a keyboard or screen-reader
+  // user got no signal that anything happened. Move focus to the target section's heading (which
+  // carries tabindex="-1") - that both announces the section and puts the next Tab inside it.
+  function goToSection(id) {
+    scrollToSection(scroller, id);
+    const h = scroller && scroller.querySelector('#sech-' + id);
+    if (h) h.focus({ preventScroll: true });
+  }
   function change(keyOrPatch, val) {
     // Atomic multi-key form: change({k1:v1, k2:v2}) updates both in a single render. The keybind
     // capture uses this so its sibling-key update (vk + button) lands as one consistent state.
@@ -101,6 +118,12 @@
     if (key === '__action') { if (val === 'openIni') openIni(); return; }
     // Staged only - the elevated write happens in apply(), like every other setting.
     if (key === '__mpoStaged') { mpoStaged = !!val; return; }
+    // Both of these restructure the page: showAdvanced adds/removes ~10 rows, and model swaps most
+    // of the Display section (every row carries showIf:{key:'model'}). Neither moves focus.
+    if (key === 'showAdvanced')
+      announce(Number(val) === 1 ? 'Advanced settings shown' : 'Advanced settings hidden');
+    if (key === 'model')
+      announce('Magnifier model set to ' + val + '. Some display options changed.');
     const next = { ...values, [key]: val };
     // Disabling the alternate-keybinds toggle clears the alternate bindings (side-button + key) so
     // any previously bound alt input stops firing (Apply still has to be pressed to persist).
@@ -137,6 +160,7 @@
       return;
     }
     commit();
+    announce('Settings applied');
   }
   // When a push arrived while edits were staged (the tray switched profiles under us), `saved`
   // still holds the OLD profile's snapshot - restoring it would show a clean-looking page that is
@@ -147,6 +171,7 @@
     mpoStaged = mpoLive;
     if (pendingReload) { pendingReload = false; await loadValues(); }
     else values = { ...saved };
+    announce('Changes discarded');
   }
   // --- Profiles (spec 2026-08-12) -------------------------------------------
   let profiles = { names: [], active: '' };
@@ -185,9 +210,14 @@
     if (kind === 'switch' || kind === 'create' || (kind === 'delete' && r.active !== prevActive))
       await loadValues();
     if (!r.ok) { profileError = r.error || 'Profile operation failed'; return; }
+    if (kind === 'switch')         announce('Switched to profile ' + payload.name + '. Settings reloaded.');
+    else if (kind === 'create')    announce('Created profile ' + payload.name + '. Settings reset to defaults.');
+    else if (kind === 'rename')    announce('Renamed profile to ' + payload.to);
+    else if (kind === 'duplicate') announce('Duplicated profile ' + payload.name);
+    else if (kind === 'delete')    announce('Deleted profile ' + payload.name);
     // A fresh factory-defaults profile has no zoom keys bound (keybinds are per-profile):
     // put the user right where fixing that starts.
-    if (kind === 'create') scrollToSection(scroller, 'keybinds');
+    if (kind === 'create') goToSection('keybinds');
   }
   // Unsolicited host push: the tray switched profiles under this window. Refresh the titlebar and,
   // unless the user has staged edits, the values too (a stale Apply would mirror the OLD profile's
@@ -221,11 +251,13 @@
   $: advancedOn = Number(values.showAdvanced) === 1;
 </script>
 <div class="win">
-  <Rail sections={railItems} {active} onSelect={(id) => scrollToSection(scroller, id)}
+  <Rail sections={railItems} {active} onSelect={goToSection}
         {theme} onToggleTheme={toggleTheme} />
-  <section class="content">
+  <!-- Was <section>: an unnamed section is a landmark with no label, which is noise in a screen
+       reader's landmark list. The scroll region below is the real <main>. -->
+  <div class="content">
     <div class="caption" style="app-region:drag;-webkit-app-region:drag">
-      <span class="ctitle">Wind Settings</span>
+      <h1 class="ctitle">Wind Settings</h1>
       <ProfileMenu active={profiles.active} names={profiles.names} onAction={profileAction} />
       <div class="spacer" style="flex:1"></div>
       <div class="tbtns" style="app-region:no-drag;-webkit-app-region:no-drag">
@@ -233,8 +265,8 @@
         <button class="tbtn close" title="Close" aria-label="Close" on:click={requestClose}>{@html ic.close}</button>
       </div>
     </div>
-    <div class="scroll" bind:this={scroller}
-         use:scrollspy={{ sectionIds: ids, onActive: (id) => active = id }}>
+    <main class="scroll" bind:this={scroller}
+          use:scrollspy={{ sectionIds: ids, onActive: (id) => active = id }}>
       {#each sections as s}
         <Section id={s.id} label={s.label} desc={s.desc}>
           {#each s.rows as r}
@@ -246,16 +278,22 @@
           {/each}
         </Section>
       {/each}
-    </div>
+    </main>
     <footer>
       <button class="btn" on:click={exportDiagnostics}>Export diagnostics</button>
       <button class="btn" on:click={discard} disabled={!dirty}>Discard</button>
       <button class="btn primary" on:click={apply} disabled={!dirty}>Apply</button>
     </footer>
-  </section>
+    <!-- Single polite live region for the whole page. Everything that changes the page WITHOUT
+         moving focus is announced here: revealing the advanced rows, swapping the model (which
+         replaces most of the Display section), Apply/Discard, and profile switches. Before this
+         the page had no live regions at all, so all of that was silent. -->
+    <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">{announcement}</div>
+  </div>
   {#if restartError}
     <div class="mbackdrop">
-      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="rtitle">
+      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="rtitle"
+           use:dialog={{ onClose: () => (restartError = false) }}>
         <h2 id="rtitle">Couldn't restart Wind</h2>
         <p>Wind.exe could not be launched. The magnifier is still running with the previous model.</p>
         <div class="mbtns"><button class="primary" on:click={() => (restartError = false)}>Close</button></div>
@@ -264,7 +302,8 @@
   {/if}
   {#if mpoRestartPrompt}
     <div class="mbackdrop">
-      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="mtitle">
+      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="mtitle"
+           use:dialog={{ onClose: () => (mpoRestartPrompt = false) }}>
         <h2 id="mtitle">Restart to finish</h2>
         <p>
           MPO is now {mpoLive ? 'disabled' : 'enabled'} in the registry. Windows only reads this
@@ -279,7 +318,8 @@
   {/if}
   {#if mpoFailed}
     <div class="mbackdrop">
-      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="ftitle">
+      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="ftitle"
+           use:dialog={{ onClose: () => (mpoFailed = false) }}>
         <h2 id="ftitle">MPO change not applied</h2>
         <p>
           The registry was not changed. This happens if the administrator prompt was dismissed.
@@ -291,7 +331,8 @@
   {/if}
   {#if closePrompt}
     <div class="mbackdrop">
-      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="ctitle">
+      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="ctitle"
+           use:dialog={{ onClose: () => (closePrompt = false) }}>
         <h2 id="ctitle">Settings not applied</h2>
         <p>You have changes that haven't been applied. Closing now discards them.</p>
         <div class="mbtns">
@@ -303,7 +344,8 @@
   {/if}
   {#if profilePrompt}
     <div class="mbackdrop">
-      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="ptitle">
+      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="ptitle"
+           use:dialog={{ onClose: () => (profilePrompt = null) }}>
         <h2 id="ptitle">Unsaved changes</h2>
         <p>You have settings that were not applied. Switching profiles will discard them.</p>
         <div class="mbtns">
@@ -315,7 +357,8 @@
   {/if}
   {#if profileError}
     <div class="mbackdrop">
-      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="petitle">
+      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="petitle"
+           use:dialog={{ onClose: () => (profileError = '') }}>
         <h2 id="petitle">Profile action failed</h2>
         <p>{profileError}</p>
         <div class="mbtns"><button class="primary" on:click={() => (profileError = '')}>Close</button></div>
@@ -324,7 +367,8 @@
   {/if}
   {#if profileNotice}
     <div class="mbackdrop">
-      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="pntitle">
+      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="pntitle"
+           use:dialog={{ onClose: () => (profileNotice = '') }}>
         <h2 id="pntitle">Profile changed</h2>
         <p>{profileNotice}</p>
         <div class="mbtns"><button class="primary" on:click={() => (profileNotice = '')}>OK</button></div>
@@ -339,7 +383,9 @@
          background: var(--bg); color: var(--text); font-size: 13px; }
   .content { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .caption { height: 44px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; padding-left: 22px; }
-  .ctitle { font-size: 12.5px; color: var(--muted); font-weight: 500; }
+  /* margin:0 because this is an <h1> now (the page needed a top-level heading); the UA's default
+     h1 margin would otherwise push the flex caption bar around. Visually identical to the span. */
+  .ctitle { font-size: 12.5px; color: var(--muted); font-weight: 500; margin: 0; }
   .tbtns { display: flex; height: 100%; }
   .tbtn { width: 46px; height: 100%; display: grid; place-items: center; color: var(--muted); border: 0; background: transparent; cursor: pointer; }
   .tbtn:hover { background: var(--hover); color: var(--text); }

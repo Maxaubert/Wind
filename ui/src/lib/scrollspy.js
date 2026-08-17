@@ -44,5 +44,9 @@ function smoothScrollTo(node, target, duration) {
 }
 export function scrollToSection(node, id) {
   const el = node.querySelector('#sec-' + id);
-  if (el) smoothScrollTo(node, el.offsetTop - 4, 220);
+  if (!el) return;
+  // The CSS reduced-motion block cannot reach a rAF-driven scroll, so honour the setting here too.
+  const still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (still) { node.scrollTop = el.offsetTop - 4; return; }
+  smoothScrollTo(node, el.offsetTop - 4, 220);
 }

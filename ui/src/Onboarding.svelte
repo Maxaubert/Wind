@@ -17,6 +17,9 @@
     for (const k of Object.keys(patch)) setConfig(k, patch[k]);
     keys = { ...keys, ...patch };
   }
+  const stepTitles = ['Welcome to Wind', 'Set your zoom keys', "You're all set"];
+  // Advancing swaps the entire body with no focus change, so a screen reader would hear nothing.
+  $: stepMsg = `Step ${cur + 1} of ${N}: ${stepTitles[cur]}`;
   function next() {
     if (cur === N - 1) { setConfig('onboarded', '1'); onDone(); return; }
     cur += 1;
@@ -36,11 +39,11 @@
       <button class="tbtn close" title="Close" aria-label="Close" on:click={() => windowControl('quitWind')}>{@html ic.close}</button>
     </div>
   </div>
-  <div class="wizbody">
+  <main class="wizbody">
     <!-- Step 0: Welcome. Ported .hero block (windsvg trails + windgrad def + logosvg). -->
     <div class="step center" class:show={cur === 0}>
       <div class="hero">
-        <svg class="windsvg" viewBox="0 0 236 140" fill="none">
+        <svg class="windsvg" viewBox="0 0 236 140" fill="none" aria-hidden="true" focusable="false">
           <defs><linearGradient id="windgrad" x1="0" y1="0" x2="1" y2="0">
             <stop offset="0" stop-color="currentColor" stop-opacity="0"/>
             <stop offset=".5" stop-color="currentColor" stop-opacity="1"/>
@@ -52,38 +55,41 @@
           <path class="wln l4" pathLength="100" d="M246 48 C 162 58, 62 40, -10 54"/>
           <path class="wln l5" pathLength="100" d="M246 108 C 172 130, 86 96, -10 112"/>
         </svg>
-        <svg class="logosvg" viewBox="0 0 16 16" fill="none">
+        <svg class="logosvg" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
           <path class="lp" pathLength="100" d="M2 5.5h8.5a2 2 0 1 0-2-2"/>
           <path class="lp" pathLength="100" d="M2 9h11a2 2 0 1 1-2 2"/>
           <path class="lp" pathLength="100" d="M2 12.5h6.5a1.7 1.7 0 1 1-1.7 1.7"/>
         </svg>
       </div>
-      <h2>Welcome to Wind</h2>
+      <h1>Welcome to Wind</h1>
       <p>A fast magnifier that lives in your tray. Let's set up the essentials.</p>
     </div>
     <!-- Step 1: Set your zoom keys -->
     <div class="step" class:show={cur === 1}>
-      <h2>Set your zoom keys</h2>
+      <h1>Set your zoom keys</h1>
       <p>Pick the buttons you'll hold to zoom. Mouse side-buttons work great, or choose keyboard keys.</p>
-      <div class="orow"><div class="ot"><div class="rlabel">Zoom in</div><div class="rdesc">Hold to magnify</div></div>
-        <div class="rctl"><KeybindCapture row={zoomInRow} values={keys} onChange={live} /></div></div>
-      <div class="orow"><div class="ot"><div class="rlabel">Zoom out</div><div class="rdesc">Hold to zoom back</div></div>
-        <div class="rctl"><KeybindCapture row={zoomOutRow} values={keys} onChange={live} /></div></div>
+      <div class="orow"><div class="ot"><div class="rlabel" id="ob-in-l">Zoom in</div><div class="rdesc" id="ob-in-d">Hold to magnify</div></div>
+        <div class="rctl"><KeybindCapture row={zoomInRow} values={keys} onChange={live}
+                            labelledby="ob-in-l ob-in-v" describedby="ob-in-d" valueId="ob-in-v" /></div></div>
+      <div class="orow"><div class="ot"><div class="rlabel" id="ob-out-l">Zoom out</div><div class="rdesc" id="ob-out-d">Hold to zoom back</div></div>
+        <div class="rctl"><KeybindCapture row={zoomOutRow} values={keys} onChange={live}
+                            labelledby="ob-out-l ob-out-v" describedby="ob-out-d" valueId="ob-out-v" /></div></div>
     </div>
     <!-- Step 2: You're all set. Ported .bigring check-ring SVG. -->
     <div class="step center" class:show={cur === 2}>
-      <div class="bigring"><svg viewBox="0 0 80 80" width="86" height="86">
+      <div class="bigring"><svg viewBox="0 0 80 80" width="86" height="86" aria-hidden="true" focusable="false">
         <circle class="ring" cx="40" cy="40" r="36" fill="none" stroke="var(--accent)" stroke-width="3"/>
         <path class="tick" d="M25 41l10 10 20-21" fill="none" stroke="var(--accent)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
       </svg></div>
-      <h2>You're all set</h2>
+      <h1>You're all set</h1>
     </div>
-  </div>
-  <div class="wizdots">{#each Array(N) as _, i}<i class:on={i === cur}></i>{/each}</div>
+  </main>
+  <div class="wizdots" aria-hidden="true">{#each Array(N) as _, i}<i class:on={i === cur}></i>{/each}</div>
+  <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">{stepMsg}</div>
   <div class="wizfoot">
-    {#if cur < N - 1}<button class="skip" on:click={skip}>Skip setup</button>{/if}
-    {#if cur > 0}<button class="btn" on:click={back}>Back</button>{/if}
-    <button class="btn primary" on:click={next}>{cur === 0 ? 'Get started' : cur === N - 1 ? 'Open Settings' : 'Next'}</button>
+    {#if cur < N - 1}<button class="skip" type="button" on:click={skip}>Skip setup</button>{/if}
+    {#if cur > 0}<button class="btn" type="button" on:click={back}>Back</button>{/if}
+    <button class="btn primary" type="button" on:click={next}>{cur === 0 ? 'Get started' : cur === N - 1 ? 'Open Settings' : 'Next'}</button>
   </div>
 </div>
 <style>
@@ -102,7 +108,7 @@
   .wizbody { flex: 1; overflow: auto; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 8px 52px; }
   .step { display: none; width: 100%; max-width: 430px; }
   .step.show { display: block; }
-  .step h2 { font-size: 27px; margin: 0 0 10px; font-weight: 600; letter-spacing: -.3px; }
+  .step h1 { font-size: 27px; margin: 0 0 10px; font-weight: 600; letter-spacing: -.3px; }
   .step p { color: var(--muted); font-size: 13.5px; line-height: 1.55; margin: 0 0 24px; }
   .step.center { text-align: center; }
   .step.center p { max-width: 384px; margin-left: auto; margin-right: auto; }
