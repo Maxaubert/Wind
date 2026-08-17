@@ -141,7 +141,22 @@ struct Config {
     // this level (the shipped 8 is the field-measured MPO-off optimum for games; raising it keeps
     // DWM's magnification pipeline warm at high zoom on the DESKTOP so pan-resume skips the
     // park-rebuild spike - A/B knob, the 700ms window itself is measured and untouched).
-    int txKeepAliveMaxLevel = 8;
+    // 0 (DEFAULT) = OFF. Traced against native Magnifier (issue #204): native never writes a
+    // value it does not mean - when the view is static it simply stops writing. Our keep-alive
+    // alternated the translation by 1px at TICK rate to stop DWM parking, i.e. a deliberate 1px
+    // shimmer 144x/s during every pause in a pan. Set >0 to re-enable up to that level.
+    int txKeepAliveMaxLevel = 0;
+    // Transform write cadence (issue #204). Measured: native Magnifier writes ~59/s while ramping
+    // and ~49/s while panning; we wrote 120/s and 92/s because we write per tick on a 144Hz panel.
+    // Every write makes DWM redo work proportional to the level, and our timing was MORE regular
+    // than native's (p95 interval 7.56ms vs 31.44ms), so the extra writes were not buying
+    // smoothness - they were saturating the compositor. 0 = per-tick (the old behaviour).
+    int txWriteHz = 60;
+    // Minimum destination-space (screen px) movement before a PAN-ONLY write goes out. Native's
+    // median pan step is 2.24px; ours was 1.41px, and a THIRD of all our writes moved the image by
+    // exactly one pixel. Sub-threshold movement is coalesced, never dropped: a residual still
+    // lands within kSettleMs so the view can never rest visibly offset. 0 = write every change.
+    int txMinOffsetPx = 2;
     int magInputTransform = 1; // publish MagSetInputTransform while zoomed (hot; needs UIAccess).
                           //     1 (DEFAULT) = the visual source rect per change - native-
                           //     Magnifier parity, THE fix for the pointer-framework hover dead

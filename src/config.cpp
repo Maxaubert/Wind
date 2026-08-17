@@ -164,6 +164,8 @@ Config ParseConfig(const std::string& text) {
             else if (key == "mpoBuster")          c.mpoBuster = std::stoi(val);
             else if (key == "txSamplingMode")     c.txSamplingMode = std::stoi(val);
             else if (key == "txKeepAliveMaxLevel")c.txKeepAliveMaxLevel = std::stoi(val);
+            else if (key == "txWriteHz")          c.txWriteHz = std::stoi(val);
+            else if (key == "txMinOffsetPx")      c.txMinOffsetPx = std::stoi(val);
             else if (key == "txIdleReleaseMs")    c.txIdleReleaseMs = std::stoi(val);
             else if (key == "txMaxStepPct")       c.txMaxStepPct = std::stoi(val);
             else if (key == "txLevelStep")        c.txLevelStep = std::stoi(val);
@@ -209,8 +211,13 @@ Config ParseConfig(const std::string& text) {
     if (c.tdrTest > 4) c.tdrTest = 4;
     if (c.ixDecimate < 1)  c.ixDecimate = 1;       // 1 = publish every changed tick
     if (c.ixDecimate > 16) c.ixDecimate = 16;
-    if (c.txKeepAliveMaxLevel < 1)  c.txKeepAliveMaxLevel = 1;
+    // 0 is meaningful here (keep-alive OFF, the shipped default), so the floor is 0 not 1.
+    if (c.txKeepAliveMaxLevel < 0)  c.txKeepAliveMaxLevel = 0;
     if (c.txKeepAliveMaxLevel > 50) c.txKeepAliveMaxLevel = 50;
+    if (c.txWriteHz < 0)    c.txWriteHz = 0;        // 0 = uncapped (per-tick)
+    if (c.txWriteHz > 1000) c.txWriteHz = 1000;
+    if (c.txMinOffsetPx < 0)  c.txMinOffsetPx = 0;  // 0 = write every change
+    if (c.txMinOffsetPx > 32) c.txMinOffsetPx = 32;
     if (c.txLevelStep < 0)   c.txLevelStep = 0;    // per mille; 0 = per-tick level writes
     if (c.txLevelStep > 200) c.txLevelStep = 200;
     if (c.txGrid < 0)   c.txGrid = 0;              // per mille geometric grid; 0 = continuous

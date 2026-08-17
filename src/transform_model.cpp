@@ -1,11 +1,17 @@
 #include "transform_model.h"
 #include "transform.h"   // ComputeMagTransform
+#include "tx_cadence.h"  // ShouldWriteTransform (pure, tested)
 #include "logging.h"
 #include <windows.h>
 #include <magnification.h>
 #include <cmath>
 
 namespace wind {
+
+// How long a write may be held back by the cadence gates before it goes out anyway (issue #204).
+// Without this a sub-threshold residual movement at the end of a pan would never be written and
+// the view would rest up to txMinOffsetPx off where the cursor actually is.
+static const unsigned long long kSettleMs = 100;
 
 // How long the magnification context lingers after a zoom ends. Long enough that zoom-out /
 // zoom-in flicks stay instant, short enough that going back to playing is clean almost at once.
@@ -16,7 +22,7 @@ void TransformModel::resetTransformState() {
     // compares against values DWM no longer holds and skips the writes that would re-apply them.
     lastLevel_ = 0.0; lastRequestedLevel_ = 0.0;
     lastOffX_ = lastOffY_ = lastTxX_ = lastTxY_ = 0;
-    lastChangeMs_ = 0; keepAliveTick_ = 0; hiRampTick_ = 0;
+    lastChangeMs_ = 0; lastWriteMs_ = 0; keepAliveTick_ = 0; hiRampTick_ = 0;
     lastInputXformOn_ = false;
     ixTick_ = 0; ixPending_ = false;
     lastSpriteX_ = INT_MIN; lastSpriteY_ = INT_MIN;
@@ -385,22 +391,60 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // racing a cursor-position update is the proven TDR, so those ticks write NOTHING. State is
     // untouched; the next unpaused tick lands the same values.
     if (!ex.pauseWrites) {
+    const unsigned long long nowMs = GetTickCount64();
     const bool changed = m.offX != lastOffX_ || m.offY != lastOffY_ ||
                          m.txX != lastTxX_ || m.txY != lastTxY_ || applyLevel != lastLevel_;
-    if (changed) {
+
+    // WRITE CADENCE (issue #204). Traced against native Magnifier: it writes ~59/s while ramping
+    // and ~49/s while panning, in ~2.24px steps. We wrote 120/s and 92/s in 1.41px steps, with a
+    // THIRD of all writes moving the image by exactly one pixel - because we wrote per tick on a
+    // 144Hz panel. Our timing was MORE regular than native's (p95 interval 7.56ms vs 31.44ms), so
+    // the surplus was not buying smoothness; every write makes DWM redo work proportional to the
+    // level, and we were saturating it. These two gates COALESCE writes - they never drop a
+    // destination state, because the next tick recomputes from the same mapper.
+    // The decision itself is pure and unit-tested (src/tx_cadence.h, tests/test_tx_cadence.cpp) -
+    // the escapes that stop a gate stranding the view are exactly the kind of thing that is easy
+    // to get wrong once and never notice.
+    TxCadenceIn ci;
+    ci.changed          = changed;
+    ci.levelMoved       = applyLevel != lastLevel_;
+    ci.rampStopped      = rampStopped;
+    ci.applyLevel       = applyLevel;
+    // DESTINATION space: tx is screen pixels, whereas offX is SOURCE pixels, where at 20x a 1px
+    // step is a 20px jump on screen. Thresholding the wrong one would gate ~nothing at high zoom.
+    {
+        int dtx = m.txX - lastTxX_; if (dtx < 0) dtx = -dtx;
+        int dty = m.txY - lastTxY_; if (dty < 0) dty = -dty;
+        ci.dMoveDest = dtx > dty ? dtx : dty;
+    }
+    ci.sinceLastWriteMs = nowMs - lastWriteMs_;
+    ci.writeHz          = cfg.txWriteHz;
+    ci.minOffsetPx      = cfg.txMinOffsetPx;
+    ci.settleMs         = kSettleMs;
+    const bool writeNow = ShouldWriteTransform(ci);
+
+    if (writeNow) {
         lastOffX_ = m.offX; lastOffY_ = m.offY; lastTxX_ = m.txX; lastTxY_ = m.txY;
         lastLevel_ = applyLevel;
-        lastChangeMs_ = GetTickCount64();
+        lastChangeMs_ = nowMs;
+        lastWriteMs_ = nowMs;
         keepAliveTick_ = 0;
     }
+    // Everything below keys off whether the write ACTUALLY goes out this tick, not merely whether
+    // the values differ - the cached last* state must never claim a write we suppressed.
+    const bool changedAndWriting = writeNow;
     int txJitter = 0;
     // Keep-alive: 700ms window, <=8x only. (The original 1.5s/all-levels spec was re-tried
     // under MPO-off 2026-07-26 and measured WORSE - 360ms worst spike vs 198ms baseline. With
     // MPO disabled the desktop composites in software, so a hot magnification pipeline taxes
     // every frame; keep the window short and the high-zoom pipeline parked.)
+    // Ships OFF (txKeepAliveMaxLevel now defaults to 0, issue #204): this deliberately wrote a
+    // value 1px off the truth, 144x/s, through every pause in a pan. Native Magnifier does the
+    // opposite - when the view is static it stops writing entirely.
     bool keepAliveActive = false;
-    if (!changed && !ramping && applyLevel <= (double)cfg.txKeepAliveMaxLevel &&
-        GetTickCount64() - lastChangeMs_ < 700) {
+    if (!changedAndWriting && !ramping && cfg.txKeepAliveMaxLevel > 0 &&
+        applyLevel <= (double)cfg.txKeepAliveMaxLevel &&
+        nowMs - lastChangeMs_ < 700) {
         keepAliveTick_ ^= 1;
         txJitter = keepAliveTick_;
         keepAliveActive = true;   // BOTH parities must write (the return-to-true-value half too)
@@ -408,7 +452,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // Same-value hygiene (issue #189): once the keep-alive window has lapsed (or above its level
     // gate), a zoomed-idle tick would push an identical write 144x/s. DWM parks on static values
     // anyway (measured), so skipping is free; the next changed/keep-alive tick writes as before.
-    if (changed || keepAliveActive)
+    if (changedAndWriting || keepAliveActive)
         writeTransform((float)applyLevel, m.offX, m.offY, m.txX + txJitter, m.txY, fastPan_, false);
     // Input transform. Mode 1 (THE SHIPPED DEFAULT; field-verified 4x-20x,
     // POINTER-HITTEST-FINDINGS.md): publish the visual source rect on every change, exactly
