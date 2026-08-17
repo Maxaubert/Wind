@@ -171,11 +171,16 @@
   /* Room for the overlaid "..." so a long profile name cannot run under it. */
   .pitem > .prow { padding-right: 26px; }
   .prow:hover { background: var(--hover); }
+  /* The "..." is a sibling now, not a child, so hovering it no longer hovered the row underneath.
+     Hover the item and the row lights up either way, as it did before. */
+  .pitem:hover > .prow { background: var(--hover); }
   .pcheck { width: 14px; }
   .plabel { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* Absolutely placed over the row: the "..." used to be nested INSIDE it, which is invalid inside
      a menuitem. Sibling + overlay keeps the layout pixel-identical. */
-  .pdots { position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  /* right:8px matches the row's own padding, so the glyph sits exactly where it did when it was
+     the row's last flex child. */
+  .pdots { position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
            border: 0; background: transparent; color: var(--muted); cursor: pointer;
            border-radius: 4px; padding: 0 4px; line-height: 1; }
   .pdots:hover { background: var(--hover); color: var(--text); }

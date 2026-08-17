@@ -13,6 +13,9 @@
   let open = false;
   let el, triggerEl;
   let activeIdx = 0;                 // option under the keyboard cursor (NOT the committed value)
+  // Only paint the keyboard cursor once a key has actually been used. Opening with the mouse would
+  // otherwise draw a ring on the current option that means nothing to a pointer user.
+  let kbNav = false;
   // Unique per instance: aria-activedescendant is an id reference, and several selects coexist.
   const uid = 'ls-' + Math.random().toString(36).slice(2, 8);
   const optId = (i) => `${uid}-o${i}`;
@@ -28,7 +31,9 @@
     open = false;
     if (refocus && triggerEl) triggerEl.focus();
   }
-  function toggle() { if (disabled) return; open ? closeMenu() : openMenu(); }
+  // Only reachable by pointer: Enter/Space are preventDefault-ed in onKey, so they never
+  // synthesise a click on the trigger.
+  function toggle() { if (disabled) return; kbNav = false; open ? closeMenu() : openMenu(); }
   function pick(o) { onChange(o); closeMenu(); }
   function onWindowClick(e) { if (open && el && !el.contains(e.target)) open = false; }
 
@@ -48,6 +53,7 @@
   }
   function onKey(e) {
     if (disabled) return;
+    kbNav = true;
     const k = e.key;
     if (!open) {
       if (k === 'ArrowDown' || k === 'ArrowUp' || k === 'Enter' || k === ' ') {
@@ -90,8 +96,9 @@
     <!-- svelte-ignore a11y-click-events-have-key-events -->
     <div class="menu" role="listbox" id={uid} aria-labelledby={labelledby}>
       {#each options as o, i}
-        <div class="opt" class:selected={o === value} class:active={i === activeIdx}
+        <div class="opt" class:selected={o === value} class:active={kbNav && i === activeIdx}
              id={optId(i)} role="option" aria-selected={o === value} tabindex="-1"
+             on:mouseenter={() => (activeIdx = i)}
              on:click|stopPropagation={() => pick(o)}>{show(o)}</div>
       {/each}
     </div>
