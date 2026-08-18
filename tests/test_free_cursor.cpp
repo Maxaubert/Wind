@@ -142,3 +142,68 @@ TEST_CASE("the source rect always stays inside the desktop") {
         }
     }
 }
+
+// --- hook write path (issue #206) -------------------------------------------
+#include "../src/hook_geometry.h"
+
+// THE invariant for stage 2. From #206 there are two writers: the mouse hook (inline, for latency)
+// and the tick thread (level ramps, and a settled view). If they computed the source rect even
+// slightly differently they would overwrite each other every tick with alternating positions -
+// reintroducing exactly the wobble #205 removed. So the hook's pure geometry must agree with the
+// mapper the tick drives, everywhere.
+TEST_CASE("hook geometry agrees with the mapper the tick uses, across the whole range") {
+    CursorMapper m(3840, 2160, 0.4);
+    for (double level = 1.05; level <= 20.0; level += 0.13) {
+        for (int cx = -200; cx <= 4000; cx += 173) {
+            for (int cy = -200; cy <= 2400; cy += 211) {
+                MapResult r = FreeCursorMap(m, cx, cy, level);
+                FreeCursorSrc h = ComputeFreeCursorSrc(cx, cy, level, 3840, 2160, -1.0, -1.0);
+                CHECK(h.left == doctest::Approx(r.srcLeft).epsilon(1e-9));
+                CHECK(h.top  == doctest::Approx(r.srcTop).epsilon(1e-9));
+            }
+        }
+    }
+}
+
+TEST_CASE("hook geometry reproduces native Magnifier's measured samples too") {
+    for (const NativeSample& s : kNative8x) {
+        FreeCursorSrc h = ComputeFreeCursorSrc(s.curX, s.curY, 8.0, 3840, 2160, -1.0, -1.0);
+        CHECK(std::llround(h.left) == s.offX);
+        CHECK(std::llround(h.top)  == s.offY);
+    }
+}
+
+TEST_CASE("hook geometry honours the MPO pan wall") {
+    // The wall is what keeps |src*level| inside the driver's 16-bit field (#148/#191). The hook
+    // path must respect the SAME bound the mapper is given, or it could pan somewhere the tick
+    // would have refused - straight into the crash the wall exists to prevent.
+    const double level = 20.0, wall = 32000.0 / level;   // 1600
+    FreeCursorSrc h = ComputeFreeCursorSrc(3800, 2100, level, 3840, 2160, wall, wall);
+    CHECK(h.left <= wall + 1e-9);
+    CHECK(h.top  <= wall + 1e-9);
+    CHECK(h.left * level <= 32000.0 + 1e-6);
+    CHECK(h.top  * level <= 32000.0 + 1e-6);
+    // Unbounded, the same cursor reaches much further.
+    FreeCursorSrc f = ComputeFreeCursorSrc(3800, 2100, level, 3840, 2160, -1.0, -1.0);
+    CHECK(f.left > wall);
+}
+
+TEST_CASE("hook geometry never leaves the desktop, including at degenerate levels") {
+    static const double kL[] = { 1.0, 1.0001, 1.5, 8.0, 20.0, 50.0 };
+    static const int kC[] = { -9999, -1, 0, 1920, 3839, 3840, 99999 };
+    for (int li = 0; li < 6; ++li) {
+        for (int xi = 0; xi < 7; ++xi) {
+            FreeCursorSrc h = ComputeFreeCursorSrc(kC[xi], kC[xi], kL[li], 3840, 2160, -1.0, -1.0);
+            CHECK(h.left >= 0.0);
+            CHECK(h.top  >= 0.0);
+            if (kL[li] > 1.0) {
+                CHECK(h.left + 3840.0 / kL[li] <= 3840.0 + 1e-6);
+                CHECK(h.top  + 2160.0 / kL[li] <= 2160.0 + 1e-6);
+            }
+        }
+    }
+    // A zero/negative monitor size must not divide by zero or produce garbage.
+    FreeCursorSrc z = ComputeFreeCursorSrc(100, 100, 8.0, 0, 0, -1.0, -1.0);
+    CHECK(z.left == 0.0);
+    CHECK(z.top == 0.0);
+}

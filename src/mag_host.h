@@ -9,12 +9,20 @@ namespace wind {
 // next transform write failed). Everything goes through this refcount instead: the runtime is
 // alive while ANY holder needs it and released exactly when the last one lets go.
 bool MagApiAcquire();
+// The un-marshalled bodies. Call ONLY from the runtime's owning thread (issue #206); everything
+// else must go through MagApiAcquire/MagApiRelease, which marshal.
+bool MagApiAcquireOwned();
+void MagApiReleaseOwned();
 void MagApiRelease();
 bool MagApiAlive();
 class MagHost {
 public:
     bool initialize();
     bool setTransform(float zoom, int offX, int offY, int tx, int ty, bool fastPan);
+    // Same call with NO marshalling - valid only on the runtime's owning thread. MouseProc uses
+    // this directly (issue #206): it already runs on the owner, and the whole latency win is in
+    // not taking a detour to get there.
+    bool setTransformOwned(float zoom, int offX, int offY, int tx, int ty, bool fastPan);
     // Tell the INPUT stack how to invert the magnification (MagSetInputTransform - what the
     // native Magnifier does). Documented for pen/touch, and modern pointer-stack frameworks
     // (XAML/Explorer, Chromium) consult it for hit-testing too (issue #148 desktop dead zones).

@@ -1,4 +1,6 @@
 #include "input_router.h"
+#include "mag_thread.h"   // the hook thread owns the Magnification runtime (issue #206)
+#include "hook_transform.h" // ...and writes the transform inline from MouseProc (#206 stage 2)
 #include "config.h"     // IsForbiddenBindVk (keyboard-bind safety blocklist)
 #include "logging.h"    // hook-watchdog events (issue #156)
 #include <windows.h>
@@ -172,6 +174,20 @@ static LRESULT CALLBACK KbProc(int code, WPARAM wParam, LPARAM lParam) {
 static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
     if (code == HC_ACTION && g_router) {
         auto* mi = reinterpret_cast<MSLLHOOKSTRUCT*>(lParam);
+        // THE LATENCY PATH (issue #206). Measured 4.36ms median cursor-to-view against native
+        // Magnifier's 0.58ms, our spread uniform across exactly one tick - we were purely waiting
+        // for the tick to notice. This thread owns the Magnification runtime (stage 1), so the
+        // write happens here, inline, against the position the event itself carries.
+        //
+        // Deliberately FIRST in the callback: everything below is bookkeeping that can wait, and
+        // any of it running first would add its own microseconds to the number we are cutting.
+        // Armed only for free-cursor transform sessions, and the arm check is a relaxed atomic
+        // read, so an idle hook pays a single load. The private write channel measures 0.09-0.24ms;
+        // the PUBLIC one is 3-9ms and must never be routed here - a slow low-level hook callback
+        // delays input for every process on the machine, and Windows silently evicts hooks that
+        // exceed LowLevelHooksTimeout.
+        if (wParam == WM_MOUSEMOVE && wind::HookTransformArmed())
+            wind::WriteHookTransformFromEvent(mi->pt.x, mi->pt.y);
         // Inspect-mode click-to-look-point. Swallow the real DOWN (it would land at the frozen cursor)
         // and signal the tick, which fires a clean absolute click at the crosshair. Swallow the matching
         // real UP too. Our own injected click carries LLMHF_INJECTED, so it skips this and passes through.
@@ -258,7 +274,24 @@ static DWORD WINAPI HookThreadProc(LPVOID) {
     g_kbOk   = (g_kbHook != nullptr);
     SetEvent(g_hookReady);                                        // publish the install result to start()
     if (!g_mouseHook) { if (g_kbHook) { UnhookWindowsHookEx(g_kbHook); g_kbHook = nullptr; } return 1; }
+    // Claim the Magnification runtime for THIS thread (issue #206). The API is thread-affine
+    // (measured: a write from any other thread returns FALSE and changes nothing), so whichever
+    // thread owns it is the only one that can drive the transform. Owning it here is what lets
+    // MouseProc write the view inline with the cursor event instead of waiting up to a full tick -
+    // the measured 3.94ms mean that separates us from native Magnifier's 0.58ms.
+    // Claimed only AFTER the mouse hook is confirmed installed: with no hook there is no latency
+    // win to be had, and MagThreadInvoke degrades to running inline on the caller's thread, which
+    // is exactly the behaviour that shipped before this existed.
+    wind::MagThreadClaim(GetCurrentThreadId());
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {                // WM_QUIT (posted by stop()) ends this
+        // Magnification calls marshalled from other threads (tick thread: session setup/teardown,
+        // cursor hiding, input-transform publishes). Serviced here because this thread owns the
+        // runtime. Every one of them measures well under a millisecond; nothing slow may be routed
+        // through here, or it delays system-wide input.
+        if (msg.message == wind::MagThreadMessageId()) {
+            wind::MagThreadService(static_cast<unsigned long long>(msg.wParam));
+            continue;
+        }
         // Watchdog recovery: re-install the keyboard hook Windows evicted from under us. Must run
         // HERE - a low-level hook is bound to the message queue of the thread that installs it, so
         // installing from the tick thread would produce a hook nothing ever pumps.
@@ -277,6 +310,10 @@ static DWORD WINAPI HookThreadProc(LPVOID) {
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
+    // Give up the Magnification runtime BEFORE unhooking: past this point nothing will pump the
+    // message loop, so a marshalled call would wait out its full timeout instead of being serviced.
+    // Releasing first makes MagThreadInvoke fall back to running inline on the caller's thread.
+    wind::MagThreadRelease();
     UnhookWindowsHookEx(g_mouseHook);                            // unhook on the installing thread
     g_mouseHook = nullptr;
     if (g_kbHook) { UnhookWindowsHookEx(g_kbHook); g_kbHook = nullptr; }

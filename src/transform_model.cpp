@@ -452,7 +452,9 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // Same-value hygiene (issue #189): once the keep-alive window has lapsed (or above its level
     // gate), a zoomed-idle tick would push an identical write 144x/s. DWM parks on static values
     // anyway (measured), so skipping is free; the next changed/keep-alive tick writes as before.
-    if (changedAndWriting || keepAliveActive)
+    // suppressTransformWrite: the mouse hook is the single writer this session (issue #206). The
+    // state above is still maintained, so turning the hook path off mid-session resumes cleanly.
+    if ((changedAndWriting || keepAliveActive) && !ex.suppressTransformWrite)
         writeTransform((float)applyLevel, m.offX, m.offY, m.txX + txJitter, m.txY, fastPan_, false);
     // Input transform. Mode 1 (THE SHIPPED DEFAULT; field-verified 4x-20x,
     // POINTER-HITTEST-FINDINGS.md): publish the visual source rect on every change, exactly

@@ -41,6 +41,9 @@ public:
     void setMpoBusterWanted(bool wanted) { mpoBusterWanted_ = wanted; }
     void setMpoExposed(bool exposed) { mpoExposed_ = exposed; }
     bool mpoGhostSettled() const { return mpoGhost_.settled(GetTickCount64()); }
+    // For the hook write path (issue #206): the hook needs the SAME host, since the runtime is
+    // refcounted per process and a second one would not be the context DWM is holding.
+    MagHost* magHost() { return &host_; }
 private:
     bool fastPan_, smoothPan_, useSprite_;
     int  zorderBand_;                                // sprite z-band (above the shell); needs UIAccess

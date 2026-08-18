@@ -166,6 +166,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "txKeepAliveMaxLevel")c.txKeepAliveMaxLevel = std::stoi(val);
             else if (key == "txWriteHz")          c.txWriteHz = std::stoi(val);
             else if (key == "txFreeCursor")       c.txFreeCursor = std::stoi(val);
+            else if (key == "txHookWrite")        c.txHookWrite = std::stoi(val);
             else if (key == "txMinOffsetPx")      c.txMinOffsetPx = std::stoi(val);
             else if (key == "txIdleReleaseMs")    c.txIdleReleaseMs = std::stoi(val);
             else if (key == "txMaxStepPct")       c.txMaxStepPct = std::stoi(val);
