@@ -40,7 +40,11 @@ static const unsigned long long kTickTakeoverMs = 20;   // caps idle tick attemp
 // Last values actually written, so a mouse move that does not change the transform costs nothing.
 // Owned by the runtime thread alone - the hook and any marshalled tick write both run there, so no
 // lock is needed and none should be added.
-static double g_wMaxMs2_unused = 0.0;   // (timing accumulators declared below)
+// Time spent INSIDE the DWM write, on the hook thread. Unbounded work in a WH_MOUSE_LL callback
+// delays input for every process on the machine, so its cost has to be visible rather than assumed.
+// Hook-thread only, so plain statics are correct - no atomics needed and none should be added.
+static double g_wMaxMs = 0.0, g_wSumMs = 0.0;
+static unsigned long long g_wN = 0;
 static int    g_lastOffX = 0, g_lastOffY = 0, g_lastTx = 0, g_lastTy = 0;
 static double g_lastLevel = 0.0;
 
@@ -113,7 +117,6 @@ bool WriteHookTransform(double cursorVirtX, double cursorVirtY) {
 // Once-a-second visibility on which path is actually writing. Without this the only symptom of a
 // mis-armed hook path is "latency did not improve", which says nothing about why.
 // Called only from the hook thread, so plain statics are correct here - no atomics, no CAS.
-static double g_wMaxMs = 0.0, g_wSumMs = 0.0; static unsigned long long g_wN = 0;
 static unsigned long long g_lastStatMs = 0;
 static void MaybeLogStats() {
     const unsigned long long now = GetTickCount64();
