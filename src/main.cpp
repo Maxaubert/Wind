@@ -2008,6 +2008,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     RegisterQuickZoomHotkey(hwnd, (cfg.quickZoomHotkeyMode && cfg.quickZoomVk) ? cfg.quickZoomVk : 0,
                             cfg.quickZoomMods);
 
+    // Whether the hook thread should own the Magnification runtime. Worth its cost only if
+    // something writes from the hook; with txHookWrite off (the default) it would just marshal the
+    // tick thread's calls onto the system input thread for nothing. Read once here - thread affinity
+    // means ownership can never move once MagInitialize has run, so this needs a restart to change.
+    wind::SetMagThreadClaimEnabled(cfg.txHookWrite != 0);
     if (!g_input.start(cfg.zoomInButton, cfg.zoomInButton2, cfg.zoomOutButton, cfg.zoomOutButton2,
                        /*swallow=*/true)) {
         MessageBoxW(nullptr, L"Failed to install the mouse hook.", L"Wind", MB_ICONERROR);

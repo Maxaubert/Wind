@@ -28,9 +28,27 @@
 //  - With no owner claimed (unit tests, a failed hook install), Invoke runs the callable inline on
 //    the caller's thread. That is exactly the old single-threaded behaviour, so a hook that fails
 //    to install degrades to what shipped before rather than losing magnification entirely.
+//
+// OWNERSHIP IS OPT-IN, AND OFF BY DEFAULT. Moving the runtime to the hook thread is worth its cost
+// ONLY when something actually writes from the hook. With txHookWrite off - the shipped default -
+// the tick thread still makes every call, and each one then pays a full round trip: a heap MagCall,
+// a CreateEventW/CloseHandle pair, a PostThreadMessage, and two context switches. While zoomed that
+// is the transform write plus the input-transform publish on every tick, ~288 marshalled round
+// trips a second, executed on the thread that carries system-wide mouse input, for no benefit
+// whatever. The recorded per-write cost went from 0.02ms to 0.2-0.5ms. So the hook thread claims
+// the runtime only when the config asks for hook writes; otherwise ownership stays where it has
+// always been and calls run inline, exactly as before this layer existed.
+//
+// The choice is made once at startup and cannot be revisited live: MagInitialize has already run on
+// the owning thread by then, and thread affinity means ownership can never move afterwards. A
+// txHookWrite change therefore needs a restart, like the other engine-shaped settings.
 namespace wind {
 
+// Enable/disable the claim below. Must be called BEFORE the hook thread starts. Default: disabled.
+void SetMagThreadClaimEnabled(bool enabled);
+
 // Called by the hook thread once its message loop is about to run. threadId is its own.
+// A no-op unless SetMagThreadClaimEnabled(true) ran first.
 void MagThreadClaim(unsigned long threadId);
 void MagThreadRelease();
 bool MagThreadOwned();
