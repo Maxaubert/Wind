@@ -282,6 +282,9 @@ static DWORD WINAPI HookThreadProc(LPVOID) {
     // Claimed only AFTER the mouse hook is confirmed installed: with no hook there is no latency
     // win to be had, and MagThreadInvoke degrades to running inline on the caller's thread, which
     // is exactly the behaviour that shipped before this existed.
+    // A NO-OP unless main enabled it (txHookWrite). Owning the runtime here while nothing writes
+    // from the hook only marshals the tick thread's calls onto the system input thread - ~288 round
+    // trips a second while zoomed, each with its own kernel event, for no benefit. See mag_thread.h.
     wind::MagThreadClaim(GetCurrentThreadId());
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {                // WM_QUIT (posted by stop()) ends this
         // Magnification calls marshalled from other threads (tick thread: session setup/teardown,

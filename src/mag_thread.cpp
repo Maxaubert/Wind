@@ -9,6 +9,7 @@ namespace wind {
 static const UINT kMagCallMsg = WM_APP + 0x51;
 
 static std::atomic<unsigned long> g_ownerTid{0};
+static std::atomic<bool> g_claimEnabled{false};
 
 // HEAP-allocated and jointly owned by the caller and the servicer, released by whichever finishes
 // last. The obvious stack-allocated version is wrong: if the caller ever gives up waiting, its
@@ -29,7 +30,18 @@ static void ReleaseCall(MagCall* c) {
     }
 }
 
+void SetMagThreadClaimEnabled(bool enabled) {
+    g_claimEnabled.store(enabled, std::memory_order_release);
+}
+
 void MagThreadClaim(unsigned long threadId) {
+    // Declining is the DEFAULT, not a failure: with nothing writing from the hook, marshalling every
+    // call onto it is pure overhead on the system input thread (see the header).
+    if (!g_claimEnabled.load(std::memory_order_acquire)) {
+        wind::Log(wind::LogLevel::Info, "magthread",
+                  "runtime stays on the tick thread (txHookWrite off) - calls run inline");
+        return;
+    }
     g_ownerTid.store(threadId, std::memory_order_release);
     wind::Log(wind::LogLevel::Info, "magthread", "runtime owner = thread %lu (hook thread)", threadId);
 }
