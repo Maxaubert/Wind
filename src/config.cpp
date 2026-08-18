@@ -167,6 +167,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "txWriteHz")          c.txWriteHz = std::stoi(val);
             else if (key == "txFreeCursor")       c.txFreeCursor = std::stoi(val);
             else if (key == "txHookWrite")        c.txHookWrite = std::stoi(val);
+            else if (key == "txHookMinIntervalMs") c.txHookMinIntervalMs = std::stoi(val);
             else if (key == "txMinOffsetPx")      c.txMinOffsetPx = std::stoi(val);
             else if (key == "txIdleReleaseMs")    c.txIdleReleaseMs = std::stoi(val);
             else if (key == "txMaxStepPct")       c.txMaxStepPct = std::stoi(val);
@@ -220,6 +221,8 @@ Config ParseConfig(const std::string& text) {
     if (c.txWriteHz > 1000) c.txWriteHz = 1000;
     if (c.txMinOffsetPx < 0)  c.txMinOffsetPx = 0;  // 0 = write every change
     if (c.txMinOffsetPx > 32) c.txMinOffsetPx = 32;
+    if (c.txHookMinIntervalMs < 0)   c.txHookMinIntervalMs = 0;
+    if (c.txHookMinIntervalMs > 100) c.txHookMinIntervalMs = 100;
     if (c.txLevelStep < 0)   c.txLevelStep = 0;    // per mille; 0 = per-tick level writes
     if (c.txLevelStep > 200) c.txLevelStep = 200;
     if (c.txGrid < 0)   c.txGrid = 0;              // per mille geometric grid; 0 = continuous

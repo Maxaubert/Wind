@@ -26,6 +26,7 @@ struct HookTransformState {
     int    monX = 0, monY = 0, monW = 0, monH = 0;
     double maxSrcX = -1.0, maxSrcY = -1.0;   // MPO pan wall (#148/#191), <0 = unbounded
     bool   fastPan = true;     // private channel; the PUBLIC one is 3-9ms and must never run here
+    int    minIntervalMs = 8;  // trailing-edge throttle; 0 = write every event (measured bad)
     MagHost* host = nullptr;
 };
 

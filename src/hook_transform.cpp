@@ -17,6 +17,7 @@ namespace wind {
 static SRWLOCK           g_lock = SRWLOCK_INIT;
 static HookTransformState g_state;
 static std::atomic<bool>  g_armed{false};        // fast pre-check, so an idle hook takes no lock
+static std::atomic<int>   g_minIntervalMs{15};   // throttle window, published with the state
 
 static std::atomic<unsigned long long> g_hookWrites{0};
 static std::atomic<unsigned long long> g_tickWrites{0};
@@ -35,7 +36,36 @@ static std::atomic<unsigned long long> g_tickWrites{0};
 // the hook recently (pointer sitting still). While panning this drops tick writes to zero.
 static std::atomic<unsigned long long> g_lastHookWriteMs{0};
 static std::atomic<unsigned long long> g_lastTickTryMs{0};
-static const unsigned long long kTickTakeoverMs = 20;   // caps idle tick attempts at ~50/s
+// The tick's takeover window MUST stay above the hook's throttle window. If it did not, then
+// during continuous panning the hook would write every minInterval and the tick would fire in the
+// gap, doubling the effective rate - which is the frame-incoherence failure this whole change
+// exists to avoid. Derived from the throttle rather than fixed, so it cannot be invalidated by
+// someone widening the throttle.
+static unsigned long long TickTakeoverMs() {
+    const int mi = g_minIntervalMs.load(std::memory_order_relaxed);
+    const unsigned long long v = (unsigned long long)(mi > 0 ? mi + 5 : 15);
+    return v < 12 ? 12 : v;
+}
+
+// TRAILING-EDGE THROTTLE (issue #206, third attempt).
+//
+// Measured on native Magnifier against an identical target: it receives ~500 injected mouse
+// events/s and writes 64 - one per ~15ms - while STILL answering a discrete move in 0.58ms. That
+// combination IS the design, and neither earlier attempt had it:
+//   #204 bounded the rate but gated a TICK, so it added latency instead of removing it;
+//   #206 stage 2 wrote on the event but unbounded - 434-685/s against a 144Hz compositor, three to
+//        five writes per displayed frame, and the cursor visibly swam.
+// Write on the event (latency), at most once per frame (coherence).
+//
+// QPC, not GetTickCount64: the tick counter has ~15.6ms resolution and cannot express a sub-frame
+// interval at all - an 8ms throttle built on it would quantise to 0 or 15.6.
+static LARGE_INTEGER g_qpf = {};
+static long long g_lastHookWriteQpc = 0;   // owner-thread only
+static long long MinIntervalTicks(int ms) {
+    if (ms <= 0) return 0;
+    if (g_qpf.QuadPart == 0) QueryPerformanceFrequency(&g_qpf);
+    return (g_qpf.QuadPart * (long long)ms) / 1000;
+}
 
 // Last values actually written, so a mouse move that does not change the transform costs nothing.
 // Owned by the runtime thread alone - the hook and any marshalled tick write both run there, so no
@@ -56,6 +86,7 @@ void PublishHookTransform(const HookTransformState& s) {
     AcquireSRWLockExclusive(&g_lock);
     g_state = s;
     ReleaseSRWLockExclusive(&g_lock);
+    g_minIntervalMs.store(s.minIntervalMs, std::memory_order_relaxed);
     g_armed.store(s.armed, std::memory_order_release);
 }
 
@@ -130,8 +161,9 @@ static void MaybeLogStats() {
         // a millisecond here would mean we are delaying system-wide input, and Windows silently
         // evicts low-level hooks that exceed LowLevelHooksTimeout.
         wind::Log(wind::LogLevel::Info, "hookwrite",
-                  "hook=%llu (+%llu/s) tick=%llu (+%llu/s) armed=%d write avg=%.3fms MAX=%.3fms",
+                  "hook=%llu (+%llu/s) tick=%llu (+%llu/s) armed=%d throttle=%dms write avg=%.3fms MAX=%.3fms",
                   h, h - ph, t, t - pt, (int)g_armed.load(std::memory_order_relaxed),
+                  g_minIntervalMs.load(std::memory_order_relaxed),
                   g_wN ? g_wSumMs / (double)g_wN : 0.0, g_wMaxMs);
         ph = h; pt = t;
     }
@@ -140,8 +172,24 @@ static void MaybeLogStats() {
 
 bool WriteHookTransformFromEvent(long ptx, long pty) {
     if (!g_armed.load(std::memory_order_acquire)) return false;
+
+    // Trailing edge: a move arriving after the window writes IMMEDIATELY (so a discrete movement
+    // still answers in well under a millisecond), while continuous panning is bounded to one write
+    // per window. Skipping costs nothing - the next event carries a FRESHER position than the one
+    // dropped, so only the redundant write is lost.
+    const int msWanted = g_minIntervalMs.load(std::memory_order_relaxed);
+    if (msWanted > 0) {
+        LARGE_INTEGER now;
+        QueryPerformanceCounter(&now);
+        const long long need = MinIntervalTicks(msWanted);
+        if (need > 0 && (now.QuadPart - g_lastHookWriteQpc) < need) return false;
+    }
+
     const bool ok = WriteHookTransform((double)ptx, (double)pty);
     if (ok) {
+        LARGE_INTEGER now;
+        QueryPerformanceCounter(&now);
+        g_lastHookWriteQpc = now.QuadPart;
         g_hookWrites.fetch_add(1, std::memory_order_relaxed);
         g_lastHookWriteMs.store(GetTickCount64(), std::memory_order_relaxed);
     }
@@ -155,8 +203,9 @@ bool RequestHookTransformWrite() {
     // attempt was the tick posting to the hook thread every tick and blocking on it. While the
     // pointer is moving the hook has this covered and the tick must stay out of the way entirely.
     const unsigned long long now = GetTickCount64();
-    if (now - g_lastHookWriteMs.load(std::memory_order_relaxed) < kTickTakeoverMs) return false;
-    if (now - g_lastTickTryMs.load(std::memory_order_relaxed) < kTickTakeoverMs) return false;
+    const unsigned long long takeover = TickTakeoverMs();
+    if (now - g_lastHookWriteMs.load(std::memory_order_relaxed) < takeover) return false;
+    if (now - g_lastTickTryMs.load(std::memory_order_relaxed) < takeover) return false;
     g_lastTickTryMs.store(now, std::memory_order_relaxed);   // stamped on the ATTEMPT, so a
                                                              // deduped no-op cannot spin every tick
     POINT p;

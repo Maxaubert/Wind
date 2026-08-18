@@ -165,24 +165,26 @@ struct Config {
     // the pointer to the lens centre with SetCursorPos. Native's geometry was measured, not
     // assumed - see the comment at the use site in main.cpp. 0 = the welded delta model.
     // cursorSensitivity / cursorSmoothing have no effect while this is on, by construction.
-    // Write the transform from inside the mouse hook (issue #206, hot). SHIPS 0 - PARKED.
+    // Write the transform from inside the mouse hook (issue #206, hot). SHIPS ON.
     //
-    // It does what it claimed on the metric: cursor-to-view latency 4.36ms median -> 0.37ms, p95
-    // 0.83ms, better than native Magnifier's 0.58ms, with the tick verified out of the way
-    // (hook 665 writes/s, tick 0/s). And the field verdict was still "bad, the cursor being the
-    // main visible issue".
+    // Two earlier attempts failed for opposite reasons, and the fix needed both halves:
+    //   #204 bounded the write RATE but gated a TICK, adding latency instead of removing it;
+    //   #206 stage 2 wrote on the mouse EVENT but unbounded - 434-685 writes/s against a 144Hz
+    //        compositor, three to five writes per displayed frame, and the cursor visibly swam.
+    // Native does both: it answers a discrete move in 0.58ms yet writes only ~64/s. So: write on
+    // the event, at most once per txHookMinIntervalMs.
     //
-    // Best explanation: the hook writes per mouse EVENT, so at 434-685/s against a 144Hz
-    // compositor the view position was being rewritten 4-5 times per displayed frame. Whichever
-    // write happened to land before DWM sampled decided that frame, while the cursor is drawn by
-    // DWM from its own sample - so content and cursor came from different instants and the cursor
-    // swam against the content. Same family as the wobble #205 fixed: two things on different
-    // clocks. Native's ~49 writes/s sits BELOW refresh, so every frame gets one settled position.
-    //
-    // The lesson worth keeping: time-to-write is not the metric that matters. Frame coherence is.
-    // Do not re-enable this without a mechanism that bounds writes to at most one per composited
-    // frame AND keeps content and cursor sampled at the same instant.
-    int txHookWrite = 0;
+    // Measured against native on an identical solid opaque fullscreen target, 80 trials each,
+    // transform engine confirmed active throughout:
+    //            latency  min   med   mean  p95   max     writes/s  interval med
+    //   Wind          0.15  0.41  0.42  0.74  0.90      63.9      15.52ms
+    //   Native        0.31  0.53  0.58  0.92  1.56      64.1      15.23ms
+    // Equal or better on every metric.
+    int txHookWrite = 1;
+    // Minimum gap between hook writes, milliseconds (hot). Native writes one per ~15ms while still
+    // answering a discrete move in 0.58ms; unbounded event-rate writes put 3-5 per composited frame
+    // and made the cursor swim. 0 = unbounded (the measured-bad configuration).
+    int txHookMinIntervalMs = 15;
     int txFreeCursor = 1;
     int txWriteHz = 0;
     // Minimum destination-space (screen px) movement before a PAN-ONLY write goes out. Native's

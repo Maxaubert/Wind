@@ -1366,6 +1366,7 @@ static void RunTick(TickState& t) {
             hs.maxSrcX = wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0;
             hs.maxSrcY = wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0;
             hs.fastPan = t.cfg.fastPan != 0;
+            hs.minIntervalMs = t.cfg.txHookMinIntervalMs;
             hs.host = tmWall->magHost();
             wind::PublishHookTransform(hs);
         } else {

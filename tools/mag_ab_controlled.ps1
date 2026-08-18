@@ -18,7 +18,11 @@ param(
   [int]$PanSeconds = 5,
   [double]$InjectMs = 2.0,     # 500Hz, a realistic gaming mouse; NEVER Start-Sleep (that is ~15.6ms)
   [int]$NativePct = 800,
-  [int]$WindZoomHoldMs = 900
+  [int]$WindZoomHoldMs = 900,
+  # Native's baseline does not move between Wind configurations, and re-measuring it each time
+  # would stop Wind, rewrite the Magnifier registry and relaunch Magnify.exe per row. Skip it while
+  # sweeping Wind settings and compare against the recorded baseline instead.
+  [switch]$SkipNative
 )
 $ErrorActionPreference = 'Stop'
 
@@ -169,6 +173,9 @@ try {
   }
 
   # --- NATIVE ----------------------------------------------------------------
+  # NOT `return`: a return inside try{} exits the whole script, skipping the report that lives
+  # after the finally block - which silently produced empty sweep rows.
+  if (-not $SkipNative) {
   $props = Get-ItemProperty $magKey
   foreach ($n in @('Magnification','MagnificationMode','FollowMouse','FullScreenTrackingMode')) {
     if ($null -ne $props.$n) { $backup[$n] = $props.$n }
@@ -198,6 +205,7 @@ try {
                               writesPerSec=[math]::Round(1000/(($iv|Measure-Object -Average).Average),1)
                               ivStats=(Stats $iv); levelChanges=$lvlChg; env=[AC]::Env($SW,$SH)
                               minLevel=[math]::Round([AC]::MinLevelSeen,2) }
+  }
 }
 finally {
   try { [AC]::Fini() } catch {}
