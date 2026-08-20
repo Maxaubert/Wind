@@ -22,7 +22,7 @@
 
 !include "over.nsh"
 
-!define FRAMES 379         ; the whole clip, just under 16 seconds at 24 fps
+!define FRAMES 324         ; 13.5 seconds at 24 fps, the blue window of the source clip
 !define TICK   42
 
 !define /ifndef SRCCOPY 0x00CC0020

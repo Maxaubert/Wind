@@ -61,8 +61,19 @@ is there to catch, so run `build.bat installer` after any such edit.
 
 ## Changing the clip
 
-The footage currently shipping is **Prism's**, held as a placeholder until Wind's own clip
-exists. To replace it:
+The footage currently shipping is a blue flow-line abstract, cut from the first 15 seconds of
+the source clip: it drifts teal after that, and blue is the family Wind's indigo accent lives
+in. It was built with
+
+```
+node installer/make-loop.mjs "wave-abstract-background.1920x1080.mp4" --start 0 --len 15 --fps 24 --fade 36
+```
+
+which yielded 324 frames, so `FRAMES` in `video.nsh` is 324 and `TICK` is 42. The wrap measures
+RMSE 0.0369 against a natural frame-to-frame range of 0.0099 to 0.0319, so the seam is a little
+above the clip's own fastest moment and reads as motion rather than a cut.
+
+To replace it:
 
 ```
 node installer/make-loop.mjs "C:\path\to\clip.mp4" --len 16 --fps 24
@@ -85,8 +96,8 @@ the same full-frame gradient nineteen times: measured, that was 28.3 MB of media
 
 ## What it costs
 
-Roughly 9 MB of frames at 800x600, plus about 4 MB of overlays across both DPI sets and the
-1.7 MB WebView2 stub, so a little over 13 MB of media. Both overlay sets are packed into the
+Roughly 7.6 MB of frames at 800x600, plus about 4 MB of overlays across both DPI sets and the
+1.7 MB WebView2 stub, which packs down to a 12.3 MB installer. Both overlay sets are packed into the
 installer and only the matching one is unpacked at runtime.
 
 The footage ships at one size for every display because it is defocused motion and an upscale
