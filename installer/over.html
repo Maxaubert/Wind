@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Wind setup overlay</title>
+<!--
+  The installer's foreground, drawn once per screen and composited over the video loop at
+  runtime.
+
+  No panel anywhere. Type sits straight on the picture, which means every pixel here needs
+  an alpha channel, so make-over.mjs renders each screen twice, once on black and once on
+  white, and solves for the alpha it cannot capture directly.
+
+  There is no geometry in this design, on purpose. The darkening under the words is a
+  falloff with no edge in frame, and nothing is drawn with an outline. Anything that has a
+  visible boundary sitting over moving footage reads as an artifact rather than as design:
+  a hairline circle was tried here as a lens rim and looked exactly like a stray white line
+  left on the picture.
+
+  Anything the installer has to write at runtime is NOT drawn here: the install path, the
+  progress fill, and every checkbox box. They leave a gap and NSIS paints into it, because
+  the values change and a bitmap cannot.
+
+  Type: Bahnschrift for the titles (Microsoft's DIN-derived grotesque, which reads as
+  instrument labelling rather than as UI chrome), Segoe UI Variable Text for everything the
+  reader has to act on, and Consolas for the install path, because it is a filesystem path
+  and monospace says so. kit.nsh creates Consolas for the same reason: NSIS paints that one
+  string itself and the two have to agree.
+-->
+<style>
+  * { box-sizing: border-box; margin: 0 }
+  /* Two panes, same overlay, one on black and one on white, captured together. Swapping a
+     background between two captures does not survive an off-screen window: the second
+     capture comes back stale and the alpha solves to opaque. */
+  html, body { width: 1280px; height: 480px; overflow: hidden }
+  body { display: flex; color: #f3f4fa; -webkit-font-smoothing: antialiased;
+    font: 400 13px/1.5 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif }
+  .pane { position: relative; width: 640px; height: 480px; overflow: hidden; flex: none }
+  .pane.k { background: #000 } .pane.w { background: #fff }
+
+  /* --- legibility ------------------------------------------------------------------------
+     A falloff whose core sits under the words and whose tail leaves the frame on every
+     side, so it has no edge anywhere in view. A shape with a visible boundary reads as a
+     grey plate laid on the picture instead of as light.
+
+     There WAS a second element here: a hairline circle, meant to read as a lens rim and be
+     the one piece of geometry in the design. It was removed after a look at the real build,
+     because over moving footage it did not read as a rim at all, it read as a stray white
+     line someone had left on the picture. A signature that has to be explained is not one.
+     Do not add it back without watching it move first. */
+  .shade { position: absolute; left: -180px; top: 40px; width: 800px; height: 640px;
+    background: radial-gradient(50% 50% at 48.75% 50%,
+      rgba(10,10,17,.92) 0%, rgba(10,10,17,.70) 40%, rgba(10,10,17,.34) 70%, rgba(10,10,17,0) 100%) }
+  /* The caption sits on bare footage, which is bright in parts of the loop. This fades out
+     over 96px, so like .shade it darkens without drawing an edge. */
+  .top { position: absolute; left: 0; right: 0; top: 0; height: 96px;
+    background: linear-gradient(rgba(8,8,14,.72), rgba(8,8,14,.34) 46%, rgba(8,8,14,0)) }
+
+  /* the caption is ours now: no OS title bar behind any of this */
+  .cap { position: absolute; left: 0; right: 0; top: 0; height: 38px; display: flex;
+    align-items: center; padding-left: 14px; gap: 9px }
+  .cap .who { font-size: 12px; font-weight: 620; color: rgba(255,255,255,.92);
+    text-shadow: 0 1px 6px rgba(0,0,0,.8) }
+  .cap .wc { margin-left: auto; display: flex; height: 100% }
+  .cap .wc i { width: 44px; height: 38px; display: grid; place-items: center; font-style: normal;
+    font-size: 12px; color: rgba(255,255,255,.62) }
+  .cap .wc i.hot { background: rgba(255,255,255,.14); color: #fff }
+  .cap .wc i.x.hot { background: #c42b1c; color: #fff }
+
+  /* the block of words, bottom left, held inside the lens */
+  .pad { position: absolute; left: 34px; right: 200px; bottom: 30px }
+  h1 { font-family: Bahnschrift, "DIN Alternate", "Segoe UI", sans-serif;
+    font-size: 34px; font-weight: 600; letter-spacing: -.005em; line-height: 1.04;
+    text-shadow: 0 2px 20px rgba(6,6,14,.72), 0 1px 3px rgba(6,6,14,.5) }
+  p { margin-top: 10px; font-size: 12.5px; color: rgba(243,244,250,.60); line-height: 1.5;
+    text-shadow: 0 1px 12px rgba(6,6,14,.85) }
+  .row { margin-top: 20px; display: flex; align-items: center; gap: 10px }
+
+  .cta { height: 36px; border: 0; border-radius: 8px; padding: 0 20px; font: inherit;
+    font-size: 13px; font-weight: 680; background: #5b5bd6; color: #fff;
+    box-shadow: 0 10px 26px -12px #5b5bd6 }
+  .cta.hot { background: #7373e4 }
+  .ghost { height: 36px; border: 1px solid rgba(255,255,255,.26); border-radius: 8px;
+    padding: 0 16px; font: inherit; font-size: 12.5px; font-weight: 600;
+    background: rgba(255,255,255,.06); color: #cdd2dc }
+  .ghost.hot { background: rgba(255,255,255,.14); color: #fff; border-color: rgba(255,255,255,.5) }
+
+  /* The path is stated, not offered: there is no field and no Browse, because UIAccess is
+     only granted in a secure location and a chooser's wrong answers would be silent. The
+     path TEXT is still left out and painted by NSIS, so this row is the icon and a gap. */
+  .path { margin-top: 16px; display: flex; align-items: center; gap: 8px }
+  .path .slot { height: 18px; flex: 1; min-width: 0 }
+
+  /* Trough only. The indigo fill is a rectangle NSIS paints as it copies. */
+  .track { flex: 1; height: 8px; border-radius: 4px; background: rgba(255,255,255,.22);
+    box-shadow: 0 2px 14px rgba(0,0,0,.5) }
+
+  /* The options. `hollow` leaves the box out of the art entirely, so setup can paint it in
+     whichever state it is actually in: three boxes across two screens would otherwise be
+     eight combinations and dozens of overlays. */
+  .row.opt { margin-top: 11px; display: flex; align-items: center; gap: 10px; font-size: 12.5px;
+    color: rgba(243,244,250,.82); text-shadow: 0 1px 10px rgba(6,6,14,.85) }
+  .box { width: 18px; height: 18px; border-radius: 5px; flex: none; display: grid;
+    place-items: center; border: 1.5px solid rgba(255,255,255,.34); background: rgba(10,10,17,.5) }
+  .box.hollow { border-color: transparent; background: transparent }
+  .box.on { background: #5b5bd6; border-color: #5b5bd6 }
+  .box.on::after { content: ""; width: 9px; height: 4.5px; border: 2px solid #fff;
+    border-top: 0; border-right: 0; transform: rotate(-45deg) translate(1px,-1px) }
+</style>
+</head>
+<body>
+<div class="pane k" id="k"></div><div class="pane w" id="w"></div>
+<script>
+// The app icon, from assets/wind-badge.svg: the indigo badge with the three wind strokes
+// knocked out. Same mark the tray and the Settings window show, so setup and the app the
+// user is about to run are recognisably the same thing.
+const MARK = (s) => `
+  <svg width="${s}" height="${s}" viewBox="0 0 256 256" style="display:block;flex:none">
+    <defs><linearGradient id="wg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6d6df0"/><stop offset="1" stop-color="#5151cb"/>
+    </linearGradient></defs>
+    <rect x="8" y="8" width="240" height="240" rx="56" fill="url(#wg)"/>
+    <g transform="translate(50,50) scale(9.75)" fill="none" stroke="#fff"
+       stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2 5.5h8.5a2 2 0 1 0-2-2"/>
+      <path d="M2 9h11a2 2 0 1 1-2 2"/>
+      <path d="M2 12.5h6.5a1.7 1.7 0 1 1-1.7 1.7"/>
+    </g>
+  </svg>`
+
+const FOLDER = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(243,244,250,.5)"
+  stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="flex:none"><path
+  d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`
+
+const COPY = [
+  ['Install Wind', 'A fullscreen magnifier that keeps tracking the mouse, even when a game hides it.'],
+  ['Where Wind goes', 'Wind installs to Program Files. Windows only grants the access its shortcuts and desktop zoom need to apps that live there.'],
+  ['Installing', 'This takes a few seconds.'],
+  ['Wind installed', '']
+]
+
+// Per screen: the options it offers, as [KEY, label]. The boxes are painted by setup.
+const OPTIONS = [
+  [],
+  [['AUTOSTART', 'Start Wind when I sign in']],
+  [],
+  [['RUN', 'Open Wind now'], ['DESK', 'Create desktop shortcut']]
+]
+const NEXT = ['Install Wind', 'Install', '', 'Finish']
+
+/* `hot` names the one control drawn hot; `boxes` is 'none' (setup paints them), 'on' or
+   'off' (used only to cut the two box images out). */
+function screen(s, hot, boxes) {
+  const h = (n) => (hot === n ? ' hot' : '')
+  const [title, sub] = COPY[s]
+  return `
+    <div class="cap">
+      ${MARK(15)}<span class="who">Wind Setup</span>
+      <div class="wc"><i class="min${h('min')}" data-a="CAP_MIN">&#8210;</i><i class="x${h('close')}" data-a="CAP_X">&#10005;</i></div>
+    </div>
+    <div class="pad">
+      <h1 data-a="TITLE">${title}</h1>
+      ${sub ? `<p>${sub}</p>` : ''}
+      ${s === 1 ? `<div class="path">${FOLDER}<span class="slot" data-a="PATH"></span></div>` : ''}
+      ${s === 2 ? `<div class="row"><div class="track" data-a="TRACK"></div></div>` : ''}
+      ${OPTIONS[s].map(([key, label]) => `
+        <div class="row opt" data-a="OPT_${key}">
+          <i class="box${boxes === 'none' ? ' hollow' : boxes === 'on' ? ' on' : ''}" data-a="BOX_${key}"></i>
+          <span>${label}</span>
+        </div>`).join('')}
+      <div class="row">
+        ${s === 1 ? `<button class="ghost${h('back')}" data-a="BACK">Back</button>` : ''}
+        ${NEXT[s] ? `<button class="cta${h('next')}" data-a="NEXT">${NEXT[s]}</button>` : ''}
+      </div>
+    </div>`
+}
+
+// The background is identical on every screen and every hover state, so it is rendered
+// ONCE into its own overlay and drawn under the type at runtime. Baking it into all
+// eighteen would store the same full-frame gradient eighteen times over, which measured at
+// 28 MB of media against 13 MB for the split.
+const back = () => `
+  <div class="shade"></div>
+  <div class="top"></div>`
+
+const paint = (html) => {
+  document.getElementById('k').innerHTML = html
+  document.getElementById('w').innerHTML = html
+}
+
+window.render = (s, hot, boxes) => paint(screen(s, hot, boxes))
+window.renderBack = () => paint(back())
+window.rects = () => {
+  const out = {}
+  document.querySelectorAll('#k [data-a]').forEach((el) => {
+    const r = el.getBoundingClientRect()
+    out[el.dataset.a] = { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }
+  })
+  return out
+}
+window.render(0, null, 'none')
+</script>
+</body>
+</html>

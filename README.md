@@ -73,14 +73,42 @@ Settings; bound keys are swallowed so they never double-fire into the focused ap
 - **Inspect mode** (optional bind) - freeze the cursor and free-look with the crosshair.
 - **Ctrl+Alt+Q** - quit from anywhere (also restores the cursor); or use the tray icon.
 
+## Releases
+Download `Wind-Setup-x64-<version>.exe` from the
+[Releases page](https://github.com/Maxaubert/Wind/releases) and run it.
+
+Setup installs **per-machine** to `C:\Program Files\Wind` and asks for administrator rights.
+That location is not a preference: Windows only grants UIAccess to a signed binary in a
+"secure location", and UIAccess is what lets Wind's shortcuts keep working while an elevated
+window has focus, and what enables the desktop zoom path. Setup also offers to start Wind when
+you sign in, and installs the WebView2 runtime if Settings has no browser engine to run in.
+Your settings, profiles and logs stay in `%LOCALAPPDATA%\Wind`, and uninstalling keeps them
+unless you say otherwise.
+
+**Signing.** Release builds are currently **unsigned**, so Windows SmartScreen will warn on
+first run, and the UIAccess-only behaviour above is switched off (Wind detects this at startup
+and stays on the render path for the desktop; everything else works normally). A free
+open-source certificate is being sought from
+[SignPath Foundation](https://signpath.org/); the release pipeline already signs when one is
+configured, via `WIND_SIGN_THUMBPRINT`, or `WIND_SIGN_PFX` plus `WIND_SIGN_PASSWORD`:
+
+```
+pwsh -File tools\release.ps1
+```
+
+With a certificate it builds the UIAccess variant, signs both executables and the installer,
+and writes `dist\Wind-Setup-x64-<version>.exe`. Without one it builds the ordinary variant and
+says so. `src\version.h` is the only place the version is declared.
+
 ## Build
 Requires Visual Studio 2022+ Build Tools (Desktop development with C++). From any shell:
 - `build.bat` - builds `Wind.exe` (runs from anywhere).
 - `build.bat test` - builds and runs the unit tests.
 - `build.bat uiaccess` - builds the UIAccess variant (signed-install prerequisite).
 - `build.bat config` - builds the Settings app (`WindConfig.exe` + the Svelte UI).
+- `build.bat installer` - compiles the setup program (needs NSIS: `winget install NSIS.NSIS`).
 
-## Install (signed build)
+## Install from source (development)
 Run **elevated**:
 ```
 powershell -ExecutionPolicy Bypass -File tools\uiaccess_setup.ps1

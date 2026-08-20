@@ -25,6 +25,7 @@ if /i "%1"=="test" goto :test
 if /i "%1"=="check" goto :check
 if /i "%1"=="uiaccess" goto :uiaccess
 if /i "%1"=="config" goto :config
+if /i "%1"=="installer" goto :installer
 
 rem --- App build (normal: uiAccess=false, runs from anywhere) ----------------
 rem Compile the app-icon resource (rc.exe ships with the Windows SDK, on PATH via vcvars).
@@ -90,3 +91,22 @@ rem --- Compile-only check (no link; verifies all sources compile) -----------
 cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c src\*.cpp
 exit /b %errorlevel%
 
+rem --- Installer (needs NSIS; winget install NSIS.NSIS) ---------------------
+:installer
+set "MAKENSIS=%ProgramFiles(x86)%\NSIS\makensis.exe"
+if not exist "%MAKENSIS%" set "MAKENSIS=%ProgramFiles%\NSIS\makensis.exe"
+if not exist "%MAKENSIS%" (
+  echo [build] NSIS not found. Install it with: winget install NSIS.NSIS
+  exit /b 1
+)
+if not exist "%ROOT%dist" mkdir "%ROOT%dist"
+rem /WX so a warning is a build failure. NSIS already aborts on a missing File source,
+rem but it only WARNS about things like an unreferenced define or a shadowed function,
+rem and in an installer those are how a page ends up wired to nothing.
+"%MAKENSIS%" /WX /V2 "%ROOT%installer\wind.nsi"
+if errorlevel 1 exit /b 1
+rem The gate checks what a compile cannot: that every rectangle the pages read was
+rem generated, and that a silent install/uninstall round-trips. Elevated-only parts
+rem skip themselves from an ordinary shell.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%tools\installer_check.ps1"
+exit /b %errorlevel%
