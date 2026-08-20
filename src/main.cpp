@@ -33,6 +33,7 @@
 #include "shell_desktop.h"
 #include "cursor_lock.h"
 #include "inspect_focus.h"
+#include "launch_quiesce.h"
 #include "resource.h"
 
 using namespace wind;
@@ -514,7 +515,16 @@ static void TrackLaunchCover(TickState& t, HWND fg, bool fsCover, bool fgBorderl
             t.lastCoverFg = fg;
             DWORD pid = 0;
             GetWindowThreadProcessId(fg, &pid);
+            const unsigned long ex = (unsigned long)GetWindowLongPtrW(fg, GWL_EXSTYLE);
             if (pid && pid != t.quiescedPid && FgProcessYoungerThanMs(fg, 60000)) {
+                // Shape alone is not enough: a shell overlay covers borderless too, and holding
+                // for one froze the magnifier and its zoom keys on every Snipping Tool capture.
+                if (!wind::ShouldArmLaunchQuiesce(fsCover, fgBorderless, ex, true)) {
+                    wind::Log(wind::LogLevel::Info, "transform",
+                              "launch quiesce declined: %ls is an overlay cover (ex=0x%lx), not a "
+                              "presenting window", ExeNameOf(fg).c_str(), ex);
+                    return;
+                }
                 t.quiescedPid = pid;
                 t.quiesceUntilMs = GetTickCount64() + 1500;
                 wind::Log(wind::LogLevel::Info, "transform",
