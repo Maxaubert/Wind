@@ -116,6 +116,21 @@ if (-not (Test-Path $setup)) {
     $scratch = Join-Path $env:TEMP 'wind-installer-check'
     if (Test-Path $scratch) { Remove-Item -LiteralPath $scratch -Recurse -Force }
 
+    # The uninstaller must KEEP the user's settings unless they say otherwise, and a silent
+    # uninstall answers its prompt with /SD IDNO. Testing that needs something to preserve: on a
+    # machine that has never run Wind (every CI runner) the folder does not exist, and asserting
+    # it survived would pass or fail for reasons that have nothing to do with the installer. So a
+    # marker is seeded when the folder is absent, and removed again afterwards. A real settings
+    # folder is left completely alone - it is only read, never created or deleted.
+    $appData = Join-Path $env:LOCALAPPDATA 'Wind'
+    $seeded = $false
+    $marker = Join-Path $appData 'installer-check-marker.txt'
+    if (-not (Test-Path $appData)) {
+        New-Item -ItemType Directory -Force $appData | Out-Null
+        Set-Content -LiteralPath $marker -Value 'seeded by tools/installer_check.ps1' -NoNewline
+        $seeded = $true
+    }
+
     # /D must be the last argument and unquoted. That is an NSIS rule, not a typo.
     Start-Process $setup -ArgumentList '/S', "/D=$scratch" -Wait
     Check "silent install placed Wind.exe"       { Test-Path (Join-Path $scratch 'Wind.exe') }
@@ -141,11 +156,20 @@ if (-not (Test-Path $setup)) {
         Check "uninstall removed the Run value" {
             $null -eq (Get-ItemProperty $RUN -ErrorAction SilentlyContinue).Wind
         }
-        # A silent uninstall answers the keep-or-delete prompt with /SD IDNO, so the user's
-        # settings must still be there. Deleting them silently would be the worst bug here.
-        Check "uninstall kept %LOCALAPPDATA%\Wind" { Test-Path (Join-Path $env:LOCALAPPDATA 'Wind') }
+        # A silent uninstall answers the keep-or-delete prompt with /SD IDNO, so the settings
+        # must still be there. Deleting them silently would be the worst bug in the installer.
+        Check "uninstall kept %LOCALAPPDATA%\Wind" { Test-Path $appData }
+        if ($seeded) { Check "uninstall kept the seeded file" { Test-Path $marker } }
     } else {
         Check "uninstaller was written" { $false }
+    }
+
+    # Take back only what this script created; a real settings folder is never touched.
+    if ($seeded) {
+        Remove-Item -LiteralPath $marker -Force -ErrorAction SilentlyContinue
+        if (-not (Get-ChildItem $appData -Force -ErrorAction SilentlyContinue)) {
+            Remove-Item -LiteralPath $appData -Force -ErrorAction SilentlyContinue
+        }
     }
 
     if (Test-Path $scratch) { Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue }
