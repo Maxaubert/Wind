@@ -5,7 +5,7 @@
 ; binary in a secure location. The path is therefore not the user's to change: installing
 ; to D:\Apps\Wind would silently disable the features this install mode exists to enable.
 ;
-; The picture (kit.nsh, video.nsh, pages.nsh) is layered on top of this; nothing in the
+; The picture (kit.nsh, video.nsh, screens.nsh) is layered on top of this; nothing in the
 ; sections below changes when it is.
 ;
 
@@ -27,8 +27,8 @@ SetCompressor /SOLID lzma
 
 ; The progress bar's two colours, in NSIS's 0xBBGGRR order, which is the REVERSE of a CSS
 ; hex triplet. Getting it backwards is a wrong-colour bug, not an error.
-!define TRACK_BG 0x2A2320   ; CSS #20232a
-!define TRACK_FG 0xE8A15B   ; CSS #5ba1e8
+!define TRACK_BG 0x261B1B   ; CSS #1b1b26, the trough drawn in over.html
+!define TRACK_FG 0xD65B5B   ; CSS #5b5bd6, Wind's accent (--accent in ui/src/theme.css)
 
 Name "${PRODUCT}"
 OutFile "..\dist\Wind-Setup-x64-${WIND_VERSION}.exe"
@@ -51,22 +51,30 @@ VIAddVersionKey "LegalCopyright"  "Copyright (c) 2026 ${PUBLISHER}"
 !include "x64.nsh"
 !include "app.nsh"
 
+; The picture. These come before MUI_LANGUAGE, because kit.nsh sets
+; MUI_CUSTOMFUNCTION_GUIINIT and MUI only reads that when it emits .onGUIInit. Unlike Prism
+; there is no BUILD_UNINSTALLER guard: electron-builder compiles the uninstaller in a second
+; pass, plain NSIS emits both from one, and the uninstaller simply never calls any of this.
+!include "kit.nsh"
+!include "video.nsh"
+
 !define MUI_ICON   "..\assets\wind.ico"
 !define MUI_UNICON "..\assets\wind.ico"
 
-; Stock pages for now. pages.nsh replaces this block once the picture exists.
-!insertmacro MUI_PAGE_WELCOME
+!include "screens.nsh"
+
+; Welcome, setup, copying, done. Only the copying page is MUI's, because it is the one that
+; has to be driven by the section; the SHOW define has to sit immediately before it, which is
+; the only way to hand that page a show function without an earlier page swallowing it.
+Page custom windWelcomeCreate windPageLeave
+Page custom windSetupCreate   windPageLeave
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW windCopyShow
 !insertmacro MUI_PAGE_INSTFILES
-!define MUI_FINISHPAGE_RUN
-!define MUI_FINISHPAGE_RUN_FUNCTION WindLaunch
-!insertmacro MUI_PAGE_FINISH
+Page custom windDoneCreate    windDoneLeave
+
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
-
-Function WindLaunch
-  !insertmacro WIND_LAUNCH_DEELEVATED
-FunctionEnd
 
 ; Setup writes nothing to %LOCALAPPDATA%\Wind: the app seeds and owns that directory,
 ; including magnifier.ini, which it resolves through wind::ResolveIniPath().
@@ -100,10 +108,14 @@ Section "Wind" SEC_WIND
   CreateShortcut "$SMPROGRAMS\Wind.lnk" "$INSTDIR\Wind.exe"
 
   !insertmacro WIND_ENSURE_WEBVIEW2
+  ; $WantAutostart is chosen on the setup screen, which runs BEFORE this section, so it can be
+  ; applied here. $WantDesktop and $RunAfter are chosen on the done screen, which runs after,
+  ; and windDoneLeave applies those.
   !insertmacro WIND_APPLY_AUTOSTART
-  ${If} $WantDesktop == 1
-    CreateShortcut "$DESKTOP\Wind.lnk" "$INSTDIR\Wind.exe"
-  ${EndIf}
+
+  ; The done screen is walked to by autoclose: the Next button it would otherwise wait for has
+  ; been hidden since .onGUIInit.
+  SetAutoClose true
 SectionEnd
 
 Section "Uninstall"

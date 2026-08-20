@@ -23,7 +23,7 @@ whose wrong answers are quiet.
 | `make-loop.mjs` | turns a source clip into the frame sequence, and makes it loop |
 | `kit.nsh` | the frameless window: size, DPI, GDI+, unpacking |
 | `video.nsh` | the player: decode, composite, hover, clicks, dragging |
-| `pages.nsh` | the four screens, and what each click means |
+| `screens.nsh` | the four screens, and what each click means |
 | `over.nsh` | generated: control rectangles in 640x480 units |
 | `media/<size>/` | generated: `v/` frames, `o/` overlays. Not hand-edited. |
 | `media/<size>/o/back.png` | generated: the shade, the rim and the caption scrim, drawn under every screen |
