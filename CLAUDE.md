@@ -452,6 +452,20 @@ restartWind), `dirty`, `openIni`, `exportDiagnostics`, `pickExe`, `mpoState`, `s
 Feature/fix work: GitHub issue -> branch -> PR. README-only changes commit directly.
 Remote: `github.com/Maxaubert/Wind`. Own-renderer work is on `feat/own-renderer` (issue #4).
 
+## Releases are automatic (STANDING RULE)
+Every push to `main` that can change the binary rebuilds the installer and republishes it
+(`.github/workflows/release.yml`). `src/version.h` is the only place a version is declared, so
+BUMPING IT IS WHAT CUTS A NEW RELEASE; a push that leaves it alone refreshes the existing
+release's asset in place. Never hand-upload a release artifact: the workflow owns them, and a
+manual upload is how the download drifts from main.
+CI signs nothing (no cert), so it ships the `uiAccess=false` variant, which is the correct
+public configuration. Do NOT put the self-signed dev cert in CI - trusted by nobody, and worse
+than no signature.
+WHY THIS IS MECHANICAL: v0.1.0 shipped, the #209 fix landed on main, and the release kept
+serving the old installer. That stale build was then installed over this dev box and silently
+removed a working fix (the branch it lived on was unmerged). Anything deployed here that is not
+on `main` is one installer run from being lost.
+
 ## Deploy for testing (STANDING RULE)
 Whenever you build something new the user should test/verify (a new feature, a behaviour change, a
 bug fix with a runtime effect), DEPLOY it to `C:\Program Files\Wind` so Max can test the real signed

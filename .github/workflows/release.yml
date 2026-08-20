@@ -1,0 +1,123 @@
+# Keep the published release in step with main.
+#
+# The problem this exists for: v0.1.0 shipped, a fix landed on main, and the release kept
+# handing people the old installer. Worse, that stale build was then installed over a dev
+# machine and silently took a working fix away with it. So the rule is now mechanical rather
+# than remembered: every push to main that can change the binary rebuilds the installer and
+# replaces the asset on the release for whatever version src/version.h names.
+#
+# Versioning: src/version.h is the only place a version is declared, so bumping it is what
+# cuts a NEW release. Pushes that do not touch it refresh the existing one in place, which is
+# what keeps the download matching main without a version number per commit.
+#
+# Unsigned on purpose: no certificate is configured here, and tools/release.ps1 then builds
+# the uiAccess=false variant. That is the correct public configuration until a real cert
+# exists. Never put a self-signed cert in CI: it would be trusted by nobody and look worse
+# than no signature at all.
+name: release
+
+on:
+  push:
+    branches: [ main ]
+    # Docs cannot change the installer, so they do not need to republish it.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/ISSUE_TEMPLATE/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  # Two pushes in quick succession must not race to upload the same asset.
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version from src/version.h
+        id: ver
+        shell: pwsh
+        run: |
+          $h = Get-Content src/version.h -Raw
+          $maj = [regex]::Match($h, '#define\s+WIND_VER_MAJOR\s+(\d+)').Groups[1].Value
+          $min = [regex]::Match($h, '#define\s+WIND_VER_MINOR\s+(\d+)').Groups[1].Value
+          $pat = [regex]::Match($h, '#define\s+WIND_VER_PATCH\s+(\d+)').Groups[1].Value
+          if (-not $maj) { throw 'could not read WIND_VER_MAJOR from src/version.h' }
+          "version=$maj.$min.$pat" >> $env:GITHUB_OUTPUT
+
+      - name: Install NSIS
+        shell: pwsh
+        run: choco install nsis --no-progress -y
+
+      - name: Unit tests
+        shell: cmd
+        run: build.bat test
+
+      # Builds Wind.exe + WindConfig.exe + ui/dist, then compiles the installer and runs
+      # tools/installer_check.ps1. The runner is administrator, so the gate's silent
+      # install/uninstall round-trip actually executes rather than skipping itself.
+      - name: Build installer
+        shell: pwsh
+        run: pwsh -File tools/release.ps1
+
+      - name: Compose release notes
+        id: notes
+        shell: pwsh
+        run: |
+          $v = '${{ steps.ver.outputs.version }}'
+          $exe = "dist/Wind-Setup-x64-$v.exe"
+          if (-not (Test-Path $exe)) { throw "installer not produced: $exe" }
+          $sha = (Get-FileHash $exe -Algorithm SHA256).Hash
+          (Get-Content .github/release-notes.md -Raw).
+            Replace('__VERSION__', $v).
+            Replace('__SHA256__', $sha).
+            Replace('__COMMIT__', '${{ github.sha }}'.Substring(0,7)) |
+            Set-Content notes.md -NoNewline
+          "sha=$sha" >> $env:GITHUB_OUTPUT
+
+      # Create the release the first time this version is seen; afterwards replace the asset
+      # in place so the download always matches main. --clobber is what makes the refresh
+      # idempotent: without it a second push to the same version fails on a duplicate name.
+      - name: Publish or refresh the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Actions runs pwsh with $ErrorActionPreference='Stop', and PowerShell 7.4 turns a
+          # non-zero NATIVE exit into a throw. `gh release view` exits 1 when the tag does not
+          # exist yet, which is the normal first-release path, not an error - so exit codes are
+          # checked by hand here instead of being allowed to abort the step.
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $v = '${{ steps.ver.outputs.version }}'
+          $tag = "v$v"
+          $exe = "dist/Wind-Setup-x64-$v.exe"
+          gh release view $tag 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "refreshing existing release $tag"
+            gh release edit $tag --notes-file notes.md
+            if ($LASTEXITCODE -ne 0) { throw 'gh release edit failed' }
+            gh release upload $tag $exe --clobber
+            if ($LASTEXITCODE -ne 0) { throw 'gh release upload failed' }
+          } else {
+            Write-Host "creating release $tag"
+            gh release create $tag $exe --title "Wind $v" --notes-file notes.md
+            if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
+          }
+
+      - name: Summary
+        shell: pwsh
+        run: |
+          $v = '${{ steps.ver.outputs.version }}'
+          "## Wind $v published"                                   >> $env:GITHUB_STEP_SUMMARY
+          ""                                                        >> $env:GITHUB_STEP_SUMMARY
+          "- tag ``v$v``"                                           >> $env:GITHUB_STEP_SUMMARY
+          "- asset ``Wind-Setup-x64-$v.exe``"                       >> $env:GITHUB_STEP_SUMMARY
+          "- sha256 ``${{ steps.notes.outputs.sha }}``"             >> $env:GITHUB_STEP_SUMMARY
+          "- unsigned (no certificate configured)"                  >> $env:GITHUB_STEP_SUMMARY
