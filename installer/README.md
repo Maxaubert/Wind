@@ -26,6 +26,7 @@ whose wrong answers are quiet.
 | `pages.nsh` | the four screens, and what each click means |
 | `over.nsh` | generated: control rectangles in 640x480 units |
 | `media/<size>/` | generated: `v/` frames, `o/` overlays. Not hand-edited. |
+| `media/<size>/o/back.png` | generated: the shade, the rim and the caption scrim, drawn under every screen |
 | `MicrosoftEdgeWebview2Setup.exe` | Microsoft's ~1.7 MB Evergreen bootstrapper stub |
 
 ## Building it
@@ -74,9 +75,20 @@ smaller than an ordinary frame step. It prints both numbers so you can check.
 
 Needs `ffmpeg` and ImageMagick (`magick`) on PATH.
 
+## Two overlay layers
+
+Each screen is drawn as **two** overlays, not one: `back.png` carries the shade, the lens rim
+and the caption scrim, and the per-screen overlay carries only type and controls. They are
+identical layers on every screen and every hover state, so baking them together would store
+the same full-frame gradient nineteen times: measured, that was 28.3 MB of media against
+13.3 MB for the split. The cost is one extra `GdipDrawImageRectI` per tick.
+
 ## What it costs
 
-Roughly 9 MB of frames at 800x600, plus about 3 MB of overlays and the 1.7 MB WebView2 stub.
+Roughly 9 MB of frames at 800x600, plus about 4 MB of overlays across both DPI sets and the
+1.7 MB WebView2 stub, so a little over 13 MB of media. Both overlay sets are packed into the
+installer and only the matching one is unpacked at runtime.
+
 The footage ships at one size for every display because it is defocused motion and an upscale
 is invisible on it; the type is a separate overlay and renders at the display's own
 resolution.
