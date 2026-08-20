@@ -89,10 +89,23 @@ bool TransformModel::initialize(const MonitorTarget& monitor) {
         sprite_  = std::make_unique<CursorSprite>(blanker_->originals());
         // P2 experiment (spriteBand16): band 16, positioned in SCREEN space - testing whether
         // high-band windows escape the DWM fullscreen transform (constant-size cursor).
-        sprite_->create(spriteBand16_ ? 16 : zorderBand_);
+        const int wantBand = spriteBand16_ ? 16 : zorderBand_;
+        sprite_->create(wantBand);
+        // ALWAYS log the achieved band, not only for the spriteBand16 experiment. band_window.h
+        // exists because a silently refused band "looked exactly like success" on #162, and the
+        // sprite was still doing exactly that: a zorderBand=16 test against #215 could not tell
+        // "band 16 did not help" from "band 16 was never granted". Rig-measured with this in
+        // place: 16 IS granted, and every band above it (17-20) is refused on Windows 11 26200,
+        // so 16 is the ceiling and the sprite cannot be lifted over a DWM-composited thumbnail.
+        if (wantBand > 0) {
+            wind::Log(sprite_->usedBand() == wantBand ? wind::LogLevel::Info : wind::LogLevel::Warn,
+                      "transform", "cursor sprite band: requested %d, got %d%s",
+                      wantBand, sprite_->usedBand(),
+                      sprite_->usedBand() == wantBand ? "" : " (REFUSED - cascaded down)");
+        }
         // Positioning keys off the ACHIEVED band, never the request: a refused band with
         // screen-space positioning would misplace the sprite AND read as a false experiment
-        // verdict (the cascade already logs the refusal - band_window.h).
+        // verdict.
         if (spriteBand16_ && sprite_->usedBand() < 16) {
             spriteBand16_ = false;
             wind::Log(wind::LogLevel::Warn, "transform",
@@ -212,9 +225,6 @@ void TransformModel::setActive(bool active) {
         // present() hide branch keeps its blank() call as the fallback (idempotent) and still
         // owns MagShowSystemCursor + cursorHidden_ bookkeeping.
         if (useSprite_ && blanker_) blanker_->blank();
-        // A new session must republish the cursor transform even if its first offset happens
-        // to equal the last session's, or DWM would hold a transform from a view that is gone.
-        host_.resetCursorPublish();
         // (A sub-pixel "session warm-up" write here was tried and measured WORSE: 4 spike frames
         // per 3 cycles vs 2, and it added zoom-out spikes. Entering magnification costs ~36ms
         // once per zoom-in regardless - that is DWM building its machinery.)

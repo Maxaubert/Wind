@@ -23,9 +23,6 @@ public:
     void onActivate() override {}                 // no capture to prime
     void idleTick() override;                     // tears the mag context down once idle (#148)
     void setIdleReleaseMs(int ms) { idleReleaseMs_ = ms < 0 ? 0 : ms; }
-    // Issue #215: whether transform writes also publish through the public API so DWM keeps
-    // the REAL cursor magnified and placed (native parity). Only useful with cursorSprite=0.
-    void setCursorMode(int mode) { host_.setCursorMode(wind::ParseTxCursorMode(mode)); }
     void present(const MapResult& r, double level, const Config& cfg,
                  const MonitorTarget& mon, const PresentExtras& ex) override;
     bool coversShell() const override { return false; }

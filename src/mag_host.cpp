@@ -101,36 +101,16 @@ bool MagHost::setTransformOwned(float zoom, int offX, int offY, int tx, int ty, 
     // routing big-|tx| writes through the public API crashed identically. The real lethal
     // condition is magnifying the far-right source region above ~9x over a heavy game - see
     // the hybrid level threshold in main.cpp. No channel guard needed here.)
-    // Issue #215: keep DWM's CURSOR transform current. The private channel below pans the view
-    // sub-pixel but leaves the cursor untransformed - it stays native-size at its untransformed
-    // desktop position, which is the tiny pointer stranded away from the lens. The public API is
-    // what DWM derives the cursor transform from (native Magnifier drives only that), so it is
-    // issued FIRST and the private write then places the view precisely. Both forms come from
-    // the same ComputeMagTransform result, so they describe the identical view and DWM never
-    // composites the intermediate state.
-    if (wind::ShouldPublishCursorTransform(cursorMode_, offX, offY, lastPubOffX_, lastPubOffY_)) {
-        MagSetFullscreenTransform(zoom, offX, offY);
-        lastPubOffX_ = offX;
-        lastPubOffY_ = offY;
-    }
-
     if (fastPan && !privateBroken_ && setMagDesktop_) {
         if (setMagDesktop_(zoom, tx, ty) != 0) return true;
         // This latch permanently downgrades the session to whole-pixel panning, which is a
-        // visible quality change (the integer wobble), and it used to happen in silence. Issue
-        // #215 needs to know whether mixing in a public write is what breaks it: if the latch
-        // fires right after the first publish, the two channels are mutually exclusive and no
-        // publish schedule can win.
+        // VISIBLE quality change - the integer pan wobble - and it used to happen in silence.
+        // Chasing #215 wasted a round on "is the private channel dying?" that this answers.
         privateBroken_ = true;   // fall back permanently this session
         wind::Log(wind::LogLevel::Warn, "transform",
-                  "private pan channel FAILED (zoom=%.3f tx=%d ty=%d, published=%d) - "
-                  "session falls back to whole-pixel public panning",
-                  (double)zoom, tx, ty, (int)(cursorMode_ != wind::TxCursorMode::Off));
+                  "private pan channel FAILED (zoom=%.3f tx=%d ty=%d) - session falls back to "
+                  "whole-pixel public panning", (double)zoom, tx, ty);
     }
-    // The public path is also the fallback, so record what it carried: otherwise OnChange would
-    // compare against a stale offset and skip a publish the cursor actually needed.
-    lastPubOffX_ = offX;
-    lastPubOffY_ = offY;
     return MagSetFullscreenTransform(zoom, offX, offY) != FALSE;
 }
 

@@ -2058,7 +2058,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                                                    cfg.cursorSprite != 0, cfg.zorderBand,
                                                    cfg.spriteBand16 != 0);
         tm->setIdleReleaseMs(cfg.txIdleReleaseMs);
-        tm->setCursorMode(cfg.txCursorMode);
         model = std::move(tm);
     } else {
         model = std::make_unique<RenderModel>(cfg.zorderBand, cfg.hdrTonemap != 0,
@@ -2072,7 +2071,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                                                         cfg.cursorSprite != 0, cfg.zorderBand,
                                                         cfg.spriteBand16 != 0);
             tm2->setIdleReleaseMs(cfg.txIdleReleaseMs);
-            tm2->setCursorMode(cfg.txCursorMode);
             model2 = std::move(tm2);
         }
     }
