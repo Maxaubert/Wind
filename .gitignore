@@ -4,6 +4,10 @@
 *.pdb
 *.ilk
 *.lib
+# ...but the VENDORED WebView2 import library is not build output, it is part of the SDK we
+# ship in-tree, and WindConfig.exe cannot link without it. Ignoring it worked for years only
+# because every build was local; CI failed on the first run with LNK1181.
+!third_party/webview2/x64/*.lib
 *.exp
 *.res
 build/
