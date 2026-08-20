@@ -11,11 +11,11 @@
   an alpha channel, so make-over.mjs renders each screen twice, once on black and once on
   white, and solves for the alpha it cannot capture directly.
 
-  THE LENS. The darkening under the words is not an arbitrary scrim: it is the interior of
-  one large circle whose centre sits off-frame at the lower left, with a hairline on its
-  edge. The words live inside the lens; the footage outside it is untouched. A magnifier is
-  the one product where that shape is an argument rather than a decoration, and it is the
-  only geometry in the design.
+  There is no geometry in this design, on purpose. The darkening under the words is a
+  falloff with no edge in frame, and nothing is drawn with an outline. Anything that has a
+  visible boundary sitting over moving footage reads as an artifact rather than as design:
+  a hairline circle was tried here as a lens rim and looked exactly like a stray white line
+  left on the picture.
 
   Anything the installer has to write at runtime is NOT drawn here: the install path, the
   progress fill, and every checkbox box. They leave a gap and NSIS paints into it, because
@@ -38,23 +38,19 @@
   .pane { position: relative; width: 640px; height: 480px; overflow: hidden; flex: none }
   .pane.k { background: #000 } .pane.w { background: #fff }
 
-  /* --- legibility, and the lens --------------------------------------------------------
-     Two separate jobs, deliberately not the same element.
+  /* --- legibility ------------------------------------------------------------------------
+     A falloff whose core sits under the words and whose tail leaves the frame on every
+     side, so it has no edge anywhere in view. A shape with a visible boundary reads as a
+     grey plate laid on the picture instead of as light.
 
-     .shade is the functional half: a falloff whose core sits under the words and whose
-     tail leaves the frame on every side, so it has no edge anywhere in view. A shape with
-     a visible boundary reads as a grey plate laid on the picture, which is what happens
-     the moment the darkening is given the lens's own radius.
-
-     .rim is the signature: one hairline circle, centred (170, 470) with radius 405, so it
-     enters the left edge at y=102 and leaves the bottom edge at x=575. It passes above the
-     title rather than through it. It is the only geometry in the design, and a magnifier
-     is the one product where an optical rim is an argument rather than a decoration. */
+     There WAS a second element here: a hairline circle, meant to read as a lens rim and be
+     the one piece of geometry in the design. It was removed after a look at the real build,
+     because over moving footage it did not read as a rim at all, it read as a stray white
+     line someone had left on the picture. A signature that has to be explained is not one.
+     Do not add it back without watching it move first. */
   .shade { position: absolute; left: -180px; top: 40px; width: 800px; height: 640px;
     background: radial-gradient(50% 50% at 48.75% 50%,
       rgba(10,10,17,.92) 0%, rgba(10,10,17,.70) 40%, rgba(10,10,17,.34) 70%, rgba(10,10,17,0) 100%) }
-  .rim { position: absolute; left: -235px; top: 65px; width: 810px; height: 810px;
-    border-radius: 50%; border: 1px solid rgba(150,150,246,.34) }
   /* The caption sits on bare footage, which is bright in parts of the loop. This fades out
      over 96px, so like .shade it darkens without drawing an edge. */
   .top { position: absolute; left: 0; right: 0; top: 0; height: 96px;
@@ -185,7 +181,6 @@ function screen(s, hot, boxes) {
 // 28 MB of media against 13 MB for the split.
 const back = () => `
   <div class="shade"></div>
-  <div class="rim"></div>
   <div class="top"></div>`
 
 const paint = (html) => {

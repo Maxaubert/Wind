@@ -26,7 +26,7 @@ whose wrong answers are quiet.
 | `screens.nsh` | the four screens, and what each click means |
 | `over.nsh` | generated: control rectangles in 640x480 units |
 | `media/<size>/` | generated: `v/` frames, `o/` overlays. Not hand-edited. |
-| `media/<size>/o/back.png` | generated: the shade, the rim and the caption scrim, drawn under every screen |
+| `media/<size>/o/back.png` | generated: the shade and the caption scrim, drawn under every screen |
 | `MicrosoftEdgeWebview2Setup.exe` | Microsoft's ~1.7 MB Evergreen bootstrapper stub |
 
 ## Building it
@@ -88,7 +88,7 @@ Needs `ffmpeg` and ImageMagick (`magick`) on PATH.
 
 ## Two overlay layers
 
-Each screen is drawn as **two** overlays, not one: `back.png` carries the shade, the lens rim
+Each screen is drawn as **two** overlays, not one: `back.png` carries the shade
 and the caption scrim, and the per-screen overlay carries only type and controls. They are
 identical layers on every screen and every hover state, so baking them together would store
 the same full-frame gradient nineteen times: measured, that was 28.3 MB of media against

@@ -7,7 +7,7 @@
 ; Everything lands in a single DIB, so nothing flickers and there are no sibling controls to
 ; fight over z-order.
 ;
-; TWO overlays, not one: back.png carries the shade, the lens rim and the caption scrim,
+; TWO overlays, not one: back.png carries the shade and the caption scrim,
 ; which are identical on every screen, and the per-screen overlay carries only type and
 ; controls. Baking them together stored the same full-frame gradient nineteen times over and
 ; measured 28.3 MB of media against 13.3 MB for the split.
@@ -44,7 +44,7 @@ Var Frame
 Var Screen      ; 0 welcome, 1 setup, 2 copying, 3 done
 Var OverName    ; which overlay is loaded, so we only reload on a change
 Var OverImg
-Var BackImg     ; the shade, rim and caption scrim, loaded once per page
+Var BackImg     ; the shade and caption scrim, loaded once per page
 Var Hot         ; control under the pointer
 Var WasDown
 Var Leaving     ; an action is posted; this page is finished
@@ -218,7 +218,7 @@ Function WindDraw
     System::Call 'gdiplus::GdipDisposeImage(p $1)'
   ${EndIf}
 
-  ; 2. the shade, the lens rim and the caption scrim, which never change
+  ; 2. the shade and the caption scrim, which never change
   ${If} $BackImg <> 0
     System::Call 'gdiplus::GdipDrawImageRectI(p $3, p $BackImg, i 0, i 0, i $CanvasW, i $CanvasH) i'
   ${EndIf}
