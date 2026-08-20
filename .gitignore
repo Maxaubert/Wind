@@ -31,3 +31,11 @@ build_*.txt
 
 # graphify knowledge-graph output (generated)
 graphify-out/
+
+# Installer: release artifacts and generated media (regenerate with
+# installer/make-loop.mjs and installer/make-over.mjs)
+dist/
+installer/media/
+# ...but the WebView2 bootstrapper stub IS committed; it is a Microsoft
+# redistributable the installer packs, not build output. Overrides *.exe above.
+!installer/MicrosoftEdgeWebview2Setup.exe

@@ -25,6 +25,7 @@ if /i "%1"=="test" goto :test
 if /i "%1"=="check" goto :check
 if /i "%1"=="uiaccess" goto :uiaccess
 if /i "%1"=="config" goto :config
+if /i "%1"=="installer" goto :installer
 
 rem --- App build (normal: uiAccess=false, runs from anywhere) ----------------
 rem Compile the app-icon resource (rc.exe ships with the Windows SDK, on PATH via vcvars).
@@ -90,3 +91,16 @@ rem --- Compile-only check (no link; verifies all sources compile) -----------
 cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c src\*.cpp
 exit /b %errorlevel%
 
+rem --- Installer (needs NSIS; winget install NSIS.NSIS) ---------------------
+:installer
+set "MAKENSIS=%ProgramFiles(x86)%\NSIS\makensis.exe"
+if not exist "%MAKENSIS%" set "MAKENSIS=%ProgramFiles%\NSIS\makensis.exe"
+if not exist "%MAKENSIS%" (
+  echo [build] NSIS not found. Install it with: winget install NSIS.NSIS
+  exit /b 1
+)
+if not exist "%ROOT%dist" mkdir "%ROOT%dist"
+rem /WX so a warning is a build failure: NSIS warns rather than errors on a missing
+rem File source, which would otherwise ship an installer with nothing in it.
+"%MAKENSIS%" /WX /V2 "%ROOT%installer\wind.nsi"
+exit /b %errorlevel%
