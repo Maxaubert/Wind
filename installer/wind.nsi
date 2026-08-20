@@ -49,6 +49,7 @@ VIAddVersionKey "LegalCopyright"  "Copyright (c) 2026 ${PUBLISHER}"
 !include "LogicLib.nsh"
 !include "FileFunc.nsh"
 !include "x64.nsh"
+!include "app.nsh"
 
 !define MUI_ICON   "..\assets\wind.ico"
 !define MUI_UNICON "..\assets\wind.ico"
@@ -56,14 +57,22 @@ VIAddVersionKey "LegalCopyright"  "Copyright (c) 2026 ${PUBLISHER}"
 ; Stock pages for now. pages.nsh replaces this block once the picture exists.
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_INSTFILES
+!define MUI_FINISHPAGE_RUN
+!define MUI_FINISHPAGE_RUN_FUNCTION WindLaunch
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
 
+Function WindLaunch
+  !insertmacro WIND_LAUNCH_DEELEVATED
+FunctionEnd
+
 ; Setup writes nothing to %LOCALAPPDATA%\Wind: the app seeds and owns that directory,
 ; including magnifier.ini, which it resolves through wind::ResolveIniPath().
 Section "Wind" SEC_WIND
+  !insertmacro WIND_QUIT_RUNNING
+
   SetOutPath "$INSTDIR"
   File "..\Wind.exe"
   File "..\WindConfig.exe"
@@ -89,9 +98,17 @@ Section "Wind" SEC_WIND
   ; Start menu. SetShellVarContext all, because this is a per-machine install.
   SetShellVarContext all
   CreateShortcut "$SMPROGRAMS\Wind.lnk" "$INSTDIR\Wind.exe"
+
+  !insertmacro WIND_ENSURE_WEBVIEW2
+  !insertmacro WIND_APPLY_AUTOSTART
+  ${If} $WantDesktop == 1
+    CreateShortcut "$DESKTOP\Wind.lnk" "$INSTDIR\Wind.exe"
+  ${EndIf}
 SectionEnd
 
 Section "Uninstall"
+  !insertmacro WIND_QUIT_RUNNING
+
   SetShellVarContext all
   Delete "$SMPROGRAMS\Wind.lnk"
   Delete "$DESKTOP\Wind.lnk"
@@ -105,6 +122,19 @@ Section "Uninstall"
   ; Not RMDir /r on $INSTDIR itself: a stray recursive delete of the wrong directory is
   ; the one unrecoverable installer bug, so only the files we wrote are named.
   RMDir "$INSTDIR"
+
+  ; The app's settings, profiles and logs. Default is to keep them, so reinstalling does
+  ; not silently discard someone's keybinds and profiles. SetShellVarContext current here
+  ; on purpose: this is the running user's data, not the machine's. /SD IDNO is what makes
+  ; a silent uninstall keep the data rather than hang waiting on a prompt nobody can see.
+  SetShellVarContext current
+  ${If} ${FileExists} "$LOCALAPPDATA\Wind\*.*"
+    MessageBox MB_YESNO|MB_ICONQUESTION \
+      "Remove Wind's settings, profiles and logs as well?$\n$\n$LOCALAPPDATA\Wind" \
+      /SD IDNO IDNO keepData
+    RMDir /r "$LOCALAPPDATA\Wind"
+    keepData:
+  ${EndIf}
 SectionEnd
 
 Function .onInit
@@ -113,6 +143,12 @@ Function .onInit
     Abort
   ${EndIf}
   SetRegView 64
+
+  ; Defaults for the three choices setup offers. The custom pages edit these; with the
+  ; stock pages, and under /S, they are what actually applies.
+  StrCpy $WantAutostart 1
+  StrCpy $WantDesktop 0
+  StrCpy $RunAfter 1
 FunctionEnd
 
 Function un.onInit
