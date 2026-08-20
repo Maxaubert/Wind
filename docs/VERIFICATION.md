@@ -49,6 +49,52 @@ in magnifier.ini (default); `engine=mag` selects the Magnification-API engine.
 - [ ] Quit from tray: cursor + screen back to normal everywhere.
 - [ ] A/B vs engine=mag and vs Windows Magnifier for smoothness/feel.
 
+## Installer (issue #213)
+
+Spec `docs/superpowers/specs/2026-08-20-installer-design.md`, sources in `installer/`.
+
+**Auto-verified** by `build.bat installer`, which compiles the script and then runs
+`tools\installer_check.ps1`:
+- every `File` source the script packs exists, `/nonfatal` ones included,
+- every rectangle the screens read is present in the generated `over.nsh` (the failure a
+  rename in `over.html` causes, which a compile does not catch),
+- a silent install lands the payload, the ARP key and the Run value, and a silent uninstall
+  removes all three and KEEPS `%LOCALAPPDATA%\Wind`.
+  The install half needs an elevated shell and skips itself without one.
+
+Also rig-verified once, by probe rather than by suite:
+- the `Local\Wind_QuitRequest` handshake stops a running Wind on its own, mutex released
+  after 3 ms, no `taskkill` needed,
+- an install over a running Wind writes the clean-shutdown line
+  (`MagUninitialize -> refs=0`) to `wind-core.log`, so the polite path really ran,
+- launching through `explorer.exe` yields a NOT-elevated Wind where a plain launch from the
+  same elevated context yields an ELEVATED one.
+
+**The limit worth stating:** `/S` exercises the section, not the drawn UI, and the drawn UI
+is most of the code. Three approaches to capturing the live window failed (`PrintWindow`
+returns blank on the DIB-into-static drawing), so the screens below are human-only.
+
+**Human-only checks:**
+- [ ] Fresh install on a machine with no Wind: files in `C:\Program Files\Wind`, entry in
+      Settings > Apps, Run value in Task Manager > Startup, tray icon after Finish.
+- [ ] The window is frameless with rounded corners, centred, and the loop plays smoothly and
+      wraps without a visible jump.
+- [ ] Hover Install, Back, minimise and close: each one lights up, and the hit area matches
+      what it looks like. Drag the caption strip: the window moves.
+- [ ] The setup screen shows `C:\Program Files\Wind` in Consolas, in the gap left for it.
+- [ ] Toggle "Start Wind when I sign in", go forward, come Back: the box kept its state.
+- [ ] The progress bar sits ON the drawn trough, in Wind's indigo, not the Windows green.
+- [ ] The done screen's two boxes toggle, and Finish opens Wind only when "Open Wind now" is
+      ticked. The Wind it opens is NOT elevated (Task Manager > Details > Elevated column).
+- [ ] Upgrade while Wind is running AND zoomed: no "file in use" error, and the OS cursor is
+      visible afterwards. A stranded hidden cursor means the polite quit was skipped.
+- [ ] Upgrade with the Settings window open: WindConfig closes, no orphan process.
+- [ ] Uninstall, answer NO to removing settings: `%LOCALAPPDATA%\Wind\magnifier.ini` survives.
+- [ ] Uninstall, answer YES: it does not.
+- [ ] At 100% DPI and at 225%: window centred, type sharp, hit targets land where they look.
+      225% loads the 1440 overlays, 100% loads the 960 set.
+- [ ] Tray > Open Settings works after install (proves WebView2 is present or was installed).
+
 ## Notes / known v1 behavior
 - Editing the config while running re-initializes zoom to 1.0x (rare action).
 - Renderer knobs (cursorSensitivity, cursorScaleWithZoom, bilinear) apply on restart.

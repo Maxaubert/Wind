@@ -15,6 +15,11 @@ Plan: `docs/superpowers/plans/2026-05-24-wind-magnifier.md`.
   compiles `src/config_ui/*.cpp` against the vendored WebView2 SDK -> `WindConfig.exe` next to
   `Wind.exe`). Also run by `tools\uiaccess_setup.ps1`, which deploys `WindConfig.exe` + `ui/dist`
   alongside the signed `Wind.exe`.
+- Build the installer: `build.bat installer`  (needs NSIS: `winget install NSIS.NSIS`; compiles
+  `installer\wind.nsi` then runs `tools\installer_check.ps1`). Release artifact:
+  `pwsh -File tools\release.ps1` -> `dist\Wind-Setup-x64-<ver>.exe`. Setup is a custom-drawn
+  video screen modelled on Prism's; see `installer\README.md` and the spec
+  `docs/superpowers/specs/2026-08-20-installer-design.md`.
 - Deploy UIAccess build (elevated; from a normal shell):
   `Start-Process powershell -Verb RunAs -ArgumentList '-NoExit','-ExecutionPolicy','Bypass','-File','tools\uiaccess_setup.ps1'`
 
@@ -405,6 +410,18 @@ restartWind), `dirty`, `openIni`, `exportDiagnostics`, `pickExe`, `mpoState`, `s
      from the pointer that owns the drag). The press landed under the welded cursor before the
      button went down; the release lands where pointer and content both are. Weld resumes on
      release (renderFrame invalidates its park dedupe so the first post-release frame re-parks).
+- THE INSTALLER IS ELEVATED, WHICH MAKES HKCU AND `%LOCALAPPDATA%` THE WRONG USER'S. An
+  elevated process's HKCU is whichever hive the ELEVATED token owns, which is an admin
+  account's whenever a standard user elevated with different credentials. So autostart goes in
+  HKLM `...\CurrentVersion\Run`, never HKCU, and Wind is launched at the end through
+  `explorer.exe` (the shell owns the user's token) rather than `Exec`. A plain `Exec` hands Wind
+  an ADMIN token and `ResolveIniPath()` then puts magnifier.ini, the profiles and the logs in the
+  administrator's profile where the user never finds them. Rig-measured both ways (probe: plain
+  launch = ELEVATED, via explorer = not elevated). Related: an upgrade must stop a running Wind
+  by SETTING `Local\Wind_QuitRequest` and waiting for the process to actually go, not by
+  `taskkill` - only the clean exit restores the OS cursor, releases ClipCursor and restores the
+  user's native-Magnifier registry backup. The mutex comes free ~3ms in, well BEFORE the process
+  exits, so the mutex wait alone is not a safe gate to kill after.
 - PROGRAM FILES IS READ-ONLY FOR NON-ADMIN: any file the runtime needs to write MUST go to a
   per-user-writable location, never next to the exe. The UIAccess build is installed to
   `C:\Program Files\Wind\` and WindConfig.exe runs as a normal user, so an in-place write there
