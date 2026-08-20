@@ -103,7 +103,13 @@ bool MagHost::setTransformOwned(float zoom, int offX, int offY, int tx, int ty, 
     // the hybrid level threshold in main.cpp. No channel guard needed here.)
     if (fastPan && !privateBroken_ && setMagDesktop_) {
         if (setMagDesktop_(zoom, tx, ty) != 0) return true;
+        // This latch permanently downgrades the session to whole-pixel panning, which is a
+        // VISIBLE quality change - the integer pan wobble - and it used to happen in silence.
+        // Chasing #215 wasted a round on "is the private channel dying?" that this answers.
         privateBroken_ = true;   // fall back permanently this session
+        wind::Log(wind::LogLevel::Warn, "transform",
+                  "private pan channel FAILED (zoom=%.3f tx=%d ty=%d) - session falls back to "
+                  "whole-pixel public panning", (double)zoom, tx, ty);
     }
     return MagSetFullscreenTransform(zoom, offX, offY) != FALSE;
 }
