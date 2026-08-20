@@ -212,6 +212,9 @@ void TransformModel::setActive(bool active) {
         // present() hide branch keeps its blank() call as the fallback (idempotent) and still
         // owns MagShowSystemCursor + cursorHidden_ bookkeeping.
         if (useSprite_ && blanker_) blanker_->blank();
+        // A new session must republish the cursor transform even if its first offset happens
+        // to equal the last session's, or DWM would hold a transform from a view that is gone.
+        host_.resetCursorPublish();
         // (A sub-pixel "session warm-up" write here was tried and measured WORSE: 4 spike frames
         // per 3 cycles vs 2, and it added zoom-out spikes. Entering magnification costs ~36ms
         // once per zoom-in regardless - that is DWM building its machinery.)

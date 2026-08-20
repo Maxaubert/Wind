@@ -97,6 +97,15 @@ struct Config {
                           //     (sub-pixel); falls back to the public API automatically if unavailable.
     int smoothPan   = 0;  // 1 = hold the display composited while zoomed (1px pin) so flip-model games
                           //     do not stutter while panning, at a capped frame rate while zoomed.
+    // Issue #215 field knob (restart). Which channel keeps DWM transforming the REAL cursor:
+    //   0 = private pan only (shipped): smooth sub-pixel view, cursor NOT transformed - which
+    //       is why the sprite exists, and why the sprite loses to DWM-composited shell
+    //       thumbnails no matter its z-band.
+    //   1 = also publish MagSetFullscreenTransform EVERY tick (native Magnifier parity).
+    //   2 = publish only when the whole-pixel offset moves (cheaper; tests whether DWM holds
+    //       the cursor transform between public writes).
+    // Only meaningful with cursorSprite=0: the point is to let DWM draw the real cursor.
+    int txCursorMode = 0;
     int cursorSprite = 1; // 1 = hide the OS cursor and draw a scene-locked sprite welded to the
                           //     transform (fixes cursor/click divergence near screen edges).
     // Desktop opt-in for the transform engine (issue #185, hot): 1 = hybrid picks the transform

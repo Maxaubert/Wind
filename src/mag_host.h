@@ -1,5 +1,6 @@
 #pragma once
 #include <windows.h>
+#include "tx_cursor.h"
 namespace wind {
 // The Magnification runtime is PROCESS-scoped, and BOTH models use it: the transform model for
 // the fullscreen transform, the render model for MagShowSystemCursor. Independent
@@ -23,6 +24,13 @@ public:
     // this directly (issue #206): it already runs on the owner, and the whole latency win is in
     // not taking a detour to get there.
     bool setTransformOwned(float zoom, int offX, int offY, int tx, int ty, bool fastPan);
+    // Issue #215. Off = private channel only (shipped). Always/OnChange additionally issue the
+    // PUBLIC MagSetFullscreenTransform so DWM keeps transforming the real cursor, which is how
+    // native Magnifier gets a correctly sized and placed pointer that also survives over
+    // DWM-composited shell surfaces. Set once per session; resetCursorPublish() forgets the
+    // last published offset so a new session cannot inherit a stale one.
+    void setCursorMode(wind::TxCursorMode m) { cursorMode_ = m; }
+    void resetCursorPublish() { lastPubOffX_ = wind::kNoPublishedOffset; lastPubOffY_ = wind::kNoPublishedOffset; }
     // Tell the INPUT stack how to invert the magnification (MagSetInputTransform - what the
     // native Magnifier does). Documented for pen/touch, and modern pointer-stack frameworks
     // (XAML/Explorer, Chromium) consult it for hit-testing too (issue #148 desktop dead zones).
@@ -40,6 +48,14 @@ public:
     void shutdown();
 private:
     bool initialized_ = false;
+    // Issue #215: the cursor-transform publish state. The private pan channel leaves DWM's
+    // cursor transform untouched, so the public API is issued alongside it to keep the real
+    // cursor magnified and correctly placed. These track what the last public write carried,
+    // so TxCursorMode::OnChange can skip the ticks where the whole-pixel offset did not move.
+    wind::TxCursorMode cursorMode_ = wind::TxCursorMode::Off;
+    int lastPubOffX_ = wind::kNoPublishedOffset;
+    int lastPubOffY_ = wind::kNoPublishedOffset;
+
     bool privateBroken_ = false;
     int  (__stdcall* setMagDesktop_)(double, int, int) = nullptr;
     int  (__stdcall* setBitmapSmoothing_)(int) = nullptr;
