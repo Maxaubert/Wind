@@ -7,6 +7,7 @@ TEST_CASE("tx cursor mode parses, and anything unknown is off") {
     CHECK(ParseTxCursorMode(0) == TxCursorMode::Off);
     CHECK(ParseTxCursorMode(1) == TxCursorMode::Always);
     CHECK(ParseTxCursorMode(2) == TxCursorMode::OnChange);
+    CHECK(ParseTxCursorMode(3) == TxCursorMode::Once);
     CHECK(ParseTxCursorMode(-1) == TxCursorMode::Off);
     CHECK(ParseTxCursorMode(99) == TxCursorMode::Off);
 }
@@ -32,4 +33,14 @@ TEST_CASE("OnChange publishes only when the whole-pixel offset actually moves") 
 TEST_CASE("OnChange always publishes the first write of a session") {
     CHECK(ShouldPublishCursorTransform(TxCursorMode::OnChange, 0, 0, kNoPublishedOffset, kNoPublishedOffset));
     CHECK(ShouldPublishCursorTransform(TxCursorMode::OnChange, 10, 20, kNoPublishedOffset, kNoPublishedOffset));
+}
+
+// Once is the arm that separates "DWM establishes the cursor transform and leaves it" from
+// "DWM re-derives it on every public write": exactly one publish per session, so if the cursor
+// then drifts as the view pans, it is the latter.
+TEST_CASE("Once publishes exactly the first write of a session and never again") {
+    CHECK(ShouldPublishCursorTransform(TxCursorMode::Once, 10, 20, kNoPublishedOffset, kNoPublishedOffset));
+    CHECK_FALSE(ShouldPublishCursorTransform(TxCursorMode::Once, 10, 20, 10, 20));
+    // and NOT again just because the view moved, which is what separates it from OnChange
+    CHECK_FALSE(ShouldPublishCursorTransform(TxCursorMode::Once, 999, 999, 10, 20));
 }

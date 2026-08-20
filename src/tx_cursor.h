@@ -22,23 +22,36 @@
 // final state.
 //
 // The open question this exists to A/B is HOW OFTEN the public write is needed:
-//   Always     - safest; pays a second API call every tick.
-//   OnChange   - only when the whole-pixel offset actually moves. If DWM keeps the cursor
-//                transform until the next public write, this is free for most ticks; if it
-//                resyncs the cursor to the public value on every write, this is also what
-//                makes the cursor step once per source pixel instead of continuously.
+//   Always     - safest; pays a second API call every tick. FIELD-TESTED AND REJECTED: the
+//                public write re-places the view at its whole-pixel offset every tick, so it
+//                fights the private write that just placed it precisely. Result was the full
+//                integer-pan wobble plus a zoom-in hitch, because the ramp is exactly when the
+//                extra per-tick call is least affordable.
+//   OnChange   - only when the whole-pixel offset actually moves. Strictly less fighting than
+//                Always, but the fight is the same one: every publish still yanks the view a
+//                whole source pixel. Expect "wobbles less often", not "smooth".
+//   Once       - publish exactly once per session and never again. If DWM ESTABLISHES the
+//                cursor transform from that write and then leaves it alone, this is the whole
+//                fix: correct cursor, zero wobble, one extra call per zoom. If instead DWM
+//                re-derives the cursor from each public write, the cursor will be correct at
+//                the moment of the first write and drift as the view pans away from it -
+//                which is itself the diagnostic that separates the two behaviours.
 // Off is the shipped behaviour and the control arm.
 #include <climits>
 
 namespace wind {
 
-enum class TxCursorMode { Off = 0, Always = 1, OnChange = 2 };
+enum class TxCursorMode { Off = 0, Always = 1, OnChange = 2, Once = 3 };
 
 inline TxCursorMode ParseTxCursorMode(int v) {
     if (v == 1) return TxCursorMode::Always;
     if (v == 2) return TxCursorMode::OnChange;
+    if (v == 3) return TxCursorMode::Once;
     return TxCursorMode::Off;
 }
+
+// Sentinel for "no public write yet this session".
+inline constexpr int kNoPublishedOffset = INT_MIN;
 
 // `lastX/lastY` are the offsets carried by the previous public write, or INT_MIN when none has
 // been issued this session - which must always publish, or a session could start with DWM
@@ -48,12 +61,10 @@ inline bool ShouldPublishCursorTransform(TxCursorMode mode, int offX, int offY,
     switch (mode) {
         case TxCursorMode::Always:   return true;
         case TxCursorMode::OnChange: return offX != lastX || offY != lastY;
+        case TxCursorMode::Once:     return lastX == kNoPublishedOffset;
         case TxCursorMode::Off:
         default:                     return false;
     }
 }
-
-// Sentinel for "no public write yet this session".
-inline constexpr int kNoPublishedOffset = INT_MIN;
 
 }  // namespace wind

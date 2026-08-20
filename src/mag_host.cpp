@@ -116,7 +116,16 @@ bool MagHost::setTransformOwned(float zoom, int offX, int offY, int tx, int ty, 
 
     if (fastPan && !privateBroken_ && setMagDesktop_) {
         if (setMagDesktop_(zoom, tx, ty) != 0) return true;
+        // This latch permanently downgrades the session to whole-pixel panning, which is a
+        // visible quality change (the integer wobble), and it used to happen in silence. Issue
+        // #215 needs to know whether mixing in a public write is what breaks it: if the latch
+        // fires right after the first publish, the two channels are mutually exclusive and no
+        // publish schedule can win.
         privateBroken_ = true;   // fall back permanently this session
+        wind::Log(wind::LogLevel::Warn, "transform",
+                  "private pan channel FAILED (zoom=%.3f tx=%d ty=%d, published=%d) - "
+                  "session falls back to whole-pixel public panning",
+                  (double)zoom, tx, ty, (int)(cursorMode_ != wind::TxCursorMode::Off));
     }
     // The public path is also the fallback, so record what it carried: otherwise OnChange would
     // compare against a stale offset and skip a publish the cursor actually needed.

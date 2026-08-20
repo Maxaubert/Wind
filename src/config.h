@@ -101,9 +101,15 @@ struct Config {
     //   0 = private pan only (shipped): smooth sub-pixel view, cursor NOT transformed - which
     //       is why the sprite exists, and why the sprite loses to DWM-composited shell
     //       thumbnails no matter its z-band.
-    //   1 = also publish MagSetFullscreenTransform EVERY tick (native Magnifier parity).
+    //   1 = also publish MagSetFullscreenTransform EVERY tick. FIELD-REJECTED: it re-places the
+    //       view at the whole-pixel offset every tick, so it fights the private write - full
+    //       integer wobble plus a zoom-in hitch from the extra per-tick call during the ramp.
     //   2 = publish only when the whole-pixel offset moves (cheaper; tests whether DWM holds
     //       the cursor transform between public writes).
+    //   3 = publish ONCE per session. If DWM establishes the cursor transform from that write
+    //       and then leaves it alone, this is the fix: correct cursor, no wobble, one extra
+    //       call per zoom. If the cursor instead drifts as the view pans away, DWM re-derives
+    //       it per public write and no publish schedule can win.
     // Only meaningful with cursorSprite=0: the point is to let DWM draw the real cursor.
     int txCursorMode = 0;
     int cursorSprite = 1; // 1 = hide the OS cursor and draw a scene-locked sprite welded to the
