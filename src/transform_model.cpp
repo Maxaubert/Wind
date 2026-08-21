@@ -235,9 +235,11 @@ void TransformModel::setActive(bool active) {
                 sprite_->keepOnTop();
                 // The blank hits the cursor plane the SAME frame, but the sprite's first
                 // composite lands the NEXT one - a one-frame hole that motion masks and a
-                // still pointer exposes (field-verified). One DwmFlush (~7ms, before the
-                // context build that follows anyway) guarantees the sprite is on screen
-                // before the real pointer vanishes.
+                // still pointer exposes (field-verified). TWO DwmFlush passes (~14ms, before
+                // the context build that follows anyway): the first can latch a composite
+                // that began before the ShowWindow reached DWM, the second is guaranteed to
+                // include the sprite. One flush measurably still blinked on a still pointer.
+                DwmFlush();
                 DwmFlush();
             }
             blanker_->blank();
