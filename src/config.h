@@ -220,6 +220,12 @@ struct Config {
                           //     stall catch-up snap. The applied level trails the controller by
                           //     a few ticks and catches up when the ramp stops. 0 = uncapped.
                           //     Hot-reloadable.
+    int lockForce = 0;    // DIAGNOSTIC (hot): 1 = force the LOCKED regime (raw-mickey pan)
+                          //     everywhere, detector bypassed. Exists to demonstrate why locked
+                          //     cannot be the default: desktop panning loses Windows pointer
+                          //     ballistics (linear, speed-mismatched), drag-follow never engages
+                          //     (the #169 drag flicker returns), and the free mode's
+                          //     view-derived-from-pointer click guarantee is weakened. Never ship 1.
     int warpLock = 1;     // warp-anchor lock detection (issue #221, hot): mouselook engines that
                           //     WARP the pointer to a fixed recenter point every frame (DOOM The
                           //     Dark Ages, field-traced) defeat both classic lock tells, so the

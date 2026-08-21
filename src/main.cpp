@@ -930,6 +930,22 @@ static void RunTick(TickState& t) {
             t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y);   // virtual -> local monitor coords
             t.lastSetVirtual = pt;        // baseline for the OS-cursor delta (first delta = 0)
             t.detector.reset();           // start free
+            // Warp-lock seeding (issue #221 round 3, Max: any motion-based tell still needs a
+            // wiggle as evidence). Zooming in over a COVERING app whose cursor is already
+            // hidden by the APP is mouselook with near-certainty (the game-inspect tell, valid
+            // at this instant because this session has hidden nothing yet) - start LOCKED so
+            // the raw-mickey pan works from the first tick, motionless. A menu or the desktop
+            // (cursor shown) seeds nothing; a wrong seed over fullscreen video self-heals in
+            // ~100ms once the player re-shows the pointer and it tracks the hand.
+            if (t.cfg.warpLock != 0 && !t.cursorHiddenByUs && ForegroundCoversMonitor(t.mon)) {
+                CURSORINFO ci{}; ci.cbSize = sizeof(ci);
+                if (GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING) == 0) {
+                    t.detector.seedLock();
+                    t.prevDetLocked = true;
+                    wind::Log(wind::LogLevel::Info, "lock",
+                              "seeded LOCKED at zoom-in (app cursor hidden, covering foreground)");
+                }
+            }
             // Transform sessions run the WELDED-cursor design (re-test of the #148 weld; see
             // transform_model.cpp): the transform welds the REAL cursor to the lens point, so
             // hover, drags, and clicks are native - same contract as the render engine. The old
@@ -1036,6 +1052,7 @@ static void RunTick(TickState& t) {
                                             std::abs(rawDx) + std::abs(rawDy),
                                             std::abs(curDx) + std::abs(curDy),
                                             t.cfg.warpLock != 0, cur.x, cur.y);
+            if (t.cfg.lockForce != 0) locked = true;   // diagnostic: see config.h, never ship
             if (locked != t.prevDetLocked) {
                 // Field diagnosis (issue #221): which tell engaged, and when, in wind-core.log.
                 wind::Log(wind::LogLevel::Info, "lock", "detector %s%s lvl=%.2f",

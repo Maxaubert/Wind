@@ -193,6 +193,30 @@ TEST_CASE("box tell: opening the game menu (cursor roams) unlocks shortly after"
     CHECK(!locked);
 }
 
+// Round 3: seeding at the zoom-in edge (app-hidden cursor over a covering foreground).
+
+TEST_CASE("seedLock: locked immediately, and gameplay warps sustain it") {
+    LockDetector d;
+    d.seedLock();
+    CHECK(d.locked());
+    CHECK(d.warpLocked());
+    for (int i = 0; i < 10; ++i) warpPeriod(d, true);
+    CHECK(d.locked());
+}
+
+TEST_CASE("seedLock: a wrong seed (video player re-shows the cursor) self-heals quickly") {
+    LockDetector d;
+    d.seedLock();
+    REQUIRE(d.locked());
+    bool locked = true;
+    int ticks = 0;
+    // Pointer reappears and tracks the hand: free evidence, gated only by the quiet window.
+    for (; ticks < 30 && locked; ++ticks)
+        locked = d.update(false, 10, 8, true, 500 + ticks * 20, 600);
+    CHECK(!locked);
+    CHECK(ticks <= 20);   // ~kWarpQuietTicks + kFreeTicks at 144Hz = ~110ms
+}
+
 TEST_CASE("warp tell: reset clears the anchor state") {
     LockDetector d;
     d.update(false, 20, 300, true, 853, 480);

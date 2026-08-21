@@ -44,6 +44,13 @@ public:
     bool locked() const { return locked_; }
     // True when the CURRENT locked state was reached via the warp-anchor tell (diagnostics).
     bool warpLocked() const { return locked_ && warpReturns_ > 0; }
+    // Start the session LOCKED with zero motion evidence (issue #221 round 3): the caller saw
+    // the mouselook tell at the zoom-in edge (covering foreground whose cursor is hidden by the
+    // APP - the game-inspect signal, valid there because nothing is hidden by us yet). The
+    // quiet-window guard arms so a few stray free ticks cannot immediately undo the seed; a
+    // wrong seed (fullscreen video with an auto-hidden cursor) self-heals in ~100ms once the
+    // pointer reappears and tracks the hand.
+    void seedLock() { locked_ = true; warpReturns_ = 1; sinceWarp_ = 0; }
     void reset();   // back to free (call on zoom-in / recenter / monitor retarget)
 private:
     bool locked_ = false;
