@@ -220,6 +220,14 @@ struct Config {
                           //     stall catch-up snap. The applied level trails the controller by
                           //     a few ticks and catches up when the ramp stops. 0 = uncapped.
                           //     Hot-reloadable.
+    int warpLock = 1;     // warp-anchor lock detection (issue #221, hot): mouselook engines that
+                          //     WARP the pointer to a fixed recenter point every frame (DOOM The
+                          //     Dark Ages, field-traced) defeat both classic lock tells, so the
+                          //     lens snaps back to the warp point instead of panning. 1 = detect
+                          //     the warp signature (repeated big-jump landings on one anchor) and
+                          //     run the locked raw-mickey pan. Optional because the engage window
+                          //     (~1s while the anchor accumulates) can read as a brief hitch
+                          //     before panning "becomes good". 0 = classic tells only.
     int txIdleReleaseMs = 1200;  // how long the DWM magnification context lingers after a zoom
                           //     ends before it is released. Longer = repeat zooms skip the
                           //     rebuild (fewer big entry spikes) but DWM stays magnification-

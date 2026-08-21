@@ -170,6 +170,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "txMinOffsetPx")      c.txMinOffsetPx = std::stoi(val);
             else if (key == "txIdleReleaseMs")    c.txIdleReleaseMs = std::stoi(val);
             else if (key == "txMaxStepPct")       c.txMaxStepPct = std::stoi(val);
+            else if (key == "warpLock")           c.warpLock = std::stoi(val);
             else if (key == "txLevelStep")        c.txLevelStep = std::stoi(val);
             else if (key == "txGrid")             c.txGrid = std::stoi(val);
             else if (key == "gameFpsCap")         c.gameFpsCap = std::stoi(val);

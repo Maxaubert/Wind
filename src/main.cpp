@@ -221,6 +221,7 @@ struct TickState {
     ZoomController zoom;
     CursorMapper   mapper;
     LockDetector   detector;    // free vs game-locked cursor
+    bool           prevDetLocked = false;   // edge-log the detector state (issue #221)
     POINT          lastSetVirtual{};  // MEASURED post-present pointer position (virtual px), the
                                       // baseline for the next tick's hand delta (issue #169: never
                                       // assume the weld landed - measure)
@@ -1033,7 +1034,15 @@ static void RunTick(TickState& t) {
                                                        t.mon.w, t.mon.h);
             bool locked = t.detector.update(clipConfined,
                                             std::abs(rawDx) + std::abs(rawDy),
-                                            std::abs(curDx) + std::abs(curDy));
+                                            std::abs(curDx) + std::abs(curDy),
+                                            t.cfg.warpLock != 0, cur.x, cur.y);
+            if (locked != t.prevDetLocked) {
+                // Field diagnosis (issue #221): which tell engaged, and when, in wind-core.log.
+                wind::Log(wind::LogLevel::Info, "lock", "detector %s%s lvl=%.2f",
+                          locked ? "LOCKED" : "free",
+                          (locked && t.detector.warpLocked()) ? " (warp-anchor)" : "", lvl);
+                t.prevDetLocked = locked;
+            }
             if (locked) {
                 dx = (int)std::lround(rawDx * t.cfg.cursorSensitivity);
                 dy = (int)std::lround(rawDy * t.cfg.cursorSensitivity);
