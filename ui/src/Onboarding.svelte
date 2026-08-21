@@ -62,7 +62,7 @@
         </svg>
       </div>
       <h1>Welcome to Wind</h1>
-      <p>A fast magnifier that lives in your tray. Let's set up the essentials.</p>
+      <p>Barely there. Everywhere. Let's set up the essentials.</p>
     </div>
     <!-- Step 1: Set your zoom keys -->
     <div class="step" class:show={cur === 1}>

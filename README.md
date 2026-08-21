@@ -3,7 +3,9 @@
 
   # Wind
 
-  A lightweight fullscreen magnifier for Windows - "light as air".
+  Barely there. Everywhere.
+
+  A lightweight fullscreen magnifier for Windows.
 
   [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square)](https://github.com/Maxaubert/Wind)
   [![Built with](https://img.shields.io/badge/C%2B%2B-Direct3D%2011-00599C?style=flat-square)](https://github.com/Maxaubert/Wind)
