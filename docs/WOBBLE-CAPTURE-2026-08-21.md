@@ -96,7 +96,38 @@ Fix directions for Wind (issue to file):
    is confirmed.
 4. Fix the ixwrite fail accounting (see note above) so the log stops crying wolf.
 
-## Not yet done (deliberately)
+## FINAL VERDICTS (same day, ~13:30) - parked per Max, tracked in issue #217
+
+The stomp-guard fix (PR #218) shipped and armed correctly, and its ground-truth logging settled
+the remaining questions the hard way:
+
+- Wind's MagSetInputTransform publishes SUCCEED (ixdiag: ret=1, read-back matches). But wm
+  rewrites the slot faster than once per tick: at 144 republishes/s Wind lost EVERY race
+  (stomps=144/s, not-stuck=144/s). The publish war is unwinnable while wm runs. The guard still
+  earns its keep by healing the stale rect a dirty-killed wm strands (one republish wins against
+  a corpse) and by providing reliable foreign-writer DETECTION.
+- Max reproduced the wobble "to a tee" on the fixed build, so the identity input transform is a
+  correlated symptom of wm running, not the wobble mechanism itself.
+- Eyeball discrimination (Max): ONE cursor, content pans smoothly, the ARROW detaches and
+  trails. The only visible cursor in a transform session is the sprite, so the mechanism is
+  SPRITE WINDOW MOVE LATENCY: wm's second magnification context makes DWM apply the sprite's
+  per-tick SetWindowPos late relative to transform writes; the sprite (desktop coords, magnified)
+  then appears speed x lag px behind centre and catches up at rest.
+- spriteBand16=1 field verdict (the P2 experiment's one missing datum): NEGATIVE. Band-16
+  windows are magnified/remapped like everything else on 26200 - the screen-space sprite was
+  visibly misplaced. Experiment closed.
+- cursorSprite=0 (raw welded cursor) field verdict: NEGATIVE for the transform model. The
+  cursor PLANE composites OUTSIDE the magnification (constant size, raw desktop position), so
+  it sits off-centre and points at the wrong content under the transform. Matches the old
+  transform.h measurement; unusable.
+- model=render with wm open: CLEAN (Max-verified). The render engine draws the cursor inside
+  its own frame, so it is immune to all of wm's shared-state stomps by construction.
+
+Recommended fix when picked up again: hybrid auto-picks the RENDER engine while a foreign
+magnifier is detected (the stomp guard's detection latch, plus a Magnify.exe process check at
+zoom-in), re-picking via the existing mid-zoom instant-switch machinery; a pinned
+model=transform gets a tray/log warning that native Magnifier degrades the cursor. Not built -
+parked at Max's request.
 
 - No `-Driver native` baseline: that path kills and restarts Wind, which would destroy the
   degenerate state. Run it (plus a wind rerun) after Wind is next restarted cleanly.

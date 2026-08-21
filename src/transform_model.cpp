@@ -528,7 +528,22 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             LARGE_INTEGER fr, a, b;
             QueryPerformanceFrequency(&fr); QueryPerformanceCounter(&a);
             bool ok = host_.setInputTransform(enable, src, dst);
+            const unsigned long setGle = GetLastError();
             QueryPerformanceCounter(&b);
+            // One-shot ground truth (issue #217): the set's return value, its GetLastError, and
+            // an immediate read-back, so a publish war or a lying return code is visible in the
+            // field log instead of being theorized about. First few publishes only.
+            if (ixDbgLogs_ < 4) {
+                ++ixDbgLogs_;
+                bool gOn = false; RECT gS{}, gD{};
+                const bool gOk = host_.getInputTransform(gOn, gS, gD);
+                wind::Log(wind::LogLevel::Info, "ixdiag",
+                          "set en=%d src=(%ld,%ld,%ld,%ld) ret=%d gle=%lu | get ret=%d en=%d "
+                          "src=(%ld,%ld,%ld,%ld)",
+                          enable ? 1 : 0, src.left, src.top, src.right, src.bottom,
+                          ok ? 1 : 0, setGle, gOk ? 1 : 0, gOn ? 1 : 0,
+                          gS.left, gS.top, gS.right, gS.bottom);
+            }
             if (!ok) {
                 // The return value cries wolf on this rig (issue #217): FALSE while the publish
                 // demonstrably lands (read-back tracks our rect). The read-back is the truth.

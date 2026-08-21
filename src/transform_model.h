@@ -116,5 +116,6 @@ private:
     int    ixExpL_ = 0, ixExpT_ = 0, ixExpR_ = 0, ixExpB_ = 0;
     int    ixStomps_ = 0;                            // foreign overwrites seen this log window
     bool   ixStompWarned_ = false;                   // one-shot foreign-writer warn
+    int    ixDbgLogs_ = 0;                           // one-shot publish ground-truth logs (#217)
 };
 }
