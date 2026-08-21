@@ -218,7 +218,23 @@ void TransformModel::setActive(bool active) {
         // zoom-in hitch. Plain SetSystemCursor needs no context, so it is free out here. The
         // present() hide branch keeps its blank() call as the fallback (idempotent) and still
         // owns MagShowSystemCursor + cursorHidden_ bookkeeping.
-        if (useSprite_ && blanker_) blanker_->blank();
+        if (useSprite_ && blanker_) {
+            // Bridge the swap gap (issue #221 field report: zoom-in BLINKS the cursor): the
+            // blank hides the real pointer instantly, but the sprite's first present is a
+            // context build (~36ms) plus a reveal away - a visible cursor-less gap. Stand the
+            // sprite up at the pointer's position BEFORE blanking (at ~1x the transform is
+            // identity, so it lands exactly on the pointer) and the handoff overlaps instead
+            // of gapping. Skipped when the APP is hiding its cursor (mouselook): nothing
+            // visible is being swapped there, and flashing a sprite would be its own blink.
+            CURSORINFO ci{}; ci.cbSize = sizeof(ci);
+            if (sprite_ && GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING) != 0 &&
+                sprite_->refreshShape() == CursorSprite::ShapeStatus::Rendered) {
+                sprite_->moveTo(ci.ptScreenPos.x, ci.ptScreenPos.y);
+                sprite_->show();
+                sprite_->keepOnTop();
+            }
+            blanker_->blank();
+        }
         // (A sub-pixel "session warm-up" write here was tried and measured WORSE: 4 spike frames
         // per 3 cycles vs 2, and it added zoom-out spikes. Entering magnification costs ~36ms
         // once per zoom-in regardless - that is DWM building its machinery.)
