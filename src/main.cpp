@@ -1053,6 +1053,10 @@ static void RunTick(TickState& t) {
                                             std::abs(curDx) + std::abs(curDy),
                                             t.cfg.warpLock != 0, cur.x, cur.y);
             if (t.cfg.lockForce != 0) locked = true;   // diagnostic: see config.h, never ship
+            // lockApps (issue #221): listed foreground exe = locked outright, no heuristics.
+            else if (!t.cfg.lockApps.empty() &&
+                     FgExeInList(GetForegroundWindow(), t.cfg.lockApps))
+                locked = true;
             if (locked != t.prevDetLocked) {
                 // Field diagnosis (issue #221): which tell engaged, and when, in wind-core.log.
                 wind::Log(wind::LogLevel::Info, "lock", "detector %s%s lvl=%.2f",

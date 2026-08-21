@@ -92,6 +92,12 @@ struct Config {
     // user never considered. Exe names, comma-separated, case-insensitive, matched whenever one is
     // foreground - fullscreen or windowed, since the user named it explicitly.
     std::string noSwallowApps = "";
+    // lockApps (issue #221, hot): exe names whose sessions run the LOCKED regime outright while
+    // they are foreground - raw-mickey panning from the first tick, detector bypassed. The
+    // deterministic answer for pointer-warping mouselook games (DOOM The Dark Ages) where any
+    // detection heuristic still lets a moment of recentering through. Comma-separated,
+    // case-insensitive, exact exe name match (IsExeInList), same shape as noSwallowApps.
+    std::string lockApps = "";
     // Transform-model-only knobs (ignored by the other models):
     int fastPan     = 1;  // 1 = pan via the private SetMagnificationDesktopMagnification channel
                           //     (sub-pixel); falls back to the public API automatically if unavailable.

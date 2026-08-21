@@ -109,6 +109,7 @@ Config ParseConfig(const std::string& text) {
         // defaults, so a list with defaults could never be emptied at all.
         if (key == "transformExclude") { c.transformExclude = val; continue; }
         if (key == "noSwallowApps")    { c.noSwallowApps    = val; continue; }
+        if (key == "lockApps")         { c.lockApps         = val; continue; }
         if (val.empty()) continue;
         try {
             if (key == "zoomInButton")          c.zoomInButton = std::stoi(val);
