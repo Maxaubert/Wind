@@ -50,7 +50,7 @@ Wind/
     └── test_config.cpp
 ```
 
-**Design boundary:** `transform`, `zoom_controller`, `tracker`, and the parse half of `config` include only `<algorithm>`/`<cmath>`/`<string>` — never `<windows.h>` — so tests compile and run without a desktop session. All Win32 calls live in `magnifier_engine`, `input_router`, `tray`, the I/O half of `config`, and `main`.
+**Design boundary:** `transform`, `zoom_controller`, `tracker`, and the parse half of `config` include only `<algorithm>`/`<cmath>`/`<string>` - never `<windows.h>` - so tests compile and run without a desktop session. All Win32 calls live in `magnifier_engine`, `input_router`, `tray`, the I/O half of `config`, and `main`.
 
 ---
 
@@ -66,7 +66,7 @@ gh issue create --title "PR1: repo scaffold + verification loop" \
   --body "Scaffold Wind: .gitignore, README, CLAUDE.md, .claude settings, build.bat, doctest, first passing test."
 git checkout -b feat/scaffold
 ```
-(If `gh repo create` has not been run yet, create the remote first: `gh repo create Wind --private --source . --remote origin`. This publishes a private repo — confirm with the user before running.)
+(If `gh repo create` has not been run yet, create the remote first: `gh repo create Wind --private --source . --remote origin`. This publishes a private repo - confirm with the user before running.)
 
 - [ ] **Step 2: Write `.gitignore`**
 
@@ -92,22 +92,22 @@ Thumbs.db
 ```markdown
 # Wind
 
-A lightweight fullscreen magnifier for Windows — "light as air". A replacement for
+A lightweight fullscreen magnifier for Windows - "light as air". A replacement for
 the built-in Magnifier, with smooth continuous zoom that keeps tracking the mouse
 even when games hide, clip, or center-lock the cursor.
 
 ## Controls (default, configurable in `magnifier.ini`)
-- Hold **mouse forward button (XButton2)** — zoom in (smooth ramp).
-- Hold **mouse back button (XButton1)** — zoom out (smooth ramp).
-- Release — zoom stays at the current level.
+- Hold **mouse forward button (XButton2)** - zoom in (smooth ramp).
+- Hold **mouse back button (XButton1)** - zoom out (smooth ramp).
+- Release - zoom stays at the current level.
 
 ## Build
 Requires Visual Studio 2022+ Build Tools. Run `build.bat` from any shell.
-- `build.bat` — builds `Wind.exe`.
-- `build.bat test` — builds and runs unit tests.
+- `build.bat` - builds `Wind.exe`.
+- `build.bat test` - builds and runs unit tests.
 
 ## Run
-`Wind.exe` — runs from the system tray. Right-click the tray icon to edit config or quit.
+`Wind.exe` - runs from the system tray. Right-click the tray icon to edit config or quit.
 
 ## Scope
 v1 covers the desktop, normal apps, and **borderless / windowed-fullscreen** games.
@@ -117,7 +117,7 @@ Exclusive-fullscreen games are out of scope for v1 (set the game to borderless).
 - [ ] **Step 4: Write `CLAUDE.md`**
 
 ```markdown
-# Wind — fullscreen magnifier
+# Wind - fullscreen magnifier
 
 Lightweight standalone Windows fullscreen magnifier replacing Magnify.exe.
 Design spec: `docs/superpowers/specs/2026-05-24-magnifier-design.md`.
@@ -137,10 +137,10 @@ parse half of `src/config`. Win32 I/O: `magnifier_engine`, `input_router`, `tray
 `MagSetFullscreenTransform(level, xOffset, yOffset)` each frame.
 
 ## IMPORTANT gotchas
-- Pure-logic files MUST NOT include `<windows.h>` — keeps unit tests desktop-free.
+- Pure-logic files MUST NOT include `<windows.h>` - keeps unit tests desktop-free.
 - Declare Per-Monitor-V2 DPI awareness (`Wind.manifest`) or offset pixel math is wrong
   on scaled displays.
-- Always reset to `MagSetFullscreenTransform(1.0,0,0)` + `MagUninitialize` on exit —
+- Always reset to `MagSetFullscreenTransform(1.0,0,0)` + `MagUninitialize` on exit - 
   never leave the screen zoomed.
 - The lens-must-move-when-cursor-locked behavior is THE core feature. It relies on
   Raw Input deltas (HID-level, unaffected by ShowCursor/ClipCursor/SetCursorPos),
@@ -306,7 +306,7 @@ gh pr create --fill --base main
 
 ---
 
-## Task 4: `transform` — center+level+screen → offset (PR2, TDD)
+## Task 4: `transform` - center+level+screen → offset (PR2, TDD)
 
 **Files:**
 - Create: `src/transform.h`, `tests/test_transform.cpp`
@@ -315,7 +315,7 @@ gh pr create --fill --base main
 - [ ] **Step 1: Branch + issue**
 
 ```bash
-gh issue create --title "PR2: pure logic modules" --body "transform, zoom_controller, tracker, config parse — TDD."
+gh issue create --title "PR2: pure logic modules" --body "transform, zoom_controller, tracker, config parse - TDD."
 git checkout main && git pull && git checkout -b feat/pure-logic
 ```
 
@@ -396,12 +396,12 @@ Expected: PASS, all `transform` cases green.
 
 ```bash
 git add src/transform.h src/transform.cpp tests/test_transform.cpp
-git commit -m "feat: transform — center/level/screen to clamped magnifier offset"
+git commit -m "feat: transform - center/level/screen to clamped magnifier offset"
 ```
 
 ---
 
-## Task 5: `zoom_controller` — ramp + direction resolution (PR2, TDD)
+## Task 5: `zoom_controller` - ramp + direction resolution (PR2, TDD)
 
 **Files:**
 - Create: `src/zoom_controller.h`, `tests/test_zoom_controller.cpp`
@@ -527,12 +527,12 @@ Expected: PASS.
 
 ```bash
 git add src/zoom_controller.h src/zoom_controller.cpp tests/test_zoom_controller.cpp
-git commit -m "feat: zoom_controller — multiplicative hold-to-zoom ramp + direction resolve"
+git commit -m "feat: zoom_controller - multiplicative hold-to-zoom ramp + direction resolve"
 ```
 
 ---
 
-## Task 6: `tracker` — free/locked blend with delta integration (PR2, TDD)
+## Task 6: `tracker` - free/locked blend with delta integration (PR2, TDD)
 
 **Files:**
 - Create: `src/tracker.h`, `tests/test_tracker.cpp`
@@ -675,18 +675,18 @@ Expected: PASS.
 
 ```bash
 git add src/tracker.h src/tracker.cpp tests/test_tracker.cpp
-git commit -m "feat: tracker — free/locked blend with raw-delta integration and clamp"
+git commit -m "feat: tracker - free/locked blend with raw-delta integration and clamp"
 ```
 
 ---
 
-## Task 7: `config` — parse (pure) + load/save/hot-reload (PR2 pure half, PR3 I/O half)
+## Task 7: `config` - parse (pure) + load/save/hot-reload (PR2 pure half, PR3 I/O half)
 
 **Files:**
 - Create: `src/config.h`, `tests/test_config.cpp`
 - Modify: `src/config.cpp`
 
-- [ ] **Step 1: Write the failing test** (`tests/test_config.cpp`) — pure parse only
+- [ ] **Step 1: Write the failing test** (`tests/test_config.cpp`) - pure parse only
 
 ```cpp
 #include "doctest.h"
@@ -801,13 +801,13 @@ Expected: PASS. This completes PR2.
 
 ```bash
 git add src/config.h src/config.cpp tests/test_config.cpp
-git commit -m "feat: config — pure INI parser with defaults"
+git commit -m "feat: config - pure INI parser with defaults"
 gh pr create --fill --base main
 ```
 
 ---
 
-## Task 8: `magnifier_engine` — Magnification API wrapper (PR3)
+## Task 8: `magnifier_engine` - Magnification API wrapper (PR3)
 
 **Files:**
 - Create: `src/magnifier_engine.h`, `src/magnifier_engine.cpp`
@@ -871,12 +871,12 @@ Expected: `Wind.exe` builds (it won't do anything useful until `main` is wired i
 
 ```bash
 git add src/magnifier_engine.h src/magnifier_engine.cpp
-git commit -m "feat: magnifier_engine — Magnification API fullscreen-transform wrapper"
+git commit -m "feat: magnifier_engine - Magnification API fullscreen-transform wrapper"
 ```
 
 ---
 
-## Task 9: `input_router` — Raw Input + low-level mouse hook (PR3)
+## Task 9: `input_router` - Raw Input + low-level mouse hook (PR3)
 
 **Files:**
 - Create: `src/input_router.h`, `src/input_router.cpp`
@@ -968,7 +968,7 @@ void InputRouter::drainRaw(int& dx, int& dy) {
 }
 ```
 
-- [ ] **Step 3: Add a helper main.cpp will call from WM_INPUT** — append to `input_router.cpp`
+- [ ] **Step 3: Add a helper main.cpp will call from WM_INPUT** - append to `input_router.cpp`
 
 ```cpp
 namespace wind {
@@ -988,7 +988,7 @@ namespace wind { class InputRouter; void AccumulateRaw(InputRouter& r, int dx, i
 
 ```bash
 git add src/input_router.h src/input_router.cpp
-git commit -m "feat: input_router — WH_MOUSE_LL side-button capture + raw-delta accumulator"
+git commit -m "feat: input_router - WH_MOUSE_LL side-button capture + raw-delta accumulator"
 ```
 
 ---
@@ -1028,7 +1028,7 @@ unsigned long long ConfigMTime(const std::wstring& path) {
 ```
 Note: these use `<windows.h>` but live in the same `config.cpp`. Keep them **below** the pure parser and guarded so the test build excludes them: wrap this block in `#ifndef WIND_TESTS ... #endif`, and add `/DWIND_TESTS` to the `:test` `cl` line in `build.bat`.
 
-- [ ] **Step 2: Add the guard** — wrap the Step 1 block:
+- [ ] **Step 2: Add the guard** - wrap the Step 1 block:
 
 ```cpp
 #ifndef WIND_TESTS
@@ -1052,7 +1052,7 @@ gh pr create --fill --base main
 
 ---
 
-## Task 11: `main.cpp` — wire everything, tick thread, lifecycle (PR4)
+## Task 11: `main.cpp` - wire everything, tick thread, lifecycle (PR4)
 
 **Files:**
 - Create: `src/main.cpp`
@@ -1168,7 +1168,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     g_running.store(false);
     if (tick.joinable()) tick.join();
-    engine.shutdown();       // resets to 1x — never leave the screen zoomed
+    engine.shutdown();       // resets to 1x - never leave the screen zoomed
     g_input.stop();
     Tray::Remove();
     ReleaseMutex(mtx);
@@ -1179,18 +1179,18 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 - [ ] **Step 3: Build**
 
 Run: `build.bat`
-Expected: `Wind.exe` builds and links (Task 12 provides `tray.*`; if building before Task 12, stub `tray.h`/`tray.cpp` first — see Task 12).
+Expected: `Wind.exe` builds and links (Task 12 provides `tray.*`; if building before Task 12, stub `tray.h`/`tray.cpp` first - see Task 12).
 
 - [ ] **Step 4: Commit**
 
 ```bash
 git add src/main.cpp
-git commit -m "feat: main — wire modules, raw-input window, DwmFlush tick thread, lifecycle"
+git commit -m "feat: main - wire modules, raw-input window, DwmFlush tick thread, lifecycle"
 ```
 
 ---
 
-## Task 12: `tray` — system tray icon + menu (PR4)
+## Task 12: `tray` - system tray icon + menu (PR4)
 
 **Files:**
 - Create: `src/tray.h`, `src/tray.cpp`
@@ -1267,7 +1267,7 @@ Expected: `Wind.exe` builds and links cleanly at `/W4`.
 
 ```bash
 git add src/tray.h src/tray.cpp
-git commit -m "feat: tray — icon, right-click menu (edit config / quit), balloon"
+git commit -m "feat: tray - icon, right-click menu (edit config / quit), balloon"
 ```
 
 ---
@@ -1278,7 +1278,7 @@ git commit -m "feat: tray — icon, right-click menu (edit config / quit), ballo
 - Create: `docs/VERIFICATION.md`
 - Modify: `src/main.cpp` (config hot-reload poll), `config/magnifier.ini`
 
-- [ ] **Step 1: Add config hot-reload to the tick thread** — in `main.cpp`, before the tick loop add an mtime poll roughly once per second and re-apply tunable fields:
+- [ ] **Step 1: Add config hot-reload to the tick thread** - in `main.cpp`, before the tick loop add an mtime poll roughly once per second and re-apply tunable fields:
 
 ```cpp
 // inside the tick lambda, after computing dt:
@@ -1295,7 +1295,7 @@ if (sinceCheck > 1.0) {
     }
 }
 ```
-(Capture `zoom`/`tracker` by reference in the lambda — they already are.)
+(Capture `zoom`/`tracker` by reference in the lambda - they already are.)
 
 - [ ] **Step 2: Ship a default `config/magnifier.ini`**
 
