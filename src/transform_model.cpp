@@ -4,6 +4,7 @@
 #include "logging.h"
 #include <windows.h>
 #include <magnification.h>
+#include <dwmapi.h>      // DwmFlush: the sprite-before-blank handoff (issue #221)
 #include <cmath>
 
 namespace wind {
@@ -232,6 +233,12 @@ void TransformModel::setActive(bool active) {
                 sprite_->moveTo(ci.ptScreenPos.x, ci.ptScreenPos.y);
                 sprite_->show();
                 sprite_->keepOnTop();
+                // The blank hits the cursor plane the SAME frame, but the sprite's first
+                // composite lands the NEXT one - a one-frame hole that motion masks and a
+                // still pointer exposes (field-verified). One DwmFlush (~7ms, before the
+                // context build that follows anyway) guarantees the sprite is on screen
+                // before the real pointer vanishes.
+                DwmFlush();
             }
             blanker_->blank();
         }
@@ -259,7 +266,14 @@ void TransformModel::setActive(bool active) {
     // Unconditional (and idempotent): setActive(true) pre-blanks BEFORE the context exists, so
     // a session that never entered the draw branch (cursorVisibility=never, hide-hotkey) still
     // has blanked system cursors to give back even though cursorHidden_ never went true.
-    if (blanker_) blanker_->restore();
+    if (blanker_) {
+        blanker_->restore();
+        // Windows repaints the pointer plane only on the next cursor EVENT, so a restored-but-
+        // still pointer stays invisible until the hand moves (field-verified). A 1px nudge and
+        // back generates that event invisibly.
+        POINT np;
+        if (GetCursorPos(&np)) { SetCursorPos(np.x + 1, np.y); SetCursorPos(np.x, np.y); }
+    }
     idleSinceMs_ = GetTickCount64();   // start the release countdown (idleTick)
     wind::Log(wind::LogLevel::Info, "txsession", "session end maxLevel=%.2f", sessionMaxLevel_);
     sessionMaxLevel_ = 0.0;
