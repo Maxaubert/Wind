@@ -1054,6 +1054,7 @@ static void RunTick(TickState& t) {
                                             t.cfg.warpLock != 0, cur.x, cur.y);
             if (t.cfg.lockForce != 0) locked = true;   // diagnostic: see config.h, never ship
             // lockApps (issue #221): listed foreground exe = locked outright, no heuristics.
+            // The list IS the feature (empty = off); warpLock=1 adds the smart tells globally.
             else if (!t.cfg.lockApps.empty() &&
                      FgExeInList(GetForegroundWindow(), t.cfg.lockApps))
                 locked = true;

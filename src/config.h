@@ -232,14 +232,18 @@ struct Config {
                           //     ballistics (linear, speed-mismatched), drag-follow never engages
                           //     (the #169 drag flicker returns), and the free mode's
                           //     view-derived-from-pointer click guarantee is weakened. Never ship 1.
-    int warpLock = 1;     // warp-anchor lock detection (issue #221, hot): mouselook engines that
-                          //     WARP the pointer to a fixed recenter point every frame (DOOM The
-                          //     Dark Ages, field-traced) defeat both classic lock tells, so the
-                          //     lens snaps back to the warp point instead of panning. 1 = detect
-                          //     the warp signature (repeated big-jump landings on one anchor) and
-                          //     run the locked raw-mickey pan. Optional because the engage window
-                          //     (~1s while the anchor accumulates) can read as a brief hitch
-                          //     before panning "becomes good". 0 = classic tells only.
+    int warpLock = 0;     // game lock handling for pointer-WARPING mouselook engines (issue
+                          //     #221; DOOM The Dark Ages field-traced: the game recenters the
+                          //     pointer every frame, defeating both classic lock tells, so the
+                          //     lens snaps back instead of panning). The lockApps LIST is the
+                          //     feature: listed exes run their sessions locked outright, and an
+                          //     empty list means off - no separate off switch needed (Max).
+                          //     0 (default) = selected apps only; everywhere else is untouched
+                          //         classic behaviour.
+                          //     1 = global: additionally run the smart tells everywhere (warp-
+                          //         anchor, confinement box, hidden-cursor zoom-in seeding) for
+                          //         UNLISTED games - can transiently lock over e.g. fullscreen
+                          //         video with an auto-hidden cursor (~100ms, self-heals).
     int txIdleReleaseMs = 1200;  // how long the DWM magnification context lingers after a zoom
                           //     ends before it is released. Longer = repeat zooms skip the
                           //     rebuild (fewer big entry spikes) but DWM stays magnification-
