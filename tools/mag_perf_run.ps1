@@ -14,8 +14,9 @@
 # Magnifier registry exactly like mag_wobble_probe.ps1.
 param(
   [ValidateSet('wind','native')] [string]$Driver = 'wind',
-  [ValidateSet('pan','ramp','cycle')] [string]$Mode = 'pan',   # ramp: zoom in/out; cycle: Max's repro -
-                                                       # focus-swap Tabby->target, zoom to level, pan, out
+  [ValidateSet('pan','ramp','cycle','rezoom')] [string]$Mode = 'pan',   # ramp: zoom in/out; cycle: Max's
+                                                       # focus-swap repro; rezoom: 15x -> full out ->
+                                                       # IMMEDIATELY in again (session-start bounce repro)
   [int]$Cycles = 5,
   [int]$SettleMs = 1000,         # cycle mode: pause between ramp end and pan start
   [string]$SwapProcess = 'Tabby',
@@ -177,22 +178,27 @@ public static class PF {
   // report "changes|maxPlateauMs|maxJump". The compositor can tick perfectly while the level
   // sits on a plateau then jumps - that is a perceived hitch no flush metric can see.
   public static double LastRampMs;
+  // Also counts BACKWARD level motion during an inward ramp (backSteps + total backward level
+  // travel): the session-start bounce Max reported is the level briefly zooming OUT mid-ramp-in,
+  // which plateau/jump stats are blind to.
   public static string WatchRamp(double target, double timeoutS) {
     var t = System.Diagnostics.Stopwatch.StartNew();
     float last = Level(); double lastChange = 0, maxPlateau = 0; float maxJump = 0; int changes = 0;
+    int backSteps = 0; double backTravel = 0;
     while (t.Elapsed.TotalSeconds < timeoutS) {
       float l = Level();
       if (Math.Abs(l - last) > 0.0001f) {
         double now = t.Elapsed.TotalMilliseconds;
         if (changes > 0) { double p = now - lastChange; if (p > maxPlateau) maxPlateau = p; }
         float j = Math.Abs(l - last); if (j > maxJump) maxJump = j;
+        if (l < last) { backSteps++; backTravel += last - l; }
         changes++; lastChange = now; last = l;
       }
       if (last >= target) break;
       Thread.SpinWait(100);
     }
     LastRampMs = t.Elapsed.TotalMilliseconds;
-    return string.Format("{0}|{1:F0}|{2:F2}", changes, maxPlateau, maxJump);
+    return string.Format("{0}|{1:F0}|{2:F2}|back{3}|{4:F2}", changes, maxPlateau, maxJump, backSteps, backTravel);
   }
 
   // Pan evenness (main thread): max gap between OFFSET changes - a frozen view mid-pan is the
@@ -319,6 +325,32 @@ try {
     # Magnify steals focus at launch - re-focus the target.
     if ($target) { $shell = New-Object -ComObject WScript.Shell; [void]$shell.AppActivate($target.Id); Start-Sleep -Milliseconds 400 }
     if ($Mode -eq 'cycle') { Set-ItemProperty $magKey -Name 'Magnification' -Value 100 -Type DWord; Start-Sleep 1 }
+  }
+
+  if ($Mode -eq 'rezoom') {
+    # The bounce repro (wind only): zoom deep, zoom fully out, zoom straight back in within the
+    # context linger window (txIdleReleaseMs) so no teardown resets the cached write state.
+    [PF]::StartFlushForever()
+    [PF]::MoveAbs([int]($SW/2), [int]($SH/2), $SW, $SH); Start-Sleep -Milliseconds 300
+    for ($c = 1; $c -le $Cycles; $c++) {
+      [PF]::XBtn($true, 2); $r1 = [PF]::WatchRamp($TargetLevel, 9); [PF]::XBtn($false, 2)
+      Start-Sleep -Milliseconds 400
+      [PF]::XBtn($true, 1)
+      $sw6 = [Diagnostics.Stopwatch]::StartNew()
+      while ($sw6.Elapsed.TotalSeconds -lt 8 -and [PF]::Level() -gt 1.02) { Start-Sleep -Milliseconds 10 }
+      [PF]::XBtn($false, 1)
+      Start-Sleep -Milliseconds 250          # well inside the 1.2s linger: context stays up
+      [void][PF]::FlushMark()
+      [PF]::XBtn($true, 2); $r2 = [PF]::WatchRamp($TargetLevel, 9); [PF]::XBtn($false, 2)
+      $g2 = [PF]::FlushMark()
+      "REZOOM $c ramp1=$r1 ramp2=$r2 ramp2Gaps=$g2   (rampN = changes|maxPlateau|maxJump|backSteps|backTravel)"
+      [PF]::XBtn($true, 1)
+      $sw7 = [Diagnostics.Stopwatch]::StartNew()
+      while ($sw7.Elapsed.TotalSeconds -lt 8 -and [PF]::Level() -gt 1.02) { Start-Sleep -Milliseconds 10 }
+      [PF]::XBtn($false, 1)
+      Start-Sleep -Milliseconds 1500         # let the context release before the next cycle's ramp1
+    }
+    return
   }
 
   if ($Mode -eq 'cycle') {

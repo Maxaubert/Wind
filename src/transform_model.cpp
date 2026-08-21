@@ -254,6 +254,9 @@ void TransformModel::setActive(bool active) {
     QueryPerformanceFrequency(&fr); QueryPerformanceCounter(&pa);
     host_.setTransform(1.0f, 0, 0, 0, 0, false);
     QueryPerformanceCounter(&pb);
+    // The park applied 1.0 outside writeTransform, so sync the cached level: a stale lastLevel_
+    // here anchored the step cap's next session at the trailing zoom-out value (#219 bounce).
+    lastLevel_ = 1.0; lastRequestedLevel_ = 1.0;
     identityParked_ = true;
     parkedAtMs_ = GetTickCount64();
     const double parkMs = double(pb.QuadPart - pa.QuadPart) * 1000.0 / fr.QuadPart;
@@ -332,15 +335,18 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     }
     // txMaxStepPct: rate-limit the APPLIED level change per tick. Each change makes DWM re-scale
     // its cached surfaces and that cost grows with the level, so an unclamped fast ramp demands
-    // the most expensive re-scales back to back exactly at the top - the suspected cause of the
-    // occasional huge spike at max zoom. The applied level trails and catches up within a few
-    // ticks of the ramp stopping; the source rect below is recomputed for whatever we apply.
-    if (cfg.txMaxStepPct > 0 && lastLevel_ > 1.0 && applyLevel > 1.0) {
-        const double maxRel = cfg.txMaxStepPct / 1000.0;
-        const double up = lastLevel_ * (1.0 + maxRel);
-        const double down = lastLevel_ / (1.0 + maxRel);
+    // the most expensive re-scales back to back exactly at the top - measured (#219): ~15% of
+    // uncapped 15x zoom-ins stalled 35-43ms then snapped 1.2-1.9 levels; capped, 20/20 ramps
+    // ran even. UP-steps ONLY: zoom-out measured clean uncapped (outGaps <=8ms in every soak),
+    // and a DOWN clamp anchored on lastLevel_ is what caused the session-start BOUNCE (rig-
+    // reproduced 4/4: 5-7 backward level steps at the start of a quick re-zoom) - the zoom-out
+    // trailed the controller, the identity park bypassed lastLevel_, and the next ramp's first
+    // writes were dragged back down toward the stale anchor. The applied level trails a fast
+    // ramp and catches up within a few ticks of it stopping; the source rect below is recomputed
+    // for whatever we apply.
+    if (cfg.txMaxStepPct > 0 && lastLevel_ > 1.0 && applyLevel > lastLevel_) {
+        const double up = lastLevel_ * (1.0 + cfg.txMaxStepPct / 1000.0);
         if (applyLevel > up) applyLevel = up;
-        else if (applyLevel < down) applyLevel = down;
     }
     // txGrid: snap to a fixed GEOMETRIC ladder (1.0 * g^k) so every zoom reuses the same small
     // set of scale factors instead of minting ~200 fresh ones - DWM's per-factor surface cache
