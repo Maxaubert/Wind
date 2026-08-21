@@ -2232,6 +2232,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     QueryPerformanceCounter(&ts.prev);
     ts.iniPath = iniPath;
     ts.lastMtime = ConfigMTime(iniPath);
+    // Seed the UI-only-change fingerprint from the CURRENT ini, or the first settings write
+    // after launch always reloads (empty fingerprint = "unknown") - the first theme flip of a
+    // session still collapsed the zoom (Max field report on the StripUiOnlyKeys fix).
+    ts.lastCoreIni = wind::StripUiOnlyKeys(wind::ReadTextFile(iniPath));
     // Watch the directory holding the ini so config hot-reload doesn't stat magnifier.ini every
     // second on the render thread (see RunTick). LAST_WRITE catches in-place saves; FILE_NAME
     // catches write-temp-then-rename saves. nullptr/INVALID on failure -> RunTick falls back to
