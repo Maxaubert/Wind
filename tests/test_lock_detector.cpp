@@ -154,6 +154,45 @@ TEST_CASE("warp tell: a fast desktop pan (positions always advancing) never lock
     CHECK(!d.locked());
 }
 
+// Round 2 (Max: gentle mouselook needed ERRATIC motion to engage): the confinement-box tell.
+// Constants: kBoxTicks=24, kBoxRawSum=400, kBoxSpanPx=30.
+
+TEST_CASE("box tell: gentle mouselook (small jiggle, streaming mickeys) locks within a window") {
+    LockDetector d;
+    // ~20 mickeys/tick, cursor jiggling +/-8px around the warp point: too small for the anchor
+    // tell's 100px jumps, but 480 mickeys land in a 16px box within one 24-tick window.
+    for (int i = 0; i < 24; ++i)
+        d.update(false, 20, 10, true, 853 + (i % 2 ? 8 : -8), 480 + (i % 3 ? 5 : -5));
+    CHECK(d.locked());
+    CHECK(d.warpLocked());
+}
+
+TEST_CASE("box tell: precise slow desktop work (few mickeys) never locks") {
+    LockDetector d;
+    // Careful nudging: ~6 mickeys/tick in a tiny area - 144/window, far under kBoxRawSum.
+    for (int i = 0; i < 96; ++i)
+        d.update(false, 6, 2, true, 1200 + (i % 2), 800);
+    CHECK(!d.locked());
+}
+
+TEST_CASE("box tell: a sweeping pan (positions advancing) never locks") {
+    LockDetector d;
+    for (int i = 0; i < 96; ++i)
+        d.update(false, 25, 30, true, 400 + i * 30, 900);
+    CHECK(!d.locked());
+}
+
+TEST_CASE("box tell: opening the game menu (cursor roams) unlocks shortly after") {
+    LockDetector d;
+    for (int i = 0; i < 24; ++i)
+        d.update(false, 20, 10, true, 853 + (i % 2 ? 8 : -8), 480);
+    REQUIRE(d.locked());
+    bool locked = true;
+    for (int i = 0; i < 40 && locked; ++i)
+        locked = d.update(false, 10, 12, true, 1000 + i * 25, 700 + i * 8);
+    CHECK(!locked);
+}
+
 TEST_CASE("warp tell: reset clears the anchor state") {
     LockDetector d;
     d.update(false, 20, 300, true, 853, 480);

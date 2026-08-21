@@ -55,5 +55,10 @@ private:
     int  anchorMissTicks_ = 0;   // ticks since the cursor last sat on the anchor
     int  warpReturns_ = 0;       // big jumps that LANDED on the anchor
     int  sinceWarp_ = 1000;      // ticks since the last warp landing (large = long ago)
+    // Confinement-box tell (issue #221, round 2): GENTLE mouselook produces warp jumps too
+    // small for the anchor tell, but the signature is the same - lots of raw mickeys while the
+    // cursor's positions stay inside a tiny box. Tumbling window accumulators.
+    int  boxTicks_ = 0, boxRawSum_ = 0;
+    int  boxMinX_ = 0, boxMaxX_ = 0, boxMinY_ = 0, boxMaxY_ = 0;
 };
 }

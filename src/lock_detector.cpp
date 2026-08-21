@@ -16,11 +16,20 @@ constexpr int kWarpJumpPx      = 100;  // a landing only counts as a warp if it 
 constexpr int kWarpLockReturns = 4;    // anchor landings before the lock engages
 constexpr int kAnchorLossTicks = 45;   // ~0.3s off-anchor -> forget it (it was not a warp target)
 constexpr int kWarpQuietTicks  = 12;   // warp this recent blocks the free-streak unlock
+// Confinement-box tell (issue #221 round 2, Max: gentle mouselook needed ERRATIC motion to
+// engage the anchor tell). Signature: a hand streaming plenty of mickeys while every cursor
+// position stays inside a tiny box - gentle warping keeps the pointer jiggling around the
+// recenter point. Precise desktop work never trips it: a careful hand produces proportionally
+// FEW mickeys (ballistics map slow motion ~1:1), nowhere near kBoxRawSum in one window.
+constexpr int kBoxTicks  = 24;   // tumbling window (~170ms at 144Hz) - engages fast
+constexpr int kBoxRawSum = 400;  // mickeys accumulated in the window = deliberate sweeping
+constexpr int kBoxSpanPx = 30;   // and the cursor went nowhere: confined
 }
 
 void LockDetector::reset() {
     locked_ = false; lockStreak_ = 0; freeStreak_ = 0;
     haveAnchor_ = false; anchorMissTicks_ = 0; warpReturns_ = 0; sinceWarp_ = 1000;
+    boxTicks_ = 0; boxRawSum_ = 0;
 }
 
 bool LockDetector::update(bool clipConfined, int rawMag, int cursorMag) {
@@ -53,6 +62,21 @@ bool LockDetector::update(bool clipConfined, int rawMag, int cursorMag,
             // end of a hand flick) never accumulates returns and ages out via anchorMissTicks_.
             anchorX_ = cx; anchorY_ = cy; haveAnchor_ = true;
             anchorMissTicks_ = 0; warpReturns_ = 0;
+        }
+        // Confinement-box tell: accumulate the tumbling window.
+        if (boxTicks_ == 0) { boxMinX_ = boxMaxX_ = cx; boxMinY_ = boxMaxY_ = cy; boxRawSum_ = 0; }
+        if (cx < boxMinX_) boxMinX_ = cx; if (cx > boxMaxX_) boxMaxX_ = cx;
+        if (cy < boxMinY_) boxMinY_ = cy; if (cy > boxMaxY_) boxMaxY_ = cy;
+        boxRawSum_ += rawMag;
+        if (++boxTicks_ >= kBoxTicks) {
+            if (boxRawSum_ >= kBoxRawSum &&
+                boxMaxX_ - boxMinX_ <= kBoxSpanPx && boxMaxY_ - boxMinY_ <= kBoxSpanPx) {
+                locked_ = true;
+                if (warpReturns_ == 0) warpReturns_ = 1;   // report as warp-class for diagnostics
+                sinceWarp_ = 0;                            // block the free-streak unlock nearby
+                freeStreak_ = 0; lockStreak_ = 0;
+            }
+            boxTicks_ = 0;
         }
     }
 
