@@ -14,9 +14,12 @@
 # Magnifier registry exactly like mag_wobble_probe.ps1.
 param(
   [ValidateSet('wind','native')] [string]$Driver = 'wind',
-  [ValidateSet('pan','ramp','cycle','rezoom')] [string]$Mode = 'pan',   # ramp: zoom in/out; cycle: Max's
-                                                       # focus-swap repro; rezoom: 15x -> full out ->
-                                                       # IMMEDIATELY in again (session-start bounce repro)
+  [ValidateSet('pan','ramp','cycle','rezoom','zigzag')] [string]$Mode = 'pan', # ramp: zoom in/out; cycle:
+                                                       # focus-swap repro; rezoom: session-start bounce
+                                                       # repro; zigzag: Max's protocol - start at the
+                                                       # BOTTOM, zoom in, zig-zag climb to the TOP
+                                                       # (both pan axes at once), zoom out
+  [int]$ZigClimb = 2,            # zigzag: upward mickeys per step
   [int]$Cycles = 5,
   [int]$SettleMs = 1000,         # cycle mode: pause between ramp end and pan start
   [string]$SwapProcess = 'Tabby',
@@ -201,6 +204,58 @@ public static class PF {
     return string.Format("{0}|{1:F0}|{2:F2}|back{3}|{4:F2}", changes, maxPlateau, maxJump, backSteps, backTravel);
   }
 
+  // Zig-zag injection (worker): horizontal sweeps + steady upward climb, stopping at topY.
+  public static volatile bool ZigDone;
+  public static void StartZig(int mickeys, int climb, int stepMs, int reverseMs, int topY, double timeoutS) {
+    ZigDone = false;
+    worker = new Thread(() => {
+      var t = System.Diagnostics.Stopwatch.StartNew();
+      int dir = 1; double lastRev = 0, lastInject = -1000;
+      while (t.Elapsed.TotalSeconds < timeoutS) {
+        double nowMs = t.Elapsed.TotalMilliseconds;
+        if (nowMs - lastRev > reverseMs) { dir = -dir; lastRev = nowMs; }
+        if (nowMs - lastInject >= stepMs) {
+          MoveRel(dir * mickeys, -climb); lastInject = nowMs;
+          POINT p; if (GetCursorPos(out p) && p.Y <= topY) break;
+        }
+        Thread.Sleep(1);
+      }
+      ZigDone = true;
+    });
+    worker.IsBackground = true; worker.Start();
+  }
+
+  // Zig watcher (main thread, Mag affinity): offset-change gaps + BOTH-axis cursor deviation
+  // (the guardrail) while the zig runs. Returns "changes|maxGapMs|dxMed/dxP95|dyMed/dyP95".
+  public static string WatchZig(double timeoutS, int sw, int sh) {
+    var t = System.Diagnostics.Stopwatch.StartNew();
+    var devX = new List<double>(); var devY = new List<double>();
+    float l; int ox, oy, lox = int.MinValue, loy = 0, changes = 0;
+    double lastChange = 0, maxGap = 0, halfW = sw / 2.0, halfH = sh / 2.0;
+    while (!ZigDone && t.Elapsed.TotalSeconds < timeoutS) {
+      if (MagGetFullscreenTransform(out l, out ox, out oy)) {
+        POINT p; GetCursorPos(out p);
+        if (ox != lox || oy != loy) {
+          double now = t.Elapsed.TotalMilliseconds;
+          if (changes > 0) { double g = now - lastChange; if (g > maxGap) maxGap = g; }
+          changes++; lastChange = now; lox = ox; loy = oy;
+        }
+        if (l > 1.01) {
+          double maxOffX = sw - sw / l, maxOffY = sh - sh / l;
+          double dx = (p.X - ox) * l - halfW, dy = (p.Y - oy) * l - halfH;
+          bool cx = ox <= 0.5 || ox >= maxOffX - 0.5, cy = oy <= 0.5 || oy >= maxOffY - 0.5;
+          if (!cx && Math.Abs(dx) < sw) devX.Add(Math.Abs(dx));
+          if (!cy && Math.Abs(dy) < sh) devY.Add(Math.Abs(dy));
+        }
+      }
+      Thread.SpinWait(150);
+    }
+    devX.Sort(); devY.Sort();
+    double xm = devX.Count > 0 ? devX[devX.Count / 2] : -1, xp = devX.Count > 0 ? devX[(int)(devX.Count * 0.95)] : -1;
+    double ym = devY.Count > 0 ? devY[devY.Count / 2] : -1, yp = devY.Count > 0 ? devY[(int)(devY.Count * 0.95)] : -1;
+    return string.Format("{0}|{1:F0}|dx{2:F1}/{3:F1}|dy{4:F1}/{5:F1}", changes, maxGap, xm, xp, ym, yp);
+  }
+
   // Pan evenness (main thread): max gap between OFFSET changes - a frozen view mid-pan is the
   // artefact, however smooth the compositor heartbeat is.
   public static string WatchPanGaps(double seconds) {
@@ -350,6 +405,81 @@ try {
       [PF]::XBtn($false, 1)
       Start-Sleep -Milliseconds 1500         # let the context release before the next cycle's ramp1
     }
+    return
+  }
+
+  if ($Mode -eq 'zigzag') {
+    # Max's zig-zag protocol: focus-swap, cursor to the BOTTOM of the (maximized) target, zoom
+    # to level, zig-zag climb to the TOP (both pan axes), zoom out. Resources sampled across the
+    # whole loop; per-phase compositor gaps + offset cadence + both-axis cursor deviation.
+    [PF]::StartFlushForever()
+    $shell2 = New-Object -ComObject WScript.Shell
+    $swap = Get-Process -Name $SwapProcess -EA SilentlyContinue | Where-Object { $_.MainWindowTitle } | Select-Object -First 1
+    $groups = @{ dwm = 'dwm'; wind = 'Wind'; mag = 'Magnify'; app = $FocusProcess }
+    $cpu0 = @{}; foreach ($k in $groups.Keys) { $cpu0[$k] = Sum-Cpu (Get-ProcGroup $groups[$k]) }
+    $gpuFile = Join-Path $env:TEMP "wind_perf_gpu_$PID.txt"; Remove-Item $gpuFile -EA SilentlyContinue
+    $gpuArgs = @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $PSScriptRoot 'gpu_sampler.ps1'),
+                 '-Samples', [string]($Cycles * 7), '-OutFile', $gpuFile)
+    $gpuChild = Start-Process powershell -PassThru -WindowStyle Hidden -ArgumentList $gpuArgs
+    $loopSw = [Diagnostics.Stopwatch]::StartNew()
+    "zigzag mode: swap=$SwapProcess target=$FocusProcess cycles=$Cycles level=$TargetLevel"
+    for ($c = 1; $c -le $Cycles; $c++) {
+      if ($swap) { [void]$shell2.AppActivate($swap.Id); Start-Sleep -Milliseconds 500 }
+      if ($target) { [void]$shell2.AppActivate($target.Id); Start-Sleep -Milliseconds 500 }
+      [PF]::MoveAbs([int]($SW/2), $SH - 120, $SW, $SH); Start-Sleep -Milliseconds 250
+      [void][PF]::FlushMark()
+      if ($Driver -eq 'wind') {
+        [PF]::XBtn($true, 2); $ramp = [PF]::WatchRamp($TargetLevel, 9); [PF]::XBtn($false, 2)
+      } else {
+        Set-ItemProperty $magKey -Name 'Magnification' -Value ([int]($TargetLevel * 100)) -Type DWord
+        $ramp = [PF]::WatchRamp($TargetLevel - 0.2, 9)
+      }
+      $rampMs = [int][PF]::LastRampMs
+      $rampG = [PF]::FlushMark()
+      Start-Sleep -Milliseconds 400
+      [void][PF]::FlushMark()
+      [PF]::StartZig($PanMickeys, $ZigClimb, $StepMs, 500, 130, 8)
+      $zig = [PF]::WatchZig(8.5, $SW, $SH)
+      $zigG = [PF]::FlushMark()
+      $sw5 = [Diagnostics.Stopwatch]::StartNew()
+      if ($Driver -eq 'wind') {
+        [PF]::XBtn($true, 1)
+        while ($sw5.Elapsed.TotalSeconds -lt 8 -and [PF]::Level() -gt 1.05) { Start-Sleep -Milliseconds 20 }
+        [PF]::XBtn($false, 1)
+      } else {
+        Set-ItemProperty $magKey -Name 'Magnification' -Value 100 -Type DWord
+        while ($sw5.Elapsed.TotalSeconds -lt 8 -and [PF]::Level() -gt 1.05) { Start-Sleep -Milliseconds 20 }
+      }
+      $outMs = [int]$sw5.Elapsed.TotalMilliseconds
+      $outG = [PF]::FlushMark()
+      "ZIG $c rampMs=$rampMs ramp=$ramp rampGaps=$rampG zig=$zig zigGaps=$zigG outMs=$outMs outGaps=$outG"
+      Start-Sleep -Milliseconds 600
+    }
+    $loopSecs = $loopSw.Elapsed.TotalSeconds
+    $cpu1 = @{}; foreach ($k in $groups.Keys) { $cpu1[$k] = Sum-Cpu (Get-ProcGroup $groups[$k]) }
+    $ws = @{}; foreach ($k in $groups.Keys) { $ws[$k] = Sum-Ws (Get-ProcGroup $groups[$k]) }
+    if ($gpuChild -and -not $gpuChild.HasExited) { Stop-Process -Id $gpuChild.Id -Force -EA SilentlyContinue }
+    $gpuByPid = @{}
+    if (Test-Path $gpuFile) {
+      foreach ($line in Get-Content $gpuFile) {
+        $parts = $line -split ','
+        if ($parts.Count -eq 2) {
+          $p = [int]$parts[0]; if (-not $gpuByPid[$p]) { $gpuByPid[$p] = [System.Collections.ArrayList]::new() }
+          [void]$gpuByPid[$p].Add([double]$parts[1])
+        }
+      }
+    }
+    function GpuOfZ([string]$name) {
+      $ids = @(Get-ProcGroup $name | ForEach-Object Id); $vals = @()
+      foreach ($p in $ids) { if ($gpuByPid[$p]) { $vals += ($gpuByPid[$p] | Measure-Object -Average).Average } }
+      if ($vals.Count -gt 0) { [math]::Round(($vals | Measure-Object -Sum).Sum, 1) } else { 0 }
+    }
+    $cpuLine = 'RESOURCES'
+    foreach ($k in @('dwm','wind','mag','app')) {
+      $d = 0; if ($cpu1[$k] -and $cpu0[$k]) { $d = [math]::Round(($cpu1[$k] - $cpu0[$k]) / $loopSecs * 100, 1) }
+      $cpuLine += " cpu$($k)=$d"
+    }
+    "$cpuLine gpuDwm=$(GpuOfZ 'dwm') gpuWind=$(GpuOfZ 'Wind') gpuMag=$(GpuOfZ 'Magnify') gpuApp=$(GpuOfZ $FocusProcess) wsDwm=$($ws['dwm']) wsWind=$($ws['wind']) wsMag=$($ws['mag']) wsApp=$($ws['app'])"
     return
   }
 

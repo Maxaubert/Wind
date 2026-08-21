@@ -46,3 +46,24 @@ ramp plateau <=13ms / jump <=0.4 levels / no over-25ms flush gaps; pan flush gap
 Prior config.h comments say txLevelStep and txGrid measured NO BETTER / WORSE - those skip or
 quantize writes. The cap is different: it never skips, it limits the SIZE of a change, which is
 what kills the snap without touching cadence.
+
+## Round 2: session-start bounce (Max field report after the cap shipped)
+
+Quick re-zoom (15x -> full out -> immediately in) made the level BOUNCE at ramp start: rig-
+reproduced 4/4 with the harness rezoom mode (5-7 backward level steps, 0.13-0.19 levels of
+backward travel). Cause: the cap's DOWN clamp anchored on a stale lastLevel_ - zoom-out trailed
+under the cap and the identity park wrote 1.0 without updating the cache. Fix (ae1f126): cap
+UP-steps only (zoom-out measured clean uncapped, outGaps <=8ms in every soak) + the park syncs
+lastLevel_. After: back0 on every re-zoom, ramps unchanged. Residual: a sporadic DWM stall
+(~1/10 ramps, system-internal) still occurs but now recovers as a capped glide, not a snap.
+
+## Round 3: Max's zig-zag protocol (bottom -> top climb at 15x, both pan axes, 8 cycles each)
+
+- WIND: 8/8 clean. Ramps even (back0), zig offset gaps max 21-29ms, compositor flush gaps
+  max 18.9ms, ZERO over-25ms stutters in any phase. Cursor welded: dev median 0.0 both axes.
+  Resources: dwm CPU ~0, GPU ~0.5%, dwm WS 157MB, Wind WS 19MB.
+- NATIVE: stutters in EVERY zig pass - 1-6 over-25ms compositor stalls per climb (28 across
+  8 cycles), ramp gaps 24-28.6ms routinely, plus Magnify.exe 124MB WS / 1.3% CPU.
+
+Wind is as good or better than wm on every protocol measured: steady pan, fast pan, ramp
+cycling, focus-swap cycles, quick re-zooms, and the zig-zag climb.
