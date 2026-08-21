@@ -222,6 +222,7 @@ struct TickState {
     CursorMapper   mapper;
     LockDetector   detector;    // free vs game-locked cursor
     bool           prevDetLocked = false;   // edge-log the detector state (issue #221)
+    std::string    lastCoreIni;             // stripped ini fingerprint (skip UI-only reloads)
     POINT          lastSetVirtual{};  // MEASURED post-present pointer position (virtual px), the
                                       // baseline for the next tick's hand delta (issue #169: never
                                       // assume the weld landed - measure)
@@ -642,6 +643,12 @@ static void RunTick(TickState& t) {
         unsigned long long m = ConfigMTime(t.iniPath);
         if (m != t.lastMtime) {
             t.lastMtime = m;
+            // Skip the reload when only UI-owned keys changed (uiTheme/showAdvanced/onboarded):
+            // the settings app writes those, the core never reads them, and the reload below
+            // resets the ZoomController - a theme toggle mid-zoom collapsed the zoom to 1x.
+            std::string stripped = wind::StripUiOnlyKeys(wind::ReadTextFile(t.iniPath));
+            if (t.lastCoreIni.empty() || stripped != t.lastCoreIni) {
+            t.lastCoreIni = stripped;
             Config nc = LoadConfig(t.iniPath);
             // Re-bind the hook's button mapping if the user changed it via the config UI; without
             // this the hook would keep firing the OLD button (the new VK works via GetAsyncKeyState
@@ -678,6 +685,7 @@ static void RunTick(TickState& t) {
             double ocx = t.mapper.centerX(), ocy = t.mapper.centerY();   // preserve position
             t.mapper = CursorMapper(t.mon.w, t.mon.h, nc.cursorSmoothing);
             t.mapper.reset(ocx, ocy);
+            }   // core-relevant change guard (StripUiOnlyKeys)
         }
     }
 

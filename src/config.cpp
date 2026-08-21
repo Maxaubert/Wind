@@ -1,4 +1,5 @@
 #include "config.h"
+#include <cstring>
 #include <sstream>
 #include <string>
 #include <algorithm>
@@ -253,6 +254,29 @@ Config ParseConfig(const std::string& text) {
     return c;
 }
 }
+
+namespace wind {
+std::string StripUiOnlyKeys(const std::string& iniText) {
+    std::string out;
+    out.reserve(iniText.size());
+    size_t pos = 0;
+    while (pos < iniText.size()) {
+        size_t eol = iniText.find('\n', pos);
+        if (eol == std::string::npos) eol = iniText.size();
+        std::string line = iniText.substr(pos, eol - pos);
+        size_t b = line.find_first_not_of(" \t");
+        bool uiOnly = false;
+        if (b != std::string::npos) {
+            for (const char* k : { "uiTheme=", "showAdvanced=", "onboarded=" }) {
+                if (line.compare(b, strlen(k), k) == 0) { uiOnly = true; break; }
+            }
+        }
+        if (!uiOnly) { out += line; out += '\n'; }
+        pos = eol + 1;
+    }
+    return out;
+}
+}  // namespace wind
 
 #ifndef WIND_TESTS
 // --- File I/O (excluded from the pure test build via WIND_TESTS) ------------

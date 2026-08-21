@@ -393,6 +393,13 @@ bool IsForbiddenBindVk(int vk);
 // True when exeName (bare file name, any case) appears in a comma-separated list. Used for the
 // Auto/hybrid transform exclusion (fullscreen browser video must stay on the render engine).
 bool IsExeInList(const std::string& exeName, const std::string& list);
+// The ini text with UI-ONLY lines removed (uiTheme, showAdvanced, onboarded): the settings app
+// owns those keys and the core never consumes them, yet every write hot-reloads the core - and
+// the reload resets the ZoomController, so toggling the app theme while zoomed collapsed the
+// zoom to 1x (Max field report). The core compares this stripped form across reloads and skips
+// the reload when nothing it consumes changed. 'profile' stays IN: the core mirrors setConfig
+// into the active profile, so a profile change must still reload.
+std::string StripUiOnlyKeys(const std::string& iniText);
 // Pure: parse "#rrggbb" or "rrggbb" (case-insensitive) into r,g,b floats in [0,1]. Returns
 // false on any malformed input (wrong length, non-hex), leaving the outputs untouched so the
 // caller keeps its fallback default.
