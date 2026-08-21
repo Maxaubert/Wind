@@ -92,7 +92,7 @@ test('theme toggle writes uiTheme', async ({ page }) => {
 test('changes stage until Apply, then setConfig fires', async ({ page }) => {
   await page.goto('/');
   // Staged via the alternate-keybinds toggle: the smooth-zoom toggle left the UI (always on).
-  await page.getByText('Enable alternate keybinds', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();
+  await page.getByText('Alternate keybinds', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();
   expect(await page.evaluate(() => window.__sets.filter(s => s.key === 'altKeybinds').length)).toBe(0);
   await page.getByRole('button', { name: 'Apply' }).click();
   const sets = await page.evaluate(() => window.__sets);
@@ -116,7 +116,7 @@ test('a slot holding both a side-button and a key shows BOTH bindings', async ({
 // row stays one line however many programs are listed.
 test('the app row summarises an empty list and opens a dialog', async ({ page }) => {
   await page.goto('/');
-  const row = page.getByText("Don't swallow keys in these apps", { exact: true }).locator('xpath=../..');
+  const row = page.getByText("Pass zoom keys to these apps", { exact: true }).locator('xpath=../..');
   await expect(row.getByText('None', { exact: true })).toBeVisible();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await row.getByRole('button', { name: 'Manage list' }).click();
@@ -238,7 +238,7 @@ test('closing with unsaved changes asks before discarding', async ({ page }) => 
   // The title-bar X, not the footer Discard: both a footer button and the dialog are named
   // "Discard", so every button here is located precisely.
   const titleClose = page.locator('button.tbtn.close');
-  await page.getByText('Enable alternate keybinds', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();   // smooth-zoom toggle left the UI
+  await page.getByText('Alternate keybinds', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();   // smooth-zoom toggle left the UI
   await titleClose.click();
   await expect(page.getByRole('dialog')).toContainText('Settings not applied');
   // Cancel keeps the window and the staged change.
@@ -342,7 +342,7 @@ test('delete is disabled on the last profile', async ({ page }) => {
 
 test('switching with staged changes raises the unsaved-changes guard', async ({ page }) => {
   await page.goto('/');
-  await page.getByText('Enable alternate keybinds', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();   // smooth-zoom toggle left the UI
+  await page.getByText('Alternate keybinds', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();   // smooth-zoom toggle left the UI
   await page.getByRole('button', { name: /Default/ }).click();
   await page.getByRole('menuitemradio', { name: /Gaming/ }).click();
   await expect(page.getByText('Unsaved changes')).toBeVisible();
@@ -363,7 +363,7 @@ test('a failed profile action surfaces a visible error dialog', async ({ page })
 
 test('deleting a NON-active profile with staged changes skips the guard', async ({ page }) => {
   await page.goto('/');
-  await page.getByText('Enable alternate keybinds', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();   // smooth-zoom toggle left the UI
+  await page.getByText('Alternate keybinds', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();   // smooth-zoom toggle left the UI
   await page.getByRole('button', { name: /Default/ }).click();
   await page.getByRole('menuitemradio', { name: /Gaming/ }).click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Delete' }).click();          // one-click delete
@@ -421,7 +421,7 @@ test('forbidden keys are refused during keybind capture and capture stays armed'
 
 test('a model change writes the ini BEFORE requesting the relaunch', async ({ page }) => {
   await page.goto('/');
-  const row = page.getByText('Magnifier model', { exact: true }).locator('xpath=../..');
+  const row = page.getByText('Magnifier engine', { exact: true }).locator('xpath=../..');
   await row.getByRole('combobox').click();
   await page.getByRole('option', { name: 'Windows Magnifier' }).click();
   await page.getByRole('button', { name: 'Apply' }).click();
@@ -435,7 +435,7 @@ test('a model change writes the ini BEFORE requesting the relaunch', async ({ pa
 test('a failed relaunch reverts the model dropdown and the ini', async ({ page }) => {
   await page.addInitScript(() => { window.__restartFail = true; });
   await page.goto('/');
-  const row = page.getByText('Magnifier model', { exact: true }).locator('xpath=../..');
+  const row = page.getByText('Magnifier engine', { exact: true }).locator('xpath=../..');
   await row.getByRole('combobox').click();
   await page.getByRole('option', { name: 'Windows Magnifier' }).click();
   await page.getByRole('button', { name: 'Apply' }).click();

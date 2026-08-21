@@ -1060,12 +1060,19 @@ static void RunTick(TickState& t) {
                                             std::abs(rawDx) + std::abs(rawDy),
                                             std::abs(curDx) + std::abs(curDy),
                                             t.cfg.warpLock != 0, cur.x, cur.y);
-            if (t.cfg.lockForce != 0) locked = true;   // diagnostic: see config.h, never ship
             // lockApps (issue #221): listed foreground exe = locked outright, no heuristics.
             // The list IS the feature (empty = off); warpLock=1 adds the smart tells globally.
-            else if (!t.cfg.lockApps.empty() &&
-                     FgExeInList(GetForegroundWindow(), t.cfg.lockApps))
+            // MUST force through the DETECTOR, not just this tick's local: the free-cursor gate
+            // reads t.detector.locked() below, and a local-only force left the transform view
+            // pinned to the warped pointer (field regression: the list "did nothing" once the
+            // zoom-in seeding was scoped behind warpLock - gameplay had been riding the seed).
+            const bool forcedLock = t.cfg.lockForce != 0 ||
+                (!t.cfg.lockApps.empty() &&
+                 FgExeInList(GetForegroundWindow(), t.cfg.lockApps));
+            if (forcedLock && !locked) {
+                t.detector.seedLock();
                 locked = true;
+            }
             if (locked != t.prevDetLocked) {
                 // Field diagnosis (issue #221): which tell engaged, and when, in wind-core.log.
                 wind::Log(wind::LogLevel::Info, "lock", "detector %s%s lvl=%.2f",

@@ -68,7 +68,7 @@ test('a control is named by its own row label, not just any label', async ({ pag
   // (Post-cleanup roster: the smooth-zoom/multi-monitor toggles, sharpness slider, and the
   // colour input left the UI - no color-type row remains, so that widget type is uncovered.)
   const cases = [
-    ['Enable alternate keybinds', 'checkbox'],
+    ['Alternate keybinds', 'checkbox'],
     ['Max zoom', 'slider'],
     ['Cursor speed', 'slider'],
     ['Frametime logging', 'checkbox'],
@@ -79,7 +79,7 @@ test('a control is named by its own row label, not just any label', async ({ pag
       `${role} named "${label}"`).toHaveCount(1);
 
   // Value-bearing controls read "<label> <value>" so the binding/selection is spoken with the row.
-  await expect(page.getByRole('combobox', { name: /Magnifier model.*Render/ })).toHaveCount(1);
+  await expect(page.getByRole('combobox', { name: /Magnifier engine.*Render/ })).toHaveCount(1);
   await expect(page.getByRole('button', { name: /Zoom in.*Mouse button 5/ })).toHaveCount(1);
   await expect(page.getByRole('button', { name: /Inspect mode.*F2/ })).toHaveCount(1);
 });
@@ -93,7 +93,7 @@ test('row descriptions are linked to their control, not left orphaned', async ({
 });
 
 test('sliders speak their unit instead of a bare number', async ({ page }) => {
-  await expect(page.getByRole('slider', { name: /Smooth ramp/ }))
+  await expect(page.getByRole('slider', { name: /Ease-in duration/ }))
     .toHaveAttribute('aria-valuetext', /seconds/);
   await expect(page.getByRole('slider', { name: /Zoom-in speed/ }))
     .toHaveAttribute('aria-valuetext', /times/);
@@ -177,7 +177,7 @@ test('the settings prompts announce themselves too', async ({ page }) => {
 // --- The dropdown -----------------------------------------------------------
 
 test('the model dropdown is fully keyboard operable', async ({ page }) => {
-  const combo = page.getByRole('combobox', { name: /Magnifier model/ });
+  const combo = page.getByRole('combobox', { name: /Magnifier engine/ });
   await combo.focus();
 
   await page.keyboard.press('Enter');                       // open
@@ -215,7 +215,7 @@ test('the model dropdown is fully keyboard operable', async ({ page }) => {
 
 test('the dropdown supports type-ahead like a native select', async ({ page }) => {
   // Retargeted to the model picker: the cursor-visibility select left the UI (2026-08-21).
-  const combo = page.getByRole('combobox', { name: /Magnifier model/ });
+  const combo = page.getByRole('combobox', { name: /Magnifier engine/ });
   await combo.focus();
   await page.keyboard.press('t');            // "Transform"
   await expect(page.getByRole('listbox')).toBeVisible();
@@ -277,7 +277,7 @@ test('restructuring the page is announced', async ({ page }) => {
 test('Tab escapes an armed keybind capture instead of binding Tab', async ({ page }) => {
   // Arming used to swallow every key including Tab, so a keyboard user who activated a keycap by
   // mistake had no way out except Escape - which nothing told them about.
-  const cap = page.getByRole('button', { name: /Hide cursor \(hotkey\)/ });
+  const cap = page.getByRole('button', { name: /Hide cursor/ });
   await cap.focus();
   await page.keyboard.press('Enter');                    // arm
   await expect(cap).toHaveText(/Press a key/);
@@ -289,7 +289,7 @@ test('Tab escapes an armed keybind capture instead of binding Tab', async ({ pag
 });
 
 test('an armed keycap says so, and carries its instructions as a description', async ({ page }) => {
-  const cap = page.getByRole('button', { name: /Hide cursor \(hotkey\)/ });
+  const cap = page.getByRole('button', { name: /Hide cursor/ });
   await expect(cap).toHaveAccessibleDescription(/Escape cancels/);
   await cap.click();
   await expect(page.locator('[aria-live=assertive]').filter({ hasText: 'Listening' })).toHaveCount(1);
