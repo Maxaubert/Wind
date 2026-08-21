@@ -72,4 +72,13 @@ InputTransformRects ComputeInputTransformRects(double srcLeft, double srcTop, do
     r.dr = monX + monW; r.db = monY + monH;
     return r;
 }
+
+bool InputTransformStomped(bool expectedEnabled, int esl, int est, int esr, int esb,
+                           bool actualEnabled, int asl, int ast, int asr, int asb) {
+    // We want it OFF: any enabled state is a foreign writer's.
+    if (!expectedEnabled) return actualEnabled;
+    // We want it ON: a disable is a stomp, and so is any rect that is not ours.
+    if (!actualEnabled) return true;
+    return esl != asl || est != ast || esr != asr || esb != asb;
+}
 }

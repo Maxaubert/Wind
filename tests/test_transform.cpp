@@ -121,3 +121,34 @@ TEST_CASE("input-transform rects: level below 1 clamps to 1 (the math is total)"
     CHECK(r.sr - r.sl == 3840);
     CHECK(r.sb - r.st == 2160);
 }
+
+// --- Foreign input-transform writer detection (issue #217) ----------------------------------
+TEST_CASE("input-transform stomp: our own publish echoed back is not a stomp") {
+    CHECK_FALSE(wind::InputTransformStomped(true, 200, 100, 1160, 640,
+                                            true, 200, 100, 1160, 640));
+    // We published a disable and the slot reads disabled (rects are noise when off).
+    CHECK_FALSE(wind::InputTransformStomped(false, 0, 0, 0, 0,
+                                            false, 999, 999, 1000, 1000));
+}
+
+TEST_CASE("input-transform stomp: native Magnifier's enabled identity over our zoom rect") {
+    // The measured wm-open state: enabled (0,0,3840,2160) while Wind published an 8x rect.
+    CHECK(wind::InputTransformStomped(true, 1687, 949, 2153, 1211,
+                                      true, 0, 0, 3840, 2160));
+}
+
+TEST_CASE("input-transform stomp: a disable while we want it enabled is a stomp") {
+    CHECK(wind::InputTransformStomped(true, 200, 100, 1160, 640,
+                                      false, 200, 100, 1160, 640));
+}
+
+TEST_CASE("input-transform stomp: any enabled state while we published a disable is foreign") {
+    // The stale rect a dirty-killed wm strands (measured: its last zoomed rect stays enabled).
+    CHECK(wind::InputTransformStomped(false, 0, 0, 0, 0,
+                                      true, 1280, 360, 3840, 1800));
+}
+
+TEST_CASE("input-transform stomp: a single-edge rect difference is a stomp (exact compare)") {
+    CHECK(wind::InputTransformStomped(true, 200, 100, 1160, 640,
+                                      true, 201, 100, 1160, 640));
+}

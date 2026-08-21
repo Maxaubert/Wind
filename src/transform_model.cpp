@@ -144,13 +144,20 @@ void TransformModel::noteIxWrite(double ms, bool ok) {
     unsigned long long now = GetTickCount64();
     if (ixLogMs_ == 0) ixLogMs_ = now;
     if (now - ixLogMs_ >= 1000) {
-        if (ixMaxMs_ > 5.0 || ixFails_ > 0) {
+        if (ixMaxMs_ > 5.0 || ixFails_ > 0 || ixStomps_ > 0) {
             wind::Log(wind::LogLevel::Info, "ixwrite",
-                      "publishes=%d avg=%.2fms MAX=%.1fms fails=%d",
-                      ixCount_, ixCount_ ? ixSumMs_ / ixCount_ : 0.0, ixMaxMs_, ixFails_);
+                      "publishes=%d avg=%.2fms MAX=%.1fms fails=%d stomps=%d",
+                      ixCount_, ixCount_ ? ixSumMs_ / ixCount_ : 0.0, ixMaxMs_, ixFails_,
+                      ixStomps_);
         }
         ixLogMs_ = now; ixMaxMs_ = 0.0; ixSumMs_ = 0.0; ixCount_ = 0; ixFails_ = 0;
+        ixStomps_ = 0;
     }
+}
+
+void TransformModel::noteIxStomp() {
+    std::lock_guard<std::mutex> lk(statMx_);
+    ++ixStomps_;
 }
 
 void TransformModel::noteWrite(double ms, bool ok) {
@@ -254,6 +261,11 @@ void TransformModel::setActive(bool active) {
         wind::Log(wind::LogLevel::Info, "transform", "identity park took %.1fms", parkMs);
     RECT full{ 0, 0, mon_.w, mon_.h };
     host_.setInputTransform(false, full, full);   // input mapping back to identity at 1x
+    // Stomp-guard expectation (issue #217): the slot should now read DISABLED. Kept valid across
+    // the idle so the next session's first tick catches a rect stranded meanwhile (e.g. a native
+    // Magnifier killed while zoomed) and overwrites it immediately.
+    ixExpectedValid_ = true;
+    ixExpectedOn_ = false;
     pin_.hide();
     mpoGhost_.hide();   // after the identity park: re-promotion happens against a parked value
 }
@@ -464,16 +476,45 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // Both rects in VIRTUAL-SCREEN coordinates (the old 0,0-based dst was wrong off-primary).
     // Needs UIAccess: the ENABLED publish fails without it (rig-measured ERROR_ACCESS_DENIED;
     // the DISABLED call succeeds regardless - never probe availability with the disable shape).
-    if (cfg.magInputTransform != 0 && (changed || ixPending_)) {
+    // Stomp guard (issue #217, docs/WOBBLE-CAPTURE-2026-08-21.md): the input transform is ONE
+    // system-wide slot, and native Magnifier re-publishes an ENABLED IDENTITY into it
+    // continuously while it runs - even sitting unzoomed at 100%. Under a Wind zoom that
+    // identity mapping unmoors the visible cursor (the wobble); a dirty Magnifier exit strands
+    // its last rect the same way. So every zoomed tick reads the slot back (~0.1ms) and, when
+    // it does not hold what we last published, forces a republish past the decimation. Wind at
+    // tick rate wins the two-writer war for as long as the foreign writer lives, and a stale
+    // corpse is overwritten on the first tick of the next session.
+    bool ixForce = false;
+    if (cfg.magInputTransform == 1 && applyLevel > 1.001 && ixExpectedValid_) {
+        bool aOn = false; RECT aSrc{}, aDst{};
+        if (host_.getInputTransform(aOn, aSrc, aDst) &&
+            InputTransformStomped(ixExpectedOn_, ixExpL_, ixExpT_, ixExpR_, ixExpB_,
+                                  aOn, aSrc.left, aSrc.top, aSrc.right, aSrc.bottom)) {
+            ixForce = true;
+            noteIxStomp();
+            // The same foreign writer owns the shared cursor-visibility global
+            // (MagShowSystemCursor) - re-assert our hide on the stomp tick so the raw pointer
+            // plane it re-showed does not rubber-band beside the sprite (two-cursors gotcha).
+            if (cursorHidden_) MagShowSystemCursor(FALSE);
+            if (!ixStompWarned_) {
+                ixStompWarned_ = true;
+                wind::Log(wind::LogLevel::Warn, "transform",
+                          "foreign input-transform writer detected (native Magnifier running?) - "
+                          "republishing per tick");
+            }
+        }
+    }
+    if (cfg.magInputTransform != 0 && (changed || ixPending_ || ixForce)) {
         // Decimation (issue #189): the publish exists for pointer-framework HOVER hit-testing
         // (clicks ride the welded cursor and never consult it), so it does not need the 144Hz
         // motion rate - every Nth changed tick suffices, with a GUARANTEED publish the moment
         // motion rests (changed goes false with one pending) so a stationary aim is always
         // exact. Halves-or-better the per-tick DWM magnification-message rate during ramps/pans
         // (this call postdates every hitch baseline and was fully uninstrumented until now).
+        // A stomp bypasses the decimation entirely: correctness of the mapping beats hygiene.
         if (changed) ixPending_ = true;
         const bool rest = !changed;
-        if (rest || ++ixTick_ >= cfg.ixDecimate) {
+        if (ixForce || rest || ++ixTick_ >= cfg.ixDecimate) {
             ixTick_ = 0;
             ixPending_ = false;
             // srcL/srcT, not r.srcLeft/srcTop: when the ramp limiters make applyLevel != level
@@ -483,14 +524,28 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
                 srcL, srcT, applyLevel, mon_.x, mon_.y, mon_.w, mon_.h);
             RECT dst{ ir.dl, ir.dt, ir.dr, ir.db };
             RECT src = (cfg.magInputTransform == 2) ? dst : RECT{ ir.sl, ir.st, ir.sr, ir.sb };
+            const bool enable = applyLevel > 1.001;
             LARGE_INTEGER fr, a, b;
             QueryPerformanceFrequency(&fr); QueryPerformanceCounter(&a);
-            bool ok = host_.setInputTransform(applyLevel > 1.001, src, dst);
+            bool ok = host_.setInputTransform(enable, src, dst);
             QueryPerformanceCounter(&b);
-            noteIxWrite(double(b.QuadPart - a.QuadPart) * 1000.0 / fr.QuadPart, ok);
             if (!ok) {
-                // Self-heal (spec constraint 1): a failed ENABLED publish means this build
-                // cannot fix the pointer-framework dead zones - the DESKTOP pick must stop
+                // The return value cries wolf on this rig (issue #217): FALSE while the publish
+                // demonstrably lands (read-back tracks our rect). The read-back is the truth.
+                bool aOn = false; RECT aS{}, aD{};
+                if (host_.getInputTransform(aOn, aS, aD) &&
+                    !InputTransformStomped(enable, src.left, src.top, src.right, src.bottom,
+                                           aOn, aS.left, aS.top, aS.right, aS.bottom))
+                    ok = true;
+            }
+            noteIxWrite(double(b.QuadPart - a.QuadPart) * 1000.0 / fr.QuadPart, ok);
+            if (ok) {
+                ixExpectedValid_ = true;
+                ixExpectedOn_ = enable;
+                ixExpL_ = src.left; ixExpT_ = src.top; ixExpR_ = src.right; ixExpB_ = src.bottom;
+            } else {
+                // Self-heal (spec constraint 1): a VERIFIED-failed ENABLED publish means this
+                // build cannot fix the pointer-framework dead zones - the DESKTOP pick must stop
                 // choosing the transform. Games are unaffected (legacy input surfaces).
                 inputTransformAvailable_ = false;
                 if (!inputXformWarned_) {
@@ -503,6 +558,8 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     } else if (changed && lastInputXformOn_) {
         RECT full{ 0, 0, mon_.w, mon_.h };
         host_.setInputTransform(false, full, full);
+        ixExpectedValid_ = true;
+        ixExpectedOn_ = false;
     }
     if (changed) lastInputXformOn_ = cfg.magInputTransform != 0;
     }   // !ex.pauseWrites
