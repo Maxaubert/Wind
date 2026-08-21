@@ -8,6 +8,10 @@ TEST_CASE("defaults when text is empty") {
     CHECK(c.zoomOutButton == 0);   // shipped unbound
     CHECK(c.maxLevel == doctest::Approx(12.0));
     CHECK(c.diagnostics == 0);
+    // Ramp step cap ships ON (issue #219): uncapped, ~15% of high-level zoom-ins stall 35-43ms
+    // then snap 1.2-1.9 levels; capped at 2.5%/tick every measured ramp was even. 0 would
+    // regress the acrylic-window hitch Max reproduced.
+    CHECK(c.txMaxStepPct == 25);
 }
 TEST_CASE("parses renderer knobs") {
     Config c = ParseConfig(

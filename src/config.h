@@ -207,13 +207,19 @@ struct Config {
     int txLevelStep = 0;  // Minimum RELATIVE level change (per mille) before a ramp re-writes
                           //     the level. MEASURED NO BETTER than continuous once sample size
                           //     was adequate (big sporadic stalls appear in every setting).
-    int txMaxStepPct = 0; // cap the per-tick RELATIVE level change the transform applies (per
+    int txMaxStepPct = 25; // cap the per-tick RELATIVE level change the transform applies (per
                           //     mille; 25 = 2.5%). DWM re-scales on every level change and the
                           //     cost grows with the level, so a fast ramp asks for the most
-                          //     expensive work at the highest rate right at the top - the
-                          //     suspected source of the occasional huge spike at max zoom. The
-                          //     applied level trails the controller by a few ticks and catches
-                          //     up when the ramp stops. 0 = uncapped. Hot-reloadable.
+                          //     expensive work at the highest rate right at the top. MEASURED
+                          //     FIX (issue #219, 20-cycle focus-swap soaks at 15x over acrylic):
+                          //     uncapped ramps stall 35-43ms with a 1.2-1.9 level snap in ~15%
+                          //     of zoom-ins (native Magnifier: 23-32ms gaps in 7/20); capped at
+                          //     25 every ramp ran plateau <=13ms, uniform 0.36 steps, zero
+                          //     over-25ms compositor gaps, ramp only ~35ms longer. Normal ramp
+                          //     ticks are 0.8-2.2% relative, so the cap bites only the post-
+                          //     stall catch-up snap. The applied level trails the controller by
+                          //     a few ticks and catches up when the ramp stops. 0 = uncapped.
+                          //     Hot-reloadable.
     int txIdleReleaseMs = 1200;  // how long the DWM magnification context lingers after a zoom
                           //     ends before it is released. Longer = repeat zooms skip the
                           //     rebuild (fewer big entry spikes) but DWM stays magnification-

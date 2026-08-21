@@ -39,16 +39,36 @@ public static class WM {
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("dwmapi.dll")] public static extern int DwmFlush();
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L,T,R,B; }
   [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
+
+  // Composition pacing sidecar: a DwmFlush loop on its own thread; per-second fps + max gap +
+  // over-25ms count are copied out at each emit. The objective form of "the pan looks choppy".
+  static object flushLock = new object();
+  static int flushCount, flushOver25; static double flushMaxMs;
+  static void FlushLoop() {
+    var t = System.Diagnostics.Stopwatch.StartNew();
+    double last = 0;
+    while (true) {
+      if (DwmFlush() != 0) { System.Threading.Thread.Sleep(20); continue; }
+      double now = t.Elapsed.TotalMilliseconds, gap = now - last; last = now;
+      lock (flushLock) {
+        flushCount++;
+        if (gap > flushMaxMs) flushMaxMs = gap;
+        if (gap > 25.0) flushOver25++;
+      }
+    }
+  }
 
   public static void Run(double seconds, string path) {
     int sw = GetSystemMetrics(0), sh = GetSystemMetrics(1);
     double halfW = sw / 2.0, halfH = sh / 2.0;
+    var ft = new System.Threading.Thread(FlushLoop); ft.IsBackground = true; ft.Start();
     var w = new System.IO.StreamWriter(path, false); w.AutoFlush = true;
     // ixEn + ixL..ixB: the system-wide pointer input transform (MagGetInputTransform) - what native
     // Magnifier publishes while zoomed. A stale ENABLED rect surviving wm's exit is the leak suspect.
-    w.WriteLine("time,lvl,act,spd,devXmed,devXp95,devYmed,staleMs,writes,rev,spriteX,mag,fg,ixEn,ixL,ixT,ixR,ixB");
+    w.WriteLine("time,lvl,act,spd,devXmed,devXp95,devYmed,staleMs,writes,rev,spriteX,mag,fg,ixEn,ixL,ixT,ixR,ixB,dwmFps,dwmMaxMs,dwmOver25");
     var t = System.Diagnostics.Stopwatch.StartNew();
     IntPtr sprite = FindWindowW("WindCursorSprite", null);
     int lastOx = int.MinValue, lastOy = int.MinValue, lastPx = int.MinValue, lastPy = int.MinValue;
@@ -93,10 +113,13 @@ public static class WM {
         double stale = (dist > 200 && maxLvl > 1.01 && dmed >= 0) ? dmed / (dist * maxLvl) * 1000 : -1;
         bool ixEn = false; RECT ixS = new RECT(), ixD;
         bool ixOk = MagGetInputTransform(out ixEn, out ixS, out ixD);
-        w.WriteLine(string.Format("{0:HH:mm:ss},{1:F2},{2},{3:F0},{4:F1},{5:F1},{6:F1},{7:F2},{8},{9},{10:F1},{11},{12},{13},{14},{15},{16},{17}",
+        int fc, fo; double fm;
+        lock (flushLock) { fc = flushCount; fm = flushMaxMs; fo = flushOver25;
+                           flushCount = 0; flushMaxMs = 0; flushOver25 = 0; }
+        w.WriteLine(string.Format("{0:HH:mm:ss},{1:F2},{2},{3:F0},{4:F1},{5:F1},{6:F1},{7:F2},{8},{9},{10:F1},{11},{12},{13},{14},{15},{16},{17},{18},{19:F1},{20}",
           DateTime.Now, maxLvl, dx.Count > 0 ? 1 : 0, dist, dmed, dp95, dymed, stale, writes, rev,
           sx.Count > 0 ? sMean : 0, mag, fg,
-          ixOk ? (ixEn ? 1 : 0) : -1, ixS.L, ixS.T, ixS.R, ixS.B));
+          ixOk ? (ixEn ? 1 : 0) : -1, ixS.L, ixS.T, ixS.R, ixS.B, fc, fm, fo));
         dx.Clear(); dy.Clear(); sx.Clear(); dist = 0; writes = 0; rev = 0; maxLvl = 0;
         secStart = sec;
         if (sprite == IntPtr.Zero) sprite = FindWindowW("WindCursorSprite", null);
