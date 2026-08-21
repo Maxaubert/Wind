@@ -17,25 +17,29 @@ export const sections = [
       def:'', advanced:true },
   ]},
   { id:'zoom', label:'Zoom', icon:'zoom', desc:'How magnification grows while you hold the zoom button.', rows: [
+    { key:'maxLevel',     type:'slider', label:'Max zoom',       desc:'How far you can zoom.', min:2, max:50, step:1, def:12.0, unit:'times' },
     { key:'zoomInSpeed',  type:'slider', label:'Zoom-in speed',  desc:'Multiplier (1.0 = default).', min:0.25, max:4, step:0.05, def:1.0, unit:'times' },
     { key:'zoomOutSpeed', type:'slider', label:'Zoom-out speed', desc:'Multiplier (1.0 = default).', min:0.25, max:4, step:0.05, def:1.0, unit:'times' },
-    { key:'maxLevel',     type:'slider', label:'Max zoom',       desc:'How far you can zoom.', min:2, max:50, step:1, def:12.0, unit:'times' },
     // Smooth zoom is always on now (the toggle was removed; core default is 1). Its two shape
     // sliders survive as advanced knobs.
     { key:'smoothZoomAccel', type:'slider', label:'Smooth ease-in depth', desc:'Higher = slower start.', min:1, max:8, step:0.5, def:3.0, advanced:true },
     { key:'smoothZoomRamp',  type:'slider', label:'Smooth ramp (s)', desc:'Seconds to reach full speed.', min:0.1, max:3, step:0.1, def:0.6, advanced:true, unit:'seconds' },
   ]},
   { id:'cursor', label:'Cursor', icon:'cursor', desc:'Pointer movement and visibility while zoomed.', rows: [
-    { key:'cursorSensitivity', type:'slider', label:'Cursor speed', desc:'Pan speed multiplier (1.0 = match your mouse).', min:0.25, max:4, step:0.05, def:1.0, advanced:true, unit:'times' },
-    { key:'cursorSmoothing',   type:'slider', label:'Cursor inertia smoothing', desc:'0 = off, higher = smoother. Render engine only.', min:0, max:0.95, step:0.05, def:0.4, advanced:true },
-    { key:'cursorVisibility', type:'select', label:'Cursor visibility', options:['auto','always','never'], def:'auto', advanced:true },
-    // Warp-lock (issue #221): listed apps run their zoom sessions in the locked raw-mouse pan
-    // outright - the fix for engines that recenter the pointer every frame (DOOM The Dark Ages).
-    { key:'lockApps', type:'applist', label:'Lock zoom view in these apps',
-      desc:'Games that recenter the mouse (e.g. DOOM). Panning uses raw mouse motion there.',
-      def:'', advanced:true },
     { key:'__hideCursor', type:'keybind', label:'Hide cursor (hotkey)', desc:'Press to instantly toggle the magnified cursor. Does not reset zoom.', vkKey:'hideCursorVk', modsKey:'hideCursorMods' },
     { key:'__cursorLock', type:'keybind', label:'Inspect mode', desc:'Freeze the cursor (keeps a hover or tooltip alive) and free-look around with a crosshair that pans the view, at any zoom. Press to set, right-click to clear.', vkKey:'cursorLockVk' },
+    // Zoom lock detection (issue #221): games like DOOM lock the mouse to the screen centre,
+    // which would pin the zoom view there too. Listed apps get the view UNLOCKED from the
+    // pointer - it pans from raw mouse motion instead.
+    { key:'lockApps', type:'applist', label:'Zoom lock detection',
+      desc:'Apps that lock the mouse to the screen centre (e.g. DOOM). The zoom view unlocks and pans from raw mouse motion there.',
+      def:'', advanced:true },
+    { key:'cursorSensitivity', type:'slider', label:'Cursor speed', desc:'Pan speed multiplier (1.0 = match your mouse).', min:0.25, max:4, step:0.05, def:1.0, advanced:true, unit:'times' },
+    { key:'cursorSmoothing',   type:'slider', label:'Cursor inertia smoothing', desc:'0 = off, higher = smoother. Render engine only.', min:0, max:0.95, step:0.05, def:0.4, advanced:true },
+    // (cursorVisibility left the UI 2026-08-21: in the transform model 'always' and 'auto' are
+    // indistinguishable - main.cpp collapses to drawCursor = mode != 2 - and 'always' cannot
+    // conjure a shape while a game hides its pointer, so only 'never' did anything, which the
+    // hide-cursor hotkey already covers. Ini key still parsed.)
   ]},
   { id:'display', label:'Display', icon:'display', desc:'The engine behind the magnified view.', rows: [
     { key:'model', type:'select', label:'Magnifier model',

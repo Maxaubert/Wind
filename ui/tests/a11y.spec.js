@@ -214,12 +214,13 @@ test('the model dropdown is fully keyboard operable', async ({ page }) => {
 });
 
 test('the dropdown supports type-ahead like a native select', async ({ page }) => {
-  const combo = page.getByRole('combobox', { name: /Cursor visibility/ });
+  // Retargeted to the model picker: the cursor-visibility select left the UI (2026-08-21).
+  const combo = page.getByRole('combobox', { name: /Magnifier model/ });
   await combo.focus();
-  await page.keyboard.press('n');            // "never"
+  await page.keyboard.press('t');            // "Transform"
   await expect(page.getByRole('listbox')).toBeVisible();
   await page.keyboard.press('Enter');
-  await expect(combo).toHaveAccessibleName(/never/);
+  await expect(combo).toHaveAccessibleName(/Transform/);
 });
 
 // --- Navigation -------------------------------------------------------------
