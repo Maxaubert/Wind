@@ -65,12 +65,13 @@ test('every control in the settings list has an accessible name', async ({ page 
 test('a control is named by its own row label, not just any label', async ({ page }) => {
   // Naming everything is not enough - the name has to be the RIGHT one. Checked against a spread
   // of row types (toggle, slider, colour, keybind, dropdown, applist).
+  // (Post-cleanup roster: the smooth-zoom/multi-monitor toggles, sharpness slider, and the
+  // colour input left the UI - no color-type row remains, so that widget type is uncovered.)
   const cases = [
-    ['Smooth zoom', 'checkbox'],
+    ['Enable alternate keybinds', 'checkbox'],
     ['Max zoom', 'slider'],
-    ['Sharpness', 'slider'],
-    ['Outline color', 'textbox'],          // <input type=color> maps to textbox
-    ['Follow cursor monitor', 'checkbox'],
+    ['Cursor speed', 'slider'],
+    ['Frametime logging', 'checkbox'],
     ['Disable MPO', 'checkbox'],
   ];
   for (const [label, role] of cases)
@@ -94,8 +95,8 @@ test('row descriptions are linked to their control, not left orphaned', async ({
 test('sliders speak their unit instead of a bare number', async ({ page }) => {
   await expect(page.getByRole('slider', { name: /Smooth ramp/ }))
     .toHaveAttribute('aria-valuetext', /seconds/);
-  await expect(page.getByRole('slider', { name: /Outline thickness/ }))
-    .toHaveAttribute('aria-valuetext', /pixels/);
+  await expect(page.getByRole('slider', { name: /Zoom-in speed/ }))
+    .toHaveAttribute('aria-valuetext', /times/);
 });
 
 // --- Focus visibility -------------------------------------------------------
@@ -269,21 +270,8 @@ test('restructuring the page is announced', async ({ page }) => {
 
 // --- Widgets ----------------------------------------------------------------
 
-test('the segmented control is a radio group with working arrow keys', async ({ page }) => {
-  const group = page.getByRole('radiogroup', { name: /Quick zoom/ });
-  await expect(group).toHaveCount(1);
-  const modifier = group.getByRole('radio', { name: 'Modifier' });
-  const hotkey = group.getByRole('radio', { name: 'Hotkey' });
-  await expect(modifier).toHaveAttribute('aria-checked', 'true');
-  await expect(hotkey).toHaveAttribute('aria-checked', 'false');
-
-  await modifier.focus();
-  await page.keyboard.press('ArrowRight');
-  await expect(hotkey).toHaveAttribute('aria-checked', 'true');
-  await expect(hotkey).toBeFocused();
-  await page.keyboard.press('ArrowLeft');
-  await expect(modifier).toHaveAttribute('aria-checked', 'true');
-});
+// (The segmented-control radio-group test left with the quick-zoom rows - no segmented row
+// remains in the schema. Restore it from git history if a segmented row ever returns.)
 
 test('Tab escapes an armed keybind capture instead of binding Tab', async ({ page }) => {
   // Arming used to swallow every key including Tab, so a keyboard user who activated a keycap by
