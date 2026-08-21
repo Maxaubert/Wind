@@ -16,6 +16,10 @@
 A replacement for the built-in Magnifier, with smooth continuous zoom that keeps tracking the
 mouse even when games hide, clip, or center-lock the cursor.
 
+> Contributing or curious how it works? The developer book lives at
+> [docs/architecture](docs/architecture/README.md): twelve chapters covering every subsystem,
+> end to end.
+
 Wind renders the magnified view itself - capturing the desktop with DXGI Desktop Duplication
 and scaling it on the GPU (Direct3D 11) onto a click-through overlay, or magnifying inside the
 compositor (DWM fullscreen transform) when a game is in front. That gives sub-pixel smooth

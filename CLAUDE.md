@@ -3,6 +3,7 @@
 Lightweight standalone Windows fullscreen magnifier replacing Magnify.exe.
 Design spec: `docs/superpowers/specs/2026-05-24-magnifier-design.md`.
 Plan: `docs/superpowers/plans/2026-05-24-wind-magnifier.md`.
+Developer book (readable, canonical): `docs/architecture/` - keep it in step with changes here.
 
 ## Commands
 - Build app: `build.bat`  (locates MSVC via vswhere, emits `Wind.exe`; uiAccess=false, runs anywhere)
