@@ -5,7 +5,7 @@
 
   Barely there. Everywhere.
 
-  A lightweight fullscreen magnifier for Windows.
+  A lightweight magnifier for Windows.
 
   [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square)](https://github.com/Maxaubert/Wind)
   [![Built with](https://img.shields.io/badge/C%2B%2B-Direct3D%2011-00599C?style=flat-square)](https://github.com/Maxaubert/Wind)
@@ -34,16 +34,20 @@ you keep clicking and using the screen while zoomed.
   live when you alt-tab, keeping the zoom level.
 - **Named settings profiles** - full snapshots (keybinds included), switchable from the tray
   menu or the Settings titlebar.
-- **Real cursor** at a constant on-screen size - including the text I-beam and link hand.
+- **Real cursor** - the actual pointer shapes (text I-beam and link hand included), drawn
+  crisp at every zoom.
 - **HDR-aware** - on an HDR display it tonemaps to match the desktop automatically (tracking
   the live SDR-brightness slider); on SDR it's a straight passthrough. No per-machine tuning.
 - **Follows the mouse even when a game locks/hides the cursor** (HID-level Raw Input, no
   injection - anti-cheat safe).
 - **Inspect mode** - freeze the cursor (keeps a hover/tooltip alive) and free-look around with
   a crosshair; clicks land where you aim.
+- **Zoom lock detection** - games that pin the mouse to the screen center (DOOM-style
+  mouselook) would drag the zoom back with it; listed apps (Settings > Cursor) pan from raw
+  mouse motion instead.
 
 ## Magnifier models (`model=`)
-Selected with the `model` ini key or the model row in Settings ("Magnifier model"). `model` is
+Selected with the `model` ini key or the "Magnifier engine" row in Settings. `model` is
 read once at launch, so switching it restarts Wind (Settings does this automatically on Apply).
 
 - **`hybrid`** (default, shown as **Auto**) - constructs both engines below and picks per
@@ -58,8 +62,8 @@ read once at launch, so switching it restarts Wind (Settings does this automatic
 - **`magnify`** - drives the **native Windows Magnifier** with Wind's buttons. This is the
   model for DRM-protected video (Netflix and friends), which shows black under screen capture.
   Holding a zoom button scroll-zooms Magnifier exactly like its own Ctrl+Alt+wheel shortcut,
-  stepping by `magnifyStep` percent per notch (Settings > Display > Zoom step; lower = smoother
-  and slower, applies live). Everything else is pure native Magnifier behavior; quitting Wind
+  stepping by `magnifyStep` percent per notch (ini key; lower = smoother and slower, applies
+  live). Everything else is pure native Magnifier behavior; quitting Wind
   (or switching models) closes it and restores your original Magnifier settings. Max zoom is
   Magnifier's ceiling, 1600%.
 
@@ -129,8 +133,10 @@ high band puts Wind under the Snipping Tool's capture overlay, which costs the c
 during Win+Shift+S - a deliberate trade-off (issue #162).
 
 ## Config (`magnifier.ini`, hot-reloads unless noted)
-The Settings app (tray -> Open Settings) is the comfortable way to edit this file; it shows
-only the rows that apply to the selected model and closes itself if the magnifier exits.
+The Settings app (tray -> Open Settings) is the comfortable way to edit this file; it keeps
+the everyday settings front and center (the rest sit behind "Show advanced settings") and
+closes itself if the magnifier exits. Every ini key below keeps working even when it has no
+Settings row.
 Profiles (tray -> Profiles, or the Settings titlebar) snapshot the whole file per activity.
 
 - `zoomInButton`/`zoomOutButton` (mouse side-buttons) and `zoomInVk`/`zoomOutVk` (keyboard) -
@@ -143,8 +149,10 @@ Profiles (tray -> Profiles, or the Settings titlebar) snapshot the whole file pe
 - Pacing/perf: `vsync` (default on), `dwmFlush` (default 0), `gameFpsCap`, `gpuPriority`.
 - `model` - `hybrid` (default) / `render` / `transform` / `magnify`. Restart to switch.
 - `multiMonitor` - 0 (default, primary only) or 1 (follow the cursor's monitor per zoom-in).
-- `desktopTransform` - experimental: use the game (compositor) engine on the desktop too
-  (signed install only, primary monitor only; Settings > Display, advanced, Auto model).
+- `desktopTransform` - experimental, ini-only: use the game (compositor) engine on the
+  desktop too (signed install only, primary monitor only, Auto model).
+- `lockApps` - per-app zoom lock detection (Settings > Cursor > "Zoom lock detection");
+  `warpLock=1` extends the detection heuristics to unlisted games.
 - Advanced: `zorderBand`, `transformExclude`, `noSwallowApps`, `profile`.
 
 ## Scope
