@@ -19,7 +19,13 @@ public:
     // smoothing 0..~0.95: light inertia on the lens. 0 = none (rendered center snaps to the
     // accumulated target); higher = the center eases toward the target over several frames,
     // smoothing jerk and the uneven per-frame delta steps (costs a little lag).
-    CursorMapper(int screenW, int screenH, double smoothing = 0.0);
+    // tickHz: the loop's tick rate. The smoothing value is defined at the 144Hz baseline (the
+    // rig it was tuned on, issue #223); the per-tick easing factor is re-derived so the felt
+    // inertia (the exponential's real-time constant) is the same at any refresh rate.
+    CursorMapper(int screenW, int screenH, double smoothing = 0.0, int tickHz = 144);
+    // Re-derive the easing factor for a new tick rate (monitor retarget / topology change),
+    // keeping the configured smoothing and all position state.
+    void setTickRate(int tickHz);
     void reset(double centerX, double centerY);    // pin both target + rendered center
     // Pan wall (issue #148): upper bound for the source rect's LEFT edge (desktop px), or a
     // negative value for no bound. Transform GAME sessions set 32000/level each tick: the
@@ -39,7 +45,8 @@ public:
     double centerY() const { return cy_; }
 private:
     int sw_, sh_;
-    double alpha_;          // per-frame easing factor (1 - smoothing), clamped
+    double smoothing_;      // configured smoothing (144Hz-baseline semantics)
+    double alpha_;          // per-tick easing factor derived from smoothing_ + tick rate, clamped
     double cx_, cy_;        // rendered center (eased)
     double tx_, ty_;        // target center (delta-accumulated)
     double maxSrcX_ = -1.0; // pan wall: max source-left (desktop px); <0 = unbounded
