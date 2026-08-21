@@ -9,6 +9,8 @@
 
   [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square)](https://github.com/Maxaubert/Wind)
   [![Built with](https://img.shields.io/badge/C%2B%2B-Direct3D%2011-00599C?style=flat-square)](https://github.com/Maxaubert/Wind)
+
+  [Download](https://github.com/Maxaubert/Wind/releases) · [Documentation](docs/architecture/README.md)
 </div>
 
 ---
