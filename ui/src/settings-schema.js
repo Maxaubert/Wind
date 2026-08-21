@@ -1,81 +1,63 @@
+// Settings page layout. Cleaned up 2026-08-21 with Max deciding every row (issue #221 branch):
+// stale/niche rows were removed from the UI (their ini keys keep working) or demoted to
+// advanced. Removed outright: quick zoom (mode/modifier/hotkey), smooth-zoom toggle (always on
+// now - the sliders stay, advanced), scale-cursor-with-zoom, magnifyStep, desktopTransform,
+// bilinear, sharpness, brightness, hdrTonemap (auto: no-op on SDR), multiMonitor, the whole
+// outline family, cursorVisibility (broken in the transform model - see the Cursor section).
+// Copy pass same day: plain language (no "swallow"), no toggle labels starting with "Enable",
+// no desc that restates its label, consequences kept only where they change a decision.
 export const sections = [
-  { id:'keybinds', label:'Keybinds', icon:'keys', desc:'Hold to zoom. Each slot accepts a mouse side-button or a key. Right-click a binding to clear it.', rows: [
-    { key:'__zoomIn',   type:'keybind', label:'Zoom in',  desc:'Hold to magnify',  buttonKey:'zoomInButton',  vkKey:'zoomInVk',  modsKey:'zoomInMods' },
-    { key:'__zoomOut',  type:'keybind', label:'Zoom out', desc:'Hold to zoom back', buttonKey:'zoomOutButton', vkKey:'zoomOutVk', modsKey:'zoomOutMods' },
-    { key:'altKeybinds', type:'toggle', label:'Enable alternate keybinds', desc:'Adds an optional second binding (side-button or key) per direction.', def:0 },
-    { key:'__zoomIn2',  type:'keybind', label:'Zoom in (alternate)',  desc:'Optional side-button or key', buttonKey:'zoomInButton2',  vkKey:'zoomInVk2',  modsKey:'zoomInMods2',  requires:'altKeybinds' },
-    { key:'__zoomOut2', type:'keybind', label:'Zoom out (alternate)', desc:'Optional side-button or key', buttonKey:'zoomOutButton2', vkKey:'zoomOutVk2', modsKey:'zoomOutMods2', requires:'altKeybinds' },
-    // Keyboard-hook suspension (issue #156). Watching the keyboard makes Windows hand Wind every
-    // keystroke and wait before delivering anything else, including mouse movement to the game, so
-    // holding a key stalls panning ~30x/s. Named apps only: this trades key-swallowing for smooth
-    // panning, which is a per-app call rather than something to apply to everything at once.
-    { key:'noSwallowApps', type:'applist', label:"Don't swallow keys in these apps",
-      desc:'Fixes stuttery panning in games. These programs will also see the key.',
-      def:'' },
+  { id:'keybinds', label:'Keybinds', icon:'keys', desc:'Hold to zoom. Each binding takes a mouse side-button or a key. Right-click to clear.', rows: [
+    { key:'__zoomIn',   type:'keybind', label:'Zoom in',  buttonKey:'zoomInButton',  vkKey:'zoomInVk',  modsKey:'zoomInMods' },
+    { key:'__zoomOut',  type:'keybind', label:'Zoom out', buttonKey:'zoomOutButton', vkKey:'zoomOutVk', modsKey:'zoomOutMods' },
+    { key:'altKeybinds', type:'toggle', label:'Alternate keybinds', desc:'A second binding for each direction.', def:0 },
+    { key:'__zoomIn2',  type:'keybind', label:'Zoom in (alternate)',  buttonKey:'zoomInButton2',  vkKey:'zoomInVk2',  modsKey:'zoomInMods2',  requires:'altKeybinds' },
+    { key:'__zoomOut2', type:'keybind', label:'Zoom out (alternate)', buttonKey:'zoomOutButton2', vkKey:'zoomOutVk2', modsKey:'zoomOutMods2', requires:'altKeybinds' },
+    // Keyboard-hook suspension (issue #156): trades key-interception for smooth panning, per app.
+    { key:'noSwallowApps', type:'applist', label:'Pass zoom keys to these apps',
+      desc:'Fixes stuttery panning in some games. The app will also receive the key.',
+      def:'', advanced:true },
   ]},
-  { id:'zoom', label:'Zoom', icon:'zoom', desc:'How magnification grows while you hold the zoom button.', rows: [
-    { key:'zoomInSpeed',  type:'slider', label:'Zoom-in speed',  desc:'Multiplier (1.0 = default).', min:0.25, max:4, step:0.05, def:1.0, unit:'times' },
-    { key:'zoomOutSpeed', type:'slider', label:'Zoom-out speed', desc:'Multiplier (1.0 = default).', min:0.25, max:4, step:0.05, def:1.0, unit:'times' },
+  { id:'zoom', label:'Zoom', icon:'zoom', desc:'How far and how fast you zoom.', rows: [
     { key:'maxLevel',     type:'slider', label:'Max zoom',       desc:'How far you can zoom.', min:2, max:50, step:1, def:12.0, unit:'times' },
-    { key:'smoothZoom',   type:'toggle', label:'Smooth zoom',    desc:'Zoom-in eases up to your speed.', def:0, advanced:true },
-    { key:'smoothZoomAccel', type:'slider', label:'Smooth ease-in depth', desc:'Higher = slower start.', min:1, max:8, step:0.5, def:3.0, dependsOn:'smoothZoom', advanced:true },
-    { key:'smoothZoomRamp',  type:'slider', label:'Smooth ramp (s)', desc:'Seconds to reach full speed.', min:0.1, max:3, step:0.1, def:0.6, dependsOn:'smoothZoom', advanced:true, unit:'seconds' },
-    { key:'quickZoomHotkeyMode', type:'segmented', label:'Quick zoom', desc:'Toggle 0% and your last level (above 200%). Choose the trigger.', seg:['Modifier','Hotkey'], def:0 },
-    { key:'quickZoomModifier', type:'select', label:'Modifier key', desc:'Hold this and tap a zoom key to toggle. None = off.', options:['None','Ctrl','Alt','Shift'], def:'Ctrl', requiresNot:'quickZoomHotkeyMode' },
-    { key:'__quickZoom', type:'keybind', label:'Quick-zoom hotkey', desc:'Press to toggle quick zoom. Right-click to clear (off). Default F1.', vkKey:'quickZoomVk', modsKey:'quickZoomMods', requires:'quickZoomHotkeyMode' },
+    { key:'zoomInSpeed',  type:'slider', label:'Zoom-in speed',  desc:'1 = normal speed.', min:0.25, max:4, step:0.05, def:1.0, unit:'times' },
+    { key:'zoomOutSpeed', type:'slider', label:'Zoom-out speed', desc:'1 = normal speed.', min:0.25, max:4, step:0.05, def:1.0, unit:'times' },
+    // Smooth zoom is always on (the toggle was removed; core default is 1). Its two shape
+    // sliders survive as advanced knobs.
+    { key:'smoothZoomAccel', type:'slider', label:'Zoom-in ease', desc:'Higher = gentler start.', min:1, max:8, step:0.5, def:3.0, advanced:true },
+    { key:'smoothZoomRamp',  type:'slider', label:'Ease-in duration', desc:'Time until full speed.', min:0.1, max:3, step:0.1, def:0.6, advanced:true, unit:'seconds' },
   ]},
-  { id:'cursor', label:'Cursor', icon:'cursor', desc:'Pointer movement and visibility while zoomed.', rows: [
-    { key:'cursorSensitivity', type:'slider', label:'Cursor speed', desc:'Pan speed multiplier (1.0 = match your mouse).', min:0.25, max:4, step:0.05, def:1.0, advanced:true, unit:'times' },
-    { key:'cursorSmoothing',   type:'slider', label:'Cursor inertia smoothing', desc:'0 = off, higher = smoother.', min:0, max:0.95, step:0.05, def:0.4 },
-    { key:'cursorScaleWithZoom', type:'toggle', label:'Scale cursor with zoom', def:0, advanced:true },
-    { key:'cursorVisibility', type:'select', label:'Cursor visibility', options:['auto','always','never'], def:'auto', advanced:true },
-    { key:'__hideCursor', type:'keybind', label:'Hide cursor (hotkey)', desc:'Press to instantly toggle the magnified cursor. Does not reset zoom.', vkKey:'hideCursorVk', modsKey:'hideCursorMods' },
-    { key:'__cursorLock', type:'keybind', label:'Inspect mode', desc:'Freeze the cursor (keeps a hover or tooltip alive) and free-look around with a crosshair that pans the view, at any zoom. Press to set, right-click to clear.', vkKey:'cursorLockVk' },
+  { id:'cursor', label:'Cursor', icon:'cursor', desc:'How the pointer behaves while zoomed.', rows: [
+    { key:'__hideCursor', type:'keybind', label:'Hide cursor', desc:'Toggles the cursor without leaving zoom.', vkKey:'hideCursorVk', modsKey:'hideCursorMods' },
+    { key:'__cursorLock', type:'keybind', label:'Inspect mode', desc:'Freezes the cursor so tooltips stay open, while a crosshair pans the view.', vkKey:'cursorLockVk' },
+    // Zoom lock detection (issue #221): games like DOOM pin the mouse to the screen centre,
+    // which would pin the zoom view there too. Listed apps get the view UNLOCKED from the
+    // pointer - it pans from raw mouse motion instead.
+    { key:'lockApps', type:'applist', label:'Zoom lock detection',
+      desc:'Games that pin the mouse to the screen center (e.g. DOOM). Zoom pans from raw mouse motion there.',
+      def:'', advanced:true },
+    { key:'cursorSensitivity', type:'slider', label:'Cursor speed', desc:'1 = match your mouse.', min:0.25, max:4, step:0.05, def:1.0, advanced:true, unit:'times' },
+    { key:'cursorSmoothing',   type:'slider', label:'Pan smoothing', desc:'Adds inertia to panning. Render engine only.', min:0, max:0.95, step:0.05, def:0.4, advanced:true },
+    // (cursorVisibility left the UI 2026-08-21: in the transform model 'always' and 'auto' are
+    // indistinguishable - main.cpp collapses to drawCursor = mode != 2 - and 'always' cannot
+    // conjure a shape while a game hides its pointer, so only 'never' did anything, which the
+    // hide-cursor hotkey already covers. Ini key still parsed.)
   ]},
-  { id:'display', label:'Display', icon:'display', desc:'Image quality of the magnified view.', rows: [
-    { key:'model', type:'select', label:'Magnifier model',
-      desc:'The engine that runs the magnifier. Auto picks the best one for the app in front. Restart to switch.',
+  { id:'display', label:'Display', icon:'display', desc:'The engine behind the magnified view.', rows: [
+    { key:'model', type:'select', label:'Magnifier engine',
+      desc:'Auto picks the best engine for the app in front. Restart to switch.',
       options:['hybrid','render','transform','magnify'],
       optionLabels:{ hybrid:'Auto', render:'Render', transform:'Transform', magnify:'Windows Magnifier' },
       def:'hybrid' },
-    { key:'magnifyStep', type:'select', label:'Zoom step',
-      desc:'Windows Magnifier zoom increment, percent per step. Lower = smoother and slower. Applies live.',
-      options:['5','10','25','50','100'], def:'50', showIf:{ key:'model', eq:'magnify' } },
-    { key:'desktopTransform', type:'toggle', label:'Game engine on the desktop',
-      desc:'Experimental: use the compositor engine on the primary monitor everywhere, not just in games. Needs the signed install.',
-      def:0, advanced:true, showIf:{ key:'model', eq:'hybrid' } },
-    { key:'bilinear',    type:'toggle', label:'Smooth scaling', desc:'Bilinear vs crisp pixels.', def:1, advanced:true, showIf:{ key:'model', eq:'render' } },
-    { key:'sharpness',   type:'slider', label:'Sharpness', desc:'Crisps the magnified image (0 = off).', min:0, max:1, step:0.05, def:0.0, advanced:true, showIf:{ key:'model', eq:'render' } },
-    { key:'brightness',  type:'slider', label:'Brightness', min:0.5, max:1.5, step:0.05, def:1.0, advanced:true, showIf:{ key:'model', eq:'render' } },
-    { key:'hdrTonemap',  type:'toggle', label:'HDR tonemap', desc:'HDR10 to SDR when HDR is on.', def:1, advanced:true, showIf:{ key:'model', eq:'render' } },
-    { key:'multiMonitor',type:'toggle', label:'Follow cursor monitor', def:0 },
-    // Not an ini setting: this row reflects HKLM\...\Dwm\OverlayTestMode. MPO makes the driver pack
-    // DWM's magnification translation into a 16-bit field over a game surface (the issue #148 TDR
-    // trigger and the reason the transform model needs a pan wall), and measurably costs transform
-    // smoothness in-game. Advanced because it changes a system-wide display setting and needs UAC.
+    // Not an ini setting: reflects HKLM\...\Dwm\OverlayTestMode (issue #148 TDR trigger; costs
+    // transform smoothness in-game). Advanced: system-wide display setting, needs UAC.
     { key:'__mpo', type:'mpo', label:'Disable MPO',
-      desc:'Multi-plane overlay can stutter or reset the display driver while zoomed in games. Needs admin and a Windows restart.',
+      desc:'Multi-plane overlay can stutter or crash the display driver when zooming in games. Needs admin and a Windows restart.',
       advanced:true },
-    { key:'outline',          type:'toggle', label:'Edge outline',
-      desc:'Show an outline around the screen while zoomed.', def:0, showIf:{ key:'model', eq:'render' } },
-    { key:'outlineThickness', type:'slider', label:'Outline thickness',
-      desc:'Width in pixels.', min:1, max:40, step:1, def:4, unit:'pixels', dependsOn:'outline', showIf:{ key:'model', eq:'render' } },
-    { key:'outlineColor',     type:'color',  label:'Outline color',
-      def:'#5b5bd6', dependsOn:'outline', showIf:{ key:'model', eq:'render' } },
-    { key:'outlineLowZoomOnly', type:'toggle', label:'Only at low zoom',
-      desc:'Hide the outline once you zoom past the cutoff.', def:0, dependsOn:'outline', showIf:{ key:'model', eq:'render' } },
-    { key:'outlineLowZoomMax',  type:'slider', label:'Low-zoom cutoff',
-      desc:'Show only at or below this zoom (2 = 200%).', min:1.25, max:2, step:0.05, def:2, unit:'times',
-      dependsOn:'outlineLowZoomOnly', showIf:{ key:'model', eq:'render' } },
-    { key:'outlineIdleHide',    type:'toggle', label:'Hide when idle',
-      desc:'Fade the outline out when the mouse is still.', def:0, dependsOn:'outline', showIf:{ key:'model', eq:'render' } },
-    { key:'outlineIdleSeconds', type:'slider', label:'Idle timeout (s)',
-      desc:'Seconds of no movement before it fades.', min:1, max:30, step:1, def:7, unit:'seconds',
-      dependsOn:'outlineIdleHide', showIf:{ key:'model', eq:'render' } },
   ]},
   { id:'about', label:'About', icon:'about', desc:'', rows: [
-    { key:'diagnostics', type:'toggle', label:'Frametime logging', desc:'Write timing to a log file.', def:0 },
-    { key:'showAdvanced', type:'toggle', label:'Show advanced settings', desc:'Reveal advanced options.', def:0 },
+    { key:'diagnostics', type:'toggle', label:'Frametime logging', desc:'Logs frame timing for debugging.', def:0, advanced:true },
+    { key:'showAdvanced', type:'toggle', label:'Show advanced settings', def:0 },
     { key:'__about', type:'about' },
   ]},
 ];

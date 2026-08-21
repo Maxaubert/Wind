@@ -221,6 +221,8 @@ struct TickState {
     ZoomController zoom;
     CursorMapper   mapper;
     LockDetector   detector;    // free vs game-locked cursor
+    bool           prevDetLocked = false;   // edge-log the detector state (issue #221)
+    std::string    lastCoreIni;             // stripped ini fingerprint (skip UI-only reloads)
     POINT          lastSetVirtual{};  // MEASURED post-present pointer position (virtual px), the
                                       // baseline for the next tick's hand delta (issue #169: never
                                       // assume the weld landed - measure)
@@ -641,6 +643,12 @@ static void RunTick(TickState& t) {
         unsigned long long m = ConfigMTime(t.iniPath);
         if (m != t.lastMtime) {
             t.lastMtime = m;
+            // Skip the reload when only UI-owned keys changed (uiTheme/showAdvanced/onboarded):
+            // the settings app writes those, the core never reads them, and the reload below
+            // resets the ZoomController - a theme toggle mid-zoom collapsed the zoom to 1x.
+            std::string stripped = wind::StripUiOnlyKeys(wind::ReadTextFile(t.iniPath));
+            if (t.lastCoreIni.empty() || stripped != t.lastCoreIni) {
+            t.lastCoreIni = stripped;
             Config nc = LoadConfig(t.iniPath);
             // Re-bind the hook's button mapping if the user changed it via the config UI; without
             // this the hook would keep firing the OLD button (the new VK works via GetAsyncKeyState
@@ -677,6 +685,7 @@ static void RunTick(TickState& t) {
             double ocx = t.mapper.centerX(), ocy = t.mapper.centerY();   // preserve position
             t.mapper = CursorMapper(t.mon.w, t.mon.h, nc.cursorSmoothing);
             t.mapper.reset(ocx, ocy);
+            }   // core-relevant change guard (StripUiOnlyKeys)
         }
     }
 
@@ -929,6 +938,22 @@ static void RunTick(TickState& t) {
             t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y);   // virtual -> local monitor coords
             t.lastSetVirtual = pt;        // baseline for the OS-cursor delta (first delta = 0)
             t.detector.reset();           // start free
+            // Warp-lock seeding (issue #221 round 3, Max: any motion-based tell still needs a
+            // wiggle as evidence). Zooming in over a COVERING app whose cursor is already
+            // hidden by the APP is mouselook with near-certainty (the game-inspect tell, valid
+            // at this instant because this session has hidden nothing yet) - start LOCKED so
+            // the raw-mickey pan works from the first tick, motionless. A menu or the desktop
+            // (cursor shown) seeds nothing; a wrong seed over fullscreen video self-heals in
+            // ~100ms once the player re-shows the pointer and it tracks the hand.
+            if (t.cfg.warpLock != 0 && !t.cursorHiddenByUs && ForegroundCoversMonitor(t.mon)) {
+                CURSORINFO ci{}; ci.cbSize = sizeof(ci);
+                if (GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING) == 0) {
+                    t.detector.seedLock();
+                    t.prevDetLocked = true;
+                    wind::Log(wind::LogLevel::Info, "lock",
+                              "seeded LOCKED at zoom-in (app cursor hidden, covering foreground)");
+                }
+            }
             // Transform sessions run the WELDED-cursor design (re-test of the #148 weld; see
             // transform_model.cpp): the transform welds the REAL cursor to the lens point, so
             // hover, drags, and clicks are native - same contract as the render engine. The old
@@ -1033,7 +1058,28 @@ static void RunTick(TickState& t) {
                                                        t.mon.w, t.mon.h);
             bool locked = t.detector.update(clipConfined,
                                             std::abs(rawDx) + std::abs(rawDy),
-                                            std::abs(curDx) + std::abs(curDy));
+                                            std::abs(curDx) + std::abs(curDy),
+                                            t.cfg.warpLock != 0, cur.x, cur.y);
+            // lockApps (issue #221): listed foreground exe = locked outright, no heuristics.
+            // The list IS the feature (empty = off); warpLock=1 adds the smart tells globally.
+            // MUST force through the DETECTOR, not just this tick's local: the free-cursor gate
+            // reads t.detector.locked() below, and a local-only force left the transform view
+            // pinned to the warped pointer (field regression: the list "did nothing" once the
+            // zoom-in seeding was scoped behind warpLock - gameplay had been riding the seed).
+            const bool forcedLock = t.cfg.lockForce != 0 ||
+                (!t.cfg.lockApps.empty() &&
+                 FgExeInList(GetForegroundWindow(), t.cfg.lockApps));
+            if (forcedLock && !locked) {
+                t.detector.seedLock();
+                locked = true;
+            }
+            if (locked != t.prevDetLocked) {
+                // Field diagnosis (issue #221): which tell engaged, and when, in wind-core.log.
+                wind::Log(wind::LogLevel::Info, "lock", "detector %s%s lvl=%.2f",
+                          locked ? "LOCKED" : "free",
+                          (locked && t.detector.warpLocked()) ? " (warp-anchor)" : "", lvl);
+                t.prevDetLocked = locked;
+            }
             if (locked) {
                 dx = (int)std::lround(rawDx * t.cfg.cursorSensitivity);
                 dy = (int)std::lround(rawDy * t.cfg.cursorSensitivity);
@@ -2193,6 +2239,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     QueryPerformanceCounter(&ts.prev);
     ts.iniPath = iniPath;
     ts.lastMtime = ConfigMTime(iniPath);
+    // Seed the UI-only-change fingerprint from the CURRENT ini, or the first settings write
+    // after launch always reloads (empty fingerprint = "unknown") - the first theme flip of a
+    // session still collapsed the zoom (Max field report on the StripUiOnlyKeys fix).
+    ts.lastCoreIni = wind::StripUiOnlyKeys(wind::ReadTextFile(iniPath));
     // Watch the directory holding the ini so config hot-reload doesn't stat magnifier.ini every
     // second on the render thread (see RunTick). LAST_WRITE catches in-place saves; FILE_NAME
     // catches write-temp-then-rename saves. nullptr/INVALID on failure -> RunTick falls back to

@@ -28,6 +28,12 @@ public:
     // (XAML/Explorer, Chromium) consult it for hit-testing too (issue #148 desktop dead zones).
     // Needs UIAccess: fails harmlessly on the dev build (logged once by the caller's model).
     bool setInputTransform(bool active, const RECT& src, const RECT& dst);
+    // Read the system input transform back (MagGetInputTransform; no UIAccess needed). The slot
+    // is ONE system-wide value that native Magnifier re-publishes continuously while it runs
+    // (issue #217), so the model reads it back each zoomed tick to detect a foreign writer and
+    // republish. Also the truth for publish success: on this rig MagSetInputTransform can return
+    // FALSE while the publish lands, so the return value alone must never be trusted.
+    bool getInputTransform(bool& active, RECT& src, RECT& dst);
     // Magnification bitmap smoothing: MagSetFullscreenUseBitmapSmoothing, Magnification.dll
     // ORDINAL 1 (undocumented, no header - Magnify.exe imports it; it is what the "smooth edges
     // of images and text" option flips). A session that never sets it samples NEAREST NEIGHBOUR,

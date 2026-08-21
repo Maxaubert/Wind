@@ -4,6 +4,7 @@
 #include "logging.h"
 #include <windows.h>
 #include <magnification.h>
+#include <dwmapi.h>      // DwmFlush: the sprite-before-blank handoff (issue #221)
 #include <cmath>
 
 namespace wind {
@@ -144,13 +145,20 @@ void TransformModel::noteIxWrite(double ms, bool ok) {
     unsigned long long now = GetTickCount64();
     if (ixLogMs_ == 0) ixLogMs_ = now;
     if (now - ixLogMs_ >= 1000) {
-        if (ixMaxMs_ > 5.0 || ixFails_ > 0) {
+        if (ixMaxMs_ > 5.0 || ixFails_ > 0 || ixStomps_ > 0) {
             wind::Log(wind::LogLevel::Info, "ixwrite",
-                      "publishes=%d avg=%.2fms MAX=%.1fms fails=%d",
-                      ixCount_, ixCount_ ? ixSumMs_ / ixCount_ : 0.0, ixMaxMs_, ixFails_);
+                      "publishes=%d avg=%.2fms MAX=%.1fms fails=%d stomps=%d",
+                      ixCount_, ixCount_ ? ixSumMs_ / ixCount_ : 0.0, ixMaxMs_, ixFails_,
+                      ixStomps_);
         }
         ixLogMs_ = now; ixMaxMs_ = 0.0; ixSumMs_ = 0.0; ixCount_ = 0; ixFails_ = 0;
+        ixStomps_ = 0;
     }
+}
+
+void TransformModel::noteIxStomp() {
+    std::lock_guard<std::mutex> lk(statMx_);
+    ++ixStomps_;
 }
 
 void TransformModel::noteWrite(double ms, bool ok) {
@@ -211,7 +219,31 @@ void TransformModel::setActive(bool active) {
         // zoom-in hitch. Plain SetSystemCursor needs no context, so it is free out here. The
         // present() hide branch keeps its blank() call as the fallback (idempotent) and still
         // owns MagShowSystemCursor + cursorHidden_ bookkeeping.
-        if (useSprite_ && blanker_) blanker_->blank();
+        if (useSprite_ && blanker_) {
+            // Bridge the swap gap (issue #221 field report: zoom-in BLINKS the cursor): the
+            // blank hides the real pointer instantly, but the sprite's first present is a
+            // context build (~36ms) plus a reveal away - a visible cursor-less gap. Stand the
+            // sprite up at the pointer's position BEFORE blanking (at ~1x the transform is
+            // identity, so it lands exactly on the pointer) and the handoff overlaps instead
+            // of gapping. Skipped when the APP is hiding its cursor (mouselook): nothing
+            // visible is being swapped there, and flashing a sprite would be its own blink.
+            CURSORINFO ci{}; ci.cbSize = sizeof(ci);
+            if (sprite_ && GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING) != 0 &&
+                sprite_->refreshShape() == CursorSprite::ShapeStatus::Rendered) {
+                sprite_->moveTo(ci.ptScreenPos.x, ci.ptScreenPos.y);
+                sprite_->show();
+                sprite_->keepOnTop();
+                // The blank hits the cursor plane the SAME frame, but the sprite's first
+                // composite lands the NEXT one - a one-frame hole that motion masks and a
+                // still pointer exposes (field-verified). TWO DwmFlush passes (~14ms, before
+                // the context build that follows anyway): the first can latch a composite
+                // that began before the ShowWindow reached DWM, the second is guaranteed to
+                // include the sprite. One flush measurably still blinked on a still pointer.
+                DwmFlush();
+                DwmFlush();
+            }
+            blanker_->blank();
+        }
         // (A sub-pixel "session warm-up" write here was tried and measured WORSE: 4 spike frames
         // per 3 cycles vs 2, and it added zoom-out spikes. Entering magnification costs ~36ms
         // once per zoom-in regardless - that is DWM building its machinery.)
@@ -236,7 +268,14 @@ void TransformModel::setActive(bool active) {
     // Unconditional (and idempotent): setActive(true) pre-blanks BEFORE the context exists, so
     // a session that never entered the draw branch (cursorVisibility=never, hide-hotkey) still
     // has blanked system cursors to give back even though cursorHidden_ never went true.
-    if (blanker_) blanker_->restore();
+    if (blanker_) {
+        blanker_->restore();
+        // Windows repaints the pointer plane only on the next cursor EVENT, so a restored-but-
+        // still pointer stays invisible until the hand moves (field-verified). A 1px nudge and
+        // back generates that event invisibly.
+        POINT np;
+        if (GetCursorPos(&np)) { SetCursorPos(np.x + 1, np.y); SetCursorPos(np.x, np.y); }
+    }
     idleSinceMs_ = GetTickCount64();   // start the release countdown (idleTick)
     wind::Log(wind::LogLevel::Info, "txsession", "session end maxLevel=%.2f", sessionMaxLevel_);
     sessionMaxLevel_ = 0.0;
@@ -247,6 +286,9 @@ void TransformModel::setActive(bool active) {
     QueryPerformanceFrequency(&fr); QueryPerformanceCounter(&pa);
     host_.setTransform(1.0f, 0, 0, 0, 0, false);
     QueryPerformanceCounter(&pb);
+    // The park applied 1.0 outside writeTransform, so sync the cached level: a stale lastLevel_
+    // here anchored the step cap's next session at the trailing zoom-out value (#219 bounce).
+    lastLevel_ = 1.0; lastRequestedLevel_ = 1.0;
     identityParked_ = true;
     parkedAtMs_ = GetTickCount64();
     const double parkMs = double(pb.QuadPart - pa.QuadPart) * 1000.0 / fr.QuadPart;
@@ -254,6 +296,11 @@ void TransformModel::setActive(bool active) {
         wind::Log(wind::LogLevel::Info, "transform", "identity park took %.1fms", parkMs);
     RECT full{ 0, 0, mon_.w, mon_.h };
     host_.setInputTransform(false, full, full);   // input mapping back to identity at 1x
+    // Stomp-guard expectation (issue #217): the slot should now read DISABLED. Kept valid across
+    // the idle so the next session's first tick catches a rect stranded meanwhile (e.g. a native
+    // Magnifier killed while zoomed) and overwrites it immediately.
+    ixExpectedValid_ = true;
+    ixExpectedOn_ = false;
     pin_.hide();
     mpoGhost_.hide();   // after the identity park: re-promotion happens against a parked value
 }
@@ -320,15 +367,18 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     }
     // txMaxStepPct: rate-limit the APPLIED level change per tick. Each change makes DWM re-scale
     // its cached surfaces and that cost grows with the level, so an unclamped fast ramp demands
-    // the most expensive re-scales back to back exactly at the top - the suspected cause of the
-    // occasional huge spike at max zoom. The applied level trails and catches up within a few
-    // ticks of the ramp stopping; the source rect below is recomputed for whatever we apply.
-    if (cfg.txMaxStepPct > 0 && lastLevel_ > 1.0 && applyLevel > 1.0) {
-        const double maxRel = cfg.txMaxStepPct / 1000.0;
-        const double up = lastLevel_ * (1.0 + maxRel);
-        const double down = lastLevel_ / (1.0 + maxRel);
+    // the most expensive re-scales back to back exactly at the top - measured (#219): ~15% of
+    // uncapped 15x zoom-ins stalled 35-43ms then snapped 1.2-1.9 levels; capped, 20/20 ramps
+    // ran even. UP-steps ONLY: zoom-out measured clean uncapped (outGaps <=8ms in every soak),
+    // and a DOWN clamp anchored on lastLevel_ is what caused the session-start BOUNCE (rig-
+    // reproduced 4/4: 5-7 backward level steps at the start of a quick re-zoom) - the zoom-out
+    // trailed the controller, the identity park bypassed lastLevel_, and the next ramp's first
+    // writes were dragged back down toward the stale anchor. The applied level trails a fast
+    // ramp and catches up within a few ticks of it stopping; the source rect below is recomputed
+    // for whatever we apply.
+    if (cfg.txMaxStepPct > 0 && lastLevel_ > 1.0 && applyLevel > lastLevel_) {
+        const double up = lastLevel_ * (1.0 + cfg.txMaxStepPct / 1000.0);
         if (applyLevel > up) applyLevel = up;
-        else if (applyLevel < down) applyLevel = down;
     }
     // txGrid: snap to a fixed GEOMETRIC ladder (1.0 * g^k) so every zoom reuses the same small
     // set of scale factors instead of minting ~200 fresh ones - DWM's per-factor surface cache
@@ -464,16 +514,45 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // Both rects in VIRTUAL-SCREEN coordinates (the old 0,0-based dst was wrong off-primary).
     // Needs UIAccess: the ENABLED publish fails without it (rig-measured ERROR_ACCESS_DENIED;
     // the DISABLED call succeeds regardless - never probe availability with the disable shape).
-    if (cfg.magInputTransform != 0 && (changed || ixPending_)) {
+    // Stomp guard (issue #217, docs/WOBBLE-CAPTURE-2026-08-21.md): the input transform is ONE
+    // system-wide slot, and native Magnifier re-publishes an ENABLED IDENTITY into it
+    // continuously while it runs - even sitting unzoomed at 100%. Under a Wind zoom that
+    // identity mapping unmoors the visible cursor (the wobble); a dirty Magnifier exit strands
+    // its last rect the same way. So every zoomed tick reads the slot back (~0.1ms) and, when
+    // it does not hold what we last published, forces a republish past the decimation. Wind at
+    // tick rate wins the two-writer war for as long as the foreign writer lives, and a stale
+    // corpse is overwritten on the first tick of the next session.
+    bool ixForce = false;
+    if (cfg.magInputTransform == 1 && applyLevel > 1.001 && ixExpectedValid_) {
+        bool aOn = false; RECT aSrc{}, aDst{};
+        if (host_.getInputTransform(aOn, aSrc, aDst) &&
+            InputTransformStomped(ixExpectedOn_, ixExpL_, ixExpT_, ixExpR_, ixExpB_,
+                                  aOn, aSrc.left, aSrc.top, aSrc.right, aSrc.bottom)) {
+            ixForce = true;
+            noteIxStomp();
+            // The same foreign writer owns the shared cursor-visibility global
+            // (MagShowSystemCursor) - re-assert our hide on the stomp tick so the raw pointer
+            // plane it re-showed does not rubber-band beside the sprite (two-cursors gotcha).
+            if (cursorHidden_) MagShowSystemCursor(FALSE);
+            if (!ixStompWarned_) {
+                ixStompWarned_ = true;
+                wind::Log(wind::LogLevel::Warn, "transform",
+                          "foreign input-transform writer detected (native Magnifier running?) - "
+                          "republishing per tick");
+            }
+        }
+    }
+    if (cfg.magInputTransform != 0 && (changed || ixPending_ || ixForce)) {
         // Decimation (issue #189): the publish exists for pointer-framework HOVER hit-testing
         // (clicks ride the welded cursor and never consult it), so it does not need the 144Hz
         // motion rate - every Nth changed tick suffices, with a GUARANTEED publish the moment
         // motion rests (changed goes false with one pending) so a stationary aim is always
         // exact. Halves-or-better the per-tick DWM magnification-message rate during ramps/pans
         // (this call postdates every hitch baseline and was fully uninstrumented until now).
+        // A stomp bypasses the decimation entirely: correctness of the mapping beats hygiene.
         if (changed) ixPending_ = true;
         const bool rest = !changed;
-        if (rest || ++ixTick_ >= cfg.ixDecimate) {
+        if (ixForce || rest || ++ixTick_ >= cfg.ixDecimate) {
             ixTick_ = 0;
             ixPending_ = false;
             // srcL/srcT, not r.srcLeft/srcTop: when the ramp limiters make applyLevel != level
@@ -483,14 +562,43 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
                 srcL, srcT, applyLevel, mon_.x, mon_.y, mon_.w, mon_.h);
             RECT dst{ ir.dl, ir.dt, ir.dr, ir.db };
             RECT src = (cfg.magInputTransform == 2) ? dst : RECT{ ir.sl, ir.st, ir.sr, ir.sb };
+            const bool enable = applyLevel > 1.001;
             LARGE_INTEGER fr, a, b;
             QueryPerformanceFrequency(&fr); QueryPerformanceCounter(&a);
-            bool ok = host_.setInputTransform(applyLevel > 1.001, src, dst);
+            bool ok = host_.setInputTransform(enable, src, dst);
+            const unsigned long setGle = GetLastError();
             QueryPerformanceCounter(&b);
-            noteIxWrite(double(b.QuadPart - a.QuadPart) * 1000.0 / fr.QuadPart, ok);
+            // One-shot ground truth (issue #217): the set's return value, its GetLastError, and
+            // an immediate read-back, so a publish war or a lying return code is visible in the
+            // field log instead of being theorized about. First few publishes only.
+            if (ixDbgLogs_ < 4) {
+                ++ixDbgLogs_;
+                bool gOn = false; RECT gS{}, gD{};
+                const bool gOk = host_.getInputTransform(gOn, gS, gD);
+                wind::Log(wind::LogLevel::Info, "ixdiag",
+                          "set en=%d src=(%ld,%ld,%ld,%ld) ret=%d gle=%lu | get ret=%d en=%d "
+                          "src=(%ld,%ld,%ld,%ld)",
+                          enable ? 1 : 0, src.left, src.top, src.right, src.bottom,
+                          ok ? 1 : 0, setGle, gOk ? 1 : 0, gOn ? 1 : 0,
+                          gS.left, gS.top, gS.right, gS.bottom);
+            }
             if (!ok) {
-                // Self-heal (spec constraint 1): a failed ENABLED publish means this build
-                // cannot fix the pointer-framework dead zones - the DESKTOP pick must stop
+                // The return value cries wolf on this rig (issue #217): FALSE while the publish
+                // demonstrably lands (read-back tracks our rect). The read-back is the truth.
+                bool aOn = false; RECT aS{}, aD{};
+                if (host_.getInputTransform(aOn, aS, aD) &&
+                    !InputTransformStomped(enable, src.left, src.top, src.right, src.bottom,
+                                           aOn, aS.left, aS.top, aS.right, aS.bottom))
+                    ok = true;
+            }
+            noteIxWrite(double(b.QuadPart - a.QuadPart) * 1000.0 / fr.QuadPart, ok);
+            if (ok) {
+                ixExpectedValid_ = true;
+                ixExpectedOn_ = enable;
+                ixExpL_ = src.left; ixExpT_ = src.top; ixExpR_ = src.right; ixExpB_ = src.bottom;
+            } else {
+                // Self-heal (spec constraint 1): a VERIFIED-failed ENABLED publish means this
+                // build cannot fix the pointer-framework dead zones - the DESKTOP pick must stop
                 // choosing the transform. Games are unaffected (legacy input surfaces).
                 inputTransformAvailable_ = false;
                 if (!inputXformWarned_) {
@@ -503,6 +611,8 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     } else if (changed && lastInputXformOn_) {
         RECT full{ 0, 0, mon_.w, mon_.h };
         host_.setInputTransform(false, full, full);
+        ixExpectedValid_ = true;
+        ixExpectedOn_ = false;
     }
     if (changed) lastInputXformOn_ = cfg.magInputTransform != 0;
     }   // !ex.pauseWrites

@@ -84,7 +84,7 @@
       <path d="M2 12.5h6.5a1.7 1.7 0 1 1-1.7 1.7"/>
     </svg>
     <div class="name">Wind</div>
-    <p class="tag">A fast magnifier that lives in your tray.</p>
+    <p class="tag">Barely there. Everywhere.</p>
     <p class="version">v0.9.0</p>
     <a class="link" href="https://github.com/Maxaubert/Wind" target="_blank" rel="noopener">View on GitHub</a>
   </div>

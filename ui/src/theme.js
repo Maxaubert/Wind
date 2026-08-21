@@ -11,8 +11,12 @@ export function applyTheme(mode) {
 export function currentTheme(values) {
   return values && values.uiTheme ? values.uiTheme : 'auto';
 }
-// The sun/moon toggle cycles auto -> dark -> light -> auto and persists.
-export function nextTheme(mode) {
-  return mode === 'auto' ? 'dark' : mode === 'dark' ? 'light' : 'auto';
+// The sun/moon toggle flips the EFFECTIVE theme: auto resolves against the system preference
+// first, so one click always visibly changes something. (The old auto -> dark -> light cycle
+// needed TWO clicks to reach light on a dark system: auto -> dark was invisible.)
+export function nextTheme(mode, systemDark = typeof window !== 'undefined' &&
+    window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+  const dark = mode === 'dark' || (mode === 'auto' && systemDark);
+  return dark ? 'light' : 'dark';
 }
 export function setTheme(mode) { applyTheme(mode); setConfig('uiTheme', mode); }

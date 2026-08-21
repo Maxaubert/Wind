@@ -29,11 +29,43 @@ public:
     // cursorMag : |cursorDx| + |cursorDy| this tick (how far the OS cursor actually moved).
     // Returns the (possibly updated) locked state.
     bool update(bool clipConfined, int rawMag, int cursorMag);
+    // Warp-anchor variant (issue #221, field-traced on DOOM The Dark Ages): some mouselook
+    // engines WARP the pointer back to a fixed anchor every frame instead of clipping or
+    // freezing it - the trace showed 58 returns to one pixel with apparent pointer speeds of
+    // 13k-80k px/s. That defeats both classic tells at once (the clip is the full monitor, and
+    // the warp keeps the cursor MOVING, which the frozen-tell reads as free movement). So:
+    // a big cursor jump (>= kWarpJumpPx) LANDING within a few px of the same anchor repeatedly
+    // is lock evidence, and a recent warp landing suppresses the free streak (a slow game warps
+    // only every few ticks, and the hand-motion ticks in between must not unlock).
+    // warpTell gates the whole mechanism (the warpLock knob: engaging mid-fight reads as "the
+    // magnifier hitches then gets good", so the feature is user-visible and optional).
+    // cx/cy: the current OS cursor position (virtual px).
+    bool update(bool clipConfined, int rawMag, int cursorMag, bool warpTell, int cx, int cy);
     bool locked() const { return locked_; }
+    // True when the CURRENT locked state was reached via the warp-anchor tell (diagnostics).
+    bool warpLocked() const { return locked_ && warpReturns_ > 0; }
+    // Start the session LOCKED with zero motion evidence (issue #221 round 3): the caller saw
+    // the mouselook tell at the zoom-in edge (covering foreground whose cursor is hidden by the
+    // APP - the game-inspect signal, valid there because nothing is hidden by us yet). The
+    // quiet-window guard arms so a few stray free ticks cannot immediately undo the seed; a
+    // wrong seed (fullscreen video with an auto-hidden cursor) self-heals in ~100ms once the
+    // pointer reappears and tracks the hand.
+    void seedLock() { locked_ = true; warpReturns_ = 1; sinceWarp_ = 0; }
     void reset();   // back to free (call on zoom-in / recenter / monitor retarget)
 private:
     bool locked_ = false;
     int  lockStreak_ = 0;   // consecutive ticks of (raw active, OS cursor frozen)
     int  freeStreak_ = 0;   // consecutive ticks of (OS cursor moving with input)
+    // Warp-anchor state (issue #221).
+    bool haveAnchor_ = false;
+    int  anchorX_ = 0, anchorY_ = 0;
+    int  anchorMissTicks_ = 0;   // ticks since the cursor last sat on the anchor
+    int  warpReturns_ = 0;       // big jumps that LANDED on the anchor
+    int  sinceWarp_ = 1000;      // ticks since the last warp landing (large = long ago)
+    // Confinement-box tell (issue #221, round 2): GENTLE mouselook produces warp jumps too
+    // small for the anchor tell, but the signature is the same - lots of raw mickeys while the
+    // cursor's positions stay inside a tiny box. Tumbling window accumulators.
+    int  boxTicks_ = 0, boxRawSum_ = 0;
+    int  boxMinX_ = 0, boxMaxX_ = 0, boxMinY_ = 0, boxMaxY_ = 0;
 };
 }

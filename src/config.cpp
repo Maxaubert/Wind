@@ -1,4 +1,5 @@
 #include "config.h"
+#include <cstring>
 #include <sstream>
 #include <string>
 #include <algorithm>
@@ -109,6 +110,7 @@ Config ParseConfig(const std::string& text) {
         // defaults, so a list with defaults could never be emptied at all.
         if (key == "transformExclude") { c.transformExclude = val; continue; }
         if (key == "noSwallowApps")    { c.noSwallowApps    = val; continue; }
+        if (key == "lockApps")         { c.lockApps         = val; continue; }
         if (val.empty()) continue;
         try {
             if (key == "zoomInButton")          c.zoomInButton = std::stoi(val);
@@ -170,6 +172,8 @@ Config ParseConfig(const std::string& text) {
             else if (key == "txMinOffsetPx")      c.txMinOffsetPx = std::stoi(val);
             else if (key == "txIdleReleaseMs")    c.txIdleReleaseMs = std::stoi(val);
             else if (key == "txMaxStepPct")       c.txMaxStepPct = std::stoi(val);
+            else if (key == "warpLock")           c.warpLock = std::stoi(val);
+            else if (key == "lockForce")          c.lockForce = std::stoi(val);
             else if (key == "txLevelStep")        c.txLevelStep = std::stoi(val);
             else if (key == "txGrid")             c.txGrid = std::stoi(val);
             else if (key == "gameFpsCap")         c.gameFpsCap = std::stoi(val);
@@ -250,6 +254,29 @@ Config ParseConfig(const std::string& text) {
     return c;
 }
 }
+
+namespace wind {
+std::string StripUiOnlyKeys(const std::string& iniText) {
+    std::string out;
+    out.reserve(iniText.size());
+    size_t pos = 0;
+    while (pos < iniText.size()) {
+        size_t eol = iniText.find('\n', pos);
+        if (eol == std::string::npos) eol = iniText.size();
+        std::string line = iniText.substr(pos, eol - pos);
+        size_t b = line.find_first_not_of(" \t");
+        bool uiOnly = false;
+        if (b != std::string::npos) {
+            for (const char* k : { "uiTheme=", "showAdvanced=", "onboarded=" }) {
+                if (line.compare(b, strlen(k), k) == 0) { uiOnly = true; break; }
+            }
+        }
+        if (!uiOnly) { out += line; out += '\n'; }
+        pos = eol + 1;
+    }
+    return out;
+}
+}  // namespace wind
 
 #ifndef WIND_TESTS
 // --- File I/O (excluded from the pure test build via WIND_TESTS) ------------

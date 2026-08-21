@@ -116,6 +116,16 @@ bool MagHost::setInputTransform(bool active, const RECT& src, const RECT& dst) {
     });
 }
 
+bool MagHost::getInputTransform(bool& active, RECT& src, RECT& dst) {
+    if (!initialized_) return false;
+    return MagThreadInvoke([&]() -> bool {
+        BOOL en = FALSE;
+        if (MagGetInputTransform(&en, &src, &dst) == FALSE) return false;
+        active = en != FALSE;
+        return true;
+    });
+}
+
 void MagHost::shutdown() {
     if (!initialized_) return;
     // Reset and release as ONE marshalled unit: split across two invokes another thread could slip

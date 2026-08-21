@@ -45,4 +45,14 @@ MagTransform ComputeMagTransform(double srcLeft, double srcTop, double level,
 struct InputTransformRects { int sl, st, sr, sb; int dl, dt, dr, db; };
 InputTransformRects ComputeInputTransformRects(double srcLeft, double srcTop, double level,
                                                int monX, int monY, int monW, int monH);
+
+// Foreign-writer detection for the system input transform (issue #217). The publish is ONE
+// system-wide slot and native Magnifier re-publishes an ENABLED IDENTITY into it continuously
+// while it runs - even sitting at 100% - which unmoors the cursor under a Wind zoom (the wobble).
+// A dirty Magnifier exit also strands its last rect there. So the model compares what the slot
+// ACTUALLY holds against what Wind last published; any difference means a foreign writer (or a
+// stale corpse) owns the slot and Wind must republish. Exact integer compare: our own publish
+// echoes back verbatim, so any deviation is foreign by definition.
+bool InputTransformStomped(bool expectedEnabled, int esl, int est, int esr, int esb,
+                           bool actualEnabled, int asl, int ast, int asr, int asb);
 }

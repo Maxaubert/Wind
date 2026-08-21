@@ -92,6 +92,12 @@ struct Config {
     // user never considered. Exe names, comma-separated, case-insensitive, matched whenever one is
     // foreground - fullscreen or windowed, since the user named it explicitly.
     std::string noSwallowApps = "";
+    // lockApps (issue #221, hot): exe names whose sessions run the LOCKED regime outright while
+    // they are foreground - raw-mickey panning from the first tick, detector bypassed. The
+    // deterministic answer for pointer-warping mouselook games (DOOM The Dark Ages) where any
+    // detection heuristic still lets a moment of recentering through. Comma-separated,
+    // case-insensitive, exact exe name match (IsExeInList), same shape as noSwallowApps.
+    std::string lockApps = "";
     // Transform-model-only knobs (ignored by the other models):
     int fastPan     = 1;  // 1 = pan via the private SetMagnificationDesktopMagnification channel
                           //     (sub-pixel); falls back to the public API automatically if unavailable.
@@ -207,13 +213,37 @@ struct Config {
     int txLevelStep = 0;  // Minimum RELATIVE level change (per mille) before a ramp re-writes
                           //     the level. MEASURED NO BETTER than continuous once sample size
                           //     was adequate (big sporadic stalls appear in every setting).
-    int txMaxStepPct = 0; // cap the per-tick RELATIVE level change the transform applies (per
+    int txMaxStepPct = 25; // cap the per-tick RELATIVE level change the transform applies (per
                           //     mille; 25 = 2.5%). DWM re-scales on every level change and the
                           //     cost grows with the level, so a fast ramp asks for the most
-                          //     expensive work at the highest rate right at the top - the
-                          //     suspected source of the occasional huge spike at max zoom. The
-                          //     applied level trails the controller by a few ticks and catches
-                          //     up when the ramp stops. 0 = uncapped. Hot-reloadable.
+                          //     expensive work at the highest rate right at the top. MEASURED
+                          //     FIX (issue #219, 20-cycle focus-swap soaks at 15x over acrylic):
+                          //     uncapped ramps stall 35-43ms with a 1.2-1.9 level snap in ~15%
+                          //     of zoom-ins (native Magnifier: 23-32ms gaps in 7/20); capped at
+                          //     25 every ramp ran plateau <=13ms, uniform 0.36 steps, zero
+                          //     over-25ms compositor gaps, ramp only ~35ms longer. Normal ramp
+                          //     ticks are 0.8-2.2% relative, so the cap bites only the post-
+                          //     stall catch-up snap. The applied level trails the controller by
+                          //     a few ticks and catches up when the ramp stops. 0 = uncapped.
+                          //     Hot-reloadable.
+    int lockForce = 0;    // DIAGNOSTIC (hot): 1 = force the LOCKED regime (raw-mickey pan)
+                          //     everywhere, detector bypassed. Exists to demonstrate why locked
+                          //     cannot be the default: desktop panning loses Windows pointer
+                          //     ballistics (linear, speed-mismatched), drag-follow never engages
+                          //     (the #169 drag flicker returns), and the free mode's
+                          //     view-derived-from-pointer click guarantee is weakened. Never ship 1.
+    int warpLock = 0;     // game lock handling for pointer-WARPING mouselook engines (issue
+                          //     #221; DOOM The Dark Ages field-traced: the game recenters the
+                          //     pointer every frame, defeating both classic lock tells, so the
+                          //     lens snaps back instead of panning). The lockApps LIST is the
+                          //     feature: listed exes run their sessions locked outright, and an
+                          //     empty list means off - no separate off switch needed (Max).
+                          //     0 (default) = selected apps only; everywhere else is untouched
+                          //         classic behaviour.
+                          //     1 = global: additionally run the smart tells everywhere (warp-
+                          //         anchor, confinement box, hidden-cursor zoom-in seeding) for
+                          //         UNLISTED games - can transiently lock over e.g. fullscreen
+                          //         video with an auto-hidden cursor (~100ms, self-heals).
     int txIdleReleaseMs = 1200;  // how long the DWM magnification context lingers after a zoom
                           //     ends before it is released. Longer = repeat zooms skip the
                           //     rebuild (fewer big entry spikes) but DWM stays magnification-
@@ -363,6 +393,13 @@ bool IsForbiddenBindVk(int vk);
 // True when exeName (bare file name, any case) appears in a comma-separated list. Used for the
 // Auto/hybrid transform exclusion (fullscreen browser video must stay on the render engine).
 bool IsExeInList(const std::string& exeName, const std::string& list);
+// The ini text with UI-ONLY lines removed (uiTheme, showAdvanced, onboarded): the settings app
+// owns those keys and the core never consumes them, yet every write hot-reloads the core - and
+// the reload resets the ZoomController, so toggling the app theme while zoomed collapsed the
+// zoom to 1x (Max field report). The core compares this stripped form across reloads and skips
+// the reload when nothing it consumes changed. 'profile' stays IN: the core mirrors setConfig
+// into the active profile, so a profile change must still reload.
+std::string StripUiOnlyKeys(const std::string& iniText);
 // Pure: parse "#rrggbb" or "rrggbb" (case-insensitive) into r,g,b floats in [0,1]. Returns
 // false on any malformed input (wrong length, non-hex), leaving the outputs untouched so the
 // caller keeps its fallback default.

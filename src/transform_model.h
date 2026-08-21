@@ -97,6 +97,7 @@ private:
     void writeTransform(float lvl, int offX, int offY, int tx, int ty, bool fast, bool unusedAsync);
     void noteWrite(double ms, bool ok);
     void noteIxWrite(double ms, bool ok);            // input-transform publish stats (issue #189)
+    void noteIxStomp();                              // foreign writer overwrote our publish (#217)
     std::mutex statMx_;
     unsigned long long statLogMs_ = 0;
     double statMaxMs_ = 0.0, statSumMs_ = 0.0;
@@ -106,5 +107,15 @@ private:
     int    ixCount_ = 0, ixFails_ = 0;
     int    ixTick_ = 0;                              // decimation counter (cfg.ixDecimate)
     bool   ixPending_ = false;                       // motion changed since the last publish
+    // Stomp guard (issue #217): what we last VERIFIABLY published into the system input-
+    // transform slot. Kept across sessions on purpose - a fresh session's first tick compares
+    // the slot against the previous session's disable, so a rect stranded by a dead native
+    // Magnifier is caught and overwritten immediately.
+    bool   ixExpectedValid_ = false;
+    bool   ixExpectedOn_ = false;
+    int    ixExpL_ = 0, ixExpT_ = 0, ixExpR_ = 0, ixExpB_ = 0;
+    int    ixStomps_ = 0;                            // foreign overwrites seen this log window
+    bool   ixStompWarned_ = false;                   // one-shot foreign-writer warn
+    int    ixDbgLogs_ = 0;                           // one-shot publish ground-truth logs (#217)
 };
 }

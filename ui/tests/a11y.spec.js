@@ -65,12 +65,13 @@ test('every control in the settings list has an accessible name', async ({ page 
 test('a control is named by its own row label, not just any label', async ({ page }) => {
   // Naming everything is not enough - the name has to be the RIGHT one. Checked against a spread
   // of row types (toggle, slider, colour, keybind, dropdown, applist).
+  // (Post-cleanup roster: the smooth-zoom/multi-monitor toggles, sharpness slider, and the
+  // colour input left the UI - no color-type row remains, so that widget type is uncovered.)
   const cases = [
-    ['Smooth zoom', 'checkbox'],
+    ['Alternate keybinds', 'checkbox'],
     ['Max zoom', 'slider'],
-    ['Sharpness', 'slider'],
-    ['Outline color', 'textbox'],          // <input type=color> maps to textbox
-    ['Follow cursor monitor', 'checkbox'],
+    ['Cursor speed', 'slider'],
+    ['Frametime logging', 'checkbox'],
     ['Disable MPO', 'checkbox'],
   ];
   for (const [label, role] of cases)
@@ -78,7 +79,7 @@ test('a control is named by its own row label, not just any label', async ({ pag
       `${role} named "${label}"`).toHaveCount(1);
 
   // Value-bearing controls read "<label> <value>" so the binding/selection is spoken with the row.
-  await expect(page.getByRole('combobox', { name: /Magnifier model.*Render/ })).toHaveCount(1);
+  await expect(page.getByRole('combobox', { name: /Magnifier engine.*Render/ })).toHaveCount(1);
   await expect(page.getByRole('button', { name: /Zoom in.*Mouse button 5/ })).toHaveCount(1);
   await expect(page.getByRole('button', { name: /Inspect mode.*F2/ })).toHaveCount(1);
 });
@@ -92,10 +93,10 @@ test('row descriptions are linked to their control, not left orphaned', async ({
 });
 
 test('sliders speak their unit instead of a bare number', async ({ page }) => {
-  await expect(page.getByRole('slider', { name: /Smooth ramp/ }))
+  await expect(page.getByRole('slider', { name: /Ease-in duration/ }))
     .toHaveAttribute('aria-valuetext', /seconds/);
-  await expect(page.getByRole('slider', { name: /Outline thickness/ }))
-    .toHaveAttribute('aria-valuetext', /pixels/);
+  await expect(page.getByRole('slider', { name: /Zoom-in speed/ }))
+    .toHaveAttribute('aria-valuetext', /times/);
 });
 
 // --- Focus visibility -------------------------------------------------------
@@ -127,7 +128,7 @@ test('focus is visible, in both themes', async ({ page }) => {
 // --- Dialogs ----------------------------------------------------------------
 
 test('a dialog takes focus, traps Tab, and gives focus back on close', async ({ page }) => {
-  const opener = page.getByRole('button', { name: /Manage list/ });
+  const opener = page.getByRole('button', { name: /Manage list/ }).first();   // two applists exist now (lockApps, #221)
   await opener.click();
   const dlg = page.getByRole('dialog');
   await expect(dlg).toBeVisible();
@@ -157,7 +158,7 @@ test('a dialog takes focus, traps Tab, and gives focus back on close', async ({ 
 test('Escape works the instant a dialog opens', async ({ page }) => {
   // Regression: focus used to be moved in on a setTimeout, so an Escape pressed immediately after
   // opening landed on the page behind and did nothing.
-  await page.getByRole('button', { name: /Manage list/ }).click();
+  await page.getByRole('button', { name: /Manage list/ }).first().click();   // two applists exist now (lockApps, #221)
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
 });
@@ -176,7 +177,7 @@ test('the settings prompts announce themselves too', async ({ page }) => {
 // --- The dropdown -----------------------------------------------------------
 
 test('the model dropdown is fully keyboard operable', async ({ page }) => {
-  const combo = page.getByRole('combobox', { name: /Magnifier model/ });
+  const combo = page.getByRole('combobox', { name: /Magnifier engine/ });
   await combo.focus();
 
   await page.keyboard.press('Enter');                       // open
@@ -213,12 +214,13 @@ test('the model dropdown is fully keyboard operable', async ({ page }) => {
 });
 
 test('the dropdown supports type-ahead like a native select', async ({ page }) => {
-  const combo = page.getByRole('combobox', { name: /Cursor visibility/ });
+  // Retargeted to the model picker: the cursor-visibility select left the UI (2026-08-21).
+  const combo = page.getByRole('combobox', { name: /Magnifier engine/ });
   await combo.focus();
-  await page.keyboard.press('n');            // "never"
+  await page.keyboard.press('t');            // "Transform"
   await expect(page.getByRole('listbox')).toBeVisible();
   await page.keyboard.press('Enter');
-  await expect(combo).toHaveAccessibleName(/never/);
+  await expect(combo).toHaveAccessibleName(/Transform/);
 });
 
 // --- Navigation -------------------------------------------------------------
@@ -269,26 +271,13 @@ test('restructuring the page is announced', async ({ page }) => {
 
 // --- Widgets ----------------------------------------------------------------
 
-test('the segmented control is a radio group with working arrow keys', async ({ page }) => {
-  const group = page.getByRole('radiogroup', { name: /Quick zoom/ });
-  await expect(group).toHaveCount(1);
-  const modifier = group.getByRole('radio', { name: 'Modifier' });
-  const hotkey = group.getByRole('radio', { name: 'Hotkey' });
-  await expect(modifier).toHaveAttribute('aria-checked', 'true');
-  await expect(hotkey).toHaveAttribute('aria-checked', 'false');
-
-  await modifier.focus();
-  await page.keyboard.press('ArrowRight');
-  await expect(hotkey).toHaveAttribute('aria-checked', 'true');
-  await expect(hotkey).toBeFocused();
-  await page.keyboard.press('ArrowLeft');
-  await expect(modifier).toHaveAttribute('aria-checked', 'true');
-});
+// (The segmented-control radio-group test left with the quick-zoom rows - no segmented row
+// remains in the schema. Restore it from git history if a segmented row ever returns.)
 
 test('Tab escapes an armed keybind capture instead of binding Tab', async ({ page }) => {
   // Arming used to swallow every key including Tab, so a keyboard user who activated a keycap by
   // mistake had no way out except Escape - which nothing told them about.
-  const cap = page.getByRole('button', { name: /Hide cursor \(hotkey\)/ });
+  const cap = page.getByRole('button', { name: /Hide cursor/ });
   await cap.focus();
   await page.keyboard.press('Enter');                    // arm
   await expect(cap).toHaveText(/Press a key/);
@@ -300,7 +289,7 @@ test('Tab escapes an armed keybind capture instead of binding Tab', async ({ pag
 });
 
 test('an armed keycap says so, and carries its instructions as a description', async ({ page }) => {
-  const cap = page.getByRole('button', { name: /Hide cursor \(hotkey\)/ });
+  const cap = page.getByRole('button', { name: /Hide cursor/ });
   await expect(cap).toHaveAccessibleDescription(/Escape cancels/);
   await cap.click();
   await expect(page.locator('[aria-live=assertive]').filter({ hasText: 'Listening' })).toHaveCount(1);

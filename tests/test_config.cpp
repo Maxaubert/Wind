@@ -8,7 +8,22 @@ TEST_CASE("defaults when text is empty") {
     CHECK(c.zoomOutButton == 0);   // shipped unbound
     CHECK(c.maxLevel == doctest::Approx(12.0));
     CHECK(c.diagnostics == 0);
+    // Ramp step cap ships ON (issue #219): uncapped, ~15% of high-level zoom-ins stall 35-43ms
+    // then snap 1.2-1.9 levels; capped at 2.5%/tick every measured ramp was even. 0 would
+    // regress the acrylic-window hitch Max reproduced.
+    CHECK(c.txMaxStepPct == 25);
 }
+TEST_CASE("StripUiOnlyKeys drops exactly the UI-owned lines (theme toggle must not hot-reload the core)") {
+    const std::string ini =
+        "maxLevel=12\nuiTheme=dark\n  showAdvanced=1\nonboarded=1\nzoomInSpeed=2\nprofile=Default\n";
+    const std::string s = wind::StripUiOnlyKeys(ini);
+    CHECK(s == "maxLevel=12\nzoomInSpeed=2\nprofile=Default\n");   // profile STAYS: mirroring needs it
+    // A theme flip alone produces an identical stripped form - the skip condition.
+    CHECK(wind::StripUiOnlyKeys("a=1\nuiTheme=light\n") == wind::StripUiOnlyKeys("a=1\nuiTheme=dark\n"));
+    // A key that merely STARTS like a UI key is kept.
+    CHECK(wind::StripUiOnlyKeys("uiThemeX=1\n") == "uiThemeX=1\n");
+}
+
 TEST_CASE("parses renderer knobs") {
     Config c = ParseConfig(
         "cursorSensitivity=1.5\ncursorScaleWithZoom=0\nbilinear=1\n");
