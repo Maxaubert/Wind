@@ -248,3 +248,45 @@ TEST_CASE("ClipRectConfines separates game clips from desktop-like clips") {
     CHECK(wind::ClipRectConfines(0, 0, 3840, 2160));
     CHECK(!wind::ClipRectConfines(1920, 1080, 0, 0));
 }
+
+// issue #223: the streak/window constants were field-tuned in ticks on a 144Hz panel. At other
+// refresh rates the detector re-derives them from ms baselines so real-time behavior is stable.
+TEST_CASE("setTickRate keeps lock/unlock behavior in real time, not in ticks") {
+    // At 144Hz the derivation reproduces the original tuned constants exactly: the classic
+    // frozen-cursor lock still needs 6 raw-active ticks.
+    {
+        LockDetector d;
+        d.setTickRate(144);
+        for (int i = 0; i < 5; ++i) CHECK(!d.update(false, 20, 0));
+        CHECK(d.update(false, 20, 0));   // 6th tick locks
+    }
+    // At 60Hz a tick is 2.4x longer, so the same ~42ms of evidence is 3 ticks.
+    {
+        LockDetector d;
+        d.setTickRate(60);
+        for (int i = 0; i < 2; ++i) CHECK(!d.update(false, 20, 0));
+        CHECK(d.update(false, 20, 0));   // 3rd tick locks (~50ms at 60Hz)
+    }
+    // At 240Hz the same evidence takes proportionally more ticks (10 for ~42ms).
+    {
+        LockDetector d;
+        d.setTickRate(240);
+        for (int i = 0; i < 9; ++i) CHECK(!d.update(false, 20, 0));
+        CHECK(d.update(false, 20, 0));
+    }
+    // Slow deliberate mouselook at 240Hz: per-tick mickeys halve, and the deliberate-motion
+    // floor follows (4 @144 -> 2 @240) so gentle motion still counts as lock evidence.
+    {
+        LockDetector d;
+        d.setTickRate(240);
+        for (int i = 0; i < 10; ++i) d.update(false, 2, 0);
+        CHECK(d.locked());
+    }
+    // An unconfigured detector behaves exactly as the 144Hz-tuned original (test-suite baseline).
+    {
+        LockDetector a, b;
+        b.setTickRate(144);
+        for (int i = 0; i < 6; ++i) { a.update(false, 20, 0); b.update(false, 20, 0); }
+        CHECK(a.locked() == b.locked());
+    }
+}

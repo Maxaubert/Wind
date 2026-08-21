@@ -41,6 +41,14 @@ public:
     // magnifier hitches then gets good", so the feature is user-visible and optional).
     // cx/cy: the current OS cursor position (virtual px).
     bool update(bool clipConfined, int rawMag, int cursorMag, bool warpTell, int cx, int cy);
+    // Re-derive the tick-count thresholds for the loop's actual tick rate (issue #223). All the
+    // streak/window constants were field-tuned in TICKS on a 144Hz panel; a tick is one display
+    // refresh, so on a 60Hz panel the same counts took 2.4x longer in real time (and per-tick
+    // mickey aggregation grew by the same factor). The baselines live in milliseconds now and
+    // this converts them back to ticks; at 144Hz the derived values reproduce the original
+    // tuned constants exactly. Call at init and whenever the paced refresh rate changes
+    // (monitor retarget, topology change). Values <= 0 fall back to 144.
+    void setTickRate(int hz);
     bool locked() const { return locked_; }
     // True when the CURRENT locked state was reached via the warp-anchor tell (diagnostics).
     bool warpLocked() const { return locked_ && warpReturns_ > 0; }
@@ -54,6 +62,14 @@ public:
     void reset();   // back to free (call on zoom-in / recenter / monitor retarget)
 private:
     bool locked_ = false;
+    // Tick-rate-derived thresholds (setTickRate). Defaults are the 144Hz field-tuned values so
+    // an un-configured detector (and the unit tests) behaves exactly as before.
+    int  lockTicks_      = 6;    // consecutive raw-active + cursor-frozen ticks -> lock
+    int  freeTicks_      = 3;    // consecutive cursor-moving ticks -> unlock
+    int  anchorLossTicks_ = 45;  // ~0.3s off-anchor -> forget the anchor
+    int  warpQuietTicks_ = 12;   // warp this recent blocks the free-streak unlock
+    int  boxWindowTicks_ = 24;   // confinement-box tumbling window (~170ms)
+    int  rawActive_      = 4;    // per-tick mickey floor that counts as deliberate motion
     int  lockStreak_ = 0;   // consecutive ticks of (raw active, OS cursor frozen)
     int  freeStreak_ = 0;   // consecutive ticks of (OS cursor moving with input)
     // Warp-anchor state (issue #221).

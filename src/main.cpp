@@ -94,6 +94,15 @@ static int DetectRefreshHz(const wchar_t* device = nullptr) {
     return 60;
 }
 
+// Small tick windows were field-tuned in TICKS on the 144Hz dev rig; a tick is one refresh, so
+// the same count is 2.4x longer in real time at 60Hz and 0.6x at 240Hz (issue #223). This keeps
+// their real-time duration by scaling the 144Hz-tuned count to the loop's actual tick rate.
+static int TicksAtHz(int base144, int hz) {
+    if (hz <= 0) hz = 144;
+    const int t = (base144 * hz + 72) / 144;
+    return t < 1 ? 1 : t;
+}
+
 // The primary monitor as a MonitorTarget (origin 0,0, primary size, empty device name = first
 // DXGI output). This is the legacy single-monitor target and the universal fallback.
 static MonitorTarget PrimaryMonitor() {
@@ -683,7 +692,7 @@ static void RunTick(TickState& t) {
             t.fgCacheHwnd = nullptr;   // transformExclude may have changed: re-resolve predicates
             t.zoom = ZoomController(1.0, nc.maxLevel);
             double ocx = t.mapper.centerX(), ocy = t.mapper.centerY();   // preserve position
-            t.mapper = CursorMapper(t.mon.w, t.mon.h, nc.cursorSmoothing);
+            t.mapper = CursorMapper(t.mon.w, t.mon.h, nc.cursorSmoothing, t.hz);
             t.mapper.reset(ocx, ocy);
             }   // core-relevant change guard (StripUiOnlyKeys)
         }
@@ -908,9 +917,11 @@ static void RunTick(TickState& t) {
                 IMagnifierModel* rt = t.mRender ? t.mRender : t.model;
                 if (!SameMonitor(nt, t.mon) && rt->retarget(nt)) {
                     t.mon = nt;
-                    t.mapper = CursorMapper(nt.w, nt.h, t.cfg.cursorSmoothing);
                     int nhz = DetectRefreshHz(nt.device);   // pace off the new monitor's refresh (#74)
                     if (nhz > 0) t.hz = nhz;
+                    // Everything tuned in ticks follows the new tick rate (issue #223).
+                    t.mapper = CursorMapper(nt.w, nt.h, t.cfg.cursorSmoothing, t.hz);
+                    t.detector.setTickRate(t.hz);
                 }
             }
             if (t.mTransform) {
@@ -1244,7 +1255,7 @@ static void RunTick(TickState& t) {
         // backgrounded and cursorless there is nothing meaningful to click anyway.
         if (nLeft + nRight > 0 && !t.inspectGame) {
             ClipCursor(nullptr);       // release the 1px freeze so the absolute click can reach the look point
-            t.clickReleaseTicks = 2;   // ...and keep it released a couple ticks before re-freezing (below)
+            t.clickReleaseTicks = TicksAtHz(2, t.hz);   // ...and keep it released ~14ms before re-freezing (below)
             const VirtualBounds& vb = t.vbounds;   // cached at activation; equals the SM_*VIRTUALSCREEN metrics
             if (vb.w > 1 && vb.h > 1) {
                 int lx = r.clickDesktopX + t.mon.x, ly = r.clickDesktopY + t.mon.y;
@@ -1265,7 +1276,7 @@ static void RunTick(TickState& t) {
                 if (dynamic_cast<TransformModel*>(t.model)) {
                     // The injected absolute move races transform writes (issue #148 TDR class), so
                     // SERIALIZE: skip transform writes for a couple ticks around it (ex.pauseWrites).
-                    t.clickPauseTicks = 3;
+                    t.clickPauseTicks = TicksAtHz(3, t.hz);
                 }
             }
         }
@@ -1338,7 +1349,7 @@ static void RunTick(TickState& t) {
                     // for the same short overlap, then drop it.
                     t.model->setActive(true);
                     t.restAfterReveal = old;
-                    t.restOverlapTicks = 3;
+                    t.restOverlapTicks = TicksAtHz(3, t.hz);
                 }
                 // Name the trigger: if another transient surface ever ping-pongs the engine the
                 // way the taskbar flyout did (issue #180), the log identifies it directly.
@@ -2263,6 +2274,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // Auto-detect the display refresh rate so we never assume a fixed rate (the dev's 144Hz).
     // Paces the idle/1x loop and the vsync=0 path; while zoomed, DwmFlush/vsync pace instead.
     ts.hz = DetectRefreshHz();
+    // Everything tuned in ticks (lock-detector streaks/windows, cursor smoothing inertia)
+    // derives from the detected rate too, so a tick stays the same real-time span (issue #223).
+    ts.detector.setTickRate(ts.hz);
+    ts.mapper.setTickRate(ts.hz);
     int pacedHz = ts.hz;                              // hz the timer interval below is computed for
     LARGE_INTEGER due; due.QuadPart = -(10000000LL / pacedHz);
 

@@ -1,10 +1,25 @@
 #include "cursor_mapper.h"
 #include "transform.h"
+#include <cmath>
 namespace wind {
-CursorMapper::CursorMapper(int screenW, int screenH, double smoothing)
-    : sw_(screenW), sh_(screenH),
+CursorMapper::CursorMapper(int screenW, int screenH, double smoothing, int tickHz)
+    : sw_(screenW), sh_(screenH), smoothing_(smoothing),
       cx_(screenW / 2.0), cy_(screenH / 2.0), tx_(screenW / 2.0), ty_(screenH / 2.0) {
-    alpha_ = 1.0 - smoothing;
+    setTickRate(tickHz);
+}
+
+void CursorMapper::setTickRate(int tickHz) {
+    if (tickHz <= 0) tickHz = 144;
+    // The easing recurrence keeps a fraction (1 - alpha) of the gap each tick. The configured
+    // smoothing is that keep-fraction at the 144Hz baseline; keeping the SAME real-time decay at
+    // another tick rate means keep_hz = smoothing^(144/hz) (issue #223) - otherwise the felt
+    // inertia stretched by hz/144 (0.4 at 60Hz lagged like ~0.68 at 144Hz).
+    double keep = 0.0;
+    if (smoothing_ > 0.0) {
+        double s = smoothing_ > 0.95 ? 0.95 : smoothing_;
+        keep = std::pow(s, 144.0 / (double)tickHz);
+    }
+    alpha_ = 1.0 - keep;
     if (alpha_ > 1.0) alpha_ = 1.0;
     if (alpha_ < 0.05) alpha_ = 0.05;     // never fully stall (keep responsiveness)
 }

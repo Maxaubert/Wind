@@ -262,6 +262,16 @@ depends on the state:
   the current monitor's real rate, never assumes the dev box's 144 Hz, and is re-queried on
   retarget so a mixed-refresh setup paces the panel it is actually on (#74). The timer interval
   is recomputed only when the paced Hz actually changes.
+
+A tick is one display refresh, so anything expressed in TICKS is refresh-rate dependent. Every
+tick-tuned quantity therefore derives from the detected rate at init and on retarget (issue
+#223): `LockDetector::setTickRate` re-derives its streak/window constants from millisecond
+baselines (the 144 Hz derivation reproduces the original field-tuned values exactly, and the
+per-tick mickey floor scales with tick duration), `CursorMapper::setTickRate` re-derives the
+smoothing ease so the felt inertia keeps the same real-time constant, and the small windows in
+`RunTick` (`clickReleaseTicks`, `clickPauseTicks`, `restOverlapTicks`) scale through
+`TicksAtHz`. New tick-count constants must go through the same mechanism - a bare tick count
+tuned on this rig silently changes behavior on 60 Hz and 240 Hz panels.
 - **Zoomed, render model, vsync (default)**: `Present(1,0)` blocks to the refresh and paces the
   loop by itself; the timer is skipped to avoid double-pacing.
 - **Zoomed, render model, `dwmFlush=1`**: present immediately, then `DwmFlush()` after the tick
