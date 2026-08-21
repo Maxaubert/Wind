@@ -124,7 +124,7 @@ test('the app row summarises an empty list and opens a dialog', async ({ page })
 
 test('adding a program stages it until Apply, then setConfig fires', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Manage list' }).click();
+  await page.getByRole('button', { name: 'Manage list' }).first().click();   // two applists exist now (lockApps, #221): target the first (noSwallowApps)
   await page.getByRole('button', { name: 'Add program...' }).click();   // mock picks RDR2.exe
   await expect(page.getByRole('dialog').getByText('RDR2.exe')).toBeVisible();
   expect(await page.evaluate(() => window.__sets.filter(s => s.key === 'noSwallowApps').length)).toBe(0);
@@ -139,7 +139,7 @@ test('adding a program stages it until Apply, then setConfig fires', async ({ pa
 // effect while the list looked broken. The add path has to reject the duplicate outright.
 test('adding the same program twice is ignored, regardless of case', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Manage list' }).click();
+  await page.getByRole('button', { name: 'Manage list' }).first().click();   // two applists exist now (lockApps, #221): target the first (noSwallowApps)
   const add = page.getByRole('button', { name: 'Add program...' });
   await add.click();
   await page.evaluate(() => { window.__pick = 'rdr2.EXE'; });   // same program, different case
@@ -149,26 +149,26 @@ test('adding the same program twice is ignored, regardless of case', async ({ pa
 
 test('removing a program empties the list again', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Manage list' }).click();
+  await page.getByRole('button', { name: 'Manage list' }).first().click();   // two applists exist now (lockApps, #221): target the first (noSwallowApps)
   await page.getByRole('button', { name: 'Add program...' }).click();
   await page.getByRole('button', { name: 'Remove RDR2.exe' }).click();
   await expect(page.getByRole('dialog').getByText('No apps yet')).toBeVisible();
   await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
-  await expect(page.getByText('None', { exact: true })).toBeVisible();
+  await expect(page.getByText('None', { exact: true }).first()).toBeVisible();   // both applists show 'None' when empty (#221)
 });
 
 // Closing is the only way out now that the confirm button is gone, so all three routes are load
 // bearing: the X, Escape, and a backdrop click.
 test('the backdrop closes the dialog', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Manage list' }).click();
+  await page.getByRole('button', { name: 'Manage list' }).first().click();   // two applists exist now (lockApps, #221): target the first (noSwallowApps)
   await page.mouse.click(8, 8);   // outside the box, on the backdrop
   await expect(page.getByRole('dialog')).toHaveCount(0);
 });
 
 test('Escape closes the dialog', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Manage list' }).click();
+  await page.getByRole('button', { name: 'Manage list' }).first().click();   // two applists exist now (lockApps, #221): target the first (noSwallowApps)
   await expect(page.getByRole('dialog')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);

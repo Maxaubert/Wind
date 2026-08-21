@@ -29,6 +29,16 @@ export const sections = [
     { key:'cursorSmoothing',   type:'slider', label:'Cursor inertia smoothing', desc:'0 = off, higher = smoother.', min:0, max:0.95, step:0.05, def:0.4 },
     { key:'cursorScaleWithZoom', type:'toggle', label:'Scale cursor with zoom', def:0, advanced:true },
     { key:'cursorVisibility', type:'select', label:'Cursor visibility', options:['auto','always','never'], def:'auto', advanced:true },
+    // Warp-lock (issue #221): mouselook engines that recenter the pointer every frame (DOOM The
+    // Dark Ages, field-traced) defeat the automatic lock detection, so the lens snaps back to the
+    // game's recenter point instead of panning. Listed apps run their zoom sessions in the locked
+    // raw-mouse pan outright; the advanced toggle extends the smart detection to unlisted games.
+    { key:'lockApps', type:'applist', label:'Lock zoom view in these apps',
+      desc:'Games that recenter the mouse (e.g. DOOM). Panning uses raw mouse motion there.',
+      def:'' },
+    { key:'warpLock', type:'toggle', label:'Auto-detect recentering games',
+      desc:'Detect such games everywhere, not just the list. May briefly engage over fullscreen video.',
+      def:0, advanced:true },
     { key:'__hideCursor', type:'keybind', label:'Hide cursor (hotkey)', desc:'Press to instantly toggle the magnified cursor. Does not reset zoom.', vkKey:'hideCursorVk', modsKey:'hideCursorMods' },
     { key:'__cursorLock', type:'keybind', label:'Inspect mode', desc:'Freeze the cursor (keeps a hover or tooltip alive) and free-look around with a crosshair that pans the view, at any zoom. Press to set, right-click to clear.', vkKey:'cursorLockVk' },
   ]},

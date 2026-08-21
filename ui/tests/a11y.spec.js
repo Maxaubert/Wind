@@ -127,7 +127,7 @@ test('focus is visible, in both themes', async ({ page }) => {
 // --- Dialogs ----------------------------------------------------------------
 
 test('a dialog takes focus, traps Tab, and gives focus back on close', async ({ page }) => {
-  const opener = page.getByRole('button', { name: /Manage list/ });
+  const opener = page.getByRole('button', { name: /Manage list/ }).first();   // two applists exist now (lockApps, #221)
   await opener.click();
   const dlg = page.getByRole('dialog');
   await expect(dlg).toBeVisible();
@@ -157,7 +157,7 @@ test('a dialog takes focus, traps Tab, and gives focus back on close', async ({ 
 test('Escape works the instant a dialog opens', async ({ page }) => {
   // Regression: focus used to be moved in on a setTimeout, so an Escape pressed immediately after
   // opening landed on the page behind and did nothing.
-  await page.getByRole('button', { name: /Manage list/ }).click();
+  await page.getByRole('button', { name: /Manage list/ }).first().click();   // two applists exist now (lockApps, #221)
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
 });
