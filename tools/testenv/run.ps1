@@ -143,6 +143,15 @@ $phases = @()      # @{ name; t0; t1 } in QPC ms, indexes into the telemetry
 $ramSamples = [ordered]@{}
 $failedInfra = $null
 
+# One magnifier at a time (issue #217): a second magnifier owns the system input-transform
+# slot and unmoors Wind's cursor, so any run alongside it measures the collision. Refuse early.
+$foreign = Get-ForeignMagnifiers
+if ($foreign.Count -gt 0) {
+  Write-Host "ABORT: another magnifier is running ($($foreign -join ', ')) - close it first." -ForegroundColor Red
+  Write-Host 'Issue #217: it republishes the system input transform and unmoors the cursor; every' -ForegroundColor Red
+  Write-Host 'cursor metric taken alongside it is invalid.' -ForegroundColor Red
+  exit 3
+}
 Write-Host "Wind proving ground - suite '$Suite' (telemetry: $telemetry)"
 Write-Host 'Restarting Wind with telemetry...'
 Stop-Wind
@@ -196,6 +205,17 @@ try {
         Run-Program $sc.prog $sc.progS
         $t1 = Now-Ms
         Reset-Zoom $telemetry                  # closed contract: every scenario ends at 1.0x
+        # One magnifier at a time (issue #217), checked per scenario as well as at start: one
+        # that appears MID-run owns the input-transform slot from that moment and every later
+        # cursor number describes the collision. Polling the process list directly - Wind's own
+        # foreign-writer log line only appears when its stomp check happens to catch a publish,
+        # which a short overlap can miss entirely (verified 2026-08-22).
+        $midForeign = Get-ForeignMagnifiers
+        if ($midForeign.Count -gt 0) {
+          $script:abortedOn = "ANOTHER MAGNIFIER started mid-suite ($($midForeign -join ', ')) - results INVALID (issue #217)"
+          Write-Host "ABORT: $script:abortedOn" -ForegroundColor Red
+          break
+        }
         $phName = if ($Suite -eq 'soak') { "$($sc.name)#$pass" } else { $sc.name }
         $ph = @{ name = $phName; t0 = $t0; t1 = $t1; prog = $sc.prog }
         $phases += $ph
@@ -270,6 +290,7 @@ foreach ($ph in $phases) {
     ticks = $a.ticks; maxLevel = $a.maxLevel
     dtP95 = $a.dtP95; dtP99 = $a.dtP99; hitches = $a.hitches
     devMed = $a.devMed; devP95 = $a.devP95; jitP95 = $a.jitP95
+    swimP95 = $a.swimP95; swimPct = $a.swimPct
     weldedPct = $a.weldedPct
     backSteps = $a.backSteps; maxJump = $a.maxJump
     why = ($why -join '; ')
@@ -286,7 +307,8 @@ foreach ($h in $healthBad) {
 }
 if ($ramLeak -gt 60) { $fails++; Write-Host "RAM LEAK: +${ramLeak}MB over the suite" -ForegroundColor Red }
 
-$rows | Format-Table -AutoSize | Out-String | Write-Host
+$rows | Format-Table -AutoSize -Property scenario, verdict, engine, ticks, maxLevel, dtP95, dtP99,
+  hitches, devMed, devP95, jitP95, swimP95, why | Out-String | Write-Host
 Write-Host ("RAM: start {0}MB end {1}MB (delta {2}MB)" -f $ramSamples['start'], $ramSamples['end'], $ramLeak)
 foreach ($i in $healthInfo) { Write-Host "health info: $i" -ForegroundColor Yellow }
 if ($healthBad.Count -eq 0) { Write-Host 'Health: alive, dwm intact, no stranded clip/cursor, no device-lost.' -ForegroundColor Green }

@@ -29,20 +29,26 @@ struct TelemetrySample {
     // own cache); still-cursor ramps are tick-written, which is exactly the shake scenario.
     double wLevel;
     int    wTxX, wTxY;
+    // Cumulative transform writes issued from the INPUT HOOK (issue #229 swim detection).
+    // Hook writes land BETWEEN ticks, so tick-sampled geometry cannot see them: a build
+    // writing several times per composited frame looks perfectly steady in every other
+    // column while the view visibly swims against the cursor. The per-tick delta of this
+    // counter is what exposes it (>1 write per frame = the documented swim condition).
+    unsigned long long wHook;
 };
 
 inline const char* TelemetryHeader() {
     return "t_ms,dt_ms,active,engine,level,map_x,map_y,mon_x,mon_y,cur_x,cur_y,welded,"
-           "w_level,w_tx,w_ty\n";
+           "w_level,w_tx,w_ty,w_hook\n";
 }
 
 // Formats one CSV line into buf; returns the length written (0 if it did not fit).
 inline int FormatTelemetryLine(char* buf, int cap, const TelemetrySample& s) {
     const int n = std::snprintf(buf, (size_t)cap,
-                                "%.3f,%.3f,%d,%c,%.4f,%.2f,%.2f,%d,%d,%ld,%ld,%d,%.6f,%d,%d\n",
+                                "%.3f,%.3f,%d,%c,%.4f,%.2f,%.2f,%d,%d,%ld,%ld,%d,%.6f,%d,%d,%llu\n",
                                 s.tMs, s.dtMs, s.active, s.engine, s.level,
                                 s.mapX, s.mapY, s.monX, s.monY, s.curX, s.curY, s.welded,
-                                s.wLevel, s.wTxX, s.wTxY);
+                                s.wLevel, s.wTxX, s.wTxY, s.wHook);
     return (n > 0 && n < cap) ? n : 0;
 }
 

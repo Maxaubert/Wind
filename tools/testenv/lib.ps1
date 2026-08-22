@@ -297,6 +297,26 @@ function Test-Health($Before) {
     $recent = @(Get-Content $log -Tail 2000 | Where-Object { $_ -match '  (WARN|ERROR) ' } | Select-Object -Last 3)
     $info += "log gained $warnDelta WARN/ERROR line(s); last: $($recent -join ' | ')"
   }
+  # ANOTHER MAGNIFIER RAN DURING THE SUITE (issue #217) - a hard invalidation, not info.
+  # Native Magnifier republishes an ENABLED IDENTITY into the one system input-transform slot
+  # continuously while it runs (even at 100%), which unmoors Wind's cursor: the field-visible
+  # WOBBLE. Any measurement taken alongside it is describing the collision, not the build -
+  # the 2026-08-22 session lost an afternoon to exactly this (a wobble blamed on a Wind change
+  # that turned out to be a stray Magnify.exe). Wind logs the detection; the suite must FAIL on
+  # it so the run is thrown out rather than believed.
+  $log3 = Join-Path $env:LOCALAPPDATA 'Wind\logs\wind-core.log'
+  if (Test-Path $log3) {
+    $foreign = Get-Content $log3 -Tail 4000 | Where-Object { $_ -match 'foreign input-transform writer' }
+    foreach ($f in $foreign) {
+      if ($f -match '^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})') {
+        $ts = [datetime]::Parse($Matches[1] + 'Z').ToLocalTime()
+        if ($ts -gt $Before.at) {
+          $bad += 'ANOTHER MAGNIFIER was running during the suite (foreign input-transform writer, issue #217) - results INVALID'
+          break
+        }
+      }
+    }
+  }
   # Device-lost / TDR / reset lines since the suite began.
   $log2 = Join-Path $env:LOCALAPPDATA 'Wind\logs\wind-core.log'
   if (Test-Path $log2) {
@@ -310,6 +330,15 @@ function Test-Health($Before) {
     }
   }
   @{ bad = $bad; info = $info }
+}
+
+# ---- environment preconditions -------------------------------------------------------------
+# One magnifier at a time (issue #217). A second magnifier owning the input-transform slot makes
+# every cursor metric meaningless, so the suite refuses to start rather than produce numbers that
+# describe the collision. Returns the offending process names, empty when the desktop is clean.
+function Get-ForeignMagnifiers {
+  $names = @('Magnify', 'ZoomText', 'Fusion', 'SuperNova', 'Lunar')
+  @(Get-Process -Name $names -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ProcessName -Unique)
 }
 
 # ---- RAM sampling ----
@@ -334,6 +363,8 @@ function Analyze-Telemetry([string]$Path, [object[]]$Phases, [int]$Hz) {
       engines = @{}
       jitters = New-Object System.Collections.Generic.List[double]
       prevDevX = [double]::NaN; prevDevY = [double]::NaN
+      prevHook = -1.0; prevCurX = 0.0; prevCurY = 0.0
+      swims = New-Object System.Collections.ArrayList
     }
   }
   $first = $true
@@ -377,6 +408,27 @@ function Analyze-Telemetry([string]$Path, [object[]]$Phases, [int]$Hz) {
           $s.jitters.Add([math]::Sqrt($jx * $jx + $jy * $jy))
         }
         $s.prevDevX = $dx; $s.prevDevY = $dy
+        # SWIM (issue #229). Hook-path writes land BETWEEN ticks, so no tick-sampled geometry
+        # can see them - a build rewriting the view several times per composited frame reads
+        # perfectly steady in dev/jitter while the view visibly swims against the cursor
+        # (documented: DWM picks whichever write landed first, the pointer is drawn from its
+        # own sample, so the two come from different instants). The exposure: writes per
+        # frame > 1 means the view position for THIS frame was ambiguous across the cursor
+        # travel of the frame; the ambiguity amplitude is that travel scaled by the surplus
+        # writes. Zero surplus (tick-paced writing) can never register.
+        if ($c.Length -ge 16) {
+          $hook = [double]$c[15]
+          if ($s.prevHook -ge 0) {
+            $dHook = $hook - $s.prevHook
+            if ($dHook -gt 1) {
+              $curDx = [double]$c[9] - $s.prevCurX; $curDy = [double]$c[10] - $s.prevCurY
+              $travel = [math]::Sqrt($curDx * $curDx + $curDy * $curDy)
+              [void]$s.swims.Add($travel * ($dHook - 1.0) / $dHook)
+            } else { [void]$s.swims.Add(0.0) }
+          }
+          $s.prevHook = $hook
+        }
+        $s.prevCurX = [double]$c[9]; $s.prevCurY = [double]$c[10]
       }
       break
     }
@@ -402,6 +454,12 @@ function Analyze-Telemetry([string]$Path, [object[]]$Phases, [int]$Hz) {
       $jsorted = $s.jitters | Sort-Object
       $r.jitP95 = [math]::Round($jsorted[[int]($jsorted.Count * 0.95)], 1)
       $r.jitMax = [math]::Round(($jsorted | Select-Object -Last 1), 1)
+    }
+    if ($s.swims.Count -gt 10) {
+      $ssorted = $s.swims | Sort-Object
+      $r.swimP95 = [math]::Round($ssorted[[int]($ssorted.Count * 0.95)], 2)
+      $r.swimMax = [math]::Round(($ssorted | Select-Object -Last 1), 2)
+      $r.swimPct = [math]::Round(100.0 * @($s.swims | Where-Object { $_ -gt 0.5 }).Count / $s.swims.Count, 0)
     }
     $r.weldedPct = if ($s.total -gt 0) { [math]::Round(100.0 * $s.welded / $s.total, 0) } else { 0 }
     $eng = '-'

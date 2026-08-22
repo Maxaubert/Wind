@@ -1809,6 +1809,11 @@ static void RunTick(TickState& t) {
             s.wLevel = tmT->writtenLevel();
             s.wTxX = tmT->writtenTxX(); s.wTxY = tmT->writtenTxY();
         }
+        {   // Hook-write counter (issue #229): the swim metric's raw input.
+            unsigned long long hw = 0, tw = 0;
+            wind::HookTransformStats(hw, tw);
+            s.wHook = hw;
+        }
         g_testlog.write(s);
     }
 }
