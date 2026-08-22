@@ -35,20 +35,34 @@ struct TelemetrySample {
     // column while the view visibly swims against the cursor. The per-tick delta of this
     // counter is what exposes it (>1 write per frame = the documented swim condition).
     unsigned long long wHook;
+    // Content-vs-cursor lag in screen px, sampled at the COMPOSITE boundary (hook_transform.h):
+    // |cursor now - cursor the live transform was written for| * (level - 1). Constant lag is
+    // invisible; the per-frame CHANGE of this value is the wobble the eye sees.
+    double lagPx;
+    // Sprite placement (issue #229 two-cursor metric): the DESKTOP position Wind last gave the
+    // cursor sprite, and whether it is on screen. DWM magnifies the sprite with the content, so
+    // its screen position depends on the transform live at composite time - the analyzer
+    // reconstructs it and compares against the real pointer.
+    int    spriteX, spriteY, spriteOn;
+    // Cumulative MagShowSystemCursor failures (issue #229): a hide that did not take leaves the
+    // real pointer drawn beside our sprite - the two-cursor artifact.
+    unsigned long long hideFails;
 };
 
 inline const char* TelemetryHeader() {
     return "t_ms,dt_ms,active,engine,level,map_x,map_y,mon_x,mon_y,cur_x,cur_y,welded,"
-           "w_level,w_tx,w_ty,w_hook\n";
+           "w_level,w_tx,w_ty,w_hook,lag_px,spr_x,spr_y,spr_on,hide_fail\n";
 }
 
 // Formats one CSV line into buf; returns the length written (0 if it did not fit).
 inline int FormatTelemetryLine(char* buf, int cap, const TelemetrySample& s) {
     const int n = std::snprintf(buf, (size_t)cap,
-                                "%.3f,%.3f,%d,%c,%.4f,%.2f,%.2f,%d,%d,%ld,%ld,%d,%.6f,%d,%d,%llu\n",
+                                "%.3f,%.3f,%d,%c,%.4f,%.2f,%.2f,%d,%d,%ld,%ld,%d,%.6f,%d,%d,%llu,%.2f,"
+                                "%d,%d,%d,%llu\n",
                                 s.tMs, s.dtMs, s.active, s.engine, s.level,
                                 s.mapX, s.mapY, s.monX, s.monY, s.curX, s.curY, s.welded,
-                                s.wLevel, s.wTxX, s.wTxY, s.wHook);
+                                s.wLevel, s.wTxX, s.wTxY, s.wHook, s.lagPx,
+                                s.spriteX, s.spriteY, s.spriteOn, s.hideFails);
     return (n > 0 && n < cap) ? n : 0;
 }
 

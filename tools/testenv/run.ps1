@@ -308,6 +308,8 @@ foreach ($ph in $phases) {
     dtP95 = $a.dtP95; dtP99 = $a.dtP99; hitches = $a.hitches
     devMed = $a.devMed; devP95 = $a.devP95; jitP95 = $a.jitP95
     swimP95 = $a.swimP95; swimPct = $a.swimPct
+    lagP95 = $a.lagP95; lagJumpP95 = $a.lagJumpP95; lagJumpMax = $a.lagJumpMax
+    hookWrites = $a.hookWrites
     weldedPct = $a.weldedPct
     backSteps = $a.backSteps; maxJump = $a.maxJump
     why = ($why -join '; ')
@@ -325,7 +327,7 @@ foreach ($h in $healthBad) {
 if ($ramLeak -gt 60) { $fails++; Write-Host "RAM LEAK: +${ramLeak}MB over the suite" -ForegroundColor Red }
 
 $rows | Format-Table -AutoSize -Property scenario, verdict, engine, ticks, maxLevel, dtP95, dtP99,
-  hitches, devMed, devP95, jitP95, swimP95, why | Out-String | Write-Host
+  hitches, devMed, devP95, jitP95, lagP95, lagJumpP95, why | Out-String | Write-Host
 Write-Host ("RAM: start {0}MB end {1}MB (delta {2}MB)" -f $ramSamples['start'], $ramSamples['end'], $ramLeak)
 foreach ($i in $healthInfo) { Write-Host "health info: $i" -ForegroundColor Yellow }
 if ($healthBad.Count -eq 0) { Write-Host 'Health: alive, dwm intact, no stranded clip/cursor, no device-lost.' -ForegroundColor Green }

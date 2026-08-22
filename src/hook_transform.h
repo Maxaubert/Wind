@@ -60,4 +60,22 @@ void HookTransformStats(unsigned long long& hookWrites, unsigned long long& tick
 void MarkComposite();               // called by the tick loop right after DwmFlush returns
 void SetHookFrameGate(bool on);     // txHookWrite == 2
 
+// CONTENT-VS-CURSOR LAG (issue #229). The transform is anchored so T(cursor) == cursor, so if
+// it was written for cursor c_w while the pointer has since reached c_now, the content is
+// displaced from the pointer by |c_now - c_w| * (level - 1) screen px. That is the whole
+// wobble question stated numerically: a lag that stays CONSTANT is invisible (the view simply
+// trails by a fixed amount), while a lag that jumps frame to frame is what the eye reads as
+// the cursor swimming against the content. Both write paths record the cursor they used here;
+// the tick loop samples it at the composite boundary, which is the instant DWM pairs the
+// transform with the pointer it draws. Screen capture cannot see any of this - it returns the
+// unmagnified desktop surface (measured 2026-08-22), so this is the only way to measure it.
+void NoteWriteCursor(double virtX, double virtY);
+void GetWriteCursor(double& virtX, double& virtY);
+
+// What the HOOK path last pushed to DWM. The transform model's own cache only records tick
+// writes, so any measurement built on it cannot see hook writes at all - which is exactly why
+// the sprite-vs-centre check kept reading clean on a build the eye called wobbly. Returns
+// false when the hook has written nothing this session (level 0).
+bool GetHookLiveTransform(double& level, int& txX, int& txY);
+
 }  // namespace wind

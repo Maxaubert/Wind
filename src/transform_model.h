@@ -9,6 +9,11 @@
 #include <mutex>
 #include <condition_variable>
 namespace wind {
+// Count of MagShowSystemCursor calls that did NOT take (thread-affinity, dead context). A
+// non-zero value while zoomed means the real pointer may be visible next to our sprite - the
+// two-cursor artifact (issue #229).
+unsigned long long TransformCursorHideFailures();
+
 class TransformModel : public IMagnifierModel {
 public:
     TransformModel(bool fastPan, bool smoothPan, bool useSprite, int zorderBand,
@@ -31,6 +36,15 @@ public:
     // RenderEngine::parkedLastFrame(): baseline on the weld point only when the weld really fired.
     // Written-transform readbacks for the telemetry channel (issue #227): what the tick path
     // last actually applied (the hook writer keeps its own cache and is not reflected here).
+    // Sprite placement readback for the two-cursor metric (issue #229). The sprite is placed
+    // in DESKTOP space and DWM magnifies it with the content, so its SCREEN position is
+    // (spriteDesktop - src) * level, recomputed by DWM from whatever transform is live at
+    // composite time. Placed once per tick, the transform possibly many times per tick: the
+    // gap between where the sprite lands and where the real pointer is IS the reported
+    // "two cursors, one lagging". Needs the real placement, not an inferred one.
+    bool spriteShown() const { return spriteShown_; }
+    int  spriteDesktopX() const { return lastSpriteX_; }
+    int  spriteDesktopY() const { return lastSpriteY_; }
     double writtenLevel() const { return lastLevel_; }
     int    writtenTxX() const { return lastTxX_; }
     int    writtenTxY() const { return lastTxY_; }
@@ -62,6 +76,7 @@ private:
     bool mpoBusterWanted_ = false;                   // show the ghost this session
     bool mpoExposed_ = false;                        // apply the 16-bit write clamp
     unsigned long long lastGhostAssertMs_ = 0;       // 500ms assert cadence
+    bool spriteShown_ = false;                       // sprite visible this frame (#229 metric)
     int  appliedSampling_ = -2;                      // sampling mode DWM currently holds (-2 = unknown)
     std::unique_ptr<CursorBlanker> blanker_;
     std::unique_ptr<CursorSprite> sprite_;

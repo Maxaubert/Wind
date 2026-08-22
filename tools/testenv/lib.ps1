@@ -374,6 +374,8 @@ function Analyze-Telemetry([string]$Path, [object[]]$Phases, [int]$Hz) {
       jitters = New-Object System.Collections.Generic.List[double]
       prevDevX = [double]::NaN; prevDevY = [double]::NaN
       prevHook = -1.0; prevCurX = 0.0; prevCurY = 0.0; hookWrites = 0.0
+      lags = New-Object System.Collections.ArrayList
+      lagJumps = New-Object System.Collections.ArrayList; prevLag = [double]::NaN
       swims = New-Object System.Collections.ArrayList
     }
   }
@@ -440,6 +442,16 @@ function Analyze-Telemetry([string]$Path, [object[]]$Phases, [int]$Hz) {
           $s.prevHook = $hook
         }
         $s.prevCurX = [double]$c[9]; $s.prevCurY = [double]$c[10]
+        # CONTENT-VS-CURSOR LAG (issue #229), measured by Wind at the composite boundary:
+        # |cursor - cursor the live transform was written for| * (level - 1) screen px. A
+        # steady lag is an invisible trail; the per-frame CHANGE is the wobble the eye sees,
+        # so the jump series - not the lag itself - is the signal.
+        if ($c.Length -ge 17) {
+          $lag = [double]$c[16]
+          [void]$s.lags.Add($lag)
+          if (-not [double]::IsNaN($s.prevLag)) { [void]$s.lagJumps.Add([math]::Abs($lag - $s.prevLag)) }
+          $s.prevLag = $lag
+        }
       }
       break
     }
@@ -467,6 +479,15 @@ function Analyze-Telemetry([string]$Path, [object[]]$Phases, [int]$Hz) {
       $r.jitMax = [math]::Round(($jsorted | Select-Object -Last 1), 1)
     }
     $r.hookWrites = [int]$s.hookWrites
+    if ($s.lags.Count -gt 20) {
+      $lsorted = $s.lags | Sort-Object
+      $r.lagP95 = [math]::Round($lsorted[[int]($lsorted.Count * 0.95)], 1)
+      if ($s.lagJumps.Count -gt 20) {
+        $jsort = $s.lagJumps | Sort-Object
+        $r.lagJumpP95 = [math]::Round($jsort[[int]($jsort.Count * 0.95)], 1)
+        $r.lagJumpMax = [math]::Round(($jsort | Select-Object -Last 1), 1)
+      }
+    }
     if ($s.swims.Count -gt 10) {
       $ssorted = $s.swims | Sort-Object
       $r.swimP95 = [math]::Round($ssorted[[int]($ssorted.Count * 0.95)], 2)

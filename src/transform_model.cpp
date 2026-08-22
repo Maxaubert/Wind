@@ -1,13 +1,36 @@
 #include "transform_model.h"
 #include "transform.h"   // ComputeMagTransform
 #include "tx_cadence.h"  // ShouldWriteTransform (pure, tested)
+#include "hook_transform.h" // NoteWriteCursor: the lag metric anchor (issue #229)
+#include "mag_thread.h"     // MagThreadInvoke: the API is thread-affine (issue #229)
 #include "logging.h"
 #include <windows.h>
 #include <magnification.h>
 #include <dwmapi.h>      // DwmFlush: the sprite-before-blank handoff (issue #221)
 #include <cmath>
+#include <atomic>
 
 namespace wind {
+
+// THE MAGNIFICATION API IS THREAD-AFFINE (issue #229). Every transform write already goes
+// through MagThreadInvoke (mag_host.cpp), but MagShowSystemCursor - the call that hides the
+// real pointer so only our sprite is visible - was invoked straight from the tick thread. That
+// works while the tick thread owns the runtime, and silently FAILS the moment ownership moves
+// to the input-hook thread (txHookWrite != 0 claims it there). A failed hide leaves the real
+// pointer drawn at its raw position while the sprite sits at the magnified centre: the
+// field-reported TWO CURSORS, "one perfectly centred and one lagging behind". Marshalled here,
+// with failures counted so the proving ground can see a hide that did not take.
+static std::atomic<unsigned long long> g_showCursorFails{0};
+static bool ShowSystemCursorMarshalled(BOOL show) {
+    const bool ok = wind::MagThreadInvoke([show]() -> bool {
+        return MagShowSystemCursor(show) != FALSE;
+    });
+    if (!ok) g_showCursorFails.fetch_add(1, std::memory_order_relaxed);
+    return ok;
+}
+unsigned long long TransformCursorHideFailures() {
+    return g_showCursorFails.load(std::memory_order_relaxed);
+}
 
 // How long a write may be held back by the cadence gates before it goes out anyway (issue #204).
 // Without this a sub-threshold residual movement at the end of a pan would never be written and
@@ -56,7 +79,7 @@ void TransformModel::teardownMag() {
     QueryPerformanceFrequency(&fr); QueryPerformanceCounter(&a);
     // Cursor state FIRST: MagShowSystemCursor needs a live context, so undoing it after
     // MagUninitialize would silently fail and strand the pointer hidden.
-    if (cursorHidden_) { MagShowSystemCursor(TRUE); cursorHidden_ = false; }
+    if (cursorHidden_) { ShowSystemCursorMarshalled(TRUE); cursorHidden_ = false; }
     if (sprite_) sprite_->hide();
     if (blanker_) blanker_->restore();
     host_.setTransform(1.0f, 0, 0, 0, 0, false);   // leave DWM at identity before releasing
@@ -205,8 +228,8 @@ void TransformModel::hideSystemCursor(bool hide) {
     // magnified) and main.cpp never calls this. It is called only for INSPECT sessions, where the
     // frozen real cursor must vanish under the crosshair: blanker for standard cursors,
     // MagShowSystemCursor for the plane wholesale (app-custom cursors). Both are undone on exit.
-    if (hide) { blanker_->blank(); MagShowSystemCursor(FALSE); if (sprite_) sprite_->show(); }
-    else      { if (sprite_) sprite_->hide(); MagShowSystemCursor(TRUE); blanker_->restore(); }
+    if (hide) { blanker_->blank(); ShowSystemCursorMarshalled(FALSE); if (sprite_) sprite_->show(); }
+    else      { if (sprite_) sprite_->hide(); ShowSystemCursorMarshalled(TRUE); blanker_->restore(); }
 }
 
 void TransformModel::setActive(bool active) {
@@ -262,7 +285,7 @@ void TransformModel::setActive(bool active) {
     // it). Done here, while the context is still alive - MagShowSystemCursor needs one.
     if (cursorHidden_) {
         if (sprite_) sprite_->hide();
-        MagShowSystemCursor(TRUE);
+        ShowSystemCursorMarshalled(TRUE);
         cursorHidden_ = false;
     }
     // Unconditional (and idempotent): setActive(true) pre-blanks BEFORE the context exists, so
@@ -541,7 +564,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             // The same foreign writer owns the shared cursor-visibility global
             // (MagShowSystemCursor) - re-assert our hide on the stomp tick so the raw pointer
             // plane it re-showed does not rubber-band beside the sprite (two-cursors gotcha).
-            if (cursorHidden_) MagShowSystemCursor(FALSE);
+            if (cursorHidden_) ShowSystemCursorMarshalled(FALSE);
             if (!ixStompWarned_) {
                 ixStompWarned_ = true;
                 wind::Log(wind::LogLevel::Warn, "transform",
@@ -700,7 +723,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         if (sprite_->refreshShape() == CursorSprite::ShapeStatus::Rendered) {
             if (!cursorHidden_) {
                 blanker_->blank();
-                MagShowSystemCursor(FALSE);
+                ShowSystemCursorMarshalled(FALSE);
                 cursorHidden_ = true;
             }
             // DESKTOP coords, not screen: DWM magnifies layered windows too, so the sprite must
@@ -719,11 +742,13 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
                 sprite_->moveTo(sx, sy);
                 lastSpriteX_ = sx; lastSpriteY_ = sy;
             }
+            spriteShown_ = true;
             sprite_->show();
             sprite_->keepOnTop();
         } else {
+            spriteShown_ = false;
             sprite_->hide();   // shape we cannot render: fall back to the system pointer
-            if (cursorHidden_) { MagShowSystemCursor(TRUE); blanker_->restore(); cursorHidden_ = false; }
+            if (cursorHidden_) { ShowSystemCursorMarshalled(TRUE); blanker_->restore(); cursorHidden_ = false; }
         }
     } else if (useSprite_ && sprite_) {
         // Reached only when the cursor is not drawn at all this tick (cursorVisibility=never,

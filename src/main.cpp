@@ -269,6 +269,10 @@ struct TickState {
     double inspectPanRemY = 0.0;
     bool   inspectGame = false;         // game-inspect (issue #144): foreground stolen from a mouselook
                                         //   game so its raw-input camera stops receiving the mouse
+    // Content-vs-cursor lag at the last composite boundary, screen px (issue #229). Sampled
+    // in the pacing block right after DwmFlush - the instant DWM pairs the transform it holds
+    // with the pointer it draws - and reported per tick in the telemetry.
+    double lagPx = 0.0;
     bool   inspectStealPending = false; // steal deferred past the reveal logic (it must read the true fg)
     HWND   inspectPrevFg = nullptr;     // the game window foreground is handed back to on exit
     int    clickPauseTicks = 0;     // ticks to skip transform writes around an Inspect click's
@@ -1200,8 +1204,15 @@ static void RunTick(TickState& t) {
                                 dynamic_cast<TransformModel*>(t.model) != nullptr;
         if (freeCursor) {
             POINT cp;
-            if (GetCursorPos(&cp))
+            if (GetCursorPos(&cp)) {
                 t.mapper.reset(double(cp.x - t.mon.x), double(cp.y - t.mon.y));
+                // The lag metric's anchor for the TICK path (issue #229): this is the pointer
+                // sample this frame's geometry is derived from, so it is the honest counterpart
+                // to the hook path's event position. Recorded here rather than in the model,
+                // where only the mapper's click point is available - measuring that instead
+                // reported hundreds of px of phantom lag on a build the eye calls clean.
+                wind::NoteWriteCursor((double)cp.x, (double)cp.y);
+            }
         }
         MapResult r = t.mapper.update(freeCursor ? 0 : dx, freeCursor ? 0 : dy, lvl);
         // Dead-zone probe (probeClicks=1, diagnostic): the field annotates hover dead zones by
@@ -1808,6 +1819,20 @@ static void RunTick(TickState& t) {
         if (tmT) {
             s.wLevel = tmT->writtenLevel();
             s.wTxX = tmT->writtenTxX(); s.wTxY = tmT->writtenTxY();
+            // Prefer the LIVE state: while the hook owns the writes the model's cache is stale
+            // by construction, and every metric derived from it reads a build as clean no
+            // matter what DWM is actually showing (issue #229).
+            double hl = 0.0; int htx = 0, hty = 0;
+            if (wind::HookTransformArmed() && wind::GetHookLiveTransform(hl, htx, hty)) {
+                s.wLevel = hl; s.wTxX = htx; s.wTxY = hty;
+            }
+        }
+        s.lagPx = t.lagPx;
+        if (tmT) {
+            s.spriteX = tmT->spriteDesktopX();
+            s.spriteY = tmT->spriteDesktopY();
+            s.spriteOn = tmT->spriteShown() ? 1 : 0;
+            s.hideFails = wind::TransformCursorHideFailures();
         }
         {   // Hook-write counter (issue #229): the swim metric's raw input.
             unsigned long long hw = 0, tw = 0;
@@ -2449,6 +2474,22 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         if (dwmPaces) {
             DwmFlush();             // block until DWM's next composite -> frames align with it
             wind::MarkComposite();  // frame boundary: the hook may write once more (issue #229)
+            // Content-vs-cursor lag, measured where it actually matters (issue #229): DWM has
+            // just paired the transform it holds with the pointer it draws. The transform is
+            // anchored so T(cursor) == cursor, so content sits |cursor now - cursor the write
+            // used| * (level - 1) screen px away from the pointer. A steady value is an
+            // invisible trail; a value that jumps frame to frame is the visible wobble.
+            if (ts.prevLvl > 1.0) {
+                double wx = 0.0, wy = 0.0;
+                wind::GetWriteCursor(wx, wy);
+                POINT cp;
+                if (wx != 0.0 && GetCursorPos(&cp)) {
+                    const double dx = (double)cp.x - wx, dy = (double)cp.y - wy;
+                    ts.lagPx = std::sqrt(dx * dx + dy * dy) * (ts.prevLvl - 1.0);
+                }
+            } else {
+                ts.lagPx = 0.0;
+            }
         }
     }
 

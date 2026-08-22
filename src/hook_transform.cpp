@@ -24,6 +24,11 @@ static std::atomic<unsigned long long> g_tickWrites{0};
 static std::atomic<bool> g_frameGate{false};
 static std::atomic<bool> g_wroteThisFrame{false};
 static std::atomic<unsigned long long> g_gateSkips{0};
+// Cursor position the last transform write was based on (issue #229 lag metric). Written by
+// both paths, read by the tick loop at the composite boundary. Two independent atomics: a torn
+// pair costs one sample's accuracy in a diagnostic, which is not worth a lock on the hot path.
+static std::atomic<double> g_writeCurX{0.0};
+static std::atomic<double> g_writeCurY{0.0};
 
 // SINGLE-WRITER ARBITRATION (issue #206, second attempt).
 //
@@ -111,6 +116,7 @@ bool WriteHookTransform(double cursorVirtX, double cursorVirtY) {
     if (wms > g_wMaxMs) g_wMaxMs = wms;
     g_wSumMs += wms; ++g_wN;
     if (ok) {
+        NoteWriteCursor(cursorVirtX, cursorVirtY);
         g_lastOffX = m.offX; g_lastOffY = m.offY;
         g_lastTx = m.txX;    g_lastTy = m.txY;
         g_lastLevel = s.level;
@@ -140,6 +146,21 @@ static void MaybeLogStats() {
         ph = h; pt = t;
     }
     g_wMaxMs = 0.0; g_wSumMs = 0.0; g_wN = 0;
+}
+
+void NoteWriteCursor(double virtX, double virtY) {
+    g_writeCurX.store(virtX, std::memory_order_relaxed);
+    g_writeCurY.store(virtY, std::memory_order_relaxed);
+}
+void GetWriteCursor(double& virtX, double& virtY) {
+    virtX = g_writeCurX.load(std::memory_order_relaxed);
+    virtY = g_writeCurY.load(std::memory_order_relaxed);
+}
+
+bool GetHookLiveTransform(double& level, int& txX, int& txY) {
+    // Plain reads of the writer thread's cache: a torn value costs one diagnostic sample.
+    level = g_lastLevel; txX = g_lastTx; txY = g_lastTy;
+    return g_lastLevel > 0.0;
 }
 
 void MarkComposite() { g_wroteThisFrame.store(false, std::memory_order_release); }
