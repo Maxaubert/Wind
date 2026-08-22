@@ -20,6 +20,9 @@
 param(
   [string[]]$Drivers = @('wind','native'),
   [string]$ExternalSpec = '',
+  # Equal-footing cap comparison: >0 drives EVERY driver to this level in the cap scenario
+  # (e.g. 16 = both at WM's ceiling) instead of each magnifier's own probed maximum.
+  [double]$CapLevel = 0,
   [string]$WindExe = 'C:\Program Files\Wind\Wind.exe'
 )
 $ErrorActionPreference = 'Stop'
@@ -460,8 +463,13 @@ try {
           }
           'cap' {
             [BM]::StartRam($drv.ProcNames)
-            $cap = & $drv.ZoomMax
-            $entry.maxZoom = [math]::Round([double]$cap, 2)
+            if ($CapLevel -gt 0) {
+              & $drv.ZoomTo $CapLevel                     # equal footing: same level for everyone
+              $entry.maxZoom = $CapLevel
+            } else {
+              $cap = & $drv.ZoomMax
+              $entry.maxZoom = [math]::Round([double]$cap, 2)
+            }
             Measure-Movement $drv $sc { [BM]::StartPan([double]$sc.secs + 0.5, 10, 2, 1100) }
             [BM]::StopRam()
           }

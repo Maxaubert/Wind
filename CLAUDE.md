@@ -244,20 +244,31 @@ restartWind), `dirty`, `openIni`, `exportDiagnostics`, `pickExe`, `mpoState`, `s
   path (toggle-off, teardown-to-idle, device-lost, shutdown). Click-to-look-point is DISCARDED in
   game-inspect (a click would re-activate the game mid-inspect). Exclusive-fullscreen games may
   minimize on focus loss; games that pause on focus loss show their paused frame - both by design.
-- MAGNIFIED IMAGE QUALITY IS CAPPED BY A DWM BUG, NOT BY OUR CODE (issue #197, field-settled
-  2026-08-13). DWM magnifies with NEAREST NEIGHBOUR unless something calls the undocumented
+- MAGNIFIED IMAGE + CURSOR QUALITY = THE DWM SMOOTHING FLAG (issues #197 + #227). DWM magnifies
+  with NEAREST NEIGHBOUR unless something calls the undocumented
   `MagSetFullscreenUseBitmapSmoothing` (Magnification.dll ORDINAL 1 - what native Magnifier's
   "smooth edges of images and text" flips; callable without UIAccess; the raw user32
   `SetMagnificationDesktopSamplingMode` takes a DWORD POINTER and a by-value call
-  access-violates). Turning it on looks dramatically better AND CRASHES dwm.exe in dwmcore.dll
-  over complex Mica/acrylic geometry at high zoom - two first-try reproductions in a browser,
-  zero with nearest, A/B'd back and forth. The sampling modes 2/3/4 that the kernel also accepts
-  were field-tested and are ALIASES OF NEAREST, so there is no cheaper middle filter. Native
-  sets the flag too but never pans a high-zoom view the way we do, so it likely never stresses
-  the faulting path. `txSamplingMode` ships 0 (nearest): a slightly blocky magnified image is the
-  correct trade against a compositor that dies. The flag is DWM-GLOBAL and survives the process
-  that set it until DWM restarts - which is why smoothing appeared to come and go between builds
-  and why a stale "smooth" state can make an innocent build look like it caused a crash.
+  access-violates). `txSamplingMode` SHIPS 1 since #227: the flag is the ENTIRE quality gap to
+  native Magnifier - image AND cursor (the pointer grows naturally with zoom; WM does NOT swap
+  cursor bitmaps, probed 1x-16x arrow stays 32x32 - the sharpness is DWM's filter). The
+  2026-08-13 dwmcore crash (two first-try repros over browser Mica/acrylic at high zoom) did
+  NOT reproduce 2026-08-22 (newer driver, MPO off, rewritten transform): full stress suite at
+  20x over heavy acrylic + zoom storms + 3 rounds of max-zoom pans over real Edge Mica and
+  Settings, dwm PID unchanged. If dwm.exe crashes return in the field, this flag is the FIRST
+  suspect: set that user's txSamplingMode=0 and re-bisect. Modes 2/3/4 the kernel also accepts
+  are field-tested ALIASES OF NEAREST - no middle filter exists. The flag is DWM-GLOBAL and
+  survives the process that set it until DWM restarts - which is why smoothing appeared to come
+  and go between builds and why a stale "smooth" state can frame an innocent build. KNOWN
+  INTERACTIONS now that rendering is clean: (a) the tx keep-alive (`txKeepAliveMaxLevel`>0,
+  default 0 since #204) writes 1px-off values 144x/s - nearest masked it, smoothing shows it as
+  cursor SHAKING at rest (a stale ini/profile carrying 8 was the 2026-08-22 field case: purge
+  the key, hot). (b) During active ramps a ~1px anchor micro-shimmer remains: both transform
+  channels take INTEGER translations, so each per-tick write carries a +/-0.5px rounding
+  residue in a fresh direction. Irreducible through the int API (private-channel doubles were
+  ruled out: the x64 calling convention would visibly break if offsets were floats). WM avoids
+  it by easing inside DWM. Candidate leads if it ever matters: the undocumented user32 export
+  `SetFullscreenMagnifierOffsetsDWMUpdated` (Magnify.exe imports it), or DWM-internal easing.
 - Declare Per-Monitor-V2 DPI awareness (`Wind.manifest`) or offset pixel math is wrong
   on scaled displays.
 - The lens-must-move-when-cursor-locked behavior is THE core feature. It relies on
