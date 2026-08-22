@@ -30,6 +30,7 @@
 #include "zoom_controller.h"
 #include "tray.h"
 #include "lock_detector.h"
+#include "test_telemetry.h"
 #include "shell_desktop.h"
 #include "cursor_lock.h"
 #include "inspect_focus.h"
@@ -614,6 +615,10 @@ static BallisticsConfig ReadMouseBallistics() {
 // One magnifier tick: advance zoom, hot-reload config, then pan/draw via the render engine.
 // Pure of any pacing wait - the caller paces. Safe to call from the main loop or from a
 // WM_TIMER during a modal loop.
+// Test telemetry (issue #225): the proving-ground harness sets WIND_TESTLOG=<path> and every
+// tick appends one CSV sample. Disabled (one branch per tick) in normal runs.
+static wind::TestTelemetry g_testlog;
+
 static void RunTick(TickState& t) {
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
@@ -1775,6 +1780,25 @@ static void RunTick(TickState& t) {
             t.diagFrames = 0; t.diagHitches = 0;
         }
     }
+
+    // Test telemetry (issue #225): one CSV sample per tick when the harness enabled it. The
+    // engine queries run only on this path - the disabled cost is the single enabled() branch.
+    if (g_testlog.enabled()) {
+        wind::TelemetrySample s{};
+        s.tMs   = double(now.QuadPart) / double(t.freq.QuadPart) * 1000.0;
+        s.dtMs  = dt * 1000.0;
+        s.active = active ? 1 : 0;
+        s.level  = lvl;
+        auto* rmT = dynamic_cast<RenderModel*>(t.model);
+        auto* tmT = dynamic_cast<TransformModel*>(t.model);
+        s.engine = rmT ? 'R' : (tmT ? 'T' : (t.model && t.model->selfDrivenZoom() ? 'M' : '-'));
+        s.mapX = t.mapper.centerX(); s.mapY = t.mapper.centerY();
+        s.monX = t.mon.x; s.monY = t.mon.y;
+        s.curX = t.lastSetVirtual.x; s.curY = t.lastSetVirtual.y;
+        s.welded = (rmT && rmT->engine().parkedLastFrame()) ||
+                   (tmT && tmT->weldedLastFrame()) ? 1 : 0;
+        g_testlog.write(s);
+    }
 }
 
 // Message-handler: decodes raw mouse movement (survives cursor lock) and routes tray msgs.
@@ -2271,6 +2295,32 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr,
         CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+    // Test telemetry opt-in (issue #225). Two channels, either enables it:
+    //   - WIND_TESTLOG env var (dev builds, plain CreateProcess launches)
+    //   - %LOCALAPPDATA%\Wind\testlog.txt containing the target path (one line). The signed
+    //     uiAccess build launches BROKERED via the AppInfo service, which hands the child a
+    //     fresh user environment - the harness's env var never arrives - so the harness writes
+    //     this control file before launch and deletes it after the suite.
+    // The harness owns both and always passes an ASCII temp path, so narrow reads suffice.
+    {
+        char tlPath[512] = {};
+        if (!(GetEnvironmentVariableA("WIND_TESTLOG", tlPath, sizeof(tlPath)) > 0 && tlPath[0])) {
+            char ctl[512] = {};
+            if (ExpandEnvironmentStringsA("%LOCALAPPDATA%\\Wind\\testlog.txt", ctl, sizeof(ctl)) > 0) {
+                if (FILE* cf = fopen(ctl, "rb")) {
+                    size_t n = fread(tlPath, 1, sizeof(tlPath) - 1, cf);
+                    fclose(cf);
+                    while (n > 0 && (tlPath[n - 1] == '\r' || tlPath[n - 1] == '\n' ||
+                                     tlPath[n - 1] == ' '))
+                        n--;
+                    tlPath[n] = 0;
+                }
+            }
+        }
+        if (tlPath[0] && g_testlog.open(tlPath))
+            wind::Log(wind::LogLevel::Info, "test", "telemetry -> %s", tlPath);
+    }
+
     // Auto-detect the display refresh rate so we never assume a fixed rate (the dev's 144Hz).
     // Paces the idle/1x loop and the vsync=0 path; while zoomed, DwmFlush/vsync pace instead.
     ts.hz = DetectRefreshHz();

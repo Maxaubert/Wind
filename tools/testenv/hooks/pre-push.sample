@@ -1,0 +1,26 @@
+#!/bin/sh
+# Wind pre-push gate (optional; install with:
+#   cp tools/testenv/hooks/pre-push.sample .git/hooks/pre-push && chmod +x .git/hooks/pre-push )
+#
+# On a push to main, remind about (or run) the proving ground. It needs ~2 hands-off minutes
+# with injected mouse input, so it never runs silently: set WIND_TESTENV_AUTORUN=1 to actually
+# run the quick suite as the gate; otherwise this just prints the reminder and allows the push.
+while read local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/heads/main)
+      if [ "$WIND_TESTENV_AUTORUN" = "1" ]; then
+        echo "[testenv] Running quick suite as push gate (hands off the mouse after the tone)..."
+        powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/testenv/run.ps1 -Suite quick -CI
+        rc=$?
+        if [ $rc -ne 0 ]; then
+          echo "[testenv] quick suite FAILED (rc=$rc) - push aborted."
+          exit 1
+        fi
+      else
+        echo "[testenv] Pushing to main. Consider: powershell -File tools\\testenv\\run.ps1 -Suite quick -CI"
+        echo "[testenv] (set WIND_TESTENV_AUTORUN=1 to make this hook run it as a gate)"
+      fi
+      ;;
+  esac
+done
+exit 0

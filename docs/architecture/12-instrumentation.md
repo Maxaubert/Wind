@@ -315,3 +315,17 @@ instruments worth keeping.
   `lockForce`, `warpLock`, `lockApps`, `txMaxStepPct`)
 - `tools/`, the harness inventory above
 - Related chapters: [Engines](03-engines.md) for the mechanisms these instruments measure
+
+## The proving ground (tools/testenv, issue #225)
+
+The reusable automated test environment: `run.ps1` restarts Wind with per-tick telemetry
+(`src/test_telemetry.h`, enabled via the `%LOCALAPPDATA%\Wind\testlog.txt` control file or the
+`WIND_TESTLOG` env var), forces a zoom-out reset, plays a start tone (880 Hz), then drives
+scenarios - backdrop window (solid / white / light acrylic / heavy acrylic / animated grid;
+borderless vs captioned selects the engine class) x zoom x movement program (zigzag, pans,
+precision drift, dead-stop hold, rezoom cycles) - and ends with a stop tone (440 Hz). Those
+two tones are the environment's entire sound vocabulary. Suites: rapid (~1 min) / quick
+(~2 min) / full (~8 min) / soak; the iteration gate is rapid-or-quick by risk, then full,
+then PR. Verdicts come from the telemetry (pacing p95/p99, ramp back-steps, cursor-centre
+jitter) plus RAM deltas, compared against `baselines.json` with `-CI` exiting nonzero on
+regression. Full docs: `tools/testenv/README.md`.
