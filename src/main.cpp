@@ -1797,6 +1797,10 @@ static void RunTick(TickState& t) {
         s.curX = t.lastSetVirtual.x; s.curY = t.lastSetVirtual.y;
         s.welded = (rmT && rmT->engine().parkedLastFrame()) ||
                    (tmT && tmT->weldedLastFrame()) ? 1 : 0;
+        if (tmT) {
+            s.wLevel = tmT->writtenLevel();
+            s.wTxX = tmT->writtenTxX(); s.wTxY = tmT->writtenTxY();
+        }
         g_testlog.write(s);
     }
 }

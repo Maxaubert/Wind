@@ -263,12 +263,16 @@ restartWind), `dirty`, `openIni`, `exportDiagnostics`, `pickExe`, `mpoState`, `s
   INTERACTIONS now that rendering is clean: (a) the tx keep-alive (`txKeepAliveMaxLevel`>0,
   default 0 since #204) writes 1px-off values 144x/s - nearest masked it, smoothing shows it as
   cursor SHAKING at rest (a stale ini/profile carrying 8 was the 2026-08-22 field case: purge
-  the key, hot). (b) During active ramps a ~1px anchor micro-shimmer remains: both transform
-  channels take INTEGER translations, so each per-tick write carries a +/-0.5px rounding
-  residue in a fresh direction. Irreducible through the int API (private-channel doubles were
-  ruled out: the x64 calling convention would visibly break if offsets were floats). WM avoids
-  it by easing inside DWM. Candidate leads if it ever matters: the undocumented user32 export
-  `SetFullscreenMagnifierOffsetsDWMUpdated` (Magnify.exe imports it), or DWM-internal easing.
+  the key, hot). (b) During LEVEL ramps a slight shimmer remains under smoothing - the filter
+  re-interpolates every edge per scale step. NOT our geometry, cadence, or frame coherence:
+  all instrumented 2026-08-22 (telemetry w_level/w_tx channel + optical capture; written
+  transforms proved sub-0.1px consistent while the shimmer persisted), and WM shows the same
+  artifact character under its notchy ease (its steps mask it). A nearest-during-ramp /
+  smooth-at-rest HOTSWAP was field-rejected: nearest renders the source rounded to whole
+  pixels while smooth honors the fraction, so every swap shifted the image 1-2px
+  (zoom-dependent) even with the source snapped to integers on the swap tick. Final design:
+  ONE static filter, user's choice (txSamplingMode 1 smooth DEFAULT / 0 nearest), no dynamic
+  switching. Pans are clean under smooth; only changing SCALE shimmers.
 - Declare Per-Monitor-V2 DPI awareness (`Wind.manifest`) or offset pixel math is wrong
   on scaled displays.
 - The lens-must-move-when-cursor-locked behavior is THE core feature. It relies on

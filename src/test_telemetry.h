@@ -22,17 +22,27 @@ struct TelemetrySample {
     int    monX, monY; // monitor origin (virtual px) - converts mapX/Y to virtual
     long   curX, curY; // last known OS cursor position (virtual px)
     int    welded;     // the engine reported its park/weld ran last frame
+    // Written-transform channel (issue #227 ramp micro-shake): the level and screen-space
+    // translation of the transform model's LAST APPLIED write (0s for other engines). The
+    // anchor's rendered position is anchor*wLevel + wTx - the wobble metric computes straight
+    // from these, no screen capture needed. Tick-path writes only (the hook writer keeps its
+    // own cache); still-cursor ramps are tick-written, which is exactly the shake scenario.
+    double wLevel;
+    int    wTxX, wTxY;
 };
 
 inline const char* TelemetryHeader() {
-    return "t_ms,dt_ms,active,engine,level,map_x,map_y,mon_x,mon_y,cur_x,cur_y,welded\n";
+    return "t_ms,dt_ms,active,engine,level,map_x,map_y,mon_x,mon_y,cur_x,cur_y,welded,"
+           "w_level,w_tx,w_ty\n";
 }
 
 // Formats one CSV line into buf; returns the length written (0 if it did not fit).
 inline int FormatTelemetryLine(char* buf, int cap, const TelemetrySample& s) {
-    const int n = std::snprintf(buf, (size_t)cap, "%.3f,%.3f,%d,%c,%.4f,%.2f,%.2f,%d,%d,%ld,%ld,%d\n",
+    const int n = std::snprintf(buf, (size_t)cap,
+                                "%.3f,%.3f,%d,%c,%.4f,%.2f,%.2f,%d,%d,%ld,%ld,%d,%.6f,%d,%d\n",
                                 s.tMs, s.dtMs, s.active, s.engine, s.level,
-                                s.mapX, s.mapY, s.monX, s.monY, s.curX, s.curY, s.welded);
+                                s.mapX, s.mapY, s.monX, s.monY, s.curX, s.curY, s.welded,
+                                s.wLevel, s.wTxX, s.wTxY);
     return (n > 0 && n < cap) ? n : 0;
 }
 

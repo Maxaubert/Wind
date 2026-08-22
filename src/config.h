@@ -131,7 +131,14 @@ struct Config {
     //       stress suite (20x over heavy acrylic, zoom storms) + 3 rounds of max-zoom hard
     //       pans over real Edge Mica/Settings, dwm PID unchanged. If dwm crashes return in
     //       the field, this flag is the first suspect - drop the user to 0 and re-bisect.
-    //   0 = NEAREST: blocky magnification, but immune to the dwmcore crash class above.
+    //       KNOWN TRADE (field-settled 2026-08-22): during LEVEL ramps the filter
+    //       re-interpolates every edge per scale step - a slight shimmer nearest does not
+    //       have. Not our geometry/cadence/coherence (all instrumented and ruled out); WM
+    //       shows the same artifact character under its notchy ease. A nearest-during-ramp
+    //       hotswap was field-rejected: the filters disagree about sub-pixel phase, so every
+    //       swap shifted the image 1-2px even with the source snapped to integers.
+    //   0 = NEAREST: blocky magnification, but shimmer-free ramps and immune to the dwmcore
+    //       crash class above. The either/or is the user's; no dynamic switching.
     //   2..4 = undocumented modes the kernel accepts and round-trips. FIELD-TESTED 2026-08-13:
     //       all three render IDENTICALLY to nearest, i.e. they are aliases, not cheaper filters.
     //       Mode 1 is the only real smooth path. Do not re-test these hoping for a middle
