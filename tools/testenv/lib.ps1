@@ -373,7 +373,7 @@ function Analyze-Telemetry([string]$Path, [object[]]$Phases, [int]$Hz) {
       engines = @{}
       jitters = New-Object System.Collections.Generic.List[double]
       prevDevX = [double]::NaN; prevDevY = [double]::NaN
-      prevHook = -1.0; prevCurX = 0.0; prevCurY = 0.0
+      prevHook = -1.0; prevCurX = 0.0; prevCurY = 0.0; hookWrites = 0.0
       swims = New-Object System.Collections.ArrayList
     }
   }
@@ -430,6 +430,7 @@ function Analyze-Telemetry([string]$Path, [object[]]$Phases, [int]$Hz) {
           $hook = [double]$c[15]
           if ($s.prevHook -ge 0) {
             $dHook = $hook - $s.prevHook
+            if ($dHook -gt 0) { $s.hookWrites += $dHook }
             if ($dHook -gt 1) {
               $curDx = [double]$c[9] - $s.prevCurX; $curDy = [double]$c[10] - $s.prevCurY
               $travel = [math]::Sqrt($curDx * $curDx + $curDy * $curDy)
@@ -465,6 +466,7 @@ function Analyze-Telemetry([string]$Path, [object[]]$Phases, [int]$Hz) {
       $r.jitP95 = [math]::Round($jsorted[[int]($jsorted.Count * 0.95)], 1)
       $r.jitMax = [math]::Round(($jsorted | Select-Object -Last 1), 1)
     }
+    $r.hookWrites = [int]$s.hookWrites
     if ($s.swims.Count -gt 10) {
       $ssorted = $s.swims | Sort-Object
       $r.swimP95 = [math]::Round($ssorted[[int]($ssorted.Count * 0.95)], 2)

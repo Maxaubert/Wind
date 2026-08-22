@@ -136,6 +136,20 @@ function Test-NonNegotiable($a, [double]$cap, [bool]$isStress) {
   if ($a.maxLevel -gt $cap + 0.05)           { $why += "level ESCAPED cap $cap : $($a.maxLevel)" }
   if ($a.backSteps -gt 0 -and -not $isStress) { $why += "backSteps=$($a.backSteps)" }
   if ($a.jitP95 -and $a.jitP95 -gt 25.0 -and -not $isStress) { $why += "jitP95=$($a.jitP95)px" }
+  # SWIM: the view rewritten more than once per composited frame (lib.ps1). Screen px of
+  # possible cursor-vs-content disagreement; a tick-paced build measures exactly 0.
+  if ($a.swimP95 -and $a.swimP95 -gt 2.0) { $why += "swimP95=$($a.swimP95)px (writes/frame>1)" }
+  # HOOK-PATH WRITES (issue #229). Cursor-vs-content wobble CANNOT be measured optically on
+  # this rig: consecutive screen captures of a magnified, panning view come back BYTE-IDENTICAL
+  # (GDI/mss returns the desktop surface, not DWM's magnified composition, and refreshes far
+  # below frame rate) - measured 2026-08-22 after verifying the phase correlation is exact on
+  # synthetic shifts. So the field verdict is encoded structurally instead: transform writes
+  # issued from the input hook were called wobbly by eye TWICE (per-event mode, then the
+  # frame-gated mode on a verified-clean desktop) while every internal metric read perfectly
+  # steady. Any hook write during a scenario fails the run; tick-paced builds measure zero.
+  if ($a.hookWrites -and $a.hookWrites -gt 0) {
+    $why += "hookWrites=$($a.hookWrites) (field-verified wobble; txHookWrite must be 0)"
+  }
   return $why
 }
 
