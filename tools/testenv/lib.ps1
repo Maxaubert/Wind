@@ -103,6 +103,30 @@ public static class TE {
       Thread.Sleep(650); n++;
     }
   }
+  // WOBBLE STROKES (issue #229, Max's design): one clean stroke per direction with a rest
+  // between, then erratic side-to-side. Rests matter as much as the strokes - the view must
+  // come to a dead stop between them, so any residual motion is the artifact, not the input.
+  // Single-axis strokes also make an off-axis excursion unambiguous. Deliberately short and
+  // zoom-free: the level never changes, so ramp transitions cannot contaminate the sample.
+  public static void Strokes() {
+    // Stroke length is deliberately SMALL (about 150 desktop px): at the test's zoom the view
+    // must never reach a screen edge, because a clamped view legitimately leaves the centre and
+    // swamps the geometry check (measured: p95 1940px of pure clamping at 19x).
+    int[][] dirs = { new[]{ 1, 0 }, new[]{ -1, 0 }, new[]{ 0, -1 }, new[]{ 0, 1 } };
+    foreach (var d in dirs) {
+      for (int i = 0; i < 50; i++) { MoveRel(d[0] * 3, d[1] * 3); Thread.Sleep(5); }   // ~250ms stroke
+      Thread.Sleep(420);                                                               // dead stop
+    }
+    // Erratic: direction flips at irregular intervals, the pattern that exposes a view whose
+    // position depends on WHICH write landed rather than on the hand.
+    int[] runs = { 7, 3, 11, 4, 9, 2, 13, 5, 8, 3, 10, 6 };
+    int sign = 1;
+    foreach (int r in runs) {
+      for (int i = 0; i < r * 3; i++) { MoveRel(sign * 5, (i % 3) - 1); Thread.Sleep(3); }
+      sign = -sign;
+    }
+    Thread.Sleep(300);
+  }
   // Precision drift: tiny 1-mickey steps in a slow circle - where wobble hides.
   public static void Drift(double seconds, int stepMs) {
     var t = System.Diagnostics.Stopwatch.StartNew();
@@ -375,6 +399,7 @@ function Analyze-Telemetry([string]$Path, [object[]]$Phases, [int]$Hz) {
       prevDevX = [double]::NaN; prevDevY = [double]::NaN
       prevHook = -1.0; prevCurX = 0.0; prevCurY = 0.0; hookWrites = 0.0
       lags = New-Object System.Collections.ArrayList
+      sprOff = New-Object System.Collections.ArrayList
       lagJumps = New-Object System.Collections.ArrayList; prevLag = [double]::NaN
       swims = New-Object System.Collections.ArrayList
     }
@@ -442,6 +467,23 @@ function Analyze-Telemetry([string]$Path, [object[]]$Phases, [int]$Hz) {
           $s.prevHook = $hook
         }
         $s.prevCurX = [double]$c[9]; $s.prevCurY = [double]$c[10]
+        # SPRITE OFF-CENTRE (issue #229) - the two-cursor metric. The view is centred on the
+        # cursor, so DWM must magnify the sprite (placed at the cursor's DESKTOP point) to the
+        # screen centre: screen = spriteDesktop * level + tx, using the transform ACTUALLY live.
+        # Any distance from the centre is the sprite drawn somewhere it does not belong, which
+        # beside the real pointer is the reported "two cursors, one centred and one lagging".
+        # Only steady-state samples count: a level change means the frame is mid-ramp and the
+        # sprite legitimately trails by one tick (that contamination is why the same figure read
+        # p95 1200px on a good build until the dedicated wobble test isolated it).
+        if ($c.Length -ge 20 -and $c[19] -eq '1') {
+          $sl = [double]$c[12]
+          if ($sl -gt 1.001 -and $s.prevLevel -ge 0 -and [math]::Abs($lvl - $s.prevLevel) -lt 1e-9) {
+            $spx = [double]$c[17] * $sl + [double]$c[13]
+            $spy = [double]$c[18] * $sl + [double]$c[14]
+            $ox = $spx - ([TE]::GetSystemMetrics(0) / 2.0); $oy = $spy - ([TE]::GetSystemMetrics(1) / 2.0)
+            [void]$s.sprOff.Add([math]::Sqrt($ox * $ox + $oy * $oy))
+          }
+        }
         # CONTENT-VS-CURSOR LAG (issue #229), measured by Wind at the composite boundary:
         # |cursor - cursor the live transform was written for| * (level - 1) screen px. A
         # steady lag is an invisible trail; the per-frame CHANGE is the wobble the eye sees,
@@ -479,6 +521,12 @@ function Analyze-Telemetry([string]$Path, [object[]]$Phases, [int]$Hz) {
       $r.jitMax = [math]::Round(($jsorted | Select-Object -Last 1), 1)
     }
     $r.hookWrites = [int]$s.hookWrites
+    if ($s.sprOff.Count -gt 20) {
+      $so = $s.sprOff | Sort-Object
+      $r.sprOffMed = [math]::Round($so[[int]($so.Count * 0.5)], 1)
+      $r.sprOffP95 = [math]::Round($so[[int]($so.Count * 0.95)], 1)
+      $r.sprOffMax = [math]::Round(($so | Select-Object -Last 1), 1)
+    }
     if ($s.lags.Count -gt 20) {
       $lsorted = $s.lags | Sort-Object
       $r.lagP95 = [math]::Round($lsorted[[int]($lsorted.Count * 0.95)], 1)

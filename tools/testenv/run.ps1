@@ -24,7 +24,7 @@
 # dwm.exe not restarted, no device-lost in the log) verdict every suite - they are the primary
 # stress-suite outcome.
 param(
-  [ValidateSet('iterate','rapid','quick','full','stress','soak')] [string]$Suite = 'rapid',
+  [ValidateSet('iterate','wobble','rapid','quick','full','stress','soak')] [string]$Suite = 'rapid',
   [switch]$NoFailFast,                # fail-fast is on for iterate/rapid/quick/full
   [int]$Minutes = 30,                 # soak only
   [switch]$CI,                        # compare vs baselines.json; nonzero exit on regression
@@ -95,6 +95,14 @@ $suites = @{
     (S 'rezoom-acryl'        'acrylic'  $true  0    'rezoom' 0 'heavy' 'solid'),
     (S 'rezoom-solid'        'solid'    $false 0    'rezoom' 0)
   );
+  # THE WOBBLE TEST (issue #229, ~12s): zoom in ONCE, then one clean stroke right/left/up/down
+  # with a dead stop between each, then erratic side-to-side. No zoom changes at all, so every
+  # sample is steady-state and the sprite-vs-centre geometry is uncontaminated by ramps - that
+  # contamination is what made the same measurement read p95 1200px on a build that is fine.
+  # Noise backdrop: aperiodic texture, the only material a correlation-style check can use.
+  wobble = @(
+    (S 'wobble-pan'          'noise'    $false 0.42 'strokes' 0)
+  );
   # Pen test: the GOAL is to break the magnifier. Health checks are the verdict.
   stress = @(
     (S 'overzoom-acryl'      'acrylic'  $true  0    'overzoom'  6 'heavy' 'solid'),
@@ -117,6 +125,7 @@ function Run-Program([string]$prog, [double]$secs) {
     'flick'    { [TE]::Flick($secs) }                     # burst flicks + pauses
     'zig'      { [TE]::Zig($secs, 8, 2, 2, 1200, [int]($sh * 0.12), [int]($sh * 0.88)) }
     'drift'    { [TE]::Drift($secs, 12) }
+    'strokes'  { [TE]::Strokes() }                        # the wobble test (issue #229)
     'hold'     { Start-Sleep -Milliseconds ([int]($secs * 1000)) }   # dead-stop: wobble-at-rest
     'rezoom'   { for ($i = 0; $i -lt 5; $i++) { Zoom-In 0.6; Start-Sleep -Milliseconds 350; Zoom-Out 1.2 } }
     'overzoom' { Invoke-Overzoom $secs }                  # hold past maxLevel + pan while held
@@ -139,16 +148,19 @@ function Test-NonNegotiable($a, [double]$cap, [bool]$isStress) {
   # SWIM: the view rewritten more than once per composited frame (lib.ps1). Screen px of
   # possible cursor-vs-content disagreement; a tick-paced build measures exactly 0.
   if ($a.swimP95 -and $a.swimP95 -gt 2.0) { $why += "swimP95=$($a.swimP95)px (writes/frame>1)" }
-  # HOOK-PATH WRITES (issue #229). Cursor-vs-content wobble CANNOT be measured optically on
-  # this rig: consecutive screen captures of a magnified, panning view come back BYTE-IDENTICAL
-  # (GDI/mss returns the desktop surface, not DWM's magnified composition, and refreshes far
-  # below frame rate) - measured 2026-08-22 after verifying the phase correlation is exact on
-  # synthetic shifts. So the field verdict is encoded structurally instead: transform writes
-  # issued from the input hook were called wobbly by eye TWICE (per-event mode, then the
-  # frame-gated mode on a verified-clean desktop) while every internal metric read perfectly
-  # steady. Any hook write during a scenario fails the run; tick-paced builds measure zero.
-  if ($a.hookWrites -and $a.hookWrites -gt 0) {
-    $why += "hookWrites=$($a.hookWrites) (field-verified wobble; txHookWrite must be 0)"
+  # THE WOBBLE MEASUREMENT (issue #229). The view is centred on the cursor, so DWM must
+  # magnify the sprite - placed at the cursor's desktop point - back onto the screen centre.
+  # Any frame where it lands elsewhere is a cursor drawn where it does not belong, which is
+  # what the field saw as "two cursors, one perfectly centred and one lagging behind".
+  # Labelled pair on the dedicated wobble suite: shipped build 0.6px max, every frame;
+  # hook-write build 27.4px max while also reading 0.6px at p95 - i.e. it flickers between
+  # correct and displaced. 3px is the threshold: ten times the good build's noise floor and
+  # far below the smallest visible displacement.
+  # Cheap proxies were tried first and all read ZERO on wobbly builds: writes-per-frame,
+  # optical correlation (impossible here - captures of a magnified view come back
+  # byte-identical), and composite-boundary lag. This one measures the artifact itself.
+  if ($a.sprOffMax -and $a.sprOffMax -gt 3.0) {
+    $why += "sprite off-centre max=$($a.sprOffMax)px (two-cursor wobble)"
   }
   return $why
 }
@@ -309,6 +321,7 @@ foreach ($ph in $phases) {
     devMed = $a.devMed; devP95 = $a.devP95; jitP95 = $a.jitP95
     swimP95 = $a.swimP95; swimPct = $a.swimPct
     lagP95 = $a.lagP95; lagJumpP95 = $a.lagJumpP95; lagJumpMax = $a.lagJumpMax
+    sprOffMed = $a.sprOffMed; sprOffP95 = $a.sprOffP95; sprOffMax = $a.sprOffMax
     hookWrites = $a.hookWrites
     weldedPct = $a.weldedPct
     backSteps = $a.backSteps; maxJump = $a.maxJump
@@ -327,7 +340,7 @@ foreach ($h in $healthBad) {
 if ($ramLeak -gt 60) { $fails++; Write-Host "RAM LEAK: +${ramLeak}MB over the suite" -ForegroundColor Red }
 
 $rows | Format-Table -AutoSize -Property scenario, verdict, engine, ticks, maxLevel, dtP95, dtP99,
-  hitches, devMed, devP95, jitP95, lagP95, lagJumpP95, why | Out-String | Write-Host
+  hitches, devMed, devP95, jitP95, sprOffP95, sprOffMax, hookWrites, why | Out-String | Write-Host
 Write-Host ("RAM: start {0}MB end {1}MB (delta {2}MB)" -f $ramSamples['start'], $ramSamples['end'], $ramLeak)
 foreach ($i in $healthInfo) { Write-Host "health info: $i" -ForegroundColor Yellow }
 if ($healthBad.Count -eq 0) { Write-Host 'Health: alive, dwm intact, no stranded clip/cursor, no device-lost.' -ForegroundColor Green }
