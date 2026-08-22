@@ -13,6 +13,7 @@ public:
     int usedBand() const { return usedBand_; }
     ShapeStatus refreshShape();
     void moveTo(int desktopX, int desktopY);
+    void reapplyPosition();   // re-place after a hotspot-changing re-render (issue #229)
     void show();
     void hide();
     // Re-assert HWND_TOPMOST when a window has been displaced above us, throttled with a 1s backstop.
@@ -45,6 +46,8 @@ private:
     HICON   iconCopy_ = nullptr;
     int     hotX_ = 0, hotY_ = 0;      // in FINAL (scaled) sprite pixels
     int     natW_ = 0, natH_ = 0;      // icon's native size (DrawIconEx scales to nat * scale_)
+    int     lastTargetX_ = 0, lastTargetY_ = 0;   // last moveTo target (hotspot-independent)
+    bool    haveTarget_ = false;
     int     scale_ = 1;                // current integer zoom scale (1..8)
     bool    visible_ = false;
     bool    crosshairMode_ = false;          // window currently holds the crosshair pixels

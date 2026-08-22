@@ -1039,6 +1039,14 @@ static void RunTick(TickState& t) {
                       (int)(t.mapper.centerY() + 0.5) + t.mon.y };
             SetCursorPos(lp.x, lp.y);
             t.lastSetVirtual = lp;
+            // The cursor SHAPE is stale after the warp (issue #229): Windows re-evaluates the
+            // shape only on a cursor event, so GetCursorInfo keeps reporting whatever cursor
+            // was active at the FROZEN spot (an I-beam over text, a link hand) and the sprite
+            // draws that stale shape until the user happens to move. Same 1px jiggle the
+            // transform model's session-end path uses - a zero-delta injected move is DROPPED
+            // by Windows and refreshes nothing (field-verified).
+            SetCursorPos(lp.x + 1, lp.y);
+            SetCursorPos(lp.x, lp.y);
         }
         if (recenter) { POINT pt; GetCursorPos(&pt); t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y); t.lastSetVirtual = pt; }
         // Resolve the pan delta. FREE: the OS cursor's own motion since we last placed it - Windows'

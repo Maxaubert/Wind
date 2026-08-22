@@ -677,6 +677,13 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
                             (int)(r.cursorScreenY + 0.5) + mon_.y);
         else
             sprite_->moveTo(r.clickDesktopX + mon_.x, r.clickDesktopY + mon_.y);
+        // Keep the arrow branch's move dedupe truthful (issue #229): it compares against these,
+        // and a crosshair session that moved the window without updating them left the dedupe
+        // primed to skip a needed move on the first post-Inspect tick.
+        lastSpriteX_ = spriteBand16_ ? (int)(r.cursorScreenX + 0.5) + mon_.x
+                                     : r.clickDesktopX + mon_.x;
+        lastSpriteY_ = spriteBand16_ ? (int)(r.cursorScreenY + 0.5) + mon_.y
+                                     : r.clickDesktopY + mon_.y;
         sprite_->keepOnTop();
     } else if (useSprite_ && sprite_ && ex.drawCursor && level > 1.001) {
         // The REAL cursor is welded to the lens point above, so input is entirely native - but

@@ -183,6 +183,7 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
     lastCursor_ = info.hCursor;
     lastVerdict_ = ShapeStatus::Rendered;
     crosshairMode_ = false;   // the window now holds the cursor shape again
+    reapplyPosition();        // the hotspot may have changed with the shape (issue #229)
     return ShapeStatus::Rendered;
 }
 
@@ -305,10 +306,24 @@ void CursorSprite::renderMaskShape() {
     ReleaseDC(nullptr, screenDc);
 }
 
-// Moves the sprite so its hotspot sits at the given desktop point.
+// Moves the sprite so its hotspot sits at the given desktop point. The target is remembered:
+// a shape change re-renders with a NEW hotspot, and the window must then be repositioned even
+// though the target point never moved - callers dedupe on the target, so the reposition has to
+// come from here (issue #229: the Inspect crosshair's centered hotspot swapped back to the
+// arrow's tip hotspot with the move deduped, showing the arrow displaced by hotspot * zoom).
 void CursorSprite::moveTo(int desktopX, int desktopY) {
+    lastTargetX_ = desktopX; lastTargetY_ = desktopY; haveTarget_ = true;
     SetWindowPos(hwnd_, nullptr, desktopX - hotX_, desktopY - hotY_, 0, 0,
                  SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+// Re-applies the remembered target with the current hotspot (called after any re-render that
+// may have changed hotX_/hotY_ - refreshShape and renderMaskShape).
+void CursorSprite::reapplyPosition() {
+    if (haveTarget_) {
+        SetWindowPos(hwnd_, nullptr, lastTargetX_ - hotX_, lastTargetY_ - hotY_, 0, 0,
+                     SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
 }
 
 // True if a visible, non-cloaked window overlapping the sprite sits above it in z-order - i.e. a
@@ -397,6 +412,8 @@ void CursorSprite::showCrosshair() {
         renderCrosshair();
         crosshairMode_ = true;
         hotX_ = hotY_ = (bufSize() - 2) / 2;   // the cross centers on this texel (see BuildCrosshairBGRA)
+        reapplyPosition();                     // new hotspot, same target (issue #229)
+        reapplyPosition();                     // new hotspot, same target (issue #229)
         // Invalidate the shape cache: the window no longer holds the cursor pixels, so the next
         // refreshShape() (Inspect off) must repaint even if the cursor HANDLE never changed -
         // otherwise its early-return would leave the crosshair on screen as the "cursor".
