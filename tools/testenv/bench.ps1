@@ -1,30 +1,29 @@
-# Magnifier benchmark (issue #225 round 3): drive DIFFERENT magnifiers through the SAME
-# scenarios and produce a game-benchmark scoreboard - view update rate (avg "fps"), 1% low,
-# composition fps, response time, RAM avg/max, CPU, wobble - catalogued per run so programs
-# can be compared with definitive numbers in equal environments.
+# Magnifier benchmark v2 (issue #225): drive DIFFERENT magnifiers through the SAME harsh
+# scenarios and produce a game-benchmark scoreboard, catalogued per run.
 #
 #   powershell -File tools\testenv\bench.ps1                          # wind + native
 #   powershell -File tools\testenv\bench.ps1 -Drivers wind
 #   powershell -File tools\testenv\bench.ps1 -Drivers wind,native,external -ExternalSpec zt.json
 #
-# ExternalSpec JSON (for ZoomText etc.): { "name": "ZoomText", "exe": "C:\\...\\Zt.exe",
-#   "procNames": ["Zt"], "zoomInVks": [17,18,187], "zoomOutVks": [17,18,189], "startWaitMs": 8000 }
-# (vks are the hotkey chord, held together; the driver presses it repeatedly to reach the level.)
+# v2 hardness (field review): level ladder up to 14x plus an at-CAP scenario (the cap itself is
+# probed and scored - WM clamps at 16x, Wind at its configured maxLevel); rapid zoom-storm
+# cycles driven through each magnifier's real channel; acrylic strength ladder (glass/mid/heavy);
+# zigzag over ANIMATED content (the background differs along the path); and a real D3D11
+# flip-model game-sim window (gamesim.exe) for game-shaped present pressure.
 #
-# HARD RULE (issue #217): only ONE magnifier runs at a time - two magnification contexts share
-# DWM state and poison each other's numbers. The bench enforces it per driver.
-#
-# Measurement is external and driver-agnostic: MagGetFullscreenTransform readback (any
-# DWM-fullscreen-transform magnifier: Wind's transform engine, native Magnifier, and most
-# fullscreen-mode AT magnifiers), DwmFlush cadence, process RAM/CPU. Same tones contract:
-# one start tone, one stop tone for the whole bench.
+# HARD RULE (issue #217): only ONE magnifier runs at a time. Measurement is the DWM
+# fullscreen-transform readback + DwmFlush cadence + process RAM/CPU; the readback refreshes at
+# ~60Hz, so avgViewFps saturates there for everyone - the differentiators are the stall
+# metrics (1% low, gap p99/max), which see through the ceiling. centerGap (NOT "wobble"):
+# cursor-vs-view-centre distance; magnifiers that deliberately do not centre (Wind free-cursor)
+# legitimately score high there.
 param(
   [string[]]$Drivers = @('wind','native'),
   [string]$ExternalSpec = '',
-  [double]$TargetLevel = 8.0,
   [string]$WindExe = 'C:\Program Files\Wind\Wind.exe'
 )
 $ErrorActionPreference = 'Stop'
+$Drivers = @($Drivers | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
 . (Join-Path $PSScriptRoot 'lib.ps1')
 $script:WindExe = $WindExe
 
@@ -53,15 +52,26 @@ public static class BM {
     INPUT[] i = new INPUT[1]; i[0].type = 0; i[0].mi.dx = dx; i[0].mi.dy = dy;
     i[0].mi.dwFlags = 0x0001; SendInput(1, i, Marshal.SizeOf(typeof(INPUT)));
   }
+  static void Wheel(int notches) {
+    INPUT[] i = new INPUT[1]; i[0].type = 0; i[0].mi.mouseData = (uint)(notches * 120);
+    i[0].mi.dwFlags = 0x0800; SendInput(1, i, Marshal.SizeOf(typeof(INPUT)));
+  }
   public static void KeyChord(int[] vks, int holdMs) {
     foreach (int v in vks) keybd_event((byte)v, 0, 0, UIntPtr.Zero);
     Thread.Sleep(holdMs);
     for (int i = vks.Length - 1; i >= 0; i--) keybd_event((byte)vks[i], 0, 2, UIntPtr.Zero);
   }
+  // Native Magnifier's real zoom channel: Ctrl+Alt+wheel.
+  public static void CtrlAltWheel(int notches) {
+    keybd_event(0x11, 0, 0, UIntPtr.Zero); keybd_event(0x12, 0, 0, UIntPtr.Zero);
+    Thread.Sleep(15);
+    Wheel(notches);
+    Thread.Sleep(15);
+    keybd_event(0x12, 0, 2, UIntPtr.Zero); keybd_event(0x11, 0, 2, UIntPtr.Zero);
+  }
   public static float Level() { float l; int x, y; MagGetFullscreenTransform(out l, out x, out y); return l; }
 
-  // Closed-loop zoom for button-driven magnifiers (Wind): hold until the readback reaches the
-  // target. MAIN THREAD ONLY (Mag affinity).
+  // Closed-loop zoom for button-driven magnifiers (Wind). MAIN THREAD (Mag affinity).
   public static double ZoomHoldUntil(uint btn, double target, double timeoutS) {
     var t = System.Diagnostics.Stopwatch.StartNew();
     Btn(true, btn);
@@ -75,11 +85,15 @@ public static class BM {
     return Level();
   }
 
-  // ---- worker-thread movement (so the main thread can sample Mag concurrently) ----
+  // ---- worker-thread drive programs (main thread samples Mag concurrently) ----
   static Thread worker; public static volatile bool WorkDone;
-  public static void StartPan(double seconds, int mickeys, int stepMs, int reverseMs) {
+  static void RunWorker(ThreadStart body) {
     WorkDone = false;
-    worker = new Thread(() => {
+    worker = new Thread(() => { body(); WorkDone = true; });
+    worker.IsBackground = true; worker.Start();
+  }
+  public static void StartPan(double seconds, int mickeys, int stepMs, int reverseMs) {
+    RunWorker(() => {
       var t = System.Diagnostics.Stopwatch.StartNew();
       int dir = 1; double lastRev = 0, lastInject = -1000;
       while (t.Elapsed.TotalSeconds < seconds) {
@@ -88,13 +102,10 @@ public static class BM {
         if (nowMs - lastInject >= stepMs) { Move(dir * mickeys, 0); lastInject = nowMs; }
         Thread.Sleep(1);
       }
-      WorkDone = true;
     });
-    worker.IsBackground = true; worker.Start();
   }
   public static void StartZig(double seconds, int mickeys, int climb, int stepMs, int reverseMs, int topY, int botY) {
-    WorkDone = false;
-    worker = new Thread(() => {
+    RunWorker(() => {
       var t = System.Diagnostics.Stopwatch.StartNew();
       int dir = 1, vdir = -1; double lastRev = 0, lastInject = -1000;
       while (t.Elapsed.TotalSeconds < seconds) {
@@ -106,16 +117,30 @@ public static class BM {
         }
         Thread.Sleep(1);
       }
-      WorkDone = true;
     });
-    worker.IsBackground = true; worker.Start();
+  }
+  // Zoom storms on the worker so the main thread can watch the readback while they run.
+  public static void StartBtnStorm(int cycles, int holdMs) {
+    RunWorker(() => {
+      for (int i = 0; i < cycles; i++) {
+        Btn(true, 2); Thread.Sleep(holdMs); Btn(false, 2);
+        Btn(true, 1); Thread.Sleep(holdMs); Btn(false, 1);
+      }
+      Btn(false, 1); Btn(false, 2);
+    });
+  }
+  public static void StartWheelStorm(int cycles, int notches, int stepMs) {
+    RunWorker(() => {
+      for (int i = 0; i < cycles; i++) {
+        for (int k = 0; k < notches; k++) { CtrlAltWheel(1); Thread.Sleep(stepMs); }
+        for (int k = 0; k < notches; k++) { CtrlAltWheel(-1); Thread.Sleep(stepMs); }
+      }
+    });
   }
   public static void WaitWork() { if (worker != null) worker.Join(); }
 
-  // ---- the view sampler (MAIN THREAD, Mag affinity): the benchmark's core numbers ----
-  // View "fps" = offset-change rate; 1% low = rate implied by the p99 inter-update gap;
-  // wobble = cursor-vs-view deviation, clamp-aware (from mag_perf_run's SampleMain).
-  public static double ViewFps, ViewLow1, ViewGapP99, ViewGapMax, DevMedPx, DevP95Px, LvlMin, LvlMax;
+  // ---- view sampler (MAIN THREAD): update cadence, stalls, level range, centre gap ----
+  public static double ViewFps, ViewLow1, ViewGapP99, ViewGapMax, GapMedPx, GapP95Px, LvlMin, LvlMax;
   public static void CollectView(double seconds, int sw, int sh) {
     var gaps = new List<double>(); var devs = new List<double>();
     double halfW = sw / 2.0;
@@ -147,8 +172,8 @@ public static class BM {
     ViewGapMax = gaps.Count > 0 ? gaps[gaps.Count - 1] : -1;
     ViewLow1 = ViewGapP99 > 0 ? 1000.0 / ViewGapP99 : -1;
     devs.Sort();
-    DevMedPx = devs.Count > 0 ? devs[devs.Count / 2] : -1;
-    DevP95Px = devs.Count > 0 ? devs[(int)(devs.Count * 0.95)] : -1;
+    GapMedPx = devs.Count > 0 ? devs[devs.Count / 2] : -1;
+    GapP95Px = devs.Count > 0 ? devs[(int)(devs.Count * 0.95)] : -1;
   }
 
   // ---- composition cadence sampler (worker thread) ----
@@ -174,7 +199,7 @@ public static class BM {
   }
   public static void WaitFlush() { if (flusher != null) flusher.Join(); }
 
-  // ---- RAM/CPU sampler (worker thread) over the driver's process names ----
+  // ---- RAM/CPU sampler (worker thread) ----
   static Thread rammer; static volatile bool ramStop;
   public static double RamAvgMB, RamMaxMB, CpuAvgPct;
   public static void StartRam(string[] procs) {
@@ -210,13 +235,12 @@ public static class BM {
   }
   public static void StopRam() { ramStop = true; if (rammer != null) rammer.Join(); }
 
-  // ---- response probe (MAIN THREAD): quiet spell, inject one 60-mickey impulse, time until
-  // the view offset reacts. The per-driver "input lag" number. ----
+  // ---- response probe (MAIN THREAD) ----
   public static double RespMedMs, RespP95Ms; public static int RespSamples;
   public static void ResponseProbe(int n) {
     var lats = new List<double>();
     for (int k = 0; k < n; k++) {
-      Thread.Sleep(320);                                  // quiet: let every driver settle
+      Thread.Sleep(320);
       float l; int ox0, oy0, ox, oy;
       MagGetFullscreenTransform(out l, out ox0, out oy0);
       var t = System.Diagnostics.Stopwatch.StartNew();
@@ -226,7 +250,7 @@ public static class BM {
         if (ox != ox0 || oy != oy0) { lats.Add(t.Elapsed.TotalMilliseconds); break; }
         Thread.SpinWait(80);
       }
-      Move(-60, 0);                                       // return to start (reproducibility)
+      Move(-60, 0);
       Thread.Sleep(80);
     }
     lats.Sort();
@@ -242,12 +266,19 @@ $resultsDir = Join-Path $PSScriptRoot 'results'
 if (-not (Test-Path $resultsDir)) { New-Item -ItemType Directory $resultsDir | Out-Null }
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $magKey = 'HKCU:\Software\Microsoft\ScreenMagnifier'
+$gameSimExe = Join-Path $PSScriptRoot 'gamesim.exe'
 
-# ---- drivers ---------------------------------------------------------------------------------
-# A driver: Name, ProcNames (RAM/CPU scope), Prepare, ZoomTo(level), ZoomReset, Cleanup.
+# ---- backdrop helpers (gamesim is a real D3D app, not a WinForms backdrop) --------------------
+function Start-GameSim {
+  if (-not (Test-Path $gameSimExe)) { throw "gamesim.exe missing - build it per tools/testenv/gamesim.cpp header" }
+  $p = Start-Process $gameSimExe -PassThru
+  Start-Sleep -Milliseconds 2600               # swapchain up + clear the launch quiesce
+  return $p
+}
+
+# ---- drivers ----------------------------------------------------------------------------------
 $ext = $null
 if ($ExternalSpec -and (Test-Path $ExternalSpec)) { $ext = Get-Content $ExternalSpec -Raw | ConvertFrom-Json }
-
 $regBackup = @{}
 function Backup-MagRegistry {
   $props = Get-ItemProperty $magKey -ErrorAction SilentlyContinue
@@ -262,15 +293,17 @@ function Restore-MagRegistry {
 $driverDefs = @{
   wind = @{
     Name = 'Wind'; ProcNames = @('Wind')
-    Prepare  = { Get-Process Magnify -EA SilentlyContinue | Stop-Process -Force -Confirm:$false; Stop-Wind; Start-Wind $null }
-    ZoomTo   = { param($lvl) [void][BM]::ZoomHoldUntil(2, $lvl, 6) }
-    ZoomReset= { [void][BM]::ZoomHoldUntil(1, 1.02, 8); Clear-ZoomButtons }
-    Cleanup  = { }
+    Prepare   = { Get-Process Magnify -EA SilentlyContinue | Stop-Process -Force -Confirm:$false; Stop-Wind; Start-Wind $null }
+    ZoomTo    = { param($lvl) [void][BM]::ZoomHoldUntil(2, $lvl, 6) }
+    ZoomMax   = { [BM]::ZoomHoldUntil(2, 99, 4) }                     # hold to the cap; returns it
+    ZoomReset = { [void][BM]::ZoomHoldUntil(1, 1.02, 8); Clear-ZoomButtons }
+    StartStorm= { param($cycles) [BM]::StartBtnStorm($cycles, 190) }
+    Cleanup   = { }
   }
   native = @{
     Name = 'Windows Magnifier'; ProcNames = @('Magnify')
-    Prepare  = {
-      Stop-Wind                                # ONE magnifier at a time (#217)
+    Prepare   = {
+      Stop-Wind
       Backup-MagRegistry
       Set-ItemProperty $magKey -Name 'MagnificationMode' -Value 2 -Type DWord
       Set-ItemProperty $magKey -Name 'FollowMouse' -Value 1 -Type DWord
@@ -278,16 +311,20 @@ $driverDefs = @{
       Start-Process 'C:\Windows\System32\Magnify.exe' | Out-Null
       Start-Sleep -Milliseconds 2500
     }
-    ZoomTo   = { param($lvl)
-      # ONE registry write eases beautifully (the documented native behavior); wait out the
-      # ~280ms animation plus margin.
+    ZoomTo    = { param($lvl)
       Set-ItemProperty $magKey -Name 'Magnification' -Value ([int]($lvl * 100)) -Type DWord
       Start-Sleep -Milliseconds 900
     }
-    ZoomReset= { Set-ItemProperty $magKey -Name 'Magnification' -Value 100 -Type DWord; Start-Sleep -Milliseconds 900 }
-    Cleanup  = {
-      # Win+Esc is Magnify's own clean quit; fall back to kill.
-      [BM]::KeyChord(@(0x5B, 0x1B), 120)
+    ZoomMax   = {
+      # Writes above 1600 are silently IGNORED (field-documented), so 1600 IS the probe.
+      Set-ItemProperty $magKey -Name 'Magnification' -Value 1600 -Type DWord
+      Start-Sleep -Milliseconds 1100
+      [BM]::Level()
+    }
+    ZoomReset = { Set-ItemProperty $magKey -Name 'Magnification' -Value 100 -Type DWord; Start-Sleep -Milliseconds 900 }
+    StartStorm= { param($cycles) [BM]::StartWheelStorm($cycles, 3, 120) }   # its REAL channel: Ctrl+Alt+wheel
+    Cleanup   = {
+      [BM]::KeyChord(@(0x5B, 0x1B), 120)       # Win+Esc: Magnify's own clean quit
       Start-Sleep -Milliseconds 800
       Get-Process Magnify -EA SilentlyContinue | Stop-Process -Force -Confirm:$false
       Restore-MagRegistry
@@ -297,7 +334,7 @@ $driverDefs = @{
 if ($ext) {
   $driverDefs.external = @{
     Name = $ext.name; ProcNames = @($ext.procNames)
-    Prepare  = {
+    Prepare   = {
       Stop-Wind
       Get-Process Magnify -EA SilentlyContinue | Stop-Process -Force -Confirm:$false
       if (-not (Get-Process -Name $ext.procNames[0] -EA SilentlyContinue)) {
@@ -305,12 +342,11 @@ if ($ext) {
         Start-Sleep -Milliseconds ([int]$ext.startWaitMs)
       }
     }
-    ZoomTo   = { param($lvl)
-      # Press the zoom-in chord until the readback reaches the level (or 12 presses).
-      for ($i = 0; $i -lt 12 -and [BM]::Level() -lt $lvl; $i++) { [BM]::KeyChord(@($ext.zoomInVks), 80); Start-Sleep -Milliseconds 350 }
-    }
-    ZoomReset= { for ($i = 0; $i -lt 16 -and [BM]::Level() -gt 1.02; $i++) { [BM]::KeyChord(@($ext.zoomOutVks), 80); Start-Sleep -Milliseconds 350 } }
-    Cleanup  = { }   # leave the user's AT software running; it was likely there before
+    ZoomTo    = { param($lvl) for ($i = 0; $i -lt 20 -and [BM]::Level() -lt $lvl; $i++) { [BM]::KeyChord(@($ext.zoomInVks), 80); Start-Sleep -Milliseconds 300 } }
+    ZoomMax   = { for ($i = 0; $i -lt 30; $i++) { [BM]::KeyChord(@($ext.zoomInVks), 80); Start-Sleep -Milliseconds 250 }; [BM]::Level() }
+    ZoomReset = { for ($i = 0; $i -lt 32 -and [BM]::Level() -gt 1.02; $i++) { [BM]::KeyChord(@($ext.zoomOutVks), 80); Start-Sleep -Milliseconds 250 } }
+    StartStorm= { param($cycles) [BM]::StartBtnStorm(0, 1) }   # storms not supported generically; no-op worker
+    Cleanup   = { }
   }
 }
 
@@ -321,18 +357,36 @@ foreach ($d in $Drivers) {
 }
 if (-not $selected.Count) { Write-Host 'No drivers to run.'; exit 2 }
 
-# ---- benchmark scenarios (identical for every driver) ----------------------------------------
+# ---- benchmark scenarios (identical for every driver; 'level' 0 = handled by prog) ------------
 $benchScenarios = @(
-  @{ name = 'pan-solid';      kind = 'solid';    borderless = $true; strength = '';      underlay = '';         prog = 'pan';  secs = 8 },
-  @{ name = 'fast-solid';     kind = 'solid';    borderless = $true; strength = '';      underlay = '';         prog = 'fast'; secs = 6 },
-  @{ name = 'zig-acryl';      kind = 'acrylic';  borderless = $true; strength = 'heavy'; underlay = 'solid';    prog = 'zig';  secs = 8 },
-  @{ name = 'pan-acrylvideo'; kind = 'acrylic';  borderless = $true; strength = 'heavy'; underlay = 'animated'; prog = 'pan';  secs = 8 },
-  @{ name = 'response';       kind = 'solid';    borderless = $true; strength = '';      underlay = '';         prog = 'resp'; secs = 0 }
+  @{ name = 'pan-solid-4x';        kind = 'solid';    strength = '';      underlay = '';         prog = 'pan';   secs = 6; level = 4 },
+  @{ name = 'pan-solid-14x';       kind = 'solid';    strength = '';      underlay = '';         prog = 'pan';   secs = 8; level = 14 },
+  @{ name = 'fast-solid-14x';      kind = 'solid';    strength = '';      underlay = '';         prog = 'fast';  secs = 6; level = 14 },
+  @{ name = 'zig-animated-10x';    kind = 'animated'; strength = '';      underlay = '';         prog = 'zig';   secs = 8; level = 10 },
+  @{ name = 'zig-acryl-glass-10x'; kind = 'acrylic';  strength = 'glass'; underlay = 'solid';    prog = 'zig';   secs = 6; level = 10 },
+  @{ name = 'zig-acryl-mid-10x';   kind = 'acrylic';  strength = 'mid';   underlay = 'solid';    prog = 'zig';   secs = 6; level = 10 },
+  @{ name = 'zig-acryl-heavy-14x'; kind = 'acrylic';  strength = 'heavy'; underlay = 'solid';    prog = 'zig';   secs = 8; level = 14 },
+  @{ name = 'pan-acrylvideo-14x';  kind = 'acrylic';  strength = 'heavy'; underlay = 'animated'; prog = 'pan';   secs = 8; level = 14 },
+  @{ name = 'game-pan-14x';        kind = 'gamesim';  strength = '';      underlay = '';         prog = 'pan';   secs = 8; level = 14 },
+  @{ name = 'game-zig-8x';         kind = 'gamesim';  strength = '';      underlay = '';         prog = 'zig';   secs = 6; level = 8 },
+  @{ name = 'maxzoom-pan';         kind = 'solid';    strength = '';      underlay = '';         prog = 'cap';   secs = 5; level = 0 },
+  @{ name = 'zoomstorm';           kind = 'solid';    strength = '';      underlay = '';         prog = 'storm'; secs = 0; level = 0 },
+  @{ name = 'response-8x';         kind = 'solid';    strength = '';      underlay = '';         prog = 'resp';  secs = 0; level = 8 }
 )
+
+function Measure-Movement($drv, $sc, $moveStart) {
+  # Pre-roll: movement runs 0.5s before sampling starts, cutting the scenario-start settle
+  # artifact out of the stall stats (seen as a shared ~430ms gapMax in v1).
+  & $moveStart
+  Start-Sleep -Milliseconds 500
+  [BM]::StartFlush([double]$sc.secs)
+  [BM]::CollectView([double]$sc.secs, $sw, $sh)
+  [BM]::WaitWork(); [BM]::WaitFlush()
+}
 
 [void][BM]::MagInitialize()
 $all = [ordered]@{}
-Write-Host "Magnifier benchmark - drivers: $(($selected | ForEach-Object { $_.Name }) -join ', ') @ ${TargetLevel}x"
+Write-Host "Magnifier benchmark v2 - drivers: $(($selected | ForEach-Object { $_.Name }) -join ', ')"
 Start-Tone
 try {
   foreach ($drv in $selected) {
@@ -343,39 +397,63 @@ try {
       $bp = $null; $ul = $null
       try {
         if ($sc.underlay) { $ul = Start-Backdrop $sc.underlay $true }
-        $bp = Start-Backdrop $sc.kind $sc.borderless $sc.strength
-        [TE]::MoveAbs([int]($sw / 2), [int]($sh / 2), $sw, $sh)   # same start every time
+        $bp = if ($sc.kind -eq 'gamesim') { Start-GameSim } else { Start-Backdrop $sc.kind $true $sc.strength }
+        [TE]::MoveAbs([int]($sw / 2), [int]($sh / 2), $sw, $sh)
         Start-Sleep -Milliseconds 250
-        & $drv.ZoomTo $TargetLevel
-        [BM]::StartRam($drv.ProcNames)
-        if ($sc.prog -eq 'resp') {
-          [BM]::ResponseProbe(15)
-          [BM]::StopRam()
-          $drvResults[$sc.name] = [ordered]@{
-            respMedMs = [math]::Round([BM]::RespMedMs, 1); respP95Ms = [math]::Round([BM]::RespP95Ms, 1)
-            respSamples = [BM]::RespSamples
-            ramAvgMB = [math]::Round([BM]::RamAvgMB, 1); ramMaxMB = [math]::Round([BM]::RamMaxMB, 1)
+        $entry = [ordered]@{}
+        switch ($sc.prog) {
+          'resp' {
+            & $drv.ZoomTo $sc.level
+            [BM]::StartRam($drv.ProcNames)
+            [BM]::ResponseProbe(15)
+            [BM]::StopRam()
+            $entry.respMedMs = [math]::Round([BM]::RespMedMs, 1)
+            $entry.respP95Ms = [math]::Round([BM]::RespP95Ms, 1)
+            $entry.respSamples = [BM]::RespSamples
           }
-        } else {
-          switch ($sc.prog) {
-            'pan'  { [BM]::StartPan($sc.secs, 8, 2, 1400) }
-            'fast' { [BM]::StartPan($sc.secs, 16, 2, 900) }
-            'zig'  { [BM]::StartZig($sc.secs, 8, 2, 2, 1200, [int]($sh * 0.12), [int]($sh * 0.88)) }
+          'cap' {
+            [BM]::StartRam($drv.ProcNames)
+            $cap = & $drv.ZoomMax
+            $entry.maxZoom = [math]::Round([double]$cap, 2)
+            Measure-Movement $drv $sc { [BM]::StartPan([double]$sc.secs + 0.5, 10, 2, 1100) }
+            [BM]::StopRam()
           }
-          [BM]::StartFlush($sc.secs)
-          [BM]::CollectView($sc.secs, $sw, $sh)          # blocks (main thread, Mag affinity)
-          [BM]::WaitWork(); [BM]::WaitFlush(); [BM]::StopRam()
-          $drvResults[$sc.name] = [ordered]@{
-            viewFps = [math]::Round([BM]::ViewFps, 1); low1Fps = [math]::Round([BM]::ViewLow1, 1)
-            gapP99Ms = [math]::Round([BM]::ViewGapP99, 1); gapMaxMs = [math]::Round([BM]::ViewGapMax, 1)
-            compFps = [math]::Round([BM]::CompFps, 1); compP95Ms = [math]::Round([BM]::CompP95Ms, 2)
-            wobbleMedPx = [math]::Round([BM]::DevMedPx, 1); wobbleP95Px = [math]::Round([BM]::DevP95Px, 1)
-            lvl = [math]::Round([BM]::LvlMax, 2)
-            ramAvgMB = [math]::Round([BM]::RamAvgMB, 1); ramMaxMB = [math]::Round([BM]::RamMaxMB, 1)
-            cpuAvgPct = [math]::Round([BM]::CpuAvgPct, 1)
+          'storm' {
+            [BM]::StartRam($drv.ProcNames)
+            & $drv.StartStorm 14
+            [BM]::StartFlush(11.0)
+            [BM]::CollectView(11.0, $sw, $sh)
+            [BM]::WaitWork(); [BM]::WaitFlush(); [BM]::StopRam()
+            & $drv.ZoomReset
+            $entry.recovered = ([BM]::Level() -le 1.05)
+          }
+          default {
+            & $drv.ZoomTo $sc.level
+            [BM]::StartRam($drv.ProcNames)
+            $secsAll = [double]$sc.secs + 0.5
+            switch ($sc.prog) {
+              'pan'  { Measure-Movement $drv $sc { [BM]::StartPan($secsAll, 8, 2, 1400) } }
+              'fast' { Measure-Movement $drv $sc { [BM]::StartPan($secsAll, 16, 2, 900) } }
+              'zig'  { Measure-Movement $drv $sc { [BM]::StartZig($secsAll, 8, 2, 2, 1200, [int]($sh * 0.12), [int]($sh * 0.88)) } }
+            }
+            [BM]::StopRam()
           }
         }
-        & $drv.ZoomReset
+        if ($sc.prog -in @('pan','fast','zig','cap','storm')) {
+          $entry.viewFps = [math]::Round([BM]::ViewFps, 1); $entry.low1Fps = [math]::Round([BM]::ViewLow1, 1)
+          $entry.gapP99Ms = [math]::Round([BM]::ViewGapP99, 1); $entry.gapMaxMs = [math]::Round([BM]::ViewGapMax, 1)
+          $entry.compFps = [math]::Round([BM]::CompFps, 1); $entry.compP95Ms = [math]::Round([BM]::CompP95Ms, 2)
+          $entry.centerGapMedPx = [math]::Round([BM]::GapMedPx, 1); $entry.centerGapP95Px = [math]::Round([BM]::GapP95Px, 1)
+          $entry.lvlMin = [math]::Round([BM]::LvlMin, 2); $entry.lvlMax = [math]::Round([BM]::LvlMax, 2)
+        }
+        if ($sc.prog -ne 'resp') {
+          $entry.ramAvgMB = [math]::Round([BM]::RamAvgMB, 1); $entry.ramMaxMB = [math]::Round([BM]::RamMaxMB, 1)
+          $entry.cpuAvgPct = [math]::Round([BM]::CpuAvgPct, 1)
+        } else {
+          $entry.ramAvgMB = [math]::Round([BM]::RamAvgMB, 1); $entry.ramMaxMB = [math]::Round([BM]::RamMaxMB, 1)
+        }
+        $drvResults[$sc.name] = $entry
+        if ($sc.prog -notin @('storm')) { & $drv.ZoomReset }
       } finally {
         Stop-Backdrop $bp
         if ($ul) { Stop-Backdrop $ul }
@@ -386,15 +464,16 @@ try {
   }
 } finally {
   Stop-Tone
-  # Whatever happened, end with: no Magnify, registry restored (if backed up), Wind back up.
   Get-Process Magnify -EA SilentlyContinue | Stop-Process -Force -Confirm:$false
+  Get-Process gamesim -EA SilentlyContinue | Stop-Process -Force -Confirm:$false
   if ($regBackup.Count) { Restore-MagRegistry }
   [void][BM]::MagUninitialize()
   Restart-WindClean
 }
 
-# ---- scoreboard -------------------------------------------------------------------------------
-$moveNames = @('pan-solid','fast-solid','zig-acryl','pan-acrylvideo')
+# ---- scoreboard --------------------------------------------------------------------------------
+$moveNames = @('pan-solid-4x','pan-solid-14x','fast-solid-14x','zig-animated-10x',
+               'zig-acryl-glass-10x','zig-acryl-mid-10x','zig-acryl-heavy-14x','pan-acrylvideo-14x')
 $board = @()
 foreach ($name in $all.Keys) {
   $r = $all[$name]
@@ -402,33 +481,37 @@ foreach ($name in $all.Keys) {
   $avg = { param($k) [math]::Round((($move | ForEach-Object { $_[$k] } | Where-Object { $_ -gt 0 }) | Measure-Object -Average).Average, 1) }
   $worstLow = ($move | ForEach-Object { $_['low1Fps'] } | Where-Object { $_ -gt 0 } | Measure-Object -Minimum).Minimum
   $board += [pscustomobject]@{
-    magnifier  = $name
-    avgViewFps = & $avg 'viewFps'
-    low1Fps    = $worstLow
-    compFps    = & $avg 'compFps'
-    respMedMs  = $r['response'].respMedMs
-    respP95Ms  = $r['response'].respP95Ms
-    ramAvgMB   = & $avg 'ramAvgMB'
-    ramMaxMB   = (($move + $r['response']) | ForEach-Object { $_['ramMaxMB'] } | Where-Object { $_ -gt 0 } | Measure-Object -Maximum).Maximum
-    cpuAvgPct  = & $avg 'cpuAvgPct'
-    wobbleP95  = & $avg 'wobbleP95Px'
-    acrylVideoFps = $r['pan-acrylvideo'].viewFps
+    magnifier    = $name
+    maxZoom      = $r['maxzoom-pan'].maxZoom
+    avgViewFps   = & $avg 'viewFps'
+    low1Fps      = $worstLow
+    atCapLow1    = $r['maxzoom-pan'].low1Fps
+    gameLow1     = (@($r['game-pan-14x'].low1Fps, $r['game-zig-8x'].low1Fps) | Where-Object { $_ -gt 0 } | Measure-Object -Minimum).Minimum
+    stormGapMax  = $r['zoomstorm'].gapMaxMs
+    stormOk      = $r['zoomstorm'].recovered
+    respMedMs    = $r['response-8x'].respMedMs
+    ramAvgMB     = & $avg 'ramAvgMB'
+    ramMaxMB     = (($move + @($r['maxzoom-pan'], $r['zoomstorm'])) | ForEach-Object { $_['ramMaxMB'] } | Where-Object { $_ -gt 0 } | Measure-Object -Maximum).Maximum
+    cpuAvgPct    = & $avg 'cpuAvgPct'
+    acrylVideoLow1 = $r['pan-acrylvideo-14x'].low1Fps
   }
 }
 Write-Host ''
-Write-Host '=== SCOREBOARD ==='
+Write-Host '=== SCOREBOARD (v2, harsh) ==='
 $board | Format-Table -AutoSize | Out-String | Write-Host
 
-# ---- outputs: full JSON + one catalog line per driver (the comparable history) ----------------
-$out = [ordered]@{ stamp = $stamp; targetLevel = $TargetLevel; scenarios = $benchScenarios | ForEach-Object { $_.name }; drivers = $all; board = $board }
+# ---- outputs -----------------------------------------------------------------------------------
+$out = [ordered]@{ stamp = $stamp; version = 2; scenarios = $benchScenarios | ForEach-Object { $_.name }; drivers = $all; board = $board }
 $jsonPath = Join-Path $resultsDir "bench-$stamp.json"
 $out | ConvertTo-Json -Depth 6 | Set-Content $jsonPath
 $catalog = Join-Path $resultsDir 'catalog.csv'
-if (-not (Test-Path $catalog)) {
-  'stamp,magnifier,targetLevel,avgViewFps,low1Fps,compFps,respMedMs,respP95Ms,ramAvgMB,ramMaxMB,cpuAvgPct,wobbleP95,acrylVideoFps' | Set-Content $catalog
+$hdr = 'stamp,magnifier,maxZoom,avgViewFps,low1Fps,atCapLow1,gameLow1,stormGapMax,stormOk,respMedMs,ramAvgMB,ramMaxMB,cpuAvgPct,acrylVideoLow1'
+if ((Test-Path $catalog) -and ((Get-Content $catalog -TotalCount 1) -ne $hdr)) {
+  Move-Item $catalog (Join-Path $resultsDir 'catalog-v1.csv') -Force   # header changed: archive
 }
+if (-not (Test-Path $catalog)) { $hdr | Set-Content $catalog }
 foreach ($b in $board) {
-  "$stamp,$($b.magnifier),$TargetLevel,$($b.avgViewFps),$($b.low1Fps),$($b.compFps),$($b.respMedMs),$($b.respP95Ms),$($b.ramAvgMB),$($b.ramMaxMB),$($b.cpuAvgPct),$($b.wobbleP95),$($b.acrylVideoFps)" | Add-Content $catalog
+  "$stamp,$($b.magnifier),$($b.maxZoom),$($b.avgViewFps),$($b.low1Fps),$($b.atCapLow1),$($b.gameLow1),$($b.stormGapMax),$($b.stormOk),$($b.respMedMs),$($b.ramAvgMB),$($b.ramMaxMB),$($b.cpuAvgPct),$($b.acrylVideoLow1)" | Add-Content $catalog
 }
 Write-Host "Results: $jsonPath"
 Write-Host "Catalog: $catalog"
