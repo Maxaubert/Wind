@@ -435,7 +435,7 @@ test('a model change writes the ini BEFORE requesting the relaunch', async ({ pa
   await page.goto('/');
   const row = page.getByText('Magnifier engine', { exact: true }).locator('xpath=../..');
   await row.getByRole('combobox').click();
-  await page.getByRole('option', { name: 'Windows Magnifier' }).click();
+  await page.getByRole('option', { name: 'System' }).click();
   await page.getByRole('button', { name: 'Apply' }).click();
   const sets = await page.evaluate(() => window.__sets);
   const iModel = sets.findIndex(s => s.key === 'model' && s.value === 'magnify');
@@ -449,7 +449,7 @@ test('a failed relaunch reverts the model dropdown and the ini', async ({ page }
   await page.goto('/');
   const row = page.getByText('Magnifier engine', { exact: true }).locator('xpath=../..');
   await row.getByRole('combobox').click();
-  await page.getByRole('option', { name: 'Windows Magnifier' }).click();
+  await page.getByRole('option', { name: 'System' }).click();
   await page.getByRole('button', { name: 'Apply' }).click();
   await expect(page.getByText("Couldn't restart Wind")).toBeVisible();
   const sets = await page.evaluate(() => window.__sets);
