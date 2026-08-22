@@ -408,7 +408,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // character under its notchy ease. A nearest-during-ramp hotswap was field-tried and
     // rejected: the filters disagree about sub-pixel phase, so every swap shifted the image
     // 1-2px even with the source snapped to integers. One static filter, user's choice:
-    // txSamplingMode 1 (DEFAULT, smooth) or 0 (nearest: blocky but shimmer-free ramps).
+    // txSamplingMode 0 (DEFAULT, nearest: shimmer-free ramps) or 1 (EXPERIMENTAL smooth).
     // The flag is DWM-global and dies with a DWM restart, hence per-context re-apply.
     if (cfg.txSamplingMode >= 0 && appliedSampling_ != cfg.txSamplingMode) {
         appliedSampling_ = cfg.txSamplingMode;

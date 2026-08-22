@@ -123,7 +123,7 @@ struct Config {
     // ~N ticks of pan mid-gesture. Cuts the per-tick DWM message rate during ramps/pans.
     int ixDecimate = 4;
     // Magnification sampling mode (applied once per transform session).
-    //   1 = the DEFAULT (issue #227): the edge-preserving smooth filter behind native
+    //   1 = EXPERIMENTAL opt-in (issue #227): the edge-preserving smooth filter behind native
     //       Magnifier's "smooth edges of images and text". This is the WHOLE gap to WM's
     //       image and cursor quality - the pointer grows naturally with the zoom and stays
     //       crisp instead of pixelated. The 2026-08-13 dwmcore crash (two first-try repros
@@ -149,7 +149,7 @@ struct Config {
     // INTERACTION: the tx keep-alive (txKeepAliveMaxLevel > 0, retired default 0) writes a
     // value 1px off-true 144x/s; nearest masked that as sub-block noise, smoothing renders it
     // as visible shaking. Keep the keep-alive off while smoothing is on.
-    int txSamplingMode = 1;
+    int txSamplingMode = 0;
     // MPO buster (issue #191, hot): 1 (default) = during transform GAME sessions on MPO-ENABLED
     // machines, show a fullscreen alpha-1 click-through ghost that demotes the game off its
     // hardware overlay plane - off the plane there is no 16-bit translation field to overflow,

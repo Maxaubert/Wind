@@ -249,7 +249,7 @@ restartWind), `dirty`, `openIni`, `exportDiagnostics`, `pickExe`, `mpoState`, `s
   `MagSetFullscreenUseBitmapSmoothing` (Magnification.dll ORDINAL 1 - what native Magnifier's
   "smooth edges of images and text" flips; callable without UIAccess; the raw user32
   `SetMagnificationDesktopSamplingMode` takes a DWORD POINTER and a by-value call
-  access-violates). `txSamplingMode` SHIPS 1 since #227: the flag is the ENTIRE quality gap to
+  access-violates). `txSamplingMode` ships 0 (nearest); 1 = the EXPERIMENTAL smooth opt-in settled in #227: the flag is the ENTIRE quality gap to
   native Magnifier - image AND cursor (the pointer grows naturally with zoom; WM does NOT swap
   cursor bitmaps, probed 1x-16x arrow stays 32x32 - the sharpness is DWM's filter). The
   2026-08-13 dwmcore crash (two first-try repros over browser Mica/acrylic at high zoom) did

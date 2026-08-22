@@ -49,6 +49,13 @@ export const sections = [
       options:['hybrid','render','transform','magnify'],
       optionLabels:{ hybrid:'Auto', render:'Render', transform:'Transform', magnify:'Windows Magnifier' },
       def:'hybrid' },
+    // Smooth magnification filter (issue #227): the either/or the field investigation settled
+    // on. 1 = DWM's edge-preserving filter (sharp image + cursor, WM parity; slight shimmer
+    // while the zoom level is CHANGING - the filter's own re-render, not fixable externally).
+    // 0 = nearest (default): blocky but shimmer-free ramps. Hot; applies on the next zoom.
+    { key:'txSamplingMode', type:'toggle', label:'Smooth magnification (experimental)',
+      desc:'Sharper image and cursor while zoomed, like Windows Magnifier. May shimmer slightly while the zoom level is changing.',
+      def:0 },
     // Not an ini setting: reflects HKLM\...\Dwm\OverlayTestMode (issue #148 TDR trigger; costs
     // transform smoothness in-game). Advanced: system-wide display setting, needs UAC.
     { key:'__mpo', type:'mpo', label:'Disable MPO',
