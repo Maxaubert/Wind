@@ -337,7 +337,13 @@ function Analyze-Telemetry([string]$Path, [object[]]$Phases, [int]$Hz) {
     }
   }
   $first = $true
-  foreach ($line in [System.IO.File]::ReadLines($Path)) {
+  # ReadWrite share: the fail-fast path analyzes mid-suite while Wind still holds the file
+  # open for writing (plain ReadLines demands exclusive-write and throws).
+  $fs = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open,
+                               [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+  $sr = New-Object System.IO.StreamReader($fs)
+  try {
+  while ($null -ne ($line = $sr.ReadLine())) {
     if ($first) { $first = $false; continue }   # header
     $c = $line.Split(',')
     if ($c.Length -lt 12) { continue }
@@ -375,6 +381,7 @@ function Analyze-Telemetry([string]$Path, [object[]]$Phases, [int]$Hz) {
       break
     }
   }
+  } finally { $sr.Close(); $fs.Close() }
   $out = @{}
   foreach ($ph in $Phases) {
     $s = $stats[$ph.name]

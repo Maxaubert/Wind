@@ -8,8 +8,14 @@
 #   powershell -File tools\testenv\run.ps1 -Suite full -CI       # exit 1 on regression vs baselines
 #   powershell -File tools\testenv\run.ps1 -Suite full -UpdateBaseline
 #
-# Iteration gate: rapid or quick by change risk -> full -> PR. Run stress before releases and
-# after engine-level work.
+# Iteration gate: iterate (or quick by change risk) -> full -> PR. Run stress before releases
+# and after engine-level work. -Suite iterate = the load-bearing four in ~45s.
+#
+# FAIL-FAST (iterate/rapid/quick/full): each scenario is analyzed the moment it finishes and
+# the suite ABORTS on a non-negotiable - wobble (jitP95), hitching (dtP99), a level escaping
+# the cap, back-steps, or no data. No point running eight more scenarios past a clear no-go.
+# Stress and soak never fail fast (breaking things / collecting is their point). -NoFailFast
+# restores run-everything.
 #
 # Protocol (the contract): force a full zoom-out reset from any prior state; the cursor starts
 # every scenario at the SAME position (monitor centre); START tone (880Hz); hands off the
@@ -18,7 +24,8 @@
 # dwm.exe not restarted, no device-lost in the log) verdict every suite - they are the primary
 # stress-suite outcome.
 param(
-  [ValidateSet('rapid','quick','full','stress','soak')] [string]$Suite = 'rapid',
+  [ValidateSet('iterate','rapid','quick','full','stress','soak')] [string]$Suite = 'rapid',
+  [switch]$NoFailFast,                # fail-fast is on for iterate/rapid/quick/full
   [int]$Minutes = 30,                 # soak only
   [switch]$CI,                        # compare vs baselines.json; nonzero exit on regression
   [switch]$UpdateBaseline,
@@ -46,6 +53,15 @@ function S($name, $kind, $borderless, $zoomS, $prog, $progS, $strength = '', $un
      prog = $prog; progS = $progS; strength = $strength; underlay = $underlay }
 }
 $suites = @{
+  # The load-bearing four (~45s): centering+wobble on solid, the harshest compositor load
+  # (heavy acrylic over animated), session-boundary churn, and the cap invariants. The
+  # default gate while iterating.
+  iterate = @(
+    (S 'solid-zigzag'        'solid'    $false 0.55 'zig'   4),
+    (S 'acryl-heavy-video'   'acrylic'  $true  0.65 'pan'   4 'heavy' 'animated'),
+    (S 'rezoom-acryl'        'acrylic'  $true  0    'rezoom' 0 'heavy' 'animated'),
+    (S 'ladder-20x'          'acrylic'  $true  1.20 'pan'   3 'heavy' 'animated')
+  );
   rapid = @(                                   # ~60s: cycle backdrops, zoom in/out, pan+zig
     (S 'solid-zigzag'        'solid'    $false 0.55 'zig' 5),
     (S 'acryl-heavy-pan'     'acrylic'  $true  0.65 'pan' 6 'heavy' 'solid'),
@@ -109,6 +125,20 @@ function Run-Program([string]$prog, [double]$secs) {
 }
 
 # ---- run ------------------------------------------------------------------------------------
+$failFast = (-not $NoFailFast) -and $Suite -notin @('stress','soak')
+$script:abortedOn = $null
+# The non-negotiables: any of these is a hard no-go regardless of baselines. Shared by the
+# fail-fast path and the end-of-suite verdicts.
+function Test-NonNegotiable($a, [double]$cap, [bool]$isStress) {
+  $why = @()
+  if (-not $a -or $a.ticks -lt 10)           { return @('NO-DATA') }
+  if ($a.dtP99 -and $a.dtP99 -gt 25.0)       { $why += "dtP99=$($a.dtP99)ms" }
+  if ($a.maxLevel -gt $cap + 0.05)           { $why += "level ESCAPED cap $cap : $($a.maxLevel)" }
+  if ($a.backSteps -gt 0 -and -not $isStress) { $why += "backSteps=$($a.backSteps)" }
+  if ($a.jitP95 -and $a.jitP95 -gt 25.0 -and -not $isStress) { $why += "jitP95=$($a.jitP95)px" }
+  return $why
+}
+
 $phases = @()      # @{ name; t0; t1 } in QPC ms, indexes into the telemetry
 $ramSamples = [ordered]@{}
 $failedInfra = $null
@@ -167,8 +197,22 @@ try {
         $t1 = Now-Ms
         Reset-Zoom $telemetry                  # closed contract: every scenario ends at 1.0x
         $phName = if ($Suite -eq 'soak') { "$($sc.name)#$pass" } else { $sc.name }
-        $phases += @{ name = $phName; t0 = $t0; t1 = $t1; prog = $sc.prog }
+        $ph = @{ name = $phName; t0 = $t0; t1 = $t1; prog = $sc.prog }
+        $phases += $ph
+        if ($failFast) {
+          # Analyze THIS scenario now; a non-negotiable aborts the suite - clear no-goes
+          # (wobble, hitching, an escaped cap) do not earn eight more scenarios of runtime.
+          $ffA = (Analyze-Telemetry $telemetry @($ph) $hz)[$phName]
+          $ffStress = $sc.prog -in @('overzoom','zoomstorm','slam','flick','rezoom')
+          $ffWhy = @(Test-NonNegotiable $ffA $maxLevel $ffStress)
+          if ($ffWhy.Count -gt 0) {
+            $script:abortedOn = "$phName -> $($ffWhy -join '; ')"
+            Write-Host "FAIL-FAST: $script:abortedOn" -ForegroundColor Red
+            break
+          }
+        }
     }
+    if ($script:abortedOn) { break }
     $pass++
   } while ((Get-Date) -lt $loopUntil)
   } finally {
@@ -209,13 +253,11 @@ foreach ($ph in $phases) {
   $a = $analysis[$ph.name]
   if (-not $a -or $a.ticks -lt 10) { $rows += [pscustomobject]@{ scenario=$ph.name; verdict='NO-DATA' }; $fails++; continue }
   $verdict = 'PASS'; $why = @()
+  # Level pipeline invariants + no-goes live in Test-NonNegotiable (shared with fail-fast).
+  # Programs that legitimately reverse (rezoom/zoomstorm/overzoom-release) skip backSteps/jitter.
   $isStress = $ph.prog -in @('overzoom','zoomstorm','slam','flick','rezoom')
-  if ($a.dtP99 -and $a.dtP99 -gt 25.0)      { $verdict = 'FAIL'; $why += "dtP99=$($a.dtP99)ms" }
-  # Level pipeline invariants: never above maxLevel+epsilon; no backward motion outside
-  # programs that legitimately reverse (rezoom/zoomstorm/overzoom-release).
-  if ($a.maxLevel -gt $maxLevel + 0.05)      { $verdict = 'FAIL'; $why += "level ESCAPED cap $maxLevel : $($a.maxLevel)" }
-  if ($a.backSteps -gt 0 -and -not $isStress) { $verdict = 'FAIL'; $why += "backSteps=$($a.backSteps)" }
-  if ($a.jitP95 -and $a.jitP95 -gt 25.0 -and -not $isStress) { $verdict = 'FAIL'; $why += "jitP95=$($a.jitP95)px" }
+  $nn = @(Test-NonNegotiable $a $maxLevel $isStress)
+  if ($nn.Count -gt 0 -and $nn[0] -ne 'NO-DATA') { $verdict = 'FAIL'; $why += $nn }
   if ($baselines -and $baselines.scenarios.($ph.name)) {
     $b = $baselines.scenarios.($ph.name)
     if ($a.dtP99 -and $b.dtP99 -and $a.dtP99 -gt $b.dtP99 * 1.6 + 2) { $verdict = 'FAIL'; $why += "dtP99 $($a.dtP99) vs base $($b.dtP99)" }
@@ -232,6 +274,10 @@ foreach ($ph in $phases) {
     backSteps = $a.backSteps; maxJump = $a.maxJump
     why = ($why -join '; ')
   }
+}
+if ($script:abortedOn) {
+  $rows += [pscustomobject]@{ scenario = 'ABORTED'; verdict = 'FAIL-FAST'; why = $script:abortedOn }
+  $fails++
 }
 # Survival verdicts (the pen-test outcome proper).
 foreach ($h in $healthBad) {
