@@ -57,6 +57,8 @@ $suites = @{
   # (heavy acrylic over animated), session-boundary churn, and the cap invariants. The
   # default gate while iterating.
   iterate = @(
+    # flash-* FIRST: fail-fast on a later scenario must never skip the optical gate.
+    (S 'flash-acryl-rezoom'  'acrylic'  $true  0    'rezoom' 0 'heavy' 'white'),
     (S 'solid-zigzag'        'solid'    $false 0.55 'zig'   4),
     (S 'acryl-heavy-video'   'acrylic'  $true  0.65 'pan'   4 'heavy' 'animated'),
     (S 'rezoom-acryl'        'acrylic'  $true  0    'rezoom' 0 'heavy' 'animated'),
@@ -93,7 +95,8 @@ $suites = @{
     (S 'animated-zigzag'     'animated' $true  0.60 'zig'   8),
     (S 'ladder-20x'          'acrylic'  $true  1.20 'pan'   6 'heavy' 'solid'),
     (S 'rezoom-acryl'        'acrylic'  $true  0    'rezoom' 0 'heavy' 'solid'),
-    (S 'rezoom-solid'        'solid'    $false 0    'rezoom' 0)
+    (S 'rezoom-solid'        'solid'    $false 0    'rezoom' 0),
+    (S 'flash-acryl-rezoom'  'acrylic'  $true  0    'rezoom' 0 'heavy' 'white')
   );
   # Pen test: the GOAL is to break the magnifier. Health checks are the verdict.
   stress = @(
@@ -125,6 +128,11 @@ function Run-Program([string]$prog, [double]$secs) {
 }
 
 # ---- run ------------------------------------------------------------------------------------
+$script:pythonOk = $false
+try {
+  python -c "import mss, numpy" 2>$null
+  $script:pythonOk = ($LASTEXITCODE -eq 0)
+} catch { $script:pythonOk = $false }
 $failFast = (-not $NoFailFast) -and $Suite -notin @('stress','soak')
 $script:abortedOn = $null
 # The non-negotiables: any of these is a hard no-go regardless of baselines. Shared by the
@@ -191,20 +199,43 @@ try {
         # Deterministic start: the cursor begins every scenario at the monitor centre.
         [TE]::MoveAbs([int]($sw / 2), [int]($sh / 2), $sw, $sh)
         Start-Sleep -Milliseconds 200
+        # Flash watch (field report 2026-08-22: zooming over acrylic flashed the white underlay
+        # through). A python side-process captures the zoom area's per-frame luminance for the
+        # whole scenario and reports spike-and-revert events; any flash FAILS the scenario.
+        # Skipped silently when python is unavailable (rig tooling, like PresentMon in bench).
+        $flashJson = $null; $flashProc = $null
+        if ($sc.name -like 'flash-*' -and $script:pythonOk) {
+          $flashJson = Join-Path $env:TEMP "wind_flash_$stamp.json"
+          Remove-Item $flashJson -ErrorAction SilentlyContinue
+          $flashSecs = [math]::Max(4.0, $sc.zoomS + $sc.progS + 3.0)
+          $flashProc = Start-Process python -WindowStyle Hidden -PassThru -ArgumentList `
+            (Join-Path $PSScriptRoot 'flash_watch.py'), $flashJson,
+            ([int]($sw / 2)), ([int]($sh / 2)), 128, $flashSecs
+          Start-Sleep -Milliseconds 700   # numpy/mss import time before frames flow
+        }
         if ($sc.zoomS -gt 0) { Zoom-In $sc.zoomS }
         $t0 = Now-Ms
         Run-Program $sc.prog $sc.progS
         $t1 = Now-Ms
         Reset-Zoom $telemetry                  # closed contract: every scenario ends at 1.0x
+        $flashes = $null
+        if ($flashProc) {
+          $flashProc | Wait-Process -Timeout 20 -ErrorAction SilentlyContinue
+          if (Test-Path $flashJson) {
+            try { $flashes = (Get-Content $flashJson -Raw | ConvertFrom-Json) } catch {}
+          }
+        }
         $phName = if ($Suite -eq 'soak') { "$($sc.name)#$pass" } else { $sc.name }
-        $ph = @{ name = $phName; t0 = $t0; t1 = $t1; prog = $sc.prog }
+        $ph = @{ name = $phName; t0 = $t0; t1 = $t1; prog = $sc.prog; flash = $flashes }
         $phases += $ph
         if ($failFast) {
           # Analyze THIS scenario now; a non-negotiable aborts the suite - clear no-goes
           # (wobble, hitching, an escaped cap) do not earn eight more scenarios of runtime.
           $ffA = (Analyze-Telemetry $telemetry @($ph) $hz)[$phName]
           $ffStress = $sc.prog -in @('overzoom','zoomstorm','slam','flick','rezoom')
-          $ffWhy = @(Test-NonNegotiable $ffA $maxLevel $ffStress)
+          $ffWhy = @()
+          if ($sc.name -notlike 'flash-*') { $ffWhy = @(Test-NonNegotiable $ffA $maxLevel $ffStress) }
+          if ($flashes -and $flashes.flashes -gt 0) { $ffWhy += "FLASH x$($flashes.flashes) (dL=$($flashes.worst_dl))" }
           if ($ffWhy.Count -gt 0) {
             $script:abortedOn = "$phName -> $($ffWhy -join '; ')"
             Write-Host "FAIL-FAST: $script:abortedOn" -ForegroundColor Red
@@ -256,8 +287,12 @@ foreach ($ph in $phases) {
   # Level pipeline invariants + no-goes live in Test-NonNegotiable (shared with fail-fast).
   # Programs that legitimately reverse (rezoom/zoomstorm/overzoom-release) skip backSteps/jitter.
   $isStress = $ph.prog -in @('overzoom','zoomstorm','slam','flick','rezoom')
-  $nn = @(Test-NonNegotiable $a $maxLevel $isStress)
-  if ($nn.Count -gt 0 -and $nn[0] -ne 'NO-DATA') { $verdict = 'FAIL'; $why += $nn }
+  $isFlashOnly = $ph.name -like 'flash-*'
+  if (-not $isFlashOnly) {
+    $nn = @(Test-NonNegotiable $a $maxLevel $isStress)
+    if ($nn.Count -gt 0 -and $nn[0] -ne 'NO-DATA') { $verdict = 'FAIL'; $why += $nn }
+  }
+  if ($ph.flash -and $ph.flash.flashes -gt 0) { $verdict = 'FAIL'; $why += "FLASH x$($ph.flash.flashes) (dL=$($ph.flash.worst_dl))" }
   if ($baselines -and $baselines.scenarios.($ph.name)) {
     $b = $baselines.scenarios.($ph.name)
     if ($a.dtP99 -and $b.dtP99 -and $a.dtP99 -gt $b.dtP99 * 1.6 + 2) { $verdict = 'FAIL'; $why += "dtP99 $($a.dtP99) vs base $($b.dtP99)" }
