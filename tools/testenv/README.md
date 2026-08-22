@@ -66,6 +66,32 @@ Metric notes:
   see the launch-quiesce note in lib.ps1's Start-Backdrop).
 - RAM delta is across the whole suite; the rezoom scenarios are the leak amplifiers.
 
+## Benchmark mode (bench.ps1): compare magnifiers head to head
+
+    powershell -File tools	estenvench.ps1                       # Wind vs Windows Magnifier
+    powershell -File tools	estenvench.ps1 -Drivers wind,native,external -ExternalSpec zt.json
+
+Drives DIFFERENT magnifiers through the SAME scenarios (solid pan/fast, heavy acrylic zigzag
+over a solid underlay, heavy acrylic pan over a video-like animated underlay, and a response
+probe) and prints a game-benchmark scoreboard per magnifier: avg view fps (offset-update
+rate), 1% low (from the p99 inter-update gap), composition fps, response time med/p95 (input
+impulse -> view reaction), RAM avg/max, CPU avg, wobble p95. Full JSON per run plus one line
+per magnifier appended to `results/catalog.csv` - the comparable history.
+
+Rules and limits:
+- ONE magnifier at a time, enforced per driver (issue #217: two magnification contexts share
+  DWM state and poison each other's numbers). Wind is stopped for native runs and vice versa;
+  the native Magnifier's registry is backed up and restored; Wind is restarted at the end.
+- Measurement rides the DWM fullscreen-transform readback (MagGetFullscreenTransform), which
+  covers Wind's transform engine, the native Magnifier, and fullscreen-mode AT magnifiers.
+  Wind must therefore be running its transform engine for bench runs (desktopTransform=1 -
+  true on this rig). Render-engine sessions are invisible to this channel.
+- The native driver zooms via ONE registry write (which native eases cleanly - the measured-
+  safe channel); Wind zooms closed-loop by holding the side button until the readback reaches
+  the target; external magnifiers press their configured hotkey chord until the level lands.
+- External spec JSON (ZoomText etc.): name, exe, procNames, zoomInVks/zoomOutVks (the chord),
+  startWaitMs. The external program is left running afterwards (it was likely there first).
+
 ## Baselines and CI
 
 `baselines.json` stores per-scenario PASS numbers from this rig (`-UpdateBaseline`). `-CI`
@@ -80,6 +106,7 @@ gate) and `register_nightly.ps1` (scheduled full run on this rig).
 ## Files
 
 - `run.ps1` - orchestrator: suites (incl. stress), scenarios, health checks, verdicts, JSON
+- `bench.ps1` - cross-magnifier benchmark: scoreboard + results/catalog.csv history
 - `lib.ps1` - interop (injection, tones, Wind lifecycle, backdrop mgmt) + telemetry analysis
 - `backdrop.ps1` - one backdrop window per child process
 - `probe_animated.ps1` - standalone zoom-engagement probe (shakedown diagnostic)
