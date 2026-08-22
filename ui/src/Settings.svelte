@@ -124,14 +124,7 @@
       announce(Number(val) === 1 ? 'Advanced settings shown' : 'Advanced settings hidden');
     if (key === 'model')
       announce('Magnifier model set to ' + val + '. Some display options changed.');
-    const next = { ...values, [key]: val };
-    // Disabling the alternate-keybinds toggle clears the alternate bindings (side-button + key) so
-    // any previously bound alt input stops firing (Apply still has to be pressed to persist).
-    if (key === 'altKeybinds' && Number(val) === 0) {
-      next.zoomInVk2 = '0'; next.zoomOutVk2 = '0';
-      next.zoomInButton2 = '0'; next.zoomOutButton2 = '0';
-    }
-    values = next;
+    values = { ...values, [key]: val };
   }
   function commit() {
     for (const k of Object.keys(values)) if (String(values[k]) !== String(saved[k])) setConfig(k, values[k]);

@@ -68,7 +68,7 @@ test('a control is named by its own row label, not just any label', async ({ pag
   // (Post-cleanup roster: the smooth-zoom/multi-monitor toggles, sharpness slider, and the
   // colour input left the UI - no color-type row remains, so that widget type is uncovered.)
   const cases = [
-    ['Alternate keybinds', 'checkbox'],
+    ['High resolution cursor', 'checkbox'],
     ['Max zoom', 'slider'],
     ['Cursor speed', 'slider'],
     ['Frametime logging', 'checkbox'],

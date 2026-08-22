@@ -91,12 +91,21 @@ test('theme toggle writes uiTheme', async ({ page }) => {
 
 test('changes stage until Apply, then setConfig fires', async ({ page }) => {
   await page.goto('/');
-  // Staged via the alternate-keybinds toggle: the smooth-zoom toggle left the UI (always on).
-  await page.getByText('Alternate keybinds', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();
-  expect(await page.evaluate(() => window.__sets.filter(s => s.key === 'altKeybinds').length)).toBe(0);
+  // Staged via the high-resolution-cursor toggle (Cursor section; the alternate-keybinds
+  // gate left the UI 2026-08-22 - both keybind slots are always visible now).
+  await page.getByRole('button', { name: 'Cursor', exact: true }).click();
+  await page.getByText('High resolution cursor (experimental)', { exact: true })
+      .locator('xpath=../..').getByRole('checkbox').click();
+  expect(await page.evaluate(() => window.__sets.filter(s => s.key === 'txSamplingMode').length)).toBe(0);
   await page.getByRole('button', { name: 'Apply' }).click();
   const sets = await page.evaluate(() => window.__sets);
-  expect(sets.some(s => s.key === 'altKeybinds' && s.value === '1')).toBeTruthy();
+  expect(sets.some(s => s.key === 'txSamplingMode' && s.value === '1')).toBeTruthy();
+});
+
+test('both zoom keybind slots are visible without any gate', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByText('Zoom in (second key)', { exact: true })).toBeVisible();
+  await expect(page.getByText('Zoom out (second key)', { exact: true })).toBeVisible();
 });
 
 test('a slot holding both a side-button and a key shows BOTH bindings', async ({ page }) => {
@@ -238,7 +247,8 @@ test('closing with unsaved changes asks before discarding', async ({ page }) => 
   // The title-bar X, not the footer Discard: both a footer button and the dialog are named
   // "Discard", so every button here is located precisely.
   const titleClose = page.locator('button.tbtn.close');
-  await page.getByText('Alternate keybinds', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();   // smooth-zoom toggle left the UI
+  await page.getByRole('button', { name: 'Cursor', exact: true }).click();
+  await page.getByText('High resolution cursor (experimental)', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();
   await titleClose.click();
   await expect(page.getByRole('dialog')).toContainText('Settings not applied');
   // Cancel keeps the window and the staged change.
@@ -342,7 +352,8 @@ test('delete is disabled on the last profile', async ({ page }) => {
 
 test('switching with staged changes raises the unsaved-changes guard', async ({ page }) => {
   await page.goto('/');
-  await page.getByText('Alternate keybinds', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();   // smooth-zoom toggle left the UI
+  await page.getByRole('button', { name: 'Cursor', exact: true }).click();
+  await page.getByText('High resolution cursor (experimental)', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();
   await page.getByRole('button', { name: /Default/ }).click();
   await page.getByRole('menuitemradio', { name: /Gaming/ }).click();
   await expect(page.getByText('Unsaved changes')).toBeVisible();
@@ -363,7 +374,8 @@ test('a failed profile action surfaces a visible error dialog', async ({ page })
 
 test('deleting a NON-active profile with staged changes skips the guard', async ({ page }) => {
   await page.goto('/');
-  await page.getByText('Alternate keybinds', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();   // smooth-zoom toggle left the UI
+  await page.getByRole('button', { name: 'Cursor', exact: true }).click();
+  await page.getByText('High resolution cursor (experimental)', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();
   await page.getByRole('button', { name: /Default/ }).click();
   await page.getByRole('menuitemradio', { name: /Gaming/ }).click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Delete' }).click();          // one-click delete

@@ -8,11 +8,12 @@
 // no desc that restates its label, consequences kept only where they change a decision.
 export const sections = [
   { id:'keybinds', label:'Keybinds', icon:'keys', desc:'Hold to zoom. Each binding takes a mouse side-button or a key. Right-click to clear.', rows: [
+    // Two independent slots per direction, both always visible (the 'Alternate keybinds'
+    // gate was removed 2026-08-22): either slot works alone, both fire the same action.
     { key:'__zoomIn',   type:'keybind', label:'Zoom in',  buttonKey:'zoomInButton',  vkKey:'zoomInVk',  modsKey:'zoomInMods' },
+    { key:'__zoomIn2',  type:'keybind', label:'Zoom in (second key)',  buttonKey:'zoomInButton2',  vkKey:'zoomInVk2',  modsKey:'zoomInMods2' },
     { key:'__zoomOut',  type:'keybind', label:'Zoom out', buttonKey:'zoomOutButton', vkKey:'zoomOutVk', modsKey:'zoomOutMods' },
-    { key:'altKeybinds', type:'toggle', label:'Alternate keybinds', desc:'A second binding for each direction.', def:0 },
-    { key:'__zoomIn2',  type:'keybind', label:'Zoom in (alternate)',  buttonKey:'zoomInButton2',  vkKey:'zoomInVk2',  modsKey:'zoomInMods2',  requires:'altKeybinds' },
-    { key:'__zoomOut2', type:'keybind', label:'Zoom out (alternate)', buttonKey:'zoomOutButton2', vkKey:'zoomOutVk2', modsKey:'zoomOutMods2', requires:'altKeybinds' },
+    { key:'__zoomOut2', type:'keybind', label:'Zoom out (second key)', buttonKey:'zoomOutButton2', vkKey:'zoomOutVk2', modsKey:'zoomOutMods2' },
     // Keyboard-hook suspension (issue #156): trades key-interception for smooth panning, per app.
     { key:'noSwallowApps', type:'applist', label:'Pass zoom keys to these apps',
       desc:'Fixes stuttery panning in some games. The app will also receive the key.',
@@ -28,6 +29,14 @@ export const sections = [
     { key:'smoothZoomRamp',  type:'slider', label:'Ease-in duration', desc:'Time until full speed.', min:0.1, max:3, step:0.1, def:0.6, advanced:true, unit:'seconds' },
   ]},
   { id:'cursor', label:'Cursor', icon:'cursor', desc:'How the pointer behaves while zoomed.', rows: [
+    // High resolution cursor (issue #227): DWM's edge-preserving magnification filter - the
+    // whole quality gap to native Magnifier (sharp cursor AND image at every zoom). Known
+    // trade, field-settled 2026-08-22: slight shimmer while the zoom level is CHANGING (the
+    // filter's own re-render; not fixable externally, WM shows it too under its notchy ease).
+    // Ini key stays txSamplingMode (0 nearest default / 1 smooth). Hot; applies next zoom.
+    { key:'txSamplingMode', type:'toggle', label:'High resolution cursor (experimental)',
+      desc:'Sharp cursor and image at high zoom, like Windows Magnifier. May shimmer slightly while zooming in or out.',
+      def:0 },
     { key:'__hideCursor', type:'keybind', label:'Hide cursor', desc:'Toggles the cursor without leaving zoom.', vkKey:'hideCursorVk', modsKey:'hideCursorMods' },
     { key:'__cursorLock', type:'keybind', label:'Inspect mode', desc:'Freezes the cursor so tooltips stay open, while a crosshair pans the view.', vkKey:'cursorLockVk' },
     // Zoom lock detection (issue #221): games like DOOM pin the mouse to the screen centre,
@@ -49,13 +58,6 @@ export const sections = [
       options:['hybrid','render','transform','magnify'],
       optionLabels:{ hybrid:'Auto', render:'Render', transform:'Transform', magnify:'Windows Magnifier' },
       def:'hybrid' },
-    // Smooth magnification filter (issue #227): the either/or the field investigation settled
-    // on. 1 = DWM's edge-preserving filter (sharp image + cursor, WM parity; slight shimmer
-    // while the zoom level is CHANGING - the filter's own re-render, not fixable externally).
-    // 0 = nearest (default): blocky but shimmer-free ramps. Hot; applies on the next zoom.
-    { key:'txSamplingMode', type:'toggle', label:'Smooth magnification (experimental)',
-      desc:'Sharper image and cursor while zoomed, like Windows Magnifier. May shimmer slightly while the zoom level is changing.',
-      def:0 },
     // Not an ini setting: reflects HKLM\...\Dwm\OverlayTestMode (issue #148 TDR trigger; costs
     // transform smoothness in-game). Advanced: system-wide display setting, needs UAC.
     { key:'__mpo', type:'mpo', label:'Disable MPO',
