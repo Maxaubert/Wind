@@ -165,6 +165,8 @@ Config ParseConfig(const std::string& text) {
             else if (key == "ixDecimate")         c.ixDecimate = std::stoi(val);
             else if (key == "mpoBuster")          c.mpoBuster = std::stoi(val);
             else if (key == "txSamplingMode")     c.txSamplingMode = std::stoi(val);
+            else if (key == "txWobbleCage")       c.txWobbleCage = std::stoi(val);
+            else if (key == "txWobbleCageSize")   c.txWobbleCageSize = std::stoi(val);
             else if (key == "txKeepAliveMaxLevel")c.txKeepAliveMaxLevel = std::stoi(val);
             else if (key == "txWriteHz")          c.txWriteHz = std::stoi(val);
             else if (key == "txFreeCursor")       c.txFreeCursor = std::stoi(val);

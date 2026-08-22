@@ -1,4 +1,5 @@
 #pragma once
+#include <windows.h>   // HWND: the hook repositions the cursor sprite itself (issue #229)
 // Inline transform writes from the mouse hook (issue #206, stage 2).
 //
 // Measured: cursor-move -> transform-write latency is 4.36ms median for Wind against 0.58ms for
@@ -27,6 +28,16 @@ struct HookTransformState {
     double maxSrcX = -1.0, maxSrcY = -1.0;   // MPO pan wall (#148/#191), <0 = unbounded
     bool   fastPan = true;     // private channel; the PUBLIC one is 3-9ms and must never run here
     MagHost* host = nullptr;
+    // COHERENT SPRITE (issue #229). The cursor sprite is a layered window placed in DESKTOP
+    // space and magnified by DWM with the content, so its SCREEN position depends on whichever
+    // transform is live when DWM composites. Placed once per tick while the hook rewrote the
+    // transform in between, it landed off-centre by (cursor drift * level) - measured 27.4px,
+    // seen in the field as a second cursor "lagging behind" the centred one. So whoever moves
+    // the view must move the sprite in the same breath: the hook carries the sprite window and
+    // its hotspot, and repositions it from the same event position it just wrote the transform
+    // from. Nothing to synchronise afterwards - the two can no longer disagree.
+    HWND   spriteHwnd = nullptr;
+    int    spriteHotX = 0, spriteHotY = 0;
 };
 
 // Tick thread: publish the current state. Cheap; takes a brief writer lock.
@@ -49,5 +60,33 @@ bool RequestHookTransformWrite();
 
 // Diagnostics: how many writes the hook path has issued, and how many the tick path issued.
 void HookTransformStats(unsigned long long& hookWrites, unsigned long long& tickWrites);
+
+// FRAME GATE (issue #229). The retired per-event write path was fast (measured 0.77ms response
+// vs 5.30ms tick-paced) but wrote 4-5 times per composited frame, so DWM latched whichever
+// write landed first while drawing the pointer from its own later sample - content and cursor
+// from different instants, i.e. the swim. The documented condition for reviving it is at most
+// ONE write per composited frame. The tick loop is DwmFlush-paced while zoomed, so it marks
+// each composite here; the hook writes the FIRST move of a frame (full event latency) and
+// coalesces the rest (the tick's own write still lands them, so no destination is lost).
+void MarkComposite();               // called by the tick loop right after DwmFlush returns
+void SetHookFrameGate(bool on);     // txHookWrite == 2
+
+// CONTENT-VS-CURSOR LAG (issue #229). The transform is anchored so T(cursor) == cursor, so if
+// it was written for cursor c_w while the pointer has since reached c_now, the content is
+// displaced from the pointer by |c_now - c_w| * (level - 1) screen px. That is the whole
+// wobble question stated numerically: a lag that stays CONSTANT is invisible (the view simply
+// trails by a fixed amount), while a lag that jumps frame to frame is what the eye reads as
+// the cursor swimming against the content. Both write paths record the cursor they used here;
+// the tick loop samples it at the composite boundary, which is the instant DWM pairs the
+// transform with the pointer it draws. Screen capture cannot see any of this - it returns the
+// unmagnified desktop surface (measured 2026-08-22), so this is the only way to measure it.
+void NoteWriteCursor(double virtX, double virtY);
+void GetWriteCursor(double& virtX, double& virtY);
+
+// What the HOOK path last pushed to DWM. The transform model's own cache only records tick
+// writes, so any measurement built on it cannot see hook writes at all - which is exactly why
+// the sprite-vs-centre check kept reading clean on a build the eye called wobbly. Returns
+// false when the hook has written nothing this session (level 0).
+bool GetHookLiveTransform(double& level, int& txX, int& txY);
 
 }  // namespace wind

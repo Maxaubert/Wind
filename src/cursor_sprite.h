@@ -14,6 +14,11 @@ public:
     ShapeStatus refreshShape();
     void moveTo(int desktopX, int desktopY);
     void reapplyPosition();   // re-place after a hotspot-changing re-render (issue #229)
+   // For the coherent-sprite path (issue #229): the hook repositions this window itself, from
+    // the same event position it writes the transform with.
+    HWND hwnd() const { return hwnd_; }
+    int  hotX() const { return hotX_; }
+    int  hotY() const { return hotY_; }
     void show();
     void hide();
     // Re-assert HWND_TOPMOST when a window has been displaced above us, throttled with a 1s backstop.

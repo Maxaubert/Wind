@@ -149,6 +149,20 @@ struct Config {
     // INTERACTION: the tx keep-alive (txKeepAliveMaxLevel > 0, retired default 0) writes a
     // value 1px off-true 144x/s; nearest masked that as sub-block noise, smoothing renders it
     // as visible shaking. Keep the keep-alive off while smoothing is on.
+    // Wobble cage (issue #229, hot): a visible wobble detector - four ~10px bars boxing the
+    // cursor; the bar the sprite crosses flashes red. Diagnostic, ships 0. The collision test
+    // is numeric (see wobble_cage.h: everything we can draw is magnified, so a screen-fixed
+    // reference frame cannot exist while the transform is live). The VALUE is the trigger
+    // threshold in screen px: 1 = the default 3px (ten times a good build's 0.6px noise floor
+    // and well under a visible displacement), or set it higher to only catch gross wobbles.
+    // Deliberately far more sensitive than a literal collision with the drawn bars: a real
+    // wobble measures ~27px while the bars sit a whole cursor-width out, so waiting for actual
+    // contact would report nothing.
+    int txWobbleCage = 0;
+    // Wobble-cage box half-extent in DESKTOP px (hot). The bars magnify with the cursor, so
+    // this stays constant in desktop space and the frame keeps its proportion at every zoom.
+    // Default 18 hugs a standard cursor; raise it if your cursor scheme is larger.
+    int txWobbleCageSize = 18;
     int txSamplingMode = 0;
     // MPO buster (issue #191, hot): 1 (default) = during transform GAME sessions on MPO-ENABLED
     // machines, show a fullscreen alpha-1 click-through ghost that demotes the game off its
@@ -168,40 +182,6 @@ struct Config {
     // Back to 8 pending the free-cursor work: with the weld in place the 1px jitter is not the
     // dominant artefact, and changing two things at once made the A/B unreadable.
     int txKeepAliveMaxLevel = 8;
-    // Transform write cadence (issue #204). Measured: native Magnifier writes ~59/s while ramping
-    // and ~49/s while panning; we wrote 120/s and 92/s because we write per tick on a 144Hz panel.
-    // Every write makes DWM redo work proportional to the level, and our timing was MORE regular
-    // than native's (p95 interval 7.56ms vs 31.44ms), so the extra writes were not buying
-    // smoothness - they were saturating the compositor. 0 = per-tick (the old behaviour).
-    // SHIPS 0 (per-tick). Field verdict 2026-08-17: capping the write rate made things WORSE -
-    // "definitely running in like 60 fps, feels very choppy, the cursor is super jumpy, not
-    // centering well when panning". Root cause of that regression: Wind WELDS the cursor with
-    // SetCursorPos every tick, so throttling the VIEW while the pointer keeps moving at full rate
-    // desynchronises the two. Per-tick writing is load-bearing for the welded design - which is
-    // precisely why native Magnifier can afford ~50Hz and we cannot: it does not weld at all.
-    // Kept as an A/B knob because the MEASUREMENT was sound even though the conclusion was not.
-    // Free cursor (issue #205, hot): drive the transform's view straight from the real cursor
-    // position the way native Magnifier does, instead of integrating smoothed deltas and welding
-    // the pointer to the lens centre with SetCursorPos. Native's geometry was measured, not
-    // assumed - see the comment at the use site in main.cpp. 0 = the welded delta model.
-    // cursorSensitivity / cursorSmoothing have no effect while this is on, by construction.
-    // Write the transform from inside the mouse hook (issue #206, hot). SHIPS 0 - PARKED.
-    //
-    // It does what it claimed on the metric: cursor-to-view latency 4.36ms median -> 0.37ms, p95
-    // 0.83ms, better than native Magnifier's 0.58ms, with the tick verified out of the way
-    // (hook 665 writes/s, tick 0/s). And the field verdict was still "bad, the cursor being the
-    // main visible issue".
-    //
-    // Best explanation: the hook writes per mouse EVENT, so at 434-685/s against a 144Hz
-    // compositor the view position was being rewritten 4-5 times per displayed frame. Whichever
-    // write happened to land before DWM sampled decided that frame, while the cursor is drawn by
-    // DWM from its own sample - so content and cursor came from different instants and the cursor
-    // swam against the content. Same family as the wobble #205 fixed: two things on different
-    // clocks. Native's ~49 writes/s sits BELOW refresh, so every frame gets one settled position.
-    //
-    // The lesson worth keeping: time-to-write is not the metric that matters. Frame coherence is.
-    // Do not re-enable this without a mechanism that bounds writes to at most one per composited
-    // frame AND keeps content and cursor sampled at the same instant.
     int txHookWrite = 0;
     int txFreeCursor = 1;
     int txWriteHz = 0;

@@ -8,8 +8,14 @@
 #   powershell -File tools\testenv\run.ps1 -Suite full -CI       # exit 1 on regression vs baselines
 #   powershell -File tools\testenv\run.ps1 -Suite full -UpdateBaseline
 #
-# Iteration gate: rapid or quick by change risk -> full -> PR. Run stress before releases and
-# after engine-level work.
+# Iteration gate: iterate (or quick by change risk) -> full -> PR. Run stress before releases
+# and after engine-level work. -Suite iterate = the load-bearing four in ~45s.
+#
+# FAIL-FAST (iterate/rapid/quick/full): each scenario is analyzed the moment it finishes and
+# the suite ABORTS on a non-negotiable - wobble (jitP95), hitching (dtP99), a level escaping
+# the cap, back-steps, or no data. No point running eight more scenarios past a clear no-go.
+# Stress and soak never fail fast (breaking things / collecting is their point). -NoFailFast
+# restores run-everything.
 #
 # Protocol (the contract): force a full zoom-out reset from any prior state; the cursor starts
 # every scenario at the SAME position (monitor centre); START tone (880Hz); hands off the
@@ -18,7 +24,8 @@
 # dwm.exe not restarted, no device-lost in the log) verdict every suite - they are the primary
 # stress-suite outcome.
 param(
-  [ValidateSet('rapid','quick','full','stress','soak')] [string]$Suite = 'rapid',
+  [ValidateSet('iterate','wobble','rapid','quick','full','stress','soak')] [string]$Suite = 'rapid',
+  [switch]$NoFailFast,                # fail-fast is on for iterate/rapid/quick/full
   [int]$Minutes = 30,                 # soak only
   [switch]$CI,                        # compare vs baselines.json; nonzero exit on regression
   [switch]$UpdateBaseline,
@@ -46,6 +53,15 @@ function S($name, $kind, $borderless, $zoomS, $prog, $progS, $strength = '', $un
      prog = $prog; progS = $progS; strength = $strength; underlay = $underlay }
 }
 $suites = @{
+  # The load-bearing four (~45s): centering+wobble on solid, the harshest compositor load
+  # (heavy acrylic over animated), session-boundary churn, and the cap invariants. The
+  # default gate while iterating.
+  iterate = @(
+    (S 'solid-zigzag'        'solid'    $false 0.55 'zig'   4),
+    (S 'acryl-heavy-video'   'acrylic'  $true  0.65 'pan'   4 'heavy' 'animated'),
+    (S 'rezoom-acryl'        'acrylic'  $true  0    'rezoom' 0 'heavy' 'animated'),
+    (S 'ladder-20x'          'acrylic'  $true  1.20 'pan'   3 'heavy' 'animated')
+  );
   rapid = @(                                   # ~60s: cycle backdrops, zoom in/out, pan+zig
     (S 'solid-zigzag'        'solid'    $false 0.55 'zig' 5),
     (S 'acryl-heavy-pan'     'acrylic'  $true  0.65 'pan' 6 'heavy' 'solid'),
@@ -79,6 +95,17 @@ $suites = @{
     (S 'rezoom-acryl'        'acrylic'  $true  0    'rezoom' 0 'heavy' 'solid'),
     (S 'rezoom-solid'        'solid'    $false 0    'rezoom' 0)
   );
+  # THE WOBBLE TEST (issue #229, ~12s): zoom in ONCE, then one clean stroke right/left/up/down
+  # with a dead stop between each, then erratic side-to-side. No zoom changes at all, so every
+  # sample is steady-state and the sprite-vs-centre geometry is uncontaminated by ramps - that
+  # contamination is what made the same measurement read p95 1200px on a build that is fine.
+  # Noise backdrop: aperiodic texture, the only material a correlation-style check can use.
+  wobble = @(
+    (S 'wobble-pan'          'noise'    $false 0.42 'strokes' 0),
+    # The clamped case: the view pinned against an edge, where the cursor must cross the screen
+    # itself. Field-reported as the worst wobble and invisible to every unclamped scenario.
+    (S 'wobble-clamped'      'noise'    $false 0.42 'clamp'   0)
+  );
   # Pen test: the GOAL is to break the magnifier. Health checks are the verdict.
   stress = @(
     (S 'overzoom-acryl'      'acrylic'  $true  0    'overzoom'  6 'heavy' 'solid'),
@@ -101,6 +128,8 @@ function Run-Program([string]$prog, [double]$secs) {
     'flick'    { [TE]::Flick($secs) }                     # burst flicks + pauses
     'zig'      { [TE]::Zig($secs, 8, 2, 2, 1200, [int]($sh * 0.12), [int]($sh * 0.88)) }
     'drift'    { [TE]::Drift($secs, 12) }
+    'strokes'  { [TE]::Strokes() }                        # the wobble test (issue #229)
+    'clamp'    { [TE]::ClampSweep($sw, $sh) }             # clamped-view sweep (issue #229)
     'hold'     { Start-Sleep -Milliseconds ([int]($secs * 1000)) }   # dead-stop: wobble-at-rest
     'rezoom'   { for ($i = 0; $i -lt 5; $i++) { Zoom-In 0.6; Start-Sleep -Milliseconds 350; Zoom-Out 1.2 } }
     'overzoom' { Invoke-Overzoom $secs }                  # hold past maxLevel + pan while held
@@ -109,10 +138,67 @@ function Run-Program([string]$prog, [double]$secs) {
 }
 
 # ---- run ------------------------------------------------------------------------------------
+$failFast = (-not $NoFailFast) -and $Suite -notin @('stress','soak')
+$script:abortedOn = $null
+# The non-negotiables: any of these is a hard no-go regardless of baselines. Shared by the
+# fail-fast path and the end-of-suite verdicts.
+function Test-NonNegotiable($a, [double]$cap, [bool]$isStress) {
+  $why = @()
+  if (-not $a -or $a.ticks -lt 10)           { return @('NO-DATA') }
+  if ($a.dtP99 -and $a.dtP99 -gt 25.0)       { $why += "dtP99=$($a.dtP99)ms" }
+  # HITCHING, calibrated against what this rig actually produces rather than a round number.
+  # A healthy transform scenario runs dtP99 8.5-9.3ms with 0-4 hitches; the 25ms ceiling above
+  # was loose enough to pass a build that visibly stutters (late-sampling trial: dtP99 13.6ms,
+  # 43 hitches in 1240 ticks - reported in the field as hitching, missed by every gate).
+  # Rate rather than count, so a long scenario is not penalised for its length.
+  if ($a.dtP99 -and $a.dtP99 -gt 12.0 -and -not $isStress) { $why += "dtP99=$($a.dtP99)ms (hitching)" }
+  if ($a.hitches -and $a.ticks -and -not $isStress) {
+    $rate = 1000.0 * $a.hitches / $a.ticks
+    if ($rate -gt 12.0) { $why += ("hitchRate={0:N1}/1000 ticks" -f $rate) }
+  }
+  if ($a.maxLevel -gt $cap + 0.05)           { $why += "level ESCAPED cap $cap : $($a.maxLevel)" }
+  if ($a.backSteps -gt 0 -and -not $isStress) { $why += "backSteps=$($a.backSteps)" }
+  if ($a.jitP95 -and $a.jitP95 -gt 25.0 -and -not $isStress) { $why += "jitP95=$($a.jitP95)px" }
+  # SWIM: the view rewritten more than once per composited frame (lib.ps1). Screen px of
+  # possible cursor-vs-content disagreement; a tick-paced build measures exactly 0.
+  if ($a.swimP95 -and $a.swimP95 -gt 2.0) { $why += "swimP95=$($a.swimP95)px (writes/frame>1)" }
+  # THE WOBBLE MEASUREMENT (issue #229). The view is centred on the cursor, so DWM must
+  # magnify the sprite - placed at the cursor's desktop point - back onto the screen centre.
+  # Any frame where it lands elsewhere is a cursor drawn where it does not belong, which is
+  # what the field saw as "two cursors, one perfectly centred and one lagging behind".
+  # Labelled pair on the dedicated wobble suite: shipped build 0.6px max, every frame;
+  # hook-write build 27.4px max while also reading 0.6px at p95 - i.e. it flickers between
+  # correct and displaced. 3px is the threshold: ten times the good build's noise floor and
+  # far below the smallest visible displacement.
+  # Cheap proxies were tried first and all read ZERO on wobbly builds: writes-per-frame,
+  # optical correlation (impossible here - captures of a magnified view come back
+  # byte-identical), and composite-boundary lag. This one measures the artifact itself.
+  if ($a.sprOffMax -and $a.sprOffMax -gt 3.0) {
+    $why += "sprite off-centre max=$($a.sprOffMax)px (two-cursor wobble)"
+  }
+  # SPRITE WINDOW LAG: the window manager had the sprite somewhere other than where Wind asked
+  # at composite time - DWM magnified a stale sprite position while the view had moved on.
+  # Independent of the off-centre check above (that one reads a single tick's own values, which
+  # are coherent by construction); this one catches a placement that has not landed.
+  if ($a.sprLagMax -and $a.sprLagMax -gt 3.0) {
+    $why += "sprite window lag max=$($a.sprLagMax)px (stale placement at composite)"
+  }
+  return $why
+}
+
 $phases = @()      # @{ name; t0; t1 } in QPC ms, indexes into the telemetry
 $ramSamples = [ordered]@{}
 $failedInfra = $null
 
+# One magnifier at a time (issue #217): a second magnifier owns the system input-transform
+# slot and unmoors Wind's cursor, so any run alongside it measures the collision. Refuse early.
+$foreign = Get-ForeignMagnifiers
+if ($foreign.Count -gt 0) {
+  Write-Host "ABORT: another magnifier is running ($($foreign -join ', ')) - close it first." -ForegroundColor Red
+  Write-Host 'Issue #217: it republishes the system input transform and unmoors the cursor; every' -ForegroundColor Red
+  Write-Host 'cursor metric taken alongside it is invalid.' -ForegroundColor Red
+  exit 3
+}
 Write-Host "Wind proving ground - suite '$Suite' (telemetry: $telemetry)"
 Write-Host 'Restarting Wind with telemetry...'
 Stop-Wind
@@ -166,14 +252,42 @@ try {
         Run-Program $sc.prog $sc.progS
         $t1 = Now-Ms
         Reset-Zoom $telemetry                  # closed contract: every scenario ends at 1.0x
+        # One magnifier at a time (issue #217), checked per scenario as well as at start: one
+        # that appears MID-run owns the input-transform slot from that moment and every later
+        # cursor number describes the collision. Polling the process list directly - Wind's own
+        # foreign-writer log line only appears when its stomp check happens to catch a publish,
+        # which a short overlap can miss entirely (verified 2026-08-22).
+        $midForeign = Get-ForeignMagnifiers
+        if ($midForeign.Count -gt 0) {
+          $script:abortedOn = "ANOTHER MAGNIFIER started mid-suite ($($midForeign -join ', ')) - results INVALID (issue #217)"
+          Write-Host "ABORT: $script:abortedOn" -ForegroundColor Red
+          break
+        }
         $phName = if ($Suite -eq 'soak') { "$($sc.name)#$pass" } else { $sc.name }
-        $phases += @{ name = $phName; t0 = $t0; t1 = $t1; prog = $sc.prog }
+        $ph = @{ name = $phName; t0 = $t0; t1 = $t1; prog = $sc.prog }
+        $phases += $ph
+        if ($failFast) {
+          # Analyze THIS scenario now; a non-negotiable aborts the suite - clear no-goes
+          # (wobble, hitching, an escaped cap) do not earn eight more scenarios of runtime.
+          $ffA = (Analyze-Telemetry $telemetry @($ph) $hz)[$phName]
+          $ffStress = $sc.prog -in @('overzoom','zoomstorm','slam','flick','rezoom')
+          $ffWhy = @(Test-NonNegotiable $ffA $maxLevel $ffStress)
+          if ($ffWhy.Count -gt 0) {
+            $script:abortedOn = "$phName -> $($ffWhy -join '; ')"
+            Write-Host "FAIL-FAST: $script:abortedOn" -ForegroundColor Red
+            break
+          }
+        }
     }
+    if ($script:abortedOn) { break }
     $pass++
   } while ((Get-Date) -lt $loopUntil)
   } finally {
     Stop-Backdrop $bp
     if ($ul) { Stop-Backdrop $ul }
+    # Belt and braces on EVERY exit path (abort included): nothing this environment opened may
+    # outlive the run, or it becomes the next run's uninvited test material.
+    Stop-AllBackdrops
   }
 
   $ramSamples['end'] = Get-WindWorkingSetMB
@@ -209,13 +323,11 @@ foreach ($ph in $phases) {
   $a = $analysis[$ph.name]
   if (-not $a -or $a.ticks -lt 10) { $rows += [pscustomobject]@{ scenario=$ph.name; verdict='NO-DATA' }; $fails++; continue }
   $verdict = 'PASS'; $why = @()
+  # Level pipeline invariants + no-goes live in Test-NonNegotiable (shared with fail-fast).
+  # Programs that legitimately reverse (rezoom/zoomstorm/overzoom-release) skip backSteps/jitter.
   $isStress = $ph.prog -in @('overzoom','zoomstorm','slam','flick','rezoom')
-  if ($a.dtP99 -and $a.dtP99 -gt 25.0)      { $verdict = 'FAIL'; $why += "dtP99=$($a.dtP99)ms" }
-  # Level pipeline invariants: never above maxLevel+epsilon; no backward motion outside
-  # programs that legitimately reverse (rezoom/zoomstorm/overzoom-release).
-  if ($a.maxLevel -gt $maxLevel + 0.05)      { $verdict = 'FAIL'; $why += "level ESCAPED cap $maxLevel : $($a.maxLevel)" }
-  if ($a.backSteps -gt 0 -and -not $isStress) { $verdict = 'FAIL'; $why += "backSteps=$($a.backSteps)" }
-  if ($a.jitP95 -and $a.jitP95 -gt 25.0 -and -not $isStress) { $verdict = 'FAIL'; $why += "jitP95=$($a.jitP95)px" }
+  $nn = @(Test-NonNegotiable $a $maxLevel $isStress)
+  if ($nn.Count -gt 0 -and $nn[0] -ne 'NO-DATA') { $verdict = 'FAIL'; $why += $nn }
   if ($baselines -and $baselines.scenarios.($ph.name)) {
     $b = $baselines.scenarios.($ph.name)
     if ($a.dtP99 -and $b.dtP99 -and $a.dtP99 -gt $b.dtP99 * 1.6 + 2) { $verdict = 'FAIL'; $why += "dtP99 $($a.dtP99) vs base $($b.dtP99)" }
@@ -228,10 +340,20 @@ foreach ($ph in $phases) {
     ticks = $a.ticks; maxLevel = $a.maxLevel
     dtP95 = $a.dtP95; dtP99 = $a.dtP99; hitches = $a.hitches
     devMed = $a.devMed; devP95 = $a.devP95; jitP95 = $a.jitP95
+    swimP95 = $a.swimP95; swimPct = $a.swimPct
+    lagP95 = $a.lagP95; lagJumpP95 = $a.lagJumpP95; lagJumpMax = $a.lagJumpMax
+    sprOffMed = $a.sprOffMed; sprOffP95 = $a.sprOffP95; sprOffMax = $a.sprOffMax
+    sprLagP95 = $a.sprLagP95; sprLagMax = $a.sprLagMax; sprLagPct = $a.sprLagPct
+    clampLagP95 = $a.clampLagP95; clampLagMax = $a.clampLagMax
+    hookWrites = $a.hookWrites
     weldedPct = $a.weldedPct
     backSteps = $a.backSteps; maxJump = $a.maxJump
     why = ($why -join '; ')
   }
+}
+if ($script:abortedOn) {
+  $rows += [pscustomobject]@{ scenario = 'ABORTED'; verdict = 'FAIL-FAST'; why = $script:abortedOn }
+  $fails++
 }
 # Survival verdicts (the pen-test outcome proper).
 foreach ($h in $healthBad) {
@@ -240,7 +362,8 @@ foreach ($h in $healthBad) {
 }
 if ($ramLeak -gt 60) { $fails++; Write-Host "RAM LEAK: +${ramLeak}MB over the suite" -ForegroundColor Red }
 
-$rows | Format-Table -AutoSize | Out-String | Write-Host
+$rows | Format-Table -AutoSize -Property scenario, verdict, engine, ticks, maxLevel, dtP95, dtP99,
+  hitches, devMed, devP95, jitP95, sprOffMax, sprLagMax, clampLagP95, clampLagMax, why | Out-String | Write-Host
 Write-Host ("RAM: start {0}MB end {1}MB (delta {2}MB)" -f $ramSamples['start'], $ramSamples['end'], $ramLeak)
 foreach ($i in $healthInfo) { Write-Host "health info: $i" -ForegroundColor Yellow }
 if ($healthBad.Count -eq 0) { Write-Host 'Health: alive, dwm intact, no stranded clip/cursor, no device-lost.' -ForegroundColor Green }

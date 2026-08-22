@@ -10,13 +10,16 @@
 #   acrylLight  DWM acrylic, light tint, grid    (cheap compositor geometry)
 #   acrylHeavy  DWM acrylic, dark heavy tint, grid + cards (the Prism-class repro, #197/#217)
 #   animated    solid grid that SCROLLS slowly   (game-like motion under the lens)
+#   noise       deterministic APERIODIC texture   (the optical wobble detector's material:
+#               phase correlation locks onto the zero-shift peak on a periodic grid, so
+#               cursor-vs-content measurement needs texture that repeats nowhere)
 #
 # -Borderless: no caption -> a fullscreen cover, so hybrid picks the TRANSFORM engine.
 # default (captioned, maximized): desktop-class -> hybrid picks the RENDER engine.
 # The grid is a visual aid for the human observer (flicker/stutter is easy to SEE against it);
 # the harness itself measures via telemetry, not pixels.
 param(
-  [ValidateSet('solid','white','acrylic','acrylLight','acrylHeavy','animated')] [string]$Kind = 'solid',
+  [ValidateSet('solid','white','acrylic','acrylLight','acrylHeavy','animated','noise')] [string]$Kind = 'solid',
   # Acrylic strength ladder (issue #225 round 2): tint alpha over the blur. 'glass' is almost
   # pure blur (the "almost completely acrylic" case), 'heavy' the dense Prism-class tint.
   [ValidateSet('glass','light','mid','heavy')] [string]$Strength = 'heavy',
@@ -57,7 +60,8 @@ if ($Borderless) { $f.FormBorderStyle = 'None' }
 $f.WindowState = 'Maximized'
 
 $acrylic = $Kind -eq 'acrylic'
-$grid    = $Kind -ne 'white'
+$noise   = $Kind -eq 'noise'
+$grid    = $Kind -ne 'white' -and -not $noise
 $script:offset = 0
 
 if ($acrylic) {
@@ -71,6 +75,25 @@ if ($acrylic) {
 # between the lines; opaque kinds paint straight onto the form.
 $paint = {
   param($s, $e)
+  if ($noise) {
+    # Deterministic aperiodic texture: a fixed-seed scatter of blobs at several scales. Fixed
+    # seed = the same picture every run (reproducibility); several scales = a correlation peak
+    # that stays sharp whether the view is magnified 2x or 20x; aperiodic = exactly one peak.
+    $g = $e.Graphics
+    $g.Clear([Drawing.Color]::FromArgb(250, 250, 250))
+    $rand = New-Object Random 20260822
+    $w = $s.ClientSize.Width; $h = $s.ClientSize.Height
+    foreach ($size in @(46, 22, 9, 4)) {
+      $count = [int](($w * $h) / ($size * $size * 26))
+      for ($i = 0; $i -lt $count; $i++) {
+        $v = $rand.Next(20, 210)
+        $br = New-Object Drawing.SolidBrush ([Drawing.Color]::FromArgb($v, $v, $v))
+        $g.FillEllipse($br, $rand.Next(0, $w), $rand.Next(0, $h), $size, $size)
+        $br.Dispose()
+      }
+    }
+    return
+  }
   if (-not $grid) { return }
   $g = $e.Graphics
   $light = $acrylic

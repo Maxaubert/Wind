@@ -15,6 +15,8 @@
 #include "profiles_io.h"
 #include "drag_follow.h"
 #include "engine_pick.h"
+#include <thread>
+#include <atomic>
 #include "hook_transform.h"   // inline transform writes from the mouse hook (issue #206)
 #include "mag_thread.h"
 #include "mpo_boot.h"
@@ -269,6 +271,13 @@ struct TickState {
     double inspectPanRemY = 0.0;
     bool   inspectGame = false;         // game-inspect (issue #144): foreground stolen from a mouselook
                                         //   game so its raw-input camera stops receiving the mouse
+    // Content-vs-cursor lag at the last composite boundary, screen px (issue #229). Sampled
+    // in the pacing block right after DwmFlush - the instant DWM pairs the transform it holds
+    // with the pointer it draws - and reported per tick in the telemetry.
+    double lagPx = 0.0;
+    double spriteLagPx = 0.0;   // sprite window position vs requested, at composite (#229)
+    double clampLagPx = 0.0;    // cursor-vs-sprite drift on a CLAMPED axis (#229)
+    long long lastCompositeQpc = 0;   // when DwmFlush last returned (late sprite refresh)
     bool   inspectStealPending = false; // steal deferred past the reveal logic (it must read the true fg)
     HWND   inspectPrevFg = nullptr;     // the game window foreground is handed back to on exit
     int    clickPauseTicks = 0;     // ticks to skip transform writes around an Inspect click's
@@ -1200,8 +1209,15 @@ static void RunTick(TickState& t) {
                                 dynamic_cast<TransformModel*>(t.model) != nullptr;
         if (freeCursor) {
             POINT cp;
-            if (GetCursorPos(&cp))
+            if (GetCursorPos(&cp)) {
                 t.mapper.reset(double(cp.x - t.mon.x), double(cp.y - t.mon.y));
+                // The lag metric's anchor for the TICK path (issue #229): this is the pointer
+                // sample this frame's geometry is derived from, so it is the honest counterpart
+                // to the hook path's event position. Recorded here rather than in the model,
+                // where only the mapper's click point is available - measuring that instead
+                // reported hundreds of px of phantom lag on a build the eye calls clean.
+                wind::NoteWriteCursor((double)cp.x, (double)cp.y);
+            }
         }
         MapResult r = t.mapper.update(freeCursor ? 0 : dx, freeCursor ? 0 : dy, lvl);
         // Dead-zone probe (probeClicks=1, diagnostic): the field annotates hover dead zones by
@@ -1447,6 +1463,12 @@ static void RunTick(TickState& t) {
             hs.maxSrcY = wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0;
             hs.fastPan = t.cfg.fastPan != 0;
             hs.host = tmWall->magHost();
+            // The hook moves the sprite together with the transform (issue #229): a sprite
+            // placed by the tick while the hook rewrites the view lands off-centre by the
+            // cursor drift times the zoom - the second, lagging cursor.
+            hs.spriteHwnd = tmWall->spriteHwnd();
+            hs.spriteHotX = tmWall->spriteHotX();
+            hs.spriteHotY = tmWall->spriteHotY();
             wind::PublishHookTransform(hs);
         } else {
             wind::DisarmHookTransform();
@@ -1808,6 +1830,27 @@ static void RunTick(TickState& t) {
         if (tmT) {
             s.wLevel = tmT->writtenLevel();
             s.wTxX = tmT->writtenTxX(); s.wTxY = tmT->writtenTxY();
+            // Prefer the LIVE state: while the hook owns the writes the model's cache is stale
+            // by construction, and every metric derived from it reads a build as clean no
+            // matter what DWM is actually showing (issue #229).
+            double hl = 0.0; int htx = 0, hty = 0;
+            if (wind::HookTransformArmed() && wind::GetHookLiveTransform(hl, htx, hty)) {
+                s.wLevel = hl; s.wTxX = htx; s.wTxY = hty;
+            }
+        }
+        s.lagPx = t.lagPx;
+        if (tmT) {
+            s.spriteX = tmT->spriteDesktopX();
+            s.spriteY = tmT->spriteDesktopY();
+            s.spriteOn = tmT->spriteShown() ? 1 : 0;
+            s.hideFails = wind::TransformCursorHideFailures();
+            s.spriteLagPx = t.spriteLagPx;
+            s.clampLagPx = t.clampLagPx;
+        }
+        {   // Hook-write counter (issue #229): the swim metric's raw input.
+            unsigned long long hw = 0, tw = 0;
+            wind::HookTransformStats(hw, tw);
+            s.wHook = hw;
         }
         g_testlog.write(s);
     }
@@ -2116,6 +2159,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // tick thread's calls onto the system input thread for nothing. Read once here - thread affinity
     // means ownership can never move once MagInitialize has run, so this needs a restart to change.
     wind::SetMagThreadClaimEnabled(cfg.txHookWrite != 0);
+    wind::SetHookFrameGate(cfg.txHookWrite == 2);   // mode 2 = one hook write per composite
     if (!g_input.start(cfg.zoomInButton, cfg.zoomInButton2, cfg.zoomOutButton, cfg.zoomOutButton2,
                        /*swallow=*/true)) {
         MessageBoxW(nullptr, L"Failed to install the mouse hook.", L"Wind", MB_ICONERROR);
@@ -2440,7 +2484,77 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
         RunTick(ts);
 
-        if (dwmPaces) DwmFlush();   // block until DWM's next composite -> frames align with it
+
+        if (dwmPaces) {
+            DwmFlush();             // block until DWM's next composite -> frames align with it
+            wind::MarkComposite();  // frame boundary: the hook may write once more (issue #229)
+            {   // Composite timestamp: the late sprite refresh above measures its wait from here.
+                LARGE_INTEGER qc; QueryPerformanceCounter(&qc);
+                ts.lastCompositeQpc = qc.QuadPart;
+            }
+            // Content-vs-cursor lag, measured where it actually matters (issue #229): DWM has
+            // just paired the transform it holds with the pointer it draws. The transform is
+            // anchored so T(cursor) == cursor, so content sits |cursor now - cursor the write
+            // used| * (level - 1) screen px away from the pointer. A steady value is an
+            // invisible trail; a value that jumps frame to frame is the visible wobble.
+            // SPRITE WINDOW LAG (issue #229): ask the window manager where the sprite window
+            // actually IS at this composite and compare with where we asked it to be. A
+            // SetWindowPos that has not landed yet means DWM is magnifying a stale sprite
+            // position while the transform has already moved - the lagging second cursor. The
+            // only metric here that is not coherent by construction.
+            if (auto* tmLag = dynamic_cast<TransformModel*>(
+                    ts.mTransform ? ts.mTransform : ts.model)) {
+                HWND sh = tmLag->spriteHwnd();
+                if (sh && tmLag->spriteShown() && ts.prevLvl > 1.0) {
+                    RECT rc{};
+                    if (GetWindowRect(sh, &rc)) {
+                        const double wantX = (double)(tmLag->spriteDesktopX() - tmLag->spriteHotX());
+                        const double wantY = (double)(tmLag->spriteDesktopY() - tmLag->spriteHotY());
+                        const double dx = (double)rc.left - wantX, dy = (double)rc.top - wantY;
+                        ts.spriteLagPx = std::sqrt(dx * dx + dy * dy) * ts.prevLvl;
+                    }
+                } else {
+                    ts.spriteLagPx = 0.0;
+                }
+                // CLAMPED-VIEW CURSOR LAG (issue #229). Where the view is pinned against an
+                // edge it cannot pan, so the cursor crosses the screen itself at level x hand
+                // speed and a sprite placed from the previous tick's sample is drawn |drift| *
+                // level from the hand - the "cursor lagging wildly behind, worse the faster I
+                // move" the field reports at 2.5x with offX pinned at 0. Measured only on the
+                // CLAMPED axis: on a free axis the view pans instead and the cursor stays put
+                // on screen, so drift there is invisible. This is the one state every other
+                // metric deliberately excludes, which is why they all read clean at bad spots.
+                ts.clampLagPx = 0.0;
+                if (tmLag->spriteShown() && ts.prevLvl > 1.001) {
+                    const double lvlC = tmLag->writtenLevel();
+                    if (lvlC > 1.001) {
+                        const double srcL = -(double)tmLag->writtenTxX() / lvlC;
+                        const double srcT = -(double)tmLag->writtenTxY() / lvlC;
+                        const double maxL = (double)ts.mon.w - (double)ts.mon.w / lvlC;
+                        const double maxT = (double)ts.mon.h - (double)ts.mon.h / lvlC;
+                        const bool clX = srcL <= 1.0 || srcL >= maxL - 3.0;
+                        const bool clY = srcT <= 1.0 || srcT >= maxT - 3.0;
+                        POINT cpC;
+                        if ((clX || clY) && GetCursorPos(&cpC)) {
+                            const double dxc = clX ? (double)cpC.x - (double)tmLag->spriteDesktopX() : 0.0;
+                            const double dyc = clY ? (double)cpC.y - (double)tmLag->spriteDesktopY() : 0.0;
+                            ts.clampLagPx = std::sqrt(dxc * dxc + dyc * dyc) * lvlC;
+                        }
+                    }
+                }
+            }
+            if (ts.prevLvl > 1.0) {
+                double wx = 0.0, wy = 0.0;
+                wind::GetWriteCursor(wx, wy);
+                POINT cp;
+                if (wx != 0.0 && GetCursorPos(&cp)) {
+                    const double dx = (double)cp.x - wx, dy = (double)cp.y - wy;
+                    ts.lagPx = std::sqrt(dx * dx + dy * dy) * (ts.prevLvl - 1.0);
+                }
+            } else {
+                ts.lagPx = 0.0;
+            }
+        }
     }
 
     g_tick = nullptr;
