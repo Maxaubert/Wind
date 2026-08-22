@@ -2121,6 +2121,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // tick thread's calls onto the system input thread for nothing. Read once here - thread affinity
     // means ownership can never move once MagInitialize has run, so this needs a restart to change.
     wind::SetMagThreadClaimEnabled(cfg.txHookWrite != 0);
+    wind::SetHookFrameGate(cfg.txHookWrite == 2);   // mode 2 = one hook write per composite
     if (!g_input.start(cfg.zoomInButton, cfg.zoomInButton2, cfg.zoomOutButton, cfg.zoomOutButton2,
                        /*swallow=*/true)) {
         MessageBoxW(nullptr, L"Failed to install the mouse hook.", L"Wind", MB_ICONERROR);
@@ -2445,7 +2446,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
         RunTick(ts);
 
-        if (dwmPaces) DwmFlush();   // block until DWM's next composite -> frames align with it
+        if (dwmPaces) {
+            DwmFlush();             // block until DWM's next composite -> frames align with it
+            wind::MarkComposite();  // frame boundary: the hook may write once more (issue #229)
+        }
     }
 
     g_tick = nullptr;

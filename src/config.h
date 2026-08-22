@@ -202,6 +202,9 @@ struct Config {
     // The lesson worth keeping: time-to-write is not the metric that matters. Frame coherence is.
     // Do not re-enable this without a mechanism that bounds writes to at most one per composited
     // frame AND keeps content and cursor sampled at the same instant.
+    // 0 = tick-paced writes (the shipped path). 1 = write on every mouse event (RETIRED: the
+    // swim, see hook_transform.h). 2 = event writes with the FRAME GATE - one per composited
+    // frame, the documented safe condition (issue #229).
     int txHookWrite = 0;
     int txFreeCursor = 1;
     int txWriteHz = 0;

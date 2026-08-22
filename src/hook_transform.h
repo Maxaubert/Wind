@@ -50,4 +50,14 @@ bool RequestHookTransformWrite();
 // Diagnostics: how many writes the hook path has issued, and how many the tick path issued.
 void HookTransformStats(unsigned long long& hookWrites, unsigned long long& tickWrites);
 
+// FRAME GATE (issue #229). The retired per-event write path was fast (measured 0.77ms response
+// vs 5.30ms tick-paced) but wrote 4-5 times per composited frame, so DWM latched whichever
+// write landed first while drawing the pointer from its own later sample - content and cursor
+// from different instants, i.e. the swim. The documented condition for reviving it is at most
+// ONE write per composited frame. The tick loop is DwmFlush-paced while zoomed, so it marks
+// each composite here; the hook writes the FIRST move of a frame (full event latency) and
+// coalesces the rest (the tick's own write still lands them, so no destination is lost).
+void MarkComposite();               // called by the tick loop right after DwmFlush returns
+void SetHookFrameGate(bool on);     // txHookWrite == 2
+
 }  // namespace wind

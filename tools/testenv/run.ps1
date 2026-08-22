@@ -238,6 +238,9 @@ try {
   } finally {
     Stop-Backdrop $bp
     if ($ul) { Stop-Backdrop $ul }
+    # Belt and braces on EVERY exit path (abort included): nothing this environment opened may
+    # outlive the run, or it becomes the next run's uninvited test material.
+    Stop-AllBackdrops
   }
 
   $ramSamples['end'] = Get-WindWorkingSetMB

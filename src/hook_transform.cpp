@@ -20,6 +20,10 @@ static std::atomic<bool>  g_armed{false};        // fast pre-check, so an idle h
 
 static std::atomic<unsigned long long> g_hookWrites{0};
 static std::atomic<unsigned long long> g_tickWrites{0};
+// Frame gate (issue #229): one hook write per composited frame, see the header note.
+static std::atomic<bool> g_frameGate{false};
+static std::atomic<bool> g_wroteThisFrame{false};
+static std::atomic<unsigned long long> g_gateSkips{0};
 
 // SINGLE-WRITER ARBITRATION (issue #206, second attempt).
 //
@@ -138,8 +142,22 @@ static void MaybeLogStats() {
     g_wMaxMs = 0.0; g_wSumMs = 0.0; g_wN = 0;
 }
 
+void MarkComposite() { g_wroteThisFrame.store(false, std::memory_order_release); }
+void SetHookFrameGate(bool on) {
+    g_frameGate.store(on, std::memory_order_relaxed);
+    if (!on) g_wroteThisFrame.store(false, std::memory_order_relaxed);
+}
+
 bool WriteHookTransformFromEvent(long ptx, long pty) {
     if (!g_armed.load(std::memory_order_acquire)) return false;
+    // One write per composite (see the header): the first move of the frame gets the full
+    // event-latency win, the rest coalesce into the tick's write. exchange() so two events
+    // racing in the same frame cannot both pass.
+    if (g_frameGate.load(std::memory_order_relaxed) &&
+        g_wroteThisFrame.exchange(true, std::memory_order_acq_rel)) {
+        g_gateSkips.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
     const bool ok = WriteHookTransform((double)ptx, (double)pty);
     if (ok) {
         g_hookWrites.fetch_add(1, std::memory_order_relaxed);

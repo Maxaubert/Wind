@@ -255,6 +255,16 @@ function Stop-Backdrop($p) {
   Start-Sleep -Milliseconds 300
 }
 
+# Sweep every backdrop/underlay this environment has ever launched, tracked or not. An ABORTED
+# run (fail-fast, foreign magnifier) must leave the desktop exactly as it found it - a stray
+# borderless backdrop left on screen silently becomes the next run's test material.
+function Stop-AllBackdrops {
+  Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -match 'backdrop\.ps1' } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  Start-Sleep -Milliseconds 300
+}
+
 # ---- health checks (the pen-test verdicts: did anything BREAK) ----
 function Get-HealthSnapshot {
   $dwm  = Get-Process -Name dwm  -ErrorAction SilentlyContinue | Select-Object -First 1
