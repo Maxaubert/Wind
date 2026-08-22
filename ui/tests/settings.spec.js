@@ -102,10 +102,10 @@ test('changes stage until Apply, then setConfig fires', async ({ page }) => {
   expect(sets.some(s => s.key === 'txSamplingMode' && s.value === '1')).toBeTruthy();
 });
 
-test('both zoom keybind slots are visible without any gate', async ({ page }) => {
+test('each zoom direction is ONE row with TWO capture slots', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByText('Zoom in (second key)', { exact: true })).toBeVisible();
-  await expect(page.getByText('Zoom out (second key)', { exact: true })).toBeVisible();
+  await expect(page.getByText('Zoom in',  { exact: true }).locator('xpath=../..').getByRole('button')).toHaveCount(2);
+  await expect(page.getByText('Zoom out', { exact: true }).locator('xpath=../..').getByRole('button')).toHaveCount(2);
 });
 
 test('a slot holding both a side-button and a key shows BOTH bindings', async ({ page }) => {
@@ -114,7 +114,7 @@ test('a slot holding both a side-button and a key shows BOTH bindings', async ({
   // OR-combines the two, so both really fire - the keycap must list both. Showing only the button
   // hid the key binding, which is how PageUp/PageDown kept zooming while Settings read
   // "Mouse button 5" and offered nothing to clear.
-  const cap = page.getByText('Zoom in', { exact: true }).locator('xpath=../..').getByRole('button');
+  const cap = page.getByText('Zoom in', { exact: true }).locator('xpath=../..').getByRole('button').first();
   await expect(cap).toHaveText(/Mouse button 5/);
   await expect(cap).toHaveText(/PageUp/);
 });
@@ -186,7 +186,7 @@ test('Escape closes the dialog', async ({ page }) => {
 
 test('keybind capture writes a VK on keydown (live, no Apply needed)', async ({ page }) => {
   await page.goto('/');
-  await page.getByText('Zoom in', { exact: true }).locator('xpath=../..').getByRole('button').click();
+  await page.getByText('Zoom in', { exact: true }).locator('xpath=../..').getByRole('button').first().click();
   await page.keyboard.press('F2'); // keyCode 113; fires both keydown and keyup
   // Keybind writes are live (KeybindCapture calls setConfig immediately so the magnifier core
   // hot-reloads the new key and the hook stops swallowing the previous binding). No Apply step.
@@ -420,7 +420,7 @@ test('the Inspect row shows its real binding (cursorLockVk is loaded)', async ({
 
 test('forbidden keys are refused during keybind capture and capture stays armed', async ({ page }) => {
   await page.goto('/');
-  await page.getByText('Zoom in', { exact: true }).locator('xpath=../..').getByRole('button').click();
+  await page.getByText('Zoom in', { exact: true }).locator('xpath=../..').getByRole('button').first().click();
   await page.keyboard.press('Backspace');   // forbidden (would be swallowed system-wide)
   // Arming live-clears the previous binding (one zoomInVk=0 write is expected); the forbidden
   // key itself must never be written.

@@ -114,6 +114,15 @@
       {:else if row.type === 'keybind'}
         <KeybindCapture {row} {values} onChange={live} {disabled}
                         labelledby={labelledByWithValue} describedby={descId} {valueId} />
+        {#if row.vkKey2 || row.buttonKey2}
+          <!-- Second slot in the SAME row (the *2 config keys); either slot works alone and the
+               core OR-combines them. Its own value id so each keycap is named "label + its own
+               binding" rather than both reading the first slot's value. -->
+          <KeybindCapture row={{ ...row, buttonKey: row.buttonKey2, vkKey: row.vkKey2, modsKey: row.modsKey2 }}
+                          {values} onChange={live} {disabled}
+                          labelledby={[labelId, valueId + '2'].filter(Boolean).join(' ')}
+                          describedby={descId} valueId={valueId + '2'} />
+        {/if}
       {:else if row.type === 'button'}
         <button class="linkbtn" type="button" {disabled} id={valueId}
                 aria-labelledby={labelledByWithValue} aria-describedby={descId}

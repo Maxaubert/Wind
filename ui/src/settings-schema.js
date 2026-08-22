@@ -8,12 +8,15 @@
 // no desc that restates its label, consequences kept only where they change a decision.
 export const sections = [
   { id:'keybinds', label:'Keybinds', icon:'keys', desc:'Hold to zoom. Each binding takes a mouse side-button or a key. Right-click to clear.', rows: [
-    // Two independent slots per direction, both always visible (the 'Alternate keybinds'
-    // gate was removed 2026-08-22): either slot works alone, both fire the same action.
-    { key:'__zoomIn',   type:'keybind', label:'Zoom in',  buttonKey:'zoomInButton',  vkKey:'zoomInVk',  modsKey:'zoomInMods' },
-    { key:'__zoomIn2',  type:'keybind', label:'Zoom in (second key)',  buttonKey:'zoomInButton2',  vkKey:'zoomInVk2',  modsKey:'zoomInMods2' },
-    { key:'__zoomOut',  type:'keybind', label:'Zoom out', buttonKey:'zoomOutButton', vkKey:'zoomOutVk', modsKey:'zoomOutMods' },
-    { key:'__zoomOut2', type:'keybind', label:'Zoom out (second key)', buttonKey:'zoomOutButton2', vkKey:'zoomOutVk2', modsKey:'zoomOutMods2' },
+    // One row per direction with TWO capture slots (the 'Alternate keybinds' gate left the UI
+    // 2026-08-22): the *2 keys feed the second keycap, either slot works alone, both fire the
+    // same action (the core OR-combines them).
+    { key:'__zoomIn',   type:'keybind', label:'Zoom in',
+      buttonKey:'zoomInButton',  vkKey:'zoomInVk',  modsKey:'zoomInMods',
+      buttonKey2:'zoomInButton2',  vkKey2:'zoomInVk2',  modsKey2:'zoomInMods2' },
+    { key:'__zoomOut',  type:'keybind', label:'Zoom out',
+      buttonKey:'zoomOutButton', vkKey:'zoomOutVk', modsKey:'zoomOutMods',
+      buttonKey2:'zoomOutButton2', vkKey2:'zoomOutVk2', modsKey2:'zoomOutMods2' },
     // Keyboard-hook suspension (issue #156): trades key-interception for smooth panning, per app.
     { key:'noSwallowApps', type:'applist', label:'Pass zoom keys to these apps',
       desc:'Fixes stuttery panning in some games. The app will also receive the key.',
