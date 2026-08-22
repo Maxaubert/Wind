@@ -1,0 +1,33 @@
+{
+    "updated":  "20260822-092920",
+    "suite":  "rapid",
+    "scenarios":  {
+                      "solid-zigzag":  {
+                                           "dtP95":  7.59,
+                                           "dtP99":  8.42,
+                                           "hitches":  0,
+                                           "devMed":  0,
+                                           "devP95":  0,
+                                           "jitP95":  0,
+                                           "engine":  "T"
+                                       },
+                      "acrylHeavy-pan":  {
+                                             "dtP95":  9.05,
+                                             "dtP99":  10.01,
+                                             "hitches":  2,
+                                             "devMed":  0,
+                                             "devP95":  0,
+                                             "jitP95":  0,
+                                             "engine":  "T"
+                                         },
+                      "animated-zigzag":  {
+                                              "dtP95":  7.38,
+                                              "dtP99":  8.05,
+                                              "hitches":  0,
+                                              "devMed":  0,
+                                              "devP95":  0,
+                                              "jitP95":  0,
+                                              "engine":  "T"
+                                          }
+                  }
+}

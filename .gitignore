@@ -44,3 +44,4 @@ dist/
 # ...but the WebView2 bootstrapper stub IS committed; it is a Microsoft
 # redistributable the installer packs, not build output. Overrides *.exe above.
 !installer/MicrosoftEdgeWebview2Setup.exe
+tools/testenv/results/
