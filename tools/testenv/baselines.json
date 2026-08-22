@@ -1,33 +1,150 @@
 {
-    "updated":  "20260822-092920",
-    "suite":  "rapid",
+    "updated":  "20260822-213849",
+    "suite":  "full",
     "scenarios":  {
                       "solid-zigzag":  {
-                                           "dtP95":  7.59,
-                                           "dtP99":  8.42,
+                                           "dtP95":  7.52,
+                                           "dtP99":  8.81,
                                            "hitches":  0,
                                            "devMed":  0,
                                            "devP95":  0,
                                            "jitP95":  0,
                                            "engine":  "T"
                                        },
-                      "acrylHeavy-pan":  {
-                                             "dtP95":  9.05,
-                                             "dtP99":  10.01,
-                                             "hitches":  2,
-                                             "devMed":  0,
-                                             "devP95":  0,
-                                             "jitP95":  0,
-                                             "engine":  "T"
-                                         },
-                      "animated-zigzag":  {
-                                              "dtP95":  7.38,
-                                              "dtP99":  8.05,
-                                              "hitches":  0,
+                      "solid-pan":  {
+                                        "dtP95":  7.5,
+                                        "dtP99":  8.9,
+                                        "hitches":  2,
+                                        "devMed":  0,
+                                        "devP95":  0,
+                                        "jitP95":  0,
+                                        "engine":  "T"
+                                    },
+                      "solid-fastpan":  {
+                                            "dtP95":  7.51,
+                                            "dtP99":  9.05,
+                                            "hitches":  1,
+                                            "devMed":  0,
+                                            "devP95":  0,
+                                            "jitP95":  0,
+                                            "engine":  "T"
+                                        },
+                      "white-drift":  {
+                                          "dtP95":  7.51,
+                                          "dtP99":  8.9,
+                                          "hitches":  0,
+                                          "devMed":  0,
+                                          "devP95":  0,
+                                          "jitP95":  0,
+                                          "engine":  "T"
+                                      },
+                      "acryl-glass-pan":  {
+                                              "dtP95":  8.11,
+                                              "dtP99":  9.52,
+                                              "hitches":  5,
                                               "devMed":  0,
                                               "devP95":  0,
                                               "jitP95":  0,
                                               "engine":  "T"
-                                          }
+                                          },
+                      "acryl-light-zigzag":  {
+                                                 "dtP95":  8.15,
+                                                 "dtP99":  9.34,
+                                                 "hitches":  3,
+                                                 "devMed":  0,
+                                                 "devP95":  0,
+                                                 "jitP95":  0,
+                                                 "engine":  "T"
+                                             },
+                      "acryl-mid-zigzag":  {
+                                               "dtP95":  8.57,
+                                               "dtP99":  9.58,
+                                               "hitches":  5,
+                                               "devMed":  0,
+                                               "devP95":  0,
+                                               "jitP95":  0,
+                                               "engine":  "T"
+                                           },
+                      "acryl-heavy-zigzag":  {
+                                                 "dtP95":  8.77,
+                                                 "dtP99":  9.83,
+                                                 "hitches":  7,
+                                                 "devMed":  0,
+                                                 "devP95":  0,
+                                                 "jitP95":  0,
+                                                 "engine":  "T"
+                                             },
+                      "acryl-heavy-fastpan":  {
+                                                  "dtP95":  8.61,
+                                                  "dtP99":  9.29,
+                                                  "hitches":  6,
+                                                  "devMed":  0,
+                                                  "devP95":  0,
+                                                  "jitP95":  0,
+                                                  "engine":  "T"
+                                              },
+                      "acryl-heavy-hold":  {
+                                               "dtP95":  7.94,
+                                               "dtP99":  9.48,
+                                               "hitches":  1,
+                                               "devMed":  0,
+                                               "devP95":  0,
+                                               "jitP95":  0,
+                                               "engine":  "T"
+                                           },
+                      "acryl-heavy-drift":  {
+                                                "dtP95":  8.82,
+                                                "dtP99":  9.73,
+                                                "hitches":  5,
+                                                "devMed":  0,
+                                                "devP95":  0,
+                                                "jitP95":  0,
+                                                "engine":  "T"
+                                            },
+                      "acryl-heavy-video":  {
+                                                "dtP95":  8.85,
+                                                "dtP99":  10.22,
+                                                "hitches":  10,
+                                                "devMed":  0,
+                                                "devP95":  0,
+                                                "jitP95":  0,
+                                                "engine":  "T"
+                                            },
+                      "animated-zigzag":  {
+                                              "dtP95":  7.5,
+                                              "dtP99":  9.11,
+                                              "hitches":  4,
+                                              "devMed":  0,
+                                              "devP95":  0,
+                                              "jitP95":  0,
+                                              "engine":  "T"
+                                          },
+                      "ladder-20x":  {
+                                         "dtP95":  8.92,
+                                         "dtP99":  9.32,
+                                         "hitches":  2,
+                                         "devMed":  0,
+                                         "devP95":  0,
+                                         "jitP95":  0,
+                                         "engine":  "T"
+                                     },
+                      "rezoom-acryl":  {
+                                           "dtP95":  8,
+                                           "dtP99":  9.53,
+                                           "hitches":  5,
+                                           "devMed":  0,
+                                           "devP95":  0,
+                                           "jitP95":  0,
+                                           "engine":  "T"
+                                       },
+                      "rezoom-solid":  {
+                                           "dtP95":  7.28,
+                                           "dtP99":  8.99,
+                                           "hitches":  6,
+                                           "devMed":  0,
+                                           "devP95":  0,
+                                           "jitP95":  0,
+                                           "engine":  "T"
+                                       }
                   }
 }
