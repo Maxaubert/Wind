@@ -2,19 +2,23 @@
 #
 #   powershell -File tools\testenv\run.ps1 -Suite rapid          # ~1 min smoke (iterating)
 #   powershell -File tools\testenv\run.ps1 -Suite quick          # ~2 min (risky changes)
-#   powershell -File tools\testenv\run.ps1 -Suite full           # ~8 min (pre-PR gate)
+#   powershell -File tools\testenv\run.ps1 -Suite full           # ~9 min (pre-PR gate)
+#   powershell -File tools\testenv\run.ps1 -Suite stress         # ~4 min pen test: BREAK it
 #   powershell -File tools\testenv\run.ps1 -Suite soak -Minutes 30
 #   powershell -File tools\testenv\run.ps1 -Suite full -CI       # exit 1 on regression vs baselines
 #   powershell -File tools\testenv\run.ps1 -Suite full -UpdateBaseline
 #
-# Iteration gate: rapid or quick by change risk -> full -> PR.
+# Iteration gate: rapid or quick by change risk -> full -> PR. Run stress before releases and
+# after engine-level work.
 #
-# Protocol (the contract): force a full zoom-out reset from any prior state; START tone (880Hz);
-# hands off the mouse; scenarios run (backdrop, zoom, movement program, zoom-out per scenario);
-# STOP tone (440Hz) - the only two sounds, failures included. Wind runs with WIND_TESTLOG
-# telemetry during the suite and is restarted clean afterwards.
+# Protocol (the contract): force a full zoom-out reset from any prior state; the cursor starts
+# every scenario at the SAME position (monitor centre); START tone (880Hz); hands off the
+# mouse; scenarios run; STOP tone (440Hz) - the only two sounds, failures included. Wind runs
+# with telemetry during the suite and is restarted clean afterwards. Health checks (Wind alive,
+# dwm.exe not restarted, no device-lost in the log) verdict every suite - they are the primary
+# stress-suite outcome.
 param(
-  [ValidateSet('rapid','quick','full','soak')] [string]$Suite = 'rapid',
+  [ValidateSet('rapid','quick','full','stress','soak')] [string]$Suite = 'rapid',
   [int]$Minutes = 30,                 # soak only
   [switch]$CI,                        # compare vs baselines.json; nonzero exit on regression
   [switch]$UpdateBaseline,
@@ -32,54 +36,75 @@ $telemetry = Join-Path $env:TEMP "wind_testenv_$stamp.csv"
 $baselinePath = Join-Path $PSScriptRoot 'baselines.json'
 
 # ---- scenario definitions -------------------------------------------------------------------
-# A scenario: backdrop kind + shape (engine), zoom-in seconds (level via hold time), movement
-# program, program seconds. Grid backdrops are for the human eye; measurements come from telemetry.
-function S($name, $kind, $borderless, $zoomS, $prog, $progS) {
-  @{ name = $name; kind = $kind; borderless = $borderless; zoomS = $zoomS; prog = $prog; progS = $progS }
+# A scenario: backdrop (kind [+ acrylic strength] [+ underlay beneath it]) + zoom hold + movement
+# program. Acrylic REQUIRES an underlay for reproducibility: the blur samples whatever is behind
+# the window, so without a controlled underlay the desktop leaks into the measurement. 'solid'
+# underlay = cheap static blur source; 'animated' underlay = video-like content that forces DWM
+# to re-blur every frame (the expensive acrylic case).
+function S($name, $kind, $borderless, $zoomS, $prog, $progS, $strength = '', $underlay = '') {
+  @{ name = $name; kind = $kind; borderless = $borderless; zoomS = $zoomS
+     prog = $prog; progS = $progS; strength = $strength; underlay = $underlay }
 }
 $suites = @{
   rapid = @(                                   # ~60s: cycle backdrops, zoom in/out, pan+zig
-    (S 'solid-zigzag'      'solid'      $false 0.55 'zig' 5),
-    (S 'acrylHeavy-pan'    'acrylHeavy' $true  0.65 'pan' 6),
-    (S 'animated-zigzag'   'animated'   $true  0.60 'zig' 6)
+    (S 'solid-zigzag'        'solid'    $false 0.55 'zig' 5),
+    (S 'acryl-heavy-pan'     'acrylic'  $true  0.65 'pan' 6 'heavy' 'solid'),
+    (S 'animated-zigzag'     'animated' $true  0.60 'zig' 6)
   );
   quick = @(
-    (S 'solid-zigzag'      'solid'      $false 0.55 'zig'   6),
-    (S 'solid-fastpan'     'solid'      $false 0.55 'fast'  5),
-    (S 'acrylLight-pan'    'acrylLight' $true  0.60 'pan'   6),
-    (S 'acrylHeavy-zigzag' 'acrylHeavy' $true  0.65 'zig'   8),
-    (S 'acrylHeavy-hold'   'acrylHeavy' $true  0.65 'hold'  5),
-    (S 'animated-pan'      'animated'   $true  0.60 'pan'   6)
+    (S 'solid-zigzag'        'solid'    $false 0.55 'zig'   6),
+    (S 'solid-fastpan'       'solid'    $false 0.55 'fast'  5),
+    (S 'acryl-light-pan'     'acrylic'  $true  0.60 'pan'   6 'light' 'solid'),
+    (S 'acryl-heavy-zigzag'  'acrylic'  $true  0.65 'zig'   8 'heavy' 'solid'),
+    (S 'acryl-heavy-video'   'acrylic'  $true  0.65 'pan'   6 'heavy' 'animated'),
+    (S 'animated-pan'        'animated' $true  0.60 'pan'   6)
   );
   full = @(
-    (S 'solid-zigzag'      'solid'      $false 0.55 'zig'   8),
-    (S 'solid-pan'         'solid'      $false 0.55 'pan'   8),
-    (S 'solid-fastpan'     'solid'      $false 0.55 'fast'  6),
-    (S 'white-drift'       'white'      $false 0.55 'drift' 6),
-    (S 'acrylLight-pan'    'acrylLight' $true  0.60 'pan'   8),
-    (S 'acrylLight-zigzag' 'acrylLight' $true  0.60 'zig'   8),
-    (S 'acrylHeavy-zigzag' 'acrylHeavy' $true  0.65 'zig'  10),
-    (S 'acrylHeavy-fastpan' 'acrylHeavy' $true 0.65 'fast'  6),
-    (S 'acrylHeavy-hold'   'acrylHeavy' $true  0.65 'hold'  6),
-    (S 'acrylHeavy-drift'  'acrylHeavy' $true  0.65 'drift' 6),
-    (S 'animated-zigzag'   'animated'   $true  0.60 'zig'   8),
-    (S 'ladder-20x'        'acrylHeavy' $true  1.20 'pan'   6),   # deep-zoom: saturates at maxLevel
-    (S 'rezoom-acryl'      'acrylHeavy' $true  0    'rezoom' 0),  # 5 in/out cycles (ramp + RAM)
-    (S 'rezoom-solid'      'solid'      $false 0    'rezoom' 0)
+    (S 'solid-zigzag'        'solid'    $false 0.55 'zig'   8),
+    (S 'solid-pan'           'solid'    $false 0.55 'pan'   8),
+    (S 'solid-fastpan'       'solid'    $false 0.55 'fast'  6),
+    (S 'white-drift'         'white'    $false 0.55 'drift' 6),
+    # The acrylic strength ladder, all over the SAME solid underlay (reproducible pairs).
+    (S 'acryl-glass-pan'     'acrylic'  $true  0.60 'pan'   6 'glass' 'solid'),
+    (S 'acryl-light-zigzag'  'acrylic'  $true  0.60 'zig'   8 'light' 'solid'),
+    (S 'acryl-mid-zigzag'    'acrylic'  $true  0.62 'zig'   8 'mid'   'solid'),
+    (S 'acryl-heavy-zigzag'  'acrylic'  $true  0.65 'zig'  10 'heavy' 'solid'),
+    (S 'acryl-heavy-fastpan' 'acrylic'  $true  0.65 'fast'  6 'heavy' 'solid'),
+    (S 'acryl-heavy-hold'    'acrylic'  $true  0.65 'hold'  6 'heavy' 'solid'),
+    (S 'acryl-heavy-drift'   'acrylic'  $true  0.65 'drift' 6 'heavy' 'solid'),
+    # The underlay A/B: same acrylic, static vs video-like content beneath the blur.
+    (S 'acryl-heavy-video'   'acrylic'  $true  0.65 'pan'   8 'heavy' 'animated'),
+    (S 'animated-zigzag'     'animated' $true  0.60 'zig'   8),
+    (S 'ladder-20x'          'acrylic'  $true  1.20 'pan'   6 'heavy' 'solid'),
+    (S 'rezoom-acryl'        'acrylic'  $true  0    'rezoom' 0 'heavy' 'solid'),
+    (S 'rezoom-solid'        'solid'    $false 0    'rezoom' 0)
+  );
+  # Pen test: the GOAL is to break the magnifier. Health checks are the verdict.
+  stress = @(
+    (S 'overzoom-acryl'      'acrylic'  $true  0    'overzoom'  6 'heavy' 'solid'),
+    (S 'overzoom-animated'   'animated' $true  0    'overzoom'  6),
+    (S 'slam-solid'          'solid'    $false 0.55 'slam'      7),
+    (S 'slam-acryl'          'acrylic'  $true  0.65 'slam'      7 'heavy' 'solid'),
+    (S 'flick-solid'         'solid'    $false 0.60 'flick'     8),
+    (S 'zoomstorm-solid'     'solid'    $false 0    'zoomstorm' 0),
+    (S 'zoomstorm-acryl'     'acrylic'  $true  0    'zoomstorm' 0 'heavy' 'animated'),
+    (S 'ladder-20x-slam'     'acrylic'  $true  1.20 'slam'      6 'heavy' 'solid')
   )
 }
 $suites.soak = $suites.full                    # soak = full, looped until -Minutes is spent
 
 function Run-Program([string]$prog, [double]$secs) {
   switch ($prog) {
-    'pan'   { [TE]::Pan($secs, 8, 2, 1400) }
-    'fast'  { [TE]::Pan($secs, 16, 2, 900) }
-    'zig'   { [TE]::Zig($secs, 8, 2, 2, 1200, [int]($sh * 0.12), [int]($sh * 0.88)) }
-    'drift' { [TE]::Drift($secs, 12) }
-    'hold'  { Start-Sleep -Milliseconds ([int]($secs * 1000)) }   # dead-stop: wobble-at-rest
-    'rezoom' {
-      for ($i = 0; $i -lt 5; $i++) { Zoom-In 0.6; Start-Sleep -Milliseconds 350; Zoom-Out 1.2 }
-    }
+    'pan'      { [TE]::Pan($secs, 8, 2, 1400) }
+    'fast'     { [TE]::Pan($secs, 16, 2, 900) }
+    'slam'     { [TE]::Pan($secs, 64, 1, 200) }           # violent full-speed direction slams
+    'flick'    { [TE]::Flick($secs) }                     # burst flicks + pauses
+    'zig'      { [TE]::Zig($secs, 8, 2, 2, 1200, [int]($sh * 0.12), [int]($sh * 0.88)) }
+    'drift'    { [TE]::Drift($secs, 12) }
+    'hold'     { Start-Sleep -Milliseconds ([int]($secs * 1000)) }   # dead-stop: wobble-at-rest
+    'rezoom'   { for ($i = 0; $i -lt 5; $i++) { Zoom-In 0.6; Start-Sleep -Milliseconds 350; Zoom-Out 1.2 } }
+    'overzoom' { Invoke-Overzoom $secs }                  # hold past maxLevel + pan while held
+    'zoomstorm'{ Invoke-ZoomStorm 24 }                    # rapid in/out alternation
   }
 }
 
@@ -95,30 +120,46 @@ Start-Wind $telemetry
 # The hitch threshold needs the tick rate; read it the same way Wind does.
 Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class TEDm{[StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)]public struct DEVMODE{private const int CCHDEVICENAME=32;private const int CCHFORMNAME=32;[MarshalAs(UnmanagedType.ByValTStr,SizeConst=CCHDEVICENAME)]public string dmDeviceName;public ushort dmSpecVersion,dmDriverVersion,dmSize,dmDriverExtra;public uint dmFields;public int dmPositionX,dmPositionY;public uint dmDisplayOrientation,dmDisplayFixedOutput;public short dmColor,dmDuplex,dmYResolution,dmTTOption,dmCollate;[MarshalAs(UnmanagedType.ByValTStr,SizeConst=CCHFORMNAME)]public string dmFormName;public ushort dmLogPixels;public uint dmBitsPerPel,dmPelsWidth,dmPelsHeight,dmDisplayFlags,dmDisplayFrequency;public uint dmICMMethod,dmICMIntent,dmMediaType,dmDitherType,dmReserved1,dmReserved2,dmPanningWidth,dmPanningHeight;}[DllImport("user32.dll",CharSet=CharSet.Unicode)]public static extern bool EnumDisplaySettingsW(string dev,int mode,ref DEVMODE dm);public static int Hz(){var d=new DEVMODE();d.dmSize=(ushort)Marshal.SizeOf(typeof(DEVMODE));if(EnumDisplaySettingsW(null,-1,ref d)&&d.dmDisplayFrequency>1)return (int)d.dmDisplayFrequency;return 60;}}'
 $hz = [TEDm]::Hz()
+$health0 = Get-HealthSnapshot
+# The overzoom invariant needs the configured cap. Same resolution order as Wind: ini next to
+# the exe if writable (dev), else %LOCALAPPDATA%\Wind (the Program Files deploy).
+$maxLevel = 20.0
+foreach ($iniPath in @((Join-Path (Split-Path $WindExe) 'magnifier.ini'),
+                       (Join-Path $env:LOCALAPPDATA 'Wind\magnifier.ini'))) {
+  if (Test-Path $iniPath) {
+    $m = Select-String -Path $iniPath -Pattern '^\s*maxLevel\s*=\s*([0-9.]+)' | Select-Object -First 1
+    if ($m) { $maxLevel = [double]$m.Matches[0].Groups[1].Value; break }
+  }
+}
 
 try {
   # The contract: reset FIRST (unknown prior state), then the start tone, then hands off.
   Reset-Zoom
   Start-Tone
-  $suiteStart = Now-Ms
   $ramSamples['start'] = Get-WindWorkingSetMB
 
   $loopUntil = if ($Suite -eq 'soak') { (Get-Date).AddMinutes($Minutes) } else { Get-Date }
   $pass = 0
   do {
     foreach ($sc in $suites[$Suite]) {
-      $bp = $null
+      $bp = $null; $ul = $null
       try {
-        $bp = Start-Backdrop $sc.kind $sc.borderless
+        # Underlay FIRST (sits beneath), then the measured backdrop takes the foreground.
+        if ($sc.underlay) { $ul = Start-Backdrop $sc.underlay $true }
+        $bp = Start-Backdrop $sc.kind $sc.borderless $sc.strength
+        # Deterministic start: the cursor begins every scenario at the monitor centre.
+        [TE]::MoveAbs([int]($sw / 2), [int]($sh / 2), $sw, $sh)
+        Start-Sleep -Milliseconds 200
         if ($sc.zoomS -gt 0) { Zoom-In $sc.zoomS }
         $t0 = Now-Ms
         Run-Program $sc.prog $sc.progS
         $t1 = Now-Ms
-        if ($sc.zoomS -gt 0) { Reset-Zoom }   # closed contract: every scenario ends at 1.0x
+        Reset-Zoom                             # closed contract: every scenario ends at 1.0x
         $phName = if ($Suite -eq 'soak') { "$($sc.name)#$pass" } else { $sc.name }
-        $phases += @{ name = $phName; t0 = $t0; t1 = $t1 }
+        $phases += @{ name = $phName; t0 = $t0; t1 = $t1; prog = $sc.prog }
       } finally {
         Stop-Backdrop $bp
+        if ($ul) { Stop-Backdrop $ul }
       }
     }
     $pass++
@@ -130,9 +171,12 @@ try {
   $failedInfra = $_.Exception.Message
 } finally {
   Stop-Tone                                    # the SECOND (and last) sound - success or not
-  Stop-Wind
-  Restart-WindClean
 }
+
+# Health check BEFORE restarting Wind (a restart would mask a mid-suite crash).
+$healthBad = Test-Health $health0
+Stop-Wind
+Restart-WindClean
 
 if ($failedInfra) {
   Write-Host "INFRA FAILURE: $failedInfra" -ForegroundColor Red
@@ -152,9 +196,13 @@ foreach ($ph in $phases) {
   $a = $analysis[$ph.name]
   if (-not $a -or $a.ticks -lt 10) { $rows += [pscustomobject]@{ scenario=$ph.name; verdict='NO-DATA' }; $fails++; continue }
   $verdict = 'PASS'; $why = @()
+  $isStress = $ph.prog -in @('overzoom','zoomstorm','slam','flick','rezoom')
   if ($a.dtP99 -and $a.dtP99 -gt 25.0)      { $verdict = 'FAIL'; $why += "dtP99=$($a.dtP99)ms" }
-  if ($a.backSteps -gt 0 -and $ph.name -notlike 'rezoom*') { $verdict = 'FAIL'; $why += "backSteps=$($a.backSteps)" }
-  if ($a.jitP95 -and $a.jitP95 -gt 25.0)    { $verdict = 'FAIL'; $why += "jitP95=$($a.jitP95)px" }
+  # Level pipeline invariants: never above maxLevel+epsilon; no backward motion outside
+  # programs that legitimately reverse (rezoom/zoomstorm/overzoom-release).
+  if ($a.maxLevel -gt $maxLevel + 0.05)      { $verdict = 'FAIL'; $why += "level ESCAPED cap $maxLevel : $($a.maxLevel)" }
+  if ($a.backSteps -gt 0 -and -not $isStress) { $verdict = 'FAIL'; $why += "backSteps=$($a.backSteps)" }
+  if ($a.jitP95 -and $a.jitP95 -gt 25.0 -and -not $isStress) { $verdict = 'FAIL'; $why += "jitP95=$($a.jitP95)px" }
   if ($baselines -and $baselines.scenarios.($ph.name)) {
     $b = $baselines.scenarios.($ph.name)
     if ($a.dtP99 -and $b.dtP99 -and $a.dtP99 -gt $b.dtP99 * 1.6 + 2) { $verdict = 'FAIL'; $why += "dtP99 $($a.dtP99) vs base $($b.dtP99)" }
@@ -172,15 +220,22 @@ foreach ($ph in $phases) {
     why = ($why -join '; ')
   }
 }
+# Survival verdicts (the pen-test outcome proper).
+foreach ($h in $healthBad) {
+  $rows += [pscustomobject]@{ scenario = 'HEALTH'; verdict = 'FAIL'; why = $h }
+  $fails++
+}
 if ($ramLeak -gt 60) { $fails++; Write-Host "RAM LEAK: +${ramLeak}MB over the suite" -ForegroundColor Red }
 
 $rows | Format-Table -AutoSize | Out-String | Write-Host
 Write-Host ("RAM: start {0}MB end {1}MB (delta {2}MB)" -f $ramSamples['start'], $ramSamples['end'], $ramLeak)
+if ($healthBad.Count -eq 0) { Write-Host 'Health: Wind alive, dwm intact, no device-lost.' -ForegroundColor Green }
 
 # ---- outputs --------------------------------------------------------------------------------
 $result = [ordered]@{
   suite = $Suite; stamp = $stamp; hz = $hz
   ramStartMB = $ramSamples['start']; ramEndMB = $ramSamples['end']; ramDeltaMB = $ramLeak
+  health = $healthBad
   scenarios = [ordered]@{}
   fails = $fails
 }

@@ -73,6 +73,17 @@ public static class TE {
       Thread.Sleep(1);
     }
   }
+  // Violent flicks: bursts of huge deltas with pauses between - hunts warp-detector false
+  // positives and integrator overshoot. Deterministic burst pattern.
+  public static void Flick(double seconds) {
+    var t = System.Diagnostics.Stopwatch.StartNew();
+    int n = 0;
+    while (t.Elapsed.TotalSeconds < seconds) {
+      int sx = (n % 2 == 0) ? 1 : -1; int sy = ((n / 2) % 2 == 0) ? 1 : -1;
+      for (int i = 0; i < 8; i++) { MoveRel(sx * 280, sy * 40); Thread.Sleep(1); }
+      Thread.Sleep(650); n++;
+    }
+  }
   // Precision drift: tiny 1-mickey steps in a slow circle - where wobble hides.
   public static void Drift(double seconds, int stepMs) {
     var t = System.Diagnostics.Stopwatch.StartNew();
@@ -155,9 +166,32 @@ function Zoom-Out([double]$Seconds) {
   Start-Sleep -Milliseconds 250
 }
 
+# ---- stress programs (the pen-testing half: the GOAL is to break the magnifier) ----
+function Invoke-Overzoom([double]$PanSecs) {
+  # Hold zoom-in far past saturation (maxLevel), and KEEP holding while panning hard: the level
+  # pipeline must clamp (no >maxLevel writes, no back-steps), the pan wall must hold at the cap.
+  Clear-ZoomButtons
+  [TE]::XBtn($true, 2)
+  Start-Sleep -Milliseconds 3000              # 4x longer than saturation needs
+  [TE]::Pan($PanSecs, 16, 2, 700)             # fast pan while the button is STILL held
+  [TE]::XBtn($false, 2)
+  Start-Sleep -Milliseconds 250
+}
+function Invoke-ZoomStorm([int]$Cycles) {
+  # Rapid in/out alternation with sub-ramp holds: the DWM re-scale stress (the documented
+  # expensive path) and the classic TDR hunter. No settling between cycles on purpose.
+  Clear-ZoomButtons
+  for ($i = 0; $i -lt $Cycles; $i++) {
+    [TE]::XBtn($true, 2); Start-Sleep -Milliseconds 190; [TE]::XBtn($false, 2)
+    [TE]::XBtn($true, 1); Start-Sleep -Milliseconds 190; [TE]::XBtn($false, 1)
+  }
+  Start-Sleep -Milliseconds 300
+}
+
 # ---- backdrop management (child processes; each owns its pump) ----
-function Start-Backdrop([string]$Kind, [bool]$Borderless) {
+function Start-Backdrop([string]$Kind, [bool]$Borderless, [string]$Strength = '') {
   $args = @('-NoProfile','-ExecutionPolicy','Bypass','-File', (Join-Path $PSScriptRoot 'backdrop.ps1'), '-Kind', $Kind)
+  if ($Strength) { $args += @('-Strength', $Strength) }
   if ($Borderless) { $args += '-Borderless' }
   $p = Start-Process powershell -ArgumentList $args -PassThru -WindowStyle Hidden
   # Wait for the backdrop window to exist and take the foreground.
@@ -176,6 +210,36 @@ function Start-Backdrop([string]$Kind, [bool]$Borderless) {
 function Stop-Backdrop($p) {
   if ($p -and -not $p.HasExited) { $p | Stop-Process -Force -Confirm:$false }
   Start-Sleep -Milliseconds 300
+}
+
+# ---- health checks (the pen-test verdicts: did anything BREAK) ----
+function Get-HealthSnapshot {
+  $dwm  = Get-Process -Name dwm  -ErrorAction SilentlyContinue | Select-Object -First 1
+  $wind = Get-Process -Name Wind -ErrorAction SilentlyContinue | Select-Object -First 1
+  @{ dwmPid = if ($dwm) { $dwm.Id } else { 0 }
+     windPid = if ($wind) { $wind.Id } else { 0 }
+     at = Get-Date }
+}
+function Test-Health($Before) {
+  $after = Get-HealthSnapshot
+  $bad = @()
+  if ($after.windPid -eq 0)                    { $bad += 'Wind DIED during the suite' }
+  elseif ($after.windPid -ne $Before.windPid)  { $bad += 'Wind RESTARTED (crash filter?) during the suite' }
+  if ($Before.dwmPid -ne 0 -and $after.dwmPid -ne $Before.dwmPid) { $bad += "dwm.exe RESTARTED (compositor crash: pid $($Before.dwmPid) -> $($after.dwmPid))" }
+  # Device-lost / TDR / reset lines in Wind's own log since the suite began.
+  $log = Join-Path $env:LOCALAPPDATA 'Wind\logs\wind-core.log'
+  if (Test-Path $log) {
+    $hits = Get-Content $log -Tail 4000 | Where-Object {
+      $_ -match 'device.?lost|TDR|driver reset|DXGI_ERROR' } | Select-Object -Last 3
+    foreach ($h in $hits) {
+      # Only lines stamped after the suite started count.
+      if ($h -match '^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})') {
+        $ts = [datetime]::Parse($Matches[1] + 'Z').ToLocalTime()
+        if ($ts -gt $Before.at) { $bad += "log: $h" }
+      }
+    }
+  }
+  ,$bad
 }
 
 # ---- RAM sampling ----

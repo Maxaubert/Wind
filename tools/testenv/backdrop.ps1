@@ -16,9 +16,15 @@
 # The grid is a visual aid for the human observer (flicker/stutter is easy to SEE against it);
 # the harness itself measures via telemetry, not pixels.
 param(
-  [ValidateSet('solid','white','acrylLight','acrylHeavy','animated')] [string]$Kind = 'solid',
+  [ValidateSet('solid','white','acrylic','acrylLight','acrylHeavy','animated')] [string]$Kind = 'solid',
+  # Acrylic strength ladder (issue #225 round 2): tint alpha over the blur. 'glass' is almost
+  # pure blur (the "almost completely acrylic" case), 'heavy' the dense Prism-class tint.
+  [ValidateSet('glass','light','mid','heavy')] [string]$Strength = 'heavy',
   [switch]$Borderless
 )
+# Legacy kind names map onto the ladder so old scenario tables keep working.
+if ($Kind -eq 'acrylLight') { $Kind = 'acrylic'; $Strength = 'light' }
+if ($acrylic -and $Strength -in @('mid','heavy')) { $Kind = 'acrylic'; $Strength = 'heavy' }
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -46,11 +52,11 @@ public static class BdAcrylic {
 
 [Windows.Forms.Application]::EnableVisualStyles()
 $f = New-Object Windows.Forms.Form
-$f.Text = "Wind testenv backdrop [$Kind]"
+$f.Text = "Wind testenv backdrop [$Kind $(if ($Kind -eq 'acrylic') { $Strength })]"
 if ($Borderless) { $f.FormBorderStyle = 'None' }
 $f.WindowState = 'Maximized'
 
-$acrylic = $Kind -in @('acrylLight','acrylHeavy')
+$acrylic = $Kind -eq 'acrylic'
 $grid    = $Kind -ne 'white'
 $script:offset = 0
 
@@ -67,7 +73,7 @@ $paint = {
   param($s, $e)
   if (-not $grid) { return }
   $g = $e.Graphics
-  $light = $Kind -eq 'acrylLight' -or $Kind -eq 'acrylHeavy'
+  $light = $acrylic
   $thinC  = if ($light) { [Drawing.Color]::FromArgb(200, 200, 200, 214) } else { [Drawing.Color]::FromArgb(215,215,215) }
   $thickC = if ($light) { [Drawing.Color]::FromArgb(240, 240, 240, 255) } else { [Drawing.Color]::FromArgb(140,140,140) }
   $thin  = New-Object Drawing.Pen $thinC, 1
@@ -84,7 +90,7 @@ $paint = {
 $f.Add_Paint($paint)
 $f.Add_Resize({ $f.Invalidate() })
 
-if ($Kind -eq 'acrylHeavy') {
+if ($acrylic -and $Strength -in @('mid','heavy')) {
   # Cards give the zoomed view geometry over the blur (the Prism-class content shape).
   for ($i = 0; $i -lt 6; $i++) {
     $card = New-Object Windows.Forms.Panel
@@ -104,7 +110,7 @@ if ($Kind -eq 'acrylHeavy') {
 
 $f.Add_Shown({
   if ($acrylic) {
-    $tint = if ($Kind -eq 'acrylHeavy') { 0xCC1E1E2E } else { 0x66F0F0F0 }
+    $tint = if ($acrylic -and $Strength -in @('mid','heavy')) { 0xCC1E1E2E } else { 0x66F0F0F0 }
     [BdAcrylic]::Apply($f.Handle, [int]$tint)
   }
   if ($Kind -eq 'animated') {

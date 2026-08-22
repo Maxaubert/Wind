@@ -14,12 +14,17 @@ backdrops make flicker and stutter easy to see by eye).
     powershell -File tools\testenv\run.ps1 -Suite full -CI       # exit 1 on regression vs baselines
     powershell -File tools\testenv\run.ps1 -Suite full -UpdateBaseline
 
-**Iteration gate**: `rapid` or `quick` by change risk -> `full` -> PR.
+**Iteration gate**: `rapid` or `quick` by change risk -> `full` -> PR. Run `stress` before
+releases and after engine-level work - its scenarios exist to break the magnifier (overzoom
+held far past maxLevel while panning, 64-mickey slam pans, violent flick bursts, rapid
+zoom-storm cycling), and its primary verdict is the health check: Wind still alive, dwm.exe
+not restarted, no device-lost in the log, level never escaped the configured cap.
 
 ## The protocol (per suite)
 
 1. Wind is restarted with telemetry enabled; a **full zoom-out reset** runs first (never trusts
-   prior state).
+   prior state), and every scenario starts with the cursor at the **same position** (monitor
+   centre) for reproducibility.
 2. **Start tone** (880 Hz, short) - hands off the mouse from here.
 3. Scenarios run: backdrop spawns and takes focus -> zoom in -> movement program -> full reset.
 4. **Stop tone** (440 Hz, long) - the hands-off period is over. These are the only two sounds
@@ -29,8 +34,15 @@ backdrops make flicker and stutter easy to see by eye).
 ## Backdrops and programs
 
 Backdrops (all fullscreen, grid-painted for the human eye): `solid`, `white` (no grid -
-worst case), `acrylLight`, `acrylHeavy` (the Prism-class repro), `animated` (scrolling grid,
-game-like motion). Borderless -> hybrid picks the transform engine; captioned -> render-class.
+worst case), `acrylic` with a **strength ladder** (`glass` = near-pure blur, `light`, `mid`,
+`heavy` = the Prism-class tint), `animated` (scrolling grid, game-like motion). Borderless ->
+hybrid picks the transform engine; captioned -> render-class.
+
+Acrylic scenarios always run over a controlled **underlay window** - the blur samples whatever
+is behind the acrylic surface, so without one the desktop leaks into the measurement. `solid`
+underlay = the cheap static case (DWM re-uses the blur); `animated` underlay = video-like
+motion beneath, which forces a re-blur every composite - the expensive acrylic case, and the
+`acryl-heavy-video` vs `acryl-heavy-zigzag` pair measures exactly that difference.
 NOTE: with `desktopTransform=1` in the live ini, everything runs transform - the results table
 reports the OBSERVED engine per scenario.
 
@@ -67,7 +79,7 @@ gate) and `register_nightly.ps1` (scheduled full run on this rig).
 
 ## Files
 
-- `run.ps1` - orchestrator: suites, scenarios, verdicts, JSON results
+- `run.ps1` - orchestrator: suites (incl. stress), scenarios, health checks, verdicts, JSON
 - `lib.ps1` - interop (injection, tones, Wind lifecycle, backdrop mgmt) + telemetry analysis
 - `backdrop.ps1` - one backdrop window per child process
 - `probe_animated.ps1` - standalone zoom-engagement probe (shakedown diagnostic)
