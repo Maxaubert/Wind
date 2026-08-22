@@ -68,7 +68,7 @@ test('a control is named by its own row label, not just any label', async ({ pag
   // (Post-cleanup roster: the smooth-zoom/multi-monitor toggles, sharpness slider, and the
   // colour input left the UI - no color-type row remains, so that widget type is uncovered.)
   const cases = [
-    ['Alternate keybinds', 'checkbox'],
+    ['High resolution cursor', 'checkbox'],
     ['Max zoom', 'slider'],
     ['Cursor speed', 'slider'],
     ['Frametime logging', 'checkbox'],
@@ -89,7 +89,7 @@ test('row descriptions are linked to their control, not left orphaned', async ({
     const id = el.getAttribute('aria-describedby');
     return id ? (document.getElementById(id) || {}).innerText : null;
   });
-  expect(described).toContain('How far you can zoom');
+  expect(described).toContain('The highest magnification you can reach');
 });
 
 test('sliders speak their unit instead of a bare number', async ({ page }) => {
@@ -200,7 +200,7 @@ test('the model dropdown is fully keyboard operable', async ({ page }) => {
   await page.keyboard.press('Home');
   expect(await activeName()).toBe('Auto');
   await page.keyboard.press('End');
-  expect(await activeName()).toBe('Windows Magnifier');
+  expect(await activeName()).toBe('System');
 
   await page.keyboard.press('Escape');                      // closes without committing
   await expect(page.getByRole('listbox')).toHaveCount(0);

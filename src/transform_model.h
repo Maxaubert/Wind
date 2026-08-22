@@ -29,6 +29,11 @@ public:
     // True when THIS present actually called SetCursorPos (weld executed; not deduped, not
     // suppressed by drag-follow). RunTick's #169 measured-baseline logic reads it exactly like
     // RenderEngine::parkedLastFrame(): baseline on the weld point only when the weld really fired.
+    // Written-transform readbacks for the telemetry channel (issue #227): what the tick path
+    // last actually applied (the hook writer keeps its own cache and is not reflected here).
+    double writtenLevel() const { return lastLevel_; }
+    int    writtenTxX() const { return lastTxX_; }
+    int    writtenTxY() const { return lastTxY_; }
     bool weldedLastFrame() const { return weldedLastFrame_; }
     // Whether MagSetInputTransform is usable (probed once at initialize; needs UIAccess). The
     // hybrid DESKTOP pick requires this: without the source-rect input transform, transform
@@ -57,7 +62,7 @@ private:
     bool mpoBusterWanted_ = false;                   // show the ghost this session
     bool mpoExposed_ = false;                        // apply the 16-bit write clamp
     unsigned long long lastGhostAssertMs_ = 0;       // 500ms assert cadence
-    bool samplingApplied_ = false;                   // bitmap smoothing set for this context
+    int  appliedSampling_ = -2;                      // sampling mode DWM currently holds (-2 = unknown)
     std::unique_ptr<CursorBlanker> blanker_;
     std::unique_ptr<CursorSprite> sprite_;
     unsigned long long lastPinAssertMs_ = 0;
@@ -67,7 +72,7 @@ private:
     int  hiRampTick_ = 0;                            // >8x ramp divisor (TDR guard, issue #148)
     int  lastOffX_ = 0, lastOffY_ = 0, lastTxX_ = 0, lastTxY_ = 0;   // last applied transform
     double lastLevel_ = 0.0;
-    double lastRequestedLevel_ = 0.0;   // detect "ramp stopped" so the final level always lands
+    double lastRequestedLevel_ = 0.0;
     double sessionMaxLevel_ = 0.0;      // logged at teardown: scripted-run engagement proof
     unsigned long long lastChangeMs_ = 0;            // when the transform last REALLY changed
     unsigned long long lastWriteMs_ = 0;             // when a write last actually went out (#204)

@@ -123,18 +123,32 @@ struct Config {
     // ~N ticks of pan mid-gesture. Cuts the per-tick DWM message rate during ramps/pans.
     int ixDecimate = 4;
     // Magnification sampling mode (applied once per transform session).
-    //   0 = NEAREST (the DEFAULT, and the safe one)
-    //   1 = the edge-preserving smooth filter behind native Magnifier's "smooth edges of images
-    //       and text" - looks far better, but FIELD-CONFIRMED to crash dwm.exe in dwmcore.dll
-    //       over complex Mica/acrylic geometry at high zoom (two first-try reproductions in a
-    //       browser; zero with nearest). Do not ship 1 without re-testing that case.
+    //   1 = EXPERIMENTAL opt-in (issue #227): the edge-preserving smooth filter behind native
+    //       Magnifier's "smooth edges of images and text". This is the WHOLE gap to WM's
+    //       image and cursor quality - the pointer grows naturally with the zoom and stays
+    //       crisp instead of pixelated. The 2026-08-13 dwmcore crash (two first-try repros
+    //       over browser Mica/acrylic at high zoom) did NOT reproduce on 2026-08-22: full
+    //       stress suite (20x over heavy acrylic, zoom storms) + 3 rounds of max-zoom hard
+    //       pans over real Edge Mica/Settings, dwm PID unchanged. If dwm crashes return in
+    //       the field, this flag is the first suspect - drop the user to 0 and re-bisect.
+    //       KNOWN TRADE (field-settled 2026-08-22): during LEVEL ramps the filter
+    //       re-interpolates every edge per scale step - a slight shimmer nearest does not
+    //       have. Not our geometry/cadence/coherence (all instrumented and ruled out); WM
+    //       shows the same artifact character under its notchy ease. A nearest-during-ramp
+    //       hotswap was field-rejected: the filters disagree about sub-pixel phase, so every
+    //       swap shifted the image 1-2px even with the source snapped to integers.
+    //   0 = NEAREST: blocky magnification, but shimmer-free ramps and immune to the dwmcore
+    //       crash class above. The either/or is the user's; no dynamic switching.
     //   2..4 = undocumented modes the kernel accepts and round-trips. FIELD-TESTED 2026-08-13:
     //       all three render IDENTICALLY to nearest, i.e. they are aliases, not cheaper filters.
-    //       Mode 1 is the only real smooth path and it is the one that crashes. Do not re-test
-    //       these hoping for a middle ground - there isn't one on this Windows build.
+    //       Mode 1 is the only real smooth path. Do not re-test these hoping for a middle
+    //       ground - there isn't one on this Windows build.
     //   -1 = leave whatever DWM currently has alone.
     // The state is global to DWM and resets when DWM restarts, which is why smoothing appeared
-    // to come and go between builds; it is re-applied per magnification context.
+    // to come and go between builds; it is re-applied per magnification context. KNOWN
+    // INTERACTION: the tx keep-alive (txKeepAliveMaxLevel > 0, retired default 0) writes a
+    // value 1px off-true 144x/s; nearest masked that as sub-block noise, smoothing renders it
+    // as visible shaking. Keep the keep-alive off while smoothing is on.
     int txSamplingMode = 0;
     // MPO buster (issue #191, hot): 1 (default) = during transform GAME sessions on MPO-ENABLED
     // machines, show a fullscreen alpha-1 click-through ghost that demotes the game off its

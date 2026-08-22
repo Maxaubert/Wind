@@ -91,12 +91,21 @@ test('theme toggle writes uiTheme', async ({ page }) => {
 
 test('changes stage until Apply, then setConfig fires', async ({ page }) => {
   await page.goto('/');
-  // Staged via the alternate-keybinds toggle: the smooth-zoom toggle left the UI (always on).
-  await page.getByText('Alternate keybinds', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();
-  expect(await page.evaluate(() => window.__sets.filter(s => s.key === 'altKeybinds').length)).toBe(0);
+  // Staged via the high-resolution-cursor toggle (Cursor section; the alternate-keybinds
+  // gate left the UI 2026-08-22 - both keybind slots are always visible now).
+  await page.getByRole('button', { name: 'Cursor', exact: true }).click();
+  await page.getByText('High resolution cursor (experimental)', { exact: true })
+      .locator('xpath=../..').getByRole('checkbox').click();
+  expect(await page.evaluate(() => window.__sets.filter(s => s.key === 'txSamplingMode').length)).toBe(0);
   await page.getByRole('button', { name: 'Apply' }).click();
   const sets = await page.evaluate(() => window.__sets);
-  expect(sets.some(s => s.key === 'altKeybinds' && s.value === '1')).toBeTruthy();
+  expect(sets.some(s => s.key === 'txSamplingMode' && s.value === '1')).toBeTruthy();
+});
+
+test('each zoom direction is ONE row with TWO capture slots', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByText('Zoom in',  { exact: true }).locator('xpath=../..').getByRole('button')).toHaveCount(2);
+  await expect(page.getByText('Zoom out', { exact: true }).locator('xpath=../..').getByRole('button')).toHaveCount(2);
 });
 
 test('a slot holding both a side-button and a key shows BOTH bindings', async ({ page }) => {
@@ -105,7 +114,7 @@ test('a slot holding both a side-button and a key shows BOTH bindings', async ({
   // OR-combines the two, so both really fire - the keycap must list both. Showing only the button
   // hid the key binding, which is how PageUp/PageDown kept zooming while Settings read
   // "Mouse button 5" and offered nothing to clear.
-  const cap = page.getByText('Zoom in', { exact: true }).locator('xpath=../..').getByRole('button');
+  const cap = page.getByText('Zoom in', { exact: true }).locator('xpath=../..').getByRole('button').first();
   await expect(cap).toHaveText(/Mouse button 5/);
   await expect(cap).toHaveText(/PageUp/);
 });
@@ -177,7 +186,7 @@ test('Escape closes the dialog', async ({ page }) => {
 
 test('keybind capture writes a VK on keydown (live, no Apply needed)', async ({ page }) => {
   await page.goto('/');
-  await page.getByText('Zoom in', { exact: true }).locator('xpath=../..').getByRole('button').click();
+  await page.getByText('Zoom in', { exact: true }).locator('xpath=../..').getByRole('button').first().click();
   await page.keyboard.press('F2'); // keyCode 113; fires both keydown and keyup
   // Keybind writes are live (KeybindCapture calls setConfig immediately so the magnifier core
   // hot-reloads the new key and the hook stops swallowing the previous binding). No Apply step.
@@ -238,7 +247,8 @@ test('closing with unsaved changes asks before discarding', async ({ page }) => 
   // The title-bar X, not the footer Discard: both a footer button and the dialog are named
   // "Discard", so every button here is located precisely.
   const titleClose = page.locator('button.tbtn.close');
-  await page.getByText('Alternate keybinds', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();   // smooth-zoom toggle left the UI
+  await page.getByRole('button', { name: 'Cursor', exact: true }).click();
+  await page.getByText('High resolution cursor (experimental)', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();
   await titleClose.click();
   await expect(page.getByRole('dialog')).toContainText('Settings not applied');
   // Cancel keeps the window and the staged change.
@@ -342,7 +352,8 @@ test('delete is disabled on the last profile', async ({ page }) => {
 
 test('switching with staged changes raises the unsaved-changes guard', async ({ page }) => {
   await page.goto('/');
-  await page.getByText('Alternate keybinds', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();   // smooth-zoom toggle left the UI
+  await page.getByRole('button', { name: 'Cursor', exact: true }).click();
+  await page.getByText('High resolution cursor (experimental)', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();
   await page.getByRole('button', { name: /Default/ }).click();
   await page.getByRole('menuitemradio', { name: /Gaming/ }).click();
   await expect(page.getByText('Unsaved changes')).toBeVisible();
@@ -363,7 +374,8 @@ test('a failed profile action surfaces a visible error dialog', async ({ page })
 
 test('deleting a NON-active profile with staged changes skips the guard', async ({ page }) => {
   await page.goto('/');
-  await page.getByText('Alternate keybinds', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();   // smooth-zoom toggle left the UI
+  await page.getByRole('button', { name: 'Cursor', exact: true }).click();
+  await page.getByText('High resolution cursor (experimental)', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();
   await page.getByRole('button', { name: /Default/ }).click();
   await page.getByRole('menuitemradio', { name: /Gaming/ }).click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Delete' }).click();          // one-click delete
@@ -408,7 +420,7 @@ test('the Inspect row shows its real binding (cursorLockVk is loaded)', async ({
 
 test('forbidden keys are refused during keybind capture and capture stays armed', async ({ page }) => {
   await page.goto('/');
-  await page.getByText('Zoom in', { exact: true }).locator('xpath=../..').getByRole('button').click();
+  await page.getByText('Zoom in', { exact: true }).locator('xpath=../..').getByRole('button').first().click();
   await page.keyboard.press('Backspace');   // forbidden (would be swallowed system-wide)
   // Arming live-clears the previous binding (one zoomInVk=0 write is expected); the forbidden
   // key itself must never be written.
@@ -423,7 +435,7 @@ test('a model change writes the ini BEFORE requesting the relaunch', async ({ pa
   await page.goto('/');
   const row = page.getByText('Magnifier engine', { exact: true }).locator('xpath=../..');
   await row.getByRole('combobox').click();
-  await page.getByRole('option', { name: 'Windows Magnifier' }).click();
+  await page.getByRole('option', { name: 'System' }).click();
   await page.getByRole('button', { name: 'Apply' }).click();
   const sets = await page.evaluate(() => window.__sets);
   const iModel = sets.findIndex(s => s.key === 'model' && s.value === 'magnify');
@@ -437,7 +449,7 @@ test('a failed relaunch reverts the model dropdown and the ini', async ({ page }
   await page.goto('/');
   const row = page.getByText('Magnifier engine', { exact: true }).locator('xpath=../..');
   await row.getByRole('combobox').click();
-  await page.getByRole('option', { name: 'Windows Magnifier' }).click();
+  await page.getByRole('option', { name: 'System' }).click();
   await page.getByRole('button', { name: 'Apply' }).click();
   await expect(page.getByText("Couldn't restart Wind")).toBeVisible();
   const sets = await page.evaluate(() => window.__sets);

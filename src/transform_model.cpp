@@ -28,7 +28,7 @@ void TransformModel::resetTransformState() {
     ixTick_ = 0; ixPending_ = false;
     lastSpriteX_ = INT_MIN; lastSpriteY_ = INT_MIN;
     haveLastClick_ = false;
-    samplingApplied_ = false;   // re-apply bitmap smoothing on the next context (DWM-global state)
+    appliedSampling_ = -2;      // re-apply sampling mode on the next context (DWM-global state)
 }
 
 bool TransformModel::ensureMag() {
@@ -398,12 +398,20 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     }
     idleReleaseMs_ = cfg.txIdleReleaseMs;   // hot-reloadable release window
     if (!ensureMag()) return;   // lazy context: the session's first write brings DWM up
-    // Bitmap smoothing, once per magnification context. Without it DWM magnifies with nearest
-    // neighbour and the whole view - cursor included - is blocky; native Magnifier sets this at
-    // startup, which is why running it alongside used to smooth our session too. The flag is
-    // DWM-global and dies with a DWM restart, hence per-context rather than once per process.
-    if (cfg.txSamplingMode >= 0 && !samplingApplied_) {
-        samplingApplied_ = true;
+    // Bitmap smoothing (issue #197/#227), once per magnification context. The smooth filter
+    // is the WHOLE quality gap to native Magnifier: sharp magnified image and a cursor that
+    // grows naturally with the zoom instead of pixelating. Known trade, accepted after a full
+    // field investigation (2026-08-22): during LEVEL ramps the filter re-interpolates every
+    // edge per scale step - a slight shimmer that nearest does not have. It is NOT our
+    // geometry (written transforms proved sub-0.1px consistent), not write cadence, not
+    // frame coherence, not the pointer plane - and native Magnifier shows the same artifact
+    // character under its notchy ease. A nearest-during-ramp hotswap was field-tried and
+    // rejected: the filters disagree about sub-pixel phase, so every swap shifted the image
+    // 1-2px even with the source snapped to integers. One static filter, user's choice:
+    // txSamplingMode 0 (DEFAULT, nearest: shimmer-free ramps) or 1 (EXPERIMENTAL smooth).
+    // The flag is DWM-global and dies with a DWM restart, hence per-context re-apply.
+    if (cfg.txSamplingMode >= 0 && appliedSampling_ != cfg.txSamplingMode) {
+        appliedSampling_ = cfg.txSamplingMode;
         const bool ok = host_.setSamplingMode((unsigned)cfg.txSamplingMode);
         wind::Log(wind::LogLevel::Info, "transform", "bitmap smoothing %d applied=%d",
                   cfg.txSamplingMode, ok ? 1 : 0);
@@ -669,6 +677,13 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
                             (int)(r.cursorScreenY + 0.5) + mon_.y);
         else
             sprite_->moveTo(r.clickDesktopX + mon_.x, r.clickDesktopY + mon_.y);
+        // Keep the arrow branch's move dedupe truthful (issue #229): it compares against these,
+        // and a crosshair session that moved the window without updating them left the dedupe
+        // primed to skip a needed move on the first post-Inspect tick.
+        lastSpriteX_ = spriteBand16_ ? (int)(r.cursorScreenX + 0.5) + mon_.x
+                                     : r.clickDesktopX + mon_.x;
+        lastSpriteY_ = spriteBand16_ ? (int)(r.cursorScreenY + 0.5) + mon_.y
+                                     : r.clickDesktopY + mon_.y;
         sprite_->keepOnTop();
     } else if (useSprite_ && sprite_ && ex.drawCursor && level > 1.001) {
         // The REAL cursor is welded to the lens point above, so input is entirely native - but
