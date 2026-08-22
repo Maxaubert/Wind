@@ -134,19 +134,30 @@ foreach ($iniPath in @((Join-Path (Split-Path $WindExe) 'magnifier.ini'),
 
 try {
   # The contract: reset FIRST (unknown prior state), then the start tone, then hands off.
-  Reset-Zoom
+  Reset-Zoom $telemetry
   Start-Tone
   $ramSamples['start'] = Get-WindWorkingSetMB
 
   $loopUntil = if ($Suite -eq 'soak') { (Get-Date).AddMinutes($Minutes) } else { Get-Date }
   $pass = 0
+  # Backdrop reuse (v3): consecutive scenarios sharing kind|borderless|strength|underlay keep
+  # their windows - the quiesce settle is paid once per backdrop, not once per scenario.
+  $bp = $null; $ul = $null; $curSig = ''
+  $shell = New-Object -ComObject WScript.Shell
+  try {
   do {
     foreach ($sc in $suites[$Suite]) {
-      $bp = $null; $ul = $null
-      try {
-        # Underlay FIRST (sits beneath), then the measured backdrop takes the foreground.
-        if ($sc.underlay) { $ul = Start-Backdrop $sc.underlay $true }
-        $bp = Start-Backdrop $sc.kind $sc.borderless $sc.strength
+        $sig = "$($sc.kind)|$($sc.borderless)|$($sc.strength)|$($sc.underlay)"
+        if ($sig -ne $curSig) {
+          Stop-Backdrop $bp; if ($ul) { Stop-Backdrop $ul; $ul = $null }
+          # Underlay FIRST (sits beneath), then the measured backdrop takes the foreground.
+          if ($sc.underlay) { $ul = Start-Backdrop $sc.underlay $true }
+          $bp = Start-Backdrop $sc.kind $sc.borderless $sc.strength
+          $curSig = $sig
+        } else {
+          [void]$shell.AppActivate($bp.Id)      # keep the reused backdrop foreground
+          Start-Sleep -Milliseconds 150
+        }
         # Deterministic start: the cursor begins every scenario at the monitor centre.
         [TE]::MoveAbs([int]($sw / 2), [int]($sh / 2), $sw, $sh)
         Start-Sleep -Milliseconds 200
@@ -154,19 +165,19 @@ try {
         $t0 = Now-Ms
         Run-Program $sc.prog $sc.progS
         $t1 = Now-Ms
-        Reset-Zoom                             # closed contract: every scenario ends at 1.0x
+        Reset-Zoom $telemetry                  # closed contract: every scenario ends at 1.0x
         $phName = if ($Suite -eq 'soak') { "$($sc.name)#$pass" } else { $sc.name }
         $phases += @{ name = $phName; t0 = $t0; t1 = $t1; prog = $sc.prog }
-      } finally {
-        Stop-Backdrop $bp
-        if ($ul) { Stop-Backdrop $ul }
-      }
     }
     $pass++
   } while ((Get-Date) -lt $loopUntil)
+  } finally {
+    Stop-Backdrop $bp
+    if ($ul) { Stop-Backdrop $ul }
+  }
 
   $ramSamples['end'] = Get-WindWorkingSetMB
-  Reset-Zoom                                   # always end fully unzoomed
+  Reset-Zoom $telemetry                        # always end fully unzoomed
 } catch {
   $failedInfra = $_.Exception.Message
 } finally {
@@ -174,7 +185,9 @@ try {
 }
 
 # Health check BEFORE restarting Wind (a restart would mask a mid-suite crash).
-$healthBad = Test-Health $health0
+$health = Test-Health $health0
+$healthBad = @($health.bad)
+$healthInfo = @($health.info)
 Stop-Wind
 Restart-WindClean
 
@@ -229,13 +242,15 @@ if ($ramLeak -gt 60) { $fails++; Write-Host "RAM LEAK: +${ramLeak}MB over the su
 
 $rows | Format-Table -AutoSize | Out-String | Write-Host
 Write-Host ("RAM: start {0}MB end {1}MB (delta {2}MB)" -f $ramSamples['start'], $ramSamples['end'], $ramLeak)
-if ($healthBad.Count -eq 0) { Write-Host 'Health: Wind alive, dwm intact, no device-lost.' -ForegroundColor Green }
+foreach ($i in $healthInfo) { Write-Host "health info: $i" -ForegroundColor Yellow }
+if ($healthBad.Count -eq 0) { Write-Host 'Health: alive, dwm intact, no stranded clip/cursor, no device-lost.' -ForegroundColor Green }
 
 # ---- outputs --------------------------------------------------------------------------------
 $result = [ordered]@{
   suite = $Suite; stamp = $stamp; hz = $hz
   ramStartMB = $ramSamples['start']; ramEndMB = $ramSamples['end']; ramDeltaMB = $ramLeak
   health = $healthBad
+  healthInfo = $healthInfo
   scenarios = [ordered]@{}
   fails = $fails
 }

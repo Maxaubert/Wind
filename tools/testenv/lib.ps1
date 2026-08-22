@@ -37,6 +37,25 @@ public static class TE {
     i[0].mi.dx = (int)((x * 65535L) / (sw - 1)); i[0].mi.dy = (int)((y * 65535L) / (sh - 1));
     i[0].mi.dwFlags = 0x0001 | 0x8000; SendInput(1, i, Marshal.SizeOf(typeof(INPUT)));
   }
+  [DllImport("user32.dll")] public static extern bool GetClipCursor(out RECT r);
+  [DllImport("user32.dll")] public static extern bool GetCursorInfo(ref CURSORINFO ci);
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
+  [StructLayout(LayoutKind.Sequential)] public struct CURSORINFO { public int cbSize, flags; public IntPtr hCursor; public POINT pt; }
+  // Stranded-state tells (issue #225 v3): a ClipCursor rect smaller than the virtual screen
+  // after a suite = a stranded freeze clip; CURSOR_SHOWING == 0 = the OS cursor never came back.
+  public static string ClipState() {
+    RECT r; GetClipCursor(out r);
+    int vx = GetSystemMetrics(76), vy = GetSystemMetrics(77);
+    int vw = GetSystemMetrics(78), vh = GetSystemMetrics(79);
+    bool full = (r.L <= vx && r.T <= vy && r.R >= vx + vw && r.B >= vy + vh);
+    return full ? "full" : string.Format("CLIPPED {0},{1}-{2},{3}", r.L, r.T, r.R, r.B);
+  }
+  public static bool CursorShowing() {
+    var ci = new CURSORINFO(); ci.cbSize = Marshal.SizeOf(typeof(CURSORINFO));
+    if (!GetCursorInfo(ref ci)) return true;   // unknown: do not cry wolf
+    return (ci.flags & 1) != 0;
+  }
+
   // QPC milliseconds - the SAME clock Wind's telemetry stamps t_ms with, so the runner's
   // phase marks index directly into the telemetry file.
   public static double NowMs() {
@@ -150,11 +169,35 @@ function Clear-ZoomButtons {
   [TE]::XBtn($false, 1); [TE]::XBtn($false, 2)
   Start-Sleep -Milliseconds 120
 }
-function Reset-Zoom {
-  # Generous hold: from ANY level (maxLevel included) back to 1.0, regardless of outSpeed.
+# Read the CURRENT level from the live telemetry file's tail (Wind flushes every ~32 lines,
+# so the value is at most ~0.3s stale). Returns -1 when unavailable.
+function Get-LiveLevel([string]$TelemetryPath) {
+  if (-not $TelemetryPath -or -not (Test-Path $TelemetryPath)) { return -1 }
+  try {
+    $line = Get-Content $TelemetryPath -Tail 1
+    if (-not $line -or $line.StartsWith('t_ms')) { return -1 }
+    $c = $line.Split(',')
+    if ($c.Length -ge 5) { return [double]$c[4] } else { return -1 }
+  } catch { return -1 }
+}
+function Reset-Zoom([string]$TelemetryPath = '') {
+  # Closed loop when the telemetry tail is readable (release as soon as the level lands at
+  # 1.0, ~2s saved per reset); the generous open-loop hold is the fallback.
   Clear-ZoomButtons
-  [TE]::XBtn($true, 1); Start-Sleep -Seconds 3; [TE]::XBtn($false, 1)
-  Start-Sleep -Milliseconds 400
+  [TE]::XBtn($true, 1)
+  $closed = $false
+  if ($TelemetryPath) {
+    $deadline = (Get-Date).AddSeconds(4)
+    while ((Get-Date) -lt $deadline) {
+      Start-Sleep -Milliseconds 150
+      $lvl = Get-LiveLevel $TelemetryPath
+      if ($lvl -ge 0 -and $lvl -le 1.02) { $closed = $true; break }
+    }
+  }
+  if (-not $closed -and -not $TelemetryPath) { Start-Sleep -Seconds 3 }
+  elseif (-not $closed) { Start-Sleep -Milliseconds 800 }   # tail unreadable: brief top-up
+  [TE]::XBtn($false, 1)
+  Start-Sleep -Milliseconds 300
 }
 function Zoom-In([double]$Seconds) {
   Clear-ZoomButtons
@@ -216,30 +259,57 @@ function Stop-Backdrop($p) {
 function Get-HealthSnapshot {
   $dwm  = Get-Process -Name dwm  -ErrorAction SilentlyContinue | Select-Object -First 1
   $wind = Get-Process -Name Wind -ErrorAction SilentlyContinue | Select-Object -First 1
+  $churny = Join-Path $env:LOCALAPPDATA 'Wind\churny_apps.txt'
+  $log = Join-Path $env:LOCALAPPDATA 'Wind\logs\wind-core.log'
   @{ dwmPid = if ($dwm) { $dwm.Id } else { 0 }
+     dwmWsMB = if ($dwm) { [math]::Round($dwm.WorkingSet64 / 1MB, 0) } else { 0 }
      windPid = if ($wind) { $wind.Id } else { 0 }
+     churny = if (Test-Path $churny) { (Get-Content $churny -Raw) } else { '' }
+     logWarns = if (Test-Path $log) { @(Get-Content $log -Tail 6000 | Where-Object { $_ -match '  (WARN|ERROR) ' }).Count } else { 0 }
      at = Get-Date }
 }
 function Test-Health($Before) {
+  # Returns @{ bad = fail-worthy findings; info = report-only observations }.
   $after = Get-HealthSnapshot
-  $bad = @()
-  if ($after.windPid -eq 0)                    { $bad += 'Wind DIED during the suite' }
-  elseif ($after.windPid -ne $Before.windPid)  { $bad += 'Wind RESTARTED (crash filter?) during the suite' }
+  $bad = @(); $info = @()
+  if ($Before.windPid -ne 0) {                 # only meaningful when Wind was the one under test
+    if ($after.windPid -eq 0)                   { $bad += 'Wind DIED during the suite' }
+    elseif ($after.windPid -ne $Before.windPid) { $bad += 'Wind RESTARTED (crash filter?) during the suite' }
+  }
   if ($Before.dwmPid -ne 0 -and $after.dwmPid -ne $Before.dwmPid) { $bad += "dwm.exe RESTARTED (compositor crash: pid $($Before.dwmPid) -> $($after.dwmPid))" }
-  # Device-lost / TDR / reset lines in Wind's own log since the suite began.
-  $log = Join-Path $env:LOCALAPPDATA 'Wind\logs\wind-core.log'
-  if (Test-Path $log) {
-    $hits = Get-Content $log -Tail 4000 | Where-Object {
+  # Stranded teardown state: the nastiest regression class (issue #225 v3).
+  $clip = [TE]::ClipState()
+  if ($clip -ne 'full') { $bad += "STRANDED ClipCursor after the suite: $clip" }
+  if (-not [TE]::CursorShowing()) { $bad += 'OS cursor still HIDDEN after the suite' }
+  # churny_apps.txt growth = a device-lost fired and marked an exe mid-suite.
+  if ($after.churny -ne $Before.churny) {
+    $newLines = @(($after.churny -split "`n") | Where-Object { $_ -and ($Before.churny -notmatch [regex]::Escape($_)) })
+    $bad += "churny_apps.txt grew during the suite: $($newLines -join ', ')"
+  }
+  # dwm memory growth: the open dwm memory-exhaustion crash class - report always, fail huge.
+  $dwmDelta = $after.dwmWsMB - $Before.dwmWsMB
+  if ($dwmDelta -gt 300) { $bad += "dwm.exe RAM grew ${dwmDelta}MB during the suite" }
+  elseif ([math]::Abs($dwmDelta) -gt 20) { $info += "dwm RAM delta: ${dwmDelta}MB ($($Before.dwmWsMB) -> $($after.dwmWsMB))" }
+  # New WARN/ERROR volume in Wind's log (soft-error visibility even on green runs).
+  $warnDelta = $after.logWarns - $Before.logWarns
+  if ($warnDelta -gt 0) {
+    $log = Join-Path $env:LOCALAPPDATA 'Wind\logs\wind-core.log'
+    $recent = @(Get-Content $log -Tail 2000 | Where-Object { $_ -match '  (WARN|ERROR) ' } | Select-Object -Last 3)
+    $info += "log gained $warnDelta WARN/ERROR line(s); last: $($recent -join ' | ')"
+  }
+  # Device-lost / TDR / reset lines since the suite began.
+  $log2 = Join-Path $env:LOCALAPPDATA 'Wind\logs\wind-core.log'
+  if (Test-Path $log2) {
+    $hits = Get-Content $log2 -Tail 4000 | Where-Object {
       $_ -match 'device.?lost|TDR|driver reset|DXGI_ERROR' } | Select-Object -Last 3
     foreach ($h in $hits) {
-      # Only lines stamped after the suite started count.
       if ($h -match '^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})') {
         $ts = [datetime]::Parse($Matches[1] + 'Z').ToLocalTime()
         if ($ts -gt $Before.at) { $bad += "log: $h" }
       }
     }
   }
-  ,$bad
+  @{ bad = $bad; info = $info }
 }
 
 # ---- RAM sampling ----

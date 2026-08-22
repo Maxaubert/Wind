@@ -151,10 +151,21 @@ public static class BM {
       float l; int ox, oy; POINT p;
       if (MagGetFullscreenTransform(out l, out ox, out oy) && GetCursorPos(out p)) {
         if (l < LvlMin) LvlMin = l; if (l > LvlMax) LvlMax = l;
+        // Edge-pinned views legitimately stop updating: while either axis sits at its clamp,
+        // break the gap chain so pinned time never counts as a stall (v2 artifact at 4x).
+        bool pinned = false;
+        if (l > 1.01) {
+          double maxOffX = sw - sw / l;
+          // 2.5px margin: a follow-mode view can rest a pixel or two shy of the mathematical
+          // clamp when the CURSOR pins at the desktop edge (the 4x false-stall artifact).
+          pinned = ox <= 2.5 || ox >= maxOffX - 2.5;
+        }
         if (ox != lox || oy != loy) {
           double now = t.Elapsed.TotalMilliseconds;
-          if (lastChange >= 0) gaps.Add(now - lastChange);
+          if (lastChange >= 0 && !pinned) gaps.Add(now - lastChange);
           lastChange = now; changes++; lox = ox; loy = oy;
+        } else if (pinned) {
+          lastChange = -1;
         }
         if (l > 1.01) {
           double maxOff = sw - sw / l;
@@ -292,12 +303,14 @@ function Restore-MagRegistry {
 
 $driverDefs = @{
   wind = @{
-    Name = 'Wind'; ProcNames = @('Wind')
-    Prepare   = { Get-Process Magnify -EA SilentlyContinue | Stop-Process -Force -Confirm:$false; Stop-Wind; Start-Wind $null }
-    ZoomTo    = { param($lvl) [void][BM]::ZoomHoldUntil(2, $lvl, 6) }
+    Name = 'Wind'; ProcNames = @('Wind'); Telemetry = $true
+    Prepare   = { Get-Process Magnify -EA SilentlyContinue | Stop-Process -Force -Confirm:$false; Stop-Wind; Start-Wind $script:benchTele }
+    # Release at 94% of target: the eased ramp coasts the remainder (v2 overshot 14 -> 16.1).
+    ZoomTo    = { param($lvl) [void][BM]::ZoomHoldUntil(2, $lvl * 0.94, 6) }
     ZoomMax   = { [BM]::ZoomHoldUntil(2, 99, 4) }                     # hold to the cap; returns it
     ZoomReset = { [void][BM]::ZoomHoldUntil(1, 1.02, 8); Clear-ZoomButtons }
-    StartStorm= { param($cycles) [BM]::StartBtnStorm($cycles, 190) }
+    # 260ms holds reach ~2.5x per cycle - the same churn amplitude the WM wheel storm gets.
+    StartStorm= { param($cycles) [BM]::StartBtnStorm($cycles, 260) }
     Cleanup   = { }
   }
   native = @{
@@ -386,21 +399,55 @@ function Measure-Movement($drv, $sc, $moveStart) {
 
 [void][BM]::MagInitialize()
 $all = [ordered]@{}
-Write-Host "Magnifier benchmark v2 - drivers: $(($selected | ForEach-Object { $_.Name }) -join ', ')"
+$script:benchTele = Join-Path $env:TEMP "wind_bench_$stamp.csv"
+
+# ---- PresentMon: ONE elevated capture for the whole bench (needs admin for ETW; UAC is
+# silent on this rig). -qpc_time_s stamps rows on the same QPC clock as Now-Ms, so scenario
+# windows slice the capture directly. This is the screen-truth channel: real displayed frame
+# pacing, no MagGet 60Hz readback ceiling. ----
+$pmExe = Join-Path (Split-Path $PSScriptRoot) 'PresentMon.exe'
+$pmCsv = Join-Path $env:TEMP "wind_bench_pm_$stamp.csv"
+$pmProc = $null
+if (Test-Path $pmExe) {
+  $pmArgs = "-process_name dwm.exe -process_name Wind.exe -process_name Magnify.exe " +
+            "-output_file `"$pmCsv`" -qpc_time_s -timed 1800 -terminate_after_timed " +
+            "-stop_existing_session -no_top"
+  $pmProc = Start-Process $pmExe -ArgumentList $pmArgs -Verb RunAs -PassThru -WindowStyle Hidden
+  Start-Sleep -Milliseconds 1500
+} else {
+  Write-Host 'PresentMon.exe not found - screen-truth metrics will be absent.' -ForegroundColor Yellow
+}
+
+Write-Host "Magnifier benchmark v3 - drivers: $(($selected | ForEach-Object { $_.Name }) -join ', ')"
 Start-Tone
 try {
+  $healthRows = @()
   foreach ($drv in $selected) {
     Write-Host ">> $($drv.Name)"
     & $drv.Prepare
+    $health0 = Get-HealthSnapshot
     $drvResults = [ordered]@{}
+    $winTimes = @{}
+    # Backdrop reuse (v3): consecutive scenarios sharing kind|strength|underlay keep their
+    # windows - the 2.5s quiesce settle is paid once per backdrop, not once per scenario.
+    $bp = $null; $ul = $null; $curSig = ''
+    $shell = New-Object -ComObject WScript.Shell
+    try {
     foreach ($sc in $benchScenarios) {
-      $bp = $null; $ul = $null
-      try {
-        if ($sc.underlay) { $ul = Start-Backdrop $sc.underlay $true }
-        $bp = if ($sc.kind -eq 'gamesim') { Start-GameSim } else { Start-Backdrop $sc.kind $true $sc.strength }
+        $sig = "$($sc.kind)|$($sc.strength)|$($sc.underlay)"
+        if ($sig -ne $curSig) {
+          Stop-Backdrop $bp; if ($ul) { Stop-Backdrop $ul; $ul = $null }
+          if ($sc.underlay) { $ul = Start-Backdrop $sc.underlay $true }
+          $bp = if ($sc.kind -eq 'gamesim') { Start-GameSim } else { Start-Backdrop $sc.kind $true $sc.strength }
+          $curSig = $sig
+        } else {
+          [void]$shell.AppActivate($bp.Id)      # keep the reused backdrop foreground
+          Start-Sleep -Milliseconds 150
+        }
         [TE]::MoveAbs([int]($sw / 2), [int]($sh / 2), $sw, $sh)
         Start-Sleep -Milliseconds 250
         $entry = [ordered]@{}
+        $winT0 = Now-Ms
         switch ($sc.prog) {
           'resp' {
             & $drv.ZoomTo $sc.level
@@ -452,24 +499,107 @@ try {
         } else {
           $entry.ramAvgMB = [math]::Round([BM]::RamAvgMB, 1); $entry.ramMaxMB = [math]::Round([BM]::RamMaxMB, 1)
         }
+        $winTimes[$sc.name] = @{ t0 = $winT0; t1 = Now-Ms }
         $drvResults[$sc.name] = $entry
         if ($sc.prog -notin @('storm')) { & $drv.ZoomReset }
-      } finally {
-        Stop-Backdrop $bp
-        if ($ul) { Stop-Backdrop $ul }
-      }
     }
+    } finally {
+      Stop-Backdrop $bp
+      if ($ul) { Stop-Backdrop $ul }
+    }
+    # Health per driver, BEFORE its cleanup restarts anything.
+    $h = Test-Health $health0
+    foreach ($b in $h.bad)  { $healthRows += [pscustomobject]@{ driver = $drv.Name; kind = 'FAIL'; what = $b } }
+    foreach ($i in $h.info) { $healthRows += [pscustomobject]@{ driver = $drv.Name; kind = 'info'; what = $i } }
     & $drv.Cleanup
+    $drvResults['__windows'] = $winTimes
     $all[$drv.Name] = $drvResults
   }
 } finally {
   Stop-Tone
+  if ($pmProc) {
+    Start-Process powershell -Verb RunAs -WindowStyle Hidden -Wait -ArgumentList '-NoProfile','-Command',"Stop-Process -Name PresentMon -Force -ErrorAction SilentlyContinue"
+    Start-Sleep -Milliseconds 800              # let the CSV flush
+  }
   Get-Process Magnify -EA SilentlyContinue | Stop-Process -Force -Confirm:$false
   Get-Process gamesim -EA SilentlyContinue | Stop-Process -Force -Confirm:$false
   if ($regBackup.Count) { Restore-MagRegistry }
   [void][BM]::MagUninitialize()
   Restart-WindClean
 }
+
+# ---- post-hoc channels: screen truth (PresentMon) + source truth (Wind telemetry) -------------
+function Percentile($sorted, $q) { if ($sorted.Count -eq 0) { return -1 } $sorted[[int][math]::Min($sorted.Count - 1, $sorted.Count * $q)] }
+
+# PresentMon: slice dwm rows per scenario window; per-swapchain (mixing chains corrupts gaps),
+# score the busiest chain. Columns located by header name.
+$pmRows = $null
+if ($pmProc -and (Test-Path $pmCsv)) {
+  $pmAll = [System.IO.File]::ReadAllLines($pmCsv)
+  if ($pmAll.Count -gt 2) {
+    $hdr = $pmAll[0].TrimStart([char]0xFEFF).Split(',')   # the CSV header carries a BOM
+    $iApp = [array]::IndexOf($hdr, 'Application'); $iChain = [array]::IndexOf($hdr, 'SwapChainAddress')
+    # With -qpc_time_s the QPC clock is the QPCTime column; TimeInSeconds stays capture-relative.
+    $iTime = [array]::IndexOf($hdr, 'QPCTime')
+    if ($iTime -lt 0) { $iTime = [array]::IndexOf($hdr, 'TimeInSeconds') }
+    $iMbd = [array]::IndexOf($hdr, 'msBetweenDisplayChange')
+    if ($iMbd -lt 0) { $iMbd = [array]::IndexOf($hdr, 'msBetweenPresents') }
+    $pmRows = New-Object System.Collections.Generic.List[object]
+    foreach ($line in $pmAll) {
+      $c = $line.Split(',')
+      if ($c.Length -le [math]::Max($iMbd, $iTime) -or $c[$iApp] -ne 'dwm.exe') { continue }
+      $pmRows.Add(@{ chain = $c[$iChain]; t = [double]$c[$iTime]; ms = [double]$c[$iMbd] })
+    }
+  }
+}
+foreach ($name in @($all.Keys)) {
+  $r = $all[$name]; $winTimes = $r['__windows']
+  if (-not $winTimes) { continue }
+  foreach ($scName in @($winTimes.Keys)) {
+    $w = $winTimes[$scName]; $entry = $r[$scName]
+    if (-not $entry) { continue }
+    if ($pmRows) {
+      $t0 = $w.t0 / 1000.0; $t1 = $w.t1 / 1000.0
+      $inWin = $pmRows | Where-Object { $_.t -ge $t0 -and $_.t -le $t1 }
+      if ($inWin.Count -gt 20) {
+        $byChain = $inWin | Group-Object { $_.chain } | Sort-Object Count -Descending | Select-Object -First 1
+        $ms = @($byChain.Group | ForEach-Object { $_.ms } | Where-Object { $_ -gt 0 }) | Sort-Object
+        if ($ms.Count -gt 20) {
+          $entry.screenFps = [math]::Round(1000.0 / (($ms | Measure-Object -Average).Average), 1)
+          $entry.screenLow1 = [math]::Round(1000.0 / (Percentile $ms 0.99), 1)
+          $entry.screenP99Ms = [math]::Round((Percentile $ms 0.99), 1)
+        }
+      }
+    }
+  }
+}
+# Wind telemetry: per-scenario tick truth (144Hz source cadence, render engine included).
+$windName = ($selected | Where-Object { $_.Telemetry } | ForEach-Object { $_.Name }) | Select-Object -First 1
+if ($windName -and $all[$windName] -and (Test-Path $script:benchTele)) {
+  $winTimes = $all[$windName]['__windows']
+  $slices = @{}
+  foreach ($scName in $winTimes.Keys) { $slices[$scName] = New-Object System.Collections.Generic.List[double] }
+  $first = $true
+  foreach ($line in [System.IO.File]::ReadLines($script:benchTele)) {
+    if ($first) { $first = $false; continue }
+    $c = $line.Split(',')
+    if ($c.Length -lt 12 -or [int]$c[2] -ne 1) { continue }
+    $t = [double]$c[0]
+    foreach ($scName in $winTimes.Keys) {
+      $w = $winTimes[$scName]
+      if ($t -ge $w.t0 -and $t -le $w.t1) { $slices[$scName].Add([double]$c[1]); break }
+    }
+  }
+  foreach ($scName in $slices.Keys) {
+    $d = $slices[$scName] | Sort-Object
+    $entry = $all[$windName][$scName]
+    if ($entry -and $d.Count -gt 20) {
+      $entry.srcTickFps = [math]::Round(1000.0 / (($d | Measure-Object -Average).Average), 1)
+      $entry.srcLow1 = [math]::Round(1000.0 / (Percentile $d 0.99), 1)
+    }
+  }
+}
+foreach ($name in @($all.Keys)) { $all[$name].Remove('__windows') }
 
 # ---- scoreboard --------------------------------------------------------------------------------
 $moveNames = @('pan-solid-4x','pan-solid-14x','fast-solid-14x','zig-animated-10x',
@@ -480,9 +610,13 @@ foreach ($name in $all.Keys) {
   $move = $moveNames | ForEach-Object { $r[$_] } | Where-Object { $_ }
   $avg = { param($k) [math]::Round((($move | ForEach-Object { $_[$k] } | Where-Object { $_ -gt 0 }) | Measure-Object -Average).Average, 1) }
   $worstLow = ($move | ForEach-Object { $_['low1Fps'] } | Where-Object { $_ -gt 0 } | Measure-Object -Minimum).Minimum
+  $screenLows = @($move | ForEach-Object { $_['screenLow1'] } | Where-Object { $_ -gt 0 })
   $board += [pscustomobject]@{
     magnifier    = $name
     maxZoom      = $r['maxzoom-pan'].maxZoom
+    screenFps    = & $avg 'screenFps'
+    screenLow1   = if ($screenLows.Count) { ($screenLows | Measure-Object -Minimum).Minimum } else { $null }
+    srcLow1      = ($move | ForEach-Object { $_['srcLow1'] } | Where-Object { $_ -gt 0 } | Measure-Object -Minimum).Minimum
     avgViewFps   = & $avg 'viewFps'
     low1Fps      = $worstLow
     atCapLow1    = $r['maxzoom-pan'].low1Fps
@@ -497,21 +631,27 @@ foreach ($name in $all.Keys) {
   }
 }
 Write-Host ''
-Write-Host '=== SCOREBOARD (v2, harsh) ==='
+Write-Host '=== SCOREBOARD (v3: screen* = PresentMon truth, src* = Wind tick truth) ==='
 $board | Format-Table -AutoSize | Out-String | Write-Host
+if ($healthRows.Count) {
+  Write-Host '=== HEALTH ==='
+  $healthRows | Format-Table -AutoSize | Out-String | Write-Host
+} else {
+  Write-Host 'Health: all drivers clean (alive, no dwm restart, no stranded clip/cursor, no device-lost).' -ForegroundColor Green
+}
 
 # ---- outputs -----------------------------------------------------------------------------------
-$out = [ordered]@{ stamp = $stamp; version = 2; scenarios = $benchScenarios | ForEach-Object { $_.name }; drivers = $all; board = $board }
+$out = [ordered]@{ stamp = $stamp; version = 3; scenarios = $benchScenarios | ForEach-Object { $_.name }; drivers = $all; board = $board; health = $healthRows }
 $jsonPath = Join-Path $resultsDir "bench-$stamp.json"
 $out | ConvertTo-Json -Depth 6 | Set-Content $jsonPath
 $catalog = Join-Path $resultsDir 'catalog.csv'
-$hdr = 'stamp,magnifier,maxZoom,avgViewFps,low1Fps,atCapLow1,gameLow1,stormGapMax,stormOk,respMedMs,ramAvgMB,ramMaxMB,cpuAvgPct,acrylVideoLow1'
+$hdr = 'stamp,magnifier,maxZoom,screenFps,screenLow1,srcLow1,avgViewFps,low1Fps,atCapLow1,gameLow1,stormGapMax,stormOk,respMedMs,ramAvgMB,ramMaxMB,cpuAvgPct,acrylVideoLow1'
 if ((Test-Path $catalog) -and ((Get-Content $catalog -TotalCount 1) -ne $hdr)) {
-  Move-Item $catalog (Join-Path $resultsDir 'catalog-v1.csv') -Force   # header changed: archive
+  Move-Item $catalog (Join-Path $resultsDir "catalog-old-$stamp.csv") -Force   # header changed: archive
 }
 if (-not (Test-Path $catalog)) { $hdr | Set-Content $catalog }
 foreach ($b in $board) {
-  "$stamp,$($b.magnifier),$($b.maxZoom),$($b.avgViewFps),$($b.low1Fps),$($b.atCapLow1),$($b.gameLow1),$($b.stormGapMax),$($b.stormOk),$($b.respMedMs),$($b.ramAvgMB),$($b.ramMaxMB),$($b.cpuAvgPct),$($b.acrylVideoLow1)" | Add-Content $catalog
+  "$stamp,$($b.magnifier),$($b.maxZoom),$($b.screenFps),$($b.screenLow1),$($b.srcLow1),$($b.avgViewFps),$($b.low1Fps),$($b.atCapLow1),$($b.gameLow1),$($b.stormGapMax),$($b.stormOk),$($b.respMedMs),$($b.ramAvgMB),$($b.ramMaxMB),$($b.cpuAvgPct),$($b.acrylVideoLow1)" | Add-Content $catalog
 }
 Write-Host "Results: $jsonPath"
 Write-Host "Catalog: $catalog"
