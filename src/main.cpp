@@ -972,6 +972,23 @@ static void RunTick(TickState& t) {
                 if (pick && pick != t.model) t.model = pick;
             }
             t.vbounds = QueryVirtualBounds();   // refresh cached clip-detect bounds (topology may have changed)
+            // REFRESH RATE CAN CHANGE WITHOUT THE GEOMETRY CHANGING (issue #232). The retarget
+            // above only fires when SameMonitor is false, and that compares origin, size and
+            // device name - not the rate. A game switching to 60Hz at the desktop's resolution,
+            // or a driver-side refresh toggle, therefore left t.hz at its startup value forever.
+            // Everything derived from it is then wrong by that ratio: the timer pacing, the
+            // mapper's smoothing, the lock detector, and the tick counts TicksAtHz scales (its
+            // own comment notes a 144Hz-tuned count runs 2.4x longer at 60Hz). One
+            // EnumDisplaySettingsW per zoom-in is a cheap price for not being silently mistuned.
+            {
+                const int curHz = DetectRefreshHz(t.mon.device);
+                if (curHz > 0 && curHz != t.hz) {
+                    wind::Log(wind::LogLevel::Info, "tick", "refresh rate %dHz -> %dHz", t.hz, curHz);
+                    t.hz = curHz;
+                    t.mapper = CursorMapper(t.mon.w, t.mon.h, t.cfg.cursorSmoothing, t.hz);
+                    t.detector.setTickRate(t.hz);
+                }
+            }
             POINT pt; GetCursorPos(&pt);
             t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y);   // virtual -> local monitor coords
             t.lastSetVirtual = pt;        // baseline for the OS-cursor delta (first delta = 0)
