@@ -22,6 +22,12 @@ public:
         : fastPan_(fastPan), smoothPan_(smoothPan), useSprite_(useSprite),
           zorderBand_(zorderBand), spriteBand16_(spriteBand16) {}
     bool initialize(const MonitorTarget& monitor) override;
+    // MONITOR GEOMETRY CAN CHANGE UNDER A LIVE SESSION (issue #230). mon_ feeds the clamp bounds in
+    // ComputeMagTransform, the sprite's placement offsets and the MagSetInputTransform rects, and
+    // it used to be written once at startup: retarget() was declared render-only, so a display-mode
+    // change - a game switching to a lower resolution - left the transform clamping against the old
+    // size and the view could be panned off the real desktop.
+    bool retarget(const MonitorTarget& m) override;
     void shutdown() override;
     bool ready() const override { return ready_; }
     void hideSystemCursor(bool hide) override;

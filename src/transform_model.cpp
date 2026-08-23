@@ -823,6 +823,23 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     }
 }
 
+bool TransformModel::retarget(const MonitorTarget& m) {
+    if (m.w <= 0 || m.h <= 0) return false;          // a bogus target would clamp to nothing
+    if (m.x == mon_.x && m.y == mon_.y && m.w == mon_.w && m.h == mon_.h) return true;
+    wind::Log(wind::LogLevel::Info, "transform", "retarget %dx%d at (%d,%d) -> %dx%d at (%d,%d)",
+              mon_.w, mon_.h, mon_.x, mon_.y, m.w, m.h, m.x, m.y);
+    mon_ = m;
+    // The cached level/translation describe the OLD geometry, and the write path skips a value it
+    // believes DWM already holds - so without this the first write after a resolution change is
+    // suppressed and the stale transform stays on screen. It also forces the input-transform rects
+    // to be republished, which are likewise sized from mon_.
+    resetTransformState();
+    // The MPO ghost is created at monitor bounds; leave it correct for the new ones.
+    mpoGhost_.hide();
+    mpoGhost_.create(mon_.x, mon_.y, mon_.w, mon_.h);
+    return true;
+}
+
 void TransformModel::shutdown() {
     teardownMag();
     if (sprite_) sprite_->destroy();
