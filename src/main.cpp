@@ -704,7 +704,16 @@ static void RunTick(TickState& t) {
                 tmHot->setIdleReleaseMs(nc.txIdleReleaseMs);
             t.cfg = nc;   // pick up renderer knobs (smoothing, filter, cursor scale, zoom speed)
             t.fgCacheHwnd = nullptr;   // transformExclude may have changed: re-resolve predicates
+            // PRESERVE THE LIVE ZOOM ACROSS THE RELOAD (issue #234). ZoomController starts at its
+            // minimum, so rebuilding it for a possibly-changed maxLevel used to drop whatever the
+            // user was zoomed to: change any core setting while zoomed and the view collapsed to
+            // 1x instantly. That is exactly the moment someone tunes zoom speed or smoothing and
+            // watches the effect. setLevel clamps into the new range, so a maxLevel lowered below
+            // the current level lands on the new ceiling rather than snapping home. The mapper's
+            // centre is preserved two lines below for the same reason; the level was just missed.
+            const double keepLevel = t.zoom.level();
             t.zoom = ZoomController(1.0, nc.maxLevel);
+            t.zoom.setLevel(keepLevel);
             double ocx = t.mapper.centerX(), ocy = t.mapper.centerY();   // preserve position
             t.mapper = CursorMapper(t.mon.w, t.mon.h, nc.cursorSmoothing, t.hz);
             t.mapper.reset(ocx, ocy);
