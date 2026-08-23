@@ -926,10 +926,23 @@ static void RunTick(TickState& t) {
             // zooms could hand a secondary-monitor session the transform engine (or a primary
             // game session the render one). Retarget through the render model: it owns the
             // overlay, and hybrid may still be holding the transform half from the last session.
-            if (zoomed && t.cfg.multiMonitor) {
-                MonitorTarget nt = MonitorUnderCursor();
+            // multiMonitor decides WHICH monitor to follow, not WHETHER to notice the current
+            // one's geometry (issue #230). It used to gate both, so with it off - the shipped
+            // default - a display-mode change was never picked up at all; and with it on, only the
+            // render model was retargeted, leaving the transform clamping against the old size.
+            // A game that switches to a lower resolution therefore let the view pan off the real
+            // desktop. Both engines are retargeted now, and the geometry is tracked either way.
+            if (zoomed) {
+                MonitorTarget nt = t.cfg.multiMonitor ? MonitorUnderCursor() : PrimaryMonitor();
                 IMagnifierModel* rt = t.mRender ? t.mRender : t.model;
-                if (!SameMonitor(nt, t.mon) && rt->retarget(nt)) {
+                bool ok = SameMonitor(nt, t.mon) ? false : rt->retarget(nt);
+                // The transform half owns its own bounds and must follow even when the render
+                // half refuses (retarget returns false across adapters, where the overlay cannot
+                // move but the transform is still valid on the new geometry).
+                if (!SameMonitor(nt, t.mon) && t.mTransform && t.mTransform != rt) {
+                    if (t.mTransform->retarget(nt)) ok = true;
+                }
+                if (ok) {
                     t.mon = nt;
                     int nhz = DetectRefreshHz(nt.device);   // pace off the new monitor's refresh (#74)
                     if (nhz > 0) t.hz = nhz;
