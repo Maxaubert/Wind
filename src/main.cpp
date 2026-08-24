@@ -632,7 +632,7 @@ static void RefreshFgCache(TickState& t, HWND fgw) {
     t.fgCacheChurny   = IsChurnyFg(fgw);
     t.fgCacheBackdrop = HasSystemBackdrop(fgw);
     t.fgCacheProtected = IsCaptureProtectedFg(fgw);
-    t.fgCacheRenderExcl = IsExeInList(ExeNameOf(fgw), t.cfg.renderExclude);
+    t.fgCacheRenderExcl = FgExeInList(fgw, t.cfg.renderExclude);   // same narrowing as transformExclude
 }
 
 // Fill the per-window-type half of the pick inputs. Both pick sites (zoom-in and the mid-zoom
