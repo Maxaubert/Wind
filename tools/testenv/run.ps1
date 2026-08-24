@@ -24,7 +24,7 @@
 # dwm.exe not restarted, no device-lost in the log) verdict every suite - they are the primary
 # stress-suite outcome.
 param(
-  [ValidateSet('iterate','wobble','rapid','quick','full','stress','soak')] [string]$Suite = 'rapid',
+  [ValidateSet('iterate','wobble','acryl','rapid','quick','full','stress','soak')] [string]$Suite = 'rapid',
   [switch]$NoFailFast,                # fail-fast is on for iterate/rapid/quick/full
   [int]$Minutes = 30,                 # soak only
   [switch]$CI,                        # compare vs baselines.json; nonzero exit on regression
@@ -75,6 +75,15 @@ $suites = @{
     (S 'acryl-heavy-video'   'acrylic'  $true  0.65 'pan'   6 'heavy' 'animated'),
     (S 'animated-pan'        'animated' $true  0.60 'pan'   6)
   );
+  # The three scenarios that carry the acrylic-hitching defect, and one solid control so a run
+  # that is simply having a bad minute is distinguishable from a real effect. ~2.5 min, which is
+  # what makes it usable for screening a list of candidates rather than a pair.
+  acryl = @(
+    (S 'solid-zigzag'        'solid'    $false 0.55 'zig'   8),
+    (S 'acryl-light-zigzag'  'acrylic'  $true  0.60 'zig'   8 'light' 'solid'),
+    (S 'acryl-heavy-zigzag'  'acrylic'  $true  0.65 'zig'  10 'heavy' 'solid'),
+    (S 'acryl-heavy-fastpan' 'acrylic'  $true  0.65 'fast'  6 'heavy' 'solid')
+  );
   full = @(
     (S 'solid-zigzag'        'solid'    $false 0.55 'zig'   8),
     (S 'solid-pan'           'solid'    $false 0.55 'pan'   8),
@@ -102,6 +111,10 @@ $suites = @{
   # Noise backdrop: aperiodic texture, the only material a correlation-style check can use.
   wobble = @(
     (S 'wobble-pan'          'noise'    $false 0.42 'strokes' 0),
+    # RAMP SHAKE: zoom cycles with the hand completely still. A centred view must hold the
+    # cursor on the screen centre at every level, so anything that moves is the shake Max
+    # reports on the high-resolution cursor - and the steady-state checks cannot see it.
+    (S 'wobble-ramp'         'noise'    $false 0    'rezoom' 0),
     # The clamped case: the view pinned against an edge, where the cursor must cross the screen
     # itself. Field-reported as the worst wobble and invisible to every unclamped scenario.
     (S 'wobble-clamped'      'noise'    $false 0.42 'clamp'   0)
@@ -156,6 +169,15 @@ function Test-NonNegotiable($a, [double]$cap, [bool]$isStress) {
     $rate = 1000.0 * $a.hitches / $a.ticks
     if ($rate -gt 12.0) { $why += ("hitchRate={0:N1}/1000 ticks" -f $rate) }
   }
+  # THE ZOOM MUST STILL BE A RAMP (2026-08-23). Every other gate here can be satisfied by a
+  # magnifier that does less work, and txGrid=100 proved it: 68% fewer hitches, ramp shimmer gone,
+  # a clean 16/16 full suite - and the zoom had become a single ~1.2x step with no glide at all.
+  # The field caught it in seconds; not one gate did, because they check for hitching, cap escapes
+  # and back-steps, all of which a barely-moving zoom passes easily. A continuous ramp advances the
+  # applied level by well under 1% per tick; 5% is already visible notching.
+  if ($a.rampStepMaxPct -and $a.rampStepMaxPct -gt 5.0) {
+    $why += "rampStepMax=$($a.rampStepMaxPct)% (the zoom is stepping, not ramping)"
+  }
   if ($a.maxLevel -gt $cap + 0.05)           { $why += "level ESCAPED cap $cap : $($a.maxLevel)" }
   if ($a.backSteps -gt 0 -and -not $isStress) { $why += "backSteps=$($a.backSteps)" }
   if ($a.jitP95 -and $a.jitP95 -gt 25.0 -and -not $isStress) { $why += "jitP95=$($a.jitP95)px" }
@@ -173,13 +195,33 @@ function Test-NonNegotiable($a, [double]$cap, [bool]$isStress) {
   # Cheap proxies were tried first and all read ZERO on wobbly builds: writes-per-frame,
   # optical correlation (impossible here - captures of a magnified view come back
   # byte-identical), and composite-boundary lag. This one measures the artifact itself.
-  if ($a.sprOffMax -and $a.sprOffMax -gt 3.0) {
+  #
+  # SCOPED TO THE WOBBLE SUITE (corrected 2026-08-23), because outside it this measures something
+  # legitimate. It is the distance from the sprite to the SCREEN CENTRE, which assumes the view is
+  # centred on the pointer - true under a weld, but the shipped default is free-cursor, where the
+  # pointer is meant to move within the view. On origin/main the pan-heavy scenarios measure 80px
+  # at 4.5x and 558px at 31x, and both work out to the SAME ~18 desktop pixels, so it is a fixed
+  # pointer-to-centre offset magnified by the zoom, not a cursor drawn in the wrong place: the
+  # telemetry for those frames has spr_x/spr_y equal to cur_x/cur_y to the pixel, meaning the
+  # sprite is exactly on the content the pointer addresses, which is the thing that actually
+  # matters. The wobble suite's strokes are short enough that the view stays on the pointer, so
+  # there the assumption holds and 3px remains the right threshold - it is where this check caught
+  # every hook-write build. Elsewhere the number is still reported, just not fatal.
+  if ($Suite -eq 'wobble' -and $a.sprOffMax -and $a.sprOffMax -gt 3.0) {
     $why += "sprite off-centre max=$($a.sprOffMax)px (two-cursor wobble)"
   }
   # SPRITE WINDOW LAG: the window manager had the sprite somewhere other than where Wind asked
   # at composite time - DWM magnified a stale sprite position while the view had moved on.
   # Independent of the off-centre check above (that one reads a single tick's own values, which
   # are coherent by construction); this one catches a placement that has not landed.
+  # TINY CURSOR (issue #229): the drawn cursor must scale with the zoom. Our sprite is
+  # magnified with the content (on-screen height = nativeH * level); a cursor handed to DWM
+  # unmagnified stays at nativeH however far you zoom - #227 shipped that by accident and no
+  # metric saw it, because nothing looked at cursor SIZE. cpx/level is constant when correct,
+  # so a median far below the observed maximum means it stopped growing.
+  if ($a.curScaleRatio -and $a.curScaleRatio -lt 0.6) {
+    $why += "cursor not scaling with zoom (tiny cursor, ratio $($a.curScaleRatio))"
+  }
   if ($a.sprLagMax -and $a.sprLagMax -gt 3.0) {
     $why += "sprite window lag max=$($a.sprLagMax)px (stale placement at composite)"
   }
@@ -199,6 +241,57 @@ if ($foreign.Count -gt 0) {
   Write-Host 'cursor metric taken alongside it is invalid.' -ForegroundColor Red
   exit 3
 }
+# A BACKDROP LEFT OVER FROM A KILLED RUN POISONS EVERY RUN AFTER IT (2026-08-23). Each backdrop is
+# a full-screen acrylic window, and a run that dies before Stop-AllBackdrops leaves it on screen
+# where it keeps costing DWM a blur pass forever. Three of them survived a killed A/B and turned a
+# healthy machine into 16 failed scenarios at dtP99 17ms, in BOTH arms - which reads exactly like a
+# catastrophic regression rather than like dirty state. Clear them before measuring anything.
+# Hold the display awake for the run (see KeepDisplayAwake): a sleeping panel drops DWM to ~13Hz
+# and turns every measurement in the suite into noise that looks like a catastrophic regression.
+[TE]::KeepDisplayAwake()
+
+# ONE SUITE AT A TIME (2026-08-23). Two drivers running together fight over the single Wind
+# instance and the single ini: each stops the other's magnifier and overwrites its configuration.
+# That produced a screen of NO-DATA, knobs that vanished from the ini, and Wind restarting every
+# 5.5 seconds - which read convincingly as a crash loop in the magnifier and cost a real hunt
+# before the cause turned out to be two of my own scripts launched back to back.
+$lock = Join-Path $env:TEMP 'wind_testenv.lock'
+if (Test-Path $lock) {
+  $age = (Get-Date) - (Get-Item $lock).LastWriteTime
+  $holder = (Get-Content $lock -ErrorAction SilentlyContinue) -join ' '
+  if ($age.TotalMinutes -lt 45) {
+    Write-Host "ABORT: another suite is running ($holder, started $([int]$age.TotalMinutes)m ago)." -ForegroundColor Red
+    Write-Host 'Two suites share one Wind and one ini and will corrupt each other. Wait, or delete' -ForegroundColor Red
+    Write-Host "  $lock" -ForegroundColor Red
+    exit 6
+  }
+  Write-Host "Clearing a stale suite lock ($([int]$age.TotalMinutes)m old)." -ForegroundColor Yellow
+}
+Set-Content $lock "suite=$Suite pid=$PID"
+# The ini is the configuration under test, so anything that edits it mid-run invalidates the run.
+# The usual culprit is the Settings window, which live-mirrors the active profile back into it -
+# but only when something changes, so an idle one is harmless and blocking on its mere presence
+# stopped legitimate work. Watching the file itself catches it, and catches anything else too.
+$iniPath = Join-Path $env:LOCALAPPDATA 'Wind\magnifier.ini'
+$iniStampAtStart = if (Test-Path $iniPath) { (Get-Item $iniPath).LastWriteTimeUtc } else { [datetime]::MinValue }
+
+$hz = Get-CompositeHz
+if ($hz -lt 50) {
+  Write-Host "ABORT: DWM is compositing at ${hz}Hz - the display is asleep or off." -ForegroundColor Red
+  Write-Host 'Every timing in the suite would be invalid: a sleeping panel produces 80-150ms frames,' -ForegroundColor Red
+  Write-Host 'fails every scenario on hitching, and returns screen captures that never refresh.' -ForegroundColor Red
+  Write-Host 'Wake the display and re-run. It cannot be woken from here - injected input, SetCursorPos' -ForegroundColor Red
+  Write-Host 'and the monitor-power broadcast were all tried.' -ForegroundColor Red
+  exit 4
+}
+
+$stray = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+           Where-Object { $_.CommandLine -match 'backdrop\.ps1' })
+if ($stray.Count -gt 0) {
+  Write-Host "Clearing $($stray.Count) leftover backdrop window(s) from an earlier run." -ForegroundColor Yellow
+  Stop-AllBackdrops
+}
+
 Write-Host "Wind proving ground - suite '$Suite' (telemetry: $telemetry)"
 Write-Host 'Restarting Wind with telemetry...'
 Stop-Wind
@@ -344,7 +437,10 @@ foreach ($ph in $phases) {
     lagP95 = $a.lagP95; lagJumpP95 = $a.lagJumpP95; lagJumpMax = $a.lagJumpMax
     sprOffMed = $a.sprOffMed; sprOffP95 = $a.sprOffP95; sprOffMax = $a.sprOffMax
     sprLagP95 = $a.sprLagP95; sprLagMax = $a.sprLagMax; sprLagPct = $a.sprLagPct
-    clampLagP95 = $a.clampLagP95; clampLagMax = $a.clampLagMax
+    clampLagP95 = $a.clampLagP95; clampLagMax = $a.clampLagMax; clampLagN = $a.clampLagN
+    rampStepMaxPct = $a.rampStepMaxPct; rampStepP95Pct = $a.rampStepP95Pct; rampLevels = $a.rampLevels
+    curScaleRatio = $a.curScaleRatio; curScaleMin = $a.curScaleMin
+    rampShakeP95 = $a.rampShakeP95; rampShakeMax = $a.rampShakeMax
     hookWrites = $a.hookWrites
     weldedPct = $a.weldedPct
     backSteps = $a.backSteps; maxJump = $a.maxJump
@@ -363,7 +459,15 @@ foreach ($h in $healthBad) {
 if ($ramLeak -gt 60) { $fails++; Write-Host "RAM LEAK: +${ramLeak}MB over the suite" -ForegroundColor Red }
 
 $rows | Format-Table -AutoSize -Property scenario, verdict, engine, ticks, maxLevel, dtP95, dtP99,
-  hitches, devMed, devP95, jitP95, sprOffMax, sprLagMax, clampLagP95, clampLagMax, why | Out-String | Write-Host
+  hitches, devMed, devP95, jitP95, sprOffMax, clampLagP95, rampStepMaxPct, rampShakeP95, curScaleRatio, why | Out-String | Write-Host
+# Release the one-suite-at-a-time lock, and say so if the ini moved under the run: the whole
+# comparison is meaningless if the configuration changed halfway, and silence there is how a
+# corrupted run gets reported as a result.
+Remove-Item (Join-Path $env:TEMP 'wind_testenv.lock') -ErrorAction SilentlyContinue
+if ((Test-Path $iniPath) -and (Get-Item $iniPath).LastWriteTimeUtc -ne $iniStampAtStart) {
+  Write-Host 'WARNING: magnifier.ini was modified during this run - the configuration measured is' -ForegroundColor Red
+  Write-Host 'not necessarily the one it started with. Settings window open, or two suites at once?' -ForegroundColor Red
+}
 Write-Host ("RAM: start {0}MB end {1}MB (delta {2}MB)" -f $ramSamples['start'], $ramSamples['end'], $ramLeak)
 foreach ($i in $healthInfo) { Write-Host "health info: $i" -ForegroundColor Yellow }
 if ($healthBad.Count -eq 0) { Write-Host 'Health: alive, dwm intact, no stranded clip/cursor, no device-lost.' -ForegroundColor Green }
