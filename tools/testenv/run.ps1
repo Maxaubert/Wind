@@ -175,8 +175,20 @@ function Test-NonNegotiable($a, [double]$cap, [bool]$isStress) {
   # The field caught it in seconds; not one gate did, because they check for hitching, cap escapes
   # and back-steps, all of which a barely-moving zoom passes easily. A continuous ramp advances the
   # applied level by well under 1% per tick; 5% is already visible notching.
-  if ($a.rampStepMaxPct -and $a.rampStepMaxPct -gt 5.0) {
-    $why += "rampStepMax=$($a.rampStepMaxPct)% (the zoom is stepping, not ramping)"
+  #
+  # CALIBRATED 2026-08-24, after the first version false-failed a perfectly smooth ramp. It gated on
+  # the MAXIMUM step, which is not a measure of quantization at all: the level advances in
+  # proportion to the tick's dt, so a single hitched tick necessarily takes a proportionally bigger
+  # step. Gating the max therefore re-detected hitching under a misleading name, and a legitimate
+  # ramp at zoomInSpeed 2.25 read 5.65% max while its p95 was 2.85% across 726 distinct levels.
+  # Both real statistics are gated instead, and a quantized zoom fails them by an order of
+  # magnitude rather than a hair: the txGrid=100 ladder that motivated this gate steps 10% per
+  # move and visits about ten levels where a ramp visits hundreds.
+  if ($a.rampStepP95Pct -and $a.rampStepP95Pct -gt 6.0) {
+    $why += "rampStepP95=$($a.rampStepP95Pct)% (the zoom is stepping, not ramping)"
+  }
+  if ($a.rampLevels -and $a.rampLevels -lt 40) {
+    $why += "rampLevels=$($a.rampLevels) (too few distinct levels to be a glide)"
   }
   if ($a.maxLevel -gt $cap + 0.05)           { $why += "level ESCAPED cap $cap : $($a.maxLevel)" }
   if ($a.backSteps -gt 0 -and -not $isStress) { $why += "backSteps=$($a.backSteps)" }
