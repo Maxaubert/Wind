@@ -19,7 +19,7 @@
 # The grid is a visual aid for the human observer (flicker/stutter is easy to SEE against it);
 # the harness itself measures via telemetry, not pixels.
 param(
-  [ValidateSet('solid','white','acrylic','acrylLight','acrylHeavy','animated','noise')] [string]$Kind = 'solid',
+  [ValidateSet('solid','white','black','acrylic','acrylLight','acrylHeavy','animated','noise')] [string]$Kind = 'solid',
   # Acrylic strength ladder (issue #225 round 2): tint alpha over the blur. 'glass' is almost
   # pure blur (the "almost completely acrylic" case), 'heavy' the dense Prism-class tint.
   [ValidateSet('glass','light','mid','heavy')] [string]$Strength = 'heavy',
@@ -61,12 +61,18 @@ $f.WindowState = 'Maximized'
 
 $acrylic = $Kind -eq 'acrylic'
 $noise   = $Kind -eq 'noise'
-$grid    = $Kind -ne 'white' -and -not $noise
+# 'black' is for the dual-cursor area probe: the count of bright pixels on screen has to BE the
+# cursor, so this kind paints flat black and draws no grid - a grid line is bright pixels that
+# move with the view and would swamp the very signal the probe measures.
+$black   = $Kind -eq 'black'
+$grid    = $Kind -ne 'white' -and -not $noise -and -not $black
 $script:offset = 0
 
 if ($acrylic) {
   $f.BackColor = [Drawing.Color]::Black
   $f.TransparencyKey = [Drawing.Color]::Black
+} elseif ($black) {
+  $f.BackColor = [Drawing.Color]::Black   # opaque, and NOT a transparency key: it must be painted
 } else {
   $f.BackColor = [Drawing.Color]::White
 }

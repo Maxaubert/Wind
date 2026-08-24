@@ -94,7 +94,11 @@ static int DetectRefreshHz(const wchar_t* device = nullptr) {
     const wchar_t* dev = (device && device[0]) ? device : nullptr;
     if (EnumDisplaySettingsW(dev, ENUM_CURRENT_SETTINGS, &dm) && dm.dmDisplayFrequency > 1)
         return (int)dm.dmDisplayFrequency;
-    return 60;
+    // 0, NOT a 60 fallback. A caller cannot otherwise tell a failed query from a real 60Hz panel,
+    // and issue #232 made this run on every zoom-in rather than only on a monitor change: one
+    // transient failure would have pinned a 144Hz rig to 60 for the life of the process, with every
+    // tick-derived timing scaled 2.4x wrong. Callers substitute their own default.
+    return 0;
 }
 
 // Small tick windows were field-tuned in TICKS on the 144Hz dev rig; a tick is one refresh, so
@@ -2316,7 +2320,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             ts.mapper.reset(pt.x - ts.mon.x, pt.y - ts.mon.y);
             renderEngine.hideSystemCursor(true);
             LARGE_INTEGER f, a{}, b; QueryPerformanceFrequency(&f);
-            const double target = 1.0 / DetectRefreshHz();
+            const int probeHz = DetectRefreshHz();
+            const double target = 1.0 / (probeHz > 0 ? probeHz : 60);
             double elapsed = 0.0, sumDt = 0.0, maxDt = 0.0; int frames = 0, hitches = 0, big = 0;
             bool first = true;
             QueryPerformanceCounter(&a);
@@ -2419,6 +2424,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // Auto-detect the display refresh rate so we never assume a fixed rate (the dev's 144Hz).
     // Paces the idle/1x loop and the vsync=0 path; while zoomed, DwmFlush/vsync pace instead.
     ts.hz = DetectRefreshHz();
+    if (ts.hz <= 0) ts.hz = 60;              // query failed at startup: assume the safe common case
     // Everything tuned in ticks (lock-detector streaks/windows, cursor smoothing inertia)
     // derives from the detected rate too, so a tick stays the same real-time span (issue #223).
     ts.detector.setTickRate(ts.hz);
