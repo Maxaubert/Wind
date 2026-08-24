@@ -3,6 +3,10 @@
 
 using wind::EnginePickInputs;
 using wind::ShouldPickTransform;
+using wind::ClassifyWindow;
+using wind::WindowCategory;
+using wind::EnginePref;
+using wind::ParseEnginePref;
 
 static EnginePickInputs game() {
     EnginePickInputs in;
@@ -87,5 +91,90 @@ TEST_CASE("the desktop path is vetoed off the primary monitor (multiMonitor seco
     EnginePickInputs in;
     in.desktopTransformOptIn = true; in.inputTransformOk = true;
     in.primaryMonitor = false;
+    CHECK_FALSE(ShouldPickTransform(in));
+}
+
+// ---- per-window-type engine selection ---------------------------------------------------------
+
+TEST_CASE("classification: game beats acrylic, shell desktop is never a game") {
+    // A fullscreen game that also declares a Mica backdrop is still a GAME.
+    CHECK((ClassifyWindow(true, true, false, true) == WindowCategory::Game));
+    CHECK((ClassifyWindow(true, true, false, false) == WindowCategory::Game));
+    // Win+D reads as a borderless cover (issue #172) but is the desktop, not a game.
+    CHECK((ClassifyWindow(true, true, true, false) == WindowCategory::Desktop));
+    CHECK((ClassifyWindow(false, false, false, true) == WindowCategory::Acrylic));
+    CHECK((ClassifyWindow(false, false, false, false) == WindowCategory::Other));
+}
+
+TEST_CASE("engine preference parsing falls back to auto, never to a hard pin") {
+    CHECK((ParseEnginePref("transform") == EnginePref::Transform));
+    CHECK((ParseEnginePref("render")    == EnginePref::Render));
+    CHECK((ParseEnginePref("auto")      == EnginePref::Auto));
+    CHECK((ParseEnginePref("")          == EnginePref::Auto));
+    CHECK((ParseEnginePref("Transform") == EnginePref::Auto));   // case-sensitive by design
+    CHECK((ParseEnginePref("nonsense")  == EnginePref::Auto));
+}
+
+TEST_CASE("auto is byte-for-byte the old behaviour") {
+    // The whole safety story for this feature: an untouched install has every category on auto,
+    // so nothing about the historical pick may change.
+    EnginePickInputs in;
+    in.coversMonitor = true; in.borderless = true; in.primaryMonitor = true;
+    CHECK((in.pref == EnginePref::Auto));
+    CHECK(ShouldPickTransform(in));
+    in.excluded = true;
+    CHECK_FALSE(ShouldPickTransform(in));
+}
+
+TEST_CASE("an explicit preference overrides the automatic pick both ways") {
+    EnginePickInputs in;
+    in.primaryMonitor = true;
+    // A plain window would be render under auto; pinning transform gets transform.
+    in.pref = EnginePref::Transform;
+    CHECK(ShouldPickTransform(in));
+    // A fullscreen game would be transform under auto; pinning render gets render.
+    EnginePickInputs g;
+    g.coversMonitor = true; g.borderless = true; g.primaryMonitor = true;
+    g.pref = EnginePref::Render;
+    CHECK_FALSE(ShouldPickTransform(g));
+}
+
+TEST_CASE("an explicit transform preference still respects the correctness limits") {
+    // These are not taste: off the primary monitor there is no cross-adapter transform chase,
+    // and an excluded exe crashed dwm.exe at high zoom.
+    EnginePickInputs off;
+    off.pref = EnginePref::Transform; off.primaryMonitor = false;
+    CHECK_FALSE(ShouldPickTransform(off));
+    EnginePickInputs ex;
+    ex.pref = EnginePref::Transform; ex.primaryMonitor = true; ex.excluded = true;
+    CHECK_FALSE(ShouldPickTransform(ex));
+}
+
+TEST_CASE("protected content never gets render, whatever anything else says") {
+    // Desktop Duplication captures DRM surfaces as black, so render shows nothing at all.
+    EnginePickInputs in;
+    in.captureProtected = true;
+    in.pref = EnginePref::Render;        // the user explicitly asked for render
+    CHECK(ShouldPickTransform(in));      // and still does not get it
+    in.primaryMonitor = false;           // not even off the primary monitor
+    CHECK(ShouldPickTransform(in));
+    EnginePickInputs man;
+    man.renderExcluded = true;           // the manual escape hatch behaves identically
+    man.pref = EnginePref::Render;
+    CHECK(ShouldPickTransform(man));
+}
+
+TEST_CASE("Netflix in a browser: protected beats transformExclude") {
+    // THE CONFLICT THIS ORDERING EXISTS FOR. A browser is on transformExclude (dwm.exe crashed at
+    // high zoom over Mica), and DRM video inside it is capture-protected. Both rules fire and they
+    // disagree. Protected wins: black video every single time is a worse failure than a rare crash
+    // risk that the pan wall and MPO buster already mitigate. Signed off by Max, 2026-08-24.
+    EnginePickInputs in;
+    in.excluded = true;                  // browser
+    in.captureProtected = true;          // playing DRM content
+    in.primaryMonitor = true;
+    CHECK(ShouldPickTransform(in));
+    // Without the protection it is an ordinary browser again: excluded, so render.
+    in.captureProtected = false;
     CHECK_FALSE(ShouldPickTransform(in));
 }

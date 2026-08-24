@@ -61,6 +61,32 @@ export const sections = [
       options:['hybrid','render','transform','magnify'],
       optionLabels:{ hybrid:'Auto', render:'Render', transform:'Transform', magnify:'System' },
       def:'hybrid' },
+    // PER-WINDOW-TYPE ENGINE (2026-08-24). Advanced, and every row defaults to Auto so an
+    // untouched install behaves exactly as before. These only apply when the engine above is Auto.
+    // 'showIf' keeps them hidden when a single engine is pinned, where they would do nothing.
+    { key:'engineGame', type:'select', label:'Engine for games',
+      desc:'Fullscreen or borderless apps. Auto uses Transform, which stays smooth over a heavy game.',
+      options:['auto','transform','render'],
+      optionLabels:{ auto:'Auto', transform:'Transform', render:'Render' },
+      def:'auto', advanced:true, showIf:{ key:'model', eq:'hybrid' } },
+    { key:'engineAcrylic', type:'select', label:'Engine for blurred windows',
+      desc:'Windows that ask for a Mica or acrylic background. Only apps that opt in are detected.',
+      options:['auto','transform','render'],
+      optionLabels:{ auto:'Auto', transform:'Transform', render:'Render' },
+      def:'auto', advanced:true, showIf:{ key:'model', eq:'hybrid' } },
+    { key:'engineDesktop', type:'select', label:'Engine for the desktop',
+      desc:'The desktop itself, with no window in front.',
+      options:['auto','transform','render'],
+      optionLabels:{ auto:'Auto', transform:'Transform', render:'Render' },
+      def:'auto', advanced:true, showIf:{ key:'model', eq:'hybrid' } },
+    { key:'engineOther', type:'select', label:'Engine for other windows',
+      desc:'Everything else: normal app windows.',
+      options:['auto','transform','render'],
+      optionLabels:{ auto:'Auto', transform:'Transform', render:'Render' },
+      def:'auto', advanced:true, showIf:{ key:'model', eq:'hybrid' } },
+    { key:'renderExclude', type:'applist', label:'Never use Render for',
+      desc:'Apps whose video is copy-protected, like Netflix or Apple TV, magnify as a black rectangle on Render. Wind detects most of them on its own; list any it misses.',
+      def:'', advanced:true, showIf:{ key:'model', eq:'hybrid' } },
     // Not an ini setting: reflects HKLM\...\Dwm\OverlayTestMode (issue #148 TDR trigger; costs
     // transform smoothness in-game). Advanced: system-wide display setting, needs UAC.
     { key:'__mpo', type:'mpo', label:'Disable MPO',

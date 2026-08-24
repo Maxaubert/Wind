@@ -109,8 +109,15 @@ Config ParseConfig(const std::string& text) {
         // the ini correctly and the core silently kept the previous value - including the shipped
         // defaults, so a list with defaults could never be emptied at all.
         if (key == "transformExclude") { c.transformExclude = val; continue; }
+        if (key == "renderExclude")    { c.renderExclude    = val; continue; }
         if (key == "noSwallowApps")    { c.noSwallowApps    = val; continue; }
         if (key == "lockApps")         { c.lockApps         = val; continue; }
+        // Per-window-type engine preferences. Parsed here with the lists rather than below,
+        // because an empty value must mean "back to auto" and the numeric guard would skip it.
+        if (key == "engineGame")    { c.engineGame    = val.empty() ? "auto" : val; continue; }
+        if (key == "engineAcrylic") { c.engineAcrylic = val.empty() ? "auto" : val; continue; }
+        if (key == "engineDesktop") { c.engineDesktop = val.empty() ? "auto" : val; continue; }
+        if (key == "engineOther")   { c.engineOther   = val.empty() ? "auto" : val; continue; }
         if (val.empty()) continue;
         try {
             if (key == "zoomInButton")          c.zoomInButton = std::stoi(val);
@@ -381,6 +388,27 @@ Config LoadConfig(const std::wstring& path) {
                ";   like a game to the foreground test but wants the render engine. Comma-separated,\n"
                ";   case-insensitive, exact name match. Empty = exclude nothing.\n"
                "transformExclude=zen.exe,firefox.exe,chrome.exe,msedge.exe,brave.exe,opera.exe,opera_gx.exe,vivaldi.exe\n"
+               "; renderExclude (Auto/hybrid only): exe names that must never get the RENDER engine.\n"
+               ";   For DRM/protected apps (Netflix, Apple TV): Desktop Duplication captures those as\n"
+               ";   BLACK, so render shows nothing. Wind detects most of them automatically via the\n"
+               ";   window's display affinity; this is the escape hatch for the ones it misses.\n"
+               "renderExclude=\n"
+               "; engineGame / engineAcrylic / engineDesktop / engineOther (Auto/hybrid only):\n"
+               ";   which engine to use per window type. auto|transform|render; auto = Wind decides\n"
+               ";   exactly as it always has, so leaving these alone changes nothing.\n"
+               ";     game    = borderless and covering the monitor (games, F11 video)\n"
+               ";     acrylic = the window declares a DWM backdrop (Mica/acrylic/tabbed). Only\n"
+               ";               windows that OPT IN are detectable, so this is a subset of what\n"
+               ";               looks blurred on screen - third-party blur is invisible to it.\n"
+               ";     desktop = the shell desktop (Win+D)\n"
+               ";     other   = everything else\n"
+               ";   Two rules always win over these: protected/DRM content never gets render, and\n"
+               ";   transformExclude apps never get transform (except when protected, where black\n"
+               ";   video is the worse failure).\n"
+               "engineGame=auto\n"
+               "engineAcrylic=auto\n"
+               "engineDesktop=auto\n"
+               "engineOther=auto\n"
                "; noSwallowApps: programs where Wind stops intercepting its keyboard binds.\n"
                ";   Watching the keyboard makes Windows hand us every keystroke and WAIT before it\n"
                ";   delivers anything else - including mouse movement to the game. Holding a key\n"

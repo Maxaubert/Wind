@@ -306,6 +306,13 @@ struct TickState {
     // WINDOW changes. covers/borderless stay per-tick (cheap user32 reads, genuinely dynamic).
     HWND fgCacheHwnd = nullptr;
     bool fgCacheShell = false, fgCacheExcluded = false, fgCacheChurny = false;
+    // Per-window-type pick (advanced engine selection). Both are cached with the rest because the
+    // mid-zoom pick site runs EVERY zoomed tick, and the protection check walks child windows -
+    // a browser has plenty, so doing that at 144Hz would be real waste for a value that can only
+    // change when the foreground does.
+    bool fgCacheBackdrop = false;    // window declares a DWM system backdrop (Mica/acrylic/tabbed)
+    bool fgCacheProtected = false;   // window or a descendant is capture-protected (DRM)
+    bool fgCacheRenderExcl = false;  // exe listed in renderExclude
     bool probePrevLDown = false;    // dead-zone probe (probeClicks=1): left-click edge detect
     unsigned probeTraceTick = 0;    // dead-zone probe (probeClicks=2): trace decimation counter
     bool   inspectCursorWasShowing = true; // cursor visibility at the toggle edge (the mouselook tell)
@@ -570,12 +577,81 @@ static bool QuiesceHoldActive(const TickState& t) {
 
 // Refresh the per-HWND cache of exe-derived pick predicates. Only re-resolves when the foreground
 // WINDOW changed; a null fgw clears to safe defaults (no transform pick without a foreground).
+// Does the window declare a DWM system backdrop (Mica / acrylic / tabbed)?
+//
+// Probed against every visible window on this machine: readable cross-process on 13 of 13. The
+// honest limitation is what it MEANS, not whether it reads - most windows report DWMSBT_AUTO (0),
+// which says "let the system decide" rather than "no backdrop", and a third-party app painting its
+// own blur never appears here at all. So this catches windows that OPT IN, a subset of what looks
+// blurred on screen. The category is named after the signal for that reason.
+static bool HasSystemBackdrop(HWND fg) {
+    if (!fg) return false;
+    // DWMWA_SYSTEMBACKDROP_TYPE = 38. 2=mica, 3=acrylic, 4=tabbed; 0=auto and 1=none are not a
+    // declared backdrop.
+    int bd = 0;
+    if (FAILED(DwmGetWindowAttribute(fg, 38, &bd, sizeof(bd)))) return false;
+    return bd == 2 || bd == 3 || bd == 4;
+}
+
+static BOOL CALLBACK ProtectedChildProc(HWND child, LPARAM lp) {
+    DWORD aff = 0;
+    if (GetWindowDisplayAffinity(child, &aff) && aff != WDA_NONE) {
+        *reinterpret_cast<bool*>(lp) = true;
+        return FALSE;                       // one is enough
+    }
+    return TRUE;
+}
+
+// Is this window (or any descendant) protected from screen capture? That is the DRM tell: Desktop
+// Duplication returns BLACK for protected surfaces, so the render engine would magnify nothing.
+//
+// THE CHILD WALK IS THE POINT. Netflix or Apple TV inside a browser leaves the top-level frame
+// unprotected and marks only the video surface, so checking the foreground HWND alone misses
+// exactly the case this exists for.
+//
+// Our OWN overlay is capture-excluded by design (WDA_EXCLUDEFROMCAPTURE, the feedback-loop guard),
+// and it was the single protected window in the probe - so skip anything belonging to this process
+// or we would detect ourselves and pin the engine forever.
+static bool IsCaptureProtectedFg(HWND fg) {
+    if (!fg) return false;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(fg, &pid);
+    if (pid == GetCurrentProcessId()) return false;
+    DWORD aff = 0;
+    if (GetWindowDisplayAffinity(fg, &aff) && aff != WDA_NONE) return true;
+    bool found = false;
+    EnumChildWindows(fg, ProtectedChildProc, reinterpret_cast<LPARAM>(&found));
+    return found;
+}
+
 static void RefreshFgCache(TickState& t, HWND fgw) {
     if (fgw == t.fgCacheHwnd) return;
     t.fgCacheHwnd = fgw;
     t.fgCacheShell    = IsShellDesktopFg(fgw);
     t.fgCacheExcluded = IsTransformExcluded(fgw, t.cfg);
     t.fgCacheChurny   = IsChurnyFg(fgw);
+    t.fgCacheBackdrop = HasSystemBackdrop(fgw);
+    t.fgCacheProtected = IsCaptureProtectedFg(fgw);
+    t.fgCacheRenderExcl = IsExeInList(ExeNameOf(fgw), t.cfg.renderExclude);
+}
+
+// Fill the per-window-type half of the pick inputs. Both pick sites (zoom-in and the mid-zoom
+// instant switch) must agree exactly - that is why the pure decision was extracted in the first
+// place - and the category/preference/override plumbing is now big enough that duplicating it by
+// hand would be the obvious place for the two to drift apart.
+static void FillCategoryInputs(const TickState& t, wind::EnginePickInputs& pin) {
+    const wind::WindowCategory cat = wind::ClassifyWindow(
+        pin.coversMonitor, pin.borderless, pin.shellDesktop, t.fgCacheBackdrop);
+    const std::string* sel = &t.cfg.engineOther;
+    switch (cat) {
+        case wind::WindowCategory::Game:    sel = &t.cfg.engineGame;    break;
+        case wind::WindowCategory::Acrylic: sel = &t.cfg.engineAcrylic; break;
+        case wind::WindowCategory::Desktop: sel = &t.cfg.engineDesktop; break;
+        default:                            sel = &t.cfg.engineOther;   break;
+    }
+    pin.pref = wind::ParseEnginePref(*sel);
+    pin.captureProtected = t.fgCacheProtected;
+    pin.renderExcluded   = t.fgCacheRenderExcl;
 }
 
 // Hand foreground back to the game when game-inspect ends. Called on EVERY inspect exit path
@@ -707,7 +783,11 @@ static void RunTick(TickState& t) {
                     t.mTransform ? t.mTransform : t.model))
                 tmHot->setIdleReleaseMs(nc.txIdleReleaseMs);
             t.cfg = nc;   // pick up renderer knobs (smoothing, filter, cursor scale, zoom speed)
-            t.fgCacheHwnd = nullptr;   // transformExclude may have changed: re-resolve predicates
+            // transformExclude / renderExclude / the per-window-type engine keys may all have
+            // changed: drop the cache so every exe-derived predicate is re-resolved. Without this
+            // an edited list only took effect on the next foreground change, which reads as the
+            // setting not working.
+            t.fgCacheHwnd = nullptr;
             // PRESERVE THE LIVE ZOOM ACROSS THE RELOAD (issue #234). ZoomController starts at its
             // minimum, so rebuilding it for a possibly-changed maxLevel used to drop whatever the
             // user was zoomed to: change any core setting while zoomed and the view collapsed to
@@ -981,6 +1061,7 @@ static void RunTick(TickState& t) {
                 pin.tdrHarness     = t.cfg.tdrTest > 0;
                 pin.desktopTransformOptIn = t.cfg.desktopTransform != 0;
                 pin.inputTransformOk      = tAvail && tAvail->inputTransformAvailable();
+                FillCategoryInputs(t, pin);
                 IMagnifierModel* pick = ShouldPickTransform(pin) ? t.mTransform : t.mRender;
                 if (pick && pick != t.model) t.model = pick;
             }
@@ -1380,6 +1461,7 @@ static void RunTick(TickState& t) {
             pin.tdrHarness     = t.cfg.tdrTest > 0;
             pin.desktopTransformOptIn = t.cfg.desktopTransform != 0;
             pin.inputTransformOk      = tAvail && tAvail->inputTransformAvailable();
+            FillCategoryInputs(t, pin);
             IMagnifierModel* want = ShouldPickTransform(pin) ? t.mTransform : t.mRender;
             // STICKY (field: the engine flapped render<->transform inside one zoom session, and
             // each flip releases and rebuilds DWM's magnification context - a stall every time).
