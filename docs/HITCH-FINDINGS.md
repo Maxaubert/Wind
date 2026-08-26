@@ -96,6 +96,60 @@ Diagnostic tells for this class: **two cursors** = something released the runtim
 render model had the pointer hidden; **cursor moves but nothing magnifies** = transform writes
 returning FALSE (`txwrite ... fails=N` in wind-core.log, N == writes).
 
+## The pan-start hitch: FIXED (2026-08-26), and the two residuals
+
+Symptom: zoomed panning is smooth, but the first movement after any pause hitches, worst at a
+side-to-side reversal. Intermittent per session - roughly 1 session in 4 was clean with no config
+change, which is what made every single-take A/B below worthless until it was understood.
+
+### What it actually was, traced from INSIDE Wind
+
+`txTrace=1` dumps a per-tick ring buffer at session end. Every external probe that tried to
+attribute a stall was starved by the load it was measuring and reported zero writes that Wind's own
+loop log contradicted. The trace settles it:
+
+| tick state | warm OFF | warm ON |
+|---|---|---|
+| MOTION (changed) | 7.10 ms | 6.94 ms |
+| REST (unchanged) | 11.36 ms | 6.94 ms |
+| first motion tick after a rest | **15.01 ms** | 7.02 ms |
+| second motion tick | **15.24 ms** | 7.00 ms |
+
+The first motion tick after a rest WROTE the transform 8/8 times, so Wind was never the one that
+stopped feeding. At rest DWM composition falls to ~88Hz and needs two frames to come back; that
+~30 ms at the start of every pan is the hitch. Warm-keeping holds DWM at full rate through the
+rest and removes it: 29 wake transitions, worst 8.64 ms.
+
+### Shipped
+
+- `txWarmMode=4` (capped 10x) - warm-keeping, above.
+- `txWriteHz=60` + `txMinOffsetPx=2` - we wrote ~144/s where native writes ~49/s.
+- Ramps EXEMPT from the rate cap - capping level changes gave "terrible hitching in ramp".
+- Sprite moves only on ticks the view moved - else it walks across unmoved content (wobble).
+
+Result: pan stalls 0.00/s in 7 of 7 gauntlet rounds, against 8-12/s before.
+
+### Residual 1: VRR (not fixable in Wind)
+
+The panel is variable-refresh, 23-143 Hz (`MinRefreshRate=23, MaxRefreshRate=143`). When the game
+presents ~70 fps the panel and DWM follow it down, and the transform model is DwmFlush-paced BY
+DESIGN (main.cpp: the only pace that puts the sprite and the transform in the same frame), so Wind
+then updates at ~74 Hz. In one failing round warm-keeping was firing at full rate and composition
+still ran at 74 Hz - no write cadence can raise a panel's refresh. The lever is on the display
+side: G-SYNC/VRR off or a fixed refresh for that game, or an fps cap near the panel maximum.
+
+### Residual 2: the overlay-plane race (open)
+
+Wind lands composited 3/6 alt-tab sessions; native Windows Magnifier 6/6. On a plane the zoom-in
+ramp costs about twice as much (8.7-10.6 stalls/s vs 3.2-4.4) and the pan walls stay up.
+`mpoBuster`'s ghost is verifiably shown, fullscreen, topmost from 300 ms in - but the failing
+sessions report `Hardware Composed: Independent Flip`, i.e. MPO composes MULTIPLE planes, so
+covering the game with a window cannot force DWM composition. Native uses no window for this at all
+(its fullscreen window is never shown); DWM simply stops promoting planes while its magnification
+is active. Replicating that is the open work. Measured dead ends: asserting the ghost every 100 ms
+for 2 s (2/3), the public transform channel (5/6, 3/4 on retest), never releasing the magnification
+context (3/4), resting at a non-identity level (5/6).
+
 ## The pan-start hitch: ROOT CAUSE = the game on a hardware overlay plane (2026-08-26)
 
 Field report: zoomed panning is smooth, but the FIRST movement after a pause hitches, worst at a
