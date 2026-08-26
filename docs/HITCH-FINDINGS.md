@@ -96,6 +96,58 @@ Diagnostic tells for this class: **two cursors** = something released the runtim
 render model had the pointer hidden; **cursor moves but nothing magnifies** = transform writes
 returning FALSE (`txwrite ... fails=N` in wind-core.log, N == writes).
 
+## The pan-start hitch: OPEN (investigated 2026-08-26)
+
+Field report: zoomed panning is smooth, but the FIRST movement after the hand pauses hitches, and a
+side-to-side pan hitches at each end where the hand reverses through zero velocity. Absent under
+native Windows Magnifier. Reproducible on demand, and confirmed by eye on the runs the harness
+scored - the metric and the user agree.
+
+Harness: `tools/pan_wake_probe.ps1` (+ `pan_wake_ab.ps1`, `pan_reach_probe.ps1`). Wake edges come
+from passive Raw Input (works while a game holds the cursor frozen), composition from blocking in
+DwmFlush, game frames from PresentMon joined on QPC. It drives the sweep/stop/sweep pattern itself,
+zooms closed-loop to a target level, and voids a take if the zoom did not engage or the game lost
+foreground. Traps it avoids, all of which produced wrong answers first: joining PresentMon on
+`TimeInSeconds` instead of `QPCTime` (put 2135/2135 rows in the wrong bucket), holding the button
+for a fixed duration to set zoom (same hold gave 7.04x and 21x on consecutive takes), and opening a
+magnification context in the probe itself.
+
+| config (DOOM, 7x, identical injected hand) | idle median | idle stalls/s | wake stalls/s |
+|---|---|---|---|
+| Wind, `txWarmMode=0` | 13.17 ms | 58.9 | 29.1 |
+| native Windows Magnifier at 700% | 6.94 ms | 0.0 | 0.0 |
+| Wind, `txWarmMode=1` (1px jitter) | 6.94 ms | 0.2 | 0.0 |
+| Wind, `txWarmMode=4` (level epsilon) | 6.94 ms | 0.0 | 0.0 |
+
+### Measured dead ends (do not re-try without new evidence)
+
+- **Re-sending the same transform** (`txWarmMode=2`): wake 23.8/s. DWM ignores an identical write,
+  exactly as the old "DWM parks on static values anyway" comment claimed.
+- **Republishing the input transform** (`txWarmMode=3`): wake 26.5/s - WORSE than baseline, and it
+  degraded sustained motion too (3.7/s vs 0.07/s).
+- **An unrelated per-frame damage source** (probe `-DamagePin`): wake 28.2/s, and it did not move
+  the composition rate at all. It is not about generic damage.
+- **A level change of 4e-6 relative**: too small for DWM to notice. 1e-5 registers.
+
+### Why nothing shipped
+
+1. **Neither working mode is visually free.** Mode 1 shifts the whole image a rigid 1 screen px at
+   tick rate (the #204 shimmer). Mode 4 was believed to displace 0.077px - that is in SOURCE pixels,
+   so on screen it is `0.077 * level`: ~0.6px at 7x, ~1.6px at 21x, worse than mode 1 at high zoom.
+   Its applied stream also shows the derived source origin flipping a whole source pixel
+   (offX 2411 <-> 2412 at 7.37x).
+2. **The premise was wrong.** Sampling native's applied stream shows it writes NOTHING across a
+   330ms rest - a single level value for an entire run - and still holds 6.94ms composition. Native
+   is not staying smooth by keeping warm. Do not rebuild the "keep writing" theory on this evidence.
+3. **The metric is bimodal on one binary.** The same build scored 0.00/s and 18-29/s wake stalls on
+   consecutive takes with nothing changed. Leading suspect is VRR refresh hunting: the panel runs
+   23-143Hz and composition settles at either ~144Hz or the game's ~72Hz. Until that is pinned
+   down, no fix here can be called verified.
+
+Next step for whoever picks this up: instrument what governs the composition rate (DWM timing info
+/ actual display refresh) across a rest, for Wind and native side by side. The answer is in why
+native holds 144Hz while writing nothing.
+
 ## Open items
 
 - Zoom-ramp spikes (~1 per cycle, 45 ms) - DWM re-scale cost during the ramp.

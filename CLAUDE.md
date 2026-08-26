@@ -43,8 +43,17 @@ rests a few ticks AFTER the incoming one is live - restAfterReveal - so a handov
 composites a bare unmagnified frame). `transform` (revived issue #148) = DWM fullscreen
 transform via MagSet/private channel: compositor-internal, the only path that stays smooth over
 a heavy game (native-Magnifier parity measured); continuous per-tick level (big discrete jumps
-are what cost ~30-50ms game frames - do NOT re-quantize ramps), tx keep-alive after changes
-(value-static = DWM parks, action-start spike), launch warm-up 1.001, rest at TRUE 1.0.
+are what cost ~30-50ms game frames - do NOT re-quantize ramps), PAN-START HITCH (OPEN, 2026-08-26): the first move after any pause hitches, worst at a
+side-to-side reversal; native Magnifier does not. Reproducible on demand with
+tools/pan_wake_probe.ps1 (+ pan_reach_probe.ps1). Wind idles at 13.17ms composition where native
+holds 6.94ms. `txWarmMode` (SHIPS 0/OFF) is the A/B harness for it: modes 1 (1px jitter) and 4
+(level epsilon) both score native-clean but BOTH are visibly costly (mode 4's displacement is
+0.077 SOURCE px = 0.077*level on SCREEN, ~1.6px at 21x, and it flips the derived source origin a
+whole pixel). Measured dead: same-value rewrites, input-transform republishes, unrelated
+per-frame damage, level deltas below ~1e-5. CRITICAL: native writes NOTHING across a rest and
+stays smooth anyway, so "keep writing to stay warm" is NOT what it does - do not rebuild that
+theory. The metric is also bimodal on one binary (0.00 vs 18-29 stalls/s), VRR refresh hunting
+the leading suspect. See docs/HITCH-FINDINGS.md. launch warm-up 1.001, rest at TRUE 1.0.
 maxLevel is ONE SHARED setting across models (no per-model cap; the old 12x cap guarded what
 turned out to be the MPO bug below). TRANSFORM ON THE DESKTOP (root-caused AND solved
 2026-08-12, docs/POINTER-HITTEST-FINDINGS.md): pointer-input frameworks (XAML/DirectUI -
@@ -260,10 +269,10 @@ restartWind), `dirty`, `openIni`, `exportDiagnostics`, `pickExe`, `mpoState`, `s
   are field-tested ALIASES OF NEAREST - no middle filter exists. The flag is DWM-GLOBAL and
   survives the process that set it until DWM restarts - which is why smoothing appeared to come
   and go between builds and why a stale "smooth" state can frame an innocent build. KNOWN
-  INTERACTIONS now that rendering is clean: (a) the tx keep-alive (`txKeepAliveMaxLevel`>0,
-  default 0 since #204) writes 1px-off values 144x/s - nearest masked it, smoothing shows it as
-  cursor SHAKING at rest (a stale ini/profile carrying 8 was the 2026-08-22 field case: purge
-  the key, hot). (b) During LEVEL ramps a slight shimmer remains under smoothing - the filter
+  INTERACTIONS now that rendering is clean: (a) warm-keeping perturbs the LEVEL, never the
+  position, so it cannot shake the cursor. The RETIRED 1px translation jitter (once
+  `txKeepAliveMaxLevel`, now `txWarmMode=1`, A/B only) is what shook it under smoothing;
+  `txKeepAliveMaxLevel` is still parsed for old inis but NOTHING READS IT. (b) During LEVEL ramps a slight shimmer remains under smoothing - the filter
   re-interpolates every edge per scale step. NOT our geometry, cadence, or frame coherence:
   all instrumented 2026-08-22 (telemetry w_level/w_tx channel + optical capture; written
   transforms proved sub-0.1px consistent while the shimmer persisted), and WM shows the same

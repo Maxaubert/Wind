@@ -188,17 +188,40 @@ struct Config {
     // edit). Fail-closed: the walls lift only while the ghost is verifiably shown + settled.
     // 0 = walls-only (the pre-#191 fence behavior). No effect when MPO is off.
     int mpoBuster = 1;
-    // Keep-alive level gate (issue #189, hot): the 1px keep-alive jitter runs only at or below
-    // this level (the shipped 8 is the field-measured MPO-off optimum for games; raising it keeps
-    // DWM's magnification pipeline warm at high zoom on the DESKTOP so pan-resume skips the
-    // park-rebuild spike - A/B knob, the 700ms window itself is measured and untouched).
-    // 0 (DEFAULT) = OFF. Traced against native Magnifier (issue #204): native never writes a
-    // value it does not mean - when the view is static it simply stops writing. Our keep-alive
-    // alternated the translation by 1px at TICK rate to stop DWM parking, i.e. a deliberate 1px
-    // shimmer 144x/s during every pause in a pan. Set >0 to re-enable up to that level.
-    // Back to 8 pending the free-cursor work: with the weld in place the 1px jitter is not the
-    // dominant artefact, and changing two things at once made the A/B unreadable.
+    // RETIRED (superseded by txWarmMode, 2026-08-26). This was the level gate on the old 1px
+    // translation keep-alive. That mechanism is now txWarmMode=1 and is kept only for A/B; the
+    // shipped warm-keeping (mode 4) perturbs the LEVEL by txWarmLevelEps instead, which fixes the
+    // same pan-start hitch without shifting the image by a pixel. Parsed and clamped so an old ini
+    // or profile carrying the key is still accepted, but NOTHING READS IT - do not add a reader.
     int txKeepAliveMaxLevel = 8;
+    // WARM-KEEPING (pan-start hitch, measured 2026-08-26 with tools/pan_wake_probe.ps1). At rest
+    // Wind stops writing entirely ("same-value hygiene" below), and DWM then lets its
+    // magnification composition path fall off full rate; the first movement after the pause lands
+    // a frame or two late, which is the hitch felt at every direction reversal. Measured over DOOM
+    // at 7x, driven by an identical injected hand, composition intervals:
+    //     Wind, keep-alive off   idle median 11.78ms, 48.9 stalls/s, wake 9.55 stalls/s
+    //     native Magnifier 7x    idle median  6.94ms,  0.0 stalls/s, wake 0.00 stalls/s
+    //     Wind + 1px keep-alive  idle median  6.94ms,  0.1 stalls/s, wake 0.00 stalls/s
+    // Native never goes quiet, and the legacy keep-alive matches it - but that one writes a value
+    // 1px OFF THE TRUTH at tick rate, which is the shimmer that retired it in #204. These modes
+    // exist to find a channel that keeps DWM warm without lying about the position:
+    //   0 = off (fall through to the legacy txKeepAliveMaxLevel path)
+    //   1 = legacy 1px jitter, for A/B only
+    //   2 = SAME-VALUE rewrite: re-send the exact transform already applied. Honest by
+    //       construction. Rests on DWM re-compositing for an identical write, which the old
+    //       "DWM parks on static values anyway" comment claims it does NOT - measure, don't assume.
+    //   3 = INPUT-TRANSFORM republish only: touches no visual channel whatsoever, so it cannot
+    //       shimmer even in principle. This is what native is known to do continuously
+    //       (docs/WOBBLE-CAPTURE-2026-08-21.md: it republishes an enabled identity even while
+    //       sitting unzoomed at 100%).
+    int txWarmMode = 0;
+    int txWarmMaxLevel = 0;      // 0 = no level cap (unlike the legacy keep-alive's gate)
+    int txWarmWindowMs = 0;      // 0 = warm for as long as the session rests; else ms after last change
+    // Mode 4's level perturbation, RELATIVE. The displacement it causes is not uniform: it is 0 at
+    // the source origin and grows to (width * eps) at the far edge, which is a far gentler artefact
+    // than mode 1's rigid 1px shift of the whole screen. 4e-6 was measured too small for DWM to
+    // notice at all; this is the knob for finding the smallest value that still wakes it.
+    double txWarmLevelEps = 0.00002;
     int txHookWrite = 0;
     int txFreeCursor = 1;
     int txWriteHz = 0;

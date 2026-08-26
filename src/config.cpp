@@ -175,6 +175,10 @@ Config ParseConfig(const std::string& text) {
             else if (key == "txWobbleCage")       c.txWobbleCage = std::stoi(val);
             else if (key == "txWobbleCageSize")   c.txWobbleCageSize = std::stoi(val);
             else if (key == "txKeepAliveMaxLevel")c.txKeepAliveMaxLevel = std::stoi(val);
+            else if (key == "txWarmMode")         c.txWarmMode = std::stoi(val);
+            else if (key == "txWarmMaxLevel")     c.txWarmMaxLevel = std::stoi(val);
+            else if (key == "txWarmWindowMs")     c.txWarmWindowMs = std::stoi(val);
+            else if (key == "txWarmLevelEps")     c.txWarmLevelEps = std::stod(val);
             else if (key == "txWriteHz")          c.txWriteHz = std::stoi(val);
             else if (key == "txFreeCursor")       c.txFreeCursor = std::stoi(val);
             else if (key == "txHookWrite")        c.txHookWrite = std::stoi(val);
@@ -229,6 +233,12 @@ Config ParseConfig(const std::string& text) {
     // 0 is meaningful here (keep-alive OFF, the shipped default), so the floor is 0 not 1.
     if (c.txKeepAliveMaxLevel < 0)  c.txKeepAliveMaxLevel = 0;
     if (c.txKeepAliveMaxLevel > 50) c.txKeepAliveMaxLevel = 50;
+    if (c.txWarmMode < 0)      c.txWarmMode = 0;
+    if (c.txWarmMode > 4)      c.txWarmMode = 4;
+    if (c.txWarmMaxLevel < 0)  c.txWarmMaxLevel = 0;
+    if (c.txWarmWindowMs < 0)  c.txWarmWindowMs = 0;
+    if (c.txWarmLevelEps < 0.0)     c.txWarmLevelEps = 0.0;
+    if (c.txWarmLevelEps > 0.01)    c.txWarmLevelEps = 0.01;
     if (c.txWriteHz < 0)    c.txWriteHz = 0;        // 0 = uncapped (per-tick)
     if (c.txWriteHz > 1000) c.txWriteHz = 1000;
     if (c.txMinOffsetPx < 0)  c.txMinOffsetPx = 0;  // 0 = write every change

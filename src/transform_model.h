@@ -76,6 +76,7 @@ public:
     MagHost* magHost() { return &host_; }
 private:
     bool fastPan_, smoothPan_, useSprite_;
+    bool warmLevelJitter_ = false;   // mode 4: perturb the level, not the position (this tick only)
     int  zorderBand_;                                // sprite z-band (above the shell); needs UIAccess
     bool spriteBand16_ = false;                      // P2 experiment: band-16 SCREEN-space sprite
     bool ready_ = false;

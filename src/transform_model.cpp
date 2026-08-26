@@ -1,6 +1,7 @@
 #include "transform_model.h"
 #include "transform.h"   // ComputeMagTransform
 #include "tx_cadence.h"  // ShouldWriteTransform (pure, tested)
+#include "tx_warm.h"     // WarmAction (pure, tested): the pan-start hitch fix
 #include "hook_transform.h" // NoteWriteCursor: the lag metric anchor (issue #229)
 #include "mag_thread.h"     // MagThreadInvoke: the API is thread-affine (issue #229)
 #include "logging.h"
@@ -47,6 +48,7 @@ void TransformModel::resetTransformState() {
     lastLevel_ = 0.0; lastRequestedLevel_ = 0.0;
     lastOffX_ = lastOffY_ = lastTxX_ = lastTxY_ = 0;
     lastChangeMs_ = 0; lastWriteMs_ = 0; keepAliveTick_ = 0; hiRampTick_ = 0;
+    warmLevelJitter_ = false;
     lastInputXformOn_ = false;
     ixTick_ = 0; ixPending_ = false;
     lastSpriteX_ = INT_MIN; lastSpriteY_ = INT_MIN;
@@ -517,28 +519,53 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // the values differ - the cached last* state must never claim a write we suppressed.
     const bool changedAndWriting = writeNow;
     int txJitter = 0;
-    // Keep-alive: 700ms window, <=8x only. (The original 1.5s/all-levels spec was re-tried
-    // under MPO-off 2026-07-26 and measured WORSE - 360ms worst spike vs 198ms baseline. With
-    // MPO disabled the desktop composites in software, so a hot magnification pipeline taxes
-    // every frame; keep the window short and the high-zoom pipeline parked.)
-    // Ships OFF (txKeepAliveMaxLevel now defaults to 0, issue #204): this deliberately wrote a
-    // value 1px off the truth, 144x/s, through every pause in a pan. Native Magnifier does the
-    // opposite - when the view is static it stops writing entirely.
     bool keepAliveActive = false;
-    if (!changedAndWriting && !ramping && cfg.txKeepAliveMaxLevel > 0 &&
-        applyLevel <= (double)cfg.txKeepAliveMaxLevel &&
-        nowMs - lastChangeMs_ < 700) {
-        keepAliveTick_ ^= 1;
-        txJitter = keepAliveTick_;
-        keepAliveActive = true;   // BOTH parities must write (the return-to-true-value half too)
+    bool warmIxOnly = false;
+    // WARM-KEEPING (see src/tx_warm.h for the measurements). At rest Wind would otherwise stop
+    // writing entirely and DWM's composition falls back to the game's present rate, so the first
+    // movement after a pause lands late - the hitch felt at every direction reversal.
+    TxWarmIn wi;
+    wi.wroteThisTick      = changedAndWriting;
+    wi.ramping            = ramping;
+    wi.mode               = cfg.txWarmMode;
+    wi.applyLevel         = applyLevel;
+    wi.maxLevel           = cfg.txWarmMaxLevel;
+    wi.windowMs           = cfg.txWarmWindowMs;
+    wi.sinceLastChangeMs  = nowMs - lastChangeMs_;
+    switch (WarmAction(wi)) {
+        case TxWarm::Jitter1px:
+            keepAliveTick_ ^= 1;
+            txJitter = keepAliveTick_;   // BOTH parities must write (the return-to-true half too)
+            keepAliveActive = true;
+            break;
+        case TxWarm::SameValue:
+            keepAliveActive = true;
+            break;
+        case TxWarm::InputTransform:
+            warmIxOnly = true;
+            break;
+        case TxWarm::LevelEpsilon:
+            keepAliveTick_ ^= 1;
+            warmLevelJitter_ = keepAliveTick_ != 0;
+            keepAliveActive = true;
+            break;
+        case TxWarm::None:
+            break;
     }
+
     // Same-value hygiene (issue #189): once the keep-alive window has lapsed (or above its level
     // gate), a zoomed-idle tick would push an identical write 144x/s. DWM parks on static values
     // anyway (measured), so skipping is free; the next changed/keep-alive tick writes as before.
     // suppressTransformWrite: the mouse hook is the single writer this session (issue #206). The
     // state above is still maintained, so turning the hook path off mid-session resumes cleanly.
-    if ((changedAndWriting || keepAliveActive) && !ex.suppressTransformWrite)
-        writeTransform((float)applyLevel, m.offX, m.offY, m.txX + txJitter, m.txY, fastPan_, false);
+    if ((changedAndWriting || keepAliveActive) && !ex.suppressTransformWrite) {
+        // warmLevelJitter_ (mode 4) perturbs only the LEVEL, and only on warm ticks - a real
+        // write always sends the true level. See the mode 4 note above for why it has to change
+        // at all and why this is the cheapest honest thing to change.
+        const double lvlOut = warmLevelJitter_ ? applyLevel * (1.0 + cfg.txWarmLevelEps) : applyLevel;
+        writeTransform((float)lvlOut, m.offX, m.offY, m.txX + txJitter, m.txY, fastPan_, false);
+    }
+    warmLevelJitter_ = false;
     // Input transform. Mode 1 (THE SHIPPED DEFAULT; field-verified 4x-20x,
     // POINTER-HITTEST-FINDINGS.md): publish the visual source rect on every change, exactly
     // like native Magnifier. Pointer-framework apps (Explorer/Settings/shell) hit-test mouse
@@ -575,7 +602,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             }
         }
     }
-    if (cfg.magInputTransform != 0 && (changed || ixPending_ || ixForce)) {
+    if (cfg.magInputTransform != 0 && (changed || ixPending_ || ixForce || warmIxOnly)) {
         // Decimation (issue #189): the publish exists for pointer-framework HOVER hit-testing
         // (clicks ride the welded cursor and never consult it), so it does not need the 144Hz
         // motion rate - every Nth changed tick suffices, with a GUARANTEED publish the moment
@@ -585,7 +612,9 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         // A stomp bypasses the decimation entirely: correctness of the mapping beats hygiene.
         if (changed) ixPending_ = true;
         const bool rest = !changed;
-        if (ixForce || rest || ++ixTick_ >= cfg.ixDecimate) {
+        // warmIxOnly bypasses the decimation for the same reason a stomp does: the publish IS the
+        // work here, and decimating it away would defeat the whole mode.
+        if (ixForce || warmIxOnly || rest || ++ixTick_ >= cfg.ixDecimate) {
             ixTick_ = 0;
             ixPending_ = false;
             // srcL/srcT, not r.srcLeft/srcTop: when the ramp limiters make applyLevel != level
