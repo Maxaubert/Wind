@@ -485,6 +485,11 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         if (m.txX < -32000) m.txX = -32000;
     }
     bool txWroteThisTick = false;   // the sprite follows the VIEW, not the tick (see below)
+    // Trace inputs, captured here and appended at the END of present() so the sprite position
+    // recorded is this tick's, not the previous one's.
+    bool trChanged = false, trRamping = ramping, trWarm = false;
+    const double trLevel = applyLevel;
+    const int trTxX = m.txX, trOffX = m.offX;
     // pauseWrites (issue #148): a click's injected cursor move is in flight - a transform write
     // racing a cursor-position update is the proven TDR, so those ticks write NOTHING. State is
     // untouched; the next unpaused tick lands the same values.
@@ -532,6 +537,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // the values differ - the cached last* state must never claim a write we suppressed.
     const bool changedAndWriting = writeNow;
     txWroteThisTick = writeNow;
+    trChanged = changed;
     int txJitter = 0;
     bool keepAliveActive = false;
     bool warmIxOnly = false;
@@ -562,6 +568,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             keepAliveTick_ ^= 1;
             warmLevelJitter_ = keepAliveTick_ != 0;
             keepAliveActive = true;
+            trWarm = true;
             break;
         case TxWarm::None:
             break;
@@ -578,17 +585,6 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         // at all and why this is the cheapest honest thing to change.
         const double lvlOut = warmLevelJitter_ ? applyLevel * (1.0 + cfg.txWarmLevelEps) : applyLevel;
         writeTransform((float)lvlOut, m.offX, m.offY, m.txX + txJitter, m.txY, fastPan_, false);
-    }
-    if (traceOn_) {
-        LARGE_INTEGER qf, qc; QueryPerformanceFrequency(&qf); QueryPerformanceCounter(&qc);
-        TxTick& e = traceBuf_[traceHead_ % kTraceCap];
-        e.ms = double(qc.QuadPart) * 1000.0 / double(qf.QuadPart);
-        e.level = applyLevel; e.txX = m.txX;
-        e.wrote = (unsigned char)(changedAndWriting ? 1 : 0);
-        e.changed = (unsigned char)(changed ? 1 : 0);
-        e.ramping = (unsigned char)(ramping ? 1 : 0);
-        e.warm = (unsigned char)(keepAliveActive ? 1 : 0);
-        ++traceHead_;
     }
     warmLevelJitter_ = false;
     // Input transform. Mode 1 (THE SHIPPED DEFAULT; field-verified 4x-20x,
@@ -868,6 +864,18 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         sprite_->hide();
     }
 
+    if (traceOn_) {
+        LARGE_INTEGER qf, qc; QueryPerformanceFrequency(&qf); QueryPerformanceCounter(&qc);
+        TxTick& e = traceBuf_[traceHead_ % kTraceCap];
+        e.ms = double(qc.QuadPart) * 1000.0 / double(qf.QuadPart);
+        e.level = trLevel; e.txX = trTxX; e.offX = trOffX;
+        e.spriteX = lastSpriteX_; e.spriteY = lastSpriteY_;
+        e.wrote = (unsigned char)(txWroteThisTick ? 1 : 0);
+        e.changed = (unsigned char)(trChanged ? 1 : 0);
+        e.ramping = (unsigned char)(trRamping ? 1 : 0);
+        e.warm = (unsigned char)(trWarm ? 1 : 0);
+        ++traceHead_;
+    }
     if (smoothPan_ && level > 1.0) {
         unsigned long long now = GetTickCount64();
         if (now - lastPinAssertMs_ >= 500) { lastPinAssertMs_ = now; pin_.assert_(); }
@@ -940,7 +948,7 @@ void TransformModel::traceDump() {
              (unsigned long long)GetTickCount64());
     FILE* f = nullptr;
     if (_wfopen_s(&f, path, L"w") != 0 || !f) return;
-    fprintf(f, "ms,dt,level,txX,wrote,changed,ramping,warm\n");
+    fprintf(f, "ms,dt,level,txX,offX,spriteX,spriteY,wrote,changed,ramping,warm\n");
     const int n = traceHead_ < kTraceCap ? traceHead_ : kTraceCap;
     const int start = traceHead_ < kTraceCap ? 0 : (traceHead_ % kTraceCap);
     double prev = 0.0;
@@ -948,9 +956,9 @@ void TransformModel::traceDump() {
         const TxTick& e = traceBuf_[(start + i) % kTraceCap];
         const double dt = prev > 0.0 ? (e.ms - prev) : 0.0;
         prev = e.ms;
-        fprintf(f, "%.3f,%.3f,%.6f,%d,%d,%d,%d,%d\n",
-                e.ms, dt, e.level, e.txX, (int)e.wrote, (int)e.changed,
-                (int)e.ramping, (int)e.warm);
+        fprintf(f, "%.3f,%.3f,%.6f,%d,%d,%d,%d,%d,%d,%d,%d\n",
+                e.ms, dt, e.level, e.txX, e.offX, e.spriteX, e.spriteY,
+                (int)e.wrote, (int)e.changed, (int)e.ramping, (int)e.warm);
     }
     fclose(f);
     traceHead_ = 0;

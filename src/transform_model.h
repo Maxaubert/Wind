@@ -80,7 +80,8 @@ private:
     bool warmLevelJitter_ = false;   // mode 4: perturb the level, not the position (this tick only)
     bool spriteFirst_ = false;       // sprite placed at least once this session (lockstep gate)
     // Per-tick trace (cfg.txTrace). Fixed ring, no allocation on the tick path.
-    struct TxTick { double ms; double level; int txX; unsigned char wrote, changed, ramping, warm; };
+    struct TxTick { double ms; double level; int txX, offX, spriteX, spriteY;
+                    unsigned char wrote, changed, ramping, warm; };
     static const int kTraceCap = 8192;
     TxTick traceBuf_[kTraceCap]{};
     int  traceHead_ = 0;
