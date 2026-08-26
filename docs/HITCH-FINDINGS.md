@@ -96,28 +96,49 @@ Diagnostic tells for this class: **two cursors** = something released the runtim
 render model had the pointer hidden; **cursor moves but nothing magnifies** = transform writes
 returning FALSE (`txwrite ... fails=N` in wind-core.log, N == writes).
 
-## The pan-start hitch: OPEN (investigated 2026-08-26)
+## The pan-start hitch: ROOT CAUSE = the game on a hardware overlay plane (2026-08-26)
 
-Field report: zoomed panning is smooth, but the FIRST movement after the hand pauses hitches, and a
-side-to-side pan hitches at each end where the hand reverses through zero velocity. Absent under
-native Windows Magnifier. Reproducible on demand, and confirmed by eye on the runs the harness
-scored - the metric and the user agree.
+Field report: zoomed panning is smooth, but the FIRST movement after a pause hitches, worst at a
+side-to-side reversal. Absent under native Magnifier. Crucially it is INTERMITTENT PER SESSION -
+alt-tab away and back and roughly one session in four is clean, the rest stutter, with no config
+change in between. That randomness is the tell, and it is what finally identified the cause.
 
-Harness: `tools/pan_wake_probe.ps1` (+ `pan_wake_ab.ps1`, `pan_reach_probe.ps1`). Wake edges come
-from passive Raw Input (works while a game holds the cursor frozen), composition from blocking in
-DwmFlush, game frames from PresentMon joined on QPC. It drives the sweep/stop/sweep pattern itself,
-zooms closed-loop to a target level, and voids a take if the zoom did not engage or the game lost
-foreground. Traps it avoids, all of which produced wrong answers first: joining PresentMon on
-`TimeInSeconds` instead of `QPCTime` (put 2135/2135 rows in the wrong bucket), holding the button
-for a fixed duration to set zoom (same hold gave 7.04x and 21x on consecutive takes), and opening a
-magnification context in the probe itself.
+ROOT CAUSE: whether the game is riding a HARDWARE OVERLAY PLANE for that session. On a plane
+(`Hardware Composed: Independent Flip`) DWM is not compositing the game at all, so nothing Wind
+writes can drive the composition rate, and the magnified view lands late on every pan start. When
+the game is `Composed: Flip`, the same build with the same settings is clean. Plane promotion is a
+race decided at session start, which is exactly why the symptom comes and goes.
 
-| config (DOOM, 7x, identical injected hand) | idle median | idle stalls/s | wake stalls/s |
-|---|---|---|---|
-| Wind, `txWarmMode=0` | 13.17 ms | 58.9 | 29.1 |
-| native Windows Magnifier at 700% | 6.94 ms | 0.0 | 0.0 |
-| Wind, `txWarmMode=1` (1px jitter) | 6.94 ms | 0.2 | 0.0 |
-| Wind, `txWarmMode=4` (level epsilon) | 6.94 ms | 0.0 | 0.0 |
+Correlation over 36 takes (PresentMon `PresentMode`, joined against each take's stall score):
+
+| takes | n | mean % frames on a hardware plane |
+|---|---|---|
+| clean (wake < 2 stalls/s) | 18 | **14.4 %** |
+| stuttering (wake > 8 stalls/s) | 18 | **51.1 %** |
+
+Two takes minutes apart, identical config: `ghost1` 4.8 % on plane -> 0.00 stalls/s; `ghost0`
+35.1 % on plane -> 20.76 stalls/s.
+
+THIS INVALIDATES SINGLE-TAKE COMPARISONS. Every A/B in this file taken while MPO was enabled has
+the plane state as an uncontrolled variable, and it dominates everything else measured here. A
+whole day of A/B results (write-cadence modes, keep-alive variants, input-transform republishes,
+damage pins) was noise from this. ALWAYS record PresentMode alongside any magnifier timing, and
+discard takes whose plane share differs from the arm being compared against.
+
+FIXES, in order of preference:
+1. **MPO off machine-wide** (`HKLM\SOFTWARE\Microsoft\Windows\Dwm` `OverlayTestMode`=5 DWORD,
+   REBOOT). No planes exist, so the game is always composited and the behaviour is deterministic.
+   This is also what lifts the pan walls (issue #148), so it fixes two things at once.
+2. **The MPO buster ghost** (`mpoBuster=1`) is meant to force the demotion when MPO is on, and it
+   DOES work when it wins - but it does not reliably win: several takes sat at ~53 % plane with the
+   ghost enabled. Making the demotion deterministic (verify the plane state and re-assert until it
+   takes, rather than a blind 500 ms cadence) is an open Wind bug.
+
+## The pan-start hitch: warm-keeping experiments (superseded by the above)
+
+The experiments below were run BEFORE the plane state was identified, so their single-take numbers
+carry an uncontrolled variable. Kept because the dead ends are still informative about what DWM
+does and does not respond to.
 
 ### Measured dead ends (do not re-try without new evidence)
 

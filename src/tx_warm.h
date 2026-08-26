@@ -21,25 +21,27 @@
 //   - An unrelated per-frame damage window:          wake 28.2/s, composition rate unchanged.
 //   - A level change of 4e-6 relative:               too small to register at all.
 //
-// WHY THIS SHIPS OFF (txWarmMode=0), despite modes 1 and 4 scoring perfectly:
+// WHY MODE 4 SHIPS ON, and what is still unresolved.
 //
-//   1. Neither mode is visually free. Mode 1 shifts the whole image a rigid 1 screen px at tick
-//      rate - the shimmer that retired it in #204. Mode 4 perturbs the level instead, which was
-//      believed to displace only 0.077px; that figure is in SOURCE pixels, so ON SCREEN it is
-//      0.077 * level - about 0.6px at 7x and 1.6px at 21x, i.e. WORSE than mode 1 at high zoom.
+// Field verdict (2026-08-26): with mode 4 the reporter had no stutter and saw no shimmer; with it
+// off the stutter returns immediately. That is the decisive evidence, and it outranks the two
+// concerns below - both of which are about the EXPLANATION, not about whether it works.
+//
+//   1. The displacement is bigger than first claimed. 0.077 is in SOURCE pixels, so on screen it
+//      is 0.077 * level: ~0.6px at 7x, ~1.6px at 21x. Mode 1's rigid 1px shift is smaller above
+//      ~13x, so if shimmer is ever reported at high zoom, try mode 1 there before anything else.
 //      The applied stream also shows the derived source origin flipping a whole source pixel
 //      (offX 2411 <-> 2412 at 7.37x) as the rounding tips back and forth.
-//   2. The premise was wrong. Sampling native's applied stream shows it writes NOTHING across a
-//      330ms rest - one single level value for a whole run - and still holds 6.94ms composition.
-//      So native is not staying smooth by keeping warm, and "write something every tick" is not
-//      what it does. Whatever native has, this is not it.
-//   3. The measurement is bimodal on the SAME binary: takes score 0.00/s and 18-29/s wake stalls
-//      with nothing changed but the run. Until that variance is understood (VRR refresh hunting
-//      is the leading suspect - the panel is 23-143Hz and composition settles at either ~144Hz or
-//      the game's ~72Hz), a fix cannot be called verified.
+//   2. The "native never goes quiet" story is WRONG. Sampling native's applied stream shows it
+//      writes NOTHING across a 330ms rest - one level value for a whole run - and still holds
+//      6.94ms composition. So native is not staying smooth by keeping warm, and we do not know
+//      what it actually does. Mode 4 fixes the symptom; it does not explain native.
+//   3. The harness metric is bimodal on one binary (0.00 vs 18-29 stalls/s, nothing changed).
+//      VRR refresh hunting is the leading suspect - the panel runs 23-143Hz and composition
+//      settles at either ~144Hz or the game's ~72Hz. Single takes are therefore not conclusive;
+//      the user's eyes have been the tiebreaker throughout.
 //
-// So the modes stay as an A/B harness for whoever picks this up, the shipped path is unchanged
-// from before, and the hitch remains OPEN. docs/HITCH-FINDINGS.md carries the full write-up.
+// docs/HITCH-FINDINGS.md carries the full write-up and the measured dead ends.
 namespace wind {
 
 enum class TxWarm {

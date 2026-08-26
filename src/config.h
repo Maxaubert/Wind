@@ -214,7 +214,7 @@ struct Config {
     //       shimmer even in principle. This is what native is known to do continuously
     //       (docs/WOBBLE-CAPTURE-2026-08-21.md: it republishes an enabled identity even while
     //       sitting unzoomed at 100%).
-    int txWarmMode = 0;
+    int txWarmMode = 4;
     int txWarmMaxLevel = 0;      // 0 = no level cap (unlike the legacy keep-alive's gate)
     int txWarmWindowMs = 0;      // 0 = warm for as long as the session rests; else ms after last change
     // Mode 4's level perturbation, RELATIVE. The displacement it causes is not uniform: it is 0 at
