@@ -27,7 +27,11 @@ param(
   [string]$RestoreExe = 'zen',
   [double]$MaxStallsPerSec = 3.0,   # "minimal stutters" while steadily panning
   [double]$MaxPlanePct     = 20.0,
-  [double]$MaxRampStallsPerSec = 8.0,   # ramps cost DWM real work; this catches COARSE ramps
+  [double]$MaxRampStallsPerSec = 12.0,  # the ZOOM-IN cost is explicitly out of scope for the
+                                        # verdict (it is the 'startup stutter'); this bar exists only
+                                        # to catch a genuine ramp REGRESSION - throttling level
+                                        # changes measured 12.0-12.6/s and was felt as bad hitching,
+                                        # while normal entry is 3-4/s composited, 8-11/s on a plane.
 
   [switch]$Native,
   [int]$NativeLevel = 700,
@@ -240,12 +244,18 @@ try {
     # gives us too few frames inside the sweeps to compute it, that is inconclusive - not a
     # failure. Treating NaN as a fail made a round with 0.00 stalls and an 8.2ms worst stall
     # report FAIL, which is exactly the kind of harness artifact that has wasted hours here.
+    # THE VERDICT IS THE PAN STALL RATE. Plane share is advisory: it is a proxy for a cause, not a
+    # symptom the user feels, and failing a round on it discarded rounds that had 0.00 pan stalls.
+    # The ramp is likewise out of scope by instruction ("ignoring the startup stutters"), bounded
+    # only against a true regression.
     $planeOk = [double]::IsNaN($planePct) -or ($planePct -lt $MaxPlanePct)
-    $ok = ($stallRate -lt $MaxStallsPerSec) -and $planeOk -and ($rampRate -lt $MaxRampStallsPerSec)
+    $ok = ($stallRate -lt $MaxStallsPerSec) -and ($rampRate -lt $MaxRampStallsPerSec)
+    $note = ''
+    if (-not $planeOk) { $note = '  (on a plane - ramp costs more, panning unaffected)' }
     $verdict = if ($ok) { 'PASS' } else { 'FAIL' }
     $col = if ($ok) { 'Green' } else { 'Red' }
     $planeTxt = if ([double]::IsNaN($planePct)) { '   n/a' } else { '{0,6:N1}%' -f $planePct }
-    Write-Host ("  {0,-6} {1,-6} {2,5:N2}x  {3}  {4,9:N2}  {5,6:N2}   {6}" -f $r, $pans, $lvl, $planeTxt, $stallRate, $rampRate, $verdict) -ForegroundColor $col
+    Write-Host ("  {0,-6} {1,-6} {2,5:N2}x  {3}  {4,9:N2}  {5,6:N2}   {6}{7}" -f $r, $pans, $lvl, $planeTxt, $stallRate, $rampRate, $verdict, $note) -ForegroundColor $col
     if (-not $ok) {
       $failed = $true
       # ATTRIBUTION. Find the worst stall inside a sweep and print what the applied transform was
