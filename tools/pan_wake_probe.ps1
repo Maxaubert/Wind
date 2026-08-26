@@ -512,6 +512,8 @@ $gWake = New-Object System.Collections.Generic.List[double]
 $gSust = New-Object System.Collections.Generic.List[double]
 $gIdle = New-Object System.Collections.Generic.List[double]
 $gameRows = 0
+$script:planePct = $null
+$script:planeTop = ''
 if ($Game -and (Test-Path $gameCsv)) {
   $rows = @(Import-Csv $gameCsv)
   $gameRows = $rows.Count
@@ -520,6 +522,18 @@ if ($Game -and (Test-Path $gameCsv)) {
     # QPCTime first, ALWAYS. PresentMon emits both, and TimeInSeconds is relative to the start of
     # the trace, not to QPC - joining on it silently drops every row into the wrong bucket
     # (measured: 2135/2135 rows landed in "idle" on the first take).
+    # PLANE SHARE - the dominant variable (docs/HITCH-FINDINGS.md). On a hardware overlay plane
+    # DWM is not compositing the game, so nothing the magnifier writes can drive the composition
+    # rate. Clean takes average 14% here, stuttering takes 51%. Any take compared against another
+    # with a different plane share is not a comparison at all.
+    if ($names -contains 'PresentMode') {
+      $modes = @{}
+      foreach ($r in $rows) { $m = $r.PresentMode; if ($m) { $modes[$m] = 1 + ($modes[$m] | ForEach-Object { $_ }) } }
+      $tot = ($modes.Values | Measure-Object -Sum).Sum
+      $hw  = 0; foreach ($k in $modes.Keys) { if ($k -like '*Hardware*') { $hw += $modes[$k] } }
+      $script:planePct = if ($tot -gt 0) { 100.0 * $hw / $tot } else { [double]::NaN }
+      $script:planeTop = ($modes.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 1).Key
+    }
     $tcol = @('QPCTime','CPUStartQPCTime') | Where-Object { $names -contains $_ } | Select-Object -First 1
     $fcol = @('msBetweenPresents','MsBetweenPresents') | Where-Object { $names -contains $_ } | Select-Object -First 1
     if (-not $tcol) { Write-Host "  WARNING: no QPC column in the PresentMon CSV - game rows cannot be joined." -ForegroundColor Red }
@@ -560,6 +574,10 @@ Emit ""
 Emit "  pan-wake probe   label=$Label   $Seconds s   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
 Emit "  mouse packets $($rawT.Count)    motion runs $($motion.Count)    wake edges $($wakes.Count)    game rows $gameRows"
 Emit "  wake = first packet after >= $GapMs ms still; attributed window = $WindowMs ms"
+if ($null -ne $script:planePct) {
+  $flag = if ($script:planePct -gt 20) { '   *** ON A HARDWARE PLANE - magnifier timing here is not comparable ***' } else { '' }
+  Emit ("  plane share: {0:N1}% of game frames on a hardware overlay plane ({1}){2}" -f $script:planePct, $script:planeTop, $flag)
+}
 if ($Drive)    { Emit "  driven: sweep ${SweepMs}ms / stop ${PauseMs}ms / speed $Speed" }
 if ($DamagePin){ Emit "  damage pin: ON" }
 # Was it actually ZOOMED? A dead keybind producing a clean result is the single biggest source of

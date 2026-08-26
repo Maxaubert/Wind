@@ -38,6 +38,12 @@ inline bool ShouldWriteTransform(const TxCadenceIn& in) {
     // desktop magnified for an extra tick (or forever, if no further tick writes).
     if (in.applyLevel <= 1.0) return true;
 
+    // A RAMP IS NEVER RATE-LIMITED (field-reported 2026-08-26: capping writes during the zoom
+    // ramp produced "terrible hitching in ramp"). The rate cap exists because PAN writes at tick
+    // rate saturate DWM, but a ramp changes the LEVEL, and stepping the level at 60Hz on a 144Hz
+    // panel is visible as coarse jumps. Ramps are short and self-limiting, so they write per tick.
+    if (in.levelMoved) return true;
+
     bool gated = false;
     if (in.writeHz > 0) {
         const unsigned long long minGap = 1000ull / (unsigned long long)in.writeHz;

@@ -176,6 +176,8 @@ Config ParseConfig(const std::string& text) {
             else if (key == "txWobbleCageSize")   c.txWobbleCageSize = std::stoi(val);
             else if (key == "txKeepAliveMaxLevel")c.txKeepAliveMaxLevel = std::stoi(val);
             else if (key == "txWarmMode")         c.txWarmMode = std::stoi(val);
+            else if (key == "txTrace")            c.txTrace = std::stoi(val);
+            else if (key == "txRestLevel")        c.txRestLevel = std::stod(val);
             else if (key == "txWarmMaxLevel")     c.txWarmMaxLevel = std::stoi(val);
             else if (key == "txWarmWindowMs")     c.txWarmWindowMs = std::stoi(val);
             else if (key == "txWarmLevelEps")     c.txWarmLevelEps = std::stod(val);
@@ -233,6 +235,9 @@ Config ParseConfig(const std::string& text) {
     // 0 is meaningful here (keep-alive OFF, the shipped default), so the floor is 0 not 1.
     if (c.txKeepAliveMaxLevel < 0)  c.txKeepAliveMaxLevel = 0;
     if (c.txKeepAliveMaxLevel > 50) c.txKeepAliveMaxLevel = 50;
+    if (c.txIdleReleaseMs < 0) c.txIdleReleaseMs = 0;
+    if (c.txRestLevel < 1.0)   c.txRestLevel = 1.0;
+    if (c.txRestLevel > 1.01)  c.txRestLevel = 1.01;   // visually identity only
     if (c.txWarmMode < 0)      c.txWarmMode = 0;
     if (c.txWarmMode > 4)      c.txWarmMode = 4;
     if (c.txWarmMaxLevel < 0)  c.txWarmMaxLevel = 0;

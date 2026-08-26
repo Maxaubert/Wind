@@ -214,8 +214,35 @@ struct Config {
     //       shimmer even in principle. This is what native is known to do continuously
     //       (docs/WOBBLE-CAPTURE-2026-08-21.md: it republishes an enabled identity even while
     //       sitting unzoomed at 100%).
+    // Resting magnification level between sessions. 1.0 = TRUE identity (default).
+    // >1.0 keeps DWM in fullscreen-magnification mode even while Wind is idle, which is the one
+    // structural difference left against native Magnifier: native runs with magnification active
+    // the whole time, so DWM never hands the game a hardware overlay plane in the first place.
+    // Wind zooms on demand and is therefore always racing a plane that has ALREADY been assigned,
+    // which it loses ~1 session in 3 (tools/plane_race_probe.ps1). A value like 1.0001 is
+    // visually identity but is NOT 1.0 to DWM.
+    // COST, measured in issue #148 and not to be forgotten: a live magnification-aware compositor
+    // taxes every cursor visibility/shape change any app makes (13-24 spike frames per
+    // middle-click test with Wind merely running), and it denies the game independent flip for
+    // the whole time Wind is up. Diagnostic knob; ships at 1.0.
+    double txRestLevel = 1.0;
+    // Per-tick transform trace (diagnostic, hot). 1 = while zoomed, record every tick into a ring
+    // buffer and dump it to %LOCALAPPDATA%\Wind\logs	xtrace-<stamp>.csv at session end.
+    // WHY THIS EXISTS: every external probe that tried to attribute a stall - "did Wind stop
+    // feeding DWM, or did DWM stall while being fed?" - was starved by the very load it measured
+    // and reported zero writes that Wind's own loop log contradicted. Only Wind can answer it.
+    int txTrace = 0;
+    // SHIPPED ON, 2026-08-26. Traced from inside Wind (txTrace): at rest DWM's composition falls
+    // to ~88Hz (tick dt median 11.36ms vs 7.10ms in motion), and on the first movement it takes
+    // TWO slow frames to come back - wake tick +0 = 15.01ms, +1 = 15.24ms. That ~30ms at the start
+    // of every pan IS the field-reported stutter. Warm-keeping holds DWM at full rate through the
+    // rest: REST median 6.94ms, wake +0 7.02ms, +1 7.00ms over 29 transitions, worst 8.64ms.
+    // Verified with tools/stutter_gauntlet.ps1: 5/5 rounds, 0.00 pan stalls per round.
     int txWarmMode = 4;
-    int txWarmMaxLevel = 0;      // 0 = no level cap (unlike the legacy keep-alive's gate)
+    // Level cap on warm-keeping. Mode 4's perturbation is 0.077 SOURCE px, which on SCREEN is
+    // 0.077 * level - about 0.8px at 10x. Capping keeps the artefact sub-pixel where it is most
+    // likely to be noticed; above the cap the wake cost returns, which is the accepted trade.
+    int txWarmMaxLevel = 10;
     int txWarmWindowMs = 0;      // 0 = warm for as long as the session rests; else ms after last change
     // Mode 4's level perturbation, RELATIVE. The displacement it causes is not uniform: it is 0 at
     // the source origin and grows to (width * eps) at the far edge, which is a far gentler artefact
@@ -224,12 +251,24 @@ struct Config {
     double txWarmLevelEps = 0.00002;
     int txHookWrite = 0;
     int txFreeCursor = 1;
-    int txWriteHz = 0;
+    // WRITE CADENCE - SHIPPED ON since 2026-08-26. Wind wrote once per tick (~144/s on a 144Hz
+    // panel) where native Magnifier writes ~49/s while panning, and every write makes DWM redo
+    // work proportional to the zoom level. That surplus saturates the compositor: DWM starts
+    // missing composites, the tick loop (which paces on DwmFlush for this model) drops to 84-114
+    // fps with 25ms gaps, and each gap is a visible hitch at a pan start.
+    // Measured with tools/stutter_gauntlet.ps1, alternating A/B over DOOM:
+    //   cadence ON  (60 / 2px)  13/13 rounds passed, 0.00 stalls/s in EVERY round, at 14.5x
+    //   cadence OFF (the old default)  one hard failure in 8 rounds: 10.35 stalls/s, 25.0ms stall
+    // The gates only COALESCE - a suppressed write is superseded by a fresher one on the next
+    // tick, and the escapes in tx_cadence.h stop anything being stranded (see that header).
+    // This is issue #204's own machinery, which shipped disabled because the measurements of the
+    // day were dominated by an uncontrolled variable (the overlay-plane race, docs/HITCH-FINDINGS.md).
+    int txWriteHz = 60;
     // Minimum destination-space (screen px) movement before a PAN-ONLY write goes out. Native's
     // median pan step is 2.24px; ours was 1.41px, and a THIRD of all our writes moved the image by
     // exactly one pixel. Sub-threshold movement is coalesced, never dropped: a residual still
     // lands within kSettleMs so the view can never rest visibly offset. 0 = write every change.
-    int txMinOffsetPx = 0;   // ships off for the same reason as txWriteHz above.
+    int txMinOffsetPx = 2;   // native's median pan step; ships ON with txWriteHz above.
     int magInputTransform = 1; // publish MagSetInputTransform while zoomed (hot; needs UIAccess).
                           //     1 (DEFAULT) = the visual source rect per change - native-
                           //     Magnifier parity, THE fix for the pointer-framework hover dead
