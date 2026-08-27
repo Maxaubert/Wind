@@ -1343,6 +1343,12 @@ static void RunTick(TickState& t) {
                 wind::NoteWriteCursor((double)cp.x, (double)cp.y);
             }
         }
+        // Feed the MEASURED tick interval so the lens easing decays per unit time, not per tick.
+        // The transform model paces on DwmFlush, so on a VRR display this interval swings with
+        // whatever the game is doing (6.9 -> 13.4 -> 25ms with G-Sync following a 73fps game) and a
+        // fixed per-tick keep-fraction turns a steady hand into an unsteady lens. Clamped: after a
+        // real stall we want the lens to catch up, but a 500ms gap should not snap it.
+        t.mapper.setTickDeltaMs(dt > 0.05 ? 50.0 : dt * 1000.0);
         MapResult r = t.mapper.update(freeCursor ? 0 : dx, freeCursor ? 0 : dy, lvl);
         // Dead-zone probe (probeClicks=1, diagnostic): the field annotates hover dead zones by
         // clicking. Plain click = "hover works here" (OK), Ctrl+click = "dead here" (DEAD). Each

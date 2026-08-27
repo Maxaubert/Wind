@@ -796,17 +796,15 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             // sample: two placers against one transform is what put the sprite off-centre by
             // (cursor drift * level) and drew the second, lagging cursor.
             if (!wind::HookTransformArmed()) {
-                // LOCKSTEP WITH THE VIEW (field-reported 2026-08-26: "wobble cursor"). The write
-                // cadence coalesces pan writes, so the magnified view can hold still for a tick
-                // or two while the mapper keeps advancing. Moving the sprite every tick then
-                // walks it across content that has not moved yet - a visible wobble, the same
-                // two-placer class as issue #229. Move it only on ticks the view actually moved.
-                // (spriteFirst_ places it once at session start; the settle escape in
-                // tx_cadence.h guarantees a write within kSettleMs, so it can never lag longer.)
-                if ((txWroteThisTick || !spriteFirst_) && (sx != lastSpriteX_ || sy != lastSpriteY_)) {
+                // NO LOCKSTEP GATE HERE. Gating the sprite on "the view moved this tick" was
+                // tried 2026-08-26 to cure a wobble and BROKE THE EDGE ZONES: at a screen edge the
+                // mapper clamps the source rect, so the transform stops changing while
+                // cursorScreen keeps sliding - the sprite froze and the pointer could not reach
+                // the left side of the screen (field-reported). The cursor must follow the MAPPER,
+                // always. The wobble it was aimed at came from the write cadence, which is off.
+                if (sx != lastSpriteX_ || sy != lastSpriteY_) {
                     sprite_->moveTo(sx, sy);
                     lastSpriteX_ = sx; lastSpriteY_ = sy;
-                    spriteFirst_ = true;
                 }
             } else {
                 // Keep the record truthful for the telemetry/metric: under hook ownership the

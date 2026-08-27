@@ -98,3 +98,40 @@ TEST_CASE("reset overrides the accumulated center") {
     CHECK(m.centerX() == doctest::Approx(800.0));
     CHECK(m.centerY() == doctest::Approx(400.0));
 }
+
+// --- time-based easing under a variable refresh rate ------------------------------------
+// On a VRR display the tick interval is not fixed (the transform model paces on DwmFlush, and
+// G-Sync follows the game), so a per-TICK keep-fraction changes the real-time decay every tick
+// and a steady hand produces an unsteady lens. The easing must decay per unit TIME.
+TEST_CASE("easing decays by elapsed time, not by tick count") {
+    const double nominal = 1000.0 / 144.0;
+
+    // One tick of 2x the nominal interval must land where TWO nominal ticks land: with
+    // smoothing 0.5 the pair goes 550 -> 575 -> 587.5, and the single double-length tick keeps
+    // 0.5^2 = 0.25 of the gap, landing on 587.5 directly.
+    CursorMapper twoTicks(1000, 1000, 0.5, 144);
+    twoTicks.reset(500.0, 500.0);
+    twoTicks.update(100, 0, 1.0);          // move the target
+    twoTicks.setTickDeltaMs(nominal);
+    twoTicks.update(0, 0, 1.0);            // two nominal ticks...
+    twoTicks.setTickDeltaMs(nominal);
+    twoTicks.update(0, 0, 1.0);
+    const double after2 = twoTicks.centerX();
+
+    CursorMapper oneLong(1000, 1000, 0.5, 144);
+    oneLong.reset(500.0, 500.0);
+    oneLong.update(100, 0, 1.0);
+    oneLong.setTickDeltaMs(nominal * 2.0);
+    const double afterLong = oneLong.update(0, 0, 1.0).centerX;
+
+    CHECK(afterLong == doctest::Approx(after2).epsilon(0.02));
+}
+
+TEST_CASE("a zero delta falls back to the nominal tick rate") {
+    CursorMapper a(1000, 1000, 0.5, 144), b(1000, 1000, 0.5, 144);
+    a.reset(500.0, 500.0); b.reset(500.0, 500.0);
+    a.update(100, 0, 1.0); b.update(100, 0, 1.0);
+    a.setTickDeltaMs(0.0);                  // "unknown" - behave exactly as before
+    b.setTickDeltaMs(1000.0 / 144.0);
+    CHECK(a.update(0, 0, 1.0).centerX == doctest::Approx(b.update(0, 0, 1.0).centerX));
+}

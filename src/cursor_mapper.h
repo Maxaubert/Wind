@@ -41,12 +41,18 @@ public:
     // dx/dy: the pixel delta to apply to the lens center this tick (already resolved by the
     // caller - the OS cursor's own motion when free, or scaled raw input when a game locks it).
     MapResult update(int dx, int dy, double level);
+    // Elapsed time since the previous update, ms. The easing below decays per UNIT TIME, so an
+    // uneven tick interval no longer changes the felt inertia. 0 = "assume the nominal tick rate"
+    // (what a fixed-refresh display gives, and what every unit test uses).
+    void setTickDeltaMs(double ms) { dtMs_ = ms > 0.0 ? ms : 0.0; }
     double centerX() const { return cx_; }         // rendered (smoothed) center
     double centerY() const { return cy_; }
 private:
     int sw_, sh_;
     double smoothing_;      // configured smoothing (144Hz-baseline semantics)
     double alpha_;          // per-tick easing factor derived from smoothing_ + tick rate, clamped
+    double nominalDtMs_ = 1000.0 / 144.0;   // the tick interval alpha_ was derived for
+    double dtMs_ = 0.0;     // measured interval for THIS tick (0 = use the nominal)
     double cx_, cy_;        // rendered center (eased)
     double tx_, ty_;        // target center (delta-accumulated)
     double maxSrcX_ = -1.0; // pan wall: max source-left (desktop px); <0 = unbounded

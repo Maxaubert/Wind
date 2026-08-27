@@ -251,24 +251,21 @@ struct Config {
     double txWarmLevelEps = 0.00002;
     int txHookWrite = 0;
     int txFreeCursor = 1;
-    // WRITE CADENCE - SHIPPED ON since 2026-08-26. Wind wrote once per tick (~144/s on a 144Hz
-    // panel) where native Magnifier writes ~49/s while panning, and every write makes DWM redo
-    // work proportional to the zoom level. That surplus saturates the compositor: DWM starts
-    // missing composites, the tick loop (which paces on DwmFlush for this model) drops to 84-114
-    // fps with 25ms gaps, and each gap is a visible hitch at a pan start.
-    // Measured with tools/stutter_gauntlet.ps1, alternating A/B over DOOM:
-    //   cadence ON  (60 / 2px)  13/13 rounds passed, 0.00 stalls/s in EVERY round, at 14.5x
-    //   cadence OFF (the old default)  one hard failure in 8 rounds: 10.35 stalls/s, 25.0ms stall
-    // The gates only COALESCE - a suppressed write is superseded by a fresher one on the next
-    // tick, and the escapes in tx_cadence.h stop anything being stranded (see that header).
-    // This is issue #204's own machinery, which shipped disabled because the measurements of the
-    // day were dominated by an uncontrolled variable (the overlay-plane race, docs/HITCH-FINDINGS.md).
-    int txWriteHz = 60;
+    // WRITE CADENCE - SHIPPED OFF (tried ON 2026-08-26, REVERTED the same day on field report).
+    // The theory (issue #204) is sound: we write ~144/s where native writes ~49/s, and each write
+    // makes DWM redo work proportional to the zoom. Turning it on scored well in the automated
+    // gauntlet. It is still WRONG for the user:
+    //   txMinOffsetPx=2 makes the view advance in 2px steps under a smooth hand, which reads as
+    //     WOBBLE at low zoom - the pointer slides against content that is jumping.
+    //   txWriteHz=60 caps the view at 60Hz on a 144Hz panel, which reads as LOW FPS at high zoom.
+    // The pan-start stutter these were bundled with is fixed by txWarmMode, which is independent.
+    // Do not re-enable without a test that watches the view under a SLOW hand, not just stall counts.
+    int txWriteHz = 0;
     // Minimum destination-space (screen px) movement before a PAN-ONLY write goes out. Native's
     // median pan step is 2.24px; ours was 1.41px, and a THIRD of all our writes moved the image by
     // exactly one pixel. Sub-threshold movement is coalesced, never dropped: a residual still
     // lands within kSettleMs so the view can never rest visibly offset. 0 = write every change.
-    int txMinOffsetPx = 2;   // native's median pan step; ships ON with txWriteHz above.
+    int txMinOffsetPx = 0;   // ships OFF with txWriteHz above.
     int magInputTransform = 1; // publish MagSetInputTransform while zoomed (hot; needs UIAccess).
                           //     1 (DEFAULT) = the visual source rect per change - native-
                           //     Magnifier parity, THE fix for the pointer-framework hover dead
