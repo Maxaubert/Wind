@@ -492,6 +492,20 @@ serving the old installer. That stale build was then installed over this dev box
 removed a working fix (the branch it lived on was unmerged). Anything deployed here that is not
 on `main` is one installer run from being lost.
 
+## Alpha / nightly channel
+`.github/workflows/alpha.yml` builds an installer from ANY branch on demand (Actions -> alpha ->
+Run workflow, pick the branch, optional "what is being tested" note). It publishes a GitHub
+PRE-RELEASE tagged `v<version>-alpha.<short-sha>` with asset
+`Wind-Setup-x64-<version>-alpha.<sha>.exe`. It does NOT bump src/version.h.
+WHY IT IS SAFE beside release.yml: GitHub's "Latest release" pointer ignores pre-releases, so the
+repo download button - and any future in-app updater asking for the latest release - keep seeing
+the stable build however many alphas exist. release.yml stays the only publisher of a real release.
+An alpha REPLACES a normal install (same dir, same `%LOCALAPPDATA%\Wind` settings); roll back by
+running the stable installer, which always keeps the Latest badge. Newest 5 alphas are kept, older
+ones are deleted with their tags. The build steps intentionally MIRROR release.yml rather than
+sharing a composite action - if they ever drift in a way that matters, extract one and use it in
+BOTH, never fix just one.
+
 ## Deploy for testing (STANDING RULE)
 Whenever you build something new the user should test/verify (a new feature, a behaviour change, a
 bug fix with a runtime effect), DEPLOY it to `C:\Program Files\Wind` so Max can test the real signed
