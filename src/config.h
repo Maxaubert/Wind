@@ -232,17 +232,34 @@ struct Config {
     // feeding DWM, or did DWM stall while being fed?" - was starved by the very load it measured
     // and reported zero writes that Wind's own loop log contradicted. Only Wind can answer it.
     int txTrace = 0;
-    // SHIPPED ON, 2026-08-26. Traced from inside Wind (txTrace): at rest DWM's composition falls
-    // to ~88Hz (tick dt median 11.36ms vs 7.10ms in motion), and on the first movement it takes
-    // TWO slow frames to come back - wake tick +0 = 15.01ms, +1 = 15.24ms. That ~30ms at the start
-    // of every pan IS the field-reported stutter. Warm-keeping holds DWM at full rate through the
-    // rest: REST median 6.94ms, wake +0 7.02ms, +1 7.00ms over 29 transitions, worst 8.64ms.
-    // Verified with tools/stutter_gauntlet.ps1: 5/5 rounds, 0.00 pan stalls per round.
-    int txWarmMode = 4;
+    // WARM-KEEPING. SHIPPED AS MODE 1, 2026-08-27.
+    //
+    // The symptom: the first movement after ANY pause hitches (worst at a side-to-side reversal,
+    // where the hand passes through zero), then panning is smooth again.
+    //
+    // The cause, from the per-tick trace (txTrace) of a real session:
+    //     prev tick: dt= 7.50ms  warm=1              <- resting, panel at full rate
+    //     this tick: dt=25.01ms  wrote=1 changed=1   <- the FIRST REAL pan write
+    // DWM was compositing happily at 143Hz through the rest, and still paid ~25ms the moment the
+    // magnified SOURCE REGION actually moved. So the thing that goes cold is not the compositor,
+    // it is DWM's magnification RE-RENDER path, and only a real change to the sampled region
+    // keeps it warm.
+    //
+    // That is why mode 4 (perturb the LEVEL by txWarmLevelEps) was not enough despite looking
+    // perfect on every composition-rate metric: a 2e-5 level nudge is sub-pixel, DWM skips the
+    // real work, and the first genuine source change still pays full price. Mode 1 alternates the
+    // translation by 1px, which IS a real source change, and it is what actually removed the
+    // spike in the field.
+    //
+    // The cost is honest and known: the view sits 1px off the truth on alternate rest ticks. That
+    // is what retired this mechanism in #204, under smooth sampling. It is being shipped anyway
+    // because the hitch it removes is worse, and txWarmMode=0 turns it off for anyone who
+    // disagrees. txWarmWindowMs bounds how long after a rest it keeps jittering.
+    int txWarmMode = 1;
     // Level cap on warm-keeping. Mode 4's perturbation is 0.077 SOURCE px, which on SCREEN is
     // 0.077 * level - about 0.8px at 10x. Capping keeps the artefact sub-pixel where it is most
     // likely to be noticed; above the cap the wake cost returns, which is the accepted trade.
-    int txWarmMaxLevel = 10;
+    int txWarmMaxLevel = 0;
     int txWarmWindowMs = 0;      // 0 = warm for as long as the session rests; else ms after last change
     // Mode 4's level perturbation, RELATIVE. The displacement it causes is not uniform: it is 0 at
     // the source origin and grows to (width * eps) at the far edge, which is a far gentler artefact

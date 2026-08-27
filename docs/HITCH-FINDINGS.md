@@ -96,59 +96,52 @@ Diagnostic tells for this class: **two cursors** = something released the runtim
 render model had the pointer hidden; **cursor moves but nothing magnifies** = transform writes
 returning FALSE (`txwrite ... fails=N` in wind-core.log, N == writes).
 
-## The pan-start hitch: FIXED (2026-08-26), and the two residuals
+## The pan-start hitch: what it actually was (2026-08-27)
 
-Symptom: zoomed panning is smooth, but the first movement after any pause hitches, worst at a
-side-to-side reversal. Intermittent per session - roughly 1 session in 4 was clean with no config
-change, which is what made every single-take A/B below worthless until it was understood.
+Symptom: the first movement after ANY pause hitches, worst at a side-to-side reversal where the
+hand passes through zero velocity; then panning is smooth again. Intermittent enough per session
+that single takes were worthless for most of the investigation.
 
-### What it actually was, traced from INSIDE Wind
+CAUSE: **DWM's magnification RE-RENDER path goes cold, not the compositor.** From the per-tick
+trace (`txTrace=1`) of a real session:
 
-`txTrace=1` dumps a per-tick ring buffer at session end. Every external probe that tried to
-attribute a stall was starved by the load it was measuring and reported zero writes that Wind's own
-loop log contradicted. The trace settles it:
+    prev tick: dt= 7.50ms  warm=1              <- resting, panel at full rate
+    this tick: dt=25.01ms  wrote=1 changed=1   <- the FIRST REAL pan write, d(txX)=2
 
-| tick state | warm OFF | warm ON |
-|---|---|---|
-| MOTION (changed) | 7.10 ms | 6.94 ms |
-| REST (unchanged) | 11.36 ms | 6.94 ms |
-| first motion tick after a rest | **15.01 ms** | 7.02 ms |
-| second motion tick | **15.24 ms** | 7.00 ms |
+DWM was compositing at 143Hz right through the rest and STILL paid ~25ms the moment the magnified
+source region actually moved. Only a real change to the sampled region keeps that path warm.
 
-The first motion tick after a rest WROTE the transform 8/8 times, so Wind was never the one that
-stopped feeding. At rest DWM composition falls to ~88Hz and needs two frames to come back; that
-~30 ms at the start of every pan is the hitch. Warm-keeping holds DWM at full rate through the
-rest and removes it: 29 wake transitions, worst 8.64 ms.
+FIX: `txWarmMode=1` - alternate the translation by 1px on rest ticks. Field-verified on both the
+desktop and in games.
 
-### Shipped
+### Why this took so long, and what was measured wrong
 
-- `txWarmMode=4` (capped 10x) - warm-keeping, above.
-- `txWriteHz=60` + `txMinOffsetPx=2` - we wrote ~144/s where native writes ~49/s.
-- Ramps EXEMPT from the rate cap - capping level changes gave "terrible hitching in ramp".
-- Sprite moves only on ticks the view moved - else it walks across unmoved content (wobble).
+- **Composition rate is the wrong metric.** Mode 4 (perturb the LEVEL by 2e-5) held composition at
+  a flat 6.94ms through every rest and scored 0.00 stalls/s in 15/15 automated rounds - and the
+  user still felt the spike. A sub-pixel level nudge is not a real source change, so DWM skips the
+  work and the first genuine pan write still pays. Anything that measures only WHEN DWM composited,
+  and not whether it re-rendered the magnified region, will pass a build that is still broken.
+- **The write cadence (`txWriteHz`/`txMinOffsetPx`) is not the answer and is actively harmful.**
+  It scored well in the automated gauntlet and was field-rejected the same day: `txMinOffsetPx=2`
+  advances the view in 2px steps under a smooth hand (wobble at low zoom) and `txWriteHz=60` caps
+  the view at 60Hz on a 144Hz panel (reads as low fps at high zoom).
+- **Do not gate the cursor sprite on "the view moved this tick".** Tried as a wobble fix; it froze
+  the drawn cursor in the screen edge zones, where the source rect clamps and the transform stops
+  changing while the pointer must keep travelling. Worst at bottom-left, where both axes clamp: the
+  visible cursor froze while the real one kept working underneath.
+- **Test in real gameplay, not a menu.** Most of this investigation ran against a DOOM menu/loading
+  screen. In gameplay the game holds the mouse (raw-input mouselook) and Wind pans on the LOCKED
+  path, which is a different code path entirely.
 
-Result: pan stalls 0.00/s in 7 of 7 gauntlet rounds, against 8-12/s before.
+### Related but separate: VRR
 
-### Residual 1: VRR (not fixable in Wind)
-
-The panel is variable-refresh, 23-143 Hz (`MinRefreshRate=23, MaxRefreshRate=143`). When the game
-presents ~70 fps the panel and DWM follow it down, and the transform model is DwmFlush-paced BY
-DESIGN (main.cpp: the only pace that puts the sprite and the transform in the same frame), so Wind
-then updates at ~74 Hz. In one failing round warm-keeping was firing at full rate and composition
-still ran at 74 Hz - no write cadence can raise a panel's refresh. The lever is on the display
-side: G-SYNC/VRR off or a fixed refresh for that game, or an fps cap near the panel maximum.
-
-### Residual 2: the overlay-plane race (open)
-
-Wind lands composited 3/6 alt-tab sessions; native Windows Magnifier 6/6. On a plane the zoom-in
-ramp costs about twice as much (8.7-10.6 stalls/s vs 3.2-4.4) and the pan walls stay up.
-`mpoBuster`'s ghost is verifiably shown, fullscreen, topmost from 300 ms in - but the failing
-sessions report `Hardware Composed: Independent Flip`, i.e. MPO composes MULTIPLE planes, so
-covering the game with a window cannot force DWM composition. Native uses no window for this at all
-(its fullscreen window is never shown); DWM simply stops promoting planes while its magnification
-is active. Replicating that is the open work. Measured dead ends: asserting the ghost every 100 ms
-for 2 s (2/3), the public transform channel (5/6, 3/4 on retest), never releasing the magnification
-context (3/4), resting at a non-identity level (5/6).
+The panel is variable-refresh 23-143Hz, and the transform model paces on DwmFlush by design, so
+Wind's tick interval follows whatever the display is doing (measured: DOOM gameplay presents
+13.68ms / 73fps, display change 13.29ms). The lens easing used to keep a fixed fraction of the gap
+PER TICK, so an uneven interval changed the felt inertia every tick - a steady hand produced an
+unsteady lens. Now re-derived from the MEASURED interval (`CursorMapper::setTickDeltaMs`), so the
+inertia is constant in real time whatever the refresh does. Issue #223 had already fixed this for
+different FIXED rates; VRR is the case it did not cover.
 
 ## The pan-start hitch: ROOT CAUSE = the game on a hardware overlay plane (2026-08-26)
 

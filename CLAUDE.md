@@ -43,17 +43,18 @@ rests a few ticks AFTER the incoming one is live - restAfterReveal - so a handov
 composites a bare unmagnified frame). `transform` (revived issue #148) = DWM fullscreen
 transform via MagSet/private channel: compositor-internal, the only path that stays smooth over
 a heavy game (native-Magnifier parity measured); continuous per-tick level (big discrete jumps
-are what cost ~30-50ms game frames - do NOT re-quantize ramps), PAN-START HITCH (OPEN, 2026-08-26): the first move after any pause hitches, worst at a
-side-to-side reversal; native Magnifier does not. Reproducible on demand with
-tools/pan_wake_probe.ps1 (+ pan_reach_probe.ps1). Wind idles at 13.17ms composition where native
-holds 6.94ms. `txWarmMode` (SHIPS 0/OFF) is the A/B harness for it: modes 1 (1px jitter) and 4
-(level epsilon) both score native-clean but BOTH are visibly costly (mode 4's displacement is
-0.077 SOURCE px = 0.077*level on SCREEN, ~1.6px at 21x, and it flips the derived source origin a
-whole pixel). Measured dead: same-value rewrites, input-transform republishes, unrelated
-per-frame damage, level deltas below ~1e-5. CRITICAL: native writes NOTHING across a rest and
-stays smooth anyway, so "keep writing to stay warm" is NOT what it does - do not rebuild that
-theory. The metric is also bimodal on one binary (0.00 vs 18-29 stalls/s), VRR refresh hunting
-the leading suspect. See docs/HITCH-FINDINGS.md. launch warm-up 1.001, rest at TRUE 1.0.
+are what cost ~30-50ms game frames - do NOT re-quantize ramps), PAN-START HITCH (FIXED 2026-08-27): the first move after any pause hitched, worst at a
+side-to-side reversal. Cause is DWM's magnification RE-RENDER going cold, NOT the compositor:
+the trace shows a resting tick at 7.50ms (panel at full rate) followed by 25.01ms on the FIRST
+REAL pan write. `txWarmMode` (SHIPS 1) alternates the translation 1px on rest ticks, which is a
+REAL source-rect change and is what keeps that path warm. Mode 4 (level epsilon 2e-5) held
+composition at a flat 6.94ms and scored 0.00 stalls in 15/15 automated rounds and the user STILL
+felt the spike - sub-pixel is not a real change, so DO NOT trust composition-rate metrics here.
+Cost: the view sits 1px off on alternate rest ticks (the #204 shimmer); txWarmMode=0 disables.
+MEASURED HARMFUL, do not re-enable: `txWriteHz`/`txMinOffsetPx` (2px view steps = wobble at low
+zoom; 60Hz view = low fps at high zoom) and gating the cursor sprite on "the view moved" (freezes
+the drawn cursor in the edge zones, worst bottom-left). See docs/HITCH-FINDINGS.md.
+launch warm-up 1.001, rest at TRUE 1.0.
 maxLevel is ONE SHARED setting across models (no per-model cap; the old 12x cap guarded what
 turned out to be the MPO bug below). TRANSFORM ON THE DESKTOP (root-caused AND solved
 2026-08-12, docs/POINTER-HITTEST-FINDINGS.md): pointer-input frameworks (XAML/DirectUI -
