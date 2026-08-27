@@ -1,0 +1,144 @@
+# Alpha / nightly channel: build an installer from ANY branch, on demand, without touching the
+# stable download.
+#
+# Why this is safe next to release.yml: every build here is published as a GitHub PRE-RELEASE, and
+# GitHub's "Latest release" pointer ignores pre-releases. So the download button on the repo, and
+# any future in-app updater that asks for the latest release, keep seeing the stable build no
+# matter how many alphas exist. release.yml remains the only thing that publishes a real release.
+#
+# Versioning: src/version.h is still the single source of the version, and an alpha does NOT bump
+# it. The tag is v<version>-alpha.<short-sha>, so alphas are unique per commit, sort under the
+# stable tag, and can never collide with the release tag for the same version.
+#
+# Installing an alpha REPLACES a normal Wind install (same install dir, same settings). Rolling
+# back is running the stable installer again - it is always one click away on the releases page,
+# because it keeps the "Latest" badge.
+#
+# NOTE ON DUPLICATION: the build steps below mirror release.yml on purpose rather than sharing a
+# composite action. The stable release path works and is not worth destabilising for DRY. If these
+# ever drift in a way that matters, extract .github/actions/build-installer and have BOTH use it -
+# do not fix it by editing only one.
+name: alpha
+
+on:
+  workflow_dispatch:
+    inputs:
+      note:
+        description: 'What is being tested (goes in the release notes)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: alpha
+  cancel-in-progress: false
+
+jobs:
+  alpha:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version and compose the alpha tag
+        id: ver
+        shell: pwsh
+        run: |
+          $h = Get-Content src/version.h -Raw
+          $maj = [regex]::Match($h, '#define\s+WIND_VER_MAJOR\s+(\d+)').Groups[1].Value
+          $min = [regex]::Match($h, '#define\s+WIND_VER_MINOR\s+(\d+)').Groups[1].Value
+          $pat = [regex]::Match($h, '#define\s+WIND_VER_PATCH\s+(\d+)').Groups[1].Value
+          if (-not $maj) { throw 'could not read WIND_VER_MAJOR from src/version.h' }
+          $v = "$maj.$min.$pat"
+          $sha = '${{ github.sha }}'.Substring(0,7)
+          "version=$v"                >> $env:GITHUB_OUTPUT
+          "alpha=$v-alpha.$sha"       >> $env:GITHUB_OUTPUT
+          "tag=v$v-alpha.$sha"        >> $env:GITHUB_OUTPUT
+          "sha7=$sha"                 >> $env:GITHUB_OUTPUT
+
+      - name: Install NSIS
+        shell: pwsh
+        run: choco install nsis --no-progress -y
+
+      # Same gate as the stable release: an alpha that fails the unit suite is not worth installing.
+      - name: Unit tests
+        shell: cmd
+        run: build.bat test
+
+      - name: Build installer
+        shell: pwsh
+        run: pwsh -File tools/release.ps1
+
+      # tools/release.ps1 names the artefact from src/version.h, which an alpha does not bump - so
+      # rename it to carry the alpha suffix. Without this every alpha asset would be called
+      # Wind-Setup-x64-0.4.1.exe and be indistinguishable in a downloads folder.
+      - name: Name the asset for this alpha
+        id: asset
+        shell: pwsh
+        run: |
+          $v = '${{ steps.ver.outputs.version }}'
+          $src = "dist/Wind-Setup-x64-$v.exe"
+          if (-not (Test-Path $src)) { throw "installer not produced: $src" }
+          $dst = "dist/Wind-Setup-x64-${{ steps.ver.outputs.alpha }}.exe"
+          Move-Item $src $dst -Force
+          "path=$dst" >> $env:GITHUB_OUTPUT
+          "sha256=$((Get-FileHash $dst -Algorithm SHA256).Hash)" >> $env:GITHUB_OUTPUT
+
+      - name: Publish the pre-release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $tag  = '${{ steps.ver.outputs.tag }}'
+          $exe  = '${{ steps.asset.outputs.path }}'
+          $note = '${{ inputs.note }}'
+          $body = @"
+          **Alpha build - not a release.** Installs over a normal Wind install and shares its
+          settings; roll back by running the stable installer from the Latest release.
+
+          | | |
+          |---|---|
+          | branch | ``${{ github.ref_name }}`` |
+          | commit | ``${{ steps.ver.outputs.sha7 }}`` |
+          | base version | ``${{ steps.ver.outputs.version }}`` |
+          | sha256 | ``${{ steps.asset.outputs.sha256 }}`` |
+
+          $(if ($note) { "**Testing:** $note" })
+
+          Unsigned, like the stable build - SmartScreen will warn.
+          "@
+          $body | Set-Content notes.md -NoNewline
+          gh release create $tag $exe --prerelease --title "Wind ${{ steps.ver.outputs.alpha }}" --notes-file notes.md
+          if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
+
+      # Alphas are disposable and accumulate fast. Keep the newest few so a bisect across recent
+      # builds is still possible, and delete the rest along with their tags.
+      - name: Prune old alphas
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $keep = 5
+          $all = gh release list --limit 100 --json tagName,isPrerelease,createdAt | ConvertFrom-Json
+          $alphas = @($all | Where-Object { $_.isPrerelease -and $_.tagName -like '*-alpha.*' } |
+                      Sort-Object { [datetime]$_.createdAt } -Descending)
+          if ($alphas.Count -le $keep) { "nothing to prune ($($alphas.Count) alphas)"; exit 0 }
+          foreach ($old in $alphas[$keep..($alphas.Count-1)]) {
+            "pruning $($old.tagName)"
+            gh release delete $old.tagName --yes --cleanup-tag
+          }
+
+      - name: Summary
+        shell: pwsh
+        run: |
+          "## Wind ${{ steps.ver.outputs.alpha }} (pre-release)"        >> $env:GITHUB_STEP_SUMMARY
+          ""                                                             >> $env:GITHUB_STEP_SUMMARY
+          "- branch ``${{ github.ref_name }}``"                          >> $env:GITHUB_STEP_SUMMARY
+          "- tag ``${{ steps.ver.outputs.tag }}``"                       >> $env:GITHUB_STEP_SUMMARY
+          "- sha256 ``${{ steps.asset.outputs.sha256 }}``"               >> $env:GITHUB_STEP_SUMMARY
+          "- the stable release keeps the Latest badge; this does not"   >> $env:GITHUB_STEP_SUMMARY
