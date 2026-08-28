@@ -79,6 +79,23 @@ struct Config {
     // Empty string = exclude nothing.
     std::string transformExclude =
         "zen.exe,firefox.exe,chrome.exe,msedge.exe,brave.exe,opera.exe,opera_gx.exe,vivaldi.exe";
+    // PER-WINDOW-TYPE ENGINE SELECTION. Each takes auto|transform|render; "auto" is the historical
+    // automatic pick, so an untouched install behaves exactly as before. Categories are classified
+    // in ClassifyWindow (engine_pick.h) from signals read per tick. Hot-reloadable.
+    //   game    - borderless and covering the monitor (games, F11 video)
+    //   acrylic - the window declares a DWM system backdrop (Mica/acrylic/tabbed). Only catches
+    //             windows that OPT IN: most report DWMSBT_AUTO, and third-party blur is invisible
+    //             here, so this bucket is a subset of what "looks like acrylic" on screen.
+    //   desktop - the shell desktop (Win+D, Progman)
+    //   other   - everything else
+    std::string engineGame    = "auto";
+    std::string engineAcrylic = "auto";
+    std::string engineDesktop = "auto";
+    std::string engineOther   = "auto";
+    // Exes that must NEVER get the render engine - the manual counterpart to transformExclude, for
+    // DRM/protected apps whose capture comes back black. The automatic display-affinity probe
+    // catches most of these; this list is the escape hatch for the ones it misses. Empty = none.
+    std::string renderExclude = "";
     // Keyboard-hook suspension (issue #156). A WH_KEYBOARD_LL hook makes Windows' input thread hand
     // every keystroke to us and WAIT for the reply before delivering anything else - including mouse
     // movement to the foreground app. Holding a key auto-repeats ~30x/s, so it stalls the mouse
