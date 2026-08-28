@@ -30,6 +30,7 @@ export const sections = [
     // sliders survive as advanced knobs.
     { key:'smoothZoomAccel', type:'slider', label:'Zoom-in ease', desc:'Softens the start of each zoom.', min:1, max:8, step:0.5, def:3.0, advanced:true },
     { key:'smoothZoomRamp',  type:'slider', label:'Ease-in duration', desc:'How long the soft start lasts.', min:0.1, max:3, step:0.1, def:0.6, advanced:true, unit:'seconds' },
+    { key:'zoomEaseOutMs',   type:'slider', label:'Release glide', desc:'How softly the zoom coasts to a stop when you let go. 0 stops instantly.', min:0, max:300, step:5, def:45, advanced:true, unit:'ms' },
   ]},
   { id:'cursor', label:'Cursor', icon:'cursor', desc:'How the pointer behaves while zoomed.', rows: [
     // High resolution cursor (issue #227): DWM's edge-preserving magnification filter - the

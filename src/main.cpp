@@ -938,6 +938,7 @@ static void RunTick(TickState& t) {
     // root-caused elsewhere - issue #148 - so the user's configured speed applies everywhere.)
     t.zoom.setProfile(t.cfg.zoomInSpeed, t.cfg.zoomOutSpeed, t.cfg.smoothZoom != 0,
                       t.cfg.smoothZoomAccel, t.cfg.smoothZoomRamp);
+    t.zoom.setEaseOut(t.cfg.zoomEaseOutMs / 1000.0);
     // Quick-zoom trigger. Modifier mode (quickZoomHotkeyMode==0): hold the configured modifier
     // (Ctrl/Alt/Shift; "None" = off) and tap a zoom key. While the modifier is held it toggles quick
     // zoom (below) instead of hold-zooming, so suppress the hold-zoom direction (the toggle snaps the

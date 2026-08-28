@@ -18,6 +18,8 @@ public:
     //                      inSpeed (the linear cap, never exceeded); >1 (<=1 = no ease-in)
     //   rampSeconds      - seconds of continuous zoom-in to reach the linear rate (<=0 = instant)
     void setProfile(double inSpeed, double outSpeed, bool smooth, double accel, double rampSeconds);
+    // Release ease-out time constant, seconds (0 = the old dead stop). Hot like setProfile.
+    void setEaseOut(double tauSeconds) { rateTau_ = tauSeconds > 0.0 ? tauSeconds : 0.0; }
     void tick(double dtSeconds);   // ramp level multiplicatively toward bound
     double level() const { return level_; }
     void reset();                  // level=min, dir=None, held cleared
@@ -30,6 +32,10 @@ private:
     bool   smooth_ = false;
     double accel_ = 3.0, rampSeconds_ = 0.6;
     double heldIn_ = 0.0;                      // continuous seconds zoom-in held (drives accel ramp)
+    double rateTau_ = 0.045;                   // glide time constant (setEaseOut; 0 = dead stop)
+    double rate_ = 0.0;                        // applied rate (signed doublings/s) - glides toward
+                                               // the commanded rate so release EASES OUT instead of
+                                               // stopping dead (the square-wave stop read as harsh)
 };
 
 // Result of one quick-zoom toggle: the level to snap to, and the (possibly updated) remembered level.

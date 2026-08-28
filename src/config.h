@@ -51,6 +51,10 @@ struct Config {
     double smoothZoomAccel = 3.0;
     // Seconds of continuous holding to reach the linear rate. 0.1-3.0.
     double smoothZoomRamp = 0.6;
+    // Release ease-out (2026-08-28, hot): the applied zoom rate glides to a stop over roughly
+    // 3x this time constant instead of freezing the instant the button lifts (the square-wave
+    // stop read as harsh). ~45ms tau = ~150ms felt glide. 0 = off (the old dead stop).
+    int zoomEaseOutMs = 45;
     // Present sync while zoomed (render engine): 1 = vsync (Present sync-interval 1, locked to
     // the display refresh); 0 = no vsync (Present 0), with the loop paced by the timer instead.
     int    vsync            = 1;

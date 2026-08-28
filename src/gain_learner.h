@@ -52,17 +52,30 @@ public:
     }
 
     // Gain to apply to a locked-regime packet arriving at `counts` mickeys over `dtMs`.
+    // INTERPOLATED between bins (2026-08-28): a flat per-bin gain made pan speed jump discretely
+    // every time the hand crossed a bin boundary - field-reported as stepping, worst while
+    // ramping and panning together. Piecewise-linear over the log-rate axis keeps the replayed
+    // curve as continuous as the real one.
     double gainFor(double counts, double dtMs) const {
         if (dtMs <= 0.0) return fallback();
-        const int b = bin(counts / dtMs);
-        if (n_[b] > 0) return gain_[b];
-        // Nearest learned bin: the curve is monotone-ish, so the neighbour is a far better guess
-        // than a cold 1.0 once anything at all has been learned.
-        for (int d = 1; d < kBins; ++d) {
-            if (b - d >= 0    && n_[b - d] > 0) return gain_[b - d];
-            if (b + d < kBins && n_[b + d] > 0) return gain_[b + d];
+        const double pos = binPos(counts / dtMs);
+        // Interpolate between the nearest LEARNED bins on each side (bin centres as sample
+        // points). Interpolating between raw neighbours and nearest-filling the gaps was tried
+        // first and left a cliff at the midpoint of every unlearned gap - the same discontinuity
+        // this exists to remove. Sparse data now yields one continuous piecewise-linear curve.
+        int lo = -1, hi = -1;
+        for (int i = 0; i < kBins; ++i) {
+            if (n_[i] == 0) continue;
+            const double c = i + 0.5;
+            if (c <= pos) lo = i;
+            if (c >= pos && hi < 0) hi = i;
         }
-        return 1.0;
+        if (lo < 0 && hi < 0) return 1.0;             // nothing learned yet: raw passthrough
+        if (lo < 0) return gain_[hi];                 // below the lowest learned centre
+        if (hi < 0) return gain_[lo];                 // above the highest learned centre
+        if (lo == hi) return gain_[lo];
+        const double t = (pos - (lo + 0.5)) / (double)(hi - lo);
+        return gain_[lo] + (gain_[hi] - gain_[lo]) * (t < 0.0 ? 0.0 : (t > 1.0 ? 1.0 : t));
     }
 
     bool warmedUp() const {
@@ -107,12 +120,15 @@ public:
     }
 
 private:
-    static int bin(double rate) {
-        if (rate <= kMinRate) return 0;
-        if (rate >= kMaxRate) return kBins - 1;
+    static double binPos(double rate) {
+        if (rate <= kMinRate) return 0.0;
+        if (rate >= kMaxRate) return (double)(kBins - 1);
         // log-spaced: pointer ballistics vary most at low speed, so low bins must be narrow
         const double t = std::log(rate / kMinRate) / std::log(kMaxRate / kMinRate);
-        int b = (int)(t * kBins);
+        return t * kBins;
+    }
+    static int bin(double rate) {
+        int b = (int)binPos(rate);
         if (b < 0) b = 0;
         if (b >= kBins) b = kBins - 1;
         return b;

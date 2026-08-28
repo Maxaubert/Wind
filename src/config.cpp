@@ -142,6 +142,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "smoothZoom")       c.smoothZoom = std::stoi(val);
             else if (key == "smoothZoomAccel")  c.smoothZoomAccel = std::stod(val);
             else if (key == "smoothZoomRamp")   c.smoothZoomRamp = std::stod(val);
+            else if (key == "zoomEaseOutMs")    c.zoomEaseOutMs = std::stoi(val);
             else if (key == "vsync")            c.vsync = std::stoi(val);
             else if (key == "dwmFlush")         c.dwmFlush = std::stoi(val);
             else if (key == "diagnostics")      c.diagnostics = std::stoi(val);
@@ -243,6 +244,8 @@ Config ParseConfig(const std::string& text) {
     if (c.txRestLevel > 1.01)  c.txRestLevel = 1.01;   // visually identity only
     if (c.txPace < 0)          c.txPace = 0;
     if (c.txPace > 2)          c.txPace = 2;
+    if (c.zoomEaseOutMs < 0)   c.zoomEaseOutMs = 0;
+    if (c.zoomEaseOutMs > 300) c.zoomEaseOutMs = 300;
     if (c.txWarmMode < 0)      c.txWarmMode = 0;
     if (c.txWarmMode > 4)      c.txWarmMode = 4;
     if (c.txWarmMaxLevel < 0)  c.txWarmMaxLevel = 0;

@@ -84,11 +84,15 @@ TEST_CASE("smooth zoom plateaus at the linear rate (does not exceed it)") {
     ZoomController sm (1.0, 1e9);  sm .setProfile(1.0, 1.0, true,  3.0, 0.1);
     ZoomController lin(1.0, 1e9);  lin.setProfile(1.0, 1.0, false, 3.0, 0.1);
     sm.setDirection(ZoomDir::In);  lin.setDirection(ZoomDir::In);
-    for (int i = 0; i < 5; ++i) { sm.tick(0.05); lin.tick(0.05); }  // sm past ramp -> linear rate
+    // Warm PAST the velocity glide's convergence, not just past the ease-in ramp: the applied
+    // rate chases the commanded rate with a ~45ms time constant (the release ease-out), and the
+    // two controllers' rate histories differ during the ramp, so comparing factors before both
+    // have fully converged measures the glide residue, not the plateau.
+    for (int i = 0; i < 20; ++i) { sm.tick(0.05); lin.tick(0.05); }
     double smBefore = sm.level(), linBefore = lin.level();
     sm.tick(0.1); lin.tick(0.1);
     double smFactor = sm.level() / smBefore, linFactor = lin.level() / linBefore;
-    CHECK(smFactor == doctest::Approx(linFactor));   // at the plateau, smooth grows at the linear rate
+    CHECK(smFactor == doctest::Approx(linFactor).epsilon(0.001));   // plateau: smooth == linear rate
 }
 TEST_CASE("releasing resets the smooth ramp so the next in starts slow") {
     ZoomController z(1.0, 1e9);
@@ -128,4 +132,40 @@ TEST_CASE("setLevel snaps and clamps to bounds") {
     CHECK(z.level() == doctest::Approx(8.0));
     z.setLevel(0.5);                   // below min -> clamps to 1.0
     CHECK(z.level() == doctest::Approx(1.0));
+}
+
+TEST_CASE("release eases out instead of stopping dead") {
+    // The ramp used to be a velocity square wave; the dead stop on release read as "harsh, too
+    // coarse" in the field. After release the level must keep gliding briefly (the ease-out),
+    // with a DECAYING rate, and settle to a stop rather than continuing forever.
+    ZoomController z(1.0, 1e9);
+    z.setProfile(1.0, 1.0, false, 3.0, 0.2);
+    z.setDirection(ZoomDir::In);
+    for (int i = 0; i < 50; ++i) z.tick(0.007);      // at full rate
+    z.setDirection(ZoomDir::None);
+    const double atRelease = z.level();
+    z.tick(0.007);
+    const double g1 = z.level() - atRelease;         // still moving right after release
+    CHECK(g1 > 0.0);
+    double prev = z.level(); z.tick(0.007);
+    const double g2 = z.level() - prev;              // ...but slower: the rate is decaying
+    CHECK(g2 < g1);
+    for (int i = 0; i < 100; ++i) z.tick(0.007);     // ~0.7s later the glide must be fully settled
+    const double settled = z.level();
+    z.tick(0.007);
+    CHECK(z.level() == doctest::Approx(settled));
+}
+
+TEST_CASE("the ease-out is time-based, not tick-based") {
+    // VRR: the same real time in different tick sizes must glide to (nearly) the same level.
+    ZoomController a(1.0, 1e9), b(1.0, 1e9);
+    a.setProfile(1.0, 1.0, false, 3.0, 0.2);
+    b.setProfile(1.0, 1.0, false, 3.0, 0.2);
+    a.setDirection(ZoomDir::In); b.setDirection(ZoomDir::In);
+    for (int i = 0; i < 100; ++i) a.tick(0.007);     // 0.7s at 143Hz
+    for (int i = 0; i < 50;  ++i) b.tick(0.014);     // 0.7s at 71Hz
+    a.setDirection(ZoomDir::None); b.setDirection(ZoomDir::None);
+    for (int i = 0; i < 100; ++i) a.tick(0.007);
+    for (int i = 0; i < 50;  ++i) b.tick(0.014);
+    CHECK(a.level() == doctest::Approx(b.level()).epsilon(0.02));
 }
