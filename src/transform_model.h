@@ -96,6 +96,11 @@ private:
     CompositionPin pin_;
     MpoGhost mpoGhost_;                              // MPO buster (issue #191)
     bool mpoBusterWanted_ = false;                   // show the ghost this session
+    // Edge clip (cfg.edgeClip): session-scoped ClipCursor 1px inside the monitor. See config.h.
+    bool edgeClipActive_ = false;
+    RECT edgeClipSaved_{};                            // the clip that existed before ours
+    RECT edgeClipApplied_{};                          // what we set (dedupe + foreign-change test)
+    void edgeClipManage(bool wantActive);
     unsigned long long ghostSessionStartMs_ = 0;     // 0 = not started; drives the opening burst
     bool mpoExposed_ = false;                        // apply the 16-bit write clamp
     unsigned long long lastGhostAssertMs_ = 0;       // 500ms assert cadence

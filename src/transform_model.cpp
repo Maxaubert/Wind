@@ -80,6 +80,7 @@ bool TransformModel::ensureMag() {
 }
 
 void TransformModel::teardownMag() {
+    edgeClipManage(false);   // never strand our clip across a teardown
     if (!magUp_) { identityParked_ = false; return; }
     LARGE_INTEGER fr, a, b;
     QueryPerformanceFrequency(&fr); QueryPerformanceCounter(&a);
@@ -239,6 +240,57 @@ void TransformModel::hideSystemCursor(bool hide) {
     else      { if (sprite_) sprite_->hide(); ShowSystemCursorMarshalled(TRUE); blanker_->restore(); }
 }
 
+
+// Session-scoped edge clip (cfg.edgeClip; the full story is in config.h). Keeps the pointer off
+// the outermost pixel ring so the WM_SETCURSOR shape war there can never start. Rules, each one
+// load-bearing:
+//   - SNAPSHOT the existing clip on engage and RESTORE it on release: this rig runs a permanent
+//     external work-area clip, and releasing to nullptr would destroy it.
+//   - INTERSECT with the existing clip rather than replace it.
+//   - NEVER fight a tighter clip: a game confining the pointer, or Inspect's 1px freeze, already
+//     keeps the pointer off the edge - adopt, do not overwrite.
+//   - Re-assert only when a foreign write WIDENED the clip back over the edge pixels (deduped by
+//     comparing against what we applied), so there is no per-tick churn.
+void TransformModel::edgeClipManage(bool wantActive) {
+    RECT cur{};
+    if (!GetClipCursor(&cur)) return;
+    const RECT inset{ mon_.x + 1, mon_.y + 1, mon_.x + mon_.w - 1, mon_.y + mon_.h - 1 };
+    if (!wantActive) {
+        if (edgeClipActive_) {
+            // Restore the snapshot unless someone else took the clip meanwhile (theirs wins).
+            if (EqualRect(&cur, &edgeClipApplied_)) ClipCursor(&edgeClipSaved_);
+            edgeClipActive_ = false;
+        }
+        return;
+    }
+    const bool coversEdge = cur.left < inset.left || cur.top < inset.top ||
+                            cur.right > inset.right || cur.bottom > inset.bottom;
+    if (!edgeClipActive_) {
+        if (!coversEdge) return;                     // something tighter already owns the pointer
+        edgeClipSaved_ = cur;
+        RECT want{};
+        if (!IntersectRect(&want, &cur, &inset)) return;
+        ClipCursor(&want);
+        edgeClipApplied_ = want;
+        edgeClipActive_ = true;
+        return;
+    }
+    // Active: re-assert only if a foreign write re-opened the edge pixels.
+    if (!EqualRect(&cur, &edgeClipApplied_)) {
+        if (!coversEdge) {                            // foreign but tighter (game/Inspect): adopt
+            edgeClipSaved_ = cur;                     // restoring THEIR clip at session end is
+            edgeClipApplied_ = cur;                   // wrong; they own it now - track and yield
+            edgeClipActive_ = false;
+            return;
+        }
+        edgeClipSaved_ = cur;                        // foreign and wide: re-snapshot, re-inset
+        RECT want{};
+        if (!IntersectRect(&want, &cur, &inset)) return;
+        ClipCursor(&want);
+        edgeClipApplied_ = want;
+    }
+}
+
 void TransformModel::setActive(bool active) {
     active_ = active;
     if (active) {
@@ -306,6 +358,7 @@ void TransformModel::setActive(bool active) {
         POINT np;
         if (GetCursorPos(&np)) { SetCursorPos(np.x + 1, np.y); SetCursorPos(np.x, np.y); }
     }
+    edgeClipManage(false);             // give the clip back before the session winds down
     idleSinceMs_ = GetTickCount64();   // start the release countdown (idleTick)
     wind::Log(wind::LogLevel::Info, "txsession", "session end maxLevel=%.2f", sessionMaxLevel_);
     if (traceOn_) traceDump();
@@ -724,6 +777,11 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // pointer owns the interaction, and welding it back fights the hand. weldedLastFrame_
     // records whether SetCursorPos REALLY ran, so RunTick can baseline on the weld point only
     // when it did (#169 measured-baseline law; assuming it landed is the unstable-servo bug).
+    // Edge clip: engaged while genuinely zoomed and the pointer is OURS to manage (not Inspect,
+    // whose 1px freeze clip must never be disturbed - ex.clickOverride marks it).
+    if (cfg.edgeClip != 0)
+        edgeClipManage(applyLevel > 1.001 && !ex.clickOverride);
+
     weldedLastFrame_ = false;
     if (!ex.suppressCursorSync) {
         int cx = ex.clickOverride ? ex.clickDesktopX : (r.clickDesktopX + mon_.x);
