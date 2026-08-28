@@ -5,7 +5,11 @@
 #include "profiles_io.h"
 #include "config.h"
 #include "config_ui/ini_edit.h"
+#include "tray_draw.h"
+#include "tray_status.h"
+#include "tick_stats.h"
 #include <shellapi.h>
+#include <dwmapi.h>
 #include <string>
 #include <thread>
 #include <mutex>
@@ -14,7 +18,7 @@ namespace wind { namespace Tray {
 static NOTIFYICONDATAW g_nid{};
 static const UINT WM_TRAY = WM_APP + 1;
 static const UINT ID_SETTINGS = 1003, ID_QUIT = 1002;
-static const UINT ID_EXPORTDIAG = 1004;
+static const UINT ID_HEADER = 1005;   // owner-drawn, disabled: the status readout
 static const UINT ID_PROFILE_BASE = 1100;      // 1100..1131: one per profile menu item
 static const UINT kMaxProfileMenuItems = 32;
 
@@ -39,17 +43,244 @@ static void SwitchToProfile(const std::wstring& ini, const std::wstring& nameW);
 static volatile LONG g_menuOpen = 0;
 struct MenuCtx { HWND mainHwnd; POINT pt; };
 
+// Owner-draw state for ONE menu open. All of it lives on the menu thread: items, fonts,
+// palette, metrics are created per open and destroyed with the host window, and the status they
+// render is read cross-thread from the tick loop's relaxed-atomic snapshot (tray_status.h) plus
+// the frame-pacing ring (tick_stats.h) - both designed for exactly this reader.
+struct MenuDrawState {
+    std::vector<TrayDraw::Item> items;
+    TrayDraw::Palette pal;
+    TrayDraw::Metrics mt;
+    TrayDraw::Fonts   fonts;
+    // Live header (the menu would otherwise be a still - field-rejected): MenuThread sets `menu`
+    // and a 100ms timer on the host; WM_TIMER finds the system's menu window once (class #32768
+    // hosting `menu`) and invalidates the header item's rect, so WM_DRAWITEM re-reads the status
+    // snapshot, the fps figure and the pacing ring while the menu is open.
+    HMENU menu = nullptr;
+    HWND  menuWnd = nullptr;
+};
+
+static void MeasureItem(const MenuDrawState& st, MEASUREITEMSTRUCT* mis) {
+    if (!mis || mis->CtlType != ODT_MENU) return;
+    const auto* it = reinterpret_cast<const TrayDraw::Item*>(mis->itemData);
+    mis->itemWidth  = (UINT)st.mt.menuWidth();
+    mis->itemHeight = (UINT)(!it ? st.mt.rowHeight()
+                             : it->kind == TrayDraw::Kind::Header ? st.mt.headerH()
+                             : it->kind == TrayDraw::Kind::Sep    ? st.mt.sepH()
+                                                                  : st.mt.rowHeight());
+}
+
+static void DrawHeaderBody(const MenuDrawState& st, HDC dc, const RECT& r) {
+    const auto& pal = st.pal;
+    const int pad = st.mt.padX();
+    const TrayStatus ts = ReadTrayStatus();
+    wchar_t zoom[16];
+    const bool zoomed = FormatZoom(ts.level, zoom, 16);
+
+    HGDIOBJ of = SelectObject(dc, st.fonts.big);
+    SetTextColor(dc, zoomed ? pal.text : pal.faint);
+    RECT zr{ r.left + pad, r.top + st.mt.scale(12), r.right - pad, r.top + st.mt.scale(46) };
+    DrawTextW(dc, zoom, -1, &zr, DT_LEFT | DT_TOP | DT_SINGLELINE);
+    SIZE zs{}; GetTextExtentPoint32W(dc, zoom, lstrlenW(zoom), &zs);
+    if (zoomed) {
+        SelectObject(dc, st.fonts.body);
+        SetTextColor(dc, pal.dim);
+        RECT xr{ zr.left + zs.cx + st.mt.scale(3), r.top + st.mt.scale(28),
+                 r.right - pad, r.top + st.mt.scale(48) };
+        DrawTextW(dc, L"x", -1, &xr, DT_LEFT | DT_TOP | DT_SINGLELINE);
+    }
+
+    float buf[TickStats::kCap];
+    const int n = Ticks().snapshot(buf, TickStats::kCap);
+    if (n >= 8) {
+        const double fps = FpsFromMs(MeanMs(buf, n));   // mean: jitter pairs cancel, see tick_stats.h
+        wchar_t f[32]; wsprintfW(f, L"%d fps", (int)(fps + 0.5));
+        SelectObject(dc, st.fonts.small_);
+        SetTextColor(dc, pal.faint);
+        RECT kr{ r.left, r.top + st.mt.scale(13), r.right - pad, r.top + st.mt.scale(25) };
+        DrawTextW(dc, L"COMPOSITION", -1, &kr, DT_RIGHT | DT_TOP | DT_SINGLELINE);
+        SelectObject(dc, st.fonts.body);
+        SetTextColor(dc, LateCount(buf, n) > 0 ? pal.warn : pal.ok);
+        RECT vr{ r.left, r.top + st.mt.scale(26), r.right - pad, r.top + st.mt.scale(44) };
+        DrawTextW(dc, f, -1, &vr, DT_RIGHT | DT_TOP | DT_SINGLELINE);
+    }
+
+    const wchar_t* eng = EngineLabel(ts.engine);
+    SelectObject(dc, st.fonts.pill);
+    SIZE ps{}; GetTextExtentPoint32W(dc, eng, lstrlenW(eng), &ps);
+    RECT pill{ r.left + pad, r.top + st.mt.scale(50),
+               r.left + pad + ps.cx + st.mt.scale(12), r.top + st.mt.scale(68) };
+    TrayDraw::FillRoundRectC(dc, pill, pal.dark ? RGB(0x2e,0x2e,0x4a) : RGB(0xe6,0xe6,0xfa),
+                             st.mt.scale(4));
+    SetTextColor(dc, pal.accent);
+    DrawTextW(dc, eng, -1, &pill, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    SelectObject(dc, st.fonts.body);
+    SetTextColor(dc, pal.dim);
+    RECT sr{ pill.right + st.mt.scale(8), pill.top, r.right - pad, pill.bottom };
+    DrawTextW(dc, zoomed ? (ts.panning ? L"active" : L"holding")
+                         : L"Hold your zoom button", -1, &sr,
+              DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+    RECT sp{ r.left + pad, r.top + st.mt.scale(74), r.right - pad, r.top + st.mt.scale(98) };
+    TrayDraw::DrawSparkline(dc, sp, pal, st.mt);
+    SelectObject(dc, of);
+}
+
+static void DrawItem(const MenuDrawState& st, DRAWITEMSTRUCT* dis) {
+    if (!dis || dis->CtlType != ODT_MENU) return;
+    const auto* it = reinterpret_cast<const TrayDraw::Item*>(dis->itemData);
+    if (!it) return;
+    HDC dc = dis->hDC;
+    RECT r = dis->rcItem;
+    const auto& pal = st.pal;
+    const int pad = st.mt.padX();
+
+    if (it->kind == TrayDraw::Kind::Header) {
+        // Double-buffered: the live timer repaints the header ~10x a second, and menu windows
+        // are not double-buffered - drawing text straight to the screen at that cadence shimmers.
+        const int w = r.right - r.left, h = r.bottom - r.top;
+        HDC mem = CreateCompatibleDC(dc);
+        HBITMAP bmp = mem ? CreateCompatibleBitmap(dc, w, h) : nullptr;
+        if (mem && bmp) {
+            HGDIOBJ ob = SelectObject(mem, bmp);
+            SetWindowOrgEx(mem, r.left, r.top, nullptr);   // header code keeps its item coords
+            SetBkMode(mem, TRANSPARENT);
+            TrayDraw::FillRectC(mem, r, pal.bg);
+            DrawHeaderBody(st, mem, r);
+            BitBlt(dc, r.left, r.top, w, h, mem, r.left, r.top, SRCCOPY);
+            SelectObject(mem, ob);
+        } else {
+            TrayDraw::FillRectC(dc, r, pal.bg);
+            SetBkMode(dc, TRANSPARENT);
+            DrawHeaderBody(st, dc, r);
+        }
+        if (bmp) DeleteObject(bmp);
+        if (mem) DeleteDC(mem);
+        return;
+    }
+
+    TrayDraw::FillRectC(dc, r, pal.bg);
+    SetBkMode(dc, TRANSPARENT);
+
+    if (it->kind == TrayDraw::Kind::Sep) {
+        RECT ln{ r.left + pad, (r.top + r.bottom) / 2, r.right - pad, (r.top + r.bottom) / 2 + 1 };
+        TrayDraw::FillRectC(dc, ln, pal.sep);
+        return;
+    }
+
+    const bool sel = (dis->itemState & ODS_SELECTED) != 0;
+    if (sel) {
+        // Windows 11 selection language: rounded fill, short accent bar at the leading edge.
+        RECT hr{ r.left + st.mt.scale(4), r.top + st.mt.scale(2),
+                 r.right - st.mt.scale(4), r.bottom - st.mt.scale(2) };
+        TrayDraw::FillRoundRectC(dc, hr, pal.hover, st.mt.scale(4));
+        RECT bar{ hr.left, hr.top + st.mt.scale(6),
+                  hr.left + st.mt.scale(3), hr.bottom - st.mt.scale(6) };
+        TrayDraw::FillRoundRectC(dc, bar, pal.accent, st.mt.scale(1));
+    }
+    HGDIOBJ of = SelectObject(dc, st.fonts.body);
+    SetTextColor(dc, pal.text);
+    int textLeft = r.left + pad + st.mt.scale(10);
+    if (it->kind == TrayDraw::Kind::Radio) {
+        if (it->checked) {
+            const int ccx = r.left + pad + st.mt.scale(5);
+            const int ccy = (r.top + r.bottom) / 2;
+            HBRUSH br = CreateSolidBrush(pal.accent);
+            HGDIOBJ ob = SelectObject(dc, br);
+            HGDIOBJ op = SelectObject(dc, GetStockObject(NULL_PEN));
+            Ellipse(dc, ccx - st.mt.scale(3), ccy - st.mt.scale(3),
+                        ccx + st.mt.scale(3), ccy + st.mt.scale(3));
+            SelectObject(dc, op); SelectObject(dc, ob); DeleteObject(br);
+        }
+        textLeft = r.left + pad + st.mt.scale(16);
+    }
+    RECT tr{ textLeft, r.top, r.right - pad, r.bottom };
+    DrawTextW(dc, it->label.c_str(), -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    if (!it->value.empty() || it->submenu) {
+        SetTextColor(dc, pal.dim);
+        RECT vr{ r.left, r.top, r.right - pad - (it->submenu ? st.mt.scale(16) : 0), r.bottom };
+        if (!it->value.empty())
+            DrawTextW(dc, it->value.c_str(), -1, &vr, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+        if (it->submenu) {
+            SetTextColor(dc, pal.faint);
+            RECT cr{ r.right - pad - st.mt.scale(10), r.top, r.right - pad, r.bottom };
+            DrawTextW(dc, L"\u203A", -1, &cr, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+        }
+    }
+    SelectObject(dc, of);
+}
+
+// The host window's WndProc. The owner-drawn menu sends WM_MEASUREITEM / WM_DRAWITEM to the menu
+// OWNER, which is this window on the MENU THREAD - the whole point of the port: the instrument
+// drawing lives here and the main thread's tick never sees any of it.
+static LRESULT CALLBACK MenuHostProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    auto* st = reinterpret_cast<MenuDrawState*>(GetWindowLongPtrW(h, GWLP_USERDATA));
+    if (st) {
+        if (m == WM_MEASUREITEM) { MeasureItem(*st, reinterpret_cast<MEASUREITEMSTRUCT*>(l)); return TRUE; }
+        if (m == WM_DRAWITEM)    { DrawItem(*st, reinterpret_cast<DRAWITEMSTRUCT*>(l));       return TRUE; }
+        if (m == WM_TIMER && w == 1) {
+            // The live tick. TrackPopupMenu's modal loop dispatches WM_TIMER here (unlike posted
+            // messages, timers do not starve its input - the v1/v2 history above). Find the
+            // system's menu window once, then invalidate just the header item so it redraws.
+            if (!st->menuWnd && st->menu) {
+                EnumThreadWindows(GetCurrentThreadId(), [](HWND wnd, LPARAM lp) -> BOOL {
+                    auto* s2 = reinterpret_cast<MenuDrawState*>(lp);
+                    wchar_t cls[16];
+                    if (GetClassNameW(wnd, cls, 16) && lstrcmpW(cls, L"#32768") == 0 &&
+                        reinterpret_cast<HMENU>(SendMessageW(wnd, MN_GETHMENU, 0, 0)) == s2->menu) {
+                        s2->menuWnd = wnd;
+                        // While we have the window: Windows 11 rounds its own menus, but an
+                        // owner-drawn one shows square corners unless asked explicitly.
+                        DWM_WINDOW_CORNER_PREFERENCE cp = DWMWCP_ROUND;
+                        DwmSetWindowAttribute(wnd, DWMWA_WINDOW_CORNER_PREFERENCE, &cp, sizeof(cp));
+                        return FALSE;
+                    }
+                    return TRUE;
+                }, reinterpret_cast<LPARAM>(st));
+            }
+            if (st->menuWnd) {
+                RECT hr{};
+                if (GetMenuItemRect(nullptr, st->menu, 0, &hr)) {
+                    MapWindowPoints(HWND_DESKTOP, st->menuWnd, reinterpret_cast<POINT*>(&hr), 2);
+                    InvalidateRect(st->menuWnd, &hr, FALSE);
+                } else {
+                    InvalidateRect(st->menuWnd, nullptr, FALSE);
+                }
+            }
+            return 0;
+        }
+    }
+    return DefWindowProcW(h, m, w, l);
+}
+
 static DWORD WINAPI MenuThread(LPVOID param) {
     MenuCtx ctx = *static_cast<MenuCtx*>(param);
     delete static_cast<MenuCtx*>(param);
 
-    // TrackPopupMenu needs a window owned by the CALLING thread. Zero-size popup: never visible,
-    // but a real window (not message-only) so it can take foreground for click-away dismissal.
-    HWND host = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"STATIC", L"WindMenuHost",
+    // Registered class, not "STATIC": the owner-drawn header needs a WndProc that answers
+    // WM_MEASUREITEM / WM_DRAWITEM, and a static control's default proc does not.
+    static ATOM s_cls = 0;
+    if (!s_cls) {
+        WNDCLASSW wc{};
+        wc.lpfnWndProc = MenuHostProc;
+        wc.hInstance = GetModuleHandleW(nullptr);
+        wc.lpszClassName = L"WindMenuHost";
+        s_cls = RegisterClassW(&wc);
+    }
+    HWND host = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"WindMenuHost", L"",
                                 WS_POPUP, ctx.pt.x, ctx.pt.y, 0, 0,
                                 nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     if (!host) { InterlockedExchange(&g_menuOpen, 0); return 0; }
     ShowWindow(host, SW_SHOWNOACTIVATE);
+
+    // Per-open draw state: theme, DPI and fonts are not constants (system theme switch,
+    // per-monitor DPI), so they are resolved fresh on every open.
+    MenuDrawState st;
+    st.pal = TrayDraw::MakePalette();
+    st.mt.dpi = (int)GetDpiForWindow(host);
+    if (st.mt.dpi <= 0) st.mt.dpi = 96;
+    st.fonts.create(st.mt.dpi);
+    SetWindowLongPtrW(host, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&st));
 
     const std::wstring ini = wind::ResolveIniPath();
     std::vector<std::wstring> profNames = wind::ListProfileFiles(wind::ProfilesDirFromIni(ini));
@@ -57,51 +288,66 @@ static DWORD WINAPI MenuThread(LPVOID param) {
     const std::wstring active = wind::WidenUtf8(
         wind::ReadIniValues(wind::ReadTextFile(ini))["profile"]);
 
+    // Item models BEFORE appending, never resized after: the menu holds raw pointers into this
+    // vector for as long as it is open.
+    st.items.reserve(profNames.size() + 6);
+    st.items.push_back({ TrayDraw::Kind::Header, L"", L"", false, false });
+    st.items.push_back({ TrayDraw::Kind::Action, L"Profile",
+                         active.empty() ? std::wstring(L"Default") : active, false, true });
+    st.items.push_back({ TrayDraw::Kind::Action, L"Settings", L"", false, false });
+    st.items.push_back({ TrayDraw::Kind::Action, L"Quit",     L"", false, false });
+    st.items.push_back({ TrayDraw::Kind::Sep, L"", L"", false, false });   // [4]
+    st.items.push_back({ TrayDraw::Kind::Sep, L"", L"", false, false });   // [5]
+    const size_t profFirst = st.items.size();
+    for (const auto& nm : profNames)
+        st.items.push_back({ TrayDraw::Kind::Radio, nm, L"",
+                             _wcsicmp(nm.c_str(), active.c_str()) == 0, false });
+
     HMENU m = CreatePopupMenu();
     HMENU pm = CreatePopupMenu();
-    int activeIdx = -1;
-    for (UINT i = 0; i < (UINT)profNames.size(); ++i) {
-        if (_wcsicmp(profNames[i].c_str(), active.c_str()) == 0) activeIdx = (int)i;
-        AppendMenuW(pm, MF_STRING, ID_PROFILE_BASE + i, profNames[i].c_str());
-    }
-    if (activeIdx >= 0)
-        CheckMenuRadioItem(pm, ID_PROFILE_BASE, ID_PROFILE_BASE + (UINT)profNames.size() - 1,
-                           ID_PROFILE_BASE + (UINT)activeIdx, MF_BYCOMMAND);
-    AppendMenuW(m, MF_STRING, ID_SETTINGS, L"Open Settings");
+    for (UINT i = 0; i < (UINT)profNames.size(); ++i)
+        AppendMenuW(pm, MF_OWNERDRAW, ID_PROFILE_BASE + i,
+                    reinterpret_cast<LPCWSTR>(&st.items[profFirst + i]));
+
+    AppendMenuW(m, MF_OWNERDRAW | MF_DISABLED | MF_GRAYED, ID_HEADER,
+                reinterpret_cast<LPCWSTR>(&st.items[0]));
+    AppendMenuW(m, MF_OWNERDRAW | MF_DISABLED, 0, reinterpret_cast<LPCWSTR>(&st.items[4]));
     if (!profNames.empty())
-        AppendMenuW(m, MF_POPUP, reinterpret_cast<UINT_PTR>(pm), L"Profiles");
+        AppendMenuW(m, MF_OWNERDRAW | MF_POPUP, reinterpret_cast<UINT_PTR>(pm),
+                    reinterpret_cast<LPCWSTR>(&st.items[1]));
     else
         DestroyMenu(pm);
-    AppendMenuW(m, MF_STRING, ID_EXPORTDIAG, L"Export diagnostics");
-    AppendMenuW(m, MF_STRING, ID_QUIT, L"Quit");
+    AppendMenuW(m, MF_OWNERDRAW, ID_SETTINGS, reinterpret_cast<LPCWSTR>(&st.items[2]));
+    AppendMenuW(m, MF_OWNERDRAW | MF_DISABLED, 0, reinterpret_cast<LPCWSTR>(&st.items[5]));
+    AppendMenuW(m, MF_OWNERDRAW, ID_QUIT, reinterpret_cast<LPCWSTR>(&st.items[3]));
 
+    // Our background too, or the system paints the gaps around the owner-drawn rows in the
+    // default colour and the panel reads as two different widgets.
+    MENUINFO mi{}; mi.cbSize = sizeof(mi);
+    mi.fMask = MIM_BACKGROUND | MIM_APPLYTOSUBMENUS;
+    mi.hbrBack = CreateSolidBrush(st.pal.bg);
+    SetMenuInfo(m, &mi);
+
+    st.menu = m;
+    SetTimer(host, 1, 100, nullptr);   // the live-header tick; see MenuHostProc
     SetForegroundWindow(host);   // we own the last input (the tray click), so this is permitted
     int cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_RIGHTBUTTON, ctx.pt.x, ctx.pt.y, 0,
                              host, nullptr);
+    KillTimer(host, 1);
     PostMessageW(host, WM_NULL, 0, 0);   // the documented dismiss fix
+    SetWindowLongPtrW(host, GWLP_USERDATA, 0);
     DestroyMenu(m);
+    if (mi.hbrBack) DeleteObject(mi.hbrBack);
+    st.fonts.destroy();
     DestroyWindow(host);
 
-    // Actions. Everything here is safe off the main thread: ShellExecute is thread-agnostic,
-    // Quit is a PostMessage to the main window, the diagnostics worker already ran off-thread
-    // and completes via the guarded slot + registered message, and the profile switch is file
-    // I/O whose UI feedback (Notify) is a process-global Shell_NotifyIcon call.
+    // Actions - all safe off the main thread: ShellExecute is thread-agnostic, Quit is a
+    // PostMessage to the main window, and the profile switch is file I/O whose UI feedback
+    // (Notify) is a process-global Shell_NotifyIcon call. Export diagnostics left the tray with
+    // this design (it is a button in the Settings UI); its worker plumbing stays for the
+    // Settings-origin path.
     if (cmd == ID_SETTINGS)
         ShellExecuteW(nullptr, L"open", L"WindConfig.exe", nullptr, nullptr, SW_SHOW);
-    else if (cmd == ID_EXPORTDIAG) {
-        bool start = false;
-        { std::lock_guard<std::mutex> lk(g_diagMx); if (!g_diagRunning) { g_diagRunning = true; start = true; } }
-        if (start) {
-            HWND mainHwnd = ctx.mainHwnd;
-            std::thread([mainHwnd]{
-                std::wstring zip = wind::ExportDiagnosticsToDesktop();
-                { std::lock_guard<std::mutex> lk(g_diagMx);
-                  g_diagZip = std::move(zip); g_diagOk = !g_diagZip.empty();
-                  g_diagReady = true; g_diagRunning = false; }
-                PostMessageW(mainHwnd, DiagDoneMsg(), 0, 0);
-            }).detach();
-        }
-    }
     else if (cmd == ID_QUIT)
         PostMessageW(ctx.mainHwnd, WM_CLOSE, 0, 0);
     else if (cmd >= (int)ID_PROFILE_BASE && cmd < (int)(ID_PROFILE_BASE + profNames.size()))
