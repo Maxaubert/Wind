@@ -505,6 +505,9 @@ running the stable installer, which always keeps the Latest badge. Newest 5 alph
 ones are deleted with their tags. The build steps intentionally MIRROR release.yml rather than
 sharing a composite action - if they ever drift in a way that matters, extract one and use it in
 BOTH, never fix just one.
+NOTE: workflow_dispatch only lists workflows present on the DEFAULT branch, which is why this
+lands on main separately rather than riding inside a feature PR - otherwise the channel could not
+be used to test the very branch that introduces it.
 
 ## Deploy for testing (STANDING RULE)
 Whenever you build something new the user should test/verify (a new feature, a behaviour change, a
