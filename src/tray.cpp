@@ -9,6 +9,7 @@
 #include "tray_status.h"
 #include "tick_stats.h"
 #include <shellapi.h>
+#include <dwmapi.h>
 #include <string>
 #include <thread>
 #include <mutex>
@@ -51,14 +52,78 @@ struct MenuDrawState {
     TrayDraw::Palette pal;
     TrayDraw::Metrics mt;
     TrayDraw::Fonts   fonts;
+    // Live header (the menu would otherwise be a still - field-rejected): MenuThread sets `menu`
+    // and a 100ms timer on the host; WM_TIMER finds the system's menu window once (class #32768
+    // hosting `menu`) and invalidates the header item's rect, so WM_DRAWITEM re-reads the status
+    // snapshot, the fps figure and the pacing ring while the menu is open.
+    HMENU menu = nullptr;
+    HWND  menuWnd = nullptr;
 };
 
 static void MeasureItem(const MenuDrawState& st, MEASUREITEMSTRUCT* mis) {
     if (!mis || mis->CtlType != ODT_MENU) return;
     const auto* it = reinterpret_cast<const TrayDraw::Item*>(mis->itemData);
     mis->itemWidth  = (UINT)st.mt.menuWidth();
-    mis->itemHeight = (UINT)((it && it->kind == TrayDraw::Kind::Header) ? st.mt.headerH()
-                                                                        : st.mt.rowHeight());
+    mis->itemHeight = (UINT)(!it ? st.mt.rowHeight()
+                             : it->kind == TrayDraw::Kind::Header ? st.mt.headerH()
+                             : it->kind == TrayDraw::Kind::Sep    ? st.mt.sepH()
+                                                                  : st.mt.rowHeight());
+}
+
+static void DrawHeaderBody(const MenuDrawState& st, HDC dc, const RECT& r) {
+    const auto& pal = st.pal;
+    const int pad = st.mt.padX();
+    const TrayStatus ts = ReadTrayStatus();
+    wchar_t zoom[16];
+    const bool zoomed = FormatZoom(ts.level, zoom, 16);
+
+    HGDIOBJ of = SelectObject(dc, st.fonts.big);
+    SetTextColor(dc, zoomed ? pal.text : pal.faint);
+    RECT zr{ r.left + pad, r.top + st.mt.scale(12), r.right - pad, r.top + st.mt.scale(46) };
+    DrawTextW(dc, zoom, -1, &zr, DT_LEFT | DT_TOP | DT_SINGLELINE);
+    SIZE zs{}; GetTextExtentPoint32W(dc, zoom, lstrlenW(zoom), &zs);
+    if (zoomed) {
+        SelectObject(dc, st.fonts.body);
+        SetTextColor(dc, pal.dim);
+        RECT xr{ zr.left + zs.cx + st.mt.scale(3), r.top + st.mt.scale(28),
+                 r.right - pad, r.top + st.mt.scale(48) };
+        DrawTextW(dc, L"x", -1, &xr, DT_LEFT | DT_TOP | DT_SINGLELINE);
+    }
+
+    float buf[TickStats::kCap];
+    const int n = Ticks().snapshot(buf, TickStats::kCap);
+    if (n >= 8) {
+        const double fps = FpsFromMs(MedianMs(buf, n));
+        wchar_t f[32]; wsprintfW(f, L"%d fps", (int)(fps + 0.5));
+        SelectObject(dc, st.fonts.small_);
+        SetTextColor(dc, pal.faint);
+        RECT kr{ r.left, r.top + st.mt.scale(13), r.right - pad, r.top + st.mt.scale(25) };
+        DrawTextW(dc, L"COMPOSITION", -1, &kr, DT_RIGHT | DT_TOP | DT_SINGLELINE);
+        SelectObject(dc, st.fonts.body);
+        SetTextColor(dc, LateCount(buf, n) > 0 ? pal.warn : pal.ok);
+        RECT vr{ r.left, r.top + st.mt.scale(26), r.right - pad, r.top + st.mt.scale(44) };
+        DrawTextW(dc, f, -1, &vr, DT_RIGHT | DT_TOP | DT_SINGLELINE);
+    }
+
+    const wchar_t* eng = EngineLabel(ts.engine);
+    SelectObject(dc, st.fonts.pill);
+    SIZE ps{}; GetTextExtentPoint32W(dc, eng, lstrlenW(eng), &ps);
+    RECT pill{ r.left + pad, r.top + st.mt.scale(50),
+               r.left + pad + ps.cx + st.mt.scale(12), r.top + st.mt.scale(68) };
+    TrayDraw::FillRoundRectC(dc, pill, pal.dark ? RGB(0x2e,0x2e,0x4a) : RGB(0xe6,0xe6,0xfa),
+                             st.mt.scale(4));
+    SetTextColor(dc, pal.accent);
+    DrawTextW(dc, eng, -1, &pill, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    SelectObject(dc, st.fonts.body);
+    SetTextColor(dc, pal.dim);
+    RECT sr{ pill.right + st.mt.scale(8), pill.top, r.right - pad, pill.bottom };
+    DrawTextW(dc, zoomed ? (ts.panning ? L"active" : L"holding")
+                         : L"Hold your zoom button", -1, &sr,
+              DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+    RECT sp{ r.left + pad, r.top + st.mt.scale(74), r.right - pad, r.top + st.mt.scale(98) };
+    TrayDraw::DrawSparkline(dc, sp, pal, st.mt);
+    SelectObject(dc, of);
 }
 
 static void DrawItem(const MenuDrawState& st, DRAWITEMSTRUCT* dis) {
@@ -70,69 +135,48 @@ static void DrawItem(const MenuDrawState& st, DRAWITEMSTRUCT* dis) {
     const auto& pal = st.pal;
     const int pad = st.mt.padX();
 
+    if (it->kind == TrayDraw::Kind::Header) {
+        // Double-buffered: the live timer repaints the header ~10x a second, and menu windows
+        // are not double-buffered - drawing text straight to the screen at that cadence shimmers.
+        const int w = r.right - r.left, h = r.bottom - r.top;
+        HDC mem = CreateCompatibleDC(dc);
+        HBITMAP bmp = mem ? CreateCompatibleBitmap(dc, w, h) : nullptr;
+        if (mem && bmp) {
+            HGDIOBJ ob = SelectObject(mem, bmp);
+            SetWindowOrgEx(mem, r.left, r.top, nullptr);   // header code keeps its item coords
+            SetBkMode(mem, TRANSPARENT);
+            TrayDraw::FillRectC(mem, r, pal.bg);
+            DrawHeaderBody(st, mem, r);
+            BitBlt(dc, r.left, r.top, w, h, mem, r.left, r.top, SRCCOPY);
+            SelectObject(mem, ob);
+        } else {
+            TrayDraw::FillRectC(dc, r, pal.bg);
+            SetBkMode(dc, TRANSPARENT);
+            DrawHeaderBody(st, dc, r);
+        }
+        if (bmp) DeleteObject(bmp);
+        if (mem) DeleteDC(mem);
+        return;
+    }
+
     TrayDraw::FillRectC(dc, r, pal.bg);
     SetBkMode(dc, TRANSPARENT);
 
-    if (it->kind == TrayDraw::Kind::Header) {
-        const TrayStatus ts = ReadTrayStatus();
-        wchar_t zoom[16];
-        const bool zoomed = FormatZoom(ts.level, zoom, 16);
-
-        HGDIOBJ of = SelectObject(dc, st.fonts.big);
-        SetTextColor(dc, zoomed ? pal.text : pal.faint);
-        RECT zr{ r.left + pad, r.top + st.mt.scale(12), r.right - pad, r.top + st.mt.scale(46) };
-        DrawTextW(dc, zoom, -1, &zr, DT_LEFT | DT_TOP | DT_SINGLELINE);
-        SIZE zs{}; GetTextExtentPoint32W(dc, zoom, lstrlenW(zoom), &zs);
-        if (zoomed) {
-            SelectObject(dc, st.fonts.body);
-            SetTextColor(dc, pal.dim);
-            RECT xr{ zr.left + zs.cx + st.mt.scale(3), r.top + st.mt.scale(28),
-                     r.right - pad, r.top + st.mt.scale(48) };
-            DrawTextW(dc, L"x", -1, &xr, DT_LEFT | DT_TOP | DT_SINGLELINE);
-        }
-
-        float buf[TickStats::kCap];
-        const int n = Ticks().snapshot(buf, TickStats::kCap);
-        if (n >= 8) {
-            const double fps = FpsFromMs(MedianMs(buf, n));
-            wchar_t f[32]; wsprintfW(f, L"%d fps", (int)(fps + 0.5));
-            SelectObject(dc, st.fonts.small_);
-            SetTextColor(dc, pal.faint);
-            RECT kr{ r.left, r.top + st.mt.scale(13), r.right - pad, r.top + st.mt.scale(25) };
-            DrawTextW(dc, L"COMPOSITION", -1, &kr, DT_RIGHT | DT_TOP | DT_SINGLELINE);
-            SelectObject(dc, st.fonts.body);
-            SetTextColor(dc, LateCount(buf, n) > 0 ? pal.warn : pal.ok);
-            RECT vr{ r.left, r.top + st.mt.scale(26), r.right - pad, r.top + st.mt.scale(44) };
-            DrawTextW(dc, f, -1, &vr, DT_RIGHT | DT_TOP | DT_SINGLELINE);
-        }
-
-        const wchar_t* eng = EngineLabel(ts.engine);
-        SelectObject(dc, st.fonts.pill);
-        SIZE ps{}; GetTextExtentPoint32W(dc, eng, lstrlenW(eng), &ps);
-        RECT pill{ r.left + pad, r.top + st.mt.scale(50),
-                   r.left + pad + ps.cx + st.mt.scale(12), r.top + st.mt.scale(68) };
-        TrayDraw::FillRectC(dc, pill, pal.dark ? RGB(0x2e,0x2e,0x4a) : RGB(0xe6,0xe6,0xfa));
-        SetTextColor(dc, pal.accent);
-        DrawTextW(dc, eng, -1, &pill, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-        SelectObject(dc, st.fonts.body);
-        SetTextColor(dc, pal.dim);
-        RECT sr{ pill.right + st.mt.scale(8), pill.top, r.right - pad, pill.bottom };
-        DrawTextW(dc, zoomed ? (ts.panning ? L"active" : L"holding")
-                             : L"Hold your zoom button", -1, &sr,
-                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-
-        RECT sp{ r.left + pad, r.top + st.mt.scale(74), r.right - pad, r.top + st.mt.scale(98) };
-        TrayDraw::DrawSparkline(dc, sp, pal, st.mt);
-        SelectObject(dc, of);
+    if (it->kind == TrayDraw::Kind::Sep) {
+        RECT ln{ r.left + pad, (r.top + r.bottom) / 2, r.right - pad, (r.top + r.bottom) / 2 + 1 };
+        TrayDraw::FillRectC(dc, ln, pal.sep);
         return;
     }
 
     const bool sel = (dis->itemState & ODS_SELECTED) != 0;
     if (sel) {
-        TrayDraw::FillRectC(dc, r, pal.hover);
-        // Windows 11 selection language: a short accent bar at the leading edge.
-        RECT bar{ r.left, r.top + st.mt.scale(7), r.left + st.mt.scale(3), r.bottom - st.mt.scale(7) };
-        TrayDraw::FillRectC(dc, bar, pal.accent);
+        // Windows 11 selection language: rounded fill, short accent bar at the leading edge.
+        RECT hr{ r.left + st.mt.scale(4), r.top + st.mt.scale(2),
+                 r.right - st.mt.scale(4), r.bottom - st.mt.scale(2) };
+        TrayDraw::FillRoundRectC(dc, hr, pal.hover, st.mt.scale(4));
+        RECT bar{ hr.left, hr.top + st.mt.scale(6),
+                  hr.left + st.mt.scale(3), hr.bottom - st.mt.scale(6) };
+        TrayDraw::FillRoundRectC(dc, bar, pal.accent, st.mt.scale(1));
     }
     HGDIOBJ of = SelectObject(dc, st.fonts.body);
     SetTextColor(dc, pal.text);
@@ -154,12 +198,13 @@ static void DrawItem(const MenuDrawState& st, DRAWITEMSTRUCT* dis) {
     DrawTextW(dc, it->label.c_str(), -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     if (!it->value.empty() || it->submenu) {
         SetTextColor(dc, pal.dim);
-        RECT vr{ r.left, r.top, r.right - pad - (it->submenu ? st.mt.scale(12) : 0), r.bottom };
+        RECT vr{ r.left, r.top, r.right - pad - (it->submenu ? st.mt.scale(16) : 0), r.bottom };
         if (!it->value.empty())
             DrawTextW(dc, it->value.c_str(), -1, &vr, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
         if (it->submenu) {
-            RECT cr{ r.right - pad - st.mt.scale(9), r.top, r.right - pad, r.bottom };
-            DrawTextW(dc, L">", -1, &cr, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+            SetTextColor(dc, pal.faint);
+            RECT cr{ r.right - pad - st.mt.scale(10), r.top, r.right - pad, r.bottom };
+            DrawTextW(dc, L"\u203A", -1, &cr, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
         }
     }
     SelectObject(dc, of);
@@ -173,6 +218,37 @@ static LRESULT CALLBACK MenuHostProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (st) {
         if (m == WM_MEASUREITEM) { MeasureItem(*st, reinterpret_cast<MEASUREITEMSTRUCT*>(l)); return TRUE; }
         if (m == WM_DRAWITEM)    { DrawItem(*st, reinterpret_cast<DRAWITEMSTRUCT*>(l));       return TRUE; }
+        if (m == WM_TIMER && w == 1) {
+            // The live tick. TrackPopupMenu's modal loop dispatches WM_TIMER here (unlike posted
+            // messages, timers do not starve its input - the v1/v2 history above). Find the
+            // system's menu window once, then invalidate just the header item so it redraws.
+            if (!st->menuWnd && st->menu) {
+                EnumThreadWindows(GetCurrentThreadId(), [](HWND wnd, LPARAM lp) -> BOOL {
+                    auto* s2 = reinterpret_cast<MenuDrawState*>(lp);
+                    wchar_t cls[16];
+                    if (GetClassNameW(wnd, cls, 16) && lstrcmpW(cls, L"#32768") == 0 &&
+                        reinterpret_cast<HMENU>(SendMessageW(wnd, MN_GETHMENU, 0, 0)) == s2->menu) {
+                        s2->menuWnd = wnd;
+                        // While we have the window: Windows 11 rounds its own menus, but an
+                        // owner-drawn one shows square corners unless asked explicitly.
+                        DWM_WINDOW_CORNER_PREFERENCE cp = DWMWCP_ROUND;
+                        DwmSetWindowAttribute(wnd, DWMWA_WINDOW_CORNER_PREFERENCE, &cp, sizeof(cp));
+                        return FALSE;
+                    }
+                    return TRUE;
+                }, reinterpret_cast<LPARAM>(st));
+            }
+            if (st->menuWnd) {
+                RECT hr{};
+                if (GetMenuItemRect(nullptr, st->menu, 0, &hr)) {
+                    MapWindowPoints(HWND_DESKTOP, st->menuWnd, reinterpret_cast<POINT*>(&hr), 2);
+                    InvalidateRect(st->menuWnd, &hr, FALSE);
+                } else {
+                    InvalidateRect(st->menuWnd, nullptr, FALSE);
+                }
+            }
+            return 0;
+        }
     }
     return DefWindowProcW(h, m, w, l);
 }
@@ -214,12 +290,14 @@ static DWORD WINAPI MenuThread(LPVOID param) {
 
     // Item models BEFORE appending, never resized after: the menu holds raw pointers into this
     // vector for as long as it is open.
-    st.items.reserve(profNames.size() + 4);
+    st.items.reserve(profNames.size() + 6);
     st.items.push_back({ TrayDraw::Kind::Header, L"", L"", false, false });
     st.items.push_back({ TrayDraw::Kind::Action, L"Profile",
                          active.empty() ? std::wstring(L"Default") : active, false, true });
     st.items.push_back({ TrayDraw::Kind::Action, L"Settings", L"", false, false });
     st.items.push_back({ TrayDraw::Kind::Action, L"Quit",     L"", false, false });
+    st.items.push_back({ TrayDraw::Kind::Sep, L"", L"", false, false });   // [4]
+    st.items.push_back({ TrayDraw::Kind::Sep, L"", L"", false, false });   // [5]
     const size_t profFirst = st.items.size();
     for (const auto& nm : profNames)
         st.items.push_back({ TrayDraw::Kind::Radio, nm, L"",
@@ -233,14 +311,14 @@ static DWORD WINAPI MenuThread(LPVOID param) {
 
     AppendMenuW(m, MF_OWNERDRAW | MF_DISABLED | MF_GRAYED, ID_HEADER,
                 reinterpret_cast<LPCWSTR>(&st.items[0]));
-    AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(m, MF_OWNERDRAW | MF_DISABLED, 0, reinterpret_cast<LPCWSTR>(&st.items[4]));
     if (!profNames.empty())
         AppendMenuW(m, MF_OWNERDRAW | MF_POPUP, reinterpret_cast<UINT_PTR>(pm),
                     reinterpret_cast<LPCWSTR>(&st.items[1]));
     else
         DestroyMenu(pm);
     AppendMenuW(m, MF_OWNERDRAW, ID_SETTINGS, reinterpret_cast<LPCWSTR>(&st.items[2]));
-    AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(m, MF_OWNERDRAW | MF_DISABLED, 0, reinterpret_cast<LPCWSTR>(&st.items[5]));
     AppendMenuW(m, MF_OWNERDRAW, ID_QUIT, reinterpret_cast<LPCWSTR>(&st.items[3]));
 
     // Our background too, or the system paints the gaps around the owner-drawn rows in the
@@ -250,9 +328,12 @@ static DWORD WINAPI MenuThread(LPVOID param) {
     mi.hbrBack = CreateSolidBrush(st.pal.bg);
     SetMenuInfo(m, &mi);
 
+    st.menu = m;
+    SetTimer(host, 1, 100, nullptr);   // the live-header tick; see MenuHostProc
     SetForegroundWindow(host);   // we own the last input (the tray click), so this is permitted
     int cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_RIGHTBUTTON, ctx.pt.x, ctx.pt.y, 0,
                              host, nullptr);
+    KillTimer(host, 1);
     PostMessageW(host, WM_NULL, 0, 0);   // the documented dismiss fix
     SetWindowLongPtrW(host, GWLP_USERDATA, 0);
     DestroyMenu(m);
