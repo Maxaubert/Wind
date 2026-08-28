@@ -18,15 +18,104 @@ static const UINT ID_EXPORTDIAG = 1004;
 static const UINT ID_PROFILE_BASE = 1100;      // 1100..1131: one per profile menu item
 static const UINT kMaxProfileMenuItems = 32;
 
+static UINT DiagDoneMsg() { static UINT m = RegisterWindowMessageW(L"Wind.DiagnosticsExportDone.v1"); return m; }
+static std::mutex  g_diagMx;
+static std::wstring g_diagZip;
+static bool g_diagOk = false, g_diagReady = false, g_diagRunning = false;
+
+// Menu thread (2026-08-28, third design - the history matters here):
+//   v1  SetTimer(8ms) kept the tick alive through TrackPopupMenu's modal loop, but SetTimer's
+//       real floor is ~15.6ms, so the whole magnifier dropped to ~64Hz while any menu was open
+//       (field-reported frame loss, and the runaway zoom-after-release in that degraded regime).
+//   v2  a pump thread PostMessage'd WM_TIMER at 143Hz - and froze the menu solid, because POSTED
+//       messages outrank HARDWARE input in the queue: the modal loop always found a posted tick
+//       first and never dequeued the mouse.
+//   v3  (this) the menu runs on ITS OWN THREAD with its own zero-size popup window. The main
+//       thread never blocks, so the tick keeps its normal full-rate pacing with no keep-alive
+//       trick at all, and the menu's input is handled by its own loop - both sides at full speed.
+// One menu at a time (g_menuOpen); the weld is suspended while it is open (main.cpp reads
+// MenuOpen()) so the pointer belongs to the user while they aim at menu items.
+static void SwitchToProfile(const std::wstring& ini, const std::wstring& nameW);
+static volatile LONG g_menuOpen = 0;
+struct MenuCtx { HWND mainHwnd; POINT pt; };
+
+static DWORD WINAPI MenuThread(LPVOID param) {
+    MenuCtx ctx = *static_cast<MenuCtx*>(param);
+    delete static_cast<MenuCtx*>(param);
+
+    // TrackPopupMenu needs a window owned by the CALLING thread. Zero-size popup: never visible,
+    // but a real window (not message-only) so it can take foreground for click-away dismissal.
+    HWND host = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"STATIC", L"WindMenuHost",
+                                WS_POPUP, ctx.pt.x, ctx.pt.y, 0, 0,
+                                nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (!host) { InterlockedExchange(&g_menuOpen, 0); return 0; }
+    ShowWindow(host, SW_SHOWNOACTIVATE);
+
+    const std::wstring ini = wind::ResolveIniPath();
+    std::vector<std::wstring> profNames = wind::ListProfileFiles(wind::ProfilesDirFromIni(ini));
+    if (profNames.size() > kMaxProfileMenuItems) profNames.resize(kMaxProfileMenuItems);
+    const std::wstring active = wind::WidenUtf8(
+        wind::ReadIniValues(wind::ReadTextFile(ini))["profile"]);
+
+    HMENU m = CreatePopupMenu();
+    HMENU pm = CreatePopupMenu();
+    int activeIdx = -1;
+    for (UINT i = 0; i < (UINT)profNames.size(); ++i) {
+        if (_wcsicmp(profNames[i].c_str(), active.c_str()) == 0) activeIdx = (int)i;
+        AppendMenuW(pm, MF_STRING, ID_PROFILE_BASE + i, profNames[i].c_str());
+    }
+    if (activeIdx >= 0)
+        CheckMenuRadioItem(pm, ID_PROFILE_BASE, ID_PROFILE_BASE + (UINT)profNames.size() - 1,
+                           ID_PROFILE_BASE + (UINT)activeIdx, MF_BYCOMMAND);
+    AppendMenuW(m, MF_STRING, ID_SETTINGS, L"Open Settings");
+    if (!profNames.empty())
+        AppendMenuW(m, MF_POPUP, reinterpret_cast<UINT_PTR>(pm), L"Profiles");
+    else
+        DestroyMenu(pm);
+    AppendMenuW(m, MF_STRING, ID_EXPORTDIAG, L"Export diagnostics");
+    AppendMenuW(m, MF_STRING, ID_QUIT, L"Quit");
+
+    SetForegroundWindow(host);   // we own the last input (the tray click), so this is permitted
+    int cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_RIGHTBUTTON, ctx.pt.x, ctx.pt.y, 0,
+                             host, nullptr);
+    PostMessageW(host, WM_NULL, 0, 0);   // the documented dismiss fix
+    DestroyMenu(m);
+    DestroyWindow(host);
+
+    // Actions. Everything here is safe off the main thread: ShellExecute is thread-agnostic,
+    // Quit is a PostMessage to the main window, the diagnostics worker already ran off-thread
+    // and completes via the guarded slot + registered message, and the profile switch is file
+    // I/O whose UI feedback (Notify) is a process-global Shell_NotifyIcon call.
+    if (cmd == ID_SETTINGS)
+        ShellExecuteW(nullptr, L"open", L"WindConfig.exe", nullptr, nullptr, SW_SHOW);
+    else if (cmd == ID_EXPORTDIAG) {
+        bool start = false;
+        { std::lock_guard<std::mutex> lk(g_diagMx); if (!g_diagRunning) { g_diagRunning = true; start = true; } }
+        if (start) {
+            HWND mainHwnd = ctx.mainHwnd;
+            std::thread([mainHwnd]{
+                std::wstring zip = wind::ExportDiagnosticsToDesktop();
+                { std::lock_guard<std::mutex> lk(g_diagMx);
+                  g_diagZip = std::move(zip); g_diagOk = !g_diagZip.empty();
+                  g_diagReady = true; g_diagRunning = false; }
+                PostMessageW(mainHwnd, DiagDoneMsg(), 0, 0);
+            }).detach();
+        }
+    }
+    else if (cmd == ID_QUIT)
+        PostMessageW(ctx.mainHwnd, WM_CLOSE, 0, 0);
+    else if (cmd >= (int)ID_PROFILE_BASE && cmd < (int)(ID_PROFILE_BASE + profNames.size()))
+        SwitchToProfile(ini, profNames[cmd - ID_PROFILE_BASE]);
+
+    InterlockedExchange(&g_menuOpen, 0);
+    return 0;
+}
+
 // Diagnostics-export completion signal. The worker thread does NOT smuggle a heap pointer through the
 // window message (any local process could PostMessage a forged LPARAM -> controlled deref/free). Instead
 // it parks the result in this mutex-guarded slot and posts a bare wake-up; the handler reads the slot
 // under the lock and never dereferences the message params. The message id is registered (process-unique,
 // >= 0xC000) so it isn't a guessable WM_APP+n, and the handler ignores any wake-up with no result ready.
-static UINT DiagDoneMsg() { static UINT m = RegisterWindowMessageW(L"Wind.DiagnosticsExportDone.v1"); return m; }
-static std::mutex  g_diagMx;
-static std::wstring g_diagZip;
-static bool g_diagOk = false, g_diagReady = false, g_diagRunning = false;
 
 void Add(HWND hwnd, HINSTANCE hInst) {
     g_nid.cbSize = sizeof(g_nid);
@@ -118,6 +207,8 @@ static void SwitchToProfile(const std::wstring& ini, const std::wstring& nameW) 
     }
 }
 
+bool MenuOpen() { return InterlockedCompareExchange(&g_menuOpen, 0, 0) != 0; }
+
 bool HandleMessage(HWND hwnd, UINT msg, WPARAM /*wp*/, LPARAM lp) {
     if (msg == DiagDoneMsg()) {
         // Export worker finished (off-thread). Read the result from the guarded slot - the message params
@@ -136,64 +227,14 @@ bool HandleMessage(HWND hwnd, UINT msg, WPARAM /*wp*/, LPARAM lp) {
         return true;
     }
     if (msg == WM_TRAY && (lp == WM_RBUTTONUP || lp == WM_LBUTTONUP)) {
-        POINT pt; GetCursorPos(&pt);
-        HMENU m = CreatePopupMenu();
-        // Profiles submenu: enumerated fresh on every open so external edits show up. Radio-checked
-        // active entry; capped at 32 (IDs 1100..1131). Management (rename/duplicate/delete) lives in
-        // the Settings UI only.
-        const std::wstring ini = wind::ResolveIniPath();
-        std::vector<std::wstring> profNames = wind::ListProfileFiles(wind::ProfilesDirFromIni(ini));
-        if (profNames.size() > kMaxProfileMenuItems) profNames.resize(kMaxProfileMenuItems);
-        const std::wstring active = wind::WidenUtf8(
-            wind::ReadIniValues(wind::ReadTextFile(ini))["profile"]);
-        HMENU pm = CreatePopupMenu();
-        int activeIdx = -1;
-        for (UINT i = 0; i < (UINT)profNames.size(); ++i) {
-            if (_wcsicmp(profNames[i].c_str(), active.c_str()) == 0) activeIdx = (int)i;
-            AppendMenuW(pm, MF_STRING, ID_PROFILE_BASE + i, profNames[i].c_str());
-        }
-        if (activeIdx >= 0)   // radio bullet (not a checkmark) on the active profile
-            CheckMenuRadioItem(pm, ID_PROFILE_BASE, ID_PROFILE_BASE + (UINT)profNames.size() - 1,
-                               ID_PROFILE_BASE + (UINT)activeIdx, MF_BYCOMMAND);
-        AppendMenuW(m, MF_STRING, ID_SETTINGS, L"Open Settings");
-        if (!profNames.empty())   // second entry, right under Open Settings
-            AppendMenuW(m, MF_POPUP, reinterpret_cast<UINT_PTR>(pm), L"Profiles");
-        else
-            DestroyMenu(pm);   // no profiles dir yet (pre-migration): keep the menu as before
-        AppendMenuW(m, MF_STRING, ID_EXPORTDIAG, L"Export diagnostics");
-        AppendMenuW(m, MF_STRING, ID_QUIT, L"Quit");
-        SetForegroundWindow(hwnd);  // required so the menu dismisses on click-away
-        // TrackPopupMenu runs its own modal message loop that owns the thread until it closes.
-        // A timer keeps WM_TIMER (and thus the magnifier tick in WndProc) firing through it, so
-        // the zoom doesn't freeze while the menu is open. ~8 ms is clamped to the system minimum.
-        UINT_PTR tickTimer = SetTimer(hwnd, 0xC001, 8, nullptr);
-        int cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, nullptr);
-        if (tickTimer) KillTimer(hwnd, 0xC001);
-        PostMessageW(hwnd, WM_NULL, 0, 0);  // the documented dismiss fix
-        DestroyMenu(m);
-        if (cmd == ID_SETTINGS)
-            ShellExecuteW(nullptr, L"open", L"WindConfig.exe", nullptr, nullptr, SW_SHOW);
-        else if (cmd == ID_EXPORTDIAG) {
-            // Run the zip OFF the message thread: ExportDiagnosticsToDesktop spawns powershell and waits
-            // up to 30s, and this WndProc is the same thread that drives the magnifier tick - doing it
-            // inline froze the overlay for the whole export. The worker parks the result in g_diag* and
-            // posts a bare wake-up (no pointer); the handler consumes it. Coalesce re-clicks while running.
-            bool start = false;
-            { std::lock_guard<std::mutex> lk(g_diagMx); if (!g_diagRunning) { g_diagRunning = true; start = true; } }
-            if (start) {
-                std::thread([hwnd]{
-                    std::wstring zip = wind::ExportDiagnosticsToDesktop();
-                    { std::lock_guard<std::mutex> lk(g_diagMx);
-                      g_diagZip = std::move(zip); g_diagOk = !g_diagZip.empty();
-                      g_diagReady = true; g_diagRunning = false; }
-                    PostMessageW(hwnd, DiagDoneMsg(), 0, 0);   // wake-up only; params carry nothing
-                }).detach();
-            }
-        }
-        else if (cmd == ID_QUIT)
-            PostMessageW(hwnd, WM_CLOSE, 0, 0);
-        else if (cmd >= (int)ID_PROFILE_BASE && cmd < (int)(ID_PROFILE_BASE + profNames.size()))
-            SwitchToProfile(ini, profNames[cmd - ID_PROFILE_BASE]);
+        // One menu at a time; a second click while it is open is just a re-click, ignored.
+        if (InterlockedCompareExchange(&g_menuOpen, 1, 0) != 0) return true;
+        auto* ctx = new MenuCtx{};
+        ctx->mainHwnd = hwnd;
+        GetCursorPos(&ctx->pt);
+        HANDLE t = CreateThread(nullptr, 0, MenuThread, ctx, 0, nullptr);
+        if (t) CloseHandle(t);
+        else { delete ctx; InterlockedExchange(&g_menuOpen, 0); }
         return true;
     }
     if (msg == WM_CLOSE)  { DestroyWindow(hwnd); return true; }

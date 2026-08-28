@@ -6,5 +6,6 @@ namespace Tray {
     void Remove();                                           // delete icon
     void Notify(const wchar_t* title, const wchar_t* text);  // balloon
     bool HandleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp); // true if handled
+    bool MenuOpen();                                         // the tray menu's modal loop is live
 }
 }
