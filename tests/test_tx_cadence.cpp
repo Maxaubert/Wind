@@ -92,14 +92,19 @@ TEST_CASE("the final level of a stopped ramp always lands, even inside the rate 
     CHECK(ShouldWriteTransform(in) == true);
 }
 
-TEST_CASE("a mid-ramp level change IS rate-limited") {
-    // The ramp escape is only for the settle write; during the ramp the cap must hold or we are
-    // back to 120 writes/s.
+TEST_CASE("a mid-ramp level change is NOT rate-limited") {
+    // REVERSED 2026-08-26 on field evidence. The original rule capped ramp writes too, on the
+    // reasoning that letting them through puts us back at ~120 writes/s. That was never actually
+    // exercised in shipping: txWriteHz defaulted to 0, so the cap was dead code in the field.
+    // The moment it shipped ON (to stop pan writes saturating DWM) the reporter got "terrible
+    // hitching in ramp" - stepping the LEVEL at 60Hz on a 144Hz panel is visibly coarse. Ramps
+    // are short and self-limiting, so the write-rate argument does not apply to them; the cap is
+    // for sustained panning.
     TxCadenceIn in = Base();
     in.levelMoved = true;
     in.rampStopped = false;
     in.sinceLastWriteMs = 1;
-    CHECK(ShouldWriteTransform(in) == false);
+    CHECK(ShouldWriteTransform(in) == true);
 }
 
 TEST_CASE("minOffsetPx=0 writes every change") {

@@ -96,6 +96,126 @@ Diagnostic tells for this class: **two cursors** = something released the runtim
 render model had the pointer hidden; **cursor moves but nothing magnifies** = transform writes
 returning FALSE (`txwrite ... fails=N` in wind-core.log, N == writes).
 
+## The pan-start hitch: what it actually was (2026-08-27)
+
+Symptom: the first movement after ANY pause hitches, worst at a side-to-side reversal where the
+hand passes through zero velocity; then panning is smooth again. Intermittent enough per session
+that single takes were worthless for most of the investigation.
+
+CAUSE: **DWM's magnification RE-RENDER path goes cold, not the compositor.** From the per-tick
+trace (`txTrace=1`) of a real session:
+
+    prev tick: dt= 7.50ms  warm=1              <- resting, panel at full rate
+    this tick: dt=25.01ms  wrote=1 changed=1   <- the FIRST REAL pan write, d(txX)=2
+
+DWM was compositing at 143Hz right through the rest and STILL paid ~25ms the moment the magnified
+source region actually moved. Only a real change to the sampled region keeps that path warm.
+
+FIX: `txWarmMode=1` - alternate the translation by 1px on rest ticks. Field-verified on both the
+desktop and in games.
+
+### Why this took so long, and what was measured wrong
+
+- **Composition rate is the wrong metric.** Mode 4 (perturb the LEVEL by 2e-5) held composition at
+  a flat 6.94ms through every rest and scored 0.00 stalls/s in 15/15 automated rounds - and the
+  user still felt the spike. A sub-pixel level nudge is not a real source change, so DWM skips the
+  work and the first genuine pan write still pays. Anything that measures only WHEN DWM composited,
+  and not whether it re-rendered the magnified region, will pass a build that is still broken.
+- **The write cadence (`txWriteHz`/`txMinOffsetPx`) is not the answer and is actively harmful.**
+  It scored well in the automated gauntlet and was field-rejected the same day: `txMinOffsetPx=2`
+  advances the view in 2px steps under a smooth hand (wobble at low zoom) and `txWriteHz=60` caps
+  the view at 60Hz on a 144Hz panel (reads as low fps at high zoom).
+- **Do not gate the cursor sprite on "the view moved this tick".** Tried as a wobble fix; it froze
+  the drawn cursor in the screen edge zones, where the source rect clamps and the transform stops
+  changing while the pointer must keep travelling. Worst at bottom-left, where both axes clamp: the
+  visible cursor froze while the real one kept working underneath.
+- **Test in real gameplay, not a menu.** Most of this investigation ran against a DOOM menu/loading
+  screen. In gameplay the game holds the mouse (raw-input mouselook) and Wind pans on the LOCKED
+  path, which is a different code path entirely.
+
+### Related but separate: VRR
+
+The panel is variable-refresh 23-143Hz, and the transform model paces on DwmFlush by design, so
+Wind's tick interval follows whatever the display is doing (measured: DOOM gameplay presents
+13.68ms / 73fps, display change 13.29ms). The lens easing used to keep a fixed fraction of the gap
+PER TICK, so an uneven interval changed the felt inertia every tick - a steady hand produced an
+unsteady lens. Now re-derived from the MEASURED interval (`CursorMapper::setTickDeltaMs`), so the
+inertia is constant in real time whatever the refresh does. Issue #223 had already fixed this for
+different FIXED rates; VRR is the case it did not cover.
+
+## The pan-start hitch: ROOT CAUSE = the game on a hardware overlay plane (2026-08-26)
+
+Field report: zoomed panning is smooth, but the FIRST movement after a pause hitches, worst at a
+side-to-side reversal. Absent under native Magnifier. Crucially it is INTERMITTENT PER SESSION -
+alt-tab away and back and roughly one session in four is clean, the rest stutter, with no config
+change in between. That randomness is the tell, and it is what finally identified the cause.
+
+ROOT CAUSE: whether the game is riding a HARDWARE OVERLAY PLANE for that session. On a plane
+(`Hardware Composed: Independent Flip`) DWM is not compositing the game at all, so nothing Wind
+writes can drive the composition rate, and the magnified view lands late on every pan start. When
+the game is `Composed: Flip`, the same build with the same settings is clean. Plane promotion is a
+race decided at session start, which is exactly why the symptom comes and goes.
+
+Correlation over 36 takes (PresentMon `PresentMode`, joined against each take's stall score):
+
+| takes | n | mean % frames on a hardware plane |
+|---|---|---|
+| clean (wake < 2 stalls/s) | 18 | **14.4 %** |
+| stuttering (wake > 8 stalls/s) | 18 | **51.1 %** |
+
+Two takes minutes apart, identical config: `ghost1` 4.8 % on plane -> 0.00 stalls/s; `ghost0`
+35.1 % on plane -> 20.76 stalls/s.
+
+THIS INVALIDATES SINGLE-TAKE COMPARISONS. Every A/B in this file taken while MPO was enabled has
+the plane state as an uncontrolled variable, and it dominates everything else measured here. A
+whole day of A/B results (write-cadence modes, keep-alive variants, input-transform republishes,
+damage pins) was noise from this. ALWAYS record PresentMode alongside any magnifier timing, and
+discard takes whose plane share differs from the arm being compared against.
+
+FIXES, in order of preference:
+1. **MPO off machine-wide** (`HKLM\SOFTWARE\Microsoft\Windows\Dwm` `OverlayTestMode`=5 DWORD,
+   REBOOT). No planes exist, so the game is always composited and the behaviour is deterministic.
+   This is also what lifts the pan walls (issue #148), so it fixes two things at once.
+2. **The MPO buster ghost** (`mpoBuster=1`) is meant to force the demotion when MPO is on, and it
+   DOES work when it wins - but it does not reliably win: several takes sat at ~53 % plane with the
+   ghost enabled. Making the demotion deterministic (verify the plane state and re-assert until it
+   takes, rather than a blind 500 ms cadence) is an open Wind bug.
+
+## The pan-start hitch: warm-keeping experiments (superseded by the above)
+
+The experiments below were run BEFORE the plane state was identified, so their single-take numbers
+carry an uncontrolled variable. Kept because the dead ends are still informative about what DWM
+does and does not respond to.
+
+### Measured dead ends (do not re-try without new evidence)
+
+- **Re-sending the same transform** (`txWarmMode=2`): wake 23.8/s. DWM ignores an identical write,
+  exactly as the old "DWM parks on static values anyway" comment claimed.
+- **Republishing the input transform** (`txWarmMode=3`): wake 26.5/s - WORSE than baseline, and it
+  degraded sustained motion too (3.7/s vs 0.07/s).
+- **An unrelated per-frame damage source** (probe `-DamagePin`): wake 28.2/s, and it did not move
+  the composition rate at all. It is not about generic damage.
+- **A level change of 4e-6 relative**: too small for DWM to notice. 1e-5 registers.
+
+### Why nothing shipped
+
+1. **Neither working mode is visually free.** Mode 1 shifts the whole image a rigid 1 screen px at
+   tick rate (the #204 shimmer). Mode 4 was believed to displace 0.077px - that is in SOURCE pixels,
+   so on screen it is `0.077 * level`: ~0.6px at 7x, ~1.6px at 21x, worse than mode 1 at high zoom.
+   Its applied stream also shows the derived source origin flipping a whole source pixel
+   (offX 2411 <-> 2412 at 7.37x).
+2. **The premise was wrong.** Sampling native's applied stream shows it writes NOTHING across a
+   330ms rest - a single level value for an entire run - and still holds 6.94ms composition. Native
+   is not staying smooth by keeping warm. Do not rebuild the "keep writing" theory on this evidence.
+3. **The metric is bimodal on one binary.** The same build scored 0.00/s and 18-29/s wake stalls on
+   consecutive takes with nothing changed. Leading suspect is VRR refresh hunting: the panel runs
+   23-143Hz and composition settles at either ~144Hz or the game's ~72Hz. Until that is pinned
+   down, no fix here can be called verified.
+
+Next step for whoever picks this up: instrument what governs the composition rate (DWM timing info
+/ actual display refresh) across a rest, for Wind and native side by side. The answer is in why
+native holds 144Hz while writing nothing.
+
 ## Open items
 
 - Zoom-ramp spikes (~1 per cycle, 45 ms) - DWM re-scale cost during the ramp.

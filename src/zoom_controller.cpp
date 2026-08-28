@@ -18,14 +18,23 @@ void ZoomController::setProfile(double inSpeed, double outSpeed, bool smooth,
     inSpeed_ = inSpeed; outSpeed_ = outSpeed; smooth_ = smooth;
     accel_ = accel; rampSeconds_ = rampSeconds;
 }
+// Velocity low-pass (2026-08-28). The ramp used to be a velocity SQUARE WAVE -
+// full rate the instant the button went down, dead stop the instant it came up - and the stop is
+// what read as "harsh, too coarse" in the field, especially while panning at the same time.
+// Native Magnifier eases every notch out (~280ms); this is the same idea as a first-order glide:
+// the applied rate chases the commanded rate with a ~45ms time constant, so release tapers over
+// ~150ms and direction reversals round off instead of snapping. Time-based, so VRR tick-interval
+// variation does not change the felt ease (the same law as the mapper's easing).
+
 void ZoomController::tick(double dt) {
     // Track continuous zoom-in hold time for the smooth-zoom ease-in; any non-In direction
     // (release or reverse) resets it, so each fresh zoom-in starts slow again.
     if (dir_ == ZoomDir::In && dt > 0.0) heldIn_ += dt;
     else if (dir_ != ZoomDir::In)        heldIn_ = 0.0;
-    if (dir_ == ZoomDir::None || dt <= 0.0) return;
+    if (dt <= 0.0) return;
 
-    double speed;
+    // The commanded rate, in signed doublings/sec.
+    double target = 0.0;
     if (dir_ == ZoomDir::In) {
         // Smooth zoom is a soft start: the in-rate climbs from a slow start up to the LINEAR rate
         // (inSpeed) and never exceeds it. accelMult ramps from 1/accel to 1 over rampSeconds.
@@ -37,16 +46,24 @@ void ZoomController::tick(double dt) {
             double startFrac = 1.0 / accel_;            // slow start = linear / accel
             accelMult = startFrac + (1.0 - startFrac) * t;  // startFrac..1 (caps AT linear, never above)
         }
-        speed = inSpeed_ * accelMult;
-    } else {
-        speed = outSpeed_;                              // out never accelerates
+        target = inSpeed_ * accelMult * kZoomDoublingsPerSecond;
+    } else if (dir_ == ZoomDir::Out) {
+        target = -outSpeed_ * kZoomDoublingsPerSecond;  // out never accelerates
     }
-    double f = std::pow(2.0, dt * speed * kZoomDoublingsPerSecond);
-    if (dir_ == ZoomDir::In)  level_ *= f;
-    else                      level_ /= f;
+
+    // Glide the applied rate toward the commanded one, then integrate. The glide keeps moving
+    // the level briefly AFTER release (target 0, rate decaying), which is the ease-out.
+    if (rateTau_ <= 0.0) rate_ = target;                    // ease-out off: the old hard stop
+    else rate_ += (target - rate_) * (1.0 - std::exp(-dt / rateTau_));
+    if (dir_ == ZoomDir::None && std::abs(rate_) < 0.05) rate_ = 0.0;   // settle, never glide forever
+    if (rate_ == 0.0) return;
+    level_ *= std::pow(2.0, dt * rate_);
     level_ = std::min(maxLevel_, std::max(minLevel_, level_));
+    // Pinned at a bound with the button released: kill the residual glide so the settle write
+    // (rampStopped in the transform model) is not deferred by an invisible decaying rate.
+    if (dir_ == ZoomDir::None && (level_ >= maxLevel_ || level_ <= minLevel_)) rate_ = 0.0;
 }
-void ZoomController::reset() { level_ = minLevel_; dir_ = ZoomDir::None; heldIn_ = 0.0; }
+void ZoomController::reset() { level_ = minLevel_; dir_ = ZoomDir::None; heldIn_ = 0.0; rate_ = 0.0; }
 void ZoomController::setLevel(double l) {
     level_ = std::min(maxLevel_, std::max(minLevel_, l));
 }

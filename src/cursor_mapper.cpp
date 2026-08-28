@@ -19,6 +19,7 @@ void CursorMapper::setTickRate(int tickHz) {
         double s = smoothing_ > 0.95 ? 0.95 : smoothing_;
         keep = std::pow(s, 144.0 / (double)tickHz);
     }
+    nominalDtMs_ = 1000.0 / (double)tickHz;
     alpha_ = 1.0 - keep;
     if (alpha_ > 1.0) alpha_ = 1.0;
     if (alpha_ < 0.05) alpha_ = 0.05;     // never fully stall (keep responsiveness)
@@ -54,9 +55,26 @@ MapResult CursorMapper::update(int dx, int dy, double level) {
     }
 
     // Light inertia: ease the rendered center toward the target. Smooths jerk and the uneven
-    // per-frame delta steps; alpha_ = 1 means no smoothing (snaps to target).
-    cx_ += (tx_ - cx_) * alpha_;
-    cy_ += (ty_ - cy_) * alpha_;
+    // per-frame delta steps; alpha = 1 means no smoothing (snaps to target).
+    //
+    // TIME-BASED, NOT TICK-BASED (2026-08-27). alpha_ is derived from a NOMINAL tick rate, which is
+    // right only while ticks are evenly spaced. On a VRR display they are not: the transform model
+    // paces on DwmFlush, and with G-Sync following a 73fps game the composite interval swings
+    // 6.9 -> 13.4 -> 25ms. A fixed per-tick keep-fraction then means the decay per unit TIME
+    // changes every tick, so a steady hand produces an unsteady lens - felt as judder that no
+    // amount of write-cadence tuning can remove. Re-deriving the keep-fraction from the MEASURED
+    // interval makes the inertia identical in real time whatever the refresh is doing.
+    double a = alpha_;
+    if (dtMs_ > 0.0 && smoothing_ > 0.0 && nominalDtMs_ > 0.0) {
+        const double keepNominal = 1.0 - alpha_;
+        if (keepNominal > 0.0) {
+            a = 1.0 - std::pow(keepNominal, dtMs_ / nominalDtMs_);
+            if (a > 1.0) a = 1.0;
+            if (a < 0.05) a = 0.05;      // same floor as setTickRate: never fully stall
+        }
+    }
+    cx_ += (tx_ - cx_) * a;
+    cy_ += (ty_ - cy_) * a;
 
     OffsetF o = ComputeOffsetF(cx_, cy_, level, sw_, sh_);
     MapResult r;

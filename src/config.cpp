@@ -142,6 +142,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "smoothZoom")       c.smoothZoom = std::stoi(val);
             else if (key == "smoothZoomAccel")  c.smoothZoomAccel = std::stod(val);
             else if (key == "smoothZoomRamp")   c.smoothZoomRamp = std::stod(val);
+            else if (key == "zoomEaseOutMs")    c.zoomEaseOutMs = std::stoi(val);
             else if (key == "vsync")            c.vsync = std::stoi(val);
             else if (key == "dwmFlush")         c.dwmFlush = std::stoi(val);
             else if (key == "diagnostics")      c.diagnostics = std::stoi(val);
@@ -175,8 +176,17 @@ Config ParseConfig(const std::string& text) {
             else if (key == "txWobbleCage")       c.txWobbleCage = std::stoi(val);
             else if (key == "txWobbleCageSize")   c.txWobbleCageSize = std::stoi(val);
             else if (key == "txKeepAliveMaxLevel")c.txKeepAliveMaxLevel = std::stoi(val);
+            else if (key == "txWarmMode")         c.txWarmMode = std::stoi(val);
+            else if (key == "txTrace")            c.txTrace = std::stoi(val);
+            else if (key == "txRestLevel")        c.txRestLevel = std::stod(val);
+            else if (key == "txWarmMaxLevel")     c.txWarmMaxLevel = std::stoi(val);
+            else if (key == "txWarmWindowMs")     c.txWarmWindowMs = std::stoi(val);
+            else if (key == "txWarmLevelEps")     c.txWarmLevelEps = std::stod(val);
             else if (key == "txWriteHz")          c.txWriteHz = std::stoi(val);
             else if (key == "txFreeCursor")       c.txFreeCursor = std::stoi(val);
+            else if (key == "lockedBallistics")   c.lockedBallistics = std::stoi(val);
+            else if (key == "edgeClip")           c.edgeClip = std::stoi(val);
+            else if (key == "txPace")             c.txPace = std::stoi(val);
             else if (key == "txHookWrite")        c.txHookWrite = std::stoi(val);
             else if (key == "txMinOffsetPx")      c.txMinOffsetPx = std::stoi(val);
             else if (key == "txIdleReleaseMs")    c.txIdleReleaseMs = std::stoi(val);
@@ -229,6 +239,19 @@ Config ParseConfig(const std::string& text) {
     // 0 is meaningful here (keep-alive OFF, the shipped default), so the floor is 0 not 1.
     if (c.txKeepAliveMaxLevel < 0)  c.txKeepAliveMaxLevel = 0;
     if (c.txKeepAliveMaxLevel > 50) c.txKeepAliveMaxLevel = 50;
+    if (c.txIdleReleaseMs < 0) c.txIdleReleaseMs = 0;
+    if (c.txRestLevel < 1.0)   c.txRestLevel = 1.0;
+    if (c.txRestLevel > 1.01)  c.txRestLevel = 1.01;   // visually identity only
+    if (c.txPace < 0)          c.txPace = 0;
+    if (c.txPace > 2)          c.txPace = 2;
+    if (c.zoomEaseOutMs < 0)   c.zoomEaseOutMs = 0;
+    if (c.zoomEaseOutMs > 300) c.zoomEaseOutMs = 300;
+    if (c.txWarmMode < 0)      c.txWarmMode = 0;
+    if (c.txWarmMode > 4)      c.txWarmMode = 4;
+    if (c.txWarmMaxLevel < 0)  c.txWarmMaxLevel = 0;
+    if (c.txWarmWindowMs < 0)  c.txWarmWindowMs = 0;
+    if (c.txWarmLevelEps < 0.0)     c.txWarmLevelEps = 0.0;
+    if (c.txWarmLevelEps > 0.01)    c.txWarmLevelEps = 0.01;
     if (c.txWriteHz < 0)    c.txWriteHz = 0;        // 0 = uncapped (per-tick)
     if (c.txWriteHz > 1000) c.txWriteHz = 1000;
     if (c.txMinOffsetPx < 0)  c.txMinOffsetPx = 0;  // 0 = write every change

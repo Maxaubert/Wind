@@ -35,6 +35,7 @@ public:
     void onActivate() override {}                 // no capture to prime
     void idleTick() override;                     // tears the mag context down once idle (#148)
     void setIdleReleaseMs(int ms) { idleReleaseMs_ = ms < 0 ? 0 : ms; }
+    void setRestLevel(double l) { restLevel_ = l < 1.0 ? 1.0 : l; }
     void present(const MapResult& r, double level, const Config& cfg,
                  const MonitorTarget& mon, const PresentExtras& ex) override;
     bool coversShell() const override { return false; }
@@ -76,6 +77,16 @@ public:
     MagHost* magHost() { return &host_; }
 private:
     bool fastPan_, smoothPan_, useSprite_;
+    bool warmLevelJitter_ = false;   // mode 4: perturb the level, not the position (this tick only)
+    bool spriteFirst_ = false;       // sprite placed at least once this session (lockstep gate)
+    // Per-tick trace (cfg.txTrace). Fixed ring, no allocation on the tick path.
+    struct TxTick { double ms; double level; int txX, offX, spriteX, spriteY;
+                    unsigned char wrote, changed, ramping, warm; };
+    static const int kTraceCap = 8192;
+    TxTick traceBuf_[kTraceCap]{};
+    int  traceHead_ = 0;
+    bool traceOn_ = false;
+    void traceDump();
     int  zorderBand_;                                // sprite z-band (above the shell); needs UIAccess
     bool spriteBand16_ = false;                      // P2 experiment: band-16 SCREEN-space sprite
     bool ready_ = false;
@@ -85,6 +96,12 @@ private:
     CompositionPin pin_;
     MpoGhost mpoGhost_;                              // MPO buster (issue #191)
     bool mpoBusterWanted_ = false;                   // show the ghost this session
+    // Edge clip (cfg.edgeClip): session-scoped ClipCursor 1px inside the monitor. See config.h.
+    bool edgeClipActive_ = false;
+    RECT edgeClipSaved_{};                            // the clip that existed before ours
+    RECT edgeClipApplied_{};                          // what we set (dedupe + foreign-change test)
+    void edgeClipManage(bool wantActive);
+    unsigned long long ghostSessionStartMs_ = 0;     // 0 = not started; drives the opening burst
     bool mpoExposed_ = false;                        // apply the 16-bit write clamp
     unsigned long long lastGhostAssertMs_ = 0;       // 500ms assert cadence
     bool spriteShown_ = false;                       // sprite visible this frame (#229 metric)
@@ -119,6 +136,7 @@ private:
     bool inputTransformAvailable_ = false;           // MagSetInputTransform probe (UIAccess)
     unsigned long long idleSinceMs_ = 0;             // when the last session ended (0 = none)
     int  idleReleaseMs_ = 1200;                      // cfg.txIdleReleaseMs (hot)
+    double restLevel_ = 1.0;                         // cfg.txRestLevel (hot): >1 keeps DWM magnifying
     bool identityParked_ = false;                    // phase 1 of the release done (see idleTick)
     unsigned long long parkedAtMs_ = 0;
     bool ensureMag();

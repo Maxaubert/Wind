@@ -51,6 +51,10 @@ struct Config {
     double smoothZoomAccel = 3.0;
     // Seconds of continuous holding to reach the linear rate. 0.1-3.0.
     double smoothZoomRamp = 0.6;
+    // Release ease-out (2026-08-28, hot): the applied zoom rate glides to a stop over roughly
+    // 3x this time constant instead of freezing the instant the button lifts (the square-wave
+    // stop read as harsh). ~45ms tau = ~150ms felt glide. 0 = off (the old dead stop).
+    int zoomEaseOutMs = 45;
     // Present sync while zoomed (render engine): 1 = vsync (Present sync-interval 1, locked to
     // the display refresh); 0 = no vsync (Present 0), with the loop paced by the timer instead.
     int    vsync            = 1;
@@ -188,25 +192,144 @@ struct Config {
     // edit). Fail-closed: the walls lift only while the ghost is verifiably shown + settled.
     // 0 = walls-only (the pre-#191 fence behavior). No effect when MPO is off.
     int mpoBuster = 1;
-    // Keep-alive level gate (issue #189, hot): the 1px keep-alive jitter runs only at or below
-    // this level (the shipped 8 is the field-measured MPO-off optimum for games; raising it keeps
-    // DWM's magnification pipeline warm at high zoom on the DESKTOP so pan-resume skips the
-    // park-rebuild spike - A/B knob, the 700ms window itself is measured and untouched).
-    // 0 (DEFAULT) = OFF. Traced against native Magnifier (issue #204): native never writes a
-    // value it does not mean - when the view is static it simply stops writing. Our keep-alive
-    // alternated the translation by 1px at TICK rate to stop DWM parking, i.e. a deliberate 1px
-    // shimmer 144x/s during every pause in a pan. Set >0 to re-enable up to that level.
-    // Back to 8 pending the free-cursor work: with the weld in place the 1px jitter is not the
-    // dominant artefact, and changing two things at once made the A/B unreadable.
+    // RETIRED (superseded by txWarmMode, 2026-08-26). This was the level gate on the old 1px
+    // translation keep-alive. That mechanism is now txWarmMode=1 and is kept only for A/B; the
+    // shipped warm-keeping (mode 4) perturbs the LEVEL by txWarmLevelEps instead, which fixes the
+    // same pan-start hitch without shifting the image by a pixel. Parsed and clamped so an old ini
+    // or profile carrying the key is still accepted, but NOTHING READS IT - do not add a reader.
     int txKeepAliveMaxLevel = 8;
+    // WARM-KEEPING (pan-start hitch, measured 2026-08-26 with tools/pan_wake_probe.ps1). At rest
+    // Wind stops writing entirely ("same-value hygiene" below), and DWM then lets its
+    // magnification composition path fall off full rate; the first movement after the pause lands
+    // a frame or two late, which is the hitch felt at every direction reversal. Measured over DOOM
+    // at 7x, driven by an identical injected hand, composition intervals:
+    //     Wind, keep-alive off   idle median 11.78ms, 48.9 stalls/s, wake 9.55 stalls/s
+    //     native Magnifier 7x    idle median  6.94ms,  0.0 stalls/s, wake 0.00 stalls/s
+    //     Wind + 1px keep-alive  idle median  6.94ms,  0.1 stalls/s, wake 0.00 stalls/s
+    // Native never goes quiet, and the legacy keep-alive matches it - but that one writes a value
+    // 1px OFF THE TRUTH at tick rate, which is the shimmer that retired it in #204. These modes
+    // exist to find a channel that keeps DWM warm without lying about the position:
+    //   0 = off (fall through to the legacy txKeepAliveMaxLevel path)
+    //   1 = legacy 1px jitter, for A/B only
+    //   2 = SAME-VALUE rewrite: re-send the exact transform already applied. Honest by
+    //       construction. Rests on DWM re-compositing for an identical write, which the old
+    //       "DWM parks on static values anyway" comment claims it does NOT - measure, don't assume.
+    //   3 = INPUT-TRANSFORM republish only: touches no visual channel whatsoever, so it cannot
+    //       shimmer even in principle. This is what native is known to do continuously
+    //       (docs/WOBBLE-CAPTURE-2026-08-21.md: it republishes an enabled identity even while
+    //       sitting unzoomed at 100%).
+    // Resting magnification level between sessions. 1.0 = TRUE identity (default).
+    // >1.0 keeps DWM in fullscreen-magnification mode even while Wind is idle, which is the one
+    // structural difference left against native Magnifier: native runs with magnification active
+    // the whole time, so DWM never hands the game a hardware overlay plane in the first place.
+    // Wind zooms on demand and is therefore always racing a plane that has ALREADY been assigned,
+    // which it loses ~1 session in 3 (tools/plane_race_probe.ps1). A value like 1.0001 is
+    // visually identity but is NOT 1.0 to DWM.
+    // COST, measured in issue #148 and not to be forgotten: a live magnification-aware compositor
+    // taxes every cursor visibility/shape change any app makes (13-24 spike frames per
+    // middle-click test with Wind merely running), and it denies the game independent flip for
+    // the whole time Wind is up. Diagnostic knob; ships at 1.0.
+    double txRestLevel = 1.0;
+    // Per-tick transform trace (diagnostic, hot). 1 = while zoomed, record every tick into a ring
+    // buffer and dump it to %LOCALAPPDATA%\Wind\logs	xtrace-<stamp>.csv at session end.
+    // WHY THIS EXISTS: every external probe that tried to attribute a stall - "did Wind stop
+    // feeding DWM, or did DWM stall while being fed?" - was starved by the very load it measured
+    // and reported zero writes that Wind's own loop log contradicted. Only Wind can answer it.
+    int txTrace = 0;
+    // WARM-KEEPING. SHIPPED AS MODE 1, 2026-08-27.
+    //
+    // The symptom: the first movement after ANY pause hitches (worst at a side-to-side reversal,
+    // where the hand passes through zero), then panning is smooth again.
+    //
+    // The cause, from the per-tick trace (txTrace) of a real session:
+    //     prev tick: dt= 7.50ms  warm=1              <- resting, panel at full rate
+    //     this tick: dt=25.01ms  wrote=1 changed=1   <- the FIRST REAL pan write
+    // DWM was compositing happily at 143Hz through the rest, and still paid ~25ms the moment the
+    // magnified SOURCE REGION actually moved. So the thing that goes cold is not the compositor,
+    // it is DWM's magnification RE-RENDER path, and only a real change to the sampled region
+    // keeps it warm.
+    //
+    // That is why mode 4 (perturb the LEVEL by txWarmLevelEps) was not enough despite looking
+    // perfect on every composition-rate metric: a 2e-5 level nudge is sub-pixel, DWM skips the
+    // real work, and the first genuine source change still pays full price. Mode 1 alternates the
+    // translation by 1px, which IS a real source change, and it is what actually removed the
+    // spike in the field.
+    //
+    // The cost is honest and known: the view sits 1px off the truth on alternate rest ticks. That
+    // is what retired this mechanism in #204, under smooth sampling. It is being shipped anyway
+    // because the hitch it removes is worse, and txWarmMode=0 turns it off for anyone who
+    // disagrees. txWarmWindowMs bounds how long after a rest it keeps jittering.
+    int txWarmMode = 1;
+    // Level cap on warm-keeping. Mode 4's perturbation is 0.077 SOURCE px, which on SCREEN is
+    // 0.077 * level - about 0.8px at 10x. Capping keeps the artefact sub-pixel where it is most
+    // likely to be noticed; above the cap the wake cost returns, which is the accepted trade.
+    int txWarmMaxLevel = 0;
+    int txWarmWindowMs = 0;      // 0 = warm for as long as the session rests; else ms after last change
+    // Mode 4's level perturbation, RELATIVE. The displacement it causes is not uniform: it is 0 at
+    // the source origin and grows to (width * eps) at the far edge, which is a far gentler artefact
+    // than mode 1's rigid 1px shift of the whole screen. 4e-6 was measured too small for DWM to
+    // notice at all; this is the knob for finding the smallest value that still wakes it.
+    double txWarmLevelEps = 0.00002;
+    // EXPERIMENTAL pacing (2026-08-28, hot): 0 (default) = DwmFlush-paced while zoomed - the tick
+    // runs at DWM's composition rate. On a VRR panel that rate FOLLOWS CONTENT: video at 60fps or
+    // a game at 70 drags composition down, and with it Wind's input sampling, weld and writes -
+    // felt as low fps, a slowed cursor, and the weld re-parking slowly enough that the real
+    // pointer shows between parks (the double cursor). Native Magnifier is immune because it
+    // writes from its mouse hook at input rate. 1 = pace by the high-resolution timer at the
+    // detected refresh instead: the tick holds the panel's MAX rate no matter what composition
+    // does. FIELD RESULT 2026-08-28: mode 1 wobbles even at full rate - a free-running timer
+    // drifts against composition, so some composites get two writes and some none, and the uneven
+    // view steps beat against the cursor. The one-fresh-write-per-composite regularity is the real
+    // value of DwmFlush pacing, which mode 2 keeps:
+    // 2 = DwmFlush WITH BACKFILL: a helper thread signals each real composite and the tick waits
+    // on that signal with a one-frame timeout. Composition healthy -> phase-locked, identical to
+    // mode 0. Composition drooping (VRR following a 65fps game) -> the timeout backfills ticks at
+    // the panel's max rate, so input sampling and the weld never slow down; the surplus writes
+    // coalesce in DWM. Best of both regimes by construction.
+    // Locked-regime pan ballistics (2026-08-28, hot). 1 (DEFAULT) = run locked-session raw
+    // mickeys through the same per-packet Windows-ballistics cooking Inspect uses
+    // (src/mouse_ballistics), so panning in a lockApps/mouselook game moves at the same speed as
+    // the desktop cursor - pointer-speed slider and acceleration included. 0 = the old behavior
+    // (raw x cursorSensitivity), which is measurably slower than the desktop cursor whenever the
+    // user's slider or acceleration would have boosted the motion.
+    // Locked-regime pan speed (2026-08-28, hot). 1 (DEFAULT) = pan at the TRUE desktop cursor
+    // speed, LEARNED from the OS itself: free-cursor ticks record the raw-in -> cursor-out ratio
+    // per speed (src/gain_learner.h) and locked sessions replay it - slider, acceleration curve,
+    // polling rate and every undocumented constant included, nothing to tune. Modelling this
+    // pipeline was tried twice (mouse_ballistics blends) and missed both ways, because WM_INPUT
+    // coalescing wrecks any per-packet speed estimate. 0 = raw mickeys x cursorSensitivity (the
+    // historical behavior, measurably slower than the desktop cursor).
+    int lockedBallistics = 1;
+    // Left/top edge cursor-shape flicker (field 2026-08-28, DOOM and KCD): when the welded
+    // pointer rests ON the outermost pixel column, the cursor shape flip-flops between the
+    // game's cursor and the system arrow (captured: hCursor 0x67910FD3 <-> 0x10003 pinned at
+    // (0,y)) - the outermost pixel is contested by shell edge zones and third-party edge hooks.
+    // Two weld-side fixes failed: an inset target alone cannot hold (the hand re-pins the
+    // pointer past the deduped weld), and re-asserting the weld per tick fights the hand
+    // everywhere (field-rejected hard). So the OS does it instead: while a transform session is
+    // zoomed, a ClipCursor 1px INSIDE the monitor keeps the pointer off the contested pixels
+    // with ZERO writes. Snapshot-and-restore (this rig has a permanent external work-area clip
+    // that a nullptr release would destroy), intersected with whatever clip already exists, and
+    // never fighting a TIGHTER clip (a game confine, Inspect's 1px freeze). 0 = off (hot).
+    int edgeClip = 1;
+    int txPace = 0;
     int txHookWrite = 0;
     int txFreeCursor = 1;
+    // WRITE CADENCE - SHIPPED OFF (tried ON 2026-08-26, REVERTED the same day on field report).
+    // The theory (issue #204) is sound: we write ~144/s where native writes ~49/s, and each write
+    // makes DWM redo work proportional to the zoom. Turning it on scored well in the automated
+    // gauntlet. It is still WRONG for the user:
+    //   txMinOffsetPx=2 makes the view advance in 2px steps under a smooth hand, which reads as
+    //     WOBBLE at low zoom - the pointer slides against content that is jumping.
+    //   txWriteHz=60 caps the view at 60Hz on a 144Hz panel, which reads as LOW FPS at high zoom.
+    // The pan-start stutter these were bundled with is fixed by txWarmMode, which is independent.
+    // Do not re-enable without a test that watches the view under a SLOW hand, not just stall counts.
     int txWriteHz = 0;
     // Minimum destination-space (screen px) movement before a PAN-ONLY write goes out. Native's
     // median pan step is 2.24px; ours was 1.41px, and a THIRD of all our writes moved the image by
     // exactly one pixel. Sub-threshold movement is coalesced, never dropped: a residual still
     // lands within kSettleMs so the view can never rest visibly offset. 0 = write every change.
-    int txMinOffsetPx = 0;   // ships off for the same reason as txWriteHz above.
+    int txMinOffsetPx = 0;   // ships OFF with txWriteHz above.
     int magInputTransform = 1; // publish MagSetInputTransform while zoomed (hot; needs UIAccess).
                           //     1 (DEFAULT) = the visual source rect per change - native-
                           //     Magnifier parity, THE fix for the pointer-framework hover dead

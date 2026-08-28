@@ -1,9 +1,12 @@
 #include "transform_model.h"
 #include "transform.h"   // ComputeMagTransform
 #include "tx_cadence.h"  // ShouldWriteTransform (pure, tested)
+#include "tx_warm.h"     // WarmAction (pure, tested): the pan-start hitch fix
 #include "hook_transform.h" // NoteWriteCursor: the lag metric anchor (issue #229)
 #include "mag_thread.h"     // MagThreadInvoke: the API is thread-affine (issue #229)
 #include "logging.h"
+#include "config_path.h"   // ResolveLogDir
+#include <cstdio>
 #include <windows.h>
 #include <magnification.h>
 #include <dwmapi.h>      // DwmFlush: the sprite-before-blank handoff (issue #221)
@@ -47,6 +50,9 @@ void TransformModel::resetTransformState() {
     lastLevel_ = 0.0; lastRequestedLevel_ = 0.0;
     lastOffX_ = lastOffY_ = lastTxX_ = lastTxY_ = 0;
     lastChangeMs_ = 0; lastWriteMs_ = 0; keepAliveTick_ = 0; hiRampTick_ = 0;
+    warmLevelJitter_ = false;
+    spriteFirst_ = false;
+    ghostSessionStartMs_ = 0;
     lastInputXformOn_ = false;
     ixTick_ = 0; ixPending_ = false;
     lastSpriteX_ = INT_MIN; lastSpriteY_ = INT_MIN;
@@ -74,6 +80,7 @@ bool TransformModel::ensureMag() {
 }
 
 void TransformModel::teardownMag() {
+    edgeClipManage(false);   // never strand our clip across a teardown
     if (!magUp_) { identityParked_ = false; return; }
     LARGE_INTEGER fr, a, b;
     QueryPerformanceFrequency(&fr); QueryPerformanceCounter(&a);
@@ -233,6 +240,57 @@ void TransformModel::hideSystemCursor(bool hide) {
     else      { if (sprite_) sprite_->hide(); ShowSystemCursorMarshalled(TRUE); blanker_->restore(); }
 }
 
+
+// Session-scoped edge clip (cfg.edgeClip; the full story is in config.h). Keeps the pointer off
+// the outermost pixel ring so the WM_SETCURSOR shape war there can never start. Rules, each one
+// load-bearing:
+//   - SNAPSHOT the existing clip on engage and RESTORE it on release: this rig runs a permanent
+//     external work-area clip, and releasing to nullptr would destroy it.
+//   - INTERSECT with the existing clip rather than replace it.
+//   - NEVER fight a tighter clip: a game confining the pointer, or Inspect's 1px freeze, already
+//     keeps the pointer off the edge - adopt, do not overwrite.
+//   - Re-assert only when a foreign write WIDENED the clip back over the edge pixels (deduped by
+//     comparing against what we applied), so there is no per-tick churn.
+void TransformModel::edgeClipManage(bool wantActive) {
+    RECT cur{};
+    if (!GetClipCursor(&cur)) return;
+    const RECT inset{ mon_.x + 1, mon_.y + 1, mon_.x + mon_.w - 1, mon_.y + mon_.h - 1 };
+    if (!wantActive) {
+        if (edgeClipActive_) {
+            // Restore the snapshot unless someone else took the clip meanwhile (theirs wins).
+            if (EqualRect(&cur, &edgeClipApplied_)) ClipCursor(&edgeClipSaved_);
+            edgeClipActive_ = false;
+        }
+        return;
+    }
+    const bool coversEdge = cur.left < inset.left || cur.top < inset.top ||
+                            cur.right > inset.right || cur.bottom > inset.bottom;
+    if (!edgeClipActive_) {
+        if (!coversEdge) return;                     // something tighter already owns the pointer
+        edgeClipSaved_ = cur;
+        RECT want{};
+        if (!IntersectRect(&want, &cur, &inset)) return;
+        ClipCursor(&want);
+        edgeClipApplied_ = want;
+        edgeClipActive_ = true;
+        return;
+    }
+    // Active: re-assert only if a foreign write re-opened the edge pixels.
+    if (!EqualRect(&cur, &edgeClipApplied_)) {
+        if (!coversEdge) {                            // foreign but tighter (game/Inspect): adopt
+            edgeClipSaved_ = cur;                     // restoring THEIR clip at session end is
+            edgeClipApplied_ = cur;                   // wrong; they own it now - track and yield
+            edgeClipActive_ = false;
+            return;
+        }
+        edgeClipSaved_ = cur;                        // foreign and wide: re-snapshot, re-inset
+        RECT want{};
+        if (!IntersectRect(&want, &cur, &inset)) return;
+        ClipCursor(&want);
+        edgeClipApplied_ = want;
+    }
+}
+
 void TransformModel::setActive(bool active) {
     active_ = active;
     if (active) {
@@ -300,19 +358,23 @@ void TransformModel::setActive(bool active) {
         POINT np;
         if (GetCursorPos(&np)) { SetCursorPos(np.x + 1, np.y); SetCursorPos(np.x, np.y); }
     }
+    edgeClipManage(false);             // give the clip back before the session winds down
     idleSinceMs_ = GetTickCount64();   // start the release countdown (idleTick)
     wind::Log(wind::LogLevel::Info, "txsession", "session end maxLevel=%.2f", sessionMaxLevel_);
+    if (traceOn_) traceDump();
     sessionMaxLevel_ = 0.0;
     // Park at EXACT identity right here, at the end of the zoom-out. Returning DWM to identity
     // costs a ~150ms compositor stall no matter when it happens (measured), so pay it while the
     // user is still in zoom motion and expects movement - not 1.2s later while they are playing.
     LARGE_INTEGER fr, pa, pb;
     QueryPerformanceFrequency(&fr); QueryPerformanceCounter(&pa);
-    host_.setTransform(1.0f, 0, 0, 0, 0, false);
+    // restLevel_ > 1.0 parks a hair off identity so DWM stays in magnification mode across the
+    // idle - see cfg.txRestLevel for why and what it costs. 1.0 is the shipped behaviour.
+    host_.setTransform((float)restLevel_, 0, 0, 0, 0, false);
     QueryPerformanceCounter(&pb);
     // The park applied 1.0 outside writeTransform, so sync the cached level: a stale lastLevel_
     // here anchored the step cap's next session at the trailing zoom-out value (#219 bounce).
-    lastLevel_ = 1.0; lastRequestedLevel_ = 1.0;
+    lastLevel_ = restLevel_; lastRequestedLevel_ = restLevel_;
     identityParked_ = true;
     parkedAtMs_ = GetTickCount64();
     const double parkMs = double(pb.QuadPart - pa.QuadPart) * 1000.0 / fr.QuadPart;
@@ -331,6 +393,9 @@ void TransformModel::setActive(bool active) {
 
 void TransformModel::idleTick() {
     if (!magUp_ || active_ || idleSinceMs_ == 0) return;
+    // Holding a non-identity rest level is pointless if the context is then released: the release
+    // returns DWM to identity anyway. So the two go together.
+    if (restLevel_ > 1.0) return;
     const unsigned long long since = GetTickCount64() - idleSinceMs_;
     if (since < (unsigned long long)idleReleaseMs_) return;
     // The identity park already happened at session end (see setActive); releasing the context
@@ -421,6 +486,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         srcL = o.x; srcT = o.y;
     }
     idleReleaseMs_ = cfg.txIdleReleaseMs;   // hot-reloadable release window
+    restLevel_ = cfg.txRestLevel;           // hot
     if (!ensureMag()) return;   // lazy context: the session's first write brings DWM up
     // Bitmap smoothing (issue #197/#227), once per magnification context. The smooth filter
     // is the WHOLE quality gap to native Magnifier: sharp magnified image and a cursor that
@@ -440,6 +506,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         wind::Log(wind::LogLevel::Info, "transform", "bitmap smoothing %d applied=%d",
                   cfg.txSamplingMode, ok ? 1 : 0);
     }
+    traceOn_ = cfg.txTrace != 0;
     cfgWobbleCage_ = cfg.txWobbleCage;        // diagnostic cage + threshold px (issue #229)
     if (level > sessionMaxLevel_) sessionMaxLevel_ = level;
     const bool ramping = applyLevel != level || (applyLevel != lastLevel_ && lastLevel_ > 0.0);
@@ -470,6 +537,12 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         if (m.offX > maxOff) m.offX = maxOff;
         if (m.txX < -32000) m.txX = -32000;
     }
+    bool txWroteThisTick = false;   // the sprite follows the VIEW, not the tick (see below)
+    // Trace inputs, captured here and appended at the END of present() so the sprite position
+    // recorded is this tick's, not the previous one's.
+    bool trChanged = false, trRamping = ramping, trWarm = false;
+    const double trLevel = applyLevel;
+    const int trTxX = m.txX, trOffX = m.offX;
     // pauseWrites (issue #148): a click's injected cursor move is in flight - a transform write
     // racing a cursor-position update is the proven TDR, so those ticks write NOTHING. State is
     // untouched; the next unpaused tick lands the same values.
@@ -516,29 +589,57 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // Everything below keys off whether the write ACTUALLY goes out this tick, not merely whether
     // the values differ - the cached last* state must never claim a write we suppressed.
     const bool changedAndWriting = writeNow;
+    txWroteThisTick = writeNow;
+    trChanged = changed;
     int txJitter = 0;
-    // Keep-alive: 700ms window, <=8x only. (The original 1.5s/all-levels spec was re-tried
-    // under MPO-off 2026-07-26 and measured WORSE - 360ms worst spike vs 198ms baseline. With
-    // MPO disabled the desktop composites in software, so a hot magnification pipeline taxes
-    // every frame; keep the window short and the high-zoom pipeline parked.)
-    // Ships OFF (txKeepAliveMaxLevel now defaults to 0, issue #204): this deliberately wrote a
-    // value 1px off the truth, 144x/s, through every pause in a pan. Native Magnifier does the
-    // opposite - when the view is static it stops writing entirely.
     bool keepAliveActive = false;
-    if (!changedAndWriting && !ramping && cfg.txKeepAliveMaxLevel > 0 &&
-        applyLevel <= (double)cfg.txKeepAliveMaxLevel &&
-        nowMs - lastChangeMs_ < 700) {
-        keepAliveTick_ ^= 1;
-        txJitter = keepAliveTick_;
-        keepAliveActive = true;   // BOTH parities must write (the return-to-true-value half too)
+    bool warmIxOnly = false;
+    // WARM-KEEPING (see src/tx_warm.h for the measurements). At rest Wind would otherwise stop
+    // writing entirely and DWM's composition falls back to the game's present rate, so the first
+    // movement after a pause lands late - the hitch felt at every direction reversal.
+    TxWarmIn wi;
+    wi.wroteThisTick      = changedAndWriting;
+    wi.ramping            = ramping;
+    wi.mode               = cfg.txWarmMode;
+    wi.applyLevel         = applyLevel;
+    wi.maxLevel           = cfg.txWarmMaxLevel;
+    wi.windowMs           = cfg.txWarmWindowMs;
+    wi.sinceLastChangeMs  = nowMs - lastChangeMs_;
+    switch (WarmAction(wi)) {
+        case TxWarm::Jitter1px:
+            keepAliveTick_ ^= 1;
+            txJitter = keepAliveTick_;   // BOTH parities must write (the return-to-true half too)
+            keepAliveActive = true;
+            break;
+        case TxWarm::SameValue:
+            keepAliveActive = true;
+            break;
+        case TxWarm::InputTransform:
+            warmIxOnly = true;
+            break;
+        case TxWarm::LevelEpsilon:
+            keepAliveTick_ ^= 1;
+            warmLevelJitter_ = keepAliveTick_ != 0;
+            keepAliveActive = true;
+            trWarm = true;
+            break;
+        case TxWarm::None:
+            break;
     }
+
     // Same-value hygiene (issue #189): once the keep-alive window has lapsed (or above its level
     // gate), a zoomed-idle tick would push an identical write 144x/s. DWM parks on static values
     // anyway (measured), so skipping is free; the next changed/keep-alive tick writes as before.
     // suppressTransformWrite: the mouse hook is the single writer this session (issue #206). The
     // state above is still maintained, so turning the hook path off mid-session resumes cleanly.
-    if ((changedAndWriting || keepAliveActive) && !ex.suppressTransformWrite)
-        writeTransform((float)applyLevel, m.offX, m.offY, m.txX + txJitter, m.txY, fastPan_, false);
+    if ((changedAndWriting || keepAliveActive) && !ex.suppressTransformWrite) {
+        // warmLevelJitter_ (mode 4) perturbs only the LEVEL, and only on warm ticks - a real
+        // write always sends the true level. See the mode 4 note above for why it has to change
+        // at all and why this is the cheapest honest thing to change.
+        const double lvlOut = warmLevelJitter_ ? applyLevel * (1.0 + cfg.txWarmLevelEps) : applyLevel;
+        writeTransform((float)lvlOut, m.offX, m.offY, m.txX + txJitter, m.txY, fastPan_, false);
+    }
+    warmLevelJitter_ = false;
     // Input transform. Mode 1 (THE SHIPPED DEFAULT; field-verified 4x-20x,
     // POINTER-HITTEST-FINDINGS.md): publish the visual source rect on every change, exactly
     // like native Magnifier. Pointer-framework apps (Explorer/Settings/shell) hit-test mouse
@@ -575,7 +676,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             }
         }
     }
-    if (cfg.magInputTransform != 0 && (changed || ixPending_ || ixForce)) {
+    if (cfg.magInputTransform != 0 && (changed || ixPending_ || ixForce || warmIxOnly)) {
         // Decimation (issue #189): the publish exists for pointer-framework HOVER hit-testing
         // (clicks ride the welded cursor and never consult it), so it does not need the 144Hz
         // motion rate - every Nth changed tick suffices, with a GUARANTEED publish the moment
@@ -585,7 +686,9 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         // A stomp bypasses the decimation entirely: correctness of the mapping beats hygiene.
         if (changed) ixPending_ = true;
         const bool rest = !changed;
-        if (ixForce || rest || ++ixTick_ >= cfg.ixDecimate) {
+        // warmIxOnly bypasses the decimation for the same reason a stomp does: the publish IS the
+        // work here, and decimating it away would defeat the whole mode.
+        if (ixForce || warmIxOnly || rest || ++ixTick_ >= cfg.ixDecimate) {
             ixTick_ = 0;
             ixPending_ = false;
             // srcL/srcT, not r.srcLeft/srcTop: when the ramp limiters make applyLevel != level
@@ -674,6 +777,11 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // pointer owns the interaction, and welding it back fights the hand. weldedLastFrame_
     // records whether SetCursorPos REALLY ran, so RunTick can baseline on the weld point only
     // when it did (#169 measured-baseline law; assuming it landed is the unstable-servo bug).
+    // Edge clip: engaged while genuinely zoomed and the pointer is OURS to manage (not Inspect,
+    // whose 1px freeze clip must never be disturbed - ex.clickOverride marks it).
+    if (cfg.edgeClip != 0)
+        edgeClipManage(applyLevel > 1.001 && !ex.clickOverride);
+
     weldedLastFrame_ = false;
     if (!ex.suppressCursorSync) {
         int cx = ex.clickOverride ? ex.clickDesktopX : (r.clickDesktopX + mon_.x);
@@ -746,6 +854,12 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             // sample: two placers against one transform is what put the sprite off-centre by
             // (cursor drift * level) and drew the second, lagging cursor.
             if (!wind::HookTransformArmed()) {
+                // NO LOCKSTEP GATE HERE. Gating the sprite on "the view moved this tick" was
+                // tried 2026-08-26 to cure a wobble and BROKE THE EDGE ZONES: at a screen edge the
+                // mapper clamps the source rect, so the transform stops changing while
+                // cursorScreen keeps sliding - the sprite froze and the pointer could not reach
+                // the left side of the screen (field-reported). The cursor must follow the MAPPER,
+                // always. The wobble it was aimed at came from the write cadence, which is off.
                 if (sx != lastSpriteX_ || sy != lastSpriteY_) {
                     sprite_->moveTo(sx, sy);
                     lastSpriteX_ = sx; lastSpriteY_ = sy;
@@ -806,6 +920,18 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         sprite_->hide();
     }
 
+    if (traceOn_) {
+        LARGE_INTEGER qf, qc; QueryPerformanceFrequency(&qf); QueryPerformanceCounter(&qc);
+        TxTick& e = traceBuf_[traceHead_ % kTraceCap];
+        e.ms = double(qc.QuadPart) * 1000.0 / double(qf.QuadPart);
+        e.level = trLevel; e.txX = trTxX; e.offX = trOffX;
+        e.spriteX = lastSpriteX_; e.spriteY = lastSpriteY_;
+        e.wrote = (unsigned char)(txWroteThisTick ? 1 : 0);
+        e.changed = (unsigned char)(trChanged ? 1 : 0);
+        e.ramping = (unsigned char)(trRamping ? 1 : 0);
+        e.warm = (unsigned char)(trWarm ? 1 : 0);
+        ++traceHead_;
+    }
     if (smoothPan_ && level > 1.0) {
         unsigned long long now = GetTickCount64();
         if (now - lastPinAssertMs_ >= 500) { lastPinAssertMs_ = now; pin_.assert_(); }
@@ -817,8 +943,26 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // MPO-exposed (alt-tab to the desktop mid-zoom, knob turned off).
     if (mpoBusterWanted_ && level > 1.001) {
         unsigned long long nowG = GetTickCount64();
-        if (nowG - lastGhostAssertMs_ >= 500) { lastGhostAssertMs_ = nowG; mpoGhost_.assert_(); }
+        // THE DEMOTION IS A RACE, AND A BLIND 500ms CADENCE LOSES IT (measured 2026-08-26 with
+        // tools/plane_race_probe.ps1: 3 of 6 alt-tab sessions left the game on its overlay plane
+        // for ~2.5s, against native Magnifier's 6 of 6 composited on the same machine). While the
+        // game holds a hardware plane DWM is not compositing it, so nothing we write can drive the
+        // composition rate and every pan start lands late - that IS the field stutter, and its
+        // per-session randomness is this race.
+        //
+        // So the OPENING of a session is asserted hard and the steady state stays calm: the first
+        // kGhostAggressiveMs are re-asserted every kGhostFastMs, which is what actually has to win
+        // against DWM re-promoting the game as it takes the foreground back. assert_() is already
+        // read-first (it transacts only when the ghost is hidden, moved, or stripped of TOPMOST),
+        // so a tighter cadence costs three cheap reads per tick, not a z-order transaction.
+        static constexpr unsigned long long kGhostAggressiveMs = 2000;
+        static constexpr unsigned long long kGhostFastMs       = 100;
+        if (ghostSessionStartMs_ == 0) ghostSessionStartMs_ = nowG;
+        const bool opening = (nowG - ghostSessionStartMs_) < kGhostAggressiveMs;
+        const unsigned long long cadence = opening ? kGhostFastMs : 500;
+        if (nowG - lastGhostAssertMs_ >= cadence) { lastGhostAssertMs_ = nowG; mpoGhost_.assert_(); }
     } else {
+        ghostSessionStartMs_ = 0;   // next session re-opens with the aggressive window
         mpoGhost_.hide();
     }
 }
@@ -848,4 +992,33 @@ void TransformModel::shutdown() {
     mpoGhost_.destroy();
     ready_ = false;
 }
+
+// Dump the per-tick trace. Diagnostic only: runs at session end, never on the tick path.
+void TransformModel::traceDump() {
+    if (traceHead_ == 0) return;
+    const std::wstring dir = wind::ResolveLogDir();
+    wchar_t path[MAX_PATH];
+    // Forward slash on purpose: Win32 file APIs accept it, and it keeps this string free
+    // of backslash escapes (a double-escaped one silently became a TAB here once).
+    swprintf(path, MAX_PATH, L"%s/txtrace-%llu.csv", dir.c_str(),
+             (unsigned long long)GetTickCount64());
+    FILE* f = nullptr;
+    if (_wfopen_s(&f, path, L"w") != 0 || !f) return;
+    fprintf(f, "ms,dt,level,txX,offX,spriteX,spriteY,wrote,changed,ramping,warm\n");
+    const int n = traceHead_ < kTraceCap ? traceHead_ : kTraceCap;
+    const int start = traceHead_ < kTraceCap ? 0 : (traceHead_ % kTraceCap);
+    double prev = 0.0;
+    for (int i = 0; i < n; ++i) {
+        const TxTick& e = traceBuf_[(start + i) % kTraceCap];
+        const double dt = prev > 0.0 ? (e.ms - prev) : 0.0;
+        prev = e.ms;
+        fprintf(f, "%.3f,%.3f,%.6f,%d,%d,%d,%d,%d,%d,%d,%d\n",
+                e.ms, dt, e.level, e.txX, e.offX, e.spriteX, e.spriteY,
+                (int)e.wrote, (int)e.changed, (int)e.ramping, (int)e.warm);
+    }
+    fclose(f);
+    traceHead_ = 0;
+    wind::Log(wind::LogLevel::Info, "txtrace", "wrote %d ticks", n);
 }
+
+}  // namespace wind
