@@ -140,10 +140,17 @@ inline void DrawSparkline(HDC dc, const RECT& box, const Palette& pal, const Met
     LineTo(dc, box.right - 2, midY);
     SelectObject(dc, og); DeleteObject(grid);
 
+    // Noise floor: the ring records when the LOOP WOKE, and at this magnification (full box =
+    // 2x median) the scheduler's few-hundred-us wake jitter reads as a rough surface even though
+    // composition is locked (RTSS plots the vsync-locked present intervals, hence its flat
+    // line - field comparison 2026-08-28). The graph exists to show stalls, not that fuzz:
+    // samples within 12% of the median draw AT the median; anything beyond draws at full value.
+    const double band = med * 0.12;
     POINT pts[TickStats::kCap + 2];
     for (int i = 0; i < n; ++i) {
         pts[i].x = box.left + 2 + MulDiv(i, w - 4, n - 1);
-        double v = buf[i] / top; if (v > 1.0) v = 1.0;
+        const double raw = (buf[i] > med - band && buf[i] < med + band) ? med : buf[i];
+        double v = raw / top; if (v > 1.0) v = 1.0;
         pts[i].y = box.bottom - 2 - (LONG)(v * (h - 4));
     }
     pts[n]     = { box.right - 2, box.bottom - 2 };
