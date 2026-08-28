@@ -93,7 +93,7 @@ static void DrawHeaderBody(const MenuDrawState& st, HDC dc, const RECT& r) {
     float buf[TickStats::kCap];
     const int n = Ticks().snapshot(buf, TickStats::kCap);
     if (n >= 8) {
-        const double fps = FpsFromMs(MedianMs(buf, n));
+        const double fps = FpsFromMs(MeanMs(buf, n));   // mean: jitter pairs cancel, see tick_stats.h
         wchar_t f[32]; wsprintfW(f, L"%d fps", (int)(fps + 0.5));
         SelectObject(dc, st.fonts.small_);
         SetTextColor(dc, pal.faint);

@@ -140,16 +140,16 @@ inline void DrawSparkline(HDC dc, const RECT& box, const Palette& pal, const Met
     LineTo(dc, box.right - 2, midY);
     SelectObject(dc, og); DeleteObject(grid);
 
-    // Noise floor: the ring records when the LOOP WOKE, and at this magnification (full box =
-    // 2x median) the scheduler's few-hundred-us wake jitter reads as a rough surface even though
-    // composition is locked (RTSS plots the vsync-locked present intervals, hence its flat
-    // line - field comparison 2026-08-28). The graph exists to show stalls, not that fuzz:
-    // samples within 12% of the median draw AT the median; anything beyond draws at full value.
-    const double band = med * 0.12;
+    // This is a STALL METER, not an oscilloscope. The ring records when the LOOP WOKE, so it
+    // carries the scheduler's wake jitter: a wake 1-2ms late plus its short catch-up tick, in
+    // up/down pairs (a 12% deadband still let those poke through - field 2026-08-28; RTSS reads
+    // flat because it plots the vsync-locked present intervals). None of that can miss a
+    // composite. The honest cut is the tick that CAN: anything under 1.5x the median collapses
+    // to the median line, so the trace is flat while healthy and spikes only for a real stall.
     POINT pts[TickStats::kCap + 2];
     for (int i = 0; i < n; ++i) {
         pts[i].x = box.left + 2 + MulDiv(i, w - 4, n - 1);
-        const double raw = (buf[i] > med - band && buf[i] < med + band) ? med : buf[i];
+        const double raw = (buf[i] < med * 1.5) ? med : buf[i];
         double v = raw / top; if (v > 1.0) v = 1.0;
         pts[i].y = box.bottom - 2 - (LONG)(v * (h - 4));
     }

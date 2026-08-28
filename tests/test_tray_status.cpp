@@ -92,6 +92,16 @@ TEST_CASE("median ignores a single stall where a mean would not") {
     CHECK(FpsFromMs(MedianMs(v, 10)) == doctest::Approx(144.9).epsilon(0.02));
 }
 
+TEST_CASE("the fps figure uses the mean so jitter pairs cancel to the true rate") {
+    // A 144Hz panel (6.944ms) seen through wake jitter: alternating early/late wakes. The
+    // median lands on one half of the pair and reads 153.8 "fps"; the mean cancels the pair
+    // and reads the panel's truth. This is the tray's "145 fps on a 144Hz screen" bug.
+    float v[8] = {6.5f,7.4f,6.5f,7.4f,6.5f,7.4f,6.5f,7.4f};
+    CHECK(MeanMs(v, 8) == doctest::Approx(6.95).epsilon(0.001));
+    CHECK(FpsFromMs(MeanMs(v, 8)) == doctest::Approx(143.9).epsilon(0.01));
+    CHECK(MeanMs(nullptr, 0) == doctest::Approx(0.0));
+}
+
 TEST_CASE("late frames are counted at 1.5x the median, matching the pan-wake harness") {
     float v[10] = {7,7,7,7,7,7,7,7,7,25};
     CHECK(LateCount(v, 10) == 1);

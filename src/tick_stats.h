@@ -60,6 +60,20 @@ inline double MedianMs(const float* v, int n) {
     return (double)tmp[m / 2];
 }
 
+// Mean of the sample window - the rate estimator for the fps FIGURE. The mean, not the median:
+// scheduler wake jitter comes in late/short PAIRS that sum to the true elapsed time, so they
+// cancel in a mean, while the median sits on whichever half of the pair is more common - which
+// is how the tray read "145 fps" on a 144Hz panel (field 2026-08-28). A lone stall barely moves
+// a 256-sample mean (~0.07ms), and a SUSTAINED slowdown moving it is the figure being honest.
+// The median stays the anchor for the sparkline scale and the LateCount threshold, where
+// robustness against stalls is exactly what is wanted.
+inline double MeanMs(const float* v, int n) {
+    if (!v || n <= 0) return 0.0;
+    double s = 0.0;
+    for (int i = 0; i < n; ++i) s += (double)v[i];
+    return s / n;
+}
+
 // Frames per second implied by an interval. 0 in, 0 out - never a divide by zero into the UI.
 inline double FpsFromMs(double ms) { return ms > 0.0001 ? 1000.0 / ms : 0.0; }
 
