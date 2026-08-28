@@ -183,6 +183,9 @@ Config ParseConfig(const std::string& text) {
             else if (key == "txWarmLevelEps")     c.txWarmLevelEps = std::stod(val);
             else if (key == "txWriteHz")          c.txWriteHz = std::stoi(val);
             else if (key == "txFreeCursor")       c.txFreeCursor = std::stoi(val);
+            else if (key == "lockedBallistics")   c.lockedBallistics = std::stoi(val);
+            else if (key == "edgeClip")           c.edgeClip = std::stoi(val);
+            else if (key == "txPace")             c.txPace = std::stoi(val);
             else if (key == "txHookWrite")        c.txHookWrite = std::stoi(val);
             else if (key == "txMinOffsetPx")      c.txMinOffsetPx = std::stoi(val);
             else if (key == "txIdleReleaseMs")    c.txIdleReleaseMs = std::stoi(val);
@@ -238,6 +241,8 @@ Config ParseConfig(const std::string& text) {
     if (c.txIdleReleaseMs < 0) c.txIdleReleaseMs = 0;
     if (c.txRestLevel < 1.0)   c.txRestLevel = 1.0;
     if (c.txRestLevel > 1.01)  c.txRestLevel = 1.01;   // visually identity only
+    if (c.txPace < 0)          c.txPace = 0;
+    if (c.txPace > 2)          c.txPace = 2;
     if (c.txWarmMode < 0)      c.txWarmMode = 0;
     if (c.txWarmMode > 4)      c.txWarmMode = 4;
     if (c.txWarmMaxLevel < 0)  c.txWarmMaxLevel = 0;

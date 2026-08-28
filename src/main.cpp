@@ -31,6 +31,25 @@
 #include "cursor_mapper.h"
 #include "zoom_controller.h"
 #include "tray.h"
+#include "gain_learner.h"  // learned pointer ballistics: locked pan at TRUE desktop speed
+
+// txPace=2 composite signal (see config.h). One thread blocks in DwmFlush forever and pulses an
+// auto-reset event per real composite; the pacing loop waits on the event WITH A TIMEOUT, so a
+// drooping composition backfills ticks instead of dragging the whole pipeline down with it.
+// Started lazily on first use; harmless at idle (DwmFlush at composition rate, no work between).
+static HANDLE g_compEvt = nullptr;
+static void EnsureCompositePulse() {
+    if (g_compEvt) return;
+    g_compEvt = CreateEventW(nullptr, FALSE, FALSE, nullptr);   // auto-reset
+    if (!g_compEvt) return;
+    CreateThread(nullptr, 0, [](LPVOID) -> DWORD {
+        for (;;) {
+            if (DwmFlush() != S_OK) Sleep(50);   // DWM restarting: back off, keep trying
+            SetEvent(g_compEvt);
+        }
+        return 0;
+    }, nullptr, 0, nullptr);
+}
 #include "lock_detector.h"
 #include "test_telemetry.h"
 #include "shell_desktop.h"
@@ -273,6 +292,10 @@ struct TickState {
                                     //   the synthesized click reaches the look point (then re-freeze)
     double inspectPanRemX = 0.0;    // sub-pixel carry for the cooked Inspect-mode pan (slow motion not lost)
     double inspectPanRemY = 0.0;
+    double lockedPanRemX = 0.0;         // sub-pixel carry for the locked pan
+    double lockedPanRemY = 0.0;
+    GainLearner gainLearner;            // free ticks teach it the real in->out ratio;
+                                        // locked ticks replay it (gain_learner.h)
     bool   inspectGame = false;         // game-inspect (issue #144): foreground stolen from a mouselook
                                         //   game so its raw-input camera stops receiving the mouse
     // Content-vs-cursor lag at the last composite boundary, screen px (issue #229). Sampled
@@ -1238,8 +1261,23 @@ static void RunTick(TickState& t) {
                 t.prevDetLocked = locked;
             }
             if (locked) {
-                dx = (int)std::lround(rawDx * t.cfg.cursorSensitivity);
-                dy = (int)std::lround(rawDy * t.cfg.cursorSensitivity);
+                // LOCKED pan at the TRUE desktop-cursor speed (issue: "cursor slower zoomed
+                // in DOOM"). Not modelled - MEASURED: free ticks record the OS's own in->out
+                // ratio per speed (gain_learner.h) and this replays it. Modelling was tried
+                // twice and missed both ways (raw = too slow, cooked curve = too fast) because
+                // a per-packet speed estimate cannot see WM_INPUT coalescing.
+                if (t.cfg.lockedBallistics != 0) {
+                    const double inC = std::sqrt((double)rawDx * rawDx + (double)rawDy * rawDy);
+                    const double g = t.gainLearner.gainFor(inC, dt * 1000.0);
+                    t.lockedPanRemX += rawDx * g * t.cfg.cursorSensitivity;
+                    t.lockedPanRemY += rawDy * g * t.cfg.cursorSensitivity;
+                    dx = (int)t.lockedPanRemX; t.lockedPanRemX -= dx;
+                    dy = (int)t.lockedPanRemY; t.lockedPanRemY -= dy;
+                } else {
+                    dx = (int)std::lround(rawDx * t.cfg.cursorSensitivity);
+                    dy = (int)std::lround(rawDy * t.cfg.cursorSensitivity);
+                    t.lockedPanRemX = 0.0; t.lockedPanRemY = 0.0;
+                }
             } else {
                 // Drag-follow (issue #169): while a mouse button is physically held, the pointer IS
                 // the interaction (window drag, text selection) - the per-tick weld would fight the
@@ -1255,6 +1293,16 @@ static void RunTick(TickState& t) {
                                            (GetAsyncKeyState(VK_MBUTTON) & 0x8000);
                 const bool weldActive = dynamic_cast<RenderModel*>(t.model) != nullptr ||
                                         dynamic_cast<TransformModel*>(t.model) != nullptr;
+                // FREE tick: both ends of the OS pointer pipeline are visible right here -
+                // rawDx/rawDy went in, curDx/curDy came out - so teach the learner the REAL
+                // ballistics at this speed. Gated on no confining clip: a clamped cursor
+                // under-reports output and would teach a too-low gain.
+                if (!clipConfined && (std::abs(rawDx) + std::abs(rawDy)) >= wind::GainLearner::kMinCounts) {
+                    const double dtMs_ = dt * 1000.0;
+                    const double inC  = std::sqrt((double)rawDx * rawDx + (double)rawDy * rawDy);
+                    const double outC = std::sqrt((double)curDx * curDx + (double)curDy * curDy);
+                    t.gainLearner.observe(inC, outC, dtMs_);
+                }
                 dragFollow = wind::ShouldDragFollow(weldActive, locked, inspect, anyButtonDown);
                 if (dragFollow) {
                     dx = curDx;
@@ -1613,6 +1661,11 @@ static void RunTick(TickState& t) {
         const bool quiesceHold = QuiesceHoldActive(t);
         ex.pauseWrites = t.clickPauseTicks > 0 || quiesceHold;
         if (quiesceHold) ex.suppressCursorSync = true;
+        // Our own menu is open: the pointer belongs to the USER (they are aiming at menu items),
+        // so the weld must not re-park it - at full tick rate it pins the cursor outright
+        // (field-reported as a frozen cursor the moment the tray opened). The view keeps panning;
+        // only the cursor re-park is suspended, exactly like drag-follow during a button hold.
+        if (wind::Tray::MenuOpen()) ex.suppressCursorSync = true;
         if (t.clickPauseTicks > 0) --t.clickPauseTicks;
         if (inspect) {
             if (t.clickReleaseTicks > 0) {
@@ -2353,6 +2406,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         model2.reset();
     }
 
+    // Inspect's cooked-pan ballistics from the real system settings at startup (previously read
+    // only on Inspect entry). The LOCKED path no longer models ballistics at all - it replays the
+    // learned desktop gain instead (gain_learner.h).
+    g_input.setBallistics(ReadMouseBallistics());
     Tray::Add(hwnd, hInst);
 
     TickState ts(model.get(), startupMon, cfg);
@@ -2360,6 +2417,13 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     ts.mTransform = model2.get();
     ts.hwnd = hwnd;                       // so RunTick can re-register the hide-cursor hotkey
     g_tick = &ts;   // so the WM_TIMER tick (during the tray menu's modal loop) can run
+    {   // Restore the learned gain curve so the first locked session after a restart pans at the
+        // learned desktop speed instead of raw passthrough ("default to the last read value").
+        // Corrupt or missing = fresh learner, which re-warms from live use in seconds.
+        const std::wstring gp = wind::ResolveLogDir() + L"/learned_gain.txt";  // Win32 accepts '/'
+        const std::string txt = wind::ReadTextFile(gp);
+        if (!txt.empty()) ts.gainLearner.deserialize(txt.c_str());
+    }
 
     // Autonomous verification hook: WIND_SELFTEST drives the real integrated render path at a
     // forced zoom and dumps a PNG (the overlay is WDA_EXCLUDEFROMCAPTURE, so it can only be
@@ -2594,7 +2658,42 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         // and the transform land in the SAME frame. A plain timer lets them drift into different
         // composites, so the cursor beats against the panning view (the flicker) - exactly what
         // DwmFlush prevents (and it paces at refresh, so no flood either). Bloom paces this way too.
-        bool dwmPaces = zoomed && (renderModelActive ? (ts.cfg.dwmFlush != 0) : true);
+        // txPace (EXPERIMENTAL, hot; see config.h): 0 = DwmFlush-paced (one write per composite,
+        // but the whole pipeline follows VRR droop). 1 = free timer (measured WOBBLY: uneven
+        // writes per composite). 2 = DwmFlush with a one-frame-timeout backfill: phase-locked
+        // while composition is healthy, full-rate ticks when it droops.
+        const int txPaceMode = renderModelActive ? 0 : ts.cfg.txPace;
+        bool dwmPaces = zoomed && (renderModelActive ? (ts.cfg.dwmFlush != 0)
+                                                     : (txPaceMode == 0));
+        if (zoomed && !renderModelActive && txPaceMode == 2) {
+            EnsureCompositePulse();
+            if (g_compEvt) {
+                // 1.5 frames, not 1 (field-tuned 2026-08-28): with a one-frame timeout, a pulse
+                // arriving just after the timeout released the NEXT wait immediately - write
+                // pairs, breaking the one-write-per-composite regularity this mode exists to
+                // keep, felt as intermittent chop. At 1.5 frames a healthy composition ALWAYS
+                // wins the race (identical to plain DwmFlush pacing), and the backfill engages
+                // only on genuine droop - at ~2/3 of the panel max rather than full rate, which
+                // still keeps the weld tight without fighting the composite phase.
+                const DWORD frameMs = ts.hz > 0 ? (DWORD)(1500 / ts.hz + 1) : 11;
+                const DWORD w = WaitForSingleObject(g_compEvt, frameMs);
+                wind::MarkComposite();
+                // Telemetry: a droop episode is invisible in tick dt now that backfill exists, so
+                // count it here. Logged once a second only when timeouts happened.
+                static unsigned s_pulses = 0, s_timeouts = 0;
+                static unsigned long long s_paceLogMs = 0;
+                if (w == WAIT_TIMEOUT) ++s_timeouts; else ++s_pulses;
+                const unsigned long long nowP = GetTickCount64();
+                if (nowP - s_paceLogMs >= 1000) {
+                    if (s_timeouts > 0)
+                        wind::Log(wind::LogLevel::Info, "pace",
+                                  "composition drooping: pulses=%u timeouts=%u this second",
+                                  s_pulses, s_timeouts);
+                    s_pulses = 0; s_timeouts = 0; s_paceLogMs = nowP;
+                }
+            }
+            dwmPaces = false;   // paced here; skip both the timer and the post-tick DwmFlush
+        }
         // Game pacing engaged: presents are non-blocking Present(0,0) frames (and may be skipped
         // by the fence gate), so the blocking-present pace is unavailable - fall through to the
         // timer (full tick rate; frame work skips inside renderFrame as needed).
@@ -2603,7 +2702,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         // present-paced here and must NOT also wait on the timer.
         bool renderPresentPaces = renderModelActive && zoomed && !dwmPaces && ts.cfg.vsync != 0 &&
                                   !ts.gamePacing;
-        if (!renderPresentPaces && !dwmPaces) {
+        const bool pacedByPulse = zoomed && !renderModelActive && txPaceMode == 2;
+        if (!renderPresentPaces && !dwmPaces && !pacedByPulse) {
             // Recompute the timer interval if the paced refresh changed (retarget to a different-Hz
             // monitor updates ts.hz). Cheap equality check; only recomputes on an actual change (#74).
             if (ts.hz > 0 && ts.hz != pacedHz) { pacedHz = ts.hz; due.QuadPart = -(10000000LL / pacedHz); }
@@ -2703,6 +2803,12 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // left the transform half's magnification context + cursor state untouched without this.
     if (model2) model2->shutdown();
     g_input.stop();
+    {   // Persist the learned gain curve (see startup load). Best-effort: a failed write just
+        // means the next run re-warms from live use.
+        char buf[1024];
+        ts.gainLearner.serialize(buf, (int)sizeof(buf));
+        wind::WriteTextFileAtomic(wind::ResolveLogDir() + L"/learned_gain.txt", buf);  // Win32 accepts '/'
+    }
     Tray::Remove();
     if (mtx) { ReleaseMutex(mtx); CloseHandle(mtx); }
     wind::LogShutdown();

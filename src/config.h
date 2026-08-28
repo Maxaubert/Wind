@@ -266,6 +266,49 @@ struct Config {
     // than mode 1's rigid 1px shift of the whole screen. 4e-6 was measured too small for DWM to
     // notice at all; this is the knob for finding the smallest value that still wakes it.
     double txWarmLevelEps = 0.00002;
+    // EXPERIMENTAL pacing (2026-08-28, hot): 0 (default) = DwmFlush-paced while zoomed - the tick
+    // runs at DWM's composition rate. On a VRR panel that rate FOLLOWS CONTENT: video at 60fps or
+    // a game at 70 drags composition down, and with it Wind's input sampling, weld and writes -
+    // felt as low fps, a slowed cursor, and the weld re-parking slowly enough that the real
+    // pointer shows between parks (the double cursor). Native Magnifier is immune because it
+    // writes from its mouse hook at input rate. 1 = pace by the high-resolution timer at the
+    // detected refresh instead: the tick holds the panel's MAX rate no matter what composition
+    // does. FIELD RESULT 2026-08-28: mode 1 wobbles even at full rate - a free-running timer
+    // drifts against composition, so some composites get two writes and some none, and the uneven
+    // view steps beat against the cursor. The one-fresh-write-per-composite regularity is the real
+    // value of DwmFlush pacing, which mode 2 keeps:
+    // 2 = DwmFlush WITH BACKFILL: a helper thread signals each real composite and the tick waits
+    // on that signal with a one-frame timeout. Composition healthy -> phase-locked, identical to
+    // mode 0. Composition drooping (VRR following a 65fps game) -> the timeout backfills ticks at
+    // the panel's max rate, so input sampling and the weld never slow down; the surplus writes
+    // coalesce in DWM. Best of both regimes by construction.
+    // Locked-regime pan ballistics (2026-08-28, hot). 1 (DEFAULT) = run locked-session raw
+    // mickeys through the same per-packet Windows-ballistics cooking Inspect uses
+    // (src/mouse_ballistics), so panning in a lockApps/mouselook game moves at the same speed as
+    // the desktop cursor - pointer-speed slider and acceleration included. 0 = the old behavior
+    // (raw x cursorSensitivity), which is measurably slower than the desktop cursor whenever the
+    // user's slider or acceleration would have boosted the motion.
+    // Locked-regime pan speed (2026-08-28, hot). 1 (DEFAULT) = pan at the TRUE desktop cursor
+    // speed, LEARNED from the OS itself: free-cursor ticks record the raw-in -> cursor-out ratio
+    // per speed (src/gain_learner.h) and locked sessions replay it - slider, acceleration curve,
+    // polling rate and every undocumented constant included, nothing to tune. Modelling this
+    // pipeline was tried twice (mouse_ballistics blends) and missed both ways, because WM_INPUT
+    // coalescing wrecks any per-packet speed estimate. 0 = raw mickeys x cursorSensitivity (the
+    // historical behavior, measurably slower than the desktop cursor).
+    int lockedBallistics = 1;
+    // Left/top edge cursor-shape flicker (field 2026-08-28, DOOM and KCD): when the welded
+    // pointer rests ON the outermost pixel column, the cursor shape flip-flops between the
+    // game's cursor and the system arrow (captured: hCursor 0x67910FD3 <-> 0x10003 pinned at
+    // (0,y)) - the outermost pixel is contested by shell edge zones and third-party edge hooks.
+    // Two weld-side fixes failed: an inset target alone cannot hold (the hand re-pins the
+    // pointer past the deduped weld), and re-asserting the weld per tick fights the hand
+    // everywhere (field-rejected hard). So the OS does it instead: while a transform session is
+    // zoomed, a ClipCursor 1px INSIDE the monitor keeps the pointer off the contested pixels
+    // with ZERO writes. Snapshot-and-restore (this rig has a permanent external work-area clip
+    // that a nullptr release would destroy), intersected with whatever clip already exists, and
+    // never fighting a TIGHTER clip (a game confine, Inspect's 1px freeze). 0 = off (hot).
+    int edgeClip = 1;
+    int txPace = 0;
     int txHookWrite = 0;
     int txFreeCursor = 1;
     // WRITE CADENCE - SHIPPED OFF (tried ON 2026-08-26, REVERTED the same day on field report).
