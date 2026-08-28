@@ -32,6 +32,8 @@
 #include "zoom_controller.h"
 #include "tray.h"
 #include "gain_learner.h"  // learned pointer ballistics: locked pan at TRUE desktop speed
+#include "tray_status.h"   // the tray menu's status snapshot
+#include "tick_stats.h"    // frame-pacing ring the tray sparkline draws from
 
 // txPace=2 composite signal (see config.h). One thread blocks in DwmFlush forever and pulses an
 // auto-reset event per real composite; the pacing loop waits on the event WITH A TIMEOUT, so a
@@ -736,6 +738,9 @@ static void RunTick(TickState& t) {
     QueryPerformanceCounter(&now);
     double dt = double(now.QuadPart - t.prev.QuadPart) / double(t.freq.QuadPart);
     t.prev = now;
+    // One float store per tick, for the tray's frame-pacing readout. Deliberately the cheapest
+    // possible coupling to the hot path: no lock, no allocation, and nothing reads it here.
+    wind::Ticks().push((float)(dt * 1000.0));
 
     // Config hot-reload. A directory-change notification tells us WHEN to re-check magnifier.ini,
     // so the idle render thread does NO per-second filesystem stat (the old 1 Hz GetFileAttributesExW
@@ -1023,6 +1028,21 @@ static void RunTick(TickState& t) {
         t.quickZoomStored = qr.newStored;
     }
     double lvl = t.zoom.level();
+    {
+        // Snapshot for the tray menu, published every tick and read (cross-thread, relaxed
+        // atomics) when the menu opens - always current at the moment it is shown. "Advanced" is
+        // the hybrid model: the mode that picks an engine per window type; renamed from "Auto"
+        // because Auto undersold what it does.
+        wind::TrayStatus ts_;
+        ts_.level = lvl;
+        const std::string& mdl = t.cfg.model;
+        ts_.engine = mdl == "transform" ? wind::TrayEngine::Transform
+                   : mdl == "render"    ? wind::TrayEngine::Render
+                   : mdl == "magnify"   ? wind::TrayEngine::System
+                                        : wind::TrayEngine::Advanced;
+        ts_.panning = lvl > 1.001;
+        wind::PublishTrayStatus(ts_);
+    }
 
     int rawDx, rawDy; g_input.drainRaw(rawDx, rawDy);
 

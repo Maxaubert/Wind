@@ -60,7 +60,7 @@ export const sections = [
     { key:'model', type:'select', label:'Magnifier engine',
       desc:'Auto picks the best engine for the app in front. Restart to switch.',
       options:['hybrid','render','transform','magnify'],
-      optionLabels:{ hybrid:'Auto', render:'Render', transform:'Transform', magnify:'System' },
+      optionLabels:{ hybrid:'Advanced', render:'Render', transform:'Transform', magnify:'System' },
       def:'hybrid' },
     // PER-WINDOW-TYPE ENGINE (2026-08-24). Advanced, and every row defaults to Auto so an
     // untouched install behaves exactly as before. These only apply when the engine above is Auto.
