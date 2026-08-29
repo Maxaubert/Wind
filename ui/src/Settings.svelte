@@ -118,6 +118,11 @@
     if (key === '__action') { if (val === 'openIni') openIni(); return; }
     // Staged only - the elevated write happens in apply(), like every other setting.
     if (key === '__mpoStaged') { mpoStaged = !!val; return; }
+    // High-res + MPO coupling (issue #242): crisp magnification with MPO enabled is the
+    // driver-crash combo, so the one toggle drives both halves - crisp stages MPO-disable,
+    // high-res stages MPO-enable. The registry half still lands in apply() (UAC + the restart
+    // prompt); until the restart, the core's pan wall guards the interim.
+    if (key === 'txSamplingMode' && mpoKnown) mpoStaged = Number(val) !== 1;
     // Both of these restructure the page: showAdvanced adds/removes ~10 rows, and model swaps most
     // of the Display section (every row carries showIf:{key:'model'}). Neither moves focus.
     if (key === 'showAdvanced')
@@ -142,7 +147,14 @@
       // Prompt only when the new value differs from what DWM actually loaded. Writing the value
       // back to the boot state changes the registry but changes nothing about the running session,
       // so demanding a reboot there is just noise.
-      if (!res.ok || res.disabled !== want) mpoFailed = true;
+      if (!res.ok || res.disabled !== want) {
+        mpoFailed = true;
+        // Combined option (issue #242): the registry half failed (cancelled UAC), so the ini
+        // half must not land alone - a half-applied "crisp" would be exactly the crisp+MPO-on
+        // combo the coupling exists to prevent (the core wall would guard it, but the UI must
+        // not claim a state it did not reach).
+        values = { ...values, txSamplingMode: saved.txSamplingMode };
+      }
       else if (res.disabled !== mpoBoot) mpoRestartPrompt = true;
     }
     if (String(values.model) !== String(saved.model)) {

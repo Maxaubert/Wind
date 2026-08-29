@@ -33,13 +33,17 @@ export const sections = [
     { key:'zoomEaseOutMs',   type:'slider', label:'Release glide', desc:'How softly the zoom coasts to a stop when you let go. 0 stops instantly.', min:0, max:300, step:5, def:45, advanced:true, unit:'ms' },
   ]},
   { id:'cursor', label:'Cursor', icon:'cursor', desc:'How the pointer behaves while zoomed.', rows: [
-    // High resolution cursor (issue #227): DWM's edge-preserving magnification filter - the
-    // whole quality gap to native Magnifier (sharp cursor AND image at every zoom). Known
-    // trade, field-settled 2026-08-22: slight shimmer while the zoom level is CHANGING (the
-    // filter's own re-render; not fixable externally, WM shows it too under its notchy ease).
-    // Ini key stays txSamplingMode (0 nearest default / 1 smooth). Hot; applies next zoom.
-    { key:'txSamplingMode', type:'toggle', label:'High resolution cursor (experimental)',
-      desc:'Renders a sharper cursor and image at high zoom. May shimmer slightly while zooming in or out.',
+    // High resolution cursor (issue #227) + MPO, ONE option (issue #242). The smooth filter is
+    // the whole quality gap to native Magnifier (sharp cursor AND image; slight shimmer while
+    // the level is changing - the filter's own re-render, WM shows it too). Field 2026-08-29:
+    // the NVIDIA 16-bit overflow TDR (#148) fires only on the NEAREST path, so crisp + MPO
+    // enabled is the crash combo - the two settings are coupled: turning high-res OFF also
+    // stages MPO-disable (registry, UAC + Windows restart, the old "Disable MPO" flow), and
+    // turning it ON stages MPO re-enable. Ini key stays txSamplingMode (0 nearest / 1 smooth,
+    // hot); the MPO half lives in HKLM and applies through Settings.svelte's staged MPO logic.
+    // Until the restart lands (or if UAC is cancelled), the core's pan wall guards nearest+MPO.
+    { key:'txSamplingMode', type:'highres', label:'High resolution cursor',
+      desc:'Sharper cursor and image at high zoom; may shimmer slightly while the zoom is moving. Turning it off also disables multi-plane overlay (admin + Windows restart) - crisp magnification with MPO enabled can crash the display driver.',
       def:0 },
     { key:'__hideCursor', type:'keybind', label:'Hide cursor', desc:'Hides or shows the cursor while zoomed.', vkKey:'hideCursorVk', modsKey:'hideCursorMods' },
     { key:'__cursorLock', type:'keybind', label:'Inspect mode', desc:'Freezes the cursor so tooltips stay open, while a crosshair pans the view.', vkKey:'cursorLockVk' },
@@ -88,11 +92,9 @@ export const sections = [
     { key:'renderExclude', type:'applist', label:'Never use Render for',
       desc:'Apps whose video is copy-protected, like Netflix or Apple TV, magnify as a black rectangle on Render. Wind detects most of them on its own; list any it misses.',
       def:'', advanced:true, showIf:{ key:'model', eq:'hybrid' } },
-    // Not an ini setting: reflects HKLM\...\Dwm\OverlayTestMode (issue #148 TDR trigger; costs
-    // transform smoothness in-game). Advanced: system-wide display setting, needs UAC.
-    { key:'__mpo', type:'mpo', label:'Disable MPO',
-      desc:'Multi-plane overlay can stutter or crash the display driver when zooming in games. Needs admin and a Windows restart.',
-      advanced:true },
+    // (The standalone "Disable MPO" row merged into the High resolution cursor option above,
+    // issue #242 - the two are safety-coupled. The staged MPO machinery in Settings.svelte is
+    // unchanged; the ini/registry keys remain independently drivable for power users.)
   ]},
   { id:'about', label:'About', icon:'about', desc:'', rows: [
     { key:'diagnostics', type:'toggle', label:'Frametime logging', desc:'Logs frame timing for debugging.', def:0, advanced:true },

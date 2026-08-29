@@ -13,7 +13,8 @@ test.beforeEach(async ({ page }) => {
           // they never render and the tests asserting on them time out looking for a hidden row.
           // model=render: 'Sharpness' additionally carries showIf {model:'render'}, and an unset
           // model fails that check (undefined !== 'render'), hiding the row the same way.
-          listeners.forEach(fn => fn({ data: { type: 'config', values: { zoomInSpeed: '1.2', smoothZoom: '0', uiTheme: 'auto', showAdvanced: '1', model: 'render', zoomInButton: '2', zoomInVk: '33', zoomOutButton: '1', zoomOutVk: '34', cursorLockVk: '113' } } }));
+          // __cfgSampling seeds txSamplingMode (the combined high-res/MPO option, issue #242).
+          listeners.forEach(fn => fn({ data: { type: 'config', values: { zoomInSpeed: '1.2', smoothZoom: '0', uiTheme: 'auto', showAdvanced: '1', model: 'render', zoomInButton: '2', zoomInVk: '33', zoomOutButton: '1', zoomOutVk: '34', cursorLockVk: '113', txSamplingMode: window.__cfgSampling !== undefined ? window.__cfgSampling : '0' } } }));
         if (msg.type === 'setConfig') window.__sets.push(msg);
         // MPO lives in the registry, not the ini. __mpoDisabled drives what the "registry" reports;
         // __mpoOk drives whether the elevated write is accepted (false = UAC dismissed).
@@ -94,7 +95,7 @@ test('changes stage until Apply, then setConfig fires', async ({ page }) => {
   // Staged via the high-resolution-cursor toggle (Cursor section; the alternate-keybinds
   // gate left the UI 2026-08-22 - both keybind slots are always visible now).
   await page.getByRole('button', { name: 'Cursor', exact: true }).click();
-  await page.getByText('High resolution cursor (experimental)', { exact: true })
+  await page.getByText('High resolution cursor', { exact: true })
       .locator('xpath=../..').getByRole('checkbox').click();
   expect(await page.evaluate(() => window.__sets.filter(s => s.key === 'txSamplingMode').length)).toBe(0);
   await page.getByRole('button', { name: 'Apply' }).click();
@@ -194,52 +195,64 @@ test('keybind capture writes a VK on keydown (live, no Apply needed)', async ({ 
   expect(sets.some(s => s.key === 'zoomInVk' && s.value === '113')).toBeTruthy();
 });
 
-// --- MPO row + unsaved-changes guard (issue #164) ---------------------------
-// The MPO row reflects HKLM, not the ini, so it stages and applies on its own path. The TOGGLE is
-// the detector - unticked means MPO is on - so these assert on its checked state rather than on any
-// badge beside it. A badge saying the same thing was removed: it read as an action, not a state.
-const mpoBox = page => page.getByText('Disable MPO').locator('xpath=../..').getByRole('checkbox');
+// --- High-res + MPO combined option (issue #242; MPO staging from issue #164) ----------------
+// The one toggle drives BOTH halves: its checked state is the INI value (txSamplingMode), and
+// editing it mirrors the staged MPO half (crisp stages MPO-disable, high-res stages MPO-enable),
+// because crisp magnification with MPO enabled is the driver-crash combo. The registry half still
+// applies through the staged UAC + restart flow.
+const hiResBox = page => page.getByText('High resolution cursor', { exact: true })
+    .locator('xpath=../..').getByRole('checkbox');
 
-test('MPO row shows unticked when MPO is still enabled', async ({ page }) => {
-  await page.addInitScript(() => { window.__mpoDisabled = false; });
-  await page.goto('/');
-  await expect(page.getByText('Disable MPO')).toBeVisible();
-  await expect(mpoBox(page)).not.toBeChecked();
-  await expect(page.getByText('Requires restart')).toHaveCount(0);
-});
-
-test('MPO row shows ticked once MPO is disabled', async ({ page }) => {
+test('the combined toggle reflects the ini value, not the registry', async ({ page }) => {
+  // MPO already disabled, but high-res off in the ini: the toggle must show the INI half.
   await page.addInitScript(() => { window.__mpoDisabled = true; });
   await page.goto('/');
-  await expect(mpoBox(page)).toBeChecked();
+  await expect(hiResBox(page)).not.toBeChecked();
   await expect(page.getByText('Requires restart')).toHaveCount(0);
 });
 
-test('staging MPO shows "Requires restart" and prompts to reboot on Apply', async ({ page }) => {
-  await page.addInitScript(() => { window.__mpoDisabled = false; });
+test('turning high-res OFF stages MPO-disable and prompts to restart on Apply', async ({ page }) => {
+  await page.addInitScript(() => { window.__mpoDisabled = false; window.__cfgSampling = '1'; });
   await page.goto('/');
-  await mpoBox(page).check();
+  await hiResBox(page).uncheck();
   await expect(page.getByText('Requires restart')).toBeVisible();
   await page.getByRole('button', { name: 'Apply' }).click();
   await expect(page.getByRole('dialog')).toContainText('Restart to finish');
-  // Cancel leaves the registry change in place and only defers the reboot, so the toggle stays
-  // ticked AND the chip stays up: the value is written but DWM is still running the old one.
+  // Cancel leaves the registry change in place and only defers the reboot: the chip stays up
+  // (the value is written but DWM is still running the old one), and the ini half landed too.
   await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
-  await expect(mpoBox(page)).toBeChecked();
   await expect(page.getByText('Requires restart')).toBeVisible();
+  const sets = await page.evaluate(() => window.__sets);
+  expect(sets.some(s => s.key === 'txSamplingMode' && s.value === '0')).toBeTruthy();
 });
 
-test('a dismissed admin prompt reverts the MPO toggle', async ({ page }) => {
-  await page.addInitScript(() => { window.__mpoDisabled = false; window.__mpoOk = false; });
+test('turning high-res ON stages MPO re-enable', async ({ page }) => {
+  await page.addInitScript(() => { window.__mpoDisabled = true; window.__cfgSampling = '0'; });
   await page.goto('/');
-  await mpoBox(page).check();
+  await hiResBox(page).check();
+  await expect(page.getByText('Requires restart')).toBeVisible();
+  await page.getByRole('button', { name: 'Apply' }).click();
+  await expect(page.getByRole('dialog')).toContainText('Restart to finish');
+  const sets = await page.evaluate(() => window.__sets);
+  expect(sets.some(s => s.key === 'txSamplingMode' && s.value === '1')).toBeTruthy();
+});
+
+test('a dismissed admin prompt reverts BOTH halves of the option', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__mpoDisabled = false; window.__mpoOk = false; window.__cfgSampling = '1';
+  });
+  await page.goto('/');
+  await hiResBox(page).uncheck();
   await page.getByRole('button', { name: 'Apply' }).click();
   await expect(page.getByRole('dialog')).toContainText('MPO change not applied');
   // Scoped to the dialog: the title bar also has a button named Close.
   await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
-  // Reverted: back to unticked, with nothing left staged.
-  await expect(mpoBox(page)).not.toBeChecked();
+  // Reverted wholesale: the toggle is back ON, nothing staged, and the ini half never landed -
+  // a half-applied "crisp" would be exactly the crisp+MPO-on combo the coupling prevents.
+  await expect(hiResBox(page)).toBeChecked();
   await expect(page.getByText('Requires restart')).toHaveCount(0);
+  expect(await page.evaluate(() =>
+    window.__sets.filter(s => s.key === 'txSamplingMode' && s.value === '0').length)).toBe(0);
 });
 
 test('closing with unsaved changes asks before discarding', async ({ page }) => {
@@ -248,7 +261,7 @@ test('closing with unsaved changes asks before discarding', async ({ page }) => 
   // "Discard", so every button here is located precisely.
   const titleClose = page.locator('button.tbtn.close');
   await page.getByRole('button', { name: 'Cursor', exact: true }).click();
-  await page.getByText('High resolution cursor (experimental)', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();
+  await page.getByText('High resolution cursor', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();
   await titleClose.click();
   await expect(page.getByRole('dialog')).toContainText('Settings not applied');
   // Cancel keeps the window and the staged change.
@@ -276,23 +289,25 @@ test('closing with nothing staged does not prompt', async ({ page }) => {
 // reboot. The comparison is against the BOOT state, so restoring it is a no-op and a real change
 // still prompts.
 test('putting MPO back to the boot state needs no restart', async ({ page }) => {
-  // DWM booted with MPO disabled; the registry has since been changed to enabled.
-  await page.addInitScript(() => { window.__mpoDisabled = false; window.__mpoAtBoot = true; });
+  // DWM booted with MPO disabled; the registry has since been changed to enabled (the chip must
+  // say so on load, with nothing staged). Toggling high-res ON then OFF stages MPO-disable while
+  // leaving the ini value where it started - back to the boot state, so the chip clears and
+  // Apply writes the registry without demanding a pointless reboot.
+  await page.addInitScript(() => { window.__mpoDisabled = false; window.__mpoAtBoot = true; window.__cfgSampling = '0'; });
   await page.goto('/');
-  // Nothing staged yet, but the registry already disagrees with what is running - say so.
   await expect(page.getByText('Requires restart')).toBeVisible();
-  await mpoBox(page).check();                       // back to the boot state
+  await hiResBox(page).check();
+  await hiResBox(page).uncheck();                   // stages MPO-disable = the boot state
   await expect(page.getByText('Requires restart')).toHaveCount(0);
   await page.getByRole('button', { name: 'Apply' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);   // written, but nothing to reboot for
-  await expect(mpoBox(page)).toBeChecked();
 });
 
 test('moving MPO away from the boot state still prompts to restart', async ({ page }) => {
-  await page.addInitScript(() => { window.__mpoDisabled = true; window.__mpoAtBoot = true; });
+  await page.addInitScript(() => { window.__mpoDisabled = true; window.__mpoAtBoot = true; window.__cfgSampling = '0'; });
   await page.goto('/');
   await expect(page.getByText('Requires restart')).toHaveCount(0);
-  await mpoBox(page).uncheck();
+  await hiResBox(page).check();                     // high-res ON stages MPO re-enable
   await expect(page.getByText('Requires restart')).toBeVisible();
   await page.getByRole('button', { name: 'Apply' }).click();
   await expect(page.getByRole('dialog')).toContainText('Restart to finish');
@@ -353,7 +368,7 @@ test('delete is disabled on the last profile', async ({ page }) => {
 test('switching with staged changes raises the unsaved-changes guard', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Cursor', exact: true }).click();
-  await page.getByText('High resolution cursor (experimental)', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();
+  await page.getByText('High resolution cursor', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();
   await page.getByRole('button', { name: /Default/ }).click();
   await page.getByRole('menuitemradio', { name: /Gaming/ }).click();
   await expect(page.getByText('Unsaved changes')).toBeVisible();
@@ -375,7 +390,7 @@ test('a failed profile action surfaces a visible error dialog', async ({ page })
 test('deleting a NON-active profile with staged changes skips the guard', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Cursor', exact: true }).click();
-  await page.getByText('High resolution cursor (experimental)', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();
+  await page.getByText('High resolution cursor', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();
   await page.getByRole('button', { name: /Default/ }).click();
   await page.getByRole('menuitemradio', { name: /Gaming/ }).click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Delete' }).click();          // one-click delete
