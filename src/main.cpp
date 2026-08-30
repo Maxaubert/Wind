@@ -21,6 +21,7 @@
 #include "mag_thread.h"
 #include "mpo_boot.h"
 #include "config_ui/ini_edit.h"   // wind::UpdateIniText - flip the model key in place
+#include "config_ui/mpo.h"        // wind::MpoDisabledInRegistry - the #242 restart-pending tell
 #include "logging.h"
 #pragma comment(lib, "Dwmapi.lib")
 #include "render_engine.h"
@@ -781,15 +782,16 @@ static void RunTick(TickState& t) {
             if (t.lastCoreIni.empty() || stripped != t.lastCoreIni) {
             t.lastCoreIni = stripped;
             Config nc = LoadConfig(t.iniPath);
-            // Issue #242: never RUN crisp sampling on a boot where MPO is enabled - the 16-bit
-            // TDR combo. txSamplingMode is hot while the MPO half of the combined option needs a
-            // reboot, so the crisp ini value must wait for it; this also covers profile switches
-            // and hand edits. The ini keeps the user's intent; smooth runs until the restart.
-            if (int eff = EffectiveSamplingMode(nc.txSamplingMode, g_mpoDisabled, nc.tdrTest);
+            // Issue #242: the high-res/MPO option is atomic at restart - while an MPO restart is
+            // pending (registry != boot) the BOOT state's look holds in both directions, and
+            // crisp never runs on an MPO-enabled boot (the 16-bit TDR combo; covers profile
+            // switches and hand edits too). The ini keeps the user's intent.
+            if (int eff = EffectiveSamplingMode(nc.txSamplingMode, g_mpoDisabled,
+                                                wind::MpoDisabledInRegistry(), nc.tdrTest);
                 eff != nc.txSamplingMode) {
                 wind::Log(wind::LogLevel::Info, "config",
-                          "crisp sampling deferred: MPO enabled at boot - running smooth until "
-                          "a restart lands MPO off (issue #242)");
+                          "sampling %d deferred, running %d: MPO restart pending or MPO-enabled "
+                          "boot (issue #242)", nc.txSamplingMode, eff);
                 nc.txSamplingMode = eff;
             }
             // Re-bind the hook's button mapping if the user changed it via the config UI; without
@@ -2327,14 +2329,16 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // resolution is used by WindConfig.exe so both processes always touch the same file.
     std::wstring iniPath = wind::ResolveIniPath();
     Config cfg = LoadConfig(iniPath);
-    // Issue #242: never RUN crisp sampling on a boot where MPO is enabled (the 16-bit TDR combo).
-    // The ini keeps the user's intent; smooth runs until a restart lands MPO off. Mirrored at the
-    // hot-reload site in RunTick, which also covers profile switches and hand edits.
-    if (int eff = EffectiveSamplingMode(cfg.txSamplingMode, g_mpoDisabled, cfg.tdrTest);
+    // Issue #242: the high-res/MPO option is atomic at restart - while an MPO restart is pending
+    // (registry != boot) the BOOT state's look holds in both directions, and crisp never runs on
+    // an MPO-enabled boot (the 16-bit TDR combo). The ini keeps the user's intent. Mirrored at
+    // the hot-reload site in RunTick, which also covers profile switches and hand edits.
+    if (int eff = EffectiveSamplingMode(cfg.txSamplingMode, g_mpoDisabled,
+                                        wind::MpoDisabledInRegistry(), cfg.tdrTest);
         eff != cfg.txSamplingMode) {
         wind::Log(wind::LogLevel::Info, "config",
-                  "crisp sampling deferred: MPO enabled at boot - running smooth until a restart "
-                  "lands MPO off (issue #242)");
+                  "sampling %d deferred, running %d: MPO restart pending or MPO-enabled boot "
+                  "(issue #242)", cfg.txSamplingMode, eff);
         cfg.txSamplingMode = eff;
     }
 

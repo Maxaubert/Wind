@@ -41,11 +41,12 @@ export const sections = [
     // stages MPO-disable (registry, UAC + Windows restart, the old "Disable MPO" flow), and
     // turning it ON stages MPO re-enable. Ini key stays txSamplingMode (0 nearest / 1 smooth);
     // the MPO half lives in HKLM and applies through Settings.svelte's staged MPO logic.
-    // ATOMIC AT RESTART: the ini key is hot but the core DEFERS a crisp value on any boot where
-    // MPO is enabled (EffectiveSamplingMode, main.cpp) - smooth keeps running until the restart
-    // lands MPO off, so the dangerous crisp+MPO interim never renders, from ANY route (this
-    // toggle, profile switches, hand edits). Enabling high-res applies immediately (safe in
-    // every MPO state). The pan wall remains as the last belt (tdrTest bypasses both).
+    // ATOMIC AT RESTART, both directions: the ini key is hot, but while an MPO restart is
+    // pending the core holds the BOOT state's look (EffectiveSamplingMode, main.cpp), and a
+    // crisp value never runs on an MPO-enabled boot - so flipping this changes nothing on
+    // screen until the restart, and the dangerous crisp+MPO interim never renders, from ANY
+    // route (this toggle, profile switches, hand edits). A deliberate steady smooth+MPO-off
+    // config is untouched. The pan wall remains as the last belt (tdrTest bypasses both).
     { key:'txSamplingMode', type:'highres', label:'High resolution cursor',
       desc:'A sharper cursor and image at high zoom. Changing this needs admin and a Windows restart.',
       def:0 },

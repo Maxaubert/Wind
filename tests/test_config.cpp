@@ -371,15 +371,19 @@ TEST_CASE("gpuPriority tri-state parses, clamps, and folds the legacy alias") {
     CHECK(EffectiveGpuPriority(ParseConfig("gpuPriority=1\nlowGpuPriority=1\n")) == 1);
 }
 
-TEST_CASE("crisp sampling is deferred while the boot has MPO enabled (issue #242)") {
-    // Crisp (nearest) + MPO enabled at boot is the NVIDIA 16-bit TDR combo. The ini key is hot
-    // while the MPO half of the combined option needs a reboot, so a crisp value must not RUN
-    // until a boot where MPO is off - the core substitutes smooth (the safe path) meanwhile.
-    CHECK(EffectiveSamplingMode(0, false, 0) == 1);   // crisp wanted, MPO on -> run smooth
-    CHECK(EffectiveSamplingMode(0, true,  0) == 0);   // crisp wanted, MPO off -> crisp is safe
-    CHECK(EffectiveSamplingMode(1, false, 0) == 1);   // smooth is safe in every MPO state
-    CHECK(EffectiveSamplingMode(1, true,  0) == 1);
+TEST_CASE("the high-res/MPO option is atomic at restart (issue #242)") {
+    // Args: (iniValue, mpoDisabledAtBoot, mpoDisabledInRegistry, tdrTest).
+    // STEADY STATES (registry == boot) run the ini value, except the TDR combo:
+    CHECK(EffectiveSamplingMode(1, false, false, 0) == 1);  // smooth + MPO on: the shipped pair
+    CHECK(EffectiveSamplingMode(0, true,  true,  0) == 0);  // crisp + MPO off: the shipped pair
+    CHECK(EffectiveSamplingMode(1, true,  true,  0) == 1);  // smooth + MPO off: legacy, safe, kept
+    CHECK(EffectiveSamplingMode(0, false, false, 0) == 1);  // crisp + MPO on (profile switch,
+                                                            //   hand edit): the TDR combo -> smooth
+    // RESTART PENDING (registry != boot): the BOOT state's look holds in BOTH directions, so
+    // flipping the toggle changes nothing on screen until the restart lands.
+    CHECK(EffectiveSamplingMode(0, false, true,  0) == 1);  // turned high-res OFF: stay smooth
+    CHECK(EffectiveSamplingMode(1, true,  false, 0) == 0);  // turned high-res ON: stay crisp
     // The field harness must be able to repro nearest+MPO deliberately.
-    CHECK(EffectiveSamplingMode(0, false, 2) == 0);
-    CHECK(EffectiveSamplingMode(0, false, 4) == 0);
+    CHECK(EffectiveSamplingMode(0, false, false, 2) == 0);
+    CHECK(EffectiveSamplingMode(0, false, true,  4) == 0);
 }
