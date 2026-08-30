@@ -520,7 +520,9 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // Both channels recomputed so offsets and translations describe the same rect. MUST share the
     // wall's evidence gate: clamping while the walls are lifted would pin the view at the 32000
     // line while the mapper (and welded cursor) pan on past it.
-    if (mpoExposed_ && !mpoGhost_.settled(GetTickCount64())) {
+    if (mpoExposed_ && (cfg.txSamplingMode == 0 || !mpoGhost_.settled(GetTickCount64()))) {
+        // Nearest sampling never lifts the clamp (issue #242): the 16-bit field lives in the
+        // nearest magnification path itself, ghost or no ghost - field-proven 2026-08-29.
         bool clamped = false;
         if (m.txX < -32000) { m.txX = -32000; clamped = true; }
         if (m.txY < -32000) { m.txY = -32000; clamped = true; }

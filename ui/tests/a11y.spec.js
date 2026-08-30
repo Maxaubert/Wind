@@ -68,11 +68,10 @@ test('a control is named by its own row label, not just any label', async ({ pag
   // (Post-cleanup roster: the smooth-zoom/multi-monitor toggles, sharpness slider, and the
   // colour input left the UI - no color-type row remains, so that widget type is uncovered.)
   const cases = [
-    ['High resolution cursor', 'checkbox'],
+    ['High resolution cursor', 'checkbox'],   // the combined high-res/MPO option (issue #242)
     ['Max zoom', 'slider'],
     ['Cursor speed', 'slider'],
     ['Frametime logging', 'checkbox'],
-    ['Disable MPO', 'checkbox'],
   ];
   for (const [label, role] of cases)
     await expect(page.getByRole(role, { name: label, exact: false }),
@@ -198,7 +197,7 @@ test('the model dropdown is fully keyboard operable', async ({ page }) => {
   await page.keyboard.press('ArrowUp');
   expect(await activeName()).toBe('Render');
   await page.keyboard.press('Home');
-  expect(await activeName()).toBe('Auto');
+  expect(await activeName()).toBe('Advanced');   // hybrid's label since the #237 engine UI
   await page.keyboard.press('End');
   expect(await activeName()).toBe('System');
 

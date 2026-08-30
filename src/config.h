@@ -544,6 +544,20 @@ bool ParseHexColor(const std::string& s, float& r, float& g, float& b);
 // legacy lowGpuPriority alias into gpuPriority. gpuPriority wins when non-zero.
 int EffectiveGpuPriority(const Config& c);
 
+// Pure (issue #242): the sampling mode the core actually RUNS. The combined high-res/MPO option
+// is ATOMIC AT RESTART in both directions (field ask: a hot half beside a reboot half reads as
+// broken, and the crisp+MPO-on interim is the NVIDIA 16-bit TDR combo):
+//   1. While an MPO restart is PENDING (registry != boot state), the running mode is whatever
+//      matches the BOOT state - the pre-change look holds, so flipping the toggle changes
+//      nothing on screen until the restart lands. Boot MPO on -> smooth; boot MPO off -> crisp.
+//   2. Steady state runs the ini value, except crisp on an MPO-enabled boot (profile switches,
+//      hand edits - no registry change staged) which runs smooth, the safe path.
+// The ini always keeps the user's intent. A deliberate steady smooth+MPO-off config (legacy
+// setups) is untouched by rule 1 because nothing is pending. Applied at EVERY config load.
+// tdrTest != 0 bypasses (the field harness must be able to repro nearest+MPO deliberately).
+int EffectiveSamplingMode(int iniValue, bool mpoDisabledAtBoot, bool mpoDisabledInRegistry,
+                          int tdrTest);
+
 // Pure: whether the edge outline should show at this zoom level, given the master `outline`
 // toggle and the optional low-zoom cutoff. (The "are we zoomed" level > 1.0 gate stays in the
 // render pass.)

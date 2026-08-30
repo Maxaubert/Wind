@@ -84,14 +84,24 @@ is the FIRST suspect (docs/HITCH-FINDINGS.md has the bisect). Still true regardl
 ClipCursor re-asserts are DEDUPED via GetClipCursor reads, Inspect's injected absolute clicks
 pause transform writes for ~3 ticks (ex.pauseWrites), and ComputeMagTransform clamps offsets
 AND private-channel translations with a 2px right/bottom margin (rounding overshoot = TDR class).
-NVIDIA MPO BUG (issue #148 final root cause, proven by the MPO-off experiment): the driver
-packs DWM's magnification translation into a 16-bit field when a game surface rides a hardware
-overlay plane; |srcX*level| > 32767 (the far-right strip above ~9.3x on 3840) wraps and TDRs -
-both API channels, only over real games. With MPO disabled (HKLM\SOFTWARE\Microsoft\Windows\Dwm
-OverlayTestMode=5 DWORD, reboot) the same writes are clean at full range. Wind reads the MPO
-boot state at startup: MPO on -> the mapper pan wall (setMaxSourceLeft, srcX*level <= 32000)
-bounds transform GAME sessions - keyed to the SESSION TYPE (transform + borderless cover), not
-any cursor state; MPO off (this rig) -> full range. CHURNY APPS: the live GetCursorInfo churn
+NVIDIA MPO BUG (issue #148; REFINED 2026-08-29, issue #242): the driver packs DWM's
+magnification translation into a 16-bit field ON THE NEAREST-SAMPLING PATH; |srcX*level| >
+32767 (the far-right strip above ~9.3x on 3840, and the same for Y above ~16.2x on 2160) wraps
+and TDRs - both API channels. #148 believed it needed a game on an overlay plane; the field
+disproved that twice: a Mica browser (#197), then three PLAIN-DESKTOP TDRs at 25x bottom-right
+(LiveKernelEvent 117 + nvlddmkm storms, tick traces show txX=-92110) with the #191 MPO ghost
+verifiably shown AND settled - so the ghost-settled wall lift is FALSIFIED for nearest and the
+field lives in the nearest magnification path itself, which no window geometry can demote.
+SMOOTH sampling (txSamplingMode=1) takes the shader/float path: the same corner at 25x survived
+repeated A/B/A, and native Magnifier (smooth by default) survives it too. With MPO disabled
+(HKLM\SOFTWARE\Microsoft\Windows\Dwm OverlayTestMode=5 DWORD, reboot) everything is clean at
+full range. The walls (mapper setMaxSourceLeft/Top + the write-site clamp in transform_model)
+therefore key on MPO boot state + SAMPLING MODE: MPO on + nearest = walls ALWAYS (no ghost
+lift); MPO on + smooth = the #191 ghost-gated lift; MPO off = full range. UI COUPLING (#242):
+the Settings "High resolution cursor" toggle is ONE option driving BOTH txSamplingMode and the
+MPO registry state (crisp stages MPO-disable via the old UAC+restart flow, high-res stages
+re-enable) - crisp+MPO-on is never offered because it is the crash combo; the wall guards the
+interim until the reboot lands. CHURNY APPS: the live GetCursorInfo churn
 valve was retired (it mis-fired on our own cursor work); what remains is the DEVICE-LOST
 BACKSTOP - a render device-lost within 30s of a transform game session marks that session's exe
 in %LOCALAPPDATA%\Wind\churny_apps.txt, and future zoom-ins over it pick render (one crash,
@@ -259,7 +269,10 @@ restartWind), `dirty`, `openIni`, `exportDiagnostics`, `pickExe`, `mpoState`, `s
   `MagSetFullscreenUseBitmapSmoothing` (Magnification.dll ORDINAL 1 - what native Magnifier's
   "smooth edges of images and text" flips; callable without UIAccess; the raw user32
   `SetMagnificationDesktopSamplingMode` takes a DWORD POINTER and a by-value call
-  access-violates). `txSamplingMode` ships 0 (nearest); 1 = the EXPERIMENTAL smooth opt-in settled in #227: the flag is the ENTIRE quality gap to
+  access-violates). `txSamplingMode` ships 0 (nearest); 1 = smooth (no longer experimental -
+  issue #242 made it the "High resolution cursor" half of the combined high-res/MPO option, and
+  SAFETY now depends on it: nearest+MPO-on is the 16-bit TDR combo, walled always; smooth is the
+  float path, full range). The flag is the ENTIRE quality gap to
   native Magnifier - image AND cursor (the pointer grows naturally with zoom; WM does NOT swap
   cursor bitmaps, probed 1x-16x arrow stays 32x32 - the sharpness is DWM's filter). The
   2026-08-13 dwmcore crash (two first-try repros over browser Mica/acrylic at high zoom) did

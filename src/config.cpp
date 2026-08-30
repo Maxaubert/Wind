@@ -90,6 +90,15 @@ int EffectiveGpuPriority(const Config& c) {
     return c.lowGpuPriority != 0 ? -1 : 0;             // legacy alias: lowGpuPriority=1 -> low
 }
 
+int EffectiveSamplingMode(int iniValue, bool mpoDisabledAtBoot, bool mpoDisabledInRegistry,
+                          int tdrTest) {
+    if (tdrTest != 0) return iniValue;
+    if (mpoDisabledAtBoot != mpoDisabledInRegistry)     // restart pending: hold the boot look
+        return mpoDisabledAtBoot ? 0 : 1;
+    if (iniValue == 0 && !mpoDisabledAtBoot) return 1;  // crisp on an MPO boot = the TDR combo
+    return iniValue;
+}
+
 Config ParseConfig(const std::string& text) {
     Config c;
     std::istringstream in(text);

@@ -370,3 +370,20 @@ TEST_CASE("gpuPriority tri-state parses, clamps, and folds the legacy alias") {
     CHECK(EffectiveGpuPriority(ParseConfig("lowGpuPriority=1\n")) == -1);
     CHECK(EffectiveGpuPriority(ParseConfig("gpuPriority=1\nlowGpuPriority=1\n")) == 1);
 }
+
+TEST_CASE("the high-res/MPO option is atomic at restart (issue #242)") {
+    // Args: (iniValue, mpoDisabledAtBoot, mpoDisabledInRegistry, tdrTest).
+    // STEADY STATES (registry == boot) run the ini value, except the TDR combo:
+    CHECK(EffectiveSamplingMode(1, false, false, 0) == 1);  // smooth + MPO on: the shipped pair
+    CHECK(EffectiveSamplingMode(0, true,  true,  0) == 0);  // crisp + MPO off: the shipped pair
+    CHECK(EffectiveSamplingMode(1, true,  true,  0) == 1);  // smooth + MPO off: legacy, safe, kept
+    CHECK(EffectiveSamplingMode(0, false, false, 0) == 1);  // crisp + MPO on (profile switch,
+                                                            //   hand edit): the TDR combo -> smooth
+    // RESTART PENDING (registry != boot): the BOOT state's look holds in BOTH directions, so
+    // flipping the toggle changes nothing on screen until the restart lands.
+    CHECK(EffectiveSamplingMode(0, false, true,  0) == 1);  // turned high-res OFF: stay smooth
+    CHECK(EffectiveSamplingMode(1, true,  false, 0) == 0);  // turned high-res ON: stay crisp
+    // The field harness must be able to repro nearest+MPO deliberately.
+    CHECK(EffectiveSamplingMode(0, false, false, 2) == 0);
+    CHECK(EffectiveSamplingMode(0, false, true,  4) == 0);
+}

@@ -21,6 +21,7 @@
 #include "mag_thread.h"
 #include "mpo_boot.h"
 #include "config_ui/ini_edit.h"   // wind::UpdateIniText - flip the model key in place
+#include "config_ui/mpo.h"        // wind::MpoDisabledInRegistry - the #242 restart-pending tell
 #include "logging.h"
 #pragma comment(lib, "Dwmapi.lib")
 #include "render_engine.h"
@@ -781,6 +782,18 @@ static void RunTick(TickState& t) {
             if (t.lastCoreIni.empty() || stripped != t.lastCoreIni) {
             t.lastCoreIni = stripped;
             Config nc = LoadConfig(t.iniPath);
+            // Issue #242: the high-res/MPO option is atomic at restart - while an MPO restart is
+            // pending (registry != boot) the BOOT state's look holds in both directions, and
+            // crisp never runs on an MPO-enabled boot (the 16-bit TDR combo; covers profile
+            // switches and hand edits too). The ini keeps the user's intent.
+            if (int eff = EffectiveSamplingMode(nc.txSamplingMode, g_mpoDisabled,
+                                                wind::MpoDisabledInRegistry(), nc.tdrTest);
+                eff != nc.txSamplingMode) {
+                wind::Log(wind::LogLevel::Info, "config",
+                          "sampling %d deferred, running %d: MPO restart pending or MPO-enabled "
+                          "boot (issue #242)", nc.txSamplingMode, eff);
+                nc.txSamplingMode = eff;
+            }
             // Re-bind the hook's button mapping if the user changed it via the config UI; without
             // this the hook would keep firing the OLD button (the new VK works via GetAsyncKeyState
             // but the mouse mapping is captured once in g_input.start at app launch).
@@ -1354,13 +1367,20 @@ static void RunTick(TickState& t) {
         auto* tmWall = dynamic_cast<TransformModel*>(t.model);
         const bool transformGame = tmWall != nullptr && fsCover && fgBorderless;
         const bool mpoExposed = tmWall != nullptr && !g_mpoDisabled;
-        // MPO buster (issue #191): a fullscreen alpha-1 ghost window demotes the game off its
-        // hardware overlay plane by geometry (the parking law, PresentMon-proven) - no plane, no
-        // 16-bit field, no overflow. The walls lift ONLY on verified evidence (ghost shown +
-        // settled >=350ms + rect intact), never on intent: any doubt keeps them up (fail-closed).
-        // tdrTest=4 is the field harness override (walls off regardless, for the repro probe).
+        // SAMPLING MODE DECIDES THE CRASH PATH (field 2026-08-29, issue #242; refines #148/#191).
+        // Three TDR episodes (LiveKernelEvent 117, nvlddmkm storms) at 25x bottom-right on the
+        // plain DESKTOP, every one under NEAREST sampling with the MPO ghost verifiably shown and
+        // settled - the #191 "ghost settled -> no plane -> no 16-bit field" lift is FALSIFIED for
+        // nearest: the field lives in the nearest magnification path itself (plausibly DWM handing
+        // the scale+pan to plane hardware), which no window geometry can demote. SMOOTH sampling
+        // takes the shader/float path: the same corner at the same level survived repeated A/B/A
+        // on this rig, and native Magnifier (smooth by default) survives it too.
+        // So: MPO on + nearest = walls, ALWAYS. Smooth keeps the #191 ghost-gated lift (shown +
+        // settled >=350ms + rect intact; fail-closed). tdrTest=4 is the field harness override.
+        const bool nearestSampling = t.cfg.txSamplingMode == 0;
         const bool wallNeeded = mpoExposed && t.cfg.tdrTest != 4 &&
-                                !(t.cfg.mpoBuster != 0 && tmWall->mpoGhostSettled());
+                                (nearestSampling ||
+                                 !(t.cfg.mpoBuster != 0 && tmWall->mpoGhostSettled()));
         t.mapper.setMaxSourceLeft(wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0);
         // Y wall too (issue #191): |srcY*level| overflows the same 16-bit field - the bottom
         // strip above ~16.2x on 2160 was reachable-lethal with the X-only wall.
@@ -2309,6 +2329,18 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // resolution is used by WindConfig.exe so both processes always touch the same file.
     std::wstring iniPath = wind::ResolveIniPath();
     Config cfg = LoadConfig(iniPath);
+    // Issue #242: the high-res/MPO option is atomic at restart - while an MPO restart is pending
+    // (registry != boot) the BOOT state's look holds in both directions, and crisp never runs on
+    // an MPO-enabled boot (the 16-bit TDR combo). The ini keeps the user's intent. Mirrored at
+    // the hot-reload site in RunTick, which also covers profile switches and hand edits.
+    if (int eff = EffectiveSamplingMode(cfg.txSamplingMode, g_mpoDisabled,
+                                        wind::MpoDisabledInRegistry(), cfg.tdrTest);
+        eff != cfg.txSamplingMode) {
+        wind::Log(wind::LogLevel::Info, "config",
+                  "sampling %d deferred, running %d: MPO restart pending or MPO-enabled boot "
+                  "(issue #242)", cfg.txSamplingMode, eff);
+        cfg.txSamplingMode = eff;
+    }
 
     // Profiles (spec 2026-08-12): first launch after the update seeds profiles\Default.ini from the
     // user's current settings, so existing installs get a "Default" profile with zero user action.

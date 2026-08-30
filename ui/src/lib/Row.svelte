@@ -149,27 +149,27 @@
         <button class="linkbtn" type="button" {disabled} id={rid + '-b'}
                 aria-labelledby="{labelledByWithValue} {rid}-b" aria-describedby={descId}
                 on:click={() => (listOpen = true)}>Manage list</button>
-      {:else if row.type === 'mpo'}
-        <!-- The toggle IS the detector: unticked means MPO is on. An extra "MPO on" badge beside it
-             said the same thing twice and made the row read as an action button rather than a state,
-             so the only chip here is the staged "Requires restart" note. Flex-wrapped because an
+      {:else if row.type === 'highres'}
+        <!-- High-res + MPO combined (issue #242). The toggle drives the INI half (txSamplingMode,
+             this row's value); Settings.svelte's change() mirrors the staged MPO half from it
+             (crisp stages MPO-disable, high-res stages MPO-enable - crisp with MPO on is the
+             driver-crash combo). The chip is the old MPO row's staged-vs-BOOT restart note: it
+             answers "will a restart change anything", so it can show with nothing staged (the
+             registry already holds a value DWM has not loaded yet). Flex-wrapped because an
              empty inline-block checkbox baselines at its bottom edge, which sat the chip visibly
              below the toggle. -->
         <div class="mpoctl">
-          <!-- Driven by staged-vs-BOOT, not staged-vs-registry: the chip answers "will a restart
-               change anything", which is also why it can show with nothing staged (the registry
-               already holds a value DWM has not loaded yet). -->
           {#if extra.mpoNeedsRestart}
             <span class="tag" id={rid + '-t'}>Requires restart</span>
           {/if}
-          <label class="checkbox-wrapper" class:disabled={disabled || !extra.mpoKnown}>
-            <!-- The "Requires restart" chip joins the description when it is showing: it is the
-                 only signal that an applied change has not taken effect yet, and sighted users
-                 read it right next to the toggle. -->
-            <input type="checkbox" disabled={disabled || !extra.mpoKnown} checked={!!extra.mpoStaged}
+          <label class="checkbox-wrapper" class:disabled>
+            <!-- The chip joins the description when showing: it is the only signal that an
+                 applied change has not taken effect yet. The toggle itself stays enabled even
+                 when the MPO state could not be read - the ini half always works. -->
+            <input type="checkbox" {disabled} checked={num(value) === 1}
                    aria-labelledby={labelId}
                    aria-describedby={extra.mpoNeedsRestart ? `${descId ?? ''} ${rid}-t`.trim() : descId}
-                   on:change={e => set('__mpoStaged', e.target.checked)} />
+                   on:change={e => onChange(e.target.checked ? 1 : 0)} />
             <svg viewBox="0 0 35.6 35.6" aria-hidden="true" focusable="false">
               <circle class="background" cx="17.8" cy="17.8" r="17.8"></circle>
               <circle class="stroke" cx="17.8" cy="17.8" r="14.37"></circle>
