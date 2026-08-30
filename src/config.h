@@ -544,6 +544,16 @@ bool ParseHexColor(const std::string& s, float& r, float& g, float& b);
 // legacy lowGpuPriority alias into gpuPriority. gpuPriority wins when non-zero.
 int EffectiveGpuPriority(const Config& c);
 
+// Pure (issue #242): the sampling mode the core actually RUNS. Crisp (nearest, 0) while Windows
+// BOOTED with MPO enabled is the NVIDIA 16-bit TDR combo, and txSamplingMode is hot while the
+// MPO half of the combined option needs a reboot - so a crisp ini value must not take effect
+// until a boot where MPO is off. The ini keeps the user's intent; the running mode stays smooth
+// (the safe path) until the restart lands. Applied at EVERY config load, which covers every
+// route to the combo: the Settings toggle's pre-reboot interim, profile switches carrying a
+// crisp snapshot, hand-edited inis. tdrTest != 0 bypasses (the field harness must be able to
+// repro nearest+MPO deliberately).
+int EffectiveSamplingMode(int iniValue, bool mpoDisabledAtBoot, int tdrTest);
+
 // Pure: whether the edge outline should show at this zoom level, given the master `outline`
 // toggle and the optional low-zoom cutoff. (The "are we zoomed" level > 1.0 gate stays in the
 // render pass.)

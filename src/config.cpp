@@ -90,6 +90,11 @@ int EffectiveGpuPriority(const Config& c) {
     return c.lowGpuPriority != 0 ? -1 : 0;             // legacy alias: lowGpuPriority=1 -> low
 }
 
+int EffectiveSamplingMode(int iniValue, bool mpoDisabledAtBoot, int tdrTest) {
+    if (iniValue == 0 && !mpoDisabledAtBoot && tdrTest == 0) return 1;
+    return iniValue;
+}
+
 Config ParseConfig(const std::string& text) {
     Config c;
     std::istringstream in(text);

@@ -39,11 +39,15 @@ export const sections = [
     // the NVIDIA 16-bit overflow TDR (#148) fires only on the NEAREST path, so crisp + MPO
     // enabled is the crash combo - the two settings are coupled: turning high-res OFF also
     // stages MPO-disable (registry, UAC + Windows restart, the old "Disable MPO" flow), and
-    // turning it ON stages MPO re-enable. Ini key stays txSamplingMode (0 nearest / 1 smooth,
-    // hot); the MPO half lives in HKLM and applies through Settings.svelte's staged MPO logic.
-    // Until the restart lands (or if UAC is cancelled), the core's pan wall guards nearest+MPO.
+    // turning it ON stages MPO re-enable. Ini key stays txSamplingMode (0 nearest / 1 smooth);
+    // the MPO half lives in HKLM and applies through Settings.svelte's staged MPO logic.
+    // ATOMIC AT RESTART: the ini key is hot but the core DEFERS a crisp value on any boot where
+    // MPO is enabled (EffectiveSamplingMode, main.cpp) - smooth keeps running until the restart
+    // lands MPO off, so the dangerous crisp+MPO interim never renders, from ANY route (this
+    // toggle, profile switches, hand edits). Enabling high-res applies immediately (safe in
+    // every MPO state). The pan wall remains as the last belt (tdrTest bypasses both).
     { key:'txSamplingMode', type:'highres', label:'High resolution cursor',
-      desc:'Sharper cursor and image at high zoom; may shimmer slightly while the zoom is moving. Turning it off also disables multi-plane overlay (admin + Windows restart) - crisp magnification with MPO enabled can crash the display driver.',
+      desc:'A sharper cursor and image at high zoom. Changing this needs admin and a Windows restart.',
       def:0 },
     { key:'__hideCursor', type:'keybind', label:'Hide cursor', desc:'Hides or shows the cursor while zoomed.', vkKey:'hideCursorVk', modsKey:'hideCursorMods' },
     { key:'__cursorLock', type:'keybind', label:'Inspect mode', desc:'Freezes the cursor so tooltips stay open, while a crosshair pans the view.', vkKey:'cursorLockVk' },

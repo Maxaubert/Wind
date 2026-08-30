@@ -781,6 +781,17 @@ static void RunTick(TickState& t) {
             if (t.lastCoreIni.empty() || stripped != t.lastCoreIni) {
             t.lastCoreIni = stripped;
             Config nc = LoadConfig(t.iniPath);
+            // Issue #242: never RUN crisp sampling on a boot where MPO is enabled - the 16-bit
+            // TDR combo. txSamplingMode is hot while the MPO half of the combined option needs a
+            // reboot, so the crisp ini value must wait for it; this also covers profile switches
+            // and hand edits. The ini keeps the user's intent; smooth runs until the restart.
+            if (int eff = EffectiveSamplingMode(nc.txSamplingMode, g_mpoDisabled, nc.tdrTest);
+                eff != nc.txSamplingMode) {
+                wind::Log(wind::LogLevel::Info, "config",
+                          "crisp sampling deferred: MPO enabled at boot - running smooth until "
+                          "a restart lands MPO off (issue #242)");
+                nc.txSamplingMode = eff;
+            }
             // Re-bind the hook's button mapping if the user changed it via the config UI; without
             // this the hook would keep firing the OLD button (the new VK works via GetAsyncKeyState
             // but the mouse mapping is captured once in g_input.start at app launch).
@@ -2316,6 +2327,16 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // resolution is used by WindConfig.exe so both processes always touch the same file.
     std::wstring iniPath = wind::ResolveIniPath();
     Config cfg = LoadConfig(iniPath);
+    // Issue #242: never RUN crisp sampling on a boot where MPO is enabled (the 16-bit TDR combo).
+    // The ini keeps the user's intent; smooth runs until a restart lands MPO off. Mirrored at the
+    // hot-reload site in RunTick, which also covers profile switches and hand edits.
+    if (int eff = EffectiveSamplingMode(cfg.txSamplingMode, g_mpoDisabled, cfg.tdrTest);
+        eff != cfg.txSamplingMode) {
+        wind::Log(wind::LogLevel::Info, "config",
+                  "crisp sampling deferred: MPO enabled at boot - running smooth until a restart "
+                  "lands MPO off (issue #242)");
+        cfg.txSamplingMode = eff;
+    }
 
     // Profiles (spec 2026-08-12): first launch after the update seeds profiles\Default.ini from the
     // user's current settings, so existing installs get a "Default" profile with zero user action.
