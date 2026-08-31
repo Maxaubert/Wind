@@ -510,7 +510,18 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     cfgWobbleCage_ = cfg.txWobbleCage;        // diagnostic cage + threshold px (issue #229)
     if (level > sessionMaxLevel_) sessionMaxLevel_ = level;
     const bool ramping = applyLevel != level || (applyLevel != lastLevel_ && lastLevel_ > 0.0);
-    MagTransform m = ComputeMagTransform(srcL, srcT, applyLevel, mon_.w, mon_.h);
+    // Edge sampling margin (see transform.h) applied to the SOURCE, not just to the written
+    // transform: srcL/srcT go on to feed the input-transform publish below, and a visual rect
+    // that sat one texel inside a published rect that did not would put the pointer framework's
+    // hover hit-test one source pixel off along that edge - level px on screen. One rect.
+    {
+        const double loX = SrcEdgeFloor(cfg.txEdgeMargin, applyLevel, mon_.w);
+        const double loY = SrcEdgeFloor(cfg.txEdgeMargin, applyLevel, mon_.h);
+        if (srcL < loX) srcL = loX;
+        if (srcT < loY) srcT = loY;
+    }
+    MagTransform m = ComputeMagTransform(srcL, srcT, applyLevel, mon_.w, mon_.h,
+                                         cfg.txEdgeMargin);
     // 2D write-site 16-bit backstop (issue #191): when the session is MPO-exposed AND the ghost
     // is not verifiably holding the game off its overlay plane, the never-exceed-32767 invariant
     // is enforced HERE, structurally, regardless of the mapper walls (which divide by the

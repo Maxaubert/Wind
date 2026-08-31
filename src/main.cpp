@@ -1681,6 +1681,7 @@ static void RunTick(TickState& t) {
             // have refused (the issue #148/#191 16-bit overflow).
             hs.maxSrcX = wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0;
             hs.maxSrcY = wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0;
+            hs.edgeMargin = t.cfg.txEdgeMargin;
             hs.fastPan = t.cfg.fastPan != 0;
             hs.host = tmWall->magHost();
             // The hook moves the sprite together with the transform (issue #229): a sprite

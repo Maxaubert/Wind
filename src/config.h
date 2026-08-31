@@ -339,6 +339,15 @@ struct Config {
     // Two measured-NEGATIVE hitch experiments, kept as diagnostics only (issue #148, harness
     // runs of 15-20 zoom cycles over Foundation). LEAVE BOTH AT 0 - continuous per-tick level
     // ramping is the best configuration measured.
+    // EDGE SAMPLING MARGIN, source px. Keeps the magnified source rect this many texels inside
+    // the desktop texture on the LEFT/TOP as well as the right/bottom. At source origin exactly 0
+    // DWM's NEAREST path resolves the outermost destination columns below texel 0 and fills them
+    // with an undefined light-grey border: the vertical line down the left edge (and its
+    // horizontal twin along the top) once the view is parked against that boundary. Native
+    // Magnifier is smooth-sampled, whose filter clamps to edge, which is why it never shows it.
+    // 0 = old behaviour (for A/B); raise to 2 if a thinner line survives at 1. The cost is the
+    // outermost source pixel becoming unreachable - exactly what the right/bottom already pay.
+    double txEdgeMargin = 1.0;
     int txGrid = 0;       // Snap the applied level to a geometric ladder (per mille; 50 = 5%).
                           //     Theory: DWM caches scaled surfaces per scale factor, so reusing
                           //     a small factor set should hit that cache. MEASURED MUCH WORSE:

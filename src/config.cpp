@@ -203,6 +203,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "warpLock")           c.warpLock = std::stoi(val);
             else if (key == "lockForce")          c.lockForce = std::stoi(val);
             else if (key == "txLevelStep")        c.txLevelStep = std::stoi(val);
+            else if (key == "txEdgeMargin")       c.txEdgeMargin = std::stod(val);
             else if (key == "txGrid")             c.txGrid = std::stoi(val);
             else if (key == "gameFpsCap")         c.gameFpsCap = std::stoi(val);
             else if (key == "onboarded")          c.onboarded = std::stoi(val);
@@ -267,6 +268,8 @@ Config ParseConfig(const std::string& text) {
     if (c.txMinOffsetPx > 32) c.txMinOffsetPx = 32;
     if (c.txLevelStep < 0)   c.txLevelStep = 0;    // per mille; 0 = per-tick level writes
     if (c.txLevelStep > 200) c.txLevelStep = 200;
+    if (c.txEdgeMargin < 0.0) c.txEdgeMargin = 0.0;
+    if (c.txEdgeMargin > 8.0) c.txEdgeMargin = 8.0;   // beyond this the lost border is the bug
     if (c.txGrid < 0)   c.txGrid = 0;              // per mille geometric grid; 0 = continuous
     if (c.txGrid > 250) c.txGrid = 250;
     c.outlineIdleSeconds = clampd(c.outlineIdleSeconds, 0.5, 60.0);

@@ -76,6 +76,78 @@ TEST_CASE("ComputeMagTransform: zero source is identity") {
     CHECK(m.txY == 0);
 }
 
+// --- Edge sampling margin (the left/top grey line) -------------------------------------------
+// At source origin 0 DWM's NEAREST path resolves the outermost destination columns below texel 0
+// and draws an undefined light-grey border there. The margin holds the source rect off that
+// boundary, in BOTH channels, without ever crossing the right/bottom wall or disturbing 1x.
+
+TEST_CASE("edge margin: left/top source is held one texel inside the texture") {
+    const int W = 3840, H = 2160;
+    MagTransform m = ComputeMagTransform(0.0, 0.0, 4.0, W, H, 1.0);
+    CHECK(m.offX == 1);
+    CHECK(m.offY == 1);
+    CHECK(m.txX == -4);       // -margin * level, so both channels describe the same rect
+    CHECK(m.txY == -4);
+}
+
+TEST_CASE("edge margin: zero margin keeps the pre-existing identity exactly") {
+    MagTransform m = ComputeMagTransform(0.0, 0.0, 4.0, 3840, 2160, 0.0);
+    CHECK(m.offX == 0);
+    CHECK(m.offY == 0);
+    CHECK(m.txX == 0);
+    CHECK(m.txY == 0);
+}
+
+TEST_CASE("edge margin: rest level 1.0 stays exactly identity whatever the margin") {
+    // The unzoomed desktop must never be shifted by a margin - there is no source rect to inset.
+    const double margins[4] = { 0.0, 1.0, 2.0, 8.0 };
+    for (int i = 0; i < 4; ++i) {
+        const double margin = margins[i];
+        MagTransform m = ComputeMagTransform(0.0, 0.0, 1.0, 3840, 2160, margin);
+        CHECK(m.offX == 0);
+        CHECK(m.offY == 0);
+        CHECK(m.txX == 0);
+        CHECK(m.txY == 0);
+    }
+}
+
+TEST_CASE("edge margin: a source already inside the margin is left alone") {
+    MagTransform m = ComputeMagTransform(500.0, 300.0, 4.0, 3840, 2160, 2.0);
+    CHECK(m.offX == 500);
+    CHECK(m.offY == 300);
+}
+
+TEST_CASE("edge margin: never crosses the right/bottom wall (issue #148 TDR invariant holds)") {
+    const int W = 3840, H = 2160;
+    // Sweep levels where the headroom shrinks toward (and below) the margin, from a source
+    // pinned at BOTH extremes. The source rect must stay strictly inside the texture either way.
+    const double levels[9] = { 1.0, 1.0005, 1.001, 1.01, 1.2, 2.0, 7.5, 21.0, 25.0 };
+    for (int li = 0; li < 9; ++li) {
+        const double level = levels[li];
+        const double srcPins[2] = { 0.0, 1.0e9 };
+        for (int i = 0; i < 2; ++i) {
+            const double srcPin = srcPins[i];
+            MagTransform m = ComputeMagTransform(srcPin, srcPin, level, W, H, 2.0);
+            CHECK(m.offX >= 0);
+            CHECK(m.offY >= 0);
+            CHECK(m.offX + W / level <= (double)W);
+            CHECK(m.offY + H / level <= (double)H);
+            CHECK(m.txX <= 0);
+            CHECK(m.txY <= 0);
+            CHECK((double)m.txX >= -((double)W * (level - 1.0)));
+            CHECK((double)m.txY >= -((double)H * (level - 1.0)));
+        }
+    }
+}
+
+TEST_CASE("SrcEdgeFloor: yields nothing where there is no headroom for it") {
+    CHECK(SrcEdgeFloor(1.0, 1.0, 3840) == 0.0);      // rest level: no source rect to inset
+    CHECK(SrcEdgeFloor(0.0, 8.0, 3840) == 0.0);      // margin off
+    CHECK(SrcEdgeFloor(1.0, 4.0, 3840) == 1.0);      // plenty of room
+    CHECK(SrcEdgeFloor(1.0, 1.0005, 3840) < 1.0);    // headroom smaller than the margin: bounded
+    CHECK(SrcEdgeFloor(1.0, 1.0005, 3840) >= 0.0);
+}
+
 TEST_CASE("ComputeMagTransform: right/bottom boundary never overshoots the desktop (issue #148 TDR)") {
     // Field-confirmed GPU driver reset: the mapper clamps the FLOAT source to maxX = w - w/level
     // (fractional at any mid-ramp level); a round-to-nearest that lands past it makes the
