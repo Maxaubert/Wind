@@ -31,9 +31,27 @@ OffsetF ComputeFixedPointOffset(double centerX, double centerY, double level);
 // the integer offset (or the private translation) past it, so the magnified source rect samples
 // OUTSIDE the desktop texture - field-confirmed GPU driver reset (TDR), always at the right or
 // bottom edge (left/top clamp to exact 0 and cannot overshoot). Clamp AFTER rounding, downward.
+//
+// EDGE SAMPLING MARGIN (the left/top edge line). The margin above is one-sided in the code that
+// predates it because only the right/bottom can OVERSHOOT - the left/top clamp to exact 0 and
+// cannot. But 0 is not a safe source origin either: DWM's NEAREST magnification path resolves
+// each destination column to a source texel around a half-texel offset, so at source left EXACTLY
+// 0 the leftmost destination columns resolve BELOW column 0, outside the desktop texture, and DWM
+// fills them with an undefined light-grey border - a vertical line ~level/2 px wide down the
+// screen's left edge (the same along the top), visible only once the view is parked against that
+// boundary. Native Magnifier never shows it because it samples SMOOTH by default and that filter
+// clamps to edge; our shipped txSamplingMode=0 is nearest, which does not. So the source rect is
+// held `edgeMargin` texels inside the texture on the LOW side too. edgeMargin 0 = old behaviour.
 struct MagTransform { int offX; int offY; int txX; int txY; };
 MagTransform ComputeMagTransform(double srcLeft, double srcTop, double level,
-                                 int screenW, int screenH);
+                                 int screenW, int screenH, double edgeMargin = 0.0);
+
+// The low-side margin that is actually applicable at this level, so every caller that needs the
+// source rect (the visual write, the input-transform publish, the sprite/weld geometry) derives
+// it from ONE formula and they can never describe different rects. Near 1x there is no room for a
+// margin at all (the source rect IS the screen), and there the result is 0 - the identity
+// transform at rest must stay exactly identity.
+double SrcEdgeFloor(double edgeMargin, double level, int screenExtent);
 
 // MagSetInputTransform rects (issue #185; docs/POINTER-HITTEST-FINDINGS.md): pointer-framework
 // apps hit-test mouse input through the system input transform under a fullscreen

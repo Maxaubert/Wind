@@ -184,6 +184,28 @@ margin specifically covers the exact-level-cap case where a bare floor still let
 exactly at the texture edge and the driver's filter neighborhood walks off it. Do not simplify
 the clamp or the margin away; the comment block in `src/transform.h` is the contract.
 
+## Clamping: the edge sampling margin
+
+The clamp above is one-sided because only the right/bottom can OVERSHOOT: the left/top clamp to
+exact 0 and cannot. But 0 is not a safe source origin either. DWM's NEAREST magnification path
+resolves each destination column to a source texel around a half-texel offset, so at source left
+EXACTLY 0 the leftmost destination columns resolve below texel 0, outside the desktop texture,
+and DWM fills them with an undefined light-grey border: a vertical line roughly `level/2` px wide
+down the screen's left edge, and its horizontal twin along the top. It appears only once the view
+is parked against that boundary, which is why it reads as "a line that shows up when you stop
+zooming". Native Magnifier never shows it because it samples SMOOTH by default and that filter
+clamps to edge; our shipped `txSamplingMode=0` is nearest, which does not.
+
+`SrcEdgeFloor` holds the source rect `txEdgeMargin` texels inside the texture on the LOW side too
+(default 1 source px; 0 restores the old behaviour for an A/B). One formula, three consumers, so
+they can never describe different rects: `ComputeMagTransform` applies it to both channel forms,
+`TransformModel::present` applies it to `srcL/srcT` before the input-transform publish (a visual
+rect one texel inside a published rect that was not would put the pointer framework's hover
+hit-test one source pixel - `level` screen px - off along that edge), and the hook writer takes it
+through `HookTransformState::edgeMargin`. It resolves to 0 wherever there is no headroom for it,
+so the identity transform at rest stays exactly identity and the floor can never cross the
+right/bottom wall above.
+
 ## The MPO 16-bit overflow, pan walls, and the ghost
 
 The final root cause of issue #148's crashes over real games: when a game surface rides an NVIDIA

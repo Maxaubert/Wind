@@ -26,6 +26,7 @@ struct HookTransformState {
     double level = 1.0;
     int    monX = 0, monY = 0, monW = 0, monH = 0;
     double maxSrcX = -1.0, maxSrcY = -1.0;   // MPO pan wall (#148/#191), <0 = unbounded
+    double edgeMargin = 0.0;   // cfg.txEdgeMargin: low-side source floor, see transform.h
     bool   fastPan = true;     // private channel; the PUBLIC one is 3-9ms and must never run here
     MagHost* host = nullptr;
     // COHERENT SPRITE (issue #229). The cursor sprite is a layered window placed in DESKTOP

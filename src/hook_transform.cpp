@@ -100,7 +100,8 @@ bool WriteHookTransform(double cursorVirtX, double cursorVirtY) {
     // The exact formula native uses, shared with the tick path so the two can never diverge.
     const FreeCursorSrc src = ComputeFreeCursorSrc(cursorVirtX - s.monX, cursorVirtY - s.monY,
                                                    s.level, s.monW, s.monH, s.maxSrcX, s.maxSrcY);
-    const MagTransform m = ComputeMagTransform(src.left, src.top, s.level, s.monW, s.monH);
+    const MagTransform m = ComputeMagTransform(src.left, src.top, s.level, s.monW, s.monH,
+                                               s.edgeMargin);
 
     if (m.offX == g_lastOffX && m.offY == g_lastOffY &&
         m.txX == g_lastTx && m.txY == g_lastTy && s.level == g_lastLevel)

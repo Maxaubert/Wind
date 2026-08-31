@@ -31,8 +31,17 @@ static int iround(double v) {
     return (lower & 1) ? lower + 1 : lower;
 }
 
+double SrcEdgeFloor(double edgeMargin, double level, int screenExtent) {
+    if (edgeMargin <= 0.0 || level <= 1.0) return 0.0;
+    // Never past the UPPER bound: at a level with less headroom than the margin the two clamps
+    // would cross, and a crossed clamp is how a source rect ends up outside the texture.
+    const double room = (double)screenExtent - (double)screenExtent / level - 2.0;
+    double lo = edgeMargin < room ? edgeMargin : room;
+    return lo > 0.0 ? lo : 0.0;
+}
+
 MagTransform ComputeMagTransform(double srcLeft, double srcTop, double level,
-                                 int screenW, int screenH) {
+                                 int screenW, int screenH, double edgeMargin) {
     if (level < 1.0) level = 1.0;
     int offX = iround(srcLeft), offY = iround(srcTop);
     int txX = iround(-srcLeft * level), txY = iround(-srcTop * level);
@@ -47,16 +56,23 @@ MagTransform ComputeMagTransform(double srcLeft, double srcTop, double level,
     const double kMargin = 2.0;
     const double maxX = screenW - screenW / level - kMargin;
     const double maxY = screenH - screenH / level - kMargin;
+    // LOW side: the edge sampling margin (see the header note). Both channels get the SAME
+    // floor expressed in their own space, so the public offsets and the private translations
+    // keep describing one rect.
+    const double loX = SrcEdgeFloor(edgeMargin, level, screenW);
+    const double loY = SrcEdgeFloor(edgeMargin, level, screenH);
     if (offX > (int)maxX) offX = (int)maxX;
     if (offY > (int)maxY) offY = (int)maxY;
-    if (offX < 0) offX = 0;
-    if (offY < 0) offY = 0;
+    if (offX < (int)loX) offX = (int)loX;
+    if (offY < (int)loY) offY = (int)loY;
     const double minTx = -((double)screenW * (level - 1.0)) + kMargin * level;
     const double minTy = -((double)screenH * (level - 1.0)) + kMargin * level;
     if (txX < (int)minTx) txX = (int)minTx;
     if (txY < (int)minTy) txY = (int)minTy;
-    if (txX > 0) txX = 0;
-    if (txY > 0) txY = 0;
+    const int maxTx = -(int)(loX * level);
+    const int maxTy = -(int)(loY * level);
+    if (txX > maxTx) txX = maxTx;
+    if (txY > maxTy) txY = maxTy;
     return MagTransform{ offX, offY, txX, txY };
 }
 
