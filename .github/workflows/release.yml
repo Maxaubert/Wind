@@ -110,14 +110,13 @@ jobs:
           $v = '${{ steps.ver.outputs.version }}'
           $tag = "v$v"
           $exe = "dist/Wind-Setup-x64-$v.exe"
-          # The fallback below publishes into THIS repo, which is correct only while this repo
-          # is public. Once it is private that fallback would upload the installer somewhere
-          # nobody can download it, and it would do so without failing. Refuse instead.
+          # DELIBERATE while Wind is pre-launch: releases go to this PRIVATE repo, so the
+          # installer sits behind authentication and only Max can fetch it. That is the point
+          # for now. Setting RELEASES_TOKEN (a fine-grained PAT with Contents: read and write
+          # on Maxaubert/Wind-releases) is the single switch that moves publishing to the
+          # public download repo, for when the product goes out to Vispero, Statped or NAV.
           if ($env:IS_PRIVATE -eq 'true' -and $env:HAS_TOKEN -ne 'true') {
-            throw ("RELEASES_TOKEN is not set and this repository is private.`n" +
-                   "  Publishing here would put the installer behind authentication.`n" +
-                   "  Create a fine-grained PAT with Contents: read and write on`n" +
-                   "  Maxaubert/Wind-releases, add it as the RELEASES_TOKEN secret, and re-run.")
+            Write-Host "::notice::Publishing to the PRIVATE repo. The asset will not be publicly downloadable. Set RELEASES_TOKEN to publish to Maxaubert/Wind-releases instead."
           }
           $repo = $env:TARGET_REPO
           Write-Host "publishing to $repo"

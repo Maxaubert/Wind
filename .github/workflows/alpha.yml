@@ -97,12 +97,9 @@ jobs:
         run: |
           $ErrorActionPreference = 'Continue'
           $PSNativeCommandUseErrorActionPreference = $false
-          # See the same guard in release.yml: the in-repo fallback is only correct while this
-          # repo is public, and silently hides the build behind auth once it is not.
+          # See release.yml: alphas stay in this private repo until RELEASES_TOKEN is set.
           if ($env:IS_PRIVATE -eq 'true' -and $env:HAS_TOKEN -ne 'true') {
-            throw ("RELEASES_TOKEN is not set and this repository is private.`n" +
-                   "  Add a fine-grained PAT with Contents: read and write on`n" +
-                   "  Maxaubert/Wind-releases as the RELEASES_TOKEN secret, then re-run.")
+            Write-Host "::notice::Publishing to the PRIVATE repo. Set RELEASES_TOKEN to publish to Maxaubert/Wind-releases instead."
           }
           $tag  = '${{ steps.ver.outputs.tag }}'
           $exe  = '${{ steps.asset.outputs.path }}'
