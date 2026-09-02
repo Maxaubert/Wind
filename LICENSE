@@ -1,21 +1,52 @@
-MIT License
+Wind - proprietary software licence
 
-Copyright (c) 2026 Max Aubert
+Copyright (c) 2026 Max Aubert. All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Wind, together with its source code, build scripts, documentation and design
+specifications (the "Software"), is the proprietary and confidential property of
+Max Aubert, protected by copyright law including the Norwegian Copyright Act
+(lov om opphavsrett til andsverk mv.) and the Berne Convention.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+1. SOURCE CODE
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+   No permission is granted to any person to use, copy, reproduce, modify,
+   adapt, translate, merge, publish, distribute, sublicense, sell, or create
+   derivative works from the Software or any part of it, in source or object
+   form, by any means, without the prior express written permission of the
+   copyright holder.
+
+2. OFFICIAL BINARIES
+
+   Compiled binaries published by the copyright holder (Wind-Setup-x64-<version>.exe
+   and the executables it installs) may be installed and used free of charge, on
+   any number of devices, for personal use or for internal use within an
+   organisation.
+
+   You may not redistribute, resell, rent, lease, sublicense or otherwise make
+   those binaries available to third parties, and you may not reverse engineer,
+   decompile or disassemble them, except to the extent that such a restriction
+   is prohibited by applicable law.
+
+3. NO WARRANTY
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+   IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+   CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+4. THIRD-PARTY COMPONENTS
+
+   The Software includes third-party components distributed under their own
+   licences. See THIRD-PARTY-NOTICES.md. Nothing in this licence limits any
+   rights granted to you under those licences with respect to those components.
+
+5. PRIOR RELEASES
+
+   Versions of this software published on or before 2026-08-31 (up to and
+   including release v0.6.1, commit 161cb70) were released under the MIT
+   licence. That grant continues to apply to those versions, and to those
+   versions only. It does not extend to this version or to any later version.
+
+Enquiries about commercial licensing: aubert@post.com

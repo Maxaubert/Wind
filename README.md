@@ -101,10 +101,10 @@ unless you say otherwise.
 
 **Signing.** Release builds are currently **unsigned**, so Windows SmartScreen will warn on
 first run, and the UIAccess-only behaviour above is switched off (Wind detects this at startup
-and stays on the render path for the desktop; everything else works normally). A free
-open-source certificate is being sought from
-[SignPath Foundation](https://signpath.org/); the release pipeline already signs when one is
-configured, via `WIND_SIGN_THUMBPRINT`, or `WIND_SIGN_PFX` plus `WIND_SIGN_PASSWORD`:
+and stays on the render path for the desktop; everything else works normally). Being unsigned
+is also why some browsers, and most managed work computers, refuse the download outright. A
+certificate is being arranged; the release pipeline already signs when one is configured, via
+`WIND_SIGN_THUMBPRINT`, or `WIND_SIGN_PFX` plus `WIND_SIGN_PASSWORD`:
 
 ```
 pwsh -File tools\release.ps1
@@ -163,3 +163,15 @@ Profiles (tray -> Profiles, or the Settings titlebar) snapshot the whole file pe
 Primary monitor by default (`multiMonitor=1` follows the cursor's monitor). Covers the desktop,
 normal apps, and **borderless / windowed-fullscreen** games. Exclusive-fullscreen games are out
 of scope (set the game to borderless).
+
+## Licence
+Wind is **proprietary**. Copyright (c) 2026 Max Aubert, all rights reserved. The source code
+may not be used, copied, modified or redistributed without written permission; official
+binaries are free to install and use, personally or inside an organisation. See `LICENSE`.
+
+Releases published on or before 2026-08-31 (up to `v0.6.1`) were issued under the MIT licence,
+and that grant still covers those versions. It does not extend to anything after them.
+
+Third-party components and their licences are listed in `THIRD-PARTY-NOTICES.md`.
+
+Commercial licensing enquiries: aubert@post.com

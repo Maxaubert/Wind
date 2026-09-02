@@ -24,6 +24,10 @@ on:
       - '**.md'
       - 'docs/**'
       - '.github/ISSUE_TEMPLATE/**'
+      # Licence text cannot change the binary, and republishing would hand the current
+      # release a new asset hash for no reason, resetting what little SmartScreen
+      # reputation the existing download has earned.
+      - 'LICENSE'
   workflow_dispatch:
 
 permissions:
@@ -84,10 +88,16 @@ jobs:
       # Create the release the first time this version is seen; afterwards replace the asset
       # in place so the download always matches main. --clobber is what makes the refresh
       # idempotent: without it a second push to the same version fails on a duplicate name.
+      # Assets are published to a SEPARATE PUBLIC repo, because this repo is private and a
+      # private repo's release assets need an authenticated request to download - i.e. nobody
+      # can get the installer. RELEASES_TOKEN is a fine-grained PAT with contents:write on
+      # that public repo and nothing else. While it is unset the job falls back to publishing
+      # here, so the pipeline keeps working during the move and on a fork.
       - name: Publish or refresh the release
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN || github.token }}
+          TARGET_REPO: ${{ secrets.RELEASES_TOKEN && 'Maxaubert/Wind-releases' || github.repository }}
         run: |
           # Actions runs pwsh with $ErrorActionPreference='Stop', and PowerShell 7.4 turns a
           # non-zero NATIVE exit into a throw. `gh release view` exits 1 when the tag does not
@@ -98,16 +108,18 @@ jobs:
           $v = '${{ steps.ver.outputs.version }}'
           $tag = "v$v"
           $exe = "dist/Wind-Setup-x64-$v.exe"
-          gh release view $tag 2>$null | Out-Null
+          $repo = $env:TARGET_REPO
+          Write-Host "publishing to $repo"
+          gh release view $tag --repo $repo 2>$null | Out-Null
           if ($LASTEXITCODE -eq 0) {
             Write-Host "refreshing existing release $tag"
-            gh release edit $tag --notes-file notes.md
+            gh release edit $tag --repo $repo --notes-file notes.md
             if ($LASTEXITCODE -ne 0) { throw 'gh release edit failed' }
-            gh release upload $tag $exe --clobber
+            gh release upload $tag $exe --repo $repo --clobber
             if ($LASTEXITCODE -ne 0) { throw 'gh release upload failed' }
           } else {
             Write-Host "creating release $tag"
-            gh release create $tag $exe --title "Wind $v" --notes-file notes.md
+            gh release create $tag $exe --repo $repo --title "Wind $v" --notes-file notes.md
             if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
           }
 

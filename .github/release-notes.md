@@ -14,8 +14,8 @@ Requires 64-bit Windows 10 or 11.
 ## Two things to know before you download
 
 **This build is unsigned.** SmartScreen will warn on first run: choose *More info* then
-*Run anyway*. A free open-source certificate is being sought from
-[SignPath Foundation](https://signpath.org/).
+*Run anyway*. Some browsers and most managed work computers block the download outright,
+which a signature is the only real fix for; one is being arranged.
 
 **Being unsigned costs two features**, because Windows only grants UIAccess to a signed
 binary in a protected folder:
