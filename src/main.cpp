@@ -575,6 +575,15 @@ static void TrackLaunchCover(TickState& t, HWND fg, bool fsCover, bool fgBorderl
             GetWindowThreadProcessId(fg, &pid);
             const unsigned long ex = (unsigned long)GetWindowLongPtrW(fg, GWL_EXSTYLE);
             if (pid && pid != t.quiescedPid && FgProcessYoungerThanMs(fg, 60000)) {
+                // launchQuiesce=0 (issue #247): say what WOULD have armed and do nothing. The
+                // per-instance slot is deliberately not consumed, so flipping the ini back to 1
+                // mid-test re-arms for this same process on its next cover sighting.
+                if (!t.cfg.launchQuiesce) {
+                    wind::Log(wind::LogLevel::Info, "transform",
+                              "launch quiesce disabled (launchQuiesce=0): fresh cover %ls not held",
+                              ExeNameOf(fg).c_str());
+                    return;
+                }
                 // Shape alone is not enough: a shell overlay covers borderless too, and holding
                 // for one froze the magnifier and its zoom keys on every Snipping Tool capture.
                 if (!wind::ShouldArmLaunchQuiesce(fsCover, fgBorderless, ex, true)) {
@@ -597,7 +606,9 @@ static void TrackLaunchCover(TickState& t, HWND fg, bool fsCover, bool fgBorderl
 
 // Whether the hold is live THIS tick. Transform only - it protects DWM's magnification path.
 static bool QuiesceHoldActive(const TickState& t) {
-    return t.quiesceUntilMs != 0 && GetTickCount64() < t.quiesceUntilMs &&
+    // Read the ini switch here too, not only at arm time: the ini hot-reloads, so setting
+    // launchQuiesce=0 during a hold releases it on the next tick instead of 1.5s later.
+    return t.cfg.launchQuiesce && t.quiesceUntilMs != 0 && GetTickCount64() < t.quiesceUntilMs &&
            dynamic_cast<TransformModel*>(t.model) != nullptr;
 }
 

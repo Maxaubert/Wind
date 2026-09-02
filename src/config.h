@@ -264,6 +264,15 @@ struct Config {
     // 0.077 * level - about 0.8px at 10x. Capping keeps the artefact sub-pixel where it is most
     // likely to be noticed; above the cap the wake cost returns, which is the accepted trade.
     int txWarmMaxLevel = 0;
+    // LAUNCH QUIESCE master switch (issue #247). 1 (shipped) = when a freshly launched (<60s)
+    // process takes over as a borderless cover, transform writes, the input transform and the
+    // weld are held ~1.5s so DWM can digest the takeover; that hold is what stops the dwmcore
+    // APPCRASH of #187 (RDR2 launching under a live 20x ramp). 0 = never arm it, and release
+    // any hold already in flight on the next tick (hot). The trigger is shape + process age and
+    // cannot tell a launching game from an ordinary app going fullscreen inside its first
+    // minute (Apple TV, #247), so 0 exists to test the cost of the hold against the risk it
+    // buys. Off means the #187 crash class is unguarded: field-test with it, do not ship it.
+    int launchQuiesce = 1;
     int txWarmWindowMs = 0;      // 0 = warm for as long as the session rests; else ms after last change
     // Mode 4's level perturbation, RELATIVE. The displacement it causes is not uniform: it is 0 at
     // the source origin and grows to (width * eps) at the far edge, which is a far gentler artefact

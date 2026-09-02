@@ -106,6 +106,15 @@ TEST_CASE("ParseConfig sanitizes forbidden keybinds to unbound (defense in depth
     // A legitimate bind is preserved.
     CHECK(ParseConfig("zoomInVk=33\n").zoomInVk == 33);
 }
+TEST_CASE("launchQuiesce defaults on and is a strict 0/1 switch (issue #247)") {
+    // Shipped default must stay ON: it is the guard for the #187 dwmcore crash.
+    CHECK(ParseConfig("").launchQuiesce == 1);
+    CHECK(ParseConfig("launchQuiesce=0\n").launchQuiesce == 0);
+    CHECK(ParseConfig("launchQuiesce=1\n").launchQuiesce == 1);
+    // Any non-zero value is just "on"; a stray -1 or 7 must not become a third state.
+    CHECK(ParseConfig("launchQuiesce=7\n").launchQuiesce == 1);
+    CHECK(ParseConfig("launchQuiesce=-1\n").launchQuiesce == 1);
+}
 TEST_CASE("parses cursorVisibility") {
     CHECK(ParseConfig("cursorVisibility=always\n").cursorVisibility == "always");
     CHECK(ParseConfig("cursorVisibility=never\n").cursorVisibility == "never");

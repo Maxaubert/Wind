@@ -189,6 +189,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "txTrace")            c.txTrace = std::stoi(val);
             else if (key == "txRestLevel")        c.txRestLevel = std::stod(val);
             else if (key == "txWarmMaxLevel")     c.txWarmMaxLevel = std::stoi(val);
+            else if (key == "launchQuiesce")      c.launchQuiesce = std::stoi(val);
             else if (key == "txWarmWindowMs")     c.txWarmWindowMs = std::stoi(val);
             else if (key == "txWarmLevelEps")     c.txWarmLevelEps = std::stod(val);
             else if (key == "txWriteHz")          c.txWriteHz = std::stoi(val);
@@ -259,6 +260,7 @@ Config ParseConfig(const std::string& text) {
     if (c.txWarmMode < 0)      c.txWarmMode = 0;
     if (c.txWarmMode > 4)      c.txWarmMode = 4;
     if (c.txWarmMaxLevel < 0)  c.txWarmMaxLevel = 0;
+    c.launchQuiesce = c.launchQuiesce ? 1 : 0;
     if (c.txWarmWindowMs < 0)  c.txWarmWindowMs = 0;
     if (c.txWarmLevelEps < 0.0)     c.txWarmLevelEps = 0.0;
     if (c.txWarmLevelEps > 0.01)    c.txWarmLevelEps = 0.01;

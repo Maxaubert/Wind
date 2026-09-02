@@ -157,7 +157,9 @@ Profiles (tray -> Profiles, or the Settings titlebar) snapshot the whole file pe
   desktop too (signed install only, primary monitor only, Auto model).
 - `lockApps` - per-app zoom lock detection (Settings > Cursor > "Zoom lock detection");
   `warpLock=1` extends the detection heuristics to unlisted games.
-- Advanced: `zorderBand`, `transformExclude`, `noSwallowApps`, `profile`.
+- Advanced: `zorderBand`, `transformExclude`, `noSwallowApps`, `profile`, `launchQuiesce`
+  (default 1; 0 disables the ~1.5s write hold on a freshly launched fullscreen cover - a test
+  knob for issue #247, it unguards the #187 DWM crash class, do not ship it off).
 
 ## Scope
 Primary monitor by default (`multiMonitor=1` follows the cursor's monitor). Covers the desktop,
