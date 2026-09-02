@@ -28,6 +28,9 @@ on:
       # release a new asset hash for no reason, resetting what little SmartScreen
       # reputation the existing download has earned.
       - 'LICENSE'
+      # Test harness only. It cannot change the shipped binary, and a republish would give
+      # the current release a new asset hash for nothing.
+      - 'tools/testenv/**'
   workflow_dispatch:
 
 permissions:
