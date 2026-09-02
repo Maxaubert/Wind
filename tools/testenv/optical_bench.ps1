@@ -10,8 +10,21 @@
 # `external` driver would sit in its ZoomTo loop forever and report zeros.
 #
 # WHAT IS MEASURED INSTEAD: the screen itself. A small region is BitBlt'd from the screen DC
-# and hashed; a changed hash means the magnified view updated. That works for every magnifier
-# whose output reaches the desktop, which is all three of these.
+# and hashed; a changed hash means the magnified CONTENT in that region moved. That works for
+# every magnifier whose output reaches the desktop, which is all three of these.
+#
+# UpdateHz IS NOT A FRAME RATE. READ THIS BEFORE QUOTING IT ANYWHERE.
+# It counts how often the content inside a FIXED region at the screen centre changed, and the
+# two magnifiers move differently under the same pan:
+#   - Wind welds the cursor to the centre and pans the world underneath it, so that region
+#     changes on essentially every frame -> ~114/s.
+#   - Windows Magnifier largely leaves the content put and lets the POINTER travel, so the
+#     cursor spends most of a +/-900px sweep outside the region -> ~7/s.
+# Magnifier is smooth in the field (a stable 144fps while panning, no stutter). A low UpdateHz
+# for it is NOT a smoothness verdict, and reading it as one was a real mistake once already.
+# What the number legitimately shows is how much re-render each model demands of DWM, which is
+# where the GPU difference comes from. For an actual smoothness comparison, sample a region
+# that FOLLOWS the cursor, or the whole screen - not this fixed centre window.
 #
 # MEASUREMENT CEILING: the screen BitBlt is vsync-locked, so the sampler runs at panel rate
 # (144/s measured on this rig, independent of region size). Every fps number is capped there.
@@ -370,4 +383,7 @@ $results | ConvertTo-Json -Depth 4 | Set-Content $out
 Write-Host "saved $out"
 Write-Host ""
 Write-Host "SamplerHz is the measurement ceiling (vsync-locked BitBlt). UpdateHz cannot exceed it."
+Write-Host "UpdateHz IS NOT A FRAME RATE: it counts content changes in a FIXED centre region, so a" -ForegroundColor Yellow
+Write-Host "magnifier that moves the POINTER rather than the world scores low while being perfectly" -ForegroundColor Yellow
+Write-Host "smooth. Use it to compare re-render demand, never smoothness. See the file header." -ForegroundColor Yellow
 Write-Host "Wind numbers are its TRANSFORM engine only; the render overlay is capture-excluded."
