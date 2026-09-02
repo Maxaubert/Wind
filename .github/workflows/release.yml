@@ -98,6 +98,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN || github.token }}
           TARGET_REPO: ${{ secrets.RELEASES_TOKEN && 'Maxaubert/Wind-releases' || github.repository }}
+          HAS_TOKEN: ${{ secrets.RELEASES_TOKEN != '' }}
+          IS_PRIVATE: ${{ github.event.repository.private }}
         run: |
           # Actions runs pwsh with $ErrorActionPreference='Stop', and PowerShell 7.4 turns a
           # non-zero NATIVE exit into a throw. `gh release view` exits 1 when the tag does not
@@ -108,6 +110,15 @@ jobs:
           $v = '${{ steps.ver.outputs.version }}'
           $tag = "v$v"
           $exe = "dist/Wind-Setup-x64-$v.exe"
+          # The fallback below publishes into THIS repo, which is correct only while this repo
+          # is public. Once it is private that fallback would upload the installer somewhere
+          # nobody can download it, and it would do so without failing. Refuse instead.
+          if ($env:IS_PRIVATE -eq 'true' -and $env:HAS_TOKEN -ne 'true') {
+            throw ("RELEASES_TOKEN is not set and this repository is private.`n" +
+                   "  Publishing here would put the installer behind authentication.`n" +
+                   "  Create a fine-grained PAT with Contents: read and write on`n" +
+                   "  Maxaubert/Wind-releases, add it as the RELEASES_TOKEN secret, and re-run.")
+          }
           $repo = $env:TARGET_REPO
           Write-Host "publishing to $repo"
           gh release view $tag --repo $repo 2>$null | Out-Null

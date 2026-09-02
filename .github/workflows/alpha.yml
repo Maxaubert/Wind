@@ -92,9 +92,18 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN || github.token }}
           TARGET_REPO: ${{ secrets.RELEASES_TOKEN && 'Maxaubert/Wind-releases' || github.repository }}
+          HAS_TOKEN: ${{ secrets.RELEASES_TOKEN != '' }}
+          IS_PRIVATE: ${{ github.event.repository.private }}
         run: |
           $ErrorActionPreference = 'Continue'
           $PSNativeCommandUseErrorActionPreference = $false
+          # See the same guard in release.yml: the in-repo fallback is only correct while this
+          # repo is public, and silently hides the build behind auth once it is not.
+          if ($env:IS_PRIVATE -eq 'true' -and $env:HAS_TOKEN -ne 'true') {
+            throw ("RELEASES_TOKEN is not set and this repository is private.`n" +
+                   "  Add a fine-grained PAT with Contents: read and write on`n" +
+                   "  Maxaubert/Wind-releases as the RELEASES_TOKEN secret, then re-run.")
+          }
           $tag  = '${{ steps.ver.outputs.tag }}'
           $exe  = '${{ steps.asset.outputs.path }}'
           $note = '${{ inputs.note }}'
