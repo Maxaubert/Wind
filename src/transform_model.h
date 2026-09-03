@@ -121,6 +121,7 @@ private:
     double lastRequestedLevel_ = 0.0;
     double sessionMaxLevel_ = 0.0;      // logged at teardown: scripted-run engagement proof
     unsigned long long lastChangeMs_ = 0;            // when the transform last REALLY changed
+    unsigned long long lastWarmMs_ = 0;              // when the last warm pulse CLOSED (issue #246)
     unsigned long long lastWriteMs_ = 0;             // when a write last actually went out (#204)
     int  lastSpriteX_ = INT_MIN, lastSpriteY_ = INT_MIN;   // dedup the game-session sprite move
     // Magnification context lifetime (issue #148). While a context is alive DWM composites

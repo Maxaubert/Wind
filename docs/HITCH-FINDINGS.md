@@ -114,6 +114,18 @@ source region actually moved. Only a real change to the sampled region keeps tha
 FIX: `txWarmMode=1` - alternate the translation by 1px on rest ticks. Field-verified on both the
 desktop and in games.
 
+COST, and the 2026-09-03 refinement (issue #246): every warm write is a real source change, so
+DWM re-renders the whole magnified screen for it. Measured with `tools/gpu_ab.ps1` on the
+controlled solid target (dwm.exe 3D-engine %): a zoomed session sitting still cost 16.1% with
+per-tick warming, 0.0% with it off, 0.2% for native Magnifier at rest - which was the entire GPU
+gap the field reported, since panning costs both magnifiers the same order (Wind 16%, native 12%
+in either tracking mode). The warm write is now a PULSE on `txWarmHz` (one displacement plus its
+return per period; an open pulse always closes before any other gate). Rest cost per cadence:
+48Hz 10.1%, 24Hz 8.3%, 12Hz 4.6% (shipped), 6Hz 2.4%. `tools/warm_cadence_sweep.ps1` scores
+each cadence with the pan-wake probe, the txtrace wake-write dt and rest GPU; on the desktop the
+wake-write dt stays 7-13ms at every cadence INCLUDING warming off, so the desktop cannot set the
+floor - the field verdict in a game does (12Hz: no hitch and no visible twitch reported).
+
 ### Why this took so long, and what was measured wrong
 
 - **Composition rate is the wrong metric.** Mode 4 (perturb the LEVEL by 2e-5) held composition at

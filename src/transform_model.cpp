@@ -49,7 +49,7 @@ void TransformModel::resetTransformState() {
     // compares against values DWM no longer holds and skips the writes that would re-apply them.
     lastLevel_ = 0.0; lastRequestedLevel_ = 0.0;
     lastOffX_ = lastOffY_ = lastTxX_ = lastTxY_ = 0;
-    lastChangeMs_ = 0; lastWriteMs_ = 0; keepAliveTick_ = 0; hiRampTick_ = 0;
+    lastChangeMs_ = 0; lastWriteMs_ = 0; lastWarmMs_ = 0; keepAliveTick_ = 0; hiRampTick_ = 0;
     warmLevelJitter_ = false;
     spriteFirst_ = false;
     ghostSessionStartMs_ = 0;
@@ -618,11 +618,17 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     wi.maxLevel           = cfg.txWarmMaxLevel;
     wi.windowMs           = cfg.txWarmWindowMs;
     wi.sinceLastChangeMs  = nowMs - lastChangeMs_;
+    // Cadence (issue #246): the period counts from whichever came last, the previous pulse
+    // closing or a real write (a real write resets keepAliveTick_ above, so no pulse is open).
+    wi.warmHz             = cfg.txWarmHz;
+    wi.pulseOpen          = keepAliveTick_ != 0;
+    wi.sinceLastWarmMs    = nowMs - (lastWarmMs_ > lastChangeMs_ ? lastWarmMs_ : lastChangeMs_);
     switch (WarmAction(wi)) {
         case TxWarm::Jitter1px:
             keepAliveTick_ ^= 1;
             txJitter = keepAliveTick_;   // BOTH parities must write (the return-to-true half too)
             keepAliveActive = true;
+            if (keepAliveTick_ == 0) lastWarmMs_ = nowMs;   // pulse closed: the period starts here
             break;
         case TxWarm::SameValue:
             keepAliveActive = true;
@@ -635,6 +641,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             warmLevelJitter_ = keepAliveTick_ != 0;
             keepAliveActive = true;
             trWarm = true;
+            if (keepAliveTick_ == 0) lastWarmMs_ = nowMs;
             break;
         case TxWarm::None:
             break;

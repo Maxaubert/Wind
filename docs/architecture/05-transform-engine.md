@@ -119,12 +119,22 @@ stays because the measurement was sound even though the throttle conclusion was 
 
 Two smaller cadence mechanisms:
 
-- **Keep-alive jitter.** DWM discards its magnification resources when the transform value sits
-  still and pays a rebuild spike on the next real change. The keep-alive alternates the private
-  channel translation by 1px on alternating ticks, only within 700ms of the last real change and
-  only at or below `txKeepAliveMaxLevel`. Jittering the level instead (v1) forced a full re-scale
-  per tick and was the cure being the disease. The config default is 8 (`src/config.h`); a stale
-  comment in `TransformModel::present` claims it ships 0, and the config header is the truth.
+- **Warm-keeping** (`txWarmMode`, pure gate `WarmAction` in `src/tx_warm.h`). DWM's magnification
+  re-render path goes cold when the sampled source region sits still, and the first real move
+  after a pause pays ~25ms (the pan-start hitch, `../HITCH-FINDINGS.md`). Mode 1 (shipped)
+  displaces the private-channel translation by 1px and returns it, which is a real source change
+  and is what keeps the path warm; a sub-pixel level nudge (mode 4) passes every composition-rate
+  metric and still hitches. **Every warm write is a full re-render**, so its cadence is the GPU
+  cost of a zoomed view at rest: per-tick warming measured 16.1% dwm.exe GPU with the mouse still
+  against 0.0% with warming off and 0.2% for native Magnifier (`tools/gpu_ab.ps1`, controlled
+  solid target, issue #246), which was the whole reported GPU gap - panning costs both magnifiers
+  the same order (Wind 16%, native 12%). `txWarmHz` therefore makes the warm write a **pulse**:
+  one displacement plus its return per period, nothing between; 0 = every tick, 12 ships
+  (rest cost 4.6% against 9-16% per tick; the hitch never reproduces on the desktop, so the
+  floor is a game verdict). An open pulse
+  always closes before any other gate (period, `txWarmMaxLevel`, `txWarmWindowMs`) can apply, so
+  the view is never stranded 1px off. `txWarmWindowMs` bounds how long after the last real change
+  warming continues at all (0 = as long as the session rests).
 - **Same-value hygiene.** Once the keep-alive window lapses, a zoomed-idle tick writes nothing at
   all; DWM parks on static values anyway, and 144 identical writes per second bought nothing.
 

@@ -67,6 +67,68 @@ TEST_CASE("level cap: 0 means no cap") {
     CHECK(WarmAction(in) == TxWarm::LevelEpsilon);
 }
 
+TEST_CASE("cadence: 0 warms every tick (the pre-#246 behaviour)") {
+    TxWarmIn in = Resting();
+    in.mode = 1;
+    in.warmHz = 0;
+    in.sinceLastWarmMs = 0;
+    CHECK(WarmAction(in) == TxWarm::Jitter1px);
+}
+
+TEST_CASE("cadence: a new pulse waits for its period") {
+    TxWarmIn in = Resting();
+    in.mode = 1;
+    in.warmHz = 24;                 // period 41ms
+    in.pulseOpen = false;
+    in.sinceLastWarmMs = 7;         // one tick after the last pulse closed
+    CHECK(WarmAction(in) == TxWarm::None);
+    in.sinceLastWarmMs = 40;
+    CHECK(WarmAction(in) == TxWarm::None);
+    in.sinceLastWarmMs = 41;
+    CHECK(WarmAction(in) == TxWarm::Jitter1px);
+    in.sinceLastWarmMs = 5000;
+    CHECK(WarmAction(in) == TxWarm::Jitter1px);
+}
+
+TEST_CASE("cadence: an open pulse always closes, never waits for the period") {
+    // The displacing half went out last tick; the view is 1px off. The return must go out THIS
+    // tick regardless of cadence, or the rest view sits displaced for a whole period.
+    TxWarmIn in = Resting();
+    in.mode = 1;
+    in.warmHz = 12;
+    in.pulseOpen = true;
+    in.sinceLastWarmMs = 0;
+    CHECK(WarmAction(in) == TxWarm::Jitter1px);
+    // The same rule for the level-epsilon channel: both halves of its toggle must write.
+    in.mode = 4;
+    CHECK(WarmAction(in) == TxWarm::LevelEpsilon);
+}
+
+TEST_CASE("cadence: a real write closes an open pulse by itself") {
+    // A real write this tick returns the view to the truth (it writes the true translation), so
+    // no close is owed and warming stays out of its way.
+    TxWarmIn in = Resting();
+    in.mode = 1;
+    in.warmHz = 12;
+    in.pulseOpen = true;
+    in.wroteThisTick = true;
+    CHECK(WarmAction(in) == TxWarm::None);
+}
+
+TEST_CASE("cadence: neither the window nor the level cap can strand an open pulse") {
+    TxWarmIn in = Resting(20.0);
+    in.mode = 1;
+    in.warmHz = 12;
+    in.pulseOpen = true;
+    in.windowMs = 700;
+    in.sinceLastChangeMs = 100000;   // window long lapsed
+    in.maxLevel = 8;                 // and the level is over the cap
+    CHECK(WarmAction(in) == TxWarm::Jitter1px);
+    // ...but once closed, both gates apply again.
+    in.pulseOpen = false;
+    CHECK(WarmAction(in) == TxWarm::None);
+}
+
 TEST_CASE("window: 0 warms for as long as the session rests") {
     TxWarmIn in = Resting();
     in.sinceLastChangeMs = 60000;
