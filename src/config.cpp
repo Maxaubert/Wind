@@ -191,6 +191,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "txWarmMaxLevel")     c.txWarmMaxLevel = std::stoi(val);
             else if (key == "launchQuiesce")      c.launchQuiesce = std::stoi(val);
             else if (key == "txWarmWindowMs")     c.txWarmWindowMs = std::stoi(val);
+            else if (key == "txWarmHz")           c.txWarmHz = std::stoi(val);
             else if (key == "txWarmLevelEps")     c.txWarmLevelEps = std::stod(val);
             else if (key == "txWriteHz")          c.txWriteHz = std::stoi(val);
             else if (key == "txFreeCursor")       c.txFreeCursor = std::stoi(val);
@@ -262,6 +263,8 @@ Config ParseConfig(const std::string& text) {
     if (c.txWarmMaxLevel < 0)  c.txWarmMaxLevel = 0;
     c.launchQuiesce = c.launchQuiesce ? 1 : 0;
     if (c.txWarmWindowMs < 0)  c.txWarmWindowMs = 0;
+    if (c.txWarmHz < 0)        c.txWarmHz = 0;       // 0 = every tick
+    if (c.txWarmHz > 1000)     c.txWarmHz = 1000;
     if (c.txWarmLevelEps < 0.0)     c.txWarmLevelEps = 0.0;
     if (c.txWarmLevelEps > 0.01)    c.txWarmLevelEps = 0.01;
     if (c.txWriteHz < 0)    c.txWriteHz = 0;        // 0 = uncapped (per-tick)

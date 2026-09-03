@@ -274,6 +274,19 @@ struct Config {
     // buys. Off means the #187 crash class is unguarded: field-test with it, do not ship it.
     int launchQuiesce = 1;
     int txWarmWindowMs = 0;      // 0 = warm for as long as the session rests; else ms after last change
+    // WARM CADENCE (issue #246, hot). Every warm write is a real source-rect change, so DWM
+    // re-renders the whole magnified screen for it: per-tick warming made a zoomed session
+    // sitting STILL cost dwm.exe 16% GPU on this rig (tools/gpu_ab.ps1, controlled solid target)
+    // where native Magnifier at rest costs 0.2%, and that was the entire GPU gap the field saw -
+    // panning costs both about the same (Wind 16%, native 12%). So the warm write is a PULSE on
+    // this cadence: one 1px displacement and its return per period, nothing in between. 0 = every
+    // tick (the 2026-08-27 behaviour). The pure gate is WarmAction (src/tx_warm.h).
+    // Rest cost measured per cadence (same rig, dwm.exe 3D %): every tick 9-16, 48Hz 10.1,
+    // 24Hz 8.3, 12Hz 4.6, 6Hz 2.4, off 0.0 - roughly 0.2% per re-render/s. The pan-start hitch
+    // does NOT reproduce on the desktop at any cadence (tools/warm_cadence_sweep.ps1: wake-write
+    // dt 7-13ms even with warming off), so the cadence floor is a GAME verdict: 12 is the
+    // provisional default pending the field test in DOOM (12 -> 6 -> 24 if the hitch returns).
+    int txWarmHz = 12;
     // Mode 4's level perturbation, RELATIVE. The displacement it causes is not uniform: it is 0 at
     // the source origin and grows to (width * eps) at the far edge, which is a far gentler artefact
     // than mode 1's rigid 1px shift of the whole screen. 4e-6 was measured too small for DWM to

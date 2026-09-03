@@ -52,6 +52,15 @@ enum class TxWarm {
     LevelEpsilon,     // mode 4: THE SHIPPED FIX
 };
 
+// CADENCE (issue #246). Every warm write is a REAL source-rect change, so DWM re-renders the
+// whole magnified screen for it - the full pan cost, at rest. Measured on the controlled solid
+// target (tools/gpu_ab.ps1, 2026-09-03, 4K, RTX 5090): a zoomed session sitting STILL cost
+// dwm.exe 16.1% GPU with per-tick warming and 0.0% with it off; native Magnifier at rest is 0.2%.
+// That is the entire GPU gap the field reported - panning costs both magnifiers the same order
+// (Wind 16%, native 12%). So the warm write is now a PULSE on a cadence: one 1px displacement
+// and its return, then nothing until the next period. warmHz 0 = every tick (the pre-#246
+// behaviour); the return half of an open pulse is never gated, so the view is off by 1px for
+// exactly one tick per period, never longer.
 struct TxWarmIn {
     bool   wroteThisTick      = false;  // a real, changed write already went out - nothing to warm
     bool   ramping            = false;  // the level is moving on its own; it is already waking DWM
@@ -60,6 +69,9 @@ struct TxWarmIn {
     int    maxLevel           = 0;      // 0 = no cap
     int    windowMs           = 0;      // 0 = warm for as long as the session rests
     unsigned long long sinceLastChangeMs = 0;
+    int    warmHz             = 0;      // pulses per second; 0 = every tick
+    bool   pulseOpen          = false;  // the displacing half went out; the return half is owed
+    unsigned long long sinceLastWarmMs = 0;   // since the last pulse CLOSED (or the last real write)
 };
 
 inline TxWarm WarmAction(const TxWarmIn& in) {
@@ -69,8 +81,14 @@ inline TxWarm WarmAction(const TxWarmIn& in) {
     // Never warm at rest level. Below this the session is not magnifying, and poking DWM there is
     // the startup tax that issue #148 removed.
     if (in.applyLevel <= 1.001) return TxWarm::None;
-    if (in.maxLevel > 0 && in.applyLevel > (double)in.maxLevel) return TxWarm::None;
-    if (in.windowMs > 0 && in.sinceLastChangeMs >= (unsigned long long)in.windowMs) return TxWarm::None;
+    // An OPEN pulse always closes, before any gate below can say otherwise: a displaced view must
+    // never be stranded by the period, the level cap, or the window lapsing mid-pulse.
+    if (!in.pulseOpen) {
+        if (in.maxLevel > 0 && in.applyLevel > (double)in.maxLevel) return TxWarm::None;
+        if (in.windowMs > 0 && in.sinceLastChangeMs >= (unsigned long long)in.windowMs) return TxWarm::None;
+        // Cadence: a new pulse only when the period has elapsed.
+        if (in.warmHz > 0 && in.sinceLastWarmMs < 1000ull / (unsigned long long)in.warmHz) return TxWarm::None;
+    }
     switch (in.mode) {
         case 1:  return TxWarm::Jitter1px;
         case 2:  return TxWarm::SameValue;
