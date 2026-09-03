@@ -51,6 +51,12 @@ REAL source-rect change and is what keeps that path warm. Mode 4 (level epsilon 
 composition at a flat 6.94ms and scored 0.00 stalls in 15/15 automated rounds and the user STILL
 felt the spike - sub-pixel is not a real change, so DO NOT trust composition-rate metrics here.
 Cost: the view sits 1px off on alternate rest ticks (the #204 shimmer); txWarmMode=0 disables.
+EVERY WARM WRITE IS A FULL DWM RE-RENDER (#246): per-tick warming cost dwm.exe 16% GPU with the
+mouse STILL (native at rest: 0.2%) - the whole field-reported GPU gap; panning costs both ~the
+same (Wind 16%, native 12%). So it is a PULSE on `txWarmHz` (ships 12: rest cost 4.6%; 0 = per
+tick), one displacement + return per period; an open pulse always closes first. The hitch never
+reproduces on the desktop, so the cadence floor is a game verdict (`tools/warm_cadence_sweep.ps1`,
+`tools/gpu_ab.ps1` = per-process dwm/Wind GPU vs native on the solid target).
 MEASURED HARMFUL, do not re-enable: `txWriteHz`/`txMinOffsetPx` (2px view steps = wobble at low
 zoom; 60Hz view = low fps at high zoom) and gating the cursor sprite on "the view moved" (freezes
 the drawn cursor in the edge zones, worst bottom-left). See docs/HITCH-FINDINGS.md.
