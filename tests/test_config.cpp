@@ -266,20 +266,6 @@ TEST_CASE("ParseHexColor parses 6-digit hex with and without leading #") {
     CHECK(g3 == doctest::Approx(0.0f));
     CHECK(b3 == doctest::Approx(0.0f));
 }
-TEST_CASE("outline keys default off with accent color") {
-    Config c = ParseConfig("");
-    CHECK(c.outline == 0);                  // off by default
-    CHECK(c.outlineThickness == 4);
-    CHECK(c.outlineColor == "#5b5bd6");     // Wind accent
-}
-TEST_CASE("outline keys parse and thickness clamps to [1,40]") {
-    Config c = ParseConfig("outline=1\noutlineThickness=8\noutlineColor=#ff0000\n");
-    CHECK(c.outline == 1);
-    CHECK(c.outlineThickness == 8);
-    CHECK(c.outlineColor == "#ff0000");
-    CHECK(ParseConfig("outlineThickness=0\n").outlineThickness == 1);     // clamp low
-    CHECK(ParseConfig("outlineThickness=999\n").outlineThickness == 40);  // clamp high
-}
 TEST_CASE("ParseHexColor rejects malformed input and leaves outputs untouched") {
     float r = 0.5f, g = 0.5f, b = 0.5f;
     CHECK(ParseHexColor("", r, g, b) == false);
@@ -290,62 +276,6 @@ TEST_CASE("ParseHexColor rejects malformed input and leaves outputs untouched") 
     CHECK(r == doctest::Approx(0.5f));                    // unchanged on failure
     CHECK(g == doctest::Approx(0.5f));
     CHECK(b == doctest::Approx(0.5f));
-}
-TEST_CASE("OutlineVisibleAtLevel honors master toggle and low-zoom cutoff") {
-    Config c;                       // defaults: outline=0, outlineLowZoomOnly=0, outlineLowZoomMax=2.0
-    CHECK(OutlineVisibleAtLevel(c, 1.5) == false);   // master off
-    c.outline = 1;
-    CHECK(OutlineVisibleAtLevel(c, 1.5) == true);    // on, no cutoff
-    CHECK(OutlineVisibleAtLevel(c, 9.0) == true);    // on, cutoff disabled -> any level
-    c.outlineLowZoomOnly = 1;                        // cutoff at 2.0
-    CHECK(OutlineVisibleAtLevel(c, 1.5) == true);    // below cutoff
-    CHECK(OutlineVisibleAtLevel(c, 2.0) == true);    // exactly at cutoff (inclusive)
-    CHECK(OutlineVisibleAtLevel(c, 2.5) == false);   // above cutoff
-}
-TEST_CASE("OutlineIdleAlpha ramps from 1 to 0 across the fade window") {
-    CHECK(OutlineIdleAlpha(0.0, 7.0, 0.3) == doctest::Approx(1.0));   // not idle yet
-    CHECK(OutlineIdleAlpha(7.0, 7.0, 0.3) == doctest::Approx(1.0));   // at threshold, fade starts
-    CHECK(OutlineIdleAlpha(7.15, 7.0, 0.3) == doctest::Approx(0.5));  // ~mid-fade (0.5 within tolerance)
-    CHECK(OutlineIdleAlpha(7.3, 7.0, 0.3) == doctest::Approx(0.0));   // fully faded
-    CHECK(OutlineIdleAlpha(99.0, 7.0, 0.3) == doctest::Approx(0.0));  // stays faded
-    CHECK(OutlineIdleAlpha(6.9, 7.0, 0.0) == doctest::Approx(1.0));   // degenerate fade<=0 -> step
-    CHECK(OutlineIdleAlpha(7.0, 7.0, 0.0) == doctest::Approx(0.0));
-}
-TEST_CASE("OutlineDwellSeconds gates appearance until the band is held for the threshold") {
-    const double thr = 1.0;
-    double s = 0.0;
-    s = OutlineDwellSeconds(true, s, 0.4, thr); CHECK(s == doctest::Approx(0.4)); CHECK(s < thr);  // building
-    s = OutlineDwellSeconds(true, s, 0.4, thr); CHECK(s == doctest::Approx(0.8)); CHECK(s < thr);
-    s = OutlineDwellSeconds(true, s, 0.4, thr); CHECK(s == doctest::Approx(1.0)); CHECK(s >= thr); // capped, now shows
-    s = OutlineDwellSeconds(true, s, 0.4, thr); CHECK(s == doctest::Approx(1.0));                  // stays capped while in-band
-    s = OutlineDwellSeconds(false, s, 0.4, thr); CHECK(s == doctest::Approx(0.0)); CHECK(s < thr); // left band -> reset
-    // A quick pass-through (total in-band time < threshold) never reaches the gate.
-    double q = 0.0;
-    q = OutlineDwellSeconds(true, q, 0.3, thr);
-    q = OutlineDwellSeconds(false, q, 0.3, thr);   // left before 1s elapsed
-    CHECK(q == doctest::Approx(0.0)); CHECK(q < thr);
-    // Negative/zero dt never decrements the accumulator.
-    CHECK(OutlineDwellSeconds(true, 0.5, -0.2, thr) == doctest::Approx(0.5));
-}
-TEST_CASE("outline low-zoom + idle keys default and parse with clamps") {
-    Config d = ParseConfig("");
-    CHECK(d.outlineLowZoomOnly == 0);
-    CHECK(d.outlineLowZoomMax  == doctest::Approx(2.0));
-    CHECK(d.outlineIdleHide    == 0);
-    CHECK(d.outlineIdleSeconds == doctest::Approx(7.0));
-
-    Config c = ParseConfig(
-        "outlineLowZoomOnly=1\noutlineLowZoomMax=3.5\noutlineIdleHide=1\noutlineIdleSeconds=10\n");
-    CHECK(c.outlineLowZoomOnly == 1);
-    CHECK(c.outlineLowZoomMax  == doctest::Approx(3.5));
-    CHECK(c.outlineIdleHide    == 1);
-    CHECK(c.outlineIdleSeconds == doctest::Approx(10.0));
-
-    // Clamps: outlineLowZoomMax [1.0,50.0]; outlineIdleSeconds [0.5,60.0].
-    CHECK(ParseConfig("outlineLowZoomMax=0.2\n").outlineLowZoomMax == doctest::Approx(1.0));
-    CHECK(ParseConfig("outlineLowZoomMax=99\n").outlineLowZoomMax  == doctest::Approx(50.0));
-    CHECK(ParseConfig("outlineIdleSeconds=0\n").outlineIdleSeconds == doctest::Approx(0.5));
-    CHECK(ParseConfig("outlineIdleSeconds=120\n").outlineIdleSeconds == doctest::Approx(60.0));
 }
 TEST_CASE("game perf keys (issue #148) default and parse with clamps") {
     Config d = ParseConfig("");

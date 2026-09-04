@@ -3,7 +3,8 @@
 // advanced. Removed outright: quick zoom (mode/modifier/hotkey), smooth-zoom toggle (always on
 // now - the sliders stay, advanced), scale-cursor-with-zoom, magnifyStep, desktopTransform,
 // bilinear, sharpness, brightness, hdrTonemap (auto: no-op on SDR), multiMonitor, the whole
-// outline family, cursorVisibility (broken in the transform model - see the Cursor section).
+// outline family (the feature itself was deleted 2026-09-04), cursorVisibility (broken in the
+// transform model - see the Cursor section).
 // Copy pass same day: plain language (no "swallow"), no toggle labels starting with "Enable",
 // no desc that restates its label, consequences kept only where they change a decision.
 export const sections = [

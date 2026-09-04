@@ -17,7 +17,7 @@ reveal choreography, because parts of it need information the engine does not ha
 foreground window covers the monitor, which tick is the idle-to-active edge).
 
 Per frame the flow is: `renderFrame(RenderFrameParams)` captures the desktop if it changed,
-draws three passes into the back buffer (magnify, edge outline, cursor sprite), and presents. The
+draws two passes into the back buffer (magnify, cursor sprite), and presents. The
 magnified view is a float source rect (`srcLeft`/`srcTop` plus `level`), so panning is sub-pixel
 smooth; the pure math that produces the rect lives in `src/cursor_mapper` and `src/transform`,
 covered in [the tick loop](02-tick-loop.md).
@@ -224,13 +224,11 @@ color.
 ## Drawing: three passes, and the cursor
 
 `State::render` draws the magnified desktop as one full-screen opaque triangle (skipping the clear
-whenever a desktop copy exists, saving a 4K clear per frame), then the edge outline, then the
-cursor. The outline is deliberately **one** full-screen quad whose pixel shader colors only the
-border band and discards the interior; an earlier four-quads-in-a-loop version dropped individual
-edges on some GPUs. The frame is inset 6 px from the screen edge because at non-integer DPI
-(observed at 4K 225% on an RTX 5090) DWM can mis-composite the layered blt present with a small
-down-left offset that clips a flush left/bottom band off the panel; that is a driver/DWM artifact,
-not draw code, so do not chase it as a render bug.
+whenever a desktop copy exists, saving a 4K clear per frame), then the cursor. (An edge-outline
+pass lived between the two until 2026-09-04; removed with the feature. Its one lasting lesson is
+kept in CLAUDE.md: at non-integer DPI DWM can mis-composite the layered blt present with a small
+down-left offset that clips a flush left/bottom band off the panel - a driver/DWM artifact, not
+draw code.)
 
 The cursor sprite comes from `GetCursorInfo` + `DecodeCursorBGRA` (it works while the OS cursor is
 hidden), cached per `HCURSOR` with a 5 s staleness bound because the OS recycles handles, and drawn

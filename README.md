@@ -72,7 +72,7 @@ read once at launch, so switching it restarts Wind (Settings does this automatic
   Magnifier's ceiling, 1600%.
 
 The `magnify` model hands the view and cursor to Windows Magnifier, so the render-only features
-do not apply there: `sharpness`, `hdrTonemap`, `bilinear`, `outline*`, `brightness`,
+do not apply there: `sharpness`, `hdrTonemap`, `bilinear`, `brightness`,
 `cursorSensitivity`/`cursorSmoothing`, `multiMonitor`, and Inspect mode.
 
 ## Controls

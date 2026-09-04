@@ -26,12 +26,6 @@ struct RenderFrameParams {
     int    cursorMode;                   // 0=auto (draw only when the app shows a cursor), 1=always, 2=never
     bool   vsync;                        // true = Present(1,0) vsync; false = Present(0,0) no vsync
     bool   cropCapture;                  // on a full-screen repaint, copy only the magnified region (cuts 4K copy)
-    bool   outline;                      // draw the edge outline while zoomed (level > 1.0)
-    int    outlineThicknessPx;           // outline width in physical px (clamped in render())
-    float  outlineR, outlineG, outlineB; // outline color 0..1, written straight to the BGRA8 backbuffer
-                                         // (no gamma correction; the magnify pass writes sRGB-encoded
-                                         // pixels too, so the stored value matches the user's sRGB hex)
-    float  outlineAlpha;        // 0..1 fade for the outline (1 = solid); <= 0 skips the draw
     bool   cursorLocked;        // Inspect mode on: draw the crosshair sprite in place of the captured cursor
     bool   suppressCursorSync;  // drag-follow (issue #169): a button is held, the pointer owns the
                                 //   interaction - skip the SetCursorPos weld this frame entirely

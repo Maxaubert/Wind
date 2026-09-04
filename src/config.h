@@ -525,23 +525,6 @@ struct Config {
     int    quickZoomVk         = 112;
     int    quickZoomMods       = 0;
     double quickZoomDefault  = 4.0;   // level to snap to when nothing has been remembered yet
-    // --- Edge outline (zoom indicator) -------------------------------------
-    // 1 = draw a solid outline around the screen edges while zoomed (an at-a-glance "you are
-    // zoomed" indicator, handy at low zoom); 0 = off (default). Hot-reloadable.
-    int         outline          = 0;
-    // Outline width in physical pixels (clamped 1-40).
-    int         outlineThickness = 4;
-    // Outline color as hex RGB ("#rrggbb"; leading '#' optional). Default = Wind accent.
-    std::string outlineColor     = "#5b5bd6";
-    // outlineColor pre-parsed to 0..1 floats (done once in ParseConfig so the per-frame render path
-    // doesn't re-scan the hex string). Defaults match #5b5bd6; a bad/empty hex leaves these unchanged.
-    float       outlineR = 0.357f, outlineG = 0.357f, outlineB = 0.839f;
-    // Low-zoom-only: show the outline only while level <= outlineLowZoomMax (when enabled).
-    int    outlineLowZoomOnly = 0;     // 1 = enable the cutoff
-    double outlineLowZoomMax  = 2.0;   // zoom cutoff (clamped [1.0, 50.0])
-    // Idle-hide: fade the outline out after outlineIdleSeconds of no cursor motion (when enabled).
-    int    outlineIdleHide    = 0;     // 1 = enable idle fade
-    double outlineIdleSeconds = 7.0;   // idle timeout before fade (clamped [0.5, 60.0])
 };
 // Pure: parse INI text (key=value, ';' or '#' comments) into a Config, keeping
 // defaults for missing/malformed keys. Any keybind VK that IsForbiddenBindVk() rejects is
@@ -589,22 +572,6 @@ int EffectiveGpuPriority(const Config& c);
 int EffectiveSamplingMode(int iniValue, bool mpoDisabledAtBoot, bool mpoDisabledInRegistry,
                           int tdrTest);
 
-// Pure: whether the edge outline should show at this zoom level, given the master `outline`
-// toggle and the optional low-zoom cutoff. (The "are we zoomed" level > 1.0 gate stays in the
-// render pass.)
-bool OutlineVisibleAtLevel(const Config& c, double level);
-
-// Pure: edge-outline idle-fade alpha. Returns 1.0 until `idleSeconds` reaches `threshold`, then
-// ramps linearly to 0.0 over `fadeDuration` seconds (clamped to [0,1]). fadeDuration <= 0 gives a
-// hard 1.0/0.0 step at the threshold. Deterministic so the fade ramp is unit-testable.
-double OutlineIdleAlpha(double idleSeconds, double threshold, double fadeDuration);
-
-// Pure: low-zoom dwell accumulator. Returns the updated count of seconds the zoom level has been
-// continuously inside the low-zoom band: prevSeconds + dt while inBand (capped at `threshold`, and
-// dt clamped to >= 0 so a hitch never decrements), reset to 0.0 the moment we leave the band. The
-// caller shows the outline once the result reaches `threshold`, so a sub-threshold pass-through
-// never flashes it. Deterministic for unit testing.
-double OutlineDwellSeconds(bool inBand, double prevSeconds, double dt, double threshold);
 
 // I/O (implemented in Task 10): read file -> ParseConfig; create with defaults if absent.
 Config LoadConfig(const std::wstring& path);

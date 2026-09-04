@@ -366,8 +366,6 @@ struct TickState {
     bool   dbgOutOverstayLogged = false;
     std::atomic<bool> quickZoomHotkey{false};  // set by WM_HOTKEY (hotkey-mode quick zoom), consumed in RunTick
     bool   cursorHidden       = false;         // runtime-only override (no ini write, no hot-reload)
-    double outlineIdleSec = 0.0;   // seconds the cursor has been still (drives the outline idle fade)
-    double outlineZoneSec = 0.0;   // seconds continuously in the low-zoom band (drives the show dwell)
     HWND   hwnd               = nullptr;       // owning message window (for RegisterHotKey)
     // Frame-pacing diagnostics (diagnostics=1): a 2 s window of loop-interval stats.
     double diagAccum = 0.0, diagSumDt = 0.0, diagMaxDt = 0.0;
@@ -1078,7 +1076,6 @@ static void RunTick(TickState& t) {
         bool enterActive  = !t.prevActive;            // idle -> active (overlay just turned on)
         bool inspectEnter = inspect && !t.prevInspect;
         if (enterActive) {
-            t.outlineIdleSec = 0.0;   // each activation starts with the outline fully shown
             // Follow the cursor's monitor (multiMonitor on, only when zoomed). Only reconfigure when
             // it actually changed; retarget() returns false on multi-GPU/failure, in which case we keep
             // the current monitor. The overlay is still at alpha 0 here, so a move never flashes.
@@ -1622,42 +1619,12 @@ static void RunTick(TickState& t) {
             }
         }
         // Per-tick render-only overrides go through PresentExtras; the model's present() runs
-        // FillRenderParams and applies these on top. ex.outline seeds with the same base value
-        // FillRenderParams would compute, so the dwell/idle logic below reads an identical start.
+        // FillRenderParams and applies these on top.
         PresentExtras ex;
         ex.fsGame = fsGame;
         ex.forceCrop = fsGame && t.cfg.gameCrop != 0;
-        ex.outline = OutlineVisibleAtLevel(t.cfg, lvl);
-        ex.outlineAlpha = 1.0f;
         ex.cursorMode = CursorModeFromCfg(t.cfg);
         ex.cursorLocked = false;
-        // Low-zoom dwell: with "only at low zoom" on, show the outline only after the zoom settles
-        // at a STABLE level inside the band for kOutlineDwellSec. "Stable" = the level is unchanged
-        // since last tick (the controller freezes the level exactly when no zoom direction is held),
-        // so an actively-changing level - zooming through the band, or repeatedly nudging in/out -
-        // never accumulates: the countdown starts only once you stop on a level in the band. Any
-        // level change or leaving the band resets it (OutlineDwellSeconds returns 0 when !inBand).
-        // Always-on mode (lowZoomOnly off) is unaffected. The reset also fires on zoom-out to idle
-        // via the teardown branch below, so cycling 1x<->in-band can never bank partial dwell.
-        if (t.cfg.outline != 0 && t.cfg.outlineLowZoomOnly != 0) {
-            const double kOutlineDwellSec = 1.0;
-            bool stable = std::fabs(lvl - t.prevLvl) <= 1e-4;   // level held constant => settled
-            bool inBand = ex.outline && lvl > 1.0 && stable;
-            t.outlineZoneSec = OutlineDwellSeconds(inBand, t.outlineZoneSec, dt, kOutlineDwellSec);
-            if (t.outlineZoneSec < kOutlineDwellSec) ex.outline = false;   // not dwelled long enough yet
-        } else {
-            t.outlineZoneSec = 0.0;   // keep ready for when the cutoff is toggled on mid-session
-        }
-        // Idle-hide fade: when enabled and the outline is visible, accumulate idle time (reset on
-        // any hand motion - free OS-cursor delta or raw mickeys), then map it to the fade alpha.
-        // dt is the per-tick elapsed time computed at the top of RunTick. Fade duration is 0.3s.
-        const bool outlineMoved = (std::abs(curDx) + std::abs(curDy) + std::abs(rawDx) + std::abs(rawDy)) > 0;
-        if (t.cfg.outlineIdleHide && ex.outline) {
-            t.outlineIdleSec = outlineMoved ? 0.0 : (t.outlineIdleSec + dt);
-            ex.outlineAlpha = (float)OutlineIdleAlpha(t.outlineIdleSec, t.cfg.outlineIdleSeconds, 0.3);
-        } else {
-            t.outlineIdleSec = 0.0;   // keep ready for when idle-hide is toggled on mid-session
-        }
         if (t.cursorHidden) ex.cursorMode = 2;   // hotkey override; CursorModeFromCfg already set 0/1/2 from cfg
         // cursorMode is now final for this tick; derive drawCursor from it so the transform model
         // (which only reads drawCursor, not cursorMode - see magnifier_model.h) also honours
@@ -1743,7 +1710,6 @@ static void RunTick(TickState& t) {
                 ex.clickDesktopY = t.frozenCursor.y;
             }
             ex.cursorLocked = true;        // draw the crosshair at the look point (cursorScreen)
-            if (!zoomed) ex.outline = false;   // no lens outline on the 1:1 view at 1x
         }
         // Game pacing (issue #148): ONLY for the opt-in knobs. The default zoomed path keeps the
         // vsync-locked blocking Present - it is what makes panning smooth (refresh-locked cadence),
@@ -1945,7 +1911,6 @@ static void RunTick(TickState& t) {
         if (t.restAfterReveal) { t.restAfterReveal->setActive(false); t.restAfterReveal = nullptr; }
         t.model->setActive(false);
         SetSystemCursorHidden(t, t.model, false);
-        t.outlineZoneSec = 0.0;                       // zoom-out clears the low-zoom dwell (no banked partial)
         t.gamePacing = false;                         // idle: normal timer pacing
         t.pushPhase = 0;
         t.presentAccum = 0.0;

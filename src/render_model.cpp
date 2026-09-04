@@ -23,10 +23,6 @@ void FillRenderParams(RenderFrameParams& p, const MapResult& r, const Config& cf
     // In DwmFlush mode we present immediately (no vsync block) and let DwmFlush() pace.
     p.vsync = (cfg.vsync != 0 && cfg.dwmFlush == 0);
     p.cropCapture = (cfg.cropCapture != 0);
-    p.outline = OutlineVisibleAtLevel(cfg, level);
-    p.outlineThicknessPx = cfg.outlineThickness;
-    p.outlineR = cfg.outlineR; p.outlineG = cfg.outlineG; p.outlineB = cfg.outlineB;   // parsed once in ParseConfig
-    p.outlineAlpha = 1.0f;   // RunTick lowers this when idle-hide is active
     p.cursorLocked = false;  // RunTick sets true while zoomed + Inspect mode (draw the crosshair sprite)
     p.suppressCursorSync = false;  // RunTick sets true mid-drag (issue #169; see PresentExtras)
 }
@@ -67,8 +63,6 @@ void RenderModel::present(const MapResult& r, double level, const Config& cfg,
                           const MonitorTarget& mon, const PresentExtras& ex) {
     RenderFrameParams p{};
     FillRenderParams(p, r, cfg, mon, level);
-    p.outline = ex.outline;
-    p.outlineAlpha = ex.outlineAlpha;
     p.cursorLocked = ex.cursorLocked;
     p.cursorMode = ex.cursorMode;
     if (ex.clickOverride) { p.clickDesktopX = ex.clickDesktopX; p.clickDesktopY = ex.clickDesktopY; }

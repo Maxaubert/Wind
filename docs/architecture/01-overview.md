@@ -187,7 +187,7 @@ large fleet of PowerShell measurement probes, see
 | `profiles_io.h` | Win32 profile I/O shared by both exes |
 | `render_engine.cpp/.h` | The own renderer: DXGI Desktop Duplication capture + D3D11 scale to a click-through overlay |
 | `render_model.cpp/.h` | Adapts `RenderEngine` to `IMagnifierModel` |
-| `render_shaders.h` | HLSL sources: magnify/sharpen/tonemap PS, cursor quad, single-pass edge outline |
+| `render_shaders.h` | HLSL sources: magnify/sharpen/tonemap PS, cursor quad |
 | `resource.h` / `wind.rc` | App/tray icon resources |
 | `shell_desktop.h` | Pure test: is this window class the shell desktop (Win+D reads as a game otherwise, issue #172) |
 | `transform.cpp/.h` | Pure transform math: anchored offsets, TDR-safe clamps, input-transform rects, foreign-writer detection |

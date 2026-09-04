@@ -21,8 +21,8 @@ its steady-state work; it drives whatever `TickState::model` currently points at
 - `onActivate()`: called on the idle-to-active edge so the engine grabs a live frame rather than a
   stale cached one (render: `invalidateCapture` + reveal priming).
 - `present(...)`: the per-tick draw. It takes the mapper's `MapResult`, the level, the config, the
-  monitor, and `PresentExtras`, a struct of per-tick overrides RunTick computes (outline fade,
-  Inspect crosshair, drag-follow weld suppression, game pacing flags). The transform model ignores
+  monitor, and `PresentExtras`, a struct of per-tick overrides RunTick computes (Inspect
+  crosshair, drag-follow weld suppression, game pacing flags). The transform model ignores
   almost all of it by design; the comments in `magnifier_model.h` say which engine reads which field.
 - `idleTick()`: called every tick while idle. This exists for one load-bearing reason: the
   transform model releases its Magnification context here, because a live context keeps DWM in

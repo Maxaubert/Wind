@@ -130,11 +130,6 @@ struct RenderEngine::State {
     ComPtr<ID3D11PixelShader> cps;
     ComPtr<ID3D11Buffer> ccb;                  // posClip/sizeClip for the cursor quad
 
-    // Border (edge-outline) pass: a solid-color quad pipeline reused for all four edges.
-    ComPtr<ID3D11VertexShader> bvs;
-    ComPtr<ID3D11PixelShader> bps;
-    ComPtr<ID3D11Buffer> bcb;                  // posClip/sizeClip + rgba for the outline quad
-
     ComPtr<ID3D11BlendState> blend;            // alpha blend for normal cursors
     ComPtr<ID3D11BlendState> blendInvert;      // invert blend for I-beam-style cursors
     ComPtr<ID3D11Texture2D> cursorTex;         // the ACTIVE cursor's texture (an alias into the cache)
@@ -482,7 +477,6 @@ bool RenderEngine::recoverDeviceLost() {
     s_->cursorCache.clear();   // cached cursor textures belong to the dead device
     s_->vs.Reset(); s_->ps.Reset(); s_->cvs.Reset(); s_->cps.Reset();
     s_->cb.Reset(); s_->ccb.Reset();
-    s_->bvs.Reset(); s_->bps.Reset(); s_->bcb.Reset();
     s_->blend.Reset(); s_->blendInvert.Reset(); s_->sampLinear.Reset(); s_->sampPoint.Reset();
     s_->releasePresent();              // rtv + swapchain
     s_->ctx.Reset(); s_->device.Reset();
@@ -642,22 +636,6 @@ bool RenderEngine::State::buildDeviceResources() {
     ccbd.Usage = D3D11_USAGE_DEFAULT;
     ccbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
     if (FAILED(device->CreateBuffer(&ccbd, nullptr, ccb.ReleaseAndGetAddressOf()))) { RLog("buildDeviceResources: CreateBuffer(cursor cb) failed"); return false; }
-
-    // --- Border (edge-outline) shader pipeline ---
-    ID3DBlob* bvsb = CompileShader(kBorderHLSL, "VSMain", "vs_5_0");
-    ID3DBlob* bpsb = CompileShader(kBorderHLSL, "PSMain", "ps_5_0");
-    if (!bvsb || !bpsb) { RLog("buildDeviceResources: border shader compile failed"); SafeRelease(bvsb); SafeRelease(bpsb); return false; }
-    HRESULT hr5 = device->CreateVertexShader(bvsb->GetBufferPointer(), bvsb->GetBufferSize(), nullptr, bvs.ReleaseAndGetAddressOf());
-    HRESULT hr6 = device->CreatePixelShader(bpsb->GetBufferPointer(), bpsb->GetBufferSize(), nullptr, bps.ReleaseAndGetAddressOf());
-    SafeRelease(bvsb); SafeRelease(bpsb);
-    if (FAILED(hr5) || FAILED(hr6)) { RLog("buildDeviceResources: border shader create failed hr5=0x%08lX hr6=0x%08lX", (unsigned long)hr5, (unsigned long)hr6); return false; }
-
-    D3D11_BUFFER_DESC bcbd{};
-    bcbd.ByteWidth = 32;   // float2 posClip + float2 sizeClip + float4 color
-    bcbd.Usage = D3D11_USAGE_DYNAMIC;             // updated per-edge in a loop -> Map(WRITE_DISCARD)
-    bcbd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE; //   (a bound DEFAULT cb dropped edges; see the draw loop)
-    bcbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    if (FAILED(device->CreateBuffer(&bcbd, nullptr, bcb.ReleaseAndGetAddressOf()))) { RLog("buildDeviceResources: CreateBuffer(border cb) failed"); return false; }
 
     D3D11_BLEND_DESC bd{};
     bd.RenderTarget[0].BlendEnable = TRUE;
@@ -1125,39 +1103,6 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
         c->Draw(3, 0);
     }
 
-    // Edge-outline pass: ONE full-screen quad whose pixel shader colors only the border band (within
-    // `t` px of an edge) and discards the interior. Into the capture-excluded overlay, so it never
-    // feeds back into Desktop Duplication. Alpha-blended (supports the idle fade). Gated on level > 1.0.
-    // (Replaces an earlier four-quads-in-a-loop draw that dropped individual edges on some GPUs.)
-    if (p.outline && p.level > 1.0 && haveDesktop && p.outlineAlpha > 0.0f) {
-        int t = p.outlineThicknessPx;
-        if (t < 1) t = 1;
-        const int maxT = (sw < sh ? sw : sh) / 2;   // never let opposite edges overlap
-        // Inset the outline frame a few px from the screen edge (fixed, physical px). At non-integer
-        // DPI the layered blt present can be DWM-shifted down-left by a few px, which clips a flush
-        // left/bottom band off the panel; a frame inset a few px in survives the shift. See the
-        // CLAUDE.md render-engine non-integer-DPI gotcha. Clamped so inset+thickness stays on-screen.
-        int inset = 6;
-        if (inset > maxT - 1) inset = (maxT > 1) ? maxT - 1 : 0;   // degenerate guard (tiny surfaces)
-        if (inset < 0) inset = 0;
-        if (t > maxT - inset) t = maxT - inset;                    // keep inset+thickness within half
-        if (t < 1) t = 1;
-        c->OMSetBlendState(blend.Get(), nullptr, 0xFFFFFFFF);
-        c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-        c->IASetInputLayout(nullptr);
-        c->VSSetShader(bvs.Get(), nullptr, 0);
-        c->PSSetShader(bps.Get(), nullptr, 0);
-        c->PSSetConstantBuffers(0, 1, bcb.GetAddressOf());
-        // cb layout matches kBorderHLSL: rgba color, screen size (px), thickness (px), inset (px).
-        const float bcbv[8] = { p.outlineR, p.outlineG, p.outlineB, p.outlineAlpha,
-                                (float)sw, (float)sh, (float)t, (float)inset };
-        D3D11_MAPPED_SUBRESOURCE ms{};
-        if (SUCCEEDED(c->Map(bcb.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
-            memcpy(ms.pData, bcbv, sizeof(bcbv));
-            c->Unmap(bcb.Get(), 0);
-            c->Draw(4, 0);
-        }
-    }
 
     // Cursor pass: alpha-blended quad at the centered hotspot, scaled by zoom. In auto mode
     // (cursorMode 0) we skip it when the focused app hides its own cursor (games), so we don't

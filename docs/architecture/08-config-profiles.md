@@ -128,7 +128,7 @@ There is no formal registry of which keys are hot; the rule falls out of how a v
 consumed, and the comment on each `Config` field states it. The heuristic for reading the code:
 
 - **Hot**: anything read from `t.cfg` per tick or per zoom-in. The reload swaps `t.cfg`, so the
-  next consumer sees the new value. Examples: `dwmFlush`, `cursorSensitivity`, `outline*`,
+  next consumer sees the new value. Examples: `dwmFlush`, `cursorSensitivity`,
   `desktopTransform`, `txMaxStepPct` (the per-tick relative level-step cap, shipped 25 per
   mille after the issue #219 ramp-stall soaks), `lockApps` and `warpLock` (the issue #221
   pointer-warping-game lock tells), `multiMonitor` (applies at the next zoom-in),

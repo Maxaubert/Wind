@@ -37,7 +37,7 @@ flowchart TD
   ENTER --> PAN[pan delta: free / locked / inspect]
   PAN --> FG[foreground facts, pan wall]
   FG --> SWITCH[hybrid instant switch]
-  SWITCH --> EX[PresentExtras: outline, weld suppression, pacing]
+  SWITCH --> EX[PresentExtras: cursor mode, weld suppression, pacing]
   EX --> PRESENT[model->present]
   PRESENT --> REVEAL[reveal gating + handover overlap]
   REVEAL --> BASE[measure cursor baseline for next tick]
@@ -202,8 +202,7 @@ handover choreography live in [Engines and the hybrid pick](03-engines.md).
 
 ### Present and its per-tick overrides
 
-The tick then fills a `PresentExtras` (src/magnifier_model.h): the outline visibility (with the
-low-zoom dwell and the idle-hide fade both computed here from `dt`), the cursor mode, weld
+The tick then fills a `PresentExtras` (src/magnifier_model.h): the cursor mode, weld
 suppression (`suppressCursorSync` when drag-follow or free cursor is active), transform-write
 pausing (around an Inspect click's injected input, and for the launch quiesce), and the game
 pacing flags. Then `t.model->present(r, lvl, cfg, mon, ex)` runs the engine. Two opt-in game

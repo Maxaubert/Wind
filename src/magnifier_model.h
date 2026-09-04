@@ -6,8 +6,6 @@ namespace wind {
 // Per-tick render-only overrides RunTick computes (outline fade, inspect crosshair, click freeze,
 // cursor hide). The transform model ignores everything except drawCursor.
 struct PresentExtras {
-    bool  outline = false;        // draw the edge outline this frame
-    float outlineAlpha = 1.0f;    // idle-fade alpha
     bool  cursorLocked = false;   // Inspect mode: draw the crosshair at the look point
     int   cursorMode = 0;         // 0=auto,1=always,2=never (final, after cursorHidden override)
     int   clickDesktopX = 0;      // SetCursorPos target override (Inspect freeze); <INT_MIN if unset

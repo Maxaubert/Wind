@@ -171,7 +171,7 @@ The schema's header comment is the changelog of record: the settings page was pr
 deciding every row (issue #221 branch). Removed outright from the UI: quick zoom
 (mode/modifier/hotkey), the smooth-zoom toggle (always on now; its two shape sliders survive as
 advanced), scale-cursor-with-zoom, `magnifyStep`, `desktopTransform`, bilinear, sharpness,
-brightness, `hdrTonemap`, `multiMonitor`, the whole outline family, and `cursorVisibility`
+brightness, `hdrTonemap`, `multiMonitor`, and `cursorVisibility`
 (broken in the transform model: `main.cpp` collapses it to `drawCursor = mode != 2`, so only
 "never" did anything, and the hide-cursor hotkey already covers that). The crucial rule:
 **removed from the UI does not mean removed from the product**. Every one of those ini keys is

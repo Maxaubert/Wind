@@ -189,7 +189,7 @@ that invalidates one of the rows above, not a cleaner-looking implementation of 
 ## What the model deliberately does not do
 
 Because Magnifier owns everything visual, most Wind features are documented no-ops here: no
-cursor hide or drawn cursor, no cursor-sensitivity scaling, no Inspect mode, no zoom outline, no
+cursor hide or drawn cursor, no cursor-sensitivity scaling, no Inspect mode, no
 quick zoom, no multi-monitor retarget (`main.cpp` gives the model the primary monitor and notes
 the targeting is a no-op), and no participation in the hybrid model's engine picking, `magnify`
 is only ever an explicit `model=` choice, never auto-selected. The settings UI shows only the
