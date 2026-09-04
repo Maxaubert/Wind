@@ -296,7 +296,6 @@ struct TickState {
     unsigned subWakeups = 0, subWrites = 0;    // per-second diagnostics
     double subGainSum = 0.0, tickGainSum = 0.0; unsigned subGainN = 0, tickGainN = 0;   // diag
     long long rawCountsSub = 0, rawCountsTick = 0;   // diag: |raw| drained per second, per path
-    unsigned tickHist[5]{};                          // diag: ticks by drained counts 0 / 1-2 / 3-5 / 6-8 / 9+
     long long subLastQpc  = 0;                 // last sub-tick that ran (min-interval gate)
     wind::RawRateWindow rawWin;                // locked-regime speed estimate (raw_rate_window.h)
     unsigned long long subLogMs = 0;
@@ -1184,10 +1183,6 @@ static void RunTick(TickState& t) {
     // windowed speed estimate - see LockedGain).
     const int subDx = t.subRawDx, subDy = t.subRawDy;
     t.rawCountsTick += (rawDx < 0 ? -rawDx : rawDx) + (rawDy < 0 ? -rawDy : rawDy);
-    {
-        const int c = (rawDx < 0 ? -rawDx : rawDx) + (rawDy < 0 ? -rawDy : rawDy);
-        ++t.tickHist[c == 0 ? 0 : c <= 2 ? 1 : c <= 5 ? 2 : c <= 8 ? 3 : 4];
-    }
     t.subRawDx = 0; t.subRawDy = 0;
     t.prevDrainQpc = t.lastDrainQpc != 0 ? t.lastDrainQpc : now.QuadPart - 1;
     t.lastDrainQpc = now.QuadPart;
@@ -2914,18 +2909,16 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         }
 
         RunTick(ts);
-        if (ts.subWakeups || ts.subWrites || ts.tickGainN) {
+        if (ts.subWakeups || ts.subWrites || ts.rawCountsTick) {
             const unsigned long long nowS = GetTickCount64();
             if (nowS - ts.subLogMs >= 1000) {
                 wind::Log(wind::LogLevel::Info, "subtick",
-                          "wakeups=%u writes=%u this second | gain sub %.3f (n=%u) tick %.3f (n=%u) | raw counts sub %lld tick %lld | tick hist 0:%u 1-2:%u 3-5:%u 6-8:%u 9+:%u",
+                          "wakeups=%u writes=%u this second | gain sub %.3f (n=%u) tick %.3f (n=%u) | raw counts sub %lld tick %lld",
                           ts.subWakeups, ts.subWrites,
                           ts.subGainN ? ts.subGainSum / ts.subGainN : 0.0, ts.subGainN,
                           ts.tickGainN ? ts.tickGainSum / ts.tickGainN : 0.0, ts.tickGainN,
-                          ts.rawCountsSub, ts.rawCountsTick,
-                          ts.tickHist[0], ts.tickHist[1], ts.tickHist[2], ts.tickHist[3], ts.tickHist[4]);
+                          ts.rawCountsSub, ts.rawCountsTick);
                 ts.rawCountsSub = 0; ts.rawCountsTick = 0;
-                for (auto& hbin : ts.tickHist) hbin = 0;
                 ts.subWakeups = 0; ts.subWrites = 0; ts.subLogMs = nowS;
                 ts.subGainSum = ts.tickGainSum = 0.0; ts.subGainN = ts.tickGainN = 0;
             }

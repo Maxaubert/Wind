@@ -339,25 +339,33 @@ finally {
   if ($windWasRunning -and -not (Get-Process Wind -ErrorAction SilentlyContinue)) { explorer.exe $windExe }
 }
 
-# ---- Wind's own session trace (txTrace=1): settled-level travel, the speed-parity number ----
-$trTravel = 0; $trSub = 0; $trTicks = 0; $trSecs = 0
+# ---- Wind's own session trace (txTrace=1): median sweep amplitude at the settled level, the
+# speed-parity number (a per-second travel figure was misleading: the 8192-entry trace ring and
+# the idle tail before zoom-out weigh the two write paths differently).
+$trAmp = 0; $trSub = 0; $trRows = 0; $trSweeps = 0
 if ($Mode -eq 'wind') {
   Start-Sleep -Milliseconds 1500   # the dump lands at session end
   $tr = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Wind\logs\txtrace-*.csv') -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
   if ($tr -and $tr.LastWriteTime -gt (Get-Date).AddSeconds(-20)) {
     $rows = Import-Csv $tr.FullName
     $lv = @($rows | ForEach-Object { [double]$_.level }); $mx = ($lv | Measure-Object -Maximum).Maximum
-    $prevTx = $null; $t0 = $null; $t1 = $null
+    $amps = New-Object System.Collections.Generic.List[double]
+    $startTx = $null; $startMs = 0; $lastTx = $null; $lastMs = 0; $dir = 0
     for ($i = 0; $i -lt $rows.Count; $i++) {
-      if ([math]::Abs($lv[$i] - $mx) -gt 1e-6) { $prevTx = $null; continue }
-      $tx = [int]$rows[$i].txX
-      if ($null -ne $prevTx) { $trTravel += [math]::Abs($tx - $prevTx) }
-      $prevTx = $tx
-      if ($null -eq $t0) { $t0 = [double]$rows[$i].ms }; $t1 = [double]$rows[$i].ms
-      $trTicks++
+      $trRows++
       if ($rows[$i].PSObject.Properties['sub'] -and [int]$rows[$i].sub -eq 1) { $trSub++ }
+      if ([math]::Abs($lv[$i] - $mx) -gt 1e-6) { continue }
+      $tx = [int]$rows[$i].txX; $ms = [double]$rows[$i].ms
+      if ($null -eq $lastTx) { $startTx = $tx; $startMs = $ms; $lastTx = $tx; $lastMs = $ms; continue }
+      $sgn = [math]::Sign($tx - $lastTx)
+      if ($sgn -ne 0 -and $dir -ne 0 -and $sgn -ne $dir) {
+        if (($lastMs - $startMs) -gt 300) { $amps.Add([math]::Abs($lastTx - $startTx) / $mx) }
+        $startTx = $lastTx; $startMs = $lastMs; $dir = $sgn
+      } elseif ($sgn -ne 0 -and $dir -eq 0) { $dir = $sgn }
+      $lastTx = $tx; $lastMs = $ms
     }
-    if ($t0 -and $t1) { $trSecs = ($t1 - $t0) / 1000.0 }
+    $trSweeps = $amps.Count
+    if ($amps.Count) { $trAmp = Pct ([double[]]$amps.ToArray()) 0.5 }
   }
 }
 # ---- analysis ----
@@ -391,7 +399,7 @@ if ($rawT.Count -gt 10) { $win = [long]([CR]::Freq / 144.1); $t = $rawT[0]; $i =
 $res = [ordered]@{ stamp=$stamp; label=$Label; mode=$Mode; level=[math]::Round($achieved,2); secs=$Secs; fgOk=$fgOk
   compHz=[math]::Round([CR]::CompT.Count / $Secs,1); compMed=[math]::Round((Pct $comp 0.5),2); compP95=[math]::Round((Pct $comp 0.95),2); compP99=[math]::Round((Pct $comp 0.99),2); compMax=[math]::Round((($comp | Measure-Object -Maximum).Maximum),1)
   optHz=[math]::Round([CR]::OptT.Count / $Secs,1); optSampleHz=[math]::Round([CR]::OptSamples / $Secs,1); optMed=[math]::Round((Pct $opt 0.5),2); optP95=[math]::Round((Pct $opt 0.95),2); optP99=[math]::Round((Pct $opt 0.99),2); optMax=[math]::Round((($opt | Measure-Object -Maximum).Maximum),1)
-  windCpuPct=$windCpuPct; trTravelPxPerSec=$(if ($trSecs -gt 0) { [math]::Round($trTravel / $trSecs / [math]::Max(1,$achieved),0) } else { 0 }); trSub=$trSub; trRows=$trTicks; shTracked=$tracked; shMoving=$moving; shMed=[math]::Round($shMed,2); shCv=$shCv; shHolds=$holds; shDoubles=$doubles; shBacksteps=$backsteps; rawHz=[math]::Round([CR]::RawT.Count / $Secs,1); rawP99=[math]::Round((Pct $raw 0.99),2); rawEmptyPct=$(if ($rawWin) { [math]::Round(100.0*$rawEmpty/$rawWin,1) } else { 0 }); curHz=[math]::Round([CR]::CurT.Count / $Secs,1); curMed=[math]::Round((Pct $cur 0.5),2); curP99=[math]::Round((Pct $cur 0.99),2) }
+  windCpuPct=$windCpuPct; trSweepAmpSrcPx=[math]::Round($trAmp,0); trSweeps=$trSweeps; trSub=$trSub; trRows=$trRows; shTracked=$tracked; shMoving=$moving; shMed=[math]::Round($shMed,2); shCv=$shCv; shHolds=$holds; shDoubles=$doubles; shBacksteps=$backsteps; rawHz=[math]::Round([CR]::RawT.Count / $Secs,1); rawP99=[math]::Round((Pct $raw 0.99),2); rawEmptyPct=$(if ($rawWin) { [math]::Round(100.0*$rawEmpty/$rawWin,1) } else { 0 }); curHz=[math]::Round([CR]::CurT.Count / $Secs,1); curMed=[math]::Round((Pct $cur 0.5),2); curP99=[math]::Round((Pct $cur 0.99),2) }
 if ($pm -and (Test-Path $pmCsv)) {
   $rows = Import-Csv $pmCsv
   $groups = $rows | Group-Object Application | Sort-Object Count -Descending
@@ -408,6 +416,6 @@ if ($pm -and (Test-Path $pmCsv)) {
 }
 Write-Host ""
 Write-Host ("  {0,-9} lvl={1,-5} comp {2,5}/s med {3,5}ms p95 {4,5} p99 {5,5} max {6,5} | optical {7,5}/s (sampler {8}/s) med {9,5} p95 {10,5} p99 {11,5} max {12,5} | cursor {13}/s med {14} p99 {15} | raw {17}/s p99 {18}ms empty-frames {19}% | fg={16}" -f $Label,$res.level,$res.compHz,$res.compMed,$res.compP95,$res.compP99,$res.compMax,$res.optHz,$res.optSampleHz,$res.optMed,$res.optP95,$res.optP99,$res.optMax,$res.curHz,$res.curMed,$res.curP99,$fgOk,$res.rawHz,$res.rawP99,$res.rawEmptyPct)
-Write-Host ("            pan-track: tracked {0} moving {1} step med {2}px cv {3} holds {4} doubles {5} backsteps {10} | Wind CPU {6}% of one core | trace: {7} source px/s over {8}s, sub writes {9}" -f $tracked,$moving,$res.shMed,$shCv,$holds,$doubles,$windCpuPct,$res.trTravelPxPerSec,[math]::Round($trSecs,1),$trSub,$backsteps)
+Write-Host ("            pan-track: tracked {0} moving {1} step med {2}px cv {3} holds {4} doubles {5} backsteps {10} | Wind CPU {6}% of one core | trace: sweep amplitude med {7} source px over {8} sweeps, sub writes {9}" -f $tracked,$moving,$res.shMed,$shCv,$holds,$doubles,$windCpuPct,$res.trSweepAmpSrcPx,$trSweeps,$trSub,$backsteps)
 if ($res.pm) { foreach ($k in $res.pm.Keys) { $v = $res.pm[$k]; Write-Host ("     pm {0,-22} n={1,-5} present {2,5}/s p99 {3,5}ms | display {4,5}/s p99 {5,5}ms | gpu med {7} p95 {8} max {9} | {6}" -f $k,$v.n,$v.presentHz,$v.presentP99,$v.displayHz,$v.displayP99,$v.modes,$v.gpuMed,$v.gpuP95,$v.gpuMax) } }
 $res | ConvertTo-Json -Depth 4 -Compress | Add-Content (Join-Path $outDir 'catalog.jsonl')
