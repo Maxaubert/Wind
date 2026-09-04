@@ -35,6 +35,7 @@
 #include "gain_learner.h"  // learned pointer ballistics: locked pan at TRUE desktop speed
 #include "tray_status.h"   // the tray menu's status snapshot
 #include "tick_stats.h"    // frame-pacing ring the tray sparkline draws from
+#include "raw_rate_window.h" // locked-regime speed estimate shared by tick and sub-tick pans
 
 // txPace=2 composite signal (see config.h). One thread blocks in DwmFlush forever and pulses an
 // auto-reset event per real composite; the pacing loop waits on the event WITH A TIMEOUT, so a
@@ -285,6 +286,20 @@ struct TickState {
     bool   revealNeedsComposite = false;       // fullscreen-app zoom-in: also require a post-prime
                                                //   composite in the capture before revealing
     int    hz = 60;                            // resolved tick/refresh rate (auto-detected)
+    // Sub-tick pan (cfg.subTickPan, see config.h + RunPanSubTick). Armed by RunTick for the
+    // interval until the next tick; the main loop then wakes on Raw Input and pans immediately.
+    bool   subTickArmed   = false;
+    double subLevel       = 1.0;               // the settled level the sub-ticks pan at
+    long long lastDrainQpc = 0;                // when the raw accumulator was last drained (tick or sub)
+    long long prevDrainQpc = 0;                // the drain before that (this tick's sample span)
+    int    subRawDx = 0, subRawDy = 0;         // raw counts the sub-ticks consumed since the last tick
+    unsigned subWakeups = 0, subWrites = 0;    // per-second diagnostics
+    double subGainSum = 0.0, tickGainSum = 0.0; unsigned subGainN = 0, tickGainN = 0;   // diag
+    long long rawCountsSub = 0, rawCountsTick = 0;   // diag: |raw| drained per second, per path
+    unsigned tickHist[5]{};                          // diag: ticks by drained counts 0 / 1-2 / 3-5 / 6-8 / 9+
+    long long subLastQpc  = 0;                 // last sub-tick that ran (min-interval gate)
+    wind::RawRateWindow rawWin;                // locked-regime speed estimate (raw_rate_window.h)
+    unsigned long long subLogMs = 0;
     bool   recenterKeyWasDown = false;         // edge-detect the recenterVk key
     CursorLockController cursorLock;            // Inspect mode (freeze-cursor + free-look reticle toggle)
     bool   lockKeyWasDown = false;             // edge-detect the cursorLockVk toggle
@@ -738,6 +753,100 @@ static BallisticsConfig ReadMouseBallistics() {
     return c;
 }
 
+// SUB-TICK PAN (cfg.subTickPan). Runs on the main thread between ticks whenever Raw Input
+// arrives while a locked transform session sits at a settled level. It is the locked pan resolve
+// of RunTick (raw mickeys -> learned gain -> sub-pixel carry -> mapper) applied to the packets
+// that arrived since the last drain, followed by a position-only transform write. The tick that
+// follows drains only what arrived after the last sub-tick and integrates that remainder through
+// the very same state, so the two can never disagree: one integrator (the mapper), one writer
+// (this thread), no cross-thread state.
+//
+// WHY (2026-09-04, tools/comp_rate_probe.ps1 per-frame optical tracking over DOOM at ~70fps):
+// with one write per tick the on-screen pan held still for a whole frame 3-7% of the time and
+// native Magnifier never did. A game frame that arrives between DWM's present and our tick's
+// write is composited with the previous tick's transform; the transform is then a full frame
+// stale on screen. Writes issued at input-event time (the free-cursor hook path) measured zero
+// such frames in every take, and re-sending the tick's value from the hook did nothing - it is
+// the freshness of the position at composite time that matters, not the thread or the call.
+// Locked-regime gain for one drain (tick aggregate or sub-tick packet): the learned table is
+// indexed by counts per tick interval, and raw_rate_window.h makes every drain read exactly that
+// whatever its span - the tick and the sub-ticks MUST agree here or the pan speed would depend
+// on which of them wrote (measured 12-18% apart with two earlier estimators).
+static double LockedGain(TickState& t, long long start, long long end, double counts) {
+    const double winMs = 1000.0 / (t.hz > 0 ? t.hz : 144);
+    const long long winTicks = (long long)(winMs * double(t.freq.QuadPart) / 1000.0);
+    if (start < end - winTicks * 8) start = end - winTicks * 8;   // a long idle before this drain
+    t.rawWin.push(start, end, counts);
+    return t.gainLearner.gainFor(t.rawWin.countsIn(end, winTicks), winMs);
+}
+
+static void RunPanSubTick(TickState& t) {
+    if (!t.subTickArmed) return;
+    int rdx, rdy; g_input.drainRaw(rdx, rdy);
+    if (rdx == 0 && rdy == 0) return;
+    LARGE_INTEGER now; QueryPerformanceCounter(&now);
+    double dtMs = (t.lastDrainQpc != 0)
+        ? double(now.QuadPart - t.lastDrainQpc) * 1000.0 / double(t.freq.QuadPart) : 1.0;
+    const long long spanStart = t.lastDrainQpc != 0 ? t.lastDrainQpc : now.QuadPart - 1;
+    t.lastDrainQpc = now.QuadPart;
+    if (dtMs < 0.05) dtMs = 0.05;
+    t.subRawDx += rdx; t.subRawDy += rdy;
+    t.rawCountsSub += (rdx < 0 ? -rdx : rdx) + (rdy < 0 ? -rdy : rdy);
+    int dx, dy;
+    if (t.cfg.lockedBallistics != 0) {
+        const double inC = std::sqrt((double)rdx * rdx + (double)rdy * rdy);
+        const double g = LockedGain(t, spanStart, now.QuadPart, inC);
+        t.subGainSum += g; ++t.subGainN;
+        t.lockedPanRemX += rdx * g * t.cfg.cursorSensitivity;
+        t.lockedPanRemY += rdy * g * t.cfg.cursorSensitivity;
+    } else {
+        t.lockedPanRemX += rdx * t.cfg.cursorSensitivity;
+        t.lockedPanRemY += rdy * t.cfg.cursorSensitivity;
+    }
+    dx = (int)t.lockedPanRemX; t.lockedPanRemX -= dx;
+    dy = (int)t.lockedPanRemY; t.lockedPanRemY -= dy;
+    if (dx == 0 && dy == 0) return;                       // sub-pixel carry only
+    if (dx >  t.mon.w) dx =  t.mon.w; else if (dx < -t.mon.w) dx = -t.mon.w;
+    if (dy >  t.mon.h) dy =  t.mon.h; else if (dy < -t.mon.h) dy = -t.mon.h;
+    t.mapper.setTickDeltaMs(dtMs > 50.0 ? 50.0 : dtMs);
+    const MapResult r = t.mapper.update(dx, dy, t.subLevel);
+    if (auto* tm = dynamic_cast<TransformModel*>(t.model)) {
+        if (tm->panWrite(r, t.subLevel, t.cfg)) ++t.subWrites;
+    }
+}
+
+// Wait for `h` (the composite pulse or the pacing timer) while servicing Raw Input between
+// ticks: when a packet is queued, pump the message loop (the WM_INPUT handler accumulates it),
+// run the sub-tick pan, and resume waiting for the remainder. With the sub-tick disarmed this
+// is a plain WaitForSingleObject - no extra wakeups at idle or in any non-locked session.
+static DWORD WaitWithSubTicks(TickState& ts, HANDLE h, DWORD timeoutMs) {
+    if (!ts.subTickArmed) return WaitForSingleObject(h, timeoutMs);
+    LARGE_INTEGER start; QueryPerformanceCounter(&start);
+    const double freq = double(ts.freq.QuadPart);
+    for (;;) {
+        DWORD left = INFINITE;
+        if (timeoutMs != INFINITE) {
+            LARGE_INTEGER q; QueryPerformanceCounter(&q);
+            const double usedMs = double(q.QuadPart - start.QuadPart) * 1000.0 / freq;
+            left = usedMs >= timeoutMs ? 0 : (DWORD)(timeoutMs - usedMs + 0.5);
+        }
+        const DWORD w = MsgWaitForMultipleObjects(1, &h, FALSE, left, QS_RAWINPUT);
+        if (w != WAIT_OBJECT_0 + 1) return w;
+        MSG msg;
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            if (msg.message == WM_QUIT) { PostQuitMessage((int)msg.wParam); return WAIT_TIMEOUT; }
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+        LARGE_INTEGER q; QueryPerformanceCounter(&q);
+        const double sinceMs = double(q.QuadPart - ts.subLastQpc) * 1000.0 / freq;
+        if (sinceMs < 0.8) continue;       // coalesce: counts accumulate to the next wakeup
+        ts.subLastQpc = q.QuadPart;
+        ++ts.subWakeups;
+        RunPanSubTick(ts);
+    }
+}
+
 // One magnifier tick: advance zoom, hot-reload config, then pan/draw via the render engine.
 // Pure of any pacing wait - the caller paces. Safe to call from the main loop or from a
 // WM_TIMER during a modal loop.
@@ -1069,6 +1178,20 @@ static void RunTick(TickState& t) {
     }
 
     int rawDx, rawDy; g_input.drainRaw(rawDx, rawDy);
+    // Sub-tick pan bookkeeping: what the sub-ticks already integrated since the last tick is
+    // still "raw activity" for the lock detector and the outline idle logic, but must NOT be
+    // panned again (the locked pan below integrates only this tick's remainder, at the shared
+    // windowed speed estimate - see LockedGain).
+    const int subDx = t.subRawDx, subDy = t.subRawDy;
+    t.rawCountsTick += (rawDx < 0 ? -rawDx : rawDx) + (rawDy < 0 ? -rawDy : rawDy);
+    {
+        const int c = (rawDx < 0 ? -rawDx : rawDx) + (rawDy < 0 ? -rawDy : rawDy);
+        ++t.tickHist[c == 0 ? 0 : c <= 2 ? 1 : c <= 5 ? 2 : c <= 8 ? 3 : 4];
+    }
+    t.subRawDx = 0; t.subRawDy = 0;
+    t.prevDrainQpc = t.lastDrainQpc != 0 ? t.lastDrainQpc : now.QuadPart - 1;
+    t.lastDrainQpc = now.QuadPart;
+    t.subTickArmed = false;   // re-armed below only by a settled, locked, presenting transform tick
 
     bool zoomed = lvl > 1.0;
     bool inspect = t.cursorLock.locked();
@@ -1282,7 +1405,7 @@ static void RunTick(TickState& t) {
                                                        (int)(clip.bottom - clip.top),
                                                        t.mon.w, t.mon.h);
             bool locked = t.detector.update(clipConfined,
-                                            std::abs(rawDx) + std::abs(rawDy),
+                                            std::abs(rawDx + subDx) + std::abs(rawDy + subDy),
                                             std::abs(curDx) + std::abs(curDy),
                                             t.cfg.warpLock != 0, cur.x, cur.y);
             // lockApps (issue #221): listed foreground exe = locked outright, no heuristics.
@@ -1313,7 +1436,8 @@ static void RunTick(TickState& t) {
                 // a per-packet speed estimate cannot see WM_INPUT coalescing.
                 if (t.cfg.lockedBallistics != 0) {
                     const double inC = std::sqrt((double)rawDx * rawDx + (double)rawDy * rawDy);
-                    const double g = t.gainLearner.gainFor(inC, dt * 1000.0);
+                    const double g = LockedGain(t, t.prevDrainQpc, now.QuadPart, inC);
+                    t.tickGainSum += g; ++t.tickGainN;
                     t.lockedPanRemX += rawDx * g * t.cfg.cursorSensitivity;
                     t.lockedPanRemY += rawDy * g * t.cfg.cursorSensitivity;
                     dx = (int)t.lockedPanRemX; t.lockedPanRemX -= dx;
@@ -1651,7 +1775,7 @@ static void RunTick(TickState& t) {
         // Idle-hide fade: when enabled and the outline is visible, accumulate idle time (reset on
         // any hand motion - free OS-cursor delta or raw mickeys), then map it to the fade alpha.
         // dt is the per-tick elapsed time computed at the top of RunTick. Fade duration is 0.3s.
-        const bool outlineMoved = (std::abs(curDx) + std::abs(curDy) + std::abs(rawDx) + std::abs(rawDy)) > 0;
+        const bool outlineMoved = (std::abs(curDx) + std::abs(curDy) + std::abs(rawDx + subDx) + std::abs(rawDy + subDy)) > 0;
         if (t.cfg.outlineIdleHide && ex.outline) {
             t.outlineIdleSec = outlineMoved ? 0.0 : (t.outlineIdleSec + dt);
             ex.outlineAlpha = (float)OutlineIdleAlpha(t.outlineIdleSec, t.cfg.outlineIdleSeconds, 0.3);
@@ -1807,6 +1931,15 @@ static void RunTick(TickState& t) {
             // formula, same dedupe cache as the hook path, so it writes only when the hook has not
             // already put those exact values in (and therefore cannot fight it).
             if (ex.suppressTransformWrite && !ex.pauseWrites) wind::RequestHookTransformWrite();
+            // Sub-tick pan (config.h subTickPan): between this tick and the next, Raw Input
+            // packets pan the view directly. Only the locked (welded, raw-mickey) transform path
+            // at a SETTLED level: free-cursor sessions pin the view to the OS pointer per tick
+            // (or the hook writes them), a ramp is the tick's level logic, Inspect and drag-follow
+            // own the pointer, and pauseWrites/quiesce hold every write.
+            t.subTickArmed = t.cfg.subTickPan != 0 && tmWall != nullptr && zoomed &&
+                             t.detector.locked() && !freeCursor && !inspect && !dragFollow &&
+                             !ex.pauseWrites && !ex.suppressTransformWrite && levelSettled;
+            t.subLevel = lvl;
         } else if (capVsync) {
             // Reduced-push skip tick: block to the next vblank so the loop cadence stays
             // vblank-locked (Present paces the present ticks, this paces the skips). Fallback
@@ -2741,7 +2874,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                 // only on genuine droop - at ~2/3 of the panel max rather than full rate, which
                 // still keeps the weld tight without fighting the composite phase.
                 const DWORD frameMs = ts.hz > 0 ? (DWORD)(1500 / ts.hz + 1) : 11;
-                const DWORD w = WaitForSingleObject(g_compEvt, frameMs);
+                const DWORD w = WaitWithSubTicks(ts, g_compEvt, frameMs);
                 wind::MarkComposite();
                 // Telemetry: a droop episode is invisible in tick dt now that backfill exists, so
                 // count it here. Logged once a second only when timeouts happened.
@@ -2774,13 +2907,29 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             if (ts.hz > 0 && ts.hz != pacedHz) { pacedHz = ts.hz; due.QuadPart = -(10000000LL / pacedHz); }
             if (timer) {
                 SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);
-                WaitForSingleObject(timer, INFINITE);
+                WaitWithSubTicks(ts, timer, INFINITE);
             } else {
                 Sleep(1000 / pacedHz);
             }
         }
 
         RunTick(ts);
+        if (ts.subWakeups || ts.subWrites || ts.tickGainN) {
+            const unsigned long long nowS = GetTickCount64();
+            if (nowS - ts.subLogMs >= 1000) {
+                wind::Log(wind::LogLevel::Info, "subtick",
+                          "wakeups=%u writes=%u this second | gain sub %.3f (n=%u) tick %.3f (n=%u) | raw counts sub %lld tick %lld | tick hist 0:%u 1-2:%u 3-5:%u 6-8:%u 9+:%u",
+                          ts.subWakeups, ts.subWrites,
+                          ts.subGainN ? ts.subGainSum / ts.subGainN : 0.0, ts.subGainN,
+                          ts.tickGainN ? ts.tickGainSum / ts.tickGainN : 0.0, ts.tickGainN,
+                          ts.rawCountsSub, ts.rawCountsTick,
+                          ts.tickHist[0], ts.tickHist[1], ts.tickHist[2], ts.tickHist[3], ts.tickHist[4]);
+                ts.rawCountsSub = 0; ts.rawCountsTick = 0;
+                for (auto& hbin : ts.tickHist) hbin = 0;
+                ts.subWakeups = 0; ts.subWrites = 0; ts.subLogMs = nowS;
+                ts.subGainSum = ts.tickGainSum = 0.0; ts.subGainN = ts.tickGainN = 0;
+            }
+        }
 
 
         if (dwmPaces) {

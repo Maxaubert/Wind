@@ -57,6 +57,16 @@ same (Wind 16%, native 12%). So it is a PULSE on `txWarmHz` (ships 12: rest cost
 tick), one displacement + return per period; an open pulse always closes first. The hitch never
 reproduces on the desktop, so the cadence floor is a game verdict (`tools/warm_cadence_sweep.ps1`,
 `tools/gpu_ab.ps1` = per-process dwm/Wind GPU vs native on the solid target).
+SUB-TICK PAN (2026-09-04, `subTickPan=1` hot): over a GPU-saturated game the pan held a whole
+frame 3-7% of the time with one write per tick (a game frame landing between DWM's present and
+the tick's write composites the PREVIOUS transform) while native never did. Locked transform
+sessions at a settled level now pan on Raw Input ARRIVAL: the main loop waits with
+MsgWaitForMultipleObjects(QS_RAWINPUT), drains, runs the same locked resolve + mapper and calls
+TransformModel::panWrite; the tick integrates only the remainder. One integrator, one writer.
+Both writers MUST look the learned gain up through src/raw_rate_window.h (counts per tick
+interval) or the pan speed depends on who wrote (measured 12-18% apart otherwise). Measured
+native parity (0-2 hold frames per ~2000 vs 100-220; tools/comp_rate_probe.ps1). NOT the fix:
+hook-thread marshalling (worse), public channel, reissuing the tick value from the hook.
 MEASURED HARMFUL, do not re-enable: `txWriteHz`/`txMinOffsetPx` (2px view steps = wobble at low
 zoom; 60Hz view = low fps at high zoom) and gating the cursor sprite on "the view moved" (freezes
 the drawn cursor in the edge zones, worst bottom-left). See docs/HITCH-FINDINGS.md.

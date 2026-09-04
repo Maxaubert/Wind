@@ -403,6 +403,79 @@ void TransformModel::idleTick() {
     teardownMag();
 }
 
+MagTransform TransformModel::computeWrite(double& srcL, double& srcT, double applyLevel,
+                                          const Config& cfg) const {
+    // Edge sampling margin (see transform.h) applied to the SOURCE, not just to the written
+    // transform: srcL/srcT go on to feed the input-transform publish below, and a visual rect
+    // that sat one texel inside a published rect that did not would put the pointer framework's
+    // hover hit-test one source pixel off along that edge - level px on screen. One rect.
+    {
+        const double loX = SrcEdgeFloor(cfg.txEdgeMargin, applyLevel, mon_.w);
+        const double loY = SrcEdgeFloor(cfg.txEdgeMargin, applyLevel, mon_.h);
+        if (srcL < loX) srcL = loX;
+        if (srcT < loY) srcT = loY;
+    }
+    MagTransform m = ComputeMagTransform(srcL, srcT, applyLevel, mon_.w, mon_.h,
+                                         cfg.txEdgeMargin);
+    // 2D write-site 16-bit backstop (issue #191): when the session is MPO-exposed AND the ghost
+    // is not verifiably holding the game off its overlay plane, the never-exceed-32767 invariant
+    // is enforced HERE, structurally, regardless of the mapper walls (which divide by the
+    // CONTROLLER level while this write uses the ramp-limited applyLevel - step-limit drift
+    // otherwise spends the headroom on faith). Checked fresh at write time - a ghost that died
+    // mid-session re-arms the clamp on the very next write, one tick before the wall re-engages.
+    // Both channels recomputed so offsets and translations describe the same rect. MUST share the
+    // wall's evidence gate: clamping while the walls are lifted would pin the view at the 32000
+    // line while the mapper (and welded cursor) pan on past it.
+    if (mpoExposed_ && (cfg.txSamplingMode == 0 || !mpoGhost_.settled(GetTickCount64()))) {
+        // Nearest sampling never lifts the clamp (issue #242): the 16-bit field lives in the
+        // nearest magnification path itself, ghost or no ghost - field-proven 2026-08-29.
+        bool clamped = false;
+        if (m.txX < -32000) { m.txX = -32000; clamped = true; }
+        if (m.txY < -32000) { m.txY = -32000; clamped = true; }
+        if (clamped) {
+            m.offX = (int)(-m.txX / applyLevel);
+            m.offY = (int)(-m.txY / applyLevel);
+        }
+    }
+    return m;
+}
+
+bool TransformModel::panWrite(const MapResult& r, double level, const Config& cfg) {
+    // A live context at exactly the level the tick last applied, or nothing: a ramp in flight
+    // (applyLevel trailing the controller under txMaxStepPct) is the tick's business.
+    if (!magUp_ || lastLevel_ <= 1.001 || level != lastLevel_) return false;
+    double srcL = r.srcLeft, srcT = r.srcTop;
+    const MagTransform m = computeWrite(srcL, srcT, level, cfg);
+    const unsigned long long nowMs = GetTickCount64();
+    const bool changed = m.offX != lastOffX_ || m.offY != lastOffY_ ||
+                         m.txX != lastTxX_ || m.txY != lastTxY_;
+    TxCadenceIn ci;
+    ci.changed = changed; ci.levelMoved = false; ci.rampStopped = true; ci.applyLevel = level;
+    {
+        int dtx = m.txX - lastTxX_; if (dtx < 0) dtx = -dtx;
+        int dty = m.txY - lastTxY_; if (dty < 0) dty = -dty;
+        ci.dMoveDest = dtx > dty ? dtx : dty;
+    }
+    ci.sinceLastWriteMs = nowMs - lastWriteMs_;
+    ci.writeHz = cfg.txWriteHz; ci.minOffsetPx = cfg.txMinOffsetPx; ci.settleMs = kSettleMs;
+    if (!ShouldWriteTransform(ci)) return false;
+    lastOffX_ = m.offX; lastOffY_ = m.offY; lastTxX_ = m.txX; lastTxY_ = m.txY;
+    lastChangeMs_ = nowMs; lastWriteMs_ = nowMs;
+    keepAliveTick_ = 0;          // a real write closes any open warm pulse (as in present)
+    ixPending_ = true;           // the tick's decimated input-transform publish follows the view
+    writeTransform((float)level, m.offX, m.offY, m.txX, m.txY, fastPan_, false);
+    if (traceOn_) {
+        LARGE_INTEGER qf, qc; QueryPerformanceFrequency(&qf); QueryPerformanceCounter(&qc);
+        TxTick& e = traceBuf_[traceHead_ % kTraceCap];
+        e.ms = double(qc.QuadPart) * 1000.0 / double(qf.QuadPart);
+        e.level = level; e.txX = m.txX; e.offX = m.offX;
+        e.spriteX = lastSpriteX_; e.spriteY = lastSpriteY_;
+        e.wrote = 1; e.changed = 1; e.ramping = 0; e.warm = 0; e.sub = 1;
+        ++traceHead_;
+    }
+    return true;
+}
+
 void TransformModel::present(const MapResult& r, double level, const Config& cfg,
                              const MonitorTarget& mon, const PresentExtras& ex) {
     (void)mon;
@@ -510,38 +583,8 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     cfgWobbleCage_ = cfg.txWobbleCage;        // diagnostic cage + threshold px (issue #229)
     if (level > sessionMaxLevel_) sessionMaxLevel_ = level;
     const bool ramping = applyLevel != level || (applyLevel != lastLevel_ && lastLevel_ > 0.0);
-    // Edge sampling margin (see transform.h) applied to the SOURCE, not just to the written
-    // transform: srcL/srcT go on to feed the input-transform publish below, and a visual rect
-    // that sat one texel inside a published rect that did not would put the pointer framework's
-    // hover hit-test one source pixel off along that edge - level px on screen. One rect.
-    {
-        const double loX = SrcEdgeFloor(cfg.txEdgeMargin, applyLevel, mon_.w);
-        const double loY = SrcEdgeFloor(cfg.txEdgeMargin, applyLevel, mon_.h);
-        if (srcL < loX) srcL = loX;
-        if (srcT < loY) srcT = loY;
-    }
-    MagTransform m = ComputeMagTransform(srcL, srcT, applyLevel, mon_.w, mon_.h,
-                                         cfg.txEdgeMargin);
-    // 2D write-site 16-bit backstop (issue #191): when the session is MPO-exposed AND the ghost
-    // is not verifiably holding the game off its overlay plane, the never-exceed-32767 invariant
-    // is enforced HERE, structurally, regardless of the mapper walls (which divide by the
-    // CONTROLLER level while this write uses the ramp-limited applyLevel - step-limit drift
-    // otherwise spends the headroom on faith). Checked fresh at write time - a ghost that died
-    // mid-session re-arms the clamp on the very next write, one tick before the wall re-engages.
-    // Both channels recomputed so offsets and translations describe the same rect. MUST share the
-    // wall's evidence gate: clamping while the walls are lifted would pin the view at the 32000
-    // line while the mapper (and welded cursor) pan on past it.
-    if (mpoExposed_ && (cfg.txSamplingMode == 0 || !mpoGhost_.settled(GetTickCount64()))) {
-        // Nearest sampling never lifts the clamp (issue #242): the 16-bit field lives in the
-        // nearest magnification path itself, ghost or no ghost - field-proven 2026-08-29.
-        bool clamped = false;
-        if (m.txX < -32000) { m.txX = -32000; clamped = true; }
-        if (m.txY < -32000) { m.txY = -32000; clamped = true; }
-        if (clamped) {
-            m.offX = (int)(-m.txX / applyLevel);
-            m.offY = (int)(-m.txY / applyLevel);
-        }
-    }
+    // Source floor + 16-bit clamp: shared with panWrite() (see computeWrite).
+    MagTransform m = computeWrite(srcL, srcT, applyLevel, cfg);
     if (cfg.tdrTest == 2) {
         // Overflow probe (issue #148 harness): keep the level-space translation inside a signed
         // 16-bit range. If the far-right max-zoom crashes vanish with this, some DWM/driver
@@ -950,6 +993,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         e.changed = (unsigned char)(trChanged ? 1 : 0);
         e.ramping = (unsigned char)(trRamping ? 1 : 0);
         e.warm = (unsigned char)(trWarm ? 1 : 0);
+        e.sub = 0;
         ++traceHead_;
     }
     if (smoothPan_ && level > 1.0) {
@@ -1024,7 +1068,7 @@ void TransformModel::traceDump() {
              (unsigned long long)GetTickCount64());
     FILE* f = nullptr;
     if (_wfopen_s(&f, path, L"w") != 0 || !f) return;
-    fprintf(f, "ms,dt,level,txX,offX,spriteX,spriteY,wrote,changed,ramping,warm\n");
+    fprintf(f, "ms,dt,level,txX,offX,spriteX,spriteY,wrote,changed,ramping,warm,sub\n");
     const int n = traceHead_ < kTraceCap ? traceHead_ : kTraceCap;
     const int start = traceHead_ < kTraceCap ? 0 : (traceHead_ % kTraceCap);
     double prev = 0.0;
@@ -1032,9 +1076,9 @@ void TransformModel::traceDump() {
         const TxTick& e = traceBuf_[(start + i) % kTraceCap];
         const double dt = prev > 0.0 ? (e.ms - prev) : 0.0;
         prev = e.ms;
-        fprintf(f, "%.3f,%.3f,%.6f,%d,%d,%d,%d,%d,%d,%d,%d\n",
+        fprintf(f, "%.3f,%.3f,%.6f,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
                 e.ms, dt, e.level, e.txX, e.offX, e.spriteX, e.spriteY,
-                (int)e.wrote, (int)e.changed, (int)e.ramping, (int)e.warm);
+                (int)e.wrote, (int)e.changed, (int)e.ramping, (int)e.warm, (int)e.sub);
     }
     fclose(f);
     traceHead_ = 0;

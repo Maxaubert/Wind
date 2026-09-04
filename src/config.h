@@ -335,6 +335,16 @@ struct Config {
     // never fighting a TIGHTER clip (a game confine, Inspect's 1px freeze). 0 = off (hot).
     int edgeClip = 1;
     int txPace = 0;
+    // SUB-TICK PAN (2026-09-04, hot). Over a GPU-saturated game the on-screen pan stalled for a
+    // whole frame 3-7% of the time (tools/comp_rate_probe.ps1, per-frame optical tracking) while
+    // native Magnifier never did. Mechanism: a game frame that lands between DWM's present and
+    // Wind's once-per-tick write is composited with the PREVIOUS tick's transform; writes issued
+    // at input-event time (the free-cursor hook path) measured zero stalls. 1 = while a locked
+    // (welded) transform session sits at a settled level, the main loop wakes on every Raw Input
+    // packet between ticks, integrates it through the same mapper and gain, and writes the
+    // transform immediately - the tick then finds the position already advanced and only writes
+    // the remainder. One integrator, one writer, no cross-thread state. 0 = tick writes only.
+    int subTickPan = 1;
     int txHookWrite = 0;
     int txFreeCursor = 1;
     // WRITE CADENCE - SHIPPED OFF (tried ON 2026-08-26, REVERTED the same day on field report).

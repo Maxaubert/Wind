@@ -198,6 +198,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "lockedBallistics")   c.lockedBallistics = std::stoi(val);
             else if (key == "edgeClip")           c.edgeClip = std::stoi(val);
             else if (key == "txPace")             c.txPace = std::stoi(val);
+            else if (key == "subTickPan")         c.subTickPan = std::stoi(val);
             else if (key == "txHookWrite")        c.txHookWrite = std::stoi(val);
             else if (key == "txMinOffsetPx")      c.txMinOffsetPx = std::stoi(val);
             else if (key == "txIdleReleaseMs")    c.txIdleReleaseMs = std::stoi(val);

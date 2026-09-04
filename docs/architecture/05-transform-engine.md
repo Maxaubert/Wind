@@ -320,7 +320,36 @@ overlay (`ScreenClippingHost.exe`: fullscreen, borderless, `WS_EX_NOREDIRECTIONB
 the full hold on every snip while zoomed, freezing the view and deadening the zoom keys for 1.5s
 (log-proven). `WS_EX_TOPMOST` is deliberately not in the veto set: fullscreen games set it.
 
-## Hook writes: the single-writer design that shipped off
+## Sub-tick pan writes (the low-fps game fix, 2026-09-04)
+
+Field report: over a ~70 fps game Wind's pan felt capped at the game's frame rate while native
+Magnifier stayed at panel rate. Per-frame optical tracking of the magnified content
+(`tools/comp_rate_probe.ps1`: one screen BitBlt per vblank, horizontal shift by cross-correlation)
+over DOOM at 70 fps, 4-5x, injected constant-velocity pan:
+
+| | hold frames per ~2000 moving | step cv | DWM presents/s |
+|---|---|---|---|
+| Wind, one write per tick | 100-220 (plus doubles) | 0.30-0.35 | 131-137 |
+| native Magnifier | 0 | 0.15-0.21 | 138-139 |
+| Wind, sub-tick pan | 0-2 | 0.16-0.25 | 134-140 |
+
+Mechanism: a game frame that arrives between DWM's present and the tick's write is composited
+with the PREVIOUS tick's transform, so the content holds for a frame and then double-steps. It
+is the freshness of the position at composite time that matters - not the thread, the channel or
+the call: marshalling the tick's write onto the hook thread made it worse (10-14% holds), the
+public `MagSetFullscreenTransform` channel changed nothing, and re-sending the tick's value from
+inside the mouse hook changed nothing. Writes at input-event time (the free-cursor hook path)
+measured zero holds in every take, and that is what `panWrite` gives the locked path from the
+main thread: see [The tick loop](02-tick-loop.md#sub-tick-pan-locked-transform-sessions).
+
+`TransformModel::panWrite` shares `computeWrite` (source floor + 16-bit clamp), the cadence gate
+and the `last*` dedupe cache with `present()`, refuses unless a context is live at exactly the
+level the last `present()` applied, and stamps `ixPending_` so the tick's decimated
+input-transform publish follows the view. Pan speed is unchanged by construction: both writers
+look the learned gain up through `RawRateWindow` (src/raw_rate_window.h), which reads every
+drain - a tick aggregate or one packet - as counts per tick interval, the footing the table was
+learned on (measured 1842/1791 vs 1849/1835 source px/s on identical injected input).
+
 
 Issue #206 attacked cursor-to-view latency: tick-paced writes measured 4.36ms median (a uniform
 spread across exactly one 144Hz tick) against native's 0.58ms, because native writes from inside
@@ -338,7 +367,10 @@ The field verdict and its explanation are preserved in `src/config.h`: writing p
 434-685/s against a 144Hz compositor, rewrote the view 4-5 times per displayed frame, so content
 and the DWM-sampled cursor came from different instants and the cursor swam. The lesson worth
 keeping: time-to-write is not the metric, frame coherence is. Do not re-enable without bounding
-writes to one per composited frame with content and cursor sampled at the same instant. With the
+writes to one per composited frame with content and cursor sampled at the same instant. (The
+2026-09-04 game measurements above re-ran this path over DOOM: with the frame gate, `txHookWrite=2`,
+it showed the same zero-hold result as ungated, so the coherence concern is a desktop finding,
+not a game one; the locked path got its input-time writes from the main thread instead.) With the
 knob off, ownership stays on the tick thread and every call runs inline, exactly the pre-#206
 behavior; the choice is made at startup and cannot move afterward (thread affinity).
 
@@ -350,6 +382,10 @@ behavior; the choice is made at startup and cannot move afterward (thread affini
 - `src/tx_cadence.h` + `tests/test_tx_cadence.cpp`: the pure write-cadence gate.
 - `src/mag_host.h/.cpp`, `src/mag_thread.h`: the shared runtime refcount, channels, marshalling.
 - `src/hook_transform.h/.cpp`: the parked hook-write path.
+- `src/raw_rate_window.h` + `tests/test_raw_rate_window.cpp`: the pure speed window both pan
+  writers share.
+- `tools/comp_rate_probe.ps1`: the per-frame optical / PresentMon / raw-input probe behind the
+  sub-tick measurements (Wind, native and control, same injected hand).
 - `src/launch_quiesce.h`: the quiesce arm predicate; use sites in `src/main.cpp`.
 - Evidence: [PERF-ACRYLIC-PARITY-2026-08-21](../PERF-ACRYLIC-PARITY-2026-08-21.md),
   [WOBBLE-CAPTURE-2026-08-21](../WOBBLE-CAPTURE-2026-08-21.md),

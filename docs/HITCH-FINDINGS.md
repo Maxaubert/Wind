@@ -228,6 +228,51 @@ Next step for whoever picks this up: instrument what governs the composition rat
 / actual display refresh) across a rest, for Wind and native side by side. The answer is in why
 native holds 144Hz while writing nothing.
 
+## "Wind runs at the game's frame rate, native at 144" (2026-09-04): mechanism and fix
+
+Field report: over DOOM at ~70 fps, Wind's pan feels capped at the game's rate; native Magnifier
+is visibly at panel rate, A/B'd side by side. `tools/comp_rate_probe.ps1` measures the screen
+itself per vblank (one BitBlt of a band, horizontal shift of three strips by cross-correlation),
+DWM's presents (PresentMon, all processes) and the raw-input stream, for Wind, native and a
+no-magnifier control, all driven by the same injected hand over the same game. Per 15 s take at
+4-5x, ~1350-2100 moving frames:
+
+| | hold frames | double steps | step cv | DWM presents/s |
+|---|---|---|---|---|
+| Wind, tick writes (shipped before) | 93-219 | 8-104 | 0.28-0.35 | 130-137 |
+| native Magnifier ("within edges") | 0 | 0-5 | 0.15-0.21 | 138-139 |
+| Wind, sub-tick pan (`subTickPan=1`) | 0-2 | 0-2 | 0.16-0.25 | 134-140 |
+
+Mechanism: the game frame. A frame that lands between DWM's present and the tick's write is
+composited with the previous tick's transform: the content holds a frame, then double-steps.
+DWM's own GPU time is identical either way (median 1.47 ms), so it is not compositor cost; it is
+the staleness of the position at the instant DWM composes. Eliminated one by one, each with the
+same probe: pacing mode (0/1/2), the write channel (public vs private), the input-transform
+publish, the sprite, the warm pulse, the level, sampling mode, a 72 Hz write cap - none moved the
+holds. What did: writing at input-event time. The free-cursor hook path (`txHookWrite=1`, and
+the frame-gated `=2`) measured 0 holds in every take; marshalling the tick's write onto the hook
+thread made it WORSE (10-14%: later in the frame), and re-sending the tick's value from inside the
+hook did nothing (same stale value). So the locked path now pans on Raw Input arrival from the
+main thread (sub-tick pan: `WaitWithSubTicks` / `RunPanSubTick` in main.cpp,
+`TransformModel::panWrite`), one integrator, one writer, no cross-thread state.
+
+Speed parity took two more rounds: per-drain dt over-read queued packets (12% faster), a
+sample window that reset per tick under-read (10% slower). `src/raw_rate_window.h` makes every
+drain read as counts per tick interval (drains tile time, so the window count is exact) and the
+two paths agree to 1-3% (gain 1.77 vs 1.76 on the same stream, 1842/1791 vs 1849/1835 source
+px/s). CPU: 7-10% of one core either way at 430 packets/s.
+
+Harness lessons that cost a night: SendInput relative moves must carry
+`MOUSEEVENTF_MOVE_NOCOALESCE` or a passive raw-input sink sees ~126 packets/s with 15% empty
+frames (the injected stream itself, not Wind); an elevated runner must be launched
+`-WindowStyle Hidden` and the probe must re-assert the game's foreground before zooming and
+before recording, or the console steals focus and the take measures the desktop; and every take
+must start from the monitor centre or part of every sweep is spent clamped at an edge.
+
+Still open from this work: one sub-tick take (of ~20) froze - the main loop stopped ticking for
+~17 s with the view frozen until the harness killed Wind; a dump-on-stall catcher
+(scratchpad `hangcatch.ps1`) ran 16 further takes clean. Not reproduced, not explained.
+
 ## Open items
 
 - Zoom-ramp spikes (~1 per cycle, 45 ms) - DWM re-scale cost during the ramp.

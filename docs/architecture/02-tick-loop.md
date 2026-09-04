@@ -148,7 +148,7 @@ sources depending on who currently owns the truth about the pointer:
 | Regime | Source of truth | Delta |
 |---|---|---|
 | Free (desktop) | The OS cursor itself | `GetCursorPos - lastSetVirtual`, scaled by `cursorSensitivity` |
-| Locked (game holds the mouse) | Raw Input mickeys | `rawDx/rawDy * cursorSensitivity` |
+| Locked (game holds the mouse) | Raw Input mickeys | learned gain (`gain_learner.h`) x `cursorSensitivity`, at input-event time when armed (sub-tick pan, see Pacing) |
 | Inspect (cursor frozen) | Ballistics-cooked mickeys | `drainCooked` with a sub-pixel carry |
 
 The free regime is the "oracle": Windows already applied pointer acceleration to the real cursor,
@@ -284,6 +284,30 @@ tuned on this rig silently changes behavior on 60 Hz and 240 Hz panels.
   from beating against the panning view.
 - **Game pacing modes**: pace themselves inside `RunTick` (vblank waits or the present
   accumulator) and are excluded from the timer wait.
+
+### Sub-tick pan (locked transform sessions)
+
+The wait between ticks is not always a plain wait. While a LOCKED transform session sits at a
+settled level (`TickState::subTickArmed`, set at the end of a presenting tick; `subTickPan=1`),
+the main loop waits with `MsgWaitForMultipleObjects(..., QS_RAWINPUT)` (`WaitWithSubTicks`,
+src/main.cpp) and services Raw Input as it arrives: pump the queue (the `WM_INPUT` handler
+accumulates), then `RunPanSubTick` drains the accumulator, runs the locked pan resolve on that
+remainder (learned gain, sub-pixel carry, the same mapper) and calls
+`TransformModel::panWrite` - a position-only write at the settled level. The tick that follows
+drains only what arrived after the last sub-tick and integrates that through the very same state,
+so there is one integrator and one writer; the sub-ticks merely move part of the tick's work
+earlier. Sub-ticks are coalesced to at most one per 0.8 ms (an 8 kHz mouse must not wake the loop
+8000 times a second), the raw counts they consumed are still reported to the lock detector and
+the outline idle logic (`subRawDx/Dy`), and everything else - level ramps, the weld, the sprite,
+the input-transform publish, warm pulses - stays per tick.
+
+Why: over a GPU-saturated game (DOOM at ~70 fps) the on-screen pan held still for a whole frame
+3-7% of the time with one write per tick, and native Magnifier never did (per-frame optical
+tracking, `tools/comp_rate_probe.ps1`). A game frame that lands between DWM's present and the
+tick's write is composited with the previous tick's transform. Writing at input-event time keeps
+the transform fresh whenever DWM composites, and measured 0-1 such frames per ~2000 - native
+parity - with the pan speed unchanged. `docs/HITCH-FINDINGS.md` has the measurements and the
+paths that did NOT work (hook-thread marshalling, re-sending the tick's value from the hook).
 
 Device-lost recovery also lives in the main loop, not the tick: when the render engine reports a
 removed D3D device, the loop restores the cursor first, cleans Inspect state, marks the churny

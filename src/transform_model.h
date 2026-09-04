@@ -1,6 +1,7 @@
 #pragma once
 #include "magnifier_model.h"
 #include "mag_host.h"
+#include "transform.h"      // MagTransform (computeWrite)
 #include "comp_pin.h"
 #include "cursor_blanker.h"
 #include "cursor_sprite.h"
@@ -38,6 +39,12 @@ public:
     void setRestLevel(double l) { restLevel_ = l < 1.0 ? 1.0 : l; }
     void present(const MapResult& r, double level, const Config& cfg,
                  const MonitorTarget& mon, const PresentExtras& ex) override;
+    // SUB-TICK PAN WRITE (cfg.subTickPan, see config.h): position only, at the settled level the
+    // last present() applied. Same source floor, 16-bit clamp, cadence gate and dedupe cache as
+    // present(), so the tick's next write sees exactly what DWM holds. Level logic, warm pulses,
+    // the input-transform publish, the sprite and the weld all stay per tick. Returns true when
+    // a write went out. Refuses (false) unless a context is live at exactly `level`.
+    bool panWrite(const MapResult& r, double level, const Config& cfg);
     bool coversShell() const override { return false; }
     // True when THIS present actually called SetCursorPos (weld executed; not deduped, not
     // suppressed by drag-follow). RunTick's #169 measured-baseline logic reads it exactly like
@@ -81,7 +88,7 @@ private:
     bool spriteFirst_ = false;       // sprite placed at least once this session (lockstep gate)
     // Per-tick trace (cfg.txTrace). Fixed ring, no allocation on the tick path.
     struct TxTick { double ms; double level; int txX, offX, spriteX, spriteY;
-                    unsigned char wrote, changed, ramping, warm; };
+                    unsigned char wrote, changed, ramping, warm, sub; };
     static const int kTraceCap = 8192;
     TxTick traceBuf_[kTraceCap]{};
     int  traceHead_ = 0;
@@ -148,6 +155,10 @@ private:
     // asyncTx=1 hands the write to a dedicated thread with latest-value coalescing so the tick
     // never waits. Instrumentation logs per-second max/avg write time either way.
     void writeTransform(float lvl, int offX, int offY, int tx, int ty, bool fast, bool unusedAsync);
+    // The write-site geometry shared by present() and panWrite(): the low-side source floor
+    // (applied to srcL/srcT in place - the input-transform rects must describe the same rect)
+    // and the MPO 16-bit translation clamp (issues #191/#242).
+    MagTransform computeWrite(double& srcL, double& srcT, double applyLevel, const Config& cfg) const;
     void noteWrite(double ms, bool ok);
     void noteIxWrite(double ms, bool ok);            // input-transform publish stats (issue #189)
     void noteIxStomp();                              // foreign writer overwrote our publish (#217)
