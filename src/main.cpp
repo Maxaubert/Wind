@@ -831,10 +831,12 @@ static DWORD WaitWithSubTicks(TickState& ts, HANDLE h, DWORD timeoutMs) {
         }
         const DWORD w = MsgWaitForMultipleObjects(1, &h, FALSE, left, QS_RAWINPUT);
         if (w != WAIT_OBJECT_0 + 1) return w;
+        // WM_INPUT only. Everything else (tray, hotkeys, display/config changes, quit) keeps its
+        // single entry point at the top of the main loop, so no handler runs against an armed
+        // sub-tick's stale state from inside this wait.
         MSG msg;
-        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
-            if (msg.message == WM_QUIT) { PostQuitMessage((int)msg.wParam); return WAIT_TIMEOUT; }
-            TranslateMessage(&msg);
+        while (PeekMessageW(&msg, nullptr, WM_INPUT, WM_INPUT, PM_REMOVE)) {
+            if (msg.message == WM_QUIT) { PostQuitMessage((int)msg.wParam); return WAIT_OBJECT_0; }
             DispatchMessageW(&msg);
         }
         LARGE_INTEGER q; QueryPerformanceCounter(&q);
@@ -1438,9 +1440,12 @@ static void RunTick(TickState& t) {
                     dx = (int)t.lockedPanRemX; t.lockedPanRemX -= dx;
                     dy = (int)t.lockedPanRemY; t.lockedPanRemY -= dy;
                 } else {
-                    dx = (int)std::lround(rawDx * t.cfg.cursorSensitivity);
-                    dy = (int)std::lround(rawDy * t.cfg.cursorSensitivity);
-                    t.lockedPanRemX = 0.0; t.lockedPanRemY = 0.0;
+                    // Same sub-pixel carry as the sub-tick path (RunPanSubTick), so the two
+                    // writers round identically and no fraction is thrown away between them.
+                    t.lockedPanRemX += rawDx * t.cfg.cursorSensitivity;
+                    t.lockedPanRemY += rawDy * t.cfg.cursorSensitivity;
+                    dx = (int)t.lockedPanRemX; t.lockedPanRemX -= dx;
+                    dy = (int)t.lockedPanRemY; t.lockedPanRemY -= dy;
                 }
             } else {
                 // Drag-follow (issue #169): while a mouse button is physically held, the pointer IS
@@ -1567,7 +1572,13 @@ static void RunTick(TickState& t) {
         // whatever the game is doing (6.9 -> 13.4 -> 25ms with G-Sync following a 73fps game) and a
         // fixed per-tick keep-fraction turns a steady hand into an unsteady lens. Clamped: after a
         // real stall we want the lens to catch up, but a 500ms gap should not snap it.
-        t.mapper.setTickDeltaMs(dt > 0.05 ? 50.0 : dt * 1000.0);
+        {
+            // The sub-ticks already fed the mapper their spans; the tick feeds only what is
+            // left since the last drain, or the time-based easing (cursorSmoothing) would decay
+            // the same interval twice (review finding).
+            const double spanMs = double(now.QuadPart - t.prevDrainQpc) * 1000.0 / double(t.freq.QuadPart);
+            t.mapper.setTickDeltaMs(spanMs > 50.0 ? 50.0 : (spanMs > 0.0 ? spanMs : dt * 1000.0));
+        }
         MapResult r = t.mapper.update(freeCursor ? 0 : dx, freeCursor ? 0 : dy, lvl);
         // Dead-zone probe (probeClicks=1, diagnostic): the field annotates hover dead zones by
         // clicking. Plain click = "hover works here" (OK), Ctrl+click = "dead here" (DEAD). Each
@@ -1931,9 +1942,13 @@ static void RunTick(TickState& t) {
             // at a SETTLED level: free-cursor sessions pin the view to the OS pointer per tick
             // (or the hook writes them), a ramp is the tick's level logic, Inspect and drag-follow
             // own the pointer, and pauseWrites/quiesce hold every write.
+            // ...and the APPLIED level must equal the controller's (txMaxStepPct trails a fast
+            // ramp for a few ticks; txGrid snaps): panWrite refuses any other level, and arming
+            // then would drain and pan a mapper whose write never goes out.
             t.subTickArmed = t.cfg.subTickPan != 0 && tmWall != nullptr && zoomed &&
                              t.detector.locked() && !freeCursor && !inspect && !dragFollow &&
-                             !ex.pauseWrites && !ex.suppressTransformWrite && levelSettled;
+                             !ex.pauseWrites && !ex.suppressTransformWrite && levelSettled &&
+                             tmWall->writtenLevel() == lvl;
             t.subLevel = lvl;
         } else if (capVsync) {
             // Reduced-push skip tick: block to the next vblank so the loop cadence stays
@@ -2855,7 +2870,13 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         // but the whole pipeline follows VRR droop). 1 = free timer (measured WOBBLY: uneven
         // writes per composite). 2 = DwmFlush with a one-frame-timeout backfill: phase-locked
         // while composition is healthy, full-rate ticks when it droops.
-        const int txPaceMode = renderModelActive ? 0 : ts.cfg.txPace;
+        // An ARMED sub-tick pan (subTickPan, see RunPanSubTick) needs a wait it can service Raw
+        // Input from, and txPace=0 has none: it blocks in DwmFlush AFTER the tick. So while armed
+        // the loop takes the composite-pulse pacing (mode 2) - the same one-tick-per-composite
+        // alignment, waited for BEFORE the tick where MsgWait can interleave the packets. Found
+        // in review: without this the shipped default (txPace=0) never ran a sub-tick at all.
+        const int txPaceMode = renderModelActive ? 0
+                             : ((ts.cfg.txPace == 0 && ts.subTickArmed) ? 2 : ts.cfg.txPace);
         bool dwmPaces = zoomed && (renderModelActive ? (ts.cfg.dwmFlush != 0)
                                                      : (txPaceMode == 0));
         if (zoomed && !renderModelActive && txPaceMode == 2) {
@@ -2909,7 +2930,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         }
 
         RunTick(ts);
-        if (ts.subWakeups || ts.subWrites || ts.rawCountsTick) {
+        if (ts.subWakeups || ts.subWrites || ts.tickGainN) {
             const unsigned long long nowS = GetTickCount64();
             if (nowS - ts.subLogMs >= 1000) {
                 wind::Log(wind::LogLevel::Info, "subtick",

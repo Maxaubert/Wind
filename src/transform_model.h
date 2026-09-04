@@ -2,6 +2,7 @@
 #include "magnifier_model.h"
 #include "mag_host.h"
 #include "transform.h"      // MagTransform (computeWrite)
+#include "tx_cadence.h"     // TxCadenceIn (cadenceIn)
 #include "comp_pin.h"
 #include "cursor_blanker.h"
 #include "cursor_sprite.h"
@@ -159,6 +160,10 @@ private:
     // (applied to srcL/srcT in place - the input-transform rects must describe the same rect)
     // and the MPO 16-bit translation clamp (issues #191/#242).
     MagTransform computeWrite(double& srcL, double& srcT, double applyLevel, const Config& cfg) const;
+    // The write-cadence inputs shared by present() and panWrite() (one filler, so a new field or
+    // a changed destination-space rule cannot land in one path and not the other).
+    TxCadenceIn cadenceIn(const MagTransform& m, double applyLevel, bool levelMoved,
+                          bool rampStopped, const Config& cfg) const;
     void noteWrite(double ms, bool ok);
     void noteIxWrite(double ms, bool ok);            // input-transform publish stats (issue #189)
     void noteIxStomp();                              // foreign writer overwrote our publish (#217)

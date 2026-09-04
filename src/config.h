@@ -334,6 +334,8 @@ struct Config {
     // that a nullptr release would destroy), intersected with whatever clip already exists, and
     // never fighting a TIGHTER clip (a game confine, Inspect's 1px freeze). 0 = off (hot).
     int edgeClip = 1;
+    // NOTE: while a sub-tick pan is armed (subTickPan below) the loop uses mode 2's pulse wait
+    // whatever txPace says - mode 0 has no wait the packets could be serviced from.
     int txPace = 0;
     // SUB-TICK PAN (2026-09-04, hot). Over a GPU-saturated game the on-screen pan stalled for a
     // whole frame 3-7% of the time (tools/comp_rate_probe.ps1, per-frame optical tracking) while

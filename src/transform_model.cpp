@@ -440,6 +440,28 @@ MagTransform TransformModel::computeWrite(double& srcL, double& srcT, double app
     return m;
 }
 
+TxCadenceIn TransformModel::cadenceIn(const MagTransform& m, double applyLevel, bool levelMoved,
+                                      bool rampStopped, const Config& cfg) const {
+    TxCadenceIn ci;
+    ci.changed = m.offX != lastOffX_ || m.offY != lastOffY_ ||
+                 m.txX != lastTxX_ || m.txY != lastTxY_ || applyLevel != lastLevel_;
+    ci.levelMoved = levelMoved;
+    ci.rampStopped = rampStopped;
+    ci.applyLevel = applyLevel;
+    // DESTINATION space: tx is screen pixels, whereas offX is SOURCE pixels, where at 20x a 1px
+    // step is a 20px jump on screen. Thresholding the wrong one would gate ~nothing at high zoom.
+    {
+        int dtx = m.txX - lastTxX_; if (dtx < 0) dtx = -dtx;
+        int dty = m.txY - lastTxY_; if (dty < 0) dty = -dty;
+        ci.dMoveDest = dtx > dty ? dtx : dty;
+    }
+    ci.sinceLastWriteMs = GetTickCount64() - lastWriteMs_;
+    ci.writeHz = cfg.txWriteHz;
+    ci.minOffsetPx = cfg.txMinOffsetPx;
+    ci.settleMs = kSettleMs;
+    return ci;
+}
+
 bool TransformModel::panWrite(const MapResult& r, double level, const Config& cfg) {
     // A live context at exactly the level the tick last applied, or nothing: a ramp in flight
     // (applyLevel trailing the controller under txMaxStepPct) is the tick's business.
@@ -447,23 +469,28 @@ bool TransformModel::panWrite(const MapResult& r, double level, const Config& cf
     double srcL = r.srcLeft, srcT = r.srcTop;
     const MagTransform m = computeWrite(srcL, srcT, level, cfg);
     const unsigned long long nowMs = GetTickCount64();
-    const bool changed = m.offX != lastOffX_ || m.offY != lastOffY_ ||
-                         m.txX != lastTxX_ || m.txY != lastTxY_;
-    TxCadenceIn ci;
-    ci.changed = changed; ci.levelMoved = false; ci.rampStopped = true; ci.applyLevel = level;
-    {
-        int dtx = m.txX - lastTxX_; if (dtx < 0) dtx = -dtx;
-        int dty = m.txY - lastTxY_; if (dty < 0) dty = -dty;
-        ci.dMoveDest = dtx > dty ? dtx : dty;
-    }
-    ci.sinceLastWriteMs = nowMs - lastWriteMs_;
-    ci.writeHz = cfg.txWriteHz; ci.minOffsetPx = cfg.txMinOffsetPx; ci.settleMs = kSettleMs;
+    const TxCadenceIn ci = cadenceIn(m, level, false, true, cfg);
     if (!ShouldWriteTransform(ci)) return false;
     lastOffX_ = m.offX; lastOffY_ = m.offY; lastTxX_ = m.txX; lastTxY_ = m.txY;
     lastChangeMs_ = nowMs; lastWriteMs_ = nowMs;
     keepAliveTick_ = 0;          // a real write closes any open warm pulse (as in present)
     ixPending_ = true;           // the tick's decimated input-transform publish follows the view
     writeTransform((float)level, m.offX, m.offY, m.txX, m.txY, fastPan_, false);
+    // SAME BREATH AS THE TRANSFORM (issue #229, the hook path's lesson): the sprite is a layered
+    // window in DESKTOP space that DWM magnifies with the content, so moving the source rect
+    // without moving the sprite displays it (pan * level) screen px off the lens point until
+    // the next present() re-places it - a cursor that slides and snaps back at packet rate.
+    // Whoever moves the view moves the sprite: the tick's own placement rule, applied here.
+    if (spriteShown_ && sprite_ && !wind::HookTransformArmed()) {
+        const int sx = spriteBand16_ ? (int)(r.cursorScreenX + 0.5) + mon_.x
+                                     : r.clickDesktopX + mon_.x;
+        const int sy = spriteBand16_ ? (int)(r.cursorScreenY + 0.5) + mon_.y
+                                     : r.clickDesktopY + mon_.y;
+        if (sx != lastSpriteX_ || sy != lastSpriteY_) {
+            sprite_->moveTo(sx, sy);
+            lastSpriteX_ = sx; lastSpriteY_ = sy;
+        }
+    }
     if (traceOn_) {
         LARGE_INTEGER qf, qc; QueryPerformanceFrequency(&qf); QueryPerformanceCounter(&qc);
         TxTick& e = traceBuf_[traceHead_ % kTraceCap];
@@ -617,22 +644,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // The decision itself is pure and unit-tested (src/tx_cadence.h, tests/test_tx_cadence.cpp) -
     // the escapes that stop a gate stranding the view are exactly the kind of thing that is easy
     // to get wrong once and never notice.
-    TxCadenceIn ci;
-    ci.changed          = changed;
-    ci.levelMoved       = applyLevel != lastLevel_;
-    ci.rampStopped      = rampStopped;
-    ci.applyLevel       = applyLevel;
-    // DESTINATION space: tx is screen pixels, whereas offX is SOURCE pixels, where at 20x a 1px
-    // step is a 20px jump on screen. Thresholding the wrong one would gate ~nothing at high zoom.
-    {
-        int dtx = m.txX - lastTxX_; if (dtx < 0) dtx = -dtx;
-        int dty = m.txY - lastTxY_; if (dty < 0) dty = -dty;
-        ci.dMoveDest = dtx > dty ? dtx : dty;
-    }
-    ci.sinceLastWriteMs = nowMs - lastWriteMs_;
-    ci.writeHz          = cfg.txWriteHz;
-    ci.minOffsetPx      = cfg.txMinOffsetPx;
-    ci.settleMs         = kSettleMs;
+    const TxCadenceIn ci = cadenceIn(m, applyLevel, applyLevel != lastLevel_, rampStopped, cfg);
     const bool writeNow = ShouldWriteTransform(ci);
 
     if (writeNow) {
