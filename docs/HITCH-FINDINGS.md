@@ -271,7 +271,7 @@ must start from the monitor centre or part of every sweep is spent clamped at an
 
 Still open from this work: one sub-tick take (of ~20) froze - the main loop stopped ticking for
 ~17 s with the view frozen until the harness killed Wind; a dump-on-stall catcher
-(scratchpad `hangcatch.ps1`) ran 16 further takes clean. Not reproduced, not explained.
+(scratchpad `hangcatch.ps1`) ran 54 further takes clean, including 30 on the final build. Not reproduced, not explained; the frozen take ran an intermediate build that still carried the (inactive) hook-reissue experiment.
 
 ## Open items
 
