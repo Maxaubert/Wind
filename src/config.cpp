@@ -157,7 +157,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "diagnostics")      c.diagnostics = std::stoi(val);
             else if (key == "cursorSensitivity")  c.cursorSensitivity = std::stod(val);
             else if (key == "cursorSmoothing")    c.cursorSmoothing = std::stod(val);
-            else if (key == "cursorScaleWithZoom")c.cursorScaleWithZoom = std::stoi(val);
+            else if (key == "cursorConstantSize") c.cursorConstantSize = std::stoi(val);
             else if (key == "cursorVisibility")   c.cursorVisibility = val;
             else if (key == "model")              c.model = val;
             else if (key == "magnifyStep")        c.magnifyStep = std::stoi(val);
@@ -397,9 +397,9 @@ Config LoadConfig(const std::wstring& path) {
                "cursorSensitivity=1.0\n"
                "; cursorSmoothing: light inertia on the pan (0=off, higher=smoother+laggier; 0.4 shipped: light)\n"
                "cursorSmoothing=0.4\n"
-               "; cursorScaleWithZoom: 0=constant on-screen cursor size at every zoom (the product\n"
-               ";   rule); 1=draw the cursor scaled by the zoom level (opt-in look)\n"
-               "cursorScaleWithZoom=0\n"
+               "; cursorConstantSize: 0=the cursor grows with the zoom (default); 1=keep it at normal\n"
+               ";   desktop size at every zoom (render engine only). Replaces cursorScaleWithZoom (ignored).\n"
+               "cursorConstantSize=0\n"
                "; cursorVisibility: auto=hide our cursor when the focused app hides its own (games);\n"
                ";   always=always draw it; never=never draw it\n"
                "cursorVisibility=auto\n"

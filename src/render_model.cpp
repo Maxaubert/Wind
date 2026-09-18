@@ -15,7 +15,7 @@ void FillRenderParams(RenderFrameParams& p, const MapResult& r, const Config& cf
     p.cursorScreenX = r.cursorScreenX; p.cursorScreenY = r.cursorScreenY;
     // clickDesktop is local monitor px; SetCursorPos needs virtual-desktop coords.
     p.clickDesktopX = r.clickDesktopX + mon.x; p.clickDesktopY = r.clickDesktopY + mon.y;
-    p.cursorScaleWithZoom = (cfg.cursorScaleWithZoom != 0);
+    p.cursorScaleWithZoom = (cfg.cursorConstantSize == 0);   // issue #253
     p.bilinear = (cfg.bilinear != 0);
     p.sharpness = cfg.sharpness;
     p.brightness = cfg.brightness;

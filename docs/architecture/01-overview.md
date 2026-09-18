@@ -29,14 +29,13 @@ Exclusive-fullscreen games are explicitly out of scope.
 These are commitments, not implementation details. Code that violates one is a bug even if it
 "works". They are stated here once so later chapters can refer back instead of re-arguing them.
 
-**The cursor keeps a constant on-screen size at every zoom level.** In every model, in every zoom
-mode Wind will ever grow, the pointer must not scale with the magnification. A cursor that grows
-with the level is a bug, not a look. The `cursorScaleWithZoom` ini key ships 0; scaling is the
-opt-in exception the user owns (`src/config.h`). The render engine satisfies this by drawing the
-decoded real cursor (`src/cursor_decode.cpp`) at a fixed sprite size; the transform engine's sprite
-lives in desktop space where DWM magnifies it, which is a tracked open item
-(`spriteBand16`, the screen-space sprite experiment in `src/transform_model.cpp`), not a design
-choice.
+**The cursor grows with the zoom, in every engine.** (Owner decision 2026-09-18, issue #253; this
+replaces the earlier "constant on-screen size" commitment.) The transform engine's sprite lives in
+desktop space, so DWM magnifies it with everything else; the render engine draws the decoded real
+cursor (`src/cursor_decode.cpp`) scaled by the zoom level so both engines look the same. A render
+cursor held at desktop size read as tiny on every fresh install. `cursorConstantSize=1`
+(`src/config.h`) is the opt-in for a constant desktop-size pointer in the render engine; the old
+`cursorScaleWithZoom` key is retired and ignored, because every ini carried it as an explicit 0.
 
 **The screen stays interactive while zoomed.** Wind is not a screenshot viewer. Clicks pass through
 to the app under the drawn cursor: the render overlay is click-through
