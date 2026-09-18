@@ -198,12 +198,16 @@ restartWind), `dirty`, `openIni`, `exportDiagnostics`, `pickExe`, `mpoState`, `s
   flips per 20s; measured 13-24 spike frames per 14 wheel-clicks, 0 with no context). Writing
   level 1.0 does NOT leave the mode; only releasing the runtime does. Hence the transform model
   creates its context on a session's first write and releases it ~1.2s after the zoom ends.
-- CURSOR SIZE IS CONSTANT, ALWAYS (product rule, no exceptions): the pointer must keep the SAME
-  on-screen size at every zoom level, in every model and every zoom we ever build. It must never
-  scale with the zoom - a cursor that grows with the level is a bug, not a look. Accordingly
-  `cursorScaleWithZoom` ships 0 (scaling is the opt-in exception the user owns). (The transform
-  model's sprite lives in desktop space, so DWM magnifies it with the zoom - that is the open
-  item, not a design choice.)
+- THE CURSOR GROWS WITH THE ZOOM, IN EVERY ENGINE (owner decision 2026-09-18, issue #253; this
+  REPLACES the old "cursor size is constant, always" rule - do not restore it). The transform
+  engine cannot do otherwise (its sprite lives in desktop space, DWM magnifies it), and a render
+  cursor pinned at desktop size reads as TINY next to it: that was the fresh-install tiny-cursor
+  bug, reproduced on a wiped box with the public 0.6.2 installer. `cursorScaleWithZoom` is
+  RETIRED AND IGNORED - the default template wrote it as an explicit 0 into every ini, so a
+  changed default alone would never have reached an existing install. `cursorConstantSize`
+  (default 0; 1 = old constant-size look, render only) is the opt-in. DEBUGGING TRAP from the
+  same hunt: the dev box ini differs from a clean install (model, desktopTransform, this key),
+  so "works at home" proves nothing about defaults - wipe `%LOCALAPPDATA%\Wind` to test them.
 - Pure-logic files MUST NOT include `<windows.h>` - keeps unit tests desktop-free.
   The test build compiles only the pure `.cpp` files and defines `WIND_TESTS`.
 - INPUT SWALLOWING: bound keybinds are eaten so they never double-fire into the focused app. Mouse

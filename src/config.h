@@ -439,9 +439,12 @@ struct Config {
     double cursorSensitivity = 1.0;
     double cursorSmoothing = 0.4;    // light inertia on the pan: 0 = off, higher = smoother/laggier
                                      // (0.4 shipped: light smoothing, less lag than 0.8)
-    int    cursorScaleWithZoom = 0;  // 0 = constant on-screen size at every zoom (the product
-                                     //   rule: "cursor size is constant, always"); 1 = opt-in
-                                     //   scale-with-zoom look
+    // 0 (default) = the render engine's cursor grows with the zoom, matching the transform
+    // engine (DWM magnifies its sprite); 1 = opt-in constant desktop-size pointer. Replaces
+    // cursorScaleWithZoom (issue #253), which is IGNORED: the default template wrote it as an
+    // explicit 0 into every ini, so fresh installs got a tiny cursor in render and a changed
+    // default alone could never have reached them.
+    int    cursorConstantSize = 0;
     // Cursor visibility while zoomed: "auto" = follow the focused app (don't draw a cursor
     // when a game hides its own via ShowCursor(FALSE); detected with GetCursorInfo's
     // CURSOR_SHOWING flag, which our own MagShowSystemCursor hide does NOT affect);

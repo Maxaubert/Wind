@@ -26,15 +26,23 @@ TEST_CASE("StripUiOnlyKeys drops exactly the UI-owned lines (theme toggle must n
 
 TEST_CASE("parses renderer knobs") {
     Config c = ParseConfig(
-        "cursorSensitivity=1.5\ncursorScaleWithZoom=0\nbilinear=1\n");
+        "cursorSensitivity=1.5\ncursorConstantSize=1\nbilinear=1\n");
     CHECK(c.cursorSensitivity == doctest::Approx(1.5));
-    CHECK(c.cursorScaleWithZoom == 0);
+    CHECK(c.cursorConstantSize == 1);
     CHECK(c.bilinear == 1);
+}
+// Issue #253: every ini written before 0.6.3 carries an explicit cursorScaleWithZoom=0 from the
+// default template (no UI ever exposed it, so nobody chose it), which pinned the render engine's
+// cursor at desktop size - a tiny pointer on every fresh install. The key is retired so the
+// update fixes those installs; cursorConstantSize is the opt-in for the old look.
+TEST_CASE("legacy cursorScaleWithZoom=0 no longer pins a constant-size cursor") {
+    Config c = ParseConfig("cursorScaleWithZoom=0\n");
+    CHECK(c.cursorConstantSize == 0);
 }
 TEST_CASE("renderer knobs have sane defaults") {
     Config c = ParseConfig("");
     CHECK(c.cursorSensitivity == doctest::Approx(1.0));
-    CHECK(c.cursorScaleWithZoom == 0);         // constant cursor size (the product rule); scaling is opt-in
+    CHECK(c.cursorConstantSize == 0);          // cursor grows with the zoom, like transform (issue #253)
     CHECK(c.bilinear == 1);
     CHECK(c.sharpness == doctest::Approx(0.0));   // off by default
     CHECK(c.cursorSmoothing == doctest::Approx(0.4));

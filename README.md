@@ -147,7 +147,7 @@ Profiles (tray -> Profiles, or the Settings titlebar) snapshot the whole file pe
   hold to zoom; all ship unbound until the guided setup. Alternates: `*2` variants.
 - `maxLevel`, `zoomInSpeed`/`zoomOutSpeed`, `smoothZoom*` - zoom range and feel.
 - `cursorSensitivity`, `cursorSmoothing` - pan speed and inertia.
-- `bilinear`, `sharpness`, `cursorScaleWithZoom` (default 0: constant cursor size),
+- `bilinear`, `sharpness`, `cursorConstantSize` (default 0: the cursor grows with the zoom),
   `cursorVisibility` - image and cursor rendering.
 - `brightness`, `hdrTonemap` - output tuning.
 - Pacing/perf: `vsync` (default on), `dwmFlush` (default 0), `gameFpsCap`, `gpuPriority`.

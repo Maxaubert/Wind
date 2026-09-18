@@ -7,4 +7,4 @@
 #define WIND_VER_PATCH 2
 
 // String form for logs/snapshot/UI. Keep in sync with the numeric parts above.
-#define WIND_VERSION_STR "0.6.2"
+#define WIND_VERSION_STR "0.6.3"
