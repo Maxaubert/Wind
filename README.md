@@ -15,7 +15,15 @@
 
 ---
 
-https://github.com/user-attachments/assets/cf86509c-e5cd-4055-bfce-ca385de72965
+
+
+https://github.com/user-attachments/assets/dfe056e0-8d02-4a42-9704-332674a62550
+
+
+
+
+
+
 
 A replacement for the built-in Magnifier, with smooth continuous zoom that keeps tracking the
 mouse even when games hide, clip, or center-lock the cursor.
