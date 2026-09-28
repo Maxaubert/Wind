@@ -19,16 +19,23 @@ Function windPageStart
   ${If} ${Silent}
     Abort
   ${EndIf}
+  ; Back runs no leave function, so the page we came from may still hold its canvas: the
+  ; bitmaps, the DC and the GDI+ images, one of which keeps its PNG locked. Free it here so
+  ; nothing leaks and the next unpack can write (issue #263). Idempotent after a Next.
+  Call WindCanvasFree
   !insertmacro HIDE_WIZARD_BUTTONS
   nsDialogs::Create 1018
   Pop $Dialog
   ${If} $Dialog == error
+    !insertmacro WIND_THAW
     Abort
   ${EndIf}
   Push $Dialog
   Call WindCanvas
   Call WindPickOverlay
   Call WindDraw
+  ; the first frame is in place: let the window show it (see WIND_FREEZE)
+  !insertmacro WIND_THAW
   ${NSD_CreateTimer} WindTick ${TICK}
 FunctionEnd
 
@@ -42,8 +49,11 @@ Function windWelcomeCreate
   ${If} ${Silent}
     Abort
   ${EndIf}
-  InitPluginsDir
-  !insertmacro UNPACK_MEDIA
+  ; once per run: Back returns here, and the art is already unpacked
+  ${If} $ArtDir == ""
+    InitPluginsDir
+    !insertmacro UNPACK_MEDIA
+  ${EndIf}
   StrCpy $Screen 0
   Call windPageStart
   nsDialogs::Show
@@ -68,6 +78,9 @@ Function windLicenceLeave
   ; reaches Next another way (Enter, a stray WM_COMMAND). Abort keeps the page up, and the
   ; canvas and its timer with it.
   ${If} $Accepted <> 1
+    ; staying on this page: undo what the click set up for leaving it
+    StrCpy $Leaving 0
+    !insertmacro WIND_THAW
     Abort
   ${EndIf}
   Call windPageLeave
@@ -149,6 +162,11 @@ Function windCopyShow
   SendMessage $R5 ${PBM_SETBARCOLOR} 0 ${TRACK_FG}
   !insertmacro OAT COPY_TRACK
   System::Call 'user32::SetWindowPos(p $R5, p 0, i $R0, i $R1, i $R2, i $R3, i 0x10)'
+  ; NSIS calls this before it shows its own page, so thawing now would repaint the window
+  ; with nothing on it: one white frame (recorded). Show the page first; NSIS's own
+  ; ShowWindow right after is then a no-op.
+  ShowWindow $R4 8          ; SW_SHOWNA
+  !insertmacro WIND_THAW
 FunctionEnd
 
 ; ---- 4. done -----------------------------------------------------------------
