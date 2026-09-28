@@ -1498,6 +1498,7 @@ static void RunTick(TickState& t) {
                     wind::FinishReturn(t.viewOwner);
                     t.mapper.reset(ptrX, ptrY);          // hand back exactly at the pointer
                     t.lastSetVirtual = cur;
+                    t.viewDetached = false;              // normal weld/hook paths resume this tick
                 } else {
                     r = wind::DetachedMap(t.viewCx, t.viewCy, ptrX, ptrY, lvl, t.mon.w, t.mon.h);
                     t.mapper.reset(t.viewCx, t.viewCy);   // hybrid switches and the next tick start here
