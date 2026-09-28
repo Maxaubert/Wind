@@ -58,9 +58,6 @@ Function windLicenceCreate
   ${If} ${Silent}
     Abort
   ${EndIf}
-  ; the full text the "Read the full licence" link opens
-  SetOutPath "$PLUGINSDIR"
-  File "/oname=LICENSE.txt" "..\LICENSE"
   StrCpy $Screen 4
   Call windPageStart
   nsDialogs::Show
@@ -79,8 +76,28 @@ FunctionEnd
 ; Opens the licence in the user's own text viewer. Through explorer.exe, like
 ; WIND_LAUNCH_DEELEVATED, so the viewer does not inherit setup's elevation: an elevated
 ; Notepad can open and save any file on the machine.
+; Not from $PLUGINSDIR: an elevated NSIS locks that folder to Administrators, so the
+; de-elevated viewer is refused. GetTempFileName makes a fresh, uniquely named entry in the
+; user's own temp folder instead; turned into a folder, it inherits the user's access and no
+; one can have planted anything at that name beforehand.
 Function WindOpenLicence
-  Exec '"$WINDIR\explorer.exe" "$PLUGINSDIR\LICENSE.txt"'
+  ${If} $LicenceDir == ""
+    GetTempFileName $LicenceDir
+    Delete $LicenceDir
+    CreateDirectory $LicenceDir
+    SetOutPath $LicenceDir
+    File "/oname=LICENSE.txt" "..\LICENSE"
+  ${EndIf}
+  Exec '"$WINDIR\explorer.exe" "$LicenceDir\LICENSE.txt"'
+FunctionEnd
+
+; Tidies the viewer's copy when setup closes. A viewer reads the whole file on open, so
+; one still showing it is unaffected; RMDir without /r only removes the folder once empty.
+Function .onGUIEnd
+  ${If} $LicenceDir != ""
+    Delete "$LicenceDir\LICENSE.txt"
+    RMDir $LicenceDir
+  ${EndIf}
 FunctionEnd
 
 ; ---- 2. setup ----------------------------------------------------------------

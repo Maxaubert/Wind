@@ -23,6 +23,7 @@ Var WantAutostart
 Var WantDesktop
 Var RunAfter
 Var Accepted     ; the licence box: Continue does nothing until this is 1
+Var LicenceDir   ; where "Read the full licence" put its copy, empty until then
 
 ; ---- stop a running Wind -----------------------------------------------------
 ; An upgrade always runs over a live tray app holding its own exe open. Wind exposes an
