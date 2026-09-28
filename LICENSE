@@ -3,9 +3,9 @@ Wind - proprietary software licence
 Copyright (c) 2026 Max Aubert. All rights reserved.
 
 Wind, together with its source code, build scripts, documentation and design
-specifications (the "Software"), is the proprietary and confidential property of
-Max Aubert, protected by copyright law including the Norwegian Copyright Act
-(lov om opphavsrett til andsverk mv.) and the Berne Convention.
+specifications (the "Software"), is the proprietary property of Max Aubert,
+protected by copyright law including the Norwegian Copyright Act (lov om
+opphavsrett til andsverk mv.) and the Berne Convention.
 
 1. SOURCE CODE
 
@@ -42,11 +42,25 @@ Max Aubert, protected by copyright law including the Norwegian Copyright Act
    licences. See THIRD-PARTY-NOTICES.md. Nothing in this licence limits any
    rights granted to you under those licences with respect to those components.
 
-5. PRIOR RELEASES
+5. TERMINATION
+
+   Any permission granted by this licence ends automatically, without notice, if
+   you breach any of its terms. On termination you must stop using the Software
+   and delete every copy of it in your possession or control. Sections 3, 6 and 7
+   survive termination.
+
+6. PRIOR RELEASES
 
    Versions of this software published on or before 2026-08-31 (up to and
    including release v0.6.1, commit 161cb70) were released under the MIT
    licence. That grant continues to apply to those versions, and to those
    versions only. It does not extend to this version or to any later version.
+
+7. GOVERNING LAW AND JURISDICTION
+
+   This licence is governed by the laws of Norway, without regard to its
+   conflict-of-law rules. Any dispute arising out of or in connection with this
+   licence or the Software shall be subject to the exclusive jurisdiction of the
+   Norwegian courts.
 
 Enquiries about commercial licensing: aubert@post.com
