@@ -35,6 +35,14 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Started from a pwsh 7 window, setup (and so this script) inherits pwsh 7's PSModulePath,
+# and Windows PowerShell then cannot load its own Microsoft.PowerShell.Security: there is no
+# Cert: drive, signing fails, and setup quietly keeps the standard build (issue #265).
+# This script only ever needs the in-box modules, so pin the path to them.
+$env:PSModulePath = "$env:SystemRoot\system32\WindowsPowerShell\v1.0\Modules;$env:ProgramFiles\WindowsPowerShell\Modules"
+Import-Module Microsoft.PowerShell.Security, PKI
+
 $subject = 'CN=Wind Local Signing'
 $targets = @($Stage, "$Dir\WindConfig.exe")
 $trustStores = 'Root', 'TrustedPublisher'
