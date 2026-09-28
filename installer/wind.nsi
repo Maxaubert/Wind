@@ -161,6 +161,11 @@ Section "Wind" SEC_WIND
   ; The done screen is walked to by autoclose: the Next button it would otherwise wait for has
   ; been hidden since .onGUIInit.
   SetAutoClose true
+  ; That walk is a page swap no click started, so freeze here as a click would (issue #263);
+  ; the done screen thaws after its first frame. Last, so a failure above never leaves it on.
+  ${IfNot} ${Silent}
+    !insertmacro WIND_FREEZE
+  ${EndIf}
 SectionEnd
 
 Section "Uninstall"

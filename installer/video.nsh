@@ -379,6 +379,22 @@ FunctionEnd
   System::Call 'user32::PostMessageW(p $HWNDPARENT, i ${WM_COMMAND}, p ${ID}, p 0)'
 !macroend
 
+; The page swap flash (issue #263). NSIS builds the next page and destroys the old one in
+; between our last frame and the new page's first, and with the pointer over the window
+; that gap was composited as the whole window in pure white for 3-4 frames (recorded with
+; Desktop Duplication, every DWM frame). Freezing redraw on the top-level window across the
+; swap keeps the last frame on screen until the new page has drawn its first one. Frozen
+; only by our own Next and Back; every page thaws after its first draw.
+!macro WIND_FREEZE
+  SendMessage $HWNDPARENT ${WM_SETREDRAW} 0 0
+!macroend
+!macro WIND_THAW
+  SendMessage $HWNDPARENT ${WM_SETREDRAW} 1 0
+  ; RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW: redraw was off, so nothing
+  ; that changed meanwhile has been painted yet
+  System::Call 'user32::RedrawWindow(p $HWNDPARENT, p 0, p 0, i 0x0185)'
+!macroend
+
 !macro TOGGLE_ROW RECT STATE
   !insertmacro HITS ${RECT} $0
   ${If} $0 = 1
@@ -401,10 +417,12 @@ Function WindClick
     Return
   ${EndIf}
   ${If} $Hot == "next"
+    !insertmacro WIND_FREEZE
     !insertmacro POST_CMD 1
     Return
   ${EndIf}
   ${If} $Hot == "back"
+    !insertmacro WIND_FREEZE
     !insertmacro POST_CMD 3
     Return
   ${EndIf}
