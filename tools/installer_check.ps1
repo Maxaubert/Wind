@@ -20,6 +20,14 @@
 param()
 
 $ErrorActionPreference = 'Stop'
+
+# build.bat runs this in Windows PowerShell, and release.ps1 runs build.bat from pwsh 7, whose
+# PSModulePath is inherited: Microsoft.PowerShell.Security then fails to load and the Cert:
+# drive does not exist (issue #265, the failed v0.9.0/v0.9.1 release runs). Pin the in-box path.
+if ($PSVersionTable.PSEdition -eq 'Desktop') {
+    $env:PSModulePath = "$env:SystemRoot\system32\WindowsPowerShell\v1.0\Modules;$env:ProgramFiles\WindowsPowerShell\Modules"
+    Import-Module Microsoft.PowerShell.Security
+}
 $root = Split-Path -Parent $PSScriptRoot
 $script:fail = @()
 
