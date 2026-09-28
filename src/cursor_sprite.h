@@ -1,12 +1,24 @@
 #pragma once
 #include <windows.h>
 #include <unordered_map>
+#include "sprite_layer.h"
 namespace wind {
 class CursorSprite {
 public:
     enum class ShapeStatus { Rendered, Hidden, Unsupported };
     explicit CursorSprite(const std::unordered_map<HCURSOR, HCURSOR>& originals) : originals_(originals) {}
-    bool create(int zorderBand = 0);   // >0 -> CreateWindowInBand (above the shell; needs UIAccess)
+    // zorderBand > 0 -> CreateWindowInBand (above the shell; needs UIAccess). autoHigh (issue
+    // #269) also creates a second window in band 16; setLayer() then picks which one shows.
+    // capturable: leave the windows visible to screen capture (the dualcursor test rig only).
+    bool create(int zorderBand = 0, bool autoHigh = false, bool capturable = false);
+    // Automatic band (issue #269): the low window (zorderBand, as before) and a band-16 one hold
+    // the same shape at the same place, and exactly one is ever shown. Switching invalidates the
+    // shape cache, so the next refreshShape()/showCrosshair() paints the incoming window, and the
+    // next show() reveals it BEFORE hiding the outgoing one: no frame without a cursor.
+    bool hasHigh() const { return hwndHigh_ != nullptr; }
+    int  highBand() const { return usedBandHigh_; }
+    SpriteLayer layer() const { return layer_; }
+    void setLayer(SpriteLayer l);
     // The band the window ACTUALLY got (the cascade can refuse the request; band_window logs
     // it). Callers keying behavior to a band (spriteBand16 screen-space positioning) must read
     // this, never the requested value - a refused band with requested-keyed behavior mispositions.
@@ -39,13 +51,19 @@ public:
     void destroy();
 private:
     int usedBand_ = 0;
+    int usedBandHigh_ = 0;
+    HWND makeWindow(int band, int* usedBand, bool capturable);
+    HWND hwndLow_ = nullptr;           // zorderBand (band 2 under UIAccess by default)
+    HWND hwndHigh_ = nullptr;          // band 16, only with autoHigh
+    HWND pendingHide_ = nullptr;       // the outgoing window after a switch, hidden by show()/hide()
+    SpriteLayer layer_ = SpriteLayer::Low;
     void renderMaskShape();
     void renderCrosshair();
     bool displaced() const;            // a visible, overlapping window sits above us in z-order
     static const int kSize = 64;       // base (1x) logical canvas; buffers are kSize * scale_
     int bufSize() const { return kSize * scale_; }
     const std::unordered_map<HCURSOR, HCURSOR>& originals_;
-    HWND    hwnd_ = nullptr;
+    HWND    hwnd_ = nullptr;           // the active window: hwndLow_ or hwndHigh_
     HCURSOR lastCursor_ = nullptr;
     ShapeStatus lastVerdict_ = ShapeStatus::Hidden;
     HICON   iconCopy_ = nullptr;

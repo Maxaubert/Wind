@@ -17,7 +17,7 @@ static const wchar_t* kClassName = L"WindCursorSprite";
 // sprite together with the content beneath it, so cursor and view are
 // rigidly locked and cannot wobble against each other.
 
-bool CursorSprite::create(int zorderBand) {
+HWND CursorSprite::makeWindow(int band, int* usedBand, bool capturable) {
     HINSTANCE hInst = GetModuleHandleW(nullptr);
     // Register once and keep the atom: RegisterClassExW returns 0 on a re-register (class is
     // process-global and never unregistered), and CreateWindowInBand needs a valid atom, so cache it.
@@ -33,30 +33,76 @@ bool CursorSprite::create(int zorderBand) {
 
     const DWORD exStyle = WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT
                         | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
-    hwnd_ = nullptr;
     // Match the render overlay's z-band (needs UIAccess) so the sprite draws above the shell's
     // immersive bands - the only way the cursor can cover the magnified taskbar / Start / tray,
     // and (band 17, issue #162) the Snipping Tool capture overlay. Without it the sprite is an
     // ordinary topmost window and the shell composites over it. Undocumented, so it is loaded
     // dynamically and cascades down to band 16 then plain topmost; see band_window.h.
-    int usedBand = 0;
-    hwnd_ = wind::CreateBandedWindow(exStyle, s_atom, L"WindCursor", WS_POPUP,
-                                     0, 0, kSize, kSize, hInst, zorderBand, &usedBand);
-    if (!hwnd_) {
-        usedBand = 0;
-        hwnd_ = CreateWindowExW(exStyle, kClassName, L"WindCursor", WS_POPUP,
-                                0, 0, kSize, kSize, nullptr, nullptr, hInst, nullptr);
+    *usedBand = 0;
+    HWND h = wind::CreateBandedWindow(exStyle, s_atom, L"WindCursor", WS_POPUP,
+                                      0, 0, kSize, kSize, hInst, band, usedBand);
+    if (!h) {
+        *usedBand = 0;
+        h = CreateWindowExW(exStyle, kClassName, L"WindCursor", WS_POPUP,
+                            0, 0, kSize, kSize, nullptr, nullptr, hInst, nullptr);
     }
-    usedBand_ = hwnd_ ? usedBand : 0;
-    if (hwnd_) {
+    if (h) {
         // Exempt the sprite from Aero Peek, exactly like the render overlay (issue #141). Resting
         // on a taskbar thumbnail makes DWM preview that window and hide every other one, and no
         // z-band beats that: it is a compositor effect. Unexempted, the cursor showed over the
         // thumbnail and then vanished ~0.5 s later, on every hover (issue #267, owner recording).
         BOOL exPeek = TRUE;
-        DwmSetWindowAttribute(hwnd_, DWMWA_EXCLUDED_FROM_PEEK, &exPeek, sizeof(exPeek));
+        DwmSetWindowAttribute(h, DWMWA_EXCLUDED_FROM_PEEK, &exPeek, sizeof(exPeek));
+        // Invisible to screen capture, like the real Windows pointer, which screenshots never
+        // contain. Captured, the sprite was frozen into the Snipping Tool's screenshot: a dimmed
+        // arrow under the snip crosshair that panned with the picture (issue #269, reproduced).
+        // Owner decision 2026-09-28: always hidden, so recordings show no cursor either. The
+        // hidden spriteCapturable knob exists only for the dualcursor rig, which measures it.
+        if (!capturable) SetWindowDisplayAffinity(h, WDA_EXCLUDEFROMCAPTURE);
     }
+    return h;
+}
+
+bool CursorSprite::create(int zorderBand, bool autoHigh, bool capturable) {
+    int used = 0;
+    hwndLow_ = makeWindow(zorderBand, &used, capturable);
+    usedBand_ = hwndLow_ ? used : 0;
+    // The band-16 twin (issue #269). Only worth having when the low window is below 16 and the
+    // band is actually granted (UIAccess): a refused request falls through to plain topmost,
+    // which would be a second LOW window, so that one is discarded.
+    if (hwndLow_ && autoHigh && usedBand_ < kSpriteHighBand) {
+        int usedHigh = 0;
+        hwndHigh_ = makeWindow(kSpriteHighBand, &usedHigh, capturable);
+        if (hwndHigh_ && usedHigh != kSpriteHighBand) {
+            DestroyWindow(hwndHigh_);
+            hwndHigh_ = nullptr;
+        }
+        usedBandHigh_ = hwndHigh_ ? usedHigh : 0;
+    }
+    hwnd_ = hwndLow_;
+    layer_ = SpriteLayer::Low;
     return hwnd_ != nullptr;
+}
+
+void CursorSprite::setLayer(SpriteLayer l) {
+    if (l == layer_) return;
+    HWND to = (l == SpriteLayer::High) ? hwndHigh_ : hwndLow_;
+    if (!to) return;
+    // A switch back before the previous one finished: the window we return to is the pending
+    // one, so it must not be hidden by the next show().
+    if (pendingHide_ == to) pendingHide_ = nullptr;
+    HWND from = hwnd_;
+    hwnd_ = to;
+    layer_ = l;
+    // The incoming window holds stale or no pixels: force the next refreshShape()/showCrosshair()
+    // to paint it, even though the cursor handle has not changed.
+    lastCursor_ = nullptr;
+    crosshairMode_ = false;
+    reapplyPosition();
+    if (visible_) {
+        visible_ = false;          // so the next show() reveals the incoming window...
+        pendingHide_ = from;       // ...and only then hides this one
+    }
 }
 
 // Re-evaluates the system cursor and, for shapes that can be rendered
@@ -167,6 +213,11 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
         lastVerdict_ = ShapeStatus::Rendered;
         renderMaskShape();
         crosshairMode_ = false;   // the window now holds the cursor shape again
+        // Same as the alpha path below (issue #229): the hotspot changed with the shape, and
+        // nothing else re-places the window until the pointer moves. Missing here, a mask cursor
+        // (the Snipping Tool's cross, the I-beam) sat off by the old hotspot until the first
+        // move, most visibly on the band switch into the snip overlay (issue #269).
+        reapplyPosition();
         return ShapeStatus::Rendered;
     }
 
@@ -430,12 +481,20 @@ void CursorSprite::showCrosshair() {
     show();
 }
 
-void CursorSprite::show() { if (!visible_) { ShowWindow(hwnd_, SW_SHOWNOACTIVATE); visible_ = true; } }
-void CursorSprite::hide() { if (visible_) { ShowWindow(hwnd_, SW_HIDE); visible_ = false; } }
+void CursorSprite::show() {
+    if (!visible_) { ShowWindow(hwnd_, SW_SHOWNOACTIVATE); visible_ = true; }
+    if (pendingHide_) { ShowWindow(pendingHide_, SW_HIDE); pendingHide_ = nullptr; }
+}
+void CursorSprite::hide() {
+    if (visible_) { ShowWindow(hwnd_, SW_HIDE); visible_ = false; }
+    if (pendingHide_) { ShowWindow(pendingHide_, SW_HIDE); pendingHide_ = nullptr; }
+}
 
 void CursorSprite::destroy() {
     hide();
-    if (hwnd_) { DestroyWindow(hwnd_); hwnd_ = nullptr; }
+    if (hwndLow_)  { DestroyWindow(hwndLow_);  hwndLow_ = nullptr; }
+    if (hwndHigh_) { DestroyWindow(hwndHigh_); hwndHigh_ = nullptr; }
+    hwnd_ = nullptr;
     DestroyIcon(iconCopy_);
     iconCopy_ = nullptr;
 }

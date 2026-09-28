@@ -40,7 +40,12 @@ Stop-AllBackdrops
 
 $allKeys = @($Configs | ForEach-Object { $_.Split(';') } | Where-Object { $_ } |
              ForEach-Object { $_.Split('=')[0] } | Select-Object -Unique)
+# The cursor sprite is hidden from screen capture for users (issue #269), and this rig measures
+# it FROM captures, so every run turns the hidden spriteCapturable knob on and the end puts it
+# back. A restArea near zero with this missing is exactly that: nothing to see.
+$allKeys = @($allKeys + 'spriteCapturable' | Select-Object -Unique)
 function Use-Config([string]$spec) {
+  $spec = if ($spec) { "spriteCapturable=1;$spec" } else { 'spriteCapturable=1' }
   Update-IniKnobs $ini $allKeys $spec
   try { $ev = [System.Threading.EventWaitHandle]::OpenExisting('Local\Wind_QuitRequest'); [void]$ev.Set(); Start-Sleep 2 } catch {}
   Start-Process 'C:\Program Files\Wind\Wind.exe'; Start-Sleep 3
@@ -111,6 +116,9 @@ for ($i = 1; $i -le $Rounds; $i++) {
 }
 Stop-Backdrop $bd
 Stop-AllBackdrops
+Update-IniKnobs $ini @('spriteCapturable') ''
+try { $ev = [System.Threading.EventWaitHandle]::OpenExisting('Local\Wind_QuitRequest'); [void]$ev.Set(); Start-Sleep 2 } catch {}
+Start-Process 'C:\Program Files\Wind\Wind.exe'
 [TE]::AllowDisplaySleep()
 Stop-Tone
 Write-Host ""
