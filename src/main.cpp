@@ -31,6 +31,10 @@
 #include "input_router.h"
 #include "cursor_mapper.h"
 #include "zoom_controller.h"
+#include "view_target.h"     // tracking (issue #276): who owns the view
+#include "view_glide.h"      // tracking: glide + target geometry
+#include "detached_view.h"   // tracking: a frame whose view is not centred on the pointer
+#include "focus_track.h"     // tracking: caret/focus watcher thread
 #include "tray.h"
 #include "gain_learner.h"  // learned pointer ballistics: locked pan at TRUE desktop speed
 #include "tray_status.h"   // the tray menu's status snapshot
@@ -65,6 +69,7 @@ static void EnsureCompositePulse() {
 using namespace wind;
 
 static InputRouter g_input;
+static wind::FocusTracker g_track;   // tracking (issue #276): caret/focus watcher thread
 
 // Issue #148 ROOT CAUSE (proven 2026-07-26 via the MPO-off experiment): NVIDIA's multiplane-
 // overlay (MPO) plane programming packs DWM's magnification translation into a 16-bit field.
@@ -283,6 +288,10 @@ struct TickState {
                                                //   plus a small overlap (else a bare unmagnified
                                                //   composite flashes through the channel gap)
     int    restOverlapTicks = 0;               // overlap countdown once the handover condition met
+    // Tracking (issue #276): who owns the view, and the glided detached centre (monitor-local px).
+    wind::ViewOwnerState viewOwner;
+    double viewCx = 0.0, viewCy = 0.0;
+    bool   viewDetached = false;   // last tick drew a detached frame
     bool   revealNeedsComposite = false;       // fullscreen-app zoom-in: also require a post-prime
                                                //   composite in the capture before revealing
     int    hz = 60;                            // resolved tick/refresh rate (auto-detected)
@@ -1451,6 +1460,54 @@ static void RunTick(TickState& t) {
         // real stall we want the lens to catch up, but a 500ms gap should not snap it.
         t.mapper.setTickDeltaMs(dt > 0.05 ? 50.0 : dt * 1000.0);
         MapResult r = t.mapper.update(freeCursor ? 0 : dx, freeCursor ? 0 : dy, lvl);
+        // --- Tracking (issue #276): caret / focus own the view; the pointer is never moved. ---
+        // fsCover (read once above, see the "Foreground facts for this tick" comment) is the
+        // borderless-fullscreen-game tell; reused here rather than a second ForegroundCoversMonitor
+        // call (it is also what fsGame below aliases).
+        const bool trackEnabled = lvl > 1.001 && !inspect && !t.detector.locked() && !fsCover &&
+                                  (t.cfg.trackCaret != 0 || t.cfg.trackFocus != 0);
+        g_track.setActive(trackEnabled, t.cfg.trackCaret != 0, t.cfg.trackFocus != 0, t.cfg.trackLog != 0);
+        {
+            wind::ViewOwnerInputs vi;
+            vi.enabled = trackEnabled;
+            vi.trackCaret = t.cfg.trackCaret != 0; vi.trackFocus = t.cfg.trackFocus != 0;
+            vi.mouseDx = curDx; vi.mouseDy = curDy;
+            vi.buttonDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) ||
+                            (GetAsyncKeyState(VK_RBUTTON) & 0x8000) ||
+                            (GetAsyncKeyState(VK_MBUTTON) & 0x8000);
+            vi.dtMs = dt * 1000.0;
+            vi.snap = g_track.snapshot();
+            const bool wasDetached = t.viewOwner.owner != wind::ViewOwner::Mouse;
+            const wind::ViewOwner owner = wind::StepViewOwner(t.viewOwner, vi);
+            if (owner != wind::ViewOwner::Mouse) {
+                if (!wasDetached) { t.viewCx = r.centerX; t.viewCy = r.centerY; }   // glide from where we are
+                const double ptrX = cur.x - t.mon.x, ptrY = cur.y - t.mon.y;
+                double tx = t.viewCx, ty = t.viewCy;
+                if (owner == wind::ViewOwner::Returning) {
+                    tx = ptrX; ty = ptrY;   // centred return; phase 2 swaps in EdgePanCenter for mouseAlign=1
+                } else {
+                    const wind::TrackRect rc{ vi.snap.l - t.mon.x, vi.snap.t - t.mon.y, vi.snap.r - t.mon.x, vi.snap.b - t.mon.y };
+                    double ox, oy;
+                    if (wind::TrackTargetCenter(rc, t.viewCx, t.viewCy, lvl, t.mon.w, t.mon.h,
+                                                t.cfg.trackAlign, t.cfg.trackMarginPct, ox, oy)) { tx = ox; ty = oy; }
+                }
+                t.viewCx = wind::GlideToward(t.viewCx, tx, vi.dtMs, t.cfg.trackGlideMs);
+                t.viewCy = wind::GlideToward(t.viewCy, ty, vi.dtMs, t.cfg.trackGlideMs);
+                if (owner == wind::ViewOwner::Returning &&
+                    std::fabs(t.viewCx - tx) < 1.0 && std::fabs(t.viewCy - ty) < 1.0) {
+                    wind::FinishReturn(t.viewOwner);
+                    t.mapper.reset(ptrX, ptrY);          // hand back exactly at the pointer
+                    t.lastSetVirtual = cur;
+                } else {
+                    r = wind::DetachedMap(t.viewCx, t.viewCy, ptrX, ptrY, lvl, t.mon.w, t.mon.h);
+                    t.mapper.reset(t.viewCx, t.viewCy);   // hybrid switches and the next tick start here
+                    t.lastSetVirtual = cur;               // measure the next hand motion from here
+                    t.viewDetached = true;
+                }
+            } else {
+                t.viewDetached = false;
+            }
+        }
         // Dead-zone probe (probeClicks=1, diagnostic): the field annotates hover dead zones by
         // clicking. Plain click = "hover works here" (OK), Ctrl+click = "dead here" (DEAD). Each
         // click logs every coordinate space in the chain plus what Windows hit-tests at the
@@ -1670,7 +1727,7 @@ static void RunTick(TickState& t) {
         // freeCursor: never weld. The weld is what the whole native-model change removes - with the
         // view already positioned so the pointer lands centre-screen, SetCursorPos has nothing to
         // correct and only reintroduces the feedback loop.
-        ex.suppressCursorSync = dragFollow || freeCursor;
+        ex.suppressCursorSync = dragFollow || freeCursor || t.viewDetached;   // tracking never moves the pointer (#276)
         // HOOK WRITE PATH (issue #206). When free cursor is active the view is a pure function of
         // the cursor, so the mouse hook can compute and write it inline - 0.58ms-class latency
         // instead of waiting up to a full 6.94ms tick. Publish what the hook needs, then let it be
@@ -1683,7 +1740,7 @@ static void RunTick(TickState& t) {
         const bool levelSettled = (lvl == t.prevTickLevel);
         t.prevTickLevel = lvl;
         const bool hookWrite = freeCursor && t.cfg.txHookWrite != 0 && wind::MagThreadOwned() &&
-                               tmWall != nullptr && lvl > 1.0 && levelSettled;
+                               tmWall != nullptr && lvl > 1.0 && levelSettled && !t.viewDetached;
         if (hookWrite) {
             wind::HookTransformState hs;
             hs.armed = true;
@@ -2419,6 +2476,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         MessageBoxW(nullptr, L"Failed to install the mouse hook.", L"Wind", MB_ICONERROR);
         return 1;
     }
+    g_track.start();   // tracking (issue #276): caret/focus watcher, starts alongside the input router
     // Configure the keyboard hook's bound keys (zoom in/out primary+alt, recenter, Inspect-mode
     // cursor-lock, and magnifier-model swap) so it swallows them and tracks their state. Kept in
     // sync on hot-reload below.
@@ -2471,6 +2529,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         MessageBoxW(nullptr, L"Could not start the renderer (Direct3D 11 / Desktop Duplication "
                              L"unavailable on this system).", L"Wind", MB_ICONERROR);
         g_input.stop();
+        g_track.stop();
         return 1;
     }
     if (model2 && !model2->initialize(PrimaryMonitor())) {
@@ -2528,6 +2587,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         model->shutdown();
         if (model2) model2->shutdown();
         g_input.stop();
+        g_track.stop();
         Tray::Remove();
         ReleaseMutex(mtx);
         return 0;
@@ -2574,6 +2634,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         model->shutdown();
         if (model2) model2->shutdown();
         g_input.stop();
+        g_track.stop();
         Tray::Remove();
         ReleaseMutex(mtx);
         return 0;
@@ -2875,6 +2936,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // left the transform half's magnification context + cursor state untouched without this.
     if (model2) model2->shutdown();
     g_input.stop();
+    g_track.stop();
     {   // Persist the learned gain curve (see startup load). Best-effort: a failed write just
         // means the next run re-warms from live use.
         char buf[1024];
