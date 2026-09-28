@@ -65,6 +65,11 @@ export const sections = [
     // conjure a shape while a game hides its pointer, so only 'never' did anything, which the
     // hide-cursor hotkey already covers. Ini key still parsed.)
   ]},
+  { id:'tracking', label:'Tracking', icon:'cursor', desc:'What the zoomed view follows besides the mouse.', rows: [
+    { key:'trackCaret', type:'toggle', label:'Follow the text cursor', desc:'While you type, the view glides to the text cursor. The mouse pointer stays where it was.', def:'1' },
+    { key:'trackFocus', type:'toggle', label:'Follow keyboard focus', desc:'When you move with Tab or the arrow keys, the view glides to the selected control.', def:'0' },
+    { key:'trackAlign', type:'select', label:'Keep the text cursor and focus', options:['0','1'], optionLabels:{ '0':'Centred', '1':'Within the edges' }, def:'0' },
+  ]},
   { id:'display', label:'Display', icon:'display', desc:'The engine behind the magnified view.', rows: [
     { key:'model', type:'select', label:'Magnifier engine',
       desc:'Auto picks the best engine for the app in front. Restart to switch.',
