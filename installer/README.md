@@ -51,8 +51,11 @@ Without a code-signing certificate, `release.ps1` also builds the uiAccess varia
 trusted in LocalMachine Root and TrustedPublisher, signs `Wind.exe` and `WindConfig.exe`, and
 has its private key deleted straight away, so the signatures stay valid but nothing can ever
 sign with that root again. Older Wind Local Signing roots are retired on every install, and
-the uninstaller removes them (`local-sign.ps1 -Remove`). If anything fails, setup installs the
-ordinary build instead, which runs everywhere without UIAccess. A release signed with a real
+the uninstaller removes them (`local-sign.ps1 -Remove`). Setup installs the ordinary build
+first and signs the uiAccess one in `$PLUGINSDIR`, copying it over only once its signature
+verifies: an unsigned uiAccess `Wind.exe` does not start at all ("A referral was returned from
+the server"), and a setup killed mid-signing once left exactly that. So any failure or
+interruption leaves the ordinary build, which runs everywhere without UIAccess. A release signed with a real
 certificate has no `WindUA.exe` and skips all of it. Verified 2026-09-28: the installed build
 logs `token UIAccess=1`, and the elevated `installer_check.ps1` covers the signature, the
 deleted key, the single root and the uninstall clean-up.

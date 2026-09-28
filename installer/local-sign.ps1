@@ -8,7 +8,7 @@
 
       1. a fresh code-signing certificate, CN=Wind Local Signing, in LocalMachine\My
       2. its public half trusted in LocalMachine\Root and LocalMachine\TrustedPublisher
-      3. Wind.exe and WindConfig.exe signed with it
+      3. the staged uiAccess Wind.exe and the installed WindConfig.exe signed with it
       4. the certificate and its PRIVATE KEY deleted from LocalMachine\My
 
     Step 4 is the point. The signatures stay valid (they carry the public certificate, and the
@@ -17,21 +17,26 @@
 
     Every earlier Wind Local Signing root is retired from both stores on the way out, success
     or failure, so upgrades do not pile them up. On failure the new one is rolled back too,
-    and setup installs the ordinary build instead.
+    and setup keeps the ordinary build it installed first.
 
     Output: the new thumbprint on stdout (and nothing else), exit 0. Anything else is exit 1,
     with the reason on stderr.
 
+    -Stage is the uiAccess Wind.exe, still in setup's own folder: setup copies it into place
+    only after this succeeds, so a failure or a kill never leaves an unsigned uiAccess build
+    (which does not start) in Program Files. -Dir is the install folder, for WindConfig.exe.
+
     -Remove (the uninstaller) retires every Wind Local Signing root and signs nothing.
 #>
 param(
+    [string]$Stage,
     [string]$Dir,
     [switch]$Remove
 )
 
 $ErrorActionPreference = 'Stop'
 $subject = 'CN=Wind Local Signing'
-$targets = @("$Dir\Wind.exe", "$Dir\WindConfig.exe")
+$targets = @($Stage, "$Dir\WindConfig.exe")
 $trustStores = 'Root', 'TrustedPublisher'
 $new = $null
 
@@ -53,7 +58,7 @@ if ($Remove) {
 }
 
 try {
-    if (-not $Dir) { throw '-Dir is required' }
+    if (-not $Stage -or -not $Dir) { throw '-Stage and -Dir are required' }
     foreach ($t in $targets) { if (-not (Test-Path $t)) { throw "not found: $t" } }
 
     # 50 years: these signatures carry no timestamp (a timestamp server is a network call
