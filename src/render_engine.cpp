@@ -1341,7 +1341,7 @@ static bool ShowSystemCursorOnOwner(BOOL show) {
 static LONG WINAPI CursorRestoreFilter(EXCEPTION_POINTERS* ep) {
     static LONG s_inHandler = 0;
     if (InterlockedExchange(&s_inHandler, 1)) return EXCEPTION_CONTINUE_SEARCH;
-    ShowSystemCursorOnOwner(TRUE);       // bounded: MagThreadInvoke gives up after 250 ms
+    ShowSystemCursorOnOwner(TRUE);       // bounded: MagThreadInvoke gives up within 500 ms
     ClipCursor(nullptr);                 // never leave the cursor clipped if we crash while Inspect-locked
     SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, SPIF_SENDCHANGE);
     wind::WriteCrashReport(ep);          // minidump + text summary into the log dir

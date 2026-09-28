@@ -22,8 +22,10 @@ static std::atomic<bool> g_claimEnabled{false};
 // real call sites did exactly that). So the call has a state, and the servicer and the caller race
 // for it with a compare-exchange: the servicer claims Pending -> Running before calling fn, the
 // timed-out caller claims Pending -> Abandoned. Whoever loses knows what happened: an abandoned
-// call is skipped, and a caller that finds it Running waits for it to finish (it is a sub-
-// millisecond Magnification call once started) before its frame can unwind.
+// call is skipped, and a caller that finds it Running gives it one more BOUNDED wait (it is a
+// sub-millisecond Magnification call once started) and then returns regardless - the tick thread
+// and the crash filter must never block without a limit (review of #274). Returning while it
+// still runs is memory-safe because every caller captures by value (the rule above).
 enum MagCallState : int { kPending = 0, kRunning = 1, kDone = 2, kAbandoned = 3 };
 struct MagCall {
     std::function<bool()> fn;
@@ -121,11 +123,12 @@ bool MagThreadInvoke(const std::function<bool()>& fn) {
             wind::Log(wind::LogLevel::Warn, "magthread",
                       "owner thread did not service the call in 250ms - abandoned, it will not run");
         } else {
-            // The servicer started it just now: it is touching our frame, so wait it out.
-            WaitForSingleObject(call->done, INFINITE);
-            ok = call->result;
+            // The servicer started it just now. Give it one more bounded wait; past that, return
+            // anyway - it only touches its own by-value copies, never our frame.
+            if (WaitForSingleObject(call->done, 250) == WAIT_OBJECT_0) ok = call->result;
             wind::Log(wind::LogLevel::Warn, "magthread",
-                      "owner thread serviced the call only after 250ms");
+                      "owner thread started the call only after 250ms (%s)",
+                      ok ? "finished" : "still running at 500ms, not waited for");
         }
     }
     ReleaseCall(call);        // the servicer releases its own reference whenever it gets there

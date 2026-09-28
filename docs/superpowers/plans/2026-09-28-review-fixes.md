@@ -10,13 +10,16 @@ already explained by the next comment). One PR, one commit per area, patch bump 
    `mag_host.cpp` setInputTransform/getInputTransform, `hook_transform.cpp`
    RequestHookTransformWrite). Fix at the source, not per caller: give `MagCall` a state
    (pending / running / done / abandoned). On timeout the caller CAS pending -> abandoned and the
-   servicer skips an abandoned call; if the servicer already started it, the caller waits for it to
-   finish (the call is sub-millisecond once running). A late call then never runs against a dead
-   frame, whatever it captured. Also switch the three `[&]` lambdas to by-value captures where
+   servicer skips an abandoned call; if the servicer already started it, the caller gives it one
+   more bounded 250 ms wait and then returns regardless (review of this PR: an unbounded wait here
+   could freeze the tick or the crash filter). Returning early is safe because every caller now
+   captures by value. Also switch the three `[&]` lambdas to by-value captures where
    they do not need out-params, as the file's own contract asks.
 2. **`MagHost::setSamplingMode` not marshalled** (`mag_host.cpp:71`): route through
    `MagThreadInvoke`, and set `appliedSampling_` only when the call succeeded
-   (`transform_model.cpp:535`) so a failure retries next tick.
+   (`transform_model.cpp:535`), with a BOUNDED retry (3 tries, 1 s apart, then accept): testing
+   found mode 0 reports FALSE on every call on this rig (245 of 245 log lines) while working, so
+   an unbounded retry would have re-issued it every tick.
 3. **`RenderEngine` shows/hides the system cursor unmarshalled** (`render_engine.cpp:1355`,
    shutdown, the crash filter): route through `MagThreadInvoke` like the transform model's
    `ShowSystemCursorMarshalled`; the crash filter tries the marshalled call and falls back to a
