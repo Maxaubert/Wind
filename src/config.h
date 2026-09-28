@@ -126,11 +126,13 @@ struct Config {
                           //     do not stutter while panning, at a capped frame rate while zoomed.
     int cursorSprite = 1; // 1 = hide the OS cursor and draw a scene-locked sprite welded to the
                           //     transform (fixes cursor/click divergence near screen edges).
-    // Desktop opt-in for the transform engine (issue #185, hot): 1 = hybrid picks the transform
-    // on the DESKTOP too (not just games) WHEN the input transform is verified available
-    // (UIAccess). 0 (default) = desktop stays on render. Experimental until the P3 endurance
-    // gates pass; see docs/superpowers/specs/2026-08-12-one-model-transform-design.md.
-    int desktopTransform = 0;
+    // Transform engine on the desktop (issue #185, hot): 1 (DEFAULT since issue #271, owner
+    // decision 2026-09-28) = hybrid picks the transform on the DESKTOP too, not just games, WHEN
+    // the input transform is verified available (UIAccess, which every install gets since the
+    // per-PC signing of #261). Without it the desktop still falls back to render. 0 = desktop on
+    // render. Not in the ini template or the Settings UI, so the default reaches existing
+    // installs; only an explicit desktopTransform=0 keeps render.
+    int desktopTransform = 1;
     // P2 experiment (issue #185, restart-applied, UIAccess build): create the transform cursor
     // sprite in band 16 positioned in SCREEN space. Hypothesis: high-band windows escape the DWM
     // fullscreen transform (native Magnifier's own fullscreen UI stays unmagnified), giving a

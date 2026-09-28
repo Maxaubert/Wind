@@ -87,7 +87,8 @@ return (game || desktop) && in.primaryMonitor &&
 
 Reading it as intent: the transform is picked for the **game path** (a borderless cover that is
 not the shell desktop, i.e. a real fullscreen game or F11 video) or the **desktop path** (the user
-opted in via `desktopTransform` AND the source-rect input transform verifiably works, because
+has `desktopTransform` on, the default since issue #271, AND the source-rect input transform
+verifiably works, because
 without it pointer-input frameworks like Explorer and Settings get hard hover dead zones under a
 welded cursor, root-caused in [../POINTER-HITTEST-FINDINGS.md](../POINTER-HITTEST-FINDINGS.md)).
 Either path additionally requires the primary monitor (no cross-adapter transform chase), and both
