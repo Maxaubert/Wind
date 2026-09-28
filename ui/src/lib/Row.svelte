@@ -1,7 +1,9 @@
 <script>
   import KeybindCapture from './KeybindCapture.svelte';
   import CustomSelect from './CustomSelect.svelte';
-  import { pickExe } from '../bridge.js';
+  import { pickExe, openRepo } from '../bridge.js';
+  // replaced at build time with src/version.h's WIND_VERSION_STR (vite.config.js); empty in tests
+  const WIND_VERSION = typeof __WIND_VERSION__ === 'string' ? __WIND_VERSION__ : '';
   import AppListModal from './AppListModal.svelte';
   export let row, value, onChange, disabled = false;
   export let values = {};   // keybind rows read sibling keys (e.g. zoomInVk) from here
@@ -85,8 +87,15 @@
     </svg>
     <div class="name">Wind</div>
     <p class="tag">Barely there. Everywhere.</p>
-    <p class="version">v0.9.0</p>
-    <a class="link" href="https://github.com/Maxaubert/Wind" target="_blank" rel="noopener">View on GitHub</a>
+    {#if WIND_VERSION}<p class="version">v{WIND_VERSION}</p>{/if}
+    <button type="button" class="link" on:click={openRepo}>
+      <svg class="star" viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor"
+           stroke-width="1.5" stroke-linejoin="round" aria-hidden="true" focusable="false">
+        <path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z"/>
+      </svg>
+      Star on GitHub
+    </button>
+    <p class="ask">If Wind helps you, a star helps others find it.</p>
   </div>
 {:else}
   <div class="row" class:disabled>
@@ -249,6 +258,8 @@
   .about-hero .name{font-size:30px;font-weight:700;letter-spacing:-.4px;margin-bottom:6px}
   .about-hero .tag{color:var(--muted);margin:0 0 4px;font-size:14px}
   .about-hero .version{color:var(--muted);font-size:12.5px;margin:0 0 22px}
-  .about-hero .link{color:var(--accent);text-decoration:none;font-size:13px;padding:8px 16px;border:1px solid var(--line);border-radius:7px;display:inline-block}
+  .about-hero .link{color:var(--accent);font:inherit;font-size:14px;font-weight:600;padding:9px 18px;background:none;border:1px solid var(--line);border-radius:7px;display:inline-flex;align-items:center;gap:8px;cursor:pointer}
   .about-hero .link:hover{background:var(--hover)}
+  .about-hero .link:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .about-hero .ask{color:var(--muted);font-size:12.5px;margin:12px 0 0}
 </style>

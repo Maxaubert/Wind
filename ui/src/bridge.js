@@ -13,6 +13,8 @@ export function getConfig() {
     post({ type: 'getConfig' });
   });
 }
+// About's star button: the host opens the repo in the default browser (a fixed URL, see main.cpp).
+export function openRepo() { post({ type: 'openRepo' }); }
 export function setConfig(key, value) { post({ type: 'setConfig', key, value: String(value) }); }
 // Launch mode: WindConfig.exe navigates to ...?mode=onboard for first-launch setup.
 export function getMode() {

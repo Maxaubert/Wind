@@ -413,6 +413,11 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
                 err = "Could not delete the profile file";
         }
         PostProfiles(wv, err.empty(), err);
+    } else if (type == "openRepo") {
+        // About's "Star on GitHub". In the user's default browser, where they are signed in and can
+        // star; a link followed inside the WebView would open a bare popup instead. The URL is fixed
+        // here and nothing in the message is used, so the page cannot open anything else.
+        ShellExecuteW(nullptr, L"open", L"https://github.com/Maxaubert/Wind", nullptr, nullptr, SW_SHOWNORMAL);
     }
 }
 // Poll for the magnifier's exit (Ctrl+Alt+Q, tray Quit, or a crash) and take this window down with
