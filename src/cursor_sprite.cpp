@@ -48,6 +48,14 @@ bool CursorSprite::create(int zorderBand) {
                                 0, 0, kSize, kSize, nullptr, nullptr, hInst, nullptr);
     }
     usedBand_ = hwnd_ ? usedBand : 0;
+    if (hwnd_) {
+        // Exempt the sprite from Aero Peek, exactly like the render overlay (issue #141). Resting
+        // on a taskbar thumbnail makes DWM preview that window and hide every other one, and no
+        // z-band beats that: it is a compositor effect. Unexempted, the cursor showed over the
+        // thumbnail and then vanished ~0.5 s later, on every hover (issue #267, owner recording).
+        BOOL exPeek = TRUE;
+        DwmSetWindowAttribute(hwnd_, DWMWA_EXCLUDED_FROM_PEEK, &exPeek, sizeof(exPeek));
+    }
     return hwnd_ != nullptr;
 }
 
