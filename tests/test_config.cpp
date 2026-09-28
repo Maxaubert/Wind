@@ -479,4 +479,26 @@ TEST_CASE("the first-run ini template parses to the struct defaults (issue #274)
     CHECK(t.outlineIdleHide == d.outlineIdleHide);
     CHECK(t.outlineIdleSeconds == doctest::Approx(d.outlineIdleSeconds));
     CHECK(t.onboarded == d.onboarded);
+    CHECK(t.trackCaret == d.trackCaret);
+    CHECK(t.trackFocus == d.trackFocus);
+    CHECK(t.trackAlign == d.trackAlign);
+    CHECK(t.mouseAlign == d.mouseAlign);
+    CHECK(t.trackGlideMs == d.trackGlideMs);
+    CHECK(t.trackMarginPct == d.trackMarginPct);
+}
+
+TEST_CASE("tracking settings: defaults and parsing (issue #276)") {
+    Config d = ParseConfig("");
+    CHECK(d.trackCaret == 1);
+    CHECK(d.trackFocus == 0);
+    CHECK(d.trackAlign == 0);
+    CHECK(d.mouseAlign == 0);
+    CHECK(d.trackGlideMs == 150);
+    CHECK(d.trackMarginPct == 15);
+    CHECK(d.trackLog == 0);
+    Config c = ParseConfig("trackCaret=0\ntrackFocus=1\ntrackAlign=1\nmouseAlign=1\n"
+                           "trackGlideMs=90\ntrackMarginPct=20\ntrackLog=1\n");
+    CHECK(c.trackCaret == 0); CHECK(c.trackFocus == 1); CHECK(c.trackAlign == 1);
+    CHECK(c.mouseAlign == 1); CHECK(c.trackGlideMs == 90); CHECK(c.trackMarginPct == 20);
+    CHECK(c.trackLog == 1);
 }

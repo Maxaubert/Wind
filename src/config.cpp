@@ -180,6 +180,13 @@ Config ParseConfig(const std::string& text) {
             else if (key == "desktopTransform")   c.desktopTransform = std::stoi(val);
             else if (key == "spriteBand16")       c.spriteBand16 = std::stoi(val);
             else if (key == "cursorBandAuto")     c.cursorBandAuto = std::stoi(val);
+            else if (key == "trackCaret")         c.trackCaret = std::stoi(val);
+            else if (key == "trackFocus")         c.trackFocus = std::stoi(val);
+            else if (key == "trackAlign")         c.trackAlign = std::stoi(val);
+            else if (key == "mouseAlign")         c.mouseAlign = std::stoi(val);
+            else if (key == "trackGlideMs")       c.trackGlideMs = std::stoi(val);
+            else if (key == "trackMarginPct")     c.trackMarginPct = std::stoi(val);
+            else if (key == "trackLog")           c.trackLog = std::stoi(val);
             else if (key == "spriteCapturable")   c.spriteCapturable = std::stoi(val);
             else if (key == "ixDecimate")         c.ixDecimate = std::stoi(val);
             else if (key == "mpoBuster")          c.mpoBuster = std::stoi(val);
@@ -412,6 +419,18 @@ std::string DefaultIniText() {
                ";   Start and tray flyouts, and drops below them only while the Snipping Tool overlay\n"
                ";   is up, so it stays visible there too (needs UIAccess; restart). 0=use zorderBand.\n"
                "cursorBandAuto=1\n"
+               "; trackCaret: 1=the zoomed view follows the text cursor while you type; 0=off\n"
+               "trackCaret=1\n"
+               "; trackFocus: 1=the zoomed view follows keyboard focus (Tab, menus); 0=off\n"
+               "trackFocus=0\n"
+               "; trackAlign: text cursor and focus, 0=keep centred, 1=keep within the edges\n"
+               "trackAlign=0\n"
+               "; mouseAlign: mouse pointer, 0=keep centred, 1=keep within the edges\n"
+               "mouseAlign=0\n"
+               "; trackGlideMs: how long the view takes to glide to the caret/focus/pointer (ms)\n"
+               "trackGlideMs=150\n"
+               "; trackMarginPct: within-the-edges margin, percent of the view on each side\n"
+               "trackMarginPct=15\n"
                "; brightness: magnified-view output multiplier (1.0=unchanged; fine-tune for HDR)\n"
                "brightness=1.0\n"
                "; hdrTonemap: 1=HDR10->SDR tonemap when Windows HDR is on (no-op on SDR); 0=off\n"
