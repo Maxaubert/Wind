@@ -404,3 +404,14 @@ TEST_CASE("the high-res/MPO option is atomic at restart (issue #242)") {
     CHECK(EffectiveSamplingMode(0, false, false, 2) == 0);
     CHECK(EffectiveSamplingMode(0, false, true,  4) == 0);
 }
+
+TEST_CASE("cursorBandAuto defaults on and parses off (issue #269)") {
+    CHECK(ParseConfig("").cursorBandAuto == 1);
+    CHECK(ParseConfig("cursorBandAuto=0\n").cursorBandAuto == 0);
+    CHECK(ParseConfig("cursorBandAuto=1\n").cursorBandAuto == 1);
+}
+
+TEST_CASE("spriteCapturable is a hidden test knob, off by default (issue #269)") {
+    CHECK(ParseConfig("").spriteCapturable == 0);
+    CHECK(ParseConfig("spriteCapturable=1\n").spriteCapturable == 1);
+}

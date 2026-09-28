@@ -179,6 +179,8 @@ Config ParseConfig(const std::string& text) {
             else if (key == "probeClicks")        c.probeClicks = std::stoi(val);
             else if (key == "desktopTransform")   c.desktopTransform = std::stoi(val);
             else if (key == "spriteBand16")       c.spriteBand16 = std::stoi(val);
+            else if (key == "cursorBandAuto")     c.cursorBandAuto = std::stoi(val);
+            else if (key == "spriteCapturable")   c.spriteCapturable = std::stoi(val);
             else if (key == "ixDecimate")         c.ixDecimate = std::stoi(val);
             else if (key == "mpoBuster")          c.mpoBuster = std::stoi(val);
             else if (key == "txSamplingMode")     c.txSamplingMode = std::stoi(val);
@@ -412,6 +414,10 @@ Config LoadConfig(const std::wstring& path) {
                ";   (needs the UIAccess build): covers the Start menu / taskbar / tray flyouts, but\n"
                ";   the snip overlay then covers US and a zoom there shows no cursor at all.\n"
                "zorderBand=0\n"
+               "; cursorBandAuto: 1=the zoomed cursor (transform engine) sits above taskbar previews,\n"
+               ";   Start and tray flyouts, and drops below them only while the Snipping Tool overlay\n"
+               ";   is up, so it stays visible there too (needs UIAccess; restart). 0=use zorderBand.\n"
+               "cursorBandAuto=1\n"
                "; brightness: magnified-view output multiplier (1.0=unchanged; fine-tune for HDR)\n"
                "brightness=1.0\n"
                "; hdrTonemap: 1=HDR10->SDR tonemap when Windows HDR is on (no-op on SDR); 0=off\n"

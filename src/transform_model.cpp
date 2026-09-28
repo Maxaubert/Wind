@@ -5,6 +5,7 @@
 #include "hook_transform.h" // NoteWriteCursor: the lag metric anchor (issue #229)
 #include "mag_thread.h"     // MagThreadInvoke: the API is thread-affine (issue #229)
 #include "logging.h"
+#include "sprite_layer.h"  // PickSpriteLayer (pure, tested): issue #269
 #include "config_path.h"   // ResolveLogDir
 #include <cstdio>
 #include <windows.h>
@@ -104,6 +105,30 @@ void TransformModel::teardownMag() {
               double(b.QuadPart - a.QuadPart) * 1000.0 / fr.QuadPart);
 }
 
+// GetWindowBand is undocumented (user32 exports it since Windows 8), so it is resolved once at
+// runtime; 0 = unknown, which PickSpriteLayer treats like an ordinary window.
+static int QueryWindowBand(HWND h) {
+    using PFN = BOOL(WINAPI*)(HWND, DWORD*);
+    static PFN fn = reinterpret_cast<PFN>(
+        GetProcAddress(GetModuleHandleW(L"user32.dll"), "GetWindowBand"));
+    DWORD band = 0;
+    if (!h || !fn || !fn(h, &band)) return 0;
+    return static_cast<int>(band);
+}
+
+// Issue #269. Cheap enough to run every tick: GetForegroundWindow, plus one GetWindowBand only
+// when the foreground window changes (a window's band is fixed at creation).
+void TransformModel::updateSpriteLayer() {
+    if (!sprite_ || !sprite_->hasHigh()) return;
+    HWND fg = GetForegroundWindow();
+    if (fg != layerFg_) { layerFg_ = fg; layerFgBand_ = QueryWindowBand(fg); }
+    const SpriteLayer want = PickSpriteLayer(cursorBandAuto_, true, layerFgBand_);
+    if (want == sprite_->layer()) return;
+    sprite_->setLayer(want);
+    wind::Log(wind::LogLevel::Info, "transform", "cursor sprite -> %s (foreground band %d)",
+              want == SpriteLayer::High ? "band 16" : "low band", layerFgBand_);
+}
+
 bool TransformModel::initialize(const MonitorTarget& monitor) {
     mon_ = monitor;
     // NO magnification context at startup, and no warm-up write (issue #148): a live context puts
@@ -121,7 +146,12 @@ bool TransformModel::initialize(const MonitorTarget& monitor) {
         sprite_  = std::make_unique<CursorSprite>(blanker_->originals());
         // P2 experiment (spriteBand16): band 16, positioned in SCREEN space - testing whether
         // high-band windows escape the DWM fullscreen transform (constant-size cursor).
-        sprite_->create(spriteBand16_ ? 16 : zorderBand_);
+        sprite_->create(spriteBand16_ ? 16 : zorderBand_, cursorBandAuto_ && !spriteBand16_,
+                        spriteCapturable_);
+        wind::Log(wind::LogLevel::Info, "transform", "cursor sprite: band %d%s",
+                  sprite_->usedBand(),
+                  sprite_->hasHigh() ? ", auto-switching to band 16 (cursorBandAuto)"
+                                     : (cursorBandAuto_ ? ", no band-16 twin (needs UIAccess)" : ""));
         // Positioning keys off the ACHIEVED band, never the request: a refused band with
         // screen-space positioning would misplace the sprite AND read as a false experiment
         // verdict (the cascade already logs the refusal - band_window.h).
@@ -310,6 +340,7 @@ void TransformModel::setActive(bool active) {
             // of gapping. Skipped when the APP is hiding its cursor (mouselook): nothing
             // visible is being swapped there, and flashing a sprite would be its own blink.
             CURSORINFO ci{}; ci.cbSize = sizeof(ci);
+            updateSpriteLayer();
             if (sprite_ && GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING) != 0 &&
                 sprite_->refreshShape() == CursorSprite::ShapeStatus::Rendered) {
                 sprite_->moveTo(ci.ptScreenPos.x, ci.ptScreenPos.y);
@@ -813,6 +844,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         }
     }
 
+    updateSpriteLayer();
     if (useSprite_ && sprite_ && ex.cursorLocked && ex.drawCursor) {
         // Inspect mode: the real cursor is frozen at the (overridden) click point, but the thing the
         // user aims with is the LOOK POINT (mapper center). Repaint the sprite as the crosshair (the

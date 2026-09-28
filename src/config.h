@@ -138,6 +138,14 @@ struct Config {
     // under the transform CONTRADICT each other (transform.h header vs transform_model.cpp), so
     // this needs one visual verdict from the field: zoomed, is the sprite unmagnified?
     int spriteBand16 = 0;
+    // Transform cursor z-band switching (issue #269, restart): 1 = the sprite lives in band 16
+    // (above taskbar thumbnails, Start, tray flyouts) and drops to the low window only while the
+    // foreground sits above band 16 (the Snipping Tool overlay, band 17). Needs UIAccess; 0 = one
+    // window in zorderBand, as before.
+    int cursorBandAuto = 1;
+    // Hidden test knob (not in the template or the UI): 1 leaves the transform cursor visible to
+    // screen capture, for tools/testenv/dualcursor.ps1. Users always get it hidden (issue #269).
+    int spriteCapturable = 0;
     // Input-transform publish decimation (issue #189, hot): publish every Nth CHANGED tick during
     // motion (1 = every tick, the pre-#189 behavior), with a guaranteed publish the moment motion
     // rests - so hover hit-testing is exact whenever the view is still, and stale by at most

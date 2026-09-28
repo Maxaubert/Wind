@@ -409,6 +409,15 @@ restartWind), `dirty`, `openIni`, `exportDiagnostics`, `pickExe`, `mpoState`, `s
   Both bandable windows (render overlay + transform cursor sprite) go through
   `wind::CreateBandedWindow` (src/band_window.h), which cascades the requested band -> 16 ->
   unbanded and LOGS when the request was refused - never let a refused band be silent again.
+  TRANSFORM CURSOR SWITCHES BANDS AUTOMATICALLY (issue #269, measured with GetWindowBand): a
+  UIAccess sprite lands in band 2; taskbar thumbnails, Start and tray flyouts are band 16; the
+  snip overlay (ScreenClippingHost's CoreWindow) is band 17. `cursorBandAuto=1` (default) keeps a
+  band-16 twin of the sprite and shows it unless the FOREGROUND window's band is above 16, when
+  the low window shows instead (pure rule: `src/sprite_layer.h`). The sprite is also exempt from
+  Aero Peek (#267: it vanished ~0.5 s into a thumbnail hover) and EXCLUDED FROM CAPTURE (owner
+  decision: otherwise it is frozen into the snip screenshot as a dimmed arrow; recordings show no
+  cursor). `tools/testenv/dualcursor.ps1` turns the hidden `spriteCapturable=1` knob on because
+  it measures the sprite from captures.
   DIAGNOSTIC TRAP: `ScreenClippingHost.exe` holds foreground with no visible top-level window, so
   a z-order walk shows us at index 0 while we are plainly covered. Do not "verify" band problems
   that way. `CURSOR_SHOWING` also stays 1 throughout, so it is not the `cursorVisibility` gate.

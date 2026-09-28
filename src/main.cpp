@@ -2364,7 +2364,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         cd << "maxLevel=" << cfg.maxLevel << "\nzoomInSpeed=" << cfg.zoomInSpeed
            << "\nzoomOutSpeed=" << cfg.zoomOutSpeed << "\nmultiMonitor=" << cfg.multiMonitor
            << "\ncropCapture=" << cfg.cropCapture << "\nvsync=" << cfg.vsync
-           << "\ndwmFlush=" << cfg.dwmFlush << "\nzorderBand=" << cfg.zorderBand
+           << "\ndwmFlush=" << cfg.dwmFlush << "\nzorderBand=" << cfg.zorderBand << "\ncursorBandAuto=" << cfg.cursorBandAuto
            << "\ncursorVisibility=" << cfg.cursorVisibility << "\nhdrTonemap=" << cfg.hdrTonemap;
     #ifdef WIND_UIACCESS
         wind::LogSystemSnapshot("uiaccess", cd.str());
@@ -2442,8 +2442,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         // throttles (measured). Cursor is anchored, not centered (documented model tradeoff).
         auto tm = std::make_unique<TransformModel>(cfg.fastPan != 0, cfg.smoothPan != 0,
                                                    cfg.cursorSprite != 0, cfg.zorderBand,
-                                                   cfg.spriteBand16 != 0);
+                                                   cfg.spriteBand16 != 0, cfg.cursorBandAuto != 0);
         tm->setIdleReleaseMs(cfg.txIdleReleaseMs);
+        tm->setSpriteCapturable(cfg.spriteCapturable != 0);
         model = std::move(tm);
     } else {
         model = std::make_unique<RenderModel>(cfg.zorderBand, cfg.hdrTonemap != 0,
@@ -2455,8 +2456,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             // engine is picked per zoom-in session in RunTick; both stay initialized.
             auto tm2 = std::make_unique<TransformModel>(cfg.fastPan != 0, cfg.smoothPan != 0,
                                                         cfg.cursorSprite != 0, cfg.zorderBand,
-                                                        cfg.spriteBand16 != 0);
+                                                        cfg.spriteBand16 != 0, cfg.cursorBandAuto != 0);
             tm2->setIdleReleaseMs(cfg.txIdleReleaseMs);
+            tm2->setSpriteCapturable(cfg.spriteCapturable != 0);
             model2 = std::move(tm2);
         }
     }

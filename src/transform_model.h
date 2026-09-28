@@ -18,9 +18,11 @@ unsigned long long TransformCursorHideFailures();
 class TransformModel : public IMagnifierModel {
 public:
     TransformModel(bool fastPan, bool smoothPan, bool useSprite, int zorderBand,
-                   bool spriteBand16 = false)
+                   bool spriteBand16 = false, bool cursorBandAuto = false)
         : fastPan_(fastPan), smoothPan_(smoothPan), useSprite_(useSprite),
-          zorderBand_(zorderBand), spriteBand16_(spriteBand16) {}
+          zorderBand_(zorderBand), spriteBand16_(spriteBand16), cursorBandAuto_(cursorBandAuto) {}
+    // Before initialize(). The dualcursor rig measures the sprite from captures (issue #269).
+    void setSpriteCapturable(bool on) { spriteCapturable_ = on; }
     bool initialize(const MonitorTarget& monitor) override;
     // MONITOR GEOMETRY CAN CHANGE UNDER A LIVE SESSION (issue #230). mon_ feeds the clamp bounds in
     // ComputeMagTransform, the sprite's placement offsets and the MagSetInputTransform rects, and
@@ -89,6 +91,11 @@ private:
     void traceDump();
     int  zorderBand_;                                // sprite z-band (above the shell); needs UIAccess
     bool spriteBand16_ = false;                      // P2 experiment: band-16 SCREEN-space sprite
+    bool cursorBandAuto_ = false;                    // issue #269: band 16 unless the snip overlay is up
+    HWND layerFg_ = nullptr;                         // foreground the layer verdict was read for
+    int  layerFgBand_ = 0;                           // ...and its z-band
+    void updateSpriteLayer();                        // pick the sprite window for this tick (#269)
+    bool spriteCapturable_ = false;                  // test rig only: keep the sprite capturable
     bool ready_ = false;
     bool active_ = false;
     MonitorTarget mon_{};
