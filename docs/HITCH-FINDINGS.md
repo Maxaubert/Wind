@@ -228,6 +228,38 @@ Next step for whoever picks this up: instrument what governs the composition rat
 / actual display refresh) across a rest, for Wind and native side by side. The answer is in why
 native holds 144Hz while writing nothing.
 
+## The "native feels 144 Hz over a 70 fps game" question: measured 2026-09-28
+
+Setup: DOOM The Dark Ages main menu (~71 fps, 14 ms frames), 4K 144 Hz VRR panel, MPO OFF
+(`OverlayTestMode=5`), Wind 0.10.1 transform model with `txPace=2`. All takes driven by
+`tools/pan_wake_probe.ps1 -Drive` (same injected sweep/stop pattern), DOOM foreground held.
+
+| take | DWM composition while panning | DOOM frametime |
+|---|---|---|
+| native Magnifier 300% | 6.94 ms median (144 Hz) | 14.3 ms |
+| Wind (`-ZoomTo 3`) | 6.94 ms (144 Hz) | 14.2 ms |
+| Wind + `-DamagePin` | 6.94 ms (144 Hz) | 14.2 ms |
+
+1. **DWM does NOT follow the game here.** With MPO off it composes at 144 Hz under both
+   magnifiers, so "the composition rate drops to the game's rate" (the VRR theory in this file and
+   in the 2026-09-28 code review) is not the explanation on this setup. The damage pin (a
+   composited always-on-top window, the "force composed flip" idea) changes nothing, as expected.
+2. **Transform write rate (`-SampleTransform`, public integer offsets only):** Wind changed the
+   applied transform on 78% of compositions while panning (113/s), native on 42% (60/s). Native
+   follows input 1:1 and the driven input only reached ~128 packets/s, so this does not reproduce a
+   real 1000 Hz hand; it only shows Wind is not starved of writes.
+3. **Screen capture at 144 fps** (ddagrab, 640x360 centre, `draw_mouse=0`): the capture itself
+   tops out near 90 fps, so both arms read ~41-44 new pictures/s. The one difference: Wind held a
+   picture for 3+ capture frames 11% of the time vs native 3% (more micro-holds).
+   Trap: ddagrab's default `draw_mouse=1` paints the OS pointer into every frame, which inflates
+   "distinct frames" for native (hardware cursor) and not for Wind (sprite, capture-excluded).
+
+Still open, and the next thing to measure: the synthetic setup does not reproduce the felt gap.
+Candidates left: (a) the CURSOR (native moves the hardware cursor at input rate; Wind blanks it
+and moves a composited sprite once per tick), (b) Wind's micro-holds above, (c) input rate (a real
+1000 Hz hand vs the ~128 Hz injector). Needs a real-hand take with a faster capture path (or a
+phone slow-motion video), with `spriteCapturable=1` so Wind's cursor is visible to the capture.
+
 ## Open items
 
 - Zoom-ramp spikes (~1 per cycle, 45 ms) - DWM re-scale cost during the ramp.
