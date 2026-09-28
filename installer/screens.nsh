@@ -1,5 +1,5 @@
 ;
-; Wind setup, the four screens.
+; Wind setup, the five screens.
 ;
 ; Each page is the same thing: an empty dialog, the canvas from video.nsh, and a timer. What
 ; differs is $Screen, which picks the overlay and decides what the clicks mean. There is not a
@@ -47,6 +47,57 @@ Function windWelcomeCreate
   StrCpy $Screen 0
   Call windPageStart
   nsDialogs::Show
+FunctionEnd
+
+; ---- 1b. licence --------------------------------------------------------------
+; The terms are summarised on the screen and the full text is one click away; the box has to
+; be ticked before Continue does anything. A silent install (/S) skips this page like every
+; other one: whoever runs setup silently is deploying it deliberately, and LICENSE.txt lands
+; next to Wind either way.
+Function windLicenceCreate
+  ${If} ${Silent}
+    Abort
+  ${EndIf}
+  StrCpy $Screen 4
+  Call windPageStart
+  nsDialogs::Show
+FunctionEnd
+
+Function windLicenceLeave
+  ; Continue is dead until the box is ticked, so this is only a guard against anything that
+  ; reaches Next another way (Enter, a stray WM_COMMAND). Abort keeps the page up, and the
+  ; canvas and its timer with it.
+  ${If} $Accepted <> 1
+    Abort
+  ${EndIf}
+  Call windPageLeave
+FunctionEnd
+
+; Opens the licence in the user's own text viewer. Through explorer.exe, like
+; WIND_LAUNCH_DEELEVATED, so the viewer does not inherit setup's elevation: an elevated
+; Notepad can open and save any file on the machine.
+; Not from $PLUGINSDIR: an elevated NSIS locks that folder to Administrators, so the
+; de-elevated viewer is refused. GetTempFileName makes a fresh, uniquely named entry in the
+; user's own temp folder instead; turned into a folder, it inherits the user's access and no
+; one can have planted anything at that name beforehand.
+Function WindOpenLicence
+  ${If} $LicenceDir == ""
+    GetTempFileName $LicenceDir
+    Delete $LicenceDir
+    CreateDirectory $LicenceDir
+    SetOutPath $LicenceDir
+    File "/oname=LICENSE.txt" "..\LICENSE"
+  ${EndIf}
+  Exec '"$WINDIR\explorer.exe" "$LicenceDir\LICENSE.txt"'
+FunctionEnd
+
+; Tidies the viewer's copy when setup closes. A viewer reads the whole file on open, so
+; one still showing it is unaffected; RMDir without /r only removes the folder once empty.
+Function .onGUIEnd
+  ${If} $LicenceDir != ""
+    Delete "$LicenceDir\LICENSE.txt"
+    RMDir $LicenceDir
+  ${EndIf}
 FunctionEnd
 
 ; ---- 2. setup ----------------------------------------------------------------

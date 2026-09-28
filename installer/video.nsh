@@ -41,7 +41,7 @@ Var DibBytes
 Var OldBmp
 Var Canvas      ; the one static that shows everything
 Var Frame
-Var Screen      ; 0 welcome, 1 setup, 2 copying, 3 done
+Var Screen      ; 0 welcome, 1 setup, 2 copying, 3 done, 4 licence
 Var OverName    ; which overlay is loaded, so we only reload on a change
 Var OverImg
 Var BackImg     ; the shade and caption scrim, loaded once per page
@@ -233,6 +233,8 @@ Function WindDraw
   ${ElseIf} $Screen = 3
     !insertmacro STAMP_BOX DONE_BOX_RUN $RunAfter
     !insertmacro STAMP_BOX DONE_BOX_DESK $WantDesktop
+  ${ElseIf} $Screen = 4
+    !insertmacro STAMP_BOX LICENCE_BOX_ACCEPT $Accepted
   ${EndIf}
   System::Call 'gdiplus::GdipDeleteGraphics(p $3)'
 
@@ -324,6 +326,26 @@ Function WindInput
       ${If} $0 = 1
         StrCpy $Hot "next"
       ${EndIf}
+    ${ElseIf} $Screen = 4
+      ; Continue only exists once the licence is accepted: before that it is drawn disabled and
+      ; neither lights up nor clicks
+      ${If} $Accepted = 1
+        !insertmacro HITS LICENCE_NEXT $0
+        ${If} $0 = 1
+          StrCpy $Hot "next"
+        ${EndIf}
+      ${EndIf}
+      ${If} $Hot == ""
+        !insertmacro HITS LICENCE_BACK $0
+        ${If} $0 = 1
+          StrCpy $Hot "back"
+        ${Else}
+          !insertmacro HITS LICENCE_READ $0
+          ${If} $0 = 1
+            StrCpy $Hot "read"
+          ${EndIf}
+        ${EndIf}
+      ${EndIf}
     ${EndIf}
   ${EndIf}
 
@@ -386,11 +408,17 @@ Function WindClick
     !insertmacro POST_CMD 3
     Return
   ${EndIf}
+  ${If} $Hot == "read"
+    Call WindOpenLicence
+    Return
+  ${EndIf}
   ${If} $Screen = 1
     !insertmacro TOGGLE_ROW SETUP_OPT_AUTOSTART $WantAutostart
   ${ElseIf} $Screen = 3
     !insertmacro TOGGLE_ROW DONE_OPT_RUN $RunAfter
     !insertmacro TOGGLE_ROW DONE_OPT_DESK $WantDesktop
+  ${ElseIf} $Screen = 4
+    !insertmacro TOGGLE_ROW LICENCE_OPT_ACCEPT $Accepted
   ${EndIf}
 
   ; nothing hit, and the pointer is up in the caption: drag the window. Windows runs its own
@@ -425,6 +453,13 @@ Function WindPickOverlay
     StrCpy $1 "setup"
   ${ElseIf} $Screen = 2
     StrCpy $1 "copy"
+  ${ElseIf} $Screen = 4
+    ; two overlay sets, because the Continue button's state is part of the art
+    ${If} $Accepted = 1
+      StrCpy $1 "licenceok"
+    ${Else}
+      StrCpy $1 "licence"
+    ${EndIf}
   ${Else}
     StrCpy $1 "done"
   ${EndIf}

@@ -63,10 +63,11 @@ VIAddVersionKey "LegalCopyright"  "Copyright (c) 2026 ${PUBLISHER}"
 
 !include "screens.nsh"
 
-; Welcome, setup, copying, done. Only the copying page is MUI's, because it is the one that
+; Welcome, licence, setup, copying, done. Only the copying page is MUI's, because it is the one that
 ; has to be driven by the section; the SHOW define has to sit immediately before it, which is
 ; the only way to hand that page a show function without an earlier page swallowing it.
 Page custom windWelcomeCreate windPageLeave
+Page custom windLicenceCreate windLicenceLeave
 Page custom windSetupCreate   windPageLeave
 !define MUI_PAGE_CUSTOMFUNCTION_SHOW windCopyShow
 !insertmacro MUI_PAGE_INSTFILES
@@ -84,6 +85,8 @@ Section "Wind" SEC_WIND
   SetOutPath "$INSTDIR"
   File "..\Wind.exe"
   File "..\WindConfig.exe"
+  ; the licence the user accepted, kept next to the app so the terms are always findable
+  File "/oname=LICENSE.txt" "..\LICENSE"
   SetOutPath "$INSTDIR\ui\dist"
   File /r "..\ui\dist\*.*"
   SetOutPath "$INSTDIR"
@@ -129,6 +132,7 @@ Section "Uninstall"
 
   Delete "$INSTDIR\Wind.exe"
   Delete "$INSTDIR\WindConfig.exe"
+  Delete "$INSTDIR\LICENSE.txt"
   Delete "$INSTDIR\Uninstall.exe"
   RMDir /r "$INSTDIR\ui"
   ; Not RMDir /r on $INSTDIR itself: a stray recursive delete of the wrong directory is
@@ -161,6 +165,8 @@ Function .onInit
   StrCpy $WantAutostart 1
   StrCpy $WantDesktop 0
   StrCpy $RunAfter 1
+  ; the licence starts unaccepted; only the licence screen's box sets it
+  StrCpy $Accepted 0
 FunctionEnd
 
 Function un.onInit

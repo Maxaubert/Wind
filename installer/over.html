@@ -84,6 +84,17 @@
     padding: 0 16px; font: inherit; font-size: 12.5px; font-weight: 600;
     background: rgba(255,255,255,.06); color: #cdd2dc }
   .ghost.hot { background: rgba(255,255,255,.14); color: #fff; border-color: rgba(255,255,255,.5) }
+  /* Not accepted yet: the button is present, so the layout does not jump when the box is
+     ticked, but it reads as unavailable and the installer ignores clicks on it. */
+  .cta.off { background: rgba(91,91,214,.34); color: rgba(255,255,255,.52); box-shadow: none }
+
+  /* The one link in setup. Underlined, because on moving footage colour alone does not say
+     "this opens something". */
+  .link { margin-top: 12px; display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px;
+    font-weight: 600; color: rgba(243,244,250,.86); text-decoration: underline;
+    text-decoration-color: rgba(243,244,250,.38); text-underline-offset: 3px;
+    text-shadow: 0 1px 10px rgba(6,6,14,.85) }
+  .link.hot { color: #fff; text-decoration-color: rgba(255,255,255,.8) }
 
   /* The path is stated, not offered: there is no field and no Browse, because UIAccess is
      only granted in a secure location and a chooser's wrong answers would be silent. The
@@ -132,11 +143,19 @@ const FOLDER = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stro
   stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="flex:none"><path
   d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`
 
+// Screens 4 and 5 are the licence screen, before and after the box is ticked. They are the
+// same words; only the Continue button differs, and it is baked into the art rather than
+// painted, so each state gets its own overlay. The summary has to stay true to LICENSE: it
+// is what most people will read instead of it.
+const LICENCE = ['Licence agreement',
+  'Wind is free to install and use, at home or at work. Wind and its source code may not be copied, shared, resold or taken apart. It comes as it is, without warranty.']
 const COPY = [
   ['Install Wind', 'A fullscreen magnifier that keeps tracking the mouse, even when a game hides it.'],
   ['Where Wind goes', 'Wind installs to Program Files. Windows only grants the access its shortcuts and desktop zoom need to apps that live there.'],
   ['Installing', 'This takes a few seconds.'],
-  ['Wind installed', '']
+  ['Wind installed', ''],
+  LICENCE,
+  LICENCE
 ]
 
 // Per screen: the options it offers, as [KEY, label]. The boxes are painted by setup.
@@ -144,9 +163,12 @@ const OPTIONS = [
   [],
   [['AUTOSTART', 'Start Wind when I sign in']],
   [],
-  [['RUN', 'Open Wind now'], ['DESK', 'Create desktop shortcut']]
+  [['RUN', 'Open Wind now'], ['DESK', 'Create desktop shortcut']],
+  [['ACCEPT', 'I accept the licence agreement']],
+  [['ACCEPT', 'I accept the licence agreement']]
 ]
-const NEXT = ['Install Wind', 'Install', '', 'Finish']
+const NEXT = ['Install Wind', 'Install', '', 'Finish', 'Continue', 'Continue']
+const LICENCE_SCREEN = (s) => s === 4 || s === 5
 
 /* `hot` names the one control drawn hot; `boxes` is 'none' (setup paints them), 'on' or
    'off' (used only to cut the two box images out). */
@@ -161,6 +183,7 @@ function screen(s, hot, boxes) {
     <div class="pad">
       <h1 data-a="TITLE">${title}</h1>
       ${sub ? `<p>${sub}</p>` : ''}
+      ${LICENCE_SCREEN(s) ? `<div><span class="link${h('read')}" data-a="READ">Read the full licence</span></div>` : ''}
       ${s === 1 ? `<div class="path">${FOLDER}<span class="slot" data-a="PATH"></span></div>` : ''}
       ${s === 2 ? `<div class="row"><div class="track" data-a="TRACK"></div></div>` : ''}
       ${OPTIONS[s].map(([key, label]) => `
@@ -169,8 +192,8 @@ function screen(s, hot, boxes) {
           <span>${label}</span>
         </div>`).join('')}
       <div class="row">
-        ${s === 1 ? `<button class="ghost${h('back')}" data-a="BACK">Back</button>` : ''}
-        ${NEXT[s] ? `<button class="cta${h('next')}" data-a="NEXT">${NEXT[s]}</button>` : ''}
+        ${s === 1 || LICENCE_SCREEN(s) ? `<button class="ghost${h('back')}" data-a="BACK">Back</button>` : ''}
+        ${NEXT[s] ? `<button class="cta${s === 4 ? ' off' : h('next')}" data-a="NEXT">${NEXT[s]}</button>` : ''}
       </div>
     </div>`
 }
