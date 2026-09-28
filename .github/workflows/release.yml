@@ -10,10 +10,10 @@
 # cuts a NEW release. Pushes that do not touch it refresh the existing one in place, which is
 # what keeps the download matching main without a version number per commit.
 #
-# Unsigned on purpose: no certificate is configured here, and tools/release.ps1 then builds
-# the uiAccess=false variant. That is the correct public configuration until a real cert
-# exists. Never put a self-signed cert in CI: it would be trusted by nobody and look worse
-# than no signature at all.
+# Unsigned on purpose: no certificate is configured here, and tools/release.ps1 then packs
+# both variants; setup signs the uiAccess one on each PC it installs to (issue #261,
+# installer/local-sign.ps1) and falls back to the uiAccess=false build. Never put a
+# self-signed cert in CI: it would be trusted by nobody and look worse than no signature.
 name: release
 
 on:

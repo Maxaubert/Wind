@@ -8,8 +8,9 @@
         $env:WIND_SIGN_PASSWORD     its password
 
     With a certificate this builds the uiAccess=true variant and signs it. Without one it
-    builds the ordinary variant, because shipping a manifest that asks for a privilege
-    Windows will refuse is noise in a public artifact. The app already degrades correctly:
+    builds BOTH: the ordinary Wind.exe, and the uiAccess variant as WindUA.exe, which setup
+    signs on the PC it installs to (installer\local-sign.ps1, issue #261). If that signing
+    fails, setup installs the ordinary build, and the app degrades correctly:
     transform_model.cpp probes TokenUIAccess and disables the desktop transform pick.
 
     Usage:
@@ -89,10 +90,21 @@ if ($cert) {
     Write-Host "variant: uiAccess=true"
 } else {
     Write-Warning "no certificate configured (WIND_SIGN_THUMBPRINT / WIND_SIGN_PFX)."
-    Write-Warning "unsigned build: UIAccess features disabled (elevated-window keybinds, desktopTransform)."
+    Write-Warning "unsigned release: setup signs the uiAccess build on each PC (installer\local-sign.ps1)."
 }
 
+$ua = "$root\WindUA.exe"
 if (-not $SkipBuild) {
+    # No certificate: build the uiAccess variant as well, as WindUA.exe. Setup signs it on the
+    # PC it installs to (installer\local-sign.ps1, issue #261) and keeps the standard build as
+    # the fallback. With a certificate the signed uiAccess build IS Wind.exe, so a WindUA.exe
+    # left over from an earlier run must not reach the installer.
+    if (Test-Path $ua) { Remove-Item $ua -Force }
+    if (-not $cert) {
+        Write-Host "=== building WindUA.exe (uiaccess, signed at install) ==="
+        Invoke-Build 'uiaccess'
+        Move-Item "$root\Wind.exe" $ua -Force
+    }
     Write-Host "=== building Wind.exe ($(if ($variant) { $variant } else { 'standard' })) ==="
     Invoke-Build $variant
     Write-Host "=== building WindConfig.exe + ui\dist ==="
@@ -121,4 +133,4 @@ if ($cert) { Invoke-Sign $out $cert }
 $mb = [math]::Round((Get-Item $out).Length / 1MB, 1)
 Write-Host ""
 Write-Host "DONE  $out  ($mb MB)"
-if (-not $cert) { Write-Host "      unsigned - see the comment at the top of tools\release.ps1" }
+if (-not $cert) { Write-Host "      unsigned - see the comment at the top of tools\release.ps1; Wind is signed on each PC at install" }

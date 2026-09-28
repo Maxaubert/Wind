@@ -51,6 +51,14 @@ VIAddVersionKey "LegalCopyright"  "Copyright (c) 2026 ${PUBLISHER}"
 !include "x64.nsh"
 !include "app.nsh"
 
+; UIAccess for everyone (issue #261). A release with a real code-signing certificate ships
+; Wind.exe already signed as the uiAccess build, and there is nothing to do. Without one,
+; tools\release.ps1 also builds the uiAccess variant as WindUA.exe, and setup signs it on the
+; PC it installs to (local-sign.ps1 says how, and why that is safe). Its presence decides.
+!if /FileExists "..\WindUA.exe"
+  !define LOCAL_SIGN
+!endif
+
 ; The picture. These come before MUI_LANGUAGE, because kit.nsh sets
 ; MUI_CUSTOMFUNCTION_GUIINIT and MUI only reads that when it emits .onGUIInit. Unlike Prism
 ; there is no BUILD_UNINSTALLER guard: electron-builder compiles the uninstaller in a second
@@ -83,8 +91,42 @@ Section "Wind" SEC_WIND
   !insertmacro WIND_QUIT_RUNNING
 
   SetOutPath "$INSTDIR"
+!ifdef LOCAL_SIGN
+  ; UIAccess needs a signature the PC trusts, so the uiAccess build is signed here, on this PC.
+  ; 64-bit PowerShell through Sysnative: this installer is a 32-bit process, and the
+  ; LocalMachine certificate stores are the machine's either way, but the PKI cmdlets are only
+  ; guaranteed in the native one.
+  ;
+  ; The standard build goes in FIRST, and the uiAccess build is signed in $PLUGINSDIR and only
+  ; copied over it once its signature verifies. An unsigned uiAccess build does not start at
+  ; all ("A referral was returned from the server"), so setup must never leave one in place:
+  ; killed mid-signing, it did exactly that (reproduced 2026-09-28). This way an interruption
+  ; at any point leaves a Wind that runs.
   File "..\Wind.exe"
   File "..\WindConfig.exe"
+  InitPluginsDir
+  CreateDirectory "$PLUGINSDIR\ua"
+  File "/oname=$PLUGINSDIR\ua\Wind.exe" "..\WindUA.exe"
+  File "/oname=$PLUGINSDIR\local-sign.ps1" "local-sign.ps1"
+  DetailPrint "Signing Wind on this PC..."
+  nsExec::ExecToLog '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\local-sign.ps1" -Stage "$PLUGINSDIR\ua\Wind.exe" -Dir "$INSTDIR"'
+  Pop $0
+  ${If} $0 == 0
+    ClearErrors
+    CopyFiles /SILENT "$PLUGINSDIR\ua\Wind.exe" "$INSTDIR\Wind.exe"
+    ${If} ${Errors}
+      DetailPrint "Could not place the signed build; keeping the standard one."
+      File "..\Wind.exe"
+    ${EndIf}
+  ${Else}
+    ; The standard build stays: it runs everywhere, and only the cursor over the taskbar
+    ; menus and the Snipping Tool is lost.
+    DetailPrint "Local signing failed ($0); keeping the standard build."
+  ${EndIf}
+!else
+  File "..\Wind.exe"
+  File "..\WindConfig.exe"
+!endif
   ; the licence the user accepted, kept next to the app so the terms are always findable
   File "/oname=LICENSE.txt" "..\LICENSE"
   SetOutPath "$INSTDIR\ui\dist"
@@ -129,6 +171,13 @@ Section "Uninstall"
   Delete "$DESKTOP\Wind.lnk"
   DeleteRegValue HKLM "${RUN_KEY}" "${RUN_VALUE}"
   DeleteRegKey   HKLM "${ARP_KEY}"
+
+  ; Retire the trust setup added for the local signature. Always, not only when this build
+  ; signed: an older install may have, and a root left behind for an uninstalled app is litter.
+  InitPluginsDir
+  File "/oname=$PLUGINSDIR\local-sign.ps1" "local-sign.ps1"
+  nsExec::ExecToLog '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\local-sign.ps1" -Remove'
+  Pop $0
 
   Delete "$INSTDIR\Wind.exe"
   Delete "$INSTDIR\WindConfig.exe"
