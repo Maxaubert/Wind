@@ -16,9 +16,16 @@ Three optional ways for the zoomed view to decide where to look, besides followi
 
 Owner decisions (2026-09-28, verbatim intent):
 
-1. **Tracking never moves the pointer.** When the view goes to the caret or focus, the pointer stays
-   where it was, possibly out of view. The moment the mouse moves, the view returns to the pointer,
-   centred or edges depending on the mouse setting. (Windows Magnifier's behaviour.)
+1. **Tracking never drags the pointer along.** When the view goes to the caret or focus, the pointer
+   stays where it was, possibly out of view. **Revised after the first field test (2026-09-29):** the
+   moment the mouse MOVES, the POINTER comes to the view (placed at the view centre, or just inside
+   the edges in edge mode) and the view stays where it is. (Windows Magnifier's behaviour.) A mouse
+   BUTTON press instead gives the view back to the pointer without moving it, since moving the
+   pointer under a held button would drag.
+6. **Follow only what the keyboard moves (field test 2026-09-29).** The first caret position after
+   any focus change (Tab, a click, a page load) is only a baseline; the caret is followed when it
+   moves within the same focus (typing, arrow keys). Caret and focus changes within 1 s of a mouse
+   button press are the click's own doing and never move the view.
 2. **Caret and focus default to CENTRED**, with "within edges" as an option (one shared setting).
 3. **Caret and focus GLIDE to their target, never snap.** The return to the pointer glides too.
 4. All three are optional. Only caret tracking is on by default.
@@ -43,9 +50,10 @@ the pointer after the mouse moved).
 - **Most recent input wins.** A new caret movement makes `Caret` the owner (if enabled); a new focus
   change makes `Focus` the owner (if enabled). A focus change that lands in a text field with a
   caret is treated as one event aimed at the caret.
-- **The mouse takes back control the moment it really moves** (3 px accumulated within 100 ms, or a
-  button press) or a mouse button goes down. The owner becomes `Returning`: the view glides back to
-  the pointer, then the owner becomes `Mouse` and today's behaviour resumes unchanged.
+- **The mouse takes back control the moment it really moves** (3 px accumulated within 100 ms): the
+  pointer is placed in the view (see decision 1) and today's behaviour resumes from there. A button
+  press hands control back without moving the pointer. (The first build glided the view back to the
+  pointer instead; a moving pointer was never reached, which the field felt as a wobbly, stuck view.)
 - Sensor jitter (under the 3 px threshold) never steals the view while typing.
 - Tracking is inactive (owner forced to `Mouse`) when: not zoomed, a game session, Inspect on, the
   lock detector reports a locked pointer, or the feature is off.

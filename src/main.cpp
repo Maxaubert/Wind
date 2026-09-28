@@ -292,6 +292,7 @@ struct TickState {
     wind::ViewOwnerState viewOwner;
     double viewCx = 0.0, viewCy = 0.0;
     bool   viewDetached = false;   // last tick drew a detached frame
+    unsigned long long lastButtonMs = 0;   // last tick a mouse button was down (click quiet period)
     bool   revealNeedsComposite = false;       // fullscreen-app zoom-in: also require a post-prime
                                                //   composite in the capture before revealing
     int    hz = 60;                            // resolved tick/refresh rate (auto-detected)
@@ -1475,36 +1476,43 @@ static void RunTick(TickState& t) {
             vi.buttonDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) ||
                             (GetAsyncKeyState(VK_RBUTTON) & 0x8000) ||
                             (GetAsyncKeyState(VK_MBUTTON) & 0x8000);
+            const unsigned long long nowMs = GetTickCount64();
+            if (vi.buttonDown) t.lastButtonMs = nowMs;
+            vi.msSinceButton = t.lastButtonMs ? double(nowMs - t.lastButtonMs) : 1e9;
             vi.dtMs = dt * 1000.0;
             vi.snap = g_track.snapshot();
-            const bool wasDetached = t.viewOwner.owner != wind::ViewOwner::Mouse;
+            const wind::ViewOwner was = t.viewOwner.owner;
             const wind::ViewOwner owner = wind::StepViewOwner(t.viewOwner, vi);
+            if (owner != was && t.cfg.trackLog) {
+                static const char* kName[] = { "mouse", "caret", "focus" };
+                wind::Log(wind::LogLevel::Info, "track", "view %s -> %s%s", kName[(int)was], kName[(int)owner],
+                          t.viewOwner.warpPointer ? " (pointer placed in the view)" : "");
+            }
             if (owner != wind::ViewOwner::Mouse) {
-                if (!wasDetached) { t.viewCx = r.centerX; t.viewCy = r.centerY; }   // glide from where we are
+                if (was == wind::ViewOwner::Mouse) { t.viewCx = r.centerX; t.viewCy = r.centerY; }   // glide from where we are
                 const double ptrX = cur.x - t.mon.x, ptrY = cur.y - t.mon.y;
                 double tx = t.viewCx, ty = t.viewCy;
-                if (owner == wind::ViewOwner::Returning) {
-                    tx = ptrX; ty = ptrY;   // centred return; phase 2 swaps in EdgePanCenter for mouseAlign=1
-                } else {
-                    const wind::TrackRect rc{ vi.snap.l - t.mon.x, vi.snap.t - t.mon.y, vi.snap.r - t.mon.x, vi.snap.b - t.mon.y };
-                    double ox, oy;
-                    if (wind::TrackTargetCenter(rc, t.viewCx, t.viewCy, lvl, t.mon.w, t.mon.h,
-                                                t.cfg.trackAlign, t.cfg.trackMarginPct, ox, oy)) { tx = ox; ty = oy; }
-                }
+                const wind::TrackRect rc{ vi.snap.l - t.mon.x, vi.snap.t - t.mon.y, vi.snap.r - t.mon.x, vi.snap.b - t.mon.y };
+                double ox, oy;
+                if (wind::TrackTargetCenter(rc, t.viewCx, t.viewCy, lvl, t.mon.w, t.mon.h,
+                                            t.cfg.trackAlign, t.cfg.trackMarginPct, ox, oy)) { tx = ox; ty = oy; }
                 t.viewCx = wind::GlideToward(t.viewCx, tx, vi.dtMs, t.cfg.trackGlideMs);
                 t.viewCy = wind::GlideToward(t.viewCy, ty, vi.dtMs, t.cfg.trackGlideMs);
-                if (owner == wind::ViewOwner::Returning &&
-                    std::fabs(t.viewCx - tx) < 1.0 && std::fabs(t.viewCy - ty) < 1.0) {
-                    wind::FinishReturn(t.viewOwner);
-                    t.mapper.reset(ptrX, ptrY);          // hand back exactly at the pointer
-                    t.lastSetVirtual = cur;
-                    t.viewDetached = false;              // normal weld/hook paths resume this tick
-                } else {
-                    r = wind::DetachedMap(t.viewCx, t.viewCy, ptrX, ptrY, lvl, t.mon.w, t.mon.h);
-                    t.mapper.reset(t.viewCx, t.viewCy);   // hybrid switches and the next tick start here
-                    t.lastSetVirtual = cur;               // measure the next hand motion from here
-                    t.viewDetached = true;
-                }
+                r = wind::DetachedMap(t.viewCx, t.viewCy, ptrX, ptrY, lvl, t.mon.w, t.mon.h);
+                t.mapper.reset(t.viewCx, t.viewCy);   // hybrid switches and the next tick start here
+                t.lastSetVirtual = cur;               // measure the next hand motion from here
+                t.viewDetached = true;
+            } else if (t.viewOwner.warpPointer) {
+                // The mouse moved while the view showed the caret/focus: the POINTER comes to the
+                // view, the view stays (owner decision, field test 2026-09-29). Placed at the view
+                // centre in centred mode; phase 2 places it just inside the edges for mouseAlign=1.
+                const int wx = (int)(t.viewCx + 0.5) + t.mon.x, wy = (int)(t.viewCy + 0.5) + t.mon.y;
+                SetCursorPos(wx, wy);
+                cur.x = wx; cur.y = wy;
+                t.mapper.reset(t.viewCx, t.viewCy);
+                t.lastSetVirtual = cur;
+                r = wind::DetachedMap(t.viewCx, t.viewCy, t.viewCx, t.viewCy, lvl, t.mon.w, t.mon.h);
+                t.viewDetached = false;               // normal weld/hook paths resume this tick
             } else {
                 t.viewDetached = false;
             }

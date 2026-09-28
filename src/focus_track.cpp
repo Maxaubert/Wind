@@ -134,64 +134,86 @@ void FocusTracker::run() {
     bool pendingFocus = false, pendingCaret = false;
     UINT_PTR coalesce = 0;
 
+    // FOLLOW ONLY WHAT THE KEYBOARD MOVES (field test 2026-09-29). Landing in a field, by Tab or by a
+    // click, reports a caret too (at the END of a filled field), and following it jumped the view
+    // away from what the user was looking at. So the first caret position after any focus change is
+    // only a BASELINE; a caret is published when it moves within the same focus, i.e. typing or the
+    // arrow keys. focusGen advances the moment a focus event ARRIVES (not when it is resolved), so
+    // the 60 Hz backstop poll cannot publish the new field's caret in the 30 ms before that.
+    unsigned focusGen = 0, caretGen = ~0u;
+    RECT lastCaret{};
+
+    // Caret, fastest source first. Releases everything it acquires.
+    auto findCaret = [&](IUIAutomationElement* el, RECT& rc, const char*& src) -> bool {
+        if (Win32Caret(rc)) { src = "win32"; return true; }
+        if (!el) return false;
+        bool ok = false;
+        IUIAutomationTextPattern2* tp2 = nullptr;
+        if (SUCCEEDED(el->GetCurrentPatternAs(UIA_TextPattern2Id, __uuidof(IUIAutomationTextPattern2), (void**)&tp2)) && tp2) {
+            BOOL active = FALSE; IUIAutomationTextRange* cr = nullptr;
+            if (SUCCEEDED(tp2->GetCaretRange(&active, &cr)) && cr) {
+                if (active && RangeRect(cr, rc)) { ok = true; src = "uia-caret"; }
+                cr->Release();
+            }
+            tp2->Release();
+        }
+        if (ok) return true;
+        IUIAutomationTextPattern* tp = nullptr;
+        if (SUCCEEDED(el->GetCurrentPatternAs(UIA_TextPatternId, __uuidof(IUIAutomationTextPattern), (void**)&tp)) && tp) {
+            IUIAutomationTextRangeArray* sel = nullptr;
+            if (SUCCEEDED(tp->GetSelection(&sel)) && sel) {
+                int n = 0; sel->get_Length(&n);
+                IUIAutomationTextRange* r0 = nullptr;
+                if (n > 0 && SUCCEEDED(sel->GetElement(0, &r0)) && r0) {
+                    if (RangeRect(r0, rc)) { ok = true; src = "uia-selection"; }
+                    r0->Release();
+                }
+                sel->Release();
+            }
+            tp->Release();
+        }
+        return ok;
+    };
+
     auto resolve = [&](bool focusChanged) {
         if (!active_.load()) return;
         HWND fg = GetForegroundWindow();
         if (IsOwnOrTooltip(fg)) return;
-        RECT rc{};
-        // 1. Caret, fastest source first.
+        IUIAutomationElement* el = nullptr;
+        if (uia) uia->GetFocusedElement(&el);
+        // 1. A focus change: follow the focused control (if wanted). Its caret becomes the baseline.
+        if (focusChanged && wantFocus_.load() && el) {
+            RECT b{};
+            if (SUCCEEDED(el->get_CurrentBoundingRectangle(&b)) && b.right > b.left && b.bottom > b.top)
+                publish(TrackKind::Focus, b.left, b.top, b.right, b.bottom, "uia-focus");
+        }
+        // 2. The caret: published only when it moved within the same focus.
         if (wantCaret_.load()) {
-            if (Win32Caret(rc)) { publish(TrackKind::Caret, rc.left, rc.top, rc.right, rc.bottom, "win32"); return; }
-            IUIAutomationElement* el = nullptr;
-            if (uia && SUCCEEDED(uia->GetFocusedElement(&el)) && el) {
-                IUIAutomationTextPattern2* tp2 = nullptr;
-                if (SUCCEEDED(el->GetCurrentPatternAs(UIA_TextPattern2Id, __uuidof(IUIAutomationTextPattern2), (void**)&tp2)) && tp2) {
-                    BOOL active = FALSE; IUIAutomationTextRange* cr = nullptr;
-                    if (SUCCEEDED(tp2->GetCaretRange(&active, &cr)) && cr) {
-                        if (active && RangeRect(cr, rc)) { cr->Release(); tp2->Release(); el->Release();
-                            publish(TrackKind::Caret, rc.left, rc.top, rc.right, rc.bottom, "uia-caret"); return; }
-                        cr->Release();
-                    }
-                    tp2->Release();
+            RECT rc{}; const char* src = "";
+            if (findCaret(el, rc, src)) {
+                if (caretGen != focusGen) {
+                    caretGen = focusGen; lastCaret = rc;                       // baseline, not followed
+                    if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "caret baseline via %s: %ld,%ld", src, rc.left, rc.top);
+                } else if (!EqualRect(&rc, &lastCaret)) {
+                    lastCaret = rc;
+                    publish(TrackKind::Caret, rc.left, rc.top, rc.right, rc.bottom, src);
                 }
-                IUIAutomationTextPattern* tp = nullptr;
-                if (SUCCEEDED(el->GetCurrentPatternAs(UIA_TextPatternId, __uuidof(IUIAutomationTextPattern), (void**)&tp)) && tp) {
-                    IUIAutomationTextRangeArray* sel = nullptr;
-                    if (SUCCEEDED(tp->GetSelection(&sel)) && sel) {
-                        int n = 0; sel->get_Length(&n);
-                        IUIAutomationTextRange* r0 = nullptr;
-                        if (n > 0 && SUCCEEDED(sel->GetElement(0, &r0)) && r0) {
-                            bool ok = RangeRect(r0, rc); r0->Release();
-                            if (ok) { sel->Release(); tp->Release(); el->Release();
-                                publish(TrackKind::Caret, rc.left, rc.top, rc.right, rc.bottom, "uia-selection"); return; }
-                        }
-                        sel->Release();
-                    }
-                    tp->Release();
-                }
-                // 2. Focus: the element's own bounds, only on a real focus change.
-                if (focusChanged && wantFocus_.load()) {
-                    RECT b{};
-                    if (SUCCEEDED(el->get_CurrentBoundingRectangle(&b)) && b.right > b.left && b.bottom > b.top) {
-                        el->Release(); publish(TrackKind::Focus, b.left, b.top, b.right, b.bottom, "uia-focus"); return;
-                    }
-                }
-                el->Release();
-            }
-        } else if (focusChanged && wantFocus_.load() && uia) {
-            IUIAutomationElement* el = nullptr; RECT b{};
-            if (SUCCEEDED(uia->GetFocusedElement(&el)) && el) {
-                if (SUCCEEDED(el->get_CurrentBoundingRectangle(&b)) && b.right > b.left && b.bottom > b.top)
-                    publish(TrackKind::Focus, b.left, b.top, b.right, b.bottom, "uia-focus");
-                el->Release();
             }
         }
+        if (el) el->Release();
     };
 
     while (GetMessageW(&m, nullptr, 0, 0) > 0) {
         if (m.message == kWakeMsg) {
-            if (m.wParam == EVENT_OBJECT_FOCUS || m.wParam == EVENT_SYSTEM_FOREGROUND || m.wParam == EVENT_SYSTEM_MENUPOPUPSTART) pendingFocus = true;
-            else pendingCaret = true;
+            if (m.wParam == EVENT_OBJECT_FOCUS || m.wParam == EVENT_SYSTEM_FOREGROUND || m.wParam == EVENT_SYSTEM_MENUPOPUPSTART) {
+                pendingFocus = true;
+                ++focusGen;          // at ARRIVAL: see the baseline note above resolve
+            } else if (m.wParam == 0) {
+                pendingCaret = true;
+                ++focusGen;          // (re)activation: the caret found now is a baseline too
+            } else {
+                pendingCaret = true;
+            }
             if (!coalesce) coalesce = SetTimer(nullptr, kCoalesceTimer, 30, nullptr);   // NVDA's ~30 ms
         } else if (m.message == WM_TIMER && m.wParam == coalesce && coalesce) {
             KillTimer(nullptr, coalesce); coalesce = 0;
