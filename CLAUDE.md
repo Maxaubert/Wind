@@ -507,9 +507,12 @@ Every push to `main` that can change the binary rebuilds the installer and repub
 BUMPING IT IS WHAT CUTS A NEW RELEASE; a push that leaves it alone refreshes the existing
 release's asset in place. Never hand-upload a release artifact: the workflow owns them, and a
 manual upload is how the download drifts from main.
-CI signs nothing (no cert), so it ships the `uiAccess=false` variant, which is the correct
-public configuration. Do NOT put the self-signed dev cert in CI - trusted by nobody, and worse
-than no signature.
+CI signs nothing (no cert). It ships BOTH variants, and setup signs the uiAccess one on each
+PC with a per-machine root whose private key it deletes at once (issue #261,
+`installer\local-sign.ps1`, see `installer\README.md`); on failure it installs the
+`uiAccess=false` build. Do NOT put the self-signed dev cert in CI - trusted by nobody, and
+worse than no signature. Installing a release over this box replaces the dev-signed build
+with the locally signed one, which is equivalent (both give `token UIAccess=1`).
 WHY THIS IS MECHANICAL: v0.1.0 shipped, the #209 fix landed on main, and the release kept
 serving the old installer. That stale build was then installed over this dev box and silently
 removed a working fix (the branch it lived on was unmerged). Anything deployed here that is not

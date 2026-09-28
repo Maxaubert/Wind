@@ -43,6 +43,20 @@ round-trip half needs an elevated shell and skips itself without one.
 For a release artifact, use `tools\release.ps1` instead: it builds the payload, signs it when
 a certificate is configured, and packs the installer.
 
+## UIAccess on every PC (local signing, issue #261)
+
+Without a code-signing certificate, `release.ps1` also builds the uiAccess variant as
+`WindUA.exe`, and its presence makes `wind.nsi` define `LOCAL_SIGN`. Setup then runs
+`local-sign.ps1` on the PC it installs to: a fresh `CN=Wind Local Signing` certificate is
+trusted in LocalMachine Root and TrustedPublisher, signs `Wind.exe` and `WindConfig.exe`, and
+has its private key deleted straight away, so the signatures stay valid but nothing can ever
+sign with that root again. Older Wind Local Signing roots are retired on every install, and
+the uninstaller removes them (`local-sign.ps1 -Remove`). If anything fails, setup installs the
+ordinary build instead, which runs everywhere without UIAccess. A release signed with a real
+certificate has no `WindUA.exe` and skips all of it. Verified 2026-09-28: the installed build
+logs `token UIAccess=1`, and the elevated `installer_check.ps1` covers the signature, the
+deleted key, the single root and the uninstall clean-up.
+
 ## Changing the words or the layout
 
 Edit `over.html`, then regenerate both overlay sets:
