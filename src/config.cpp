@@ -329,17 +329,11 @@ std::string StripUiOnlyKeys(const std::string& iniText) {
 }
 }  // namespace wind
 
-#ifndef WIND_TESTS
-// --- File I/O (excluded from the pure test build via WIND_TESTS) ------------
-#include <windows.h>
-#include <fstream>
 namespace wind {
-Config LoadConfig(const std::wstring& path) {
-    std::ifstream f(path);
-    if (!f) {
-        // Write defaults so the user has something to edit.
-        std::ofstream out(path);
-        out << "; Wind magnifier config. Edit and save; changes apply within ~1s.\n"
+// The first-run ini (issue #274). Pure so a test can pin that it parses to the same values
+// the Config struct defaults to; LoadConfig writes it and runs with ParseConfig of it.
+std::string DefaultIniText() {
+    return "; Wind magnifier config. Edit and save; changes apply within ~1s.\n"
                "; zoomInButton/zoomOutButton: mouse side-button to hold (1=button4/back, 2=button5/\n"
                ";   forward, 0=unbound). Shipped unbound - the first-launch setup captures your choice.\n"
                "zoomInButton=0\nzoomOutButton=0\n"
@@ -506,7 +500,24 @@ Config LoadConfig(const std::wstring& path) {
                "outlineIdleSeconds=7.0\n"
                "; onboarded: 0 = run the first-launch setup once; set to 1 once finished\n"
                "onboarded=0\n";
-        return Config{};
+}
+}  // namespace wind
+
+#ifndef WIND_TESTS
+// --- File I/O (excluded from the pure test build via WIND_TESTS) ------------
+#include <windows.h>
+#include <fstream>
+namespace wind {
+Config LoadConfig(const std::wstring& path) {
+    std::ifstream f(path);
+    if (!f) {
+        // Write defaults so the user has something to edit, and run with exactly what was
+        // written (issue #274): returning Config{} here let the template and the struct
+        // defaults drift apart silently - the cursorScaleWithZoom trap in another form.
+        const std::string text = DefaultIniText();
+        std::ofstream out(path);
+        out << text;
+        return ParseConfig(text);
     }
     std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
     return ParseConfig(text);

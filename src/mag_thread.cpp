@@ -16,10 +16,20 @@ static std::atomic<bool> g_claimEnabled{false};
 // frame unwinds while the owner thread may still be about to write the result through the pointer
 // - a use-after-free on another thread's stack. The callable is stored BY VALUE for the same
 // reason; a pointer to the caller's std::function would dangle just as badly.
+//
+// A timed-out caller must also make sure the call never RUNS later: its lambda may capture the
+// caller's locals by reference, and those are gone once the caller returns (issue #274, three
+// real call sites did exactly that). So the call has a state, and the servicer and the caller race
+// for it with a compare-exchange: the servicer claims Pending -> Running before calling fn, the
+// timed-out caller claims Pending -> Abandoned. Whoever loses knows what happened: an abandoned
+// call is skipped, and a caller that finds it Running waits for it to finish (it is a sub-
+// millisecond Magnification call once started) before its frame can unwind.
+enum MagCallState : int { kPending = 0, kRunning = 1, kDone = 2, kAbandoned = 3 };
 struct MagCall {
     std::function<bool()> fn;
     bool result = false;
     HANDLE done = nullptr;
+    std::atomic<int> state{kPending};
     std::atomic<int> refs{2};   // one for the caller, one for the servicer
 };
 
@@ -63,8 +73,13 @@ unsigned int MagThreadMessageId() { return kMagCallMsg; }
 void MagThreadService(unsigned long long wparam) {
     MagCall* c = reinterpret_cast<MagCall*>(static_cast<uintptr_t>(wparam));
     if (!c) return;
-    c->result = c->fn();
-    SetEvent(c->done);        // may be a no-op if the caller already gave up; harmless
+    int expect = kPending;
+    if (c->state.compare_exchange_strong(expect, kRunning, std::memory_order_acq_rel)) {
+        c->result = c->fn();
+        c->state.store(kDone, std::memory_order_release);
+        SetEvent(c->done);
+    }
+    // else: the caller gave up first and its frame may be gone - running fn now would read it.
     ReleaseCall(c);
 }
 
@@ -101,7 +116,17 @@ bool MagThreadInvoke(const std::function<bool()>& fn) {
     if (w == WAIT_OBJECT_0) {
         ok = call->result;
     } else {
-        wind::Log(wind::LogLevel::Warn, "magthread", "owner thread did not service the call in 250ms");
+        int expect = kPending;
+        if (call->state.compare_exchange_strong(expect, kAbandoned, std::memory_order_acq_rel)) {
+            wind::Log(wind::LogLevel::Warn, "magthread",
+                      "owner thread did not service the call in 250ms - abandoned, it will not run");
+        } else {
+            // The servicer started it just now: it is touching our frame, so wait it out.
+            WaitForSingleObject(call->done, INFINITE);
+            ok = call->result;
+            wind::Log(wind::LogLevel::Warn, "magthread",
+                      "owner thread serviced the call only after 250ms");
+        }
     }
     ReleaseCall(call);        // the servicer releases its own reference whenever it gets there
     return ok;

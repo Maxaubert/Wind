@@ -246,17 +246,6 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
     return ShapeStatus::Rendered;
 }
 
-// Change the sprite's integer zoom scale. Invalidates the shape cache so the next
-// refreshShape()/showCrosshair() re-renders at the new size (hotspot recomputes too).
-void CursorSprite::setScale(int s) {
-    if (s < 1) s = 1;
-    if (s > 8) s = 8;
-    if (s == scale_) return;
-    scale_ = s;
-    lastCursor_ = nullptr;
-    crosshairMode_ = false;
-}
-
 // Two-pass mask/inversion renderer for cursors whose single-pass render came
 // back fully transparent (legacy AND/XOR mask cursors, e.g. the I-beam
 // caret). Draws iconCopy_ once onto an opaque black-filled DIB and once onto

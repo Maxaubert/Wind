@@ -197,12 +197,25 @@ Section "Uninstall"
   ; not silently discard someone's keybinds and profiles. SetShellVarContext current here
   ; on purpose: this is the running user's data, not the machine's. /SD IDNO is what makes
   ; a silent uninstall keep the data rather than hang waiting on a prompt nobody can see.
+  ; WHOSE data: the SIGNED-IN user's, which is not necessarily the elevated token's (issue
+  ; #274). A standard user who elevated with an administrator's credentials has an
+  ; elevated $LOCALAPPDATA in the ADMIN's profile. user-localappdata.ps1 asks the owner of
+  ; this session's explorer.exe instead, and falls back to $LOCALAPPDATA if it cannot tell.
   SetShellVarContext current
-  ${If} ${FileExists} "$LOCALAPPDATA\Wind\*.*"
+  File "/oname=$PLUGINSDIR\user-localappdata.ps1" "user-localappdata.ps1"
+  nsExec::ExecToStack '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\user-localappdata.ps1"'
+  Pop $0
+  Pop $R9
+  ${If} $0 != 0
+  ${OrIf} $R9 == ""
+    StrCpy $R9 $LOCALAPPDATA
+  ${EndIf}
+  ${If} $R9 != ""
+  ${AndIf} ${FileExists} "$R9\Wind\*.*"
     MessageBox MB_YESNO|MB_ICONQUESTION \
-      "Remove Wind's settings, profiles and logs as well?$\n$\n$LOCALAPPDATA\Wind" \
+      "Remove Wind's settings, profiles and logs as well?$\n$\n$R9\Wind" \
       /SD IDNO IDNO keepData
-    RMDir /r "$LOCALAPPDATA\Wind"
+    RMDir /r "$R9\Wind"
     keepData:
   ${EndIf}
 SectionEnd

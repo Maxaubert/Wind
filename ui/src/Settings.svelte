@@ -80,6 +80,10 @@
   // launch, so a hot-reload can't switch it). To the user a deliberate Apply and a hot-reload look
   // identical, so there is no confirm step. restartError still surfaces a relaunch that failed.
   let restartError = false;
+  // A settings write the host could not save (issue #274). Shown, not retried: the next change
+  // writes the whole line again anyway, and a silent retry loop would hide a stuck file.
+  let writeError = '';
+  onMessage(m => { if (m && m.type === 'configWriteFailed') writeError = m.key || 'a setting'; });
   // The model that the LIVE process is running. Captured before commit() overwrites saved.model, so
   // a failed relaunch can revert the ini + dropdown back to it (keeps ini model == running model).
   let runningModel = '';
@@ -302,6 +306,16 @@
         <h2 id="rtitle">Couldn't restart Wind</h2>
         <p>Wind.exe could not be launched. The magnifier is still running with the previous model.</p>
         <div class="mbtns"><button class="primary" on:click={() => (restartError = false)}>Close</button></div>
+      </div>
+    </div>
+  {/if}
+  {#if writeError}
+    <div class="mbackdrop">
+      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="wtitle"
+           use:dialog={{ onClose: () => (writeError = '') }}>
+        <h2 id="wtitle">Couldn't save the setting</h2>
+        <p>Wind could not write "{writeError}" to its settings file, so the change did not stick. Another program may be holding the file. Try again in a moment.</p>
+        <div class="mbtns"><button class="primary" on:click={() => (writeError = '')}>Close</button></div>
       </div>
     </div>
   {/if}

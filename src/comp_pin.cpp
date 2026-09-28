@@ -53,6 +53,9 @@ bool MpoGhost::create(int x, int y, int w, int h) {
 
     const DWORD exStyle = WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT
                         | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
+    // retarget() calls this again for new monitor bounds (issue #230): the previous window must
+    // go first, or every geometry change orphans a monitor-sized layered window (issue #274).
+    if (hwnd_) { DestroyWindow(hwnd_); hwnd_ = nullptr; }
     x_ = x; y_ = y; w_ = w; h_ = h;
     hwnd_ = CreateWindowExW(exStyle, kGhostClass, L"WindMpoGhost", WS_POPUP,
                             x, y, w, h, nullptr, nullptr, hInst, nullptr);

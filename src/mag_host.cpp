@@ -3,6 +3,7 @@
 #include "logging.h"
 #include <windows.h>
 #include <magnification.h>
+#include <memory>
 
 namespace wind {
 
@@ -78,13 +79,20 @@ bool MagHost::setSamplingMode(unsigned mode) {
     // a cheaper filter may look smooth without taking the compositor down.
     // The raw setter takes a DWORD POINTER, not a value: passing the value by mistake
     // dereferences it and access-violates (field crash 2026-08-13).
-    if (mode >= 2) {
-        if (!setSamplingRaw_) return false;
-        DWORD m = mode;
-        return setSamplingRaw_(&m) != 0;
-    }
-    if (!setBitmapSmoothing_) return false;
-    return setBitmapSmoothing_(mode != 0 ? 1 : 0) != 0;
+    // Thread-affine like every other call in this file (issue #274): unmarshalled, it silently
+    // failed once txHookWrite moved ownership to the hook thread.
+    auto raw = setSamplingRaw_;
+    auto smooth = setBitmapSmoothing_;
+    if ((mode >= 2 && !raw) || (mode < 2 && !smooth)) return false;   // nothing to marshal
+    return MagThreadInvoke([mode, raw, smooth]() -> bool {
+        if (mode >= 2) {
+            if (!raw) return false;
+            DWORD m = mode;
+            return raw(&m) != 0;
+        }
+        if (!smooth) return false;
+        return smooth(mode != 0 ? 1 : 0) != 0;
+    });
 }
 
 bool MagHost::setTransform(float zoom, int offX, int offY, int tx, int ty, bool fastPan) {
@@ -110,20 +118,27 @@ bool MagHost::setTransformOwned(float zoom, int offX, int offY, int tx, int ty, 
 
 bool MagHost::setInputTransform(bool active, const RECT& src, const RECT& dst) {
     if (!initialized_) return false;
-    RECT s = src, d = dst;   // API takes non-const LPRECT
-    return MagThreadInvoke([&]() -> bool {
+    // By value (issue #274): MagThreadInvoke's contract is that the callable owns what it uses.
+    return MagThreadInvoke([active, src, dst]() -> bool {
+        RECT s = src, d = dst;   // API takes non-const LPRECT
         return MagSetInputTransform(active ? TRUE : FALSE, &s, &d) != FALSE;
     });
 }
 
 bool MagHost::getInputTransform(bool& active, RECT& src, RECT& dst) {
     if (!initialized_) return false;
-    return MagThreadInvoke([&]() -> bool {
-        BOOL en = FALSE;
-        if (MagGetInputTransform(&en, &src, &dst) == FALSE) return false;
-        active = en != FALSE;
-        return true;
+    // Results travel through a heap block the callable co-owns, and reach the caller's
+    // out-params only after a successful invoke, on the caller's own thread (issue #274).
+    struct Out { BOOL en = FALSE; RECT s{}, d{}; };
+    auto out = std::make_shared<Out>();
+    const bool ok = MagThreadInvoke([out]() -> bool {
+        return MagGetInputTransform(&out->en, &out->s, &out->d) != FALSE;
     });
+    if (!ok) return false;
+    active = out->en != FALSE;
+    src = out->s;
+    dst = out->d;
+    return true;
 }
 
 void MagHost::shutdown() {

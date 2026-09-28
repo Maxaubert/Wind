@@ -211,7 +211,7 @@ bool RequestHookTransformWrite() {
                                                              // deduped no-op cannot spin every tick
     POINT p;
     if (!GetCursorPos(&p)) return false;
-    const bool ok = MagThreadInvoke([&]() -> bool {
+    const bool ok = MagThreadInvoke([p]() -> bool {   // by value (issue #274)
         return WriteHookTransform((double)p.x, (double)p.y);
     });
     if (ok) g_tickWrites.fetch_add(1, std::memory_order_relaxed);
