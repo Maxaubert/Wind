@@ -16,6 +16,7 @@ test.beforeEach(async ({ page }) => {
           // __cfgSampling seeds txSamplingMode (the combined high-res/MPO option, issue #242).
           listeners.forEach(fn => fn({ data: { type: 'config', values: { zoomInSpeed: '1.2', smoothZoom: '0', uiTheme: 'auto', showAdvanced: '1', model: 'render', zoomInButton: '2', zoomInVk: '33', zoomOutButton: '1', zoomOutVk: '34', cursorLockVk: '113', txSamplingMode: window.__cfgSampling !== undefined ? window.__cfgSampling : '0' } } }));
         if (msg.type === 'setConfig') window.__sets.push(msg);
+        if (msg.type === 'openRepo') window.__sets.push(msg);
         // MPO lives in the registry, not the ini. __mpoDisabled drives what the "registry" reports;
         // __mpoOk drives whether the elevated write is accepted (false = UAC dismissed).
         if (msg.type === 'mpoState')
@@ -475,3 +476,15 @@ test('a failed relaunch reverts the model dropdown and the ini', async ({ page }
 
 // (The desktopTransform showIf test left with its row in the 2026-08-21 cleanup - the knob is
 // ini-only now. Restore from git history if the row returns.)
+
+test('About: Star on GitHub asks the host to open the repo, and shows the real version', async ({ page }) => {
+  await page.goto('/');
+  const star = page.getByRole('button', { name: 'Star on GitHub' });
+  await star.scrollIntoViewIfNeeded();
+  await star.click();
+  const sent = await page.evaluate(() => window.__sets.filter(m => m.type === 'openRepo'));
+  expect(sent).toEqual([{ type: 'openRepo' }]);
+  // not a link any more: a followed link would open a WebView popup, not the user's browser
+  await expect(page.locator('.about-hero a')).toHaveCount(0);
+  await expect(page.locator('.about-hero .version')).toHaveText(/^v\d+\.\d+\.\d+/);
+});
