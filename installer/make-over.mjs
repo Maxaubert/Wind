@@ -39,14 +39,19 @@ const { chromium } = require('playwright')
 const WIDTH = Number(process.argv[2]) || 1440
 const SCALE = WIDTH / 640
 const DIR = String(WIDTH)
-const SCREENS = ['welcome', 'setup', 'copy', 'done']
+// licence / licenceok are one screen before and after its box is ticked (over.html screens 4
+// and 5): the Continue button is baked into the art, so each state is its own overlay set.
+const SCREENS = ['welcome', 'setup', 'copy', 'done', 'licence', 'licenceok']
 
 // which control is drawn hot on which screen, and so which crops we need twice
 const HOT = {
   welcome: ['next', 'close', 'min'],
   setup: ['next', 'back', 'close', 'min'],
   copy: ['close', 'min'],
-  done: ['next', 'close', 'min']
+  done: ['next', 'close', 'min'],
+  // no 'next' before acceptance: the button is drawn disabled and never lights up
+  licence: ['back', 'read', 'close', 'min'],
+  licenceok: ['next', 'back', 'read', 'close', 'min']
 }
 
 const magick = (args) => execFileSync('magick', args, { stdio: ['ignore', 'pipe', 'pipe'] })
