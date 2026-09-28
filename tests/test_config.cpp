@@ -415,3 +415,8 @@ TEST_CASE("spriteCapturable is a hidden test knob, off by default (issue #269)")
     CHECK(ParseConfig("").spriteCapturable == 0);
     CHECK(ParseConfig("spriteCapturable=1\n").spriteCapturable == 1);
 }
+
+TEST_CASE("the transform engine is the desktop default (issue #271)") {
+    CHECK(ParseConfig("").desktopTransform == 1);
+    CHECK(ParseConfig("desktopTransform=0\n").desktopTransform == 0);
+}
