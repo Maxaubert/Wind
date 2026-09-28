@@ -5,6 +5,8 @@ test.beforeEach(async ({ page }) => {
     window.__skipSplash = true;
     window.__sets = [];
     const listeners = new Set();
+    // Lets a test play the host: deliver a message exactly as WebView2 would.
+    window.__hostSend = (data) => listeners.forEach(fn => fn({ data }));
     window.chrome = { webview: {
       addEventListener: (_e, fn) => listeners.add(fn),
       postMessage: (msg) => {
@@ -487,4 +489,15 @@ test('About: Star on GitHub asks the host to open the repo, and shows the real v
   // not a link any more: a followed link would open a WebView popup, not the user's browser
   await expect(page.locator('.about-hero a')).toHaveCount(0);
   await expect(page.locator('.about-hero .version')).toHaveText(/^v\d+\.\d+\.\d+/);
+});
+
+test('a settings write the host could not save shows a dialog (issue #274)', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByText('Keybinds').first()).toBeVisible();
+  await page.evaluate(() => window.__hostSend({ type: 'configWriteFailed', key: 'zoomInSpeed' }));
+  const dlg = page.getByRole('dialog', { name: "Couldn't save the setting" });
+  await expect(dlg).toBeVisible();
+  await expect(dlg).toContainText('zoomInSpeed');
+  await dlg.getByRole('button', { name: 'Close' }).click();
+  await expect(dlg).toHaveCount(0);
 });

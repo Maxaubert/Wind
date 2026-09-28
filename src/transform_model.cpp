@@ -59,6 +59,7 @@ void TransformModel::resetTransformState() {
     lastSpriteX_ = INT_MIN; lastSpriteY_ = INT_MIN;
     haveLastClick_ = false;
     appliedSampling_ = -2;      // re-apply sampling mode on the next context (DWM-global state)
+    sampleTryMode_ = -2;        // ...with a fresh set of attempts (#274)
 }
 
 bool TransformModel::ensureMag() {
@@ -531,11 +532,25 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // 1-2px even with the source snapped to integers. One static filter, user's choice:
     // txSamplingMode 0 (DEFAULT, nearest: shimmer-free ramps) or 1 (EXPERIMENTAL smooth).
     // The flag is DWM-global and dies with a DWM restart, hence per-context re-apply.
+    // A failed apply is retried, a little (issue #274): the call used to be recorded as applied
+    // before it ran, so a wrong-thread failure left the filter unapplied for the whole context.
+    // BOUNDED, because the setter's return value is not a reliable success signal: mode 0 via
+    // ordinal 1 has reported FALSE on every call in this rig's logs (245 of 245) while working,
+    // so an unbounded retry would re-issue it every tick. Up to 3 attempts, 1 s apart, then
+    // accept. The mode is DWM-global state, so a genuine miss is also re-tried per context.
     if (cfg.txSamplingMode >= 0 && appliedSampling_ != cfg.txSamplingMode) {
-        appliedSampling_ = cfg.txSamplingMode;
-        const bool ok = host_.setSamplingMode((unsigned)cfg.txSamplingMode);
-        wind::Log(wind::LogLevel::Info, "transform", "bitmap smoothing %d applied=%d",
-                  cfg.txSamplingMode, ok ? 1 : 0);
+        const unsigned long long now = GetTickCount64();
+        if (sampleTryMode_ != cfg.txSamplingMode) { sampleTryMode_ = cfg.txSamplingMode; sampleTries_ = 0; }
+        if (sampleTries_ == 0 || now - sampleLastTryMs_ >= 1000) {
+            const bool ok = host_.setSamplingMode((unsigned)cfg.txSamplingMode);
+            ++sampleTries_;
+            sampleLastTryMs_ = now;
+            if (ok || sampleTries_ >= 3) {
+                wind::Log(wind::LogLevel::Info, "transform", "bitmap smoothing %d applied=%d (tries %d)",
+                          cfg.txSamplingMode, ok ? 1 : 0, sampleTries_);
+                appliedSampling_ = cfg.txSamplingMode;
+            }
+        }
     }
     traceOn_ = cfg.txTrace != 0;
     cfgWobbleCage_ = cfg.txWobbleCage;        // diagnostic cage + threshold px (issue #229)
@@ -830,8 +845,10 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // when it did (#169 measured-baseline law; assuming it landed is the unstable-servo bug).
     // Edge clip: engaged while genuinely zoomed and the pointer is OURS to manage (not Inspect,
     // whose 1px freeze clip must never be disturbed - ex.clickOverride marks it).
-    if (cfg.edgeClip != 0)
-        edgeClipManage(applyLevel > 1.001 && !ex.clickOverride);
+    // Hot like the other knobs: switched off mid-zoom, give the clip back now rather than at the
+    // end of the session (issue #274). Gated so an unused edgeClip costs no per-tick syscall.
+    if (cfg.edgeClip != 0 || edgeClipActive_)
+        edgeClipManage(cfg.edgeClip != 0 && applyLevel > 1.001 && !ex.clickOverride);
 
     weldedLastFrame_ = false;
     if (!ex.suppressCursorSync) {

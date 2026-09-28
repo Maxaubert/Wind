@@ -420,3 +420,63 @@ TEST_CASE("the transform engine is the desktop default (issue #271)") {
     CHECK(ParseConfig("").desktopTransform == 1);
     CHECK(ParseConfig("desktopTransform=0\n").desktopTransform == 0);
 }
+
+TEST_CASE("the first-run ini template parses to the struct defaults (issue #274)") {
+    // LoadConfig writes DefaultIniText() on first run and runs with ParseConfig of it; this pins
+    // that doing so changes nothing versus Config{}. Generated from the template's own keys, so a
+    // default changed in only one of the two places fails here instead of shipping.
+    const Config d{};
+    const Config t = ParseConfig(DefaultIniText());
+    CHECK(t.zoomInButton == d.zoomInButton);
+    CHECK(t.zoomInVk == d.zoomInVk);
+    CHECK(t.zoomInMods == d.zoomInMods);
+    CHECK(t.zoomInButton2 == d.zoomInButton2);
+    CHECK(t.zoomInVk2 == d.zoomInVk2);
+    CHECK(t.hideCursorVk == d.hideCursorVk);
+    CHECK(t.recenterVk == d.recenterVk);
+    CHECK(t.cursorLockVk == d.cursorLockVk);
+    CHECK(t.maxLevel == doctest::Approx(d.maxLevel));
+    CHECK(t.zoomInSpeed == doctest::Approx(d.zoomInSpeed));
+    CHECK(t.smoothZoom == d.smoothZoom);
+    CHECK(t.smoothZoomAccel == doctest::Approx(d.smoothZoomAccel));
+    CHECK(t.smoothZoomRamp == doctest::Approx(d.smoothZoomRamp));
+    CHECK(t.quickZoomHotkeyMode == d.quickZoomHotkeyMode);
+    CHECK(t.quickZoomModifier == d.quickZoomModifier);
+    CHECK(t.quickZoomVk == d.quickZoomVk);
+    CHECK(t.quickZoomDefault == doctest::Approx(d.quickZoomDefault));
+    CHECK(t.vsync == d.vsync);
+    CHECK(t.dwmFlush == d.dwmFlush);
+    CHECK(t.diagnostics == d.diagnostics);
+    CHECK(t.cursorSensitivity == doctest::Approx(d.cursorSensitivity));
+    CHECK(t.cursorSmoothing == doctest::Approx(d.cursorSmoothing));
+    CHECK(t.cursorConstantSize == d.cursorConstantSize);
+    CHECK(t.cursorVisibility == d.cursorVisibility);
+    CHECK(t.bilinear == d.bilinear);
+    CHECK(t.sharpness == doctest::Approx(d.sharpness));
+    CHECK(t.zorderBand == d.zorderBand);
+    CHECK(t.cursorBandAuto == d.cursorBandAuto);
+    CHECK(t.brightness == doctest::Approx(d.brightness));
+    CHECK(t.hdrTonemap == d.hdrTonemap);
+    CHECK(t.model == d.model);
+    CHECK(t.transformExclude == d.transformExclude);
+    CHECK(t.renderExclude == d.renderExclude);
+    CHECK(t.engineGame == d.engineGame);
+    CHECK(t.engineAcrylic == d.engineAcrylic);
+    CHECK(t.engineDesktop == d.engineDesktop);
+    CHECK(t.engineOther == d.engineOther);
+    CHECK(t.noSwallowApps == d.noSwallowApps);
+    CHECK(t.magnifyStep == d.magnifyStep);
+    CHECK(t.multiMonitor == d.multiMonitor);
+    CHECK(t.cropCapture == d.cropCapture);
+    CHECK(t.gpuPriority == d.gpuPriority);
+    CHECK(t.gameCrop == d.gameCrop);
+    CHECK(t.gameFpsCap == d.gameFpsCap);
+    CHECK(t.outline == d.outline);
+    CHECK(t.outlineThickness == d.outlineThickness);
+    CHECK(t.outlineColor == d.outlineColor);
+    CHECK(t.outlineLowZoomOnly == d.outlineLowZoomOnly);
+    CHECK(t.outlineLowZoomMax == doctest::Approx(d.outlineLowZoomMax));
+    CHECK(t.outlineIdleHide == d.outlineIdleHide);
+    CHECK(t.outlineIdleSeconds == doctest::Approx(d.outlineIdleSeconds));
+    CHECK(t.onboarded == d.onboarded);
+}

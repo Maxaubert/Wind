@@ -77,8 +77,8 @@ static std::wstring IniPath() {
 static std::string ReadFileUtf8(const std::wstring& path) { return wind::ReadTextFile(path); }
 // Delegates to the shared helper so both processes use the same per-process temp naming (Wind.exe's
 // tray switch writes the same ini; a shared "<ini>.tmp" would let the temp writes clobber each other).
-static void WriteFileAtomic(const std::wstring& path, const std::string& text) {
-    wind::WriteTextFileAtomic(path, text);
+static bool WriteFileAtomic(const std::wstring& path, const std::string& text) {
+    return wind::WriteTextFileAtomic(path, text);
 }
 static std::wstring Widen(const std::string& s) { return wind::WidenUtf8(s); }
 static std::string Narrow(const std::wstring& w) { return wind::NarrowUtf8(w); }
@@ -232,7 +232,17 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
     } else if (type == "setConfig") {
         std::string key = JsonField(j, "key"), value = JsonField(j, "value");
         if (!key.empty()) {
-            WriteFileAtomic(IniPath(), wind::UpdateIniText(ReadFileUtf8(IniPath()), key, value));
+            // Checked (issue #274): this is the path every slider, toggle and keybind takes, and a
+            // failed write (AV lock, a sharing violation on the replace) used to vanish - the page
+            // showed the new value while the ini kept the old one. Tell the page, which says so.
+            if (!WriteFileAtomic(IniPath(),
+                                 wind::UpdateIniText(ReadFileUtf8(IniPath()), key, value))) {
+                wind::Log(wind::LogLevel::Warn, "config", "setConfig: writing %s=%s failed",
+                          key.c_str(), value.c_str());
+                wv->PostWebMessageAsJson(
+                    Widen("{\"type\":\"configWriteFailed\",\"key\":\"" + JsonEscape(key) + "\"}").c_str());
+                return;
+            }
             // Live-bound profiles: the active profile IS the settings, so every ini write is
             // mirrored (as the full profile-scoped snapshot) into its file. Global keys never
             // land there (MakeProfileText strips them). Missing profile/dir = pre-migration

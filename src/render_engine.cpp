@@ -9,6 +9,7 @@
 #include "logging.h"
 #include "band_window.h"
 #include "mag_host.h"   // shared Magnification-runtime refcount (both models use the API)
+#include "mag_thread.h" // MagThreadInvoke: the API is thread-affine (issue #229)
 #include <windows.h>
 #include <d3d11.h>
 #include <dxgi1_6.h>
@@ -1323,13 +1324,24 @@ bool RenderEngine::dumpFrame(const RenderFrameParams& p, const wchar_t* path) {
     return dumpBackbufferPng(path);
 }
 
+// MagShowSystemCursor is thread-affine like the rest of the Magnification API: called from the
+// tick thread while txHookWrite has moved ownership to the hook thread it returns FALSE and
+// changes nothing, which left the real pointer visible beside the drawn one (issue #274; the
+// transform model got the same fix in #229). Marshalled here, with the old direct call kept as a
+// last resort for when marshalling itself fails (no owner thread, or a wedged one).
+static bool ShowSystemCursorOnOwner(BOOL show) {
+    if (wind::MagThreadInvoke([show]() -> bool { return MagShowSystemCursor(show) != FALSE; }))
+        return true;
+    return MagShowSystemCursor(show) != FALSE;
+}
+
 // Crash safety net: if we go down while the cursor is hidden, force it visible again so the
 // user is never left without a pointer. The magnification runtime is process-scoped (so exit
 // usually restores it), but a hard crash mid-hide is exactly when this matters.
 static LONG WINAPI CursorRestoreFilter(EXCEPTION_POINTERS* ep) {
     static LONG s_inHandler = 0;
     if (InterlockedExchange(&s_inHandler, 1)) return EXCEPTION_CONTINUE_SEARCH;
-    MagShowSystemCursor(TRUE);
+    ShowSystemCursorOnOwner(TRUE);       // bounded: MagThreadInvoke gives up within 500 ms
     ClipCursor(nullptr);                 // never leave the cursor clipped if we crash while Inspect-locked
     SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, SPIF_SENDCHANGE);
     wind::WriteCrashReport(ep);          // minidump + text summary into the log dir
@@ -1352,9 +1364,10 @@ void RenderEngine::hideSystemCursor(bool hide) {
             s_->magInited = wind::MagApiAcquire();
             SetUnhandledExceptionFilter(CursorRestoreFilter);   // installed once, before first hide
         }
-        if (s_->magInited) MagShowSystemCursor(FALSE);
+        if (s_->magInited && !ShowSystemCursorOnOwner(FALSE))
+            wind::Log(wind::LogLevel::Warn, "render", "MagShowSystemCursor(FALSE) failed");
     } else if (s_->magInited) {
-        MagShowSystemCursor(TRUE);
+        ShowSystemCursorOnOwner(TRUE);
         wind::MagApiRelease();
         s_->magInited = false;
     }
@@ -1363,7 +1376,7 @@ void RenderEngine::hideSystemCursor(bool hide) {
 void RenderEngine::shutdown() {
     if (!s_) return;
     if (s_->magInited) {
-        MagShowSystemCursor(TRUE);          // never leave the cursor hidden
+        ShowSystemCursorOnOwner(TRUE);      // never leave the cursor hidden
         ClipCursor(nullptr);                // nor clipped (Inspect mode) - heal both on teardown
         wind::MagApiRelease();
         s_->magInited = false;

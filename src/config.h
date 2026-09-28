@@ -620,6 +620,8 @@ double OutlineIdleAlpha(double idleSeconds, double threshold, double fadeDuratio
 double OutlineDwellSeconds(bool inBand, double prevSeconds, double dt, double threshold);
 
 // I/O (implemented in Task 10): read file -> ParseConfig; create with defaults if absent.
+// The first-run ini text; LoadConfig writes it and returns ParseConfig of it (issue #274).
+std::string DefaultIniText();
 Config LoadConfig(const std::wstring& path);
 // I/O: last write time as a comparable tick count; 0 if missing.
 unsigned long long ConfigMTime(const std::wstring& path);

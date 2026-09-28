@@ -45,13 +45,14 @@ static void EnsureCompositePulse() {
     if (g_compEvt) return;
     g_compEvt = CreateEventW(nullptr, FALSE, FALSE, nullptr);   // auto-reset
     if (!g_compEvt) return;
-    CreateThread(nullptr, 0, [](LPVOID) -> DWORD {
+    HANDLE th = CreateThread(nullptr, 0, [](LPVOID) -> DWORD {
         for (;;) {
             if (DwmFlush() != S_OK) Sleep(50);   // DWM restarting: back off, keep trying
             SetEvent(g_compEvt);
         }
         return 0;
     }, nullptr, 0, nullptr);
+    if (th) CloseHandle(th);   // runs for the life of the process; nobody waits on it (#274)
 }
 #include "lock_detector.h"
 #include "test_telemetry.h"
@@ -1843,7 +1844,9 @@ static void RunTick(TickState& t) {
                 if (!t.revealNeedsComposite && rm->revealFrameDone(3.0)) {
                     rm->setActive(true);
                     t.revealPending = 0;
-                    if (t.restAfterReveal) t.restOverlapTicks = 3;   // overlap, then rest
+                    // Real-time overlap, same as the render -> transform path (issue #274):
+                    // raw ticks were right only at 144 Hz.
+                    if (t.restAfterReveal) t.restOverlapTicks = TicksAtHz(3, t.hz);
                 }
             } else if (t.revealPending > 0) {
                 --t.revealPending;
@@ -1855,7 +1858,9 @@ static void RunTick(TickState& t) {
                               "deferred reveal: frameDone=%d composited=%d ticksLeft=%d",
                               (int)frameDone, (int)composited, t.revealPending);
                     t.revealPending = 0;
-                    if (t.restAfterReveal) t.restOverlapTicks = 3;   // overlap, then rest
+                    // Real-time overlap, same as the render -> transform path (issue #274):
+                    // raw ticks were right only at 144 Hz.
+                    if (t.restAfterReveal) t.restOverlapTicks = TicksAtHz(3, t.hz);
                 }
             }
         } else if (enterActive) {
