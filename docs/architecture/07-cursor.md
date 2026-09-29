@@ -306,6 +306,24 @@ device-lost recovery, `shutdown()`, the crash filter, and the `atexit` input-sta
 the pointer is never stranded pinned to one pixel (the render-engine teardown gotchas in
 CLAUDE.md enumerate the same paths for cursor visibility).
 
+## Tracking: caret, focus, mouse edge mode (issue #276)
+
+Besides the mouse, the view can follow the text caret (`trackCaret`, default on) and keyboard focus
+(`trackFocus`, default off). `src/focus_track.*` runs its own COM MTA thread (WinEvents +
+GetGUIThreadInfo + UIA) and publishes a snapshot; the tick never calls UIA. `StepViewOwner`
+(`src/view_target.h`) picks one owner per tick: the most recent caret/focus change wins, real mouse
+motion (3 px in 100 ms) or a button takes it back. While caret/focus owns the view, the view is
+DETACHED: `DetachedMap` (`src/detached_view.h`) builds a `MapResult` whose view is the glided centre
+while the cursor fields report the real pointer, and the weld is off. On a mouse-movement takeover
+the pointer is placed in the view (the view stays). The glide is a critically damped spring
+(`SpringToward`, `src/view_glide.h`, 200 ms).
+
+Mouse edge mode (`mouseAlign=1`, free-pointer sessions only; mouselook and Inspect stay centred)
+uses the same detached path every tick: the pointer is real and unwelded, and `EdgePanCenter`
+(`src/edge_pan.h`) moves the view only when the cursor's visible body leaves the band
+(`mouseMarginPct`). Pointer pinned against a screen edge is hidden from the lock detector
+(`PointerPinnedAtEdge`). Field history: [../TRACKING-FINDINGS.md](../TRACKING-FINDINGS.md).
+
 ## Pointers
 
 Key sources:
