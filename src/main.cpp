@@ -34,6 +34,7 @@
 #include "view_target.h"     // tracking (issue #276): who owns the view
 #include "view_glide.h"      // tracking: glide + target geometry
 #include "detached_view.h"   // tracking: a frame whose view is not centred on the pointer
+#include "edge_pan.h"        // mouse edge mode (issue #276 phase 2)
 #include "focus_track.h"     // tracking: caret/focus watcher thread
 #include "tray.h"
 #include "gain_learner.h"  // learned pointer ballistics: locked pan at TRUE desktop speed
@@ -1504,15 +1505,37 @@ static void RunTick(TickState& t) {
                 t.viewDetached = true;
             } else if (t.viewOwner.warpPointer) {
                 // The mouse moved while the view showed the caret/focus: the POINTER comes to the
-                // view, the view stays (owner decision, field test 2026-09-29). Placed at the view
-                // centre in centred mode; phase 2 places it just inside the edges for mouseAlign=1.
-                const int wx = (int)(t.viewCx + 0.5) + t.mon.x, wy = (int)(t.viewCy + 0.5) + t.mon.y;
+                // view, the view stays (owner decision, field test 2026-09-29). Centred mode places
+                // it at the view centre; edge mode (mouseAlign=1) just inside the band, nearest to
+                // where it was.
+                const bool edges = t.cfg.mouseAlign == 1;
+                double px = t.viewCx, py = t.viewCy;
+                if (edges)
+                    wind::EdgeClampPointer(t.viewCx, t.viewCy, cur.x - t.mon.x, cur.y - t.mon.y, lvl,
+                                           t.mon.w, t.mon.h, t.cfg.trackMarginPct, px, py);
+                const int wx = (int)(px + 0.5) + t.mon.x, wy = (int)(py + 0.5) + t.mon.y;
                 SetCursorPos(wx, wy);
                 cur.x = wx; cur.y = wy;
+                t.mapper.reset(edges ? t.viewCx : px, edges ? t.viewCy : py);
+                t.lastSetVirtual = cur;
+                r = wind::DetachedMap(t.viewCx, t.viewCy, px, py, lvl, t.mon.w, t.mon.h);
+                t.viewDetached = edges;               // edge mode keeps the view where it is
+            } else if (t.cfg.mouseAlign == 1 && lvl > 1.001 && !inspect && !t.detector.locked()) {
+                // MOUSE EDGE MODE (issue #276 phase 2): the pointer roams freely inside the view and
+                // the view moves only when it reaches the margin band, just far enough. No weld:
+                // the pointer is real, so clicks are native. Mouselook (locked) and Inspect keep the
+                // centred path.
+                if (!t.viewDetached) { t.viewCx = r.centerX; t.viewCy = r.centerY; }   // start from here
+                const double ptrX = cur.x - t.mon.x, ptrY = cur.y - t.mon.y;
+                const double wall = wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0;
+                double ecx, ecy;
+                wind::EdgePanCenter(t.viewCx, t.viewCy, ptrX, ptrY, lvl, t.mon.w, t.mon.h,
+                                    t.cfg.trackMarginPct, wall, wall, ecx, ecy);
+                t.viewCx = ecx; t.viewCy = ecy;       // no glide: the hand pushes the view directly
+                r = wind::DetachedMap(t.viewCx, t.viewCy, ptrX, ptrY, lvl, t.mon.w, t.mon.h);
                 t.mapper.reset(t.viewCx, t.viewCy);
                 t.lastSetVirtual = cur;
-                r = wind::DetachedMap(t.viewCx, t.viewCy, t.viewCx, t.viewCy, lvl, t.mon.w, t.mon.h);
-                t.viewDetached = false;               // normal weld/hook paths resume this tick
+                t.viewDetached = true;
             } else {
                 t.viewDetached = false;
             }

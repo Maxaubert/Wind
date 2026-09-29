@@ -516,3 +516,14 @@ test('Tracking section: caret on, focus off, centred by default (issue #276)', a
   const sets = await page.evaluate(() => window.__sets.filter(m => m.type === 'setConfig' && m.key === 'trackFocus'));
   expect(sets.at(-1).value).toBe('1');
 });
+
+test('Keep the mouse pointer: centred by default, within the edges writes mouseAlign=1 (issue #276)', async ({ page }) => {
+  await page.goto('/');
+  const row = page.getByText('Keep the mouse pointer', { exact: true }).locator('xpath=../..');
+  await expect(row.getByRole('combobox')).toContainText('Centred');
+  await row.getByRole('combobox').click();
+  await page.getByRole('option', { name: 'Within the edges' }).click();
+  await page.getByRole('button', { name: 'Apply' }).click();
+  const sets = await page.evaluate(() => window.__sets.filter(m => m.type === 'setConfig' && m.key === 'mouseAlign'));
+  expect(sets.at(-1).value).toBe('1');
+});
