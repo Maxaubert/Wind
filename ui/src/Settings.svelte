@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { sections } from './settings-schema.js';
   import { getConfig, setConfig, openIni, exportDiagnostics, windowControl, onMessage,
-           getMpoState, setMpoDisabled, rebootNow, setDirty,
+           getMpoState, setMpoDisabled, rebootNow, setDirty, postDraft,
            listProfiles, switchProfile, createProfile, renameProfile, duplicateProfile,
            deleteProfile } from './bridge.js';
   import ProfileMenu from './lib/ProfileMenu.svelte';
@@ -263,6 +263,17 @@
   function toggleTheme() { theme = nextTheme(theme); setTheme(theme); }
   $: dirty = Object.keys(values).some(k => String(values[k]) !== String(saved[k])) || mpoDirty;
   $: setDirty(dirty);   // keep the host's WM_CLOSE guard in step with the staged state
+  // Crash recovery: the host keeps the unapplied edits and returns them after recreating the engine.
+  $: postDraft(Object.fromEntries(Object.keys(values).filter(k => String(values[k]) !== String(saved[k]))
+                                              .map(k => [k, values[k]])));
+  onMessage(m => {
+    if (m && m.type === 'restoreDraft' && m.values && typeof m.values === 'object') {
+      const back = {};
+      for (const k of Object.keys(m.values)) if (k in values) back[k] = String(m.values[k]);
+      values = { ...values, ...back };
+      if (Object.keys(back).length) announce('Settings recovered after a crash; your unsaved changes are kept.');
+    }
+  });
   // Advanced rows (schema `advanced:true`) are hidden unless "Show advanced settings" is on. Driven
   // by the live `values` so toggling it reveals/hides rows immediately (before Apply).
   $: advancedOn = Number(values.showAdvanced) === 1;

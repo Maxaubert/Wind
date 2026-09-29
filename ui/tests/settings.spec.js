@@ -19,6 +19,7 @@ test.beforeEach(async ({ page }) => {
           listeners.forEach(fn => fn({ data: { type: 'config', values: { zoomInSpeed: '1.2', smoothZoom: '0', uiTheme: 'auto', showAdvanced: '1', model: 'render', zoomInButton: '2', zoomInVk: '33', zoomOutButton: '1', zoomOutVk: '34', cursorLockVk: '113', txSamplingMode: window.__cfgSampling !== undefined ? window.__cfgSampling : '0', ...(window.__cfgExtra || {}) } } }));
         if (msg.type === 'setConfig') window.__sets.push(msg);
         if (msg.type === 'openRepo') window.__sets.push(msg);
+        if (msg.type === 'draft') window.__sets.push(msg);   // crash-recovery mirror of unapplied edits
         // MPO lives in the registry, not the ini. __mpoDisabled drives what the "registry" reports;
         // __mpoOk drives whether the elevated write is accepted (false = UAC dismissed).
         if (msg.type === 'mpoState')
@@ -641,4 +642,18 @@ test('no notice when every stored bind is allowed (#285)', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByText('Zoom-in speed')).toBeVisible();
   await expect(page.getByRole('dialog', { name: 'Some keybinds were removed' })).toHaveCount(0);
+});
+
+test('unapplied edits are mirrored to the host and restored after a crash recovery', async ({ page }) => {
+  await page.goto('/');
+  const row = page.getByText('Zoom-in speed', { exact: true }).locator('xpath=../..');
+  await row.locator('input[type=range]').fill('2');
+  await expect.poll(async () => page.evaluate(() => {
+    const d = window.__sets.filter(m => m.type === 'draft').at(-1);
+    return d ? JSON.parse(d.json).zoomInSpeed : null;
+  })).toBe('2');
+  // The host recreated the engine: a fresh page load gets its config, then the draft back.
+  await page.evaluate(() => window.__hostSend({ type: 'restoreDraft', values: { zoomInSpeed: '3.5', notARealKey: '1' } }));
+  await expect(row).toContainText('3.5');
+  await expect(page.getByRole('button', { name: 'Apply' })).toBeEnabled();
 });
