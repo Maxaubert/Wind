@@ -1,6 +1,8 @@
 #include "focus_track.h"
 #include "logging.h"
 #include "track_filter.h"
+#include "java_bridge.h"
+#include "java_bridge_util.h"
 #include <windows.h>
 #include <objbase.h>
 #include <oleacc.h>
@@ -50,6 +52,12 @@ static bool IsOwnOrTooltip(HWND h) {
 static bool IsGeckoWindow(HWND h) {
     wchar_t cls[64] = {}; GetClassNameW(h, cls, 64);
     return wcscmp(cls, L"MozillaWindowClass") == 0;
+}
+
+// A Java top-level window (IntelliJ, PyCharm, ...): its caret comes from the Java Access Bridge.
+static bool IsJavaWindow(HWND h) {
+    wchar_t cls[64] = {}; GetClassNameW(h, cls, 64);
+    return IsJavaWindowClass(cls);
 }
 
 // Classic Win32 caret of the foreground thread, in screen px. False when there is none.
@@ -150,6 +158,17 @@ void FocusTracker::run() {
     unsigned focusGen = 0, caretGen = ~0u;
     RECT lastCaret{};
 
+    // Java apps (issue #281): the bridge is asked only when something may have moved (a bridge caret
+    // or focus callback, or any tracker wake), never by the 60 Hz poll, which reuses the last answer.
+    // A bridge call is a round trip into the Java app's own UI thread, so polling it would load the app.
+    JavaBridge jab;
+    bool javaDirty = true;
+    HWND javaWnd = nullptr;
+    bool javaHave = false;
+    RECT javaCaret{};
+    ULONGLONG javaRetryAt = 0;              // a failed read is retried at most every 250 ms
+    unsigned javaEvents = 0;
+
     // Caret, fastest source first. Releases everything it acquires.
     auto findCaret = [&](IUIAutomationElement* el, RECT& rc, const char*& src) -> bool {
         if (Win32Caret(rc)) { src = "win32"; return true; }
@@ -182,10 +201,24 @@ void FocusTracker::run() {
         return ok;
     };
 
-    auto resolve = [&](bool focusChanged) {
+    auto resolve = [&](bool focusChanged, bool fromPoll) {
         if (!active_.load()) return;
         HWND fg = GetForegroundWindow();
         if (IsOwnOrTooltip(fg)) return;
+        // Java app: the bridge is the only caret source (its Win32/UIA views have no caret).
+        const bool java = wantCaret_.load() && IsJavaWindow(fg) && jab.ensure(fg, tid_.load(), kWakeMsg, log_.load());
+        if (java) {
+            if (fg != javaWnd) { javaWnd = fg; javaDirty = true; }
+            const ULONGLONG now = GetTickCount64();
+            if (!fromPoll || javaDirty || (!javaHave && now >= javaRetryAt)) {
+                javaHave = jab.caret(fg, javaCaret);
+                javaDirty = false;
+                if (!javaHave) javaRetryAt = now + 250;
+                if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "java read %s (poll=%d events=%u): %ld,%ld %ldx%ld",
+                                           javaHave ? "ok" : "none", (int)fromPoll, javaEvents, javaCaret.left, javaCaret.top,
+                                           javaCaret.right - javaCaret.left, javaCaret.bottom - javaCaret.top);
+            }
+        }
         IUIAutomationElement* el = nullptr;
         if (uia) uia->GetFocusedElement(&el);
         RECT b{};                                   // the focused element's bounds (empty = unknown)
@@ -207,7 +240,8 @@ void FocusTracker::run() {
         // 2. The caret: published only when it moved within the same focus.
         if (wantCaret_.load()) {
             RECT rc{}; const char* src = "";
-            if (findCaret(el, rc, src)) {
+            const bool found = java ? (javaHave ? (rc = javaCaret, src = "java", true) : false) : findCaret(el, rc, src);
+            if (found) {
                 if (caretGen != focusGen) {
                     caretGen = focusGen; lastCaret = rc;                       // baseline, not followed
                     if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "caret baseline via %s: %ld,%ld", src, rc.left, rc.top);
@@ -239,15 +273,20 @@ void FocusTracker::run() {
             } else if (m.wParam == 0) {
                 pendingCaret = true;
                 ++focusGen;          // (re)activation: the caret found now is a baseline too
+            } else if (m.wParam == JavaBridge::kJavaFocus) {
+                pendingFocus = true; javaDirty = true; ++javaEvents;
+                ++focusGen;          // a Java focus change: its caret is a baseline, like any other
+            } else if (m.wParam == JavaBridge::kJavaCaret) {
+                pendingCaret = true; javaDirty = true; ++javaEvents;
             } else {
                 pendingCaret = true;
             }
             if (!coalesce) coalesce = SetTimer(nullptr, kCoalesceTimer, 30, nullptr);   // NVDA's ~30 ms
         } else if (m.message == WM_TIMER && m.wParam == coalesce && coalesce) {
             KillTimer(nullptr, coalesce); coalesce = 0;
-            resolve(pendingFocus); pendingFocus = pendingCaret = false;
+            resolve(pendingFocus, false); pendingFocus = pendingCaret = false;
         } else if (m.message == WM_TIMER) {
-            if (active_.load() && wantCaret_.load()) resolve(false);                    // backstop poll
+            if (active_.load() && wantCaret_.load()) resolve(false, true);              // backstop poll
         }
         TranslateMessage(&m); DispatchMessageW(&m);
     }
