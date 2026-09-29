@@ -46,7 +46,7 @@ TEST_CASE("brightness scales the warm result") {
 TEST_CASE("out-of-range inputs are clamped") {
     double r, g, b;
     Rgb(BuildColorMatrix(0.0, 0.0), 1, 1, 1, r, g, b);
-    CHECK(r == doctest::Approx(0.05));   // brightness floor 5%
+    CHECK(r == doctest::Approx(0.01));   // brightness floor 1%
     CHECK(IsIdentity(BuildColorMatrix(-1.0, 2.0)));
     Rgb(BuildColorMatrix(5.0, 1.0), 1, 1, 1, r, g, b);
     CHECK(b == doctest::Approx(0.0));    // warmth caps at 1200 K

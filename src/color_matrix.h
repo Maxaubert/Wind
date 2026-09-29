@@ -46,7 +46,7 @@ inline bool SameMatrix(const ColorMatrix& a, const ColorMatrix& b) {
 
 // Lowest brightness the dim control reaches. Not 0: a black screen with the filter hotkey unbound
 // would look like a dead display.
-inline constexpr double kMinDim01 = 0.05;
+inline constexpr double kMinDim01 = 0.01;
 
 // Channel gains for a blackbody colour temperature, normalised so 6500 K is white (red stays 1
 // below that). Tanner Helland's fit to the CIE blackbody data, accurate to a few percent, which is
