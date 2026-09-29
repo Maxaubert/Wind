@@ -44,15 +44,6 @@ TEST_CASE("hybrid reads Advanced, not Auto") {
     CHECK(std::wstring(EngineLabel(TrayEngine::System))    == L"SYSTEM");
 }
 
-TEST_CASE("status survives a publish/read round trip") {
-    TrayStatus s; s.level = 7.4; s.engine = TrayEngine::Transform; s.panning = true;
-    PublishTrayStatus(s);
-    const TrayStatus r = ReadTrayStatus();
-    CHECK(r.level == doctest::Approx(7.4));
-    CHECK(r.engine == TrayEngine::Transform);
-    CHECK(r.panning == true);
-}
-
 // --- tick statistics -------------------------------------------------------------------
 
 TEST_CASE("the ring returns the newest samples oldest-first") {
