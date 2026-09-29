@@ -26,6 +26,7 @@
 #pragma comment(lib, "Dwmapi.lib")
 #include "render_engine.h"
 #include "render_model.h"
+#include "color_filter.h"   // issue #288
 #include "magnify_model.h"
 #include "transform_model.h"
 #include "input_router.h"
@@ -740,6 +741,7 @@ static void DiagLog(const char* fmt, ...) {
 // Forward-declared so RunTick can re-register the hide-cursor hotkey on config hot-reload;
 // the definition (with the static state it manages) lives near WndProc / kHideCursorHotkeyId.
 static void RegisterHideCursorHotkey(HWND hwnd, int vk, int mods);
+static void RegisterColorToggleHotkey(HWND hwnd, int vk, int mods);   // issue #288
 // Same pattern for the quick-zoom hotkey (hotkey mode). Pass vk=0 to unregister.
 static void RegisterQuickZoomHotkey(HWND hwnd, int vk, int mods);
 
@@ -791,7 +793,28 @@ static void EndPanelFreeze(TickState& t) {
     t.panelFreeze = false;
 }
 
+// COLOUR FILTER (issue #288). One matrix from the config and the toggle. Transform sessions and 1x use
+// the DWM colour effect; a render session clears it and filters in its pixel shader instead, because
+// its capture already contains the effect (docs/COLOUR-FILTER-FINDINGS.md). The controller dedupes, so
+// calling this every tick costs a compare when nothing changed, and holds a runtime only while a
+// filter is on.
+static wind::ColorFilterController g_color;
+static std::atomic<bool> g_colorToggleOn{true};   // the optional hotkey flips it; starts on each launch
+static void UpdateColorFilter(TickState& t, bool zoomedNow, bool renderSession, PresentExtras* ex) {
+    const bool magnify = t.model && t.model->selfDrivenZoom();   // native Magnifier has its own filters
+    wind::ColorMatrix m = wind::IdentityColorMatrix();
+    if (!magnify && g_colorToggleOn.load() && (zoomedNow || t.cfg.colorAt1x != 0))
+        m = wind::BuildColorMatrix(static_cast<wind::ColorFilter>(t.cfg.colorFilter),
+                                   t.cfg.colorWarmPct / 100.0, t.cfg.colorDimPct / 100.0);
+    const bool inShader = renderSession && !wind::IsIdentity(m);
+    if (ex) { ex->colorOn = inShader; ex->color = m; }
+    const wind::ColorMatrix dwm = inShader ? wind::IdentityColorMatrix() : m;
+    g_color.apply(dwm, !wind::IsIdentity(dwm));
+}
+
 static void RunTick(TickState& t) {
+    // Idle (1x) colour filter; a zoomed tick re-decides below with the engine known.
+    if (!t.prevActive) UpdateColorFilter(t, false, false, nullptr);
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
     double dt = double(now.QuadPart - t.prev.QuadPart) / double(t.freq.QuadPart);
@@ -867,7 +890,9 @@ static void RunTick(TickState& t) {
                 g_input.setKeys(nc.zoomInVk, nc.zoomInVk2, nc.zoomOutVk, nc.zoomOutVk2, nc.recenterVk,
                                 nc.cursorLockVk);
             }
-            if (nc.hideCursorVk != t.cfg.hideCursorVk || nc.hideCursorMods != t.cfg.hideCursorMods) {
+            if (nc.colorToggleVk != t.cfg.colorToggleVk || nc.colorToggleMods != t.cfg.colorToggleMods)
+            RegisterColorToggleHotkey(t.hwnd, nc.colorToggleVk, nc.colorToggleMods);
+        if (nc.hideCursorVk != t.cfg.hideCursorVk || nc.hideCursorMods != t.cfg.hideCursorMods) {
                 RegisterHideCursorHotkey(t.hwnd, nc.hideCursorVk, nc.hideCursorMods);
             }
             if (nc.quickZoomHotkeyMode != t.cfg.quickZoomHotkeyMode
@@ -1877,6 +1902,7 @@ static void RunTick(TickState& t) {
         }
         ex.suppressTransformWrite = hookWrite;
         ex.realPointer = panel;
+        UpdateColorFilter(t, lvl > 1.0, dynamic_cast<RenderModel*>(t.model) != nullptr, &ex);
         // Serialize transform writes around an Inspect click's injected absolute move (issue #148
         // TDR class): the injection and a transform write racing each other is the proven trigger.
         // The launch quiesce holds writes AND the weld for its whole window (see above).
@@ -2275,6 +2301,7 @@ static void RunTick(TickState& t) {
 // keyboard-only escape. The clean exit path restores the cursor and resets zoom to 1x.
 static const int kQuitHotkeyId = 0xB001;
 static const int kHideCursorHotkeyId = 0xB002;
+static const int kColorToggleHotkeyId = 0xB005;   // issue #288
 static const int kQuickZoomHotkeyId = 0xB003;
 
 // Translate our bit mask (1=Ctrl, 2=Alt, 4=Shift, 8=Win) into Win32 MOD_* flags for RegisterHotKey.
@@ -2302,6 +2329,19 @@ static void RegisterHideCursorHotkey(HWND hwnd, int vk, int mods) {
     }
 }
 
+// Hot-reloadable registration of the colour-filter toggle hotkey (issue #288). vk=0 unregisters.
+static int g_registeredColorVk = 0;
+static int g_registeredColorMods = 0;
+static void RegisterColorToggleHotkey(HWND hwnd, int vk, int mods) {
+    if (g_registeredColorVk != 0) {
+        UnregisterHotKey(hwnd, kColorToggleHotkeyId);
+        g_registeredColorVk = 0; g_registeredColorMods = 0;
+    }
+    if (vk != 0 && RegisterHotKey(hwnd, kColorToggleHotkeyId, WinModsFromBitmask(mods), vk)) {
+        g_registeredColorVk = vk; g_registeredColorMods = mods;
+    }
+}
+
 // Hot-reloadable registration of the quick-zoom hotkey (hotkey mode). Callers pass vk=0 to
 // unregister (modifier mode, or hotkey cleared), releasing the global key grab.
 static int g_registeredQuickVk = 0;
@@ -2320,6 +2360,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == WM_HOTKEY && wp == kQuitHotkeyId) { PostQuitMessage(0); return 0; }
     if (msg == WM_HOTKEY && wp == kHideCursorHotkeyId) {
         if (g_tick) g_tick->cursorHidden = !g_tick->cursorHidden;
+        return 0;
+    }
+    if (msg == WM_HOTKEY && wp == kColorToggleHotkeyId) {
+        g_colorToggleOn.store(!g_colorToggleOn.load());   // the next tick applies it
+        wind::Log(wind::LogLevel::Info, "color", "toggle -> %s", g_colorToggleOn.load() ? "on" : "off");
         return 0;
     }
     if (msg == WM_HOTKEY && wp == kQuickZoomHotkeyId) {
@@ -2576,6 +2621,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // and the cursor hidden). If the combo is already taken, the tray Quit still works.
     RegisterHotKey(hwnd, kQuitHotkeyId, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'Q');
     RegisterHideCursorHotkey(hwnd, cfg.hideCursorVk, cfg.hideCursorMods);
+    RegisterColorToggleHotkey(hwnd, cfg.colorToggleVk, cfg.colorToggleMods);   // issue #288
     RegisterQuickZoomHotkey(hwnd, (cfg.quickZoomHotkeyMode && cfg.quickZoomVk) ? cfg.quickZoomVk : 0,
                             cfg.quickZoomMods);
 
@@ -3043,8 +3089,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     if (ts.configWatch && ts.configWatch != INVALID_HANDLE_VALUE) FindCloseChangeNotification(ts.configWatch);
     UnregisterHotKey(hwnd, kQuitHotkeyId);
     UnregisterHotKey(hwnd, kHideCursorHotkeyId);
+    UnregisterHotKey(hwnd, kColorToggleHotkeyId);
     UnregisterHotKey(hwnd, kQuickZoomHotkeyId);
     EndGameInspect(ts);  // quitting mid-game-inspect hands foreground back to the game
+    g_color.shutdown();  // colour filter back to identity while the runtime still lives (#288)
     model->shutdown();   // restores cursor + tears down D3D/overlay
     // Hybrid holds TWO models; quitting while zoomed in (or shortly after) a transform session
     // left the transform half's magnification context + cursor state untouched without this.

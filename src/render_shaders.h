@@ -10,7 +10,8 @@ namespace wind {
 struct MagCB {
     float uvMinX, uvMinY, uvMaxX, uvMaxY;             // reg 0
     float brightness, hdrMode, scRgbScale, sharpness; // reg 1
-    float texelW, texelH, pad0, pad1;                 // reg 2
+    float texelW, texelH, colorOn, pad1;              // reg 2 (colorOn: issue #288)
+    float cm[5][4];                                   // reg 3-7: colour matrix rows (RGBA in, RGBA out) + offsets
 };
 
 // Fullscreen-triangle magnify shader. The VS maps the visible [0,1] screen UV into the
@@ -20,7 +21,8 @@ inline constexpr const char* kMagHLSL = R"(
 cbuffer CB : register(b0) {
     float2 uvMin; float2 uvMax;
     float brightness; float hdrMode; float scRgbScale; float sharpness;
-    float texelW; float texelH; float2 pad;
+    float texelW; float texelH; float colorOn; float pad;
+    float4 cm0; float4 cm1; float4 cm2; float4 cm3; float4 cmOff;
 };
 struct VSOut { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; };
 VSOut VSMain(uint id : SV_VertexID) {
@@ -55,6 +57,11 @@ float4 PSMain(VSOut i) : SV_TARGET {
         // FP16 scRGB source (linear Rec.709, 1.0 = 80 nits): scale so SDR white -> 1.0,
         // then sRGB-encode. Reconstructs the SDR appearance the HDR desktop shows.
         c.rgb = LinearToSrgb(max(c.rgb, 0.0) * scRgbScale);
+    }
+    if (colorOn > 0.5) {
+        // Colour filter (issue #288): the same row-vector matrix DWM would apply, done here because
+        // the captured desktop already went through DWM (see COLOUR-FILTER-FINDINGS.md).
+        c.rgb = saturate((c.r * cm0 + c.g * cm1 + c.b * cm2 + cm3 + cmOff).rgb);
     }
     c.rgb *= brightness;                         // optional fine-tune (default 1.0)
     c.a = 1.0;                                   // opaque output; window opacity is set via LWA_ALPHA

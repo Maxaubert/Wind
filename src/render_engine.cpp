@@ -1113,7 +1113,9 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
             (float)(p.srcLeft / sw), (float)(p.srcTop / sh),
             (float)((p.srcLeft + vw) / sw), (float)((p.srcTop + vh) / sh),
             bright, hdrMode, scRgbScale, sharp,
-            (sw > 0 ? 1.0f / (float)sw : 0.0f), (sh > 0 ? 1.0f / (float)sh : 0.0f), 0.0f, 0.0f };
+            (sw > 0 ? 1.0f / (float)sw : 0.0f), (sh > 0 ? 1.0f / (float)sh : 0.0f), p.colorOn ? 1.0f : 0.0f, 0.0f, {} };
+        for (int i = 0; i < 5; ++i)
+            for (int j = 0; j < 4; ++j) cbv.cm[i][j] = p.color.m[i][j];
         c->UpdateSubresource(cb.Get(), 0, nullptr, &cbv, 0, 0);
         c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         c->VSSetShader(vs.Get(), nullptr, 0);

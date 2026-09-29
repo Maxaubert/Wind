@@ -73,6 +73,8 @@ void RenderModel::present(const MapResult& r, double level, const Config& cfg,
     p.cursorMode = ex.cursorMode;
     if (ex.clickOverride) { p.clickDesktopX = ex.clickDesktopX; p.clickDesktopY = ex.clickDesktopY; }
     p.suppressCursorSync = ex.suppressCursorSync;   // mid-drag: the pointer owns the interaction (#169)
+    p.colorOn = ex.colorOn;                     // colour filter in the shader (#288)
+    p.color = ex.color;
     p.fsGame = ex.fsGame;                       // skip the periodic topmost backstop over a game
     if (ex.forceCrop) p.cropCapture = true;     // game session: crop the copy to the magnified view
     if (ex.noVsync)   p.vsync = false;          // game pacing: timer paces, Present(0,0)

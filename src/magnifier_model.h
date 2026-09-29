@@ -2,6 +2,7 @@
 #include "render_engine.h"   // MonitorTarget
 #include "cursor_mapper.h"    // MapResult
 #include "config.h"           // Config
+#include "color_matrix.h"     // ColorMatrix (issue #288)
 namespace wind {
 // Per-tick render-only overrides RunTick computes (outline fade, inspect crosshair, click freeze,
 // cursor hide). The transform model ignores everything except drawCursor.
@@ -32,6 +33,11 @@ struct PresentExtras {
     // draws above its panels) instead of the sprite, and prime one public-API write so DWM draws
     // that pointer magnified. Transform model only.
     bool  realPointer = false;
+    // Colour filter for the render engine's pixel shader (issue #288). Its capture already
+    // contains the DWM colour effect, so RunTick clears that effect during a render session and
+    // hands the matrix here instead. Transform and 1x use the DWM effect.
+    bool  colorOn = false;
+    ColorMatrix color{};
     bool  fsGame = false;         // foreground covers the monitor -> skip the periodic topmost backstop
     bool  forceCrop = false;      // fsGame && gameCrop: crop the capture copy to the magnified region
     bool  noVsync = false;        // game pacing engaged: Present(0,0); the main loop's timer paces
