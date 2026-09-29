@@ -847,11 +847,25 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // whose 1px freeze clip must never be disturbed - ex.clickOverride marks it).
     // Hot like the other knobs: switched off mid-zoom, give the clip back now rather than at the
     // end of the session (issue #274). Gated so an unused edgeClip costs no per-tick syscall.
-    if (cfg.edgeClip != 0 || edgeClipActive_)
+    // (Not while a shell panel froze the pointer: its 1px clip is RunTick's, and restoring the edge
+    // clip here would free it. RunTick gives the saved clip back when the panel closes.)
+    if ((cfg.edgeClip != 0 || edgeClipActive_) && !ex.realPointer)
         edgeClipManage(cfg.edgeClip != 0 && applyLevel > 1.001 && !ex.clickOverride);
 
     weldedLastFrame_ = false;
-    if (!ex.suppressCursorSync) {
+    if (ex.realPointer) {
+        // Shell panel freeze (#283): the pointer is pinned by a 1px clip; moving that clip moves the
+        // pointer, right after the view write above, so DWM never draws one without the other.
+        const int cx = r.clickDesktopX + mon_.x, cy = r.clickDesktopY + mon_.y;
+        RECT have{};
+        GetClipCursor(&have);
+        if (have.left != cx || have.top != cy || have.right != cx + 1 || have.bottom != cy + 1) {
+            const RECT pin{ cx, cy, cx + 1, cy + 1 };
+            ClipCursor(&pin);
+            weldedLastFrame_ = true;
+        }
+        lastClickX_ = cx; lastClickY_ = cy; haveLastClick_ = true;
+    } else if (!ex.suppressCursorSync) {
         int cx = ex.clickOverride ? ex.clickDesktopX : (r.clickDesktopX + mon_.x);
         int cy = ex.clickOverride ? ex.clickDesktopY : (r.clickDesktopY + mon_.y);
         if (!haveLastClick_ || cx != lastClickX_ || cy != lastClickY_) {
@@ -893,11 +907,18 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         // drawn above, and ONE public MagSetFullscreenTransform write makes DWM draw it magnified
         // (measured: the hardware pointer is then hidden and DWM draws it scaled; the private channel
         // alone leaves the tiny hardware pointer). Staying magnified survives later private writes.
-        // RunTick arms the hook write path meanwhile, so view and pointer move in the same breath
-        // (3 px off-centre against 44 px for tick-paced writes at 10.7x, 900 px/s).
+        // RunTick freezes the pointer meanwhile and Wind moves it with the view (see the weld).
         spriteShown_ = false;
         sprite_->hide();
-        if (cursorHidden_) { ShowSystemCursorMarshalled(TRUE); blanker_->restore(); cursorHidden_ = false; }
+        // Give the pointer back whichever way it was hidden: setActive() pre-blanks the cursor set
+        // at zoom-in without cursorHidden_, so a panel open at zoom-in stayed invisible (field).
+        if (cursorHidden_) { ShowSystemCursorMarshalled(TRUE); cursorHidden_ = false; }
+        if (blanker_ && blanker_->blanked()) {
+            blanker_->restore();
+            // The plane repaints only on the next cursor event; the pointer is frozen, so nudge it
+            // inside its 1px clip (a no-op move that still counts as an event).
+            POINT np; if (GetCursorPos(&np)) SetCursorPos(np.x, np.y);
+        }
         if (!panelPrimed_ && lastLevel_ > 1.0) {
             host_.setTransform((float)lastLevel_, lastOffX_, lastOffY_, lastTxX_, lastTxY_, false);
             panelPrimed_ = true;

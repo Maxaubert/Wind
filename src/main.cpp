@@ -294,7 +294,9 @@ struct TickState {
     wind::ViewOwnerState viewOwner;
     double viewCx = 0.0, viewCy = 0.0;
     bool   viewDetached = false;   // last tick drew a detached frame
-    bool   panelPrimed = false;    // #283: the public prime went out this panel session
+    bool   panelFreeze = false;    // #283: the real pointer is frozen and moved by Wind
+    double panelX = 0, panelY = 0; // its desktop position (sub-pixel)
+    RECT   panelSavedClip{};       // the clip to give back when the panel closes
     double viewVx = 0, viewVy = 0; // tracking spring velocity (trackGlideMode=1)
     HCURSOR bodyCursor = nullptr;  // edge mode: the cursor cursorBody was measured from
     wind::CursorBody cursorBody;   // its visible body around the hotspot (desktop px)
@@ -1317,6 +1319,11 @@ static void RunTick(TickState& t) {
             if (t.cfg.mouseAlign == 1 && t.viewDetached && !clipConfined &&
                 wind::PointerPinnedAtEdge(cur.x, cur.y, clip.left, clip.top, clip.right, clip.bottom))
                 rawMag = 0;
+            // Shell panel freeze (#283): the 1px clip and the frozen pointer are OURS, and they look
+            // exactly like mouselook. Fed to the tell, it flapped LOCKED/free every ~20 ms, each flip
+            // leaving and re-entering the panel regime (sprite/real pointer and the cursor set swapped
+            // per flip): the field flicker and frame drops. Hide both while the freeze is ours.
+            if (t.panelFreeze) { clipConfined = false; rawMag = 0; }
             bool locked = t.detector.update(clipConfined,
                                             rawMag,
                                             std::abs(curDx) + std::abs(curDy),
@@ -1468,13 +1475,36 @@ static void RunTick(TickState& t) {
         const bool freeCursor = t.cfg.txFreeCursor != 0 && !inspect && !t.detector.locked() &&
                                 dynamic_cast<TransformModel*>(t.model) != nullptr;
         // SHELL INPUT PANEL REGIME (issue #283): while the emoji picker (or clipboard history, touch
-        // keyboard) is open, the real pointer replaces the sprite (the shell draws its panels above
-        // every window band) and the mouse hook writes the view, so pointer and view never part.
-        // Caret/focus tracking and edge mode pause: both detach the view, a second writer.
-        const bool panel = t.cfg.panelPointer != 0 && freeCursor && lvl > 1.001 &&
-                           wind::MagThreadOwned() && g_track.shellPanelOpen();
-        if (!panel) t.panelPrimed = false;
-        if (freeCursor) {
+        // keyboard) is open, the real pointer replaces the sprite (the shell composes its panels above
+        // every window band; only the real pointer is drawn above them). A real pointer the hand moves
+        // between ticks drifts off the view by speed x tick x level (the wobble, 44 px at 10.7x), so it
+        // is FROZEN with a 1px clip and moved only by Wind, in the same tick and right next to the view
+        // write: the hand's motion arrives as ballistics-cooked raw input (the Inspect machinery).
+        // Hook-thread writes were tried first and rejected: owning the runtime there marshals every
+        // write onto the input thread (field: hitches). Tracking and edge mode pause meanwhile.
+        const bool panel = t.cfg.panelPointer != 0 && freeCursor && lvl > 1.001 && g_track.shellPanelOpen();
+        if (panel && !t.panelFreeze) {
+            GetClipCursor(&t.panelSavedClip);
+            POINT p{}; GetCursorPos(&p);
+            t.panelX = p.x; t.panelY = p.y;
+            double dx0, dy0; g_input.drainCooked(dx0, dy0);        // start from zero
+            g_input.state().cookActive.store(true);
+            t.panelFreeze = true;
+        } else if (!panel && t.panelFreeze) {
+            g_input.state().cookActive.store(false);
+            ClipCursor(&t.panelSavedClip);                          // this rig keeps a work-area clip
+            t.panelFreeze = false;
+        }
+        if (panel) {
+            double cdx, cdy; g_input.drainCooked(cdx, cdy);
+            t.panelX += cdx * t.cfg.cursorSensitivity;
+            t.panelY += cdy * t.cfg.cursorSensitivity;
+            const double lo = 0.0;
+            t.panelX = t.panelX < t.mon.x + lo ? t.mon.x + lo : (t.panelX > t.mon.x + t.mon.w - 1 ? t.mon.x + t.mon.w - 1 : t.panelX);
+            t.panelY = t.panelY < t.mon.y + lo ? t.mon.y + lo : (t.panelY > t.mon.y + t.mon.h - 1 ? t.mon.y + t.mon.h - 1 : t.panelY);
+            t.mapper.reset(t.panelX - t.mon.x, t.panelY - t.mon.y);
+            wind::NoteWriteCursor(t.panelX, t.panelY);
+        } else if (freeCursor) {
             POINT cp;
             if (GetCursorPos(&cp)) {
                 t.mapper.reset(double(cp.x - t.mon.x), double(cp.y - t.mon.y));
@@ -1808,10 +1838,7 @@ static void RunTick(TickState& t) {
         // latency that matters is panning at a steady level, which is what this arms for.
         const bool levelSettled = (lvl == t.prevTickLevel);
         t.prevTickLevel = lvl;
-        // In the panel regime the hook arms only from the tick AFTER the public prime (the model
-        // makes it on the first panel tick), so the prime cannot race a hook write.
-        const bool hookWrite = freeCursor && (t.cfg.txHookWrite != 0 || (panel && t.panelPrimed)) &&
-                               wind::MagThreadOwned() &&
+        const bool hookWrite = freeCursor && !panel && t.cfg.txHookWrite != 0 && wind::MagThreadOwned() &&
                                tmWall != nullptr && lvl > 1.0 && levelSettled && !t.viewDetached;
         if (hookWrite) {
             wind::HookTransformState hs;
@@ -1828,7 +1855,7 @@ static void RunTick(TickState& t) {
             // The hook moves the sprite together with the transform (issue #229): a sprite
             // placed by the tick while the hook rewrites the view lands off-centre by the
             // cursor drift times the zoom - the second, lagging cursor.
-            hs.spriteHwnd = panel ? nullptr : tmWall->spriteHwnd();   // #283: the real pointer needs no placing
+            hs.spriteHwnd = tmWall->spriteHwnd();
             hs.spriteHotX = tmWall->spriteHotX();
             hs.spriteHotY = tmWall->spriteHotY();
             wind::PublishHookTransform(hs);
@@ -1837,7 +1864,6 @@ static void RunTick(TickState& t) {
         }
         ex.suppressTransformWrite = hookWrite;
         ex.realPointer = panel;
-        if (panel) t.panelPrimed = true;   // the model primes on this frame; arm from the next
         // Serialize transform writes around an Inspect click's injected absolute move (issue #148
         // TDR class): the injection and a transform write racing each other is the proven trigger.
         // The launch quiesce holds writes AND the weld for its whole window (see above).
@@ -2543,9 +2569,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // something writes from the hook; with txHookWrite off (the default) it would just marshal the
     // tick thread's calls onto the system input thread for nothing. Read once here - thread affinity
     // means ownership can never move once MagInitialize has run, so this needs a restart to change.
-    // The hook thread owns the runtime when anything writes from it: txHookWrite, or the shell
-    // input panel regime (issue #283), which arms the hook only while a panel is open.
-    wind::SetMagThreadClaimEnabled(cfg.txHookWrite != 0 || cfg.panelPointer != 0);
+    wind::SetMagThreadClaimEnabled(cfg.txHookWrite != 0);
     wind::SetHookFrameGate(cfg.txHookWrite == 2);   // mode 2 = one hook write per composite
     if (!g_input.start(cfg.zoomInButton, cfg.zoomInButton2, cfg.zoomOutButton, cfg.zoomOutButton2,
                        /*swallow=*/true)) {

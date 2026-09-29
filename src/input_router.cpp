@@ -454,7 +454,8 @@ void InputRouter::drainRaw(int& dx, int& dy) {
 // in the normal path. Windows accelerates per packet on each packet's magnitude, so cook here (one
 // WM_INPUT = one packet) and accumulate the sub-pixel result; the tick drains it via drainCooked.
 void InputRouter::cookPacket(int dx, int dy) {
-    if (!state_.inspectActive.load(std::memory_order_relaxed)) return;
+    if (!state_.inspectActive.load(std::memory_order_relaxed) &&
+        !state_.cookActive.load(std::memory_order_relaxed)) return;
     double cx, cy;
     CookMickeyPacket(ballistics_, dx, dy, cx, cy);
     cookedX_ += cx;
