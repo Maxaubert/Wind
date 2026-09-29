@@ -3,49 +3,51 @@
 Items that are agreed direction but not yet scheduled. One line of context each; details live
 in the referenced issues/specs.
 
-## One default engine (agreed direction, 2026-08-13)
+## One default engine (agreed direction, 2026-08-13; desktop half shipped 2026-09-28)
 Converge on the TRANSFORM engine as the single DEFAULT for every use case; the other models
-stay shipped as deliberate alternatives ("second best"), never deleted. Prerequisites before
-flipping any default: extended field testing of `desktopTransform=1` (endurance, the #189 perf
-levers validated: ixDecimate / txKeepAliveMaxLevel / txMaxStepPct A/Bs), the spriteBand16
-constant-size-cursor verdict, and the launch-quiesce (#187) holding across more game launches.
+stay shipped as deliberate alternatives ("second best"), never deleted. The desktop half of
+this is done: `desktopTransform=1` shipped as the default (issue #271/#272, owner decision
+2026-09-28), so hybrid now picks transform on the desktop whenever the input-transform
+availability probe succeeds. What is left before transform becomes the default for GAMES too:
+the spriteBand16 constant-size-cursor verdict, and the launch-quiesce (#187) holding across
+more game launches (`txKeepAliveMaxLevel` is retired - warm-keeping now runs through
+`txWarmMode`/`txWarmHz`, see CLAUDE.md).
 Spec: `docs/superpowers/specs/2026-08-12-one-model-transform-design.md` (P3/P4);
 mechanism record: `docs/POINTER-HITTEST-FINDINGS.md`.
 
 ## Installer / public release
-- **Bundle the NVIDIA MPO mitigation** (issue #148). The transform model's full zoom range over
-  games requires MPO hardware overlay planes to be OFF on NVIDIA systems; otherwise the driver's
-  16-bit plane-programming field overflows (|srcX*level| > 32767) and resets the GPU. Wind
-  detects the boot state and pan-walls the unsafe strip when MPO is on, but the BEST experience
-  needs the registry edit. The installer must:
-  - offer an opt-in step (checked by default on NVIDIA GPUs) that sets
-    `HKLM\SOFTWARE\Microsoft\Windows\Dwm\OverlayTestMode = DWORD 5` and explains the
-    reboot-to-apply + how to undo (delete the value);
-  - never set it silently (system-wide display setting; users must know it exists);
-  - the uninstaller should offer to remove the value.
-  Also report the underlying bug to NVIDIA with the minimal repro (issue #148 has the full
-  forensics: signed UIAccess rig, gl_churn/gl_stress stressors, event-log verdicts).
-- **MPO-buster alternative** (unbuilt): a fullscreen alpha-1 click-through layered window shown
-  only during transform game sessions would force DWM to composite the game (off the hardware
-  plane), removing the need for the registry edit entirely. Prototype and A/B against the
-  registry route before the installer ships (evidence it works: the render model's alpha-1
-  primeReveal forces exactly this demotion, issue #90).
+- **NVIDIA MPO mitigation** (issue #148): shipped, but through Settings rather than the
+  installer. WindConfig.exe's "Disable MPO" toggle (issue #164) writes
+  `HKLM\SOFTWARE\Microsoft\Windows\Dwm\OverlayTestMode = DWORD 5` via an elevated `reg.exe`
+  call, re-reads the real state instead of assuming it applied, and is boot-state aware (DWM
+  only reads the value at boot, so the UI says a restart is needed rather than implying the
+  toggle is instant). The installer itself still does not offer this as a first-run step; an
+  install-time prompt remains open if one is wanted. Also report the underlying bug to NVIDIA
+  with the minimal repro (issue #148 has the full forensics: signed UIAccess rig,
+  gl_churn/gl_stress stressors, event-log verdicts).
+- **MPO buster** (issue #191): built and shipped, on by default (`mpoBuster=1`). During a
+  transform game session exposed to the MPO bug, Wind shows a fullscreen alpha-1
+  click-through ghost window that forces DWM to composite the game off the hardware overlay
+  plane, lifting the pan wall once the ghost settles. It runs alongside the registry route
+  rather than replacing it: the pan wall still applies unconditionally whenever sampling is
+  `nearest` and MPO is on (issue #243).
 
-## Next session - start here (2026-07-26, updated at checkpoint 8a52040)
+## Next session - start here (2026-07-26, updated at checkpoint 8a52040; size decision closed 2026-09-18)
 
 **Cursor is DONE and field-verified**: the transform model welds the real OS cursor to the lens
-point, so hover, dragging and clicks are all native. Items 1 below is therefore closed; what
-remains of the cursor work is the SIZE decision:
+point, so hover, dragging and clicks are all native. Items 1 below is therefore closed, and the
+SIZE decision below is now closed too:
 
 - With the transform engine a pointer can be **correctly placed OR constant size, never both**.
   DWM magnifies layered windows too, so a screen-space marker lands off-screen once transformed
   (verified: the pointer vanished at high zoom); in desktop space it sits exactly on target but
   grows with the zoom, like the native Magnifier. The hardware pointer is the only constant-size
   surface and it draws at its raw desktop position - the wrong place.
-- So the standing "constant on-screen size" rule cannot be met by the transform engine. The
-  render engine does meet it (it draws its own frame) but runs its own loop at ~92fps with many
-  hitches while panning, versus 144fps/1 hitch for transform. **Max to decide**: live with a
-  growing pointer in games, or use render there.
+- So the standing "constant on-screen size" rule cannot be met by the transform engine.
+  **Decided (owner decision, issue #253, 2026-09-18): the cursor grows with the zoom in every
+  engine**, including games via transform - this replaces the old constant-size rule.
+  `cursorConstantSize` (default 0) is an opt-in, render-only escape hatch for anyone who wants
+  the old constant-size look back.
 
 ## Superseded (kept for the reasoning)
 

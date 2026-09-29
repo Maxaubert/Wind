@@ -57,6 +57,10 @@ you keep clicking and using the screen while zoomed.
 - **Zoom lock detection** - games that pin the mouse to the screen center (DOOM-style
   mouselook) would drag the zoom back with it; listed apps (Settings > Cursor) pan from raw
   mouse motion instead.
+- **Tracking modes** - the view can follow you instead of only the pointer: it recenters on
+  the text caret as you type (on by default) or on the keyboard-focused control (off by
+  default), gliding smoothly to each new target; a mouse edge mode keeps the pointer from
+  reaching the view's border. Settings > Tracking.
 
 ## Magnifier models (`model=`)
 Selected with the `model` ini key or the "Magnifier engine" row in Settings. `model` is
@@ -107,20 +111,25 @@ you sign in, and installs the WebView2 runtime if Settings has no browser engine
 Your settings, profiles and logs stay in `%LOCALAPPDATA%\Wind`, and uninstalling keeps them
 unless you say otherwise.
 
-**Signing.** Release builds are currently **unsigned**, so Windows SmartScreen will warn on
-first run, and the UIAccess-only behaviour above is switched off (Wind detects this at startup
-and stays on the render path for the desktop; everything else works normally). Being unsigned
-is also why some browsers, and most managed work computers, refuse the download outright. A
-certificate is being arranged; the release pipeline already signs when one is configured, via
+**Signing.** The installer package itself is currently **unsigned**, so Windows SmartScreen
+will warn on first run, and that is also why some browsers, and most managed work computers,
+refuse the download outright. A certificate for that is being arranged.
+
+That does not cost you UIAccess, though. Setup generates a one-time local signing certificate
+on each PC it installs to, trusts it there, signs the UIAccess build with it, and deletes the
+private key right away - so a normal install gets UIAccess (elevated-window shortcuts keep
+working, and the desktop uses the transform engine) without needing a purchased certificate. If
+that per-PC signing step ever fails, Setup falls back to the ordinary, non-UIAccess build.
+
+The release pipeline also signs with a real certificate when one is configured, via
 `WIND_SIGN_THUMBPRINT`, or `WIND_SIGN_PFX` plus `WIND_SIGN_PASSWORD`:
 
 ```
 pwsh -File tools\release.ps1
 ```
 
-With a certificate it builds the UIAccess variant, signs both executables and the installer,
-and writes `dist\Wind-Setup-x64-<version>.exe`. Without one it builds the ordinary variant and
-says so. `src\version.h` is the only place the version is declared.
+With a certificate it signs both executables and the installer up front and skips the per-PC
+step entirely. `src\version.h` is the only place the version is declared.
 
 ## Build
 Requires Visual Studio 2022+ Build Tools (Desktop development with C++). From any shell:
@@ -161,10 +170,17 @@ Profiles (tray -> Profiles, or the Settings titlebar) snapshot the whole file pe
 - Pacing/perf: `vsync` (default on), `dwmFlush` (default 0), `gameFpsCap`, `gpuPriority`.
 - `model` - `hybrid` (default) / `render` / `transform` / `magnify`. Restart to switch.
 - `multiMonitor` - 0 (default, primary only) or 1 (follow the cursor's monitor per zoom-in).
-- `desktopTransform` - experimental, ini-only: use the game (compositor) engine on the
-  desktop too (signed install only, primary monitor only, Auto model).
+- `desktopTransform` - default **1**: use the game (compositor) engine on the desktop too
+  (primary monitor only, Auto model), whenever UIAccess is available; every normal install
+  gets that from the per-PC signing described above. Set it to `0` to keep the desktop on the
+  render engine.
 - `lockApps` - per-app zoom lock detection (Settings > Cursor > "Zoom lock detection");
   `warpLock=1` extends the detection heuristics to unlisted games.
+- `trackCaret` (default 1) / `trackFocus` (default 0) - follow the text caret or the
+  keyboard-focused control instead of the pointer; `trackGlideMs` (default 200) sets how fast
+  the view glides to a new target. `mouseAlign=1` switches ordinary mouse tracking to an edge
+  mode where the pointer may approach the view's border instead of staying centered.
+  Settings > Tracking.
 - Advanced: `zorderBand`, `transformExclude`, `noSwallowApps`, `profile`, `launchQuiesce`
   (default 1; 0 disables the ~1.5s write hold on a freshly launched fullscreen cover - a test
   knob for issue #247, it unguards the #187 DWM crash class, do not ship it off).

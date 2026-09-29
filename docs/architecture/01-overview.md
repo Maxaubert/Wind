@@ -71,6 +71,14 @@ locked regime outright, no heuristics, and `warpLock` adds warp-anchor/box/seed 
 pointer-warping mouselook engines (`LockDetector::warpLocked`); the list is the feature, the knob
 adds the smart tells globally. Details in [The cursor system](07-cursor.md).
 
+**Tracking follows the caret and keyboard focus on the desktop, without ever moving the pointer.**
+(Issue #276.) While zoomed on the desktop (not locked, not a fullscreen game, not Inspect), the
+view can glide to the text caret and keyboard focus (`trackCaret`, default on; `trackFocus`,
+default off) with a critically-damped 200 ms spring (`trackGlideMs`), and an opt-in mouse-edge
+mode (`mouseAlign=1`) lets the pointer roam inside the view and pans it only once the pointer
+reaches the edge margin. A real mouse move always takes the view back. Settings has its own
+Tracking section. Details in [The cursor system](07-cursor.md).
+
 ## Two binaries, one ini
 
 **The magnifier core and the settings app are separate processes with zero runtime coupling; the
@@ -162,8 +170,12 @@ large fleet of PowerShell measurement probes, see
 | `cursor_lock.cpp/.h` | Pure Inspect-mode on/off toggle state |
 | `cursor_mapper.cpp/.h` | Pure centered-lens mapper: integrates per-tick deltas into a float lens center, owns the pan wall |
 | `cursor_sprite.cpp/.h` | The transform model's layered-window cursor sprite (banded via `band_window.h`) |
+| `detached_view.h` | Pure detached-view map (issue #276): draws the view off-pointer while the cursor fields still report the real pointer, so the sprite/cursor scroll with tracked content |
+| `edge_pan.h` | Pure mouse-edge-mode geometry (issue #276 phase 2): the view moves only once the pointer leaves a comfort band sized to the cursor's visible body |
 | `drag_follow.h` | `ShouldDragFollow`: pure decision to suspend the weld during a button-hold (issue #169) |
 | `engine_pick.h` | Pure hybrid engine-pick predicate, shared by zoom-in pick and mid-zoom switch |
+| `focus_track.cpp/.h` | `FocusTracker`: one thread owns WinEvents + UI Automation for caret/keyboard-focus tracking (issue #276); the tick thread only flips `setActive()` and reads `snapshot()` |
+| `gain_learner.h` | Pure learned-ballistics gain for locked-regime panning: measures OS-cursor output against raw mickeys while free, instead of modeling Windows' pointer pipeline |
 | `hdr_info.cpp/.h` | OS query for the live SDR white level per display (issue #160) |
 | `hdr_scale.h` | Pure HDR-to-SDR tonemap scale, fold-in rule, and re-read throttle |
 | `hook_geometry.h` | Pure free-cursor source-rect formula, measured to match native Magnifier (issue #206) |
@@ -189,12 +201,21 @@ large fleet of PowerShell measurement probes, see
 | `render_shaders.h` | HLSL sources: magnify/sharpen/tonemap PS, cursor quad, single-pass edge outline |
 | `resource.h` / `wind.rc` | App/tray icon resources |
 | `shell_desktop.h` | Pure test: is this window class the shell desktop (Win+D reads as a game otherwise, issue #172) |
+| `sprite_layer.h` | Pure rule for which z-band the transform cursor sprite shows in, so it survives the Snipping Tool overlay and shell surfaces (issue #269) |
+| `test_telemetry.h` | Per-tick CSV telemetry sample/formatting for the `tools/testenv` proving-ground harness (`WIND_TESTLOG`, issue #225) |
+| `tick_stats.h` | Pure ring buffer of recent tick intervals backing the tray's frame-pacing readout |
 | `transform.cpp/.h` | Pure transform math: anchored offsets, TDR-safe clamps, input-transform rects, foreign-writer detection |
 | `transform_model.cpp/.h` | The transform engine: sessions, the weld, keep-alive, `txMaxStepPct` rate limit (default 25, i.e. 2.5% per tick) |
 | `tray.cpp/.h` | Tray icon, balloon, and menu handling |
+| `tray_draw.h` | Owner-drawn tray menu: the drawing half, kept out of `tray.cpp` |
+| `tray_status.h` | Pure decisions for what the tray menu shows (engine label, status text) from a published tick-loop snapshot |
 | `tx_cadence.h` | Pure transform write-cadence gates, traced against native Magnifier (issue #204) |
+| `tx_warm.h` | Pure transform warm-keeping: the pulsed rest-tick displacement (`txWarmHz`/`txWarmMode`) that keeps DWM's magnification re-render from going cold between pans |
 | `version.h` | The single source of the version; bumping it cuts a release |
+| `view_glide.h` | Pure glide/spring easing toward a tracking target (issue #276): time-based `GlideToward` and a critically-damped `SpringToward` |
+| `view_target.h` | Pure view-ownership rules for tracking (issue #276): mouse vs. caret/focus, the click-quiet window, warp-vs-glide handback |
 | `webview2_probe.h` | Pure rule: is the WebView2 runtime actually installed ("0.0.0.0" leftovers lie) |
+| `wobble_cage.cpp/.h` | Dev-only live wobble detector: four boxing bars around the cursor that flash on a screen-space hit, drawn in desktop space so the transform can't displace it out from under itself (issue #229) |
 | `zoom_controller.cpp/.h` | Pure hold-to-zoom state machine + quick-zoom toggle arithmetic |
 | `config_ui/main.cpp` | The WebView2 settings host; `HandleWebMessage` owns the bridge message set |
 | `config_ui/ini_edit.cpp/.h` | Pure in-place ini text editing (preserves comments, order, unknown keys) |

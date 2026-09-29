@@ -6,7 +6,7 @@ guided tour, or jump straight to the subsystem you are touching. Historical desi
 field investigations are linked from each chapter as evidence; when this book and an old spec
 disagree, the book (and above it, the code) wins.
 
-Current as of v0.2.0.
+Current as of v0.10.3.
 
 ## The system at a glance
 
@@ -51,7 +51,7 @@ flowchart LR
 | 04 | [The render engine](04-render-engine.md) | Own capture + GPU scale, and the compositor rules learned the hard way |
 | 05 | [The transform engine](05-transform-engine.md) | Magnifying inside DWM: channels, cadence, MPO, the input transform |
 | 06 | [The input pipeline](06-input.md) | Hooks, Raw Input, key swallowing and its limits |
-| 07 | [The cursor system](07-cursor.md) | Free cursor, the weld, the sprite, lock detection, Inspect mode |
+| 07 | [The cursor system](07-cursor.md) | Free cursor, the weld, the sprite, lock detection, Inspect mode, tracking (caret/focus/mouse edge) |
 | 08 | [Config and profiles](08-config-profiles.md) | The ini as the single source of truth, and profiles on top |
 | 09 | [The settings UI](09-settings-ui.md) | The WebView2 host, the schema-driven Svelte app, the bridge |
 | 10 | [The magnify model](10-magnify-model.md) | Driving the native Magnifier, and the measured dead ends |

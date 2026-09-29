@@ -11,21 +11,17 @@ keeps them unless you say otherwise.
 
 Requires 64-bit Windows 10 or 11.
 
-## Two things to know before you download
+## One thing to know before you download
 
-**This build is unsigned.** SmartScreen will warn on first run: choose *More info* then
+**This installer is unsigned.** SmartScreen will warn on first run: choose *More info* then
 *Run anyway*. Some browsers and most managed work computers block the download outright,
 which a signature is the only real fix for; one is being arranged.
 
-**Being unsigned costs two features**, because Windows only grants UIAccess to a signed
-binary in a protected folder:
-
-- zoom shortcuts do not work while an elevated window has focus (Task Manager, regedit, an
-  elevated terminal)
-- the desktop transform path stays off, so the desktop is magnified by the render engine
-
-Everything else works normally. Wind detects this at startup and picks the right engine on
-its own, so there is nothing to configure.
+That does not cost you UIAccess, though: Setup signs Wind for UIAccess on your own PC during
+install, using a certificate it generates and trusts locally, then deletes right away - so
+zoom shortcuts keep working with an elevated window focused (Task Manager, regedit, an
+elevated terminal), and the desktop uses the same compositor transform engine as a game.
+There is nothing to configure either way.
 
 ## What is in it
 
@@ -35,6 +31,8 @@ its own, so there is nothing to configure.
 - Automatic engine choice per zoom, between a DWM fullscreen transform and its own
   DXGI + Direct3D 11 renderer
 - Named settings profiles, and a Settings app with guided first-run setup
+- Tracking modes: follow the text caret or the keyboard-focused control instead of the
+  pointer, with a smooth glide, plus a mouse edge mode
 - Multi-monitor and HDR aware
 
 ## Verify your download

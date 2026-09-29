@@ -2,8 +2,13 @@
 
 The render engine is Wind's own magnifier: it captures the desktop with DXGI Desktop Duplication,
 scales a sub-pixel source rectangle on the GPU with Direct3D 11, and presents the result onto a
-fullscreen, click-through, capture-excluded overlay window. It is the default engine for desktop
-sessions and the fallback for everything the transform engine cannot handle. Almost every design
+fullscreen, click-through, capture-excluded overlay window. Since issue #272 it is the fallback engine for desktop sessions (the transform engine is now
+the default there too, `desktopTransform=1`) and for everything else the transform engine is
+refused: non-primary monitors (no cross-adapter transform chase), apps on `transformExclude`,
+learned churny apps (unless the tdr test harness forces transform), and any desktop session
+without a verified input-transform publish (no UIAccess). Capture-protected (DRM) content and
+apps on `renderExclude` still get the transform engine even then, since Desktop Duplication
+returns black for protected content and the render engine would show nothing at all. Almost every design
 decision in `src/render_engine.cpp` exists because the obvious alternative was tried and failed in
 a measurable way; this chapter treats those hard-won rules as first-class architecture, not trivia.
 

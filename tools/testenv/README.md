@@ -68,8 +68,8 @@ Metric notes:
 
 ## Benchmark mode (bench.ps1): compare magnifiers head to head
 
-    powershell -File tools	estenvench.ps1                       # Wind vs Windows Magnifier
-    powershell -File tools	estenvench.ps1 -Drivers wind,native,external -ExternalSpec zt.json
+    powershell -File tools\testenv\bench.ps1                       # Wind vs Windows Magnifier
+    powershell -File tools\testenv\bench.ps1 -Drivers wind,native,external -ExternalSpec zt.json
 
 Drives DIFFERENT magnifiers through the SAME scenarios (solid pan/fast, heavy acrylic zigzag
 over a solid underlay, heavy acrylic pan over a video-like animated underlay, and a response

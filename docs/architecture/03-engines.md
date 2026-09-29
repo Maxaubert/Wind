@@ -75,28 +75,47 @@ The inputs, and who computes them in `main.cpp`:
 | `tdrHarness` | `cfg.tdrTest > 0`: the #148 field harness bypasses the churny veto | config |
 | `desktopTransformOptIn` | The `desktopTransform` knob is on (issue #185) | config |
 | `inputTransformOk` | `MagSetInputTransform` was verified available (needs UIAccess) | `TransformModel::inputTransformAvailable()`, probed at init |
+| `pref` | The user's per-window-category engine choice (Auto/Transform/Render) for this foreground's category (Game/Acrylic/Desktop/Other) | `FillCategoryInputs` -> `ClassifyWindow` + `ParseEnginePref(engineGame/engineAcrylic/engineDesktop/engineOther)` (issue #237) |
+| `captureProtected` | The foreground (or a child surface) carries display-affinity capture protection (DRM: Netflix, Apple TV, PlayReady) | `RefreshFgCache` -> `IsCaptureProtectedFg`, walking child windows |
+| `renderExcluded` | The exe is on `renderExclude`, the manual escape hatch for protected apps the affinity probe misses | `RefreshFgCache` -> `FgExeInList(renderExclude)` |
 
-The logic is four lines:
+The pick has three tiers, evaluated in this order (`ShouldPickTransform`, src/engine_pick.h):
 
 ```cpp
+// 1. DRM always wins: a capture-protected window (or renderExclude) renders as a black
+//    rectangle on the render engine, so it forces transform even off a game or off transformExclude.
+if (in.captureProtected || in.renderExcluded) return true;
+// 2. An explicit per-window-category preference (issue #237: engineGame/engineAcrylic/
+//    engineDesktop/engineOther, each Auto/Transform/Render). Render is honored outright;
+//    Transform is still refused off the primary monitor or on an excluded exe.
+if (in.pref == EnginePref::Render) return false;
+if (in.pref == EnginePref::Transform) return in.primaryMonitor && !in.excluded;
+// 3. Auto (the historical, unchanged default - an untouched install is all-Auto):
 const bool game    = in.coversMonitor && in.borderless && !in.shellDesktop;
 const bool desktop = in.desktopTransformOptIn && in.inputTransformOk;
 return (game || desktop) && in.primaryMonitor &&
        !in.excluded && (in.tdrHarness || !in.churny);
 ```
 
-Reading it as intent: the transform is picked for the **game path** (a borderless cover that is
+Reading it as intent: DRM protection overrides everything, because a black rectangle is a total
+failure and the things transform is otherwise vetoed for (transformExclude, the churny list) are
+lesser risks by comparison. Next, a user's explicit per-window-category choice (Settings lets you
+pin Games, Acrylic desktop apps, plain desktop, or Other to Transform or Render) wins over the
+automatic reads, short of the primary-monitor and exclusion correctness limits. Only then does
+Auto run: the transform is picked for the **game path** (a borderless cover that is
 not the shell desktop, i.e. a real fullscreen game or F11 video) or the **desktop path** (the user
 has `desktopTransform` on, the default since issue #271, AND the source-rect input transform
 verifiably works, because
 without it pointer-input frameworks like Explorer and Settings get hard hover dead zones under a
 welded cursor, root-caused in [../POINTER-HITTEST-FINDINGS.md](../POINTER-HITTEST-FINDINGS.md)).
-Either path additionally requires the primary monitor (no cross-adapter transform chase), and both
-are vetoed by the exclusion list and the learned churny list. Everything that fails the predicate
-gets the render engine, including the documented trap that a maximized desktop app covers the
-monitor but keeps its caption, so it correctly stays on render.
+Either Auto path additionally requires the primary monitor (no cross-adapter transform chase), and
+both are vetoed by the exclusion list and the learned churny list. Everything that falls through
+all three tiers gets the render engine, including the documented trap that a maximized desktop app
+covers the monitor but keeps its caption, so it correctly stays on render.
 
-**The hybrid pick, as ShouldPickTransform evaluates it (src/engine_pick.h):**
+**The Auto tier of the hybrid pick (the historical, unchanged default), as `ShouldPickTransform`
+evaluates it once DRM protection and any per-window preference have already been resolved
+(src/engine_pick.h):**
 
 ```mermaid
 flowchart TD

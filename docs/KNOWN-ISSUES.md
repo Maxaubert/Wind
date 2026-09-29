@@ -4,7 +4,9 @@
 **Status:** Issue 1 **FIXED** (UIAccess). Issue 2 root cause confirmed (missing
 `MagSetInputTransform`) and then refined to a **DPI coordinate-space mismatch** at 225%
 scale; logical-coordinate fix implemented, pending test. Issue 3 (flicker) **fixed**
-(unit-tested), pending user confirmation. Issue 4 unchanged. See per-issue "Resolution".
+(unit-tested), pending user confirmation. Issue 4 **resolved** by the transform engine
+(native-Magnifier composition parity measured; see docs/HITCH-FINDINGS.md, 2026-09-28), not by
+the render-pipeline injection this doc once framed as the only fix. See per-issue "Resolution".
 
 **Live-test results (2026-05-25):**
 - After UIAccess + `MagSetInputTransform`: **Issue 1 fixed** (zoom buttons now work over
@@ -32,7 +34,7 @@ problem (view flicker, Issue 3 below), not that FPS ceiling.
 | 1 | Zoom side-buttons do nothing | Task Manager, some apps | UIPI-class: input not reaching Wind over those windows. UIAccess resolved it. | **FIXED** (UIAccess) |
 | 2 | Partial / position-dependent clickability while zoomed (which targets work depends on window position) | Any window, when zoomed, at non-100% scale | `MagSetInputTransform` rects were passed in **physical** px, but input maps in **logical** (DPI-scaled) px. At 225% they were 2.25x too large -> click offset grows with screen position. | Logical-coordinate fix implemented; **pending test** |
 | 3 | Magnified view flickers / jumps while moving the cursor (off-centers and recenters rapidly) | GPU-rendered windows: Windows Terminal, browser, launcher | `Tracker::update` free/locked heuristic flip-flopped between snapping to `GetCursorPos` and integrating raw deltas | **Fixed** (hysteresis lock detector), unit-tested; user confirming |
-| 4 | Large FPS drop when panning/zooming in games | Borderless games (KCD2 etc.) | Public API scales in DWM, drops game off the GPU fast path | Unchanged (see PERFORMANCE-FINDINGS.md); direction decision open |
+| 4 | Large FPS drop when panning/zooming in games | Borderless games (KCD2 etc.) | Public API scales in DWM, drops game off the GPU fast path | **Resolved** via the transform engine (native-Magnifier composition parity, see HITCH-FINDINGS.md); a smaller residual felt-smoothness gap is still tracked there |
 
 Issues **2 and 3 are very likely the same root cause** (the tracker's center diverging
 from the true cursor), showing up as both a visual symptom (flicker) and an interaction
@@ -272,24 +274,30 @@ follows). Commit on `fix/interaction-bugs`.
 
 ## Issue 4 - In-game FPS hitching (cross-reference)
 
-Documented and concluded in [`PERFORMANCE-FINDINGS.md`](PERFORMANCE-FINDINGS.md): the
-large FPS drop while panning/zooming in borderless games is a ceiling of the public
-Magnification API (scaling happens in DWM, dropping the game off its GPU fast path).
-Only render-pipeline injection fully fixes it. **The direction decision (accept the
-limit and finalize v1, vs. pivot to injection) is still open and not part of this
-round.** Listed here only so the four issues live in one place.
+Documented in [`PERFORMANCE-FINDINGS.md`](PERFORMANCE-FINDINGS.md), which concluded (for the
+Magnification-API engine that existed at the time) that the large FPS drop while
+panning/zooming in borderless games was a ceiling of the public API and that only
+render-pipeline injection would fully fix it. **Resolved differently**: the transform engine
+(issue #148, revived) drives DWM's own magnification channel the way native Magnifier does,
+instead of the render engine's DXGI-capture pipeline, and the hybrid model picks it
+automatically for fullscreen bordered games. Measured composition-rate parity with native
+Magnifier over a real game (docs/HITCH-FINDINGS.md, 2026-09-28); a smaller residual
+felt-smoothness gap (cursor handling, micro-holds) is still open there, but the large
+architecture-level FPS drop this issue documented is fixed. Listed here only so the four
+issues live in one place.
 
 ---
 
 ## Cross-cutting note: visual-only vs. input transform
 
-Wind magnifies visually but does not remap input (`MagSetInputTransform` is
-deliberately unused; it needs UIAccess). This is correct and click-accurate **as long
-as the view stays centered on the true cursor**. Issues 2 and 3 both come back to the
-center diverging from the true cursor, which breaks that assumption. If we ever do want
-true decoupled-lens interaction (clicking the magnified target while the lens is offset
-from the real cursor), that would require `MagSetInputTransform` and therefore working
-UIAccess. Not needed to fix Issues 2/3 if we keep the center on the cursor.
+This described the original Magnification-API engine these issues were filed against, which
+magnified visually but never remapped input. It is no longer accurate for the current
+transform engine: when UIAccess is available, the transform engine actively publishes
+`MagSetInputTransform` per source-rect change (`magInputTransform=1`, default; issue #185,
+docs/POINTER-HITTEST-FINDINGS.md) specifically to fix pointer-framework hover dead zones on
+the desktop. The render engine still has no input transform and instead keeps the real cursor
+welded/synced to the drawn one, so it stays correct and click-accurate only as long as that
+weld keeps the view centered on the true cursor.
 
 ---
 

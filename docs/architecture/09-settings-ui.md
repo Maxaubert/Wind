@@ -141,13 +141,13 @@ is a plain object naming its ini key, row type, label, description, and default.
 
 | Row type | Widget | Notes |
 |---|---|---|
-| `keybind` | `ui/src/lib/KeybindCapture.svelte` | Stores state under `buttonKey`/`vkKey`/`modsKey` sibling ini keys, not `row.key` (which is a `__`-prefixed placeholder) |
+| `keybind` | `ui/src/lib/KeybindCapture.svelte` | Stores state under `buttonKey`/`vkKey`/`modsKey` sibling ini keys, not `row.key` (which is a `__`-prefixed placeholder); the zoom-in/zoom-out rows also carry a second `buttonKey2`/`vkKey2`/`modsKey2` slot so either binding fires the action (the core OR-combines them) |
 | `toggle` | animated SVG checkbox | Writes `1`/`0` |
 | `slider` | `input type=range` | `min`/`max`/`step`/`unit`; `unit` also feeds `aria-valuetext` |
 | `select` | `ui/src/lib/CustomSelect.svelte` | `options` + `optionLabels` (e.g. `hybrid` shown as "Auto") |
 | `segmented` | ARIA radiogroup with roving tabindex | No live rows use it after the 2026-08-21 cleanup, but the widget remains |
 | `applist` | summary + "Manage list" dialog (`ui/src/lib/AppListModal.svelte`) | One comma-separated ini string; the host's `pickExe` feeds it bare exe names |
-| `mpo` | checkbox bound to `extra`, not `values` | Reflects a registry value; keeping it out of `values` prevents Apply from writing a junk key into the ini |
+| `highres` | checkbox bound to `values` (the `txSamplingMode` ini key) | The combined high-resolution-cursor/MPO toggle (issue #242); only the separate "Requires restart" chip comes from `extra.mpoNeedsRestart`, since that reflects a registry value with no ini key of its own |
 | `about` | logo hero | Label-less; also gives the last section enough height for the scrollspy |
 | `color`, `button` | supported by `Row.svelte` | Currently unused by the schema |
 
@@ -158,8 +158,10 @@ Row *visibility and gating* are schema flags, all evaluated in the render condit
   staged `values`, so flipping it reveals rows before Apply).
 - `requires: 'key'` shows the row only while another value is `1` (the alternate-keybind rows
   require `altKeybinds`); `requiresNot` is the inverse.
-- `showIf: {key, eq}` shows the row only when another value equals a literal (historically used
-  for model-specific display rows; the cleanup removed the last users, the mechanism remains).
+- `showIf: {key, eq}` shows the row only when another value equals a literal: the per-window-
+  engine rows (`engineGame`, `engineAcrylic`, `engineDesktop`, `engineOther`, `renderExclude`)
+  use it to hide themselves unless `model` is `hybrid`, where a pinned single engine would make
+  them no-ops.
 - `dependsOn: 'key'` renders the row but disables it when the dependency is off.
 
 This is why adding a setting is normally a one-line schema edit plus a core-side `ParseConfig`
@@ -187,6 +189,14 @@ the keyboard hook per app, trading key interception for smooth panning (issue #1
 that pin the mouse to the screen center, which would otherwise pin the zoomed view there too;
 listed apps get the view unlocked from the pointer and panned from raw mouse motion (see
 [The cursor system](07-cursor.md)).
+
+### Tracking (issue #276/#277)
+
+A Tracking section, sitting between Cursor and Display, was added after the 2026-08-21 cleanup:
+`trackCaret` (on by default), `trackFocus` (off by default), `trackAlign`/`mouseAlign` (Centred
+vs Within the edges selects), and `mouseMarginPct` (the edge-mode margin slider). None of these
+rows carry an `advanced` flag, so they show unconditionally. The caret/focus/edge-mode
+mechanics they drive are covered in [The cursor system](07-cursor.md).
 
 ## Staged Apply, live keybinds
 
