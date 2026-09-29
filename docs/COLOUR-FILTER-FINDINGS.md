@@ -68,9 +68,15 @@ the matrix per colour and WCAG contrast in linear light).
   the render shader, linear for DWM under HDR (`BuildColorMatrix(..., linearLight)`). Brightness is
   decoded to linear under HDR so the slider looks the same in both. Verified on the HDR desktop:
   warm 100% green x0.074 / blue 0; warm 50% x0.67 / x0.34; brightness 50% x0.214; 0% black.
-- **The pointer at 1x is not tinted or dimmed**: Windows draws it on a hardware cursor plane after
-  composition, which the DWM colour effect never touches (Night light, in the display pipeline, does
-  reach it). While zoomed Wind draws the cursor itself, so it is filtered there.
+- **The pointer at 1x is out of the DWM effect's reach**: Windows draws it on a hardware cursor plane
+  after composition (Night light, in the display pipeline, does reach it). Since 2026-09-30 Wind
+  swaps the standard pointers for tinted copies while idle (spec 2026-09-30-cursor-tint-design.md).
+  Verified on this PC: Desktop Duplication's pointer shape reads 246,76,0 at warmth 100 (246,246,246
+  off), size 64x64 and hotspot kept; zoom-in swaps back in 1.1 ms (direct, no scheme reload) and the
+  engine draws + filters its own cursor; a fullscreen window in front and colour off restore the real
+  scheme (reload, ~6 ms, idle only); a force-killed Wind leaves the tint until its next start heals it.
+  In-memory COPIES of the pointers are not identical to the scheme's own (fixed size; the default
+  text beam came back as a different format), so idle restores always reload the real scheme.
 - Wind's diagnostics snapshot logs `hdr=0` regardless (logging.cpp records it conservatively); the
   engine's own `GetHdrEnabled` is the truth.
 
