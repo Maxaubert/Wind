@@ -13,6 +13,7 @@ struct InputState {
     // and hands the tick PER-BUTTON pending counts; the tick fires a clean click at the look point per
     // pending press (counts, not a single flag, so a fast second click before the tick drains isn't lost).
     std::atomic<bool> inspectActive{false};  // tick -> hook: Inspect on, swallow clicks
+    std::atomic<bool> cookActive{false};     // tick -> router: cook raw input (shell-panel freeze, #283)
     std::atomic<int>  commitLeft{0};         // hook -> tick: pending left clicks to fire at the look point
     std::atomic<int>  commitRight{0};        // hook -> tick: pending right clicks
     // --- Diagnostics for the intermittent stuck-side-button (issue #113). Each side-button

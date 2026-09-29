@@ -28,6 +28,10 @@ struct PresentExtras {
     // which is the wobble class #205 removed. The tick still triggers writes, but through the
     // hook's own function so there is one formula.
     bool  suppressTransformWrite = false;
+    // A shell input panel is open (issue #283): show the REAL pointer (the only thing the shell
+    // draws above its panels) instead of the sprite, and prime one public-API write so DWM draws
+    // that pointer magnified. Transform model only.
+    bool  realPointer = false;
     bool  fsGame = false;         // foreground covers the monitor -> skip the periodic topmost backstop
     bool  forceCrop = false;      // fsGame && gameCrop: crop the capture copy to the magnified region
     bool  noVsync = false;        // game pacing engaged: Present(0,0); the main loop's timer paces

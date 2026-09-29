@@ -46,6 +46,7 @@ static const unsigned long long kSettleMs = 100;
 static constexpr unsigned long long kIdleReleaseMs = 1200;
 
 void TransformModel::resetTransformState() {
+    panelPrimed_ = false;   // a rebuilt context needs its own public prime (#283, review #284)
     // Everything the write path caches must be forgotten across a teardown, or the next session
     // compares against values DWM no longer holds and skips the writes that would re-apply them.
     lastLevel_ = 0.0; lastRequestedLevel_ = 0.0;
@@ -847,11 +848,25 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // whose 1px freeze clip must never be disturbed - ex.clickOverride marks it).
     // Hot like the other knobs: switched off mid-zoom, give the clip back now rather than at the
     // end of the session (issue #274). Gated so an unused edgeClip costs no per-tick syscall.
-    if (cfg.edgeClip != 0 || edgeClipActive_)
+    // (Not while a shell panel froze the pointer: its 1px clip is RunTick's, and restoring the edge
+    // clip here would free it. RunTick gives the saved clip back when the panel closes.)
+    if ((cfg.edgeClip != 0 || edgeClipActive_) && !ex.realPointer)
         edgeClipManage(cfg.edgeClip != 0 && applyLevel > 1.001 && !ex.clickOverride);
 
     weldedLastFrame_ = false;
-    if (!ex.suppressCursorSync) {
+    if (ex.realPointer) {
+        // Shell panel freeze (#283): the pointer is pinned by a 1px clip; moving that clip moves the
+        // pointer, right after the view write above, so DWM never draws one without the other.
+        const int cx = r.clickDesktopX + mon_.x, cy = r.clickDesktopY + mon_.y;
+        RECT have{};
+        GetClipCursor(&have);
+        if (have.left != cx || have.top != cy || have.right != cx + 1 || have.bottom != cy + 1) {
+            const RECT pin{ cx, cy, cx + 1, cy + 1 };
+            ClipCursor(&pin);
+            weldedLastFrame_ = true;
+        }
+        lastClickX_ = cx; lastClickY_ = cy; haveLastClick_ = true;
+    } else if (!ex.suppressCursorSync) {
         int cx = ex.clickOverride ? ex.clickDesktopX : (r.clickDesktopX + mon_.x);
         int cy = ex.clickOverride ? ex.clickDesktopY : (r.clickDesktopY + mon_.y);
         if (!haveLastClick_ || cx != lastClickX_ || cy != lastClickY_) {
@@ -887,7 +902,36 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         lastSpriteY_ = spriteBand16_ ? (int)(r.cursorScreenY + 0.5) + mon_.y
                                      : r.clickDesktopY + mon_.y;
         sprite_->keepOnTop();
+    } else if (useSprite_ && sprite_ && ex.realPointer && ex.drawCursor && level > 1.001) {
+        // SHELL INPUT PANEL (issue #283). The emoji picker and its siblings are composed by the shell
+        // above every window band, so the sprite goes under them. The real pointer is the one thing
+        // drawn above, and ONE public MagSetFullscreenTransform write makes DWM draw it magnified
+        // (measured: the hardware pointer is then hidden and DWM draws it scaled; the private channel
+        // alone leaves the tiny hardware pointer). Staying magnified survives later private writes.
+        // RunTick freezes the pointer meanwhile and Wind moves it with the view (see the weld).
+        spriteShown_ = false;
+        sprite_->hide();
+        // Give the pointer back whichever way it was hidden: setActive() pre-blanks the cursor set
+        // at zoom-in without cursorHidden_, so a panel open at zoom-in stayed invisible (field).
+        if (cursorHidden_) { ShowSystemCursorMarshalled(TRUE); cursorHidden_ = false; }
+        if (blanker_ && blanker_->blanked()) {
+            blanker_->restore();
+            // The plane repaints only on the next cursor EVENT, and a same-position SetCursorPos is
+            // not one; the pointer is pinned by its 1px clip, so nudge the clip a pixel and back
+            // (review #284). The weld above has already placed the pin this frame.
+            if (haveLastClick_) {
+                const RECT off{ lastClickX_ + 1, lastClickY_, lastClickX_ + 2, lastClickY_ + 1 };
+                const RECT pin{ lastClickX_, lastClickY_, lastClickX_ + 1, lastClickY_ + 1 };
+                ClipCursor(&off);
+                ClipCursor(&pin);
+            }
+        }
+        if (!panelPrimed_ && lastLevel_ > 1.0) {
+            host_.setTransform((float)lastLevel_, lastOffX_, lastOffY_, lastTxX_, lastTxY_, false);
+            panelPrimed_ = true;
+        }
     } else if (useSprite_ && sprite_ && ex.drawCursor && level > 1.001) {
+        panelPrimed_ = false;
         // The REAL cursor is welded to the lens point above, so input is entirely native - but
         // the hardware pointer is not magnified and is drawn at its raw desktop position, which
         // reads as a small cursor sitting away from the content it addresses. So hide it and
