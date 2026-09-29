@@ -166,6 +166,19 @@ lock edge logs which tell engaged (`"lock"` category, wind-core.log) so field re
 diagnosable. Crucially, a forced lock goes **through the detector** (`t.detector.seedLock()`),
 not a tick-local flag, because downstream gates read `t.detector.locked()`.
 
+A fourth case overrides the resolved `MapResult` afterward: **tracking** (issue #276). Once zoomed
+on the desktop (not locked, not a fullscreen game, not Inspect) and `trackCaret` and/or
+`trackFocus` is on, `FocusTracker`'s snapshot can hand the view to the caret or keyboard focus
+instead of the pointer (`wind::StepViewOwner`, src/view_target.h); the view glides there
+(`wind::SpringToward`/`GlideToward`, src/view_glide.h) via `wind::DetachedMap` (src/detached_view.h),
+which maps the view independently of where the pointer is. A real mouse move always takes the
+view back, warping the pointer into frame rather than dragging the view back to it. The same
+override also drives mouse-edge mode (`mouseAlign=1`): the pointer roams freely inside the view
+and `wind::EdgePanCenter` (src/edge_pan.h) pans the view only once the pointer reaches the margin
+band. Whenever tracking has detached the view this tick, `t.viewDetached` is set, and
+`PresentExtras.suppressCursorSync` follows it (see below), because tracking never moves the
+pointer.
+
 Inside the free regime, `wind::ShouldDragFollow` (src/drag_follow.h) suspends the per-tick weld
 while a physical mouse button is held and follows the pointer 1:1 unscaled; the weld fighting a
 drag was the #169 window-drag flicker. And when `txFreeCursor` is on in a transform session, the
@@ -204,7 +217,8 @@ handover choreography live in [Engines and the hybrid pick](03-engines.md).
 
 The tick then fills a `PresentExtras` (src/magnifier_model.h): the outline visibility (with the
 low-zoom dwell and the idle-hide fade both computed here from `dt`), the cursor mode, weld
-suppression (`suppressCursorSync` when drag-follow or free cursor is active), transform-write
+suppression (`suppressCursorSync` when drag-follow, free cursor, or tracking has detached the
+view is active), transform-write
 pausing (around an Inspect click's injected input, and for the launch quiesce), and the game
 pacing flags. Then `t.model->present(r, lvl, cfg, mon, ex)` runs the engine. Two opt-in game
 modes can skip the present on some ticks: the reduced-push mode (`gameFpsCap` with vsync)
@@ -289,9 +303,10 @@ Device-lost recovery also lives in the main loop, not the tick: when the render 
 removed D3D device, the loop restores the cursor first, cleans Inspect state, marks the churny
 backstop if a transform game session was live within 30 s, and rebuilds on a 500 ms backoff.
 
-## Threads: hooks vs. the Magnification runtime
+## Threads: hooks, the focus tracker, and the Magnification runtime
 
-Wind has exactly two threads that matter, and the split is principled:
+Wind has three threads that matter beyond the tick thread itself, each split off for its own
+principled reason:
 
 **The hook thread** (src/input_router.cpp) exists because `WH_MOUSE_LL` / `WH_KEYBOARD_LL`
 callbacks must return fast or Windows evicts the hook, and because they stall the *system's*
@@ -299,6 +314,14 @@ input pipeline while running. They cannot share the tick thread: a tick blocked 
 would hold every keystroke and mouse move on the machine hostage for a frame. The hook thread
 does minimal work (set atomics, count mickeys, swallow bound keys) and the tick thread reads the
 results.
+
+**The focus-tracker thread** (`FocusTracker`, src/focus_track.cpp, issue #276) exists because
+caret and keyboard-focus tracking needs WinEvents (out-of-context hooks), `GetGUIThreadInfo`, and
+UI Automation, all of which either block or want their own message loop / COM MTA, none of which
+can run on the tick thread without risking a stall. It starts alongside the hook thread in
+`wWinMain` and stops on every teardown path. The tick thread only calls `setActive()` (arming or
+disarming it as tracking turns on or off) and reads an atomically published `snapshot()`; it
+never waits on UI Automation.
 
 **Magnification API calls are thread-affine.** This was measured, not assumed (the transcript is
 in the header comment of src/mag_thread.h): only the thread that called `MagInitialize` can
@@ -337,6 +360,9 @@ inline on the caller, degrading exactly to the old single-threaded behavior.
 - `src/mag_thread.h` / `.cpp`: Magnification runtime thread ownership and marshalling
 - `src/hook_transform.h` / `.cpp`: the armed hook-write state and the single-writer contract
 - `src/input_router.cpp`: the hook thread the tick reads from
+- `src/focus_track.h` / `.cpp`: the focus-tracker thread and its published snapshot
+- `src/view_target.h`, `src/view_glide.h`, `src/detached_view.h`, `src/edge_pan.h`: the pure
+  tracking decisions (view ownership, glide/spring, the detached map, mouse-edge geometry)
 - `src/engine_pick.h`, `src/drag_follow.h`, `src/lock_detector.cpp`, `src/inspect_focus.h`: the
   pure decision helpers the tick calls
 - Field evidence: [../WOBBLE-CAPTURE-2026-08-21.md](../WOBBLE-CAPTURE-2026-08-21.md),

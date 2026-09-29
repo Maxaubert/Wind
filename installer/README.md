@@ -23,11 +23,22 @@ whose wrong answers are quiet.
 | `make-loop.mjs` | turns a source clip into the frame sequence, and makes it loop |
 | `kit.nsh` | the frameless window: size, DPI, GDI+, unpacking |
 | `video.nsh` | the player: decode, composite, hover, clicks, dragging |
-| `screens.nsh` | the four screens, and what each click means |
+| `screens.nsh` | the five screens, and what each click means |
 | `over.nsh` | generated: control rectangles in 640x480 units |
 | `media/<size>/` | generated: `v/` frames, `o/` overlays. Not hand-edited. |
 | `media/<size>/o/back.png` | generated: the shade and the caption scrim, drawn under every screen |
 | `MicrosoftEdgeWebview2Setup.exe` | Microsoft's ~1.7 MB Evergreen bootstrapper stub |
+
+## The licence screen (issue #258)
+
+Two of the five screens are the licence page, before and after its box is ticked (`over.html`
+screens 4 and 5; `windLicenceCreate`/`windLicenceLeave` in `screens.nsh`). Install/Next does
+nothing until the box is checked. "Read the full licence" does not open a copy from
+`$PLUGINSDIR` (an elevated NSIS locks that folder to Administrators, so a de-elevated viewer
+would be refused); it copies `LICENSE.txt` into a fresh folder made with `GetTempFileName` in
+the user's own temp directory, opens it through `explorer.exe` so the viewer itself is not
+elevated, and deletes that copy on `.onGUIEnd`. A silent install (`/S`) skips the page like
+every other one, and `LICENSE.txt` is installed next to `Wind.exe` either way.
 
 ## Building it
 

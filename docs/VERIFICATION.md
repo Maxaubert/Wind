@@ -25,10 +25,13 @@ even while the render overlay covers the screen. The tray right-click -> Quit al
 - [ ] Task Manager: Wind CPU stays near 0% idle-zoomed; low while panning.
 - [ ] No noticeable stutter added to the game.
 
-## Own GPU renderer (engine=render, the default)
+## Own GPU renderer (model=render)
 
-The own capture+Direct3D renderer (DXGI Desktop Duplication). Select with `engine=render`
-in magnifier.ini (default); `engine=mag` selects the Magnification-API engine.
+The own capture+Direct3D renderer (DXGI Desktop Duplication). Select with `model=render`
+in magnifier.ini; the shipped default is `model=hybrid` ("Auto" in the settings UI), which
+picks render or the DWM transform engine per zoom-in. `model=magnify` drives the native
+Windows Magnifier instead (works over DRM video like Netflix, which Desktop Duplication
+captures as black); the old `engine=mag` key was removed (issue #20).
 
 **Auto-verified (CI/dev, via render-then-dump PNGs):**
 - D3D11 device + click-through overlay + flip-swapchain present.
@@ -40,14 +43,14 @@ in magnifier.ini (default); `engine=mag` selects the Magnification-API engine.
 - End-to-end: `WIND_SELFTEST=1 Wind.exe` drives the real path and dumps `wind_selftest.png`.
 
 **Human-only checks (please verify when you return):**
-- [ ] Zoom in (engine=render): exactly ONE cursor visible (not two). If two, the OS-cursor
+- [ ] Zoom in (model=render): exactly ONE cursor visible (not two). If two, the OS-cursor
       hide needs the documented fallback (see KNOWN-ISSUES "Own renderer").
 - [ ] Pan while zoomed: cursor stays centered and BUTTER SMOOTH (no L-pixel hop) - the goal.
 - [ ] Content pans smoothly at high zoom (8x) - no judder.
 - [ ] Click something while zoomed: it lands where the centered cursor points.
 - [ ] DRM video (e.g. Netflix) shows BLACK in the magnified layer (known DDA limit).
 - [ ] Quit from tray: cursor + screen back to normal everywhere.
-- [ ] A/B vs engine=mag and vs Windows Magnifier for smoothness/feel.
+- [ ] A/B vs model=magnify and vs Windows Magnifier for smoothness/feel.
 
 ## Installer (issue #213)
 
@@ -81,6 +84,9 @@ returns blank on the DIB-into-static drawing), so the screens below are human-on
       wraps without a visible jump.
 - [ ] Hover Install, Back, minimise and close: each one lights up, and the hit area matches
       what it looks like. Drag the caption strip: the window moves.
+- [ ] Licence screen: Install/Next does nothing until the accept box is ticked. "Read the
+      full licence" opens LICENSE.txt in the default text viewer (not elevated). Going Back
+      to Welcome and forward again keeps the box's state.
 - [ ] The setup screen shows `C:\Program Files\Wind` in Consolas, in the gap left for it.
 - [ ] Toggle "Start Wind when I sign in", go forward, come Back: the box kept its state.
 - [ ] The progress bar sits ON the drawn trough, in Wind's indigo, not the Windows green.
@@ -96,7 +102,11 @@ returns blank on the DIB-into-static drawing), so the screens below are human-on
 - [ ] Tray > Open Settings works after install (proves WebView2 is present or was installed).
 
 ## Notes / known v1 behavior
-- Editing the config while running re-initializes zoom to 1.0x (rare action).
-- Renderer knobs (cursorSensitivity, cursorScaleWithZoom, bilinear) apply on restart.
-- v1 magnifies the primary monitor; SDR; desktop-focused (engine=mag still serves games).
-- Recenter is unbound by default (recenterVk=0); no keyboard hook is wired in v1.
+- Editing the config while running keeps the current zoom level, clamped into a lowered
+  maxLevel if needed; it no longer collapses to 1.0x (fixed, issue #234/#235).
+- Renderer knobs (cursorSensitivity, cursorConstantSize, bilinear) apply on restart.
+- Primary monitor by default; `multiMonitor=1` opts into following the cursor's monitor.
+  `model=magnify` still serves DRM-protected video (Netflix etc.), which Desktop Duplication
+  captures as black.
+- Recenter is unbound by default (recenterVk=0); keyboard zoom/recenter/cursorLock binds go
+  through a WH_KEYBOARD_LL hook (src/input_router.cpp).

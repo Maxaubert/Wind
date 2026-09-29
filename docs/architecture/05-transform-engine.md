@@ -20,8 +20,9 @@ games repeatedly put the two in the same class, and after the #219 cadence work 
 better than native on every protocol tried (`../PERF-ACRYLIC-PARITY-2026-08-21.md`).
 
 The hybrid model ([chapter 03](03-engines.md)) therefore picks the transform for game sessions
-(borderless fullscreen cover on the primary), and optionally for the desktop too
-(`desktopTransform=1`, gated on the input transform being available, see below).
+(borderless fullscreen cover on the primary), and, since issue #272, on the desktop too by
+default (`desktopTransform=1` ships on since the 2026-09-28 owner decision; an explicit
+`desktopTransform=0` opts back to render), gated on the input transform being available, see below.
 
 ## The shared-runtime law
 
@@ -254,7 +255,9 @@ nearest, so there is no cheaper middle filter; and the raw user32
 (field crash 2026-08-13). `txSamplingMode` ships 0 (nearest): a slightly blocky image is the
 correct trade against a compositor that dies. The flag is DWM-global and survives our process
 until DWM restarts, which is why smoothing appeared to come and go between builds; the model
-re-applies the configured mode once per context (`samplingApplied_`).
+re-applies the configured mode per context (`appliedSampling_`), with a bounded retry (up to 3
+attempts, 1 s apart) since the setter's return value is not reliable - mode 0 via ordinal 1
+reports FALSE on every call on this rig while still working (issue #274/#275).
 
 ## The input transform
 
