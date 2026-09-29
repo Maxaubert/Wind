@@ -44,9 +44,10 @@ inline bool SameMatrix(const ColorMatrix& a, const ColorMatrix& b) {
     return true;
 }
 
-// Lowest brightness the dim control reaches: 0, black (owner request 2026-09-29: 1% was still
-// visible on an OLED). Quitting Wind (Ctrl+Alt+Q) always clears the effect; so does a crash.
-inline constexpr double kMinDim01 = 0.0;
+// Lowest brightness the dim control reaches: 1% (owner, 2026-09-30: 0 made the screen completely
+// black, so the floor stays just above it; under HDR 1% decodes to ~0.08% light, still readable on an
+// OLED in the dark). Quitting Wind (Ctrl+Alt+Q) always clears the effect; so does a crash.
+inline constexpr double kMinDim01 = 0.01;
 
 // Channel gains for a blackbody colour temperature, in LINEAR light, normalised so 6500 K is white
 // and the largest channel is 1. Computed from Planck's law and the CIE 1931 colour-matching functions
@@ -92,7 +93,7 @@ inline double WarmKelvin(double warm01) { return 6500.0 - 5300.0 * warm01; }
 // The whole colour feature is two controls (owner decision 2026-09-29): warmth and brightness.
 // Invert, greyscale and two-colour tints were dropped: one colour matrix cannot keep multi-coloured
 // text readable (docs/COLOUR-FILTER-FINDINGS.md).
-// warm01: 0..1 (0 = no warmth). dim01: 0..1 (1 = no dim, 0 = black). Out-of-range values clamp.
+// warm01: 0..1 (0 = no warmth). dim01: kMinDim01..1 (1 = no dim). Out-of-range values clamp.
 // linearLight: the matrix acts on LINEAR values. True for the DWM colour effect while Windows HDR is
 // on (measured: it scales scRGB directly); false for SDR DWM and for the render engine's shader,
 // which apply it to sRGB-encoded values. Warmth uses the blackbody gains in the matching space, and

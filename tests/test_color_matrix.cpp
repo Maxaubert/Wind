@@ -44,16 +44,17 @@ TEST_CASE("HDR (linear) and SDR (encoded) warmth are the same colour, not the sa
         pg = g;
     }
 }
-TEST_CASE("brightness: encoded in SDR, decoded to linear in HDR, down to black") {
+TEST_CASE("brightness: encoded in SDR, decoded to linear in HDR, floor 1% (never black)") {
     double r, g, b;
     ApplyToRgb(BuildColorMatrix(0.0, 0.5, false), 1, 0.5, 0, r, g, b);
     CHECK(r == doctest::Approx(0.5)); CHECK(g == doctest::Approx(0.25));
     ApplyToRgb(BuildColorMatrix(0.0, 0.5, true), 1, 1, 1, r, g, b);
     CHECK(r == doctest::Approx(SrgbDecode(0.5)));
     ApplyToRgb(BuildColorMatrix(0.0, 0.0, true), 1, 1, 1, r, g, b);
-    CHECK(r == doctest::Approx(0.0));
+    CHECK(r == doctest::Approx(SrgbDecode(0.01)));   // HDR: 1% decoded, dim but not black
+    CHECK(r > 0.0);
     ApplyToRgb(BuildColorMatrix(0.0, -1.0, false), 1, 1, 1, r, g, b);
-    CHECK(r == doctest::Approx(0.0));
+    CHECK(r == doctest::Approx(0.01));               // SDR: 1%
     CHECK(IsIdentity(BuildColorMatrix(-1.0, 2.0, true)));
 }
 TEST_CASE("sRGB encode and decode round-trip") {
