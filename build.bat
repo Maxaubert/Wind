@@ -26,6 +26,7 @@ if /i "%1"=="check" goto :check
 if /i "%1"=="uiaccess" goto :uiaccess
 if /i "%1"=="config" goto :config
 if /i "%1"=="installer" goto :installer
+if /i "%1"=="tray" goto :tray
 
 rem --- App build (normal: uiAccess=false, runs from anywhere) ----------------
 rem Compile the app-icon resource (rc.exe ships with the Windows SDK, on PATH via vcvars).
@@ -38,6 +39,8 @@ cl /nologo /std:c++17 /EHsc /O2 /W4 /Zi /DUNICODE /D_UNICODE ^
    d3d11.lib dxgi.lib dxguid.lib d3dcompiler.lib windowscodecs.lib ole32.lib oleaut32.lib uuid.lib advapi32.lib ^
    /MANIFEST:EMBED /MANIFESTUAC:NO /MANIFESTINPUT:Wind.manifest /SUBSYSTEM:WINDOWS ^
    /DEBUG /OPT:REF /OPT:ICF
+if errorlevel 1 exit /b 1
+call :tray_exe
 exit /b %errorlevel%
 
 rem --- UIAccess build (uiAccess=true: must be signed + run from Program Files) -
@@ -53,6 +56,30 @@ cl /nologo /std:c++17 /EHsc /O2 /W4 /Zi /DUNICODE /D_UNICODE /DWIND_UIACCESS ^
    /link Magnification.lib Dwmapi.lib user32.lib shell32.lib gdi32.lib Dbghelp.lib ^
    d3d11.lib dxgi.lib dxguid.lib d3dcompiler.lib windowscodecs.lib ole32.lib oleaut32.lib uuid.lib advapi32.lib ^
    /MANIFEST:EMBED /MANIFESTUAC:NO /MANIFESTINPUT:Wind.uiaccess.manifest /SUBSYSTEM:WINDOWS ^
+   /DEBUG /OPT:REF /OPT:ICF
+if errorlevel 1 exit /b 1
+call :tray_exe
+exit /b %errorlevel%
+
+rem --- Tray helper (WindTray.exe, issue #291). ALWAYS the plain manifest (asInvoker, NO uiAccess):
+rem    a UIAccess process's menu stacks above the cursor and the Snipping Tool overlay, which is the
+rem    whole reason the tray lives in its own process. Built by the app and uiaccess targets too.
+:tray
+call :tray_exe
+exit /b %errorlevel%
+
+:tray_exe
+rc /nologo /fo "%ROOT%src\tray_app\wind_tray.res" "%ROOT%src\tray_app\wind_tray.rc"
+if errorlevel 1 (echo [build] rc.exe failed for WindTray & exit /b 1)
+rem Objects go to src\tray_app\ so the shared sources never overwrite Wind.exe's .obj files.
+cl /nologo /std:c++17 /EHsc /O2 /W4 /Zi /DUNICODE /D_UNICODE ^
+   /Fo"%ROOT%src\tray_app\\" /Fd"%ROOT%WindTray.pdb" ^
+   src\tray_app\*.cpp src\profiles.cpp src\config.cpp src\logging.cpp src\config_ui\ini_edit.cpp ^
+   src\tray_app\wind_tray.res ^
+   /Fe:WindTray.exe ^
+   /link user32.lib shell32.lib gdi32.lib Dwmapi.lib Dbghelp.lib shlwapi.lib ole32.lib version.lib ^
+   advapi32.lib ntdll.lib ^
+   /MANIFEST:EMBED /MANIFESTUAC:NO /MANIFESTINPUT:Wind.manifest /SUBSYSTEM:WINDOWS ^
    /DEBUG /OPT:REF /OPT:ICF
 exit /b %errorlevel%
 

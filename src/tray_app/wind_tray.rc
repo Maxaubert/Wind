@@ -1,0 +1,28 @@
+#include "../resource.h"
+#include "../version.h"
+#include <winver.h>
+// WindTray.exe resources (issue #291): the same Wind icon as Wind.exe, its own description.
+IDI_WIND ICON "..\\..\\assets\\wind.ico"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION    WIND_VER_MAJOR,WIND_VER_MINOR,WIND_VER_PATCH,0
+ PRODUCTVERSION WIND_VER_MAJOR,WIND_VER_MINOR,WIND_VER_PATCH,0
+ FILEOS         0x40004L
+ FILETYPE       0x1L
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904b0"
+    BEGIN
+      VALUE "CompanyName",      "Wind"
+      VALUE "FileDescription",  "Wind tray icon"
+      VALUE "FileVersion",      WIND_VERSION_STR
+      VALUE "ProductName",      "Wind"
+      VALUE "ProductVersion",   WIND_VERSION_STR
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END
