@@ -47,6 +47,7 @@
   }
   onMount(async () => {
     await loadValues();
+    loaded = true;
     profiles = await listProfiles();
     // MPO lives in the registry, not the ini, so it is fetched separately and staged separately.
     const s = await getMpoState();
@@ -256,8 +257,11 @@
   $: dirty = Object.keys(values).some(k => String(values[k]) !== String(saved[k])) || mpoDirty;
   $: setDirty(dirty);   // keep the host's WM_CLOSE guard in step with the staged state
   // Crash recovery: the host keeps the unapplied edits and returns them after recreating the engine.
-  $: postDraft(Object.fromEntries(Object.keys(values).filter(k => String(values[k]) !== String(saved[k]))
-                                              .map(k => [k, values[k]])));
+  // Only once the settings have loaded: a fresh page would otherwise report an empty draft before the
+  // host has handed the old one back, and overwrite it (measured in the first crash test).
+  let loaded = false;
+  $: if (loaded) postDraft(Object.fromEntries(Object.keys(values).filter(k => String(values[k]) !== String(saved[k]))
+                                                         .map(k => [k, values[k]])));
   onMessage(m => {
     if (m && m.type === 'restoreDraft' && m.values && typeof m.values === 'object') {
       const back = {};
