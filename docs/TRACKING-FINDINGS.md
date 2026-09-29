@@ -48,3 +48,17 @@ highlighted option through UIA, so Wind follows only the terminal caret there.
   cursor's visible body (opaque bounds around the hotspot, re-measured on cursor change).
 - **Margin.** Edge mode has its own `mouseMarginPct` (default 0: the cursor reaches the view edge
   before the view moves; Settings slider 0-30%). `trackMarginPct` (15%) stays the caret/focus one.
+
+## Firefox in a zoomed iframe (issue #278, 2026-09-29)
+
+- A Claude artifact (an iframe) at high Ctrl+ page zoom in Zen: Firefox reports the caret wrongly
+  from BOTH sources. The Win32 caret sits below and right of the input (input 2226,997 798x74,
+  caret 3097,1226 1x118); the UIA caret range and the element bounds point above the real text.
+  Not reproducible on a plain page at the same zoom. There is no correct source to fall back to.
+- Fix: in Gecko windows (`MozillaWindowClass`, Firefox and all forks) a caret whose centre is outside
+  its own element is skipped, so the view stays put. Limited to Gecko so no app that tracked
+  correctly before can lose tracking. A UIA fallback was tried and field-rejected (it lands above).
+- Leaving a text box moves focus to the whole page (3400x1912); centring on it dropped the view.
+  Focus rects covering half the monitor or more are containers and are skipped (all apps).
+- Diagnostic tool from this hunt: a recorder logging the foreground process, Win32 caret, UIA caret
+  and focus bounds every 100 ms; the Win32/UIA disagreement is what located the bad source.

@@ -1,5 +1,6 @@
 #include "focus_track.h"
 #include "logging.h"
+#include "track_filter.h"
 #include <windows.h>
 #include <objbase.h>
 #include <oleacc.h>
@@ -43,6 +44,12 @@ static bool IsOwnOrTooltip(HWND h) {
     if (pid == GetCurrentProcessId()) return true;
     wchar_t cls[64] = {}; GetClassNameW(h, cls, 64);
     return wcscmp(cls, L"tooltips_class32") == 0 || wcscmp(cls, L"Xaml_WindowedPopupClass") == 0;
+}
+
+// A Gecko browser window (Firefox and every fork share this class).
+static bool IsGeckoWindow(HWND h) {
+    wchar_t cls[64] = {}; GetClassNameW(h, cls, 64);
+    return wcscmp(cls, L"MozillaWindowClass") == 0;
 }
 
 // Classic Win32 caret of the foreground thread, in screen px. False when there is none.
@@ -181,11 +188,21 @@ void FocusTracker::run() {
         if (IsOwnOrTooltip(fg)) return;
         IUIAutomationElement* el = nullptr;
         if (uia) uia->GetFocusedElement(&el);
+        RECT b{};                                   // the focused element's bounds (empty = unknown)
+        if (el && FAILED(el->get_CurrentBoundingRectangle(&b))) b = RECT{};
         // 1. A focus change: follow the focused control (if wanted). Its caret becomes the baseline.
-        if (focusChanged && wantFocus_.load() && el) {
-            RECT b{};
-            if (SUCCEEDED(el->get_CurrentBoundingRectangle(&b)) && b.right > b.left && b.bottom > b.top)
+        //    A container-sized focus (the page after leaving a text box, a pane, the window) is not
+        //    something the user moved to, so it is skipped (issue #278).
+        if (focusChanged && wantFocus_.load() && el && b.right > b.left && b.bottom > b.top) {
+            MONITORINFO mi{ sizeof(mi) };
+            const bool haveMon = GetMonitorInfoW(MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST), &mi) != 0;
+            if (haveMon && IsContainerFocus({ b.left, b.top, b.right, b.bottom },
+                                            mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right, mi.rcMonitor.bottom)) {
+                if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "focus skipped (container): %ld,%ld %ldx%ld",
+                                           b.left, b.top, b.right - b.left, b.bottom - b.top);
+            } else {
                 publish(TrackKind::Focus, b.left, b.top, b.right, b.bottom, "uia-focus");
+            }
         }
         // 2. The caret: published only when it moved within the same focus.
         if (wantCaret_.load()) {
@@ -196,7 +213,18 @@ void FocusTracker::run() {
                     if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "caret baseline via %s: %ld,%ld", src, rc.left, rc.top);
                 } else if (!EqualRect(&rc, &lastCaret)) {
                     lastCaret = rc;
-                    publish(TrackKind::Caret, rc.left, rc.top, rc.right, rc.bottom, src);
+                    // In a Gecko browser (Firefox, Zen, LibreWolf...: one window class), a caret
+                    // outside its own element is a bad report, not a place to look (a zoomed iframe,
+                    // issue #278; its UIA caret was wrong too, so there is no source to fall back
+                    // to): the view stays where it is. Other apps are unchanged, so no case that
+                    // worked before can lose tracking to this rule.
+                    if (IsGeckoWindow(fg) &&
+                        !CaretInsideElement({ rc.left, rc.top, rc.right, rc.bottom }, { b.left, b.top, b.right, b.bottom })) {
+                        if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "caret skipped (outside its element %ld,%ld %ldx%ld) via %s: %ld,%ld",
+                                                   b.left, b.top, b.right - b.left, b.bottom - b.top, src, rc.left, rc.top);
+                    } else {
+                        publish(TrackKind::Caret, rc.left, rc.top, rc.right, rc.bottom, src);
+                    }
                 }
             }
         }
