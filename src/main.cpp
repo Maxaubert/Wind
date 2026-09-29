@@ -1293,8 +1293,14 @@ static void RunTick(TickState& t) {
             bool clipConfined = wind::ClipRectConfines((int)(clip.right - clip.left),
                                                        (int)(clip.bottom - clip.top),
                                                        t.mon.w, t.mon.h);
+            int rawMag = std::abs(rawDx) + std::abs(rawDy);
+            // Mouse edge mode: the pointer is real and free, so pushing it into a screen edge or
+            // corner is not mouselook. Hide that motion from the lock tell (see PointerPinnedAtEdge).
+            if (t.cfg.mouseAlign == 1 && t.viewDetached && !clipConfined &&
+                wind::PointerPinnedAtEdge(cur.x, cur.y, clip.left, clip.top, clip.right, clip.bottom))
+                rawMag = 0;
             bool locked = t.detector.update(clipConfined,
-                                            std::abs(rawDx) + std::abs(rawDy),
+                                            rawMag,
                                             std::abs(curDx) + std::abs(curDy),
                                             t.cfg.warpLock != 0, cur.x, cur.y);
             // lockApps (issue #221): listed foreground exe = locked outright, no heuristics.
@@ -1512,7 +1518,7 @@ static void RunTick(TickState& t) {
                 double px = t.viewCx, py = t.viewCy;
                 if (edges)
                     wind::EdgeClampPointer(t.viewCx, t.viewCy, cur.x - t.mon.x, cur.y - t.mon.y, lvl,
-                                           t.mon.w, t.mon.h, t.cfg.trackMarginPct, px, py);
+                                           t.mon.w, t.mon.h, t.cfg.mouseMarginPct, px, py);
                 const int wx = (int)(px + 0.5) + t.mon.x, wy = (int)(py + 0.5) + t.mon.y;
                 SetCursorPos(wx, wy);
                 cur.x = wx; cur.y = wy;
@@ -1530,7 +1536,7 @@ static void RunTick(TickState& t) {
                 const double wall = wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0;
                 double ecx, ecy;
                 wind::EdgePanCenter(t.viewCx, t.viewCy, ptrX, ptrY, lvl, t.mon.w, t.mon.h,
-                                    t.cfg.trackMarginPct, wall, wall, ecx, ecy);
+                                    t.cfg.mouseMarginPct, wall, wall, ecx, ecy);
                 t.viewCx = ecx; t.viewCy = ecy;       // no glide: the hand pushes the view directly
                 r = wind::DetachedMap(t.viewCx, t.viewCy, ptrX, ptrY, lvl, t.mon.w, t.mon.h);
                 t.mapper.reset(t.viewCx, t.viewCy);

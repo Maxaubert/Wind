@@ -30,3 +30,11 @@ TEST_CASE("edge clamp: a pointer outside the view is placed just inside the band
     EdgeClampPointer(1920, 1080, 2000, 1000, 4, 3840, 2160, 15, x, y);
     CHECK(x == doctest::Approx(2000)); CHECK(y == doctest::Approx(1000));
 }
+
+TEST_CASE("a pointer held against the clip edge or corner is pinned; inside is not") {
+    CHECK(PointerPinnedAtEdge(0, 500, 0, 0, 3840, 2160));
+    CHECK(PointerPinnedAtEdge(3839, 2159, 0, 0, 3840, 2160));
+    CHECK(PointerPinnedAtEdge(1000, 2063, 0, 0, 3840, 2064));   // work-area clip, taskbar edge
+    CHECK_FALSE(PointerPinnedAtEdge(1, 1, 0, 0, 3840, 2160));
+    CHECK_FALSE(PointerPinnedAtEdge(1920, 1080, 0, 0, 3840, 2160));
+}

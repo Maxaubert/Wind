@@ -36,4 +36,12 @@ inline void EdgeClampPointer(double viewCx, double viewCy, double ptrX, double p
     outX = clamp(ptrX, viewCx - vw / 2 + mx, viewCx + vw / 2 - mx);
     outY = clamp(ptrY, viewCy - vh / 2 + my, viewCy + vh / 2 - my);
 }
+
+// Is the pointer held against the edge of the area it may move in (the clip rect, which is the whole
+// desktop when nothing clips)? Pushing into a screen edge or corner in edge mode sends raw mickeys
+// while the pointer cannot move, which is exactly the lock detector's mouselook tell; that false
+// lock switched to the centred path and flung the pointer away from the corner (field 2026-09-29).
+inline bool PointerPinnedAtEdge(int x, int y, int clipL, int clipT, int clipR, int clipB) {
+    return x <= clipL || y <= clipT || x >= clipR - 1 || y >= clipB - 1;
+}
 }  // namespace wind
