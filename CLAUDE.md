@@ -469,6 +469,11 @@ restartWind), `dirty`, `openIni`, `exportDiagnostics`, `pickExe`, `mpoState`, `s
      from the pointer that owns the drag). The press landed under the welded cursor before the
      button went down; the release lands where pointer and content both are. Weld resumes on
      release (renderFrame invalidates its park dedupe so the first post-release frame re-parks).
+- TRACKING (issue #276; docs/architecture/07-cursor.md, field notes docs/TRACKING-FINDINGS.md):
+  caret/focus/edge-mode views are DETACHED (weld off, `t.viewDetached`); the POINTER comes to the
+  view on a mouse-move takeover, never the view to the pointer (that wobbled). Only keyboard-driven
+  caret moves are followed (first caret after a focus change = baseline; 1 s click quiet period).
+  Edge mode hides edge-pinned motion from the lock detector, or corners fling the pointer.
 - THE INSTALLER IS ELEVATED, WHICH MAKES HKCU AND `%LOCALAPPDATA%` THE WRONG USER'S. An
   elevated process's HKCU is whichever hive the ELEVATED token owns, which is an admin
   account's whenever a standard user elevated with different credentials. So autostart goes in

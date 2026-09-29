@@ -501,3 +501,36 @@ test('a settings write the host could not save shows a dialog (issue #274)', asy
   await dlg.getByRole('button', { name: 'Close' }).click();
   await expect(dlg).toHaveCount(0);
 });
+
+// Tracking modes (issue #276): caret tracking defaults ON, focus tracking OFF, alignment
+// centred by default. Toggle rows expose role="checkbox" here (see Row.svelte), not "switch",
+// so the query matches the rest of this file rather than the plan's draft.
+test('Tracking section: caret on, focus off, centred by default (issue #276)', async ({ page }) => {
+  await page.goto('/');
+  const caret = page.getByText('Follow the text cursor', { exact: true }).locator('xpath=../..').getByRole('checkbox');
+  const focus = page.getByText('Follow keyboard focus', { exact: true }).locator('xpath=../..').getByRole('checkbox');
+  await expect(caret).toBeChecked();
+  await expect(focus).not.toBeChecked();
+  await focus.click();
+  await page.getByRole('button', { name: 'Apply' }).click();
+  const sets = await page.evaluate(() => window.__sets.filter(m => m.type === 'setConfig' && m.key === 'trackFocus'));
+  expect(sets.at(-1).value).toBe('1');
+});
+
+test('Keep the mouse pointer: centred by default, within the edges writes mouseAlign=1 (issue #276)', async ({ page }) => {
+  await page.goto('/');
+  const row = page.getByText('Keep the mouse pointer', { exact: true }).locator('xpath=../..');
+  await expect(row.getByRole('combobox')).toContainText('Centred');
+  await row.getByRole('combobox').click();
+  await page.getByRole('option', { name: 'Within the edges' }).click();
+  await page.getByRole('button', { name: 'Apply' }).click();
+  const sets = await page.evaluate(() => window.__sets.filter(m => m.type === 'setConfig' && m.key === 'mouseAlign'));
+  expect(sets.at(-1).value).toBe('1');
+});
+
+test('Mouse edge margin: a slider in the Tracking section, 0% by default (issue #276)', async ({ page }) => {
+  await page.goto('/');
+  const row = page.getByText('Mouse edge margin', { exact: true }).locator('xpath=../..');
+  await expect(row).toBeVisible();
+  await expect(row).toContainText('0');
+});

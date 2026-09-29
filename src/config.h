@@ -145,6 +145,17 @@ struct Config {
     // foreground sits above band 16 (the Snipping Tool overlay, band 17). Needs UIAccess; 0 = one
     // window in zorderBand, as before.
     int cursorBandAuto = 1;
+    // Tracking modes (issue #276, hot). The view can follow the text caret and keyboard focus;
+    // the pointer is never moved by tracking. Caret on by default, focus off.
+    int trackCaret = 1;
+    int trackFocus = 0;
+    int trackAlign = 0;      // caret + focus: 0 = centred, 1 = within the edges
+    int mouseAlign = 0;      // mouse: 0 = centred (today), 1 = within the edges (phase 2)
+    int trackGlideMs = 200;  // glide time to 95% of the distance (field pick 2026-09-29, spring)
+    int trackMarginPct = 15; // within-edges margin, % of the view on each side
+    int trackGlideMode = 1;  // hidden: 1 = spring (carries velocity, field pick), 0 = old exponential ease
+    int mouseMarginPct = 0;  // mouse edge mode (mouseAlign=1): how close to the view edge the pointer may go
+    int trackLog = 0;        // hidden: log every resolved caret/focus event with its source
     // Hidden test knob (not in the template or the UI): 1 leaves the transform cursor visible to
     // screen capture, for tools/testenv/dualcursor.ps1. Users always get it hidden (issue #269).
     int spriteCapturable = 0;
