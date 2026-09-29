@@ -3,7 +3,6 @@
 #include "logging.h"
 #include <windows.h>
 #include <magnification.h>
-#include <atomic>
 #include <memory>
 
 namespace wind {
@@ -120,28 +119,10 @@ bool MagHost::setTransformOwned(float zoom, int offX, int offY, int tx, int ty, 
 bool MagHost::setInputTransform(bool active, const RECT& src, const RECT& dst) {
     if (!initialized_) return false;
     // By value (issue #274): MagThreadInvoke's contract is that the callable owns what it uses.
-    // Since issue #283 the hook thread owns the runtime in every default session. The input
-    // transform is what keeps shell hit-testing alive under the zoom (dead zones without it), so a
-    // failure on the owner thread is retried once on the calling thread, and the first few are
-    // logged with both error codes (a field session 2026-09-29 saw every publish stomped; it did not
-    // reproduce after a restart, and a stray magnifier client is the suspect).
-    static std::atomic<unsigned long> ownerErr{0};
-    static std::atomic<int> logged{0};
-    if (MagThreadInvoke([active, src, dst]() -> bool {
-            RECT s = src, d = dst;   // API takes non-const LPRECT
-            const bool r = MagSetInputTransform(active ? TRUE : FALSE, &s, &d) != FALSE;
-            if (!r) ownerErr = GetLastError();
-            return r;
-        }))
-        return true;
-    RECT s = src, d = dst;
-    SetLastError(0);
-    const bool inl = MagSetInputTransform(active ? TRUE : FALSE, &s, &d) != FALSE;
-    const DWORD inlErr = GetLastError();
-    if (logged.fetch_add(1) < 5)
-        wind::Log(wind::LogLevel::Warn, "magapi", "input transform failed on the owner thread (err=%lu); retry on thread %lu %s (err=%lu)",
-                  ownerErr.load(), GetCurrentThreadId(), inl ? "succeeded" : "failed", inlErr);
-    return inl;
+    return MagThreadInvoke([active, src, dst]() -> bool {
+        RECT s = src, d = dst;   // API takes non-const LPRECT
+        return MagSetInputTransform(active ? TRUE : FALSE, &s, &d) != FALSE;
+    });
 }
 
 bool MagHost::getInputTransform(bool& active, RECT& src, RECT& dst) {

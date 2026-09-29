@@ -181,6 +181,15 @@ void FocusTracker::run() {
     HWINEVENTHOOK h3 = SetWinEventHook(EVENT_OBJECT_FOCUS, EVENT_OBJECT_FOCUS, nullptr, FocusTrackImpl::OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     HWINEVENTHOOK h4 = SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE, nullptr, FocusTrackImpl::OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     HWINEVENTHOOK h5 = SetWinEventHook(EVENT_OBJECT_CLOAKED, EVENT_OBJECT_UNCLOAKED, nullptr, FocusTrackImpl::OnCloak, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    // A panel already open when we start raised its UNCLOAKED before the hook existed (review #284).
+    EnumWindows([](HWND h, LPARAM) -> BOOL {
+        DWORD cloaked = 1;
+        if (IsShellPanelWindow(h) && SUCCEEDED(DwmGetWindowAttribute(h, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && !cloaked) {
+            FocusTrackImpl::SetPanel(true, h);
+            return FALSE;
+        }
+        return TRUE;
+    }, 0);
     SetTimer(nullptr, kPollTimer, 16, nullptr);   // 60 Hz backstop, work only while active
     bool pendingFocus = false, pendingCaret = false;
     UINT_PTR coalesce = 0;

@@ -46,6 +46,7 @@ static const unsigned long long kSettleMs = 100;
 static constexpr unsigned long long kIdleReleaseMs = 1200;
 
 void TransformModel::resetTransformState() {
+    panelPrimed_ = false;   // a rebuilt context needs its own public prime (#283, review #284)
     // Everything the write path caches must be forgotten across a teardown, or the next session
     // compares against values DWM no longer holds and skips the writes that would re-apply them.
     lastLevel_ = 0.0; lastRequestedLevel_ = 0.0;
@@ -915,9 +916,15 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         if (cursorHidden_) { ShowSystemCursorMarshalled(TRUE); cursorHidden_ = false; }
         if (blanker_ && blanker_->blanked()) {
             blanker_->restore();
-            // The plane repaints only on the next cursor event; the pointer is frozen, so nudge it
-            // inside its 1px clip (a no-op move that still counts as an event).
-            POINT np; if (GetCursorPos(&np)) SetCursorPos(np.x, np.y);
+            // The plane repaints only on the next cursor EVENT, and a same-position SetCursorPos is
+            // not one; the pointer is pinned by its 1px clip, so nudge the clip a pixel and back
+            // (review #284). The weld above has already placed the pin this frame.
+            if (haveLastClick_) {
+                const RECT off{ lastClickX_ + 1, lastClickY_, lastClickX_ + 2, lastClickY_ + 1 };
+                const RECT pin{ lastClickX_, lastClickY_, lastClickX_ + 1, lastClickY_ + 1 };
+                ClipCursor(&off);
+                ClipCursor(&pin);
+            }
         }
         if (!panelPrimed_ && lastLevel_ > 1.0) {
             host_.setTransform((float)lastLevel_, lastOffX_, lastOffY_, lastTxX_, lastTxY_, false);

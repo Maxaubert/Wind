@@ -67,3 +67,20 @@ Considered and declined for now (owner, 2026-09-29): the freeze replaces direct 
 reconstructed ballistics (feel differs slightly), blocks absolute devices (pens, touch, remote tools)
 and apps that move the pointer, moves a clip every frame, and interferes with mouselook detection.
 The sprite stays the everyday cursor; the real pointer is used only while a shell panel is open.
+
+## Known limitation
+
+While a shell panel is open and Wind is zoomed in, the real pointer is frozen and moved only from
+mouse (relative) raw input. Pens, touch screens and remote-desktop pointers set ABSOLUTE positions,
+which the 1px clip blocks, so they cannot steer the pointer over the panel meanwhile (review of #284,
+2026-09-29; accepted by the owner, mouse-only setup). Zooming out, or closing the panel, restores
+normal behaviour. A possible later fix: skip the freeze when the last pointer input was absolute.
+
+## Review of PR #284 (2026-09-29)
+
+Three sonnet reviewers (state/edge cases, input, performance) plus one adversarial verifier each:
+13 confirmed, 9 distinct, all fixed before merge: a quick-zoom snap-out left the pointer pinned
+(teardown now runs on every session end and only releases our own pin), the public prime flag
+survived a runtime rebuild (tiny pointer on re-zoom), the mouselook gain learner learned from
+Wind-driven motion, the repaint nudge was a same-position no-op, a panel open at startup was
+missed, and a leftover publish retry from the rejected hook design was removed.

@@ -777,6 +777,20 @@ static wind::CursorBody CurrentCursorBody(TickState& t) {
     return t.cursorBody;
 }
 
+// Leave the shell-panel freeze (#283): stop cooking and give the saved clip back. Runs from the
+// in-session exit AND the active -> idle teardown: a quick-zoom snap-out drops the level from ~10x to
+// 1x in one tick, skipping the in-session branch, which left the pointer pinned to one pixel (review
+// #284). The clip is restored only while it is still our 1px pin: anything that took the clip since
+// (a game, Inspect, another tool) wins, and a stale snapshot is never forced back over it.
+static void EndPanelFreeze(TickState& t) {
+    if (!t.panelFreeze) return;
+    g_input.state().cookActive.store(false);
+    RECT cur{};
+    if (GetClipCursor(&cur) && cur.right - cur.left <= 1 && cur.bottom - cur.top <= 1)
+        ClipCursor(&t.panelSavedClip);
+    t.panelFreeze = false;
+}
+
 static void RunTick(TickState& t) {
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
@@ -1385,7 +1399,8 @@ static void RunTick(TickState& t) {
                 // rawDx/rawDy went in, curDx/curDy came out - so teach the learner the REAL
                 // ballistics at this speed. Gated on no confining clip: a clamped cursor
                 // under-reports output and would teach a too-low gain.
-                if (!clipConfined && (std::abs(rawDx) + std::abs(rawDy)) >= wind::GainLearner::kMinCounts) {
+                // Not during the shell-panel freeze: the pointer moves only by Wind then (review #284).
+            if (!clipConfined && !t.panelFreeze && (std::abs(rawDx) + std::abs(rawDy)) >= wind::GainLearner::kMinCounts) {
                     const double dtMs_ = dt * 1000.0;
                     const double inC  = std::sqrt((double)rawDx * rawDx + (double)rawDy * rawDy);
                     const double outC = std::sqrt((double)curDx * curDx + (double)curDy * curDy);
@@ -1491,9 +1506,7 @@ static void RunTick(TickState& t) {
             g_input.state().cookActive.store(true);
             t.panelFreeze = true;
         } else if (!panel && t.panelFreeze) {
-            g_input.state().cookActive.store(false);
-            ClipCursor(&t.panelSavedClip);                          // this rig keeps a work-area clip
-            t.panelFreeze = false;
+            EndPanelFreeze(t);                                      // this rig keeps a work-area clip
         }
         if (panel) {
             double cdx, cdy; g_input.drainCooked(cdx, cdy);
@@ -2104,6 +2117,7 @@ static void RunTick(TickState& t) {
             }
         }
     } else if (t.prevActive) {                        // active -> idle: tear the overlay down
+        EndPanelFreeze(t);                            // #283: never leave the pointer pinned (review #284)
         if (t.restAfterReveal) { t.restAfterReveal->setActive(false); t.restAfterReveal = nullptr; }
         t.model->setActive(false);
         SetSystemCursorHidden(t, t.model, false);
