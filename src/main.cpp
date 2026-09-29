@@ -826,7 +826,7 @@ static void UpdateCursorTint(TickState& t) {
     const bool magnify = t.model && t.model->selfDrivenZoom();
     const wind::ColorMatrix enc = magnify ? wind::IdentityColorMatrix()
         : wind::BuildColorMatrix(t.cfg.colorWarmPct / 100.0, t.cfg.colorDimPct / 100.0, false);
-    if (wind::IsIdentity(enc)) { g_tint.restore(); return; }
+    if (wind::IsIdentity(enc)) { g_tint.restore(true); return; }
     static unsigned long long checkedMs = 0;
     static bool fsApp = false;
     const unsigned long long now = GetTickCount64();
@@ -835,7 +835,7 @@ static void UpdateCursorTint(TickState& t) {
         const HWND fg = GetForegroundWindow();
         fsApp = ForegroundCoversMonitor(t.mon) && !IsShellDesktopFg(fg);
     }
-    if (fsApp) g_tint.restore();
+    if (fsApp) g_tint.restore(true);
     else g_tint.apply(enc);
 }
 
@@ -1177,7 +1177,7 @@ static void RunTick(TickState& t) {
             // Pristine pointers back BEFORE any engine hides or captures the pointer: the transform
             // sprite and the render engine draw the real shape and filter it themselves, so a
             // tinted source would be tinted twice (#288). Direct swaps, no scheme reload.
-            g_tint.restore();
+            g_tint.restore(false);
             t.outlineIdleSec = 0.0;   // each activation starts with the outline fully shown
             // Follow the cursor's monitor (multiMonitor on, only when zoomed). Only reconfigure when
             // it actually changed; retarget() returns false on multi-GPU/failure, in which case we keep
@@ -3109,7 +3109,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     UnregisterHotKey(hwnd, kQuickZoomHotkeyId);
     EndGameInspect(ts);  // quitting mid-game-inspect hands foreground back to the game
     g_color.shutdown();  // colour filter back to identity while the runtime still lives (#288)
-    g_tint.restore();    // pristine pointers (the exit scheme reload below heals them too)
+    g_tint.restore(true);   // the user's own pointers back (the exit scheme reload heals them too)
     model->shutdown();   // restores cursor + tears down D3D/overlay
     // Hybrid holds TWO models; quitting while zoomed in (or shortly after) a transform session
     // left the transform half's magnification context + cursor state untouched without this.

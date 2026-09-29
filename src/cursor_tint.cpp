@@ -101,7 +101,7 @@ static HCURSOR BuildTinted(HCURSOR src, const ColorMatrix& m) {
 }
 
 void CursorTint::apply(const ColorMatrix& m) {
-    if (IsIdentity(m)) { restore(); return; }
+    if (IsIdentity(m)) { restore(true); return; }
     if (applied_ && SameMatrix(m, current_)) return;
     LARGE_INTEGER t0; QueryPerformanceCounter(&t0);
     int done = 0;
@@ -116,16 +116,21 @@ void CursorTint::apply(const ColorMatrix& m) {
     wind::Log(wind::LogLevel::Info, "color", "pointer tint applied (%d pointers, %.1f ms)", done, MsSince(t0));
 }
 
-void CursorTint::restore() {
+void CursorTint::restore(bool reloadScheme) {
     if (!applied_) return;
     LARGE_INTEGER t0; QueryPerformanceCounter(&t0);
-    for (int i = 0; i < kCount; ++i) {
-        if (!pristine_[i] || IsAnimatedId(kIds[i])) continue;
-        HCURSOR copy = CopyCursor(pristine_[i]);
-        if (copy && !SetSystemCursor(copy, kIds[i])) DestroyCursor(copy);
+    if (reloadScheme) {
+        SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, 0);   // no broadcast: nothing else needs telling
+    } else {
+        for (int i = 0; i < kCount; ++i) {
+            if (!pristine_[i] || IsAnimatedId(kIds[i])) continue;
+            HCURSOR copy = CopyCursor(pristine_[i]);
+            if (copy && !SetSystemCursor(copy, kIds[i])) DestroyCursor(copy);
+        }
     }
     applied_ = false;
-    wind::Log(wind::LogLevel::Info, "color", "pointer tint restored (%.1f ms)", MsSince(t0));
+    wind::Log(wind::LogLevel::Info, "color", "pointer tint restored (%s, %.1f ms)",
+              reloadScheme ? "scheme reload" : "direct swap", MsSince(t0));
 }
 
 }  // namespace wind
