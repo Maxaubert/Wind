@@ -37,10 +37,9 @@
 #include "edge_pan.h"        // mouse edge mode (issue #276 phase 2)
 #include "cursor_decode.h"   // edge mode measures the cursor body
 #include "focus_track.h"     // tracking: caret/focus watcher thread
-#include "tray.h"
+#include "tray_host.h"     // WindTray.exe owns the icon and menu (#291)
 #include "gain_learner.h"  // learned pointer ballistics: locked pan at TRUE desktop speed
-#include "tray_status.h"   // the tray menu's status snapshot
-#include "tick_stats.h"    // frame-pacing ring the tray sparkline draws from
+#include "tray_ipc.h"      // the status block shared with WindTray.exe
 
 // txPace=2 composite signal (see config.h). One thread blocks in DwmFlush forever and pulses an
 // auto-reset event per real composite; the pacing loop waits on the event WITH A TIMEOUT, so a
@@ -791,6 +790,10 @@ static void EndPanelFreeze(TickState& t) {
     t.panelFreeze = false;
 }
 
+// The status block WindTray.exe reads (tray_ipc.h). Null if the mapping failed: every accessor
+// treats null as "no tray data", so the tick path needs no extra branch beyond the pointer test.
+static wind::TrayShared* g_trayBlock = nullptr;
+
 static void RunTick(TickState& t) {
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
@@ -798,7 +801,7 @@ static void RunTick(TickState& t) {
     t.prev = now;
     // One float store per tick, for the tray's frame-pacing readout. Deliberately the cheapest
     // possible coupling to the hot path: no lock, no allocation, and nothing reads it here.
-    wind::Ticks().push((float)(dt * 1000.0));
+    if (g_trayBlock) g_trayBlock->ticks.push((float)(dt * 1000.0));
 
     // Config hot-reload. A directory-change notification tells us WHEN to re-check magnifier.ini,
     // so the idle render thread does NO per-second filesystem stat (the old 1 Hz GetFileAttributesExW
@@ -1099,8 +1102,8 @@ static void RunTick(TickState& t) {
     }
     double lvl = t.zoom.level();
     {
-        // Snapshot for the tray menu, published every tick and read (cross-thread, relaxed
-        // atomics) when the menu opens - always current at the moment it is shown. "Advanced" is
+        // Snapshot for the tray menu, published every tick into the shared block and read by
+        // WindTray.exe (relaxed atomics) while its menu is open. "Advanced" is
         // the hybrid model: the mode that picks an engine per window type; renamed from "Auto"
         // because Auto undersold what it does.
         wind::TrayStatus ts_;
@@ -1111,7 +1114,7 @@ static void RunTick(TickState& t) {
                    : mdl == "magnify"   ? wind::TrayEngine::System
                                         : wind::TrayEngine::Advanced;
         ts_.panning = lvl > 1.001;
-        wind::PublishTrayStatus(ts_);
+        wind::PublishTrayStatus(g_trayBlock, ts_);
     }
 
     int rawDx, rawDy; g_input.drainRaw(rawDx, rawDy);
@@ -1885,11 +1888,12 @@ static void RunTick(TickState& t) {
         const bool quiesceHold = QuiesceHoldActive(t);
         ex.pauseWrites = t.clickPauseTicks > 0 || quiesceHold;
         if (quiesceHold) ex.suppressCursorSync = true;
-        // Our own menu is open: the pointer belongs to the USER (they are aiming at menu items),
+        // Our tray menu is open (in WindTray.exe, flagged through the shared block): the pointer
+        // belongs to the USER (they are aiming at menu items),
         // so the weld must not re-park it - at full tick rate it pins the cursor outright
         // (field-reported as a frozen cursor the moment the tray opened). The view keeps panning;
         // only the cursor re-park is suspended, exactly like drag-follow during a button hold.
-        if (wind::Tray::MenuOpen()) ex.suppressCursorSync = true;
+        if (wind::TrayMenuOpen(g_trayBlock)) ex.suppressCursorSync = true;
         if (t.clickPauseTicks > 0) --t.clickPauseTicks;
         if (inspect) {
             if (t.clickReleaseTicks > 0) {
@@ -2394,7 +2398,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         return 0;
     }
-    if (Tray::HandleMessage(hwnd, msg, wp, lp)) return 0;
+    if (msg == WM_CLOSE)   { DestroyWindow(hwnd); return 0; }
+    if (msg == WM_DESTROY) { PostQuitMessage(0); return 0; }
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
@@ -2655,7 +2660,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // only on Inspect entry). The LOCKED path no longer models ballistics at all - it replays the
     // learned desktop gain instead (gain_learner.h).
     g_input.setBallistics(ReadMouseBallistics());
-    Tray::Add(hwnd, hInst);
+    // The tray icon and menu live in WindTray.exe (issue #291): a UIAccess process's menu stacks
+    // above the cursor and the Snipping Tool overlay, an ordinary process's menu does not.
+    g_trayBlock = wind::TrayHost::Start(exePath);
 
     TickState ts(model.get(), startupMon, cfg);
     ts.mRender = model.get();
@@ -2702,7 +2709,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         if (model2) model2->shutdown();
         g_input.stop();
         g_track.stop();
-        Tray::Remove();
+        wind::TrayHost::Stop();
         ReleaseMutex(mtx);
         return 0;
     }
@@ -2749,7 +2756,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         if (model2) model2->shutdown();
         g_input.stop();
         g_track.stop();
-        Tray::Remove();
+        wind::TrayHost::Stop();
         ReleaseMutex(mtx);
         return 0;
     }
@@ -3057,7 +3064,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         ts.gainLearner.serialize(buf, (int)sizeof(buf));
         wind::WriteTextFileAtomic(wind::ResolveLogDir() + L"/learned_gain.txt", buf);  // Win32 accepts '/'
     }
-    Tray::Remove();
+    wind::TrayHost::Stop();
     if (mtx) { ReleaseMutex(mtx); CloseHandle(mtx); }
     wind::LogShutdown();
     return 0;
