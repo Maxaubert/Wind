@@ -51,3 +51,28 @@ TEST_CASE("oversized rect aligns top-left") {
     REQUIRE(TrackTargetCenter({1000, 1000, 3000, 1020}, 1920, 1080, 4, 3840, 2160, 1, 15, cx, cy));
     CHECK(cx == doctest::Approx(1000 - 0.15 * 960 + 480));
 }
+
+TEST_CASE("spring: settles ~95% of a step in glideMs, never overshoots, same at any tick rate") {
+    const double dts[] = { 4.0, 6.94, 16.7 };
+    for (double dt : dts) {
+        double x = 0, v = 0, peak = 0;
+        for (double t = 0; t < 150.0 - 1e-9; t += dt) { x = SpringToward(x, 100, v, dt, 150); if (x > peak) peak = x; }
+        CHECK(x > 90); CHECK(x < 99);
+        for (int i = 0; i < 400; ++i) { x = SpringToward(x, 100, v, dt, 150); if (x > peak) peak = x; }
+        CHECK(peak <= 100.0 + 1e-6);
+        CHECK(x == doctest::Approx(100).epsilon(1e-3));
+    }
+}
+TEST_CASE("spring: steady typing becomes a steady glide (velocity carries across retargets)") {
+    double x = 0, v = 0, target = 0;
+    for (int k = 0; k < 20; ++k) {           // a keystroke every 120 ms, 10 px each
+        target += 10;
+        for (int i = 0; i < 17; ++i) x = SpringToward(x, target, v, 7, 150);
+    }
+    INFO("v=" << v << " lag=" << (target - x));
+    CHECK(v > 20);                            // still moving between keys: not stop-start
+    CHECK(target - x < 25);                   // and within ~2.5 characters of the caret
+}
+TEST_CASE("spring: glideMs 0 snaps and clears velocity") {
+    double v = 5; CHECK(SpringToward(3, 9, v, 7, 0) == 9); CHECK(v == 0);
+}

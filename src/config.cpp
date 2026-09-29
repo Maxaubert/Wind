@@ -185,6 +185,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "trackAlign")         c.trackAlign = std::stoi(val);
             else if (key == "mouseAlign")         c.mouseAlign = std::stoi(val);
             else if (key == "trackGlideMs")       c.trackGlideMs = std::stoi(val);
+            else if (key == "trackGlideMode")     c.trackGlideMode = std::stoi(val);
             else if (key == "trackMarginPct")     c.trackMarginPct = std::stoi(val);
             else if (key == "mouseMarginPct")     c.mouseMarginPct = std::stoi(val);
             else if (key == "trackLog")           c.trackLog = std::stoi(val);

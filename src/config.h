@@ -153,6 +153,7 @@ struct Config {
     int mouseAlign = 0;      // mouse: 0 = centred (today), 1 = within the edges (phase 2)
     int trackGlideMs = 150;  // glide time to 95% of the distance
     int trackMarginPct = 15; // within-edges margin, % of the view on each side
+    int trackGlideMode = 0;  // hidden A/B knob: 0 = exponential ease, 1 = spring (carries velocity)
     int mouseMarginPct = 0;  // mouse edge mode (mouseAlign=1): how close to the view edge the pointer may go
     int trackLog = 0;        // hidden: log every resolved caret/focus event with its source
     // Hidden test knob (not in the template or the UI): 1 leaves the transform cursor visible to

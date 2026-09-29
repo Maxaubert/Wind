@@ -294,6 +294,7 @@ struct TickState {
     wind::ViewOwnerState viewOwner;
     double viewCx = 0.0, viewCy = 0.0;
     bool   viewDetached = false;   // last tick drew a detached frame
+    double viewVx = 0, viewVy = 0; // tracking spring velocity (trackGlideMode=1)
     HCURSOR bodyCursor = nullptr;  // edge mode: the cursor cursorBody was measured from
     wind::CursorBody cursorBody;   // its visible body around the hotspot (desktop px)
     unsigned long long lastButtonMs = 0;   // last tick a mouse button was down (click quiet period)
@@ -1519,8 +1520,14 @@ static void RunTick(TickState& t) {
                 double ox, oy;
                 if (wind::TrackTargetCenter(rc, t.viewCx, t.viewCy, lvl, t.mon.w, t.mon.h,
                                             t.cfg.trackAlign, t.cfg.trackMarginPct, ox, oy)) { tx = ox; ty = oy; }
-                t.viewCx = wind::GlideToward(t.viewCx, tx, vi.dtMs, t.cfg.trackGlideMs);
-                t.viewCy = wind::GlideToward(t.viewCy, ty, vi.dtMs, t.cfg.trackGlideMs);
+                if (was == wind::ViewOwner::Mouse) { t.viewVx = 0; t.viewVy = 0; }
+                if (t.cfg.trackGlideMode == 1) {
+                    t.viewCx = wind::SpringToward(t.viewCx, tx, t.viewVx, vi.dtMs, t.cfg.trackGlideMs);
+                    t.viewCy = wind::SpringToward(t.viewCy, ty, t.viewVy, vi.dtMs, t.cfg.trackGlideMs);
+                } else {
+                    t.viewCx = wind::GlideToward(t.viewCx, tx, vi.dtMs, t.cfg.trackGlideMs);
+                    t.viewCy = wind::GlideToward(t.viewCy, ty, vi.dtMs, t.cfg.trackGlideMs);
+                }
                 r = wind::DetachedMap(t.viewCx, t.viewCy, ptrX, ptrY, lvl, t.mon.w, t.mon.h);
                 t.mapper.reset(t.viewCx, t.viewCy);   // hybrid switches and the next tick start here
                 t.lastSetVirtual = cur;               // measure the next hand motion from here

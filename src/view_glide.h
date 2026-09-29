@@ -12,6 +12,22 @@ inline double GlideToward(double cur, double target, double dtMs, double glideMs
     return target + (cur - target) * keep;
 }
 
+// Critically damped spring (SmoothDamp form, stable at any dt). Unlike GlideToward it CARRIES its
+// velocity across retargets, so a caret stepping one character per keystroke becomes one continuous
+// glide instead of a fresh jolt per key (field ask 2026-09-29: "glide more as you type, never lag").
+// glideMs is matched to GlideToward's: 95% of a step in glideMs (critically damped: ~4.74/omega).
+inline double SpringToward(double cur, double target, double& vel, double dtMs, double glideMs) {
+    if (glideMs <= 0.0) { vel = 0; return target; }
+    if (dtMs <= 0.0) return cur;
+    const double omega = 4.74 / (glideMs / 1000.0), dt = dtMs / 1000.0;
+    const double x = omega * dt;
+    const double decay = 1.0 / (1.0 + x + 0.48 * x * x + 0.235 * x * x * x);
+    const double change = cur - target;
+    const double temp = (vel + omega * change) * dt;
+    vel = (vel - omega * temp) * decay;
+    return target + (change + temp) * decay;
+}
+
 struct TrackRect { double l, t, r, b; };
 
 inline bool TrackTargetCenter(const TrackRect& rc, double curCx, double curCy, double level,
