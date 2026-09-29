@@ -72,6 +72,18 @@ export const sections = [
     { key:'mouseAlign', type:'select', label:'Keep the mouse pointer', desc:'Within the edges: the pointer moves freely and the view only moves when it nears the edge.', options:['0','1'], optionLabels:{ '0':'Centred', '1':'Within the edges' }, def:'0' },
     { key:'mouseMarginPct', type:'slider', label:'Mouse edge margin', desc:'With the pointer kept within the edges: how close it gets to the edge of the view before the view moves.', min:0, max:30, step:1, def:0, unit:'%' },
   ]},
+  // Colour filters (issue #288): one DWM colour matrix (the render engine applies it in its shader).
+  { id:'colour', label:'Colour', icon:'display', desc:'Colour filters for the screen, while zoomed and optionally at normal size.', rows: [
+    { key:'colorFilter', type:'select', label:'Colour filter',
+      desc:'Changes the colours of everything on the screen.',
+      options:['0','1','2','3','4','5','6'],
+      optionLabels:{ '0':'Off', '1':'Invert', '2':'Greyscale', '3':'Warm (orange)', '4':'Yellow on black', '5':'White on blue', '6':'Green on black' },
+      def:'0' },
+    { key:'colorWarmPct', type:'slider', label:'Warm strength', desc:'How orange the Warm filter is.', min:10, max:100, step:5, def:50, unit:'%' },
+    { key:'colorDimPct', type:'slider', label:'Brightness', desc:'Darkens the picture, like turning down a TV. 100% is normal. Works with any filter.', min:20, max:100, step:5, def:100, unit:'%' },
+    { key:'colorAt1x', type:'toggle', label:'Also when not zoomed', desc:'Keep the filter on at normal size too.', def:'1' },
+    { key:'__colorToggle', type:'keybind', label:'Toggle colour filter', desc:'Turns the filter and brightness on and off. Optional.', vkKey:'colorToggleVk', modsKey:'colorToggleMods' },
+  ]},
   { id:'display', label:'Display', icon:'display', desc:'The engine behind the magnified view.', rows: [
     { key:'model', type:'select', label:'Magnifier engine',
       desc:'Auto picks the best engine for the app in front. Restart to switch.',
