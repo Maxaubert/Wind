@@ -46,6 +46,12 @@ static bool IsOwnOrTooltip(HWND h) {
     return wcscmp(cls, L"tooltips_class32") == 0 || wcscmp(cls, L"Xaml_WindowedPopupClass") == 0;
 }
 
+// A Gecko browser window (Firefox and every fork share this class).
+static bool IsGeckoWindow(HWND h) {
+    wchar_t cls[64] = {}; GetClassNameW(h, cls, 64);
+    return wcscmp(cls, L"MozillaWindowClass") == 0;
+}
+
 // Classic Win32 caret of the foreground thread, in screen px. False when there is none.
 static bool Win32Caret(RECT& out) {
     HWND fg = GetForegroundWindow();
@@ -207,9 +213,13 @@ void FocusTracker::run() {
                     if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "caret baseline via %s: %ld,%ld", src, rc.left, rc.top);
                 } else if (!EqualRect(&rc, &lastCaret)) {
                     lastCaret = rc;
-                    // A caret outside its own element is a bad report, not a place to look (Firefox
-                    // in a zoomed iframe, issue #278): the view stays where it is.
-                    if (!CaretInsideElement({ rc.left, rc.top, rc.right, rc.bottom }, { b.left, b.top, b.right, b.bottom })) {
+                    // In a Gecko browser (Firefox, Zen, LibreWolf...: one window class), a caret
+                    // outside its own element is a bad report, not a place to look (a zoomed iframe,
+                    // issue #278; its UIA caret was wrong too, so there is no source to fall back
+                    // to): the view stays where it is. Other apps are unchanged, so no case that
+                    // worked before can lose tracking to this rule.
+                    if (IsGeckoWindow(fg) &&
+                        !CaretInsideElement({ rc.left, rc.top, rc.right, rc.bottom }, { b.left, b.top, b.right, b.bottom })) {
                         if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "caret skipped (outside its element %ld,%ld %ldx%ld) via %s: %ld,%ld",
                                                    b.left, b.top, b.right - b.left, b.bottom - b.top, src, rc.left, rc.top);
                     } else {
