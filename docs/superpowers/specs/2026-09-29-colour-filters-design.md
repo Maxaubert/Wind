@@ -115,7 +115,7 @@ owner may prefer a patch bump), release on merge.
 This supersedes the filter list, the "also when not zoomed" toggle and the hotkey above.
 
 - The feature is two sliders, always applied (zoomed and at 1x): **Warmth** (`colorWarmPct`,
-  0-100, default 0 = off) and **Brightness** (`colorDimPct`, 1-100, default 100). Both neutral = no
+  0-100, default 0 = off) and **Brightness** (`colorDimPct`, 0-100, default 100). Both neutral = no
   colour effect and no held Magnification runtime.
 - Warmth follows the blackbody curve from 6500 K to 1200 K (Night light's range), linear in
   mireds; 100% is about (1, 0.34, 0). The first version (G x 0.75, B x 0.4 at 100%) read as dim pink.

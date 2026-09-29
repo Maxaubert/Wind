@@ -75,7 +75,7 @@ export const sections = [
   // Colour (issue #288): warmth and brightness, one DWM colour matrix (the render engine applies it in its shader).
   { id:'colour', label:'Colour', icon:'display', desc:'Warmth and brightness for the whole screen, zoomed or not.', rows: [
     { key:'colorWarmPct', type:'slider', label:'Warmth', desc:'Makes the screen more orange, like Night light. 0% is off.', min:0, max:100, step:5, def:0, unit:'%' },
-    { key:'colorDimPct', type:'slider', label:'Brightness', desc:'Darkens the picture, like turning down a TV. 100% is normal.', min:1, max:100, step:1, def:100, unit:'%' },
+    { key:'colorDimPct', type:'slider', label:'Brightness', desc:'Darkens the picture, like turning down a TV. 100% is normal.', min:0, max:100, step:1, def:100, unit:'%' },
   ]},
   { id:'display', label:'Display', icon:'display', desc:'The engine behind the magnified view.', rows: [
     { key:'model', type:'select', label:'Magnifier engine',

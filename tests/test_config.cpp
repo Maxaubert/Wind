@@ -508,8 +508,8 @@ TEST_CASE("colour keys: defaults, parse and clamps (#288)") {
     CHECK(d.colorWarmPct == 0); CHECK(d.colorDimPct == 100);
     Config c = ParseConfig("colorWarmPct=80\ncolorDimPct=60\n");
     CHECK(c.colorWarmPct == 80); CHECK(c.colorDimPct == 60);
-    Config x = ParseConfig("colorWarmPct=-4\ncolorDimPct=1\n");
-    CHECK(x.colorWarmPct == 0); CHECK(x.colorDimPct == 1);
+    Config x = ParseConfig("colorWarmPct=-4\ncolorDimPct=-5\n");
+    CHECK(x.colorWarmPct == 0); CHECK(x.colorDimPct == 0);
     CHECK(ParseConfig("colorWarmPct=150\n").colorWarmPct == 100);
     // Keys of the dropped controls are ignored, not errors.
     Config old = ParseConfig("colorFilter=4\ncolorAt1x=0\ncolorToggleVk=67\n");

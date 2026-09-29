@@ -44,57 +44,72 @@ inline bool SameMatrix(const ColorMatrix& a, const ColorMatrix& b) {
     return true;
 }
 
-// Lowest brightness the dim control reaches. Not 0: a black screen with the filter hotkey unbound
-// would look like a dead display.
-inline constexpr double kMinDim01 = 0.01;
+// Lowest brightness the dim control reaches: 0, black (owner request 2026-09-29: 1% was still
+// visible on an OLED). Quitting Wind (Ctrl+Alt+Q) always clears the effect; so does a crash.
+inline constexpr double kMinDim01 = 0.0;
 
-// Channel gains for a blackbody colour temperature, normalised so 6500 K is white (red stays 1
-// below that). Tanner Helland's fit to the CIE blackbody data, accurate to a few percent, which is
-// all a screen tint needs. 1200 K gives about (1, 0.34, 0): the orange of Night light at full.
-inline void KelvinGains(double kelvin, double& r, double& g, double& b) {
-    auto raw = [](double k, double& rr, double& gg, double& bb) {
-        const double t = k / 100.0;
-        rr = t <= 66 ? 1.0 : 329.698727446 * std::pow(t - 60, -0.1332047592) / 255.0;
-        gg = t <= 66 ? (99.4708025861 * std::log(t) - 161.1195681661) / 255.0
-                     : 288.1221695283 * std::pow(t - 60, -0.0755148492) / 255.0;
-        bb = t >= 66 ? 1.0 : t <= 19 ? 0.0 : (138.5177312231 * std::log(t - 10) - 305.0447927307) / 255.0;
-        auto c01 = [](double v) { return v < 0 ? 0.0 : (v > 1 ? 1.0 : v); };
-        rr = c01(rr); gg = c01(gg); bb = c01(bb);
-    };
-    double wr, wg, wb, cr, cg, cb;
-    raw(6500.0, wr, wg, wb);
-    raw(kelvin, cr, cg, cb);
-    r = cr / wr; g = cg / wg; b = cb / wb;
-    if (r > 1) r = 1;
-    if (g > 1) g = 1;
-    if (b > 1) b = 1;
+// Channel gains for a blackbody colour temperature, in LINEAR light, normalised so 6500 K is white
+// and the largest channel is 1. Computed from Planck's law and the CIE 1931 colour-matching functions
+// (Wyman-Sloan-Shirley fit), converted to linear sRGB; 1000 K to 6500 K in 100 K steps.
+inline constexpr float kKelvinGains[][3] = {
+    { 1.0000f, 0.0303f, 0.0000f }, { 1.0000f, 0.0532f, 0.0000f }, { 1.0000f, 0.0774f, 0.0000f }, { 1.0000f, 0.1024f, 0.0000f },
+    { 1.0000f, 0.1279f, 0.0000f }, { 1.0000f, 0.1537f, 0.0000f }, { 1.0000f, 0.1796f, 0.0000f }, { 1.0000f, 0.2055f, 0.0000f },
+    { 1.0000f, 0.2312f, 0.0000f }, { 1.0000f, 0.2567f, 0.0000f }, { 1.0000f, 0.2820f, 0.0077f }, { 1.0000f, 0.3069f, 0.0174f },
+    { 1.0000f, 0.3315f, 0.0283f }, { 1.0000f, 0.3557f, 0.0404f }, { 1.0000f, 0.3794f, 0.0538f }, { 1.0000f, 0.4027f, 0.0682f },
+    { 1.0000f, 0.4256f, 0.0838f }, { 1.0000f, 0.4480f, 0.1004f }, { 1.0000f, 0.4700f, 0.1179f }, { 1.0000f, 0.4915f, 0.1364f },
+    { 1.0000f, 0.5125f, 0.1557f }, { 1.0000f, 0.5331f, 0.1757f }, { 1.0000f, 0.5532f, 0.1965f }, { 1.0000f, 0.5729f, 0.2179f },
+    { 1.0000f, 0.5920f, 0.2400f }, { 1.0000f, 0.6108f, 0.2625f }, { 1.0000f, 0.6291f, 0.2856f }, { 1.0000f, 0.6469f, 0.3091f },
+    { 1.0000f, 0.6643f, 0.3330f }, { 1.0000f, 0.6813f, 0.3572f }, { 1.0000f, 0.6979f, 0.3817f }, { 1.0000f, 0.7140f, 0.4064f },
+    { 1.0000f, 0.7298f, 0.4314f }, { 1.0000f, 0.7451f, 0.4565f }, { 1.0000f, 0.7601f, 0.4818f }, { 1.0000f, 0.7747f, 0.5072f },
+    { 1.0000f, 0.7889f, 0.5326f }, { 1.0000f, 0.8028f, 0.5581f }, { 1.0000f, 0.8163f, 0.5836f }, { 1.0000f, 0.8295f, 0.6091f },
+    { 1.0000f, 0.8423f, 0.6346f }, { 1.0000f, 0.8548f, 0.6599f }, { 1.0000f, 0.8670f, 0.6852f }, { 1.0000f, 0.8789f, 0.7104f },
+    { 1.0000f, 0.8904f, 0.7355f }, { 1.0000f, 0.9017f, 0.7605f }, { 1.0000f, 0.9127f, 0.7853f }, { 1.0000f, 0.9234f, 0.8099f },
+    { 1.0000f, 0.9339f, 0.8344f }, { 1.0000f, 0.9441f, 0.8587f }, { 1.0000f, 0.9540f, 0.8828f }, { 1.0000f, 0.9637f, 0.9067f },
+    { 1.0000f, 0.9731f, 0.9303f }, { 1.0000f, 0.9823f, 0.9538f }, { 1.0000f, 0.9913f, 0.9770f }, { 1.0000f, 1.0000f, 1.0000f }
+};
+inline constexpr int kKelvinMin = 1000, kKelvinStep = 100;
+inline constexpr int kKelvinCount = (int)(sizeof(kKelvinGains) / sizeof(kKelvinGains[0]));
+
+inline void KelvinGainsLinear(double kelvin, double& r, double& g, double& b) {
+    double f = (kelvin - kKelvinMin) / kKelvinStep;
+    if (f < 0) f = 0;
+    if (f > kKelvinCount - 1) f = kKelvinCount - 1;
+    const int i = (int)f;
+    const int j = i + 1 < kKelvinCount ? i + 1 : i;
+    const double t = f - i;
+    r = kKelvinGains[i][0] + (kKelvinGains[j][0] - kKelvinGains[i][0]) * t;
+    g = kKelvinGains[i][1] + (kKelvinGains[j][1] - kKelvinGains[i][1]) * t;
+    b = kKelvinGains[i][2] + (kKelvinGains[j][2] - kKelvinGains[i][2]) * t;
 }
 
-// Warm strength 0..1 -> colour temperature 6500 K..1200 K (Night light's range), linear in mireds
-// so equal slider steps look like equal steps of warmth.
-inline double WarmKelvin(double warm01) {
-    const double m0 = 1e6 / 6500.0, m1 = 1e6 / 1200.0;
-    return 1e6 / (m0 + (m1 - m0) * warm01);
-}
+inline double SrgbEncode(double c) { return c <= 0.0031308 ? 12.92 * c : 1.055 * std::pow(c, 1.0 / 2.4) - 0.055; }
+inline double SrgbDecode(double c) { return c <= 0.04045 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4); }
+
+// Warmth 0..1 -> colour temperature, on Night light's own scale: 0% = 6500 K, 100% = 1200 K,
+// LINEAR in Kelvin (measured 2026-09-29 from its stored setting: 50% = 3850 K).
+inline double WarmKelvin(double warm01) { return 6500.0 - 5300.0 * warm01; }
 
 // The whole colour feature is two controls (owner decision 2026-09-29): warmth and brightness.
 // Invert, greyscale and two-colour tints were dropped: one colour matrix cannot keep multi-coloured
 // text readable (docs/COLOUR-FILTER-FINDINGS.md).
-// warm01: 0..1 (0 = no warmth). dim01: kMinDim01..1 (1 = no dim). Out-of-range values clamp.
+// warm01: 0..1 (0 = no warmth). dim01: 0..1 (1 = no dim, 0 = black). Out-of-range values clamp.
+// linearLight: the matrix acts on LINEAR values. True for the DWM colour effect while Windows HDR is
+// on (measured: it scales scRGB directly); false for SDR DWM and for the render engine's shader,
+// which apply it to sRGB-encoded values. Warmth uses the blackbody gains in the matching space, and
+// brightness is decoded to linear there, so both look the same in SDR and HDR.
 // Both at their neutral ends give the identity, which the controller treats as "off".
-inline ColorMatrix BuildColorMatrix(double warm01, double dim01) {
+inline ColorMatrix BuildColorMatrix(double warm01, double dim01, bool linearLight) {
     auto clamp = [](double v, double lo, double hi) { return v < lo ? lo : (v > hi ? hi : v); };
     warm01 = clamp(warm01, 0.0, 1.0);
     dim01 = clamp(dim01, kMinDim01, 1.0);
     ColorMatrix m = IdentityColorMatrix();
     if (warm01 > 0.0) {
-        // A colour temperature, like Night light: red kept, green and blue cut along the
-        // blackbody curve (a fixed 25%/60% cut read as dim pink, field 2026-09-29).
-        double r, g, b;
-        KelvinGains(WarmKelvin(warm01), r, g, b);
-        m.m[0][0] = (float)r; m.m[1][1] = (float)g; m.m[2][2] = (float)b;
+        double g[3];
+        KelvinGainsLinear(WarmKelvin(warm01), g[0], g[1], g[2]);
+        for (int i = 0; i < 3; ++i) m.m[i][i] = (float)(linearLight ? g[i] : SrgbEncode(g[i]));
     }
-    for (int i = 0; i < 3; ++i) m.m[i][i] = (float)(m.m[i][i] * dim01);   // dim composes last
+    const double d = linearLight ? SrgbDecode(dim01) : dim01;
+    for (int i = 0; i < 3; ++i) m.m[i][i] = (float)(m.m[i][i] * d);   // dim composes last
     return m;
 }
 

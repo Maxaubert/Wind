@@ -26,7 +26,8 @@
 #pragma comment(lib, "Dwmapi.lib")
 #include "render_engine.h"
 #include "render_model.h"
-#include "color_filter.h"   // issue #288
+#include "color_filter.h"
+#include "hdr_info.h"   // issue #288
 #include "magnify_model.h"
 #include "transform_model.h"
 #include "input_router.h"
@@ -798,15 +799,20 @@ static void EndPanelFreeze(TickState& t) {
 // calling this every tick costs a compare when nothing changed, and holds a runtime only while a
 // filter is on.
 static wind::ColorFilterController g_color;
+// Windows HDR on? Under HDR the DWM colour effect scales LINEAR scRGB (measured 2026-09-29), so the
+// matrix must be built for linear light there. Read at startup and on WM_DISPLAYCHANGE (toggling HDR
+// changes the display mode), never per tick: it is a DisplayConfig query.
+static std::atomic<bool> g_hdrOn{false};
 static void UpdateColorFilter(TickState& t, bool zoomedNow, bool renderSession, PresentExtras* ex) {
     const bool magnify = t.model && t.model->selfDrivenZoom();   // native Magnifier has its own filters
-    wind::ColorMatrix m = wind::IdentityColorMatrix();
     (void)zoomedNow;   // applies zoomed and at 1x alike (owner decision 2026-09-29)
-    if (!magnify)
-        m = wind::BuildColorMatrix(t.cfg.colorWarmPct / 100.0, t.cfg.colorDimPct / 100.0);
-    const bool inShader = renderSession && !wind::IsIdentity(m);
-    if (ex) { ex->colorOn = inShader; ex->color = m; }
-    const wind::ColorMatrix dwm = inShader ? wind::IdentityColorMatrix() : m;
+    const double w = t.cfg.colorWarmPct / 100.0, d = t.cfg.colorDimPct / 100.0;
+    // The render shader works on sRGB-encoded values (after its HDR->SDR step), in SDR and HDR alike.
+    const wind::ColorMatrix enc = magnify ? wind::IdentityColorMatrix() : wind::BuildColorMatrix(w, d, false);
+    const bool inShader = renderSession && !wind::IsIdentity(enc);
+    if (ex) { ex->colorOn = inShader; ex->color = enc; }
+    const wind::ColorMatrix dwm = (inShader || magnify) ? wind::IdentityColorMatrix()
+                                                        : wind::BuildColorMatrix(w, d, g_hdrOn.load(std::memory_order_relaxed));
     g_color.apply(dwm, !wind::IsIdentity(dwm));
 }
 
@@ -2339,6 +2345,7 @@ static void RegisterQuickZoomHotkey(HWND hwnd, int vk, int mods) {
 }
 
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_DISPLAYCHANGE) g_hdrOn.store(wind::GetHdrEnabled(nullptr));   // colour space (#288); falls through
     if (msg == WM_HOTKEY && wp == kQuitHotkeyId) { PostQuitMessage(0); return 0; }
     if (msg == WM_HOTKEY && wp == kHideCursorHotkeyId) {
         if (g_tick) g_tick->cursorHidden = !g_tick->cursorHidden;
@@ -2597,6 +2604,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // Safety: global Ctrl+Alt+Q quits cleanly from anywhere (works even with the overlay up
     // and the cursor hidden). If the combo is already taken, the tray Quit still works.
     RegisterHotKey(hwnd, kQuitHotkeyId, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'Q');
+    g_hdrOn.store(wind::GetHdrEnabled(nullptr));   // colour filter space (#288), refreshed on WM_DISPLAYCHANGE
     RegisterHideCursorHotkey(hwnd, cfg.hideCursorVk, cfg.hideCursorMods);
     RegisterQuickZoomHotkey(hwnd, (cfg.quickZoomHotkeyMode && cfg.quickZoomVk) ? cfg.quickZoomVk : 0,
                             cfg.quickZoomMods);
