@@ -503,14 +503,15 @@ TEST_CASE("tracking settings: defaults and parsing (issue #276)") {
     CHECK(c.trackLog == 1);
 }
 
-TEST_CASE("colour filter keys: defaults, parse and clamps (#288)") {
+TEST_CASE("colour keys: defaults, parse and clamps (#288)") {
     Config d = ParseConfig("");
-    CHECK(d.colorFilter == 0); CHECK(d.colorWarmPct == 50); CHECK(d.colorDimPct == 100); CHECK(d.colorAt1x == 1);
-    CHECK(d.colorToggleVk == 0);
-    Config c = ParseConfig("colorFilter=1\ncolorWarmPct=80\ncolorDimPct=60\ncolorAt1x=0\ncolorToggleVk=67\ncolorToggleMods=3\n");
-    CHECK(c.colorFilter == 1); CHECK(c.colorWarmPct == 80); CHECK(c.colorDimPct == 60); CHECK(c.colorAt1x == 0);
-    CHECK(c.colorToggleVk == 67); CHECK(c.colorToggleMods == 3);
-    Config x = ParseConfig("colorFilter=42\ncolorWarmPct=0\ncolorDimPct=1\ncolorToggleVk=1\n");
-    CHECK(x.colorFilter == 6); CHECK(x.colorWarmPct == 10); CHECK(x.colorDimPct == 5);
-    CHECK(x.colorToggleVk == 0);   // left click is a forbidden bind
+    CHECK(d.colorWarmPct == 0); CHECK(d.colorDimPct == 100);
+    Config c = ParseConfig("colorWarmPct=80\ncolorDimPct=60\n");
+    CHECK(c.colorWarmPct == 80); CHECK(c.colorDimPct == 60);
+    Config x = ParseConfig("colorWarmPct=-4\ncolorDimPct=1\n");
+    CHECK(x.colorWarmPct == 0); CHECK(x.colorDimPct == 5);
+    CHECK(ParseConfig("colorWarmPct=150\n").colorWarmPct == 100);
+    // Keys of the dropped controls are ignored, not errors.
+    Config old = ParseConfig("colorFilter=4\ncolorAt1x=0\ncolorToggleVk=67\n");
+    CHECK(old.colorWarmPct == 0); CHECK(old.colorDimPct == 100);
 }

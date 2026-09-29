@@ -169,12 +169,8 @@ Config ParseConfig(const std::string& text) {
             else if (key == "sharpness")          c.sharpness = std::stod(val);
             else if (key == "zorderBand")         c.zorderBand = std::stoi(val);
             else if (key == "brightness")         c.brightness = std::stod(val);
-            else if (key == "colorFilter")        c.colorFilter = std::stoi(val);
             else if (key == "colorWarmPct")       c.colorWarmPct = std::stoi(val);
             else if (key == "colorDimPct")        c.colorDimPct = std::stoi(val);
-            else if (key == "colorAt1x")          c.colorAt1x = std::stoi(val);
-            else if (key == "colorToggleVk")      c.colorToggleVk = std::stoi(val);
-            else if (key == "colorToggleMods")    c.colorToggleMods = std::stoi(val);
             else if (key == "hdrTonemap")         c.hdrTonemap = std::stoi(val);
             else if (key == "multiMonitor")       c.multiMonitor = std::stoi(val);
             else if (key == "cropCapture")        c.cropCapture = std::stoi(val);
@@ -256,8 +252,7 @@ Config ParseConfig(const std::string& text) {
     c.cursorSmoothing = clampd(c.cursorSmoothing, 0.0, 0.95);
     c.sharpness       = clampd(c.sharpness,       0.0, 1.0);
     c.brightness      = clampd(c.brightness,      0.5, 1.5);
-    c.colorFilter     = (int)clampd(c.colorFilter, 0, 6);
-    c.colorWarmPct    = (int)clampd(c.colorWarmPct, 10, 100);
+    c.colorWarmPct    = (int)clampd(c.colorWarmPct, 0, 100);
     c.colorDimPct     = (int)clampd(c.colorDimPct, 5, 100);
     c.quickZoomDefault  = clampd(c.quickZoomDefault, 1.0, 50.0);
     if (c.outlineThickness < 1)  c.outlineThickness = 1;
@@ -322,7 +317,6 @@ Config ParseConfig(const std::string& text) {
     sanitizeVk(c.recenterVk);
     sanitizeVk(c.cursorLockVk);
     sanitizeVk(c.hideCursorVk);
-    sanitizeVk(c.colorToggleVk);
     sanitizeVk(c.quickZoomVk);
     return c;
 }
@@ -450,14 +444,9 @@ std::string DefaultIniText() {
                "mouseMarginPct=0\n"
                "; brightness: magnified-view output multiplier (1.0=unchanged; fine-tune for HDR)\n"
                "brightness=1.0\n"
-               "; colorFilter: 0 off, 1 invert, 2 greyscale, 3 warm, 4 yellow on black, 5 white on blue, 6 green on black\n"
-               "colorFilter=0\n"
-               "; colorWarmPct: Warm strength (10-100); colorDimPct: artificial brightness (5-100, 100 = normal)\n"
-               "colorWarmPct=50\n"
+               "; colorWarmPct: screen warmth like Night light (0-100, 0 = off); colorDimPct: artificial brightness (5-100, 100 = normal)\n"
+               "colorWarmPct=0\n"
                "colorDimPct=100\n"
-               "; colorAt1x: 1 = filter also when not zoomed; colorToggleVk/Mods: optional on/off hotkey\n"
-               "colorAt1x=1\n"
-               "colorToggleVk=0\ncolorToggleMods=0\n"
                "; hdrTonemap: 1=HDR10->SDR tonemap when Windows HDR is on (no-op on SDR); 0=off\n"
                "hdrTonemap=1\n"
                "; model: hybrid = Auto (default): picks render or transform per zoom-in (games get\n"

@@ -496,12 +496,9 @@ struct Config {
     // Output brightness multiplier for the magnified view. 1.0 = unchanged. Hot-reloadable.
     double brightness = 1.0;
     // Colour filters (issue #288): a DWM colour matrix (render engine: its pixel shader).
-    int colorFilter = 0;      // 0 off, 1 invert, 2 greyscale, 3 warm, 4 yellow on black, 5 white on blue, 6 green on black
-    int colorWarmPct = 50;    // Warm strength, 10..100
-    int colorDimPct = 100;    // artificial brightness, 20..100 (100 = no dim); composes with any filter
-    int colorAt1x = 1;        // also apply when not zoomed (holds a magnification context while on)
-    int colorToggleVk = 0;    // optional hotkey that flips the filter on/off (0 = none)
-    int colorToggleMods = 0;
+    // Two controls, always applied (zoomed or not): warmth and brightness. Both neutral = off.
+    int colorWarmPct = 0;     // warmth 0..100 (0 = off, 100 = 1200 K like Night light at full)
+    int colorDimPct = 100;    // artificial brightness 5..100 (100 = no dim)
     // HDR->SDR tonemap. Only engages when Windows HDR is actually on (advancedColorEnabled);
     // on SDR it's a no-op (plain BGRA8 passthrough), so it's safe on by default. Set 0 to
     // force the legacy BGRA8 capture even on HDR. Applied at startup + on HDR toggle.

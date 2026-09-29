@@ -109,3 +109,17 @@ shader instead (the shader already has a brightness stage, `render_shaders.h`).
 
 One PR: issue #288 -> `feat/288-colour-filters`, version bump inside the PR (0.12.0 as a feature;
 owner may prefer a patch bump), release on merge.
+
+## Amendment: two sliders only (owner field test, 2026-09-29)
+
+This supersedes the filter list, the "also when not zoomed" toggle and the hotkey above.
+
+- The feature is two sliders, always applied (zoomed and at 1x): **Warmth** (`colorWarmPct`,
+  0-100, default 0 = off) and **Brightness** (`colorDimPct`, 5-100, default 100). Both neutral = no
+  colour effect and no held Magnification runtime.
+- Warmth follows the blackbody curve from 6500 K to 1200 K (Night light's range), linear in
+  mireds; 100% is about (1, 0.34, 0). The first version (G x 0.75, B x 0.4 at 100%) read as dim pink.
+- Brightness floor 5% (`kMinDim01`; not 0, a black screen looks like a dead display).
+- Removed: Invert, Greyscale, the two-colour tints, `colorAt1x`, the toggle hotkey
+  (`colorFilter`, `colorAt1x`, `colorToggleVk/Mods` in an old ini are ignored). Why: a single
+  colour matrix cannot keep multi-coloured text readable, see `docs/COLOUR-FILTER-FINDINGS.md`.

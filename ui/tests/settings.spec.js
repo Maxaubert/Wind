@@ -535,21 +535,11 @@ test('Mouse edge margin: a slider in the Tracking section, 0% by default (issue 
   await expect(row).toContainText('0');
 });
 
-test('Colour section: choosing Invert writes colorFilter=1 (issue #288)', async ({ page }) => {
+test('Colour section: only the warmth and brightness sliders, neutral by default (issue #288)', async ({ page }) => {
   await page.goto('/');
-  const row = page.getByText('Colour filter', { exact: true }).locator('xpath=../..');
-  await expect(row.getByRole('combobox')).toContainText('Off');
-  await row.getByRole('combobox').click();
-  await page.getByRole('option', { name: 'Invert' }).click();
-  await page.getByRole('button', { name: 'Apply' }).click();
-  const sets = await page.evaluate(() => window.__sets.filter(m => m.type === 'setConfig' && m.key === 'colorFilter'));
-  expect(sets.at(-1).value).toBe('1');
-});
-
-test('Colour section: brightness and warm sliders, the 1x toggle and the hotkey row render (issue #288)', async ({ page }) => {
-  await page.goto('/');
-  for (const label of ['Warm strength', 'Brightness', 'Also when not zoomed', 'Toggle colour filter']) {
-    await expect(page.getByText(label, { exact: true })).toBeVisible();
-  }
+  await expect(page.getByText('Warmth', { exact: true }).locator('xpath=../..')).toContainText('0');
   await expect(page.getByText('Brightness', { exact: true }).locator('xpath=../..')).toContainText('100');
+  for (const gone of ['Colour filter', 'Also when not zoomed', 'Toggle colour filter']) {
+    await expect(page.getByText(gone, { exact: true })).toHaveCount(0);
+  }
 });

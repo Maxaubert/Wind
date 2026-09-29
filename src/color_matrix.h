@@ -8,8 +8,6 @@
 #include <cmath>
 namespace wind {
 
-enum class ColorFilter { Off = 0, Invert, Greyscale, Warm, YellowOnBlack, WhiteOnBlue, GreenOnBlack };
-
 struct ColorMatrix { float m[5][5]; };
 
 inline ColorMatrix IdentityColorMatrix() {
@@ -79,49 +77,24 @@ inline double WarmKelvin(double warm01) {
     return 1e6 / (m0 + (m1 - m0) * warm01);
 }
 
-// warm01: Warm strength 0..1. dim01: brightness kMinDim01..1 (1 = no dim). Out-of-range values clamp.
-inline ColorMatrix BuildColorMatrix(ColorFilter f, double warm01, double dim01) {
+// The whole colour feature is two controls (owner decision 2026-09-29): warmth and brightness.
+// Invert, greyscale and two-colour tints were dropped: one colour matrix cannot keep multi-coloured
+// text readable (docs/COLOUR-FILTER-FINDINGS.md).
+// warm01: 0..1 (0 = no warmth). dim01: kMinDim01..1 (1 = no dim). Out-of-range values clamp.
+// Both at their neutral ends give the identity, which the controller treats as "off".
+inline ColorMatrix BuildColorMatrix(double warm01, double dim01) {
     auto clamp = [](double v, double lo, double hi) { return v < lo ? lo : (v > hi ? hi : v); };
     warm01 = clamp(warm01, 0.0, 1.0);
     dim01 = clamp(dim01, kMinDim01, 1.0);
-    const double w[3] = { 0.2126, 0.7152, 0.0722 };   // Rec.709 luma
     ColorMatrix m = IdentityColorMatrix();
-    auto twoColour = [&](const double fg[3], const double bg[3]) {
-        // Inverted luma drives the blend, so dark text on a light page becomes fg on bg:
-        // out = bg + (1 - L) (fg - bg) = fg - L (fg - bg).
-        ColorMatrix t = IdentityColorMatrix();
-        for (int j = 0; j < 3; ++j) {
-            for (int i = 0; i < 3; ++i) t.m[i][j] = (float)(-w[i] * (fg[j] - bg[j]));
-            t.m[4][j] = (float)fg[j];
-        }
-        return t;
-    };
-    switch (f) {
-        case ColorFilter::Invert:
-            for (int i = 0; i < 3; ++i) { m.m[i][i] = -1.0f; m.m[4][i] = 1.0f; }
-            break;
-        case ColorFilter::Greyscale:
-            for (int i = 0; i < 3; ++i)
-                for (int j = 0; j < 3; ++j) m.m[i][j] = (float)w[i];
-            break;
-        case ColorFilter::Warm: {
-            // A colour temperature, like Night light: red kept, green and blue cut along the
-            // blackbody curve (the old fixed 25%/60% cut read as dim pink, field 2026-09-29).
-            double r, g, b;
-            KelvinGains(WarmKelvin(warm01), r, g, b);
-            m.m[0][0] = (float)r; m.m[1][1] = (float)g; m.m[2][2] = (float)b;
-            break;
-        }
-        case ColorFilter::YellowOnBlack: { const double fg[3] = { 1, 1, 0 }, bg[3] = { 0, 0, 0 }; m = twoColour(fg, bg); break; }
-        case ColorFilter::WhiteOnBlue:   { const double fg[3] = { 1, 1, 1 }, bg[3] = { 0, 0, 0.5 }; m = twoColour(fg, bg); break; }
-        case ColorFilter::GreenOnBlack:  { const double fg[3] = { 0, 1, 0 }, bg[3] = { 0, 0, 0 }; m = twoColour(fg, bg); break; }
-        default: break;   // Off, or an unknown value from a hand-edited ini
+    if (warm01 > 0.0) {
+        // A colour temperature, like Night light: red kept, green and blue cut along the
+        // blackbody curve (a fixed 25%/60% cut read as dim pink, field 2026-09-29).
+        double r, g, b;
+        KelvinGains(WarmKelvin(warm01), r, g, b);
+        m.m[0][0] = (float)r; m.m[1][1] = (float)g; m.m[2][2] = (float)b;
     }
-    if (dim01 < 1.0) {
-        ColorMatrix d = IdentityColorMatrix();
-        for (int i = 0; i < 3; ++i) d.m[i][i] = (float)dim01;
-        m = Multiply(m, d);   // dim last: out = (in x filter) x dim
-    }
+    for (int i = 0; i < 3; ++i) m.m[i][i] = (float)(m.m[i][i] * dim01);   // dim composes last
     return m;
 }
 
