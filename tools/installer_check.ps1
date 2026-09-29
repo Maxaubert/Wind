@@ -150,6 +150,7 @@ if (-not (Test-Path $setup)) {
     Start-Process $setup -ArgumentList '/S', "/D=$scratch" -Wait
     Check "silent install placed Wind.exe"       { Test-Path (Join-Path $scratch 'Wind.exe') }
     Check "silent install placed WindConfig.exe" { Test-Path (Join-Path $scratch 'WindConfig.exe') }
+    Check "silent install placed WindTray.exe"   { Test-Path (Join-Path $scratch 'WindTray.exe') }
     Check "silent install placed ui\dist"        { Test-Path (Join-Path $scratch 'ui\dist\index.html') }
     # Local signing (issue #261): only when this build packed the uiAccess variant.
     if (Test-Path (Join-Path $root 'WindUA.exe')) {
@@ -178,6 +179,7 @@ if (-not (Test-Path $setup)) {
         Start-Process $uninst -ArgumentList '/S', ('_?=' + $scratch) -Wait
         Start-Sleep -Milliseconds 1200
         Check "uninstall removed Wind.exe"    { -not (Test-Path (Join-Path $scratch 'Wind.exe')) }
+        Check "uninstall removed WindTray.exe" { -not (Test-Path (Join-Path $scratch 'WindTray.exe')) }
         Check "uninstall removed ui\dist"     { -not (Test-Path (Join-Path $scratch 'ui')) }
         Check "uninstall removed the ARP key" { $null -eq (Get-ItemProperty $ARP -ErrorAction SilentlyContinue) }
         Check "uninstall removed every Wind Local Signing root" {

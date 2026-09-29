@@ -111,7 +111,7 @@ if (-not $SkipBuild) {
     Invoke-Build 'config'
 }
 
-foreach ($f in 'Wind.exe', 'WindConfig.exe') {
+foreach ($f in 'Wind.exe', 'WindTray.exe', 'WindConfig.exe') {
     if (-not (Test-Path "$root\$f")) { throw "missing build output: $f" }
 }
 if (-not (Test-Path "$root\ui\dist\index.html")) { throw "missing ui\dist (build.bat config)" }
@@ -121,6 +121,7 @@ if (-not (Test-Path "$root\ui\dist\index.html")) { throw "missing ui\dist (build
 if ($cert) {
     Invoke-Sign "$root\Wind.exe" $cert
     Invoke-Sign "$root\WindConfig.exe" $cert
+    Invoke-Sign "$root\WindTray.exe" $cert
 }
 
 Write-Host "=== compiling the installer ==="
