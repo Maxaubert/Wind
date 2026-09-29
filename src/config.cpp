@@ -435,7 +435,7 @@ std::string DefaultIniText() {
                "; trackMarginPct: within-the-edges margin, percent of the view on each side\n"
                "trackMarginPct=15\n"
                "; mouseMarginPct: mouse edge mode, how close (percent of the view) the pointer gets to the edge before the view moves\n"
-               "mouseMarginPct=5\n"
+               "mouseMarginPct=0\n"
                "; brightness: magnified-view output multiplier (1.0=unchanged; fine-tune for HDR)\n"
                "brightness=1.0\n"
                "; hdrTonemap: 1=HDR10->SDR tonemap when Windows HDR is on (no-op on SDR); 0=off\n"

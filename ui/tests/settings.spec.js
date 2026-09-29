@@ -528,9 +528,9 @@ test('Keep the mouse pointer: centred by default, within the edges writes mouseA
   expect(sets.at(-1).value).toBe('1');
 });
 
-test('Mouse edge margin: a slider in the Tracking section, 5% by default (issue #276)', async ({ page }) => {
+test('Mouse edge margin: a slider in the Tracking section, 0% by default (issue #276)', async ({ page }) => {
   await page.goto('/');
   const row = page.getByText('Mouse edge margin', { exact: true }).locator('xpath=../..');
   await expect(row).toBeVisible();
-  await expect(row).toContainText('5');
+  await expect(row).toContainText('0');
 });

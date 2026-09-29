@@ -70,7 +70,7 @@ export const sections = [
     { key:'trackFocus', type:'toggle', label:'Follow keyboard focus', desc:'When you move with Tab or the arrow keys, the view glides to the selected control.', def:0 },
     { key:'trackAlign', type:'select', label:'Keep the text cursor and focus', options:['0','1'], optionLabels:{ '0':'Centred', '1':'Within the edges' }, def:'0' },
     { key:'mouseAlign', type:'select', label:'Keep the mouse pointer', desc:'Within the edges: the pointer moves freely and the view only moves when it nears the edge.', options:['0','1'], optionLabels:{ '0':'Centred', '1':'Within the edges' }, def:'0' },
-    { key:'mouseMarginPct', type:'slider', label:'Mouse edge margin', desc:'With the pointer kept within the edges: how close it gets to the edge of the view before the view moves.', min:0, max:30, step:1, def:5, unit:'%' },
+    { key:'mouseMarginPct', type:'slider', label:'Mouse edge margin', desc:'With the pointer kept within the edges: how close it gets to the edge of the view before the view moves.', min:0, max:30, step:1, def:0, unit:'%' },
   ]},
   { id:'display', label:'Display', icon:'display', desc:'The engine behind the magnified view.', rows: [
     { key:'model', type:'select', label:'Magnifier engine',

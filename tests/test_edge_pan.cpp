@@ -38,3 +38,24 @@ TEST_CASE("a pointer held against the clip edge or corner is pinned; inside is n
     CHECK_FALSE(PointerPinnedAtEdge(1, 1, 0, 0, 3840, 2160));
     CHECK_FALSE(PointerPinnedAtEdge(1920, 1080, 0, 0, 3840, 2160));
 }
+
+TEST_CASE("the band is measured to the cursor body, so an arrow reaches both edges equally") {
+    // 4x on 3840x2160: view 960x540 centred at 1920,1080 spans x 1440..2400. Arrow body 0 left, 20 right.
+    CursorBody arrow; arrow.r = 20; arrow.b = 30;
+    double cx, cy;
+    EdgePanCenter(1920, 1080, 1440, 1080, 4, 3840, 2160, 0, -1, -1, cx, cy, arrow);   // tip on left edge
+    CHECK(cx == doctest::Approx(1920));
+    EdgePanCenter(1920, 1080, 2380, 1080, 4, 3840, 2160, 0, -1, -1, cx, cy, arrow);   // body on right edge
+    CHECK(cx == doctest::Approx(1920));
+    EdgePanCenter(1920, 1080, 2390, 1080, 4, 3840, 2160, 0, -1, -1, cx, cy, arrow);   // body 10 px past
+    CHECK(cx == doctest::Approx(1930));
+}
+TEST_CASE("CursorBodyFromPixels: opaque bounds relative to the hotspot") {
+    uint32_t px[4 * 4] = {};
+    px[1 * 4 + 1] = 0xFF000000u; px[3 * 4 + 2] = 0xFFFFFFFFu;   // opaque at (1,1) and (2,3)
+    CursorBody b = CursorBodyFromPixels(px, 4, 4, 1, 1);
+    CHECK(b.l == 0); CHECK(b.t == 0); CHECK(b.r == 1); CHECK(b.b == 2);
+    uint32_t none[4] = {};
+    CursorBody z = CursorBodyFromPixels(none, 2, 2, 0, 0);
+    CHECK(z.r == 0); CHECK(z.b == 0);
+}

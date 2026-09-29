@@ -35,6 +35,7 @@
 #include "view_glide.h"      // tracking: glide + target geometry
 #include "detached_view.h"   // tracking: a frame whose view is not centred on the pointer
 #include "edge_pan.h"        // mouse edge mode (issue #276 phase 2)
+#include "cursor_decode.h"   // edge mode measures the cursor body
 #include "focus_track.h"     // tracking: caret/focus watcher thread
 #include "tray.h"
 #include "gain_learner.h"  // learned pointer ballistics: locked pan at TRUE desktop speed
@@ -293,6 +294,8 @@ struct TickState {
     wind::ViewOwnerState viewOwner;
     double viewCx = 0.0, viewCy = 0.0;
     bool   viewDetached = false;   // last tick drew a detached frame
+    HCURSOR bodyCursor = nullptr;  // edge mode: the cursor cursorBody was measured from
+    wind::CursorBody cursorBody;   // its visible body around the hotspot (desktop px)
     unsigned long long lastButtonMs = 0;   // last tick a mouse button was down (click quiet period)
     bool   revealNeedsComposite = false;       // fullscreen-app zoom-in: also require a post-prime
                                                //   composite in the capture before revealing
@@ -756,6 +759,19 @@ static BallisticsConfig ReadMouseBallistics() {
 // Test telemetry (issue #225): the proving-ground harness sets WIND_TESTLOG=<path> and every
 // tick appends one CSV sample. Disabled (one branch per tick) in normal runs.
 static wind::TestTelemetry g_testlog;
+
+// Mouse edge mode: the current cursor's visible body, re-measured only when the cursor changes.
+static wind::CursorBody CurrentCursorBody(TickState& t) {
+    CURSORINFO ci{ sizeof(ci) };
+    if (!GetCursorInfo(&ci) || !ci.hCursor) return wind::CursorBody{};
+    if (ci.hCursor != t.bodyCursor) {
+        std::vector<uint32_t> px; int w = 0, h = 0, hx = 0, hy = 0; bool inv = false;
+        t.cursorBody = wind::DecodeCursorBGRA(ci.hCursor, px, w, h, hx, hy, inv)
+                         ? wind::CursorBodyFromPixels(px.data(), w, h, hx, hy) : wind::CursorBody{};
+        t.bodyCursor = ci.hCursor;
+    }
+    return t.cursorBody;
+}
 
 static void RunTick(TickState& t) {
     LARGE_INTEGER now;
@@ -1518,7 +1534,7 @@ static void RunTick(TickState& t) {
                 double px = t.viewCx, py = t.viewCy;
                 if (edges)
                     wind::EdgeClampPointer(t.viewCx, t.viewCy, cur.x - t.mon.x, cur.y - t.mon.y, lvl,
-                                           t.mon.w, t.mon.h, t.cfg.mouseMarginPct, px, py);
+                                           t.mon.w, t.mon.h, t.cfg.mouseMarginPct, px, py, CurrentCursorBody(t));
                 const int wx = (int)(px + 0.5) + t.mon.x, wy = (int)(py + 0.5) + t.mon.y;
                 SetCursorPos(wx, wy);
                 cur.x = wx; cur.y = wy;
@@ -1536,7 +1552,7 @@ static void RunTick(TickState& t) {
                 const double wall = wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0;
                 double ecx, ecy;
                 wind::EdgePanCenter(t.viewCx, t.viewCy, ptrX, ptrY, lvl, t.mon.w, t.mon.h,
-                                    t.cfg.mouseMarginPct, wall, wall, ecx, ecy);
+                                    t.cfg.mouseMarginPct, wall, wall, ecx, ecy, CurrentCursorBody(t));
                 t.viewCx = ecx; t.viewCy = ecy;       // no glide: the hand pushes the view directly
                 r = wind::DetachedMap(t.viewCx, t.viewCy, ptrX, ptrY, lvl, t.mon.w, t.mon.h);
                 t.mapper.reset(t.viewCx, t.viewCy);
