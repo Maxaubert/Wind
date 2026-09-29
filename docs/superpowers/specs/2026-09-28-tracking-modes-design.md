@@ -36,8 +36,9 @@ Owner decisions (2026-09-28, verbatim intent):
 
 In: the three features above, in both the render and transform engines, on the desktop.
 Out (v1): games (a borderless full-screen foreground, the transform GAME path), Inspect mode,
-locked/mouselook sessions, a caret or focus on a monitor other than the zoomed one, Java apps
-(needs the Java Access Bridge), Narrator cursor. In those cases the view simply follows the mouse
+locked/mouselook sessions, a caret or focus on a monitor other than the zoomed one, Narrator
+cursor. (Java apps were out of v1 and landed in issue #281 via the Java Access Bridge; see
+`docs/TRACKING-FINDINGS.md`.) In those cases the view simply follows the mouse
 as today.
 
 ## 3. Behaviour

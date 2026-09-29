@@ -318,6 +318,12 @@ while the cursor fields report the real pointer, and the weld is off. On a mouse
 the pointer is placed in the view (the view stays). The glide is a critically damped spring
 (`SpringToward`, `src/view_glide.h`, 200 ms).
 
+Java apps (IntelliJ, PyCharm) expose the caret only through the Java Access Bridge
+(`src/java_bridge.*`, issue #281). The tracker loads the Authenticode-signed client DLL from the Java
+app's own folder, starts the bridge on its thread (the bridge's hidden windows get a narrow UIPI
+allowance, since Wind is UIAccess), and reads the caret only after bridge caret/focus callbacks,
+never on the 60 Hz poll. It also enables the bridge in `%USERPROFILE%\.accessibility.properties`.
+
 Mouse edge mode (`mouseAlign=1`, free-pointer sessions only; mouselook and Inspect stay centred)
 uses the same detached path every tick: the pointer is real and unwelded, and `EdgePanCenter`
 (`src/edge_pan.h`) moves the view only when the cursor's visible body leaves the band
