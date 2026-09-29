@@ -53,7 +53,7 @@ ramp always eases at a steady rate regardless of frame-time spikes.
 
 ### Config hot-reload
 
-Wind has no IPC with the settings app. `WindConfig.exe` writes `magnifier.ini` and the core
+Wind has no IPC with the settings app (the tray helper's status block, `src/tray_ipc.h`, carries no settings). `WindConfig.exe` writes `magnifier.ini` and the core
 notices. The noticing is deliberately cheap:
 
 - At startup, `wWinMain` arms a `FindFirstChangeNotificationW` on the ini's parent directory

@@ -133,7 +133,7 @@ step entirely. `src\version.h` is the only place the version is declared.
 
 ## Build
 Requires Visual Studio 2022+ Build Tools (Desktop development with C++). From any shell:
-- `build.bat` - builds `Wind.exe` (runs from anywhere).
+- `build.bat` - builds `Wind.exe` and its tray helper `WindTray.exe` (runs from anywhere).
 - `build.bat test` - builds and runs the unit tests.
 - `build.bat uiaccess` - builds the UIAccess variant (signed-install prerequisite).
 - `build.bat config` - builds the Settings app (`WindConfig.exe` + the Svelte UI).

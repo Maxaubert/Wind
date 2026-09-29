@@ -16,6 +16,8 @@ Developer book (readable, canonical): `docs/architecture/` - keep it in step wit
   compiles `src/config_ui/*.cpp` against the vendored WebView2 SDK -> `WindConfig.exe` next to
   `Wind.exe`). Also run by `tools\uiaccess_setup.ps1`, which deploys `WindConfig.exe` + `ui/dist`
   alongside the signed `Wind.exe`.
+- The app and `uiaccess` targets also build `WindTray.exe` (`build.bat tray` alone), ALWAYS with the
+  plain manifest: it must never be uiAccess (see "Three binaries").
 - Build the installer: `build.bat installer`  (needs NSIS: `winget install NSIS.NSIS`; compiles
   `installer\wind.nsi` then runs `tools\installer_check.ps1`). Release artifact:
   `pwsh -File tools\release.ps1` -> `dist\Wind-Setup-x64-<ver>.exe`. Setup is a custom-drawn
@@ -168,8 +170,14 @@ every host `setConfig` mirrors the profile-scoped snapshot back into its file. F
 duplicate/delete; bridge messages `listProfiles`/`switchProfile`/`createProfile`/`renameProfile`/
 `duplicateProfile`/`deleteProfile`, each replying the refreshed list).
 
-**Two binaries.** `Wind.exe` is the always-running tray magnifier (the perf-critical core
-described above). `WindConfig.exe` is an on-demand settings GUI: a thin C++ WebView2 host
+**Three binaries.** `WindTray.exe` (`src/tray_app/`, issue #291) owns the tray icon and menu
+WITHOUT UIAccess: a UIAccess process's popup menu stacks above the cursor sprite and the Snipping
+Tool overlay, an ordinary process's menu does not. Wind starts it with `ShellExecuteExW` (never
+CreateProcess: no inherited UIAccess token) passing `--wind-pid`, restarts it if it dies (at most 3
+launches a minute, `src/tray_host.cpp`), and it exits when that Wind exits. The only coupling is the
+shared block `Local\Wind_TrayState_v1` (`src/tray_ipc.h`: status, frame-pacing ring, `menuOpen`)
+plus `Local\Wind_QuitRequest` for Quit. `Wind.exe` is the always-running magnifier (the
+perf-critical core described above). `WindConfig.exe` is an on-demand settings GUI: a thin C++ WebView2 host
 (`src/config_ui/main.cpp`) that loads a built Svelte app from `ui/dist/` and talks to the core
 only by writing `magnifier.ini` (the core dir-watches and hot-reloads it - no IPC). First
 launch also runs a short guided onboarding (wind-trails-into-logo intro -> set zoom keys ->
