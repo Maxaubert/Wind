@@ -19,6 +19,7 @@ test.beforeEach(async ({ page }) => {
           listeners.forEach(fn => fn({ data: { type: 'config', values: { zoomInSpeed: '1.2', smoothZoom: '0', uiTheme: 'auto', showAdvanced: '1', model: 'render', zoomInButton: '2', zoomInVk: '33', zoomOutButton: '1', zoomOutVk: '34', cursorLockVk: '113', txSamplingMode: window.__cfgSampling !== undefined ? window.__cfgSampling : '0' } } }));
         if (msg.type === 'setConfig') window.__sets.push(msg);
         if (msg.type === 'openRepo') window.__sets.push(msg);
+        if (msg.type === 'draft') window.__sets.push(msg);   // crash-recovery mirror of unapplied edits
         // MPO lives in the registry, not the ini. __mpoDisabled drives what the "registry" reports;
         // __mpoOk drives whether the elevated write is accepted (false = UAC dismissed).
         if (msg.type === 'mpoState')
@@ -542,4 +543,18 @@ test('Colour section: only the warmth and brightness sliders, neutral by default
   for (const gone of ['Colour filter', 'Also when not zoomed', 'Toggle colour filter']) {
     await expect(page.getByText(gone, { exact: true })).toHaveCount(0);
   }
+});
+
+test('unapplied edits are mirrored to the host and restored after a crash recovery', async ({ page }) => {
+  await page.goto('/');
+  const row = page.getByText('Brightness', { exact: true }).locator('xpath=../..');
+  await row.locator('input[type=range]').fill('35');
+  await expect.poll(async () => page.evaluate(() => {
+    const d = window.__sets.filter(m => m.type === 'draft').at(-1);
+    return d ? JSON.parse(d.json).colorDimPct : null;
+  })).toBe('35');
+  // The host recreated the engine: a fresh page load gets its config, then the draft back.
+  await page.evaluate(() => window.__hostSend({ type: 'restoreDraft', values: { colorDimPct: '40', notARealKey: '1' } }));
+  await expect(row).toContainText('40');
+  await expect(page.getByRole('button', { name: 'Apply' })).toBeEnabled();
 });
