@@ -51,3 +51,36 @@ the render engine's shader (zoomed, render engine), not at 1x or on the transfor
 decision: keep only warmth and brightness, which scale channels and never merge or swap colours.
 The numbers come from a small Python harness over the palette (not committed; rerun by computing
 the matrix per colour and WCAG contrast in linear light).
+
+## HDR, Night light and the warmth maths (measured 2026-09-29/30, this PC: LG OLED, Windows HDR on, SDR white 188 nits)
+
+- **Under HDR the DWM colour effect scales LINEAR scRGB.** Desktop Duplication in R16G16B16A16_FLOAT
+  with a green gain of 0.339: green 2.198 -> 0.746 (exactly x0.339). A GDI capture (SDR, after
+  Windows' HDR->SDR step) had suggested sRGB-encoded maths; that was the conversion, not the effect.
+  In SDR the effect acts on encoded values. So the same number means a far weaker tint under HDR:
+  the first warmth build's 100% (green 0.339) was really about 2400 K on this screen, "yellow".
+- **Night light's scale** (from its stored setting, CloudStore `bluelightreduction.settings`, the
+  value after `cf 28` is 2 x Kelvin as a varint): 0% = 6500 K, 100% = 1200 K, 50% = 3850 K, i.e.
+  LINEAR in Kelvin. Wind's Warmth now uses the same scale (`WarmKelvin`).
+- **Night light is invisible to software capture under HDR** (no change in the FP16 duplication, gamma
+  ramp untouched): it runs in the display pipeline. Wind therefore models it: CIE 1931 blackbody
+  gains in linear light (`kKelvinGains`, Planck + Wyman-Sloan-Shirley CMF fit), encoded for SDR and
+  the render shader, linear for DWM under HDR (`BuildColorMatrix(..., linearLight)`). Brightness is
+  decoded to linear under HDR so the slider looks the same in both. Verified on the HDR desktop:
+  warm 100% green x0.074 / blue 0; warm 50% x0.67 / x0.34; brightness 50% x0.214; 0% black.
+- **The pointer at 1x is not tinted or dimmed**: Windows draws it on a hardware cursor plane after
+  composition, which the DWM colour effect never touches (Night light, in the display pipeline, does
+  reach it). While zoomed Wind draws the cursor itself, so it is filtered there.
+- Wind's diagnostics snapshot logs `hdr=0` regardless (logging.cpp records it conservatively); the
+  engine's own `GetHdrEnabled` is the truth.
+
+## Settings crash (RTSS), 2026-09-29
+
+WebView2 154's browser process loads and unloads `dxgi.dll` at start-up; RTSS's global hook
+(RTSSHooks64 of 2025-09-27) remembers it and, on the next window creation (Chromium's network-cost
+watcher's hidden COM window), reads the unloaded DLL in `ValidateRuntimes`: an access violation that
+kills the whole WebView2 engine (dump: faulting address inside "unloaded module dxgi.dll"). Chromium
+creates that watcher unconditionally (`network_change_notifier_win.cc`), so there is no flag to avoid
+it. Settings now recovers: `ProcessFailed` -> recreate the engine (page process: reload), at most 3 a
+minute (`src/config_ui/webview_recover.h`), and the page's unapplied edits are mirrored to the host and
+handed back. Verified by killing the engine with a staged change: back in ~0.3 s with the edit kept.
