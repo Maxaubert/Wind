@@ -82,7 +82,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR cmdLine, int) {
         HANDLE waits[2] = { mtx, hWind };
         const DWORD w = WaitForMultipleObjects(2, waits, FALSE, 10000);
         if (w != WAIT_OBJECT_0 && w != WAIT_ABANDONED_0) {
-            wind::Log(wind::LogLevel::Warn, "tray", "another tray is live (w=%lu); exiting", w);
+            if (w == WAIT_OBJECT_0 + 1)
+                wind::Log(wind::LogLevel::Warn, "tray",
+                          "Wind pid=%lu exited before the tray mutex came free; exiting", windPid);
+            else
+                wind::Log(wind::LogLevel::Warn, "tray", "another tray is live (w=%lu); exiting", w);
             CloseHandle(mtx); CloseHandle(hWind);
             wind::LogShutdown();
             return 0;

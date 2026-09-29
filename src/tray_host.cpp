@@ -93,7 +93,14 @@ TrayShared* Start(const std::wstring& appDir) {
 void Stop() {
     if (g_thread) {
         SetEvent(g_stop);
-        WaitForSingleObject(g_thread, 2000);
+        // Close only once the thread is really gone. If it is still inside ShellExecuteEx (an AV
+        // scan can hold that for seconds), it reads g_stop next: closing it here would turn its
+        // waits into instant WAIT_FAILED returns, defeating the rate limit. On a timeout the two
+        // handles are left to process exit, which follows every Stop() call.
+        if (WaitForSingleObject(g_thread, 2000) != WAIT_OBJECT_0) {
+            wind::Log(wind::LogLevel::Warn, "tray", "supervisor still busy at stop; leaving it to exit");
+            return;
+        }
         CloseHandle(g_thread);
         g_thread = nullptr;
     }

@@ -157,6 +157,9 @@ if (-not (Test-Path $setup)) {
         $sig = Get-AuthenticodeSignature (Join-Path $scratch 'Wind.exe')
         Check "local signing: Wind.exe signature is Valid" { $sig.Status -eq 'Valid' }
         Check "local signing: signed by CN=Wind Local Signing" { $sig.SignerCertificate.Subject -eq 'CN=Wind Local Signing' }
+        Check "local signing: WindTray.exe signature is Valid" {
+            (Get-AuthenticodeSignature (Join-Path $scratch 'WindTray.exe')).Status -eq 'Valid'
+        }
         Check "local signing: the signing key is gone" {
             -not (Get-ChildItem Cert:\LocalMachine\My | Where-Object Subject -eq 'CN=Wind Local Signing')
         }

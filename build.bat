@@ -116,6 +116,9 @@ exit /b %errorlevel%
 rem --- Compile-only check (no link; verifies all sources compile) -----------
 :check
 cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c src\*.cpp
+if errorlevel 1 exit /b 1
+rem WindTray.exe sources (issue #291); own object dir, its main.cpp would overwrite Wind's main.obj.
+cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c /Fo"%ROOT%src\tray_app\\" src\tray_app\*.cpp
 exit /b %errorlevel%
 
 rem --- Installer (needs NSIS; winget install NSIS.NSIS) ---------------------
