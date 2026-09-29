@@ -887,7 +887,23 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         lastSpriteY_ = spriteBand16_ ? (int)(r.cursorScreenY + 0.5) + mon_.y
                                      : r.clickDesktopY + mon_.y;
         sprite_->keepOnTop();
+    } else if (useSprite_ && sprite_ && ex.realPointer && ex.drawCursor && level > 1.001) {
+        // SHELL INPUT PANEL (issue #283). The emoji picker and its siblings are composed by the shell
+        // above every window band, so the sprite goes under them. The real pointer is the one thing
+        // drawn above, and ONE public MagSetFullscreenTransform write makes DWM draw it magnified
+        // (measured: the hardware pointer is then hidden and DWM draws it scaled; the private channel
+        // alone leaves the tiny hardware pointer). Staying magnified survives later private writes.
+        // RunTick arms the hook write path meanwhile, so view and pointer move in the same breath
+        // (3 px off-centre against 44 px for tick-paced writes at 10.7x, 900 px/s).
+        spriteShown_ = false;
+        sprite_->hide();
+        if (cursorHidden_) { ShowSystemCursorMarshalled(TRUE); blanker_->restore(); cursorHidden_ = false; }
+        if (!panelPrimed_ && lastLevel_ > 1.0) {
+            host_.setTransform((float)lastLevel_, lastOffX_, lastOffY_, lastTxX_, lastTxY_, false);
+            panelPrimed_ = true;
+        }
     } else if (useSprite_ && sprite_ && ex.drawCursor && level > 1.001) {
+        panelPrimed_ = false;
         // The REAL cursor is welded to the lens point above, so input is entirely native - but
         // the hardware pointer is not magnified and is drawn at its raw desktop position, which
         // reads as a small cursor sitting away from the content it addresses. So hide it and

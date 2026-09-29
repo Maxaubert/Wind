@@ -294,6 +294,7 @@ struct TickState {
     wind::ViewOwnerState viewOwner;
     double viewCx = 0.0, viewCy = 0.0;
     bool   viewDetached = false;   // last tick drew a detached frame
+    bool   panelPrimed = false;    // #283: the public prime went out this panel session
     double viewVx = 0, viewVy = 0; // tracking spring velocity (trackGlideMode=1)
     HCURSOR bodyCursor = nullptr;  // edge mode: the cursor cursorBody was measured from
     wind::CursorBody cursorBody;   // its visible body around the hotspot (desktop px)
@@ -1466,6 +1467,13 @@ static void RunTick(TickState& t) {
         //     integrates raw deltas instead (issue #3 / #158).
         const bool freeCursor = t.cfg.txFreeCursor != 0 && !inspect && !t.detector.locked() &&
                                 dynamic_cast<TransformModel*>(t.model) != nullptr;
+        // SHELL INPUT PANEL REGIME (issue #283): while the emoji picker (or clipboard history, touch
+        // keyboard) is open, the real pointer replaces the sprite (the shell draws its panels above
+        // every window band) and the mouse hook writes the view, so pointer and view never part.
+        // Caret/focus tracking and edge mode pause: both detach the view, a second writer.
+        const bool panel = t.cfg.panelPointer != 0 && freeCursor && lvl > 1.001 &&
+                           wind::MagThreadOwned() && g_track.shellPanelOpen();
+        if (!panel) t.panelPrimed = false;
         if (freeCursor) {
             POINT cp;
             if (GetCursorPos(&cp)) {
@@ -1489,7 +1497,7 @@ static void RunTick(TickState& t) {
         // fsCover (read once above, see the "Foreground facts for this tick" comment) is the
         // borderless-fullscreen-game tell; reused here rather than a second ForegroundCoversMonitor
         // call (it is also what fsGame below aliases).
-        const bool trackEnabled = lvl > 1.001 && !inspect && !t.detector.locked() && !fsCover &&
+        const bool trackEnabled = lvl > 1.001 && !panel && !inspect && !t.detector.locked() && !fsCover &&
                                   (t.cfg.trackCaret != 0 || t.cfg.trackFocus != 0);
         g_track.setActive(trackEnabled, t.cfg.trackCaret != 0, t.cfg.trackFocus != 0, t.cfg.trackLog != 0);
         {
@@ -1549,7 +1557,7 @@ static void RunTick(TickState& t) {
                 t.lastSetVirtual = cur;
                 r = wind::DetachedMap(t.viewCx, t.viewCy, px, py, lvl, t.mon.w, t.mon.h);
                 t.viewDetached = edges;               // edge mode keeps the view where it is
-            } else if (t.cfg.mouseAlign == 1 && lvl > 1.001 && !inspect && !t.detector.locked()) {
+            } else if (t.cfg.mouseAlign == 1 && lvl > 1.001 && !panel && !inspect && !t.detector.locked()) {
                 // MOUSE EDGE MODE (issue #276 phase 2): the pointer roams freely inside the view and
                 // the view moves only when it reaches the margin band, just far enough. No weld:
                 // the pointer is real, so clicks are native. Mouselook (locked) and Inspect keep the
@@ -1800,7 +1808,10 @@ static void RunTick(TickState& t) {
         // latency that matters is panning at a steady level, which is what this arms for.
         const bool levelSettled = (lvl == t.prevTickLevel);
         t.prevTickLevel = lvl;
-        const bool hookWrite = freeCursor && t.cfg.txHookWrite != 0 && wind::MagThreadOwned() &&
+        // In the panel regime the hook arms only from the tick AFTER the public prime (the model
+        // makes it on the first panel tick), so the prime cannot race a hook write.
+        const bool hookWrite = freeCursor && (t.cfg.txHookWrite != 0 || (panel && t.panelPrimed)) &&
+                               wind::MagThreadOwned() &&
                                tmWall != nullptr && lvl > 1.0 && levelSettled && !t.viewDetached;
         if (hookWrite) {
             wind::HookTransformState hs;
@@ -1817,7 +1828,7 @@ static void RunTick(TickState& t) {
             // The hook moves the sprite together with the transform (issue #229): a sprite
             // placed by the tick while the hook rewrites the view lands off-centre by the
             // cursor drift times the zoom - the second, lagging cursor.
-            hs.spriteHwnd = tmWall->spriteHwnd();
+            hs.spriteHwnd = panel ? nullptr : tmWall->spriteHwnd();   // #283: the real pointer needs no placing
             hs.spriteHotX = tmWall->spriteHotX();
             hs.spriteHotY = tmWall->spriteHotY();
             wind::PublishHookTransform(hs);
@@ -1825,6 +1836,8 @@ static void RunTick(TickState& t) {
             wind::DisarmHookTransform();
         }
         ex.suppressTransformWrite = hookWrite;
+        ex.realPointer = panel;
+        if (panel) t.panelPrimed = true;   // the model primes on this frame; arm from the next
         // Serialize transform writes around an Inspect click's injected absolute move (issue #148
         // TDR class): the injection and a transform write racing each other is the proven trigger.
         // The launch quiesce holds writes AND the weld for its whole window (see above).
@@ -2530,7 +2543,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // something writes from the hook; with txHookWrite off (the default) it would just marshal the
     // tick thread's calls onto the system input thread for nothing. Read once here - thread affinity
     // means ownership can never move once MagInitialize has run, so this needs a restart to change.
-    wind::SetMagThreadClaimEnabled(cfg.txHookWrite != 0);
+    // The hook thread owns the runtime when anything writes from it: txHookWrite, or the shell
+    // input panel regime (issue #283), which arms the hook only while a panel is open.
+    wind::SetMagThreadClaimEnabled(cfg.txHookWrite != 0 || cfg.panelPointer != 0);
     wind::SetHookFrameGate(cfg.txHookWrite == 2);   // mode 2 = one hook write per composite
     if (!g_input.start(cfg.zoomInButton, cfg.zoomInButton2, cfg.zoomOutButton, cfg.zoomOutButton2,
                        /*swallow=*/true)) {

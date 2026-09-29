@@ -8,15 +8,50 @@
 #include <oleacc.h>
 #include <oleauto.h>
 #include <UIAutomation.h>
+#include <dwmapi.h>
 #include <string>
 #pragma comment(lib, "oleacc.lib")
+#pragma comment(lib, "dwmapi.lib")
 namespace wind {
 
 static const UINT kWakeMsg = WM_APP + 0x61;       // an event arrived: resolve after coalescing
 static const UINT_PTR kCoalesceTimer = 1, kPollTimer = 2;
 static FocusTracker* g_self = nullptr;            // WinEvent callbacks have no context pointer
 
+// The shell's input panels (emoji picker, clipboard history, touch keyboard) are hosted by
+// TextInputHost.exe and composed by the shell ABOVE every app window, so no band Wind can create
+// covers them (issue #283, measured 2026-09-29). They never change as windows either: the only
+// reliable signal is TextInputHost's "IME" window, uncloaked while a panel shows and cloaked when it
+// closes (every open/close in the field recording matched). "IME" is a common class name (every GUI
+// thread has one), so the owning process is checked too.
+static bool IsShellPanelWindow(HWND h) {
+    wchar_t cls[16] = {};
+    if (!GetClassNameW(h, cls, 16) || wcscmp(cls, L"IME") != 0) return false;
+    DWORD pid = 0; GetWindowThreadProcessId(h, &pid);
+    HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!p) return false;
+    wchar_t path[MAX_PATH]; DWORD n = MAX_PATH;
+    bool yes = false;
+    if (QueryFullProcessImageNameW(p, 0, path, &n)) {
+        const wchar_t* base = wcsrchr(path, L'\\');
+        yes = _wcsicmp(base ? base + 1 : path, L"TextInputHost.exe") == 0;
+    }
+    CloseHandle(p);
+    return yes;
+}
+
 struct FocusTrackImpl {
+    static void SetPanel(bool open, HWND h) {
+        if (!g_self) return;
+        g_self->panelHwnd_.store(open ? h : nullptr);
+        if (g_self->panelOpen_.exchange(open) != open)
+            wind::Log(wind::LogLevel::Info, "track", "shell input panel %s", open ? "open" : "closed");
+    }
+    static void CALLBACK OnCloak(HWINEVENTHOOK, DWORD ev, HWND h, LONG obj, LONG, DWORD, DWORD) {
+        if (!g_self || !h || obj != OBJID_WINDOW) return;
+        if (!IsShellPanelWindow(h)) return;
+        SetPanel(ev == EVENT_OBJECT_UNCLOAKED, h);
+    }
     static void CALLBACK OnWinEvent(HWINEVENTHOOK, DWORD ev, HWND, LONG obj, LONG, DWORD, DWORD) {
         if (!g_self || !g_self->active_.load()) return;
         if (ev == EVENT_OBJECT_LOCATIONCHANGE && obj != OBJID_CARET) return;
@@ -145,6 +180,7 @@ void FocusTracker::run() {
     HWINEVENTHOOK h2 = SetWinEventHook(EVENT_SYSTEM_MENUPOPUPSTART, EVENT_SYSTEM_MENUPOPUPSTART, nullptr, FocusTrackImpl::OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     HWINEVENTHOOK h3 = SetWinEventHook(EVENT_OBJECT_FOCUS, EVENT_OBJECT_FOCUS, nullptr, FocusTrackImpl::OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     HWINEVENTHOOK h4 = SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE, nullptr, FocusTrackImpl::OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    HWINEVENTHOOK h5 = SetWinEventHook(EVENT_OBJECT_CLOAKED, EVENT_OBJECT_UNCLOAKED, nullptr, FocusTrackImpl::OnCloak, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     SetTimer(nullptr, kPollTimer, 16, nullptr);   // 60 Hz backstop, work only while active
     bool pendingFocus = false, pendingCaret = false;
     UINT_PTR coalesce = 0;
@@ -288,12 +324,21 @@ void FocusTracker::run() {
             KillTimer(nullptr, coalesce); coalesce = 0;
             resolve(pendingFocus, false); pendingFocus = pendingCaret = false;
         } else if (m.message == WM_TIMER) {
+            // A missed close (TextInputHost restarted, an event dropped) must not leave the real
+            // pointer on for good: re-check the remembered panel window while it is marked open.
+            if (panelOpen_.load()) {
+                HWND ph = static_cast<HWND>(panelHwnd_.load());
+                DWORD cloaked = 0;
+                if (!ph || !IsWindow(ph) ||
+                    (SUCCEEDED(DwmGetWindowAttribute(ph, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked))
+                    FocusTrackImpl::SetPanel(false, nullptr);
+            }
             if (active_.load() && wantCaret_.load()) resolve(false, true);              // backstop poll
         }
         TranslateMessage(&m); DispatchMessageW(&m);
     }
     KillTimer(nullptr, kPollTimer);
-    for (HWINEVENTHOOK h : { h1, h2, h3, h4 }) if (h) UnhookWinEvent(h);
+    for (HWINEVENTHOOK h : { h1, h2, h3, h4, h5 }) if (h) UnhookWinEvent(h);
     if (uia && fh) uia->RemoveFocusChangedEventHandler(fh);
     if (fh) fh->Release();
     if (uia) uia->Release();

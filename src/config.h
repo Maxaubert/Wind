@@ -357,6 +357,7 @@ struct Config {
     int edgeClip = 1;
     int txPace = 0;
     int txHookWrite = 0;
+    int panelPointer = 1;   // #283: real magnified pointer + hook writes while a shell input panel is open (restart)
     int txFreeCursor = 1;
     // WRITE CADENCE - SHIPPED OFF (tried ON 2026-08-26, REVERTED the same day on field report).
     // The theory (issue #204) is sound: we write ~144/s where native writes ~49/s, and each write

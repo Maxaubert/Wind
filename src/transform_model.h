@@ -140,6 +140,7 @@ private:
     // (measured 17 spike frames per 14 clicks after a zoom; 0 with no context, 0 while actually
     // zoomed). So the context lives only around real zoom sessions.
     bool magUp_ = false;
+    bool panelPrimed_ = false;                       // #283: public write done for this panel
     bool cursorHidden_ = false;                      // we called MagShowSystemCursor(FALSE)
     bool haveLastClick_ = false;                     // dedup the per-tick cursor weld
     int  lastClickX_ = 0, lastClickY_ = 0;
