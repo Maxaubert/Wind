@@ -58,7 +58,7 @@ you keep clicking and using the screen while zoomed.
   mouselook) would drag the zoom back with it; listed apps (Settings > Cursor) pan from raw
   mouse motion instead.
 - **Tracking modes** - the view can follow you instead of only the pointer: it recenters on
-  the text caret as you type (on by default) or on the keyboard-focused control (off by
+  the text caret as you type (on by default, including Java apps such as IntelliJ and PyCharm) or on the keyboard-focused control (off by
   default), gliding smoothly to each new target; a mouse edge mode keeps the pointer from
   reaching the view's border. Settings > Tracking.
 

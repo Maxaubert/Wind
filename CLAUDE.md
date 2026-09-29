@@ -474,6 +474,10 @@ restartWind), `dirty`, `openIni`, `exportDiagnostics`, `pickExe`, `mpoState`, `s
   view on a mouse-move takeover, never the view to the pointer (that wobbled). Only keyboard-driven
   caret moves are followed (first caret after a focus change = baseline; 1 s click quiet period).
   Edge mode hides edge-pinned motion from the lock detector, or corners fling the pointer.
+  JAVA CARET = Java Access Bridge (src/java_bridge.*, #281). UIPI DROPS THE JVM'S HANDSHAKE TO A
+  UIACCESS PROCESS: without the narrow ChangeWindowMessageFilterEx allowance on the bridge's hidden
+  windows it loads but never connects. Never poll the bridge (each read runs on the Java app's UI
+  thread); only load Authenticode-signed bridge DLLs (Wind is UIAccess, window classes are spoofable).
 - THE INSTALLER IS ELEVATED, WHICH MAKES HKCU AND `%LOCALAPPDATA%` THE WRONG USER'S. An
   elevated process's HKCU is whichever hive the ELEVATED token owns, which is an admin
   account's whenever a standard user elevated with different credentials. So autostart goes in

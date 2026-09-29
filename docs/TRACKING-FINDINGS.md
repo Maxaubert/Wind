@@ -13,6 +13,7 @@ to 2026-09-29, on this PC (3840x2160, 225%, signed UIAccess build, `trackLog=1`)
 | Notepad, classic Win32 dialogs | `win32` (GetGUIThreadInfo) | `uia-focus` |
 | Chrome / Edge, VS Code, Electron | `uia-caret` (TextPattern2::GetCaretRange) | `uia-focus` |
 | Windows Terminal / Prism | `uia-selection` (TextPattern::GetSelection) | `uia-focus` |
+| IntelliJ, PyCharm, other Java (Swing/AWT) apps | `java` (Java Access Bridge, issue #281) | (none) |
 
 Known limit: terminal TUI option pickers (e.g. Claude's AskUserQuestion list) do not expose the
 highlighted option through UIA, so Wind follows only the terminal caret there.
@@ -62,3 +63,33 @@ highlighted option through UIA, so Wind follows only the terminal caret there.
   Focus rects covering half the monitor or more are containers and are skipped (all apps).
 - Diagnostic tool from this hunt: a recorder logging the foreground process, Win32 caret, UIA caret
   and focus bounds every 100 ms; the Win32/UIA disagreement is what located the bad source.
+
+## Java apps: the Java Access Bridge (issue #281, 2026-09-29)
+
+- Java apps report the caret only through the Java Access Bridge, not the Win32 caret or UIA (Windows
+  Magnifier does not follow them either). Probe on IntelliJ 2026.2: `getAccessibleContextWithFocus` +
+  `getAccessibleTextInfo` + `getAccessibleTextRect` return a correct, moving caret rect, 1-12 ms per
+  read with an outlier of 134 ms, and ONLY while the Java window is active (inactive: context 0, and
+  the text calls then return TRUE with garbage, so a zero context is treated as "no caret").
+- **UIPI was the blocker.** The bridge loaded but every read failed with zero events: Wind is a
+  UIAccess process, and Windows drops messages an ordinary process (the JVM) sends to it, so the
+  bridge handshake never completed. The same calls worked from a non-UIAccess probe. Fix: allow
+  exactly the bridge protocol's messages on the bridge's own hidden windows (`WM_COPYDATA`, the two
+  `AccessBridge-From*-Hello` registered messages, `WM_USER+0x1000..0x1003` from OpenJDK
+  `AccessBridgeMessages.h`).
+- **Event-driven, never polled.** Each read is a round trip into the Java app's UI thread, so reads
+  happen only after a bridge caret/focus callback or a Java window switch (plus one retry per 250 ms
+  after a failed read). IntelliJ delivered ~100 caret events in a few seconds of typing.
+- **Security (review of #281).** Any process can register a window with a Java class name, and Wind
+  is UIAccess, so the client DLL (loaded from the Java app's folder) must carry a valid Authenticode
+  signature, as must a `vcruntime140.dll` shipped beside it; both are held open against replacement
+  while verified and loaded, and dependencies resolve only from that folder and System32. Every
+  bridge DLL on the dev box verified (JetBrains, Oracle, Microsoft, Amazon).
+- **No manual steps.** Wind writes `assistive_technologies=com.sun.java.accessibility.AccessBridge`
+  into `%USERPROFILE%\.accessibility.properties` (what `jabswitch -enable` does) the first time it sees
+  a Java window; a Java app picks it up at its next start. The file is only rewritten after a clean
+  read or when it does not exist, so a locked file is never wiped. IntelliJ's own "Support screen
+  readers" setting was already on here; on a PC where it is off, IntelliJ may need it (IntelliJ offers
+  it itself when it detects the bridge).
+- A window Windows reports as not responding (`IsHungAppWindow`) is skipped, so a hung Java app cannot
+  stall tracking for other apps.

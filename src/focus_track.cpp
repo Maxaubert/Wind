@@ -210,7 +210,9 @@ void FocusTracker::run() {
         if (java) {
             if (fg != javaWnd) { javaWnd = fg; javaDirty = true; }
             const ULONGLONG now = GetTickCount64();
-            if (!fromPoll || javaDirty || (!javaHave && now >= javaRetryAt)) {
+            // Only after a Java event or window switch (javaDirty), or one retry per 250 ms after a
+            // failed read: unrelated system-wide wakes must not become Java round trips (review #281).
+            if (javaDirty || (!javaHave && now >= javaRetryAt)) {
                 javaHave = jab.caret(fg, javaCaret);
                 javaDirty = false;
                 if (!javaHave) javaRetryAt = now + 250;
