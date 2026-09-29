@@ -478,6 +478,11 @@ restartWind), `dirty`, `openIni`, `exportDiagnostics`, `pickExe`, `mpoState`, `s
   UIACCESS PROCESS: without the narrow ChangeWindowMessageFilterEx allowance on the bridge's hidden
   windows it loads but never connects. Never poll the bridge (each read runs on the Java app's UI
   thread); only load Authenticode-signed bridge DLLs (Wind is UIAccess, window classes are spoofable).
+- SHELL INPUT PANELS (emoji picker, #283; docs/SHELL-PANEL-CURSOR-FINDINGS.md): composed above
+  every band, so only the REAL pointer shows over them. One public MagSetFullscreenTransform write
+  makes DWM draw it magnified; it is frozen (1px clip) and moved by Wind with the view to avoid
+  wobble. Do NOT use hook-thread writes for this (runtime ownership marshals every write onto the
+  input thread = hitches), and keep the freeze hidden from the lock detector (flap = flicker).
 - THE INSTALLER IS ELEVATED, WHICH MAKES HKCU AND `%LOCALAPPDATA%` THE WRONG USER'S. An
   elevated process's HKCU is whichever hive the ELEVATED token owns, which is an admin
   account's whenever a standard user elevated with different credentials. So autostart goes in

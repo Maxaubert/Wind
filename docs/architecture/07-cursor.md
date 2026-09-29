@@ -330,6 +330,18 @@ uses the same detached path every tick: the pointer is real and unwelded, and `E
 (`mouseMarginPct`). Pointer pinned against a screen edge is hidden from the lock detector
 (`PointerPinnedAtEdge`). Field history: [../TRACKING-FINDINGS.md](../TRACKING-FINDINGS.md).
 
+## Shell input panels: the real pointer, frozen (issue #283)
+
+The emoji picker, clipboard history and touch keyboard are composed by the shell above every window
+band, so the sprite goes under them. While one is open (`FocusTracker::shellPanelOpen`, from
+TextInputHost's `IME` window UNCLOAKED/CLOAKED events) RunTick enters the panel regime (`panelPointer`,
+default 1): the transform model hides the sprite, restores the real pointer and makes ONE public
+`MagSetFullscreenTransform` write, after which DWM draws the pointer magnified. The pointer is frozen
+with a 1px clip and moved only by Wind, from ballistics-cooked raw input (`InputState::cookActive`),
+right after the view write, so DWM never draws one without the other. The freeze is hidden from the
+lock detector, tracking and edge mode pause, and the saved clip is restored on close. Evidence and the
+rejected hook-write variant: [../SHELL-PANEL-CURSOR-FINDINGS.md](../SHELL-PANEL-CURSOR-FINDINGS.md).
+
 ## Pointers
 
 Key sources:
