@@ -202,6 +202,7 @@ void FocusTracker::run() {
     // the 60 Hz backstop poll cannot publish the new field's caret in the 30 ms before that.
     unsigned focusGen = 0, caretGen = ~0u;
     RECT lastCaret{};
+    CaretJumpGate jumpGate;   // issue #293: far jumps no key explains are held
 
     // Java apps (issue #281): the bridge is asked only when something may have moved (a bridge caret
     // or focus callback, or any tracker wake), never by the 60 Hz poll, which reuses the last answer.
@@ -291,6 +292,7 @@ void FocusTracker::run() {
             if (found) {
                 if (caretGen != focusGen) {
                     caretGen = focusGen; lastCaret = rc;                       // baseline, not followed
+                    CaretGateBaseline(jumpGate, { rc.left, rc.top, rc.right, rc.bottom });
                     if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "caret baseline via %s: %ld,%ld", src, rc.left, rc.top);
                 } else if (!EqualRect(&rc, &lastCaret)) {
                     lastCaret = rc;
@@ -304,7 +306,21 @@ void FocusTracker::run() {
                         if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "caret skipped (outside its element %ld,%ld %ldx%ld) via %s: %ld,%ld",
                                                    b.left, b.top, b.right - b.left, b.bottom - b.top, src, rc.left, rc.top);
                     } else {
-                        publish(TrackKind::Caret, rc.left, rc.top, rc.right, rc.bottom, src);
+                        // The last key within a second, or none known at all (no hook, no raw
+                        // input yet): only a known ordinary key can hold a jump.
+                        const LastKey& lk = LastKeySlot();
+                        const unsigned long long km = lk.ms.load(std::memory_order_relaxed);
+                        const bool jumpKey = km == 0 || GetTickCount64() - km > 1000 ||
+                                             IsJumpKey(lk.vk.load(std::memory_order_relaxed), lk.chord.load(std::memory_order_relaxed));
+                        const bool wasPending = jumpGate.pending;
+                        if (CaretGateStep(jumpGate, { rc.left, rc.top, rc.right, rc.bottom }, jumpKey)) {
+                            if (wasPending && !jumpGate.pending && log_.load())
+                                wind::Log(wind::LogLevel::Info, "track", "caret jump confirmed or dropped via %s: %ld,%ld", src, rc.left, rc.top);
+                            publish(TrackKind::Caret, rc.left, rc.top, rc.right, rc.bottom, src);
+                        } else if (log_.load()) {
+                            wind::Log(wind::LogLevel::Info, "track", "caret jump held (no navigation key, vk=0x%02x) via %s: %ld,%ld",
+                                      lk.vk.load(std::memory_order_relaxed), src, rc.left, rc.top);
+                        }
                     }
                 }
             }

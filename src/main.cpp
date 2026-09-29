@@ -36,6 +36,7 @@
 #include "detached_view.h"   // tracking: a frame whose view is not centred on the pointer
 #include "edge_pan.h"        // mouse edge mode (issue #276 phase 2)
 #include "cursor_decode.h"   // edge mode measures the cursor body
+#include "track_filter.h"    // NoteKeyDown: the caret-jump rule's key clock (#293)
 #include "focus_track.h"     // tracking: caret/focus watcher thread
 #include "tray_host.h"     // WindTray.exe owns the icon and menu (#291)
 #include "gain_learner.h"  // learned pointer ballistics: locked pan at TRUE desktop speed
@@ -1585,9 +1586,10 @@ static void RunTick(TickState& t) {
             const unsigned long long nowMs = GetTickCount64();
             if (vi.buttonDown) t.lastButtonMs = nowMs;
             vi.msSinceButton = t.lastButtonMs ? double(nowMs - t.lastButtonMs) : 1e9;
-            // Keyboard-driven only (#289). Without the keyboard hook there is no timestamp: no gate.
+            // Keyboard-driven only (#289). The hook and Raw Input both stamp the clock, so a suspended
+            // hook no longer switches the gate off. No stamp at all and no hook: no information, no gate.
             const unsigned long long lastKey = g_input.lastAnyKeyDownMs();
-            vi.msSinceKey = !g_input.kbHookActive() ? 0.0 : (lastKey ? double(nowMs - lastKey) : 1e9);
+            vi.msSinceKey = lastKey ? double(nowMs - lastKey) : (g_input.kbHookActive() ? 1e9 : 0.0);
             vi.dtMs = dt * 1000.0;
             vi.snap = g_track.snapshot();
             const wind::ViewOwner was = t.viewOwner.owner;
@@ -2389,6 +2391,14 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 const RAWKEYBOARD& kb = ri->data.keyboard;
                 if ((kb.Flags & RI_KEY_BREAK) && kb.VKey > 0 && kb.VKey < 256)
                     g_input.rawKeyUp(static_cast<int>(kb.VKey));
+                // Key DOWN feeds only tracking's key clock (#289/#293), never held state. Raw Input
+                // keeps arriving while the hook is suspended (fullscreen game, noSwallowApps), so
+                // the clock stays true there instead of the gate switching off (review #289).
+                if (!(kb.Flags & RI_KEY_BREAK) && kb.VKey > 0 && kb.VKey < 256) {
+                    const unsigned long long now = GetTickCount64();
+                    g_input.noteAnyKeyDown(now);
+                    wind::NoteKeyDown(kb.VKey, (GetAsyncKeyState(VK_CONTROL) & 0x8000) || (GetAsyncKeyState(VK_MENU) & 0x8000), now);
+                }
             } else if (ri->header.dwType == RIM_TYPEMOUSE) {
                 const RAWMOUSE& m = ri->data.mouse;
                 if ((m.usFlags & MOUSE_MOVE_ABSOLUTE) == 0) {
