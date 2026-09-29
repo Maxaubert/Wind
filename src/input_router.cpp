@@ -1,5 +1,4 @@
 #include "input_router.h"
-#include "track_filter.h"   // NoteKeyDown (#293)
 #include "mag_thread.h"   // the hook thread owns the Magnification runtime (issue #206)
 #include "hook_transform.h" // ...and writes the transform inline from MouseProc (#206 stage 2)
 #include "config.h"     // IsForbiddenBindVk (keyboard-bind safety blocklist)
@@ -235,11 +234,7 @@ static LRESULT CALLBACK KbProc(int code, WPARAM wParam, LPARAM lParam) {
         int vk = static_cast<int>(ks->vkCode);
         bool down = (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN);
         bool up   = (wParam == WM_KEYUP   || wParam == WM_SYSKEYUP);
-        if (down) {   // any key: tracking's keyboard gate (#289) and caret-jump rule (#293)
-            const unsigned long long now = GetTickCount64();
-            g_router->noteAnyKeyDown(now);
-            wind::NoteKeyDown(vk, (GetAsyncKeyState(VK_CONTROL) & 0x8000) || (GetAsyncKeyState(VK_MENU) & 0x8000), now);
-        }
+        if (down) g_router->noteAnyKeyDown(GetTickCount64());   // any key: tracking's keyboard gate (#289)
         // Only bound (non-forbidden) keys are tracked/swallowed; every other keystroke passes through
         // untouched. isBoundKey already range-checks vk and excludes IsForbiddenBindVk keys.
         if ((down || up) && g_router->isBoundKey(vk)) {

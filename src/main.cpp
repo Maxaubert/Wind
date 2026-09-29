@@ -36,7 +36,6 @@
 #include "detached_view.h"   // tracking: a frame whose view is not centred on the pointer
 #include "edge_pan.h"        // mouse edge mode (issue #276 phase 2)
 #include "cursor_decode.h"   // edge mode measures the cursor body
-#include "track_filter.h"    // NoteKeyDown: the caret-jump rule's key clock (#293)
 #include "focus_track.h"     // tracking: caret/focus watcher thread
 #include "tray_host.h"     // WindTray.exe owns the icon and menu (#291)
 #include "gain_learner.h"  // learned pointer ballistics: locked pan at TRUE desktop speed
@@ -2391,14 +2390,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 const RAWKEYBOARD& kb = ri->data.keyboard;
                 if ((kb.Flags & RI_KEY_BREAK) && kb.VKey > 0 && kb.VKey < 256)
                     g_input.rawKeyUp(static_cast<int>(kb.VKey));
-                // Key DOWN feeds only tracking's key clock (#289/#293), never held state. Raw Input
+                // Key DOWN feeds only tracking's key clock (#289), never held state. Raw Input
                 // keeps arriving while the hook is suspended (fullscreen game, noSwallowApps), so
                 // the clock stays true there instead of the gate switching off (review #289).
-                if (!(kb.Flags & RI_KEY_BREAK) && kb.VKey > 0 && kb.VKey < 256) {
-                    const unsigned long long now = GetTickCount64();
-                    g_input.noteAnyKeyDown(now);
-                    wind::NoteKeyDown(kb.VKey, (GetAsyncKeyState(VK_CONTROL) & 0x8000) || (GetAsyncKeyState(VK_MENU) & 0x8000), now);
-                }
+                if (!(kb.Flags & RI_KEY_BREAK) && kb.VKey > 0 && kb.VKey < 256)
+                    g_input.noteAnyKeyDown(GetTickCount64());
             } else if (ri->header.dwType == RIM_TYPEMOUSE) {
                 const RAWMOUSE& m = ri->data.mouse;
                 if ((m.usFlags & MOUSE_MOVE_ABSOLUTE) == 0) {
