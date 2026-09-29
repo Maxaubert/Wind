@@ -3,8 +3,9 @@
 Wind is a lightweight standalone fullscreen magnifier for Windows: a replacement for the built-in
 Magnify.exe that keeps zoom smooth and sub-pixel, keeps the screen fully interactive while zoomed,
 and keeps tracking the mouse even when a game hides, clips, or center-locks the cursor. It ships as
-two cooperating binaries, `Wind.exe` (the always-running tray magnifier) and `WindConfig.exe` (an
-on-demand settings app), whose only communication channel is the `magnifier.ini` file. This chapter
+three cooperating binaries: `Wind.exe` (the always-running magnifier), `WindTray.exe` (its tray
+icon and menu, a separate process since issue #291) and `WindConfig.exe` (an on-demand settings
+app). Settings travel only through the `magnifier.ini` file. This chapter
 covers what Wind promises the user, why the code is split the way it is, and what every file in
 `src/` does.
 
@@ -93,7 +94,7 @@ flowchart LR
   C --> P
 ```
 
-`Wind.exe` is the perf-critical core: the tick loop, the input hooks, the engines, the tray icon.
+`Wind.exe` is the perf-critical core: the tick loop, the input hooks, the engines.
 It runs from login to logout and must never hitch. `WindConfig.exe` is a thin C++ WebView2 host
 (`src/config_ui/main.cpp`) that loads a built Svelte app from `ui/dist/` and talks to the core only
 by writing `magnifier.ini`. The core dir-watches the ini and hot-reloads it; there is no pipe, no
@@ -101,6 +102,16 @@ shared memory, no window messages between the two. That buys three things: the s
 crash, restart, or be rewritten without touching the magnifier loop; the config process runs
 non-admin and non-elevated by design; and the ini stays a plain, hand-editable text file that is
 also the profile snapshot format (`src/profiles.h`, [Config and profiles](08-config-profiles.md)).
+
+The tray is the one exception to "no shared memory", and it carries no settings. Wind.exe is a
+signed UIAccess process, and Windows stacks a UIAccess process's popup menu above almost
+everything, including the magnified cursor and the Snipping Tool overlay (measured 2026-09-29).
+So the tray icon and menu live in `WindTray.exe`, which runs without UIAccess (`src/tray_app/`).
+Wind starts it with `ShellExecuteExW` and its PID (`src/tray_host.cpp`), restarts it if it dies
+(at most three launches a minute), and publishes its live status into a small named block
+(`src/tray_ipc.h`). The tray writes one flag back, `menuOpen`, which suspends the cursor re-park
+while the user aims at menu items; Quit sets `Local\Wind_QuitRequest`, the same clean-exit event
+the installer uses. The tray exits when its Wind exits, taking the icon with it.
 
 Two refinements keep this simple channel honest. First, the ini path is never hardcoded:
 `wind::ResolveIniPath()` (`src/config_path.h`) probes whether the exe directory is writable, so a
@@ -206,8 +217,9 @@ large fleet of PowerShell measurement probes, see
 | `tick_stats.h` | Pure ring buffer of recent tick intervals backing the tray's frame-pacing readout |
 | `transform.cpp/.h` | Pure transform math: anchored offsets, TDR-safe clamps, input-transform rects, foreign-writer detection |
 | `transform_model.cpp/.h` | The transform engine: sessions, the weld, keep-alive, `txMaxStepPct` rate limit (default 25, i.e. 2.5% per tick) |
-| `tray.cpp/.h` | Tray icon, balloon, and menu handling |
-| `tray_draw.h` | Owner-drawn tray menu: the drawing half, kept out of `tray.cpp` |
+| `tray_app/` | `WindTray.exe` (issue #291): `main.cpp` lifecycle (serves one Wind PID, single instance, TaskbarCreated), `tray_icon.cpp` icon and balloons, `tray_menu.cpp` the owner-drawn menu and profile switch, `tray_draw.h` its drawing half |
+| `tray_host.cpp/.h` | Wind.exe side of the tray split: creates the shared block and supervises `WindTray.exe` |
+| `tray_ipc.h` | Pure layout of the block shared with `WindTray.exe` (`Local\Wind_TrayState_v1`): status, frame-pacing ring, `menuOpen` |
 | `tray_status.h` | Pure decisions for what the tray menu shows (engine label, status text) from a published tick-loop snapshot |
 | `tx_cadence.h` | Pure transform write-cadence gates, traced against native Magnifier (issue #204) |
 | `tx_warm.h` | Pure transform warm-keeping: the pulsed rest-tick displacement (`txWarmHz`/`txWarmMode`) that keeps DWM's magnification re-render from going cold between pans |

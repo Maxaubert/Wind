@@ -104,6 +104,7 @@ Section "Wind" SEC_WIND
   ; at any point leaves a Wind that runs.
   File "..\Wind.exe"
   File "..\WindConfig.exe"
+  File "..\WindTray.exe"
   InitPluginsDir
   CreateDirectory "$PLUGINSDIR\ua"
   File "/oname=$PLUGINSDIR\ua\Wind.exe" "..\WindUA.exe"
@@ -126,6 +127,7 @@ Section "Wind" SEC_WIND
 !else
   File "..\Wind.exe"
   File "..\WindConfig.exe"
+  File "..\WindTray.exe"
 !endif
   ; the licence the user accepted, kept next to the app so the terms are always findable
   File "/oname=LICENSE.txt" "..\LICENSE"
@@ -186,6 +188,7 @@ Section "Uninstall"
 
   Delete "$INSTDIR\Wind.exe"
   Delete "$INSTDIR\WindConfig.exe"
+  Delete "$INSTDIR\WindTray.exe"
   Delete "$INSTDIR\LICENSE.txt"
   Delete "$INSTDIR\Uninstall.exe"
   RMDir /r "$INSTDIR\ui"

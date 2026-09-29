@@ -1,5 +1,5 @@
 # Wind UIAccess setup (run elevated). Creates a local self-signed code-signing cert,
-# trusts it, signs Wind.exe, and deploys Wind.exe + WindConfig.exe + ui/dist to
+# trusts it, signs Wind.exe, and deploys Wind.exe + WindTray.exe + WindConfig.exe + ui/dist to
 # C:\Program Files\Wind so UIAccess activates and the config UI is reachable.
 $ErrorActionPreference = 'Stop'
 # Derive paths from the script's own location ($PSScriptRoot = the tools\ dir) so this runs
@@ -10,15 +10,16 @@ try {
     $root = Split-Path -Parent $PSScriptRoot
     $src = "$root\Wind.exe"
     $cfgSrc = "$root\WindConfig.exe"
+    $traySrc = "$root\WindTray.exe"   # built by build.bat uiaccess; plain manifest, NO uiAccess (#291)
     $uiSrc = "$root\ui\dist"
 
     Write-Output "=== 0a. stop any running Wind / WindConfig (dev or deployed) so the exes are not locked ==="
-    Get-Process Wind,WindConfig -ErrorAction SilentlyContinue | Stop-Process -Force
+    Get-Process Wind,WindTray,WindConfig -ErrorAction SilentlyContinue | Stop-Process -Force
     Start-Sleep -Milliseconds 400
 
     Write-Output "=== 0b. build the UIAccess variant (uiAccess=true manifest) ==="
     & cmd /c "`"$root\build.bat`" uiaccess"
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $src)) { throw "build.bat uiaccess failed." }
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $src) -or -not (Test-Path $traySrc)) { throw "build.bat uiaccess failed." }
 
     Write-Output "=== 0c. build the config UI host (npm build of ui + WindConfig.exe) ==="
     & cmd /c "`"$root\build.bat`" config"
@@ -63,19 +64,23 @@ try {
     # quarantining it out of Program Files, which broke the tray's "Open Settings" (issue #86).
     $sigCfg = Set-AuthenticodeSignature -FilePath $cfgSrc -Certificate $cert -HashAlgorithm SHA256
     Write-Output "WindConfig.exe sign status=$($sigCfg.Status)"
+    # WindTray.exe likewise needs no UIAccess (it must NOT have it, #291); signed for the same reason.
+    $sigTray = Set-AuthenticodeSignature -FilePath $traySrc -Certificate $cert -HashAlgorithm SHA256
+    Write-Output "WindTray.exe sign status=$($sigTray.Status)"
 
-    Write-Output "=== 4. deploy Wind.exe, WindConfig.exe and ui\dist to C:\Program Files\Wind ==="
-    Get-Process Wind,WindConfig -ErrorAction SilentlyContinue | Stop-Process -Force
+    Write-Output "=== 4. deploy Wind.exe, WindTray.exe, WindConfig.exe and ui\dist to C:\Program Files\Wind ==="
+    Get-Process Wind,WindTray,WindConfig -ErrorAction SilentlyContinue | Stop-Process -Force
     Start-Sleep -Milliseconds 300
     $dst = "C:\Program Files\Wind"
     New-Item -ItemType Directory -Force $dst | Out-Null
     Copy-Item $src "$dst\Wind.exe" -Force
     Copy-Item $cfgSrc "$dst\WindConfig.exe" -Force
+    Copy-Item $traySrc "$dst\WindTray.exe" -Force
     $uiDst = "$dst\ui\dist"
     if (Test-Path $uiDst) { Remove-Item $uiDst -Recurse -Force }
     New-Item -ItemType Directory -Force "$dst\ui" | Out-Null
     Copy-Item $uiSrc $uiDst -Recurse -Force
-    Write-Output "deployed: Wind.exe, WindConfig.exe, ui\dist\"
+    Write-Output "deployed: Wind.exe, WindTray.exe, WindConfig.exe, ui\dist\"
 
     Write-Output "=== 5. magnifier.ini: NOT deployed - the app owns the single copy in %LOCALAPPDATA% ==="
     # We intentionally do NOT write a magnifier.ini into Program Files. Wind.exe resolves its ini to
