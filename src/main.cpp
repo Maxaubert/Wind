@@ -28,6 +28,7 @@
 #include "render_model.h"
 #include "color_filter.h"
 #include "hdr_info.h"   // issue #288
+#include "cursor_tint.h"   // tinted pointer at 1x (#288)
 #include "magnify_model.h"
 #include "transform_model.h"
 #include "input_router.h"
@@ -816,6 +817,28 @@ static void UpdateColorFilter(TickState& t, bool zoomedNow, bool renderSession, 
     g_color.apply(dwm, !wind::IsIdentity(dwm));
 }
 
+// Tinted pointer at 1x (spec 2026-09-30-cursor-tint-design.md): the hardware pointer is out of the
+// DWM effect's reach, so while the colour is on and Wind is idle the standard pointers are swapped
+// for tinted copies. Idle ticks only; zoom-in restores first, zoom-out invalidates (the engines
+// reload the scheme), and a fullscreen app in front (not the desktop) keeps the pristine pointers.
+static wind::CursorTint g_tint;
+static void UpdateCursorTint(TickState& t) {
+    const bool magnify = t.model && t.model->selfDrivenZoom();
+    const wind::ColorMatrix enc = magnify ? wind::IdentityColorMatrix()
+        : wind::BuildColorMatrix(t.cfg.colorWarmPct / 100.0, t.cfg.colorDimPct / 100.0, false);
+    if (wind::IsIdentity(enc)) { g_tint.restore(); return; }
+    static unsigned long long checkedMs = 0;
+    static bool fsApp = false;
+    const unsigned long long now = GetTickCount64();
+    if (now - checkedMs >= 250) {   // a window-rect query, 4x a second at most
+        checkedMs = now;
+        const HWND fg = GetForegroundWindow();
+        fsApp = ForegroundCoversMonitor(t.mon) && !IsShellDesktopFg(fg);
+    }
+    if (fsApp) g_tint.restore();
+    else g_tint.apply(enc);
+}
+
 static void RunTick(TickState& t) {
     // Idle (1x) colour filter; a zoomed tick re-decides below with the engine known.
     if (!t.prevActive) UpdateColorFilter(t, false, false, nullptr);
@@ -1151,6 +1174,10 @@ static void RunTick(TickState& t) {
         bool enterActive  = !t.prevActive;            // idle -> active (overlay just turned on)
         bool inspectEnter = inspect && !t.prevInspect;
         if (enterActive) {
+            // Pristine pointers back BEFORE any engine hides or captures the pointer: the transform
+            // sprite and the render engine draw the real shape and filter it themselves, so a
+            // tinted source would be tinted twice (#288). Direct swaps, no scheme reload.
+            g_tint.restore();
             t.outlineIdleSec = 0.0;   // each activation starts with the outline fully shown
             // Follow the cursor's monitor (multiMonitor on, only when zoomed). Only reconfigure when
             // it actually changed; retarget() returns false on multi-GPU/failure, in which case we keep
@@ -2165,6 +2192,7 @@ static void RunTick(TickState& t) {
             t.lastSetVirtual = lp;
         }
         t.revealPending = 0;                          // a quick tap may zoom out before the deferred reveal
+        g_tint.invalidate();                          // the engines put the scheme back: re-tint when idle
     } else {
         // Idle: let the transform model release its magnification context shortly after a zoom
         // ends. While a context is alive, DWM composites magnification-aware and every cursor
@@ -2173,6 +2201,7 @@ static void RunTick(TickState& t) {
         // half get the tick (in model=transform the transform IS t.model); others no-op.
         t.model->idleTick();
         if (t.mTransform && t.mTransform != t.model) t.mTransform->idleTick();
+        UpdateCursorTint(t);
     }
     t.prevLvl = lvl;
     t.prevActive = active;
@@ -2346,6 +2375,9 @@ static void RegisterQuickZoomHotkey(HWND hwnd, int vk, int mods) {
 
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == WM_DISPLAYCHANGE) g_hdrOn.store(wind::GetHdrEnabled(nullptr));   // colour space (#288); falls through
+    // A pointer-scheme reload (the user changed scheme or size, or an engine healed it) leaves the
+    // clean scheme in place: take fresh pristine copies; the next idle tick re-tints (#288).
+    if (msg == WM_SETTINGCHANGE && wp == SPI_SETCURSORS) g_tint.capture();
     if (msg == WM_HOTKEY && wp == kQuitHotkeyId) { PostQuitMessage(0); return 0; }
     if (msg == WM_HOTKEY && wp == kHideCursorHotkeyId) {
         if (g_tick) g_tick->cursorHidden = !g_tick->cursorHidden;
@@ -2687,6 +2719,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     g_input.setBallistics(ReadMouseBallistics());
     Tray::Add(hwnd, hInst);
 
+    g_tint.capture();   // the scheme is clean here: RestoreInputState reloaded it at start-up (#288)
     TickState ts(model.get(), startupMon, cfg);
     ts.mRender = model.get();
     ts.mTransform = model2.get();
@@ -3076,6 +3109,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     UnregisterHotKey(hwnd, kQuickZoomHotkeyId);
     EndGameInspect(ts);  // quitting mid-game-inspect hands foreground back to the game
     g_color.shutdown();  // colour filter back to identity while the runtime still lives (#288)
+    g_tint.restore();    // pristine pointers (the exit scheme reload below heals them too)
     model->shutdown();   // restores cursor + tears down D3D/overlay
     // Hybrid holds TWO models; quitting while zoomed in (or shortly after) a transform session
     // left the transform half's magnification context + cursor state untouched without this.
