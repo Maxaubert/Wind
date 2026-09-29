@@ -90,3 +90,31 @@ creates that watcher unconditionally (`network_change_notifier_win.cc`), so ther
 it. Settings now recovers: `ProcessFailed` -> recreate the engine (page process: reload), at most 3 a
 minute (`src/config_ui/webview_recover.h`), and the page's unapplied edits are mirrored to the host and
 handed back. Verified by killing the engine with a staged change: back in ~0.3 s with the edit kept.
+
+## How other night-light apps do it (research 2026-09-30, sources cited)
+
+- f.lux, Iris, LightBulb, Night Ember tint with the GDI gamma ramp (`SetDeviceGammaRamp`, a 1D
+  256-entry table per channel; LightBulb source: https://github.com/Tyrrrz/LightBulb).
+- They have THE SAME pointer problem: f.lux's FAQ says a bright white cursor "happens when your
+  videocard displays uses a 'hardware cursor'" and ships "Software mouse cursor when needed"
+  (https://justgetflux.com/faq.html); Iris has "use software mouse cursor"
+  (https://iristech.co/troubleshooting/). Wind's tinted-pointer swap is the same class of fix.
+- They are WEAKER under HDR: Microsoft documents the gamma ramp as "undefined behavior in HDR modes"
+  (https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-setdevicegammaramp); f.lux
+  users report it stops working with HDR/Advanced Color
+  (https://forum.justgetflux.com/topic/6163/windows-10-with-hdr-and-advanced-color-working-with-f-lux).
+  Ramps are also reset by sleep/display changes (apps re-apply constantly) and deep warm shifts need
+  the admin `GdiIcmGammaRange` registry change.
+- Windows Night light: Microsoft says it "might also use" the post-composition display pipeline
+  (3x3 linear matrix + 1D LUT), which apps can only reach through an ICC profile with the private
+  `MHC2` tag (https://learn.microsoft.com/en-us/windows/win32/wcs/display-calibration-mhc). That fits
+  the measurements above (invisible to capture, gamma ramp identity, hardware cursor tinted).
+- Rejected for Wind: dwm_lut (injects into dwm.exe; https://github.com/ledoge/dwm_lut), NVAPI via
+  novideo_srgb (NVIDIA-only, fails under HDR, its README admits cursor issues;
+  https://github.com/ledoge/novideo_srgb), `IDXGIOutput::SetGammaControl` (exclusive fullscreen only),
+  `D3DKMTSetGammaRamp` (no public user-mode contract).
+- The one untested lead: an MHC2 profile associated at runtime
+  (`ColorProfileAddDisplayAssociation`) would sit in Night light's own pipeline (HDR-capable,
+  likely reaching the pointer). Unknowns: pointer behaviour (https://github.com/dantmnf/MHC2 notes a
+  "buggy mouse cursor and MPO composition" with MHC active), change latency, stacking with Night
+  light, and it would displace a user's own calibration profile.
