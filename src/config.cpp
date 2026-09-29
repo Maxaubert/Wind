@@ -258,7 +258,7 @@ Config ParseConfig(const std::string& text) {
     c.brightness      = clampd(c.brightness,      0.5, 1.5);
     c.colorFilter     = (int)clampd(c.colorFilter, 0, 6);
     c.colorWarmPct    = (int)clampd(c.colorWarmPct, 10, 100);
-    c.colorDimPct     = (int)clampd(c.colorDimPct, 20, 100);
+    c.colorDimPct     = (int)clampd(c.colorDimPct, 5, 100);
     c.quickZoomDefault  = clampd(c.quickZoomDefault, 1.0, 50.0);
     if (c.outlineThickness < 1)  c.outlineThickness = 1;
     if (c.outlineThickness > 40) c.outlineThickness = 40;
@@ -452,7 +452,7 @@ std::string DefaultIniText() {
                "brightness=1.0\n"
                "; colorFilter: 0 off, 1 invert, 2 greyscale, 3 warm, 4 yellow on black, 5 white on blue, 6 green on black\n"
                "colorFilter=0\n"
-               "; colorWarmPct: Warm strength (10-100); colorDimPct: artificial brightness (20-100, 100 = normal)\n"
+               "; colorWarmPct: Warm strength (10-100); colorDimPct: artificial brightness (5-100, 100 = normal)\n"
                "colorWarmPct=50\n"
                "colorDimPct=100\n"
                "; colorAt1x: 1 = filter also when not zoomed; colorToggleVk/Mods: optional on/off hotkey\n"

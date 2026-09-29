@@ -510,7 +510,7 @@ TEST_CASE("colour filter keys: defaults, parse and clamps (#288)") {
     Config c = ParseConfig("colorFilter=1\ncolorWarmPct=80\ncolorDimPct=60\ncolorAt1x=0\ncolorToggleVk=67\ncolorToggleMods=3\n");
     CHECK(c.colorFilter == 1); CHECK(c.colorWarmPct == 80); CHECK(c.colorDimPct == 60); CHECK(c.colorAt1x == 0);
     CHECK(c.colorToggleVk == 67); CHECK(c.colorToggleMods == 3);
-    Config x = ParseConfig("colorFilter=42\ncolorWarmPct=0\ncolorDimPct=5\ncolorToggleVk=1\n");
-    CHECK(x.colorFilter == 6); CHECK(x.colorWarmPct == 10); CHECK(x.colorDimPct == 20);
+    Config x = ParseConfig("colorFilter=42\ncolorWarmPct=0\ncolorDimPct=1\ncolorToggleVk=1\n");
+    CHECK(x.colorFilter == 6); CHECK(x.colorWarmPct == 10); CHECK(x.colorDimPct == 5);
     CHECK(x.colorToggleVk == 0);   // left click is a forbidden bind
 }

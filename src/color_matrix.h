@@ -5,6 +5,7 @@
 // matrix, so out[j] = sum_i in[i] * m[i][j] and row 4 holds the offsets. The same numbers feed the
 // render engine's pixel shader, which cannot use the DWM effect (its capture already contains it:
 // docs/COLOUR-FILTER-FINDINGS.md).
+#include <cmath>
 namespace wind {
 
 enum class ColorFilter { Off = 0, Invert, Greyscale, Warm, YellowOnBlack, WhiteOnBlue, GreenOnBlack };
@@ -45,11 +46,44 @@ inline bool SameMatrix(const ColorMatrix& a, const ColorMatrix& b) {
     return true;
 }
 
-// warm01: Warm strength 0..1. dim01: brightness 0.2..1 (1 = no dim). Out-of-range values clamp.
+// Lowest brightness the dim control reaches. Not 0: a black screen with the filter hotkey unbound
+// would look like a dead display.
+inline constexpr double kMinDim01 = 0.05;
+
+// Channel gains for a blackbody colour temperature, normalised so 6500 K is white (red stays 1
+// below that). Tanner Helland's fit to the CIE blackbody data, accurate to a few percent, which is
+// all a screen tint needs. 1200 K gives about (1, 0.34, 0): the orange of Night light at full.
+inline void KelvinGains(double kelvin, double& r, double& g, double& b) {
+    auto raw = [](double k, double& rr, double& gg, double& bb) {
+        const double t = k / 100.0;
+        rr = t <= 66 ? 1.0 : 329.698727446 * std::pow(t - 60, -0.1332047592) / 255.0;
+        gg = t <= 66 ? (99.4708025861 * std::log(t) - 161.1195681661) / 255.0
+                     : 288.1221695283 * std::pow(t - 60, -0.0755148492) / 255.0;
+        bb = t >= 66 ? 1.0 : t <= 19 ? 0.0 : (138.5177312231 * std::log(t - 10) - 305.0447927307) / 255.0;
+        auto c01 = [](double v) { return v < 0 ? 0.0 : (v > 1 ? 1.0 : v); };
+        rr = c01(rr); gg = c01(gg); bb = c01(bb);
+    };
+    double wr, wg, wb, cr, cg, cb;
+    raw(6500.0, wr, wg, wb);
+    raw(kelvin, cr, cg, cb);
+    r = cr / wr; g = cg / wg; b = cb / wb;
+    if (r > 1) r = 1;
+    if (g > 1) g = 1;
+    if (b > 1) b = 1;
+}
+
+// Warm strength 0..1 -> colour temperature 6500 K..1200 K (Night light's range), linear in mireds
+// so equal slider steps look like equal steps of warmth.
+inline double WarmKelvin(double warm01) {
+    const double m0 = 1e6 / 6500.0, m1 = 1e6 / 1200.0;
+    return 1e6 / (m0 + (m1 - m0) * warm01);
+}
+
+// warm01: Warm strength 0..1. dim01: brightness kMinDim01..1 (1 = no dim). Out-of-range values clamp.
 inline ColorMatrix BuildColorMatrix(ColorFilter f, double warm01, double dim01) {
     auto clamp = [](double v, double lo, double hi) { return v < lo ? lo : (v > hi ? hi : v); };
     warm01 = clamp(warm01, 0.0, 1.0);
-    dim01 = clamp(dim01, 0.2, 1.0);
+    dim01 = clamp(dim01, kMinDim01, 1.0);
     const double w[3] = { 0.2126, 0.7152, 0.0722 };   // Rec.709 luma
     ColorMatrix m = IdentityColorMatrix();
     auto twoColour = [&](const double fg[3], const double bg[3]) {
@@ -70,10 +104,14 @@ inline ColorMatrix BuildColorMatrix(ColorFilter f, double warm01, double dim01) 
             for (int i = 0; i < 3; ++i)
                 for (int j = 0; j < 3; ++j) m.m[i][j] = (float)w[i];
             break;
-        case ColorFilter::Warm:
-            m.m[1][1] = (float)(1.0 - 0.25 * warm01);
-            m.m[2][2] = (float)(1.0 - 0.6 * warm01);
+        case ColorFilter::Warm: {
+            // A colour temperature, like Night light: red kept, green and blue cut along the
+            // blackbody curve (the old fixed 25%/60% cut read as dim pink, field 2026-09-29).
+            double r, g, b;
+            KelvinGains(WarmKelvin(warm01), r, g, b);
+            m.m[0][0] = (float)r; m.m[1][1] = (float)g; m.m[2][2] = (float)b;
             break;
+        }
         case ColorFilter::YellowOnBlack: { const double fg[3] = { 1, 1, 0 }, bg[3] = { 0, 0, 0 }; m = twoColour(fg, bg); break; }
         case ColorFilter::WhiteOnBlue:   { const double fg[3] = { 1, 1, 1 }, bg[3] = { 0, 0, 0.5 }; m = twoColour(fg, bg); break; }
         case ColorFilter::GreenOnBlack:  { const double fg[3] = { 0, 1, 0 }, bg[3] = { 0, 0, 0 }; m = twoColour(fg, bg); break; }
