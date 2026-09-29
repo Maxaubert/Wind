@@ -493,7 +493,7 @@ TEST_CASE("tracking settings: defaults and parsing (issue #276)") {
     CHECK(d.trackFocus == 0);
     CHECK(d.trackAlign == 0);
     CHECK(d.mouseAlign == 0);
-    CHECK(d.trackGlideMs == 150);
+    CHECK(d.trackGlideMs == 200); CHECK(d.trackGlideMode == 1);
     CHECK(d.trackMarginPct == 15);
     CHECK(d.trackLog == 0);
     Config c = ParseConfig("trackCaret=0\ntrackFocus=1\ntrackAlign=1\nmouseAlign=1\n"

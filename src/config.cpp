@@ -432,7 +432,7 @@ std::string DefaultIniText() {
                "; mouseAlign: mouse pointer, 0=keep centred, 1=keep within the edges\n"
                "mouseAlign=0\n"
                "; trackGlideMs: how long the view takes to glide to the caret/focus/pointer (ms)\n"
-               "trackGlideMs=150\n"
+               "trackGlideMs=200\n"
                "; trackMarginPct: within-the-edges margin, percent of the view on each side\n"
                "trackMarginPct=15\n"
                "; mouseMarginPct: mouse edge mode, how close (percent of the view) the pointer gets to the edge before the view moves\n"
