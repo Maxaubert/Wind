@@ -1585,6 +1585,9 @@ static void RunTick(TickState& t) {
             const unsigned long long nowMs = GetTickCount64();
             if (vi.buttonDown) t.lastButtonMs = nowMs;
             vi.msSinceButton = t.lastButtonMs ? double(nowMs - t.lastButtonMs) : 1e9;
+            // Keyboard-driven only (#289). Without the keyboard hook there is no timestamp: no gate.
+            const unsigned long long lastKey = g_input.lastAnyKeyDownMs();
+            vi.msSinceKey = !g_input.kbHookActive() ? 0.0 : (lastKey ? double(nowMs - lastKey) : 1e9);
             vi.dtMs = dt * 1000.0;
             vi.snap = g_track.snapshot();
             const wind::ViewOwner was = t.viewOwner.owner;

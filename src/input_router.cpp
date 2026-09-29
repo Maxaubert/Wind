@@ -234,6 +234,7 @@ static LRESULT CALLBACK KbProc(int code, WPARAM wParam, LPARAM lParam) {
         int vk = static_cast<int>(ks->vkCode);
         bool down = (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN);
         bool up   = (wParam == WM_KEYUP   || wParam == WM_SYSKEYUP);
+        if (down) g_router->noteAnyKeyDown(GetTickCount64());   // any key: tracking's keyboard gate (#289)
         // Only bound (non-forbidden) keys are tracked/swallowed; every other keystroke passes through
         // untouched. isBoundKey already range-checks vk and excludes IsForbiddenBindVk keys.
         if ((down || up) && g_router->isBoundKey(vk)) {

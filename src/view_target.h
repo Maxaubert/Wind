@@ -11,6 +11,9 @@
 //    field-reported wobble.)
 //  - Caret/focus changes within kClickQuietMs of a mouse button are the click's own doing
 //    (opening a page, clicking into a field): they are consumed without taking the view.
+//  - And they need a KEY: a caret/focus change takes the view only if a key went down within
+//    kKeyDrivenMs (issue #289). Scrolling a page moves a focused control's caret on screen with
+//    no key at all (field: the Settings page dragged the view while scrolling).
 #include <cmath>
 namespace wind {
 enum class ViewOwner { Mouse, Caret, Focus };
@@ -29,11 +32,13 @@ struct ViewOwnerInputs {
     double mouseDx = 0, mouseDy = 0;   // real pointer movement this tick, px
     bool buttonDown = false;
     double msSinceButton = 1e9;   // time since a mouse button was last down
+    double msSinceKey = 0;        // time since any key went down (0 when unknown: no gate)
     double dtMs = 0;
     TrackSnapshot snap;
 };
 inline constexpr double kMouseTakeoverPx = 3.0, kMouseTakeoverWindowMs = 100.0;
 inline constexpr double kClickQuietMs = 1000.0;
+inline constexpr double kKeyDrivenMs = 1000.0;
 
 inline ViewOwner StepViewOwner(ViewOwnerState& s, const ViewOwnerInputs& in) {
     s.warpPointer = false;
@@ -65,7 +70,7 @@ inline ViewOwner StepViewOwner(ViewOwnerState& s, const ViewOwnerInputs& in) {
     // A new tracking event, unless a recent click caused it.
     if (in.snap.seq != s.lastSeq) {
         s.lastSeq = in.snap.seq;
-        if (in.msSinceButton >= kClickQuietMs) {
+        if (in.msSinceButton >= kClickQuietMs && in.msSinceKey <= kKeyDrivenMs) {
             if (in.snap.kind == TrackKind::Caret && in.trackCaret) s.owner = ViewOwner::Caret;
             else if (in.snap.kind == TrackKind::Focus && in.trackFocus) s.owner = ViewOwner::Focus;
         }

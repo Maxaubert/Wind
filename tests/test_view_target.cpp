@@ -69,3 +69,19 @@ TEST_CASE("tracking turned off mid-caret goes straight back to the mouse, no war
     CHECK(StepViewOwner(s, in) == ViewOwner::Mouse);
     CHECK_FALSE(s.warpPointer);
 }
+
+TEST_CASE("caret or focus changes need a recent key: scrolling moves a caret with no key (#289)") {
+    ViewOwnerState s; auto in = Base();
+    in.msSinceKey = 5000; in.snap = Snap(TrackKind::Caret, 1);
+    CHECK(StepViewOwner(s, in) == ViewOwner::Mouse);   // no key: consumed, not followed
+    in.msSinceKey = 5000; CHECK(StepViewOwner(s, in) == ViewOwner::Mouse);   // and it never fires late
+    in.msSinceKey = 80; in.snap = Snap(TrackKind::Caret, 2);
+    CHECK(StepViewOwner(s, in) == ViewOwner::Caret);   // typed: followed
+}
+TEST_CASE("focus by Tab follows; focus moved by the app on its own does not (#289)") {
+    ViewOwnerState s; auto in = Base();
+    in.msSinceKey = 3000; in.snap = Snap(TrackKind::Focus, 1);
+    CHECK(StepViewOwner(s, in) == ViewOwner::Mouse);
+    in.msSinceKey = 40; in.snap = Snap(TrackKind::Focus, 2);
+    CHECK(StepViewOwner(s, in) == ViewOwner::Focus);
+}
