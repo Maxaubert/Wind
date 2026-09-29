@@ -244,7 +244,9 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
         }
         g_recovered = false;
     } else if (type == "draft") {
-        g_draftJson = JsonField(j, "json");
+        // While a recovery is pending the draft held here is the one to hand back; nothing the new
+        // page reports before its config arrives may replace it.
+        if (!g_recovered) g_draftJson = JsonField(j, "json");
     } else if (type == "setConfig") {
         std::string key = JsonField(j, "key"), value = JsonField(j, "value");
         if (!key.empty()) {
