@@ -12,7 +12,8 @@ TEST_CASE("keybind safety rules match the shared case list (#285)") {
     std::string line;
     int cases = 0;
     while (std::getline(f, line)) {
-        if (line.empty() || line[0] == '#') continue;
+        if (!line.empty() && line.back() == 0x0D) line.pop_back();   // CRLF checkouts
+        if (line.empty() || line[0] == 0x23) continue;
         std::istringstream in(line);
         std::string kind, want;
         in >> kind;

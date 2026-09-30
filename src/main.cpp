@@ -372,6 +372,8 @@ struct TickState {
                                                //   present divisor (0 = present tick)
     double quickZoomStored    = 0.0;           // remembered quick-zoom level (0 = none yet); in-memory
     bool   prevInHeld         = false;         // for rising-edge detection of the zoom-in channel
+    bool   prevInPlain        = false;         // quick-zoom tap edges: binds without the modifier (#285)
+    bool   prevOutPlain       = false;
     bool   prevOutHeld        = false;
     // Diagnostics (issue #113): held-state edge logging for the intermittent stuck side-button. Track
     // the previous-tick held flags + how long the current held episode has lasted, so we can log a
@@ -858,10 +860,13 @@ static void RunTick(TickState& t) {
             // this the hook would keep firing the OLD button (the new VK works via GetAsyncKeyState
             // but the mouse mapping is captured once in g_input.start at app launch).
             if (nc.zoomInButton != t.cfg.zoomInButton || nc.zoomOutButton != t.cfg.zoomOutButton
-             || nc.zoomInButton2 != t.cfg.zoomInButton2 || nc.zoomOutButton2 != t.cfg.zoomOutButton2) {
-                g_input.setButtons(nc.zoomInButton, nc.zoomInButton2,
-                                   nc.zoomOutButton, nc.zoomOutButton2);
+             || nc.zoomInButton2 != t.cfg.zoomInButton2 || nc.zoomOutButton2 != t.cfg.zoomOutButton2
+             || nc.zoomInButtonMods != t.cfg.zoomInButtonMods || nc.zoomOutButtonMods != t.cfg.zoomOutButtonMods
+             || nc.zoomInButton2Mods != t.cfg.zoomInButton2Mods || nc.zoomOutButton2Mods != t.cfg.zoomOutButton2Mods) {
+                g_input.setButtonBinds(nc.zoomInButton, nc.zoomInButtonMods, nc.zoomInButton2, nc.zoomInButton2Mods,
+                                       nc.zoomOutButton, nc.zoomOutButtonMods, nc.zoomOutButton2, nc.zoomOutButton2Mods);
             }
+            g_input.setWheelMods(nc.zoomWheelMods);   // scroll-wheel zoom (#285); one relaxed store
             // Re-bind the keyboard hook's tracked/swallowed keys when any keyboard zoom/recenter
             // bind changed (else the hook keeps swallowing the OLD key and ignores the new one).
             if (nc.zoomInVk != t.cfg.zoomInVk || nc.zoomOutVk != t.cfg.zoomOutVk
@@ -1005,12 +1010,31 @@ static void RunTick(TickState& t) {
         return true;
     };
     auto comboHeld = [&](int vk, int mods) { return keyDown(vk) && modsHeld(mods); };
-    bool inHeld  = g_input.state().inHeld.load()
-        || comboHeld(t.cfg.zoomInVk,  t.cfg.zoomInMods)
-        || comboHeld(t.cfg.zoomInVk2, t.cfg.zoomInMods2);
-    bool outHeld = g_input.state().outHeld.load()
-        || comboHeld(t.cfg.zoomOutVk,  t.cfg.zoomOutMods)
-        || comboHeld(t.cfg.zoomOutVk2, t.cfg.zoomOutMods2);
+    // Quick-zoom modifier mode (see below): holding the modifier turns a zoom-key press into a
+    // quick-zoom tap. A bind that ITSELF includes that modifier (Ctrl+Alt+click with the Ctrl
+    // modifier, #285) is a normal hold-to-zoom bind, so every held bind is sorted into "includes the
+    // quick-zoom modifier" (qz) or not (plain).
+    const bool hotkeyMode = t.cfg.quickZoomHotkeyMode != 0;
+    const std::string& qzMod = t.cfg.quickZoomModifier;
+    int quickZoomModVk = VK_CONTROL, qzBit = 1;
+    if      (_stricmp(qzMod.c_str(), "alt")   == 0) { quickZoomModVk = VK_MENU;  qzBit = 2; }
+    else if (_stricmp(qzMod.c_str(), "shift") == 0) { quickZoomModVk = VK_SHIFT; qzBit = 4; }
+    const bool modifierActive = !hotkeyMode && _stricmp(qzMod.c_str(), "none") != 0;
+    bool inPlain = false, inQz = false, outPlain = false, outQz = false;
+    auto sortHeld = [&](bool held, int mods, bool& plain, bool& qz) {
+        if (!held) return;
+        if (modifierActive && (mods & qzBit)) qz = true; else plain = true;
+    };
+    sortHeld(g_input.state().inHeld.load(), g_input.state().inHeldMods.load(), inPlain, inQz);
+    sortHeld(comboHeld(t.cfg.zoomInVk,  t.cfg.zoomInMods),  t.cfg.zoomInMods,  inPlain, inQz);
+    sortHeld(comboHeld(t.cfg.zoomInVk2, t.cfg.zoomInMods2), t.cfg.zoomInMods2, inPlain, inQz);
+    sortHeld(g_input.state().outHeld.load(), g_input.state().outHeldMods.load(), outPlain, outQz);
+    sortHeld(comboHeld(t.cfg.zoomOutVk,  t.cfg.zoomOutMods),  t.cfg.zoomOutMods,  outPlain, outQz);
+    sortHeld(comboHeld(t.cfg.zoomOutVk2, t.cfg.zoomOutMods2), t.cfg.zoomOutMods2, outPlain, outQz);
+    bool inHeld  = inPlain || inQz;
+    bool outHeld = outPlain || outQz;
+    // Scroll-wheel zoom (#285): whole steps the hook swallowed since the last tick.
+    const int wheelSteps = g_input.drainWheelSteps();
     // Apply the live zoom profile every frame (free hot-reload; setProfile does not reset level).
     // (The old transform <=1.0x ramp-speed cap was a blind TDR mitigation; the resets were
     // root-caused elsewhere - issue #148 - so the user's configured speed applies everywhere.)
@@ -1021,14 +1045,11 @@ static void RunTick(TickState& t) {
     // (Ctrl/Alt/Shift; "None" = off) and tap a zoom key. While the modifier is held it toggles quick
     // zoom (below) instead of hold-zooming, so suppress the hold-zoom direction (the toggle snaps the
     // level). Hotkey mode (==1): a dedicated hotkey toggles it and the modifier is inert here.
-    bool hotkeyMode = t.cfg.quickZoomHotkeyMode != 0;
-    const std::string& qzMod = t.cfg.quickZoomModifier;
-    int quickZoomModVk = VK_CONTROL;
-    if      (_stricmp(qzMod.c_str(), "alt")   == 0) quickZoomModVk = VK_MENU;
-    else if (_stricmp(qzMod.c_str(), "shift") == 0) quickZoomModVk = VK_SHIFT;
-    bool modifierActive = !hotkeyMode && _stricmp(qzMod.c_str(), "none") != 0;
     bool modKeyDown = modifierActive && (GetAsyncKeyState(quickZoomModVk) & 0x8000) != 0;
-    t.zoom.setDirection(modKeyDown ? ZoomDir::None : ResolveDirection(inHeld, outHeld));
+    // With the modifier down only binds that include it hold-zoom; the others are quick-zoom taps.
+    t.zoom.setDirection(modKeyDown ? ResolveDirection(inQz, outQz) : ResolveDirection(inHeld, outHeld));
+    if (wheelSteps != 0 && !t.model->selfDrivenZoom())   // native Magnifier gets its own notch below
+        t.zoom.stepTarget(wheelSteps, t.cfg.zoomWheelStepPct / 100.0);
     // Clamp the dt fed to the zoom so a single long tick (cold first capture, alt-tab, any hitch)
     // can't jump the zoom level mid-ramp - it should always ease in/out at a steady rate regardless
     // of frame-time spikes. Raw dt is kept below for the diagnostics block (which must see true
@@ -1077,7 +1098,10 @@ static void RunTick(TickState& t) {
     // diagnostics block at the bottom is skipped too; the magnify category logs direction edges.)
     if (t.model->selfDrivenZoom()) {
         int rdx, rdy; g_input.drainRaw(rdx, rdy);            // keep the raw accumulator drained
-        t.model->nativeZoomTick((inHeld ? 1 : 0) - (outHeld ? 1 : 0), t.cfg);
+        // Native Magnifier: a wheel step is one tick of its own notch drive (#285).
+        int nativeDir = (inHeld ? 1 : 0) - (outHeld ? 1 : 0);
+        if (nativeDir == 0 && wheelSteps != 0) nativeDir = wheelSteps > 0 ? 1 : -1;
+        t.model->nativeZoomTick(nativeDir, t.cfg);
         t.prevInHeld = inHeld; t.prevOutHeld = outHeld;
         t.prevLvl = 1.0; t.prevActive = false; t.prevInspect = false;
         return;
@@ -1089,8 +1113,10 @@ static void RunTick(TickState& t) {
     // flag) OR the modifier held + a rising edge of either zoom key (modifier mode). The snap flows
     // into the SAME-tick zoom-in/out transitions below (which key off lvl vs prevLvl).
     // prevInHeld/prevOutHeld update every tick (outside the gate) so re-enabling can't fire a stale edge.
-    bool inEdge  = inHeld  && !t.prevInHeld;
-    bool outEdge = outHeld && !t.prevOutHeld;
+    // Quick-zoom taps come only from binds WITHOUT the modifier (a bind that includes it zooms).
+    bool inEdge  = inPlain  && !t.prevInPlain;
+    bool outEdge = outPlain && !t.prevOutPlain;
+    t.prevInPlain = inPlain; t.prevOutPlain = outPlain;
     t.prevInHeld = inHeld; t.prevOutHeld = outHeld;
     bool hotkeyTrigger = t.quickZoomHotkey.exchange(false);   // always consume (only set in hotkey mode)
     bool modZoomTrigger = modKeyDown && (inEdge || outEdge);  // modKeyDown implies modifier mode + enabled
@@ -2595,6 +2621,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         MessageBoxW(nullptr, L"Failed to install the mouse hook.", L"Wind", MB_ICONERROR);
         return 1;
     }
+    // Button binds with modifiers + left/right/middle click, and the wheel (#285).
+    g_input.setButtonBinds(cfg.zoomInButton, cfg.zoomInButtonMods, cfg.zoomInButton2, cfg.zoomInButton2Mods,
+                           cfg.zoomOutButton, cfg.zoomOutButtonMods, cfg.zoomOutButton2, cfg.zoomOutButton2Mods);
+    g_input.setWheelMods(cfg.zoomWheelMods);
     g_track.start();   // tracking (issue #276): caret/focus watcher, starts alongside the input router
     // Configure the keyboard hook's bound keys (zoom in/out primary+alt, recenter, Inspect-mode
     // cursor-lock, and magnifier-model swap) so it swallows them and tracks their state. Kept in

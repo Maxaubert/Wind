@@ -24,9 +24,15 @@ public:
     double level() const { return level_; }
     void reset();                  // level=min, dir=None, held cleared
     void setLevel(double l);       // instant snap to a level (clamped to [min,max]); dir_ untouched
+    // Scroll-wheel zoom (#285): move a TARGET level by x(1+step) per step (negative = out), clamped;
+    // tick() glides the level to it. Steps stack on the target, so fast scrolling reads as one
+    // continuous zoom. A held zoom direction takes over at once (the target is dropped).
+    void stepTarget(int steps, double step);
+    bool hasTarget() const { return target_ > 0.0; }
 private:
     double minLevel_, maxLevel_;
     double level_;
+    double target_ = 0.0;                      // wheel target level (0 = none)
     ZoomDir dir_ = ZoomDir::None;
     double inSpeed_ = 1.0, outSpeed_ = 1.0;   // defaults reproduce today's behavior
     bool   smooth_ = false;
