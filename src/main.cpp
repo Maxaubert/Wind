@@ -876,6 +876,7 @@ static void RunTick(TickState& t) {
                 g_input.setKeys(nc.zoomInVk, nc.zoomInVk2, nc.zoomOutVk, nc.zoomOutVk2, nc.recenterVk,
                                 nc.cursorLockVk);
             }
+            g_input.setKeyMods(nc.zoomInMods, nc.zoomInMods2, nc.zoomOutMods, nc.zoomOutMods2);
             if (nc.hideCursorVk != t.cfg.hideCursorVk || nc.hideCursorMods != t.cfg.hideCursorMods) {
                 RegisterHideCursorHotkey(t.hwnd, nc.hideCursorVk, nc.hideCursorMods);
             }
@@ -1049,8 +1050,9 @@ static void RunTick(TickState& t) {
     bool modKeyDown = modifierActive && (GetAsyncKeyState(quickZoomModVk) & 0x8000) != 0;
     // With the modifier down only binds that include it hold-zoom; the others are quick-zoom taps.
     t.zoom.setDirection(modKeyDown ? ResolveDirection(inQz, outQz) : ResolveDirection(inHeld, outHeld));
-    if (wheelSteps != 0 && !t.model->selfDrivenZoom())   // native Magnifier gets its own notch below
-        t.zoom.stepTarget(wheelSteps, t.cfg.zoomWheelStepPct / 100.0);
+    // The wheel zooms at the user's zoom speeds (a notch = 0.1 s of holding the bind).
+    if (wheelSteps != 0 && !t.model->selfDrivenZoom())   // native Magnifier gets its own notches below
+        t.zoom.wheelNotches(wheelSteps);
     // Clamp the dt fed to the zoom so a single long tick (cold first capture, alt-tab, any hitch)
     // can't jump the zoom level mid-ramp - it should always ease in/out at a steady rate regardless
     // of frame-time spikes. Raw dt is kept below for the diagnostics block (which must see true
@@ -1099,10 +1101,9 @@ static void RunTick(TickState& t) {
     // diagnostics block at the bottom is skipped too; the magnify category logs direction edges.)
     if (t.model->selfDrivenZoom()) {
         int rdx, rdy; g_input.drainRaw(rdx, rdy);            // keep the raw accumulator drained
-        // Native Magnifier: a wheel step is one tick of its own notch drive (#285).
-        int nativeDir = (inHeld ? 1 : 0) - (outHeld ? 1 : 0);
-        if (nativeDir == 0 && wheelSteps != 0) nativeDir = wheelSteps > 0 ? 1 : -1;
+        const int nativeDir = (inHeld ? 1 : 0) - (outHeld ? 1 : 0);
         t.model->nativeZoomTick(nativeDir, t.cfg);
+        t.model->nativeWheelNotches(wheelSteps);   // every wheel notch becomes one Magnifier notch (#285)
         t.prevInHeld = inHeld; t.prevOutHeld = outHeld;
         t.prevLvl = 1.0; t.prevActive = false; t.prevInspect = false;
         return;
@@ -2404,6 +2405,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 USHORT bf = m.usButtonFlags;
                 if (bf & RI_MOUSE_BUTTON_4_UP) g_input.rawButtonUp(1);
                 if (bf & RI_MOUSE_BUTTON_5_UP) g_input.rawButtonUp(2);
+                // Same net for left/right/middle click binds (#285); a no-op unless one holds a zoom.
+                if (bf & RI_MOUSE_LEFT_BUTTON_UP)   g_input.rawButtonUp(3);
+                if (bf & RI_MOUSE_RIGHT_BUTTON_UP)  g_input.rawButtonUp(4);
+                if (bf & RI_MOUSE_MIDDLE_BUTTON_UP) g_input.rawButtonUp(5);
                 if (!g_input.hookActive()) {
                     if (bf & RI_MOUSE_BUTTON_4_DOWN) g_input.setButtonState(1, true);
                     if (bf & RI_MOUSE_BUTTON_5_DOWN) g_input.setButtonState(2, true);
@@ -2618,21 +2623,20 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // means ownership can never move once MagInitialize has run, so this needs a restart to change.
     wind::SetMagThreadClaimEnabled(cfg.txHookWrite != 0);
     wind::SetHookFrameGate(cfg.txHookWrite == 2);   // mode 2 = one hook write per composite
+    // Every bind, modifiers included, is in place BEFORE the hooks go live (#285): installed first
+    // with bare button ids, a Ctrl+Alt+left bind briefly matched (and ate) plain left clicks.
+    g_input.setButtonBinds(cfg.zoomInButton, cfg.zoomInButtonMods, cfg.zoomInButton2, cfg.zoomInButton2Mods,
+                           cfg.zoomOutButton, cfg.zoomOutButtonMods, cfg.zoomOutButton2, cfg.zoomOutButton2Mods);
+    g_input.setWheelMods(cfg.zoomWheelMods);
+    g_input.setKeys(cfg.zoomInVk, cfg.zoomInVk2, cfg.zoomOutVk, cfg.zoomOutVk2, cfg.recenterVk,
+                    cfg.cursorLockVk);
+    g_input.setKeyMods(cfg.zoomInMods, cfg.zoomInMods2, cfg.zoomOutMods, cfg.zoomOutMods2);
     if (!g_input.start(cfg.zoomInButton, cfg.zoomInButton2, cfg.zoomOutButton, cfg.zoomOutButton2,
                        /*swallow=*/true)) {
         MessageBoxW(nullptr, L"Failed to install the mouse hook.", L"Wind", MB_ICONERROR);
         return 1;
     }
-    // Button binds with modifiers + left/right/middle click, and the wheel (#285).
-    g_input.setButtonBinds(cfg.zoomInButton, cfg.zoomInButtonMods, cfg.zoomInButton2, cfg.zoomInButton2Mods,
-                           cfg.zoomOutButton, cfg.zoomOutButtonMods, cfg.zoomOutButton2, cfg.zoomOutButton2Mods);
-    g_input.setWheelMods(cfg.zoomWheelMods);
     g_track.start();   // tracking (issue #276): caret/focus watcher, starts alongside the input router
-    // Configure the keyboard hook's bound keys (zoom in/out primary+alt, recenter, Inspect-mode
-    // cursor-lock, and magnifier-model swap) so it swallows them and tracks their state. Kept in
-    // sync on hot-reload below.
-    g_input.setKeys(cfg.zoomInVk, cfg.zoomInVk2, cfg.zoomOutVk, cfg.zoomOutVk2, cfg.recenterVk,
-                    cfg.cursorLockVk);
 
     // Target monitor for this session: the cursor's monitor when multiMonitor is on, else the
     // primary. The first zoom-in re-checks and retargets if the cursor moved to another monitor.

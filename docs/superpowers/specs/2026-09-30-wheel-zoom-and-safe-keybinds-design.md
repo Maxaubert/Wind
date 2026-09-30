@@ -66,7 +66,11 @@ not a lone tap. Injected with `LLKHF_INJECTED`; Wind's own hook passes it throug
 
 ## 5. Wheel zoom
 
-- Config: `zoomWheelMods` (modifier mask, 0 = off), `zoomWheelStepPct` (per notch, 5-100, default 25).
+- Config: `zoomWheelMods` (modifier mask, 0 = off). AMENDED 2026-09-30 (owner): no separate step
+  setting. A notch zooms as far as holding the bind does in 0.1 s at the same speed slider
+  (`zoomInSpeed` up, `zoomOutSpeed` down), so ~10 notches a second feels like holding and faster or
+  slower scrolling scales from there (x1.19 per notch at speed 1.0, x1.60 at 2.7). The native
+  Magnifier model passes each notch on as one Magnifier notch (its ZoomIncrement sets the size).
 - The mouse hook (`WH_MOUSE_LL`) sees `WM_MOUSEWHEEL`. When the held modifiers include every bit of
   `zoomWheelMods` (extra modifiers allowed, like the key combos), the notch is swallowed so the app
   under the pointer does not scroll, and counted (high-resolution wheels send partial notches:

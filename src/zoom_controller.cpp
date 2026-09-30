@@ -30,6 +30,18 @@ void ZoomController::setProfile(double inSpeed, double outSpeed, bool smooth,
 // glide and not a jump (~95% of the way in ~0.25 s).
 static constexpr double kWheelTau = 0.08;
 
+// One wheel notch zooms as far as HOLDING the zoom bind does in this long, at the same speed
+// slider, so scrolling about 10 notches a second feels like holding; faster or slower scrolling
+// zooms faster or slower from there. At speed 1.0 a notch is x1.19; at 2.7 it is x1.60.
+static constexpr double kWheelNotchSeconds = 0.1;
+double WheelNotchStep(double speed) {
+    return std::pow(2.0, speed * kZoomDoublingsPerSecond * kWheelNotchSeconds) - 1.0;
+}
+void ZoomController::wheelNotches(int steps) {
+    if (steps == 0) return;
+    stepTarget(steps, WheelNotchStep(steps > 0 ? inSpeed_ : outSpeed_));
+}
+
 void ZoomController::stepTarget(int steps, double step) {
     if (steps == 0 || step <= 0.0) return;
     const double base = target_ > 0.0 ? target_ : level_;

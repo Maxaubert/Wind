@@ -40,6 +40,31 @@ export function checkClickBind(button, mods) {
   return checkWheelBind(mods);
 }
 
+// Stored binds the rules refuse (#285). The core already reads each as unbound, so an old ini whose
+// Inspect key was a bare letter would otherwise just stop working with no word why. Returns
+// [{ label, keys }]: the row label and the ini keys to reset to 0.
+const KEY_SLOTS = [
+  ['Zoom in', 'zoomInVk', 'zoomInMods'], ['Zoom in (alternate)', 'zoomInVk2', 'zoomInMods2'],
+  ['Zoom out', 'zoomOutVk', 'zoomOutMods'], ['Zoom out (alternate)', 'zoomOutVk2', 'zoomOutMods2'],
+  ['Hide cursor', 'hideCursorVk', 'hideCursorMods'], ['Inspect mode', 'cursorLockVk', null],
+  ['Recenter', 'recenterVk', null], ['Quick zoom', 'quickZoomVk', 'quickZoomMods'],
+];
+const BUTTON_SLOTS = [
+  ['Zoom in', 'zoomInButton', 'zoomInButtonMods'], ['Zoom in (alternate)', 'zoomInButton2', 'zoomInButton2Mods'],
+  ['Zoom out', 'zoomOutButton', 'zoomOutButtonMods'], ['Zoom out (alternate)', 'zoomOutButton2', 'zoomOutButton2Mods'],
+];
+export function droppedBinds(cfg) {
+  const n = k => Number(cfg[k] || 0);
+  const out = [];
+  for (const [label, vk, mods] of KEY_SLOTS)
+    if (n(vk) && checkKeyBind(n(vk), mods ? n(mods) : 0) !== 'ok') out.push({ label, keys: mods ? [vk, mods] : [vk] });
+  for (const [label, b, mods] of BUTTON_SLOTS)
+    if (n(b) && checkClickBind(n(b), n(mods)) !== 'ok') out.push({ label, keys: [b, mods] });
+  if (n('zoomWheelMods') && checkWheelBind(n('zoomWheelMods')) !== 'ok')
+    out.push({ label: 'Zoom with the scroll wheel', keys: ['zoomWheelMods'] });
+  return out;
+}
+
 // Why a press was refused, in plain words (shown under the keycap and spoken). `what` is the
 // readable combo ("Ctrl+Alt+2", "Ctrl+wheel", "A").
 export function refusalText(verdict, what) {

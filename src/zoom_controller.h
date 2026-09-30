@@ -5,6 +5,8 @@ enum class ZoomDir { None, In, Out };
 // Pure: given which side buttons are physically held, what should the zoom do.
 // Both held is ambiguous, so freeze.
 ZoomDir ResolveDirection(bool inHeld, bool outHeld);
+// Zoom per wheel notch (x(1+step)) for a zoom-speed slider value (#285): the hold rate over 0.1 s.
+double WheelNotchStep(double speed);
 
 class ZoomController {
 public:
@@ -28,6 +30,8 @@ public:
     // tick() glides the level to it. Steps stack on the target, so fast scrolling reads as one
     // continuous zoom. A held zoom direction takes over at once (the target is dropped).
     void stepTarget(int steps, double step);
+    // The wheel at the user's zoom speeds: up uses inSpeed, down uses outSpeed (see WheelNotchStep).
+    void wheelNotches(int steps);
     bool hasTarget() const { return target_ > 0.0; }
 private:
     double minLevel_, maxLevel_;

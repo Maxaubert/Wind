@@ -16,6 +16,9 @@
   // A click captured ON the keycap is followed by its own click event, which would re-arm the row
   // and clear the bind just made: ignore an arm that close after a mouse capture.
   let mouseCapturedAt = -Infinity;
+  // A right-click WITH modifiers is a bind attempt (captured or refused on mousedown); the
+  // contextmenu event that follows it must not then clear the row.
+  let skipContextMenu = false;
   // Naming from the owning Row (issue #201): `labelledby` lists the row label AND the value span,
   // so the keycap reads "Zoom in, Mouse button 5 + PageUp" instead of a bare binding with no
   // indication of which slot it belongs to.
@@ -154,16 +157,18 @@
     const mods = eventMods(e);
     if (btn === 4 && mods === 0) return;        // a plain right-click clears the row (contextmenu)
     e.preventDefault();
+    if (btn === 4) skipContextMenu = true;
     const what = [modsName(mods), BUTTON_NAMES[btn]].filter(Boolean).join('+');
     const verdict = checkClickBind(btn, mods);
     if (verdict !== 'ok') { refuse(verdict, what); return; }
     const patch = { [row.buttonKey]: String(btn), [row.vkKey]: '0' };
     if (row.modsKey) patch[row.modsKey] = '0';
-    if (row.buttonModsKey) patch[row.buttonModsKey] = String(btn >= 3 ? mods : 0);
+    // Side buttons keep their modifiers too (Ctrl+Mouse4), like the clicks.
+    if (row.buttonModsKey) patch[row.buttonModsKey] = String(mods);
     mouseCapturedAt = performance.now();
     onChange(patch);
     armed = false; preCapture = null; refusal = '';
-    liveMsg = 'Bound to ' + (btn >= 3 ? what : BUTTON_NAMES[btn]);
+    liveMsg = 'Bound to ' + (row.buttonModsKey ? what : BUTTON_NAMES[btn]);
   }
   // The wheel row: the modifiers held while the wheel turns become the bind.
   function onWheel(e) {
@@ -176,6 +181,10 @@
     onChange({ [row.modsKey]: String(mods) });
     armed = false; preCapture = null; refusal = '';
     liveMsg = 'Bound to ' + what;
+  }
+  function onContextMenu() {
+    if (skipContextMenu) { skipContextMenu = false; return; }
+    clear();
   }
   // Right-click clears the binding (Unbound). Works whether or not the keycap is armed.
   function clear() {
@@ -193,7 +202,7 @@
         aria-labelledby={labelledby} aria-describedby="{describedby ?? ''} {uid}-hint"
         on:click={arm}
         on:blur={() => { if (armed) cancel(); }}
-        on:contextmenu|preventDefault={clear}
+        on:contextmenu|preventDefault={onContextMenu}
         title="Click to bind (combos like Ctrl+Alt+F1 work), right-click to clear">
   {armed ? (row.wheel ? 'Hold keys and turn the wheel...' : row.buttonKey ? 'Press a key, combo, or button...' : 'Press a key or combo...') : lbl}
 </button>

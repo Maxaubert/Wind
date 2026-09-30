@@ -19,10 +19,8 @@ export const sections = [
       buttonKey2:'zoomOutButton2', vkKey2:'zoomOutVk2', modsKey2:'zoomOutMods2', buttonModsKey2:'zoomOutButton2Mods' },
     // Scroll-wheel zoom (#285): the modifiers held while turning the wheel; up = in, down = out.
     { key:'__zoomWheel', type:'keybind', label:'Zoom with the scroll wheel',
-      desc:'Hold these keys and turn the wheel: up zooms in, down zooms out. Needs a modifier, not Ctrl or Shift alone.',
+      desc:'Hold these keys and turn the wheel: up zooms in, down zooms out, at your zoom speeds. Needs a modifier, not Ctrl or Shift alone.',
       wheel:true, modsKey:'zoomWheelMods' },
-    { key:'zoomWheelStepPct', type:'slider', label:'Wheel zoom step', desc:'How much one notch of the wheel zooms.',
-      min:5, max:100, step:5, def:25, unit:'%' },
     // Keyboard-hook suspension (issue #156): trades key-interception for smooth panning, per app.
     { key:'noSwallowApps', type:'applist', label:'Pass zoom keys to these apps',
       desc:'Fixes stuttery panning in some games. The app will also receive the key.',

@@ -151,7 +151,6 @@ Config ParseConfig(const std::string& text) {
             else if (key == "zoomInButton2Mods")  c.zoomInButton2Mods = std::stoi(val);
             else if (key == "zoomOutButton2Mods") c.zoomOutButton2Mods = std::stoi(val);
             else if (key == "zoomWheelMods")      c.zoomWheelMods = std::stoi(val);
-            else if (key == "zoomWheelStepPct")   c.zoomWheelStepPct = std::stoi(val);
             else if (key == "maxLevel")         c.maxLevel = std::stod(val);
             else if (key == "zoomInSpeed")      c.zoomInSpeed = std::stod(val);
             else if (key == "zoomOutSpeed")     c.zoomOutSpeed = std::stod(val);
@@ -333,7 +332,6 @@ Config ParseConfig(const std::string& text) {
     sanitizeButton(c.zoomInButton, c.zoomInButtonMods);    sanitizeButton(c.zoomInButton2, c.zoomInButton2Mods);
     sanitizeButton(c.zoomOutButton, c.zoomOutButtonMods);  sanitizeButton(c.zoomOutButton2, c.zoomOutButton2Mods);
     if (c.zoomWheelMods != 0 && CheckWheelBind(c.zoomWheelMods) != BindVerdict::Ok) c.zoomWheelMods = 0;
-    c.zoomWheelStepPct = (int)clampd(c.zoomWheelStepPct, 5, 100);
     return c;
 }
 }
@@ -389,8 +387,8 @@ std::string DefaultIniText() {
                ";   (zoomInButtonMods etc., same bits; never Ctrl or Shift alone). Optional for 1/2.\n"
                "zoomInButtonMods=0\nzoomOutButtonMods=0\nzoomInButton2Mods=0\nzoomOutButton2Mods=0\n"
                "; zoomWheelMods: modifiers that make the scroll wheel zoom (0=off; e.g. 2=Alt, 3=Ctrl+Alt;\n"
-               ";   never Ctrl or Shift alone). zoomWheelStepPct: zoom per notch, 5-100.\n"
-               "zoomWheelMods=0\nzoomWheelStepPct=25\n"
+               ";   never Ctrl or Shift alone). Speed: zoomInSpeed (up), zoomOutSpeed (down).\n"
+               "zoomWheelMods=0\n"
                "; hideCursorVk/hideCursorMods: hotkey to toggle the magnified cursor on/off while\n"
                ";   zoomed (does not reset zoom). VK + mods, 0=unbound.\n"
                "hideCursorVk=0\nhideCursorMods=0\n"

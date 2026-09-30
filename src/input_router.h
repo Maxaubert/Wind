@@ -68,7 +68,12 @@ public:
     // Clears the per-key pressed/swallowed records so a remap mid-press can't strand a key.
     void setKeys(int zoomInVk, int zoomInVk2, int zoomOutVk, int zoomOutVk2, int recenterVk,
                  int cursorLockVk);
-    // Whether vk is one of the configured (non-forbidden) keyboard binds: decides track+swallow.
+    // The zoom key binds' modifier masks (recenter and Inspect have none). The hook swallows a bound
+    // key only when one of its binds has every modifier held, so Ctrl+F1 leaves a plain F1 alone.
+    void setKeyMods(int zoomInMods, int zoomInMods2, int zoomOutMods, int zoomOutMods2);
+    // Whether a press of vk with these modifiers held is one of the binds (the hook's swallow test).
+    bool keyBindMatches(int vk, int heldMods) const;
+    // Whether vk is one of the configured (non-forbidden) keyboard binds: decides tracking.
     bool isBoundKey(int vk) const;
     // Physical down-state of a keyboard key, as tracked by the keyboard hook. This is the authority
     // when kbHookActive() (a swallowed key never shows in GetAsyncKeyState), so main reads it instead
@@ -171,9 +176,10 @@ private:
     std::atomic<int> kbZoomOutVk2_{0};
     std::atomic<int> kbRecenterVk_{0};
     std::atomic<int> kbCursorLockVk_{0};
+    std::atomic<int> kbZoomInMods_{0}, kbZoomInMods2_{0}, kbZoomOutMods_{0}, kbZoomOutMods2_{0};
     // Recency stamps for the raw-UP reordering guards (see rawKeyUp/rawButtonUp).
     std::atomic<unsigned long long> kbLastHookDownMs_[256]{};
-    std::atomic<unsigned long long> btnLastHookDownMs_[3]{};
+    std::atomic<unsigned long long> btnLastHookDownMs_[6]{};   // button ids 1..5
     std::atomic<bool> kbHookActive_{false}; // true once the LL KEYBOARD hook is installed
     std::atomic<unsigned> kbHookReinstalls_{0};  // watchdog recoveries this session
     std::atomic<bool> kbHookWanted_{true};       // false while a fullscreen game is foreground

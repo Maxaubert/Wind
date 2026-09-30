@@ -153,6 +153,22 @@ bool InputRouter::isBoundKey(int vk) const {
         || vk == kbRecenterVk_.load(std::memory_order_relaxed)
         || vk == kbCursorLockVk_.load(std::memory_order_relaxed);
 }
+void InputRouter::setKeyMods(int zoomInMods, int zoomInMods2, int zoomOutMods, int zoomOutMods2) {
+    kbZoomInMods_.store(zoomInMods, std::memory_order_relaxed);
+    kbZoomInMods2_.store(zoomInMods2, std::memory_order_relaxed);
+    kbZoomOutMods_.store(zoomOutMods, std::memory_order_relaxed);
+    kbZoomOutMods2_.store(zoomOutMods2, std::memory_order_relaxed);
+}
+bool InputRouter::keyBindMatches(int vk, int heldMods) const {
+    if (!isBoundKey(vk)) return false;
+    auto slot = [&](const std::atomic<int>& v, const std::atomic<int>& m) {
+        return vk == v.load(std::memory_order_relaxed) && ModsSatisfied(m.load(std::memory_order_relaxed), heldMods);
+    };
+    return slot(kbZoomInVk_, kbZoomInMods_) || slot(kbZoomInVk2_, kbZoomInMods2_)
+        || slot(kbZoomOutVk_, kbZoomOutMods_) || slot(kbZoomOutVk2_, kbZoomOutMods2_)
+        || vk == kbRecenterVk_.load(std::memory_order_relaxed)
+        || vk == kbCursorLockVk_.load(std::memory_order_relaxed);
+}
 bool InputRouter::keyPressed(int vk) const {
     if (vk <= 0 || vk > 255) return false;
     return g_kbPressed[vk].load(std::memory_order_relaxed);
@@ -176,7 +192,10 @@ void InputRouter::rawKeyUp(int vk) {
     g_kbSwallowedDown[vk].store(false, std::memory_order_relaxed);
 }
 void InputRouter::rawButtonUp(int xbuttonId) {
-    if (xbuttonId != 1 && xbuttonId != 2) return;
+    if (xbuttonId < 1 || xbuttonId > 5) return;
+    // Left/right/middle (3-5) only matter while one of them holds a zoom; every ordinary click
+    // passes straight through here.
+    if (xbuttonId >= 3 && g_btnDir[xbuttonId].load(std::memory_order_relaxed) == 0) return;
     // Same reordering guard as rawKeyUp: no auto-repeat exists for a side-button, so a stale raw
     // UP landing after the hook's next DOWN would silently end a zoom hold until re-pressed.
     if (hookActive() &&
@@ -187,7 +206,7 @@ void InputRouter::noteHookKeyDown(int vk) {
     if (vk > 0 && vk < 256) kbLastHookDownMs_[vk].store(GetTickCount64(), std::memory_order_relaxed);
 }
 void InputRouter::noteHookButtonDown(int xbuttonId) {
-    if (xbuttonId == 1 || xbuttonId == 2)
+    if (xbuttonId >= 1 && xbuttonId <= 5)
         btnLastHookDownMs_[xbuttonId].store(GetTickCount64(), std::memory_order_relaxed);
 }
 void InputRouter::setKeys(int zoomInVk, int zoomInVk2, int zoomOutVk, int zoomOutVk2, int recenterVk,
@@ -220,16 +239,23 @@ static LRESULT CALLBACK KbProc(int code, WPARAM wParam, LPARAM lParam) {
         if ((down || up) && g_router->isBoundKey(vk)) {
             bool swallow = false;
             if (down) {
-                // Auto-repeat re-fires WM_KEYDOWN; storing true each time is idempotent. main reads
-                // this as the physical down-state and does its own rising-edge work for taps.
-                g_kbPressed[vk].store(true);
+                // Auto-repeat re-fires WM_KEYDOWN. main reads g_kbPressed as the physical down-state
+                // and does its own rising-edge work for taps.
+                const bool firstDown = !g_kbPressed[vk].exchange(true);
                 g_router->noteHookKeyDown(vk);   // recency guard for the raw UP safety net
-                if (g_router->swallowEnabled()) {
-                    // First swallowed down of this press (auto-repeat re-fires): if Alt or Win is
-                    // held, mask it so its release is not a lone tap (Start / menu bar, #285).
-                    if (!g_kbSwallowedDown[vk].exchange(true) && NeedsMaskKey(HeldModsNow()))
-                        InjectMaskKey();
-                    swallow = true;
+                if (firstDown) {
+                    // Decide ONCE per press: swallow only if a bind on this key has all its modifiers
+                    // held now (#285: Ctrl+F1 must not eat a plain F1). Auto-repeat then follows that
+                    // decision, so a key the app already saw going down is never swallowed mid-press.
+                    const int held = HeldModsNow();
+                    if (g_router->swallowEnabled() && g_router->keyBindMatches(vk, held)) {
+                        g_kbSwallowedDown[vk].store(true);
+                        // Alt or Win held: mask it so its release is not a lone tap (Start / menu bar).
+                        if (NeedsMaskKey(held)) InjectMaskKey();
+                        swallow = true;
+                    }
+                } else {
+                    swallow = g_kbSwallowedDown[vk].load();
                 }
             } else { // up: swallow iff we swallowed its DOWN, so the system's down/up view stays balanced.
                 g_kbPressed[vk].store(false);
@@ -279,6 +305,7 @@ static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
                 const int held = HeldModsNow();
                 int dir = 0, mods = 0;
                 if (g_router->matchButton(cb, held, dir, mods)) {
+                    g_router->noteHookButtonDown(cb);   // recency guard for the raw UP safety net
                     g_btnMods[cb].store(mods, std::memory_order_relaxed);
                     g_btnDir[cb].store(dir, std::memory_order_relaxed);
                     PublishButtonHeld(g_router->state());

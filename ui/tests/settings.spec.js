@@ -16,7 +16,7 @@ test.beforeEach(async ({ page }) => {
           // model=render: 'Sharpness' additionally carries showIf {model:'render'}, and an unset
           // model fails that check (undefined !== 'render'), hiding the row the same way.
           // __cfgSampling seeds txSamplingMode (the combined high-res/MPO option, issue #242).
-          listeners.forEach(fn => fn({ data: { type: 'config', values: { zoomInSpeed: '1.2', smoothZoom: '0', uiTheme: 'auto', showAdvanced: '1', model: 'render', zoomInButton: '2', zoomInVk: '33', zoomOutButton: '1', zoomOutVk: '34', cursorLockVk: '113', txSamplingMode: window.__cfgSampling !== undefined ? window.__cfgSampling : '0' } } }));
+          listeners.forEach(fn => fn({ data: { type: 'config', values: { zoomInSpeed: '1.2', smoothZoom: '0', uiTheme: 'auto', showAdvanced: '1', model: 'render', zoomInButton: '2', zoomInVk: '33', zoomOutButton: '1', zoomOutVk: '34', cursorLockVk: '113', txSamplingMode: window.__cfgSampling !== undefined ? window.__cfgSampling : '0', ...(window.__cfgExtra || {}) } } }));
         if (msg.type === 'setConfig') window.__sets.push(msg);
         if (msg.type === 'openRepo') window.__sets.push(msg);
         // MPO lives in the registry, not the ini. __mpoDisabled drives what the "registry" reports;
@@ -596,4 +596,47 @@ test('the wheel row binds Alt+wheel and refuses Ctrl or Shift alone (#285)', asy
   await page.keyboard.down('Alt'); await page.mouse.wheel(0, -100); await page.keyboard.up('Alt');
   expect(await lastSet(page, 'zoomWheelMods')).toBe('2');
   await expect(cap).toHaveText('Alt+Wheel');
+});
+
+test('a right-click with modifiers binds and stays bound; a plain right-click still clears (#285)', async ({ page }) => {
+  await page.goto('/');
+  const cap = zoomInCap(page);
+  await cap.click();
+  const box = await cap.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.keyboard.down('Control'); await page.keyboard.down('Alt');
+  await page.mouse.down({ button: 'right' }); await page.mouse.up({ button: 'right' });
+  await page.keyboard.up('Alt'); await page.keyboard.up('Control');
+  await page.waitForTimeout(100);
+  expect(await lastSet(page, 'zoomInButton')).toBe('4');
+  expect(await lastSet(page, 'zoomInButtonMods')).toBe('3');
+  await expect(cap).toHaveText('Ctrl+Alt+Right click');
+  await page.mouse.down({ button: 'right' }); await page.mouse.up({ button: 'right' });
+  await expect(cap).toHaveText('Unbound');
+});
+test('a side button keeps its modifiers (Ctrl+Mouse button 4) (#285)', async ({ page }) => {
+  await page.goto('/');
+  const cap = zoomInCap(page);
+  await cap.click();
+  await page.evaluate(() => window.dispatchEvent(new MouseEvent('mousedown', { button: 3, ctrlKey: true })));
+  expect(await lastSet(page, 'zoomInButton')).toBe('1');
+  expect(await lastSet(page, 'zoomInButtonMods')).toBe('1');
+  await expect(cap).toHaveText('Ctrl+Mouse button 4');
+});
+test('stored binds the rules refuse are reset once, with a notice naming them (#285)', async ({ page }) => {
+  await page.addInitScript(() => { window.__cfgExtra = { cursorLockVk: '82', zoomWheelMods: '1' }; });
+  await page.goto('/');
+  const dlg = page.getByRole('dialog', { name: 'Some keybinds were removed' });
+  await expect(dlg).toBeVisible();
+  await expect(dlg).toContainText('Inspect mode');
+  await expect(dlg).toContainText('Zoom with the scroll wheel');
+  expect(await lastSet(page, 'cursorLockVk')).toBe('0');
+  expect(await lastSet(page, 'zoomWheelMods')).toBe('0');
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  await expect(dlg).toBeHidden();
+});
+test('no notice when every stored bind is allowed (#285)', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByText('Zoom-in speed')).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Some keybinds were removed' })).toHaveCount(0);
 });

@@ -168,7 +168,8 @@ Profiles (tray -> Profiles, or the Settings titlebar) snapshot the whole file pe
 - `zoomInButton`/`zoomOutButton` (1/2 mouse side-buttons, 3/4/5 left/right/middle click with
   `zoomInButtonMods` etc.) and `zoomInVk`/`zoomOutVk` + `zoomInMods`/`zoomOutMods` (keyboard) -
   hold to zoom; all ship unbound until the guided setup. Alternates: `*2` variants.
-- `zoomWheelMods` (0 = off), `zoomWheelStepPct` (default 25) - scroll-wheel zoom.
+- `zoomWheelMods` (0 = off) - scroll-wheel zoom. A notch zooms as far as holding the bind does in
+  0.1 s, so `zoomInSpeed`/`zoomOutSpeed` set its speed too.
 - `maxLevel`, `zoomInSpeed`/`zoomOutSpeed`, `smoothZoom*` - zoom range and feel.
 - `cursorSensitivity`, `cursorSmoothing` - pan speed and inertia.
 - `bilinear`, `sharpness`, `cursorConstantSize` (default 0: the cursor grows with the zoom),

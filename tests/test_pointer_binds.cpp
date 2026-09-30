@@ -1,3 +1,4 @@
+#include <cmath>
 #include "doctest.h"
 #include "../src/pointer_binds.h"
 #include "../src/zoom_controller.h"
@@ -54,6 +55,21 @@ TEST_CASE("the glide is smooth: the first tick moves part of the way, not the wh
     z.stepTarget(1, 1.0);                                // target 2.0
     z.tick(0.007);
     CHECK(z.level() > 1.0); CHECK(z.level() < 1.3);
+}
+TEST_CASE("a wheel notch zooms as far as holding does in 0.1 s at the same speed slider") {
+    // hold rate = speed x 2.5 doublings/s, so a notch = 2^(speed x 0.25)
+    CHECK(WheelNotchStep(1.0) == doctest::Approx(0.18921).epsilon(0.001));   // x1.19
+    CHECK(WheelNotchStep(2.7) == doctest::Approx(0.59587).epsilon(0.001));   // x1.60
+    CHECK(WheelNotchStep(4.0) == doctest::Approx(1.0));                      // x2 at the top
+    ZoomController z(1.0, 100.0);
+    z.setProfile(2.0, 0.5, false, 3.0, 0.6);             // in fast, out slow
+    z.wheelNotches(2);
+    for (int i = 0; i < 300; ++i) z.tick(0.007);
+    CHECK(z.level() == doctest::Approx(std::pow(2.0, 2 * 2.0 * 0.25)).epsilon(0.001));   // 2 notches x 0.5 doublings = 2x
+    const double before = z.level();
+    z.wheelNotches(-2);                                   // down uses the OUT speed
+    for (int i = 0; i < 300; ++i) z.tick(0.007);
+    CHECK(z.level() == doctest::Approx(before / std::pow(1.0 + WheelNotchStep(0.5), 2)).epsilon(0.001));
 }
 TEST_CASE("holding a zoom key takes over from a wheel glide at once") {
     ZoomController z(1.0, 10.0);

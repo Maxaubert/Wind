@@ -35,3 +35,18 @@ test('settings mode does not show onboarding', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByText('Zoom-in speed')).toBeVisible();
 });
+
+test('onboarding saves the modifiers of a click bind (#285)', async ({ page }) => {
+  await page.goto('/?mode=onboard');
+  await page.getByRole('button', { name: 'Get started' }).click();
+  const cap = page.getByText('Zoom in', { exact: true }).locator('xpath=../..').getByRole('button').first();
+  await cap.click();
+  const box = await cap.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.keyboard.down('Control'); await page.keyboard.down('Alt');
+  await page.mouse.down(); await page.mouse.up();
+  await page.keyboard.up('Alt'); await page.keyboard.up('Control');
+  const last = k => page.evaluate(k => (window.__sets.filter(s => s.key === k).at(-1) || {}).value, k);
+  expect(await last('zoomInButton')).toBe('3');
+  expect(await last('zoomInButtonMods')).toBe('3');
+});

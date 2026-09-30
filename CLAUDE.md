@@ -235,7 +235,9 @@ restartWind), `dirty`, `openIni`, `exportDiagnostics`, `pickExe`, `mpoState`, `s
   wins. SWALLOWING WITH ALT OR WIN HELD INJECTS ONE MASK KEY (VK 0xE8): otherwise Windows sees the
   modifier tapped alone (Start opens, the app's menu bar activates; Alt measured both ways, Win fixed-case only). Wind's own
   injections carry `kWindInjectTag` in dwExtraInfo and are skipped by the bind matcher; other
-  injectors count as real input. The quick-zoom modifier only turns binds that LACK it into taps. Down/up swallows are balanced
+  injectors count as real input. The quick-zoom modifier only turns binds that LACK it into taps. A KEY bind is swallowed only when a
+  bind on that key has all its modifiers held (`keyBindMatches`), decided once per press; the old
+  VK-only test ate a plain F1 system-wide for a Ctrl+F1 bind. Down/up swallows are balanced
   (only swallow an UP whose DOWN we swallowed) and released on teardown so a key is never stranded.
   `cursorLockVk` (Inspect mode) is VK-only (no mods), swallowed like `recenterVk`.
   Inspect mode is a FREEZE-cursor + free-look reticle toggle (driven entirely in `main.cpp` RunTick,

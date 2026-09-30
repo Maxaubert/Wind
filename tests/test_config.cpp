@@ -516,13 +516,12 @@ TEST_CASE("unsafe binds in an ini read as unbound; safe ones survive (#285)") {
 }
 TEST_CASE("click and wheel binds need a modifier, never Ctrl or Shift alone (#285)") {
     Config c = ParseConfig("zoomInButton=3\nzoomInButtonMods=3\nzoomOutButton=4\nzoomOutButtonMods=1\n"
-                           "zoomInButton2=2\nzoomWheelMods=2\nzoomWheelStepPct=500\n");
+                           "zoomInButton2=2\nzoomWheelMods=2\n");
     CHECK(c.zoomInButton == 3); CHECK(c.zoomInButtonMods == 3);    // Ctrl+Alt+left click
     CHECK(c.zoomOutButton == 0); CHECK(c.zoomOutButtonMods == 0);  // Ctrl+right click: refused
     CHECK(c.zoomInButton2 == 2);                                    // side button alone: fine
-    CHECK(c.zoomWheelMods == 2); CHECK(c.zoomWheelStepPct == 100);
+    CHECK(c.zoomWheelMods == 2);
     CHECK(ParseConfig("zoomWheelMods=1\n").zoomWheelMods == 0);     // Ctrl+wheel: browser zoom
     CHECK(ParseConfig("zoomWheelMods=4\n").zoomWheelMods == 0);     // Shift+wheel
     CHECK(ParseConfig("zoomInButton=5\n").zoomInButton == 0);       // bare middle click
-    CHECK(ParseConfig("").zoomWheelStepPct == 25);
 }
