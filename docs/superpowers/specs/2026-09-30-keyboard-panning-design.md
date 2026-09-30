@@ -7,6 +7,7 @@ Magnifier's Ctrl+Alt+arrow keys. For reading long text and for keeping hands on 
 ## 2. Owner decisions (2026-09-30)
 - **Binds:** four settable keybinds, Pan left / right / up / down. Default **Ctrl+Alt+arrows**
   (bound out of the box, unlike the zoom binds), exactly like Windows Magnifier.
+  AMENDED 2026-09-30 (#307, owner): unbound by default; users turn it on by setting keys.
 - **Feel:** **tap to nudge, hold to pan.** A tap moves the view one step; holding pans
   continuously with a short ease-in, and the motion glides out on release. One **Pan speed**
   slider in Settings. The same feel at every zoom level (defined in screen space).

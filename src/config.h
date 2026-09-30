@@ -36,11 +36,14 @@ struct Config {
     // Ctrl alone is fine, #295). Its speed follows zoomInSpeed/zoomOutSpeed.
     int    zoomWheelMods    = 0;
     int    recenterVk       = 0;     // VK code; 0 = unbound. Tap to recenter the lens on the cursor.
+    int    recenterMods     = 0;     // its modifiers (#307: every bind takes 0-4 modifiers + one key)
     int    cursorLockVk     = 0;     // VK code; 0 = unbound. Tap to toggle Inspect mode (cursor lock)
-    // Keyboard panning (#287): hold/tap to move the zoomed view. Default Ctrl+Alt+arrows, like
-    // Windows Magnifier; swallowed only while zoomed. mods: bit 1 Ctrl, 2 Alt, 4 Shift, 8 Win.
-    int    panLeftVk = 37, panLeftMods = 3, panRightVk = 39, panRightMods = 3;
-    int    panUpVk   = 38, panUpMods   = 3, panDownVk  = 40, panDownMods  = 3;
+    int    cursorLockMods   = 0;     // its modifiers (#307)
+    // Keyboard panning (#287): hold/tap to move the zoomed view; swallowed only while zoomed.
+    // UNBOUND by default (#307, owner): users turn it on by setting keys (Ctrl+Alt+arrows = mods 3,
+    // like Windows Magnifier). mods: bit 1 Ctrl, 2 Alt, 4 Shift, 8 Win.
+    int    panLeftVk = 0, panLeftMods = 0, panRightVk = 0, panRightMods = 0;
+    int    panUpVk   = 0, panUpMods   = 0, panDownVk  = 0, panDownMods  = 0;
                                      // while zoomed. Swallowed system-wide like recenterVk (VK only,
                                      // no modifier - the keyboard hook swallows the bare key).
     int    swapModelVk      = 0;     // RETIRED (the hybrid "Auto" model replaced it). The field

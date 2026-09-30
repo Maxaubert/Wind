@@ -152,3 +152,25 @@ key 25 3 ok
 key 26 3 ok
 key 27 3 ok
 key 28 3 ok
+
+# two and three modifiers + one key (#307)
+key 70 3 ok
+key 70 7 ok
+key 71 11 ok
+key 70 11 windows
+key 71 13 ok
+key 21 7 ok
+key 25 7 ok
+key 24 6 ok
+key 41 5 ok
+key 41 6 ok
+key 41 7 altgr
+key 10 3 modifier
+key 11 7 modifier
+key 12 5 modifier
+wheel 7 ok
+wheel 11 ok
+wheel 14 ok
+click 3 7 ok
+click 4 6 ok
+click 5 11 ok

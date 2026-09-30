@@ -669,10 +669,10 @@ test('unapplied edits are mirrored to the host and restored after a crash recove
 
 // --- Keyboard panning (issue #287) ----------------------------------------------------------
 const capOf = (page, label) => page.getByText(label, { exact: true }).locator('xpath=../..').getByRole('button').first();
-test('pan rows default to Ctrl+Alt+arrows and rebind with the shared rules (#287)', async ({ page }) => {
+test('pan rows ship unbound (#307) and bind with the shared rules (#287)', async ({ page }) => {
   await page.goto('/');
-  for (const [label, key] of [['Pan left', 'Left'], ['Pan right', 'Right'], ['Pan up', 'Up'], ['Pan down', 'Down']])
-    await expect(capOf(page, label)).toHaveText('Ctrl+Alt+' + key);
+  for (const label of ['Pan left', 'Pan right', 'Pan up', 'Pan down'])
+    await expect(capOf(page, label)).toHaveText('Unbound');
   const up = capOf(page, 'Pan up');
   await up.click();
   await page.keyboard.press('k');
@@ -689,4 +689,37 @@ test('the Pan speed slider writes panSpeed on Apply (#287)', async ({ page }) =>
   await row.locator('input[type=range]').fill('2');
   await page.getByRole('button', { name: 'Apply' }).click();
   expect(await lastSet(page, 'panSpeed')).toBe('2');
+});
+test('two and three modifiers work on every keybind row: zoom, pan, Inspect, wheel (#307)', async ({ page }) => {
+  await page.goto('/');
+  const zin = capOf(page, 'Zoom in');
+  await zin.click(); await page.keyboard.press('Control+Alt+Shift+F1');
+  expect(await lastSet(page, 'zoomInVk')).toBe('112'); expect(await lastSet(page, 'zoomInMods')).toBe('7');
+  await expect(zin).toHaveText('Ctrl+Alt+Shift+F1');
+  const pl = capOf(page, 'Pan left');
+  await pl.click(); await page.keyboard.press('Control+Alt+ArrowLeft');
+  expect(await lastSet(page, 'panLeftVk')).toBe('37'); expect(await lastSet(page, 'panLeftMods')).toBe('3');
+  await expect(pl).toHaveText('Ctrl+Alt+Left');
+  const insp = capOf(page, 'Inspect mode');
+  await insp.click(); await page.keyboard.press('Control+Alt+Shift+F4');
+  expect(await lastSet(page, 'cursorLockVk')).toBe('115'); expect(await lastSet(page, 'cursorLockMods')).toBe('7');
+  await expect(insp).toHaveText('Ctrl+Alt+Shift+F4');
+  const wheel = capOf(page, 'Zoom with the scroll wheel');
+  await wheel.click();
+  const box = await wheel.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.keyboard.down('Control'); await page.keyboard.down('Alt'); await page.keyboard.down('Shift');
+  await page.mouse.wheel(0, -100);
+  await page.keyboard.up('Shift'); await page.keyboard.up('Alt'); await page.keyboard.up('Control');
+  expect(await lastSet(page, 'zoomWheelMods')).toBe('7');
+  await expect(wheel).toHaveText('Ctrl+Alt+Shift+Wheel');
+});
+test('a modifier alone never binds; the row keeps listening (#307)', async ({ page }) => {
+  await page.goto('/');
+  const insp = capOf(page, 'Inspect mode');
+  await insp.click();
+  await page.keyboard.down('Control'); await page.keyboard.down('Alt'); await page.keyboard.up('Alt'); await page.keyboard.up('Control');
+  expect(await lastSet(page, 'cursorLockVk')).toBe('0');   // the arm cleared it; nothing captured
+  await page.keyboard.press('F9');
+  expect(await lastSet(page, 'cursorLockVk')).toBe('120');
 });
