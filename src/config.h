@@ -2,7 +2,8 @@
 #include <string>
 namespace wind {
 struct Config {
-    int    zoomInButton     = 0;     // 1 = XBUTTON1 (back), 2 = XBUTTON2 (forward); 0 = unbound
+    int    zoomInButton     = 0;     // 1 = XBUTTON1 (back), 2 = XBUTTON2 (forward), 3 = left, 4 = right,
+                                     // 5 = middle click (3-5 need a modifier, #285); 0 = unbound
     int    zoomOutButton    = 0;     // shipped unbound - onboarding captures the user's choice
     // Keyboard hold-to-zoom (Virtual-Key codes; 0 = unbound). Polled via GetAsyncKeyState and
     // OR-combined with the mouse side-buttons, so the app is usable without side-buttons.
@@ -25,6 +26,16 @@ struct Config {
     int    zoomOutMods      = 0;
     int    zoomInMods2      = 0;
     int    zoomOutMods2     = 0;
+    // Modifier mask per BUTTON binding (same bits). Required for left/right/middle click (button
+    // 3/4/5, #285; never Ctrl or Shift alone), optional for the side buttons. 0 = none.
+    int    zoomInButtonMods   = 0;
+    int    zoomOutButtonMods  = 0;
+    int    zoomInButton2Mods  = 0;
+    int    zoomOutButton2Mods = 0;
+    // Scroll-wheel zoom (#285): the modifiers that make the wheel zoom (0 = off; never Ctrl or Shift
+    // alone), and how much one notch zooms, in percent (5..100).
+    int    zoomWheelMods    = 0;
+    int    zoomWheelStepPct = 25;
     int    recenterVk       = 0;     // VK code; 0 = unbound. Tap to recenter the lens on the cursor.
     int    cursorLockVk     = 0;     // VK code; 0 = unbound. Tap to toggle Inspect mode (cursor lock)
                                      // while zoomed. Swallowed system-wide like recenterVk (VK only,
