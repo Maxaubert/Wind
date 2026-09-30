@@ -1668,7 +1668,7 @@ static void RunTick(TickState& t) {
             const wind::ViewOwner was = t.viewOwner.owner;
             const wind::ViewOwner owner = wind::StepViewOwner(t.viewOwner, vi);
             if (owner != was && t.cfg.trackLog) {
-                static const char* kName[] = { "mouse", "caret", "focus" };
+                static const char* kName[] = { "mouse", "caret", "focus", "keys" };
                 wind::Log(wind::LogLevel::Info, "track", "view %s -> %s%s", kName[(int)was], kName[(int)owner],
                           t.viewOwner.warpPointer ? " (pointer placed in the view)" : "");
             }

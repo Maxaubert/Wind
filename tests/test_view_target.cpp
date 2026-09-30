@@ -105,3 +105,34 @@ TEST_CASE("focus by Tab follows; focus moved by the app on its own does not (#28
     in.msSinceKey = 40; in.snap = Snap(TrackKind::Focus, 2);
     CHECK(StepViewOwner(s, in) == ViewOwner::Focus);
 }
+
+TEST_CASE("keyboard panning owns the view; the mouse takes it back like from the caret (#287)") {
+    ViewOwnerState s;
+    ViewOwnerInputs in = Base(); in.panning = true;
+    CHECK(StepViewOwner(s, in) == ViewOwner::Keys);
+    in.panning = false;
+    CHECK(StepViewOwner(s, in) == ViewOwner::Keys);          // stays until something else takes it
+    in.mouseDx = 4;
+    CHECK(StepViewOwner(s, in) == ViewOwner::Mouse);
+    CHECK(s.warpPointer);                                     // pointer comes to the view
+}
+TEST_CASE("a button after a pan gives the view back without moving the pointer (#287)") {
+    ViewOwnerState s;
+    ViewOwnerInputs in = Base(); in.panning = true;
+    StepViewOwner(s, in);
+    in.panning = false; in.buttonDown = true;
+    CHECK(StepViewOwner(s, in) == ViewOwner::Mouse);
+    CHECK_FALSE(s.warpPointer);
+}
+TEST_CASE("panning beats a caret event in the same tick; disabled resets to the mouse (#287)") {
+    ViewOwnerState s;
+    ViewOwnerInputs in = Base(); in.panning = true; in.snap = Snap(TrackKind::Caret, 1);
+    CHECK(StepViewOwner(s, in) == ViewOwner::Keys);
+    in.enabled = false;
+    CHECK(StepViewOwner(s, in) == ViewOwner::Mouse);
+}
+TEST_CASE("panning works with caret and focus tracking both off (#287)") {
+    ViewOwnerState s;
+    ViewOwnerInputs in = Base(); in.trackCaret = false; in.trackFocus = false; in.panning = true;
+    CHECK(StepViewOwner(s, in) == ViewOwner::Keys);
+}

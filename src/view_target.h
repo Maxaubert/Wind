@@ -16,7 +16,7 @@
 //    no key at all (field: the Settings page dragged the view while scrolling).
 #include <cmath>
 namespace wind {
-enum class ViewOwner { Mouse, Caret, Focus };
+enum class ViewOwner { Mouse, Caret, Focus, Keys };   // Keys: keyboard panning (#287)
 enum class TrackKind { None = 0, Caret = 1, Focus = 2 };
 struct TrackSnapshot { TrackKind kind = TrackKind::None; unsigned seq = 0; double l = 0, t = 0, r = 0, b = 0; };
 struct ViewOwnerState {
@@ -39,6 +39,7 @@ struct ViewOwnerInputs {
     double msSinceKey = 0;        // time since any key went down (0 when unknown: no gate)
     double dtMs = 0;
     TrackSnapshot snap;
+    bool panning = false;         // a pan key is held or its motion is still gliding (#287)
 };
 inline constexpr double kMouseTakeoverPx = 3.0, kMouseTakeoverWindowMs = 100.0;
 inline constexpr double kClickQuietMs = 1000.0;
@@ -69,6 +70,13 @@ inline ViewOwner StepViewOwner(ViewOwnerState& s, const ViewOwnerInputs& in) {
             s.warpPointer = moved && !in.buttonDown;
         }
         s.lastSeq = in.snap.seq;      // the mouse wins this tick
+        return s.owner;
+    }
+    // Keyboard panning is an explicit request: it owns the view while active, ahead of any caret or
+    // focus event in the same tick. The mouse still takes it back exactly as from the caret (#287).
+    if (in.panning) {
+        s.owner = ViewOwner::Keys;
+        s.lastSeq = in.snap.seq;
         return s.owner;
     }
     // A new tracking event, unless a recent click caused it.
