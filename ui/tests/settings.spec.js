@@ -545,20 +545,6 @@ test('Colour section: only the warmth and brightness sliders, neutral by default
   }
 });
 
-test('unapplied edits are mirrored to the host and restored after a crash recovery', async ({ page }) => {
-  await page.goto('/');
-  const row = page.getByText('Brightness', { exact: true }).locator('xpath=../..');
-  await row.locator('input[type=range]').fill('35');
-  await expect.poll(async () => page.evaluate(() => {
-    const d = window.__sets.filter(m => m.type === 'draft').at(-1);
-    return d ? JSON.parse(d.json).colorDimPct : null;
-  })).toBe('35');
-  // The host recreated the engine: a fresh page load gets its config, then the draft back.
-  await page.evaluate(() => window.__hostSend({ type: 'restoreDraft', values: { colorDimPct: '40', notARealKey: '1' } }));
-  await expect(row).toContainText('40');
-  await expect(page.getByRole('button', { name: 'Apply' })).toBeEnabled();
-});
-
 // --- Safe keybinds, click and wheel binds (issue #285) -------------------------------------
 const zoomInCap = page => page.getByText('Zoom in', { exact: true }).locator('xpath=../..').getByRole('button').first();
 const lastSet = (page, key) => page.evaluate(k => (window.__sets.filter(s => s.key === k).at(-1) || {}).value, key);
@@ -665,4 +651,18 @@ test('no notice when every stored bind is allowed (#285)', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByText('Zoom-in speed')).toBeVisible();
   await expect(page.getByRole('dialog', { name: 'Some keybinds were removed' })).toHaveCount(0);
+});
+
+test('unapplied edits are mirrored to the host and restored after a crash recovery', async ({ page }) => {
+  await page.goto('/');
+  const row = page.getByText('Zoom-in speed', { exact: true }).locator('xpath=../..');
+  await row.locator('input[type=range]').fill('2');
+  await expect.poll(async () => page.evaluate(() => {
+    const d = window.__sets.filter(m => m.type === 'draft').at(-1);
+    return d ? JSON.parse(d.json).zoomInSpeed : null;
+  })).toBe('2');
+  // The host recreated the engine: a fresh page load gets its config, then the draft back.
+  await page.evaluate(() => window.__hostSend({ type: 'restoreDraft', values: { zoomInSpeed: '3.5', notARealKey: '1' } }));
+  await expect(row).toContainText('3.5');
+  await expect(page.getByRole('button', { name: 'Apply' })).toBeEnabled();
 });

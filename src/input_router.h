@@ -179,6 +179,13 @@ private:
     std::atomic<int> kbZoomInMods_{0}, kbZoomInMods2_{0}, kbZoomOutMods_{0}, kbZoomOutMods2_{0};
     // Recency stamps for the raw-UP reordering guards (see rawKeyUp/rawButtonUp).
     std::atomic<unsigned long long> kbLastHookDownMs_[256]{};
+public:
+    // Any key down, injected included (on-screen keyboards, voice typing), GetTickCount64 ms. 0 = none
+    // yet. Tracking uses it: only keyboard-driven caret/focus changes move the view (issue #289).
+    unsigned long long lastAnyKeyDownMs() const { return kbLastAnyDownMs_.load(std::memory_order_relaxed); }
+    void noteAnyKeyDown(unsigned long long ms) { kbLastAnyDownMs_.store(ms, std::memory_order_relaxed); }
+private:
+    std::atomic<unsigned long long> kbLastAnyDownMs_{0};
     std::atomic<unsigned long long> btnLastHookDownMs_[6]{};   // button ids 1..5
     std::atomic<bool> kbHookActive_{false}; // true once the LL KEYBOARD hook is installed
     std::atomic<unsigned> kbHookReinstalls_{0};  // watchdog recoveries this session

@@ -11,6 +11,9 @@
 //    field-reported wobble.)
 //  - Caret/focus changes within kClickQuietMs of a mouse button are the click's own doing
 //    (opening a page, clicking into a field): they are consumed without taking the view.
+//  - And they need a KEY: a caret/focus change takes the view only if a key went down or up within
+//    kKeyDrivenMs (issue #289; key-ups count so Alt+Tab released after a long look still counts). Scrolling a page moves a focused control's caret on screen with
+//    no key at all (field: the Settings page dragged the view while scrolling).
 #include <cmath>
 namespace wind {
 enum class ViewOwner { Mouse, Caret, Focus };
@@ -22,6 +25,10 @@ struct ViewOwnerState {
     double moveAccum = 0;
     double moveWindowMs = 0;
     bool warpPointer = false;     // set on the tick the mouse MOVED the view back; caller clears
+    // The caret/focus rect the view follows: LATCHED only from events that passed the gates. Reading
+    // the live snapshot instead let an owner that already followed one keystroke keep chasing every
+    // later caret move, a scroll included, and an app-driven focus change (review 2026-09-30).
+    TrackSnapshot target;
 };
 struct ViewOwnerInputs {
     bool enabled = false;         // zoomed && !game && !inspect && !locked
@@ -29,11 +36,13 @@ struct ViewOwnerInputs {
     double mouseDx = 0, mouseDy = 0;   // real pointer movement this tick, px
     bool buttonDown = false;
     double msSinceButton = 1e9;   // time since a mouse button was last down
+    double msSinceKey = 0;        // time since any key went down (0 when unknown: no gate)
     double dtMs = 0;
     TrackSnapshot snap;
 };
 inline constexpr double kMouseTakeoverPx = 3.0, kMouseTakeoverWindowMs = 100.0;
 inline constexpr double kClickQuietMs = 1000.0;
+inline constexpr double kKeyDrivenMs = 1000.0;
 
 inline ViewOwner StepViewOwner(ViewOwnerState& s, const ViewOwnerInputs& in) {
     s.warpPointer = false;
@@ -65,9 +74,9 @@ inline ViewOwner StepViewOwner(ViewOwnerState& s, const ViewOwnerInputs& in) {
     // A new tracking event, unless a recent click caused it.
     if (in.snap.seq != s.lastSeq) {
         s.lastSeq = in.snap.seq;
-        if (in.msSinceButton >= kClickQuietMs) {
-            if (in.snap.kind == TrackKind::Caret && in.trackCaret) s.owner = ViewOwner::Caret;
-            else if (in.snap.kind == TrackKind::Focus && in.trackFocus) s.owner = ViewOwner::Focus;
+        if (in.msSinceButton >= kClickQuietMs && in.msSinceKey <= kKeyDrivenMs) {
+            if (in.snap.kind == TrackKind::Caret && in.trackCaret) { s.owner = ViewOwner::Caret; s.target = in.snap; }
+            else if (in.snap.kind == TrackKind::Focus && in.trackFocus) { s.owner = ViewOwner::Focus; s.target = in.snap; }
         }
     }
     return s.owner;
