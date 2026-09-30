@@ -98,6 +98,8 @@ Shift or AltGr (Ctrl+Alt) plus a typing key, and combos Windows reserves (Alt+F4
 - Hold your **zoom-in** bind - zoom in (smooth ramp). Hold **zoom-out** - zoom back.
 - **Scroll-wheel zoom** (optional): hold the modifiers you chose (for example Ctrl,
   Alt or Ctrl+Alt; never Shift alone) and turn the wheel - up zooms in, down zooms out.
+- **Keyboard panning**: while zoomed, **Ctrl+Alt+arrow keys** move the view (tap to nudge, hold
+  to pan), like Windows Magnifier. Rebindable; at 1x the keys go to your apps as normal.
 - Release - zoom stays at the current level.
 - **Quick zoom** (default Ctrl + a zoom key, or a dedicated hotkey) - toggle between 1x and
   your remembered level.
@@ -170,6 +172,8 @@ Profiles (tray -> Profiles, or the Settings titlebar) snapshot the whole file pe
   hold to zoom; all ship unbound until the guided setup. Alternates: `*2` variants.
 - `zoomWheelMods` (0 = off) - scroll-wheel zoom. A notch zooms as far as holding the bind does in
   0.1 s, so `zoomInSpeed`/`zoomOutSpeed` set its speed too.
+- `panLeftVk`/`panRightVk`/`panUpVk`/`panDownVk` + `*Mods` (default Ctrl+Alt+arrows), `panSpeed`
+  (default 1.0) - keyboard panning while zoomed.
 - `maxLevel`, `zoomInSpeed`/`zoomOutSpeed`, `smoothZoom*` - zoom range and feel.
 - `cursorSensitivity`, `cursorSmoothing` - pan speed and inertia.
 - `bilinear`, `sharpness`, `cursorConstantSize` (default 0: the cursor grows with the zoom),
