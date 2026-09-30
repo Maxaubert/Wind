@@ -160,7 +160,20 @@ bool InputRouter::isBoundKey(int vk) const {
         || vk == kbZoomOutVk_.load(std::memory_order_relaxed)
         || vk == kbZoomOutVk2_.load(std::memory_order_relaxed)
         || vk == kbRecenterVk_.load(std::memory_order_relaxed)
-        || vk == kbCursorLockVk_.load(std::memory_order_relaxed);
+        || vk == kbCursorLockVk_.load(std::memory_order_relaxed)
+        || vk == panVk_[0].load(std::memory_order_relaxed) || vk == panVk_[1].load(std::memory_order_relaxed)
+        || vk == panVk_[2].load(std::memory_order_relaxed) || vk == panVk_[3].load(std::memory_order_relaxed);
+}
+void InputRouter::setPanKeys(const int vk[4], const int mods[4]) {
+    for (int i = 0; i < 4; ++i) {
+        panMods_[i].store(mods[i], std::memory_order_relaxed);
+        panVk_[i].store(vk[i], std::memory_order_relaxed);
+    }
+    for (int i = 0; i < 256; ++i) { g_kbPressed[i].store(false); g_kbSwallowedDown[i].store(false); }
+}
+bool InputRouter::keySwallowed(int vk) const {
+    if (vk <= 0 || vk > 255) return false;
+    return g_kbSwallowedDown[vk].load(std::memory_order_relaxed);
 }
 void InputRouter::setKeyMods(int zoomInMods, int zoomInMods2, int zoomOutMods, int zoomOutMods2) {
     kbZoomInMods_.store(zoomInMods, std::memory_order_relaxed);
@@ -176,7 +189,10 @@ bool InputRouter::keyBindMatches(int vk, int heldMods) const {
     return slot(kbZoomInVk_, kbZoomInMods_) || slot(kbZoomInVk2_, kbZoomInMods2_)
         || slot(kbZoomOutVk_, kbZoomOutMods_) || slot(kbZoomOutVk2_, kbZoomOutMods2_)
         || vk == kbRecenterVk_.load(std::memory_order_relaxed)
-        || vk == kbCursorLockVk_.load(std::memory_order_relaxed);
+        || vk == kbCursorLockVk_.load(std::memory_order_relaxed)
+        || (panArmed_.load(std::memory_order_relaxed) &&
+            (slot(panVk_[0], panMods_[0]) || slot(panVk_[1], panMods_[1]) ||
+             slot(panVk_[2], panMods_[2]) || slot(panVk_[3], panMods_[3])));
 }
 bool InputRouter::keyPressed(int vk) const {
     if (vk <= 0 || vk > 255) return false;
