@@ -1602,7 +1602,9 @@ static void RunTick(TickState& t) {
                 if (was == wind::ViewOwner::Mouse) { t.viewCx = r.centerX; t.viewCy = r.centerY; }   // glide from where we are
                 const double ptrX = cur.x - t.mon.x, ptrY = cur.y - t.mon.y;
                 double tx = t.viewCx, ty = t.viewCy;
-                const wind::TrackRect rc{ vi.snap.l - t.mon.x, vi.snap.t - t.mon.y, vi.snap.r - t.mon.x, vi.snap.b - t.mon.y };
+                // The LATCHED target: only caret/focus events that passed the gates move the view.
+                const wind::TrackSnapshot& tg = t.viewOwner.target;
+                const wind::TrackRect rc{ tg.l - t.mon.x, tg.t - t.mon.y, tg.r - t.mon.x, tg.b - t.mon.y };
                 double ox, oy;
                 if (wind::TrackTargetCenter(rc, t.viewCx, t.viewCy, lvl, t.mon.w, t.mon.h,
                                             t.cfg.trackAlign, t.cfg.trackMarginPct, ox, oy)) { tx = ox; ty = oy; }
@@ -2390,11 +2392,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 const RAWKEYBOARD& kb = ri->data.keyboard;
                 if ((kb.Flags & RI_KEY_BREAK) && kb.VKey > 0 && kb.VKey < 256)
                     g_input.rawKeyUp(static_cast<int>(kb.VKey));
-                // Key DOWN feeds only tracking's key clock (#289), never held state. Raw Input
+                // Key activity (down and up) feeds only tracking's key clock (#289), never held state. Raw Input
                 // keeps arriving while the hook is suspended (fullscreen game, noSwallowApps), so
                 // the clock stays true there instead of the gate switching off (review #289).
-                if (!(kb.Flags & RI_KEY_BREAK) && kb.VKey > 0 && kb.VKey < 256)
-                    g_input.noteAnyKeyDown(GetTickCount64());
+                if (kb.VKey > 0 && kb.VKey < 256)
+                    g_input.noteAnyKeyDown(GetTickCount64());   // downs and ups, like the hook
             } else if (ri->header.dwType == RIM_TYPEMOUSE) {
                 const RAWMOUSE& m = ri->data.mouse;
                 if ((m.usFlags & MOUSE_MOVE_ABSOLUTE) == 0) {
