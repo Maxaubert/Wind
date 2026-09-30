@@ -40,6 +40,11 @@ static std::atomic<bool> g_swallowedDown[6] = {};   // index = button id 1..5 (#
 static std::atomic<int> g_btnDir[6] = {};
 static std::atomic<int> g_btnMods[6] = {};
 static WheelAccum g_wheelAcc;   // hook thread only
+// Event-driven idle (#71): wakes the sleeping main loop. SetEvent is a cheap, lock-free kernel call,
+// safe from the LL hooks; it is only raised on edges (never per mouse move or per unbound key), and
+// always AFTER the state the main loop will read has been published.
+static HANDLE g_idleWake = nullptr;
+static inline void WakeMain() { if (g_idleWake) SetEvent(g_idleWake); }
 // One mask keystroke per Alt/Win hold is enough (#301): set when injected, cleared when the keyboard
 // hook sees Alt or Win released. Without it a spun wheel injected two key events per notch.
 static std::atomic<bool> g_maskedThisHold{false};
@@ -107,9 +112,11 @@ static void PublishButtonHeld(InputState& st) {
     }
     st.inHeldMods.store(inM, std::memory_order_relaxed);
     st.outHeldMods.store(outM, std::memory_order_relaxed);
+    const bool changed = st.inHeld.load() != in || st.outHeld.load() != out;
     st.inHeld.store(in);
     st.outHeld.store(out);
     g_publishLock.clear(std::memory_order_release);
+    if (changed) WakeMain();   // every button/click bind press and release, and a rebind that drops a hold
 }
 // Shared by the WH_MOUSE_LL hook (below) and main's WM_INPUT path: map a button to held. A press
 // holds the direction of the slot it matches (with the modifiers held now); a release frees it.
@@ -286,6 +293,7 @@ static LRESULT CALLBACK KbProc(int code, WPARAM wParam, LPARAM lParam) {
                 // and does its own rising-edge work for taps.
                 const bool firstDown = !g_kbPressed[vk].exchange(true);
                 g_router->noteHookKeyDown(vk);   // recency guard for the raw UP safety net
+                if (firstDown) WakeMain();       // edges only: auto-repeat never wakes the loop (#71)
                 if (firstDown) {
                     // Decide ONCE per press: swallow only if a bind on this key has all its modifiers
                     // held now (#285: Ctrl+F1 must not eat a plain F1). Auto-repeat then follows that
@@ -303,6 +311,7 @@ static LRESULT CALLBACK KbProc(int code, WPARAM wParam, LPARAM lParam) {
                 }
             } else { // up: swallow iff we swallowed its DOWN, so the system's down/up view stays balanced.
                 g_kbPressed[vk].store(false);
+                WakeMain();
                 if (g_kbSwallowedDown[vk].exchange(false)) swallow = true;
             }
             if (swallow) return 1; // eat the key so the focused app never sees the zoom/recenter bind
@@ -372,7 +381,7 @@ static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
                     const int held = HeldModsNow();
                     if (ModsSatisfied(wm, held)) {
                         const int steps = g_wheelAcc.add((short)HIWORD(mi->mouseData));
-                        if (steps) g_router->state().wheelSteps.fetch_add(steps, std::memory_order_relaxed);
+                        if (steps) { g_router->state().wheelSteps.fetch_add(steps, std::memory_order_relaxed); WakeMain(); }
                         // Pass-through apps (and swallow off) still zoom, and get the notch too.
                         if (g_router->swallowEnabled() && g_router->keyboardHookWanted()) {
                             if (NeedsMaskKey(held)) InjectMaskKey();
@@ -525,6 +534,7 @@ bool InputRouter::start(int inButtonId, int inButtonId2, int outButtonId, int ou
     outButtonId_.store(outButtonId, std::memory_order_relaxed);
     outButtonId2_.store(outButtonId2, std::memory_order_relaxed);
     swallow_ = swallow;
+    if (!g_idleWake) g_idleWake = CreateEventW(nullptr, FALSE, FALSE, nullptr);   // before any hook exists (#71)
     // Diagnostic: WIND_NOHOOK=1 skips the low-level mouse hook entirely (button state still arrives
     // via Raw Input). Kept as a fallback / A-B toggle; side-button swallowing is disabled in it.
     if (GetEnvironmentVariableW(L"WIND_NOHOOK", nullptr, 0) > 0) {
@@ -630,6 +640,15 @@ void InputRouter::stop() {
     hookActive_.store(false);
     kbHookActive_.store(false);
     g_router = nullptr;
+    // After the hook thread has joined: nothing can signal it any more.
+    if (g_idleWake) { CloseHandle(g_idleWake); g_idleWake = nullptr; }
+}
+void* InputRouter::wakeEvent() const { return g_idleWake; }
+bool InputRouter::anyBoundKeyPressed() const {
+    const int vks[] = { kbZoomInVk_.load(), kbZoomInVk2_.load(), kbZoomOutVk_.load(), kbZoomOutVk2_.load(),
+                        kbRecenterVk_.load(), kbCursorLockVk_.load() };
+    for (int vk : vks) if (vk > 0 && vk < 256 && g_kbPressed[vk].load(std::memory_order_relaxed)) return true;
+    return false;
 }
 void InputRouter::drainRaw(int& dx, int& dy) {
     dx = state_.rawDx.exchange(0);
