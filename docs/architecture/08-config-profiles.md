@@ -38,7 +38,7 @@ flowchart LR
   subgraph core [Wind.exe]
     WATCH[dir-change watch\n~4 Hz check] --> RELOAD[StripUiOnlyKeys fingerprint\nthen LoadConfig]
     RELOAD --> TICK[RunTick uses new Config]
-    TRAY[tray Profiles submenu\ntray.cpp SwitchToProfile]
+    TRAY[tray Profiles submenu\ntray_app/tray_menu.cpp SwitchToProfile]
   end
   WM -->|UpdateIniText + atomic write| INI
   WM -->|mirror: MakeProfileText| PROF
@@ -168,7 +168,7 @@ exactly like the live ini.
 
 ### Switching: `MakeLiveText` and the model restart
 
-A switch, whether from the tray (`SwitchToProfile`, `src/tray.cpp`) or the settings-UI titlebar
+A switch, whether from the tray (`SwitchToProfile`, `src/tray_app/tray_menu.cpp`, in `WindTray.exe`) or the settings-UI titlebar
 dropdown (`DoSwitchProfile`, `src/config_ui/main.cpp`), is the same sequence:
 
 1. Validate the profile file. `wind::ProfileTextError` rejects binary content, absurd size, and
@@ -267,7 +267,7 @@ generates "Name copy", "Name copy 2", ... for duplication, truncating to fit the
 - `src/profiles_io.h`: profile file I/O, `WriteTextFileAtomic`, `MirrorLiveToActiveProfile`,
   `EnsureProfilesSeeded`.
 - `src/config_ui/main.cpp`: the bridge (`HandleWebMessage`), `DoSwitchProfile`, the setConfig
-  mirror; `src/tray.cpp`: the tray switch surface.
+  mirror; `src/tray_app/tray_menu.cpp`: the tray switch surface.
 - Spec: [2026-08-12-profiles-design.md](../superpowers/specs/2026-08-12-profiles-design.md).
 - Related chapters: [The tick loop](02-tick-loop.md) (the watch/reload mechanics),
   [The settings UI](09-settings-ui.md) (the other side of the bridge),

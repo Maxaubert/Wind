@@ -94,6 +94,24 @@ Var LicenceDir   ; where "Read the full licence" put its copy, empty until then
     nsExec::Exec 'taskkill /IM Wind.exe /F'
     Pop $0
   ${EndIf}
+
+  ; WindTray.exe (issue #291) exits by itself when Wind does, removing its tray icon. Give it
+  ; up to 2 s, and only then force it: a forced kill leaves the icon behind until the mouse
+  ; passes over it, and its exe must not be held open while setup replaces it.
+  StrCpy $3 0
+  ${Do}
+    nsExec::Exec 'cmd /c tasklist /FI "IMAGENAME eq WindTray.exe" /NH | find /I "WindTray.exe"'
+    Pop $4
+    ${If} $4 != 0
+      ${Break}
+    ${EndIf}
+    Sleep 100
+    IntOp $3 $3 + 1
+  ${LoopUntil} $3 >= 20
+  ${If} $4 == 0
+    nsExec::Exec 'taskkill /IM WindTray.exe /F'
+    Pop $0
+  ${EndIf}
   Sleep 300
 !macroend
 

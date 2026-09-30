@@ -11,7 +11,7 @@
   // while those stay live underneath is misleading. Writing 0 makes the display match reality; the
   // KeybindCapture below then writes setConfig live as the user captures.
   let keys = { zoomInButton:'0', zoomInVk:'0', zoomOutButton:'0', zoomOutVk:'0',
-               zoomInMods:'0', zoomOutMods:'0' };
+               zoomInMods:'0', zoomOutMods:'0', zoomInButtonMods:'0', zoomOutButtonMods:'0' };
   onMount(() => { for (const k of Object.keys(keys)) setConfig(k, keys[k]); });
   function live(patch) {
     for (const k of Object.keys(patch)) setConfig(k, patch[k]);
@@ -26,8 +26,8 @@
   }
   function back() { if (cur > 0) cur -= 1; }
   function skip() { setConfig('onboarded', '1'); onDone(); }
-  const zoomInRow  = { label:'Zoom in',  desc:'Hold to magnify',  buttonKey:'zoomInButton',  vkKey:'zoomInVk',  modsKey:'zoomInMods' };
-  const zoomOutRow = { label:'Zoom out', desc:'Hold to zoom back', buttonKey:'zoomOutButton', vkKey:'zoomOutVk', modsKey:'zoomOutMods' };
+  const zoomInRow  = { label:'Zoom in',  desc:'Hold to magnify',  buttonKey:'zoomInButton',  vkKey:'zoomInVk',  modsKey:'zoomInMods',  buttonModsKey:'zoomInButtonMods' };
+  const zoomOutRow = { label:'Zoom out', desc:'Hold to zoom back', buttonKey:'zoomOutButton', vkKey:'zoomOutVk', modsKey:'zoomOutMods', buttonModsKey:'zoomOutButtonMods' };
 </script>
 <div class="win">
   <div class="caption" style="app-region:drag;-webkit-app-region:drag">

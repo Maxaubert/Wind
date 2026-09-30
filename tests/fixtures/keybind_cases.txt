@@ -1,0 +1,124 @@
+# Shared keybind safety cases (issue #285). One case per line:
+#   key   <vk hex> <mods> <verdict>      mods: bit 1 Ctrl, 2 Alt, 4 Shift, 8 Win
+#   wheel <mods> <verdict>
+#   click <button> <mods> <verdict>      button: 1/2 side, 3 left, 4 right, 5 middle
+# Read by tests/test_keybind_rules.cpp (C++ rules) and ui/tests/keybind-rules.spec.js (UI mirror).
+# verdicts: ok never modifier notalone shifttypes altgr system windows needsmod ctrlalone shiftalone
+
+# alone: navigation, arrows, Delete, F-keys, Pause, ScrollLock, numpad are fine
+key 21 0 ok
+key 22 0 ok
+key 24 0 ok
+key 23 0 ok
+key 2D 0 ok
+key 2E 0 ok
+key 25 0 ok
+key 28 0 ok
+key 70 0 ok
+key 87 0 ok
+key 13 0 ok
+key 91 0 ok
+key 60 0 ok
+key 6B 0 ok
+# alone: typing and critical keys are refused
+key 41 0 notalone
+key 5A 0 notalone
+key 30 0 notalone
+key 20 0 notalone
+key 0D 0 notalone
+key 09 0 notalone
+key 1B 0 notalone
+key BA 0 notalone
+key E2 0 notalone
+key 14 0 notalone
+key 2C 0 notalone
+key 5D 0 notalone
+key 90 0 notalone
+# never / modifiers as the key
+key 08 0 never
+key 08 1 never
+key 01 1 never
+key 02 3 never
+key 04 3 never
+key 10 0 modifier
+key 11 2 modifier
+key 12 1 modifier
+key A2 0 modifier
+key 5B 0 modifier
+key 5C 1 modifier
+# combos that are fine
+key 70 1 ok
+key 21 3 ok
+key 41 1 ok
+key 43 1 ok
+key 21 8 ok
+key 70 8 ok
+key 22 9 ok
+key 41 5 ok
+key 21 4 ok
+key 70 4 ok
+key 41 2 ok
+# Shift + typing key: capitals and symbols
+key 41 4 shifttypes
+key 31 4 shifttypes
+key BD 4 shifttypes
+# AltGr (Ctrl+Alt) + typing key: @ { } [ ] $ on Nordic layouts
+key 32 3 altgr
+key 37 3 altgr
+key 45 3 altgr
+key 32 7 altgr
+key DE 3 altgr
+# Ctrl+Alt + a non-typing key is fine
+key 21 3 ok
+key 70 3 ok
+# system-critical
+key 73 2 system
+key 09 2 system
+key 09 6 system
+key 1B 2 system
+key 20 2 system
+key 1B 1 system
+key 1B 5 system
+key 2E 3 system
+key 6E 3 system
+# Windows-reserved
+key 4C 8 windows
+key 44 8 windows
+key 09 8 windows
+key 25 8 windows
+key BB 8 windows
+key BD 8 windows
+key 20 8 windows
+key 31 8 windows
+key 4C 9 windows
+# Win + safe keys
+key 21 8 ok
+key 23 8 ok
+key 2E 8 ok
+key 71 8 ok
+key 61 8 ok
+
+# wheel
+wheel 0 needsmod
+wheel 1 ok
+wheel 4 shiftalone
+wheel 2 ok
+wheel 8 ok
+wheel 3 ok
+wheel 5 ok
+wheel 12 ok
+
+# clicks
+click 0 0 ok
+click 1 0 ok
+click 2 0 ok
+click 2 3 ok
+click 3 0 needsmod
+click 4 0 needsmod
+click 5 0 needsmod
+click 3 1 ctrlalone
+click 3 4 shiftalone
+click 3 3 ok
+click 4 2 ok
+click 5 8 ok
+click 9 3 never

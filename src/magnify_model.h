@@ -27,6 +27,7 @@ public:
     bool supportsInspect() const override { return false; }
     bool selfDrivenZoom() const override { return true; }
     void nativeZoomTick(int dir, const Config& cfg) override;
+    void nativeWheelNotches(int steps) override;
 private:
     void launchMagnifier();
 

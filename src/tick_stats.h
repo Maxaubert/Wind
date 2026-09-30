@@ -7,7 +7,8 @@
 // no lock, no branch worth measuring. That matters: this is the magnifier's hot path, and a status
 // readout must never be the reason a frame is late.
 //
-// Single producer (the tick loop), single consumer (the tray, when the menu opens). The ring is
+// Single producer (the tick loop), single consumer (WindTray.exe, through the shared block in
+// tray_ipc.h; a zero-filled ring is a valid empty one). The ring is
 // deliberately not synchronised beyond a relaxed head counter: a torn read costs one wrong pixel in
 // a sparkline and nothing else, which is not worth a lock on the tick path.
 #include <atomic>
@@ -43,9 +44,6 @@ private:
     float buf_[kCap]{};
     std::atomic<unsigned> head_{0};
 };
-
-// Process-wide instance. Defined inline so the header is self-contained (C++17).
-inline TickStats& Ticks() { static TickStats s; return s; }
 
 // --- pure statistics, unit-tested ---------------------------------------------------------
 

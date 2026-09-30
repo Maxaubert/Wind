@@ -2,10 +2,8 @@
 // What the tray shows about the running magnifier. PURE (no <windows.h>): the label decisions are
 // where the bugs live, so they are unit-tested rather than eyeballed in a menu.
 //
-// The tick loop publishes a snapshot; the tray reads it when the menu opens. There is no live
-// update while the menu is open and that is deliberate (docs/superpowers/specs/2026-08-28-tray-menu-design.md):
-// the values are current at the moment you open it, which is all a menu needs to be truthful.
-#include <atomic>
+// The tick loop publishes a snapshot into the shared block (tray_ipc.h); WindTray.exe reads it
+// while its menu is open.
 
 namespace wind {
 
@@ -19,26 +17,7 @@ struct TrayStatus {
     bool        panning = false;
 };
 
-// One writer (the tick loop), one reader (the tray). Three plain scalars behind a seqlock-free
-// relaxed publish: the worst a torn read can do is pair last tick's level with this tick's engine,
-// which is invisible in a menu that opens in 30ms.
-inline std::atomic<double>& TrayLevelSlot()   { static std::atomic<double> v{1.0}; return v; }
-inline std::atomic<int>&    TrayEngineSlot()  { static std::atomic<int> v{0}; return v; }
-inline std::atomic<bool>&   TrayPanningSlot() { static std::atomic<bool> v{false}; return v; }
-
-inline void PublishTrayStatus(const TrayStatus& s) {
-    TrayLevelSlot().store(s.level, std::memory_order_relaxed);
-    TrayEngineSlot().store((int)s.engine, std::memory_order_relaxed);
-    TrayPanningSlot().store(s.panning, std::memory_order_relaxed);
-}
-
-inline TrayStatus ReadTrayStatus() {
-    TrayStatus s;
-    s.level   = TrayLevelSlot().load(std::memory_order_relaxed);
-    s.engine  = (TrayEngine)TrayEngineSlot().load(std::memory_order_relaxed);
-    s.panning = TrayPanningSlot().load(std::memory_order_relaxed);
-    return s;
-}
+// The transport (Wind.exe -> WindTray.exe) is the shared block in tray_ipc.h.
 
 // --- pure label logic, unit-tested ---------------------------------------------------------
 

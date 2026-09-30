@@ -6,8 +6,15 @@ namespace wind {
 struct InputState {
     std::atomic<int>  rawDx{0};      // summed since last drain
     std::atomic<int>  rawDy{0};
-    std::atomic<bool> inHeld{false}; // zoom-in side button physically down
+    std::atomic<bool> inHeld{false}; // a zoom-in BUTTON bind is held (side button or click + mods)
     std::atomic<bool> outHeld{false};
+    // The modifier masks of the button binds currently holding each direction (OR of all), so the
+    // tick can tell a bind that includes the quick-zoom modifier from one that does not (#285).
+    std::atomic<int>  inHeldMods{0};
+    std::atomic<int>  outHeldMods{0};
+    // Scroll-wheel zoom (#285): whole wheel steps the hook swallowed, + = in, - = out. The tick
+    // drains them (drainWheelSteps).
+    std::atomic<int>  wheelSteps{0};
     // Inspect-mode click routing (tick <-> WH_MOUSE_LL hook). While Inspect is on the real cursor is
     // frozen elsewhere, so the hook swallows a real left/right click (it would land at the frozen point)
     // and hands the tick PER-BUTTON pending counts; the tick fires a clean click at the look point per
@@ -61,7 +68,12 @@ public:
     // Clears the per-key pressed/swallowed records so a remap mid-press can't strand a key.
     void setKeys(int zoomInVk, int zoomInVk2, int zoomOutVk, int zoomOutVk2, int recenterVk,
                  int cursorLockVk);
-    // Whether vk is one of the configured (non-forbidden) keyboard binds: decides track+swallow.
+    // The zoom key binds' modifier masks (recenter and Inspect have none). The hook swallows a bound
+    // key only when one of its binds has every modifier held, so Ctrl+F1 leaves a plain F1 alone.
+    void setKeyMods(int zoomInMods, int zoomInMods2, int zoomOutMods, int zoomOutMods2);
+    // Whether a press of vk with these modifiers held is one of the binds (the hook's swallow test).
+    bool keyBindMatches(int vk, int heldMods) const;
+    // Whether vk is one of the configured (non-forbidden) keyboard binds: decides tracking.
     bool isBoundKey(int vk) const;
     // Physical down-state of a keyboard key, as tracked by the keyboard hook. This is the authority
     // when kbHookActive() (a swallowed key never shows in GetAsyncKeyState), so main reads it instead
@@ -131,6 +143,15 @@ public:
     // Atomic so the hook thread's reads in setButtonState/isZoomButton stay race-free, and the
     // held flags are cleared so a stale press of the previous button does not stick.
     void setButtons(int inButtonId, int inButtonId2, int outButtonId, int outButtonId2);
+    // #285: the same with a modifier mask per slot, and button ids 3/4/5 = left/right/middle click.
+    void setButtonBinds(int inButtonId, int inMods, int inButtonId2, int inMods2,
+                        int outButtonId, int outMods, int outButtonId2, int outMods2);
+    // The slot a button press belongs to, given the modifiers held (hook thread). False = not a bind.
+    bool matchButton(int button, int heldMods, int& dir, int& mods) const;
+    // Scroll-wheel zoom: the modifier mask that makes the wheel zoom (0 = off).
+    void setWheelMods(int mods) { wheelMods_.store(mods, std::memory_order_relaxed); }
+    int  wheelMods() const { return wheelMods_.load(std::memory_order_relaxed); }
+    int  drainWheelSteps() { return state_.wheelSteps.exchange(0, std::memory_order_relaxed); }
 private:
     InputState state_;
     // Primary + alternate side-button per direction (1 = XBUTTON1, 2 = XBUTTON2, 0 = none); set in
@@ -139,6 +160,11 @@ private:
     std::atomic<int> inButtonId2_{0};
     std::atomic<int> outButtonId_{1};
     std::atomic<int> outButtonId2_{0};
+    std::atomic<int> inButtonMods_{0};
+    std::atomic<int> inButtonMods2_{0};
+    std::atomic<int> outButtonMods_{0};
+    std::atomic<int> outButtonMods2_{0};
+    std::atomic<int> wheelMods_{0};
     bool swallow_ = true;
     std::atomic<bool> hookActive_{false};   // true once the LL hook is installed (not WIND_NOHOOK)
     // Configured keyboard binds (VK codes; 0 = unbound). Atomic so the keyboard hook thread reads
@@ -150,9 +176,10 @@ private:
     std::atomic<int> kbZoomOutVk2_{0};
     std::atomic<int> kbRecenterVk_{0};
     std::atomic<int> kbCursorLockVk_{0};
+    std::atomic<int> kbZoomInMods_{0}, kbZoomInMods2_{0}, kbZoomOutMods_{0}, kbZoomOutMods2_{0};
     // Recency stamps for the raw-UP reordering guards (see rawKeyUp/rawButtonUp).
     std::atomic<unsigned long long> kbLastHookDownMs_[256]{};
-    std::atomic<unsigned long long> btnLastHookDownMs_[3]{};
+    std::atomic<unsigned long long> btnLastHookDownMs_[6]{};   // button ids 1..5
     std::atomic<bool> kbHookActive_{false}; // true once the LL KEYBOARD hook is installed
     std::atomic<unsigned> kbHookReinstalls_{0};  // watchdog recoveries this session
     std::atomic<bool> kbHookWanted_{true};       // false while a fullscreen game is foreground

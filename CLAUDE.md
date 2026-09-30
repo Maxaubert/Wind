@@ -16,6 +16,8 @@ Developer book (readable, canonical): `docs/architecture/` - keep it in step wit
   compiles `src/config_ui/*.cpp` against the vendored WebView2 SDK -> `WindConfig.exe` next to
   `Wind.exe`). Also run by `tools\uiaccess_setup.ps1`, which deploys `WindConfig.exe` + `ui/dist`
   alongside the signed `Wind.exe`.
+- The app and `uiaccess` targets also build `WindTray.exe` (`build.bat tray` alone), ALWAYS with the
+  plain manifest: it must never be uiAccess (see "Three binaries").
 - Build the installer: `build.bat installer`  (needs NSIS: `winget install NSIS.NSIS`; compiles
   `installer\wind.nsi` then runs `tools\installer_check.ps1`). Release artifact:
   `pwsh -File tools\release.ps1` -> `dist\Wind-Setup-x64-<ver>.exe`. Setup is a custom-drawn
@@ -168,8 +170,14 @@ every host `setConfig` mirrors the profile-scoped snapshot back into its file. F
 duplicate/delete; bridge messages `listProfiles`/`switchProfile`/`createProfile`/`renameProfile`/
 `duplicateProfile`/`deleteProfile`, each replying the refreshed list).
 
-**Two binaries.** `Wind.exe` is the always-running tray magnifier (the perf-critical core
-described above). `WindConfig.exe` is an on-demand settings GUI: a thin C++ WebView2 host
+**Three binaries.** `WindTray.exe` (`src/tray_app/`, issue #291) owns the tray icon and menu
+WITHOUT UIAccess: a UIAccess process's popup menu stacks above the cursor sprite and the Snipping
+Tool overlay, an ordinary process's menu does not. Wind starts it with `ShellExecuteExW` (never
+CreateProcess: no inherited UIAccess token) passing `--wind-pid`, restarts it if it dies (at most 3
+launches a minute, `src/tray_host.cpp`), and it exits when that Wind exits. The only coupling is the
+shared block `Local\Wind_TrayState_v1` (`src/tray_ipc.h`: status, frame-pacing ring, `menuOpen`)
+plus `Local\Wind_QuitRequest` for Quit. `Wind.exe` is the always-running magnifier (the
+perf-critical core described above). `WindConfig.exe` is an on-demand settings GUI: a thin C++ WebView2 host
 (`src/config_ui/main.cpp`) that loads a built Svelte app from `ui/dist/` and talks to the core
 only by writing `magnifier.ini` (the core dir-watches and hot-reloads it - no IPC). First
 launch also runs a short guided onboarding (wind-trails-into-logo intro -> set zoom keys ->
@@ -223,10 +231,20 @@ restartWind), `dirty`, `openIni`, `exportDiagnostics`, `pickExe`, `mpoState`, `s
   never appears in `GetAsyncKeyState`, so the keyboard hook is the AUTHORITY for bound-key down-state
   (`keyPressed()`); `main.cpp` reads it when `kbHookActive()`, else falls back to polling (install
   failure / `WIND_NOHOOK`). hide-cursor + hotkey-mode quick-zoom are swallowed by `RegisterHotKey`
-  instead, not this hook. SAFETY: `IsForbiddenBindVk` (pure, in `config.cpp`) blocks binding keys
-  that would be catastrophic to lose system-wide - left/right click (1/2), Backspace (8), Win
-  (0x5B/0x5C) - enforced in three places: the hook never swallows them, `ParseConfig` sanitizes them
-  out of the ini, and the config UI's keybind capture refuses them. Down/up swallows are balanced
+  instead, not this hook. SAFETY (#285): ONE rule set for every bind, `src/keybind_rules.h`
+  (`CheckKeyBind`/`CheckWheelBind`/`CheckClickBind`), mirrored in `ui/src/lib/keybindRules.js`; both
+  are tested against `tests/fixtures/keybind_cases.txt`, so change the rules in BOTH or the tests
+  fail. `ParseConfig` reads any unsafe bind as unbound, the UI refuses it with a reason, and the hook
+  still never swallows `IsForbiddenBindVk` keys. AltGr sends Ctrl+Alt, so Ctrl+Alt + a typing key is
+  refused (the owner types on a Norwegian layout). Button binds: 1/2 side, 3/4/5 left/right/middle
+  (these need modifiers, never Ctrl or Shift alone; the wheel allows Ctrl alone, #295, since the notch
+  is swallowed); the most specific matching slot
+  wins. SWALLOWING WITH ALT OR WIN HELD INJECTS ONE MASK KEY (VK 0xE8): otherwise Windows sees the
+  modifier tapped alone (Start opens, the app's menu bar activates; Alt measured both ways, Win fixed-case only). Wind's own
+  injections carry `kWindInjectTag` in dwExtraInfo and are skipped by the bind matcher; other
+  injectors count as real input. The quick-zoom modifier only turns binds that LACK it into taps. A KEY bind is swallowed only when a
+  bind on that key has all its modifiers held (`keyBindMatches`), decided once per press; the old
+  VK-only test ate a plain F1 system-wide for a Ctrl+F1 bind. Down/up swallows are balanced
   (only swallow an UP whose DOWN we swallowed) and released on teardown so a key is never stranded.
   `cursorLockVk` (Inspect mode) is VK-only (no mods), swallowed like `recenterVk`.
   Inspect mode is a FREEZE-cursor + free-look reticle toggle (driven entirely in `main.cpp` RunTick,

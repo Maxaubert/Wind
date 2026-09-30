@@ -1,31 +1,22 @@
-#include "tray.h"
-#include "resource.h"
-#include "logging.h"
-#include "config_path.h"
-#include "profiles_io.h"
-#include "config.h"
-#include "config_ui/ini_edit.h"
+// The tray menu (WindTray.exe, issue #291): owner-drawn, on its own thread, reading Wind's live
+// status from the shared block (tray_ipc.h).
+#include "tray_app.h"
 #include "tray_draw.h"
-#include "tray_status.h"
-#include "tick_stats.h"
+#include "../logging.h"
+#include "../config_path.h"
+#include "../profiles_io.h"
+#include "../config.h"
+#include "../config_ui/ini_edit.h"
+#include "../tray_ipc.h"
 #include <shellapi.h>
 #include <dwmapi.h>
 #include <string>
-#include <thread>
-#include <mutex>
 #include <vector>
-namespace wind { namespace Tray {
-static NOTIFYICONDATAW g_nid{};
-static const UINT WM_TRAY = WM_APP + 1;
+namespace wind { namespace TrayApp {
 static const UINT ID_SETTINGS = 1003, ID_QUIT = 1002;
 static const UINT ID_HEADER = 1005;   // owner-drawn, disabled: the status readout
 static const UINT ID_PROFILE_BASE = 1100;      // 1100..1131: one per profile menu item
 static const UINT kMaxProfileMenuItems = 32;
-
-static UINT DiagDoneMsg() { static UINT m = RegisterWindowMessageW(L"Wind.DiagnosticsExportDone.v1"); return m; }
-static std::mutex  g_diagMx;
-static std::wstring g_diagZip;
-static bool g_diagOk = false, g_diagReady = false, g_diagRunning = false;
 
 // Menu thread (2026-08-28, third design - the history matters here):
 //   v1  SetTimer(8ms) kept the tick alive through TrackPopupMenu's modal loop, but SetTimer's
@@ -37,16 +28,20 @@ static bool g_diagOk = false, g_diagReady = false, g_diagRunning = false;
 //   v3  (this) the menu runs on ITS OWN THREAD with its own zero-size popup window. The main
 //       thread never blocks, so the tick keeps its normal full-rate pacing with no keep-alive
 //       trick at all, and the menu's input is handled by its own loop - both sides at full speed.
-// One menu at a time (g_menuOpen); the weld is suspended while it is open (main.cpp reads
-// MenuOpen()) so the pointer belongs to the user while they aim at menu items.
+//   v4  (issue #291) the whole tray moved out of Wind.exe into WindTray.exe, so the menu is no
+//       longer a UIAccess window that stacks above the cursor and the Snipping Tool overlay. The
+//       menu thread stays: the header's live timer must keep ticking during the modal loop.
+// One menu at a time (g_menuOpen); the weld is suspended while it is open (Wind reads `menuOpen`
+// from the shared block) so the pointer belongs to the user while they aim at menu items.
 static void SwitchToProfile(const std::wstring& ini, const std::wstring& nameW);
 static volatile LONG g_menuOpen = 0;
-struct MenuCtx { HWND mainHwnd; POINT pt; };
+struct MenuCtx { POINT pt; };
+static const TickStats g_noTicks{};   // header input when Wind shared no block
 
 // Owner-draw state for ONE menu open. All of it lives on the menu thread: items, fonts,
 // palette, metrics are created per open and destroyed with the host window, and the status they
-// render is read cross-thread from the tick loop's relaxed-atomic snapshot (tray_status.h) plus
-// the frame-pacing ring (tick_stats.h) - both designed for exactly this reader.
+// render is read cross-process from Wind's shared block (tray_ipc.h): the status snapshot plus the
+// frame-pacing ring, both relaxed atomics designed for exactly this reader.
 struct MenuDrawState {
     std::vector<TrayDraw::Item> items;
     TrayDraw::Palette pal;
@@ -73,7 +68,9 @@ static void MeasureItem(const MenuDrawState& st, MEASUREITEMSTRUCT* mis) {
 static void DrawHeaderBody(const MenuDrawState& st, HDC dc, const RECT& r) {
     const auto& pal = st.pal;
     const int pad = st.mt.padX();
-    const TrayStatus ts = ReadTrayStatus();
+    TrayShared* blk = Block();
+    const TrayStatus ts = ReadTrayStatus(blk);
+    const TickStats& ticks = TrayBlockValid(blk) ? blk->ticks : g_noTicks;
     wchar_t zoom[16];
     const bool zoomed = FormatZoom(ts.level, zoom, 16);
 
@@ -91,7 +88,7 @@ static void DrawHeaderBody(const MenuDrawState& st, HDC dc, const RECT& r) {
     }
 
     float buf[TickStats::kCap];
-    const int n = Ticks().snapshot(buf, TickStats::kCap);
+    const int n = ticks.snapshot(buf, TickStats::kCap);
     if (n >= 8) {
         const double fps = FpsFromMs(MeanMs(buf, n));   // mean: jitter pairs cancel, see tick_stats.h
         wchar_t f[32]; wsprintfW(f, L"%d fps", (int)(fps + 0.5));
@@ -122,7 +119,7 @@ static void DrawHeaderBody(const MenuDrawState& st, HDC dc, const RECT& r) {
               DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
     RECT sp{ r.left + pad, r.top + st.mt.scale(74), r.right - pad, r.top + st.mt.scale(98) };
-    TrayDraw::DrawSparkline(dc, sp, pal, st.mt);
+    TrayDraw::DrawSparkline(dc, sp, pal, st.mt, ticks);
     SelectObject(dc, of);
 }
 
@@ -330,10 +327,12 @@ static DWORD WINAPI MenuThread(LPVOID param) {
 
     st.menu = m;
     SetTimer(host, 1, 100, nullptr);   // the live-header tick; see MenuHostProc
+    SetTrayMenuOpen(Block(), true);    // Wind suspends the cursor re-park while this is set
     SetForegroundWindow(host);   // we own the last input (the tray click), so this is permitted
     int cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_RIGHTBUTTON, ctx.pt.x, ctx.pt.y, 0,
                              host, nullptr);
     KillTimer(host, 1);
+    SetTrayMenuOpen(Block(), false);
     PostMessageW(host, WM_NULL, 0, 0);   // the documented dismiss fix
     SetWindowLongPtrW(host, GWLP_USERDATA, 0);
     DestroyMenu(m);
@@ -341,15 +340,14 @@ static DWORD WINAPI MenuThread(LPVOID param) {
     st.fonts.destroy();
     DestroyWindow(host);
 
-    // Actions - all safe off the main thread: ShellExecute is thread-agnostic, Quit is a
-    // PostMessage to the main window, and the profile switch is file I/O whose UI feedback
-    // (Notify) is a process-global Shell_NotifyIcon call. Export diagnostics left the tray with
-    // this design (it is a button in the Settings UI); its worker plumbing stays for the
-    // Settings-origin path.
+    // Actions - all safe off the main thread: ShellExecute is thread-agnostic, Quit is a named
+    // event, and the profile switch is file I/O whose feedback (Notify) is a process-global
+    // Shell_NotifyIcon call. Full paths from our own folder: the tray's cwd is not trusted.
     if (cmd == ID_SETTINGS)
-        ShellExecuteW(nullptr, L"open", L"WindConfig.exe", nullptr, nullptr, SW_SHOW);
+        ShellExecuteW(nullptr, L"open", (AppDir() + L"\\WindConfig.exe").c_str(), nullptr,
+                      AppDir().c_str(), SW_SHOW);
     else if (cmd == ID_QUIT)
-        PostMessageW(ctx.mainHwnd, WM_CLOSE, 0, 0);
+        RequestWindQuit();
     else if (cmd >= (int)ID_PROFILE_BASE && cmd < (int)(ID_PROFILE_BASE + profNames.size()))
         SwitchToProfile(ini, profNames[cmd - ID_PROFILE_BASE]);
 
@@ -357,42 +355,10 @@ static DWORD WINAPI MenuThread(LPVOID param) {
     return 0;
 }
 
-// Diagnostics-export completion signal. The worker thread does NOT smuggle a heap pointer through the
-// window message (any local process could PostMessage a forged LPARAM -> controlled deref/free). Instead
-// it parks the result in this mutex-guarded slot and posts a bare wake-up; the handler reads the slot
-// under the lock and never dereferences the message params. The message id is registered (process-unique,
-// >= 0xC000) so it isn't a guessable WM_APP+n, and the handler ignores any wake-up with no result ready.
-
-void Add(HWND hwnd, HINSTANCE hInst) {
-    g_nid.cbSize = sizeof(g_nid);
-    g_nid.hWnd = hwnd;
-    g_nid.uID = 1;
-    g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
-    g_nid.uCallbackMessage = WM_TRAY;
-    // Our logo badge at the shell's small-icon size (picks the 16px frame from the multi-size .ico
-    // for a crisp tray render). Fall back to the generic app icon if the resource can't be loaded.
-    if (!hInst) hInst = GetModuleHandleW(nullptr);
-    g_nid.hIcon = (HICON)LoadImageW(hInst, MAKEINTRESOURCEW(IDI_WIND), IMAGE_ICON,
-                                    GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON),
-                                    LR_DEFAULTCOLOR);
-    if (!g_nid.hIcon) g_nid.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
-    lstrcpyW(g_nid.szTip, L"Wind magnifier");
-    Shell_NotifyIconW(NIM_ADD, &g_nid);
-}
-void Remove() { Shell_NotifyIconW(NIM_DELETE, &g_nid); }
-void Notify(const wchar_t* title, const wchar_t* text) {
-    g_nid.uFlags = NIF_INFO;
-    // Bounded copies: szInfoTitle is 64 wchars, szInfo 256; profile names travel through here,
-    // so an unbounded lstrcpyW was a caller-controlled overflow of the fixed NOTIFYICONDATA.
-    lstrcpynW(g_nid.szInfoTitle, title, ARRAYSIZE(g_nid.szInfoTitle));
-    lstrcpynW(g_nid.szInfo, text, ARRAYSIZE(g_nid.szInfo));
-    Shell_NotifyIconW(NIM_MODIFY, &g_nid);
-    g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
-}
 // Switch the active profile from the tray: rewrite the live ini from the profile file (globals
 // preserved); the core's dir-watch hot-reloads everything except `model`, which is read once at
-// launch - a model change relaunches Wind.exe (the new instance evicts us via the single-instance
-// handshake, same as the swap-model path in main.cpp).
+// launch - a model change relaunches Wind.exe from our folder (the new instance evicts the running
+// one via the single-instance handshake, same as the swap-model path in Wind's main.cpp).
 static void SwitchToProfile(const std::wstring& ini, const std::wstring& nameW) {
     // Every step logs (issue #184: a field switch failed with no trace - the balloon is
     // transient, the log is not).
@@ -433,11 +399,12 @@ static void SwitchToProfile(const std::wstring& ini, const std::wstring& nameW) 
               oldModel.c_str(), newModel.c_str(),
               oldModel != newModel ? " (relaunching)" : " (hot)");
     if (oldModel != newModel) {
-        wchar_t exe[MAX_PATH];
-        const bool haveExe = GetModuleFileNameW(nullptr, exe, MAX_PATH) != 0;
+        // Wind.exe, NOT our own exe (GetModuleFileNameW here is WindTray.exe).
+        const std::wstring exe = AppDir() + L"\\Wind.exe";
+        const bool haveExe = GetFileAttributesW(exe.c_str()) != INVALID_FILE_ATTRIBUTES;
         INT_PTR rc = haveExe
-            ? reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", exe, nullptr, nullptr,
-                                                      SW_SHOWNORMAL))
+            ? reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", exe.c_str(), nullptr,
+                                                      AppDir().c_str(), SW_SHOWNORMAL))
             : 0;
         if (rc > 32) {
             Notify(L"Wind", (L"Switched to \"" + nameW + L"\" (restarting for its model).").c_str());
@@ -453,38 +420,14 @@ static void SwitchToProfile(const std::wstring& ini, const std::wstring& nameW) 
     }
 }
 
-bool MenuOpen() { return InterlockedCompareExchange(&g_menuOpen, 0, 0) != 0; }
-
-bool HandleMessage(HWND hwnd, UINT msg, WPARAM /*wp*/, LPARAM lp) {
-    if (msg == DiagDoneMsg()) {
-        // Export worker finished (off-thread). Read the result from the guarded slot - the message params
-        // are NOT trusted/dereferenced, so a forged wake-up from another process can't deref a pointer.
-        std::wstring zip; bool ok = false, ready = false;
-        { std::lock_guard<std::mutex> lk(g_diagMx);
-          if (g_diagReady) { zip = std::move(g_diagZip); ok = g_diagOk; g_diagReady = false; g_diagZip.clear(); ready = true; } }
-        if (!ready) return true;   // no export result pending (spurious/foreign wake-up): ignore
-        if (ok && !zip.empty()) {  // reveal + notify here, on the message thread (tray state stays single-threaded)
-            std::wstring args = L"/select,\"" + zip + L"\"";
-            ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
-            Notify(L"Wind", L"Diagnostics exported to your Desktop.");
-        } else {
-            Notify(L"Wind", L"Could not export diagnostics.");
-        }
-        return true;
-    }
-    if (msg == WM_TRAY && (lp == WM_RBUTTONUP || lp == WM_LBUTTONUP)) {
-        // One menu at a time; a second click while it is open is just a re-click, ignored.
-        if (InterlockedCompareExchange(&g_menuOpen, 1, 0) != 0) return true;
-        auto* ctx = new MenuCtx{};
-        ctx->mainHwnd = hwnd;
-        GetCursorPos(&ctx->pt);
-        HANDLE t = CreateThread(nullptr, 0, MenuThread, ctx, 0, nullptr);
-        if (t) CloseHandle(t);
-        else { delete ctx; InterlockedExchange(&g_menuOpen, 0); }
-        return true;
-    }
-    if (msg == WM_CLOSE)  { DestroyWindow(hwnd); return true; }
-    if (msg == WM_DESTROY) { PostQuitMessage(0); return true; }
+bool OpenMenu(POINT pt) {
+    // One menu at a time; a second click while it is open is just a re-click, ignored.
+    if (InterlockedCompareExchange(&g_menuOpen, 1, 0) != 0) return false;
+    auto* ctx = new MenuCtx{ pt };
+    HANDLE t = CreateThread(nullptr, 0, MenuThread, ctx, 0, nullptr);
+    if (t) { CloseHandle(t); return true; }
+    delete ctx;
+    InterlockedExchange(&g_menuOpen, 0);
     return false;
 }
 }}

@@ -69,5 +69,8 @@ struct IMagnifierModel {
     // the rest of the zoom pipeline when selfDrivenZoom() is true.
     virtual bool selfDrivenZoom() const { return false; }
     virtual void nativeZoomTick(int dir, const Config& cfg) { (void)dir; (void)cfg; }
+    // Magnify model: pass scroll-wheel zoom notches straight on (#285), one Magnifier notch each
+    // (steps > 0 = in). Magnifier's own ZoomIncrement sets the size of a notch there.
+    virtual void nativeWheelNotches(int steps) { (void)steps; }
 };
 }

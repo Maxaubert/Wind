@@ -1,5 +1,6 @@
 #include "magnify_model.h"
 #include "logging.h"
+#include "pointer_binds.h"   // kWindInjectTag (#285)
 #include <windows.h>
 #include <magnification.h>
 #include <shellapi.h>
@@ -66,6 +67,8 @@ void InjectZoomNotch(bool zoomIn) {
     in[1].type = INPUT_KEYBOARD; in[1].ki.wVk = VK_MENU;
     in[2].type = INPUT_MOUSE;    in[2].mi.dwFlags = MOUSEEVENTF_WHEEL;
     in[2].mi.mouseData = (DWORD)(zoomIn ? WHEEL_DELTA : -WHEEL_DELTA);
+    for (auto& i : in) { if (i.type == INPUT_MOUSE) i.mi.dwExtraInfo = (ULONG_PTR)wind::kWindInjectTag;
+                         else i.ki.dwExtraInfo = (ULONG_PTR)wind::kWindInjectTag; }   // never a wheel bind (#285)
     in[3].type = INPUT_KEYBOARD; in[3].ki.wVk = VK_MENU;    in[3].ki.dwFlags = KEYEVENTF_KEYUP;
     in[4].type = INPUT_KEYBOARD; in[4].ki.wVk = VK_CONTROL; in[4].ki.dwFlags = KEYEVENTF_KEYUP;
     SendInput(5, in, sizeof(INPUT));
@@ -121,6 +124,38 @@ void MagnifyModel::nativeZoomTick(int dir, const Config& cfg) {
     if (!MagnifierWindowPresent()) { launchMagnifier(); return; }   // user closed it: bring it back
     lastNotchMs_ = now;
     InjectZoomNotch(dir > 0);
+}
+
+// The user is turning the wheel with the bind's modifiers held, which may already include Ctrl or
+// Alt. Inject only the ones NOT held: releasing a physically held modifier would clear its logical
+// state, and the user's next notch would then miss the bind and scroll the app instead.
+static void InjectWheelNotches(int count, bool zoomIn) {
+    const bool ctrlHeld = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+    const bool altHeld  = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
+    INPUT in[4 + 8] = {};
+    int n = 0;
+    auto key = [&](WORD vk, bool up) {
+        in[n].type = INPUT_KEYBOARD; in[n].ki.wVk = vk; in[n].ki.dwFlags = up ? KEYEVENTF_KEYUP : 0;
+        in[n].ki.dwExtraInfo = (ULONG_PTR)wind::kWindInjectTag; ++n;
+    };
+    if (!ctrlHeld) key(VK_CONTROL, false);
+    if (!altHeld)  key(VK_MENU, false);
+    for (int i = 0; i < count; ++i) {
+        in[n].type = INPUT_MOUSE; in[n].mi.dwFlags = MOUSEEVENTF_WHEEL;
+        in[n].mi.mouseData = (DWORD)(zoomIn ? WHEEL_DELTA : -WHEEL_DELTA);
+        in[n].mi.dwExtraInfo = (ULONG_PTR)wind::kWindInjectTag; ++n;
+    }
+    if (!altHeld)  key(VK_MENU, true);
+    if (!ctrlHeld) key(VK_CONTROL, true);
+    SendInput((UINT)n, in, sizeof(INPUT));
+}
+
+void MagnifyModel::nativeWheelNotches(int steps) {
+    if (steps == 0 || !ready_) return;
+    if (!MagnifierWindowPresent()) { launchMagnifier(); return; }
+    int count = steps > 0 ? steps : -steps;
+    if (count > 8) count = 8;   // a long free-spin: Magnifier eases each notch, more is just lag
+    InjectWheelNotches(count, steps > 0);
 }
 
 void MagnifyModel::shutdown() {

@@ -7,16 +7,20 @@
 // Copy pass same day: plain language (no "swallow"), no toggle labels starting with "Enable",
 // no desc that restates its label, consequences kept only where they change a decision.
 export const sections = [
-  { id:'keybinds', label:'Keybinds', icon:'keys', desc:'Hold to zoom. Each binding takes a mouse side-button or a key. Right-click to clear.', rows: [
+  { id:'keybinds', label:'Keybinds', icon:'keys', desc:'Hold to zoom. A binding can be a key, a key combination, a mouse side-button, or a click with modifiers. Right-click to clear.', rows: [
     // One row per direction with TWO capture slots (the 'Alternate keybinds' gate left the UI
     // 2026-08-22): the *2 keys feed the second keycap, either slot works alone, both fire the
     // same action (the core OR-combines them).
     { key:'__zoomIn',   type:'keybind', label:'Zoom in',
-      buttonKey:'zoomInButton',  vkKey:'zoomInVk',  modsKey:'zoomInMods',
-      buttonKey2:'zoomInButton2',  vkKey2:'zoomInVk2',  modsKey2:'zoomInMods2' },
+      buttonKey:'zoomInButton',  vkKey:'zoomInVk',  modsKey:'zoomInMods',  buttonModsKey:'zoomInButtonMods',
+      buttonKey2:'zoomInButton2',  vkKey2:'zoomInVk2',  modsKey2:'zoomInMods2',  buttonModsKey2:'zoomInButton2Mods' },
     { key:'__zoomOut',  type:'keybind', label:'Zoom out',
-      buttonKey:'zoomOutButton', vkKey:'zoomOutVk', modsKey:'zoomOutMods',
-      buttonKey2:'zoomOutButton2', vkKey2:'zoomOutVk2', modsKey2:'zoomOutMods2' },
+      buttonKey:'zoomOutButton', vkKey:'zoomOutVk', modsKey:'zoomOutMods', buttonModsKey:'zoomOutButtonMods',
+      buttonKey2:'zoomOutButton2', vkKey2:'zoomOutVk2', modsKey2:'zoomOutMods2', buttonModsKey2:'zoomOutButton2Mods' },
+    // Scroll-wheel zoom (#285): the modifiers held while turning the wheel; up = in, down = out.
+    { key:'__zoomWheel', type:'keybind', label:'Zoom with the scroll wheel',
+      desc:'Hold these keys and turn the wheel: up zooms in, down zooms out, at your zoom speeds. Needs a modifier, not Shift alone. Ctrl zooms the screen instead of the page.',
+      wheel:true, modsKey:'zoomWheelMods' },
     // Keyboard-hook suspension (issue #156): trades key-interception for smooth panning, per app.
     { key:'noSwallowApps', type:'applist', label:'Pass zoom keys to these apps',
       desc:'Fixes stuttery panning in some games. The app will also receive the key.',

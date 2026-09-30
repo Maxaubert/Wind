@@ -44,7 +44,7 @@ $env:PSModulePath = "$env:SystemRoot\system32\WindowsPowerShell\v1.0\Modules;$en
 Import-Module Microsoft.PowerShell.Security, PKI
 
 $subject = 'CN=Wind Local Signing'
-$targets = @($Stage, "$Dir\WindConfig.exe")
+$targets = @($Stage, "$Dir\WindConfig.exe", "$Dir\WindTray.exe")   # WindTray: issue #291, same Defender reason as WindConfig
 $trustStores = 'Root', 'TrustedPublisher'
 $new = $null
 

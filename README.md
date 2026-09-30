@@ -90,9 +90,14 @@ do not apply there: `sharpness`, `hdrTonemap`, `bilinear`, `outline*`, `brightne
 ## Controls
 Zoom binds ship **unbound** - the first-launch guided setup captures your choice (mouse
 side-buttons and/or keyboard keys, with optional alternates). Everything is rebindable in
-Settings; bound keys are swallowed so they never double-fire into the focused app.
+Settings; bound keys are swallowed so they never double-fire into the focused app. A bind can be
+a key, a key combination (Ctrl, Alt, Shift, Win), a mouse side-button, or a left/right/middle click
+with modifiers. Binds that would break normal use are refused with the reason: typing keys alone,
+Shift or AltGr (Ctrl+Alt) plus a typing key, and combos Windows reserves (Alt+F4, Win+L, ...).
 
 - Hold your **zoom-in** bind - zoom in (smooth ramp). Hold **zoom-out** - zoom back.
+- **Scroll-wheel zoom** (optional): hold the modifiers you chose (for example Ctrl,
+  Alt or Ctrl+Alt; never Shift alone) and turn the wheel - up zooms in, down zooms out.
 - Release - zoom stays at the current level.
 - **Quick zoom** (default Ctrl + a zoom key, or a dedicated hotkey) - toggle between 1x and
   your remembered level.
@@ -133,7 +138,7 @@ step entirely. `src\version.h` is the only place the version is declared.
 
 ## Build
 Requires Visual Studio 2022+ Build Tools (Desktop development with C++). From any shell:
-- `build.bat` - builds `Wind.exe` (runs from anywhere).
+- `build.bat` - builds `Wind.exe` and its tray helper `WindTray.exe` (runs from anywhere).
 - `build.bat test` - builds and runs the unit tests.
 - `build.bat uiaccess` - builds the UIAccess variant (signed-install prerequisite).
 - `build.bat config` - builds the Settings app (`WindConfig.exe` + the Svelte UI).
@@ -160,8 +165,11 @@ closes itself if the magnifier exits. Every ini key below keeps working even whe
 Settings row.
 Profiles (tray -> Profiles, or the Settings titlebar) snapshot the whole file per activity.
 
-- `zoomInButton`/`zoomOutButton` (mouse side-buttons) and `zoomInVk`/`zoomOutVk` (keyboard) -
+- `zoomInButton`/`zoomOutButton` (1/2 mouse side-buttons, 3/4/5 left/right/middle click with
+  `zoomInButtonMods` etc.) and `zoomInVk`/`zoomOutVk` + `zoomInMods`/`zoomOutMods` (keyboard) -
   hold to zoom; all ship unbound until the guided setup. Alternates: `*2` variants.
+- `zoomWheelMods` (0 = off) - scroll-wheel zoom. A notch zooms as far as holding the bind does in
+  0.1 s, so `zoomInSpeed`/`zoomOutSpeed` set its speed too.
 - `maxLevel`, `zoomInSpeed`/`zoomOutSpeed`, `smoothZoom*` - zoom range and feel.
 - `cursorSensitivity`, `cursorSmoothing` - pan speed and inertia.
 - `bilinear`, `sharpness`, `cursorConstantSize` (default 0: the cursor grows with the zoom),

@@ -1,12 +1,12 @@
 #pragma once
-// Owner-drawn tray menu: the drawing half, kept out of tray.cpp so the menu logic there stays
+// Owner-drawn tray menu: the drawing half, kept out of tray_menu.cpp so the menu logic there stays
 // readable. See docs/superpowers/specs/2026-08-28-tray-menu-design.md for the design and for why
 // this is an owner-drawn HMENU rather than a custom popup window.
 #include <windows.h>
 #include <string>
 #include <vector>
-#include "tick_stats.h"
-#include "tray_status.h"
+#include "../tick_stats.h"
+#include "../tray_status.h"
 
 namespace wind { namespace TrayDraw {
 
@@ -111,12 +111,13 @@ inline void FillRoundRectC(HDC dc, const RECT& r, COLORREF c, int rad) {
 // a bright top line - the original 1px accent hairline on the dark well was field-rejected as
 // invisible. The dotted midline IS the median (the scale is 2x median), so a healthy trace hugs
 // it and a stall spikes visibly above it.
-inline void DrawSparkline(HDC dc, const RECT& box, const Palette& pal, const Metrics& mt) {
+inline void DrawSparkline(HDC dc, const RECT& box, const Palette& pal, const Metrics& mt,
+                          const TickStats& ticks) {
     const COLORREF well = pal.dark ? RGB(0x19,0x19,0x1c) : RGB(0xef,0xef,0xf3);
     FillRoundRectC(dc, box, well, mt.scale(4));
 
     float buf[TickStats::kCap];
-    const int n = Ticks().snapshot(buf, TickStats::kCap);
+    const int n = ticks.snapshot(buf, TickStats::kCap);
     const int w = box.right - box.left, h = box.bottom - box.top;
     const int midY = (box.top + box.bottom) / 2;
     if (n < 8 || w <= 4 || h <= 4) {

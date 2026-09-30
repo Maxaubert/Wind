@@ -1,4 +1,5 @@
 #include "config.h"
+#include "keybind_rules.h"   // one safety rule set for every bind (#285)
 #include <cstring>
 #include <sstream>
 #include <string>
@@ -145,6 +146,11 @@ Config ParseConfig(const std::string& text) {
             else if (key == "zoomOutMods")      c.zoomOutMods = std::stoi(val);
             else if (key == "zoomInMods2")      c.zoomInMods2 = std::stoi(val);
             else if (key == "zoomOutMods2")     c.zoomOutMods2 = std::stoi(val);
+            else if (key == "zoomInButtonMods")   c.zoomInButtonMods = std::stoi(val);
+            else if (key == "zoomOutButtonMods")  c.zoomOutButtonMods = std::stoi(val);
+            else if (key == "zoomInButton2Mods")  c.zoomInButton2Mods = std::stoi(val);
+            else if (key == "zoomOutButton2Mods") c.zoomOutButton2Mods = std::stoi(val);
+            else if (key == "zoomWheelMods")      c.zoomWheelMods = std::stoi(val);
             else if (key == "maxLevel")         c.maxLevel = std::stod(val);
             else if (key == "zoomInSpeed")      c.zoomInSpeed = std::stod(val);
             else if (key == "zoomOutSpeed")     c.zoomOutSpeed = std::stod(val);
@@ -311,13 +317,25 @@ Config ParseConfig(const std::string& text) {
     // Reject keybinds to keys Wind must never swallow (see IsForbiddenBindVk). A bound key is
     // eaten system-wide, so binding e.g. Backspace or the Windows key would make it unusable
     // everywhere; treat a forbidden bind as unbound regardless of how it got into the ini.
-    auto sanitizeVk = [](int& vk) { if (IsForbiddenBindVk(vk)) vk = 0; };
-    sanitizeVk(c.zoomInVk);   sanitizeVk(c.zoomInVk2);
-    sanitizeVk(c.zoomOutVk);  sanitizeVk(c.zoomOutVk2);
-    sanitizeVk(c.recenterVk);
-    sanitizeVk(c.cursorLockVk);
-    sanitizeVk(c.hideCursorVk);
-    sanitizeVk(c.quickZoomVk);
+    // Since #285 every bind goes through the one shared rule set (src/keybind_rules.h), which also
+    // refuses typing keys alone, Shift/AltGr + a typing key and system-reserved combos: an unsafe bind
+    // in an ini (hand-edited, or from an older version) reads as unbound.
+    auto sanitizeKey = [](int& vk, int* mods) {
+        const int m = mods ? *mods : 0;
+        if (CheckKeyBind(vk, m) != BindVerdict::Ok) { vk = 0; if (mods) *mods = 0; }
+    };
+    sanitizeKey(c.zoomInVk, &c.zoomInMods);    sanitizeKey(c.zoomInVk2, &c.zoomInMods2);
+    sanitizeKey(c.zoomOutVk, &c.zoomOutMods);  sanitizeKey(c.zoomOutVk2, &c.zoomOutMods2);
+    sanitizeKey(c.recenterVk, nullptr);
+    sanitizeKey(c.cursorLockVk, nullptr);
+    sanitizeKey(c.hideCursorVk, &c.hideCursorMods);
+    sanitizeKey(c.quickZoomVk, &c.quickZoomMods);
+    auto sanitizeButton = [](int& b, int& mods) {
+        if (CheckClickBind(b, mods) != BindVerdict::Ok) { b = 0; mods = 0; }
+    };
+    sanitizeButton(c.zoomInButton, c.zoomInButtonMods);    sanitizeButton(c.zoomInButton2, c.zoomInButton2Mods);
+    sanitizeButton(c.zoomOutButton, c.zoomOutButtonMods);  sanitizeButton(c.zoomOutButton2, c.zoomOutButton2Mods);
+    if (c.zoomWheelMods != 0 && CheckWheelBind(c.zoomWheelMods) != BindVerdict::Ok) c.zoomWheelMods = 0;
     return c;
 }
 }
@@ -355,8 +373,9 @@ std::string DefaultIniText() {
                "zoomInButton=0\nzoomOutButton=0\n"
                "; Keyboard hold-to-zoom (Virtual-Key codes, decimal; 0=unbound). Works without a\n"
                ";   side-button mouse. The bound key is SWALLOWED (it won't reach the focused app), so\n"
-               ";   it can't double-fire. Left/right click, Backspace, and the Windows keys can't be\n"
-               ";   bound (they'd be lost system-wide). e.g. 33=PageUp 34=PageDown 107/109=NumPad +/- 112=F1.\n"
+               ";   it can't double-fire. Typing keys, Backspace, a bare modifier, system combos (Alt+F4,\n"
+               ";   Alt+Tab...) and Windows-reserved Win combos can't be bound (they'd be lost system-wide;\n"
+               ";   src/keybind_rules.h). e.g. 33=PageUp 34=PageDown 107/109=NumPad +/- 112=F1.\n"
                "zoomInVk=0\nzoomOutVk=0\n"
                "; Modifier mask required with each zoom key (bit 1=Ctrl, 2=Alt, 4=Shift, 8=Win;\n"
                ";   0=no modifier). e.g. 3 = Ctrl+Alt. Extra modifiers held don't disqualify.\n"
@@ -368,6 +387,12 @@ std::string DefaultIniText() {
                ";   when a primary slot holds a key.\n"
                "zoomInButton2=0\nzoomOutButton2=0\n"
                "zoomInVk2=0\nzoomOutVk2=0\nzoomInMods2=0\nzoomOutMods2=0\n"
+               "; Button binds may also be 3=left, 4=right, 5=middle click, which need a modifier mask\n"
+               ";   (zoomInButtonMods etc., same bits; never Ctrl or Shift alone). Optional for 1/2.\n"
+               "zoomInButtonMods=0\nzoomOutButtonMods=0\nzoomInButton2Mods=0\nzoomOutButton2Mods=0\n"
+               "; zoomWheelMods: modifiers that make the scroll wheel zoom (0=off; e.g. 2=Alt, 3=Ctrl+Alt;\n"
+               ";   never Shift alone; Ctrl zooms the screen, not the page). Speed: zoomInSpeed (up), zoomOutSpeed (down).\n"
+               "zoomWheelMods=0\n"
                "; hideCursorVk/hideCursorMods: hotkey to toggle the magnified cursor on/off while\n"
                ";   zoomed (does not reset zoom). VK + mods, 0=unbound.\n"
                "hideCursorVk=0\nhideCursorMods=0\n"

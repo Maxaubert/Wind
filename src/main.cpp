@@ -40,10 +40,10 @@
 #include "edge_pan.h"        // mouse edge mode (issue #276 phase 2)
 #include "cursor_decode.h"   // edge mode measures the cursor body
 #include "focus_track.h"     // tracking: caret/focus watcher thread
-#include "tray.h"
+#include "tray_host.h"     // WindTray.exe owns the icon and menu (#291)
 #include "gain_learner.h"  // learned pointer ballistics: locked pan at TRUE desktop speed
-#include "tray_status.h"   // the tray menu's status snapshot
-#include "tick_stats.h"    // frame-pacing ring the tray sparkline draws from
+#include "tray_ipc.h"      // the status block shared with WindTray.exe
+#include "pointer_binds.h"  // kWindInjectTag: tag our own injected clicks (#285)
 
 // txPace=2 composite signal (see config.h). One thread blocks in DwmFlush forever and pulses an
 // auto-reset event per real composite; the pacing loop waits on the event WITH A TIMEOUT, so a
@@ -376,6 +376,8 @@ struct TickState {
                                                //   present divisor (0 = present tick)
     double quickZoomStored    = 0.0;           // remembered quick-zoom level (0 = none yet); in-memory
     bool   prevInHeld         = false;         // for rising-edge detection of the zoom-in channel
+    bool   prevInPlain        = false;         // quick-zoom tap edges: binds without the modifier (#285)
+    bool   prevOutPlain       = false;
     bool   prevOutHeld        = false;
     // Diagnostics (issue #113): held-state edge logging for the intermittent stuck side-button. Track
     // the previous-tick held flags + how long the current held episode has lasted, so we can log a
@@ -859,6 +861,9 @@ static void UpdateCursorTint(TickState& t) {
     if (fsApp) g_tint.restore(true);
     else g_tint.apply(enc);
 }
+// The status block WindTray.exe reads (tray_ipc.h). Null if the mapping failed: every accessor
+// treats null as "no tray data", so the tick path needs no extra branch beyond the pointer test.
+static wind::TrayShared* g_trayBlock = nullptr;
 
 static void RunTick(TickState& t) {
     // Idle (1x) colour filter; a zoomed tick re-decides below with the engine known.
@@ -869,7 +874,7 @@ static void RunTick(TickState& t) {
     t.prev = now;
     // One float store per tick, for the tray's frame-pacing readout. Deliberately the cheapest
     // possible coupling to the hot path: no lock, no allocation, and nothing reads it here.
-    wind::Ticks().push((float)(dt * 1000.0));
+    if (g_trayBlock) g_trayBlock->ticks.push((float)(dt * 1000.0));
 
     // Config hot-reload. A directory-change notification tells us WHEN to re-check magnifier.ini,
     // so the idle render thread does NO per-second filesystem stat (the old 1 Hz GetFileAttributesExW
@@ -926,10 +931,13 @@ static void RunTick(TickState& t) {
             // this the hook would keep firing the OLD button (the new VK works via GetAsyncKeyState
             // but the mouse mapping is captured once in g_input.start at app launch).
             if (nc.zoomInButton != t.cfg.zoomInButton || nc.zoomOutButton != t.cfg.zoomOutButton
-             || nc.zoomInButton2 != t.cfg.zoomInButton2 || nc.zoomOutButton2 != t.cfg.zoomOutButton2) {
-                g_input.setButtons(nc.zoomInButton, nc.zoomInButton2,
-                                   nc.zoomOutButton, nc.zoomOutButton2);
+             || nc.zoomInButton2 != t.cfg.zoomInButton2 || nc.zoomOutButton2 != t.cfg.zoomOutButton2
+             || nc.zoomInButtonMods != t.cfg.zoomInButtonMods || nc.zoomOutButtonMods != t.cfg.zoomOutButtonMods
+             || nc.zoomInButton2Mods != t.cfg.zoomInButton2Mods || nc.zoomOutButton2Mods != t.cfg.zoomOutButton2Mods) {
+                g_input.setButtonBinds(nc.zoomInButton, nc.zoomInButtonMods, nc.zoomInButton2, nc.zoomInButton2Mods,
+                                       nc.zoomOutButton, nc.zoomOutButtonMods, nc.zoomOutButton2, nc.zoomOutButton2Mods);
             }
+            g_input.setWheelMods(nc.zoomWheelMods);   // scroll-wheel zoom (#285); one relaxed store
             // Re-bind the keyboard hook's tracked/swallowed keys when any keyboard zoom/recenter
             // bind changed (else the hook keeps swallowing the OLD key and ignores the new one).
             if (nc.zoomInVk != t.cfg.zoomInVk || nc.zoomOutVk != t.cfg.zoomOutVk
@@ -938,7 +946,8 @@ static void RunTick(TickState& t) {
                 g_input.setKeys(nc.zoomInVk, nc.zoomInVk2, nc.zoomOutVk, nc.zoomOutVk2, nc.recenterVk,
                                 nc.cursorLockVk);
             }
-        if (nc.hideCursorVk != t.cfg.hideCursorVk || nc.hideCursorMods != t.cfg.hideCursorMods) {
+            g_input.setKeyMods(nc.zoomInMods, nc.zoomInMods2, nc.zoomOutMods, nc.zoomOutMods2);
+            if (nc.hideCursorVk != t.cfg.hideCursorVk || nc.hideCursorMods != t.cfg.hideCursorMods) {
                 RegisterHideCursorHotkey(t.hwnd, nc.hideCursorVk, nc.hideCursorMods);
             }
             if (nc.quickZoomHotkeyMode != t.cfg.quickZoomHotkeyMode
@@ -1073,12 +1082,31 @@ static void RunTick(TickState& t) {
         return true;
     };
     auto comboHeld = [&](int vk, int mods) { return keyDown(vk) && modsHeld(mods); };
-    bool inHeld  = g_input.state().inHeld.load()
-        || comboHeld(t.cfg.zoomInVk,  t.cfg.zoomInMods)
-        || comboHeld(t.cfg.zoomInVk2, t.cfg.zoomInMods2);
-    bool outHeld = g_input.state().outHeld.load()
-        || comboHeld(t.cfg.zoomOutVk,  t.cfg.zoomOutMods)
-        || comboHeld(t.cfg.zoomOutVk2, t.cfg.zoomOutMods2);
+    // Quick-zoom modifier mode (see below): holding the modifier turns a zoom-key press into a
+    // quick-zoom tap. A bind that ITSELF includes that modifier (Ctrl+Alt+click with the Ctrl
+    // modifier, #285) is a normal hold-to-zoom bind, so every held bind is sorted into "includes the
+    // quick-zoom modifier" (qz) or not (plain).
+    const bool hotkeyMode = t.cfg.quickZoomHotkeyMode != 0;
+    const std::string& qzMod = t.cfg.quickZoomModifier;
+    int quickZoomModVk = VK_CONTROL, qzBit = 1;
+    if      (_stricmp(qzMod.c_str(), "alt")   == 0) { quickZoomModVk = VK_MENU;  qzBit = 2; }
+    else if (_stricmp(qzMod.c_str(), "shift") == 0) { quickZoomModVk = VK_SHIFT; qzBit = 4; }
+    const bool modifierActive = !hotkeyMode && _stricmp(qzMod.c_str(), "none") != 0;
+    bool inPlain = false, inQz = false, outPlain = false, outQz = false;
+    auto sortHeld = [&](bool held, int mods, bool& plain, bool& qz) {
+        if (!held) return;
+        if (modifierActive && (mods & qzBit)) qz = true; else plain = true;
+    };
+    sortHeld(g_input.state().inHeld.load(), g_input.state().inHeldMods.load(), inPlain, inQz);
+    sortHeld(comboHeld(t.cfg.zoomInVk,  t.cfg.zoomInMods),  t.cfg.zoomInMods,  inPlain, inQz);
+    sortHeld(comboHeld(t.cfg.zoomInVk2, t.cfg.zoomInMods2), t.cfg.zoomInMods2, inPlain, inQz);
+    sortHeld(g_input.state().outHeld.load(), g_input.state().outHeldMods.load(), outPlain, outQz);
+    sortHeld(comboHeld(t.cfg.zoomOutVk,  t.cfg.zoomOutMods),  t.cfg.zoomOutMods,  outPlain, outQz);
+    sortHeld(comboHeld(t.cfg.zoomOutVk2, t.cfg.zoomOutMods2), t.cfg.zoomOutMods2, outPlain, outQz);
+    bool inHeld  = inPlain || inQz;
+    bool outHeld = outPlain || outQz;
+    // Scroll-wheel zoom (#285): whole steps the hook swallowed since the last tick.
+    const int wheelSteps = g_input.drainWheelSteps();
     // Apply the live zoom profile every frame (free hot-reload; setProfile does not reset level).
     // (The old transform <=1.0x ramp-speed cap was a blind TDR mitigation; the resets were
     // root-caused elsewhere - issue #148 - so the user's configured speed applies everywhere.)
@@ -1089,14 +1117,12 @@ static void RunTick(TickState& t) {
     // (Ctrl/Alt/Shift; "None" = off) and tap a zoom key. While the modifier is held it toggles quick
     // zoom (below) instead of hold-zooming, so suppress the hold-zoom direction (the toggle snaps the
     // level). Hotkey mode (==1): a dedicated hotkey toggles it and the modifier is inert here.
-    bool hotkeyMode = t.cfg.quickZoomHotkeyMode != 0;
-    const std::string& qzMod = t.cfg.quickZoomModifier;
-    int quickZoomModVk = VK_CONTROL;
-    if      (_stricmp(qzMod.c_str(), "alt")   == 0) quickZoomModVk = VK_MENU;
-    else if (_stricmp(qzMod.c_str(), "shift") == 0) quickZoomModVk = VK_SHIFT;
-    bool modifierActive = !hotkeyMode && _stricmp(qzMod.c_str(), "none") != 0;
     bool modKeyDown = modifierActive && (GetAsyncKeyState(quickZoomModVk) & 0x8000) != 0;
-    t.zoom.setDirection(modKeyDown ? ZoomDir::None : ResolveDirection(inHeld, outHeld));
+    // With the modifier down only binds that include it hold-zoom; the others are quick-zoom taps.
+    t.zoom.setDirection(modKeyDown ? ResolveDirection(inQz, outQz) : ResolveDirection(inHeld, outHeld));
+    // The wheel zooms at the user's zoom speeds (a notch = 0.1 s of holding the bind).
+    if (wheelSteps != 0 && !t.model->selfDrivenZoom())   // native Magnifier gets its own notches below
+        t.zoom.wheelNotches(wheelSteps);
     // Clamp the dt fed to the zoom so a single long tick (cold first capture, alt-tab, any hitch)
     // can't jump the zoom level mid-ramp - it should always ease in/out at a steady rate regardless
     // of frame-time spikes. Raw dt is kept below for the diagnostics block (which must see true
@@ -1145,7 +1171,9 @@ static void RunTick(TickState& t) {
     // diagnostics block at the bottom is skipped too; the magnify category logs direction edges.)
     if (t.model->selfDrivenZoom()) {
         int rdx, rdy; g_input.drainRaw(rdx, rdy);            // keep the raw accumulator drained
-        t.model->nativeZoomTick((inHeld ? 1 : 0) - (outHeld ? 1 : 0), t.cfg);
+        const int nativeDir = (inHeld ? 1 : 0) - (outHeld ? 1 : 0);
+        t.model->nativeZoomTick(nativeDir, t.cfg);
+        t.model->nativeWheelNotches(wheelSteps);   // every wheel notch becomes one Magnifier notch (#285)
         t.prevInHeld = inHeld; t.prevOutHeld = outHeld;
         t.prevLvl = 1.0; t.prevActive = false; t.prevInspect = false;
         return;
@@ -1157,8 +1185,10 @@ static void RunTick(TickState& t) {
     // flag) OR the modifier held + a rising edge of either zoom key (modifier mode). The snap flows
     // into the SAME-tick zoom-in/out transitions below (which key off lvl vs prevLvl).
     // prevInHeld/prevOutHeld update every tick (outside the gate) so re-enabling can't fire a stale edge.
-    bool inEdge  = inHeld  && !t.prevInHeld;
-    bool outEdge = outHeld && !t.prevOutHeld;
+    // Quick-zoom taps come only from binds WITHOUT the modifier (a bind that includes it zooms).
+    bool inEdge  = inPlain  && !t.prevInPlain;
+    bool outEdge = outPlain && !t.prevOutPlain;
+    t.prevInPlain = inPlain; t.prevOutPlain = outPlain;
     t.prevInHeld = inHeld; t.prevOutHeld = outHeld;
     bool hotkeyTrigger = t.quickZoomHotkey.exchange(false);   // always consume (only set in hotkey mode)
     bool modZoomTrigger = modKeyDown && (inEdge || outEdge);  // modKeyDown implies modifier mode + enabled
@@ -1170,8 +1200,8 @@ static void RunTick(TickState& t) {
     }
     double lvl = t.zoom.level();
     {
-        // Snapshot for the tray menu, published every tick and read (cross-thread, relaxed
-        // atomics) when the menu opens - always current at the moment it is shown. "Advanced" is
+        // Snapshot for the tray menu, published every tick into the shared block and read by
+        // WindTray.exe (relaxed atomics) while its menu is open. "Advanced" is
         // the hybrid model: the mode that picks an engine per window type; renamed from "Auto"
         // because Auto undersold what it does.
         wind::TrayStatus ts_;
@@ -1182,7 +1212,7 @@ static void RunTick(TickState& t) {
                    : mdl == "magnify"   ? wind::TrayEngine::System
                                         : wind::TrayEngine::Advanced;
         ts_.panning = lvl > 1.001;
-        wind::PublishTrayStatus(ts_);
+        wind::PublishTrayStatus(g_trayBlock, ts_);
     }
 
     int rawDx, rawDy; g_input.drainRaw(rawDx, rawDy);
@@ -1768,7 +1798,8 @@ static void RunTick(TickState& t) {
                 auto fireClicks = [&](DWORD downF, DWORD upF, int count) {
                     for (int k = 0; k < count; ++k) {
                         INPUT clk[3] = {};
-                        for (int i = 0; i < 3; ++i) { clk[i].type = INPUT_MOUSE; clk[i].mi.dx = ax; clk[i].mi.dy = ay; }
+                        for (int i = 0; i < 3; ++i) { clk[i].type = INPUT_MOUSE; clk[i].mi.dx = ax; clk[i].mi.dy = ay;
+                                                      clk[i].mi.dwExtraInfo = (ULONG_PTR)wind::kWindInjectTag; }   // never a click bind (#285)
                         clk[0].mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
                         clk[1].mi.dwFlags = downF | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
                         clk[2].mi.dwFlags = upF   | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
@@ -1962,11 +1993,12 @@ static void RunTick(TickState& t) {
         const bool quiesceHold = QuiesceHoldActive(t);
         ex.pauseWrites = t.clickPauseTicks > 0 || quiesceHold;
         if (quiesceHold) ex.suppressCursorSync = true;
-        // Our own menu is open: the pointer belongs to the USER (they are aiming at menu items),
+        // Our tray menu is open (in WindTray.exe, flagged through the shared block): the pointer
+        // belongs to the USER (they are aiming at menu items),
         // so the weld must not re-park it - at full tick rate it pins the cursor outright
         // (field-reported as a frozen cursor the moment the tray opened). The view keeps panning;
         // only the cursor re-park is suspended, exactly like drag-follow during a button hold.
-        if (wind::Tray::MenuOpen()) ex.suppressCursorSync = true;
+        if (wind::TrayMenuOpen(g_trayBlock)) ex.suppressCursorSync = true;
         if (t.clickPauseTicks > 0) --t.clickPauseTicks;
         if (inspect) {
             if (t.clickReleaseTicks > 0) {
@@ -2461,6 +2493,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 USHORT bf = m.usButtonFlags;
                 if (bf & RI_MOUSE_BUTTON_4_UP) g_input.rawButtonUp(1);
                 if (bf & RI_MOUSE_BUTTON_5_UP) g_input.rawButtonUp(2);
+                // Same net for left/right/middle click binds (#285); a no-op unless one holds a zoom.
+                if (bf & RI_MOUSE_LEFT_BUTTON_UP)   g_input.rawButtonUp(3);
+                if (bf & RI_MOUSE_RIGHT_BUTTON_UP)  g_input.rawButtonUp(4);
+                if (bf & RI_MOUSE_MIDDLE_BUTTON_UP) g_input.rawButtonUp(5);
                 if (!g_input.hookActive()) {
                     if (bf & RI_MOUSE_BUTTON_4_DOWN) g_input.setButtonState(1, true);
                     if (bf & RI_MOUSE_BUTTON_5_DOWN) g_input.setButtonState(2, true);
@@ -2483,7 +2519,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         return 0;
     }
-    if (Tray::HandleMessage(hwnd, msg, wp, lp)) return 0;
+    if (msg == WM_CLOSE)   { DestroyWindow(hwnd); return 0; }
+    if (msg == WM_DESTROY) { PostQuitMessage(0); return 0; }
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
@@ -2675,17 +2712,20 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // means ownership can never move once MagInitialize has run, so this needs a restart to change.
     wind::SetMagThreadClaimEnabled(cfg.txHookWrite != 0);
     wind::SetHookFrameGate(cfg.txHookWrite == 2);   // mode 2 = one hook write per composite
+    // Every bind, modifiers included, is in place BEFORE the hooks go live (#285): installed first
+    // with bare button ids, a Ctrl+Alt+left bind briefly matched (and ate) plain left clicks.
+    g_input.setButtonBinds(cfg.zoomInButton, cfg.zoomInButtonMods, cfg.zoomInButton2, cfg.zoomInButton2Mods,
+                           cfg.zoomOutButton, cfg.zoomOutButtonMods, cfg.zoomOutButton2, cfg.zoomOutButton2Mods);
+    g_input.setWheelMods(cfg.zoomWheelMods);
+    g_input.setKeys(cfg.zoomInVk, cfg.zoomInVk2, cfg.zoomOutVk, cfg.zoomOutVk2, cfg.recenterVk,
+                    cfg.cursorLockVk);
+    g_input.setKeyMods(cfg.zoomInMods, cfg.zoomInMods2, cfg.zoomOutMods, cfg.zoomOutMods2);
     if (!g_input.start(cfg.zoomInButton, cfg.zoomInButton2, cfg.zoomOutButton, cfg.zoomOutButton2,
                        /*swallow=*/true)) {
         MessageBoxW(nullptr, L"Failed to install the mouse hook.", L"Wind", MB_ICONERROR);
         return 1;
     }
     g_track.start();   // tracking (issue #276): caret/focus watcher, starts alongside the input router
-    // Configure the keyboard hook's bound keys (zoom in/out primary+alt, recenter, Inspect-mode
-    // cursor-lock, and magnifier-model swap) so it swallows them and tracks their state. Kept in
-    // sync on hot-reload below.
-    g_input.setKeys(cfg.zoomInVk, cfg.zoomInVk2, cfg.zoomOutVk, cfg.zoomOutVk2, cfg.recenterVk,
-                    cfg.cursorLockVk);
 
     // Target monitor for this session: the cursor's monitor when multiMonitor is on, else the
     // primary. The first zoom-in re-checks and retargets if the cursor moved to another monitor.
@@ -2745,7 +2785,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // only on Inspect entry). The LOCKED path no longer models ballistics at all - it replays the
     // learned desktop gain instead (gain_learner.h).
     g_input.setBallistics(ReadMouseBallistics());
-    Tray::Add(hwnd, hInst);
+    // The tray icon and menu live in WindTray.exe (issue #291): a UIAccess process's menu stacks
+    // above the cursor and the Snipping Tool overlay, an ordinary process's menu does not.
+    g_trayBlock = wind::TrayHost::Start(exePath);
 
     g_tint.capture();   // the scheme is clean here: RestoreInputState reloaded it at start-up (#288)
     TickState ts(model.get(), startupMon, cfg);
@@ -2793,7 +2835,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         if (model2) model2->shutdown();
         g_input.stop();
         g_track.stop();
-        Tray::Remove();
+        wind::TrayHost::Stop();
         ReleaseMutex(mtx);
         return 0;
     }
@@ -2840,7 +2882,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         if (model2) model2->shutdown();
         g_input.stop();
         g_track.stop();
-        Tray::Remove();
+        wind::TrayHost::Stop();
         ReleaseMutex(mtx);
         return 0;
     }
@@ -3150,7 +3192,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         ts.gainLearner.serialize(buf, (int)sizeof(buf));
         wind::WriteTextFileAtomic(wind::ResolveLogDir() + L"/learned_gain.txt", buf);  // Win32 accepts '/'
     }
-    Tray::Remove();
+    wind::TrayHost::Stop();
     if (mtx) { ReleaseMutex(mtx); CloseHandle(mtx); }
     wind::LogShutdown();
     return 0;

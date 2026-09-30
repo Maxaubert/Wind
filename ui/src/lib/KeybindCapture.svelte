@@ -6,7 +6,19 @@
   // effective the moment a key/button is captured. This matters because the magnifier core's
   // global hook swallows the bound key/button; without an immediate clear, pressing the OLD
   // bound key to re-bind it would be intercepted by the hook and never reach this UI.
+  // #285: row.buttonModsKey = modifier mask for the button slot (left/right/middle click need one);
+  // row.wheel = a wheel row (modsKey = zoomWheelMods only). Every capture goes through the shared
+  // safety rules (keybindRules.js, mirrored from src/keybind_rules.h); a refused press keeps the row
+  // listening and says why, on screen and to screen readers.
+  import { checkKeyBind, checkClickBind, checkWheelBind, refusalText } from './keybindRules.js';
   export let row, values, onChange, disabled = false;
+  let refusal = '';
+  // A click captured ON the keycap is followed by its own click event, which would re-arm the row
+  // and clear the bind just made: ignore an arm that close after a mouse capture.
+  let mouseCapturedAt = -Infinity;
+  // A right-click WITH modifiers is a bind attempt (captured or refused on mousedown); the
+  // contextmenu event that follows it must not then clear the row.
+  let skipContextMenu = false;
   // Naming from the owning Row (issue #201): `labelledby` lists the row label AND the value span,
   // so the keycap reads "Zoom in, Mouse button 5 + PageUp" instead of a bare binding with no
   // indication of which slot it belongs to.
@@ -38,6 +50,12 @@
     return 'Key ' + vk;
   }
   const MOD_BITS = [ {bit:1, name:'Ctrl'}, {bit:2, name:'Alt'}, {bit:4, name:'Shift'}, {bit:8, name:'Win'} ];
+  const BUTTON_NAMES = { 1:'Mouse button 4', 2:'Mouse button 5', 3:'Left click', 4:'Right click', 5:'Middle click' };
+  const eventMods = e => (e.ctrlKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.shiftKey ? 4 : 0) | (e.metaKey ? 8 : 0);
+  function refuse(verdict, what) {
+    refusal = refusalText(verdict, what);
+    liveMsg = refusal;
+  }
   function modsName(mods) { return MOD_BITS.filter(m => mods & m.bit).map(m => m.name).join('+'); }
   function comboName(mods, vk) {
     const m = modsName(mods);
@@ -52,10 +70,15 @@
   // kept PageUp/PageDown zooming while the row read "Mouse button 5" (right-click clears both).
   $: lbl = (function () {
     const parts = [];
+    if (row.wheel) {
+      const wm = Number(values[row.modsKey] || 0);
+      return wm ? modsName(wm) + '+Wheel' : 'Unbound';
+    }
     if (row.buttonKey) {
       const btn = Number(values[row.buttonKey] || 0);
-      if (btn === 2) parts.push('Mouse button 5');
-      else if (btn === 1) parts.push('Mouse button 4');
+      const bm = row.buttonModsKey ? Number(values[row.buttonModsKey] || 0) : 0;
+      const name = BUTTON_NAMES[btn];
+      if (name) parts.push([modsName(bm), name].filter(Boolean).join('+'));
     }
     const vk = Number(values[row.vkKey] || 0);
     const mods = row.modsKey ? Number(values[row.modsKey] || 0) : 0;
@@ -71,21 +94,26 @@
   // no-op so the snapshot is not overwritten by the cleared values.
   function arm() {
     if (disabled || armed) return;
-    liveMsg = row.buttonKey
-      ? 'Listening. Press a key, a combination, or a mouse side-button. Escape cancels, Tab leaves.'
-      : 'Listening. Press a key or a combination. Escape cancels, Tab leaves.';
-    preCapture = { [row.vkKey]: String(values[row.vkKey] ?? '0') };
-    if (row.buttonKey) preCapture[row.buttonKey] = String(values[row.buttonKey] ?? '0');
-    if (row.modsKey)   preCapture[row.modsKey]   = String(values[row.modsKey]   ?? '0');
-    const clearPatch = { [row.vkKey]: '0' };
-    if (row.buttonKey) clearPatch[row.buttonKey] = '0';
-    if (row.modsKey)   clearPatch[row.modsKey]   = '0';
+    if (performance.now() - mouseCapturedAt < 500) return;
+    refusal = '';
+    liveMsg = row.wheel
+      ? 'Listening. Hold modifier keys and turn the mouse wheel. Escape cancels, Tab leaves.'
+      : row.buttonKey
+        ? 'Listening. Press a key, a combination, a mouse side-button, or a click with modifiers. Escape cancels, Tab leaves.'
+        : 'Listening. Press a key or a combination. Escape cancels, Tab leaves.';
+    preCapture = {};
+    const clearPatch = {};
+    for (const k of [row.vkKey, row.buttonKey, row.modsKey, row.buttonModsKey]) {
+      if (!k) continue;
+      preCapture[k] = String(values[k] ?? '0');
+      clearPatch[k] = '0';
+    }
     onChange(clearPatch);
     armed = true;
   }
   function cancel() {
     if (preCapture) onChange(preCapture);
-    armed = false; preCapture = null;
+    armed = false; preCapture = null; refusal = '';
     liveMsg = 'Cancelled. Binding unchanged.';
   }
   // Capture on keydown so a combo (Ctrl+Alt+F1) is captured the instant the main key fires while
@@ -107,47 +135,78 @@
     e.preventDefault();
     if (!e.keyCode) return;
     if (e.keyCode === 16 || e.keyCode === 17 || e.keyCode === 18 || e.keyCode === 91 || e.keyCode === 92) return;
-    if (FORBIDDEN_VK.has(e.keyCode)) return;   // can't bind a key Wind must never swallow
-    const mods = (e.ctrlKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.shiftKey ? 4 : 0) | (e.metaKey ? 8 : 0);
+    if (row.wheel) return;                     // the wheel row binds the wheel, not a key
+    const mods = eventMods(e);
+    if (FORBIDDEN_VK.has(e.keyCode)) { refuse('never', vkName(e.keyCode)); return; }
+    // Rows without a modifier slot (Inspect) bind the bare key; judge it as one.
+    const verdict = checkKeyBind(e.keyCode, row.modsKey ? mods : 0);
+    if (verdict !== 'ok') { refuse(verdict, row.modsKey ? comboName(mods, e.keyCode) : vkName(e.keyCode)); return; }
     const patch = { [row.vkKey]: String(e.keyCode) };
     if (row.modsKey)   patch[row.modsKey]   = String(mods);
     if (row.buttonKey) patch[row.buttonKey] = '0';
+    if (row.buttonModsKey) patch[row.buttonModsKey] = '0';
     onChange(patch);
-    armed = false; preCapture = null;
+    armed = false; preCapture = null; refusal = '';
     liveMsg = 'Bound to ' + (comboName(mods, e.keyCode) || vkName(e.keyCode));
   }
   function onMouse(e) {
-    if (!armed || !row.buttonKey) return;     // keyboard-only slot: ignore mouse
-    const btn = e.button === 3 ? '1' : e.button === 4 ? '2' : null;
+    if (!armed || !row.buttonKey || row.wheel) return;   // keyboard-only slot: ignore mouse
+    // DOM buttons: 0 left, 1 middle, 2 right, 3 back, 4 forward -> slot ids 3, 5, 4, 1, 2.
+    const btn = { 0: 3, 1: 5, 2: 4, 3: 1, 4: 2 }[e.button];
     if (!btn) return;
+    const mods = eventMods(e);
+    if (btn === 4 && mods === 0) return;        // a plain right-click clears the row (contextmenu)
     e.preventDefault();
-    const patch = { [row.buttonKey]: btn, [row.vkKey]: '0' };
+    if (btn === 4) skipContextMenu = true;
+    const what = [modsName(mods), BUTTON_NAMES[btn]].filter(Boolean).join('+');
+    const verdict = checkClickBind(btn, mods);
+    if (verdict !== 'ok') { refuse(verdict, what); return; }
+    const patch = { [row.buttonKey]: String(btn), [row.vkKey]: '0' };
     if (row.modsKey) patch[row.modsKey] = '0';
+    // Side buttons keep their modifiers too (Ctrl+Mouse4), like the clicks.
+    if (row.buttonModsKey) patch[row.buttonModsKey] = String(mods);
+    mouseCapturedAt = performance.now();
     onChange(patch);
-    armed = false; preCapture = null;
-    liveMsg = 'Bound to mouse button ' + (btn === '2' ? '5' : '4');
+    armed = false; preCapture = null; refusal = '';
+    liveMsg = 'Bound to ' + (row.buttonModsKey ? what : BUTTON_NAMES[btn]);
+  }
+  // The wheel row: the modifiers held while the wheel turns become the bind.
+  function onWheel(e) {
+    if (!armed || !row.wheel) return;
+    e.preventDefault();
+    const mods = eventMods(e);
+    const what = [modsName(mods), 'Wheel'].filter(Boolean).join('+');
+    const verdict = checkWheelBind(mods);
+    if (verdict !== 'ok') { refuse(verdict, what); return; }
+    onChange({ [row.modsKey]: String(mods) });
+    armed = false; preCapture = null; refusal = '';
+    liveMsg = 'Bound to ' + what;
+  }
+  function onContextMenu() {
+    if (skipContextMenu) { skipContextMenu = false; return; }
+    clear();
   }
   // Right-click clears the binding (Unbound). Works whether or not the keycap is armed.
   function clear() {
-    const patch = { [row.vkKey]: '0' };
-    if (row.buttonKey) patch[row.buttonKey] = '0';
-    if (row.modsKey)   patch[row.modsKey]   = '0';
+    const patch = {};
+    for (const k of [row.vkKey, row.buttonKey, row.modsKey, row.buttonModsKey]) if (k) patch[k] = '0';
     onChange(patch);
-    armed = false; preCapture = null;
+    armed = false; preCapture = null; refusal = '';
     liveMsg = 'Binding cleared. Unbound.';
   }
 </script>
-<svelte:window on:keydown={onKey} on:mousedown={onMouse} />
+<svelte:window on:keydown={onKey} on:mousedown={onMouse} on:wheel|nonpassive={onWheel} />
 <!-- The instructions were `title`-only, which a screen reader never reads on keyboard focus.
      They are a real description now, appended to the row's own. -->
 <button class="keycap" type="button" class:armed {disabled} id={valueId}
         aria-labelledby={labelledby} aria-describedby="{describedby ?? ''} {uid}-hint"
         on:click={arm}
         on:blur={() => { if (armed) cancel(); }}
-        on:contextmenu|preventDefault={clear}
+        on:contextmenu|preventDefault={onContextMenu}
         title="Click to bind (combos like Ctrl+Alt+F1 work), right-click to clear">
-  {armed ? (row.buttonKey ? 'Press a key, combo, or side-button...' : 'Press a key or combo...') : lbl}
+  {armed ? (row.wheel ? 'Hold keys and turn the wheel...' : row.buttonKey ? 'Press a key, combo, or button...' : 'Press a key or combo...') : lbl}
 </button>
+{#if armed && refusal}<span class="refusal">{refusal}</span>{/if}
 <span class="sr-only" id="{uid}-hint" aria-hidden="true">
   Activate to rebind{row.buttonKey ? ', then press a key, a combination, or a mouse side-button' : ', then press a key or a combination'}. Escape cancels. Right-click, or use the context-menu key, to clear the binding.
 </span>
@@ -157,4 +216,5 @@
   .keycap { padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--chip); font-size: 11.5px; color: var(--text); cursor: pointer; }
   .keycap.armed { outline: 2px solid var(--accent); }
   .keycap:disabled { opacity: .5; cursor: default; }
+  .refusal { display: block; margin-top: 4px; font-size: 11.5px; color: var(--warn, #e0a030); max-width: 280px; }
 </style>
