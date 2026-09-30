@@ -259,6 +259,16 @@ the full curve over-accelerates fast moves. `InputRouter::cookPacket` runs per `
 (matching Windows' per-packet keying), only while `inspectActive`, accumulating sub-pixel results
 that the tick drains via `drainCooked`. It is pure logic, no `<windows.h>`, and unit-tested.
 
+## Keyboard panning keys (issue #287)
+
+The four pan binds (default Ctrl+Alt+arrows) are tracked like every bound key, but
+`keyBindMatches` counts a pan slot only while `setPanArmed(true)`. RunTick arms them each tick
+while the view is zoomed, Inspect is off and no mouselook lock holds the mouse. The swallow
+decision is still made once per press, so a Ctrl+Alt+Left pressed at 1x goes to the app for its
+whole press even if a zoom starts mid-way, and RunTick pans only on presses the hook swallowed
+(`keySwallowed(vk)`), never on one the app already saw. In the magnify model Wind's level stays at
+1x, so the keys are never armed and Windows Magnifier pans with them natively.
+
 ## Pointers
 
 - src/input_router.h / src/input_router.cpp: hooks, hook thread, swallowing, watchdog plumbing,

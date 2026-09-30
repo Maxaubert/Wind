@@ -330,6 +330,21 @@ uses the same detached path every tick: the pointer is real and unwelded, and `E
 (`mouseMarginPct`). Pointer pinned against a screen edge is hidden from the lock detector
 (`PointerPinnedAtEdge`). Field history: [../TRACKING-FINDINGS.md](../TRACKING-FINDINGS.md).
 
+## Keyboard panning: the Keys owner (issue #287)
+
+`ViewOwner::Keys` is a fourth detached owner next to Caret and Focus. `KeyPan`
+(`src/keyboard_pan.h`, pure) turns the held pan keys into a view delta: a press starts panning at
+once at `panSpeed x 1.25` screen widths per second (every direction, so up/down match left/right) with a ~150 ms ease-in; a press released within 250 ms
+is a tap, which stops that axis and tops the move up to exactly 1/8 of the screen (a quick ~90 ms
+glide); a longer hold never adds that step (field test: a step at the start of a hold read as a
+jump) and glides out in ~120 ms. All in screen space, so the feel does not change with the zoom.
+While KeyPan is active it owns the view ahead of any caret event; RunTick
+adds the delta to the detached centre, clamps it to the monitor and to the MPO wall (the same
+`kMaxSafeTxMagnitude / level` limit mouse edge mode uses), and draws with `DetachedMap`. The
+pointer never moves while panning; the next real mouse movement places it in the view
+(`warpPointer`), a button press gives the view back without a warp. It works with caret and focus
+tracking switched off.
+
 ## Shell input panels: the real pointer, frozen (issue #283)
 
 The emoji picker, clipboard history and touch keyboard are composed by the shell above every window

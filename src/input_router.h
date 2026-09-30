@@ -71,6 +71,18 @@ public:
     // The zoom key binds' modifier masks (recenter and Inspect have none). The hook swallows a bound
     // key only when one of its binds has every modifier held, so Ctrl+F1 leaves a plain F1 alone.
     void setKeyMods(int zoomInMods, int zoomInMods2, int zoomOutMods, int zoomOutMods2);
+    // Keyboard panning (#287), order Left, Right, Up, Down. Pan keys are tracked like every bound
+    // key but swallowed only while armed (the tick arms them while zoomed), so at 1x they reach
+    // the app. setPanKeys clears the per-key records like setKeys; call it only on a change.
+    void setPanKeys(const int vk[4], const int mods[4]);
+    void setPanArmed(bool armed) { panArmed_.store(armed, std::memory_order_relaxed); }
+    // Whether the hook swallowed the current press of vk: pan acts only on presses Wind took, so a
+    // key that went to the app at 1x never pans after a zoom-in mid-press.
+    bool keySwallowed(int vk) const;
+    // Swallowed pan presses since the last drain, per slot: a tap whose down AND up both land
+    // between two tick samples is still one nudge (review of #287).
+    int drainPanPresses(int slot) { return (slot >= 0 && slot < 4) ? panPresses_[slot].exchange(0, std::memory_order_relaxed) : 0; }
+    void notePanPress(int vk);
     // Whether a press of vk with these modifiers held is one of the binds (the hook's swallow test).
     bool keyBindMatches(int vk, int heldMods) const;
     // Whether vk is one of the configured (non-forbidden) keyboard binds: decides tracking.
@@ -180,6 +192,9 @@ private:
     std::atomic<int> kbRecenterVk_{0};
     std::atomic<int> kbCursorLockVk_{0};
     std::atomic<int> kbZoomInMods_{0}, kbZoomInMods2_{0}, kbZoomOutMods_{0}, kbZoomOutMods2_{0};
+    std::atomic<int> panVk_[4]{}, panMods_[4]{};
+    std::atomic<int> panPresses_[4]{};
+    std::atomic<bool> panArmed_{false};
     // Recency stamps for the raw-UP reordering guards (see rawKeyUp/rawButtonUp).
     std::atomic<unsigned long long> kbLastHookDownMs_[256]{};
 public:

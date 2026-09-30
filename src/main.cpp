@@ -34,7 +34,8 @@
 #include "input_router.h"
 #include "cursor_mapper.h"
 #include "zoom_controller.h"
-#include "view_target.h"     // tracking (issue #276): who owns the view
+#include "view_target.h"
+#include "keyboard_pan.h"     // tracking (issue #276): who owns the view
 #include "view_glide.h"      // tracking: glide + target geometry
 #include "detached_view.h"   // tracking: a frame whose view is not centred on the pointer
 #include "edge_pan.h"        // mouse edge mode (issue #276 phase 2)
@@ -297,6 +298,7 @@ struct TickState {
     wind::ViewOwnerState viewOwner;
     double viewCx = 0.0, viewCy = 0.0;
     bool   viewDetached = false;   // last tick drew a detached frame
+    wind::KeyPan keyPan;           // keyboard panning motion (#287)
     bool   panelFreeze = false;    // #283: the real pointer is frozen and moved by Wind
     double panelX = 0, panelY = 0; // its desktop position (sub-pixel)
     RECT   panelSavedClip{};       // the clip to give back when the panel closes
@@ -947,6 +949,14 @@ static void RunTick(TickState& t) {
                                 nc.cursorLockVk);
             }
             g_input.setKeyMods(nc.zoomInMods, nc.zoomInMods2, nc.zoomOutMods, nc.zoomOutMods2);
+            if (nc.panLeftVk != t.cfg.panLeftVk || nc.panLeftMods != t.cfg.panLeftMods
+             || nc.panRightVk != t.cfg.panRightVk || nc.panRightMods != t.cfg.panRightMods
+             || nc.panUpVk != t.cfg.panUpVk || nc.panUpMods != t.cfg.panUpMods
+             || nc.panDownVk != t.cfg.panDownVk || nc.panDownMods != t.cfg.panDownMods) {
+                const int pv[4] = { nc.panLeftVk, nc.panRightVk, nc.panUpVk, nc.panDownVk };
+                const int pm[4] = { nc.panLeftMods, nc.panRightMods, nc.panUpMods, nc.panDownMods };
+                g_input.setPanKeys(pv, pm);   // keyboard panning (#287)
+            }
             if (nc.hideCursorVk != t.cfg.hideCursorVk || nc.hideCursorMods != t.cfg.hideCursorMods) {
                 RegisterHideCursorHotkey(t.hwnd, nc.hideCursorVk, nc.hideCursorMods);
             }
@@ -1050,7 +1060,8 @@ static void RunTick(TickState& t) {
     constexpr unsigned long long kKbHookDeadMs = 250;
     if (g_input.kbHookActive() && g_input.swallowEnabled() && !g_input.ignoreInjectedKeys()) {
         const int watched[] = { t.cfg.zoomInVk, t.cfg.zoomInVk2, t.cfg.zoomOutVk, t.cfg.zoomOutVk2,
-                                t.cfg.recenterVk, t.cfg.cursorLockVk };
+                                t.cfg.recenterVk, t.cfg.cursorLockVk,
+                                t.cfg.panLeftVk, t.cfg.panRightVk, t.cfg.panUpVk, t.cfg.panDownVk };
         bool divergent = false;
         for (int vk : watched) {
             if (vk == 0 || !g_input.isBoundKey(vk)) continue;
@@ -1220,6 +1231,12 @@ static void RunTick(TickState& t) {
     bool zoomed = lvl > 1.0;
     bool inspect = t.cursorLock.locked();
     bool active = zoomed || inspect;                 // overlay runs while zoomed OR Inspect-frozen
+    // Keyboard panning (#287): the hook swallows pan keys only while this is set, so at 1x
+    // Ctrl+Alt+arrows reach the app (IntelliJ navigate back/forward). Mouselook games and Inspect
+    // keep them too. Published once per tick, before anything reads the pan keys.
+    const bool panArmed = lvl > 1.001 && !inspect && !t.detector.locked();
+    g_input.setPanArmed(panArmed);
+    if (!panArmed) t.keyPan.reset();
 
     if (active) {
         bool enterActive  = !t.prevActive;            // idle -> active (overlay just turned on)
@@ -1648,9 +1665,25 @@ static void RunTick(TickState& t) {
         const bool trackEnabled = lvl > 1.001 && !panel && !inspect && !t.detector.locked() && !fsCover &&
                                   (t.cfg.trackCaret != 0 || t.cfg.trackFocus != 0);
         g_track.setActive(trackEnabled, t.cfg.trackCaret != 0, t.cfg.trackFocus != 0, t.cfg.trackLog != 0);
+        // Keyboard panning (#287): only presses the hook swallowed count (a key that went to the app
+        // at 1x never pans after a zoom-in mid-press); without the hook, the polled combo.
+        const bool panEnabled = panArmed && !panel;
+        double panDx = 0, panDy = 0;
+        if (panEnabled) {
+            const bool kb = g_input.kbHookActive();
+            auto panHeld = [&](int vk, int mods) { return vk && (kb ? g_input.keySwallowed(vk) : comboHeld(vk, mods)); };
+            bool held[4] = { panHeld(t.cfg.panLeftVk, t.cfg.panLeftMods), panHeld(t.cfg.panRightVk, t.cfg.panRightMods),
+                             panHeld(t.cfg.panUpVk, t.cfg.panUpMods),     panHeld(t.cfg.panDownVk, t.cfg.panDownMods) };
+            // A tap that went down and up between two samples counts as held for this step.
+            for (int i = 0; i < 4; ++i) if (g_input.drainPanPresses(i) > 0) held[i] = true;
+            t.keyPan.step(held, (dt > 0.05 ? 0.05 : dt) * 1000.0, lvl, t.mon.w, t.mon.h, t.cfg.panSpeed, panDx, panDy);
+        } else {
+            t.keyPan.reset();
+        }
         {
             wind::ViewOwnerInputs vi;
-            vi.enabled = trackEnabled;
+            vi.enabled = trackEnabled || panEnabled;
+            vi.panning = panEnabled && t.keyPan.active();
             vi.trackCaret = t.cfg.trackCaret != 0; vi.trackFocus = t.cfg.trackFocus != 0;
             vi.mouseDx = curDx; vi.mouseDy = curDy;
             vi.buttonDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) ||
@@ -1668,12 +1701,31 @@ static void RunTick(TickState& t) {
             const wind::ViewOwner was = t.viewOwner.owner;
             const wind::ViewOwner owner = wind::StepViewOwner(t.viewOwner, vi);
             if (owner != was && t.cfg.trackLog) {
-                static const char* kName[] = { "mouse", "caret", "focus" };
+                static const char* kName[] = { "mouse", "caret", "focus", "keys" };
                 wind::Log(wind::LogLevel::Info, "track", "view %s -> %s%s", kName[(int)was], kName[(int)owner],
                           t.viewOwner.warpPointer ? " (pointer placed in the view)" : "");
             }
-            if (owner != wind::ViewOwner::Mouse) {
-                if (was == wind::ViewOwner::Mouse) { t.viewCx = r.centerX; t.viewCy = r.centerY; }   // glide from where we are
+            if (owner == wind::ViewOwner::Keys) {
+                // Keyboard panning (#287): the view moves by the KeyPan delta, the pointer stays put
+                // until the mouse moves (then it comes to the view, the warpPointer branch below).
+                // From a centred view seed at the pointer's view; mouse edge mode's detached centre
+                // is already the real view (seeding from the mapper there jumped the view).
+                if (was == wind::ViewOwner::Mouse && !t.viewDetached) { t.viewCx = r.centerX; t.viewCy = r.centerY; }
+                t.viewVx = 0; t.viewVy = 0;
+                const double hw = t.mon.w / (2.0 * lvl), hh = t.mon.h / (2.0 * lvl);
+                double nx = t.viewCx + panDx, ny = t.viewCy + panDy;
+                // The MPO wall (#148/#242) caps the source left/top like mouse edge mode does.
+                const double wall = wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0;
+                if (wall >= 0) { if (nx - hw > wall) nx = wall + hw; if (ny - hh > wall) ny = wall + hh; }
+                nx = (std::min)((std::max)(nx, hw), t.mon.w - hw);
+                ny = (std::min)((std::max)(ny, hh), t.mon.h - hh);
+                t.viewCx = nx; t.viewCy = ny;
+                r = wind::DetachedMap(t.viewCx, t.viewCy, cur.x - t.mon.x, cur.y - t.mon.y, lvl, t.mon.w, t.mon.h);
+                t.mapper.reset(t.viewCx, t.viewCy);
+                t.lastSetVirtual = cur;
+                t.viewDetached = true;
+            } else if (owner != wind::ViewOwner::Mouse) {
+                if (was == wind::ViewOwner::Mouse && !t.viewDetached) { t.viewCx = r.centerX; t.viewCy = r.centerY; }   // glide from where we are
                 const double ptrX = cur.x - t.mon.x, ptrY = cur.y - t.mon.y;
                 double tx = t.viewCx, ty = t.viewCy;
                 // The LATCHED target: only caret/focus events that passed the gates move the view.
@@ -2731,6 +2783,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     g_input.setKeys(cfg.zoomInVk, cfg.zoomInVk2, cfg.zoomOutVk, cfg.zoomOutVk2, cfg.recenterVk,
                     cfg.cursorLockVk);
     g_input.setKeyMods(cfg.zoomInMods, cfg.zoomInMods2, cfg.zoomOutMods, cfg.zoomOutMods2);
+    {   // keyboard panning (#287); armed per tick while zoomed
+        const int pv[4] = { cfg.panLeftVk, cfg.panRightVk, cfg.panUpVk, cfg.panDownVk };
+        const int pm[4] = { cfg.panLeftMods, cfg.panRightMods, cfg.panUpMods, cfg.panDownMods };
+        g_input.setPanKeys(pv, pm);
+    }
     if (!g_input.start(cfg.zoomInButton, cfg.zoomInButton2, cfg.zoomOutButton, cfg.zoomOutButton2,
                        /*swallow=*/true)) {
         MessageBoxW(nullptr, L"Failed to install the mouse hook.", L"Wind", MB_ICONERROR);

@@ -146,3 +146,9 @@ click 5 4 shiftalone
 click 5 0 needsmod
 click 2 1 ok
 click 6 3 never
+
+# pan defaults (#287): Ctrl+Alt+arrows
+key 25 3 ok
+key 26 3 ok
+key 27 3 ok
+key 28 3 ok

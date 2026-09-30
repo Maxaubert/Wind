@@ -160,7 +160,30 @@ bool InputRouter::isBoundKey(int vk) const {
         || vk == kbZoomOutVk_.load(std::memory_order_relaxed)
         || vk == kbZoomOutVk2_.load(std::memory_order_relaxed)
         || vk == kbRecenterVk_.load(std::memory_order_relaxed)
-        || vk == kbCursorLockVk_.load(std::memory_order_relaxed);
+        || vk == kbCursorLockVk_.load(std::memory_order_relaxed)
+        || vk == panVk_[0].load(std::memory_order_relaxed) || vk == panVk_[1].load(std::memory_order_relaxed)
+        || vk == panVk_[2].load(std::memory_order_relaxed) || vk == panVk_[3].load(std::memory_order_relaxed);
+}
+void InputRouter::setPanKeys(const int vk[4], const int mods[4]) {
+    // Only the old and new pan keys' pressed records are reset, so a held zoom key survives a pan
+    // rebind. Swallow records are kept: a swallowed DOWN must still get its UP swallowed (#301).
+    for (int i = 0; i < 4; ++i) {
+        const int old = panVk_[i].load(std::memory_order_relaxed);
+        if (old > 0 && old < 256) g_kbPressed[old].store(false);
+        if (vk[i] > 0 && vk[i] < 256) g_kbPressed[vk[i]].store(false);
+        panMods_[i].store(mods[i], std::memory_order_relaxed);
+        panVk_[i].store(vk[i], std::memory_order_relaxed);
+        panPresses_[i].store(0, std::memory_order_relaxed);
+    }
+}
+void InputRouter::notePanPress(int vk) {
+    if (!panArmed_.load(std::memory_order_relaxed)) return;
+    for (int i = 0; i < 4; ++i)
+        if (vk == panVk_[i].load(std::memory_order_relaxed)) panPresses_[i].fetch_add(1, std::memory_order_relaxed);
+}
+bool InputRouter::keySwallowed(int vk) const {
+    if (vk <= 0 || vk > 255) return false;
+    return g_kbSwallowedDown[vk].load(std::memory_order_relaxed);
 }
 void InputRouter::setKeyMods(int zoomInMods, int zoomInMods2, int zoomOutMods, int zoomOutMods2) {
     kbZoomInMods_.store(zoomInMods, std::memory_order_relaxed);
@@ -176,7 +199,10 @@ bool InputRouter::keyBindMatches(int vk, int heldMods) const {
     return slot(kbZoomInVk_, kbZoomInMods_) || slot(kbZoomInVk2_, kbZoomInMods2_)
         || slot(kbZoomOutVk_, kbZoomOutMods_) || slot(kbZoomOutVk2_, kbZoomOutMods2_)
         || vk == kbRecenterVk_.load(std::memory_order_relaxed)
-        || vk == kbCursorLockVk_.load(std::memory_order_relaxed);
+        || vk == kbCursorLockVk_.load(std::memory_order_relaxed)
+        || (panArmed_.load(std::memory_order_relaxed) &&
+            (slot(panVk_[0], panMods_[0]) || slot(panVk_[1], panMods_[1]) ||
+             slot(panVk_[2], panMods_[2]) || slot(panVk_[3], panMods_[3])));
 }
 bool InputRouter::keyPressed(int vk) const {
     if (vk <= 0 || vk > 255) return false;
@@ -265,6 +291,7 @@ static LRESULT CALLBACK KbProc(int code, WPARAM wParam, LPARAM lParam) {
                     const int held = HeldModsNow();
                     if (g_router->swallowEnabled() && g_router->keyBindMatches(vk, held)) {
                         g_kbSwallowedDown[vk].store(true);
+                        g_router->notePanPress(vk);   // a tap between two tick samples still nudges
                         // Alt or Win held: mask it so its release is not a lone tap (Start / menu bar).
                         if (NeedsMaskKey(held)) InjectMaskKey();
                         swallow = true;

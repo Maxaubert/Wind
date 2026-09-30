@@ -37,6 +37,10 @@ struct Config {
     int    zoomWheelMods    = 0;
     int    recenterVk       = 0;     // VK code; 0 = unbound. Tap to recenter the lens on the cursor.
     int    cursorLockVk     = 0;     // VK code; 0 = unbound. Tap to toggle Inspect mode (cursor lock)
+    // Keyboard panning (#287): hold/tap to move the zoomed view. Default Ctrl+Alt+arrows, like
+    // Windows Magnifier; swallowed only while zoomed. mods: bit 1 Ctrl, 2 Alt, 4 Shift, 8 Win.
+    int    panLeftVk = 37, panLeftMods = 3, panRightVk = 39, panRightMods = 3;
+    int    panUpVk   = 38, panUpMods   = 3, panDownVk  = 40, panDownMods  = 3;
                                      // while zoomed. Swallowed system-wide like recenterVk (VK only,
                                      // no modifier - the keyboard hook swallows the bare key).
     int    swapModelVk      = 0;     // RETIRED (the hybrid "Auto" model replaced it). The field
@@ -54,6 +58,7 @@ struct Config {
     // Speed is independent of maxLevel (a fixed doublings/sec base inside ZoomController).
     double zoomInSpeed  = 1.0;       // 0.25-4.0
     double zoomOutSpeed = 1.0;       // 0.25-4.0
+    double panSpeed     = 1.0;       // 0.25-4.0; 1.0 = 1.25 screens per second while a pan key is held
     // Smooth zoom: 0 = linear/constant; 1 = zoom-IN soft-starts (eases up to linear). Shipped on.
     int    smoothZoom = 1;
     // Smooth ease-in depth: zoom-in starts at zoomInSpeed/smoothZoomAccel and climbs to zoomInSpeed

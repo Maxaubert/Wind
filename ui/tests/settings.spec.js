@@ -666,3 +666,27 @@ test('unapplied edits are mirrored to the host and restored after a crash recove
   await expect(row).toContainText('3.5');
   await expect(page.getByRole('button', { name: 'Apply' })).toBeEnabled();
 });
+
+// --- Keyboard panning (issue #287) ----------------------------------------------------------
+const capOf = (page, label) => page.getByText(label, { exact: true }).locator('xpath=../..').getByRole('button').first();
+test('pan rows default to Ctrl+Alt+arrows and rebind with the shared rules (#287)', async ({ page }) => {
+  await page.goto('/');
+  for (const [label, key] of [['Pan left', 'Left'], ['Pan right', 'Right'], ['Pan up', 'Up'], ['Pan down', 'Down']])
+    await expect(capOf(page, label)).toHaveText('Ctrl+Alt+' + key);
+  const up = capOf(page, 'Pan up');
+  await up.click();
+  await page.keyboard.press('k');
+  await expect(page.locator('.refusal', { hasText: /alone would stop you typing/ })).toBeVisible();
+  await page.keyboard.press('Control+Alt+PageUp');
+  expect(await lastSet(page, 'panUpVk')).toBe('33');
+  expect(await lastSet(page, 'panUpMods')).toBe('3');
+  await expect(up).toHaveText('Ctrl+Alt+PageUp');
+});
+test('the Pan speed slider writes panSpeed on Apply (#287)', async ({ page }) => {
+  await page.goto('/');
+  const row = page.getByText('Pan speed', { exact: true }).locator('xpath=../..');
+  await expect(row).toContainText('1');
+  await row.locator('input[type=range]').fill('2');
+  await page.getByRole('button', { name: 'Apply' }).click();
+  expect(await lastSet(page, 'panSpeed')).toBe('2');
+});

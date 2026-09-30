@@ -48,7 +48,10 @@
                          zoomInVk2:'0', zoomOutVk2:'0',
                          zoomInMods:'0', zoomOutMods:'0', zoomInMods2:'0', zoomOutMods2:'0',
                          hideCursorVk:'0', hideCursorMods:'0',
-                         quickZoomVk:'112', quickZoomMods:'0' };
+                         quickZoomVk:'112', quickZoomMods:'0',
+                         // Keyboard panning ships bound (#287): Ctrl+Alt+arrows, like the core default.
+                         panLeftVk:'37', panLeftMods:'3', panRightVk:'39', panRightMods:'3',
+                         panUpVk:'38', panUpMods:'3', panDownVk:'40', panDownMods:'3' };
     for (const k of Object.keys(kbDefaults)) v[k] = (k in cfg) ? cfg[k] : kbDefaults[k];
     values = v; saved = { ...v };
     theme = currentTheme(cfg); applyTheme(theme);

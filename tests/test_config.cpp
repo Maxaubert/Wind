@@ -538,3 +538,18 @@ TEST_CASE("click and wheel binds need a modifier; Ctrl+wheel is fine, Ctrl+click
     CHECK(ParseConfig("zoomWheelMods=4\n").zoomWheelMods == 0);     // Shift+wheel
     CHECK(ParseConfig("zoomInButton=5\n").zoomInButton == 0);       // bare middle click
 }
+
+TEST_CASE("pan keys default to Ctrl+Alt+arrows; unsafe binds and speeds are sanitised (#287)") {
+    Config d = ParseConfig("");
+    CHECK(d.panLeftVk == 37); CHECK(d.panLeftMods == 3); CHECK(d.panRightVk == 39); CHECK(d.panRightMods == 3);
+    CHECK(d.panUpVk == 38); CHECK(d.panUpMods == 3); CHECK(d.panDownVk == 40); CHECK(d.panDownMods == 3);
+    CHECK(d.panSpeed == doctest::Approx(1.0));
+    CHECK(ParseConfig("panSpeed=9\n").panSpeed == doctest::Approx(4.0));
+    CHECK(ParseConfig("panSpeed=0\n").panSpeed == doctest::Approx(0.25));
+    Config a = ParseConfig("panLeftVk=65\npanLeftMods=0\n");   // bare A: refused
+    CHECK(a.panLeftVk == 0); CHECK(a.panLeftMods == 0);
+    Config u = ParseConfig("panUpVk=33\npanUpMods=0\n");       // PageUp alone: fine
+    CHECK(u.panUpVk == 33); CHECK(u.panUpMods == 0);
+    Config off = ParseConfig("panDownVk=0\n");                         // unbound on purpose
+    CHECK(off.panDownVk == 0);
+}

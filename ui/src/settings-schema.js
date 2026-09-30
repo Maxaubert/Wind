@@ -21,6 +21,14 @@ export const sections = [
     { key:'__zoomWheel', type:'keybind', label:'Zoom with the scroll wheel',
       desc:'Hold these keys and turn the wheel: up zooms in, down zooms out, at your zoom speeds. Needs a modifier, not Shift alone. Ctrl zooms the screen instead of the page.',
       wheel:true, modsKey:'zoomWheelMods' },
+    // Keyboard panning (#287): move the zoomed view without the mouse. Default Ctrl+Alt+arrows,
+    // like Windows Magnifier; the keys reach apps normally at 1x.
+    { key:'__panLeft',  type:'keybind', label:'Pan left',
+      desc:'While zoomed: tap to nudge the view, hold to pan. The keys work normally in apps when not zoomed.',
+      vkKey:'panLeftVk',  modsKey:'panLeftMods' },
+    { key:'__panRight', type:'keybind', label:'Pan right', vkKey:'panRightVk', modsKey:'panRightMods' },
+    { key:'__panUp',    type:'keybind', label:'Pan up',    vkKey:'panUpVk',    modsKey:'panUpMods' },
+    { key:'__panDown',  type:'keybind', label:'Pan down',  vkKey:'panDownVk',  modsKey:'panDownMods' },
     // Keyboard-hook suspension (issue #156): trades key-interception for smooth panning, per app.
     { key:'noSwallowApps', type:'applist', label:'Pass zoom keys to these apps',
       desc:'Fixes stuttery panning in some games. The app will also receive the key.',
@@ -30,6 +38,7 @@ export const sections = [
     { key:'maxLevel',     type:'slider', label:'Max zoom',       desc:'The highest magnification you can reach.', min:2, max:50, step:1, def:12.0, unit:'times' },
     { key:'zoomInSpeed',  type:'slider', label:'Zoom-in speed',  desc:'How quickly the view magnifies while you hold the key.', min:0.25, max:4, step:0.05, def:1.0, unit:'times' },
     { key:'zoomOutSpeed', type:'slider', label:'Zoom-out speed', desc:'How quickly the view returns while you hold the key.', min:0.25, max:4, step:0.05, def:1.0, unit:'times' },
+    { key:'panSpeed', type:'slider', label:'Pan speed', desc:'How fast holding a pan key moves the view.', min:0.25, max:4, step:0.05, def:1.0, unit:'times' },
     // Smooth zoom is always on (the toggle was removed; core default is 1). Its two shape
     // sliders survive as advanced knobs.
     { key:'smoothZoomAccel', type:'slider', label:'Zoom-in ease', desc:'Softens the start of each zoom.', min:1, max:8, step:0.5, def:3.0, advanced:true },
