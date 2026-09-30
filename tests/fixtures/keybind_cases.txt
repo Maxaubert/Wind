@@ -52,7 +52,6 @@ key 21 3 ok
 key 41 1 ok
 key 43 1 ok
 key 21 8 ok
-key 70 8 ok
 key 22 9 ok
 key 41 5 ok
 key 21 4 ok
@@ -122,3 +121,28 @@ click 3 3 ok
 click 4 2 ok
 click 5 8 ok
 click 9 3 never
+
+# added for #301: gaps the #285 review found
+key 24 8 windows
+key 70 8 windows
+key 24 1 ok
+key 70 1 ok
+key 9 3 system
+key 9 11 windows
+key C1 0 notalone
+key C1 4 shifttypes
+key C2 3 altgr
+key E1 0 notalone
+key E1 1 ok
+key C3 0 notalone
+key 1B 3 ok
+key 73 3 ok
+wheel 9 ok
+wheel 6 ok
+wheel 15 ok
+click 3 9 ok
+click 4 12 ok
+click 5 4 shiftalone
+click 5 0 needsmod
+click 2 1 ok
+click 6 3 never

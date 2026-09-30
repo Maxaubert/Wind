@@ -40,6 +40,12 @@ static std::atomic<bool> g_swallowedDown[6] = {};   // index = button id 1..5 (#
 static std::atomic<int> g_btnDir[6] = {};
 static std::atomic<int> g_btnMods[6] = {};
 static WheelAccum g_wheelAcc;   // hook thread only
+// One mask keystroke per Alt/Win hold is enough (#301): set when injected, cleared when the keyboard
+// hook sees Alt or Win released. Without it a spun wheel injected two key events per notch.
+static std::atomic<bool> g_maskedThisHold{false};
+// PublishButtonHeld runs on the hook, tick and main threads; unserialised, a stale recompute could
+// land after a newer one and strand a direction as held (#301).
+static std::atomic_flag g_publishLock = ATOMIC_FLAG_INIT;
 
 // The modifiers held right now (bit 1 Ctrl, 2 Alt, 4 Shift, 8 Win). Modifiers are never swallowed,
 // so the async state is current for them even inside the hook.
@@ -54,6 +60,9 @@ static int HeldModsNow() {
 // One unassigned keystroke so a held Alt/Win is not released "alone" after we swallowed the event
 // in between (Start menu / menu-bar activation, see NeedsMaskKey). Injected: our hooks pass it.
 static void InjectMaskKey() {
+    // While the keyboard hook is suspended nothing would clear the once-per-hold flag, so mask
+    // every time then (the old behaviour).
+    if (g_router && g_router->kbHookActive() && g_maskedThisHold.exchange(true)) return;
     INPUT in[2]{};
     in[0].type = INPUT_KEYBOARD; in[0].ki.wVk = (WORD)kMaskVk; in[0].ki.dwExtraInfo = (ULONG_PTR)kWindInjectTag;
     in[1] = in[0]; in[1].ki.dwFlags = KEYEVENTF_KEYUP;
@@ -89,6 +98,7 @@ bool InputRouter::matchButton(int button, int heldMods, int& dir, int& mods) con
 }
 // Recompute the per-direction held flags from the per-button records.
 static void PublishButtonHeld(InputState& st) {
+    while (g_publishLock.test_and_set(std::memory_order_acquire)) {}   // held for a few loads
     bool in = false, out = false; int inM = 0, outM = 0;
     for (int b = 1; b <= 5; ++b) {
         const int d = g_btnDir[b].load(std::memory_order_relaxed);
@@ -99,6 +109,7 @@ static void PublishButtonHeld(InputState& st) {
     st.outHeldMods.store(outM, std::memory_order_relaxed);
     st.inHeld.store(in);
     st.outHeld.store(out);
+    g_publishLock.clear(std::memory_order_release);
 }
 // Shared by the WH_MOUSE_LL hook (below) and main's WM_INPUT path: map a button to held. A press
 // holds the direction of the slot it matches (with the modifiers held now); a release frees it.
@@ -137,11 +148,9 @@ void InputRouter::setButtonBinds(int inButtonId, int inMods, int inButtonId2, in
     // progress would never get its UP event matched and inHeld/outHeld would stick true).
     for (int b = 1; b <= 5; ++b) g_btnDir[b].store(0, std::memory_order_relaxed);
     PublishButtonHeld(state_);
-    // Also clear the swallowed-DOWN records: a remap mid-press (exactly what keybind capture does)
-    // must not let a stale flag cause a later, unrelated UP to be swallowed (-> stuck button).
-    // Left/right/middle are NOT cleared here: an up whose down we swallowed must still be
-    // swallowed, or the app sees a lone click-up (the balanced rule); they clear on their up.
-    g_swallowedDown[1].store(false); g_swallowedDown[2].store(false);
+    // The swallowed-DOWN records are NOT cleared (#301): an UP whose DOWN we swallowed must still
+    // be swallowed after a remap mid-press, or the app sees a lone button-up (a side button's
+    // XBUTTONUP alone is browser Back/Forward). Each record clears on its own UP.
 }
 
 bool InputRouter::isBoundKey(int vk) const {
@@ -234,6 +243,9 @@ static LRESULT CALLBACK KbProc(int code, WPARAM wParam, LPARAM lParam) {
         int vk = static_cast<int>(ks->vkCode);
         bool down = (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN);
         bool up   = (wParam == WM_KEYUP   || wParam == WM_SYSKEYUP);
+        // Alt or Win released: the next hold gets its own mask keystroke.
+        if (up && (vk == VK_LMENU || vk == VK_RMENU || vk == VK_MENU || vk == VK_LWIN || vk == VK_RWIN))
+            g_maskedThisHold.store(false, std::memory_order_relaxed);
         // Any key activity, down OR up: tracking's keyboard gate (#289). Ups count so a focus change
         // committed by a release (Alt+Tab held for a while) is still keyboard-driven (review).
         if (down || up) g_router->noteAnyKeyDown(GetTickCount64());
@@ -312,7 +324,7 @@ static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
                     g_btnMods[cb].store(mods, std::memory_order_relaxed);
                     g_btnDir[cb].store(dir, std::memory_order_relaxed);
                     PublishButtonHeld(g_router->state());
-                    if (g_router->swallowEnabled()) {
+                    if (g_router->swallowEnabled() && g_router->keyboardHookWanted()) {
                         g_swallowedDown[cb].store(true);
                         if (NeedsMaskKey(held)) InjectMaskKey();
                         return 1;
@@ -332,8 +344,12 @@ static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
                     if (ModsSatisfied(wm, held)) {
                         const int steps = g_wheelAcc.add((short)HIWORD(mi->mouseData));
                         if (steps) g_router->state().wheelSteps.fetch_add(steps, std::memory_order_relaxed);
-                        if (NeedsMaskKey(held)) InjectMaskKey();
-                        return 1;
+                        // Pass-through apps (and swallow off) still zoom, and get the notch too.
+                        if (g_router->swallowEnabled() && g_router->keyboardHookWanted()) {
+                            if (NeedsMaskKey(held)) InjectMaskKey();
+                            return 1;
+                        }
+                        return CallNextHookEx(g_mouseHook, code, wParam, lParam);
                     }
                     g_wheelAcc.reset();   // a fraction never carries into an unrelated gesture
                 }
@@ -501,22 +517,14 @@ bool InputRouter::start(int inButtonId, int inButtonId2, int outButtonId, int ou
     // Raw Input registration (RIDEV_INPUTSINK) + WM_INPUT decoding live in main.cpp's
     // message-only window, which calls AccumulateRaw() with the decoded deltas.
 }
-// Synthesize an XBUTTON UP for any side-button whose DOWN we swallowed but whose UP we have not yet
-// seen/passed through. Called when the hook is torn down: if we vanish mid-press (e.g. another
-// instance signals us to quit while a side-button DOWN is outstanding, or shutdown races a press),
-// the system would otherwise be left believing the button is held forever, breaking clicks
-// system-wide. This GUARANTEES we never strand a button no matter how teardown is triggered.
+// Called when the hook is torn down (quit, shutdown racing a press).
+// No button-up is synthesised (#301): a swallowed DOWN never reached the system, so nothing believes
+// the button is held, and a lone synthesised UP had effects of its own (a right-click menu, browser
+// Back/Forward, a drag finished in the wrong window). Only our own records are cleared.
 static void ReleaseSwallowedButtons() {
-    for (int id = 1; id <= 5; ++id) {
-        if (!g_swallowedDown[id].exchange(false)) continue;
-        INPUT in{};
-        in.type = INPUT_MOUSE;
-        if (id <= 2) { in.mi.dwFlags = MOUSEEVENTF_XUP; in.mi.mouseData = (id == 1) ? XBUTTON1 : XBUTTON2; }
-        else in.mi.dwFlags = id == 3 ? MOUSEEVENTF_LEFTUP : id == 4 ? MOUSEEVENTF_RIGHTUP : MOUSEEVENTF_MIDDLEUP;
-        SendInput(1, &in, sizeof(in));
-    }
+    for (int id = 1; id <= 5; ++id) g_swallowedDown[id].store(false);
 }
-// Keyboard analogue of ReleaseSwallowedButtons: synthesize a KEYUP for any bound key whose DOWN we
+// Keys differ from buttons: synthesize a KEYUP for any bound key whose DOWN we
 // swallowed but whose UP we never passed through, so teardown mid-press can't leave any consumer
 // believing the key is held. A lone keyup with no matching down is harmless (apps ignore it).
 static void ReleaseSwallowedKeys() {
@@ -587,7 +595,7 @@ void InputRouter::stop() {
     } else if (g_mouseHook) {                                 // hookless/no-thread paths: unhook directly
         UnhookWindowsHookEx(g_mouseHook); g_mouseHook = nullptr;
     }
-    ReleaseSwallowedButtons();   // never leave a swallowed side-button stranded as held
+    ReleaseSwallowedButtons();   // drop our swallow records; no synthetic button-up (#301)
     ReleaseSwallowedKeys();      // ...nor a swallowed keyboard bind
     for (auto& d : g_commitDown) d.store(false, std::memory_order_relaxed);   // clear inspect click latches
     hookActive_.store(false);
