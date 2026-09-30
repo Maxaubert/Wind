@@ -136,6 +136,15 @@ Config ParseConfig(const std::string& text) {
             else if (key == "zoomOutButton2")   c.zoomOutButton2 = std::stoi(val);
             else if (key == "recenterVk")       c.recenterVk = std::stoi(val);
             else if (key == "cursorLockVk")     c.cursorLockVk = std::stoi(val);
+            else if (key == "panLeftVk")        c.panLeftVk = std::stoi(val);
+            else if (key == "panLeftMods")      c.panLeftMods = std::stoi(val);
+            else if (key == "panRightVk")       c.panRightVk = std::stoi(val);
+            else if (key == "panRightMods")     c.panRightMods = std::stoi(val);
+            else if (key == "panUpVk")          c.panUpVk = std::stoi(val);
+            else if (key == "panUpMods")        c.panUpMods = std::stoi(val);
+            else if (key == "panDownVk")        c.panDownVk = std::stoi(val);
+            else if (key == "panDownMods")      c.panDownMods = std::stoi(val);
+            else if (key == "panSpeed")         c.panSpeed = std::stod(val);
             else if (key == "hideCursorVk")     c.hideCursorVk = std::stoi(val);
             else if (key == "hideCursorMods")   c.hideCursorMods = std::stoi(val);
             else if (key == "zoomInVk")         c.zoomInVk = std::stoi(val);
@@ -252,6 +261,7 @@ Config ParseConfig(const std::string& text) {
     c.maxLevel        = clampd(c.maxLevel,        1.0, 50.0);   // must be >= the 1.0 min zoom level
     c.zoomInSpeed     = clampd(c.zoomInSpeed,     0.25, 4.0);
     c.zoomOutSpeed    = clampd(c.zoomOutSpeed,    0.25, 4.0);
+    c.panSpeed        = clampd(c.panSpeed,        0.25, 4.0);
     c.smoothZoomAccel = clampd(c.smoothZoomAccel, 1.0, 8.0);
     c.smoothZoomRamp  = clampd(c.smoothZoomRamp,  0.1, 3.0);
     c.cursorSensitivity = clampd(c.cursorSensitivity, 0.25, 4.0);
@@ -328,6 +338,8 @@ Config ParseConfig(const std::string& text) {
     sanitizeKey(c.zoomOutVk, &c.zoomOutMods);  sanitizeKey(c.zoomOutVk2, &c.zoomOutMods2);
     sanitizeKey(c.recenterVk, nullptr);
     sanitizeKey(c.cursorLockVk, nullptr);
+    sanitizeKey(c.panLeftVk, &c.panLeftMods);  sanitizeKey(c.panRightVk, &c.panRightMods);
+    sanitizeKey(c.panUpVk, &c.panUpMods);      sanitizeKey(c.panDownVk, &c.panDownMods);
     sanitizeKey(c.hideCursorVk, &c.hideCursorMods);
     sanitizeKey(c.quickZoomVk, &c.quickZoomMods);
     auto sanitizeButton = [](int& b, int& mods) {
@@ -401,6 +413,11 @@ std::string DefaultIniText() {
                "; cursorLockVk: tap to toggle Inspect mode - freeze the cursor (keeps a hover/tooltip\n"
                ";   alive) while you pan the lens. Click while locked commits there + unlocks. VK; 0=unbound.\n"
                "cursorLockVk=0\n"
+               "; panLeftVk/panRightVk/panUpVk/panDownVk + *Mods: keyboard panning while zoomed (tap = a\n"
+               ";   small step, hold = pan). Default Ctrl+Alt+arrows (mods 3), like Windows Magnifier;\n"
+               ";   the keys reach apps normally at 1x. panSpeed: 0.25-4, 1.0 = half a screen per second.\n"
+               "panLeftVk=37\npanLeftMods=3\npanRightVk=39\npanRightMods=3\n"
+               "panUpVk=38\npanUpMods=3\npanDownVk=40\npanDownMods=3\npanSpeed=1.0\n"
                "; maxLevel: how far you can zoom (does not affect zoom speed)\n"
                "maxLevel=12.0\n"
                "; zoomInSpeed/zoomOutSpeed: zoom rate multipliers (1.0=default, 2.0=twice as fast, 0.5=half);\n"
