@@ -16,10 +16,12 @@ Magnifier's Ctrl+Alt+arrow keys. For reading long text and for keeping hands on 
 - Issue #286 (per-app profiles) was dropped the same day; nothing here depends on it.
 
 ## 3. Behaviour
-- **Nudge:** on a pan key's first down, the view target moves by **1/8 of the screen** in that
-  direction (screen space, so 1/(8 x level) of the desktop), reached with a ~120 ms glide.
-- **Hold:** after **250 ms** held, continuous panning starts, easing in over ~150 ms to
-  `panSpeed x 0.5` screen widths per second (heights for up/down). Release glides out (~120 ms).
+- **Press:** panning starts at once, easing in over ~150 ms to `panSpeed x 1.25` screen widths per
+  second (heights for up/down). AMENDED 2026-09-30 after the owner's first test: the original
+  nudge-on-press made every hold start with a jump, and 0.5 screens/s was too slow.
+- **Tap:** a press released within **250 ms** stops that axis and is topped up to exactly **1/8 of
+  the screen** (screen space, so 1/(8 x level) of the desktop), with a quick ~90 ms glide.
+- **Hold:** longer presses only pan (never the tap step) and glide out on release (~120 ms).
   Two keys held (e.g. Up + Right) pan diagonally; opposite keys cancel.
 - **Pointer:** the view detaches from the pointer (the tracking path, #276). The pointer does not
   move while panning; on the next real mouse movement the pointer is placed in the view (the
