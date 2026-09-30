@@ -891,6 +891,10 @@ static bool IdleNow(TickState& t) {
                         t.cfg.recenterVk, t.cfg.cursorLockVk };
     const bool kbHook = g_input.kbHookActive();
     for (int vk : kvs) if (vk && (!kbHook || !g_input.isBoundKey(vk))) { ii.keyboardPolled = true; break; }
+    // A silently evicted hook (#156) still claims to be active. A swallowed key never shows in
+    // GetAsyncKeyState, so a bound key the OS sees held means the hook missed it: stay awake so the
+    // watchdog runs at frame rate. At most six cheap calls per wake.
+    for (int vk : kvs) if (vk && (GetAsyncKeyState(vk) & 0x8000)) { ii.anyHold = true; break; }
     ii.wakeHandle = g_input.wakeEvent() != nullptr;
     return wind::IdleSleepOk(ii);
 }
@@ -907,6 +911,7 @@ static void RunTick(TickState& t) {
     // wake tick ramps from its first frame instead of jumping, and the tray/diagnostics readouts
     // never report the sleep as a hitch.
     const double rawDt = dt;
+    const bool woke = t.wokeFromIdle;   // readouts skip this tick: the sleep is not a frame
     if (t.wokeFromIdle) {
         t.wokeFromIdle = false;
         const double frame = 1.0 / (t.hz > 30 ? t.hz : 30);
@@ -914,7 +919,7 @@ static void RunTick(TickState& t) {
     }
     // One float store per tick, for the tray's frame-pacing readout. Deliberately the cheapest
     // possible coupling to the hot path: no lock, no allocation, and nothing reads it here.
-    if (g_trayBlock) g_trayBlock->ticks.push((float)(dt * 1000.0));
+    if (g_trayBlock && !woke) g_trayBlock->ticks.push((float)(dt * 1000.0));
 
     // Config hot-reload. A directory-change notification tells us WHEN to re-check magnifier.ini,
     // so the idle render thread does NO per-second filesystem stat (the old 1 Hz GetFileAttributesExW
@@ -1266,6 +1271,9 @@ static void RunTick(TickState& t) {
     }
 
     int rawDx, rawDy; g_input.drainRaw(rawDx, rawDy);
+    // Raw motion from before this activation (up to a 100 ms idle sleep of it, #71) never pans the
+    // first zoomed frame: at 1x it is unused, so an idle->active tick starts from zero.
+    if (!t.prevActive) { rawDx = 0; rawDy = 0; }
 
     bool zoomed = lvl > 1.0;
     bool inspect = t.cursorLock.locked();
@@ -2420,7 +2428,7 @@ static void RunTick(TickState& t) {
     // Frame-pacing diagnostics: a 2 s window of loop-interval stats (dt = time between ticks =
     // the on-screen frame interval, since Present(1,0) paces while zoomed). maxDt and the hitch
     // count expose microstutter that an average would hide.
-    if (t.cfg.diagnostics) {
+    if (t.cfg.diagnostics && !woke) {
         const double target = 1.0 / (t.hz > 0 ? t.hz : 60);
         t.diagSumDt += dt; t.diagFrames++; t.diagAccum += dt;
         if (dt > t.diagMaxDt) t.diagMaxDt = dt;

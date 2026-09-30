@@ -223,6 +223,10 @@ restartWind), `dirty`, `openIni`, `exportDiagnostics`, `pickExe`, `mpoState`, `s
   (default 0; 1 = old constant-size look, render only) is the opt-in. DEBUGGING TRAP from the
   same hunt: the dev box ini differs from a clean install (model, desktopTransform, this key),
   so "works at home" proves nothing about defaults - wipe `%LOCALAPPDATA%\Wind` to test them.
+- THE 1X LOOP SLEEPS (#71, docs/architecture/02-tick-loop.md "Idle"). Anything new that must react
+  at 1x needs a wake: an LL-hook edge must `WakeMain()` (input_router.cpp) after publishing its state,
+  a window message must be in the wait mask, or `IdleNow` must keep the loop awake while it is
+  pending. Never add QS_RAWINPUT/QS_INPUT to the mask (every mouse move would wake it).
 - Pure-logic files MUST NOT include `<windows.h>` - keeps unit tests desktop-free.
   The test build compiles only the pure `.cpp` files and defines `WIND_TESTS`.
 - INPUT SWALLOWING: bound keybinds are eaten so they never double-fire into the focused app. Mouse

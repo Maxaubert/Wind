@@ -303,6 +303,25 @@ Device-lost recovery also lives in the main loop, not the tick: when the render 
 removed D3D device, the loop restores the cursor first, cleans Inspect state, marks the churny
 backstop if a transform game session was live within 30 s, and rebuilds on a 500 ms backoff.
 
+## Idle: the loop sleeps at 1x (issue #71)
+
+At 1x with nothing in flight the loop does not tick at the refresh rate. `IdleNow` (main.cpp,
+the rule itself pure in `src/idle_policy.h`) is read live right before the wait; when it allows,
+the loop sleeps in `MsgWaitForMultipleObjectsEx` on the input router's auto-reset wake event and the
+quit event, with a 100 ms timeout and the mask `QS_POSTMESSAGE | QS_SENDMESSAGE | QS_HOTKEY`.
+Raw Input is deliberately NOT in the mask (it arrives for every mouse move system-wide); it is
+drained after the wake. The LL hooks `SetEvent` only on edges: a bound key's first down and its up,
+a button/click bind's held state changing (`PublishButtonHeld`), a wheel step. After a wake the loop
+drains messages at once so a hotkey is seen by that same tick. The wake tick keeps the raw dt for
+wall-clock gates (config watch) but clamps the motion dt to one frame, skips the tray pacing ring
+and diagnostics, and zeroes the raw motion accumulated while asleep. It stays awake while a zoom or
+key is held, wheel steps or a quick zoom are pending, an engine rest/reveal/glide/pan is running,
+for 500 ms after a zoom session, and whenever an input could only be seen by polling (mouse hook
+missing, keyboard hook suspended or failed, or a bound key the OS reports held while the hook did
+not see it - a silently evicted hook). Measured: Wind CPU at 1x 37.5 -> 3.1 ms per second; a zoom
+starts 3-6 ms after a wheel notch that wakes it. The focus tracker installs its LOCATIONCHANGE
+hook and 16 ms caret poll only while active, and is switched off at every zoom-out.
+
 ## Threads: hooks, the focus tracker, and the Magnification runtime
 
 Wind has three threads that matter beyond the tick thread itself, each split off for its own

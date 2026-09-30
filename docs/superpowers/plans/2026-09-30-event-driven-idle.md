@@ -74,7 +74,7 @@ The zoom-in/out frame spike; the render/transform paced paths; the device-lost b
   click zooms still start, quick-zoom hotkey still toggles, and a config edit still hot-reloads
   within ~0.5 s; zoom-in latency sanity (first level change after the press within one frame).
 - [ ] T7 docs (CLAUDE.md one line, docs/architecture/02-tick-loop.md section), version 0.15.3,
-  code review workflow, PR, merge on the owner's standing "merge when done" for this task.
+  code review workflow, PR, deploy the branch build, recommend, ask the owner "merge?" (no standing approval).
 
 ## Review Focus
 1. A zoom key pressed while the loop sleeps: wakes within ~1 ms, and the first zoom step is one
@@ -85,3 +85,18 @@ The zoom-in/out frame spike; the render/transform paced paths; the device-lost b
    (check the auto-reset event and that WM_INPUT is excluded from the wake mask).
 4. Magnify model: holding the zoom key must keep ticking every frame (nativeZoomTick notches).
 5. The tray menu path that calls RunTick from WM_TIMER must still work while the loop sleeps.
+
+## Amendments after the plan review (2026-09-30)
+- Messages are drained right after the wait returns (a hotkey was otherwise seen 100 ms late).
+- The wake is raised in `PublishButtonHeld` (covers side buttons AND the left/right/middle click
+  binds, press and release), on the first down / up of a bound key (no auto-repeat wakes) and per
+  wheel step.
+- The predicate is evaluated live in `IdleNow` right before the wait (the magnify model returned
+  before the end of RunTick, and a cached flag could be stale).
+- The wake event is created before the WIND_NOHOOK return and closed after the hook thread joins; any
+  wait result other than the event, the quit event, a message or the timeout falls back to the timer.
+- The quit event is in the wait set (instant quit). QS_TIMER dropped (Wind has no thread timers).
+- The focus tracker installs its LOCATIONCHANGE hook and 16 ms poll only while active (250 ms panel
+  re-check otherwise), switched by a dedicated thread message.
+- Code review fixes: the wake tick skips the tray pacing ring and diagnostics, raw motion from before
+  an activation is zeroed, and a bound key the OS reports held keeps the loop awake (evicted hook).
