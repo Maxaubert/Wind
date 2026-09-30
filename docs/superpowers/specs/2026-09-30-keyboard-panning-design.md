@@ -18,7 +18,7 @@ Magnifier's Ctrl+Alt+arrow keys. For reading long text and for keeping hands on 
 ## 3. Behaviour
 - **Press:** panning starts at once, easing in over ~150 ms to `panSpeed x 1.25` screen widths per
   second in EVERY direction (heights for up/down were 56% as fast on 16:9, owner test), scaled by
-  zoom: 100% at 6x and above, 75% at 2x, linear between (#305, too fast at low zoom), and the tap
+  zoom: 100% at 6x and above, 60% at 2x, linear between (#305, too fast at low zoom; 75% was "much better, a bit slower still"), and the tap
   step is 1/8 of the width for all four. AMENDED 2026-09-30 after the owner's first test: the original
   nudge-on-press made every hold start with a jump, and 0.5 screens/s was too slow.
 - **Tap:** a press released within **250 ms** stops that axis and is topped up to exactly **1/8 of

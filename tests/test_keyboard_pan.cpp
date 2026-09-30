@@ -33,16 +33,16 @@ TEST_CASE("a hold starts moving at once and never adds the nudge (no jump)") {
     double prev = sx;
     for (int i = 0; i < 60; ++i) {                       // per-tick steps never exceed full speed
         double dx = 0, dy = 0; p.step(right, 7, 2.0, 3840, 2160, 1.0, dx, dy);
-        CHECK(dx <= 0.75 * 1.25 * 3840 * 0.007 / 2.0 + 1e-6);
+        CHECK(dx <= 0.6 * 1.25 * 3840 * 0.007 / 2.0 + 1e-6);
         sx += dx; prev = sx;
     }
     (void)prev;
 }
-TEST_CASE("holding pans at speed x 1.25 screens per second (x 0.75 at 2x), then glides to rest") {
+TEST_CASE("holding pans at speed x 1.25 screens per second (x 0.6 at 2x), then glides to rest") {
     KeyPan p; double sx = 0, sy = 0;
     const bool right[4] = { false, true, false, false };
     Run(p, right, 2000, 2.0, 1.0, sx, sy);
-    const double full = 0.75 * 1.25 * 3840.0 * 2.0 / 2.0;   // 2 s at the 2x rate, desktop px at 2x
+    const double full = 0.6 * 1.25 * 3840.0 * 2.0 / 2.0;    // 2 s at the 2x rate, desktop px at 2x
     CHECK(sx > full * 0.9); CHECK(sx < full);
     Run(p, kNone, 600, 2.0, 1.0, sx, sy);
     CHECK_FALSE(p.active());
@@ -58,17 +58,17 @@ TEST_CASE("every direction pans at the same pixel rate and taps the same step (f
     Run(c, up, 7, 2.0, 1.0, cx, cy); Run(c, kNone, 1000, 2.0, 1.0, cx, cy);
     CHECK(cy == doctest::Approx(-3840.0 / 8 / 2.0).epsilon(0.01));
 }
-TEST_CASE("lower zoom pans slower on screen: 75% at 2x, 87.5% at 4x, 100% at 6x and up (#305)") {
-    CHECK(KeyPan::ZoomRateScale(2.0) == doctest::Approx(0.75));
-    CHECK(KeyPan::ZoomRateScale(4.0) == doctest::Approx(0.875));
+TEST_CASE("lower zoom pans slower on screen: 60% at 2x, 80% at 4x, 100% at 6x and up (#305)") {
+    CHECK(KeyPan::ZoomRateScale(2.0) == doctest::Approx(0.6));
+    CHECK(KeyPan::ZoomRateScale(4.0) == doctest::Approx(0.8));
     CHECK(KeyPan::ZoomRateScale(6.0) == doctest::Approx(1.0));
     CHECK(KeyPan::ZoomRateScale(20.0) == doctest::Approx(1.0));
-    CHECK(KeyPan::ZoomRateScale(1.0) == doctest::Approx(0.6875));
+    CHECK(KeyPan::ZoomRateScale(1.0) == doctest::Approx(0.5));
     const bool right[4] = { false, true, false, false };
     KeyPan a, b; double ax = 0, ay = 0, bx = 0, by = 0;
     Run(a, right, 2000, 2.0, 1.0, ax, ay);
     Run(b, right, 2000, 8.0, 1.0, bx, by);
-    CHECK((ax * 2.0) == doctest::Approx(0.75 * bx * 8.0).epsilon(0.01));   // compared in screen px
+    CHECK((ax * 2.0) == doctest::Approx(0.6 * bx * 8.0).epsilon(0.01));    // compared in screen px
 }
 TEST_CASE("speed scales the pan linearly") {
     const bool down[4] = { false, false, false, true };
