@@ -26,10 +26,10 @@ inline bool IsModifierVk(int vk) {
     return vk == 0x10 || vk == 0x11 || vk == 0x12 || (vk >= 0xA0 && vk <= 0xA5) || vk == 0x5B || vk == 0x5C;
 }
 // Keys that type a character: letters, digits, Space and the OEM punctuation keys (incl. <> on
-// ISO keyboards, VK_OEM_102).
+// ISO keyboards, VK_OEM_102; the Brazilian ABNT keys 0xC1/0xC2 and VK_OEM_AX 0xE1).
 inline bool IsTypingVk(int vk) {
     return (vk >= 0x30 && vk <= 0x39) || (vk >= 0x41 && vk <= 0x5A) || vk == 0x20 ||
-           (vk >= 0xBA && vk <= 0xC0) || (vk >= 0xDB && vk <= 0xDF) || vk == 0xE2;
+           (vk >= 0xBA && vk <= 0xC2) || (vk >= 0xDB && vk <= 0xDF) || vk == 0xE1 || vk == 0xE2;
 }
 // Keys that may be bound with no modifier (owner, 2026-09-30): navigation incl. arrows and Delete,
 // F1-F24, Pause, ScrollLock, the numpad.
@@ -57,17 +57,19 @@ inline BindVerdict CheckKeyBind(int vk, int mods) {
         return BindVerdict::SystemReserved;
     if (ctrl && !alt && !win && vk == 0x1B) return BindVerdict::SystemReserved;          // Ctrl+Esc, Ctrl+Shift+Esc
     if (ctrl && alt && (vk == 0x2E || vk == 0x6E)) return BindVerdict::SystemReserved;  // Ctrl+Alt+Delete
+    if (ctrl && alt && !win && vk == 0x09) return BindVerdict::SystemReserved;           // Ctrl+Alt+Tab
     (void)shift;
     // Windows-reserved Win combos (the shell takes nearly every one of these).
     if (win && ((vk >= 0x30 && vk <= 0x39) || (vk >= 0x41 && vk <= 0x5A) || vk == 0x09 || vk == 0x20 ||
                 (vk >= 0x25 && vk <= 0x28) || vk == 0xBB || vk == 0xBD || vk == 0xBC || vk == 0xBE ||
-                vk == 0x6B || vk == 0x6D || vk == 0x13 || vk == 0x2C || vk == 0x1B || vk == 0x0D))
+                vk == 0x6B || vk == 0x6D || vk == 0x13 || vk == 0x2C || vk == 0x1B || vk == 0x0D ||
+                vk == 0x24 /*Win+Home: minimise others*/ || vk == 0x70 /*Win+F1: help*/))
         return BindVerdict::WindowsReserved;
     return BindVerdict::Ok;
 }
 
-// The wheel, and left/right/middle click, as zoom binds: a modifier is mandatory, and neither Ctrl
-// alone nor Shift alone (browser zoom / horizontal scroll; multi-select / range select).
+// The wheel, and left/right/middle click, as zoom binds: a modifier is mandatory, never Shift alone
+// (horizontal scroll / range select), and for clicks never Ctrl alone (multi-select).
 // Ctrl+wheel is allowed (owner decision 2026-09-30, #295): Wind swallows the notch, so it zooms
 // the screen instead of the browser or app. Shift+wheel is horizontal scroll, which people use.
 inline BindVerdict CheckWheelBind(int mods) {
