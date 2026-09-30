@@ -70,7 +70,8 @@ public:
                  int cursorLockVk);
     // The zoom key binds' modifier masks (recenter and Inspect have none). The hook swallows a bound
     // key only when one of its binds has every modifier held, so Ctrl+F1 leaves a plain F1 alone.
-    void setKeyMods(int zoomInMods, int zoomInMods2, int zoomOutMods, int zoomOutMods2);
+    void setKeyMods(int zoomInMods, int zoomInMods2, int zoomOutMods, int zoomOutMods2,
+                    int recenterMods, int cursorLockMods);
     // Keyboard panning (#287), order Left, Right, Up, Down. Pan keys are tracked like every bound
     // key but swallowed only while armed (the tick arms them while zoomed), so at 1x they reach
     // the app. setPanKeys clears the per-key records like setKeys; call it only on a change.
@@ -192,6 +193,7 @@ private:
     std::atomic<int> kbRecenterVk_{0};
     std::atomic<int> kbCursorLockVk_{0};
     std::atomic<int> kbZoomInMods_{0}, kbZoomInMods2_{0}, kbZoomOutMods_{0}, kbZoomOutMods2_{0};
+    std::atomic<int> kbRecenterMods_{0}, kbCursorLockMods_{0};
     std::atomic<int> panVk_[4]{}, panMods_[4]{};
     std::atomic<int> panPresses_[4]{};
     std::atomic<bool> panArmed_{false};

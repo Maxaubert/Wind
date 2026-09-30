@@ -50,8 +50,8 @@ export function checkClickBind(button, mods) {
 const KEY_SLOTS = [
   ['Zoom in', 'zoomInVk', 'zoomInMods'], ['Zoom in (alternate)', 'zoomInVk2', 'zoomInMods2'],
   ['Zoom out', 'zoomOutVk', 'zoomOutMods'], ['Zoom out (alternate)', 'zoomOutVk2', 'zoomOutMods2'],
-  ['Hide cursor', 'hideCursorVk', 'hideCursorMods'], ['Inspect mode', 'cursorLockVk', null],
-  ['Recenter', 'recenterVk', null], ['Quick zoom', 'quickZoomVk', 'quickZoomMods'],
+  ['Hide cursor', 'hideCursorVk', 'hideCursorMods'], ['Inspect mode', 'cursorLockVk', 'cursorLockMods'],
+  ['Recenter', 'recenterVk', 'recenterMods'], ['Quick zoom', 'quickZoomVk', 'quickZoomMods'],
   ['Pan left', 'panLeftVk', 'panLeftMods'], ['Pan right', 'panRightVk', 'panRightMods'],
   ['Pan up', 'panUpVk', 'panUpMods'], ['Pan down', 'panDownVk', 'panDownMods'],
 ];

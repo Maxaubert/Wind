@@ -136,6 +136,8 @@ Config ParseConfig(const std::string& text) {
             else if (key == "zoomOutButton2")   c.zoomOutButton2 = std::stoi(val);
             else if (key == "recenterVk")       c.recenterVk = std::stoi(val);
             else if (key == "cursorLockVk")     c.cursorLockVk = std::stoi(val);
+            else if (key == "recenterMods")     c.recenterMods = std::stoi(val);
+            else if (key == "cursorLockMods")   c.cursorLockMods = std::stoi(val);
             else if (key == "panLeftVk")        c.panLeftVk = std::stoi(val);
             else if (key == "panLeftMods")      c.panLeftMods = std::stoi(val);
             else if (key == "panRightVk")       c.panRightVk = std::stoi(val);
@@ -145,7 +147,9 @@ Config ParseConfig(const std::string& text) {
             else if (key == "panDownVk")        c.panDownVk = std::stoi(val);
             else if (key == "panDownMods")      c.panDownMods = std::stoi(val);
             else if (key == "panSpeed")         c.panSpeed = std::stod(val);
-            else if (key == "hideCursorVk")     c.hideCursorVk = std::stoi(val);
+            // The chain is split in two: MSVC caps if/else nesting depth (C1061). Keys are unique,
+            // so a second chain changes nothing.
+            if (key == "hideCursorVk")     c.hideCursorVk = std::stoi(val);
             else if (key == "hideCursorMods")   c.hideCursorMods = std::stoi(val);
             else if (key == "zoomInVk")         c.zoomInVk = std::stoi(val);
             else if (key == "zoomOutVk")        c.zoomOutVk = std::stoi(val);
@@ -336,8 +340,8 @@ Config ParseConfig(const std::string& text) {
     };
     sanitizeKey(c.zoomInVk, &c.zoomInMods);    sanitizeKey(c.zoomInVk2, &c.zoomInMods2);
     sanitizeKey(c.zoomOutVk, &c.zoomOutMods);  sanitizeKey(c.zoomOutVk2, &c.zoomOutMods2);
-    sanitizeKey(c.recenterVk, nullptr);
-    sanitizeKey(c.cursorLockVk, nullptr);
+    sanitizeKey(c.recenterVk, &c.recenterMods);
+    sanitizeKey(c.cursorLockVk, &c.cursorLockMods);
     sanitizeKey(c.panLeftVk, &c.panLeftMods);  sanitizeKey(c.panRightVk, &c.panRightMods);
     sanitizeKey(c.panUpVk, &c.panUpMods);      sanitizeKey(c.panDownVk, &c.panDownMods);
     sanitizeKey(c.hideCursorVk, &c.hideCursorMods);
@@ -408,16 +412,16 @@ std::string DefaultIniText() {
                "; hideCursorVk/hideCursorMods: hotkey to toggle the magnified cursor on/off while\n"
                ";   zoomed (does not reset zoom). VK + mods, 0=unbound.\n"
                "hideCursorVk=0\nhideCursorMods=0\n"
-               "; recenterVk: tap to recenter the lens on the cursor (VK code; 0=unbound)\n"
-               "recenterVk=0\n"
+               "; recenterVk/recenterMods: tap to recenter the lens on the cursor (VK code; 0=unbound)\n"
+               "recenterVk=0\nrecenterMods=0\n"
                "; cursorLockVk: tap to toggle Inspect mode - freeze the cursor (keeps a hover/tooltip\n"
                ";   alive) while you pan the lens. Click while locked commits there + unlocks. VK; 0=unbound.\n"
-               "cursorLockVk=0\n"
+               "cursorLockVk=0\ncursorLockMods=0\n"
                "; panLeftVk/panRightVk/panUpVk/panDownVk + *Mods: keyboard panning while zoomed (tap = a\n"
-               ";   small step, hold = pan). Default Ctrl+Alt+arrows (mods 3), like Windows Magnifier;\n"
+               ";   small step, hold = pan). Unbound by default; Ctrl+Alt+arrows (mods 3) is Windows Magnifier's;\n"
                ";   the keys reach apps normally at 1x. panSpeed: 0.25-4, 1.0 = up to 1.25 screens/s, slower at low zoom.\n"
-               "panLeftVk=37\npanLeftMods=3\npanRightVk=39\npanRightMods=3\n"
-               "panUpVk=38\npanUpMods=3\npanDownVk=40\npanDownMods=3\npanSpeed=1.0\n"
+               "panLeftVk=0\npanLeftMods=0\npanRightVk=0\npanRightMods=0\n"
+               "panUpVk=0\npanUpMods=0\npanDownVk=0\npanDownMods=0\npanSpeed=1.0\n"
                "; maxLevel: how far you can zoom (does not affect zoom speed)\n"
                "maxLevel=12.0\n"
                "; zoomInSpeed/zoomOutSpeed: zoom rate multipliers (1.0=default, 2.0=twice as fast, 0.5=half);\n"

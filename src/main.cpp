@@ -948,7 +948,8 @@ static void RunTick(TickState& t) {
                 g_input.setKeys(nc.zoomInVk, nc.zoomInVk2, nc.zoomOutVk, nc.zoomOutVk2, nc.recenterVk,
                                 nc.cursorLockVk);
             }
-            g_input.setKeyMods(nc.zoomInMods, nc.zoomInMods2, nc.zoomOutMods, nc.zoomOutMods2);
+            g_input.setKeyMods(nc.zoomInMods, nc.zoomInMods2, nc.zoomOutMods, nc.zoomOutMods2,
+                               nc.recenterMods, nc.cursorLockMods);
             if (nc.panLeftVk != t.cfg.panLeftVk || nc.panLeftMods != t.cfg.panLeftMods
              || nc.panRightVk != t.cfg.panRightVk || nc.panRightMods != t.cfg.panRightMods
              || nc.panUpVk != t.cfg.panUpVk || nc.panUpMods != t.cfg.panUpMods
@@ -1149,13 +1150,13 @@ static void RunTick(TickState& t) {
     if (!quiesceFreeze) t.zoom.tick(dt < kMaxZoomDt ? dt : kMaxZoomDt);
     // Recenter on a recenterVk key press (rising edge).
     bool recenter = false;
-    bool recenterDown = keyDown(t.cfg.recenterVk);
+    bool recenterDown = comboHeld(t.cfg.recenterVk, t.cfg.recenterMods);   // mods since #307
     if (recenterDown && !t.recenterKeyWasDown) recenter = true;
     t.recenterKeyWasDown = recenterDown;
     // Inspect mode: toggle on the bound key's rising edge (works at any zoom). The crosshair is
     // overlay-drawn (render_engine draws the crosshair sprite when cursorLocked is set); the active
     // block below freezes the real cursor (1px ClipCursor) and roams a raw-driven look point.
-    bool lockDown = keyDown(t.cfg.cursorLockVk);
+    bool lockDown = comboHeld(t.cfg.cursorLockVk, t.cfg.cursorLockMods);
     if (lockDown && !t.lockKeyWasDown) {
         if (t.model->supportsInspect()) {
             // Snapshot cursor visibility at the toggle edge, BEFORE this tick's active block hides it,
@@ -1232,7 +1233,7 @@ static void RunTick(TickState& t) {
     bool inspect = t.cursorLock.locked();
     bool active = zoomed || inspect;                 // overlay runs while zoomed OR Inspect-frozen
     // Keyboard panning (#287): the hook swallows pan keys only while this is set, so at 1x
-    // Ctrl+Alt+arrows reach the app (IntelliJ navigate back/forward). Mouselook games and Inspect
+    // the pan keys reach the app (e.g. Ctrl+Alt+Left/Right = IntelliJ navigate back/forward). Mouselook games and Inspect
     // keep them too. Published once per tick, before anything reads the pan keys.
     const bool panArmed = lvl > 1.001 && !inspect && !t.detector.locked();
     g_input.setPanArmed(panArmed);
@@ -2782,7 +2783,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     g_input.setWheelMods(cfg.zoomWheelMods);
     g_input.setKeys(cfg.zoomInVk, cfg.zoomInVk2, cfg.zoomOutVk, cfg.zoomOutVk2, cfg.recenterVk,
                     cfg.cursorLockVk);
-    g_input.setKeyMods(cfg.zoomInMods, cfg.zoomInMods2, cfg.zoomOutMods, cfg.zoomOutMods2);
+    g_input.setKeyMods(cfg.zoomInMods, cfg.zoomInMods2, cfg.zoomOutMods, cfg.zoomOutMods2,
+                       cfg.recenterMods, cfg.cursorLockMods);
     {   // keyboard panning (#287); armed per tick while zoomed
         const int pv[4] = { cfg.panLeftVk, cfg.panRightVk, cfg.panUpVk, cfg.panDownVk };
         const int pm[4] = { cfg.panLeftMods, cfg.panRightMods, cfg.panUpMods, cfg.panDownMods };

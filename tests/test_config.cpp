@@ -539,10 +539,12 @@ TEST_CASE("click and wheel binds need a modifier; Ctrl+wheel is fine, Ctrl+click
     CHECK(ParseConfig("zoomInButton=5\n").zoomInButton == 0);       // bare middle click
 }
 
-TEST_CASE("pan keys default to Ctrl+Alt+arrows; unsafe binds and speeds are sanitised (#287)") {
+TEST_CASE("pan keys ship unbound (#307); Ctrl+Alt+arrows bind; unsafe binds and speeds are sanitised (#287)") {
     Config d = ParseConfig("");
-    CHECK(d.panLeftVk == 37); CHECK(d.panLeftMods == 3); CHECK(d.panRightVk == 39); CHECK(d.panRightMods == 3);
-    CHECK(d.panUpVk == 38); CHECK(d.panUpMods == 3); CHECK(d.panDownVk == 40); CHECK(d.panDownMods == 3);
+    CHECK(d.panLeftVk == 0); CHECK(d.panRightVk == 0); CHECK(d.panUpVk == 0); CHECK(d.panDownVk == 0);
+    Config wm = ParseConfig("panLeftVk=37\npanLeftMods=3\npanDownVk=40\npanDownMods=7\n");
+    CHECK(wm.panLeftVk == 37); CHECK(wm.panLeftMods == 3);        // Ctrl+Alt+Left
+    CHECK(wm.panDownVk == 40); CHECK(wm.panDownMods == 7);        // Ctrl+Alt+Shift+Down
     CHECK(d.panSpeed == doctest::Approx(1.0));
     CHECK(ParseConfig("panSpeed=9\n").panSpeed == doctest::Approx(4.0));
     CHECK(ParseConfig("panSpeed=0\n").panSpeed == doctest::Approx(0.25));
@@ -552,4 +554,28 @@ TEST_CASE("pan keys default to Ctrl+Alt+arrows; unsafe binds and speeds are sani
     CHECK(u.panUpVk == 33); CHECK(u.panUpMods == 0);
     Config off = ParseConfig("panDownVk=0\n");                         // unbound on purpose
     CHECK(off.panDownVk == 0);
+}
+
+TEST_CASE("every keybind takes two or three modifiers plus one key (#307)") {
+    Config c = ParseConfig("zoomInVk=112\nzoomInMods=7\n"            // Ctrl+Alt+Shift+F1
+                           "zoomOutVk=34\nzoomOutMods=3\n"           // Ctrl+Alt+PageDown
+                           "hideCursorVk=113\nhideCursorMods=11\n"   // Ctrl+Alt+Win+F2
+                           "quickZoomVk=114\nquickZoomMods=5\n"      // Ctrl+Shift+F3
+                           "cursorLockVk=115\ncursorLockMods=7\n"    // Ctrl+Alt+Shift+F4
+                           "recenterVk=36\nrecenterMods=6\n"         // Alt+Shift+Home
+                           "zoomWheelMods=7\n"                         // Ctrl+Alt+Shift+wheel
+                           "zoomInButton=3\nzoomInButtonMods=7\n");  // Ctrl+Alt+Shift+left click
+    CHECK(c.zoomInVk == 112); CHECK(c.zoomInMods == 7);
+    CHECK(c.zoomOutVk == 34); CHECK(c.zoomOutMods == 3);
+    CHECK(c.hideCursorVk == 113); CHECK(c.hideCursorMods == 11);
+    CHECK(c.quickZoomVk == 114); CHECK(c.quickZoomMods == 5);
+    CHECK(c.cursorLockVk == 115); CHECK(c.cursorLockMods == 7);
+    CHECK(c.recenterVk == 36); CHECK(c.recenterMods == 6);
+    CHECK(c.zoomWheelMods == 7);
+    CHECK(c.zoomInButton == 3); CHECK(c.zoomInButtonMods == 7);
+    // A modifier as the key is still refused everywhere (Ctrl+Alt with Shift as the "key").
+    Config m = ParseConfig("cursorLockVk=16\ncursorLockMods=3\n");
+    CHECK(m.cursorLockVk == 0); CHECK(m.cursorLockMods == 0);
+    // A letter alone for Inspect still reads as unbound (it would stop you typing it).
+    CHECK(ParseConfig("cursorLockVk=82\n").cursorLockVk == 0);
 }

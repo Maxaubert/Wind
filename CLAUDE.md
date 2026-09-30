@@ -244,8 +244,8 @@ restartWind), `dirty`, `openIni`, `exportDiagnostics`, `pickExe`, `mpoState`, `s
   injections carry `kWindInjectTag` in dwExtraInfo and are skipped by the bind matcher; other
   injectors count as real input. The quick-zoom modifier only turns binds that LACK it into taps. A KEY bind is swallowed only when a
   bind on that key has all its modifiers held (`keyBindMatches`), decided once per press; the old
-  VK-only test ate a plain F1 system-wide for a Ctrl+F1 bind. KEYBOARD PANNING (#287, default
-  Ctrl+Alt+arrows): pan slots match only while the tick ARMS them (zoomed, not Inspect, no mouselook
+  VK-only test ate a plain F1 system-wide for a Ctrl+F1 bind. KEYBOARD PANNING (#287, unbound by
+  default since #307): pan slots match only while the tick ARMS them (zoomed, not Inspect, no mouselook
   lock), so at 1x the keys reach apps (IntelliJ navigate back/forward); the tick pans only on presses
   the hook swallowed (`keySwallowed`), as the `ViewOwner::Keys` detached view (src/keyboard_pan.h). Down/up swallows are balanced
   (only swallow an UP whose DOWN we swallowed) and released on teardown so a key is never stranded.

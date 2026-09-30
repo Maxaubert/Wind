@@ -261,7 +261,7 @@ that the tick drains via `drainCooked`. It is pure logic, no `<windows.h>`, and 
 
 ## Keyboard panning keys (issue #287)
 
-The four pan binds (default Ctrl+Alt+arrows) are tracked like every bound key, but
+The four pan binds (unbound by default since #307; Ctrl+Alt+arrows is Windows Magnifier's) are tracked like every bound key, but
 `keyBindMatches` counts a pan slot only while `setPanArmed(true)`. RunTick arms them each tick
 while the view is zoomed, Inspect is off and no mouselook lock holds the mouse. The swallow
 decision is still made once per press, so a Ctrl+Alt+Left pressed at 1x goes to the app for its

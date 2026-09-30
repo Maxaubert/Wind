@@ -21,10 +21,10 @@ export const sections = [
     { key:'__zoomWheel', type:'keybind', label:'Zoom with the scroll wheel',
       desc:'Hold these keys and turn the wheel: up zooms in, down zooms out, at your zoom speeds. Needs a modifier, not Shift alone. Ctrl zooms the screen instead of the page.',
       wheel:true, modsKey:'zoomWheelMods' },
-    // Keyboard panning (#287): move the zoomed view without the mouse. Default Ctrl+Alt+arrows,
-    // like Windows Magnifier; the keys reach apps normally at 1x.
+    // Keyboard panning (#287): move the zoomed view without the mouse. Unbound by default (#307);
+    // Ctrl+Alt+arrows matches Windows Magnifier. The keys reach apps normally at 1x.
     { key:'__panLeft',  type:'keybind', label:'Pan left',
-      desc:'While zoomed: tap to nudge the view, hold to pan. The keys work normally in apps when not zoomed.',
+      desc:'While zoomed: tap to nudge the view, hold to pan. Off until you set keys (Windows Magnifier uses Ctrl+Alt+arrows). The keys work normally in apps when not zoomed.',
       vkKey:'panLeftVk',  modsKey:'panLeftMods' },
     { key:'__panRight', type:'keybind', label:'Pan right', vkKey:'panRightVk', modsKey:'panRightMods' },
     { key:'__panUp',    type:'keybind', label:'Pan up',    vkKey:'panUpVk',    modsKey:'panUpMods' },
@@ -64,7 +64,7 @@ export const sections = [
       desc:'A sharper cursor and image at high zoom. Changing this needs admin and a Windows restart.',
       def:0 },
     { key:'__hideCursor', type:'keybind', label:'Hide cursor', desc:'Hides or shows the cursor while zoomed.', vkKey:'hideCursorVk', modsKey:'hideCursorMods' },
-    { key:'__cursorLock', type:'keybind', label:'Inspect mode', desc:'Freezes the cursor so tooltips stay open, while a crosshair pans the view.', vkKey:'cursorLockVk' },
+    { key:'__cursorLock', type:'keybind', label:'Inspect mode', desc:'Freezes the cursor so tooltips stay open, while a crosshair pans the view.', vkKey:'cursorLockVk', modsKey:'cursorLockMods' },
     // Zoom lock detection (issue #221): games like DOOM pin the mouse to the screen centre,
     // which would pin the zoom view there too. Listed apps get the view UNLOCKED from the
     // pointer - it pans from raw mouse motion instead.
