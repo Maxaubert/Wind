@@ -334,7 +334,7 @@ uses the same detached path every tick: the pointer is real and unwelded, and `E
 
 `ViewOwner::Keys` is a fourth detached owner next to Caret and Focus. `KeyPan`
 (`src/keyboard_pan.h`, pure) turns the held pan keys into a view delta: a press starts panning at
-once at `panSpeed x 1.25` screens per second with a ~150 ms ease-in; a press released within 250 ms
+once at `panSpeed x 1.25` screen widths per second (every direction, so up/down match left/right) with a ~150 ms ease-in; a press released within 250 ms
 is a tap, which stops that axis and tops the move up to exactly 1/8 of the screen (a quick ~90 ms
 glide); a longer hold never adds that step (field test: a step at the start of a hold read as a
 jump) and glides out in ~120 ms. All in screen space, so the feel does not change with the zoom.

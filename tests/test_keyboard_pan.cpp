@@ -47,6 +47,17 @@ TEST_CASE("holding pans at speed x 1.25 screens per second, then glides to rest"
     Run(p, kNone, 600, 2.0, 1.0, sx, sy);
     CHECK_FALSE(p.active());
 }
+TEST_CASE("every direction pans at the same pixel rate and taps the same step (field test)") {
+    const bool right[4] = { false, true, false, false }, down[4] = { false, false, false, true };
+    KeyPan a, b; double ax = 0, ay = 0, bx = 0, by = 0;
+    Run(a, right, 1000, 3.0, 1.0, ax, ay);
+    Run(b, down, 1000, 3.0, 1.0, bx, by);
+    CHECK(by == doctest::Approx(ax).epsilon(0.001));
+    const bool up[4] = { false, false, true, false };
+    KeyPan c; double cx = 0, cy = 0;
+    Run(c, up, 7, 2.0, 1.0, cx, cy); Run(c, kNone, 1000, 2.0, 1.0, cx, cy);
+    CHECK(cy == doctest::Approx(-3840.0 / 8 / 2.0).epsilon(0.01));
+}
 TEST_CASE("speed scales the pan linearly") {
     const bool down[4] = { false, false, false, true };
     KeyPan a, b; double ax = 0, ay = 0, bx = 0, by = 0;

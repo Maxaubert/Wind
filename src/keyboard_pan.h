@@ -28,11 +28,14 @@ struct KeyPan {
         dx = dy = 0;
         if (level < 1.0) level = 1.0;
         if (dtMs <= 0) return;
+        (void)monH;   // kept in the signature: the tap/rate span is the width for both axes
         static const double kSign[4] = { -1, 1, -1, 1 };
         double tvx = 0, tvy = 0;
         for (int i = 0; i < 4; ++i) {
             const bool horiz = i < 2;
-            const double span = horiz ? monW : monH;
+            // One pixel rate and one tap step for every direction, from the screen WIDTH: on a
+            // 16:9 panel a height-based rate made up/down pan at 56% of left/right (field test).
+            const double span = monW;
             if (held[i]) {
                 heldMs[i] += dtMs;
                 (horiz ? tvx : tvy) += kSign[i] * speed * kScreensPerSec * span;
