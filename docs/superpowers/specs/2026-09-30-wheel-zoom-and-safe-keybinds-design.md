@@ -17,7 +17,9 @@ Date: 2026-09-30. Owner: Max. Status: awaiting approval (spec + plan together).
   Space, Enter, Tab, Esc, Backspace, punctuation, CapsLock, PrintScreen, the Apps key, NumLock,
   and a bare modifier or Windows key.
 - **Combos refused: system-critical only.** App shortcuts (Ctrl+C and so on) stay allowed.
-- **Wheel:** needs at least one modifier, and never Ctrl alone (browser zoom) or Shift alone
+- **Wheel:** needs at least one modifier, and never Shift alone. (AMENDED 2026-09-30, #295: Ctrl
+  alone is allowed; Wind swallows the notch, so it zooms the screen instead of the page.) Originally
+  also never Ctrl alone (browser zoom) or Shift alone
   (horizontal scroll). Unbound by default.
 - **Left/right/middle click** (added the same day): bindable as a hold-to-zoom bind, with the same
   modifier rule as the wheel. Never alone; never Ctrl alone or Shift alone (Ctrl/Shift+click select

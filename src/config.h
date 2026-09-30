@@ -32,8 +32,8 @@ struct Config {
     int    zoomOutButtonMods  = 0;
     int    zoomInButton2Mods  = 0;
     int    zoomOutButton2Mods = 0;
-    // Scroll-wheel zoom (#285): the modifiers that make the wheel zoom (0 = off; never Ctrl or Shift
-    // alone), and how much one notch zooms, in percent (5..100).
+    // Scroll-wheel zoom (#285): the modifiers that make the wheel zoom (0 = off; never Shift alone,
+    // Ctrl alone is fine, #295). Its speed follows zoomInSpeed/zoomOutSpeed.
     int    zoomWheelMods    = 0;
     int    recenterVk       = 0;     // VK code; 0 = unbound. Tap to recenter the lens on the cursor.
     int    cursorLockVk     = 0;     // VK code; 0 = unbound. Tap to toggle Inspect mode (cursor lock)

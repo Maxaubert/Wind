@@ -96,8 +96,8 @@ with modifiers. Binds that would break normal use are refused with the reason: t
 Shift or AltGr (Ctrl+Alt) plus a typing key, and combos Windows reserves (Alt+F4, Win+L, ...).
 
 - Hold your **zoom-in** bind - zoom in (smooth ramp). Hold **zoom-out** - zoom back.
-- **Scroll-wheel zoom** (optional): hold the modifiers you chose (for example Alt, or Ctrl+Alt;
-  never Ctrl or Shift alone) and turn the wheel - up zooms in, down zooms out.
+- **Scroll-wheel zoom** (optional): hold the modifiers you chose (for example Ctrl,
+  Alt or Ctrl+Alt; never Shift alone) and turn the wheel - up zooms in, down zooms out.
 - Release - zoom stays at the current level.
 - **Quick zoom** (default Ctrl + a zoom key, or a dedicated hotkey) - toggle between 1x and
   your remembered level.

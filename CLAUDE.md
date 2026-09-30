@@ -231,7 +231,8 @@ restartWind), `dirty`, `openIni`, `exportDiagnostics`, `pickExe`, `mpoState`, `s
   fail. `ParseConfig` reads any unsafe bind as unbound, the UI refuses it with a reason, and the hook
   still never swallows `IsForbiddenBindVk` keys. AltGr sends Ctrl+Alt, so Ctrl+Alt + a typing key is
   refused (the owner types on a Norwegian layout). Button binds: 1/2 side, 3/4/5 left/right/middle
-  (these need modifiers, never Ctrl or Shift alone, like the wheel); the most specific matching slot
+  (these need modifiers, never Ctrl or Shift alone; the wheel allows Ctrl alone, #295, since the notch
+  is swallowed); the most specific matching slot
   wins. SWALLOWING WITH ALT OR WIN HELD INJECTS ONE MASK KEY (VK 0xE8): otherwise Windows sees the
   modifier tapped alone (Start opens, the app's menu bar activates; Alt measured both ways, Win fixed-case only). Wind's own
   injections carry `kWindInjectTag` in dwExtraInfo and are skipped by the bind matcher; other

@@ -387,7 +387,7 @@ std::string DefaultIniText() {
                ";   (zoomInButtonMods etc., same bits; never Ctrl or Shift alone). Optional for 1/2.\n"
                "zoomInButtonMods=0\nzoomOutButtonMods=0\nzoomInButton2Mods=0\nzoomOutButton2Mods=0\n"
                "; zoomWheelMods: modifiers that make the scroll wheel zoom (0=off; e.g. 2=Alt, 3=Ctrl+Alt;\n"
-               ";   never Ctrl or Shift alone). Speed: zoomInSpeed (up), zoomOutSpeed (down).\n"
+               ";   never Shift alone; Ctrl zooms the screen, not the page). Speed: zoomInSpeed (up), zoomOutSpeed (down).\n"
                "zoomWheelMods=0\n"
                "; hideCursorVk/hideCursorMods: hotkey to toggle the magnified cursor on/off while\n"
                ";   zoomed (does not reset zoom). VK + mods, 0=unbound.\n"
