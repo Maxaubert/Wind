@@ -59,21 +59,27 @@ TEST_CASE("every direction pans at the same pixel rate and taps the same step (f
     Run(c, up, 7, 2.0, 1.0, cx, cy); Run(c, kNone, 1000, 2.0, 1.0, cx, cy);
     CHECK(cy == doctest::Approx(-3840.0 / 8 / 2.0).epsilon(0.01));
 }
-TEST_CASE("lower zoom pans slower on screen along one smooth curve, full speed from 7.5x (#305)") {
-    CHECK(KeyPan::ZoomRateScale(7.5) == doctest::Approx(1.0));
-    CHECK(KeyPan::ZoomRateScale(20.0) == doctest::Approx(1.0));
-    CHECK(KeyPan::ZoomRateScale(2.0) == doctest::Approx(std::pow(2.0 / 7.5, 0.6)));
-    CHECK(KeyPan::ZoomRateScale(1.4) == doctest::Approx(std::pow(1.4 / 7.5, 0.6)));
-    // Proportional: the same zoom RATIO always gives the same speed ratio below 7.5x.
-    CHECK(KeyPan::ZoomRateScale(4.0) / KeyPan::ZoomRateScale(2.0) ==
-          doctest::Approx(KeyPan::ZoomRateScale(2.0) / KeyPan::ZoomRateScale(1.0)));
-    for (double l = 1.0; l < 8.0; l += 0.05)                        // never falls as the zoom rises
-        CHECK(KeyPan::ZoomRateScale(l + 0.05) >= KeyPan::ZoomRateScale(l) - 1e-12);
+TEST_CASE("pan speed follows one smooth curve of the zoom, no corners or steps (#305)") {
+    CHECK(KeyPan::ZoomRateScale(2.0) == doctest::Approx(std::pow(2.0 / 7.0, 0.6)).epsilon(0.01));   // power law at low zoom
+    CHECK(KeyPan::ZoomRateScale(7.5) == doctest::Approx(0.93).epsilon(0.01));
+    CHECK(KeyPan::ZoomRateScale(10.0) == doctest::Approx(0.98).epsilon(0.01));
+    CHECK(KeyPan::ZoomRateScale(40.0) < 1.0);
+    CHECK(KeyPan::ZoomRateScale(40.0) > 0.999);
+    // Smooth: sampled every 0.01x from 1x to 30x the curve always rises, and its slope changes by only
+    // a tiny amount from one sample to the next (a corner or a step would show as a jump here).
+    const double h = 0.01;
+    double prevSlope = (KeyPan::ZoomRateScale(1.0 + h) - KeyPan::ZoomRateScale(1.0)) / h;
+    for (double l = 1.0 + h; l < 30.0; l += h) {
+        const double slope = (KeyPan::ZoomRateScale(l + h) - KeyPan::ZoomRateScale(l)) / h;
+        CHECK(slope > 0);
+        CHECK(std::fabs(slope - prevSlope) < 0.003);
+        prevSlope = slope;
+    }
     const bool right[4] = { false, true, false, false };
     KeyPan a, b; double ax = 0, ay = 0, bx = 0, by = 0;
     Run(a, right, 2000, 2.0, 1.0, ax, ay);
     Run(b, right, 2000, 8.0, 1.0, bx, by);
-    CHECK((ax * 2.0) == doctest::Approx(KeyPan::ZoomRateScale(2.0) * bx * 8.0).epsilon(0.01));   // screen px
+    CHECK((ax * 2.0) / (bx * 8.0) == doctest::Approx(KeyPan::ZoomRateScale(2.0) / KeyPan::ZoomRateScale(8.0)).epsilon(0.01));
 }
 TEST_CASE("speed scales the pan linearly") {
     const bool down[4] = { false, false, false, true };

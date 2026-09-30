@@ -12,15 +12,16 @@ struct KeyPan {
     static constexpr double kTapMs = 250.0;          // released sooner than this: a tap
     static constexpr double kScreensPerSec = 1.25;   // continuous rate at panSpeed 1.0, 7.5x and above
     // Lower zoom pans slower (owner, 2026-09-30, #305): a constant screen rate crosses the whole
-    // desktop in (level - 1) / rate seconds, under one at 2x. ONE smooth power curve, so the speed
-    // changes in proportion to the zoom with no corners: (level / 7.5)^0.6 below 7.5x, full speed
-    // from 7.5x ("at 7.5 and up it's fine"). The earlier piecewise-linear curve with a separate cap
-    // below 2x "didn't feel like the speed stays proportional".
-    static constexpr double kFullSpeedLevel = 7.5, kRateExponent = 0.6;
+    // desktop in (level - 1) / rate seconds, under one at 2x. The scale is ONE smooth curve with no
+    // corner anywhere: a power law x = (level / 7)^0.6 at low zoom that eases into full speed through
+    // a soft minimum, (x^-8 + 1)^(-1/8). It tracks x below ~5x (47% at 2x), is 93% at 7.5x, 98% at 10x
+    // and approaches 100% from there. History: piecewise-linear versions "did not feel proportional",
+    // and a clamped power law still had one bend at 7.5x ("make it a perfect curve").
+    static constexpr double kKneeLevel = 7.0, kRateExponent = 0.6, kKneeSharpness = 8.0;
     static double ZoomRateScale(double level) {
-        if (level >= kFullSpeedLevel) return 1.0;
         if (level < 1.0) level = 1.0;
-        return std::pow(level / kFullSpeedLevel, kRateExponent);
+        const double x = std::pow(level / kKneeLevel, kRateExponent);
+        return std::pow(std::pow(x, -kKneeSharpness) + 1.0, -1.0 / kKneeSharpness);
     }
     static constexpr double kEaseInMs = 150.0, kGlideMs = 120.0, kNudgeGlideMs = 90.0;
 
