@@ -804,10 +804,31 @@ static wind::ColorFilterController g_color;
 // matrix must be built for linear light there. Read at startup and on WM_DISPLAYCHANGE (toggling HDR
 // changes the display mode), never per tick: it is a DisplayConfig query.
 static std::atomic<bool> g_hdrOn{false};
+// HDR state of the PRIMARY monitor. The DWM effect is one matrix for every monitor, so a mixed
+// HDR/SDR setup gets the right strength on the primary only (documented limitation).
+static bool PrimaryHdrOn() {
+    MONITORINFOEXW mi{}; mi.cbSize = sizeof(mi);
+    HMONITOR hm = MonitorFromPoint(POINT{ 0, 0 }, MONITOR_DEFAULTTOPRIMARY);
+    return wind::GetHdrEnabled(hm && GetMonitorInfoW(hm, &mi) ? mi.szDevice : nullptr);
+}
+// The render overlay is on screen (revealed, not yet rested). Colour is filtered in its shader only
+// then; before the reveal and after it rests the DWM effect must carry it (review 2026-09-30).
+static bool RenderOverlayShown(TickState& t) {
+    auto* rm = dynamic_cast<RenderModel*>(t.mRender ? t.mRender : t.model);
+    return rm && rm->visible();
+}
 static void UpdateColorFilter(TickState& t, bool zoomedNow, bool renderSession, PresentExtras* ex) {
     const bool magnify = t.model && t.model->selfDrivenZoom();   // native Magnifier has its own filters
     (void)zoomedNow;   // applies zoomed and at 1x alike (owner decision 2026-09-29)
     const double w = t.cfg.colorWarmPct / 100.0, d = t.cfg.colorDimPct / 100.0;
+    // Toggling HDR is not guaranteed to raise WM_DISPLAYCHANGE (and may settle after it), so while a
+    // filter is on the state is re-read once a second. A DisplayConfig query is microseconds (the
+    // render engine runs the same kind of query at 4 Hz, CLAUDE.md), so this is not a tick cost.
+    if (!magnify && (w > 0.0 || d < 1.0)) {
+        static unsigned long long hdrReadMs = 0;
+        const unsigned long long now = GetTickCount64();
+        if (now - hdrReadMs >= 1000) { hdrReadMs = now; g_hdrOn.store(PrimaryHdrOn()); }
+    }
     // The render shader works on sRGB-encoded values (after its HDR->SDR step), in SDR and HDR alike.
     const wind::ColorMatrix enc = magnify ? wind::IdentityColorMatrix() : wind::BuildColorMatrix(w, d, false);
     const bool inShader = renderSession && !wind::IsIdentity(enc);
@@ -1804,6 +1825,7 @@ static void RunTick(TickState& t) {
                     t.restAfterReveal->setActive(false);
                     t.restAfterReveal = nullptr;
                     t.restOverlapTicks = 0;
+                    UpdateColorFilter(t, true, RenderOverlayShown(t), nullptr);   // colour follows what is visible
                 }
                 IMagnifierModel* old = t.model;
                 SetSystemCursorHidden(t, old, false);
@@ -1931,7 +1953,7 @@ static void RunTick(TickState& t) {
         }
         ex.suppressTransformWrite = hookWrite;
         ex.realPointer = panel;
-        UpdateColorFilter(t, lvl > 1.0, dynamic_cast<RenderModel*>(t.model) != nullptr, &ex);
+        UpdateColorFilter(t, lvl > 1.0, RenderOverlayShown(t), &ex);
         // Serialize transform writes around an Inspect click's injected absolute move (issue #148
         // TDR class): the injection and a transform write racing each other is the proven trigger.
         // The launch quiesce holds writes AND the weld for its whole window (see above).
@@ -2096,6 +2118,9 @@ static void RunTick(TickState& t) {
         if (t.restAfterReveal && t.restOverlapTicks > 0 && --t.restOverlapTicks == 0) {
             t.restAfterReveal->setActive(false);
             t.restAfterReveal = nullptr;
+            // The render overlay just left the screen: the DWM effect takes the colour back THIS
+            // tick, not next tick's top-of-tick call (a one-frame unfiltered flash otherwise).
+            UpdateColorFilter(t, true, RenderOverlayShown(t), nullptr);
         }
         // Execute the deferred game-inspect steal now that the reveal logic has read the true
         // foreground, and RE-assert it if the game pulled foreground back mid-inspect (some
@@ -2174,6 +2199,9 @@ static void RunTick(TickState& t) {
     } else if (t.prevActive) {                        // active -> idle: tear the overlay down
         EndPanelFreeze(t);                            // #283: never leave the pointer pinned (review #284)
         if (t.restAfterReveal) { t.restAfterReveal->setActive(false); t.restAfterReveal = nullptr; }
+        // DWM effect back BEFORE the overlay hides: worst case one double-filtered frame, never a
+        // bright unfiltered one (review 2026-09-30).
+        UpdateColorFilter(t, false, false, nullptr);
         t.model->setActive(false);
         SetSystemCursorHidden(t, t.model, false);
         t.outlineZoneSec = 0.0;                       // zoom-out clears the low-zoom dwell (no banked partial)
@@ -2374,7 +2402,7 @@ static void RegisterQuickZoomHotkey(HWND hwnd, int vk, int mods) {
 }
 
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
-    if (msg == WM_DISPLAYCHANGE) g_hdrOn.store(wind::GetHdrEnabled(nullptr));   // colour space (#288); falls through
+    if (msg == WM_DISPLAYCHANGE) g_hdrOn.store(PrimaryHdrOn());   // colour space (#288); falls through
     // A pointer-scheme reload (the user changed scheme or size, or an engine healed it) leaves the
     // clean scheme in place: take fresh pristine copies; the next idle tick re-tints (#288).
     if (msg == WM_SETTINGCHANGE && wp == SPI_SETCURSORS) g_tint.capture();
@@ -2636,7 +2664,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // Safety: global Ctrl+Alt+Q quits cleanly from anywhere (works even with the overlay up
     // and the cursor hidden). If the combo is already taken, the tray Quit still works.
     RegisterHotKey(hwnd, kQuitHotkeyId, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'Q');
-    g_hdrOn.store(wind::GetHdrEnabled(nullptr));   // colour filter space (#288), refreshed on WM_DISPLAYCHANGE
+    g_hdrOn.store(PrimaryHdrOn());   // colour filter space (#288), refreshed on WM_DISPLAYCHANGE + 1 Hz while on
     RegisterHideCursorHotkey(hwnd, cfg.hideCursorVk, cfg.hideCursorMods);
     RegisterQuickZoomHotkey(hwnd, (cfg.quickZoomHotkeyMode && cfg.quickZoomVk) ? cfg.quickZoomVk : 0,
                             cfg.quickZoomMods);

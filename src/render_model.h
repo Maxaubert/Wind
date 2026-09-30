@@ -41,5 +41,10 @@ private:
     bool hdrTonemap_;
     int  gpuPriority_;
     bool primed_ = false;
+    bool visible_ = false;   // the overlay is revealed (setActive(true) .. setActive(false))
+public:
+    // Whether the overlay is on screen. The colour filter follows the VISIBLE engine, not the
+    // selected one: a pending reveal still shows the DWM-filtered desktop (issue #288 review).
+    bool visible() const { return visible_; }
 };
 }

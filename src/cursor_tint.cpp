@@ -36,6 +36,7 @@ void CursorTint::capture() {
         }
     }
     applied_ = false;
+    swapped_ = false;   // capture() runs right after a scheme reload: the pointers are the user's
 }
 
 // Reads a bitmap as top-down 32bpp (colour) or 1bpp (mask) rows.
@@ -112,15 +113,17 @@ void CursorTint::apply(const ColorMatrix& m) {
         else if (tinted) DestroyCursor(tinted);
     }
     applied_ = true;
+    swapped_ = true;
     current_ = m;
     wind::Log(wind::LogLevel::Info, "color", "pointer tint applied (%d pointers, %.1f ms)", done, MsSince(t0));
 }
 
 void CursorTint::restore(bool reloadScheme) {
-    if (!applied_) return;
+    if (reloadScheme ? !swapped_ : !applied_) return;
     LARGE_INTEGER t0; QueryPerformanceCounter(&t0);
     if (reloadScheme) {
         SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, 0);   // no broadcast: nothing else needs telling
+        swapped_ = false;
     } else {
         for (int i = 0; i < kCount; ++i) {
             if (!pristine_[i] || IsAnimatedId(kIds[i])) continue;

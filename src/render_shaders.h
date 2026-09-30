@@ -71,8 +71,13 @@ float4 PSMain(VSOut i) : SV_TARGET {
 
 // Cursor quad shader: a per-quad transform (top-left + size in clip space) places an
 // alpha-blended textured quad. Drawn as a 4-vertex triangle strip from the vertex id.
+// colorOn + cm*: the colour filter (issue #288). The DWM effect is cleared in a render session, so
+// the drawn pointer and the Inspect crosshair must be filtered here like the desktop pass, or they
+// stay full-bright over a dimmed picture (review 2026-09-30). Straight alpha: RGB only.
+struct CursorCB { float posClipX, posClipY, sizeClipX, sizeClipY; float colorOn, pad0, pad1, pad2; float cm[5][4]; };
 inline constexpr const char* kCursorHLSL = R"(
-cbuffer CB : register(b0) { float2 posClip; float2 sizeClip; };
+cbuffer CB : register(b0) { float2 posClip; float2 sizeClip; float colorOn; float3 cpad;
+                            float4 cm0; float4 cm1; float4 cm2; float4 cm3; float4 cmOff; };
 struct VSOut { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; };
 VSOut VSMain(uint id : SV_VertexID) {
     float2 q = float2(id & 1, (id >> 1) & 1);   // (0,0),(1,0),(0,1),(1,1)
@@ -83,7 +88,11 @@ VSOut VSMain(uint id : SV_VertexID) {
 }
 Texture2D tex : register(t0);
 SamplerState smp : register(s0);
-float4 PSMain(VSOut i) : SV_TARGET { return tex.Sample(smp, i.uv); }
+float4 PSMain(VSOut i) : SV_TARGET {
+    float4 c = tex.Sample(smp, i.uv);
+    if (colorOn > 0.5) c.rgb = saturate((c.r * cm0 + c.g * cm1 + c.b * cm2 + cm3 + cmOff).rgb);
+    return c;
+}
 )";
 
 // Zoom edge outline as a SINGLE full-screen quad: the pixel shader colors only pixels within

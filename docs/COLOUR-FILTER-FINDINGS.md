@@ -118,3 +118,19 @@ handed back. Verified by killing the engine with a staged change: back in ~0.3 s
   likely reaching the pointer). Unknowns: pointer behaviour (https://github.com/dantmnf/MHC2 notes a
   "buggy mouse cursor and MPO composition" with MHC active), change latency, stacking with Night
   light, and it would displace a user's own calibration profile.
+
+## Review fixes (2026-09-30)
+
+- The render engine's drawn pointer, Inspect crosshair and zoom outline are filtered too (cursor
+  shader + CPU-filtered outline colour); an inverting text beam is drawn untinted (a matrix on an
+  inverting texture changes the inversion, it does not tint).
+- Colour follows the VISIBLE engine (`RenderModel::visible()`), not the selected one: a pending
+  render reveal keeps the DWM-filtered desktop, the effect returns before the overlay hides at
+  zoom-out and the moment an outgoing render overlay rests in a hybrid switch. Worst case left: one
+  double-filtered frame while the capture catches up after the effect is cleared.
+- HDR state is the PRIMARY monitor's, re-read once a second while a colour setting is on (toggling
+  HDR is not guaranteed to raise WM_DISPLAYCHANGE). Mixed HDR/SDR monitors: the single DWM matrix is
+  right on the primary only.
+- Tinted pointer: a separate "pointers are ours" flag, so an idle restore after a render session
+  (which never reloads the scheme) still reloads the user's real scheme.
+- Trade-off kept: colour on holds the Magnification runtime at 1x (CLAUDE.md gotcha).

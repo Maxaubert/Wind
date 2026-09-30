@@ -33,6 +33,11 @@ private:
     HCURSOR pristine_[kCount] = {};
     bool mono_[kCount] = {};
     bool applied_ = false;
+    // The system pointers are ours (tinted, or the in-memory copies from a zoom-in swap) rather than
+    // the user's scheme. Separate from applied_: a zoom-in swap and invalidate() clear applied_, but
+    // the render engine never reloads the scheme at zoom-out, so the copies can still be on screen
+    // (review 2026-09-30). Only a real scheme reload clears it.
+    bool swapped_ = false;
     ColorMatrix current_{};
     void release();
 };

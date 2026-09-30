@@ -41,6 +41,7 @@ void RenderModel::shutdown() { engine_.shutdown(); }
 bool RenderModel::ready() const { return engine_.ready(); }
 void RenderModel::hideSystemCursor(bool hide) { engine_.hideSystemCursor(hide); }
 void RenderModel::setActive(bool active) {
+    visible_ = active;
     engine_.setVisible(active);
     // Zoom-out: also drop the Desktop Duplication session (issue #148). While a duplication is
     // alive, DWM keeps servicing it; idle at 1x should cost the system nothing. The next zoom-in
