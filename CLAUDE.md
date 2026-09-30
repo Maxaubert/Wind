@@ -225,10 +225,19 @@ restartWind), `dirty`, `openIni`, `exportDiagnostics`, `pickExe`, `mpoState`, `s
   never appears in `GetAsyncKeyState`, so the keyboard hook is the AUTHORITY for bound-key down-state
   (`keyPressed()`); `main.cpp` reads it when `kbHookActive()`, else falls back to polling (install
   failure / `WIND_NOHOOK`). hide-cursor + hotkey-mode quick-zoom are swallowed by `RegisterHotKey`
-  instead, not this hook. SAFETY: `IsForbiddenBindVk` (pure, in `config.cpp`) blocks binding keys
-  that would be catastrophic to lose system-wide - left/right click (1/2), Backspace (8), Win
-  (0x5B/0x5C) - enforced in three places: the hook never swallows them, `ParseConfig` sanitizes them
-  out of the ini, and the config UI's keybind capture refuses them. Down/up swallows are balanced
+  instead, not this hook. SAFETY (#285): ONE rule set for every bind, `src/keybind_rules.h`
+  (`CheckKeyBind`/`CheckWheelBind`/`CheckClickBind`), mirrored in `ui/src/lib/keybindRules.js`; both
+  are tested against `tests/fixtures/keybind_cases.txt`, so change the rules in BOTH or the tests
+  fail. `ParseConfig` reads any unsafe bind as unbound, the UI refuses it with a reason, and the hook
+  still never swallows `IsForbiddenBindVk` keys. AltGr sends Ctrl+Alt, so Ctrl+Alt + a typing key is
+  refused (the owner types on a Norwegian layout). Button binds: 1/2 side, 3/4/5 left/right/middle
+  (these need modifiers, never Ctrl or Shift alone, like the wheel); the most specific matching slot
+  wins. SWALLOWING WITH ALT OR WIN HELD INJECTS ONE MASK KEY (VK 0xE8): otherwise Windows sees the
+  modifier tapped alone (Start opens, the app's menu bar activates; Alt measured both ways, Win fixed-case only). Wind's own
+  injections carry `kWindInjectTag` in dwExtraInfo and are skipped by the bind matcher; other
+  injectors count as real input. The quick-zoom modifier only turns binds that LACK it into taps. A KEY bind is swallowed only when a
+  bind on that key has all its modifiers held (`keyBindMatches`), decided once per press; the old
+  VK-only test ate a plain F1 system-wide for a Ctrl+F1 bind. Down/up swallows are balanced
   (only swallow an UP whose DOWN we swallowed) and released on teardown so a key is never stranded.
   `cursorLockVk` (Inspect mode) is VK-only (no mods), swallowed like `recenterVk`.
   Inspect mode is a FREEZE-cursor + free-look reticle toggle (driven entirely in `main.cpp` RunTick,

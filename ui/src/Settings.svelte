@@ -13,6 +13,7 @@
   import { ic } from './lib/icons.js';
   import { scrollspy, scrollToSection } from './lib/scrollspy.js';
   import { dialog } from './lib/dialog.js';
+  import { droppedBinds } from './lib/keybindRules.js';
 
   let values = {}, saved = {}, active = sections[0].id, theme = 'auto', scroller;
   const railItems = sections.map(s => ({ id: s.id, label: s.label, icon: s.icon }));
@@ -20,8 +21,15 @@
 
   // Reusable so a profile switch/create/delete can re-pull the whole config after the host
   // rewrites the live ini (the staged/saved state is replaced wholesale on purpose).
+  // Binds from an older version that the safety rules now refuse (#285): reset once, and said why.
+  let dropped = [];
   async function loadValues() {
     const cfg = await getConfig();
+    const found = droppedBinds(cfg);
+    if (found.length) {
+      for (const d of found) for (const k of d.keys) { cfg[k] = '0'; setConfig(k, '0'); }
+      dropped = found;
+    }
     const v = {};
     for (const s of sections) for (const r of s.rows) {
       if (r.key[0] !== '_') v[r.key] = (r.key in cfg) ? cfg[r.key] : r.def;
@@ -29,7 +37,7 @@
       // every one of those must be loaded too, or the row displays "Unbound" over a live binding
       // and a capture/clear through the lying row destroys the user's real bind (the Inspect row
       // had exactly this bug - cursorLockVk was never loaded).
-      for (const k of [r.buttonKey, r.vkKey, r.modsKey]) if (k) v[k] = (k in cfg) ? cfg[k] : '0';
+      for (const k of [r.buttonKey, r.vkKey, r.modsKey, r.buttonModsKey, r.buttonModsKey2]) if (k) v[k] = (k in cfg) ? cfg[k] : '0';
     }
     // These must match the core's shipped defaults (src/config.h + the ini template in config.cpp),
     // which are ALL unbound - onboarding captures the user's choice. Seeding a key here that the
@@ -306,6 +314,20 @@
         <h2 id="rtitle">Couldn't restart Wind</h2>
         <p>Wind.exe could not be launched. The magnifier is still running with the previous model.</p>
         <div class="mbtns"><button class="primary" on:click={() => (restartError = false)}>Close</button></div>
+      </div>
+    </div>
+  {/if}
+  {#if dropped.length}
+    <div class="mbackdrop">
+      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="dtitle"
+           use:dialog={{ onClose: () => (dropped = []) }}>
+        <h2 id="dtitle">Some keybinds were removed</h2>
+        <p>
+          Wind no longer allows binds that would stop you typing a key or clash with Windows, so
+          these are now unbound: <strong>{dropped.map(d => d.label).join(', ')}</strong>. Set them
+          again under Keybinds, with a modifier such as Ctrl, Alt or Win.
+        </p>
+        <div class="mbtns"><button class="primary" on:click={() => (dropped = [])}>OK</button></div>
       </div>
     </div>
   {/if}

@@ -502,3 +502,26 @@ TEST_CASE("tracking settings: defaults and parsing (issue #276)") {
     CHECK(c.mouseAlign == 1); CHECK(c.trackGlideMs == 90); CHECK(c.trackMarginPct == 20);
     CHECK(c.trackLog == 1);
 }
+
+TEST_CASE("unsafe binds in an ini read as unbound; safe ones survive (#285)") {
+    Config c = ParseConfig("zoomInVk=65\nzoomOutVk=34\nzoomInVk2=50\nzoomInMods2=3\nzoomOutVk2=115\nzoomOutMods2=2\n"
+                           "hideCursorVk=112\nhideCursorMods=1\nrecenterVk=82\ncursorLockVk=113\n");
+    CHECK(c.zoomInVk == 0);                              // A alone
+    CHECK(c.zoomOutVk == 34);                            // PageDown alone is fine
+    CHECK(c.zoomInVk2 == 0); CHECK(c.zoomInMods2 == 0);  // Ctrl+Alt+2 = AltGr @
+    CHECK(c.zoomOutVk2 == 0); CHECK(c.zoomOutMods2 == 0);// Alt+F4
+    CHECK(c.hideCursorVk == 112); CHECK(c.hideCursorMods == 1);
+    CHECK(c.recenterVk == 0);                            // R alone
+    CHECK(c.cursorLockVk == 113);                        // F2 alone
+}
+TEST_CASE("click and wheel binds need a modifier, never Ctrl or Shift alone (#285)") {
+    Config c = ParseConfig("zoomInButton=3\nzoomInButtonMods=3\nzoomOutButton=4\nzoomOutButtonMods=1\n"
+                           "zoomInButton2=2\nzoomWheelMods=2\n");
+    CHECK(c.zoomInButton == 3); CHECK(c.zoomInButtonMods == 3);    // Ctrl+Alt+left click
+    CHECK(c.zoomOutButton == 0); CHECK(c.zoomOutButtonMods == 0);  // Ctrl+right click: refused
+    CHECK(c.zoomInButton2 == 2);                                    // side button alone: fine
+    CHECK(c.zoomWheelMods == 2);
+    CHECK(ParseConfig("zoomWheelMods=1\n").zoomWheelMods == 0);     // Ctrl+wheel: browser zoom
+    CHECK(ParseConfig("zoomWheelMods=4\n").zoomWheelMods == 0);     // Shift+wheel
+    CHECK(ParseConfig("zoomInButton=5\n").zoomInButton == 0);       // bare middle click
+}

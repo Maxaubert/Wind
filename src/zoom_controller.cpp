@@ -26,7 +26,41 @@ void ZoomController::setProfile(double inSpeed, double outSpeed, bool smooth,
 // ~150ms and direction reversals round off instead of snapping. Time-based, so VRR tick-interval
 // variation does not change the felt ease (the same law as the mapper's easing).
 
+// Wheel glide time constant: short enough that a notch feels immediate, long enough that it is a
+// glide and not a jump (~95% of the way in ~0.25 s).
+static constexpr double kWheelTau = 0.08;
+
+// One wheel notch zooms as far as HOLDING the zoom bind does in this long, at the same speed
+// slider, so scrolling about 10 notches a second feels like holding; faster or slower scrolling
+// zooms faster or slower from there. At speed 1.0 a notch is x1.19; at 2.7 it is x1.60.
+static constexpr double kWheelNotchSeconds = 0.1;
+double WheelNotchStep(double speed) {
+    return std::pow(2.0, speed * kZoomDoublingsPerSecond * kWheelNotchSeconds) - 1.0;
+}
+void ZoomController::wheelNotches(int steps) {
+    if (steps == 0) return;
+    stepTarget(steps, WheelNotchStep(steps > 0 ? inSpeed_ : outSpeed_));
+}
+
+void ZoomController::stepTarget(int steps, double step) {
+    if (steps == 0 || step <= 0.0) return;
+    const double base = target_ > 0.0 ? target_ : level_;
+    const double t = base * std::pow(1.0 + step, (double)steps);
+    target_ = std::min(maxLevel_, std::max(minLevel_, t));
+}
+
 void ZoomController::tick(double dt) {
+    if (dir_ != ZoomDir::None) target_ = 0.0;          // a held zoom takes over from the wheel
+    if (target_ > 0.0 && dt > 0.0) {
+        // Exponential approach in LOG space: equal steps look equal at any zoom.
+        const double a = 1.0 - std::exp(-dt / kWheelTau);
+        const double lg = std::log(level_) + (std::log(target_) - std::log(level_)) * a;
+        level_ = std::exp(lg);
+        if (std::abs(std::log(level_ / target_)) < 0.002) { level_ = target_; target_ = 0.0; }
+        level_ = std::min(maxLevel_, std::max(minLevel_, level_));
+        rate_ = 0.0; heldIn_ = 0.0;
+        return;
+    }
     // Track continuous zoom-in hold time for the smooth-zoom ease-in; any non-In direction
     // (release or reverse) resets it, so each fresh zoom-in starts slow again.
     if (dir_ == ZoomDir::In && dt > 0.0) heldIn_ += dt;
@@ -63,8 +97,9 @@ void ZoomController::tick(double dt) {
     // (rampStopped in the transform model) is not deferred by an invisible decaying rate.
     if (dir_ == ZoomDir::None && (level_ >= maxLevel_ || level_ <= minLevel_)) rate_ = 0.0;
 }
-void ZoomController::reset() { level_ = minLevel_; dir_ = ZoomDir::None; heldIn_ = 0.0; rate_ = 0.0; }
+void ZoomController::reset() { level_ = minLevel_; dir_ = ZoomDir::None; heldIn_ = 0.0; rate_ = 0.0; target_ = 0.0; }
 void ZoomController::setLevel(double l) {
+    target_ = 0.0;   // a snap (quick zoom, keep-level) cancels any wheel glide
     level_ = std::min(maxLevel_, std::max(minLevel_, l));
 }
 
