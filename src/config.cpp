@@ -415,7 +415,7 @@ std::string DefaultIniText() {
                "cursorLockVk=0\n"
                "; panLeftVk/panRightVk/panUpVk/panDownVk + *Mods: keyboard panning while zoomed (tap = a\n"
                ";   small step, hold = pan). Default Ctrl+Alt+arrows (mods 3), like Windows Magnifier;\n"
-               ";   the keys reach apps normally at 1x. panSpeed: 0.25-4, 1.0 = 1.25 screens per second.\n"
+               ";   the keys reach apps normally at 1x. panSpeed: 0.25-4, 1.0 = 1.25 screens/s at 6x+, 75% at 2x.\n"
                "panLeftVk=37\npanLeftMods=3\npanRightVk=39\npanRightMods=3\n"
                "panUpVk=38\npanUpMods=3\npanDownVk=40\npanDownMods=3\npanSpeed=1.0\n"
                "; maxLevel: how far you can zoom (does not affect zoom speed)\n"

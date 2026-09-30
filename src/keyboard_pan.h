@@ -10,7 +10,13 @@ namespace wind {
 struct KeyPan {
     static constexpr double kNudgeFrac = 0.125;      // a tap: 1/8 of the screen
     static constexpr double kTapMs = 250.0;          // released sooner than this: a tap
-    static constexpr double kScreensPerSec = 1.25;   // continuous rate at panSpeed 1.0
+    static constexpr double kScreensPerSec = 1.25;   // continuous rate at panSpeed 1.0, 6x and above
+    // Lower zoom pans slower (owner, 2026-09-30, #305): a constant screen rate crosses the whole
+    // desktop in (level - 1) / rate seconds, under one at 2x. 100% at 6x+, 75% at 2x, linear between.
+    static double ZoomRateScale(double level) {
+        const double s = 0.625 + 0.0625 * level;
+        return s > 1.0 ? 1.0 : s;
+    }
     static constexpr double kEaseInMs = 150.0, kGlideMs = 120.0, kNudgeGlideMs = 90.0;
 
     double heldMs[4] = { 0, 0, 0, 0 };
@@ -38,7 +44,7 @@ struct KeyPan {
             const double span = monW;
             if (held[i]) {
                 heldMs[i] += dtMs;
-                (horiz ? tvx : tvy) += kSign[i] * speed * kScreensPerSec * span;
+                (horiz ? tvx : tvy) += kSign[i] * speed * kScreensPerSec * ZoomRateScale(level) * span;
                 continue;
             }
             if (heldMs[i] > 0 && heldMs[i] < kTapMs) {
