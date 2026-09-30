@@ -33,6 +33,7 @@ static ComPtr<ICoreWebView2> g_webview;
 // the engine dying: the page posts them on every change and gets them back after a recovery.
 static std::string g_draftJson;
 static bool g_recovered = false;
+static bool g_onboard = false;   // launched with --onboard; cleared once onboarding is done (ini)
 static const UINT WM_APP_WV_FAILED = WM_APP + 0x31;
 static void CreateWebView(HWND hwnd);
 static HWND g_hwnd = nullptr;
@@ -490,12 +491,24 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     }
     if (m == WM_APP_WV_FAILED) {
         static wind::WvRecoverBudget budget;
+        static bool gaveUp = false;
         const int kind = (int)w;
+        // Onboarding finishing is an in-page switch, so the URL still says ?mode=onboard: a recovery
+        // would otherwise re-run the guided setup, whose X quits Wind (review 2026-09-30).
+        const bool wasOnboard = g_onboard;
+        if (g_onboard) {
+            auto v = wind::ReadIniValues(ReadFileUtf8(IniPath()));
+            auto it = v.find("onboarded");
+            if (it != v.end() && it->second == "1") g_onboard = false;
+        }
         switch (wind::DecideWvRecovery(kind, budget, GetTickCount64())) {
         case wind::WvRecovery::Reload:
             wind::Log(wind::LogLevel::Warn, "config", "recovery: page process failed (kind=%d), reloading", kind);
             g_recovered = true;
-            if (g_webview) g_webview->Reload();
+            if (g_webview) {
+                if (wasOnboard && !g_onboard) g_webview->Navigate(L"https://wind.config/index.html");
+                else g_webview->Reload();
+            }
             break;
         case wind::WvRecovery::Recreate:
             wind::Log(wind::LogLevel::Warn, "config", "recovery: WebView2 engine exited, recreating it");
@@ -505,6 +518,12 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             CreateWebView(h);
             break;
         case wind::WvRecovery::GiveUp:
+            // The page is gone for good: the unsaved-changes guard would post its question to a dead
+            // page and the window could never close (review 2026-09-30). One message, not one per
+            // queued failure event.
+            g_forceClose = true; g_dirty = false;
+            if (gaveUp) break;
+            gaveUp = true;
             wind::Log(wind::LogLevel::Error, "config", "recovery: WebView2 keeps failing (kind=%d); giving up", kind);
             MessageBoxW(h, L"Wind Settings keeps crashing (its web engine exits on start).\n\n"
                            L"Close it and open Settings again. If it keeps happening, an overlay tool "
@@ -558,7 +577,6 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
 }
 // Creates the WebView2 environment + controller and loads the UI. Called once at start and again
 // by the crash recovery when the engine has exited (WM_APP_WV_FAILED).
-static bool g_onboard = false;
 static void CreateWebView(HWND hwnd) {
     // WebView2's user-data folder MUST be writable. The default sits next to the exe
     // (<exeDir>\WindConfig.exe.WebView2), which is fine in dev but read-only when the exe is
@@ -595,8 +613,16 @@ static void CreateWebView(HWND hwnd) {
             }
             env->CreateCoreWebView2Controller(hwnd,
                 Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
-                [hwnd, uiDir, onboard](HRESULT, ICoreWebView2Controller* controller) -> HRESULT {
-                    if (!controller) return S_OK;
+                [hwnd, uiDir, onboard](HRESULT chr, ICoreWebView2Controller* controller) -> HRESULT {
+                    if (FAILED(chr) || !controller) {
+                        // Silent before (review 2026-09-30): log it and go through the same
+                        // budgeted recreate as an engine crash, so a transient failure heals and a
+                        // persistent one ends in the give-up message instead of a blank window.
+                        wind::Log(wind::LogLevel::Error, "config", "WebView2 controller creation failed hr=0x%08lX",
+                                  (unsigned long)chr);
+                        PostMessageW(hwnd, WM_APP_WV_FAILED, 0, 0);
+                        return S_OK;
+                    }
                     g_controller = controller;
                     g_controller->get_CoreWebView2(&g_webview);
                     { ComPtr<ICoreWebView2Settings> s0;
