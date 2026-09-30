@@ -1,5 +1,6 @@
 #include "magnify_model.h"
 #include "logging.h"
+#include "pointer_binds.h"   // kWindInjectTag (#285)
 #include <windows.h>
 #include <magnification.h>
 #include <shellapi.h>
@@ -66,6 +67,8 @@ void InjectZoomNotch(bool zoomIn) {
     in[1].type = INPUT_KEYBOARD; in[1].ki.wVk = VK_MENU;
     in[2].type = INPUT_MOUSE;    in[2].mi.dwFlags = MOUSEEVENTF_WHEEL;
     in[2].mi.mouseData = (DWORD)(zoomIn ? WHEEL_DELTA : -WHEEL_DELTA);
+    for (auto& i : in) { if (i.type == INPUT_MOUSE) i.mi.dwExtraInfo = (ULONG_PTR)wind::kWindInjectTag;
+                         else i.ki.dwExtraInfo = (ULONG_PTR)wind::kWindInjectTag; }   // never a wheel bind (#285)
     in[3].type = INPUT_KEYBOARD; in[3].ki.wVk = VK_MENU;    in[3].ki.dwFlags = KEYEVENTF_KEYUP;
     in[4].type = INPUT_KEYBOARD; in[4].ki.wVk = VK_CONTROL; in[4].ki.dwFlags = KEYEVENTF_KEYUP;
     SendInput(5, in, sizeof(INPUT));

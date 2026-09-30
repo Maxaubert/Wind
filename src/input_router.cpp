@@ -55,7 +55,7 @@ static int HeldModsNow() {
 // in between (Start menu / menu-bar activation, see NeedsMaskKey). Injected: our hooks pass it.
 static void InjectMaskKey() {
     INPUT in[2]{};
-    in[0].type = INPUT_KEYBOARD; in[0].ki.wVk = (WORD)kMaskVk;
+    in[0].type = INPUT_KEYBOARD; in[0].ki.wVk = (WORD)kMaskVk; in[0].ki.dwExtraInfo = (ULONG_PTR)kWindInjectTag;
     in[1] = in[0]; in[1].ki.dwFlags = KEYEVENTF_KEYUP;
     SendInput(2, in, sizeof(INPUT));
 }
@@ -262,9 +262,9 @@ static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
         // and signal the tick, which fires a clean absolute click at the crosshair. Swallow the matching
         // real UP too. Our own injected click carries LLMHF_INJECTED, so it skips this and passes through.
         // Click zoom binds (#285): left/right/middle with modifiers. Checked before Inspect's click
-        // routing, so a bound Ctrl+Alt+click zooms even in Inspect. Injected clicks (Inspect's own,
-        // other tools') are never binds.
-        if (!(mi->flags & LLMHF_INJECTED)) {
+        // routing, so a bound Ctrl+Alt+click zooms even in Inspect. Wind's OWN injections (tagged:
+        // Inspect's clicks, the native-Magnifier notches) are never binds; other injectors are.
+        if ((unsigned long long)mi->dwExtraInfo != kWindInjectTag) {
             int cb = 0; bool cbDown = false, cbUp = false;
             switch (wParam) {
                 case WM_LBUTTONDOWN: cb = 3; cbDown = true; break;

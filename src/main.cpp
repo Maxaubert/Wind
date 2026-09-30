@@ -40,6 +40,7 @@
 #include "tray_host.h"     // WindTray.exe owns the icon and menu (#291)
 #include "gain_learner.h"  // learned pointer ballistics: locked pan at TRUE desktop speed
 #include "tray_ipc.h"      // the status block shared with WindTray.exe
+#include "pointer_binds.h"  // kWindInjectTag: tag our own injected clicks (#285)
 
 // txPace=2 composite signal (see config.h). One thread blocks in DwmFlush forever and pulses an
 // auto-reset event per real composite; the pacing loop waits on the event WITH A TIMEOUT, so a
@@ -1722,7 +1723,8 @@ static void RunTick(TickState& t) {
                 auto fireClicks = [&](DWORD downF, DWORD upF, int count) {
                     for (int k = 0; k < count; ++k) {
                         INPUT clk[3] = {};
-                        for (int i = 0; i < 3; ++i) { clk[i].type = INPUT_MOUSE; clk[i].mi.dx = ax; clk[i].mi.dy = ay; }
+                        for (int i = 0; i < 3; ++i) { clk[i].type = INPUT_MOUSE; clk[i].mi.dx = ax; clk[i].mi.dy = ay;
+                                                      clk[i].mi.dwExtraInfo = (ULONG_PTR)wind::kWindInjectTag; }   // never a click bind (#285)
                         clk[0].mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
                         clk[1].mi.dwFlags = downF | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
                         clk[2].mi.dwFlags = upF   | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;

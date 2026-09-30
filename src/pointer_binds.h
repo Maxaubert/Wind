@@ -33,6 +33,11 @@ inline int PickButtonSlot(const ButtonSlot* slots, int n, int button, int held) 
 inline bool NeedsMaskKey(int held) { return (held & (kModAlt | kModWin)) != 0; }
 inline constexpr int kMaskVk = 0xE8;   // VK 0xE8: unassigned
 
+// dwExtraInfo on every event Wind itself injects (Inspect's clicks, the native-Magnifier wheel
+// notches, the mask keystroke). The bind matcher skips exactly these, so Wind never swallows its own
+// input, while other injectors (AutoHotkey remaps, accessibility tools) count like a real device.
+inline constexpr unsigned long long kWindInjectTag = 0x57494E44ull;   // "WIND"
+
 // Wheel deltas arrive in units of 120 per notch, or in smaller pieces from high-resolution wheels
 // and touchpads. Whole steps come out; the remainder carries (sign-correct in both directions).
 struct WheelAccum {
