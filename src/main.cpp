@@ -1060,7 +1060,8 @@ static void RunTick(TickState& t) {
     constexpr unsigned long long kKbHookDeadMs = 250;
     if (g_input.kbHookActive() && g_input.swallowEnabled() && !g_input.ignoreInjectedKeys()) {
         const int watched[] = { t.cfg.zoomInVk, t.cfg.zoomInVk2, t.cfg.zoomOutVk, t.cfg.zoomOutVk2,
-                                t.cfg.recenterVk, t.cfg.cursorLockVk };
+                                t.cfg.recenterVk, t.cfg.cursorLockVk,
+                                t.cfg.panLeftVk, t.cfg.panRightVk, t.cfg.panUpVk, t.cfg.panDownVk };
         bool divergent = false;
         for (int vk : watched) {
             if (vk == 0 || !g_input.isBoundKey(vk)) continue;
@@ -1671,8 +1672,10 @@ static void RunTick(TickState& t) {
         if (panEnabled) {
             const bool kb = g_input.kbHookActive();
             auto panHeld = [&](int vk, int mods) { return vk && (kb ? g_input.keySwallowed(vk) : comboHeld(vk, mods)); };
-            const bool held[4] = { panHeld(t.cfg.panLeftVk, t.cfg.panLeftMods), panHeld(t.cfg.panRightVk, t.cfg.panRightMods),
-                                   panHeld(t.cfg.panUpVk, t.cfg.panUpMods),     panHeld(t.cfg.panDownVk, t.cfg.panDownMods) };
+            bool held[4] = { panHeld(t.cfg.panLeftVk, t.cfg.panLeftMods), panHeld(t.cfg.panRightVk, t.cfg.panRightMods),
+                             panHeld(t.cfg.panUpVk, t.cfg.panUpMods),     panHeld(t.cfg.panDownVk, t.cfg.panDownMods) };
+            // A tap that went down and up between two samples counts as held for this step.
+            for (int i = 0; i < 4; ++i) if (g_input.drainPanPresses(i) > 0) held[i] = true;
             t.keyPan.step(held, (dt > 0.05 ? 0.05 : dt) * 1000.0, lvl, t.mon.w, t.mon.h, t.cfg.panSpeed, panDx, panDy);
         } else {
             t.keyPan.reset();
@@ -1705,7 +1708,9 @@ static void RunTick(TickState& t) {
             if (owner == wind::ViewOwner::Keys) {
                 // Keyboard panning (#287): the view moves by the KeyPan delta, the pointer stays put
                 // until the mouse moves (then it comes to the view, the warpPointer branch below).
-                if (was == wind::ViewOwner::Mouse) { t.viewCx = r.centerX; t.viewCy = r.centerY; }
+                // From a centred view seed at the pointer's view; mouse edge mode's detached centre
+                // is already the real view (seeding from the mapper there jumped the view).
+                if (was == wind::ViewOwner::Mouse && !t.viewDetached) { t.viewCx = r.centerX; t.viewCy = r.centerY; }
                 t.viewVx = 0; t.viewVy = 0;
                 const double hw = t.mon.w / (2.0 * lvl), hh = t.mon.h / (2.0 * lvl);
                 double nx = t.viewCx + panDx, ny = t.viewCy + panDy;
@@ -1720,7 +1725,7 @@ static void RunTick(TickState& t) {
                 t.lastSetVirtual = cur;
                 t.viewDetached = true;
             } else if (owner != wind::ViewOwner::Mouse) {
-                if (was == wind::ViewOwner::Mouse) { t.viewCx = r.centerX; t.viewCy = r.centerY; }   // glide from where we are
+                if (was == wind::ViewOwner::Mouse && !t.viewDetached) { t.viewCx = r.centerX; t.viewCy = r.centerY; }   // glide from where we are
                 const double ptrX = cur.x - t.mon.x, ptrY = cur.y - t.mon.y;
                 double tx = t.viewCx, ty = t.viewCy;
                 // The LATCHED target: only caret/focus events that passed the gates move the view.
