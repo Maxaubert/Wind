@@ -233,7 +233,7 @@ restartWind), `dirty`, `openIni`, `exportDiagnostics`, `pickExe`, `mpoState`, `s
   refused (the owner types on a Norwegian layout). Button binds: 1/2 side, 3/4/5 left/right/middle
   (these need modifiers, never Ctrl or Shift alone, like the wheel); the most specific matching slot
   wins. SWALLOWING WITH ALT OR WIN HELD INJECTS ONE MASK KEY (VK 0xE8): otherwise Windows sees the
-  modifier tapped alone (Start opens, the app's menu bar activates) - measured both ways. Wind's own
+  modifier tapped alone (Start opens, the app's menu bar activates; Alt measured both ways, Win fixed-case only). Wind's own
   injections carry `kWindInjectTag` in dwExtraInfo and are skipped by the bind matcher; other
   injectors count as real input. The quick-zoom modifier only turns binds that LACK it into taps. Down/up swallows are balanced
   (only swallow an UP whose DOWN we swallowed) and released on teardown so a key is never stranded.
