@@ -7,7 +7,7 @@ TEST_CASE("a dead browser engine is recreated, a dead page reloaded, the rest le
     WvRecoverBudget b;
     CHECK(DecideWvRecovery(0, b, 1000) == WvRecovery::Recreate);
     CHECK(DecideWvRecovery(1, b, 2000) == WvRecovery::Reload);
-    CHECK(DecideWvRecovery(2, b, 3000) == WvRecovery::Reload);
+    CHECK(DecideWvRecovery(2, b, 3000) == WvRecovery::None);    // merely slow: left alone, not counted
     WvRecoverBudget c;
     CHECK(DecideWvRecovery(3, c, 1000) == WvRecovery::None);    // GPU process: WebView2 restarts it
     CHECK(DecideWvRecovery(5, c, 1000) == WvRecovery::None);

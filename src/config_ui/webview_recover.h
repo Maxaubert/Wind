@@ -6,7 +6,9 @@
 // The kinds are COREWEBVIEW2_PROCESS_FAILED_KIND values, kept as ints so this header needs no SDK:
 //   0 BROWSER_PROCESS_EXITED   the whole engine is gone: the controller is dead, recreate it
 //   1 RENDER_PROCESS_EXITED    the page's process died: reload
-//   2 RENDER_PROCESS_UNRESPONSIVE
+//   2 RENDER_PROCESS_UNRESPONSIVE: NOT recovered. A slow page (heavy system load) is not a dead
+//     one, and reloading it would throw away its state (review 2026-09-30); WebView2 keeps
+//     raising the event while it stays hung, and a page that really dies raises kind 1.
 //   others (GPU, utility, frame renderer): WebView2 restarts those itself.
 namespace wind {
 
@@ -21,7 +23,7 @@ struct WvRecoverBudget { unsigned long long at[kWvMaxRecoveries] = {}; int n = 0
 inline WvRecovery DecideWvRecovery(int kind, WvRecoverBudget& b, unsigned long long nowMs) {
     WvRecovery r = WvRecovery::None;
     if (kind == 0) r = WvRecovery::Recreate;
-    else if (kind == 1 || kind == 2) r = WvRecovery::Reload;
+    else if (kind == 1) r = WvRecovery::Reload;
     if (r == WvRecovery::None) return r;
     // Forget recoveries older than the window.
     int keep = 0;
