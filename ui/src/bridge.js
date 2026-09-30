@@ -28,6 +28,9 @@ export function windowControl(action, force = false) {
 // Mirror the staged/unsaved state to the host so its WM_CLOSE can put up the guard for Alt+F4 and
 // the system menu too, not just our own title-bar button.
 export function setDirty(v) { post({ type: 'dirty', value: v ? '1' : '0' }); }
+// The staged (unapplied) edits, mirrored to the host on every change. If WebView2's engine dies,
+// the host recreates it and hands them back ('restoreDraft'), so a crash costs no edits.
+export function postDraft(changed) { post({ type: 'draft', json: JSON.stringify(changed || {}) }); }
 // MPO (Multi-Plane Overlay) lives in HKLM, so reading is free but writing needs elevation.
 // getMpoState is a plain read; setMpoDisabled raises a UAC prompt in the host and resolves with the
 // RE-READ state, so a cancelled prompt reverts the row rather than showing a change that never was.

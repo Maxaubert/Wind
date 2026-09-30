@@ -1,3 +1,4 @@
+#include "webview_recover.h"
 #include <windows.h>
 #include <windowsx.h>
 #include <shellapi.h>
@@ -28,6 +29,13 @@
 using namespace Microsoft::WRL;
 static ComPtr<ICoreWebView2Controller> g_controller;
 static ComPtr<ICoreWebView2> g_webview;
+// Crash recovery (see webview_recover.h). The page's unsaved edits live here too, so they survive
+// the engine dying: the page posts them on every change and gets them back after a recovery.
+static std::string g_draftJson;
+static bool g_recovered = false;
+static bool g_onboard = false;   // launched with --onboard; cleared once onboarding is done (ini)
+static const UINT WM_APP_WV_FAILED = WM_APP + 0x31;
+static void CreateWebView(HWND hwnd);
 static HWND g_hwnd = nullptr;
 // Unsaved-changes guard (issue #164). The UI owns "dirty" (it knows what is staged vs saved), so it
 // mirrors the flag here and WM_CLOSE asks the UI to confirm instead of closing. Kept in the host
@@ -229,6 +237,17 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
             out += "\"" + JsonEscape(kv.first) + "\":\"" + JsonEscape(kv.second) + "\""; }
         out += "}}";
         wv->PostWebMessageAsJson(Widen(out).c_str());
+        // After a crash recovery, hand the page back the edits it had not applied yet. It asks for
+        // the config first on every load, so this arrives right behind it.
+        if (g_recovered && wind::LooksLikeJsonObject(g_draftJson.c_str(), g_draftJson.size())) {
+            wv->PostWebMessageAsJson(Widen("{\"type\":\"restoreDraft\",\"values\":" + g_draftJson + "}").c_str());
+            wind::Log(wind::LogLevel::Info, "config", "recovery: unsaved edits handed back to the page");
+        }
+        g_recovered = false;
+    } else if (type == "draft") {
+        // While a recovery is pending the draft held here is the one to hand back; nothing the new
+        // page reports before its config arrives may replace it.
+        if (!g_recovered) g_draftJson = JsonField(j, "json");
     } else if (type == "setConfig") {
         std::string key = JsonField(j, "key"), value = JsonField(j, "value");
         if (!key.empty()) {
@@ -470,6 +489,50 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (pt.y < titleH && pt.x < rc.right - MulDiv(120, dpi, 96)) return HTCAPTION;
         return HTCLIENT;
     }
+    if (m == WM_APP_WV_FAILED) {
+        static wind::WvRecoverBudget budget;
+        static bool gaveUp = false;
+        const int kind = (int)w;
+        // Onboarding finishing is an in-page switch, so the URL still says ?mode=onboard: a recovery
+        // would otherwise re-run the guided setup, whose X quits Wind (review 2026-09-30).
+        const bool wasOnboard = g_onboard;
+        if (g_onboard) {
+            auto v = wind::ReadIniValues(ReadFileUtf8(IniPath()));
+            auto it = v.find("onboarded");
+            if (it != v.end() && it->second == "1") g_onboard = false;
+        }
+        switch (wind::DecideWvRecovery(kind, budget, GetTickCount64())) {
+        case wind::WvRecovery::Reload:
+            wind::Log(wind::LogLevel::Warn, "config", "recovery: page process failed (kind=%d), reloading", kind);
+            g_recovered = true;
+            if (g_webview) {
+                if (wasOnboard && !g_onboard) g_webview->Navigate(L"https://wind.config/index.html");
+                else g_webview->Reload();
+            }
+            break;
+        case wind::WvRecovery::Recreate:
+            wind::Log(wind::LogLevel::Warn, "config", "recovery: WebView2 engine exited, recreating it");
+            g_recovered = true;
+            if (g_controller) g_controller->Close();
+            g_webview.Reset(); g_controller.Reset();
+            CreateWebView(h);
+            break;
+        case wind::WvRecovery::GiveUp:
+            // The page is gone for good: the unsaved-changes guard would post its question to a dead
+            // page and the window could never close (review 2026-09-30). One message, not one per
+            // queued failure event.
+            g_forceClose = true; g_dirty = false;
+            if (gaveUp) break;
+            gaveUp = true;
+            wind::Log(wind::LogLevel::Error, "config", "recovery: WebView2 keeps failing (kind=%d); giving up", kind);
+            MessageBoxW(h, L"Wind Settings keeps crashing (its web engine exits on start).\n\n"
+                           L"Close it and open Settings again. If it keeps happening, an overlay tool "
+                           L"such as RivaTuner may be interfering.", L"Wind", MB_ICONWARNING | MB_OK);
+            break;
+        default: break;
+        }
+        return 0;
+    }
     if (m == WM_SIZE && g_controller) { RECT r; GetClientRect(h, &r); g_controller->put_Bounds(r); return 0; }
     if (m == WM_GETMINMAXINFO) {   // enforce a minimum window size (DPI-scaled)
         UINT dpi = GetDpiForWindow(h); if (!dpi) dpi = 96;
@@ -512,6 +575,94 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (m == WM_DESTROY) { KillTimer(h, kWindWatchTimerId); PostQuitMessage(0); return 0; }
     return DefWindowProcW(h, m, w, l);
 }
+// Creates the WebView2 environment + controller and loads the UI. Called once at start and again
+// by the crash recovery when the engine has exited (WM_APP_WV_FAILED).
+static void CreateWebView(HWND hwnd) {
+    // WebView2's user-data folder MUST be writable. The default sits next to the exe
+    // (<exeDir>\WindConfig.exe.WebView2), which is fine in dev but read-only when the exe is
+    // installed under Program Files - causing the environment to fail and the window to render
+    // as an empty shell. Force it to %LOCALAPPDATA%\Wind\WebView2 so it always works.
+    std::wstring userData;
+    {
+        wchar_t buf[MAX_PATH];
+        DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
+        if (n == 0 || n >= MAX_PATH) { GetTempPathW(MAX_PATH, buf); }
+        userData = std::wstring(buf) + L"\\Wind\\WebView2";
+        CreateDirectoryW((std::wstring(buf) + L"\\Wind").c_str(), nullptr);
+        CreateDirectoryW(userData.c_str(), nullptr);
+    }
+    const std::wstring uiDir = ExeDir() + L"\\ui\\dist";
+    const bool onboard = g_onboard;
+    CreateCoreWebView2EnvironmentWithOptions(nullptr, userData.c_str(), nullptr,
+        Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
+        [hwnd, uiDir, onboard](HRESULT hr, ICoreWebView2Environment* env) -> HRESULT {
+            if (FAILED(hr) || !env) {
+                // Env creation can fail if the Edge WebView2 Runtime is missing/corrupt or the user-data
+                // folder isn't writable; env is then null. Dereferencing it crashed the host - guard it,
+                // tell the user, and close instead of leaving a dead empty shell. (The inner controller
+                // handler below already has the symmetric `if (!controller)` guard.)
+                wind::Log(wind::LogLevel::Error, "config",
+                          "WebView2 environment creation failed hr=0x%08lX (is the Edge WebView2 Runtime installed?)",
+                          (unsigned long)hr);
+                MessageBoxW(hwnd,
+                    L"Wind Settings could not start WebView2.\n\n"
+                    L"Please install the Microsoft Edge WebView2 Runtime, then reopen Settings.",
+                    L"Wind", MB_ICONERROR | MB_OK);
+                PostQuitMessage(0);
+                return hr;
+            }
+            env->CreateCoreWebView2Controller(hwnd,
+                Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
+                [hwnd, uiDir, onboard](HRESULT chr, ICoreWebView2Controller* controller) -> HRESULT {
+                    if (FAILED(chr) || !controller) {
+                        // Silent before (review 2026-09-30): log it and go through the same
+                        // budgeted recreate as an engine crash, so a transient failure heals and a
+                        // persistent one ends in the give-up message instead of a blank window.
+                        wind::Log(wind::LogLevel::Error, "config", "WebView2 controller creation failed hr=0x%08lX",
+                                  (unsigned long)chr);
+                        PostMessageW(hwnd, WM_APP_WV_FAILED, 0, 0);
+                        return S_OK;
+                    }
+                    g_controller = controller;
+                    g_controller->get_CoreWebView2(&g_webview);
+                    { ComPtr<ICoreWebView2Settings> s0;
+                      if (SUCCEEDED(g_webview->get_Settings(&s0))) {
+                          ComPtr<ICoreWebView2Settings9> s9;
+                          if (SUCCEEDED(s0.As(&s9)) && s9)
+                              s9->put_IsNonClientRegionSupportEnabled(TRUE);
+                      } }
+                    RECT r; GetClientRect(hwnd, &r); g_controller->put_Bounds(r);
+                    { ComPtr<ICoreWebView2_3> wv3;
+                      if (SUCCEEDED(g_webview.As(&wv3)))
+                          wv3->SetVirtualHostNameToFolderMapping(L"wind.config", uiDir.c_str(),
+                              COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW); }
+                    EventRegistrationToken tok;
+                    // A dead engine or page is recovered on the UI thread (WndProc), never from
+                    // inside this callback: the recreate path releases the objects raising it.
+                    g_webview->add_ProcessFailed(
+                        Callback<ICoreWebView2ProcessFailedEventHandler>(
+                        [](ICoreWebView2*, ICoreWebView2ProcessFailedEventArgs* args) -> HRESULT {
+                            COREWEBVIEW2_PROCESS_FAILED_KIND k = COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED;
+                            if (args) args->get_ProcessFailedKind(&k);
+                            PostMessageW(g_hwnd, WM_APP_WV_FAILED, (WPARAM)k, 0);
+                            return S_OK;
+                        }).Get(), &tok);
+                    g_webview->add_WebMessageReceived(
+                        Callback<ICoreWebView2WebMessageReceivedEventHandler>(
+                        [](ICoreWebView2* wv, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
+                            LPWSTR json = nullptr;
+                            if (SUCCEEDED(args->get_WebMessageAsJson(&json)) && json) { HandleWebMessage(wv, json); CoTaskMemFree(json); }
+                            return S_OK;
+                        }).Get(), &tok);
+                    g_webview->Navigate(onboard
+                        ? L"https://wind.config/index.html?mode=onboard"
+                        : L"https://wind.config/index.html");
+                    return S_OK;
+                }).Get());
+            return S_OK;
+        }).Get());
+}
+
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
     // Single-instance: opening Settings from the tray (or any second launch) focuses the existing
     // window instead of stacking another WindConfig.exe with its own WebView2.
@@ -570,70 +721,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
     SetWindowPos(hwnd, nullptr, wx, wy, ww, wh, SWP_NOZORDER);
     ShowWindow(hwnd, SW_SHOW);
     g_hwnd = hwnd;
-    std::wstring uiDir = ExeDir() + L"\\ui\\dist";
-    // WebView2's user-data folder MUST be writable. The default sits next to the exe
-    // (<exeDir>\WindConfig.exe.WebView2), which is fine in dev but read-only when the exe is
-    // installed under Program Files - causing the environment to fail and the window to render
-    // as an empty shell. Force it to %LOCALAPPDATA%\Wind\WebView2 so it always works.
-    std::wstring userData;
-    {
-        wchar_t buf[MAX_PATH];
-        DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
-        if (n == 0 || n >= MAX_PATH) { GetTempPathW(MAX_PATH, buf); }
-        userData = std::wstring(buf) + L"\\Wind\\WebView2";
-        CreateDirectoryW((std::wstring(buf) + L"\\Wind").c_str(), nullptr);
-        CreateDirectoryW(userData.c_str(), nullptr);
-    }
-    CreateCoreWebView2EnvironmentWithOptions(nullptr, userData.c_str(), nullptr,
-        Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
-        [hwnd, uiDir, onboard](HRESULT hr, ICoreWebView2Environment* env) -> HRESULT {
-            if (FAILED(hr) || !env) {
-                // Env creation can fail if the Edge WebView2 Runtime is missing/corrupt or the user-data
-                // folder isn't writable; env is then null. Dereferencing it crashed the host - guard it,
-                // tell the user, and close instead of leaving a dead empty shell. (The inner controller
-                // handler below already has the symmetric `if (!controller)` guard.)
-                wind::Log(wind::LogLevel::Error, "config",
-                          "WebView2 environment creation failed hr=0x%08lX (is the Edge WebView2 Runtime installed?)",
-                          (unsigned long)hr);
-                MessageBoxW(hwnd,
-                    L"Wind Settings could not start WebView2.\n\n"
-                    L"Please install the Microsoft Edge WebView2 Runtime, then reopen Settings.",
-                    L"Wind", MB_ICONERROR | MB_OK);
-                PostQuitMessage(0);
-                return hr;
-            }
-            env->CreateCoreWebView2Controller(hwnd,
-                Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
-                [hwnd, uiDir, onboard](HRESULT, ICoreWebView2Controller* controller) -> HRESULT {
-                    if (!controller) return S_OK;
-                    g_controller = controller;
-                    g_controller->get_CoreWebView2(&g_webview);
-                    { ComPtr<ICoreWebView2Settings> s0;
-                      if (SUCCEEDED(g_webview->get_Settings(&s0))) {
-                          ComPtr<ICoreWebView2Settings9> s9;
-                          if (SUCCEEDED(s0.As(&s9)) && s9)
-                              s9->put_IsNonClientRegionSupportEnabled(TRUE);
-                      } }
-                    RECT r; GetClientRect(hwnd, &r); g_controller->put_Bounds(r);
-                    { ComPtr<ICoreWebView2_3> wv3;
-                      if (SUCCEEDED(g_webview.As(&wv3)))
-                          wv3->SetVirtualHostNameToFolderMapping(L"wind.config", uiDir.c_str(),
-                              COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW); }
-                    EventRegistrationToken tok;
-                    g_webview->add_WebMessageReceived(
-                        Callback<ICoreWebView2WebMessageReceivedEventHandler>(
-                        [](ICoreWebView2* wv, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
-                            LPWSTR json = nullptr;
-                            if (SUCCEEDED(args->get_WebMessageAsJson(&json)) && json) { HandleWebMessage(wv, json); CoTaskMemFree(json); }
-                            return S_OK;
-                        }).Get(), &tok);
-                    g_webview->Navigate(onboard
-                        ? L"https://wind.config/index.html?mode=onboard"
-                        : L"https://wind.config/index.html");
-                    return S_OK;
-                }).Get());
-            return S_OK;
-        }).Get());
+    g_onboard = onboard;
+    CreateWebView(hwnd);
     MSG msg; while (GetMessageW(&msg, nullptr, 0, 0)) { TranslateMessage(&msg); DispatchMessageW(&msg); }
     wind::LogShutdown();
     return 0;
