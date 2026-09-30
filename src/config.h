@@ -58,7 +58,7 @@ struct Config {
     // Speed is independent of maxLevel (a fixed doublings/sec base inside ZoomController).
     double zoomInSpeed  = 1.0;       // 0.25-4.0
     double zoomOutSpeed = 1.0;       // 0.25-4.0
-    double panSpeed     = 1.0;       // 0.25-4.0; 1.0 = 1.25 screens per second at 6x+ (60% at 2x, 24% at 1.4x)
+    double panSpeed     = 1.0;       // 0.25-4.0; 1.0 = 1.25 screens per second at 7.5x+ (60% at 2x, 24% at 1.4x)
     // Smooth zoom: 0 = linear/constant; 1 = zoom-IN soft-starts (eases up to linear). Shipped on.
     int    smoothZoom = 1;
     // Smooth ease-in depth: zoom-in starts at zoomInSpeed/smoothZoomAccel and climbs to zoomInSpeed

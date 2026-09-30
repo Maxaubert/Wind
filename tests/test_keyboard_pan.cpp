@@ -58,10 +58,11 @@ TEST_CASE("every direction pans at the same pixel rate and taps the same step (f
     Run(c, up, 7, 2.0, 1.0, cx, cy); Run(c, kNone, 1000, 2.0, 1.0, cx, cy);
     CHECK(cy == doctest::Approx(-3840.0 / 8 / 2.0).epsilon(0.01));
 }
-TEST_CASE("lower zoom pans slower on screen: 60% at 2x, 80% at 4x, 100% at 6x and up (#305)") {
+TEST_CASE("lower zoom pans slower on screen: 60% at 2x, rising to 100% at 7.5x and up (#305)") {
     CHECK(KeyPan::ZoomRateScale(2.0) == doctest::Approx(0.6));
-    CHECK(KeyPan::ZoomRateScale(4.0) == doctest::Approx(0.8));
-    CHECK(KeyPan::ZoomRateScale(6.0) == doctest::Approx(1.0));
+    CHECK(KeyPan::ZoomRateScale(4.0) == doctest::Approx(0.6 + 2.0 * 0.4 / 5.5));
+    CHECK(KeyPan::ZoomRateScale(6.0) < 1.0);
+    CHECK(KeyPan::ZoomRateScale(7.5) == doctest::Approx(1.0));
     CHECK(KeyPan::ZoomRateScale(20.0) == doctest::Approx(1.0));
     CHECK(KeyPan::ZoomRateScale(1.4) == doctest::Approx(0.24));   // below 2x: the crossing-time cap
     CHECK(KeyPan::ZoomRateScale(1.2) == doctest::Approx(0.12));
@@ -72,7 +73,7 @@ TEST_CASE("lower zoom pans slower on screen: 60% at 2x, 80% at 4x, 100% at 6x an
     KeyPan a, b; double ax = 0, ay = 0, bx = 0, by = 0;
     Run(a, right, 2000, 2.0, 1.0, ax, ay);
     Run(b, right, 2000, 8.0, 1.0, bx, by);
-    CHECK((ax * 2.0) == doctest::Approx(0.6 * bx * 8.0).epsilon(0.01));    // compared in screen px
+    CHECK((ax * 2.0) == doctest::Approx(0.6 * bx * 8.0).epsilon(0.01));    // compared in screen px (8x = full)
 }
 TEST_CASE("speed scales the pan linearly") {
     const bool down[4] = { false, false, false, true };
