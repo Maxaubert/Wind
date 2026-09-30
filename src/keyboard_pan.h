@@ -10,7 +10,19 @@ namespace wind {
 struct KeyPan {
     static constexpr double kNudgeFrac = 0.125;      // a tap: 1/8 of the screen
     static constexpr double kTapMs = 250.0;          // released sooner than this: a tap
-    static constexpr double kScreensPerSec = 1.25;   // continuous rate at panSpeed 1.0
+    static constexpr double kScreensPerSec = 1.25;   // continuous rate at panSpeed 1.0, 7.5x and above
+    // Lower zoom pans slower (owner, 2026-09-30, #305): a constant screen rate crosses the whole
+    // desktop in (level - 1) / rate seconds, under one at 2x. The scale is ONE smooth curve with no
+    // corner anywhere: a power law x = (level / 7)^0.6 at low zoom that eases into full speed through
+    // a soft minimum, (x^-8 + 1)^(-1/8). It tracks x below ~5x (47% at 2x), is 93% at 7.5x, 98% at 10x
+    // and approaches 100% from there. History: piecewise-linear versions "did not feel proportional",
+    // and a clamped power law still had one bend at 7.5x ("make it a perfect curve").
+    static constexpr double kKneeLevel = 7.0, kRateExponent = 0.6, kKneeSharpness = 8.0;
+    static double ZoomRateScale(double level) {
+        if (level < 1.0) level = 1.0;
+        const double x = std::pow(level / kKneeLevel, kRateExponent);
+        return std::pow(std::pow(x, -kKneeSharpness) + 1.0, -1.0 / kKneeSharpness);
+    }
     static constexpr double kEaseInMs = 150.0, kGlideMs = 120.0, kNudgeGlideMs = 90.0;
 
     double heldMs[4] = { 0, 0, 0, 0 };
@@ -38,7 +50,7 @@ struct KeyPan {
             const double span = monW;
             if (held[i]) {
                 heldMs[i] += dtMs;
-                (horiz ? tvx : tvy) += kSign[i] * speed * kScreensPerSec * span;
+                (horiz ? tvx : tvy) += kSign[i] * speed * kScreensPerSec * ZoomRateScale(level) * span;
                 continue;
             }
             if (heldMs[i] > 0 && heldMs[i] < kTapMs) {
