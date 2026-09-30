@@ -100,7 +100,7 @@ key 61 8 ok
 
 # wheel
 wheel 0 needsmod
-wheel 1 ctrlalone
+wheel 1 ok
 wheel 4 shiftalone
 wheel 2 ok
 wheel 8 ok

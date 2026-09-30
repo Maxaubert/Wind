@@ -18,7 +18,7 @@ enum class BindVerdict {
     SystemReserved,    // Alt+F4, Alt+Tab, Ctrl+Esc, Ctrl+Shift+Esc, Ctrl+Alt+Delete, ...
     WindowsReserved,   // Win + letter/digit/Tab/Space/arrow/...: taken by the shell
     NeedsModifier,     // wheel or left/right/middle click with no modifier
-    CtrlAlone,         // wheel/click with Ctrl only: browser zoom / multi-select
+    CtrlAlone,         // click with Ctrl only: multi-select, open in new tab
     ShiftAlone,        // wheel/click with Shift only: horizontal scroll / range select
 };
 
@@ -68,10 +68,11 @@ inline BindVerdict CheckKeyBind(int vk, int mods) {
 
 // The wheel, and left/right/middle click, as zoom binds: a modifier is mandatory, and neither Ctrl
 // alone nor Shift alone (browser zoom / horizontal scroll; multi-select / range select).
+// Ctrl+wheel is allowed (owner decision 2026-09-30, #295): Wind swallows the notch, so it zooms
+// the screen instead of the browser or app. Shift+wheel is horizontal scroll, which people use.
 inline BindVerdict CheckWheelBind(int mods) {
     mods &= (kModCtrl | kModAlt | kModShift | kModWin);
     if (mods == 0) return BindVerdict::NeedsModifier;
-    if (mods == kModCtrl) return BindVerdict::CtrlAlone;
     if (mods == kModShift) return BindVerdict::ShiftAlone;
     return BindVerdict::Ok;
 }
@@ -80,7 +81,11 @@ inline BindVerdict CheckWheelBind(int mods) {
 inline BindVerdict CheckClickBind(int button, int mods) {
     if (button == 0 || button == 1 || button == 2) return BindVerdict::Ok;
     if (button < 0 || button > 5) return BindVerdict::NeverBindable;
-    return CheckWheelBind(mods);
+    mods &= (kModCtrl | kModAlt | kModShift | kModWin);
+    if (mods == 0) return BindVerdict::NeedsModifier;
+    if (mods == kModCtrl) return BindVerdict::CtrlAlone;
+    if (mods == kModShift) return BindVerdict::ShiftAlone;
+    return BindVerdict::Ok;
 }
 
 inline const char* BindVerdictName(BindVerdict v) {

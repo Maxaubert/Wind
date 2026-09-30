@@ -30,14 +30,17 @@ export function checkKeyBind(vk, mods) {
 export function checkWheelBind(mods) {
   mods &= 15;
   if (mods === 0) return 'needsmod';
-  if (mods === MOD.ctrl) return 'ctrlalone';
-  if (mods === MOD.shift) return 'shiftalone';
+  if (mods === MOD.shift) return 'shiftalone';   // Ctrl+wheel is allowed (#295): Wind eats the notch
   return 'ok';
 }
 export function checkClickBind(button, mods) {
   if (button === 0 || button === 1 || button === 2) return 'ok';
   if (button < 0 || button > 5) return 'never';
-  return checkWheelBind(mods);
+  mods &= 15;
+  if (mods === 0) return 'needsmod';
+  if (mods === MOD.ctrl) return 'ctrlalone';
+  if (mods === MOD.shift) return 'shiftalone';
+  return 'ok';
 }
 
 // Stored binds the rules refuse (#285). The core already reads each as unbound, so an old ini whose
@@ -66,7 +69,7 @@ export function droppedBinds(cfg) {
 }
 
 // Why a press was refused, in plain words (shown under the keycap and spoken). `what` is the
-// readable combo ("Ctrl+Alt+2", "Ctrl+wheel", "A").
+// readable combo ("Ctrl+Alt+2", "Ctrl+Left click", "A").
 export function refusalText(verdict, what) {
   switch (verdict) {
     case 'never':      return `${what} can't be a keybind.`;

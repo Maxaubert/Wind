@@ -19,7 +19,7 @@ export const sections = [
       buttonKey2:'zoomOutButton2', vkKey2:'zoomOutVk2', modsKey2:'zoomOutMods2', buttonModsKey2:'zoomOutButton2Mods' },
     // Scroll-wheel zoom (#285): the modifiers held while turning the wheel; up = in, down = out.
     { key:'__zoomWheel', type:'keybind', label:'Zoom with the scroll wheel',
-      desc:'Hold these keys and turn the wheel: up zooms in, down zooms out, at your zoom speeds. Needs a modifier, not Ctrl or Shift alone.',
+      desc:'Hold these keys and turn the wheel: up zooms in, down zooms out, at your zoom speeds. Needs a modifier, not Shift alone. Ctrl zooms the screen instead of the page.',
       wheel:true, modsKey:'zoomWheelMods' },
     // Keyboard-hook suspension (issue #156): trades key-interception for smooth panning, per app.
     { key:'noSwallowApps', type:'applist', label:'Pass zoom keys to these apps',

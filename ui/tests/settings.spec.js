@@ -583,19 +583,21 @@ test('a click with modifiers binds; a plain, Ctrl or Shift click is refused (#28
   expect(await lastSet(page, 'zoomInButtonMods')).toBe('3');
   await expect(cap).toHaveText('Ctrl+Alt+Left click');
 });
-test('the wheel row binds Alt+wheel and refuses Ctrl or Shift alone (#285)', async ({ page }) => {
+test('the wheel row binds Ctrl+wheel and Alt+wheel and refuses Shift alone (#285, #295)', async ({ page }) => {
   await page.goto('/');
   const cap = page.getByText('Zoom with the scroll wheel', { exact: true }).locator('xpath=../..').getByRole('button').first();
   await cap.click();
   const box = await cap.boundingBox();
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.keyboard.down('Control'); await page.mouse.wheel(0, -100); await page.keyboard.up('Control');
-  await expect(page.locator('.refusal', { hasText: /used by apps \(zoom, select\)/ })).toBeVisible();
   await page.keyboard.down('Shift'); await page.mouse.wheel(0, -100); await page.keyboard.up('Shift');
   await expect(page.locator('.refusal', { hasText: /used by apps \(scroll, select\)/ })).toBeVisible();
   await page.keyboard.down('Alt'); await page.mouse.wheel(0, -100); await page.keyboard.up('Alt');
   expect(await lastSet(page, 'zoomWheelMods')).toBe('2');
   await expect(cap).toHaveText('Alt+Wheel');
+  await cap.click();
+  await page.keyboard.down('Control'); await page.mouse.wheel(0, -100); await page.keyboard.up('Control');
+  expect(await lastSet(page, 'zoomWheelMods')).toBe('1');
+  await expect(cap).toHaveText('Ctrl+Wheel');
 });
 
 test('a right-click with modifiers binds and stays bound; a plain right-click still clears (#285)', async ({ page }) => {
@@ -624,7 +626,7 @@ test('a side button keeps its modifiers (Ctrl+Mouse button 4) (#285)', async ({ 
   await expect(cap).toHaveText('Ctrl+Mouse button 4');
 });
 test('stored binds the rules refuse are reset once, with a notice naming them (#285)', async ({ page }) => {
-  await page.addInitScript(() => { window.__cfgExtra = { cursorLockVk: '82', zoomWheelMods: '1' }; });
+  await page.addInitScript(() => { window.__cfgExtra = { cursorLockVk: '82', zoomWheelMods: '4' }; });
   await page.goto('/');
   const dlg = page.getByRole('dialog', { name: 'Some keybinds were removed' });
   await expect(dlg).toBeVisible();
