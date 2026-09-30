@@ -12,18 +12,15 @@ struct KeyPan {
     static constexpr double kTapMs = 250.0;          // released sooner than this: a tap
     static constexpr double kScreensPerSec = 1.25;   // continuous rate at panSpeed 1.0, 7.5x and above
     // Lower zoom pans slower (owner, 2026-09-30, #305): a constant screen rate crosses the whole
-    // desktop in (level - 1) / rate seconds, under one at 2x. 100% at 7.5x+ (owner: "at 7.5 and up
-    // it's fine"), 60% at 2x, linear between. Below 2x the pannable range shrinks
-    // toward nothing, so the rate is also capped to cross the whole desktop in no less than ~1.33 s
-    // (0.6 x (level - 1)), the 2x crossing time ("still too fast at 1.4x"); a small floor keeps a
-    // hold moving just above 1x.
+    // desktop in (level - 1) / rate seconds, under one at 2x. ONE smooth power curve, so the speed
+    // changes in proportion to the zoom with no corners: (level / 7.5)^0.6 below 7.5x, full speed
+    // from 7.5x ("at 7.5 and up it's fine"). The earlier piecewise-linear curve with a separate cap
+    // below 2x "didn't feel like the speed stays proportional".
+    static constexpr double kFullSpeedLevel = 7.5, kRateExponent = 0.6;
     static double ZoomRateScale(double level) {
-        double s = 0.6 + (level - 2.0) * (0.4 / 5.5);   // 60% at 2x -> 100% at 7.5x
-        const double crossCap = 0.6 * (level - 1.0);
-        if (crossCap < s) s = crossCap;
-        if (s > 1.0) s = 1.0;
-        if (s < 0.08) s = 0.08;
-        return s;
+        if (level >= kFullSpeedLevel) return 1.0;
+        if (level < 1.0) level = 1.0;
+        return std::pow(level / kFullSpeedLevel, kRateExponent);
     }
     static constexpr double kEaseInMs = 150.0, kGlideMs = 120.0, kNudgeGlideMs = 90.0;
 
