@@ -127,7 +127,7 @@
           <!-- Second slot in the SAME row (the *2 config keys); either slot works alone and the
                core OR-combines them. Its own value id so each keycap is named "label + its own
                binding" rather than both reading the first slot's value. -->
-          <KeybindCapture row={{ ...row, buttonKey: row.buttonKey2, vkKey: row.vkKey2, modsKey: row.modsKey2 }}
+          <KeybindCapture row={{ ...row, buttonKey: row.buttonKey2, vkKey: row.vkKey2, modsKey: row.modsKey2, buttonModsKey: row.buttonModsKey2 }}
                           {values} onChange={live} {disabled}
                           labelledby={[labelId, valueId + '2'].filter(Boolean).join(' ')}
                           describedby={descId} valueId={valueId + '2'} />

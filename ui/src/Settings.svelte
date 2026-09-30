@@ -29,7 +29,7 @@
       // every one of those must be loaded too, or the row displays "Unbound" over a live binding
       // and a capture/clear through the lying row destroys the user's real bind (the Inspect row
       // had exactly this bug - cursorLockVk was never loaded).
-      for (const k of [r.buttonKey, r.vkKey, r.modsKey]) if (k) v[k] = (k in cfg) ? cfg[k] : '0';
+      for (const k of [r.buttonKey, r.vkKey, r.modsKey, r.buttonModsKey, r.buttonModsKey2]) if (k) v[k] = (k in cfg) ? cfg[k] : '0';
     }
     // These must match the core's shipped defaults (src/config.h + the ini template in config.cpp),
     // which are ALL unbound - onboarding captures the user's choice. Seeding a key here that the

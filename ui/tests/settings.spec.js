@@ -534,3 +534,66 @@ test('Mouse edge margin: a slider in the Tracking section, 0% by default (issue 
   await expect(row).toBeVisible();
   await expect(row).toContainText('0');
 });
+
+// --- Safe keybinds, click and wheel binds (issue #285) -------------------------------------
+const zoomInCap = page => page.getByText('Zoom in', { exact: true }).locator('xpath=../..').getByRole('button').first();
+const lastSet = (page, key) => page.evaluate(k => (window.__sets.filter(s => s.key === k).at(-1) || {}).value, key);
+
+test('typing keys alone and system combos are refused with a reason; the row keeps listening (#285)', async ({ page }) => {
+  await page.goto('/');
+  const cap = zoomInCap(page);
+  await cap.click();
+  await page.keyboard.press('a');
+  await expect(page.locator('.refusal', { hasText: /alone would stop you typing/ })).toBeVisible();
+  await page.keyboard.press('Alt+F4');
+  await expect(page.locator('.refusal', { hasText: /reserved by Windows/ })).toBeVisible();
+  await page.keyboard.press('Control+Alt+2');                        // AltGr @ on Nordic layouts
+  await expect(page.locator('.refusal', { hasText: /AltGr/ })).toBeVisible();
+  expect(await page.evaluate(() => window.__sets.filter(s => s.key === 'zoomInVk' && s.value !== '0').length)).toBe(0);
+  await page.keyboard.press('PageUp');                               // allowed alone
+  expect(await lastSet(page, 'zoomInVk')).toBe('33');
+  await expect(cap).toHaveText(/PageUp/);
+});
+test('combos with Ctrl, Ctrl+Alt and Win are accepted (#285)', async ({ page }) => {
+  await page.goto('/');
+  const cap = zoomInCap(page);
+  for (const [keys, vk, mods, label] of [['Control+F1', '112', '1', 'Ctrl+F1'], ['Control+Alt+PageUp', '33', '3', 'Ctrl+Alt+PageUp'],
+                                          ['Meta+PageUp', '33', '8', 'Win+PageUp']]) {
+    await cap.click();
+    await page.keyboard.press(keys);
+    expect(await lastSet(page, 'zoomInVk')).toBe(vk);
+    expect(await lastSet(page, 'zoomInMods')).toBe(mods);
+    await expect(cap).toHaveText(label);
+  }
+});
+test('a click with modifiers binds; a plain, Ctrl or Shift click is refused (#285)', async ({ page }) => {
+  await page.goto('/');
+  const cap = zoomInCap(page);
+  await cap.click();
+  const box = await cap.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down(); await page.mouse.up();                     // plain left click
+  await expect(page.locator('.refusal', { hasText: /needs a modifier/ })).toBeVisible();
+  await page.keyboard.down('Control'); await page.mouse.down(); await page.mouse.up(); await page.keyboard.up('Control');
+  await expect(page.locator('.refusal', { hasText: /used by apps/ })).toBeVisible();
+  await page.keyboard.down('Control'); await page.keyboard.down('Alt');
+  await page.mouse.down(); await page.mouse.up();
+  await page.keyboard.up('Alt'); await page.keyboard.up('Control');
+  expect(await lastSet(page, 'zoomInButton')).toBe('3');
+  expect(await lastSet(page, 'zoomInButtonMods')).toBe('3');
+  await expect(cap).toHaveText('Ctrl+Alt+Left click');
+});
+test('the wheel row binds Alt+wheel and refuses Ctrl or Shift alone (#285)', async ({ page }) => {
+  await page.goto('/');
+  const cap = page.getByText('Zoom with the scroll wheel', { exact: true }).locator('xpath=../..').getByRole('button').first();
+  await cap.click();
+  const box = await cap.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.keyboard.down('Control'); await page.mouse.wheel(0, -100); await page.keyboard.up('Control');
+  await expect(page.locator('.refusal', { hasText: /used by apps \(zoom, select\)/ })).toBeVisible();
+  await page.keyboard.down('Shift'); await page.mouse.wheel(0, -100); await page.keyboard.up('Shift');
+  await expect(page.locator('.refusal', { hasText: /used by apps \(scroll, select\)/ })).toBeVisible();
+  await page.keyboard.down('Alt'); await page.mouse.wheel(0, -100); await page.keyboard.up('Alt');
+  expect(await lastSet(page, 'zoomWheelMods')).toBe('2');
+  await expect(cap).toHaveText('Alt+Wheel');
+});
