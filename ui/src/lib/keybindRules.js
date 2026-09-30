@@ -52,6 +52,8 @@ const KEY_SLOTS = [
   ['Zoom out', 'zoomOutVk', 'zoomOutMods'], ['Zoom out (alternate)', 'zoomOutVk2', 'zoomOutMods2'],
   ['Hide cursor', 'hideCursorVk', 'hideCursorMods'], ['Inspect mode', 'cursorLockVk', null],
   ['Recenter', 'recenterVk', null], ['Quick zoom', 'quickZoomVk', 'quickZoomMods'],
+  ['Pan left', 'panLeftVk', 'panLeftMods'], ['Pan right', 'panRightVk', 'panRightMods'],
+  ['Pan up', 'panUpVk', 'panUpMods'], ['Pan down', 'panDownVk', 'panDownMods'],
 ];
 const BUTTON_SLOTS = [
   ['Zoom in', 'zoomInButton', 'zoomInButtonMods'], ['Zoom in (alternate)', 'zoomInButton2', 'zoomInButton2Mods'],
