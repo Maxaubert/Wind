@@ -13,10 +13,17 @@ struct KeyPan {
     static constexpr double kScreensPerSec = 1.25;   // continuous rate at panSpeed 1.0, 6x and above
     // Lower zoom pans slower (owner, 2026-09-30, #305): a constant screen rate crosses the whole
     // desktop in (level - 1) / rate seconds, under one at 2x. 100% at 6x+, 60% at 2x, linear between
-    // (75% at 2x was "much better, could be a bit slower still").
+    // (75% at 2x was "much better, could be a bit slower still"). Below 2x the pannable range shrinks
+    // toward nothing, so the rate is also capped to cross the whole desktop in no less than ~1.33 s
+    // (0.6 x (level - 1)), the 2x crossing time ("still too fast at 1.4x"); a small floor keeps a
+    // hold moving just above 1x.
     static double ZoomRateScale(double level) {
-        const double s = 0.4 + 0.1 * level;
-        return s > 1.0 ? 1.0 : s;
+        double s = 0.4 + 0.1 * level;
+        const double crossCap = 0.6 * (level - 1.0);
+        if (crossCap < s) s = crossCap;
+        if (s > 1.0) s = 1.0;
+        if (s < 0.08) s = 0.08;
+        return s;
     }
     static constexpr double kEaseInMs = 150.0, kGlideMs = 120.0, kNudgeGlideMs = 90.0;
 

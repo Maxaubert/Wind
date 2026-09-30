@@ -63,7 +63,11 @@ TEST_CASE("lower zoom pans slower on screen: 60% at 2x, 80% at 4x, 100% at 6x an
     CHECK(KeyPan::ZoomRateScale(4.0) == doctest::Approx(0.8));
     CHECK(KeyPan::ZoomRateScale(6.0) == doctest::Approx(1.0));
     CHECK(KeyPan::ZoomRateScale(20.0) == doctest::Approx(1.0));
-    CHECK(KeyPan::ZoomRateScale(1.0) == doctest::Approx(0.5));
+    CHECK(KeyPan::ZoomRateScale(1.4) == doctest::Approx(0.24));   // below 2x: the crossing-time cap
+    CHECK(KeyPan::ZoomRateScale(1.2) == doctest::Approx(0.12));
+    CHECK(KeyPan::ZoomRateScale(1.0) == doctest::Approx(0.08));   // the floor
+    for (double l = 1.0; l < 8.0; l += 0.05)                        // never falls as the zoom rises
+        CHECK(KeyPan::ZoomRateScale(l + 0.05) >= KeyPan::ZoomRateScale(l) - 1e-12);
     const bool right[4] = { false, true, false, false };
     KeyPan a, b; double ax = 0, ay = 0, bx = 0, by = 0;
     Run(a, right, 2000, 2.0, 1.0, ax, ay);
