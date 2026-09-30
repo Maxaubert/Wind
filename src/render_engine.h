@@ -1,4 +1,5 @@
 #pragma once
+#include "color_matrix.h"   // RenderFrameParams::color (issue #288)
 namespace wind {
 
 // A target monitor for the magnifier overlay. All values are in physical pixels in the
@@ -23,6 +24,8 @@ struct RenderFrameParams {
     bool   bilinear;                     // bilinear (smooth) vs point sampling
     double sharpness;                    // 0 = off; >0 = adaptive sharpen strength (crisps upscaled detail)
     double brightness;                   // output multiplier (1.0 = unchanged; <1 dims for HDR)
+    bool   colorOn = false;              // apply `color` in the pixel shader (issue #288)
+    wind::ColorMatrix color{};
     int    cursorMode;                   // 0=auto (draw only when the app shows a cursor), 1=always, 2=never
     bool   vsync;                        // true = Present(1,0) vsync; false = Present(0,0) no vsync
     bool   cropCapture;                  // on a full-screen repaint, copy only the magnified region (cuts 4K copy)

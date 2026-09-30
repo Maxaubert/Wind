@@ -175,6 +175,8 @@ Config ParseConfig(const std::string& text) {
             else if (key == "sharpness")          c.sharpness = std::stod(val);
             else if (key == "zorderBand")         c.zorderBand = std::stoi(val);
             else if (key == "brightness")         c.brightness = std::stod(val);
+            else if (key == "colorWarmPct")       c.colorWarmPct = std::stoi(val);
+            else if (key == "colorDimPct")        c.colorDimPct = std::stoi(val);
             else if (key == "hdrTonemap")         c.hdrTonemap = std::stoi(val);
             else if (key == "multiMonitor")       c.multiMonitor = std::stoi(val);
             else if (key == "cropCapture")        c.cropCapture = std::stoi(val);
@@ -256,6 +258,8 @@ Config ParseConfig(const std::string& text) {
     c.cursorSmoothing = clampd(c.cursorSmoothing, 0.0, 0.95);
     c.sharpness       = clampd(c.sharpness,       0.0, 1.0);
     c.brightness      = clampd(c.brightness,      0.5, 1.5);
+    c.colorWarmPct    = (int)clampd(c.colorWarmPct, 0, 100);
+    c.colorDimPct     = (int)clampd(c.colorDimPct, 1, 100);
     c.quickZoomDefault  = clampd(c.quickZoomDefault, 1.0, 50.0);
     if (c.outlineThickness < 1)  c.outlineThickness = 1;
     if (c.outlineThickness > 40) c.outlineThickness = 40;
@@ -465,6 +469,9 @@ std::string DefaultIniText() {
                "mouseMarginPct=0\n"
                "; brightness: magnified-view output multiplier (1.0=unchanged; fine-tune for HDR)\n"
                "brightness=1.0\n"
+               "; colorWarmPct: screen warmth like Night light (0-100, 0 = off); colorDimPct: artificial brightness (1-100, 100 = normal)\n"
+               "colorWarmPct=0\n"
+               "colorDimPct=100\n"
                "; hdrTonemap: 1=HDR10->SDR tonemap when Windows HDR is on (no-op on SDR); 0=off\n"
                "hdrTonemap=1\n"
                "; model: hybrid = Auto (default): picks render or transform per zoom-in (games get\n"

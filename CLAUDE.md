@@ -207,6 +207,12 @@ restartWind), `dirty`, `openIni`, `exportDiagnostics`, `pickExe`, `mpoState`, `s
   flips per 20s; measured 13-24 spike frames per 14 wheel-clicks, 0 with no context). Writing
   level 1.0 does NOT leave the mode; only releasing the runtime does. Hence the transform model
   creates its context on a session's first write and releases it ~1.2s after the zoom ends.
+- COLOUR (WARMTH/BRIGHTNESS, #288) HOLDS THE MAGNIFICATION RUNTIME AT 1X while either is on, so the
+  gotcha above applies at 1x too (the #148 game-cursor tax). Accepted trade-off: the feature needs it,
+  and it is off by default. Measure a cursor-toggling game with colour on before blaming anything else.
+  The DWM effect scales LINEAR light under HDR (encoded in SDR), is one matrix for all monitors (mixed
+  HDR/SDR: right strength on the primary only), and never reaches the hardware pointer, so Wind swaps
+  the system pointers for tinted copies at 1x (src/cursor_tint.*). docs/COLOUR-FILTER-FINDINGS.md.
 - THE CURSOR GROWS WITH THE ZOOM, IN EVERY ENGINE (owner decision 2026-09-18, issue #253; this
   REPLACES the old "cursor size is constant, always" rule - do not restore it). The transform
   engine cannot do otherwise (its sprite lives in desktop space, DWM magnifies it), and a render

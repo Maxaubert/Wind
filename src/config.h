@@ -367,7 +367,7 @@ struct Config {
     int edgeClip = 1;
     int txPace = 0;
     int txHookWrite = 0;
-    int panelPointer = 1;   // #283: real magnified pointer + hook writes while a shell input panel is open (restart)
+    int panelPointer = 1;   // #283: real magnified pointer, frozen and moved by Wind, while a shell input panel is open
     int txFreeCursor = 1;
     // WRITE CADENCE - SHIPPED OFF (tried ON 2026-08-26, REVERTED the same day on field report).
     // The theory (issue #204) is sound: we write ~144/s where native writes ~49/s, and each write
@@ -505,6 +505,10 @@ struct Config {
     int    zorderBand = 0;
     // Output brightness multiplier for the magnified view. 1.0 = unchanged. Hot-reloadable.
     double brightness = 1.0;
+    // Colour filters (issue #288): a DWM colour matrix (render engine: its pixel shader).
+    // Two controls, always applied (zoomed or not): warmth and brightness. Both neutral = off.
+    int colorWarmPct = 0;     // warmth 0..100 (0 = off, 100 = 1200 K like Night light at full)
+    int colorDimPct = 100;    // artificial brightness 1..100 (100 = no dim; quitting Wind clears it)
     // HDR->SDR tonemap. Only engages when Windows HDR is actually on (advancedColorEnabled);
     // on SDR it's a no-op (plain BGRA8 passthrough), so it's safe on by default. Set 0 to
     // force the legacy BGRA8 capture even on HDR. Applied at startup + on HDR toggle.

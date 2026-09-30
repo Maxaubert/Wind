@@ -503,6 +503,19 @@ TEST_CASE("tracking settings: defaults and parsing (issue #276)") {
     CHECK(c.trackLog == 1);
 }
 
+TEST_CASE("colour keys: defaults, parse and clamps (#288)") {
+    Config d = ParseConfig("");
+    CHECK(d.colorWarmPct == 0); CHECK(d.colorDimPct == 100);
+    Config c = ParseConfig("colorWarmPct=80\ncolorDimPct=60\n");
+    CHECK(c.colorWarmPct == 80); CHECK(c.colorDimPct == 60);
+    Config x = ParseConfig("colorWarmPct=-4\ncolorDimPct=-5\n");
+    CHECK(x.colorWarmPct == 0); CHECK(x.colorDimPct == 1);
+    CHECK(ParseConfig("colorWarmPct=150\n").colorWarmPct == 100);
+    // Keys of the dropped controls are ignored, not errors.
+    Config old = ParseConfig("colorFilter=4\ncolorAt1x=0\ncolorToggleVk=67\n");
+    CHECK(old.colorWarmPct == 0); CHECK(old.colorDimPct == 100);
+}
+
 TEST_CASE("unsafe binds in an ini read as unbound; safe ones survive (#285)") {
     Config c = ParseConfig("zoomInVk=65\nzoomOutVk=34\nzoomInVk2=50\nzoomInMods2=3\nzoomOutVk2=115\nzoomOutMods2=2\n"
                            "hideCursorVk=112\nhideCursorMods=1\nrecenterVk=82\ncursorLockVk=113\n");

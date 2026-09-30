@@ -639,7 +639,7 @@ bool RenderEngine::State::buildDeviceResources() {
     if (FAILED(hr3) || FAILED(hr4)) { RLog("buildDeviceResources: cursor shader create failed hr3=0x%08lX hr4=0x%08lX", (unsigned long)hr3, (unsigned long)hr4); return false; }
 
     D3D11_BUFFER_DESC ccbd{};
-    ccbd.ByteWidth = 16;   // float2 posClip + float2 sizeClip
+    ccbd.ByteWidth = sizeof(CursorCB);   // quad placement + the colour filter (issue #288)
     ccbd.Usage = D3D11_USAGE_DEFAULT;
     ccbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
     if (FAILED(device->CreateBuffer(&ccbd, nullptr, ccb.ReleaseAndGetAddressOf()))) { RLog("buildDeviceResources: CreateBuffer(cursor cb) failed"); return false; }
@@ -1113,7 +1113,9 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
             (float)(p.srcLeft / sw), (float)(p.srcTop / sh),
             (float)((p.srcLeft + vw) / sw), (float)((p.srcTop + vh) / sh),
             bright, hdrMode, scRgbScale, sharp,
-            (sw > 0 ? 1.0f / (float)sw : 0.0f), (sh > 0 ? 1.0f / (float)sh : 0.0f), 0.0f, 0.0f };
+            (sw > 0 ? 1.0f / (float)sw : 0.0f), (sh > 0 ? 1.0f / (float)sh : 0.0f), p.colorOn ? 1.0f : 0.0f, 0.0f, {} };
+        for (int i = 0; i < 5; ++i)
+            for (int j = 0; j < 4; ++j) cbv.cm[i][j] = p.color.m[i][j];
         c->UpdateSubresource(cb.Get(), 0, nullptr, &cbv, 0, 0);
         c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         c->VSSetShader(vs.Get(), nullptr, 0);
@@ -1150,7 +1152,14 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
         c->PSSetShader(bps.Get(), nullptr, 0);
         c->PSSetConstantBuffers(0, 1, bcb.GetAddressOf());
         // cb layout matches kBorderHLSL: rgba color, screen size (px), thickness (px), inset (px).
-        const float bcbv[8] = { p.outlineR, p.outlineG, p.outlineB, p.outlineAlpha,
+        float oR = p.outlineR, oG = p.outlineG, oB = p.outlineB;
+        if (p.colorOn) {   // the outline is dimmed/warmed like everything else (issue #288)
+            double fr, fg, fb;
+            wind::ApplyToRgb(p.color, oR, oG, oB, fr, fg, fb);
+            auto sat = [](double v) { return (float)(v < 0 ? 0 : (v > 1 ? 1 : v)); };
+            oR = sat(fr); oG = sat(fg); oB = sat(fb);
+        }
+        const float bcbv[8] = { oR, oG, oB, p.outlineAlpha,
                                 (float)sw, (float)sh, (float)t, (float)inset };
         D3D11_MAPPED_SUBRESOURCE ms{};
         if (SUCCEEDED(c->Map(bcb.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
@@ -1179,13 +1188,21 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
         float posClipY = (float)(1.0 - tlY / sh * 2.0);
         float sizeClipX = (float)(drawW / sw * 2.0);
         float sizeClipY = (float)(-(drawH / sh * 2.0));   // clip-y up vs screen-y down
-        float ccbv[4] = { posClipX, posClipY, sizeClipX, sizeClipY };
-        c->UpdateSubresource(ccb.Get(), 0, nullptr, ccbv, 0, 0);
+        CursorCB ccbv{ posClipX, posClipY, sizeClipX, sizeClipY, 0.0f, 0.0f, 0.0f, 0.0f, {} };
+        // An inverting cursor (the classic text beam) inverts what is behind it: a colour matrix
+        // on its texture would change the inversion, not tint it, so it is drawn as is.
+        if (p.colorOn && !(cursorInvert && !useCross)) {
+            ccbv.colorOn = 1.0f;
+            for (int i = 0; i < 5; ++i)
+                for (int j = 0; j < 4; ++j) ccbv.cm[i][j] = p.color.m[i][j];
+        }
+        c->UpdateSubresource(ccb.Get(), 0, nullptr, &ccbv, 0, 0);
         c->OMSetBlendState(((cursorInvert && !useCross) ? blendInvert : blend).Get(), nullptr, 0xFFFFFFFF);
         c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
         c->VSSetShader(cvs.Get(), nullptr, 0);
         c->VSSetConstantBuffers(0, 1, ccb.GetAddressOf());
         c->PSSetShader(cps.Get(), nullptr, 0);
+        c->PSSetConstantBuffers(0, 1, ccb.GetAddressOf());   // PS reads the colour filter
         c->PSSetShaderResources(0, 1, useCross ? crosshairSRV.GetAddressOf() : cursorSRV.GetAddressOf());
         c->PSSetSamplers(0, 1, sampLinear.GetAddressOf());
         c->Draw(4, 0);

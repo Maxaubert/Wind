@@ -536,6 +536,15 @@ test('Mouse edge margin: a slider in the Tracking section, 0% by default (issue 
   await expect(row).toContainText('0');
 });
 
+test('Colour section: only the warmth and brightness sliders, neutral by default (issue #288)', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByText('Warmth', { exact: true }).locator('xpath=../..')).toContainText('0');
+  await expect(page.getByText('Brightness', { exact: true }).locator('xpath=../..')).toContainText('100');
+  for (const gone of ['Colour filter', 'Also when not zoomed', 'Toggle colour filter']) {
+    await expect(page.getByText(gone, { exact: true })).toHaveCount(0);
+  }
+});
+
 // --- Safe keybinds, click and wheel binds (issue #285) -------------------------------------
 const zoomInCap = page => page.getByText('Zoom in', { exact: true }).locator('xpath=../..').getByRole('button').first();
 const lastSet = (page, key) => page.evaluate(k => (window.__sets.filter(s => s.key === k).at(-1) || {}).value, key);
