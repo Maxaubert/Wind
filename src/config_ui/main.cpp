@@ -308,10 +308,21 @@ static void DropInitScript() {
     g_initScriptId.clear();
 }
 
+// Start-up measurement (#303): process start -> NavigationCompleted -> first paint ("ready" posted by
+// the page after two animation frames). Logged once each in the config log for before/after numbers.
+static ULONGLONG g_launchTick = 0;
+static bool g_loggedNav = false, g_loggedReady = false;
+
 static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
     std::string j = Narrow(jsonW);
     std::string type = JsonField(j, "type");
-    if (type == "getConfig") {
+    if (type == "ready") {
+        if (!g_loggedReady && g_launchTick) {
+            g_loggedReady = true;
+            wind::Log(wind::LogLevel::Info, "config", "startup: first paint %llu ms after launch",
+                      (unsigned long long)(GetTickCount64() - g_launchTick));
+        }
+    } else if (type == "getConfig") {
         wv->PostWebMessageAsJson(Widen("{\"type\":\"config\"," + SessionPayload(ReadFileUtf8(IniPath())) + "}").c_str());
     } else if (type == "setConfig" || type == "setConfigPersist") {
         std::string key = JsonField(j, "key"), value = JsonField(j, "value");
@@ -741,6 +752,16 @@ static void CreateWebView(HWND hwnd) {
                             PostMessageW(g_hwnd, WM_APP_WV_FAILED, (WPARAM)k, 0);
                             return S_OK;
                         }).Get(), &tok);
+                    g_webview->add_NavigationCompleted(
+                        Callback<ICoreWebView2NavigationCompletedEventHandler>(
+                        [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT {
+                            if (!g_loggedNav && g_launchTick) {
+                                g_loggedNav = true;
+                                wind::Log(wind::LogLevel::Info, "config", "startup: navigation completed %llu ms after launch",
+                                          (unsigned long long)(GetTickCount64() - g_launchTick));
+                            }
+                            return S_OK;
+                        }).Get(), &tok);
                     g_webview->add_WebMessageReceived(
                         Callback<ICoreWebView2WebMessageReceivedEventHandler>(
                         [](ICoreWebView2* wv, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
@@ -780,6 +801,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
         CloseHandle(mtx);
         return 0;
     }
+    g_launchTick = GetTickCount64();
     wind::LogInit(L"config");
     atexit(wind::LogShutdown);
     wind::LogSystemSnapshot("config", "");

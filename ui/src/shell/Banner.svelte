@@ -1,10 +1,14 @@
 <script>
+  import { onMount } from 'svelte';
   import { iconSvg } from '../design/icons.js';
   // Page banner: near-black band, outlined rounded icon box, aurora still fading in from the right.
   let { title = '', description = '', icon = '', image = './c-grey.jpg' } = $props();
+  // The aurora still loads after first paint (two frames in), so it never delays the first render.
+  let loaded = $state(false);
+  onMount(() => { requestAnimationFrame(() => requestAnimationFrame(() => { loaded = true; })); });
 </script>
 
-<header class="banner" style="--bimg:url({image})">
+<header class="banner" style={loaded ? `--bimg:url(${image})` : ''}>
   {#if icon}<span class="bico">{@html iconSvg(icon, 22)}</span>{/if}
   <div>
     <h1>{title}</h1>
