@@ -1,3 +1,5 @@
+> **Superseded (2026-10-01, issue #313):** the owner-drawn menu is replaced by the tray flyout. See `2026-10-01-tray-flyout-design.md`.
+
 # Tray menu: instrument header (2026-08-28)
 
 Replace the four bare strings in the tray menu with a **status header plus three actions**, keeping

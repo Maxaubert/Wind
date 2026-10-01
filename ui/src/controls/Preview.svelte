@@ -20,7 +20,7 @@
   const visible = (r) => !r.showIf || String(values[r.showIf.key]) === String(r.showIf.eq);
   const set = (key, val) => { values[key] = val; calls.push([key, val]); };
   const extra = {
-    runningModel: 'hybrid', mpoNeedsRestart: false, version: '0.16.0',
+    runningModel: 'hybrid', mpoNeedsRestart: false, version: '0.17.0',
     onRestart: () => calls.push('restart'), onAction: (a) => calls.push(['action', a]),
     onTheme: (m) => calls.push(['theme', m]), onRepo: () => calls.push('repo'),
     pick: async () => 'RDR2.exe',
