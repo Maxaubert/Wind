@@ -74,7 +74,7 @@ if errorlevel 1 (echo [build] rc.exe failed for WindTray & exit /b 1)
 rem Objects go to src\tray_app\ so the shared sources never overwrite Wind.exe's .obj files.
 cl /nologo /std:c++17 /EHsc /O2 /W4 /Zi /DUNICODE /D_UNICODE ^
    /Fo"%ROOT%src\tray_app\\" /Fd"%ROOT%WindTray.pdb" ^
-   src\tray_app\*.cpp src\profiles.cpp src\config.cpp src\logging.cpp src\config_ui\ini_edit.cpp ^
+   src\tray_app\*.cpp src\tray_items.cpp src\profiles.cpp src\config.cpp src\logging.cpp src\config_ui\ini_edit.cpp ^
    src\tray_app\wind_tray.res ^
    /Fe:WindTray.exe ^
    /link user32.lib shell32.lib gdi32.lib Dwmapi.lib Dbghelp.lib shlwapi.lib ole32.lib version.lib ^

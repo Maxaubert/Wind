@@ -217,7 +217,7 @@ large fleet of PowerShell measurement probes, see
 | `tick_stats.h` | Pure ring buffer of recent tick intervals backing the tray's frame-pacing readout |
 | `transform.cpp/.h` | Pure transform math: anchored offsets, TDR-safe clamps, input-transform rects, foreign-writer detection |
 | `transform_model.cpp/.h` | The transform engine: sessions, the weld, keep-alive, `txMaxStepPct` rate limit (default 25, i.e. 2.5% per tick) |
-| `tray_app/` | `WindTray.exe` (issue #291): `main.cpp` lifecycle (serves one Wind PID, single instance, TaskbarCreated), `tray_icon.cpp` icon and balloons, `tray_menu.cpp` the owner-drawn menu and profile switch, `tray_draw.h` its drawing half |
+| `tray_app/` | `WindTray.exe` (issue #291): `main.cpp` lifecycle (serves one Wind PID, single instance, TaskbarCreated), `tray_icon.cpp` icon and balloons, `flyout_window.cpp` the quick-controls flyout window (placement, dismissal; issue #313), `flyout_draw.cpp` its Direct2D painter, `flyout_model.h` its pure model (placement, layout, hit-testing, view; unit-tested), `tray_menu.cpp` what its buttons do (Quit guard, profile switch) |
 | `tray_host.cpp/.h` | Wind.exe side of the tray split: creates the shared block and supervises `WindTray.exe` |
 | `tray_ipc.h` | Pure layout of the block shared with `WindTray.exe` (`Local\Wind_TrayState_v1`): status, frame-pacing ring, `menuOpen` |
 | `tray_status.h` | Pure decisions for what the tray menu shows (engine label, status text) from a published tick-loop snapshot |
