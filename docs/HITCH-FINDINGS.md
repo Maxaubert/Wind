@@ -79,6 +79,32 @@ on every zoom), so cold vs warm is still unmeasured; the caret-jump fix needs a 
 candidate: a non-blocking bridge (plan item B), A/B'd on blink and time-to-visible. A full suite
 over all builds is planned by the owner.
 
+### Full suite (2026-10-01): 0.15.2 / 0.15.3 / 0.15.4, each with only the zoom timeline added
+
+Transform engine, 3840x2160 at 144 Hz, side-button zooms, 40 per build per scenario (desktop still
+pointer, desktop moving pointer, DOOM: The Dark Ages in focus), ABAB over a released (cold) vs kept
+(warm) magnification context. Medians; desktop rows are the median of both pointer cases.
+
+| | 0.15.2 | 0.15.3 | 0.15.4 |
+|---|---|---|---|
+| press -> Wind's tick | 2.7-4.4 ms | 0.1 ms | 0.1 ms |
+| press -> zoom starts (level leaves 1.0) | 8.7-10.2 ms | 5.4-6.2 ms | 5.6-6.5 ms |
+| enter tick | 19.5-28.0 ms | 21.4-21.6 ms | 21.1-21.5 ms |
+| ...of which the cursor bridge (two DwmFlush) | 16.6-20.3 ms | 18.9-19.9 ms | 18.9-19.8 ms |
+| press -> first DWM composite | 27-34 ms | 27 ms | 27 ms |
+| press -> visible screen change (desktop) | 44-50 ms | 42 ms | 42 ms |
+| ramp: repeated frames in the first 300 ms | ~8 of ~43, max 1-2 in a row | same | same |
+| DOOM frame time median / p99 / max | 13.4 / 14.8 / 21 ms | 13.5 / 14.8 / 20 ms | 13.5 / 14.8 / 19 ms |
+| DOOM frames > 2x median | 0 | 0 | 0 |
+
+Cold vs warm context: no difference in 0.15.3/0.15.4 (the warm flag is now read before the first
+present; the earlier "always warm" reading was a measurement bug). So keeping the context alive buys
+nothing on this rig and txIdleReleaseMs stays 1200 (it protects games from the #148 cursor tax).
+0.15.2's slower start is the old refresh-rate idle loop (#71). The remaining big piece is the cursor
+bridge: ~19 of the ~27 ms to the first composite. The earlier 8-zoom run's 62 ms still-pointer
+figure did not reproduce at 40 zooms (42 ms). Caret jumps were 0, but the suite types nothing, so
+the caret fix is still untested. Data: %TEMP%\wind_zoom_suite (JSON + PresentMon CSVs).
+
 ## Engine comparison while zoomed at 12x, panning continuously (12 s)
 
 | engine | game avg frametime | game spikes | Wind's own loop |
