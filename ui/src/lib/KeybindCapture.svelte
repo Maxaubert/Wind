@@ -12,6 +12,9 @@
   // listening and says why, on screen and to screen readers.
   import { checkKeyBind, checkClickBind, checkWheelBind, refusalText } from './keybindRules.js';
   export let row, values, onChange, disabled = false;
+  // What an empty slot says. The redesigned page passes 'Add key' (a soft chip); the default keeps
+  // the wording the onboarding and older tests rely on.
+  export let unboundText = 'Unbound';
   let refusal = '';
   // A click captured ON the keycap is followed by its own click event, which would re-arm the row
   // and clear the bind just made: ignore an arm that close after a mouse capture.
@@ -72,7 +75,7 @@
     const parts = [];
     if (row.wheel) {
       const wm = Number(values[row.modsKey] || 0);
-      return wm ? modsName(wm) + '+Wheel' : 'Unbound';
+      return wm ? modsName(wm) + '+Wheel' : null;
     }
     if (row.buttonKey) {
       const btn = Number(values[row.buttonKey] || 0);
@@ -86,7 +89,7 @@
       const combo = comboName(mods, vk);
       if (combo) parts.push(combo);
     }
-    return parts.join(' + ') || 'Unbound';
+    return parts.join(' + ') || null;
   })();
 
   // Arming: snapshot the current binding (for Escape restore) and live-clear it so the magnifier
@@ -198,13 +201,13 @@
 <svelte:window on:keydown={onKey} on:mousedown={onMouse} on:wheel|nonpassive={onWheel} />
 <!-- The instructions were `title`-only, which a screen reader never reads on keyboard focus.
      They are a real description now, appended to the row's own. -->
-<button class="keycap" type="button" class:armed {disabled} id={valueId}
+<button class="keycap" type="button" class:armed class:unbound={!armed && lbl === null} {disabled} id={valueId}
         aria-labelledby={labelledby} aria-describedby="{describedby ?? ''} {uid}-hint"
         on:click={arm}
         on:blur={() => { if (armed) cancel(); }}
         on:contextmenu|preventDefault={onContextMenu}
         title="Click to bind (combos like Ctrl+Alt+F1 work), right-click to clear">
-  {armed ? (row.wheel ? 'Hold keys and turn the wheel...' : row.buttonKey ? 'Press a key, combo, or button...' : 'Press a key or combo...') : lbl}
+  {armed ? (row.wheel ? 'Hold keys and turn the wheel...' : row.buttonKey ? 'Press a key, combo, or button...' : 'Press a key or combo...') : (lbl ?? unboundText)}
 </button>
 {#if armed && refusal}<span class="refusal">{refusal}</span>{/if}
 <span class="sr-only" id="{uid}-hint" aria-hidden="true">
