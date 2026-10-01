@@ -23,6 +23,7 @@
   import SettingRow from './controls/SettingRow.svelte';
   import Prompt from './prompts/Prompt.svelte';
   import Results from './search/Results.svelte';
+  import TrayMenuPage from './tray/TrayMenuPage.svelte';
   import { search } from './search/search.js';
 
   // Replaced at build time with src/version.h's WIND_VERSION_STR (vite.config.js); empty in tests.
@@ -36,7 +37,8 @@
   let loaded = $state(false);
   let main = $state();
 
-  const side = groups.filter((g) => g.id !== 'advanced' && g.id !== 'about');
+  const side = groups.filter((g) => g.id !== 'advanced' && g.id !== 'about' && g.id !== 'tray');
+  const trayGroup = groups.filter((g) => g.id === 'tray');
   const expert = groups.filter((g) => g.id === 'advanced' || g.id === 'about');
   const group = $derived(groups.find((g) => g.id === activeId) || groups[0]);
   const count = $derived(loaded ? changedKeys(values, saved).length : 0);
@@ -270,9 +272,9 @@
 <div class="wnd app" data-theme={effTheme}>
   <TitleBar {themeMode} onTheme={onTheme} onMinimize={() => windowControl('minimize')} onClose={requestClose} />
   <div class="body">
-    <Sidebar groups={side} {expert} active={searching ? '' : activeId} version={VERSION} {query} {onSearch}
+    <Sidebar groups={side} tray={trayGroup} {expert} active={searching ? '' : activeId} version={VERSION} {query} {onSearch}
              onSelect={(id) => { clearSearch(); select(id); }} />
-    <main class="main" bind:this={main} tabindex="-1" aria-label={group.label}>
+    <main class="main" data-page={searching ? 'search' : group.id} bind:this={main} tabindex="-1" aria-label={group.label}>
       {#if searching}
         <Results {results} {query} onJump={jump} />
       {:else}
@@ -285,6 +287,9 @@
           {/each}
         </Card>
       {/each}
+      {#if group.custom === 'tray'}
+        <TrayMenuPage {values} onChange={change} {announce} />
+      {/if}
       {/if}
       <div class="tail"></div>
     </main>
@@ -365,6 +370,7 @@
   .body { display: grid; grid-template-columns: 240px 1fr; min-height: 0; }
   .main { position: relative; min-height: 0; overflow-y: auto; padding: 0 40px; outline: none;
           scrollbar-width: thin; scrollbar-color: var(--track) transparent; }
+  .main[data-page="tray"] :global(.banner + .card) { margin-top: 20px; }   /* k01: a caption-less first card sits 20px under the band */
   .tail { height: 110px; }   /* clearance so the capsule never covers the last row */
   .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
              clip: rect(0 0 0 0); white-space: nowrap; border: 0; }

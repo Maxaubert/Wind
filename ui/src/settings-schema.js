@@ -117,6 +117,16 @@ export const groups = [
       ] },
     ] },
 
+  // Tray menu (#313): the Performance switch is an ordinary row; the two item lists are drawn by
+  // src/tray/TrayMenuPage.svelte (custom: 'tray'). All five tray keys are global, never profile keys.
+  { id: 'tray', label: 'Tray menu', icon: 'tray', section: 'TRAY', custom: 'tray',
+    desc: 'Choose what the tray menu shows, and in what order.',
+    cards: [
+      { caption: '', rows: [
+        { key: 'trayPerf', type: 'toggle', label: 'Performance in the tray', desc: 'Zoom, fps and a frame-time graph.', def: 0 },
+      ] },
+    ] },
+
   { id: 'advanced', label: 'Advanced', icon: 'adv',
     desc: 'Engines, per-app exceptions and fine tuning.',
     cards: [
