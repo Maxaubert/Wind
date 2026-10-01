@@ -139,8 +139,9 @@ consumed, and the comment on each `Config` field states it. The heuristic for re
   a process restart (see the eviction handshake below). `gpuPriority` applies at D3D device
   build; `spriteBand16` at sprite-window creation; `zorderBand` at overlay creation.
 
-The settings UI encodes the same split: keybind rows live-apply, most rows stage behind
-Apply/Discard, and a `model` change goes through an explicit restart
+The settings UI encodes the same split: every row applies live to the session (the live ini),
+Save writes the session into the active profile, keybinds also persist at once, and a `model`
+change goes through an explicit restart
 (see [The settings UI](09-settings-ui.md)).
 
 ## Profiles
@@ -175,10 +176,9 @@ dropdown (`DoSwitchProfile`, `src/config_ui/main.cpp`), is the same sequence:
    text that has non-comment lines yet parses to zero keys, so a corrupt or locked file can
    never be silently applied. Crucially, a read FAILURE is distinguished from an EMPTY file,
    because empty is legitimate (see below).
-2. `wind::MirrorLiveToActiveProfile` captures the current live settings into the outgoing
-   profile's file first. The per-write mirror (next section) covers everything done through the
-   settings app, but hand edits via the "Edit config file" button touch only the live ini;
-   without this capture a switch would silently discard them.
+2. The settings UI asks Save / Discard / Cancel before a switch when the session has unsaved
+   changes (live differs from the profile). A tray switch carries no prompt and discards the
+   outgoing profile's unsaved changes by design.
 3. `wind::MakeLiveText(profileText, oldLiveText, name)` builds the new live ini: the profile's
    text with any smuggled global-key lines stripped, plus the globals carried from the old live
    text, plus `profile=<name>`. Written atomically over `magnifier.ini`.
@@ -216,14 +216,19 @@ sequenceDiagram
   end
 ```
 
-### Live-bound mirroring
+### Session model: live ini = session, profile file = saved
 
-The active profile IS the settings, not a snapshot you must remember to save. Every `setConfig`
-the host handles (`HandleWebMessage`, `src/config_ui/main.cpp`) writes the live ini and then
-immediately mirrors `MakeProfileText(live)` into the active profile's file, so the profile file
-tracks the live state write-for-write. Global keys never land there because `MakeProfileText`
-strips them. A missing profile file or directory means a pre-migration state and the mirror
-skips silently; the core seeds on next launch.
+Since 0.16.0 (#303) profiles are no longer live-bound. Every settings change writes only the live
+ini (the session) and the core hot-reloads it; the active profile's file changes only on Save
+(`MakeProfileText(live)`) or when a keybind is captured (`setConfigPersist` updates that one key in
+both). "Unsaved" means `wind::SessionDiffers(live, profile)` (`src/profiles.*`): any profile-scoped
+key differs, global keys ignored, a key missing on one side compares as missing, values trimmed.
+The session resets when Wind closes: at start the core calls `ResetSessionToProfile`
+(`src/profiles_io.h`) and rewrites the live ini from the active profile via `MakeLiveText`, unless
+`%LOCALAPPDATA%\Wind\session.keep` exists, which a self-triggered restart (engine change, profile
+switch with a model change) leaves behind and which is consumed once. The tray's Quit also compares
+files with `SessionDiffers` and prompts Save / Discard / Cancel. See
+[The settings UI](09-settings-ui.md#session-model-instant-apply-explicit-save).
 
 ### Empty file = factory defaults
 

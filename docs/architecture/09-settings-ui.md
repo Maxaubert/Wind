@@ -5,7 +5,7 @@ WebView2 host (`src/config_ui/main.cpp`) that loads a built Svelte app from `ui/
 to the magnifier core only by writing `magnifier.ini`, which the core dir-watches and
 hot-reloads, so the settings window has zero performance coupling to the tick loop and needs no
 IPC channel of its own. This chapter covers the host, the bridge message set, the schema-driven
-Svelte app, the staged-Apply model, profiles, theming, onboarding, accessibility, and how the UI
+Svelte app, the session model (instant apply, explicit Save), profiles, theming, onboarding, accessibility, and how the UI
 is tested headlessly with a Playwright mock of the WebView2 bridge.
 
 ## Why a second process
@@ -111,9 +111,13 @@ this failure mode).
 | Message | Direction | What it does |
 |---|---|---|
 | `getConfig` | request/reply `config` | Dump every ini key/value to the UI |
-| `setConfig` | fire-and-forget | Atomic ini write of one key, then mirror the profile-scoped snapshot into the active profile's file |
-| `window` | fire-and-forget | `minimize` / `close` (with `force` for Discard) / `quitWind` / `restartWind` |
-| `dirty` | fire-and-forget | Mirror the staged/unsaved flag into the host so `WM_CLOSE` (Alt+F4, system menu) can raise the confirm dialog |
+| `setConfig` | fire-and-forget | Atomic write of one key into the live ini (the session). Never touches the profile file |
+| `setConfigPersist` | fire-and-forget | Same, and also writes that single key into the active profile file (`UpdateProfileKey`). Used by keybind captures |
+| `saveSession` | request/reply `sessionSaved` | Save: write `MakeProfileText(live)` over the active profile file |
+| `discardSession` | request/reply `config` | Discard: rewrite the live ini from the profile (`MakeLiveText`) and reply with fresh `values`+`saved` |
+| `ready` | fire-and-forget | Posted two animation frames after App mounts; the host logs launch-to-first-paint |
+| `window` | fire-and-forget | `minimize` / `close` (with `force`) / `quitWind` / `restartWind` (writes `session.keep` first, see below) |
+| `dirty` | fire-and-forget | Mirror the unsaved flag into the host so `WM_CLOSE` (Alt+F4, system menu) can raise the Save / Discard / Keep prompt |
 | `openIni` | fire-and-forget | Open `magnifier.ini` with the registered `.ini` handler, Notepad fallback |
 | `exportDiagnostics` | fire-and-forget | Zip `%LOCALAPPDATA%\Wind\logs` to the Desktop and reveal it |
 | `pickExe` | request/reply `exePicked` | Native file picker; replies with the bare exe **name**, never a path, because the core matches app lists by file name (`IsExeInList`) |
@@ -133,29 +137,37 @@ characters, reserved names, and dots are rejected; see
 
 ## The Svelte app: schema-driven rows
 
-The entire settings page is generated from one data structure: `sections` in
-`ui/src/settings-schema.js`. Each section has an id, label, icon, and a list of rows; each row
-is a plain object naming its ini key, row type, label, description, and default.
-`ui/src/Settings.svelte` iterates the schema and renders each row through
-`ui/src/lib/Row.svelte`, which switches on `row.type`:
+The entire settings page is generated from one data structure: `groups` in
+`ui/src/settings-schema.js` (redesign #303). There are eight task-based groups, each with a label,
+sidebar icon, banner description and a list of cards; each card holds rows, and each row is a plain
+object naming its ini key, row type, label, description, and default. `ui/src/Settings.svelte` is
+the shell: it renders the `shell/` pieces (title bar, sidebar, banner, save capsule, cards), routes
+search through `search/`, and renders every row through `controls/SettingRow.svelte`, which
+switches on `row.type`:
 
 | Row type | Widget | Notes |
 |---|---|---|
-| `keybind` | `ui/src/lib/KeybindCapture.svelte` | Stores state under `buttonKey`/`vkKey`/`modsKey` sibling ini keys, not `row.key` (which is a `__`-prefixed placeholder); the zoom-in/zoom-out rows also carry a second `buttonKey2`/`vkKey2`/`modsKey2` slot so either binding fires the action (the core OR-combines them) |
-| `toggle` | animated SVG checkbox | Writes `1`/`0` |
-| `slider` | `input type=range` | `min`/`max`/`step`/`unit`; `unit` also feeds `aria-valuetext` |
-| `select` | `ui/src/lib/CustomSelect.svelte` | `options` + `optionLabels` (e.g. `hybrid` shown as "Auto") |
-| `segmented` | ARIA radiogroup with roving tabindex | No live rows use it after the 2026-08-21 cleanup, but the widget remains |
-| `applist` | summary + "Manage list" dialog (`ui/src/lib/AppListModal.svelte`) | One comma-separated ini string; the host's `pickExe` feeds it bare exe names |
-| `highres` | checkbox bound to `values` (the `txSamplingMode` ini key) | The combined high-resolution-cursor/MPO toggle (issue #242); only the separate "Requires restart" chip comes from `extra.mpoNeedsRestart`, since that reflects a registry value with no ini key of its own |
-| `about` | logo hero | Label-less; also gives the last section enough height for the scrollspy |
-| `color`, `button` | supported by `Row.svelte` | Currently unused by the schema |
+| `keybind` | `lib/KeybindCapture.svelte` + `controls/Keycaps.svelte` | State lives under `buttonKey`/`vkKey`/`modsKey` sibling ini keys, not `row.key` (a `__`-prefixed placeholder); zoom in/out carry a second slot (`*2` keys) that the core OR-combines |
+| `toggle` | `controls/Toggle.svelte` | Writes `1`/`0` |
+| `slider` | `controls/Slider.svelte` | `min`/`max`/`step`/`unit`; `unit` also feeds `aria-valuetext` |
+| `select` | `controls/Select.svelte` | `options` + `optionLabels` (e.g. `hybrid` shown as "Auto") |
+| `applist` | `controls/AppList.svelte` | One comma-separated ini string; the host's `pickExe` feeds it bare exe names |
+| `highres` | `controls/HighRes.svelte` | The combined high-resolution-cursor/MPO toggle (issue #242); keeps its confirm step (UAC plus restart prompt) as an inline action |
+| `engine` | `controls/EngineRow.svelte` | The Magnifier engine select; `model` is read once at launch, so it applies on an inline "Restart Wind" button, not on selection |
+| `theme` | `controls/ThemeRow.svelte` | `uiTheme`, a global key |
+| `profiles` | `general/Profiles.svelte` | Profile list and switch/create/rename/duplicate/delete |
+| `button`, `about` | `SettingRow`, `controls/About.svelte` | Actions (open ini, export diagnostics) and the logo hero |
+
+Visual tokens (colours, radii, the aurora banner) live in `ui/src/design/tokens.css`, taken from
+`docs/design/settings-2026-10/FINAL-v10-grey.html`; the reference render is `FINAL-reference.png`
+in the same folder.
 
 Row *visibility and gating* are schema flags, all evaluated in the render condition in
 `Settings.svelte`:
 
-- `advanced: true` hides the row unless the `showAdvanced` toggle is on (driven by the live
-  staged `values`, so flipping it reveals rows before Apply).
+- Advanced rows live in the Advanced group, which is always present. The old "Show advanced
+  settings" row is gone; `showAdvanced` stays a parsed-and-ignored global key. Search reaches
+  Advanced rows too.
 - `requires: 'key'` shows the row only while another value is `1` (the alternate-keybind rows
   require `altKeybinds`); `requiresNot` is the inverse.
 - `showIf: {key, eq}` shows the row only when another value equals a literal: the per-window-
@@ -198,77 +210,90 @@ vs Within the edges selects), and `mouseMarginPct` (the edge-mode margin slider)
 rows carry an `advanced` flag, so they show unconditionally. The caret/focus/edge-mode
 mechanics they drive are covered in [The cursor system](07-cursor.md).
 
-## Staged Apply, live keybinds
+## Session model: instant apply, explicit Save
 
-Settings state is two dictionaries in `Settings.svelte`: `values` (what the page shows) and
-`saved` (what the ini holds). `dirty` is a derived comparison of the two (plus the separately
-staged MPO flag), and it is mirrored to the host via `setDirty` so the host's `WM_CLOSE` guard
-covers Alt+F4 and the system menu, not just the page's own close button. `apply()` diffs and
-writes only the changed keys (`commit()`); `discard()` restores `values` from `saved`.
+Before 0.16.0 every row staged behind an Apply/Discard footer and the active profile was
+live-bound (each write mirrored into its profile file). The redesign (#303, spec
+`docs/superpowers/specs/2026-10-01-settings-redesign-design.md`) replaced that with a session:
 
-Keybinds are the deliberate exception: `KeybindCapture` rows call the `live()` setter, which
-writes `setConfig` immediately **and** updates both `values` and `saved`. The rebind takes
-effect at once (the core hot-reloads, the hook stops swallowing the old binding, the user can
-try the new one immediately), and because `saved` moved too, keybind changes never show as
-dirty in the Apply footer. Everything else stages.
+- **The live ini is the session.** Every change writes `magnifier.ini` at once (`setConfig`) and
+  the core hot-reloads it, so a slider takes effect as it moves. It is not mirrored into the
+  profile file.
+- **The profile file is the saved state.** Save (`saveSession`) writes `MakeProfileText(live)`
+  over the active profile file; Discard (`discardSession`) rewrites the live ini from it
+  (`MakeLiveText`, globals kept).
+- **Unsaved = the live ini differs from the profile** in profile-scoped keys. The host computes
+  `values` (live) and `saved` (profile) in `SessionPayload` and sends both; the page derives the
+  save capsule from `changedKeys(values, saved)` in `ui/src/session.js` (pure, defaults filled in
+  on both sides so an absent key never counts as a change). The C++ twin is
+  `wind::SessionDiffers` in `src/profiles.*`, which the tray and the core use.
+- **Reset when Wind closes.** At start the core calls `ResetSessionToProfile`
+  (`src/profiles_io.h`), rewriting the live ini from the active profile before parsing it, so
+  unsaved changes never survive a restart or a crash (Windows shutdown and logoff have no
+  prompt; the next start resets). A restart Wind triggers itself (engine change, profile switch
+  with a model change) writes `%LOCALAPPDATA%\Wind\session.keep` first; the starting core
+  consumes it, skips the reset once and the session survives.
+- **Keybinds persist at once.** `KeybindCapture` writes `setConfigPersist`, which updates the live
+  ini and the single key in the profile file, so a capture survives Discard and a later Save
+  loses nothing while other changes stay unsaved. Global keys (`profile`, `onboarded`, `uiTheme`,
+  `showAdvanced`) are written directly and never count as unsaved.
+- **Three prompts** (`ui/src/prompts/Prompt.svelte`, focus-trapped via `lib/dialog.js`):
+  closing Settings with unsaved changes offers Save / Discard / Keep for this session (the
+  window closes, the changes stay live until Wind quits; Esc cancels); switching profile offers
+  Save / Discard / Cancel. Quitting Wind from the tray decides from the files, not from the UI:
+  `ConfirmQuit` in `src/tray_app/tray_menu.cpp` compares live against the profile with
+  `SessionDiffers` and shows a TaskDialog (Save / Discard / Cancel) even when Settings is closed.
 
-Two settings need extra machinery inside `apply()`:
+The `model` engine switch and the MPO registry value keep their special handling. `model` is read
+once at launch, so the engine row writes the ini, then `restartWind` makes the host write
+`session.keep` and launch `Wind.exe` again; the new instance evicts the incumbent through the
+`Local\Wind_QuitRequest` handshake in `src/main.cpp`. On `restartFailed` the UI reverts the
+dropdown and the ini to the running model, preserving the invariant that the ini's model matches
+the running process. MPO is a registry value, not an ini key, and `highres` tracks three booleans
+whose conflation is a documented bug class: `mpoLive` (what the registry says), `mpoStaged` (what
+the toggle shows) and `mpoBoot` (what DWM loaded at boot, the only honest basis for "requires
+restart"). The elevated write is awaited; a cancelled UAC prompt comes back as the re-read
+unchanged state and reverts the toggle.
 
-- **`model`** is read once at Wind's launch, so a hot-reload cannot switch it. Apply writes the
-  ini first (the relaunched Wind reads it at startup), then sends `restartWind`; the host just
-  launches `Wind.exe` again and the new instance evicts the incumbent through the
-  `Local\Wind_QuitRequest` handshake in `src/main.cpp`. If the launch fails the host replies
-  `restartFailed`, and the UI reverts both the dropdown and the ini to the still-running model
-  (`runningModel`, captured before `commit()` moved `saved.model` forward), preserving the
-  invariant that the ini's model always matches the running process.
-- **MPO** is a registry value, not an ini key, and `Settings.svelte` tracks *three* booleans
-  whose conflation is a documented bug class: `mpoLive` (what the registry says, decides whether
-  Apply must write), `mpoStaged` (what the toggle shows), and `mpoBoot` (what DWM actually
-  loaded at boot, the only honest basis for "requires restart"). Apply awaits the elevated
-  write first; a cancelled UAC prompt comes back as the re-read unchanged state and reverts the
-  toggle instead of showing a change that never happened.
-
-**Sequence of a normal Apply (one changed slider), from click to core reload.**
+**Sequence of one slider change, then Save.**
 
 ```mermaid
 sequenceDiagram
   participant U as User
   participant S as Settings.svelte
-  participant B as bridge.js
   participant H as WindConfig host<br/>HandleWebMessage
-  participant I as magnifier.ini
-  participant P as active profile file
+  participant I as magnifier.ini (session)
+  participant P as active profile file (saved)
   participant W as Wind.exe RunTick
-  U->>S: click Apply
-  S->>S: commit(): diff values vs saved
-  S->>B: setConfig(key, value) per changed key
-  B->>H: postMessage {type: setConfig}
+  U->>S: drag slider
+  S->>H: setConfig(key, value)
   H->>I: WriteFileAtomic(UpdateIniText(...))
-  H->>P: mirror profile-scoped snapshot (MakeProfileText)
   W->>I: dir-watch fires, read ini
-  W->>W: StripUiOnlyKeys fingerprint changed?
-  W->>W: yes: LoadConfig, rebind hooks, keep zoom center
-  S->>S: saved = values, announce "Settings applied"
+  W->>W: StripUiOnlyKeys fingerprint changed? yes: reload, keep zoom center
+  S->>S: values differ from saved: capsule shows unsaved
+  U->>S: click Save
+  S->>H: saveSession
+  H->>P: WriteTextFileAtomic(MakeProfileText(live))
+  H->>S: sessionSaved ok
+  S->>S: saved = values
 ```
 
-Note what is *absent*: no acknowledgment flows back for `setConfig`. The write is atomic, the
-UI optimistically advances `saved`, and the core's hot-reload is the delivery mechanism. The
-profile mirror in the host is what makes profiles live-bound: the active profile's file always
-equals the current settings (globals stripped), so switching away and back loses nothing.
+No acknowledgment flows back for `setConfig` itself (a failed write posts `configWriteFailed`,
+which the page surfaces). The core's hot-reload is the delivery mechanism.
 
-## Profiles in the titlebar
+## Profiles
 
-`ui/src/lib/ProfileMenu.svelte` renders the active profile as a titlebar dropdown with
-switch/create/rename/duplicate/delete. The interesting logic is in `Settings.svelte`'s
-`profileAction`: operations that replace the staged settings wholesale (switch, create, delete
-of the *active* profile) route through the same unsaved-changes guard as closing, while rename,
-duplicate, and deleting an inactive profile skip it. After a mutating operation the UI reloads
-the whole config (`loadValues`), deliberately *before* checking the reply's `ok`, because a
-failed operation can still have rewritten the live ini (a switch that landed but whose model
-restart failed) and stale staged values would then Apply the old profile's settings on top of
-the new one. A `push:true` profiles message (tray switch under an open window) refreshes the
-titlebar immediately; if edits are staged it raises a notice and arms `pendingReload` so
-Discard reloads the new profile's values instead of restoring a snapshot of the old one.
+`ui/src/shell/TitleBar.svelte` shows the active profile, and `ui/src/general/Profiles.svelte`
+(General group) manages them: switch/create/rename/duplicate/delete. The interesting logic is in
+`Settings.svelte`'s `profileAction`: operations that replace the live settings wholesale (switch,
+create, delete of the *active* profile) route through the unsaved-changes prompt
+(Save / Discard / Cancel), while rename, duplicate, and deleting an inactive profile skip it.
+After a mutating operation the UI reloads the whole config (`loadValues`), deliberately *before*
+checking the reply's `ok`, because a failed operation can still have rewritten the live ini (a
+switch that landed but whose model restart failed) and stale values would then be compared
+against the wrong profile. A `push:true` profiles message (tray switch under an open window)
+refreshes the titlebar and reloads `values`/`saved`; a tray switch rewrites the live ini from the
+new profile, so unsaved edits are gone by then and the capsule resets.
 Creating a profile lands the user on the Keybinds section, because a factory-defaults profile
 has no zoom keys bound and fixing that is the first thing to do.
 
@@ -296,12 +321,12 @@ magnifier running in the tray.
 `ui/tests/a11y.spec.js`, whose header tells the origin story: every control in the settings
 list was anonymous, because labels and descriptions are sibling `<div>`s of their controls, so
 a screen reader announced "checkbox, checked" with no clue which of ~24 settings it had
-reached. The fix concentrates in `Row.svelte`, which the whole schema flows through, so wiring
+reached. The fix concentrates in `controls/SettingRow.svelte`, which the whole schema flows through, so wiring
 ids there named every row at once: controls whose text is not their name get
 `aria-labelledby` pointing at the row label; controls whose text is their *value* (select
 trigger, keycap, "Manage list") get labelledby listing both label and value ids. On top of
 that: a single polite `aria-live` region in `Settings.svelte` announces everything that changes
-the page without moving focus (advanced rows toggling, model swaps, Apply/Discard, profile
+the page without moving focus (model swaps, Save/Discard, profile
 switches), with a zero-width-space trick so repeating the same message still re-announces; rail
 navigation moves focus to the target section's `tabindex="-1"` heading; every modal uses the
 `ui/src/lib/dialog.js` action (focus trap, Escape, restore); and the segmented widget is a real
@@ -311,18 +336,17 @@ altitude: none of it is visible in a screenshot.
 
 ## Testing: Playwright against a mocked bridge
 
-The UI tests (`ui/tests/settings.spec.js`, `a11y.spec.js`, `onboarding.spec.js`) run the real
+The UI tests (`ui/tests/*.spec.js`: settings, session, shell, search, schema, a11y, onboarding, keybind-rules) run the real
 Svelte app in a real Chromium via Playwright, with the one Windows-specific piece replaced: an
 `addInitScript` installs a fake `window.chrome.webview` whose `postMessage` implements the
 host's half of the bridge in-page. The mock answers `getConfig` with a canned config
-(`showAdvanced: '1'` and `model: 'render'` on purpose, so advanced and conditional rows render
-and can be asserted on), records every `setConfig` into `window.__sets` for assertions like
-"changes stage until Apply", and simulates the failure modes the C++ host can produce:
+(a live and a saved snapshot, so unsaved states can be set up), records every message into
+`window.__msgs` for assertions like "a slider writes the live ini at once", and simulates the failure modes the C++ host can produce:
 `__restartFail` for a failed model relaunch, `__mpoOk = false` for a dismissed UAC prompt,
 `__profileFail` for any profile op, and `__pick` for what the "file picker" returns.
 `bridge.js` itself needs no test shim beyond this because it touches nothing but
 `window.chrome.webview` (plus a `window.__windMock` hook for ad-hoc harnesses). This is the
-project's verification-loop rule applied to the UI: the staged-Apply logic, the MPO three-state
+project's verification-loop rule applied to the UI: the session model, the MPO three-state
 dance, the profile guard, and the a11y contract are all asserted headlessly by `npm test` in
 `ui/` (Playwright starts the Vite dev server itself), with no magnifier and no WebView2
 involved. CI currently runs only the doctest suite; the UI suite is a local pre-commit gate. What the mock cannot
@@ -336,12 +360,15 @@ into the doctest build instead.
 - `src/config_ui/wind_watchdog.h`: pure close-on-Wind-gone decision, unit-tested.
 - `src/config_ui/mpo.h`, `src/mpo_boot.h`: MPO registry read/write and the boot-state record.
 - `ui/src/settings-schema.js`: every row on the page, plus the 2026-08-21 cleanup changelog.
-- `ui/src/Settings.svelte`: staged Apply, dirty tracking, profiles, announcements, dialogs.
-- `ui/src/lib/Row.svelte`: the row-type switch and the accessible-naming rules.
+- `ui/src/Settings.svelte`: the shell, save/discard, profiles, announcements, prompts.
+- `ui/src/session.js`: pure unsaved-change comparison (`changedKeys`).
+- `ui/src/controls/SettingRow.svelte`: the row-type switch and the accessible-naming rules.
+- `ui/src/design/tokens.css`: the visual tokens from the design reference.
 - `ui/src/bridge.js`, `ui/src/theme.js`, `ui/src/Onboarding.svelte`.
 - `ui/tests/a11y.spec.js`: the living a11y spec; `ui/tests/settings.spec.js`: the bridge mock.
 - Specs: [config UI polish + onboarding](../superpowers/specs/2026-05-27-config-ui-polish-onboarding-design.md),
-  [profiles](../superpowers/specs/2026-08-12-profiles-design.md).
+  [profiles](../superpowers/specs/2026-08-12-profiles-design.md),
+  [settings redesign and session model](../superpowers/specs/2026-10-01-settings-redesign-design.md).
 - Related chapters: [Overview](01-overview.md), [The tick loop](02-tick-loop.md) (hot reload),
   [Config and profiles](08-config-profiles.md) (ini resolution, profile file machinery),
   [Build, test, release](11-build-test-release.md) (`build.bat config`, the npm build).
