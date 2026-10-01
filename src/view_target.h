@@ -29,6 +29,14 @@ struct ViewOwnerState {
     // the live snapshot instead let an owner that already followed one keystroke keep chasing every
     // later caret move, a scroll included, and an app-driven focus change (review 2026-09-30).
     TrackSnapshot target;
+    // Re-baseline at zoom-in (#310). StepViewOwner runs only while zoomed, so lastSeq went stale
+    // across the 1x gap: a caret event published just before the previous zoom-out read, at the
+    // next zoom-in's first tick and within a second of any key, as new typing - the view lurched to
+    // the caret and the pointer was warped back (~3% of zoom-ins, same millisecond as the session
+    // start). On the tracking-active rising edge lastSeq simply takes the current seq; nothing is
+    // swallowed after that. The caller clears wasTracking on every 1x tick (main.cpp); a state
+    // that never saw one counts as already tracking.
+    bool wasTracking = true;
 };
 struct ViewOwnerInputs {
     bool enabled = false;         // zoomed && !game && !inspect && !locked
@@ -40,6 +48,7 @@ struct ViewOwnerInputs {
     double dtMs = 0;
     TrackSnapshot snap;
     bool panning = false;         // a pan key is held or its motion is still gliding (#287)
+    bool trackActive = true;      // caret/focus tracking is on this tick (its rising edge re-baselines)
 };
 inline constexpr double kMouseTakeoverPx = 3.0, kMouseTakeoverWindowMs = 100.0;
 inline constexpr double kClickQuietMs = 1000.0;
@@ -48,6 +57,9 @@ inline constexpr double kKeyDrivenMs = 1000.0;
 inline ViewOwner StepViewOwner(ViewOwnerState& s, const ViewOwnerInputs& in) {
     s.warpPointer = false;
     const bool detached = s.owner != ViewOwner::Mouse;
+    const bool tracking = in.enabled && in.trackActive;
+    if (tracking && !s.wasTracking) s.lastSeq = in.snap.seq;   // rising edge: baseline, not an event
+    s.wasTracking = tracking;
     if (!in.enabled) {
         s.owner = ViewOwner::Mouse;   // zoomed out / game / Inspect: the mouse path resumes
         s.lastSeq = in.snap.seq;      // events seen while disabled never fire later
@@ -80,7 +92,7 @@ inline ViewOwner StepViewOwner(ViewOwnerState& s, const ViewOwnerInputs& in) {
         return s.owner;
     }
     // A new tracking event, unless a recent click caused it.
-    if (in.snap.seq != s.lastSeq) {
+    if (in.trackActive && in.snap.seq != s.lastSeq) {   // tracking off: nothing takes the view
         s.lastSeq = in.snap.seq;
         if (in.msSinceButton >= kClickQuietMs && in.msSinceKey <= kKeyDrivenMs) {
             if (in.snap.kind == TrackKind::Caret && in.trackCaret) { s.owner = ViewOwner::Caret; s.target = in.snap; }

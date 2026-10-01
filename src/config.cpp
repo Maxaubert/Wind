@@ -147,6 +147,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "panDownVk")        c.panDownVk = std::stoi(val);
             else if (key == "panDownMods")      c.panDownMods = std::stoi(val);
             else if (key == "panSpeed")         c.panSpeed = std::stod(val);
+            else if (key == "zoomTrace")        c.zoomTrace = std::stoi(val);
             // The chain is split in two: MSVC caps if/else nesting depth (C1061). Keys are unique,
             // so a second chain changes nothing.
             if (key == "hideCursorVk")     c.hideCursorVk = std::stoi(val);

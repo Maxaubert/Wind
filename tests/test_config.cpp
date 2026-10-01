@@ -579,3 +579,8 @@ TEST_CASE("every keybind takes two or three modifiers plus one key (#307)") {
     // A letter alone for Inspect still reads as unbound (it would stop you typing it).
     CHECK(ParseConfig("cursorLockVk=82\n").cursorLockVk == 0);
 }
+
+TEST_CASE("zoomTrace is off by default and parses (#310)") {
+    CHECK(ParseConfig("").zoomTrace == 0);
+    CHECK(ParseConfig("zoomTrace=1\n").zoomTrace == 1);
+}

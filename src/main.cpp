@@ -304,6 +304,15 @@ struct TickState {
     // one for wall-clock gates), and when the view was last active (the settle window).
     bool   wokeFromIdle = false;
     unsigned long long lastActiveMs = 0;
+    // Zoom timeline (#310, zoomTrace=1): one log line per zoom-in and per zoom-out.
+    double lastTickWorkMs = 0;      // the previous RunTick's own work time
+    struct ZoomTimeline {
+        bool armed = false, outPending = false; int step = 0;
+        long long press = 0, start = 0;
+        double setActiveMs = 0, presentMs = 0, outSetActiveMs = 0, work[7] = {};
+        unsigned long long cFrame0 = 0; long long firstComp = 0; unsigned comps = 0;
+        const char* engine = ""; bool warm = false; double bridgeMs = 0, ensureMs = 0;
+    } zt;
     bool   panelFreeze = false;    // #283: the real pointer is frozen and moved by Wind
     double panelX = 0, panelY = 0; // its desktop position (sub-pixel)
     RECT   panelSavedClip{};       // the clip to give back when the panel closes
@@ -899,7 +908,46 @@ static bool IdleNow(TickState& t) {
     return wind::IdleSleepOk(ii);
 }
 
+// RunTick's own work time, for the zoom timeline (#310): two QPC reads per tick.
+struct TickWorkTimer {
+    TickState& t; LARGE_INTEGER s;
+    explicit TickWorkTimer(TickState& x) : t(x) { QueryPerformanceCounter(&s); }
+    ~TickWorkTimer() {
+        LARGE_INTEGER e; QueryPerformanceCounter(&e);
+        t.lastTickWorkMs = double(e.QuadPart - s.QuadPart) * 1000.0 / double(t.freq.QuadPart);
+    }
+};
+static double QpcMs(const TickState& t, long long a, long long b) {
+    return double(b - a) * 1000.0 / double(t.freq.QuadPart);
+}
+// The next tick after a zoom-in/out: gather the composite and per-tick work, log when complete.
+static void ZoomTimelineStep(TickState& t, long long nowQpc) {
+    auto& z = t.zt;
+    if (z.outPending) {
+        z.outPending = false;
+        wind::Log(wind::LogLevel::Info, "zoomtrace", "out: teardown tick %.2f ms (setActive(false) %.2f ms)",
+                  t.lastTickWorkMs, z.outSetActiveMs);
+    }
+    if (!z.armed) return;
+    z.work[z.step] = t.lastTickWorkMs;   // step 0 = the enter tick itself
+    DWM_TIMING_INFO ti{}; ti.cbSize = sizeof(ti);
+    if (SUCCEEDED(DwmGetCompositionTimingInfo(nullptr, &ti)) && z.cFrame0 && ti.cFrame > z.cFrame0 && !z.firstComp) {
+        z.firstComp = (long long)ti.qpcCompose; z.comps = (unsigned)(ti.cFrame - z.cFrame0);
+    }
+    if (++z.step < 7) return;
+    z.armed = false;
+    const double pressToTick = z.press ? QpcMs(t, z.press, z.start) : -1.0;
+    const double pressToComp = (z.press && z.firstComp) ? QpcMs(t, z.press, z.firstComp) : -1.0;
+    wind::Log(wind::LogLevel::Info, "zoomtrace",
+              "in: engine=%s warm=%d press->tick=%.2f setActive=%.2f (bridge=%.2f ensureMag=%.2f) "
+              "present=%.2f enterTick=%.2f press->firstComposite=%.2f (composites seen %u) next=%.1f,%.1f,%.1f,%.1f,%.1f,%.1f",
+              z.engine, (int)z.warm, pressToTick, z.setActiveMs, z.bridgeMs, z.ensureMs, z.presentMs,
+              z.work[0], pressToComp, z.comps, z.work[1], z.work[2], z.work[3], z.work[4], z.work[5], z.work[6]);
+    (void)nowQpc;
+}
+
 static void RunTick(TickState& t) {
+    TickWorkTimer workTimer(t);
     // Idle (1x) colour filter; a zoomed tick re-decides below with the engine known.
     if (!t.prevActive) UpdateColorFilter(t, false, false, nullptr);
     LARGE_INTEGER now;
@@ -911,6 +959,9 @@ static void RunTick(TickState& t) {
     // wake tick ramps from its first frame instead of jumping, and the tray/diagnostics readouts
     // never report the sleep as a hitch.
     const double rawDt = dt;
+    if (t.cfg.zoomTrace) ZoomTimelineStep(t, now.QuadPart);
+    // A press stamp nobody zoomed on (a recenter key, a click bind that did not match) goes stale.
+    if (!t.prevActive) { const long long p = g_input.peekPressQpc(); if (p && QpcMs(t, p, now.QuadPart) > 500.0) g_input.takePressQpc(); }
     const bool woke = t.wokeFromIdle;   // readouts skip this tick: the sleep is not a frame
     if (t.wokeFromIdle) {
         t.wokeFromIdle = false;
@@ -1279,6 +1330,17 @@ static void RunTick(TickState& t) {
     bool inspect = t.cursorLock.locked();
     bool active = zoomed || inspect;                 // overlay runs while zoomed OR Inspect-frozen
     if (active) t.lastActiveMs = GetTickCount64();   // event-driven idle settle window (#71)
+    else t.viewOwner.wasTracking = false;            // 1x only: the next zoom-in re-baselines the tracker (#310)
+    if (active && !t.prevActive && t.cfg.zoomTrace) {  // zoom timeline (#310): arm on the enter tick
+        auto& z = t.zt;
+        z = TickState::ZoomTimeline{};
+        z.armed = true; z.press = g_input.takePressQpc(); z.start = now.QuadPart;
+        z.engine = dynamic_cast<TransformModel*>(t.model) ? "transform"
+                 : dynamic_cast<RenderModel*>(t.model) ? "render" : "other";
+        // Warm/cold must be read now: the first present below builds the context, so setActive's
+        // own view of it is always "warm".
+        if (auto* tm = dynamic_cast<TransformModel*>(t.mTransform ? t.mTransform : t.model)) z.warm = tm->contextLive();
+    }
     // Keyboard panning (#287): the hook swallows pan keys only while this is set, so at 1x
     // the pan keys reach the app (e.g. Ctrl+Alt+Left/Right = IntelliJ navigate back/forward). Mouselook games and Inspect
     // keep them too. Published once per tick, before anything reads the pan keys.
@@ -1732,6 +1794,7 @@ static void RunTick(TickState& t) {
             wind::ViewOwnerInputs vi;
             vi.enabled = trackEnabled || panEnabled;
             vi.panning = panEnabled && t.keyPan.active();
+            vi.trackActive = trackEnabled;
             vi.trackCaret = t.cfg.trackCaret != 0; vi.trackFocus = t.cfg.trackFocus != 0;
             vi.mouseDx = curDx; vi.mouseDy = curDy;
             vi.buttonDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) ||
@@ -2187,7 +2250,11 @@ static void RunTick(TickState& t) {
             t.presentAccum = 0.0;
         }
         if (doPresent) {
+            LARGE_INTEGER zp0; if (t.zt.armed && t.zt.step == 0) QueryPerformanceCounter(&zp0);
             t.model->present(r, lvl, t.cfg, t.mon, ex);      // render+present (never blocks the ramp)
+            if (t.zt.armed && t.zt.step == 0 && t.zt.presentMs == 0) {
+                LARGE_INTEGER zp1; QueryPerformanceCounter(&zp1); t.zt.presentMs = QpcMs(t, zp0.QuadPart, zp1.QuadPart);
+            }
             // The hook covers cursor MOVEMENT; this covers everything else that must still land -
             // a level ramp, or a settled view with the mouse held still. Same function, same
             // formula, same dedupe cache as the hook path, so it writes only when the hook has not
@@ -2249,7 +2316,16 @@ static void RunTick(TickState& t) {
                 }
             }
         } else if (enterActive) {
+            LARGE_INTEGER zs0; QueryPerformanceCounter(&zs0);
             t.model->setActive(true);   // transform: reveal immediately, no capture priming
+            if (t.zt.armed) {
+                LARGE_INTEGER zs1; QueryPerformanceCounter(&zs1); t.zt.setActiveMs = QpcMs(t, zs0.QuadPart, zs1.QuadPart);
+                if (auto* tm = dynamic_cast<TransformModel*>(t.model)) {
+                    const auto sp = tm->lastEnter(); t.zt.bridgeMs = sp.bridgeMs; t.zt.ensureMs = sp.ensureMagMs;
+                }
+                DWM_TIMING_INFO ti{}; ti.cbSize = sizeof(ti);   // the composite count the first write must beat
+                if (SUCCEEDED(DwmGetCompositionTimingInfo(nullptr, &ti))) t.zt.cFrame0 = ti.cFrame;
+            }
         }
         // Handover overlap: the outgoing engine rests a few ticks after the incoming one is
         // live, so the crossover never composites a bare unmagnified frame (see instant switch).
@@ -2343,7 +2419,12 @@ static void RunTick(TickState& t) {
         // DWM effect back BEFORE the overlay hides: worst case one double-filtered frame, never a
         // bright unfiltered one (review 2026-09-30).
         UpdateColorFilter(t, false, false, nullptr);
+        LARGE_INTEGER zo0; QueryPerformanceCounter(&zo0);
         t.model->setActive(false);
+        if (t.cfg.zoomTrace) {
+            LARGE_INTEGER zo1; QueryPerformanceCounter(&zo1);
+            t.zt.outSetActiveMs = QpcMs(t, zo0.QuadPart, zo1.QuadPart); t.zt.outPending = true;
+        }
         SetSystemCursorHidden(t, t.model, false);
         t.outlineZoneSec = 0.0;                       // zoom-out clears the low-zoom dwell (no banked partial)
         t.gamePacing = false;                         // idle: normal timer pacing

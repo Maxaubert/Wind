@@ -326,6 +326,9 @@ void TransformModel::edgeClipManage(bool wantActive) {
 void TransformModel::setActive(bool active) {
     active_ = active;
     if (active) {
+        LARGE_INTEGER zf, z0, z1, z2;   // zoom timeline split (#310): a few QPC reads, always on
+        QueryPerformanceFrequency(&zf); QueryPerformanceCounter(&z0);
+        lastEnter_.wasWarm = magUp_;
         // Blank the system cursor set BEFORE the magnification context exists (issue #189): the
         // blanker swaps 14 system cursors, and under a LIVE context every cursor change costs a
         // DWM re-composite (the documented per-change tax) - running the burst inside the fresh
@@ -359,10 +362,14 @@ void TransformModel::setActive(bool active) {
             }
             blanker_->blank();
         }
+        QueryPerformanceCounter(&z1);
         // (A sub-pixel "session warm-up" write here was tried and measured WORSE: 4 spike frames
         // per 3 cycles vs 2, and it added zoom-out spikes. Entering magnification costs ~36ms
         // once per zoom-in regardless - that is DWM building its machinery.)
         ensureMag();
+        QueryPerformanceCounter(&z2);
+        lastEnter_.bridgeMs = double(z1.QuadPart - z0.QuadPart) * 1000.0 / zf.QuadPart;
+        lastEnter_.ensureMagMs = double(z2.QuadPart - z1.QuadPart) * 1000.0 / zf.QuadPart;
         identityParked_ = false;
         idleSinceMs_ = 0;
         return;

@@ -45,6 +45,13 @@ static WheelAccum g_wheelAcc;   // hook thread only
 // always AFTER the state the main loop will read has been published.
 static HANDLE g_idleWake = nullptr;
 static inline void WakeMain() { if (g_idleWake) SetEvent(g_idleWake); }
+// Zoom timeline (#310): the first press since the main loop last took it. One QPC read and a CAS.
+static std::atomic<long long> g_pressQpc{0};
+static inline void StampPress() {
+    LARGE_INTEGER q; QueryPerformanceCounter(&q);
+    long long zero = 0;
+    g_pressQpc.compare_exchange_strong(zero, q.QuadPart, std::memory_order_relaxed);
+}
 // One mask keystroke per Alt/Win hold is enough (#301): set when injected, cleared when the keyboard
 // hook sees Alt or Win released. Without it a spun wheel injected two key events per notch.
 static std::atomic<bool> g_maskedThisHold{false};
@@ -112,7 +119,9 @@ static void PublishButtonHeld(InputState& st) {
     }
     st.inHeldMods.store(inM, std::memory_order_relaxed);
     st.outHeldMods.store(outM, std::memory_order_relaxed);
+    const bool wasAny = st.inHeld.load() || st.outHeld.load();
     const bool changed = st.inHeld.load() != in || st.outHeld.load() != out;
+    if (!wasAny && (in || out)) StampPress();   // a hold just started
     st.inHeld.store(in);
     st.outHeld.store(out);
     g_publishLock.clear(std::memory_order_release);
@@ -293,7 +302,7 @@ static LRESULT CALLBACK KbProc(int code, WPARAM wParam, LPARAM lParam) {
                 // and does its own rising-edge work for taps.
                 const bool firstDown = !g_kbPressed[vk].exchange(true);
                 g_router->noteHookKeyDown(vk);   // recency guard for the raw UP safety net
-                if (firstDown) WakeMain();       // edges only: auto-repeat never wakes the loop (#71)
+                if (firstDown) { StampPress(); WakeMain(); }   // edges only: auto-repeat never wakes the loop (#71)
                 if (firstDown) {
                     // Decide ONCE per press: swallow only if a bind on this key has all its modifiers
                     // held now (#285: Ctrl+F1 must not eat a plain F1). Auto-repeat then follows that
@@ -381,7 +390,7 @@ static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
                     const int held = HeldModsNow();
                     if (ModsSatisfied(wm, held)) {
                         const int steps = g_wheelAcc.add((short)HIWORD(mi->mouseData));
-                        if (steps) { g_router->state().wheelSteps.fetch_add(steps, std::memory_order_relaxed); WakeMain(); }
+                        if (steps) { StampPress(); g_router->state().wheelSteps.fetch_add(steps, std::memory_order_relaxed); WakeMain(); }
                         // Pass-through apps (and swallow off) still zoom, and get the notch too.
                         if (g_router->swallowEnabled() && g_router->keyboardHookWanted()) {
                             if (NeedsMaskKey(held)) InjectMaskKey();
@@ -644,6 +653,8 @@ void InputRouter::stop() {
     if (g_idleWake) { CloseHandle(g_idleWake); g_idleWake = nullptr; }
 }
 void* InputRouter::wakeEvent() const { return g_idleWake; }
+long long InputRouter::takePressQpc() { return g_pressQpc.exchange(0, std::memory_order_relaxed); }
+long long InputRouter::peekPressQpc() const { return g_pressQpc.load(std::memory_order_relaxed); }
 bool InputRouter::anyBoundKeyPressed() const {
     const int vks[] = { kbZoomInVk_.load(), kbZoomInVk2_.load(), kbZoomOutVk_.load(), kbZoomOutVk2_.load(),
                         kbRecenterVk_.load(), kbCursorLockVk_.load() };

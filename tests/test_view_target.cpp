@@ -136,3 +136,31 @@ TEST_CASE("panning works with caret and focus tracking both off (#287)") {
     ViewOwnerInputs in = Base(); in.trackCaret = false; in.trackFocus = false; in.panning = true;
     CHECK(StepViewOwner(s, in) == ViewOwner::Keys);
 }
+
+TEST_CASE("zoom-in re-baselines: an event from before the zoom never takes the view (#310)") {
+    ViewOwnerState s;
+    ViewOwnerInputs in = Base(); in.enabled = false; StepViewOwner(s, in);   // 1x: seq 0 seen
+    s.wasTracking = false;                                       // main clears it on every 1x tick
+    in.enabled = true; in.msSinceKey = 200;                      // zoom-in shortly after typing
+    in.snap = Snap(TrackKind::Caret, 7);                         // published before the zoom-in
+    CHECK(StepViewOwner(s, in) == ViewOwner::Mouse);
+    CHECK(StepViewOwner(s, in) == ViewOwner::Mouse);
+}
+TEST_CASE("right after the zoom-in a typed caret move still takes the view: nothing swallowed (#310)") {
+    ViewOwnerState s;
+    ViewOwnerInputs in = Base(); in.enabled = false; StepViewOwner(s, in);
+    s.wasTracking = false;
+    in.enabled = true; in.msSinceKey = 200; in.snap = Snap(TrackKind::Caret, 1);
+    StepViewOwner(s, in);                                        // the baseline tick
+    in.snap = Snap(TrackKind::Caret, 2); in.msSinceKey = 5;      // typed on the very next tick
+    CHECK(StepViewOwner(s, in) == ViewOwner::Caret);
+}
+TEST_CASE("tracking turning on mid-zoom (alt-tab back from a game) also re-baselines (#310)") {
+    ViewOwnerState s;
+    ViewOwnerInputs in = Base(); in.trackActive = false; in.snap = Snap(TrackKind::Caret, 1);
+    StepViewOwner(s, in);
+    in.trackActive = true; in.snap = Snap(TrackKind::Caret, 4); in.msSinceKey = 100;
+    CHECK(StepViewOwner(s, in) == ViewOwner::Mouse);
+    in.snap = Snap(TrackKind::Caret, 5);
+    CHECK(StepViewOwner(s, in) == ViewOwner::Caret);
+}

@@ -84,6 +84,10 @@ public:
     // end a zoom (bound key down/up, a button or click bind's held state changing, a wheel step).
     // The main loop sleeps on it at 1x. Null until start(); valid for the router's lifetime after.
     void* wakeEvent() const;
+    // Zoom timeline (#310): QPC of the first press edge since the last take (a bound key's first
+    // down, a button/click bind starting a hold, a wheel zoom step). 0 = none.
+    long long takePressQpc();
+    long long peekPressQpc() const;
     // Any configured keyboard bind physically down per the hook (magnify-model holds, quick zoom).
     bool anyBoundKeyPressed() const;
     // Swallowed pan presses since the last drain, per slot: a tap whose down AND up both land
