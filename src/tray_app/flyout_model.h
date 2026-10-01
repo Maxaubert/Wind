@@ -79,6 +79,21 @@ inline Placement PlaceFlyout(const IRect& icon, const IRect& monitor, const IRec
     return p;
 }
 
+// Top-left of a w x h window opened at the click point, the way the old TrackPopupMenu tray menu
+// was (Max, 2026-10-02: "same position as the old tray menu", including when the icon lives in the
+// overflow flyout). Like a popup menu: the window's corner sits on the point, right and down by
+// default, flipped left when it would cross the monitor's right edge and up when it would cross the
+// bottom, then clamped to the monitor. Arguments are physical pixels.
+inline Placement PlaceAtPoint(int px, int py, const IRect& monitor, int w, int h) {
+    Placement p;
+    p.x = px; p.y = py;
+    if (p.x + w > monitor.r) p.x = px - w;
+    if (p.y + h > monitor.b) p.y = py - h;
+    p.x = ClampInt(p.x, monitor.l, monitor.r - w);
+    p.y = ClampInt(p.y, monitor.t, monitor.b - h);
+    return p;
+}
+
 // Dismissal: a click on the tray icon while the flyout is open first DEACTIVATES it (the flyout
 // closes, on button DOWN), then the icon's own click arrives (WM_TRAY on button UP, legacy
 // callback) and would reopen it. Two cases make that up-click the same click:

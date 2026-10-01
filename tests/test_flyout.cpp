@@ -369,3 +369,29 @@ TEST_CASE("every icon parses to at least one drawn segment") {
             for (int k = 0; k < 7; ++k) CHECK_MESSAGE(std::abs(s.v[k]) < 20.f, icons[i].id);
     }
 }
+
+// ---------------------------------------------------------------- click-point placement (like the old menu)
+
+TEST_CASE("click placement: a click on the taskbar opens up and to the right of the point") {
+    const Placement p = PlaceAtPoint(1500, 1060, kMon, 300, 285);
+    CHECK(p.x == 1500);
+    CHECK(p.y == 1060 - 285);
+}
+
+TEST_CASE("click placement: near the right edge it flips to the left of the point") {
+    const Placement p = PlaceAtPoint(1800, 1060, kMon, 300, 285);
+    CHECK(p.x == 1800 - 300);
+    CHECK(p.y == 1060 - 285);
+}
+
+TEST_CASE("click placement: an overflow-flyout click high on the screen opens down and right") {
+    const Placement p = PlaceAtPoint(1500, 240, kMon, 300, 285);
+    CHECK(p.x == 1500);
+    CHECK(p.y == 240);
+}
+
+TEST_CASE("click placement: never leaves the monitor") {
+    const Placement p = PlaceAtPoint(100, 50, IRect{0, 0, 250, 200}, 300, 285);
+    CHECK(p.x == 0);
+    CHECK(p.y == 0);
+}

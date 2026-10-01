@@ -690,13 +690,10 @@ bool OpenFlyout() {
     auto pit = s->ini.find("profile");
     s->profile = pit == s->ini.end() ? std::wstring() : wind::WidenUtf8(pit->second);
 
-    // Anchor: the icon, or the cursor when the shell cannot say (icon in the overflow flyout).
-    RECT icon{};
-    if (!GetIconRect(&icon)) {
-        POINT p; GetCursorPos(&p);
-        icon = { p.x, p.y, p.x + 1, p.y + 1 };
-    }
-    HMONITOR mon = MonitorFromRect(&icon, MONITOR_DEFAULTTONEAREST);
+    // Anchor: the click point, exactly like the old popup menu (2026-10-02). The icon rect put the
+    // flyout on the far side of the taskbar when the icon lives in the overflow flyout.
+    POINT click; GetCursorPos(&click);
+    HMONITOR mon = MonitorFromPoint(click, MONITOR_DEFAULTTONEAREST);
     MONITORINFO mi{ sizeof(mi) };
     GetMonitorInfoW(mon, &mi);
     UINT dx = 96, dy = 96;
@@ -707,10 +704,9 @@ bool OpenFlyout() {
     s->geo = Flyout::ComputeGeometry(s->view.perf, (int)s->view.sliders.size(), (int)s->view.toggles.size(),
                                      Flyout::MeasureProfileText(s->view.profile));
     const int pw = Flyout::ScalePx(s->geo.width, s->dpi), ph = Flyout::ScalePx(s->geo.height, s->dpi);
-    const Flyout::IRect ir{ icon.left, icon.top, icon.right, icon.bottom };
     const Flyout::IRect mr{ mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right, mi.rcMonitor.bottom };
     s->work = { mi.rcWork.left, mi.rcWork.top, mi.rcWork.right, mi.rcWork.bottom };
-    const Flyout::Placement pl = Flyout::PlaceFlyout(ir, mr, s->work, pw, ph, Flyout::ScalePx(8, s->dpi));
+    const Flyout::Placement pl = Flyout::PlaceAtPoint(click.x, click.y, mr, pw, ph);
     s->sf.pos = { pl.x, pl.y };
 
     if (!g_cls) {
