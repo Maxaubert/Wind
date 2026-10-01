@@ -48,20 +48,24 @@ int RunRenderTest(const wchar_t*) {
     TrayStatus st;
     st.level = 7.4;
     float ticks[TickStats::kCap];
-    {   // j01 shows a jagged trace, so the fake history has a few mild stalls (the sparkline only draws
-        // frames above 1.5x the median); the rest is solved so the mean stays 6.94 ms (144 fps).
-        static const float stall[] = { 10.1f, 10.8f, 10.4f, 11.2f, 10.2f, 10.7f, 11.0f };
-        static const int gap[] = { 17, 23, 19, 27, 16, 22, 20 };
-        const int N = TickStats::kCap;
-        bool isStall[TickStats::kCap] = {};
-        float sum = 0.f;
-        int nst = 0;
-        for (int i = 3, j = 0; i < N; i += gap[j % 7], ++j) { ticks[i] = stall[j % 7]; isStall[i] = true; sum += ticks[i]; ++nst; }
-        const float base = (6.94f * (float)N - sum) / (float)(N - nst);
-        for (int i = 0; i < N; ++i) if (!isStall[i]) ticks[i] = base;
-    }
+    // A steady 6.94 ms history (the fps and "6.9 ms" readouts come from it).
+    for (int i = 0; i < TickStats::kCap; ++i) ticks[i] = 6.94f;
     Flyout::View v = Flyout::BuildView(ini, ParseTrayLayout(ini), st, ticks, TickStats::kCap, L"Default", !light);
     v.hover = hover;
+    {   // The j01 trace is a gentle low-amplitude wobble, not stalls: the same 17 polyline points the
+        // mockup draws (viewBox 0 0 100 14), resampled to 101 evenly spaced samples and mapped to the
+        // painter's 0 (bottom) .. 1 (top) scale for a 14 px high line box.
+        static const float px[] = { 0, 6, 12, 18, 24, 30, 36, 42, 48, 54, 60, 66, 72, 78, 84, 90, 100 };
+        static const float py[] = { 8, 7, 9, 6, 8, 7, 9, 5, 8, 7, 9, 6, 8, 7, 9, 6, 8 };
+        v.p.spark.clear();
+        for (int i = 0; i <= 100; ++i) {
+            int k = 0;
+            while (k < 15 && (float)i > px[k + 1]) ++k;
+            const float t = ((float)i - px[k]) / (px[k + 1] - px[k]);
+            const float y = py[k] + (py[k + 1] - py[k]) * t;
+            v.p.spark.push_back((13.f - y) / 12.f);
+        }
+    }
     return Flyout::RenderToPng(v, Flyout::MeasureProfileText(v.profile), dpi, out.c_str()) ? 0 : 1;
 }
 

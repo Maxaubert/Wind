@@ -29,8 +29,8 @@ public:
     Painter();
     ~Painter();
     bool Init(ID2D1RenderTarget* rt, bool dark);
-    // Call between BeginDraw and EndDraw. Paints the whole flyout (transparent outside the
-    // rounded shape) from the origin in DIPs.
+    // Call between BeginDraw and EndDraw. Paints the whole flyout from the origin in DIPs onto an
+    // opaque target; ApplyShapeAlpha then cuts the rounded corners out of the pixels.
     void Draw(const View& v, const Geometry& g);
     // The profile list popup (its own window, its own painter): same tokens, same clipping.
     void DrawList(const ListView& v, const ListGeometry& g);
@@ -38,6 +38,11 @@ private:
     struct Impl;
     Impl* d_;
 };
+
+// The painter draws onto an OPAQUE target (so ClearType text works); this cuts the rounded shape
+// out of the finished pixels: alpha 255 inside, an antialiased 0 outside the kRadius corners.
+// `premultiply` for UpdateLayeredWindow, false for a straight-alpha PNG. dpi = the target's DPI.
+void ApplyShapeAlpha(unsigned char* bgra, int w, int h, int strideBytes, int dpi, bool premultiply);
 
 // Renders the flyout to a PNG at `dpi` (96 = 1x). False on any failure.
 bool RenderToPng(const View& v, int profileTextW, int dpi, const wchar_t* path);

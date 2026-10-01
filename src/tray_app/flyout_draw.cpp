@@ -10,6 +10,7 @@
 #include <shlwapi.h>
 #include <wrl/client.h>
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include <vector>
 
@@ -222,7 +223,7 @@ ID2D1DCRenderTarget* CreateDcTarget(int dpi) {
     if (!g_s.ok) return nullptr;
     D2D1_RENDER_TARGET_PROPERTIES p = D2D1::RenderTargetProperties(
         D2D1_RENDER_TARGET_TYPE_DEFAULT,
-        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE),
         (float)dpi, (float)dpi, D2D1_RENDER_TARGET_USAGE_NONE, D2D1_FEATURE_LEVEL_DEFAULT);
     ID2D1DCRenderTarget* rt = nullptr;
     if (FAILED(g_s.d2d->CreateDCRenderTarget(&p, &rt))) return nullptr;
@@ -234,8 +235,10 @@ ID2D1DCRenderTarget* CreateDcTarget(int dpi) {
 struct Painter::Impl {
     ComPtr<ID2D1RenderTarget> rt;
     ComPtr<ID2D1SolidColorBrush> br;
-    ComPtr<ID2D1StrokeStyle> round, dotted;
-    ComPtr<ID2D1Bitmap> aurora;
+    ComPtr<ID2D1StrokeStyle> round, dotted, trace;   // trace: flat caps, round joins (an SVG polyline)
+    ComPtr<ID2D1Bitmap> aurora;             // the image pre-scaled to the header's device size
+    const std::vector<BYTE>* auroraPx = nullptr;
+    UINT auroraW = 0, auroraH = 0;          // cache key (device px)
     Theme th;
 
     void fill(const D2D1_RECT_F& r, const D2D1_COLOR_F& c) { br->SetColor(c); rt->FillRectangle(r, br.Get()); }
@@ -299,6 +302,43 @@ struct Painter::Impl {
         return out;
     }
 
+    // A browser scales the header image with a high quality filter; Direct2D's bilinear DrawBitmap
+    // aliases a 0.65x downscale. Scale once with WIC's Fant filter to the header's device size
+    // (CSS `cover`: the larger of the two ratios) and draw that 1:1.
+    bool prepareAurora(float wDip, float hDip) {
+        if (!auroraPx || auroraPx->empty() || !g_s.aw || !g_s.ah) return false;
+        float dx = 96.f, dy = 96.f;
+        rt->GetDpi(&dx, &dy);
+        const UINT wDev = (UINT)(wDip * dx / 96.f + .5f), hDev = (UINT)(hDip * dy / 96.f + .5f);
+        if (aurora && auroraW == wDev && auroraH == hDev) return true;
+        aurora.Reset();
+        const double sc = (std::max)((double)wDev / g_s.aw, (double)hDev / g_s.ah);
+        const UINT sw = (std::max)(wDev, (UINT)(g_s.aw * sc + .5)), sh = (std::max)(hDev, (UINT)(g_s.ah * sc + .5));
+        ComPtr<IWICBitmap> src;
+        if (FAILED(g_s.wic->CreateBitmapFromMemory(g_s.aw, g_s.ah, GUID_WICPixelFormat32bppPBGRA, g_s.aw * 4,
+                                                   (UINT)auroraPx->size(), const_cast<BYTE*>(auroraPx->data()), &src)))
+            return false;
+        ComPtr<IWICBitmapScaler> scaler;
+        if (FAILED(g_s.wic->CreateBitmapScaler(&scaler)) ||
+            FAILED(scaler->Initialize(src.Get(), sw, sh, WICBitmapInterpolationModeFant)))
+            return false;
+        std::vector<BYTE> out((size_t)sw * sh * 4);
+        if (FAILED(scaler->CopyPixels(nullptr, sw * 4, (UINT)out.size(), out.data()))) return false;
+        // Keep only the visible window: right aligned, vertically centred.
+        const UINT x0 = sw - wDev, y0 = (sh - hDev) / 2;
+        std::vector<BYTE> crop((size_t)wDev * hDev * 4);
+        for (UINT y = 0; y < hDev; ++y)
+            std::copy(out.begin() + ((size_t)(y0 + y) * sw + x0) * 4,
+                      out.begin() + ((size_t)(y0 + y) * sw + x0 + wDev) * 4,
+                      crop.begin() + (size_t)y * wDev * 4);
+        if (FAILED(rt->CreateBitmap(D2D1::SizeU(wDev, hDev), crop.data(), wDev * 4,
+                                    D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
+                                                           D2D1_ALPHA_MODE_PREMULTIPLIED), dx, dy), &aurora)))
+            return false;
+        auroraW = wDev; auroraH = hDev;
+        return true;
+    }
+
     void drawHead(const View& v, const Geometry& g);
     void drawQuick(const View& v, const Geometry& g);
     void drawBar(const View& v, const Geometry& g);
@@ -310,13 +350,9 @@ void Painter::Impl::drawHead(const View& v, const Geometry& g) {
     const D2D1_RECT_F h = R(g.head);
     const float W = h.right - h.left, H = h.bottom - h.top;
     fill(h, th.band);
-    if (aurora) {
-        // background: right center / cover
-        const float sc = (std::max)(W / (float)g_s.aw, H / (float)g_s.ah);
-        const float sw = W / sc, sh = H / sc;
-        const D2D1_RECT_F src = D2D1::RectF((float)g_s.aw - sw, ((float)g_s.ah - sh) / 2.f, (float)g_s.aw,
-                                            ((float)g_s.ah + sh) / 2.f);
-        rt->DrawBitmap(aurora.Get(), h, th.aurora, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, src);
+    if (prepareAurora(W, H)) {
+        // background: right center / cover, drawn 1:1 from the pre-scaled copy
+        rt->DrawBitmap(aurora.Get(), h, th.aurora, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
         // mask-image: linear-gradient(90deg, transparent 15%, #000 70%) == the band colour fades the
         // image back out on the left.
         auto m = gradient(D2D1::Point2F(h.left, 0), D2D1::Point2F(h.right, 0),
@@ -335,8 +371,11 @@ void Painter::Impl::drawHead(const View& v, const Geometry& g) {
     const float padX = (float)kPadX, left = h.left + padX, right = h.right - padX;
     const float topRow = h.top + 18.f;
     // zoom level, 28 px, tight tracking
-    text(v.p.zoom, g_s.sans28.Get(), D2D1::RectF(left, topRow, right, topRow + 28.f),
+    // (the browser reference draws this variable-font line greyscale, the 12 px mono text ClearType)
+    rt->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+    text(v.p.zoom, g_s.sans28.Get(), D2D1::RectF(left, topRow - .5f, right, topRow - .5f + 28.f),
          v.p.zoomed ? th.fg : th.fg3, DWRITE_TEXT_ALIGNMENT_LEADING, -0.7f);
+    rt->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
     if (v.p.haveFps) {
         wchar_t b[24];
         wsprintfW(b, L"%d fps", v.p.fps);
@@ -351,7 +390,7 @@ void Painter::Impl::drawHead(const View& v, const Geometry& g) {
         ID2D1PathGeometry* mg = IconGeometry("menu");
         if (mg) {
             const float k = 13.f / 16.f;
-            rt->SetTransform(D2D1::Matrix3x2F::Scale(k, k) * D2D1::Matrix3x2F::Translation(mr.left + 4.5f, my + 4.5f));
+            rt->SetTransform(D2D1::Matrix3x2F::Scale(k, k) * D2D1::Matrix3x2F::Translation(mr.left + 5.f, my + 5.f));
             br->SetColor(th.fg3);
             rt->DrawGeometry(mg, br.Get(), 1.5f, round.Get());
             rt->SetTransform(D2D1::Matrix3x2F::Identity());
@@ -377,7 +416,7 @@ void Painter::Impl::drawHead(const View& v, const Geometry& g) {
                 sink->EndFigure(D2D1_FIGURE_END_OPEN);
                 sink->Close();
                 br->SetColor(th.teal);
-                rt->DrawGeometry(pg.Get(), br.Get(), 1.5f, round.Get());
+                rt->DrawGeometry(pg.Get(), br.Get(), 1.5f, trace.Get());
             }
         } else {
             br->SetColor(WithAlpha(th.fg3, .55f));
@@ -442,20 +481,18 @@ bool Painter::Init(ID2D1RenderTarget* rt, bool dark) {
     if (!rt || !g_s.ok) return false;
     d_->rt = rt;
     d_->th = MakeTheme(dark);
-    rt->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+    // ClearType like the browser reference: it needs opaque pixels under the glyphs, which the clip
+    // layer below provides (INITIALIZE_FOR_CLEARTYPE); outside it the target falls back to grayscale.
+    rt->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
     if (FAILED(rt->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &d_->br))) return false;
     g_s.d2d->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND,
                                D2D1_CAP_STYLE_ROUND, D2D1_LINE_JOIN_ROUND), nullptr, 0, &d_->round);
     g_s.d2d->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT,
+                               D2D1_CAP_STYLE_FLAT, D2D1_LINE_JOIN_ROUND), nullptr, 0, &d_->trace);
+    g_s.d2d->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT,
                                D2D1_CAP_STYLE_FLAT, D2D1_LINE_JOIN_MITER, 10.f, D2D1_DASH_STYLE_CUSTOM, 0.f),
                                kDots, 2, &d_->dotted);
-    const std::vector<BYTE>& px = dark ? g_s.auroraDark : g_s.auroraLight;
-    if (!px.empty()) {
-        rt->CreateBitmap(D2D1::SizeU(g_s.aw, g_s.ah), px.data(), g_s.aw * 4,
-                         D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
-                                                                  D2D1_ALPHA_MODE_PREMULTIPLIED), 96.f, 96.f),
-                         &d_->aurora);
-    }
+    d_->auroraPx = dark ? &g_s.auroraDark : &g_s.auroraLight;
     return true;
 }
 
@@ -464,16 +501,10 @@ void Painter::Draw(const View& v, const Geometry& g) {
     if (!d.rt || !d.br) return;
     const float W = (float)g.width, H = (float)g.height;
     d.rt->SetTransform(D2D1::Matrix3x2F::Identity());
-    d.rt->Clear(D2D1::ColorF(0, 0, 0, 0));
-
-    // Everything is clipped to the rounded shape (the menu is overflow:hidden, radius 10).
-    ComPtr<ID2D1RoundedRectangleGeometry> clip;
-    ComPtr<ID2D1Layer> layer;
-    const bool clipped = SUCCEEDED(g_s.d2d->CreateRoundedRectangleGeometry(
-                             D2D1::RoundedRect(D2D1::RectF(0, 0, W, H), (float)kRadius, (float)kRadius), &clip)) &&
-                         SUCCEEDED(d.rt->CreateLayer(nullptr, &layer));
-    if (clipped)
-        d.rt->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), clip.Get()), layer.Get());
+    // The target is opaque so ClearType can run. The rounded shape is cut out afterwards by
+    // ApplyShapeAlpha, so the corners are cleared in the border colour (their antialiased edge then
+    // blends border over border, never a dark fringe).
+    d.rt->Clear(d.th.menub);
     d.fill(D2D1::RectF(0, 0, W, H), d.th.menu);
     if (g.hasHead) d.drawHead(v, g);
     for (int y : g.hair) d.fill(D2D1::RectF((float)kBorder, (float)y, W - kBorder, (float)y + 1.f), d.th.rule);
@@ -488,7 +519,6 @@ void Painter::Draw(const View& v, const Geometry& g) {
                                        d.br.Get(), 2.f);
         }
     }
-    if (clipped) d.rt->PopLayer();
     d.ring(D2D1::RectF(0, 0, W, H), (float)kRadius, d.th.menub);
 }
 
@@ -497,8 +527,8 @@ void Painter::DrawList(const ListView& v, const ListGeometry& g) {
     if (!d.rt || !d.br) return;
     const float W = (float)g.width, H = (float)g.height;
     d.rt->SetTransform(D2D1::Matrix3x2F::Identity());
-    d.rt->Clear(D2D1::ColorF(0, 0, 0, 0));
-    d.fillRound(D2D1::RectF(0, 0, W, H), (float)kRadius, d.th.menu);
+    d.rt->Clear(d.th.menub);
+    d.fill(D2D1::RectF(0, 0, W, H), d.th.menu);
     for (size_t i = 0; i < v.names.size() && i < g.row.size(); ++i) {
         const D2D1_RECT_F r = d.R(g.row[i]);
         if ((int)i == v.sel) d.fillRound(r, 8.f, d.th.hl);
@@ -511,6 +541,38 @@ void Painter::DrawList(const ListView& v, const ListGeometry& g) {
     d.ring(D2D1::RectF(0, 0, W, H), (float)kRadius, d.th.menub);
 }
 
+// ---------------------------------------------------------------- shape alpha
+
+void ApplyShapeAlpha(unsigned char* px, int w, int h, int strideBytes, int dpi, bool premultiply) {
+    if (!px || w <= 0 || h <= 0) return;
+    const float r = (float)kRadius * (float)dpi / 96.f;
+    const int ri = (int)r + 1;
+    for (int y = 0; y < h; ++y) {
+        unsigned char* row = px + (size_t)y * strideBytes;
+        const bool cy = y < ri || y >= h - ri;
+        for (int x = 0; x < w; ++x) {
+            unsigned char* q = row + (size_t)x * 4;
+            float cov = 1.f;
+            if (cy && (x < ri || x >= w - ri)) {
+                const float cx = x < ri ? r : (float)w - r, cyy = y < ri ? r : (float)h - r;
+                const float fx = (float)x + .5f, fy = (float)y + .5f;
+                const bool inCorner = (x < ri ? fx < cx : fx > cx) && (y < ri ? fy < cyy : fy > cyy);
+                if (inCorner) {
+                    const float d = std::sqrt((fx - cx) * (fx - cx) + (fy - cyy) * (fy - cyy));
+                    cov = r - d + .5f;
+                    cov = cov < 0.f ? 0.f : (cov > 1.f ? 1.f : cov);
+                }
+            }
+            q[3] = (unsigned char)(cov * 255.f + .5f);
+            if (premultiply && cov < 1.f) {
+                q[0] = (unsigned char)(q[0] * cov + .5f);
+                q[1] = (unsigned char)(q[1] * cov + .5f);
+                q[2] = (unsigned char)(q[2] * cov + .5f);
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------- png
 
 bool RenderToPng(const View& v, int profileTextW, int dpi, const wchar_t* path) {
@@ -518,11 +580,11 @@ bool RenderToPng(const View& v, int profileTextW, int dpi, const wchar_t* path) 
     const Geometry g = ComputeGeometry(v.perf, (int)v.sliders.size(), (int)v.toggles.size(), profileTextW);
     const UINT pw = (UINT)ScalePx(g.width, dpi), ph = (UINT)ScalePx(g.height, dpi);
     ComPtr<IWICBitmap> bmp;
-    if (FAILED(g_s.wic->CreateBitmap(pw, ph, GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnLoad, &bmp))) return false;
+    if (FAILED(g_s.wic->CreateBitmap(pw, ph, GUID_WICPixelFormat32bppBGR, WICBitmapCacheOnLoad, &bmp))) return false;
     ComPtr<ID2D1RenderTarget> rt;
     if (FAILED(g_s.d2d->CreateWicBitmapRenderTarget(
             bmp.Get(), D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT,
-                                                    D2D1::PixelFormat(DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_PREMULTIPLIED),
+                                                    D2D1::PixelFormat(DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_IGNORE),
                                                     (float)dpi, (float)dpi), &rt))) return false;
     Painter p;
     if (!p.Init(rt.Get(), v.dark)) return false;
@@ -530,8 +592,16 @@ bool RenderToPng(const View& v, int profileTextW, int dpi, const wchar_t* path) 
     p.Draw(v, g);
     if (FAILED(rt->EndDraw())) return false;
 
-    ComPtr<IWICBitmapSource> conv;
-    if (FAILED(WICConvertBitmapSource(GUID_WICPixelFormat32bppBGRA, bmp.Get(), &conv))) return false;
+    // Straight-alpha BGRA with the rounded corners cut out.
+    ComPtr<IWICBitmapSource> conv0;
+    if (FAILED(WICConvertBitmapSource(GUID_WICPixelFormat32bppBGRA, bmp.Get(), &conv0))) return false;
+    std::vector<BYTE> px((size_t)pw * ph * 4);
+    if (FAILED(conv0->CopyPixels(nullptr, pw * 4, (UINT)px.size(), px.data()))) return false;
+    ApplyShapeAlpha(px.data(), (int)pw, (int)ph, (int)pw * 4, dpi, false);
+    ComPtr<IWICBitmap> outBmp;
+    if (FAILED(g_s.wic->CreateBitmapFromMemory(pw, ph, GUID_WICPixelFormat32bppBGRA, pw * 4, (UINT)px.size(),
+                                               px.data(), &outBmp))) return false;
+    ComPtr<IWICBitmapSource> conv = outBmp;
     ComPtr<IWICStream> stream;
     if (FAILED(g_s.wic->CreateStream(&stream)) || FAILED(stream->InitializeFromFilename(path, GENERIC_WRITE))) return false;
     ComPtr<IWICBitmapEncoder> enc;

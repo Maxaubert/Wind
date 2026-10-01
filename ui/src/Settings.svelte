@@ -372,6 +372,7 @@
           scrollbar-width: thin; scrollbar-color: var(--track) transparent; }
   .main[data-page="tray"] :global(.banner + .card) { margin-top: 20px; }   /* k01: a caption-less first card sits 20px under the band */
   .tail { height: 110px; }   /* clearance so the capsule never covers the last row */
+  .main[data-page="tray"] .tail { height: 120px; }   /* k01: the scroller pads 120px under the last card */
   .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
              clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 </style>

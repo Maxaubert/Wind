@@ -50,15 +50,16 @@ const int kMaxFlushRetries = 20;                 // a locked ini is retried for 
 // into through a DC target, then UpdateLayeredWindow publishes.
 struct Surface {
     HWND hwnd = nullptr;
-    int pw = 0, ph = 0;
+    int pw = 0, ph = 0, dpi = 96;
+    void* bits = nullptr;
     POINT pos{};
     HDC dc = nullptr;
     HBITMAP dib = nullptr, oldBmp = nullptr;
     ID2D1DCRenderTarget* rt = nullptr;
     Flyout::Painter* painter = nullptr;
 
-    bool Init(HWND h, int w, int ht, int dpi, bool dark) {
-        hwnd = h; pw = w; ph = ht;
+    bool Init(HWND h, int w, int ht, int dpiArg, bool dark) {
+        hwnd = h; pw = w; ph = ht; dpi = dpiArg;
         HDC screen = GetDC(nullptr);
         dc = CreateCompatibleDC(screen);
         BITMAPINFO bi{};
@@ -68,10 +69,9 @@ struct Surface {
         bi.bmiHeader.biPlanes = 1;
         bi.bmiHeader.biBitCount = 32;
         bi.bmiHeader.biCompression = BI_RGB;
-        void* bits = nullptr;
         dib = CreateDIBSection(screen, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
         ReleaseDC(nullptr, screen);
-        rt = dib ? Flyout::CreateDcTarget(dpi) : nullptr;
+        rt = dib ? Flyout::CreateDcTarget(dpiArg) : nullptr;
         painter = new Flyout::Painter;
         if (!dc || !dib || !rt || !painter->Init(rt, dark)) return false;
         oldBmp = static_cast<HBITMAP>(SelectObject(dc, dib));
@@ -94,6 +94,7 @@ struct Surface {
             wind::Log(wind::LogLevel::Warn, "tray", "flyout draw failed (hr=0x%08lx)", (unsigned long)hr);
             return;
         }
+        if (bits) Flyout::ApplyShapeAlpha(static_cast<unsigned char*>(bits), pw, ph, pw * 4, dpi, true);
         POINT src{ 0, 0 }, dst = pos;
         SIZE sz{ pw, ph };
         BLENDFUNCTION bf{ AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
