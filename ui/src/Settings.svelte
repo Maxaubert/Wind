@@ -1,480 +1,339 @@
 <script>
-  import { onMount } from 'svelte';
-  import { sections } from './settings-schema.js';
-  import { getConfig, setConfig, openIni, exportDiagnostics, windowControl, onMessage,
-           getMpoState, setMpoDisabled, rebootNow, setDirty, postDraft,
-           listProfiles, switchProfile, createProfile, renameProfile, duplicateProfile,
-           deleteProfile } from './bridge.js';
-  import ProfileMenu from './lib/ProfileMenu.svelte';
-  import { currentTheme, applyTheme, nextTheme, setTheme } from './theme.js';
-  import Rail from './lib/Rail.svelte';
-  import Section from './lib/Section.svelte';
-  import Row from './lib/Row.svelte';
-  import { ic } from './lib/icons.js';
-  import { scrollspy, scrollToSection } from './lib/scrollspy.js';
-  import { dialog } from './lib/dialog.js';
+  // Settings window: instant apply with an explicit Save (spec 2026-10-01).
+  //   values  the session: what the live ini holds right now. Every change is written at once
+  //           (setConfig), so it takes effect immediately.
+  //   saved   what the active profile file holds. The capsule counts the keys where the two differ.
+  // Keybind captures are the exception: they write the live ini AND the profile (setConfigPersist),
+  // so they are never "unsaved" and a later Save cannot lose them.
+  import { onMount, tick } from 'svelte';
+  import './design/tokens.css';
+  import { groups } from './settings-schema.js';
+  import { getSession, setConfig, setConfigPersist, saveSession, discardSession, openIni,
+           exportDiagnostics, openRepo, pickExe, windowControl, onMessage, getMpoState,
+           setMpoDisabled, rebootNow, setDirty, switchProfile, createProfile, renameProfile,
+           duplicateProfile, deleteProfile } from './bridge.js';
+  import { fill, changedKeys } from './session.js';
+  import { applyTheme, setTheme } from './theme.js';
   import { droppedBinds } from './lib/keybindRules.js';
+  import TitleBar from './shell/TitleBar.svelte';
+  import Sidebar from './shell/Sidebar.svelte';
+  import Banner from './shell/Banner.svelte';
+  import Card from './shell/Card.svelte';
+  import SaveCapsule from './shell/SaveCapsule.svelte';
+  import SettingRow from './controls/SettingRow.svelte';
+  import Prompt from './prompts/Prompt.svelte';
 
-  let values = {}, saved = {}, active = sections[0].id, theme = 'auto', scroller;
-  const railItems = sections.map(s => ({ id: s.id, label: s.label, icon: s.icon }));
-  const ids = sections.map(s => s.id);
+  // Replaced at build time with src/version.h's WIND_VERSION_STR (vite.config.js); empty in tests.
+  const VERSION = typeof __WIND_VERSION__ === 'string' ? __WIND_VERSION__ : '';
 
-  // Reusable so a profile switch/create/delete can re-pull the whole config after the host
-  // rewrites the live ini (the staged/saved state is replaced wholesale on purpose).
-  // Binds from an older version that the safety rules now refuse (#285): reset once, and said why.
-  let dropped = [];
-  async function loadValues() {
-    const cfg = await getConfig();
-    const found = droppedBinds(cfg);
+  let values = $state({});
+  let saved = $state({});
+  let themeMode = $state('auto');
+  let prof = $state({ names: [], active: '' });
+  let activeId = $state('zoom');
+  let loaded = $state(false);
+  let main = $state();
+
+  const side = groups.filter((g) => g.id !== 'advanced' && g.id !== 'about');
+  const expert = groups.filter((g) => g.id === 'advanced' || g.id === 'about');
+  const group = $derived(groups.find((g) => g.id === activeId) || groups[0]);
+  const count = $derived(loaded ? changedKeys(values, saved).length : 0);
+  const dirty = $derived(count > 0);
+  $effect(() => { if (loaded) setDirty(dirty); });   // the host's WM_CLOSE guard follows the UI
+
+  // Effective palette: auto resolves against the system setting.
+  let systemDark = $state(typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches);
+  const effTheme = $derived(themeMode === 'light' ? 'light' : themeMode === 'dark' ? 'dark' : (systemDark ? 'dark' : 'light'));
+
+  // --- Screen-reader announcements ------------------------------------------------------------
+  let announcement = $state('');
+  function announce(msg) { announcement = announcement === msg ? msg + '​' : msg; }
+
+  // --- Loading --------------------------------------------------------------------------------
+  let dropped = $state([]);
+  let runningModel = $state('');   // the engine the live Wind process runs (read once at launch)
+  async function load(session) {
+    const s = session || await getSession();
+    const f = fill(s);
+    // Binds from an older version that the safety rules now refuse (#285): reset once, say why.
+    // Binds are deliberate, so the reset persists like any other keybind change.
+    const found = droppedBinds(f.values);
     if (found.length) {
-      for (const d of found) for (const k of d.keys) { cfg[k] = '0'; setConfig(k, '0'); }
+      for (const d of found) for (const k of d.keys) { f.values[k] = '0'; f.saved[k] = '0'; setConfigPersist(k, '0'); }
       dropped = found;
     }
-    const v = {};
-    for (const s of sections) for (const r of s.rows) {
-      if (r.key[0] !== '_') v[r.key] = (r.key in cfg) ? cfg[r.key] : r.def;
-      // Keybind rows store their real state under buttonKey/vkKey/modsKey, not row.key ('__x'):
-      // every one of those must be loaded too, or the row displays "Unbound" over a live binding
-      // and a capture/clear through the lying row destroys the user's real bind (the Inspect row
-      // had exactly this bug - cursorLockVk was never loaded).
-      for (const k of [r.buttonKey, r.vkKey, r.modsKey, r.buttonModsKey, r.buttonModsKey2]) if (k) v[k] = (k in cfg) ? cfg[k] : '0';
-    }
-    // These must match the core's shipped defaults (src/config.h + the ini template in config.cpp),
-    // which are ALL unbound - onboarding captures the user's choice. Seeding a key here that the
-    // core does not default to (this used to be PageUp 33 / PageDown 34) invents a binding the user
-    // never chose and can write it into the ini on the next Apply.
-    const kbDefaults = { zoomInButton:'0', zoomInVk:'0', zoomOutButton:'0', zoomOutVk:'0',
-                         zoomInButton2:'0', zoomOutButton2:'0',
-                         zoomInVk2:'0', zoomOutVk2:'0',
-                         zoomInMods:'0', zoomOutMods:'0', zoomInMods2:'0', zoomOutMods2:'0',
-                         hideCursorVk:'0', hideCursorMods:'0',
-                         quickZoomVk:'112', quickZoomMods:'0',
-                         // Keyboard panning ships unbound (#307), like the core default.
-                         panLeftVk:'0', panLeftMods:'0', panRightVk:'0', panRightMods:'0',
-                         panUpVk:'0', panUpMods:'0', panDownVk:'0', panDownMods:'0',
-                         cursorLockMods:'0', recenterMods:'0' };
-    for (const k of Object.keys(kbDefaults)) v[k] = (k in cfg) ? cfg[k] : kbDefaults[k];
-    values = v; saved = { ...v };
-    theme = currentTheme(cfg); applyTheme(theme);
-  }
-  onMount(async () => {
-    await loadValues();
+    values = f.values; saved = f.saved;
+    if (s.profiles) prof = { names: s.profiles.names || [], active: s.profiles.active || '' };
+    themeMode = s.theme || 'auto'; applyTheme(themeMode);
+    if (!runningModel) runningModel = String(f.values.model);
     loaded = true;
-    profiles = await listProfiles();
-    // MPO lives in the registry, not the ini, so it is fetched separately and staged separately.
-    const s = await getMpoState();
-    mpoLive = s.disabled; mpoStaged = s.disabled; mpoKnown = true;
-    // No record for this boot -> assume the registry is what DWM loaded. That is the old
-    // behaviour, and the worst it does is offer a restart that turns out to be unnecessary.
-    mpoBoot = s.bootKnown ? s.atBoot : s.disabled;
-  });
-  // --- MPO (issue #164) -----------------------------------------------------
-  // Three distinct values, and conflating any two of them is a bug:
-  //   mpoLive   - what the registry says right now      -> decides whether Apply must WRITE
-  //   mpoStaged - what the toggle shows                 -> what the user wants
-  //   mpoBoot   - what DWM actually loaded at boot      -> decides whether a RESTART is required
-  // Comparing staged against the registry (the original mistake) demanded a restart for a change
-  // that merely restored the value DWM already had, and would equally have stayed silent about one
-  // that really needed a reboot.
-  let mpoLive = false, mpoStaged = false, mpoBoot = false, mpoKnown = false;
-  let mpoRestartPrompt = false, mpoFailed = false;
-  $: mpoDirty = mpoKnown && mpoStaged !== mpoLive;
-  $: mpoNeedsRestart = mpoKnown && mpoStaged !== mpoBoot;
-  $: extra = { mpoKnown, mpoLive, mpoStaged, mpoNeedsRestart };
-  // Live setter for keybind rows: writes setConfig immediately AND updates both staged + saved
-  // so the rebind is effective at once (the core hot-reloads it, the hook stops swallowing the
-  // previous binding) and the Apply/Discard footer does NOT show keybind changes as dirty.
+  }
+
+  // --- MPO (issue #164, #242) -----------------------------------------------------------------
+  // High resolution cursor couples to the registry. The registry write needs UAC, so it runs the
+  // moment the toggle moves; a dismissed prompt reverts the toggle. mpoBoot is what DWM loaded at
+  // boot and alone decides whether a restart is required.
+  let mpoLive = $state(false), mpoBoot = $state(false), mpoKnown = $state(false);
+  let mpoRestartPrompt = $state(false), mpoFailed = $state(false);
+  const mpoNeedsRestart = $derived(mpoKnown && mpoLive !== mpoBoot);
+  async function syncMpo(prevTx) {
+    if (!mpoKnown) return;
+    const want = Number(values.txSamplingMode) !== 1;   // crisp sampling -> MPO disabled
+    if (want === mpoLive) return;
+    const res = await setMpoDisabled(want);
+    mpoLive = res.disabled;
+    if (!res.ok || res.disabled !== want) {
+      mpoFailed = true;
+      // The ini half must not land alone: crisp sampling with MPO still on is the driver-crash combo.
+      values = { ...values, txSamplingMode: prevTx }; setConfig('txSamplingMode', prevTx);
+    } else if (res.disabled !== mpoBoot) mpoRestartPrompt = true;
+  }
+
+  // --- Changes --------------------------------------------------------------------------------
+  function change(key, val) {
+    if (key === 'model') announce('Magnifier model set to ' + val + '. Some display options changed.');
+    const prev = values[key];
+    values = { ...values, [key]: val };
+    setConfig(key, val);
+    if (key === 'txSamplingMode') syncMpo(prev);
+  }
+  // Keybind captures: live AND saved at once, so the hook stops swallowing the old binding and a
+  // later Save or Discard cannot lose them.
   function live(patch) {
-    for (const k of Object.keys(patch)) setConfig(k, patch[k]);
+    for (const k of Object.keys(patch)) setConfigPersist(k, patch[k]);
     values = { ...values, ...patch };
     saved = { ...saved, ...patch };
   }
-  // A model change is applied by writing the ini then relaunching Wind (model is read once at
-  // launch, so a hot-reload can't switch it). To the user a deliberate Apply and a hot-reload look
-  // identical, so there is no confirm step. restartError still surfaces a relaunch that failed.
-  let restartError = false;
-  // A settings write the host could not save (issue #274). Shown, not retried: the next change
-  // writes the whole line again anyway, and a silent retry loop would hide a stuck file.
-  let writeError = '';
-  onMessage(m => { if (m && m.type === 'configWriteFailed') writeError = m.key || 'a setting'; });
-  // The model that the LIVE process is running. Captured before commit() overwrites saved.model, so
-  // a failed relaunch can revert the ini + dropdown back to it (keeps ini model == running model).
-  let runningModel = '';
-  onMessage(m => {
-    if (m && m.type === 'restartFailed') {
-      values = { ...values, model: runningModel };
-      saved  = { ...saved,  model: runningModel };
-      setConfig('model', runningModel);   // rewrite the ini back to the model still running
-      restartError = true;
-    }
+  let restartError = $state(false);
+  let writeError = $state('');
+  let saveError = $state(false);
+  onMount(() => {
+    const offs = [
+      onMessage((m) => { if (m && m.type === 'configWriteFailed') writeError = m.key || 'a setting'; }),
+      onMessage((m) => {
+        if (m && m.type === 'restartFailed') {
+          values = { ...values, model: runningModel }; setConfig('model', runningModel);
+          restartError = true;
+        }
+      }),
+      // The tray switched profiles under us: the host already rewrote the live ini, so reload.
+      onMessage(async (m) => {
+        if (!m || m.type !== 'profiles' || !m.push) return;
+        const changed = m.active !== prof.active;
+        prof = { names: m.names, active: m.active };
+        if (changed) { await load(); announce('Profile switched to ' + m.active + '. Settings reloaded.'); }
+      }),
+      onMessage((m) => { if (m && m.type === 'confirmClose' && dirty) closePrompt = true; }),
+    ];
+    const mq = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : null;
+    const onMq = (e) => { systemDark = e.matches; };
+    if (mq && mq.addEventListener) mq.addEventListener('change', onMq);
+    (async () => {
+      await load();
+      const s = await getMpoState();
+      mpoLive = s.disabled; mpoKnown = true;
+      // No record for this boot -> assume the registry is what DWM loaded.
+      mpoBoot = s.bootKnown ? s.atBoot : s.disabled;
+    })();
+    return () => { offs.forEach((o) => o()); if (mq && mq.removeEventListener) mq.removeEventListener('change', onMq); };
   });
-  // --- Screen-reader announcements (issue #201) -----------------------------
-  // Anything that changes the page without moving focus has to be spoken, or it did not happen as
-  // far as a screen reader user is concerned. Re-assigning the same string would NOT re-announce
-  // (the region's text has not changed), so repeats get a zero-width space appended.
-  let announcement = '';
-  function announce(msg) {
-    announcement = announcement === msg ? msg + '​' : msg;
-  }
-  // The rail scrolled the pane but left focus on the rail button, so a keyboard or screen-reader
-  // user got no signal that anything happened. Move focus to the target section's heading (which
-  // carries tabindex="-1") - that both announces the section and puts the next Tab inside it.
-  function goToSection(id) {
-    scrollToSection(scroller, id);
-    const h = scroller && scroller.querySelector('#sech-' + id);
-    if (h) h.focus({ preventScroll: true });
-  }
-  function change(keyOrPatch, val) {
-    // Atomic multi-key form: change({k1:v1, k2:v2}) updates both in a single render. The keybind
-    // capture uses this so its sibling-key update (vk + button) lands as one consistent state.
-    if (keyOrPatch && typeof keyOrPatch === 'object') {
-      values = { ...values, ...keyOrPatch };
-      return;
-    }
-    const key = keyOrPatch;
-    if (key === '__action') { if (val === 'openIni') openIni(); return; }
-    // Staged only - the elevated write happens in apply(), like every other setting.
-    if (key === '__mpoStaged') { mpoStaged = !!val; return; }
-    // High-res + MPO coupling (issue #242): crisp magnification with MPO enabled is the
-    // driver-crash combo, so the one toggle drives both halves - crisp stages MPO-disable,
-    // high-res stages MPO-enable. The registry half still lands in apply() (UAC + the restart
-    // prompt); until the restart, the core's pan wall guards the interim.
-    if (key === 'txSamplingMode' && mpoKnown) mpoStaged = Number(val) !== 1;
-    // Both of these restructure the page: showAdvanced adds/removes ~10 rows, and model swaps most
-    // of the Display section (every row carries showIf:{key:'model'}). Neither moves focus.
-    if (key === 'showAdvanced')
-      announce(Number(val) === 1 ? 'Advanced settings shown' : 'Advanced settings hidden');
-    if (key === 'model')
-      announce('Magnifier model set to ' + val + '. Some display options changed.');
-    values = { ...values, [key]: val };
-  }
-  function commit() {
-    for (const k of Object.keys(values)) if (String(values[k]) !== String(saved[k])) setConfig(k, values[k]);
+
+  // --- Save / Discard -------------------------------------------------------------------------
+  async function save() {
+    const ok = await saveSession();
+    if (!ok) { saveError = true; return false; }
     saved = { ...values };
+    announce('Settings saved');
+    return true;
   }
-  // `model` is read once at Wind launch, so switching it writes the ini (model FIRST - the relaunched
-  // Wind reads it at startup) then relaunches. No confirm: a restart and a hot-reload look the same.
-  async function apply() {
-    // MPO first and awaited: it raises a UAC prompt, and a cancelled prompt must revert the toggle
-    // rather than leave the row claiming a change that never reached the registry.
-    if (mpoDirty) {
-      const want = mpoStaged;
-      const res = await setMpoDisabled(want);
-      mpoLive = res.disabled; mpoStaged = res.disabled;
-      // Prompt only when the new value differs from what DWM actually loaded. Writing the value
-      // back to the boot state changes the registry but changes nothing about the running session,
-      // so demanding a reboot there is just noise.
-      if (!res.ok || res.disabled !== want) {
-        mpoFailed = true;
-        // Combined option (issue #242): the registry half failed (cancelled UAC), so the ini
-        // half must not land alone - a half-applied "crisp" would be exactly the crisp+MPO-on
-        // combo the coupling exists to prevent (the core wall would guard it, but the UI must
-        // not claim a state it did not reach).
-        values = { ...values, txSamplingMode: saved.txSamplingMode };
-      }
-      else if (res.disabled !== mpoBoot) mpoRestartPrompt = true;
-    }
-    if (String(values.model) !== String(saved.model)) {
-      runningModel = saved.model;   // remember what's live before commit() moves saved.model forward
-      restartError = false;
-      commit();
-      windowControl('restartWind');
-      return;
-    }
-    commit();
-    announce('Settings applied');
-  }
-  // When a push arrived while edits were staged (the tray switched profiles under us), `saved`
-  // still holds the OLD profile's snapshot - restoring it would show a clean-looking page that is
-  // wholesale wrong for the now-active profile. Discard must then RELOAD from the live ini, which
-  // is exactly what the push notice promises ("Discard them to load its settings instead").
-  let pendingReload = false;
   async function discard() {
-    mpoStaged = mpoLive;
-    if (pendingReload) { pendingReload = false; await loadValues(); }
-    else values = { ...saved };
+    const s = await discardSession();
+    await load(s);
     announce('Changes discarded');
   }
-  // --- Profiles (spec 2026-08-12) -------------------------------------------
-  let profiles = { names: [], active: '' };
-  let profileError = '';
-  // Switching/creating replaces the staged settings wholesale, so route every profile action
-  // through the unsaved-changes guard (same UX as closing, issue #164). Rename/duplicate do not
-  // touch the staged values, so they skip the guard.
-  let profilePrompt = null;   // pending {kind, payload} while the guard is up
+
+  // --- Profiles -------------------------------------------------------------------------------
+  // Switching, creating and deleting the ACTIVE profile replace the session, so with unsaved changes
+  // they ask first (Save / Discard / Cancel). Rename, duplicate and deleting another profile do not.
+  let profilePrompt = $state(null);   // pending { kind, payload }
+  let profileError = $state('');
   function profileAction(kind, payload) {
-    // Only actions that replace the staged settings need the guard: switch, create, and deleting
-    // the ACTIVE profile (which switches away). Deleting another profile, rename, and duplicate
-    // leave the staged values untouched.
-    const deletesActive = kind === 'delete' &&
-      payload.name.toLowerCase() === profiles.active.toLowerCase();
-    const mutates = kind === 'switch' || kind === 'create' || deletesActive;
-    if (mutates && dirty) { profilePrompt = { kind, payload }; return; }
+    const deletesActive = kind === 'delete' && payload.name.toLowerCase() === prof.active.toLowerCase();
+    const replaces = kind === 'switch' || kind === 'create' || deletesActive;
+    if (replaces && dirty) { profilePrompt = { kind, payload }; return; }
     runProfileAction(kind, payload);
   }
-  async function discardAndRunProfile() {
-    const p = profilePrompt; profilePrompt = null; await discard(); runProfileAction(p.kind, p.payload);
+  async function resolveProfilePrompt(how) {
+    const p = profilePrompt; profilePrompt = null;
+    if (how === 'save') { if (!(await save())) return; }
+    else await discard();
+    runProfileAction(p.kind, p.payload);
   }
   async function runProfileAction(kind, payload) {
     profileError = '';
-    const prevActive = profiles.active;
+    const prevActive = prof.active;
     let r;
-    if (kind === 'switch')         r = await switchProfile(payload.name);
-    else if (kind === 'create')    r = await createProfile(payload.name);
-    else if (kind === 'rename')    r = await renameProfile(payload.from, payload.to);
+    if (kind === 'switch') r = await switchProfile(payload.name);
+    else if (kind === 'create') r = await createProfile(payload.name);
+    else if (kind === 'rename') r = await renameProfile(payload.from, payload.to);
     else if (kind === 'duplicate') r = await duplicateProfile(payload.name);
-    else if (kind === 'delete')    r = await deleteProfile(payload.name);
+    else if (kind === 'delete') r = await deleteProfile(payload.name);
     else return;
-    profiles = { names: r.names, active: r.active };
-    // Reload BEFORE the error check: a failed op can still have rewritten the live ini (e.g. the
-    // switch landed but the model restart failed), and stale staged values would then Apply the
-    // OLD profile's settings on top of the new one.
-    if (kind === 'switch' || kind === 'create' || (kind === 'delete' && r.active !== prevActive))
-      await loadValues();
+    prof = { names: r.names, active: r.active };
+    // Reload BEFORE the error check: a failed op can still have rewritten the live ini.
+    if (kind === 'switch' || kind === 'create' || (kind === 'delete' && r.active !== prevActive)) await load();
     if (!r.ok) { profileError = r.error || 'Profile operation failed'; return; }
-    if (kind === 'switch')         announce('Switched to profile ' + payload.name + '. Settings reloaded.');
-    else if (kind === 'create')    announce('Created profile ' + payload.name + '. Settings reset to defaults.');
-    else if (kind === 'rename')    announce('Renamed profile to ' + payload.to);
+    if (kind === 'switch') announce('Switched to profile ' + payload.name + '. Settings reloaded.');
+    else if (kind === 'create') { announce('Created profile ' + payload.name + '. Settings reset to defaults.'); select('zoom'); }
+    else if (kind === 'rename') announce('Renamed profile to ' + payload.to);
     else if (kind === 'duplicate') announce('Duplicated profile ' + payload.name);
-    else if (kind === 'delete')    announce('Deleted profile ' + payload.name);
-    // A fresh factory-defaults profile has no zoom keys bound (keybinds are per-profile):
-    // put the user right where fixing that starts.
-    if (kind === 'create') goToSection('keybinds');
+    else if (kind === 'delete') announce('Deleted profile ' + payload.name);
   }
-  // Unsolicited host push: the tray switched profiles under this window. Refresh the titlebar and,
-  // unless the user has staged edits, the values too (a stale Apply would mirror the OLD profile's
-  // settings into the NEW profile's file). With staged edits, surface it instead of silently
-  // discarding the user's work.
-  onMessage(async m => {
-    if (!m || m.type !== 'profiles' || !m.push) return;
-    const changed = m.active !== profiles.active;
-    profiles = { names: m.names, active: m.active };
-    if (!changed) return;
-    if (!dirty) await loadValues();
-    else {
-      pendingReload = true;   // Discard now reloads the NEW profile instead of the stale snapshot
-      profileNotice = 'The active profile was switched to "' + m.active + '" from the tray. Your staged changes now apply to that profile; Discard them to load its settings instead.';
-    }
-  });
-  let profileNotice = '';
-  // --- Unsaved-changes guard (issue #164) -----------------------------------
-  // The host mirrors `dirty` and bounces WM_CLOSE back as confirmClose, so Alt+F4 and the system
-  // menu get the same prompt as our own title-bar button. Closing to the tray still loses staged
-  // edits, which is exactly why it is worth asking.
-  let closePrompt = false;
+
+  // --- Close and quit -------------------------------------------------------------------------
+  let closePrompt = $state(false);
+  let quitPrompt = $state(false);
   function requestClose() { if (dirty) closePrompt = true; else windowControl('close'); }
-  function discardAndClose() { closePrompt = false; windowControl('close', true); }
-  onMessage(m => { if (m && m.type === 'confirmClose') closePrompt = true; });
-  function toggleTheme() { theme = nextTheme(theme); setTheme(theme); }
-  $: dirty = Object.keys(values).some(k => String(values[k]) !== String(saved[k])) || mpoDirty;
-  $: setDirty(dirty);   // keep the host's WM_CLOSE guard in step with the staged state
-  // Crash recovery: the host keeps the unapplied edits and returns them after recreating the engine.
-  // Only once the settings have loaded: a fresh page would otherwise report an empty draft before the
-  // host has handed the old one back, and overwrite it (measured in the first crash test).
-  let loaded = false;
-  $: if (loaded) postDraft(Object.fromEntries(Object.keys(values).filter(k => String(values[k]) !== String(saved[k]))
-                                                         .map(k => [k, values[k]])));
-  onMessage(m => {
-    if (m && m.type === 'restoreDraft' && m.values && typeof m.values === 'object') {
-      const back = {};
-      for (const k of Object.keys(m.values)) if (k in values) back[k] = String(m.values[k]);
-      values = { ...values, ...back };
-      if (Object.keys(back).length) announce('Settings recovered after a crash; your unsaved changes are kept.');
-    }
+  function requestQuit() { if (dirty) quitPrompt = true; else doQuit(); }
+  function doQuit() { setDirty(false); windowControl('quitWind'); }
+  async function closeWith(how) {
+    closePrompt = false;
+    if (how === 'save') { if (!(await save())) return; }
+    else if (how === 'discard') await discard();
+    windowControl('close', true);   // 'keep' leaves the session live until Wind quits
+  }
+  async function quitWith(how) {
+    quitPrompt = false;
+    if (how === 'save') { if (!(await save())) return; }
+    else await discard();
+    doQuit();
+  }
+  function onKeydown(e) { if (e.ctrlKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'q') { e.preventDefault(); requestQuit(); } }
+
+  // --- Navigation -----------------------------------------------------------------------------
+  async function select(id) {
+    activeId = id;
+    await tick();
+    if (main) { main.scrollTop = 0; main.focus({ preventScroll: true }); }
+  }
+  function onTheme(mode) { themeMode = mode; setTheme(mode); announce('Theme ' + mode); }
+  function onAction(a) {
+    if (a === 'openIni') openIni();
+    else if (a === 'exportDiagnostics') exportDiagnostics();
+    else if (a === 'quitWind') requestQuit();
+  }
+  const visible = (r) => !r.showIf || String(values[r.showIf.key]) === String(r.showIf.eq);
+  const extra = $derived({
+    mpoNeedsRestart, runningModel, version: VERSION, theme: themeMode, onTheme, onRepo: openRepo,
+    onAction, pick: pickExe,
+    onRestart: () => { restartError = false; windowControl('restartWind'); },
+    profiles: {
+      names: prof.names, active: prof.active,
+      onSwitch: (name) => profileAction('switch', { name }),
+      onCreate: (name) => profileAction('create', { name }),
+      onRename: (from, to) => profileAction('rename', { from, to }),
+      onDuplicate: (name) => profileAction('duplicate', { name }),
+      onDelete: (name) => profileAction('delete', { name }),
+    },
   });
-  // Advanced rows (schema `advanced:true`) are hidden unless "Show advanced settings" is on. Driven
-  // by the live `values` so toggling it reveals/hides rows immediately (before Apply).
-  $: advancedOn = Number(values.showAdvanced) === 1;
 </script>
-<div class="win">
-  <Rail sections={railItems} {active} onSelect={goToSection}
-        {theme} onToggleTheme={toggleTheme} />
-  <!-- Was <section>: an unnamed section is a landmark with no label, which is noise in a screen
-       reader's landmark list. The scroll region below is the real <main>. -->
-  <div class="content">
-    <div class="caption" style="app-region:drag;-webkit-app-region:drag">
-      <h1 class="ctitle">Wind Settings</h1>
-      <ProfileMenu active={profiles.active} names={profiles.names} onAction={profileAction} />
-      <div class="spacer" style="flex:1"></div>
-      <div class="tbtns" style="app-region:no-drag;-webkit-app-region:no-drag">
-        <button class="tbtn" title="Minimize" aria-label="Minimize" on:click={() => windowControl('minimize')}>{@html ic.min}</button>
-        <button class="tbtn close" title="Close" aria-label="Close" on:click={requestClose}>{@html ic.close}</button>
-      </div>
-    </div>
-    <main class="scroll" bind:this={scroller}
-          use:scrollspy={{ sectionIds: ids, onActive: (id) => active = id }}>
-      {#each sections as s}
-        <Section id={s.id} label={s.label} desc={s.desc}>
-          {#each s.rows as r}
-            {#if (!r.requires || Number(values[r.requires]) === 1) && (!r.requiresNot || Number(values[r.requiresNot]) !== 1) && (!r.advanced || advancedOn) && (!r.showIf || values[r.showIf.key] === r.showIf.eq)}
-              <Row row={r} value={values[r.key]} {values} {extra} set={change} {live}
-                   disabled={r.dependsOn && Number(values[r.dependsOn]) !== 1}
-                   onChange={(val) => change(r.key, val)} />
-            {/if}
+
+<svelte:window onkeydown={onKeydown} />
+
+<div class="wnd app" data-theme={effTheme}>
+  <TitleBar {themeMode} onTheme={onTheme} onMinimize={() => windowControl('minimize')} onClose={requestClose} />
+  <div class="body">
+    <Sidebar groups={side} {expert} active={activeId} version={VERSION} onSelect={select} />
+    <main class="main" bind:this={main} tabindex="-1" aria-label={group.label}>
+      <Banner title={group.label} description={group.desc} icon={group.icon} />
+      {#each group.cards as card, i (group.id + i)}
+        <Card caption={card.caption}>
+          {#each card.rows.filter(visible) as r (r.key)}
+            <SettingRow row={r} value={values[r.key]} {values} {extra} {live}
+                        onChange={(v) => change(r.key, v)} />
           {/each}
-        </Section>
+        </Card>
       {/each}
+      <div class="tail"></div>
     </main>
-    <footer>
-      <button class="btn" on:click={exportDiagnostics}>Export diagnostics</button>
-      <button class="btn" on:click={discard} disabled={!dirty}>Discard</button>
-      <button class="btn primary" on:click={apply} disabled={!dirty}>Apply</button>
-    </footer>
-    <!-- Single polite live region for the whole page. Everything that changes the page WITHOUT
-         moving focus is announced here: revealing the advanced rows, swapping the model (which
-         replaces most of the Display section), Apply/Discard, and profile switches. Before this
-         the page had no live regions at all, so all of that was silent. -->
-    <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">{announcement}</div>
   </div>
-  {#if restartError}
-    <div class="mbackdrop">
-      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="rtitle"
-           use:dialog={{ onClose: () => (restartError = false) }}>
-        <h2 id="rtitle">Couldn't restart Wind</h2>
-        <p>Wind.exe could not be launched. The magnifier is still running with the previous model.</p>
-        <div class="mbtns"><button class="primary" on:click={() => (restartError = false)}>Close</button></div>
-      </div>
-    </div>
-  {/if}
-  {#if dropped.length}
-    <div class="mbackdrop">
-      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="dtitle"
-           use:dialog={{ onClose: () => (dropped = []) }}>
-        <h2 id="dtitle">Some keybinds were removed</h2>
-        <p>
-          Wind no longer allows binds that would stop you typing a key or clash with Windows, so
-          these are now unbound: <strong>{dropped.map(d => d.label).join(', ')}</strong>. Set them
-          again under Keybinds, with a modifier such as Ctrl, Alt or Win.
-        </p>
-        <div class="mbtns"><button class="primary" on:click={() => (dropped = [])}>OK</button></div>
-      </div>
-    </div>
-  {/if}
-  {#if writeError}
-    <div class="mbackdrop">
-      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="wtitle"
-           use:dialog={{ onClose: () => (writeError = '') }}>
-        <h2 id="wtitle">Couldn't save the setting</h2>
-        <p>Wind could not write "{writeError}" to its settings file, so the change did not stick. Another program may be holding the file. Try again in a moment.</p>
-        <div class="mbtns"><button class="primary" on:click={() => (writeError = '')}>Close</button></div>
-      </div>
-    </div>
-  {/if}
-  {#if mpoRestartPrompt}
-    <div class="mbackdrop">
-      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="mtitle"
-           use:dialog={{ onClose: () => (mpoRestartPrompt = false) }}>
-        <h2 id="mtitle">Restart to finish</h2>
-        <p>
-          MPO is now {mpoLive ? 'disabled' : 'enabled'} in the registry. Windows only reads this
-          setting when it starts, so it takes effect after a restart.
-        </p>
-        <div class="mbtns">
-          <button on:click={() => (mpoRestartPrompt = false)}>Cancel</button>
-          <button class="primary" on:click={() => { mpoRestartPrompt = false; rebootNow(); }}>Restart now</button>
-        </div>
-      </div>
-    </div>
-  {/if}
-  {#if mpoFailed}
-    <div class="mbackdrop">
-      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="ftitle"
-           use:dialog={{ onClose: () => (mpoFailed = false) }}>
-        <h2 id="ftitle">MPO change not applied</h2>
-        <p>
-          The registry was not changed. This happens if the administrator prompt was dismissed.
-          Nothing else in your settings was affected.
-        </p>
-        <div class="mbtns"><button class="primary" on:click={() => (mpoFailed = false)}>Close</button></div>
-      </div>
-    </div>
-  {/if}
+  <SaveCapsule {count} onSave={save} onDiscard={discard} />
+  <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">{announcement}</div>
+
   {#if closePrompt}
-    <div class="mbackdrop">
-      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="ctitle"
-           use:dialog={{ onClose: () => (closePrompt = false) }}>
-        <h2 id="ctitle">Settings not applied</h2>
-        <p>You have changes that haven't been applied. Closing now discards them.</p>
-        <div class="mbtns">
-          <button on:click={() => (closePrompt = false)}>Cancel</button>
-          <button class="primary" on:click={discardAndClose}>Discard</button>
-        </div>
-      </div>
-    </div>
+    <Prompt id="close" title="Unsaved changes"
+            text="You have changes that are not saved. Save them to the profile, discard them, or keep them for this session (they apply until Wind quits)."
+            onEsc={() => (closePrompt = false)}
+            buttons={[{ label: 'Keep for this session', onClick: () => closeWith('keep') },
+                      { label: 'Discard', onClick: () => closeWith('discard') },
+                      { label: 'Save', kind: 'primary', onClick: () => closeWith('save') }]} />
+  {/if}
+  {#if quitPrompt}
+    <Prompt id="quit" title="Quit Wind?"
+            text="You have changes that are not saved. Save them before Wind quits, or discard them."
+            onEsc={() => (quitPrompt = false)}
+            buttons={[{ label: 'Cancel', onClick: () => (quitPrompt = false) },
+                      { label: 'Discard', onClick: () => quitWith('discard') },
+                      { label: 'Save', kind: 'primary', onClick: () => quitWith('save') }]} />
   {/if}
   {#if profilePrompt}
-    <div class="mbackdrop">
-      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="ptitle"
-           use:dialog={{ onClose: () => (profilePrompt = null) }}>
-        <h2 id="ptitle">Unsaved changes</h2>
-        <p>You have settings that were not applied. Switching profiles will discard them.</p>
-        <div class="mbtns">
-          <button on:click={() => (profilePrompt = null)}>Keep editing</button>
-          <button class="primary" on:click={discardAndRunProfile}>Discard and continue</button>
-        </div>
-      </div>
-    </div>
+    <Prompt id="profile" title="Unsaved changes"
+            text="You have changes that are not saved. Save or discard them before changing profile."
+            onEsc={() => (profilePrompt = null)}
+            buttons={[{ label: 'Cancel', onClick: () => (profilePrompt = null) },
+                      { label: 'Discard', onClick: () => resolveProfilePrompt('discard') },
+                      { label: 'Save', kind: 'primary', onClick: () => resolveProfilePrompt('save') }]} />
+  {/if}
+  {#if mpoRestartPrompt}
+    <Prompt id="mpo" title="Restart to finish"
+            text={'MPO is now ' + (mpoLive ? 'disabled' : 'enabled') + ' in the registry. Windows only reads this setting when it starts, so it takes effect after a restart.'}
+            onEsc={() => (mpoRestartPrompt = false)}
+            buttons={[{ label: 'Cancel', onClick: () => (mpoRestartPrompt = false) },
+                      { label: 'Restart now', kind: 'primary', onClick: () => { mpoRestartPrompt = false; rebootNow(); } }]} />
+  {/if}
+  {#if mpoFailed}
+    <Prompt id="mpof" title="MPO change not applied"
+            text="The registry was not changed. This happens if the administrator prompt was dismissed. Nothing else in your settings was affected."
+            onEsc={() => (mpoFailed = false)}
+            buttons={[{ label: 'Close', kind: 'primary', onClick: () => (mpoFailed = false) }]} />
+  {/if}
+  {#if restartError}
+    <Prompt id="rst" title="Couldn't restart Wind"
+            text="Wind.exe could not be launched. The magnifier is still running with the previous engine."
+            onEsc={() => (restartError = false)}
+            buttons={[{ label: 'Close', kind: 'primary', onClick: () => (restartError = false) }]} />
+  {/if}
+  {#if dropped.length}
+    <Prompt id="drop" title="Some keybinds were removed"
+            text={'Wind no longer allows binds that would stop you typing a key or clash with Windows, so these are now unbound: ' + dropped.map((d) => d.label).join(', ') + '. Set them again with a modifier such as Ctrl, Alt or Win.'}
+            onEsc={() => (dropped = [])}
+            buttons={[{ label: 'OK', kind: 'primary', onClick: () => (dropped = []) }]} />
+  {/if}
+  {#if writeError}
+    <Prompt id="wr" title="Couldn't save the setting"
+            text={'Wind could not write "' + writeError + '" to its settings file, so the change did not stick. Another program may be holding the file. Try again in a moment.'}
+            onEsc={() => (writeError = '')}
+            buttons={[{ label: 'Close', kind: 'primary', onClick: () => (writeError = '') }]} />
+  {/if}
+  {#if saveError}
+    <Prompt id="sv" title="Couldn't save"
+            text="Wind could not write the profile file, so your changes are still unsaved. Another program may be holding the file. Try again in a moment."
+            onEsc={() => (saveError = false)}
+            buttons={[{ label: 'Close', kind: 'primary', onClick: () => (saveError = false) }]} />
   {/if}
   {#if profileError}
-    <div class="mbackdrop">
-      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="petitle"
-           use:dialog={{ onClose: () => (profileError = '') }}>
-        <h2 id="petitle">Profile action failed</h2>
-        <p>{profileError}</p>
-        <div class="mbtns"><button class="primary" on:click={() => (profileError = '')}>Close</button></div>
-      </div>
-    </div>
-  {/if}
-  {#if profileNotice}
-    <div class="mbackdrop">
-      <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="pntitle"
-           use:dialog={{ onClose: () => (profileNotice = '') }}>
-        <h2 id="pntitle">Profile changed</h2>
-        <p>{profileNotice}</p>
-        <div class="mbtns"><button class="primary" on:click={() => (profileNotice = '')}>OK</button></div>
-      </div>
-    </div>
+    <Prompt id="pe" title="Profile action failed" text={profileError}
+            onEsc={() => (profileError = '')}
+            buttons={[{ label: 'Close', kind: 'primary', onClick: () => (profileError = '') }]} />
   {/if}
 </div>
+
 <style>
-  /* Ported from mockups/config-ui-onepage.html (.win / .main->.content / .caption / .ctitle /
-     .tbtns / .tbtn / .scroll / .footer / .fhint->.hint / .btn). */
-  .win { width: 100vw; height: 100vh; overflow: hidden; display: flex;
-         background: var(--bg); color: var(--text); font-size: 13px; }
-  .content { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-  .caption { height: 44px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; padding-left: 22px; }
-  /* margin:0 because this is an <h1> now (the page needed a top-level heading); the UA's default
-     h1 margin would otherwise push the flex caption bar around. Visually identical to the span. */
-  .ctitle { font-size: 12.5px; color: var(--muted); font-weight: 500; margin: 0; }
-  .tbtns { display: flex; height: 100%; }
-  .tbtn { width: 46px; height: 100%; display: grid; place-items: center; color: var(--muted); border: 0; background: transparent; cursor: pointer; }
-  .tbtn:hover { background: var(--hover); color: var(--text); }
-  .tbtn.close:hover { background: #e81123; color: #fff; }
-  .scroll { flex: 1; overflow-y: auto; position: relative; padding: 0 30px 24px;
-            scrollbar-width: thin; scrollbar-color: var(--track) transparent; }
-  /* Slim themed scrollbar (Chromium/WebView2). The 'thin' rule above handles Firefox. */
-  .scroll::-webkit-scrollbar { width: 8px; }
-  .scroll::-webkit-scrollbar-track { background: transparent; }
-  .scroll::-webkit-scrollbar-thumb { background: var(--track); border-radius: 4px; border: 2px solid transparent; background-clip: padding-box; }
-  .scroll::-webkit-scrollbar-thumb:hover { background: var(--accent-icon); background-clip: padding-box; border: 2px solid transparent; }
-  /* Extra breathing room between sections (Section.svelte's .sec lives in another scope,
-     so use :global to reach it). The About section's large logo hero gives the last section
-     real height so its header can reach the scroll-spy top band; the scrollspy also has a
-     bottom-of-scroll fallback that activates the last section when the container hits bottom. */
-  :global(.sec + .sec) { margin-top: 40px; }
-  footer { flex-shrink: 0; display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 12px 26px; border-top: 1px solid var(--line); }
-  .hint { margin-right: auto; color: var(--muted); font-size: 11.5px; }
-  .btn { padding: 7px 16px; border-radius: 7px; border: 1px solid var(--line); background: transparent; color: var(--text); font-size: 12.5px; cursor: pointer; }
-  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .btn:disabled { opacity: .5; cursor: default; }
-  .mbackdrop { position: fixed; inset: 0; background: rgba(0,0,0,.45);
-               display: flex; align-items: center; justify-content: center; z-index: 50; }
-  .mbox { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 10px;
-          padding: 20px 22px; width: 380px; box-shadow: 0 12px 40px rgba(0,0,0,.5); }
-  .mbox h2 { margin: 0 0 8px; font-size: 15px; }
-  .mbox p { margin: 0 0 18px; font-size: 13px; opacity: .85; line-height: 1.45; }
-  .mbtns { display: flex; gap: 8px; justify-content: flex-end; }
-  .mbtns button { padding: 7px 16px; border-radius: 7px; font-size: 12.5px; cursor: pointer;
-                  border: 1px solid var(--line); background: transparent; color: var(--text); }
-  .mbtns button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .app { width: 100vw; height: 100vh; display: grid; grid-template-rows: 38px 1fr; position: relative; overflow: hidden; }
+  .body { display: grid; grid-template-columns: 240px 1fr; min-height: 0; }
+  .main { position: relative; min-height: 0; overflow-y: auto; padding: 0 40px; outline: none;
+          scrollbar-width: thin; scrollbar-color: var(--track) transparent; }
+  .tail { height: 110px; }   /* clearance so the capsule never covers the last row */
+  .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
+             clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 </style>

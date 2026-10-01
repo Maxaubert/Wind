@@ -15,7 +15,7 @@
   import HighRes from './HighRes.svelte';
   import EngineRow from './EngineRow.svelte';
   import ThemeRow from './ThemeRow.svelte';
-  import Profiles from './Profiles.svelte';
+  import Profiles from '../general/Profiles.svelte';
   import About from './About.svelte';
   let { row, value = undefined, values = {}, onChange = () => {}, live = () => {}, extra = {}, disabled = false } = $props();
 
