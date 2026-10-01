@@ -240,7 +240,9 @@
   }
 
   // --- Navigation -----------------------------------------------------------------------------
+  let navigated = $state(false);   // the page cross-fade stays off until the first navigation (none on first paint)
   async function select(id) {
+    navigated = true;
     activeId = id;
     await tick();
     if (main) { main.scrollTop = 0; main.focus({ preventScroll: true }); }
@@ -275,6 +277,8 @@
     <Sidebar groups={side} {expert} active={searching ? '' : activeId} version={VERSION} {query} {onSearch}
              onSelect={(id) => { clearSearch(); select(id); }} />
     <main class="main" bind:this={main} tabindex="-1" aria-label={group.label}>
+      {#key searching ? '?search' : activeId}
+      <div class="page" class:fade={navigated}>
       {#if searching}
         <Results {results} {query} onJump={jump} />
       {:else}
@@ -288,6 +292,8 @@
         </Card>
       {/each}
       {/if}
+      </div>
+      {/key}
       <div class="tail"></div>
     </main>
   </div>
@@ -367,6 +373,8 @@
   .body { display: grid; grid-template-columns: 240px 1fr; min-height: 0; }
   .main { position: relative; min-height: 0; overflow-y: auto; padding: 0 40px; outline: none;
           scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--fg) 16%, transparent) transparent; }
+  .page.fade { animation: pagein var(--dur-fast) var(--ease); }
+  @keyframes pagein { from { opacity: 0; } }
   .tail { height: 110px; }   /* clearance so the capsule never covers the last row */
   .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
              clip: rect(0 0 0 0); white-space: nowrap; border: 0; }

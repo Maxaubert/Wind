@@ -23,6 +23,10 @@
                align-items: center; justify-content: center; z-index: 50; }
   .mbox { background: var(--card); color: var(--fg); border: 1px solid var(--line2); border-radius: 10px;
           padding: 22px 24px; width: 440px; max-width: calc(100vw - 48px); box-shadow: var(--shadow); }
+  .mbackdrop { animation: fade var(--dur) var(--ease); }
+  .mbox { animation: pop var(--dur) var(--ease); }
+  @keyframes fade { from { opacity: 0; } }
+  @keyframes pop { from { opacity: 0; transform: scale(.98); } }
   h2 { margin: 0 0 8px; font: 600 15px var(--s); }
   p { margin: 0 0 20px; font: 13px/1.5 var(--s); color: var(--fg2); }
   .mbtns { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }

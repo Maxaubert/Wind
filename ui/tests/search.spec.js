@@ -69,8 +69,7 @@ test('Ctrl+F focuses the search box, which shows a visible focus ring', async ({
   await page.locator('main').click({ position: { x: 5, y: 5 } });
   await page.keyboard.press('Control+f');
   await expect(input(page)).toBeFocused();
-  const border = await page.locator('.search').evaluate((el) => getComputedStyle(el).borderTopColor);
-  expect(border).toBe('rgb(242, 242, 242)');
+  await expect(page.locator('.search')).toHaveCSS('border-top-color', 'rgb(242, 242, 242)');   // after its short fade
 });
 
 test('keyboard only: Tab reaches a result and Enter opens it, Advanced rows reachable', async ({ page }) => {

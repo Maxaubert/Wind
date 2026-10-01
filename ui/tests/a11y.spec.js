@@ -90,6 +90,7 @@ for (const theme of ['dark', 'light']) test('focus is visible in the ' + theme +
     await page.addInitScript((t) => { window.__theme = t; }, theme);
     await page.goto('/');
     await expect(page.locator('.wnd')).toHaveAttribute('data-theme', theme);
+    await page.keyboard.press('Tab');   // keyboard modality: the ring is for keyboard users only
     for (const sel of ['.side .it', '.side .search input', '[data-theme-cycle]', 'main .keycap']) {
       await page.locator(sel).first().focus();
       const ring = await page.locator(sel).first().evaluate((el) => {

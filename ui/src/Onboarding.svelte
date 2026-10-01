@@ -152,7 +152,7 @@
   .rctl { flex-shrink: 0; display: flex; align-items: center; gap: 10px; }
 
   .wizdots { display: flex; justify-content: center; gap: 7px; padding: 4px 0 10px; }
-  .wizdots i { width: 7px; height: 7px; border-radius: 50%; background: var(--track); transition: width .2s; }
+  .wizdots i { width: 7px; height: 7px; border-radius: 50%; background: var(--track); transition: width var(--dur) var(--ease), background-color var(--dur) var(--ease); }
   .wizdots i.on { width: 22px; border-radius: 4px; background: var(--accent); }
 
   .wizfoot { flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 14px 24px; }   /* no divider above the buttons (Max, 2026-10-02) */
@@ -163,6 +163,6 @@
   /* KeybindCapture styles itself with legacy theme.css variables; restyle it with tokens here. */
   .rctl :global(.keycap) { font: 500 12px var(--m); color: var(--fg); background: var(--chip); border: 1px solid var(--chipb); border-radius: var(--srad); padding: 5px 10px; min-height: 28px; }
   .rctl :global(.keycap:hover) { border-color: var(--outline); }
-  .rctl :global(.keycap.armed) { outline: 2px solid var(--fg); outline-offset: 1px; }
+  .rctl :global(.keycap.armed) { border-color: var(--fg); background: var(--hover); }
   .rctl :global(.refusal) { color: var(--fg2); }
 </style>

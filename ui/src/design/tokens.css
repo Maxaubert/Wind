@@ -2,6 +2,10 @@
    Source of truth: docs/design/settings-2026-10/FINAL-v10-grey.html (baseline + the v10 overrides
    at the end of its stylesheet). Scoped to .wnd so the legacy theme.css keeps working until the
    pages move over. Set data-theme="light" on the .wnd element for the light palette. */
+:root {
+  /* Motion: calm and quick. Everything below is switched off by the prefers-reduced-motion rule in theme.css. */
+  --dur-fast: 120ms; --dur: 180ms; --ease: cubic-bezier(.2, .7, .2, 1);
+}
 .wnd {
   --s: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
   --m: "Cascadia Mono", Consolas, monospace;
@@ -51,3 +55,22 @@
 }
 .wnd button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
 .wnd :focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+/* Focus ring for the keyboard only: a mouse click (or a script moving focus after one) never draws a box. */
+.wnd :focus:not(:focus-visible) { outline: none; }
+/* Chromium still matches :focus-visible on a mouse-clicked <select> (and after a script moves focus
+   following a click), so the ring is also gated on the last input being the keyboard: main.js sets
+   data-kbd on <html> at the first key press and clears it on every pointer press. Text fields keep
+   their own ring either way. */
+html:not([data-kbd]) .wnd :focus-visible:not(input:is([type="text"], [type="search"], :not([type]))) { outline: none; }
+html:not([data-kbd]) .wnd input:focus-visible + .track { outline: none; }
+
+/* Hover and press feedback: short colour fades on every button, field and row; a 0.97 press on the
+   pill and chip buttons. No layout properties are animated. */
+.wnd button, .wnd select, .wnd .search, .wnd .kc {
+  transition: background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease),
+              color var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease),
+              transform var(--dur-fast) var(--ease);
+}
+.wnd :is(.btn, .chip, .link, .reset, .restart, .mbtns button, button.keycap:not(.split)):active:not(:disabled) {
+  transform: scale(.97);
+}
