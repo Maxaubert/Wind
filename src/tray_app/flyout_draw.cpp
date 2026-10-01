@@ -340,7 +340,22 @@ void Painter::Impl::drawHead(const View& v, const Geometry& g) {
     if (v.p.haveFps) {
         wchar_t b[24];
         wsprintfW(b, L"%d fps", v.p.fps);
-        text(b, g_s.mono12b.Get(), D2D1::RectF(left, topRow, right, topRow + 28.f), th.fg, DWRITE_TEXT_ALIGNMENT_TRAILING);
+        text(b, g_s.mono12b.Get(), D2D1::RectF(left, topRow, right - 22.f - 8.f, topRow + 28.f), th.fg,
+             DWRITE_TEXT_ALIGNMENT_TRAILING);
+    }
+    // the small bordered mark right of the fps (j01 .mark: 22 px, radius 6, 13 px three-line glyph)
+    {
+        const float my = topRow + 14.f - 11.f;
+        const D2D1_RECT_F mr = D2D1::RectF(right - 22.f, my, right, my + 22.f);
+        ring(mr, 6.f, th.chipb);
+        ID2D1PathGeometry* mg = IconGeometry("menu");
+        if (mg) {
+            const float k = 13.f / 16.f;
+            rt->SetTransform(D2D1::Matrix3x2F::Scale(k, k) * D2D1::Matrix3x2F::Translation(mr.left + 4.5f, my + 4.5f));
+            br->SetColor(th.fg3);
+            rt->DrawGeometry(mg, br.Get(), 1.5f, round.Get());
+            rt->SetTransform(D2D1::Matrix3x2F::Identity());
+        }
     }
     // frame row: "Frame" [sparkline] "6.9 ms"
     const float rowT = topRow + 28.f + 14.f, rowB = rowT + 14.f;

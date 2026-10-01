@@ -33,6 +33,7 @@ inline const IconDef* Icons(int* count) {
         { "profile","M8 2L13.5 4.75 8 7.5 2.5 4.75zM2.5 8L8 10.75 13.5 8M2.5 11L8 13.75 13.5 11" },
         { "settings","M2 5h12M2 11h12M5 3v4M11 9v4" },
         { "quit",   "M8 2v6M4.5 4.5a5 5 0 1 0 7 0" },
+        { "menu",   "M3 5h10M3 8h10M3 11h6" },
         { "check",  "M3 8.5l3.2 3.2L13 4.5" },
     };
     if (count) *count = (int)(sizeof(k) / sizeof(k[0]));
