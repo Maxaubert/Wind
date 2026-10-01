@@ -155,7 +155,7 @@
   .wizdots i { width: 7px; height: 7px; border-radius: 50%; background: var(--track); transition: width .2s; }
   .wizdots i.on { width: 22px; border-radius: 4px; background: var(--accent); }
 
-  .wizfoot { flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 14px 24px; border-top: 1px solid var(--line); }
+  .wizfoot { flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 14px 24px; }   /* no divider above the buttons (Max, 2026-10-02) */
   .skip { margin-right: auto; background: transparent; border: 0; color: var(--fg3); font-size: 12.5px; cursor: pointer; }
   .skip:hover { color: var(--fg); }
   .btn { height: 36px; padding: 0 20px; border-radius: 999px; border: 1px solid var(--chipb); background: transparent; color: var(--fg2); font: 600 13px var(--s); cursor: pointer; }
