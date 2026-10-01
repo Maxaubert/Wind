@@ -80,7 +80,7 @@ test('schema and controls contain no em-dash', () => {
   const dir = new URL('../src/controls/', import.meta.url);
   const files = readdirSync(dir).map((f) => new URL(f, dir));
   files.push(new URL('../src/settings-schema.js', import.meta.url));
-  for (const f of files) expect(readFileSync(f, 'utf8'), f.pathname).not.toContain('—');
+  for (const f of files) expect(readFileSync(f, 'utf8'), f.pathname).not.toContain('\u2014');
 });
 
 const css = (loc, prop) => loc.evaluate((el, p) => getComputedStyle(el).getPropertyValue(p), prop);
