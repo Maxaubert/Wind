@@ -378,9 +378,9 @@ TEST_CASE("click placement: a click on the taskbar opens up and to the right of 
     CHECK(p.y == 1060 - 285);
 }
 
-TEST_CASE("click placement: near the right edge it flips to the left of the point") {
+TEST_CASE("click placement: near the right edge it shifts left just enough, not flipped") {
     const Placement p = PlaceAtPoint(1800, 1060, kMon, 300, 285);
-    CHECK(p.x == 1800 - 300);
+    CHECK(p.x == 1920 - 300);
     CHECK(p.y == 1060 - 285);
 }
 
@@ -388,6 +388,12 @@ TEST_CASE("click placement: an overflow-flyout click high on the screen opens do
     const Placement p = PlaceAtPoint(1500, 240, kMon, 300, 285);
     CHECK(p.x == 1500);
     CHECK(p.y == 240);
+}
+
+TEST_CASE("click placement: overflow click near the right edge stays on the panel, from the pointer row") {
+    const Placement p = PlaceAtPoint(1700, 600, kMon, 300, 285);
+    CHECK(p.x == 1920 - 300);   // overlaps the panel under the pointer instead of jumping left of it
+    CHECK(p.y == 600);
 }
 
 TEST_CASE("click placement: never leaves the monitor") {

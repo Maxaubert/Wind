@@ -81,13 +81,15 @@ inline Placement PlaceFlyout(const IRect& icon, const IRect& monitor, const IRec
 
 // Top-left of a w x h window opened at the click point, the way the old TrackPopupMenu tray menu
 // was (Max, 2026-10-02: "same position as the old tray menu", including when the icon lives in the
-// overflow flyout). Like a popup menu: the window's corner sits on the point, right and down by
-// default, flipped left when it would cross the monitor's right edge and up when it would cross the
-// bottom, then clamped to the monitor. Arguments are physical pixels.
+// overflow flyout). The top-left corner sits on the point, right and down by default, so a click
+// in the overflow panel opens OVER the panel from the pointer (Max's choice). Near the right edge it
+// is shifted left only as much as needed to stay on screen (not flipped, which pushed it away from
+// the panel); it flips up when it would cross the bottom (a click on the taskbar itself), then is
+// clamped to the monitor. Arguments are physical pixels.
 inline Placement PlaceAtPoint(int px, int py, const IRect& monitor, int w, int h) {
     Placement p;
     p.x = px; p.y = py;
-    if (p.x + w > monitor.r) p.x = px - w;
+    if (p.x + w > monitor.r) p.x = monitor.r - w;
     if (p.y + h > monitor.b) p.y = py - h;
     p.x = ClampInt(p.x, monitor.l, monitor.r - w);
     p.y = ClampInt(p.y, monitor.t, monitor.b - h);
