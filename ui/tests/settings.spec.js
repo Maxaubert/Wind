@@ -1,728 +1,240 @@
+// Settings window against the mock bridge: groups and navigation, instant apply, theme, keybind
+// rules and the pages that carry the old per-feature rows (redesign, #303).
 import { test, expect } from '@playwright/test';
-
-// Targets the pre-redesign UI. Skipped until Task 12 rewrites it for the new shell (#303).
-test.skip(true, 'old UI spec, rewritten in Task 12');
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     window.__skipSplash = true;
-    window.__sets = [];
+    window.__msgs = [];
+    // Built on the first getConfig so a test's own init script (window.__cfgExtra) is already set.
+    const init = () => {
+      if (window.__live) return;
+      window.__live = { maxLevel: '12', zoomInVk: '33', zoomInButton: '2', zoomOutVk: '114',
+        cursorLockVk: '113', model: 'hybrid', uiTheme: 'dark', ...(window.__cfgExtra || {}) };
+      window.__saved = { ...window.__live };
+    };
     const listeners = new Set();
-    // Lets a test play the host: deliver a message exactly as WebView2 would.
-    window.__hostSend = (data) => listeners.forEach(fn => fn({ data }));
+    const send = (data) => listeners.forEach((fn) => fn({ data }));
+    window.__hostSend = send;
     window.chrome = { webview: {
       addEventListener: (_e, fn) => listeners.add(fn),
       postMessage: (msg) => {
-        if (msg.type === 'getConfig')
-          // showAdvanced=1: 'Cursor speed' and 'Smooth zoom' are advanced:true rows, so without it
-          // they never render and the tests asserting on them time out looking for a hidden row.
-          // model=render: 'Sharpness' additionally carries showIf {model:'render'}, and an unset
-          // model fails that check (undefined !== 'render'), hiding the row the same way.
-          // __cfgSampling seeds txSamplingMode (the combined high-res/MPO option, issue #242).
-          listeners.forEach(fn => fn({ data: { type: 'config', values: { zoomInSpeed: '1.2', smoothZoom: '0', uiTheme: 'auto', showAdvanced: '1', model: 'render', zoomInButton: '2', zoomInVk: '33', zoomOutButton: '1', zoomOutVk: '34', cursorLockVk: '113', txSamplingMode: window.__cfgSampling !== undefined ? window.__cfgSampling : '0', ...(window.__cfgExtra || {}) } } }));
-        if (msg.type === 'setConfig') window.__sets.push(msg);
-        if (msg.type === 'openRepo') window.__sets.push(msg);
-        if (msg.type === 'draft') window.__sets.push(msg);   // crash-recovery mirror of unapplied edits
-        // MPO lives in the registry, not the ini. __mpoDisabled drives what the "registry" reports;
-        // __mpoOk drives whether the elevated write is accepted (false = UAC dismissed).
-        if (msg.type === 'mpoState')
-          // __mpoAtBoot defaults to the current value, i.e. "the registry is what DWM loaded".
-          // Set it separately to model a registry that has already moved away from the boot state.
-          listeners.forEach(fn => fn({ data: { type: 'mpoState',
-            disabled: !!window.__mpoDisabled,
-            bootKnown: window.__mpoBootKnown !== false,
-            atBoot: window.__mpoAtBoot !== undefined ? !!window.__mpoAtBoot : !!window.__mpoDisabled } }));
-        if (msg.type === 'setMpoDisabled') {
-          const ok = window.__mpoOk !== false;
-          if (ok) window.__mpoDisabled = msg.value === '1';
-          listeners.forEach(fn => fn({ data: { type: 'mpoApplied', ok, disabled: !!window.__mpoDisabled } }));
-        }
-        if (msg.type === 'window') {
-          window.__sets.push(msg);
-          // __restartFail: the host failed to relaunch Wind after a model change.
-          if (msg.action === 'restartWind' && window.__restartFail)
-            listeners.forEach(fn => fn({ data: { type: 'restartFailed' } }));
-        }
-        // The host shows a native file picker and replies with the bare exe name. Stand in for it
-        // with a settable name so a test can drive what the "picker" returns.
-        if (msg.type === 'pickExe')
-          listeners.forEach(fn => fn({ data: { type: 'exePicked', name: window.__pick || 'RDR2.exe' } }));
-        // Profiles: an in-page stand-in for the host's file ops, same reply shape as the C++ host.
-        if (String(msg.type || '').match(/Profile$|^listProfiles$/)) window.__sets.push(msg);
-        window.__profiles = window.__profiles || { names: ['Default', 'Gaming'], active: 'Default' };
-        const reply = (ok = true, error = '') => listeners.forEach(fn => fn({ data: {
-          type: 'profiles', names: [...window.__profiles.names],
-          active: window.__profiles.active, ok, error } }));
-        // __profileFail = '<messageType>' forces that operation to reply ok=false.
-        if (window.__profileFail && msg.type === window.__profileFail) { reply(false, 'Simulated failure'); return; }
-        if (msg.type === 'listProfiles') reply();
-        if (msg.type === 'switchProfile') { window.__profiles.active = msg.name; reply(); }
-        if (msg.type === 'createProfile') {
-          window.__profiles.names.push(msg.name); window.__profiles.active = msg.name; reply();
-        }
-        if (msg.type === 'renameProfile') {
-          window.__profiles.names = window.__profiles.names.map(n => n === msg.from ? msg.to : n);
-          if (window.__profiles.active === msg.from) window.__profiles.active = msg.to;
-          reply();
-        }
-        if (msg.type === 'duplicateProfile') { window.__profiles.names.push(msg.name + ' copy'); reply(); }
-        if (msg.type === 'deleteProfile') {
-          window.__profiles.names = window.__profiles.names.filter(n => n !== msg.name);
-          if (window.__profiles.active === msg.name) window.__profiles.active = window.__profiles.names[0];
-          reply();
-        }
+        window.__msgs.push(msg);
+        if (msg.type === 'getConfig') { init(); send({ type: 'config', values: { ...window.__live }, saved: { ...window.__saved },
+          profiles: { names: ['Default', 'Gaming'], active: 'Default' } }); }
+        else if (msg.type === 'setConfig') window.__live[msg.key] = msg.value;
+        else if (msg.type === 'setConfigPersist') { window.__live[msg.key] = msg.value; window.__saved[msg.key] = msg.value; }
+        else if (msg.type === 'mpoState') send({ type: 'mpoState', disabled: false, bootKnown: true, atBoot: false });
+        else if (msg.type === 'pickExe') send({ type: 'exePicked', name: 'RDR2.exe' });
       },
-    }};
+    } };
   });
 });
 
-test('renders all sections on one page', async ({ page }) => {
+const sent = (page, type) => page.evaluate((t) => window.__msgs.filter((m) => m.type === t), type);
+const go = (page, g) => page.locator('.side .it[data-g="' + g + '"]').click();
+const css = (loc, prop) => loc.evaluate((el, p) => getComputedStyle(el).getPropertyValue(p), prop);
+const key = (page, k) => page.locator('[data-key="' + k + '"]');
+
+test('sidebar lists the task groups and each one opens its own page', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByText('Zoom-in speed')).toBeVisible();
-  await expect(page.getByText('Cursor speed')).toBeVisible();
-  await expect(page.getByText('Max zoom')).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'About' })).toBeVisible();
-});
-
-test('rail click scrolls and marks the section active', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Display' }).click();
-  await expect(page.getByRole('button', { name: 'Display' })).toHaveClass(/active/);
-});
-
-test('theme toggle writes uiTheme', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Toggle theme' }).click();
-  const sets = await page.evaluate(() => window.__sets);
-  expect(sets.some(s => s.key === 'uiTheme')).toBeTruthy();
-});
-
-test('changes stage until Apply, then setConfig fires', async ({ page }) => {
-  await page.goto('/');
-  // Staged via the high-resolution-cursor toggle (Cursor section; the alternate-keybinds
-  // gate left the UI 2026-08-22 - both keybind slots are always visible now).
-  await page.getByRole('button', { name: 'Cursor', exact: true }).click();
-  await page.getByText('High resolution cursor', { exact: true })
-      .locator('xpath=../..').getByRole('checkbox').click();
-  expect(await page.evaluate(() => window.__sets.filter(s => s.key === 'txSamplingMode').length)).toBe(0);
-  await page.getByRole('button', { name: 'Apply' }).click();
-  const sets = await page.evaluate(() => window.__sets);
-  expect(sets.some(s => s.key === 'txSamplingMode' && s.value === '1')).toBeTruthy();
-});
-
-test('each zoom direction is ONE row with TWO capture slots', async ({ page }) => {
-  await page.goto('/');
-  await expect(page.getByText('Zoom in',  { exact: true }).locator('xpath=../..').getByRole('button')).toHaveCount(2);
-  await expect(page.getByText('Zoom out', { exact: true }).locator('xpath=../..').getByRole('button')).toHaveCount(2);
-});
-
-test('a slot holding both a side-button and a key shows BOTH bindings', async ({ page }) => {
-  await page.goto('/');
-  // The mock binds zoom-in to Mouse button 5 AND PageUp (zoomInButton=2, zoomInVk=33). The core
-  // OR-combines the two, so both really fire - the keycap must list both. Showing only the button
-  // hid the key binding, which is how PageUp/PageDown kept zooming while Settings read
-  // "Mouse button 5" and offered nothing to clear.
-  const cap = page.getByText('Zoom in', { exact: true }).locator('xpath=../..').getByRole('button').first();
-  await expect(cap).toHaveText(/Mouse button 5/);
-  await expect(cap).toHaveText(/PageUp/);
-});
-
-// Issue #156: releasing keys trades swallowing for smooth panning, so it must be visible in the UI
-// (an ini-only knob is one nobody finds) and must ship OFF - the mock config sets neither key.
-// The row shows the current state plus one button; everything else lives in the dialog, so the
-// row stays one line however many programs are listed.
-test('the app row summarises an empty list and opens a dialog', async ({ page }) => {
-  await page.goto('/');
-  const row = page.getByText("Pass zoom keys to these apps", { exact: true }).locator('xpath=../..');
-  await expect(row.getByText('None', { exact: true })).toBeVisible();
-  await expect(page.getByRole('dialog')).toHaveCount(0);
-  await row.getByRole('button', { name: 'Manage list' }).click();
-  await expect(page.getByRole('dialog')).toBeVisible();
-});
-
-test('adding a program stages it until Apply, then setConfig fires', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Manage list' }).first().click();   // two applists exist now (lockApps, #221): target the first (noSwallowApps)
-  await page.getByRole('button', { name: 'Add program...' }).click();   // mock picks RDR2.exe
-  await expect(page.getByRole('dialog').getByText('RDR2.exe')).toBeVisible();
-  expect(await page.evaluate(() => window.__sets.filter(s => s.key === 'noSwallowApps').length)).toBe(0);
-  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
-  await expect(page.getByRole('dialog')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Apply' }).click();
-  const sets = await page.evaluate(() => window.__sets);
-  expect(sets.some(s => s.key === 'noSwallowApps' && s.value === 'RDR2.exe')).toBeTruthy();
-});
-
-// The core matches exe names case-insensitively, so two spellings of one program would both take
-// effect while the list looked broken. The add path has to reject the duplicate outright.
-test('adding the same program twice is ignored, regardless of case', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Manage list' }).first().click();   // two applists exist now (lockApps, #221): target the first (noSwallowApps)
-  const add = page.getByRole('button', { name: 'Add program...' });
-  await add.click();
-  await page.evaluate(() => { window.__pick = 'rdr2.EXE'; });   // same program, different case
-  await add.click();
-  await expect(page.getByRole('button', { name: /^Remove / })).toHaveCount(1);
-});
-
-test('removing a program empties the list again', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Manage list' }).first().click();   // two applists exist now (lockApps, #221): target the first (noSwallowApps)
-  await page.getByRole('button', { name: 'Add program...' }).click();
-  await page.getByRole('button', { name: 'Remove RDR2.exe' }).click();
-  await expect(page.getByRole('dialog').getByText('No apps yet')).toBeVisible();
-  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
-  await expect(page.getByText('None', { exact: true }).first()).toBeVisible();   // both applists show 'None' when empty (#221)
-});
-
-// Closing is the only way out now that the confirm button is gone, so all three routes are load
-// bearing: the X, Escape, and a backdrop click.
-test('the backdrop closes the dialog', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Manage list' }).first().click();   // two applists exist now (lockApps, #221): target the first (noSwallowApps)
-  await page.mouse.click(8, 8);   // outside the box, on the backdrop
-  await expect(page.getByRole('dialog')).toHaveCount(0);
-});
-
-test('Escape closes the dialog', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Manage list' }).first().click();   // two applists exist now (lockApps, #221): target the first (noSwallowApps)
-  await expect(page.getByRole('dialog')).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(page.getByRole('dialog')).toHaveCount(0);
-});
-
-test('keybind capture writes a VK on keydown (live, no Apply needed)', async ({ page }) => {
-  await page.goto('/');
-  await page.getByText('Zoom in', { exact: true }).locator('xpath=../..').getByRole('button').first().click();
-  await page.keyboard.press('F2'); // keyCode 113; fires both keydown and keyup
-  // Keybind writes are live (KeybindCapture calls setConfig immediately so the magnifier core
-  // hot-reloads the new key and the hook stops swallowing the previous binding). No Apply step.
-  const sets = await page.evaluate(() => window.__sets);
-  expect(sets.some(s => s.key === 'zoomInVk' && s.value === '113')).toBeTruthy();
-});
-
-// --- High-res + MPO combined option (issue #242; MPO staging from issue #164) ----------------
-// The one toggle drives BOTH halves: its checked state is the INI value (txSamplingMode), and
-// editing it mirrors the staged MPO half (crisp stages MPO-disable, high-res stages MPO-enable),
-// because crisp magnification with MPO enabled is the driver-crash combo. The registry half still
-// applies through the staged UAC + restart flow.
-const hiResBox = page => page.getByText('High resolution cursor', { exact: true })
-    .locator('xpath=../..').getByRole('checkbox');
-
-test('the combined toggle reflects the ini value, not the registry', async ({ page }) => {
-  // MPO already disabled, but high-res off in the ini: the toggle must show the INI half.
-  await page.addInitScript(() => { window.__mpoDisabled = true; });
-  await page.goto('/');
-  await expect(hiResBox(page)).not.toBeChecked();
-  await expect(page.getByText('Requires restart')).toHaveCount(0);
-});
-
-test('turning high-res OFF stages MPO-disable and prompts to restart on Apply', async ({ page }) => {
-  await page.addInitScript(() => { window.__mpoDisabled = false; window.__cfgSampling = '1'; });
-  await page.goto('/');
-  await hiResBox(page).uncheck();
-  await expect(page.getByText('Requires restart')).toBeVisible();
-  await page.getByRole('button', { name: 'Apply' }).click();
-  await expect(page.getByRole('dialog')).toContainText('Restart to finish');
-  // Cancel leaves the registry change in place and only defers the reboot: the chip stays up
-  // (the value is written but DWM is still running the old one), and the ini half landed too.
-  await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
-  await expect(page.getByText('Requires restart')).toBeVisible();
-  const sets = await page.evaluate(() => window.__sets);
-  expect(sets.some(s => s.key === 'txSamplingMode' && s.value === '0')).toBeTruthy();
-});
-
-test('turning high-res ON stages MPO re-enable', async ({ page }) => {
-  await page.addInitScript(() => { window.__mpoDisabled = true; window.__cfgSampling = '0'; });
-  await page.goto('/');
-  await hiResBox(page).check();
-  await expect(page.getByText('Requires restart')).toBeVisible();
-  await page.getByRole('button', { name: 'Apply' }).click();
-  await expect(page.getByRole('dialog')).toContainText('Restart to finish');
-  const sets = await page.evaluate(() => window.__sets);
-  expect(sets.some(s => s.key === 'txSamplingMode' && s.value === '1')).toBeTruthy();
-});
-
-test('a dismissed admin prompt reverts BOTH halves of the option', async ({ page }) => {
-  await page.addInitScript(() => {
-    window.__mpoDisabled = false; window.__mpoOk = false; window.__cfgSampling = '1';
-  });
-  await page.goto('/');
-  await hiResBox(page).uncheck();
-  await page.getByRole('button', { name: 'Apply' }).click();
-  await expect(page.getByRole('dialog')).toContainText('MPO change not applied');
-  // Scoped to the dialog: the title bar also has a button named Close.
-  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
-  // Reverted wholesale: the toggle is back ON, nothing staged, and the ini half never landed -
-  // a half-applied "crisp" would be exactly the crisp+MPO-on combo the coupling prevents.
-  await expect(hiResBox(page)).toBeChecked();
-  await expect(page.getByText('Requires restart')).toHaveCount(0);
-  expect(await page.evaluate(() =>
-    window.__sets.filter(s => s.key === 'txSamplingMode' && s.value === '0').length)).toBe(0);
-});
-
-test('closing with unsaved changes asks before discarding', async ({ page }) => {
-  await page.goto('/');
-  // The title-bar X, not the footer Discard: both a footer button and the dialog are named
-  // "Discard", so every button here is located precisely.
-  const titleClose = page.locator('button.tbtn.close');
-  await page.getByRole('button', { name: 'Cursor', exact: true }).click();
-  await page.getByText('High resolution cursor', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();
-  await titleClose.click();
-  await expect(page.getByRole('dialog')).toContainText('Settings not applied');
-  // Cancel keeps the window and the staged change.
-  await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
-  await expect(page.getByRole('dialog')).toHaveCount(0);
-  let sets = await page.evaluate(() => window.__sets);
-  expect(sets.some(s => s.type === 'window' && s.action === 'close')).toBeFalsy();
-  // Discard closes for real, with force so the host guard does not re-ask.
-  await titleClose.click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Discard' }).click();
-  sets = await page.evaluate(() => window.__sets);
-  expect(sets.some(s => s.type === 'window' && s.action === 'close' && s.force === '1')).toBeTruthy();
-});
-
-test('closing with nothing staged does not prompt', async ({ page }) => {
-  await page.goto('/');
-  await page.locator('button.tbtn.close').click();
-  await expect(page.getByRole('dialog')).toHaveCount(0);
-  const sets = await page.evaluate(() => window.__sets);
-  expect(sets.some(s => s.type === 'window' && s.action === 'close')).toBeTruthy();
-});
-
-// The bug this pair guards (issue #164, caught in use): DWM reads OverlayTestMode once, at boot.
-// Comparing the staged value against the REGISTRY made restoring the boot value demand a pointless
-// reboot. The comparison is against the BOOT state, so restoring it is a no-op and a real change
-// still prompts.
-test('putting MPO back to the boot state needs no restart', async ({ page }) => {
-  // DWM booted with MPO disabled; the registry has since been changed to enabled (the chip must
-  // say so on load, with nothing staged). Toggling high-res ON then OFF stages MPO-disable while
-  // leaving the ini value where it started - back to the boot state, so the chip clears and
-  // Apply writes the registry without demanding a pointless reboot.
-  await page.addInitScript(() => { window.__mpoDisabled = false; window.__mpoAtBoot = true; window.__cfgSampling = '0'; });
-  await page.goto('/');
-  await expect(page.getByText('Requires restart')).toBeVisible();
-  await hiResBox(page).check();
-  await hiResBox(page).uncheck();                   // stages MPO-disable = the boot state
-  await expect(page.getByText('Requires restart')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Apply' }).click();
-  await expect(page.getByRole('dialog')).toHaveCount(0);   // written, but nothing to reboot for
-});
-
-test('moving MPO away from the boot state still prompts to restart', async ({ page }) => {
-  await page.addInitScript(() => { window.__mpoDisabled = true; window.__mpoAtBoot = true; window.__cfgSampling = '0'; });
-  await page.goto('/');
-  await expect(page.getByText('Requires restart')).toHaveCount(0);
-  await hiResBox(page).check();                     // high-res ON stages MPO re-enable
-  await expect(page.getByText('Requires restart')).toBeVisible();
-  await page.getByRole('button', { name: 'Apply' }).click();
-  await expect(page.getByRole('dialog')).toContainText('Restart to finish');
-});
-
-// --- Profiles (spec 2026-08-12): titlebar dropdown ---------------------------
-test('titlebar shows the active profile and lists all profiles on click', async ({ page }) => {
-  await page.goto('/');
-  const trigger = page.getByRole('button', { name: /Default/ });
-  await expect(trigger).toBeVisible();
-  await trigger.click();
-  await expect(page.getByRole('menuitemradio', { name: /Gaming/ })).toBeVisible();
-  await expect(page.getByRole('menuitem', { name: /Create new profile/ })).toBeVisible();
-});
-
-test('clicking another profile switches and reloads', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('button', { name: /Default/ }).click();
-  await page.getByRole('menuitemradio', { name: /Gaming/ }).click();
-  await expect(page.getByRole('button', { name: /Gaming/ })).toBeVisible();
-  const sets = await page.evaluate(() => window.__sets);
-  expect(sets.some(s => s.type === 'switchProfile' && s.name === 'Gaming')).toBeTruthy();
-});
-
-test('create validates the name inline and sends createProfile when valid', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('button', { name: /Default/ }).click();
-  await page.getByRole('menuitem', { name: /Create new profile/ }).click();
-  const input = page.getByPlaceholder('New profile name');
-  await input.fill('Gaming');                       // duplicate
-  await page.getByRole('button', { name: 'Create', exact: true }).click();
-  await expect(page.getByText(/already exists/)).toBeVisible();
-  await input.fill('Movies');
-  await page.getByRole('button', { name: 'Create', exact: true }).click();
-  const sets = await page.evaluate(() => window.__sets);
-  expect(sets.some(s => s.type === 'createProfile' && s.name === 'Movies')).toBeTruthy();
-});
-
-test('right-click opens rename/duplicate/delete; rename round-trips', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('button', { name: /Default/ }).click();
-  await page.getByRole('menuitemradio', { name: /Gaming/ }).click({ button: 'right' });
-  await page.getByRole('menuitem', { name: 'Rename' }).click();
-  await page.getByPlaceholder('New name').fill('Games');
-  await page.getByRole('button', { name: 'Rename', exact: true }).click();
-  const sets = await page.evaluate(() => window.__sets);
-  expect(sets.some(s => s.type === 'renameProfile' && s.from === 'Gaming' && s.to === 'Games')).toBeTruthy();
-});
-
-test('delete is disabled on the last profile', async ({ page }) => {
-  await page.addInitScript(() => { window.__profiles = { names: ['Solo'], active: 'Solo' }; });
-  await page.goto('/');
-  await page.getByRole('button', { name: /Solo/ }).click();
-  await page.getByRole('menuitemradio', { name: /Solo/ }).click({ button: 'right' });
-  await expect(page.getByRole('menuitem', { name: 'Delete' })).toBeDisabled();
-});
-
-test('switching with staged changes raises the unsaved-changes guard', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Cursor', exact: true }).click();
-  await page.getByText('High resolution cursor', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();
-  await page.getByRole('button', { name: /Default/ }).click();
-  await page.getByRole('menuitemradio', { name: /Gaming/ }).click();
-  await expect(page.getByText('Unsaved changes')).toBeVisible();
-  await page.getByRole('button', { name: 'Discard and continue' }).click();
-  await expect(page.getByRole('button', { name: /Gaming/ })).toBeVisible();
-});
-
-test('a failed profile action surfaces a visible error dialog', async ({ page }) => {
-  await page.addInitScript(() => { window.__profileFail = 'switchProfile'; });
-  await page.goto('/');
-  await page.getByRole('button', { name: /Default/ }).click();
-  await page.getByRole('menuitemradio', { name: /Gaming/ }).click();
-  await expect(page.getByText('Profile action failed')).toBeVisible();
-  await expect(page.getByText('Simulated failure')).toBeVisible();
-  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
-  await expect(page.getByText('Profile action failed')).toHaveCount(0);
-});
-
-test('deleting a NON-active profile with staged changes skips the guard', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Cursor', exact: true }).click();
-  await page.getByText('High resolution cursor', { exact: true }).locator('xpath=../..').getByRole('checkbox').click();
-  await page.getByRole('button', { name: /Default/ }).click();
-  await page.getByRole('menuitemradio', { name: /Gaming/ }).click({ button: 'right' });
-  await page.getByRole('menuitem', { name: 'Delete' }).click();          // one-click delete
-  await expect(page.getByText('Unsaved changes')).toHaveCount(0);      // no guard
-  const sets = await page.evaluate(() => window.__sets);
-  expect(sets.some(s => s.type === 'deleteProfile' && s.name === 'Gaming')).toBeTruthy();
-});
-
-test('a leading-dot name is rejected inline before reaching the host', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('button', { name: /Default/ }).click();
-  await page.getByRole('menuitem', { name: /Create new profile/ }).click();
-  await page.getByPlaceholder('New profile name').fill('.hidden');
-  await page.getByRole('button', { name: 'Create', exact: true }).click();
-  await expect(page.getByText(/space or dot/)).toBeVisible();
-  expect(await page.evaluate(() => window.__sets.filter(s => s.type === 'createProfile').length)).toBe(0);
-});
-
-test('Escape closes the profile dropdown', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('button', { name: /Default/ }).click();
-  await expect(page.getByRole('menuitemradio', { name: /Gaming/ })).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(page.getByRole('menuitemradio', { name: /Gaming/ })).toHaveCount(0);
-});
-
-test('the Default profile cannot be deleted even among many', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('button', { name: /Default/ }).click();
-  await page.getByRole('menuitem', { name: 'Profile actions for Default' }).click();
-  await expect(page.getByRole('menuitem', { name: 'Delete' })).toBeDisabled();
-});
-
-// --- Review fixes (issue #182) ----------------------------------------------
-test('the Inspect row shows its real binding (cursorLockVk is loaded)', async ({ page }) => {
-  await page.goto('/');
-  // Mock binds cursorLockVk=113 (F2). The row lied ("Unbound") before the fix because
-  // vkKey-only rows were never loaded into values.
-  const cap = page.getByText('Inspect mode', { exact: true }).locator('xpath=../..').getByRole('button');
-  await expect(cap).toHaveText(/F2/);
-});
-
-test('forbidden keys are refused during keybind capture and capture stays armed', async ({ page }) => {
-  await page.goto('/');
-  await page.getByText('Zoom in', { exact: true }).locator('xpath=../..').getByRole('button').first().click();
-  await page.keyboard.press('Backspace');   // forbidden (would be swallowed system-wide)
-  // Arming live-clears the previous binding (one zoomInVk=0 write is expected); the forbidden
-  // key itself must never be written.
-  expect(await page.evaluate(() =>
-    window.__sets.filter(s => s.key === 'zoomInVk' && s.value !== '0').length)).toBe(0);
-  await page.keyboard.press('F2');          // capture must still be armed
-  const sets = await page.evaluate(() => window.__sets);
-  expect(sets.some(s => s.key === 'zoomInVk' && s.value === '113')).toBeTruthy();
-});
-
-test('a model change writes the ini BEFORE requesting the relaunch', async ({ page }) => {
-  await page.goto('/');
-  const row = page.getByText('Magnifier engine', { exact: true }).locator('xpath=../..');
-  await row.getByRole('combobox').click();
-  await page.getByRole('option', { name: 'System' }).click();
-  await page.getByRole('button', { name: 'Apply' }).click();
-  const sets = await page.evaluate(() => window.__sets);
-  const iModel = sets.findIndex(s => s.key === 'model' && s.value === 'magnify');
-  const iRestart = sets.findIndex(s => s.type === 'window' && s.action === 'restartWind');
-  expect(iModel).toBeGreaterThanOrEqual(0);
-  expect(iRestart).toBeGreaterThan(iModel);   // the relaunched Wind reads the ini at startup
-});
-
-test('a failed relaunch reverts the model dropdown and the ini', async ({ page }) => {
-  await page.addInitScript(() => { window.__restartFail = true; });
-  await page.goto('/');
-  const row = page.getByText('Magnifier engine', { exact: true }).locator('xpath=../..');
-  await row.getByRole('combobox').click();
-  await page.getByRole('option', { name: 'System' }).click();
-  await page.getByRole('button', { name: 'Apply' }).click();
-  await expect(page.getByText("Couldn't restart Wind")).toBeVisible();
-  const sets = await page.evaluate(() => window.__sets);
-  // The revert write puts the RUNNING model back after the failed switch attempt.
-  const last = sets.filter(s => s.key === 'model').pop();
-  expect(last.value).toBe('render');
-});
-
-// (The desktopTransform showIf test left with its row in the 2026-08-21 cleanup - the knob is
-// ini-only now. Restore from git history if the row returns.)
-
-test('About: Star on GitHub asks the host to open the repo, and shows the real version', async ({ page }) => {
-  await page.goto('/');
-  const star = page.getByRole('button', { name: 'Star on GitHub' });
-  await star.scrollIntoViewIfNeeded();
-  await star.click();
-  const sent = await page.evaluate(() => window.__sets.filter(m => m.type === 'openRepo'));
-  expect(sent).toEqual([{ type: 'openRepo' }]);
-  // not a link any more: a followed link would open a WebView popup, not the user's browser
-  await expect(page.locator('.about-hero a')).toHaveCount(0);
-  await expect(page.locator('.about-hero .version')).toHaveText(/^v\d+\.\d+\.\d+/);
-});
-
-test('a settings write the host could not save shows a dialog (issue #274)', async ({ page }) => {
-  await page.goto('/');
-  await expect(page.getByText('Keybinds').first()).toBeVisible();
-  await page.evaluate(() => window.__hostSend({ type: 'configWriteFailed', key: 'zoomInSpeed' }));
-  const dlg = page.getByRole('dialog', { name: "Couldn't save the setting" });
-  await expect(dlg).toBeVisible();
-  await expect(dlg).toContainText('zoomInSpeed');
-  await dlg.getByRole('button', { name: 'Close' }).click();
-  await expect(dlg).toHaveCount(0);
-});
-
-// Tracking modes (issue #276): caret tracking defaults ON, focus tracking OFF, alignment
-// centred by default. Toggle rows expose role="checkbox" here (see Row.svelte), not "switch",
-// so the query matches the rest of this file rather than the plan's draft.
-test('Tracking section: caret on, focus off, centred by default (issue #276)', async ({ page }) => {
-  await page.goto('/');
-  const caret = page.getByText('Follow the text cursor', { exact: true }).locator('xpath=../..').getByRole('checkbox');
-  const focus = page.getByText('Follow keyboard focus', { exact: true }).locator('xpath=../..').getByRole('checkbox');
-  await expect(caret).toBeChecked();
-  await expect(focus).not.toBeChecked();
-  await focus.click();
-  await page.getByRole('button', { name: 'Apply' }).click();
-  const sets = await page.evaluate(() => window.__sets.filter(m => m.type === 'setConfig' && m.key === 'trackFocus'));
-  expect(sets.at(-1).value).toBe('1');
-});
-
-test('Keep the mouse pointer: centred by default, within the edges writes mouseAlign=1 (issue #276)', async ({ page }) => {
-  await page.goto('/');
-  const row = page.getByText('Keep the mouse pointer', { exact: true }).locator('xpath=../..');
-  await expect(row.getByRole('combobox')).toContainText('Centred');
-  await row.getByRole('combobox').click();
-  await page.getByRole('option', { name: 'Within the edges' }).click();
-  await page.getByRole('button', { name: 'Apply' }).click();
-  const sets = await page.evaluate(() => window.__sets.filter(m => m.type === 'setConfig' && m.key === 'mouseAlign'));
-  expect(sets.at(-1).value).toBe('1');
-});
-
-test('Mouse edge margin: a slider in the Tracking section, 0% by default (issue #276)', async ({ page }) => {
-  await page.goto('/');
-  const row = page.getByText('Mouse edge margin', { exact: true }).locator('xpath=../..');
-  await expect(row).toBeVisible();
-  await expect(row).toContainText('0');
-});
-
-test('Colour section: only the warmth and brightness sliders, neutral by default (issue #288)', async ({ page }) => {
-  await page.goto('/');
-  await expect(page.getByText('Warmth', { exact: true }).locator('xpath=../..')).toContainText('0');
-  await expect(page.getByText('Brightness', { exact: true }).locator('xpath=../..')).toContainText('100');
-  for (const gone of ['Colour filter', 'Also when not zoomed', 'Toggle colour filter']) {
-    await expect(page.getByText(gone, { exact: true })).toHaveCount(0);
+  await expect(page.locator('h1')).toHaveText('Zoom');
+  await expect(page.locator('.side nav .it')).toHaveText([/Zoom/, /Moving around/, /Cursor/, /Follow typing/, /Colour/, /General/]);
+  await expect(page.locator('.side .adv .it')).toHaveText([/Advanced/, /About/]);
+  await expect(page.locator('.side .it.sel')).toContainText('Zoom');
+  for (const [g, title] of [['move', 'Moving around'], ['cursor', 'Cursor'], ['typing', 'Follow typing'], ['colour', 'Colour'],
+    ['general', 'General'], ['advanced', 'Advanced'], ['about', 'About'], ['zoom', 'Zoom']]) {
+    await go(page, g);
+    await expect(page.locator('h1')).toHaveText(title);
+    await expect(page.locator('.side .it.sel')).toHaveAttribute('data-g', g);
+    await expect(page.locator('.side .it.sel')).toHaveAttribute('aria-current', 'page');
   }
 });
 
-// --- Safe keybinds, click and wheel binds (issue #285) -------------------------------------
-const zoomInCap = page => page.getByText('Zoom in', { exact: true }).locator('xpath=../..').getByRole('button').first();
-const lastSet = (page, key) => page.evaluate(k => (window.__sets.filter(s => s.key === k).at(-1) || {}).value, key);
-
-test('typing keys alone and system combos are refused with a reason; the row keeps listening (#285)', async ({ page }) => {
+test('pages show their cards', async ({ page }) => {
   await page.goto('/');
-  const cap = zoomInCap(page);
+  await expect(page.locator('main .card')).toHaveCount(3);
+  await go(page, 'move');
+  await expect(page.locator('main .card')).toHaveCount(2);
+  await go(page, 'general');
+  await expect(page.locator('main .card')).toHaveCount(3);
+});
+
+test('About: Star on GitHub asks the host to open the repo', async ({ page }) => {
+  await page.goto('/');
+  await go(page, 'about');
+  await page.getByRole('button', { name: 'Star on GitHub' }).click();
+  expect(await sent(page, 'openRepo')).toHaveLength(1);
+});
+
+test('theme: the title bar cycles dark, light, auto and writes uiTheme each time', async ({ page }) => {
+  await page.goto('/');
+  const app = page.locator('.wnd');
+  const btn = page.locator('[data-theme-cycle]');
+  await expect(app).toHaveAttribute('data-theme', 'dark');
+  await expect(btn).toHaveAttribute('aria-label', 'Theme: Dark');
+  await btn.click();
+  await expect(app).toHaveAttribute('data-theme', 'light');
+  await expect(btn).toHaveAttribute('aria-label', 'Theme: Light');
+  await btn.click();
+  await expect(btn).toHaveAttribute('aria-label', 'Theme: Auto');
+  await btn.click();
+  await expect(app).toHaveAttribute('data-theme', 'dark');
+  const writes = (await sent(page, 'setConfig')).filter((m) => m.key === 'uiTheme').map((m) => m.value);
+  expect(writes).toEqual(['light', 'auto', 'dark']);
+});
+
+test('theme: the General radio group follows the same mode, and a theme change is never unsaved', async ({ page }) => {
+  await page.goto('/');
+  await go(page, 'general');
+  await key(page, '__theme').getByRole('radio', { name: 'Light' }).click();
+  await expect(page.locator('.wnd')).toHaveAttribute('data-theme', 'light');
+  await expect(page.locator('[data-theme-cycle]')).toHaveAttribute('aria-label', 'Theme: Light');
+  await expect(page.locator('.capsule')).toHaveCount(0);
+});
+
+test('light theme: shell surfaces and the capsule read on white', async ({ page }) => {
+  await page.addInitScript(() => { window.__cfgExtra = { uiTheme: 'light' }; });
+  await page.goto('/');
+  await expect(page.locator('.wnd')).toHaveAttribute('data-theme', 'light');
+  expect(await css(page.locator('.card').first(), 'background-color')).toBe('rgb(255, 255, 255)');
+  expect(await css(page.locator('.side'), 'background-color')).toBe('rgb(243, 243, 244)');
+  expect(await css(page.locator('.side .it.sel'), 'background-color')).toBe('rgb(228, 228, 228)');
+  expect(await css(page.locator('.banner'), 'background-color')).toBe('rgb(246, 246, 247)');
+  await key(page, 'maxLevel').locator('input[type=range]').fill('20');
+  const cap = page.locator('.capsule');
+  await expect(cap).toBeVisible();
+  const [bg, fg] = await cap.evaluate((el) => [getComputedStyle(el).backgroundColor, getComputedStyle(el).color]);
+  expect(bg).not.toBe(fg);
+  expect(bg).not.toBe('rgba(0, 0, 0, 0)');
+});
+
+test('focus order: Tab goes title bar, search, sidebar, then the page, and focus is visible', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('h1')).toHaveText('Zoom');
+  const where = () => page.evaluate(() => {
+    const a = document.activeElement;
+    if (!a) return '';
+    if (a.closest('header.tb')) return 'tb';
+    if (a.closest('.side .search')) return 'search';
+    if (a.closest('.side')) return 'side';
+    if (a.closest('main')) return 'main';
+    return a.tagName;
+  });
+  const seen = [];
+  for (let i = 0; i < 40; i++) {
+    await page.keyboard.press('Tab');
+    const w = await where();
+    if (seen.at(-1) !== w) seen.push(w);
+  }
+  const order = seen.filter((w) => ['tb', 'search', 'side', 'main'].includes(w));
+  const uniq = [...new Set(order)];
+  expect(uniq).toEqual(expect.arrayContaining(['tb', 'search', 'side', 'main']));
+  expect(uniq.indexOf('search')).toBeLessThan(uniq.indexOf('side'));
+  expect(uniq.indexOf('side')).toBeLessThan(uniq.indexOf('main'));
+  const ring = await page.evaluate(() => {
+    const s = getComputedStyle(document.activeElement);
+    return s.outlineStyle !== 'none' || s.boxShadow !== 'none';
+  });
+  expect(ring).toBe(true);
+});
+
+test('Advanced: engine row, per-window rows follow Auto, app list writes through the session', async ({ page }) => {
+  await page.goto('/');
+  await go(page, 'advanced');
+  await expect(page.getByRole('button', { name: 'Restart Wind' })).toHaveCount(0);
+  await key(page, 'model').locator('select').selectOption('render');
+  await expect(page.getByRole('button', { name: 'Restart Wind' })).toBeVisible();
+  await expect(key(page, 'engineGame')).toHaveCount(0);
+  await key(page, 'model').locator('select').selectOption('hybrid');
+  const apps = key(page, 'renderExclude');
+  await apps.getByRole('button', { name: /Manage/ }).click();
+  await page.getByRole('button', { name: 'Add program...' }).click();
+  await page.getByRole('button', { name: 'Add program...' }).click();   // the same exe twice is ignored
+  await expect(page.getByRole('button', { name: 'Remove RDR2.exe' })).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  expect((await sent(page, 'setConfig')).some((m) => m.key === 'renderExclude' && m.value.includes('RDR2.exe'))).toBe(true);
+});
+
+test('Typing page: caret on, focus off by default; a toggle writes at once', async ({ page }) => {
+  await page.goto('/');
+  await go(page, 'typing');
+  await expect(key(page, 'trackCaret').getByRole('switch')).toBeChecked();
+  await expect(key(page, 'trackFocus').getByRole('switch')).not.toBeChecked();
+  await key(page, 'trackFocus').getByRole('switch').check({ force: true });
+  expect((await sent(page, 'setConfig')).some((m) => m.key === 'trackFocus' && String(m.value) === '1')).toBe(true);
+  await expect(page.locator('.capsule')).toContainText('1 unsaved change');
+});
+
+test('Colour page: only warmth and brightness, neutral by default (no warmth, full brightness)', async ({ page }) => {
+  await page.goto('/');
+  await go(page, 'colour');
+  await expect(page.locator('main input[type=range]')).toHaveCount(2);
+  await expect(key(page, 'colorWarmPct').locator('input[type=range]')).toHaveValue('0');
+  await expect(key(page, 'colorDimPct').locator('input[type=range]')).toHaveValue('100');
+});
+
+test('Move page: pan rows ship unbound and bind with the shared rules', async ({ page }) => {
+  await page.goto('/');
+  await go(page, 'move');
+  const left = key(page, '__panLeft').locator('.keycap').first();
+  await expect(left).toHaveText('Add key');
+  await left.click();
+  await page.keyboard.press('Control+Alt+ArrowLeft');
+  expect((await sent(page, 'setConfigPersist')).some((m) => m.key === 'panLeftVk' && m.value === '37')).toBe(true);
+});
+
+test('keybind safety: typing keys and system combos are refused and the row keeps listening', async ({ page }) => {
+  await page.goto('/');
+  const cap = key(page, '__zoomOut').locator('.keycap').first();
   await cap.click();
   await page.keyboard.press('a');
-  await expect(page.locator('.refusal', { hasText: /alone would stop you typing/ })).toBeVisible();
-  await page.keyboard.press('Alt+F4');
-  await expect(page.locator('.refusal', { hasText: /reserved by Windows/ })).toBeVisible();
-  await page.keyboard.press('Control+Alt+2');                        // AltGr @ on Nordic layouts
-  await expect(page.locator('.refusal', { hasText: /AltGr/ })).toBeVisible();
-  expect(await page.evaluate(() => window.__sets.filter(s => s.key === 'zoomInVk' && s.value !== '0').length)).toBe(0);
-  await page.keyboard.press('PageUp');                               // allowed alone
-  expect(await lastSet(page, 'zoomInVk')).toBe('33');
-  await expect(cap).toHaveText(/PageUp/);
-});
-test('combos with Ctrl, Ctrl+Alt and Win are accepted (#285)', async ({ page }) => {
-  await page.goto('/');
-  const cap = zoomInCap(page);
-  for (const [keys, vk, mods, label] of [['Control+F1', '112', '1', 'Ctrl+F1'], ['Control+Alt+PageUp', '33', '3', 'Ctrl+Alt+PageUp'],
-                                          ['Meta+PageUp', '33', '8', 'Win+PageUp']]) {
-    await cap.click();
-    await page.keyboard.press(keys);
-    expect(await lastSet(page, 'zoomInVk')).toBe(vk);
-    expect(await lastSet(page, 'zoomInMods')).toBe(mods);
-    await expect(cap).toHaveText(label);
-  }
-});
-test('a click with modifiers binds; a plain, Ctrl or Shift click is refused (#285)', async ({ page }) => {
-  await page.goto('/');
-  const cap = zoomInCap(page);
-  await cap.click();
-  const box = await cap.boundingBox();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down(); await page.mouse.up();                     // plain left click
-  await expect(page.locator('.refusal', { hasText: /needs a modifier/ })).toBeVisible();
-  await page.keyboard.down('Control'); await page.mouse.down(); await page.mouse.up(); await page.keyboard.up('Control');
-  await expect(page.locator('.refusal', { hasText: /used by apps/ })).toBeVisible();
-  await page.keyboard.down('Control'); await page.keyboard.down('Alt');
-  await page.mouse.down(); await page.mouse.up();
-  await page.keyboard.up('Alt'); await page.keyboard.up('Control');
-  expect(await lastSet(page, 'zoomInButton')).toBe('3');
-  expect(await lastSet(page, 'zoomInButtonMods')).toBe('3');
-  await expect(cap).toHaveText('Ctrl+Alt+Left click');
-});
-test('the wheel row binds Ctrl+wheel and Alt+wheel and refuses Shift alone (#285, #295)', async ({ page }) => {
-  await page.goto('/');
-  const cap = page.getByText('Zoom with the scroll wheel', { exact: true }).locator('xpath=../..').getByRole('button').first();
-  await cap.click();
-  const box = await cap.boundingBox();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.keyboard.down('Shift'); await page.mouse.wheel(0, -100); await page.keyboard.up('Shift');
-  await expect(page.locator('.refusal', { hasText: /used by apps \(scroll, select\)/ })).toBeVisible();
-  await page.keyboard.down('Alt'); await page.mouse.wheel(0, -100); await page.keyboard.up('Alt');
-  expect(await lastSet(page, 'zoomWheelMods')).toBe('2');
-  await expect(cap).toHaveText('Alt+Wheel');
-  await cap.click();
-  await page.keyboard.down('Control'); await page.mouse.wheel(0, -100); await page.keyboard.up('Control');
-  expect(await lastSet(page, 'zoomWheelMods')).toBe('1');
-  await expect(cap).toHaveText('Ctrl+Wheel');
+  await expect(cap).toHaveClass(/armed/);
+  expect((await sent(page, 'setConfigPersist')).filter((m) => m.key === 'zoomOutVk' && m.value !== '0')).toHaveLength(0);
+  await page.keyboard.press('F2');
+  await expect(cap).not.toHaveClass(/armed/);
+  expect((await sent(page, 'setConfigPersist')).some((m) => m.key === 'zoomOutVk' && m.value === '113')).toBe(true);
 });
 
-test('a right-click with modifiers binds and stays bound; a plain right-click still clears (#285)', async ({ page }) => {
+test('Escape cancels an armed capture and keeps the old binding', async ({ page }) => {
   await page.goto('/');
-  const cap = zoomInCap(page);
+  const cap = key(page, '__zoomIn').locator('.keycap').first();
+  const before = await cap.textContent();
   await cap.click();
-  const box = await cap.boundingBox();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.keyboard.down('Control'); await page.keyboard.down('Alt');
-  await page.mouse.down({ button: 'right' }); await page.mouse.up({ button: 'right' });
-  await page.keyboard.up('Alt'); await page.keyboard.up('Control');
-  await page.waitForTimeout(100);
-  expect(await lastSet(page, 'zoomInButton')).toBe('4');
-  expect(await lastSet(page, 'zoomInButtonMods')).toBe('3');
-  await expect(cap).toHaveText('Ctrl+Alt+Right click');
-  await page.mouse.down({ button: 'right' }); await page.mouse.up({ button: 'right' });
-  await expect(cap).toHaveText('Unbound');
-});
-test('a side button keeps its modifiers (Ctrl+Mouse button 4) (#285)', async ({ page }) => {
-  await page.goto('/');
-  const cap = zoomInCap(page);
-  await cap.click();
-  await page.evaluate(() => window.dispatchEvent(new MouseEvent('mousedown', { button: 3, ctrlKey: true })));
-  expect(await lastSet(page, 'zoomInButton')).toBe('1');
-  expect(await lastSet(page, 'zoomInButtonMods')).toBe('1');
-  await expect(cap).toHaveText('Ctrl+Mouse button 4');
-});
-test('stored binds the rules refuse are reset once, with a notice naming them (#285)', async ({ page }) => {
-  await page.addInitScript(() => { window.__cfgExtra = { cursorLockVk: '82', zoomWheelMods: '4' }; });
-  await page.goto('/');
-  const dlg = page.getByRole('dialog', { name: 'Some keybinds were removed' });
-  await expect(dlg).toBeVisible();
-  await expect(dlg).toContainText('Inspect mode');
-  await expect(dlg).toContainText('Zoom with the scroll wheel');
-  expect(await lastSet(page, 'cursorLockVk')).toBe('0');
-  expect(await lastSet(page, 'zoomWheelMods')).toBe('0');
-  await dlg.getByRole('button', { name: 'OK' }).click();
-  await expect(dlg).toBeHidden();
-});
-test('no notice when every stored bind is allowed (#285)', async ({ page }) => {
-  await page.goto('/');
-  await expect(page.getByText('Zoom-in speed')).toBeVisible();
-  await expect(page.getByRole('dialog', { name: 'Some keybinds were removed' })).toHaveCount(0);
+  await expect(cap).toHaveClass(/armed/);
+  await page.keyboard.press('Escape');
+  await expect(cap).not.toHaveClass(/armed/);
+  await expect(cap).toHaveText(before);
 });
 
-test('unapplied edits are mirrored to the host and restored after a crash recovery', async ({ page }) => {
+test('a modifier alone never binds; the row keeps listening', async ({ page }) => {
   await page.goto('/');
-  const row = page.getByText('Zoom-in speed', { exact: true }).locator('xpath=../..');
-  await row.locator('input[type=range]').fill('2');
-  await expect.poll(async () => page.evaluate(() => {
-    const d = window.__sets.filter(m => m.type === 'draft').at(-1);
-    return d ? JSON.parse(d.json).zoomInSpeed : null;
-  })).toBe('2');
-  // The host recreated the engine: a fresh page load gets its config, then the draft back.
-  await page.evaluate(() => window.__hostSend({ type: 'restoreDraft', values: { zoomInSpeed: '3.5', notARealKey: '1' } }));
-  await expect(row).toContainText('3.5');
-  await expect(page.getByRole('button', { name: 'Apply' })).toBeEnabled();
+  const cap = key(page, '__zoomOut').locator('.keycap').first();
+  await cap.click();
+  await page.keyboard.press('Control');
+  await page.keyboard.press('Shift');
+  await expect(cap).toHaveClass(/armed/);
+  expect((await sent(page, 'setConfigPersist')).filter((m) => m.key === 'zoomOutVk' && m.value !== '0')).toHaveLength(0);
 });
 
-// --- Keyboard panning (issue #287) ----------------------------------------------------------
-const capOf = (page, label) => page.getByText(label, { exact: true }).locator('xpath=../..').getByRole('button').first();
-test('pan rows ship unbound (#307) and bind with the shared rules (#287)', async ({ page }) => {
+test('stored binds the rules refuse are reset once and persisted', async ({ page }) => {
+  await page.addInitScript(() => { window.__cfgExtra = { zoomInVk: '65' }; });
   await page.goto('/');
-  for (const label of ['Pan left', 'Pan right', 'Pan up', 'Pan down'])
-    await expect(capOf(page, label)).toHaveText('Unbound');
-  const up = capOf(page, 'Pan up');
-  await up.click();
-  await page.keyboard.press('k');
-  await expect(page.locator('.refusal', { hasText: /alone would stop you typing/ })).toBeVisible();
-  await page.keyboard.press('Control+Alt+PageUp');
-  expect(await lastSet(page, 'panUpVk')).toBe('33');
-  expect(await lastSet(page, 'panUpMods')).toBe('3');
-  await expect(up).toHaveText('Ctrl+Alt+PageUp');
+  await expect(page.locator('h1')).toHaveText('Zoom');
+  await expect.poll(async () => (await sent(page, 'setConfigPersist')).some((m) => m.key === 'zoomInVk' && m.value === '0')).toBe(true);
+  await expect(page.locator('.capsule')).toHaveCount(0);
 });
-test('the Pan speed slider writes panSpeed on Apply (#287)', async ({ page }) => {
+
+test('no reset when every stored bind is allowed', async ({ page }) => {
   await page.goto('/');
-  const row = page.getByText('Pan speed', { exact: true }).locator('xpath=../..');
-  await expect(row).toContainText('1');
-  await row.locator('input[type=range]').fill('2');
-  await page.getByRole('button', { name: 'Apply' }).click();
-  expect(await lastSet(page, 'panSpeed')).toBe('2');
+  await expect(page.locator('h1')).toHaveText('Zoom');
+  expect(await sent(page, 'setConfigPersist')).toHaveLength(0);
 });
-test('two and three modifiers work on every keybind row: zoom, pan, Inspect, wheel (#307)', async ({ page }) => {
+
+test('a settings write the host could not save shows a dialog', async ({ page }) => {
   await page.goto('/');
-  const zin = capOf(page, 'Zoom in');
-  await zin.click(); await page.keyboard.press('Control+Alt+Shift+F1');
-  expect(await lastSet(page, 'zoomInVk')).toBe('112'); expect(await lastSet(page, 'zoomInMods')).toBe('7');
-  await expect(zin).toHaveText('Ctrl+Alt+Shift+F1');
-  const pl = capOf(page, 'Pan left');
-  await pl.click(); await page.keyboard.press('Control+Alt+ArrowLeft');
-  expect(await lastSet(page, 'panLeftVk')).toBe('37'); expect(await lastSet(page, 'panLeftMods')).toBe('3');
-  await expect(pl).toHaveText('Ctrl+Alt+Left');
-  const insp = capOf(page, 'Inspect mode');
-  await insp.click(); await page.keyboard.press('Control+Alt+Shift+F4');
-  expect(await lastSet(page, 'cursorLockVk')).toBe('115'); expect(await lastSet(page, 'cursorLockMods')).toBe('7');
-  await expect(insp).toHaveText('Ctrl+Alt+Shift+F4');
-  const wheel = capOf(page, 'Zoom with the scroll wheel');
-  await wheel.click();
-  const box = await wheel.boundingBox();
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.keyboard.down('Control'); await page.keyboard.down('Alt'); await page.keyboard.down('Shift');
-  await page.mouse.wheel(0, -100);
-  await page.keyboard.up('Shift'); await page.keyboard.up('Alt'); await page.keyboard.up('Control');
-  expect(await lastSet(page, 'zoomWheelMods')).toBe('7');
-  await expect(wheel).toHaveText('Ctrl+Alt+Shift+Wheel');
-});
-test('a modifier alone never binds; the row keeps listening (#307)', async ({ page }) => {
-  await page.goto('/');
-  const insp = capOf(page, 'Inspect mode');
-  await insp.click();
-  await page.keyboard.down('Control'); await page.keyboard.down('Alt'); await page.keyboard.up('Alt'); await page.keyboard.up('Control');
-  expect(await lastSet(page, 'cursorLockVk')).toBe('0');   // the arm cleared it; nothing captured
-  await page.keyboard.press('F9');
-  expect(await lastSet(page, 'cursorLockVk')).toBe('120');
+  await expect(page.locator('h1')).toHaveText('Zoom');
+  await page.evaluate(() => window.__hostSend({ type: 'configWriteFailed', key: 'maxLevel' }));
+  await expect(page.getByRole('dialog')).toContainText('maxLevel');
 });

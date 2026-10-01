@@ -54,7 +54,7 @@ test('session helpers: global keys never count, defaults fill both sides', () =>
 
 test('session files contain no em-dash', () => {
   for (const f of ['../src/session.js', '../src/Settings.svelte', '../src/prompts/Prompt.svelte', '../src/bridge.js'])
-    expect(readFileSync(new URL(f, import.meta.url), 'utf8')).not.toContain('—');
+    expect(readFileSync(new URL(f, import.meta.url), 'utf8')).not.toContain(String.fromCharCode(0x2014));
 });
 
 test('opens clean: no capsule and the host is told nothing is dirty', async ({ page }) => {
