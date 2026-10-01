@@ -3,7 +3,8 @@
   import { iconSvg } from '../design/icons.js';
   // Page banner: near-black band, outlined rounded icon box, aurora still fading in from the right.
   let { title = '', description = '', icon = '', image = './c-grey.jpg' } = $props();
-  // The aurora still loads after first paint (two frames in), so it never delays the first render.
+  // The aurora URL is only set two frames after mount, so the image request cannot start before the
+  // banner's first render. Measured (docs/PERF-SETTINGS-STARTUP-2026-10-01.md): no first-paint change.
   let loaded = $state(false);
   onMount(() => { requestAnimationFrame(() => requestAnimationFrame(() => { loaded = true; })); });
 </script>
