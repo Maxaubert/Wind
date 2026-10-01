@@ -175,14 +175,102 @@ test('Colour page: only warmth and brightness, neutral by default (no warmth, fu
   await expect(key(page, 'colorDimPct').locator('input[type=range]')).toHaveValue('100');
 });
 
-test('Move page: pan rows ship unbound and bind with the shared rules', async ({ page }) => {
+const panWrites = async (page) => {
+  const w = {};
+  for (const m of await sent(page, 'setConfigPersist')) w[m.key] = m.value;
+  return w;
+};
+const PAN_KEYS = ['panLeftVk', 'panUpVk', 'panRightVk', 'panDownVk', 'panLeftMods', 'panUpMods', 'panRightMods', 'panDownMods'];
+
+test('Move page: one pan row, fixed arrow caps always shown, Ctrl+Alt writes all four binds', async ({ page }) => {
   await page.goto('/');
   await go(page, 'move');
-  const left = key(page, '__panLeft').locator('.keycap').first();
-  await expect(left).toHaveText('Add key');
-  await left.click();
+  const row = key(page, '__pan');
+  await expect(row).toHaveCount(1);
+  await expect(key(page, '__panLeft')).toHaveCount(0);
+  await expect(row.locator('.kc.fixed')).toHaveText(['←', '↑', '→', '↓']);   // unbound: still shown
+  const cap = row.locator('button.keycap');
+  await expect(cap).toHaveText('Add modifier');
+  // The arrow caps are inert: not buttons, default cursor.
+  expect(await css(row.locator('.kc.fixed').first(), 'cursor')).toBe('default');
+  expect(await row.locator('button').count()).toBe(1);
+  await cap.click();
+  await page.keyboard.down('Control'); await page.keyboard.down('Alt');
+  await page.keyboard.up('Alt'); await page.keyboard.up('Control');
+  const w = await panWrites(page);
+  expect([w.panLeftVk, w.panUpVk, w.panRightVk, w.panDownVk]).toEqual(['37', '38', '39', '40']);
+  for (const k of ['panLeftMods', 'panUpMods', 'panRightMods', 'panDownMods']) expect(w[k]).toBe('3');
+  await expect(row.locator('.kc:not(.fixed)')).toHaveText(['Ctrl', 'Alt']);
+  await expect(row.locator('.kc.fixed')).toHaveCount(4);
+});
+
+test('Move page: pressing Ctrl+Alt+Left saves only the modifiers', async ({ page }) => {
+  await page.goto('/');
+  await go(page, 'move');
+  const row = key(page, '__pan');
+  await row.locator('button.keycap').click();
   await page.keyboard.press('Control+Alt+ArrowLeft');
-  expect((await sent(page, 'setConfigPersist')).some((m) => m.key === 'panLeftVk' && m.value === '37')).toBe(true);
+  const w = await panWrites(page);
+  expect([w.panLeftVk, w.panUpVk, w.panRightVk, w.panDownVk]).toEqual(['37', '38', '39', '40']);
+  expect(w.panLeftMods).toBe('3');
+  await expect(row.locator('.kc:not(.fixed)')).toHaveText(['Ctrl', 'Alt']);
+});
+
+test('Move page: a non-modifier key is ignored and a refused combo says why', async ({ page }) => {
+  await page.goto('/');
+  await go(page, 'move');
+  const row = key(page, '__pan');
+  const cap = row.locator('button.keycap');
+  await cap.click();
+  await page.keyboard.press('a');
+  await expect(cap).toHaveClass(/armed/);
+  await page.keyboard.press('Meta+ArrowLeft');
+  await expect(row.locator('.refusal')).toContainText('Windows shortcut');
+  await expect(cap).toHaveClass(/armed/);
+  expect((await sent(page, 'setConfigPersist')).filter((m) => m.value !== '0')).toHaveLength(0);
+});
+
+test('Move page: a bound row unbinds with right-click and writes all eight keys to 0', async ({ page }) => {
+  await page.addInitScript(() => { window.__cfgExtra = { panLeftVk: '37', panUpVk: '38', panRightVk: '39', panDownVk: '40',
+    panLeftMods: '3', panUpMods: '3', panRightMods: '3', panDownMods: '3' }; });
+  await page.goto('/');
+  await go(page, 'move');
+  const row = key(page, '__pan');
+  await expect(row.locator('.kc:not(.fixed)')).toHaveText(['Ctrl', 'Alt']);
+  await row.locator('button.keycap').click({ button: 'right' });
+  const w = await panWrites(page);
+  for (const k of PAN_KEYS) expect(w[k], k).toBe('0');
+  await expect(row.locator('button.keycap')).toHaveText('Add modifier');
+  await expect(row.locator('.kc.fixed')).toHaveCount(4);
+});
+
+test('Move page: older custom pan keys read as Custom keys; choosing modifiers replaces all four', async ({ page }) => {
+  await page.addInitScript(() => { window.__cfgExtra = { panLeftVk: '33', panUpVk: '38', panRightVk: '39', panDownVk: '40',
+    panLeftMods: '3', panUpMods: '3', panRightMods: '3', panDownMods: '3' }; });
+  await page.goto('/');
+  await go(page, 'move');
+  const row = key(page, '__pan');
+  await expect(row).toContainText('Custom keys');
+  await expect(row.locator('.kc.fixed')).toHaveCount(0);
+  // Arming Change must not wipe the custom keys.
+  await row.getByRole('button', { name: /Change/ }).click();
+  expect((await sent(page, 'setConfigPersist')).filter((m) => PAN_KEYS.includes(m.key))).toHaveLength(0);
+  await page.keyboard.press('Control+Alt+ArrowUp');
+  const w = await panWrites(page);
+  expect([w.panLeftVk, w.panUpVk, w.panRightVk, w.panDownVk]).toEqual(['37', '38', '39', '40']);
+  await expect(row).not.toContainText('Custom keys');
+  await expect(row.locator('.kc.fixed')).toHaveCount(4);
+});
+
+test('Move page: Reset clears custom pan keys', async ({ page }) => {
+  await page.addInitScript(() => { window.__cfgExtra = { panLeftVk: '33', panLeftMods: '3' }; });
+  await page.goto('/');
+  await go(page, 'move');
+  const row = key(page, '__pan');
+  await row.getByRole('button', { name: 'Reset' }).click();
+  const w = await panWrites(page);
+  for (const k of PAN_KEYS) expect(w[k], k).toBe('0');
+  await expect(row.locator('button.keycap')).toHaveText('Add modifier');
 });
 
 test('keybind safety: typing keys and system combos are refused and the row keeps listening', async ({ page }) => {

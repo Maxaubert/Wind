@@ -33,6 +33,9 @@ test('search is case-insensitive, word-prefix and covers label, description, cap
   // Group label and card caption reach their rows.
   expect(search(groups, 'moving').map((g) => g.id)).toContain('move');
   expect(keys('panning')).toContain('panSpeed');
+  // The single pan row is found by both words (#303).
+  expect(keys('pan')).toContain('__pan');
+  expect(keys('arrow')).toContain('__pan');
   // Advanced rows are searchable, hidden-by-showIf ones included.
   expect(search(groups, 'engine').some((g) => g.id === 'advanced')).toBe(true);
 });

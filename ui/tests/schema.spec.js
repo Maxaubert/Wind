@@ -6,7 +6,7 @@ import { groups, allRows, groupRows, bindKeys } from '../src/settings-schema.js'
 // appear exactly once in the regrouped schema, except showAdvanced: that UI-only row went away
 // (Advanced is always a group; the ini key stays parsed and ignored).
 const OLD_KEYS = [
-  '__zoomIn', '__zoomOut', '__zoomWheel', '__panLeft', '__panRight', '__panUp', '__panDown',
+  '__zoomIn', '__zoomOut', '__zoomWheel', '__pan',  // was four rows (Pan left/right/up/down); their ini keys live in OLD_BIND_KEYS
   'noSwallowApps', 'maxLevel', 'zoomInSpeed', 'zoomOutSpeed', 'panSpeed', 'smoothZoomAccel',
   'smoothZoomRamp', 'zoomEaseOutMs', 'txSamplingMode', '__hideCursor', '__cursorLock', 'lockApps',
   'cursorSensitivity', 'cursorSmoothing', 'trackCaret', 'trackFocus', 'trackAlign', 'mouseAlign',
@@ -57,7 +57,7 @@ test('rows land in the groups the spec names', () => {
   const where = (key) => groups.find((g) => groupRows(g).some((r) => r.key === key)).id;
   expect(where('maxLevel')).toBe('zoom');
   expect(where('__zoomWheel')).toBe('zoom');
-  expect(where('__panDown')).toBe('move');
+  expect(where('__pan')).toBe('move');
   expect(where('mouseAlign')).toBe('move');
   expect(where('txSamplingMode')).toBe('cursor');
   expect(where('__cursorLock')).toBe('cursor');

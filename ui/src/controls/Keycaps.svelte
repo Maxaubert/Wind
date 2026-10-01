@@ -3,6 +3,7 @@
   // screen-reader messages) stays in lib/KeybindCapture.svelte; this restyles it as monospace
   // keycaps with an "or" between the two slots and a soft "Add key" chip when a slot is empty.
   import KeybindCapture from '../lib/KeybindCapture.svelte';
+  import PanArrows from './PanArrows.svelte';
   let { row, values = {}, live = () => {}, disabled = false, labelledby, describedby, valueId } = $props();
   const second = $derived(!!(row.vkKey2 || row.buttonKey2));
   const row2 = $derived({ ...row, buttonKey: row.buttonKey2, vkKey: row.vkKey2, modsKey: row.modsKey2,
@@ -10,6 +11,9 @@
 </script>
 
 <div class="kcs">
+{#if row.panArrows}
+  <PanArrows {row} {values} {live} {disabled} {labelledby} {describedby} {valueId} />
+{:else}
   <KeybindCapture {row} {values} onChange={live} {disabled} unboundText="Add key" split
                   {labelledby} {describedby} {valueId} />
   {#if second}
@@ -18,6 +22,7 @@
                     labelledby={[labelledby && labelledby.split(' ')[0], valueId && valueId + '2'].filter(Boolean).join(' ')}
                     {describedby} valueId={valueId && valueId + '2'} />
   {/if}
+{/if}
 </div>
 
 <style>

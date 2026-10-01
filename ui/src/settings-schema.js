@@ -50,12 +50,11 @@ export const groups = [
       { caption: 'Keys', rows: [
         // Keyboard panning (#287): move the zoomed view without the mouse. Unbound by default (#307);
         // Ctrl+Alt+arrows matches Windows Magnifier. The keys reach apps normally at 1x.
-        { key: '__panLeft', type: 'keybind', label: 'Pan left',
-          desc: 'While zoomed: tap to nudge the view, hold to pan. Off until you set keys (Windows Magnifier uses Ctrl+Alt+arrows). The keys work normally in apps when not zoomed.',
-          vkKey: 'panLeftVk', modsKey: 'panLeftMods' },
-        { key: '__panRight', type: 'keybind', label: 'Pan right', vkKey: 'panRightVk', modsKey: 'panRightMods' },
-        { key: '__panUp', type: 'keybind', label: 'Pan up', vkKey: 'panUpVk', modsKey: 'panUpMods' },
-        { key: '__panDown', type: 'keybind', label: 'Pan down', vkKey: 'panDownVk', modsKey: 'panDownMods' },
+        // The arrow keys are fixed and drawn by the control itself; only the modifiers are chosen.
+        { key: '__pan', type: 'keybind', label: 'Pan with the arrow keys',
+          desc: 'While zoomed: tap to nudge the view, hold to pan. Off until you set modifiers (Windows Magnifier uses Ctrl+Alt). The keys work normally in apps when not zoomed.',
+          panArrows: true,
+          panKeys: ['panLeftVk', 'panUpVk', 'panRightVk', 'panDownVk', 'panLeftMods', 'panUpMods', 'panRightMods', 'panDownMods'] },
       ] },
       { caption: 'Panning', rows: [
         { key: 'panSpeed', type: 'slider', label: 'Pan speed', desc: 'How fast holding a pan key moves the view.', min: 0.25, max: 4, step: 0.05, def: 1.0, unit: 'times' },
@@ -180,7 +179,7 @@ export const allRows = groups.flatMap(groupRows);
 // buttonKey/vkKey/modsKey (and the *2 slot), so loading and diffing must cover those too.
 export const bindKeys = (r) =>
   ['buttonKey', 'vkKey', 'modsKey', 'buttonModsKey', 'buttonKey2', 'vkKey2', 'modsKey2', 'buttonModsKey2']
-    .map((k) => r[k]).filter(Boolean);
+    .map((k) => r[k]).filter(Boolean).concat(r.panKeys || []);
 
 // Interim view for the page that predates the redesign (Settings.svelte reads `sections` with flat
 // `rows`). Rows of the new-only types are left out so that page keeps working until the
