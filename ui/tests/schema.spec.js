@@ -90,7 +90,7 @@ test('zoom page: keycaps, slider and the old keybind safety still work', async (
   await page.goto('/controls.html?group=zoom');
   await expect(page.locator('h1')).toHaveText('Zoom');
   const zin = ctl(page, '__zoomIn');
-  await expect(zin.locator('.keycap').first()).toHaveText('Mouse button 5 + PageUp');
+  await expect(zin.locator('.keycap').first()).toHaveText('Mouse 5+PageUp');
   await expect(zin.locator('.keycap.unbound')).toHaveText('Add key');
   await expect(zin.locator('.sep')).toHaveText('or');
   expect(await css(zin.locator('.keycap').first(), 'font-family')).toContain('Cascadia Mono');
@@ -104,7 +104,7 @@ test('zoom page: keycaps, slider and the old keybind safety still work', async (
   await expect(sl).toHaveAttribute('aria-valuetext', '12 times');
   expect(parseFloat(await css(sl, '--pct'))).toBeCloseTo(20.83, 1);
   await sl.fill('30');
-  await expect(ctl(page, 'maxLevel').locator('.val')).toHaveText('30');
+  await expect(ctl(page, 'maxLevel').locator('.val')).toHaveText('30x');
 });
 
 test('toggle and select drive their row value', async ({ page }) => {
@@ -175,5 +175,5 @@ test('about page shows the logo and link; light theme controls read on white', a
   await page.goto('/controls.html?group=colour&theme=light');
   const sl = ctl(page, 'colorWarmPct').locator('input');
   expect(await css(sl, 'accent-color')).not.toBe('');
-  expect(await css(ctl(page, 'colorWarmPct').locator('.val'), 'color')).toBe('rgb(46, 46, 46)');
+  expect(await css(ctl(page, 'colorWarmPct').locator('.val'), 'color')).toBe('rgb(10, 10, 10)');
 });

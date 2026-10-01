@@ -24,15 +24,15 @@ export const groups = [
         // One row per direction with TWO capture slots: the *2 keys feed the second keycap, either
         // slot works alone, both fire the same action (the core OR-combines them).
         { key: '__zoomIn', type: 'keybind', label: 'Zoom in',
-          desc: 'Hold to zoom in. A binding can be a key, a combination, a mouse side-button, or a click with modifiers. Right-click to clear.',
+          desc: 'Hold to magnify the view.',
           buttonKey: 'zoomInButton', vkKey: 'zoomInVk', modsKey: 'zoomInMods', buttonModsKey: 'zoomInButtonMods',
           buttonKey2: 'zoomInButton2', vkKey2: 'zoomInVk2', modsKey2: 'zoomInMods2', buttonModsKey2: 'zoomInButton2Mods' },
-        { key: '__zoomOut', type: 'keybind', label: 'Zoom out',
+        { key: '__zoomOut', type: 'keybind', label: 'Zoom out', desc: 'Hold to return the view.',
           buttonKey: 'zoomOutButton', vkKey: 'zoomOutVk', modsKey: 'zoomOutMods', buttonModsKey: 'zoomOutButtonMods',
           buttonKey2: 'zoomOutButton2', vkKey2: 'zoomOutVk2', modsKey2: 'zoomOutMods2', buttonModsKey2: 'zoomOutButton2Mods' },
         // Scroll-wheel zoom (#285): the modifiers held while turning the wheel; up = in, down = out.
         { key: '__zoomWheel', type: 'keybind', label: 'Zoom with the scroll wheel',
-          desc: 'Hold these keys and turn the wheel: up zooms in, down zooms out, at your zoom speeds. Needs a modifier, not Shift alone. Ctrl zooms the screen instead of the page.',
+          desc: 'Hold these keys and turn the wheel.',
           wheel: true, modsKey: 'zoomWheelMods' },
       ] },
       { caption: 'Levels', rows: [

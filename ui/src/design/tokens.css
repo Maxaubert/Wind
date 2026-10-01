@@ -44,8 +44,9 @@
   --band: #f6f6f7;
 }
 .wnd *, .wnd *::before, .wnd *::after { box-sizing: border-box; }
+.wnd svg.ic:not([width]) { width: 20px; height: 20px; }
 .wnd svg.ic {
-  width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor;
+  flex: none; fill: none; stroke: currentColor;
   stroke-width: 1.5; stroke-linecap: square; stroke-linejoin: miter;
 }
 .wnd button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }

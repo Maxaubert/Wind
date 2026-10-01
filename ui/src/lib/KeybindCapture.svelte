@@ -15,6 +15,10 @@
   // What an empty slot says. The redesigned page passes 'Add key' (a soft chip); the default keeps
   // the wording the onboarding and older tests rely on.
   export let unboundText = 'Unbound';
+  // Settings page: show a combo as one keycap per key with a '+' between them, and the short
+  // 'Mouse 5' names. Off by default so the onboarding keeps its single-chip label.
+  export let split = false;
+  const SHORT_BUTTON = { 1: 'Mouse 4', 2: 'Mouse 5' };
   let refusal = '';
   // A click captured ON the keycap is followed by its own click event, which would re-arm the row
   // and clear the bind just made: ignore an arm that close after a mouse capture.
@@ -90,6 +94,26 @@
       if (combo) parts.push(combo);
     }
     return parts.join(' + ') || null;
+  })();
+
+  // The same live bindings as individual key names, for the split (one cap per key) display.
+  $: caps = (function () {
+    const out = [];
+    const modList = (m) => MOD_BITS.filter(b => m & b.bit).map(b => b.name);
+    if (row.wheel) {
+      const wm = Number(values[row.modsKey] || 0);
+      return wm ? [...modList(wm), 'Wheel'] : [];
+    }
+    if (row.buttonKey) {
+      const btn = Number(values[row.buttonKey] || 0);
+      const bm = row.buttonModsKey ? Number(values[row.buttonModsKey] || 0) : 0;
+      const name = SHORT_BUTTON[btn] || BUTTON_NAMES[btn];
+      if (name) out.push(...modList(bm), name);
+    }
+    const vk = Number(values[row.vkKey] || 0);
+    const mods = row.modsKey ? Number(values[row.modsKey] || 0) : 0;
+    if (vk || mods) out.push(...modList(mods), ...(vk ? [vkName(vk)] : []));
+    return out;
   })();
 
   // Arming: snapshot the current binding (for Escape restore) and live-clear it so the magnifier
@@ -201,13 +225,19 @@
 <svelte:window on:keydown={onKey} on:mousedown={onMouse} on:wheel|nonpassive={onWheel} />
 <!-- The instructions were `title`-only, which a screen reader never reads on keyboard focus.
      They are a real description now, appended to the row's own. -->
-<button class="keycap" type="button" class:armed class:unbound={!armed && lbl === null} {disabled} id={valueId}
+<button class="keycap" type="button" class:armed class:split={split && !armed && lbl !== null} class:unbound={!armed && lbl === null} {disabled} id={valueId}
         aria-labelledby={labelledby} aria-describedby="{describedby ?? ''} {uid}-hint"
         on:click={arm}
         on:blur={() => { if (armed) cancel(); }}
         on:contextmenu|preventDefault={onContextMenu}
         title="Click to bind (combos like Ctrl+Alt+F1 work), right-click to clear">
-  {armed ? (row.wheel ? 'Hold keys and turn the wheel...' : row.buttonKey ? 'Press a key, combo, or button...' : 'Press a key or combo...') : (lbl ?? unboundText)}
+  {#if armed}
+    {row.wheel ? 'Hold keys and turn the wheel...' : row.buttonKey ? 'Press a key, combo, or button...' : 'Press a key or combo...'}
+  {:else if split && lbl !== null}
+    {#each caps as c, i}{#if i}<span class="pl">+</span>{/if}<span class="kc">{c}</span>{/each}
+  {:else}
+    {#if split}<svg class="plus" aria-hidden="true" focusable="false" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg>{/if}{lbl ?? unboundText}
+  {/if}
 </button>
 {#if armed && refusal}<span class="refusal">{refusal}</span>{/if}
 <span class="sr-only" id="{uid}-hint" aria-hidden="true">

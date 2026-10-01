@@ -71,12 +71,12 @@
 {/if}
 
 <style>
-  .row { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 14px 18px; }
+  .row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 24px; min-height: 62px; padding: 8px 18px; }
   .row.disabled { opacity: .45; }
   .meta { min-width: 0; }
-  .label { font-weight: 500; color: var(--fg); }
-  .desc { margin-top: 2px; font-size: 12px; color: var(--fg3); max-width: 56ch; }
-  .ctl { display: flex; align-items: center; justify-content: flex-end; flex: none; }
+  .label { font: 500 13.5px var(--s); color: var(--fg); }
+  .desc { margin-top: 1px; font: 12.5px var(--s); color: var(--fg3); }
+  .ctl { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
   .chip { height: 28px; padding: 0 12px; border-radius: var(--srad); background: var(--chip);
           border: 1px solid var(--chipb); color: var(--fg); font: 13px var(--s); }
   .chip:hover:not(:disabled) { border-color: var(--outline); }

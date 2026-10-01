@@ -12,7 +12,8 @@
 {/if}
 
 <style>
-  .capsule { backdrop-filter: blur(14px); position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%);
+  /* centred on the main area (the 240px sidebar sits left of it), as in the mockup */
+  .capsule { backdrop-filter: blur(14px); position: absolute; left: calc(50% + 120px); bottom: 26px; transform: translateX(-50%);
              height: 48px; border-radius: 999px; background: var(--pill); border: 1px solid var(--pillb);
              box-shadow: var(--shadow); display: flex; align-items: center; gap: 10px; padding: 0 5px 0 20px; white-space: nowrap; }
   b { font: 600 13px var(--s); }
