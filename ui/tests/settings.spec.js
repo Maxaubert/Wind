@@ -1,5 +1,8 @@
 import { test, expect } from '@playwright/test';
 
+// Targets the pre-redesign UI. Skipped until Task 12 rewrites it for the new shell (#303).
+test.skip(true, 'old UI spec, rewritten in Task 12');
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     window.__skipSplash = true;

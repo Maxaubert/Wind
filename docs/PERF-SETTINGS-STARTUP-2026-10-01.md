@@ -30,16 +30,20 @@ Raw navigation, old: 344 328 344 360 391 329 328 328 719 328 329. New: 312 344 3
 - `ready` is posted when App mounts, not when the session has loaded, so "first paint" means the shell's first
   paint, not fully populated settings.
 
-## Gate state at this commit (Task 11)
+## Caveats
 
-- `build.bat test`: 407 doctest cases pass (re-run from PowerShell as `.\build.bat test`; `build.bat` is not
-  found from the bash shell because the cwd is not on its search path).
-- Playwright: `a11y.spec.js` and `settings.spec.js` still target the old UI and fail on the pre-Task-11 UI
-  as well (66 failed, 6 passed in those two files on a build without the lazy changes). They are rewritten in
-  Task 12. keybind-rules, onboarding, schema, search, session and shell all pass.
-- Stability: two repeat runs of those two files at HEAD gave the identical 6 passed / 66 failed with the
-  identical set of passing titles; the other six files give 47 passes. 47 + 6 = 53 passing of 119 listed, and
-  that count was identical in every run I made, so I could not reproduce a 52. The earlier 52-vs-53 most likely
-  came from the old-UI specs, where each failure waits out a 30 s timeout (so a full `npx playwright test`
-  exceeds 600 s right now); it is not tied to the lazy Onboarding import, and no conditional or skipped
-  tests exist (grep for skip/fixme/only/env gates finds none).
+- The commit subject of 9aa1c94 ("measured faster first paint") overstates the result: first paint did not
+  improve. Only navigation completion did (about 30 ms).
+- The numbers were captured with the code of commit 63b4075 (same lazy Onboarding and banner code as 9aa1c94;
+  63b4075 only adds a comment to Banner.svelte). The "old" build is a hand-built variant of this branch with the
+  static Onboarding import and eager banner, not a checkout of the real pre-Task-11 commit.
+
+## Gate state (Task 11 fix-up)
+
+- `build.bat test`: 407 doctest cases pass.
+- `build.bat config`: builds, exit 0 (stop any running WindConfig.exe from the worktree first, it locks the link).
+- `cd ui && npx playwright test`: 47 passed, 72 skipped, 0 failed, 6.5 s. `a11y.spec.js` and `settings.spec.js`
+  target the pre-redesign UI and are skipped with `test.skip(true, ...)` until Task 12 rewrites them. They failed
+  before Task 11 as well (66 failed, 6 passed), so this is not caused by the lazy-loading change. The earlier
+  "52 vs 53 passed" difference came from those old-UI specs timing out and was not reproduced; with them skipped
+  the count is stable.
