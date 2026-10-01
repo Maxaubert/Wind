@@ -1279,7 +1279,7 @@ static void RunTick(TickState& t) {
     bool inspect = t.cursorLock.locked();
     bool active = zoomed || inspect;                 // overlay runs while zoomed OR Inspect-frozen
     if (active) t.lastActiveMs = GetTickCount64();   // event-driven idle settle window (#71)
-    else t.viewOwner.wasEnabled = false;             // the next zoom-in starts the tracker settle (#310)
+    else t.viewOwner.wasTracking = false;            // the next zoom-in re-baselines the tracker (#310)
     // Keyboard panning (#287): the hook swallows pan keys only while this is set, so at 1x
     // the pan keys reach the app (e.g. Ctrl+Alt+Left/Right = IntelliJ navigate back/forward). Mouselook games and Inspect
     // keep them too. Published once per tick, before anything reads the pan keys.
@@ -1733,6 +1733,7 @@ static void RunTick(TickState& t) {
             wind::ViewOwnerInputs vi;
             vi.enabled = trackEnabled || panEnabled;
             vi.panning = panEnabled && t.keyPan.active();
+            vi.trackActive = trackEnabled;
             vi.trackCaret = t.cfg.trackCaret != 0; vi.trackFocus = t.cfg.trackFocus != 0;
             vi.mouseDx = curDx; vi.mouseDy = curDy;
             vi.buttonDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) ||
