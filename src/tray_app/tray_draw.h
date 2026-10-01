@@ -20,7 +20,7 @@ struct Item {
     bool         submenu = false;   // draws the chevron
 };
 
-// Palette resolved once per menu open. The system theme is the authority; the accent is ours.
+// Palette resolved once per menu open. Wind's uiTheme decides (auto follows the system); the accent is ours.
 struct Palette {
     bool     dark = true;
     COLORREF bg, text, dim, faint, sep, hover, accent, ok, warn;
@@ -35,9 +35,10 @@ inline bool SystemUsesLightTheme() {
     return false;   // no key: assume dark, which is what Wind's own UI defaults to
 }
 
-inline Palette MakePalette() {
+// `dark` comes from Wind's own uiTheme setting (the tray follows the app, not just the OS).
+inline Palette MakePalette(bool dark) {
     Palette p;
-    p.dark   = !SystemUsesLightTheme();
+    p.dark   = dark;
     p.accent = RGB(0x5b, 0x5b, 0xd6);          // Wind accent, both themes
     p.ok     = RGB(0x4a, 0xde, 0x80);
     p.warn   = RGB(0xfb, 0xbf, 0x24);

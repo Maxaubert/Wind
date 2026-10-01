@@ -9,6 +9,9 @@
 #include "../config_ui/ini_edit.h"
 #include "../tray_ipc.h"
 #include <shellapi.h>
+#include <commctrl.h>
+#pragma comment(lib, "comctl32.lib")
+#pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 #include <dwmapi.h>
 #include <string>
 #include <vector>
@@ -34,6 +37,54 @@ static const UINT kMaxProfileMenuItems = 32;
 // One menu at a time (g_menuOpen); the weld is suspended while it is open (Wind reads `menuOpen`
 // from the shared block) so the pointer belongs to the user while they aim at menu items.
 static void SwitchToProfile(const std::wstring& ini, const std::wstring& nameW);
+
+// Dark or light for this open: the ini's uiTheme ("dark" / "light" / anything else = auto, which
+// follows the system). Read fresh on every open so a theme change in Settings shows immediately.
+static bool TrayUsesDark(const std::string& iniText) {
+    auto vals = wind::ReadIniValues(iniText);
+    auto it = vals.find("uiTheme");
+    const std::string t = it == vals.end() ? std::string() : it->second;
+    if (t == "dark") return true;
+    if (t == "light") return false;
+    return !TrayDraw::SystemUsesLightTheme();
+}
+
+// Quit guard: the tray decides from the files (live ini vs the active profile), never from the UI,
+// so it still prompts when Settings is closed. Returns false when the user cancels the quit.
+static bool ConfirmQuit(const std::wstring& ini) {
+    const std::string live = wind::ReadTextFile(ini);
+    auto vals = wind::ReadIniValues(live);
+    auto it = vals.find("profile");
+    if (it == vals.end() || it->second.empty()) return true;
+    const std::wstring pp = wind::ProfilesDirFromIni(ini) + L"\\" + wind::WidenUtf8(it->second) + L".ini";
+    std::string profile;
+    if (!wind::ReadTextFileOk(pp, profile)) return true;   // no saved state to compare against
+    if (!wind::SessionDiffers(live, profile)) return true;
+
+    enum { ID_SAVE = 2001, ID_DISCARD = 2002 };
+    const TASKDIALOG_BUTTON buttons[] = { { ID_SAVE, L"Save" }, { ID_DISCARD, L"Discard" } };
+    TASKDIALOGCONFIG cfg{};
+    cfg.cbSize = sizeof(cfg);
+    cfg.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION;
+    cfg.dwCommonButtons = TDCBF_CANCEL_BUTTON;
+    cfg.pszWindowTitle = L"Wind";
+    cfg.pszMainInstruction = L"You have unsaved settings";
+    cfg.pszContent = L"Save them to the active profile before quitting, or discard them?";
+    cfg.cButtons = 2;
+    cfg.pButtons = buttons;
+    cfg.nDefaultButton = ID_SAVE;
+    int pressed = 0;
+    if (FAILED(TaskDialogIndirect(&cfg, &pressed, nullptr, nullptr))) return true;
+    if (pressed == ID_SAVE) {
+        if (!wind::WriteTextFileAtomic(pp, wind::MakeProfileText(live))) {
+            wind::Log(wind::LogLevel::Warn, "profile", "quit save failed (err=%lu)", GetLastError());
+            Notify(L"Wind", L"Could not save the settings; Wind keeps running.");
+            return false;
+        }
+        return true;
+    }
+    return pressed == ID_DISCARD;
+}
 static volatile LONG g_menuOpen = 0;
 struct MenuCtx { POINT pt; };
 static const TickStats g_noTicks{};   // header input when Wind shared no block
@@ -273,13 +324,13 @@ static DWORD WINAPI MenuThread(LPVOID param) {
     // Per-open draw state: theme, DPI and fonts are not constants (system theme switch,
     // per-monitor DPI), so they are resolved fresh on every open.
     MenuDrawState st;
-    st.pal = TrayDraw::MakePalette();
+    const std::wstring ini = wind::ResolveIniPath();
+    st.pal = TrayDraw::MakePalette(TrayUsesDark(wind::ReadTextFile(ini)));
     st.mt.dpi = (int)GetDpiForWindow(host);
     if (st.mt.dpi <= 0) st.mt.dpi = 96;
     st.fonts.create(st.mt.dpi);
     SetWindowLongPtrW(host, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&st));
 
-    const std::wstring ini = wind::ResolveIniPath();
     std::vector<std::wstring> profNames = wind::ListProfileFiles(wind::ProfilesDirFromIni(ini));
     if (profNames.size() > kMaxProfileMenuItems) profNames.resize(kMaxProfileMenuItems);
     const std::wstring active = wind::WidenUtf8(
@@ -347,7 +398,7 @@ static DWORD WINAPI MenuThread(LPVOID param) {
         ShellExecuteW(nullptr, L"open", (AppDir() + L"\\WindConfig.exe").c_str(), nullptr,
                       AppDir().c_str(), SW_SHOW);
     else if (cmd == ID_QUIT)
-        RequestWindQuit();
+    { if (ConfirmQuit(ini)) RequestWindQuit(); }
     else if (cmd >= (int)ID_PROFILE_BASE && cmd < (int)(ID_PROFILE_BASE + profNames.size()))
         SwitchToProfile(ini, profNames[cmd - ID_PROFILE_BASE]);
 
