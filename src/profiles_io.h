@@ -97,4 +97,32 @@ inline void EnsureProfilesSeeded(const std::wstring& iniPath) {
     }
     WriteTextFileAtomic(iniPath, UpdateIniText(live, "profile", "Default"));
 }
+// %LOCALAPPDATA%\Wind\session.keep: written by the host right before a restart Wind triggers itself
+// (engine change, profile switch with a model change) so the next start keeps the unsaved session.
+inline std::wstring SessionKeepPath() {
+    wchar_t buf[MAX_PATH];
+    DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
+    std::wstring base = (n == 0 || n >= MAX_PATH) ? std::wstring(L".") : std::wstring(buf, n);
+    return base + L"\\Wind\\session.keep";
+}
+
+// Settings session model: the live ini is the session, the active profile file is the saved state.
+// A plain start discards unsaved changes by rewriting the live ini from the profile (globals kept).
+// A self-triggered restart leaves session.keep behind; it is consumed here and the session survives.
+inline void ResetSessionToProfile(const std::wstring& iniPath) {
+    std::wstring keep = SessionKeepPath();
+    if (GetFileAttributesW(keep.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        DeleteFileW(keep.c_str());
+        return;
+    }
+    std::string live = ReadTextFile(iniPath);
+    auto vals = ReadIniValues(live);
+    auto it = vals.find("profile");
+    if (it == vals.end() || it->second.empty()) return;
+    std::wstring pp = ProfilesDirFromIni(iniPath) + L"\\" + WidenUtf8(it->second) + L".ini";
+    std::string profile;
+    if (GetFileAttributesW(pp.c_str()) == INVALID_FILE_ATTRIBUTES || !ReadTextFileOk(pp, profile)) return;
+    if (!SessionDiffers(live, profile)) return;
+    WriteTextFileAtomic(iniPath, MakeLiveText(profile, live, it->second));
+}
 }  // namespace wind
