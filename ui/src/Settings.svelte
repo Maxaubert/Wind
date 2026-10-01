@@ -22,6 +22,8 @@
   import SaveCapsule from './shell/SaveCapsule.svelte';
   import SettingRow from './controls/SettingRow.svelte';
   import Prompt from './prompts/Prompt.svelte';
+  import Results from './search/Results.svelte';
+  import { search } from './search/search.js';
 
   // Replaced at build time with src/version.h's WIND_VERSION_STR (vite.config.js); empty in tests.
   const VERSION = typeof __WIND_VERSION__ === 'string' ? __WIND_VERSION__ : '';
@@ -208,7 +210,32 @@
     else await discard();
     doQuit();
   }
-  function onKeydown(e) { if (e.ctrlKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'q') { e.preventDefault(); requestQuit(); } }
+  // --- Search ---------------------------------------------------------------------------------
+  let query = $state('');
+  const results = $derived(search(groups, query));
+  const searching = $derived(query.trim() !== '');
+  const searchInput = () => document.querySelector('.side .search input');
+  function onSearch(q) { query = q; }
+  function clearSearch() { query = ''; const i = searchInput(); if (i) i.value = ''; }
+  async function jump(hit) {
+    clearSearch();
+    await select(hit.groupId);
+    const row = main && main.querySelector('[data-key="' + hit.key + '"]');
+    if (row) {
+      row.scrollIntoView({ block: 'center' });
+      const f = row.querySelector('button, input, select, [tabindex]');
+      if (f) f.focus({ preventScroll: true });
+    }
+  }
+  function onKeydown(e) {
+    const mod = e.ctrlKey && !e.altKey && !e.shiftKey;
+    if (mod && e.key.toLowerCase() === 'f') { e.preventDefault(); const i = searchInput(); if (i) { i.focus(); i.select(); } return; }
+    if (e.key === 'Escape' && (searching || e.target === searchInput())) {
+      e.preventDefault(); clearSearch(); if (main) main.focus({ preventScroll: true }); return;
+    }
+    if (e.key === 'Enter' && e.target === searchInput() && results.length) { e.preventDefault(); jump(results[0].rows[0]); return; }
+    if (mod && e.key.toLowerCase() === 'q') { e.preventDefault(); requestQuit(); }
+  }
 
   // --- Navigation -----------------------------------------------------------------------------
   async function select(id) {
@@ -243,8 +270,12 @@
 <div class="wnd app" data-theme={effTheme}>
   <TitleBar {themeMode} onTheme={onTheme} onMinimize={() => windowControl('minimize')} onClose={requestClose} />
   <div class="body">
-    <Sidebar groups={side} {expert} active={activeId} version={VERSION} onSelect={select} />
+    <Sidebar groups={side} {expert} active={searching ? '' : activeId} version={VERSION} {query} {onSearch}
+             onSelect={(id) => { clearSearch(); select(id); }} />
     <main class="main" bind:this={main} tabindex="-1" aria-label={group.label}>
+      {#if searching}
+        <Results {results} {query} onJump={jump} />
+      {:else}
       <Banner title={group.label} description={group.desc} icon={group.icon} />
       {#each group.cards as card, i (group.id + i)}
         <Card caption={card.caption}>
@@ -254,6 +285,7 @@
           {/each}
         </Card>
       {/each}
+      {/if}
       <div class="tail"></div>
     </main>
   </div>
