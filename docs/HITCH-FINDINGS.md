@@ -58,6 +58,27 @@ ramp stall frames, with PresentMon and the trace lines, ABAB over txIdleReleaseM
 Earlier review numbers to beat: enter tick 14-16 ms median (tail 50 ms); caret jump on ~3% of
 zoom-ins (fixed by the lastSeq re-baseline).
 
+### First results (2026-10-01, 0.15.4 branch build, transform engine, 8 zoom-ins per config)
+
+| | desktop, still pointer | desktop, moving pointer | DOOM: The Dark Ages |
+|---|---|---|---|
+| press -> Wind's tick | 0.2 ms | 0.1 ms | 0.1 ms |
+| enter tick (median) | 31-35 ms | 21 ms | 21 ms |
+| ...of which the cursor bridge (two DwmFlush) | 29-33 ms | 19 ms | 19 ms |
+| press -> first DWM composite | 38-41 ms | 27 ms | 27 ms |
+| press -> visible screen change (BitBlt) | 62 ms | 42 ms | n/a (live game) |
+| game frame spikes > 2x median | - | - | 0 (14.3 ms median) |
+
+Reading: the zoom-in latency the user sees is dominated by the #221 cursor bridge in
+`TransformModel::setActive(true)`: two blocking DwmFlush calls before the system cursor is blanked.
+With a still pointer DWM composes lazily, so the pair waits longer (~30 ms). Ticks after the enter
+tick cost ~1 ms. Earlier builds (from the #71 A/B, press -> level starts rising): 0.15.2 9.6 / 7.8 /
+7.4 ms (desktop / browser / DOOM), 0.15.3 4.0 / 4.4 / 4.7 ms; the bridge and enter-tick code is the
+same in all three builds. OPEN: the txIdleReleaseMs 1200 config never released the context (warm=1
+on every zoom), so cold vs warm is still unmeasured; the caret-jump fix needs a typing test. Next
+candidate: a non-blocking bridge (plan item B), A/B'd on blink and time-to-visible. A full suite
+over all builds is planned by the owner.
+
 ## Engine comparison while zoomed at 12x, panning continuously (12 s)
 
 | engine | game avg frametime | game spikes | Wind's own loop |
