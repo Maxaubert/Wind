@@ -362,9 +362,11 @@
 
 <style>
   .app { width: 100vw; height: 100vh; display: grid; grid-template-rows: 38px 1fr; position: relative; overflow: hidden; }
+  /* Thin window outline, drawn above everything so no child background can cover it. */
+  .app::after { content: ""; position: absolute; inset: 0; border: 1px solid var(--winborder, var(--line2)); pointer-events: none; z-index: 1000; }
   .body { display: grid; grid-template-columns: 240px 1fr; min-height: 0; }
   .main { position: relative; min-height: 0; overflow-y: auto; padding: 0 40px; outline: none;
-          scrollbar-width: thin; scrollbar-color: var(--track) transparent; }
+          scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--fg) 16%, transparent) transparent; }
   .tail { height: 110px; }   /* clearance so the capsule never covers the last row */
   .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
              clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
