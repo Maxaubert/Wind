@@ -170,7 +170,7 @@ changes on Save (`saveSession`) or on a keybind capture (`setConfigPersist`). Un
 profile (unsaved changes never survive), unless `%LOCALAPPDATA%\Wind\session.keep` marks a
 self-triggered restart. Tray Quit prompts from the files. First run seeds
 `Default` from current settings (`EnsureProfilesSeeded`). Surfaces: tray `Profiles` submenu
-(switch only, IDs 1100..1131) and the settings-UI titlebar dropdown (switch/create/rename/
+(switch only, IDs 1100..1131) and the Settings General page (switch/create/rename/
 duplicate/delete; bridge messages `listProfiles`/`switchProfile`/`createProfile`/`renameProfile`/
 `duplicateProfile`/`deleteProfile`, each replying the refreshed list).
 
@@ -193,7 +193,7 @@ restartWind), `dirty`, `openIni`, `exportDiagnostics`, `pickExe`, `mpoState`, `s
 `rebootNow`, and the six profile messages (`listProfiles`/`switchProfile`/`createProfile`/
 `renameProfile`/`duplicateProfile`/`deleteProfile`) - see `HandleWebMessage` in
 `src/config_ui/main.cpp` for the authoritative set. Settings apply instantly to the live ini; the
-title-bar capsule shows unsaved state (Save / Discard), keybinds persist at once. See
+floating Save capsule shows unsaved state (Save / Discard), keybinds persist at once. See
 `docs/architecture/09-settings-ui.md`.
 
 ## IMPORTANT gotchas
