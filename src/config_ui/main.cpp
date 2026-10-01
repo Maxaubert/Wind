@@ -30,6 +30,13 @@
 using namespace Microsoft::WRL;
 static ComPtr<ICoreWebView2Controller> g_controller;
 static ComPtr<ICoreWebView2> g_webview;
+// Tells the page whether the window is maximized (it hides its 1px outline then). Sent on every
+// WM_SIZE and in reply to getConfig, so a page that loads into a maximized window still knows.
+static void PostWindowState(HWND h) {
+    if (!g_webview || !h) return;
+    g_webview->PostWebMessageAsJson(IsZoomed(h) ? L"{\"type\":\"windowState\",\"maximized\":true}"
+                                                          : L"{\"type\":\"windowState\",\"maximized\":false}");
+}
 // Crash recovery (see webview_recover.h). Settings are live now (the ini is the session), so a
 // recovered page simply re-reads the ini: there is no separate draft to hand back.
 static std::wstring g_initScriptId;   // AddScriptToExecuteOnDocumentCreated id for window.__windInit
@@ -323,6 +330,7 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
                       (unsigned long long)(GetTickCount64() - g_launchTick));
         }
     } else if (type == "getConfig") {
+        PostWindowState(g_hwnd);
         wv->PostWebMessageAsJson(Widen("{\"type\":\"config\"," + SessionPayload(ReadFileUtf8(IniPath())) + "}").c_str());
     } else if (type == "setConfig" || type == "setConfigPersist") {
         std::string key = JsonField(j, "key"), value = JsonField(j, "value");
@@ -638,7 +646,11 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         ApplyWindowTheme(UiThemeOf(ReadFileUtf8(IniPath())));   // "auto" follows the system theme live
         return 0;
     }
-    if (m == WM_SIZE && g_controller) { RECT r; GetClientRect(h, &r); g_controller->put_Bounds(r); return 0; }
+    if (m == WM_SIZE && g_controller) {
+        RECT r; GetClientRect(h, &r); g_controller->put_Bounds(r);
+        PostWindowState(h);   // the page drops its window outline while maximized
+        return 0;
+    }
     if (m == WM_GETMINMAXINFO) {   // enforce a minimum window size (DPI-scaled)
         UINT dpi = GetDpiForWindow(h); if (!dpi) dpi = 96;
         auto* mmi = reinterpret_cast<MINMAXINFO*>(l);
