@@ -12,7 +12,11 @@
 #                        change (a smooth ramp changes every frame), and the longest still gap.
 #   - Wind's own zoomtrace line (needs a build with zoomTrace; older builds simply lack it).
 #   - caret jumps      : 'view mouse -> caret' log lines in the cycle (needs trackLog=1).
-# Per block: PresentMon frame times of dwm.exe (desktop) or the game, spikes > 2x median.
+# Game scenario: the screen-capture metrics are OFF (a live game changes every frame, and a game on
+# an independent-flip plane is invisible to BitBlt); it reports the zoomtrace lines and the game's
+# own PresentMon frame times (continuous presents, so spikes > 2x median are real hitches).
+# Desktop scenario: PresentMon is skipped (dwm.exe presents only on change, so idle gaps would
+# dominate); the capture metrics cover it.
 #
 # Configurations alternate ABAB so drift cancels: txIdleReleaseMs 1200 (context rebuilt every zoom:
 # the post-zoom-out gap is 3 s) vs 15000 (context kept warm across the cycle). Pointer still or
@@ -48,6 +52,7 @@ public static class ZR {
   [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr h);
   [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int c);
+  [DllImport("user32.dll")] static extern bool IsIconic(IntPtr h);
   [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
   [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr v);
   [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr h);
@@ -71,7 +76,7 @@ public static class ZR {
   public static void Move(int dx, int dy) { var i = new IN(); i.type = 0; i.u.mi.flags = 1; i.u.mi.dx = dx; i.u.mi.dy = dy; Send(i); }
   public static void Focus(IntPtr h) {
     var fg = GetForegroundWindow(); uint a = GetWindowThreadProcessId(fg, IntPtr.Zero), b = GetCurrentThreadId();
-    AttachThreadInput(b, a, true); ShowWindow(h, 9); BringWindowToTop(h); SetForegroundWindow(h); AttachThreadInput(b, a, false);
+    AttachThreadInput(b, a, true); if (IsIconic(h)) ShowWindow(h, 9); BringWindowToTop(h); SetForegroundWindow(h); AttachThreadInput(b, a, false);
   }
   // Sample a WxH screen region every frame (BitBlt is vsync-locked) and hash it.
   static ulong Hash(IntPtr bits, int n) { ulong h = 1469598103934665603UL; for (int i = 0; i < n; i += 4) { h ^= (ulong)Marshal.ReadInt32(bits, i); h *= 1099511628211UL; } return h; }
@@ -94,7 +99,9 @@ public static class ZR {
     if (!released) XBtn(2, false);
     double lvl = Level();
     int first = -1; for (int i = 0; i < hashes.Count; i++) if (hashes[i] != h0) { first = i; break; }
-    double vis = first >= 0 ? times[first] : -1, stalls = 0, longest = 0, still = 0;
+    double vis = first >= 0 ? times[first] : -1, stalls = first >= 0 ? 0 : -1, longest = first >= 0 ? 0 : -1, still = 0;
+    var gaps = new List<double>(); for (int i = 1; i < times.Count; i++) gaps.Add(times[i] - times[i - 1]); gaps.Sort();
+    double medGap = gaps.Count > 0 ? gaps[gaps.Count / 2] : -1;
     if (first >= 0) {
       for (int i = first + 1; i < hashes.Count && times[i] - times[first] <= 300; i++) {
         double gap = times[i] - times[i - 1];
@@ -104,7 +111,7 @@ public static class ZR {
     SelectObject(mdc, old); DeleteObject(dib); DeleteDC(mdc); ReleaseDC(IntPtr.Zero, sdc);
     XBtn(1, true); var s2 = Stopwatch.StartNew(); while (s2.ElapsedMilliseconds < 4000 && Level() > 1.0) Thread.Sleep(10); Thread.Sleep(80); XBtn(1, false);
     Moving = false; if (mv != null) mv.Join(); Moving = mv != null;
-    return new double[] { vis, stalls, longest, lvl };
+    return new double[] { vis, stalls, longest, lvl, medGap };
   }
   public static Form F;
   public static void MakeForm() {
@@ -130,7 +137,23 @@ function PmStats($csv) { if (-not (Test-Path $csv)) { return [ordered]@{ error =
   $med = $ft[[int][Math]::Floor(($ft.Count - 1) / 2)]
   [ordered]@{ frames = $ft.Count; median = [Math]::Round($med, 2); p99 = [Math]::Round($ft[[int][Math]::Floor(0.99 * ($ft.Count - 1))], 2); max = [Math]::Round($ft[-1], 2); over2x = @($ft | ? { $_ -gt 2 * $med }).Count } }
 
-$bak = "$OutDir\magnifier.ini.bak"; Copy-Item $ini $bak -Force
+# Restore exactly the keys this script touches, to their original values or absence. The originals
+# file is written once; if a previous run died before restoring, it is applied first (never refreshed
+# from an already-modified ini).
+$touched = @('zoomTrace', 'trackLog', 'colorDimPct', 'colorWarmPct', 'txIdleReleaseMs')
+$origFile = "$OutDir\ini-originals.json"
+function ReadKey($t, $k) { $m = [regex]::Match($t, "(?m)^$k=([^\r\n]*)"); if ($m.Success) { $m.Groups[1].Value } else { $null } }
+function RestoreOriginals {
+  if (-not (Test-Path $origFile)) { return }
+  $o = Get-Content $origFile -Raw | ConvertFrom-Json; $t = [IO.File]::ReadAllText($ini)
+  foreach ($k in $touched) { $v = $o.$k
+    if ($null -eq $v) { $t = $t -replace "(?m)^$k=[^\r\n]*\r?\n?", '' }
+    elseif ($t -match "(?m)^$k=") { $t = $t -replace "(?m)^$k=[^\r\n]*", "$k=$v" } else { $t += "`r`n$k=$v" } }
+  [IO.File]::WriteAllText($ini, $t); Remove-Item $origFile; [ZR]::Pump(1200)
+}
+RestoreOriginals   # a previous run that died mid-way
+$t0 = [IO.File]::ReadAllText($ini); $orig = [ordered]@{}; foreach ($k in $touched) { $orig[$k] = ReadKey $t0 $k }
+$orig | ConvertTo-Json | Set-Content $origFile
 $results = [ordered]@{ label = $Label; scenario = $Scenario; pointer = $Pointer; version = (Get-Item 'C:\Program Files\Wind\Wind.exe').VersionInfo.ProductVersion; configs = [ordered]@{} }
 try {
   SetIni @{ zoomTrace = 1; trackLog = 1; colorDimPct = 100; colorWarmPct = 0 }
@@ -140,21 +163,22 @@ try {
   if ($target -eq [IntPtr]::Zero) { throw "no target window for $Scenario" }
   $rx = 1920 + 700; $ry = 1080 + 400; $rw = 160; $rh = 120          # off-centre: the zoom moves it
   $configs = @(@{ name = 'cold1200'; rel = 1200 }, @{ name = 'warm15000'; rel = 15000 })
-  foreach ($c in $configs) { $results.configs[$c.name] = [ordered]@{ vis = @(); stalls = @(); longest = @(); trace = @(); caretJumps = 0; pm = @() } }
+  foreach ($c in $configs) { $results.configs[$c.name] = [ordered]@{ vis = @(); stalls = @(); longest = @(); gap = @(); levels = @(); trace = @(); caretJumps = 0; pm = @() } }
   for ($b = 0; $b -lt $Blocks; $b++) {
     $c = $configs[$b % 2]; $r = $results.configs[$c.name]
     SetIni @{ txIdleReleaseMs = $c.rel }
     [ZR]::Focus($target); [ZR]::Pump(800); if ($Scenario -eq 'desktop') { [ZR]::SetCursorPos(1920, 1080) }
     [ZR]::Moving = $false; $x = [ZR]::Cycle($rx, $ry, $rw, $rh, 400); [ZR]::Pump(3000)   # discard: the ini flip lands on the next session
     $logStart = (Get-Item $log).Length
-    $csv = PmStart "b$b-$($c.name)" $proc ([int]($CyclesPerBlock * 4.6 + 6))
+    $csv = $null; if ($Scenario -eq 'game') { $csv = PmStart "b$b-$($c.name)" $proc ([int]($CyclesPerBlock * 5.5 + 10)) }
     for ($i = 0; $i -lt $CyclesPerBlock; $i++) {
       [ZR]::Moving = ($Pointer -eq 'moving')
       $v = [ZR]::Cycle($rx, $ry, $rw, $rh, 400)
-      $r.vis += $v[0]; $r.stalls += $v[1]; $r.longest += $v[2]
+      if ($Scenario -eq 'desktop') { $r.vis += $v[0]; $r.stalls += $v[1]; $r.longest += $v[2]; $r.gap += $v[4] }
+      $r.levels += $v[3]
       [ZR]::Pump(3000)                         # 3 s after zoom-out: cold config really releases
     }
-    PmWait; $r.pm += PmStats $csv
+    if ($csv) { PmWait; $r.pm += PmStats $csv }
     $fs = [IO.File]::Open($log, 'Open', 'Read', 'ReadWrite'); $fs.Seek($logStart, 'Begin') | Out-Null
     $txt = (New-Object IO.StreamReader($fs)).ReadToEnd(); $fs.Close()
     $r.trace += @($txt -split "`n" | ? { $_ -match 'zoomtrace\s+in:' } | % { $_.Trim() })
@@ -163,11 +187,13 @@ try {
   $summary = [ordered]@{}
   foreach ($k in $results.configs.Keys) { $r = $results.configs[$k]
     $summary[$k] = [ordered]@{ pressToVisibleMs = Stats $r.vis; rampStallFrames = Stats $r.stalls; longestStillMs = Stats $r.longest;
-      neverChanged = @($r.vis | ? { $_ -lt 0 }).Count; caretJumps = $r.caretJumps; presentmon = $r.pm; traceLines = $r.trace.Count } }
+      neverChanged = @($r.vis | ? { $_ -lt 0 }).Count; medianSampleMs = (Stats $r.gap).median;
+      zoomedCycles = @($r.levels | ? { $_ -gt 1.05 }).Count; cycles = $r.levels.Count;
+      caretJumps = $r.caretJumps; presentmon = $r.pm; traceLines = $r.trace.Count; trace = $r.trace } }
   $results.summary = $summary
 } finally {
   if ([ZR]::F) { [ZR]::F.Close() }
-  Copy-Item $bak $ini -Force; [ZR]::Pump(1200)
+  RestoreOriginals
 }
 $json = $results | ConvertTo-Json -Depth 6
 $json | Set-Content -Encoding utf8 "$OutDir\$Label-$Scenario-$Pointer.json"

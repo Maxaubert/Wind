@@ -1330,6 +1330,7 @@ static void RunTick(TickState& t) {
     bool inspect = t.cursorLock.locked();
     bool active = zoomed || inspect;                 // overlay runs while zoomed OR Inspect-frozen
     if (active) t.lastActiveMs = GetTickCount64();   // event-driven idle settle window (#71)
+    else t.viewOwner.wasTracking = false;            // 1x only: the next zoom-in re-baselines the tracker (#310)
     if (active && !t.prevActive && t.cfg.zoomTrace) {  // zoom timeline (#310): arm on the enter tick
         auto& z = t.zt;
         z = TickState::ZoomTimeline{};
@@ -1337,7 +1338,6 @@ static void RunTick(TickState& t) {
         z.engine = dynamic_cast<TransformModel*>(t.model) ? "transform"
                  : dynamic_cast<RenderModel*>(t.model) ? "render" : "other";
     }
-    else t.viewOwner.wasTracking = false;            // the next zoom-in re-baselines the tracker (#310)
     // Keyboard panning (#287): the hook swallows pan keys only while this is set, so at 1x
     // the pan keys reach the app (e.g. Ctrl+Alt+Left/Right = IntelliJ navigate back/forward). Mouselook games and Inspect
     // keep them too. Published once per tick, before anything reads the pan keys.
