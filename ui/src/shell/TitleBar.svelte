@@ -21,10 +21,9 @@
   .tb { display: flex; align-items: center; height: 38px; border-bottom: 1px solid var(--line); padding-left: 12px; background: var(--bg); }
   .brand { display: flex; align-items: center; gap: 10px; font: 600 13px var(--s); }
   .logo { width: 20px; height: 20px; border-radius: 4px; background: var(--fg); color: var(--bg); display: grid; place-items: center; }
-  .logo :global(svg) { width: 12px; height: 12px; stroke-width: 2; }
+  .logo :global(svg.ic) { width: 12px; height: 12px; stroke-width: 2; }
   .sp { flex: 1; }
   .wc { width: 46px; height: 38px; display: grid; place-items: center; color: var(--fg2); }
   .wc:hover { background: var(--hover); color: var(--fg); }
-  .wc :global(svg) { width: 15px; height: 15px; stroke-width: 1.75; }
-  .wc[data-theme-cycle] :global(svg) { width: 14px; height: 14px; stroke-width: 1.5; }
+  .wc :global(svg.ic) { width: 15px; height: 15px; stroke-width: 1.75; }
 </style>
