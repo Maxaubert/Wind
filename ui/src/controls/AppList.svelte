@@ -60,6 +60,10 @@
   .box { background: var(--card); color: var(--fg); border: 1px solid var(--cardb); border-radius: 10px;
          padding: 18px 20px; width: 400px; max-width: calc(100vw - 32px); box-shadow: var(--shadow);
          font: 13px var(--s); }
+  .back { animation: fade var(--dur) var(--ease); }
+  .box { animation: pop var(--dur) var(--ease); }
+  @keyframes fade { from { opacity: 0; } }
+  @keyframes pop { from { opacity: 0; transform: scale(.98); } }
   .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
   h2 { margin: 0; font-size: 15px; font-weight: 600; }
   .x { width: 28px; height: 28px; border-radius: var(--srad); color: var(--fg3); font-size: 18px; line-height: 1; }

@@ -43,6 +43,6 @@
   .kcs :global(button.keycap.unbound:hover) { color: var(--fg); border-color: var(--chipb); }
   .kcs :global(svg.plus) { width: 11px; height: 11px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.75;
     stroke-linecap: round; stroke-linejoin: round; }
-  .kcs :global(button.keycap.armed) { outline: 2px solid var(--fg); outline-offset: 1px; }
+  .kcs :global(button.keycap.armed) { border-color: var(--fg); background: var(--hover); }
   .kcs :global(.refusal) { color: var(--fg2); }
 </style>

@@ -199,7 +199,8 @@
 <style>
   .card { border: 1px solid var(--cardb); background: var(--card); border-radius: 10px; box-shadow: var(--cshadow); }
   .trow { position: relative; display: grid; grid-template-columns: auto auto 1fr auto; align-items: center; gap: 12px;
-          min-height: 62px; padding: 8px 18px 8px 8px; user-select: none; -webkit-user-select: none; cursor: pointer; }
+          min-height: 62px; padding: 8px 18px 8px 8px; user-select: none; -webkit-user-select: none; cursor: pointer;
+          transition: background-color var(--dur-fast) var(--ease); }
   .trow + .trow { border-top: 1px solid var(--rowline); }
   .trow:first-child { border-radius: 9px 9px 0 0; }
   .trow:last-child { border-radius: 0 0 9px 9px; }

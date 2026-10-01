@@ -1,5 +1,6 @@
 #include "webview_recover.h"
 #include <windows.h>
+#include <dwmapi.h>
 #include <windowsx.h>
 #include <shellapi.h>
 #include <tlhelp32.h>
@@ -30,6 +31,13 @@
 using namespace Microsoft::WRL;
 static ComPtr<ICoreWebView2Controller> g_controller;
 static ComPtr<ICoreWebView2> g_webview;
+// Tells the page whether the window is maximized (it hides its 1px outline then). Sent on every
+// WM_SIZE and in reply to getConfig, so a page that loads into a maximized window still knows.
+static void PostWindowState(HWND h) {
+    if (!g_webview || !h) return;
+    g_webview->PostWebMessageAsJson(IsZoomed(h) ? L"{\"type\":\"windowState\",\"maximized\":true}"
+                                                          : L"{\"type\":\"windowState\",\"maximized\":false}");
+}
 // Crash recovery (see webview_recover.h). Settings are live now (the ini is the session), so a
 // recovered page simply re-reads the ini: there is no separate draft to hand back.
 static std::wstring g_initScriptId;   // AddScriptToExecuteOnDocumentCreated id for window.__windInit
@@ -293,6 +301,11 @@ static void ApplyWindowTheme(const std::string& theme) {
     if (brush) DeleteObject(brush);
     brush = nb;
     if (g_hwnd) InvalidateRect(g_hwnd, nullptr, TRUE);
+    if (g_hwnd) {   // the thin window outline DWM draws around the frame (none when maximized)
+        const bool light = GetRValue(c) > 128;
+        COLORREF border = light ? RGB(0xd4, 0xd4, 0xd4) : RGB(0x2a, 0x2a, 0x2a);
+        DwmSetWindowAttribute(g_hwnd, 34 /* DWMWA_BORDER_COLOR */, &border, sizeof(border));
+    }
     if (g_controller) {
         ComPtr<ICoreWebView2Controller2> c2;
         if (SUCCEEDED(g_controller.As(&c2)) && c2) {
@@ -323,6 +336,7 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
                       (unsigned long long)(GetTickCount64() - g_launchTick));
         }
     } else if (type == "getConfig") {
+        PostWindowState(g_hwnd);
         wv->PostWebMessageAsJson(Widen("{\"type\":\"config\"," + SessionPayload(ReadFileUtf8(IniPath())) + "}").c_str());
     } else if (type == "setConfig" || type == "setConfigPersist") {
         std::string key = JsonField(j, "key"), value = JsonField(j, "value");
@@ -561,15 +575,22 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         // Remove the standard window frame so the client area spans the whole window (we draw our
         // own title bar in the web UI). When maximized, inset by the frame so content is not clipped
         // off-screen and the taskbar stays reachable.
+        auto* p = reinterpret_cast<NCCALCSIZE_PARAMS*>(l);
         if (IsZoomed(h)) {
             UINT dpi = GetDpiForWindow(h); if (!dpi) dpi = 96;
             int fx = GetSystemMetricsForDpi(SM_CXFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
             int fy = GetSystemMetricsForDpi(SM_CYFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
-            auto* p = reinterpret_cast<NCCALCSIZE_PARAMS*>(l);
             p->rgrc[0].left += fx; p->rgrc[0].right -= fx;
             p->rgrc[0].top += fy; p->rgrc[0].bottom -= fy;
+            return 0;
         }
-        return 0;
+        // Not maximized: let Windows keep the left/right/bottom frame (invisible resize borders on
+        // 10/11, outside the visible window) and drop only the caption. The WebView child covers the
+        // client, so without these frames only the corners could be grabbed (Max, 2026-10-02).
+        const LONG top = p->rgrc[0].top;
+        const LRESULT r = DefWindowProcW(h, m, w, l);
+        p->rgrc[0].top = top;
+        return r;
     }
     if (m == WM_NCHITTEST) {
         // Resize borders (8px DPI-scaled). Drag is handled by WebView2 non-client regions
@@ -579,6 +600,9 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         const int titleH = MulDiv(44, dpi, 96);
         POINT pt{ GET_X_LPARAM(l), GET_Y_LPARAM(l) }; ScreenToClient(h, &pt);
         RECT rc; GetClientRect(h, &rc);
+        // Left, right and bottom are real frame now: let Windows answer outside the client.
+        const LRESULT def = DefWindowProcW(h, m, w, l);
+        if (def != HTCLIENT && def != HTNOWHERE) return def;
         bool left = pt.x < border, right = pt.x >= rc.right - border;
         bool top = pt.y < border, bottom = pt.y >= rc.bottom - border;
         if (top && left) return HTTOPLEFT;       if (top && right) return HTTOPRIGHT;
@@ -638,12 +662,31 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         ApplyWindowTheme(UiThemeOf(ReadFileUtf8(IniPath())));   // "auto" follows the system theme live
         return 0;
     }
-    if (m == WM_SIZE && g_controller) { RECT r; GetClientRect(h, &r); g_controller->put_Bounds(r); return 0; }
+    if (m == WM_SIZE && g_controller) {
+        RECT r; GetClientRect(h, &r);
+        if (!IsZoomed(h)) r.top += 1;   // 1px top strip stays the parent's: the top resize edge
+        g_controller->put_Bounds(r);
+        PostWindowState(h);   // the page drops its window outline while maximized
+        return 0;
+    }
     if (m == WM_GETMINMAXINFO) {   // enforce a minimum window size (DPI-scaled)
         UINT dpi = GetDpiForWindow(h); if (!dpi) dpi = 96;
         auto* mmi = reinterpret_cast<MINMAXINFO*>(l);
         mmi->ptMinTrackSize.x = MulDiv(820, dpi, 96);
         mmi->ptMinTrackSize.y = MulDiv(560, dpi, 96);
+        // Maximize to the WORK AREA, not the whole monitor: a captionless popup otherwise covers the
+        // taskbar. The frame thickness is added on every side because WM_NCCALCSIZE insets the
+        // client by exactly that much while maximized, so the client lands on the work area.
+        HMONITOR mon = MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO mi{ sizeof(mi) };
+        if (GetMonitorInfoW(mon, &mi)) {
+            const int fx = GetSystemMetricsForDpi(SM_CXFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+            const int fy = GetSystemMetricsForDpi(SM_CYFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+            mmi->ptMaxPosition.x = mi.rcWork.left - mi.rcMonitor.left - fx;
+            mmi->ptMaxPosition.y = mi.rcWork.top - mi.rcMonitor.top - fy;
+            mmi->ptMaxSize.x = (mi.rcWork.right - mi.rcWork.left) + 2 * fx;
+            mmi->ptMaxSize.y = (mi.rcWork.bottom - mi.rcWork.top) + 2 * fy;
+        }
         return 0;
     }
     if (m == WM_TIMER && w == kWindWatchTimerId) {
@@ -736,7 +779,7 @@ static void CreateWebView(HWND hwnd) {
                           if (SUCCEEDED(s0.As(&s9)) && s9)
                               s9->put_IsNonClientRegionSupportEnabled(TRUE);
                       } }
-                    RECT r; GetClientRect(hwnd, &r); g_controller->put_Bounds(r);
+                    RECT r; GetClientRect(hwnd, &r); if (!IsZoomed(hwnd)) r.top += 1; g_controller->put_Bounds(r);
                     { ComPtr<ICoreWebView2_3> wv3;
                       if (SUCCEEDED(g_webview.As(&wv3)))
                           wv3->SetVirtualHostNameToFolderMapping(L"wind.config", uiDir.c_str(),

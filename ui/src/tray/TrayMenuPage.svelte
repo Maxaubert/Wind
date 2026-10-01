@@ -75,7 +75,8 @@
   :global(.wnd[data-theme="light"]) .d { color: #5a5a5a; }
   .chk { --onfill: #04201b; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 7px;
          border: 1px solid var(--ctl); background: transparent; color: transparent;
-         transition: background-color .12s, border-color .12s; }
+         transition: background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease); }
+  .chk:active:not(:disabled) { transform: scale(.97); }
   :global(.wnd[data-theme="light"]) .chk { --onfill: #fff; }
   .chk svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: square; stroke-linejoin: miter; }
   .chk:hover { border-color: var(--fg); }

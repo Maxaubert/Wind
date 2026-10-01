@@ -114,6 +114,8 @@
   onMount(() => {
     const offs = [
       onMessage((m) => { if (m && m.type === 'configWriteFailed') writeError = m.key || 'a setting'; }),
+      // Maximized: no window outline (the host reports the state on every resize).
+      onMessage((m) => { if (m && m.type === 'windowState') document.documentElement.toggleAttribute('data-maximized', !!m.maximized); }),
       onMessage((m) => {
         if (m && m.type === 'restartFailed') {
           values = { ...values, model: runningModel }; setConfig('model', runningModel);
@@ -240,7 +242,9 @@
   }
 
   // --- Navigation -----------------------------------------------------------------------------
+  let navigated = $state(false);   // the page cross-fade stays off until the first navigation (none on first paint)
   async function select(id) {
+    navigated = true;
     activeId = id;
     await tick();
     if (main) { main.scrollTop = 0; main.focus({ preventScroll: true }); }
@@ -275,6 +279,8 @@
     <Sidebar groups={side} tray={trayGroup} {expert} active={searching ? '' : activeId} version={VERSION} {query} {onSearch}
              onSelect={(id) => { clearSearch(); select(id); }} />
     <main class="main" data-page={searching ? 'search' : group.id} bind:this={main} tabindex="-1" aria-label={group.label}>
+      {#key searching ? '?search' : activeId}
+      <div class="page" class:fade={navigated}>
       {#if searching}
         <Results {results} {query} onJump={jump} />
       {:else}
@@ -291,6 +297,8 @@
         <TrayMenuPage {values} onChange={change} {announce} />
       {/if}
       {/if}
+      </div>
+      {/key}
       <div class="tail"></div>
     </main>
   </div>
@@ -369,8 +377,10 @@
   .app { width: 100vw; height: 100vh; display: grid; grid-template-rows: 38px 1fr; position: relative; overflow: hidden; }
   .body { display: grid; grid-template-columns: 240px 1fr; min-height: 0; }
   .main { position: relative; min-height: 0; overflow-y: auto; padding: 0 40px; outline: none;
-          scrollbar-width: thin; scrollbar-color: var(--track) transparent; }
+          scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--fg) 16%, transparent) transparent; }
   .main[data-page="tray"] :global(.banner + .card) { margin-top: 20px; }   /* k01: a caption-less first card sits 20px under the band */
+  .page.fade { animation: pagein var(--dur-fast) var(--ease); }
+  @keyframes pagein { from { opacity: 0; } }
   .tail { height: 110px; }   /* clearance so the capsule never covers the last row */
   .main[data-page="tray"] .tail { height: 120px; }   /* k01: the scroller pads 120px under the last card */
   .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
