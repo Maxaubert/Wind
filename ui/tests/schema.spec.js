@@ -94,7 +94,7 @@ test('zoom page: keycaps, slider and the old keybind safety still work', async (
   await expect(zin.locator('.keycap.unbound')).toHaveText('Add key');
   await expect(zin.locator('.sep')).toHaveText('or');
   expect(await css(zin.locator('.keycap').first(), 'font-family')).toContain('Cascadia Mono');
-  expect(await css(zin.locator('.keycap.unbound'), 'background-color')).toBe('rgb(38, 38, 38)');
+  expect(await css(zin.locator('.keycap.unbound'), 'background-color')).toBe('rgb(14, 14, 14)');
   // capture a key on the empty slot: a live patch reaches the page
   await zin.locator('.keycap.unbound').click();
   await page.keyboard.press('F8');

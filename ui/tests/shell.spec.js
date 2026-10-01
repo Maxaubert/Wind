@@ -20,10 +20,10 @@ test('tokens and design files contain no em-dash', () => {
 test('dark tokens and shell components render in isolation', async ({ page }) => {
   await page.goto('/preview.html');
   const app = page.locator('.wnd');
-  expect(await css(app, '--card')).toBe('#1b1b1b');
+  expect(await css(app, '--card')).toBe('#080808');
   expect(await css(app, '--hlGrey')).toBe('#313131');
   expect(await css(page.locator('.card'), 'border-top-left-radius')).toBe('10px');
-  expect(await css(page.locator('.card'), 'background-color')).toBe('rgb(27, 27, 27)');
+  expect(await css(page.locator('.card'), 'background-color')).toBe('rgb(8, 8, 8)');
   expect(await css(page.locator('.it').first(), 'border-top-left-radius')).toBe('8px');
   expect(await css(page.locator('.it').first(), 'height')).toBe('36px');
   expect(await css(page.locator('.it.sel'), 'background-color')).toBe('rgb(49, 49, 49)');

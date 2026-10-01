@@ -12,9 +12,9 @@
   --isz: 16px;
 
   --bg: #000; --side: #000;
-  --line: #1f1f1f; --line2: #2a2a2a; --outline: #5c5c5c; --rowline: #242424;
-  --hover: #121212; --card: #1b1b1b; --chip: #262626; --chipb: #353535;
-  --cardb: #262626; --cshadow: none;
+  --line: #1f1f1f; --line2: #2a2a2a; --outline: #5c5c5c; --rowline: #0f0f0f;
+  --hover: #121212; --card: #080808; --chip: #0e0e0e; --chipb: #353535;   /* card #080808: Max 2026-10-02 */
+  --cardb: #131313; --cshadow: none;
   --fg: #f2f2f2; --fg2: #d0d0d0; --fg3: #8f8f8f; --glyph: #b0b0b0;
   --track: #303030; --accent: #fff; --onaccent: #000;
   --pill: rgba(24, 24, 24, .9); --pillb: #3a3a3a;
@@ -22,7 +22,7 @@
   --guide: #3c3c3c; --prog: #f2f2f2;
   --hlStrong: #6e6e6e; --hlDim: #2e2e2e; --hlGrey: #313131;
   --fill: #2fbfa5; --thumb: #f2f2f2;
-  --band: #0a0a0a; --bandimg-op: .275; --bandimg-from: 50%;
+  --band: #080808; --bandimg-op: .17; --bandimg-from: 50%;   /* banner = option colour, aurora .17: Max 2026-10-02 */
 
   background: var(--bg);
   color: var(--fg);

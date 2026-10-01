@@ -364,9 +364,6 @@
 
 <style>
   .app { width: 100vw; height: 100vh; display: grid; grid-template-rows: 38px 1fr; position: relative; overflow: hidden; }
-  /* Thin window outline, drawn above everything so no child background can cover it. */
-  .app::after { content: ""; position: absolute; inset: 0; border: 1px solid var(--winborder, var(--line2)); pointer-events: none; z-index: 1000; }
-  :global(html[data-maximized]) .app::after { display: none; }
   .body { display: grid; grid-template-columns: 240px 1fr; min-height: 0; }
   .main { position: relative; min-height: 0; overflow-y: auto; padding: 0 40px; outline: none;
           scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--fg) 16%, transparent) transparent; }
