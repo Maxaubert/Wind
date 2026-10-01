@@ -22,16 +22,16 @@
   <nav aria-label="Settings sections">
     {#each groups as g (g.id)}{@render row(g)}{/each}
   </nav>
+  <div class="adv">
+    <div class="lbl">Expert</div>
+    {#each expert as g (g.id)}{@render row(g)}{/each}
+  </div>
   {#if tray.length}
     <div class="grp2">
       <div class="lbl">Tray</div>
       {#each tray as g (g.id)}{@render row(g)}{/each}
     </div>
   {/if}
-  <div class="adv">
-    <div class="lbl">Expert</div>
-    {#each expert as g (g.id)}{@render row(g)}{/each}
-  </div>
 </aside>
 
 <style>
@@ -52,7 +52,6 @@
   .it:hover { background: var(--hover); color: var(--fg); }
   .it.sel { background: var(--hlGrey); color: var(--fg); }
   .n { margin: 0 28px 0 auto; font: 400 10.5px var(--m); color: var(--fg3); }   /* version sits where the mockup's count/chevron slots leave it */
-  .grp2 { margin-top: 14px; }
-  .adv { margin-top: auto; border-top: 1px solid var(--line2); padding-top: 8px; }
+  .grp2, .adv { margin-top: 14px; }   /* one list, small section labels; nothing pinned to the bottom (Max, 2026-10-02) */
   .lbl { font: 600 11px var(--m); letter-spacing: .1em; text-transform: uppercase; color: var(--fg3); padding: 2px 10px 8px; }
 </style>
