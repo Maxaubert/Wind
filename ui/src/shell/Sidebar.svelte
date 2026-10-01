@@ -46,6 +46,6 @@
   .it:hover { background: var(--hover); color: var(--fg); }
   .it.sel { background: var(--hlGrey); color: var(--fg); }
   .n { margin: 0 28px 0 auto; font: 400 10.5px var(--m); color: var(--fg3); }   /* version sits where the mockup's count/chevron slots leave it */
-  .adv { margin-top: auto; border-top: 1px solid var(--line2); padding-top: 8px; }
+  .adv { margin-top: 14px; }   /* attached under the list, not pinned to the bottom (Max, 2026-10-02) */
   .lbl { font: 600 11px var(--m); letter-spacing: .1em; text-transform: uppercase; color: var(--fg3); padding: 2px 10px 8px; }
 </style>
