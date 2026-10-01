@@ -32,6 +32,8 @@ public:
     // Call between BeginDraw and EndDraw. Paints the whole flyout (transparent outside the
     // rounded shape) from the origin in DIPs.
     void Draw(const View& v, const Geometry& g);
+    // The profile list popup (its own window, its own painter): same tokens, same clipping.
+    void DrawList(const ListView& v, const ListGeometry& g);
 private:
     struct Impl;
     Impl* d_;

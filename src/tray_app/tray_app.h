@@ -35,6 +35,7 @@ int RunFlyoutTest();
 // tray_menu.cpp - what the flyout's buttons do (no UI of their own).
 bool UsesDarkTheme(const std::string& iniText);   // Wind's uiTheme; anything but dark/light = system
 bool ConfirmQuit(const std::wstring& ini);        // the unsaved-settings prompt; false = cancelled
+bool ConfirmSwitch(const std::wstring& ini);      // the same prompt before a profile switch (Discard resets the session)
 void SwitchToProfile(const std::wstring& ini, const std::wstring& nameW);
 void OpenSettings();
 

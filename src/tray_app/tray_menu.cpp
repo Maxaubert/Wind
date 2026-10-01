@@ -40,9 +40,12 @@ void OpenSettings() {
                   AppDir().c_str(), SW_SHOW);
 }
 
-// Quit guard: the tray decides from the files (live ini vs the active profile), never from the UI,
-// so it still prompts when Settings is closed. Returns false when the user cancels the quit.
-bool ConfirmQuit(const std::wstring& ini) {
+// Unsaved-settings guard for Quit and for a profile switch: the tray decides from the files (live
+// ini vs the active profile), never from the UI, so it still prompts when Settings is closed.
+// Save writes the session to the active profile; Discard drops it (a switch resets the live ini to
+// the profile right here, so the switch's own capture of the outgoing live settings cannot save
+// them after all). Returns false when the user cancels.
+static bool ConfirmUnsaved(const std::wstring& ini, bool forSwitch) {
     const std::string live = wind::ReadTextFile(ini);
     auto vals = wind::ReadIniValues(live);
     auto it = vals.find("profile");
@@ -60,7 +63,8 @@ bool ConfirmQuit(const std::wstring& ini) {
     cfg.dwCommonButtons = TDCBF_CANCEL_BUTTON;
     cfg.pszWindowTitle = L"Wind";
     cfg.pszMainInstruction = L"You have unsaved settings";
-    cfg.pszContent = L"Save them to the active profile before quitting, or discard them?";
+    cfg.pszContent = forSwitch ? L"Save them to the active profile before switching, or discard them?"
+                               : L"Save them to the active profile before quitting, or discard them?";
     cfg.cButtons = 2;
     cfg.pButtons = buttons;
     cfg.nDefaultButton = ID_SAVE;
@@ -69,13 +73,22 @@ bool ConfirmQuit(const std::wstring& ini) {
     if (pressed == ID_SAVE) {
         if (!wind::WriteTextFileAtomic(pp, wind::MakeProfileText(live))) {
             wind::Log(wind::LogLevel::Warn, "profile", "quit save failed (err=%lu)", GetLastError());
-            Notify(L"Wind", L"Could not save the settings; Wind keeps running.");
+            Notify(L"Wind", forSwitch ? L"Could not save the settings; the profile stays as it is."
+                                      : L"Could not save the settings; Wind keeps running.");
             return false;
         }
         return true;
     }
-    return pressed == ID_DISCARD;
+    if (pressed != ID_DISCARD) return false;
+    if (forSwitch && !wind::WriteTextFileAtomic(ini, wind::MakeLiveText(profile, live, it->second))) {
+        Notify(L"Wind", L"Could not discard the settings; the profile stays as it is.");
+        return false;
+    }
+    return true;
 }
+
+bool ConfirmQuit(const std::wstring& ini) { return ConfirmUnsaved(ini, false); }
+bool ConfirmSwitch(const std::wstring& ini) { return ConfirmUnsaved(ini, true); }
 // Switch the active profile from the tray: rewrite the live ini from the profile file (globals
 // preserved); the core's dir-watch hot-reloads everything except `model`, which is read once at
 // launch - a model change relaunches Wind.exe from our folder (the new instance evicts the running

@@ -464,7 +464,35 @@ void Painter::Draw(const View& v, const Geometry& g) {
     for (int y : g.hair) d.fill(D2D1::RectF((float)kBorder, (float)y, W - kBorder, (float)y + 1.f), d.th.rule);
     if (g.hasQs) d.drawQuick(v, g);
     d.drawBar(v, g);
+    if (v.showFocus && v.focus.kind != HitKind::None) {
+        const IRect fr = FocusRect(g, v.focus);
+        if (fr.w() > 0) {
+            d.br->SetColor(d.th.teal);
+            d.rt->DrawRoundedRectangle(D2D1::RoundedRect(D2D1::RectF((float)fr.l + 1.f, (float)fr.t + 1.f,
+                                                                    (float)fr.r - 1.f, (float)fr.b - 1.f), 7.f, 7.f),
+                                       d.br.Get(), 2.f);
+        }
+    }
     if (clipped) d.rt->PopLayer();
+    d.ring(D2D1::RectF(0, 0, W, H), (float)kRadius, d.th.menub);
+}
+
+void Painter::DrawList(const ListView& v, const ListGeometry& g) {
+    Impl& d = *d_;
+    if (!d.rt || !d.br) return;
+    const float W = (float)g.width, H = (float)g.height;
+    d.rt->SetTransform(D2D1::Matrix3x2F::Identity());
+    d.rt->Clear(D2D1::ColorF(0, 0, 0, 0));
+    d.fillRound(D2D1::RectF(0, 0, W, H), (float)kRadius, d.th.menu);
+    for (size_t i = 0; i < v.names.size() && i < g.row.size(); ++i) {
+        const D2D1_RECT_F r = d.R(g.row[i]);
+        if ((int)i == v.sel) d.fillRound(r, 8.f, d.th.hl);
+        d.text(v.names[i], g_s.mono12.Get(),
+               D2D1::RectF(r.left + (float)kListTextPad, r.top, r.right - (float)kListCheckW, r.bottom),
+               ((int)i == v.sel || (int)i == v.active) ? d.th.fg : d.th.fg2, DWRITE_TEXT_ALIGNMENT_LEADING);
+        if ((int)i == v.active)
+            d.icon("check", r.right - 12.f - 16.f, r.top + (r.bottom - r.top - 16.f) / 2.f, d.th.teal, 1.75f);
+    }
     d.ring(D2D1::RectF(0, 0, W, H), (float)kRadius, d.th.menub);
 }
 

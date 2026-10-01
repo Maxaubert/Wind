@@ -197,19 +197,20 @@ struct SliderSpec {
     double min, max, def;
     ValueFmt fmt;
     const char* icon;
+    double step;        // the Settings slider's step (ui/src/settings-schema.js)
 };
 
 inline const SliderSpec* SliderSpecs(int* count) {
     // Ranges and defaults mirror ui/src/settings-schema.js; the ini is the source of truth.
     static const SliderSpec k[] = {
-        { "colorWarmPct",   L"Warmth",         0,    100,  0,    ValueFmt::Percent,  "warm" },
-        { "colorDimPct",    L"Brightness",     1,    100,  100,  ValueFmt::Percent,  "bright" },
-        { "maxLevel",       L"Max zoom",       2,    50,   12,   ValueFmt::TimesInt, "maxz" },
-        { "zoomInSpeed",    L"Zoom-in speed",  0.25, 4,    1,    ValueFmt::Times2,   "zin" },
-        { "zoomOutSpeed",   L"Zoom-out speed", 0.25, 4,    1,    ValueFmt::Times2,   "zout" },
-        { "panSpeed",       L"Pan speed",      0.25, 4,    1,    ValueFmt::Times2,   "pan" },
-        { "cursorSmoothing",L"Pan smoothing",  0,    0.95, 0.4,  ValueFmt::Dec2,     "smooth" },
-        { "zoomEaseOutMs",  L"Release glide",  0,    300,  45,   ValueFmt::Millis,   "glide" },
+        { "colorWarmPct",   L"Warmth",         0,    100,  0,    ValueFmt::Percent,  "warm", 5 },
+        { "colorDimPct",    L"Brightness",     1,    100,  100,  ValueFmt::Percent,  "bright", 1 },
+        { "maxLevel",       L"Max zoom",       2,    50,   12,   ValueFmt::TimesInt, "maxz", 1 },
+        { "zoomInSpeed",    L"Zoom-in speed",  0.25, 4,    1,    ValueFmt::Times2,   "zin", 0.05 },
+        { "zoomOutSpeed",   L"Zoom-out speed", 0.25, 4,    1,    ValueFmt::Times2,   "zout", 0.05 },
+        { "panSpeed",       L"Pan speed",      0.25, 4,    1,    ValueFmt::Times2,   "pan", 0.05 },
+        { "cursorSmoothing",L"Pan smoothing",  0,    0.95, 0.4,  ValueFmt::Dec2,     "smooth", 0.05 },
+        { "zoomEaseOutMs",  L"Release glide",  0,    300,  45,   ValueFmt::Millis,   "glide", 5 },
     };
     if (count) *count = (int)(sizeof(k) / sizeof(k[0]));
     return k;
@@ -342,6 +343,8 @@ struct View {
     std::vector<ToggleView> toggles;
     std::wstring profile = L"Default";
     Hit hover;
+    Hit focus;                      // keyboard focus; drawn only when showFocus
+    bool showFocus = false;
 };
 
 inline PerfView BuildPerf(const TrayStatus& st, const float* ticks, int n) {
@@ -394,5 +397,174 @@ inline View BuildView(const IniValues& ini, const TrayLayout& layout, const Tray
     v.profile = profile.empty() ? std::wstring(L"Default") : profile;
     return v;
 }
+
+// ---------------------------------------------------------------- interaction (pure)
+
+// A slider value snapped to the Settings slider's step (from `min`) and clamped to its range.
+inline double SnapSlider(const SliderSpec& s, double v) {
+    v = (std::min)((std::max)(v, s.min), s.max);
+    if (s.step > 0) {
+        v = s.min + std::floor((v - s.min) / s.step + 0.5) * s.step;
+        v = (std::min)((std::max)(v, s.min), s.max);
+    }
+    return v;
+}
+
+// The value a pointer at `x` (DIPs) means on `track`; clamps beyond either end.
+inline double SliderFromX(const SliderSpec& s, const IRect& track, int x) {
+    if (track.w() <= 0) return s.def;
+    const double f = (std::min)((std::max)((double)(x - track.l) / (double)track.w(), 0.0), 1.0);
+    return SnapSlider(s, s.min + f * (s.max - s.min));
+}
+
+// One keyboard step up (dir > 0) or down; `big` (Shift) moves about a tenth of the range.
+inline double StepSlider(const SliderSpec& s, double cur, int dir, bool big) {
+    double d = s.step > 0 ? s.step : (s.max - s.min) / 100.0;
+    if (big) d = (std::max)(d, std::floor((s.max - s.min) * 0.1 / d + 0.5) * d);
+    return SnapSlider(s, cur + (dir > 0 ? d : -d));
+}
+
+// The ini text for a slider value: whole numbers for %, x-int and ms; two decimals otherwise.
+inline std::string FormatIniValue(const SliderSpec& s, double v) {
+    char b[32];
+    switch (s.fmt) {
+        case ValueFmt::Percent: case ValueFmt::TimesInt: case ValueFmt::Millis:
+            std::snprintf(b, sizeof b, "%d", (int)std::lround(v)); break;
+        default: std::snprintf(b, sizeof b, "%.2f", v); break;
+    }
+    return b;
+}
+
+// One ini write. Toggling "Keep within the edges" is two of them (mouseAlign and trackAlign).
+struct IniChange { std::string key, value; };
+
+inline std::vector<IniChange> ToggleChanges(const std::string& key, bool turnOn) {
+    const char* v = turnOn ? "1" : "0";
+    if (key == "keepEdges") return { { "mouseAlign", v }, { "trackAlign", v } };
+    return { { key, v } };
+}
+
+inline void ApplyChanges(IniValues& ini, const std::vector<IniChange>& ch) {
+    for (const auto& c : ch) ini[c.key] = c.value;
+}
+
+// Writes while dragging a slider: at most one per kMinMs, the rest coalesced; whatever is still
+// pending is flushed by a timer (and unconditionally on release), so the final value always lands.
+struct WriteThrottle {
+    static constexpr unsigned long long kMinMs = 50;
+    unsigned long long lastMs = 0;
+    bool due(unsigned long long nowMs) const { return lastMs == 0 || nowMs < lastMs || nowMs - lastMs >= kMinMs; }
+    unsigned long long waitMs(unsigned long long nowMs) const {
+        return due(nowMs) ? 0 : kMinMs - (nowMs - lastMs);
+    }
+    void wrote(unsigned long long nowMs) { lastMs = nowMs; }
+};
+
+// A press on a slider row only starts a drag on (or just beside) the track, not on its icon or value.
+inline bool SliderTrackHit(const Geometry& g, int i, int x, int y) {
+    if (i < 0 || i >= (int)g.sliderTrack.size()) return false;
+    const IRect& t = g.sliderTrack[i];
+    return g.sliderRow[i].contains(x, y) && x >= t.l - 8 && x < t.r + 8;
+}
+
+// Keyboard focus walks the controls in reading order: sliders, chips, profile, Settings, Quit.
+inline int FocusCount(const Geometry& g) { return (int)g.sliderRow.size() + (int)g.chip.size() + 3; }
+inline Hit FocusHit(const Geometry& g, int idx) {
+    const int ns = (int)g.sliderRow.size(), nc = (int)g.chip.size();
+    if (idx < 0) return {};
+    if (idx < ns) return { HitKind::Slider, idx };
+    if (idx < ns + nc) return { HitKind::Chip, idx - ns };
+    switch (idx - ns - nc) {
+        case 0: return { HitKind::Profile, 0 };
+        case 1: return { HitKind::Settings, 0 };
+        case 2: return { HitKind::Quit, 0 };
+    }
+    return {};
+}
+inline int FocusIndex(const Geometry& g, const Hit& h) {
+    const int ns = (int)g.sliderRow.size(), nc = (int)g.chip.size();
+    switch (h.kind) {
+        case HitKind::Slider:   return h.index;
+        case HitKind::Chip:     return ns + h.index;
+        case HitKind::Profile:  return ns + nc;
+        case HitKind::Settings: return ns + nc + 1;
+        case HitKind::Quit:     return ns + nc + 2;
+        default: return -1;
+    }
+}
+// Tab (back = false) or Shift+Tab from `cur` (-1 = nothing focused yet), wrapping.
+inline int NextFocus(int cur, int count, bool back) {
+    if (count <= 0) return -1;
+    if (cur < 0) return back ? count - 1 : 0;
+    return back ? (cur + count - 1) % count : (cur + 1) % count;
+}
+inline IRect FocusRect(const Geometry& g, const Hit& h) {
+    switch (h.kind) {
+        case HitKind::Slider:
+            if (h.index >= 0 && h.index < (int)g.sliderRow.size()) {
+                const IRect& r = g.sliderRow[h.index];
+                return { r.l + 8, r.t + 2, r.r - 8, r.b - 2 };
+            }
+            break;
+        case HitKind::Chip:     if (h.index >= 0 && h.index < (int)g.chip.size()) return g.chip[h.index]; break;
+        case HitKind::Profile:  return g.profileBtn;
+        case HitKind::Settings: return g.settingsBtn;
+        case HitKind::Quit:     return g.quitBtn;
+        default: break;
+    }
+    return {};
+}
+
+// ---------------------------------------------------------------- profile list popup (pure)
+
+inline constexpr int kListRowH = 32, kListPad = 4, kListMinW = 140, kListMaxW = 296, kListTextPad = 12, kListCheckW = 28;
+
+struct ListGeometry {
+    int width = 0, height = 0;
+    std::vector<IRect> row;
+};
+
+inline ListGeometry ComputeList(int n, int widestTextW) {
+    ListGeometry g;
+    g.width = ClampInt(widestTextW + 2 * kListTextPad + kListCheckW + 2 * kListPad + 2 * kBorder,
+                       kListMinW, kListMaxW);
+    int y = kBorder + kListPad;
+    for (int i = 0; i < n; ++i) {
+        g.row.push_back({ kBorder + kListPad, y, g.width - kBorder - kListPad, y + kListRowH });
+        y += kListRowH;
+    }
+    g.height = y + kListPad + kBorder;
+    return g;
+}
+
+inline int ListHitTest(const ListGeometry& g, int x, int y) {
+    for (size_t i = 0; i < g.row.size(); ++i) if (g.row[i].contains(x, y)) return (int)i;
+    return -1;
+}
+
+// Up/Down in the list, clamped (no wrap); -1 (nothing selected yet) starts at the first or last.
+inline int ListStep(int cur, int n, int dir) {
+    if (n <= 0) return -1;
+    if (cur < 0) return dir > 0 ? 0 : n - 1;
+    return (std::min)((std::max)(cur + (dir > 0 ? 1 : -1), 0), n - 1);
+}
+
+// Top-left (pixels) of a w x h list opening ABOVE the anchor button, left-aligned with it; below
+// when there is no room above (taskbar on top). Clamped to the work area.
+inline Placement PlaceList(const IRect& anchor, const IRect& work, int w, int h, int gap) {
+    Placement p;
+    p.x = ClampInt(anchor.l, work.l + gap, work.r - w - gap);
+    int y = anchor.t - gap - h;
+    if (y < work.t + gap) y = anchor.b + gap;
+    p.y = ClampInt(y, work.t + gap, work.b - h - gap);
+    return p;
+}
+
+struct ListView {
+    bool dark = true;
+    std::vector<std::wstring> names;
+    int active = -1;      // the current profile (checkmark)
+    int sel = -1;         // hover or keyboard selection
+};
 
 }}  // namespace wind::Flyout
