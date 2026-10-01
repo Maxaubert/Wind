@@ -91,6 +91,9 @@ public static class ZR {
     Thread mv = null; if (Moving) { mv = new Thread(Mover); mv.IsBackground = true; mv.Start(); }
     BitBlt(mdc, 0, 0, rw, rh, sdc, rx, ry, 0x00CC0020); ulong h0 = Hash(bits, rw * rh * 4);
     var sw = Stopwatch.StartNew(); XBtn(2, true); bool released = false;
+    // press -> Wind starts the zoom (its published level leaves 1.0), polled finely for <= 60 ms
+    double startMs = -1;
+    while (sw.ElapsedMilliseconds < 60) { if (Level() > 1.0005) { startMs = sw.Elapsed.TotalMilliseconds; break; } Thread.SpinWait(100); }
     while (sw.ElapsedMilliseconds < 900) {
       if (!released && sw.ElapsedMilliseconds >= holdMs) { XBtn(2, false); released = true; }
       BitBlt(mdc, 0, 0, rw, rh, sdc, rx, ry, 0x00CC0020);
@@ -111,7 +114,7 @@ public static class ZR {
     SelectObject(mdc, old); DeleteObject(dib); DeleteDC(mdc); ReleaseDC(IntPtr.Zero, sdc);
     XBtn(1, true); var s2 = Stopwatch.StartNew(); while (s2.ElapsedMilliseconds < 4000 && Level() > 1.0) Thread.Sleep(10); Thread.Sleep(80); XBtn(1, false);
     Moving = false; if (mv != null) mv.Join(); Moving = mv != null;
-    return new double[] { vis, stalls, longest, lvl, medGap };
+    return new double[] { vis, stalls, longest, lvl, medGap, startMs };
   }
   public static Form F;
   public static void MakeForm() {
@@ -163,7 +166,7 @@ try {
   if ($target -eq [IntPtr]::Zero) { throw "no target window for $Scenario" }
   $rx = 1920 + 700; $ry = 1080 + 400; $rw = 160; $rh = 120          # off-centre: the zoom moves it
   $configs = @(@{ name = 'cold1200'; rel = 1200 }, @{ name = 'warm15000'; rel = 15000 })
-  foreach ($c in $configs) { $results.configs[$c.name] = [ordered]@{ vis = @(); stalls = @(); longest = @(); gap = @(); levels = @(); trace = @(); caretJumps = 0; pm = @() } }
+  foreach ($c in $configs) { $results.configs[$c.name] = [ordered]@{ start = @(); vis = @(); stalls = @(); longest = @(); gap = @(); levels = @(); trace = @(); caretJumps = 0; pm = @() } }
   for ($b = 0; $b -lt $Blocks; $b++) {
     $c = $configs[$b % 2]; $r = $results.configs[$c.name]
     SetIni @{ txIdleReleaseMs = $c.rel }
@@ -175,7 +178,7 @@ try {
       [ZR]::Moving = ($Pointer -eq 'moving')
       $v = [ZR]::Cycle($rx, $ry, $rw, $rh, 400)
       if ($Scenario -eq 'desktop') { $r.vis += $v[0]; $r.stalls += $v[1]; $r.longest += $v[2]; $r.gap += $v[4] }
-      $r.levels += $v[3]
+      $r.levels += $v[3]; $r.start += $v[5]
       [ZR]::Pump(3000)                         # 3 s after zoom-out: cold config really releases
     }
     if ($csv) { PmWait; $r.pm += PmStats $csv }
@@ -186,7 +189,7 @@ try {
   }
   $summary = [ordered]@{}
   foreach ($k in $results.configs.Keys) { $r = $results.configs[$k]
-    $summary[$k] = [ordered]@{ pressToVisibleMs = Stats $r.vis; rampStallFrames = Stats $r.stalls; longestStillMs = Stats $r.longest;
+    $summary[$k] = [ordered]@{ pressToZoomStartMs = Stats $r.start; pressToVisibleMs = Stats $r.vis; rampStallFrames = Stats $r.stalls; longestStillMs = Stats $r.longest;
       neverChanged = @($r.vis | ? { $_ -lt 0 }).Count; medianSampleMs = (Stats $r.gap).median;
       zoomedCycles = @($r.levels | ? { $_ -gt 1.05 }).Count; cycles = $r.levels.Count;
       caretJumps = $r.caretJumps; presentmon = $r.pm; traceLines = $r.trace.Count; trace = $r.trace } }

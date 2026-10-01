@@ -70,6 +70,9 @@ public:
     // Zoom timeline (#310, zoomTrace): where the last setActive(true) spent its time.
     struct EnterSplit { double bridgeMs = 0, ensureMagMs = 0; bool wasWarm = false; };
     EnterSplit lastEnter() const { return lastEnter_; }
+    // Whether the DWM magnification context is up right now. Read BEFORE the enter tick's first
+    // present (which builds it) to know if a zoom-in starts warm or cold.
+    bool contextLive() const { return magUp_; }
     // MPO buster (issue #191). Wanted = show the fullscreen alpha-1 ghost this session (MPO-
     // exposed game session + the mpoBuster knob); exposed = the session could overflow the
     // 16-bit plane field, so the write-site clamp applies whenever the ghost is not verifiably

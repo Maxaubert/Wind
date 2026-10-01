@@ -1337,6 +1337,9 @@ static void RunTick(TickState& t) {
         z.armed = true; z.press = g_input.takePressQpc(); z.start = now.QuadPart;
         z.engine = dynamic_cast<TransformModel*>(t.model) ? "transform"
                  : dynamic_cast<RenderModel*>(t.model) ? "render" : "other";
+        // Warm/cold must be read now: the first present below builds the context, so setActive's
+        // own view of it is always "warm".
+        if (auto* tm = dynamic_cast<TransformModel*>(t.mTransform ? t.mTransform : t.model)) z.warm = tm->contextLive();
     }
     // Keyboard panning (#287): the hook swallows pan keys only while this is set, so at 1x
     // the pan keys reach the app (e.g. Ctrl+Alt+Left/Right = IntelliJ navigate back/forward). Mouselook games and Inspect
@@ -2318,7 +2321,7 @@ static void RunTick(TickState& t) {
             if (t.zt.armed) {
                 LARGE_INTEGER zs1; QueryPerformanceCounter(&zs1); t.zt.setActiveMs = QpcMs(t, zs0.QuadPart, zs1.QuadPart);
                 if (auto* tm = dynamic_cast<TransformModel*>(t.model)) {
-                    const auto sp = tm->lastEnter(); t.zt.bridgeMs = sp.bridgeMs; t.zt.ensureMs = sp.ensureMagMs; t.zt.warm = sp.wasWarm;
+                    const auto sp = tm->lastEnter(); t.zt.bridgeMs = sp.bridgeMs; t.zt.ensureMs = sp.ensureMagMs;
                 }
                 DWM_TIMING_INFO ti{}; ti.cbSize = sizeof(ti);   // the composite count the first write must beat
                 if (SUCCEEDED(DwmGetCompositionTimingInfo(nullptr, &ti))) t.zt.cFrame0 = ti.cFrame;
