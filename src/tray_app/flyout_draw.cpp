@@ -259,6 +259,9 @@ struct Painter::Impl {
         rt->SetTransform(D2D1::Matrix3x2F::Translation(x, y));
         br->SetColor(c);
         rt->DrawGeometry(g, br.Get(), w, round.Get());
+        if (id == "warm") {   // second <path> of the reference thermometer, composited separately
+            if (ID2D1PathGeometry* l = IconGeometry("warm_line")) rt->DrawGeometry(l, br.Get(), w, round.Get());
+        }
         rt->SetTransform(D2D1::Matrix3x2F::Identity());
     }
 

@@ -12,7 +12,11 @@ struct IconDef { const char* id; const char* path; };
 
 inline const IconDef* Icons(int* count) {
     static const IconDef k[] = {
-        { "warm",   "M6.5 9.2V3a1.5 1.5 0 0 1 3 0v6.2a3 3 0 1 1-3 0zM8 6v5.5" },
+        // The reference draws the thermometer as TWO <path>s, each composited on its own, so the two
+        // anti-aliased edges where the centre line meets the stem wall do not add up to solid. "warm"
+        // is the outline and "warm_line" the centre line; icon() draws them as separate strokes.
+        { "warm",   "M6.5 9.2V3a1.5 1.5 0 0 1 3 0v6.2a3 3 0 1 1-3 0z" },
+        { "warm_line", "M8 6v5.5" },
         { "bright", "M5.2 8a2.8 2.8 0 1 0 5.6 0a2.8 2.8 0 1 0-5.6 0z"
                     "M8 1.5v1.8M8 12.7v1.8M1.5 8h1.8M12.7 8h1.8M3.4 3.4l1.3 1.3M11.3 11.3l1.3 1.3M3.4 12.6l1.3-1.3M11.3 4.7l1.3-1.3" },
         { "maxz",   "M2 6.75a4.75 4.75 0 1 0 9.5 0a4.75 4.75 0 1 0-9.5 0z"
