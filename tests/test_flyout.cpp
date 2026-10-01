@@ -370,30 +370,24 @@ TEST_CASE("every icon parses to at least one drawn segment") {
     }
 }
 
-// ---------------------------------------------------------------- click-point placement (like the old menu)
+// ---------------------------------------------------------------- click-point placement (up and to the left)
 
-TEST_CASE("click placement: a click on the taskbar opens up and to the right of the point") {
-    const Placement p = PlaceAtPoint(1500, 1060, kMon, 300, 285);
-    CHECK(p.x == 1500);
-    CHECK(p.y == 1060 - 285);
+TEST_CASE("click placement: opens up and to the left of the pointer") {
+    const Placement p = PlaceAtPoint(1500, 600, kMon, 300, 285);
+    CHECK(p.x == 1500 - 300);
+    CHECK(p.y == 600 - 285);
 }
 
-TEST_CASE("click placement: near the right edge it shifts left just enough, not flipped") {
+TEST_CASE("click placement: a click on the taskbar opens above it, to the left") {
     const Placement p = PlaceAtPoint(1800, 1060, kMon, 300, 285);
-    CHECK(p.x == 1920 - 300);
+    CHECK(p.x == 1800 - 300);
     CHECK(p.y == 1060 - 285);
 }
 
-TEST_CASE("click placement: an overflow-flyout click high on the screen opens down and right") {
-    const Placement p = PlaceAtPoint(1500, 240, kMon, 300, 285);
-    CHECK(p.x == 1500);
-    CHECK(p.y == 240);
-}
-
-TEST_CASE("click placement: overflow click near the right edge stays on the panel, from the pointer row") {
-    const Placement p = PlaceAtPoint(1700, 600, kMon, 300, 285);
-    CHECK(p.x == 1920 - 300);   // overlaps the panel under the pointer instead of jumping left of it
-    CHECK(p.y == 600);
+TEST_CASE("click placement: no room on the left flips right, no room above flips down") {
+    const Placement p = PlaceAtPoint(100, 120, kMon, 300, 285);
+    CHECK(p.x == 100);
+    CHECK(p.y == 120);
 }
 
 TEST_CASE("click placement: never leaves the monitor") {
