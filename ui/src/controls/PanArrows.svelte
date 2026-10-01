@@ -54,9 +54,11 @@
 <style>
   .pan { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
   .arrows { display: inline-flex; gap: 4px; }
-  /* Fixed keys: the same cap shape, smaller and recessed, with no hover, no focus and a plain cursor. */
-  .pan span.kc.fixed { min-width: 26px; height: 24px; padding: 0; font: 13px var(--m); background: transparent;
-    border-style: dashed; color: var(--fg3); cursor: default; user-select: none; pointer-events: none; }
+  /* Fixed keys: the same cap shape, smaller and recessed (sunk into the card, no border, dim glyph),
+     with no hover, no focus and a plain cursor. Never dashed: Max ruled dashed borders out. */
+  .pan span.kc.fixed { min-width: 26px; height: 24px; padding: 0; font: 13px var(--m);
+    background: color-mix(in srgb, var(--bg) 55%, var(--card)); border-color: transparent;
+    box-shadow: inset 0 1px 2px rgba(0,0,0,.35); color: var(--fg3); cursor: default; user-select: none; pointer-events: none; }
   .pan span.kc.custom { color: var(--fg3); }
   .reset { height: 28px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--chipb); background: none;
     color: var(--fg2); font: 12.5px var(--s); }
