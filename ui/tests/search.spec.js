@@ -39,7 +39,7 @@ test('search is case-insensitive, word-prefix and covers label, description, cap
 
 test('search files contain no em-dash', () => {
   for (const f of ['../src/search/search.js', '../src/search/Results.svelte'])
-    expect(readFileSync(new URL(f, import.meta.url), 'utf8')).not.toContain('—');
+    expect(readFileSync(new URL(f, import.meta.url), 'utf8')).not.toContain(String.fromCharCode(0x2014));
 });
 
 test('typing shows grouped results, Enter jumps to the first, Esc clears', async ({ page }) => {
