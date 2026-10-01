@@ -256,11 +256,16 @@ struct Painter::Impl {
     void icon(const std::string& id, float x, float y, const D2D1_COLOR_F& c, float w) {
         ID2D1PathGeometry* g = IconGeometry(id);
         if (!g) return;
-        rt->SetTransform(D2D1::Matrix3x2F::Translation(x, y));
+        // The thermometer is drawn at 1.25x (the 20 px the Settings tab icon uses, same 1.5 px line) so
+        // the stem interior stays open: at 16 px the centre line fills the 1.5 px stem and it reads solid.
+        const bool warm = (id == "warm");
+        const float k = warm ? 1.25f : 1.f;
+        rt->SetTransform(D2D1::Matrix3x2F::Scale(k, k) * D2D1::Matrix3x2F::Translation(x - (k - 1.f) * 8.f, y - (k - 1.f) * 8.f));
         br->SetColor(c);
-        rt->DrawGeometry(g, br.Get(), w, round.Get());
-        if (id == "warm") {   // second <path> of the reference thermometer, composited separately
-            if (ID2D1PathGeometry* l = IconGeometry("warm_line")) rt->DrawGeometry(l, br.Get(), w, round.Get());
+        const float sw = w / k;
+        rt->DrawGeometry(g, br.Get(), sw, round.Get());
+        if (warm) {   // second <path> of the reference thermometer, composited separately
+            if (ID2D1PathGeometry* l = IconGeometry("warm_line")) rt->DrawGeometry(l, br.Get(), sw, round.Get());
         }
         rt->SetTransform(D2D1::Matrix3x2F::Identity());
     }
