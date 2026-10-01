@@ -5,6 +5,14 @@
 using namespace wind;
 using namespace wind::Flyout;
 
+TEST_CASE("StepToward: linear, clamps at the target, instant for a zero duration") {
+    CHECK(StepToward(0.f, 1.f, 60.f, 120.f) == doctest::Approx(0.5f));
+    CHECK(StepToward(0.9f, 1.f, 60.f, 120.f) == doctest::Approx(1.f));
+    CHECK(StepToward(1.f, 0.f, 30.f, 120.f) == doctest::Approx(0.75f));
+    CHECK(StepToward(0.2f, 0.f, 500.f, 120.f) == doctest::Approx(0.f));
+    CHECK(StepToward(0.3f, 0.8f, 10.f, 0.f) == doctest::Approx(0.8f));
+}
+
 // ---------------------------------------------------------------- placement
 
 static const IRect kMon{0, 0, 1920, 1080};

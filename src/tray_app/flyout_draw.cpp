@@ -260,15 +260,25 @@ struct Painter::Impl {
         // the stem interior stays open: at 16 px the centre line fills the 1.5 px stem and it reads solid.
         const bool warm = (id == "warm");
         const float k = warm ? 1.25f : 1.f;
-        rt->SetTransform(D2D1::Matrix3x2F::Scale(k, k) * D2D1::Matrix3x2F::Translation(x - (k - 1.f) * 8.f, y - (k - 1.f) * 8.f));
+        rt->SetTransform(D2D1::Matrix3x2F::Scale(k, k) * D2D1::Matrix3x2F::Translation(x - (k - 1.f) * 8.f, y - (k - 1.f) * 8.f) * pre);
         br->SetColor(c);
         const float sw = w / k;
         rt->DrawGeometry(g, br.Get(), sw, round.Get());
         if (warm) {   // second <path> of the reference thermometer, composited separately
             if (ID2D1PathGeometry* l = IconGeometry("warm_line")) rt->DrawGeometry(l, br.Get(), sw, round.Get());
         }
-        rt->SetTransform(D2D1::Matrix3x2F::Identity());
+        rt->SetTransform(pre);
     }
+
+    // Press feedback: scale the element about its centre by 1 - 0.03 * amount (about 0.97 fully down).
+    D2D1::Matrix3x2F pre = D2D1::Matrix3x2F::Identity();
+    void pressBegin(const D2D1_RECT_F& r, float amount) {
+        if (amount <= 0.f) return;
+        const float k = 1.f - 0.03f * amount;
+        pre = D2D1::Matrix3x2F::Scale(k, k, D2D1::Point2F((r.left + r.right) / 2.f, (r.top + r.bottom) / 2.f));
+        rt->SetTransform(pre);
+    }
+    void pressEnd() { pre = D2D1::Matrix3x2F::Identity(); rt->SetTransform(pre); }
 
     // Text in a box, vertically centred. `spacing` is the trailing letter spacing in DIPs.
     float text(const std::wstring& s, IDWriteTextFormat* f, const D2D1_RECT_F& box, const D2D1_COLOR_F& c,
@@ -353,6 +363,9 @@ struct Painter::Impl {
 };
 
 static D2D1_COLOR_F WithAlpha(D2D1_COLOR_F c, float a) { c.a = a; return c; }
+static D2D1_COLOR_F Mix(const D2D1_COLOR_F& a, const D2D1_COLOR_F& b, float t) {
+    return D2D1::ColorF(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, a.a + (b.a - a.a) * t);
+}
 
 void Painter::Impl::drawHead(const View& v, const Geometry& g) {
     const D2D1_RECT_F h = R(g.head);
@@ -452,6 +465,18 @@ void Painter::Impl::drawQuick(const View& v, const Geometry& g) {
         const ToggleView& t = v.toggles[i];
         const bool hot = v.hover.kind == HitKind::Chip && v.hover.index == (int)i;
         const D2D1_RECT_F r = R(g.chip[i]);
+        const AnimView& a = v.anim;
+        if (a.active && i < a.chipHot.size() && i < a.chipOn.size() && i < a.chipPress.size()) {
+            // cross-faded: hover mixes the *h colours in, the ON amount mixes the on colours in
+            const float h = a.chipHot[i], o = a.chipOn[i];
+            pressBegin(r, a.chipPress[i]);
+            fillRound(r, 8.f, Mix(Mix(th.off, th.offh, h), Mix(th.on, th.onh, h), o));
+            if (o > 0.f) ring(r, 8.f, WithAlpha(th.onb, th.onb.a * o));
+            if (h > 0.f && o < 1.f) ring(r, 8.f, WithAlpha(th.chipb, h * (1.f - o)));
+            icon(t.icon, r.left + 16.f, r.top + 8.f, Mix(Mix(th.offic, th.fg, h), th.onic, o), 1.75f);
+            pressEnd();
+            continue;
+        }
         if (t.on) {
             fillRound(r, 8.f, hot ? th.onh : th.on);
             ring(r, 8.f, th.onb);
@@ -469,15 +494,21 @@ void Painter::Impl::drawBar(const View& v, const Geometry& g) {
     const Btn btns[] = { { &g.profileBtn, HitKind::Profile, "profile" },
                          { &g.settingsBtn, HitKind::Settings, "settings" },
                          { &g.quitBtn, HitKind::Quit, "quit" } };
+    int bi = 0;
     for (const Btn& b : btns) {
-        const bool hot = v.hover.kind == b.k;
+        const AnimView& a = v.anim;
+        const float h = a.active ? a.btnHot[bi] : (v.hover.kind == b.k ? 1.f : 0.f);
+        const bool hot = h > 0.f;
         const D2D1_RECT_F r = R(*b.r);
-        if (hot) fillRound(r, 8.f, th.hl);
+        if (a.active) pressBegin(r, a.btnPress[bi]);
+        ++bi;
+        if (hot) fillRound(r, 8.f, WithAlpha(th.hl, th.hl.a * h));
         const float ix = b.k == HitKind::Profile ? r.left + 8.f : r.left + (r.right - r.left - 16.f) / 2.f;
-        icon(b.icon, ix, r.top + 8.f, hot ? th.fg : th.glyph, 1.5f);
+        icon(b.icon, ix, r.top + 8.f, Mix(th.glyph, th.fg, h), 1.5f);
         if (b.k == HitKind::Profile)
             text(v.profile, g_s.mono12.Get(), D2D1::RectF(r.left + 8.f + 16.f + 12.f, r.top, r.right - 4.f, r.bottom),
-                 hot ? th.fg : th.fg2, DWRITE_TEXT_ALIGNMENT_LEADING);
+                 Mix(th.fg2, th.fg, h), DWRITE_TEXT_ALIGNMENT_LEADING);
+        pressEnd();
     }
 }
 
@@ -521,7 +552,7 @@ void Painter::Draw(const View& v, const Geometry& g) {
     if (v.showFocus && v.focus.kind != HitKind::None) {
         const IRect fr = FocusRect(g, v.focus);
         if (fr.w() > 0) {
-            d.br->SetColor(d.th.teal);
+            d.br->SetColor(d.th.fg);   // the Settings focus colour (--fg), not the accent
             d.rt->DrawRoundedRectangle(D2D1::RoundedRect(D2D1::RectF((float)fr.l + 1.f, (float)fr.t + 1.f,
                                                                     (float)fr.r - 1.f, (float)fr.b - 1.f), 7.f, 7.f),
                                        d.br.Get(), 2.f);

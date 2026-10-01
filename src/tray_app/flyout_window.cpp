@@ -42,6 +42,9 @@ const wchar_t* const kClass = L"WindTrayFlyout";
 const wchar_t* const kListClass = L"WindTrayFlyoutList";
 const UINT_PTR kTimerId = 1;
 const UINT_PTR kFlushTimerId = 2;
+const UINT_PTR kAnimTimerId = 3;                 // runs only while something is animating (~60 Hz), never idle
+const UINT kAnimMs = 16;
+const float kHoverMs = 120.f, kPressMs = 80.f, kOnMs = 150.f, kFadeMs = 120.f;
 const UINT kTimerMs = 100;                       // ~10 Hz while open (performance + outside-click fallback)
 const UINT WM_FLYOUT_CLOSE = WM_APP + 20;
 const int kMaxFlushRetries = 20;                 // a locked ini is retried for about a second, then dropped
@@ -53,6 +56,7 @@ struct Surface {
     int pw = 0, ph = 0, dpi = 96;
     void* bits = nullptr;
     POINT pos{};
+    BYTE alpha = 255;                    // whole-window opacity (the open fade)
     HDC dc = nullptr;
     HBITMAP dib = nullptr, oldBmp = nullptr;
     ID2D1DCRenderTarget* rt = nullptr;
@@ -97,7 +101,7 @@ struct Surface {
         if (bits) Flyout::ApplyShapeAlpha(static_cast<unsigned char*>(bits), pw, ph, pw * 4, dpi, true);
         POINT src{ 0, 0 }, dst = pos;
         SIZE sz{ pw, ph };
-        BLENDFUNCTION bf{ AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+        BLENDFUNCTION bf{ AC_SRC_OVER, 0, alpha, AC_SRC_ALPHA };
         UpdateLayeredWindow(hwnd, nullptr, &dst, &sz, dc, &src, 0, &bf, ULW_ALPHA);
     }
 };
@@ -121,6 +125,14 @@ struct State {
     Flyout::WriteThrottle thr;
     bool flushArmed = false;
     int flushRetries = 0;
+    // Animation: current amounts chase targets taken from the view (hover, press, ON). The timer
+    // exists only while they differ, so a still flyout costs no CPU. animOn = the Windows
+    // "show animations" setting; off snaps every value.
+    bool animOn = true, animTimer = false, animInit = false;
+    ULONGLONG animLast = 0;
+    float fade = 1.f;
+    std::vector<float> chipHot, chipPress, chipOn;
+    float btnHot[3] = { 0, 0, 0 }, btnPress[3] = { 0, 0, 0 };
 };
 
 struct ListState {
@@ -158,8 +170,93 @@ void RebuildView(State& s) {
     s.view.showFocus = showFocus;
 }
 
+// Targets for the animated amounts, from the view and the pressed element.
+struct AnimTargets {
+    std::vector<float> chipHot, chipPress, chipOn;
+    float btnHot[3] = { 0, 0, 0 }, btnPress[3] = { 0, 0, 0 };
+};
+
+AnimTargets TargetsOf(const State& s) {
+    AnimTargets t;
+    const size_t n = s.view.toggles.size();
+    t.chipHot.assign(n, 0.f); t.chipPress.assign(n, 0.f); t.chipOn.assign(n, 0.f);
+    const Flyout::Hit& hv = s.view.hover;
+    const bool held = s.down.kind != Flyout::HitKind::None && s.down == hv && s.drag < 0;
+    for (size_t i = 0; i < n; ++i) {
+        const bool me = hv.kind == Flyout::HitKind::Chip && hv.index == (int)i;
+        t.chipHot[i] = me ? 1.f : 0.f;
+        t.chipPress[i] = (me && held) ? 1.f : 0.f;
+        t.chipOn[i] = s.view.toggles[i].on ? 1.f : 0.f;
+    }
+    const Flyout::HitKind ks[3] = { Flyout::HitKind::Profile, Flyout::HitKind::Settings, Flyout::HitKind::Quit };
+    for (int b = 0; b < 3; ++b) {
+        t.btnHot[b] = hv.kind == ks[b] ? 1.f : 0.f;
+        t.btnPress[b] = (hv.kind == ks[b] && held) ? 1.f : 0.f;
+    }
+    return t;
+}
+
+bool AnimSettled(const State& s, const AnimTargets& t) {
+    if (s.fade < 1.f) return false;
+    for (size_t i = 0; i < t.chipHot.size(); ++i)
+        if (s.chipHot[i] != t.chipHot[i] || s.chipPress[i] != t.chipPress[i] || s.chipOn[i] != t.chipOn[i]) return false;
+    for (int b = 0; b < 3; ++b) if (s.btnHot[b] != t.btnHot[b] || s.btnPress[b] != t.btnPress[b]) return false;
+    return true;
+}
+
+// Moves the current amounts toward the targets by dtMs (all the way when animations are off).
+void AnimAdvance(State& s, const AnimTargets& t, float dtMs) {
+    if (s.chipHot.size() != t.chipHot.size()) {   // chip count changed (first call): start at the targets
+        s.chipHot = t.chipHot; s.chipPress = t.chipPress; s.chipOn = t.chipOn;
+    }
+    auto st = [&](float cur, float tg, float dur) { return Flyout::StepToward(cur, tg, dtMs, s.animOn ? dur : 0.f); };
+    for (size_t i = 0; i < t.chipHot.size(); ++i) {
+        s.chipHot[i] = st(s.chipHot[i], t.chipHot[i], kHoverMs);
+        s.chipPress[i] = st(s.chipPress[i], t.chipPress[i], kPressMs);
+        s.chipOn[i] = st(s.chipOn[i], t.chipOn[i], kOnMs);
+    }
+    for (int b = 0; b < 3; ++b) {
+        s.btnHot[b] = st(s.btnHot[b], t.btnHot[b], kHoverMs);
+        s.btnPress[b] = st(s.btnPress[b], t.btnPress[b], kPressMs);
+    }
+    s.fade = st(s.fade, 1.f, kFadeMs);
+}
+
 void Render(State& s) {
+    const AnimTargets t = TargetsOf(s);
+    if (!s.animInit) {
+        // Opening: chips start at their real ON state (no cross-fade on open); only the window fades in.
+        s.animInit = true;
+        s.chipHot = t.chipHot; s.chipPress = t.chipPress; s.chipOn = t.chipOn;
+        s.fade = s.animOn ? 0.f : 1.f;
+        s.animLast = GetTickCount64();
+    } else if (!s.animOn) {
+        AnimAdvance(s, t, 0.f);
+    } else if (s.chipHot.size() != t.chipHot.size()) {
+        s.chipHot = t.chipHot; s.chipPress = t.chipPress; s.chipOn = t.chipOn;
+    }
+    Flyout::AnimView& a = s.view.anim;
+    a.active = true;
+    a.chipHot = s.chipHot; a.chipPress = s.chipPress; a.chipOn = s.chipOn;
+    for (int b = 0; b < 3; ++b) { a.btnHot[b] = s.btnHot[b]; a.btnPress[b] = s.btnPress[b]; }
+    s.sf.alpha = (BYTE)(s.fade * 255.f + .5f);
     s.sf.Present([&](Flyout::Painter& p) { p.Draw(s.view, s.geo); });
+    if (s.animOn && !s.animTimer && s.hwnd && !AnimSettled(s, t)) {
+        s.animLast = GetTickCount64();
+        SetTimer(s.hwnd, kAnimTimerId, kAnimMs, nullptr);
+        s.animTimer = true;
+    }
+}
+
+// One animation frame: advance by the real elapsed time, draw, and stop the timer once settled.
+void AnimTick(State& s) {
+    const ULONGLONG now = GetTickCount64();
+    const float dt = (float)(now - s.animLast);
+    s.animLast = now;
+    const AnimTargets t = TargetsOf(s);
+    AnimAdvance(s, t, dt < 1.f ? 1.f : dt);
+    if (AnimSettled(s, t)) { KillTimer(s.hwnd, kAnimTimerId); s.animTimer = false; }
+    Render(s);
 }
 
 void RenderList(ListState& l) {
@@ -526,7 +623,7 @@ LRESULT CALLBACK FlyoutProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             const Flyout::Hit hit = HitAt(*s, l);
             const Flyout::Hit down = s->down;
             s->down = {};
-            if (hit != down) return 0;
+            if (hit != down) { Render(*s); return 0; }
             if (hit.kind == Flyout::HitKind::Chip) {
                 ToggleChip(*s, hit.index);
             } else if (hit.kind == Flyout::HitKind::Profile) {
@@ -547,6 +644,8 @@ LRESULT CALLBACK FlyoutProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         case WM_TIMER:
             if (w == kFlushTimerId) {
                 FlushPending(*s);
+            } else if (w == kAnimTimerId) {
+                AnimTick(*s);
             } else if (w == kTimerId) {
                 if (!s->activated && ((GetAsyncKeyState(VK_LBUTTON) | GetAsyncKeyState(VK_RBUTTON)) & 0x8000)) {
                     // We could not take foreground, so no deactivation will ever come: a click
@@ -563,6 +662,7 @@ LRESULT CALLBACK FlyoutProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             return 0;
         case WM_DESTROY: {
             KillTimer(h, kTimerId);
+            KillTimer(h, kAnimTimerId);
             s->closing = true;
             FlushPending(*s);              // a value still held by the throttle is never lost
             if (s->tip) DestroyWindow(s->tip);
@@ -636,6 +736,10 @@ bool OpenFlyout() {
         return false;
     }
     CreateTips(*s);
+    {
+        BOOL on = TRUE;   // Windows "Show animations in Windows": off = no animation at all
+        if (SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &on, 0)) s->animOn = on != FALSE;
+    }
     Render(*s);
 
     SetTrayMenuOpen(Block(), true);     // Wind suspends the cursor re-park while the flyout is open

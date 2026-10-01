@@ -335,6 +335,22 @@ struct PerfView {
     std::wstring frameMs;           // "6.9 ms"
     std::vector<float> spark;       // see SparkNorm; empty = flat dashed rule
 };
+// Animation amounts (0..1) for the drawn state, owned by the window. `active` false = the painter
+// uses the plain hover/on state (render-test, unit tests), so a still frame is identical either way.
+struct AnimView {
+    bool active = false;
+    std::vector<float> chipHot, chipPress, chipOn;   // per toggle chip
+    float btnHot[3] = { 0, 0, 0 }, btnPress[3] = { 0, 0, 0 };   // profile, settings, quit
+};
+
+// Moves `cur` toward `target` linearly so a full 0..1 swing takes `durMs`. PURE.
+inline float StepToward(float cur, float target, float dtMs, float durMs) {
+    if (durMs <= 0.f || dtMs >= durMs) return target;
+    const float step = dtMs / durMs;
+    if (cur < target) return cur + step > target ? target : cur + step;
+    return cur - step < target ? target : cur - step;
+}
+
 struct View {
     bool dark = true;
     bool perf = false;
@@ -345,6 +361,7 @@ struct View {
     Hit hover;
     Hit focus;                      // keyboard focus; drawn only when showFocus
     bool showFocus = false;
+    AnimView anim;
 };
 
 inline PerfView BuildPerf(const TrayStatus& st, const float* ticks, int n) {
