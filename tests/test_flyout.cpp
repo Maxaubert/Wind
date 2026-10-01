@@ -104,10 +104,19 @@ TEST_CASE("placement: a window larger than the work area keeps its top-left on s
 }
 
 TEST_CASE("dismissal: the icon click that deactivated the flyout must not reopen it") {
-    CHECK(IgnoreIconClick(1000, 900));            // 100 ms after the deactivation close
-    CHECK_FALSE(IgnoreIconClick(1000, 600));      // 400 ms: a genuine new click
-    CHECK_FALSE(IgnoreIconClick(1000, 0));        // never closed by deactivation
-    CHECK_FALSE(IgnoreIconClick(500, 900));       // clock went backwards: do not block forever
+    CHECK(IgnoreIconClick(1000, 900, false));            // 100 ms after the deactivation close
+    CHECK_FALSE(IgnoreIconClick(1000, 600, false));      // 400 ms: a genuine new click
+    CHECK_FALSE(IgnoreIconClick(1000, 0, false));        // never closed by deactivation
+    CHECK_FALSE(IgnoreIconClick(500, 900, false));       // clock went backwards: do not block forever
+}
+
+TEST_CASE("dismissal: a slow click (button held past the quick guard) must not reopen") {
+    // Press on the icon at t=1000 closes the flyout; the up-click arrives 800 ms later.
+    CHECK_FALSE(IgnoreIconClick(1800, 1000, false));     // the old time-only guard reopened here
+    CHECK(IgnoreIconClick(1800, 1000, true));            // button was held on the icon: same click
+    CHECK(IgnoreIconClick(1000 + kHeldClickMaxMs - 1, 1000, true));
+    CHECK_FALSE(IgnoreIconClick(1000 + kHeldClickMaxMs, 1000, true));   // bounded: stale stamp expires
+    CHECK_FALSE(IgnoreIconClick(500, 1000, true));       // clock went backwards
 }
 
 // ---------------------------------------------------------------- layout

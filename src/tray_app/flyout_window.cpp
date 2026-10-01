@@ -5,8 +5,9 @@
 //
 // Dismissal: deactivation (a click anywhere else, alt-tab, Win key), Esc, and a second click on the
 // tray icon all close it exactly once. The icon click DEACTIVATES us first and then arrives as a
-// click of its own, which would reopen the flyout: a close by deactivation within kReopenGuardMs
-// of that click is that click, so ToggleFlyout ignores it (IgnoreIconClick, unit-tested).
+// click of its own (on button UP), which would reopen the flyout: a close by deactivation while the
+// button is held on the icon (any hold length), or within kReopenGuardMs, is that click, so
+// ToggleFlyout ignores it once (IgnoreIconClick, unit-tested).
 #include "tray_app.h"
 #include "flyout_draw.h"
 #include "flyout_model.h"
@@ -50,6 +51,15 @@ struct State {
 
 State* g_f = nullptr;
 ULONGLONG g_deactivatedAt = 0;
+bool g_pressHeldOnIcon = false;   // a mouse button was down over the tray icon at deactivation
+
+bool PressHeldOnIcon() {
+    if (!((GetAsyncKeyState(VK_LBUTTON) | GetAsyncKeyState(VK_RBUTTON)) & 0x8000)) return false;
+    RECT r; POINT p;
+    if (!GetIconRect(&r) || !GetCursorPos(&p)) return false;
+    InflateRect(&r, 2, 2);
+    return PtInRect(&r, p) != FALSE;
+}
 ATOM g_cls = 0;
 
 void RebuildView(State& s) {
@@ -95,6 +105,7 @@ LRESULT CALLBACK FlyoutProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             if (LOWORD(w) == WA_INACTIVE) {
                 if (!s->closing) {
                     g_deactivatedAt = GetTickCount64();
+                    g_pressHeldOnIcon = PressHeldOnIcon();
                     PostMessageW(h, WM_FLYOUT_CLOSE, 0, 0);
                 }
             } else {
@@ -261,7 +272,10 @@ void CloseFlyout() {
 
 void ToggleFlyout() {
     if (g_f) { CloseFlyout(); return; }     // a second click while it is still open and active
-    if (Flyout::IgnoreIconClick(GetTickCount64(), g_deactivatedAt)) return;
+    const bool ignore = Flyout::IgnoreIconClick(GetTickCount64(), g_deactivatedAt, g_pressHeldOnIcon);
+    g_deactivatedAt = 0;                    // one deactivation swallows at most one icon click
+    g_pressHeldOnIcon = false;
+    if (ignore) return;
     OpenFlyout();
 }
 

@@ -80,11 +80,18 @@ inline Placement PlaceFlyout(const IRect& icon, const IRect& monitor, const IRec
 }
 
 // Dismissal: a click on the tray icon while the flyout is open first DEACTIVATES it (the flyout
-// closes), then the icon's own click arrives and would reopen it. A close by deactivation within
-// this window of the icon click is that same click, so it must not reopen.
+// closes, on button DOWN), then the icon's own click arrives (WM_TRAY on button UP, legacy
+// callback) and would reopen it. Two cases make that up-click the same click:
+//  - the button was still held, over the icon, at deactivation (pressHeldOnIcon): the up-click ends
+//    that press however long it was held, bounded by kHeldClickMaxMs so a stale stamp never
+//    swallows a later genuine click;
+//  - a quick click whose up arrives within kReopenGuardMs of the deactivation.
 inline constexpr unsigned long long kReopenGuardMs = 300;
-inline bool IgnoreIconClick(unsigned long long nowMs, unsigned long long deactivatedMs) {
-    return deactivatedMs != 0 && nowMs >= deactivatedMs && nowMs - deactivatedMs < kReopenGuardMs;
+inline constexpr unsigned long long kHeldClickMaxMs = 10000;
+inline bool IgnoreIconClick(unsigned long long nowMs, unsigned long long deactivatedMs, bool pressHeldOnIcon) {
+    if (deactivatedMs == 0 || nowMs < deactivatedMs) return false;
+    const unsigned long long limit = pressHeldOnIcon ? kHeldClickMaxMs : kReopenGuardMs;
+    return nowMs - deactivatedMs < limit;
 }
 
 // ---------------------------------------------------------------- layout (DIPs, window origin)
