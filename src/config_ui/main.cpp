@@ -25,14 +25,14 @@
 #include "../resource.h"
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "comdlg32.lib")
+#pragma comment(lib, "gdi32.lib")
 
 using namespace Microsoft::WRL;
 static ComPtr<ICoreWebView2Controller> g_controller;
 static ComPtr<ICoreWebView2> g_webview;
-// Crash recovery (see webview_recover.h). The page's unsaved edits live here too, so they survive
-// the engine dying: the page posts them on every change and gets them back after a recovery.
-static std::string g_draftJson;
-static bool g_recovered = false;
+// Crash recovery (see webview_recover.h). Settings are live now (the ini is the session), so a
+// recovered page simply re-reads the ini: there is no separate draft to hand back.
+static std::wstring g_initScriptId;   // AddScriptToExecuteOnDocumentCreated id for window.__windInit
 static bool g_onboard = false;   // launched with --onboard; cleared once onboarding is done (ini)
 static const UINT WM_APP_WV_FAILED = WM_APP + 0x31;
 static void CreateWebView(HWND hwnd);
@@ -186,6 +186,13 @@ static void PostProfiles(ICoreWebView2* wv, bool ok, const std::string& err, boo
 // Names arriving over the bridge become file paths; anything the pure validator rejects (traversal
 // characters, reserved names, dots) must never reach ProfilePath.
 static bool SafeName(const std::string& n) { return wind::ProfileNameError(n).empty(); }
+// session.keep tells the next Wind start to keep the unsaved session (see ResetSessionToProfile).
+static void WriteSessionKeep() {
+    HANDLE h = CreateFileW(wind::SessionKeepPath().c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                           FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
+}
+static void ClearSessionKeep() { DeleteFileW(wind::SessionKeepPath().c_str()); }
 // Rewrite the live ini from a profile file (globals preserved). The core hot-reloads; a model
 // change additionally relaunches Wind (LaunchWind: the new instance evicts the incumbent).
 static std::string DoSwitchProfile(const std::string& name) {
@@ -208,7 +215,10 @@ static std::string DoSwitchProfile(const std::string& name) {
     // ParseConfig canonicalizes (legacy "transform" -> magnify mapping, unknown -> render), same
     // comparison as the tray path, so the two surfaces can never disagree about restarting.
     const std::string oldModel = wind::ParseConfig(oldLive).model;
-    if (oldModel != wind::ParseConfig(newLive).model && !LaunchWind()) {
+    const bool modelChanged = oldModel != wind::ParseConfig(newLive).model;
+    if (modelChanged) WriteSessionKeep();   // our own restart: the start must not reset the session
+    if (modelChanged && !LaunchWind()) {
+        ClearSessionKeep();
         // Keep "ini model == running model" (mirrors the Settings restartFailed handler).
         WriteFileAtomic(IniPath(), wind::UpdateIniText(newLive, "model", oldModel));
         return "Switched, but restarting Wind failed; kept the current model";
@@ -227,33 +237,89 @@ static std::string ValidateNewName(const std::string& name) {
     return "";
 }
 
+// ---- Session model (spec 2026-10-01): live ini = session, active profile file = saved state ------
+static std::string ActiveProfileName(const std::string& liveText) {
+    auto vals = wind::ReadIniValues(liveText);
+    auto it = vals.find("profile");
+    return it == vals.end() ? std::string() : it->second;
+}
+static std::string JsonObjectOf(const std::map<std::string, std::string>& m) {
+    std::string out = "{"; bool first = true;
+    for (auto& kv : m) { if (!first) out += ","; first = false;
+        out += "\"" + JsonEscape(kv.first) + "\":\"" + JsonEscape(kv.second) + "\""; }
+    return out + "}";
+}
+// `"values":{...},"saved":{...},"profiles":{"names":[...],"active":"..."}` (no outer braces): shared
+// by getConfig, discardSession and the window.__windInit injection. `saved` is the active profile's
+// values merged over the live globals; it equals `values` when there is no readable profile file.
+static std::string SessionPayload(const std::string& live) {
+    auto values = wind::ReadIniValues(live);
+    const std::string active = ActiveProfileName(live);
+    auto saved = values;
+    std::string prof;
+    if (!active.empty() && SafeName(active) &&
+        GetFileAttributesW(ProfilePath(active).c_str()) != INVALID_FILE_ATTRIBUTES &&
+        wind::ReadTextFileOk(ProfilePath(active), prof))
+        saved = wind::ReadIniValues(wind::MakeLiveText(prof, live, active));
+    std::string names = "["; bool first = true;
+    for (const auto& n : ProfileNamesUtf8()) { if (!first) names += ","; first = false; names += "\"" + JsonEscape(n) + "\""; }
+    names += "]";
+    return "\"values\":" + JsonObjectOf(values) + ",\"saved\":" + JsonObjectOf(saved) +
+           ",\"profiles\":{\"names\":" + names + ",\"active\":\"" + JsonEscape(active) + "\"}";
+}
+static std::string UiThemeOf(const std::string& live) {
+    auto v = wind::ReadIniValues(live);
+    auto it = v.find("uiTheme");
+    return (it == v.end() || it->second.empty()) ? std::string("auto") : it->second;
+}
+static bool SystemUsesLightApps() {
+    DWORD v = 0, cb = sizeof(v);
+    if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                     L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &v, &cb) == ERROR_SUCCESS)
+        return v != 0;
+    return false;
+}
+// Window/WebView background from uiTheme (auto follows the system) so first paint never flashes
+// white. Colors are the --bg tokens of docs/design/settings-2026-10/FINAL-v10-grey.html.
+static COLORREF ThemeBackground(const std::string& theme) {
+    const bool light = theme == "light" || (theme != "dark" && SystemUsesLightApps());
+    return light ? RGB(0xf3, 0xf3, 0xf4) : RGB(0x00, 0x00, 0x00);
+}
+static void ApplyWindowTheme(const std::string& theme) {
+    const COLORREF c = ThemeBackground(theme);
+    static HBRUSH brush = nullptr;
+    HBRUSH nb = CreateSolidBrush(c);
+    if (g_hwnd) SetClassLongPtrW(g_hwnd, GCLP_HBRBACKGROUND, (LONG_PTR)nb);
+    if (brush) DeleteObject(brush);
+    brush = nb;
+    if (g_hwnd) InvalidateRect(g_hwnd, nullptr, TRUE);
+    if (g_controller) {
+        ComPtr<ICoreWebView2Controller2> c2;
+        if (SUCCEEDED(g_controller.As(&c2)) && c2) {
+            COREWEBVIEW2_COLOR col{ 255, GetRValue(c), GetGValue(c), GetBValue(c) };
+            c2->put_DefaultBackgroundColor(col);
+        }
+    }
+}
+// The injected init snapshot goes stale the moment the page reloads (recovery, onboarding finishing),
+// so it is removed before any reload/navigate; the page then asks the host like normal.
+static void DropInitScript() {
+    if (g_webview && !g_initScriptId.empty()) g_webview->RemoveScriptToExecuteOnDocumentCreated(g_initScriptId.c_str());
+    g_initScriptId.clear();
+}
+
 static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
     std::string j = Narrow(jsonW);
     std::string type = JsonField(j, "type");
     if (type == "getConfig") {
-        auto vals = wind::ReadIniValues(ReadFileUtf8(IniPath()));
-        std::string out = "{\"type\":\"config\",\"values\":{"; bool first = true;
-        for (auto& kv : vals) { if (!first) out += ","; first = false;
-            out += "\"" + JsonEscape(kv.first) + "\":\"" + JsonEscape(kv.second) + "\""; }
-        out += "}}";
-        wv->PostWebMessageAsJson(Widen(out).c_str());
-        // After a crash recovery, hand the page back the edits it had not applied yet. It asks for
-        // the config first on every load, so this arrives right behind it.
-        if (g_recovered && wind::LooksLikeJsonObject(g_draftJson.c_str(), g_draftJson.size())) {
-            wv->PostWebMessageAsJson(Widen("{\"type\":\"restoreDraft\",\"values\":" + g_draftJson + "}").c_str());
-            wind::Log(wind::LogLevel::Info, "config", "recovery: unsaved edits handed back to the page");
-        }
-        g_recovered = false;
-    } else if (type == "draft") {
-        // While a recovery is pending the draft held here is the one to hand back; nothing the new
-        // page reports before its config arrives may replace it.
-        if (!g_recovered) g_draftJson = JsonField(j, "json");
-    } else if (type == "setConfig") {
+        wv->PostWebMessageAsJson(Widen("{\"type\":\"config\"," + SessionPayload(ReadFileUtf8(IniPath())) + "}").c_str());
+    } else if (type == "setConfig" || type == "setConfigPersist") {
         std::string key = JsonField(j, "key"), value = JsonField(j, "value");
         if (!key.empty()) {
             // Checked (issue #274): this is the path every slider, toggle and keybind takes, and a
             // failed write (AV lock, a sharing violation on the replace) used to vanish - the page
             // showed the new value while the ini kept the old one. Tell the page, which says so.
+            // setConfig writes the live ini (the session) only; the profile file changes on Save.
             if (!WriteFileAtomic(IniPath(),
                                  wind::UpdateIniText(ReadFileUtf8(IniPath()), key, value))) {
                 wind::Log(wind::LogLevel::Warn, "config", "setConfig: writing %s=%s failed",
@@ -262,17 +328,39 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
                     Widen("{\"type\":\"configWriteFailed\",\"key\":\"" + JsonEscape(key) + "\"}").c_str());
                 return;
             }
-            // Live-bound profiles: the active profile IS the settings, so every ini write is
-            // mirrored (as the full profile-scoped snapshot) into its file. Global keys never
-            // land there (MakeProfileText strips them). Missing profile/dir = pre-migration
-            // state; skip silently, the core seeds it on next launch.
-            const std::string live = ReadFileUtf8(IniPath());
-            auto vals = wind::ReadIniValues(live);
-            const std::string active = vals.count("profile") ? vals["profile"] : "";
-            if (!active.empty() &&
-                GetFileAttributesW(ProfilePath(active).c_str()) != INVALID_FILE_ATTRIBUTES)
-                wind::WriteTextFileAtomic(ProfilePath(active), wind::MakeProfileText(live));
+            if (key == "uiTheme") ApplyWindowTheme(value);
+            if (type == "setConfigPersist") {
+                // Keybind captures: also written straight into the active profile so they survive
+                // a later Discard or restart while other changes stay unsaved. Only this one key
+                // moves; the rest of the profile file stays as saved.
+                const std::string active = ActiveProfileName(ReadFileUtf8(IniPath()));
+                std::string prof;
+                if (!active.empty() && SafeName(active) &&
+                    GetFileAttributesW(ProfilePath(active).c_str()) != INVALID_FILE_ATTRIBUTES &&
+                    wind::ReadTextFileOk(ProfilePath(active), prof) &&
+                    !wind::WriteTextFileAtomic(ProfilePath(active), wind::UpdateProfileKey(prof, key, value)))
+                    wind::Log(wind::LogLevel::Warn, "config", "setConfigPersist: profile write of %s failed", key.c_str());
+            }
         }
+    } else if (type == "saveSession") {
+        // Save: the live session (profile-scoped keys) becomes the active profile file.
+        const std::string live = ReadFileUtf8(IniPath());
+        const std::string active = ActiveProfileName(live);
+        const bool ok = !active.empty() && SafeName(active) &&
+                        wind::WriteTextFileAtomic(ProfilePath(active), wind::MakeProfileText(live));
+        if (!ok) wind::Log(wind::LogLevel::Warn, "config", "saveSession failed (profile '%s')", active.c_str());
+        wv->PostWebMessageAsJson(
+            Widen(std::string("{\"type\":\"sessionSaved\",\"ok\":") + (ok ? "true" : "false") + "}").c_str());
+    } else if (type == "discardSession") {
+        // Discard: the live ini goes back to the saved profile (globals kept); reply with fresh state.
+        const std::string live = ReadFileUtf8(IniPath());
+        const std::string active = ActiveProfileName(live);
+        std::string prof;
+        if (!active.empty() && SafeName(active) &&
+            GetFileAttributesW(ProfilePath(active).c_str()) != INVALID_FILE_ATTRIBUTES &&
+            wind::ReadTextFileOk(ProfilePath(active), prof))
+            WriteFileAtomic(IniPath(), wind::MakeLiveText(prof, live, active));
+        wv->PostWebMessageAsJson(Widen("{\"type\":\"config\"," + SessionPayload(ReadFileUtf8(IniPath())) + "}").c_str());
     } else if (type == "mpoState") {
         // Read-only probe: HKLM reads do not need elevation, so the Advanced row can always show
         // the true state without ever prompting. `atBoot` is what DWM actually loaded (see
@@ -325,7 +413,9 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
             // evicts the incumbent via the Local\Wind_QuitRequest handshake. On failure the
             // incumbent is untouched (it is only ever signalled BY a successfully started instance),
             // so report back rather than leaving the user with a silently ignored button.
-            if (!LaunchWind()) wv->PostWebMessageAsJson(L"{\"type\":\"restartFailed\"}");
+            // session.keep first: this restart is ours, so the unsaved session must survive it.
+            WriteSessionKeep();
+            if (!LaunchWind()) { ClearSessionKeep(); wv->PostWebMessageAsJson(L"{\"type\":\"restartFailed\"}"); }
         }
     } else if (type == "pickExe") {
         // "+" on the key-release app list: browse for a program and hand back just its FILE NAME.
@@ -504,7 +594,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         switch (wind::DecideWvRecovery(kind, budget, GetTickCount64())) {
         case wind::WvRecovery::Reload:
             wind::Log(wind::LogLevel::Warn, "config", "recovery: page process failed (kind=%d), reloading", kind);
-            g_recovered = true;
+            DropInitScript();
             if (g_webview) {
                 if (wasOnboard && !g_onboard) g_webview->Navigate(L"https://wind.config/index.html");
                 else g_webview->Reload();
@@ -512,7 +602,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             break;
         case wind::WvRecovery::Recreate:
             wind::Log(wind::LogLevel::Warn, "config", "recovery: WebView2 engine exited, recreating it");
-            g_recovered = true;
+            g_initScriptId.clear();
             if (g_controller) g_controller->Close();
             g_webview.Reset(); g_controller.Reset();
             CreateWebView(h);
@@ -531,6 +621,10 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             break;
         default: break;
         }
+        return 0;
+    }
+    if (m == WM_SETTINGCHANGE && l && wcscmp((LPCWSTR)l, L"ImmersiveColorSet") == 0) {
+        ApplyWindowTheme(UiThemeOf(ReadFileUtf8(IniPath())));   // "auto" follows the system theme live
         return 0;
     }
     if (m == WM_SIZE && g_controller) { RECT r; GetClientRect(h, &r); g_controller->put_Bounds(r); return 0; }
@@ -654,6 +748,16 @@ static void CreateWebView(HWND hwnd) {
                             if (SUCCEEDED(args->get_WebMessageAsJson(&json)) && json) { HandleWebMessage(wv, json); CoTaskMemFree(json); }
                             return S_OK;
                         }).Get(), &tok);
+                    // First-paint config: window.__windInit = {values, saved, profiles, theme}, so the
+                    // page renders without a getConfig round trip (bridge.js consumes it once).
+                    { const std::string live = ReadFileUtf8(IniPath());
+                      const std::string theme = UiThemeOf(live);
+                      ApplyWindowTheme(theme);
+                      const std::wstring js = Widen("window.__windInit={" + SessionPayload(live) +
+                                                    ",\"theme\":\"" + JsonEscape(theme) + "\"};");
+                      g_webview->AddScriptToExecuteOnDocumentCreated(js.c_str(),
+                          Callback<ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler>(
+                          [](HRESULT, PCWSTR id) -> HRESULT { if (id) g_initScriptId = id; return S_OK; }).Get()); }
                     g_webview->Navigate(onboard
                         ? L"https://wind.config/index.html?mode=onboard"
                         : L"https://wind.config/index.html");
@@ -706,6 +810,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
     // which looked low-res/blurry). Must be set before any window is created.
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     WNDCLASSW wc{}; wc.lpfnWndProc = WndProc; wc.hInstance = hInst; wc.lpszClassName = L"WindConfigWnd";
+    wc.hbrBackground = CreateSolidBrush(ThemeBackground(UiThemeOf(ReadFileUtf8(IniPath()))));
     wc.hIcon = LoadIconW(hInst, MAKEINTRESOURCEW(IDI_WIND));  // logo badge for taskbar/alt-tab
     RegisterClassW(&wc);
     HWND hwnd = CreateWindowExW(0, wc.lpszClassName, L"Wind Settings",
