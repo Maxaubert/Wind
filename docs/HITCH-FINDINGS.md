@@ -48,6 +48,16 @@ machinery when the level first leaves 1.0 - the unavoidable other half of releas
 between sessions. Entering at a sub-pixel level first ("session warm-up") was tried and measured
 WORSE (4 spikes per 3 cycles instead of 2, and it added zoom-out spikes).
 
+## Measuring the zoom response (#310, 2026-10-01)
+
+`zoomTrace=1` logs one `zoomtrace in:` line per zoom-in (engine, warm/cold context, press->tick,
+setActive split into cursor bridge and ensureMag, first present, enter-tick work, press->first DWM
+composite, the next 6 ticks' work) and one `zoomtrace out:` line per zoom-out. `tools/zoom_response_ab.ps1`
+measures what the user sees: press -> first visible screen change (BitBlt, transform only) and
+ramp stall frames, with PresentMon and the trace lines, ABAB over txIdleReleaseMs 1200/15000.
+Earlier review numbers to beat: enter tick 14-16 ms median (tail 50 ms); caret jump on ~3% of
+zoom-ins (fixed by the lastSeq re-baseline).
+
 ## Engine comparison while zoomed at 12x, panning continuously (12 s)
 
 | engine | game avg frametime | game spikes | Wind's own loop |

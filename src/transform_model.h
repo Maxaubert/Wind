@@ -67,6 +67,9 @@ public:
     // hybrid DESKTOP pick requires this: without the source-rect input transform, transform
     // desktop sessions have the pointer-framework hover dead zones (POINTER-HITTEST-FINDINGS.md).
     bool inputTransformAvailable() const { return inputTransformAvailable_; }
+    // Zoom timeline (#310, zoomTrace): where the last setActive(true) spent its time.
+    struct EnterSplit { double bridgeMs = 0, ensureMagMs = 0; bool wasWarm = false; };
+    EnterSplit lastEnter() const { return lastEnter_; }
     // MPO buster (issue #191). Wanted = show the fullscreen alpha-1 ghost this session (MPO-
     // exposed game session + the mpoBuster knob); exposed = the session could overflow the
     // 16-bit plane field, so the write-site clamp applies whenever the ghost is not verifiably
@@ -146,6 +149,7 @@ private:
     int  lastClickX_ = 0, lastClickY_ = 0;
     bool weldedLastFrame_ = false;                   // SetCursorPos ran in the last present()
     bool inputTransformAvailable_ = false;           // MagSetInputTransform probe (UIAccess)
+    EnterSplit lastEnter_;
     unsigned long long idleSinceMs_ = 0;             // when the last session ended (0 = none)
     int  idleReleaseMs_ = 1200;                      // cfg.txIdleReleaseMs (hot)
     double restLevel_ = 1.0;                         // cfg.txRestLevel (hot): >1 keeps DWM magnifying

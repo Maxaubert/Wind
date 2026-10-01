@@ -70,3 +70,25 @@ Changing defaults beyond B/C before data; render-engine reveal gating; the colou
 3. The settle window must not swallow a real caret move typed right after zooming (150 ms).
 4. zoomTrace must cost nothing when off and must not allocate or log inside the hook.
 5. The harness must never leave the user's ini changed or the screen undimmed afterwards.
+
+## Amendments after the plan review (2026-10-01)
+- **C rewritten.** The caret jump is a stale `lastSeq`, not the tracker's activation publish (the
+  tracker already baselines its first caret after activation, and a same-millisecond jump cannot
+  come from its 30 ms coalesce). `StepViewOwner` runs only while zoomed, so an event published just
+  before a zoom-out read as new typing at the next zoom-in. Fix: re-baseline `lastSeq` on the
+  rising edge of tracking-active (zoom-in, or tracking turning back on mid-zoom), nothing swallowed
+  afterwards; tracking events are ignored while tracking is off.
+- **B deferred until measured.** The deferred bridge would show two misaligned cursors during the
+  first ramp frames (the sprite is magnified at the lens point, the welded real pointer is not), and
+  would move the 14-cursor blank into the live context (#189). Whether the DwmFlush pair is what the
+  user feels is unmeasured; the timeline below decides it. B only ever addressed the enter-tick
+  median, not the 50 ms tail or DWM's 35-42 ms machinery build.
+- **Timeline stamps.** The press is stamped only on zoom-in rising edges (first since taken, stale
+  after 500 ms); the first composite after the enter tick comes from `DwmGetCompositionTimingInfo`
+  (cFrame/qpcCompose), not the loop's DwmFlush (absent on the enter tick). `setActive(true)` reports
+  bridge / ensureMag / warm.
+- **Harness measures what the user sees.** Screen BitBlt sampling of a textured off-centre region:
+  press -> first visible change, and ramp stall frames (a still frame inside the first 300 ms of the
+  ramp). Plus PresentMon (dwm.exe or the game), the zoomtrace lines, caret jumps (trackLog). ABAB
+  blocks; one discarded cycle after each ini flip; 3 s after zoom-out so the cold config is cold;
+  still and moving pointer. Old (main) vs new build at test time for the optical metrics.
