@@ -26,4 +26,6 @@
   .wc { width: 46px; height: 38px; display: grid; place-items: center; color: var(--fg2); }
   .wc:hover { background: var(--hover); color: var(--fg); }
   .wc :global(svg.ic) { width: 15px; height: 15px; stroke-width: 1.75; }
+  /* The theme glyph is the mockup's `.wc .ic` (14px, 1.5 stroke); minimize and close stay 15px. */
+  .wc[data-theme-cycle] :global(svg.ic) { width: 14px; height: 14px; stroke-width: 1.5; }
 </style>
