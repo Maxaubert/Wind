@@ -521,40 +521,6 @@ bool OnKey(State& s, WPARAM vk, LPARAM l) {
     return false;
 }
 
-// ---------------------------------------------------------------- tooltips
-
-void AddTip(State& s, const Flyout::IRect& r, const std::wstring& text, int grow) {
-    if (!s.tip || text.empty()) return;
-    static UINT_PTR id = 0;
-    TOOLINFOW ti{};
-    ti.cbSize = sizeof(ti);
-    ti.uFlags = TTF_SUBCLASS;
-    ti.hwnd = s.hwnd;
-    ti.uId = ++id;
-    ti.rect = { Flyout::ScalePx(r.l - grow, s.dpi), Flyout::ScalePx(r.t - grow, s.dpi),
-                Flyout::ScalePx(r.r + grow, s.dpi), Flyout::ScalePx(r.b + grow, s.dpi) };
-    ti.lpszText = const_cast<LPWSTR>(text.c_str());   // copied by the control
-    SendMessageW(s.tip, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&ti));
-}
-
-void CreateTips(State& s) {
-    INITCOMMONCONTROLSEX icc{ sizeof(icc), ICC_WIN95_CLASSES };
-    InitCommonControlsEx(&icc);
-    s.tip = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TRANSPARENT, TOOLTIPS_CLASSW, nullptr,
-                            WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX, 0, 0, 0, 0, s.hwnd, nullptr,
-                            GetModuleHandleW(nullptr), nullptr);
-    if (!s.tip) return;
-    SetWindowTheme(s.tip, s.dark ? L"DarkMode_Explorer" : L"Explorer", nullptr);
-    SendMessageW(s.tip, TTM_SETDELAYTIME, TTDT_INITIAL, 500);
-    for (size_t i = 0; i < s.view.sliders.size() && i < s.geo.sliderIcon.size(); ++i)
-        AddTip(s, s.geo.sliderIcon[i], s.view.sliders[i].name, 6);
-    for (size_t i = 0; i < s.view.toggles.size() && i < s.geo.chip.size(); ++i)
-        AddTip(s, s.geo.chip[i], s.view.toggles[i].name, 0);
-    AddTip(s, s.geo.profileBtn, L"Switch profile", 0);
-    AddTip(s, s.geo.settingsBtn, L"Settings", 0);
-    AddTip(s, s.geo.quitBtn, L"Quit Wind", 0);
-}
-
 // ---------------------------------------------------------------- the window
 
 LRESULT CALLBACK FlyoutProc(HWND h, UINT m, WPARAM w, LPARAM l) {
@@ -731,7 +697,7 @@ bool OpenFlyout() {
         DestroyWindow(s->hwnd);        // WM_DESTROY releases and frees
         return false;
     }
-    CreateTips(*s);
+    // No tooltips: users learn the icons (Max, 2026-10-02).
     {
         BOOL on = TRUE;   // Windows "Show animations in Windows": off = no animation at all
         if (SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &on, 0)) s->animOn = on != FALSE;

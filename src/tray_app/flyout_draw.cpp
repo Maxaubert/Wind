@@ -459,7 +459,7 @@ void Painter::Impl::drawQuick(const View& v, const Geometry& g) {
             fillRound(r, 8.f, Mix(Mix(th.off, th.offh, h), Mix(th.on, th.onh, h), o));
             if (o > 0.f) ring(r, 8.f, WithAlpha(th.onb, th.onb.a * o));
             if (h > 0.f && o < 1.f) ring(r, 8.f, WithAlpha(th.chipb, h * (1.f - o)));
-            icon(t.icon, r.left + 16.f, r.top + 8.f, Mix(Mix(th.offic, th.fg, h), th.onic, o), 1.75f);
+            icon(t.icon, (r.left + r.right) / 2.f - 8.f, (r.top + r.bottom) / 2.f - 8.f, Mix(Mix(th.offic, th.fg, h), th.onic, o), 1.75f);
             pressEnd();
             continue;
         }
@@ -471,7 +471,7 @@ void Painter::Impl::drawQuick(const View& v, const Geometry& g) {
             if (hot) ring(r, 8.f, th.chipb);
         }
         const D2D1_COLOR_F ic = t.on ? th.onic : (hot ? th.fg : th.offic);
-        icon(t.icon, r.left + 16.f, r.top + 8.f, ic, 1.75f);
+        icon(t.icon, (r.left + r.right) / 2.f - 8.f, (r.top + r.bottom) / 2.f - 8.f, ic, 1.75f);
     }
 }
 

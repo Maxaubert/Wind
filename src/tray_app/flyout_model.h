@@ -158,10 +158,7 @@ inline Geometry ComputeGeometry(bool perf, int nSliders, int nToggles, int profi
             ry += kRowH;
         }
         if (nToggles > 0) {
-            // Wide chips (Max, 2026-10-02): a 3-column row that spans the flyout, so three chips
-            // fill it; fewer stay the same width, left-aligned; more than three share the row.
-            const int cols = nToggles > 3 ? nToggles : 3;
-            const int cw = ((x1 - x0 - 2 * kPadX) - (cols - 1) * kChipGap) / cols;
+            const int cw = kChipW;   // fixed size (Max rejected wide chips, 2026-10-02)
             for (int i = 0; i < nToggles; ++i) {
                 const int cx = x0 + kPadX + i * (cw + kChipGap);
                 g.chip.push_back({ cx, ry + kChipTop, cx + cw, ry + kChipTop + kChipH });
