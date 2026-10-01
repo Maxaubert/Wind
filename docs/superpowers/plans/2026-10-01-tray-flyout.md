@@ -38,7 +38,7 @@ cursor. The Settings UI gains a group with two drag-reorder lists.
 `struct TrayLayout { bool perf; std::vector<TrayItem> sliders, toggles; };`
 `TrayLayout ParseTrayLayout(const IniValues&);` `void WriteTrayLayout(const TrayLayout&, IniValues&);`
 `const std::vector<std::string>& EligibleSliders(); const std::vector<std::string>& EligibleToggles();`
-- [ ] Failing tests: defaults (perf off, warmth+brightness on), round trip, order kept, unknown keys dropped, missing eligible items appended off.
+- [ ] Failing tests: defaults (perf off, warmth+brightness on), round trip, order kept, unknown keys dropped, missing eligible items appended off, caps (more than 4 sliders / 6 toggles enabled are read as off, in list order). Toggles include `mouseAlign`.
 - [ ] Implement; `build.bat test` green; commit `feat(tray): tray layout model (#313)`.
 
 ### Task 2: Core tray command (Hide cursor)
@@ -58,7 +58,7 @@ cursor. The Settings UI gains a group with two drag-reorder lists.
 
 ### Task 5: Settings "Tray menu" tab
 **Files:** `ui/src/settings-schema.js` (group under a TRAY label), `ui/src/tray/TrayMenuPage.svelte`, `ui/src/tray/DragList.svelte` (reusable smooth drag list with keyboard reorder), icons added to `ui/src/design/icons.js`.
-- [ ] Performance toggle card; Sliders and Toggles cards; icons without background; checkmarks; counts; writes the five keys.
+- [ ] Performance toggle card; Sliders and Toggles cards; icons without background; checkmarks; counts as "N of 4" / "N of 6"; at the cap unchecked checkmarks are disabled with "Uncheck one to add another"; writes the five keys.
 - [ ] Commit `feat(ui): Tray menu tab (#313)`.
 
 ### Task 6: Tests

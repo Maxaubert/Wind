@@ -50,18 +50,25 @@ order them. Stacks on the Settings redesign (#303, PR #312).
 | Toggle | Follow the text cursor | `trackCaret` | I-beam |
 | Toggle | Follow keyboard focus | `trackFocus` | focus brackets |
 | Toggle | Hide cursor | (runtime action, no ini key) | crossed pointer |
+| Toggle | Keep the pointer within the edges | `mouseAlign` (on = 1 "Within the edges", off = 0 "Centred") | pointer inside a frame |
 
 Hide cursor is an action the core performs from its hotkey today; the flyout triggers it through a
 new `Local\Wind_TrayCommand` event plus a command field in `TrayShared` (the core adds the event to
 its wait set, so the sleeping 1x loop wakes; see the #71 gotcha). High resolution cursor is NOT
 eligible: it needs admin and a Windows restart, which does not belong behind a one-click chip.
 
+## Limits (owner decision 2026-10-01)
+At most **4 sliders and 6 toggles** enabled at once: the flyout stays about the height of the Windows
+volume flyout and 6 chips fill one row at ~300 px. Once a list is full, its unchecked checkmarks are
+disabled and the list caption shows "4 of 4" with a one-line note ("Uncheck one to add another").
+The parser enforces the same limits (extra enabled items beyond the cap are read as off).
+
 ## Settings: "Tray menu" tab
 - A new sidebar section label "TRAY" with one item "Tray menu" (terminal icon), above EXPERT.
 - Banner: "Tray menu", "Choose what the tray menu shows, and in what order."
 - Card 1: a normal toggle row "Performance in the tray" (off by default).
 - Card 2, caption "Sliders" with an "N on" count: the six sliders. Card 3, caption "Toggles": the
-  three toggles. Each row: drag handle, the item's tray icon (no background), name and one-line
+  four toggles. Each row: drag handle, the item's tray icon (no background), name and one-line
   description, checkmark button (teal when on). Rows reorder only within their card; smooth drag
   (the picked row lifts, others glide ~150 ms), keyboard reorder (Space to pick up, arrows, Space).
 - Stored as global (non-profile) ini keys, added to `IsGlobalProfileKey`:
@@ -70,11 +77,11 @@ eligible: it needs admin and a Windows restart, which does not belong behind a o
   Defaults: Performance off; Warmth and Brightness on; everything else off. Changes are ordinary
   Settings changes (session model, capsule).
 
-## Open decisions (my recommendation first)
-1. **Quick-control changes are session changes** (unsaved until Save, reset at Wind start, counted
-   by the Quit prompt) for consistency with #303. Alternative: they persist immediately like
-   keybinds, so a quick brightness tweak never triggers the Quit prompt.
-2. **Names:** tab "Tray menu"; lists "Sliders" and "Toggles".
+## Decisions (2026-10-01)
+1. Quick-control changes are session changes (unsaved until Save, reset at Wind start, counted by
+   the Quit prompt), consistent with #303 (the recommendation; Max approved without overriding it).
+2. Names: tab "Tray menu"; lists "Sliders" and "Toggles".
+3. Available items: the table above (Keep the pointer within the edges added by Max). Limits: 4 + 6.
 
 ## Out of scope
 New settings, UI Automation for the flyout (follow-up), animations beyond hover/press and the
