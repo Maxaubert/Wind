@@ -24,7 +24,7 @@ cursor. The Settings UI gains a group with two drag-reorder lists.
   `build.bat config`, `cd ui && npx playwright test`.
 
 ## Review Focus
-1. The 1x core loop sleeps: the Hide cursor command must wake it (event in the wait set), not wait for the next tick.
+1. "Keep within the edges" writes BOTH mouseAlign and trackAlign, and reads ON only when both are 1 (a hand-edited mixed state shows OFF; clicking sets both).
 2. Dragging a slider must not flood the ini (throttle) and the final value must land on release.
 3. Flyout placement with the taskbar on the left/top/right and on a secondary monitor, at 100-250% DPI.
 4. Dismissal: clicking outside, Esc, alt-tab and the tray icon itself all close it exactly once (no reopen flicker).
@@ -38,13 +38,11 @@ cursor. The Settings UI gains a group with two drag-reorder lists.
 `struct TrayLayout { bool perf; std::vector<TrayItem> sliders, toggles; };`
 `TrayLayout ParseTrayLayout(const IniValues&);` `void WriteTrayLayout(const TrayLayout&, IniValues&);`
 `const std::vector<std::string>& EligibleSliders(); const std::vector<std::string>& EligibleToggles();`
-- [ ] Failing tests: defaults (perf off, warmth+brightness on), round trip, order kept, unknown keys dropped, missing eligible items appended off, caps (more than 4 sliders / 6 toggles enabled are read as off, in list order). Toggles include `mouseAlign`.
+- [ ] Failing tests: defaults (perf off, warmth+brightness on), round trip, order kept, unknown keys dropped, missing eligible items appended off, cap (more than 4 enabled sliders are read as off, in list order; toggles uncapped). Sliders: colorWarmPct, colorDimPct, maxLevel, zoomInSpeed, zoomOutSpeed, panSpeed, cursorSmoothing, zoomEaseOutMs. Toggles: trackCaret, trackFocus, keepEdges (the combined mouseAlign + trackAlign item).
 - [ ] Implement; `build.bat test` green; commit `feat(tray): tray layout model (#313)`.
 
-### Task 2: Core tray command (Hide cursor)
-**Files:** `src/tray_ipc.h` (command seq field), `src/main.cpp` (event in the wait set, handler calls the existing hide-cursor toggle).
-- [ ] `Local\Wind_TrayCommand` auto-reset event; WindTray bumps `TrayShared::command` then sets it.
-- [ ] `build.bat` + `build.bat test`; commit `feat(core): tray command wakes the loop (#313)`.
+### Task 2: (removed)
+No action buttons were chosen, so the core needs no tray command. Skip.
 
 ### Task 3: Flyout rendering
 **Files:** Create `src/tray_app/flyout_window.cpp/.h` (window, placement, dismissal), `src/tray_app/flyout_draw.cpp/.h` (D2D/DWrite drawing from a view model), embed `c-grey.jpg` in `wind_tray.rc`; remove the HMENU path from `tray_menu.cpp` (keep icon/IPC parts).
@@ -58,7 +56,7 @@ cursor. The Settings UI gains a group with two drag-reorder lists.
 
 ### Task 5: Settings "Tray menu" tab
 **Files:** `ui/src/settings-schema.js` (group under a TRAY label), `ui/src/tray/TrayMenuPage.svelte`, `ui/src/tray/DragList.svelte` (reusable smooth drag list with keyboard reorder), icons added to `ui/src/design/icons.js`.
-- [ ] Performance toggle card; Sliders and Toggles cards; icons without background; checkmarks; counts as "N of 4" / "N of 6"; at the cap unchecked checkmarks are disabled with "Uncheck one to add another"; writes the five keys.
+- [ ] Performance toggle card; Sliders and Toggles cards; icons without background; checkmarks; count "N of 4" on Sliders (Toggles show "N on"); at the slider cap unchecked checkmarks are disabled with "Uncheck one to add another"; writes the five keys.
 - [ ] Commit `feat(ui): Tray menu tab (#313)`.
 
 ### Task 6: Tests
