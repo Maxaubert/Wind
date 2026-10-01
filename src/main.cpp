@@ -35,7 +35,8 @@
 #include "cursor_mapper.h"
 #include "zoom_controller.h"
 #include "view_target.h"
-#include "keyboard_pan.h"     // tracking (issue #276): who owns the view
+#include "keyboard_pan.h"
+#include "idle_policy.h"     // tracking (issue #276): who owns the view
 #include "view_glide.h"      // tracking: glide + target geometry
 #include "detached_view.h"   // tracking: a frame whose view is not centred on the pointer
 #include "edge_pan.h"        // mouse edge mode (issue #276 phase 2)
@@ -299,6 +300,10 @@ struct TickState {
     double viewCx = 0.0, viewCy = 0.0;
     bool   viewDetached = false;   // last tick drew a detached frame
     wind::KeyPan keyPan;           // keyboard panning motion (#287)
+    // Event-driven idle (#71): the loop slept before this tick (clamp the motion dt, keep the raw
+    // one for wall-clock gates), and when the view was last active (the settle window).
+    bool   wokeFromIdle = false;
+    unsigned long long lastActiveMs = 0;
     bool   panelFreeze = false;    // #283: the real pointer is frozen and moved by Wind
     double panelX = 0, panelY = 0; // its desktop position (sub-pixel)
     RECT   panelSavedClip{};       // the clip to give back when the panel closes
@@ -867,6 +872,33 @@ static void UpdateCursorTint(TickState& t) {
 // treats null as "no tray data", so the tick path needs no extra branch beyond the pointer test.
 static wind::TrayShared* g_trayBlock = nullptr;
 
+// Event-driven idle (#71): read LIVE right before the wait, so nothing that arrived during the last
+// tick is slept on. Keyboard binds the hook cannot see (hook suspended for noSwallowApps, failed,
+// or a bind outside the tracked set) are polled with GetAsyncKeyState, so they keep the loop ticking.
+static bool IdleNow(TickState& t) {
+    wind::IdleInputs ii;
+    ii.active = t.prevActive || t.cursorLock.locked();
+    auto& st = g_input.state();
+    ii.anyHold = st.inHeld.load() || st.outHeld.load() || g_input.anyBoundKeyPressed();
+    ii.wheelPending = st.wheelSteps.load(std::memory_order_relaxed) != 0;
+    ii.quickZoomPending = t.quickZoomHotkey.load();
+    ii.settling = t.restAfterReveal != nullptr || t.revealPending > 0 || t.zoom.hasTarget() ||
+                  t.keyPan.active() || t.zoom.level() > 1.0;
+    const unsigned long long now = GetTickCount64();
+    ii.msSinceActive = t.lastActiveMs ? double(now - t.lastActiveMs) : 1e9;
+    ii.mouseHook = g_input.hookActive();
+    const int kvs[] = { t.cfg.zoomInVk, t.cfg.zoomInVk2, t.cfg.zoomOutVk, t.cfg.zoomOutVk2,
+                        t.cfg.recenterVk, t.cfg.cursorLockVk };
+    const bool kbHook = g_input.kbHookActive();
+    for (int vk : kvs) if (vk && (!kbHook || !g_input.isBoundKey(vk))) { ii.keyboardPolled = true; break; }
+    // A silently evicted hook (#156) still claims to be active. A swallowed key never shows in
+    // GetAsyncKeyState, so a bound key the OS sees held means the hook missed it: stay awake so the
+    // watchdog runs at frame rate. At most six cheap calls per wake.
+    for (int vk : kvs) if (vk && (GetAsyncKeyState(vk) & 0x8000)) { ii.anyHold = true; break; }
+    ii.wakeHandle = g_input.wakeEvent() != nullptr;
+    return wind::IdleSleepOk(ii);
+}
+
 static void RunTick(TickState& t) {
     // Idle (1x) colour filter; a zoomed tick re-decides below with the engine known.
     if (!t.prevActive) UpdateColorFilter(t, false, false, nullptr);
@@ -874,9 +906,20 @@ static void RunTick(TickState& t) {
     QueryPerformanceCounter(&now);
     double dt = double(now.QuadPart - t.prev.QuadPart) / double(t.freq.QuadPart);
     t.prev = now;
+    // After an idle sleep (#71) dt is the whole sleep. Wall-clock gates (the config check) take the
+    // raw value; everything that MOVES or measures frames gets one frame, so a zoom starting on the
+    // wake tick ramps from its first frame instead of jumping, and the tray/diagnostics readouts
+    // never report the sleep as a hitch.
+    const double rawDt = dt;
+    const bool woke = t.wokeFromIdle;   // readouts skip this tick: the sleep is not a frame
+    if (t.wokeFromIdle) {
+        t.wokeFromIdle = false;
+        const double frame = 1.0 / (t.hz > 30 ? t.hz : 30);
+        if (dt > frame) dt = frame;
+    }
     // One float store per tick, for the tray's frame-pacing readout. Deliberately the cheapest
     // possible coupling to the hot path: no lock, no allocation, and nothing reads it here.
-    if (g_trayBlock) g_trayBlock->ticks.push((float)(dt * 1000.0));
+    if (g_trayBlock && !woke) g_trayBlock->ticks.push((float)(dt * 1000.0));
 
     // Config hot-reload. A directory-change notification tells us WHEN to re-check magnifier.ini,
     // so the idle render thread does NO per-second filesystem stat (the old 1 Hz GetFileAttributesExW
@@ -888,7 +931,7 @@ static void RunTick(TickState& t) {
         // Poll the watch handle ~4x/s, not every tick: WaitForSingleObject is a kernel transition,
         // and at 144Hz while zoomed that's ~144 needless syscalls/s. Config edits are user-initiated
         // and rare, so ~250ms reload latency is imperceptible (#70).
-        t.sinceCheck += dt;
+        t.sinceCheck += rawDt;
         if (t.sinceCheck >= 0.25) {
             t.sinceCheck = 0.0;
             if (WaitForSingleObject(t.configWatch, 0) == WAIT_OBJECT_0) {
@@ -903,7 +946,7 @@ static void RunTick(TickState& t) {
             }
         }
     } else {
-        t.sinceCheck += dt;
+        t.sinceCheck += rawDt;
         if (t.sinceCheck > 1.0) { t.sinceCheck = 0.0; checkConfig = true; }
     }
     if (checkConfig) {
@@ -1228,10 +1271,14 @@ static void RunTick(TickState& t) {
     }
 
     int rawDx, rawDy; g_input.drainRaw(rawDx, rawDy);
+    // Raw motion from before this activation (up to a 100 ms idle sleep of it, #71) never pans the
+    // first zoomed frame: at 1x it is unused, so an idle->active tick starts from zero.
+    if (!t.prevActive) { rawDx = 0; rawDy = 0; }
 
     bool zoomed = lvl > 1.0;
     bool inspect = t.cursorLock.locked();
     bool active = zoomed || inspect;                 // overlay runs while zoomed OR Inspect-frozen
+    if (active) t.lastActiveMs = GetTickCount64();   // event-driven idle settle window (#71)
     // Keyboard panning (#287): the hook swallows pan keys only while this is set, so at 1x
     // the pan keys reach the app (e.g. Ctrl+Alt+Left/Right = IntelliJ navigate back/forward). Mouselook games and Inspect
     // keep them too. Published once per tick, before anything reads the pan keys.
@@ -2289,6 +2336,9 @@ static void RunTick(TickState& t) {
         }
     } else if (t.prevActive) {                        // active -> idle: tear the overlay down
         EndPanelFreeze(t);                            // #283: never leave the pointer pinned (review #284)
+        // The caret/focus watcher is switched off only from the zoomed view block; a zoom-out that
+        // snaps straight to 1.0 skipped it and left the watcher polling at 1x (#71).
+        g_track.setActive(false, t.cfg.trackCaret != 0, t.cfg.trackFocus != 0, t.cfg.trackLog != 0);
         if (t.restAfterReveal) { t.restAfterReveal->setActive(false); t.restAfterReveal = nullptr; }
         // DWM effect back BEFORE the overlay hides: worst case one double-filtered frame, never a
         // bright unfiltered one (review 2026-09-30).
@@ -2378,7 +2428,7 @@ static void RunTick(TickState& t) {
     // Frame-pacing diagnostics: a 2 s window of loop-interval stats (dt = time between ticks =
     // the on-screen frame interval, since Present(1,0) paces while zoomed). maxDt and the hitch
     // count expose microstutter that an average would hide.
-    if (t.cfg.diagnostics) {
+    if (t.cfg.diagnostics && !woke) {
         const double target = 1.0 / (t.hz > 0 ? t.hz : 60);
         t.diagSumDt += dt; t.diagFrames++; t.diagAccum += dt;
         if (dt > t.diagMaxDt) t.diagMaxDt = dt;
@@ -3157,11 +3207,36 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             // Recompute the timer interval if the paced refresh changed (retarget to a different-Hz
             // monitor updates ts.hz). Cheap equality check; only recomputes on an actual change (#74).
             if (ts.hz > 0 && ts.hz != pacedHz) { pacedHz = ts.hz; due.QuadPart = -(10000000LL / pacedHz); }
-            if (timer) {
-                SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);
-                WaitForSingleObject(timer, INFINITE);
-            } else {
-                Sleep(1000 / pacedHz);
+            // Event-driven idle (#71): at 1x with nothing in flight, sleep until the hooks signal an
+            // edge, a hotkey/posted/sent message arrives, the quit event fires, or the housekeeping
+            // timeout. Raw Input (every mouse move) is NOT in the wake mask; it is drained below.
+            bool slept = false;
+            if (!zoomed && IdleNow(ts)) {
+                HANDLE hs[2] = { static_cast<HANDLE>(g_input.wakeEvent()), quitEvent };
+                const DWORD n = quitEvent ? 2 : 1;
+                const DWORD r = MsgWaitForMultipleObjectsEx(n, hs, wind::kIdleTimeoutMs,
+                                                            QS_POSTMESSAGE | QS_SENDMESSAGE | QS_HOTKEY, 0);
+                if (n == 2 && r == WAIT_OBJECT_0 + 1) { running = false; break; }   // quit request
+                if (r == WAIT_OBJECT_0 || r == WAIT_OBJECT_0 + n || r == WAIT_TIMEOUT) {
+                    slept = true;
+                    ts.wokeFromIdle = true;
+                    // Drain now, so a hotkey or settings message is seen by THIS tick, not the next.
+                    while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+                        if (msg.message == WM_QUIT) { running = false; break; }
+                        TranslateMessage(&msg);
+                        DispatchMessageW(&msg);
+                    }
+                    if (!running) break;
+                }
+                // Anything else (WAIT_FAILED): fall back to the paced timer below, never spin.
+            }
+            if (!slept) {
+                if (timer) {
+                    SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);
+                    WaitForSingleObject(timer, INFINITE);
+                } else {
+                    Sleep(1000 / pacedHz);
+                }
             }
         }
 

@@ -80,6 +80,12 @@ public:
     // Whether the hook swallowed the current press of vk: pan acts only on presses Wind took, so a
     // key that went to the app at 1x never pans after a zoom-in mid-press.
     bool keySwallowed(int vk) const;
+    // Event-driven idle (#71): an auto-reset event the hooks signal on every edge that can start or
+    // end a zoom (bound key down/up, a button or click bind's held state changing, a wheel step).
+    // The main loop sleeps on it at 1x. Null until start(); valid for the router's lifetime after.
+    void* wakeEvent() const;
+    // Any configured keyboard bind physically down per the hook (magnify-model holds, quick zoom).
+    bool anyBoundKeyPressed() const;
     // Swallowed pan presses since the last drain, per slot: a tap whose down AND up both land
     // between two tick samples is still one nudge (review of #287).
     int drainPanPresses(int slot) { return (slot >= 0 && slot < 4) ? panPresses_[slot].exchange(0, std::memory_order_relaxed) : 0; }

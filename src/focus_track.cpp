@@ -15,7 +15,8 @@
 namespace wind {
 
 static const UINT kWakeMsg = WM_APP + 0x61;       // an event arrived: resolve after coalescing
-static const UINT_PTR kCoalesceTimer = 1, kPollTimer = 2;
+static const UINT kActiveMsg = WM_APP + 0x62;     // active_ changed (wParam = new value): retune (#71)
+static const UINT_PTR kCoalesceTimer = 1;
 static FocusTracker* g_self = nullptr;            // WinEvent callbacks have no context pointer
 
 // The shell's input panels (emoji picker, clipboard history, touch keyboard) are hosted by
@@ -156,7 +157,9 @@ void FocusTracker::stop() {
 void FocusTracker::setActive(bool on, bool wantCaret, bool wantFocus, bool log) {
     wantCaret_ = wantCaret; wantFocus_ = wantFocus; log_ = log;
     const bool was = active_.exchange(on);
-    if (on && !was) { const unsigned long t = tid_.load(); if (t) PostThreadMessageW(t, kWakeMsg, 0, 0); }
+    const unsigned long t = tid_.load();
+    if (t && on != was) PostThreadMessageW(t, kActiveMsg, on ? 1 : 0, 0);   // hooks + poll rate
+    if (on && !was && t) PostThreadMessageW(t, kWakeMsg, 0, 0);
 }
 void FocusTracker::publish(TrackKind k, double l, double t, double r, double b, const char* src) {
     {
@@ -179,7 +182,18 @@ void FocusTracker::run() {
     HWINEVENTHOOK h1 = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr, FocusTrackImpl::OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     HWINEVENTHOOK h2 = SetWinEventHook(EVENT_SYSTEM_MENUPOPUPSTART, EVENT_SYSTEM_MENUPOPUPSTART, nullptr, FocusTrackImpl::OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     HWINEVENTHOOK h3 = SetWinEventHook(EVENT_OBJECT_FOCUS, EVENT_OBJECT_FOCUS, nullptr, FocusTrackImpl::OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
-    HWINEVENTHOOK h4 = SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE, nullptr, FocusTrackImpl::OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    // LOCATIONCHANGE fires for every moving window and caret system-wide: installed only while the
+    // tracker is active (zoomed), never at 1x (#71). The 16 ms caret backstop likewise; while idle a
+    // 250 ms timer only re-checks a shell panel marked open.
+    HWINEVENTHOOK h4 = nullptr;
+    UINT_PTR pollTimer = 0;
+    auto retune = [&](bool on) {
+        if (on && !h4)
+            h4 = SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE, nullptr, FocusTrackImpl::OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+        if (!on && h4) { UnhookWinEvent(h4); h4 = nullptr; }
+        if (pollTimer) KillTimer(nullptr, pollTimer);
+        pollTimer = SetTimer(nullptr, 0, on ? 16 : 250, nullptr);
+    };
     HWINEVENTHOOK h5 = SetWinEventHook(EVENT_OBJECT_CLOAKED, EVENT_OBJECT_UNCLOAKED, nullptr, FocusTrackImpl::OnCloak, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     // A panel already open when we start raised its UNCLOAKED before the hook existed (review #284).
     EnumWindows([](HWND h, LPARAM) -> BOOL {
@@ -190,7 +204,7 @@ void FocusTracker::run() {
         }
         return TRUE;
     }, 0);
-    SetTimer(nullptr, kPollTimer, 16, nullptr);   // 60 Hz backstop, work only while active
+    retune(active_.load());   // an activation that raced thread start-up is picked up here
     bool pendingFocus = false, pendingCaret = false;
     UINT_PTR coalesce = 0;
 
@@ -313,6 +327,7 @@ void FocusTracker::run() {
     };
 
     while (GetMessageW(&m, nullptr, 0, 0) > 0) {
+        if (m.message == kActiveMsg) { retune(m.wParam != 0); continue; }
         if (m.message == kWakeMsg) {
             if (m.wParam == EVENT_OBJECT_FOCUS || m.wParam == EVENT_SYSTEM_FOREGROUND || m.wParam == EVENT_SYSTEM_MENUPOPUPSTART) {
                 pendingFocus = true;
@@ -346,7 +361,7 @@ void FocusTracker::run() {
         }
         TranslateMessage(&m); DispatchMessageW(&m);
     }
-    KillTimer(nullptr, kPollTimer);
+    if (pollTimer) KillTimer(nullptr, pollTimer);
     for (HWINEVENTHOOK h : { h1, h2, h3, h4, h5 }) if (h) UnhookWinEvent(h);
     if (uia && fh) uia->RemoveFocusChangedEventHandler(fh);
     if (fh) fh->Release();
