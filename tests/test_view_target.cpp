@@ -136,3 +136,28 @@ TEST_CASE("panning works with caret and focus tracking both off (#287)") {
     ViewOwnerInputs in = Base(); in.trackCaret = false; in.trackFocus = false; in.panning = true;
     CHECK(StepViewOwner(s, in) == ViewOwner::Keys);
 }
+
+TEST_CASE("zoom-in settle: the tracker's activation publish never takes the view (#310)") {
+    ViewOwnerState s;
+    ViewOwnerInputs in = Base(); in.enabled = false;
+    StepViewOwner(s, in);                                         // 1x
+    in.enabled = true; in.msSinceKey = 200;                       // zoom-in shortly after typing
+    in.snap = Snap(TrackKind::Caret, 7);                          // the activation publish
+    for (int i = 0; i < 20; ++i) CHECK(StepViewOwner(s, in) == ViewOwner::Mouse);   // 140 ms
+}
+TEST_CASE("after the settle window a typed caret move still takes the view (#310)") {
+    ViewOwnerState s;
+    ViewOwnerInputs in = Base(); in.enabled = false; StepViewOwner(s, in);
+    in.enabled = true; in.msSinceKey = 200; in.snap = Snap(TrackKind::Caret, 1);
+    for (int i = 0; i < 25; ++i) StepViewOwner(s, in);          // 175 ms: past the window
+    in.snap = Snap(TrackKind::Caret, 2); in.msSinceKey = 10;
+    CHECK(StepViewOwner(s, in) == ViewOwner::Caret);
+}
+TEST_CASE("the mouse and keyboard panning still work inside the settle window (#310)") {
+    ViewOwnerState s;
+    ViewOwnerInputs in = Base(); in.enabled = false; StepViewOwner(s, in);
+    in.enabled = true; in.panning = true;
+    CHECK(StepViewOwner(s, in) == ViewOwner::Keys);
+    in.panning = false; in.mouseDx = 5;
+    CHECK(StepViewOwner(s, in) == ViewOwner::Mouse);
+}

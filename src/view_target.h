@@ -29,6 +29,13 @@ struct ViewOwnerState {
     // the live snapshot instead let an owner that already followed one keystroke keep chasing every
     // later caret move, a scroll included, and an app-driven focus change (review 2026-09-30).
     TrackSnapshot target;
+    // Zoom-in settle (#310): enabling the tracker makes it publish the CURRENT caret, which within
+    // a second of any key press read as a new keyboard-driven event: the view lurched to the caret
+    // and the pointer was warped back (~3% of zoom-ins). Events inside this window only re-baseline.
+    // StepViewOwner runs only while zoomed, so the caller clears wasEnabled on every 1x tick
+    // (main.cpp); a state that never saw a disabled tick counts as already settled.
+    bool wasEnabled = true;
+    double settleMs = 0;
 };
 struct ViewOwnerInputs {
     bool enabled = false;         // zoomed && !game && !inspect && !locked
@@ -44,10 +51,13 @@ struct ViewOwnerInputs {
 inline constexpr double kMouseTakeoverPx = 3.0, kMouseTakeoverWindowMs = 100.0;
 inline constexpr double kClickQuietMs = 1000.0;
 inline constexpr double kKeyDrivenMs = 1000.0;
+inline constexpr double kEnableSettleMs = 150.0;
 
 inline ViewOwner StepViewOwner(ViewOwnerState& s, const ViewOwnerInputs& in) {
     s.warpPointer = false;
     const bool detached = s.owner != ViewOwner::Mouse;
+    if (in.enabled && !s.wasEnabled) s.settleMs = kEnableSettleMs;   // just enabled (zoom-in)
+    s.wasEnabled = in.enabled;
     if (!in.enabled) {
         s.owner = ViewOwner::Mouse;   // zoomed out / game / Inspect: the mouse path resumes
         s.lastSeq = in.snap.seq;      // events seen while disabled never fire later
@@ -76,6 +86,12 @@ inline ViewOwner StepViewOwner(ViewOwnerState& s, const ViewOwnerInputs& in) {
     // focus event in the same tick. The mouse still takes it back exactly as from the caret (#287).
     if (in.panning) {
         s.owner = ViewOwner::Keys;
+        s.lastSeq = in.snap.seq;
+        return s.owner;
+    }
+    // Settle window after enabling: the tracker's activation publish is a baseline, not typing.
+    if (s.settleMs > 0) {
+        s.settleMs -= in.dtMs;
         s.lastSeq = in.snap.seq;
         return s.owner;
     }

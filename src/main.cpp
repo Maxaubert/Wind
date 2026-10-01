@@ -1279,6 +1279,7 @@ static void RunTick(TickState& t) {
     bool inspect = t.cursorLock.locked();
     bool active = zoomed || inspect;                 // overlay runs while zoomed OR Inspect-frozen
     if (active) t.lastActiveMs = GetTickCount64();   // event-driven idle settle window (#71)
+    else t.viewOwner.wasEnabled = false;             // the next zoom-in starts the tracker settle (#310)
     // Keyboard panning (#287): the hook swallows pan keys only while this is set, so at 1x
     // the pan keys reach the app (e.g. Ctrl+Alt+Left/Right = IntelliJ navigate back/forward). Mouselook games and Inspect
     // keep them too. Published once per tick, before anything reads the pan keys.
