@@ -10,7 +10,8 @@ Max from a list of suggestions. Stacks on PR #314.
   per-window engine rows (`engineGame`, `engineAcrylic`, `engineDesktop`, `engineOther`).
 - Picking a value writes that key to the live ini only. The core already reads these per pick, so it
   applies at once with no restart (hot), including mid-zoom (hybrid re-picks on change). It is a
-  SESSION change: nothing is saved, Settings shows its unsaved capsule, the Quit prompt counts it.
+  SESSION change, exactly like picking it in Settings: nothing is saved, opening Settings shows the
+  unsaved capsule, closing Settings gives the Save / Discard / Keep prompt, the Quit prompt counts it.
 - The chip shows a small engine glyph plus a short mono label ("Auto" / "Tx" / "Rd" style is too
   cryptic, so the label is the full word in the open list and an icon on the chip); the open list
   has a caption naming the category ("Engine for games").
@@ -21,21 +22,30 @@ Max from a list of suggestions. Stacks on PR #314.
   shown disabled with "Main engine: Render" (switching the main engine needs a restart and stays in
   Settings).
 
-## 2. App fixes manager (one chip that opens a list)
-- One chip ("app fixes", wrench-and-window glyph). Click: a list popup (same style as the profile
-  list) of the most likely apps, each row = app icon + exe name + two checkmark buttons:
-  **Mouse lock** (`lockApps`: the view follows hand movement in games that hold the pointer) and
-  **Pass keys** (`noSwallowApps`: zoom keys also reach the app, fixes stuttery panning).
-- Which apps are listed, top to bottom: apps that already have a fix (so you can see and undo them),
-  then apps with a visible window right now ordered by most recently in front (fullscreen and
-  borderless windows first, since those are the games), capped at ~10 rows with a scroll. No
-  "listen for the next click" mode: the list covers the alt-tab/fullscreen problem without it.
-- Checking a box adds the exe to the list in the ini; unchecking removes it. These PERSIST
-  immediately (written to the live ini AND the active profile), like keybinds: they are deliberate
-  per-app fixes you expect next time. (Decision 2.)
-- The core needs no change (both lists are already hot). Recency: the core publishes a small ring of
-  the last 8 foreground exe names in `TrayShared` (`recentFg`), so the list can order by "last in
-  front" even after the game lost focus to the tray.
+## 2. App fixes: listen-and-chime chips (Max, 2026-10-02)
+Two chips in the toggle row, one per fix:
+- **Mouse lock** (`lockApps`: the view follows hand movement in games that hold the pointer).
+- **Pass keys** (`noSwallowApps`: zoom keys also reach the app, fixes stuttery panning).
+
+How it works:
+1. Click the chip: it starts **listening**. The chip pulses (a slow, soft brightness pulse, ~1.2 s
+   period), and the tray icon pulses too, because the flyout closes as soon as you click elsewhere.
+2. Go to the app however you like: click its window, alt-tab to it, or click its taskbar button.
+   The next real foreground app is the target (the taskbar, the tray, Wind's own windows, the
+   alt-tab switcher and the desktop are skipped; a fullscreen game that minimized counts when you
+   come back to it).
+3. Wind toggles that fix for that app: if the app did not have it, it is added and a short
+   **rising chime** plays (about half a second, two soft notes going up); if it already had it, it
+   is removed and the **falling chime** (the same notes going down) plays. Listening ends.
+4. Clicking the chip again while it pulses cancels (no sound). Listening also ends silently after
+   20 seconds.
+- The change PERSISTS immediately (live ini AND the active profile), like keybinds: these are
+  deliberate per-app fixes you expect next time.
+- The chimes are two tiny WAV resources in WindTray, played asynchronously, at a modest level.
+- The chips themselves carry no on/off state (the state is per app); Settings > Advanced lists the
+  apps for anyone who wants to review them.
+- Recency is no longer needed, so the core publishes no app ring; it only needs the foreground
+  filtering it already does for the engine dropdown's category.
 
 ## 3. Pause Wind (toggle chip)
 - ON = zoom keys and the scroll-wheel zoom do nothing and are not swallowed (they reach apps), the
@@ -45,19 +55,18 @@ Max from a list of suggestions. Stacks on PR #314.
   icon gets a small paused mark so the state is visible when the flyout is closed.
 
 ## Settings: Tray menu tab
-The Toggles list gains "Pause Wind" and "App fixes"; the engine dropdown is a list item too
+The Toggles list gains "Pause Wind", "Mouse lock (listen)" and "Pass keys (listen)"; the engine dropdown is a list item too
 ("Engine for the app in front"). All three default OFF (not shown) except nothing else changes.
 Limits unchanged (4 sliders; toggles uncapped; the dropdown counts as a toggle-row item).
 
-## Decisions to confirm
-1. Engine dropdown = per-window-kind engine (hot, session), not the main engine (which needs a restart).
-2. App fixes persist immediately (like keybinds) rather than being session changes.
-3. One "App fixes" chip with two checkmark columns, instead of two separate chips.
+## Decisions (Max, 2026-10-02)
+1. Engine dropdown = per-window-kind engine, hot, a session change exactly like Settings.
+2. App fixes = two listen-and-chime chips (Mouse lock, Pass keys); changes persist immediately.
 
 ## Testing
-doctest: category publishing filter (shell/tray/Wind windows ignored), recency ring, list ordering,
+doctest: category publishing filter (shell/tray/Wind windows ignored), listen state machine (target filter, toggle add/remove, cancel, 20 s timeout),
 add/remove exe in the lists (case-insensitive, no duplicates), pause gating of zoom input. Playwright:
 the three new rows in the Tray menu tab. Flyout render test with the dropdown and app-fixes list open.
-Manual: game in front -> flyout -> engine dropdown says "games" and switches live; app fixes list
-shows the game first and toggles persist across a Wind restart; Pause stops zoom keys and they type
+Manual: game in front -> flyout -> engine dropdown says "games" and switches live; Mouse lock chip pulses, alt-tab into the game plays the rising chime,
+again plays the falling chime, the change survives a Wind restart; Pause stops zoom keys and they type
 normally.
