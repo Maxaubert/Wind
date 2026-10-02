@@ -73,10 +73,11 @@ static std::string Join(const std::vector<TrayItem>& items, bool onlyEnabled) {
 TrayLayout ParseTrayLayout(const IniValues& v) {
     TrayLayout l;
     const std::string* p = Find(v, "trayPerf");
-    l.perf = p && Trim(*p) == "1";
+    l.perf = !p || Trim(*p) == "1";   // shown by default (#329); an explicit 0 hides it
     l.sliders = ParseList(v, "traySliders", "traySliderOrder", EligibleSliders(),
                           {"colorWarmPct", "colorDimPct"}, kMaxTraySliders);
-    l.toggles = ParseList(v, "trayToggles", "trayToggleOrder", EligibleToggles(), {}, 0);
+    // Every toggle item is on by default (#329): follow caret, follow focus, keep centred, engine.
+    l.toggles = ParseList(v, "trayToggles", "trayToggleOrder", EligibleToggles(), EligibleToggles(), 0);
     return l;
 }
 void WriteTrayLayout(const TrayLayout& l, IniValues& v) {

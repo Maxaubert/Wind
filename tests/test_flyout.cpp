@@ -272,7 +272,7 @@ TEST_CASE("view: only enabled, known items appear, in layout order") {
     CHECK(v.toggles[1].key == "keepEdges");
     CHECK(v.toggles[1].on);                               // no align keys = centred = Keep cursor centred ON
     CHECK(v.profile == L"Work");
-    CHECK_FALSE(v.perf);
+    CHECK(v.perf);                                        // no trayPerf key: shown by default (#329)
 }
 
 TEST_CASE("view: a legacy uiTheme=light ini changes nothing, the flyout is always dark (#324)") {

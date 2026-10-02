@@ -11,13 +11,19 @@ static std::vector<std::string> Keys(const std::vector<TrayItem>& v, bool onlyOn
 }
 using V = std::vector<std::string>;
 
-TEST_CASE("tray layout defaults: perf off, warmth and brightness on") {
+TEST_CASE("tray layout defaults: perf on, warmth and brightness, every toggle on (#329)") {
     TrayLayout l = ParseTrayLayout({});
-    CHECK_FALSE(l.perf);
+    CHECK(l.perf);
     CHECK(Keys(l.sliders, true) == V{"colorWarmPct", "colorDimPct"});
     CHECK(Keys(l.sliders, false) == EligibleSliders());
-    CHECK(Keys(l.toggles, true).empty());
+    CHECK(Keys(l.toggles, true) == EligibleToggles());
     CHECK(Keys(l.toggles, false) == EligibleToggles());
+}
+
+TEST_CASE("tray layout: an explicit trayPerf=0 and an empty toggle list still hide them (#329)") {
+    TrayLayout l = ParseTrayLayout({ { "trayPerf", "0" }, { "trayToggles", "" } });
+    CHECK_FALSE(l.perf);
+    CHECK(Keys(l.toggles, true).empty());
 }
 
 TEST_CASE("eligible lists match the owner's choice") {
@@ -108,10 +114,10 @@ TEST_CASE("toggles are uncapped") {
     CHECK(Keys(ParseTrayLayout(v).toggles, true).size() == 4);
 }
 
-TEST_CASE("the engine item exists, defaults off, and round trips") {
+TEST_CASE("the engine item exists, defaults on (#329), and round trips") {
     TrayLayout d = ParseTrayLayout({});
     bool found = false;
-    for (const auto& i : d.toggles) if (i.key == "engine") { found = true; CHECK_FALSE(i.on); }
+    for (const auto& i : d.toggles) if (i.key == "engine") { found = true; CHECK(i.on); }
     CHECK(found);
     IniValues v;
     v["trayToggles"] = "engine,trackCaret";
