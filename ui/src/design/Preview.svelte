@@ -1,6 +1,6 @@
 <script>
   // Dev/test harness: every shell component rendered with props only, no bridge. Served by Vite
-  // dev at /preview.html (not part of the production build). ?theme=light switches the palette.
+  // dev at /preview.html (not part of the production build).
   import './tokens.css';
   import TitleBar from '../shell/TitleBar.svelte';
   import Sidebar from '../shell/Sidebar.svelte';
@@ -9,7 +9,6 @@
   import SaveCapsule from '../shell/SaveCapsule.svelte';
 
   const q = new URLSearchParams(location.search);
-  let theme = $state(q.get('theme') === 'light' ? 'light' : 'dark');
   let active = $state('hotkeys');
   let count = $state(Number(q.get('count') ?? 2));
   const calls = (window.__calls = []);
@@ -28,7 +27,7 @@
   ];
 </script>
 
-<div class="wnd app" data-theme={theme}>
+<div class="wnd app">
   <TitleBar onMinimize={() => log('minimize')} onMaximize={() => log('maximize')} onClose={() => log('close')} />
   <div class="body">
     <Sidebar {groups} {bottom} {active} version="0.15.4"

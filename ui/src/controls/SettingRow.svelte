@@ -6,7 +6,7 @@
   //   onChange  onChange(val) for the row's own key
   //   onSet     onSet(key, val) for a sibling key (the extra-key switches)
   //   live      live(patch) for keybind captures (written immediately by the page)
-  //   extra     { mpoNeedsRestart, runningModel, onRestart, theme, onTheme, mode (resolved dark/light),
+  //   extra     { mpoNeedsRestart, runningModel, onRestart,
   //             profiles: {names, active, onSwitch, onNew, onDelete}, version, onRepo, onAction(name) }
   import Toggle from './Toggle.svelte';
   import Slider from './Slider.svelte';
@@ -17,7 +17,6 @@
   import AppList from './AppList.svelte';
   import HighRes from './HighRes.svelte';
   import EngineRow from './EngineRow.svelte';
-  import ModeSwitch from './ModeSwitch.svelte';
   import ThemePicker from '../prefs/ThemePicker.svelte';
   import ProfilePicker from '../prefs/ProfilePicker.svelte';
   import About from './About.svelte';
@@ -72,11 +71,8 @@
       {:else if row.type === 'highres'}
         <HighRes {value} {disabled} onChange={onChange} needsRestart={!!extra.mpoNeedsRestart}
                  labelledby={labelId} describedby={descId} tagId={rid + '-t'} />
-      {:else if row.type === 'theme'}
-        <ModeSwitch value={extra.theme ?? value ?? 'auto'} onChange={extra.onTheme ?? onChange}
-                    labelledby={labelId} describedby={descId} />
       {:else if row.type === 'palette'}
-        <ThemePicker value={value ?? 'grey'} mode={extra.mode ?? 'dark'} onChange={onChange}
+        <ThemePicker value={value ?? 'grey'} onChange={onChange}
                      labelledby={labelId} describedby={descId} />
       {:else if row.type === 'profiles'}
         <ProfilePicker {...(extra.profiles ?? {})} {disabled} labelledby={labelId} describedby={descId} />

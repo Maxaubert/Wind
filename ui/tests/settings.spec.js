@@ -1,4 +1,4 @@
-// Settings window against the mock bridge: the seven pages and navigation, instant apply, mode, the
+// Settings window against the mock bridge: the seven pages and navigation, instant apply, the
 // advanced switch and the Hotkeys page (one-box bindings, wheel capture, limits, extra-key switches).
 // Redesign #303, structure and hotkeys #318.
 import { test, expect } from '@playwright/test';
@@ -116,19 +116,7 @@ test('the title bar has only minimize, maximize and close; Maximize asks the hos
   await expect(page.getByRole('button', { name: 'Restore' })).toBeVisible();
 });
 
-// ---- mode and the advanced switch -----------------------------------------------------------------
-
-test('mode: the Preferences radio group writes uiTheme, and a mode change is never unsaved', async ({ page }) => {
-  await page.goto('/');
-  await go(page, 'prefs');
-  await expect(page.locator('.wnd.app')).toHaveAttribute('data-theme', 'dark');
-  await key(page, '__theme').getByRole('radio', { name: 'Light' }).click();
-  await expect(page.locator('.wnd.app')).toHaveAttribute('data-theme', 'light');
-  await key(page, '__theme').getByRole('radio', { name: 'Dark' }).click();
-  await expect(page.locator('.wnd.app')).toHaveAttribute('data-theme', 'dark');
-  expect((await sent(page, 'setConfig')).filter((m) => m.key === 'uiTheme').map((m) => m.value)).toEqual(['light', 'dark']);
-  await expect(page.locator('.capsule')).toHaveCount(0);
-});
+// ---- the advanced switch --------------------------------------------------------------------------
 
 test('Show advanced settings reveals the advanced rows inline, with no marker, and hides them again', async ({ page }) => {
   await page.goto('/');
@@ -217,14 +205,8 @@ test('Screen page: only warmth and brightness, neutral by default (no warmth, fu
   await expect(key(page, 'colorDimPct').locator('input[type=range]')).toHaveValue('100');
 });
 
-test('light theme: shell surfaces and the capsule read on white', async ({ page }) => {
-  await page.addInitScript(() => { window.__cfgExtra = { uiTheme: 'light' }; });
+test('the save capsule reads on the dark surfaces', async ({ page }) => {
   await page.goto('/');
-  await expect(page.locator('.wnd')).toHaveAttribute('data-theme', 'light');
-  expect(await css(page.locator('.card').first(), 'background-color')).toBe('rgb(255, 255, 255)');
-  expect(await css(page.locator('.side'), 'background-color')).toBe('rgb(243, 243, 244)');
-  expect(await css(page.locator('.side .it.sel'), 'background-color')).toBe('rgb(228, 228, 228)');
-  expect(await css(page.locator('.banner'), 'background-color')).toBe('rgb(246, 246, 247)');
   await go(page, 'zoom');
   await key(page, 'maxLevel').locator('input[type=range]').fill('20');
   const cap = page.locator('.capsule');

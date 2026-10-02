@@ -1,7 +1,7 @@
 <script>
   // Dev/test harness for the regrouped pages: every group's cards rendered with SettingRow and fake
   // values, no bridge. Served at /controls.html (not part of the production build).
-  // ?group=<id> picks the group (default hotkeys), ?theme=light the mode, ?palette=<id> the built-in theme (default
+  // ?group=<id> picks the group (default hotkeys), ?palette=<id> the built-in theme (default
   // grey), ?model=<engine> the engine.
   import '../design/tokens.css';
   import '../design/themes.css';
@@ -11,7 +11,6 @@
   import { groups, groupRows, bindKeys } from '../settings-schema.js';
 
   const q = new URLSearchParams(location.search);
-  const theme = q.get('theme') === 'light' ? 'light' : 'dark';
   const palette = normalizePalette(q.get('palette'));
   const group = groups.find((g) => g.id === q.get('group')) || groups[0];
   const calls = (window.__calls = []);
@@ -26,7 +25,7 @@
   const extra = {
     runningModel: 'hybrid', mpoNeedsRestart: false, version: '0.19.2',
     onRestart: () => calls.push('restart'), onAction: (a) => calls.push(['action', a]),
-    onTheme: (m) => calls.push(['theme', m]), onRepo: () => calls.push('repo'), mode: theme,
+    onRepo: () => calls.push('repo'),
     pick: async () => 'RDR2.exe',
     profiles: { names: ['Default', 'Gaming'], active: 'Gaming',
       onSwitch: (n) => calls.push(['switch', n]), onNew: () => calls.push('new'),
@@ -34,7 +33,7 @@
   };
 </script>
 
-<div class="wnd page" data-palette={palette} data-theme={theme}>
+<div class="wnd page" data-palette={palette}>
   <h1>{group.label}</h1>
   {#each group.cards as card, i (i)}
     <Card caption={card.caption}>

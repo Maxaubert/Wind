@@ -21,7 +21,7 @@ const OLD_BIND_KEYS = [
   'panLeftVk', 'panLeftMods', 'panRightVk', 'panRightMods', 'panUpVk', 'panUpMods', 'panDownVk', 'panDownMods',
   'hideCursorVk', 'hideCursorMods', 'cursorLockVk', 'cursorLockMods',
 ];
-const NEW_KEYS = ['__theme', 'uiPalette', '__profiles', '__diagnostics', '__openIni', 'trayPerf', 'showAdvanced'];
+const NEW_KEYS = ['uiPalette', '__profiles', '__diagnostics', '__openIni', 'trayPerf', 'showAdvanced'];
 
 test('group ids, order and shape follow the spec', () => {
   expect(groups.map((g) => g.id)).toEqual(['hotkeys', 'zoom', 'view', 'screen', 'prefs', 'tray', 'about']);
@@ -202,9 +202,8 @@ test('view page: high resolution toggle; hotkeys page: inspect box and its switc
   await expect(ins.locator('.kwrap')).toHaveClass(/off/);   // the binding dims, it is not lost
 });
 
-test('preferences page: mode, profiles and file buttons', async ({ page }) => {
+test('preferences page: theme, profiles and file buttons', async ({ page }) => {
   await page.goto('/controls.html?group=prefs');
-  await ctl(page, '__theme').getByRole('radio', { name: 'Light' }).click();
   await ctl(page, '__diagnostics').getByRole('button', { name: 'Export' }).click();
   await ctl(page, '__openIni').getByRole('button', { name: 'Open' }).click();
   await ctl(page, 'uiPalette').getByRole('radio', { name: 'Ember' }).click();
@@ -215,18 +214,18 @@ test('preferences page: mode, profiles and file buttons', async ({ page }) => {
   await prof.getByRole('button', { name: /^Profile:/ }).click();
   await prof.getByRole('button', { name: 'Delete profile Gaming' }).click();
   expect(await page.evaluate(() => window.__calls)).toEqual([
-    ['theme', 'light'], ['action', 'exportDiagnostics'], ['action', 'openIni'], ['uiPalette', 'ember'],
+    ['action', 'exportDiagnostics'], ['action', 'openIni'], ['uiPalette', 'ember'],
     ['switch', 'Default'], 'new', ['delete', 'Gaming'],
   ]);
 });
 
-test('about page shows the logo and link; light theme controls read on white', async ({ page }) => {
-  await page.goto('/controls.html?group=about&theme=light');
+test('about page shows the logo and link; controls read on the dark surface', async ({ page }) => {
+  await page.goto('/controls.html?group=about');
   await expect(page.getByText('Barely there. Everywhere.')).toBeVisible();
   await page.getByRole('button', { name: 'Star on GitHub' }).click();
   expect(await page.evaluate(() => window.__calls)).toEqual(['repo']);
-  await page.goto('/controls.html?group=screen&theme=light');
+  await page.goto('/controls.html?group=screen');
   const sl = ctl(page, 'colorWarmPct').locator('input');
   expect(await css(sl, 'accent-color')).not.toBe('');
-  expect(await css(ctl(page, 'colorWarmPct').locator('.val'), 'color')).toBe('rgb(10, 10, 10)');
+  expect(await css(ctl(page, 'colorWarmPct').locator('.val'), 'color')).toBe('rgb(242, 242, 242)');
 });

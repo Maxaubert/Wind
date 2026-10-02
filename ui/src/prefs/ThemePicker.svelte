@@ -3,11 +3,11 @@
   // under each and the selected card outlined. There are four themes, so they always fit: no scrolling, no
   // arrow buttons, no edge fades. Left/Right (and Up/Down, Home, End) move the selection and apply it.
   // Each swatch is a tiny window drawn with that theme's real tokens: it is its own .wnd element carrying
-  // data-palette and data-theme, so themes.css colours it with no colour values duplicated in JS.
-  //   value     the palette id (uiPalette)      mode  the RESOLVED mode, dark or light
+  // data-palette, so themes.css colours it with no colour values duplicated in JS.
+  //   value     the palette id (uiPalette)
   //   onChange  onChange(id)
   import { themes } from '../design/themes.js';
-  let { value = 'grey', mode = 'dark', onChange = () => {}, labelledby, describedby } = $props();
+  let { value = 'grey', onChange = () => {}, labelledby, describedby } = $props();
   let el;
   function key(e) {
     const i = Math.max(0, themes.findIndex((t) => t.id === value));
@@ -28,7 +28,7 @@
   {#each themes as t (t.id)}
     <button type="button" role="radio" class="th" class:on={value === t.id} aria-checked={value === t.id}
             tabindex={value === t.id ? 0 : -1} data-palette-id={t.id} onclick={() => onChange(t.id)}>
-      <span class="wnd sw" data-palette={t.id} data-theme={mode} aria-hidden="true">
+      <span class="wnd sw" data-palette={t.id} aria-hidden="true">
         <i class="sb"></i><i class="bn"></i><i class="r1"></i><i class="r2"></i><i class="ac"></i>
       </span>
       <span class="nm">{t.label}</span>

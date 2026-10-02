@@ -14,7 +14,6 @@
            setMpoDisabled, rebootNow, setDirty, switchProfile, createProfile, deleteProfile } from './bridge.js';
   import { fill, changedKeys, GLOBAL_KEYS } from './session.js';
   import { themes, normalizePalette } from './design/themes.js';
-  import { applyTheme, setTheme } from './theme.js';
   import { droppedBinds } from './lib/keybindRules.js';
   import TitleBar from './shell/TitleBar.svelte';
   import Sidebar from './shell/Sidebar.svelte';
@@ -33,7 +32,6 @@
 
   let values = $state({});
   let saved = $state({});
-  let themeMode = $state('auto');
   let prof = $state({ names: [], active: '' });
   let activeId = $state('hotkeys');   // Settings opens on Hotkeys
   let loaded = $state(false);
@@ -48,10 +46,7 @@
   const dirty = $derived(count > 0);
   $effect(() => { if (loaded) setDirty(dirty); });   // the host's WM_CLOSE guard follows the UI
 
-  // Effective palette: auto resolves against the system setting.
-  let systemDark = $state(typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches);
-  const effTheme = $derived(themeMode === 'light' ? 'light' : themeMode === 'dark' ? 'dark' : (systemDark ? 'dark' : 'light'));
-  // The built-in theme (uiPalette, a global key) plus the resolved mode pick the token block in design/themes.css.
+  // The built-in theme (uiPalette, a global key) picks the token block in design/themes.css. Always dark (#324).
   const palette = $derived(normalizePalette(values.uiPalette));
 
   // --- Screen-reader announcements ------------------------------------------------------------
@@ -73,7 +68,6 @@
     }
     values = f.values; saved = f.saved;
     if (s.profiles) prof = { names: s.profiles.names || [], active: s.profiles.active || '' };
-    themeMode = s.theme || 'auto'; applyTheme(themeMode);
     if (!runningModel) runningModel = String(f.values.model);
     loaded = true;
   }
@@ -137,9 +131,6 @@
       }),
       onMessage((m) => { if (m && m.type === 'confirmClose' && dirty) closePrompt = true; }),
     ];
-    const mq = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : null;
-    const onMq = (e) => { systemDark = e.matches; };
-    if (mq && mq.addEventListener) mq.addEventListener('change', onMq);
     (async () => {
       await load();
       const s = await getMpoState();
@@ -147,7 +138,7 @@
       // No record for this boot -> assume the registry is what DWM loaded.
       mpoBoot = s.bootKnown ? s.atBoot : s.disabled;
     })();
-    return () => { offs.forEach((o) => o()); if (mq && mq.removeEventListener) mq.removeEventListener('change', onMq); };
+    return () => { offs.forEach((o) => o()); };
   });
 
   // --- Save / Discard -------------------------------------------------------------------------
@@ -267,7 +258,6 @@
     await tick();
     if (main) { main.scrollTop = 0; main.focus({ preventScroll: true }); }
   }
-  function onTheme(mode) { themeMode = mode; setTheme(mode); announce('Theme ' + mode); }
   function onAction(a) {
     if (a === 'openIni') openIni();
     else if (a === 'exportDiagnostics') exportDiagnostics();
@@ -279,10 +269,9 @@
   const advOn = $derived(Number(values.showAdvanced) === 1);
   const shown = (r) => visible(r) && (!r.adv || advOn || r.key === revealKey);
   const extra = $derived({
-    mpoNeedsRestart, runningModel, version: VERSION, theme: themeMode, onTheme, onRepo: openRepo,
+    mpoNeedsRestart, runningModel, version: VERSION, onRepo: openRepo,
     onAction, pick: pickExe,
     onRestart: () => { restartError = false; windowControl('restartWind'); },
-    mode: effTheme,
     profiles: {
       names: prof.names, active: prof.active,
       onSwitch: (name) => profileAction('switch', { name }),
@@ -294,7 +283,7 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="wnd app" data-palette={palette} data-theme={effTheme}>
+<div class="wnd app" data-palette={palette}>
   <TitleBar {maximized} onMinimize={() => windowControl('minimize')} onMaximize={() => windowControl('maximize')} onClose={requestClose} />
   <div class="body">
     <Sidebar groups={top} {bottom} active={searching ? '' : activeId} version={VERSION} {query} {onSearch}

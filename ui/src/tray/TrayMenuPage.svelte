@@ -72,7 +72,6 @@
   .k { font: 500 13.5px var(--s); color: var(--fg); }
   .k.off { color: var(--fg2); }
   .d { margin-top: 1px; font: 12.5px var(--s); color: var(--fg3); }
-  :global(.wnd[data-theme="light"]) .d { color: #5a5a5a; }
   .chk { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 7px;
          border: 1px solid var(--ctl); background: transparent; color: transparent;
          transition: background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease); }

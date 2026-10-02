@@ -12,10 +12,10 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     window.__skipSplash = true;
     window.__msgs = [];
-    // Built on the first getConfig so a test's own init script (window.__theme) is already set.
+    // Built on the first getConfig so a test's own init script is already set.
     let live, saved;
     const init = () => { if (live) return; live = { maxLevel: '12', zoomInVk: '33', zoomInButton: '2', cursorLockVk: '113', model: 'hybrid',
-      uiTheme: window.__theme || 'dark', trackCaret: '1', noSwallowApps: 'netflix.exe', showAdvanced: '1' };
+      uiTheme: 'dark', trackCaret: '1', noSwallowApps: 'netflix.exe', showAdvanced: '1' };
       saved = { ...live }; };
     const listeners = new Set();
     const send = (data) => listeners.forEach((fn) => fn({ data }));
@@ -89,11 +89,9 @@ test('sliders speak their unit instead of a bare number', async ({ page }) => {
   await expect(page.locator('[data-key="maxLevel"] input[type=range]')).toHaveAttribute('aria-valuetext', '12 times');
 });
 
-for (const theme of ['dark', 'light']) test('focus is visible in the ' + theme + ' theme', async ({ page }) => {
+test('focus is visible', async ({ page }) => {
   {
-    await page.addInitScript((t) => { window.__theme = t; }, theme);
     await page.goto('/');
-    await expect(page.locator('.wnd')).toHaveAttribute('data-theme', theme);
     await page.keyboard.press('Tab');   // keyboard modality: the ring is for keyboard users only
     for (const sel of ['.side .it', '.side .search input', 'header.tb .wc', 'main .kchg']) {
       await page.locator(sel).first().focus();
@@ -102,7 +100,7 @@ for (const theme of ['dark', 'light']) test('focus is visible in the ' + theme +
         const box = el.closest('.search') ? getComputedStyle(el.closest('.search')).borderTopColor : '';
         return { outline: s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) > 0, shadow: s.boxShadow !== 'none', box };
       });
-      expect(ring.outline || ring.shadow || ring.box !== '', theme + ' ' + sel).toBe(true);
+      expect(ring.outline || ring.shadow || ring.box !== '', sel).toBe(true);
     }
   }
 });
@@ -205,15 +203,15 @@ test('an armed keycap says so and carries its instructions as a description', as
   await expect(page.locator('[data-key="__zoomIn"] [role=status]')).toContainText(/Listening/);
 });
 
-test('the theme control is a radio group with arrow-key navigation', async ({ page }) => {
+test('the theme picker is a radio group with arrow-key navigation', async ({ page }) => {
   await page.goto('/');
   await go(page, 'prefs');
-  const group = page.locator('[data-key="__theme"]').getByRole('radiogroup');
-  await expect(group.getByRole('radio')).toHaveCount(3);
+  const group = page.locator('[data-key="uiPalette"]').getByRole('radiogroup');
+  await expect(group.getByRole('radio')).toHaveCount(4);
   await group.getByRole('radio', { checked: true }).focus();
   await page.keyboard.press('ArrowRight');
   await expect(group.getByRole('radio', { checked: true })).toHaveCount(1);
-  expect((await page.evaluate(() => window.__msgs.filter((m) => m.type === 'setConfig' && m.key === 'uiTheme'))).length).toBe(1);
+  expect((await page.evaluate(() => window.__msgs.filter((m) => m.type === 'setConfig' && m.key === 'uiPalette'))).length).toBe(1);
 });
 
 test('the profile selector has an accessible name and the search box is a labelled search field', async ({ page }) => {
