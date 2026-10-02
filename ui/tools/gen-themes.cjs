@@ -11,7 +11,7 @@
 // dangerbtn dangerbtnfg scrim bnfilter bntint bntop rc rp rsw rkn.
 // Wind grey (dark AND light) takes the app's own tokens.css values for every token the app already had, so
 // today's look is exactly preserved; every other theme comes from the mockup palettes.
-// Palette ids in the app: grey ember cyber mono slate carbon hicon ocean (the core's kUiPalettes, src/config.cpp).
+// Palette ids in the app: grey ember ocean hicon (the core's kUiPalettes, src/config.cpp). Four themes only (Max 2026-10-02).
 const fs = require('fs');
 const path = require('path');
 
@@ -19,8 +19,7 @@ const iaDir = process.argv[2] || 'C:/Users/Admin/Documents/Claude/wind-settings-
 const all = Object.assign({}, require(path.join(iaDir, 'palettes08.cjs')),
   require(path.join(iaDir, 'palettes-b1.cjs')), require(path.join(iaDir, 'palettes-b2.cjs')));
 // app id -> mockup id, in picker order
-const ORDER = [['grey', 'grey'], ['ember', 'ember'], ['cyber', 'cyber'], ['mono', 'b1_mono'], ['slate', 'b1_slate'],
-  ['carbon', 'b1_carbon'], ['hicon', 'b1_hicon'], ['ocean', 'b2_ocean']];
+const ORDER = [['grey', 'grey'], ['ember', 'ember'], ['ocean', 'b2_ocean'], ['hicon', 'b1_hicon']];
 
 // --- today's tokens (src/design/tokens.css, the first .wnd block) ---
 const tokensCss = fs.readFileSync(path.join(__dirname, '../src/design/tokens.css'), 'utf8');
@@ -68,10 +67,8 @@ for (const [id, mid] of ORDER) {
     const t = map(p[mode], p.radii, mode);
     if (id === 'grey') for (const n of EXISTING) if (n in todayDark) t[n] = (mode === 'dark' ? todayDark : todayLight)[n];
     if (id === 'grey') t.onfill = mode === 'dark' ? '#04201b' : '#ffffff';   // today's toggle knob colours
-    // Cyberpunk dark: selections are solid signal yellow with black text (Max 2026-10-02).
     // The selection is what the app already drew (--hlGrey) in Wind grey, with its text colour.
     if (id === 'grey') { t.sel = t.hlGrey; t.selfg = t.fg; }
-    if (id === 'cyber' && mode === 'dark') { t.hlGrey = '#fcee0a'; t.sel = '#fcee0a'; t.selfg = '#000000'; }
     const lines = Object.entries(t).map(([n, v]) => `  --${n}: ${v};`);
     css += `.wnd[data-palette="${id}"][data-theme="${mode}"] {\n${lines.join('\n')}\n  color-scheme: ${mode};\n}\n`;
   }

@@ -174,9 +174,9 @@ TEST_CASE("UpdateProfileKey updates profile keys and refuses global keys") {
 TEST_CASE("uiPalette survives a profile switch and never lands in a profile file (#318)") {
     const std::string live = "maxLevel=8\nuiPalette=ember\nprofile=A\n";
     CHECK(MakeProfileText(live) == "maxLevel=8\n");
-    const std::string sw = MakeLiveText("maxLevel=3\nuiPalette=cyber\n", live, "B");
+    const std::string sw = MakeLiveText("maxLevel=3\nuiPalette=hicon\n", live, "B");
     auto v = ReadIniValues(sw);
     CHECK(v["uiPalette"] == "ember");     // the live global wins; a smuggled one in the profile is dropped
     CHECK(v["maxLevel"] == "3");
-    CHECK_FALSE(SessionDiffers("a=1\nuiPalette=ember\n", "a=1\nuiPalette=cyber\n"));
+    CHECK_FALSE(SessionDiffers("a=1\nuiPalette=ember\n", "a=1\nuiPalette=hicon\n"));
 }

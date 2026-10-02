@@ -98,20 +98,48 @@ test('Mode writes uiTheme auto / light / dark, and System follows the system set
 
 // ---- Themes ---------------------------------------------------------------------------------------
 
-test('the theme picker is one scrolling row of the eight themes', async ({ page }) => {
+test('the theme picker is one row of the four theme cards, no scrolling, no arrows', async ({ page }) => {
   await page.setViewportSize({ width: 820, height: 700 });
   await page.goto('/');
   await go(page, 'prefs');
   const picker = key(page, 'uiPalette').getByRole('radiogroup');
   await expect(picker.getByRole('radio')).toHaveText(themes.map((t) => t.label));
-  expect(themes.map((t) => t.id)).toEqual(['grey', 'ember', 'cyber', 'mono', 'slate', 'carbon', 'hicon', 'ocean']);
+  expect(themes.map((t) => t.id)).toEqual(['grey', 'ember', 'ocean', 'hicon']);   // High contrast is always last
   const tops = new Set();
   for (const r of await picker.getByRole('radio').all()) tops.add(Math.round((await r.boundingBox()).y));
   expect(tops.size).toBe(1);   // one row, no wrapping
-  // Too narrow for all eight: the strip scrolls sideways instead of wrapping or clipping.
-  expect(await picker.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
-  expect(await css(picker, 'overflow-x')).toBe('auto');
+  // Four fit: nothing scrolls, there are no arrow buttons and no edge fade mask.
+  expect(await picker.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  expect(await css(picker, 'overflow-x')).toBe('visible');
+  await expect(key(page, 'uiPalette').locator('button')).toHaveCount(4);   // the four cards only
+  expect(await css(picker, 'mask-image')).toBe('none');
+  // Right-aligned like the other controls: the last card ends at the row's right edge.
+  const rowBox = await key(page, 'uiPalette').boundingBox();
+  const lastBox = await picker.getByRole('radio').last().boundingBox();
+  expect(rowBox.x + rowBox.width - (lastBox.x + lastBox.width)).toBeLessThan(40);
   await expect(picker.getByRole('radio', { checked: true })).toHaveText('Wind grey');
+  // Each card is drawn in its own theme: the mini windows differ.
+  const bgs = new Set();
+  for (const sw of await picker.locator('.sw').all()) bgs.add((await css(sw, 'background-color')) + '|' + (await css(sw.locator('.ac'), 'background-color')));
+  expect(bgs.size).toBe(4);
+});
+
+test('theme picker keyboard: Left/Right moves and applies, the focus ring is for the keyboard only', async ({ page }) => {
+  await page.goto('/');
+  await go(page, 'prefs');
+  const picker = key(page, 'uiPalette').getByRole('radiogroup');
+  await picker.getByRole('radio', { name: 'Wind grey' }).click();
+  expect(await css(picker.getByRole('radio', { name: 'Wind grey' }), 'outline-style')).toBe('none');   // a click leaves no ring
+  await page.keyboard.press('ArrowRight');
+  await expect(app(page)).toHaveAttribute('data-palette', 'ember');
+  await expect(picker.getByRole('radio', { name: 'Ember' })).toBeFocused();
+  expect(await css(picker.getByRole('radio', { name: 'Ember' }), 'outline-style')).not.toBe('none');
+  await page.keyboard.press('ArrowLeft');
+  await expect(app(page)).toHaveAttribute('data-palette', 'grey');
+  await page.keyboard.press('End');
+  await expect(app(page)).toHaveAttribute('data-palette', 'hicon');
+  await page.keyboard.press('ArrowRight');   // wraps to the first
+  await expect(app(page)).toHaveAttribute('data-palette', 'grey');
 });
 
 test('picking a theme restyles the window, writes uiPalette and is never unsaved', async ({ page }) => {
@@ -136,9 +164,9 @@ test('picking a theme restyles the window, writes uiPalette and is never unsaved
 });
 
 test('every theme has a dark and a light block that differ, and the saved theme loads at launch', async ({ page }) => {
-  await page.addInitScript(() => { window.__cfgExtra = { uiPalette: 'carbon' }; });
+  await page.addInitScript(() => { window.__cfgExtra = { uiPalette: 'hicon' }; });
   await page.goto('/');
-  await expect(app(page)).toHaveAttribute('data-palette', 'carbon');
+  await expect(app(page)).toHaveAttribute('data-palette', 'hicon');
   await go(page, 'prefs');
   const picker = key(page, 'uiPalette').getByRole('radiogroup');
   for (const mode of ['Dark', 'Light']) {
@@ -185,19 +213,15 @@ test('Wind grey is today\'s look: every token that existed before themes is unch
   await page.close();
 });
 
-test('Cyberpunk dark selections are solid #fcee0a with black text, and the sharp themes square the corners', async ({ page }) => {
-  await page.addInitScript(() => { window.__cfgExtra = { uiPalette: 'cyber' }; });
+test('a removed theme id reads as Wind grey, and the sharp radii belong to High contrast only', async ({ page }) => {
+  for (const gone of ['cyber', 'mono', 'slate', 'carbon']) {
+    await page.addInitScript((id) => { window.__cfgExtra = { uiPalette: id }; }, gone);
+    await page.goto('/');
+    await expect(app(page), gone).toHaveAttribute('data-palette', 'grey');
+  }
   await page.goto('/');
-  const sel = page.locator('.side .it.sel');
-  await expect(sel).toContainText('Hotkeys');
-  expect(await css(sel, 'background-color')).toBe('rgb(252, 238, 10)');
-  expect(await css(sel, 'color')).toBe('rgb(0, 0, 0)');
-  expect(await css(page.locator('.card').first(), 'border-radius')).toBe('4px');
   await go(page, 'prefs');
-  const on = key(page, '__theme').getByRole('radio', { checked: true });
-  expect(await css(on, 'background-color')).toBe('rgb(252, 238, 10)');
-  expect(await css(on, 'color')).toBe('rgb(0, 0, 0)');
-  for (const [id, rc] of [['carbon', '4px'], ['hicon', '4px'], ['grey', '10px'], ['ocean', '10px']]) {
+  for (const [id, rc] of [['hicon', '4px'], ['grey', '10px'], ['ocean', '10px'], ['ember', '10px']]) {
     await key(page, 'uiPalette').getByRole('radio', { name: themes.find((t) => t.id === id).label }).click();
     expect(await css(page.locator('.card').first(), 'border-radius'), id).toBe(rc);
   }

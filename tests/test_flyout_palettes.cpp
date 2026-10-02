@@ -18,12 +18,9 @@ TEST_CASE("flyout palettes: one row per Settings palette, same ids in the same o
 TEST_CASE("flyout palettes: lookup by id") {
     CHECK(PaletteIndex("grey") == 0);
     CHECK(PaletteIndex("ember") == 1);
-    CHECK(PaletteIndex("cyber") == 2);
-    CHECK(PaletteIndex("mono") == 3);
-    CHECK(PaletteIndex("slate") == 4);
-    CHECK(PaletteIndex("carbon") == 5);
-    CHECK(PaletteIndex("hicon") == 6);
-    CHECK(PaletteIndex("ocean") == 7);
+    CHECK(PaletteIndex("ocean") == 2);
+    CHECK(PaletteIndex("hicon") == 3);      // High contrast is always last
+    CHECK(kPaletteCount == 4);
     CHECK(std::string(FindPalette("ocean").id) == "ocean");
 }
 
@@ -31,7 +28,8 @@ TEST_CASE("flyout palettes: unknown, empty or wrong-case ids fall back to Wind g
     CHECK(PaletteIndex("") == 0);
     CHECK(PaletteIndex("nope") == 0);
     CHECK(PaletteIndex("Ember") == 0);      // ids are exact, like the Settings app's normalizePalette
-    CHECK(PaletteIndex("b1_mono") == 0);    // mockup ids are not app ids
+    CHECK(PaletteIndex("b1_hicon") == 0);   // mockup ids are not app ids
+    for (const char* gone : { "cyber", "mono", "slate", "carbon" }) CHECK(PaletteIndex(gone) == 0);   // removed themes read as grey
     CHECK(std::string(FindPalette("zzz").id) == "grey");
     CHECK(&PaletteAt(-1) == &kPalettes[0]);
     CHECK(&PaletteAt(kPaletteCount) == &kPalettes[0]);
@@ -50,15 +48,15 @@ TEST_CASE("flyout palettes: Wind grey keeps the look the flyout already had") {
     CHECK(g.dark.tintA == 0.f);
 }
 
-TEST_CASE("flyout palettes: radii are sharp for cyber, carbon and hicon, soft elsewhere") {
-    for (const char* id : { "cyber", "carbon", "hicon" }) {
+TEST_CASE("flyout palettes: radii are sharp for hicon, soft elsewhere") {
+    for (const char* id : { "hicon" }) {
         const FlyoutPalette& p = FindPalette(id);
         CHECK(p.rc == 4);
         CHECK(p.rk == 3);
         CHECK(p.rs == 2);
         CHECK(ListRadiusFor(p) == 4.f);
     }
-    for (const char* id : { "grey", "ember", "mono", "slate", "ocean" }) {
+    for (const char* id : { "grey", "ember", "ocean" }) {
         const FlyoutPalette& p = FindPalette(id);
         CHECK(p.rc == 10);
         CHECK(p.rk == 8);
@@ -67,11 +65,12 @@ TEST_CASE("flyout palettes: radii are sharp for cyber, carbon and hicon, soft el
     }
 }
 
-TEST_CASE("flyout palettes: Cyberpunk dark has solid yellow on-segments with black icons") {
-    const PaletteMode& d = FindPalette("cyber").dark;
-    CHECK(d.on == 0xfcee0a);
-    CHECK(d.onh == 0xfcee0a);
-    CHECK(d.onic == 0x000000);
+TEST_CASE("flyout palettes: High contrast dark is white on black with grey on-segments") {
+    const PaletteMode& d = FindPalette("hicon").dark;
+    CHECK(d.menu == 0x000000);
+    CHECK(d.fg == 0xffffff);
+    CHECK(d.on == 0x707070);
+    CHECK(d.onic == 0xffffff);
 }
 
 TEST_CASE("flyout palettes: every mode is fully specified and on-state differs from off") {

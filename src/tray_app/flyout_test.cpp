@@ -2,7 +2,7 @@
 // the flyout with fake status to a PNG and exits, so the drawing can be compared with the j01
 // references in docs/design/tray-2026-10 without a desktop session or a running Wind.
 //   --light            the light theme (default dark)
-//   --palette ID       the theme: grey (default) ember cyber mono slate carbon hicon ocean; unknown = grey, like the live flyout
+//   --palette ID       the theme: grey (default) ember ocean hicon; unknown = grey, like the live flyout
 //   --dpi N            scale (96 = 1x, 192 = 2x like the reference PNGs)
 //   --hover K[:I]      hover state: toggle:1, engine, settings, quit, profile
 //   --tools            adds the #315 engine dropdown under the toggle group

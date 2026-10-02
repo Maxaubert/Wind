@@ -136,8 +136,8 @@ export const groups = [
     cards: [
       { caption: 'General', rows: [
         { key: '__theme', type: 'theme', label: 'Mode', desc: 'Light, dark or the same as the system.', def: 'auto' },
-        // Global UI-only key (uiPalette): the built-in theme, shared by Settings and the tray menu. One row of swatches.
-        { key: 'uiPalette', type: 'palette', wide: true, label: 'Theme', desc: 'The colours of Settings and the tray menu.', def: 'grey' },
+        // Global UI-only key (uiPalette): the built-in theme, shared by Settings and the tray menu. One row of mini window cards, right-aligned like the other controls.
+        { key: 'uiPalette', type: 'palette', label: 'Theme', desc: 'The colours of Settings and the tray menu.', def: 'grey' },
         { key: '__profiles', type: 'profiles', label: 'Profile', desc: 'A saved set of all settings.' },
         // Global UI-only key: shows the advanced rows of every page.
         { key: 'showAdvanced', type: 'toggle', label: 'Show advanced settings', desc: 'Shows extra options on every page.', def: 0 },

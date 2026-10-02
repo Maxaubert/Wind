@@ -2,12 +2,8 @@
 export const themes = [
   { id: 'grey', label: 'Wind grey' },
   { id: 'ember', label: 'Ember' },
-  { id: 'cyber', label: 'Cyberpunk' },
-  { id: 'mono', label: 'Mono' },
-  { id: 'slate', label: 'Slate' },
-  { id: 'carbon', label: 'Carbon' },
-  { id: 'hicon', label: 'High contrast' },
   { id: 'ocean', label: 'Deep ocean' },
+  { id: 'hicon', label: 'High contrast' },
 ];
 export const themeIds = themes.map((t) => t.id);
 export const normalizePalette = (v) => (themeIds.includes(v) ? v : 'grey');

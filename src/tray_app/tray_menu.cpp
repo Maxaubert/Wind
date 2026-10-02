@@ -36,7 +36,7 @@ bool UsesDarkTheme(const std::string& iniText) {
     return !SystemUsesLightTheme();
 }
 
-// The theme for this open: the ini's uiPalette (grey ember cyber mono slate carbon hicon ocean). Unknown or absent is
+// The theme for this open: the ini's uiPalette (grey ember ocean hicon). Unknown or absent is
 // Wind grey, like Settings. Read fresh on every open, with uiTheme above.
 int UsesPalette(const std::string& iniText) {
     auto vals = wind::ReadIniValues(iniText);

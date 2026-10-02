@@ -2,7 +2,7 @@
 // labels and the "does this pick change anything" rule are pure and unit-tested (flyout_tools.h).
 //
 // `model` is read once at Wind's launch, so a pick writes it and restarts the Wind core, with no
-// prompt. It is a SESSION change exactly like the Settings "Magnifier engine" row followed by its
+// prompt. It is a SESSION change exactly like the Settings "Engine" row followed by its
 // Restart Wind button: only the live ini is written (the active profile is not touched, so the
 // Settings Save capsule shows it as unsaved), and session.keep is dropped first so the restarted
 // Wind keeps that unsaved session instead of resetting the live ini to the profile

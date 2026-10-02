@@ -10,7 +10,7 @@ namespace wind { namespace Flyout {
 
 // ---------------------------------------------------------------- main engine dropdown
 
-// The ini key the dropdown picks (the Settings "Magnifier engine" row). Read once at Wind's launch,
+// The ini key the dropdown picks (the Settings "Engine" row). Read once at Wind's launch,
 // so a change restarts the Wind core.
 inline constexpr const char* kEngineKey = "model";
 

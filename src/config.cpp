@@ -393,7 +393,7 @@ std::string StripUiOnlyKeys(const std::string& iniText) {
 }  // namespace wind
 
 namespace wind {
-static const char* const kUiPalettes[] = { "grey", "ember", "cyber", "mono", "slate", "carbon", "hicon", "ocean" };
+static const char* const kUiPalettes[] = { "grey", "ember", "ocean", "hicon" };
 const char* const* UiPaletteIds(int& count) { count = (int)(sizeof(kUiPalettes) / sizeof(kUiPalettes[0])); return kUiPalettes; }
 std::string NormalizeUiPalette(const std::string& value) {
     const std::string v = trim(value);

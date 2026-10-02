@@ -650,14 +650,16 @@ TEST_CASE("extra-key switches default on; off clears the parsed bind but not the
 }
 TEST_CASE("uiPalette is UI-only: stripped from the core text, unknown reads grey (#318)") {
     CHECK(StripUiOnlyKeys("a=1\nuiPalette=ember\nb=2\n") == "a=1\nb=2\n");
-    CHECK(StripUiOnlyKeys("a=1\nuiPalette=ember\n") == StripUiOnlyKeys("a=1\nuiPalette=cyber\n"));
+    CHECK(StripUiOnlyKeys("a=1\nuiPalette=ember\n") == StripUiOnlyKeys("a=1\nuiPalette=hicon\n"));
     CHECK(StripUiOnlyKeys("uiPaletteX=1\n") == "uiPaletteX=1\n");
     int n = 0; const char* const* ids = UiPaletteIds(n);
-    CHECK(n == 8); CHECK(std::string(ids[0]) == "grey");
+    CHECK(n == 4); CHECK(std::string(ids[0]) == "grey");
     for (int i = 0; i < n; ++i) CHECK(NormalizeUiPalette(ids[i]) == ids[i]);
     CHECK(NormalizeUiPalette("") == "grey");
     CHECK(NormalizeUiPalette("neon") == "grey");
-    CHECK(NormalizeUiPalette("b1_mono") == "grey");                 // old mockup ids are not ini values
+    CHECK(NormalizeUiPalette("b1_hicon") == "grey");                // old mockup ids are not ini values
+    for (const char* gone : { "cyber", "mono", "slate", "carbon" }) CHECK(NormalizeUiPalette(gone) == "grey");   // removed themes
+    CHECK(std::string(ids[3]) == "hicon");                          // High contrast is always last
     CHECK(NormalizeUiPalette(" ocean ") == "ocean");
 }
 TEST_CASE("the first-run ini carries the new keys and parses to the struct defaults (#318)") {

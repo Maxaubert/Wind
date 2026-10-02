@@ -248,7 +248,7 @@ inline const SliderSpec* SliderSpecs(int* count) {
         { "maxLevel",       L"Max zoom",       2,    50,   12,   ValueFmt::TimesInt, "maxz", 1 },
         { "zoomInSpeed",    L"Zoom-in speed",  0.25, 4,    1,    ValueFmt::Times2,   "zin", 0.05 },
         { "zoomOutSpeed",   L"Zoom-out speed", 0.25, 4,    1,    ValueFmt::Times2,   "zout", 0.05 },
-        { "panSpeed",       L"Pan speed",      0.25, 4,    1,    ValueFmt::Times2,   "pan", 0.05 },
+        { "panSpeed",       L"Arrow key speed", 0.25, 4,    1,    ValueFmt::Times2,   "pan", 0.05 },
         { "cursorSmoothing",L"Pan smoothing",  0,    0.95, 0.4,  ValueFmt::Dec2,     "smooth", 0.05 },
         { "zoomEaseOutMs",  L"Release glide",  0,    300,  45,   ValueFmt::Millis,   "glide", 5 },
     };
@@ -273,7 +273,7 @@ inline const ToggleSpec* FindToggleSpec(const std::string& key) {
         { "trackCaret", L"Follow the text cursor",  "ftc" },
         { "trackFocus", L"Follow keyboard focus",   "ffk" },
         { "keepEdges",  L"Keep cursor centred",     "edges" },
-        { "engine",     L"Magnifier engine",        "engine" },
+        { "engine",     L"Engine",                 "engine" },
     };
     for (const auto& t : k) if (key == t.key) return &t;
     return nullptr;

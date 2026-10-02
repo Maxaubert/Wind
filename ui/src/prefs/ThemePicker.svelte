@@ -1,7 +1,7 @@
 <script>
-  // Theme picker: ONE row of small swatch buttons with the theme name under each, scrolling sideways when
-  // the window is too narrow for all of them. Isolated here on purpose: the final picker layout is Max's
-  // pick from his mockups (ia/picker.html), and only this file changes when it lands.
+  // Theme picker (mockup option A, Max 2026-10-02): ONE row of mini window preview cards with the theme name
+  // under each and the selected card outlined. There are four themes, so they always fit: no scrolling, no
+  // arrow buttons, no edge fades. Left/Right (and Up/Down, Home, End) move the selection and apply it.
   // Each swatch is a tiny window drawn with that theme's real tokens: it is its own .wnd element carrying
   // data-palette and data-theme, so themes.css colours it with no colour values duplicated in JS.
   //   value     the palette id (uiPalette)      mode  the RESOLVED mode, dark or light
@@ -19,7 +19,7 @@
     if (n === null) return;
     e.preventDefault();
     onChange(themes[n].id);
-    setTimeout(() => { const b = el && el.querySelectorAll('button')[n]; if (b) { b.focus(); b.scrollIntoView({ inline: 'nearest', block: 'nearest' }); } }, 0);
+    setTimeout(() => { const b = el && el.querySelectorAll('button')[n]; if (b) b.focus(); }, 0);
   }
 </script>
 
@@ -37,15 +37,14 @@
 </div>
 
 <style>
-  /* The strip never wraps: one row, scrolls sideways. */
-  .strip { display: flex; flex-wrap: nowrap; gap: 6px; max-width: 100%; overflow-x: auto; padding: 2px 2px 8px;
-           scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--fg) 22%, transparent) transparent; }
-  .th { flex: none; min-width: 92px; padding: 4px; border: 1px solid transparent; border-radius: var(--rc); text-align: left;
+  /* One row, never wraps, never scrolls: four cards of 106px (they shrink a little before anything overflows). */
+  .strip { display: flex; flex-wrap: nowrap; justify-content: flex-end; gap: 6px; max-width: 100%; padding: 3px 0; }
+  .th { flex: 0 1 auto; width: 106px; min-width: 84px; padding: 4px; border: 1px solid transparent; border-radius: var(--rc); text-align: left;
         color: var(--fg3); }
-  .th:hover { background: var(--hover); color: var(--fg); }
-  .th.on { border-color: var(--fg); color: var(--fg); }
-  .th:focus-visible { outline-offset: -2px; }
-  .nm { display: block; margin: 6px 2px 1px; font: 11.5px var(--m); white-space: nowrap; }
+  .th:hover { border-color: var(--chipb); color: var(--fg); }
+  .th.on { border-color: var(--fg); box-shadow: inset 0 0 0 1px var(--fg); color: var(--fg); }
+  .th:focus-visible { outline-offset: 2px; }
+  .nm { display: block; margin: 5px 2px 1px; font: 11px var(--m); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   /* The mini window. It is a .wnd of its own, so these colours are that theme's tokens. */
   .sw { display: block; position: relative; height: 52px; border-radius: var(--srad); background: var(--bg);
