@@ -35,6 +35,16 @@ struct Config {
     // Scroll-wheel zoom (#285): the modifiers that make the wheel zoom (0 = off; never Shift alone,
     // Ctrl alone is fine, #295). Its speed follows zoomInSpeed/zoomOutSpeed.
     int    zoomWheelMods    = 0;
+    // Wheel up / down as ZOOM binds (#318): button code 6 = wheel up, 7 = wheel down in any of the
+    // four zoom button slots (zoomInButton, zoomInButton2, zoomOutButton, zoomOutButton2 + their
+    // Mods). One wheel notch zooms one step; the notch is swallowed only with the mods held.
+    // zoomWheelMods above is the LEGACY form: MigrateWheelMods moves it into free slots once.
+    // Extra-key switches (#318, per profile, default 1). 0 = the key is not bound, not swallowed and
+    // not registered with RegisterHotKey; the binding itself stays in the ini (the UI shows it dimmed).
+    // ParseConfig zeroes the matching *Vk/*Mods fields when a switch is 0, so every consumer is gated.
+    int    panKeysOn        = 1;     // the four keyboard pan binds
+    int    hideCursorOn     = 1;     // hideCursorVk
+    int    cursorLockOn     = 1;     // cursorLockVk (Inspect mode)
     int    recenterVk       = 0;     // VK code; 0 = unbound. Tap to recenter the lens on the cursor.
     int    recenterMods     = 0;     // its modifiers (#307: every bind takes 0-4 modifiers + one key)
     int    cursorLockVk     = 0;     // VK code; 0 = unbound. Tap to toggle Inspect mode (cursor lock)
@@ -613,6 +623,18 @@ bool IsExeInList(const std::string& exeName, const std::string& list);
 // the reload when nothing it consumes changed. 'profile' stays IN: the core mirrors setConfig
 // into the active profile, so a profile change must still reload.
 std::string StripUiOnlyKeys(const std::string& iniText);
+// The built-in Settings/tray palette ids (#318), in picker order. uiPalette is a global UI-only ini
+// key (never read by the core's zoom code); NormalizeUiPalette maps anything unknown or empty to
+// "grey" so the Settings app and the tray flyout agree on a bad value.
+const char* const* UiPaletteIds(int& count);
+std::string NormalizeUiPalette(const std::string& value);
+// One-time ini migration (#318): zoomWheelMods (the old "wheel zooms with these modifiers" key) moves
+// into the zoom button slots as codes 6/7: wheel up + the mods in a free Zoom in slot, wheel down +
+// the mods in a free Zoom out slot, then zoomWheelMods=0. Pure text transform. When either direction
+// has no free slot nothing changes (zoomWheelMods stays and the core keeps honouring it) and
+// `blocked` is set so the caller can log it. `changed` is true when the text was rewritten.
+struct WheelMigration { std::string text; bool changed = false; bool blocked = false; };
+WheelMigration MigrateWheelMods(const std::string& iniText);
 // Pure: parse "#rrggbb" or "rrggbb" (case-insensitive) into r,g,b floats in [0,1]. Returns
 // false on any malformed input (wrong length, non-hex), leaving the outputs untouched so the
 // caller keeps its fallback default.

@@ -33,7 +33,8 @@ test('onboarding walks 3 steps, applies keys on advance, sets onboarded', async 
 
 test('settings mode does not show onboarding', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByText('Zoom-in speed')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Hotkeys' })).toBeVisible();   // Settings opens on Hotkeys
+  await expect(page.getByText('Zoom-in speed')).toHaveCount(0);
 });
 
 test('onboarding saves the modifiers of a click bind (#285)', async ({ page }) => {

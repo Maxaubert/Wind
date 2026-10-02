@@ -7,12 +7,13 @@
   // so they are never "unsaved" and a later Save cannot lose them.
   import { onMount, tick } from 'svelte';
   import './design/tokens.css';
+  import './design/themes.css';
   import { groups } from './settings-schema.js';
   import { getSession, setConfig, setConfigPersist, saveSession, discardSession, openIni,
            exportDiagnostics, openRepo, pickExe, windowControl, onMessage, getMpoState,
-           setMpoDisabled, rebootNow, setDirty, switchProfile, createProfile, renameProfile,
-           duplicateProfile, deleteProfile } from './bridge.js';
-  import { fill, changedKeys } from './session.js';
+           setMpoDisabled, rebootNow, setDirty, switchProfile, createProfile, deleteProfile } from './bridge.js';
+  import { fill, changedKeys, GLOBAL_KEYS } from './session.js';
+  import { themes, normalizePalette } from './design/themes.js';
   import { applyTheme, setTheme } from './theme.js';
   import { droppedBinds } from './lib/keybindRules.js';
   import TitleBar from './shell/TitleBar.svelte';
@@ -23,6 +24,7 @@
   import SettingRow from './controls/SettingRow.svelte';
   import Prompt from './prompts/Prompt.svelte';
   import Results from './search/Results.svelte';
+  import NewProfileDialog from './prefs/NewProfileDialog.svelte';
   import TrayMenuPage from './tray/TrayMenuPage.svelte';
   import { search } from './search/search.js';
 
@@ -33,13 +35,14 @@
   let saved = $state({});
   let themeMode = $state('auto');
   let prof = $state({ names: [], active: '' });
-  let activeId = $state('zoom');
+  let activeId = $state('hotkeys');   // Settings opens on Hotkeys
   let loaded = $state(false);
   let main = $state();
+  let maximized = $state(false);
+  let revealKey = $state('');   // an advanced row opened by a search result while the switch is off
 
-  const side = groups.filter((g) => g.id !== 'advanced' && g.id !== 'about' && g.id !== 'tray');
-  const trayGroup = groups.filter((g) => g.id === 'tray');
-  const expert = groups.filter((g) => g.id === 'advanced' || g.id === 'about');
+  const top = groups.filter((g) => !g.bottom);
+  const bottom = groups.filter((g) => g.bottom);   // below the sidebar divider
   const group = $derived(groups.find((g) => g.id === activeId) || groups[0]);
   const count = $derived(loaded ? changedKeys(values, saved).length : 0);
   const dirty = $derived(count > 0);
@@ -48,6 +51,8 @@
   // Effective palette: auto resolves against the system setting.
   let systemDark = $state(typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches);
   const effTheme = $derived(themeMode === 'light' ? 'light' : themeMode === 'dark' ? 'dark' : (systemDark ? 'dark' : 'light'));
+  // The built-in theme (uiPalette, a global key) plus the resolved mode pick the token block in design/themes.css.
+  const palette = $derived(normalizePalette(values.uiPalette));
 
   // --- Screen-reader announcements ------------------------------------------------------------
   let announcement = $state('');
@@ -96,6 +101,7 @@
   // --- Changes --------------------------------------------------------------------------------
   function change(key, val) {
     if (key === 'model') announce('Magnifier model set to ' + val + '. Some display options changed.');
+    if (key === 'uiPalette') announce('Theme ' + (themes.find((t) => t.id === val)?.label ?? val));
     const prev = values[key];
     values = { ...values, [key]: val };
     setConfig(key, val);
@@ -115,7 +121,7 @@
     const offs = [
       onMessage((m) => { if (m && m.type === 'configWriteFailed') writeError = m.key || 'a setting'; }),
       // Maximized: no window outline (the host reports the state on every resize).
-      onMessage((m) => { if (m && m.type === 'windowState') document.documentElement.toggleAttribute('data-maximized', !!m.maximized); }),
+      onMessage((m) => { if (m && m.type === 'windowState') { maximized = !!m.maximized; document.documentElement.toggleAttribute('data-maximized', maximized); } }),
       onMessage((m) => {
         if (m && m.type === 'restartFailed') {
           values = { ...values, model: runningModel }; setConfig('model', runningModel);
@@ -159,13 +165,16 @@
   }
 
   // --- Profiles -------------------------------------------------------------------------------
-  // Switching, creating and deleting the ACTIVE profile replace the session, so with unsaved changes
-  // they ask first (Save / Discard / Cancel). Rename, duplicate and deleting another profile do not.
+  // Switching, creating from the defaults and deleting the ACTIVE profile replace the session, so with
+  // unsaved changes they ask first (Save / Discard / Cancel). Deleting another profile does not, and neither
+  // does a new profile that starts from the current settings: the unsaved changes carry into it.
   let profilePrompt = $state(null);   // pending { kind, payload }
   let profileError = $state('');
+  let newDialog = $state(false);      // the New profile dialog
+  let deleteTarget = $state('');      // the profile the delete confirmation is about ('' = closed)
   function profileAction(kind, payload) {
     const deletesActive = kind === 'delete' && payload.name.toLowerCase() === prof.active.toLowerCase();
-    const replaces = kind === 'switch' || kind === 'create' || deletesActive;
+    const replaces = kind === 'switch' || (kind === 'create' && payload.from !== 'current') || deletesActive;
     if (replaces && dirty) { profilePrompt = { kind, payload }; return; }
     runProfileAction(kind, payload);
   }
@@ -178,11 +187,10 @@
   async function runProfileAction(kind, payload) {
     profileError = '';
     const prevActive = prof.active;
+    const snapshot = { ...values };   // what "start from the current settings" copies
     let r;
     if (kind === 'switch') r = await switchProfile(payload.name);
     else if (kind === 'create') r = await createProfile(payload.name);
-    else if (kind === 'rename') r = await renameProfile(payload.from, payload.to);
-    else if (kind === 'duplicate') r = await duplicateProfile(payload.name);
     else if (kind === 'delete') r = await deleteProfile(payload.name);
     else return;
     prof = { names: r.names, active: r.active };
@@ -190,9 +198,18 @@
     if (kind === 'switch' || kind === 'create' || (kind === 'delete' && r.active !== prevActive)) await load();
     if (!r.ok) { profileError = r.error || 'Profile operation failed'; return; }
     if (kind === 'switch') announce('Switched to profile ' + payload.name + '. Settings reloaded.');
-    else if (kind === 'create') { announce('Created profile ' + payload.name + '. Settings reset to defaults.'); select('zoom'); }
-    else if (kind === 'rename') announce('Renamed profile to ' + payload.to);
-    else if (kind === 'duplicate') announce('Duplicated profile ' + payload.name);
+    else if (kind === 'create' && payload.from === 'current') {
+      // The host starts a new profile from the defaults, so write the current settings into it. Persisted
+      // (profile file and live ini), so the new profile holds them and nothing shows as unsaved.
+      const patch = {};
+      for (const k of Object.keys(snapshot)) {
+        if (GLOBAL_KEYS.has(k) || k[0] === '_') continue;
+        if (String(snapshot[k]) !== String(values[k])) patch[k] = snapshot[k];
+      }
+      live(patch);
+      announce('Created profile ' + payload.name + ' from the current settings.');
+    }
+    else if (kind === 'create') announce('Created profile ' + payload.name + ' with the default settings.');
     else if (kind === 'delete') announce('Deleted profile ' + payload.name);
   }
 
@@ -223,6 +240,7 @@
   function clearSearch() { query = ''; const i = searchInput(); if (i) i.value = ''; }
   async function jump(hit) {
     clearSearch();
+    revealKey = hit.adv ? hit.key : '';
     await select(hit.groupId);
     const row = main && main.querySelector('[data-key="' + hit.key + '"]');
     if (row) {
@@ -256,28 +274,31 @@
     else if (a === 'quitWind') requestQuit();
   }
   const visible = (r) => !r.showIf || String(values[r.showIf.key]) === String(r.showIf.eq);
+  // Advanced rows show only while the global switch is on, with one exception: the row a search result
+  // opened (revealKey) shows on its own and turns nothing on.
+  const advOn = $derived(Number(values.showAdvanced) === 1);
+  const shown = (r) => visible(r) && (!r.adv || advOn || r.key === revealKey);
   const extra = $derived({
     mpoNeedsRestart, runningModel, version: VERSION, theme: themeMode, onTheme, onRepo: openRepo,
     onAction, pick: pickExe,
     onRestart: () => { restartError = false; windowControl('restartWind'); },
+    mode: effTheme,
     profiles: {
       names: prof.names, active: prof.active,
       onSwitch: (name) => profileAction('switch', { name }),
-      onCreate: (name) => profileAction('create', { name }),
-      onRename: (from, to) => profileAction('rename', { from, to }),
-      onDuplicate: (name) => profileAction('duplicate', { name }),
-      onDelete: (name) => profileAction('delete', { name }),
+      onNew: () => (newDialog = true),
+      onDelete: (name) => (deleteTarget = name),
     },
   });
 </script>
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="wnd app" data-theme={effTheme}>
-  <TitleBar {themeMode} onTheme={onTheme} onMinimize={() => windowControl('minimize')} onClose={requestClose} />
+<div class="wnd app" data-palette={palette} data-theme={effTheme}>
+  <TitleBar {maximized} onMinimize={() => windowControl('minimize')} onMaximize={() => windowControl('maximize')} onClose={requestClose} />
   <div class="body">
-    <Sidebar groups={side} tray={trayGroup} {expert} active={searching ? '' : activeId} version={VERSION} {query} {onSearch}
-             onSelect={(id) => { clearSearch(); select(id); }} />
+    <Sidebar groups={top} {bottom} active={searching ? '' : activeId} version={VERSION} {query} {onSearch}
+             onSelect={(id) => { revealKey = ''; clearSearch(); select(id); }} />
     <main class="main" data-page={searching ? 'search' : group.id} bind:this={main} tabindex="-1" aria-label={group.label}>
       {#key searching ? '?search' : activeId}
       <div class="page" class:fade={navigated}>
@@ -286,12 +307,15 @@
       {:else}
       <Banner title={group.label} description={group.desc} icon={group.icon} />
       {#each group.cards as card, i (group.id + i)}
+        {@const rows = card.rows.filter(shown)}
+        {#if rows.length}
         <Card caption={card.caption}>
-          {#each card.rows.filter(visible) as r (r.key)}
+          {#each rows as r (r.key)}
             <SettingRow row={r} value={values[r.key]} {values} {extra} {live}
-                        onChange={(v) => change(r.key, v)} />
+                        onChange={(v) => change(r.key, v)} onSet={change} />
           {/each}
         </Card>
+        {/if}
       {/each}
       {#if group.custom === 'tray'}
         <TrayMenuPage {values} onChange={change} {announce} />
@@ -328,6 +352,16 @@
             buttons={[{ label: 'Cancel', onClick: () => (profilePrompt = null) },
                       { label: 'Discard', onClick: () => resolveProfilePrompt('discard') },
                       { label: 'Save', kind: 'primary', onClick: () => resolveProfilePrompt('save') }]} />
+  {/if}
+  {#if newDialog}
+    <NewProfileDialog names={prof.names} current={prof.active} onCancel={() => (newDialog = false)}
+                      onCreate={({ name, from }) => { newDialog = false; profileAction('create', { name, from }); }} />
+  {/if}
+  {#if deleteTarget}
+    <Prompt id="pdel" title="Delete profile" text={'Delete "' + deleteTarget + '"? This cannot be undone.'}
+            onEsc={() => (deleteTarget = '')}
+            buttons={[{ label: 'Cancel', onClick: () => (deleteTarget = '') },
+                      { label: 'Delete', kind: 'danger', onClick: () => { const name = deleteTarget; deleteTarget = ''; profileAction('delete', { name }); } }]} />
   {/if}
   {#if mpoRestartPrompt}
     <Prompt id="mpo" title="Restart to finish"

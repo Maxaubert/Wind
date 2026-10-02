@@ -13,6 +13,6 @@
 
 <style>
   .hr { display: inline-flex; align-items: center; gap: 10px; }
-  .tag { background: var(--chip); color: var(--fg3); border: 1px solid var(--chipb); border-radius: 999px;
+  .tag { background: var(--chip); color: var(--fg3); border: 1px solid var(--chipb); border-radius: var(--rp);
          padding: 2px 9px; font-size: 11px; white-space: nowrap; }
 </style>

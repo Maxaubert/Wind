@@ -2,6 +2,7 @@
 // colours and metrics are the j01-calm-tint tokens.
 #include "flyout_draw.h"
 #include "flyout_icons.h"
+#include "flyout_palettes.h"
 #include "svg_path.h"
 #include "../resource.h"
 #include <d2d1helper.h>
@@ -44,32 +45,28 @@ D2D1_COLOR_F Col(unsigned rgb, float a = 1.f) {
 }
 
 struct Theme {
-    D2D1_COLOR_F menu, card, menub, fg, fg2, fg3, rule, hl, glyph, teal, lift, scrim, band, track;
-    D2D1_COLOR_F off, offh, offic, onic, on, onh, onb, segline;
-    float aurora;       // --ac
+    D2D1_COLOR_F menu, card, menub, fg, fg2, fg3, rule, hl, glyph, teal, spark, lift, scrim, band, track;
+    D2D1_COLOR_F off, offh, offic, onic, on, onh, onb, segline, focus, fillline, ring;
+    float aurora;       // header image opacity (--bnop * 3.4)
+    float rc, rk, rs, listRad;   // window, control, small and list popup radii in DIPs
     bool dark;
 };
 
-Theme MakeTheme(bool dark) {
+// The theme for one palette (flyout_palettes.h, generated from the Settings theme sources) and mode.
+Theme MakeTheme(bool dark, int palette) {
+    const FlyoutPalette& fp = PaletteAt(palette);
+    const PaletteMode& m = dark ? fp.dark : fp.light;
     Theme t;
     t.dark = dark;
-    if (dark) {
-        t.menu = Col(0x000000); t.card = Col(0x121212); t.menub = Col(0x333333); t.fg = Col(0xf2f2f2); t.fg2 = Col(0xd0d0d0);
-        t.fg3 = Col(0xb4b6ba); t.rule = Col(0x303236); t.hl = Col(0x2d2d2d); t.glyph = Col(0xb0b0b0);
-        t.teal = Col(0x2fbfa5); t.lift = Col(0x0b0b0b); t.scrim = Col(0x000000, .55f);
-        t.band = Col(0x0a0a0a); t.track = Col(0x3d3d3d);
-        t.off = Col(0x303033); t.offh = Col(0x3b3b3f); t.offic = Col(0xc8cad0); t.onic = Col(0xa9ece0);
-        t.on = Col(0x1f5650); t.onh = Col(0x266560); t.onb = Col(0x2fbfa5, .4f); t.segline = Col(0x000000);
-        t.aurora = .62f;
-    } else {
-        t.menu = Col(0xffffff); t.card = Col(0xffffff); t.menub = Col(0xd9d9d9); t.fg = Col(0x0a0a0a); t.fg2 = Col(0x2e2e2e);
-        t.fg3 = Col(0x45484d); t.rule = Col(0xc6c9ce); t.hl = Col(0xececec); t.glyph = Col(0x555555);
-        t.teal = Col(0x087a67); t.lift = Col(0xf6f7f8); t.scrim = Col(0xffffff, .78f);
-        t.band = Col(0xf1f2f4); t.track = Col(0xd0d3d6);
-        t.off = Col(0xe5e6e8); t.offh = Col(0xdadbde); t.offic = Col(0x3d4147); t.onic = Col(0x0a5a4d);
-        t.on = Col(0xbfe2db); t.onh = Col(0xb2d9d1); t.onb = Col(0x087a67, .4f); t.segline = Col(0xffffff);
-        t.aurora = .85f;
-    }
+    t.menu = Col(m.menu); t.card = Col(m.card); t.menub = Col(m.menub); t.fg = Col(m.fg); t.fg2 = Col(m.fg2); t.fg3 = Col(m.fg3);
+    t.rule = Col(m.rule); t.hl = Col(m.hl); t.glyph = Col(m.glyph); t.teal = Col(m.fill); t.spark = Col(m.spark);
+    t.lift = Col(m.lift); t.scrim = Col(m.scrim, m.scrimA); t.band = Col(m.band); t.track = Col(m.track);
+    t.off = Col(m.off); t.offh = Col(m.offh); t.offic = Col(m.offic); t.onic = Col(m.onic); t.on = Col(m.on); t.onh = Col(m.onh);
+    t.onb = Col(m.onb, m.onbA); t.segline = Col(m.segline); t.focus = Col(m.focus); t.fillline = Col(m.fillline, m.filllineA);
+    t.ring = Col(m.ring);
+    t.aurora = m.aurora;
+    t.rc = (float)fp.rc; t.rk = (float)fp.rk; t.rs = (float)fp.rs;
+    t.listRad = ListRadiusFor(fp);
     return t;
 }
 
@@ -89,6 +86,42 @@ void LightenAurora(std::vector<BYTE>& px) {
         b = clamp01((0.213f - 0.213f * s) * r2 + (0.715f - 0.715f * s) * g2 + (0.072f + 0.928f * s) * b2);
         r = clamp01((r - .5f) * 1.25f + .5f); g = clamp01((g - .5f) * 1.25f + .5f); b = clamp01((b - .5f) * 1.25f + .5f);
         px[i] = (BYTE)(b * 255.f + .5f); px[i + 1] = (BYTE)(g * 255.f + .5f); px[i + 2] = (BYTE)(r * 255.f + .5f);
+    }
+}
+
+// Bakes the header image for a palette that needs more than the plain opacity: an inverted light image
+// and/or the CSS `mix-blend-mode: color` tint the mockup lays over it (tray08.css .thead::before/::after).
+// Result = backdrop (band + image at `aurora` opacity), then the tint's hue and saturation over that
+// backdrop's luminosity at `tintA`. Opaque premultiplied BGRA, to be drawn at full opacity.
+void BakeAurora(const std::vector<BYTE>& src, const PaletteMode& m, std::vector<BYTE>& out) {
+    auto ch = [](unsigned rgb, int sh) { return ((rgb >> sh) & 0xff) / 255.f; };
+    auto lum = [](float r, float g, float b) { return .3f * r + .59f * g + .11f * b; };
+    const float band[3] = { ch(m.band, 16), ch(m.band, 8), ch(m.band, 0) };
+    const float tint[3] = { ch(m.tint, 16), ch(m.tint, 8), ch(m.tint, 0) };
+    const float o = m.aurora > 1.f ? 1.f : m.aurora;
+    out.resize(src.size());
+    for (size_t i = 0; i + 3 < src.size(); i += 4) {
+        const float a = src[i + 3] / 255.f;
+        float c[3] = { 0, 0, 0 };
+        if (a > 0.f) { c[0] = src[i + 2] / 255.f / a; c[1] = src[i + 1] / 255.f / a; c[2] = src[i] / 255.f / a; }   // straight RGB
+        if (m.invert) for (float& v : c) v = 1.f - v;
+        const float k = o * a;
+        float cb[3];
+        for (int j = 0; j < 3; ++j) cb[j] = band[j] * (1.f - k) + c[j] * k;
+        if (m.tintA > 0.f) {
+            // SetLum(tint, Lum(backdrop)) with ClipColor, per the compositing spec
+            const float d = lum(cb[0], cb[1], cb[2]) - lum(tint[0], tint[1], tint[2]);
+            float t[3] = { tint[0] + d, tint[1] + d, tint[2] + d };
+            const float l = lum(t[0], t[1], t[2]);
+            const float n = (std::min)({ t[0], t[1], t[2] }), x = (std::max)({ t[0], t[1], t[2] });
+            for (float& v : t) {
+                if (n < 0.f && l - n > 0.f) v = l + (v - l) * l / (l - n);
+                if (x > 1.f && x - l > 0.f) v = l + (v - l) * (1.f - l) / (x - l);
+            }
+            for (int j = 0; j < 3; ++j) cb[j] = cb[j] * (1.f - m.tintA) + (t[j] < 0.f ? 0.f : (t[j] > 1.f ? 1.f : t[j])) * m.tintA;
+        }
+        out[i] = (BYTE)(cb[2] * 255.f + .5f); out[i + 1] = (BYTE)(cb[1] * 255.f + .5f); out[i + 2] = (BYTE)(cb[0] * 255.f + .5f);
+        out[i + 3] = 255;
     }
 }
 
@@ -240,6 +273,8 @@ struct Painter::Impl {
     const std::vector<BYTE>* auroraPx = nullptr;
     UINT auroraW = 0, auroraH = 0;          // cache key (device px)
     Theme th;
+    std::vector<BYTE> auroraBaked;          // this palette's header image when it needs baking
+    float auroraOpacity = 1.f;              // the opacity to draw auroraPx at
 
     void fill(const D2D1_RECT_F& r, const D2D1_COLOR_F& c) { br->SetColor(c); rt->FillRectangle(r, br.Get()); }
     void fillRound(const D2D1_RECT_F& r, float rad, const D2D1_COLOR_F& c) {
@@ -397,7 +432,7 @@ void Painter::Impl::drawHead(const View& v, const Geometry& g) {
     fill(h, th.band);
     if (prepareAurora(W, H)) {
         // background: right center / cover, drawn 1:1 from the pre-scaled copy
-        rt->DrawBitmap(aurora.Get(), h, th.aurora, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
+        rt->DrawBitmap(aurora.Get(), h, auroraOpacity, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
         // mask-image: linear-gradient(90deg, transparent 15%, #000 70%) == the band colour fades the
         // image back out on the left.
         auto m = gradient(D2D1::Point2F(h.left, 0), D2D1::Point2F(h.right, 0),
@@ -446,7 +481,7 @@ void Painter::Impl::drawHead(const View& v, const Geometry& g) {
                 }
                 sink->EndFigure(D2D1_FIGURE_END_OPEN);
                 sink->Close();
-                br->SetColor(th.teal);
+                br->SetColor(th.spark);
                 rt->DrawGeometry(pg.Get(), br.Get(), 1.5f, trace.Get());
             }
         } else {
@@ -466,7 +501,12 @@ void Painter::Impl::drawQuick(const View& v, const Geometry& g) {
         const IRect& tr = g.sliderTrack[i];
         fillRound(R(tr), 3.f, th.track);
         const float x = (float)tr.l + (float)tr.w() * (float)s.frac;
-        if (x > (float)tr.l) fillRound(D2D1::RectF((float)tr.l, (float)tr.t, x, (float)tr.b), 3.f, th.teal);
+        if (x > (float)tr.l) {
+            const D2D1_RECT_F fr = D2D1::RectF((float)tr.l, (float)tr.t, x, (float)tr.b);
+            fillRound(fr, 3.f, th.teal);
+            if (th.fillline.a > 0.f)   // box-shadow 0 0 0 1px --fillline
+                ring(D2D1::RectF(fr.left - 1.f, fr.top - 1.f, fr.right + 1.f, fr.bottom + 1.f), 4.f, th.fillline);
+        }
         const float mid = (float)(tr.t + tr.b) / 2.f;
         fillRound(D2D1::RectF(x - 3.f, mid - 5.f, x, mid + 5.f), 1.5f, th.fg);
         text(s.text, g_s.mono12.Get(), R(g.sliderValue[i]), th.fg, DWRITE_TEXT_ALIGNMENT_TRAILING);
@@ -484,7 +524,7 @@ void Painter::Impl::drawQuick(const View& v, const Geometry& g) {
         const float h = anim ? a.chipHot[i] : (hot ? 1.f : 0.f);
         const float o = anim ? a.chipOn[i] : (t.on ? 1.f : 0.f);
         float rad[4];
-        segRadii(i, nseg, (float)kSegRadius, rad);
+        segRadii(i, nseg, th.rk, rad);
         if (auto pg = cornerPath(r, rad[0], rad[1], rad[2], rad[3])) {
             br->SetColor(Mix(Mix(th.off, th.offh, h), Mix(th.on, th.onh, h), o));
             rt->FillGeometry(pg.Get(), br.Get());
@@ -493,14 +533,17 @@ void Painter::Impl::drawQuick(const View& v, const Geometry& g) {
         icon(t.icon, (r.left + r.right) / 2.f - 8.f, (r.top + r.bottom) / 2.f - 8.f,
              Mix(Mix(th.offic, th.fg, h), th.onic, o), 1.75f);
     }
+    // The bar's 1 px outline, like Settings' segmented controls (--chipb).
+    if (nseg > 0)
+        ring(D2D1::RectF((float)g.seg[0].l, (float)g.seg[0].t, (float)g.seg[nseg - 1].r, (float)g.seg[nseg - 1].b), th.rk, th.ring);
     // The engine dropdown (mockup v02): a full-width --off field, the engine glyph and the current
     // value (mono 12) at the left, a chevron at the right that flips while the list is open, with a
     // 1 px --onb inset ring while open.
     if (v.hasEngine && g.engine.w() > 0) {
         const D2D1_RECT_F r = R(g.engine);
         const float h = a.active ? a.engHot : (v.hover.kind == HitKind::Engine ? 1.f : 0.f);
-        fillRound(r, (float)kSegRadius, Mix(th.off, th.offh, h));
-        if (v.engine.open) ring(r, (float)kSegRadius, th.onb);
+        fillRound(r, th.rk, Mix(th.off, th.offh, h));
+        ring(r, th.rk, v.engine.open ? th.onb : th.ring);
         icon(v.engine.icon, r.left + 10.f, (r.top + r.bottom) / 2.f - 8.f, th.glyph, 1.5f);
         text(v.engine.value, g_s.mono12.Get(), D2D1::RectF(r.left + 10.f + 16.f + 10.f, r.top, r.right - 10.f - 14.f - 6.f, r.bottom),
              th.fg, DWRITE_TEXT_ALIGNMENT_LEADING);
@@ -521,7 +564,7 @@ void Painter::Impl::drawBar(const View& v, const Geometry& g) {
         const D2D1_RECT_F r = R(*b.r);
         if (a.active) pressBegin(r, a.btnPress[bi]);
         ++bi;
-        if (hot) fillRound(r, 8.f, WithAlpha(th.hl, th.hl.a * h));
+        if (hot) fillRound(r, th.rk, WithAlpha(th.hl, th.hl.a * h));
         const float ix = b.k == HitKind::Profile ? r.left + 8.f : r.left + (r.right - r.left - 16.f) / 2.f;
         icon(b.icon, ix, r.top + 8.f, Mix(th.glyph, th.fg, h), 1.5f);
         if (b.k == HitKind::Profile)
@@ -534,11 +577,11 @@ void Painter::Impl::drawBar(const View& v, const Geometry& g) {
 Painter::Painter() : d_(new Impl) {}
 Painter::~Painter() { delete d_; }
 
-bool Painter::Init(ID2D1RenderTarget* rt, bool dark) {
+bool Painter::Init(ID2D1RenderTarget* rt, bool dark, int palette) {
     static const float kDots[2] = { 1.f, 3.f };
     if (!rt || !g_s.ok) return false;
     d_->rt = rt;
-    d_->th = MakeTheme(dark);
+    d_->th = MakeTheme(dark, palette);
     // ClearType like the browser reference: it needs opaque pixels under the glyphs, which the clip
     // layer below provides (INITIALIZE_FOR_CLEARTYPE); outside it the target falls back to grayscale.
     rt->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
@@ -550,7 +593,16 @@ bool Painter::Init(ID2D1RenderTarget* rt, bool dark) {
     g_s.d2d->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT,
                                D2D1_CAP_STYLE_FLAT, D2D1_LINE_JOIN_MITER, 10.f, D2D1_DASH_STYLE_CUSTOM, 0.f),
                                kDots, 2, &d_->dotted);
-    d_->auroraPx = dark ? &g_s.auroraDark : &g_s.auroraLight;
+    const PaletteMode& pm = PaletteFor(palette, dark);
+    d_->auroraOpacity = d_->th.aurora;
+    d_->auroraPx = &g_s.auroraDark;
+    if (pm.legacyLight) {
+        d_->auroraPx = &g_s.auroraLight;   // Wind grey light: the j01 reference's filter chain
+    } else if (!g_s.auroraDark.empty() && (pm.invert || pm.tintA > 0.f)) {
+        BakeAurora(g_s.auroraDark, pm, d_->auroraBaked);
+        d_->auroraPx = &d_->auroraBaked;
+        d_->auroraOpacity = 1.f;
+    }
     return true;
 }
 
@@ -573,20 +625,20 @@ void Painter::Draw(const View& v, const Geometry& g) {
         if (fr.w() > 0 && v.focus.kind == HitKind::Toggle) {
             // A segment of the group: only the outer ends of the bar are rounded.
             float rad[4];
-            d.segRadii((size_t)v.focus.index, g.seg.size(), 7.f, rad);
+            d.segRadii((size_t)v.focus.index, g.seg.size(), (std::max)(d.th.rk - 1.f, 0.5f), rad);
             if (auto pg = d.cornerPath(D2D1::RectF((float)fr.l + 1.f, (float)fr.t + 1.f, (float)fr.r - 1.f, (float)fr.b - 1.f),
                                        rad[0], rad[1], rad[2], rad[3])) {
-                d.br->SetColor(d.th.fg);
+                d.br->SetColor(d.th.focus);
                 d.rt->DrawGeometry(pg.Get(), d.br.Get(), 2.f);
             }
         } else if (fr.w() > 0) {
-            d.br->SetColor(d.th.fg);   // the Settings focus colour (--fg), not the accent
+            d.br->SetColor(d.th.focus);   // the theme's --focus
             d.rt->DrawRoundedRectangle(D2D1::RoundedRect(D2D1::RectF((float)fr.l + 1.f, (float)fr.t + 1.f,
-                                                                    (float)fr.r - 1.f, (float)fr.b - 1.f), 7.f, 7.f),
+                                                                    (float)fr.r - 1.f, (float)fr.b - 1.f), (std::max)(d.th.rk - 1.f, 0.5f), (std::max)(d.th.rk - 1.f, 0.5f)),
                                        d.br.Get(), 2.f);
         }
     }
-    d.ring(D2D1::RectF(0, 0, W, H), (float)kRadius, d.th.menub);
+    d.ring(D2D1::RectF(0, 0, W, H), d.th.rc, d.th.menub);
 }
 
 void Painter::DrawList(const ListView& v, const ListGeometry& g) {
@@ -603,14 +655,14 @@ void Painter::DrawList(const ListView& v, const ListGeometry& g) {
                d.th.fg3, DWRITE_TEXT_ALIGNMENT_LEADING);
     for (size_t i = 0; i < v.names.size() && i < g.row.size(); ++i) {
         const D2D1_RECT_F r = d.R(g.row[i]);
-        if ((int)i == v.sel) d.fillRound(r, (float)kListRowRadius, d.th.hl);
+        if ((int)i == v.sel) d.fillRound(r, d.th.rs, d.th.hl);
         d.text(v.names[i], g_s.mono12.Get(),
                D2D1::RectF(r.left + (float)kListTextPad, r.top, r.right - (float)kListCheckW, r.bottom),
                ((int)i == v.sel || (int)i == v.active) ? d.th.fg : d.th.fg2, DWRITE_TEXT_ALIGNMENT_LEADING);
         if ((int)i == v.active)
-            d.icon("check", r.right - (float)kListCheckInset - 16.f, r.top + (r.bottom - r.top - 16.f) / 2.f, d.th.teal, 1.75f);
+            d.icon("check", r.right - (float)kListCheckInset - 16.f, r.top + (r.bottom - r.top - 16.f) / 2.f, d.th.spark, 1.75f);
     }
-    d.ring(D2D1::RectF(0, 0, W, H), (float)kListRadius, d.th.menub);
+    d.ring(D2D1::RectF(0, 0, W, H), d.th.listRad, d.th.menub);
 }
 
 // ---------------------------------------------------------------- shape alpha
@@ -650,7 +702,7 @@ void ApplyShapeAlpha(unsigned char* px, int w, int h, int strideBytes, int dpi, 
 // Paints one window-sized frame with `draw(painter)` (inside BeginDraw/EndDraw) and saves it as a
 // straight-alpha PNG with the rounded corners cut out. Shared by the flyout and the list popup.
 template <class F>
-static bool RenderFrameToPng(int wDip, int hDip, bool dark, int dpi, const wchar_t* path, int radiusDip, F draw) {
+static bool RenderFrameToPng(int wDip, int hDip, bool dark, int palette, int dpi, const wchar_t* path, int radiusDip, F draw) {
     if (!DrawInit()) return false;
     const UINT pw = (UINT)ScalePx(wDip, dpi), ph = (UINT)ScalePx(hDip, dpi);
     ComPtr<IWICBitmap> bmp;
@@ -661,7 +713,7 @@ static bool RenderFrameToPng(int wDip, int hDip, bool dark, int dpi, const wchar
                                                     D2D1::PixelFormat(DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_IGNORE),
                                                     (float)dpi, (float)dpi), &rt))) return false;
     Painter p;
-    if (!p.Init(rt.Get(), dark)) return false;
+    if (!p.Init(rt.Get(), dark, palette)) return false;
     rt->BeginDraw();
     draw(p);
     if (FAILED(rt->EndDraw())) return false;
@@ -692,11 +744,11 @@ static bool RenderFrameToPng(int wDip, int hDip, bool dark, int dpi, const wchar
 bool RenderToPng(const View& v, int profileTextW, int dpi, const wchar_t* path) {
     if (!DrawInit()) return false;
     const Geometry g = ComputeGeometry(v, profileTextW);
-    return RenderFrameToPng(g.width, g.height, v.dark, dpi, path, kRadius, [&](Painter& p) { p.Draw(v, g); });
+    return RenderFrameToPng(g.width, g.height, v.dark, v.palette, dpi, path, PaletteAt(v.palette).rc, [&](Painter& p) { p.Draw(v, g); });
 }
 
 bool RenderListToPng(const ListView& v, const ListGeometry& g, int dpi, const wchar_t* path) {
-    return RenderFrameToPng(g.width, g.height, v.dark, dpi, path, kListRadius, [&](Painter& p) { p.DrawList(v, g); });
+    return RenderFrameToPng(g.width, g.height, v.dark, v.palette, dpi, path, (int)ListRadiusFor(PaletteAt(v.palette)), [&](Painter& p) { p.DrawList(v, g); });
 }
 
 }}  // namespace wind::Flyout

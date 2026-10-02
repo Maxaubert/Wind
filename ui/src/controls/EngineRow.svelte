@@ -1,5 +1,5 @@
 <script>
-  // The Magnifier engine select. The engine is read once at launch, so a change needs a relaunch:
+  // The Engine select. The engine is read once at launch, so a change needs a relaunch:
   // once the chosen value differs from the engine the running Wind has, an inline "Restart Wind"
   // appears beside the select. `running` is that engine (empty = unknown, no button).
   import Select from './Select.svelte';

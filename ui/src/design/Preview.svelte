@@ -10,34 +10,31 @@
 
   const q = new URLSearchParams(location.search);
   let theme = $state(q.get('theme') === 'light' ? 'light' : 'dark');
-  let mode = $state(theme);
-  let active = $state('zoom');
+  let active = $state('hotkeys');
   let count = $state(Number(q.get('count') ?? 2));
   const calls = (window.__calls = []);
   const log = (name, arg) => calls.push(arg === undefined ? name : [name, arg]);
 
   const groups = [
+    { id: 'hotkeys', label: 'Hotkeys', icon: 'hotkeys' },
     { id: 'zoom', label: 'Zoom', icon: 'zoom' },
-    { id: 'move', label: 'Moving around', icon: 'move' },
-    { id: 'cursor', label: 'Cursor', icon: 'cursor' },
-    { id: 'typing', label: 'Follow typing', icon: 'typing' },
-    { id: 'colour', label: 'Colour', icon: 'colour' },
-    { id: 'general', label: 'General', icon: 'general' },
+    { id: 'view', label: 'View', icon: 'view' },
+    { id: 'screen', label: 'Screen', icon: 'screen' },
   ];
-  const expert = [
-    { id: 'adv', label: 'Advanced', icon: 'adv' },
+  const bottom = [
+    { id: 'prefs', label: 'Preferences', icon: 'general' },
+    { id: 'tray', label: 'Tray menu', icon: 'tray' },
     { id: 'about', label: 'About', icon: 'about' },
   ];
 </script>
 
 <div class="wnd app" data-theme={theme}>
-  <TitleBar themeMode={mode} onTheme={(m) => { mode = m; log('theme', m); }}
-            onMinimize={() => log('minimize')} onClose={() => log('close')} />
+  <TitleBar onMinimize={() => log('minimize')} onMaximize={() => log('maximize')} onClose={() => log('close')} />
   <div class="body">
-    <Sidebar {groups} {expert} {active} version="0.15.4"
+    <Sidebar {groups} {bottom} {active} version="0.15.4"
              onSelect={(id) => { active = id; log('select', id); }} onSearch={(v) => log('search', v)} />
     <main class="main">
-      <Banner title="Zoom" description="Keys, limits and speed for magnifying the screen." icon="zoom" />
+      <Banner title="Zoom" description="How far and how fast to zoom." icon="zoom" />
       <Card caption="Keys">
         <div class="row">Zoom in</div>
         <div class="row">Zoom out</div>

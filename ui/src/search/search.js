@@ -1,6 +1,7 @@
-// Settings search (pure). Matches rows across all groups, hidden (showIf) and Advanced rows included.
+// Settings search (pure). Matches rows across all groups, hidden (showIf) and advanced rows included (the
+// word "advanced" also matches them; a hit carries adv so the page can show a hidden one on its own).
 // A row matches when every query word is a word-prefix of its label, description, card caption or
-// group label (case-insensitive). Returns [{ id, label, rows: [{ key, label, desc, caption, groupId }] }]
+// group label (case-insensitive). Returns [{ id, label, rows: [{ key, label, desc, caption, groupId, adv }] }]
 // in schema order, dropping groups with no match.
 
 const words = (s) => String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
@@ -14,9 +15,9 @@ export function search(groups, query) {
     for (const card of g.cards || []) {
       for (const r of card.rows || []) {
         if (!r.label) continue;
-        const hay = [...words(r.label), ...words(r.desc), ...words(card.caption), ...words(g.label)];
+        const hay = [...words(r.label), ...words(r.desc), ...words(card.caption), ...words(g.label), ...(r.adv ? ['advanced'] : [])];
         if (q.every((w) => hay.some((h) => h.startsWith(w))))
-          rows.push({ key: r.key, label: r.label, desc: r.desc || '', caption: card.caption || '', groupId: g.id });
+          rows.push({ key: r.key, label: r.label, desc: r.desc || '', caption: card.caption || '', groupId: g.id, adv: !!r.adv });
       }
     }
     if (rows.length) out.push({ id: g.id, label: g.label, rows });

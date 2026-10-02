@@ -1,7 +1,7 @@
 # Shared keybind safety cases (issue #285). One case per line:
 #   key   <vk hex> <mods> <verdict>      mods: bit 1 Ctrl, 2 Alt, 4 Shift, 8 Win
 #   wheel <mods> <verdict>
-#   click <button> <mods> <verdict>      button: 1/2 side, 3 left, 4 right, 5 middle
+#   click <button> <mods> <verdict>      button: 1/2 side, 3 left, 4 right, 5 middle, 6 wheel up, 7 wheel down
 # Read by tests/test_keybind_rules.cpp (C++ rules) and ui/tests/keybind-rules.spec.js (UI mirror).
 # verdicts: ok never modifier notalone shifttypes altgr system windows needsmod ctrlalone shiftalone
 
@@ -145,7 +145,16 @@ click 4 12 ok
 click 5 4 shiftalone
 click 5 0 needsmod
 click 2 1 ok
-click 6 3 never
+click 8 3 never
+# wheel up / down as zoom button codes (#318): the wheel rule
+click 6 0 needsmod
+click 7 0 needsmod
+click 6 4 shiftalone
+click 7 4 shiftalone
+click 6 1 ok
+click 7 1 ok
+click 6 3 ok
+click 7 10 ok
 
 # pan defaults (#287): Ctrl+Alt+arrows
 key 25 3 ok

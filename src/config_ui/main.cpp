@@ -287,14 +287,29 @@ static bool SystemUsesLightApps() {
         return v != 0;
     return false;
 }
-// Window/WebView background from uiTheme (auto follows the system) so first paint never flashes
-// white. Colors are the --bg tokens of docs/design/settings-2026-10/FINAL-v10-grey.html.
-static COLORREF ThemeBackground(const std::string& theme) {
+static std::string UiPaletteOf(const std::string& live) {
+    auto v = wind::ReadIniValues(live);
+    auto it = v.find("uiPalette");
+    return wind::NormalizeUiPalette(it == v.end() ? std::string() : it->second);
+}
+// Window/WebView background from uiPalette + uiTheme (auto follows the system) so first paint never flashes
+// the wrong colour. Colours are the --bg tokens of ui/src/design/themes.css (generated; keep in step when a
+// theme is added): grey, ember, ocean, hicon, each dark then light.
+static COLORREF ThemeBackground(const std::string& palette, const std::string& theme) {
     const bool light = theme == "light" || (theme != "dark" && SystemUsesLightApps());
-    return light ? RGB(0xf3, 0xf3, 0xf4) : RGB(0x00, 0x00, 0x00);
+    static const COLORREF kBg[4][2] = {
+        { RGB(0x00, 0x00, 0x00), RGB(0xf3, 0xf3, 0xf4) },   // grey
+        { RGB(0x0c, 0x09, 0x08), RGB(0xf7, 0xf2, 0xed) },   // ember
+        { RGB(0x0c, 0x11, 0x17), RGB(0xef, 0xf3, 0xf8) },   // ocean
+        { RGB(0x00, 0x00, 0x00), RGB(0xff, 0xff, 0xff) },   // hicon
+    };
+    int n = 0; const char* const* ids = wind::UiPaletteIds(n);
+    int idx = 0;
+    for (int i = 0; i < n && i < 4; ++i) if (palette == ids[i]) idx = i;
+    return kBg[idx][light ? 1 : 0];
 }
 static void ApplyWindowTheme(const std::string& theme) {
-    const COLORREF c = ThemeBackground(theme);
+    const COLORREF c = ThemeBackground(UiPaletteOf(ReadFileUtf8(IniPath())), theme);
     static HBRUSH brush = nullptr;
     HBRUSH nb = CreateSolidBrush(c);
     if (g_hwnd) SetClassLongPtrW(g_hwnd, GCLP_HBRBACKGROUND, (LONG_PTR)nb);
@@ -354,6 +369,7 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
                 return;
             }
             if (key == "uiTheme") ApplyWindowTheme(value);
+            else if (key == "uiPalette") ApplyWindowTheme(UiThemeOf(ReadFileUtf8(IniPath())));
             if (type == "setConfigPersist") {
                 // Keybind captures: also written straight into the active profile so they survive
                 // a later Discard or restart while other changes stay unsaved. Only this one key
@@ -418,6 +434,7 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
     } else if (type == "window") {
         std::string action = JsonField(j, "action");
         if (action == "minimize") ShowWindow(g_hwnd, SW_MINIMIZE);
+        else if (action == "maximize") ShowWindow(g_hwnd, IsZoomed(g_hwnd) ? SW_RESTORE : SW_MAXIMIZE);   // the title bar button toggles
         else if (action == "close") {
             // "force" is the Discard path from the confirm dialog: skip the guard, do not re-ask.
             if (JsonField(j, "force") == "1") { g_forceClose = true; g_dirty = false; }
@@ -875,7 +892,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
     // which looked low-res/blurry). Must be set before any window is created.
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     WNDCLASSW wc{}; wc.lpfnWndProc = WndProc; wc.hInstance = hInst; wc.lpszClassName = L"WindConfigWnd";
-    wc.hbrBackground = CreateSolidBrush(ThemeBackground(UiThemeOf(ReadFileUtf8(IniPath()))));
+    {
+        const std::string iniText = ReadFileUtf8(IniPath());
+        wc.hbrBackground = CreateSolidBrush(ThemeBackground(UiPaletteOf(iniText), UiThemeOf(iniText)));
+    }
     wc.hIcon = LoadIconW(hInst, MAKEINTRESOURCEW(IDI_WIND));  // logo badge for taskbar/alt-tab
     RegisterClassW(&wc);
     HWND hwnd = CreateWindowExW(0, wc.lpszClassName, L"Wind Settings",

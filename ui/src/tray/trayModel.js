@@ -12,7 +12,7 @@ export const SLIDERS = [
   { key: 'maxLevel', icon: 'maxz', name: 'Max zoom', desc: 'The highest magnification.' },
   { key: 'zoomInSpeed', icon: 'zin', name: 'Zoom-in speed', desc: 'How quickly the view magnifies.' },
   { key: 'zoomOutSpeed', icon: 'zout', name: 'Zoom-out speed', desc: 'How quickly the view returns.' },
-  { key: 'panSpeed', icon: 'pan', name: 'Pan speed', desc: 'How fast the view pans.' },
+  { key: 'panSpeed', icon: 'pan', name: 'Arrow key speed', desc: 'How fast the view pans.' },
   { key: 'cursorSmoothing', icon: 'smooth', name: 'Pan smoothing', desc: 'Gentle inertia while panning.' },
   { key: 'zoomEaseOutMs', icon: 'glide', name: 'Release glide', desc: 'How softly the zoom coasts to a stop.' },
 ];
@@ -22,7 +22,7 @@ export const TOGGLES = [
   // One segment for both alignment settings (mouseAlign + trackAlign); the flyout writes both.
   { key: 'keepEdges', icon: 'edges', name: 'Keep cursor centred', desc: 'On: the view keeps the pointer, text cursor and focus centred. Off: they move freely and the view follows near the edges.' },
   // #315. A full-width dropdown under the toggle group in the tray that picks the main engine; a change restarts Wind.
-  { key: 'engine', icon: 'engine', name: 'Magnifier engine', desc: 'A dropdown to switch the engine. Wind restarts to apply it.' },
+  { key: 'engine', icon: 'engine', name: 'Engine', desc: 'A dropdown to switch the engine. Wind restarts to apply it.' },
 ];
 export const KINDS = {
   sliders: { items: SLIDERS, enabledKey: 'traySliders', orderKey: 'traySliderOrder', defaultOn: ['colorWarmPct', 'colorDimPct'], cap: MAX_SLIDERS },

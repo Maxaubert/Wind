@@ -51,24 +51,22 @@ test('text cannot be selected, except inside the search field', async ({ page })
 
 test('a mouse click leaves no focus ring on any control; Tab shows one', async ({ page }) => {
   await page.goto('/');
-  const zoom = {
-    slider: page.locator('[data-key="maxLevel"] input[type=range]'),
-    toggle: page.locator('[role=switch]').first(),
-    keycap: page.locator('button.keycap').first(),
-    chip: page.locator('.row button.chip').first(),
-    sidebar: page.locator('.side .it').nth(2),
-  };
-  await page.locator('.side .it').first().click();
-  for (const [name, loc] of Object.entries(zoom)) {
-    if (!(await loc.count())) continue;
-    await loc.scrollIntoViewIfNeeded();
-    if (name === 'toggle') { await loc.click({ force: true }); await noRing(loc.locator('xpath=following-sibling::*[1]')); continue; }
-    await loc.click();
-    await noRing(loc);
-    if (name === 'keycap') await page.keyboard.press('Escape');   // leave capture (a key press is keyboard use)
-  }
+  // Hotkeys (the opening page): a binding box and an extra-key switch.
+  const box = page.locator('.bx .kc.ghost').first();   // an empty binding (the harness has none bound)
+  await box.click();
+  await noRing(box);
+  await page.keyboard.press('Escape');   // leave capture (a key press is keyboard use)
+  const toggle = page.locator('[role=switch]').first();
+  await toggle.click({ force: true });
+  await noRing(toggle.locator('xpath=following-sibling::*[1]'));
+  await page.locator('.side .it[data-g="zoom"]').click();
+  const slider = page.locator('[data-key="maxLevel"] input[type=range]');
+  await slider.click();
+  await noRing(slider);
+  await page.locator('.side .it').nth(2).click();   // a sidebar row
+  await noRing(page.locator('.side .it').nth(2));
   // A select: open it with the mouse, close it, no ring; reach it with the keyboard, ring.
-  await page.locator('.side .it[data-g="move"]').click();
+  await page.locator('.side .it[data-g="view"]').click();
   const sel = page.locator('[data-key="mouseAlign"] select');
   await sel.scrollIntoViewIfNeeded();
   await sel.click();
@@ -81,6 +79,7 @@ test('a mouse click leaves no focus ring on any control; Tab shows one', async (
 test('reduced motion: the capsule and a dialog carry no transition or animation', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/');
+  await page.locator('.side .it[data-g="zoom"]').click();
   const slider = page.locator('[data-key="maxLevel"] input[type=range]');
   await slider.focus();
   await page.keyboard.press('ArrowRight');
@@ -102,6 +101,7 @@ test('normal motion: the capsule eases in and the dialog pops, both under 200 ms
   const t = await page.evaluate(() => [getComputedStyle(document.documentElement).getPropertyValue('--dur-fast').trim(),
     getComputedStyle(document.documentElement).getPropertyValue('--dur').trim()]);
   expect(t).toEqual(['120ms', '180ms']);
+  await page.locator('.side .it[data-g="zoom"]').click();
   await page.locator('[data-key="maxLevel"] input[type=range]').focus();
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('Control+q');

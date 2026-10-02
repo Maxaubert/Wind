@@ -4,7 +4,7 @@ import { groups, groupRows, bindKeys } from './settings-schema.js';
 
 // Mirrors IsGlobalProfileKey in src/profiles.cpp: these are never part of a profile, so they never
 // count as an unsaved change. The five tray keys (#313) live in the live ini only.
-export const GLOBAL_KEYS = new Set(['profile', 'onboarded', 'uiTheme', 'showAdvanced',
+export const GLOBAL_KEYS = new Set(['profile', 'onboarded', 'uiTheme', 'uiPalette', 'showAdvanced',
   'trayPerf', 'traySliders', 'traySliderOrder', 'trayToggles', 'trayToggleOrder']);
 
 // Must match the core's shipped defaults (src/config.h): every keybind ships unbound except Quick
@@ -17,6 +17,7 @@ export const KB_DEFAULTS = {
   panLeftVk: '0', panLeftMods: '0', panRightVk: '0', panRightMods: '0',
   panUpVk: '0', panUpMods: '0', panDownVk: '0', panDownMods: '0',
   cursorLockMods: '0', recenterMods: '0',
+  panKeysOn: '1', hideCursorOn: '1', cursorLockOn: '1',   // the extra-key switches (#318) ship on
 };
 
 // Defaults for every key the page shows. Applied to BOTH sides of the comparison, so a key the file

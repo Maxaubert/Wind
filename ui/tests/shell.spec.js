@@ -5,7 +5,7 @@ import { iconNames, iconSvg } from '../src/design/icons.js';
 const css = (loc, prop) => loc.evaluate((el, p) => getComputedStyle(el).getPropertyValue(p), prop);
 
 test('icon set covers the plan list and renders static svg', () => {
-  for (const n of ['zoom', 'move', 'cursor', 'typing', 'colour', 'general', 'adv', 'about', 'search', 'auto', 'light', 'dark'])
+  for (const n of ['hotkeys', 'zoom', 'view', 'screen', 'general', 'about', 'search', 'maximize', 'auto', 'light', 'dark'])
     expect(iconNames).toContain(n);
   expect(iconSvg('zoom')).toMatch(/^<svg /);
   expect(iconSvg('nope')).toBe('');
@@ -28,10 +28,21 @@ test('dark tokens and shell components render in isolation', async ({ page }) =>
   expect(await css(page.locator('.it').first(), 'height')).toBe('36px');
   expect(await css(page.locator('.it.sel'), 'background-color')).toBe('rgb(49, 49, 49)');
   await expect(page.locator('.banner h1')).toHaveText('Zoom');
-  await expect(page.locator('.banner .bdesc')).toContainText('Keys, limits');
+  await expect(page.locator('.banner .bdesc')).toContainText('How far and how fast');
   await expect(page.locator('.capsule b')).toHaveText('2 unsaved changes');
   await expect(page.locator('.side .n')).toHaveText('0.15.4');
   await expect(page.locator('.tb .brand')).toContainText('Wind Settings');
+});
+
+test('the title bar carries only the window buttons and the sidebar has a divider but no labels', async ({ page }) => {
+  await page.goto('/preview.html');
+  await expect(page.locator('header.tb button')).toHaveText(['', '', '']);
+  await expect(page.locator('header.tb button')).toHaveCount(3);
+  await expect(page.locator('[data-theme-cycle]')).toHaveCount(0);
+  await expect(page.locator('.side .lbl')).toHaveCount(0);
+  await expect(page.locator('.side nav:not(.bottom) .it')).toHaveCount(4);
+  await expect(page.locator('.side nav.bottom .it')).toHaveCount(3);
+  expect(await css(page.locator('.side nav.bottom'), 'border-top-width')).toBe('1px');
 });
 
 test('light theme tokens apply', async ({ page }) => {
@@ -44,16 +55,16 @@ test('light theme tokens apply', async ({ page }) => {
 
 test('callbacks fire and the capsule hides at zero', async ({ page }) => {
   await page.goto('/preview.html');
-  await page.getByRole('button', { name: 'Cursor' }).click();
-  await expect(page.locator('.it.sel')).toContainText('Cursor');
+  await page.getByRole('button', { name: 'View' }).click();
+  await expect(page.locator('.it.sel')).toContainText('View');
   await page.getByRole('button', { name: 'Save' }).click();
   await page.getByRole('button', { name: 'Discard' }).click();
   await page.getByRole('button', { name: 'Minimize' }).click();
+  await page.getByRole('button', { name: 'Maximize' }).click();
   await page.getByRole('button', { name: 'Close' }).click();
-  await page.getByRole('button', { name: /^Theme:/ }).click();
   await page.getByPlaceholder('Search settings').fill('zoom');
   expect(await page.evaluate(() => window.__calls)).toEqual([
-    ['select', 'cursor'], 'save', 'discard', 'minimize', 'close', ['theme', 'light'], ['search', 'zoom'],
+    ['select', 'view'], 'save', 'discard', 'minimize', 'maximize', 'close', ['search', 'zoom'],
   ]);
   await page.goto('/preview.html?count=0');
   await expect(page.locator('.capsule')).toHaveCount(0);

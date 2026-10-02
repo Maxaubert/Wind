@@ -39,10 +39,16 @@ test.beforeEach(async ({ page }) => {
 
 const sent = (page, type) => page.evaluate((t) => window.__msgs.filter((m) => m.type === t), type);
 const maxLevel = (page) => page.locator('[data-key="maxLevel"] input[type=range]');
+const go = (page, g) => page.locator('.side .it[data-g="' + g + '"]').click();
 const capsule = (page) => page.locator('.capsule');
+const pickProfile = async (page, name) => {   // open the profile dropdown, choose a profile
+  await page.locator('[data-key="__profiles"] .trig').click();
+  await page.getByRole('option', { name }).click();
+};
 
 test('session helpers: global keys never count, defaults fill both sides', () => {
   expect(GLOBAL_KEYS.has('uiTheme')).toBe(true);
+  expect(GLOBAL_KEYS.has('uiPalette')).toBe(true);   // #318: the built-in theme is global, UI-only
   expect(changedKeys({ a: '1', uiTheme: 'dark' }, { a: '1', uiTheme: 'light' })).toEqual([]);
   expect(changedKeys({ a: '2 ' }, { a: '2' })).toEqual([]);
   expect(changedKeys({ a: '2', b: '1' }, { a: '1', b: '1' })).toEqual(['a']);
@@ -59,13 +65,14 @@ test('session files contain no em-dash', () => {
 
 test('opens clean: no capsule and the host is told nothing is dirty', async ({ page }) => {
   await page.goto('/');
-  await expect(page.locator('h1')).toHaveText('Zoom');
+  await expect(page.locator('h1')).toHaveText('Hotkeys');
   await expect(capsule(page)).toHaveCount(0);
   expect((await sent(page, 'dirty')).every((m) => m.value === '0')).toBe(true);
 });
 
 test('a change applies at once (setConfig, no Save) and raises the capsule; undoing it clears it', async ({ page }) => {
   await page.goto('/');
+  await go(page, 'zoom');
   await maxLevel(page).fill('20');
   expect((await sent(page, 'setConfig')).some((m) => m.key === 'maxLevel' && m.value === '20')).toBe(true);
   expect(await sent(page, 'saveSession')).toHaveLength(0);
@@ -77,6 +84,7 @@ test('a change applies at once (setConfig, no Save) and raises the capsule; undo
 
 test('Save posts saveSession and clears the capsule', async ({ page }) => {
   await page.goto('/');
+  await go(page, 'zoom');
   await maxLevel(page).fill('20');
   await capsule(page).getByRole('button', { name: 'Save' }).click();
   await expect(capsule(page)).toHaveCount(0);
@@ -87,6 +95,7 @@ test('Save posts saveSession and clears the capsule', async ({ page }) => {
 test('a failed Save keeps the capsule and says so', async ({ page }) => {
   await page.addInitScript(() => { window.__saveOk = false; });
   await page.goto('/');
+  await go(page, 'zoom');
   await maxLevel(page).fill('20');
   await capsule(page).getByRole('button', { name: 'Save' }).click();
   await expect(page.getByRole('dialog', { name: "Couldn't save" })).toBeVisible();
@@ -95,6 +104,7 @@ test('a failed Save keeps the capsule and says so', async ({ page }) => {
 
 test('Discard posts discardSession and reloads the saved values', async ({ page }) => {
   await page.goto('/');
+  await go(page, 'zoom');
   await maxLevel(page).fill('20');
   await capsule(page).getByRole('button', { name: 'Discard' }).click();
   await expect(capsule(page)).toHaveCount(0);
@@ -104,8 +114,10 @@ test('Discard posts discardSession and reloads the saved values', async ({ page 
 
 test('keybind capture persists at once, never counts as unsaved, and survives Save', async ({ page }) => {
   await page.goto('/');
+  await go(page, 'zoom');
   await maxLevel(page).fill('20');   // an unsaved change is pending while the bind is captured
-  await page.locator('[data-key="__zoomOut"] .keycap').first().click();
+  await go(page, 'hotkeys');
+  await page.locator('[data-key="__zoomOut"] .kc.ghost').click();
   await page.keyboard.press('F2');
   const persisted = (await sent(page, 'setConfigPersist')).map((m) => m.key);
   expect(persisted).toContain('zoomOutVk');
@@ -117,6 +129,7 @@ test('keybind capture persists at once, never counts as unsaved, and survives Sa
 
 test('closing with unsaved changes offers Save, Discard and Keep for this session', async ({ page }) => {
   await page.goto('/');
+  await go(page, 'zoom');
   await maxLevel(page).fill('20');
   await page.getByRole('button', { name: 'Close' }).click();
   const dlg = page.getByRole('dialog', { name: 'Unsaved changes' });
@@ -130,6 +143,7 @@ test('closing with unsaved changes offers Save, Discard and Keep for this sessio
 
 test('close prompt: Save saves then closes; Discard discards then closes; Esc cancels', async ({ page }) => {
   await page.goto('/');
+  await go(page, 'zoom');
   await maxLevel(page).fill('20');
   await page.getByRole('button', { name: 'Close' }).click();
   await page.keyboard.press('Escape');
@@ -152,6 +166,7 @@ test('closing with nothing unsaved does not prompt', async ({ page }) => {
 
 test('the host bouncing WM_CLOSE (confirmClose) raises the same prompt', async ({ page }) => {
   await page.goto('/');
+  await go(page, 'zoom');
   await maxLevel(page).fill('20');
   await page.evaluate(() => window.__hostSend({ type: 'confirmClose' }));
   await expect(page.getByRole('dialog', { name: 'Unsaved changes' })).toBeVisible();
@@ -159,6 +174,7 @@ test('the host bouncing WM_CLOSE (confirmClose) raises the same prompt', async (
 
 test('Quit Wind (Ctrl+Q) with unsaved changes asks Save / Discard / Cancel', async ({ page }) => {
   await page.goto('/');
+  await go(page, 'zoom');
   await maxLevel(page).fill('20');
   await page.keyboard.press('Control+q');
   const dlg = page.getByRole('dialog', { name: 'Quit Wind?' });
@@ -180,9 +196,10 @@ test('Quit Wind with nothing unsaved quits without a prompt', async ({ page }) =
 
 test('switching profile with unsaved changes asks first; Cancel keeps everything', async ({ page }) => {
   await page.goto('/');
+  await go(page, 'zoom');
   await maxLevel(page).fill('20');
-  await page.getByRole('button', { name: 'General' }).click();
-  await page.locator('[data-key="__profiles"] select').selectOption('Gaming');
+  await go(page, 'prefs');
+  await pickProfile(page, 'Gaming');
   const dlg = page.getByRole('dialog', { name: 'Unsaved changes' });
   await expect(dlg.getByRole('button')).toHaveText(['Cancel', 'Discard', 'Save']);
   await dlg.getByRole('button', { name: 'Cancel' }).click();
@@ -192,9 +209,10 @@ test('switching profile with unsaved changes asks first; Cancel keeps everything
 
 test('profile switch prompt: Save saves then switches; Discard discards then switches', async ({ page }) => {
   await page.goto('/');
+  await go(page, 'zoom');
   await maxLevel(page).fill('20');
-  await page.getByRole('button', { name: 'General' }).click();
-  await page.locator('[data-key="__profiles"] select').selectOption('Gaming');
+  await go(page, 'prefs');
+  await pickProfile(page, 'Gaming');
   await page.getByRole('dialog').getByRole('button', { name: 'Save' }).click();
   await expect.poll(async () => (await sent(page, 'switchProfile')).length).toBe(1);
   const order = await page.evaluate(() => window.__msgs.map((m) => m.type).filter((t) => t === 'saveSession' || t === 'switchProfile'));
@@ -204,15 +222,17 @@ test('profile switch prompt: Save saves then switches; Discard discards then swi
 
 test('switching with nothing unsaved goes straight through', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'General' }).click();
-  await page.locator('[data-key="__profiles"] select').selectOption('Gaming');
+  await go(page, 'prefs');
+  await pickProfile(page, 'Gaming');
   await expect(page.getByRole('dialog')).toHaveCount(0);
   expect(await sent(page, 'switchProfile')).toHaveLength(1);
 });
 
 test('engine change writes the ini, then Restart Wind relaunches; a failed relaunch reverts', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Advanced' }).click();
+  await go(page, 'prefs');
+  await page.locator('[data-key="showAdvanced"]').getByRole('switch').check({ force: true });   // the engine row is advanced
+  await go(page, 'zoom');
   await page.locator('[data-key="model"] select').selectOption('render');
   expect((await sent(page, 'setConfig')).some((m) => m.key === 'model' && m.value === 'render')).toBe(true);
   await page.getByRole('button', { name: 'Restart Wind' }).click();
@@ -235,7 +255,7 @@ test('High resolution cursor: the registry write follows the toggle and a dismis
     };
   });
   await page.goto('/');
-  await page.getByRole('button', { name: 'Cursor' }).click();
+  await go(page, 'view');
   const sw = page.locator('[data-key="txSamplingMode"]').getByRole('switch');
   await sw.check({ force: true });   // high resolution on: MPO already enabled, no registry write
   expect(await sent(page, 'setMpoDisabled')).toHaveLength(0);
@@ -247,6 +267,7 @@ test('High resolution cursor: the registry write follows the toggle and a dismis
 
 test('the tray switching profile reloads the session', async ({ page }) => {
   await page.goto('/');
+  await go(page, 'zoom');
   await page.evaluate(() => {
     window.__live.maxLevel = '30'; window.__saved.maxLevel = '30'; window.__profiles.active = 'Gaming';
     window.__hostSend({ type: 'profiles', push: true, names: ['Default', 'Gaming'], active: 'Gaming', ok: true });

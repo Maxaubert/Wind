@@ -26,7 +26,7 @@
   h1 { margin: 0 0 6px; font: 600 24px var(--s); color: var(--fg); }
   .sum { margin: 0 0 6px; color: var(--fg3); font: 13px var(--s); }
   .gl { margin: 22px 0 10px 2px; font: 500 13px var(--s); letter-spacing: .02em; color: var(--fg3); }
-  .list { border: 1px solid var(--cardb); background: var(--card); border-radius: 10px; box-shadow: var(--cshadow); overflow: hidden; }
+  .list { border: 1px solid var(--cardb); background: var(--card); border-radius: var(--rc); box-shadow: var(--cshadow); overflow: hidden; }
   .hit { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; width: 100%; text-align: left;
          padding: 12px 16px; color: var(--fg); }
   .hit + .hit { border-top: 1px solid var(--rowline); }

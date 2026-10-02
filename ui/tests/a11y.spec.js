@@ -6,7 +6,7 @@
 // them is invisible in a screenshot.
 import { test, expect } from '@playwright/test';
 
-const GROUPS = ['zoom', 'move', 'cursor', 'typing', 'colour', 'general', 'advanced', 'about'];
+const GROUPS = ['hotkeys', 'zoom', 'view', 'screen', 'prefs', 'tray', 'about'];
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -15,7 +15,7 @@ test.beforeEach(async ({ page }) => {
     // Built on the first getConfig so a test's own init script (window.__theme) is already set.
     let live, saved;
     const init = () => { if (live) return; live = { maxLevel: '12', zoomInVk: '33', zoomInButton: '2', cursorLockVk: '113', model: 'hybrid',
-      uiTheme: window.__theme || 'dark', trackCaret: '1', renderExclude: 'netflix.exe' };
+      uiTheme: window.__theme || 'dark', trackCaret: '1', noSwallowApps: 'netflix.exe', showAdvanced: '1' };
       saved = { ...live }; };
     const listeners = new Set();
     const send = (data) => listeners.forEach((fn) => fn({ data }));
@@ -52,7 +52,7 @@ const unnamedIn = (page, root) => page.locator(root).evaluate((r) => {
 
 test('every control on every page has an accessible name', async ({ page }) => {
   await page.goto('/');
-  await expect(page.locator('h1')).toHaveText('Zoom');
+  await expect(page.locator('h1')).toHaveText('Hotkeys');
   for (const g of GROUPS) {
     await go(page, g);
     await expect(page.locator('.side .it.sel')).toHaveAttribute('data-g', g);
@@ -64,11 +64,14 @@ test('every control on every page has an accessible name', async ({ page }) => {
 
 test('a control is named by its own row label', async ({ page }) => {
   await page.goto('/');
+  await go(page, 'zoom');
   await expect(page.getByRole('slider', { name: /Max zoom/i })).toBeVisible();
-  await go(page, 'typing');
+  await go(page, 'view');
   await expect(page.getByRole('switch', { name: /text cursor/i }).first()).toBeVisible();
-  await go(page, 'advanced');
+  await go(page, 'zoom');
   await expect(page.getByRole('combobox', { name: /engine/i }).first()).toBeVisible();
+  await go(page, 'hotkeys');
+  await expect(page.getByRole('switch', { name: 'Hide pointer' })).toBeVisible();   // an extra key's on/off switch
 });
 
 test('row descriptions are linked to their control, not orphaned', async ({ page }) => {
@@ -82,6 +85,7 @@ test('row descriptions are linked to their control, not orphaned', async ({ page
 
 test('sliders speak their unit instead of a bare number', async ({ page }) => {
   await page.goto('/');
+  await go(page, 'zoom');
   await expect(page.locator('[data-key="maxLevel"] input[type=range]')).toHaveAttribute('aria-valuetext', '12 times');
 });
 
@@ -91,7 +95,7 @@ for (const theme of ['dark', 'light']) test('focus is visible in the ' + theme +
     await page.goto('/');
     await expect(page.locator('.wnd')).toHaveAttribute('data-theme', theme);
     await page.keyboard.press('Tab');   // keyboard modality: the ring is for keyboard users only
-    for (const sel of ['.side .it', '.side .search input', '[data-theme-cycle]', 'main .keycap']) {
+    for (const sel of ['.side .it', '.side .search input', 'header.tb .wc', 'main .kchg']) {
       await page.locator(sel).first().focus();
       const ring = await page.locator(sel).first().evaluate((el) => {
         const s = getComputedStyle(el);
@@ -105,8 +109,7 @@ for (const theme of ['dark', 'light']) test('focus is visible in the ' + theme +
 
 test('a dialog takes focus, traps Tab, and gives focus back on close', async ({ page }) => {
   await page.goto('/');
-  await go(page, 'advanced');
-  const manage = page.locator('[data-key="renderExclude"]').getByRole('button', { name: /Manage/ });
+  const manage = page.locator('[data-key="noSwallowApps"]').getByRole('button', { name: /Manage/ });
   await manage.focus();
   await page.keyboard.press('Enter');
   const dlg = page.getByRole('dialog');
@@ -123,6 +126,7 @@ test('a dialog takes focus, traps Tab, and gives focus back on close', async ({ 
 
 test('the unsaved-changes prompt announces itself as a labelled modal dialog', async ({ page }) => {
   await page.goto('/');
+  await go(page, 'zoom');
   await page.locator('[data-key="maxLevel"] input[type=range]').fill('20');
   await page.getByRole('button', { name: 'Close' }).click();
   const dlg = page.getByRole('dialog', { name: 'Unsaved changes' });
@@ -135,6 +139,7 @@ test('the unsaved-changes prompt announces itself as a labelled modal dialog', a
 
 test('the capsule is reachable by keyboard and its buttons are named', async ({ page }) => {
   await page.goto('/');
+  await go(page, 'zoom');
   await page.locator('[data-key="maxLevel"] input[type=range]').fill('20');
   const cap = page.locator('.capsule');
   await expect(cap.getByRole('button', { name: 'Save' })).toBeVisible();
@@ -149,8 +154,8 @@ test('the sidebar is a navigation landmark that marks the current page', async (
   await page.goto('/');
   await expect(page.getByRole('navigation', { name: 'Settings sections' })).toBeVisible();
   await expect(page.locator('.side .it[aria-current=page]')).toHaveCount(1);
-  await go(page, 'cursor');
-  await expect(page.locator('.side .it[aria-current=page]')).toHaveAttribute('data-g', 'cursor');
+  await go(page, 'view');
+  await expect(page.locator('.side .it[aria-current=page]')).toHaveAttribute('data-g', 'view');
 });
 
 test('the page has a lang, one h1, and hierarchical headings', async ({ page }) => {
@@ -171,6 +176,7 @@ test('decorative icons are hidden from the accessibility tree', async ({ page })
 
 test('Save is announced through the live region', async ({ page }) => {
   await page.goto('/');
+  await go(page, 'zoom');
   await page.locator('[data-key="maxLevel"] input[type=range]').fill('20');
   await page.locator('.capsule').getByRole('button', { name: 'Save' }).click();
   await expect(page.locator('[role=status][aria-live=polite]')).toContainText('Settings saved');
@@ -178,29 +184,30 @@ test('Save is announced through the live region', async ({ page }) => {
 
 test('Tab escapes an armed keybind capture instead of binding Tab', async ({ page }) => {
   await page.goto('/');
-  const cap = page.locator('[data-key="__zoomIn"] .keycap').first();
+  const cap = page.locator('[data-key="__zoomIn"] .kchg').first();
   await cap.focus();
   await page.keyboard.press('Enter');
-  await expect(cap).toHaveClass(/armed/);
+  await expect(cap).toHaveAccessibleName(/Recording/);
   await page.keyboard.press('Tab');
-  await expect(cap).not.toHaveClass(/armed/);
+  await expect(cap).toHaveAccessibleName(/Change/);
   const bound = await page.evaluate(() => window.__msgs.some((m) => /^setConfig/.test(m.type) && m.value === '9'));
   expect(bound).toBe(false);
 });
 
 test('an armed keycap says so and carries its instructions as a description', async ({ page }) => {
   await page.goto('/');
-  const cap = page.locator('[data-key="__zoomIn"] .keycap').first();
+  const cap = page.locator('[data-key="__zoomIn"] .kchg').first();
   await cap.click();
-  await expect(cap).toHaveClass(/armed/);
+  await expect(cap).toHaveAccessibleName(/Recording/);
   const desc = await cap.evaluate((el) => (el.getAttribute('aria-describedby') || '').split(/\s+/)
     .map((id) => (document.getElementById(id) || {}).textContent || '').join(' '));
-  expect(desc + (await cap.getAttribute('aria-label') || '')).toMatch(/Listening|Press a key/i);
+  expect(desc).toMatch(/Escape cancels/i);
+  await expect(page.locator('[data-key="__zoomIn"] [role=status]')).toContainText(/Listening/);
 });
 
 test('the theme control is a radio group with arrow-key navigation', async ({ page }) => {
   await page.goto('/');
-  await go(page, 'general');
+  await go(page, 'prefs');
   const group = page.locator('[data-key="__theme"]').getByRole('radiogroup');
   await expect(group.getByRole('radio')).toHaveCount(3);
   await group.getByRole('radio', { checked: true }).focus();
@@ -212,6 +219,6 @@ test('the theme control is a radio group with arrow-key navigation', async ({ pa
 test('the profile selector has an accessible name and the search box is a labelled search field', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('searchbox', { name: 'Search settings' })).toBeVisible();
-  await go(page, 'general');
-  await expect(page.locator('[data-key="__profiles"] select')).toHaveAccessibleName(/profile/i);
+  await go(page, 'prefs');
+  await expect(page.locator('[data-key="__profiles"] .trig')).toHaveAccessibleName(/profile/i);
 });

@@ -27,6 +27,12 @@ inline int PickButtonSlot(const ButtonSlot* slots, int n, int button, int held) 
     return best;
 }
 
+// Wheel binds (#318): button codes 6 = wheel up and 7 = wheel down live in the same zoom slots as the
+// buttons. WheelCode names the code a notch of this delta would match (0 for a zero delta).
+inline constexpr int kWheelUpButton = 6;
+inline constexpr int kWheelDownButton = 7;
+inline int WheelCode(int delta) { return delta > 0 ? kWheelUpButton : (delta < 0 ? kWheelDownButton : 0); }
+
 // Swallowing an event while Alt or Win is held leaves Windows seeing that modifier pressed and
 // released on its own: Win opens Start, Alt activates the focused app's menu bar. One masking
 // keystroke (an unassigned VK) in between prevents both.
@@ -50,4 +56,21 @@ struct WheelAccum {
     }
     void reset() { acc = 0; }
 };
+// What one wheel event does. `zoomSteps` is signed whole notches (+ = zoom in, - = zoom out); 0 means
+// a fraction is still accumulating. `claimed` = the event matched a bind (its modifiers are held), so
+// the hook swallows it; an event that matches nothing (plain scrolling, wrong modifiers) is never
+// claimed. A slot match decides the direction (a wheel-up bound to Zoom out zooms out); the legacy
+// zoomWheelMods form (no slot match, only when migration found no free slot) zooms in on up, out on down.
+struct WheelDecision { bool claimed = false; int zoomSteps = 0; };
+inline WheelDecision DecideWheel(WheelAccum& acc, int delta, int held, int slotDir, int legacyMods) {
+    WheelDecision d;
+    const int dir = slotDir == 1 ? 1 : (slotDir == 2 ? -1 : 0);   // +1 in, -1 out, 0 = legacy
+    d.claimed = dir != 0 || (legacyMods != 0 && ModsSatisfied(legacyMods, held));
+    if (!d.claimed) { acc.reset(); return d; }     // a fraction never carries into an unrelated gesture
+    const int steps = acc.add(delta);
+    if (dir == 0) d.zoomSteps = steps;             // legacy: the wheel's own direction
+    else d.zoomSteps = (steps < 0 ? -steps : steps) * dir;
+    return d;
+}
+
 }  // namespace wind

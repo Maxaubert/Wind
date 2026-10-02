@@ -1,5 +1,7 @@
 #include "config.h"
 #include "keybind_rules.h"   // one safety rule set for every bind (#285)
+#include "config_ui/ini_edit.h"   // wheel migration (#318): pure text edits
+#include <map>
 #include <cstring>
 #include <sstream>
 #include <string>
@@ -165,6 +167,9 @@ Config ParseConfig(const std::string& text) {
             else if (key == "zoomInButton2Mods")  c.zoomInButton2Mods = std::stoi(val);
             else if (key == "zoomOutButton2Mods") c.zoomOutButton2Mods = std::stoi(val);
             else if (key == "zoomWheelMods")      c.zoomWheelMods = std::stoi(val);
+            else if (key == "panKeysOn")          c.panKeysOn = std::stoi(val) != 0 ? 1 : 0;
+            else if (key == "hideCursorOn")       c.hideCursorOn = std::stoi(val) != 0 ? 1 : 0;
+            else if (key == "cursorLockOn")       c.cursorLockOn = std::stoi(val) != 0 ? 1 : 0;
             else if (key == "maxLevel")         c.maxLevel = std::stod(val);
             else if (key == "zoomInSpeed")      c.zoomInSpeed = std::stod(val);
             else if (key == "zoomOutSpeed")     c.zoomOutSpeed = std::stod(val);
@@ -354,6 +359,12 @@ Config ParseConfig(const std::string& text) {
     sanitizeButton(c.zoomInButton, c.zoomInButtonMods);    sanitizeButton(c.zoomInButton2, c.zoomInButton2Mods);
     sanitizeButton(c.zoomOutButton, c.zoomOutButtonMods);  sanitizeButton(c.zoomOutButton2, c.zoomOutButton2Mods);
     if (c.zoomWheelMods != 0 && CheckWheelBind(c.zoomWheelMods) != BindVerdict::Ok) c.zoomWheelMods = 0;
+    // Extra-key switches (#318): off = unbound as far as the core is concerned (no hook tracking, no
+    // swallowing, no RegisterHotKey). The ini keeps the binding; only this parsed copy is cleared.
+    if (!c.panKeysOn) { c.panLeftVk = c.panRightVk = c.panUpVk = c.panDownVk = 0;
+                        c.panLeftMods = c.panRightMods = c.panUpMods = c.panDownMods = 0; }
+    if (!c.hideCursorOn) { c.hideCursorVk = 0; c.hideCursorMods = 0; }
+    if (!c.cursorLockOn) { c.cursorLockVk = 0; c.cursorLockMods = 0; }
     return c;
 }
 }
@@ -370,7 +381,7 @@ std::string StripUiOnlyKeys(const std::string& iniText) {
         size_t b = line.find_first_not_of(" \t");
         bool uiOnly = false;
         if (b != std::string::npos) {
-            for (const char* k : { "uiTheme=", "showAdvanced=", "onboarded=" }) {
+            for (const char* k : { "uiTheme=", "uiPalette=", "showAdvanced=", "onboarded=" }) {
                 if (line.compare(b, strlen(k), k) == 0) { uiOnly = true; break; }
             }
         }
@@ -378,6 +389,42 @@ std::string StripUiOnlyKeys(const std::string& iniText) {
         pos = eol + 1;
     }
     return out;
+}
+}  // namespace wind
+
+namespace wind {
+static const char* const kUiPalettes[] = { "grey", "ember", "ocean", "hicon" };
+const char* const* UiPaletteIds(int& count) { count = (int)(sizeof(kUiPalettes) / sizeof(kUiPalettes[0])); return kUiPalettes; }
+std::string NormalizeUiPalette(const std::string& value) {
+    const std::string v = trim(value);
+    for (const char* id : kUiPalettes) if (v == id) return v;
+    return "grey";
+}
+// Zoom button slot keys, in match order per direction: the first free one takes the wheel bind.
+static bool SlotFree(const std::map<std::string, std::string>& v, const char* key) {
+    auto it = v.find(key);
+    if (it == v.end()) return true;
+    try { return std::stoi(it->second) == 0; } catch (...) { return true; }
+}
+WheelMigration MigrateWheelMods(const std::string& iniText) {
+    WheelMigration r; r.text = iniText;
+    const auto v = ReadIniValues(iniText);
+    auto it = v.find("zoomWheelMods");
+    int mods = 0;
+    if (it != v.end()) { try { mods = std::stoi(it->second); } catch (...) { mods = 0; } }
+    if (mods == 0) return r;
+    // An unsafe stored value (Shift alone, no modifier) already reads as off; clear it quietly.
+    if (CheckWheelBind(mods) != BindVerdict::Ok) { r.text = UpdateIniText(iniText, "zoomWheelMods", "0"); r.changed = true; return r; }
+    const char* inSlot  = SlotFree(v, "zoomInButton")  ? "zoomInButton"  : SlotFree(v, "zoomInButton2")  ? "zoomInButton2"  : nullptr;
+    const char* outSlot = SlotFree(v, "zoomOutButton") ? "zoomOutButton" : SlotFree(v, "zoomOutButton2") ? "zoomOutButton2" : nullptr;
+    if (!inSlot || !outSlot) { r.blocked = true; return r; }
+    const std::string m = std::to_string(mods & 15);
+    std::string t = iniText;
+    t = UpdateIniText(t, inSlot, "6");   t = UpdateIniText(t, std::string(inSlot) + "Mods", m);
+    t = UpdateIniText(t, outSlot, "7");  t = UpdateIniText(t, std::string(outSlot) + "Mods", m);
+    r.text = UpdateIniText(t, "zoomWheelMods", "0");
+    r.changed = true;
+    return r;
 }
 }  // namespace wind
 
@@ -408,9 +455,12 @@ std::string DefaultIniText() {
                "; Button binds may also be 3=left, 4=right, 5=middle click, which need a modifier mask\n"
                ";   (zoomInButtonMods etc., same bits; never Ctrl or Shift alone). Optional for 1/2.\n"
                "zoomInButtonMods=0\nzoomOutButtonMods=0\nzoomInButton2Mods=0\nzoomOutButton2Mods=0\n"
-               "; zoomWheelMods: modifiers that make the scroll wheel zoom (0=off; e.g. 2=Alt, 3=Ctrl+Alt;\n"
-               ";   never Shift alone; Ctrl zooms the screen, not the page). Speed: zoomInSpeed (up), zoomOutSpeed (down).\n"
+               "; The wheel is a zoom bind too: button 6 = wheel up, 7 = wheel down (with the Mods mask above;\n"
+               ";   never Shift alone; Ctrl zooms the screen, not the page). Speed: zoomInSpeed, zoomOutSpeed.\n"
+               "; zoomWheelMods: the OLD single wheel setting; moved into the button slots on load (#318).\n"
                "zoomWheelMods=0\n"
+               "; Extra-key switches (1=on, 0=off): off frees the keys but keeps the binding below.\n"
+               "panKeysOn=1\nhideCursorOn=1\ncursorLockOn=1\n"
                "; hideCursorVk/hideCursorMods: hotkey to toggle the magnified cursor on/off while\n"
                ";   zoomed (does not reset zoom). VK + mods, 0=unbound.\n"
                "hideCursorVk=0\nhideCursorMods=0\n"

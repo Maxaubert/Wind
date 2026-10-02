@@ -1004,7 +1004,7 @@ static void RunTick(TickState& t) {
         unsigned long long m = ConfigMTime(t.iniPath);
         if (m != t.lastMtime) {
             t.lastMtime = m;
-            // Skip the reload when only UI-owned keys changed (uiTheme/showAdvanced/onboarded):
+            // Skip the reload when only UI-owned keys changed (uiTheme/uiPalette/showAdvanced/onboarded):
             // the settings app writes those, the core never reads them, and the reload below
             // resets the ZoomController - a theme toggle mid-zoom collapsed the zoom to 1x.
             std::string stripped = wind::StripUiOnlyKeys(wind::ReadTextFile(t.iniPath));
@@ -2840,6 +2840,12 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // Profiles (spec 2026-08-12): first launch after the update seeds profiles\Default.ini from the
     // user's current settings, so existing installs get a "Default" profile with zero user action.
     EnsureProfilesSeeded(iniPath);
+    // One-time ini migration (#318): the old zoomWheelMods key becomes wheel up/down zoom binds.
+    {
+        const wind::IniMigrationResult mig = wind::MigrateIniFiles(iniPath);
+        if (mig.rewritten) wind::Log(wind::LogLevel::Info, "config", "migrated zoomWheelMods into wheel zoom binds in %d file(s)", mig.rewritten);
+        if (mig.blocked) wind::Log(wind::LogLevel::Warn, "config", "zoomWheelMods kept in %d file(s): both zoom slots of a direction are full", mig.blocked);
+    }
     // Settings session (#303): unsaved changes do not survive a start, unless Wind restarted itself.
     {
         bool keep = GetFileAttributesW(wind::SessionKeepPath().c_str()) != INVALID_FILE_ATTRIBUTES;

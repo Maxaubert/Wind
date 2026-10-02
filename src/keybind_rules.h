@@ -79,10 +79,12 @@ inline BindVerdict CheckWheelBind(int mods) {
     return BindVerdict::Ok;
 }
 // Button ids as stored in the zoom slots: 1 = XBUTTON1 (back), 2 = XBUTTON2 (forward), 3 = left,
-// 4 = right, 5 = middle. Side buttons may be bound alone (as always).
+// 4 = right, 5 = middle, 6 = wheel up, 7 = wheel down (#318: the wheel codes exist only on the zoom
+// rows and follow the wheel rule). Side buttons may be bound alone (as always).
 inline BindVerdict CheckClickBind(int button, int mods) {
     if (button == 0 || button == 1 || button == 2) return BindVerdict::Ok;
-    if (button < 0 || button > 5) return BindVerdict::NeverBindable;
+    if (button < 0 || button > 7) return BindVerdict::NeverBindable;
+    if (button == 6 || button == 7) return CheckWheelBind(mods);
     mods &= (kModCtrl | kModAlt | kModShift | kModWin);
     if (mods == 0) return BindVerdict::NeedsModifier;
     if (mods == kModCtrl) return BindVerdict::CtrlAlone;

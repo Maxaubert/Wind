@@ -1,5 +1,6 @@
 #include "doctest.h"
 #include "../src/config.h"
+#include "../src/config_ui/ini_edit.h"
 using namespace wind;
 
 TEST_CASE("defaults when text is empty") {
@@ -583,4 +584,86 @@ TEST_CASE("every keybind takes two or three modifiers plus one key (#307)") {
 TEST_CASE("zoomTrace is off by default and parses (#310)") {
     CHECK(ParseConfig("").zoomTrace == 0);
     CHECK(ParseConfig("zoomTrace=1\n").zoomTrace == 1);
+}
+
+// ---- #318: wheel zoom binds, the zoomWheelMods migration, extra-key switches, uiPalette ----
+TEST_CASE("wheel up and down are zoom button codes 6/7 and follow the wheel rule (#318)") {
+    Config c = ParseConfig("zoomInButton=6\nzoomInButtonMods=1\nzoomOutButton=7\nzoomOutButtonMods=3\n"
+                           "zoomInButton2=2\nzoomOutButton2=7\nzoomOutButton2Mods=0\n");
+    CHECK(c.zoomInButton == 6);  CHECK(c.zoomInButtonMods == 1);    // Ctrl + wheel up
+    CHECK(c.zoomOutButton == 7); CHECK(c.zoomOutButtonMods == 3);   // Ctrl+Alt + wheel down
+    CHECK(c.zoomInButton2 == 2);                                    // a side button next to it
+    CHECK(c.zoomOutButton2 == 0);                                   // wheel with no modifier: refused
+    Config s = ParseConfig("zoomInButton=6\nzoomInButtonMods=4\nzoomOutButton=8\nzoomOutButtonMods=3\n");
+    CHECK(s.zoomInButton == 0);                                     // Shift alone: refused
+    CHECK(s.zoomOutButton == 0);                                    // 8 is not a code
+}
+TEST_CASE("zoomWheelMods migrates once into free zoom slots (#318)") {
+    const auto m = MigrateWheelMods("maxLevel=8\nzoomWheelMods=3\nzoomInButton=2\n");
+    CHECK(m.changed); CHECK_FALSE(m.blocked);
+    const Config c = ParseConfig(m.text);
+    CHECK(c.zoomInButton == 2);                                     // the existing bind stays first
+    CHECK(c.zoomInButton2 == 6);  CHECK(c.zoomInButton2Mods == 3);  // wheel up + Ctrl+Alt in the free slot
+    CHECK(c.zoomOutButton == 7);  CHECK(c.zoomOutButtonMods == 3);  // wheel down + the same mods
+    CHECK(c.zoomWheelMods == 0);
+    CHECK(m.text.find("maxLevel=8") != std::string::npos);          // other lines untouched
+    // Idempotent: a second pass has nothing to do.
+    const auto again = MigrateWheelMods(m.text);
+    CHECK_FALSE(again.changed); CHECK(again.text == m.text);
+}
+TEST_CASE("zoomWheelMods stays when a direction has no free slot (#318)") {
+    const std::string ini = "zoomWheelMods=1\nzoomOutButton=2\nzoomOutButton2=1\n";
+    const auto m = MigrateWheelMods(ini);
+    CHECK(m.blocked); CHECK_FALSE(m.changed); CHECK(m.text == ini);
+    CHECK(ParseConfig(m.text).zoomWheelMods == 1);                  // the core keeps honouring it
+    const auto full = MigrateWheelMods("zoomWheelMods=1\nzoomInButton=2\nzoomInButton2=1\n");
+    CHECK(full.blocked); CHECK_FALSE(full.changed);
+}
+TEST_CASE("migration leaves nothing to do without a wheel setting, and drops an unsafe one (#318)") {
+    CHECK_FALSE(MigrateWheelMods("maxLevel=8\n").changed);
+    CHECK_FALSE(MigrateWheelMods("zoomWheelMods=0\n").changed);
+    const auto bad = MigrateWheelMods("zoomWheelMods=4\n");        // Shift alone never bound
+    CHECK(bad.changed); CHECK_FALSE(bad.blocked);
+    CHECK(ParseConfig(bad.text).zoomInButton == 0);
+    CHECK(ReadIniValues(bad.text)["zoomWheelMods"] == "0");
+}
+TEST_CASE("extra-key switches default on; off clears the parsed bind but not the ini (#318)") {
+    const Config d = ParseConfig("panLeftVk=37\npanLeftMods=3\nhideCursorVk=112\ncursorLockVk=113\n");
+    CHECK(d.panKeysOn == 1); CHECK(d.hideCursorOn == 1); CHECK(d.cursorLockOn == 1);
+    CHECK(d.panLeftVk == 37); CHECK(d.hideCursorVk == 112); CHECK(d.cursorLockVk == 113);
+    const std::string ini = "panLeftVk=37\npanLeftMods=3\npanRightVk=39\npanRightMods=3\npanUpVk=38\npanUpMods=3\n"
+                            "panDownVk=40\npanDownMods=3\nhideCursorVk=112\nhideCursorMods=1\ncursorLockVk=113\n"
+                            "recenterVk=36\nrecenterMods=2\n";
+    const Config off = ParseConfig(ini + "panKeysOn=0\nhideCursorOn=0\ncursorLockOn=0\n");
+    CHECK(off.panKeysOn == 0); CHECK(off.hideCursorOn == 0); CHECK(off.cursorLockOn == 0);
+    CHECK(off.panLeftVk == 0); CHECK(off.panRightVk == 0); CHECK(off.panUpVk == 0); CHECK(off.panDownVk == 0);
+    CHECK(off.panLeftMods == 0);
+    CHECK(off.hideCursorVk == 0); CHECK(off.hideCursorMods == 0);
+    CHECK(off.cursorLockVk == 0);
+    CHECK(off.recenterVk == 36);                                    // not an extra key: unaffected
+    // Each switch is independent.
+    const Config one = ParseConfig(ini + "hideCursorOn=0\n");
+    CHECK(one.hideCursorVk == 0); CHECK(one.panLeftVk == 37); CHECK(one.cursorLockVk == 113);
+    // Any non-zero value reads as on; the key may sit before or after the binding.
+    CHECK(ParseConfig("panKeysOn=2\npanLeftVk=37\npanLeftMods=3\n").panLeftVk == 37);
+    CHECK(ParseConfig("cursorLockOn=0\ncursorLockVk=113\n").cursorLockVk == 0);
+}
+TEST_CASE("uiPalette is UI-only: stripped from the core text, unknown reads grey (#318)") {
+    CHECK(StripUiOnlyKeys("a=1\nuiPalette=ember\nb=2\n") == "a=1\nb=2\n");
+    CHECK(StripUiOnlyKeys("a=1\nuiPalette=ember\n") == StripUiOnlyKeys("a=1\nuiPalette=hicon\n"));
+    CHECK(StripUiOnlyKeys("uiPaletteX=1\n") == "uiPaletteX=1\n");
+    int n = 0; const char* const* ids = UiPaletteIds(n);
+    CHECK(n == 4); CHECK(std::string(ids[0]) == "grey");
+    for (int i = 0; i < n; ++i) CHECK(NormalizeUiPalette(ids[i]) == ids[i]);
+    CHECK(NormalizeUiPalette("") == "grey");
+    CHECK(NormalizeUiPalette("neon") == "grey");
+    CHECK(NormalizeUiPalette("b1_hicon") == "grey");                // old mockup ids are not ini values
+    for (const char* gone : { "cyber", "mono", "slate", "carbon" }) CHECK(NormalizeUiPalette(gone) == "grey");   // removed themes
+    CHECK(std::string(ids[3]) == "hicon");                          // High contrast is always last
+    CHECK(NormalizeUiPalette(" ocean ") == "ocean");
+}
+TEST_CASE("the first-run ini carries the new keys and parses to the struct defaults (#318)") {
+    const Config t = ParseConfig(DefaultIniText());
+    CHECK(t.panKeysOn == 1); CHECK(t.hideCursorOn == 1); CHECK(t.cursorLockOn == 1);
+    CHECK(t.zoomWheelMods == 0);
 }
