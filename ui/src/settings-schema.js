@@ -155,7 +155,7 @@ export const groups = [
     desc: 'Choose what the tray menu shows, and in what order.',
     cards: [
       { caption: '', rows: [
-        { key: 'trayPerf', type: 'toggle', label: 'Performance in the tray', desc: 'Zoom, fps and a frame-time graph.', def: 0 },
+        { key: 'trayPerf', type: 'toggle', label: 'Performance in the tray', desc: 'Zoom, fps and a frame-time graph.', def: 1 },
       ] },
     ] },
 

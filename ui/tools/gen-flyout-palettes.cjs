@@ -1,7 +1,7 @@
 // Generates src/tray_app/flyout_palettes.h (the tray flyout's 4 themes, dark only since 0.20.0 / #324) from the same mockup palettes
 // as ui/tools/gen-themes.cjs, evaluating the tokens tray08.css derives (all color-mix(in srgb) done here):
-//   toff = fg 12% over card, toffh = fg 18% over card, ton = segon || fill 36% over toff, tonh = segon || fill 44%,
-//   tonic = segonfg || accent 70% over fg, scrim = bg at 62%, segline = card (the 1px gap shows the group's card).
+//   off = chip, offh = fg 6% over chip, ton = segon || swon (solid), tonh = segon || fg 12% over swon,
+//   tonic = segonfg || accenton, scrim = bg at 62%, segline = card (the 1px gap shows the group's card).
 //
 //   node tools/gen-flyout-palettes.cjs [mockup-ia-dir]
 //
@@ -24,10 +24,12 @@ const H = (n) => '0x' + n.toString(16).padStart(6, '0');
 const f = (v) => { const s = String(+(+v).toFixed(3)); return (s.includes('.') ? s : s + '.') + 'f'; };
 
 // today's flyout look (MakeTheme in flyout_draw.cpp before #318), the Wind grey rows
+// Wind grey dark ON segments: solid teal with a near-black icon, the black-and-teal contrast of the Settings
+// switches (Max 2026-10-02, #329); the old dim teal tint did not fit.
 const GREY = {
   dark: { menu: 0x000000, card: 0x121212, menub: 0x333333, fg: 0xf2f2f2, fg2: 0xd0d0d0, fg3: 0xb4b6ba, rule: 0x303236, hl: 0x2d2d2d,
     glyph: 0xb0b0b0, spark: 0x2fbfa5, fill: 0x2fbfa5, fillline: 0, filllineA: 0, lift: 0x0b0b0b, scrim: 0x000000, scrimA: .55,
-    band: 0x0a0a0a, track: 0x3d3d3d, off: 0x303033, offh: 0x3b3b3f, offic: 0xc8cad0, onic: 0xa9ece0, on: 0x1f5650, onh: 0x266560,
+    band: 0x0a0a0a, track: 0x3d3d3d, off: 0x303033, offh: 0x3b3b3f, offic: 0xc8cad0, onic: 0x04201b, on: 0x2fbfa5, onh: 0x45cbb3,
     onb: 0x2fbfa5, onbA: .4, segline: 0x000000, focus: 0xf2f2f2, aurora: .62, tint: 0, tintA: 0 },
 };
 // Settings control greys (ui/src/design/themes.css, Wind grey): the toggle bar and dropdown match them.
@@ -40,10 +42,11 @@ function mixN(a, b, t) {   // a over b by t, 0xRRGGBB numbers
 }
 function derive(k) {
   const card = hex(k.card), fg = hex(k.fg), fill = hex(k.fill), accent = hex(k.pbg);
-  const toff = mix(fg, card, .12);   // base for the ON tint only (unchanged look)
   const chip = hex(k.chip), chipb = hex(k.chipb), chiph = mix(fg, chip, .06);
-  const ton = k.segon ? hex(k.segon) : mix(fill, toff, .36), tonh = k.segon ? hex(k.segon) : mix(fill, toff, .44);
-  const tonic = k.segonfg ? hex(k.segonfg) : mix(accent, fg, .7);
+  // ON segments: a SOLID fill in the colour of the Settings switches (swon) with the on-accent icon colour,
+  // so they pop like Wind grey does (Max 2026-10-02, #329); the old tint over the off fill was too faint.
+  const ton = k.segon ? hex(k.segon) : hex(k.swon), tonh = k.segon ? hex(k.segon) : mix(fg, hex(k.swon), .12);
+  const tonic = k.segonfg ? hex(k.segonfg) : hex(k.accenton);
   const fl = k.fillline && k.fillline !== 'transparent';
   return { menu: hex(k.bg), card, menub: hex(k.chipb), fg, fg2: hex(k.fg2), fg3: hex(k.fg3), rule: hex(k.line2), hl: hex(k.hover),
     glyph: hex(k.glyph), spark: accent, fill, fillline: fl ? hex(k.fillline) : 0, filllineA: fl ? 1 : 0, lift: card,
