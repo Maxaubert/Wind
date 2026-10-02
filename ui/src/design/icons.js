@@ -24,6 +24,11 @@ export const paths = {
   ftc: '<path d="M5 2h6M5 14h6M8 2v12"/><path d="M1.5 6v4M14.5 6v4"/>',
   ffk: '<path d="M2 5.5V3a1 1 0 0 1 1-1h2.5M10.5 2H13a1 1 0 0 1 1 1v2.5M14 10.5V13a1 1 0 0 1-1 1h-2.5M5.5 14H3a1 1 0 0 1-1-1v-2.5"/><path d="M6 6h4v4H6z"/>',
   edges: '<path d="M2.5 2.5h11v11h-11zM6 5.5l4.5 2.8-1.9.6-.8 2z"/>',
+  // Tray tools (#315): chip with pins, mouse, keycap with an arrow, two bars. Same paths as flyout_icons.h.
+  engine: '<path d="M4.5 4.5h7v7h-7zM6.75 6.75h2.5v2.5h-2.5z"/><path d="M6.5 1.5v3M9.5 1.5v3M6.5 11.5v3M9.5 11.5v3M1.5 6.5h3M1.5 9.5h3M11.5 6.5h3M11.5 9.5h3"/>',
+  lock: '<path d="M5 7a3 3 0 0 1 6 0v3a3 3 0 0 1-6 0zM8 4v3.5"/>',
+  pass: '<path d="M2.5 4.5h11v7h-11zM5.5 8h5M8.5 6l2 2-2 2"/>',
+  pause: '<path d="M5.75 3.5v9M10.25 3.5v9"/>',
   // Theme glyphs are round on purpose: square ones read as the window maximize button.
   auto: '<circle cx="8" cy="8" r="5.5"/><path d="M8 2.5a5.5 5.5 0 0 1 0 11z" fill="currentColor"/>',
   light: '<circle cx="8" cy="8" r="2.75"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.4 1.4M11.6 11.6L13 13M3 13l1.4-1.4M11.6 4.4L13 3"/>',

@@ -41,7 +41,7 @@ test('model: defaults are Warmth and Brightness on, everything else off, perform
   expect(t.perf).toBe(false);
   expect(t.sliders.map((i) => i.key)).toEqual(SLIDERS.map((i) => i.key));
   expect(t.sliders.filter((i) => i.on).map((i) => i.key)).toEqual(['colorWarmPct', 'colorDimPct']);
-  expect(t.toggles.map((i) => i.key)).toEqual(['trackCaret', 'trackFocus', 'keepEdges']);
+  expect(t.toggles.map((i) => i.key)).toEqual(['trackCaret', 'trackFocus', 'keepEdges', 'engine', 'fixLock', 'fixPass', 'pause']);
   expect(t.toggles.some((i) => i.on)).toBe(false);
 });
 
@@ -57,7 +57,7 @@ test('model: round trip keeps order and enabled, drops unknown keys, appends mis
   const back = parseList({ ...v, ...w }, 'sliders');
   expect(back.map((i) => [i.key, i.on])).toEqual(s.map((i) => [i.key, i.on]));
   const t = parseList(v, 'toggles');
-  expect(t.map((i) => i.key)).toEqual(['keepEdges', 'trackCaret', 'trackFocus']);
+  expect(t.map((i) => i.key)).toEqual(['keepEdges', 'trackCaret', 'trackFocus', 'engine', 'fixLock', 'fixPass', 'pause']);
   expect(t.filter((i) => i.on).map((i) => i.key)).toEqual(['keepEdges']);
 });
 
@@ -84,7 +84,7 @@ test('tab: TRAY section label, banner, performance card and both lists', async (
   await expect(page.locator('#cap-sliders')).toHaveText('Sliders');
   await expect(page.locator('#cap-toggles')).toHaveText('Toggles');
   expect(await names(page, 'sliders')).toEqual(['Warmth', 'Brightness', 'Max zoom', 'Zoom-in speed', 'Zoom-out speed', 'Pan speed', 'Pan smoothing', 'Release glide']);
-  expect(await names(page, 'toggles')).toEqual(['Follow the text cursor', 'Follow keyboard focus', 'Keep within the edges']);
+  expect(await names(page, 'toggles')).toEqual(['Follow the text cursor', 'Follow keyboard focus', 'Keep within the edges', 'Engine for the app in front', 'Mouse lock (listen)', 'Pass keys (listen)', 'Pause Wind']);
   await expect(page.locator('[data-cnt="sliders"]')).toHaveText('2 of 4');
   await expect(page.locator('[data-cnt="toggles"]')).toHaveText('0 on');
   await expect(chk(page, 'sliders', 'Warmth')).toHaveAttribute('aria-checked', 'true');
@@ -97,7 +97,7 @@ test('tab: item icons are bare line icons without a background box', async ({ pa
   const st = await tic.evaluate((el) => { const c = getComputedStyle(el); return { bg: c.backgroundColor, bw: c.borderTopWidth, br: c.borderTopLeftRadius }; });
   expect(st.bg).toBe('rgba(0, 0, 0, 0)');
   expect(st.bw).toBe('0px');
-  expect(await page.locator('.tic svg').count()).toBe(11);
+  expect(await page.locator('.tic svg').count()).toBe(15);
 });
 
 test('performance switch writes trayPerf', async ({ page }) => {
@@ -122,7 +122,7 @@ test('check and uncheck write the enabled list and the full order', async ({ pag
   await rowsOf(page, 'toggles').filter({ hasText: 'Follow keyboard focus' }).locator('.k').click();
   v = await live(page);
   expect(v.trayToggles).toBe('trackFocus');
-  expect(v.trayToggleOrder).toBe('trackCaret,trackFocus,keepEdges');
+  expect(v.trayToggleOrder).toBe('trackCaret,trackFocus,keepEdges,engine,fixLock,fixPass,pause');
   await expect(page.locator('[data-cnt="toggles"]')).toHaveText('1 on');
 });
 
@@ -180,14 +180,14 @@ test('drag reorders the Toggles list, and a row dragged in one list stays in it'
   await page.setViewportSize({ width: 1120, height: 1100 });   // the whole Sliders card in view: the drag spans all eight rows
   await open(page);
   await dragRow(page, 'toggles', 'Keep within the edges', 'Follow the text cursor');
-  await expect.poll(() => names(page, 'toggles')).toEqual(['Keep within the edges', 'Follow the text cursor', 'Follow keyboard focus']);
-  expect((await live(page)).trayToggleOrder).toBe('keepEdges,trackCaret,trackFocus');
+  await expect.poll(() => names(page, 'toggles')).toEqual(['Keep within the edges', 'Follow the text cursor', 'Follow keyboard focus', 'Engine for the app in front', 'Mouse lock (listen)', 'Pass keys (listen)', 'Pause Wind']);
+  expect((await live(page)).trayToggleOrder).toBe('keepEdges,trackCaret,trackFocus,engine,fixLock,fixPass,pause');
   // a slider row dragged to the bottom of its own list lands last and leaves the Toggles card alone
   await dragRow(page, 'sliders', 'Warmth', 'Release glide');
   await expect.poll(async () => (await names(page, 'sliders')).at(-1)).toBe('Warmth');
-  expect(await rowsOf(page, 'toggles').count()).toBe(3);
+  expect(await rowsOf(page, 'toggles').count()).toBe(7);
   expect(await rowsOf(page, 'sliders').count()).toBe(8);
-  expect(await names(page, 'toggles')).toEqual(['Keep within the edges', 'Follow the text cursor', 'Follow keyboard focus']);
+  expect((await names(page, 'toggles')).slice(0, 3)).toEqual(['Keep within the edges', 'Follow the text cursor', 'Follow keyboard focus']);
 });
 
 test('keyboard: Space picks up, arrows move, Space drops; Escape cancels', async ({ page }) => {
@@ -214,8 +214,8 @@ test('keyboard: Space picks up, arrows move, Space drops; Escape cancels', async
   await page.keyboard.press('ArrowUp');
   await page.keyboard.press('ArrowUp');
   await page.keyboard.press('Space');
-  await expect.poll(() => names(page, 'toggles')).toEqual(['Keep within the edges', 'Follow the text cursor', 'Follow keyboard focus']);
-  expect((await live(page)).trayToggleOrder).toBe('keepEdges,trackCaret,trackFocus');
+  await expect.poll(async () => (await names(page, 'toggles')).slice(0, 3)).toEqual(['Keep within the edges', 'Follow the text cursor', 'Follow keyboard focus']);
+  expect((await live(page)).trayToggleOrder).toBe('keepEdges,trackCaret,trackFocus,engine,fixLock,fixPass,pause');
 });
 
 test('the saved lists load back from the ini', async ({ page }) => {
@@ -235,4 +235,21 @@ test('search finds the Performance row and jumps to the tray tab', async ({ page
   await page.locator('.side .search input').fill('performance');
   await page.locator('.side .search input').press('Enter');
   await expect(page.locator('h1')).toHaveText('Tray menu');
+});
+
+test('tools: the four #315 items are off by default, have icons and descriptions, and write trayToggles', async ({ page }) => {
+  await open(page);
+  const tools = [['Engine for the app in front', 'engine'], ['Mouse lock (listen)', 'fixLock'], ['Pass keys (listen)', 'fixPass'], ['Pause Wind', 'pause']];
+  for (const [name] of tools) {
+    const row = rowsOf(page, 'toggles').filter({ hasText: name });
+    await expect(row.locator('.tic svg')).toHaveCount(1);
+    await expect(row.locator('.d')).not.toBeEmpty();
+    await expect(chk(page, 'toggles', name)).toHaveAttribute('aria-checked', 'false');
+  }
+  await chk(page, 'toggles', 'Pause Wind').click();
+  await chk(page, 'toggles', 'Mouse lock (listen)').click();
+  const v = await live(page);
+  expect(v.trayToggles).toBe('fixLock,pause');
+  expect(v.trayToggleOrder).toBe('trackCaret,trackFocus,keepEdges,engine,fixLock,fixPass,pause');
+  await expect(page.locator('[data-cnt="toggles"]')).toHaveText('2 on');
 });
