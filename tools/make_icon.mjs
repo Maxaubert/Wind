@@ -25,15 +25,14 @@ const { chromium } = require(resolve(root, 'ui', 'node_modules', 'playwright'));
 // large icon 32 x scale), so Windows never resamples a neighbour frame: a 225% taskbar wants 54 px, the tray
 // 36 px, and scaling 64 or 40 down made both soft (Max 2026-10-03, #332).
 const SIZES = [256, 128, 96, 80, 72, 64, 60, 56, 54, 48, 42, 40, 36, 32, 30, 28, 24, 20, 16];
-// Taskbar variant: black badge + faint white edge outline (see the SVG header). The outline
-// is re-drawn per size: ~1 physical px at 16-32 px, shrinking toward 6/256 of the icon at
-// 128-256 px, so it never vanishes and never looks heavy. The stroke sits inside the badge
-// (centre inset by half its width from the 8..248 edge).
+// Taskbar variant: black badge + a solid #202020 edge outline (see the SVG header). The outline
+// is re-drawn per size at exactly 1 physical px, the thinnest line that never vanishes. The
+// stroke sits inside the badge (centre inset by half its width from the 8..248 edge).
 const src = readFileSync(resolve(root, 'assets', 'wind-badge-taskbar.svg'), 'utf8');
 function svgFor(s) {
-  const w = Math.max(6, 256 / s);                 // viewBox units; 256/s = 1 physical px
+  const w = 256 / s;                              // viewBox units: exactly 1 physical px at every size
   const inset = 8 + w / 2, side = 240 - w, rx = 56 - w / 2;
-  const rect = `<rect x="${inset}" y="${inset}" width="${side}" height="${side}" rx="${rx}" fill="none" stroke="#ffffff" stroke-opacity="0.1" stroke-width="${w}"/>`;
+  const rect = `<rect x="${inset}" y="${inset}" width="${side}" height="${side}" rx="${rx}" fill="none" stroke="#202020" stroke-width="${w}"/>`;
   const re = /<rect x="11"[^>]*\/>/;
   if (!re.test(src)) throw new Error('outline rect not found in wind-badge-taskbar.svg');
   return src.replace(re, rect);

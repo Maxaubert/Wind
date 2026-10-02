@@ -1,11 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
-  <!-- Wind taskbar / window icon source: the main logo (assets/wind-badge.svg) plus a faint
-       WHITE edge outline at 10% opacity, drawn inside the square (inset by half its width).
-       Used ONLY to build assets/wind.ico (taskbar, alt-tab, window icon) via
-       tools/make_icon.mjs, which re-draws the outline per size so it stays about 1 px wide
-       at 16-32 px. Everywhere else use wind-badge.svg (no outline). -->
+  <!-- Wind taskbar / window icon source: the main logo (assets/wind-badge.svg) plus a solid
+       #202020 edge outline (the Windows dark taskbar grey, so it vanishes on a dark taskbar and
+       shows as a subtle edge on a black one; Max 2026-10-03), drawn inside the square (inset by
+       half its width). Used ONLY to build assets/wind.ico (taskbar, alt-tab, window icon) via
+       tools/make_icon.mjs, which re-draws the outline 1 physical px wide at every size.
+       Everywhere else use wind-badge.svg (no outline). -->
   <rect x="8" y="8" width="240" height="240" rx="56" fill="#000000"/>
-  <rect x="11" y="11" width="234" height="234" rx="53" fill="none" stroke="#ffffff" stroke-opacity="0.1" stroke-width="6"/>
+  <rect x="11" y="11" width="234" height="234" rx="53" fill="none" stroke="#202020" stroke-width="6"/>
   <g transform="translate(50,50) scale(9.75)" fill="none" stroke="#ffffff"
      stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round">
     <path d="M2 5.5h8.5a2 2 0 1 0-2-2"/>
