@@ -27,11 +27,10 @@
      onkeydown={key}>
   {#each themes as t (t.id)}
     <button type="button" role="radio" class="th" class:on={value === t.id} aria-checked={value === t.id}
-            tabindex={value === t.id ? 0 : -1} data-palette-id={t.id} onclick={() => onChange(t.id)}>
+            tabindex={value === t.id ? 0 : -1} aria-label={t.label} data-palette-id={t.id} onclick={() => onChange(t.id)}>
       <span class="wnd sw" data-palette={t.id} aria-hidden="true">
         <i class="sb"></i><i class="bn"></i><i class="r1"></i><i class="r2"></i><i class="ac"></i>
       </span>
-      <span class="nm">{t.label}</span>
     </button>
   {/each}
 </div>
@@ -44,7 +43,6 @@
   .th:hover { border-color: var(--chipb); color: var(--fg); }
   .th.on { border-color: var(--fg); box-shadow: inset 0 0 0 1px var(--fg); color: var(--fg); }
   .th:focus-visible { outline-offset: 2px; }
-  .nm { display: block; margin: 5px 2px 1px; font: 11px var(--m); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   /* The mini window. It is a .wnd of its own, so these colours are that theme's tokens. */
   .sw { display: block; position: relative; height: 52px; border-radius: var(--srad); background: var(--bg);

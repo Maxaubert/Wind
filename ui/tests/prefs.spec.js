@@ -99,7 +99,8 @@ test('the theme picker is one row of the four theme cards, no scrolling, no arro
   const rowBox = await key(page, 'uiPalette').boundingBox();
   const lastBox = await picker.getByRole('radio').last().boundingBox();
   expect(rowBox.x + rowBox.width - (lastBox.x + lastBox.width)).toBeLessThan(40);
-  await expect(picker.getByRole('radio', { checked: true })).toHaveText('Wind grey');
+  await expect(picker.getByRole('radio', { checked: true })).toHaveAccessibleName('Wind grey');
+  await expect(picker.locator('.nm')).toHaveCount(0);   // cards only, no names (Max 2026-10-02)
   // Each card is drawn in its own theme: the mini windows differ.
   const bgs = new Set();
   for (const sw of await picker.locator('.sw').all()) bgs.add((await css(sw, 'background-color')) + '|' + (await css(sw.locator('.ac'), 'background-color')));
