@@ -36,7 +36,8 @@ export function checkWheelBind(mods) {
 }
 export function checkClickBind(button, mods) {
   if (button === 0 || button === 1 || button === 2) return 'ok';
-  if (button < 0 || button > 5) return 'never';
+  if (button < 0 || button > 7) return 'never';
+  if (button === 6 || button === 7) return checkWheelBind(mods);   // wheel up / down, zoom rows only (#318)
   mods &= 15;
   if (mods === 0) return 'needsmod';
   if (mods === MOD.ctrl) return 'ctrlalone';

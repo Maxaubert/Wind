@@ -9,6 +9,7 @@
 #include <algorithm>
 #include "profiles.h"
 #include "config_ui/ini_edit.h"
+#include "config.h"   // MigrateWheelMods (pure)
 namespace wind {
 inline std::wstring ProfilesDirFromIni(const std::wstring& iniPath) {
     size_t slash = iniPath.find_last_of(L"\\/");
@@ -96,6 +97,25 @@ inline void EnsureProfilesSeeded(const std::wstring& iniPath) {
         return;
     }
     WriteTextFileAtomic(iniPath, UpdateIniText(live, "profile", "Default"));
+}
+// One-time ini migrations (#318), run at start before ResetSessionToProfile: zoomWheelMods moves into
+// the zoom button slots (MigrateWheelMods) in the live ini AND in every profile file, so the session
+// never reads as "unsaved" because only one side was migrated. Returns the number of files rewritten;
+// `blocked` counts files whose zoom slots were full (zoomWheelMods kept, the core still honours it).
+struct IniMigrationResult { int rewritten = 0; int blocked = 0; };
+inline IniMigrationResult MigrateIniFiles(const std::wstring& iniPath) {
+    IniMigrationResult res;
+    auto one = [&](const std::wstring& path) {
+        std::string text;
+        if (!ReadTextFileOk(path, text)) return;
+        WheelMigration m = MigrateWheelMods(text);
+        if (m.blocked) ++res.blocked;
+        if (m.changed && WriteTextFileAtomic(path, m.text)) ++res.rewritten;
+    };
+    one(iniPath);
+    const std::wstring dir = ProfilesDirFromIni(iniPath);
+    for (const auto& n : ListProfileFiles(dir)) one(dir + L"\\" + n + L".ini");
+    return res;
 }
 // %LOCALAPPDATA%\Wind\session.keep: written by the host right before a restart Wind triggers itself
 // (engine change, profile switch with a model change) so the next start keeps the unsaved session.

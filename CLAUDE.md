@@ -159,7 +159,7 @@ Specs: `docs/superpowers/specs/2026-05-25-own-renderer-design.md` (render, issue
 **Profiles** (issue #178, spec `docs/superpowers/specs/2026-08-12-profiles-design.md`): named
 full-snapshot settings profiles (keybinds included). Each is `profiles\<Name>.ini` next to the
 resolved `magnifier.ini`; the live ini stays the single config both exes use, plus `profile=<name>`.
-GLOBAL keys never travel with a profile: `profile`, `onboarded`, `uiTheme`, `showAdvanced`
+GLOBAL keys never travel with a profile: `profile`, `onboarded`, `uiTheme`, `uiPalette`, `showAdvanced`
 (`IsGlobalProfileKey`, src/profiles.* pure + tested; I/O in src/profiles_io.h). Switching =
 `MakeLiveText` (profile keys over live, globals preserved) + hot-reload; a `model` change relaunches
 Wind via the eviction handshake. An EMPTY profile file = factory defaults (absent keys fall back to
@@ -247,7 +247,13 @@ floating Save capsule shows unsaved state (Save / Discard), keybinds persist at 
   still never swallows `IsForbiddenBindVk` keys. AltGr sends Ctrl+Alt, so Ctrl+Alt + a typing key is
   refused (the owner types on a Norwegian layout). Button binds: 1/2 side, 3/4/5 left/right/middle
   (these need modifiers, never Ctrl or Shift alone; the wheel allows Ctrl alone, #295, since the notch
-  is swallowed); the most specific matching slot
+  is swallowed); 6/7 = wheel up/down in the zoom slots (#318: one zoom step per notch, swallowed only with the
+  slot's mods held, plain scrolling untouched; the old `zoomWheelMods` is migrated into free slots once at
+  start, `MigrateIniFiles`, and stays honoured only when a direction has no free slot). The extra-key
+  switches `panKeysOn`/`hideCursorOn`/`cursorLockOn` (default 1, per profile) make ParseConfig read that
+  key as unbound when 0 (no hook tracking, no swallow, no RegisterHotKey) while the ini keeps the binding;
+  `uiPalette` is a global UI-only key like `uiTheme` (stripped from the core text, `NormalizeUiPalette`);
+  the most specific matching slot
   wins. SWALLOWING WITH ALT OR WIN HELD INJECTS ONE MASK KEY (VK 0xE8): otherwise Windows sees the
   modifier tapped alone (Start opens, the app's menu bar activates; Alt measured both ways, Win fixed-case only). Wind's own
   injections carry `kWindInjectTag` in dwExtraInfo and are skipped by the bind matcher; other

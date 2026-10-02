@@ -4,11 +4,15 @@
 #include "../src/config.h"
 using namespace wind;
 
-TEST_CASE("global keys are exactly profile/onboarded/uiTheme/showAdvanced") {
+TEST_CASE("global keys are exactly profile/onboarded/uiTheme/uiPalette/showAdvanced") {
     CHECK(IsGlobalProfileKey("profile"));
     CHECK(IsGlobalProfileKey("onboarded"));
     CHECK(IsGlobalProfileKey("uiTheme"));
     CHECK(IsGlobalProfileKey("showAdvanced"));
+    CHECK(IsGlobalProfileKey("uiPalette"));   // #318: the built-in theme never travels with a profile
+    CHECK_FALSE(IsGlobalProfileKey("panKeysOn"));   // the extra-key switches are per profile
+    CHECK_FALSE(IsGlobalProfileKey("hideCursorOn"));
+    CHECK_FALSE(IsGlobalProfileKey("cursorLockOn"));
     CHECK_FALSE(IsGlobalProfileKey("model"));
     CHECK_FALSE(IsGlobalProfileKey("zoomInVk"));
     CHECK_FALSE(IsGlobalProfileKey("maxLevel"));
@@ -166,4 +170,13 @@ TEST_CASE("SessionDiffers: CRLF and trailing spaces do not differ") {
 TEST_CASE("UpdateProfileKey updates profile keys and refuses global keys") {
     CHECK(UpdateProfileKey("zoom=2\n", "zoom", "3") == UpdateIniText("zoom=2\n", "zoom", "3"));
     CHECK(UpdateProfileKey("zoom=2\n", "uiTheme", "dark") == "zoom=2\n");
+}
+TEST_CASE("uiPalette survives a profile switch and never lands in a profile file (#318)") {
+    const std::string live = "maxLevel=8\nuiPalette=ember\nprofile=A\n";
+    CHECK(MakeProfileText(live) == "maxLevel=8\n");
+    const std::string sw = MakeLiveText("maxLevel=3\nuiPalette=cyber\n", live, "B");
+    auto v = ReadIniValues(sw);
+    CHECK(v["uiPalette"] == "ember");     // the live global wins; a smuggled one in the profile is dropped
+    CHECK(v["maxLevel"] == "3");
+    CHECK_FALSE(SessionDiffers("a=1\nuiPalette=ember\n", "a=1\nuiPalette=cyber\n"));
 }

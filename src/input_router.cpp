@@ -384,13 +384,19 @@ static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
                 if (g_swallowedDown[cb].exchange(false)) return 1;
             }
             // Scroll-wheel zoom: a notch with the bound modifiers held zooms instead of scrolling.
+            // Wheel up / down are zoom binds (#318, button codes 6/7 in the zoom slots); the legacy
+            // zoomWheelMods form is still honoured when migration found no free slot.
             if (wParam == WM_MOUSEWHEEL) {
+                const int delta = (short)HIWORD(mi->mouseData);
                 const int wm = g_router->wheelMods();
-                if (wm != 0) {
-                    const int held = HeldModsNow();
-                    if (ModsSatisfied(wm, held)) {
-                        const int steps = g_wheelAcc.add((short)HIWORD(mi->mouseData));
-                        if (steps) { StampPress(); g_router->state().wheelSteps.fetch_add(steps, std::memory_order_relaxed); WakeMain(); }
+                const int wcode = WheelCode(delta);
+                int slotDir = 0, slotMods = 0;
+                const int held = HeldModsNow();
+                if (wcode != 0) g_router->matchButton(wcode, held, slotDir, slotMods);
+                if (wcode != 0) {
+                    const WheelDecision wd = DecideWheel(g_wheelAcc, delta, held, slotDir, wm);
+                    if (wd.claimed) {
+                        if (wd.zoomSteps) { StampPress(); g_router->state().wheelSteps.fetch_add(wd.zoomSteps, std::memory_order_relaxed); WakeMain(); }
                         // Pass-through apps (and swallow off) still zoom, and get the notch too.
                         if (g_router->swallowEnabled() && g_router->keyboardHookWanted()) {
                             if (NeedsMaskKey(held)) InjectMaskKey();
@@ -398,7 +404,6 @@ static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
                         }
                         return CallNextHookEx(g_mouseHook, code, wParam, lParam);
                     }
-                    g_wheelAcc.reset();   // a fraction never carries into an unrelated gesture
                 }
             }
         }

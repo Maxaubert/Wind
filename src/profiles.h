@@ -6,7 +6,7 @@
 #include <vector>
 namespace wind {
 // Machine/app state that never travels with a profile: the active-profile pointer itself,
-// the onboarding flag, the UI-only theme/advanced toggles, and the five tray-menu keys (#313).
+// the onboarding flag, the UI-only theme/palette/advanced toggles (uiTheme, uiPalette, showAdvanced), and the five tray-menu keys (#313).
 bool IsGlobalProfileKey(const std::string& key);
 // "" when the (already-trimmed) name is a valid profile name, else a short user-facing reason.
 std::string ProfileNameError(const std::string& name);

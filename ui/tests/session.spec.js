@@ -43,6 +43,7 @@ const capsule = (page) => page.locator('.capsule');
 
 test('session helpers: global keys never count, defaults fill both sides', () => {
   expect(GLOBAL_KEYS.has('uiTheme')).toBe(true);
+  expect(GLOBAL_KEYS.has('uiPalette')).toBe(true);   // #318: the built-in theme is global, UI-only
   expect(changedKeys({ a: '1', uiTheme: 'dark' }, { a: '1', uiTheme: 'light' })).toEqual([]);
   expect(changedKeys({ a: '2 ' }, { a: '2' })).toEqual([]);
   expect(changedKeys({ a: '2', b: '1' }, { a: '1', b: '1' })).toEqual(['a']);

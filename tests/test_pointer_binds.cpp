@@ -79,3 +79,49 @@ TEST_CASE("holding a zoom key takes over from a wheel glide at once") {
     z.tick(0.007);
     CHECK_FALSE(z.hasTarget());
 }
+
+// ---- #318: wheel up / down as zoom binds ----
+TEST_CASE("a wheel notch matches the slot of its direction, with its modifiers only (#318)") {
+    const ButtonSlot s[4] = { { 6, kModCtrl, 1 }, { 0, 0, 1 }, { 7, kModCtrl, 2 }, { 0, 0, 2 } };
+    CHECK(PickButtonSlot(s, 4, WheelCode(120), kModCtrl) == 0);
+    CHECK(PickButtonSlot(s, 4, WheelCode(-120), kModCtrl) == 2);
+    CHECK(PickButtonSlot(s, 4, WheelCode(120), 0) == -1);              // plain scrolling is untouched
+    CHECK(PickButtonSlot(s, 4, WheelCode(120), kModAlt) == -1);        // wrong modifier
+    CHECK(PickButtonSlot(s, 4, WheelCode(120), kModCtrl | kModAlt) == 0);   // extras are fine
+    CHECK(WheelCode(0) == 0);
+    CHECK(WheelCode(1) == 6); CHECK(WheelCode(-1) == 7);
+}
+TEST_CASE("DecideWheel: one step per notch, direction from the slot, plain scroll never claimed (#318)") {
+    WheelAccum a;
+    WheelDecision d = DecideWheel(a, 120, kModCtrl, 1, 0);             // wheel up bound to Zoom in
+    CHECK(d.claimed); CHECK(d.zoomSteps == 1);
+    d = DecideWheel(a, 240, kModCtrl, 1, 0);                           // two notches in one event
+    CHECK(d.zoomSteps == 2);
+    d = DecideWheel(a, -120, kModCtrl, 2, 0);                          // wheel down bound to Zoom out
+    CHECK(d.claimed); CHECK(d.zoomSteps == -1);
+    d = DecideWheel(a, 120, kModCtrl, 2, 0);                           // wheel up bound to Zoom OUT
+    CHECK(d.claimed); CHECK(d.zoomSteps == -1);
+    d = DecideWheel(a, 120, 0, 0, 0);                                  // no slot, no legacy mods
+    CHECK_FALSE(d.claimed); CHECK(d.zoomSteps == 0);
+}
+TEST_CASE("DecideWheel: high-resolution wheels carry fractions and a stray gesture resets them (#318)") {
+    WheelAccum a;
+    CHECK(DecideWheel(a, 40, kModAlt, 1, 0).zoomSteps == 0);
+    CHECK(DecideWheel(a, 40, kModAlt, 1, 0).zoomSteps == 0);
+    CHECK(DecideWheel(a, 40, kModAlt, 1, 0).zoomSteps == 1);
+    DecideWheel(a, 40, kModAlt, 1, 0);
+    DecideWheel(a, 40, 0, 0, 0);                                       // modifier released: reset
+    CHECK(a.acc == 0);
+    CHECK(DecideWheel(a, 80, kModAlt, 1, 0).zoomSteps == 0);           // starts from zero again
+}
+TEST_CASE("DecideWheel: the legacy zoomWheelMods form zooms by the wheel's own direction (#318)") {
+    WheelAccum a;
+    WheelDecision d = DecideWheel(a, 120, kModAlt, 0, kModAlt);
+    CHECK(d.claimed); CHECK(d.zoomSteps == 1);
+    d = DecideWheel(a, -120, kModAlt, 0, kModAlt);
+    CHECK(d.claimed); CHECK(d.zoomSteps == -1);
+    d = DecideWheel(a, 120, kModCtrl, 0, kModAlt);                     // legacy mods not held
+    CHECK_FALSE(d.claimed);
+    d = DecideWheel(a, -120, kModAlt, 2, kModAlt);                     // a slot match wins over legacy
+    CHECK(d.zoomSteps == -1);
+}
