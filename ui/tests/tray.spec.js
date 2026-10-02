@@ -236,11 +236,11 @@ test('the saved lists load back from the ini', async ({ page }) => {
   await expect(chk(page, 'toggles', 'Keep cursor centred')).toHaveAttribute('aria-checked', 'true');
 });
 
-test('search finds the Performance row and jumps to the tray tab', async ({ page }) => {
+test('search finds the Performance row and edits it in the results (#317)', async ({ page }) => {
   await page.goto('/');
   await page.locator('.side .search input').fill('performance');
-  await page.locator('.side .search input').press('Enter');
-  await expect(page.locator('h1')).toHaveText('Tray menu');
+  await expect(page.locator('.res .hit[data-hit="trayPerf"]')).toBeVisible();
+  await expect(page.locator('.res .hit[data-hit="trayPerf"] .tab')).toHaveText('Tray menu');
 });
 
 test('engine: the Engine item is on by default (#329), has an icon and a description, and writes trayToggles', async ({ page }) => {

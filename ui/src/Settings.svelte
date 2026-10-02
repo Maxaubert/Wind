@@ -38,7 +38,6 @@
   let loaded = $state(false);
   let main = $state();
   let maximized = $state(false);
-  let revealKey = $state('');   // an advanced row opened by a search result while the switch is off
 
   const top = groups.filter((g) => !g.bottom);
   const bottom = groups.filter((g) => g.bottom);   // below the sidebar divider
@@ -233,16 +232,13 @@
   const searchInput = () => document.querySelector('.side .search input');
   function onSearch(q) { query = q; }
   function clearSearch() { query = ''; const i = searchInput(); if (i) i.value = ''; }
-  async function jump(hit) {
-    clearSearch();
-    revealKey = hit.adv ? hit.key : '';
-    await select(hit.groupId);
-    const row = main && main.querySelector('[data-key="' + hit.key + '"]');
-    if (row) {
-      row.scrollIntoView({ block: 'center' });
-      const f = row.querySelector('button, input, select, [tabindex]');
-      if (f) f.focus({ preventScroll: true });
-    }
+  // A result's control is the real one; a row hidden on its page by showIf (it only applies under another
+  // setting) shows dimmed, like the rest of the app shows a gated control.
+  const isDisabled = (r) => !visible(r);
+  // Enter or Down in the search box moves into the best result's control (Tab then walks the rest).
+  function focusFirstResult() {
+    const c = main && main.querySelector('.res .hit button, .res .hit input, .res .hit select, .res .hit [tabindex="0"]');
+    if (c) c.focus();
   }
   function onKeydown(e) {
     const mod = e.ctrlKey && !e.altKey && !e.shiftKey;
@@ -250,7 +246,7 @@
     if (e.key === 'Escape' && (searching || e.target === searchInput())) {
       e.preventDefault(); clearSearch(); if (main) main.focus({ preventScroll: true }); return;
     }
-    if (e.key === 'Enter' && e.target === searchInput() && results.length) { e.preventDefault(); jump(results[0].rows[0]); return; }
+    if ((e.key === 'Enter' || e.key === 'ArrowDown') && e.target === searchInput() && results.length) { e.preventDefault(); focusFirstResult(); return; }
     if (mod && e.key.toLowerCase() === 'q') { e.preventDefault(); requestQuit(); }
   }
 
@@ -268,10 +264,9 @@
     else if (a === 'quitWind') requestQuit();
   }
   const visible = (r) => !r.showIf || String(values[r.showIf.key]) === String(r.showIf.eq);
-  // Advanced rows show only while the global switch is on, with one exception: the row a search result
-  // opened (revealKey) shows on its own and turns nothing on.
+  // Advanced rows show on their page only while the global switch is on; search results show them always.
   const advOn = $derived(Number(values.showAdvanced) === 1);
-  const shown = (r) => visible(r) && (!r.adv || advOn || r.key === revealKey);
+  const shown = (r) => visible(r) && (!r.adv || advOn);
   const extra = $derived({
     mpoNeedsRestart, runningModel, version: VERSION, onRepo: openRepo,
     onAction, pick: pickExe,
@@ -291,12 +286,12 @@
   <TitleBar {maximized} onMinimize={() => windowControl('minimize')} onMaximize={() => windowControl('maximize')} onClose={requestClose} />
   <div class="body">
     <Sidebar groups={top} {bottom} active={searching ? '' : activeId} version={VERSION} {query} {onSearch}
-             onSelect={(id) => { revealKey = ''; clearSearch(); select(id); }} />
+             onSelect={(id) => { clearSearch(); select(id); }} />
     <main class="main" data-page={searching ? 'search' : group.id} bind:this={main} tabindex="-1" aria-label={group.label}>
       {#key searching ? '?search' : activeId}
       <div class="page" class:fade={navigated}>
       {#if searching}
-        <Results {results} {query} onJump={jump} />
+        <Results {results} {query} {values} {extra} {live} onChange={change} onSet={change} {isDisabled} />
       {:else}
       <Banner title={group.label} description={group.desc} icon={group.icon} />
       {#each group.cards as card, i (group.id + i)}
