@@ -4,15 +4,15 @@
 .wnd[data-palette="grey"][data-theme="dark"] {
   --bg: #000;
   --side: #000;
-  --line: #1f1f1f;
-  --line2: #2a2a2a;
+  --line: #151515;
+  --line2: #1b1b1b;
   --outline: #5c5c5c;
   --rowline: #0f0f0f;
   --hover: #121212;
   --card: #080808;
   --chip: #0e0e0e;
-  --chipb: #353535;
-  --cardb: #131313;
+  --chipb: #212121;
+  --cardb: #0e0e0e;
   --cshadow: none;
   --fg: #f2f2f2;
   --fg2: #d0d0d0;
@@ -22,7 +22,7 @@
   --accent: #fff;
   --onaccent: #000;
   --pill: rgba(24, 24, 24, .9);
-  --pillb: #3a3a3a;
+  --pillb: #242424;
   --shadow: 0 0 0 1px rgba(255, 255, 255, .05), 0 14px 36px rgba(0, 0, 0, .9);
   --guide: #3c3c3c;
   --prog: #f2f2f2;
@@ -60,15 +60,15 @@
 .wnd[data-palette="grey"][data-theme="light"] {
   --bg: #f3f3f4;
   --side: #f3f3f4;
-  --line: #e0e0e0;
-  --line2: #dcdcdc;
+  --line: #e4e4e4;
+  --line2: #e0e0e0;
   --outline: #9a9a9a;
   --rowline: #eeeeee;
   --hover: #f3f3f3;
   --card: #fff;
   --chip: #f7f7f7;
-  --chipb: #d8d8d8;
-  --cardb: #e4e4e4;
+  --chipb: #dddddd;
+  --cardb: #e7e7e7;
   --cshadow: 0 1px 2px rgba(0, 0, 0, .05), 0 2px 8px rgba(0, 0, 0, .04);
   --fg: #0a0a0a;
   --fg2: #2e2e2e;
@@ -78,7 +78,7 @@
   --accent: #0a0a0a;
   --onaccent: #fff;
   --pill: rgba(255, 255, 255, .85);
-  --pillb: #c4c4c4;
+  --pillb: #cbcbcb;
   --shadow: 0 10px 28px rgba(0, 0, 0, .16);
   --guide: #cfcfcf;
   --prog: #0a0a0a;
@@ -116,15 +116,15 @@
 .wnd[data-palette="ember"][data-theme="dark"] {
   --bg: #0c0908;
   --side: #0c0908;
-  --line: #281d16;
-  --line2: #34261d;
+  --line: #221813;
+  --line2: #2a1f18;
   --outline: #62503f;
   --rowline: #1a130e;
   --hover: #1d1612;
   --card: #130e0b;
   --chip: #18120e;
-  --chipb: #4a392d;
-  --cardb: #231a14;
+  --chipb: #3a2c23;
+  --cardb: #1e1611;
   --cshadow: none;
   --fg: #f5eee7;
   --fg2: #d8cbbf;
@@ -134,7 +134,7 @@
   --accent: #e48a45;
   --onaccent: #1c0f06;
   --pill: rgba(30,22,17,.9);
-  --pillb: #4a3a2d;
+  --pillb: #3a2d23;
   --shadow: 0 0 0 1px rgba(255,255,255,.05),0 14px 36px rgba(0,0,0,.9);
   --guide: #62503f;
   --prog: #f5eee7;
@@ -172,15 +172,15 @@
 .wnd[data-palette="ember"][data-theme="light"] {
   --bg: #f7f2ed;
   --side: #f1eae3;
-  --line: #e0d4c8;
-  --line2: #d4c5b6;
+  --line: #e4d9ce;
+  --line2: #d9ccbe;
   --outline: #a8957f;
   --rowline: #f0e8e0;
   --hover: #efe6dd;
   --card: #fffdfb;
   --chip: #faf5f0;
-  --chipb: #c4b2a2;
-  --cardb: #e7dcd1;
+  --chipb: #cbbbad;
+  --cardb: #eae0d6;
   --cshadow: 0 1px 2px rgba(0, 0, 0, .05), 0 2px 8px rgba(0, 0, 0, .04);
   --fg: #261a12;
   --fg2: #4b3b2f;
@@ -190,7 +190,7 @@
   --accent: #b0540d;
   --onaccent: #ffffff;
   --pill: rgba(255,251,247,.93);
-  --pillb: #cdbcad;
+  --pillb: #d3c4b6;
   --shadow: 0 0 0 1px rgba(0,0,0,.05),0 14px 36px rgba(30,24,18,.2);
   --guide: #a8957f;
   --prog: #261a12;
@@ -228,15 +228,15 @@
 .wnd[data-palette="ocean"][data-theme="dark"] {
   --bg: #0c1117;
   --side: #0a0d12;
-  --line: #1d2735;
-  --line2: #253346;
+  --line: #18202c;
+  --line2: #1c2735;
   --outline: #4a5d78;
   --rowline: #171f2b;
   --hover: #19222e;
   --card: #121821;
   --chip: #161e29;
-  --chipb: #364963;
-  --cardb: #1d2735;
+  --chipb: #263345;
+  --cardb: #18202c;
   --cshadow: none;
   --fg: #f1f2f4;
   --fg2: #c6cbd2;
@@ -246,7 +246,7 @@
   --accent: #5aaaf5;
   --onaccent: #061018;
   --pill: rgba(21,29,40,0.9);
-  --pillb: #32445d;
+  --pillb: #243042;
   --shadow: 0 0 0 1px rgba(255,255,255,.05),0 14px 36px rgba(0,0,0,.9);
   --guide: #4a5d78;
   --prog: #f1f2f4;
@@ -284,15 +284,15 @@
 .wnd[data-palette="ocean"][data-theme="light"] {
   --bg: #eff3f8;
   --side: #e6edf4;
-  --line: #d3deeb;
-  --line2: #bccde1;
+  --line: #d8e2ed;
+  --line2: #c4d3e4;
   --outline: #889db4;
   --rowline: #e5ebf3;
   --hover: #e1e9f2;
   --card: #fcfcfd;
   --chip: #f4f7fa;
-  --chipb: #98acc3;
-  --cardb: #d7e1ed;
+  --chipb: #a4b6ca;
+  --cardb: #dbe4ef;
   --cshadow: 0 1px 2px rgba(0, 0, 0, .05), 0 2px 8px rgba(0, 0, 0, .04);
   --fg: #11171d;
   --fg2: #323c48;
@@ -302,7 +302,7 @@
   --accent: #1262b8;
   --onaccent: #ffffff;
   --pill: rgba(248,250,252,0.92);
-  --pillb: #abbcce;
+  --pillb: #b5c4d4;
   --shadow: 0 0 0 1px rgba(0,0,0,.05),0 14px 36px rgba(30,24,18,.2);
   --guide: #889db4;
   --prog: #11171d;
