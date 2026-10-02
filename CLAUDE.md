@@ -163,10 +163,14 @@ GLOBAL keys never travel with a profile: `profile`, `onboarded`, `uiTheme`, `sho
 (`IsGlobalProfileKey`, src/profiles.* pure + tested; I/O in src/profiles_io.h). Switching =
 `MakeLiveText` (profile keys over live, globals preserved) + hot-reload; a `model` change relaunches
 Wind via the eviction handshake. An EMPTY profile file = factory defaults (absent keys fall back to
-ParseConfig defaults) - that is how "create new profile" works. The active profile is LIVE-BOUND:
-every host `setConfig` mirrors the profile-scoped snapshot back into its file. First run seeds
+ParseConfig defaults) - that is how "create new profile" works. Settings use a SESSION model (0.16.0, #303): every
+change writes only the live ini (instant, hot-reloaded); the profile file is the SAVED state and
+changes on Save (`saveSession`) or on a keybind capture (`setConfigPersist`). Unsaved =
+`SessionDiffers(live, profile)`. At Wind start `ResetSessionToProfile` rewrites live from the
+profile (unsaved changes never survive), unless `%LOCALAPPDATA%\Wind\session.keep` marks a
+self-triggered restart. Tray Quit prompts from the files. First run seeds
 `Default` from current settings (`EnsureProfilesSeeded`). Surfaces: tray `Profiles` submenu
-(switch only, IDs 1100..1131) and the settings-UI titlebar dropdown (switch/create/rename/
+(switch only, IDs 1100..1131) and the Settings General page (switch/create/rename/
 duplicate/delete; bridge messages `listProfiles`/`switchProfile`/`createProfile`/`renameProfile`/
 `duplicateProfile`/`deleteProfile`, each replying the refreshed list).
 
@@ -188,8 +192,9 @@ in a separate exe entirely, and has zero perf coupling to the magnifier loop. Se
 restartWind), `dirty`, `openIni`, `exportDiagnostics`, `pickExe`, `mpoState`, `setMpoDisabled`,
 `rebootNow`, and the six profile messages (`listProfiles`/`switchProfile`/`createProfile`/
 `renameProfile`/`duplicateProfile`/`deleteProfile`) - see `HandleWebMessage` in
-`src/config_ui/main.cpp` for the authoritative set. Settings live-applies keybind changes (sync
-`values`+`saved`); other rows use the staged Apply/Discard footer.
+`src/config_ui/main.cpp` for the authoritative set. Settings apply instantly to the live ini; the
+floating Save capsule shows unsaved state (Save / Discard), keybinds persist at once. See
+`docs/architecture/09-settings-ui.md`.
 
 ## IMPORTANT gotchas
 - THE MAGNIFICATION RUNTIME IS PROCESS-SCOPED AND SHARED. Both models use it (transform: the

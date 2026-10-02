@@ -2837,6 +2837,18 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // Resolve magnifier.ini's runtime path (exe-dir if writable, else %LOCALAPPDATA%\Wind\). Same
     // resolution is used by WindConfig.exe so both processes always touch the same file.
     std::wstring iniPath = wind::ResolveIniPath();
+    // Profiles (spec 2026-08-12): first launch after the update seeds profiles\Default.ini from the
+    // user's current settings, so existing installs get a "Default" profile with zero user action.
+    EnsureProfilesSeeded(iniPath);
+    // Settings session (#303): unsaved changes do not survive a start, unless Wind restarted itself.
+    {
+        bool keep = GetFileAttributesW(wind::SessionKeepPath().c_str()) != INVALID_FILE_ATTRIBUTES;
+        std::string before = wind::ReadTextFile(iniPath);
+        wind::ResetSessionToProfile(iniPath);
+        if (keep) wind::Log(wind::LogLevel::Info, "session", "kept unsaved settings across a self-triggered restart");
+        else if (wind::ReadTextFile(iniPath) != before)
+            wind::Log(wind::LogLevel::Info, "session", "unsaved settings reset to the saved profile at start");
+    }
     Config cfg = LoadConfig(iniPath);
     // Issue #242: the high-res/MPO option is atomic at restart - while an MPO restart is pending
     // (registry != boot) the BOOT state's look holds in both directions, and crisp never runs on
@@ -2850,10 +2862,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                   "(issue #242)", cfg.txSamplingMode, eff);
         cfg.txSamplingMode = eff;
     }
-
-    // Profiles (spec 2026-08-12): first launch after the update seeds profiles\Default.ini from the
-    // user's current settings, so existing installs get a "Default" profile with zero user action.
-    EnsureProfilesSeeded(iniPath);
 
     // Render the live config as key=value lines for the snapshot.
     {

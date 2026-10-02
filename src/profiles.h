@@ -32,4 +32,11 @@ bool SameProfileName(const std::string& a, const std::string& b);
 // bytes), absurd size (> 256 KB), and text that has non-comment lines yet parses to zero keys -
 // so a corrupt file can never be silently applied as "factory defaults" on switch.
 std::string ProfileTextError(const std::string& text);
+// True when any profile-scoped key differs between the live session text and the saved profile
+// text. Global keys are ignored; a key missing on one side compares as missing (not as a default);
+// values are compared trimmed.
+bool SessionDiffers(const std::string& liveText, const std::string& profileText);
+// UpdateIniText for profile-scoped keys only: a global key returns the input unchanged.
+std::string UpdateProfileKey(const std::string& profileText, const std::string& key,
+                             const std::string& value);
 }

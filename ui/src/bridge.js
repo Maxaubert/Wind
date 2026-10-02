@@ -7,15 +7,58 @@ export function post(msg) {
   if (wv) wv.postMessage(msg);
   else if (window.__windMock) window.__windMock(msg);
 }
-export function getConfig() {
+// Session model: the live ini is the session, the active profile file is the saved state.
+// getSession() resolves { values, saved, profiles: {names, active}, theme }. The first call after
+// load is answered from window.__windInit (injected by the host before the page runs); it is
+// consumed once, so later calls (and a reload) always ask the host for fresh state.
+export function getSession() {
+  const init = window.__windInit;
+  if (init) {
+    delete window.__windInit;
+    return Promise.resolve({
+      values: init.values || {}, saved: init.saved || init.values || {},
+      profiles: init.profiles || { names: [], active: '' }, theme: init.theme || 'auto',
+    });
+  }
   return new Promise(resolve => {
-    const off = onMessage(m => { if (m && m.type === 'config') { off(); resolve(m.values || {}); } });
+    const off = onMessage(m => {
+      if (m && m.type === 'config') {
+        off();
+        resolve({ values: m.values || {}, saved: m.saved || m.values || {},
+                  profiles: m.profiles || { names: [], active: '' },
+                  theme: (m.values && m.values.uiTheme) || 'auto' });
+      }
+    });
     post({ type: 'getConfig' });
   });
 }
+export function getConfig() { return getSession().then(s => s.values); }
 // About's star button: the host opens the repo in the default browser (a fixed URL, see main.cpp).
 export function openRepo() { post({ type: 'openRepo' }); }
+// Writes the live ini (the session) only; the active profile changes on saveSession().
 export function setConfig(key, value) { post({ type: 'setConfig', key, value: String(value) }); }
+// Writes the live ini AND the active profile file at once (keybind captures persist immediately).
+export function setConfigPersist(key, value) { post({ type: 'setConfigPersist', key, value: String(value) }); }
+// Save: the host writes the live profile-scoped keys into the active profile; resolves the ok flag.
+export function saveSession() {
+  return new Promise(resolve => {
+    const off = onMessage(m => { if (m && m.type === 'sessionSaved') { off(); resolve(!!m.ok); } });
+    post({ type: 'saveSession' });
+  });
+}
+// Discard: the host rewrites the live ini from the active profile; resolves the fresh session.
+export function discardSession() {
+  return new Promise(resolve => {
+    const off = onMessage(m => {
+      if (m && m.type === 'config') {
+        off();
+        resolve({ values: m.values || {}, saved: m.saved || m.values || {},
+                  profiles: m.profiles || { names: [], active: '' } });
+      }
+    });
+    post({ type: 'discardSession' });
+  });
+}
 // Launch mode: WindConfig.exe navigates to ...?mode=onboard for first-launch setup.
 export function getMode() {
   return new URLSearchParams(location.search).get('mode') === 'onboard' ? 'onboard' : 'settings';
@@ -28,9 +71,6 @@ export function windowControl(action, force = false) {
 // Mirror the staged/unsaved state to the host so its WM_CLOSE can put up the guard for Alt+F4 and
 // the system menu too, not just our own title-bar button.
 export function setDirty(v) { post({ type: 'dirty', value: v ? '1' : '0' }); }
-// The staged (unapplied) edits, mirrored to the host on every change. If WebView2's engine dies,
-// the host recreates it and hands them back ('restoreDraft'), so a crash costs no edits.
-export function postDraft(changed) { post({ type: 'draft', json: JSON.stringify(changed || {}) }); }
 // MPO (Multi-Plane Overlay) lives in HKLM, so reading is free but writing needs elevation.
 // getMpoState is a plain read; setMpoDisabled raises a UAC prompt in the host and resolves with the
 // RE-READ state, so a cancelled prompt reverts the row rather than showing a change that never was.

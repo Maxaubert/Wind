@@ -1,0 +1,76 @@
+/* Design tokens for the redesigned Settings window.
+   Source of truth: docs/design/settings-2026-10/FINAL-v10-grey.html (baseline + the v10 overrides
+   at the end of its stylesheet). Scoped to .wnd so the legacy theme.css keeps working until the
+   pages move over. Set data-theme="light" on the .wnd element for the light palette. */
+:root {
+  /* Motion: calm and quick. Everything below is switched off by the prefers-reduced-motion rule in theme.css. */
+  --dur-fast: 120ms; --dur: 180ms; --ease: cubic-bezier(.2, .7, .2, 1);
+}
+.wnd {
+  --s: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --m: "Cascadia Mono", Consolas, monospace;
+  --nf: var(--m);
+  --w: 500;
+  --rad: 8px;
+  --srad: 6px;
+  --isz: 16px;
+
+  --bg: #000; --side: #000;
+  --line: #1f1f1f; --line2: #2a2a2a; --outline: #5c5c5c; --rowline: #0f0f0f;
+  --hover: #121212; --card: #080808; --chip: #0e0e0e; --chipb: #353535;   /* card #080808: Max 2026-10-02 */
+  --cardb: #131313; --cshadow: none;
+  --fg: #f2f2f2; --fg2: #d0d0d0; --fg3: #8f8f8f; --glyph: #b0b0b0;
+  --track: #303030; --accent: #fff; --onaccent: #000;
+  --pill: rgba(24, 24, 24, .9); --pillb: #3a3a3a;
+  --shadow: 0 0 0 1px rgba(255, 255, 255, .05), 0 14px 36px rgba(0, 0, 0, .9);
+  --guide: #3c3c3c; --prog: #f2f2f2;
+  --hlStrong: #6e6e6e; --hlDim: #2e2e2e; --hlGrey: #313131;
+  --fill: #2fbfa5; --thumb: #f2f2f2;
+  --band: #080808; --bandimg-op: .17; --bandimg-from: 50%;   /* banner = option colour, aurora .17: Max 2026-10-02 */
+
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.4 var(--s);
+  -webkit-font-smoothing: antialiased;
+  box-sizing: border-box;
+}
+.wnd[data-theme="light"] {
+  --bg: #f3f3f4; --side: #f3f3f4;
+  --line: #e0e0e0; --line2: #dcdcdc; --outline: #9a9a9a; --rowline: #eeeeee;
+  --hover: #f3f3f3; --card: #fff; --chip: #f7f7f7; --chipb: #d8d8d8;
+  --cardb: #e4e4e4; --cshadow: 0 1px 2px rgba(0, 0, 0, .05), 0 2px 8px rgba(0, 0, 0, .04);
+  --fg: #0a0a0a; --fg2: #2e2e2e; --fg3: #6a6a6a; --glyph: #555;
+  --track: #dcdcdc; --accent: #0a0a0a; --onaccent: #fff;
+  --pill: rgba(255, 255, 255, .85); --pillb: #c4c4c4; --shadow: 0 10px 28px rgba(0, 0, 0, .16);
+  --guide: #cfcfcf; --prog: #0a0a0a;
+  --hlStrong: #8c8c8c; --hlDim: #dadada; --hlGrey: #e4e4e4;
+  --fill: #11977f; --thumb: #0a0a0a;
+  --band: #f6f6f7;
+}
+.wnd *, .wnd *::before, .wnd *::after { box-sizing: border-box; }
+.wnd svg.ic:not([width]) { width: 20px; height: 20px; }
+.wnd svg.ic {
+  flex: none; fill: none; stroke: currentColor;
+  stroke-width: 1.5; stroke-linecap: square; stroke-linejoin: miter;
+}
+.wnd button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
+.wnd :focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+/* Focus ring for the keyboard only: a mouse click (or a script moving focus after one) never draws a box. */
+.wnd :focus:not(:focus-visible) { outline: none; }
+/* Chromium still matches :focus-visible on a mouse-clicked <select> (and after a script moves focus
+   following a click), so the ring is also gated on the last input being the keyboard: main.js sets
+   data-kbd on <html> at the first key press and clears it on every pointer press. Text fields keep
+   their own ring either way. */
+html:not([data-kbd]) .wnd :focus-visible:not(input:is([type="text"], [type="search"], :not([type]))) { outline: none; }
+html:not([data-kbd]) .wnd input:focus-visible + .track { outline: none; }
+
+/* Hover and press feedback: short colour fades on every button, field and row; a 0.97 press on the
+   pill and chip buttons. No layout properties are animated. */
+.wnd button, .wnd select, .wnd .search, .wnd .kc {
+  transition: background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease),
+              color var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease),
+              transform var(--dur-fast) var(--ease);
+}
+.wnd :is(.btn, .chip, .link, .reset, .restart, .mbtns button, button.keycap:not(.split)):active:not(:disabled) {
+  transform: scale(.97);
+}

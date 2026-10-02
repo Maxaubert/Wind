@@ -11,7 +11,17 @@
   // safety rules (keybindRules.js, mirrored from src/keybind_rules.h); a refused press keeps the row
   // listening and says why, on screen and to screen readers.
   import { checkKeyBind, checkClickBind, checkWheelBind, refusalText } from './keybindRules.js';
-  export let row, values, onChange, disabled = false;
+  // row.modsOnly = the arrow-key pan row: only the modifiers are captured (modsKey is a virtual key the
+  // owner translates into the four real binds); the arrow keys are fixed and drawn by the owner.
+  // `onClear` (optional) replaces the right-click clear patch.
+  export let row, values, onChange, disabled = false, onClear = null;
+  // What an empty slot says. The redesigned page passes 'Add key' (a soft chip); the default keeps
+  // the wording the onboarding and older tests rely on.
+  export let unboundText = 'Unbound';
+  // Settings page: show a combo as one keycap per key with a '+' between them, and the short
+  // 'Mouse 5' names. Off by default so the onboarding keeps its single-chip label.
+  export let split = false;
+  const SHORT_BUTTON = { 1: 'Mouse 4', 2: 'Mouse 5' };
   let refusal = '';
   // A click captured ON the keycap is followed by its own click event, which would re-arm the row
   // and clear the bind just made: ignore an arm that close after a mouse capture.
@@ -25,6 +35,7 @@
   export let labelledby = undefined, describedby = undefined, valueId = undefined;
   let armed = false;
   let preCapture = null;
+  let peak = 0;   // modsOnly: the most modifiers held at once since arming
   // The armed state used to be conveyed by the visible label alone, with the instructions in a
   // `title` tooltip - which is never announced on keyboard focus. This region speaks it.
   let liveMsg = '';
@@ -70,9 +81,10 @@
   // kept PageUp/PageDown zooming while the row read "Mouse button 5" (right-click clears both).
   $: lbl = (function () {
     const parts = [];
+    if (row.modsOnly) { const m = Number(values[row.modsKey] || 0); return m ? modsName(m) : null; }
     if (row.wheel) {
       const wm = Number(values[row.modsKey] || 0);
-      return wm ? modsName(wm) + '+Wheel' : 'Unbound';
+      return wm ? modsName(wm) + '+Wheel' : null;
     }
     if (row.buttonKey) {
       const btn = Number(values[row.buttonKey] || 0);
@@ -86,7 +98,28 @@
       const combo = comboName(mods, vk);
       if (combo) parts.push(combo);
     }
-    return parts.join(' + ') || 'Unbound';
+    return parts.join(' + ') || null;
+  })();
+
+  // The same live bindings as individual key names, for the split (one cap per key) display.
+  $: caps = (function () {
+    const out = [];
+    const modList = (m) => MOD_BITS.filter(b => m & b.bit).map(b => b.name);
+    if (row.modsOnly) return modList(Number(values[row.modsKey] || 0));
+    if (row.wheel) {
+      const wm = Number(values[row.modsKey] || 0);
+      return wm ? [...modList(wm), 'Wheel'] : [];
+    }
+    if (row.buttonKey) {
+      const btn = Number(values[row.buttonKey] || 0);
+      const bm = row.buttonModsKey ? Number(values[row.buttonModsKey] || 0) : 0;
+      const name = SHORT_BUTTON[btn] || BUTTON_NAMES[btn];
+      if (name) out.push(...modList(bm), name);
+    }
+    const vk = Number(values[row.vkKey] || 0);
+    const mods = row.modsKey ? Number(values[row.modsKey] || 0) : 0;
+    if (vk || mods) out.push(...modList(mods), ...(vk ? [vkName(vk)] : []));
+    return out;
   })();
 
   // Arming: snapshot the current binding (for Escape restore) and live-clear it so the magnifier
@@ -96,7 +129,10 @@
     if (disabled || armed) return;
     if (performance.now() - mouseCapturedAt < 500) return;
     refusal = '';
-    liveMsg = row.wheel
+    peak = 0;
+    liveMsg = row.modsOnly
+      ? 'Listening. Press the modifier keys you want, for example Control and Alt, then let go. The arrow keys are added automatically. Escape cancels, Tab leaves.'
+      : row.wheel
       ? 'Listening. Hold modifier keys and turn the mouse wheel. Escape cancels, Tab leaves.'
       : row.buttonKey
         ? 'Listening. Press a key, a combination, a mouse side-button, or a click with modifiers. Escape cancels, Tab leaves.'
@@ -133,6 +169,7 @@
     // undiscoverable. Let the browser move focus; the blur handler below cancels the capture.
     if (e.key === 'Tab') return;
     e.preventDefault();
+    if (row.modsOnly) { modsKey(e); return; }
     if (!e.keyCode) return;
     if (e.keyCode === 16 || e.keyCode === 17 || e.keyCode === 18 || e.keyCode === 91 || e.keyCode === 92) return;
     if (row.wheel) return;                     // the wheel row binds the wheel, not a key
@@ -148,6 +185,25 @@
     onChange(patch);
     armed = false; preCapture = null; refusal = '';
     liveMsg = 'Bound to ' + (comboName(mods, e.keyCode) || vkName(e.keyCode));
+  }
+  // modsOnly capture: the modifiers become the bind when they are let go (or when an arrow key is
+  // pressed with them held; the arrow itself is ignored, the keys are fixed). Any other key is ignored.
+  function modsKey(e) {
+    peak |= eventMods(e);
+    if (e.keyCode >= 37 && e.keyCode <= 40 && eventMods(e)) commitMods(eventMods(e));
+  }
+  function onKeyUp(e) {
+    if (!armed || !row.modsOnly || !peak || eventMods(e)) return;
+    commitMods(peak);
+  }
+  function commitMods(mods) {
+    for (const vk of [37, 38, 39, 40]) {
+      const verdict = checkKeyBind(vk, mods);
+      if (verdict !== 'ok') { peak = 0; refuse(verdict, comboName(mods, vk)); return; }
+    }
+    onChange({ [row.modsKey]: String(mods) });
+    armed = false; preCapture = null; refusal = ''; peak = 0;
+    liveMsg = 'Bound to ' + modsName(mods) + ' plus the arrow keys';
   }
   function onMouse(e) {
     if (!armed || !row.buttonKey || row.wheel) return;   // keyboard-only slot: ignore mouse
@@ -188,6 +244,7 @@
   }
   // Right-click clears the binding (Unbound). Works whether or not the keycap is armed.
   function clear() {
+    if (onClear) { onClear(); armed = false; preCapture = null; refusal = ''; liveMsg = 'Binding cleared. Unbound.'; return; }
     const patch = {};
     for (const k of [row.vkKey, row.buttonKey, row.modsKey, row.buttonModsKey]) if (k) patch[k] = '0';
     onChange(patch);
@@ -195,26 +252,32 @@
     liveMsg = 'Binding cleared. Unbound.';
   }
 </script>
-<svelte:window on:keydown={onKey} on:mousedown={onMouse} on:wheel|nonpassive={onWheel} />
+<svelte:window on:keydown={onKey} on:keyup={onKeyUp} on:mousedown={onMouse} on:wheel|nonpassive={onWheel} />
 <!-- The instructions were `title`-only, which a screen reader never reads on keyboard focus.
      They are a real description now, appended to the row's own. -->
-<button class="keycap" type="button" class:armed {disabled} id={valueId}
+<button class="keycap" type="button" class:armed class:split={split && !armed && lbl !== null} class:unbound={!armed && lbl === null} {disabled} id={valueId}
         aria-labelledby={labelledby} aria-describedby="{describedby ?? ''} {uid}-hint"
         on:click={arm}
         on:blur={() => { if (armed) cancel(); }}
         on:contextmenu|preventDefault={onContextMenu}
         title="Click to bind (combos like Ctrl+Alt+F1 work), right-click to clear">
-  {armed ? (row.wheel ? 'Hold keys and turn the wheel...' : row.buttonKey ? 'Press a key, combo, or button...' : 'Press a key or combo...') : lbl}
+  {#if armed}
+    {row.modsOnly ? 'Hold the modifier keys...' : row.wheel ? 'Hold keys and turn the wheel...' : row.buttonKey ? 'Press a key, combo, or button...' : 'Press a key or combo...'}
+  {:else if split && lbl !== null}
+    {#each caps as c, i}{#if i}<span class="pl">+</span>{/if}<span class="kc">{c}</span>{/each}
+  {:else}
+    {#if split}<svg class="plus" aria-hidden="true" focusable="false" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg>{/if}{lbl ?? unboundText}
+  {/if}
 </button>
 {#if armed && refusal}<span class="refusal">{refusal}</span>{/if}
 <span class="sr-only" id="{uid}-hint" aria-hidden="true">
-  Activate to rebind{row.buttonKey ? ', then press a key, a combination, or a mouse side-button' : ', then press a key or a combination'}. Escape cancels. Right-click, or use the context-menu key, to clear the binding.
+  Activate to rebind{row.modsOnly ? ', then press the modifier keys' : row.buttonKey ? ', then press a key, a combination, or a mouse side-button' : ', then press a key or a combination'}. Escape cancels. Right-click, or use the context-menu key, to clear the binding.
 </span>
 <span class="sr-only" role="status" aria-live="assertive">{liveMsg}</span>
 <style>
   /* Ported from mockups/config-ui-onboarding.html .keycap. */
   .keycap { padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--chip); font-size: 11.5px; color: var(--text); cursor: pointer; }
-  .keycap.armed { outline: 2px solid var(--accent); }
+  .keycap.armed { border-color: var(--accent); }
   .keycap:disabled { opacity: .5; cursor: default; }
   .refusal { display: block; margin-top: 4px; font-size: 11.5px; color: var(--warn, #e0a030); max-width: 280px; }
 </style>

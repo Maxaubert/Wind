@@ -99,7 +99,7 @@ cl /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE ^
    src\config_ui\main.cpp src\config_ui\ini_edit.cpp src\profiles.cpp src\config.cpp src\logging.cpp src\wind.res ^
    /Fe:WindConfig.exe ^
    /link third_party\webview2\x64\WebView2LoaderStatic.lib ^
-   user32.lib shell32.lib shlwapi.lib ole32.lib version.lib advapi32.lib ntdll.lib /SUBSYSTEM:WINDOWS
+   user32.lib shell32.lib shlwapi.lib ole32.lib version.lib advapi32.lib ntdll.lib Dwmapi.lib /SUBSYSTEM:WINDOWS
 exit /b %errorlevel%
 
 rem --- Test build (pure-logic sources only; no <windows.h>) -----------------

@@ -4,6 +4,9 @@
   import { ic } from './lib/icons.js';
   import KeybindCapture from './lib/KeybindCapture.svelte';
   export let onDone;
+  export let theme = 'auto';
+  const sysDark = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  $: effTheme = theme === 'light' ? 'light' : theme === 'dark' ? 'dark' : (sysDark ? 'dark' : 'light');
   let cur = 0;
   const N = 3;
   // Keybinds start blank (Unbound) and are ACTUALLY cleared in the ini on mount, not just shown as
@@ -29,7 +32,7 @@
   const zoomInRow  = { label:'Zoom in',  desc:'Hold to magnify',  buttonKey:'zoomInButton',  vkKey:'zoomInVk',  modsKey:'zoomInMods',  buttonModsKey:'zoomInButtonMods' };
   const zoomOutRow = { label:'Zoom out', desc:'Hold to zoom back', buttonKey:'zoomOutButton', vkKey:'zoomOutVk', modsKey:'zoomOutMods', buttonModsKey:'zoomOutButtonMods' };
 </script>
-<div class="win">
+<div class="wnd win" data-theme={effTheme}>
   <div class="caption" style="app-region:drag;-webkit-app-region:drag">
     <div class="tbtns" style="app-region:no-drag;-webkit-app-region:no-drag">
       <button class="tbtn" title="Minimize" aria-label="Minimize" on:click={() => windowControl('minimize')}>{@html ic.min}</button>
@@ -78,8 +81,8 @@
     <!-- Step 2: You're all set. Ported .bigring check-ring SVG. -->
     <div class="step center" class:show={cur === 2}>
       <div class="bigring"><svg viewBox="0 0 80 80" width="86" height="86" aria-hidden="true" focusable="false">
-        <circle class="ring" cx="40" cy="40" r="36" fill="none" stroke="var(--accent)" stroke-width="3"/>
-        <path class="tick" d="M25 41l10 10 20-21" fill="none" stroke="var(--accent)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle class="ring" cx="40" cy="40" r="36" fill="none" stroke="var(--fg)" stroke-width="3"/>
+        <path class="tick" d="M25 41l10 10 20-21" fill="none" stroke="var(--fg)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
       </svg></div>
       <h1>You're all set</h1>
     </div>
@@ -97,19 +100,19 @@
      not the mockup's fixed 560x500 demo card. Theme tokens (--bg/--text/--accent/...) come from
      the global theme.css. Animated elements all live here, so .step.show gating drives them. */
   .win { width: 100vw; height: 100vh; overflow: hidden; display: flex; flex-direction: column;
-         background: var(--bg); color: var(--text); font-size: 13px; }
+         background: var(--bg); color: var(--fg); font-size: 13px; }
 
   .caption { height: 44px; flex-shrink: 0; display: flex; align-items: center; justify-content: flex-end; padding-left: 10px; }
   .tbtns { display: flex; height: 100%; }
-  .tbtn { width: 46px; height: 100%; display: grid; place-items: center; color: var(--muted); border: 0; background: transparent; cursor: pointer; }
-  .tbtn:hover { background: var(--hover); color: var(--text); }
+  .tbtn { width: 46px; height: 100%; display: grid; place-items: center; color: var(--fg3); border: 0; background: transparent; cursor: pointer; }
+  .tbtn:hover { background: var(--hover); color: var(--fg); }
   .tbtn.close:hover { background: #e81123; color: #fff; }
 
   .wizbody { flex: 1; overflow: auto; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 8px 52px; }
   .step { display: none; width: 100%; max-width: 430px; }
   .step.show { display: block; }
   .step h1 { font-size: 27px; margin: 0 0 10px; font-weight: 600; letter-spacing: -.3px; }
-  .step p { color: var(--muted); font-size: 13.5px; line-height: 1.55; margin: 0 0 24px; }
+  .step p { color: var(--fg3); font-size: 13.5px; line-height: 1.55; margin: 0 0 24px; }
   .step.center { text-align: center; }
   .step.center p { max-width: 384px; margin-left: auto; margin-right: auto; }
 
@@ -123,7 +126,7 @@
 
   /* welcome: wind trails flow, then the logo draws in and settles static */
   .hero { position: relative; width: 236px; height: 140px; margin: 0 auto 14px; display: grid; place-items: center; }
-  .windsvg { position: absolute; inset: 0; width: 236px; height: 140px; color: var(--accent-icon); }
+  .windsvg { position: absolute; inset: 0; width: 236px; height: 140px; color: var(--fg2); }
   .step.show .windsvg { animation: trailsOut .9s ease-out .85s forwards; }
   .wln { fill: none; stroke: url(#windgrad); stroke-linecap: round; stroke-dasharray: 26 200; }
   .wln.l1 { stroke-width: 2.6; animation: windTrail 3.2s linear infinite; }
@@ -133,7 +136,7 @@
   .wln.l5 { stroke-width: 2.4; animation: windTrail 3.9s linear 1.9s infinite; }
   @keyframes windTrail { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -226; } }
   @keyframes trailsOut { to { opacity: 0; } }
-  .logosvg { position: relative; z-index: 1; width: 84px; height: 84px; color: var(--accent-icon); opacity: 0; }
+  .logosvg { position: relative; z-index: 1; width: 84px; height: 84px; color: var(--fg); opacity: 0; }
   .step.show .logosvg { animation: logoIn .6s ease-out .95s forwards; }
   @keyframes logoIn { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: scale(1); } }
   .lp { fill: none; stroke: currentColor; stroke-width: 1.2; stroke-linecap: round; stroke-dasharray: 100; stroke-dashoffset: -100; }
@@ -143,18 +146,23 @@
   .step.show .lp:nth-child(3) { animation-delay: 1.15s; }
   @keyframes logoDraw { to { stroke-dashoffset: 0; } }
 
-  .orow { display: flex; align-items: center; gap: 16px; padding: 15px 16px; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 11px; }
+  .orow { display: flex; align-items: center; gap: 16px; padding: 15px 16px; border: 1px solid var(--cardb); background: var(--card); box-shadow: var(--cshadow); border-radius: var(--rad); margin-bottom: 11px; }
   .orow > .ot { flex: 1; min-width: 0; }
-  .rlabel { font-size: 13.5px; } .rdesc { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+  .rlabel { font-size: 13.5px; } .rdesc { font-size: 11.5px; color: var(--fg3); margin-top: 2px; }
   .rctl { flex-shrink: 0; display: flex; align-items: center; gap: 10px; }
 
   .wizdots { display: flex; justify-content: center; gap: 7px; padding: 4px 0 10px; }
-  .wizdots i { width: 7px; height: 7px; border-radius: 50%; background: var(--track); transition: width .2s; }
+  .wizdots i { width: 7px; height: 7px; border-radius: 50%; background: var(--track); transition: width var(--dur) var(--ease), background-color var(--dur) var(--ease); }
   .wizdots i.on { width: 22px; border-radius: 4px; background: var(--accent); }
 
-  .wizfoot { flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 14px 24px; border-top: 1px solid var(--line); }
-  .skip { margin-right: auto; background: transparent; border: 0; color: var(--muted); font-size: 12.5px; cursor: pointer; }
-  .skip:hover { color: var(--text); }
-  .btn { padding: 8px 20px; border-radius: 7px; border: 1px solid var(--line); background: transparent; color: var(--text); font-size: 12.5px; cursor: pointer; }
-  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .wizfoot { flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 14px 24px; }   /* no divider above the buttons (Max, 2026-10-02) */
+  .skip { margin-right: auto; background: transparent; border: 0; color: var(--fg3); font-size: 12.5px; cursor: pointer; }
+  .skip:hover { color: var(--fg); }
+  .btn { height: 36px; padding: 0 20px; border-radius: 999px; border: 1px solid var(--chipb); background: transparent; color: var(--fg2); font: 600 13px var(--s); cursor: pointer; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--onaccent); }
+  /* KeybindCapture styles itself with legacy theme.css variables; restyle it with tokens here. */
+  .rctl :global(.keycap) { font: 500 12px var(--m); color: var(--fg); background: var(--chip); border: 1px solid var(--chipb); border-radius: var(--srad); padding: 5px 10px; min-height: 28px; }
+  .rctl :global(.keycap:hover) { border-color: var(--outline); }
+  .rctl :global(.keycap.armed) { border-color: var(--fg); background: var(--hover); }
+  .rctl :global(.refusal) { color: var(--fg2); }
 </style>

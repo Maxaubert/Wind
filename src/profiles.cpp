@@ -90,4 +90,16 @@ std::string ProfileTextError(const std::string& text) {
     }
     return "";
 }
+bool SessionDiffers(const std::string& liveText, const std::string& profileText) {
+    auto a = ReadIniValues(liveText);
+    auto b = ReadIniValues(profileText);
+    for (auto it = a.begin(); it != a.end();) it = IsGlobalProfileKey(it->first) ? a.erase(it) : std::next(it);
+    for (auto it = b.begin(); it != b.end();) it = IsGlobalProfileKey(it->first) ? b.erase(it) : std::next(it);
+    return a != b;
+}
+std::string UpdateProfileKey(const std::string& profileText, const std::string& key,
+                             const std::string& value) {
+    if (IsGlobalProfileKey(key)) return profileText;
+    return UpdateIniText(profileText, key, value);
+}
 }

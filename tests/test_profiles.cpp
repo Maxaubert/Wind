@@ -146,3 +146,24 @@ TEST_CASE("ProfileTextError accepts real and factory-default profiles, rejects g
     CHECK(ProfileTextError("this is not an ini\nat all\n") != ""); // lines but zero keys
     CHECK(ProfileTextError(std::string(300 * 1024, 'a')) != "");  // absurd size
 }
+
+TEST_CASE("SessionDiffers: identical texts do not differ") {
+    CHECK_FALSE(SessionDiffers("model=a\nzoom=2\n", "model=a\nzoom=2\n"));
+}
+TEST_CASE("SessionDiffers: one changed key differs") {
+    CHECK(SessionDiffers("model=a\nzoom=3\n", "model=a\nzoom=2\n"));
+}
+TEST_CASE("SessionDiffers: global keys are ignored") {
+    CHECK_FALSE(SessionDiffers("model=a\nuiTheme=dark\nprofile=x\n", "model=a\nuiTheme=light\n"));
+}
+TEST_CASE("SessionDiffers: a key present on one side only differs") {
+    CHECK(SessionDiffers("model=a\nzoom=2\n", "model=a\n"));
+    CHECK(SessionDiffers("model=a\n", "model=a\nzoom=2\n"));
+}
+TEST_CASE("SessionDiffers: CRLF and trailing spaces do not differ") {
+    CHECK_FALSE(SessionDiffers("model=a  \r\nzoom=2\r\n", "model=a\nzoom=2\n"));
+}
+TEST_CASE("UpdateProfileKey updates profile keys and refuses global keys") {
+    CHECK(UpdateProfileKey("zoom=2\n", "zoom", "3") == UpdateIniText("zoom=2\n", "zoom", "3"));
+    CHECK(UpdateProfileKey("zoom=2\n", "uiTheme", "dark") == "zoom=2\n");
+}
