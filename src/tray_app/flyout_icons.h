@@ -34,6 +34,13 @@ inline const IconDef* Icons(int* count) {
                     "M5.5 14H3a1 1 0 0 1-1-1v-2.5M6 6h4v4H6z" },
         // NEW: a pointer inside a frame
         { "edges",  "M2.5 2.5h11v11h-11zM6 5.5l4.5 2.8-1.9.6-.8 2z" },
+        // NEW (#315): a chip with pins (engine), a mouse (mouse lock), a keycap with an arrow through
+        // it (pass keys), two bars (pause)
+        { "engine", "M4.5 4.5h7v7h-7zM6.75 6.75h2.5v2.5h-2.5zM6.5 1.5v3M9.5 1.5v3M6.5 11.5v3M9.5 11.5v3"
+                    "M1.5 6.5h3M1.5 9.5h3M11.5 6.5h3M11.5 9.5h3" },
+        { "lock",   "M5 7a3 3 0 0 1 6 0v3a3 3 0 0 1-6 0zM8 4v3.5" },
+        { "pass",   "M2.5 4.5h11v7h-11zM5.5 8h5M8.5 6l2 2-2 2" },
+        { "pause",  "M5.75 3.5v9M10.25 3.5v9" },
         { "profile","M8 2L13.5 4.75 8 7.5 2.5 4.75zM2.5 8L8 10.75 13.5 8M2.5 11L8 13.75 13.5 11" },
         { "settings","M2 5h12M2 11h12M5 3v4M11 9v4" },
         { "quit",   "M8 2v6M4.5 4.5a5 5 0 1 0 7 0" },

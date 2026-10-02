@@ -46,6 +46,7 @@ static LRESULT CALLBACK TrayWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         TrayApp::ToggleFlyout();
         return 0;
     }
+    if (m == WM_TIMER) { TrayApp::ToolsTimer(w); return 0; }   // the listen chips' poll (#315)
     if (g_taskbarCreated && m == g_taskbarCreated) {
         // Explorer restarted: the shell forgot every icon. AddIcon deletes before adding, so this
         // can never leave two.
@@ -70,6 +71,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR cmdLine, int) {
     // Test hook: render the flyout with fake status to a PNG and exit (no Wind, no tray icon).
     if (cmdLine && wcsstr(cmdLine, L"--render-test")) return TrayApp::RunRenderTest(cmdLine);
     if (cmdLine && wcsstr(cmdLine, L"--flyout-test")) return TrayApp::RunFlyoutTest();
+    if (cmdLine && wcsstr(cmdLine, L"--icon-test")) return TrayApp::RunIconTest(cmdLine);
     wind::LogInit(L"tray");
     const DWORD windPid = ParseWindPid(cmdLine);
 
@@ -138,6 +140,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR cmdLine, int) {
     g_taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
     // Explorer runs at the same integrity, but allow the broadcast explicitly in case it does not.
     ChangeWindowMessageFilterEx(hwnd, g_taskbarCreated, MSGFLT_ALLOW, nullptr);
+    TrayApp::ToolsInit(hwnd);
     TrayApp::AddIcon(hwnd, hInst);
     wind::Log(wind::LogLevel::Info, "tray", "serving Wind pid=%lu", windPid);
 

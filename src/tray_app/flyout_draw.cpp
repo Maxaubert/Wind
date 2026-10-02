@@ -451,27 +451,25 @@ void Painter::Impl::drawQuick(const View& v, const Geometry& g) {
         const ToggleView& t = v.toggles[i];
         const bool hot = v.hover.kind == HitKind::Chip && v.hover.index == (int)i;
         const D2D1_RECT_F r = R(g.chip[i]);
-        const AnimView& a = v.anim;
-        if (a.active && i < a.chipHot.size() && i < a.chipOn.size() && i < a.chipPress.size()) {
-            // cross-faded: hover mixes the *h colours in, the ON amount mixes the on colours in
-            const float h = a.chipHot[i], o = a.chipOn[i];
-            pressBegin(r, a.chipPress[i]);
-            fillRound(r, 8.f, Mix(Mix(th.off, th.offh, h), Mix(th.on, th.onh, h), o));
-            if (o > 0.f) ring(r, 8.f, WithAlpha(th.onb, th.onb.a * o));
-            if (h > 0.f && o < 1.f) ring(r, 8.f, WithAlpha(th.chipb, h * (1.f - o)));
-            icon(t.icon, (r.left + r.right) / 2.f - 8.f, (r.top + r.bottom) / 2.f - 8.f, Mix(Mix(th.offic, th.fg, h), th.onic, o), 1.75f);
-            pressEnd();
+        const float cx = (r.left + r.right) / 2.f - 8.f, cy = (r.top + r.bottom) / 2.f - 8.f;
+        if (t.disabled) {   // the engine chip while the main engine is not Auto: dimmed, no hover
+            fillRound(r, 8.f, Mix(th.lift, th.off, .55f));
+            icon(t.icon, cx, cy, Mix(th.lift, th.offic, .4f), 1.75f);
             continue;
         }
-        if (t.on) {
-            fillRound(r, 8.f, hot ? th.onh : th.on);
-            ring(r, 8.f, th.onb);
-        } else {
-            fillRound(r, 8.f, hot ? th.offh : th.off);
-            if (hot) ring(r, 8.f, th.chipb);
-        }
-        const D2D1_COLOR_F ic = t.on ? th.onic : (hot ? th.fg : th.offic);
-        icon(t.icon, (r.left + r.right) / 2.f - 8.f, (r.top + r.bottom) / 2.f - 8.f, ic, 1.75f);
+        const AnimView& a = v.anim;
+        const bool anim = a.active && i < a.chipHot.size() && i < a.chipOn.size() && i < a.chipPress.size();
+        // Cross-faded: hover mixes the *h colours in, the ON amount mixes the on colours in. A listening
+        // chip borrows the ON look at a soft pulsing amount (a still frame holds it at 0.6).
+        const float h = anim ? a.chipHot[i] : (hot ? 1.f : 0.f);
+        float o = anim ? a.chipOn[i] : (t.on ? 1.f : 0.f);
+        if (t.listening) o = (std::max)(o, 0.1f + 0.8f * (a.active ? a.pulse : 0.6f));
+        if (anim) pressBegin(r, a.chipPress[i]);
+        fillRound(r, 8.f, Mix(Mix(th.off, th.offh, h), Mix(th.on, th.onh, h), o));
+        if (o > 0.f) ring(r, 8.f, WithAlpha(th.onb, th.onb.a * o));
+        if (h > 0.f && o < 1.f) ring(r, 8.f, WithAlpha(th.chipb, h * (1.f - o)));
+        icon(t.icon, cx, cy, Mix(Mix(th.offic, th.fg, h), th.onic, o), 1.75f);
+        if (anim) pressEnd();
     }
 }
 
@@ -554,6 +552,11 @@ void Painter::DrawList(const ListView& v, const ListGeometry& g) {
     d.rt->SetTransform(D2D1::Matrix3x2F::Identity());
     d.rt->Clear(d.th.menub);
     d.fill(D2D1::RectF(0, 0, W, H), d.th.menu);
+    if (g.caption.w() > 0 && !v.caption.empty())
+        d.text(v.caption, g_s.mono12.Get(),
+               D2D1::RectF((float)g.caption.l + (float)kListTextPad, (float)g.caption.t,
+                           (float)g.caption.r - (float)kListTextPad, (float)g.caption.b),
+               d.th.fg3, DWRITE_TEXT_ALIGNMENT_LEADING);
     for (size_t i = 0; i < v.names.size() && i < g.row.size(); ++i) {
         const D2D1_RECT_F r = d.R(g.row[i]);
         if ((int)i == v.sel) d.fillRound(r, 8.f, d.th.hl);
@@ -600,10 +603,12 @@ void ApplyShapeAlpha(unsigned char* px, int w, int h, int strideBytes, int dpi, 
 
 // ---------------------------------------------------------------- png
 
-bool RenderToPng(const View& v, int profileTextW, int dpi, const wchar_t* path) {
+// Paints one window-sized frame with `draw(painter)` (inside BeginDraw/EndDraw) and saves it as a
+// straight-alpha PNG with the rounded corners cut out. Shared by the flyout and the list popup.
+template <class F>
+static bool RenderFrameToPng(int wDip, int hDip, bool dark, int dpi, const wchar_t* path, F draw) {
     if (!DrawInit()) return false;
-    const Geometry g = ComputeGeometry(v.perf, (int)v.sliders.size(), (int)v.toggles.size(), profileTextW);
-    const UINT pw = (UINT)ScalePx(g.width, dpi), ph = (UINT)ScalePx(g.height, dpi);
+    const UINT pw = (UINT)ScalePx(wDip, dpi), ph = (UINT)ScalePx(hDip, dpi);
     ComPtr<IWICBitmap> bmp;
     if (FAILED(g_s.wic->CreateBitmap(pw, ph, GUID_WICPixelFormat32bppBGR, WICBitmapCacheOnLoad, &bmp))) return false;
     ComPtr<ID2D1RenderTarget> rt;
@@ -612,9 +617,9 @@ bool RenderToPng(const View& v, int profileTextW, int dpi, const wchar_t* path) 
                                                     D2D1::PixelFormat(DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_IGNORE),
                                                     (float)dpi, (float)dpi), &rt))) return false;
     Painter p;
-    if (!p.Init(rt.Get(), v.dark)) return false;
+    if (!p.Init(rt.Get(), dark)) return false;
     rt->BeginDraw();
-    p.Draw(v, g);
+    draw(p);
     if (FAILED(rt->EndDraw())) return false;
 
     // Straight-alpha BGRA with the rounded corners cut out.
@@ -638,6 +643,16 @@ bool RenderToPng(const View& v, int profileTextW, int dpi, const wchar_t* path) 
     if (FAILED(fr->SetSize(pw, ph)) || FAILED(fr->SetPixelFormat(&fmt))) return false;
     if (FAILED(fr->WriteSource(conv.Get(), nullptr)) || FAILED(fr->Commit()) || FAILED(enc->Commit())) return false;
     return true;
+}
+
+bool RenderToPng(const View& v, int profileTextW, int dpi, const wchar_t* path) {
+    if (!DrawInit()) return false;
+    const Geometry g = ComputeGeometry(v.perf, (int)v.sliders.size(), (int)v.toggles.size(), profileTextW);
+    return RenderFrameToPng(g.width, g.height, v.dark, dpi, path, [&](Painter& p) { p.Draw(v, g); });
+}
+
+bool RenderListToPng(const ListView& v, const ListGeometry& g, int dpi, const wchar_t* path) {
+    return RenderFrameToPng(g.width, g.height, v.dark, dpi, path, [&](Painter& p) { p.DrawList(v, g); });
 }
 
 }}  // namespace wind::Flyout

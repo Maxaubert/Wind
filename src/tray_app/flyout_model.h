@@ -13,6 +13,7 @@
 #include "../tick_stats.h"
 #include "../tray_items.h"
 #include "../tray_status.h"
+#include "flyout_tools.h"
 
 namespace wind { namespace Flyout {
 
@@ -116,6 +117,7 @@ inline constexpr int kHeadH = 96;          // 18 pad + 28 big + 14 gap + 14 fram
 inline constexpr int kRowH = 40, kQsPadY = 8, kPadX = 20, kIcon = 16, kIconGap = 12, kValueW = 48;
 inline constexpr int kChipW = 48, kChipH = 32, kChipGap = 10, kChipTop = 2, kChipRowH = 39;
 inline constexpr int kBarH = 40, kBtn = 32, kBottomPad = 8;
+inline constexpr int kChipsPerRow = 4;     // (258 inner + 10 gap) / (48 + 10): more chips wrap to the next row (#315)
 
 struct Geometry {
     int width = kWidth, height = 0;
@@ -160,10 +162,11 @@ inline Geometry ComputeGeometry(bool perf, int nSliders, int nToggles, int profi
         if (nToggles > 0) {
             const int cw = kChipW;   // fixed size (Max rejected wide chips, 2026-10-02)
             for (int i = 0; i < nToggles; ++i) {
-                const int cx = x0 + kPadX + i * (cw + kChipGap);
-                g.chip.push_back({ cx, ry + kChipTop, cx + cw, ry + kChipTop + kChipH });
+                const int cx = x0 + kPadX + (i % kChipsPerRow) * (cw + kChipGap);
+                const int ctop = ry + (i / kChipsPerRow) * kChipRowH + kChipTop;
+                g.chip.push_back({ cx, ctop, cx + cw, ctop + kChipH });
             }
-            ry += kChipRowH;
+            ry += ((nToggles + kChipsPerRow - 1) / kChipsPerRow) * kChipRowH;
         }
         ry += kQsPadY;
         g.qs = { x0, top, x1, ry };
@@ -241,11 +244,26 @@ inline const SliderSpec* FindSliderSpec(const std::string& key) {
 
 struct ToggleSpec { const char* key; const wchar_t* name; const char* icon; };
 
+// What a chip does (#315): Plain = an ini toggle; Engine opens the per-window engine list; Listen =
+// the Mouse lock / Pass keys fixes (click, then go to the app); Pause = runtime Pause Wind.
+enum class ChipKind { Plain, Engine, Listen, Pause };
+inline ChipKind ChipKindOf(const std::string& key) {
+    if (key == "engine") return ChipKind::Engine;
+    if (key == "fixLock" || key == "fixPass") return ChipKind::Listen;
+    if (key == "pause") return ChipKind::Pause;
+    return ChipKind::Plain;
+}
+inline FixKind FixKindOf(const std::string& key) { return key == "fixPass" ? FixKind::Pass : FixKind::Lock; }
+
 inline const ToggleSpec* FindToggleSpec(const std::string& key) {
     static const ToggleSpec k[] = {
         { "trackCaret", L"Follow the text cursor",  "ftc" },
         { "trackFocus", L"Follow keyboard focus",   "ffk" },
         { "keepEdges",  L"Keep within the edges",   "edges" },
+        { "engine",     L"Engine for the app in front", "engine" },
+        { "fixLock",    L"Mouse lock (listen)",     "lock" },
+        { "fixPass",    L"Pass keys (listen)",      "pass" },
+        { "pause",      L"Pause Wind",              "pause" },
     };
     for (const auto& t : k) if (key == t.key) return &t;
     return nullptr;
@@ -342,6 +360,23 @@ struct ToggleView {
     std::string key, icon;
     std::wstring name;
     bool on = false;
+    ChipKind kind = ChipKind::Plain;
+    bool disabled = false;      // the engine chip while the main engine is not Auto
+    bool listening = false;     // a listen chip waiting for the next app: pulses
+};
+// Live inputs the tools chips need beyond the ini (read from the shared block and the tools controller).
+struct ToolsInput {
+    int fgCategory = -1;        // WindowCategory of the last real foreground window, -1 = none yet
+    bool paused = false;
+    int listening = 0;          // 0 none, 1 Mouse lock, 2 Pass keys
+};
+// The engine dropdown's current state (valid whether or not the chip is shown).
+struct EngineView {
+    int category = 3;
+    std::string key = "engineOther";
+    int pref = 0;               // 0 Auto, 1 Transform, 2 Render
+    bool enabled = true;
+    std::wstring caption;       // "Engine for games", or "Main engine: Render" when disabled
 };
 struct PerfView {
     bool zoomed = false;
@@ -357,6 +392,7 @@ struct AnimView {
     bool active = false;
     std::vector<float> chipHot, chipPress, chipOn;   // per toggle chip
     float btnHot[3] = { 0, 0, 0 }, btnPress[3] = { 0, 0, 0 };   // profile, settings, quit
+    float pulse = 0.f;                               // the listening chip's soft pulse, 0..1
 };
 
 // Moves `cur` toward `target` linearly so a full 0..1 swing takes `durMs`. PURE.
@@ -378,6 +414,7 @@ struct View {
     Hit focus;                      // keyboard focus; drawn only when showFocus
     bool showFocus = false;
     AnimView anim;
+    EngineView engine;
 };
 
 inline PerfView BuildPerf(const TrayStatus& st, const float* ticks, int n) {
@@ -402,9 +439,21 @@ inline PerfView BuildPerf(const TrayStatus& st, const float* ticks, int n) {
 // Items the layout enables, in its order. A key that is not a known item is skipped (an older or
 // hand-edited ini); ParseTrayLayout has already dropped unknown keys and applied the slider cap.
 inline View BuildView(const IniValues& ini, const TrayLayout& layout, const TrayStatus& st,
-                      const float* ticks, int nTicks, const std::wstring& profile, bool dark) {
+                      const float* ticks, int nTicks, const std::wstring& profile, bool dark,
+                      const ToolsInput& tools = ToolsInput()) {
     View v;
     v.dark = dark;
+    {
+        EngineView& e = v.engine;
+        e.category = NormCategory(tools.fgCategory);
+        e.key = EngineKeyFor(e.category);
+        auto mi = ini.find("model");
+        const std::string model = mi == ini.end() ? std::string("hybrid") : TrimWs(mi->second);
+        e.enabled = MainEngineIsAuto(model);
+        auto pi = ini.find(e.key);
+        e.pref = pi == ini.end() ? 0 : EnginePrefIndex(TrimWs(pi->second));
+        e.caption = e.enabled ? std::wstring(EngineCaptionFor(e.category)) : MainEngineCaption(model);
+    }
     v.perf = layout.perf;
     if (layout.perf) v.p = BuildPerf(st, ticks, nTicks);
     for (const auto& it : layout.sliders) {
@@ -424,7 +473,10 @@ inline View BuildView(const IniValues& ini, const TrayLayout& layout, const Tray
         if (!t) continue;
         ToggleView tv;
         tv.key = t->key; tv.icon = t->icon; tv.name = t->name;
-        tv.on = ToggleOn(it.key, ini);
+        tv.kind = ChipKindOf(it.key);
+        tv.on = tv.kind == ChipKind::Pause ? tools.paused : (tv.kind == ChipKind::Plain && ToggleOn(it.key, ini));
+        tv.disabled = tv.kind == ChipKind::Engine && !v.engine.enabled;
+        tv.listening = tv.kind == ChipKind::Listen && tools.listening == (it.key == "fixLock" ? 1 : 2);
         v.toggles.push_back(tv);
     }
     v.profile = profile.empty() ? std::wstring(L"Default") : profile;
@@ -552,16 +604,24 @@ inline IRect FocusRect(const Geometry& g, const Hit& h) {
 
 inline constexpr int kListRowH = 32, kListPad = 4, kListMinW = 140, kListMaxW = 296, kListTextPad = 12, kListCheckW = 28;
 
+inline constexpr int kListCaptionH = 28;      // the caption line above the rows (the engine list)
+
 struct ListGeometry {
     int width = 0, height = 0;
+    IRect caption;                  // empty (w() == 0) when the list has no caption
     std::vector<IRect> row;
 };
 
-inline ListGeometry ComputeList(int n, int widestTextW) {
+// `captionW` > 0 adds a caption line above the rows and widens the list to fit it.
+inline ListGeometry ComputeList(int n, int widestTextW, int captionW = 0) {
     ListGeometry g;
-    g.width = ClampInt(widestTextW + 2 * kListTextPad + kListCheckW + 2 * kListPad + 2 * kBorder,
+    g.width = ClampInt((std::max)(widestTextW + kListCheckW, captionW) + 2 * kListTextPad + 2 * kListPad + 2 * kBorder,
                        kListMinW, kListMaxW);
     int y = kBorder + kListPad;
+    if (captionW > 0) {
+        g.caption = { kBorder + kListPad, y, g.width - kBorder - kListPad, y + kListCaptionH };
+        y += kListCaptionH;
+    }
     for (int i = 0; i < n; ++i) {
         g.row.push_back({ kBorder + kListPad, y, g.width - kBorder - kListPad, y + kListRowH });
         y += kListRowH;
@@ -598,6 +658,7 @@ struct ListView {
     std::vector<std::wstring> names;
     int active = -1;      // the current profile (checkmark)
     int sel = -1;         // hover or keyboard selection
+    std::wstring caption; // a line above the rows (the engine list); empty = none
 };
 
 }}  // namespace wind::Flyout

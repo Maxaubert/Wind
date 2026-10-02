@@ -46,5 +46,7 @@ void ApplyShapeAlpha(unsigned char* bgra, int w, int h, int strideBytes, int dpi
 
 // Renders the flyout to a PNG at `dpi` (96 = 1x). False on any failure.
 bool RenderToPng(const View& v, int profileTextW, int dpi, const wchar_t* path);
+// The same for the list popup (profiles, or the engine list with its caption).
+bool RenderListToPng(const ListView& v, const ListGeometry& g, int dpi, const wchar_t* path);
 
 }}  // namespace wind::Flyout

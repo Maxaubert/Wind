@@ -18,12 +18,18 @@ void RemoveIcon();
 void Notify(const wchar_t* title, const wchar_t* text);
 // Screen rectangle of the icon (Shell_NotifyIconGetRect); false when the shell cannot say.
 bool GetIconRect(RECT* out);
+// The icon shows the app's logo, plus a pulsing dot while listening (frame 0..kIconPulseFrames-1,
+// -1 = not listening) and a pause mark while Wind is paused. Cheap when nothing changed.
+inline constexpr int kIconPulseFrames = 6;
+void SetIconState(bool paused, int listenFrame);
+HICON BadgedIconForTest(HICON base, bool pause, bool dot, float amount);   // `--icon-test` only
 
 // flyout_window.cpp - the quick-controls flyout (issue #313), on the main thread. A tray click
 // toggles it; it closes on Esc, deactivation (outside click, alt-tab) and a second icon click.
 void ToggleFlyout();
 void CloseFlyout();
 bool FlyoutIsOpen();
+void FlyoutRefresh();          // rebuild and repaint the open flyout (a listen ended, pause changed); no-op when closed
 
 // flyout_test.cpp - `WindTray.exe --render-test out.png [--light] [--dpi N] [--hover kind[:i]]`
 // renders the flyout with fake status to a PNG and exits. Returns the process exit code.
@@ -31,9 +37,20 @@ int RunRenderTest(const wchar_t* cmdLine);
 // `WindTray.exe --flyout-test`: opens the LIVE flyout at the cursor (no icon, no Wind, no single
 // instance), pumps messages until it closes or 20 s pass. For checking placement and dismissal.
 int RunFlyoutTest();
+// `WindTray.exe --icon-test out.bmp`: the tray icon states (plain, pause, two pulse frames, both) at
+// 16 and 32 px on a dark and a light strip, magnified 8x, to judge the badges without a taskbar.
+int RunIconTest(const wchar_t* cmdLine);
 
 // chime.cpp - the rising (enabled) / falling (disabled) chime for the listen chips; async, never a system sound.
 void PlayChime(bool enabled);
+
+// tools.cpp - the tray tools (#315): listen-and-chime app fixes, Pause, and the tray icon's state.
+void ToolsInit(HWND hwnd);                       // the hidden tray window that owns the listen timer
+void ToolsTimer(UINT_PTR id);                    // forwarded WM_TIMER
+void ToolsListenClick(int fix);                  // 0 Mouse lock, 1 Pass keys: start, cancel (re-click) or switch
+int ToolsListening();                            // 0 none, 1 Mouse lock, 2 Pass keys
+unsigned long long ToolsListenElapsedMs();       // since listening began (0 when not)
+void ToolsTogglePause();
 
 // tray_menu.cpp - what the flyout's buttons do (no UI of their own).
 bool UsesDarkTheme(const std::string& iniText);   // Wind's uiTheme; anything but dark/light = system
