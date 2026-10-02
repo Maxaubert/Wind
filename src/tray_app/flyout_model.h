@@ -649,7 +649,9 @@ inline Hit VerticalNeighbor(const Geometry& g, const Hit& cur, int dir) {
 
 // ---------------------------------------------------------------- profile list popup (pure)
 
-inline constexpr int kListRowH = 32, kListPad = 4, kListMinW = 140, kListMaxW = 296, kListTextPad = 12, kListCheckW = 28;
+inline constexpr int kListRowH = 30, kListPad = 4, kListMinW = 140, kListMaxW = 296, kListTextPad = 10, kListCheckW = 26;
+// The list popup follows the mockup list: 8 DIP popup radius, 6 DIP row highlight, check 8 DIP from the edge.
+inline constexpr int kListRadius = 8, kListRowRadius = 6, kListCheckInset = 8;
 
 inline constexpr int kListCaptionH = 28;      // the caption line above the rows (the engine list)
 

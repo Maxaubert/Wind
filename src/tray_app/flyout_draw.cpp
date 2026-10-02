@@ -44,7 +44,7 @@ D2D1_COLOR_F Col(unsigned rgb, float a = 1.f) {
 }
 
 struct Theme {
-    D2D1_COLOR_F menu, menub, fg, fg2, fg3, rule, hl, glyph, teal, lift, scrim, band, track;
+    D2D1_COLOR_F menu, card, menub, fg, fg2, fg3, rule, hl, glyph, teal, lift, scrim, band, track;
     D2D1_COLOR_F off, offh, offic, onic, on, onh, onb, segline;
     float aurora;       // --ac
     bool dark;
@@ -54,7 +54,7 @@ Theme MakeTheme(bool dark) {
     Theme t;
     t.dark = dark;
     if (dark) {
-        t.menu = Col(0x000000); t.menub = Col(0x333333); t.fg = Col(0xf2f2f2); t.fg2 = Col(0xd0d0d0);
+        t.menu = Col(0x000000); t.card = Col(0x121212); t.menub = Col(0x333333); t.fg = Col(0xf2f2f2); t.fg2 = Col(0xd0d0d0);
         t.fg3 = Col(0xb4b6ba); t.rule = Col(0x303236); t.hl = Col(0x2d2d2d); t.glyph = Col(0xb0b0b0);
         t.teal = Col(0x2fbfa5); t.lift = Col(0x0b0b0b); t.scrim = Col(0x000000, .55f);
         t.band = Col(0x0a0a0a); t.track = Col(0x3d3d3d);
@@ -62,7 +62,7 @@ Theme MakeTheme(bool dark) {
         t.on = Col(0x1f5650); t.onh = Col(0x266560); t.onb = Col(0x2fbfa5, .4f); t.segline = Col(0x000000);
         t.aurora = .62f;
     } else {
-        t.menu = Col(0xffffff); t.menub = Col(0xd9d9d9); t.fg = Col(0x0a0a0a); t.fg2 = Col(0x2e2e2e);
+        t.menu = Col(0xffffff); t.card = Col(0xffffff); t.menub = Col(0xd9d9d9); t.fg = Col(0x0a0a0a); t.fg2 = Col(0x2e2e2e);
         t.fg3 = Col(0x45484d); t.rule = Col(0xc6c9ce); t.hl = Col(0xececec); t.glyph = Col(0x555555);
         t.teal = Col(0x087a67); t.lift = Col(0xf6f7f8); t.scrim = Col(0xffffff, .78f);
         t.band = Col(0xf1f2f4); t.track = Col(0xd0d3d6);
@@ -498,13 +498,13 @@ void Painter::Impl::drawQuick(const View& v, const Geometry& g) {
     // 1 px --onb inset ring while open.
     if (v.hasEngine && g.engine.w() > 0) {
         const D2D1_RECT_F r = R(g.engine);
-        const float h = v.engine.open ? 1.f : (a.active ? a.engHot : (v.hover.kind == HitKind::Engine ? 1.f : 0.f));
+        const float h = a.active ? a.engHot : (v.hover.kind == HitKind::Engine ? 1.f : 0.f);
         fillRound(r, (float)kSegRadius, Mix(th.off, th.offh, h));
         if (v.engine.open) ring(r, (float)kSegRadius, th.onb);
         icon(v.engine.icon, r.left + 10.f, (r.top + r.bottom) / 2.f - 8.f, th.glyph, 1.5f);
         text(v.engine.value, g_s.mono12.Get(), D2D1::RectF(r.left + 10.f + 16.f + 10.f, r.top, r.right - 10.f - 14.f - 6.f, r.bottom),
              th.fg, DWRITE_TEXT_ALIGNMENT_LEADING);
-        icon(v.engine.open ? "chevup" : "chevdown", r.right - 10.f - 14.f - 1.f, (r.top + r.bottom) / 2.f - 8.f, th.offic, 1.5f);
+        icon(v.engine.open ? "chevup" : "chevdown", r.right - 10.f - 14.f - 1.f, (r.top + r.bottom) / 2.f - 8.f, th.offic, 1.75f);
     }
 }
 
@@ -595,7 +595,7 @@ void Painter::DrawList(const ListView& v, const ListGeometry& g) {
     const float W = (float)g.width, H = (float)g.height;
     d.rt->SetTransform(D2D1::Matrix3x2F::Identity());
     d.rt->Clear(d.th.menub);
-    d.fill(D2D1::RectF(0, 0, W, H), d.th.menu);
+    d.fill(D2D1::RectF(0, 0, W, H), d.th.card);
     if (g.caption.w() > 0 && !v.caption.empty())
         d.text(v.caption, g_s.mono12.Get(),
                D2D1::RectF((float)g.caption.l + (float)kListTextPad, (float)g.caption.t,
@@ -603,21 +603,21 @@ void Painter::DrawList(const ListView& v, const ListGeometry& g) {
                d.th.fg3, DWRITE_TEXT_ALIGNMENT_LEADING);
     for (size_t i = 0; i < v.names.size() && i < g.row.size(); ++i) {
         const D2D1_RECT_F r = d.R(g.row[i]);
-        if ((int)i == v.sel) d.fillRound(r, 8.f, d.th.hl);
+        if ((int)i == v.sel) d.fillRound(r, (float)kListRowRadius, d.th.hl);
         d.text(v.names[i], g_s.mono12.Get(),
                D2D1::RectF(r.left + (float)kListTextPad, r.top, r.right - (float)kListCheckW, r.bottom),
                ((int)i == v.sel || (int)i == v.active) ? d.th.fg : d.th.fg2, DWRITE_TEXT_ALIGNMENT_LEADING);
         if ((int)i == v.active)
-            d.icon("check", r.right - 12.f - 16.f, r.top + (r.bottom - r.top - 16.f) / 2.f, d.th.teal, 1.75f);
+            d.icon("check", r.right - (float)kListCheckInset - 16.f, r.top + (r.bottom - r.top - 16.f) / 2.f, d.th.teal, 1.75f);
     }
-    d.ring(D2D1::RectF(0, 0, W, H), (float)kRadius, d.th.menub);
+    d.ring(D2D1::RectF(0, 0, W, H), (float)kListRadius, d.th.menub);
 }
 
 // ---------------------------------------------------------------- shape alpha
 
-void ApplyShapeAlpha(unsigned char* px, int w, int h, int strideBytes, int dpi, bool premultiply) {
+void ApplyShapeAlpha(unsigned char* px, int w, int h, int strideBytes, int dpi, bool premultiply, int radiusDip) {
     if (!px || w <= 0 || h <= 0) return;
-    const float r = (float)kRadius * (float)dpi / 96.f;
+    const float r = (float)radiusDip * (float)dpi / 96.f;
     const int ri = (int)r + 1;
     for (int y = 0; y < h; ++y) {
         unsigned char* row = px + (size_t)y * strideBytes;
@@ -650,7 +650,7 @@ void ApplyShapeAlpha(unsigned char* px, int w, int h, int strideBytes, int dpi, 
 // Paints one window-sized frame with `draw(painter)` (inside BeginDraw/EndDraw) and saves it as a
 // straight-alpha PNG with the rounded corners cut out. Shared by the flyout and the list popup.
 template <class F>
-static bool RenderFrameToPng(int wDip, int hDip, bool dark, int dpi, const wchar_t* path, F draw) {
+static bool RenderFrameToPng(int wDip, int hDip, bool dark, int dpi, const wchar_t* path, int radiusDip, F draw) {
     if (!DrawInit()) return false;
     const UINT pw = (UINT)ScalePx(wDip, dpi), ph = (UINT)ScalePx(hDip, dpi);
     ComPtr<IWICBitmap> bmp;
@@ -671,7 +671,7 @@ static bool RenderFrameToPng(int wDip, int hDip, bool dark, int dpi, const wchar
     if (FAILED(WICConvertBitmapSource(GUID_WICPixelFormat32bppBGRA, bmp.Get(), &conv0))) return false;
     std::vector<BYTE> px((size_t)pw * ph * 4);
     if (FAILED(conv0->CopyPixels(nullptr, pw * 4, (UINT)px.size(), px.data()))) return false;
-    ApplyShapeAlpha(px.data(), (int)pw, (int)ph, (int)pw * 4, dpi, false);
+    ApplyShapeAlpha(px.data(), (int)pw, (int)ph, (int)pw * 4, dpi, false, radiusDip);
     ComPtr<IWICBitmap> outBmp;
     if (FAILED(g_s.wic->CreateBitmapFromMemory(pw, ph, GUID_WICPixelFormat32bppBGRA, pw * 4, (UINT)px.size(),
                                                px.data(), &outBmp))) return false;
@@ -692,11 +692,11 @@ static bool RenderFrameToPng(int wDip, int hDip, bool dark, int dpi, const wchar
 bool RenderToPng(const View& v, int profileTextW, int dpi, const wchar_t* path) {
     if (!DrawInit()) return false;
     const Geometry g = ComputeGeometry(v, profileTextW);
-    return RenderFrameToPng(g.width, g.height, v.dark, dpi, path, [&](Painter& p) { p.Draw(v, g); });
+    return RenderFrameToPng(g.width, g.height, v.dark, dpi, path, kRadius, [&](Painter& p) { p.Draw(v, g); });
 }
 
 bool RenderListToPng(const ListView& v, const ListGeometry& g, int dpi, const wchar_t* path) {
-    return RenderFrameToPng(g.width, g.height, v.dark, dpi, path, [&](Painter& p) { p.DrawList(v, g); });
+    return RenderFrameToPng(g.width, g.height, v.dark, dpi, path, kListRadius, [&](Painter& p) { p.DrawList(v, g); });
 }
 
 }}  // namespace wind::Flyout

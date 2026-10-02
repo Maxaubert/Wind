@@ -56,6 +56,7 @@ struct Surface {
     int pw = 0, ph = 0, dpi = 96;
     void* bits = nullptr;
     POINT pos{};
+    int radius = Flyout::kRadius;        // corner radius in DIP (the list popup is tighter)
     BYTE alpha = 255;                    // whole-window opacity (the open fade)
     HDC dc = nullptr;
     HBITMAP dib = nullptr, oldBmp = nullptr;
@@ -98,7 +99,7 @@ struct Surface {
             wind::Log(wind::LogLevel::Warn, "tray", "flyout draw failed (hr=0x%08lx)", (unsigned long)hr);
             return;
         }
-        if (bits) Flyout::ApplyShapeAlpha(static_cast<unsigned char*>(bits), pw, ph, pw * 4, dpi, true);
+        if (bits) Flyout::ApplyShapeAlpha(static_cast<unsigned char*>(bits), pw, ph, pw * 4, dpi, true, radius);
         POINT src{ 0, 0 }, dst = pos;
         SIZE sz{ pw, ph };
         BLENDFUNCTION bf{ AC_SRC_OVER, 0, alpha, AC_SRC_ALPHA };
@@ -419,6 +420,7 @@ LRESULT CALLBACK ListProc(HWND h, UINT m, WPARAM w, LPARAM l) {
 // `matchWidth`: the popup is exactly as wide as the anchor (the engine dropdown's list).
 void ShowList(State& s, ListState* ls, const Flyout::IRect& b, const wchar_t* title, bool below = false,
               bool matchWidth = false) {
+    ls->sf.radius = Flyout::kListRadius;
     ls->sf.pw = Flyout::ScalePx(ls->geo.width, s.dpi);
     ls->sf.ph = Flyout::ScalePx(ls->geo.height, s.dpi);
     const Flyout::IRect anchor{ s.sf.pos.x + Flyout::ScalePx(b.l, s.dpi), s.sf.pos.y + Flyout::ScalePx(b.t, s.dpi),
