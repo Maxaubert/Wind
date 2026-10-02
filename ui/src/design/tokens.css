@@ -63,6 +63,16 @@
 }
 .wnd button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
 .wnd :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+/* Scrollbars (#322, Max 2026-10-02): a small rounded chip, no track and no arrow buttons. 10 px gutter,
+   6 px thumb (2 px transparent border each side), a little stronger on hover and while dragging. */
+.wnd ::-webkit-scrollbar { width: 10px; height: 10px; background: transparent; }
+.wnd ::-webkit-scrollbar-track, .wnd ::-webkit-scrollbar-corner { background: transparent; }
+.wnd ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+.wnd ::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--fg) 16%, transparent); border-radius: 99px;
+  border: 2px solid transparent; background-clip: padding-box; min-height: 32px; }
+.wnd ::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--fg) 28%, transparent); }
+.wnd ::-webkit-scrollbar-thumb:active { background-color: color-mix(in srgb, var(--fg) 36%, transparent); }
+
 /* Focus ring for the keyboard only: a mouse click (or a script moving focus after one) never draws a box. */
 .wnd :focus:not(:focus-visible) { outline: none; }
 /* Chromium still matches :focus-visible on a mouse-clicked <select> (and after a script moves focus
