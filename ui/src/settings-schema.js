@@ -8,7 +8,8 @@
 // showAdvanced key is on (Preferences), carries no marker, and search still finds it.
 //
 // Row types: keybind, slider, toggle, select, applist, highres, engine (the engine select with the
-// inline "Restart Wind"), theme (the Mode picker), profiles, button, about. A row may carry showIf
+// inline "Restart Wind"), theme (the Mode switch), palette (the Theme picker, `wide`: its control sits under the
+// text), profiles (dropdown + New), button, about. A row may carry showIf
 // { key, eq } to hide it unless another setting has that value. A keybind row may carry `max` (how
 // many bindings it takes, default 1) and `onKey` (the on/off switch key of an extra key).
 //
@@ -135,6 +136,8 @@ export const groups = [
     cards: [
       { caption: 'General', rows: [
         { key: '__theme', type: 'theme', label: 'Mode', desc: 'Light, dark or the same as the system.', def: 'auto' },
+        // Global UI-only key (uiPalette): the built-in theme, shared by Settings and the tray menu. One row of swatches.
+        { key: 'uiPalette', type: 'palette', wide: true, label: 'Theme', desc: 'The colours of Settings and the tray menu.', def: 'grey' },
         { key: '__profiles', type: 'profiles', label: 'Profile', desc: 'A saved set of all settings.' },
         // Global UI-only key: shows the advanced rows of every page.
         { key: 'showAdvanced', type: 'toggle', label: 'Show advanced settings', desc: 'Shows extra options on every page.', def: 0 },

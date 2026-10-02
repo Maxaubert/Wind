@@ -154,8 +154,9 @@ switches on `row.type`:
 | `applist` | `controls/AppList.svelte` | One comma-separated ini string; the host's `pickExe` feeds it bare exe names |
 | `highres` | `controls/HighRes.svelte` | The combined high-resolution-cursor/MPO toggle (issue #242); keeps its confirm step (UAC plus restart prompt) as an inline action |
 | `engine` | `controls/EngineRow.svelte` | The Magnifier engine select; `model` is read once at launch, so it applies on an inline "Restart Wind" button, not on selection |
-| `theme` | `controls/ThemeRow.svelte` | `uiTheme`, a global key |
-| `profiles` | `general/Profiles.svelte` | Profile list and switch/create/rename/duplicate/delete |
+| `theme` | `controls/ModeSwitch.svelte` | The Mode row: System / Light / Dark, three equal segments, writes `uiTheme` (`auto`/`light`/`dark`), a global key |
+| `palette` | `prefs/ThemePicker.svelte` | The Theme row (`wide`: control under the text): one scrolling row of swatch buttons, writes `uiPalette`, a global key. Isolated so the final picker layout can replace it |
+| `profiles` | `prefs/ProfilePicker.svelte` | A dropdown of the profiles plus New; a trash per profile in the open list (none when one is left, none on Default). Dialogs: `prefs/NewProfileDialog.svelte`, delete confirm via `Prompt` |
 | `button`, `about` | `SettingRow`, `controls/About.svelte` | Actions (open ini, export diagnostics) and the logo hero |
 
 Visual tokens (colours, radii, the aurora banner) live in `ui/src/design/tokens.css`, taken from
@@ -292,29 +293,42 @@ and limits: `docs/superpowers/specs/2026-10-01-tray-flyout-design.md`. Playwrigh
 
 ## Profiles
 
-`ui/src/shell/TitleBar.svelte` shows the active profile, and `ui/src/general/Profiles.svelte`
-(General group) manages them: switch/create/rename/duplicate/delete. The interesting logic is in
-`Settings.svelte`'s `profileAction`: operations that replace the live settings wholesale (switch,
-create, delete of the *active* profile) route through the unsaved-changes prompt
-(Save / Discard / Cancel), while rename, duplicate, and deleting an inactive profile skip it.
-After a mutating operation the UI reloads the whole config (`loadValues`), deliberately *before*
+The Profile row on the Preferences page (`ui/src/prefs/ProfilePicker.svelte`) is a dropdown of the profiles plus one
+New button. Each profile in the open list has a trash icon (hidden when one profile is left, and on Default, which the
+host protects); the trash opens a confirm prompt ("Delete profile", Cancel / Delete). New opens
+`prefs/NewProfileDialog.svelte`: a name (checked by `prefs/profileName.js`, the host's file-name rules) and a start point,
+a copy of the current settings or the defaults. Rename and duplicate have no UI (the bridge messages remain).
+The interesting logic is in `Settings.svelte`'s `profileAction`: operations that replace the live settings wholesale
+(switch, create from the defaults, delete of the *active* profile) route through the unsaved-changes prompt
+(Save / Discard / Cancel), while deleting an inactive profile skips it. A new profile that starts from the CURRENT
+settings skips it too: the host creates every profile from the defaults (`createProfile`), so the page then writes the
+keys that differ with `setConfigPersist` (live ini and profile file), which carries unsaved changes into the new
+profile and leaves nothing unsaved.
+After a mutating operation the UI reloads the whole config (`load`), deliberately *before*
 checking the reply's `ok`, because a failed operation can still have rewritten the live ini (a
 switch that landed but whose model restart failed) and stale values would then be compared
 against the wrong profile. A `push:true` profiles message (tray switch under an open window)
-refreshes the titlebar and reloads `values`/`saved`; a tray switch rewrites the live ini from the
+reloads `values`/`saved`; a tray switch rewrites the live ini from the
 new profile, so unsaved edits are gone by then and the capsule resets.
-Creating a profile lands the user on the Keybinds section, because a factory-defaults profile
-has no zoom keys bound and fixing that is the first thing to do.
 
 ## Theme, onboarding, accessibility
 
 **Theme.** `uiTheme` is `auto | dark | light`, persisted in the ini as a UI-only key (the core
 ignores it, and `StripUiOnlyKeys` keeps it from triggering reloads). `ui/src/theme.js` applies
 it as a `force-dark`/`force-light` class overriding the `prefers-color-scheme` media query in
-`ui/src/theme.css`. The sun/moon toggle flips the *effective* theme: `nextTheme` first resolves
-`auto` against the system preference, so one click always visibly changes something (the old
-auto to dark to light cycle needed two clicks to reach light on a dark system, the first being
-invisible).
+`ui/src/theme.css`. The Mode row in Preferences (`controls/ModeSwitch.svelte`: System / Light / Dark, three equal
+segments) writes it; the window title bar carries no theme button.
+
+**Built-in themes (#318).** `uiPalette` is a second global UI-only key: `grey ember cyber mono slate carbon hicon ocean`
+(the core's `kUiPalettes`; anything else reads as `grey`). `Settings.svelte` puts it on the root as `data-palette` next
+to the resolved mode `data-theme`, and `ui/src/design/themes.css` has one token block per theme and mode
+(`.wnd[data-palette][data-theme]`) over the defaults in `design/tokens.css`. themes.css and `design/themes.js` are
+GENERATED by `ui/tools/gen-themes.cjs` from Max's mockup palettes (`wind-settings-mockups/ia/palettes08/-b1/-b2.cjs`);
+edit the generator, not the output. Wind grey takes tokens.css's own values (dark and light), so its look is exactly
+today's. Cyberpunk dark selections are solid #fcee0a with black text; Cyberpunk, Carbon and High contrast use the sharp
+radii (`--rc --rad --srad --rp --rsw --rkn`). Components use the tokens (`--sel`/`--selfg` for selections, `--onfill`,
+`--focus`, `--danger*`, `--scrim`, the radii), never fixed colours. The Theme row is `prefs/ThemePicker.svelte`: for now
+one scrolling row of swatch buttons, each a tiny `.wnd` carrying its own palette so it shows the theme's real tokens.
 
 **Onboarding.** `ui/src/App.svelte` routes on `getMode()` (the `?mode=onboard` query the host
 appends). `ui/src/Onboarding.svelte` is a three-step wizard: the wind-trails-into-logo intro,

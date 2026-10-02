@@ -21,7 +21,7 @@ const OLD_BIND_KEYS = [
   'panLeftVk', 'panLeftMods', 'panRightVk', 'panRightMods', 'panUpVk', 'panUpMods', 'panDownVk', 'panDownMods',
   'hideCursorVk', 'hideCursorMods', 'cursorLockVk', 'cursorLockMods',
 ];
-const NEW_KEYS = ['__theme', '__profiles', '__diagnostics', '__openIni', 'trayPerf', 'showAdvanced'];
+const NEW_KEYS = ['__theme', 'uiPalette', '__profiles', '__diagnostics', '__openIni', 'trayPerf', 'showAdvanced'];
 
 test('group ids, order and shape follow the spec', () => {
   expect(groups.map((g) => g.id)).toEqual(['hotkeys', 'zoom', 'view', 'screen', 'prefs', 'tray', 'about']);
@@ -207,16 +207,16 @@ test('preferences page: mode, profiles and file buttons', async ({ page }) => {
   await ctl(page, '__theme').getByRole('radio', { name: 'Light' }).click();
   await ctl(page, '__diagnostics').getByRole('button', { name: 'Export' }).click();
   await ctl(page, '__openIni').getByRole('button', { name: 'Open' }).click();
+  await ctl(page, 'uiPalette').getByRole('radio', { name: 'Ember' }).click();
   const prof = ctl(page, '__profiles');
-  await prof.locator('select').selectOption('Default');
+  await prof.getByRole('button', { name: /^Profile:/ }).click();
+  await prof.getByRole('option', { name: 'Default' }).click();
   await prof.getByRole('button', { name: 'New' }).click();
-  await prof.getByLabel('Profile name').fill('Gaming');
-  await prof.getByRole('button', { name: 'OK' }).click();
-  await expect(prof.getByRole('alert')).toHaveText('A profile with that name already exists');
-  await prof.getByLabel('Profile name').fill('Work');
-  await prof.getByRole('button', { name: 'OK' }).click();
+  await prof.getByRole('button', { name: /^Profile:/ }).click();
+  await prof.getByRole('button', { name: 'Delete profile Gaming' }).click();
   expect(await page.evaluate(() => window.__calls)).toEqual([
-    ['theme', 'light'], ['action', 'exportDiagnostics'], ['action', 'openIni'], ['switch', 'Default'], ['create', 'Work'],
+    ['theme', 'light'], ['action', 'exportDiagnostics'], ['action', 'openIni'], ['uiPalette', 'ember'],
+    ['switch', 'Default'], 'new', ['delete', 'Gaming'],
   ]);
 });
 

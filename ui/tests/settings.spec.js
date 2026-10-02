@@ -121,11 +121,11 @@ test('the title bar has only minimize, maximize and close; Maximize asks the hos
 test('mode: the Preferences radio group writes uiTheme, and a mode change is never unsaved', async ({ page }) => {
   await page.goto('/');
   await go(page, 'prefs');
-  await expect(page.locator('.wnd')).toHaveAttribute('data-theme', 'dark');
+  await expect(page.locator('.wnd.app')).toHaveAttribute('data-theme', 'dark');
   await key(page, '__theme').getByRole('radio', { name: 'Light' }).click();
-  await expect(page.locator('.wnd')).toHaveAttribute('data-theme', 'light');
+  await expect(page.locator('.wnd.app')).toHaveAttribute('data-theme', 'light');
   await key(page, '__theme').getByRole('radio', { name: 'Dark' }).click();
-  await expect(page.locator('.wnd')).toHaveAttribute('data-theme', 'dark');
+  await expect(page.locator('.wnd.app')).toHaveAttribute('data-theme', 'dark');
   expect((await sent(page, 'setConfig')).filter((m) => m.key === 'uiTheme').map((m) => m.value)).toEqual(['light', 'dark']);
   await expect(page.locator('.capsule')).toHaveCount(0);
 });

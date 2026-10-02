@@ -6,8 +6,8 @@
   //   onChange  onChange(val) for the row's own key
   //   onSet     onSet(key, val) for a sibling key (the extra-key switches)
   //   live      live(patch) for keybind captures (written immediately by the page)
-  //   extra     { mpoNeedsRestart, runningModel, onRestart, theme, onTheme, profiles: {names, active,
-  //             onSwitch, onCreate, onRename, onDuplicate, onDelete}, version, onRepo, onAction(name) }
+  //   extra     { mpoNeedsRestart, runningModel, onRestart, theme, onTheme, mode (resolved dark/light),
+  //             profiles: {names, active, onSwitch, onNew, onDelete}, version, onRepo, onAction(name) }
   import Toggle from './Toggle.svelte';
   import Slider from './Slider.svelte';
   import Select from './Select.svelte';
@@ -17,8 +17,9 @@
   import AppList from './AppList.svelte';
   import HighRes from './HighRes.svelte';
   import EngineRow from './EngineRow.svelte';
-  import ThemeRow from './ThemeRow.svelte';
-  import Profiles from '../general/Profiles.svelte';
+  import ModeSwitch from './ModeSwitch.svelte';
+  import ThemePicker from '../prefs/ThemePicker.svelte';
+  import ProfilePicker from '../prefs/ProfilePicker.svelte';
   import About from './About.svelte';
   let { row, value = undefined, values = {}, onChange = () => {}, onSet = () => {}, live = () => {}, extra = {}, disabled = false } = $props();
 
@@ -33,7 +34,7 @@
 {#if row.type === 'about'}
   <About version={extra.version} onRepo={extra.onRepo} />
 {:else}
-  <div class="row" class:disabled data-key={row.key}>
+  <div class="row" class:disabled class:wide={row.wide} data-key={row.key}>
     <div class="meta">
       {#if row.label}<div class="label" id={labelId}>{row.label}</div>{/if}
       {#if row.desc}<div class="desc" id={descId}>{row.desc}</div>{/if}
@@ -72,10 +73,13 @@
         <HighRes {value} {disabled} onChange={onChange} needsRestart={!!extra.mpoNeedsRestart}
                  labelledby={labelId} describedby={descId} tagId={rid + '-t'} />
       {:else if row.type === 'theme'}
-        <ThemeRow value={extra.theme ?? value ?? 'auto'} onChange={extra.onTheme ?? onChange}
-                  labelledby={labelId} describedby={descId} />
+        <ModeSwitch value={extra.theme ?? value ?? 'auto'} onChange={extra.onTheme ?? onChange}
+                    labelledby={labelId} describedby={descId} />
+      {:else if row.type === 'palette'}
+        <ThemePicker value={value ?? 'grey'} mode={extra.mode ?? 'dark'} onChange={onChange}
+                     labelledby={labelId} describedby={descId} />
       {:else if row.type === 'profiles'}
-        <Profiles {...(extra.profiles ?? {})} {disabled} labelledby={labelId} describedby={descId} />
+        <ProfilePicker {...(extra.profiles ?? {})} {disabled} labelledby={labelId} describedby={descId} />
       {:else if row.type === 'button'}
         <button type="button" class="chip" {disabled} id={valueId}
                 aria-labelledby={withValue} aria-describedby={descId}
@@ -88,6 +92,8 @@
 <style>
   .row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 24px; min-height: 62px; padding: 8px 18px; }
   .row.disabled { opacity: .45; }
+  .row.wide { grid-template-columns: minmax(0, 1fr); gap: 10px; padding-bottom: 12px; }   /* the control sits under the text, full width */
+  .row.wide .ctl { justify-content: flex-start; min-width: 0; }
   .meta { min-width: 0; }
   .label { font: 500 13.5px var(--s); color: var(--fg); }
   .desc { margin-top: 1px; font: 12.5px var(--s); color: var(--fg3); }

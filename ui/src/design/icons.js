@@ -33,6 +33,9 @@ export const paths = {
   minimize: '<path d="M3 8h10"/>',
   maximize: '<rect x="3.5" y="3.5" width="9" height="9"/>',
   close: '<path d="M3.5 3.5l9 9M12.5 3.5l-9 9"/>',
+  // Profile list (#318): the selected tick and the delete can.
+  check: '<path d="M3 8.5l3.25 3.25L13 4.75"/>',
+  trash: '<path d="M2.5 4h11M6 4V2.5h4V4M4 4l.75 9.5h6.5L12 4M6.75 6.5v4.5M9.25 6.5v4.5"/>',
 };
 
 export const iconNames = Object.keys(paths);

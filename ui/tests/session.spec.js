@@ -41,6 +41,10 @@ const sent = (page, type) => page.evaluate((t) => window.__msgs.filter((m) => m.
 const maxLevel = (page) => page.locator('[data-key="maxLevel"] input[type=range]');
 const go = (page, g) => page.locator('.side .it[data-g="' + g + '"]').click();
 const capsule = (page) => page.locator('.capsule');
+const pickProfile = async (page, name) => {   // open the profile dropdown, choose a profile
+  await page.locator('[data-key="__profiles"] .trig').click();
+  await page.getByRole('option', { name }).click();
+};
 
 test('session helpers: global keys never count, defaults fill both sides', () => {
   expect(GLOBAL_KEYS.has('uiTheme')).toBe(true);
@@ -195,7 +199,7 @@ test('switching profile with unsaved changes asks first; Cancel keeps everything
   await go(page, 'zoom');
   await maxLevel(page).fill('20');
   await go(page, 'prefs');
-  await page.locator('[data-key="__profiles"] select').selectOption('Gaming');
+  await pickProfile(page, 'Gaming');
   const dlg = page.getByRole('dialog', { name: 'Unsaved changes' });
   await expect(dlg.getByRole('button')).toHaveText(['Cancel', 'Discard', 'Save']);
   await dlg.getByRole('button', { name: 'Cancel' }).click();
@@ -208,7 +212,7 @@ test('profile switch prompt: Save saves then switches; Discard discards then swi
   await go(page, 'zoom');
   await maxLevel(page).fill('20');
   await go(page, 'prefs');
-  await page.locator('[data-key="__profiles"] select').selectOption('Gaming');
+  await pickProfile(page, 'Gaming');
   await page.getByRole('dialog').getByRole('button', { name: 'Save' }).click();
   await expect.poll(async () => (await sent(page, 'switchProfile')).length).toBe(1);
   const order = await page.evaluate(() => window.__msgs.map((m) => m.type).filter((t) => t === 'saveSession' || t === 'switchProfile'));
@@ -219,7 +223,7 @@ test('profile switch prompt: Save saves then switches; Discard discards then swi
 test('switching with nothing unsaved goes straight through', async ({ page }) => {
   await page.goto('/');
   await go(page, 'prefs');
-  await page.locator('[data-key="__profiles"] select').selectOption('Gaming');
+  await pickProfile(page, 'Gaming');
   await expect(page.getByRole('dialog')).toHaveCount(0);
   expect(await sent(page, 'switchProfile')).toHaveLength(1);
 });

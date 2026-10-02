@@ -220,5 +220,5 @@ test('the profile selector has an accessible name and the search box is a labell
   await page.goto('/');
   await expect(page.getByRole('searchbox', { name: 'Search settings' })).toBeVisible();
   await go(page, 'prefs');
-  await expect(page.locator('[data-key="__profiles"] select')).toHaveAccessibleName(/profile/i);
+  await expect(page.locator('[data-key="__profiles"] .trig')).toHaveAccessibleName(/profile/i);
 });

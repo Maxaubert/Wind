@@ -1,5 +1,5 @@
 <script>
-  // One modal prompt. buttons: [{ label, kind: 'primary' | '', onClick }]. Esc calls onEsc (omit to
+  // One modal prompt. buttons: [{ label, kind: 'primary' | 'danger' | '', onClick }]. Esc calls onEsc (omit to
   // make Esc do nothing). Focus moves into the box and Tab is held there by the dialog action.
   import { dialog } from '../lib/dialog.js';
   let { id = 'p', title = '', text = '', buttons = [], onEsc = undefined } = $props();
@@ -12,16 +12,16 @@
     <p id="{id}-d">{text}</p>
     <div class="mbtns">
       {#each buttons as b (b.label)}
-        <button type="button" class:primary={b.kind === 'primary'} onclick={b.onClick}>{b.label}</button>
+        <button type="button" class:primary={b.kind === 'primary'} class:danger={b.kind === 'danger'} onclick={b.onClick}>{b.label}</button>
       {/each}
     </div>
   </div>
 </div>
 
 <style>
-  .mbackdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, .55); display: flex;
+  .mbackdrop { position: fixed; inset: 0; background: var(--scrim); display: flex;
                align-items: center; justify-content: center; z-index: 50; }
-  .mbox { background: var(--card); color: var(--fg); border: 1px solid var(--line2); border-radius: 10px;
+  .mbox { background: var(--card); color: var(--fg); border: 1px solid var(--line2); border-radius: var(--rc);
           padding: 22px 24px; width: 440px; max-width: calc(100vw - 48px); box-shadow: var(--shadow); }
   .mbackdrop { animation: fade var(--dur) var(--ease); }
   .mbox { animation: pop var(--dur) var(--ease); }
@@ -30,8 +30,9 @@
   h2 { margin: 0 0 8px; font: 600 15px var(--s); }
   p { margin: 0 0 20px; font: 13px/1.5 var(--s); color: var(--fg2); }
   .mbtns { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
-  button { height: 32px; padding: 0 16px; border-radius: 999px; border: 1px solid var(--chipb);
+  button { height: 32px; padding: 0 16px; border-radius: var(--rp); border: 1px solid var(--chipb);
            background: var(--chip); color: var(--fg); font: 600 12.5px var(--s); }
   button:hover { border-color: var(--outline); }
   button.primary { background: var(--accent); border-color: var(--accent); color: var(--onaccent); }
+  button.danger { background: var(--dangerbtn); border-color: var(--dangerbtn); color: var(--dangerbtnfg); }
 </style>
