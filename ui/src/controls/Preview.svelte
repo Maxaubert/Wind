@@ -1,7 +1,7 @@
 <script>
   // Dev/test harness for the regrouped pages: every group's cards rendered with SettingRow and fake
   // values, no bridge. Served at /controls.html (not part of the production build).
-  // ?group=<id> picks the group (default zoom), ?theme=light the palette, ?model=<engine> the engine.
+  // ?group=<id> picks the group (default hotkeys), ?theme=light the palette, ?model=<engine> the engine.
   import '../design/tokens.css';
   import Card from '../shell/Card.svelte';
   import SettingRow from './SettingRow.svelte';
@@ -12,7 +12,7 @@
   const group = groups.find((g) => g.id === q.get('group')) || groups[0];
   const calls = (window.__calls = []);
 
-  let values = $state({ model: q.get('model') || 'hybrid', zoomInVk: '33', zoomInButton: '2', renderExclude: 'netflix.exe' });
+  let values = $state({ model: q.get('model') || 'hybrid', zoomInVk: '33', zoomInButton: '2', noSwallowApps: 'netflix.exe' });
   for (const r of groups.flatMap(groupRows)) {
     if (!r.key.startsWith('__') && !(r.key in values)) values[r.key] = r.def ?? '';
     for (const k of bindKeys(r)) if (!(k in values)) values[k] = '0';
@@ -37,7 +37,7 @@
     <Card caption={card.caption}>
       {#each card.rows.filter(visible) as r (r.key)}
         <SettingRow row={r} value={values[r.key]} {values} {extra}
-                    onChange={(v) => set(r.key, v)} live={(p) => { for (const k in p) set(k, p[k]); }} />
+                    onChange={(v) => set(r.key, v)} onSet={set} live={(p) => { for (const k in p) set(k, p[k]); }} />
       {/each}
     </Card>
   {/each}

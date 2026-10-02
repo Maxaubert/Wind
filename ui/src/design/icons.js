@@ -1,13 +1,11 @@
 // Terminal icon set from the final mockup (square caps, mitred joins), plus the few window
 // glyphs the shell needs. Static literals, injected with {@html iconSvg(name)}.
 export const paths = {
+  hotkeys: '<rect x="1.5" y="3.5" width="13" height="9"/><path d="M4 6.5h1M7.5 6.5h1M11 6.5h1M5 9.5h6"/>',
+  view: '<path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><rect x="6.5" y="6.5" width="3" height="3"/>',
+  screen: '<rect x="1.5" y="2.5" width="13" height="9"/><path d="M5.5 14h5M8 11.5V14"/>',
   zoom: '<circle cx="6.75" cy="6.75" r="4.75"/><path d="M10.25 10.25L14 14M4.75 6.75h4M6.75 4.75v4"/>',
-  move: '<path d="M8 1.5v13M1.5 8h13M6 1.5h4M6 14.5h4M1.5 6v4M14.5 6v4"/>',
-  cursor: '<path d="M3 1.5v11.5l3-3 2.5 5 2-1-2.5-5H12z"/>',
-  typing: '<path d="M5 2.5h6M5 13.5h6M8 2.5v11"/>',
-  colour: '<rect x="2.5" y="2.5" width="11" height="11"/><path d="M8 2.5h5.5v11H8z" fill="currentColor"/>',
   general: '<path d="M1.5 4.5h3M8.5 4.5h6M1.5 11.5h7M12.5 11.5h2"/><rect x="4.5" y="3" width="3" height="3"/><rect x="8.5" y="10" width="3" height="3"/>',
-  adv: '<path d="M2.5 4l4 4-4 4M8 12.5h5.5"/>',
   about: '<rect x="2.5" y="2.5" width="11" height="11"/><path d="M8 7v4.5M8 4.5v1"/>',
   search: '<circle cx="6.75" cy="6.75" r="4.75"/><path d="M10.25 10.25L14 14"/>',
   // Tray menu: the sidebar glyph and the quick-control icons (same drawings as the flyout, see
@@ -33,6 +31,7 @@ export const paths = {
   // Window chrome and brand.
   logo: '<path d="M2 5h8a2 2 0 1 0-2-2M2 8.5h11a2 2 0 1 1-2 2M2 12h6"/>',
   minimize: '<path d="M3 8h10"/>',
+  maximize: '<rect x="3.5" y="3.5" width="9" height="9"/>',
   close: '<path d="M3.5 3.5l9 9M12.5 3.5l-9 9"/>',
 };
 

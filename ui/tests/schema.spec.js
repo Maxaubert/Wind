@@ -2,9 +2,10 @@ import { test, expect } from '@playwright/test';
 import { readFileSync, readdirSync } from 'node:fs';
 import { groups, allRows, groupRows, bindKeys } from '../src/settings-schema.js';
 
-// Row keys of the pre-redesign schema (git show of settings-schema.js before #303). Every one must
-// appear exactly once in the regrouped schema, except showAdvanced: that UI-only row went away
-// (Advanced is always a group; the ini key stays parsed and ignored).
+// Row keys of the #303 schema. Every one must still appear exactly once after #318, except the two
+// REMOVED rows: the scroll-wheel row (the wheel is a Zoom in / Zoom out binding now) and "Never use
+// Render for" (renderExclude stays in the ini and the core, not in Settings).
+const REMOVED = ['__zoomWheel', 'renderExclude'];
 const OLD_KEYS = [
   '__zoomIn', '__zoomOut', '__zoomWheel', '__pan',  // was four rows (Pan left/right/up/down); their ini keys live in OLD_BIND_KEYS
   'noSwallowApps', 'maxLevel', 'zoomInSpeed', 'zoomOutSpeed', 'panSpeed', 'smoothZoomAccel',
@@ -17,13 +18,14 @@ const OLD_KEYS = [
 const OLD_BIND_KEYS = [
   'zoomInButton', 'zoomInVk', 'zoomInMods', 'zoomInButtonMods', 'zoomInButton2', 'zoomInVk2', 'zoomInMods2', 'zoomInButton2Mods',
   'zoomOutButton', 'zoomOutVk', 'zoomOutMods', 'zoomOutButtonMods', 'zoomOutButton2', 'zoomOutVk2', 'zoomOutMods2', 'zoomOutButton2Mods',
-  'zoomWheelMods', 'panLeftVk', 'panLeftMods', 'panRightVk', 'panRightMods', 'panUpVk', 'panUpMods', 'panDownVk', 'panDownMods',
+  'panLeftVk', 'panLeftMods', 'panRightVk', 'panRightMods', 'panUpVk', 'panUpMods', 'panDownVk', 'panDownMods',
   'hideCursorVk', 'hideCursorMods', 'cursorLockVk', 'cursorLockMods',
 ];
-const NEW_KEYS = ['__theme', '__profiles', '__diagnostics', '__openIni', 'trayPerf'];
+const NEW_KEYS = ['__theme', '__profiles', '__diagnostics', '__openIni', 'trayPerf', 'showAdvanced'];
 
 test('group ids, order and shape follow the spec', () => {
-  expect(groups.map((g) => g.id)).toEqual(['zoom', 'move', 'cursor', 'typing', 'colour', 'general', 'tray', 'advanced', 'about']);
+  expect(groups.map((g) => g.id)).toEqual(['hotkeys', 'zoom', 'view', 'screen', 'prefs', 'tray', 'about']);
+  expect(groups.filter((g) => g.bottom).map((g) => g.id)).toEqual(['prefs', 'tray', 'about']);   // below the divider
   for (const g of groups) {
     expect(typeof g.label).toBe('string');
     expect(typeof g.icon).toBe('string');
@@ -32,20 +34,53 @@ test('group ids, order and shape follow the spec', () => {
     for (const c of g.cards) { expect(typeof c.caption).toBe('string'); expect(c.rows.length).toBeGreaterThan(0); }
   }
   const cap = (id) => groups.find((g) => g.id === id).cards.map((c) => c.caption);
-  expect(cap('zoom')).toEqual(['Keys', 'Levels', 'Speed']);
-  expect(cap('move')).toEqual(['Keys', 'Panning']);
-  expect(cap('cursor')).toEqual(['Look', 'Keys']);
-  expect(cap('general')).toEqual(['Appearance', 'Profiles', 'Files']);
+  expect(cap('hotkeys')).toEqual(['Zoom', 'Extra keys']);
+  expect(cap('zoom')).toEqual(['Level and speed', 'Easing', 'Engine']);
+  expect(cap('view')).toEqual(['Speed', 'Pointer', 'Typing and focus']);
+  expect(cap('screen')).toEqual(['Screen light']);
+  expect(cap('prefs')).toEqual(['General', 'Troubleshooting']);
   expect(cap('tray')).toEqual(['']);
-  expect(cap('advanced')).toEqual(['Engine', 'Apps', 'Fine tuning']);
 });
 
 test('every row of the old schema appears exactly once, nothing else but the new rows', () => {
   const keys = allRows.map((r) => r.key);
   expect(new Set(keys).size).toBe(keys.length);
-  for (const k of OLD_KEYS) expect(keys.filter((x) => x === k), k).toHaveLength(1);
-  expect(keys).not.toContain('showAdvanced');
+  for (const k of OLD_KEYS.filter((x) => !REMOVED.includes(x))) expect(keys.filter((x) => x === k), k).toHaveLength(1);
+  for (const k of REMOVED) expect(keys, k).not.toContain(k);
   expect(keys.filter((k) => !OLD_KEYS.includes(k)).sort()).toEqual([...NEW_KEYS].sort());
+});
+
+test('a captioned section has two or more rows, and the advanced rows are the ones the spec names', () => {
+  for (const g of groups) for (const c of g.cards) if (c.caption) expect(c.rows.length, g.id + ' / ' + c.caption).toBeGreaterThanOrEqual(2);
+  // With the switch off every captioned section still keeps two or more rows (an adv row never carries a section alone).
+  for (const g of groups) for (const c of g.cards) if (c.caption) {
+    const base = c.rows.filter((r) => !r.adv && (!r.showIf || r.showIf.key !== 'mouseAlign'));
+    if (base.length) expect(base.length, g.id + ' / ' + c.caption + ' (advanced off)').toBeGreaterThanOrEqual(2);
+  }
+  expect(allRows.filter((r) => r.adv).map((r) => r.key).sort()).toEqual(
+    ['cursorSmoothing', 'engineAcrylic', 'engineDesktop', 'engineGame', 'engineOther', 'lockApps', 'model', 'noSwallowApps', 'smoothZoomAccel', 'smoothZoomRamp'].sort());
+  // Troubleshooting is never advanced, and the extra keys carry their switch key.
+  for (const k of ['diagnostics', '__diagnostics', '__openIni']) expect(allRows.find((r) => r.key === k).adv).toBeUndefined();
+  expect(Object.fromEntries(allRows.filter((r) => r.onKey).map((r) => [r.key, r.onKey]))).toEqual(
+    { __pan: 'panKeysOn', __hideCursor: 'hideCursorOn', __cursorLock: 'cursorLockOn' });
+  expect(allRows.find((r) => r.key === '__zoomIn').max).toBe(2);
+  expect(allRows.find((r) => r.key === '__zoomOut').max).toBe(2);
+});
+
+test('copy follows the ia07 table, with no em-dash and no old names', () => {
+  const label = (k) => allRows.find((r) => r.key === k).label;
+  expect(label('__hideCursor')).toBe('Hide pointer');
+  expect(label('panSpeed')).toBe('Arrow key speed');
+  expect(label('cursorSensitivity')).toBe('Mouse speed');
+  expect(label('mouseAlign')).toBe('Pointer position');
+  expect(label('trackAlign')).toBe('Text cursor position');
+  expect(label('smoothZoomAccel')).toBe('Soft start');
+  expect(label('smoothZoomRamp')).toBe('Soft start length');
+  expect(label('model')).toBe('Engine');
+  expect(label('noSwallowApps')).toBe('Share zoom keys with these apps');
+  expect(label('diagnostics')).toBe('Frame time logging');
+  expect(label('showAdvanced')).toBe('Show advanced settings');
+  for (const r of allRows) expect(JSON.stringify([r.label, r.desc]), r.key).not.toMatch(/flyout|\u2014/);
 });
 
 test('keybind rows keep every ini key they owned', () => {
@@ -57,24 +92,30 @@ test('keybind rows keep every ini key they owned', () => {
 test('rows land in the groups the spec names', () => {
   const where = (key) => groups.find((g) => groupRows(g).some((r) => r.key === key)).id;
   expect(where('maxLevel')).toBe('zoom');
-  expect(where('__zoomWheel')).toBe('zoom');
-  expect(where('__pan')).toBe('move');
-  expect(where('mouseAlign')).toBe('move');
-  expect(where('txSamplingMode')).toBe('cursor');
-  expect(where('__cursorLock')).toBe('cursor');
-  expect(where('trackAlign')).toBe('typing');
-  expect(where('colorDimPct')).toBe('colour');
-  expect(where('__profiles')).toBe('general');
-  expect(where('model')).toBe('advanced');
-  expect(where('lockApps')).toBe('advanced');
-  expect(where('zoomEaseOutMs')).toBe('advanced');
+  expect(where('zoomEaseOutMs')).toBe('zoom');
+  expect(where('model')).toBe('zoom');
+  expect(where('__zoomIn')).toBe('hotkeys');
+  expect(where('noSwallowApps')).toBe('hotkeys');
+  expect(where('__pan')).toBe('hotkeys');
+  expect(where('__hideCursor')).toBe('hotkeys');
+  expect(where('__cursorLock')).toBe('hotkeys');
+  expect(where('panSpeed')).toBe('view');
+  expect(where('mouseAlign')).toBe('view');
+  expect(where('txSamplingMode')).toBe('view');
+  expect(where('lockApps')).toBe('view');
+  expect(where('trackAlign')).toBe('view');
+  expect(where('colorDimPct')).toBe('screen');
+  expect(where('__profiles')).toBe('prefs');
+  expect(where('showAdvanced')).toBe('prefs');
+  expect(where('diagnostics')).toBe('prefs');
   expect(where('__about')).toBe('about');
 });
 
 test('per-window engines show only when the engine is Auto', () => {
-  for (const k of ['engineGame', 'engineAcrylic', 'engineDesktop', 'engineOther', 'renderExclude'])
+  for (const k of ['engineGame', 'engineAcrylic', 'engineDesktop', 'engineOther'])
     expect(allRows.find((r) => r.key === k).showIf).toEqual({ key: 'model', eq: 'hybrid' });
   expect(allRows.find((r) => r.key === 'model').type).toBe('engine');
+  expect(allRows.find((r) => r.key === 'mouseMarginPct').showIf).toEqual({ key: 'mouseAlign', eq: '1' });   // the margin only matters when the pointer is kept within the edges
 });
 
 test('schema and controls contain no em-dash', () => {
@@ -87,20 +128,26 @@ test('schema and controls contain no em-dash', () => {
 const css = (loc, prop) => loc.evaluate((el, p) => getComputedStyle(el).getPropertyValue(p), prop);
 const ctl = (page, key) => page.locator(`[data-key="${key}"]`);
 
-test('zoom page: keycaps, slider and the old keybind safety still work', async ({ page }) => {
-  await page.goto('/controls.html?group=zoom');
-  await expect(page.locator('h1')).toHaveText('Zoom');
+test('hotkeys page: one box per binding, "or" between them, and the old keybind safety still works', async ({ page }) => {
+  await page.goto('/controls.html?group=hotkeys');
+  await expect(page.locator('h1')).toHaveText('Hotkeys');
   const zin = ctl(page, '__zoomIn');
-  await expect(zin.locator('.keycap').first()).toHaveText('Mouse 5+PageUp');
-  await expect(zin.locator('.keycap.unbound')).toHaveText('Add key');
-  await expect(zin.locator('.sep')).toHaveText('or');
-  expect(await css(zin.locator('.keycap').first(), 'font-family')).toContain('Cascadia Mono');
-  expect(await css(zin.locator('.keycap.unbound'), 'background-color')).toBe('rgb(14, 14, 14)');
-  // capture a key on the empty slot: a live patch reaches the page
-  await zin.locator('.keycap.unbound').click();
+  // The harness holds a button AND a key in one slot (an older ini): two boxes, none left to add.
+  await expect(zin.locator('.kb .kc')).toHaveText(['Mouse 5', 'PageUp']);
+  await expect(zin.locator('.pl')).toHaveText('or');
+  await expect(zin.locator('.kc.ghost')).toHaveCount(0);
+  expect(await css(zin.locator('.kb .kc').first(), 'font-family')).toContain('Cascadia Mono');
+  // Zoom out holds nothing: one ghost, and recording a key on it reaches the page as a live patch.
+  const zout = ctl(page, '__zoomOut');
+  await expect(zout.locator('.kc.ghost')).toHaveText('Set key');
+  expect(await css(zout.locator('.kc.ghost'), 'background-color')).toBe('rgb(14, 14, 14)');
+  await zout.locator('.kc.ghost').click();
   await page.keyboard.press('F8');
-  expect((await page.evaluate(() => window.__calls)).some((c) => c[0] === 'zoomInVk2' && c[1] === '119')).toBe(true);
+  expect((await page.evaluate(() => window.__calls)).some((c) => c[0] === 'zoomOutVk' && c[1] === '119')).toBe(true);
+  await expect(zout.locator('.kb .kc')).toHaveText(['F8']);
+  await expect(zout.locator('.kc.ghost')).toHaveText('Add key');   // zoom rows take a second binding
   // slider: end-cap thumb and value readout
+  await page.goto('/controls.html?group=zoom');
   const sl = ctl(page, 'maxLevel').locator('input[type=range]');
   await expect(sl).toHaveAttribute('aria-valuetext', '12 times');
   expect(parseFloat(await css(sl, '--pct'))).toBeCloseTo(20.83, 1);
@@ -109,7 +156,7 @@ test('zoom page: keycaps, slider and the old keybind safety still work', async (
 });
 
 test('toggle and select drive their row value', async ({ page }) => {
-  await page.goto('/controls.html?group=typing');
+  await page.goto('/controls.html?group=view');
   const t = ctl(page, 'trackFocus').getByRole('switch');
   await expect(t).not.toBeChecked();
   await t.check({ force: true });
@@ -118,18 +165,18 @@ test('toggle and select drive their row value', async ({ page }) => {
   await expect(ctl(page, 'trackAlign').locator('select')).toHaveValue('1');
 });
 
-test('advanced: engine row offers Restart Wind, per-window rows follow Auto, app list manages apps', async ({ page }) => {
-  await page.goto('/controls.html?group=advanced');
+test('engine row offers Restart Wind and per-window rows follow Auto; the share-keys app list manages apps', async ({ page }) => {
+  await page.goto('/controls.html?group=zoom');
   await expect(ctl(page, 'engineGame')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Restart Wind' })).toHaveCount(0);
   await ctl(page, 'model').locator('select').selectOption('render');
   await expect(page.getByRole('button', { name: 'Restart Wind' })).toBeVisible();
   await expect(ctl(page, 'engineGame')).toHaveCount(0);
-  await expect(ctl(page, 'renderExclude')).toHaveCount(0);
   await page.getByRole('button', { name: 'Restart Wind' }).click();
   await ctl(page, 'model').locator('select').selectOption('hybrid');
   await expect(page.getByRole('button', { name: 'Restart Wind' })).toHaveCount(0);
-  const apps = ctl(page, 'renderExclude');
+  await page.goto('/controls.html?group=hotkeys');
+  const apps = ctl(page, 'noSwallowApps');
   await expect(apps.locator('.sum')).toHaveText('netflix.exe');
   await apps.getByRole('button', { name: /Manage/ }).click();
   await page.getByRole('button', { name: 'Add program...' }).click();
@@ -139,19 +186,24 @@ test('advanced: engine row offers Restart Wind, per-window rows follow Auto, app
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
   const calls = await page.evaluate(() => window.__calls);
-  expect(calls).toContainEqual(['renderExclude', 'netflix.exe,RDR2.exe']);
-  expect(calls).toContain('restart');
+  expect(calls).toContainEqual(['noSwallowApps', 'netflix.exe,RDR2.exe']);
 });
 
-test('cursor page: high resolution toggle and inspect keycap', async ({ page }) => {
-  await page.goto('/controls.html?group=cursor');
+test('view page: high resolution toggle; hotkeys page: inspect box and its switch', async ({ page }) => {
+  await page.goto('/controls.html?group=view');
   await ctl(page, 'txSamplingMode').getByRole('switch').check({ force: true });
   expect(await page.evaluate(() => window.__calls)).toEqual([['txSamplingMode', 1]]);
-  await expect(ctl(page, '__cursorLock').locator('.keycap')).toHaveText('Add key');
+  await page.goto('/controls.html?group=hotkeys');
+  const ins = ctl(page, '__cursorLock');
+  await expect(ins.locator('.kc.ghost')).toHaveText('Set key');
+  await expect(ins.getByRole('switch')).toBeChecked();   // extra keys ship on
+  await ins.getByRole('switch').uncheck({ force: true });
+  expect(await page.evaluate(() => window.__calls)).toEqual([['cursorLockOn', 0]]);
+  await expect(ins.locator('.kwrap')).toHaveClass(/off/);   // the binding dims, it is not lost
 });
 
-test('general page: theme, profiles and file buttons', async ({ page }) => {
-  await page.goto('/controls.html?group=general');
+test('preferences page: mode, profiles and file buttons', async ({ page }) => {
+  await page.goto('/controls.html?group=prefs');
   await ctl(page, '__theme').getByRole('radio', { name: 'Light' }).click();
   await ctl(page, '__diagnostics').getByRole('button', { name: 'Export' }).click();
   await ctl(page, '__openIni').getByRole('button', { name: 'Open' }).click();
@@ -173,7 +225,7 @@ test('about page shows the logo and link; light theme controls read on white', a
   await expect(page.getByText('Barely there. Everywhere.')).toBeVisible();
   await page.getByRole('button', { name: 'Star on GitHub' }).click();
   expect(await page.evaluate(() => window.__calls)).toEqual(['repo']);
-  await page.goto('/controls.html?group=colour&theme=light');
+  await page.goto('/controls.html?group=screen&theme=light');
   const sl = ctl(page, 'colorWarmPct').locator('input');
   expect(await css(sl, 'accent-color')).not.toBe('');
   expect(await css(ctl(page, 'colorWarmPct').locator('.val'), 'color')).toBe('rgb(10, 10, 10)');

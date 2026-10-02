@@ -33,13 +33,14 @@
   let saved = $state({});
   let themeMode = $state('auto');
   let prof = $state({ names: [], active: '' });
-  let activeId = $state('zoom');
+  let activeId = $state('hotkeys');   // Settings opens on Hotkeys
   let loaded = $state(false);
   let main = $state();
+  let maximized = $state(false);
+  let revealKey = $state('');   // an advanced row opened by a search result while the switch is off
 
-  const side = groups.filter((g) => g.id !== 'advanced' && g.id !== 'about' && g.id !== 'tray');
-  const trayGroup = groups.filter((g) => g.id === 'tray');
-  const expert = groups.filter((g) => g.id === 'advanced' || g.id === 'about');
+  const top = groups.filter((g) => !g.bottom);
+  const bottom = groups.filter((g) => g.bottom);   // below the sidebar divider
   const group = $derived(groups.find((g) => g.id === activeId) || groups[0]);
   const count = $derived(loaded ? changedKeys(values, saved).length : 0);
   const dirty = $derived(count > 0);
@@ -115,7 +116,7 @@
     const offs = [
       onMessage((m) => { if (m && m.type === 'configWriteFailed') writeError = m.key || 'a setting'; }),
       // Maximized: no window outline (the host reports the state on every resize).
-      onMessage((m) => { if (m && m.type === 'windowState') document.documentElement.toggleAttribute('data-maximized', !!m.maximized); }),
+      onMessage((m) => { if (m && m.type === 'windowState') { maximized = !!m.maximized; document.documentElement.toggleAttribute('data-maximized', maximized); } }),
       onMessage((m) => {
         if (m && m.type === 'restartFailed') {
           values = { ...values, model: runningModel }; setConfig('model', runningModel);
@@ -190,7 +191,7 @@
     if (kind === 'switch' || kind === 'create' || (kind === 'delete' && r.active !== prevActive)) await load();
     if (!r.ok) { profileError = r.error || 'Profile operation failed'; return; }
     if (kind === 'switch') announce('Switched to profile ' + payload.name + '. Settings reloaded.');
-    else if (kind === 'create') { announce('Created profile ' + payload.name + '. Settings reset to defaults.'); select('zoom'); }
+    else if (kind === 'create') { announce('Created profile ' + payload.name + '. Settings reset to defaults.'); select('hotkeys'); }
     else if (kind === 'rename') announce('Renamed profile to ' + payload.to);
     else if (kind === 'duplicate') announce('Duplicated profile ' + payload.name);
     else if (kind === 'delete') announce('Deleted profile ' + payload.name);
@@ -223,6 +224,7 @@
   function clearSearch() { query = ''; const i = searchInput(); if (i) i.value = ''; }
   async function jump(hit) {
     clearSearch();
+    revealKey = hit.adv ? hit.key : '';
     await select(hit.groupId);
     const row = main && main.querySelector('[data-key="' + hit.key + '"]');
     if (row) {
@@ -256,6 +258,10 @@
     else if (a === 'quitWind') requestQuit();
   }
   const visible = (r) => !r.showIf || String(values[r.showIf.key]) === String(r.showIf.eq);
+  // Advanced rows show only while the global switch is on, with one exception: the row a search result
+  // opened (revealKey) shows on its own and turns nothing on.
+  const advOn = $derived(Number(values.showAdvanced) === 1);
+  const shown = (r) => visible(r) && (!r.adv || advOn || r.key === revealKey);
   const extra = $derived({
     mpoNeedsRestart, runningModel, version: VERSION, theme: themeMode, onTheme, onRepo: openRepo,
     onAction, pick: pickExe,
@@ -274,10 +280,10 @@
 <svelte:window onkeydown={onKeydown} />
 
 <div class="wnd app" data-theme={effTheme}>
-  <TitleBar {themeMode} onTheme={onTheme} onMinimize={() => windowControl('minimize')} onClose={requestClose} />
+  <TitleBar {maximized} onMinimize={() => windowControl('minimize')} onMaximize={() => windowControl('maximize')} onClose={requestClose} />
   <div class="body">
-    <Sidebar groups={side} tray={trayGroup} {expert} active={searching ? '' : activeId} version={VERSION} {query} {onSearch}
-             onSelect={(id) => { clearSearch(); select(id); }} />
+    <Sidebar groups={top} {bottom} active={searching ? '' : activeId} version={VERSION} {query} {onSearch}
+             onSelect={(id) => { revealKey = ''; clearSearch(); select(id); }} />
     <main class="main" data-page={searching ? 'search' : group.id} bind:this={main} tabindex="-1" aria-label={group.label}>
       {#key searching ? '?search' : activeId}
       <div class="page" class:fade={navigated}>
@@ -286,12 +292,15 @@
       {:else}
       <Banner title={group.label} description={group.desc} icon={group.icon} />
       {#each group.cards as card, i (group.id + i)}
+        {@const rows = card.rows.filter(shown)}
+        {#if rows.length}
         <Card caption={card.caption}>
-          {#each card.rows.filter(visible) as r (r.key)}
+          {#each rows as r (r.key)}
             <SettingRow row={r} value={values[r.key]} {values} {extra} {live}
-                        onChange={(v) => change(r.key, v)} />
+                        onChange={(v) => change(r.key, v)} onSet={change} />
           {/each}
         </Card>
+        {/if}
       {/each}
       {#if group.custom === 'tray'}
         <TrayMenuPage {values} onChange={change} {announce} />

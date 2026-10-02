@@ -72,11 +72,11 @@ test('model: more than four enabled sliders read the first four as on, toggles a
 
 // ---- the tab -------------------------------------------------------------------------------------
 
-test('tab: TRAY section label, banner, performance card and both lists', async ({ page }) => {
+test('tab: below the sidebar divider, banner, performance card and both lists', async ({ page }) => {
   await page.goto('/');
-  await expect(page.locator('.side .grp2 .lbl')).toHaveText('Tray');
-  await expect(page.locator('.side .grp2 .it')).toHaveText(/Tray menu/);
-  await expect(page.locator('.side nav .it[data-g="tray"]')).toHaveCount(0);
+  await expect(page.locator('.side .lbl')).toHaveCount(0);   // no group labels
+  await expect(page.locator('.side nav.bottom .it')).toHaveText([/Preferences/, /Tray menu/, /About/]);
+  await expect(page.locator('.side nav:not(.bottom) .it[data-g="tray"]')).toHaveCount(0);
   await page.locator('.side .it[data-g="tray"]').click();
   await expect(page.locator('h1')).toHaveText('Tray menu');
   await expect(page.locator('.bdesc')).toHaveText('Choose what the tray menu shows, and in what order.');

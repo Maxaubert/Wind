@@ -1,19 +1,15 @@
 <script>
   import { iconSvg } from '../design/icons.js';
-  // Props only. themeMode is 'auto' | 'light' | 'dark'; onTheme receives the NEXT mode
-  // (cycle dark -> light -> auto, as in the mockup).
-  let { title = 'Wind Settings', themeMode = 'auto', onTheme = () => {}, onMinimize = () => {}, onClose = () => {} } = $props();
-  const LABEL = { auto: 'Auto', light: 'Light', dark: 'Dark' };
-  const ORDER = ['dark', 'light', 'auto'];
-  const next = () => ORDER[(ORDER.indexOf(themeMode) + 1) % ORDER.length];
+  // Props only. The bar carries the window buttons and nothing else: minimize, maximize (restore when
+  // maximized), close. The light/dark mode lives in Preferences.
+  let { title = 'Wind Settings', maximized = false, onMinimize = () => {}, onMaximize = () => {}, onClose = () => {} } = $props();
 </script>
 
 <header class="tb">
   <div class="brand"><span class="logo">{@html iconSvg('logo')}</span>{title}</div>
   <div class="sp"></div>
-  <button class="wc" type="button" data-theme-cycle title="Theme: {LABEL[themeMode]} (click to change)"
-          aria-label="Theme: {LABEL[themeMode]}" onclick={() => onTheme(next())}>{@html iconSvg(themeMode)}</button>
   <button class="wc" type="button" aria-label="Minimize" onclick={() => onMinimize()}>{@html iconSvg('minimize')}</button>
+  <button class="wc" type="button" aria-label={maximized ? 'Restore' : 'Maximize'} onclick={() => onMaximize()}>{@html iconSvg('maximize')}</button>
   <button class="wc" type="button" aria-label="Close" onclick={() => onClose()}>{@html iconSvg('close')}</button>
 </header>
 
@@ -29,6 +25,4 @@
   .wc { width: 46px; height: 38px; display: grid; place-items: center; color: var(--fg2); }
   .wc:hover { background: var(--hover); color: var(--fg); }
   .wc :global(svg.ic) { width: 15px; height: 15px; stroke-width: 1.75; }
-  /* The theme glyph is the mockup's `.wc .ic` (14px, 1.5 stroke); minimize and close stay 15px. */
-  .wc[data-theme-cycle] :global(svg.ic) { width: 14px; height: 14px; stroke-width: 1.5; }
 </style>

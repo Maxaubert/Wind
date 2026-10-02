@@ -17,6 +17,7 @@ export const KB_DEFAULTS = {
   panLeftVk: '0', panLeftMods: '0', panRightVk: '0', panRightMods: '0',
   panUpVk: '0', panUpMods: '0', panDownVk: '0', panDownMods: '0',
   cursorLockMods: '0', recenterMods: '0',
+  panKeysOn: '1', hideCursorOn: '1', cursorLockOn: '1',   // the extra-key switches (#318) ship on
 };
 
 // Defaults for every key the page shows. Applied to BOTH sides of the comparison, so a key the file

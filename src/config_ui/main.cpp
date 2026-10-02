@@ -418,6 +418,7 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
     } else if (type == "window") {
         std::string action = JsonField(j, "action");
         if (action == "minimize") ShowWindow(g_hwnd, SW_MINIMIZE);
+        else if (action == "maximize") ShowWindow(g_hwnd, IsZoomed(g_hwnd) ? SW_RESTORE : SW_MAXIMIZE);   // the title bar button toggles
         else if (action == "close") {
             // "force" is the Discard path from the confirm dialog: skip the guard, do not re-ask.
             if (JsonField(j, "force") == "1") { g_forceClose = true; g_dirty = false; }

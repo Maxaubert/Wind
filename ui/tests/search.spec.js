@@ -31,13 +31,20 @@ test('search is case-insensitive, word-prefix and covers label, description, cap
   // Mid-word fragments do not match (word-prefix only).
   expect(keys('axzoom')).toEqual([]);
   // Group label and card caption reach their rows.
-  expect(search(groups, 'moving').map((g) => g.id)).toContain('move');
-  expect(keys('panning')).toContain('panSpeed');
+  expect(search(groups, 'preferences').map((g) => g.id)).toContain('prefs');
+  expect(keys('typing')).toContain('trackCaret');
   // The single pan row is found by both words (#303).
   expect(keys('pan')).toContain('__pan');
   expect(keys('arrow')).toContain('__pan');
-  // Advanced rows are searchable, hidden-by-showIf ones included.
-  expect(search(groups, 'engine').some((g) => g.id === 'advanced')).toBe(true);
+  // Advanced rows are searchable (hidden-by-showIf ones too) and say so: the page shows a hit on its own.
+  const engine = search(groups, 'engine').flatMap((g) => g.rows);
+  expect(engine.find((r) => r.key === 'model').adv).toBe(true);
+  expect(engine.find((r) => r.key === 'engineGame').adv).toBe(true);
+  expect(search(groups, 'maximum').flatMap((g) => g.rows).every((r) => !r.adv)).toBe(true);
+  expect(keys('advanced')).toEqual(expect.arrayContaining(['model', 'noSwallowApps', 'lockApps', 'smoothZoomAccel']));
+  expect(keys('advanced')).not.toContain('maxLevel');
+  // The removed row is not in the index.
+  expect(keys('render')).not.toContain('renderExclude');
 });
 
 test('search files contain no em-dash', () => {
@@ -47,7 +54,7 @@ test('search files contain no em-dash', () => {
 
 test('typing shows grouped results, Enter jumps to the first, Esc clears', async ({ page }) => {
   await page.goto('/');
-  await expect(page.locator('h1')).toHaveText('Zoom');
+  await expect(page.locator('h1')).toHaveText('Hotkeys');
   await input(page).fill('cursor');
   await expect(page.locator('.res')).toBeVisible();
   await expect(page.locator('.res .gl').first()).toBeVisible();
@@ -65,23 +72,42 @@ test('typing shows grouped results, Enter jumps to the first, Esc clears', async
 
 test('Ctrl+F focuses the search box, which shows a visible focus ring', async ({ page }) => {
   await page.goto('/');
-  await expect(page.locator('h1')).toHaveText('Zoom');
+  await expect(page.locator('h1')).toHaveText('Hotkeys');
   await page.locator('main').click({ position: { x: 5, y: 5 } });
   await page.keyboard.press('Control+f');
   await expect(input(page)).toBeFocused();
   await expect(page.locator('.search')).toHaveCSS('border-top-color', 'rgb(242, 242, 242)');   // after its short fade
 });
 
-test('keyboard only: Tab reaches a result and Enter opens it, Advanced rows reachable', async ({ page }) => {
+test('keyboard only: Tab reaches a result and Enter opens it, hidden advanced rows reachable', async ({ page }) => {
   await page.goto('/');
   await input(page).fill('engine');
-  await expect(page.locator('.res .gl', { hasText: 'Advanced' })).toBeVisible();
+  await expect(page.locator('.res .gl', { hasText: 'Zoom' })).toBeVisible();
   await page.locator('.res .hit[data-hit="model"]').focus();
   await expect(page.locator('.res .hit[data-hit="model"]')).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.locator('.res')).toHaveCount(0);
-  await expect(page.locator('h1')).toHaveText('Advanced');
+  await expect(page.locator('h1')).toHaveText('Zoom');
   await expect(page.locator('[data-key="model"]')).toBeVisible();
+});
+
+test('a hidden advanced row is found, shown on its own, and turns nothing on', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('.side .it[data-g="zoom"]').click();
+  await expect(page.locator('[data-key="smoothZoomAccel"]')).toHaveCount(0);   // advanced is off
+  await input(page).fill('soft start');
+  await expect(page.locator('.res .hit[data-hit="smoothZoomAccel"]')).toBeVisible();
+  await expect(page.locator('.res .hit[data-hit="smoothZoomRamp"]')).toBeVisible();
+  await page.locator('.res .hit[data-hit="smoothZoomAccel"]').click();
+  await expect(page.locator('h1')).toHaveText('Zoom');
+  await expect(page.locator('[data-key="smoothZoomAccel"]')).toBeVisible();     // just that row
+  await expect(page.locator('[data-key="smoothZoomRamp"]')).toHaveCount(0);
+  await expect(page.locator('[data-key="model"]')).toHaveCount(0);
+  // The switch stayed off, and leaving the page drops the row again.
+  await page.locator('.side .it[data-g="prefs"]').click();
+  await expect(page.locator('[data-key="showAdvanced"]').getByRole('switch')).not.toBeChecked();
+  await page.locator('.side .it[data-g="zoom"]').click();
+  await expect(page.locator('[data-key="smoothZoomAccel"]')).toHaveCount(0);
 });
 
 test('no matches says so', async ({ page }) => {
