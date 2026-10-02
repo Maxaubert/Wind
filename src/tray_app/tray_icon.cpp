@@ -12,8 +12,9 @@ void AddIcon(HWND hwnd, HINSTANCE hInst) {
     g_nid.uID = 1;
     g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     g_nid.uCallbackMessage = WM_TRAY;
-    // Our logo badge at the shell's small-icon size (picks the 16px frame from the multi-size .ico
-    // for a crisp tray render). Fall back to the generic app icon if the resource can't be loaded.
+    // Our logo badge at the shell's small-icon size for this DPI (36 px at 225%); wind.ico carries an exact
+    // frame for every common scale, so nothing is resampled. Fall back to the generic app icon if the resource
+    // can't be loaded.
     if (!hInst) hInst = GetModuleHandleW(nullptr);
     if (!g_nid.hIcon)
         g_nid.hIcon = (HICON)LoadImageW(hInst, MAKEINTRESOURCEW(IDI_WIND), IMAGE_ICON,

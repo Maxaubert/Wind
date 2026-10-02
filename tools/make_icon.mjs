@@ -21,7 +21,10 @@ const require = createRequire(import.meta.url);
 // Resolve Playwright from the UI package (no top-level dependency on it).
 const { chromium } = require(resolve(root, 'ui', 'node_modules', 'playwright'));
 
-const SIZES = [256, 128, 64, 48, 40, 32, 24, 16];
+// Every size the shell asks for between 100% and 300% scaling (small icon 16 x scale, taskbar 24 x scale,
+// large icon 32 x scale), so Windows never resamples a neighbour frame: a 225% taskbar wants 54 px, the tray
+// 36 px, and scaling 64 or 40 down made both soft (Max 2026-10-03, #332).
+const SIZES = [256, 128, 96, 80, 72, 64, 60, 56, 54, 48, 42, 40, 36, 32, 30, 28, 24, 20, 16];
 // Taskbar variant: black badge + faint white edge outline (see the SVG header). The outline
 // is re-drawn per size: ~1 physical px at 16-32 px, shrinking toward 6/256 of the icon at
 // 128-256 px, so it never vanishes and never looks heavy. The stroke sits inside the badge
