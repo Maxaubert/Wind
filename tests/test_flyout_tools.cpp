@@ -1,6 +1,6 @@
-// The tray tools (issue #315): the main-engine dropdown (values, labels, restart rule, view), and the
-// chip rows (centring, the wide engine chip, wrapping, hit testing, arrow-key neighbours). All pure;
-// engine_dropdown.cpp / flyout_window.cpp wire them to Win32.
+// The tray tools (issue #315): the main-engine dropdown (values, labels, restart rule, view), the
+// segmented toggle group and engine dropdown (stretched geometry, hit testing, list alignment, arrow-key
+// navigation). All pure; engine_dropdown.cpp / flyout_window.cpp wire them to Win32.
 #include "../third_party/doctest.h"
 #include "../src/tray_app/flyout_model.h"
 #include "../src/tray_app/flyout_icons.h"
@@ -56,40 +56,41 @@ static View ViewWith(const char* toggles, const IniValues& extra = {}) {
     return BuildView(v, ParseTrayLayout(v), TrayStatus(), nullptr, 0, L"Default", true);
 }
 
-TEST_CASE("view: the engine chip shows the main engine as text, is wide and never ON") {
+TEST_CASE("view: the engine item is the dropdown, not a toggle segment, and shows the main engine") {
     const View v = ViewWith("engine", { { "model", "transform" } });
-    REQUIRE(v.toggles.size() == 1);
-    const ToggleView& t = v.toggles[0];
-    CHECK(t.kind == ChipKind::Engine);
-    CHECK(t.value == L"Transform");
-    CHECK_FALSE(t.on);
-    CHECK_FALSE(t.open);
-    CHECK(ChipSlots(t.kind) == 2);
-    CHECK(ToggleSlots(v) == std::vector<int>{ 2 });
+    CHECK(v.toggles.empty());
+    REQUIRE(v.hasEngine);
+    CHECK(v.engine.value == L"Transform");
+    CHECK_FALSE(v.engine.open);
+    CHECK(IsEngineKey("engine"));
+    CHECK_FALSE(IsEngineKey("trackCaret"));
 }
 
-TEST_CASE("view: a missing or unknown model reads Auto, and the chip is never disabled by it") {
-    CHECK(ViewWith("engine").toggles[0].value == L"Auto");
-    CHECK(ViewWith("engine", { { "model", "junk" } }).toggles[0].value == L"Auto");
-    CHECK(ViewWith("engine", { { "model", "magnify" } }).toggles[0].value == L"System");
-    CHECK(ViewWith("engine", { { "model", "render" } }).toggles[0].value == L"Render");
+TEST_CASE("view: a missing or unknown model reads Auto, and the dropdown is never disabled by it") {
+    CHECK(ViewWith("engine").engine.value == L"Auto");
+    CHECK(ViewWith("engine", { { "model", "junk" } }).engine.value == L"Auto");
+    CHECK(ViewWith("engine", { { "model", "magnify" } }).engine.value == L"System");
+    CHECK(ViewWith("engine", { { "model", "render" } }).engine.value == L"Render");
+    CHECK(ViewWith("engine", { { "model", "junk" } }).hasEngine);
 }
 
-TEST_CASE("view: plain toggles stay one slot with no value text") {
-    const View v = ViewWith("trackCaret,engine,keepEdges");
-    REQUIRE(v.toggles.size() == 3);
-    CHECK(ToggleSlots(v) == std::vector<int>{ 1, 2, 1 });
-    CHECK(v.toggles[0].value.empty());
+TEST_CASE("view: with the engine item off there is no dropdown; toggles keep their order around it") {
+    const View none = ViewWith("trackCaret,keepEdges");
+    CHECK_FALSE(none.hasEngine);
+    CHECK(none.toggles.size() == 2);
+    const View mixed = ViewWith("trackCaret,engine,keepEdges");
+    REQUIRE(mixed.toggles.size() == 2);
+    CHECK(mixed.toggles[0].key == "trackCaret");
+    CHECK(mixed.toggles[1].key == "keepEdges");
+    CHECK(mixed.hasEngine);
 }
 
-TEST_CASE("view: the engine item has a name and icons for the chip and its chevrons") {
+TEST_CASE("view: the engine item has a name and icons for the dropdown and its chevrons") {
     const ToggleSpec* s = FindToggleSpec("engine");
     REQUIRE(s != nullptr);
     CHECK(IconPath(s->icon) != nullptr);
     CHECK(IconPath("chevdown") != nullptr);
     CHECK(IconPath("chevup") != nullptr);
-    CHECK(ChipKindOf("engine") == ChipKind::Engine);
-    CHECK(ChipKindOf("trackCaret") == ChipKind::Plain);
 }
 
 TEST_CASE("view: keys of the removed tools (fixLock, fixPass, pause) are not items any more") {
@@ -99,177 +100,241 @@ TEST_CASE("view: keys of the removed tools (fixLock, fixPass, pause) are not ite
     CHECK(IconPath("lock") == nullptr);
     CHECK(IconPath("pass") == nullptr);
     CHECK(IconPath("pause") == nullptr);
-    // A user's ini that still lists them shows only the known chips.
+    // A user's ini that still lists them shows only the known toggles.
     const View v = ViewWith("fixLock,trackCaret,pause,fixPass");
     REQUIRE(v.toggles.size() == 1);
     CHECK(v.toggles[0].key == "trackCaret");
 }
 
-// ---------------------------------------------------------------- chip rows: centring
+// ---------------------------------------------------------------- segmented group (mockup v02)
 
-static int Left(const Geometry& g) { return kBorder; }
-static int Right(const Geometry& g) { return g.width - kBorder; }
-// Space left of the first chip and right of the last chip of the row that contains chip `first`.
-static void RowMargins(const Geometry& g, size_t first, size_t last, int* l, int* r) {
-    *l = g.chip[first].l - Left(g);
-    *r = Right(g) - g.chip[last].r;
-}
+static const int kContentL = kBorder + kPadX, kContentR = kWidth - kBorder - kPadX;   // 21 .. 279
 
-TEST_CASE("centring: 3 chips sit centred, equal space left and right") {
-    const Geometry g = ComputeGeometry(false, 0, std::vector<int>{ 1, 1, 1 }, 40);
-    REQUIRE(g.chip.size() == 3);
-    int l = 0, r = 0;
-    RowMargins(g, 0, 2, &l, &r);
-    CHECK(l == r);
-    CHECK(l == 67);
-    CHECK(g.chip[1].l - g.chip[0].r == kChipGap);
-    for (const IRect& c : g.chip) { CHECK(c.w() == kChipW); CHECK(c.h() == kChipH); }
-}
-
-TEST_CASE("centring: 4 chips fill the row, still centred") {
-    const Geometry g = ComputeGeometry(false, 0, std::vector<int>{ 1, 1, 1, 1 }, 40);
-    int l = 0, r = 0;
-    RowMargins(g, 0, 3, &l, &r);
-    CHECK(l == r);
-    CHECK(l == 38);
-    CHECK(g.chip[3].t == g.chip[0].t);          // one row
-}
-
-TEST_CASE("centring: 2 and 1 chips are centred too") {
-    for (int n : { 1, 2 }) {
-        const Geometry g = ComputeGeometry(false, 0, std::vector<int>((size_t)n, 1), 40);
-        int l = 0, r = 0;
-        RowMargins(g, 0, (size_t)n - 1, &l, &r);
-        CHECK(l == r);
-    }
-}
-
-TEST_CASE("centring: 5 chips wrap to 4 + 1, and the last partial row is centred on its own") {
-    const Geometry g = ComputeGeometry(false, 0, std::vector<int>(5, 1), 40);
-    REQUIRE(g.chip.size() == 5);
-    int l = 0, r = 0;
-    RowMargins(g, 0, 3, &l, &r);
-    CHECK(l == r);
-    CHECK(g.chip[4].t - g.chip[0].t == kChipRowH);
-    RowMargins(g, 4, 4, &l, &r);
-    CHECK(l == r);                                // the lone chip: equal space both sides
-    CHECK(g.chip[4].l == 1 + (298 - kChipW) / 2);
-    for (const IRect& c : g.chip) CHECK(c.w() == kChipW);
-}
-
-TEST_CASE("centring: 7 chips are 4 + 3, both rows centred, one more row of height") {
-    const Geometry g = ComputeGeometry(false, 0, std::vector<int>(7, 1), 40);
-    int l = 0, r = 0;
-    RowMargins(g, 4, 6, &l, &r);
-    CHECK(l == r);
-    const Geometry one = ComputeGeometry(false, 0, std::vector<int>(4, 1), 40);
-    CHECK(g.height - one.height == kChipRowH);
-}
-
-TEST_CASE("centring: the wide engine chip spans two slots, 2 * chipW + gap") {
-    const Geometry g = ComputeGeometry(false, 0, std::vector<int>{ 1, 1, 1, 2 }, 40);
-    REQUIRE(g.chip.size() == 4);
-    CHECK(g.chip[3].w() == 2 * kChipW + kChipGap);
-    CHECK(g.chip[3].h() == kChipH);
-    // 1+1+1+2 = 5 slots: the engine chip does not fit the first row, so it wraps and is centred alone.
-    CHECK(g.chip[3].t - g.chip[0].t == kChipRowH);
-    int l = 0, r = 0;
-    RowMargins(g, 3, 3, &l, &r);
-    CHECK(l == r);
-    RowMargins(g, 0, 2, &l, &r);
-    CHECK(l == r);
-}
-
-TEST_CASE("centring: the engine chip beside two chips fills the row exactly (2 + 1 + 1 slots)") {
-    const Geometry g = ComputeGeometry(false, 0, std::vector<int>{ 1, 1, 2 }, 40);
-    CHECK(g.chip[2].t == g.chip[0].t);
-    int l = 0, r = 0;
-    RowMargins(g, 0, 2, &l, &r);
-    CHECK(l == r);
-    CHECK(l == 38);
-    CHECK(g.chip[2].l - g.chip[1].r == kChipGap);
-}
-
-TEST_CASE("centring: the engine chip alone is centred") {
-    const Geometry g = ComputeGeometry(false, 0, std::vector<int>{ 2 }, 40);
-    int l = 0, r = 0;
-    RowMargins(g, 0, 0, &l, &r);
-    CHECK(l == r);
-    CHECK(g.chip[0].w() == 106);
-}
-
-TEST_CASE("centring: every row's margins match for any mix of chips, at every count") {
-    const std::vector<std::vector<int>> mixes = {
-        { 2, 1, 1 }, { 1, 2, 1 }, { 1, 1, 2 }, { 2, 2 }, { 2, 2, 2 }, { 1, 2, 2, 1 }, { 1, 1, 1, 1, 2, 1 } };
-    for (const auto& m : mixes) {
-        const Geometry g = ComputeGeometry(false, 0, m, 40);
-        size_t i = 0;
-        while (i < g.chip.size()) {
-            size_t j = i;
-            while (j + 1 < g.chip.size() && g.chip[j + 1].t == g.chip[i].t) ++j;
-            int l = 0, r = 0;
-            RowMargins(g, i, j, &l, &r);
-            CHECK(l == r);
-            CHECK(l >= 0);
-            i = j + 1;
+TEST_CASE("segments: 3, 2 and 1 toggles stretch to fill the content width exactly") {
+    for (int n : { 1, 2, 3 }) {
+        const Geometry g = ComputeGeometry(false, 0, n, 40);
+        REQUIRE((int)g.seg.size() == n);
+        CHECK(g.seg.front().l == kContentL);
+        CHECK(g.seg.back().r == kContentR);
+        CHECK(g.segBar.l == kContentL);
+        CHECK(g.segBar.r == kContentR);
+        for (int i = 0; i < n; ++i) {
+            CHECK(g.seg[i].h() == kSegH);
+            CHECK(g.seg[i].t == g.segBar.t);
+            if (i > 0) CHECK(g.seg[i].l - g.seg[i - 1].r == kSegLine);    // exactly the 1 px separator
         }
     }
 }
 
-TEST_CASE("centring: a row never holds more than four slots") {
-    const Geometry g = ComputeGeometry(false, 0, std::vector<int>{ 1, 1, 1, 1, 1, 1, 1, 1, 1 }, 40);
-    for (size_t i = 0; i < g.chip.size(); ++i) {
-        int inRow = 0;
-        for (const IRect& c : g.chip) if (c.t == g.chip[i].t) ++inRow;
-        CHECK(inRow <= kChipsPerRow);
+TEST_CASE("segments: widths differ by at most one pixel (258 - separators split evenly)") {
+    const Geometry g3 = ComputeGeometry(false, 0, 3, 40);
+    CHECK(g3.seg[0].w() + g3.seg[1].w() + g3.seg[2].w() + 2 == 258);
+    CHECK(g3.seg[0].w() == 86);
+    CHECK(g3.seg[1].w() == 85);
+    CHECK(g3.seg[2].w() == 85);
+    const Geometry g2 = ComputeGeometry(false, 0, 2, 40);
+    CHECK(g2.seg[0].w() == 129);
+    CHECK(g2.seg[1].w() == 128);
+    const Geometry g1 = ComputeGeometry(false, 0, 1, 40);
+    CHECK(g1.seg[0].w() == 258);
+}
+
+TEST_CASE("segments: LayoutSegments handles any count and an empty request") {
+    CHECK(LayoutSegments(0, 0, 100, 0, 32, 1).empty());
+    for (int n = 1; n <= 9; ++n) {
+        const auto r = LayoutSegments(n, 10, 268, 5, 32, 1);
+        REQUIRE((int)r.size() == n);
+        CHECK(r.front().l == 10);
+        CHECK(r.back().r == 268);
+        for (const auto& s : r) CHECK(s.r - s.l >= 1);
     }
 }
 
-TEST_CASE("layout: no chips, no chip rows; the window with 3 chips keeps its height") {
-    CHECK(ComputeGeometry(true, 2, std::vector<int>{ 1, 1, 1 }, 40).height == 283);
-    CHECK(ComputeGeometry(false, 0, std::vector<int>{}, 40).chip.empty());
+TEST_CASE("segments: no toggles means no group and no height for it") {
+    const Geometry none = ComputeGeometry(false, 2, 0, 40);
+    CHECK(none.seg.empty());
+    CHECK(none.segBar.w() == 0);
+    CHECK(none.engine.w() == 0);
+    const Geometry one = ComputeGeometry(false, 2, 1, 40);
+    CHECK(one.height - none.height == kCtlTop + kSegH + (kQsPadBottom - kQsPadY));
 }
 
-// ---------------------------------------------------------------- chip rows: hit testing
+// ---------------------------------------------------------------- engine dropdown geometry
 
-TEST_CASE("hit test: the whole wide chip is one hit, the gap and the margins are none") {
-    const Geometry g = ComputeGeometry(false, 0, std::vector<int>{ 1, 1, 2 }, 40);
-    const IRect& e = g.chip[2];
+TEST_CASE("dropdown: full content width, 32 px, 8 px below the group") {
+    const Geometry g = ComputeGeometry(false, 2, 3, true, 40);
+    REQUIRE(g.engine.w() > 0);
+    CHECK(g.engine.l == kContentL);
+    CHECK(g.engine.r == kContentR);
+    CHECK(g.engine.h() == kSegH);
+    CHECK(g.engine.t - g.segBar.b == kCtlGap);
+    CHECK(g.engine.t - g.segBar.b == 8);
+}
+
+TEST_CASE("dropdown: with no toggles it sits where the group would, with no stray gap") {
+    const Geometry g = ComputeGeometry(false, 2, 0, true, 40);
+    CHECK(g.seg.empty());
+    CHECK(g.engine.t == g.sliderRow.back().b + kCtlTop);
+    CHECK(g.engine.l == kContentL);
+    CHECK(g.engine.r == kContentR);
+}
+
+TEST_CASE("dropdown: with the engine item off the row is not there and the window is shorter by one row") {
+    const Geometry with = ComputeGeometry(true, 2, 3, true, 40);
+    const Geometry without = ComputeGeometry(true, 2, 3, false, 40);
+    CHECK(without.engine.w() == 0);
+    CHECK(with.height - without.height == kCtlGap + kSegH);
+    CHECK(without.height == 288);
+    CHECK(with.height == 328);
+}
+
+TEST_CASE("dropdown: neither toggles nor engine leaves only sliders and the bottom row") {
+    const Geometry g = ComputeGeometry(true, 2, 0, false, 40);
+    CHECK(g.seg.empty());
+    CHECK(g.engine.w() == 0);
+    CHECK(g.qs.h() == kQsPadY + 2 * kRowH + kQsPadY);
+}
+
+TEST_CASE("layout: the control area never overlaps a slider row or the bottom bar") {
+    const Geometry g = ComputeGeometry(true, 2, 3, true, 40);
+    CHECK(g.seg[0].t >= g.sliderRow.back().b + kCtlTop);
+    CHECK(g.engine.b + kQsPadBottom == g.qs.b);
+    CHECK(g.qs.b + 1 == g.bar.t);                 // one rule between them
+}
+
+TEST_CASE("view: the geometry follows the view (toggles, engine) with no zoom readout row") {
+    const View v = ViewWith("trackCaret,trackFocus,engine");
+    const Geometry g = ComputeGeometry(v, 40);
+    CHECK(g.seg.size() == 2);
+    CHECK(g.engine.w() > 0);
+    CHECK(g.height == ComputeGeometry(v.perf, (int)v.sliders.size(), 2, true, 40).height);
+}
+
+// ---------------------------------------------------------------- hit testing
+
+TEST_CASE("hit test: every pixel of a segment hits it, the separator and the margins hit nothing") {
+    const Geometry g = ComputeGeometry(false, 0, 3, true, 40);
+    const int my = g.seg[0].t + 16;
+    for (size_t i = 0; i < g.seg.size(); ++i) {
+        CHECK(HitTest(g, g.seg[i].l, my) == Hit{ HitKind::Toggle, (int)i });
+        CHECK(HitTest(g, g.seg[i].r - 1, my) == Hit{ HitKind::Toggle, (int)i });
+        CHECK(HitTest(g, g.seg[i].l, g.seg[i].t) == Hit{ HitKind::Toggle, (int)i });
+        CHECK(HitTest(g, g.seg[i].l, g.seg[i].b - 1) == Hit{ HitKind::Toggle, (int)i });
+        CHECK(HitTest(g, g.seg[i].l, g.seg[i].b).kind != HitKind::Toggle);
+    }
+    CHECK(HitTest(g, g.seg[0].r, my).kind == HitKind::None);           // the 1 px separator
+    CHECK(HitTest(g, g.seg[1].r, my).kind == HitKind::None);
+    CHECK(HitTest(g, g.seg[0].l - 1, my).kind == HitKind::None);       // the left margin
+    CHECK(HitTest(g, g.seg[2].r, my).kind == HitKind::None);           // the right margin
+}
+
+TEST_CASE("hit test: the whole dropdown is one hit, the 8 px gap above it is none") {
+    const Geometry g = ComputeGeometry(false, 0, 3, true, 40);
+    const IRect& e = g.engine;
     const int my = (e.t + e.b) / 2;
-    CHECK(HitTest(g, e.l + 1, my) == Hit{ HitKind::Chip, 2 });                 // the icon end
-    CHECK(HitTest(g, (e.l + e.r) / 2, my) == Hit{ HitKind::Chip, 2 });         // the text
-    CHECK(HitTest(g, e.r - 1, my) == Hit{ HitKind::Chip, 2 });                 // the chevron end
+    CHECK(HitTest(g, e.l, my) == Hit{ HitKind::Engine, 0 });           // the icon end
+    CHECK(HitTest(g, (e.l + e.r) / 2, my) == Hit{ HitKind::Engine, 0 });
+    CHECK(HitTest(g, e.r - 1, my) == Hit{ HitKind::Engine, 0 });       // the chevron end
+    CHECK(HitTest(g, e.l, e.t) == Hit{ HitKind::Engine, 0 });
+    CHECK(HitTest(g, e.l, e.b - 1) == Hit{ HitKind::Engine, 0 });
+    CHECK(HitTest(g, e.l, e.t - 1).kind == HitKind::None);             // the gap between group and dropdown
+    CHECK(HitTest(g, e.l - 1, my).kind == HitKind::None);
     CHECK(HitTest(g, e.r, my).kind == HitKind::None);
-    CHECK(HitTest(g, e.l - 1, my) == Hit{ HitKind::None, -1 });                // the gap before it
-    CHECK(HitTest(g, g.chip[0].l - 3, my).kind == HitKind::None);              // the left margin
-    CHECK(HitTest(g, g.chip[0].l, g.chip[0].t) == Hit{ HitKind::Chip, 0 });
-    CHECK(HitTest(g, g.chip[1].l, g.chip[1].t) == Hit{ HitKind::Chip, 1 });
 }
 
-TEST_CASE("hit test: chips of a centred partial row are hit where they are drawn") {
-    const Geometry g = ComputeGeometry(false, 0, std::vector<int>(5, 1), 40);
-    const IRect& c = g.chip[4];
-    CHECK(HitTest(g, (c.l + c.r) / 2, (c.t + c.b) / 2) == Hit{ HitKind::Chip, 4 });
-    CHECK(HitTest(g, g.chip[0].l, c.t + 2).kind == HitKind::None);             // where a left-aligned chip used to be
+TEST_CASE("hit test: no dropdown, no hit where it would be") {
+    const Geometry with = ComputeGeometry(false, 0, 3, true, 40);
+    const Geometry without = ComputeGeometry(false, 0, 3, false, 40);
+    const int x = (with.engine.l + with.engine.r) / 2, y = (with.engine.t + with.engine.b) / 2;
+    CHECK(HitTest(with, x, y).kind == HitKind::Engine);
+    CHECK(HitTest(without, x, y).kind != HitKind::Engine);
 }
 
-// ---------------------------------------------------------------- chip rows: keyboard
+// ---------------------------------------------------------------- engine list aligned to the trigger
 
-TEST_CASE("keyboard: Left and Right walk the chips in order and stop at the ends") {
-    const Geometry g = ComputeGeometry(false, 0, std::vector<int>{ 1, 1, 2, 1 }, 40);
-    CHECK(ChipNeighbor(g, 0, +1, 0) == 1);
-    CHECK(ChipNeighbor(g, 3, +1, 0) == 3);
-    CHECK(ChipNeighbor(g, 0, -1, 0) == 0);
-    CHECK(ChipNeighbor(g, 2, -1, 0) == 1);
+TEST_CASE("engine list: as wide as the dropdown and left-aligned with it") {
+    const Geometry g = ComputeGeometry(false, 0, 3, true, 40);
+    const ListGeometry lg = ComputeList(kEngineCount, 50, 0, g.engine.w());
+    CHECK(lg.width == g.engine.w());
+    CHECK(lg.width == 258);
+    CHECK(lg.row.size() == (size_t)kEngineCount);
+    for (const IRect& r : lg.row) CHECK(r.r <= lg.width - kBorder);
+    // On screen (96 dpi): the flyout at x = 600, the list opens under the field.
+    const IRect work{ 0, 0, 1920, 1040 };
+    const IRect anchor{ 600 + g.engine.l, 300 + g.engine.t, 600 + g.engine.r, 300 + g.engine.b };
+    const Placement p = PlaceList(anchor, work, lg.width, lg.height, 4, true);
+    CHECK(p.x == anchor.l);
+    CHECK(p.x + lg.width == anchor.r);
+    CHECK(p.y == anchor.b + 4);                                         // under it
 }
 
-TEST_CASE("keyboard: Up and Down move to the nearest chip of the row above or below") {
-    // 1,1,2 | 1  : row one has three chips (the third is the wide engine chip), row two has one
-    const Geometry g = ComputeGeometry(false, 0, std::vector<int>{ 1, 1, 2, 1 }, 40);
-    REQUIRE(g.chip[3].t > g.chip[0].t);
-    CHECK(ChipNeighbor(g, 0, 0, +1) == 3);
-    CHECK(ChipNeighbor(g, 2, 0, +1) == 3);
-    CHECK(ChipNeighbor(g, 3, 0, -1) == 1);   // the row-two chip is centred, nearest above is the second chip or the engine
-    CHECK(ChipNeighbor(g, 3, 0, +1) == 3);   // no row below: stays
-    CHECK(ChipNeighbor(g, 0, 0, -1) == 0);   // no row above: stays
+TEST_CASE("engine list: flips above the dropdown when there is no room below, still aligned") {
+    const IRect work{ 0, 0, 1920, 1040 };
+    const IRect anchor{ 621, 960, 879, 992 };
+    const Placement p = PlaceList(anchor, work, 258, 150, 4, true);
+    CHECK(p.x == 621);
+    CHECK(p.y == anchor.t - 4 - 150);
+}
+
+TEST_CASE("engine list: an unpinned list still sizes to its text (the profile list)") {
+    CHECK(ComputeList(2, 40).width == kListMinW);
+    CHECK(ComputeList(2, 40, 0, 0).width == kListMinW);
+}
+
+// ---------------------------------------------------------------- keyboard
+
+TEST_CASE("keyboard: focus order puts the dropdown after the segments and before the bottom row") {
+    const Geometry g = ComputeGeometry(true, 2, 3, true, 40);
+    CHECK(FocusCount(g) == 2 + 3 + 1 + 3);
+    CHECK(FocusHit(g, 4) == Hit{ HitKind::Toggle, 2 });
+    CHECK(FocusHit(g, 5) == Hit{ HitKind::Engine, 0 });
+    CHECK(FocusHit(g, 6) == Hit{ HitKind::Profile, 0 });
+    for (int i = 0; i < FocusCount(g); ++i) CHECK(FocusIndex(g, FocusHit(g, i)) == i);
+    const Geometry none = ComputeGeometry(true, 2, 3, false, 40);
+    CHECK(FocusIndex(none, Hit{ HitKind::Engine, 0 }) == -1);
+    CHECK(FocusCount(none) == 2 + 3 + 3);
+}
+
+TEST_CASE("keyboard: every focus rect of the control area lies inside its drawn rectangle") {
+    const Geometry g = ComputeGeometry(true, 2, 3, true, 40);
+    CHECK(FocusRect(g, Hit{ HitKind::Toggle, 1 }).l == g.seg[1].l);
+    CHECK(FocusRect(g, Hit{ HitKind::Engine, 0 }).r == g.engine.r);
+}
+
+TEST_CASE("keyboard: Left and Right walk the segments and stop at the ends") {
+    const Geometry g = ComputeGeometry(false, 0, 3, true, 40);
+    CHECK(SegNeighbor(g, 0, +1) == 1);
+    CHECK(SegNeighbor(g, 1, +1) == 2);
+    CHECK(SegNeighbor(g, 2, +1) == 2);
+    CHECK(SegNeighbor(g, 0, -1) == 0);
+    CHECK(SegNeighbor(g, 2, -1) == 1);
+}
+
+TEST_CASE("keyboard: Down goes group, dropdown, bottom row; Up goes back, then to the last slider") {
+    const Geometry g = ComputeGeometry(true, 2, 3, true, 40);
+    CHECK(VerticalNeighbor(g, Hit{ HitKind::Toggle, 1 }, +1) == Hit{ HitKind::Engine, 0 });
+    const Hit down = VerticalNeighbor(g, Hit{ HitKind::Engine, 0 }, +1);       // the bottom button nearest its centre
+    CHECK((down.kind == HitKind::Profile || down.kind == HitKind::Settings || down.kind == HitKind::Quit));
+    CHECK(VerticalNeighbor(g, Hit{ HitKind::Profile, 0 }, +1) == Hit{ HitKind::Profile, 0 });   // bottom: stays
+    CHECK(VerticalNeighbor(g, Hit{ HitKind::Profile, 0 }, -1) == Hit{ HitKind::Engine, 0 });
+    CHECK(VerticalNeighbor(g, Hit{ HitKind::Quit, 0 }, -1) == Hit{ HitKind::Engine, 0 });
+    CHECK(VerticalNeighbor(g, Hit{ HitKind::Engine, 0 }, -1).kind == HitKind::Toggle);
+    CHECK(VerticalNeighbor(g, Hit{ HitKind::Toggle, 0 }, -1) == Hit{ HitKind::Slider, 1 });
+}
+
+TEST_CASE("keyboard: Up from the dropdown lands on the segment nearest to it (the middle one)") {
+    const Geometry g = ComputeGeometry(false, 0, 3, true, 40);
+    CHECK(VerticalNeighbor(g, Hit{ HitKind::Engine, 0 }, -1) == Hit{ HitKind::Toggle, 1 });
+}
+
+TEST_CASE("keyboard: rows that are not there are skipped") {
+    const Geometry noEng = ComputeGeometry(true, 2, 3, false, 40);       // group, bottom
+    CHECK(VerticalNeighbor(noEng, Hit{ HitKind::Toggle, 0 }, +1).kind == HitKind::Profile);
+    CHECK(VerticalNeighbor(noEng, Hit{ HitKind::Settings, 0 }, -1).kind == HitKind::Toggle);
+    const Geometry noGroup = ComputeGeometry(true, 2, 0, true, 40);       // dropdown, bottom
+    CHECK(VerticalNeighbor(noGroup, Hit{ HitKind::Engine, 0 }, -1) == Hit{ HitKind::Slider, 1 });
+    CHECK(VerticalNeighbor(noGroup, Hit{ HitKind::Quit, 0 }, -1) == Hit{ HitKind::Engine, 0 });
+    const Geometry onlyBar = ComputeGeometry(false, 0, 0, false, 40);     // bottom only
+    CHECK(VerticalNeighbor(onlyBar, Hit{ HitKind::Profile, 0 }, -1) == Hit{ HitKind::Profile, 0 });
+    CHECK(VerticalNeighbor(onlyBar, Hit{ HitKind::Profile, 0 }, +1) == Hit{ HitKind::Profile, 0 });
 }

@@ -1,11 +1,11 @@
-# Tray tools: main-engine dropdown and centred chip rows (issue #315), 2026-10-02
+# Tray tools: main-engine dropdown and segmented toggle group (issue #315), 2026-10-02
 
 Follow-up to the tray flyout (#313, PR #314). Stacks on PR #314. This file was rewritten on
 2026-10-02 after Max reviewed the first build and changed the scope (see "Decisions").
 
 ## Scope
-1. A wide **engine dropdown** in the toggle row that picks the MAIN engine.
-2. **Centred chip rows**, at most four chip slots per row.
+1. An **engine dropdown** under the toggle group that picks the MAIN engine.
+2. The toggles as **one stretched segmented group** (mockup v02, see "Layout v02" below).
 
 Everything else in the flyout (sliders, performance panel, placement, theme, keyboard focus ring only,
 no tooltips) is unchanged.
@@ -16,11 +16,13 @@ no tooltips) is unchanged.
 - It sets the main engine ini key `model`, with the options, order and labels of the Settings
   "Magnifier engine" row (`ui/src/settings-schema.js`): **Auto** (`hybrid`), **Render**, **Transform**,
   **System** (`magnify`). A missing or unknown value reads as Auto, like the core.
-- Look: a WIDE chip spanning two chip slots (`2 * kChipW + gap` = 106 DIP): engine glyph at the left,
-  the current value as text ("Transform"), a small chevron at the right (it flips up while the list is
-  open). A hairline border at rest makes it read as a field. It never takes the ON colour.
-- Click or Enter/Space opens the existing list popup under the chip (above it when there is no room
-  below), active option checked, no caption. Up/Down/Home/End/Enter/Esc work as in the profile list.
+- Look (v02): a full content-width, 32 DIP field in `--off`: engine glyph at the left, the current value
+  as mono 12 text ("Transform") next to it, a chevron at the right that flips up while the list is open,
+  and a 1 px `--onb` inset ring while open. It never takes the ON colour.
+- Click or Enter/Space opens the existing list popup under the field, EXACTLY as wide as the field and
+  aligned to its left and right edges (above it when there is no room below), active option checked, no
+  caption. Up/Down/Home/End/Enter/Esc work as in the profile list. If the `engine` item is off in the
+  tray layout the row is not shown at all.
 - **Pick = write and restart, no prompt.** `model` is read once at Wind's launch, so a pick of a
   different option writes `model` to the live ini and relaunches `Wind.exe` (the new instance evicts the
   running one through the single-instance handshake, the same path Settings' Restart Wind and the tray's
@@ -36,13 +38,24 @@ no tooltips) is unchanged.
 - Code: pure options/labels/index/pick rule in `src/tray_app/flyout_tools.h` (tested), Win32 in
   `src/tray_app/engine_dropdown.cpp`.
 
-## 2. Centred chip rows
-- A chip takes one slot (48 DIP) or two (the wide engine chip). A row holds at most four slots; a chip
-  that does not fit starts the next row.
-- Each row is horizontally centred in the content area (equal space left and right), the last partial
-  row included. `LayoutChips` in `flyout_tools.h` is the single source for the geometry; hit testing and
-  the keyboard focus rect use the same rectangles. Up/Down in the chip rows move to the nearest chip of
-  the row above or below.
+## 2. Layout v02: segmented toggle group (Max picked mockup v02, 2026-10-02)
+Reference: `wind-settings-mockups/keepers/tray/v02.html` (pixel truth, dark and light).
+- The enabled toggles are ONE group: a full content-width (258 DIP) bar, 32 DIP tall, 8 DIP radius on the
+  OUTER ends only, segments joined by a 1 px separator (`--segline`: #000 dark, #fff light). Each segment
+  shows the toggle icon centred; off = `--off`, on = `--on` (calm teal) with the `--onic` icon, hover
+  `--offh` / `--onh`. Segments STRETCH to fill the width whatever the count (3, 2 or 1; Max chose
+  stretched over fixed-size): `LayoutSegments` in `flyout_tools.h`, leftover pixels go one each to the
+  first segments. Hidden entirely when no toggle is enabled.
+- The engine dropdown sits 8 DIP below the group (6 DIP below the last slider, 14 DIP of padding under
+  the last control). `ComputeGeometry` gives `segBar`, `seg[]` and `engine`; hit testing, the focus rect
+  and the painter all use those rectangles.
+- NO zoom readout in the control area (Max: the zoom is already in the performance panel). The
+  mockup's second column (`2.4x` reset button) is deliberately not built.
+- Keyboard: Left/Right move inside the group (stop at the ends); Up/Down move between the group, the
+  dropdown and the bottom row (`VerticalNeighbor`; Up from the group goes to the last slider, and on a
+  slider Up/Down keep adjusting the value, Tab leaves it). Focus ring is keyboard-only, no tooltips.
+- Removed with the old chip rows: `LayoutChips`, `ChipNeighbor`, the 4-slots-per-row wrap and the 48 x 32
+  centred chips, and the press-scale on toggles.
 
 ## Removed
 Max rejected the earlier ideas from this issue, so none of them exist: **Mouse lock** (`fixLock`),
@@ -58,18 +71,21 @@ Settings page model (Playwright).
 1. The engine item is the MAIN engine (`model`), a real dropdown, not per window kind; picking restarts
    Wind automatically. It is a session change exactly like Settings.
 2. Remove Mouse lock, Pass keys and Pause Wind entirely.
-3. Chip rows are centred, at most four slots per row; the engine chip uses two.
+3. (Superseded by 4.) Chip rows were centred, at most four slots per row; the engine chip used two.
    ("items must be centred, max 4 but not aligned, more to the left than the right", and "the engine
    button does not work, it is supposed to be a dropdown not a button".)
+4. Mockup v02 (2026-10-02): toggles are one stretched segmented group, the engine is a full-width
+   dropdown below it, no zoom readout.
 
 ## Testing
 doctest (`tests/test_flyout_tools.cpp`, `tests/test_flyout.cpp`, `tests/test_tray_items.cpp`): option
 values and labels match Settings and are accepted by `ParseConfig`; model to option mapping; pick rule;
-centring for 1, 2, 3, 4, 5 (wrap), 7 chips and every mix with the wide chip (equal margins on every
-row); the wide chip is 2 slots wide; hit testing of the wide chip, the gap and the margins; arrow-key
-neighbours; dead keys dropped. Playwright (`ui/tests/tray.spec.js`): the Tray menu tab lists the engine
-item and none of the removed ones. Render test: `WindTray.exe --render-test out.png --toggles
-trackCaret,keepEdges,engine --model transform [--engine-open] [--light] [--dpi 192]`, and `--engine-list
---model transform` for the open list.
-Manual: tray, engine chip, pick Transform: Wind restarts, the chip reads Transform, Settings shows the
+3, 2 and 1 toggles stretch to the full content width with 1 px separators; no toggles and no engine
+leave no rows; the dropdown is full width, 32 DIP, 8 DIP under the group; hit tests of segments,
+separators, gaps and margins; the engine list is as wide as, and aligned to, the dropdown; focus order
+and arrow-key navigation; dead keys dropped. Playwright (`ui/tests/tray.spec.js`): the Tray menu tab
+lists the engine item and none of the removed ones. Render test: `WindTray.exe --render-test out.png
+--toggles trackCaret,keepEdges,engine --model transform [--engine-open] [--light] [--dpi 192]`
+(`--hover toggle:1|engine|settings|quit|profile`), and `--engine-list --model transform` for the open list.
+Manual: tray, engine dropdown, pick Transform: Wind restarts, the dropdown reads Transform, Settings shows the
 unsaved capsule; Discard returns to the saved engine.

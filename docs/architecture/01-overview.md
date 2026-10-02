@@ -117,15 +117,15 @@ Since 0.17.0 (issue #313) the tray's menu is a custom flyout window, not an HMEN
 (`src/tray_app/flyout_window.cpp`, painted with Direct2D by `flyout_draw.cpp`; menus cannot host
 sliders). It opens above the icon, closes on deactivation, Esc or a second icon click, and follows
 `uiTheme`. Top to bottom: an optional Performance header (zoom, fps, frame sparkline from the shared
-block), up to four quick sliders, one row of icon chips, and a bottom row (profile, Settings, Quit).
+block), up to four quick sliders, one segmented group of icon toggles with the engine dropdown below it, and a bottom row (profile, Settings, Quit).
 What it shows is user-chosen in Settings > Tray menu and stored as global (non-profile) ini keys
 `trayPerf`, `traySliders`, `traySliderOrder`, `trayToggles`, `trayToggleOrder`, parsed by the pure
 `src/tray_items.*` (shared by WindTray and the config host). Eligible sliders: Warmth, Brightness,
 Max zoom, Zoom-in speed, Zoom-out speed, Pan speed, Pan smoothing, Release glide. Eligible toggles:
-Follow the text cursor, Follow keyboard focus, and Keep within the edges (one chip that writes
-`mouseAlign` and `trackAlign` together). Chip and slider changes write the live ini with the same
+Follow the text cursor, Follow keyboard focus, and Keep within the edges (one segment that writes
+`mouseAlign` and `trackAlign` together). Toggle and slider changes write the live ini with the same
 atomic helper as the settings host and are session changes, like every Settings change. Spec:
-`docs/superpowers/specs/2026-10-01-tray-flyout-design.md`. Since 0.18.0 (issue #315) the toggle row can also hold a wide engine dropdown (two chip slots: engine glyph, the current choice as text, a chevron). It picks the main engine (`model`: Auto, Render, Transform, System, the same options as the Settings row). `model` is read once at launch, so a pick writes the live ini and restarts the Wind core at once with no prompt, exactly like Settings' Restart Wind: only the live ini changes (a session change, the Save capsule shows it) and `session.keep` makes the restarted Wind keep it. Chip rows hold at most four slots and every row is horizontally centred, the last partial row included. Spec: `docs/superpowers/specs/2026-10-02-tray-tools-design.md`. Known gap: no UI Automation names yet.
+`docs/superpowers/specs/2026-10-01-tray-flyout-design.md`. Since 0.18.0 (issue #315) the tray can also hold an engine dropdown (full width under the toggle group: engine glyph, the current choice as text, a chevron; layout v02, 2026-10-02). It picks the main engine (`model`: Auto, Render, Transform, System, the same options as the Settings row). `model` is read once at launch, so a pick writes the live ini and restarts the Wind core at once with no prompt, exactly like Settings' Restart Wind: only the live ini changes (a session change, the Save capsule shows it) and `session.keep` makes the restarted Wind keep it. The toggle segments stretch to the full content width (3, 2 or 1). Spec: `docs/superpowers/specs/2026-10-02-tray-tools-design.md`. Known gap: no UI Automation names yet.
 
 Two refinements keep this simple channel honest. First, the ini path is never hardcoded:
 `wind::ResolveIniPath()` (`src/config_path.h`) probes whether the exe directory is writable, so a

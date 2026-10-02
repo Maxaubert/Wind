@@ -3,11 +3,11 @@
 // references in docs/design/tray-2026-10 without a desktop session or a running Wind.
 //   --light            the light theme (default dark)
 //   --dpi N            scale (96 = 1x, 192 = 2x like the reference PNGs)
-//   --hover K[:I]      hover state: chip:1, settings, quit, profile
-//   --tools            adds the #315 engine dropdown (the wide chip) to the toggle row
+//   --hover K[:I]      hover state: toggle:1, engine, settings, quit, profile
+//   --tools            adds the #315 engine dropdown under the toggle group
 //   --toggles a,b,c    the enabled toggle keys, in order (trackCaret, trackFocus, keepEdges, engine)
 //   --model M          the main engine shown on the dropdown: hybrid (Auto), render, transform, magnify (System)
-//   --engine-open      the dropdown chip drawn open (chevron up, hot)
+//   --engine-open      the dropdown drawn open (chevron up, ring)
 //   --engine-list      renders the engine list popup instead of the flyout (the active row is --model)
 // Fake data: zoom 7.4x at 144 fps, Warmth 40%, Brightness 72%, all three toggles shown (text cursor
 // on, focus off, keep-within-edges on), profile "Default", Performance on.
@@ -43,7 +43,8 @@ int RunRenderTest(const wchar_t*) {
         else if (a == L"--dpi" && i + 1 < argc) dpi = (std::max)(96, _wtoi(argv[++i]));
         else if (a == L"--hover" && i + 1 < argc) {
             const std::wstring k = argv[++i];
-            if (k.rfind(L"chip", 0) == 0) hover = { Flyout::HitKind::Chip, k.size() > 5 ? _wtoi(k.c_str() + 5) : 0 };
+            if (k.rfind(L"toggle", 0) == 0) hover = { Flyout::HitKind::Toggle, k.size() > 7 ? _wtoi(k.c_str() + 7) : 0 };
+            else if (k == L"engine") hover = { Flyout::HitKind::Engine, 0 };
             else if (k == L"settings") hover = { Flyout::HitKind::Settings, 0 };
             else if (k == L"quit") hover = { Flyout::HitKind::Quit, 0 };
             else if (k == L"profile") hover = { Flyout::HitKind::Profile, 0 };
@@ -65,8 +66,8 @@ int RunRenderTest(const wchar_t*) {
     // A steady 6.94 ms history (the fps and "6.9 ms" readouts come from it).
     for (int i = 0; i < TickStats::kCap; ++i) ticks[i] = 6.94f;
     Flyout::View v = Flyout::BuildView(ini, ParseTrayLayout(ini), st, ticks, TickStats::kCap, L"Default", !light);
-    for (auto& t : v.toggles) if (t.kind == Flyout::ChipKind::Engine) t.open = engineOpen;
-    if (engineList) {   // the engine chip's open list, built exactly as the live flyout builds it
+    if (v.hasEngine) v.engine.open = engineOpen;
+    if (engineList) {   // the engine dropdown's open list, built exactly as the live flyout builds it
         Flyout::ListView lv;
         lv.dark = !light;
         int widest = 0;
@@ -75,7 +76,7 @@ int RunRenderTest(const wchar_t*) {
             widest = (std::max)(widest, Flyout::MeasureProfileText(lv.names.back()));
         }
         lv.active = Flyout::EngineIndex(model);
-        const Flyout::ListGeometry lg = Flyout::ComputeList(Flyout::kEngineCount, widest);
+        const Flyout::ListGeometry lg = Flyout::ComputeList(Flyout::kEngineCount, widest, 0, Flyout::ComputeGeometry(v, 0).engine.w());
         return Flyout::RenderListToPng(lv, lg, dpi, out.c_str()) ? 0 : 1;
     }
     v.hover = hover;

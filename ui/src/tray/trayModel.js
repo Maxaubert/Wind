@@ -19,9 +19,9 @@ export const SLIDERS = [
 export const TOGGLES = [
   { key: 'trackCaret', icon: 'ftc', name: 'Follow the text cursor', desc: 'Follow the caret while you type.' },
   { key: 'trackFocus', icon: 'ffk', name: 'Follow keyboard focus', desc: 'Follow keyboard focus around the screen.' },
-  // One chip for both alignment settings (mouseAlign + trackAlign); the flyout writes both.
+  // One segment for both alignment settings (mouseAlign + trackAlign); the flyout writes both.
   { key: 'keepEdges', icon: 'edges', name: 'Keep within the edges', desc: 'Pointer, text cursor and focus stay within the edges.' },
-  // #315. A wide dropdown in the tray (two chip slots) that picks the main engine; a change restarts Wind.
+  // #315. A full-width dropdown under the toggle group in the tray that picks the main engine; a change restarts Wind.
   { key: 'engine', icon: 'engine', name: 'Magnifier engine', desc: 'A dropdown to switch the engine. Wind restarts to apply it.' },
 ];
 export const KINDS = {

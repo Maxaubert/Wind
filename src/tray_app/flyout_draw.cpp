@@ -32,7 +32,7 @@ struct Shared {
     ComPtr<ID2D1Factory> d2d;
     ComPtr<IDWriteFactory> dw;
     ComPtr<IWICImagingFactory> wic;
-    ComPtr<IDWriteTextFormat> sans28, mono12, mono12b, mono11;
+    ComPtr<IDWriteTextFormat> sans28, mono12, mono12b;
     std::vector<BYTE> auroraDark, auroraLight;   // premultiplied BGRA, 1920 x 300
     UINT aw = 0, ah = 0;
     std::map<std::string, ComPtr<ID2D1PathGeometry>> icons;
@@ -44,8 +44,8 @@ D2D1_COLOR_F Col(unsigned rgb, float a = 1.f) {
 }
 
 struct Theme {
-    D2D1_COLOR_F menu, menub, fg, fg2, fg3, rule, hl, glyph, teal, lift, scrim, chipb, band, track;
-    D2D1_COLOR_F off, offh, offic, onic, on, onh, onb;
+    D2D1_COLOR_F menu, menub, fg, fg2, fg3, rule, hl, glyph, teal, lift, scrim, band, track;
+    D2D1_COLOR_F off, offh, offic, onic, on, onh, onb, segline;
     float aurora;       // --ac
     bool dark;
 };
@@ -57,17 +57,17 @@ Theme MakeTheme(bool dark) {
         t.menu = Col(0x000000); t.menub = Col(0x333333); t.fg = Col(0xf2f2f2); t.fg2 = Col(0xd0d0d0);
         t.fg3 = Col(0xb4b6ba); t.rule = Col(0x303236); t.hl = Col(0x2d2d2d); t.glyph = Col(0xb0b0b0);
         t.teal = Col(0x2fbfa5); t.lift = Col(0x0b0b0b); t.scrim = Col(0x000000, .55f);
-        t.chipb = Col(0x3a3a3a); t.band = Col(0x0a0a0a); t.track = Col(0x3d3d3d);
+        t.band = Col(0x0a0a0a); t.track = Col(0x3d3d3d);
         t.off = Col(0x303033); t.offh = Col(0x3b3b3f); t.offic = Col(0xc8cad0); t.onic = Col(0xa9ece0);
-        t.on = Col(0x1f5650); t.onh = Col(0x266560); t.onb = Col(0x2fbfa5, .4f);
+        t.on = Col(0x1f5650); t.onh = Col(0x266560); t.onb = Col(0x2fbfa5, .4f); t.segline = Col(0x000000);
         t.aurora = .62f;
     } else {
         t.menu = Col(0xffffff); t.menub = Col(0xd9d9d9); t.fg = Col(0x0a0a0a); t.fg2 = Col(0x2e2e2e);
         t.fg3 = Col(0x45484d); t.rule = Col(0xc6c9ce); t.hl = Col(0xececec); t.glyph = Col(0x555555);
         t.teal = Col(0x087a67); t.lift = Col(0xf6f7f8); t.scrim = Col(0xffffff, .78f);
-        t.chipb = Col(0xcdcdcd); t.band = Col(0xf1f2f4); t.track = Col(0xd0d3d6);
+        t.band = Col(0xf1f2f4); t.track = Col(0xd0d3d6);
         t.off = Col(0xe5e6e8); t.offh = Col(0xdadbde); t.offic = Col(0x3d4147); t.onic = Col(0x0a5a4d);
-        t.on = Col(0xbfe2db); t.onh = Col(0xb2d9d1); t.onb = Col(0x087a67, .4f);
+        t.on = Col(0xbfe2db); t.onh = Col(0xb2d9d1); t.onb = Col(0x087a67, .4f); t.segline = Col(0xffffff);
         t.aurora = .85f;
     }
     return t;
@@ -195,7 +195,6 @@ bool DrawInit() {
     if (!MakeFormat(sans, 28.f, DWRITE_FONT_WEIGHT_MEDIUM, g_s.sans28)) return false;
     if (!MakeFormat(mono, 12.f, DWRITE_FONT_WEIGHT_NORMAL, g_s.mono12)) return false;
     if (!MakeFormat(mono, 12.f, DWRITE_FONT_WEIGHT_SEMI_BOLD, g_s.mono12b)) return false;
-    if (!MakeFormat(mono, 11.f, DWRITE_FONT_WEIGHT_NORMAL, g_s.mono11)) return false;   // the engine dropdown's value
     LoadAurora();
     g_s.ok = true;
     return true;
@@ -203,7 +202,7 @@ bool DrawInit() {
 
 void DrawShutdown() {
     g_s.icons.clear();
-    g_s.sans28.Reset(); g_s.mono12.Reset(); g_s.mono12b.Reset(); g_s.mono11.Reset();
+    g_s.sans28.Reset(); g_s.mono12.Reset(); g_s.mono12b.Reset();
     g_s.wic.Reset(); g_s.dw.Reset(); g_s.d2d.Reset();
     g_s.auroraDark.clear(); g_s.auroraLight.clear();
     g_s.ok = false;
@@ -251,6 +250,30 @@ struct Painter::Impl {
         br->SetColor(c);
         rt->DrawRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(r.left + .5f, r.top + .5f, r.right - .5f, r.bottom - .5f),
                                                    rad - .5f, rad - .5f), br.Get(), 1.f);
+    }
+    // A rounded rectangle with a radius per corner (the toggle group rounds only its outer ends).
+    ComPtr<ID2D1PathGeometry> cornerPath(const D2D1_RECT_F& r, float tl, float tr, float brr, float bl) {
+        ComPtr<ID2D1PathGeometry> pg;
+        ComPtr<ID2D1GeometrySink> sk;
+        if (FAILED(g_s.d2d->CreatePathGeometry(&pg)) || FAILED(pg->Open(&sk))) return nullptr;
+        auto arc = [&](float x, float y, float rad) {
+            if (rad > 0.f)
+                sk->AddArc(D2D1::ArcSegment(D2D1::Point2F(x, y), D2D1::SizeF(rad, rad), 0.f,
+                                            D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
+        };
+        sk->BeginFigure(D2D1::Point2F(r.left + tl, r.top), D2D1_FIGURE_BEGIN_FILLED);
+        sk->AddLine(D2D1::Point2F(r.right - tr, r.top));    arc(r.right, r.top + tr, tr);
+        sk->AddLine(D2D1::Point2F(r.right, r.bottom - brr)); arc(r.right - brr, r.bottom, brr);
+        sk->AddLine(D2D1::Point2F(r.left + bl, r.bottom));  arc(r.left, r.bottom - bl, bl);
+        sk->AddLine(D2D1::Point2F(r.left, r.top + tl));     arc(r.left + tl, r.top, tl);
+        sk->EndFigure(D2D1_FIGURE_END_CLOSED);
+        sk->Close();
+        return pg;
+    }
+    // Segment `i` of `n`: the outer corners of the first and last segment are rounded, the joins are square.
+    void segRadii(size_t i, size_t n, float rad, float out[4]) const {
+        out[0] = out[3] = (i == 0) ? rad : 0.f;             // tl, bl
+        out[1] = out[2] = (i + 1 == n) ? rad : 0.f;         // tr, br
     }
     D2D1_RECT_F R(const IRect& r) const { return D2D1::RectF((float)r.l, (float)r.t, (float)r.r, (float)r.b); }
 
@@ -448,38 +471,40 @@ void Painter::Impl::drawQuick(const View& v, const Geometry& g) {
         fillRound(D2D1::RectF(x - 3.f, mid - 5.f, x, mid + 5.f), 1.5f, th.fg);
         text(s.text, g_s.mono12.Get(), R(g.sliderValue[i]), th.fg, DWRITE_TEXT_ALIGNMENT_TRAILING);
     }
-    for (size_t i = 0; i < v.toggles.size() && i < g.chip.size(); ++i) {
+    // The toggle group (mockup v02): one bar, the segments stretched to the full width, a 1 px
+    // separator between them (--segline), rounded only at the outer ends. Off = --off, on = --on.
+    const AnimView& a = v.anim;
+    const size_t nseg = (std::min)(v.toggles.size(), g.seg.size());
+    for (size_t i = 0; i < nseg; ++i) {
         const ToggleView& t = v.toggles[i];
-        const bool hot = v.hover.kind == HitKind::Chip && v.hover.index == (int)i;
-        const D2D1_RECT_F r = R(g.chip[i]);
-        const AnimView& a = v.anim;
-        const bool anim = a.active && i < a.chipHot.size() && i < a.chipOn.size() && i < a.chipPress.size();
+        const bool hot = v.hover.kind == HitKind::Toggle && v.hover.index == (int)i;
+        const D2D1_RECT_F r = R(g.seg[i]);
+        const bool anim = a.active && i < a.chipHot.size() && i < a.chipOn.size();
         // Cross-faded: hover mixes the *h colours in, the ON amount mixes the on colours in.
         const float h = anim ? a.chipHot[i] : (hot ? 1.f : 0.f);
-        if (t.kind == ChipKind::Engine) {
-            // The main-engine DROPDOWN (#315): a wide field, not a button. A resting hairline border,
-            // the engine glyph at the left, the current choice as text and a chevron at the right
-            // (which flips while its list is open). It never reads as ON.
-            const float hh = t.open ? 1.f : h;
-            if (anim) pressBegin(r, t.open ? 0.f : a.chipPress[i]);
-            fillRound(r, 8.f, Mix(th.off, th.offh, hh));
-            ring(r, 8.f, WithAlpha(th.chipb, .55f + .45f * hh));
-            const D2D1_COLOR_F ink = Mix(th.offic, th.fg, hh);
-            icon(t.icon, r.left + 8.f, (r.top + r.bottom) / 2.f - 8.f, ink, 1.75f);
-            text(t.value, g_s.mono11.Get(), D2D1::RectF(r.left + 27.f, r.top, r.right - 16.f, r.bottom),
-                 Mix(th.fg2, th.fg, hh), DWRITE_TEXT_ALIGNMENT_LEADING);
-            icon(t.open ? "chevup" : "chevdown", r.right - 4.f - 16.f, (r.top + r.bottom) / 2.f - 8.f, ink, 1.5f);
-            if (anim) pressEnd();
-            continue;
-        }
         const float o = anim ? a.chipOn[i] : (t.on ? 1.f : 0.f);
-        if (anim) pressBegin(r, a.chipPress[i]);
-        fillRound(r, 8.f, Mix(Mix(th.off, th.offh, h), Mix(th.on, th.onh, h), o));
-        if (o > 0.f) ring(r, 8.f, WithAlpha(th.onb, th.onb.a * o));
-        if (h > 0.f && o < 1.f) ring(r, 8.f, WithAlpha(th.chipb, h * (1.f - o)));
+        float rad[4];
+        segRadii(i, nseg, (float)kSegRadius, rad);
+        if (auto pg = cornerPath(r, rad[0], rad[1], rad[2], rad[3])) {
+            br->SetColor(Mix(Mix(th.off, th.offh, h), Mix(th.on, th.onh, h), o));
+            rt->FillGeometry(pg.Get(), br.Get());
+        }
+        if (i > 0) fill(D2D1::RectF(r.left - (float)kSegLine, r.top, r.left, r.bottom), th.segline);
         icon(t.icon, (r.left + r.right) / 2.f - 8.f, (r.top + r.bottom) / 2.f - 8.f,
              Mix(Mix(th.offic, th.fg, h), th.onic, o), 1.75f);
-        if (anim) pressEnd();
+    }
+    // The engine dropdown (mockup v02): a full-width --off field, the engine glyph and the current
+    // value (mono 12) at the left, a chevron at the right that flips while the list is open, with a
+    // 1 px --onb inset ring while open.
+    if (v.hasEngine && g.engine.w() > 0) {
+        const D2D1_RECT_F r = R(g.engine);
+        const float h = v.engine.open ? 1.f : (a.active ? a.engHot : (v.hover.kind == HitKind::Engine ? 1.f : 0.f));
+        fillRound(r, (float)kSegRadius, Mix(th.off, th.offh, h));
+        if (v.engine.open) ring(r, (float)kSegRadius, th.onb);
+        icon(v.engine.icon, r.left + 10.f, (r.top + r.bottom) / 2.f - 8.f, th.glyph, 1.5f);
+        text(v.engine.value, g_s.mono12.Get(), D2D1::RectF(r.left + 10.f + 16.f + 10.f, r.top, r.right - 10.f - 14.f - 6.f, r.bottom),
+             th.fg, DWRITE_TEXT_ALIGNMENT_LEADING);
+        icon(v.engine.open ? "chevup" : "chevdown", r.right - 10.f - 14.f - 1.f, (r.top + r.bottom) / 2.f - 8.f, th.offic, 1.5f);
     }
 }
 
@@ -545,7 +570,16 @@ void Painter::Draw(const View& v, const Geometry& g) {
     d.drawBar(v, g);
     if (v.showFocus && v.focus.kind != HitKind::None) {
         const IRect fr = FocusRect(g, v.focus);
-        if (fr.w() > 0) {
+        if (fr.w() > 0 && v.focus.kind == HitKind::Toggle) {
+            // A segment of the group: only the outer ends of the bar are rounded.
+            float rad[4];
+            d.segRadii((size_t)v.focus.index, g.seg.size(), 7.f, rad);
+            if (auto pg = d.cornerPath(D2D1::RectF((float)fr.l + 1.f, (float)fr.t + 1.f, (float)fr.r - 1.f, (float)fr.b - 1.f),
+                                       rad[0], rad[1], rad[2], rad[3])) {
+                d.br->SetColor(d.th.fg);
+                d.rt->DrawGeometry(pg.Get(), d.br.Get(), 2.f);
+            }
+        } else if (fr.w() > 0) {
             d.br->SetColor(d.th.fg);   // the Settings focus colour (--fg), not the accent
             d.rt->DrawRoundedRectangle(D2D1::RoundedRect(D2D1::RectF((float)fr.l + 1.f, (float)fr.t + 1.f,
                                                                     (float)fr.r - 1.f, (float)fr.b - 1.f), 7.f, 7.f),

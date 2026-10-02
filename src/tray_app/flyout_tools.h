@@ -1,6 +1,6 @@
 #pragma once
 // The tray tools' PURE logic (issue #315, no <windows.h>, unit-tested): the main-engine dropdown's
-// values, labels and restart rule, and the chip row layout (wide chips, wrapping, centring).
+// values, labels and restart rule, and the stretched segmented toggle group's layout.
 // engine_dropdown.cpp and flyout_window.cpp wire these to Win32.
 // Spec: docs/superpowers/specs/2026-10-02-tray-tools-design.md.
 #include <string>
@@ -40,43 +40,24 @@ inline bool EnginePickChanges(int current, int picked) {
     return picked >= 0 && picked < kEngineCount && picked != current;
 }
 
-// ---------------------------------------------------------------- chip rows
+// ---------------------------------------------------------------- segmented toggle group
 
-struct ChipRect { int l = 0, t = 0, r = 0, b = 0; };
+struct SegRect { int l = 0, t = 0, r = 0, b = 0; };
 
-// Layout of the toggle chips in DIPs. Each chip takes 1 slot (chipW) or 2 (the wide engine chip,
-// 2 * chipW + gap). A row holds at most `perRow` slots; a chip that does not fit starts the next
-// row. Every row, the last partial one included, is centred between `left` and `right`.
-struct ChipLayout {
-    std::vector<ChipRect> rect;   // one per chip, input order
-    int rows = 0;
-};
-
-inline ChipLayout LayoutChips(const std::vector<int>& slots, int left, int right, int top,
-                              int chipW, int chipH, int gap, int rowH, int perRow) {
-    ChipLayout out;
-    out.rect.resize(slots.size());
-    auto slotsOf = [&](size_t k) { return slots[k] < 1 ? 1 : (slots[k] > perRow ? perRow : slots[k]); };
-    size_t i = 0;
-    while (i < slots.size()) {
-        size_t j = i;
-        int used = 0, width = 0;
-        while (j < slots.size()) {
-            const int s = slotsOf(j);
-            if (j > i && used + s > perRow) break;
-            width += (j > i ? gap : 0) + s * chipW + (s - 1) * gap;
-            used += s;
-            ++j;
-        }
-        int x = left + ((right - left) - width) / 2;
-        const int y = top + out.rows * rowH;
-        for (size_t k = i; k < j; ++k) {
-            const int w = slotsOf(k) * chipW + (slotsOf(k) - 1) * gap;
-            out.rect[k] = { x, y, x + w, y + chipH };
-            x += w + gap;
-        }
-        ++out.rows;
-        i = j;
+// The toggle group (mockup v02, Max 2026-10-02): `n` segments stretched to fill [left, right) whatever
+// the count, joined by a 1 px separator (`line`) that belongs to no segment. The widths are whole
+// DIPs: the pixels left over after the equal split go one each to the first segments, so the group
+// always ends exactly at `right`. n <= 0 gives nothing.
+inline std::vector<SegRect> LayoutSegments(int n, int left, int right, int top, int height, int line) {
+    std::vector<SegRect> out;
+    if (n <= 0) return out;
+    const int avail = (right - left) - (n - 1) * line;
+    const int base = avail / n, extra = avail % n;
+    int x = left;
+    for (int i = 0; i < n; ++i) {
+        const int w = base + (i < extra ? 1 : 0);
+        out.push_back({ x, top, x + w, top + height });
+        x += w + line;
     }
     return out;
 }

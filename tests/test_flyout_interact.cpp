@@ -162,13 +162,13 @@ TEST_CASE("toggle writes: applying keeps every other key") {
 
 // ---------------------------------------------------------------- keyboard focus
 
-TEST_CASE("focus order: sliders, then chips, then profile, Settings, Quit") {
+TEST_CASE("focus order: sliders, then toggle segments, then profile, Settings, Quit") {
     const Geometry g = ComputeGeometry(true, 2, 3, 40);
     CHECK(FocusCount(g) == 2 + 3 + 3);
     CHECK(FocusHit(g, 0) == Hit{ HitKind::Slider, 0 });
     CHECK(FocusHit(g, 1) == Hit{ HitKind::Slider, 1 });
-    CHECK(FocusHit(g, 2) == Hit{ HitKind::Chip, 0 });
-    CHECK(FocusHit(g, 4) == Hit{ HitKind::Chip, 2 });
+    CHECK(FocusHit(g, 2) == Hit{ HitKind::Toggle, 0 });
+    CHECK(FocusHit(g, 4) == Hit{ HitKind::Toggle, 2 });
     CHECK(FocusHit(g, 5) == Hit{ HitKind::Profile, 0 });
     CHECK(FocusHit(g, 6) == Hit{ HitKind::Settings, 0 });
     CHECK(FocusHit(g, 7) == Hit{ HitKind::Quit, 0 });
@@ -178,7 +178,7 @@ TEST_CASE("focus order: sliders, then chips, then profile, Settings, Quit") {
     CHECK(FocusIndex(g, Hit{}) == -1);
 }
 
-TEST_CASE("focus order: with no sliders or chips only the bottom row is reachable") {
+TEST_CASE("focus order: with no sliders or toggles only the bottom row is reachable") {
     const Geometry g = ComputeGeometry(false, 0, 0, 40);
     CHECK(FocusCount(g) == 3);
     CHECK(FocusHit(g, 0) == Hit{ HitKind::Profile, 0 });

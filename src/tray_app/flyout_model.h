@@ -115,9 +115,11 @@ inline bool IgnoreIconClick(unsigned long long nowMs, unsigned long long deactiv
 inline constexpr int kWidth = 300, kBorder = 1, kRadius = 10;
 inline constexpr int kHeadH = 96;          // 18 pad + 28 big + 14 gap + 14 frame row + 22 pad
 inline constexpr int kRowH = 40, kQsPadY = 8, kPadX = 20, kIcon = 16, kIconGap = 12, kValueW = 48;
-inline constexpr int kChipW = 48, kChipH = 32, kChipGap = 10, kChipTop = 2, kChipRowH = 39;
+// The control area (mockup v02, Max 2026-10-02): ONE segmented toggle group, a full-width 32 px bar,
+// then the engine dropdown, a full-width 32 px field, 8 px below it. 6 px above the group, 14 px
+// of padding under the last control.
+inline constexpr int kSegH = 32, kSegLine = 1, kSegRadius = 8, kCtlTop = 6, kCtlGap = 8, kQsPadBottom = 14;
 inline constexpr int kBarH = 40, kBtn = 32, kBottomPad = 8;
-inline constexpr int kChipsPerRow = 4;     // slots per row (the wide engine chip takes two); more wrap to the next row (#315)
 
 struct Geometry {
     int width = kWidth, height = 0;
@@ -125,14 +127,16 @@ struct Geometry {
     IRect head, qs, bar;
     std::vector<int> hair;                       // y of each 1 px rule
     std::vector<IRect> sliderRow, sliderIcon, sliderTrack, sliderValue;
-    std::vector<IRect> chip;
+    IRect segBar;                                // the whole toggle group (empty when no toggle is on)
+    std::vector<IRect> seg;                      // one stretched segment per toggle
+    IRect engine;                                // the engine dropdown trigger (empty when it is off)
     IRect profileBtn, settingsBtn, quitBtn;
 };
 
-// `toggleSlots` = the slots each toggle chip takes (1, or 2 for the wide engine chip), in order.
 // `profileTextW` is the measured width of the profile name in DIPs (the renderer measures it).
-inline Geometry ComputeGeometry(bool perf, int nSliders, const std::vector<int>& toggleSlots, int profileTextW) {
-    const int nToggles = (int)toggleSlots.size();
+// `nToggles` segments fill the group; `hasEngine` adds the dropdown under it.
+inline Geometry ComputeGeometry(bool perf, int nSliders, int nToggles, bool hasEngine, int profileTextW) {
+    if (nToggles < 0) nToggles = 0;
     Geometry g;
     const int x0 = kBorder, x1 = kWidth - kBorder;
     int y = kBorder;
@@ -147,7 +151,8 @@ inline Geometry ComputeGeometry(bool perf, int nSliders, const std::vector<int>&
         g.head = { x0, y, x1, y + kHeadH };
         y += kHeadH;
     }
-    if (nSliders > 0 || nToggles > 0) {
+    const bool controls = nToggles > 0 || hasEngine;
+    if (nSliders > 0 || controls) {
         rule();
         g.hasQs = true;
         const int top = y;
@@ -161,15 +166,24 @@ inline Geometry ComputeGeometry(bool perf, int nSliders, const std::vector<int>&
                                       x1 - kPadX - kValueW - kIconGap, mid + 3 });
             ry += kRowH;
         }
-        if (nToggles > 0) {
-            // Rows of at most kChipsPerRow slots, each row centred in the content area (equal space
-            // left and right, the last partial row too). The wide engine chip takes two slots.
-            const ChipLayout cl = LayoutChips(toggleSlots, x0, x1, ry + kChipTop, kChipW, kChipH, kChipGap,
-                                              kChipRowH, kChipsPerRow);
-            for (const ChipRect& c : cl.rect) g.chip.push_back({ c.l, c.t, c.r, c.b });
-            ry += cl.rows * kChipRowH;
+        if (controls) {
+            const int cl = x0 + kPadX, cr = x1 - kPadX;       // the content width
+            ry += kCtlTop;
+            if (nToggles > 0) {
+                for (const SegRect& r : LayoutSegments(nToggles, cl, cr, ry, kSegH, kSegLine))
+                    g.seg.push_back({ r.l, r.t, r.r, r.b });
+                g.segBar = { cl, ry, cr, ry + kSegH };
+                ry += kSegH;
+                if (hasEngine) ry += kCtlGap;
+            }
+            if (hasEngine) {
+                g.engine = { cl, ry, cr, ry + kSegH };
+                ry += kSegH;
+            }
+            ry += kQsPadBottom;
+        } else {
+            ry += kQsPadY;
         }
-        ry += kQsPadY;
         g.qs = { x0, top, x1, ry };
         y = ry;
     }
@@ -187,12 +201,12 @@ inline Geometry ComputeGeometry(bool perf, int nSliders, const std::vector<int>&
     return g;
 }
 
-// Every toggle takes one slot (sliders-only cases and the unit tests).
+// No engine dropdown (sliders-only cases and the unit tests).
 inline Geometry ComputeGeometry(bool perf, int nSliders, int nToggles, int profileTextW) {
-    return ComputeGeometry(perf, nSliders, std::vector<int>((size_t)(nToggles < 0 ? 0 : nToggles), 1), profileTextW);
+    return ComputeGeometry(perf, nSliders, nToggles, false, profileTextW);
 }
 
-enum class HitKind { None, Slider, Chip, Profile, Settings, Quit };
+enum class HitKind { None, Slider, Toggle, Engine, Profile, Settings, Quit };
 struct Hit {
     HitKind kind = HitKind::None;
     int index = -1;
@@ -202,8 +216,9 @@ struct Hit {
 
 // x, y in DIPs from the window's top-left.
 inline Hit HitTest(const Geometry& g, int x, int y) {
-    for (size_t i = 0; i < g.chip.size(); ++i)
-        if (g.chip[i].contains(x, y)) return { HitKind::Chip, (int)i };
+    for (size_t i = 0; i < g.seg.size(); ++i)
+        if (g.seg[i].contains(x, y)) return { HitKind::Toggle, (int)i };
+    if (g.engine.w() > 0 && g.engine.contains(x, y)) return { HitKind::Engine, 0 };
     for (size_t i = 0; i < g.sliderRow.size(); ++i)
         if (g.sliderRow[i].contains(x, y)) return { HitKind::Slider, (int)i };
     if (g.quitBtn.contains(x, y)) return { HitKind::Quit, 0 };
@@ -250,11 +265,8 @@ inline const SliderSpec* FindSliderSpec(const std::string& key) {
 
 struct ToggleSpec { const char* key; const wchar_t* name; const char* icon; };
 
-// What a chip does (#315): Plain = an ini toggle; Engine = the wide main-engine dropdown that opens
-// the engine list (it spans two chip slots and is never a toggle).
-enum class ChipKind { Plain, Engine };
-inline ChipKind ChipKindOf(const std::string& key) { return key == "engine" ? ChipKind::Engine : ChipKind::Plain; }
-inline int ChipSlots(ChipKind k) { return k == ChipKind::Engine ? 2 : 1; }
+// The "engine" item is the main-engine dropdown under the group (#315); it is never a toggle segment.
+inline bool IsEngineKey(const std::string& key) { return key == "engine"; }
 
 inline const ToggleSpec* FindToggleSpec(const std::string& key) {
     static const ToggleSpec k[] = {
@@ -358,9 +370,12 @@ struct ToggleView {
     std::string key, icon;
     std::wstring name;
     bool on = false;
-    ChipKind kind = ChipKind::Plain;
-    std::wstring value;         // the engine dropdown's current choice ("Transform"); empty for toggles
-    bool open = false;          // the engine list is open under this chip
+};
+struct EngineView {
+    std::string icon;
+    std::wstring name;
+    std::wstring value;         // the current choice ("Transform")
+    bool open = false;          // the engine list is open under the dropdown
 };
 struct PerfView {
     bool zoomed = false;
@@ -374,7 +389,8 @@ struct PerfView {
 // uses the plain hover/on state (render-test, unit tests), so a still frame is identical either way.
 struct AnimView {
     bool active = false;
-    std::vector<float> chipHot, chipPress, chipOn;   // per toggle chip
+    std::vector<float> chipHot, chipOn;   // per toggle segment
+    float engHot = 0, engPress = 0;                  // the engine dropdown
     float btnHot[3] = { 0, 0, 0 }, btnPress[3] = { 0, 0, 0 };   // profile, settings, quit
 };
 
@@ -391,7 +407,9 @@ struct View {
     bool perf = false;
     PerfView p;
     std::vector<SliderView> sliders;
-    std::vector<ToggleView> toggles;
+    std::vector<ToggleView> toggles;        // the segments of the toggle group, in order
+    bool hasEngine = false;                 // the dropdown row under the group
+    EngineView engine;
     std::wstring profile = L"Default";
     Hit hover;
     Hit focus;                      // keyboard focus; drawn only when showFocus
@@ -399,14 +417,8 @@ struct View {
     AnimView anim;
 };
 
-// The slots each toggle chip takes, in view order (the engine dropdown is two).
-inline std::vector<int> ToggleSlots(const View& v) {
-    std::vector<int> s;
-    for (const auto& t : v.toggles) s.push_back(ChipSlots(t.kind));
-    return s;
-}
 inline Geometry ComputeGeometry(const View& v, int profileTextW) {
-    return ComputeGeometry(v.perf, (int)v.sliders.size(), ToggleSlots(v), profileTextW);
+    return ComputeGeometry(v.perf, (int)v.sliders.size(), (int)v.toggles.size(), v.hasEngine, profileTextW);
 }
 
 inline PerfView BuildPerf(const TrayStatus& st, const float* ticks, int n) {
@@ -451,15 +463,16 @@ inline View BuildView(const IniValues& ini, const TrayLayout& layout, const Tray
         if (!it.on) continue;
         const ToggleSpec* t = FindToggleSpec(it.key);
         if (!t) continue;
+        if (IsEngineKey(it.key)) {
+            auto mi = ini.find(kEngineKey);
+            v.hasEngine = true;
+            v.engine.icon = t->icon; v.engine.name = t->name;
+            v.engine.value = EngineLabel(EngineIndex(mi == ini.end() ? std::string() : mi->second));
+            continue;
+        }
         ToggleView tv;
         tv.key = t->key; tv.icon = t->icon; tv.name = t->name;
-        tv.kind = ChipKindOf(it.key);
-        if (tv.kind == ChipKind::Engine) {
-            auto mi = ini.find(kEngineKey);
-            tv.value = EngineLabel(EngineIndex(mi == ini.end() ? std::string() : mi->second));
-        } else {
-            tv.on = ToggleOn(it.key, ini);
-        }
+        tv.on = ToggleOn(it.key, ini);
         v.toggles.push_back(tv);
     }
     v.profile = profile.empty() ? std::wstring(L"Default") : profile;
@@ -535,14 +548,18 @@ inline bool SliderTrackHit(const Geometry& g, int i, int x, int y) {
     return g.sliderRow[i].contains(x, y) && x >= t.l - 8 && x < t.r + 8;
 }
 
-// Keyboard focus walks the controls in reading order: sliders, chips, profile, Settings, Quit.
-inline int FocusCount(const Geometry& g) { return (int)g.sliderRow.size() + (int)g.chip.size() + 3; }
+// Keyboard focus walks the controls in reading order: sliders, toggle segments, the engine dropdown,
+// profile, Settings, Quit.
+inline int FocusCount(const Geometry& g) {
+    return (int)g.sliderRow.size() + (int)g.seg.size() + (g.engine.w() > 0 ? 1 : 0) + 3;
+}
 inline Hit FocusHit(const Geometry& g, int idx) {
-    const int ns = (int)g.sliderRow.size(), nc = (int)g.chip.size();
+    const int ns = (int)g.sliderRow.size(), nt = (int)g.seg.size(), ne = g.engine.w() > 0 ? 1 : 0;
     if (idx < 0) return {};
     if (idx < ns) return { HitKind::Slider, idx };
-    if (idx < ns + nc) return { HitKind::Chip, idx - ns };
-    switch (idx - ns - nc) {
+    if (idx < ns + nt) return { HitKind::Toggle, idx - ns };
+    if (idx < ns + nt + ne) return { HitKind::Engine, 0 };
+    switch (idx - ns - nt - ne) {
         case 0: return { HitKind::Profile, 0 };
         case 1: return { HitKind::Settings, 0 };
         case 2: return { HitKind::Quit, 0 };
@@ -550,13 +567,14 @@ inline Hit FocusHit(const Geometry& g, int idx) {
     return {};
 }
 inline int FocusIndex(const Geometry& g, const Hit& h) {
-    const int ns = (int)g.sliderRow.size(), nc = (int)g.chip.size();
+    const int ns = (int)g.sliderRow.size(), nt = (int)g.seg.size(), ne = g.engine.w() > 0 ? 1 : 0;
     switch (h.kind) {
         case HitKind::Slider:   return h.index;
-        case HitKind::Chip:     return ns + h.index;
-        case HitKind::Profile:  return ns + nc;
-        case HitKind::Settings: return ns + nc + 1;
-        case HitKind::Quit:     return ns + nc + 2;
+        case HitKind::Toggle:   return ns + h.index;
+        case HitKind::Engine:   return ne ? ns + nt : -1;
+        case HitKind::Profile:  return ns + nt + ne;
+        case HitKind::Settings: return ns + nt + ne + 1;
+        case HitKind::Quit:     return ns + nt + ne + 2;
         default: return -1;
     }
 }
@@ -566,30 +584,11 @@ inline int NextFocus(int cur, int count, bool back) {
     if (cur < 0) return back ? count - 1 : 0;
     return back ? (cur + count - 1) % count : (cur + 1) % count;
 }
-// Arrow keys between chips: Left / Right step one chip, Up / Down move to the chip in the row above
-// or below whose centre is nearest (rows hold different chips once the engine chip is wide). Stays
-// put at an edge; no wrap.
-inline int ChipNeighbor(const Geometry& g, int idx, int dx, int dy) {
-    const int n = (int)g.chip.size();
+// Left / Right inside the toggle group: one segment over, stopping at the ends (no wrap).
+inline int SegNeighbor(const Geometry& g, int idx, int dx) {
+    const int n = (int)g.seg.size();
     if (idx < 0 || idx >= n) return idx;
-    if (dx != 0) return (std::min)((std::max)(idx + (dx > 0 ? 1 : -1), 0), n - 1);
-    const IRect& me = g.chip[idx];
-    int rowT = 0;
-    bool found = false;
-    for (int i = 0; i < n; ++i) {             // the nearest row in that direction
-        const int t = g.chip[i].t;
-        if (dy > 0 ? t <= me.t : t >= me.t) continue;
-        if (!found || (dy > 0 ? t < rowT : t > rowT)) { rowT = t; found = true; }
-    }
-    if (!found) return idx;
-    const int cx = (me.l + me.r) / 2;
-    int best = idx, bestD = 1 << 30;
-    for (int i = 0; i < n; ++i) {
-        if (g.chip[i].t != rowT) continue;
-        const int d = std::abs((g.chip[i].l + g.chip[i].r) / 2 - cx);
-        if (d < bestD) { bestD = d; best = i; }
-    }
-    return best;
+    return (std::min)((std::max)(idx + (dx > 0 ? 1 : -1), 0), n - 1);
 }
 
 inline IRect FocusRect(const Geometry& g, const Hit& h) {
@@ -600,13 +599,52 @@ inline IRect FocusRect(const Geometry& g, const Hit& h) {
                 return { r.l + 8, r.t + 2, r.r - 8, r.b - 2 };
             }
             break;
-        case HitKind::Chip:     if (h.index >= 0 && h.index < (int)g.chip.size()) return g.chip[h.index]; break;
+        case HitKind::Toggle:   if (h.index >= 0 && h.index < (int)g.seg.size()) return g.seg[h.index]; break;
+        case HitKind::Engine:   return g.engine;
         case HitKind::Profile:  return g.profileBtn;
         case HitKind::Settings: return g.settingsBtn;
         case HitKind::Quit:     return g.quitBtn;
         default: break;
     }
     return {};
+}
+
+// Up / Down from a control that is not a slider (Up/Down adjust a slider; Tab leaves it): the rows
+// are the toggle group, the engine dropdown and the bottom row. The target is the control of the
+// next present row, up or down, whose centre is nearest to the current one. Stays put at the
+// bottom; from the group (or the dropdown when there is no group) Up goes to the last slider when
+// there is one, else stays.
+inline Hit VerticalNeighbor(const Geometry& g, const Hit& cur, int dir) {
+    const bool hasGroup = !g.seg.empty(), hasEng = g.engine.w() > 0;
+    const Hit lastSlider = g.sliderRow.empty() ? cur : Hit{ HitKind::Slider, (int)g.sliderRow.size() - 1 };
+    const IRect me = FocusRect(g, cur);
+    auto nearestOf = [&](const std::vector<Hit>& c) {
+        Hit best = c.front();
+        int bd = 1 << 30;
+        const int cx = (me.l + me.r) / 2;
+        for (const Hit& h : c) {
+            const IRect r = FocusRect(g, h);
+            const int d = std::abs((r.l + r.r) / 2 - cx);
+            if (d < bd) { bd = d; best = h; }
+        }
+        return best;
+    };
+    std::vector<Hit> group;
+    for (size_t i = 0; i < g.seg.size(); ++i) group.push_back({ HitKind::Toggle, (int)i });
+    const std::vector<Hit> bottom = { { HitKind::Profile, 0 }, { HitKind::Settings, 0 }, { HitKind::Quit, 0 } };
+    switch (cur.kind) {
+        case HitKind::Toggle:
+            if (dir > 0) return hasEng ? Hit{ HitKind::Engine, 0 } : nearestOf(bottom);
+            return lastSlider;
+        case HitKind::Engine:
+            if (dir > 0) return nearestOf(bottom);
+            return hasGroup ? nearestOf(group) : lastSlider;
+        case HitKind::Profile: case HitKind::Settings: case HitKind::Quit:
+            if (dir > 0) return cur;
+            if (hasEng) return { HitKind::Engine, 0 };
+            return hasGroup ? nearestOf(group) : lastSlider;
+        default: return cur;
+    }
 }
 
 // ---------------------------------------------------------------- profile list popup (pure)
@@ -621,11 +659,13 @@ struct ListGeometry {
     std::vector<IRect> row;
 };
 
-// `captionW` > 0 adds a caption line above the rows and widens the list to fit it.
-inline ListGeometry ComputeList(int n, int widestTextW, int captionW = 0) {
+// `captionW` > 0 adds a caption line above the rows and widens the list to fit it. `fixedW` > 0 pins
+// the width (the engine list is exactly as wide as its dropdown, mockup v02) and ignores the text.
+inline ListGeometry ComputeList(int n, int widestTextW, int captionW = 0, int fixedW = 0) {
     ListGeometry g;
-    g.width = ClampInt((std::max)(widestTextW + kListCheckW, captionW) + 2 * kListTextPad + 2 * kListPad + 2 * kBorder,
-                       kListMinW, kListMaxW);
+    g.width = fixedW > 0 ? fixedW
+        : ClampInt((std::max)(widestTextW + kListCheckW, captionW) + 2 * kListTextPad + 2 * kListPad + 2 * kBorder,
+                   kListMinW, kListMaxW);
     int y = kBorder + kListPad;
     if (captionW > 0) {
         g.caption = { kBorder + kListPad, y, g.width - kBorder - kListPad, y + kListCaptionH };

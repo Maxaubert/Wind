@@ -131,7 +131,7 @@ TEST_CASE("dismissal: a slow click (button held past the quick guard) must not r
 
 TEST_CASE("layout: performance + 2 sliders + toggles") {
     const Geometry g = ComputeGeometry(true, 2, 3, 40);
-    CHECK(g.height == 283);
+    CHECK(g.height == 288);
     CHECK(g.hasHead);
     CHECK(g.head.h() == kHeadH);
     CHECK(g.hair.size() == 2);
@@ -139,11 +139,10 @@ TEST_CASE("layout: performance + 2 sliders + toggles") {
     CHECK(g.sliderRow[1].t - g.sliderRow[0].t == kRowH);
     CHECK(g.sliderTrack[0].l == 49);
     CHECK(g.sliderTrack[0].r == 219);
-    CHECK(g.chip.size() == 3);
-    CHECK(g.chip[0].l == 68);                      // 3 chips are centred (see test_flyout_tools.cpp)
-    CHECK(g.chip[1].l == 68 + 58);
-    CHECK(g.chip[0].w() == 48);
-    CHECK(g.chip[0].h() == 32);
+    CHECK(g.seg.size() == 3);                      // the segmented group (see test_flyout_tools.cpp)
+    CHECK(g.seg[0].l == 21);                       // content width: 20 px inside each side
+    CHECK(g.seg[2].r == 279);
+    CHECK(g.seg[0].h() == 32);
     CHECK(g.settingsBtn.l == 219);
     CHECK(g.quitBtn.r == 287);
 }
@@ -152,7 +151,7 @@ TEST_CASE("layout: each section is dropped when empty") {
     const Geometry noPerf = ComputeGeometry(false, 2, 3, 40);
     CHECK_FALSE(noPerf.hasHead);
     CHECK(noPerf.hair.size() == 1);
-    CHECK(noPerf.height == 283 - kHeadH - 1);
+    CHECK(noPerf.height == 288 - kHeadH - 1);
 
     const Geometry onlyBar = ComputeGeometry(false, 0, 0, 40);
     CHECK_FALSE(onlyBar.hasQs);
@@ -161,11 +160,11 @@ TEST_CASE("layout: each section is dropped when empty") {
 
     const Geometry onlyToggles = ComputeGeometry(false, 0, 2, 40);
     CHECK(onlyToggles.sliderRow.empty());
-    CHECK(onlyToggles.chip.size() == 2);
-    CHECK(onlyToggles.height == 1 + (kQsPadY + kChipRowH + kQsPadY) + 1 + kBarH + kBottomPad + 1);
+    CHECK(onlyToggles.seg.size() == 2);
+    CHECK(onlyToggles.height == 1 + (kQsPadY + kCtlTop + kSegH + kQsPadBottom) + 1 + kBarH + kBottomPad + 1);
 
     const Geometry fourSliders = ComputeGeometry(true, 4, 3, 40);
-    CHECK(fourSliders.height == 283 + 2 * kRowH);
+    CHECK(fourSliders.height == 288 + 2 * kRowH);
 }
 
 TEST_CASE("layout: a long profile name never runs into the Settings button") {
@@ -174,10 +173,10 @@ TEST_CASE("layout: a long profile name never runs into the Settings button") {
     CHECK(g.profileBtn.l == 13);
 }
 
-TEST_CASE("hit test: chips, slider rows, buttons and the gaps between them") {
+TEST_CASE("hit test: toggle segments, slider rows, buttons and the gaps between them") {
     const Geometry g = ComputeGeometry(true, 2, 3, 40);
-    CHECK(HitTest(g, g.chip[1].l + 5, g.chip[1].t + 5) == Hit{ HitKind::Chip, 1 });
-    CHECK(HitTest(g, g.chip[0].r + 3, g.chip[0].t + 5).kind == HitKind::None);   // between chips
+    CHECK(HitTest(g, g.seg[1].l + 5, g.seg[1].t + 5) == Hit{ HitKind::Toggle, 1 });
+    CHECK(HitTest(g, g.seg[0].r, g.seg[0].t + 5).kind == HitKind::None);         // the 1 px separator
     CHECK(HitTest(g, 100, g.sliderRow[1].t + 20) == Hit{ HitKind::Slider, 1 });
     CHECK(HitTest(g, g.quitBtn.l + 2, g.quitBtn.t + 2) == Hit{ HitKind::Quit, 0 });
     CHECK(HitTest(g, g.settingsBtn.l + 2, g.settingsBtn.t + 2) == Hit{ HitKind::Settings, 0 });

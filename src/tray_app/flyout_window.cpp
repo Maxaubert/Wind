@@ -131,7 +131,8 @@ struct State {
     bool animOn = true, animTimer = false, animInit = false;
     ULONGLONG animLast = 0;
     float fade = 1.f;
-    std::vector<float> chipHot, chipPress, chipOn;
+    std::vector<float> chipHot, chipOn;      // per toggle segment
+    float engHot = 0;                        // the engine dropdown
     float btnHot[3] = { 0, 0, 0 }, btnPress[3] = { 0, 0, 0 };
 };
 
@@ -166,8 +167,7 @@ void RebuildView(State& s) {
     const Flyout::Hit hover = s.view.hover, focus = s.view.focus;
     const bool showFocus = s.view.showFocus;
     s.view = Flyout::BuildView(s.ini, s.layout, st, buf, n, s.profile, s.dark);
-    for (auto& t : s.view.toggles)
-        if (t.kind == Flyout::ChipKind::Engine) t.open = g_list && g_list->engine;
+    if (s.view.hasEngine) s.view.engine.open = g_list && g_list->engine;
     s.view.hover = hover;
     s.view.focus = focus;
     s.view.showFocus = showFocus;
@@ -175,22 +175,22 @@ void RebuildView(State& s) {
 
 // Targets for the animated amounts, from the view and the pressed element.
 struct AnimTargets {
-    std::vector<float> chipHot, chipPress, chipOn;
+    std::vector<float> chipHot, chipOn;
+    float engHot = 0;
     float btnHot[3] = { 0, 0, 0 }, btnPress[3] = { 0, 0, 0 };
 };
 
 AnimTargets TargetsOf(const State& s) {
     AnimTargets t;
     const size_t n = s.view.toggles.size();
-    t.chipHot.assign(n, 0.f); t.chipPress.assign(n, 0.f); t.chipOn.assign(n, 0.f);
+    t.chipHot.assign(n, 0.f); t.chipOn.assign(n, 0.f);
     const Flyout::Hit& hv = s.view.hover;
     const bool held = s.down.kind != Flyout::HitKind::None && s.down == hv && s.drag < 0;
     for (size_t i = 0; i < n; ++i) {
-        const bool me = hv.kind == Flyout::HitKind::Chip && hv.index == (int)i;
-        t.chipHot[i] = me ? 1.f : 0.f;
-        t.chipPress[i] = (me && held) ? 1.f : 0.f;
+        t.chipHot[i] = (hv.kind == Flyout::HitKind::Toggle && hv.index == (int)i) ? 1.f : 0.f;
         t.chipOn[i] = s.view.toggles[i].on ? 1.f : 0.f;
     }
+    t.engHot = hv.kind == Flyout::HitKind::Engine ? 1.f : 0.f;
     const Flyout::HitKind ks[3] = { Flyout::HitKind::Profile, Flyout::HitKind::Settings, Flyout::HitKind::Quit };
     for (int b = 0; b < 3; ++b) {
         t.btnHot[b] = hv.kind == ks[b] ? 1.f : 0.f;
@@ -202,22 +202,23 @@ AnimTargets TargetsOf(const State& s) {
 bool AnimSettled(const State& s, const AnimTargets& t) {
     if (s.fade < 1.f) return false;
     for (size_t i = 0; i < t.chipHot.size(); ++i)
-        if (s.chipHot[i] != t.chipHot[i] || s.chipPress[i] != t.chipPress[i] || s.chipOn[i] != t.chipOn[i]) return false;
+        if (s.chipHot[i] != t.chipHot[i] || s.chipOn[i] != t.chipOn[i]) return false;
+    if (s.engHot != t.engHot) return false;
     for (int b = 0; b < 3; ++b) if (s.btnHot[b] != t.btnHot[b] || s.btnPress[b] != t.btnPress[b]) return false;
     return true;
 }
 
 // Moves the current amounts toward the targets by dtMs (all the way when animations are off).
 void AnimAdvance(State& s, const AnimTargets& t, float dtMs) {
-    if (s.chipHot.size() != t.chipHot.size()) {   // chip count changed (first call): start at the targets
-        s.chipHot = t.chipHot; s.chipPress = t.chipPress; s.chipOn = t.chipOn;
+    if (s.chipHot.size() != t.chipHot.size()) {   // segment count changed (first call): start at the targets
+        s.chipHot = t.chipHot; s.chipOn = t.chipOn; s.engHot = t.engHot;
     }
     auto st = [&](float cur, float tg, float dur) { return Flyout::StepToward(cur, tg, dtMs, s.animOn ? dur : 0.f); };
     for (size_t i = 0; i < t.chipHot.size(); ++i) {
         s.chipHot[i] = st(s.chipHot[i], t.chipHot[i], kHoverMs);
-        s.chipPress[i] = st(s.chipPress[i], t.chipPress[i], kPressMs);
         s.chipOn[i] = st(s.chipOn[i], t.chipOn[i], kOnMs);
     }
+    s.engHot = st(s.engHot, t.engHot, kHoverMs);
     for (int b = 0; b < 3; ++b) {
         s.btnHot[b] = st(s.btnHot[b], t.btnHot[b], kHoverMs);
         s.btnPress[b] = st(s.btnPress[b], t.btnPress[b], kPressMs);
@@ -230,17 +231,17 @@ void Render(State& s) {
     if (!s.animInit) {
         // Opening: chips start at their real ON state (no cross-fade on open); only the window fades in.
         s.animInit = true;
-        s.chipHot = t.chipHot; s.chipPress = t.chipPress; s.chipOn = t.chipOn;
+        s.chipHot = t.chipHot; s.chipOn = t.chipOn; s.engHot = t.engHot;
         s.fade = s.animOn ? 0.f : 1.f;
         s.animLast = GetTickCount64();
     } else if (!s.animOn) {
         AnimAdvance(s, t, 0.f);
     } else if (s.chipHot.size() != t.chipHot.size()) {
-        s.chipHot = t.chipHot; s.chipPress = t.chipPress; s.chipOn = t.chipOn;
+        s.chipHot = t.chipHot; s.chipOn = t.chipOn; s.engHot = t.engHot;
     }
     Flyout::AnimView& a = s.view.anim;
     a.active = true;
-    a.chipHot = s.chipHot; a.chipPress = s.chipPress; a.chipOn = s.chipOn;
+    a.chipHot = s.chipHot; a.chipOn = s.chipOn; a.engHot = s.engHot;
     for (int b = 0; b < 3; ++b) { a.btnHot[b] = s.btnHot[b]; a.btnPress[b] = s.btnPress[b]; }
     s.sf.alpha = (BYTE)(s.fade * 255.f + .5f);
     s.sf.Present([&](Flyout::Painter& p) { p.Draw(s.view, s.geo); });
@@ -335,14 +336,13 @@ void DragTo(State& s, LPARAM l, bool final) {
     SetSliderValue(s, s.drag, Flyout::SliderFromX(*sp, s.geo.sliderTrack[s.drag], x), final);
 }
 
-void OpenEngineList(State& s, int chip, bool keyboard);
+void OpenEngineList(State& s, bool keyboard);
 void CloseList();
 
-void ToggleChip(State& s, int i) {
+void ToggleSegment(State& s, int i) {
     if (i < 0 || i >= (int)s.view.toggles.size()) return;
     const Flyout::ToggleView& t = s.view.toggles[i];
-    if (t.kind == Flyout::ChipKind::Engine) OpenEngineList(s, i, false);
-    else Commit(s, Flyout::ToggleChanges(t.key, !t.on), true);
+    Commit(s, Flyout::ToggleChanges(t.key, !t.on), true);
 }
 
 // ---------------------------------------------------------------- profile list popup
@@ -416,11 +416,14 @@ LRESULT CALLBACK ListProc(HWND h, UINT m, WPARAM w, LPARAM l) {
 }
 
 // Creates and shows the list popup `ls` (geometry and view already set) above `anchor` (DIPs, window origin).
-void ShowList(State& s, ListState* ls, const Flyout::IRect& b, const wchar_t* title, bool below = false) {
+// `matchWidth`: the popup is exactly as wide as the anchor (the engine dropdown's list).
+void ShowList(State& s, ListState* ls, const Flyout::IRect& b, const wchar_t* title, bool below = false,
+              bool matchWidth = false) {
     ls->sf.pw = Flyout::ScalePx(ls->geo.width, s.dpi);
     ls->sf.ph = Flyout::ScalePx(ls->geo.height, s.dpi);
     const Flyout::IRect anchor{ s.sf.pos.x + Flyout::ScalePx(b.l, s.dpi), s.sf.pos.y + Flyout::ScalePx(b.t, s.dpi),
                                 s.sf.pos.x + Flyout::ScalePx(b.r, s.dpi), s.sf.pos.y + Flyout::ScalePx(b.b, s.dpi) };
+    if (matchWidth) ls->sf.pw = anchor.r - anchor.l;
     const Flyout::Placement pl = Flyout::PlaceList(anchor, s.work, ls->sf.pw, ls->sf.ph, Flyout::ScalePx(4, s.dpi), below);
     ls->sf.pos = { pl.x, pl.y };
 
@@ -467,10 +470,11 @@ void OpenList(State& s, bool keyboard) {
     ShowList(s, ls, s.geo.profileBtn, L"Wind profiles");
 }
 
-// The engine dropdown's list, under the wide chip (above it when there is no room below): Auto,
-// Render, Transform, System, the same order and labels as the Settings row, the active one checked.
-void OpenEngineList(State& s, int chip, bool keyboard) {
-    if (g_list || chip < 0 || chip >= (int)s.geo.chip.size()) return;
+// The engine dropdown's list, under the field and as wide as it (above it when there is no room
+// below): Auto, Render, Transform, System, the same order and labels as the Settings row, the active
+// one checked.
+void OpenEngineList(State& s, bool keyboard) {
+    if (g_list || s.geo.engine.w() <= 0) return;
     auto* ls = new ListState;
     ls->engine = true;
     ls->view.dark = s.dark;
@@ -482,8 +486,8 @@ void OpenEngineList(State& s, int chip, bool keyboard) {
     auto mi = s.ini.find(Flyout::kEngineKey);
     ls->view.active = Flyout::EngineIndex(mi == s.ini.end() ? std::string() : mi->second);
     ls->view.sel = keyboard ? ls->view.active : -1;
-    ls->geo = Flyout::ComputeList(Flyout::kEngineCount, widest);
-    ShowList(s, ls, s.geo.chip[chip], L"Wind engine", true);
+    ls->geo = Flyout::ComputeList(Flyout::kEngineCount, widest, 0, s.geo.engine.w());
+    ShowList(s, ls, s.geo.engine, L"Wind engine", true, true);
     RebuildView(s);       // the chip shows its list as open
     Render(s);
 }
@@ -509,11 +513,8 @@ bool ListKey(WPARAM vk) {
 
 void Activate(State& s, const Flyout::Hit& h) {
     switch (h.kind) {
-        case Flyout::HitKind::Chip:
-            if (h.index >= 0 && h.index < (int)s.view.toggles.size() &&
-                s.view.toggles[h.index].kind == Flyout::ChipKind::Engine) OpenEngineList(s, h.index, true);
-            else ToggleChip(s, h.index);
-            break;
+        case Flyout::HitKind::Toggle: ToggleSegment(s, h.index); break;
+        case Flyout::HitKind::Engine: OpenEngineList(s, true); break;
         case Flyout::HitKind::Profile: OpenList(s, true); break;
         case Flyout::HitKind::Settings: CloseFlyout(); OpenSettings(); break;
         case Flyout::HitKind::Quit: {
@@ -556,14 +557,13 @@ bool OnKey(State& s, WPARAM vk, LPARAM l) {
                 SetSliderValue(s, f.index, v, false);
                 return true;
             }
-            if (f.kind == Flyout::HitKind::Chip && vk != VK_HOME && vk != VK_END) {
-                const int to = (vk == VK_LEFT || vk == VK_RIGHT)
-                    ? Flyout::ChipNeighbor(s.geo, f.index, vk == VK_RIGHT ? 1 : -1, 0)
-                    : Flyout::ChipNeighbor(s.geo, f.index, 0, vk == VK_DOWN ? 1 : -1);   // Up/Down: the row above or below
-                s.view.focus = { Flyout::HitKind::Chip, to };
-                Render(s);
-                return true;
-            }
+            if (vk == VK_HOME || vk == VK_END) return true;
+            Flyout::Hit to = f;
+            if (f.kind == Flyout::HitKind::Toggle && (vk == VK_LEFT || vk == VK_RIGHT))
+                to = { Flyout::HitKind::Toggle, Flyout::SegNeighbor(s.geo, f.index, vk == VK_RIGHT ? 1 : -1) };
+            else if (vk == VK_UP || vk == VK_DOWN)
+                to = Flyout::VerticalNeighbor(s.geo, f, vk == VK_DOWN ? 1 : -1);   // group, dropdown, bottom row
+            if (to != f) { s.view.focus = to; Render(s); }
             return true;
         }
         case VK_SPACE: case VK_RETURN:
@@ -643,8 +643,10 @@ LRESULT CALLBACK FlyoutProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             const Flyout::Hit down = s->down;
             s->down = {};
             if (hit != down) { Render(*s); return 0; }
-            if (hit.kind == Flyout::HitKind::Chip) {
-                ToggleChip(*s, hit.index);
+            if (hit.kind == Flyout::HitKind::Toggle) {
+                ToggleSegment(*s, hit.index);
+            } else if (hit.kind == Flyout::HitKind::Engine) {
+                OpenEngineList(*s, false);
             } else if (hit.kind == Flyout::HitKind::Profile) {
                 OpenList(*s, false);
             } else if (hit.kind == Flyout::HitKind::Settings) {
