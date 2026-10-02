@@ -63,12 +63,12 @@ TEST_CASE("flyout palettes: radii are sharp for hicon, soft elsewhere") {
     }
 }
 
-TEST_CASE("flyout palettes: High contrast dark is white on black with grey on-segments") {
+TEST_CASE("flyout palettes: High contrast dark is white on black, ON segments solid white with a black icon (#329)") {
     const PaletteMode& d = FindPalette("hicon").dark;
     CHECK(d.menu == 0x000000);
     CHECK(d.fg == 0xffffff);
-    CHECK(d.on == 0x707070);
-    CHECK(d.onic == 0xffffff);
+    CHECK(d.on == 0xffffff);
+    CHECK(d.onic == 0x000000);
 }
 
 TEST_CASE("flyout palettes: every palette is fully specified, dark, and on-state differs from off") {
