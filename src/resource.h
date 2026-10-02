@@ -4,6 +4,3 @@
 #define IDI_WIND 101
 // WindTray.exe only (src/tray_app/wind_tray.rc): the grey aurora image behind the flyout's header.
 #define IDR_AURORA 201
-// WindTray.exe only: the enable (rising) and disable (falling) chimes, WAVE resources (issue #315).
-#define IDR_CHIME_ON 202
-#define IDR_CHIME_OFF 203

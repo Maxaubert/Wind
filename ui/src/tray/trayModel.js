@@ -21,11 +21,8 @@ export const TOGGLES = [
   { key: 'trackFocus', icon: 'ffk', name: 'Follow keyboard focus', desc: 'Follow keyboard focus around the screen.' },
   // One chip for both alignment settings (mouseAlign + trackAlign); the flyout writes both.
   { key: 'keepEdges', icon: 'edges', name: 'Keep within the edges', desc: 'Pointer, text cursor and focus stay within the edges.' },
-  // #315. Engine is a dropdown chip in the tray; the two fixes listen for the next app you switch to.
-  { key: 'engine', icon: 'engine', name: 'Engine for the app in front', desc: 'Pick Auto, Transform or Render for the kind of window in front.' },
-  { key: 'fixLock', icon: 'lock', name: 'Mouse lock (listen)', desc: 'Click, then switch to a game: the view follows hand movement there.' },
-  { key: 'fixPass', icon: 'pass', name: 'Pass keys (listen)', desc: 'Click, then switch to an app: zoom keys also reach it, which fixes stuttery panning.' },
-  { key: 'pause', icon: 'pause', name: 'Pause Wind', desc: 'Zoom keys and scroll zoom do nothing until you resume or Wind restarts.' },
+  // #315. A wide dropdown in the tray (two chip slots) that picks the main engine; a change restarts Wind.
+  { key: 'engine', icon: 'engine', name: 'Magnifier engine', desc: 'A dropdown to switch the engine. Wind restarts to apply it.' },
 ];
 export const KINDS = {
   sliders: { items: SLIDERS, enabledKey: 'traySliders', orderKey: 'traySliderOrder', defaultOn: ['colorWarmPct', 'colorDimPct'], cap: MAX_SLIDERS },

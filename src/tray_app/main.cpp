@@ -19,14 +19,6 @@ static std::wstring g_appDir;
 TrayShared* Block() { return g_block; }
 std::wstring AppDir() { return g_appDir; }
 
-void SetPaused(bool paused) {
-    // Block first, then the event: Wind reads the flag when the event wakes it.
-    SetTrayPaused(g_block, paused);
-    HANDLE ev = CreateEventW(nullptr, FALSE, FALSE, kTrayCommandEventName);
-    if (ev) { SetEvent(ev); CloseHandle(ev); }
-    else wind::Log(wind::LogLevel::Warn, "tray", "pause: command event open failed (err=%lu)", GetLastError());
-}
-
 void RequestWindQuit() {
     // The same clean-exit path the installer and Settings use: Wind restores cursor, clip and
     // Magnifier state as on any quit. A window message could not reach Wind anyway (UIPI).
@@ -46,7 +38,6 @@ static LRESULT CALLBACK TrayWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         TrayApp::ToggleFlyout();
         return 0;
     }
-    if (m == WM_TIMER) { TrayApp::ToolsTimer(w); return 0; }   // the listen chips' poll (#315)
     if (g_taskbarCreated && m == g_taskbarCreated) {
         // Explorer restarted: the shell forgot every icon. AddIcon deletes before adding, so this
         // can never leave two.
@@ -71,7 +62,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR cmdLine, int) {
     // Test hook: render the flyout with fake status to a PNG and exit (no Wind, no tray icon).
     if (cmdLine && wcsstr(cmdLine, L"--render-test")) return TrayApp::RunRenderTest(cmdLine);
     if (cmdLine && wcsstr(cmdLine, L"--flyout-test")) return TrayApp::RunFlyoutTest();
-    if (cmdLine && wcsstr(cmdLine, L"--icon-test")) return TrayApp::RunIconTest(cmdLine);
     wind::LogInit(L"tray");
     const DWORD windPid = ParseWindPid(cmdLine);
 
@@ -109,18 +99,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR cmdLine, int) {
     }
 
     // The status block. Missing (an older Wind) is survivable: the header shows Idle with no fps.
-    // Map the WHOLE section (size 0) and only use it if it holds our layout: an older Wind (#315)
-    // made a smaller one, and reading past its end would fault. A newer Wind's larger block is fine
-    // here, and its different version number makes TrayBlockValid refuse the values.
     HANDLE map = OpenFileMappingW(FILE_MAP_READ | FILE_MAP_WRITE, FALSE, kTrayBlockName);
-    if (map) {
-        void* view = MapViewOfFile(map, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, 0);
-        MEMORY_BASIC_INFORMATION mbi{};
-        if (view && VirtualQuery(view, &mbi, sizeof(mbi)) && mbi.RegionSize >= sizeof(TrayShared))
-            TrayApp::g_block = static_cast<TrayShared*>(view);
-        else if (view)
-            UnmapViewOfFile(view);
-    }
+    if (map) TrayApp::g_block = static_cast<TrayShared*>(
+        MapViewOfFile(map, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, sizeof(TrayShared)));
     if (!TrayApp::g_block)
         wind::Log(wind::LogLevel::Warn, "tray", "status block unavailable (err=%lu)", GetLastError());
 
@@ -140,7 +121,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR cmdLine, int) {
     g_taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
     // Explorer runs at the same integrity, but allow the broadcast explicitly in case it does not.
     ChangeWindowMessageFilterEx(hwnd, g_taskbarCreated, MSGFLT_ALLOW, nullptr);
-    TrayApp::ToolsInit(hwnd);
     TrayApp::AddIcon(hwnd, hInst);
     wind::Log(wind::LogLevel::Info, "tray", "serving Wind pid=%lu", windPid);
 

@@ -117,7 +117,7 @@ inline constexpr int kHeadH = 96;          // 18 pad + 28 big + 14 gap + 14 fram
 inline constexpr int kRowH = 40, kQsPadY = 8, kPadX = 20, kIcon = 16, kIconGap = 12, kValueW = 48;
 inline constexpr int kChipW = 48, kChipH = 32, kChipGap = 10, kChipTop = 2, kChipRowH = 39;
 inline constexpr int kBarH = 40, kBtn = 32, kBottomPad = 8;
-inline constexpr int kChipsPerRow = 4;     // (258 inner + 10 gap) / (48 + 10): more chips wrap to the next row (#315)
+inline constexpr int kChipsPerRow = 4;     // slots per row (the wide engine chip takes two); more wrap to the next row (#315)
 
 struct Geometry {
     int width = kWidth, height = 0;
@@ -129,8 +129,10 @@ struct Geometry {
     IRect profileBtn, settingsBtn, quitBtn;
 };
 
+// `toggleSlots` = the slots each toggle chip takes (1, or 2 for the wide engine chip), in order.
 // `profileTextW` is the measured width of the profile name in DIPs (the renderer measures it).
-inline Geometry ComputeGeometry(bool perf, int nSliders, int nToggles, int profileTextW) {
+inline Geometry ComputeGeometry(bool perf, int nSliders, const std::vector<int>& toggleSlots, int profileTextW) {
+    const int nToggles = (int)toggleSlots.size();
     Geometry g;
     const int x0 = kBorder, x1 = kWidth - kBorder;
     int y = kBorder;
@@ -160,13 +162,12 @@ inline Geometry ComputeGeometry(bool perf, int nSliders, int nToggles, int profi
             ry += kRowH;
         }
         if (nToggles > 0) {
-            const int cw = kChipW;   // fixed size (Max rejected wide chips, 2026-10-02)
-            for (int i = 0; i < nToggles; ++i) {
-                const int cx = x0 + kPadX + (i % kChipsPerRow) * (cw + kChipGap);
-                const int ctop = ry + (i / kChipsPerRow) * kChipRowH + kChipTop;
-                g.chip.push_back({ cx, ctop, cx + cw, ctop + kChipH });
-            }
-            ry += ((nToggles + kChipsPerRow - 1) / kChipsPerRow) * kChipRowH;
+            // Rows of at most kChipsPerRow slots, each row centred in the content area (equal space
+            // left and right, the last partial row too). The wide engine chip takes two slots.
+            const ChipLayout cl = LayoutChips(toggleSlots, x0, x1, ry + kChipTop, kChipW, kChipH, kChipGap,
+                                              kChipRowH, kChipsPerRow);
+            for (const ChipRect& c : cl.rect) g.chip.push_back({ c.l, c.t, c.r, c.b });
+            ry += cl.rows * kChipRowH;
         }
         ry += kQsPadY;
         g.qs = { x0, top, x1, ry };
@@ -184,6 +185,11 @@ inline Geometry ComputeGeometry(bool perf, int nSliders, int nToggles, int profi
     y += kBarH;
     g.height = y + kBottomPad + kBorder;
     return g;
+}
+
+// Every toggle takes one slot (sliders-only cases and the unit tests).
+inline Geometry ComputeGeometry(bool perf, int nSliders, int nToggles, int profileTextW) {
+    return ComputeGeometry(perf, nSliders, std::vector<int>((size_t)(nToggles < 0 ? 0 : nToggles), 1), profileTextW);
 }
 
 enum class HitKind { None, Slider, Chip, Profile, Settings, Quit };
@@ -244,26 +250,18 @@ inline const SliderSpec* FindSliderSpec(const std::string& key) {
 
 struct ToggleSpec { const char* key; const wchar_t* name; const char* icon; };
 
-// What a chip does (#315): Plain = an ini toggle; Engine opens the per-window engine list; Listen =
-// the Mouse lock / Pass keys fixes (click, then go to the app); Pause = runtime Pause Wind.
-enum class ChipKind { Plain, Engine, Listen, Pause };
-inline ChipKind ChipKindOf(const std::string& key) {
-    if (key == "engine") return ChipKind::Engine;
-    if (key == "fixLock" || key == "fixPass") return ChipKind::Listen;
-    if (key == "pause") return ChipKind::Pause;
-    return ChipKind::Plain;
-}
-inline FixKind FixKindOf(const std::string& key) { return key == "fixPass" ? FixKind::Pass : FixKind::Lock; }
+// What a chip does (#315): Plain = an ini toggle; Engine = the wide main-engine dropdown that opens
+// the engine list (it spans two chip slots and is never a toggle).
+enum class ChipKind { Plain, Engine };
+inline ChipKind ChipKindOf(const std::string& key) { return key == "engine" ? ChipKind::Engine : ChipKind::Plain; }
+inline int ChipSlots(ChipKind k) { return k == ChipKind::Engine ? 2 : 1; }
 
 inline const ToggleSpec* FindToggleSpec(const std::string& key) {
     static const ToggleSpec k[] = {
         { "trackCaret", L"Follow the text cursor",  "ftc" },
         { "trackFocus", L"Follow keyboard focus",   "ffk" },
         { "keepEdges",  L"Keep within the edges",   "edges" },
-        { "engine",     L"Engine for the app in front", "engine" },
-        { "fixLock",    L"Mouse lock (listen)",     "lock" },
-        { "fixPass",    L"Pass keys (listen)",      "pass" },
-        { "pause",      L"Pause Wind",              "pause" },
+        { "engine",     L"Magnifier engine",        "engine" },
     };
     for (const auto& t : k) if (key == t.key) return &t;
     return nullptr;
@@ -361,22 +359,8 @@ struct ToggleView {
     std::wstring name;
     bool on = false;
     ChipKind kind = ChipKind::Plain;
-    bool disabled = false;      // the engine chip while the main engine is not Auto
-    bool listening = false;     // a listen chip waiting for the next app: pulses
-};
-// Live inputs the tools chips need beyond the ini (read from the shared block and the tools controller).
-struct ToolsInput {
-    int fgCategory = -1;        // WindowCategory of the last real foreground window, -1 = none yet
-    bool paused = false;
-    int listening = 0;          // 0 none, 1 Mouse lock, 2 Pass keys
-};
-// The engine dropdown's current state (valid whether or not the chip is shown).
-struct EngineView {
-    int category = 3;
-    std::string key = "engineOther";
-    int pref = 0;               // 0 Auto, 1 Transform, 2 Render
-    bool enabled = true;
-    std::wstring caption;       // "Engine for games", or "Main engine: Render" when disabled
+    std::wstring value;         // the engine dropdown's current choice ("Transform"); empty for toggles
+    bool open = false;          // the engine list is open under this chip
 };
 struct PerfView {
     bool zoomed = false;
@@ -392,7 +376,6 @@ struct AnimView {
     bool active = false;
     std::vector<float> chipHot, chipPress, chipOn;   // per toggle chip
     float btnHot[3] = { 0, 0, 0 }, btnPress[3] = { 0, 0, 0 };   // profile, settings, quit
-    float pulse = 0.f;                               // the listening chip's soft pulse, 0..1
 };
 
 // Moves `cur` toward `target` linearly so a full 0..1 swing takes `durMs`. PURE.
@@ -414,8 +397,17 @@ struct View {
     Hit focus;                      // keyboard focus; drawn only when showFocus
     bool showFocus = false;
     AnimView anim;
-    EngineView engine;
 };
+
+// The slots each toggle chip takes, in view order (the engine dropdown is two).
+inline std::vector<int> ToggleSlots(const View& v) {
+    std::vector<int> s;
+    for (const auto& t : v.toggles) s.push_back(ChipSlots(t.kind));
+    return s;
+}
+inline Geometry ComputeGeometry(const View& v, int profileTextW) {
+    return ComputeGeometry(v.perf, (int)v.sliders.size(), ToggleSlots(v), profileTextW);
+}
 
 inline PerfView BuildPerf(const TrayStatus& st, const float* ticks, int n) {
     PerfView p;
@@ -439,21 +431,9 @@ inline PerfView BuildPerf(const TrayStatus& st, const float* ticks, int n) {
 // Items the layout enables, in its order. A key that is not a known item is skipped (an older or
 // hand-edited ini); ParseTrayLayout has already dropped unknown keys and applied the slider cap.
 inline View BuildView(const IniValues& ini, const TrayLayout& layout, const TrayStatus& st,
-                      const float* ticks, int nTicks, const std::wstring& profile, bool dark,
-                      const ToolsInput& tools = ToolsInput()) {
+                      const float* ticks, int nTicks, const std::wstring& profile, bool dark) {
     View v;
     v.dark = dark;
-    {
-        EngineView& e = v.engine;
-        e.category = NormCategory(tools.fgCategory);
-        e.key = EngineKeyFor(e.category);
-        auto mi = ini.find("model");
-        const std::string model = mi == ini.end() ? std::string("hybrid") : TrimWs(mi->second);
-        e.enabled = MainEngineIsAuto(model);
-        auto pi = ini.find(e.key);
-        e.pref = pi == ini.end() ? 0 : EnginePrefIndex(TrimWs(pi->second));
-        e.caption = e.enabled ? std::wstring(EngineCaptionFor(e.category)) : MainEngineCaption(model);
-    }
     v.perf = layout.perf;
     if (layout.perf) v.p = BuildPerf(st, ticks, nTicks);
     for (const auto& it : layout.sliders) {
@@ -474,9 +454,12 @@ inline View BuildView(const IniValues& ini, const TrayLayout& layout, const Tray
         ToggleView tv;
         tv.key = t->key; tv.icon = t->icon; tv.name = t->name;
         tv.kind = ChipKindOf(it.key);
-        tv.on = tv.kind == ChipKind::Pause ? tools.paused : (tv.kind == ChipKind::Plain && ToggleOn(it.key, ini));
-        tv.disabled = tv.kind == ChipKind::Engine && !v.engine.enabled;
-        tv.listening = tv.kind == ChipKind::Listen && tools.listening == (it.key == "fixLock" ? 1 : 2);
+        if (tv.kind == ChipKind::Engine) {
+            auto mi = ini.find(kEngineKey);
+            tv.value = EngineLabel(EngineIndex(mi == ini.end() ? std::string() : mi->second));
+        } else {
+            tv.on = ToggleOn(it.key, ini);
+        }
         v.toggles.push_back(tv);
     }
     v.profile = profile.empty() ? std::wstring(L"Default") : profile;
@@ -583,6 +566,32 @@ inline int NextFocus(int cur, int count, bool back) {
     if (cur < 0) return back ? count - 1 : 0;
     return back ? (cur + count - 1) % count : (cur + 1) % count;
 }
+// Arrow keys between chips: Left / Right step one chip, Up / Down move to the chip in the row above
+// or below whose centre is nearest (rows hold different chips once the engine chip is wide). Stays
+// put at an edge; no wrap.
+inline int ChipNeighbor(const Geometry& g, int idx, int dx, int dy) {
+    const int n = (int)g.chip.size();
+    if (idx < 0 || idx >= n) return idx;
+    if (dx != 0) return (std::min)((std::max)(idx + (dx > 0 ? 1 : -1), 0), n - 1);
+    const IRect& me = g.chip[idx];
+    int rowT = 0;
+    bool found = false;
+    for (int i = 0; i < n; ++i) {             // the nearest row in that direction
+        const int t = g.chip[i].t;
+        if (dy > 0 ? t <= me.t : t >= me.t) continue;
+        if (!found || (dy > 0 ? t < rowT : t > rowT)) { rowT = t; found = true; }
+    }
+    if (!found) return idx;
+    const int cx = (me.l + me.r) / 2;
+    int best = idx, bestD = 1 << 30;
+    for (int i = 0; i < n; ++i) {
+        if (g.chip[i].t != rowT) continue;
+        const int d = std::abs((g.chip[i].l + g.chip[i].r) / 2 - cx);
+        if (d < bestD) { bestD = d; best = i; }
+    }
+    return best;
+}
+
 inline IRect FocusRect(const Geometry& g, const Hit& h) {
     switch (h.kind) {
         case HitKind::Slider:
@@ -644,11 +653,17 @@ inline int ListStep(int cur, int n, int dir) {
 
 // Top-left (pixels) of a w x h list opening ABOVE the anchor button, left-aligned with it; below
 // when there is no room above (taskbar on top). Clamped to the work area.
-inline Placement PlaceList(const IRect& anchor, const IRect& work, int w, int h, int gap) {
+inline Placement PlaceList(const IRect& anchor, const IRect& work, int w, int h, int gap, bool preferBelow = false) {
     Placement p;
     p.x = ClampInt(anchor.l, work.l + gap, work.r - w - gap);
     int y = anchor.t - gap - h;
-    if (y < work.t + gap) y = anchor.b + gap;
+    if (preferBelow) {                       // a dropdown opens under its field, and flips up when it cannot
+        const int below = anchor.b + gap;
+        y = below + h <= work.b - gap ? below : y;
+        if (y < work.t + gap) y = below;
+    } else if (y < work.t + gap) {
+        y = anchor.b + gap;
+    }
     p.y = ClampInt(y, work.t + gap, work.b - h - gap);
     return p;
 }

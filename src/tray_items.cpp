@@ -7,7 +7,7 @@ const std::vector<std::string>& EligibleSliders() {
     return k;
 }
 const std::vector<std::string>& EligibleToggles() {
-    static const std::vector<std::string> k = {"trackCaret", "trackFocus", "keepEdges", "engine", "fixLock", "fixPass", "pause"};
+    static const std::vector<std::string> k = {"trackCaret", "trackFocus", "keepEdges", "engine"};
     return k;
 }
 

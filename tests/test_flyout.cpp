@@ -140,8 +140,8 @@ TEST_CASE("layout: performance + 2 sliders + toggles") {
     CHECK(g.sliderTrack[0].l == 49);
     CHECK(g.sliderTrack[0].r == 219);
     CHECK(g.chip.size() == 3);
-    CHECK(g.chip[0].l == 21);
-    CHECK(g.chip[1].l == 21 + 58);
+    CHECK(g.chip[0].l == 68);                      // 3 chips are centred (see test_flyout_tools.cpp)
+    CHECK(g.chip[1].l == 68 + 58);
     CHECK(g.chip[0].w() == 48);
     CHECK(g.chip[0].h() == 32);
     CHECK(g.settingsBtn.l == 219);

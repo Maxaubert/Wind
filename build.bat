@@ -78,7 +78,7 @@ cl /nologo /std:c++17 /EHsc /O2 /W4 /Zi /DUNICODE /D_UNICODE ^
    src\tray_app\wind_tray.res ^
    /Fe:WindTray.exe ^
    /link user32.lib shell32.lib gdi32.lib Dwmapi.lib Dbghelp.lib shlwapi.lib ole32.lib version.lib ^
-   advapi32.lib ntdll.lib winmm.lib ^
+   advapi32.lib ntdll.lib ^
    /MANIFEST:EMBED /MANIFESTUAC:NO /MANIFESTINPUT:Wind.manifest /SUBSYSTEM:WINDOWS ^
    /DEBUG /OPT:REF /OPT:ICF
 exit /b %errorlevel%

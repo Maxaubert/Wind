@@ -5,9 +5,6 @@
 IDI_WIND ICON "..\\..\\assets\\wind.ico"
 // The flyout header image (issue #313): the same c-grey.jpg the Settings UI ships in ui/public.
 IDR_AURORA RCDATA "..\\..\\ui\\public\\c-grey.jpg"
-// The listen-and-chime chips sounds (issue #315), synthesized by tools/make_chimes.mjs.
-IDR_CHIME_ON  WAVE "..\\..\\assets\\sounds\\chime_on.wav"
-IDR_CHIME_OFF WAVE "..\\..\\assets\\sounds\\chime_off.wav"
 
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION    WIND_VER_MAJOR,WIND_VER_MINOR,WIND_VER_PATCH,0

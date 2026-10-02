@@ -178,12 +178,7 @@ public:
     void setWheelMods(int mods) { wheelMods_.store(mods, std::memory_order_relaxed); }
     int  wheelMods() const { return wheelMods_.load(std::memory_order_relaxed); }
     int  drainWheelSteps() { return state_.wheelSteps.exchange(0, std::memory_order_relaxed); }
-    // Pause Wind (#315): while set, the hooks neither track nor swallow any zoom bind (keys, buttons,
-    // clicks, the wheel), so everything reaches the app. Setting it releases what was held.
-    void setPaused(bool paused);
-    bool paused() const { return paused_.load(std::memory_order_relaxed); }
 private:
-    std::atomic<bool> paused_{false};
     InputState state_;
     // Primary + alternate side-button per direction (1 = XBUTTON1, 2 = XBUTTON2, 0 = none); set in
     // start(). A direction is "held" if either of its bound buttons is down (OR-combined).

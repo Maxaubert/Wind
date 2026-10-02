@@ -1,10 +1,9 @@
-// The tray tools (issue #315, plan task 3): the per-kind engine dropdown, the listen-and-chime
-// state machine, the exe-list edits, the chip wrapping, the engine list geometry and the tray icon
-// badges. All pure; tools.cpp / flyout_window.cpp wire them to Win32.
+// The tray tools (issue #315): the main-engine dropdown (values, labels, restart rule, view), and the
+// chip rows (centring, the wide engine chip, wrapping, hit testing, arrow-key neighbours). All pure;
+// engine_dropdown.cpp / flyout_window.cpp wire them to Win32.
 #include "../third_party/doctest.h"
 #include "../src/tray_app/flyout_model.h"
 #include "../src/tray_app/flyout_icons.h"
-#include "../src/tray_app/tray_icon_badge.h"
 #include "../src/config.h"
 #include <algorithm>
 #include <vector>
@@ -13,285 +12,264 @@ using namespace wind::Flyout;
 
 // ---------------------------------------------------------------- engine dropdown
 
-TEST_CASE("engine: the window kind picks the ini key and the caption") {
-    CHECK(std::string(EngineKeyFor(0)) == "engineGame");
-    CHECK(std::string(EngineKeyFor(1)) == "engineAcrylic");
-    CHECK(std::string(EngineKeyFor(2)) == "engineDesktop");
-    CHECK(std::string(EngineKeyFor(3)) == "engineOther");
-    CHECK(std::wstring(EngineCaptionFor(0)) == L"Engine for games");
-    CHECK(std::wstring(EngineCaptionFor(1)) == L"Engine for blurred windows");
-    CHECK(std::wstring(EngineCaptionFor(2)) == L"Engine for the desktop");
-    // nothing in front yet (-1) or garbage: the Other row
-    CHECK(std::string(EngineKeyFor(-1)) == "engineOther");
-    CHECK(std::string(EngineKeyFor(9)) == "engineOther");
+TEST_CASE("engine: the options are the Settings main-engine row, same order and labels") {
+    CHECK(kEngineCount == 4);
+    CHECK(std::string(kEngineKey) == "model");
+    CHECK(std::string(EngineValue(0)) == "hybrid");
+    CHECK(std::string(EngineValue(1)) == "render");
+    CHECK(std::string(EngineValue(2)) == "transform");
+    CHECK(std::string(EngineValue(3)) == "magnify");
+    CHECK(std::wstring(EngineLabel(0)) == L"Auto");
+    CHECK(std::wstring(EngineLabel(1)) == L"Render");
+    CHECK(std::wstring(EngineLabel(2)) == L"Transform");
+    CHECK(std::wstring(EngineLabel(3)) == L"System");
 }
 
-TEST_CASE("engine: values are the Settings values, in list order") {
-    CHECK(std::string(EnginePrefValue(0)) == "auto");
-    CHECK(std::string(EnginePrefValue(1)) == "transform");
-    CHECK(std::string(EnginePrefValue(2)) == "render");
-    CHECK(EnginePrefIndex("auto") == 0);
-    CHECK(EnginePrefIndex("transform") == 1);
-    CHECK(EnginePrefIndex("render") == 2);
-    CHECK(EnginePrefIndex("junk") == 0);       // unknown reads as Auto, never a hard pin
-    CHECK(std::wstring(EnginePrefLabel(2)) == L"Render");
-}
-
-TEST_CASE("engine: usable only while the main engine is Auto") {
-    CHECK(MainEngineIsAuto("hybrid"));
-    CHECK(MainEngineIsAuto(""));
-    CHECK(MainEngineIsAuto("whatever"));       // the core falls back to hybrid for an unknown model
-    CHECK_FALSE(MainEngineIsAuto("render"));
-    CHECK_FALSE(MainEngineIsAuto("transform"));
-    CHECK_FALSE(MainEngineIsAuto("magnify"));
-    CHECK(MainEngineCaption("render") == L"Main engine: Render");
-    CHECK(MainEngineCaption("magnify") == L"Main engine: System");
-}
-
-static View ToolsView(const IniValues& ini, const ToolsInput& t) {
-    IniValues v = ini;
-    v["trayToggles"] = "engine,fixLock,fixPass,pause";
-    return BuildView(v, ParseTrayLayout(v), TrayStatus(), nullptr, 0, L"Default", true, t);
-}
-
-TEST_CASE("view: the engine chip reads the row of the window kind in front") {
-    ToolsInput t;
-    t.fgCategory = 0;
-    const View v = ToolsView({ { "engineGame", "render" }, { "engineOther", "transform" } }, t);
-    CHECK(v.engine.key == "engineGame");
-    CHECK(v.engine.pref == 2);
-    CHECK(v.engine.enabled);
-    CHECK(v.engine.caption == L"Engine for games");
-    REQUIRE(v.toggles.size() == 4);
-    CHECK(v.toggles[0].kind == ChipKind::Engine);
-    CHECK_FALSE(v.toggles[0].disabled);
-    t.fgCategory = 3;
-    CHECK(ToolsView({ { "engineGame", "render" }, { "engineOther", "transform" } }, t).engine.pref == 1);
-}
-
-TEST_CASE("view: a pinned main engine disables the engine chip and names the engine") {
-    ToolsInput t;
-    t.fgCategory = 0;
-    const View v = ToolsView({ { "model", "render" } }, t);
-    CHECK_FALSE(v.engine.enabled);
-    CHECK(v.engine.caption == L"Main engine: Render");
-    CHECK(v.toggles[0].disabled);
-    CHECK_FALSE(ToolsView({ { "model", "hybrid" } }, t).toggles[0].disabled);
-    CHECK_FALSE(ToolsView({}, t).toggles[0].disabled);      // no model key = hybrid
-}
-
-TEST_CASE("view: listen chips pulse only for the fix that is listening, Pause follows the block") {
-    ToolsInput t;
-    t.listening = 1;
-    View v = ToolsView({}, t);
-    CHECK(v.toggles[1].kind == ChipKind::Listen);
-    CHECK(v.toggles[1].listening);
-    CHECK_FALSE(v.toggles[2].listening);
-    CHECK_FALSE(v.toggles[1].on);          // the fix chips carry no on/off state
-    t.listening = 2;
-    v = ToolsView({}, t);
-    CHECK_FALSE(v.toggles[1].listening);
-    CHECK(v.toggles[2].listening);
-    t = ToolsInput();
-    CHECK_FALSE(ToolsView({}, t).toggles[3].on);
-    t.paused = true;
-    v = ToolsView({}, t);
-    CHECK(v.toggles[3].kind == ChipKind::Pause);
-    CHECK(v.toggles[3].on);
-}
-
-TEST_CASE("view: every new chip has a name and an icon") {
-    for (const char* k : { "engine", "fixLock", "fixPass", "pause" }) {
-        const ToggleSpec* s = FindToggleSpec(k);
-        REQUIRE(s != nullptr);
-        CHECK(IconPath(s->icon) != nullptr);
+TEST_CASE("engine: every option value is one the core accepts as is") {
+    for (int i = 0; i < kEngineCount; ++i) {
+        Config c = ParseConfig(std::string("model=") + EngineValue(i) + "\n");
+        CHECK(c.model == EngineValue(i));
     }
+}
+
+TEST_CASE("engine: a model value maps to its option, unknown reads as Auto like the core") {
+    CHECK(EngineIndex("hybrid") == 0);
+    CHECK(EngineIndex("render") == 1);
+    CHECK(EngineIndex("transform") == 2);
+    CHECK(EngineIndex("magnify") == 3);
+    CHECK(EngineIndex(" transform ") == 2);
+    CHECK(EngineIndex("") == 0);
+    CHECK(EngineIndex("junk") == 0);
+}
+
+TEST_CASE("engine: only a different pick changes anything (and so restarts Wind)") {
+    CHECK_FALSE(EnginePickChanges(2, 2));
+    CHECK(EnginePickChanges(0, 2));
+    CHECK(EnginePickChanges(3, 0));
+    CHECK_FALSE(EnginePickChanges(0, -1));
+    CHECK_FALSE(EnginePickChanges(0, kEngineCount));
+}
+
+static View ViewWith(const char* toggles, const IniValues& extra = {}) {
+    IniValues v = extra;
+    v["trayToggles"] = toggles;
+    return BuildView(v, ParseTrayLayout(v), TrayStatus(), nullptr, 0, L"Default", true);
+}
+
+TEST_CASE("view: the engine chip shows the main engine as text, is wide and never ON") {
+    const View v = ViewWith("engine", { { "model", "transform" } });
+    REQUIRE(v.toggles.size() == 1);
+    const ToggleView& t = v.toggles[0];
+    CHECK(t.kind == ChipKind::Engine);
+    CHECK(t.value == L"Transform");
+    CHECK_FALSE(t.on);
+    CHECK_FALSE(t.open);
+    CHECK(ChipSlots(t.kind) == 2);
+    CHECK(ToggleSlots(v) == std::vector<int>{ 2 });
+}
+
+TEST_CASE("view: a missing or unknown model reads Auto, and the chip is never disabled by it") {
+    CHECK(ViewWith("engine").toggles[0].value == L"Auto");
+    CHECK(ViewWith("engine", { { "model", "junk" } }).toggles[0].value == L"Auto");
+    CHECK(ViewWith("engine", { { "model", "magnify" } }).toggles[0].value == L"System");
+    CHECK(ViewWith("engine", { { "model", "render" } }).toggles[0].value == L"Render");
+}
+
+TEST_CASE("view: plain toggles stay one slot with no value text") {
+    const View v = ViewWith("trackCaret,engine,keepEdges");
+    REQUIRE(v.toggles.size() == 3);
+    CHECK(ToggleSlots(v) == std::vector<int>{ 1, 2, 1 });
+    CHECK(v.toggles[0].value.empty());
+}
+
+TEST_CASE("view: the engine item has a name and icons for the chip and its chevrons") {
+    const ToggleSpec* s = FindToggleSpec("engine");
+    REQUIRE(s != nullptr);
+    CHECK(IconPath(s->icon) != nullptr);
+    CHECK(IconPath("chevdown") != nullptr);
+    CHECK(IconPath("chevup") != nullptr);
+    CHECK(ChipKindOf("engine") == ChipKind::Engine);
     CHECK(ChipKindOf("trackCaret") == ChipKind::Plain);
-    CHECK(FixKindOf("fixPass") == FixKind::Pass);
-    CHECK(FixKindOf("fixLock") == FixKind::Lock);
 }
 
-// ---------------------------------------------------------------- chip rows
+TEST_CASE("view: keys of the removed tools (fixLock, fixPass, pause) are not items any more") {
+    CHECK(FindToggleSpec("fixLock") == nullptr);
+    CHECK(FindToggleSpec("fixPass") == nullptr);
+    CHECK(FindToggleSpec("pause") == nullptr);
+    CHECK(IconPath("lock") == nullptr);
+    CHECK(IconPath("pass") == nullptr);
+    CHECK(IconPath("pause") == nullptr);
+    // A user's ini that still lists them shows only the known chips.
+    const View v = ViewWith("fixLock,trackCaret,pause,fixPass");
+    REQUIRE(v.toggles.size() == 1);
+    CHECK(v.toggles[0].key == "trackCaret");
+}
 
-TEST_CASE("layout: more than four chips wrap, every chip keeps its 48x32 size") {
-    const Geometry g = ComputeGeometry(false, 0, 7, 40);
-    REQUIRE(g.chip.size() == 7);
+// ---------------------------------------------------------------- chip rows: centring
+
+static int Left(const Geometry& g) { return kBorder; }
+static int Right(const Geometry& g) { return g.width - kBorder; }
+// Space left of the first chip and right of the last chip of the row that contains chip `first`.
+static void RowMargins(const Geometry& g, size_t first, size_t last, int* l, int* r) {
+    *l = g.chip[first].l - Left(g);
+    *r = Right(g) - g.chip[last].r;
+}
+
+TEST_CASE("centring: 3 chips sit centred, equal space left and right") {
+    const Geometry g = ComputeGeometry(false, 0, std::vector<int>{ 1, 1, 1 }, 40);
+    REQUIRE(g.chip.size() == 3);
+    int l = 0, r = 0;
+    RowMargins(g, 0, 2, &l, &r);
+    CHECK(l == r);
+    CHECK(l == 67);
+    CHECK(g.chip[1].l - g.chip[0].r == kChipGap);
     for (const IRect& c : g.chip) { CHECK(c.w() == kChipW); CHECK(c.h() == kChipH); }
-    CHECK(g.chip[3].r <= kWidth - kBorder - kPadX);               // the fourth still fits
-    CHECK(g.chip[4].l == g.chip[0].l);                            // the fifth starts row two
+}
+
+TEST_CASE("centring: 4 chips fill the row, still centred") {
+    const Geometry g = ComputeGeometry(false, 0, std::vector<int>{ 1, 1, 1, 1 }, 40);
+    int l = 0, r = 0;
+    RowMargins(g, 0, 3, &l, &r);
+    CHECK(l == r);
+    CHECK(l == 38);
+    CHECK(g.chip[3].t == g.chip[0].t);          // one row
+}
+
+TEST_CASE("centring: 2 and 1 chips are centred too") {
+    for (int n : { 1, 2 }) {
+        const Geometry g = ComputeGeometry(false, 0, std::vector<int>((size_t)n, 1), 40);
+        int l = 0, r = 0;
+        RowMargins(g, 0, (size_t)n - 1, &l, &r);
+        CHECK(l == r);
+    }
+}
+
+TEST_CASE("centring: 5 chips wrap to 4 + 1, and the last partial row is centred on its own") {
+    const Geometry g = ComputeGeometry(false, 0, std::vector<int>(5, 1), 40);
+    REQUIRE(g.chip.size() == 5);
+    int l = 0, r = 0;
+    RowMargins(g, 0, 3, &l, &r);
+    CHECK(l == r);
     CHECK(g.chip[4].t - g.chip[0].t == kChipRowH);
-    CHECK(g.chip[6].l == g.chip[2].l);
-    const Geometry one = ComputeGeometry(false, 0, 4, 40);
-    CHECK(g.height - one.height == kChipRowH);                    // one more row
-    CHECK(ComputeGeometry(false, 0, 1, 40).height == one.height);
-    for (const IRect& c : g.chip) CHECK(c.r <= kWidth - kBorder);   // nothing runs past the window
+    RowMargins(g, 4, 4, &l, &r);
+    CHECK(l == r);                                // the lone chip: equal space both sides
+    CHECK(g.chip[4].l == 1 + (298 - kChipW) / 2);
+    for (const IRect& c : g.chip) CHECK(c.w() == kChipW);
 }
 
-TEST_CASE("layout: a window with 3 chips is unchanged") {
-    CHECK(ComputeGeometry(true, 2, 3, 40).height == 283);
+TEST_CASE("centring: 7 chips are 4 + 3, both rows centred, one more row of height") {
+    const Geometry g = ComputeGeometry(false, 0, std::vector<int>(7, 1), 40);
+    int l = 0, r = 0;
+    RowMargins(g, 4, 6, &l, &r);
+    CHECK(l == r);
+    const Geometry one = ComputeGeometry(false, 0, std::vector<int>(4, 1), 40);
+    CHECK(g.height - one.height == kChipRowH);
 }
 
-// ---------------------------------------------------------------- engine list
-
-TEST_CASE("engine list: a caption line above the rows") {
-    const ListGeometry plain = ComputeList(3, 60);
-    const ListGeometry cap = ComputeList(3, 60, 120);
-    CHECK(plain.caption.w() == 0);
-    CHECK(cap.caption.w() > 0);
-    CHECK(cap.height - plain.height == kListCaptionH);
-    CHECK(cap.row[0].t - plain.row[0].t == kListCaptionH);
-    CHECK(cap.row[0].t >= cap.caption.b);
-    CHECK(cap.width >= 120 + 2 * kListTextPad);                    // the caption fits
-    CHECK(ComputeList(3, 60, 900).width == kListMaxW);
+TEST_CASE("centring: the wide engine chip spans two slots, 2 * chipW + gap") {
+    const Geometry g = ComputeGeometry(false, 0, std::vector<int>{ 1, 1, 1, 2 }, 40);
+    REQUIRE(g.chip.size() == 4);
+    CHECK(g.chip[3].w() == 2 * kChipW + kChipGap);
+    CHECK(g.chip[3].h() == kChipH);
+    // 1+1+1+2 = 5 slots: the engine chip does not fit the first row, so it wraps and is centred alone.
+    CHECK(g.chip[3].t - g.chip[0].t == kChipRowH);
+    int l = 0, r = 0;
+    RowMargins(g, 3, 3, &l, &r);
+    CHECK(l == r);
+    RowMargins(g, 0, 2, &l, &r);
+    CHECK(l == r);
 }
 
-TEST_CASE("engine list: with no rows (main engine pinned) only the caption remains") {
-    const ListGeometry g = ComputeList(0, 0, 130);
-    CHECK(g.row.empty());
-    CHECK(g.caption.w() > 0);
-    CHECK(g.height == kBorder + kListPad + kListCaptionH + kListPad + kBorder);
-    CHECK(ListHitTest(g, 20, 20) == -1);
+TEST_CASE("centring: the engine chip beside two chips fills the row exactly (2 + 1 + 1 slots)") {
+    const Geometry g = ComputeGeometry(false, 0, std::vector<int>{ 1, 1, 2 }, 40);
+    CHECK(g.chip[2].t == g.chip[0].t);
+    int l = 0, r = 0;
+    RowMargins(g, 0, 2, &l, &r);
+    CHECK(l == r);
+    CHECK(l == 38);
+    CHECK(g.chip[2].l - g.chip[1].r == kChipGap);
 }
 
-// ---------------------------------------------------------------- exe lists
-
-TEST_CASE("exe list: add and remove are case-insensitive and never duplicate") {
-    CHECK(ExeListHas("RDR2.exe,eldenring.exe", "rdr2.EXE"));
-    CHECK_FALSE(ExeListHas("RDR2.exe", "rdr.exe"));
-    CHECK_FALSE(ExeListHas("", "a.exe"));
-    CHECK_FALSE(ExeListHas("a.exe", ""));
-    CHECK(ExeListAdd("", "game.exe") == "game.exe");
-    CHECK(ExeListAdd("a.exe", "game.exe") == "a.exe,game.exe");
-    CHECK(ExeListAdd("a.exe,Game.EXE", "game.exe") == "a.exe,Game.EXE");   // already there: unchanged
-    CHECK(ExeListAdd(" a.exe , b.exe ", "c.exe") == "a.exe,b.exe,c.exe");  // spacing normalised
-    CHECK(ExeListRemove("a.exe,Game.EXE,b.exe", "game.exe") == "a.exe,b.exe");
-    CHECK(ExeListRemove("game.exe", "game.exe").empty());
-    CHECK(ExeListRemove("a.exe", "game.exe") == "a.exe");
-    CHECK(ExeListRemove("game.exe,game.exe", "GAME.exe").empty());        // hand-edited duplicates all go
-    CHECK(ExeListAdd("a.exe", "").empty() == false);                       // an empty exe changes nothing
-    CHECK(ExeListAdd("a.exe", "") == "a.exe");
+TEST_CASE("centring: the engine chip alone is centred") {
+    const Geometry g = ComputeGeometry(false, 0, std::vector<int>{ 2 }, 40);
+    int l = 0, r = 0;
+    RowMargins(g, 0, 0, &l, &r);
+    CHECK(l == r);
+    CHECK(g.chip[0].w() == 106);
 }
 
-TEST_CASE("exe list: the keys are the ones the core reads") {
-    CHECK(std::string(FixKey(FixKind::Lock)) == "lockApps");
-    CHECK(std::string(FixKey(FixKind::Pass)) == "noSwallowApps");
-    // The core's own matcher agrees with ours on what was written.
-    CHECK(IsExeInList("game.exe", ExeListAdd("a.exe", "GAME.exe")));
-    CHECK_FALSE(IsExeInList("game.exe", ExeListRemove("a.exe,GAME.exe", "game.exe")));
-}
-
-// ---------------------------------------------------------------- listen state machine
-
-TEST_CASE("listen: the next real app activation is the target") {
-    const ListenState s = ListenStart(FixKind::Lock, 10, 1000);
-    CHECK(ListenPoll(s, 10, L"old.exe", 1100) == ListenEvent::Pending);      // nothing new yet
-    CHECK(ListenPoll(s, 11, L"game.exe", 1500) == ListenEvent::Target);
-    CHECK(ListenPoll(s, 12, L"game.exe", 1500) == ListenEvent::Target);      // several activations: still a target
-}
-
-TEST_CASE("listen: re-activating the same app counts (the count grows even for the same exe)") {
-    const ListenState s = ListenStart(FixKind::Pass, 4, 0);
-    CHECK(ListenPoll(s, 5, L"samefile.exe", 10) == ListenEvent::Target);
-}
-
-TEST_CASE("listen: an activation with no usable exe name waits for the next one") {
-    const ListenState s = ListenStart(FixKind::Lock, 4, 0);
-    CHECK(ListenPoll(s, 5, L"", 10) == ListenEvent::Pending);
-    CHECK(ListenPoll(s, 6, L"x.exe", 20) == ListenEvent::Target);
-}
-
-TEST_CASE("listen: times out silently after 20 seconds") {
-    const ListenState s = ListenStart(FixKind::Lock, 1, 5000);
-    CHECK(ListenPoll(s, 1, L"a.exe", 5000 + kListenTimeoutMs - 1) == ListenEvent::Pending);
-    CHECK(ListenPoll(s, 1, L"a.exe", 5000 + kListenTimeoutMs) == ListenEvent::TimedOut);
-    CHECK(ListenPoll(s, 1, L"a.exe", 4000) == ListenEvent::Pending);         // clock went backwards
-    // a target at the very deadline still wins over the timeout
-    CHECK(ListenPoll(s, 2, L"a.exe", 5000 + kListenTimeoutMs) == ListenEvent::Target);
-}
-
-TEST_CASE("listen: a stopped state never fires") {
-    CHECK(ListenPoll(ListenState{}, 99, L"a.exe", 1u << 30) == ListenEvent::Pending);
-}
-
-TEST_CASE("listen: clicking the listening chip again cancels, the other chip switches") {
-    ListenState s = ListenClick(ListenState{}, FixKind::Lock, 7, 100);
-    CHECK(s.active);
-    CHECK(s.kind == FixKind::Lock);
-    CHECK(s.baseActivations == 7);
-    ListenState other = ListenClick(s, FixKind::Pass, 9, 200);               // switch: restarts from NOW
-    CHECK(other.active);
-    CHECK(other.kind == FixKind::Pass);
-    CHECK(other.baseActivations == 9);
-    CHECK(other.startMs == 200);
-    ListenState off = ListenClick(s, FixKind::Lock, 8, 300);                 // re-click: silent cancel
-    CHECK_FALSE(off.active);
-    // the activation that happened while listening did not make a target after a cancel
-    CHECK(ListenPoll(off, 20, L"a.exe", 400) == ListenEvent::Pending);
-}
-
-TEST_CASE("listen: the pulse is a slow soft 0..1 wave, 1.2 s a cycle, easing in from 0") {
-    CHECK(ListenPulse(0) == doctest::Approx(0.0f));
-    CHECK(ListenPulse(kListenPulseMs / 2) == doctest::Approx(1.0f));
-    CHECK(ListenPulse(kListenPulseMs) == doctest::Approx(0.0f));
-    for (unsigned long long t = 0; t < 3000; t += 7) {
-        const float p = ListenPulse(t);
-        CHECK(p >= 0.0f);
-        CHECK(p <= 1.0f);
+TEST_CASE("centring: every row's margins match for any mix of chips, at every count") {
+    const std::vector<std::vector<int>> mixes = {
+        { 2, 1, 1 }, { 1, 2, 1 }, { 1, 1, 2 }, { 2, 2 }, { 2, 2, 2 }, { 1, 2, 2, 1 }, { 1, 1, 1, 1, 2, 1 } };
+    for (const auto& m : mixes) {
+        const Geometry g = ComputeGeometry(false, 0, m, 40);
+        size_t i = 0;
+        while (i < g.chip.size()) {
+            size_t j = i;
+            while (j + 1 < g.chip.size() && g.chip[j + 1].t == g.chip[i].t) ++j;
+            int l = 0, r = 0;
+            RowMargins(g, i, j, &l, &r);
+            CHECK(l == r);
+            CHECK(l >= 0);
+            i = j + 1;
+        }
     }
-    CHECK(ListenPulse(300) < ListenPulse(600));
 }
 
-// ---------------------------------------------------------------- tray icon badges
-
-TEST_CASE("icon badge: paints a dot at the bottom right and leaves the rest of the logo alone") {
-    const int w = 16, h = 16;
-    std::vector<unsigned char> px((size_t)w * h * 4, 0);
-    for (size_t i = 0; i < px.size(); i += 4) { px[i] = 200; px[i + 1] = 100; px[i + 2] = 50; px[i + 3] = 255; }
-    const std::vector<unsigned char> before = px;
-    TrayBadge::Paint(px.data(), w, h, false, true, 1.f);
-    auto at = [&](int x, int y) { return &px[((size_t)y * w + x) * 4]; };
-    CHECK(px != before);
-    CHECK(std::equal(at(0, 0), at(0, 0) + 4, &before[0]));                    // top left untouched
-    CHECK(std::equal(at(1, 14), at(1, 14) + 4, &before[((size_t)14 * w + 1) * 4]));
-    const unsigned char* c = at(w - 5, h - 5);                                // the dot centre is teal
-    CHECK(c[1] > c[2]);                                                       // g > r: teal, not the orange logo
-    CHECK(c[3] == 255);
-}
-
-TEST_CASE("icon badge: a dimmer pulse frame paints less teal than the brightest") {
-    auto tealAt = [](float amt) {
-        std::vector<unsigned char> px(16 * 16 * 4, 0);
-        for (size_t i = 3; i < px.size(); i += 4) px[i] = 255;
-        TrayBadge::Paint(px.data(), 16, 16, false, true, amt);
-        return (int)px[((size_t)11 * 16 + 11) * 4 + 1];                       // green channel at the dot centre
-    };
-    CHECK(tealAt(0.35f) < tealAt(1.0f));
-}
-
-TEST_CASE("icon badge: pulse frames cycle between 0.35 and 1") {
-    float lo = 9, hi = -9;
-    for (int f = 0; f < 6; ++f) {
-        const float a = TrayBadge::PulseAmount(f, 6);
-        lo = (std::min)(lo, a); hi = (std::max)(hi, a);
+TEST_CASE("centring: a row never holds more than four slots") {
+    const Geometry g = ComputeGeometry(false, 0, std::vector<int>{ 1, 1, 1, 1, 1, 1, 1, 1, 1 }, 40);
+    for (size_t i = 0; i < g.chip.size(); ++i) {
+        int inRow = 0;
+        for (const IRect& c : g.chip) if (c.t == g.chip[i].t) ++inRow;
+        CHECK(inRow <= kChipsPerRow);
     }
-    CHECK(lo == doctest::Approx(0.35f));
-    CHECK(hi <= 1.0f);
-    CHECK(hi > 0.9f);
 }
 
-TEST_CASE("icon badge: the pause mark is light bars on a dark disc, and tiny images are left alone") {
-    std::vector<unsigned char> px(16 * 16 * 4, 0);
-    for (size_t i = 3; i < px.size(); i += 4) px[i] = 255;
-    TrayBadge::Paint(px.data(), 16, 16, true, false, 0.f);
-    bool light = false, dark = false;
-    for (size_t i = 0; i < px.size(); i += 4) {
-        if (px[i] > 200 && px[i + 1] > 200) light = true;
-        if (px[i] > 5 && px[i] < 40) dark = true;
-    }
-    CHECK(light);
-    CHECK(dark);
-    std::vector<unsigned char> tiny(4 * 4 * 4, 7);
-    TrayBadge::Paint(tiny.data(), 4, 4, true, true, 1.f);
-    CHECK(tiny[0] == 7);
-    TrayBadge::Paint(nullptr, 16, 16, true, true, 1.f);                        // no crash
+TEST_CASE("layout: no chips, no chip rows; the window with 3 chips keeps its height") {
+    CHECK(ComputeGeometry(true, 2, std::vector<int>{ 1, 1, 1 }, 40).height == 283);
+    CHECK(ComputeGeometry(false, 0, std::vector<int>{}, 40).chip.empty());
+}
+
+// ---------------------------------------------------------------- chip rows: hit testing
+
+TEST_CASE("hit test: the whole wide chip is one hit, the gap and the margins are none") {
+    const Geometry g = ComputeGeometry(false, 0, std::vector<int>{ 1, 1, 2 }, 40);
+    const IRect& e = g.chip[2];
+    const int my = (e.t + e.b) / 2;
+    CHECK(HitTest(g, e.l + 1, my) == Hit{ HitKind::Chip, 2 });                 // the icon end
+    CHECK(HitTest(g, (e.l + e.r) / 2, my) == Hit{ HitKind::Chip, 2 });         // the text
+    CHECK(HitTest(g, e.r - 1, my) == Hit{ HitKind::Chip, 2 });                 // the chevron end
+    CHECK(HitTest(g, e.r, my).kind == HitKind::None);
+    CHECK(HitTest(g, e.l - 1, my) == Hit{ HitKind::None, -1 });                // the gap before it
+    CHECK(HitTest(g, g.chip[0].l - 3, my).kind == HitKind::None);              // the left margin
+    CHECK(HitTest(g, g.chip[0].l, g.chip[0].t) == Hit{ HitKind::Chip, 0 });
+    CHECK(HitTest(g, g.chip[1].l, g.chip[1].t) == Hit{ HitKind::Chip, 1 });
+}
+
+TEST_CASE("hit test: chips of a centred partial row are hit where they are drawn") {
+    const Geometry g = ComputeGeometry(false, 0, std::vector<int>(5, 1), 40);
+    const IRect& c = g.chip[4];
+    CHECK(HitTest(g, (c.l + c.r) / 2, (c.t + c.b) / 2) == Hit{ HitKind::Chip, 4 });
+    CHECK(HitTest(g, g.chip[0].l, c.t + 2).kind == HitKind::None);             // where a left-aligned chip used to be
+}
+
+// ---------------------------------------------------------------- chip rows: keyboard
+
+TEST_CASE("keyboard: Left and Right walk the chips in order and stop at the ends") {
+    const Geometry g = ComputeGeometry(false, 0, std::vector<int>{ 1, 1, 2, 1 }, 40);
+    CHECK(ChipNeighbor(g, 0, +1, 0) == 1);
+    CHECK(ChipNeighbor(g, 3, +1, 0) == 3);
+    CHECK(ChipNeighbor(g, 0, -1, 0) == 0);
+    CHECK(ChipNeighbor(g, 2, -1, 0) == 1);
+}
+
+TEST_CASE("keyboard: Up and Down move to the nearest chip of the row above or below") {
+    // 1,1,2 | 1  : row one has three chips (the third is the wide engine chip), row two has one
+    const Geometry g = ComputeGeometry(false, 0, std::vector<int>{ 1, 1, 2, 1 }, 40);
+    REQUIRE(g.chip[3].t > g.chip[0].t);
+    CHECK(ChipNeighbor(g, 0, 0, +1) == 3);
+    CHECK(ChipNeighbor(g, 2, 0, +1) == 3);
+    CHECK(ChipNeighbor(g, 3, 0, -1) == 1);   // the row-two chip is centred, nearest above is the second chip or the engine
+    CHECK(ChipNeighbor(g, 3, 0, +1) == 3);   // no row below: stays
+    CHECK(ChipNeighbor(g, 0, 0, -1) == 0);   // no row above: stays
 }

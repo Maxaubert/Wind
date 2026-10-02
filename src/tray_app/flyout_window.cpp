@@ -140,8 +140,7 @@ struct ListState {
     Flyout::ListGeometry geo;
     Flyout::ListView view;
     bool leaveTracked = false;
-    bool engine = false;        // the engine dropdown's list (else the profile list)
-    std::string engineKey;      // which per-window engine row a pick writes
+    bool engine = false;        // the main-engine dropdown's list (else the profile list)
 };
 
 State* g_f = nullptr;
@@ -166,12 +165,9 @@ void RebuildView(State& s) {
     if (TrayBlockValid(blk)) n = blk->ticks.snapshot(buf, TickStats::kCap);
     const Flyout::Hit hover = s.view.hover, focus = s.view.focus;
     const bool showFocus = s.view.showFocus;
-    Flyout::ToolsInput tools;
-    TrayForeground fg;
-    if (ReadTrayForeground(blk, fg)) tools.fgCategory = fg.category;
-    tools.paused = TrayPaused(blk);
-    tools.listening = ToolsListening();
-    s.view = Flyout::BuildView(s.ini, s.layout, st, buf, n, s.profile, s.dark, tools);
+    s.view = Flyout::BuildView(s.ini, s.layout, st, buf, n, s.profile, s.dark);
+    for (auto& t : s.view.toggles)
+        if (t.kind == Flyout::ChipKind::Engine) t.open = g_list && g_list->engine;
     s.view.hover = hover;
     s.view.focus = focus;
     s.view.showFocus = showFocus;
@@ -190,7 +186,7 @@ AnimTargets TargetsOf(const State& s) {
     const Flyout::Hit& hv = s.view.hover;
     const bool held = s.down.kind != Flyout::HitKind::None && s.down == hv && s.drag < 0;
     for (size_t i = 0; i < n; ++i) {
-        const bool me = hv.kind == Flyout::HitKind::Chip && hv.index == (int)i && !s.view.toggles[i].disabled;
+        const bool me = hv.kind == Flyout::HitKind::Chip && hv.index == (int)i;
         t.chipHot[i] = me ? 1.f : 0.f;
         t.chipPress[i] = (me && held) ? 1.f : 0.f;
         t.chipOn[i] = s.view.toggles[i].on ? 1.f : 0.f;
@@ -205,7 +201,6 @@ AnimTargets TargetsOf(const State& s) {
 
 bool AnimSettled(const State& s, const AnimTargets& t) {
     if (s.fade < 1.f) return false;
-    for (const auto& tv : s.view.toggles) if (tv.listening) return false;   // the soft pulse
     for (size_t i = 0; i < t.chipHot.size(); ++i)
         if (s.chipHot[i] != t.chipHot[i] || s.chipPress[i] != t.chipPress[i] || s.chipOn[i] != t.chipOn[i]) return false;
     for (int b = 0; b < 3; ++b) if (s.btnHot[b] != t.btnHot[b] || s.btnPress[b] != t.btnPress[b]) return false;
@@ -245,7 +240,6 @@ void Render(State& s) {
     }
     Flyout::AnimView& a = s.view.anim;
     a.active = true;
-    a.pulse = s.animOn ? Flyout::ListenPulse(ToolsListenElapsedMs()) : 0.6f;
     a.chipHot = s.chipHot; a.chipPress = s.chipPress; a.chipOn = s.chipOn;
     for (int b = 0; b < 3; ++b) { a.btnHot[b] = s.btnHot[b]; a.btnPress[b] = s.btnPress[b]; }
     s.sf.alpha = (BYTE)(s.fade * 255.f + .5f);
@@ -342,24 +336,13 @@ void DragTo(State& s, LPARAM l, bool final) {
 }
 
 void OpenEngineList(State& s, int chip, bool keyboard);
+void CloseList();
 
 void ToggleChip(State& s, int i) {
     if (i < 0 || i >= (int)s.view.toggles.size()) return;
     const Flyout::ToggleView& t = s.view.toggles[i];
-    switch (t.kind) {
-        case Flyout::ChipKind::Engine: OpenEngineList(s, i, false); break;
-        case Flyout::ChipKind::Listen:
-            ToolsListenClick(t.key == "fixPass" ? 1 : 0);   // start, cancel (re-click) or switch; silent
-            RebuildView(s);
-            Render(s);
-            break;
-        case Flyout::ChipKind::Pause:
-            ToolsTogglePause();
-            RebuildView(s);
-            Render(s);
-            break;
-        default: Commit(s, Flyout::ToggleChanges(t.key, !t.on), true); break;
-    }
+    if (t.kind == Flyout::ChipKind::Engine) OpenEngineList(s, i, false);
+    else Commit(s, Flyout::ToggleChanges(t.key, !t.on), true);
 }
 
 // ---------------------------------------------------------------- profile list popup
@@ -369,13 +352,18 @@ void CloseList() {
     DestroyWindow(g_list->sf.hwnd);       // WM_DESTROY frees the state
 }
 
-// A pick in the engine list: a SESSION change exactly like Settings (live ini only, nothing saved).
+// A pick in the engine list: writes `model` (a session change, like Settings) and restarts Wind.
+// Pending slider writes land first so the restart cannot lose them; the flyout closes because Wind
+// (and with it this tray process) is replaced.
 void ChooseEngine(int idx) {
     if (!g_list || !g_f || idx < 0 || idx >= (int)g_list->view.names.size()) return;
-    const std::string key = g_list->engineKey, val = Flyout::EnginePrefValue(idx);
     const bool same = idx == g_list->view.active;
+    const std::wstring ini = g_f->iniPath;
     CloseList();
-    if (!same) Commit(*g_f, { { key, val } }, true);
+    if (same) return;
+    FlushPending(*g_f);
+    CloseFlyout();
+    SetMainEngine(ini, idx);
 }
 
 void ChooseProfile(int idx) {
@@ -421,18 +409,19 @@ LRESULT CALLBACK ListProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             ls->sf.Release();
             g_list = nullptr;
             delete ls;
+            if (g_f && !g_f->closing) { RebuildView(*g_f); Render(*g_f); }   // the engine chip is closed again
             return 0;
     }
     return DefWindowProcW(h, m, w, l);
 }
 
 // Creates and shows the list popup `ls` (geometry and view already set) above `anchor` (DIPs, window origin).
-void ShowList(State& s, ListState* ls, const Flyout::IRect& b, const wchar_t* title) {
+void ShowList(State& s, ListState* ls, const Flyout::IRect& b, const wchar_t* title, bool below = false) {
     ls->sf.pw = Flyout::ScalePx(ls->geo.width, s.dpi);
     ls->sf.ph = Flyout::ScalePx(ls->geo.height, s.dpi);
     const Flyout::IRect anchor{ s.sf.pos.x + Flyout::ScalePx(b.l, s.dpi), s.sf.pos.y + Flyout::ScalePx(b.t, s.dpi),
                                 s.sf.pos.x + Flyout::ScalePx(b.r, s.dpi), s.sf.pos.y + Flyout::ScalePx(b.b, s.dpi) };
-    const Flyout::Placement pl = Flyout::PlaceList(anchor, s.work, ls->sf.pw, ls->sf.ph, Flyout::ScalePx(4, s.dpi));
+    const Flyout::Placement pl = Flyout::PlaceList(anchor, s.work, ls->sf.pw, ls->sf.ph, Flyout::ScalePx(4, s.dpi), below);
     ls->sf.pos = { pl.x, pl.y };
 
     if (!g_listCls) {
@@ -478,28 +467,25 @@ void OpenList(State& s, bool keyboard) {
     ShowList(s, ls, s.geo.profileBtn, L"Wind profiles");
 }
 
-// The engine chip's dropdown: Auto / Transform / Render for the kind of window that was in front,
-// captioned with that kind. While the main engine is not Auto it holds only the caption ("Main
-// engine: Render"), since the per-window rows do nothing then.
+// The engine dropdown's list, under the wide chip (above it when there is no room below): Auto,
+// Render, Transform, System, the same order and labels as the Settings row, the active one checked.
 void OpenEngineList(State& s, int chip, bool keyboard) {
     if (g_list || chip < 0 || chip >= (int)s.geo.chip.size()) return;
     auto* ls = new ListState;
     ls->engine = true;
-    ls->engineKey = s.view.engine.key;
     ls->view.dark = s.dark;
-    ls->view.caption = s.view.engine.caption;
     int widest = 0;
-    if (s.view.engine.enabled) {
-        for (int i = 0; i < 3; ++i) {
-            ls->view.names.push_back(Flyout::EnginePrefLabel(i));
-            widest = (std::max)(widest, Flyout::MeasureProfileText(ls->view.names.back()));
-        }
-        ls->view.active = s.view.engine.pref;
-        ls->view.sel = keyboard ? ls->view.active : -1;
+    for (int i = 0; i < Flyout::kEngineCount; ++i) {
+        ls->view.names.push_back(Flyout::EngineLabel(i));
+        widest = (std::max)(widest, Flyout::MeasureProfileText(ls->view.names.back()));
     }
-    ls->geo = Flyout::ComputeList((int)ls->view.names.size(), widest,
-                                  (std::max)(1, Flyout::MeasureProfileText(ls->view.caption)));
-    ShowList(s, ls, s.geo.chip[chip], L"Wind engine");
+    auto mi = s.ini.find(Flyout::kEngineKey);
+    ls->view.active = Flyout::EngineIndex(mi == s.ini.end() ? std::string() : mi->second);
+    ls->view.sel = keyboard ? ls->view.active : -1;
+    ls->geo = Flyout::ComputeList(Flyout::kEngineCount, widest);
+    ShowList(s, ls, s.geo.chip[chip], L"Wind engine", true);
+    RebuildView(s);       // the chip shows its list as open
+    Render(s);
 }
 
 // Keys while the list is open: it owns Up/Down/Enter/Space/Esc and swallows the rest.
@@ -571,9 +557,9 @@ bool OnKey(State& s, WPARAM vk, LPARAM l) {
                 return true;
             }
             if (f.kind == Flyout::HitKind::Chip && vk != VK_HOME && vk != VK_END) {
-                const int nc = (int)s.geo.chip.size();
-                const int step = (vk == VK_LEFT || vk == VK_RIGHT) ? 1 : Flyout::kChipsPerRow;   // Up/Down: a row
-                const int to = (std::min)((std::max)(f.index + ((vk == VK_RIGHT || vk == VK_DOWN) ? step : -step), 0), nc - 1);
+                const int to = (vk == VK_LEFT || vk == VK_RIGHT)
+                    ? Flyout::ChipNeighbor(s.geo, f.index, vk == VK_RIGHT ? 1 : -1, 0)
+                    : Flyout::ChipNeighbor(s.geo, f.index, 0, vk == VK_DOWN ? 1 : -1);   // Up/Down: the row above or below
                 s.view.focus = { Flyout::HitKind::Chip, to };
                 Render(s);
                 return true;
@@ -734,8 +720,7 @@ bool OpenFlyout() {
     s->dpi = (int)dx;
 
     RebuildView(*s);
-    s->geo = Flyout::ComputeGeometry(s->view.perf, (int)s->view.sliders.size(), (int)s->view.toggles.size(),
-                                     Flyout::MeasureProfileText(s->view.profile));
+    s->geo = Flyout::ComputeGeometry(s->view, Flyout::MeasureProfileText(s->view.profile));
     const int pw = Flyout::ScalePx(s->geo.width, s->dpi), ph = Flyout::ScalePx(s->geo.height, s->dpi);
     const Flyout::IRect mr{ mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right, mi.rcMonitor.bottom };
     s->work = { mi.rcWork.left, mi.rcWork.top, mi.rcWork.right, mi.rcWork.bottom };

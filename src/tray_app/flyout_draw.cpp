@@ -32,7 +32,7 @@ struct Shared {
     ComPtr<ID2D1Factory> d2d;
     ComPtr<IDWriteFactory> dw;
     ComPtr<IWICImagingFactory> wic;
-    ComPtr<IDWriteTextFormat> sans28, mono12, mono12b;
+    ComPtr<IDWriteTextFormat> sans28, mono12, mono12b, mono11;
     std::vector<BYTE> auroraDark, auroraLight;   // premultiplied BGRA, 1920 x 300
     UINT aw = 0, ah = 0;
     std::map<std::string, ComPtr<ID2D1PathGeometry>> icons;
@@ -195,6 +195,7 @@ bool DrawInit() {
     if (!MakeFormat(sans, 28.f, DWRITE_FONT_WEIGHT_MEDIUM, g_s.sans28)) return false;
     if (!MakeFormat(mono, 12.f, DWRITE_FONT_WEIGHT_NORMAL, g_s.mono12)) return false;
     if (!MakeFormat(mono, 12.f, DWRITE_FONT_WEIGHT_SEMI_BOLD, g_s.mono12b)) return false;
+    if (!MakeFormat(mono, 11.f, DWRITE_FONT_WEIGHT_NORMAL, g_s.mono11)) return false;   // the engine dropdown's value
     LoadAurora();
     g_s.ok = true;
     return true;
@@ -202,7 +203,7 @@ bool DrawInit() {
 
 void DrawShutdown() {
     g_s.icons.clear();
-    g_s.sans28.Reset(); g_s.mono12.Reset(); g_s.mono12b.Reset();
+    g_s.sans28.Reset(); g_s.mono12.Reset(); g_s.mono12b.Reset(); g_s.mono11.Reset();
     g_s.wic.Reset(); g_s.dw.Reset(); g_s.d2d.Reset();
     g_s.auroraDark.clear(); g_s.auroraLight.clear();
     g_s.ok = false;
@@ -451,24 +452,33 @@ void Painter::Impl::drawQuick(const View& v, const Geometry& g) {
         const ToggleView& t = v.toggles[i];
         const bool hot = v.hover.kind == HitKind::Chip && v.hover.index == (int)i;
         const D2D1_RECT_F r = R(g.chip[i]);
-        const float cx = (r.left + r.right) / 2.f - 8.f, cy = (r.top + r.bottom) / 2.f - 8.f;
-        if (t.disabled) {   // the engine chip while the main engine is not Auto: dimmed, no hover
-            fillRound(r, 8.f, Mix(th.lift, th.off, .55f));
-            icon(t.icon, cx, cy, Mix(th.lift, th.offic, .4f), 1.75f);
-            continue;
-        }
         const AnimView& a = v.anim;
         const bool anim = a.active && i < a.chipHot.size() && i < a.chipOn.size() && i < a.chipPress.size();
-        // Cross-faded: hover mixes the *h colours in, the ON amount mixes the on colours in. A listening
-        // chip borrows the ON look at a soft pulsing amount (a still frame holds it at 0.6).
+        // Cross-faded: hover mixes the *h colours in, the ON amount mixes the on colours in.
         const float h = anim ? a.chipHot[i] : (hot ? 1.f : 0.f);
-        float o = anim ? a.chipOn[i] : (t.on ? 1.f : 0.f);
-        if (t.listening) o = (std::max)(o, 0.1f + 0.8f * (a.active ? a.pulse : 0.6f));
+        if (t.kind == ChipKind::Engine) {
+            // The main-engine DROPDOWN (#315): a wide field, not a button. A resting hairline border,
+            // the engine glyph at the left, the current choice as text and a chevron at the right
+            // (which flips while its list is open). It never reads as ON.
+            const float hh = t.open ? 1.f : h;
+            if (anim) pressBegin(r, t.open ? 0.f : a.chipPress[i]);
+            fillRound(r, 8.f, Mix(th.off, th.offh, hh));
+            ring(r, 8.f, WithAlpha(th.chipb, .55f + .45f * hh));
+            const D2D1_COLOR_F ink = Mix(th.offic, th.fg, hh);
+            icon(t.icon, r.left + 8.f, (r.top + r.bottom) / 2.f - 8.f, ink, 1.75f);
+            text(t.value, g_s.mono11.Get(), D2D1::RectF(r.left + 27.f, r.top, r.right - 16.f, r.bottom),
+                 Mix(th.fg2, th.fg, hh), DWRITE_TEXT_ALIGNMENT_LEADING);
+            icon(t.open ? "chevup" : "chevdown", r.right - 4.f - 16.f, (r.top + r.bottom) / 2.f - 8.f, ink, 1.5f);
+            if (anim) pressEnd();
+            continue;
+        }
+        const float o = anim ? a.chipOn[i] : (t.on ? 1.f : 0.f);
         if (anim) pressBegin(r, a.chipPress[i]);
         fillRound(r, 8.f, Mix(Mix(th.off, th.offh, h), Mix(th.on, th.onh, h), o));
         if (o > 0.f) ring(r, 8.f, WithAlpha(th.onb, th.onb.a * o));
         if (h > 0.f && o < 1.f) ring(r, 8.f, WithAlpha(th.chipb, h * (1.f - o)));
-        icon(t.icon, cx, cy, Mix(Mix(th.offic, th.fg, h), th.onic, o), 1.75f);
+        icon(t.icon, (r.left + r.right) / 2.f - 8.f, (r.top + r.bottom) / 2.f - 8.f,
+             Mix(Mix(th.offic, th.fg, h), th.onic, o), 1.75f);
         if (anim) pressEnd();
     }
 }
@@ -647,7 +657,7 @@ static bool RenderFrameToPng(int wDip, int hDip, bool dark, int dpi, const wchar
 
 bool RenderToPng(const View& v, int profileTextW, int dpi, const wchar_t* path) {
     if (!DrawInit()) return false;
-    const Geometry g = ComputeGeometry(v.perf, (int)v.sliders.size(), (int)v.toggles.size(), profileTextW);
+    const Geometry g = ComputeGeometry(v, profileTextW);
     return RenderFrameToPng(g.width, g.height, v.dark, dpi, path, [&](Painter& p) { p.Draw(v, g); });
 }
 

@@ -67,17 +67,10 @@ static DWORD WINAPI Supervisor(LPVOID) {
 }
 
 TrayShared* Start(const std::wstring& appDir) {
-    // A model relaunch overlaps the old Wind and this one, and the old mapping (an older layout,
-    // #315) may still be open and smaller than ours: mapping our size then fails. It goes away when
-    // that Wind exits, so retry briefly instead of running with no tray data for the whole session.
-    for (int attempt = 0; attempt < 6 && !g_block; ++attempt) {
-        if (attempt) Sleep(100);
-        g_map = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0,
-                                   (DWORD)sizeof(TrayShared), kTrayBlockName);
-        if (g_map) g_block = static_cast<TrayShared*>(
-            MapViewOfFile(g_map, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, sizeof(TrayShared)));
-        if (!g_block && g_map) { CloseHandle(g_map); g_map = nullptr; }
-    }
+    g_map = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0,
+                               (DWORD)sizeof(TrayShared), kTrayBlockName);
+    if (g_map) g_block = static_cast<TrayShared*>(
+        MapViewOfFile(g_map, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, sizeof(TrayShared)));
     if (g_block) {
         // A mapping left open by the previous Wind (a model relaunch overlaps the two) keeps its
         // old values: clear the tray-written flag, then stamp ours.
