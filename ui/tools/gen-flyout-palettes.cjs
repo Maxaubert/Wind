@@ -97,7 +97,13 @@ for (const [id, mid] of ORDER) {
   const p = all[mid];
   const d = Object.assign({}, id === 'grey' ? GREY.dark : derive(p.dark)), l = Object.assign({}, id === 'grey' ? GREY.light : derive(p.light));
   // #320: the window outline, rules, control outline and separators 30% closer to the surface (not High contrast).
-  if (id !== 'hicon') for (const m of [d, l]) for (const n of ['menub', 'rule', 'ring', 'segline']) m[n] = mixN(m[n], m.lift, 0.7);
+  // Section rules + window border fade more than in Settings (Max: the sections looked segregated); the
+  // control outline and separators use the Settings chipb factor.
+  const TF = { grey: { dark: 0.45, light: 0.12 }, ember: { dark: 0.30, light: 0.12 }, ocean: { dark: 0.45, light: 0.12 } };
+  if (id !== 'hicon') for (const [m, md] of [[d, 'dark'], [l, 'light']]) {
+    for (const n of ['menub', 'rule']) m[n] = mixN(m[n], m.lift, md === 'dark' ? 0.35 : 0.65);
+    for (const n of ['ring', 'segline']) m[n] = mixN(m[n], m.lift, 1 - TF[id][md]);
+  }
   out += `    { "${id}", ${px(p.radii.rc)}, ${px(p.radii.rk)}, ${px(p.radii.rs)},\n      ${mode(d)},\n      ${mode(l)} },\n`;
 }
 out += `};
