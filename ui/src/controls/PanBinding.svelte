@@ -74,7 +74,7 @@
 
 <div class="bx" role="group" aria-labelledby={labelledby && labelledby.split(' ')[0]} aria-describedby={describedby}>
   {#if state.kind === 'none'}
-    <button type="button" class="kc ghost" class:live={armed} {disabled} id={valueId}
+    <button type="button" class="kc ghost pan" class:live={armed} {disabled} id={valueId}
             aria-label={armed ? 'Recording pan modifiers' : 'Set pan modifiers'}
             aria-describedby="{describedby ?? ''} {uid}-hint"
             onclick={arm} onblur={() => cancel()}>
