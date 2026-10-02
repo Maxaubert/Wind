@@ -15,7 +15,7 @@ hotkeys, profile dialogs), `ia08.html` + `palettes08.cjs`, `palettes-b1.cjs`, `p
 3. Session model still holds: every new UI control is a session change except keybinds (persist at once,
    as today); `uiPalette` and `showAdvanced` are global and survive profile switches.
 4. Advanced rows hidden when the switch is off but found by search; no section with fewer than 2 rows.
-5. Every theme x mode in Settings and in the tray flyout render test; Cyberpunk selected states solid yellow.
+5. Every theme x mode (grey, ember, ocean, hicon; dark and light) in Settings and in the tray flyout render test.
 
 ## Tasks
 1. **Core** (`src/config.*`, `src/input_router.*`, `src/main.cpp`, `src/profiles.cpp`): button codes 6/7 =
@@ -30,10 +30,9 @@ hotkeys, profile dialogs), `ia08.html` + `palettes08.cjs`, `palettes-b1.cjs`, `p
    and the unset state, Extra keys switches (dim the binding when off).
 4. **Preferences** (`ui/src/general/*` or a new `ui/src/prefs/*`): Mode three-way, Profile dropdown with
    trash + confirm dialog and the New dialog, Troubleshooting section; theme tokens
-   `ui/src/design/themes.css` generated from the mockup palettes (8 themes x 2 modes) applied by
+   `ui/src/design/themes.css` generated from the mockup palettes (4 themes x 2 modes (grey, ember, ocean, hicon)) applied by
    `uiPalette` + mode; a plain temporary one-row theme picker (final layout comes from Max's mockup pick).
-5. **Tray theming** (`src/tray_app/flyout_*`): `flyout_palettes.h` with the same 8 x 2 palettes, the
-   flyout reads `uiPalette`/`uiTheme` on open, sharp radii for cyber/hicon/carbon, solid yellow selected
-   segments for cyber; render-test flag `--palette <id>`.
+5. **Tray theming** (`src/tray_app/flyout_*`): `flyout_palettes.h` with the same 4 x 2 palettes, the
+   flyout reads `uiPalette`/`uiTheme` on open, sharp radii for hicon; render-test flag `--palette <id>`.
 6. **Docs, version, PR**: spec/plan final, CLAUDE.md notes, `src/version.h` 0.19.0, gates, push, PR that
    closes #318 and says it stacks on #316.

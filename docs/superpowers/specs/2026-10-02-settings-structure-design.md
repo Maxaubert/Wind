@@ -47,8 +47,13 @@ Round 2 of the Settings redesign (#303 / PR #312). Every decision Max made is lo
 ## 3. Preferences
 - **Mode**: three-way System / Light / Dark (equal-width segments, selected one clearly filled). Ini key
   `uiTheme` keeps its values (`auto` = System, `light`, `dark`).
-- **Theme**: new global ini key `uiPalette` = `grey` (default) | `ember` | `cyber` | `b1_mono` -> `mono` |
-  `slate` | `carbon` | `hicon` | `ocean`. Unknown reads as grey. Like `uiTheme` it is a GLOBAL, UI-only key:
+- **THEMES ARE FOUR (Max, 2026-10-02; this supersedes any list of eight elsewhere, task prompts included):**
+  `grey` (Wind grey), `ember` (Ember), `ocean` (Deep ocean, tokens from palettes-b2 `b2_ocean`), `hicon`
+  (High contrast, tokens from palettes-b1 `b1_hicon`, ALWAYS LAST). Cyberpunk, Mono, Slate and Carbon are
+  NOT built. The picker is mockup option A (wind-settings-mockups/ia/picker.html#A, picker.css): one row of mini
+  window preview cards (each drawn in its own theme colours) with the name under it, the selected card
+  outlined; four fit, so no scrolling, no arrow buttons, no edge fades.
+- **Theme**: new global ini key `uiPalette` = `grey` (default) | `ember` | `ocean` | `hicon`. Unknown reads as grey. Like `uiTheme` it is a GLOBAL, UI-only key:
   listed in IsGlobalProfileKey (src/profiles.cpp), stripped from the core config text (src/config.cpp), and
   ignored by the core hot-reload (src/main.cpp). The picker takes one row (layout chosen
   from the picker mockups, built last).
@@ -56,8 +61,7 @@ Round 2 of the Settings redesign (#303 / PR #312). Every decision Max made is lo
   with a confirm dialog; New opens a dialog (name, start from current settings or default settings).
 - Themes restyle Settings AND the tray flyout. Settings: CSS tokens per theme x mode generated from the
   mockup palettes (`ui/src/design/themes.css`). Tray: the flyout reads `uiPalette` + `uiTheme` and uses a
-  C++ palette table with the same values (`src/tray_app/flyout_palettes.h`), including the sharp radii of
-  Cyberpunk, High contrast and Carbon and Cyberpunk's solid yellow selected segments.
+  C++ palette table with the same values (`src/tray_app/flyout_palettes.h`), including the sharp radii of High contrast.
 
 ## 4. Out of scope
 Profile rename (open question to Max), the theme picker layout (pending mockup choice), any new setting

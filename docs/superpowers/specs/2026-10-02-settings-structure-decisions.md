@@ -70,3 +70,8 @@
   Slate (b1_slate), Carbon (b1_carbon), High contrast (b1_hicon), Deep ocean (b2_ocean). Tokens in
   palettes08.cjs + palettes-b1.cjs + palettes-b2.cjs. The theme list in Settings must take ONE row (layout
   being mocked up in picker.html). Build started 2026-10-02.
+- FINAL THEMES, REVISED (Max, 2026-10-02): only FOUR, in this order: Wind grey (grey), Ember (ember),
+  Deep ocean (ocean), High contrast (hicon, always last). Cyberpunk, Mono, Slate and Carbon are dropped.
+  With 4 themes the picker fits one row without scrolling.
+- Theme picker layout (Max): option A cards (picker.html#A): one row of mini window preview cards with the
+  name under each, selected card outlined; with four themes no scrolling and no arrow buttons are needed.
