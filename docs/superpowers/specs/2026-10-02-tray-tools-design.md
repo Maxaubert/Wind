@@ -14,8 +14,9 @@ no tooltips) is unchanged.
 - The `engine` item of the Toggles list (Settings > Tray menu, "Magnifier engine", off by default) is
   a **dropdown**, not a button and not a toggle. It is never disabled.
 - It sets the main engine ini key `model`, with the options, order and labels of the Settings
-  "Magnifier engine" row (`ui/src/settings-schema.js`): **Auto** (`hybrid`), **Render**, **Transform**,
-  **System** (`magnify`). A missing or unknown value reads as Auto, like the core.
+  "Magnifier engine" row (`ui/src/settings-schema.js`): **Auto** (`hybrid`), **Render**, **Transform**.
+  System (`magnify`) was dropped from the tray AND Settings by Max (2026-10-02); the core now reads
+  `model=magnify` as Auto. A missing or unknown value reads as Auto, like the core.
 - Look (v02): a full content-width, 32 DIP field in `--off`: engine glyph at the left, the current value
   as mono 12 text ("Transform") next to it, a chevron at the right that flips up while the list is open,
   and a 1 px `--onb` inset ring while open. It never takes the ON colour.
@@ -89,3 +90,9 @@ lists the engine item and none of the removed ones. Render test: `WindTray.exe -
 (`--hover toggle:1|engine|settings|quit|profile`), and `--engine-list --model transform` for the open list.
 Manual: tray, engine dropdown, pick Transform: Wind restarts, the dropdown reads Transform, Settings shows the
 unsaved capsule; Discard returns to the saved engine.
+
+## Keep cursor centred (Max, 2026-10-02)
+The `keepEdges` toggle was renamed "Keep cursor centred" because "Keep within the edges" did not say it
+chooses between a centred cursor and one that moves freely to the edges. Its meaning is inverted to match:
+ON = `mouseAlign` and `trackAlign` both 0 (centred); a mixed hand-edited state reads OFF; a click writes
+both. The key stays `keepEdges` so saved tray layouts keep working.

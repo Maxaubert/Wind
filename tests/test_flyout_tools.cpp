@@ -13,16 +13,14 @@ using namespace wind::Flyout;
 // ---------------------------------------------------------------- engine dropdown
 
 TEST_CASE("engine: the options are the Settings main-engine row, same order and labels") {
-    CHECK(kEngineCount == 4);
+    CHECK(kEngineCount == 3);
     CHECK(std::string(kEngineKey) == "model");
     CHECK(std::string(EngineValue(0)) == "hybrid");
     CHECK(std::string(EngineValue(1)) == "render");
     CHECK(std::string(EngineValue(2)) == "transform");
-    CHECK(std::string(EngineValue(3)) == "magnify");
     CHECK(std::wstring(EngineLabel(0)) == L"Auto");
     CHECK(std::wstring(EngineLabel(1)) == L"Render");
     CHECK(std::wstring(EngineLabel(2)) == L"Transform");
-    CHECK(std::wstring(EngineLabel(3)) == L"System");
 }
 
 TEST_CASE("engine: every option value is one the core accepts as is") {
@@ -36,7 +34,7 @@ TEST_CASE("engine: a model value maps to its option, unknown reads as Auto like 
     CHECK(EngineIndex("hybrid") == 0);
     CHECK(EngineIndex("render") == 1);
     CHECK(EngineIndex("transform") == 2);
-    CHECK(EngineIndex("magnify") == 3);
+    CHECK(EngineIndex("magnify") == 0);      // System is no longer offered: reads as Auto
     CHECK(EngineIndex(" transform ") == 2);
     CHECK(EngineIndex("") == 0);
     CHECK(EngineIndex("junk") == 0);
@@ -69,7 +67,7 @@ TEST_CASE("view: the engine item is the dropdown, not a toggle segment, and show
 TEST_CASE("view: a missing or unknown model reads Auto, and the dropdown is never disabled by it") {
     CHECK(ViewWith("engine").engine.value == L"Auto");
     CHECK(ViewWith("engine", { { "model", "junk" } }).engine.value == L"Auto");
-    CHECK(ViewWith("engine", { { "model", "magnify" } }).engine.value == L"System");
+    CHECK(ViewWith("engine", { { "model", "magnify" } }).engine.value == L"Auto");
     CHECK(ViewWith("engine", { { "model", "render" } }).engine.value == L"Render");
     CHECK(ViewWith("engine", { { "model", "junk" } }).hasEngine);
 }

@@ -15,13 +15,14 @@ namespace wind { namespace Flyout {
 inline constexpr const char* kEngineKey = "model";
 
 // The options, in the order and with the labels of the Settings row (ui/src/settings-schema.js:
-// hybrid = Auto, render, transform, magnify = System).
-inline constexpr int kEngineCount = 4;
+// hybrid = Auto, render, transform). System (magnify) is not offered any more (Max, 2026-10-02); the
+// core reads model=magnify as Auto.
+inline constexpr int kEngineCount = 3;
 inline const char* EngineValue(int i) {
-    switch (i) { case 1: return "render"; case 2: return "transform"; case 3: return "magnify"; default: return "hybrid"; }
+    switch (i) { case 1: return "render"; case 2: return "transform"; default: return "hybrid"; }
 }
 inline const wchar_t* EngineLabel(int i) {
-    switch (i) { case 1: return L"Render"; case 2: return L"Transform"; case 3: return L"System"; default: return L"Auto"; }
+    switch (i) { case 1: return L"Render"; case 2: return L"Transform"; default: return L"Auto"; }
 }
 
 inline std::string TrimWs(const std::string& s) {

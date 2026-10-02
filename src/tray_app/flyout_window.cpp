@@ -473,7 +473,7 @@ void OpenList(State& s, bool keyboard) {
 }
 
 // The engine dropdown's list, under the field and as wide as it (above it when there is no room
-// below): Auto, Render, Transform, System, the same order and labels as the Settings row, the active
+// below): Auto, Render, Transform, the same order and labels as the Settings row, the active
 // one checked.
 void OpenEngineList(State& s, bool keyboard) {
     if (g_list || s.geo.engine.w() <= 0) return;

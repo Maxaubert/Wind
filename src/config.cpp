@@ -320,8 +320,9 @@ Config ParseConfig(const std::string& text) {
     // "transform" is a first-class model again (revived for issue #148: the compositor-internal
     // zoom that stays smooth over heavy games); anything unknown falls back to hybrid, the
     // product default ("Auto" in the UI) - same fallback as a missing key (struct default).
-    if (c.model != "render" && c.model != "magnify" && c.model != "transform" &&
-        c.model != "hybrid") c.model = "hybrid";
+    // "magnify" (System, the Windows Magnifier driver) is no longer offered (Max, 2026-10-02): an old
+    // ini that still says so runs Auto. The engine code stays, it just cannot be picked.
+    if (c.model != "render" && c.model != "transform" && c.model != "hybrid") c.model = "hybrid";
     // (The old transform/hybrid maxLevel<=12 clamp is GONE: the "TDR territory above 12x" was
     // root-caused 2026-07-26 to NVIDIA's 16-bit MPO plane-programming overflow - see issue
     // #148 - which the mapper's MPO-aware pan wall now guards at ANY level, so maxLevel is one

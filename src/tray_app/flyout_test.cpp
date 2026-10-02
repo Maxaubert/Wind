@@ -6,7 +6,7 @@
 //   --hover K[:I]      hover state: toggle:1, engine, settings, quit, profile
 //   --tools            adds the #315 engine dropdown under the toggle group
 //   --toggles a,b,c    the enabled toggle keys, in order (trackCaret, trackFocus, keepEdges, engine)
-//   --model M          the main engine shown on the dropdown: hybrid (Auto), render, transform, magnify (System)
+//   --model M          the main engine shown on the dropdown: hybrid (Auto), render, transform
 //   --engine-open      the dropdown drawn open (chevron up, ring)
 //   --engine-list      renders the engine list popup instead of the flyout (the active row is --model)
 // Fake data: zoom 7.4x at 144 fps, Warmth 40%, Brightness 72%, all three toggles shown (text cursor

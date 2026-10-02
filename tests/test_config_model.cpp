@@ -8,9 +8,9 @@ TEST_CASE("model defaults to hybrid (the product default, 'Auto' in the UI)") {
     CHECK(c.model == "hybrid");
 }
 
-TEST_CASE("model=magnify parses") {
+TEST_CASE("model=magnify (System, no longer offered) reads as Auto") {
     Config c = ParseConfig("model=magnify\n");
-    CHECK(c.model == "magnify");
+    CHECK(c.model == "hybrid");
 }
 
 TEST_CASE("magnifyStep parses and clamps to Windows' 5..400 range") {

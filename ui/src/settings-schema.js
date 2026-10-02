@@ -133,8 +133,8 @@ export const groups = [
       { caption: 'Engine', rows: [
         { key: 'model', type: 'engine', label: 'Magnifier engine',
           desc: 'Auto picks the best engine for the app in front. Restart to switch.',
-          options: ['hybrid', 'render', 'transform', 'magnify'],
-          optionLabels: { hybrid: 'Auto', render: 'Render', transform: 'Transform', magnify: 'System' },
+          options: ['hybrid', 'render', 'transform'],
+          optionLabels: { hybrid: 'Auto', render: 'Render', transform: 'Transform' },
           def: 'hybrid' },
         // PER-WINDOW-TYPE ENGINE (2026-08-24). Every row defaults to Auto so an untouched install
         // behaves as before. They only apply when the engine above is Auto, so showIf hides them

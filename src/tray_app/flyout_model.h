@@ -272,7 +272,7 @@ inline const ToggleSpec* FindToggleSpec(const std::string& key) {
     static const ToggleSpec k[] = {
         { "trackCaret", L"Follow the text cursor",  "ftc" },
         { "trackFocus", L"Follow keyboard focus",   "ffk" },
-        { "keepEdges",  L"Keep within the edges",   "edges" },
+        { "keepEdges",  L"Keep cursor centred",     "edges" },
         { "engine",     L"Magnifier engine",        "engine" },
     };
     for (const auto& t : k) if (key == t.key) return &t;
@@ -325,10 +325,11 @@ inline int IniInt(const IniValues& v, const char* key, int def) {
     return ParseDouble(v, key, d) ? (int)d : def;
 }
 
-// "Keep within the edges" is ONE chip for two settings: it reads ON only when BOTH mouseAlign and
-// trackAlign are 1, so a hand-edited mixed state reads OFF (and a click then sets both).
+// "Keep cursor centred" (key keepEdges, kept so saved tray layouts still work) is ONE segment for two
+// settings: it reads ON only when BOTH mouseAlign and trackAlign are 0 (centred), so a hand-edited
+// mixed state reads OFF (and a click then sets both). Renamed and inverted by Max, 2026-10-02.
 inline bool ToggleOn(const std::string& key, const IniValues& ini) {
-    if (key == "keepEdges") return IniInt(ini, "mouseAlign", 0) == 1 && IniInt(ini, "trackAlign", 0) == 1;
+    if (key == "keepEdges") return IniInt(ini, "mouseAlign", 0) == 0 && IniInt(ini, "trackAlign", 0) == 0;
     if (key == "trackCaret") return IniInt(ini, "trackCaret", 1) != 0;
     if (key == "trackFocus") return IniInt(ini, "trackFocus", 0) != 0;
     return false;
@@ -516,12 +517,15 @@ inline std::string FormatIniValue(const SliderSpec& s, double v) {
     return b;
 }
 
-// One ini write. Toggling "Keep within the edges" is two of them (mouseAlign and trackAlign).
+// One ini write. Toggling "Keep cursor centred" is two of them (mouseAlign and trackAlign, 0 = centred).
 struct IniChange { std::string key, value; };
 
 inline std::vector<IniChange> ToggleChanges(const std::string& key, bool turnOn) {
     const char* v = turnOn ? "1" : "0";
-    if (key == "keepEdges") return { { "mouseAlign", v }, { "trackAlign", v } };
+    if (key == "keepEdges") {
+        const char* a = turnOn ? "0" : "1";           // centred = 0
+        return { { "mouseAlign", a }, { "trackAlign", a } };
+    }
     return { { key, v } };
 }
 

@@ -233,11 +233,15 @@ TEST_CASE("every eligible slider and toggle has a spec and an icon") {
     CHECK(IconPath("quit") != nullptr);
 }
 
-TEST_CASE("keep within the edges reads ON only when both alignment keys are 1") {
-    CHECK_FALSE(ToggleOn("keepEdges", {}));
+TEST_CASE("keep cursor centred reads ON only when both alignment keys are 0, and writes both") {
+    CHECK(ToggleOn("keepEdges", {}));
     CHECK_FALSE(ToggleOn("keepEdges", { { "mouseAlign", "1" }, { "trackAlign", "0" } }));
     CHECK_FALSE(ToggleOn("keepEdges", { { "mouseAlign", "0" }, { "trackAlign", "1" } }));
-    CHECK(ToggleOn("keepEdges", { { "mouseAlign", "1" }, { "trackAlign", "1" } }));
+    CHECK_FALSE(ToggleOn("keepEdges", { { "mouseAlign", "1" }, { "trackAlign", "1" } }));
+    const auto on = ToggleChanges("keepEdges", true), off = ToggleChanges("keepEdges", false);
+    REQUIRE(on.size() == 2);
+    CHECK(on[0].value == "0"); CHECK(on[1].value == "0");
+    CHECK(off[0].value == "1"); CHECK(off[1].value == "1");
 }
 
 TEST_CASE("toggle defaults follow the core: caret on, focus off") {
@@ -265,7 +269,7 @@ TEST_CASE("view: only enabled, known items appear, in layout order") {
     CHECK(v.toggles[0].key == "trackCaret");
     CHECK(v.toggles[0].on);
     CHECK(v.toggles[1].key == "keepEdges");
-    CHECK_FALSE(v.toggles[1].on);
+    CHECK(v.toggles[1].on);                               // no align keys = centred = Keep cursor centred ON
     CHECK(v.profile == L"Work");
     CHECK_FALSE(v.perf);
 }

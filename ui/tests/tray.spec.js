@@ -84,7 +84,7 @@ test('tab: TRAY section label, banner, performance card and both lists', async (
   await expect(page.locator('#cap-sliders')).toHaveText('Sliders');
   await expect(page.locator('#cap-toggles')).toHaveText('Toggles');
   expect(await names(page, 'sliders')).toEqual(['Warmth', 'Brightness', 'Max zoom', 'Zoom-in speed', 'Zoom-out speed', 'Pan speed', 'Pan smoothing', 'Release glide']);
-  expect(await names(page, 'toggles')).toEqual(['Follow the text cursor', 'Follow keyboard focus', 'Keep within the edges', 'Magnifier engine']);
+  expect(await names(page, 'toggles')).toEqual(['Follow the text cursor', 'Follow keyboard focus', 'Keep cursor centred', 'Magnifier engine']);
   await expect(page.locator('[data-cnt="sliders"]')).toHaveText('2 of 4');
   await expect(page.locator('[data-cnt="toggles"]')).toHaveText('0 on');
   await expect(chk(page, 'sliders', 'Warmth')).toHaveAttribute('aria-checked', 'true');
@@ -138,7 +138,7 @@ test('slider cap: at four the unchecked boxes are disabled with a note, unchecki
   await rowsOf(page, 'sliders').filter({ hasText: 'Zoom-in speed' }).locator('.k').click();   // row click is refused too
   expect((await live(page)).traySliders).toBe(before);
   // toggles are not capped
-  for (const n of ['Follow the text cursor', 'Follow keyboard focus', 'Keep within the edges']) await chk(page, 'toggles', n).click();
+  for (const n of ['Follow the text cursor', 'Follow keyboard focus', 'Keep cursor centred']) await chk(page, 'toggles', n).click();
   await expect(page.locator('[data-cnt="toggles"]')).toHaveText('3 on');
   await chk(page, 'sliders', 'Warmth').click();
   await expect(page.locator('[data-cnt="sliders"]')).toHaveText('3 of 4');
@@ -179,15 +179,15 @@ test('drag reorders the Sliders list and writes the order, enabled flags kept', 
 test('drag reorders the Toggles list, and a row dragged in one list stays in it', async ({ page }) => {
   await page.setViewportSize({ width: 1120, height: 1100 });   // the whole Sliders card in view: the drag spans all eight rows
   await open(page);
-  await dragRow(page, 'toggles', 'Keep within the edges', 'Follow the text cursor');
-  await expect.poll(() => names(page, 'toggles')).toEqual(['Keep within the edges', 'Follow the text cursor', 'Follow keyboard focus', 'Magnifier engine']);
+  await dragRow(page, 'toggles', 'Keep cursor centred', 'Follow the text cursor');
+  await expect.poll(() => names(page, 'toggles')).toEqual(['Keep cursor centred', 'Follow the text cursor', 'Follow keyboard focus', 'Magnifier engine']);
   expect((await live(page)).trayToggleOrder).toBe('keepEdges,trackCaret,trackFocus,engine');
   // a slider row dragged to the bottom of its own list lands last and leaves the Toggles card alone
   await dragRow(page, 'sliders', 'Warmth', 'Release glide');
   await expect.poll(async () => (await names(page, 'sliders')).at(-1)).toBe('Warmth');
   expect(await rowsOf(page, 'toggles').count()).toBe(4);
   expect(await rowsOf(page, 'sliders').count()).toBe(8);
-  expect(await names(page, 'toggles')).toEqual(['Keep within the edges', 'Follow the text cursor', 'Follow keyboard focus', 'Magnifier engine']);
+  expect(await names(page, 'toggles')).toEqual(['Keep cursor centred', 'Follow the text cursor', 'Follow keyboard focus', 'Magnifier engine']);
 });
 
 test('keyboard: Space picks up, arrows move, Space drops; Escape cancels', async ({ page }) => {
@@ -209,12 +209,12 @@ test('keyboard: Space picks up, arrows move, Space drops; Escape cancels', async
   await page.keyboard.press('Escape');
   await expect.poll(async () => (await names(page, 'sliders')).slice(0, 3)).toEqual(['Brightness', 'Max zoom', 'Warmth']);
   // toggles list: move the last one to the top
-  await grip('toggles', 'Keep within the edges').focus();
+  await grip('toggles', 'Keep cursor centred').focus();
   await page.keyboard.press('Space');
   await page.keyboard.press('ArrowUp');
   await page.keyboard.press('ArrowUp');
   await page.keyboard.press('Space');
-  await expect.poll(() => names(page, 'toggles')).toEqual(['Keep within the edges', 'Follow the text cursor', 'Follow keyboard focus', 'Magnifier engine']);
+  await expect.poll(() => names(page, 'toggles')).toEqual(['Keep cursor centred', 'Follow the text cursor', 'Follow keyboard focus', 'Magnifier engine']);
   expect((await live(page)).trayToggleOrder).toBe('keepEdges,trackCaret,trackFocus,engine');
 });
 
@@ -227,7 +227,7 @@ test('the saved lists load back from the ini', async ({ page }) => {
   await expect(chk(page, 'sliders', 'Zoom-out speed')).toHaveAttribute('aria-checked', 'true');
   await expect(chk(page, 'sliders', 'Warmth')).toHaveAttribute('aria-checked', 'false');
   await expect(page.locator('[data-cnt="sliders"]')).toHaveText('1 of 4');
-  await expect(chk(page, 'toggles', 'Keep within the edges')).toHaveAttribute('aria-checked', 'true');
+  await expect(chk(page, 'toggles', 'Keep cursor centred')).toHaveAttribute('aria-checked', 'true');
 });
 
 test('search finds the Performance row and jumps to the tray tab', async ({ page }) => {
@@ -255,7 +255,7 @@ test('removed tools: Mouse lock, Pass keys and Pause Wind are gone, and old ini 
     trayToggles: 'trackCaret,fixLock,pause,fixPass', trayToggleOrder: 'pause,fixPass,fixLock,trackCaret,keepEdges' }; });
   await open(page);
   const n = await names(page, 'toggles');
-  expect(n).toEqual(['Follow the text cursor', 'Keep within the edges', 'Follow keyboard focus', 'Magnifier engine']);
+  expect(n).toEqual(['Follow the text cursor', 'Keep cursor centred', 'Follow keyboard focus', 'Magnifier engine']);
   for (const gone of ['Mouse lock', 'Pass keys', 'Pause Wind']) expect(n.some((x) => x.includes(gone))).toBe(false);
   await expect(page.locator('[data-cnt="toggles"]')).toHaveText('1 on');
 });
