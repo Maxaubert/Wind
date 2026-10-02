@@ -317,6 +317,9 @@ struct TickState {
     double panelX = 0, panelY = 0; // its desktop position (sub-pixel)
     RECT   panelSavedClip{};       // the clip to give back when the panel closes
     double viewVx = 0, viewVy = 0; // tracking spring velocity (trackGlideMode=1)
+    // trackLog diagnostics (#326): the last logged caret seq and the last tracking-enable reason.
+    unsigned diagSeq = 0;
+    int diagEnableBits = -1;
     HCURSOR bodyCursor = nullptr;  // edge mode: the cursor cursorBody was measured from
     wind::CursorBody cursorBody;   // its visible body around the hotspot (desktop px)
     unsigned long long lastButtonMs = 0;   // last tick a mouse button was down (click quiet period)
@@ -1775,6 +1778,16 @@ static void RunTick(TickState& t) {
         const bool trackEnabled = lvl > 1.001 && !panel && !inspect && !t.detector.locked() && !fsCover &&
                                   (t.cfg.trackCaret != 0 || t.cfg.trackFocus != 0);
         g_track.setActive(trackEnabled, t.cfg.trackCaret != 0, t.cfg.trackFocus != 0, t.cfg.trackLog != 0);
+        if (t.cfg.trackLog) {   // #326: why tracking is on or off, logged on every change
+            const int bits = (lvl > 1.001 ? 1 : 0) | (panel ? 2 : 0) | (inspect ? 4 : 0) |
+                             (t.detector.locked() ? 8 : 0) | (fsCover ? 16 : 0);
+            if (bits != t.diagEnableBits) {
+                t.diagEnableBits = bits;
+                wind::Log(wind::LogLevel::Info, "track", "diag enabled=%d zoomed=%d panel=%d inspect=%d locked=%d fsCover=%d lvl=%.2f",
+                          trackEnabled ? 1 : 0, bits & 1 ? 1 : 0, bits & 2 ? 1 : 0, bits & 4 ? 1 : 0,
+                          bits & 8 ? 1 : 0, bits & 16 ? 1 : 0, lvl);
+            }
+        }
         // Keyboard panning (#287): only presses the hook swallowed count (a key that went to the app
         // at 1x never pans after a zoom-in mid-press); without the hook, the polled combo.
         const bool panEnabled = panArmed && !panel;
@@ -1810,7 +1823,22 @@ static void RunTick(TickState& t) {
             vi.dtMs = dt * 1000.0;
             vi.snap = g_track.snapshot();
             const wind::ViewOwner was = t.viewOwner.owner;
+            const unsigned diagTargetSeqBefore = t.viewOwner.target.seq;
             const wind::ViewOwner owner = wind::StepViewOwner(t.viewOwner, vi);
+            if (t.cfg.trackLog && vi.snap.seq != t.diagSeq) {   // #326: every caret/focus event, with the gate inputs
+                t.diagSeq = vi.snap.seq;
+                const bool latched = t.viewOwner.target.seq == vi.snap.seq && t.viewOwner.target.seq != diagTargetSeqBefore;
+                double ax = -1, ay = -1;
+                const wind::TrackRect drc{ vi.snap.l - t.mon.x, vi.snap.t - t.mon.y, vi.snap.r - t.mon.x, vi.snap.b - t.mon.y };
+                wind::TrackTargetCenter(drc, t.viewCx, t.viewCy, lvl, t.mon.w, t.mon.h, t.cfg.trackAlign, t.cfg.trackMarginPct, ax, ay);
+                static const char* kOwn[] = { "mouse", "caret", "focus", "keys" };
+                wind::Log(wind::LogLevel::Info, "track",
+                          "diag evt seq=%u kind=%d rect=%.0f,%.0f-%.0f,%.0f owner=%s latched=%d msKey=%.0f msBtn=%.0f en=%d lvl=%.2f view=%.0f,%.0f (%s) aim=%.0f,%.0f viewW=%.0f",
+                          vi.snap.seq, (int)vi.snap.kind, drc.l, drc.t, drc.r, drc.b, kOwn[(int)owner], latched ? 1 : 0,
+                          vi.msSinceKey, vi.msSinceButton, vi.enabled ? 1 : 0, lvl,
+                          t.viewDetached ? t.viewCx : r.centerX, t.viewDetached ? t.viewCy : r.centerY,
+                          t.viewDetached ? "detached" : "mouse", ax, ay, t.mon.w / lvl);
+            }
             if (owner != was && t.cfg.trackLog) {
                 static const char* kName[] = { "mouse", "caret", "focus", "keys" };
                 wind::Log(wind::LogLevel::Info, "track", "view %s -> %s%s", kName[(int)was], kName[(int)owner],
