@@ -29,7 +29,7 @@ Mouse lock and Pass keys listen chips (pulse on chip and tray icon; target = nex
 state when `model` is not Auto; icons in the terminal line style; render-test cases.
 
 ### Task 4: Settings Tray menu tab
-`ui/src/tray/*`: three new list items with icons (no background) and descriptions; Playwright tests.
+`ui/src/tray/*`: four new list items (Engine for the app in front, Mouse lock (listen), Pass keys (listen), Pause Wind) with icons (no background) and descriptions; Playwright tests.
 
 ### Task 5: Docs, version, PR
 Spec table, architecture tray chapter, CLAUDE.md tray notes; `src/version.h` 0.18.0; gates; push; PR
