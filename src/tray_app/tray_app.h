@@ -32,6 +32,9 @@ int RunRenderTest(const wchar_t* cmdLine);
 // instance), pumps messages until it closes or 20 s pass. For checking placement and dismissal.
 int RunFlyoutTest();
 
+// chime.cpp - the rising (enabled) / falling (disabled) chime for the listen chips; async, never a system sound.
+void PlayChime(bool enabled);
+
 // tray_menu.cpp - what the flyout's buttons do (no UI of their own).
 bool UsesDarkTheme(const std::string& iniText);   // Wind's uiTheme; anything but dark/light = system
 bool ConfirmQuit(const std::wstring& ini);        // the unsaved-settings prompt; false = cancelled

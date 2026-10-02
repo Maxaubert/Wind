@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Wind chime candidates</title>
+<style>
+  :root{color-scheme:light dark;--bg:#fff;--fg:#1b1b1f;--card:#f3f3f6;--line:#d8d8e0;--acc:#2f6fed}
+  @media (prefers-color-scheme:dark){:root{--bg:#16161a;--fg:#ececf1;--card:#212127;--line:#34343c;--acc:#7aa2ff}}
+  body{margin:0;padding:24px 16px;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,sans-serif}
+  main{max-width:560px;margin:0 auto}
+  p{opacity:.75}
+  section{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:12px 0}
+  h2{font-size:1rem;margin:0 0 10px}
+  button{font:inherit;color:var(--fg);background:transparent;border:1px solid var(--line);border-radius:8px;padding:6px 14px;margin-right:8px;cursor:pointer}
+  button:hover{border-color:var(--acc)}
+  button:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+</style></head><body><main>
+<h1>Wind chime candidates</h1>
+<p>Enabled is two soft notes rising, Disabled is the same notes falling. The chosen pair is copied to assets/sounds/chime_on.wav and chime_off.wav.</p>
+    <section>
+      <h2>Default: warm bell</h2>
+      <button data-src="../chime_on.wav">Enabled</button>
+      <button data-src="../chime_off.wav">Disabled</button>
+      <button data-both="../chime_on.wav|../chime_off.wav">Both</button>
+    </section>
+    <section>
+      <h2>Glassy</h2>
+      <button data-src="glassy_on.wav">Enabled</button>
+      <button data-src="glassy_off.wav">Disabled</button>
+      <button data-both="glassy_on.wav|glassy_off.wav">Both</button>
+    </section>
+    <section>
+      <h2>Soft marimba</h2>
+      <button data-src="marimba_on.wav">Enabled</button>
+      <button data-src="marimba_off.wav">Disabled</button>
+      <button data-both="marimba_on.wav|marimba_off.wav">Both</button>
+    </section>
+    <section>
+      <h2>Airy pluck</h2>
+      <button data-src="pluck_on.wav">Enabled</button>
+      <button data-src="pluck_off.wav">Disabled</button>
+      <button data-both="pluck_on.wav|pluck_off.wav">Both</button>
+    </section>
+</main>
+<script>
+  let a;
+  function play(src){ if(a){a.pause();} a=new Audio(src); a.play(); return a; }
+  document.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
+    if(b.dataset.src){ play(b.dataset.src); }
+    else { const [x,y]=b.dataset.both.split('|'); play(x).addEventListener('ended',()=>setTimeout(()=>play(y),350)); }
+  }));
+</script></body></html>
