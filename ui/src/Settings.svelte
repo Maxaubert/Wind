@@ -47,7 +47,10 @@
   $effect(() => { if (loaded) setDirty(dirty); });   // the host's WM_CLOSE guard follows the UI
 
   // The built-in theme (uiPalette, a global key) picks the token block in design/themes.css. Always dark (#324).
-  const palette = $derived(normalizePalette(values.uiPalette));
+  // Until the session is loaded, use the palette the host injected with the first-paint config (window.__windInit),
+  // so the very first frame already has the user's theme instead of Wind grey's tokens.
+  const initPalette = normalizePalette(window.__windInit && window.__windInit.values && window.__windInit.values.uiPalette);
+  const palette = $derived(loaded ? normalizePalette(values.uiPalette) : initPalette);
 
   // --- Screen-reader announcements ------------------------------------------------------------
   let announcement = $state('');
@@ -283,7 +286,7 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="wnd app" data-palette={palette}>
+<div class="wnd app" class:pending={!loaded} data-palette={palette}>
   <TitleBar {maximized} onMinimize={() => windowControl('minimize')} onMaximize={() => windowControl('maximize')} onClose={requestClose} />
   <div class="body">
     <Sidebar groups={top} {bottom} active={searching ? '' : activeId} version={VERSION} {query} {onSearch}
@@ -397,6 +400,8 @@
 </div>
 
 <style>
+  /* Hidden until the session is loaded, so no empty controls flash; the host paints the theme background behind it. */
+  .app.pending { visibility: hidden; }
   .app { width: 100vw; height: 100vh; display: grid; grid-template-rows: 38px 1fr; position: relative; overflow: hidden; }
   .body { display: grid; grid-template-columns: 240px 1fr; min-height: 0; }
   .main { position: relative; min-height: 0; overflow-y: auto; padding: 0 40px; outline: none; }
