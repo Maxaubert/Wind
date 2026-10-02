@@ -52,6 +52,7 @@ order them. Stacks on the Settings redesign (#303, PR #312).
 | Toggle | Follow the text cursor | `trackCaret` | I-beam |
 | Toggle | Follow keyboard focus | `trackFocus` | focus brackets |
 | Toggle | Keep within the edges | `mouseAlign` AND `trackAlign` together | pointer inside a frame |
+| Dropdown | Magnifier engine | `model` (restarts Wind), a wide chip | engine glyph (added by #315) |
 
 Chosen by Max item by item (2026-10-01). "Keep within the edges" is ONE toggle for both alignment
 settings: on writes `mouseAlign=1` and `trackAlign=1` ("Within the edges"), off writes both 0

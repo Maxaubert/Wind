@@ -22,16 +22,16 @@
   <nav aria-label="Settings sections">
     {#each groups as g (g.id)}{@render row(g)}{/each}
   </nav>
-  <div class="adv">
-    <div class="lbl">Expert</div>
-    {#each expert as g (g.id)}{@render row(g)}{/each}
-  </div>
   {#if tray.length}
     <div class="grp2">
       <div class="lbl">Tray</div>
       {#each tray as g (g.id)}{@render row(g)}{/each}
     </div>
   {/if}
+  <div class="adv">
+    <div class="lbl">Expert</div>
+    {#each expert as g (g.id)}{@render row(g)}{/each}
+  </div>
 </aside>
 
 <style>

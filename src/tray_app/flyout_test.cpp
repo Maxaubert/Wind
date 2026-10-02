@@ -3,7 +3,12 @@
 // references in docs/design/tray-2026-10 without a desktop session or a running Wind.
 //   --light            the light theme (default dark)
 //   --dpi N            scale (96 = 1x, 192 = 2x like the reference PNGs)
-//   --hover K[:I]      hover state: chip:1, settings, quit, profile
+//   --hover K[:I]      hover state: toggle:1, engine, settings, quit, profile
+//   --tools            adds the #315 engine dropdown under the toggle group
+//   --toggles a,b,c    the enabled toggle keys, in order (trackCaret, trackFocus, keepEdges, engine)
+//   --model M          the main engine shown on the dropdown: hybrid (Auto), render, transform
+//   --engine-open      the dropdown drawn open (chevron up, ring)
+//   --engine-list      renders the engine list popup instead of the flyout (the active row is --model)
 // Fake data: zoom 7.4x at 144 fps, Warmth 40%, Brightness 72%, all three toggles shown (text cursor
 // on, focus off, keep-within-edges on), profile "Default", Performance on.
 #include "tray_app.h"
@@ -23,14 +28,23 @@ int RunRenderTest(const wchar_t*) {
     bool light = false;
     int dpi = 96;
     Flyout::Hit hover;
+    bool tools = false, engineList = false, engineOpen = false;
+    std::string toggles, model = "hybrid";
+    auto narrow = [](const wchar_t* c) { std::string o; for (; *c; ++c) o.push_back((char)*c); return o; };
     for (int i = 1; i < argc; ++i) {
         const std::wstring a = argv[i];
         if (a == L"--render-test" && i + 1 < argc) out = argv[++i];
         else if (a == L"--light") light = true;
+        else if (a == L"--tools") tools = true;
+        else if (a == L"--engine-list") engineList = true;
+        else if (a == L"--engine-open") engineOpen = true;
+        else if (a == L"--toggles" && i + 1 < argc) toggles = narrow(argv[++i]);
+        else if (a == L"--model" && i + 1 < argc) model = narrow(argv[++i]);
         else if (a == L"--dpi" && i + 1 < argc) dpi = (std::max)(96, _wtoi(argv[++i]));
         else if (a == L"--hover" && i + 1 < argc) {
             const std::wstring k = argv[++i];
-            if (k.rfind(L"chip", 0) == 0) hover = { Flyout::HitKind::Chip, k.size() > 5 ? _wtoi(k.c_str() + 5) : 0 };
+            if (k.rfind(L"toggle", 0) == 0) hover = { Flyout::HitKind::Toggle, k.size() > 7 ? _wtoi(k.c_str() + 7) : 0 };
+            else if (k == L"engine") hover = { Flyout::HitKind::Engine, 0 };
             else if (k == L"settings") hover = { Flyout::HitKind::Settings, 0 };
             else if (k == L"quit") hover = { Flyout::HitKind::Quit, 0 };
             else if (k == L"profile") hover = { Flyout::HitKind::Profile, 0 };
@@ -39,11 +53,12 @@ int RunRenderTest(const wchar_t*) {
     LocalFree(argv);
     if (out.empty() || !Flyout::DrawInit()) return 2;
 
-    const IniValues ini = {
+    IniValues ini = {
         { "trayPerf", "1" },
         { "colorWarmPct", "40" }, { "colorDimPct", "72" },
-        { "trayToggles", "trackCaret,trackFocus,keepEdges" },
+        { "trayToggles", !toggles.empty() ? toggles : (tools ? "trackCaret,trackFocus,keepEdges,engine" : "trackCaret,trackFocus,keepEdges") },
         { "trackCaret", "1" }, { "trackFocus", "0" }, { "mouseAlign", "1" }, { "trackAlign", "1" },
+        { "model", model },
     };
     TrayStatus st;
     st.level = 7.4;
@@ -51,6 +66,19 @@ int RunRenderTest(const wchar_t*) {
     // A steady 6.94 ms history (the fps and "6.9 ms" readouts come from it).
     for (int i = 0; i < TickStats::kCap; ++i) ticks[i] = 6.94f;
     Flyout::View v = Flyout::BuildView(ini, ParseTrayLayout(ini), st, ticks, TickStats::kCap, L"Default", !light);
+    if (v.hasEngine) v.engine.open = engineOpen;
+    if (engineList) {   // the engine dropdown's open list, built exactly as the live flyout builds it
+        Flyout::ListView lv;
+        lv.dark = !light;
+        int widest = 0;
+        for (int i = 0; i < Flyout::kEngineCount; ++i) {
+            lv.names.push_back(Flyout::EngineLabel(i));
+            widest = (std::max)(widest, Flyout::MeasureProfileText(lv.names.back()));
+        }
+        lv.active = Flyout::EngineIndex(model);
+        const Flyout::ListGeometry lg = Flyout::ComputeList(Flyout::kEngineCount, widest, 0, Flyout::ComputeGeometry(v, 0).engine.w());
+        return Flyout::RenderListToPng(lv, lg, dpi, out.c_str()) ? 0 : 1;
+    }
     v.hover = hover;
     {   // The j01 trace is a gentle low-amplitude wobble, not stalls: the same 17 polyline points the
         // mockup draws (viewBox 0 0 100 14), resampled to 101 evenly spaced samples and mapped to the

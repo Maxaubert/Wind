@@ -32,6 +32,11 @@ int RunRenderTest(const wchar_t* cmdLine);
 // instance), pumps messages until it closes or 20 s pass. For checking placement and dismissal.
 int RunFlyoutTest();
 
+// engine_dropdown.cpp - the flyout's main-engine dropdown (#315): writes `model` to the live ini and
+// restarts the Wind core (no prompt), keeping the unsaved session like Settings does. False = nothing
+// changed (same engine, or the write or relaunch failed, which it reports itself).
+bool SetMainEngine(const std::wstring& ini, int picked);
+
 // tray_menu.cpp - what the flyout's buttons do (no UI of their own).
 bool UsesDarkTheme(const std::string& iniText);   // Wind's uiTheme; anything but dark/light = system
 bool ConfirmQuit(const std::wstring& ini);        // the unsaved-settings prompt; false = cancelled

@@ -44,8 +44,8 @@ D2D1_COLOR_F Col(unsigned rgb, float a = 1.f) {
 }
 
 struct Theme {
-    D2D1_COLOR_F menu, menub, fg, fg2, fg3, rule, hl, glyph, teal, lift, scrim, chipb, band, track;
-    D2D1_COLOR_F off, offh, offic, onic, on, onh, onb;
+    D2D1_COLOR_F menu, card, menub, fg, fg2, fg3, rule, hl, glyph, teal, lift, scrim, band, track;
+    D2D1_COLOR_F off, offh, offic, onic, on, onh, onb, segline;
     float aurora;       // --ac
     bool dark;
 };
@@ -54,20 +54,20 @@ Theme MakeTheme(bool dark) {
     Theme t;
     t.dark = dark;
     if (dark) {
-        t.menu = Col(0x000000); t.menub = Col(0x333333); t.fg = Col(0xf2f2f2); t.fg2 = Col(0xd0d0d0);
+        t.menu = Col(0x000000); t.card = Col(0x121212); t.menub = Col(0x333333); t.fg = Col(0xf2f2f2); t.fg2 = Col(0xd0d0d0);
         t.fg3 = Col(0xb4b6ba); t.rule = Col(0x303236); t.hl = Col(0x2d2d2d); t.glyph = Col(0xb0b0b0);
         t.teal = Col(0x2fbfa5); t.lift = Col(0x0b0b0b); t.scrim = Col(0x000000, .55f);
-        t.chipb = Col(0x3a3a3a); t.band = Col(0x0a0a0a); t.track = Col(0x3d3d3d);
+        t.band = Col(0x0a0a0a); t.track = Col(0x3d3d3d);
         t.off = Col(0x303033); t.offh = Col(0x3b3b3f); t.offic = Col(0xc8cad0); t.onic = Col(0xa9ece0);
-        t.on = Col(0x1f5650); t.onh = Col(0x266560); t.onb = Col(0x2fbfa5, .4f);
+        t.on = Col(0x1f5650); t.onh = Col(0x266560); t.onb = Col(0x2fbfa5, .4f); t.segline = Col(0x000000);
         t.aurora = .62f;
     } else {
-        t.menu = Col(0xffffff); t.menub = Col(0xd9d9d9); t.fg = Col(0x0a0a0a); t.fg2 = Col(0x2e2e2e);
+        t.menu = Col(0xffffff); t.card = Col(0xffffff); t.menub = Col(0xd9d9d9); t.fg = Col(0x0a0a0a); t.fg2 = Col(0x2e2e2e);
         t.fg3 = Col(0x45484d); t.rule = Col(0xc6c9ce); t.hl = Col(0xececec); t.glyph = Col(0x555555);
         t.teal = Col(0x087a67); t.lift = Col(0xf6f7f8); t.scrim = Col(0xffffff, .78f);
-        t.chipb = Col(0xcdcdcd); t.band = Col(0xf1f2f4); t.track = Col(0xd0d3d6);
+        t.band = Col(0xf1f2f4); t.track = Col(0xd0d3d6);
         t.off = Col(0xe5e6e8); t.offh = Col(0xdadbde); t.offic = Col(0x3d4147); t.onic = Col(0x0a5a4d);
-        t.on = Col(0xbfe2db); t.onh = Col(0xb2d9d1); t.onb = Col(0x087a67, .4f);
+        t.on = Col(0xbfe2db); t.onh = Col(0xb2d9d1); t.onb = Col(0x087a67, .4f); t.segline = Col(0xffffff);
         t.aurora = .85f;
     }
     return t;
@@ -250,6 +250,30 @@ struct Painter::Impl {
         br->SetColor(c);
         rt->DrawRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(r.left + .5f, r.top + .5f, r.right - .5f, r.bottom - .5f),
                                                    rad - .5f, rad - .5f), br.Get(), 1.f);
+    }
+    // A rounded rectangle with a radius per corner (the toggle group rounds only its outer ends).
+    ComPtr<ID2D1PathGeometry> cornerPath(const D2D1_RECT_F& r, float tl, float tr, float brr, float bl) {
+        ComPtr<ID2D1PathGeometry> pg;
+        ComPtr<ID2D1GeometrySink> sk;
+        if (FAILED(g_s.d2d->CreatePathGeometry(&pg)) || FAILED(pg->Open(&sk))) return nullptr;
+        auto arc = [&](float x, float y, float rad) {
+            if (rad > 0.f)
+                sk->AddArc(D2D1::ArcSegment(D2D1::Point2F(x, y), D2D1::SizeF(rad, rad), 0.f,
+                                            D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
+        };
+        sk->BeginFigure(D2D1::Point2F(r.left + tl, r.top), D2D1_FIGURE_BEGIN_FILLED);
+        sk->AddLine(D2D1::Point2F(r.right - tr, r.top));    arc(r.right, r.top + tr, tr);
+        sk->AddLine(D2D1::Point2F(r.right, r.bottom - brr)); arc(r.right - brr, r.bottom, brr);
+        sk->AddLine(D2D1::Point2F(r.left + bl, r.bottom));  arc(r.left, r.bottom - bl, bl);
+        sk->AddLine(D2D1::Point2F(r.left, r.top + tl));     arc(r.left + tl, r.top, tl);
+        sk->EndFigure(D2D1_FIGURE_END_CLOSED);
+        sk->Close();
+        return pg;
+    }
+    // Segment `i` of `n`: the outer corners of the first and last segment are rounded, the joins are square.
+    void segRadii(size_t i, size_t n, float rad, float out[4]) const {
+        out[0] = out[3] = (i == 0) ? rad : 0.f;             // tl, bl
+        out[1] = out[2] = (i + 1 == n) ? rad : 0.f;         // tr, br
     }
     D2D1_RECT_F R(const IRect& r) const { return D2D1::RectF((float)r.l, (float)r.t, (float)r.r, (float)r.b); }
 
@@ -447,31 +471,40 @@ void Painter::Impl::drawQuick(const View& v, const Geometry& g) {
         fillRound(D2D1::RectF(x - 3.f, mid - 5.f, x, mid + 5.f), 1.5f, th.fg);
         text(s.text, g_s.mono12.Get(), R(g.sliderValue[i]), th.fg, DWRITE_TEXT_ALIGNMENT_TRAILING);
     }
-    for (size_t i = 0; i < v.toggles.size() && i < g.chip.size(); ++i) {
+    // The toggle group (mockup v02): one bar, the segments stretched to the full width, a 1 px
+    // separator between them (--segline), rounded only at the outer ends. Off = --off, on = --on.
+    const AnimView& a = v.anim;
+    const size_t nseg = (std::min)(v.toggles.size(), g.seg.size());
+    for (size_t i = 0; i < nseg; ++i) {
         const ToggleView& t = v.toggles[i];
-        const bool hot = v.hover.kind == HitKind::Chip && v.hover.index == (int)i;
-        const D2D1_RECT_F r = R(g.chip[i]);
-        const AnimView& a = v.anim;
-        if (a.active && i < a.chipHot.size() && i < a.chipOn.size() && i < a.chipPress.size()) {
-            // cross-faded: hover mixes the *h colours in, the ON amount mixes the on colours in
-            const float h = a.chipHot[i], o = a.chipOn[i];
-            pressBegin(r, a.chipPress[i]);
-            fillRound(r, 8.f, Mix(Mix(th.off, th.offh, h), Mix(th.on, th.onh, h), o));
-            if (o > 0.f) ring(r, 8.f, WithAlpha(th.onb, th.onb.a * o));
-            if (h > 0.f && o < 1.f) ring(r, 8.f, WithAlpha(th.chipb, h * (1.f - o)));
-            icon(t.icon, (r.left + r.right) / 2.f - 8.f, (r.top + r.bottom) / 2.f - 8.f, Mix(Mix(th.offic, th.fg, h), th.onic, o), 1.75f);
-            pressEnd();
-            continue;
+        const bool hot = v.hover.kind == HitKind::Toggle && v.hover.index == (int)i;
+        const D2D1_RECT_F r = R(g.seg[i]);
+        const bool anim = a.active && i < a.chipHot.size() && i < a.chipOn.size();
+        // Cross-faded: hover mixes the *h colours in, the ON amount mixes the on colours in.
+        const float h = anim ? a.chipHot[i] : (hot ? 1.f : 0.f);
+        const float o = anim ? a.chipOn[i] : (t.on ? 1.f : 0.f);
+        float rad[4];
+        segRadii(i, nseg, (float)kSegRadius, rad);
+        if (auto pg = cornerPath(r, rad[0], rad[1], rad[2], rad[3])) {
+            br->SetColor(Mix(Mix(th.off, th.offh, h), Mix(th.on, th.onh, h), o));
+            rt->FillGeometry(pg.Get(), br.Get());
         }
-        if (t.on) {
-            fillRound(r, 8.f, hot ? th.onh : th.on);
-            ring(r, 8.f, th.onb);
-        } else {
-            fillRound(r, 8.f, hot ? th.offh : th.off);
-            if (hot) ring(r, 8.f, th.chipb);
-        }
-        const D2D1_COLOR_F ic = t.on ? th.onic : (hot ? th.fg : th.offic);
-        icon(t.icon, (r.left + r.right) / 2.f - 8.f, (r.top + r.bottom) / 2.f - 8.f, ic, 1.75f);
+        if (i > 0) fill(D2D1::RectF(r.left - (float)kSegLine, r.top, r.left, r.bottom), th.segline);
+        icon(t.icon, (r.left + r.right) / 2.f - 8.f, (r.top + r.bottom) / 2.f - 8.f,
+             Mix(Mix(th.offic, th.fg, h), th.onic, o), 1.75f);
+    }
+    // The engine dropdown (mockup v02): a full-width --off field, the engine glyph and the current
+    // value (mono 12) at the left, a chevron at the right that flips while the list is open, with a
+    // 1 px --onb inset ring while open.
+    if (v.hasEngine && g.engine.w() > 0) {
+        const D2D1_RECT_F r = R(g.engine);
+        const float h = a.active ? a.engHot : (v.hover.kind == HitKind::Engine ? 1.f : 0.f);
+        fillRound(r, (float)kSegRadius, Mix(th.off, th.offh, h));
+        if (v.engine.open) ring(r, (float)kSegRadius, th.onb);
+        icon(v.engine.icon, r.left + 10.f, (r.top + r.bottom) / 2.f - 8.f, th.glyph, 1.5f);
+        text(v.engine.value, g_s.mono12.Get(), D2D1::RectF(r.left + 10.f + 16.f + 10.f, r.top, r.right - 10.f - 14.f - 6.f, r.bottom),
+             th.fg, DWRITE_TEXT_ALIGNMENT_LEADING);
+        icon(v.engine.open ? "chevup" : "chevdown", r.right - 10.f - 14.f - 1.f, (r.top + r.bottom) / 2.f - 8.f, th.offic, 1.75f);
     }
 }
 
@@ -537,7 +570,16 @@ void Painter::Draw(const View& v, const Geometry& g) {
     d.drawBar(v, g);
     if (v.showFocus && v.focus.kind != HitKind::None) {
         const IRect fr = FocusRect(g, v.focus);
-        if (fr.w() > 0) {
+        if (fr.w() > 0 && v.focus.kind == HitKind::Toggle) {
+            // A segment of the group: only the outer ends of the bar are rounded.
+            float rad[4];
+            d.segRadii((size_t)v.focus.index, g.seg.size(), 7.f, rad);
+            if (auto pg = d.cornerPath(D2D1::RectF((float)fr.l + 1.f, (float)fr.t + 1.f, (float)fr.r - 1.f, (float)fr.b - 1.f),
+                                       rad[0], rad[1], rad[2], rad[3])) {
+                d.br->SetColor(d.th.fg);
+                d.rt->DrawGeometry(pg.Get(), d.br.Get(), 2.f);
+            }
+        } else if (fr.w() > 0) {
             d.br->SetColor(d.th.fg);   // the Settings focus colour (--fg), not the accent
             d.rt->DrawRoundedRectangle(D2D1::RoundedRect(D2D1::RectF((float)fr.l + 1.f, (float)fr.t + 1.f,
                                                                     (float)fr.r - 1.f, (float)fr.b - 1.f), 7.f, 7.f),
@@ -553,24 +595,29 @@ void Painter::DrawList(const ListView& v, const ListGeometry& g) {
     const float W = (float)g.width, H = (float)g.height;
     d.rt->SetTransform(D2D1::Matrix3x2F::Identity());
     d.rt->Clear(d.th.menub);
-    d.fill(D2D1::RectF(0, 0, W, H), d.th.menu);
+    d.fill(D2D1::RectF(0, 0, W, H), d.th.card);
+    if (g.caption.w() > 0 && !v.caption.empty())
+        d.text(v.caption, g_s.mono12.Get(),
+               D2D1::RectF((float)g.caption.l + (float)kListTextPad, (float)g.caption.t,
+                           (float)g.caption.r - (float)kListTextPad, (float)g.caption.b),
+               d.th.fg3, DWRITE_TEXT_ALIGNMENT_LEADING);
     for (size_t i = 0; i < v.names.size() && i < g.row.size(); ++i) {
         const D2D1_RECT_F r = d.R(g.row[i]);
-        if ((int)i == v.sel) d.fillRound(r, 8.f, d.th.hl);
+        if ((int)i == v.sel) d.fillRound(r, (float)kListRowRadius, d.th.hl);
         d.text(v.names[i], g_s.mono12.Get(),
                D2D1::RectF(r.left + (float)kListTextPad, r.top, r.right - (float)kListCheckW, r.bottom),
                ((int)i == v.sel || (int)i == v.active) ? d.th.fg : d.th.fg2, DWRITE_TEXT_ALIGNMENT_LEADING);
         if ((int)i == v.active)
-            d.icon("check", r.right - 12.f - 16.f, r.top + (r.bottom - r.top - 16.f) / 2.f, d.th.teal, 1.75f);
+            d.icon("check", r.right - (float)kListCheckInset - 16.f, r.top + (r.bottom - r.top - 16.f) / 2.f, d.th.teal, 1.75f);
     }
-    d.ring(D2D1::RectF(0, 0, W, H), (float)kRadius, d.th.menub);
+    d.ring(D2D1::RectF(0, 0, W, H), (float)kListRadius, d.th.menub);
 }
 
 // ---------------------------------------------------------------- shape alpha
 
-void ApplyShapeAlpha(unsigned char* px, int w, int h, int strideBytes, int dpi, bool premultiply) {
+void ApplyShapeAlpha(unsigned char* px, int w, int h, int strideBytes, int dpi, bool premultiply, int radiusDip) {
     if (!px || w <= 0 || h <= 0) return;
-    const float r = (float)kRadius * (float)dpi / 96.f;
+    const float r = (float)radiusDip * (float)dpi / 96.f;
     const int ri = (int)r + 1;
     for (int y = 0; y < h; ++y) {
         unsigned char* row = px + (size_t)y * strideBytes;
@@ -600,10 +647,12 @@ void ApplyShapeAlpha(unsigned char* px, int w, int h, int strideBytes, int dpi, 
 
 // ---------------------------------------------------------------- png
 
-bool RenderToPng(const View& v, int profileTextW, int dpi, const wchar_t* path) {
+// Paints one window-sized frame with `draw(painter)` (inside BeginDraw/EndDraw) and saves it as a
+// straight-alpha PNG with the rounded corners cut out. Shared by the flyout and the list popup.
+template <class F>
+static bool RenderFrameToPng(int wDip, int hDip, bool dark, int dpi, const wchar_t* path, int radiusDip, F draw) {
     if (!DrawInit()) return false;
-    const Geometry g = ComputeGeometry(v.perf, (int)v.sliders.size(), (int)v.toggles.size(), profileTextW);
-    const UINT pw = (UINT)ScalePx(g.width, dpi), ph = (UINT)ScalePx(g.height, dpi);
+    const UINT pw = (UINT)ScalePx(wDip, dpi), ph = (UINT)ScalePx(hDip, dpi);
     ComPtr<IWICBitmap> bmp;
     if (FAILED(g_s.wic->CreateBitmap(pw, ph, GUID_WICPixelFormat32bppBGR, WICBitmapCacheOnLoad, &bmp))) return false;
     ComPtr<ID2D1RenderTarget> rt;
@@ -612,9 +661,9 @@ bool RenderToPng(const View& v, int profileTextW, int dpi, const wchar_t* path) 
                                                     D2D1::PixelFormat(DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_IGNORE),
                                                     (float)dpi, (float)dpi), &rt))) return false;
     Painter p;
-    if (!p.Init(rt.Get(), v.dark)) return false;
+    if (!p.Init(rt.Get(), dark)) return false;
     rt->BeginDraw();
-    p.Draw(v, g);
+    draw(p);
     if (FAILED(rt->EndDraw())) return false;
 
     // Straight-alpha BGRA with the rounded corners cut out.
@@ -622,7 +671,7 @@ bool RenderToPng(const View& v, int profileTextW, int dpi, const wchar_t* path) 
     if (FAILED(WICConvertBitmapSource(GUID_WICPixelFormat32bppBGRA, bmp.Get(), &conv0))) return false;
     std::vector<BYTE> px((size_t)pw * ph * 4);
     if (FAILED(conv0->CopyPixels(nullptr, pw * 4, (UINT)px.size(), px.data()))) return false;
-    ApplyShapeAlpha(px.data(), (int)pw, (int)ph, (int)pw * 4, dpi, false);
+    ApplyShapeAlpha(px.data(), (int)pw, (int)ph, (int)pw * 4, dpi, false, radiusDip);
     ComPtr<IWICBitmap> outBmp;
     if (FAILED(g_s.wic->CreateBitmapFromMemory(pw, ph, GUID_WICPixelFormat32bppBGRA, pw * 4, (UINT)px.size(),
                                                px.data(), &outBmp))) return false;
@@ -638,6 +687,16 @@ bool RenderToPng(const View& v, int profileTextW, int dpi, const wchar_t* path) 
     if (FAILED(fr->SetSize(pw, ph)) || FAILED(fr->SetPixelFormat(&fmt))) return false;
     if (FAILED(fr->WriteSource(conv.Get(), nullptr)) || FAILED(fr->Commit()) || FAILED(enc->Commit())) return false;
     return true;
+}
+
+bool RenderToPng(const View& v, int profileTextW, int dpi, const wchar_t* path) {
+    if (!DrawInit()) return false;
+    const Geometry g = ComputeGeometry(v, profileTextW);
+    return RenderFrameToPng(g.width, g.height, v.dark, dpi, path, kRadius, [&](Painter& p) { p.Draw(v, g); });
+}
+
+bool RenderListToPng(const ListView& v, const ListGeometry& g, int dpi, const wchar_t* path) {
+    return RenderFrameToPng(g.width, g.height, v.dark, dpi, path, kListRadius, [&](Painter& p) { p.DrawList(v, g); });
 }
 
 }}  // namespace wind::Flyout

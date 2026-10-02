@@ -40,11 +40,14 @@ private:
 };
 
 // The painter draws onto an OPAQUE target (so ClearType text works); this cuts the rounded shape
-// out of the finished pixels: alpha 255 inside, an antialiased 0 outside the kRadius corners.
+// out of the finished pixels: alpha 255 inside, an antialiased 0 outside the corners (kRadius, or kListRadius for the list popup).
 // `premultiply` for UpdateLayeredWindow, false for a straight-alpha PNG. dpi = the target's DPI.
-void ApplyShapeAlpha(unsigned char* bgra, int w, int h, int strideBytes, int dpi, bool premultiply);
+void ApplyShapeAlpha(unsigned char* bgra, int w, int h, int strideBytes, int dpi, bool premultiply,
+                    int radiusDip = kRadius);
 
 // Renders the flyout to a PNG at `dpi` (96 = 1x). False on any failure.
 bool RenderToPng(const View& v, int profileTextW, int dpi, const wchar_t* path);
+// The same for the list popup (profiles, or the engine list with its caption).
+bool RenderListToPng(const ListView& v, const ListGeometry& g, int dpi, const wchar_t* path);
 
 }}  // namespace wind::Flyout
