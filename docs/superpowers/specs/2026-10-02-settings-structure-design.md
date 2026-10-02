@@ -66,3 +66,14 @@ Round 2 of the Settings redesign (#303 / PR #312). Every decision Max made is lo
 ## 4. Out of scope
 Profile rename (open question to Max), the theme picker layout (pending mockup choice), any new setting
 not listed above.
+
+## 5. As built (0.19.0, 2026-10-02)
+- Four themes (`grey ember ocean hicon`) end to end: `kUiPalettes`/`NormalizeUiPalette` (removed ids read as grey),
+  `ui/src/design/themes.css` + `themes.js`, `src/tray_app/flyout_palettes.h`, both generators trimmed to those four.
+  Tests that used the removed themes now use hicon (sharp radii, flyout on-segments).
+- Picker = option A, `ui/src/prefs/ThemePicker.svelte`: four 106 px cards in one row, right-aligned in the Theme row
+  (the row is no longer `wide`), name under each, selected card outlined, no scrolling, arrows or fades; Left/Right
+  moves and applies, focus ring for keyboard only.
+- Tray item names match Settings: Pan speed is Arrow key speed, Magnifier engine is Engine (ini keys unchanged).
+- WindConfig's pre-paint background follows `uiPalette` + `uiTheme` (small table in `src/config_ui/main.cpp`).
+- Screenshots of Preferences (4 themes x 2 modes) and the tray flyout (same grid): `docs/design/settings-themes-2026-10-02/`.

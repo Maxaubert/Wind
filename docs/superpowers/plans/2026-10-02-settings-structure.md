@@ -36,3 +36,7 @@ hotkeys, profile dialogs), `ia08.html` + `palettes08.cjs`, `palettes-b1.cjs`, `p
    flyout reads `uiPalette`/`uiTheme` on open, sharp radii for hicon; render-test flag `--palette <id>`.
 6. **Docs, version, PR**: spec/plan final, CLAUDE.md notes, `src/version.h` 0.19.0, gates, push, PR that
    closes #318 and says it stacks on #316.
+
+## Status (2026-10-02)
+All six tasks are built on `feat/318-settings-structure` (version 0.19.0). The picker is mockup option A with four
+themes; see "As built" in the spec. Not pushed and not merged: waiting for Max's review of the PR.
