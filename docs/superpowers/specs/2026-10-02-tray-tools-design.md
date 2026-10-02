@@ -1,72 +1,75 @@
-# Tray tools: engine dropdown, app fixes, pause (issue #315), 2026-10-02
+# Tray tools: main-engine dropdown and centred chip rows (issue #315), 2026-10-02
 
-Follow-up to the tray flyout (#313, PR #314). Three new things in the flyout's control row, chosen by
-Max from a list of suggestions. Stacks on PR #314.
+Follow-up to the tray flyout (#313, PR #314). Stacks on PR #314. This file was rewritten on
+2026-10-02 after Max reviewed the first build and changed the scope (see "Decisions").
 
-## 1. Engine dropdown (in the chip row, next to the toggle chips)
-- A chip-sized dropdown showing the engine used for the KIND of window that was in front before the
-  flyout opened: Game, Blurred window, Desktop or Other window (Wind's existing categories,
-  `src/engine_pick.h`). Values: Auto, Transform, Render, the same as the Settings > Advanced
-  per-window engine rows (`engineGame`, `engineAcrylic`, `engineDesktop`, `engineOther`).
-- Picking a value writes that key to the live ini only. The core already reads these per pick, so it
-  applies at once with no restart (hot), including mid-zoom (hybrid re-picks on change). It is a
-  SESSION change, exactly like picking it in Settings: nothing is saved, opening Settings shows the
-  unsaved capsule, closing Settings gives the Save / Discard / Keep prompt, the Quit prompt counts it.
-- The chip shows a small engine glyph plus a short mono label ("Auto" / "Tx" / "Rd" style is too
-  cryptic, so the label is the full word in the open list and an icon on the chip); the open list
-  has a caption naming the category ("Engine for games").
-- Which category: the core publishes the category of the last real foreground window (ignoring the
-  shell, the taskbar, the tray flyout and Wind's own windows) in `TrayShared` (new field
-  `fgCategory`, version bump of the shared block). The flyout reads it when it opens.
-- When the main engine (`model`) is not Auto, the per-window rows do nothing, so the dropdown is
-  shown disabled with "Main engine: Render" (switching the main engine needs a restart and stays in
-  Settings).
+## Scope
+1. A wide **engine dropdown** in the toggle row that picks the MAIN engine.
+2. **Centred chip rows**, at most four chip slots per row.
 
-## 2. App fixes: listen-and-chime chips (Max, 2026-10-02)
-Two chips in the toggle row, one per fix:
-- **Mouse lock** (`lockApps`: the view follows hand movement in games that hold the pointer).
-- **Pass keys** (`noSwallowApps`: zoom keys also reach the app, fixes stuttery panning).
+Everything else in the flyout (sliders, performance panel, placement, theme, keyboard focus ring only,
+no tooltips) is unchanged.
 
-How it works:
-1. Click the chip: it starts **listening**. The chip pulses (a slow, soft brightness pulse, ~1.2 s
-   period), and the tray icon pulses too, because the flyout closes as soon as you click elsewhere.
-2. Go to the app however you like: click its window, alt-tab to it, or click its taskbar button.
-   The next real foreground app is the target (the taskbar, the tray, Wind's own windows, the
-   alt-tab switcher and the desktop are skipped; a fullscreen game that minimized counts when you
-   come back to it).
-3. Wind toggles that fix for that app: if the app did not have it, it is added and a short
-   **rising chime** plays (about half a second, two soft notes going up); if it already had it, it
-   is removed and the **falling chime** (the same notes going down) plays. Listening ends.
-4. Clicking the chip again while it pulses cancels (no sound). Listening also ends silently after
-   20 seconds.
-- The change PERSISTS immediately (live ini AND the active profile), like keybinds: these are
-  deliberate per-app fixes you expect next time.
-- The chimes are two tiny WAV resources in WindTray, played asynchronously, at a modest level.
-- The chips themselves carry no on/off state (the state is per app); Settings > Advanced lists the
-  apps for anyone who wants to review them.
-- Recency is no longer needed, so the core publishes no app ring; it only needs the foreground
-  filtering it already does for the engine dropdown's category.
+## 1. Engine dropdown = main engine
+- The `engine` item of the Toggles list (Settings > Tray menu, "Magnifier engine", off by default) is
+  a **dropdown**, not a button and not a toggle. It is never disabled.
+- It sets the main engine ini key `model`, with the options, order and labels of the Settings
+  "Magnifier engine" row (`ui/src/settings-schema.js`): **Auto** (`hybrid`), **Render**, **Transform**,
+  **System** (`magnify`). A missing or unknown value reads as Auto, like the core.
+- Look: a WIDE chip spanning two chip slots (`2 * kChipW + gap` = 106 DIP): engine glyph at the left,
+  the current value as text ("Transform"), a small chevron at the right (it flips up while the list is
+  open). A hairline border at rest makes it read as a field. It never takes the ON colour.
+- Click or Enter/Space opens the existing list popup under the chip (above it when there is no room
+  below), active option checked, no caption. Up/Down/Home/End/Enter/Esc work as in the profile list.
+- **Pick = write and restart, no prompt.** `model` is read once at Wind's launch, so a pick of a
+  different option writes `model` to the live ini and relaunches `Wind.exe` (the new instance evicts the
+  running one through the single-instance handshake, the same path Settings' Restart Wind and the tray's
+  profile switch use). Picking the active option does nothing.
+- **Session change, not saved.** This matches exactly what Settings does for `model`: only the live ini
+  is written, the active profile file is untouched, so the Settings Save capsule shows the unsaved
+  change and the Save / Discard / Keep prompts count it. Before the relaunch the tray writes
+  `%LOCALAPPDATA%\Wind\session.keep` (as the config host does for its own restarts), so the restarted
+  Wind does not run `ResetSessionToProfile` and the change survives the restart.
+- If the relaunch fails, the old `model` is written back and `session.keep` removed (the invariant
+  "ini model == running model" that Settings and the profile switch keep), and a balloon says so.
+- Pending slider writes are flushed before the restart, so none is lost.
+- Code: pure options/labels/index/pick rule in `src/tray_app/flyout_tools.h` (tested), Win32 in
+  `src/tray_app/engine_dropdown.cpp`.
 
-## 3. Pause Wind (toggle chip)
-- ON = zoom keys and the scroll-wheel zoom do nothing and are not swallowed (they reach apps), the
-  magnifier stays loaded; OFF = normal. Runtime only: not saved, resets when Wind restarts.
-- The tray sets `TrayShared::paused` and signals a new `Local\Wind_TrayCommand` event that the core
-  adds to its wait set (the 1x loop sleeps, #71). The core zooms out if paused while zoomed. The tray
-  icon gets a small paused mark so the state is visible when the flyout is closed.
+## 2. Centred chip rows
+- A chip takes one slot (48 DIP) or two (the wide engine chip). A row holds at most four slots; a chip
+  that does not fit starts the next row.
+- Each row is horizontally centred in the content area (equal space left and right), the last partial
+  row included. `LayoutChips` in `flyout_tools.h` is the single source for the geometry; hit testing and
+  the keyboard focus rect use the same rectangles. Up/Down in the chip rows move to the nearest chip of
+  the row above or below.
 
-## Settings: Tray menu tab
-The Toggles list gains "Pause Wind", "Mouse lock (listen)" and "Pass keys (listen)"; the engine dropdown is a list item too
-("Engine for the app in front"). All three default OFF (not shown) except nothing else changes.
-Limits unchanged (4 sliders; toggles uncapped; the dropdown counts as a toggle-row item).
+## Removed
+Max rejected the earlier ideas from this issue, so none of them exist: **Mouse lock** (`fixLock`),
+**Pass keys** (`fixPass`) and **Pause Wind** (`pause`), with the listen-and-chime state machine, tray
+icon pulse and paused badge, the core's pause gating and `Local\Wind_TrayCommand`, the chime WAVs and
+their generator, and the per-window-kind engine dropdown with the core's `fgCategory` publishing.
+`TrayShared` is back to version 1, byte for byte what 0.17.0 uses, so an old and a new exe can never
+disagree about the block layout. Unknown keys a user's ini may still list (`trayToggles=...,fixLock`,
+`trayToggleOrder` with `fixPass,pause`) are dropped silently by `ParseTrayLayout` (tested) and by the
+Settings page model (Playwright).
 
 ## Decisions (Max, 2026-10-02)
-1. Engine dropdown = per-window-kind engine, hot, a session change exactly like Settings.
-2. App fixes = two listen-and-chime chips (Mouse lock, Pass keys); changes persist immediately.
+1. The engine item is the MAIN engine (`model`), a real dropdown, not per window kind; picking restarts
+   Wind automatically. It is a session change exactly like Settings.
+2. Remove Mouse lock, Pass keys and Pause Wind entirely.
+3. Chip rows are centred, at most four slots per row; the engine chip uses two.
+   ("items must be centred, max 4 but not aligned, more to the left than the right", and "the engine
+   button does not work, it is supposed to be a dropdown not a button".)
 
 ## Testing
-doctest: category publishing filter (shell/tray/Wind windows ignored), listen state machine (target filter, toggle add/remove, cancel, 20 s timeout),
-add/remove exe in the lists (case-insensitive, no duplicates), pause gating of zoom input. Playwright:
-the three new rows in the Tray menu tab. Flyout render test with the dropdown and app-fixes list open.
-Manual: game in front -> flyout -> engine dropdown says "games" and switches live; Mouse lock chip pulses, alt-tab into the game plays the rising chime,
-again plays the falling chime, the change survives a Wind restart; Pause stops zoom keys and they type
-normally.
+doctest (`tests/test_flyout_tools.cpp`, `tests/test_flyout.cpp`, `tests/test_tray_items.cpp`): option
+values and labels match Settings and are accepted by `ParseConfig`; model to option mapping; pick rule;
+centring for 1, 2, 3, 4, 5 (wrap), 7 chips and every mix with the wide chip (equal margins on every
+row); the wide chip is 2 slots wide; hit testing of the wide chip, the gap and the margins; arrow-key
+neighbours; dead keys dropped. Playwright (`ui/tests/tray.spec.js`): the Tray menu tab lists the engine
+item and none of the removed ones. Render test: `WindTray.exe --render-test out.png --toggles
+trackCaret,keepEdges,engine --model transform [--engine-open] [--light] [--dpi 192]`, and `--engine-list
+--model transform` for the open list.
+Manual: tray, engine chip, pick Transform: Wind restarts, the chip reads Transform, Settings shows the
+unsaved capsule; Discard returns to the saved engine.
