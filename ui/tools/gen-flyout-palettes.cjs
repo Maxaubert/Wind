@@ -95,7 +95,9 @@ inline const FlyoutPalette kPalettes[kPaletteCount] = {
 `;
 for (const [id, mid] of ORDER) {
   const p = all[mid];
-  const d = id === 'grey' ? GREY.dark : derive(p.dark), l = id === 'grey' ? GREY.light : derive(p.light);
+  const d = Object.assign({}, id === 'grey' ? GREY.dark : derive(p.dark)), l = Object.assign({}, id === 'grey' ? GREY.light : derive(p.light));
+  // #320: the window outline, rules, control outline and separators 30% closer to the surface (not High contrast).
+  if (id !== 'hicon') for (const m of [d, l]) for (const n of ['menub', 'rule', 'ring', 'segline']) m[n] = mixN(m[n], m.lift, 0.7);
   out += `    { "${id}", ${px(p.radii.rc)}, ${px(p.radii.rk)}, ${px(p.radii.rs)},\n      ${mode(d)},\n      ${mode(l)} },\n`;
 }
 out += `};

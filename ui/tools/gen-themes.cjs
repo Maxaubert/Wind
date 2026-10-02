@@ -39,6 +39,12 @@ const EXISTING = ['bg', 'side', 'line', 'line2', 'outline', 'rowline', 'hover', 
   'fg', 'fg2', 'fg3', 'glyph', 'track', 'accent', 'onaccent', 'pill', 'pillb', 'shadow', 'guide', 'prog',
   'hlStrong', 'hlDim', 'hlGrey', 'fill', 'thumb', 'ctl', 'band', 'bandimg-op'];
 
+// Edges and outlines sit 30% closer to the card than the palette says (Max 2026-10-02, #320), in every theme
+// except High contrast. Wind grey's edges come from tokens.css, which already holds the softened values.
+const FADE = 0.3, EDGES = ['chipb', 'cardb', 'line', 'line2', 'pillb'];
+const isHex = (v) => /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(v);
+const rgb = (h) => { h = h.slice(1); if (h.length === 3) h = h.split('').map((c) => c + c).join(''); return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)); };
+const fade = (edge, surface) => '#' + rgb(edge).map((v, i) => Math.round(v * (1 - FADE) + rgb(surface)[i] * FADE).toString(16).padStart(2, '0')).join('');
 const CSHADOW_LIGHT = '0 1px 2px rgba(0, 0, 0, .05), 0 2px 8px rgba(0, 0, 0, .04)';
 function map(k, radii, mode) {
   return {
@@ -69,6 +75,7 @@ for (const [id, mid] of ORDER) {
     if (id === 'grey') t.onfill = mode === 'dark' ? '#04201b' : '#ffffff';   // today's toggle knob colours
     // The selection is what the app already drew (--hlGrey) in Wind grey, with its text colour.
     if (id === 'grey') { t.sel = t.hlGrey; t.selfg = t.fg; }
+    if (id !== 'hicon' && id !== 'grey') for (const n of EDGES) if (isHex(t[n]) && isHex(t.card)) t[n] = fade(t[n], t.card);
     const lines = Object.entries(t).map(([n, v]) => `  --${n}: ${v};`);
     css += `.wnd[data-palette="${id}"][data-theme="${mode}"] {\n${lines.join('\n')}\n  color-scheme: ${mode};\n}\n`;
   }
