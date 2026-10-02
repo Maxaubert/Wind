@@ -45,14 +45,14 @@
 <style>
   /* centred on the main area (the 240px sidebar sits left of it), as in the mockup */
   .capsule { backdrop-filter: blur(14px); position: absolute; left: calc(50% + 120px); bottom: 26px; transform: translateX(-50%);
-             height: 48px; border-radius: 999px; background: var(--pill); border: 1px solid var(--pillb);
+             height: 48px; border-radius: var(--rp); background: var(--pill); border: 1px solid var(--pillb);
              box-shadow: var(--shadow); display: flex; align-items: center; gap: 10px; padding: 0 5px 0 20px; white-space: nowrap; }
   b { font: 600 13px var(--s); }
   .ok { display: inline-flex; align-items: center; gap: 6px; }
   .ok svg { fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round;
             animation: tick var(--dur-fast) var(--ease); }
   @keyframes tick { from { opacity: 0; transform: scale(.8); } }
-  .btn { height: 36px; padding: 0 20px; border-radius: 999px; font: 600 13px var(--s); }
+  .btn { height: 36px; padding: 0 20px; border-radius: var(--rp); font: 600 13px var(--s); }
   .btn:disabled { cursor: default; }
   .g { color: var(--fg2); }
   .p { background: var(--accent); color: var(--onaccent); }

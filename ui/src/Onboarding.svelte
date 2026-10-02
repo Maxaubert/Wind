@@ -158,7 +158,7 @@
   .wizfoot { flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 14px 24px; }   /* no divider above the buttons (Max, 2026-10-02) */
   .skip { margin-right: auto; background: transparent; border: 0; color: var(--fg3); font-size: 12.5px; cursor: pointer; }
   .skip:hover { color: var(--fg); }
-  .btn { height: 36px; padding: 0 20px; border-radius: 999px; border: 1px solid var(--chipb); background: transparent; color: var(--fg2); font: 600 13px var(--s); cursor: pointer; }
+  .btn { height: 36px; padding: 0 20px; border-radius: var(--rp); border: 1px solid var(--chipb); background: transparent; color: var(--fg2); font: 600 13px var(--s); cursor: pointer; }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--onaccent); }
   /* KeybindCapture styles itself with legacy theme.css variables; restyle it with tokens here. */
   .rctl :global(.keycap) { font: 500 12px var(--m); color: var(--fg); background: var(--chip); border: 1px solid var(--chipb); border-radius: var(--srad); padding: 5px 10px; min-height: 28px; }

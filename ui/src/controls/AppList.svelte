@@ -57,7 +57,7 @@
   .chip:disabled { opacity: .45; cursor: default; }
   .back { position: fixed; inset: 0; background: rgba(0, 0, 0, .5); display: flex; align-items: center;
           justify-content: center; z-index: 50; }
-  .box { background: var(--card); color: var(--fg); border: 1px solid var(--cardb); border-radius: 10px;
+  .box { background: var(--card); color: var(--fg); border: 1px solid var(--cardb); border-radius: var(--rc);
          padding: 18px 20px; width: 400px; max-width: calc(100vw - 32px); box-shadow: var(--shadow);
          font: 13px var(--s); }
   .back { animation: fade var(--dur) var(--ease); }

@@ -16,12 +16,11 @@
   .tg.disabled { opacity: .45; pointer-events: none; }
   input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer;
           -webkit-appearance: none; appearance: none; }
-  .track { position: absolute; inset: 0; border-radius: 11px; background: var(--track);
+  .track { position: absolute; inset: 0; border-radius: var(--rsw); background: var(--track);
            border: 1px solid var(--chipb); transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease); }
-  .knob { position: absolute; top: 50%; left: 4px; margin-top: -6px; width: 12px; height: 12px; border-radius: 50%;
+  .knob { position: absolute; top: 50%; left: 4px; margin-top: -6px; width: 12px; height: 12px; border-radius: var(--rkn);
           background: var(--fg3); transition: transform var(--dur) var(--ease), background-color var(--dur) var(--ease); }
-  input:checked + .track { background: var(--fill); border-color: var(--fill); }
-  input:checked + .track .knob { transform: translateX(18px); background: #04201b; }
-  :global([data-theme="light"]) input:checked + .track .knob { background: #fff; }
-  input:focus-visible + .track { outline: 2px solid var(--fg); outline-offset: 2px; }
+  input:checked + .track { background: var(--fill); border-color: var(--fillline, var(--fill)); }
+  input:checked + .track .knob { transform: translateX(18px); background: var(--onfill); }
+  input:focus-visible + .track { outline: 2px solid var(--focus); outline-offset: 2px; }
 </style>

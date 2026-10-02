@@ -43,7 +43,7 @@
         color: var(--fg3); font: var(--w) 12.5px var(--nf); border-radius: var(--rad); text-align: left; width: 100%; }
   .icw { width: 20px; display: grid; place-items: center; flex: none; }
   .it:hover { background: var(--hover); color: var(--fg); }
-  .it.sel { background: var(--hlGrey); color: var(--fg); }
+  .it.sel { background: var(--sel); color: var(--selfg); }
   .n { margin: 0 28px 0 auto; font: 400 10.5px var(--m); color: var(--fg3); }   /* version sits where the mockup's count/chevron slots leave it */
   /* A thin divider, no labels; the bottom group sits right under the list, not pinned to the window bottom. */
   .bottom { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line2); }

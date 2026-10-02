@@ -28,6 +28,13 @@
   --fill: #2fbfa5; --thumb: #f2f2f2; --ctl: #8c8c8c;
   --band: #080808; --bandimg-op: .17; --bandimg-from: 50%;   /* banner = option colour, aurora .17: Max 2026-10-02 */
 
+  /* Tokens the built-in themes (themes.css) set on top of the ones above. Defaults here keep the grey look. */
+  --sel: var(--hlGrey); --selfg: var(--fg); --onfill: #04201b; --fillline: transparent; --focus: var(--fg);
+  --hint: #6f6f6f; --hover2: #333; --scrim: rgba(0, 0, 0, .55);
+  --danger: #f0867e; --dangerbg: rgba(240, 134, 126, .12); --dangerbtn: #e0726a; --dangerbtnfg: #1a0605;
+  --bnfilter: none; --bntint: transparent; --bntop: 0;   /* banner image filter and colour wash */
+  --rc: 10px; --rp: 999px; --rsw: 11px; --rkn: 50%;   /* radii: card, pill, switch track, switch knob (--rad, --srad above) */
+
   background: var(--bg);
   color: var(--fg);
   font: 13px/1.4 var(--s);
@@ -46,6 +53,7 @@
   --hlStrong: #8c8c8c; --hlDim: #dadada; --hlGrey: #e4e4e4;
   --fill: #11977f; --thumb: #0a0a0a; --ctl: #767676;
   --band: #f6f6f7;
+  --onfill: #fff; --bnfilter: invert(1) hue-rotate(180deg);
 }
 .wnd *, .wnd *::before, .wnd *::after { box-sizing: border-box; }
 .wnd svg.ic:not([width]) { width: 20px; height: 20px; }
@@ -54,7 +62,7 @@
   stroke-width: 1.5; stroke-linecap: square; stroke-linejoin: miter;
 }
 .wnd button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
-.wnd :focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+.wnd :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 /* Focus ring for the keyboard only: a mouse click (or a script moving focus after one) never draws a box. */
 .wnd :focus:not(:focus-visible) { outline: none; }
 /* Chromium still matches :focus-visible on a mouse-clicked <select> (and after a script moves focus

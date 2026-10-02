@@ -233,7 +233,7 @@
 <span class="sr-only" role="status" aria-live="assertive">{liveMsg}</span>
 <style>
   /* Ported from mockups/config-ui-onboarding.html .keycap. */
-  .keycap { padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--chip); font-size: 11.5px; color: var(--text); cursor: pointer; }
+  .keycap { padding: 4px 10px; border-radius: var(--srad); border: 1px solid var(--line); background: var(--chip); font-size: 11.5px; color: var(--text); cursor: pointer; }
   .keycap.armed { border-color: var(--accent); }
   .keycap:disabled { opacity: .5; cursor: default; }
   .refusal { display: block; margin-top: 4px; font-size: 11.5px; color: var(--warn, #e0a030); max-width: 280px; }
