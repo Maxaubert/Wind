@@ -2,6 +2,7 @@
 // guard, the profile switch and opening Settings. No UI of its own; the flyout (flyout_window.cpp)
 // owns the window. The old owner-drawn HMENU that lived here is gone (menus cannot host sliders).
 #include "tray_app.h"
+#include "flyout_palettes.h"
 #include "../logging.h"
 #include "../config_path.h"
 #include "../profiles_io.h"
@@ -33,6 +34,14 @@ bool UsesDarkTheme(const std::string& iniText) {
     if (t == "dark") return true;
     if (t == "light") return false;
     return !SystemUsesLightTheme();
+}
+
+// The theme for this open: the ini's uiPalette (grey ember cyber mono slate carbon hicon ocean). Unknown or absent is
+// Wind grey, like Settings. Read fresh on every open, with uiTheme above.
+int UsesPalette(const std::string& iniText) {
+    auto vals = wind::ReadIniValues(iniText);
+    auto it = vals.find("uiPalette");
+    return Flyout::PaletteIndex(it == vals.end() ? std::string() : it->second);
 }
 
 void OpenSettings() {
