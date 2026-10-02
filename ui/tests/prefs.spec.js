@@ -85,7 +85,10 @@ test('the theme picker is one row of the four theme cards, no scrolling, no arro
   await page.goto('/');
   await go(page, 'prefs');
   const picker = key(page, 'uiPalette').getByRole('radiogroup');
-  await expect(picker.getByRole('radio')).toHaveText(themes.map((t) => t.label));
+  const radios = picker.getByRole('radio');
+  await expect(radios).toHaveCount(themes.length);
+  for (let i = 0; i < themes.length; i++) await expect(radios.nth(i)).toHaveAccessibleName(themes[i].label);
+  await expect(radios).toHaveText(themes.map(() => ''));   // no visible names, cards only
   expect(themes.map((t) => t.id)).toEqual(['grey', 'ember', 'ocean', 'hicon']);   // High contrast is always last
   const tops = new Set();
   for (const r of await picker.getByRole('radio').all()) tops.add(Math.round((await r.boundingBox()).y));
