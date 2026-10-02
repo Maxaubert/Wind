@@ -115,8 +115,8 @@ the installer uses. The tray exits when its Wind exits, taking the icon with it.
 
 Since 0.17.0 (issue #313) the tray's menu is a custom flyout window, not an HMENU
 (`src/tray_app/flyout_window.cpp`, painted with Direct2D by `flyout_draw.cpp`; menus cannot host
-sliders). It opens above the icon, closes on deactivation, Esc or a second icon click, and follows
-`uiTheme`. Top to bottom: an optional Performance header (zoom, fps, frame sparkline from the shared
+sliders). It opens above the icon, closes on deactivation, Esc or a second icon click, and is always dark (the theme comes from
+`uiPalette`; `uiTheme` is ignored). Top to bottom: an optional Performance header (zoom, fps, frame sparkline from the shared
 block), up to four quick sliders, one segmented group of icon toggles with the engine dropdown below it, and a bottom row (profile, Settings, Quit).
 What it shows is user-chosen in Settings > Tray menu and stored as global (non-profile) ini keys
 `trayPerf`, `traySliders`, `traySliderOrder`, `trayToggles`, `trayToggleOrder`, parsed by the pure

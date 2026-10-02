@@ -34,7 +34,7 @@ struct Shared {
     ComPtr<IDWriteFactory> dw;
     ComPtr<IWICImagingFactory> wic;
     ComPtr<IDWriteTextFormat> sans28, mono12, mono12b;
-    std::vector<BYTE> auroraDark, auroraLight;   // premultiplied BGRA, 1920 x 300
+    std::vector<BYTE> aurora;   // premultiplied BGRA, 1920 x 300
     UINT aw = 0, ah = 0;
     std::map<std::string, ComPtr<ID2D1PathGeometry>> icons;
 };
@@ -49,15 +49,13 @@ struct Theme {
     D2D1_COLOR_F off, offh, offic, onic, on, onh, onb, segline, focus, fillline, ring;
     float aurora;       // header image opacity (--bnop * 3.4)
     float rc, rk, rs, listRad;   // window, control, small and list popup radii in DIPs
-    bool dark;
 };
 
-// The theme for one palette (flyout_palettes.h, generated from the Settings theme sources) and mode.
-Theme MakeTheme(bool dark, int palette) {
+// The theme for one palette (flyout_palettes.h, generated from the Settings theme sources). Always dark (#324).
+Theme MakeTheme(int palette) {
     const FlyoutPalette& fp = PaletteAt(palette);
-    const PaletteMode& m = dark ? fp.dark : fp.light;
+    const PaletteMode& m = fp.dark;
     Theme t;
-    t.dark = dark;
     t.menu = Col(m.menu); t.card = Col(m.card); t.menub = Col(m.menub); t.fg = Col(m.fg); t.fg2 = Col(m.fg2); t.fg3 = Col(m.fg3);
     t.rule = Col(m.rule); t.hl = Col(m.hl); t.glyph = Col(m.glyph); t.teal = Col(m.fill); t.spark = Col(m.spark);
     t.lift = Col(m.lift); t.scrim = Col(m.scrim, m.scrimA); t.band = Col(m.band); t.track = Col(m.track);
@@ -70,27 +68,8 @@ Theme MakeTheme(bool dark, int palette) {
     return t;
 }
 
-// The light theme inverts the aurora with the CSS filter the mockup uses:
-// invert(1) hue-rotate(180deg) saturate(1.6) contrast(1.25), each stage clamped like a browser.
-void LightenAurora(std::vector<BYTE>& px) {
-    auto clamp01 = [](float v) { return v < 0.f ? 0.f : (v > 1.f ? 1.f : v); };
-    const float s = 1.6f;
-    for (size_t i = 0; i + 3 < px.size(); i += 4) {
-        float b = px[i] / 255.f, g = px[i + 1] / 255.f, r = px[i + 2] / 255.f;
-        r = 1.f - r; g = 1.f - g; b = 1.f - b;
-        float r2 = clamp01(-0.574f * r + 1.430f * g + 0.144f * b);
-        float g2 = clamp01(0.426f * r + 0.430f * g + 0.144f * b);
-        float b2 = clamp01(0.426f * r + 1.430f * g - 0.856f * b);
-        r = clamp01((0.213f + 0.787f * s) * r2 + (0.715f - 0.715f * s) * g2 + (0.072f - 0.072f * s) * b2);
-        g = clamp01((0.213f - 0.213f * s) * r2 + (0.715f + 0.285f * s) * g2 + (0.072f - 0.072f * s) * b2);
-        b = clamp01((0.213f - 0.213f * s) * r2 + (0.715f - 0.715f * s) * g2 + (0.072f + 0.928f * s) * b2);
-        r = clamp01((r - .5f) * 1.25f + .5f); g = clamp01((g - .5f) * 1.25f + .5f); b = clamp01((b - .5f) * 1.25f + .5f);
-        px[i] = (BYTE)(b * 255.f + .5f); px[i + 1] = (BYTE)(g * 255.f + .5f); px[i + 2] = (BYTE)(r * 255.f + .5f);
-    }
-}
-
-// Bakes the header image for a palette that needs more than the plain opacity: an inverted light image
-// and/or the CSS `mix-blend-mode: color` tint the mockup lays over it (tray08.css .thead::before/::after).
+// Bakes the header image for a palette that needs more than the plain opacity: the CSS
+// `mix-blend-mode: color` tint the mockup lays over it (tray08.css .thead::before/::after).
 // Result = backdrop (band + image at `aurora` opacity), then the tint's hue and saturation over that
 // backdrop's luminosity at `tintA`. Opaque premultiplied BGRA, to be drawn at full opacity.
 void BakeAurora(const std::vector<BYTE>& src, const PaletteMode& m, std::vector<BYTE>& out) {
@@ -104,7 +83,6 @@ void BakeAurora(const std::vector<BYTE>& src, const PaletteMode& m, std::vector<
         const float a = src[i + 3] / 255.f;
         float c[3] = { 0, 0, 0 };
         if (a > 0.f) { c[0] = src[i + 2] / 255.f / a; c[1] = src[i + 1] / 255.f / a; c[2] = src[i] / 255.f / a; }   // straight RGB
-        if (m.invert) for (float& v : c) v = 1.f - v;
         const float k = o * a;
         float cb[3];
         for (int j = 0; j < 3; ++j) cb[j] = band[j] * (1.f - k) + c[j] * k;
@@ -163,14 +141,12 @@ void LoadAurora() {
     UINT w = 0, hgt = 0;
     conv->GetSize(&w, &hgt);
     if (!w || !hgt) return;
-    g_s.auroraDark.resize((size_t)w * hgt * 4);
-    if (FAILED(conv->CopyPixels(nullptr, w * 4, (UINT)g_s.auroraDark.size(), g_s.auroraDark.data()))) {
-        g_s.auroraDark.clear();
+    g_s.aurora.resize((size_t)w * hgt * 4);
+    if (FAILED(conv->CopyPixels(nullptr, w * 4, (UINT)g_s.aurora.size(), g_s.aurora.data()))) {
+        g_s.aurora.clear();
         return;
     }
     g_s.aw = w; g_s.ah = hgt;
-    g_s.auroraLight = g_s.auroraDark;
-    LightenAurora(g_s.auroraLight);
 }
 
 ID2D1PathGeometry* IconGeometry(const std::string& id) {
@@ -237,7 +213,7 @@ void DrawShutdown() {
     g_s.icons.clear();
     g_s.sans28.Reset(); g_s.mono12.Reset(); g_s.mono12b.Reset();
     g_s.wic.Reset(); g_s.dw.Reset(); g_s.d2d.Reset();
-    g_s.auroraDark.clear(); g_s.auroraLight.clear();
+    g_s.aurora.clear();
     g_s.ok = false;
 }
 
@@ -577,11 +553,11 @@ void Painter::Impl::drawBar(const View& v, const Geometry& g) {
 Painter::Painter() : d_(new Impl) {}
 Painter::~Painter() { delete d_; }
 
-bool Painter::Init(ID2D1RenderTarget* rt, bool dark, int palette) {
+bool Painter::Init(ID2D1RenderTarget* rt, int palette) {
     static const float kDots[2] = { 1.f, 3.f };
     if (!rt || !g_s.ok) return false;
     d_->rt = rt;
-    d_->th = MakeTheme(dark, palette);
+    d_->th = MakeTheme(palette);
     // ClearType like the browser reference: it needs opaque pixels under the glyphs, which the clip
     // layer below provides (INITIALIZE_FOR_CLEARTYPE); outside it the target falls back to grayscale.
     rt->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
@@ -593,13 +569,11 @@ bool Painter::Init(ID2D1RenderTarget* rt, bool dark, int palette) {
     g_s.d2d->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT,
                                D2D1_CAP_STYLE_FLAT, D2D1_LINE_JOIN_MITER, 10.f, D2D1_DASH_STYLE_CUSTOM, 0.f),
                                kDots, 2, &d_->dotted);
-    const PaletteMode& pm = PaletteFor(palette, dark);
+    const PaletteMode& pm = PaletteFor(palette);
     d_->auroraOpacity = d_->th.aurora;
-    d_->auroraPx = &g_s.auroraDark;
-    if (pm.legacyLight) {
-        d_->auroraPx = &g_s.auroraLight;   // Wind grey light: the j01 reference's filter chain
-    } else if (!g_s.auroraDark.empty() && (pm.invert || pm.tintA > 0.f)) {
-        BakeAurora(g_s.auroraDark, pm, d_->auroraBaked);
+    d_->auroraPx = &g_s.aurora;
+    if (!g_s.aurora.empty() && pm.tintA > 0.f) {
+        BakeAurora(g_s.aurora, pm, d_->auroraBaked);
         d_->auroraPx = &d_->auroraBaked;
         d_->auroraOpacity = 1.f;
     }
@@ -702,7 +676,7 @@ void ApplyShapeAlpha(unsigned char* px, int w, int h, int strideBytes, int dpi, 
 // Paints one window-sized frame with `draw(painter)` (inside BeginDraw/EndDraw) and saves it as a
 // straight-alpha PNG with the rounded corners cut out. Shared by the flyout and the list popup.
 template <class F>
-static bool RenderFrameToPng(int wDip, int hDip, bool dark, int palette, int dpi, const wchar_t* path, int radiusDip, F draw) {
+static bool RenderFrameToPng(int wDip, int hDip, int palette, int dpi, const wchar_t* path, int radiusDip, F draw) {
     if (!DrawInit()) return false;
     const UINT pw = (UINT)ScalePx(wDip, dpi), ph = (UINT)ScalePx(hDip, dpi);
     ComPtr<IWICBitmap> bmp;
@@ -713,7 +687,7 @@ static bool RenderFrameToPng(int wDip, int hDip, bool dark, int palette, int dpi
                                                     D2D1::PixelFormat(DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_IGNORE),
                                                     (float)dpi, (float)dpi), &rt))) return false;
     Painter p;
-    if (!p.Init(rt.Get(), dark, palette)) return false;
+    if (!p.Init(rt.Get(), palette)) return false;
     rt->BeginDraw();
     draw(p);
     if (FAILED(rt->EndDraw())) return false;
@@ -744,11 +718,11 @@ static bool RenderFrameToPng(int wDip, int hDip, bool dark, int palette, int dpi
 bool RenderToPng(const View& v, int profileTextW, int dpi, const wchar_t* path) {
     if (!DrawInit()) return false;
     const Geometry g = ComputeGeometry(v, profileTextW);
-    return RenderFrameToPng(g.width, g.height, v.dark, v.palette, dpi, path, PaletteAt(v.palette).rc, [&](Painter& p) { p.Draw(v, g); });
+    return RenderFrameToPng(g.width, g.height, v.palette, dpi, path, PaletteAt(v.palette).rc, [&](Painter& p) { p.Draw(v, g); });
 }
 
 bool RenderListToPng(const ListView& v, const ListGeometry& g, int dpi, const wchar_t* path) {
-    return RenderFrameToPng(g.width, g.height, v.dark, v.palette, dpi, path, (int)ListRadiusFor(PaletteAt(v.palette)), [&](Painter& p) { p.DrawList(v, g); });
+    return RenderFrameToPng(g.width, g.height, v.palette, dpi, path, (int)ListRadiusFor(PaletteAt(v.palette)), [&](Painter& p) { p.DrawList(v, g); });
 }
 
 }}  // namespace wind::Flyout

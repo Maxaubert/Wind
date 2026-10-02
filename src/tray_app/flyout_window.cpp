@@ -63,7 +63,7 @@ struct Surface {
     ID2D1DCRenderTarget* rt = nullptr;
     Flyout::Painter* painter = nullptr;
 
-    bool Init(HWND h, int w, int ht, int dpiArg, bool dark, int palette, int radiusDip) {
+    bool Init(HWND h, int w, int ht, int dpiArg, int palette, int radiusDip) {
         hwnd = h; pw = w; ph = ht; dpi = dpiArg; radius = radiusDip;
         HDC screen = GetDC(nullptr);
         dc = CreateCompatibleDC(screen);
@@ -78,7 +78,7 @@ struct Surface {
         ReleaseDC(nullptr, screen);
         rt = dib ? Flyout::CreateDcTarget(dpiArg) : nullptr;
         painter = new Flyout::Painter;
-        if (!dc || !dib || !rt || !painter->Init(rt, dark, palette)) return false;
+        if (!dc || !dib || !rt || !painter->Init(rt, palette)) return false;
         oldBmp = static_cast<HBITMAP>(SelectObject(dc, dib));
         return true;
     }
@@ -114,7 +114,6 @@ struct State {
     std::wstring iniPath;
     IniValues ini;
     TrayLayout layout;
-    bool dark = true;
     int palette = 0;                             // index into Flyout::kPalettes (the ini's uiPalette)
     std::wstring profile;
     Flyout::IRect work;                          // work area of the icon's monitor, pixels
@@ -168,7 +167,7 @@ void RebuildView(State& s) {
     if (TrayBlockValid(blk)) n = blk->ticks.snapshot(buf, TickStats::kCap);
     const Flyout::Hit hover = s.view.hover, focus = s.view.focus;
     const bool showFocus = s.view.showFocus;
-    s.view = Flyout::BuildView(s.ini, s.layout, st, buf, n, s.profile, s.dark, s.palette);
+    s.view = Flyout::BuildView(s.ini, s.layout, st, buf, n, s.profile, s.palette);
     if (s.view.hasEngine) s.view.engine.open = g_list && g_list->engine;
     s.view.hover = hover;
     s.view.focus = focus;
@@ -446,7 +445,7 @@ void ShowList(State& s, ListState* ls, const Flyout::IRect& b, const wchar_t* ti
         delete ls;
         return;
     }
-    if (!ls->sf.Init(h, ls->sf.pw, ls->sf.ph, s.dpi, s.dark, s.palette, (int)Flyout::ListRadiusFor(Flyout::PaletteAt(s.palette)))) {
+    if (!ls->sf.Init(h, ls->sf.pw, ls->sf.ph, s.dpi, s.palette, (int)Flyout::ListRadiusFor(Flyout::PaletteAt(s.palette)))) {
         wind::Log(wind::LogLevel::Error, "tray", "flyout: list surface init failed");
         DestroyWindow(h);                 // WM_DESTROY frees ls
         return;
@@ -460,7 +459,6 @@ void OpenList(State& s, bool keyboard) {
     std::vector<std::wstring> names = wind::ListProfileFiles(wind::ProfilesDirFromIni(s.iniPath));
     if (names.empty()) return;
     auto* ls = new ListState;
-    ls->view.dark = s.dark;
     ls->view.palette = s.palette;
     int widest = 0;
     for (size_t i = 0; i < names.size(); ++i) {
@@ -480,7 +478,6 @@ void OpenEngineList(State& s, bool keyboard) {
     if (g_list || s.geo.engine.w() <= 0) return;
     auto* ls = new ListState;
     ls->engine = true;
-    ls->view.dark = s.dark;
     ls->view.palette = s.palette;
     int widest = 0;
     for (int i = 0; i < Flyout::kEngineCount; ++i) {
@@ -711,7 +708,6 @@ bool OpenFlyout() {
     const std::string text = wind::ReadTextFile(s->iniPath);
     s->ini = wind::ReadIniValues(text);
     s->layout = ParseTrayLayout(s->ini);
-    s->dark = UsesDarkTheme(text);
     s->palette = UsesPalette(text);
     auto pit = s->ini.find("profile");
     s->profile = pit == s->ini.end() ? std::wstring() : wind::WidenUtf8(pit->second);
@@ -751,7 +747,7 @@ bool OpenFlyout() {
         delete s;
         return false;
     }
-    if (!s->sf.Init(s->hwnd, pw, ph, s->dpi, s->dark, s->palette, Flyout::PaletteAt(s->palette).rc)) {
+    if (!s->sf.Init(s->hwnd, pw, ph, s->dpi, s->palette, Flyout::PaletteAt(s->palette).rc)) {
         wind::Log(wind::LogLevel::Error, "tray", "flyout surface init failed");
         DestroyWindow(s->hwnd);        // WM_DESTROY releases and frees
         return false;

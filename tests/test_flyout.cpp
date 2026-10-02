@@ -1,6 +1,7 @@
 #include "../third_party/doctest.h"
 #include "../src/tray_app/flyout_model.h"
 #include "../src/tray_app/flyout_icons.h"
+#include "../src/tray_app/flyout_palettes.h"
 #include "../src/tray_app/svg_path.h"
 using namespace wind;
 using namespace wind::Flyout;
@@ -259,7 +260,7 @@ TEST_CASE("view: only enabled, known items appear, in layout order") {
     l.sliders.push_back({ "notASlider", true });          // a stale key slipped past the parser
     l.toggles = { { "trackCaret", true }, { "trackFocus", false }, { "keepEdges", true } };
     const TrayStatus st;
-    const View v = BuildView(ini, l, st, nullptr, 0, L"Work", true);
+    const View v = BuildView(ini, l, st, nullptr, 0, L"Work");
     REQUIRE(v.sliders.size() == 2);
     CHECK(v.sliders[0].key == "colorWarmPct");
     CHECK(v.sliders[0].text == L"40%");
@@ -274,9 +275,21 @@ TEST_CASE("view: only enabled, known items appear, in layout order") {
     CHECK_FALSE(v.perf);
 }
 
+TEST_CASE("view: a legacy uiTheme=light ini changes nothing, the flyout is always dark (#324)") {
+    IniValues plain{ { "colorWarmPct", "40" }, { "trackCaret", "1" } };
+    IniValues legacy = plain;
+    legacy["uiTheme"] = "light";
+    const View a = BuildView(plain, ParseTrayLayout(plain), TrayStatus{}, nullptr, 0, L"Default");
+    const View b = BuildView(legacy, ParseTrayLayout(legacy), TrayStatus{}, nullptr, 0, L"Default");
+    CHECK(a.palette == b.palette);
+    CHECK(a.sliders.size() == b.sliders.size());
+    CHECK(a.toggles.size() == b.toggles.size());
+    CHECK(PaletteFor(b.palette).menu == 0x000000);   // Wind grey: black, whatever uiTheme says
+}
+
 TEST_CASE("view: more than four enabled sliders in a hand-edited ini show only four") {
     IniValues ini{ { "traySliders", "colorWarmPct,colorDimPct,maxLevel,zoomInSpeed,zoomOutSpeed,panSpeed" } };
-    const View v = BuildView(ini, ParseTrayLayout(ini), TrayStatus{}, nullptr, 0, L"", false);
+    const View v = BuildView(ini, ParseTrayLayout(ini), TrayStatus{}, nullptr, 0, L"");
     CHECK(v.sliders.size() == 4);
     CHECK(v.profile == L"Default");
 }
@@ -286,7 +299,7 @@ TEST_CASE("view: performance readout from the shared status") {
     float ticks[64];
     for (int i = 0; i < 64; ++i) ticks[i] = 6.94f;
     IniValues ini{ { "trayPerf", "1" } };
-    const View v = BuildView(ini, ParseTrayLayout(ini), st, ticks, 64, L"Default", true);
+    const View v = BuildView(ini, ParseTrayLayout(ini), st, ticks, 64, L"Default");
     REQUIRE(v.perf);
     CHECK(v.p.zoomed);
     CHECK(v.p.zoom == L"7.4x");
@@ -298,7 +311,7 @@ TEST_CASE("view: performance readout from the shared status") {
 
 TEST_CASE("view: idle with no samples shows Idle and a dash") {
     IniValues ini{ { "trayPerf", "1" } };
-    const View v = BuildView(ini, ParseTrayLayout(ini), TrayStatus{}, nullptr, 0, L"Default", true);
+    const View v = BuildView(ini, ParseTrayLayout(ini), TrayStatus{}, nullptr, 0, L"Default");
     CHECK_FALSE(v.p.zoomed);
     CHECK(v.p.zoom == L"Idle");
     CHECK_FALSE(v.p.haveFps);

@@ -404,7 +404,6 @@ inline float StepToward(float cur, float target, float dtMs, float durMs) {
 }
 
 struct View {
-    bool dark = true;
     int palette = 0;                        // index into kPalettes (flyout_palettes.h), 0 = Wind grey
     bool perf = false;
     PerfView p;
@@ -445,9 +444,8 @@ inline PerfView BuildPerf(const TrayStatus& st, const float* ticks, int n) {
 // Items the layout enables, in its order. A key that is not a known item is skipped (an older or
 // hand-edited ini); ParseTrayLayout has already dropped unknown keys and applied the slider cap.
 inline View BuildView(const IniValues& ini, const TrayLayout& layout, const TrayStatus& st,
-                      const float* ticks, int nTicks, const std::wstring& profile, bool dark, int palette = 0) {
+                      const float* ticks, int nTicks, const std::wstring& profile, int palette = 0) {
     View v;
-    v.dark = dark;
     v.palette = palette;
     v.perf = layout.perf;
     if (layout.perf) v.p = BuildPerf(st, ticks, nTicks);
@@ -717,7 +715,6 @@ inline Placement PlaceList(const IRect& anchor, const IRect& work, int w, int h,
 }
 
 struct ListView {
-    bool dark = true;
     int palette = 0;      // as View::palette
     std::vector<std::wstring> names;
     int active = -1;      // the current profile (checkmark)

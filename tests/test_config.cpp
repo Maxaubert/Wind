@@ -25,6 +25,17 @@ TEST_CASE("StripUiOnlyKeys drops exactly the UI-owned lines (theme toggle must n
     CHECK(wind::StripUiOnlyKeys("uiThemeX=1\n") == "uiThemeX=1\n");
 }
 
+TEST_CASE("uiTheme is an ignored legacy key: uiTheme=light or auto parses like no key at all (#324)") {
+    const Config base = ParseConfig("maxLevel=7\n");
+    for (const char* v : { "light", "dark", "auto", "" }) {
+        const Config c = ParseConfig(std::string("uiTheme=") + v + "\nmaxLevel=7\n");
+        CHECK(c.maxLevel == base.maxLevel);
+        CHECK(c.model == base.model);
+    }
+    // Old inis keep working: the key stays a UI-only line the core never reloads for.
+    CHECK(wind::StripUiOnlyKeys("a=1\nuiTheme=light\n") == "a=1\n");
+}
+
 TEST_CASE("parses renderer knobs") {
     Config c = ParseConfig(
         "cursorSensitivity=1.5\ncursorConstantSize=1\nbilinear=1\n");

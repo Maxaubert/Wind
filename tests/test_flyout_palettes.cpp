@@ -33,8 +33,8 @@ TEST_CASE("flyout palettes: unknown, empty or wrong-case ids fall back to Wind g
     CHECK(std::string(FindPalette("zzz").id) == "grey");
     CHECK(&PaletteAt(-1) == &kPalettes[0]);
     CHECK(&PaletteAt(kPaletteCount) == &kPalettes[0]);
-    CHECK(&PaletteFor(99, true) == &kPalettes[0].dark);
-    CHECK(&PaletteFor(2, false) == &kPalettes[2].light);
+    CHECK(&PaletteFor(99) == &kPalettes[0].dark);
+    CHECK(&PaletteFor(2) == &kPalettes[2].dark);
 }
 
 TEST_CASE("flyout palettes: Wind grey keeps the look the flyout already had") {
@@ -42,9 +42,6 @@ TEST_CASE("flyout palettes: Wind grey keeps the look the flyout already had") {
     CHECK(g.dark.menu == 0x000000);
     CHECK(g.dark.fill == 0x2fbfa5);
     CHECK(g.dark.on == 0x1f5650);
-    CHECK(g.light.menu == 0xffffff);
-    CHECK(g.light.on == 0xbfe2db);
-    CHECK(g.light.legacyLight == 1);
     CHECK(g.dark.tintA == 0.f);
 }
 
@@ -73,11 +70,16 @@ TEST_CASE("flyout palettes: High contrast dark is white on black with grey on-se
     CHECK(d.onic == 0xffffff);
 }
 
-TEST_CASE("flyout palettes: every mode is fully specified and on-state differs from off") {
+TEST_CASE("flyout palettes: every palette is fully specified, dark, and on-state differs from off") {
     for (int i = 0; i < kPaletteCount; ++i) {
-        for (bool dark : { true, false }) {
-            const PaletteMode& m = PaletteFor(i, dark);
-            INFO(kPalettes[i].id << (dark ? " dark" : " light"));
+        {
+            const PaletteMode& m = PaletteFor(i);
+            INFO(kPalettes[i].id);
+            // Dark only since #324: the window colour is near black and the text is lighter than it.
+            CHECK(((m.menu >> 16) & 0xff) < 0x30);
+            CHECK(((m.menu >> 8) & 0xff) < 0x30);
+            CHECK((m.menu & 0xff) < 0x30);
+            CHECK(m.fg > m.menu);
             CHECK(m.menu <= 0xffffff);
             CHECK(m.on != m.off);
             CHECK(m.fg != m.menu);
