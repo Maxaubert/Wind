@@ -1,4 +1,4 @@
-// Generate assets/wind.ico from assets/wind-badge.svg.
+// Generate assets/wind.ico from assets/wind-badge-taskbar.svg.
 //
 // Renders the SVG at each icon size with Playwright's bundled Chromium (faithful
 // stroke/arc rendering, transparent corners outside the rounded badge), then packs
@@ -22,7 +22,19 @@ const require = createRequire(import.meta.url);
 const { chromium } = require(resolve(root, 'ui', 'node_modules', 'playwright'));
 
 const SIZES = [256, 128, 64, 48, 40, 32, 24, 16];
-const svg = readFileSync(resolve(root, 'assets', 'wind-badge.svg'), 'utf8');
+// Taskbar variant: black badge + faint white edge outline (see the SVG header). The outline
+// is re-drawn per size: ~1 physical px at 16-32 px, shrinking toward 6/256 of the icon at
+// 128-256 px, so it never vanishes and never looks heavy. The stroke sits inside the badge
+// (centre inset by half its width from the 8..248 edge).
+const src = readFileSync(resolve(root, 'assets', 'wind-badge-taskbar.svg'), 'utf8');
+function svgFor(s) {
+  const w = Math.max(6, 256 / s);                 // viewBox units; 256/s = 1 physical px
+  const inset = 8 + w / 2, side = 240 - w, rx = 56 - w / 2;
+  const rect = `<rect x="${inset}" y="${inset}" width="${side}" height="${side}" rx="${rx}" fill="none" stroke="#ffffff" stroke-opacity="0.1" stroke-width="${w}"/>`;
+  const re = /<rect x="11"[^>]*\/>/;
+  if (!re.test(src)) throw new Error('outline rect not found in wind-badge-taskbar.svg');
+  return src.replace(re, rect);
+}
 const tmp = mkdtempSync(resolve(tmpdir(), 'windicon-'));
 
 const browser = await chromium.launch();
@@ -33,7 +45,7 @@ for (const s of SIZES) {
   const html = `<!doctype html><html><head><style>
     html,body{margin:0;padding:0;background:transparent}
     svg{display:block;width:${s}px;height:${s}px}
-  </style></head><body>${svg}</body></html>`;
+  </style></head><body>${svgFor(s)}</body></html>`;
   await page.setViewportSize({ width: s, height: s });
   await page.setContent(html, { waitUntil: 'networkidle' });
   const out = resolve(tmp, `icon-${s}.png`);
