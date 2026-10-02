@@ -45,6 +45,7 @@
 #include "tray_host.h"     // WindTray.exe owns the icon and menu (#291)
 #include "gain_learner.h"  // learned pointer ballistics: locked pan at TRUE desktop speed
 #include "tray_ipc.h"      // the status block shared with WindTray.exe
+#include "tray_publish.h"  // which foreground windows the tray block publishes (#315)
 #include "pointer_binds.h"  // kWindInjectTag: tag our own injected clicks (#285)
 
 // txPace=2 composite signal (see config.h). One thread blocks in DwmFlush forever and pulses an
@@ -184,13 +185,15 @@ static bool SameMonitor(const MonitorTarget& a, const MonitorTarget& b) {
 // Desktop Duplication can't see until our overlay forces DWM to composite it, which is what makes
 // the first zoom-in flash the previously-focused window (issue #90). We use the bridged reveal only
 // in this case so ordinary desktop zoom-ins keep the instant path.
-static bool ForegroundCoversMonitor(const MonitorTarget& mon) {
-    HWND fg = GetForegroundWindow();
-    if (!fg) return false;
+static bool WindowCoversMonitor(HWND w, const MonitorTarget& mon) {
+    if (!w) return false;
     RECT wr{};
-    if (!GetWindowRect(fg, &wr)) return false;
+    if (!GetWindowRect(w, &wr)) return false;
     return wr.left <= mon.x && wr.top <= mon.y &&
            wr.right >= mon.x + mon.w && wr.bottom >= mon.y + mon.h;
+}
+static bool ForegroundCoversMonitor(const MonitorTarget& mon) {
+    return WindowCoversMonitor(GetForegroundWindow(), mon);
 }
 
 // --- Game-inspect focus steal (issue #144) ---------------------------------------------------
@@ -362,6 +365,7 @@ struct TickState {
     unsigned long long wantSinceMs = 0;     //   has been the candidate (debounces foreground reads)
     unsigned long long kbHookDivergentSinceMs = 0;  // LL keyboard-hook watchdog dwell (issue #156)
     unsigned long long lastFgProbeMs = 0;           // throttles the game-foreground probe to ~10Hz
+    bool trayPaused = false;                        // Pause Wind (#315), as last applied from the tray block
     std::wstring transformExe;      // exe of the app under the current/last transform game session
     unsigned long long lastTransformGameMs = 0;  // TDR-backstop window (device-lost attribution)
     // Per-HWND cache for the exe-derived pick predicates (shell class, exclusion list, churny
@@ -881,6 +885,69 @@ static void UpdateCursorTint(TickState& t) {
 // treats null as "no tray data", so the tick path needs no extra branch beyond the pointer test.
 static wind::TrayShared* g_trayBlock = nullptr;
 
+// --- Tray block foreground publishing (#315) ---------------------------------------------------
+// The tray flyout's engine dropdown needs the CATEGORY of the window that was in front before the
+// flyout opened, and its app-fix chips need to hear which app the user goes to next. Both come from
+// here: every foreground change (EVENT_SYSTEM_FOREGROUND, so a taskbar click on a minimized game or
+// an alt-tab back to it is seen even though the "foreground" never stood still long enough for a
+// poll) is classified by the pure rules in tray_publish.h and the real ones are published.
+static HWND g_fgRealHwnd = nullptr;        // the last real (App or Desktop) foreground window
+static wind::TrayFgKind g_fgRealKind = wind::TrayFgKind::Ignore;
+static int  g_fgPubCategory = -1;          // last category written
+static HWINEVENTHOOK g_fgHook = nullptr;
+
+static std::string AsciiOf(const std::wstring& w) {
+    std::string a;
+    a.reserve(w.size());
+    for (wchar_t c : w) a.push_back((char)(c < 128 ? c : '?'));
+    return a;
+}
+
+// activation = a foreground-change event; false = the periodic refresh of the window in front.
+static void PublishTrayForegroundFor(HWND h, bool activation) {
+    if (!g_trayBlock || !h || !g_tick) return;
+    wchar_t clsW[96]{};
+    GetClassNameW(h, clsW, 96);
+    const std::wstring exeW = ExeNameOf(h);
+    const wind::TrayFgKind kind = wind::ClassifyTrayForeground(AsciiOf(clsW), AsciiOf(exeW));
+    if (kind == wind::TrayFgKind::Ignore) return;
+    const bool borderless = !(GetWindowLongPtrW(h, GWL_STYLE) & WS_CAPTION);
+    const int cat = wind::TrayCategoryFor(kind, WindowCoversMonitor(h, g_tick->mon), borderless,
+                                          HasSystemBackdrop(h));
+    const wind::TrayFgPublish d = wind::DecideTrayFgPublish(kind, activation, cat, g_fgPubCategory);
+    g_fgRealHwnd = h;
+    g_fgRealKind = kind;
+    if (!d.category && !d.app) return;
+    if (d.category) g_fgPubCategory = cat;
+    wind::PublishTrayForeground(g_trayBlock, d.category ? cat : -1, d.app, exeW.c_str());
+}
+
+static void CALLBACK TrayFgWinEvent(HWINEVENTHOOK, DWORD ev, HWND hwnd, LONG idObject, LONG, DWORD, DWORD) {
+    if (ev != EVENT_SYSTEM_FOREGROUND || idObject != OBJID_WINDOW || !hwnd) return;
+    PublishTrayForegroundFor(hwnd, true);
+}
+
+// A fullscreen game's window can take foreground a moment before it covers the monitor, so the
+// category of the window in front is re-read on the cover probe's cadence and rewritten if it
+// changed. Skipped while the real window is not the foreground (the flyout is up) or minimized.
+static void RefreshTrayForegroundCategory() {
+    if (!g_trayBlock || !g_fgRealHwnd || g_fgRealKind != wind::TrayFgKind::App) return;
+    if (GetForegroundWindow() != g_fgRealHwnd || !IsWindow(g_fgRealHwnd) || IsIconic(g_fgRealHwnd)) return;
+    PublishTrayForegroundFor(g_fgRealHwnd, false);
+}
+
+// Pause Wind (#315): the tray sets TrayShared::paused. Applied once per change from the tick, so the
+// hooks stop swallowing and release what they hold. Cheap enough to run every tick (one atomic).
+static void ApplyTrayPause(TickState& t) {
+    const bool want = wind::TrayPaused(g_trayBlock);
+    if (want == t.trayPaused) return;
+    t.trayPaused = want;
+    g_input.setPaused(want);
+    // An Inspect freeze would outlive the pause with its 1px clip: end it with the zoom.
+    if (want && t.cursorLock.locked()) t.cursorLock.toggle();
+    wind::Log(wind::LogLevel::Info, "tray", want ? "Wind paused from the tray" : "Wind resumed from the tray");
+}
+
 // Event-driven idle (#71): read LIVE right before the wait, so nothing that arrived during the last
 // tick is slept on. Keyboard binds the hook cannot see (hook suspended for noSwallowApps, failed,
 // or a bind outside the tracked set) are polled with GetAsyncKeyState, so they keep the loop ticking.
@@ -1126,6 +1193,7 @@ static void RunTick(TickState& t) {
             const bool cover = ForegroundCoversMonitor(t.mon);
             const bool borderless = fg && !(GetWindowLongPtrW(fg, GWL_STYLE) & WS_CAPTION);
             TrackLaunchCover(t, fg, cover, borderless);
+            RefreshTrayForegroundCategory();   // a game that took foreground before it covered (#315)
         }
     }
     if (t.cfg.noSwallowApps.empty()) {
@@ -1209,10 +1277,22 @@ static void RunTick(TickState& t) {
     sortHeld(g_input.state().outHeld.load(), g_input.state().outHeldMods.load(), outPlain, outQz);
     sortHeld(comboHeld(t.cfg.zoomOutVk,  t.cfg.zoomOutMods),  t.cfg.zoomOutMods,  outPlain, outQz);
     sortHeld(comboHeld(t.cfg.zoomOutVk2, t.cfg.zoomOutMods2), t.cfg.zoomOutMods2, outPlain, outQz);
+    // Scroll-wheel zoom (#285): whole steps the hook swallowed since the last tick.
+    int wheelSteps = g_input.drainWheelSteps();
+    // Pause Wind (#315): no zoom input does anything; a live zoom is brought back to 1x. The hooks
+    // already stopped swallowing (ApplyTrayPause), this covers polled binds and the tick's own state.
+    ApplyTrayPause(t);
+    const bool paused = t.trayPaused;
+    {
+        wind::ZoomInputs zi;
+        zi.inPlain = inPlain; zi.inQz = inQz; zi.outPlain = outPlain; zi.outQz = outQz;
+        zi.wheelSteps = wheelSteps;
+        wind::GateZoomInputsForPause(paused, t.zoom.level() > 1.0 || t.zoom.hasTarget(), zi);
+        inPlain = zi.inPlain; inQz = zi.inQz; outPlain = zi.outPlain; outQz = zi.outQz;
+        wheelSteps = zi.wheelSteps;
+    }
     bool inHeld  = inPlain || inQz;
     bool outHeld = outPlain || outQz;
-    // Scroll-wheel zoom (#285): whole steps the hook swallowed since the last tick.
-    const int wheelSteps = g_input.drainWheelSteps();
     // Apply the live zoom profile every frame (free hot-reload; setProfile does not reset level).
     // (The old transform <=1.0x ramp-speed cap was a blind TDR mitigation; the resets were
     // root-caused elsewhere - issue #148 - so the user's configured speed applies everywhere.)
@@ -1223,7 +1303,7 @@ static void RunTick(TickState& t) {
     // (Ctrl/Alt/Shift; "None" = off) and tap a zoom key. While the modifier is held it toggles quick
     // zoom (below) instead of hold-zooming, so suppress the hold-zoom direction (the toggle snaps the
     // level). Hotkey mode (==1): a dedicated hotkey toggles it and the modifier is inert here.
-    bool modKeyDown = modifierActive && (GetAsyncKeyState(quickZoomModVk) & 0x8000) != 0;
+    bool modKeyDown = !paused && modifierActive && (GetAsyncKeyState(quickZoomModVk) & 0x8000) != 0;
     // With the modifier down only binds that include it hold-zoom; the others are quick-zoom taps.
     t.zoom.setDirection(modKeyDown ? ResolveDirection(inQz, outQz) : ResolveDirection(inHeld, outHeld));
     // The wheel zooms at the user's zoom speeds (a notch = 0.1 s of holding the bind).
@@ -1244,13 +1324,13 @@ static void RunTick(TickState& t) {
     if (!quiesceFreeze) t.zoom.tick(dt < kMaxZoomDt ? dt : kMaxZoomDt);
     // Recenter on a recenterVk key press (rising edge).
     bool recenter = false;
-    bool recenterDown = comboHeld(t.cfg.recenterVk, t.cfg.recenterMods);   // mods since #307
+    bool recenterDown = !paused && comboHeld(t.cfg.recenterVk, t.cfg.recenterMods);   // mods since #307
     if (recenterDown && !t.recenterKeyWasDown) recenter = true;
     t.recenterKeyWasDown = recenterDown;
     // Inspect mode: toggle on the bound key's rising edge (works at any zoom). The crosshair is
     // overlay-drawn (render_engine draws the crosshair sprite when cursorLocked is set); the active
     // block below freezes the real cursor (1px ClipCursor) and roams a raw-driven look point.
-    bool lockDown = comboHeld(t.cfg.cursorLockVk, t.cfg.cursorLockMods);
+    bool lockDown = !paused && comboHeld(t.cfg.cursorLockVk, t.cfg.cursorLockMods);
     if (lockDown && !t.lockKeyWasDown) {
         if (t.model->supportsInspect()) {
             // Snapshot cursor visibility at the toggle edge, BEFORE this tick's active block hides it,
@@ -1296,7 +1376,9 @@ static void RunTick(TickState& t) {
     bool outEdge = outPlain && !t.prevOutPlain;
     t.prevInPlain = inPlain; t.prevOutPlain = outPlain;
     t.prevInHeld = inHeld; t.prevOutHeld = outHeld;
-    bool hotkeyTrigger = t.quickZoomHotkey.exchange(false);   // always consume (only set in hotkey mode)
+    // Always consumed (only set in hotkey mode); ignored while paused. The RegisterHotKey itself
+    // still eats the key, the one bind Pause cannot hand back to the app.
+    bool hotkeyTrigger = t.quickZoomHotkey.exchange(false) && !paused;
     bool modZoomTrigger = modKeyDown && (inEdge || outEdge);  // modKeyDown implies modifier mode + enabled
     if (hotkeyTrigger || modZoomTrigger) {
         QuickZoomResult qr = ApplyQuickZoom(t.zoom.level(), t.quickZoomStored,
@@ -3004,6 +3086,15 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     ts.mTransform = model2.get();
     ts.hwnd = hwnd;                       // so RunTick can re-register the hide-cursor hotkey
     g_tick = &ts;   // so the WM_TIMER tick (during the tray menu's modal loop) can run
+    // Foreground publishing for the tray flyout (#315). Out-of-context and skipping our own process
+    // (the focus-steal helper and overlay are never "the app in front"); delivered on this thread
+    // while the loop pumps messages. The window in front right now is published once at start-up.
+    if (g_trayBlock) {
+        g_fgHook = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr, TrayFgWinEvent,
+                                   0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+        if (!g_fgHook) wind::Log(wind::LogLevel::Warn, "tray", "foreground hook failed (err=%lu)", GetLastError());
+        PublishTrayForegroundFor(GetForegroundWindow(), true);
+    }
     {   // Restore the learned gain curve so the first locked session after a restart pans at the
         // learned desktop speed instead of raw passthrough ("default to the last read value").
         // Corrupt or missing = fresh learner, which re-warms from live use in seconds.
@@ -3133,6 +3224,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // WindConfig. A named event is a kernel object (not gated by UIPI) and both run as the same user
     // in the same session, so it works in dev and deployed. Auto-reset, initially unsignaled.
     HANDLE quitEvent = CreateEventW(nullptr, FALSE, FALSE, L"Local\\Wind_QuitRequest");
+    // Tray -> Wind commands (#315: Pause). Auto-reset, created by whichever side starts first. Waited
+    // on while idle so a pause takes effect at once instead of after the 100 ms housekeeping sleep.
+    HANDLE trayCmdEvent = CreateEventW(nullptr, FALSE, FALSE, wind::kTrayCommandEventName);
 
     HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr,
         CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
@@ -3301,12 +3395,17 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             // timeout. Raw Input (every mouse move) is NOT in the wake mask; it is drained below.
             bool slept = false;
             if (!zoomed && IdleNow(ts)) {
-                HANDLE hs[2] = { static_cast<HANDLE>(g_input.wakeEvent()), quitEvent };
-                const DWORD n = quitEvent ? 2 : 1;
+                // Slots: 0 = the input wake, then the quit event and the tray command event when they
+                // exist (a failed CreateEvent just drops its slot).
+                HANDLE hs[3] = { static_cast<HANDLE>(g_input.wakeEvent()) };
+                DWORD n = 1, quitSlot = 0xFFFFu;
+                if (quitEvent)    { quitSlot = n; hs[n++] = quitEvent; }
+                if (trayCmdEvent) { hs[n++] = trayCmdEvent; }
                 const DWORD r = MsgWaitForMultipleObjectsEx(n, hs, wind::kIdleTimeoutMs,
                                                             QS_POSTMESSAGE | QS_SENDMESSAGE | QS_HOTKEY, 0);
-                if (n == 2 && r == WAIT_OBJECT_0 + 1) { running = false; break; }   // quit request
-                if (r == WAIT_OBJECT_0 || r == WAIT_OBJECT_0 + n || r == WAIT_TIMEOUT) {
+                if (r == WAIT_OBJECT_0 + quitSlot) { running = false; break; }   // quit request
+                // The wake, a tray command (RunTick below reads the block) and the timeout all mean "tick now".
+                if (r < WAIT_OBJECT_0 + n || r == WAIT_OBJECT_0 + n || r == WAIT_TIMEOUT) {
                     slept = true;
                     ts.wokeFromIdle = true;
                     // Drain now, so a hotkey or settings message is seen by THIS tick, not the next.
@@ -3407,6 +3506,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     g_tick = nullptr;
     if (timer) CloseHandle(timer);
     if (quitEvent) CloseHandle(quitEvent);
+    if (trayCmdEvent) CloseHandle(trayCmdEvent);
+    if (g_fgHook) { UnhookWinEvent(g_fgHook); g_fgHook = nullptr; }
     if (ts.configWatch && ts.configWatch != INVALID_HANDLE_VALUE) FindCloseChangeNotification(ts.configWatch);
     UnregisterHotKey(hwnd, kQuitHotkeyId);
     UnregisterHotKey(hwnd, kHideCursorHotkeyId);

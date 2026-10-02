@@ -43,6 +43,7 @@ void OpenSettings();
 TrayShared* Block();          // the shared status block, or nullptr when Wind did not create one
 std::wstring AppDir();        // the folder holding WindTray.exe, Wind.exe and WindConfig.exe
 void RequestWindQuit();       // sets Local\Wind_QuitRequest: Wind's clean-exit path
+void SetPaused(bool paused);  // Pause Wind (#315): the block flag, then Local\Wind_TrayCommand wakes Wind
 
 }  // namespace TrayApp
 }  // namespace wind

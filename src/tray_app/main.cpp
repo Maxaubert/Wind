@@ -19,6 +19,14 @@ static std::wstring g_appDir;
 TrayShared* Block() { return g_block; }
 std::wstring AppDir() { return g_appDir; }
 
+void SetPaused(bool paused) {
+    // Block first, then the event: Wind reads the flag when the event wakes it.
+    SetTrayPaused(g_block, paused);
+    HANDLE ev = CreateEventW(nullptr, FALSE, FALSE, kTrayCommandEventName);
+    if (ev) { SetEvent(ev); CloseHandle(ev); }
+    else wind::Log(wind::LogLevel::Warn, "tray", "pause: command event open failed (err=%lu)", GetLastError());
+}
+
 void RequestWindQuit() {
     // The same clean-exit path the installer and Settings use: Wind restores cursor, clip and
     // Magnifier state as on any quit. A window message could not reach Wind anyway (UIPI).
@@ -99,9 +107,18 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR cmdLine, int) {
     }
 
     // The status block. Missing (an older Wind) is survivable: the header shows Idle with no fps.
+    // Map the WHOLE section (size 0) and only use it if it holds our layout: an older Wind (#315)
+    // made a smaller one, and reading past its end would fault. A newer Wind's larger block is fine
+    // here, and its different version number makes TrayBlockValid refuse the values.
     HANDLE map = OpenFileMappingW(FILE_MAP_READ | FILE_MAP_WRITE, FALSE, kTrayBlockName);
-    if (map) TrayApp::g_block = static_cast<TrayShared*>(
-        MapViewOfFile(map, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, sizeof(TrayShared)));
+    if (map) {
+        void* view = MapViewOfFile(map, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, 0);
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (view && VirtualQuery(view, &mbi, sizeof(mbi)) && mbi.RegionSize >= sizeof(TrayShared))
+            TrayApp::g_block = static_cast<TrayShared*>(view);
+        else if (view)
+            UnmapViewOfFile(view);
+    }
     if (!TrayApp::g_block)
         wind::Log(wind::LogLevel::Warn, "tray", "status block unavailable (err=%lu)", GetLastError());
 

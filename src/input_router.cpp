@@ -295,7 +295,8 @@ static LRESULT CALLBACK KbProc(int code, WPARAM wParam, LPARAM lParam) {
         if (down || up) g_router->noteAnyKeyDown(GetTickCount64());
         // Only bound (non-forbidden) keys are tracked/swallowed; every other keystroke passes through
         // untouched. isBoundKey already range-checks vk and excludes IsForbiddenBindVk keys.
-        if ((down || up) && g_router->isBoundKey(vk)) {
+        // Pause Wind: nothing is tracked or swallowed (setPaused already released what we held).
+        if ((down || up) && !g_router->paused() && g_router->isBoundKey(vk)) {
             bool swallow = false;
             if (down) {
                 // Auto-repeat re-fires WM_KEYDOWN. main reads g_kbPressed as the physical down-state
@@ -363,7 +364,7 @@ static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
                 case WM_MBUTTONUP:   cb = 5; cbUp = true;   break;
                 default: break;
             }
-            if (cb && cbDown) {
+            if (cb && cbDown && !g_router->paused()) {   // paused: no new binds (an UP below stays balanced)
                 const int held = HeldModsNow();
                 int dir = 0, mods = 0;
                 if (g_router->matchButton(cb, held, dir, mods)) {
@@ -384,7 +385,7 @@ static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
                 if (g_swallowedDown[cb].exchange(false)) return 1;
             }
             // Scroll-wheel zoom: a notch with the bound modifiers held zooms instead of scrolling.
-            if (wParam == WM_MOUSEWHEEL) {
+            if (wParam == WM_MOUSEWHEEL && !g_router->paused()) {
                 const int wm = g_router->wheelMods();
                 if (wm != 0) {
                     const int held = HeldModsNow();
@@ -431,7 +432,7 @@ static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
         int id = xbuttonIdFromHook(wParam, lParam);
         bool down = (wParam == WM_XBUTTONDOWN);
         bool up   = (wParam == WM_XBUTTONUP);
-        if (id != 0 && (down || up)) {
+        if (id != 0 && ((down && !g_router->paused()) || up)) {   // paused: a DOWN is ignored, its UP still balances
             if (down) g_router->noteHookButtonDown(id);   // recency guard for the raw UP safety net
             g_router->setButtonState(id, down);
             bool swallow = false;
@@ -612,6 +613,20 @@ void InputRouter::setKeyboardHookWanted(bool want) {
         ReleaseSwallowedKeys();
     }
     if (g_hookThreadId) PostThreadMessageW(g_hookThreadId, kMsgSetKbHook, want ? 1 : 0, 0);
+}
+
+// Pause Wind (#315): stop acting on and swallowing every zoom bind. Keys we swallowed get their UP
+// (the app never saw the DOWN, so a lone UP is harmless) and every held record is dropped so no
+// zoom stays latched. A swallowed button DOWN keeps its record: its UP must still be swallowed or
+// the app sees a lone button-up (a side button's alone is browser Back/Forward, #301).
+void InputRouter::setPaused(bool paused) {
+    if (paused_.exchange(paused, std::memory_order_relaxed) == paused) return;   // no change
+    if (!paused) return;   // resuming needs nothing: the next press is tracked as usual
+    ReleaseSwallowedKeys();
+    for (int vk = 0; vk < 256; ++vk) g_kbPressed[vk].store(false);
+    for (int b = 1; b <= 5; ++b) g_btnDir[b].store(0, std::memory_order_relaxed);
+    PublishButtonHeld(state_);
+    state_.wheelSteps.store(0, std::memory_order_relaxed);
 }
 
 void InputRouter::onKbHookStateChanged(bool active) {
