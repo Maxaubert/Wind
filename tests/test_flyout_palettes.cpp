@@ -41,7 +41,8 @@ TEST_CASE("flyout palettes: Wind grey keeps the look the flyout already had") {
     const FlyoutPalette& g = kPalettes[0];
     CHECK(g.dark.menu == 0x000000);
     CHECK(g.dark.fill == 0x2fbfa5);
-    CHECK(g.dark.on == 0x1f5650);
+    CHECK(g.dark.on == 0x2fbfa5);     // solid teal ON segments with a near-black icon (#329)
+    CHECK(g.dark.onic == 0x04201b);
     CHECK(g.dark.tintA == 0.f);
 }
 

@@ -17,6 +17,7 @@
   import { droppedBinds } from './lib/keybindRules.js';
   import TitleBar from './shell/TitleBar.svelte';
   import Sidebar from './shell/Sidebar.svelte';
+  import ScrollChip from './shell/ScrollChip.svelte';
   import Banner from './shell/Banner.svelte';
   import Card from './shell/Card.svelte';
   import SaveCapsule from './shell/SaveCapsule.svelte';
@@ -317,6 +318,7 @@
       {/key}
       <div class="tail"></div>
     </main>
+    <ScrollChip target={main} />
   </div>
   <SaveCapsule {count} onSave={save} onDiscard={discard} />
   <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">{announcement}</div>
@@ -404,7 +406,9 @@
   .app.pending { visibility: hidden; }
   .app { width: 100vw; height: 100vh; display: grid; grid-template-rows: 38px 1fr; position: relative; overflow: hidden; }
   .body { display: grid; grid-template-columns: 240px 1fr; min-height: 0; }
-  .main { position: relative; min-height: 0; overflow-y: auto; padding: 0 40px; outline: none; }
+  .body { position: relative; }   /* the scroll chip sits on the right edge of the page column */
+  /* No native scrollbar on the page: ScrollChip shows the position instead (#329). */
+  .main { position: relative; min-height: 0; overflow-y: auto; padding: 0 40px; outline: none; scrollbar-width: none; }
   .main[data-page="tray"] :global(.banner + .card) { margin-top: 20px; }   /* k01: a caption-less first card sits 20px under the band */
   .page.fade { animation: pagein var(--dur-fast) var(--ease); }
   @keyframes pagein { from { opacity: 0; } }

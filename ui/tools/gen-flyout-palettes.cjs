@@ -24,10 +24,12 @@ const H = (n) => '0x' + n.toString(16).padStart(6, '0');
 const f = (v) => { const s = String(+(+v).toFixed(3)); return (s.includes('.') ? s : s + '.') + 'f'; };
 
 // today's flyout look (MakeTheme in flyout_draw.cpp before #318), the Wind grey rows
+// Wind grey dark ON segments: solid teal with a near-black icon, the black-and-teal contrast of the Settings
+// switches (Max 2026-10-02, #329); the old dim teal tint did not fit.
 const GREY = {
   dark: { menu: 0x000000, card: 0x121212, menub: 0x333333, fg: 0xf2f2f2, fg2: 0xd0d0d0, fg3: 0xb4b6ba, rule: 0x303236, hl: 0x2d2d2d,
     glyph: 0xb0b0b0, spark: 0x2fbfa5, fill: 0x2fbfa5, fillline: 0, filllineA: 0, lift: 0x0b0b0b, scrim: 0x000000, scrimA: .55,
-    band: 0x0a0a0a, track: 0x3d3d3d, off: 0x303033, offh: 0x3b3b3f, offic: 0xc8cad0, onic: 0xa9ece0, on: 0x1f5650, onh: 0x266560,
+    band: 0x0a0a0a, track: 0x3d3d3d, off: 0x303033, offh: 0x3b3b3f, offic: 0xc8cad0, onic: 0x04201b, on: 0x2fbfa5, onh: 0x45cbb3,
     onb: 0x2fbfa5, onbA: .4, segline: 0x000000, focus: 0xf2f2f2, aurora: .62, tint: 0, tintA: 0 },
 };
 // Settings control greys (ui/src/design/themes.css, Wind grey): the toggle bar and dropdown match them.
