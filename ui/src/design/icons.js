@@ -24,10 +24,6 @@ export const paths = {
   edges: '<path d="M2.5 2.5h11v11h-11zM6 5.5l4.5 2.8-1.9.6-.8 2z"/>',
   // Tray tools (#315): a chip with pins, the main-engine dropdown. Same path as flyout_icons.h.
   engine: '<path d="M4.5 4.5h7v7h-7zM6.75 6.75h2.5v2.5h-2.5z"/><path d="M6.5 1.5v3M9.5 1.5v3M6.5 11.5v3M9.5 11.5v3M1.5 6.5h3M1.5 9.5h3M11.5 6.5h3M11.5 9.5h3"/>',
-  // Theme glyphs are round on purpose: square ones read as the window maximize button.
-  auto: '<circle cx="8" cy="8" r="5.5"/><path d="M8 2.5a5.5 5.5 0 0 1 0 11z" fill="currentColor"/>',
-  light: '<circle cx="8" cy="8" r="2.75"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.4 1.4M11.6 11.6L13 13M3 13l1.4-1.4M11.6 4.4L13 3"/>',
-  dark: '<path d="M13.5 9.5A5.75 5.75 0 1 1 6.5 2.5a4.5 4.5 0 0 0 7 7z"/>',
   // Window chrome and brand.
   logo: '<path d="M2 5h8a2 2 0 1 0-2-2M2 8.5h11a2 2 0 1 1-2 2M2 12h6"/>',
   minimize: '<path d="M3 8h10"/>',

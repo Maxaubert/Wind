@@ -67,6 +67,14 @@ Round 2 of the Settings redesign (#303 / PR #312). Every decision Max made is lo
 Profile rename (open question to Max), the theme picker layout (pending mockup choice), any new setting
 not listed above.
 
+## 5b. As built 0.20.0: light mode removed (#324, Max 2026-10-02)
+
+The Mode row (System / Light / Dark) is gone from Preferences, so General holds Theme, Profile and Show advanced
+settings. Settings, onboarding and the tray flyout are always dark; the four themes keep only their dark
+blocks (themes.css, flyout_palettes.h and both generators are dark only). `uiTheme` stays in the global and
+UI-only key lists as an ignored legacy key and is never written by the UI. WindConfig's pre-paint colour is the
+dark colour of the current `uiPalette`. The tray icon still follows the taskbar theme.
+
 ## 5. As built (0.19.0, 2026-10-02)
 - Four themes (`grey ember ocean hicon`) end to end: `kUiPalettes`/`NormalizeUiPalette` (removed ids read as grey),
   `ui/src/design/themes.css` + `themes.js`, `src/tray_app/flyout_palettes.h`, both generators trimmed to those four.

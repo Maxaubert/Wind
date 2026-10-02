@@ -29,7 +29,7 @@ class Painter {
 public:
     Painter();
     ~Painter();
-    bool Init(ID2D1RenderTarget* rt, bool dark, int palette = 0);   // palette = PaletteIndex(uiPalette)
+    bool Init(ID2D1RenderTarget* rt, int palette = 0);   // palette = PaletteIndex(uiPalette)
     // Call between BeginDraw and EndDraw. Paints the whole flyout from the origin in DIPs onto an
     // opaque target; ApplyShapeAlpha then cuts the rounded corners out of the pixels.
     void Draw(const View& v, const Geometry& g);

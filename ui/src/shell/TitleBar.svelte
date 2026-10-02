@@ -1,7 +1,7 @@
 <script>
   import { iconSvg } from '../design/icons.js';
   // Props only. The bar carries the window buttons and nothing else: minimize, maximize (restore when
-  // maximized), close. The light/dark mode lives in Preferences.
+  // maximized), close.
   let { title = 'Wind Settings', maximized = false, onMinimize = () => {}, onMaximize = () => {}, onClose = () => {} } = $props();
 </script>
 

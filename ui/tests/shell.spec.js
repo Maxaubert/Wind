@@ -5,7 +5,7 @@ import { iconNames, iconSvg } from '../src/design/icons.js';
 const css = (loc, prop) => loc.evaluate((el, p) => getComputedStyle(el).getPropertyValue(p), prop);
 
 test('icon set covers the plan list and renders static svg', () => {
-  for (const n of ['hotkeys', 'zoom', 'view', 'screen', 'general', 'about', 'search', 'maximize', 'auto', 'light', 'dark'])
+  for (const n of ['hotkeys', 'zoom', 'view', 'screen', 'general', 'about', 'search', 'maximize'])
     expect(iconNames).toContain(n);
   expect(iconSvg('zoom')).toMatch(/^<svg /);
   expect(iconSvg('nope')).toBe('');
@@ -45,12 +45,10 @@ test('the title bar carries only the window buttons and the sidebar has a divide
   expect(await css(page.locator('.side nav.bottom'), 'border-top-width')).toBe('1px');
 });
 
-test('light theme tokens apply', async ({ page }) => {
+test('the shell is dark, and a theme param no longer switches it', async ({ page }) => {
   await page.goto('/preview.html?theme=light');
-  expect(await css(page.locator('.card'), 'background-color')).toBe('rgb(255, 255, 255)');
-  expect(await css(page.locator('.side'), 'background-color')).toBe('rgb(243, 243, 244)');
-  expect(await css(page.locator('.it.sel'), 'background-color')).toBe('rgb(228, 228, 228)');
-  expect(await css(page.locator('.banner'), 'background-color')).toBe('rgb(246, 246, 247)');
+  expect(await css(page.locator('.card'), 'background-color')).toBe('rgb(8, 8, 8)');
+  expect(await css(page.locator('.side'), 'background-color')).toBe('rgb(0, 0, 0)');
 });
 
 test('callbacks fire and the capsule hides at zero', async ({ page }) => {

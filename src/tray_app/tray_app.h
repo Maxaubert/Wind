@@ -25,7 +25,7 @@ void ToggleFlyout();
 void CloseFlyout();
 bool FlyoutIsOpen();
 
-// flyout_test.cpp - `WindTray.exe --render-test out.png [--light] [--palette ID] [--dpi N] [--hover kind[:i]]`
+// flyout_test.cpp - `WindTray.exe --render-test out.png [--palette ID] [--dpi N] [--hover kind[:i]]`
 // renders the flyout with fake status to a PNG and exits. Returns the process exit code.
 int RunRenderTest(const wchar_t* cmdLine);
 // `WindTray.exe --flyout-test`: opens the LIVE flyout at the cursor (no icon, no Wind, no single
@@ -38,7 +38,6 @@ int RunFlyoutTest();
 bool SetMainEngine(const std::wstring& ini, int picked);
 
 // tray_menu.cpp - what the flyout's buttons do (no UI of their own).
-bool UsesDarkTheme(const std::string& iniText);   // Wind's uiTheme; anything but dark/light = system
 int UsesPalette(const std::string& iniText);     // Wind's uiPalette as an index into Flyout::kPalettes; unknown or absent = 0 (Wind grey)
 bool ConfirmQuit(const std::wstring& ini);        // the unsaved-settings prompt; false = cancelled
 bool ConfirmSwitch(const std::wstring& ini);      // the same prompt before a profile switch (Discard resets the session)

@@ -275,41 +275,28 @@ static std::string SessionPayload(const std::string& live) {
     return "\"values\":" + JsonObjectOf(values) + ",\"saved\":" + JsonObjectOf(saved) +
            ",\"profiles\":{\"names\":" + names + ",\"active\":\"" + JsonEscape(active) + "\"}";
 }
-static std::string UiThemeOf(const std::string& live) {
-    auto v = wind::ReadIniValues(live);
-    auto it = v.find("uiTheme");
-    return (it == v.end() || it->second.empty()) ? std::string("auto") : it->second;
-}
-static bool SystemUsesLightApps() {
-    DWORD v = 0, cb = sizeof(v);
-    if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
-                     L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &v, &cb) == ERROR_SUCCESS)
-        return v != 0;
-    return false;
-}
 static std::string UiPaletteOf(const std::string& live) {
     auto v = wind::ReadIniValues(live);
     auto it = v.find("uiPalette");
     return wind::NormalizeUiPalette(it == v.end() ? std::string() : it->second);
 }
-// Window/WebView background from uiPalette + uiTheme (auto follows the system) so first paint never flashes
-// the wrong colour. Colours are the --bg tokens of ui/src/design/themes.css (generated; keep in step when a
-// theme is added): grey, ember, ocean, hicon, each dark then light.
-static COLORREF ThemeBackground(const std::string& palette, const std::string& theme) {
-    const bool light = theme == "light" || (theme != "dark" && SystemUsesLightApps());
-    static const COLORREF kBg[4][2] = {
-        { RGB(0x00, 0x00, 0x00), RGB(0xf3, 0xf3, 0xf4) },   // grey
-        { RGB(0x0c, 0x09, 0x08), RGB(0xf7, 0xf2, 0xed) },   // ember
-        { RGB(0x0c, 0x11, 0x17), RGB(0xef, 0xf3, 0xf8) },   // ocean
-        { RGB(0x00, 0x00, 0x00), RGB(0xff, 0xff, 0xff) },   // hicon
+// Window/WebView background from uiPalette so first paint never flashes the wrong colour. Always dark (#324:
+// light mode is gone; uiTheme is an ignored legacy key). Colours are the --bg tokens of
+// ui/src/design/themes.css (generated; keep in step when a theme is added): grey, ember, ocean, hicon.
+static COLORREF ThemeBackground(const std::string& palette) {
+    static const COLORREF kBg[4] = {
+        RGB(0x00, 0x00, 0x00),   // grey
+        RGB(0x0c, 0x09, 0x08),   // ember
+        RGB(0x0c, 0x11, 0x17),   // ocean
+        RGB(0x00, 0x00, 0x00),   // hicon
     };
     int n = 0; const char* const* ids = wind::UiPaletteIds(n);
     int idx = 0;
     for (int i = 0; i < n && i < 4; ++i) if (palette == ids[i]) idx = i;
-    return kBg[idx][light ? 1 : 0];
+    return kBg[idx];
 }
-static void ApplyWindowTheme(const std::string& theme) {
-    const COLORREF c = ThemeBackground(UiPaletteOf(ReadFileUtf8(IniPath())), theme);
+static void ApplyWindowTheme() {
+    const COLORREF c = ThemeBackground(UiPaletteOf(ReadFileUtf8(IniPath())));
     static HBRUSH brush = nullptr;
     HBRUSH nb = CreateSolidBrush(c);
     if (g_hwnd) SetClassLongPtrW(g_hwnd, GCLP_HBRBACKGROUND, (LONG_PTR)nb);
@@ -317,8 +304,7 @@ static void ApplyWindowTheme(const std::string& theme) {
     brush = nb;
     if (g_hwnd) InvalidateRect(g_hwnd, nullptr, TRUE);
     if (g_hwnd) {   // the thin window outline DWM draws around the frame (none when maximized)
-        const bool light = GetRValue(c) > 128;
-        COLORREF border = light ? RGB(0xd4, 0xd4, 0xd4) : RGB(0x2a, 0x2a, 0x2a);
+        COLORREF border = RGB(0x2a, 0x2a, 0x2a);
         DwmSetWindowAttribute(g_hwnd, 34 /* DWMWA_BORDER_COLOR */, &border, sizeof(border));
     }
     if (g_controller) {
@@ -368,8 +354,7 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
                     Widen("{\"type\":\"configWriteFailed\",\"key\":\"" + JsonEscape(key) + "\"}").c_str());
                 return;
             }
-            if (key == "uiTheme") ApplyWindowTheme(value);
-            else if (key == "uiPalette") ApplyWindowTheme(UiThemeOf(ReadFileUtf8(IniPath())));
+            if (key == "uiPalette") ApplyWindowTheme();
             if (type == "setConfigPersist") {
                 // Keybind captures: also written straight into the active profile so they survive
                 // a later Discard or restart while other changes stay unsaved. Only this one key
@@ -504,7 +489,7 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
         // Factory defaults by design (spec): absent keys fall back to built-in defaults. `model` is
         // seeded EXPLICITLY because the UI schema default (hybrid/"Auto") and the core's missing-key
         // default (render) disagree; writing the documented product default keeps core, host, tray,
-        // and UI in agreement. Globals (onboarded=1, uiTheme, showAdvanced) carry over in MakeLiveText.
+        // and UI in agreement. Globals (onboarded=1, uiPalette, showAdvanced) carry over in MakeLiveText.
         const std::string name = JsonField(j, "name");
         std::string err = ValidateNewName(name);
         if (err.empty()) {
@@ -675,10 +660,6 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         return 0;
     }
-    if (m == WM_SETTINGCHANGE && l && wcscmp((LPCWSTR)l, L"ImmersiveColorSet") == 0) {
-        ApplyWindowTheme(UiThemeOf(ReadFileUtf8(IniPath())));   // "auto" follows the system theme live
-        return 0;
-    }
     if (m == WM_SIZE && g_controller) {
         RECT r; GetClientRect(h, &r);
         if (!IsZoomed(h)) r.top += 1;   // 1px top strip stays the parent's: the top resize edge
@@ -829,13 +810,11 @@ static void CreateWebView(HWND hwnd) {
                             if (SUCCEEDED(args->get_WebMessageAsJson(&json)) && json) { HandleWebMessage(wv, json); CoTaskMemFree(json); }
                             return S_OK;
                         }).Get(), &tok);
-                    // First-paint config: window.__windInit = {values, saved, profiles, theme}, so the
+                    // First-paint config: window.__windInit = {values, saved, profiles}, so the
                     // page renders without a getConfig round trip (bridge.js consumes it once).
                     { const std::string live = ReadFileUtf8(IniPath());
-                      const std::string theme = UiThemeOf(live);
-                      ApplyWindowTheme(theme);
-                      const std::wstring js = Widen("window.__windInit={" + SessionPayload(live) +
-                                                    ",\"theme\":\"" + JsonEscape(theme) + "\"};");
+                      ApplyWindowTheme();
+                      const std::wstring js = Widen("window.__windInit={" + SessionPayload(live) + "};");
                       g_webview->AddScriptToExecuteOnDocumentCreated(js.c_str(),
                           Callback<ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler>(
                           [](HRESULT, PCWSTR id) -> HRESULT { if (id) g_initScriptId = id; return S_OK; }).Get()); }
@@ -894,7 +873,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
     WNDCLASSW wc{}; wc.lpfnWndProc = WndProc; wc.hInstance = hInst; wc.lpszClassName = L"WindConfigWnd";
     {
         const std::string iniText = ReadFileUtf8(IniPath());
-        wc.hbrBackground = CreateSolidBrush(ThemeBackground(UiPaletteOf(iniText), UiThemeOf(iniText)));
+        wc.hbrBackground = CreateSolidBrush(ThemeBackground(UiPaletteOf(iniText)));
     }
     wc.hIcon = LoadIconW(hInst, MAKEINTRESOURCEW(IDI_WIND));  // logo badge for taskbar/alt-tab
     RegisterClassW(&wc);

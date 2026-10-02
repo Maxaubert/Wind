@@ -16,28 +16,8 @@
 #include <string>
 namespace wind { namespace TrayApp {
 
-static bool SystemUsesLightTheme() {
-    DWORD v = 0, cb = sizeof(v);
-    if (RegGetValueW(HKEY_CURRENT_USER,
-                     L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
-                     L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &v, &cb) == ERROR_SUCCESS)
-        return v != 0;
-    return false;   // no key: assume dark, which is what Wind's own UI defaults to
-}
-
-// Dark or light for this open: the ini's uiTheme ("dark" / "light" / anything else = auto, which
-// follows the system). Read fresh on every open so a theme change in Settings shows immediately.
-bool UsesDarkTheme(const std::string& iniText) {
-    auto vals = wind::ReadIniValues(iniText);
-    auto it = vals.find("uiTheme");
-    const std::string t = it == vals.end() ? std::string() : it->second;
-    if (t == "dark") return true;
-    if (t == "light") return false;
-    return !SystemUsesLightTheme();
-}
-
 // The theme for this open: the ini's uiPalette (grey ember ocean hicon). Unknown or absent is
-// Wind grey, like Settings. Read fresh on every open, with uiTheme above.
+// Wind grey, like Settings. Read fresh on every open. The flyout is always dark (#324): uiTheme is ignored.
 int UsesPalette(const std::string& iniText) {
     auto vals = wind::ReadIniValues(iniText);
     auto it = vals.find("uiPalette");

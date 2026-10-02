@@ -61,39 +61,21 @@ const token = async (page, name) => (await css(app(page), '--' + name)).trim();
 const trig = (page) => key(page, '__profiles').locator('.trig');
 const openList = (page) => trig(page).click();
 
-// ---- Mode -----------------------------------------------------------------------------------------
+// ---- Dark only (#324) -----------------------------------------------------------------------------
 
-test('Mode is a three-way System / Light / Dark with equal segments and a clearly filled selected one', async ({ page }) => {
-  await page.goto('/');
-  await go(page, 'prefs');
-  const seg = key(page, '__theme').getByRole('radiogroup');
-  await expect(seg.getByRole('radio')).toHaveText(['System', 'Light', 'Dark']);
-  const widths = [];
-  for (const r of await seg.getByRole('radio').all()) widths.push(Math.round((await r.boundingBox()).width));
-  expect(new Set(widths).size).toBe(1);   // equal-width segments
-  // The ini says dark, so Dark is the selected one: filled with the selection colour, the others are not.
-  const dark = seg.getByRole('radio', { name: 'Dark' });
-  const sel = await token(page, 'sel');
-  expect(await css(dark, 'background-color')).not.toBe(await css(seg.getByRole('radio', { name: 'Light' }), 'background-color'));
-  expect(await css(dark, 'font-weight')).toBe('600');
-  expect(sel).toBe('#313131');
-});
-
-test('Mode writes uiTheme auto / light / dark, and System follows the system setting', async ({ page }) => {
-  await page.emulateMedia({ colorScheme: 'light' });
-  await page.goto('/');
-  await go(page, 'prefs');
-  const seg = key(page, '__theme').getByRole('radiogroup');
-  await seg.getByRole('radio', { name: 'System' }).click();
-  await expect(app(page)).toHaveAttribute('data-theme', 'light');   // the system is light
-  await page.emulateMedia({ colorScheme: 'dark' });
-  await expect(app(page)).toHaveAttribute('data-theme', 'dark');   // and follows it live
-  await seg.getByRole('radio', { name: 'Light' }).click();
-  await expect(app(page)).toHaveAttribute('data-theme', 'light');
-  await seg.getByRole('radio', { name: 'Dark' }).click();
-  await expect(app(page)).toHaveAttribute('data-theme', 'dark');
-  expect((await sent(page, 'setConfig')).filter((m) => m.key === 'uiTheme').map((m) => m.value)).toEqual(['auto', 'light', 'dark']);
-  await expect(page.locator('.capsule')).toHaveCount(0);   // a mode change is never unsaved
+test('there is no Mode row, and an ini with uiTheme=light or auto still renders dark', async ({ page }) => {
+  for (const legacy of ['light', 'auto', 'dark']) {
+    await page.addInitScript((v) => { window.__cfgExtra = { uiTheme: v }; }, legacy);
+    await page.emulateMedia({ colorScheme: 'light' });   // the system being light changes nothing either
+    await page.goto('/');
+    await go(page, 'prefs');
+    await expect(key(page, '__theme')).toHaveCount(0);
+    await expect(page.getByRole('radio', { name: 'Light' })).toHaveCount(0);
+    expect(await token(page, 'bg'), legacy).toBe('#000');
+    expect(await css(page.locator('html'), 'color-scheme'), legacy).toBe('dark');
+    expect(await page.evaluate(() => document.querySelector('.wnd').hasAttribute('data-theme'))).toBe(false);
+    expect((await sent(page, 'setConfig')).filter((m) => m.key === 'uiTheme')).toEqual([]);   // the UI never writes it any more
+  }
 });
 
 // ---- Themes ---------------------------------------------------------------------------------------
@@ -103,7 +85,10 @@ test('the theme picker is one row of the four theme cards, no scrolling, no arro
   await page.goto('/');
   await go(page, 'prefs');
   const picker = key(page, 'uiPalette').getByRole('radiogroup');
-  await expect(picker.getByRole('radio')).toHaveText(themes.map((t) => t.label));
+  const radios = picker.getByRole('radio');
+  await expect(radios).toHaveCount(themes.length);
+  for (let i = 0; i < themes.length; i++) await expect(radios.nth(i)).toHaveAccessibleName(themes[i].label);
+  await expect(radios).toHaveText(themes.map(() => ''));   // no visible names, cards only
   expect(themes.map((t) => t.id)).toEqual(['grey', 'ember', 'ocean', 'hicon']);   // High contrast is always last
   const tops = new Set();
   for (const r of await picker.getByRole('radio').all()) tops.add(Math.round((await r.boundingBox()).y));
@@ -117,7 +102,8 @@ test('the theme picker is one row of the four theme cards, no scrolling, no arro
   const rowBox = await key(page, 'uiPalette').boundingBox();
   const lastBox = await picker.getByRole('radio').last().boundingBox();
   expect(rowBox.x + rowBox.width - (lastBox.x + lastBox.width)).toBeLessThan(40);
-  await expect(picker.getByRole('radio', { checked: true })).toHaveText('Wind grey');
+  await expect(picker.getByRole('radio', { checked: true })).toHaveAccessibleName('Wind grey');
+  await expect(picker.locator('.nm')).toHaveCount(0);   // cards only, no names (Max 2026-10-02)
   // Each card is drawn in its own theme: the mini windows differ.
   const bgs = new Set();
   for (const sw of await picker.locator('.sw').all()) bgs.add((await css(sw, 'background-color')) + '|' + (await css(sw.locator('.ac'), 'background-color')));
@@ -157,27 +143,22 @@ test('picking a theme restyles the window, writes uiPalette and is never unsaved
   expect(await token(page, 'fill')).toBe('#5aaaf5');
   expect((await sent(page, 'setConfig')).filter((m) => m.key === 'uiPalette').map((m) => m.value)).toEqual(['ember', 'ocean']);
   await expect(page.locator('.capsule')).toHaveCount(0);
-  // The mode picks the light block of the same theme.
-  await key(page, '__theme').getByRole('radio', { name: 'Light' }).click();
-  expect(await token(page, 'fill')).toBe('#1262b8');
-  expect(await token(page, 'bg')).toBe('#eff3f8');
 });
 
-test('every theme has a dark and a light block that differ, and the saved theme loads at launch', async ({ page }) => {
+test('every theme has its own block, and the saved theme loads at launch', async ({ page }) => {
   await page.addInitScript(() => { window.__cfgExtra = { uiPalette: 'hicon' }; });
   await page.goto('/');
   await expect(app(page)).toHaveAttribute('data-palette', 'hicon');
   await go(page, 'prefs');
   const picker = key(page, 'uiPalette').getByRole('radiogroup');
-  for (const mode of ['Dark', 'Light']) {
-    await key(page, '__theme').getByRole('radio', { name: mode }).click();
+  {
     const seen = new Set();
     for (const t of themes) {
       await picker.getByRole('radio', { name: t.label }).click();
       await expect(app(page)).toHaveAttribute('data-palette', t.id);
       seen.add([await token(page, 'bg'), await token(page, 'fill'), await token(page, 'card'), await token(page, 'sel'), await token(page, 'fg3')].join('|'));
     }
-    expect(seen.size, mode + ' blocks are all distinct').toBe(themes.length);
+    expect(seen.size, 'theme blocks are all distinct').toBe(themes.length);
   }
 });
 
@@ -187,12 +168,12 @@ test('an unknown uiPalette falls back to Wind grey', async ({ page }) => {
   await expect(app(page)).toHaveAttribute('data-palette', 'grey');
 });
 
-test('Wind grey is today\'s look: every token that existed before themes is unchanged, dark and light', async ({ browser }) => {
+test('Wind grey is today\'s look: every token that existed before themes is unchanged', async ({ browser }) => {
   const tokens = readFileSync(new URL('../src/design/tokens.css', import.meta.url), 'utf8');
-  const names = [...tokens.slice(tokens.indexOf('.wnd {'), tokens.indexOf('.wnd[data-theme="light"]')).matchAll(/--([A-Za-z0-9-]+):/g)]
+  const names = [...tokens.slice(tokens.indexOf('.wnd {'), tokens.indexOf('\n}', tokens.indexOf('.wnd {'))).matchAll(/--([A-Za-z0-9-]+):/g)]
     .map((m) => m[1]).filter((n) => !['s', 'm', 'nf', 'w', 'isz', 'dur-fast', 'dur', 'ease', 'bandimg-from', 'rad', 'srad'].includes(n));
   const page = await browser.newPage();
-  for (const mode of ['dark', 'light']) {
+  {
     const read = async (url) => {
       await page.goto(url);
       return page.evaluate((ns) => {
@@ -201,13 +182,13 @@ test('Wind grey is today\'s look: every token that existed before themes is unch
         return Object.fromEntries(ns.map((n) => [n, cs.getPropertyValue('--' + n).trim().replace(/\s+/g, ' ')]));
       }, names);
     };
-    const before = await read('/preview.html?theme=' + mode);                    // tokens.css alone, no palette
-    const grey = await read('/controls.html?group=prefs&palette=grey&theme=' + mode);   // through themes.css
+    const before = await read('/preview.html');   // tokens.css alone, no palette
+    const grey = await read('/controls.html?group=prefs&palette=grey');   // through themes.css
     for (const n of names) {
       // The new tokens have defaults in tokens.css, the old ones must match exactly.
       if (['sel', 'selfg', 'onfill', 'fillline', 'focus', 'hint', 'hover2', 'scrim', 'danger', 'dangerbg', 'dangerbtn', 'dangerbtnfg',
         'bnfilter', 'bntint', 'bntop', 'rc', 'rp', 'rsw', 'rkn'].includes(n)) continue;
-      expect(grey[n], mode + ' --' + n).toBe(before[n]);
+      expect(grey[n], '--' + n).toBe(before[n]);
     }
   }
   await page.close();
@@ -363,14 +344,14 @@ test('Troubleshooting is always there, and the advanced switch is the last row o
   await page.goto('/');
   await go(page, 'prefs');
   await expect(page.locator('main .cap')).toHaveText(['General', 'Troubleshooting']);
-  await expect(page.locator('main .card').first().locator('.row .label')).toHaveText(['Mode', 'Theme', 'Profile', 'Show advanced settings']);
+  await expect(page.locator('main .card').first().locator('.row .label')).toHaveText(['Theme', 'Profile', 'Show advanced settings']);
   await expect(page.locator('main .card').nth(1).locator('.row .label')).toHaveText(['Frame time logging', 'Export diagnostics', 'Open settings file']);
 });
 
 test('prefs files contain no em-dash', () => {
   const dash = String.fromCharCode(0x2014);
   for (const f of ['../src/prefs/ThemePicker.svelte', '../src/prefs/ProfilePicker.svelte', '../src/prefs/NewProfileDialog.svelte',
-    '../src/prefs/profileName.js', '../src/controls/ModeSwitch.svelte', '../src/design/themes.css', '../src/design/themes.js',
+    '../src/prefs/profileName.js', '../src/design/themes.css', '../src/design/themes.js',
     '../tools/gen-themes.cjs'])
     expect(readFileSync(new URL(f, import.meta.url), 'utf8'), f).not.toContain(dash);
 });

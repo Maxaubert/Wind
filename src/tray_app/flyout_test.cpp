@@ -1,7 +1,6 @@
-// `WindTray.exe --render-test out.png [--light] [--palette ID] [--dpi N] [--hover kind[:i]]` (issue #313): renders
+// `WindTray.exe --render-test out.png [--palette ID] [--dpi N] [--hover kind[:i]]` (issue #313): renders
 // the flyout with fake status to a PNG and exits, so the drawing can be compared with the j01
 // references in docs/design/tray-2026-10 without a desktop session or a running Wind.
-//   --light            the light theme (default dark)
 //   --palette ID       the theme: grey (default) ember ocean hicon; unknown = grey, like the live flyout
 //   --dpi N            scale (96 = 1x, 192 = 2x like the reference PNGs)
 //   --hover K[:I]      hover state: toggle:1, engine, settings, quit, profile
@@ -26,7 +25,6 @@ int RunRenderTest(const wchar_t*) {
     wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (!argv) return 2;
     std::wstring out;
-    bool light = false;
     int dpi = 96;
     int palette = 0;
     Flyout::Hit hover;
@@ -36,7 +34,6 @@ int RunRenderTest(const wchar_t*) {
     for (int i = 1; i < argc; ++i) {
         const std::wstring a = argv[i];
         if (a == L"--render-test" && i + 1 < argc) out = argv[++i];
-        else if (a == L"--light") light = true;
         else if (a == L"--palette" && i + 1 < argc) palette = Flyout::PaletteIndex(narrow(argv[++i]));
         else if (a == L"--tools") tools = true;
         else if (a == L"--engine-list") engineList = true;
@@ -68,11 +65,10 @@ int RunRenderTest(const wchar_t*) {
     float ticks[TickStats::kCap];
     // A steady 6.94 ms history (the fps and "6.9 ms" readouts come from it).
     for (int i = 0; i < TickStats::kCap; ++i) ticks[i] = 6.94f;
-    Flyout::View v = Flyout::BuildView(ini, ParseTrayLayout(ini), st, ticks, TickStats::kCap, L"Default", !light, palette);
+    Flyout::View v = Flyout::BuildView(ini, ParseTrayLayout(ini), st, ticks, TickStats::kCap, L"Default", palette);
     if (v.hasEngine) v.engine.open = engineOpen;
     if (engineList) {   // the engine dropdown's open list, built exactly as the live flyout builds it
         Flyout::ListView lv;
-        lv.dark = !light;
         lv.palette = palette;
         int widest = 0;
         for (int i = 0; i < Flyout::kEngineCount; ++i) {

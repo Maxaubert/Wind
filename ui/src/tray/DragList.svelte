@@ -210,8 +210,6 @@
     background: color-mix(in srgb, var(--fg) 7%, var(--card));
     box-shadow: 0 0 0 1px var(--line2), 0 8px 20px rgba(0, 0, 0, .26), 0 1px 4px rgba(0, 0, 0, .18);
     transition: box-shadow .15s ease, background-color .15s ease; }
-  :global(.wnd[data-theme="light"]) .tlist :global(.trow.dragging) {
-    background: #fff; box-shadow: 0 0 0 1px #d4d4d4, 0 10px 26px rgba(0, 0, 0, .16), 0 2px 6px rgba(0, 0, 0, .08); }
   .tlist :global(.trow.dragging.settling) { transition: transform .15s ease, box-shadow .15s ease, background-color .15s ease; }
   .tlist :global(.trow.dragging:hover) { background: color-mix(in srgb, var(--fg) 7%, var(--card)); }
   .trow.picked { background: color-mix(in srgb, var(--fg) 7%, var(--card)); z-index: 2; }

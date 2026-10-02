@@ -51,7 +51,7 @@ TEST_CASE("engine: only a different pick changes anything (and so restarts Wind)
 static View ViewWith(const char* toggles, const IniValues& extra = {}) {
     IniValues v = extra;
     v["trayToggles"] = toggles;
-    return BuildView(v, ParseTrayLayout(v), TrayStatus(), nullptr, 0, L"Default", true);
+    return BuildView(v, ParseTrayLayout(v), TrayStatus(), nullptr, 0, L"Default");
 }
 
 TEST_CASE("view: the engine item is the dropdown, not a toggle segment, and shows the main engine") {

@@ -8,7 +8,7 @@ export function post(msg) {
   else if (window.__windMock) window.__windMock(msg);
 }
 // Session model: the live ini is the session, the active profile file is the saved state.
-// getSession() resolves { values, saved, profiles: {names, active}, theme }. The first call after
+// getSession() resolves { values, saved, profiles: {names, active} }. The first call after
 // load is answered from window.__windInit (injected by the host before the page runs); it is
 // consumed once, so later calls (and a reload) always ask the host for fresh state.
 export function getSession() {
@@ -17,7 +17,7 @@ export function getSession() {
     delete window.__windInit;
     return Promise.resolve({
       values: init.values || {}, saved: init.saved || init.values || {},
-      profiles: init.profiles || { names: [], active: '' }, theme: init.theme || 'auto',
+      profiles: init.profiles || { names: [], active: '' },
     });
   }
   return new Promise(resolve => {
@@ -25,8 +25,7 @@ export function getSession() {
       if (m && m.type === 'config') {
         off();
         resolve({ values: m.values || {}, saved: m.saved || m.values || {},
-                  profiles: m.profiles || { names: [], active: '' },
-                  theme: (m.values && m.values.uiTheme) || 'auto' });
+                  profiles: m.profiles || { names: [], active: '' } });
       }
     });
     post({ type: 'getConfig' });
