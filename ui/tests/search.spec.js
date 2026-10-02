@@ -46,6 +46,15 @@ test('empty and unmatched queries return nothing', () => {
   expect(keys('zoom xyzzy')).toEqual([]);   // every word must match
 });
 
+test('stopwords never outrank content words and fuzzy skips free text', () => {
+  const zi = search(groups, 'zoom in').map((h) => h.label);
+  expect(zi[0]).toBe('Zoom in');
+  expect(zi.indexOf('Zoom out')).toBeGreaterThan(-1);
+  expect(zi.indexOf('Zoom out')).toBeLessThan(zi.indexOf('Performance in the tray'));
+  expect(search(groups, 'tray').map((h) => h.label)).toEqual(['Performance in the tray']);
+  expect(search(groups, 'theme').map((h) => h.label)).toEqual(['Theme']);
+});
+
 test('results are one flat list ranked best first, with the tab name on each hit', () => {
   const hits = search(groups, 'zoom');
   expect(hits.length).toBeGreaterThan(5);

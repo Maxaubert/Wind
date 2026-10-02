@@ -41,19 +41,19 @@ export function editDistance(a, b, max = 2) {
 // How many typos a query word may carry.
 export const budget = (w) => (w.length >= 8 ? 2 : w.length >= 4 ? 1 : 0);
 // Spelling folds for the fuzzy comparison only.
-const fold = (w) => w.replace(/ight/g, 'ite').replace(/ph/g, 'f').replace(/ck/g, 'k');
+const fold = (w) => w.replace(/ight/g, 'ite').replace(/ph/g, 'f');
 
 // Score of one query word against one list of target words, as a 0..1 strength (0 = no match):
 // exact 1, word-prefix .8, substring .6, fuzzy (whole word or typo'd prefix) .45.
-export function wordStrength(q, targets) {
+export function wordStrength(q, targets, fuzzy = true) {
   let best = 0;
-  const b = budget(q), fq = fold(q);
+  const b = fuzzy ? budget(q) : 0, fq = fold(q);
   for (const t of targets) {
     let s = 0;
     if (t === q) s = 1;
     else if (t.startsWith(q)) s = 0.8;
     else if (q.length >= 3 && t.includes(q)) s = 0.6;
-    else if (b > 0 && t[0] === q[0]) {   // fuzzy needs the same first letter: far fewer false hits
+    else if (b > 0 && t[0] === q[0] && !STOPWORDS.has(t)) {   // fuzzy needs the same first letter: far fewer false hits
       const ft = fold(t);
       if (editDistance(q, t, b) <= b || editDistance(fq, ft, b) <= b) s = 0.45;
       else if (q.length >= 5 && t.length > q.length && editDistance(q, t.slice(0, q.length), b) <= b) s = 0.4;
@@ -85,9 +85,16 @@ function fieldsOf(row, card, group) {
   return f;
 }
 
+// Common short words carry no meaning of their own: dropped from a query that has other words.
+export const STOPWORDS = new Set(['in', 'the', 'to', 'of', 'a', 'an', 'with', 'for', 'on', 'and', 'or', 'is', 'at', 'these', 'this', 'that', 'those', 'from', 'your']);
+export const meaningful = (q) => { const m = q.filter((w) => !STOPWORDS.has(w)); return m.length ? m : q; };
+
 // Score one row for the query words (0 = no match).
-export function scoreRow(f, q) {
+export function scoreRow(f, all) {
+  const q = meaningful(all);
   let total = 0;
+  // Stopwords never need to match; an exact label hit only breaks ties ("zoom in" -> Zoom in over Zoom out).
+  if (q.length < all.length) for (const w of all) if (STOPWORDS.has(w) && f.label.includes(w)) total += 5;
   for (const w of q) {
     let best = 0;
     const l = wordStrength(w, f.label) * W.label;
@@ -95,8 +102,10 @@ export function scoreRow(f, q) {
     if (w.length >= 4 && f.compact.includes(w)) best = Math.max(best, 0.55 * W.label);   // "zoomin" for "Zoom-in"
     if (best < W.label) {
       best = Math.max(best, wordStrength(w, f.kw) * W.kw);
-      best = Math.max(best, wordStrength(w, f.desc) * W.desc);
-      best = Math.max(best, wordStrength(w, f.cap) * W.cap);
+      // Free text (description, caption, tab name) matches exactly/by prefix/substring only: fuzzy hits there
+      // pair unrelated words that merely look alike (tray/trac, theme/these).
+      best = Math.max(best, wordStrength(w, f.desc, false) * W.desc);
+      best = Math.max(best, wordStrength(w, f.cap, false) * W.cap);
     }
     if (best === 0) return 0;   // every word must match something
     total += best;
@@ -105,11 +114,11 @@ export function scoreRow(f, q) {
   // and shorter labels beat longer ones.
   if (f.label[0] && f.label[0].startsWith(q[0])) total += 10;
   total -= f.label.length * 0.5;
-  const phrase = q.join(' ');
+  const phrase = all.join(' ');
   if (f.labelNorm === phrase) total += 400;
   else if (f.labelNorm.startsWith(phrase)) total += 60;
-  else if (q.length > 1 && f.labelNorm.includes(phrase)) total += 30;
-  if (q.length > 1 && f.kwPhrases.some((k) => k.includes(phrase))) total += 25;
+  else if (all.length > 1 && f.labelNorm.includes(phrase)) total += 30;
+  if (all.length > 1 && f.kwPhrases.some((k) => k.includes(phrase))) total += 25;
   return total;
 }
 
