@@ -46,7 +46,7 @@ D2D1_COLOR_F Col(unsigned rgb, float a = 1.f) {
 
 struct Theme {
     D2D1_COLOR_F menu, card, menub, fg, fg2, fg3, rule, hl, glyph, teal, spark, lift, scrim, band, track;
-    D2D1_COLOR_F off, offh, offic, onic, on, onh, onb, segline, focus, fillline;
+    D2D1_COLOR_F off, offh, offic, onic, on, onh, onb, segline, focus, fillline, ring;
     float aurora;       // header image opacity (--bnop * 3.4)
     float rc, rk, rs, listRad;   // window, control, small and list popup radii in DIPs
     bool dark;
@@ -63,6 +63,7 @@ Theme MakeTheme(bool dark, int palette) {
     t.lift = Col(m.lift); t.scrim = Col(m.scrim, m.scrimA); t.band = Col(m.band); t.track = Col(m.track);
     t.off = Col(m.off); t.offh = Col(m.offh); t.offic = Col(m.offic); t.onic = Col(m.onic); t.on = Col(m.on); t.onh = Col(m.onh);
     t.onb = Col(m.onb, m.onbA); t.segline = Col(m.segline); t.focus = Col(m.focus); t.fillline = Col(m.fillline, m.filllineA);
+    t.ring = Col(m.ring);
     t.aurora = m.aurora;
     t.rc = (float)fp.rc; t.rk = (float)fp.rk; t.rs = (float)fp.rs;
     t.listRad = ListRadiusFor(fp);
@@ -532,6 +533,9 @@ void Painter::Impl::drawQuick(const View& v, const Geometry& g) {
         icon(t.icon, (r.left + r.right) / 2.f - 8.f, (r.top + r.bottom) / 2.f - 8.f,
              Mix(Mix(th.offic, th.fg, h), th.onic, o), 1.75f);
     }
+    // The bar's 1 px outline, like Settings' segmented controls (--chipb).
+    if (nseg > 0)
+        ring(D2D1::RectF((float)g.seg[0].l, (float)g.seg[0].t, (float)g.seg[nseg - 1].r, (float)g.seg[nseg - 1].b), th.rk, th.ring);
     // The engine dropdown (mockup v02): a full-width --off field, the engine glyph and the current
     // value (mono 12) at the left, a chevron at the right that flips while the list is open, with a
     // 1 px --onb inset ring while open.
@@ -539,7 +543,7 @@ void Painter::Impl::drawQuick(const View& v, const Geometry& g) {
         const D2D1_RECT_F r = R(g.engine);
         const float h = a.active ? a.engHot : (v.hover.kind == HitKind::Engine ? 1.f : 0.f);
         fillRound(r, th.rk, Mix(th.off, th.offh, h));
-        if (v.engine.open) ring(r, th.rk, th.onb);
+        ring(r, th.rk, v.engine.open ? th.onb : th.ring);
         icon(v.engine.icon, r.left + 10.f, (r.top + r.bottom) / 2.f - 8.f, th.glyph, 1.5f);
         text(v.engine.value, g_s.mono12.Get(), D2D1::RectF(r.left + 10.f + 16.f + 10.f, r.top, r.right - 10.f - 14.f - 6.f, r.bottom),
              th.fg, DWRITE_TEXT_ALIGNMENT_LEADING);

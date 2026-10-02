@@ -34,20 +34,30 @@ const GREY = {
     band: 0xf1f2f4, track: 0xd0d3d6, off: 0xe5e6e8, offh: 0xdadbde, offic: 0x3d4147, onic: 0x0a5a4d, on: 0xbfe2db, onh: 0xb2d9d1,
     onb: 0x087a67, onbA: .4, segline: 0xffffff, focus: 0x0a0a0a, aurora: .85, tint: 0, tintA: 0, invert: 0, legacyLight: 1 },
 };
+// Settings control greys (ui/src/design/themes.css, Wind grey): the toggle bar and dropdown match them.
+GREY.dark.off = 0x0e0e0e; GREY.dark.ring = 0x353535; GREY.dark.segline = 0x353535;
+GREY.light.off = 0xf7f7f7; GREY.light.ring = 0xd8d8d8; GREY.light.segline = 0xd8d8d8;
+for (const m of [GREY.dark, GREY.light]) m.offh = mixN(m.fg, m.off, .06);
+function mixN(a, b, t) {   // a over b by t, 0xRRGGBB numbers
+  const ch = (s) => [(s >> 16) & 255, (s >> 8) & 255, s & 255];
+  const x = ch(a), y = ch(b);
+  return x.map((v, i) => Math.round(v * t + y[i] * (1 - t))).reduce((acc, v) => (acc << 8) | v, 0);
+}
 function derive(k) {
   const card = hex(k.card), fg = hex(k.fg), fill = hex(k.fill), accent = hex(k.pbg);
-  const toff = mix(fg, card, .12), toffh = mix(fg, card, .18);
+  const toff = mix(fg, card, .12);   // base for the ON tint only (unchanged look)
+  const chip = hex(k.chip), chipb = hex(k.chipb), chiph = mix(fg, chip, .06);
   const ton = k.segon ? hex(k.segon) : mix(fill, toff, .36), tonh = k.segon ? hex(k.segon) : mix(fill, toff, .44);
   const tonic = k.segonfg ? hex(k.segonfg) : mix(accent, fg, .7);
   const fl = k.fillline && k.fillline !== 'transparent';
   return { menu: hex(k.bg), card, menub: hex(k.chipb), fg, fg2: hex(k.fg2), fg3: hex(k.fg3), rule: hex(k.line2), hl: hex(k.hover),
     glyph: hex(k.glyph), spark: accent, fill, fillline: fl ? hex(k.fillline) : 0, filllineA: fl ? 1 : 0, lift: card,
-    scrim: hex(k.bg), scrimA: .62, band: hex(k.bnbg), track: hex(k.track), off: toff, offh: toffh, offic: hex(k.glyph), onic: tonic,
-    on: ton, onh: tonh, onb: fill, onbA: .4, segline: card, focus: hex(k.focus), aurora: Math.min(1, +k.bnop * 3.4),
+    scrim: hex(k.bg), scrimA: .62, band: hex(k.bnbg), track: hex(k.track), off: chip, offh: chiph, offic: hex(k.glyph), onic: tonic,
+    on: ton, onh: tonh, onb: fill, onbA: .4, segline: chipb, ring: chipb, focus: hex(k.focus), aurora: Math.min(1, +k.bnop * 3.4),
     tint: hex(k.bntint), tintA: +k.bntop, invert: k.bnfilter && k.bnfilter.startsWith('invert') ? 1 : 0, legacyLight: 0 };
 }
 const NAMES = ['menu', 'card', 'menub', 'fg', 'fg2', 'fg3', 'rule', 'hl', 'glyph', 'spark', 'fill', 'fillline', 'lift', 'scrim', 'band',
-  'track', 'off', 'offh', 'offic', 'onic', 'on', 'onh', 'onb', 'segline', 'focus', 'tint'];
+  'track', 'off', 'offh', 'offic', 'onic', 'on', 'onh', 'onb', 'segline', 'focus', 'tint', 'ring'];
 function mode(m) {
   return '{ ' + NAMES.map((n) => H(m[n])).join(', ') + ',\n      '
     + [f(m.filllineA), f(m.scrimA), f(m.onbA), f(m.aurora), f(m.tintA), m.invert, m.legacyLight].join(', ') + ' }';
@@ -63,7 +73,8 @@ namespace wind { namespace Flyout {
 
 struct PaletteMode {
     unsigned menu, card, menub, fg, fg2, fg3, rule, hl, glyph, spark, fill, fillline, lift, scrim, band, track,
-             off, offh, offic, onic, on, onh, onb, segline, focus, tint;
+             off, offh, offic, onic, on, onh, onb, segline, focus, tint,
+             ring;   // the 1 px outline of the toggle bar and the dropdown (Settings --chipb)
     float filllineA;    // 1 = a 1 px ring around the slider fill (High contrast), 0 = none
     float scrimA;       // the header scrim, over menu
     float onbA;         // alpha of the open dropdown ring (onb)
