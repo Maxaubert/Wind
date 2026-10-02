@@ -1,0 +1,27 @@
+/* Binding boxes of the Hotkeys page (mockup ia07 .kc / .kb / .kx). One box per binding with the plus
+   inside it; "or" separates two bindings; a small x appears on hover or focus to remove one. */
+.bx { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.bx .kc { height: 28px; min-width: 44px; justify-content: center; padding: 0 10px; border: 1px solid var(--chipb);
+  background: var(--chip); border-radius: 8px; display: inline-flex; align-items: center; font: 12px var(--m); color: var(--fg2); }
+.bx .kc.ghost { border-color: transparent; color: var(--fg3); gap: 5px; cursor: pointer; }
+.bx .kc.ghost:hover { color: var(--fg); border-color: var(--chipb); }
+.bx .kc.ghost svg { width: 11px; height: 11px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.bx .kc.live { color: var(--fg); border-color: var(--fill); }
+.bx .kc .kp { color: var(--glyph); margin: 0 5px; font-family: var(--s); }
+.bx .kc .kfix { display: inline-flex; align-items: center; gap: 5px; color: var(--fg3); }
+.bx .kc .kfix svg { width: 13px; height: 13px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; }
+.bx .pl { font: 12px var(--s); color: var(--glyph); min-width: 14px; text-align: center; }
+.bx .kb { display: inline-flex; align-items: center; position: relative; border-radius: 8px; }
+.bx .kb .kchg { display: inline-flex; align-items: center; background: none; border: 0; padding: 0; cursor: pointer; border-radius: 8px; }
+.bx .kb .kchg:hover .kc { border-color: var(--outline); color: var(--fg); }
+.bx .kb .kx { position: absolute; top: -7px; right: -7px; width: 16px; height: 16px; display: grid; place-items: center;
+  border-radius: 50%; background: var(--card); border: 1px solid var(--chipb); color: var(--fg2); opacity: 0; transition: opacity .12s; padding: 0; }
+.bx .kb:hover .kx, .bx .kb .kx:focus-visible { opacity: 1; }
+.bx .kb .kx:hover { color: var(--fg); border-color: var(--outline); }
+.bx .kb .kx svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1.75; }
+.bx .refusal { flex-basis: 100%; text-align: right; font: 12px var(--s); color: var(--fg2); }
+@media (prefers-reduced-motion: reduce) { .bx .kb .kx { transition: none; } }
+/* The row's binding group dims when its extra-key switch is off; the switch sits right of it. */
+.kwrap { display: inline-flex; align-items: center; gap: 6px; transition: opacity .15s; }
+.kwrap.off { opacity: .35; }
+.ksep { width: 1px; height: 20px; background: var(--rowline); margin: 0 6px 0 8px; }

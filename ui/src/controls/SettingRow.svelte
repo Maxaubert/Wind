@@ -4,20 +4,23 @@
   //   value     the row's own value (ini string or number)
   //   values    the whole map (keybind rows read their sibling keys from it)
   //   onChange  onChange(val) for the row's own key
+  //   onSet     onSet(key, val) for a sibling key (the extra-key switches)
   //   live      live(patch) for keybind captures (written immediately by the page)
   //   extra     { mpoNeedsRestart, runningModel, onRestart, theme, onTheme, profiles: {names, active,
   //             onSwitch, onCreate, onRename, onDuplicate, onDelete}, version, onRepo, onAction(name) }
   import Toggle from './Toggle.svelte';
   import Slider from './Slider.svelte';
   import Select from './Select.svelte';
-  import Keycaps from './Keycaps.svelte';
+  import Bindings from './Bindings.svelte';
+  import PanBinding from './PanBinding.svelte';
+  import './bindings.css';
   import AppList from './AppList.svelte';
   import HighRes from './HighRes.svelte';
   import EngineRow from './EngineRow.svelte';
   import ThemeRow from './ThemeRow.svelte';
   import Profiles from '../general/Profiles.svelte';
   import About from './About.svelte';
-  let { row, value = undefined, values = {}, onChange = () => {}, live = () => {}, extra = {}, disabled = false } = $props();
+  let { row, value = undefined, values = {}, onChange = () => {}, onSet = () => {}, live = () => {}, extra = {}, disabled = false } = $props();
 
   // Ids so every control is named by its row: label (and the live value for value-bearing ones).
   const rid = $derived('row-' + String(row.key).replace(/[^A-Za-z0-9_-]/g, ''));
@@ -49,7 +52,19 @@
                    onRestart={extra.onRestart} {disabled} onChange={onChange}
                    labelledby={labelId} describedby={descId} />
       {:else if row.type === 'keybind'}
-        <Keycaps {row} {values} {live} {disabled} labelledby={withValue} describedby={descId} {valueId} />
+        <!-- Extra keys carry an on/off switch right of the binding; off dims the binding (kept in the ini). -->
+        <span class="kwrap" class:off={row.onKey && String(values[row.onKey]) === '0'}>
+          {#if row.panArrows}
+            <PanBinding {row} {values} {live} {disabled} labelledby={withValue} describedby={descId} {valueId} />
+          {:else}
+            <Bindings {row} {values} {live} {disabled} labelledby={withValue} describedby={descId} {valueId} />
+          {/if}
+        </span>
+        {#if row.onKey}
+          <span class="ksep" aria-hidden="true"></span>
+          <Toggle value={values[row.onKey] ?? 1} {disabled} onChange={(v) => onSet(row.onKey, v)}
+                  labelledby={labelId} describedby={descId} />
+        {/if}
       {:else if row.type === 'applist'}
         <AppList {value} title={row.label} {disabled} onChange={onChange}
                  labelledby={withValue} describedby={descId} {valueId} pick={extra.pick} />

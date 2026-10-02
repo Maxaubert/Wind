@@ -7,10 +7,12 @@
   // global hook swallows the bound key/button; without an immediate clear, pressing the OLD
   // bound key to re-bind it would be intercepted by the hook and never reach this UI.
   // #285: row.buttonModsKey = modifier mask for the button slot (left/right/middle click need one);
-  // row.wheel = a wheel row (modsKey = zoomWheelMods only). Every capture goes through the shared
+  // The scroll-wheel row is gone (#318: wheel up/down are zoom bindings on the Hotkeys page, see
+  // controls/Bindings.svelte); this capture stays for the onboarding. Every capture goes through the shared
   // safety rules (keybindRules.js, mirrored from src/keybind_rules.h); a refused press keeps the row
   // listening and says why, on screen and to screen readers.
-  import { checkKeyBind, checkClickBind, checkWheelBind, refusalText } from './keybindRules.js';
+  import { checkKeyBind, checkClickBind, refusalText } from './keybindRules.js';
+  import { MOD_BITS, vkName, BUTTON_NAMES, shortButtonName } from './bindNames.js';
   // row.modsOnly = the arrow-key pan row: only the modifiers are captured (modsKey is a virtual key the
   // owner translates into the four real binds); the arrow keys are fixed and drawn by the owner.
   // `onClear` (optional) replaces the right-click clear patch.
@@ -21,7 +23,6 @@
   // Settings page: show a combo as one keycap per key with a '+' between them, and the short
   // 'Mouse 5' names. Off by default so the onboarding keeps its single-chip label.
   export let split = false;
-  const SHORT_BUTTON = { 1: 'Mouse 4', 2: 'Mouse 5' };
   let refusal = '';
   // A click captured ON the keycap is followed by its own click event, which would re-arm the row
   // and clear the bind just made: ignore an arm that close after a mouse capture.
@@ -41,27 +42,6 @@
   let liveMsg = '';
   const uid = 'kc-' + Math.random().toString(36).slice(2, 8);
 
-  // VK -> readable name. Covers the common cases; falls back to "Key N" for the rest.
-  function vkName(vk) {
-    const SPECIAL = {
-      8:'Backspace', 9:'Tab', 13:'Enter', 27:'Esc', 32:'Space',
-      33:'PageUp', 34:'PageDown', 35:'End', 36:'Home',
-      37:'Left', 38:'Up', 39:'Right', 40:'Down',
-      45:'Insert', 46:'Delete', 91:'LWin', 92:'RWin',
-      96:'Num0', 97:'Num1', 98:'Num2', 99:'Num3', 100:'Num4',
-      101:'Num5', 102:'Num6', 103:'Num7', 104:'Num8', 105:'Num9',
-      106:'Num*', 107:'Num+', 109:'Num-', 110:'Num.', 111:'Num/',
-      144:'NumLock', 145:'ScrollLock',
-      186:';', 187:'=', 188:',', 189:'-', 190:'.', 191:'/', 192:'`',
-      219:'[', 220:'\\', 221:']', 222:"'",
-    };
-    if (SPECIAL[vk]) return SPECIAL[vk];
-    if (vk >= 112 && vk <= 123) return 'F' + (vk - 111);
-    if ((vk >= 48 && vk <= 57) || (vk >= 65 && vk <= 90)) return String.fromCharCode(vk);
-    return 'Key ' + vk;
-  }
-  const MOD_BITS = [ {bit:1, name:'Ctrl'}, {bit:2, name:'Alt'}, {bit:4, name:'Shift'}, {bit:8, name:'Win'} ];
-  const BUTTON_NAMES = { 1:'Mouse button 4', 2:'Mouse button 5', 3:'Left click', 4:'Right click', 5:'Middle click' };
   const eventMods = e => (e.ctrlKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.shiftKey ? 4 : 0) | (e.metaKey ? 8 : 0);
   function refuse(verdict, what) {
     refusal = refusalText(verdict, what);
@@ -82,10 +62,6 @@
   $: lbl = (function () {
     const parts = [];
     if (row.modsOnly) { const m = Number(values[row.modsKey] || 0); return m ? modsName(m) : null; }
-    if (row.wheel) {
-      const wm = Number(values[row.modsKey] || 0);
-      return wm ? modsName(wm) + '+Wheel' : null;
-    }
     if (row.buttonKey) {
       const btn = Number(values[row.buttonKey] || 0);
       const bm = row.buttonModsKey ? Number(values[row.buttonModsKey] || 0) : 0;
@@ -106,14 +82,10 @@
     const out = [];
     const modList = (m) => MOD_BITS.filter(b => m & b.bit).map(b => b.name);
     if (row.modsOnly) return modList(Number(values[row.modsKey] || 0));
-    if (row.wheel) {
-      const wm = Number(values[row.modsKey] || 0);
-      return wm ? [...modList(wm), 'Wheel'] : [];
-    }
     if (row.buttonKey) {
       const btn = Number(values[row.buttonKey] || 0);
       const bm = row.buttonModsKey ? Number(values[row.buttonModsKey] || 0) : 0;
-      const name = SHORT_BUTTON[btn] || BUTTON_NAMES[btn];
+      const name = BUTTON_NAMES[btn] && shortButtonName(btn);
       if (name) out.push(...modList(bm), name);
     }
     const vk = Number(values[row.vkKey] || 0);
@@ -132,8 +104,6 @@
     peak = 0;
     liveMsg = row.modsOnly
       ? 'Listening. Press the modifier keys you want, for example Control and Alt, then let go. The arrow keys are added automatically. Escape cancels, Tab leaves.'
-      : row.wheel
-      ? 'Listening. Hold modifier keys and turn the mouse wheel. Escape cancels, Tab leaves.'
       : row.buttonKey
         ? 'Listening. Press a key, a combination, a mouse side-button, or a click with modifiers. Escape cancels, Tab leaves.'
         : 'Listening. Press a key or a combination. Escape cancels, Tab leaves.';
@@ -172,7 +142,6 @@
     if (row.modsOnly) { modsKey(e); return; }
     if (!e.keyCode) return;
     if (e.keyCode === 16 || e.keyCode === 17 || e.keyCode === 18 || e.keyCode === 91 || e.keyCode === 92) return;
-    if (row.wheel) return;                     // the wheel row binds the wheel, not a key
     const mods = eventMods(e);
     if (FORBIDDEN_VK.has(e.keyCode)) { refuse('never', vkName(e.keyCode)); return; }
     // Rows without a modifier slot (Inspect) bind the bare key; judge it as one.
@@ -206,7 +175,7 @@
     liveMsg = 'Bound to ' + modsName(mods) + ' plus the arrow keys';
   }
   function onMouse(e) {
-    if (!armed || !row.buttonKey || row.wheel) return;   // keyboard-only slot: ignore mouse
+    if (!armed || !row.buttonKey) return;   // keyboard-only slot: ignore mouse
     // DOM buttons: 0 left, 1 middle, 2 right, 3 back, 4 forward -> slot ids 3, 5, 4, 1, 2.
     const btn = { 0: 3, 1: 5, 2: 4, 3: 1, 4: 2 }[e.button];
     if (!btn) return;
@@ -226,18 +195,6 @@
     armed = false; preCapture = null; refusal = '';
     liveMsg = 'Bound to ' + (row.buttonModsKey ? what : BUTTON_NAMES[btn]);
   }
-  // The wheel row: the modifiers held while the wheel turns become the bind.
-  function onWheel(e) {
-    if (!armed || !row.wheel) return;
-    e.preventDefault();
-    const mods = eventMods(e);
-    const what = [modsName(mods), 'Wheel'].filter(Boolean).join('+');
-    const verdict = checkWheelBind(mods);
-    if (verdict !== 'ok') { refuse(verdict, what); return; }
-    onChange({ [row.modsKey]: String(mods) });
-    armed = false; preCapture = null; refusal = '';
-    liveMsg = 'Bound to ' + what;
-  }
   function onContextMenu() {
     if (skipContextMenu) { skipContextMenu = false; return; }
     clear();
@@ -252,7 +209,7 @@
     liveMsg = 'Binding cleared. Unbound.';
   }
 </script>
-<svelte:window on:keydown={onKey} on:keyup={onKeyUp} on:mousedown={onMouse} on:wheel|nonpassive={onWheel} />
+<svelte:window on:keydown={onKey} on:keyup={onKeyUp} on:mousedown={onMouse} />
 <!-- The instructions were `title`-only, which a screen reader never reads on keyboard focus.
      They are a real description now, appended to the row's own. -->
 <button class="keycap" type="button" class:armed class:split={split && !armed && lbl !== null} class:unbound={!armed && lbl === null} {disabled} id={valueId}
@@ -262,7 +219,7 @@
         on:contextmenu|preventDefault={onContextMenu}
         title="Click to bind (combos like Ctrl+Alt+F1 work), right-click to clear">
   {#if armed}
-    {row.modsOnly ? 'Hold the modifier keys...' : row.wheel ? 'Hold keys and turn the wheel...' : row.buttonKey ? 'Press a key, combo, or button...' : 'Press a key or combo...'}
+    {row.modsOnly ? 'Hold the modifier keys...' : row.buttonKey ? 'Press a key, combo, or button...' : 'Press a key or combo...'}
   {:else if split && lbl !== null}
     {#each caps as c, i}{#if i}<span class="pl">+</span>{/if}<span class="kc">{c}</span>{/each}
   {:else}

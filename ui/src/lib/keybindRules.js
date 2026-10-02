@@ -86,6 +86,7 @@ export function refusalText(verdict, what) {
     case 'needsmod':   return `${what} needs a modifier: hold Alt, Win or Ctrl+Alt while you do it.`;
     case 'ctrlalone':  return `${what} is used by apps (zoom, select). Add Alt, Shift or Win.`;
     case 'shiftalone': return `${what} is used by apps (scroll, select). Add Ctrl, Alt or Win.`;
+    case 'twomods':    return `${what} uses more than two modifiers. Use at most two.`;
     default:           return '';
   }
 }
