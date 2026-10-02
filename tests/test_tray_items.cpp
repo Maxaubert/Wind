@@ -23,7 +23,7 @@ TEST_CASE("tray layout defaults: perf off, warmth and brightness on") {
 TEST_CASE("eligible lists match the owner's choice") {
     CHECK(EligibleSliders() == V{"colorWarmPct", "colorDimPct", "maxLevel", "zoomInSpeed",
                                  "zoomOutSpeed", "panSpeed", "cursorSmoothing", "zoomEaseOutMs"});
-    CHECK(EligibleToggles() == V{"trackCaret", "trackFocus", "keepEdges"});
+    CHECK(EligibleToggles() == V{"trackCaret", "trackFocus", "keepEdges", "engine", "fixLock", "fixPass", "pause"});
 }
 
 TEST_CASE("tray layout round trip keeps order and enabled state") {
@@ -32,14 +32,15 @@ TEST_CASE("tray layout round trip keeps order and enabled state") {
     l.sliders = {{"panSpeed", true}, {"colorDimPct", true}, {"colorWarmPct", false}, {"maxLevel", true},
                  {"zoomInSpeed", false}, {"zoomOutSpeed", false}, {"cursorSmoothing", false},
                  {"zoomEaseOutMs", false}};
-    l.toggles = {{"keepEdges", true}, {"trackCaret", false}, {"trackFocus", true}};
+    l.toggles = {{"keepEdges", true}, {"trackCaret", false}, {"trackFocus", true}, {"engine", false},
+                 {"fixLock", false}, {"fixPass", false}, {"pause", false}};
     l.perf = true;
     IniValues v;
     WriteTrayLayout(l, v);
     CHECK(v["trayPerf"] == "1");
     CHECK(v["traySliders"] == "panSpeed,colorDimPct,maxLevel");
     CHECK(v["trayToggles"] == "keepEdges,trackFocus");
-    CHECK(v["trayToggleOrder"] == "keepEdges,trackCaret,trackFocus");
+    CHECK(v["trayToggleOrder"] == "keepEdges,trackCaret,trackFocus,engine,fixLock,fixPass,pause");
     TrayLayout r = ParseTrayLayout(v);
     CHECK(r.perf);
     CHECK(Keys(r.sliders, false) == Keys(l.sliders, false));
@@ -77,7 +78,7 @@ TEST_CASE("unknown keys are dropped and missing eligible items appended off") {
           V{"zoomInSpeed", "panSpeed", "colorWarmPct", "colorDimPct", "maxLevel", "zoomOutSpeed",
             "cursorSmoothing", "zoomEaseOutMs"});
     CHECK(Keys(l.sliders, true) == V{"panSpeed", "colorWarmPct"});
-    CHECK(Keys(l.toggles, false) == V{"trackFocus", "trackCaret", "keepEdges"});
+    CHECK(Keys(l.toggles, false) == V{"trackFocus", "trackCaret", "keepEdges", "engine", "fixLock", "fixPass", "pause"});
     CHECK(Keys(l.toggles, true) == V{"trackFocus"});
 }
 
@@ -104,8 +105,33 @@ TEST_CASE("more than four enabled sliders: the extras read as off, in list order
 
 TEST_CASE("toggles are uncapped") {
     IniValues v;
-    v["trayToggles"] = "trackCaret,trackFocus,keepEdges";
-    CHECK(Keys(ParseTrayLayout(v).toggles, true).size() == 3);
+    v["trayToggles"] = "trackCaret,trackFocus,keepEdges,engine,fixLock,fixPass,pause";
+    CHECK(Keys(ParseTrayLayout(v).toggles, true).size() == 7);
+}
+
+TEST_CASE("the tools items (engine, fixLock, fixPass, pause) exist, default off, and round trip") {
+    TrayLayout d = ParseTrayLayout({});
+    for (const char* k : {"engine", "fixLock", "fixPass", "pause"}) {
+        bool found = false;
+        for (const auto& i : d.toggles) if (i.key == k) { found = true; CHECK_FALSE(i.on); }
+        CHECK(found);
+    }
+    IniValues v;
+    v["trayToggles"] = "pause,engine,fixPass";
+    v["trayToggleOrder"] = "pause,fixLock,engine,fixPass";
+    TrayLayout l = ParseTrayLayout(v);
+    CHECK(Keys(l.toggles, true) == V{"pause", "engine", "fixPass"});
+    CHECK(Keys(l.toggles, false)[1] == "fixLock");
+    IniValues w;
+    WriteTrayLayout(l, w);
+    CHECK(w["trayToggles"] == "pause,engine,fixPass");
+    // An old ini without the new keys keeps its enabled toggles and gains the new ones off.
+    IniValues old;
+    old["trayToggles"] = "trackCaret";
+    old["trayToggleOrder"] = "trackCaret,trackFocus,keepEdges";
+    TrayLayout o = ParseTrayLayout(old);
+    CHECK(Keys(o.toggles, true) == V{"trackCaret"});
+    CHECK(Keys(o.toggles, false).size() == 7);
 }
 
 TEST_CASE("duplicates and whitespace in the lists are tolerated") {

@@ -23,7 +23,9 @@ struct TrayLayout {
 constexpr int kMaxTraySliders = 4;
 
 // Eligible items, in their default order. Sliders are ini keys; toggles are ini keys except
-// "keepEdges", the combined mouseAlign + trackAlign item.
+// "keepEdges", the combined mouseAlign + trackAlign item. The last four are not plain ini toggles:
+// "engine" (per-window-kind engine dropdown), "fixLock" / "fixPass" (listen-and-chime app fixes)
+// and "pause" (runtime Pause Wind). All default off. Spec: 2026-10-02-tray-tools-design.md (#315).
 const std::vector<std::string>& EligibleSliders();
 const std::vector<std::string>& EligibleToggles();
 
