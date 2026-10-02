@@ -1,7 +1,7 @@
 <script>
   import { iconSvg } from '../design/icons.js';
   // groups / expert: [{ id, label, icon }]. `version` shows beside the row with id 'about'.
-  let { groups = [], expert = [], active = '', version = '', query = '', onSelect = () => {}, onSearch = () => {} } = $props();
+  let { groups = [], tray = [], expert = [], active = '', version = '', query = '', onSelect = () => {}, onSearch = () => {} } = $props();
 </script>
 
 {#snippet row(g)}
@@ -26,6 +26,12 @@
     <div class="lbl">Expert</div>
     {#each expert as g (g.id)}{@render row(g)}{/each}
   </div>
+  {#if tray.length}
+    <div class="grp2">
+      <div class="lbl">Tray</div>
+      {#each tray as g (g.id)}{@render row(g)}{/each}
+    </div>
+  {/if}
 </aside>
 
 <style>
@@ -39,13 +45,13 @@
   .search input::placeholder { color: var(--fg3); }
   .search input::-webkit-search-cancel-button { display: none; }
   .search kbd { font: 10px var(--m); border: 1px solid var(--chipb); border-radius: 3px; padding: 1px 5px; color: var(--fg3); }
-  nav, .adv { display: flex; flex-direction: column; gap: 2px; }
+  nav, .adv, .grp2 { display: flex; flex-direction: column; gap: 2px; }
   .it { position: relative; height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 10px;
         color: var(--fg3); font: var(--w) 12.5px var(--nf); border-radius: var(--rad); text-align: left; width: 100%; }
   .icw { width: 20px; display: grid; place-items: center; flex: none; }
   .it:hover { background: var(--hover); color: var(--fg); }
   .it.sel { background: var(--hlGrey); color: var(--fg); }
   .n { margin: 0 28px 0 auto; font: 400 10.5px var(--m); color: var(--fg3); }   /* version sits where the mockup's count/chevron slots leave it */
-  .adv { margin-top: 14px; }   /* attached under the list, not pinned to the bottom (Max, 2026-10-02) */
+  .grp2, .adv { margin-top: 14px; }   /* one list, small section labels; nothing pinned to the bottom (Max, 2026-10-02) */
   .lbl { font: 600 11px var(--m); letter-spacing: .1em; text-transform: uppercase; color: var(--fg3); padding: 2px 10px 8px; }
 </style>

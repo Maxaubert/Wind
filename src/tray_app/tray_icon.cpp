@@ -29,6 +29,15 @@ void AddIcon(HWND hwnd, HINSTANCE hInst) {
 
 void RemoveIcon() { if (g_nid.hWnd) Shell_NotifyIconW(NIM_DELETE, &g_nid); }
 
+bool GetIconRect(RECT* out) {
+    if (!out || !g_nid.hWnd) return false;
+    NOTIFYICONIDENTIFIER id{};
+    id.cbSize = sizeof(id);
+    id.hWnd = g_nid.hWnd;
+    id.uID = g_nid.uID;
+    return SUCCEEDED(Shell_NotifyIconGetRect(&id, out)) && out->right > out->left && out->bottom > out->top;
+}
+
 void Notify(const wchar_t* title, const wchar_t* text) {
     NOTIFYICONDATAW n = g_nid;   // a copy: the flags below must not leak into a later re-add
     n.uFlags = NIF_INFO;

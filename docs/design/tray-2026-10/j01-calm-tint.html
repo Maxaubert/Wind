@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Wind tray j01-calm-tint</title>
+<style>
+:root{
+  --s:"Segoe UI Variable","Segoe UI",system-ui,sans-serif; --m:"Cascadia Mono",Consolas,monospace;
+  --wall:#15171b; --task:#0c0d10; --taskline:#23252a; --tray:#9a9ca3;
+  --menu:#000; --menub:#333; --fg:#f2f2f2; --fg2:#d0d0d0; --fg3:#b4b6ba; --rule:#303236; --hl:#2d2d2d; --glyph:#b0b0b0; --teal:#2fbfa5; --lift:#0b0b0b; --scrim:rgba(0,0,0,.55); --chip:#1a1a1a; --chipb:#3a3a3a;
+  --shadow:none; --band:#0a0a0a; --track:#3d3d3d; --card:#121212; --cardb:#262626; --ac:.62;--off:#303033;--offh:#3b3b3f;--offic:#c8cad0;--onic:#a9ece0;--on:#1f5650;--onh:#266560;--onb:color-mix(in srgb,#2fbfa5 40%,transparent);
+}
+html[data-theme=light]{
+  --wall:#c9cdd4; --task:#e9ebef; --taskline:#c4c7ce; --tray:#555;
+  --menu:#fff; --menub:#d9d9d9; --fg:#0a0a0a; --fg2:#2e2e2e; --fg3:#45484d; --rule:#c6c9ce; --hl:#ececec; --glyph:#555; --teal:#087a67; --lift:#f6f7f8; --scrim:rgba(255,255,255,.78); --chip:#f7f7f7; --chipb:#cdcdcd;
+  --band:#f1f2f4; --track:#d0d3d6; --card:#f6f6f7; --cardb:#e3e3e3; --ac:.85;--off:#e5e6e8;--offh:#dadbde;--offic:#3d4147;--onic:#0a5a4d;--on:#bfe2db;--onh:#b2d9d1;--onb:color-mix(in srgb,#087a67 40%,transparent); --shadow:0 2px 8px rgba(0,0,0,.10),0 1px 2px rgba(0,0,0,.08);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:520px;height:640px;overflow:hidden;background:var(--wall);font-family:var(--s);color:var(--fg);-webkit-font-smoothing:antialiased}
+.task{position:absolute;left:0;right:0;bottom:0;height:48px;background:var(--task);border-top:1px solid var(--taskline);display:flex;align-items:center;justify-content:flex-end;gap:14px;padding:0 16px}
+.task svg{width:16px;height:16px;stroke:var(--tray);fill:none;stroke-width:1.4;stroke-linecap:square}
+.task{opacity:.55}
+.task .logo{width:20px;height:20px;border-radius:5px;background:var(--tray);display:grid;place-items:center}
+.task .logo svg{width:13px;height:13px;stroke:var(--menu)}
+.task .clk{font-size:11px;line-height:1.25;text-align:right;color:var(--tray);margin-left:6px}
+.menu{position:absolute;right:10px;bottom:56px;width:300px;background:var(--menu);border:1px solid var(--menub);border-radius:10px;box-shadow:var(--shadow);padding:0 8px 8px;overflow:hidden}
+.head{margin:0 -8px;padding:18px 20px 22px;position:relative;background:var(--band);overflow:hidden;font-family:var(--m)}
+.head::before{content:"";position:absolute;inset:0;background:url(../settings-2026-10/c-grey.jpg) right center/cover no-repeat;opacity:var(--ac);pointer-events:none;-webkit-mask-image:linear-gradient(90deg,transparent 15%,#000 70%);mask-image:linear-gradient(90deg,transparent 15%,#000 70%)}
+html[data-theme=light] .head::before{filter:invert(1) hue-rotate(180deg) saturate(1.6) contrast(1.25)}
+.head::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,transparent 40%,var(--scrim) 100%),linear-gradient(90deg,var(--scrim),transparent 85%)}
+.head>*{position:relative;z-index:1}
+.top{display:flex;align-items:center;justify-content:space-between}
+.rt{display:flex;align-items:center;gap:8px}
+.big{font-family:var(--s);font-size:28px;font-weight:500;letter-spacing:-.025em;line-height:1}
+.fps{font-size:12px;line-height:1;color:var(--fg);font-weight:600}
+.mark{width:22px;height:22px;border-radius:6px;border:1px solid var(--chipb);background:transparent;display:grid;place-items:center}
+.mark svg{width:13px;height:13px;stroke:var(--fg3);fill:none;stroke-width:1.5;stroke-linecap:round}
+.pace{margin-top:14px;display:flex;align-items:center;gap:10px;font-size:12px;color:var(--fg2)}
+.pace .line{flex:1;height:14px;position:relative}
+.pace .line svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.pace .line svg polyline{fill:none;stroke:var(--teal);stroke-width:1.5;vector-effect:non-scaling-stroke;stroke-linejoin:round}
+.pace b{font-weight:600;color:var(--fg)}
+.hair{height:1px;background:var(--rule);margin:0 -8px}
+.qs{margin:0 -8px;padding:8px 20px;background:var(--lift)}
+.qc{display:flex;align-items:center;gap:12px;height:40px}
+svg.ic{width:16px;height:16px;flex:none;stroke:var(--glyph);fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.qc .sl{flex:1;position:relative;height:6px;border-radius:3px;background:var(--track)}
+.qc .sl b{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:var(--teal)}
+.qc .sl u{position:absolute;top:50%;width:3px;height:10px;margin:-5px 0 0 -3px;background:var(--fg);border-radius:1.5px;box-shadow:none}
+.qc i{font-family:var(--m);font-style:normal;font-variant-numeric:tabular-nums;color:var(--fg);font-size:12px;width:48px;text-align:right}
+.tgs{display:flex;gap:10px;padding:2px 0 5px;position:relative}
+.tc{width:48px;height:32px;flex:none;border-radius:8px;border:0;background:var(--off);display:grid;place-items:center;cursor:pointer;position:relative;transition:background .12s,box-shadow .12s;outline:none}
+.tc svg{width:16px;height:16px;stroke:var(--offic);fill:none;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;transition:stroke .12s}
+.tc:hover,.tc.tip{background:var(--offh);box-shadow:inset 0 0 0 1px var(--chipb)}.tc:hover svg,.tc.tip svg{stroke:var(--fg)}
+.tc.on{background:var(--on);box-shadow:inset 0 0 0 1px var(--onb)}.tc.on svg{stroke:var(--onic)}.tc.on:hover,.tc.on.tip{background:var(--onh);box-shadow:inset 0 0 0 1px var(--onb)}.tc.on:hover svg,.tc.on.tip svg{stroke:var(--onic)}
+.tc:focus-visible{box-shadow:0 0 0 1px var(--menu),0 0 0 3px color-mix(in srgb,var(--teal) 55%,transparent)}
+.tc::after{content:attr(data-tip);position:absolute;left:50%;bottom:calc(100% + 8px);transform:translateX(-50%);padding:3px 8px;border-radius:6px;background:var(--chip);border:1px solid var(--chipb);font:11px var(--m);color:var(--fg);white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .12s;z-index:5;box-shadow:0 2px 8px rgba(0,0,0,.35)}
+.tc::before{content:"";position:absolute;left:50%;bottom:calc(100% + 3px);width:7px;height:7px;margin-left:-3.5px;transform:rotate(45deg);background:var(--chip);border:solid var(--chipb);border-width:0 1px 1px 0;opacity:0;pointer-events:none;transition:opacity .12s;z-index:6}
+.tc:first-child::after{left:0;transform:none}.tc:last-child::after{left:auto;right:0;transform:none}
+.tc:hover::after,.tc:focus-visible::after,.tc.tip::after,.tc:hover::before,.tc:focus-visible::before,.tc.tip::before{opacity:1}
+.bar{display:flex;align-items:center;gap:4px;height:40px;padding:0 12px 0 20px;margin:0 -8px;font-family:var(--m)}
+.bar .sp{flex:1}
+.btn{display:flex;align-items:center;gap:12px;height:32px;padding:0 8px;margin-left:-8px;border-radius:8px;color:var(--fg2);font-size:12px;cursor:default;border:0;background:none;font-family:var(--m)}
+.btn.sq{width:32px;justify-content:center;margin-left:0;padding:0}
+.btn:hover,.btn:focus-visible{background:var(--hl);color:var(--fg);outline:none}
+.btn:focus-visible{box-shadow:inset 0 0 0 1px var(--teal)}
+.btn:hover svg.ic{stroke:var(--fg)}
+</style></head>
+<body>
+<div class="task">
+  <svg viewBox="0 0 16 16"><path d="M2 4h12M2 8h12M2 12h8"/></svg>
+  <svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg>
+  <div class="logo"><svg viewBox="0 0 16 16"><path d="M2 5h8M2 8h11M2 11h6" stroke-width="1.8"/></svg></div>
+  <svg viewBox="0 0 16 16"><path d="M2 11l3-3 3 2 3-5 3 4"/></svg>
+  <div class="clk">21:04<br>01.10.2026</div>
+</div>
+<div class="menu">
+  <div class="head">
+    <div class="top"><div class="big">7.4x</div><div class="rt"><span class="fps">144 fps</span><span class="mark" title="Menu"><svg viewBox="0 0 16 16"><path d="M3 5h10M3 8h10M3 11h6"/></svg></span></div></div>
+    <div class="pace"><span>Frame</span><span class="line"><svg viewBox="0 0 100 14" preserveAspectRatio="none"><polyline points="0,8 6,7 12,9 18,6 24,8 30,7 36,9 42,5 48,8 54,7 60,9 66,6 72,8 78,7 84,9 90,6 100,8"/></svg></span><b>6.9 ms</b></div>
+  </div>
+  <div class="hair"></div>
+  <div class="qs">
+  <div class="qc" title="Warmth"><svg class="ic" viewBox="0 0 16 16"><path d="M6.5 9.2V3a1.5 1.5 0 0 1 3 0v6.2a3 3 0 1 1-3 0z"/><path d="M8 6v5.5"/></svg><div class="sl"><b style="width:40%"></b><u style="left:40%"></u></div><i>40%</i></div>
+  <div class="qc" title="Brightness"><svg class="ic" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.8"/><path d="M8 1.5v1.8M8 12.7v1.8M1.5 8h1.8M12.7 8h1.8M3.4 3.4l1.3 1.3M11.3 11.3l1.3 1.3M3.4 12.6l1.3-1.3M11.3 4.7l1.3-1.3"/></svg><div class="sl"><b style="width:72%"></b><u style="left:72%"></u></div><i>72%</i></div>
+  <div class="tgs">
+    <button class="tc on" role="switch" aria-checked="true" data-tip="Follow the text cursor" aria-label="Follow the text cursor"><svg viewBox="0 0 16 16"><path d="M5 2h6M5 14h6M8 2v12"/><path d="M1.5 6v4M14.5 6v4"/></svg></button>
+    <button class="tc" role="switch" aria-checked="false" data-tip="Follow keyboard focus" aria-label="Follow keyboard focus"><svg viewBox="0 0 16 16"><path d="M2 5.5V3a1 1 0 0 1 1-1h2.5M10.5 2H13a1 1 0 0 1 1 1v2.5M14 10.5V13a1 1 0 0 1-1 1h-2.5M5.5 14H3a1 1 0 0 1-1-1v-2.5"/><path d="M6 6h4v4H6z"/></svg></button>
+    <button class="tc" role="switch" aria-checked="false" data-tip="Hide cursor" aria-label="Hide cursor"><svg viewBox="0 0 16 16"><path d="M3.5 2.5l8 5.2-3.3.9-1.3 3.8z"/><path d="M2 14L14 2"/></svg></button>
+    <button class="tc on" role="switch" aria-checked="true" data-tip="High resolution cursor" aria-label="High resolution cursor"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="3"/><path d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3"/></svg></button>
+  </div>
+  </div>
+  <div class="hair"></div>
+  <div class="bar">
+    <button class="btn" title="Profile: Default"><svg class="ic" viewBox="0 0 16 16"><path d="M8 2L13.5 4.75 8 7.5 2.5 4.75z"/><path d="M2.5 8L8 10.75 13.5 8"/><path d="M2.5 11L8 13.75 13.5 11"/></svg><span>Default</span></button>
+    <span class="sp"></span>
+    <button class="btn sq" title="Settings"><svg class="ic" viewBox="0 0 16 16"><path d="M2 5h12M2 11h12"/><path d="M5 3v4M11 9v4"/></svg></button>
+    <button class="btn sq" title="Quit"><svg class="ic" viewBox="0 0 16 16"><path d="M8 2v6"/><path d="M4.5 4.5a5 5 0 1 0 7 0"/></svg></button>
+  </div>
+</div>
+<script>
+const t=new URLSearchParams(location.search).get('theme')||'dark';
+document.documentElement.dataset.theme=t;
+document.querySelectorAll('.tc').forEach(r=>{r.onclick=()=>{const o=!r.classList.contains('on');r.classList.toggle('on',o);r.setAttribute('aria-checked',o)};r.onmouseleave=()=>r.classList.remove('tip')});
+</script>
+</body></html>

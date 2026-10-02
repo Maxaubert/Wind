@@ -113,6 +113,20 @@ Wind starts it with `ShellExecuteExW` and its PID (`src/tray_host.cpp`), restart
 while the user aims at menu items; Quit sets `Local\Wind_QuitRequest`, the same clean-exit event
 the installer uses. The tray exits when its Wind exits, taking the icon with it.
 
+Since 0.17.0 (issue #313) the tray's menu is a custom flyout window, not an HMENU
+(`src/tray_app/flyout_window.cpp`, painted with Direct2D by `flyout_draw.cpp`; menus cannot host
+sliders). It opens above the icon, closes on deactivation, Esc or a second icon click, and follows
+`uiTheme`. Top to bottom: an optional Performance header (zoom, fps, frame sparkline from the shared
+block), up to four quick sliders, one row of icon chips, and a bottom row (profile, Settings, Quit).
+What it shows is user-chosen in Settings > Tray menu and stored as global (non-profile) ini keys
+`trayPerf`, `traySliders`, `traySliderOrder`, `trayToggles`, `trayToggleOrder`, parsed by the pure
+`src/tray_items.*` (shared by WindTray and the config host). Eligible sliders: Warmth, Brightness,
+Max zoom, Zoom-in speed, Zoom-out speed, Pan speed, Pan smoothing, Release glide. Eligible toggles:
+Follow the text cursor, Follow keyboard focus, and Keep within the edges (one chip that writes
+`mouseAlign` and `trackAlign` together). Chip and slider changes write the live ini with the same
+atomic helper as the settings host and are session changes, like every Settings change. Spec:
+`docs/superpowers/specs/2026-10-01-tray-flyout-design.md`. Known gap: no UI Automation names yet.
+
 Two refinements keep this simple channel honest. First, the ini path is never hardcoded:
 `wind::ResolveIniPath()` (`src/config_path.h`) probes whether the exe directory is writable, so a
 dev build keeps the ini next to the exe while a Program Files install transparently falls back to
@@ -217,9 +231,10 @@ large fleet of PowerShell measurement probes, see
 | `tick_stats.h` | Pure ring buffer of recent tick intervals backing the tray's frame-pacing readout |
 | `transform.cpp/.h` | Pure transform math: anchored offsets, TDR-safe clamps, input-transform rects, foreign-writer detection |
 | `transform_model.cpp/.h` | The transform engine: sessions, the weld, keep-alive, `txMaxStepPct` rate limit (default 25, i.e. 2.5% per tick) |
-| `tray_app/` | `WindTray.exe` (issue #291): `main.cpp` lifecycle (serves one Wind PID, single instance, TaskbarCreated), `tray_icon.cpp` icon and balloons, `tray_menu.cpp` the owner-drawn menu and profile switch, `tray_draw.h` its drawing half |
+| `tray_app/` | `WindTray.exe` (issue #291): `main.cpp` lifecycle (serves one Wind PID, single instance, TaskbarCreated), `tray_icon.cpp` icon and balloons, `flyout_window.cpp` the quick-controls flyout window (placement, dismissal; issue #313), `flyout_draw.cpp` its Direct2D painter, `flyout_model.h` its pure model (placement, layout, hit-testing, view; unit-tested), `tray_menu.cpp` what its buttons do (Quit guard, profile switch) |
 | `tray_host.cpp/.h` | Wind.exe side of the tray split: creates the shared block and supervises `WindTray.exe` |
 | `tray_ipc.h` | Pure layout of the block shared with `WindTray.exe` (`Local\Wind_TrayState_v1`): status, frame-pacing ring, `menuOpen` |
+| `tray_items.h/.cpp` | Pure quick-control list model for the flyout (which sliders/toggles, order, 4-slider cap; ini keys `trayPerf`, `traySliders`, `traySliderOrder`, `trayToggles`, `trayToggleOrder`) |
 | `tray_status.h` | Pure decisions for what the tray menu shows (engine label, status text) from a published tick-loop snapshot |
 | `tx_cadence.h` | Pure transform write-cadence gates, traced against native Magnifier (issue #204) |
 | `tx_warm.h` | Pure transform warm-keeping: the pulsed rest-tick displacement (`txWarmHz`/`txWarmMode`) that keeps DWM's magnification re-render from going cold between pans |

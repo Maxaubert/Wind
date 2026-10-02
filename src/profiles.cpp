@@ -14,7 +14,9 @@ static std::string trim(const std::string& s) {
     return s.substr(a, b - a + 1);
 }
 bool IsGlobalProfileKey(const std::string& key) {
-    return key == "profile" || key == "onboarded" || key == "uiTheme" || key == "showAdvanced";
+    return key == "profile" || key == "onboarded" || key == "uiTheme" || key == "showAdvanced" ||
+           key == "trayPerf" || key == "traySliders" || key == "traySliderOrder" ||
+           key == "trayToggles" || key == "trayToggleOrder";
 }
 std::string ProfileNameError(const std::string& name) {
     if (name.empty()) return "Name cannot be empty";
@@ -58,7 +60,8 @@ std::string MakeLiveText(const std::string& profileText, const std::string& oldL
                          const std::string& name) {
     std::string out = StripGlobalKeyLines(profileText);
     auto oldVals = ReadIniValues(oldLiveText);
-    for (const char* k : {"onboarded", "uiTheme", "showAdvanced"}) {
+    for (const char* k : {"onboarded", "uiTheme", "showAdvanced", "trayPerf", "traySliders",
+                           "traySliderOrder", "trayToggles", "trayToggleOrder"}) {
         auto it = oldVals.find(k);
         if (it != oldVals.end()) out = UpdateIniText(out, k, it->second);
     }

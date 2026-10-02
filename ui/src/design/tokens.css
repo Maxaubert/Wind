@@ -25,7 +25,7 @@
   --shadow: 0 0 0 1px rgba(255, 255, 255, .05), 0 14px 36px rgba(0, 0, 0, .9);
   --guide: #3c3c3c; --prog: #f2f2f2;
   --hlStrong: #6e6e6e; --hlDim: #2e2e2e; --hlGrey: #313131;
-  --fill: #2fbfa5; --thumb: #f2f2f2;
+  --fill: #2fbfa5; --thumb: #f2f2f2; --ctl: #8c8c8c;
   --band: #080808; --bandimg-op: .17; --bandimg-from: 50%;   /* banner = option colour, aurora .17: Max 2026-10-02 */
 
   background: var(--bg);
@@ -44,7 +44,7 @@
   --pill: rgba(255, 255, 255, .85); --pillb: #c4c4c4; --shadow: 0 10px 28px rgba(0, 0, 0, .16);
   --guide: #cfcfcf; --prog: #0a0a0a;
   --hlStrong: #8c8c8c; --hlDim: #dadada; --hlGrey: #e4e4e4;
-  --fill: #11977f; --thumb: #0a0a0a;
+  --fill: #11977f; --thumb: #0a0a0a; --ctl: #767676;
   --band: #f6f6f7;
 }
 .wnd *, .wnd *::before, .wnd *::after { box-sizing: border-box; }

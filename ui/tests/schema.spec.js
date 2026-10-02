@@ -20,10 +20,10 @@ const OLD_BIND_KEYS = [
   'zoomWheelMods', 'panLeftVk', 'panLeftMods', 'panRightVk', 'panRightMods', 'panUpVk', 'panUpMods', 'panDownVk', 'panDownMods',
   'hideCursorVk', 'hideCursorMods', 'cursorLockVk', 'cursorLockMods',
 ];
-const NEW_KEYS = ['__theme', '__profiles', '__diagnostics', '__openIni'];
+const NEW_KEYS = ['__theme', '__profiles', '__diagnostics', '__openIni', 'trayPerf'];
 
 test('group ids, order and shape follow the spec', () => {
-  expect(groups.map((g) => g.id)).toEqual(['zoom', 'move', 'cursor', 'typing', 'colour', 'general', 'advanced', 'about']);
+  expect(groups.map((g) => g.id)).toEqual(['zoom', 'move', 'cursor', 'typing', 'colour', 'general', 'tray', 'advanced', 'about']);
   for (const g of groups) {
     expect(typeof g.label).toBe('string');
     expect(typeof g.icon).toBe('string');
@@ -36,6 +36,7 @@ test('group ids, order and shape follow the spec', () => {
   expect(cap('move')).toEqual(['Keys', 'Panning']);
   expect(cap('cursor')).toEqual(['Look', 'Keys']);
   expect(cap('general')).toEqual(['Appearance', 'Profiles', 'Files']);
+  expect(cap('tray')).toEqual(['']);
   expect(cap('advanced')).toEqual(['Engine', 'Apps', 'Fine tuning']);
 });
 

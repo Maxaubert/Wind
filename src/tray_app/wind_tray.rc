@@ -3,6 +3,8 @@
 #include <winver.h>
 // WindTray.exe resources (issue #291): the same Wind icon as Wind.exe, its own description.
 IDI_WIND ICON "..\\..\\assets\\wind.ico"
+// The flyout header image (issue #313): the same c-grey.jpg the Settings UI ships in ui/public.
+IDR_AURORA RCDATA "..\\..\\ui\\public\\c-grey.jpg"
 
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION    WIND_VER_MAJOR,WIND_VER_MINOR,WIND_VER_PATCH,0

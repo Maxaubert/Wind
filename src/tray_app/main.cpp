@@ -1,4 +1,5 @@
-// WindTray.exe (issue #291): owns Wind's notification-area icon and menu, WITHOUT UIAccess.
+// WindTray.exe (issue #291): owns Wind's notification-area icon and quick-controls flyout (#313),
+// WITHOUT UIAccess.
 //
 // Lifecycle: Wind.exe starts us with `--wind-pid <pid>` (ShellExecute, so we never inherit its
 // UIAccess token). We serve exactly that process and exit when it exits, removing the icon on the
@@ -34,8 +35,7 @@ static UINT g_taskbarCreated = 0;
 
 static LRESULT CALLBACK TrayWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (m == TrayApp::WM_TRAY && (l == WM_RBUTTONUP || l == WM_LBUTTONUP)) {
-        POINT pt; GetCursorPos(&pt);
-        TrayApp::OpenMenu(pt);
+        TrayApp::ToggleFlyout();
         return 0;
     }
     if (g_taskbarCreated && m == g_taskbarCreated) {
@@ -57,6 +57,11 @@ static DWORD ParseWindPid(const wchar_t* cmd) {
 }
 
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR cmdLine, int) {
+    // Direct2D / WIC need COM; the flyout lives on this (main) thread.
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    // Test hook: render the flyout with fake status to a PNG and exit (no Wind, no tray icon).
+    if (cmdLine && wcsstr(cmdLine, L"--render-test")) return TrayApp::RunRenderTest(cmdLine);
+    if (cmdLine && wcsstr(cmdLine, L"--flyout-test")) return TrayApp::RunFlyoutTest();
     wind::LogInit(L"tray");
     const DWORD windPid = ParseWindPid(cmdLine);
 
@@ -134,9 +139,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR cmdLine, int) {
         }
     }
 
-    // Every exit path removes the icon. A menu may still be open on its thread; ExitProcess ends
-    // it, and `menuOpen` is cleared so the next Wind (or this one, restarting us) never inherits a
-    // stale "open".
+    // Every exit path removes the icon. The flyout may still be open; ExitProcess ends it, and
+    // `menuOpen` is cleared so the next Wind (or this one, restarting us) never inherits a stale
+    // "open".
+    TrayApp::CloseFlyout();
     TrayApp::RemoveIcon();
     SetTrayMenuOpen(TrayApp::g_block, false);
     wind::LogShutdown();

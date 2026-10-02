@@ -281,6 +281,15 @@ sequenceDiagram
 No acknowledgment flows back for `setConfig` itself (a failed write posts `configWriteFailed`,
 which the page surfaces). The core's hot-reload is the delivery mechanism.
 
+## Tray menu tab (issue #313)
+A TRAY sidebar section holds one page, `ui/src/tray/TrayMenuPage.svelte` (pure list logic in
+`trayModel.js`, mirroring `src/tray_items.*`). A toggle row turns the Performance header on; two
+cards, "Sliders" (N of 4) and "Toggles", list the eligible items with a drag handle, the line icon
+(no background box), name, description and a checkmark button. Rows reorder only inside their card
+(pointer drag with a ~150 ms glide, or Space, arrows, Space on the keyboard). The keys are global,
+not profile, so `IsGlobalProfileKey` lists them. Changes are ordinary session changes. Item list
+and limits: `docs/superpowers/specs/2026-10-01-tray-flyout-design.md`. Playwright: `ui/tests/tray.spec.js`.
+
 ## Profiles
 
 `ui/src/shell/TitleBar.svelte` shows the active profile, and `ui/src/general/Profiles.svelte`
