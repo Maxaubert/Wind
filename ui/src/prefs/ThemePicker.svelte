@@ -40,12 +40,12 @@
   /* The strip never wraps: one row, scrolls sideways. */
   .strip { display: flex; flex-wrap: nowrap; gap: 6px; max-width: 100%; overflow-x: auto; padding: 2px 2px 8px;
            scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--fg) 22%, transparent) transparent; }
-  .th { flex: none; width: 92px; padding: 4px; border: 1px solid transparent; border-radius: var(--rc); text-align: left;
+  .th { flex: none; min-width: 92px; padding: 4px; border: 1px solid transparent; border-radius: var(--rc); text-align: left;
         color: var(--fg3); }
   .th:hover { background: var(--hover); color: var(--fg); }
   .th.on { border-color: var(--fg); color: var(--fg); }
   .th:focus-visible { outline-offset: -2px; }
-  .nm { display: block; margin: 6px 2px 1px; font: 11.5px var(--m); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .nm { display: block; margin: 6px 2px 1px; font: 11.5px var(--m); white-space: nowrap; }
 
   /* The mini window. It is a .wnd of its own, so these colours are that theme's tokens. */
   .sw { display: block; position: relative; height: 52px; border-radius: var(--srad); background: var(--bg);
