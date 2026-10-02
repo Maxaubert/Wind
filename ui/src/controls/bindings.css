@@ -6,7 +6,10 @@
 .bx .kc.ghost { border-color: transparent; color: var(--fg3); gap: 5px; cursor: pointer; }
 .bx .kc.ghost:hover { color: var(--fg); border-color: var(--chipb); }
 .bx .kc.ghost svg { width: 11px; height: 11px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
-.bx .kc.live { color: var(--fg); border-color: var(--fill); }
+/* The unset pan box shows a key combination, so it keeps the outline of the other key boxes (Max 2026-10-02). */
+.bx .kc.ghost.pan { border-color: var(--chipb); }
+.bx .kc.ghost.pan:hover { border-color: var(--outline); }
+.bx .kc.live, .bx .kc.ghost.pan.live { color: var(--fg); border-color: var(--fill); }
 .bx .kc .kp { color: var(--glyph); margin: 0 5px; font-family: var(--s); }
 .bx .kc .kfix { display: inline-flex; align-items: center; gap: 5px; color: var(--fg3); }
 .bx .kc .kfix svg { width: 13px; height: 13px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; }
