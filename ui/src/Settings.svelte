@@ -410,8 +410,7 @@
 <style>
   .app { width: 100vw; height: 100vh; display: grid; grid-template-rows: 38px 1fr; position: relative; overflow: hidden; }
   .body { display: grid; grid-template-columns: 240px 1fr; min-height: 0; }
-  .main { position: relative; min-height: 0; overflow-y: auto; padding: 0 40px; outline: none;
-          scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--fg) 16%, transparent) transparent; }
+  .main { position: relative; min-height: 0; overflow-y: auto; padding: 0 40px; outline: none; }
   .main[data-page="tray"] :global(.banner + .card) { margin-top: 20px; }   /* k01: a caption-less first card sits 20px under the band */
   .page.fade { animation: pagein var(--dur-fast) var(--ease); }
   @keyframes pagein { from { opacity: 0; } }

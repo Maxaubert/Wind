@@ -29,7 +29,7 @@
 
 <style>
   .side { background: var(--side); border-right: 1px solid var(--line); display: flex; flex-direction: column;
-          min-height: 0; padding: 12px 10px 14px; overflow-y: auto; scrollbar-width: thin; }
+          min-height: 0; padding: 12px 10px 14px; overflow-y: auto; }
   .search { height: 32px; border: 1px solid var(--line2); display: flex; align-items: center; gap: 8px;
             padding: 0 6px 0 10px; color: var(--fg3); margin-bottom: 12px; border-radius: var(--srad); }
   .search:focus-within { border-color: var(--fg); }

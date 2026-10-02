@@ -69,7 +69,7 @@
   .x { width: 28px; height: 28px; border-radius: var(--srad); color: var(--fg3); font-size: 18px; line-height: 1; }
   .x:hover { background: var(--hover); color: var(--fg); }
   .empty { margin: 0; padding: 30px 0; text-align: center; color: var(--fg3); }
-  ul { list-style: none; margin: 0; padding: 0; max-height: 240px; overflow-y: auto; scrollbar-width: thin; }
+  ul { list-style: none; margin: 0; padding: 0; max-height: 240px; overflow-y: auto; }
   li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 0;
        border-bottom: 1px solid var(--rowline); }
   li:last-child { border-bottom: 0; }
