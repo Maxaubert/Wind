@@ -125,7 +125,7 @@ Max zoom, Zoom-in speed, Zoom-out speed, Pan speed, Pan smoothing, Release glide
 Follow the text cursor, Follow keyboard focus, and Keep within the edges (one chip that writes
 `mouseAlign` and `trackAlign` together). Chip and slider changes write the live ini with the same
 atomic helper as the settings host and are session changes, like every Settings change. Spec:
-`docs/superpowers/specs/2026-10-01-tray-flyout-design.md`. Known gap: no UI Automation names yet.
+`docs/superpowers/specs/2026-10-01-tray-flyout-design.md`. Since 0.18.0 (issue #315) the flyout also has an engine dropdown (per-window-kind engine, a hot session change like Settings), two listen-and-chime chips (Mouse lock, Pass keys: click, go to the app, the fix toggles for it, a rising or falling chime plays, and the change persists to the ini and active profile) and a Pause Wind chip (runtime only; `TrayShared::paused` plus the `Local\Wind_TrayCommand` event, zoom input is not swallowed while paused). The core publishes the foreground category in `TrayShared`. The chimes are synthesized WAVs in `assets/sounds/` (see `assets/sounds/README.md`), embedded in WindTray and played with `PlaySound`. Spec: `docs/superpowers/specs/2026-10-02-tray-tools-design.md`. Known gap: no UI Automation names yet.
 
 Two refinements keep this simple channel honest. First, the ini path is never hardcoded:
 `wind::ResolveIniPath()` (`src/config_path.h`) probes whether the exe directory is writable, so a

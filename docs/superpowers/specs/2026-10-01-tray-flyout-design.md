@@ -52,6 +52,10 @@ order them. Stacks on the Settings redesign (#303, PR #312).
 | Toggle | Follow the text cursor | `trackCaret` | I-beam |
 | Toggle | Follow keyboard focus | `trackFocus` | focus brackets |
 | Toggle | Keep within the edges | `mouseAlign` AND `trackAlign` together | pointer inside a frame |
+| Dropdown | Engine for the app in front | `engineGame` / `engineAcrylic` / `engineDesktop` / `engineOther` | engine glyph (added by #315) |
+| Toggle | Mouse lock (listen) | `lockApps`, per app | pointer lock (added by #315) |
+| Toggle | Pass keys (listen) | `noSwallowApps`, per app | key (added by #315) |
+| Toggle | Pause Wind | runtime only, not saved | pause (added by #315) |
 
 Chosen by Max item by item (2026-10-01). "Keep within the edges" is ONE toggle for both alignment
 settings: on writes `mouseAlign=1` and `trackAlign=1` ("Within the edges"), off writes both 0
