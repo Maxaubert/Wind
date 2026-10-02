@@ -63,6 +63,18 @@ TEST_CASE("caret or focus changes right after a click are consumed, never follow
     in.snap = Snap(TrackKind::Caret, 2);            // a NEW change after the quiet period does
     CHECK(StepViewOwner(s, in) == ViewOwner::Caret);
 }
+TEST_CASE("typing right after a click is followed: a key AFTER the click ends the quiet period (#328)") {
+    // Field 2026-10-02 (Notepad): click into the text, type at once; the first 8 characters fell inside
+    // the 1 s click quiet period and the view sat on the pointer, the caret off screen.
+    ViewOwnerState s; auto in = Base();
+    in.msSinceButton = 300; in.msSinceKey = 20; in.keyAfterButton = true; in.snap = Snap(TrackKind::Caret, 1);
+    CHECK(StepViewOwner(s, in) == ViewOwner::Caret);
+}
+TEST_CASE("the click's own caret move is still consumed when no key followed the click (#328)") {
+    ViewOwnerState s; auto in = Base();
+    in.msSinceButton = 300; in.msSinceKey = 700; in.keyAfterButton = false; in.snap = Snap(TrackKind::Caret, 1);
+    CHECK(StepViewOwner(s, in) == ViewOwner::Mouse);
+}
 TEST_CASE("tracking turned off mid-caret goes straight back to the mouse, no warp") {
     ViewOwnerState s; auto in = Base(); in.snap = Snap(TrackKind::Caret, 1);
     StepViewOwner(s, in); in.enabled = false;

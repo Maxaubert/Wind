@@ -10,7 +10,9 @@
 //    would drag. (The old "glide the view back" chased a moving pointer and never arrived - the
 //    field-reported wobble.)
 //  - Caret/focus changes within kClickQuietMs of a mouse button are the click's own doing
-//    (opening a page, clicking into a field): they are consumed without taking the view.
+//    (opening a page, clicking into a field): they are consumed without taking the view. A key
+//    pressed AFTER the click ends that early (#328: clicking into Notepad and typing at once lost the
+//    first ~8 characters while the caret was off screen).
 //  - And they need a KEY: a caret/focus change takes the view only if a key went down or up within
 //    kKeyDrivenMs (issue #289; key-ups count so Alt+Tab released after a long look still counts). Scrolling a page moves a focused control's caret on screen with
 //    no key at all (field: the Settings page dragged the view while scrolling).
@@ -45,6 +47,7 @@ struct ViewOwnerInputs {
     bool buttonDown = false;
     double msSinceButton = 1e9;   // time since a mouse button was last down
     double msSinceKey = 0;        // time since any key went down (0 when unknown: no gate)
+    bool keyAfterButton = false;  // a key went down AFTER the last mouse button: typing, so the click quiet period is over (#328)
     double dtMs = 0;
     TrackSnapshot snap;
     bool panning = false;         // a pan key is held or its motion is still gliding (#287)
@@ -94,7 +97,7 @@ inline ViewOwner StepViewOwner(ViewOwnerState& s, const ViewOwnerInputs& in) {
     // A new tracking event, unless a recent click caused it.
     if (in.trackActive && in.snap.seq != s.lastSeq) {   // tracking off: nothing takes the view
         s.lastSeq = in.snap.seq;
-        if (in.msSinceButton >= kClickQuietMs && in.msSinceKey <= kKeyDrivenMs) {
+        if ((in.msSinceButton >= kClickQuietMs || in.keyAfterButton) && in.msSinceKey <= kKeyDrivenMs) {
             if (in.snap.kind == TrackKind::Caret && in.trackCaret) { s.owner = ViewOwner::Caret; s.target = in.snap; }
             else if (in.snap.kind == TrackKind::Focus && in.trackFocus) { s.owner = ViewOwner::Focus; s.target = in.snap; }
         }

@@ -1820,6 +1820,8 @@ static void RunTick(TickState& t) {
             // hook no longer switches the gate off. No stamp at all and no hook: no information, no gate.
             const unsigned long long lastKey = g_input.lastAnyKeyDownMs();
             vi.msSinceKey = lastKey ? double(nowMs - lastKey) : (g_input.kbHookActive() ? 1e9 : 0.0);
+            // #328: a key after the last mouse button means typing, so the click quiet period ends early.
+            vi.keyAfterButton = lastKey && t.lastButtonMs && lastKey > t.lastButtonMs;
             vi.dtMs = dt * 1000.0;
             vi.snap = g_track.snapshot();
             const wind::ViewOwner was = t.viewOwner.owner;
