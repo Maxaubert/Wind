@@ -122,15 +122,12 @@
 <body>
 <div class="pane k" id="k"></div><div class="pane w" id="w"></div>
 <script>
-// The app icon, from assets/wind-badge.svg: the indigo badge with the three wind strokes
-// knocked out. Same mark the tray and the Settings window show, so setup and the app the
+// The app icon, from assets/wind-badge.svg: the black badge with the three white wind strokes
+// on it. Same mark the tray and the Settings window show, so setup and the app the
 // user is about to run are recognisably the same thing.
 const MARK = (s) => `
   <svg width="${s}" height="${s}" viewBox="0 0 256 256" style="display:block;flex:none">
-    <defs><linearGradient id="wg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#6d6df0"/><stop offset="1" stop-color="#5151cb"/>
-    </linearGradient></defs>
-    <rect x="8" y="8" width="240" height="240" rx="56" fill="url(#wg)"/>
+    <rect x="8" y="8" width="240" height="240" rx="56" fill="#000"/>
     <g transform="translate(50,50) scale(9.75)" fill="none" stroke="#fff"
        stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round">
       <path d="M2 5.5h8.5a2 2 0 1 0-2-2"/>
