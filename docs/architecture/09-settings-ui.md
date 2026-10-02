@@ -158,6 +158,16 @@ switches on `row.type`:
 | `profiles` | `prefs/ProfilePicker.svelte` | A dropdown of the profiles plus New; a trash per profile in the open list (none when one is left, none on Default). Dialogs: `prefs/NewProfileDialog.svelte`, delete confirm via `Prompt` |
 | `button`, `about` | `SettingRow`, `controls/About.svelte` | Actions (open ini, export diagnostics) and the logo hero |
 
+**Search** (#317, `ui/src/search/`): `search.js` is a pure, unit-tested ranker. Every labelled row is
+scored best field first (label exact > word-prefix > substring/fuzzy, then the row's `keywords`, then
+its description, then card caption and tab name); each query word must match something, fuzzy (one typo
+for 4-7 letters, two for 8+, same first letter, a few spelling folds like ight/ite), and the scores add.
+The result is ONE ranked list, not grouped by tab. `Results.svelte` renders each hit with the page's own
+`SettingRow` (tab name beside the label), so a result is edited in place with the same session/persist
+behaviour and clicking it goes nowhere; advanced rows always show there, a row gated by `showIf` shows
+dimmed. Every labelled schema row carries `keywords` (synonyms, never displayed; a test enforces it). The
+Tray menu's item lists are not schema rows, so they are never searchable; its Performance switch is.
+
 Visual tokens (colours, radii, the aurora banner) live in `ui/src/design/tokens.css`, taken from
 `docs/design/settings-2026-10/FINAL-v10-grey.html`; the reference render is `FINAL-reference.png`
 in the same folder.
