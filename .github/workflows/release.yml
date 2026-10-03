@@ -121,6 +121,11 @@ jobs:
           if ($env:IS_PRIVATE -eq 'true' -and $env:HAS_TOKEN -ne 'true') {
             Write-Host "::notice::Publishing to the PRIVATE repo. The asset will not be publicly downloadable. Set RELEASES_TOKEN to publish to Maxaubert/Wind-releases instead."
           }
+          # A stable-named copy of the same installer (#343), so this link never needs updating:
+          # https://github.com/<repo>/releases/latest/download/Wind-Setup-x64.exe always serves
+          # the newest release. The versioned name stays the primary asset.
+          $stable = "dist/Wind-Setup-x64.exe"
+          Copy-Item $exe $stable -Force
           $repo = $env:TARGET_REPO
           Write-Host "publishing to $repo"
           gh release view $tag --repo $repo 2>$null | Out-Null
@@ -128,11 +133,11 @@ jobs:
             Write-Host "refreshing existing release $tag"
             gh release edit $tag --repo $repo --notes-file notes.md
             if ($LASTEXITCODE -ne 0) { throw 'gh release edit failed' }
-            gh release upload $tag $exe --repo $repo --clobber
+            gh release upload $tag $exe $stable --repo $repo --clobber
             if ($LASTEXITCODE -ne 0) { throw 'gh release upload failed' }
           } else {
             Write-Host "creating release $tag"
-            gh release create $tag $exe --repo $repo --title "Wind $v" --notes-file notes.md
+            gh release create $tag $exe $stable --repo $repo --title "Wind $v" --notes-file notes.md
             if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
           }
 
