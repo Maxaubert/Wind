@@ -22,9 +22,20 @@ try {
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path $src) -or -not (Test-Path $traySrc)) { throw "build.bat uiaccess failed." }
 
     Write-Output "=== 0c. build the config UI host (npm build of ui + WindConfig.exe) ==="
+    # #347: a failed UI build once deployed a stale ui\dist from days earlier (old Settings UI).
+    # Packages older than the lockfile are reinstalled first (that was the cause: Svelte 4 installed,
+    # Svelte 5 required), and ui\dist is removed so only a fresh build can be deployed.
+    $lock = "$root\ui\package-lock.json"
+    $installed = "$root\ui\node_modules\.package-lock.json"
+    if ((Test-Path $lock) -and (-not (Test-Path $installed) -or (Get-Item $lock).LastWriteTime -gt (Get-Item $installed).LastWriteTime)) {
+        Write-Output "ui packages are older than package-lock.json: npm ci"
+        Push-Location "$root\ui"
+        try { & cmd /c "npm ci"; if ($LASTEXITCODE -ne 0) { throw "npm ci failed." } } finally { Pop-Location }
+    }
+    if (Test-Path $uiSrc) { Remove-Item -LiteralPath $uiSrc -Recurse -Force }
     & cmd /c "`"$root\build.bat`" config"
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path $cfgSrc)) { throw "build.bat config failed." }
-    if (-not (Test-Path $uiSrc)) { throw "ui\dist not produced by build.bat config (npm build issue)." }
+    if (-not (Test-Path "$uiSrc\index.html")) { throw "ui\dist not produced by build.bat config (npm build issue)." }
 
     $subject = "CN=Wind Dev Test Cert"
     Write-Output "=== 1. find-or-create self-signed code-signing cert ==="
