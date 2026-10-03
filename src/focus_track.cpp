@@ -305,10 +305,11 @@ void FocusTracker::run() {
             RECT rc{}; const char* src = "";
             const bool found = java ? (javaHave ? (rc = javaCaret, src = "java", true) : false) : findCaret(el, rc, src);
             if (found) {
-                // #337: a UIA caret rect that also spans blank lines above (Chromium web editors) is
-                // trimmed to one line at its bottom, the real caret line. The line height is per focus.
+                // #337: a caret rect that also spans blank lines above (Chromium web editors, both its
+                // UIA and Win32 carets) is trimmed to one line at its bottom, the real caret line. The
+                // line height is per focus; Java carets come from the bridge and are left alone.
                 if (caretGen != focusGen) caretLine = wind::CaretLineState{};
-                if (src[0] == 'u') {
+                if (!java) {
                     const LONG rawTop = rc.top;
                     int top = (int)rc.top;
                     wind::TrimTallCaret(top, (int)rc.bottom, caretLine);

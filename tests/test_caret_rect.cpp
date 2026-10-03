@@ -2,24 +2,51 @@
 #include "../src/caret_rect.h"
 using namespace wind;
 
-TEST_CASE("caret rect: a rect spanning blank lines above is trimmed to its bottom line (#337)") {
+TEST_CASE("caret rect: a rect spanning blank lines above is trimmed to its bottom line (#337, UIA)") {
     CaretLineState s;
     int top = 1159; TrimTallCaret(top, 1203, s);   // after Enter: one line, h44
     CHECK(top == 1159);
     CHECK(s.lineH == 44);
-    top = 1136; TrimTallCaret(top, 1247, s);       // first typed char on the next line: h111, same bottom as the real line
+    top = 1203; TrimTallCaret(top, 1247, s);       // Enter again: next line
+    top = 1136; TrimTallCaret(top, 1247, s);       // first typed char: h111, same bottom as the real line
     CHECK(top == 1247 - 44);
-    CHECK(s.lineH == 44);                          // a tall rect never teaches the line height
+    CHECK(s.lineH == 44);                          // a trimmed rect never teaches the line height
+    top = 1136; TrimTallCaret(top, 1247, s);       // more typing on the same line: still trimmed
+    CHECK(top == 1203);
 }
 
-TEST_CASE("caret rect: plain single lines pass through and follow font changes") {
+TEST_CASE("caret rect: the Win32 caret from the same editor is trimmed the same way (#337, field 2026-10-03)") {
+    CaretLineState s;
+    int top = 1669; TrimTallCaret(top, 1713, s);   // after Enter: 1927,1669 h44
+    top = 1558; TrimTallCaret(top, 1713, s);       // typing: 1945,1558 h155, same bottom
+    CHECK(top == 1669);
+}
+
+TEST_CASE("caret rect: a tall rect whose bottom moved whole lines (a wrap) is trimmed too") {
+    CaretLineState s;
+    int top = 1000; TrimTallCaret(top, 1044, s);   // one line, h44
+    top = 900; TrimTallCaret(top, 1088, s);        // wrapped one line down, tall rect: bottom on the grid
+    CHECK(top == 1044);
+    CHECK(s.lineBottom == 1088);
+}
+
+TEST_CASE("caret rect: a genuinely bigger font off the line grid is learned, not trimmed") {
+    CaretLineState s;
+    int top = 100; TrimTallCaret(top, 120, s);     // 20 px body text
+    top = 300; TrimTallCaret(top, 361, s);         // a heading elsewhere: 61 px, bottom not on the grid
+    CHECK(top == 300);
+    CHECK(s.lineH == 61);
+    top = 400; TrimTallCaret(top, 461, s);         // and stays accepted
+    CHECK(top == 400);
+}
+
+TEST_CASE("caret rect: plain single lines pass through and follow smaller fonts") {
     CaretLineState s;
     int top = 100; TrimTallCaret(top, 120, s);
-    CHECK(top == 100);
-    top = 200; TrimTallCaret(top, 226, s);         // 26 px: within the ratio, accepted as the new line height
+    top = 200; TrimTallCaret(top, 226, s);
     CHECK(top == 200);
     CHECK(s.lineH == 26);
-    top = 300; TrimTallCaret(top, 312, s);         // a smaller font: accepted
+    top = 300; TrimTallCaret(top, 312, s);
     CHECK(top == 300);
     CHECK(s.lineH == 12);
 }

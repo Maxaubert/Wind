@@ -102,4 +102,8 @@ above it (`1947,1136 h111`). The BOTTOM stays on the real caret line; only the t
 on that rect left the caret below centre by half the extra height times the zoom, more with every
 blank line ("the text moves further and further down; Enter re-centres it"). `src/caret_rect.h`
 learns the one-line height per focus and trims a rect taller than 1.4 lines to one line at its
-bottom; `trackLog=1` logs each trim. Win32 and Java carets are not touched.
+bottom, but only when that bottom sits on the known line grid (same line, or whole lines below after
+a wrap); any other tall rect (a bigger font) is learned as the new line. Chromium's Win32 caret does
+the same (1927,1669 h44 then 1945,1558 h155), so UIA and Win32 carets are both trimmed; Java carets
+(bridge) are not. `trackLog=1` logs each trim.
+
