@@ -322,6 +322,15 @@ not see it - a silently evicted hook). Measured: Wind CPU at 1x 37.5 -> 3.1 ms p
 starts 3-6 ms after a wheel notch that wakes it. The focus tracker installs its LOCATIONCHANGE
 hook and 16 ms caret poll only while active, and is switched off at every zoom-out.
 
+## Priority under background load (issue #334)
+
+The tick thread runs at `THREAD_PRIORITY_HIGHEST` and the process opts out of power throttling
+(`src/sched_priority.h`, both set once before the loop). At normal priority a saturated PC (renders,
+builds) queued the tick behind every other normal thread: traces showed 139-737 ms stalls mid-zoom,
+only while the machine was busy. One step above normal is enough to win against background work and
+stays below DWM, so the tick never delays composition; the loop sleeps or timer-waits, so it costs
+nothing at rest. It does not help when the GPU is the bottleneck (DWM does that work).
+
 ## Threads: hooks, the focus tracker, and the Magnification runtime
 
 Wind has three threads that matter beyond the tick thread itself, each split off for its own
