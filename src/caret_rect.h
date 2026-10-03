@@ -32,7 +32,11 @@ inline void TrimTallCaret(int& top, int bottom, CaretLineState& s) {
         const int ad = d < 0 ? -d : d;
         const int k = (ad + s.lineH / 2) / s.lineH;            // nearest whole number of lines
         const int off = ad - k * s.lineH;
-        if (k <= kMaxWrapLines && (off < 0 ? -off : off) <= kGridSlackPx) {
+        // On the line grid (same line, or whole lines away after a wrap), or within one line of it:
+        // Enter on the last visible line reports the new line first, then the page scrolls it up by
+        // a few pixels (field: line 1989-2033, then the tall rect ends at 2009, 24 px higher).
+        const bool onGrid = k <= kMaxWrapLines && (off < 0 ? -off : off) <= kGridSlackPx;
+        if (onGrid || ad <= s.lineH) {
             top = bottom - s.lineH;                            // on the line grid: the caret is the bottom line
             s.lineBottom = bottom;
             return;

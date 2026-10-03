@@ -107,3 +107,4 @@ a wrap); any other tall rect (a bigger font) is learned as the new line. Chromiu
 the same (1927,1669 h44 then 1945,1558 h155), so UIA and Win32 carets are both trimmed; Java carets
 (bridge) are not. `trackLog=1` logs each trim.
 
+Enter on the last visible line reports the new line before the page scrolls it up a few pixels (field: line 1989-2033, then the tall typing rect ends at 2009), so a tall rect whose bottom is within one line of the known line is also trimmed.

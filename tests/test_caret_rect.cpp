@@ -30,6 +30,17 @@ TEST_CASE("caret rect: a tall rect whose bottom moved whole lines (a wrap) is tr
     CHECK(s.lineBottom == 1088);
 }
 
+TEST_CASE("caret rect: Enter on the last visible line, then the page scrolls a little (#337, field 2026-10-03)") {
+    CaretLineState s;
+    int top = 1961; TrimTallCaret(top, 2005, s);   // a line near the bottom of the page
+    top = 1989; TrimTallCaret(top, 2033, s);       // Enter: the new line reported before the scroll
+    top = 1825; TrimTallCaret(top, 2009, s);       // typing after the scroll: tall rect, bottom 24 px higher
+    CHECK(top == 2009 - 44);
+    CHECK(s.lineH == 44);
+    top = 1825; TrimTallCaret(top, 2009, s);       // more typing on that line
+    CHECK(top == 1965);
+}
+
 TEST_CASE("caret rect: a genuinely bigger font off the line grid is learned, not trimmed") {
     CaretLineState s;
     int top = 100; TrimTallCaret(top, 120, s);     // 20 px body text
