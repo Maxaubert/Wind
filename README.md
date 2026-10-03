@@ -10,7 +10,7 @@
   [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square)](https://github.com/Maxaubert/Wind)
   [![Built with](https://img.shields.io/badge/C%2B%2B-Direct3D%2011-00599C?style=flat-square)](https://github.com/Maxaubert/Wind)
 
-  [Download](https://github.com/Maxaubert/Wind/releases) · [Documentation](docs/architecture/README.md)
+  [Download](https://github.com/Maxaubert/Wind/releases/latest/download/Wind-Setup-x64.exe) · [Documentation](docs/architecture/README.md)
 </div>
 
 ---
@@ -108,8 +108,9 @@ Shift or AltGr (Ctrl+Alt) plus a typing key, and combos Windows reserves (Alt+F4
 - **Ctrl+Alt+Q** - quit from anywhere (also restores the cursor); or use the tray icon.
 
 ## Releases
-Download `Wind-Setup-x64-<version>.exe` from the
-[Releases page](https://github.com/Maxaubert/Wind/releases) and run it.
+[Download the latest installer](https://github.com/Maxaubert/Wind/releases/latest/download/Wind-Setup-x64.exe)
+(always the newest release) and run it. Release notes and older versions are on the
+[Releases page](https://github.com/Maxaubert/Wind/releases).
 
 Setup installs **per-machine** to `C:\Program Files\Wind` and asks for administrator rights.
 That location is not a preference: Windows only grants UIAccess to a signed binary in a
