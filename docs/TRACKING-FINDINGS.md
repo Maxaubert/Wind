@@ -93,3 +93,13 @@ highlighted option through UIA, so Wind follows only the terminal caret there.
   it itself when it detects the bridge).
 - A window Windows reports as not responding (`IsHungAppWindow`) is skipped, so a hung Java app cannot
   stall tracking for other apps.
+
+## Chromium web editors: tall caret rects (issue #337, 2026-10-03)
+
+Outlook on the web (Chromium) reports its UIA selection caret as one line right after Enter
+(`1927,1159 h44`), but from the first typed character as a rect that also covers the blank lines
+above it (`1947,1136 h111`). The BOTTOM stays on the real caret line; only the top climbs. Centring
+on that rect left the caret below centre by half the extra height times the zoom, more with every
+blank line ("the text moves further and further down; Enter re-centres it"). `src/caret_rect.h`
+learns the one-line height per focus and trims a rect taller than 1.4 lines to one line at its
+bottom; `trackLog=1` logs each trim. Win32 and Java carets are not touched.

@@ -1,6 +1,7 @@
 #include "focus_track.h"
 #include "logging.h"
 #include "track_filter.h"
+#include "caret_rect.h"   // trim tall UIA caret rects (#337)
 #include "java_bridge.h"
 #include "java_bridge_util.h"
 #include <windows.h>
@@ -216,6 +217,7 @@ void FocusTracker::run() {
     // the 60 Hz backstop poll cannot publish the new field's caret in the 30 ms before that.
     unsigned focusGen = 0, caretGen = ~0u;
     RECT lastCaret{};
+    wind::CaretLineState caretLine;   // one-line caret height in the current focus (#337)
 
     // Java apps (issue #281): the bridge is asked only when something may have moved (a bridge caret
     // or focus callback, or any tracker wake), never by the 60 Hz poll, which reuses the last answer.
@@ -303,6 +305,17 @@ void FocusTracker::run() {
             RECT rc{}; const char* src = "";
             const bool found = java ? (javaHave ? (rc = javaCaret, src = "java", true) : false) : findCaret(el, rc, src);
             if (found) {
+                // #337: a UIA caret rect that also spans blank lines above (Chromium web editors) is
+                // trimmed to one line at its bottom, the real caret line. The line height is per focus.
+                if (caretGen != focusGen) caretLine = wind::CaretLineState{};
+                if (src[0] == 'u') {
+                    const LONG rawTop = rc.top;
+                    int top = (int)rc.top;
+                    wind::TrimTallCaret(top, (int)rc.bottom, caretLine);
+                    rc.top = top;
+                    if (rc.top != rawTop && log_.load())
+                        wind::Log(wind::LogLevel::Info, "track", "caret trimmed (tall %ld px rect) to %ld px line", rc.bottom - rawTop, rc.bottom - rc.top);
+                }
                 if (caretGen != focusGen) {
                     caretGen = focusGen; lastCaret = rc;                       // baseline, not followed
                     if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "caret baseline via %s: %ld,%ld", src, rc.left, rc.top);
