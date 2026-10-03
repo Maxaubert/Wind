@@ -93,3 +93,19 @@ TEST_CASE("caret rect: nothing is trimmed before a line height is known, or afte
     CHECK(top == 10);
     CHECK(s.lineH == 0);
 }
+
+TEST_CASE("caret rect: a whole-line caret (VS Code) is recognised and its x pinned to the pointer (#341)") {
+    CHECK(IsLineWideCaret(263, 1752, 3593, 1796));        // field: 263,1752 3330x44
+    CHECK_FALSE(IsLineWideCaret(1927, 1159, 1929, 1203)); // a normal 2 px caret
+    CHECK_FALSE(IsLineWideCaret(100, 100, 120, 100));     // degenerate height
+    int l = 263, r = 3593;
+    PinWideCaretX(l, r, 1500);                            // pointer inside the line: x follows it
+    CHECK(l == 1500);
+    CHECK(r == 1502);
+    l = 263; r = 3593;
+    PinWideCaretX(l, r, 40);                              // pointer left of the line: clamped to its start
+    CHECK(l == 263);
+    l = 263; r = 3593;
+    PinWideCaretX(l, r, 3800);                            // right of it: clamped to its end
+    CHECK(l == 3593);
+}

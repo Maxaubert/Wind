@@ -111,6 +111,26 @@ static bool Win32Caret(RECT& out) {
     return true;
 }
 
+// The caret as the left edge of the character it sits on: the range widened by one character.
+static bool CharRect(IUIAutomationTextRange* range, RECT& out) {
+    bool ok = false;
+    IUIAutomationTextRange* wide = nullptr;
+    if (SUCCEEDED(range->Clone(&wide)) && wide) {
+        SAFEARRAY* sa = nullptr;
+        double* d = nullptr;
+        if (SUCCEEDED(wide->ExpandToEnclosingUnit(TextUnit_Character)) &&
+            SUCCEEDED(wide->GetBoundingRectangles(&sa)) && sa && sa->rgsabound[0].cElements >= 4 &&
+            SUCCEEDED(SafeArrayAccessData(sa, (void**)&d))) {
+            out = { (LONG)d[0], (LONG)d[1], (LONG)d[0] + 2, (LONG)(d[1] + d[3]) };
+            ok = d[3] > 0 && d[2] < d[3] * wind::kWideCaretRatio;   // a character, not the whole line again
+            SafeArrayUnaccessData(sa);
+        }
+        if (sa) SafeArrayDestroy(sa);
+        wide->Release();
+    }
+    return ok;
+}
+
 static bool RangeRect(IUIAutomationTextRange* range, RECT& out) {
     SAFEARRAY* sa = nullptr;
     if (FAILED(range->GetBoundingRectangles(&sa)) || !sa) return false;
@@ -121,23 +141,17 @@ static bool RangeRect(IUIAutomationTextRange* range, RECT& out) {
         out = { (LONG)d[0], (LONG)d[1], (LONG)(d[0] + (d[2] > 1 ? d[2] : 1)), (LONG)(d[1] + d[3]) };
         ok = d[3] > 0;
         SafeArrayUnaccessData(sa);
+        // #341: VS Code (Electron) reports the caret as the whole line (263,1752 3330x44). The character
+        // at the caret, when the editor exposes it, gives the real x.
+        RECT ch{};
+        if (ok && wind::IsLineWideCaret(out.left, out.top, out.right, out.bottom) && CharRect(range, ch)) out = ch;
     } else if (n == 0) {
         // An empty caret range has no rectangle: widen it by one character, then use its left edge.
-        // The zero-element array is still a real SAFEARRAY allocation; destroy it before sa is
-        // reassigned below, or it leaks on every blinking-caret resolve.
+        // The zero-element array is still a real SAFEARRAY allocation; destroy it here, or it leaks on
+        // every blinking-caret resolve.
         SafeArrayDestroy(sa);
         sa = nullptr;
-        IUIAutomationTextRange* wide = nullptr;
-        if (SUCCEEDED(range->Clone(&wide)) && wide) {
-            if (SUCCEEDED(wide->ExpandToEnclosingUnit(TextUnit_Character)) &&
-                SUCCEEDED(wide->GetBoundingRectangles(&sa)) && sa && sa->rgsabound[0].cElements >= 4 &&
-                SUCCEEDED(SafeArrayAccessData(sa, (void**)&d))) {
-                out = { (LONG)d[0], (LONG)d[1], (LONG)d[0] + 2, (LONG)(d[1] + d[3]) };
-                ok = d[3] > 0;
-                SafeArrayUnaccessData(sa);
-            }
-            wide->Release();
-        }
+        ok = CharRect(range, out);
     }
     if (sa) SafeArrayDestroy(sa);
     return ok;
@@ -310,6 +324,17 @@ void FocusTracker::run() {
                 // UIA and Win32 carets) is trimmed to one line at its bottom, the real caret line. The
                 // line height is per focus; Java carets come from the bridge and are left alone.
                 if (caretGen != focusGen) { caretLine = wind::CaretLineState{}; caretHold = wind::CaretHoldState{}; }
+                if (!java && wind::IsLineWideCaret(rc.left, rc.top, rc.right, rc.bottom)) {
+                    // #341: still the whole line (no character rect either): follow the line only, and
+                    // keep x where the pointer already is instead of the line's middle.
+                    POINT pt{};
+                    if (GetCursorPos(&pt)) {
+                        if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "caret is a whole line (%ld px wide): x kept at the pointer", rc.right - rc.left);
+                        int l = (int)rc.left, r = (int)rc.right;
+                        wind::PinWideCaretX(l, r, (int)pt.x);
+                        rc.left = l; rc.right = r;
+                    }
+                }
                 if (!java) {
                     const LONG rawTop = rc.top;
                     int top = (int)rc.top;
