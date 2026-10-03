@@ -87,8 +87,13 @@ rem --- Config UI host (WindConfig.exe). Builds the Svelte UI first if it exists
 :config
 if exist "%ROOT%ui\package.json" (
   pushd "%ROOT%ui"
-  if not exist node_modules ( call npm install || (popd & echo [build] npm install failed & exit /b 1) )
-  call npm run build || (popd & echo [build] ui build failed & exit /b 1)
+  rem Explicit errorlevel checks: "call npm ... || (...)" does not reliably see npm.cmd's exit code,
+  rem and a failed UI build once shipped a stale ui\dist (#347).
+  if not exist node_modules call npm install
+  if errorlevel 1 (popd & echo [build] npm install failed & exit /b 1)
+  call npm run build
+  if errorlevel 1 (popd & echo [build] ui build failed & exit /b 1)
+  if not exist dist\index.html (popd & echo [build] ui build produced no dist\index.html & exit /b 1)
   popd
 )
 rem Same app-icon resource as Wind.exe (rc.exe ships with the Windows SDK, on PATH via vcvars).
