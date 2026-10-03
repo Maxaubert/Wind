@@ -71,6 +71,7 @@ static void EnsureCompositePulse() {
 #include "cursor_lock.h"
 #include "inspect_focus.h"
 #include "launch_quiesce.h"
+#include "sched_priority.h"   // tick thread priority + no power throttling (#334)
 #include "resource.h"
 
 using namespace wind;
@@ -3178,6 +3179,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     ts.mapper.setTickRate(ts.hz);
     int pacedHz = ts.hz;                              // hz the timer interval below is computed for
     LARGE_INTEGER due; due.QuadPart = -(10000000LL / pacedHz);
+
+    // Background CPU load must not stall a zoom (#334): this thread runs the tick loop.
+    wind::RaiseTickThreadPriority();
+    wind::OptOutOfPowerThrottling();
 
     bool running = true;
     unsigned long long nextRecoverMs = 0;   // device-lost recovery backoff gate (GetTickCount64)
