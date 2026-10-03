@@ -218,6 +218,7 @@ void FocusTracker::run() {
     unsigned focusGen = 0, caretGen = ~0u;
     RECT lastCaret{};
     wind::CaretLineState caretLine;   // one-line caret height in the current focus (#337)
+    wind::CaretHoldState caretHold;   // last caret line, for mid-scroll Enter reports (#337)
 
     // Java apps (issue #281): the bridge is asked only when something may have moved (a bridge caret
     // or focus callback, or any tracker wake), never by the 60 Hz poll, which reuses the last answer.
@@ -308,7 +309,7 @@ void FocusTracker::run() {
                 // #337: a caret rect that also spans blank lines above (Chromium web editors, both its
                 // UIA and Win32 carets) is trimmed to one line at its bottom, the real caret line. The
                 // line height is per focus; Java carets come from the bridge and are left alone.
-                if (caretGen != focusGen) caretLine = wind::CaretLineState{};
+                if (caretGen != focusGen) { caretLine = wind::CaretLineState{}; caretHold = wind::CaretHoldState{}; }
                 if (!java) {
                     const LONG rawTop = rc.top;
                     int top = (int)rc.top;
@@ -316,6 +317,12 @@ void FocusTracker::run() {
                     rc.top = top;
                     if (rc.top != rawTop && log_.load())
                         wind::Log(wind::LogLevel::Info, "track", "caret trimmed (tall %ld px rect) to %ld px line", rc.bottom - rawTop, rc.bottom - rc.top);
+                    // A new line reported part-way through the page's scroll stays on the current line.
+                    int bot = (int)rc.bottom; top = (int)rc.top;
+                    wind::HoldMidScrollCaret((int)rc.left, top, bot, caretLine.lineH, caretHold);
+                    if ((top != rc.top || bot != rc.bottom) && log_.load())
+                        wind::Log(wind::LogLevel::Info, "track", "caret held on its line (mid-scroll report %ld-%ld)", rc.top, rc.bottom);
+                    rc.top = top; rc.bottom = bot;
                 }
                 if (caretGen != focusGen) {
                     caretGen = focusGen; lastCaret = rc;                       // baseline, not followed

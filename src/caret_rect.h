@@ -46,4 +46,29 @@ inline void TrimTallCaret(int& top, int bottom, CaretLineState& s) {
     s.lineBottom = bottom;
 }
 
+// Mid-scroll Enter (#337, field 2026-10-03): Enter on the last visible line reports the new line part-way
+// through the page's scroll (line 1965-2009, then the new line at 1989-2033: half a line lower), and the
+// page settles it exactly where the old line was without reporting the caret again until the next key.
+// Following that half-line report dipped the view and slid it back on every Enter. A caret that moved back
+// to the left (a new line) by a fraction of a line (not a whole line) is held on the current line.
+struct CaretHoldState {
+    bool have = false;
+    int left = 0, top = 0, bottom = 0;   // the last caret published
+};
+
+inline constexpr double kHoldMinFrac = 0.2;   // a fraction of a line: more than jitter...
+inline constexpr double kHoldMaxFrac = 0.8;   // ...and less than a real new line
+
+// lineH: the current one-line height (0 = unknown, nothing is held). Adjusts top/bottom in place.
+inline void HoldMidScrollCaret(int left, int& top, int& bottom, int lineH, CaretHoldState& s) {
+    if (s.have && lineH > 0 && left < s.left && bottom - top <= lineH * 1.4) {
+        const int dy = bottom - s.bottom;
+        const int ady = dy < 0 ? -dy : dy;
+        if (ady > lineH * kHoldMinFrac && ady < lineH * kHoldMaxFrac) {
+            top = s.top; bottom = s.bottom;                       // part-way through a scroll: stay on the line
+        }
+    }
+    s.have = true; s.left = left; s.top = top; s.bottom = bottom;
+}
+
 }  // namespace wind

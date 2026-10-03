@@ -41,6 +41,28 @@ TEST_CASE("caret rect: Enter on the last visible line, then the page scrolls a l
     CHECK(top == 1965);
 }
 
+TEST_CASE("caret hold: Enter on the last visible line reported mid-scroll is held on the line (#337, field 2026-10-03)") {
+    CaretHoldState h;
+    int t = 1965, b = 2009; HoldMidScrollCaret(2394, t, b, 44, h);   // typing at the end of the line
+    t = 1989; b = 2033; HoldMidScrollCaret(1927, t, b, 44, h);       // Enter: new line reported half a line lower
+    CHECK(t == 1965);
+    CHECK(b == 2009);
+    t = 1965; b = 2009; HoldMidScrollCaret(1946, t, b, 44, h);       // typing after the scroll settled
+    CHECK(t == 1965);
+}
+
+TEST_CASE("caret hold: a real Enter (a whole line down) and same-line moves are never held") {
+    CaretHoldState h;
+    int t = 1159, b = 1203; HoldMidScrollCaret(2200, t, b, 44, h);
+    t = 1203; b = 1247; HoldMidScrollCaret(1927, t, b, 44, h);       // a whole line down
+    CHECK(t == 1203);
+    t = 1214; b = 1258; HoldMidScrollCaret(1990, t, b, 44, h);       // moved right: not a new line, not held
+    CHECK(t == 1214);
+    CaretHoldState fresh;
+    t = 10; b = 54; HoldMidScrollCaret(5, t, b, 0, fresh);           // unknown line height: nothing held
+    CHECK(t == 10);
+}
+
 TEST_CASE("caret rect: a genuinely bigger font off the line grid is learned, not trimmed") {
     CaretLineState s;
     int top = 100; TrimTallCaret(top, 120, s);     // 20 px body text
