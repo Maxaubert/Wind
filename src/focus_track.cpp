@@ -111,6 +111,25 @@ static bool Win32Caret(RECT& out) {
     return true;
 }
 
+// The MSAA system caret object (OBJID_CARET) of the focused window: Chromium/Electron maintain it for
+// screen magnifiers even where their UIA caret is only a line (#341). Rejected when empty or line-wide.
+static bool MsaaCaret(RECT& out) {
+    HWND fg = GetForegroundWindow();
+    if (!fg || IsOwnOrTooltip(fg)) return false;
+    GUITHREADINFO gi{ sizeof(gi) };
+    HWND h = fg;
+    if (GetGUIThreadInfo(GetWindowThreadProcessId(fg, nullptr), &gi) && gi.hwndFocus) h = gi.hwndFocus;
+    IAccessible* acc = nullptr;
+    if (FAILED(AccessibleObjectFromWindow(h, (DWORD)OBJID_CARET, IID_IAccessible, (void**)&acc)) || !acc) return false;
+    VARIANT self; VariantInit(&self); self.vt = VT_I4; self.lVal = CHILDID_SELF;
+    long x = 0, y = 0, w = 0, hh = 0;
+    const bool got = SUCCEEDED(acc->accLocation(&x, &y, &w, &hh, self));
+    acc->Release();
+    if (!got || hh <= 0 || (x == 0 && y == 0)) return false;
+    out = { x, y, x + (w > 1 ? w : 2), y + hh };
+    return !wind::IsLineWideCaret(out.left, out.top, out.right, out.bottom);
+}
+
 // The caret as the left edge of the character it sits on: the range widened by one character.
 static bool CharRect(IUIAutomationTextRange* range, RECT& out) {
     bool ok = false;
@@ -274,6 +293,18 @@ void FocusTracker::run() {
             }
             tp->Release();
         }
+        // #341: a UIA caret that is still the whole line (VS Code / Electron: 263,1752 3330x44, and a
+        // 3330x3 strip) says nothing about where the caret is. Chromium keeps a system caret object for
+        // screen magnifiers (OBJID_CARET); use it, or report no caret rather than a guess.
+        if (ok && wind::IsLineWideCaret(rc.left, rc.top, rc.right, rc.bottom)) {
+            RECT m{};
+            if (MsaaCaret(m)) { rc = m; src = "msaa-caret"; }
+            else {
+                if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "caret ignored (whole line %ldx%ld, no system caret)",
+                                           rc.right - rc.left, rc.bottom - rc.top);
+                ok = false;
+            }
+        }
         return ok;
     };
 
@@ -324,17 +355,6 @@ void FocusTracker::run() {
                 // UIA and Win32 carets) is trimmed to one line at its bottom, the real caret line. The
                 // line height is per focus; Java carets come from the bridge and are left alone.
                 if (caretGen != focusGen) { caretLine = wind::CaretLineState{}; caretHold = wind::CaretHoldState{}; }
-                if (!java && wind::IsLineWideCaret(rc.left, rc.top, rc.right, rc.bottom)) {
-                    // #341: still the whole line (no character rect either): follow the line only, and
-                    // keep x where the pointer already is instead of the line's middle.
-                    POINT pt{};
-                    if (GetCursorPos(&pt)) {
-                        if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "caret is a whole line (%ld px wide): x kept at the pointer", rc.right - rc.left);
-                        int l = (int)rc.left, r = (int)rc.right;
-                        wind::PinWideCaretX(l, r, (int)pt.x);
-                        rc.left = l; rc.right = r;
-                    }
-                }
                 if (!java) {
                     const LONG rawTop = rc.top;
                     int top = (int)rc.top;

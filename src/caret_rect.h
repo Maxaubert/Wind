@@ -55,13 +55,6 @@ inline bool IsLineWideCaret(int left, int top, int right, int bottom) {
     return h > 0 && w > h * kWideCaretRatio;
 }
 
-// No caret x is known: follow the line only, and keep x where the pointer (the view) already is, clamped
-// into the line, instead of the line's middle (which put the view nowhere near the caret on a paste).
-inline void PinWideCaretX(int& left, int& right, int pointerX) {
-    int x = pointerX < left ? left : (pointerX > right ? right : pointerX);
-    left = x; right = x + 2;
-}
-
 // Mid-scroll Enter (#337, field 2026-10-03): Enter on the last visible line reports the new line part-way
 // through the page's scroll (line 1965-2009, then the new line at 1989-2033: half a line lower), and the
 // page settles it exactly where the old line was without reporting the caret again until the next key.
