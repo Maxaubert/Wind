@@ -109,3 +109,7 @@ the same (1927,1669 h44 then 1945,1558 h155), so UIA and Win32 carets are both t
 
 Enter on the last visible line reports the new line before the page scrolls it up a few pixels (field: line 1989-2033, then the tall typing rect ends at 2009), so a tall rect whose bottom is within one line of the known line is also trimmed.
 That Enter at the bottom also reports the NEW line part-way through the scroll (old line 1965-2009, new line 1989-2033: half a line lower), and the page settles it where the old line was without another caret report until the next key, so the view dipped and slid back on every Enter. A caret that moves back left by a fraction of a line (0.2-0.8) is held on the current line (HoldMidScrollCaret; logged as caret held).
+
+## VS Code / Electron: the caret reported as the whole line (issue #341, 2026-10-03)
+
+VS Code's UIA selection caret is the whole editor line (`263,1752 3330x44`), and sometimes a 3330x3 strip at the top of the window: no caret x, so typing never moved the view and a paste or select-all centred it on the middle of a line. A first attempt pinned x to the pointer; that published the pointer as the caret on every mouse move (worse, field-rejected). Now a UIA caret wider than 6x its height is replaced by the character at the caret (`ExpandToEnclosingUnit(Character)`) or, failing that, by the MSAA system caret object (`OBJID_CARET`, which Chromium keeps for screen magnifiers; logged as `via msaa-caret`); with neither, the caret is ignored (logged as `caret ignored`), never guessed.

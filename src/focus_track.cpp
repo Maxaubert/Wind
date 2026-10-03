@@ -111,6 +111,45 @@ static bool Win32Caret(RECT& out) {
     return true;
 }
 
+// The MSAA system caret object (OBJID_CARET) of the focused window: Chromium/Electron maintain it for
+// screen magnifiers even where their UIA caret is only a line (#341). Rejected when empty or line-wide.
+static bool MsaaCaret(RECT& out) {
+    HWND fg = GetForegroundWindow();
+    if (!fg || IsOwnOrTooltip(fg)) return false;
+    GUITHREADINFO gi{ sizeof(gi) };
+    HWND h = fg;
+    if (GetGUIThreadInfo(GetWindowThreadProcessId(fg, nullptr), &gi) && gi.hwndFocus) h = gi.hwndFocus;
+    IAccessible* acc = nullptr;
+    if (FAILED(AccessibleObjectFromWindow(h, (DWORD)OBJID_CARET, IID_IAccessible, (void**)&acc)) || !acc) return false;
+    VARIANT self; VariantInit(&self); self.vt = VT_I4; self.lVal = CHILDID_SELF;
+    long x = 0, y = 0, w = 0, hh = 0;
+    const bool got = SUCCEEDED(acc->accLocation(&x, &y, &w, &hh, self));
+    acc->Release();
+    if (!got || hh <= 0 || (x == 0 && y == 0)) return false;
+    out = { x, y, x + (w > 1 ? w : 2), y + hh };
+    return !wind::IsLineWideCaret(out.left, out.top, out.right, out.bottom);
+}
+
+// The caret as the left edge of the character it sits on: the range widened by one character.
+static bool CharRect(IUIAutomationTextRange* range, RECT& out) {
+    bool ok = false;
+    IUIAutomationTextRange* wide = nullptr;
+    if (SUCCEEDED(range->Clone(&wide)) && wide) {
+        SAFEARRAY* sa = nullptr;
+        double* d = nullptr;
+        if (SUCCEEDED(wide->ExpandToEnclosingUnit(TextUnit_Character)) &&
+            SUCCEEDED(wide->GetBoundingRectangles(&sa)) && sa && sa->rgsabound[0].cElements >= 4 &&
+            SUCCEEDED(SafeArrayAccessData(sa, (void**)&d))) {
+            out = { (LONG)d[0], (LONG)d[1], (LONG)d[0] + 2, (LONG)(d[1] + d[3]) };
+            ok = d[3] > 0 && d[2] < d[3] * wind::kWideCaretRatio;   // a character, not the whole line again
+            SafeArrayUnaccessData(sa);
+        }
+        if (sa) SafeArrayDestroy(sa);
+        wide->Release();
+    }
+    return ok;
+}
+
 static bool RangeRect(IUIAutomationTextRange* range, RECT& out) {
     SAFEARRAY* sa = nullptr;
     if (FAILED(range->GetBoundingRectangles(&sa)) || !sa) return false;
@@ -121,23 +160,17 @@ static bool RangeRect(IUIAutomationTextRange* range, RECT& out) {
         out = { (LONG)d[0], (LONG)d[1], (LONG)(d[0] + (d[2] > 1 ? d[2] : 1)), (LONG)(d[1] + d[3]) };
         ok = d[3] > 0;
         SafeArrayUnaccessData(sa);
+        // #341: VS Code (Electron) reports the caret as the whole line (263,1752 3330x44). The character
+        // at the caret, when the editor exposes it, gives the real x.
+        RECT ch{};
+        if (ok && wind::IsLineWideCaret(out.left, out.top, out.right, out.bottom) && CharRect(range, ch)) out = ch;
     } else if (n == 0) {
         // An empty caret range has no rectangle: widen it by one character, then use its left edge.
-        // The zero-element array is still a real SAFEARRAY allocation; destroy it before sa is
-        // reassigned below, or it leaks on every blinking-caret resolve.
+        // The zero-element array is still a real SAFEARRAY allocation; destroy it here, or it leaks on
+        // every blinking-caret resolve.
         SafeArrayDestroy(sa);
         sa = nullptr;
-        IUIAutomationTextRange* wide = nullptr;
-        if (SUCCEEDED(range->Clone(&wide)) && wide) {
-            if (SUCCEEDED(wide->ExpandToEnclosingUnit(TextUnit_Character)) &&
-                SUCCEEDED(wide->GetBoundingRectangles(&sa)) && sa && sa->rgsabound[0].cElements >= 4 &&
-                SUCCEEDED(SafeArrayAccessData(sa, (void**)&d))) {
-                out = { (LONG)d[0], (LONG)d[1], (LONG)d[0] + 2, (LONG)(d[1] + d[3]) };
-                ok = d[3] > 0;
-                SafeArrayUnaccessData(sa);
-            }
-            wide->Release();
-        }
+        ok = CharRect(range, out);
     }
     if (sa) SafeArrayDestroy(sa);
     return ok;
@@ -259,6 +292,18 @@ void FocusTracker::run() {
                 sel->Release();
             }
             tp->Release();
+        }
+        // #341: a UIA caret that is still the whole line (VS Code / Electron: 263,1752 3330x44, and a
+        // 3330x3 strip) says nothing about where the caret is. Chromium keeps a system caret object for
+        // screen magnifiers (OBJID_CARET); use it, or report no caret rather than a guess.
+        if (ok && wind::IsLineWideCaret(rc.left, rc.top, rc.right, rc.bottom)) {
+            RECT m{};
+            if (MsaaCaret(m)) { rc = m; src = "msaa-caret"; }
+            else {
+                if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "caret ignored (whole line %ldx%ld, no system caret)",
+                                           rc.right - rc.left, rc.bottom - rc.top);
+                ok = false;
+            }
         }
         return ok;
     };

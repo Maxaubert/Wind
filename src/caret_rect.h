@@ -46,6 +46,15 @@ inline void TrimTallCaret(int& top, int bottom, CaretLineState& s) {
     s.lineBottom = bottom;
 }
 
+// A caret reported as the whole line (#341, VS Code / Electron, field 2026-10-03): `263,1752 3330x44`.
+// Its height is the real line, but its x says nothing about the caret.
+inline constexpr int kWideCaretRatio = 6;   // wider than this many times its height = a line, not a caret
+
+inline bool IsLineWideCaret(int left, int top, int right, int bottom) {
+    const int w = right - left, h = bottom - top;
+    return h > 0 && w > h * kWideCaretRatio;
+}
+
 // Mid-scroll Enter (#337, field 2026-10-03): Enter on the last visible line reports the new line part-way
 // through the page's scroll (line 1965-2009, then the new line at 1989-2033: half a line lower), and the
 // page settles it exactly where the old line was without reporting the caret again until the next key.
