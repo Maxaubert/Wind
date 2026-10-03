@@ -26,7 +26,7 @@ export const TOGGLES = [
 ];
 export const KINDS = {
   sliders: { items: SLIDERS, enabledKey: 'traySliders', orderKey: 'traySliderOrder', defaultOn: ['colorWarmPct', 'colorDimPct'], cap: MAX_SLIDERS },
-  toggles: { items: TOGGLES, enabledKey: 'trayToggles', orderKey: 'trayToggleOrder', defaultOn: [], cap: 0 },
+  toggles: { items: TOGGLES, enabledKey: 'trayToggles', orderKey: 'trayToggleOrder', defaultOn: ['trackCaret', 'trackFocus', 'keepEdges', 'engine'], cap: 0 },   // all on by default (#329)
 };
 export const TRAY_KEYS = ['trayPerf', 'traySliders', 'traySliderOrder', 'trayToggles', 'trayToggleOrder'];
 
@@ -56,7 +56,7 @@ export function parseList(values, kind) {
 
 export function parseTray(values) {
   return {
-    perf: String(values.trayPerf ?? '').trim() === '1',
+    perf: values.trayPerf === undefined || values.trayPerf === null || String(values.trayPerf).trim() === '1',   // on by default (#329)
     sliders: parseList(values, 'sliders'),
     toggles: parseList(values, 'toggles'),
   };

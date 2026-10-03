@@ -36,13 +36,16 @@ const chk = (page, list, name) => rowsOf(page, list).filter({ hasText: name }).l
 
 // ---- the pure model ----------------------------------------------------------------------------
 
-test('model: defaults are Warmth and Brightness on, everything else off, performance off', () => {
+test('model: defaults are performance on, Warmth and Brightness, and every toggle on (#329)', () => {
   const t = parseTray({});
-  expect(t.perf).toBe(false);
+  expect(t.perf).toBe(true);
   expect(t.sliders.map((i) => i.key)).toEqual(SLIDERS.map((i) => i.key));
   expect(t.sliders.filter((i) => i.on).map((i) => i.key)).toEqual(['colorWarmPct', 'colorDimPct']);
   expect(t.toggles.map((i) => i.key)).toEqual(['trackCaret', 'trackFocus', 'keepEdges', 'engine']);
-  expect(t.toggles.some((i) => i.on)).toBe(false);
+  expect(t.toggles.every((i) => i.on)).toBe(true);
+  const off = parseTray({ trayPerf: '0', trayToggles: '' });   // explicit choices still win
+  expect(off.perf).toBe(false);
+  expect(off.toggles.some((i) => i.on)).toBe(false);
 });
 
 test('model: round trip keeps order and enabled, drops unknown keys, appends missing items off', () => {
@@ -80,13 +83,13 @@ test('tab: below the sidebar divider, banner, performance card and both lists', 
   await page.locator('.side .it[data-g="tray"]').click();
   await expect(page.locator('h1')).toHaveText('Tray menu');
   await expect(page.locator('.bdesc')).toHaveText('Choose what the tray menu shows, and in what order.');
-  await expect(page.getByRole('switch', { name: 'Performance in the tray' })).not.toBeChecked();
+  await expect(page.getByRole('switch', { name: 'Performance in the tray' })).toBeChecked();   // on by default (#329)
   await expect(page.locator('#cap-sliders')).toHaveText('Sliders');
   await expect(page.locator('#cap-toggles')).toHaveText('Toggles');
   expect(await names(page, 'sliders')).toEqual(['Warmth', 'Brightness', 'Max zoom', 'Zoom-in speed', 'Zoom-out speed', 'Arrow key speed', 'Pan smoothing', 'Release glide']);
   expect(await names(page, 'toggles')).toEqual(['Follow the text cursor', 'Follow keyboard focus', 'Keep cursor centred', 'Engine']);
   await expect(page.locator('[data-cnt="sliders"]')).toHaveText('2 of 4');
-  await expect(page.locator('[data-cnt="toggles"]')).toHaveText('0 on');
+  await expect(page.locator('[data-cnt="toggles"]')).toHaveText('4 on');   // every toggle on by default (#329)
   await expect(chk(page, 'sliders', 'Warmth')).toHaveAttribute('aria-checked', 'true');
   await expect(chk(page, 'sliders', 'Max zoom')).toHaveAttribute('aria-checked', 'false');
 });
@@ -102,10 +105,11 @@ test('tab: item icons are bare line icons without a background box', async ({ pa
 
 test('performance switch writes trayPerf', async ({ page }) => {
   await open(page);
-  await page.getByRole('switch', { name: 'Performance in the tray' }).check({ force: true });
-  expect((await live(page)).trayPerf).toBe('1');
+  // On by default (#329): turning it off writes 0, back on writes 1.
   await page.getByRole('switch', { name: 'Performance in the tray' }).uncheck({ force: true });
   expect((await live(page)).trayPerf).toBe('0');
+  await page.getByRole('switch', { name: 'Performance in the tray' }).check({ force: true });
+  expect((await live(page)).trayPerf).toBe('1');
 });
 
 test('check and uncheck write the enabled list and the full order', async ({ page }) => {
@@ -119,11 +123,11 @@ test('check and uncheck write the enabled list and the full order', async ({ pag
   v = await live(page);
   expect(v.traySliders).toBe('colorDimPct,panSpeed');
   // a click anywhere on the row toggles it too
-  await rowsOf(page, 'toggles').filter({ hasText: 'Follow keyboard focus' }).locator('.k').click();
+  await rowsOf(page, 'toggles').filter({ hasText: 'Follow keyboard focus' }).locator('.k').click();   // on by default: turns it off
   v = await live(page);
-  expect(v.trayToggles).toBe('trackFocus');
+  expect(v.trayToggles).toBe('trackCaret,keepEdges,engine');
   expect(v.trayToggleOrder).toBe('trackCaret,trackFocus,keepEdges,engine');
-  await expect(page.locator('[data-cnt="toggles"]')).toHaveText('1 on');
+  await expect(page.locator('[data-cnt="toggles"]')).toHaveText('3 on');
 });
 
 test('slider cap: at four the unchecked boxes are disabled with a note, unchecking frees them', async ({ page }) => {
@@ -138,8 +142,10 @@ test('slider cap: at four the unchecked boxes are disabled with a note, unchecki
   await rowsOf(page, 'sliders').filter({ hasText: 'Zoom-in speed' }).locator('.k').click();   // row click is refused too
   expect((await live(page)).traySliders).toBe(before);
   // toggles are not capped
-  for (const n of ['Follow the text cursor', 'Follow keyboard focus', 'Keep cursor centred']) await chk(page, 'toggles', n).click();
-  await expect(page.locator('[data-cnt="toggles"]')).toHaveText('3 on');
+  for (const n of ['Follow the text cursor', 'Follow keyboard focus', 'Keep cursor centred']) await chk(page, 'toggles', n).click();   // all on by default: three off
+  await expect(page.locator('[data-cnt="toggles"]')).toHaveText('1 on');
+  for (const n of ['Follow the text cursor', 'Follow keyboard focus', 'Keep cursor centred']) await chk(page, 'toggles', n).click();   // and back on: no cap
+  await expect(page.locator('[data-cnt="toggles"]')).toHaveText('4 on');
   await chk(page, 'sliders', 'Warmth').click();
   await expect(page.locator('[data-cnt="sliders"]')).toHaveText('3 of 4');
   await expect(chk(page, 'sliders', 'Zoom-in speed')).toBeEnabled();
@@ -230,24 +236,24 @@ test('the saved lists load back from the ini', async ({ page }) => {
   await expect(chk(page, 'toggles', 'Keep cursor centred')).toHaveAttribute('aria-checked', 'true');
 });
 
-test('search finds the Performance row and jumps to the tray tab', async ({ page }) => {
+test('search finds the Performance row and edits it in the results (#317)', async ({ page }) => {
   await page.goto('/');
   await page.locator('.side .search input').fill('performance');
-  await page.locator('.side .search input').press('Enter');
-  await expect(page.locator('h1')).toHaveText('Tray menu');
+  await expect(page.locator('.res .hit[data-hit="trayPerf"]')).toBeVisible();
+  await expect(page.locator('.res .hit[data-hit="trayPerf"] .tab')).toHaveText('Tray menu');
 });
 
-test('engine: the Engine item is off by default, has an icon and a description, and writes trayToggles', async ({ page }) => {
+test('engine: the Engine item is on by default (#329), has an icon and a description, and writes trayToggles', async ({ page }) => {
   await open(page);
   const row = rowsOf(page, 'toggles').filter({ hasText: 'Engine' });
   await expect(row.locator('.tic svg')).toHaveCount(1);
   await expect(row.locator('.d')).not.toBeEmpty();
-  await expect(chk(page, 'toggles', 'Engine')).toHaveAttribute('aria-checked', 'false');
+  await expect(chk(page, 'toggles', 'Engine')).toHaveAttribute('aria-checked', 'true');
   await chk(page, 'toggles', 'Engine').click();
   const v = await live(page);
-  expect(v.trayToggles).toBe('engine');
+  expect(v.trayToggles).toBe('trackCaret,trackFocus,keepEdges');
   expect(v.trayToggleOrder).toBe('trackCaret,trackFocus,keepEdges,engine');
-  await expect(page.locator('[data-cnt="toggles"]')).toHaveText('1 on');
+  await expect(page.locator('[data-cnt="toggles"]')).toHaveText('3 on');
 });
 
 test('removed tools: Mouse lock, Pass keys and Pause Wind are gone, and old ini keys for them are dropped', async ({ page }) => {

@@ -41,7 +41,8 @@ TEST_CASE("flyout palettes: Wind grey keeps the look the flyout already had") {
     const FlyoutPalette& g = kPalettes[0];
     CHECK(g.dark.menu == 0x000000);
     CHECK(g.dark.fill == 0x2fbfa5);
-    CHECK(g.dark.on == 0x1f5650);
+    CHECK(g.dark.on == 0x2fbfa5);     // solid teal ON segments with a near-black icon (#329)
+    CHECK(g.dark.onic == 0x04201b);
     CHECK(g.dark.tintA == 0.f);
 }
 
@@ -62,12 +63,12 @@ TEST_CASE("flyout palettes: radii are sharp for hicon, soft elsewhere") {
     }
 }
 
-TEST_CASE("flyout palettes: High contrast dark is white on black with grey on-segments") {
+TEST_CASE("flyout palettes: High contrast dark is white on black, ON segments solid white with a black icon (#329)") {
     const PaletteMode& d = FindPalette("hicon").dark;
     CHECK(d.menu == 0x000000);
     CHECK(d.fg == 0xffffff);
-    CHECK(d.on == 0x707070);
-    CHECK(d.onic == 0xffffff);
+    CHECK(d.on == 0xffffff);
+    CHECK(d.onic == 0x000000);
 }
 
 TEST_CASE("flyout palettes: every palette is fully specified, dark, and on-state differs from off") {

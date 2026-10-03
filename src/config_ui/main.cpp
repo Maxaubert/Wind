@@ -888,8 +888,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
     int wx = wa.left + ((wa.right - wa.left) - ww) / 2;
     int wy = wa.top  + ((wa.bottom - wa.top) - wh) / 2;
     SetWindowPos(hwnd, nullptr, wx, wy, ww, wh, SWP_NOZORDER);
-    ShowWindow(hwnd, SW_SHOW);
+    // Outline colour and background BEFORE the first show (#326): the window used to appear with DWM's default,
+    // stronger border until the WebView was ready and ApplyWindowTheme ran.
     g_hwnd = hwnd;
+    ApplyWindowTheme();
+    ShowWindow(hwnd, SW_SHOW);
     g_onboard = onboard;
     CreateWebView(hwnd);
     MSG msg; while (GetMessageW(&msg, nullptr, 0, 0)) { TranslateMessage(&msg); DispatchMessageW(&msg); }

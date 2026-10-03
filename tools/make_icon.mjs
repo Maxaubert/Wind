@@ -1,4 +1,4 @@
-// Generate assets/wind.ico from assets/wind-badge.svg.
+// Generate assets/wind.ico from assets/wind-badge-taskbar.svg.
 //
 // Renders the SVG at each icon size with Playwright's bundled Chromium (faithful
 // stroke/arc rendering, transparent corners outside the rounded badge), then packs
@@ -21,8 +21,22 @@ const require = createRequire(import.meta.url);
 // Resolve Playwright from the UI package (no top-level dependency on it).
 const { chromium } = require(resolve(root, 'ui', 'node_modules', 'playwright'));
 
-const SIZES = [256, 128, 64, 48, 40, 32, 24, 16];
-const svg = readFileSync(resolve(root, 'assets', 'wind-badge.svg'), 'utf8');
+// Every size the shell asks for between 100% and 300% scaling (small icon 16 x scale, taskbar 24 x scale,
+// large icon 32 x scale), so Windows never resamples a neighbour frame: a 225% taskbar wants 54 px, the tray
+// 36 px, and scaling 64 or 40 down made both soft (Max 2026-10-03, #332).
+const SIZES = [256, 128, 96, 80, 72, 64, 60, 56, 54, 48, 42, 40, 36, 32, 30, 28, 24, 20, 16];
+// Taskbar variant: black badge + a solid #202020 edge outline (see the SVG header). The outline
+// is re-drawn per size at exactly 1 physical px, the thinnest line that never vanishes. The
+// stroke sits inside the badge (centre inset by half its width from the 8..248 edge).
+const src = readFileSync(resolve(root, 'assets', 'wind-badge-taskbar.svg'), 'utf8');
+function svgFor(s) {
+  const w = 256 / s;                              // viewBox units: exactly 1 physical px at every size
+  const inset = 8 + w / 2, side = 240 - w, rx = 56 - w / 2;
+  const rect = `<rect x="${inset}" y="${inset}" width="${side}" height="${side}" rx="${rx}" fill="none" stroke="#202020" stroke-width="${w}"/>`;
+  const re = /<rect x="11"[^>]*\/>/;
+  if (!re.test(src)) throw new Error('outline rect not found in wind-badge-taskbar.svg');
+  return src.replace(re, rect);
+}
 const tmp = mkdtempSync(resolve(tmpdir(), 'windicon-'));
 
 const browser = await chromium.launch();
@@ -33,7 +47,7 @@ for (const s of SIZES) {
   const html = `<!doctype html><html><head><style>
     html,body{margin:0;padding:0;background:transparent}
     svg{display:block;width:${s}px;height:${s}px}
-  </style></head><body>${svg}</body></html>`;
+  </style></head><body>${svgFor(s)}</body></html>`;
   await page.setViewportSize({ width: s, height: s });
   await page.setContent(html, { waitUntil: 'networkidle' });
   const out = resolve(tmp, `icon-${s}.png`);

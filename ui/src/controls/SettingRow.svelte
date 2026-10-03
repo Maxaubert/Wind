@@ -6,6 +6,7 @@
   //   onChange  onChange(val) for the row's own key
   //   onSet     onSet(key, val) for a sibling key (the extra-key switches)
   //   live      live(patch) for keybind captures (written immediately by the page)
+  //   tab       optional quiet tab name shown beside the label (search results)
   //   extra     { mpoNeedsRestart, runningModel, onRestart,
   //             profiles: {names, active, onSwitch, onNew, onDelete}, version, onRepo, onAction(name) }
   import Toggle from './Toggle.svelte';
@@ -20,7 +21,7 @@
   import ThemePicker from '../prefs/ThemePicker.svelte';
   import ProfilePicker from '../prefs/ProfilePicker.svelte';
   import About from './About.svelte';
-  let { row, value = undefined, values = {}, onChange = () => {}, onSet = () => {}, live = () => {}, extra = {}, disabled = false } = $props();
+  let { row, value = undefined, values = {}, onChange = () => {}, onSet = () => {}, live = () => {}, extra = {}, disabled = false, tab = '' } = $props();
 
   // Ids so every control is named by its row: label (and the live value for value-bearing ones).
   const rid = $derived('row-' + String(row.key).replace(/[^A-Za-z0-9_-]/g, ''));
@@ -35,7 +36,7 @@
 {:else}
   <div class="row" class:disabled class:wide={row.wide} data-key={row.key}>
     <div class="meta">
-      {#if row.label}<div class="label" id={labelId}>{row.label}</div>{/if}
+      {#if row.label}<div class="lrow"><div class="label" id={labelId}>{row.label}</div>{#if tab}<span class="tab">{tab}</span>{/if}</div>{/if}
       {#if row.desc}<div class="desc" id={descId}>{row.desc}</div>{/if}
     </div>
     <div class="ctl">
@@ -91,6 +92,8 @@
   .row.wide { grid-template-columns: minmax(0, 1fr); gap: 10px; padding-bottom: 12px; }   /* the control sits under the text, full width */
   .row.wide .ctl { justify-content: flex-start; min-width: 0; }
   .meta { min-width: 0; }
+  .lrow { display: flex; align-items: baseline; gap: 10px; }
+  .tab { font: 11px var(--s); letter-spacing: .02em; color: var(--fg3); opacity: .8; }
   .label { font: 500 13.5px var(--s); color: var(--fg); }
   .desc { margin-top: 1px; font: 12.5px var(--s); color: var(--fg3); }
   .ctl { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
