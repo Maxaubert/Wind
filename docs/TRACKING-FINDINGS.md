@@ -93,3 +93,19 @@ highlighted option through UIA, so Wind follows only the terminal caret there.
   it itself when it detects the bridge).
 - A window Windows reports as not responding (`IsHungAppWindow`) is skipped, so a hung Java app cannot
   stall tracking for other apps.
+
+## Chromium web editors: tall caret rects (issue #337, 2026-10-03)
+
+Outlook on the web (Chromium) reports its UIA selection caret as one line right after Enter
+(`1927,1159 h44`), but from the first typed character as a rect that also covers the blank lines
+above it (`1947,1136 h111`). The BOTTOM stays on the real caret line; only the top climbs. Centring
+on that rect left the caret below centre by half the extra height times the zoom, more with every
+blank line ("the text moves further and further down; Enter re-centres it"). `src/caret_rect.h`
+learns the one-line height per focus and trims a rect taller than 1.4 lines to one line at its
+bottom, but only when that bottom sits on the known line grid (same line, or whole lines below after
+a wrap); any other tall rect (a bigger font) is learned as the new line. Chromium's Win32 caret does
+the same (1927,1669 h44 then 1945,1558 h155), so UIA and Win32 carets are both trimmed; Java carets
+(bridge) are not. `trackLog=1` logs each trim.
+
+Enter on the last visible line reports the new line before the page scrolls it up a few pixels (field: line 1989-2033, then the tall typing rect ends at 2009), so a tall rect whose bottom is within one line of the known line is also trimmed.
+That Enter at the bottom also reports the NEW line part-way through the scroll (old line 1965-2009, new line 1989-2033: half a line lower), and the page settles it where the old line was without another caret report until the next key, so the view dipped and slid back on every Enter. A caret that moves back left by a fraction of a line (0.2-0.8) is held on the current line (HoldMidScrollCaret; logged as caret held).
