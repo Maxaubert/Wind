@@ -305,8 +305,10 @@ and limits: `docs/superpowers/specs/2026-10-01-tray-flyout-design.md`. Playwrigh
 The Profile row on the Preferences page (`ui/src/prefs/ProfilePicker.svelte`) is a dropdown of the profiles plus one
 New button. Each profile in the open list has a trash icon (hidden when one profile is left, and on Default, which the
 host protects); the trash opens a confirm prompt ("Delete profile", Cancel / Delete). New opens
-`prefs/NewProfileDialog.svelte`: a name (checked by `prefs/profileName.js`, the host's file-name rules) and a start point,
-a copy of the current settings or the defaults. Rename and duplicate have no UI (the bridge messages remain).
+`prefs/NewProfileDialog.svelte`: a name (checked by `prefs/profileName.js`, the host's file-name rules) and three
+actions, Cancel, New (starts from the defaults) and Duplicate current (starts from a copy of the current settings, the
+primary action and what Enter does). Rename has no UI, and Duplicate current does not use the host's `duplicateProfile`
+(the bridge messages remain).
 The interesting logic is in `Settings.svelte`'s `profileAction`: operations that replace the live settings wholesale
 (switch, create from the defaults, delete of the *active* profile) route through the unsaved-changes prompt
 (Save / Discard / Cancel), while deleting an inactive profile skips it. A new profile that starts from the CURRENT

@@ -261,7 +261,7 @@ test('trash asks to confirm: Cancel keeps the profile, Delete removes it', async
   await expect(page.getByRole('option')).toHaveText(['Default', 'Work']);
 });
 
-test('New: the dialog suggests a name, checks it, and starts from the defaults', async ({ page }) => {
+test('New: the dialog suggests a name, offers Cancel / New / Duplicate current, and New starts from the defaults', async ({ page }) => {
   await page.goto('/');
   await go(page, 'prefs');
   await key(page, '__profiles').getByRole('button', { name: 'New' }).click();
@@ -269,26 +269,25 @@ test('New: the dialog suggests a name, checks it, and starts from the defaults',
   const name = dlg.getByLabel('Name');
   await expect(name).toHaveValue('Profile 3');
   await expect(name).toBeFocused();
-  const from = dlg.getByRole('radiogroup', { name: 'Start from' });
-  await expect(from.getByRole('radio')).toHaveText(['Current settings (copy of Default)', 'Default settings']);
-  await expect(from.getByRole('radio', { checked: true })).toHaveText(/Current settings/);
+  await expect(dlg.getByRole('button')).toHaveText(['Cancel', 'New', 'Duplicate current']);
+  await expect(dlg).toHaveAccessibleDescription('New starts from the default settings. Duplicate current copies Default.');
+  await expect(dlg.getByRole('radio')).toHaveCount(0);   // no "Start from" choice: the buttons are the choice
   await name.fill('gaming');
-  await dlg.getByRole('button', { name: 'Create' }).click();
+  await dlg.getByRole('button', { name: 'New', exact: true }).click();
   await expect(dlg.getByRole('alert')).toHaveText('A profile with this name already exists.');
   await name.fill('');
-  await dlg.getByRole('button', { name: 'Create' }).click();
+  await dlg.getByRole('button', { name: 'Duplicate current' }).click();
   await expect(dlg.getByRole('alert')).toHaveText('Enter a name for the profile.');
   expect(await sent(page, 'createProfile')).toHaveLength(0);
   await name.fill('Fresh');
-  await from.getByRole('radio', { name: 'Default settings' }).click();
-  await dlg.getByRole('button', { name: 'Create' }).click();
+  await dlg.getByRole('button', { name: 'New', exact: true }).click();
   await expect(dlg).toHaveCount(0);
   await expect(trig(page)).toHaveText('Fresh');
   expect((await sent(page, 'createProfile')).map((m) => m.name)).toEqual(['Fresh']);
   expect(await sent(page, 'setConfigPersist')).toHaveLength(0);   // defaults: nothing copied in
 });
 
-test('New from the current settings copies them into the new profile, even with unsaved changes', async ({ page }) => {
+test('Duplicate current copies the current settings into the new profile, even with unsaved changes', async ({ page }) => {
   await page.goto('/');
   await go(page, 'zoom');
   await page.locator('[data-key="maxLevel"] input[type=range]').fill('20');
@@ -297,7 +296,7 @@ test('New from the current settings copies them into the new profile, even with 
   await key(page, '__profiles').getByRole('button', { name: 'New' }).click();
   const dlg = page.getByRole('dialog', { name: 'New profile' });
   await dlg.getByLabel('Name').fill('Copy');
-  await dlg.getByRole('button', { name: 'Create' }).click();
+  await dlg.getByRole('button', { name: 'Duplicate current' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);   // no Save / Discard question: the changes come along
   await expect(trig(page)).toHaveText('Copy');
   expect((await sent(page, 'createProfile')).map((m) => m.name)).toEqual(['Copy']);
@@ -317,15 +316,14 @@ test('New from the defaults with unsaved changes asks Save / Discard first', asy
   await key(page, '__profiles').getByRole('button', { name: 'New' }).click();
   const dlg = page.getByRole('dialog', { name: 'New profile' });
   await dlg.getByLabel('Name').fill('Fresh');
-  await dlg.getByRole('radio', { name: 'Default settings' }).click();
-  await dlg.getByRole('button', { name: 'Create' }).click();
+  await dlg.getByRole('button', { name: 'New', exact: true }).click();
   const ask = page.getByRole('dialog', { name: 'Unsaved changes' });
   await expect(ask).toBeVisible();
   await ask.getByRole('button', { name: 'Discard' }).click();
   await expect.poll(async () => (await sent(page, 'createProfile')).length).toBe(1);
 });
 
-test('the dialogs are keyboard friendly: Escape closes, Enter creates, focus returns to New', async ({ page }) => {
+test('the dialogs are keyboard friendly: Escape closes, Enter duplicates current, focus returns to New', async ({ page }) => {
   await page.goto('/');
   await go(page, 'prefs');
   const newBtn = key(page, '__profiles').getByRole('button', { name: 'New' });
@@ -337,6 +335,8 @@ test('the dialogs are keyboard friendly: Escape closes, Enter creates, focus ret
   await page.getByLabel('Name').fill('Quick');
   await page.keyboard.press('Enter');
   await expect(trig(page)).toHaveText('Quick');
+  expect((await sent(page, 'createProfile')).map((m) => m.name)).toEqual(['Quick']);
+  expect(await sent(page, 'setConfigPersist')).toHaveLength(0);   // a clean session: the copy has nothing to write
 });
 
 test('Troubleshooting is always there, and the advanced switch is the last row of General', async ({ page }) => {
