@@ -11,6 +11,9 @@
 #include <oleauto.h>
 #include <UIAutomation.h>
 #include <dwmapi.h>
+#include <chrono>
+#include <condition_variable>
+#include <memory>
 #include <string>
 #pragma comment(lib, "oleacc.lib")
 #pragma comment(lib, "dwmapi.lib")
@@ -97,6 +100,97 @@ static bool IsJavaWindow(HWND h) {
     wchar_t cls[64] = {}; GetClassNameW(h, cls, 64);
     return IsJavaWindowClass(cls);
 }
+
+// GetFocusedElement on a helper thread with a deadline. The call is a round trip into the
+// foreground app and ignores the IUIAutomation2 timeouts: it blocked for 3 s at Notepad's activation
+// (field 2026-10-04), and while the tracker thread waited, nothing was tracked in any app. The
+// tracker now waits at most deadlineMs; a lookup still stuck past that is abandoned (its late answer
+// is released) and no new one starts until it returns, so a hung app costs one worker, not a pile.
+// The state is shared with the worker, so a worker still stuck at exit is detached safely.
+class FocusLookup {
+    struct State {
+        std::mutex mx;
+        std::condition_variable cv;
+        bool stop = false, busy = false;
+        unsigned want = 0, done = 0;
+        IUIAutomation* uia = nullptr;
+        IUIAutomationElement* result = nullptr;
+        ULONGLONG resultAt = 0;      // when the worker produced result
+        HWND resultFg = nullptr;     // the foreground window it was asked for
+    };
+public:
+    explicit FocusLookup(IUIAutomation* uia) : st_(std::make_shared<State>()) {
+        if (!uia) return;
+        uia->AddRef(); st_->uia = uia;
+        th_ = std::thread([st = st_] { Run(st); });
+    }
+    ~FocusLookup() {
+        bool busy;
+        { std::lock_guard<std::mutex> lk(st_->mx); st_->stop = true; busy = st_->busy; }
+        st_->cv.notify_all();
+        if (th_.joinable()) { if (busy) th_.detach(); else th_.join(); }   // a hung app must not block exit
+    }
+    // The focused element (AddRef'd, caller releases), or null. timedOut: not answered in time, or
+    // the previous lookup is still stuck.
+    IUIAutomationElement* get(unsigned deadlineMs, bool& timedOut) {
+        timedOut = false;
+        State& s = *st_;
+        const HWND fg = GetForegroundWindow();
+        std::unique_lock<std::mutex> lk(s.mx);
+        if (!s.uia) return nullptr;
+        if (s.busy) { timedOut = true; return nullptr; }
+        if (s.result) {
+            // A late answer (it missed the last deadline): still good if fresh and for this window.
+            // Slow-but-alive apps (Edge answers in ~200 ms) then cost one skipped round, not every round.
+            IUIAutomationElement* late = s.result; s.result = nullptr;
+            if (s.resultFg == fg && GetTickCount64() - s.resultAt < 250) return late;
+            late->Release();
+        }
+        s.busy = true;
+        s.resultFg = fg;
+        const unsigned job = ++s.want;
+        s.cv.notify_all();
+        if (!s.cv.wait_for(lk, std::chrono::milliseconds(deadlineMs), [&] { return s.done == job; })) {
+            timedOut = true;
+            return nullptr;
+        }
+        IUIAutomationElement* e = s.result; s.result = nullptr;
+        return e;
+    }
+private:
+    static void Run(std::shared_ptr<State> st) {
+        CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        SetThreadDescription(GetCurrentThread(), L"Wind focus lookup");
+        State& s = *st;
+        unsigned handled = 0;
+        for (;;) {
+            unsigned job;
+            {
+                std::unique_lock<std::mutex> lk(s.mx);
+                s.cv.wait(lk, [&] { return s.stop || s.want != handled; });
+                if (s.stop) break;
+                job = s.want;
+            }
+            IUIAutomationElement* e = nullptr;
+            s.uia->GetFocusedElement(&e);
+            handled = job;
+            std::lock_guard<std::mutex> lk(s.mx);
+            if (s.result) s.result->Release();
+            s.result = e; s.resultAt = GetTickCount64();
+            s.done = job; s.busy = false;
+            s.cv.notify_all();
+            if (s.stop) break;
+        }
+        {
+            std::lock_guard<std::mutex> lk(s.mx);
+            if (s.result) { s.result->Release(); s.result = nullptr; }
+            if (s.uia) { s.uia->Release(); s.uia = nullptr; }
+        }
+        CoUninitialize();
+    }
+    std::shared_ptr<State> st_;
+    std::thread th_;
+};
 
 // Classic Win32 caret of the foreground thread, in screen px. False when there is none.
 static bool Win32Caret(RECT& out) {
@@ -223,6 +317,21 @@ void FocusTracker::run() {
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     IUIAutomation* uia = nullptr;
     CoCreateInstance(__uuidof(CUIAutomation), nullptr, CLSCTX_INPROC_SERVER, __uuidof(IUIAutomation), (void**)&uia);
+    // Every UIA call is a round trip into the target app, and one app that does not answer stalls
+    // ALL tracking for the default timeouts (field 2026-10-04: GetFocusedElement blocked 3016 ms
+    // right after an app switch, and the next app's typing went unfollowed). Cap both waits: a slow
+    // app now costs at most half a second, and the 16 ms poll simply asks again.
+    if (uia) {
+        IUIAutomation2* uia2 = nullptr;
+        if (SUCCEEDED(uia->QueryInterface(__uuidof(IUIAutomation2), (void**)&uia2)) && uia2) {
+            uia2->put_ConnectionTimeout(500);
+            uia2->put_TransactionTimeout(500);
+            uia2->Release();
+        }
+    }
+    std::unique_ptr<FocusLookup> focusLookup;
+    if (uia) focusLookup = std::make_unique<FocusLookup>(uia);
+    bool lookupStuckLogged = false;
     FocusHandler* fh = nullptr;
     if (uia) { fh = new FocusHandler(); if (FAILED(uia->AddFocusChangedEventHandler(nullptr, fh))) { fh->Release(); fh = nullptr; } }
     HWINEVENTHOOK h1 = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr, FocusTrackImpl::OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
@@ -316,6 +425,50 @@ void FocusTracker::run() {
     };
 
     // Caret, fastest source first. Releases everything it acquires.
+    // VS Code's editor (and Monaco elsewhere) is an EditContext element, "native-edit-context",
+    // whose UIA caret and selection stay at the START of the line wherever the caret is on it
+    // (probe 2026-10-04: x=263 through End, typing and arrows). Chromium's MSAA system caret for
+    // magnifiers tracks it exactly, so for that element only the MSAA caret wins when it is on
+    // the same line. Not for other Chromium text (Edge textareas): their UIA caret is right and
+    // the MSAA one lags it by about 100 ms. The class is asked once per focus; the 60 Hz poll
+    // reuses the last MSAA answer for 100 ms, a caret event always asks fresh.
+    struct EditContextCache {
+        unsigned gen = ~0u; HWND fg = nullptr; bool is = false;
+        bool have = false; RECT msaa{}; ULONGLONG at = 0;
+    } edc;
+    auto editContextCaret = [&](IUIAutomationElement* el, RECT& rc, const char*& src, bool fromPoll) {
+        if (!el) return;
+        // Keyed on the window too: a resolve can run before the next app's focus event arrives,
+        // and a stale "is VS Code" must never send MSAA queries into another app (field: Notepad
+        // tracking went silent for 2.5 s right after leaving VS Code).
+        const HWND fgNow = GetForegroundWindow();
+        if (edc.gen != focusGen || edc.fg != fgNow) {
+            edc = EditContextCache{}; edc.gen = focusGen; edc.fg = fgNow;
+            BSTR cls = nullptr;
+            const ULONGLONG c0 = GetTickCount64();
+            const HRESULT hr = el->get_CurrentClassName(&cls);
+            if (GetTickCount64() - c0 > 100)
+                wind::Log(wind::LogLevel::Info, "track", "slow class name %llums", GetTickCount64() - c0);
+            if (SUCCEEDED(hr) && cls) {
+                edc.is = wcscmp(cls, L"native-edit-context") == 0;
+                SysFreeString(cls);
+            }
+        }
+        if (!edc.is) return;
+        const ULONGLONG now = GetTickCount64();
+        if (!(fromPoll && edc.have && now - edc.at < 100)) {
+            RECT m{};
+            edc.have = MsaaCaret(m);
+            if (edc.have) edc.msaa = m;
+            edc.at = now;
+        }
+        if (!edc.have) return;
+        const LONG lineH = rc.bottom - rc.top;
+        const LONG dy = edc.msaa.top - rc.top;
+        if ((dy < 0 ? -dy : dy) > (lineH > 16 ? lineH / 2 : 8)) return;   // another line: stale, keep UIA
+        rc = edc.msaa;
+        src = "msaa-editcontext";
+    };
     auto findCaret = [&](IUIAutomationElement* el, RECT& rc, const char*& src, bool fromPoll) -> bool {
         if (Win32Caret(rc)) { src = "win32"; return true; }
         if (!el) return false;
@@ -333,7 +486,7 @@ void FocusTracker::run() {
             }
             tp2->Release();
         }
-        if (ok) return true;
+        if (ok) { editContextCaret(el, rc, src, fromPoll); return true; }
         IUIAutomationTextPattern* tp = nullptr;
         if (SUCCEEDED(el->GetCurrentPatternAs(UIA_TextPatternId, __uuidof(IUIAutomationTextPattern), (void**)&tp)) && tp) {
             IUIAutomationTextRangeArray* sel = nullptr;
@@ -352,6 +505,7 @@ void FocusTracker::run() {
             }
             tp->Release();
         }
+        if (ok) editContextCaret(el, rc, src, fromPoll);
         return ok;
     };
 
@@ -376,9 +530,27 @@ void FocusTracker::run() {
                                            javaCaret.right - javaCaret.left, javaCaret.bottom - javaCaret.top);
             }
         }
+        // Slow-resolve log (#365 diagnosis): a cross-process call that blocks stalls ALL tracking.
+        const ULONGLONG rs0 = GetTickCount64();
         IUIAutomationElement* el = nullptr;
-        if (uia) uia->GetFocusedElement(&el);
         RECT b{};                                   // the focused element's bounds (empty = unknown)
+        // An app with a classic Win32 caret needs no UIA at all while focus-following is off: that
+        // caret wins in findCaret anyway. Skipping the lookup matters: GetFocusedElement blocked
+        // for 3 s at Notepad's activation (field 2026-10-04), a fixed wait the UIA timeouts do not
+        // cap, and it froze tracking into the next app. The caret window's rect stands in for the
+        // element bounds (the focus identity and the Gecko check).
+        GUITHREADINFO cgi{}; cgi.cbSize = sizeof(cgi);
+        const bool win32Only = !java && !wantFocus_.load() &&
+            GetGUIThreadInfo(GetWindowThreadProcessId(fg, nullptr), &cgi) && cgi.hwndCaret;
+        if (win32Only) GetWindowRect(cgi.hwndCaret, &b);
+        else if (focusLookup) {
+            bool timedOut = false;
+            el = focusLookup->get(150, timedOut);
+            if (timedOut && !lookupStuckLogged && log_.load())
+                wind::Log(wind::LogLevel::Info, "track", "focused element lookup not answered in 150 ms: resolving without UIA");
+            lookupStuckLogged = timedOut;
+        }
+        const ULONGLONG rs1 = GetTickCount64();
         if (el && FAILED(el->get_CurrentBoundingRectangle(&b))) b = RECT{};
         // 1. A focus change: follow the focused control (if wanted). Its caret becomes the baseline.
         //    A container-sized focus (the page after leaving a text box, a pane, the window) is not
@@ -397,7 +569,12 @@ void FocusTracker::run() {
         // 2. The caret: published only when it moved within the same focus.
         if (wantCaret_.load()) {
             RECT rc{}; const char* src = "";
+            const ULONGLONG fc0 = GetTickCount64();
             const bool found = java ? (javaHave ? (rc = javaCaret, src = "java", true) : false) : findCaret(el, rc, src, fromPoll);
+            const ULONGLONG fc1 = GetTickCount64();
+            if (fc1 - rs0 > 200)
+                wind::Log(wind::LogLevel::Info, "track", "slow resolve %llums (focused element %llums, caret %llums, src %s, poll=%d)",
+                          fc1 - rs0, rs1 - rs0, fc1 - fc0, found ? src : "-", (int)fromPoll);
             if (found) {
                 // #337: a caret rect that also spans blank lines above (Chromium web editors, both its
                 // UIA and Win32 carets) is trimmed to one line at its bottom, the real caret line. The
@@ -491,6 +668,7 @@ void FocusTracker::run() {
     for (HWINEVENTHOOK h : { h1, h2, h3, h4, h5 }) if (h) UnhookWinEvent(h);
     if (uia && fh) uia->RemoveFocusChangedEventHandler(fh);
     if (fh) fh->Release();
+    focusLookup.reset();
     if (uia) uia->Release();
     CoUninitialize();
     tid_ = 0;
