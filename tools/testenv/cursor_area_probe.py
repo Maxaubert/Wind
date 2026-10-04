@@ -5,7 +5,7 @@
 #
 #   area     - the count of bright pixels. Catches a genuine SECOND cursor drawn at the same time,
 #              which adds pixels even when the two blobs partly overlap.
-#   centroid - where those pixels are. Catches the artifact the field report describes: the cursor
+#   centroid, where those pixels are. Catches the artifact the field report describes: the cursor
 #              FLICKERING between its centred position and a lagging one, fast enough to read as
 #              two cursors. Only one is drawn per frame, so the area never moves - which is exactly
 #              what the first version measured (1.02 flat) and why it needed this second channel.

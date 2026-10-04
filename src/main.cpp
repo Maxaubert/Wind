@@ -1253,7 +1253,7 @@ static void RunTick(TickState& t) {
     if (lockDown && !t.lockKeyWasDown) {
         // Snapshot cursor visibility at the toggle edge, BEFORE this tick's active block hides it,
         // together with whether WE are already hiding it. A not-showing cursor that we did not
-        // hide is the mouselook-gameplay tell for game-inspect (issue #144) - true at 1x and, in
+        // hide is the mouselook-gameplay tell for game-inspect (issue #144): true at 1x and, in
         // a transform FOLLOW session, true while zoomed as well. Both are read here so the pair
         // describes the same instant.
         CURSORINFO ci{}; ci.cbSize = sizeof(ci);

@@ -2,7 +2,7 @@
 # zoom in, hold still to establish a baseline, then pan at three speeds while capturing.
 #
 # Two artifacts, two channels. A genuine SECOND cursor drawn at the same time adds bright pixels,
-# so it shows in AREA. The thing the field report describes - the cursor lagging the hand and flicking
+# so it shows in AREA. The thing the field report describes, the cursor lagging the hand and flicking
 # between the lagged and centred positions fast enough to look doubled - draws only one cursor per
 # frame, so area stays flat and what moves is POSITION. The first version measured area alone and
 # read 1.02 on every configuration including the known-bad ones, which is why position was added.

@@ -16,7 +16,7 @@ param(
   [ValidateSet('wind','native')] [string]$Driver = 'wind',
   [ValidateSet('pan','ramp','cycle','rezoom','zigzag')] [string]$Mode = 'pan', # ramp: zoom in/out; cycle:
                                                        # focus-swap repro; rezoom: session-start bounce
-                                                       # repro; zigzag: the field protocol - start at the
+                                                       # repro; zigzag: the field protocol: start at the
                                                        # BOTTOM, zoom in, zig-zag climb to the TOP
                                                        # (both pan axes at once), zoom out
   [int]$ZigClimb = 2,            # zigzag: upward mickeys per step
@@ -484,7 +484,7 @@ try {
   }
 
   if ($Mode -eq 'cycle') {
-    # The field repro (issue #219): swap focus to another maximized app and back, THEN zoom - the
+    # The field repro (issue #219): swap focus to another maximized app and back, THEN zoom, the
     # hitch lives mostly in the zoom-in. Per-phase compositor gaps via the windowed flush stats.
     [PF]::StartFlushForever()
     $shell2 = New-Object -ComObject WScript.Shell

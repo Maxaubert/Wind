@@ -113,7 +113,7 @@ $suites = @{
     (S 'wobble-pan'          'noise'    $false 0.42 'strokes' 0),
     # RAMP SHAKE: zoom cycles with the hand completely still. A centred view must hold the
     # cursor on the screen centre at every level, so anything that moves is the shake the field
-    # report describes on the high-resolution cursor - and the steady-state checks cannot see it.
+    # report describes on the high-resolution cursor, and the steady-state checks cannot see it.
     (S 'wobble-ramp'         'noise'    $false 0    'rezoom' 0),
     # The clamped case: the view pinned against an edge, where the cursor must cross the screen
     # itself. Field-reported as the worst wobble and invisible to every unclamped scenario.

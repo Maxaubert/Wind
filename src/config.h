@@ -445,7 +445,7 @@ struct Config {
                           //     pointer every frame, defeating both classic lock tells, so the
                           //     lens snaps back instead of panning). The lockApps LIST is the
                           //     feature: listed exes run their sessions locked outright, and an
-                          //     empty list means off - no separate off switch needed (owner decision).
+                          //     empty list means off, no separate off switch needed (owner decision).
                           //     0 (default) = selected apps only; everywhere else is untouched
                           //         classic behaviour.
                           //     1 = global: additionally run the smart tells everywhere (warp-
