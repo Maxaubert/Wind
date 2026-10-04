@@ -1,4 +1,5 @@
 #include "mag_host.h"
+#include "tick_span.h"   // #361: per-tick spans
 #include "mag_thread.h"
 #include "logging.h"
 #include <windows.h>
@@ -97,6 +98,7 @@ bool MagHost::setSamplingMode(unsigned mode) {
 
 bool MagHost::setTransform(float zoom, int offX, int offY, int tx, int ty, bool fastPan) {
     if (!initialized_) return false;
+    SpanScope span(kSpanTxWrite);   // includes the marshal to the owner thread
     // The hot path. Inline (zero marshalling) when the caller IS the owner - which is the whole
     // point of moving ownership to the hook thread.
     return MagThreadInvoke([=]() -> bool {
@@ -118,6 +120,7 @@ bool MagHost::setTransformOwned(float zoom, int offX, int offY, int tx, int ty, 
 
 bool MagHost::setInputTransform(bool active, const RECT& src, const RECT& dst) {
     if (!initialized_) return false;
+    SpanScope span(kSpanIx);
     // By value (issue #274): MagThreadInvoke's contract is that the callable owns what it uses.
     return MagThreadInvoke([active, src, dst]() -> bool {
         RECT s = src, d = dst;   // API takes non-const LPRECT
@@ -127,6 +130,7 @@ bool MagHost::setInputTransform(bool active, const RECT& src, const RECT& dst) {
 
 bool MagHost::getInputTransform(bool& active, RECT& src, RECT& dst) {
     if (!initialized_) return false;
+    SpanScope span(kSpanIx);
     // Results travel through a heap block the callable co-owns, and reach the caller's
     // out-params only after a successful invoke, on the caller's own thread (issue #274).
     struct Out { BOOL en = FALSE; RECT s{}, d{}; };

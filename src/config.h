@@ -72,6 +72,11 @@ struct Config {
     double zoomInSpeed  = 1.0;       // 0.25-4.0
     double zoomOutSpeed = 1.0;       // 0.25-4.0
     int    zoomTrace    = 0;         // 1 = log a zoom-in/zoom-out timeline per zoom (#310, diagnostics)
+    // Hitch recorder (#361): log every long zoomed frame with its classified cause, plus a
+    // per-minute summary. On by default: the record costs ~0.5 us per tick and logs nothing on a
+    // smooth frame. hitchThresholdPct: a frame longer than this % of the refresh interval counts.
+    int    hitchLog     = 1;
+    int    hitchThresholdPct = 150;
     double panSpeed     = 1.0;       // 0.25-4.0; 1.0 = up to 1.25 screens per second; slower at low zoom (smooth curve, KeyPan)
     // Smooth zoom: 0 = linear/constant; 1 = zoom-IN soft-starts (eases up to linear). Shipped on.
     int    smoothZoom = 1;
@@ -92,7 +97,7 @@ struct Config {
     // game the way DwmFlush can. 1 = present immediately then DwmFlush() to align 1:1 with DWM's
     // composition (overrides vsync while zoomed). Hot-reloadable.
     int    dwmFlush         = 0;
-    int    diagnostics      = 0;     // 1 = log frame-timing to wind_diag.log
+    int    diagnostics      = 0;     // 1 = log frame-timing as "diag" lines in wind-core.log
 
     // --- Model selection ----------------------------------------------------
     // Which magnification model runs. "hybrid" (DEFAULT, "Auto" in the UI) constructs render +

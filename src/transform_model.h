@@ -6,6 +6,7 @@
 #include "cursor_sprite.h"
 #include "wobble_cage.h"
 #include <memory>
+#include <vector>
 #include <thread>
 #include <mutex>
 #include <condition_variable>
@@ -94,6 +95,7 @@ private:
     int  traceHead_ = 0;
     bool traceOn_ = false;
     void traceDump();
+    static void WriteTraceCsv(const std::vector<TxTick>& rows);   // background thread
     int  zorderBand_;                                // sprite z-band (above the shell); needs UIAccess
     bool spriteBand16_ = false;                      // P2 experiment: band-16 SCREEN-space sprite
     bool cursorBandAuto_ = false;                    // issue #269: band 16 unless the snip overlay is up

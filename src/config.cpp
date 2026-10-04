@@ -150,6 +150,8 @@ Config ParseConfig(const std::string& text) {
             else if (key == "panDownMods")      c.panDownMods = std::stoi(val);
             else if (key == "panSpeed")         c.panSpeed = std::stod(val);
             else if (key == "zoomTrace")        c.zoomTrace = std::stoi(val);
+            else if (key == "hitchLog")         c.hitchLog = std::stoi(val);
+            else if (key == "hitchThresholdPct") c.hitchThresholdPct = std::clamp(std::stoi(val), 110, 1000);
             // The chain is split in two: MSVC caps if/else nesting depth (C1061). Keys are unique,
             // so a second chain changes nothing.
             if (key == "hideCursorVk")     c.hideCursorVk = std::stoi(val);
@@ -493,7 +495,7 @@ std::string DefaultIniText() {
                "vsync=1\n"
                "; dwmFlush: 0=plain vsync pacing (default, fewer stutters); 1=align to DWM's composition\n"
                "dwmFlush=0\n"
-               "; diagnostics=1 logs frame timing to %TEMP%\\wind_diag.log (restart to apply)\n"
+               "; diagnostics=1 logs frame timing as diag lines in wind-core.log (restart to apply)\n"
                "diagnostics=0\n"
                "; cursorSensitivity: pan speed multiplier - free panning auto-matches the OS cursor\n"
                ";   (DPI+accel) then scales by this (1.0=exact match); also scales locked-game panning\n"

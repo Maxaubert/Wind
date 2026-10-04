@@ -39,6 +39,17 @@ std::string FormatLogLine(unsigned long long tsMsUtc, LogLevel lvl,
     return out;
 }
 
+std::string FormatLogLineEx(unsigned long long tsMsUtc, double qpcMs, unsigned tid, LogLevel lvl,
+                            const char* category, const std::string& msg) {
+    std::string base = FormatLogLine(tsMsUtc, lvl, category, msg);
+    char mid[48];
+    std::snprintf(mid, sizeof(mid), "  +%.3f  t%u", qpcMs, tid);
+    // Insert after the timestamp (always the first 24 chars: "YYYY-MM-DDTHH:MM:SS.mmmZ").
+    const size_t tsLen = base.find(' ');
+    base.insert(tsLen == std::string::npos ? base.size() : tsLen, mid);
+    return base;
+}
+
 bool ShouldRotate(unsigned long long currentSizeBytes, unsigned long long maxBytes) {
     return currentSizeBytes >= maxBytes;
 }
@@ -74,10 +85,12 @@ std::string BuildSnapshot(const SystemInfo& si) {
 #include <shellscalingapi.h>
 #include <shlobj.h>
 #include <algorithm>
+#include <atomic>
 #include <mutex>
 #include <cstdarg>
 #include <vector>
 #include "config_path.h"
+#include "log_queue.h"
 #include "version.h"
 #pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "dbghelp.lib")
@@ -87,13 +100,34 @@ std::string BuildSnapshot(const SystemInfo& si) {
 
 namespace wind {
 namespace {
-    HANDLE      g_logFile = INVALID_HANDLE_VALUE;
-    std::mutex  g_logMutex;
+    // Writer-thread state (#361). Producers touch only g_q, the atomics and g_wakeEvt.
+    struct LogEntry {
+        unsigned long long utcMs;
+        long long qpc;
+        unsigned tid;
+        LogLevel lvl;
+        char cat[16];
+        char msg[1024];
+    };
+    LogQueue<LogEntry, 1024> g_q;                 // ~1 MiB, static: no allocation on the log path
+    std::atomic<bool> g_running{false};
+    std::atomic<bool> g_writerIdle{false};        // the writer is (about to be) asleep: wake it
+    std::atomic<unsigned long long> g_flushReqGen{0}, g_flushDoneGen{0};
+    std::atomic<unsigned long long> g_pushed{0}, g_flushedUpTo{0}, g_dropped{0};
+    HANDLE      g_wakeEvt = nullptr;
+    HANDLE      g_writer = nullptr;
+    long long   g_qpcFreq = 1;
+
+    HANDLE      g_logFile = INVALID_HANDLE_VALUE; // writer-owned after LogInit
+    std::mutex  g_logMutex;                       // LogInit / LogShutdown only, never Log
     std::wstring g_logPath;
+    std::wstring g_logDir, g_logStem;
+    bool        g_ownsBase = false;               // false = per-PID fallback file: never rotate it
+    unsigned long long g_fileBytes = 0;
     wchar_t g_crashDir[MAX_PATH] = L"";   // crash dir pre-resolved at LogInit; handler builds paths heap-free
 
     unsigned long long NowMsUtc() {
-        FILETIME ft; GetSystemTimeAsFileTime(&ft);   // 100ns ticks since 1601
+        FILETIME ft; GetSystemTimePreciseAsFileTime(&ft);   // 100ns ticks since 1601
         ULARGE_INTEGER u; u.LowPart = ft.dwLowDateTime; u.HighPart = ft.dwHighDateTime;
         // 1601->1970 offset in 100ns units = 116444736000000000.
         return (u.QuadPart - 116444736000000000ULL) / 10000ULL;
@@ -168,6 +202,75 @@ static void PruneStrayPidLogs(const std::wstring& dir) {
     }
 }
 
+// The writer thread: drains the queue, formats, writes in batches, flushes when a Warn/Error went
+// by or a LogFlush asked, rotates at the cap. Below normal priority: nothing waits on it except
+// LogFlush callers (export, crash, shutdown).
+static void WriterAppend(const std::string& batch) {
+    if (batch.empty() || g_logFile == INVALID_HANDLE_VALUE) return;
+    DWORD wrote = 0;
+    WriteFile(g_logFile, batch.data(), (DWORD)batch.size(), &wrote, nullptr);
+    g_fileBytes += wrote;
+}
+
+static void WriterRotateIfNeeded() {
+    if (!g_ownsBase || !ShouldRotate(g_fileBytes, kLogMaxBytes)) return;
+    FlushFileBuffers(g_logFile);
+    CloseHandle(g_logFile);
+    RotateIfNeeded(g_logDir, g_logStem);
+    g_logFile = CreateFileW(g_logPath.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ,
+                            nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    g_fileBytes = 0;
+}
+
+static DWORD WINAPI LogWriterMain(LPVOID) {
+    std::string batch;
+    batch.reserve(64 * 1024);
+    for (;;) {
+        const unsigned long long reqGen = g_flushReqGen.load();   // before the drain: covers its lines
+        bool needFlush = reqGen != g_flushDoneGen.load();
+        unsigned long long n = 0;
+        auto format = [&](const LogEntry& e) {
+            const double qpcMs = double(e.qpc) * 1000.0 / double(g_qpcFreq);
+            batch += FormatLogLineEx(e.utcMs, qpcMs, e.tid, e.lvl, e.cat, e.msg);
+            batch += "\r\n";
+            if (e.lvl != LogLevel::Info) needFlush = true;
+        };
+        while (g_q.pop(format)) {
+            ++n;
+            if (batch.size() > 60 * 1024) { WriterAppend(batch); batch.clear(); }
+        }
+        const unsigned long long dropped = g_dropped.exchange(0);
+        if (dropped) {
+            LARGE_INTEGER q; QueryPerformanceCounter(&q);
+            char m[96]; std::snprintf(m, sizeof(m), "dropped %llu lines (queue full)", dropped);
+            batch += FormatLogLineEx(NowMsUtc(), double(q.QuadPart) * 1000.0 / double(g_qpcFreq),
+                                     GetCurrentThreadId(), LogLevel::Warn, "log", m);
+            batch += "\r\n";
+            needFlush = true;
+        }
+        WriterAppend(batch);
+        batch.clear();
+        if (needFlush && g_logFile != INVALID_HANDLE_VALUE) FlushFileBuffers(g_logFile);
+        g_flushedUpTo.fetch_add(n);
+        g_flushDoneGen.store(reqGen);
+        WriterRotateIfNeeded();
+        if (!g_running.load()) { if (!g_q.ready()) break; continue; }
+        // Sleep until a producer wakes us. Dekker-style handshake with Log(): announce idle, then
+        // re-check, so a line published between the drain and the wait is never stranded.
+        g_writerIdle.store(true);
+        std::atomic_thread_fence(std::memory_order_seq_cst);
+        if (!g_q.ready() && g_flushReqGen.load() == g_flushDoneGen.load() && g_running.load())
+            WaitForSingleObject(g_wakeEvt, 1000);
+        g_writerIdle.store(false);
+    }
+    return 0;
+}
+
+static void WakeWriter() {
+    std::atomic_thread_fence(std::memory_order_seq_cst);
+    if (g_writerIdle.load() && g_writerIdle.exchange(false) && g_wakeEvt) SetEvent(g_wakeEvt);
+}
+
 void LogInit(const wchar_t* processTag) {
     std::lock_guard<std::mutex> lk(g_logMutex);
     if (g_logFile != INVALID_HANDLE_VALUE) return;        // idempotent: never leak a prior handle
@@ -177,6 +280,7 @@ void LogInit(const wchar_t* processTag) {
     PruneStrayPidLogs(dir);
     std::wstring stem = std::wstring(L"wind-") + processTag;
     std::wstring base = dir + L"\\" + stem + L".log";
+    g_logDir = dir; g_logStem = stem;
     // Probe whether we can own the shared log. If another instance already holds it (the brief
     // single-instance-refusal overlap), fall back to a per-PID file so we (a) never rotate or
     // corrupt the active instance's log and (b) still capture our own startup/refusal trail.
@@ -186,31 +290,65 @@ void LogInit(const wchar_t* processTag) {
         g_logPath = dir + L"\\" + stem + L"-" + std::to_wstring(GetCurrentProcessId()) + L".log";
         g_logFile = CreateFileW(g_logPath.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ,
                                 nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-        return;
+        g_ownsBase = false;
+    } else {
+        CloseHandle(probe);            // release before rotating (cannot rename a file we hold open)
+        RotateIfNeeded(dir, stem);     // safe: we are the sole owner of the base log
+        g_logPath = base;
+        g_logFile = CreateFileW(base.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ,
+                                nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        g_ownsBase = true;
     }
-    CloseHandle(probe);            // release before rotating (cannot rename a file we hold open)
-    RotateIfNeeded(dir, stem);     // safe: we are the sole owner of the base log
-    g_logPath = base;
-    g_logFile = CreateFileW(base.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ,
-                            nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (g_logFile == INVALID_HANDLE_VALUE) return;
+    LARGE_INTEGER sz{}; if (GetFileSizeEx(g_logFile, &sz)) g_fileBytes = (unsigned long long)sz.QuadPart;
+    LARGE_INTEGER f; QueryPerformanceFrequency(&f); g_qpcFreq = f.QuadPart > 0 ? f.QuadPart : 1;
+    g_wakeEvt = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    g_running.store(true);
+    g_writer = CreateThread(nullptr, 0, LogWriterMain, nullptr, 0, nullptr);
+    if (!g_writer) { g_running.store(false); return; }
+    SetThreadPriority(g_writer, THREAD_PRIORITY_BELOW_NORMAL);
+    SetThreadDescription(g_writer, L"Wind log writer");
 }
 
 void Log(LogLevel lvl, const char* category, const char* fmt, ...) {
-    char msg[1024];
+    if (!g_running.load(std::memory_order_relaxed)) return;
+    LARGE_INTEGER q; QueryPerformanceCounter(&q);
+    const unsigned long long utc = NowMsUtc();
+    const unsigned tid = GetCurrentThreadId();
     va_list ap; va_start(ap, fmt);
-    _vsnprintf_s(msg, sizeof(msg), _TRUNCATE, fmt, ap);
+    const bool ok = g_q.push([&](LogEntry& e) {
+        e.utcMs = utc; e.qpc = q.QuadPart; e.tid = tid; e.lvl = lvl;
+        strncpy_s(e.cat, category ? category : "", _TRUNCATE);
+        _vsnprintf_s(e.msg, sizeof(e.msg), _TRUNCATE, fmt, ap);
+    });
     va_end(ap);
-    std::string line = FormatLogLine(NowMsUtc(), lvl, category, msg);
-    line += "\r\n";
-    std::lock_guard<std::mutex> lk(g_logMutex);
-    if (g_logFile == INVALID_HANDLE_VALUE) return;
-    DWORD wrote = 0;
-    WriteFile(g_logFile, line.data(), (DWORD)line.size(), &wrote, nullptr);
-    if (lvl != LogLevel::Info) FlushFileBuffers(g_logFile);
+    if (ok) g_pushed.fetch_add(1); else g_dropped.fetch_add(1);
+    WakeWriter();
+}
+
+bool LogFlush(unsigned timeoutMs) {
+    if (!g_running.load()) return false;
+    const unsigned long long target = g_pushed.load();
+    const unsigned long long until = GetTickCount64() + timeoutMs;
+    const unsigned long long gen = g_flushReqGen.fetch_add(1) + 1;
+    if (g_wakeEvt) SetEvent(g_wakeEvt);
+    // The writer publishes the generation after the file flush that covered it.
+    while (g_flushedUpTo.load() < target || g_flushDoneGen.load() < gen) {
+        if (GetTickCount64() >= until) return false;
+        Sleep(1);
+    }
+    return true;
 }
 
 void LogShutdown() {
     std::lock_guard<std::mutex> lk(g_logMutex);
+    if (g_writer) {
+        g_running.store(false);
+        if (g_wakeEvt) SetEvent(g_wakeEvt);
+        WaitForSingleObject(g_writer, 2000);   // the writer drains the queue before it exits
+        CloseHandle(g_writer);
+        g_writer = nullptr;
+    }
     if (g_logFile != INVALID_HANDLE_VALUE) {
         FlushFileBuffers(g_logFile);
         CloseHandle(g_logFile);
@@ -220,6 +358,7 @@ void LogShutdown() {
 
 void WriteCrashReport(void* exceptionPointers) {
     auto* ep = reinterpret_cast<EXCEPTION_POINTERS*>(exceptionPointers);
+    LogFlush(300);   // the writer thread still runs: get the queued lines on disk first
 
     // Heap-free path building -- g_crashDir was pre-resolved at LogInit.
     unsigned long long ts = NowMsUtc();
@@ -458,7 +597,7 @@ std::wstring ExportDiagnosticsToDesktop() {
         return L"";
     // Flush our own buffered lines so the copy is current (other processes' written-but-unflushed
     // lines are still readable by CopyFileW via the OS cache).
-    { std::lock_guard<std::mutex> lk(g_logMutex); if (g_logFile != INVALID_HANDLE_VALUE) FlushFileBuffers(g_logFile); }
+    LogFlush(1000);
     std::wstring dest = std::wstring(desktop) + L"\\Wind-diagnostics-" + std::to_wstring(NowMsUtc()) + L".zip";
     if (!ZipLogDir(dest.c_str())) return L"";
     return dest;

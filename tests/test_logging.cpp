@@ -9,6 +9,13 @@ TEST_CASE("LogLevelName maps levels") {
     CHECK(std::string(LogLevelName(LogLevel::Error)) == "ERROR");
 }
 
+TEST_CASE("FormatLogLineEx adds the QPC ms and thread id after the timestamp") {
+    std::string line = FormatLogLineEx(1780215262137ULL, 123456.789, 4242, LogLevel::Warn, "render", "device lost");
+    CHECK(line.find("Z  +123456.789  t4242  WARN  render  device lost") != std::string::npos);
+    CHECK(line == FormatLogLine(1780215262137ULL, LogLevel::Warn, "render", "device lost")
+                      .insert(24, "  +123456.789  t4242"));
+}
+
 TEST_CASE("FormatLogLine renders ISO-8601 UTC ms + level + category + msg") {
     // 2026-05-31T08:14:22.137Z == 1780215262137 ms since epoch.
     std::string line = FormatLogLine(1780215262137ULL, LogLevel::Warn, "render", "device lost");
