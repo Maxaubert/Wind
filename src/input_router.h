@@ -214,8 +214,13 @@ public:
     // yet. Tracking uses it: only keyboard-driven caret/focus changes move the view (issue #289).
     unsigned long long lastAnyKeyDownMs() const { return kbLastAnyDownMs_.load(std::memory_order_relaxed); }
     void noteAnyKeyDown(unsigned long long ms) { kbLastAnyDownMs_.store(ms, std::memory_order_relaxed); }
+    // A fresh down of a non-modifier key (no ups, no auto-repeat; src/typing_key.h). Ends the click quiet
+    // period (#328): releasing Ctrl/Shift after a Ctrl/Shift+click must not count as typing (review #349).
+    unsigned long long lastTypingKeyDownMs() const { return kbLastTypingDownMs_.load(std::memory_order_relaxed); }
+    void noteTypingKeyDown(unsigned long long ms) { kbLastTypingDownMs_.store(ms, std::memory_order_relaxed); }
 private:
     std::atomic<unsigned long long> kbLastAnyDownMs_{0};
+    std::atomic<unsigned long long> kbLastTypingDownMs_{0};
     std::atomic<unsigned long long> btnLastHookDownMs_[6]{};   // button ids 1..5
     std::atomic<bool> kbHookActive_{false}; // true once the LL KEYBOARD hook is installed
     std::atomic<unsigned> kbHookReinstalls_{0};  // watchdog recoveries this session

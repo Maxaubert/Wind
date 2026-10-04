@@ -72,6 +72,7 @@ static void EnsureCompositePulse() {
 #include "inspect_focus.h"
 #include "launch_quiesce.h"
 #include "sched_priority.h"   // tick thread priority + no power throttling (#334)
+#include "typing_key.h"       // typing-key stamp for the click quiet period (#328)
 #include "resource.h"
 
 using namespace wind;
@@ -1822,7 +1823,9 @@ static void RunTick(TickState& t) {
             const unsigned long long lastKey = g_input.lastAnyKeyDownMs();
             vi.msSinceKey = lastKey ? double(nowMs - lastKey) : (g_input.kbHookActive() ? 1e9 : 0.0);
             // #328: a key after the last mouse button means typing, so the click quiet period ends early.
-            vi.keyAfterButton = lastKey && t.lastButtonMs && lastKey > t.lastButtonMs;
+            // Only a fresh non-modifier key down counts: a Ctrl/Shift release after a Ctrl/Shift+click,
+            // or auto-repeat, is not typing (review #349).
+            vi.keyAfterButton = wind::KeyAfterButton(g_input.lastTypingKeyDownMs(), t.lastButtonMs);
             vi.dtMs = dt * 1000.0;
             vi.snap = g_track.snapshot();
             const wind::ViewOwner was = t.viewOwner.owner;
@@ -2700,6 +2703,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 // the clock stays true there instead of the gate switching off (review #289).
                 if (kb.VKey > 0 && kb.VKey < 256)
                     g_input.noteAnyKeyDown(GetTickCount64());   // downs and ups, like the hook
+                // Typing stamp (#328), like the hook: fresh non-modifier downs only.
+                static wind::TypingKeyFilter rawTyping;
+                if (rawTyping.note(static_cast<int>(kb.VKey), (kb.Flags & RI_KEY_BREAK) == 0))
+                    g_input.noteTypingKeyDown(GetTickCount64());
             } else if (ri->header.dwType == RIM_TYPEMOUSE) {
                 const RAWMOUSE& m = ri->data.mouse;
                 if ((m.usFlags & MOUSE_MOVE_ABSOLUTE) == 0) {

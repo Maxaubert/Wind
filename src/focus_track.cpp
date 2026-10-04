@@ -150,6 +150,21 @@ static bool CharRect(IUIAutomationTextRange* range, RECT& out) {
     return ok;
 }
 
+// An empty (collapsed) range: a caret, not a selection. Unknown counts as empty (review #349: only a
+// caret may be replaced by the #341 line-wide fallback; a long keyboard selection is simply wide).
+static bool RangeIsEmpty(IUIAutomationTextRange* range) {
+    int cmp = 1;
+    if (SUCCEEDED(range->CompareEndpoints(TextPatternRangeEndpoint_Start, range, TextPatternRangeEndpoint_End, &cmp)))
+        return cmp == 0;
+    BSTR text = nullptr;
+    if (SUCCEEDED(range->GetText(1, &text))) {
+        const bool empty = !text || SysStringLen(text) == 0;
+        if (text) SysFreeString(text);
+        return empty;
+    }
+    return true;
+}
+
 static bool RangeRect(IUIAutomationTextRange* range, RECT& out) {
     SAFEARRAY* sa = nullptr;
     if (FAILED(range->GetBoundingRectangles(&sa)) || !sa) return false;
@@ -160,10 +175,6 @@ static bool RangeRect(IUIAutomationTextRange* range, RECT& out) {
         out = { (LONG)d[0], (LONG)d[1], (LONG)(d[0] + (d[2] > 1 ? d[2] : 1)), (LONG)(d[1] + d[3]) };
         ok = d[3] > 0;
         SafeArrayUnaccessData(sa);
-        // #341: VS Code (Electron) reports the caret as the whole line (263,1752 3330x44). The character
-        // at the caret, when the editor exposes it, gives the real x.
-        RECT ch{};
-        if (ok && wind::IsLineWideCaret(out.left, out.top, out.right, out.bottom) && CharRect(range, ch)) out = ch;
     } else if (n == 0) {
         // An empty caret range has no rectangle: widen it by one character, then use its left edge.
         // The zero-element array is still a real SAFEARRAY allocation; destroy it here, or it leaks on
@@ -264,8 +275,43 @@ void FocusTracker::run() {
     ULONGLONG javaRetryAt = 0;              // a failed read is retried at most every 250 ms
     unsigned javaEvents = 0;
 
+    // #341 line-wide fallback, cached per focus (review #349): the character at the caret or the MSAA
+    // system caret is re-asked only on a real caret/focus event, a changed line rect, or at most every
+    // 250 ms from the 60 Hz poll, and "caret ignored" is logged only when the outcome changes.
+    struct LineWideCache {
+        unsigned gen = ~0u;          // focusGen it belongs to
+        RECT line{};                 // the line-wide rect it answered
+        bool ok = false;
+        RECT rc{};
+        const char* src = "";
+        ULONGLONG retryAt = 0;
+    } lineWide;
+
+    // #341: a UIA caret that is still the whole line (VS Code / Electron: 263,1752 3330x44, and a 3330x3
+    // strip) says nothing about where the caret is. The character at the caret, when the editor exposes
+    // it, gives the real x; else Chromium's system caret object for screen magnifiers (OBJID_CARET); else
+    // no caret rather than a guess. Only for a collapsed range: a real selection keeps its own rect.
+    auto fixLineWide = [&](IUIAutomationTextRange* range, RECT& rc, const char*& src, bool fromPoll) -> bool {
+        const ULONGLONG now = GetTickCount64();
+        if (lineWide.gen == focusGen && EqualRect(&lineWide.line, &rc) && fromPoll && now < lineWide.retryAt) {
+            if (lineWide.ok) { rc = lineWide.rc; src = lineWide.src; }
+            return lineWide.ok;
+        }
+        RECT out{}; const char* outSrc = src; bool ok = false;
+        if (CharRect(range, out)) ok = true;
+        else if (MsaaCaret(out)) { ok = true; outSrc = "msaa-caret"; }
+        const bool changed = lineWide.gen != focusGen || ok != lineWide.ok;
+        if (!ok && changed && log_.load())
+            wind::Log(wind::LogLevel::Info, "track", "caret ignored (whole line %ldx%ld, no system caret)",
+                      rc.right - rc.left, rc.bottom - rc.top);
+        lineWide.gen = focusGen; lineWide.line = rc; lineWide.ok = ok; lineWide.rc = out; lineWide.src = outSrc;
+        lineWide.retryAt = now + 250;
+        if (ok) { rc = out; src = outSrc; }
+        return ok;
+    };
+
     // Caret, fastest source first. Releases everything it acquires.
-    auto findCaret = [&](IUIAutomationElement* el, RECT& rc, const char*& src) -> bool {
+    auto findCaret = [&](IUIAutomationElement* el, RECT& rc, const char*& src, bool fromPoll) -> bool {
         if (Win32Caret(rc)) { src = "win32"; return true; }
         if (!el) return false;
         bool ok = false;
@@ -273,7 +319,11 @@ void FocusTracker::run() {
         if (SUCCEEDED(el->GetCurrentPatternAs(UIA_TextPattern2Id, __uuidof(IUIAutomationTextPattern2), (void**)&tp2)) && tp2) {
             BOOL active = FALSE; IUIAutomationTextRange* cr = nullptr;
             if (SUCCEEDED(tp2->GetCaretRange(&active, &cr)) && cr) {
-                if (active && RangeRect(cr, rc)) { ok = true; src = "uia-caret"; }
+                if (active && RangeRect(cr, rc)) {
+                    ok = true; src = "uia-caret";
+                    if (wind::IsLineWideCaret(rc.left, rc.top, rc.right, rc.bottom))   // a caret range is collapsed
+                        ok = fixLineWide(cr, rc, src, fromPoll);
+                }
                 cr->Release();
             }
             tp2->Release();
@@ -286,24 +336,16 @@ void FocusTracker::run() {
                 int n = 0; sel->get_Length(&n);
                 IUIAutomationTextRange* r0 = nullptr;
                 if (n > 0 && SUCCEEDED(sel->GetElement(0, &r0)) && r0) {
-                    if (RangeRect(r0, rc)) { ok = true; src = "uia-selection"; }
+                    if (RangeRect(r0, rc)) {
+                        ok = true; src = "uia-selection";
+                        if (wind::IsLineWideCaret(rc.left, rc.top, rc.right, rc.bottom) && RangeIsEmpty(r0))
+                            ok = fixLineWide(r0, rc, src, fromPoll);
+                    }
                     r0->Release();
                 }
                 sel->Release();
             }
             tp->Release();
-        }
-        // #341: a UIA caret that is still the whole line (VS Code / Electron: 263,1752 3330x44, and a
-        // 3330x3 strip) says nothing about where the caret is. Chromium keeps a system caret object for
-        // screen magnifiers (OBJID_CARET); use it, or report no caret rather than a guess.
-        if (ok && wind::IsLineWideCaret(rc.left, rc.top, rc.right, rc.bottom)) {
-            RECT m{};
-            if (MsaaCaret(m)) { rc = m; src = "msaa-caret"; }
-            else {
-                if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "caret ignored (whole line %ldx%ld, no system caret)",
-                                           rc.right - rc.left, rc.bottom - rc.top);
-                ok = false;
-            }
         }
         return ok;
     };
@@ -349,7 +391,7 @@ void FocusTracker::run() {
         // 2. The caret: published only when it moved within the same focus.
         if (wantCaret_.load()) {
             RECT rc{}; const char* src = "";
-            const bool found = java ? (javaHave ? (rc = javaCaret, src = "java", true) : false) : findCaret(el, rc, src);
+            const bool found = java ? (javaHave ? (rc = javaCaret, src = "java", true) : false) : findCaret(el, rc, src, fromPoll);
             if (found) {
                 // #337: a caret rect that also spans blank lines above (Chromium web editors, both its
                 // UIA and Win32 carets) is trimmed to one line at its bottom, the real caret line. The
@@ -364,8 +406,7 @@ void FocusTracker::run() {
                         wind::Log(wind::LogLevel::Info, "track", "caret trimmed (tall %ld px rect) to %ld px line", rc.bottom - rawTop, rc.bottom - rc.top);
                     // A new line reported part-way through the page's scroll stays on the current line.
                     int bot = (int)rc.bottom; top = (int)rc.top;
-                    wind::HoldMidScrollCaret((int)rc.left, top, bot, caretLine.lineH, caretHold);
-                    if ((top != rc.top || bot != rc.bottom) && log_.load())
+                    if (wind::HoldMidScrollCaret((int)rc.left, top, bot, caretLine.lineH, caretHold) && log_.load())
                         wind::Log(wind::LogLevel::Info, "track", "caret held on its line (mid-scroll report %ld-%ld)", rc.top, rc.bottom);
                     rc.top = top; rc.bottom = bot;
                 }
