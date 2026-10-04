@@ -15,18 +15,13 @@ https://developer.microsoft.com/microsoft-edge/webview2/
 `installer/MicrosoftEdgeWebview2Setup.exe`, redistributed unmodified as published by Microsoft.
 Setup runs it only when the WebView2 runtime is absent. Microsoft Software License Terms apply.
 
-### Svelte 4 (MIT)
+### Svelte 5 (MIT)
 Copyright (c) 2016-2026 Svelte contributors. The Svelte runtime is compiled into `ui/dist`,
 which ships inside the installer. https://github.com/sveltejs/svelte
 
 ## Build and test only, not shipped
 
-### doctest (MIT)
-Copyright (c) 2016-2023 Viktor Kirilov. `third_party/doctest.h`, compiled only into
-`wind_tests.exe`. https://github.com/doctest/doctest
-
-### Vite, @sveltejs/vite-plugin-svelte, @playwright/test
-Build tooling and end-to-end tests. MIT and Apache-2.0. Not linked into any shipped binary.
+doctest (MIT, `third_party/doctest.h`, compiled only into `wind_tests.exe`), Vite, @sveltejs/vite-plugin-svelte and @playwright/test (MIT and Apache-2.0) are build and test tooling, not linked into any shipped binary.
 
 ---
 

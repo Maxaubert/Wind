@@ -1,43 +1,22 @@
-A lightweight fullscreen magnifier for Windows. Smooth zoom that keeps tracking the mouse
-even when a game hides or locks the cursor.
+Fullscreen magnifier for Windows with smooth zoom that keeps tracking the mouse in games.
 
 ## Install
 
 Download **Wind-Setup-x64-__VERSION__.exe** below and run it (`Wind-Setup-x64.exe` is the same
-installer under a stable name: https://github.com/Maxaubert/Wind/releases/latest/download/Wind-Setup-x64.exe
-always serves the newest release). Setup installs to
-`C:\Program Files\Wind` and asks for administrator rights, offers to start Wind when you
-sign in, and installs the WebView2 runtime if the Settings window has no browser engine to
-run in. Your settings, profiles and logs live in `%LOCALAPPDATA%\Wind`, and uninstalling
-keeps them unless you say otherwise.
+installer under a name that always points at the latest release). Setup needs 64-bit Windows 10 or
+11 and administrator rights, installs to `C:\Program Files\Wind`, offers to start Wind when you
+sign in, and adds the WebView2 runtime if it is missing. Settings, profiles and logs stay in
+`%LOCALAPPDATA%\Wind`; uninstalling keeps them unless you choose otherwise.
 
-Requires 64-bit Windows 10 or 11.
+## Unsigned installer
 
-## One thing to know before you download
+The installer is not signed, so SmartScreen warns on first run: choose **More info**, then
+**Run anyway**. Some browsers and managed work computers block the download. During setup, Wind is
+signed locally with a certificate created for your PC, whose private key is deleted straight away;
+this lets zoom keys work over elevated windows. If that step fails, setup installs a build without
+that ability.
 
-**This installer is unsigned.** SmartScreen will warn on first run: choose *More info* then
-*Run anyway*. Some browsers and most managed work computers block the download outright,
-which a signature is the only real fix for; one is being arranged.
-
-That does not cost you UIAccess, though: Setup signs Wind for UIAccess on your own PC during
-install, using a certificate it generates and trusts locally, then deletes right away - so
-zoom shortcuts keep working with an elevated window focused (Task Manager, regedit, an
-elevated terminal), and the desktop uses the same compositor transform engine as a game.
-There is nothing to configure either way.
-
-## What is in it
-
-- Hold-to-zoom on the mouse side buttons, and configurable keybinds
-- Keeps tracking the cursor in games that hide or lock it, using raw HID input
-- Inspect mode: freeze the pointer and free-look around the magnified view
-- Automatic engine choice per zoom, between a DWM fullscreen transform and its own
-  DXGI + Direct3D 11 renderer
-- Named settings profiles, and a Settings app with guided first-run setup
-- Tracking modes: follow the text caret or the keyboard-focused control instead of the
-  pointer, with a smooth glide, plus a mouse edge mode
-- Multi-monitor and HDR aware
-
-## Verify your download
+## Verify
 
 SHA-256 of `Wind-Setup-x64-__VERSION__.exe` (and its copy `Wind-Setup-x64.exe`):
 
@@ -45,7 +24,4 @@ SHA-256 of `Wind-Setup-x64-__VERSION__.exe` (and its copy `Wind-Setup-x64.exe`):
 __SHA256__
 ```
 
----
-
-Built from `__COMMIT__` by the release workflow. The installer on this page is rebuilt and
-replaced on every push to `main`, so it always matches the current source.
+Built from `__COMMIT__`.

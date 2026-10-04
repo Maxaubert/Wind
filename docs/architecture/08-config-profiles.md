@@ -1,280 +1,173 @@
 # 08. Config and profiles
 
-Wind's entire configuration is one INI file, `magnifier.ini`, and that file is also the only
-IPC between the two binaries: `WindConfig.exe` writes it, `Wind.exe` dir-watches it and
-hot-reloads. There is no pipe, no shared memory, no window messages for settings, which keeps the
-settings app at zero performance coupling to the magnifier loop. Profiles (issue #178) sit on top
-as full-snapshot copies of that same file, one `.ini` per profile, with a handful of global keys
-that never travel. This chapter covers where the file lives, how it is parsed and sanitized, what
-hot-reloads versus what needs a restart, and the complete profile machinery.
+All configuration is one file, `magnifier.ini`. It is also the only settings channel between the
+processes: `WindConfig.exe` and `WindTray.exe` write it, `Wind.exe` watches and hot-reloads it.
+Profiles are full copies of the same file, one per profile. This chapter covers where the file
+lives, parsing, hot versus restart keys, profiles, and the key reference.
 
-## One file, two processes
+## The ini as IPC
 
-The contract is deliberately primitive: `WindConfig.exe` (the WebView2 host in
-`src/config_ui/main.cpp`) handles every `setConfig` bridge message by rewriting one key in the
-ini text (`wind::UpdateIniText`) and writing the file atomically. `Wind.exe` never receives a
-message about it; its tick loop notices the file changed and reloads. The two processes cannot
-disagree about state because there is only one state, on disk, and both resolve it through the
-same function (`wind::ResolveIniPath`, `src/config_path.h`).
+**Settings travel only through `magnifier.ini`.** `Wind.exe` runs a paced loop where one stalled
+millisecond shows as a pan hitch, so the settings GUI (a whole browser engine) lives in a separate
+process. The two never message each other about settings: there is one state, on disk, and both
+resolve it through `wind::ResolveIniPath()`. The settings app can crash or restart without touching
+the magnifier, and the processes run at different integrity levels (`Wind.exe` is UIAccess, the
+others are not).
 
-Atomicity matters because both processes write the same file: the tray's profile switch in
-`Wind.exe` and every `setConfig` in `WindConfig.exe` go through
-`wind::WriteTextFileAtomic` (`src/profiles_io.h`), which writes a temp file and
-`MoveFileExW(MOVEFILE_REPLACE_EXISTING)`s it into place. The temp name embeds the writer's
-process id, because a shared `<ini>.tmp` would let the two processes clobber each other's
-in-flight writes.
-
-**The full write/read flow: settings and profiles all funnel through one file on disk.**
+- Every writer uses `wind::WriteTextFileAtomic` (`src/profiles_io.h`): write a temp file, then
+  `MoveFileExW(MOVEFILE_REPLACE_EXISTING)`. The temp name embeds the process id, so two writers
+  never clobber each other's temp file.
+- The only cross-process kernel objects are the single-instance mutexes and the
+  `Local\Wind_QuitRequest` event (quit, restart handshake, installer). A window message would not
+  work: UIPI drops `PostMessage` from a normal process to a UIAccess one.
+- The tray's status block (`Local\Wind_TrayState_v1`) carries status, not settings
+  ([01](01-overview.md)).
 
 ```mermaid
 flowchart LR
-  subgraph config [WindConfig.exe]
-    SV[Svelte settings app] -->|setConfig key,value| WM[HandleWebMessage\nconfig_ui/main.cpp]
-  end
-  subgraph disk [Disk]
-    INI[(magnifier.ini\nResolveIniPath)]
-    PROF[(profiles/Name.ini\none per profile)]
-  end
-  subgraph core [Wind.exe]
-    WATCH[dir-change watch\n~4 Hz check] --> RELOAD[StripUiOnlyKeys fingerprint\nthen LoadConfig]
-    RELOAD --> TICK[RunTick uses new Config]
-    TRAY[tray Profiles submenu\ntray_app/tray_menu.cpp SwitchToProfile]
-  end
-  WM -->|UpdateIniText + atomic write| INI
-  WM -->|mirror: MakeProfileText| PROF
-  TRAY -->|MakeLiveText + atomic write| INI
-  TRAY -->|MirrorLiveToActiveProfile| PROF
-  INI --> WATCH
+  SV[Settings app] -->|setConfig| HOST[WindConfig.exe]
+  TRAY[WindTray.exe flyout] -->|atomic write| INI
+  HOST -->|UpdateIniText + atomic write| INI[(magnifier.ini)]
+  HOST -->|Save: MakeProfileText| PROF[(profiles/Name.ini)]
+  INI -->|dir watch, fingerprint, LoadConfig| CORE[Wind.exe]
 ```
 
-## Where the file lives: `ResolveIniPath`
+## Where the file lives
 
-`wind::ResolveIniPath()` (`src/config_path.h`) is the single answer to "which magnifier.ini",
-used by both exes so they always touch the same file. It probes whether the exe's own directory
-is writable by creating a sentinel file with `FILE_FLAG_DELETE_ON_CLOSE` (so the probe leaves no
-trace). If the write succeeds, the ini lives next to the exe: the dev and portable layout, where
-editing the file in the repo directory is convenient. If it fails, we are in a read-only install
-(in practice `C:\Program Files\Wind`), and the path falls back to
-`%LOCALAPPDATA%\Wind\magnifier.ini`, creating the directory if needed. On the first fall-back
-run, if a template ini exists next to the exe it is copied over as a seed, so deploy-time
-defaults carry to the writable location; the current deploy ships no template, so
-`LoadConfig` (`src/config.cpp`) simply creates the file from built-in defaults, with a long
-commented header so the user has something readable to hand-edit.
+`wind::ResolveIniPath()` (`src/config_path.h`) probes whether the exe's directory is writable
+(a sentinel file opened with `FILE_FLAG_DELETE_ON_CLOSE`).
 
-The reason this helper exists, and the reason it must always be used instead of a hardcoded
-`L"magnifier.ini"`, is the Program-Files-read-only law: the deployed UIAccess build lives in
-Program Files, `WindConfig.exe` runs as a normal user, and a write next to the exe there fails
-silently. Historically that single mistake broke Apply, live keybind capture, and WebView2
-initialization on the deployed build, each time as a "works in dev, dead in Program Files" bug.
-`wind::ResolveLogDir` in the same header applies the identical probe for logs and crash dumps,
-and the WebView2 user-data folder is likewise explicitly pointed at `%LOCALAPPDATA%\Wind\WebView2`
-for the same reason. The rule generalizes: anything the runtime writes goes to a per-user
-location, never next to the exe.
+- Writable (dev build): the ini sits next to the exe.
+- Read-only (`C:\Program Files\Wind`): `%LOCALAPPDATA%\Wind\magnifier.ini`, seeded from a template
+  next to the exe if one exists, otherwise created by `LoadConfig` with a commented header.
+- **Never hardcode `L"magnifier.ini"`.** Program Files is read-only for the non-admin runtime, and a
+  write next to the exe fails silently. The same applies to logs (`ResolveLogDir`) and the WebView2
+  user-data folder (`%LOCALAPPDATA%\Wind\WebView2`).
 
-## Parsing: defaults, clamps, forbidden binds
+## Parsing
 
-`wind::ParseConfig` (`src/config.cpp`, declared in `src/config.h`) is pure, windows.h-free, and
-unit-tested. Every field of `wind::Config` carries its default as a struct initializer, so a
-missing or malformed key silently keeps the default; parsing never fails. After reading the
-key=value lines it sanitizes:
+`wind::ParseConfig` (`src/config.cpp`) is pure and tested. Every `Config` field carries its default
+as an initializer, so a missing or malformed key keeps the default; parsing never fails.
 
-- Numeric ranges are clamped (`maxLevel`, speeds, `magnifyStep` to Windows' own 5..400, the
-  transform diagnostics knobs, and so on), so a hand-edited ini cannot push a value into a range
-  the runtime was never tested at.
-- `model` must be one of `render`, `magnify`, `transform`, `hybrid`; anything else becomes
-  `hybrid`, the product default ("Auto" in the UI). Note: a comment in
-  `src/config_ui/main.cpp` (`DoSwitchProfile`) still describes an older fallback; the code in
-  `ParseConfig` is the truth.
-- Every keybind VK is passed through `sanitizeVk`, which unbinds any key
-  `wind::IsForbiddenBindVk` rejects: left/right mouse button (VK 1/2), Backspace (8), and both
-  Windows keys (0x5B/0x5C). A bound key is swallowed system-wide by the LL hooks
-  (see [The input pipeline](06-input.md)), so binding one of these would cost the user a key
-  they cannot live without. The ban is enforced in three independent places, deliberately:
-  the hook never swallows these keys, `ParseConfig` strips them from the ini, and the settings
-  UI's keybind capture refuses them. Defense in depth, because the failure mode is "the user
-  cannot click anymore".
+- Numeric values are clamped to tested ranges.
+- `model` must be `render`, `transform` or `hybrid`; anything else becomes `hybrid`.
+- Unsafe binds read as unbound (`src/keybind_rules.h`, [06](06-input.md)).
+- `LoadConfig` is the I/O wrapper, excluded from the test build by `WIND_TESTS`.
 
-`LoadConfig` is the thin I/O wrapper (read file, `ParseConfig`, or create the commented default
-file when absent), excluded from the test build via `WIND_TESTS` so the pure half stays
-desktop-free.
+## Hot-reload and the UI-only fingerprint
 
-## Hot-reload and the `StripUiOnlyKeys` fingerprint
+The reload mechanics are in [02](02-tick-loop.md). A reload rebuilds `ZoomController`, so it
+collapses an active zoom; therefore `StripUiOnlyKeys` removes the four keys the core never reads
+(`uiTheme`, `uiPalette`, `showAdvanced`, `onboarded`) and the reload is skipped when the stripped
+text is unchanged. `profile` stays in the fingerprint, so a profile switch reloads.
 
-The reload mechanism itself lives in `RunTick` (`src/main.cpp`) and is described in
-[The tick loop](02-tick-loop.md): a `FindFirstChangeNotification` watch on the ini's directory,
-checked non-blockingly about four times a second, with an mtime compare before anything is
-re-read. What matters here is the guard behind it.
-
-Not every write to the ini should reload the core. The settings app owns three keys the core
-never consumes (`uiTheme`, `showAdvanced`, `onboarded`), and a real reload is not free: it
-resets the `ZoomController` and rebuilds the `CursorMapper`, so it collapses an active zoom to
-1x. Before the fingerprint existed, toggling the app theme while zoomed did exactly that (Max
-field report). So on every mtime change the core computes
-`wind::StripUiOnlyKeys(iniText)` (`src/config.cpp`): the ini text with the UI-only lines
-removed, everything else verbatim. It compares that stripped form against the one it stored at
-the last reload (`t.lastCoreIni`), and skips the reload entirely when they match. `profile`
-deliberately stays IN the fingerprint: the core mirrors settings into the active profile, so a
-profile switch must reload even though `profile` itself is a global key.
-
-When the fingerprint does differ, the reload path re-binds anything captured outside the
-`Config` struct: the mouse hook's button mapping (`g_input.setButtons`), the keyboard hook's
-swallowed-key set (`g_input.setKeys`), the `RegisterHotKey` registrations for hide-cursor and
-quick zoom, and the transform model's idle-release timeout (`TransformModel::setIdleReleaseMs`).
-Then `t.cfg = nc` and the per-tick consumers just see new values.
-
-## Hot versus restart knobs
-
-There is no formal registry of which keys are hot; the rule falls out of how a value is
-consumed, and the comment on each `Config` field states it. The heuristic for reading the code:
-
-- **Hot**: anything read from `t.cfg` per tick or per zoom-in. The reload swaps `t.cfg`, so the
-  next consumer sees the new value. Examples: `dwmFlush`, `cursorSensitivity`, `outline*`,
-  `desktopTransform`, `txMaxStepPct` (the per-tick relative level-step cap, shipped 25 per
-  mille after the issue #219 ramp-stall soaks), `lockApps` and `warpLock` (the issue #221
-  pointer-warping-game lock tells), `multiMonitor` (applies at the next zoom-in),
-  `txIdleReleaseMs` (pushed into the live model by the reload path), and `magnifyStep`
-  (live-written to the Magnifier registry).
-- **Restart**: anything read once during initialization and baked into constructed state.
-  `model` is the canonical case: the model object is built at launch, so switching it requires
-  a process restart (see the eviction handshake below). `gpuPriority` applies at D3D device
-  build; `spriteBand16` at sprite-window creation; `zorderBand` at overlay creation.
-
-The settings UI encodes the same split: every row applies live to the session (the live ini),
-Save writes the session into the active profile, keybinds also persist at once, and a `model`
-change goes through an explicit restart
-(see [The settings UI](09-settings-ui.md)).
+**Hot or restart follows from how a value is read.** A key read from `t.cfg` per tick or per
+zoom-in is hot. A key baked into state at initialization needs a restart: `model` (which engines
+exist), `txHookWrite` (runtime thread ownership), `gpuPriority` (device build), `spriteBand16`
+(sprite creation), `zorderBand` (overlay creation). The comment on each `Config` field says which.
 
 ## Profiles
 
-Profiles (issue #178, spec
-[2026-08-12-profiles-design.md](../superpowers/specs/2026-08-12-profiles-design.md)) are named,
-switchable, full snapshots of the settings, keybinds included. The design principle is that the
-live `magnifier.ini` stays the single config both exes use; a profile is just a saved copy of
-its profile-scoped content, stored as `profiles\<Name>.ini` next to the resolved ini
-(`wind::ProfilesDirFromIni`, `src/profiles_io.h`), plus a `profile=<name>` pointer in the live
-ini saying which one is active.
+A profile is a named full snapshot of the settings, keybinds included, stored as
+`profiles\<Name>.ini` next to the resolved ini, with `profile=<name>` in the live ini. Pure logic is
+in `src/profiles.*` (tested); I/O in `src/profiles_io.h`.
 
-The logic/I-O split mirrors the rest of the codebase: `src/profiles.h`/`.cpp` is pure
-(no windows.h, doctested), `src/profiles_io.h` is the thin Win32 layer shared by both exes.
+**Global keys never travel with a profile.** `IsGlobalProfileKey` covers `profile`, `onboarded`,
+`uiTheme`, `uiPalette`, `showAdvanced` and the five tray layout keys (`trayPerf`, `traySliders`,
+`traySliderOrder`, `trayToggles`, `trayToggleOrder`). `MakeProfileText` strips them from profile
+files; `MakeLiveText` carries them over from the old live text. Both work line by line and keep
+comments and order.
 
-### Global keys never travel
+**Session model: the live ini is the session, the profile file is the saved state.**
 
-`wind::IsGlobalProfileKey` (`src/profiles.cpp`) names the four keys that are machine/app state,
-not settings: `profile` (the active-profile pointer itself), `onboarded`, `uiTheme`, and
-`showAdvanced`. Switching profiles must not replay someone's onboarding or flip the app theme,
-so these lines are stripped from every profile file (`MakeProfileText`) and carried over from
-the old live text on every switch (`MakeLiveText`). Both transforms work line-by-line and keep
-everything else verbatim, comments and ordering included, so profile files stay hand-editable
-exactly like the live ini.
+- Every settings change writes only the live ini, and the core hot-reloads it.
+- The profile file changes on Save (`saveSession`) or when a keybind is captured
+  (`setConfigPersist`, which writes that key to both).
+- Unsaved means `SessionDiffers(live, profile)`: a profile-scoped key differs; globals ignored.
+- At start the core runs `ResetSessionToProfile`, so unsaved changes never survive a restart,
+  unless `%LOCALAPPDATA%\Wind\session.keep` marks a restart Wind triggered itself (engine change,
+  profile switch with a model change). It is consumed once.
+- Tray Quit compares the files and prompts Save, Discard or Cancel.
 
-### Switching: `MakeLiveText` and the model restart
+**Switching** (Settings or the tray flyout, the same sequence):
 
-A switch, whether from the tray (`SwitchToProfile`, `src/tray_app/tray_menu.cpp`, in `WindTray.exe`) or the settings-UI titlebar
-dropdown (`DoSwitchProfile`, `src/config_ui/main.cpp`), is the same sequence:
+1. Read and check the profile with `ProfileTextError`, which rejects binary, oversized or
+   unparseable text. A read failure is distinct from an empty file; treating a locked file as empty
+   would reset the user to defaults.
+2. Settings asks Save, Discard or Cancel when the session has unsaved changes. The tray does not
+   prompt.
+3. Write `MakeLiveText(profile, oldLive, name)` over the live ini.
+4. The core hot-reloads everything except `model`. When the parsed `model` differs, the surface
+   relaunches `Wind.exe`. If the relaunch fails, it writes the old `model` back, so the ini always
+   matches the running engine.
 
-1. Validate the profile file. `wind::ProfileTextError` rejects binary content, absurd size, and
-   text that has non-comment lines yet parses to zero keys, so a corrupt or locked file can
-   never be silently applied. Crucially, a read FAILURE is distinguished from an EMPTY file,
-   because empty is legitimate (see below).
-2. The settings UI asks Save / Discard / Cancel before a switch when the session has unsaved
-   changes (live differs from the profile). A tray switch carries no prompt and discards the
-   outgoing profile's unsaved changes by design.
-3. `wind::MakeLiveText(profileText, oldLiveText, name)` builds the new live ini: the profile's
-   text with any smuggled global-key lines stripped, plus the globals carried from the old live
-   text, plus `profile=<name>`. Written atomically over `magnifier.ini`.
-4. The core's dir-watch hot-reloads everything except `model`. Both switch surfaces compare
-   `ParseConfig(oldLive).model` against `ParseConfig(newLive).model` (parsed, not raw text, so
-   canonicalization is shared) and, when they differ, relaunch `Wind.exe`. If the relaunch
-   fails, both surfaces write the OLD model back into the new live ini, preserving the
-   invariant "ini model == running model" while keeping the rest of the switch.
+**The relaunch uses the eviction handshake, never a kill.** The new instance finds the
+single-instance mutex held, sets `Local\Wind_QuitRequest` and waits for the old one to exit. Only a
+clean exit restores the OS cursor and releases `ClipCursor`.
 
-The relaunch works through the **eviction handshake** rather than any kill: the new instance's
-`AcquireSingleInstance` (`src/main.cpp`) finds the single-instance mutex held, signals the named
-event `Local\Wind_QuitRequest`, and waits for the incumbent to exit cleanly before taking over.
-Only the clean exit restores the OS cursor, releases `ClipCursor`, and restores the native
-Magnifier registry backup, which is also why the installer uses the same event instead of
-`taskkill`. A kernel event is used instead of a window message because the deployed `Wind.exe`
-is UIAccess and UIPI silently drops `PostMessage` from the normal-IL config host.
+**An empty profile file means factory defaults**: every profile key falls back to its `ParseConfig`
+default. "New profile" writes a near-empty file (a comment plus `model=hybrid`) and switches to it.
 
-**Profile switch, end to end (settings-UI surface; the tray path is the same shape).**
+**Seeding.** `EnsureProfilesSeeded` runs at startup before the ini mtime is recorded. With no
+`profiles\` directory it creates one, saves the current settings as `Default.ini` and writes
+`profile=Default`. The directory is the latch, so a failed `Default.ini` write removes it again.
 
-```mermaid
-sequenceDiagram
-  participant UI as WindConfig.exe
-  participant P as profiles/Name.ini
-  participant I as magnifier.ini
-  participant W as Wind.exe (running)
-  participant W2 as Wind.exe (new)
-  UI->>P: read + ProfileTextError check
-  UI->>P: MirrorLiveToActiveProfile (outgoing profile)
-  UI->>I: write MakeLiveText(profile, oldLive, name)
-  I-->>W: dir-watch fires, fingerprint differs, hot-reload
-  alt model changed
-    UI->>W2: LaunchWind (ShellExecute)
-    W2->>W: signal Local\Wind_QuitRequest
-    W->>W2: clean exit releases mutex, W2 takes over
-  end
-```
+**Names** become file names: `ProfileNameError` rejects path and control characters, leading or
+trailing dots and spaces, reserved device names and names over 40 characters. Matching is
+case-insensitive (`SameProfileName`). `NextCopyName` produces "Name copy", "Name copy 2".
 
-### Session model: live ini = session, profile file = saved
+## Key reference
 
-Since 0.16.0 (#303) profiles are no longer live-bound. Every settings change writes only the live
-ini (the session) and the core hot-reloads it; the active profile's file changes only on Save
-(`MakeProfileText(live)`) or when a keybind is captured (`setConfigPersist` updates that one key in
-both). "Unsaved" means `wind::SessionDiffers(live, profile)` (`src/profiles.*`): any profile-scoped
-key differs, global keys ignored, a key missing on one side compares as missing, values trimmed.
-The session resets when Wind closes: at start the core calls `ResetSessionToProfile`
-(`src/profiles_io.h`) and rewrites the live ini from the active profile via `MakeLiveText`, unless
-`%LOCALAPPDATA%\Wind\session.keep` exists, which a self-triggered restart (engine change, profile
-switch with a model change) leaves behind and which is consumed once. The tray's Quit also compares
-files with `SessionDiffers` and prompts Save / Discard / Cancel. See
-[The settings UI](09-settings-ui.md#session-model-instant-apply-explicit-save).
+Every key works in the ini whether or not Settings shows it. Keys hot-reload unless marked.
 
-### Empty file = factory defaults
+**Binds.** All ship unbound until the first-run setup.
 
-An empty (or comment-only) profile file is the legitimate representation of factory defaults:
-`MakeLiveText` of empty text yields a live ini holding only the globals, and every
-profile-scoped key then falls back to its `ParseConfig` struct default. That is literally how
-"create new profile" works: the host writes a near-empty file (one comment plus `model=hybrid`,
-seeded explicitly so every surface agrees on the product default) and switches to it. This is
-also why the read-versus-empty distinction in step 1 above is load-bearing: treating a locked
-file as empty would wipe the user's settings to defaults.
+| Keys | Meaning |
+|---|---|
+| `zoomInVk`/`zoomInMods`, `zoomInButton`/`zoomInButtonMods`, and the `*2` alternates; same for `zoomOut*` | Hold to zoom. Buttons: 1/2 side buttons, 3/4/5 left/right/middle click (with modifiers), 6/7 wheel up/down |
+| `panLeftVk`, `panRightVk`, `panUpVk`, `panDownVk` + `*Mods`, `panKeysOn` | Keyboard panning while zoomed |
+| `hideCursorVk`/`hideCursorMods`, `hideCursorOn` | Toggle the pointer while zoomed |
+| `cursorLockVk`/`cursorLockMods`, `cursorLockOn` | Inspect mode |
+| `recenterVk` | Recentre the view on the cursor |
+| `quickZoomHotkeyMode`, `quickZoomModifier` (default Ctrl), `quickZoomVk`/`quickZoomMods`, `quickZoomDefault` (4.0) | Quick zoom: modifier + a zoom key (mode 0) or a dedicated hotkey (mode 1) toggles between 1x and the remembered level |
+| `noSwallowApps` | Exes where the keyboard hook is dropped |
 
-### Seeding: `EnsureProfilesSeeded`
+**Zoom and view.**
 
-`wind::EnsureProfilesSeeded` (`src/profiles_io.h`) runs at `Wind.exe` startup, before the tick
-loop records the ini mtime (so the seed write never triggers a spurious hot-reload). On the
-first launch after the profiles update there is no `profiles\` directory; the seed creates it,
-captures the user's CURRENT settings as `Default.ini`, and writes `profile=Default` into the
-live ini, so existing installs get a Default profile with zero user action. The directory's
-existence is the idempotency latch, which is why a failed `Default.ini` write rolls the
-still-empty directory back: otherwise a half-migrated state would persist forever. The config
-host calls the same function defensively before creating a profile, so creating one on a
-pre-migration install cannot trip the latch without capturing Default first.
+| Keys | Meaning |
+|---|---|
+| `maxLevel` (12), `zoomInSpeed`, `zoomOutSpeed`, `zoomEaseOutMs`, `smoothZoom*` | Range and feel of the zoom |
+| `cursorSensitivity` (1.0), `cursorSmoothing`, `panSpeed` (1.0) | Mouse and arrow-key pan speed and inertia |
+| `mouseAlign` (0 centred, 1 within the edges), `mouseMarginPct` | Where the pointer sits while the view moves |
+| `trackCaret` (1), `trackFocus` (0), `trackAlign`, `trackGlideMs` (200) | Follow the text caret and keyboard focus |
+| `lockApps`, `warpLock` (0) | Games whose sessions pan from raw mouse motion; heuristics for unlisted games |
+| `multiMonitor` (0) | 1 follows the cursor's monitor at each zoom-in |
 
-### Validation and naming
+**Image and cursor.**
 
-Profile names become NTFS file names, so `wind::ProfileNameError` rejects path characters,
-control characters, leading/trailing dots and spaces, Windows reserved device names, and
-anything over 40 characters; the bridge refuses any name that fails it before it can reach
-`ProfilePath`. Identity is case-insensitive everywhere (`SameProfileName`,
-`ProfileNameTaken`), matching NTFS, and the filesystem itself is the final authority on
-collisions since its Unicode case folding is broader than the pure ASCII check. `NextCopyName`
-generates "Name copy", "Name copy 2", ... for duplication, truncating to fit the cap.
+| Keys | Meaning |
+|---|---|
+| `txSamplingMode` (0) | Transform sampling: 0 nearest, 1 smooth ("High resolution cursor", coupled to MPO, [05](05-transform-engine.md)) |
+| `bilinear`, `sharpness`, `brightness`, `hdrTonemap` (1) | Render engine image |
+| `cursorConstantSize` (0), `cursorVisibility` (`auto`) | Render cursor size and when it is drawn |
+| `colorWarmPct` (0), `colorDimPct` (100) | Warmth and brightness filter |
+| `outline*` | Zoom outline |
 
-## Pointers
+**Engine.** `model` needs a restart.
 
-- `src/config.h` / `src/config.cpp`: the `Config` struct with per-key defaults and hot/restart
-  comments, `ParseConfig`, `IsForbiddenBindVk`, `StripUiOnlyKeys`, `LoadConfig`.
-- `src/config_path.h`: `ResolveIniPath`, `ResolveLogDir`, the writability probe.
-- `src/profiles.h` / `src/profiles.cpp`: pure profile logic (global keys, name validation,
-  `MakeProfileText` / `MakeLiveText`, `ProfileTextError`).
-- `src/profiles_io.h`: profile file I/O, `WriteTextFileAtomic`, `MirrorLiveToActiveProfile`,
-  `EnsureProfilesSeeded`.
-- `src/config_ui/main.cpp`: the bridge (`HandleWebMessage`), `DoSwitchProfile`, the setConfig
-  mirror; `src/tray_app/tray_menu.cpp`: the tray switch surface.
-- Spec: [2026-08-12-profiles-design.md](../superpowers/specs/2026-08-12-profiles-design.md).
-- Related chapters: [The tick loop](02-tick-loop.md) (the watch/reload mechanics),
-  [The settings UI](09-settings-ui.md) (the other side of the bridge),
-  [The input pipeline](06-input.md) (why forbidden binds exist),
-  [Build, test, release](11-build-test-release.md) (the installer's use of the quit event).
+| Keys | Meaning |
+|---|---|
+| `model` | `hybrid` (Auto, default), `render` or `transform`; anything else reads as `hybrid` |
+| `engineGame`, `engineAcrylic`, `engineDesktop`, `engineOther` | `auto`, `transform` or `render` per window category, Auto only |
+| `desktopTransform` (1) | Let Auto use the transform on the desktop when UIAccess is available |
+| `transformExclude`, `renderExclude` | Exes that never get Transform, or never get Render |
+| `vsync` (1), `dwmFlush` (0), `gameFpsCap`, `gpuPriority` (restart) | Render pacing and game coexistence |
+| `zorderBand` (0, restart) | 16 covers the shell in the UIAccess build, at the cost of the Snipping Tool ([04](04-render-engine.md)) |
+
+**Global and UI.** `profile`, `onboarded`, `uiPalette` (`grey`, `ember`, `ocean`, `hicon`),
+`showAdvanced`, `trayPerf`, `traySliders`, `traySliderOrder`, `trayToggles`, `trayToggleOrder`.
+`uiTheme` is a legacy key, ignored.
+
+**Diagnostics.** `diagnostics=1` writes the frame-pacing log; the rest is in
+[12](12-instrumentation.md). Transform tuning keys (`tx*`, `ixDecimate`, `mpoBuster`, `tdrTest`)
+are documented on their `Config` fields in `src/config.h`.

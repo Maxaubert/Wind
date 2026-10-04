@@ -1,12 +1,18 @@
 # Transform-model hitching: findings and vetted builds (issue #148)
 
+> **Status.** Live design: no magnification context outside sessions, identity park at zoom-out,
+> release after `txIdleReleaseMs`, per-tick level writes, the `txWarmHz` warm pulse
+> ([05](architecture/05-transform-engine.md)). Open work: zoom-in response time (#310). The cursor
+> grows with the zoom in every engine by owner decision (#253), so the transform's magnified
+> pointer is intended, not a defect.
+
 Everything below is harness-measured over Foundation (an OpenGL city builder) on the 4K/144Hz
 RTX 5090 box with MPO disabled. Game frametimes come from RTSS shared memory (`rtssread.exe`);
 "spike frames" means game frames over 25 ms. Every zoom test verifies the zoom actually engaged
-(the model logs `txsession ... maxLevel=` per session) - a dead keybind silently faking a clean
+(the model logs `txsession ... maxLevel=` per session) – a dead keybind silently faking a clean
 result was the single biggest source of false positives in this work.
 
-Harness (scratchpad): `bench.ps1` (middle-click recipes), `hitchrun.ps1` (aggressive zoom
+Harness (scratchpad, not in the repo): `bench.ps1` (middle-click recipes), `hitchrun.ps1` (aggressive zoom
 flicks + camera roaming), `validate.ps1` (correctness gate), `cursorwatch.exe` (what an app does
 to the cursor), `maglab.exe` (Magnification API lifecycle), `rtssread.exe`, `gl_churn.exe`.
 
@@ -15,7 +21,7 @@ to the cursor), `maglab.exe` (Magnification API lifecycle), `rtssread.exe`, `gl_
 While ANY magnification context exists in the process, DWM composites magnification-aware, and
 then every cursor visibility or shape change any app makes costs a re-composite. Foundation
 hides and re-shows the pointer on every middle-click (`cursorwatch`: 25 visibility flips in one
-20 s test), so wheel-clicks spiked frames while left-clicks were free - with Wind merely
+20 s test), so wheel-clicks spiked frames while left-clicks were free – with Wind merely
 RUNNING, never zoomed. Writing level 1.0 does NOT leave the mode; only `MagUninitialize` does.
 
 | recipe (14 middle-click drags) | before | after |
@@ -44,7 +50,7 @@ park at exact identity at zoom-out; release the context 1.2 s later.
 `phaseprobe.ps1` spaces the phases a few seconds apart so each lands in its own sample second.
 Result across cycles: the spikes sit **exactly at zoom-in** (~35-42 ms, one per zoom), with
 nothing during the hold, the pan, or the idle after. That is DWM building its magnification
-machinery when the level first leaves 1.0 - the unavoidable other half of releasing the context
+machinery when the level first leaves 1.0 – the unavoidable other half of releasing the context
 between sessions. Entering at a sub-pixel level first ("session warm-up") was tried and measured
 WORSE (4 spikes per 3 cycles instead of 2, and it added zoom-out spikes).
 
@@ -117,11 +123,11 @@ smoothness, which is why the transform model stays the default for games.
 
 ## Measured-negative experiments (do not re-try without new evidence)
 
-- **Async transform writes**: impossible - the Magnification API is thread-affine, a writer
+- **Async transform writes**: impossible – the Magnification API is thread-affine, a writer
   thread's calls ALL fail (144/144), so Wind reports a zoom level while DWM applies nothing.
   Pointless anyway (see write cost above).
 - **`txGrid`** (snap levels to a geometric ladder so DWM's per-factor surface cache hits):
-  much worse - 0 spikes/22 ms continuous vs 8 spike-seconds/551 ms at 3 %, 7/583 ms at 6 %.
+  much worse – 0 spikes/22 ms continuous vs 8 spike-seconds/551 ms at 3 %, 7/583 ms at 6 %.
 - **`txLevelStep`** (skip sub-threshold level changes): no better than continuous.
 - **Hover sync** (one absolute cursor move per pan-rest in freeze sessions): TDRs the driver
   even with MPO off. Absolute cursor placement under an active transform is an independent
@@ -134,11 +140,11 @@ All three run the same deployed build; switch with the `model` key (restart Wind
 
 | config | ini | measured |
 |---|---|---|
-| **A - default** | `model=hybrid` | transform in games, render on the desktop. Middle-click recipes all 0 spikes; while zoomed 144 fps / 1 hitch; one ~36 ms spike per zoom-in. Cursor magnifies with zoom (violates the cursor-size rule). |
-| **B - render everywhere** | `model=render` | Middle-click recipes 0 spikes; constant-size cursor (satisfies the rule); no zoom-in spike. Cost: the magnifier's own loop runs 92 fps with many hitches while panning. |
-| **C - per-app opt-out** | `model=hybrid` + the app's exe in `%LOCALAPPDATA%\Wind\churny_apps.txt` | keeps transform for other fullscreen apps (F11 video) while a specific game uses render. |
+| **A – default** | `model=hybrid` | transform in games, render on the desktop. Middle-click recipes all 0 spikes; while zoomed 144 fps / 1 hitch; one ~36 ms spike per zoom-in. Cursor magnifies with zoom. |
+| **B – render everywhere** | `model=render` | Middle-click recipes 0 spikes; no zoom-in spike. Cost: the magnifier's own loop runs 92 fps with many hitches while panning. |
+| **C – per-app opt-out** | `model=hybrid` + the app's exe in `%LOCALAPPDATA%\Wind\churny_apps.txt` | keeps transform for other fullscreen apps (F11 video) while a specific game uses render. |
 
-Correctness gate for A (`validate.ps1`, teardown between every session): PASS - 6/6 sessions
+Correctness gate for A (`validate.ps1`, teardown between every session): PASS – 6/6 sessions
 reach 12x, 6 releases, cursor never stranded.
 
 ## Auto-mode lockup (fixed 2026-07-26)
@@ -174,19 +180,19 @@ desktop and in games.
 COST, and the 2026-09-03 refinement (issue #246): every warm write is a real source change, so
 DWM re-renders the whole magnified screen for it. Measured with `tools/gpu_ab.ps1` on the
 controlled solid target (dwm.exe 3D-engine %): a zoomed session sitting still cost 16.1% with
-per-tick warming, 0.0% with it off, 0.2% for native Magnifier at rest - which was the entire GPU
+per-tick warming, 0.0% with it off, 0.2% for native Magnifier at rest – which was the entire GPU
 gap the field reported, since panning costs both magnifiers the same order (Wind 16%, native 12%
 in either tracking mode). The warm write is now a PULSE on `txWarmHz` (one displacement plus its
 return per period; an open pulse always closes before any other gate). Rest cost per cadence:
 48Hz 10.1%, 24Hz 8.3%, 12Hz 4.6% (shipped), 6Hz 2.4%. `tools/warm_cadence_sweep.ps1` scores
 each cadence with the pan-wake probe, the txtrace wake-write dt and rest GPU; on the desktop the
 wake-write dt stays 7-13ms at every cadence INCLUDING warming off, so the desktop cannot set the
-floor - the field verdict in a game does (12Hz: no hitch and no visible twitch reported).
+floor – the field verdict in a game does (12Hz: no hitch and no visible twitch reported).
 
 ### Why this took so long, and what was measured wrong
 
 - **Composition rate is the wrong metric.** Mode 4 (perturb the LEVEL by 2e-5) held composition at
-  a flat 6.94ms through every rest and scored 0.00 stalls/s in 15/15 automated rounds - and the
+  a flat 6.94ms through every rest and scored 0.00 stalls/s in 15/15 automated rounds – and the
   user still felt the spike. A sub-pixel level nudge is not a real source change, so DWM skips the
   work and the first genuine pan write still pays. Anything that measures only WHEN DWM composited,
   and not whether it re-rendered the magnified region, will pass a build that is still broken.
@@ -207,7 +213,7 @@ floor - the field verdict in a game does (12Hz: no hitch and no visible twitch r
 The panel is variable-refresh 23-143Hz, and the transform model paces on DwmFlush by design, so
 Wind's tick interval follows whatever the display is doing (measured: DOOM gameplay presents
 13.68ms / 73fps, display change 13.29ms). The lens easing used to keep a fixed fraction of the gap
-PER TICK, so an uneven interval changed the felt inertia every tick - a steady hand produced an
+PER TICK, so an uneven interval changed the felt inertia every tick – a steady hand produced an
 unsteady lens. Now re-derived from the MEASURED interval (`CursorMapper::setTickDeltaMs`), so the
 inertia is constant in real time whatever the refresh does. Issue #223 had already fixed this for
 different FIXED rates; VRR is the case it did not cover.
@@ -246,7 +252,7 @@ FIXES, in order of preference:
    REBOOT). No planes exist, so the game is always composited and the behaviour is deterministic.
    This is also what lifts the pan walls (issue #148), so it fixes two things at once.
 2. **The MPO buster ghost** (`mpoBuster=1`) is meant to force the demotion when MPO is on, and it
-   DOES work when it wins - but it does not reliably win: several takes sat at ~53 % plane with the
+   DOES work when it wins – but it does not reliably win: several takes sat at ~53 % plane with the
    ghost enabled. Making the demotion deterministic (verify the plane state and re-assert until it
    takes, rather than a blind 500 ms cadence) is an open Wind bug.
 
@@ -260,7 +266,7 @@ does and does not respond to.
 
 - **Re-sending the same transform** (`txWarmMode=2`): wake 23.8/s. DWM ignores an identical write,
   exactly as the old "DWM parks on static values anyway" comment claimed.
-- **Republishing the input transform** (`txWarmMode=3`): wake 26.5/s - WORSE than baseline, and it
+- **Republishing the input transform** (`txWarmMode=3`): wake 26.5/s – WORSE than baseline, and it
   degraded sustained motion too (3.7/s vs 0.07/s).
 - **An unrelated per-frame damage source** (probe `-DamagePin`): wake 28.2/s, and it did not move
   the composition rate at all. It is not about generic damage.
@@ -269,12 +275,12 @@ does and does not respond to.
 ### Why nothing shipped
 
 1. **Neither working mode is visually free.** Mode 1 shifts the whole image a rigid 1 screen px at
-   tick rate (the #204 shimmer). Mode 4 was believed to displace 0.077px - that is in SOURCE pixels,
+   tick rate (the #204 shimmer). Mode 4 was believed to displace 0.077px – that is in SOURCE pixels,
    so on screen it is `0.077 * level`: ~0.6px at 7x, ~1.6px at 21x, worse than mode 1 at high zoom.
    Its applied stream also shows the derived source origin flipping a whole source pixel
    (offX 2411 <-> 2412 at 7.37x).
 2. **The premise was wrong.** Sampling native's applied stream shows it writes NOTHING across a
-   330ms rest - a single level value for an entire run - and still holds 6.94ms composition. Native
+   330ms rest – a single level value for an entire run – and still holds 6.94ms composition. Native
    is not staying smooth by keeping warm. Do not rebuild the "keep writing" theory on this evidence.
 3. **The metric is bimodal on one binary.** The same build scored 0.00/s and 18-29/s wake stalls on
    consecutive takes with nothing changed. Leading suspect is VRR refresh hunting: the panel runs
@@ -319,7 +325,16 @@ phone slow-motion video), with `spriteCapturable=1` so Wind's cursor is visible 
 
 ## Open items
 
-- Zoom-ramp spikes (~1 per cycle, 45 ms) - DWM re-scale cost during the ramp.
-- CURSOR SIZE: the transform model's pointer is magnified by DWM, which violates the standing
-  product rule (constant on-screen size at every zoom level). Unsolved for this model; the
-  render model already satisfies it.
+- Zoom-ramp spikes (~1 per cycle, 45 ms) – DWM re-scale cost during the ramp.
+- Zoom-in response time (#310): the cursor bridge (two `DwmFlush` calls) is ~19 of the ~27 ms to
+  the first composite.
+
+## Hook writes: fast and wrong (issue #206)
+
+Tick-paced writes measured 4.36 ms median cursor-to-write latency (spread across one 144 Hz tick)
+against the built-in Magnifier's 0.58 ms, which writes from inside its mouse hook. Wind's hook-write
+path (`txHookWrite=1`: runtime ownership on the hook thread, `MouseProc` writes the transform from
+each event's coordinates, single-writer contract with the tick) reached 0.37 ms median. The field
+rejected it: writing 434-685 times a second against a 144 Hz compositor rewrote the view 4-5 times
+per displayed frame, so the content and the DWM-sampled cursor came from different instants and the
+cursor swam. Time-to-write is not the metric; frame coherence is. It ships off.

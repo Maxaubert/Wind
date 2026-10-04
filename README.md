@@ -1,210 +1,89 @@
 <div align="center">
-  <img src="assets/wind-badge.svg" alt="Wind" width="128">
+  <img src="assets/wind-badge.svg" alt="Wind logo" width="128">
 
   # Wind
 
-  Barely there. Everywhere.
+  Fullscreen magnifier for Windows.
 
-  A lightweight magnifier for Windows.
+  [![Latest release](https://img.shields.io/github/v/release/Maxaubert/Wind?style=flat-square&color=5b5bd6&label=release)](https://github.com/Maxaubert/Wind/releases/latest)
+  [![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-5b5bd6?style=flat-square)](https://github.com/Maxaubert/Wind/releases/latest)
+  [![Licence: proprietary](https://img.shields.io/badge/licence-proprietary-5b5bd6?style=flat-square)](LICENSE)
 
-  [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square)](https://github.com/Maxaubert/Wind)
-  [![Built with](https://img.shields.io/badge/C%2B%2B-Direct3D%2011-00599C?style=flat-square)](https://github.com/Maxaubert/Wind)
-
-  [Download](https://github.com/Maxaubert/Wind/releases/latest/download/Wind-Setup-x64.exe) · [Documentation](docs/architecture/README.md)
+  [Download](https://github.com/Maxaubert/Wind/releases/latest/download/Wind-Setup-x64.exe) · [Releases](https://github.com/Maxaubert/Wind/releases) · [Developer docs](docs/architecture/README.md)
 </div>
-
----
-
-
 
 https://github.com/user-attachments/assets/59939cd8-8bf3-4fbf-b978-8e89a4ebde1f
 
-
-
-
-
-
-
-A replacement for the built-in Magnifier, with smooth continuous zoom that keeps tracking the
-mouse even when games hide, clip, or center-lock the cursor.
-
-> Contributing or curious how it works? The developer book lives at
-> [docs/architecture](docs/architecture/README.md): twelve chapters covering every subsystem,
-> end to end.
-
-Wind renders the magnified view itself - capturing the desktop with DXGI Desktop Duplication
-and scaling it on the GPU (Direct3D 11) onto a click-through overlay, or magnifying inside the
-compositor (DWM fullscreen transform) when a game is in front. That gives sub-pixel smooth
-panning and a crisp cursor that the integer-offset Windows Magnification API can't, and lets
-you keep clicking and using the screen while zoomed.
+Wind replaces the built-in Magnifier with smooth, continuous zoom. It keeps tracking the mouse when
+a game hides, clips or center-locks the cursor, and clicks pass through to the app under it.
 
 ## Features
-- **Smooth, sub-pixel zoom and pan** with light inertia - no stepping or cursor hop.
-- **Interact while zoomed** - clicks pass through to the app under the cursor.
-- **Auto engine per situation** - games get the compositor-internal transform path (stays
-  smooth under heavy GPU load), everything else the high-fidelity render overlay; Wind switches
-  live when you alt-tab, keeping the zoom level.
-- **Named settings profiles** - full snapshots (keybinds included), switchable from the tray
-  menu or the Settings titlebar.
-- **Real cursor** - the actual pointer shapes (text I-beam and link hand included), drawn
-  crisp at every zoom.
-- **HDR-aware** - on an HDR display it tonemaps to match the desktop automatically (tracking
-  the live SDR-brightness slider); on SDR it's a straight passthrough. No per-machine tuning.
-- **Follows the mouse even when a game locks/hides the cursor** (HID-level Raw Input, no
-  injection - anti-cheat safe).
-- **Inspect mode** - freeze the cursor (keeps a hover/tooltip alive) and free-look around with
-  a crosshair; clicks land where you aim.
-- **Zoom lock detection** - games that pin the mouse to the screen center (DOOM-style
-  mouselook) would drag the zoom back with it; listed apps (Settings > Cursor) pan from raw
-  mouse motion instead.
-- **Tracking modes** - the view can follow you instead of only the pointer: it recenters on
-  the text caret as you type (on by default, including Java apps such as IntelliJ and PyCharm) or on the keyboard-focused control (off by
-  default), gliding smoothly to each new target; a mouse edge mode keeps the pointer from
-  reaching the view's border. Settings > Tracking.
 
-## Magnifier models (`model=`)
-Selected with the `model` ini key or the "Magnifier engine" row in Settings. `model` is
-read once at launch, so switching it restarts Wind (Settings does this automatically on Apply).
+- Smooth sub-pixel zoom and pan.
+- Clicks, hover and dragging keep working while zoomed.
+- Tracks the mouse in games through raw input, without injecting into the game.
+- Auto picks the best engine for each window and switches when you alt-tab.
+- The real cursor shapes, sharp at every zoom level.
+- HDR aware: the zoomed view matches the desktop's brightness.
+- Follows the text caret as you type, and optionally the keyboard focus.
+- Inspect mode: freeze the pointer to keep a tooltip open and look around with a crosshair.
+- Named profiles for different setups.
+- Warmth and brightness filter for the whole screen.
 
-- **`hybrid`** (default, shown as **Auto**) - constructs both engines below and picks per
-  zoom-in: the transform for a borderless-fullscreen foreground on the primary monitor (games,
-  F11 video), the render overlay for everything else. Re-picks live when the foreground
-  changes mid-zoom.
-- **`render`** - captures the desktop with DXGI Desktop Duplication and redraws it into a
-  D3D11 overlay. The cursor is drawn into the same frame as the content, so it can never drift
-  against the view. The only model that can cover the shell (see the `zorderBand` note below).
-- **`transform`** - the DWM fullscreen transform only (what `hybrid` uses over games), with no
-  overlay at all. Compositor-internal, so it stays smooth while a heavy game renders.
+## Install
 
-The old **`magnify`** model (driving the native Windows Magnifier) is no longer selectable since
-0.18.0: Settings and the tray offer only Auto, Render and Transform, and an ini that still says
-`model=magnify` runs `hybrid` (Auto).
+[Download the installer](https://github.com/Maxaubert/Wind/releases/latest/download/Wind-Setup-x64.exe)
+and run it. It always points at the latest release.
 
-## Controls
-Zoom binds ship **unbound** - the first-launch guided setup captures your choice (mouse
-side-buttons and/or keyboard keys, with optional alternates). Everything is rebindable in
-Settings; bound keys are swallowed so they never double-fire into the focused app. A bind can be
-a key, a key combination (Ctrl, Alt, Shift, Win), a mouse side-button, or a left/right/middle click
-with modifiers. Binds that would break normal use are refused with the reason: typing keys alone,
-Shift or AltGr (Ctrl+Alt) plus a typing key, and combos Windows reserves (Alt+F4, Win+L, ...).
+- Needs 64-bit Windows 10 or 11 and administrator rights.
+- Installs to `C:\Program Files\Wind`. Windows grants the UIAccess permission Wind uses only to apps
+  in that kind of protected location.
+- Adds the WebView2 runtime if Settings needs it.
+- Settings, profiles and logs stay in `%LOCALAPPDATA%\Wind`, also after an uninstall unless you
+  choose otherwise.
 
-- Hold your **zoom-in** bind - zoom in (smooth ramp). Hold **zoom-out** - zoom back.
-- **Scroll-wheel zoom** (optional): hold the modifiers you chose (for example Ctrl,
-  Alt or Ctrl+Alt; never Shift alone) and turn the wheel - up zooms in, down zooms out.
-- **Keyboard panning** (optional, off until you set keys): while zoomed, your pan keys move the
-  view (tap to nudge, hold to pan). Windows Magnifier uses Ctrl+Alt+arrows. At 1x the keys go to
-  your apps as normal.
-- Release - zoom stays at the current level.
-- **Quick zoom** (default Ctrl + a zoom key, or a dedicated hotkey) - toggle between 1x and
-  your remembered level.
-- **Inspect mode** (optional bind) - freeze the cursor and free-look with the crosshair.
-- **Ctrl+Alt+Q** - quit from anywhere (also restores the cursor); or use the tray icon.
+The installer is not signed, so SmartScreen warns on first run: choose **More info**, then **Run
+anyway**. Some browsers and work computers block the download. Setup signs Wind locally for your PC
+so its zoom keys keep working over elevated windows; if that step fails, it installs a build without
+that ability.
 
-## Releases
-[Download the latest installer](https://github.com/Maxaubert/Wind/releases/latest/download/Wind-Setup-x64.exe)
-(always the newest release) and run it. Release notes and older versions are on the
-[Releases page](https://github.com/Maxaubert/Wind/releases).
+## Usage
 
-Setup installs **per-machine** to `C:\Program Files\Wind` and asks for administrator rights.
-That location is not a preference: Windows only grants UIAccess to a signed binary in a
-"secure location", and UIAccess is what lets Wind's shortcuts keep working while an elevated
-window has focus, and what enables the desktop zoom path. Setup also offers to start Wind when
-you sign in, and installs the WebView2 runtime if Settings has no browser engine to run in.
-Your settings, profiles and logs stay in `%LOCALAPPDATA%\Wind`, and uninstalling keeps them
-unless you say otherwise.
+The first launch walks you through choosing zoom keys: mouse side buttons, keyboard keys, or both.
 
-**Signing.** The installer package itself is currently **unsigned**, so Windows SmartScreen
-will warn on first run, and that is also why some browsers, and most managed work computers,
-refuse the download outright. A certificate for that is being arranged.
+- **Hold** the zoom-in key to zoom in, the zoom-out key to zoom out. Release to stay at that level.
+- **Wheel zoom:** bind a modifier plus the scroll wheel (for example Ctrl+wheel).
+- **Keyboard panning:** optional arrow-key binds move the view while zoomed.
+- **Quick zoom:** Ctrl plus a zoom key toggles between 1x and your last level.
+- **Inspect mode:** an optional key freezes the pointer and lets you look around with a crosshair.
+- **Ctrl+Alt+Q** quits Wind from anywhere.
 
-That does not cost you UIAccess, though. Setup generates a one-time local signing certificate
-on each PC it installs to, trusts it there, signs the UIAccess build with it, and deletes the
-private key right away - so a normal install gets UIAccess (elevated-window shortcuts keep
-working, and the desktop uses the transform engine) without needing a purchased certificate. If
-that per-PC signing step ever fails, Setup falls back to the ordinary, non-UIAccess build.
+Bound keys are not passed on to the app you are using. Wind refuses binds that would break normal
+typing or Windows shortcuts and tells you why.
 
-The release pipeline also signs with a real certificate when one is configured, via
-`WIND_SIGN_THUMBPRINT`, or `WIND_SIGN_PFX` plus `WIND_SIGN_PASSWORD`:
+## Settings
 
-```
-pwsh -File tools\release.ps1
-```
+Open them from the tray icon > Settings. Changes apply immediately; Save keeps them in the current
+profile. Preferences > Show advanced settings shows the rest. Every setting is also a key in
+`%LOCALAPPDATA%\Wind\magnifier.ini`; see the
+[key reference](docs/architecture/08-config-profiles.md#key-reference).
 
-With a certificate it signs both executables and the installer up front and skips the per-PC
-step entirely. `src\version.h` is the only place the version is declared.
+## Limits
 
-## Build
-Requires Visual Studio 2022+ Build Tools (Desktop development with C++). From any shell:
-- `build.bat` - builds `Wind.exe` and its tray helper `WindTray.exe` (runs from anywhere).
-- `build.bat test` - builds and runs the unit tests.
-- `build.bat uiaccess` - builds the UIAccess variant (signed-install prerequisite).
-- `build.bat config` - builds the Settings app (`WindConfig.exe` + the Svelte UI).
-- `build.bat installer` - compiles the setup program (needs NSIS: `winget install NSIS.NSIS`).
+- Magnifies the primary monitor unless `multiMonitor=1` is set.
+- Games must run borderless or windowed. Switch exclusive-fullscreen games to borderless.
+- The Start menu, taskbar and tray flyouts are not magnified by default.
+- Protected video (Netflix and similar) shows normally in Auto, which switches to the transform
+  engine for it. Forcing the Render engine shows it black.
 
-## Install from source (development)
-Run **elevated**:
-```
-powershell -ExecutionPolicy Bypass -File tools\uiaccess_setup.ps1
-```
-This builds the UIAccess variant and the Settings app, self-signs them, and installs to
-`C:\Program Files\Wind`. Launch `C:\Program Files\Wind\Wind.exe` from a normal (non-elevated)
-window so UIAccess engages. Settings (and the ini) live per-user under `%LOCALAPPDATA%\Wind`.
+## Development
 
-Note on shell coverage: covering the Start menu / taskbar / tray flyouts additionally requires
-the opt-in `zorderBand=16` (UIAccess build only). It ships **off** (`zorderBand=0`) because the
-high band puts Wind under the Snipping Tool's capture overlay, which costs the cursor entirely
-during Win+Shift+S - a deliberate trade-off (issue #162).
-
-## Config (`magnifier.ini`, hot-reloads unless noted)
-The Settings app (tray -> Open Settings) is the comfortable way to edit this file; it keeps
-the everyday settings front and center (the rest sit behind "Show advanced settings") and
-closes itself if the magnifier exits. Every ini key below keeps working even when it has no
-Settings row.
-Profiles (tray -> Profiles, or the Settings titlebar) snapshot the whole file per activity.
-
-- `zoomInButton`/`zoomOutButton` (1/2 mouse side-buttons, 3/4/5 left/right/middle click with
-  `zoomInButtonMods` etc.) and `zoomInVk`/`zoomOutVk` + `zoomInMods`/`zoomOutMods` (keyboard) -
-  hold to zoom; all ship unbound until the guided setup. Alternates: `*2` variants.
-- `zoomWheelMods` (0 = off) - scroll-wheel zoom. A notch zooms as far as holding the bind does in
-  0.1 s, so `zoomInSpeed`/`zoomOutSpeed` set its speed too.
-- `panLeftVk`/`panRightVk`/`panUpVk`/`panDownVk` + `*Mods` (unbound by default), `panSpeed`
-  (default 1.0) - keyboard panning while zoomed.
-- `maxLevel`, `zoomInSpeed`/`zoomOutSpeed`, `smoothZoom*` - zoom range and feel.
-- `cursorSensitivity`, `cursorSmoothing` - pan speed and inertia.
-- `bilinear`, `sharpness`, `cursorConstantSize` (default 0: the cursor grows with the zoom),
-  `cursorVisibility` - image and cursor rendering.
-- `brightness`, `hdrTonemap` - output tuning.
-- Pacing/perf: `vsync` (default on), `dwmFlush` (default 0), `gameFpsCap`, `gpuPriority`.
-- `model` - `hybrid` (default) / `render` / `transform` (`magnify` is read as `hybrid` since 0.18.0). Restart to switch.
-- `multiMonitor` - 0 (default, primary only) or 1 (follow the cursor's monitor per zoom-in).
-- `desktopTransform` - default **1**: use the game (compositor) engine on the desktop too
-  (primary monitor only, Auto model), whenever UIAccess is available; every normal install
-  gets that from the per-PC signing described above. Set it to `0` to keep the desktop on the
-  render engine.
-- `lockApps` - per-app zoom lock detection (Settings > Cursor > "Zoom lock detection");
-  `warpLock=1` extends the detection heuristics to unlisted games.
-- `trackCaret` (default 1) / `trackFocus` (default 0) - follow the text caret or the
-  keyboard-focused control instead of the pointer; `trackGlideMs` (default 200) sets how fast
-  the view glides to a new target. `mouseAlign=1` switches ordinary mouse tracking to an edge
-  mode where the pointer may approach the view's border instead of staying centered.
-  Settings > Tracking.
-- Advanced: `zorderBand`, `transformExclude`, `noSwallowApps`, `profile`, `launchQuiesce`
-  (default 1; 0 disables the ~1.5s write hold on a freshly launched fullscreen cover - a test
-  knob for issue #247, it unguards the #187 DWM crash class, do not ship it off).
-
-## Scope
-Primary monitor by default (`multiMonitor=1` follows the cursor's monitor). Covers the desktop,
-normal apps, and **borderless / windowed-fullscreen** games. Exclusive-fullscreen games are out
-of scope (set the game to borderless).
+`build.bat` builds Wind, `build.bat test` runs the unit tests, and `build.bat config` builds the
+Settings app. The developer docs are in [docs/architecture](docs/architecture/README.md).
 
 ## Licence
-Wind is **proprietary**. Copyright (c) 2026 Max Aubert, all rights reserved. The source code
-may not be used, copied, modified or redistributed without written permission; official
-binaries are free to install and use, personally or inside an organisation. See `LICENSE`.
 
-Releases published on or before 2026-08-31 (up to `v0.6.1`) were issued under the MIT licence,
-and that grant still covers those versions. It does not extend to anything after them.
-
-Third-party components and their licences are listed in `THIRD-PARTY-NOTICES.md`.
-
-Commercial licensing enquiries: aubert@post.com
+Wind is proprietary: the source code may not be used, copied, modified or redistributed without
+written permission, and the official binaries are free to install and use. Releases up to v0.6.1
+were MIT-licensed and stay so. See [LICENSE](LICENSE) and
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). Commercial licensing: aubert@post.com

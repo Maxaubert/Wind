@@ -1,8 +1,11 @@
 # Tracking findings (issue #276)
 
-Field notes from building caret tracking, keyboard-focus tracking and mouse edge mode, 2026-09-28
-to 2026-09-29, on this PC (3840x2160, 225%, signed UIAccess build, `trackLog=1`). Design:
-`docs/superpowers/specs/2026-09-28-tracking-modes-design.md`.
+> **Status.** Live. Caret, focus and mouse edge tracking ship; design in
+> [architecture/07](architecture/07-cursor.md#tracking-caret-focus-and-mouse-edge-mode) and
+> [specs/2026-09-28-tracking-modes-design.md](specs/2026-09-28-tracking-modes-design.md).
+
+Field notes from building caret tracking, keyboard-focus tracking and mouse edge mode on the test
+machine (3840x2160, 225%, signed UIAccess build, `trackLog=1`).
 
 ## Which source resolves where
 
@@ -11,112 +14,80 @@ to 2026-09-29, on this PC (3840x2160, 225%, signed UIAccess build, `trackLog=1`)
 | App | Caret source | Focus |
 |---|---|---|
 | Notepad, classic Win32 dialogs | `win32` (GetGUIThreadInfo) | `uia-focus` |
-| Chrome / Edge, VS Code, Electron | `uia-caret` (TextPattern2::GetCaretRange) | `uia-focus` |
+| Chrome / Edge, VS Code, Electron | `uia-caret` (TextPattern2::GetCaretRange), corrected (below) | `uia-focus` |
+| Firefox and forks (Gecko) | `uia-caret` / `win32`, skipped when outside its element (below) | `uia-focus` |
 | Windows Terminal / Prism | `uia-selection` (TextPattern::GetSelection) | `uia-focus` |
 | IntelliJ, PyCharm, other Java (Swing/AWT) apps | `java` (Java Access Bridge, issue #281) | (none) |
 
-Known limit: terminal TUI option pickers (e.g. Claude's AskUserQuestion list) do not expose the
-highlighted option through UIA, so Wind follows only the terminal caret there.
+Known limit: terminal TUI option pickers do not expose the highlighted option through UIA, so Wind
+follows only the terminal caret there.
 
 ## Field decisions and why
 
-- **The pointer comes to the view, not the other way round.** The first build glided the view back
-  to the pointer when the mouse moved. A moving pointer was never reached: the view wobbled and felt
-  stuck until a zoom out/in. Now the first real mouse move (3 px within 100 ms) places the pointer in
-  the view (centre, or just inside the edges in edge mode) and the view stays. A button press hands
-  back without moving the pointer (a warp under a held button would drag).
-- **Follow only what the keyboard moves.** Landing in a filled field (by Tab or a click) reports a
-  caret at the END of the text, and following it jumped the view away. The first caret after any
-  focus change is a baseline; only later caret moves in the same focus are followed. `focusGen` is
-  bumped when the focus event ARRIVES so the 60 Hz poll cannot publish the new field's caret early.
+- **The pointer comes to the view, not the other way round.** Gliding the view back to a moving
+  pointer never caught it: the view wobbled and felt stuck. Now the first real mouse move (3 px
+  within 100 ms) places the pointer in the view and the view stays. A button press hands back
+  without moving the pointer (a warp under a held button would drag).
+- **Follow only what the keyboard moves.** Landing in a filled field reports a caret at the end of
+  the text, and following it jumped the view. The first caret after any focus change is a baseline.
+  `focusGen` is bumped when the focus event arrives, so the 60 Hz poll cannot publish the new
+  field's caret early.
 - **Click quiet period, 1 s.** A click that opens a page moves focus somewhere the user never asked
-  to look. Caret/focus changes within 1 s of a mouse button are consumed, never followed.
-  EXCEPTION (#328, field 2026-10-02): a key typed after the click ends the quiet period early.
-  Clicking into Notepad and typing at once lost the first ~8 characters while the caret ran off
-  screen. Only a FRESH down of a non-modifier key counts (`src/typing_key.h`): the first version
-  used the tracking key clock, which also counts key-ups and auto-repeat, so releasing Ctrl or Shift
-  after a Ctrl/Shift+click ended the quiet period and the click's own caret move took the view
-  (review #349).
-- **Keyboard focus "not working" in the browser** was the setting being off (default off, and the
-  Settings page needs Apply), not a bug.
-- **Glide: critically damped spring, 200 ms** (A/B of 0, 25, 150, 200 ms and old ease vs spring).
-  The old exponential ease restarted on every keystroke (a nudge per key); the spring carries its
-  velocity, so typing becomes one continuous glide that still keeps up. Caret and focus share it.
-  `trackGlideMode=0` restores the old ease.
+  to look, so caret and focus changes within 1 s of a mouse button are not followed. A fresh down of
+  a non-modifier key ends it early (#328, `src/typing_key.h`); key-ups and auto-repeat must not, or
+  releasing Ctrl after a Ctrl+click handed the view to the click's own caret.
+- **Glide: critically damped spring, 200 ms** (A/B of 0, 25, 150, 200 ms and old ease versus
+  spring). The old exponential ease restarted on every keystroke; the spring carries its velocity,
+  so typing becomes one continuous glide. `trackGlideMode=0` restores the old ease.
 
 ## Mouse edge mode
 
-- **Corner repulsion.** Pushing the free pointer into a screen edge or corner sends raw mickeys while
-  the pointer cannot move: exactly the lock detector's mouselook tell. The log showed LOCKED/free
-  flapping every ~20 ms, and each false lock took the centred path and welded the pointer away from
-  the corner. In edge mode that motion is hidden from the tell (`PointerPinnedAtEdge`).
-- **Uneven edges.** The band was measured to the hotspot, which is the arrow's tip: the body reached
-  the right edge while the left kept a gap the width of the arrow. The band is now measured to the
-  cursor's visible body (opaque bounds around the hotspot, re-measured on cursor change).
-- **Margin.** Edge mode has its own `mouseMarginPct` (default 0: the cursor reaches the view edge
-  before the view moves; Settings slider 0-30%). `trackMarginPct` (15%) stays the caret/focus one.
+- **Corner repulsion.** Pushing the free pointer into a screen edge sends raw mickeys while the
+  pointer cannot move: the lock detector's mouselook tell. Each false lock welded the pointer away
+  from the corner. In edge mode that motion is hidden from the tell (`PointerPinnedAtEdge`).
+- **Uneven edges.** The band was measured to the hotspot (the arrow's tip), so the left edge kept an
+  arrow-wide gap. It is now measured to the cursor's visible body, re-measured on cursor change.
+- **Margin.** `mouseMarginPct` (default 0, Settings 0–30%) for edge mode; `trackMarginPct` (15%) for
+  caret and focus.
 
-## Firefox in a zoomed iframe (issue #278, 2026-09-29)
+## Firefox in a zoomed iframe (issue #278)
 
-- A Claude artifact (an iframe) at high Ctrl+ page zoom in Zen: Firefox reports the caret wrongly
-  from BOTH sources. The Win32 caret sits below and right of the input (input 2226,997 798x74,
-  caret 3097,1226 1x118); the UIA caret range and the element bounds point above the real text.
-  Not reproducible on a plain page at the same zoom. There is no correct source to fall back to.
-- Fix: in Gecko windows (`MozillaWindowClass`, Firefox and all forks) a caret whose centre is outside
-  its own element is skipped, so the view stays put. Limited to Gecko so no app that tracked
-  correctly before can lose tracking. A UIA fallback was tried and field-rejected (it lands above).
-- Leaving a text box moves focus to the whole page (3400x1912); centring on it dropped the view.
-  Focus rects covering half the monitor or more are containers and are skipped (all apps).
-- Diagnostic tool from this hunt: a recorder logging the foreground process, Win32 caret, UIA caret
-  and focus bounds every 100 ms; the Win32/UIA disagreement is what located the bad source.
+- At high page zoom inside an iframe, Firefox reports the caret wrongly from both sources (the
+  Win32 caret below and right of the input, the UIA range above the text). There is no correct
+  source to fall back to.
+- In Gecko windows (`MozillaWindowClass`) a caret whose centre is outside its own element is
+  skipped, so the view stays put. Limited to Gecko so no other app can lose tracking.
+- Focus rects covering half the monitor or more are containers and are skipped (all apps).
 
-## Java apps: the Java Access Bridge (issue #281, 2026-09-29)
+## Java apps: the Java Access Bridge (issue #281)
 
-- Java apps report the caret only through the Java Access Bridge, not the Win32 caret or UIA (Windows
-  Magnifier does not follow them either). Probe on IntelliJ 2026.2: `getAccessibleContextWithFocus` +
-  `getAccessibleTextInfo` + `getAccessibleTextRect` return a correct, moving caret rect, 1-12 ms per
-  read with an outlier of 134 ms, and ONLY while the Java window is active (inactive: context 0, and
-  the text calls then return TRUE with garbage, so a zero context is treated as "no caret").
-- **UIPI was the blocker.** The bridge loaded but every read failed with zero events: Wind is a
-  UIAccess process, and Windows drops messages an ordinary process (the JVM) sends to it, so the
-  bridge handshake never completed. The same calls worked from a non-UIAccess probe. Fix: allow
-  exactly the bridge protocol's messages on the bridge's own hidden windows (`WM_COPYDATA`, the two
-  `AccessBridge-From*-Hello` registered messages, `WM_USER+0x1000..0x1003` from OpenJDK
-  `AccessBridgeMessages.h`).
-- **Event-driven, never polled.** Each read is a round trip into the Java app's UI thread, so reads
-  happen only after a bridge caret/focus callback or a Java window switch (plus one retry per 250 ms
-  after a failed read). IntelliJ delivered ~100 caret events in a few seconds of typing.
-- **Security (review of #281).** Any process can register a window with a Java class name, and Wind
-  is UIAccess, so the client DLL (loaded from the Java app's folder) must carry a valid Authenticode
-  signature, as must a `vcruntime140.dll` shipped beside it; both are held open against replacement
-  while verified and loaded, and dependencies resolve only from that folder and System32. Every
-  bridge DLL on the dev box verified (JetBrains, Oracle, Microsoft, Amazon).
-- **No manual steps.** Wind writes `assistive_technologies=com.sun.java.accessibility.AccessBridge`
-  into `%USERPROFILE%\.accessibility.properties` (what `jabswitch -enable` does) the first time it sees
-  a Java window; a Java app picks it up at its next start. The file is only rewritten after a clean
-  read or when it does not exist, so a locked file is never wiped. IntelliJ's own "Support screen
-  readers" setting was already on here; on a PC where it is off, IntelliJ may need it (IntelliJ offers
-  it itself when it detects the bridge).
-- A window Windows reports as not responding (`IsHungAppWindow`) is skipped, so a hung Java app cannot
-  stall tracking for other apps.
+- Java apps expose the caret only through the bridge (the built-in Magnifier does not follow them
+  either). Reads take 1–12 ms (outlier 134 ms) and work only while the Java window is active.
+- UIPI drops the JVM's handshake messages to a UIAccess process, so Wind allows exactly the bridge
+  protocol's messages on the bridge's own hidden windows. Reads happen only after bridge callbacks,
+  never on the poll; hung Java windows (`IsHungAppWindow`) are skipped.
+- The client DLL and any `vcruntime140.dll` beside it must carry a valid Authenticode signature and
+  are held open against replacement. Wind enables the bridge in
+  `%USERPROFILE%\.accessibility.properties`, rewriting the file only after a clean read.
 
-## Chromium web editors: tall caret rects (issue #337, 2026-10-03)
+## Chromium web editors: tall caret rects (issue #337)
 
-Outlook on the web (Chromium) reports its UIA selection caret as one line right after Enter
-(`1927,1159 h44`), but from the first typed character as a rect that also covers the blank lines
-above it (`1947,1136 h111`). The BOTTOM stays on the real caret line; only the top climbs. Centring
-on that rect left the caret below centre by half the extra height times the zoom, more with every
-blank line ("the text moves further and further down; Enter re-centres it"). `src/caret_rect.h`
-learns the one-line height per focus and trims a rect taller than 1.4 lines to one line at its
-bottom, but only when that bottom sits on the known line grid (same line, or whole lines below after
-a wrap); any other tall rect (a bigger font) is learned as the new line. Chromium's Win32 caret does
-the same (1927,1669 h44 then 1945,1558 h155), so UIA and Win32 carets are both trimmed; Java carets
-(bridge) are not. `trackLog=1` logs each trim.
+- Outlook on the web reports the caret as one line after Enter, then as a rect that also covers the
+  blank lines above; the bottom stays on the caret line. Centring on it pushed the text lower with
+  every blank line.
+- `src/caret_rect.h` learns the one-line height per focus and trims a rect taller than 1.4 lines to
+  one line at its bottom, but only when its top climbed more than half a line above the previous
+  line's top (headings and font changes grow downward and are learned instead). UIA and Win32 carets
+  are trimmed; Java carets are not.
+- Enter on the last visible line reports the new line part-way through the page scroll. A caret
+  that moves back left by 0.2–0.8 of a line is held on the current line while the same raw report
+  repeats (`HoldMidScrollCaret`).
 
-Enter on the last visible line reports the new line before the page scrolls it up a few pixels (field: line 1989-2033, then the tall typing rect ends at 2009), so a tall rect whose bottom scrolled UP by less than a line is also trimmed.
-What separates Chromium from a genuinely taller line (review #349): in every field rect the TOP climbed 67-164 px (1.5-3.7 lines) above the previous line's top, because the extra height is whole blank lines above. A heading, a font-size change on the line or Down into a heading grows downward or both ways, so its top stays at or near the previous line's top. Only a rect whose top climbed more than half a line above is ever trimmed; a bottom that moved down off the grid is always learned as the new line height.
-That Enter at the bottom also reports the NEW line part-way through the scroll (old line 1965-2009, new line 1989-2033: half a line lower), and the page settles it where the old line was without another caret report until the next key, so the view dipped and slid back on every Enter. A caret that moves back left by a fraction of a line (0.2-0.8) is held on the current line (HoldMidScrollCaret; logged once as caret held). The hold lasts while the SAME raw report repeats: the 60 Hz poll re-reads it every ~16 ms, and the first version held only the first read, then published the stale half-line rect (review #349).
+## VS Code and Electron: the caret as the whole line (issue #341)
 
-## VS Code / Electron: the caret reported as the whole line (issue #341, 2026-10-03)
-
-VS Code's UIA selection caret is the whole editor line (`263,1752 3330x44`), and sometimes a 3330x3 strip at the top of the window: no caret x, so typing never moved the view and a paste or select-all centred it on the middle of a line. A first attempt pinned x to the pointer; that published the pointer as the caret on every mouse move (worse, field-rejected). Now a UIA caret wider than 6x its height is replaced by the character at the caret (`ExpandToEnclosingUnit(Character)`) or, failing that, by the MSAA system caret object (`OBJID_CARET`, which Chromium keeps for screen magnifiers; logged as `via msaa-caret`); with neither, the caret is ignored (logged as `caret ignored`), never guessed. Review #349: the fallback applies only to a collapsed range (a long keyboard selection is simply wide and keeps its own rect), and its answer is cached per focus: re-asked on a real caret/focus event, a changed line rect, or at most every 250 ms from the poll, and `caret ignored` is logged only when the outcome changes.
+- VS Code's UIA caret is the whole editor line, so typing never moved the view. Pinning x to the
+  pointer was field-rejected.
+- A collapsed UIA caret wider than 6x its height is replaced by the character at the caret
+  (`ExpandToEnclosingUnit(Character)`) or the MSAA system caret (`OBJID_CARET`); with neither, it is
+  ignored, never guessed. The answer is cached per focus and re-asked on a real event, a changed
+  line rect, or at most every 250 ms.

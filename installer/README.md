@@ -1,133 +1,89 @@
 # Setup
 
-Setup is a video with the UI composited over it. NSIS cannot play video, so it plays one
-itself: every tick it decodes a JPEG through GDI+, alpha-blends the screen's overlay on top,
-and copies the result into the bitmap a single static control shows. There are no buttons;
-the same tick hit-tests the pointer.
+Wind's installer is NSIS with a custom-drawn UI: a looping video with the screens composited over
+it. NSIS cannot play video, so every tick it decodes a JPEG frame through GDI+, alpha-blends the
+screen's overlay on top and copies the result into one static control; the same tick hit-tests the
+pointer. There are no native buttons.
 
-The approach is borrowed from Prism's installer. What differs here is that Wind installs
-per-machine and elevated, which the sections have to be careful about, and that there is no
-"where it goes" screen: UIAccess is only granted to a signed binary in a secure location, so
-an install to `D:\Apps\Wind` would silently disable the features the per-machine install
-exists to enable. The path is shown and the reason is given instead of offering a chooser
-whose wrong answers are quiet.
+Wind installs per-machine and elevated, and there is no install-location screen: UIAccess is granted
+only to a signed binary in a secure location, so an install elsewhere would silently disable it.
+The elevation rules (HKLM autostart, launching through `explorer.exe`, stopping Wind through
+`Local\Wind_QuitRequest`) are in
+[docs/architecture/11](../docs/architecture/11-build-test-release.md#the-installer).
 
-## The pieces
+## Files
 
-| file | what it is |
+| File | What it is |
 |---|---|
-| `wind.nsi` | the entry point: metadata, page order, the install and uninstall sections |
-| `app.nsh` | the Wind-specific half: quitting a running Wind, WebView2, autostart, launching |
-| `over.html` | the foreground: type, buttons, the caption. The only place copy lives. |
-| `make-over.mjs` | renders `over.html` into alpha overlays + `over.nsh` rectangles |
-| `make-loop.mjs` | turns a source clip into the frame sequence, and makes it loop |
-| `kit.nsh` | the frameless window: size, DPI, GDI+, unpacking |
-| `video.nsh` | the player: decode, composite, hover, clicks, dragging |
-| `screens.nsh` | the five screens, and what each click means |
-| `over.nsh` | generated: control rectangles in 640x480 units |
-| `media/<size>/` | generated: `v/` frames, `o/` overlays. Not hand-edited. |
-| `media/<size>/o/back.png` | generated: the shade and the caption scrim, drawn under every screen |
-| `MicrosoftEdgeWebview2Setup.exe` | Microsoft's ~1.7 MB Evergreen bootstrapper stub |
+| `wind.nsi` | Entry point: metadata, page order, install and uninstall sections |
+| `app.nsh` | Wind-specific logic: quitting a running Wind, WebView2, autostart, launching |
+| `screens.nsh` | The five screens and what each click does |
+| `kit.nsh` | The frameless window: size, DPI, GDI+, unpacking |
+| `video.nsh` | The player: decode, composite, hover, clicks, dragging |
+| `over.html` | The foreground: type, buttons, caption. The only place copy lives |
+| `make-over.mjs` | Renders `over.html` into overlays and `over.nsh` rectangles |
+| `make-loop.mjs` | Turns a source clip into a looping frame sequence |
+| `over.nsh` | Generated: control rectangles in 640x480 units |
+| `media/<size>/` | Generated: `v/` frames, `o/` overlays, `o/back.png` (shade and caption scrim under every screen). Committed, because CI cannot regenerate it |
+| `local-sign.ps1` | Per-PC signing of the UIAccess build |
+| `MicrosoftEdgeWebview2Setup.exe` | Microsoft's Evergreen WebView2 bootstrapper |
 
-## The licence screen (issue #258)
-
-Two of the five screens are the licence page, before and after its box is ticked (`over.html`
-screens 4 and 5; `windLicenceCreate`/`windLicenceLeave` in `screens.nsh`). Install/Next does
-nothing until the box is checked. "Read the full licence" does not open a copy from
-`$PLUGINSDIR` (an elevated NSIS locks that folder to Administrators, so a de-elevated viewer
-would be refused); it copies `LICENSE.txt` into a fresh folder made with `GetTempFileName` in
-the user's own temp directory, opens it through `explorer.exe` so the viewer itself is not
-elevated, and deletes that copy on `.onGUIEnd`. A silent install (`/S`) skips the page like
-every other one, and `LICENSE.txt` is installed next to `Wind.exe` either way.
-
-## Building it
+## Build
 
 ```
 build.bat installer
 ```
 
-Needs NSIS (`winget install NSIS.NSIS`). That target compiles the script and then runs
-`tools\installer_check.ps1`, which verifies things a compile cannot: that every rectangle the
-pages read was actually generated, and that a silent install and uninstall round-trip. The
-round-trip half needs an elevated shell and skips itself without one.
+Needs NSIS (`winget install NSIS.NSIS`). The target compiles the script and runs
+`tools\installer_check.ps1`, which checks that every packed file exists, that every rectangle the
+screens read was generated, and that a silent install and uninstall round-trip (the round trip
+needs an elevated shell). For a release artifact use `tools\release.ps1`, which builds the payload,
+signs it when a certificate is configured, and packs the installer.
 
-For a release artifact, use `tools\release.ps1` instead: it builds the payload, signs it when
-a certificate is configured, and packs the installer.
+## Local signing
 
-## UIAccess on every PC (local signing, issue #261)
+Without a code-signing certificate, `release.ps1` also builds the UIAccess variant as `WindUA.exe`,
+which makes `wind.nsi` define `LOCAL_SIGN`. Setup then runs `local-sign.ps1`:
 
-Without a code-signing certificate, `release.ps1` also builds the uiAccess variant as
-`WindUA.exe`, and its presence makes `wind.nsi` define `LOCAL_SIGN`. Setup then runs
-`local-sign.ps1` on the PC it installs to: a fresh `CN=Wind Local Signing` certificate is
-trusted in LocalMachine Root and TrustedPublisher, signs `Wind.exe` and `WindConfig.exe`, and
-has its private key deleted straight away, so the signatures stay valid but nothing can ever
-sign with that root again. Older Wind Local Signing roots are retired on every install, and
-the uninstaller removes them (`local-sign.ps1 -Remove`). Setup installs the ordinary build
-first and signs the uiAccess one in `$PLUGINSDIR`, copying it over only once its signature
-verifies: an unsigned uiAccess `Wind.exe` does not start at all ("A referral was returned from
-the server"), and a setup killed mid-signing once left exactly that. So any failure or
-interruption leaves the ordinary build, which runs everywhere without UIAccess. A release signed with a real
-certificate has no `WindUA.exe` and skips all of it. Verified 2026-09-28: the installed build
-logs `token UIAccess=1`, and the elevated `installer_check.ps1` covers the signature, the
-deleted key, the single root and the uninstall clean-up.
+- A fresh `CN=Wind Local Signing` certificate is trusted in LocalMachine Root and TrustedPublisher,
+  signs the executables, and has its private key deleted at once, so nothing can sign with that root
+  again. Older Wind roots are retired on every install; the uninstaller removes them
+  (`local-sign.ps1 -Remove`).
+- Setup installs the ordinary build first and signs the UIAccess build in `$PLUGINSDIR`, copying it
+  over only after its signature verifies. An unsigned UIAccess `Wind.exe` does not start at all, so
+  any failure leaves the ordinary build.
+- A release signed with a real certificate has no `WindUA.exe` and skips this.
 
-## Changing the words or the layout
+## Licence screen
 
-Edit `over.html`, then regenerate both overlay sets:
+Two of the five screens are the licence page, before and after its box is ticked
+(`windLicenceCreate`/`windLicenceLeave` in `screens.nsh`). Install stays disabled until the box is
+ticked. "Read the full licence" copies `LICENSE.txt` to a fresh folder in the user's temp directory
+and opens it through `explorer.exe`, so the viewer is not elevated (an elevated NSIS locks
+`$PLUGINSDIR` to Administrators). A silent install skips the page; `LICENSE.txt` is installed next to
+`Wind.exe` either way.
+
+## Editing the overlay
+
+Edit `over.html`, then regenerate both overlay sets straight into `media/<size>/o`:
 
 ```
 node installer/make-over.mjs 1440
 node installer/make-over.mjs 960
 ```
 
-They write straight into `media/<size>/o`, which is what the installer packs. Do not stage
-them anywhere else: an intermediate folder is a thing to forget.
+Renaming a `data-a` attribute renames its rectangle in `over.nsh`. That compiles and then hit-tests
+against nothing, which `installer_check.ps1` catches, so run `build.bat installer` after such an
+edit. Each screen is two layers: `back.png` (shared) and a per-screen overlay with type and
+controls, so the shared gradient is stored once.
 
-Renaming a `data-a` attribute renames its rectangle in `over.nsh`. That compiles fine and then
-hit-tests against nothing, which is exactly what the rectangle check in `installer_check.ps1`
-is there to catch, so run `build.bat installer` after any such edit.
-
-## Changing the clip
-
-The footage currently shipping is a blue flow-line abstract, cut from the first 15 seconds of
-the source clip: it drifts teal after that, and blue is the family Wind's indigo accent lives
-in. It was built with
-
-```
-node installer/make-loop.mjs "wave-abstract-background.1920x1080.mp4" --start 0 --len 15 --fps 24 --fade 36
-```
-
-which yielded 324 frames, so `FRAMES` in `video.nsh` is 324 and `TICK` is 42. The wrap measures
-RMSE 0.0369 against a natural frame-to-frame range of 0.0099 to 0.0319, so the seam is a little
-above the clip's own fastest moment and reads as motion rather than a cut.
-
-To replace it:
+## Replacing the clip
 
 ```
 node installer/make-loop.mjs "C:\path\to\clip.mp4" --len 16 --fps 24
 ```
 
-It reports how many frames it produced; put that number in `FRAMES` in `video.nsh`, and set
-`TICK` to 1000 / the clip's frame rate. The script reads how many frames the source actually
-yielded and sizes the loop to fit, and crossfades the tail into the head so the wrap is
-smaller than an ordinary frame step. It prints both numbers so you can check.
-
-Needs `ffmpeg` and ImageMagick (`magick`) on PATH.
-
-## Two overlay layers
-
-Each screen is drawn as **two** overlays, not one: `back.png` carries the shade
-and the caption scrim, and the per-screen overlay carries only type and controls. They are
-identical layers on every screen and every hover state, so baking them together would store
-the same full-frame gradient nineteen times: measured, that was 28.3 MB of media against
-13.3 MB for the split. The cost is one extra `GdipDrawImageRectI` per tick.
-
-## What it costs
-
-Roughly 7.6 MB of frames at 800x600, plus about 4 MB of overlays across both DPI sets and the
-1.7 MB WebView2 stub, which packs down to a 12.3 MB installer. Both overlay sets are packed into the
-installer and only the matching one is unpacked at runtime.
-
-The footage ships at one size for every display because it is defocused motion and an upscale
-is invisible on it; the type is a separate overlay and renders at the display's own
-resolution.
+The script sizes the loop to the frames the source yields and crossfades the tail into the head; it
+prints the frame count and the wrap error. Put the frame count in `FRAMES` in `video.nsh` and set
+`TICK` to 1000 / frame rate. Needs `ffmpeg` and ImageMagick (`magick`) on PATH. The footage ships at
+one size for every display; the overlays render at the display's resolution (960 or 1440 set).
