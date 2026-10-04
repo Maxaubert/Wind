@@ -1,4 +1,4 @@
-# Ramp-shimmer A/B (issue #229): does a configuration reduce the cursor churn Max sees while
+# Ramp-shimmer A/B (issue #229): does a configuration reduce the cursor churn seen in the field while
 # zooming with the high-resolution cursor?
 #
 # Protocol: blank backdrop so the only thing in the capture patch is the cursor, hand completely

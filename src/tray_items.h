@@ -1,7 +1,7 @@
 // Pure tray quick-control list model (no <windows.h>): which sliders and toggles the tray flyout
 // shows and in what order, parsed from / written to the global (non-profile) ini keys
 // trayPerf, traySliders, traySliderOrder, trayToggles, trayToggleOrder. Shared by WindTray and the
-// config host. Spec: docs/superpowers/specs/2026-10-01-tray-flyout-design.md (issue #313).
+// config host. Spec: docs/specs/2026-10-01-tray-flyout-design.md (issue #313).
 #pragma once
 #include <map>
 #include <string>

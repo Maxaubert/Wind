@@ -34,7 +34,7 @@ TEST_CASE("engine: a model value maps to its option, unknown reads as Auto like 
     CHECK(EngineIndex("hybrid") == 0);
     CHECK(EngineIndex("render") == 1);
     CHECK(EngineIndex("transform") == 2);
-    CHECK(EngineIndex("magnify") == 0);      // System is no longer offered: reads as Auto
+    CHECK(EngineIndex("magnify") == 0);      // the retired engine reads as Auto
     CHECK(EngineIndex(" transform ") == 2);
     CHECK(EngineIndex("") == 0);
     CHECK(EngineIndex("junk") == 0);

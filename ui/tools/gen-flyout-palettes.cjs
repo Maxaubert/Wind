@@ -25,7 +25,7 @@ const f = (v) => { const s = String(+(+v).toFixed(3)); return (s.includes('.') ?
 
 // today's flyout look (MakeTheme in flyout_draw.cpp before #318), the Wind grey rows
 // Wind grey dark ON segments: solid teal with a near-black icon, the black-and-teal contrast of the Settings
-// switches (Max 2026-10-02, #329); the old dim teal tint did not fit.
+// switches (owner decision 2026-10-02, #329); the old dim teal tint did not fit.
 const GREY = {
   dark: { menu: 0x000000, card: 0x121212, menub: 0x333333, fg: 0xf2f2f2, fg2: 0xd0d0d0, fg3: 0xb4b6ba, rule: 0x303236, hl: 0x2d2d2d,
     glyph: 0xb0b0b0, spark: 0x2fbfa5, fill: 0x2fbfa5, fillline: 0, filllineA: 0, lift: 0x0b0b0b, scrim: 0x000000, scrimA: .55,
@@ -44,7 +44,7 @@ function derive(k) {
   const card = hex(k.card), fg = hex(k.fg), fill = hex(k.fill), accent = hex(k.pbg);
   const chip = hex(k.chip), chipb = hex(k.chipb), chiph = mix(fg, chip, .06);
   // ON segments: a SOLID fill in the colour of the Settings switches (swon) with the on-accent icon colour,
-  // so they pop like Wind grey does (Max 2026-10-02, #329); the old tint over the off fill was too faint.
+  // so they pop like Wind grey does (owner decision 2026-10-02, #329); the old tint over the off fill was too faint.
   const ton = k.segon ? hex(k.segon) : hex(k.swon), tonh = k.segon ? hex(k.segon) : mix(fg, hex(k.swon), .12);
   const tonic = k.segonfg ? hex(k.segonfg) : hex(k.accenton);
   const fl = k.fillline && k.fillline !== 'transparent';
@@ -93,7 +93,7 @@ for (const [id, mid] of ORDER) {
   const p = all[mid];
   const d = Object.assign({}, id === 'grey' ? GREY.dark : derive(p.dark));
   // #320: the window outline, rules, control outline and separators closer to the surface (not High contrast).
-  // Section rules + window border fade more than in Settings (Max: the sections looked segregated); the
+  // Section rules + window border fade more than in Settings (field report: the sections looked segregated); the
   // control outline and separators use the Settings chipb factor.
   const TF = { grey: 0.45, ember: 0.30, ocean: 0.45 };
   if (id !== 'hicon') {

@@ -6,7 +6,7 @@
 .bx .kc.ghost { border-color: transparent; color: var(--fg3); gap: 5px; cursor: pointer; }
 .bx .kc.ghost:hover { color: var(--fg); border-color: var(--chipb); }
 .bx .kc.ghost svg { width: 11px; height: 11px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
-/* The unset pan box shows a key combination, so it keeps the outline of the other key boxes (Max 2026-10-02). */
+/* The unset pan box shows a key combination, so it keeps the outline of the other key boxes (owner decision). */
 .bx .kc.ghost.pan { border-color: var(--chipb); }
 .bx .kc.ghost.pan:hover { border-color: var(--outline); }
 .bx .kc.live, .bx .kc.ghost.pan.live { color: var(--fg); border-color: var(--fill); }

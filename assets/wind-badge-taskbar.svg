@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
   <!-- Wind taskbar / window icon source: the main logo (assets/wind-badge.svg) plus a solid
        #202020 edge outline (the Windows dark taskbar grey, so it vanishes on a dark taskbar and
-       shows as a subtle edge on a black one; Max 2026-10-03), drawn inside the square (inset by
+       shows as a subtle edge on a black one; owner decision 2026-10-03), drawn inside the square (inset by
        half its width). Used ONLY to build assets/wind.ico (taskbar, alt-tab, window icon) via
        tools/make_icon.mjs, which re-draws the outline 1 physical px wide at every size.
        Everywhere else use wind-badge.svg (no outline). -->

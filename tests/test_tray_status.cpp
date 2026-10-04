@@ -41,7 +41,6 @@ TEST_CASE("hybrid reads Advanced, not Auto") {
     CHECK(std::wstring(EngineLabel(TrayEngine::Advanced))  == L"ADVANCED");
     CHECK(std::wstring(EngineLabel(TrayEngine::Transform)) == L"TRANSFORM");
     CHECK(std::wstring(EngineLabel(TrayEngine::Render))    == L"RENDER");
-    CHECK(std::wstring(EngineLabel(TrayEngine::System))    == L"SYSTEM");
 }
 
 // --- tick statistics -------------------------------------------------------------------

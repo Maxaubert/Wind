@@ -16,7 +16,7 @@ struct TelemetrySample {
     double tMs;        // harness-relative timestamp (QPC ms, monotonic)
     double dtMs;       // this tick's loop interval
     int    active;     // overlay active (zoomed or inspect)
-    char   engine;     // 'R' render, 'T' transform, 'M' magnify, '-' none/idle
+    char   engine;     // 'R' render, 'T' transform, '-' none/idle
     double level;      // current zoom level
     double mapX, mapY; // mapper (lens) centre, monitor-local px
     int    monX, monY; // monitor origin (virtual px) - converts mapX/Y to virtual

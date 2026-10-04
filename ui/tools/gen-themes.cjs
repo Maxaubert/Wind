@@ -1,5 +1,5 @@
 // Generates ui/src/design/themes.css and ui/src/design/themes.js from the mockup palette files
-// (wind-settings-mockups/ia/palettes08.cjs, palettes-b1.cjs, palettes-b2.cjs, Max's final pick of 2026-10-02).
+// (wind-settings-mockups/ia/palettes08.cjs, palettes-b1.cjs, palettes-b2.cjs, the owner's final pick of 2026-10-02).
 //
 //   node tools/gen-themes.cjs [mockup-ia-dir]
 //
@@ -11,7 +11,7 @@
 // dangerbtn dangerbtnfg scrim bnfilter bntint bntop rc rp rsw rkn.
 // Wind grey takes the app's own tokens.css values for every token the app already had, so
 // today's look is exactly preserved; every other theme comes from the mockup palettes.
-// Palette ids in the app: grey ember ocean hicon (the core's kUiPalettes, src/config.cpp). Four themes only (Max 2026-10-02).
+// Palette ids in the app: grey ember ocean hicon (the core's kUiPalettes, src/config.cpp). Four themes only (owner decision 2026-10-02).
 // Dark only since 0.20.0 (#324): the mockup palettes' light halves are not read.
 const fs = require('fs');
 const path = require('path');
@@ -37,9 +37,9 @@ const EXISTING = ['bg', 'side', 'line', 'line2', 'outline', 'rowline', 'hover', 
   'fg', 'fg2', 'fg3', 'glyph', 'track', 'accent', 'onaccent', 'pill', 'pillb', 'shadow', 'prog',
   'hlDim', 'hlGrey', 'fill', 'thumb', 'ctl', 'band', 'bandimg-op'];
 
-// Edges and outlines sit closer to the card than the palette says (Max 2026-10-02, #320), in every theme
+// Edges and outlines sit closer to the card than the palette says (field report 2026-10-02, #320), in every theme
 // except High contrast. Wind grey's edges come from tokens.css, which already holds the softened values.
-// Per theme (Max, round 2): Ember as is, the black Wind grey and Ocean more.
+// Per theme (owner decision, round 2): Ember as is, the black Wind grey and Ocean more.
 const FADES = { grey: 0.45, ember: 0.30, ocean: 0.45 };
 const EDGES = ['chipb', 'cardb', 'line', 'line2', 'pillb'];
 module.exports = { FADES, EDGES };

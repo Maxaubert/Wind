@@ -1,6 +1,6 @@
 # Analyzer for the cursor optical probe (issue #229): does the cursor OSCILLATE while panning?
 #
-# Max's description of the artifact: the cursor lags the hand, the lag grows with speed (inertia),
+# The field report's description of the artifact: the cursor lags the hand, the lag grows with speed (inertia),
 # and it flickers between the centred and lagging positions fast enough to look like two cursors.
 # One cursor is drawn per frame, so area is flat - what moves is position.
 #
@@ -68,7 +68,7 @@ def _selftest():
     #    acceleration lasting several frames. The first version of this metric scored that as
     #    oscillation - tens of pixels, rising with speed exactly like a real inertia artifact -
     #    and therefore ranked a welded cursor best simply because a welded cursor hardly moves on
-    #    screen. Max saw through it from the field: the build it condemned looks clean to the eye.
+    #    screen. Field testing saw through it: the build it condemned looks clean to the eye.
     #    Smooth motion with reversals must read ~0 no matter how fast it is.
     def reversing(n, speed, period=40):
         t, x, y = [], [], []
@@ -147,7 +147,7 @@ def alternating(sx, sy):
     speed that is tens of pixels, which is what the first version of this metric reported as
     "oscillation". It scaled with speed exactly as a real inertia artifact would, and it ranked a
     welded cursor best for the uninteresting reason that a welded cursor barely moves on screen.
-    Max caught it from the field: the build it condemned does not wobble to the eye.
+    Field testing caught it: the build it condemned does not wobble to the eye.
 
     A flicker alternates every frame; acceleration holds its sign across many. Taking the smaller
     of two consecutive residuals ONLY where they have opposite signs isolates the first and

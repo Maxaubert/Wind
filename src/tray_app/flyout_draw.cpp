@@ -435,7 +435,7 @@ void Painter::Impl::drawHead(const View& v, const Geometry& g) {
     if (v.p.haveFps) {
         wchar_t b[24];
         wsprintfW(b, L"%d fps", v.p.fps);
-        text(b, g_s.mono12b.Get(), D2D1::RectF(left, topRow, right, topRow + 28.f), th.fg,   // (decorative mark removed, Max 2026-10-02)
+        text(b, g_s.mono12b.Get(), D2D1::RectF(left, topRow, right, topRow + 28.f), th.fg,   // (decorative mark removed by owner decision)
              DWRITE_TEXT_ALIGNMENT_TRAILING);
     }
     // frame row: "Frame" [sparkline] "6.9 ms"

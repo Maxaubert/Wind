@@ -28,9 +28,8 @@ Var LicenceDir   ; where "Read the full licence" put its copy, empty until then
 ; ---- stop a running Wind -----------------------------------------------------
 ; An upgrade always runs over a live tray app holding its own exe open. Wind exposes an
 ; auto-reset named event for exactly this (src\main.cpp:2199); setting it makes Wind exit
-; CLEANLY, which restores the OS cursor, releases any ClipCursor, releases the shared
-; Magnification runtime, and restores the user's native-Magnifier registry backup if the
-; magnify model ever modified it. Killing the process skips all of that and can leave the
+; CLEANLY, which restores the OS cursor, releases any ClipCursor and releases the shared
+; Magnification runtime. Killing the process skips all of that and can leave the
 ; pointer hidden or pinned to one pixel. So: ask, wait, and only then kill.
 ;
 ; The wait is on Wind's single-instance mutex rather than a tasklist poll, which is both

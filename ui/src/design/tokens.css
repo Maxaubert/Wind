@@ -16,7 +16,7 @@
 
   --bg: #000; --side: #000;
   --line: #151515; --line2: #1b1b1b; --outline: #5c5c5c; --rowline: #0f0f0f;
-  --hover: #121212; --card: #080808; --chip: #0e0e0e; --chipb: #212121;   /* card #080808: Max 2026-10-02 */
+  --hover: #121212; --card: #080808; --chip: #0e0e0e; --chipb: #212121;   /* card #080808: owner decision */
   --cardb: #0e0e0e; --cshadow: none;
   --fg: #f2f2f2; --fg2: #d0d0d0; --fg3: #8f8f8f; --glyph: #b0b0b0;
   --track: #303030; --accent: #fff; --onaccent: #000;
@@ -25,7 +25,7 @@
   --prog: #f2f2f2;
   --hlDim: #2e2e2e; --hlGrey: #313131;
   --fill: #2fbfa5; --thumb: #f2f2f2; --ctl: #8c8c8c;
-  --band: #080808; --bandimg-op: .17; --bandimg-from: 50%;   /* banner = option colour, aurora .17: Max 2026-10-02 */
+  --band: #080808; --bandimg-op: .17; --bandimg-from: 50%;   /* banner = option colour, aurora .17: owner decision */
 
   /* Tokens the built-in themes (themes.css) set on top of the ones above. Defaults here keep the grey look. */
   --sel: var(--hlGrey); --selfg: var(--fg); --onfill: #04201b; --fillline: transparent; --focus: var(--fg);
@@ -48,7 +48,7 @@
 }
 .wnd button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
 .wnd :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-/* Scrollbars (#322, Max 2026-10-02): a small rounded chip, no track and no arrow buttons. 10 px gutter,
+/* Scrollbars (#322, owner decision): a small rounded chip, no track and no arrow buttons. 10 px gutter,
    6 px thumb (2 px transparent border each side), a little stronger on hover and while dragging. */
 .wnd ::-webkit-scrollbar { width: 10px; height: 10px; background: transparent; }
 .wnd ::-webkit-scrollbar-track, .wnd ::-webkit-scrollbar-corner { background: transparent; }

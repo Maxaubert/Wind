@@ -65,10 +65,10 @@ TEST_CASE("MakeProfileText strips global keys, keeps everything else verbatim") 
 TEST_CASE("MakeLiveText: profile keys win, globals carry over, pointer set") {
     const std::string oldLive =
         "maxLevel=8.0\nmodel=render\nprofile=Default\nonboarded=1\nuiTheme=dark\nshowAdvanced=1\n";
-    const std::string prof = "maxLevel=4.0\nmodel=magnify\nzoomInVk=33\n";
+    const std::string prof = "maxLevel=4.0\nmodel=transform\nzoomInVk=33\n";
     auto v = ReadIniValues(MakeLiveText(prof, oldLive, "Gaming"));
     CHECK(v["maxLevel"] == "4.0");
-    CHECK(v["model"] == "magnify");
+    CHECK(v["model"] == "transform");
     CHECK(v["zoomInVk"] == "33");
     CHECK(v["profile"] == "Gaming");
     CHECK(v["onboarded"] == "1");

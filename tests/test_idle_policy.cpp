@@ -10,7 +10,7 @@ TEST_CASE("a quiet 1x loop with the hooks up may sleep (#71)") {
 }
 TEST_CASE("anything in flight keeps the loop ticking (#71)") {
     IdleInputs in = Quiet(); in.active = true;           CHECK_FALSE(IdleSleepOk(in));
-    in = Quiet(); in.anyHold = true;                      CHECK_FALSE(IdleSleepOk(in));   // magnify model notches
+    in = Quiet(); in.anyHold = true;                      CHECK_FALSE(IdleSleepOk(in));   // a held zoom bind
     in = Quiet(); in.wheelPending = true;                 CHECK_FALSE(IdleSleepOk(in));
     in = Quiet(); in.quickZoomPending = true;             CHECK_FALSE(IdleSleepOk(in));
     in = Quiet(); in.settling = true;                     CHECK_FALSE(IdleSleepOk(in));
