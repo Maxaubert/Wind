@@ -9,6 +9,10 @@
 // last single line in this element, and trim a rect much taller than one line to one line at its
 // bottom edge, but only when that bottom sits on the known line grid (the same line, or whole lines
 // below after a wrap). Any other tall rect (a genuinely bigger font) is learned as the new line.
+// What tells the two apart (review #349): Chromium's extra height is whole blank lines ABOVE the caret,
+// so the rect's TOP climbs well above the previous line's top while its bottom stays (or scrolls up). A
+// taller font (a heading, a font-size change on the line, Down into a heading) grows downward or both
+// ways, so its top stays at or near the previous line's top: that is learned, never trimmed.
 // Pure, no <windows.h>.
 #pragma once
 
@@ -22,21 +26,28 @@ struct CaretLineState {
 inline constexpr double kTallCaretRatio = 1.4;   // taller than this many lines' worth = spans extra lines
 inline constexpr int    kGridSlackPx = 3;        // rounding slack when matching the line grid
 inline constexpr int    kMaxWrapLines = 3;       // a wrap may move the bottom this many lines down or up
+inline constexpr double kMinClimbLines = 0.5;    // Chromium's top climbs at least this far above the last line's top
 
 // Learns from and corrects one caret rect (top/bottom in pixels). Reset the state on a focus change.
 inline void TrimTallCaret(int& top, int bottom, CaretLineState& s) {
     const int h = bottom - top;
     if (h <= 0) return;
-    if (s.lineH > 0 && h > s.lineH * kTallCaretRatio) {
+    // Only a rect whose top climbed above the last line's top can be spanning blank lines above it
+    // (field: tops 67-164 px above, 1.5-3.7 lines of 44 px). One that did not is a taller line.
+    const int prevTop = s.lineBottom - s.lineH;
+    const bool climbed = top < prevTop - s.lineH * kMinClimbLines;
+    if (s.lineH > 0 && h > s.lineH * kTallCaretRatio && climbed) {
         const int d = bottom - s.lineBottom;
         const int ad = d < 0 ? -d : d;
         const int k = (ad + s.lineH / 2) / s.lineH;            // nearest whole number of lines
         const int off = ad - k * s.lineH;
-        // On the line grid (same line, or whole lines away after a wrap), or within one line of it:
-        // Enter on the last visible line reports the new line first, then the page scrolls it up by
-        // a few pixels (field: line 1989-2033, then the tall rect ends at 2009, 24 px higher).
+        // On the line grid (same line, or whole lines away after a wrap):
         const bool onGrid = k <= kMaxWrapLines && (off < 0 ? -off : off) <= kGridSlackPx;
-        if (onGrid || ad <= s.lineH) {
+        // Or scrolled UP by a fraction of a line: Enter on the last visible line reports the new line
+        // first, then the page scrolls it up a few pixels (field: line 1989-2033, then the tall rect
+        // ends at 2009, 24 px higher). A bottom that moved DOWN off the grid is a taller font.
+        const bool scrolledUp = d < -kGridSlackPx && ad < s.lineH;
+        if (onGrid || scrolledUp) {
             top = bottom - s.lineH;                            // on the line grid: the caret is the bottom line
             s.lineBottom = bottom;
             return;
@@ -63,21 +74,35 @@ inline bool IsLineWideCaret(int left, int top, int right, int bottom) {
 struct CaretHoldState {
     bool have = false;
     int left = 0, top = 0, bottom = 0;   // the last caret published
+    // The tracker re-reads the caret every ~16 ms, and the page reports the same stale rect until the
+    // next key (review #349): the raw report being held, so its repeats stay held until it changes.
+    bool holding = false;
+    int rawLeft = 0, rawTop = 0, rawBottom = 0;
 };
 
 inline constexpr double kHoldMinFrac = 0.2;   // a fraction of a line: more than jitter...
 inline constexpr double kHoldMaxFrac = 0.8;   // ...and less than a real new line
 
 // lineH: the current one-line height (0 = unknown, nothing is held). Adjusts top/bottom in place.
-inline void HoldMidScrollCaret(int left, int& top, int& bottom, int lineH, CaretHoldState& s) {
+// Returns true only when a NEW hold starts (a repeat of the held report returns false), for logging.
+inline bool HoldMidScrollCaret(int left, int& top, int& bottom, int lineH, CaretHoldState& s) {
+    if (s.holding && left == s.rawLeft && top == s.rawTop && bottom == s.rawBottom) {
+        top = s.top; bottom = s.bottom;                           // the same stale report: still held
+        return false;
+    }
+    s.holding = false;                                            // the report changed: released
+    bool held = false;
     if (s.have && lineH > 0 && left < s.left && bottom - top <= lineH * 1.4) {
         const int dy = bottom - s.bottom;
         const int ady = dy < 0 ? -dy : dy;
         if (ady > lineH * kHoldMinFrac && ady < lineH * kHoldMaxFrac) {
+            s.holding = true; s.rawLeft = left; s.rawTop = top; s.rawBottom = bottom;
             top = s.top; bottom = s.bottom;                       // part-way through a scroll: stay on the line
+            held = true;
         }
     }
     s.have = true; s.left = left; s.top = top; s.bottom = bottom;
+    return held;
 }
 
 }  // namespace wind

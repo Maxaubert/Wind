@@ -4,6 +4,7 @@
 #include "config.h"     // IsForbiddenBindVk (keyboard-bind safety blocklist)
 #include "pointer_binds.h" // button/wheel bind matching, the mask keystroke (#285)
 #include "logging.h"    // hook-watchdog events (issue #156)
+#include "typing_key.h" // the typing-key stamp for the click quiet period (#328)
 #include <windows.h>
 #include <atomic>
 namespace wind {
@@ -11,6 +12,7 @@ static InputRouter* g_router = nullptr;
 static HHOOK   g_mouseHook    = nullptr;
 static HHOOK   g_kbHook       = nullptr;   // WH_KEYBOARD_LL, shares g_hookThread with the mouse hook
 static bool    g_kbOk         = false;     // result of the keyboard SetWindowsHookExW, via g_hookReady
+static TypingKeyFilter g_typingKeys;       // hook thread only: fresh non-modifier downs (#328)
 // Per-VK keyboard state (index = Virtual-Key code, 0..255). Touched by the hook thread (KbProc), the
 // tick thread (setKeys / main's keyPressed reads), and teardown (ReleaseSwallowedKeys via stop()),
 // so they must be atomic. g_kbPressed = physical down-state (the authority while the hook is active,
@@ -293,6 +295,8 @@ static LRESULT CALLBACK KbProc(int code, WPARAM wParam, LPARAM lParam) {
         // Any key activity, down OR up: tracking's keyboard gate (#289). Ups count so a focus change
         // committed by a release (Alt+Tab held for a while) is still keyboard-driven (review).
         if (down || up) g_router->noteAnyKeyDown(GetTickCount64());
+        // Typing (#328): only a fresh non-modifier down ends the click quiet period.
+        if ((down || up) && g_typingKeys.note(vk, down)) g_router->noteTypingKeyDown(GetTickCount64());
         // Only bound (non-forbidden) keys are tracked/swallowed; every other keystroke passes through
         // untouched. isBoundKey already range-checks vk and excludes IsForbiddenBindVk keys.
         if ((down || up) && g_router->isBoundKey(vk)) {

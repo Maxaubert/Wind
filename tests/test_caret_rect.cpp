@@ -101,3 +101,58 @@ TEST_CASE("caret rect: a whole-line caret (VS Code) is recognised (#341)") {
     CHECK_FALSE(IsLineWideCaret(1927, 1159, 1950, 1203)); // a character-wide caret
     CHECK_FALSE(IsLineWideCaret(100, 100, 120, 100));     // degenerate height
 }
+TEST_CASE("caret hold: the 60 Hz poll re-reading the same stale report stays held (review #349)") {
+    CaretHoldState h;
+    int t = 1965, b = 2009; HoldMidScrollCaret(2394, t, b, 44, h);   // typing at the end of the line
+    t = 1989; b = 2033; CHECK(HoldMidScrollCaret(1927, t, b, 44, h)); // Enter mid-scroll: a new hold
+    CHECK(t == 1965);
+    t = 1989; b = 2033; CHECK_FALSE(HoldMidScrollCaret(1927, t, b, 44, h));   // next poll, same report
+    CHECK(t == 1965);
+    CHECK(b == 2009);
+    t = 1989; b = 2033; HoldMidScrollCaret(1927, t, b, 44, h);       // and the one after
+    CHECK(t == 1965);
+    t = 1965; b = 2009; HoldMidScrollCaret(1946, t, b, 44, h);       // the next key: the report changed
+    CHECK(t == 1965);
+    CHECK(b == 2009);
+    CHECK_FALSE(h.holding);
+}
+
+TEST_CASE("caret hold: a real next line after a hold still passes (review #349)") {
+    CaretHoldState h;
+    int t = 1965, b = 2009; HoldMidScrollCaret(2394, t, b, 44, h);
+    t = 1989; b = 2033; HoldMidScrollCaret(1927, t, b, 44, h);       // held
+    t = 2009; b = 2053; CHECK_FALSE(HoldMidScrollCaret(1927, t, b, 44, h));   // a whole line below
+    CHECK(t == 2009);
+    CHECK(b == 2053);
+    t = 2009; b = 2053; HoldMidScrollCaret(1927, t, b, 44, h);       // its repeats pass unchanged
+    CHECK(t == 2009);
+}
+
+TEST_CASE("caret rect: a taller font on the same line that grows downward is learned (review #349)") {
+    CaretLineState s;
+    int top = 100; TrimTallCaret(top, 120, s);     // 20 px body text
+    top = 100; TrimTallCaret(top, 150, s);         // a 50 px heading run on the same line: top stays
+    CHECK(top == 100);
+    CHECK(s.lineH == 50);
+    top = 100; TrimTallCaret(top, 150, s);         // and keeps being accepted
+    CHECK(top == 100);
+}
+
+TEST_CASE("caret rect: a font-size change growing both ways within one line is learned (review #349)") {
+    CaretLineState s;
+    int top = 100; TrimTallCaret(top, 120, s);     // 20 px body
+    top = 95; TrimTallCaret(top, 130, s);          // 35 px: 5 up, 10 down (the old within-a-line rule trimmed it)
+    CHECK(top == 95);
+    CHECK(s.lineH == 35);
+}
+
+TEST_CASE("caret rect: Down into a heading below is learned, even with its bottom on the grid (review #349)") {
+    CaretLineState s;
+    int top = 100; TrimTallCaret(top, 120, s);     // 20 px body
+    top = 120; TrimTallCaret(top, 161, s);         // 41 px heading right below: bottom 2 lines down (on the grid)
+    CHECK(top == 120);
+    CHECK(s.lineH == 41);
+    top = 161; TrimTallCaret(top, 181, s);         // Down again into body text
+    CHECK(top == 161);
+    CHECK(s.lineH == 20);
+}

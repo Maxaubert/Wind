@@ -10,6 +10,7 @@
 // sleeps at 1x and waits on a timer when zoomed, so the raised priority costs nothing while idle.
 #pragma once
 #include <windows.h>
+#include "logging.h"
 
 namespace wind {
 
@@ -19,12 +20,23 @@ inline void RaiseTickThreadPriority() {
 }
 
 // Never run Wind in EcoQoS / efficiency mode, and honour its timer resolution even with no visible window.
+// The timer-resolution bit is Windows 11+; Windows 10 rejects the whole call when it is set, so a
+// failure retries with EXECUTION_SPEED alone (review #349). The outcome is logged once.
 inline void OptOutOfPowerThrottling() {
     PROCESS_POWER_THROTTLING_STATE s{};
     s.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
     s.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED | PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION;
     s.StateMask = 0;   // controlled bits off = never throttled
-    SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &s, sizeof(s));
+    if (SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &s, sizeof(s))) {
+        Log(LogLevel::Info, "startup", "power throttling off (execution speed + timer resolution)");
+        return;
+    }
+    const DWORD first = GetLastError();
+    s.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
+    if (SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &s, sizeof(s)))
+        Log(LogLevel::Info, "startup", "power throttling off (execution speed only; timer bit refused, error %lu)", first);
+    else
+        Log(LogLevel::Warn, "startup", "power throttling opt-out failed (errors %lu, %lu)", first, GetLastError());
 }
 
 }  // namespace wind

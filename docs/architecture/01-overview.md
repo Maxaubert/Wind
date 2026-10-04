@@ -185,6 +185,7 @@ large fleet of PowerShell measurement probes, see
 | File | Role |
 |---|---|
 | `band_window.h` | `CreateBandedWindow`: requested z-band cascades 16 then unbanded, logging every refusal (issue #162) |
+| `caret_rect.h` | Pure caret-rect corrections (issues #337/#341): trims Chromium's tall caret rects to the caret line, holds a mid-scroll Enter report on its line, recognises a whole-line caret |
 | `com_util.h` | `SafeRelease` COM helper shared by renderer and PNG dump |
 | `comp_pin.cpp/.h` | Composition pin and the MPO-buster ghost window that demotes a game off its hardware overlay plane (issue #191) |
 | `config.cpp/.h` | `Config` struct, `ParseConfig`, `StripUiOnlyKeys`, `IsForbiddenBindVk`; the parse half is pure and tested |
@@ -225,6 +226,7 @@ large fleet of PowerShell measurement probes, see
 | `render_model.cpp/.h` | Adapts `RenderEngine` to `IMagnifierModel` |
 | `render_shaders.h` | HLSL sources: magnify/sharpen/tonemap PS, cursor quad, single-pass edge outline |
 | `resource.h` / `wind.rc` | App/tray icon resources |
+| `sched_priority.h` | Raises the tick thread's priority and opts Wind out of power throttling, falling back to execution speed only where the timer bit is refused (issue #334) |
 | `shell_desktop.h` | Pure test: is this window class the shell desktop (Win+D reads as a game otherwise, issue #172) |
 | `sprite_layer.h` | Pure rule for which z-band the transform cursor sprite shows in, so it survives the Snipping Tool overlay and shell surfaces (issue #269) |
 | `test_telemetry.h` | Per-tick CSV telemetry sample/formatting for the `tools/testenv` proving-ground harness (`WIND_TESTLOG`, issue #225) |
@@ -238,6 +240,7 @@ large fleet of PowerShell measurement probes, see
 | `tray_status.h` | Pure decisions for what the tray menu shows (engine label, status text) from a published tick-loop snapshot |
 | `tx_cadence.h` | Pure transform write-cadence gates, traced against native Magnifier (issue #204) |
 | `tx_warm.h` | Pure transform warm-keeping: the pulsed rest-tick displacement (`txWarmHz`/`txWarmMode`) that keeps DWM's magnification re-render from going cold between pans |
+| `typing_key.h` | Pure rule for which keystrokes count as typing (fresh non-modifier downs) to end the click quiet period early (issue #328) |
 | `version.h` | The single source of the version; bumping it cuts a release |
 | `view_glide.h` | Pure glide/spring easing toward a tracking target (issue #276): time-based `GlideToward` and a critically-damped `SpringToward` |
 | `view_target.h` | Pure view-ownership rules for tracking (issue #276): mouse vs. caret/focus, the click-quiet window, warp-vs-glide handback |
