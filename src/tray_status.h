@@ -9,7 +9,7 @@ namespace wind {
 
 // Which engine is actually running this session - NOT what the ini asked for. "Advanced" is the
 // hybrid model: it is the mode that picks per window type, which is what the name should say.
-enum class TrayEngine { Advanced, Transform, Render, System };
+enum class TrayEngine { Advanced, Transform, Render };
 
 struct TrayStatus {
     double      level   = 1.0;                    // 1.0 = not zoomed
@@ -25,7 +25,6 @@ inline const wchar_t* EngineLabel(TrayEngine e) {
     switch (e) {
         case TrayEngine::Transform: return L"TRANSFORM";
         case TrayEngine::Render:    return L"RENDER";
-        case TrayEngine::System:    return L"SYSTEM";
         default:                    return L"ADVANCED";
     }
 }

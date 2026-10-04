@@ -97,9 +97,7 @@ struct Config {
     // --- Model selection ----------------------------------------------------
     // Which magnification model runs. "hybrid" (DEFAULT, "Auto" in the UI) constructs render +
     // transform and picks per zoom-in (engine_pick.h). "render" = the DXGI capture + D3D11
-    // overlay. "magnify" = drive the native Windows Magnifier (Magnify.exe) via injected wheel
-    // notches; works over DRM-protected video that blanks under Desktop Duplication.
-    // "transform" = the DWM fullscreen-transform model (MagSetFullscreenTransform, no
+    // overlay. "transform" = the DWM fullscreen-transform model (MagSetFullscreenTransform, no
     // Magnify.exe) - revived for issue #148: it magnifies inside the compositor with zero app
     // presents, the only path that stays smooth while a heavy game renders. Missing or unknown
     // values fall back to "hybrid" (the product default; the UI schema and new-profile seeding
@@ -217,8 +215,8 @@ struct Config {
     //   -1 = leave whatever DWM currently has alone.
     // The state is global to DWM and resets when DWM restarts, which is why smoothing appeared
     // to come and go between builds; it is re-applied per magnification context. KNOWN
-    // INTERACTION: the 1px translation warm write (txWarmMode=1, which replaced the retired
-    // txKeepAliveMaxLevel keep-alive) puts the view 1px off-true on rest ticks; nearest masks
+    // INTERACTION: the 1px translation warm write (txWarmMode=1) puts the view 1px off-true on
+    // rest ticks; nearest masks
     // that as sub-block noise, smoothing can render it as visible shaking (see txWarmMode).
     // Wobble cage (issue #229, hot): a visible wobble detector - four ~10px bars boxing the
     // cursor; the bar the sprite crosses flashes red. Diagnostic, ships 0. The collision test
@@ -242,11 +240,6 @@ struct Config {
     // edit). Fail-closed: the walls lift only while the ghost is verifiably shown + settled.
     // 0 = walls-only (the pre-#191 fence behavior). No effect when MPO is off.
     int mpoBuster = 1;
-    // RETIRED (superseded by txWarmMode, 2026-08-26). This was the level gate on the old 1px
-    // translation keep-alive; that mechanism lives on as txWarmMode=1 (the shipped mode, see
-    // WARM-KEEPING below). Parsed and clamped so an old ini or profile carrying the key is still
-    // accepted, but NOTHING READS IT - do not add a reader.
-    int txKeepAliveMaxLevel = 8;
     // WARM-KEEPING (pan-start hitch, measured 2026-08-26 with tools/pan_wake_probe.ps1). At rest
     // Wind stops writing entirely ("same-value hygiene" below), and DWM then lets its
     // magnification composition path fall off full rate; the first movement after the pause lands
@@ -258,7 +251,7 @@ struct Config {
     // Native never goes quiet, and the legacy keep-alive matches it - but that one writes a value
     // 1px OFF THE TRUTH at tick rate, which is the shimmer that retired it in #204. These modes
     // exist to find a channel that keeps DWM warm without lying about the position:
-    //   0 = off (no warm-keeping; the old txKeepAliveMaxLevel path is retired, nothing reads it)
+    //   0 = off (no warm-keeping)
     //   1 = 1px translation jitter (the shipped mode, see "SHIPPED AS MODE 1" below)
     //   2 = SAME-VALUE rewrite: re-send the exact transform already applied. Honest by
     //       construction. Rests on DWM re-compositing for an identical write, which the old
@@ -452,7 +445,7 @@ struct Config {
                           //     pointer every frame, defeating both classic lock tells, so the
                           //     lens snaps back instead of panning). The lockApps LIST is the
                           //     feature: listed exes run their sessions locked outright, and an
-                          //     empty list means off - no separate off switch needed (Max).
+                          //     empty list means off - no separate off switch needed (owner decision).
                           //     0 (default) = selected apps only; everywhere else is untouched
                           //         classic behaviour.
                           //     1 = global: additionally run the smart tells everywhere (warp-
@@ -478,10 +471,6 @@ struct Config {
                           //       disabled the 16-bit plane-programming overflow should be gone
                           //   (modes 1 and 3 acted through the retired game-session freeze and
                           //   are inert; numbers kept reserved so old field notes stay readable)
-    // Magnify-model-only: Windows Magnifier zoom increment in percent POINTS per wheel notch
-    // (written to the ScreenMagnifier registry; the user's original value is snapshot-restored
-    // on exit). Lower = smoother and slower zoom. Clamped 5..400. Live-applies (no restart).
-    int magnifyStep = 50;
     // --- Own GPU renderer ---------------------------------------------------
     // Pan speed multiplier. Free desktop panning auto-matches the OS cursor (DPI + acceleration) and
     // is then scaled by this (1.0 = exact match, the default); it also scales the raw-input pan while
@@ -618,7 +607,7 @@ bool IsExeInList(const std::string& exeName, const std::string& list);
 // The ini text with UI-ONLY lines removed (uiTheme, showAdvanced, onboarded): the settings app
 // owns those keys and the core never consumes them, yet every write hot-reloads the core - and
 // the reload resets the ZoomController, so toggling the app theme while zoomed collapsed the
-// zoom to 1x (Max field report). The core compares this stripped form across reloads and skips
+// zoom to 1x (field report). The core compares this stripped form across reloads and skips
 // the reload when nothing it consumes changed. 'profile' stays IN: the core mirrors setConfig
 // into the active profile, so a profile change must still reload.
 std::string StripUiOnlyKeys(const std::string& iniText);

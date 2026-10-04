@@ -88,7 +88,7 @@ public:
     // down, a button/click bind starting a hold, a wheel zoom step). 0 = none.
     long long takePressQpc();
     long long peekPressQpc() const;
-    // Any configured keyboard bind physically down per the hook (magnify-model holds, quick zoom).
+    // Any configured keyboard bind physically down per the hook (quick zoom).
     bool anyBoundKeyPressed() const;
     // Swallowed pan presses since the last drain, per slot: a tap whose down AND up both land
     // between two tick samples is still one nudge (review of #287).
@@ -151,13 +151,6 @@ public:
     // False while the foreground app is on noSwallowApps (or a game suspended the keyboard hook):
     // click and wheel binds then pass through to it too, like the keys ("the app also receives it").
     bool keyboardHookWanted() const { return kbHookWanted_.load(std::memory_order_relaxed); }
-    // Magnify model only: make the keyboard hook skip INJECTED events entirely. The magnify model
-    // drives Windows Magnifier by injecting Win+Plus/Win+Minus chords, and NumPad +/- are bindable
-    // zoom keys - without the skip, our own injection would be swallowed by our own hook and
-    // re-registered as a zoom press (a feedback loop). Off by default so tools that inject keys
-    // (e.g. AutoHotkey remaps) keep working with the render model.
-    void setIgnoreInjectedKeys(bool on) { ignoreInjectedKeys_.store(on, std::memory_order_relaxed); }
-    bool ignoreInjectedKeys() const { return ignoreInjectedKeys_.load(std::memory_order_relaxed); }
     // True when the LL mouse hook is installed (the normal build). When true the hook is the SOLE
     // authority for side-button held state; main's WM_INPUT path must NOT also write button state
     // (Raw Input still delivers the transition even though the hook swallows the legacy message, so
@@ -224,7 +217,6 @@ private:
     std::atomic<unsigned> kbHookReinstalls_{0};  // watchdog recoveries this session
     std::atomic<bool> kbHookWanted_{true};       // false while a fullscreen game is foreground
     std::atomic<bool> kbHookRecovering_{false};  // distinguishes watchdog recovery from a resume
-    std::atomic<bool> ignoreInjectedKeys_{false}; // magnify model: kb hook skips LLKHF_INJECTED
     // Inspect-mode cooked-pixel accumulator (main-thread only: WM_INPUT cooks, the tick drains).
     BallisticsConfig ballistics_{};
     double cookedX_ = 0.0;

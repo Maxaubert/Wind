@@ -185,7 +185,6 @@ Config ParseConfig(const std::string& text) {
             else if (key == "cursorConstantSize") c.cursorConstantSize = std::stoi(val);
             else if (key == "cursorVisibility")   c.cursorVisibility = val;
             else if (key == "model")              c.model = val;
-            else if (key == "magnifyStep")        c.magnifyStep = std::stoi(val);
             else if (key == "fastPan")            c.fastPan = std::stoi(val);
             else if (key == "smoothPan")          c.smoothPan = std::stoi(val);
             else if (key == "cursorSprite")       c.cursorSprite = std::stoi(val);
@@ -223,7 +222,6 @@ Config ParseConfig(const std::string& text) {
             else if (key == "txSamplingMode")     c.txSamplingMode = std::stoi(val);
             else if (key == "txWobbleCage")       c.txWobbleCage = std::stoi(val);
             else if (key == "txWobbleCageSize")   c.txWobbleCageSize = std::stoi(val);
-            else if (key == "txKeepAliveMaxLevel")c.txKeepAliveMaxLevel = std::stoi(val);
             else if (key == "txWarmMode")         c.txWarmMode = std::stoi(val);
             else if (key == "txTrace")            c.txTrace = std::stoi(val);
             else if (key == "txRestLevel")        c.txRestLevel = std::stod(val);
@@ -292,9 +290,6 @@ Config ParseConfig(const std::string& text) {
     if (c.tdrTest > 4) c.tdrTest = 4;
     if (c.ixDecimate < 1)  c.ixDecimate = 1;       // 1 = publish every changed tick
     if (c.ixDecimate > 16) c.ixDecimate = 16;
-    // 0 is meaningful here (keep-alive OFF, the shipped default), so the floor is 0 not 1.
-    if (c.txKeepAliveMaxLevel < 0)  c.txKeepAliveMaxLevel = 0;
-    if (c.txKeepAliveMaxLevel > 50) c.txKeepAliveMaxLevel = 50;
     if (c.txIdleReleaseMs < 0) c.txIdleReleaseMs = 0;
     if (c.txRestLevel < 1.0)   c.txRestLevel = 1.0;
     if (c.txRestLevel > 1.01)  c.txRestLevel = 1.01;   // visually identity only
@@ -325,16 +320,14 @@ Config ParseConfig(const std::string& text) {
     // "transform" is a first-class model again (revived for issue #148: the compositor-internal
     // zoom that stays smooth over heavy games); anything unknown falls back to hybrid, the
     // product default ("Auto" in the UI) - same fallback as a missing key (struct default).
-    // "magnify" (System, the Windows Magnifier driver) is no longer offered (Max, 2026-10-02): an old
-    // ini that still says so runs Auto. The engine code stays, it just cannot be picked.
+    // "magnify" (the retired Windows Magnifier driver) is unknown too, so an old ini that still
+    // says so runs Auto.
     if (c.model != "render" && c.model != "transform" && c.model != "hybrid") c.model = "hybrid";
     // (The old transform/hybrid maxLevel<=12 clamp is GONE: the "TDR territory above 12x" was
     // root-caused 2026-07-26 to NVIDIA's 16-bit MPO plane-programming overflow - see issue
     // #148 - which the mapper's MPO-aware pan wall now guards at ANY level, so maxLevel is one
     // shared setting across all models. High levels still cost DWM re-scale time; that is a
     // perf trade the user owns, not a crash.)
-    if (c.magnifyStep < 5)   c.magnifyStep = 5;     // Windows Settings' own range is 5..400
-    if (c.magnifyStep > 400) c.magnifyStep = 400;
     // Reject keybinds to keys Wind must never swallow (see IsForbiddenBindVk). A bound key is
     // eaten system-wide, so binding e.g. Backspace or the Windows key would make it unusable
     // everywhere; treat a forbidden bind as unbound regardless of how it got into the ini.
@@ -550,9 +543,7 @@ std::string DefaultIniText() {
                "; model: hybrid = Auto (default): picks render or transform per zoom-in (games get\n"
                ";   the compositor-internal transform, everything else the GPU overlay).\n"
                ";   render = GPU capture+overlay (high fidelity). transform = DWM fullscreen\n"
-               ";   transform only. magnify = drive the native Windows Magnifier (works over DRM\n"
-               ";   video like Netflix, which blanks in render; handles its own cursor; ignores\n"
-               ";   the render-only knobs; max zoom 1600%). Restart to switch.\n"
+               ";   transform only. Anything else runs hybrid. Restart to switch.\n"
                "model=hybrid\n"
                "; transformExclude (Auto/hybrid only): exe names that must never get the transform\n"
                ";   engine even when fullscreen+borderless. Fullscreen browser video looks exactly\n"
@@ -592,9 +583,6 @@ std::string DefaultIniText() {
                ";   Empty (default) = keys stay swallowed everywhere, as before. The Settings UI\n"
                ";   manages this list (Keybinds -> Release keys in these apps).\n"
                "noSwallowApps=\n"
-               "; magnifyStep (magnify only): Windows Magnifier zoom increment, percent points per\n"
-               ";   step (5-400). Lower = smoother and slower. Applies live.\n"
-               "magnifyStep=50\n"
                "; multiMonitor: 1=magnify whichever monitor the cursor is on at zoom-in; 0=primary only\n"
                "multiMonitor=0\n"
                "; cropCapture (opt-in): 0=always copy all changed regions (cache never stale, default);\n"

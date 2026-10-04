@@ -220,7 +220,7 @@ static std::string DoSwitchProfile(const std::string& name) {
     // Verify by parsed key/value maps, not raw text, so a comment difference never false-fails.
     if (wind::ReadIniValues(ReadFileUtf8(IniPath())) != wind::ReadIniValues(newLive))
         return "Could not write the config file";
-    // ParseConfig canonicalizes (legacy "transform" -> magnify mapping, unknown -> render), same
+    // ParseConfig canonicalizes (unknown or retired models -> hybrid), same
     // comparison as the tray path, so the two surfaces can never disagree about restarting.
     const std::string oldModel = wind::ParseConfig(oldLive).model;
     const bool modelChanged = oldModel != wind::ParseConfig(newLive).model;
@@ -588,7 +588,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         // Not maximized: let Windows keep the left/right/bottom frame (invisible resize borders on
         // 10/11, outside the visible window) and drop only the caption. The WebView child covers the
-        // client, so without these frames only the corners could be grabbed (Max, 2026-10-02).
+        // client, so without these frames only the corners could be grabbed (owner decision).
         const LONG top = p->rgrc[0].top;
         const LRESULT r = DefWindowProcW(h, m, w, l);
         p->rgrc[0].top = top;

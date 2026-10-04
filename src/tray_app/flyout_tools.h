@@ -15,8 +15,7 @@ namespace wind { namespace Flyout {
 inline constexpr const char* kEngineKey = "model";
 
 // The options, in the order and with the labels of the Settings row (ui/src/settings-schema.js:
-// hybrid = Auto, render, transform). System (magnify) is not offered any more (Max, 2026-10-02); the
-// core reads model=magnify as Auto.
+// hybrid = Auto, render, transform). The core reads the retired model=magnify as Auto.
 inline constexpr int kEngineCount = 3;
 inline const char* EngineValue(int i) {
     switch (i) { case 1: return "render"; case 2: return "transform"; default: return "hybrid"; }
@@ -45,7 +44,7 @@ inline bool EnginePickChanges(int current, int picked) {
 
 struct SegRect { int l = 0, t = 0, r = 0, b = 0; };
 
-// The toggle group (mockup v02, Max 2026-10-02): `n` segments stretched to fill [left, right) whatever
+// The toggle group (mockup v02, owner decision): `n` segments stretched to fill [left, right) whatever
 // the count, joined by a 1 px separator (`line`) that belongs to no segment. The widths are whole
 // DIPs: the pixels left over after the equal split go one each to the first segments, so the group
 // always ends exactly at `right`. n <= 0 gives nothing.

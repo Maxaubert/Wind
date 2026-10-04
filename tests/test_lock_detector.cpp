@@ -154,7 +154,7 @@ TEST_CASE("warp tell: a fast desktop pan (positions always advancing) never lock
     CHECK(!d.locked());
 }
 
-// Round 2 (Max: gentle mouselook needed ERRATIC motion to engage): the confinement-box tell.
+// Round 2 (field report: gentle mouselook needed ERRATIC motion to engage): the confinement-box tell.
 // Constants: kBoxTicks=24, kBoxRawSum=400, kBoxSpanPx=30.
 
 TEST_CASE("box tell: gentle mouselook (small jiggle, streaming mickeys) locks within a window") {

@@ -168,7 +168,7 @@ TEST_CASE("Netflix in a browser: protected beats transformExclude") {
     // THE CONFLICT THIS ORDERING EXISTS FOR. A browser is on transformExclude (dwm.exe crashed at
     // high zoom over Mica), and DRM video inside it is capture-protected. Both rules fire and they
     // disagree. Protected wins: black video every single time is a worse failure than a rare crash
-    // risk that the pan wall and MPO buster already mitigate. Signed off by Max, 2026-08-24.
+    // risk that the pan wall and MPO buster already mitigate. Owner decision.
     EnginePickInputs in;
     in.excluded = true;                  // browser
     in.captureProtected = true;          // playing DRM content
