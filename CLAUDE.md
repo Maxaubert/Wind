@@ -611,7 +611,9 @@ only for changes with no runtime surface (docs, tests, comments, build-script tw
 cannot be driven headlessly, so deploying IS how a change gets verified.
 - Deploy (elevated; UAC is silent on this machine, so it runs unattended - allowlisted in
   `.claude/settings.json`):
-  `Start-Process powershell -Verb RunAs -Wait -PassThru -WorkingDirectory '<repo>' -ArgumentList '-ExecutionPolicy','Bypass','-File','<repo>\tools\uiaccess_setup.ps1'`
+  `$p = Start-Process pwsh -Verb RunAs -PassThru -WorkingDirectory '<repo>' -ArgumentList '-ExecutionPolicy','Bypass','-File','<repo>\tools\uiaccess_setup.ps1'; $p.WaitForExit(110000)`
+  (about 40 s; give the call a 2 minute timeout). NOT `-Wait`: in PowerShell 7 it waits for the whole process tree,
+  and the build leaves mspdbsrv / the esbuild service running, so it hangs long after the deploy finished.
   The elevated process starts in System32, so the `-File` path MUST be absolute (a relative
   `tools\...` path silently fails to launch). The script builds `uiaccess` + `config`, signs both
   exes, and copies to Program Files; it logs to `tools\uiaccess_setup.log` (read it to verify
