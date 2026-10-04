@@ -50,3 +50,18 @@ test('onboarding saves the modifiers of a click bind (#285)', async ({ page }) =
   expect(await last('zoomInButton')).toBe('3');
   expect(await last('zoomInButtonMods')).toBe('3');
 });
+
+test('setup uses the chosen theme, and Wind grey on a first run (#359)', async ({ page }) => {
+  await page.addInitScript(() => { window.__windInit = { values: { uiPalette: 'ember' } }; });
+  await page.goto('/?mode=onboard');
+  await expect(page.getByRole('heading', { name: 'Welcome to Wind' })).toBeVisible();
+  await expect(page.locator('.wnd.win')).toHaveAttribute('data-palette', 'ember');
+  const ember = await page.locator('.wnd.win').evaluate((el) => getComputedStyle(el).getPropertyValue('--bg').trim());
+  await page.evaluate(() => { delete window.__windInit; });
+  const first = await page.context().newPage();
+  await first.goto('/?mode=onboard');
+  await expect(first.locator('.wnd.win')).toHaveAttribute('data-palette', 'grey');
+  const grey = await first.locator('.wnd.win').evaluate((el) => getComputedStyle(el).getPropertyValue('--bg').trim());
+  expect(ember).not.toBe('');
+  expect(ember).not.toBe(grey);   // the theme's own background, not Wind grey's
+});

@@ -3,7 +3,10 @@
   import { setConfig, windowControl } from './bridge.js';
   import { ic } from './lib/icons.js';
   import KeybindCapture from './lib/KeybindCapture.svelte';
+  import { normalizePalette } from './design/themes.js';
   export let onDone;
+  // The chosen theme (#359), from the host's first-paint config like Settings. A first run has none: Wind grey.
+  const palette = normalizePalette(window.__windInit && window.__windInit.values && window.__windInit.values.uiPalette);
   let cur = 0;
   const N = 3;
   // Keybinds start blank (Unbound) and are ACTUALLY cleared in the ini on mount, not just shown as
@@ -29,7 +32,7 @@
   const zoomInRow  = { label:'Zoom in',  desc:'Hold to magnify',  buttonKey:'zoomInButton',  vkKey:'zoomInVk',  modsKey:'zoomInMods',  buttonModsKey:'zoomInButtonMods' };
   const zoomOutRow = { label:'Zoom out', desc:'Hold to zoom back', buttonKey:'zoomOutButton', vkKey:'zoomOutVk', modsKey:'zoomOutMods', buttonModsKey:'zoomOutButtonMods' };
 </script>
-<div class="wnd win">
+<div class="wnd win" data-palette={palette}>
   <div class="caption" style="app-region:drag;-webkit-app-region:drag">
     <div class="tbtns" style="app-region:no-drag;-webkit-app-region:no-drag">
       <button class="tbtn" title="Minimize" aria-label="Minimize" on:click={() => windowControl('minimize')}>{@html ic.min}</button>
