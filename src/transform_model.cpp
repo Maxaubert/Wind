@@ -7,6 +7,7 @@
 #include "logging.h"
 #include "sprite_layer.h"  // PickSpriteLayer (pure, tested): issue #269
 #include "config_path.h"   // ResolveLogDir
+#include "tick_span.h"     // per-tick spans (#361)
 #include <cstdio>
 #include <windows.h>
 #include <magnification.h>
@@ -26,6 +27,7 @@ namespace wind {
 // with failures counted so the proving ground can see a hide that did not take.
 static std::atomic<unsigned long long> g_showCursorFails{0};
 static bool ShowSystemCursorMarshalled(BOOL show) {
+    wind::SpanScope span(wind::kSpanCursor);
     const bool ok = wind::MagThreadInvoke([show]() -> bool {
         return MagShowSystemCursor(show) != FALSE;
     });

@@ -13,6 +13,8 @@ const char* TickSpanName(int span) {
         case kSpanIx:       return "ix";
         case kSpanSprite:   return "sprite";
         case kSpanActivate: return "activate";
+        case kSpanCursor:   return "cursor";
+        case kSpanShape:    return "shape";
     }
     return "?";
 }
@@ -102,7 +104,7 @@ std::string FormatHitchLine(const TickRec& prev, const TickRec& cur, const Hitch
     if (v.cause == HitchCause::Blocked || v.cause == HitchCause::Busy || v.cause == HitchCause::SlowTick)
         o += std::string(" in ") + (v.span >= 0 ? TickSpanName(v.span) : "untracked");
     std::snprintf(b, sizeof(b), " %.1fms | eng=%s pace=%s lvl=%.2f%s%s%s", v.ms,
-                  EngineName(cur.flags), PaceName(cur.flags), cur.level,
+                  EngineName(prev.flags), PaceName(cur.flags), prev.level,
                   (prev.flags & kTickEnter) ? " zoom-in" : "", (prev.flags & kTickExit) ? " zoom-out" : "",
                   (cur.flags & kTickPulseTimeout) ? " pulse-timeout" : "");
     o += b;

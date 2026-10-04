@@ -1,4 +1,5 @@
 #include "cursor_blanker.h"
+#include "tick_span.h"   // #361: per-tick spans
 namespace wind {
 
 static const UINT kStandardIds[] = {
@@ -28,6 +29,7 @@ CursorBlanker::CursorBlanker() {
 }
 
 void CursorBlanker::blank() {
+    SpanScope span(kSpanCursor);
     if (blanked_) return;
     blanked_ = true;
     for (UINT id : kStandardIds) {
@@ -37,6 +39,7 @@ void CursorBlanker::blank() {
 }
 
 void CursorBlanker::restore() {
+    SpanScope span(kSpanCursor);
     if (!blanked_) return;
     blanked_ = false;
     SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, 0);

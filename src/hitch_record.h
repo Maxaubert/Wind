@@ -25,6 +25,8 @@ enum TickSpan : int {
     kSpanIx,          // input-transform publish and read-back
     kSpanSprite,      // cursor sprite window moves and show/hide
     kSpanActivate,    // zoom-in / zoom-out session start and end
+    kSpanCursor,      // system cursor set swaps (blank / restore) and show/hide
+    kSpanShape,       // reading and rendering the cursor shape for the sprite
     kSpanCount
 };
 const char* TickSpanName(int span);

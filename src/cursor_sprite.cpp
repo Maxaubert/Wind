@@ -115,6 +115,7 @@ void CursorSprite::setLayer(SpriteLayer l) {
 // while ShapeStatus::Hidden is returned, i.e. the cursor is suppressed/hidden
 // or its shape could not be captured this tick.
 CursorSprite::ShapeStatus CursorSprite::refreshShape() {
+    wind::SpanScope span(wind::kSpanShape);
     CURSORINFO info{};
     info.cbSize = sizeof(CURSORINFO);
     if (!GetCursorInfo(&info)) return ShapeStatus::Hidden;
