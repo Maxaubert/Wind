@@ -1,7 +1,7 @@
 # Autonomous candidate sweep (#229). Runs a list of configurations through the gates and logs
 # every result, so an overnight session leaves evidence rather than recollection.
 #
-# PROTOCOL (Max's): the cheap gate runs FIRST and a candidate that fails it is thrown out
+# PROTOCOL (owner decision): the cheap gate runs FIRST and a candidate that fails it is thrown out
 # immediately - no candidate that wobbles, shakes, hitches or shrinks the cursor is ever carried
 # into the longer suites. Survivors get the iterate suite; only those that pass everything are
 # recorded as wins.

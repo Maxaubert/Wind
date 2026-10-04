@@ -103,7 +103,7 @@ test('the theme picker is one row of the four theme cards, no scrolling, no arro
   const lastBox = await picker.getByRole('radio').last().boundingBox();
   expect(rowBox.x + rowBox.width - (lastBox.x + lastBox.width)).toBeLessThan(40);
   await expect(picker.getByRole('radio', { checked: true })).toHaveAccessibleName('Wind grey');
-  await expect(picker.locator('.nm')).toHaveCount(0);   // cards only, no names (Max 2026-10-02)
+  await expect(picker.locator('.nm')).toHaveCount(0);   // cards only, no names (owner decision)
   // Each card is drawn in its own theme: the mini windows differ.
   const bgs = new Set();
   for (const sw of await picker.locator('.sw').all()) bgs.add((await css(sw, 'background-color')) + '|' + (await css(sw.locator('.ac'), 'background-color')));
@@ -270,7 +270,7 @@ test('New: the dialog suggests a name, checks it, and New starts from the defaul
   const name = dlg.getByLabel('Name');
   await expect(name).toHaveValue('Profile 3');
   await expect(name).toBeFocused();
-  // Three buttons, no "Start from" choice (Max 2026-10-04): Cancel, New, Duplicate current.
+  // Three buttons, no "Start from" choice (owner decision): Cancel, New, Duplicate current.
   await expect(dlg.getByRole('button')).toHaveText(['Cancel', 'New', 'Duplicate current']);
   await expect(dlg.getByRole('radio')).toHaveCount(0);
   await name.fill('gaming');

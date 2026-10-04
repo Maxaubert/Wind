@@ -16,7 +16,7 @@ param(
   [ValidateSet('wind','native')] [string]$Driver = 'wind',
   [ValidateSet('pan','ramp','cycle','rezoom','zigzag')] [string]$Mode = 'pan', # ramp: zoom in/out; cycle:
                                                        # focus-swap repro; rezoom: session-start bounce
-                                                       # repro; zigzag: Max's protocol - start at the
+                                                       # repro; zigzag: the field protocol - start at the
                                                        # BOTTOM, zoom in, zig-zag climb to the TOP
                                                        # (both pan axes at once), zoom out
   [int]$ZigClimb = 2,            # zigzag: upward mickeys per step
@@ -182,7 +182,7 @@ public static class PF {
   // sits on a plateau then jumps - that is a perceived hitch no flush metric can see.
   public static double LastRampMs;
   // Also counts BACKWARD level motion during an inward ramp (backSteps + total backward level
-  // travel): the session-start bounce Max reported is the level briefly zooming OUT mid-ramp-in,
+  // travel): the session-start bounce from the field report is the level briefly zooming OUT mid-ramp-in,
   // which plateau/jump stats are blind to.
   public static string WatchRamp(double target, double timeoutS) {
     var t = System.Diagnostics.Stopwatch.StartNew();
@@ -409,7 +409,7 @@ try {
   }
 
   if ($Mode -eq 'zigzag') {
-    # Max's zig-zag protocol: focus-swap, cursor to the BOTTOM of the (maximized) target, zoom
+    # The field zig-zag protocol: focus-swap, cursor to the BOTTOM of the (maximized) target, zoom
     # to level, zig-zag climb to the TOP (both pan axes), zoom out. Resources sampled across the
     # whole loop; per-phase compositor gaps + offset cadence + both-axis cursor deviation.
     [PF]::StartFlushForever()
@@ -484,7 +484,7 @@ try {
   }
 
   if ($Mode -eq 'cycle') {
-    # Max's repro (issue #219): swap focus to another maximized app and back, THEN zoom - the
+    # The field repro (issue #219): swap focus to another maximized app and back, THEN zoom - the
     # hitch lives mostly in the zoom-in. Per-phase compositor gaps via the windowed flush stats.
     [PF]::StartFlushForever()
     $shell2 = New-Object -ComObject WScript.Shell

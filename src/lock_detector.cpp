@@ -11,7 +11,7 @@ constexpr int kCursorMoved = 1;  // OS cursor moved at least this many px (it tr
 constexpr int kAnchorTolPx     = 6;    // "same position" tolerance
 constexpr int kWarpJumpPx      = 100;  // a landing only counts as a warp if it came from afar
 constexpr int kWarpLockReturns = 4;    // anchor landings before the lock engages
-// Confinement-box tell (issue #221 round 2, Max: gentle mouselook needed ERRATIC motion to
+// Confinement-box tell (issue #221 round 2, field report: gentle mouselook needed ERRATIC motion to
 // engage the anchor tell). Signature: a hand streaming plenty of mickeys while every cursor
 // position stays inside a tiny box - gentle warping keeps the pointer jiggling around the
 // recenter point. Precise desktop work never trips it: a careful hand produces proportionally

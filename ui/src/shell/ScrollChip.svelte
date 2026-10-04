@@ -1,5 +1,5 @@
 <script>
-  // The Settings page's scroll indicator (#329, Max 2026-10-02): one small fixed-size chip on the right
+  // The Settings page's scroll indicator (#329, owner decision): one small fixed-size chip on the right
   // edge instead of a scrollbar. It shows only when the page has more to scroll, its position follows
   // the scroll, and it can be dragged. The page itself hides its native scrollbar (Settings.svelte).
   let { target } = $props();

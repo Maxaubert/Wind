@@ -1,5 +1,5 @@
 <script>
-  // "New profile" dialog (ia07, buttons per Max 2026-10-04): a name, then Cancel, New (the default settings) or
+  // "New profile" dialog (ia07, buttons by owner decision): a name, then Cancel, New (the default settings) or
   // Duplicate current (a copy of the current settings, unsaved changes included). Enter in the name field
   // duplicates, the old default. Props only; the page runs the bridge calls.
   //   names       existing profile names (for the duplicate check and the suggested name)

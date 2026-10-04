@@ -1,7 +1,7 @@
 # Proving-ground shared library (issue #225). Dot-sourced by run.ps1.
 # Interop + protocol primitives + telemetry analysis. PS 5.1 compatible.
 #
-# Sound contract (Max's): exactly TWO tones exist in the whole environment -
+# Sound contract (owner decision): exactly TWO tones exist in the whole environment -
 # start (880Hz, short) when a hands-off period begins, stop (440Hz, long) when it ends.
 # Failures end with the same stop tone; there is no third sound.
 
@@ -131,7 +131,7 @@ public static class TE {
       Thread.Sleep(650); n++;
     }
   }
-  // WOBBLE STROKES (issue #229, Max's design): one clean stroke per direction with a rest
+  // WOBBLE STROKES (issue #229, owner design): one clean stroke per direction with a rest
   // between, then erratic side-to-side. Rests matter as much as the strokes - the view must
   // come to a dead stop between them, so any residual motion is the artifact, not the input.
   // Single-axis strokes also make an off-axis excursion unambiguous. Deliberately short and
@@ -611,7 +611,7 @@ function Analyze-Telemetry([string]$Path, [object[]]$Phases, [int]$Hz) {
         if ($c.Length -ge 20 -and ($c[19] -eq '1' -or $c[19] -eq '2')) {
           $scr = ($c[19] -eq '2')
           $sl = [double]$c[12]
-          # RAMP SHAKE (issue #229, Max's report: the high-resolution cursor shakes while
+          # RAMP SHAKE (issue #229, field report: the high-resolution cursor shakes while
           # zooming in/out). With the hand still, a centred view must hold the sprite exactly on
           # the screen centre at EVERY level - so any deviation during a level change is the
           # shake, measured in screen px. The steady-state branch below deliberately excludes

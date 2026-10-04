@@ -81,8 +81,8 @@ inline Placement PlaceFlyout(const IRect& icon, const IRect& monitor, const IRec
 }
 
 // Top-left of a w x h window opened at the click point, the way the old TrackPopupMenu tray menu
-// was (Max, 2026-10-02: "same position as the old tray menu", including when the icon lives in the
-// overflow flyout). Max's choice (2026-10-02): the window opens UP AND TO THE LEFT of the pointer,
+// was (owner decision: "same position as the old tray menu", including when the icon lives in the
+// overflow flyout). Owner decision: the window opens UP AND TO THE LEFT of the pointer,
 // its bottom-right corner on the point. It flips right only when there is no room on the left, and
 // down only when there is no room above, then is clamped to the monitor. Physical pixels.
 inline Placement PlaceAtPoint(int px, int py, const IRect& monitor, int w, int h) {
@@ -115,7 +115,7 @@ inline bool IgnoreIconClick(unsigned long long nowMs, unsigned long long deactiv
 inline constexpr int kWidth = 300, kBorder = 1, kRadius = 10;
 inline constexpr int kHeadH = 96;          // 18 pad + 28 big + 14 gap + 14 frame row + 22 pad
 inline constexpr int kRowH = 40, kQsPadY = 8, kPadX = 20, kIcon = 16, kIconGap = 12, kValueW = 48;
-// The control area (mockup v02, Max 2026-10-02): ONE segmented toggle group, a full-width 32 px bar,
+// The control area (mockup v02, owner decision): ONE segmented toggle group, a full-width 32 px bar,
 // then the engine dropdown, a full-width 32 px field, 8 px below it. 6 px above the group, 14 px
 // of padding under the last control.
 inline constexpr int kSegH = 32, kSegLine = 1, kSegRadius = 8, kCtlTop = 6, kCtlGap = 8, kQsPadBottom = 14;
@@ -327,7 +327,7 @@ inline int IniInt(const IniValues& v, const char* key, int def) {
 
 // "Keep cursor centred" (key keepEdges, kept so saved tray layouts still work) is ONE segment for two
 // settings: it reads ON only when BOTH mouseAlign and trackAlign are 0 (centred), so a hand-edited
-// mixed state reads OFF (and a click then sets both). Renamed and inverted by Max, 2026-10-02.
+// mixed state reads OFF (and a click then sets both). Renamed and inverted by owner decision.
 inline bool ToggleOn(const std::string& key, const IniValues& ini) {
     if (key == "keepEdges") return IniInt(ini, "mouseAlign", 0) == 0 && IniInt(ini, "trackAlign", 0) == 0;
     if (key == "trackCaret") return IniInt(ini, "trackCaret", 1) != 0;
