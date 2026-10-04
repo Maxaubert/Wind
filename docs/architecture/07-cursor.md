@@ -219,8 +219,10 @@ default off). `FocusTracker` (`src/focus_track.*`) runs on its own thread with W
   The class is cached per focus and window; the poll reuses the MSAA answer for 100 ms.
 - **A blocking app stalls all tracking.** UIA calls are capped at 500 ms
   (`IUIAutomation2` timeouts). `GetFocusedElement` ignores them (3 s at Notepad's activation), so
-  with focus-following off an app with a Win32 caret skips UIA entirely. Calls over 200 ms log
-  `slow resolve` with the phase.
+  it runs on the `Wind focus lookup` thread (`FocusLookup`): the tracker waits 150 ms, then resolves
+  without UIA; no new lookup starts while one is stuck; a late answer is used if under 250 ms old
+  and for the same window. With focus-following off, an app with a Win32 caret skips the lookup.
+  Calls over 200 ms log `slow resolve` with the phase.
 - The glide is a critically damped spring (`SpringToward`, `src/view_glide.h`, `trackGlideMs`).
 - **Java apps** (IntelliJ, PyCharm) expose the caret only through the Java Access Bridge
   (`src/java_bridge.*`). UIPI drops the JVM's handshake to a UIAccess process, so the bridge's

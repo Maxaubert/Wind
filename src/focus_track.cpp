@@ -11,6 +11,9 @@
 #include <oleauto.h>
 #include <UIAutomation.h>
 #include <dwmapi.h>
+#include <chrono>
+#include <condition_variable>
+#include <memory>
 #include <string>
 #pragma comment(lib, "oleacc.lib")
 #pragma comment(lib, "dwmapi.lib")
@@ -97,6 +100,97 @@ static bool IsJavaWindow(HWND h) {
     wchar_t cls[64] = {}; GetClassNameW(h, cls, 64);
     return IsJavaWindowClass(cls);
 }
+
+// GetFocusedElement on a helper thread with a deadline. The call is a round trip into the
+// foreground app and ignores the IUIAutomation2 timeouts: it blocked for 3 s at Notepad's activation
+// (field 2026-10-04), and while the tracker thread waited, nothing was tracked in any app. The
+// tracker now waits at most deadlineMs; a lookup still stuck past that is abandoned (its late answer
+// is released) and no new one starts until it returns, so a hung app costs one worker, not a pile.
+// The state is shared with the worker, so a worker still stuck at exit is detached safely.
+class FocusLookup {
+    struct State {
+        std::mutex mx;
+        std::condition_variable cv;
+        bool stop = false, busy = false;
+        unsigned want = 0, done = 0;
+        IUIAutomation* uia = nullptr;
+        IUIAutomationElement* result = nullptr;
+        ULONGLONG resultAt = 0;      // when the worker produced result
+        HWND resultFg = nullptr;     // the foreground window it was asked for
+    };
+public:
+    explicit FocusLookup(IUIAutomation* uia) : st_(std::make_shared<State>()) {
+        if (!uia) return;
+        uia->AddRef(); st_->uia = uia;
+        th_ = std::thread([st = st_] { Run(st); });
+    }
+    ~FocusLookup() {
+        bool busy;
+        { std::lock_guard<std::mutex> lk(st_->mx); st_->stop = true; busy = st_->busy; }
+        st_->cv.notify_all();
+        if (th_.joinable()) { if (busy) th_.detach(); else th_.join(); }   // a hung app must not block exit
+    }
+    // The focused element (AddRef'd, caller releases), or null. timedOut: not answered in time, or
+    // the previous lookup is still stuck.
+    IUIAutomationElement* get(unsigned deadlineMs, bool& timedOut) {
+        timedOut = false;
+        State& s = *st_;
+        const HWND fg = GetForegroundWindow();
+        std::unique_lock<std::mutex> lk(s.mx);
+        if (!s.uia) return nullptr;
+        if (s.busy) { timedOut = true; return nullptr; }
+        if (s.result) {
+            // A late answer (it missed the last deadline): still good if fresh and for this window.
+            // Slow-but-alive apps (Edge answers in ~200 ms) then cost one skipped round, not every round.
+            IUIAutomationElement* late = s.result; s.result = nullptr;
+            if (s.resultFg == fg && GetTickCount64() - s.resultAt < 250) return late;
+            late->Release();
+        }
+        s.busy = true;
+        s.resultFg = fg;
+        const unsigned job = ++s.want;
+        s.cv.notify_all();
+        if (!s.cv.wait_for(lk, std::chrono::milliseconds(deadlineMs), [&] { return s.done == job; })) {
+            timedOut = true;
+            return nullptr;
+        }
+        IUIAutomationElement* e = s.result; s.result = nullptr;
+        return e;
+    }
+private:
+    static void Run(std::shared_ptr<State> st) {
+        CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        SetThreadDescription(GetCurrentThread(), L"Wind focus lookup");
+        State& s = *st;
+        unsigned handled = 0;
+        for (;;) {
+            unsigned job;
+            {
+                std::unique_lock<std::mutex> lk(s.mx);
+                s.cv.wait(lk, [&] { return s.stop || s.want != handled; });
+                if (s.stop) break;
+                job = s.want;
+            }
+            IUIAutomationElement* e = nullptr;
+            s.uia->GetFocusedElement(&e);
+            handled = job;
+            std::lock_guard<std::mutex> lk(s.mx);
+            if (s.result) s.result->Release();
+            s.result = e; s.resultAt = GetTickCount64();
+            s.done = job; s.busy = false;
+            s.cv.notify_all();
+            if (s.stop) break;
+        }
+        {
+            std::lock_guard<std::mutex> lk(s.mx);
+            if (s.result) { s.result->Release(); s.result = nullptr; }
+            if (s.uia) { s.uia->Release(); s.uia = nullptr; }
+        }
+        CoUninitialize();
+    }
+    std::shared_ptr<State> st_;
+    std::thread th_;
+};
 
 // Classic Win32 caret of the foreground thread, in screen px. False when there is none.
 static bool Win32Caret(RECT& out) {
@@ -235,6 +329,9 @@ void FocusTracker::run() {
             uia2->Release();
         }
     }
+    std::unique_ptr<FocusLookup> focusLookup;
+    if (uia) focusLookup = std::make_unique<FocusLookup>(uia);
+    bool lookupStuckLogged = false;
     FocusHandler* fh = nullptr;
     if (uia) { fh = new FocusHandler(); if (FAILED(uia->AddFocusChangedEventHandler(nullptr, fh))) { fh->Release(); fh = nullptr; } }
     HWINEVENTHOOK h1 = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr, FocusTrackImpl::OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
@@ -446,7 +543,13 @@ void FocusTracker::run() {
         const bool win32Only = !java && !wantFocus_.load() &&
             GetGUIThreadInfo(GetWindowThreadProcessId(fg, nullptr), &cgi) && cgi.hwndCaret;
         if (win32Only) GetWindowRect(cgi.hwndCaret, &b);
-        else if (uia) uia->GetFocusedElement(&el);
+        else if (focusLookup) {
+            bool timedOut = false;
+            el = focusLookup->get(150, timedOut);
+            if (timedOut && !lookupStuckLogged && log_.load())
+                wind::Log(wind::LogLevel::Info, "track", "focused element lookup not answered in 150 ms: resolving without UIA");
+            lookupStuckLogged = timedOut;
+        }
         const ULONGLONG rs1 = GetTickCount64();
         if (el && FAILED(el->get_CurrentBoundingRectangle(&b))) b = RECT{};
         // 1. A focus change: follow the focused control (if wanted). Its caret becomes the baseline.
@@ -565,6 +668,7 @@ void FocusTracker::run() {
     for (HWINEVENTHOOK h : { h1, h2, h3, h4, h5 }) if (h) UnhookWinEvent(h);
     if (uia && fh) uia->RemoveFocusChangedEventHandler(fh);
     if (fh) fh->Release();
+    focusLookup.reset();
     if (uia) uia->Release();
     CoUninitialize();
     tid_ = 0;
