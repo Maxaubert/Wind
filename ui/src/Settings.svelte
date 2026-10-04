@@ -343,7 +343,7 @@
                       { label: 'Save', kind: 'primary', onClick: () => resolveProfilePrompt('save') }]} />
   {/if}
   {#if newDialog}
-    <NewProfileDialog names={prof.names} current={prof.active} onCancel={() => (newDialog = false)}
+    <NewProfileDialog names={prof.names} onCancel={() => (newDialog = false)}
                       onCreate={({ name, from }) => { newDialog = false; profileAction('create', { name, from }); }} />
   {/if}
   {#if deleteTarget}

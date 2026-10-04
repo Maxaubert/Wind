@@ -3,12 +3,11 @@
   // Duplicate current (a copy of the current settings, unsaved changes included). Enter in the name field
   // duplicates, the old default. Props only; the page runs the bridge calls.
   //   names       existing profile names (for the duplicate check and the suggested name)
-  //   current     the active profile's name, named in the hint
   //   onCreate({ name, from })   from is 'current' or 'default'      onCancel()
   import { untrack } from 'svelte';
   import { dialog } from '../lib/dialog.js';
   import { nameError, suggestName } from './profileName.js';
-  let { names = [], current = '', onCreate = () => {}, onCancel = () => {} } = $props();
+  let { names = [], onCreate = () => {}, onCancel = () => {} } = $props();
   let name = $state(untrack(() => suggestName(names)));   // the suggestion is only the starting text
   let error = $state('');
   let input = $state();
@@ -25,14 +24,13 @@
 </script>
 
 <div class="scrim">
-  <div class="dlg np" role="dialog" aria-modal="true" aria-labelledby="np-t" aria-describedby="np-hint" tabindex="-1"
+  <div class="dlg np" role="dialog" aria-modal="true" aria-labelledby="np-t" tabindex="-1"
        use:dialog={{ onClose: onCancel }} onkeydown={key}>
     <h2 id="np-t">New profile</h2>
     <label class="fl" for="np-name">Name</label>
     <input id="np-name" type="text" data-autofocus bind:this={input} bind:value={name} maxlength="40" autocomplete="off"
            aria-describedby="np-err" aria-invalid={error ? 'true' : 'false'} oninput={() => (error = '')} />
     <div class="err" id="np-err" role="alert">{error}</div>
-    <p class="hint" id="np-hint">New starts from the default settings. Duplicate current copies {current}, unsaved changes included.</p>
     <div class="acts">
       <button type="button" class="btn g" onclick={onCancel}>Cancel</button>
       <span class="sp"></span>
@@ -56,7 +54,6 @@
   input[aria-invalid="true"] { border-color: var(--danger); }
   .err { min-height: 16px; margin-top: 6px; color: var(--danger); font: 12px var(--s); }
   .err:empty { margin-top: 0; min-height: 0; }
-  .hint { margin: 10px 0 0; color: var(--fg3); font: 12px/1.45 var(--s); overflow-wrap: anywhere; }
   .acts { display: flex; align-items: center; gap: 8px; margin-top: 18px; }
   .sp { flex: 1; }
   .btn { height: 32px; padding: 0 16px; border-radius: var(--rp); border: 1px solid var(--chipb); background: var(--chip);
