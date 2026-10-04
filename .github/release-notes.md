@@ -3,7 +3,9 @@ even when a game hides or locks the cursor.
 
 ## Install
 
-Download **Wind-Setup-x64-__VERSION__.exe** below and run it. Setup installs to
+Download **Wind-Setup-x64-__VERSION__.exe** below and run it (`Wind-Setup-x64.exe` is the same
+installer under a stable name: https://github.com/Maxaubert/Wind/releases/latest/download/Wind-Setup-x64.exe
+always serves the newest release). Setup installs to
 `C:\Program Files\Wind` and asks for administrator rights, offers to start Wind when you
 sign in, and installs the WebView2 runtime if the Settings window has no browser engine to
 run in. Your settings, profiles and logs live in `%LOCALAPPDATA%\Wind`, and uninstalling
@@ -37,7 +39,7 @@ There is nothing to configure either way.
 
 ## Verify your download
 
-SHA-256 of `Wind-Setup-x64-__VERSION__.exe`:
+SHA-256 of `Wind-Setup-x64-__VERSION__.exe` (and its copy `Wind-Setup-x64.exe`):
 
 ```
 __SHA256__
