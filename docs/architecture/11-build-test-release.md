@@ -84,13 +84,14 @@ flowchart TD
     B --> R{gh release view v&lt;ver&gt;\nexists?}
     R -- no --> C[gh release create: NEW release]
     R -- yes --> U[gh release edit + upload --clobber:\nrefresh asset in place]
-    C --> D[published Wind-Setup-x64-&lt;ver&gt;.exe + sha256 notes]
+    C --> D[published Wind-Setup-x64-&lt;ver&gt;.exe + Wind-Setup-x64.exe + sha256 notes]
     U --> D
 ```
 
 The moving parts:
 
 - **`src/version.h` is the only version declaration.** The workflow regex-reads `WIND_VER_MAJOR/MINOR/PATCH` from it. Bumping it is what cuts a NEW release (a new tag `v<ver>`); a push that leaves it alone refreshes the existing release's asset in place with `gh release upload --clobber`, which is what keeps the download matching `main` without a version per commit. As of this writing the tree is at 0.10.4.
+- **Every release carries the installer twice** (issue #343): `Wind-Setup-x64-<ver>.exe`, the primary asset, and a stable-named copy `Wind-Setup-x64.exe`, so `https://github.com/Maxaubert/Wind/releases/latest/download/Wind-Setup-x64.exe` (the README's download link) always serves the newest release without ever being edited. Both are uploaded together, and `--clobber` refreshes both.
 - **Docs, the licence text and the test harness never trigger it.** `paths-ignore` skips `**.md`, `docs/**`, issue templates, `LICENSE`, and `tools/testenv/**`: none of them can change the installer, and skipping the last two keeps a licence or test-harness edit from resetting the published asset's hash for nothing.
 - **Tests gate the build.** `build.bat test` runs before the installer is built; a red doctest suite blocks the release.
 - **`tools/release.ps1` is the shared build driver**, used identically by CI and by a local release. Signing is environment-driven (`WIND_SIGN_THUMBPRINT` or `WIND_SIGN_PFX`/`WIND_SIGN_PASSWORD`) so no certificate detail enters the repo. With a cert it builds and signs the `uiaccess` variant, and it signs the PAYLOAD before makensis packs it, because signing the installer does not sign what is inside it and UIAccess is granted on Wind.exe's own signature. Without a cert it builds BOTH variants: the ordinary `uiAccess=false` Wind.exe, and the uiaccess build as `WindUA.exe`, which the installer then signs on each PC it installs to with a locally trusted, per-machine certificate whose private key is deleted right after signing (issue #261/#262, `installer/local-sign.ps1`); if that local signing fails, setup keeps the ordinary build.

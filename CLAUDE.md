@@ -20,7 +20,8 @@ Developer book (readable, canonical): `docs/architecture/` - keep it in step wit
   plain manifest: it must never be uiAccess (see "Three binaries").
 - Build the installer: `build.bat installer`  (needs NSIS: `winget install NSIS.NSIS`; compiles
   `installer\wind.nsi` then runs `tools\installer_check.ps1`). Release artifact:
-  `pwsh -File tools\release.ps1` -> `dist\Wind-Setup-x64-<ver>.exe`. Setup is a custom-drawn
+  `pwsh -File tools\release.ps1` -> `dist\Wind-Setup-x64-<ver>.exe` (CI also uploads it as `Wind-Setup-x64.exe`, #343:
+  `releases/latest/download/Wind-Setup-x64.exe` is the always-latest link). Setup is a custom-drawn
   video screen modelled on Prism's; see `installer\README.md` and the spec
   `docs/superpowers/specs/2026-08-20-installer-design.md`.
 - Deploy UIAccess build (elevated; from a normal shell):
@@ -514,7 +515,8 @@ floating Save capsule shows unsaved state (Save / Discard), keybinds persist at 
 - TRACKING (issue #276; docs/architecture/07-cursor.md, field notes docs/TRACKING-FINDINGS.md):
   caret/focus/edge-mode views are DETACHED (weld off, `t.viewDetached`); the POINTER comes to the
   view on a mouse-move takeover, never the view to the pointer (that wobbled). Only keyboard-driven
-  caret moves are followed (first caret after a focus change = baseline; 1 s click quiet period).
+  caret moves are followed (first caret after a focus change = baseline; 1 s click quiet period, ended
+  early by a fresh non-modifier key down after the click, #328 - never by key-ups, auto-repeat or Ctrl/Shift).
   Edge mode hides edge-pinned motion from the lock detector, or corners fling the pointer.
   JAVA CARET = Java Access Bridge (src/java_bridge.*, #281). UIPI DROPS THE JVM'S HANDSHAKE TO A
   UIACCESS PROCESS: without the narrow ChangeWindowMessageFilterEx allowance on the bridge's hidden

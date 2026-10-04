@@ -31,6 +31,12 @@ highlighted option through UIA, so Wind follows only the terminal caret there.
   bumped when the focus event ARRIVES so the 60 Hz poll cannot publish the new field's caret early.
 - **Click quiet period, 1 s.** A click that opens a page moves focus somewhere the user never asked
   to look. Caret/focus changes within 1 s of a mouse button are consumed, never followed.
+  EXCEPTION (#328, field 2026-10-02): a key typed after the click ends the quiet period early.
+  Clicking into Notepad and typing at once lost the first ~8 characters while the caret ran off
+  screen. Only a FRESH down of a non-modifier key counts (`src/typing_key.h`): the first version
+  used the tracking key clock, which also counts key-ups and auto-repeat, so releasing Ctrl or Shift
+  after a Ctrl/Shift+click ended the quiet period and the click's own caret move took the view
+  (review #349).
 - **Keyboard focus "not working" in the browser** was the setting being off (default off, and the
   Settings page needs Apply), not a bug.
 - **Glide: critically damped spring, 200 ms** (A/B of 0, 25, 150, 200 ms and old ease vs spring).
@@ -107,9 +113,10 @@ a wrap); any other tall rect (a bigger font) is learned as the new line. Chromiu
 the same (1927,1669 h44 then 1945,1558 h155), so UIA and Win32 carets are both trimmed; Java carets
 (bridge) are not. `trackLog=1` logs each trim.
 
-Enter on the last visible line reports the new line before the page scrolls it up a few pixels (field: line 1989-2033, then the tall typing rect ends at 2009), so a tall rect whose bottom is within one line of the known line is also trimmed.
-That Enter at the bottom also reports the NEW line part-way through the scroll (old line 1965-2009, new line 1989-2033: half a line lower), and the page settles it where the old line was without another caret report until the next key, so the view dipped and slid back on every Enter. A caret that moves back left by a fraction of a line (0.2-0.8) is held on the current line (HoldMidScrollCaret; logged as caret held).
+Enter on the last visible line reports the new line before the page scrolls it up a few pixels (field: line 1989-2033, then the tall typing rect ends at 2009), so a tall rect whose bottom scrolled UP by less than a line is also trimmed.
+What separates Chromium from a genuinely taller line (review #349): in every field rect the TOP climbed 67-164 px (1.5-3.7 lines) above the previous line's top, because the extra height is whole blank lines above. A heading, a font-size change on the line or Down into a heading grows downward or both ways, so its top stays at or near the previous line's top. Only a rect whose top climbed more than half a line above is ever trimmed; a bottom that moved down off the grid is always learned as the new line height.
+That Enter at the bottom also reports the NEW line part-way through the scroll (old line 1965-2009, new line 1989-2033: half a line lower), and the page settles it where the old line was without another caret report until the next key, so the view dipped and slid back on every Enter. A caret that moves back left by a fraction of a line (0.2-0.8) is held on the current line (HoldMidScrollCaret; logged once as caret held). The hold lasts while the SAME raw report repeats: the 60 Hz poll re-reads it every ~16 ms, and the first version held only the first read, then published the stale half-line rect (review #349).
 
 ## VS Code / Electron: the caret reported as the whole line (issue #341, 2026-10-03)
 
-VS Code's UIA selection caret is the whole editor line (`263,1752 3330x44`), and sometimes a 3330x3 strip at the top of the window: no caret x, so typing never moved the view and a paste or select-all centred it on the middle of a line. A first attempt pinned x to the pointer; that published the pointer as the caret on every mouse move (worse, field-rejected). Now a UIA caret wider than 6x its height is replaced by the character at the caret (`ExpandToEnclosingUnit(Character)`) or, failing that, by the MSAA system caret object (`OBJID_CARET`, which Chromium keeps for screen magnifiers; logged as `via msaa-caret`); with neither, the caret is ignored (logged as `caret ignored`), never guessed.
+VS Code's UIA selection caret is the whole editor line (`263,1752 3330x44`), and sometimes a 3330x3 strip at the top of the window: no caret x, so typing never moved the view and a paste or select-all centred it on the middle of a line. A first attempt pinned x to the pointer; that published the pointer as the caret on every mouse move (worse, field-rejected). Now a UIA caret wider than 6x its height is replaced by the character at the caret (`ExpandToEnclosingUnit(Character)`) or, failing that, by the MSAA system caret object (`OBJID_CARET`, which Chromium keeps for screen magnifiers; logged as `via msaa-caret`); with neither, the caret is ignored (logged as `caret ignored`), never guessed. Review #349: the fallback applies only to a collapsed range (a long keyboard selection is simply wide and keeps its own rect), and its answer is cached per focus: re-asked on a real caret/focus event, a changed line rect, or at most every 250 ms from the poll, and `caret ignored` is logged only when the outcome changes.
