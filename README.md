@@ -75,17 +75,10 @@ read once at launch, so switching it restarts Wind (Settings does this automatic
   against the view. The only model that can cover the shell (see the `zorderBand` note below).
 - **`transform`** - the DWM fullscreen transform only (what `hybrid` uses over games), with no
   overlay at all. Compositor-internal, so it stays smooth while a heavy game renders.
-- **`magnify`** - drives the **native Windows Magnifier** with Wind's buttons. This is the
-  model for DRM-protected video (Netflix and friends), which shows black under screen capture.
-  Holding a zoom button scroll-zooms Magnifier exactly like its own Ctrl+Alt+wheel shortcut,
-  stepping by `magnifyStep` percent per notch (ini key; lower = smoother and slower, applies
-  live). Everything else is pure native Magnifier behavior; quitting Wind
-  (or switching models) closes it and restores your original Magnifier settings. Max zoom is
-  Magnifier's ceiling, 1600%.
 
-The `magnify` model hands the view and cursor to Windows Magnifier, so the render-only features
-do not apply there: `sharpness`, `hdrTonemap`, `bilinear`, `outline*`, `brightness`,
-`cursorSensitivity`/`cursorSmoothing`, `multiMonitor`, and Inspect mode.
+The old **`magnify`** model (driving the native Windows Magnifier) is no longer selectable since
+0.18.0: Settings and the tray offer only Auto, Render and Transform, and an ini that still says
+`model=magnify` runs `hybrid` (Auto).
 
 ## Controls
 Zoom binds ship **unbound** - the first-launch guided setup captures your choice (mouse
@@ -182,7 +175,7 @@ Profiles (tray -> Profiles, or the Settings titlebar) snapshot the whole file pe
   `cursorVisibility` - image and cursor rendering.
 - `brightness`, `hdrTonemap` - output tuning.
 - Pacing/perf: `vsync` (default on), `dwmFlush` (default 0), `gameFpsCap`, `gpuPriority`.
-- `model` - `hybrid` (default) / `render` / `transform` / `magnify`. Restart to switch.
+- `model` - `hybrid` (default) / `render` / `transform` (`magnify` is read as `hybrid` since 0.18.0). Restart to switch.
 - `multiMonitor` - 0 (default, primary only) or 1 (follow the cursor's monitor per zoom-in).
 - `desktopTransform` - default **1**: use the game (compositor) engine on the desktop too
   (primary monitor only, Auto model), whenever UIAccess is available; every normal install

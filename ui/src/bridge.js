@@ -31,7 +31,6 @@ export function getSession() {
     post({ type: 'getConfig' });
   });
 }
-export function getConfig() { return getSession().then(s => s.values); }
 // About's star button: the host opens the repo in the default browser (a fixed URL, see main.cpp).
 export function openRepo() { post({ type: 'openRepo' }); }
 // Writes the live ini (the session) only; the active profile changes on saveSession().
@@ -118,9 +117,7 @@ function profileRequest(msg) {
     post(msg);
   });
 }
-export const listProfiles     = ()         => profileRequest({ type: 'listProfiles' });
 export const switchProfile    = (name)     => profileRequest({ type: 'switchProfile', name });
 export const createProfile    = (name)     => profileRequest({ type: 'createProfile', name });
 export const renameProfile    = (from, to) => profileRequest({ type: 'renameProfile', from, to });
-export const duplicateProfile = (name)     => profileRequest({ type: 'duplicateProfile', name });
 export const deleteProfile    = (name)     => profileRequest({ type: 'deleteProfile', name });

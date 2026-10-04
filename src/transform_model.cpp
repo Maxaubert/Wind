@@ -41,10 +41,6 @@ unsigned long long TransformCursorHideFailures() {
 // the view would rest up to txMinOffsetPx off where the cursor actually is.
 static const unsigned long long kSettleMs = 100;
 
-// How long the magnification context lingers after a zoom ends. Long enough that zoom-out /
-// zoom-in flicks stay instant, short enough that going back to playing is clean almost at once.
-static constexpr unsigned long long kIdleReleaseMs = 1200;
-
 void TransformModel::resetTransformState() {
     panelPrimed_ = false;   // a rebuilt context needs its own public prime (#283, review #284)
     // Everything the write path caches must be forgotten across a teardown, or the next session

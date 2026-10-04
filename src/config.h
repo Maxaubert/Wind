@@ -217,9 +217,9 @@ struct Config {
     //   -1 = leave whatever DWM currently has alone.
     // The state is global to DWM and resets when DWM restarts, which is why smoothing appeared
     // to come and go between builds; it is re-applied per magnification context. KNOWN
-    // INTERACTION: the tx keep-alive (txKeepAliveMaxLevel > 0, retired default 0) writes a
-    // value 1px off-true 144x/s; nearest masked that as sub-block noise, smoothing renders it
-    // as visible shaking. Keep the keep-alive off while smoothing is on.
+    // INTERACTION: the 1px translation warm write (txWarmMode=1, which replaced the retired
+    // txKeepAliveMaxLevel keep-alive) puts the view 1px off-true on rest ticks; nearest masks
+    // that as sub-block noise, smoothing can render it as visible shaking (see txWarmMode).
     // Wobble cage (issue #229, hot): a visible wobble detector - four ~10px bars boxing the
     // cursor; the bar the sprite crosses flashes red. Diagnostic, ships 0. The collision test
     // is numeric (see wobble_cage.h: everything we can draw is magnified, so a screen-fixed
@@ -243,10 +243,9 @@ struct Config {
     // 0 = walls-only (the pre-#191 fence behavior). No effect when MPO is off.
     int mpoBuster = 1;
     // RETIRED (superseded by txWarmMode, 2026-08-26). This was the level gate on the old 1px
-    // translation keep-alive. That mechanism is now txWarmMode=1 and is kept only for A/B; the
-    // shipped warm-keeping (mode 4) perturbs the LEVEL by txWarmLevelEps instead, which fixes the
-    // same pan-start hitch without shifting the image by a pixel. Parsed and clamped so an old ini
-    // or profile carrying the key is still accepted, but NOTHING READS IT - do not add a reader.
+    // translation keep-alive; that mechanism lives on as txWarmMode=1 (the shipped mode, see
+    // WARM-KEEPING below). Parsed and clamped so an old ini or profile carrying the key is still
+    // accepted, but NOTHING READS IT - do not add a reader.
     int txKeepAliveMaxLevel = 8;
     // WARM-KEEPING (pan-start hitch, measured 2026-08-26 with tools/pan_wake_probe.ps1). At rest
     // Wind stops writing entirely ("same-value hygiene" below), and DWM then lets its
@@ -259,8 +258,8 @@ struct Config {
     // Native never goes quiet, and the legacy keep-alive matches it - but that one writes a value
     // 1px OFF THE TRUTH at tick rate, which is the shimmer that retired it in #204. These modes
     // exist to find a channel that keeps DWM warm without lying about the position:
-    //   0 = off (fall through to the legacy txKeepAliveMaxLevel path)
-    //   1 = legacy 1px jitter, for A/B only
+    //   0 = off (no warm-keeping; the old txKeepAliveMaxLevel path is retired, nothing reads it)
+    //   1 = 1px translation jitter (the shipped mode, see "SHIPPED AS MODE 1" below)
     //   2 = SAME-VALUE rewrite: re-send the exact transform already applied. Honest by
     //       construction. Rests on DWM re-compositing for an identical write, which the old
     //       "DWM parks on static values anyway" comment claims it does NOT - measure, don't assume.

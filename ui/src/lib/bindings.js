@@ -13,7 +13,7 @@ export const maxOf = (row) => row.max || 1;
 
 const num = (values, k) => (k ? Number(values[k] || 0) : 0);
 // The ini keys of each slot, from the schema row.
-export function slotsOf(row) {
+function slotsOf(row) {
   const out = [{ btn: row.buttonKey, bm: row.buttonModsKey, vk: row.vkKey, mods: row.modsKey }];
   if (row.vkKey2 || row.buttonKey2) out.push({ btn: row.buttonKey2, bm: row.buttonModsKey2, vk: row.vkKey2, mods: row.modsKey2 });
   return out;
@@ -61,8 +61,8 @@ export function placeBinding(row, values, unit, captured) {
 
 // Pan: one shared modifier mask on the four arrow keys (the arrows themselves are fixed).
 export const PAN_ARROWS = [37, 38, 39, 40];
-export const PAN_VK = ['panLeftVk', 'panUpVk', 'panRightVk', 'panDownVk'];
-export const PAN_MODS = ['panLeftMods', 'panUpMods', 'panRightMods', 'panDownMods'];
+const PAN_VK = ['panLeftVk', 'panUpVk', 'panRightVk', 'panDownVk'];
+const PAN_MODS = ['panLeftMods', 'panUpMods', 'panRightMods', 'panDownMods'];
 // { kind: 'none' } | { kind: 'arrows', mods } | { kind: 'custom' } (older keys that are not the arrows).
 export function panState(values) {
   const n = (k) => Number(values[k] || 0);

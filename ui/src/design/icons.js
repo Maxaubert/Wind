@@ -1,6 +1,6 @@
 // Terminal icon set from the final mockup (square caps, mitred joins), plus the few window
 // glyphs the shell needs. Static literals, injected with {@html iconSvg(name)}.
-export const paths = {
+const paths = {
   hotkeys: '<rect x="1.5" y="3.5" width="13" height="9"/><path d="M4 6.5h1M7.5 6.5h1M11 6.5h1M5 9.5h6"/>',
   view: '<path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><rect x="6.5" y="6.5" width="3" height="3"/>',
   screen: '<rect x="1.5" y="2.5" width="13" height="9"/><path d="M5.5 14h5M8 11.5V14"/>',

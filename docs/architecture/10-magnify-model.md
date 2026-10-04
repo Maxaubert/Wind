@@ -1,5 +1,10 @@
 # 10. The magnify model
 
+> **Dormant since 0.18.0.** `model=magnify` is no longer selectable: Settings and the tray offer
+> only Auto, Render and Transform, and config parse maps an old `model=magnify` to `hybrid`
+> (`src/config.cpp`). The code described below still exists but never runs. Kept as the record of
+> the design and its measured dead ends.
+
 `model=magnify` is Wind's DRM-safe fallback: instead of magnifying pixels itself, Wind launches
 the native Windows Magnifier (Magnify.exe) and drives it the way a user would, by injecting its
 own keyboard shortcut. DRM-protected video (Netflix and friends) blanks under the render model's

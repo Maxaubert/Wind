@@ -6,7 +6,6 @@ import { parseTray, parseList, serialiseList, MAX_SLIDERS, SLIDERS, TOGGLES } fr
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
-    window.__skipSplash = true;
     window.__msgs = [];
     const init = () => {
       if (window.__live) return;

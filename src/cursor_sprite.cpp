@@ -77,7 +77,6 @@ bool CursorSprite::create(int zorderBand, bool autoHigh, bool capturable) {
             DestroyWindow(hwndHigh_);
             hwndHigh_ = nullptr;
         }
-        usedBandHigh_ = hwndHigh_ ? usedHigh : 0;
     }
     hwnd_ = hwndLow_;
     layer_ = SpriteLayer::Low;

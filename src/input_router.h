@@ -152,7 +152,6 @@ public:
     // click and wheel binds then pass through to it too, like the keys ("the app also receives it").
     bool keyboardHookWanted() const { return kbHookWanted_.load(std::memory_order_relaxed); }
     // Count of successful re-installs this session (diagnostics / tests).
-    unsigned kbHookReinstalls() const { return kbHookReinstalls_.load(std::memory_order_relaxed); }
     // Magnify model only: make the keyboard hook skip INJECTED events entirely. The magnify model
     // drives Windows Magnifier by injecting Win+Plus/Win+Minus chords, and NumPad +/- are bindable
     // zoom keys - without the skip, our own injection would be swallowed by our own hook and

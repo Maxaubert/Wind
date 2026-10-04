@@ -10,7 +10,6 @@ const GROUPS = ['hotkeys', 'zoom', 'view', 'screen', 'prefs', 'tray', 'about'];
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
-    window.__skipSplash = true;
     window.__msgs = [];
     // Built on the first getConfig so a test's own init script is already set.
     let live, saved;

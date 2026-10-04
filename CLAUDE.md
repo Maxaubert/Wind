@@ -170,9 +170,10 @@ changes on Save (`saveSession`) or on a keybind capture (`setConfigPersist`). Un
 profile (unsaved changes never survive), unless `%LOCALAPPDATA%\Wind\session.keep` marks a
 self-triggered restart. Tray Quit prompts from the files. First run seeds
 `Default` from current settings (`EnsureProfilesSeeded`). Surfaces: tray `Profiles` submenu
-(switch only, IDs 1100..1131) and the Settings General page (switch/create/rename/
-duplicate/delete; bridge messages `listProfiles`/`switchProfile`/`createProfile`/`renameProfile`/
-`duplicateProfile`/`deleteProfile`, each replying the refreshed list).
+(switch only, IDs 1100..1131) and the Settings General page (switch/create/delete; the New profile
+dialog starts from a copy of the current settings or the defaults, copying via `createProfile` + a
+write). The host also handles `listProfiles`/`renameProfile`/`duplicateProfile`, which no UI calls
+today; every profile message replies the refreshed list.
 
 **Three binaries.** `WindTray.exe` (`src/tray_app/`, issue #291) owns the tray icon and menu
 WITHOUT UIAccess: a UIAccess process's popup menu stacks above the cursor sprite and the Snipping

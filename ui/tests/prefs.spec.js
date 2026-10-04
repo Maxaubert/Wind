@@ -7,7 +7,6 @@ import { themes } from '../src/design/themes.js';
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
-    window.__skipSplash = true;
     window.__msgs = [];
     const init = () => {
       if (window.__live) return;
@@ -171,7 +170,7 @@ test('an unknown uiPalette falls back to Wind grey', async ({ page }) => {
 test('Wind grey is today\'s look: every token that existed before themes is unchanged', async ({ browser }) => {
   const tokens = readFileSync(new URL('../src/design/tokens.css', import.meta.url), 'utf8');
   const names = [...tokens.slice(tokens.indexOf('.wnd {'), tokens.indexOf('\n}', tokens.indexOf('.wnd {'))).matchAll(/--([A-Za-z0-9-]+):/g)]
-    .map((m) => m[1]).filter((n) => !['s', 'm', 'nf', 'w', 'isz', 'dur-fast', 'dur', 'ease', 'bandimg-from', 'rad', 'srad'].includes(n));
+    .map((m) => m[1]).filter((n) => !['s', 'm', 'nf', 'w', 'dur-fast', 'dur', 'ease', 'bandimg-from', 'rad', 'srad'].includes(n));
   const page = await browser.newPage();
   {
     const read = async (url) => {

@@ -13,7 +13,6 @@
   --w: 500;
   --rad: 8px;
   --srad: 6px;
-  --isz: 16px;
 
   --bg: #000; --side: #000;
   --line: #151515; --line2: #1b1b1b; --outline: #5c5c5c; --rowline: #0f0f0f;
@@ -23,14 +22,14 @@
   --track: #303030; --accent: #fff; --onaccent: #000;
   --pill: rgba(24, 24, 24, .9); --pillb: #242424;
   --shadow: 0 0 0 1px rgba(255, 255, 255, .05), 0 14px 36px rgba(0, 0, 0, .9);
-  --guide: #3c3c3c; --prog: #f2f2f2;
-  --hlStrong: #6e6e6e; --hlDim: #2e2e2e; --hlGrey: #313131;
+  --prog: #f2f2f2;
+  --hlDim: #2e2e2e; --hlGrey: #313131;
   --fill: #2fbfa5; --thumb: #f2f2f2; --ctl: #8c8c8c;
   --band: #080808; --bandimg-op: .17; --bandimg-from: 50%;   /* banner = option colour, aurora .17: Max 2026-10-02 */
 
   /* Tokens the built-in themes (themes.css) set on top of the ones above. Defaults here keep the grey look. */
   --sel: var(--hlGrey); --selfg: var(--fg); --onfill: #04201b; --fillline: transparent; --focus: var(--fg);
-  --hint: #6f6f6f; --hover2: #333; --scrim: rgba(0, 0, 0, .55);
+  --hover2: #333; --scrim: rgba(0, 0, 0, .55);
   --danger: #f0867e; --dangerbg: rgba(240, 134, 126, .12); --dangerbtn: #e0726a; --dangerbtnfg: #1a0605;
   --bnfilter: none; --bntint: transparent; --bntop: 0;   /* banner image filter and colour wash */
   --rc: 10px; --rp: 999px; --rsw: 11px; --rkn: 50%;   /* radii: card, pill, switch track, switch knob (--rad, --srad above) */
