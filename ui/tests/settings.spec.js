@@ -5,7 +5,6 @@ import { test, expect } from '@playwright/test';
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
-    window.__skipSplash = true;
     window.__msgs = [];
     // Built on the first getConfig so a test's own init script (window.__cfgExtra) is already set.
     const init = () => {

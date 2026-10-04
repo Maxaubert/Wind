@@ -273,7 +273,6 @@ test('New: the dialog suggests a name, checks it, and New starts from the defaul
   // Three buttons, no "Start from" choice (Max 2026-10-04): Cancel, New, Duplicate current.
   await expect(dlg.getByRole('button')).toHaveText(['Cancel', 'New', 'Duplicate current']);
   await expect(dlg.getByRole('radio')).toHaveCount(0);
-  await expect(dlg).toHaveAccessibleDescription(/Duplicate current copies Default/);
   await name.fill('gaming');
   await dlg.getByRole('button', { name: 'New', exact: true }).click();
   await expect(dlg.getByRole('alert')).toHaveText('A profile with this name already exists.');

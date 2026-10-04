@@ -9,7 +9,7 @@ export const GLOBAL_KEYS = new Set(['profile', 'onboarded', 'uiTheme', 'uiPalett
 
 // Must match the core's shipped defaults (src/config.h): every keybind ships unbound except Quick
 // zoom. Seeding anything else here would invent a binding the user never chose.
-export const KB_DEFAULTS = {
+const KB_DEFAULTS = {
   zoomInButton: '0', zoomInVk: '0', zoomOutButton: '0', zoomOutVk: '0',
   zoomInButton2: '0', zoomOutButton2: '0', zoomInVk2: '0', zoomOutVk2: '0',
   zoomInMods: '0', zoomOutMods: '0', zoomInMods2: '0', zoomOutMods2: '0',
@@ -22,7 +22,7 @@ export const KB_DEFAULTS = {
 
 // Defaults for every key the page shows. Applied to BOTH sides of the comparison, so a key the file
 // does not mention reads the same as the default and never counts as a change.
-export function schemaDefaults() {
+function schemaDefaults() {
   const d = { ...KB_DEFAULTS };
   for (const r of groups.flatMap(groupRows)) {
     if (r.key[0] !== '_' && r.def !== undefined) d[r.key] = r.def;

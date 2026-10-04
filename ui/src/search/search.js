@@ -45,7 +45,7 @@ const fold = (w) => w.replace(/ight/g, 'ite').replace(/ph/g, 'f');
 
 // Score of one query word against one list of target words, as a 0..1 strength (0 = no match):
 // exact 1, word-prefix .8, substring .6, fuzzy (whole word or typo'd prefix) .45.
-export function wordStrength(q, targets, fuzzy = true) {
+function wordStrength(q, targets, fuzzy = true) {
   let best = 0;
   const b = fuzzy ? budget(q) : 0, fq = fold(q);
   for (const t of targets) {
@@ -86,11 +86,11 @@ function fieldsOf(row, card, group) {
 }
 
 // Common short words carry no meaning of their own: dropped from a query that has other words.
-export const STOPWORDS = new Set(['in', 'the', 'to', 'of', 'a', 'an', 'with', 'for', 'on', 'and', 'or', 'is', 'at', 'these', 'this', 'that', 'those', 'from', 'your']);
-export const meaningful = (q) => { const m = q.filter((w) => !STOPWORDS.has(w)); return m.length ? m : q; };
+const STOPWORDS = new Set(['in', 'the', 'to', 'of', 'a', 'an', 'with', 'for', 'on', 'and', 'or', 'is', 'at', 'these', 'this', 'that', 'those', 'from', 'your']);
+const meaningful = (q) => { const m = q.filter((w) => !STOPWORDS.has(w)); return m.length ? m : q; };
 
 // Score one row for the query words (0 = no match).
-export function scoreRow(f, all) {
+function scoreRow(f, all) {
   const q = meaningful(all);
   let total = 0;
   // Stopwords never need to match; an exact label hit only breaks ties ("zoom in" -> Zoom in over Zoom out).

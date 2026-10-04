@@ -1,7 +1,7 @@
 // Mirror of src/keybind_rules.h (issue #285). Both are tested against tests/fixtures/keybind_cases.txt
 // (ui/tests/keybind-rules.spec.js and tests/test_keybind_rules.cpp), so a rule changed in one place
 // fails the other's tests until it is changed there too.
-export const MOD = { ctrl: 1, alt: 2, shift: 4, win: 8 };
+const MOD = { ctrl: 1, alt: 2, shift: 4, win: 8 };
 
 const isModifierVk = vk => vk === 0x10 || vk === 0x11 || vk === 0x12 || (vk >= 0xA0 && vk <= 0xA5) || vk === 0x5B || vk === 0x5C;
 const isTypingVk = vk => (vk >= 0x30 && vk <= 0x39) || (vk >= 0x41 && vk <= 0x5A) || vk === 0x20 ||

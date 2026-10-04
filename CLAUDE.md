@@ -338,9 +338,9 @@ floating Save capsule shows unsaved state (Save / Discard), keybinds persist at 
   survives the process that set it until DWM restarts - which is why smoothing appeared to come
   and go between builds and why a stale "smooth" state can frame an innocent build. KNOWN
   INTERACTIONS now that rendering is clean: (a) warm-keeping perturbs the LEVEL, never the
-  position, so it cannot shake the cursor. The RETIRED 1px translation jitter (once
-  `txKeepAliveMaxLevel`, now `txWarmMode=1`, A/B only) is what shook it under smoothing;
-  `txKeepAliveMaxLevel` is still parsed for old inis but NOTHING READS IT. (b) During LEVEL ramps a slight shimmer remains under smoothing - the filter
+  position, so it cannot shake the cursor. The 1px translation warm write (`txWarmMode=1`,
+  shipped; it replaced the retired `txKeepAliveMaxLevel` keep-alive) perturbs the position, so it
+  can shake under smoothing; `txKeepAliveMaxLevel` is still parsed for old inis but NOTHING READS IT. (b) During LEVEL ramps a slight shimmer remains under smoothing - the filter
   re-interpolates every edge per scale step. NOT our geometry, cadence, or frame coherence:
   all instrumented 2026-08-22 (telemetry w_level/w_tx channel + optical capture; written
   transforms proved sub-0.1px consistent while the shimmer persisted), and WM shows the same

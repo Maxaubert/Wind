@@ -16,7 +16,6 @@ public:
     // shape cache, so the next refreshShape()/showCrosshair() paints the incoming window, and the
     // next show() reveals it BEFORE hiding the outgoing one: no frame without a cursor.
     bool hasHigh() const { return hwndHigh_ != nullptr; }
-    int  highBand() const { return usedBandHigh_; }
     SpriteLayer layer() const { return layer_; }
     void setLayer(SpriteLayer l);
     // The band the window ACTUALLY got (the cascade can refuse the request; band_window logs
@@ -47,7 +46,6 @@ public:
     void destroy();
 private:
     int usedBand_ = 0;
-    int usedBandHigh_ = 0;
     HWND makeWindow(int band, int* usedBand, bool capturable);
     HWND hwndLow_ = nullptr;           // zorderBand (band 2 under UIAccess by default)
     HWND hwndHigh_ = nullptr;          // band 16, only with autoHigh

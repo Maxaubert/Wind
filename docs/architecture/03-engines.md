@@ -46,13 +46,14 @@ Missing or unknown values fall back to `hybrid` (`Config::model` in `src/config.
 | `hybrid` (default, "Auto") | Not a class: `TickState` holds both a `RenderModel` (`mRender`) and a `TransformModel` (`mTransform`) and points `model` at one of them per session | The product default; picks the right engine per situation |
 | `render` | Own DXGI Desktop Duplication capture + D3D11 scale onto a click-through, capture-excluded fullscreen overlay (`src/render_engine.*`) | The desktop engine: centered cursor, sub-pixel pan, unlimited levels. Chapter [04](04-render-engine.md) |
 | `transform` | The DWM fullscreen magnification transform (`MagSetFullscreenTransform` and the private channel), zero presents of our own (`src/transform_model.cpp`) | The game engine: the only path that stays compositor-smooth over a heavy game's present load (revived for issue #148). Chapter [05](05-transform-engine.md) |
-| `magnify` | Launches and drives the native Windows Magnifier via injected Ctrl+Alt+wheel notches | The DRM-safe fallback: protected video (Netflix) blanks under Desktop Duplication. Chapter [10](10-magnify-model.md) |
+| `magnify` | Launches and drives the native Windows Magnifier via injected Ctrl+Alt+wheel notches | The DRM-safe fallback: protected video (Netflix) blanks under Desktop Duplication. Dormant: not selectable since 0.18.0 (parsed as `hybrid`). Chapter [10](10-magnify-model.md) |
 
 Hybrid's construction lives in `wWinMain` (`src/main.cpp`): when `cfg.model == "hybrid"` it builds
 a `RenderModel` plus a second `TransformModel`, initializes both, and stores them in
 `TickState::mRender` / `TickState::mTransform`. If the transform half fails to initialize, Wind
 logs a warning and runs render-only; every pick site guards on `t.mTransform` being non-null, so a
-pure `model=render` or `model=magnify` run simply never enters the pick code.
+pure `model=render` run simply never enters the pick code (`model=magnify` is not selectable since
+0.18.0: config parse maps it to `hybrid`).
 
 ## The pure pick: ShouldPickTransform
 

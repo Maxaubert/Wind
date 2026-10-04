@@ -20,7 +20,7 @@ onboarding flow plus first-launch auto-spawn. The staged-Apply settings model is
 
 ## Visual source of truth (mockups)
 
-The agreed look is captured in committed, throwaway HTML mockups (open in a browser):
+The agreed look was captured in throwaway HTML mockups (removed 2026-10-04, #350; recover them from git history):
 
 - `mockups/config-ui-onepage.html` - the settings window (single scrolling page, scroll-spy rail,
   dark + light, theme toggle).
@@ -229,7 +229,7 @@ the config UI affects zoom performance.
 - `src/config_ui/main.cpp`: frameless window, command-line mode, window/openIni bridge messages.
 - `src/config.{h,cpp}`: `onboarded` key. `src/main.cpp`: first-launch spawn.
 - `tests/test_config.cpp`: `onboarded` case.
-- `mockups/`: the design mockups (committed as the visual reference).
+- `mockups/`: the design mockups (the visual reference; removed 2026-10-04, #350).
 
 ## Out of scope (this phase)
 

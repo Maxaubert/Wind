@@ -2,7 +2,6 @@ import { test, expect } from '@playwright/test';
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
-    window.__skipSplash = true;
     window.__sets = [];
     const listeners = new Set();
     window.chrome = { webview: {

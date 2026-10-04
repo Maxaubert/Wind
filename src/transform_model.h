@@ -37,7 +37,6 @@ public:
     void onActivate() override {}                 // no capture to prime
     void idleTick() override;                     // tears the mag context down once idle (#148)
     void setIdleReleaseMs(int ms) { idleReleaseMs_ = ms < 0 ? 0 : ms; }
-    void setRestLevel(double l) { restLevel_ = l < 1.0 ? 1.0 : l; }
     void present(const MapResult& r, double level, const Config& cfg,
                  const MonitorTarget& mon, const PresentExtras& ex) override;
     bool coversShell() const override { return false; }

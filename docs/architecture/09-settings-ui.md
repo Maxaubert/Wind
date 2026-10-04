@@ -124,7 +124,7 @@ this failure mode).
 | `mpoState` | request/reply `mpoState` | Read-only HKLM probe: registry value, plus what DWM actually loaded at boot (`wind::MpoStateAtBoot`) |
 | `setMpoDisabled` | request/reply `mpoApplied` | Elevated registry write (UAC); replies with the re-read state so a cancelled prompt reverts the toggle |
 | `rebootNow` | fire-and-forget | `shutdown.exe /r /t 0` (no `/f`, so other apps can object) |
-| `listProfiles` / `switchProfile` / `createProfile` / `renameProfile` / `duplicateProfile` / `deleteProfile` | request/reply `profiles` | Profile file ops; every mutation replies with the refreshed list so the UI never guesses |
+| `listProfiles` / `switchProfile` / `createProfile` / `renameProfile` / `duplicateProfile` / `deleteProfile` | request/reply `profiles` | Profile file ops; every mutation replies with the refreshed list so the UI never guesses. The UI sends only `switchProfile`, `createProfile` and `deleteProfile`: the New profile dialog duplicates the current settings by `createProfile` plus a write of the snapshot, so `listProfiles`, `renameProfile` and `duplicateProfile` are host-only (kept, the tests mock them) |
 
 Two protocol details matter. First, every profile reply carries the full refreshed
 `{names, active}` state; the host can also send the same `profiles` message *unsolicited* when

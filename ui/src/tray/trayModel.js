@@ -24,11 +24,10 @@ export const TOGGLES = [
   // #315. A full-width dropdown under the toggle group in the tray that picks the main engine; a change restarts Wind.
   { key: 'engine', icon: 'engine', name: 'Engine', desc: 'A dropdown to switch the engine. Wind restarts to apply it.' },
 ];
-export const KINDS = {
+const KINDS = {
   sliders: { items: SLIDERS, enabledKey: 'traySliders', orderKey: 'traySliderOrder', defaultOn: ['colorWarmPct', 'colorDimPct'], cap: MAX_SLIDERS },
   toggles: { items: TOGGLES, enabledKey: 'trayToggles', orderKey: 'trayToggleOrder', defaultOn: ['trackCaret', 'trackFocus', 'keepEdges', 'engine'], cap: 0 },   // all on by default (#329)
 };
-export const TRAY_KEYS = ['trayPerf', 'traySliders', 'traySliderOrder', 'trayToggles', 'trayToggleOrder'];
 
 const split = (s) => String(s).split(',').map((t) => t.trim()).filter(Boolean);
 

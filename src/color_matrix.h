@@ -16,17 +16,6 @@ inline ColorMatrix IdentityColorMatrix() {
     return r;
 }
 
-inline ColorMatrix Multiply(const ColorMatrix& a, const ColorMatrix& b) {
-    ColorMatrix r{};
-    for (int i = 0; i < 5; ++i)
-        for (int j = 0; j < 5; ++j) {
-            double s = 0.0;
-            for (int k = 0; k < 5; ++k) s += (double)a.m[i][k] * b.m[k][j];
-            r.m[i][j] = (float)s;
-        }
-    return r;
-}
-
 inline bool IsIdentity(const ColorMatrix& c) {
     for (int i = 0; i < 5; ++i)
         for (int j = 0; j < 5; ++j) {

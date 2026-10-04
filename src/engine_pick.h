@@ -29,23 +29,6 @@ inline EnginePref ParseEnginePref(const std::string& s) {
     return EnginePref::Auto;      // unknown/empty falls back to Auto, never to a hard pin
 }
 
-inline const char* EnginePrefName(EnginePref p) {
-    switch (p) {
-        case EnginePref::Transform: return "transform";
-        case EnginePref::Render:    return "render";
-        default:                    return "auto";
-    }
-}
-
-inline const char* WindowCategoryName(WindowCategory c) {
-    switch (c) {
-        case WindowCategory::Game:    return "game";
-        case WindowCategory::Acrylic: return "acrylic";
-        case WindowCategory::Desktop: return "desktop";
-        default:                      return "other";
-    }
-}
-
 struct EnginePickInputs {
     bool coversMonitor  = false;  // foreground covers the session's target monitor
     bool borderless     = false;  // foreground has no WS_CAPTION

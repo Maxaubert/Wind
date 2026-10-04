@@ -7,7 +7,6 @@ import { search, editDistance, words } from '../src/search/search.js';
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
-    window.__skipSplash = true;
     window.__msgs = [];
     const listeners = new Set();
     const send = (data) => listeners.forEach((fn) => fn({ data }));

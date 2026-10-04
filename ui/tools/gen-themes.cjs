@@ -7,7 +7,7 @@
 //   bg side line line2 rowline hover card chip chipb cardb fg fg2 fg3 glyph track fill pill pillb shadow  -> same name
 //   hb -> --outline (hover border)   pbg/pfg -> --accent/--onaccent (primary button)   sel -> --hlGrey
 //   knob -> --ctl   bnbg/bnop -> --band/--bandimg-op   rk/rs -> --rad/--srad
-// New tokens (tokens.css gives each a default): sel selfg onfill fillline focus hint hover2 danger dangerbg
+// New tokens (tokens.css gives each a default): sel selfg onfill fillline focus hover2 danger dangerbg
 // dangerbtn dangerbtnfg scrim bnfilter bntint bntop rc rp rsw rkn.
 // Wind grey takes the app's own tokens.css values for every token the app already had, so
 // today's look is exactly preserved; every other theme comes from the mockup palettes.
@@ -34,8 +34,8 @@ const pairs = (text) => {
 const todayDark = pairs(block);
 // The tokens the app already had; Wind grey dark keeps today's value for each.
 const EXISTING = ['bg', 'side', 'line', 'line2', 'outline', 'rowline', 'hover', 'card', 'chip', 'chipb', 'cardb', 'cshadow',
-  'fg', 'fg2', 'fg3', 'glyph', 'track', 'accent', 'onaccent', 'pill', 'pillb', 'shadow', 'guide', 'prog',
-  'hlStrong', 'hlDim', 'hlGrey', 'fill', 'thumb', 'ctl', 'band', 'bandimg-op'];
+  'fg', 'fg2', 'fg3', 'glyph', 'track', 'accent', 'onaccent', 'pill', 'pillb', 'shadow', 'prog',
+  'hlDim', 'hlGrey', 'fill', 'thumb', 'ctl', 'band', 'bandimg-op'];
 
 // Edges and outlines sit closer to the card than the palette says (Max 2026-10-02, #320), in every theme
 // except High contrast. Wind grey's edges come from tokens.css, which already holds the softened values.
@@ -51,10 +51,10 @@ function map(k, radii) {
     bg: k.bg, side: k.side, line: k.line, line2: k.line2, outline: k.hb, rowline: k.rowline, hover: k.hover,
     card: k.card, chip: k.chip, chipb: k.chipb, cardb: k.cardb, cshadow: 'none',
     fg: k.fg, fg2: k.fg2, fg3: k.fg3, glyph: k.glyph, track: k.track, accent: k.pbg, onaccent: k.pfg,
-    pill: k.pill, pillb: k.pillb, shadow: k.shadow, guide: k.hb, prog: k.fg,
-    hlStrong: k.hb, hlDim: k.track, hlGrey: k.sel, fill: k.fill, thumb: k.pbg, ctl: k.knob,
+    pill: k.pill, pillb: k.pillb, shadow: k.shadow, prog: k.fg,
+    hlDim: k.track, hlGrey: k.sel, fill: k.fill, thumb: k.pbg, ctl: k.knob,
     band: k.bnbg, 'bandimg-op': k.bnop,
-    sel: k.sel, selfg: k.selfg, onfill: k.accenton, fillline: k.fillline, focus: k.focus, hint: k.hint, hover2: k.hover2,
+    sel: k.sel, selfg: k.selfg, onfill: k.accenton, fillline: k.fillline, focus: k.focus, hover2: k.hover2,
     danger: k.danger, dangerbg: k.dangerbg, dangerbtn: k.dangerbtn, dangerbtnfg: k.dangerbtnfg, scrim: k.scrim,
     bnfilter: k.bnfilter, bntint: k.bntint, bntop: k.bntop,
     rad: radii.rk, srad: radii.rs, rc: radii.rc, rp: radii.rp, rsw: radii.rsw, rkn: radii.rkn,
