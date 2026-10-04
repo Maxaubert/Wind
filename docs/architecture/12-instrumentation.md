@@ -33,8 +33,14 @@ unit-tested; the Win32 half is excluded from the test build.
   `wind-config.log` from WindConfig.exe. Rotation at 1 MiB over three generations. A second
   instance that cannot open the shared log writes `wind-core-<pid>.log`.
 - **Lines.** `wind::Log(level, category, fmt, ...)` gives
-  `2026-05-31T08:14:22.137Z  WARN  render  <msg>`. Thread-safe, flushes on Warn and Error.
-  **Never log from the per-frame path**; hot paths log per-second summaries.
+  `2026-05-31T08:14:22.137Z  +962862007.114  t57132  WARN  render  <msg>`: precise UTC, the QPC
+  clock in ms (the clock of PresentMon `--qpc_time_ms`, ETW and the tick records) and the thread id.
+- **Non-blocking (#361).** `Log` formats into a lock-free queue (`src/log_queue.h`, 1024 lines)
+  and returns; the `Wind log writer` thread (below normal priority) writes in batches, flushes on
+  Warn and Error, and rotates at runtime. A caller never waits on the disk, an EDR scan or another
+  thread, so the tick and hook threads may log. A full queue drops the line and the writer logs
+  `dropped N lines`. `LogFlush(ms)` blocks until queued lines are on disk (export, crash, shutdown).
+  Hot paths still log exceptional events and summaries, not every frame.
 - **Startup snapshot.** Version and build flavour, OS build (`RtlGetVersion`), CPU, RAM, every
   adapter with driver version, every monitor with resolution, refresh, DPI and rotation, and the
   live config.
@@ -42,7 +48,44 @@ unit-tested; the Win32 half is excluded from the test build.
   (code, address, faulting module), heap-free from a directory resolved at `LogInit`.
 - **Export diagnostics** (Settings > Preferences) zips the log folder to the Desktop. Files are
   stage-copied first, so the export never touches a live handle. The tray has no export.
-- `diagnostics=1` adds the chattier frame-pacing trace in `%TEMP%\wind_diag.log`.
+- `diagnostics=1` adds the chattier 2 s frame-pacing summary as `diag` lines.
+
+## Hitch recorder (#361)
+
+Every tick fills a `TickRec` (`src/hitch_record.h`): its dt, the pacing wait before it and how
+late that wait returned, its wall time and its thread CPU time (`QueryThreadCycleTime`, calibrated
+against QPC in the first second), and spans for the parts that can block. `SpanScope`
+(`src/tick_span.h`) times a call into the current record from anywhere on the tick thread; it is
+a null check on other threads. Spans: `track`, `color`, `present`, `txwrite` (MagHost writes,
+marshal included), `ix`, `sprite`, `activate`. A ring keeps the last 512 records. Cost: about
+a dozen QPC reads per tick, no allocation, no I/O.
+
+When a zoomed frame exceeds `hitchThresholdPct` (default 150) of the refresh interval,
+`ClassifyHitch` attributes the extra time and a `hitch` line is logged (at most two a second; the
+rest are counted on the next line). `hitchLog=0` turns the lines off.
+
+| cause | meaning | next step |
+|---|---|---|
+| `late-wake` | the pacing wait should have ended, the tick thread was not run | CPU contention: system context, WPR |
+| `compositor-late` | txPace=2: the composite pulse came late, DWM did not compose | DWM/GPU side |
+| `pulse-thread-late` | DWM composed on time, the pulse thread signalled late | its priority |
+| `blocked in X` | the tick was off the CPU inside span X: a wait, or preempted in it | the call in X |
+| `busy in X` | the tick was on the CPU in X: Wind's own work | a code fix |
+| `slow-tick in X` | a long tick in the first second, before CPU time is calibrated | either of the two above |
+| `flush-wait` | the post-tick DwmFlush took longer than a frame | DWM side |
+| `loop-other` | the time went between ticks, outside every measured part | message dispatch |
+
+`untracked` in place of a span means no span covers half the tick: add one. Each line also carries
+engine, pacing mode, level, zoom edge, the wait numbers, the previous tick's work, CPU, flush and
+spans, and the dt of the ticks before it. A `minute:` line summarises each minute that had zoomed
+ticks (ticks, hitches by cause, worst dt, worst wake lateness, tick work).
+
+Every transform zoom-out logs one `txsession session end` line with the teardown split per step
+(cursor show, blanker restore, nudge, clip, trace hand-off, identity park, input transform, pin,
+ghost). The compositor stall after the park happens after the call returns and is not in it.
+
+Threads are named (`Wind tick`, `Wind input hooks`, `Wind composite pulse`, `Wind log writer`),
+so a WPR trace shows them by name.
 
 **Per-second and edge lines** (logged only when worth reading):
 
@@ -50,7 +93,8 @@ unit-tested; the Win32 half is excluded from the test build.
 |---|---|---|
 | `txwrite` | `TransformModel::noteWrite` | Write count, avg/max ms, writes over 5 ms, failures; only when max > 5 ms or a write failed. A `fails` streak is the shared-runtime tell ([05](05-transform-engine.md)) |
 | `ixwrite` | `TransformModel::noteIxWrite` | Input-transform publish cadence and timing, plus `stomps` |
-| `txsession` | `TransformModel` | `session end maxLevel=..` per transform session |
+| `txsession` | `TransformModel` | `session end maxLevel=.. teardown=..ms (..per step..)` per transform session |
+| `hitch` | `RunTick` | A classified long frame, and the `minute:` summary (see Hitch recorder) |
 | `cursor` | `RunTick`, `diagnostics=1` | Pointer distance from the lens centre at the weld instant. Blind to between-tick lag; use the wobble probes for that |
 | `lock` | `RunTick` | Lock edges and the tell that caused them (`warp-anchor`, `seeded LOCKED at zoom-in`) |
 | `hybrid` | `RunTick` | Engine pick per session |

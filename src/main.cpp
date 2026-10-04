@@ -17,6 +17,7 @@
 #include "engine_pick.h"
 #include <thread>
 #include <atomic>
+#include <intrin.h>   // __rdtsc: thread cycle calibration (#361)
 #include "hook_transform.h"   // inline transform writes from the mouse hook (issue #206)
 #include "mag_thread.h"
 #include "mpo_boot.h"
@@ -30,6 +31,8 @@
 #include "hdr_info.h"   // issue #288
 #include "cursor_tint.h"   // tinted pointer at 1x (#288)
 #include "transform_model.h"
+#include "hitch_record.h"   // hitch recorder (#361)
+#include "tick_span.h"
 #include "input_router.h"
 #include "cursor_mapper.h"
 #include "zoom_controller.h"
@@ -51,13 +54,24 @@
 // drooping composition backfills ticks instead of dragging the whole pipeline down with it.
 // Started lazily on first use; harmless at idle (DwmFlush at composition rate, no work between).
 static HANDLE g_compEvt = nullptr;
+// Hitch recorder (#361): when the pulse thread signalled, the signal before that, and DWM's own
+// compose time for that composite. Lets a long frame say whether DWM composed late or the pulse
+// thread itself was not run. Written by the pulse thread only; torn reads only blur one record.
+static std::atomic<long long> g_pulseQpc{0}, g_pulsePrevQpc{0}, g_pulseComposeQpc{0};
 static void EnsureCompositePulse() {
     if (g_compEvt) return;
     g_compEvt = CreateEventW(nullptr, FALSE, FALSE, nullptr);   // auto-reset
     if (!g_compEvt) return;
     HANDLE th = CreateThread(nullptr, 0, [](LPVOID) -> DWORD {
+        SetThreadDescription(GetCurrentThread(), L"Wind composite pulse");
         for (;;) {
             if (DwmFlush() != S_OK) Sleep(50);   // DWM restarting: back off, keep trying
+            DWM_TIMING_INFO ti{}; ti.cbSize = sizeof(ti);
+            const long long comp = SUCCEEDED(DwmGetCompositionTimingInfo(nullptr, &ti)) ? (long long)ti.qpcCompose : 0;
+            LARGE_INTEGER q; QueryPerformanceCounter(&q);
+            g_pulsePrevQpc.store(g_pulseQpc.load(std::memory_order_relaxed), std::memory_order_relaxed);
+            g_pulseComposeQpc.store(comp, std::memory_order_relaxed);
+            g_pulseQpc.store(q.QuadPart, std::memory_order_release);
             SetEvent(g_compEvt);
         }
         return 0;
@@ -307,6 +321,20 @@ struct TickState {
     unsigned long long lastActiveMs = 0;
     // Zoom timeline (#310, zoomTrace=1): one log line per zoom-in and per zoom-out.
     double lastTickWorkMs = 0;      // the previous RunTick's own work time
+    // Hitch recorder (#361): the tick being recorded, the ring of finished ones, the pacing wait
+    // measured by the loop for the next tick, and the rate limit / per-minute roll-up.
+    struct HitchState {
+        wind::TickRing ring;
+        wind::TickRec cur;
+        bool havePrev = false;
+        float pendWait = -1, pendLate = -1, pendPulseGap = -1, pendPulseDelay = -1;
+        unsigned pendFlags = 0;
+        wind::HitchSummary minute;
+        unsigned long long minuteStartMs = 0, lineWindowMs = 0;
+        unsigned linesInWindow = 0, suppressed = 0;
+        long long calQpc0 = 0; unsigned long long calTsc0 = 0;
+        double cyclesPerMs = 0;          // thread cycle counter units per ms, measured at startup
+    } hitch;
     struct ZoomTimeline {
         bool armed = false, outPending = false; int step = 0;
         long long press = 0, start = 0;
@@ -751,15 +779,12 @@ static void EndGameInspect(TickState& t) {
     wind::Log(wind::LogLevel::Info, "inspect", "game-inspect ended (foreground returned)");
 }
 
-// Append a line to %TEMP%\wind_diag.log (frame-pacing diagnostics; gated on diagnostics=1).
-// %TEMP% so it works for the Program Files deploy too (its own dir isn't writable).
+// Frame-pacing diagnostics (diagnostics=1) as "diag" lines in wind-core.log. Formerly its own
+// fopen/append file in %TEMP% from the tick thread; now a queue push like every log line (#361).
 static void DiagLog(const char* fmt, ...) {
-    char path[MAX_PATH]; DWORD n = GetTempPathA(MAX_PATH, path);
-    if (n == 0 || n > MAX_PATH) return;
-    lstrcatA(path, "wind_diag.log");
-    FILE* f = nullptr; if (fopen_s(&f, path, "a") != 0 || !f) return;
-    va_list ap; va_start(ap, fmt); vfprintf(f, fmt, ap); va_end(ap);
-    fputc('\n', f); fclose(f);
+    char buf[1024];
+    va_list ap; va_start(ap, fmt); _vsnprintf_s(buf, sizeof(buf), _TRUNCATE, fmt, ap); va_end(ap);
+    wind::Log(wind::LogLevel::Info, "diag", "%s", buf);
 }
 
 // Forward-declared so RunTick can re-register the hide-cursor hotkey on config hot-reload;
@@ -909,18 +934,93 @@ static bool IdleNow(TickState& t) {
     return wind::IdleSleepOk(ii);
 }
 
-// RunTick's own work time, for the zoom timeline (#310): two QPC reads per tick.
-struct TickWorkTimer {
-    TickState& t; LARGE_INTEGER s;
-    explicit TickWorkTimer(TickState& x) : t(x) { QueryPerformanceCounter(&s); }
-    ~TickWorkTimer() {
-        LARGE_INTEGER e; QueryPerformanceCounter(&e);
-        t.lastTickWorkMs = double(e.QuadPart - s.QuadPart) * 1000.0 / double(t.freq.QuadPart);
-    }
-};
 static double QpcMs(const TickState& t, long long a, long long b) {
     return double(b - a) * 1000.0 / double(t.freq.QuadPart);
 }
+
+// Hitch recorder (#361), tick start: close the previous tick's record (its work and post-tick
+// flush are now known), open this one with the pacing wait the loop measured, and if the gap
+// since the previous tick was a hitch, classify and log it. Logging is a queue push.
+static void HitchBegin(TickState& t, long long now) {
+    auto& h = t.hitch;
+    const wind::TickRec prev = h.cur;
+    wind::TickRec cur{};
+    cur.qpcStart = now;
+    cur.dtMs = h.havePrev ? (float)QpcMs(t, prev.qpcStart, now) : 0.0f;
+    cur.waitMs = h.pendWait; cur.wakeLateMs = h.pendLate;
+    cur.pulseGapMs = h.pendPulseGap; cur.pulseDelayMs = h.pendPulseDelay;
+    cur.flags = h.pendFlags | (t.wokeFromIdle ? wind::kTickWoke : 0u);
+    h.pendWait = h.pendLate = h.pendPulseGap = h.pendPulseDelay = -1; h.pendFlags = 0;
+    if (h.havePrev) {
+        const unsigned long long nowMs = GetTickCount64();
+        const double frameMs = 1000.0 / (t.hz > 0 ? t.hz : 60);
+        const bool zoomed = prev.level > 1.0f || (prev.flags & (wind::kTickEnter | wind::kTickExit));
+        if (zoomed && !(cur.flags & wind::kTickWoke)) h.minute.addTick(prev);
+        if (t.cfg.hitchLog && zoomed && wind::IsHitch(cur, frameMs, t.cfg.hitchThresholdPct)) {
+            const wind::HitchVerdict v = wind::ClassifyHitch(prev, cur, frameMs);
+            h.minute.addHitch(cur, v);
+            if (nowMs - h.lineWindowMs >= 1000) { h.lineWindowMs = nowMs; h.linesInWindow = 0; }
+            if (h.linesInWindow < 2) {   // at most two lines a second; the rest are counted
+                ++h.linesInWindow;
+                float recent[8]; const int n = h.ring.size() < 8 ? h.ring.size() : 8;
+                for (int i = 0; i < n; ++i) recent[i] = h.ring.back(n - 1 - i).dtMs;
+                wind::Log(wind::LogLevel::Info, "hitch", "%s",
+                          wind::FormatHitchLine(prev, cur, v, frameMs, recent, n, h.suppressed).c_str());
+                h.suppressed = 0;
+            } else {
+                ++h.suppressed;
+            }
+        }
+        h.ring.push(prev);
+        if (h.minuteStartMs == 0) h.minuteStartMs = nowMs;
+        if (nowMs - h.minuteStartMs >= 60000) {
+            const std::string s = h.minute.format();
+            if (t.cfg.hitchLog && !s.empty()) wind::Log(wind::LogLevel::Info, "hitch", "%s", s.c_str());
+            h.minute.reset(); h.minuteStartMs = nowMs;
+        }
+    }
+    h.cur = cur;
+    h.havePrev = true;
+    wind::tl_tickSpans = h.cur.span;   // SpanScope on this thread now times into this record
+}
+
+// Tick end: work time, the thread's own CPU time inside it (wall minus CPU = off the CPU: waiting
+// in a call or preempted), level, engine, zoom edge.
+static void HitchEnd(TickState& t, long long now, double workMs, unsigned long long cycles, bool wasActive) {
+    auto& h = t.hitch;
+    auto& c = h.cur;
+    wind::tl_tickSpans = nullptr;
+    c.workMs = (float)workMs;
+    // QueryThreadCycleTime counts in TSC units: calibrate them against QPC over the first second.
+    if (h.cyclesPerMs > 0) {
+        c.cpuMs = (float)(double(cycles) / h.cyclesPerMs);
+    } else if (h.calQpc0 == 0) {
+        h.calQpc0 = now; h.calTsc0 = __rdtsc();
+    } else if (QpcMs(t, h.calQpc0, now) >= 1000.0) {
+        h.cyclesPerMs = double(__rdtsc() - h.calTsc0) / QpcMs(t, h.calQpc0, now);
+    }
+    c.level = (float)t.prevLvl;
+    if (!wasActive && t.prevActive) c.flags |= wind::kTickEnter;
+    if (wasActive && !t.prevActive) c.flags |= wind::kTickExit;
+    if (dynamic_cast<TransformModel*>(t.model)) c.flags |= wind::kTickTransform;
+    else if (dynamic_cast<RenderModel*>(t.model)) c.flags |= wind::kTickRender;
+}
+
+// RunTick's own work time, for the zoom timeline (#310) and the hitch recorder (#361).
+struct TickWorkTimer {
+    TickState& t; LARGE_INTEGER s; ULONG64 c0 = 0; bool wasActive;
+    explicit TickWorkTimer(TickState& x) : t(x), wasActive(x.prevActive) {
+        QueryPerformanceCounter(&s);
+        HitchBegin(t, s.QuadPart);
+        QueryThreadCycleTime(GetCurrentThread(), &c0);
+    }
+    ~TickWorkTimer() {
+        ULONG64 c1 = 0; QueryThreadCycleTime(GetCurrentThread(), &c1);
+        LARGE_INTEGER e; QueryPerformanceCounter(&e);
+        t.lastTickWorkMs = double(e.QuadPart - s.QuadPart) * 1000.0 / double(t.freq.QuadPart);
+        HitchEnd(t, e.QuadPart, t.lastTickWorkMs, c1 - c0, wasActive);
+    }
+};
 // The next tick after a zoom-in/out: gather the composite and per-tick work, log when complete.
 static void ZoomTimelineStep(TickState& t, long long nowQpc) {
     auto& z = t.zt;
@@ -1443,7 +1543,7 @@ static void RunTick(TickState& t) {
             } else {
                 SetSystemCursorHidden(t, t.model, true);
             }
-            t.model->onActivate();       // grab a live frame, not a stale cached one
+            { wind::SpanScope span_(wind::kSpanActivate); t.model->onActivate(); }     // grab a live frame, not a stale cached one
         }
         if (inspectEnter) {
             // Freeze the real cursor where it is; the look point (mapper center) starts there.
@@ -1460,7 +1560,7 @@ static void RunTick(TickState& t) {
             RECT fz{ pt.x, pt.y, pt.x + 1, pt.y + 1 };
             ClipCursor(&fz);
             SetSystemCursorHidden(t, t.model, true);   // hide the real cursor; we draw the crosshair
-            t.model->onActivate();
+            { wind::SpanScope span_(wind::kSpanActivate); t.model->onActivate(); }
             // Game-inspect (issue #144): if a mouselook game holds the mouse, the freeze alone is
             // not enough - its raw-input camera still receives every mickey. Steal foreground to
             // the invisible helper so the game stops getting input. Deferred via
@@ -1754,7 +1854,7 @@ static void RunTick(TickState& t) {
         // call (it is also what fsGame below aliases).
         const bool trackEnabled = lvl > 1.001 && !panel && !inspect && !t.detector.locked() && !fsCover &&
                                   (t.cfg.trackCaret != 0 || t.cfg.trackFocus != 0);
-        g_track.setActive(trackEnabled, t.cfg.trackCaret != 0, t.cfg.trackFocus != 0, t.cfg.trackLog != 0);
+        { wind::SpanScope span_(wind::kSpanTrack); g_track.setActive(trackEnabled, t.cfg.trackCaret != 0, t.cfg.trackFocus != 0, t.cfg.trackLog != 0); }
         if (t.cfg.trackLog) {   // #326: why tracking is on or off, logged on every change
             const int bits = (lvl > 1.001 ? 1 : 0) | (panel ? 2 : 0) | (inspect ? 4 : 0) |
                              (t.detector.locked() ? 8 : 0) | (fsCover ? 16 : 0);
@@ -1802,7 +1902,7 @@ static void RunTick(TickState& t) {
             // or auto-repeat, is not typing (review #349).
             vi.keyAfterButton = wind::KeyAfterButton(g_input.lastTypingKeyDownMs(), t.lastButtonMs);
             vi.dtMs = dt * 1000.0;
-            vi.snap = g_track.snapshot();
+            { wind::SpanScope span_(wind::kSpanTrack); vi.snap = g_track.snapshot(); }
             const wind::ViewOwner was = t.viewOwner.owner;
             const unsigned diagTargetSeqBefore = t.viewOwner.target.seq;
             const wind::ViewOwner owner = wind::StepViewOwner(t.viewOwner, vi);
@@ -2031,7 +2131,7 @@ static void RunTick(TickState& t) {
             const bool fgIsStealer = fgTick && fgTick == g_focusStealer;   // game-inspect helper holds fg
             if (want && want != t.model && wantSettled && !fgIsStealer) {
                 if (t.restAfterReveal) {   // rapid double-switch: settle the previous handover
-                    t.restAfterReveal->setActive(false);
+                    { wind::SpanScope span_(wind::kSpanActivate); t.restAfterReveal->setActive(false); }
                     t.restAfterReveal = nullptr;
                     t.restOverlapTicks = 0;
                     UpdateColorFilter(t, true, RenderOverlayShown(t), nullptr);   // colour follows what is visible
@@ -2044,7 +2144,7 @@ static void RunTick(TickState& t) {
                 // present (level > 1.001) and re-welds at the same point.
                 if (dynamic_cast<RenderModel*>(t.model)) SetSystemCursorHidden(t, t.model, true);
                 else t.transformExe = ExeNameOf(fgTick);   // device-lost backstop attribution
-                t.model->onActivate();
+                { wind::SpanScope span_(wind::kSpanActivate); t.model->onActivate(); }
                 if (auto* rm = dynamic_cast<RenderModel*>(t.model)) {
                     t.revealNeedsComposite = ForegroundCoversMonitor(t.mon);
                     if (t.revealNeedsComposite) rm->primeReveal();
@@ -2062,7 +2162,7 @@ static void RunTick(TickState& t) {
                 } else {
                     // render -> transform: activate the transform THIS tick, keep the overlay up
                     // for the same short overlap, then drop it.
-                    t.model->setActive(true);
+                    { wind::SpanScope span_(wind::kSpanActivate); t.model->setActive(true); }
                     t.restAfterReveal = old;
                     t.restOverlapTicks = TicksAtHz(3, t.hz);
                 }
@@ -2162,7 +2262,7 @@ static void RunTick(TickState& t) {
         }
         ex.suppressTransformWrite = hookWrite;
         ex.realPointer = panel;
-        UpdateColorFilter(t, lvl > 1.0, RenderOverlayShown(t), &ex);
+        { wind::SpanScope span_(wind::kSpanColor); UpdateColorFilter(t, lvl > 1.0, RenderOverlayShown(t), &ex); }
         // Serialize transform writes around an Inspect click's injected absolute move (issue #148
         // TDR class): the injection and a transform write racing each other is the proven trigger.
         // The launch quiesce holds writes AND the weld for its whole window (see above).
@@ -2260,7 +2360,7 @@ static void RunTick(TickState& t) {
         }
         if (doPresent) {
             LARGE_INTEGER zp0; if (t.zt.armed && t.zt.step == 0) QueryPerformanceCounter(&zp0);
-            t.model->present(r, lvl, t.cfg, t.mon, ex);      // render+present (never blocks the ramp)
+            { wind::SpanScope span_(wind::kSpanPresent); t.model->present(r, lvl, t.cfg, t.mon, ex); }      // render+present (never blocks the ramp)
             if (t.zt.armed && t.zt.step == 0 && t.zt.presentMs == 0) {
                 LARGE_INTEGER zp1; QueryPerformanceCounter(&zp1); t.zt.presentMs = QpcMs(t, zp0.QuadPart, zp1.QuadPart);
             }
@@ -2303,7 +2403,7 @@ static void RunTick(TickState& t) {
                 // case still reveals within this same tick (the instant feel is kept); a loaded
                 // GPU misses the budget and defers to the per-tick checks below.
                 if (!t.revealNeedsComposite && rm->revealFrameDone(3.0)) {
-                    rm->setActive(true);
+                    { wind::SpanScope span_(wind::kSpanActivate); rm->setActive(true); }
                     t.revealPending = 0;
                     // Real-time overlap, same as the render -> transform path (issue #274):
                     // raw ticks were right only at 144 Hz.
@@ -2314,7 +2414,7 @@ static void RunTick(TickState& t) {
                 const bool frameDone  = rm->revealFrameDone();
                 const bool composited = !t.revealNeedsComposite || rm->frameCompositedSincePrime();
                 if ((frameDone && composited) || t.revealPending == 0) {
-                    rm->setActive(true);
+                    { wind::SpanScope span_(wind::kSpanActivate); rm->setActive(true); }
                     wind::Log(wind::LogLevel::Info, "render",
                               "deferred reveal: frameDone=%d composited=%d ticksLeft=%d",
                               (int)frameDone, (int)composited, t.revealPending);
@@ -2326,7 +2426,7 @@ static void RunTick(TickState& t) {
             }
         } else if (enterActive) {
             LARGE_INTEGER zs0; QueryPerformanceCounter(&zs0);
-            t.model->setActive(true);   // transform: reveal immediately, no capture priming
+            { wind::SpanScope span_(wind::kSpanActivate); t.model->setActive(true); }   // transform: reveal immediately, no capture priming
             if (t.zt.armed) {
                 LARGE_INTEGER zs1; QueryPerformanceCounter(&zs1); t.zt.setActiveMs = QpcMs(t, zs0.QuadPart, zs1.QuadPart);
                 if (auto* tm = dynamic_cast<TransformModel*>(t.model)) {
@@ -2339,11 +2439,11 @@ static void RunTick(TickState& t) {
         // Handover overlap: the outgoing engine rests a few ticks after the incoming one is
         // live, so the crossover never composites a bare unmagnified frame (see instant switch).
         if (t.restAfterReveal && t.restOverlapTicks > 0 && --t.restOverlapTicks == 0) {
-            t.restAfterReveal->setActive(false);
+            { wind::SpanScope span_(wind::kSpanActivate); t.restAfterReveal->setActive(false); }
             t.restAfterReveal = nullptr;
             // The render overlay just left the screen: the DWM effect takes the colour back THIS
             // tick, not next tick's top-of-tick call (a one-frame unfiltered flash otherwise).
-            UpdateColorFilter(t, true, RenderOverlayShown(t), nullptr);
+            { wind::SpanScope span_(wind::kSpanColor); UpdateColorFilter(t, true, RenderOverlayShown(t), nullptr); }
         }
         // Execute the deferred game-inspect steal now that the reveal logic has read the true
         // foreground, and RE-assert it if the game pulled foreground back mid-inspect (some
@@ -2423,13 +2523,13 @@ static void RunTick(TickState& t) {
         EndPanelFreeze(t);                            // #283: never leave the pointer pinned (review #284)
         // The caret/focus watcher is switched off only from the zoomed view block; a zoom-out that
         // snaps straight to 1.0 skipped it and left the watcher polling at 1x (#71).
-        g_track.setActive(false, t.cfg.trackCaret != 0, t.cfg.trackFocus != 0, t.cfg.trackLog != 0);
+        { wind::SpanScope span_(wind::kSpanTrack); g_track.setActive(false, t.cfg.trackCaret != 0, t.cfg.trackFocus != 0, t.cfg.trackLog != 0); }
         if (t.restAfterReveal) { t.restAfterReveal->setActive(false); t.restAfterReveal = nullptr; }
         // DWM effect back BEFORE the overlay hides: worst case one double-filtered frame, never a
         // bright unfiltered one (review 2026-09-30).
-        UpdateColorFilter(t, false, false, nullptr);
+        { wind::SpanScope span_(wind::kSpanColor); UpdateColorFilter(t, false, false, nullptr); }
         LARGE_INTEGER zo0; QueryPerformanceCounter(&zo0);
-        t.model->setActive(false);
+        { wind::SpanScope span_(wind::kSpanActivate); t.model->setActive(false); }
         if (t.cfg.zoomTrace) {
             LARGE_INTEGER zo1; QueryPerformanceCounter(&zo1);
             t.zt.outSetActiveMs = QpcMs(t, zo0.QuadPart, zo1.QuadPart); t.zt.outPending = true;
@@ -3062,7 +3162,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     }
 
     // Frame-pacing self-test: WIND_PACINGTEST runs the REAL present-paced render path at a forced
-    // zoom with a simulated pan for ~4 s and logs loop-interval stats to %TEMP%\wind_diag.log -
+    // zoom with a simulated pan for ~4 s and logs loop-interval stats as diag lines in wind-core.log -
     // to measure microstutter objectively (the normal loop needs the side button to zoom). Exits.
     if (GetEnvironmentVariableW(L"WIND_PACINGTEST", nullptr, 0) > 0) {
         // Pacing test drives the render path directly, so it only runs for the RenderModel.
@@ -3188,6 +3288,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // Background CPU load must not stall a zoom (#334): this thread runs the tick loop.
     wind::RaiseTickThreadPriority();
     wind::OptOutOfPowerThrottling();
+    SetThreadDescription(GetCurrentThread(), L"Wind tick");   // names it in WPA and debuggers
 
     bool running = true;
     unsigned long long nextRecoverMs = 0;   // device-lost recovery backoff gate (GetTickCount64)
@@ -3281,8 +3382,27 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                 // only on genuine droop - at ~2/3 of the panel max rather than full rate, which
                 // still keeps the weld tight without fighting the composite phase.
                 const DWORD frameMs = ts.hz > 0 ? (DWORD)(1500 / ts.hz + 1) : 11;
+                LARGE_INTEGER wa; QueryPerformanceCounter(&wa);
                 const DWORD w = WaitForSingleObject(g_compEvt, frameMs);
+                LARGE_INTEGER wb; QueryPerformanceCounter(&wb);
                 wind::MarkComposite();
+                {   // Hitch recorder (#361): the wait, and who was late if it was long.
+                    auto& h = ts.hitch;
+                    h.pendFlags |= wind::kTickPacePulse;
+                    h.pendWait = (float)QpcMs(ts, wa.QuadPart, wb.QuadPart);
+                    const long long ps = g_pulseQpc.load(std::memory_order_acquire);
+                    const long long pp = g_pulsePrevQpc.load(std::memory_order_relaxed);
+                    const long long pc = g_pulseComposeQpc.load(std::memory_order_relaxed);
+                    if (w == WAIT_OBJECT_0) {
+                        // Signalled before the wait began: no wake latency to blame.
+                        h.pendLate = ps > wa.QuadPart ? (float)QpcMs(ts, ps, wb.QuadPart) : 0.0f;
+                        if (pp && ps > pp) h.pendPulseGap = (float)QpcMs(ts, pp, ps);
+                        if (pc && ps >= pc) h.pendPulseDelay = (float)QpcMs(ts, pc, ps);
+                    } else {
+                        h.pendFlags |= wind::kTickPulseTimeout;
+                        if (ps) h.pendPulseGap = (float)QpcMs(ts, ps, wb.QuadPart);   // still no pulse
+                    }
+                }
                 // Telemetry: a droop episode is invisible in tick dt now that backfill exists, so
                 // count it here. Logged once a second only when timeouts happened.
                 static unsigned s_pulses = 0, s_timeouts = 0;
@@ -3336,12 +3456,20 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                 // Anything else (WAIT_FAILED): fall back to the paced timer below, never spin.
             }
             if (!slept) {
+                LARGE_INTEGER wa; QueryPerformanceCounter(&wa);
                 if (timer) {
                     SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);
                     WaitForSingleObject(timer, INFINITE);
                 } else {
                     Sleep(1000 / pacedHz);
                 }
+                LARGE_INTEGER wb; QueryPerformanceCounter(&wb);
+                // Hitch recorder (#361): the timer was due one period after it was armed.
+                auto& h = ts.hitch;
+                h.pendFlags |= wind::kTickPaceTimer;
+                h.pendWait = (float)QpcMs(ts, wa.QuadPart, wb.QuadPart);
+                const float late = h.pendWait - 1000.0f / (float)pacedHz;
+                h.pendLate = late > 0 ? late : 0.0f;
             }
         }
 
@@ -3349,7 +3477,13 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
 
         if (dwmPaces) {
+            LARGE_INTEGER fa; QueryPerformanceCounter(&fa);
             DwmFlush();             // block until DWM's next composite -> frames align with it
+            {   // Hitch recorder (#361): the flush belongs to the tick that just ran.
+                LARGE_INTEGER fb; QueryPerformanceCounter(&fb);
+                ts.hitch.cur.flushMs = (float)QpcMs(ts, fa.QuadPart, fb.QuadPart);
+                ts.hitch.cur.flags |= wind::kTickPaceFlush;
+            }
             wind::MarkComposite();  // frame boundary: the hook may write once more (issue #229)
             {   // Composite timestamp: the late sprite refresh above measures its wait from here.
                 LARGE_INTEGER qc; QueryPerformanceCounter(&qc);

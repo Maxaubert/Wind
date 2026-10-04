@@ -1,4 +1,5 @@
 #include "cursor_sprite.h"
+#include "tick_span.h"   // #361: per-tick spans
 #include "crosshair.h"
 #include "band_window.h"
 #include <cstring>
@@ -359,6 +360,7 @@ void CursorSprite::renderMaskShape() {
 // come from here (issue #229: the Inspect crosshair's centered hotspot swapped back to the
 // arrow's tip hotspot with the move deduped, showing the arrow displaced by hotspot * zoom).
 void CursorSprite::moveTo(int desktopX, int desktopY) {
+    wind::SpanScope span(wind::kSpanSprite);
     lastTargetX_ = desktopX; lastTargetY_ = desktopY; haveTarget_ = true;
     SetWindowPos(hwnd_, nullptr, desktopX - hotX_, desktopY - hotY_, 0, 0,
                  SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
@@ -454,6 +456,7 @@ void CursorSprite::renderCrosshair() {
 }
 
 void CursorSprite::showCrosshair() {
+    wind::SpanScope span(wind::kSpanSprite);
     if (!hwnd_) return;
     if (!crosshairMode_) {
         renderCrosshair();
@@ -470,10 +473,12 @@ void CursorSprite::showCrosshair() {
 }
 
 void CursorSprite::show() {
+    wind::SpanScope span(wind::kSpanSprite);
     if (!visible_) { ShowWindow(hwnd_, SW_SHOWNOACTIVATE); visible_ = true; }
     if (pendingHide_) { ShowWindow(pendingHide_, SW_HIDE); pendingHide_ = nullptr; }
 }
 void CursorSprite::hide() {
+    wind::SpanScope span(wind::kSpanSprite);
     if (visible_) { ShowWindow(hwnd_, SW_HIDE); visible_ = false; }
     if (pendingHide_) { ShowWindow(pendingHide_, SW_HIDE); pendingHide_ = nullptr; }
 }

@@ -18,6 +18,12 @@ const char* LogLevelName(LogLevel lvl);
 std::string FormatLogLine(unsigned long long tsMsUtc, LogLevel lvl,
                           const char* category, const std::string& msg);
 
+// The line the runtime writes (#361): FormatLogLine plus the QPC time in ms (the same clock as
+// PresentMon --qpc_time_ms, ETW and Wind's tick records) and the logging thread id:
+//   "2026-05-31T08:14:22.137Z  +123456.789  t4242  WARN  render  <msg>"
+std::string FormatLogLineEx(unsigned long long tsMsUtc, double qpcMs, unsigned tid, LogLevel lvl,
+                            const char* category, const std::string& msg);
+
 // Rotation policy. Returns true if a file of `currentSizeBytes` should be rotated before the
 // next write. maxBytes is the per-file cap (the backend uses 1 MiB).
 bool ShouldRotate(unsigned long long currentSizeBytes, unsigned long long maxBytes);
@@ -56,9 +62,15 @@ std::string BuildSnapshot(const SystemInfo& si);
 // processTag is a short, filename-safe tag: "core" -> wind-core.log, "config" -> wind-config.log.
 // Resolves the log dir, rotates if the existing file is at/over kLogMaxBytes, opens for append.
 void LogInit(const wchar_t* processTag);
-// Append one event line. Thread-safe. Flushes on Warn/Error. NEVER call from the per-frame path.
+// Queue one event line. Thread-safe and NON-BLOCKING (#361): the caller formats into a lock-free
+// queue and a low-priority writer thread does the disk I/O (and the flush on Warn/Error). A full
+// queue drops the line and the writer reports the count. Safe on the tick and hook threads, but
+// per-frame paths should still log summaries or exceptional events, not every frame.
 void Log(LogLevel lvl, const char* category, const char* fmt, ...);
-void LogShutdown();   // flush + close
+// Wait (up to timeoutMs) until every line queued before the call is on disk and flushed.
+// Blocks the caller: for export, crash and shutdown paths only.
+bool LogFlush(unsigned timeoutMs);
+void LogShutdown();   // drain, flush, stop the writer, close
 
 // Gather the machine/display/config snapshot and write it to the log. buildFlavor is "normal" or
 // "uiaccess"; configDump is the live config rendered as key=value lines (may be empty for the

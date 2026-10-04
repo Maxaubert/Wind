@@ -371,6 +371,16 @@ void TransformModel::setActive(bool active) {
         return;
     }
     if (!magUp_) return;
+    // Teardown breakdown (#361): every step of the zoom-out timed and logged as one line, so a
+    // long zoom-out names its step instead of being one opaque total.
+    LARGE_INTEGER tf, t0; QueryPerformanceFrequency(&tf); QueryPerformanceCounter(&t0);
+    LARGE_INTEGER tPrev = t0;
+    double stepMs[9] = {};
+    auto step = [&](int i) {
+        LARGE_INTEGER n; QueryPerformanceCounter(&n);
+        stepMs[i] = double(n.QuadPart - tPrev.QuadPart) * 1000.0 / double(tf.QuadPart);
+        tPrev = n;
+    };
     // MPO buster: hide strictly AFTER the identity park below would be wrong - the park writes
     // identity while the game may still be mid-demotion-return; hiding HERE (before the park)
     // is also wrong for the same reason in reverse. Order chosen: park first (identity is a
@@ -383,22 +393,27 @@ void TransformModel::setActive(bool active) {
         ShowSystemCursorMarshalled(TRUE);
         cursorHidden_ = false;
     }
+    step(0);   // sprite hide + system cursor show
     // Unconditional (and idempotent): setActive(true) pre-blanks BEFORE the context exists, so
     // a session that never entered the draw branch (cursorVisibility=never, hide-hotkey) still
     // has blanked system cursors to give back even though cursorHidden_ never went true.
     if (blanker_) {
         blanker_->restore();
+        step(1);   // system cursor shapes restored
         // Windows repaints the pointer plane only on the next cursor EVENT, so a restored-but-
         // still pointer stays invisible until the hand moves (field-verified). A 1px nudge and
         // back generates that event invisibly.
         POINT np;
         if (GetCursorPos(&np)) { SetCursorPos(np.x + 1, np.y); SetCursorPos(np.x, np.y); }
     }
+    step(2);   // pointer nudge
     edgeClipManage(false);             // give the clip back before the session winds down
+    step(3);
     idleSinceMs_ = GetTickCount64();   // start the release countdown (idleTick)
-    wind::Log(wind::LogLevel::Info, "txsession", "session end maxLevel=%.2f", sessionMaxLevel_);
+    const double endMaxLevel = sessionMaxLevel_;
     if (traceOn_) traceDump();
     sessionMaxLevel_ = 0.0;
+    step(4);   // trace hand-off
     // Park at EXACT identity right here, at the end of the zoom-out. Returning DWM to identity
     // costs a ~150ms compositor stall no matter when it happens (measured), so pay it while the
     // user is still in zoom motion and expects movement - not 1.2s later while they are playing.
@@ -408,6 +423,7 @@ void TransformModel::setActive(bool active) {
     // idle - see cfg.txRestLevel for why and what it costs. 1.0 is the shipped behaviour.
     host_.setTransform((float)restLevel_, 0, 0, 0, 0, false);
     QueryPerformanceCounter(&pb);
+    step(5);   // identity park
     // The park applied 1.0 outside writeTransform, so sync the cached level: a stale lastLevel_
     // here anchored the step cap's next session at the trailing zoom-out value (#219 bounce).
     lastLevel_ = restLevel_; lastRequestedLevel_ = restLevel_;
@@ -418,13 +434,22 @@ void TransformModel::setActive(bool active) {
         wind::Log(wind::LogLevel::Info, "transform", "identity park took %.1fms", parkMs);
     RECT full{ 0, 0, mon_.w, mon_.h };
     host_.setInputTransform(false, full, full);   // input mapping back to identity at 1x
+    step(6);
     // Stomp-guard expectation (issue #217): the slot should now read DISABLED. Kept valid across
     // the idle so the next session's first tick catches a rect stranded meanwhile (e.g. a native
     // Magnifier killed while zoomed) and overwrites it immediately.
     ixExpectedValid_ = true;
     ixExpectedOn_ = false;
     pin_.hide();
+    step(7);
     mpoGhost_.hide();   // after the identity park: re-promotion happens against a parked value
+    step(8);
+    const double total = double(tPrev.QuadPart - t0.QuadPart) * 1000.0 / double(tf.QuadPart);
+    wind::Log(wind::LogLevel::Info, "txsession",
+              "session end maxLevel=%.2f teardown=%.2fms (cursorShow=%.2f blankerRestore=%.2f nudge=%.2f "
+              "clip=%.2f trace=%.2f park=%.2f ix=%.2f pin=%.2f ghost=%.2f)",
+              endMaxLevel, total, stepMs[0], stepMs[1], stepMs[2], stepMs[3], stepMs[4], stepMs[5],
+              stepMs[6], stepMs[7], stepMs[8]);
 }
 
 void TransformModel::idleTick() {
@@ -1109,9 +1134,26 @@ void TransformModel::shutdown() {
     ready_ = false;
 }
 
-// Dump the per-tick trace. Diagnostic only: runs at session end, never on the tick path.
+// Dump the per-tick trace (txTrace=1, diagnostic). Called at session end ON the tick thread, so it
+// only copies the ring; a below-normal thread writes the file (#361: no disk I/O on the tick).
 void TransformModel::traceDump() {
     if (traceHead_ == 0) return;
+    const int n = traceHead_ < kTraceCap ? traceHead_ : kTraceCap;
+    const int start = traceHead_ < kTraceCap ? 0 : (traceHead_ % kTraceCap);
+    auto* rows = new std::vector<TxTick>();
+    rows->reserve((size_t)n);
+    for (int i = 0; i < n; ++i) rows->push_back(traceBuf_[(start + i) % kTraceCap]);
+    traceHead_ = 0;
+    HANDLE th = CreateThread(nullptr, 0, [](LPVOID p) -> DWORD {
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+        std::unique_ptr<std::vector<TxTick>> v(static_cast<std::vector<TxTick>*>(p));
+        WriteTraceCsv(*v);
+        return 0;
+    }, rows, 0, nullptr);
+    if (th) CloseHandle(th); else delete rows;
+}
+
+void TransformModel::WriteTraceCsv(const std::vector<TxTick>& rows) {
     const std::wstring dir = wind::ResolveLogDir();
     wchar_t path[MAX_PATH];
     // Forward slash on purpose: Win32 file APIs accept it, and it keeps this string free
@@ -1121,11 +1163,8 @@ void TransformModel::traceDump() {
     FILE* f = nullptr;
     if (_wfopen_s(&f, path, L"w") != 0 || !f) return;
     fprintf(f, "ms,dt,level,txX,offX,spriteX,spriteY,wrote,changed,ramping,warm\n");
-    const int n = traceHead_ < kTraceCap ? traceHead_ : kTraceCap;
-    const int start = traceHead_ < kTraceCap ? 0 : (traceHead_ % kTraceCap);
     double prev = 0.0;
-    for (int i = 0; i < n; ++i) {
-        const TxTick& e = traceBuf_[(start + i) % kTraceCap];
+    for (const TxTick& e : rows) {
         const double dt = prev > 0.0 ? (e.ms - prev) : 0.0;
         prev = e.ms;
         fprintf(f, "%.3f,%.3f,%.6f,%d,%d,%d,%d,%d,%d,%d,%d\n",
@@ -1133,8 +1172,7 @@ void TransformModel::traceDump() {
                 (int)e.wrote, (int)e.changed, (int)e.ramping, (int)e.warm);
     }
     fclose(f);
-    traceHead_ = 0;
-    wind::Log(wind::LogLevel::Info, "txtrace", "wrote %d ticks", n);
+    wind::Log(wind::LogLevel::Info, "txtrace", "wrote %d ticks", (int)rows.size());
 }
 
 }  // namespace wind

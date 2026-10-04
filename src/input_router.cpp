@@ -479,6 +479,7 @@ static DWORD WINAPI HookThreadProc(LPVOID) {
     // the hooks, so it can never starve anything else, and it stops the whole system's input
     // waiting on us (a late hook thread delays input for EVERY process, not just ours).
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+    SetThreadDescription(GetCurrentThread(), L"Wind input hooks");   // names it in WPA (#361)
     HMODULE hmod = GetModuleHandleW(nullptr);
     g_mouseHook = SetWindowsHookExW(WH_MOUSE_LL, MouseProc, hmod, 0);
     // Keyboard hook shares this thread (keystrokes are far rarer than mouse moves, so it adds no
