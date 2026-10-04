@@ -90,7 +90,11 @@ is hidden and a stand-in drawn.
   keeps the originals. It first reloads the user's scheme, so a previously killed Wind's blanks are
   never captured as originals. `MagShowSystemCursor(FALSE)` covers app-custom cursors. The blank
   runs before the magnification context exists, because each swap under a live context costs a
-  re-composite.
+  re-composite. The swaps run in order on the `Wind cursor swaps` worker thread (#363): the restore
+  is a full `SPI_SETCURSORS` scheme reload (8 ms median, up to 90 ms under load) and the blank 14
+  `SetSystemCursor` calls, which froze the zoom-in and the 1x landing frame on the tick thread.
+  The zoom-out repaint nudge rides on the worker after the restore. `restoreSync()` waits (the
+  input-panel clip nudge, shutdown); the crash filter restores directly.
 - **`CursorSprite`** (`src/cursor_sprite.*`) is a small layered window painting the current shape,
   or the Inspect crosshair. It sits at the lens point in desktop coordinates, so DWM shows it at the
   view's centre, magnified. `keepOnTop()` re-asserts topmost only when displaced.

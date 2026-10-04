@@ -400,13 +400,16 @@ void TransformModel::setActive(bool active) {
     // a session that never entered the draw branch (cursorVisibility=never, hide-hotkey) still
     // has blanked system cursors to give back even though cursorHidden_ never went true.
     if (blanker_) {
-        blanker_->restore();
-        step(1);   // system cursor shapes restored
         // Windows repaints the pointer plane only on the next cursor EVENT, so a restored-but-
         // still pointer stays invisible until the hand moves (field-verified). A 1px nudge and
-        // back generates that event invisibly.
-        POINT np;
-        if (GetCursorPos(&np)) { SetCursorPos(np.x + 1, np.y); SetCursorPos(np.x, np.y); }
+        // back generates that event invisibly. It must FOLLOW the restore, which runs on the
+        // blanker's worker (#363: the scheme reload froze the 1x landing frame for 8-90 ms), so
+        // the nudge rides along on the worker too.
+        blanker_->restore([] {
+            POINT np;
+            if (GetCursorPos(&np)) { SetCursorPos(np.x + 1, np.y); SetCursorPos(np.x, np.y); }
+        });
+        step(1);   // system cursor restore queued (it was the whole teardown cost)
     }
     step(2);   // pointer nudge
     edgeClipManage(false);             // give the clip back before the session winds down
@@ -945,7 +948,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         // at zoom-in without cursorHidden_, so a panel open at zoom-in stayed invisible (field).
         if (cursorHidden_) { ShowSystemCursorMarshalled(TRUE); cursorHidden_ = false; }
         if (blanker_ && blanker_->blanked()) {
-            blanker_->restore();
+            blanker_->restoreSync();   // the clip nudge below needs the restored shape in place
             // The plane repaints only on the next cursor EVENT, and a same-position SetCursorPos is
             // not one; the pointer is pinned by its 1px clip, so nudge the clip a pixel and back
             // (review #284). The weld above has already placed the pin this frame.
@@ -1130,7 +1133,7 @@ bool TransformModel::retarget(const MonitorTarget& m) {
 void TransformModel::shutdown() {
     teardownMag();
     if (sprite_) sprite_->destroy();
-    if (blanker_) blanker_->restore();
+    if (blanker_ && blanker_->blanked()) blanker_->restoreSync();   // never exit with blank cursors
     pin_.destroy();
     mpoGhost_.destroy();
     ready_ = false;

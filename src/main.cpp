@@ -64,6 +64,9 @@ static void EnsureCompositePulse() {
     if (!g_compEvt) return;
     HANDLE th = CreateThread(nullptr, 0, [](LPVOID) -> DWORD {
         SetThreadDescription(GetCurrentThread(), L"Wind composite pulse");
+        // HIGHEST like the tick it paces (#363): at normal priority a build starved it and the
+        // tick waited on a late pulse (pulse-thread-late hitches). It only blocks in DwmFlush.
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
         for (;;) {
             if (DwmFlush() != S_OK) Sleep(50);   // DWM restarting: back off, keep trying
             DWM_TIMING_INFO ti{}; ti.cbSize = sizeof(ti);
