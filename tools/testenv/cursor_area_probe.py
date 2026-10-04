@@ -1,18 +1,18 @@
-# CURSOR OPTICAL PROBE (issue #229, from Max's black-backdrop idea).
+# CURSOR OPTICAL PROBE (issue #229, from the owner's black-backdrop idea).
 #
 # Over a solid BLACK backdrop the only bright thing on screen is the cursor, so a brightness
 # threshold isolates it and we can measure two things per frame:
 #
 #   area     - the count of bright pixels. Catches a genuine SECOND cursor drawn at the same time,
 #              which adds pixels even when the two blobs partly overlap.
-#   centroid - where those pixels are. Catches the artifact Max actually describes: the cursor
+#   centroid, where those pixels are. Catches the artifact the field report describes: the cursor
 #              FLICKERING between its centred position and a lagging one, fast enough to read as
 #              two cursors. Only one is drawn per frame, so the area never moves - which is exactly
 #              what the first version measured (1.02 flat) and why it needed this second channel.
 #
 # The flicker signature is an oscillation on top of smooth motion, so the analyzer works on the
 # SECOND difference of the centroid: a hand moving smoothly has a small one, a position alternating
-# between two places has a large one that reverses sign every frame. Max reports the effect is
+# between two places has a large one that reverses sign every frame. The field report says the effect is
 # inertia-based - faster movement, more lag - so the driver sweeps pan speed and the relationship
 # between speed and oscillation is itself part of the evidence.
 #

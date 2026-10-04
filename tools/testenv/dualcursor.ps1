@@ -1,8 +1,8 @@
-# CURSOR FLICKER / DUAL-CURSOR TEST (issue #229, from Max's black-backdrop idea). Black backdrop,
+# CURSOR FLICKER / DUAL-CURSOR TEST (issue #229, from the owner's black-backdrop idea). Black backdrop,
 # zoom in, hold still to establish a baseline, then pan at three speeds while capturing.
 #
 # Two artifacts, two channels. A genuine SECOND cursor drawn at the same time adds bright pixels,
-# so it shows in AREA. The thing Max actually describes - the cursor lagging the hand and flicking
+# so it shows in AREA. The thing the field report describes, the cursor lagging the hand and flicking
 # between the lagged and centred positions fast enough to look doubled - draws only one cursor per
 # frame, so area stays flat and what moves is POSITION. The first version measured area alone and
 # read 1.02 on every configuration including the known-bad ones, which is why position was added.
@@ -65,7 +65,7 @@ for ($i = 1; $i -le $Rounds; $i++) {
   foreach ($spec in $Configs) {
     $label = if ($spec -eq '') { '(default)' } else { $spec }
     Use-Config $spec
-    # SPEED SWEEP. Max reports the lag is inertia-based, so the artifact should grow with hand
+    # SPEED SWEEP. The field report says the lag is inertia-based, so the artifact should grow with hand
     # speed - a run at one speed cannot show that, and the relationship is the evidence.
     foreach ($sp in @(4, 10, 24)) {
       Reset-Zoom

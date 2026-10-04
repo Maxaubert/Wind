@@ -2,7 +2,7 @@
 // WindTray.exe (issue #291): the tray icon and its flyout (#313), in a process WITHOUT UIAccess so
 // the flyout stacks like any app's window (below the magnified cursor and the Snipping Tool overlay). Wind.exe
 // starts it with its PID; the helper exits when that process does. See
-// docs/superpowers/specs/2026-09-29-tray-process-design.md.
+// docs/specs/2026-09-29-tray-process-design.md.
 #include <windows.h>
 #include <string>
 

@@ -8,17 +8,15 @@ TEST_CASE("model defaults to hybrid (the product default, 'Auto' in the UI)") {
     CHECK(c.model == "hybrid");
 }
 
-TEST_CASE("model=magnify (System, no longer offered) reads as Auto") {
-    Config c = ParseConfig("model=magnify\n");
-    CHECK(c.model == "hybrid");
+TEST_CASE("model=magnify (the retired engine) and unknown models read as hybrid") {
+    CHECK(ParseConfig("model=magnify\n").model == "hybrid");
+    CHECK(ParseConfig("model=bogus\n").model == "hybrid");
 }
 
-TEST_CASE("magnifyStep parses and clamps to Windows' 5..400 range") {
-    CHECK(ParseConfig("").magnifyStep == 50);              // shipped default
-    CHECK(ParseConfig("magnifyStep=25\n").magnifyStep == 25);
-    CHECK(ParseConfig("magnifyStep=1\n").magnifyStep == 5);
-    CHECK(ParseConfig("magnifyStep=999\n").magnifyStep == 400);
-    CHECK(ParseConfig("magnifyStep=-10\n").magnifyStep == 5);
+TEST_CASE("an old ini with retired keys still loads") {
+    Config c = ParseConfig("model=magnify\nmagnifyStep=25\ntxKeepAliveMaxLevel=0\nmaxLevel=6\n");
+    CHECK(c.model == "hybrid");
+    CHECK(c.maxLevel == doctest::Approx(6.0));
 }
 
 TEST_CASE("model=transform is a first-class model again (issue #148 revival)") {

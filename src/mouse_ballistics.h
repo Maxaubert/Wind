@@ -9,7 +9,7 @@
 //      1:1 with the desktop) and the curve only adds acceleration above that. Normalizing this way
 //      cancels the absolute DPI/refresh scaling constants (whose exact values are undocumented),
 //      so the match is robust without depending on those magic numbers.
-// See docs/superpowers/specs for the design; issue: inspect-mode speed/DPI match.
+// Issue: inspect-mode speed/DPI match (the look point pans at the desktop cursor's speed).
 namespace wind {
 
 struct BallisticsConfig {

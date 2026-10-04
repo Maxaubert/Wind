@@ -11,7 +11,7 @@ TEST_CASE("defaults when text is empty") {
     CHECK(c.diagnostics == 0);
     // Ramp step cap ships ON (issue #219): uncapped, ~15% of high-level zoom-ins stall 35-43ms
     // then snap 1.2-1.9 levels; capped at 2.5%/tick every measured ramp was even. 0 would
-    // regress the acrylic-window hitch Max reproduced.
+    // regress the acrylic-window hitch reproduced on the test machine.
     CHECK(c.txMaxStepPct == 25);
 }
 TEST_CASE("StripUiOnlyKeys drops exactly the UI-owned lines (theme toggle must not hot-reload the core)") {
@@ -477,7 +477,6 @@ TEST_CASE("the first-run ini template parses to the struct defaults (issue #274)
     CHECK(t.engineDesktop == d.engineDesktop);
     CHECK(t.engineOther == d.engineOther);
     CHECK(t.noSwallowApps == d.noSwallowApps);
-    CHECK(t.magnifyStep == d.magnifyStep);
     CHECK(t.multiMonitor == d.multiMonitor);
     CHECK(t.cropCapture == d.cropCapture);
     CHECK(t.gpuPriority == d.gpuPriority);

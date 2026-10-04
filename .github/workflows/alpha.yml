@@ -85,22 +85,14 @@ jobs:
           "path=$dst" >> $env:GITHUB_OUTPUT
           "sha256=$((Get-FileHash $dst -Algorithm SHA256).Hash)" >> $env:GITHUB_OUTPUT
 
-      # Same split as release.yml: a private source repo cannot serve downloadable assets,
-      # so alphas are published to the public releases repo when RELEASES_TOKEN is set.
       - name: Publish the pre-release
         shell: pwsh
         env:
-          GH_TOKEN: ${{ secrets.RELEASES_TOKEN || github.token }}
-          TARGET_REPO: ${{ secrets.RELEASES_TOKEN && 'Maxaubert/Wind-releases' || github.repository }}
-          HAS_TOKEN: ${{ secrets.RELEASES_TOKEN != '' }}
-          IS_PRIVATE: ${{ github.event.repository.private }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           $ErrorActionPreference = 'Continue'
           $PSNativeCommandUseErrorActionPreference = $false
-          # See release.yml: alphas stay in this private repo until RELEASES_TOKEN is set.
-          if ($env:IS_PRIVATE -eq 'true' -and $env:HAS_TOKEN -ne 'true') {
-            Write-Host "::notice::Publishing to the PRIVATE repo. Set RELEASES_TOKEN to publish to Maxaubert/Wind-releases instead."
-          }
           $tag  = '${{ steps.ver.outputs.tag }}'
           $exe  = '${{ steps.asset.outputs.path }}'
           $note = '${{ inputs.note }}'
@@ -120,7 +112,7 @@ jobs:
           Unsigned, like the stable build - SmartScreen will warn.
           "@
           $body | Set-Content notes.md -NoNewline
-          gh release create $tag $exe --repo $env:TARGET_REPO --prerelease --title "Wind ${{ steps.ver.outputs.alpha }}" --notes-file notes.md
+          gh release create $tag $exe --prerelease --title "Wind ${{ steps.ver.outputs.alpha }}" --notes-file notes.md
           if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
 
       # Alphas are disposable and accumulate fast. Keep the newest few so a bisect across recent
@@ -128,19 +120,19 @@ jobs:
       - name: Prune old alphas
         shell: pwsh
         env:
-          GH_TOKEN: ${{ secrets.RELEASES_TOKEN || github.token }}
-          TARGET_REPO: ${{ secrets.RELEASES_TOKEN && 'Maxaubert/Wind-releases' || github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           $ErrorActionPreference = 'Continue'
           $PSNativeCommandUseErrorActionPreference = $false
           $keep = 5
-          $all = gh release list --repo $env:TARGET_REPO --limit 100 --json tagName,isPrerelease,createdAt | ConvertFrom-Json
+          $all = gh release list --limit 100 --json tagName,isPrerelease,createdAt | ConvertFrom-Json
           $alphas = @($all | Where-Object { $_.isPrerelease -and $_.tagName -like '*-alpha.*' } |
                       Sort-Object { [datetime]$_.createdAt } -Descending)
           if ($alphas.Count -le $keep) { "nothing to prune ($($alphas.Count) alphas)"; exit 0 }
           foreach ($old in $alphas[$keep..($alphas.Count-1)]) {
             "pruning $($old.tagName)"
-            gh release delete $old.tagName --repo $env:TARGET_REPO --yes --cleanup-tag
+            gh release delete $old.tagName --yes --cleanup-tag
           }
 
       - name: Summary

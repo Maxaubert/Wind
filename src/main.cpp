@@ -29,7 +29,6 @@
 #include "color_filter.h"
 #include "hdr_info.h"   // issue #288
 #include "cursor_tint.h"   // tinted pointer at 1x (#288)
-#include "magnify_model.h"
 #include "transform_model.h"
 #include "input_router.h"
 #include "cursor_mapper.h"
@@ -841,23 +840,22 @@ static bool RenderOverlayShown(TickState& t) {
     return rm && rm->visible();
 }
 static void UpdateColorFilter(TickState& t, bool zoomedNow, bool renderSession, PresentExtras* ex) {
-    const bool magnify = t.model && t.model->selfDrivenZoom();   // native Magnifier has its own filters
     (void)zoomedNow;   // applies zoomed and at 1x alike (owner decision 2026-09-29)
     const double w = t.cfg.colorWarmPct / 100.0, d = t.cfg.colorDimPct / 100.0;
     // Toggling HDR is not guaranteed to raise WM_DISPLAYCHANGE (and may settle after it), so while a
     // filter is on the state is re-read once a second. A DisplayConfig query is microseconds (the
     // render engine runs the same kind of query at 4 Hz, CLAUDE.md), so this is not a tick cost.
-    if (!magnify && (w > 0.0 || d < 1.0)) {
+    if (w > 0.0 || d < 1.0) {
         static unsigned long long hdrReadMs = 0;
         const unsigned long long now = GetTickCount64();
         if (now - hdrReadMs >= 1000) { hdrReadMs = now; g_hdrOn.store(PrimaryHdrOn()); }
     }
     // The render shader works on sRGB-encoded values (after its HDR->SDR step), in SDR and HDR alike.
-    const wind::ColorMatrix enc = magnify ? wind::IdentityColorMatrix() : wind::BuildColorMatrix(w, d, false);
+    const wind::ColorMatrix enc = wind::BuildColorMatrix(w, d, false);
     const bool inShader = renderSession && !wind::IsIdentity(enc);
     if (ex) { ex->colorOn = inShader; ex->color = enc; }
-    const wind::ColorMatrix dwm = (inShader || magnify) ? wind::IdentityColorMatrix()
-                                                        : wind::BuildColorMatrix(w, d, g_hdrOn.load(std::memory_order_relaxed));
+    const wind::ColorMatrix dwm = inShader ? wind::IdentityColorMatrix()
+                                           : wind::BuildColorMatrix(w, d, g_hdrOn.load(std::memory_order_relaxed));
     g_color.apply(dwm, !wind::IsIdentity(dwm));
 }
 
@@ -867,9 +865,7 @@ static void UpdateColorFilter(TickState& t, bool zoomedNow, bool renderSession, 
 // reload the scheme), and a fullscreen app in front (not the desktop) keeps the pristine pointers.
 static wind::CursorTint g_tint;
 static void UpdateCursorTint(TickState& t) {
-    const bool magnify = t.model && t.model->selfDrivenZoom();
-    const wind::ColorMatrix enc = magnify ? wind::IdentityColorMatrix()
-        : wind::BuildColorMatrix(t.cfg.colorWarmPct / 100.0, t.cfg.colorDimPct / 100.0, false);
+    const wind::ColorMatrix enc = wind::BuildColorMatrix(t.cfg.colorWarmPct / 100.0, t.cfg.colorDimPct / 100.0, false);
     if (wind::IsIdentity(enc)) { g_tint.restore(true); return; }
     static unsigned long long checkedMs = 0;
     static bool fsApp = false;
@@ -1155,10 +1151,9 @@ static void RunTick(TickState& t) {
     // The tell needs no extra bookkeeping: while the hook is alive it SWALLOWS every bound key, so
     // GetAsyncKeyState can NEVER see one. Poller sees a bound key held + hook still reports it up
     // => the hook is gone. The dwell keeps the ordinary press-before-callback race from
-    // false-positiving; the magnify model is excluded outright because its hook deliberately skips
-    // the injected chords it drives Windows Magnifier with (those are unswallowed by design).
+    // false-positiving.
     constexpr unsigned long long kKbHookDeadMs = 250;
-    if (g_input.kbHookActive() && g_input.swallowEnabled() && !g_input.ignoreInjectedKeys()) {
+    if (g_input.kbHookActive() && g_input.swallowEnabled()) {
         const int watched[] = { t.cfg.zoomInVk, t.cfg.zoomInVk2, t.cfg.zoomOutVk, t.cfg.zoomOutVk2,
                                 t.cfg.recenterVk, t.cfg.cursorLockVk,
                                 t.cfg.panLeftVk, t.cfg.panRightVk, t.cfg.panUpVk, t.cfg.panDownVk };
@@ -1232,8 +1227,7 @@ static void RunTick(TickState& t) {
     // With the modifier down only binds that include it hold-zoom; the others are quick-zoom taps.
     t.zoom.setDirection(modKeyDown ? ResolveDirection(inQz, outQz) : ResolveDirection(inHeld, outHeld));
     // The wheel zooms at the user's zoom speeds (a notch = 0.1 s of holding the bind).
-    if (wheelSteps != 0 && !t.model->selfDrivenZoom())   // native Magnifier gets its own notches below
-        t.zoom.wheelNotches(wheelSteps);
+    if (wheelSteps != 0) t.zoom.wheelNotches(wheelSteps);
     // Clamp the dt fed to the zoom so a single long tick (cold first capture, alt-tab, any hitch)
     // can't jump the zoom level mid-ramp - it should always ease in/out at a steady rate regardless
     // of frame-time spikes. Raw dt is kept below for the diagnostics block (which must see true
@@ -1257,38 +1251,20 @@ static void RunTick(TickState& t) {
     // block below freezes the real cursor (1px ClipCursor) and roams a raw-driven look point.
     bool lockDown = comboHeld(t.cfg.cursorLockVk, t.cfg.cursorLockMods);
     if (lockDown && !t.lockKeyWasDown) {
-        if (t.model->supportsInspect()) {
-            // Snapshot cursor visibility at the toggle edge, BEFORE this tick's active block hides it,
-            // together with whether WE are already hiding it. A not-showing cursor that we did not
-            // hide is the mouselook-gameplay tell for game-inspect (issue #144) - true at 1x and, in
-            // a transform FOLLOW session, true while zoomed as well. Both are read here so the pair
-            // describes the same instant.
-            CURSORINFO ci{}; ci.cbSize = sizeof(ci);
-            t.inspectCursorWasShowing = GetCursorInfo(&ci) ? (ci.flags & CURSOR_SHOWING) != 0 : true;
-            t.inspectMagHidCursor = t.cursorHiddenByUs;
-            t.cursorLock.toggle();
-        } else {
-            // Magnify model: Windows Magnifier owns the view and cursor; no freeze+reticle exists.
-            wind::Log(wind::LogLevel::Info, "inspect", "Inspect not available in the magnify model");
-        }
+        // Snapshot cursor visibility at the toggle edge, BEFORE this tick's active block hides it,
+        // together with whether WE are already hiding it. A not-showing cursor that we did not
+        // hide is the mouselook-gameplay tell for game-inspect (issue #144): true at 1x and, in
+        // a transform FOLLOW session, true while zoomed as well. Both are read here so the pair
+        // describes the same instant.
+        CURSORINFO ci{}; ci.cbSize = sizeof(ci);
+        t.inspectCursorWasShowing = GetCursorInfo(&ci) ? (ci.flags & CURSOR_SHOWING) != 0 : true;
+        t.inspectMagHidCursor = t.cursorHiddenByUs;
+        t.cursorLock.toggle();
     }
     t.lockKeyWasDown = lockDown;
     // Tell the mouse hook whether Inspect is on (so it swallows real clicks and routes them to the look
     // point - see the commitButton drain in the active block). Published every tick (also clears on off).
     g_input.state().inspectActive.store(t.cursorLock.locked(), std::memory_order_relaxed);
-    // Magnify model drives its own zoom natively (Windows Magnifier, wheel notches): feed it the
-    // held direction and bypass the ENTIRE level pipeline below - the ZoomController stays at 1x,
-    // the overlay never activates, quick zoom / recenter / mapper never run. (The side-button
-    // diagnostics block at the bottom is skipped too; the magnify category logs direction edges.)
-    if (t.model->selfDrivenZoom()) {
-        int rdx, rdy; g_input.drainRaw(rdx, rdy);            // keep the raw accumulator drained
-        const int nativeDir = (inHeld ? 1 : 0) - (outHeld ? 1 : 0);
-        t.model->nativeZoomTick(nativeDir, t.cfg);
-        t.model->nativeWheelNotches(wheelSteps);   // every wheel notch becomes one Magnifier notch (#285)
-        t.prevInHeld = inHeld; t.prevOutHeld = outHeld;
-        t.prevLvl = 1.0; t.prevActive = false; t.prevInspect = false;
-        return;
-    }
     // Hide-cursor hotkey is registered via RegisterHotKey (WndProc WM_HOTKEY toggles cursorHidden);
     // this both suppresses the key from reaching other apps and gives rising-edge semantics for
     // free (MOD_NOREPEAT). No polled check needed here.
@@ -1320,7 +1296,6 @@ static void RunTick(TickState& t) {
         const std::string& mdl = t.cfg.model;
         ts_.engine = mdl == "transform" ? wind::TrayEngine::Transform
                    : mdl == "render"    ? wind::TrayEngine::Render
-                   : mdl == "magnify"   ? wind::TrayEngine::System
                                         : wind::TrayEngine::Advanced;
         ts_.panning = lvl > 1.001;
         wind::PublishTrayStatus(g_trayBlock, ts_);
@@ -1438,7 +1413,7 @@ static void RunTick(TickState& t) {
             t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y);   // virtual -> local monitor coords
             t.lastSetVirtual = pt;        // baseline for the OS-cursor delta (first delta = 0)
             t.detector.reset();           // start free
-            // Warp-lock seeding (issue #221 round 3, Max: any motion-based tell still needs a
+            // Warp-lock seeding (issue #221 round 3, field report: any motion-based tell still needs a
             // wiggle as evidence). Zooming in over a COVERING app whose cursor is already
             // hidden by the APP is mouselook with near-certainty (the game-inspect tell, valid
             // at this instant because this session has hidden nothing yet) - start LOCKED so
@@ -2575,7 +2550,7 @@ static void RunTick(TickState& t) {
         s.level  = lvl;
         auto* rmT = dynamic_cast<RenderModel*>(t.model);
         auto* tmT = dynamic_cast<TransformModel*>(t.model);
-        s.engine = rmT ? 'R' : (tmT ? 'T' : (t.model && t.model->selfDrivenZoom() ? 'M' : '-'));
+        s.engine = rmT ? 'R' : (tmT ? 'T' : '-');
         s.mapX = t.mapper.centerX(); s.mapY = t.mapper.centerY();
         s.monX = t.mon.x; s.monY = t.mon.y;
         s.curX = t.lastSetVirtual.x; s.curY = t.lastSetVirtual.y;
@@ -2774,8 +2749,8 @@ static void RestoreInputState() {
 static void AtExitRestore() { RestoreInputState(); }
 
 // Crash safety net installed BEFORE the magnifier model is constructed. RenderModel hides the OS
-// cursor via the process-scoped Magnification API (auto-reverts on process death), and the magnify
-// model never touches the cursor, but the SPI_SETCURSORS reload is kept as a general heal for any
+// cursor via the process-scoped Magnification API (auto-reverts on process death), but the
+// SPI_SETCURSORS reload is kept as a general heal for any
 // stale cursor scheme a crashed predecessor left behind. Body mirrors render_engine.cpp's
 // CursorRestoreFilter (minimal, allocation-light, one-shot via InterlockedExchange, returns
 // EXCEPTION_CONTINUE_SEARCH so the default handler still reports the crash). RenderEngine::
@@ -2982,21 +2957,14 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     // Target monitor for this session: the cursor's monitor when multiMonitor is on, else the
     // primary. The first zoom-in re-checks and retargets if the cursor moved to another monitor.
-    // The magnify model has no overlay of its own (Windows Magnifier owns the view), so monitor
-    // targeting is a documented no-op there; it just gets the primary.
     MonitorTarget startupMon = (cfg.model == "render" && cfg.multiMonitor != 0)
                                    ? MonitorUnderCursor() : PrimaryMonitor();
 
-    // --- Magnifier model (render: DXGI Desktop Duplication + D3D11 overlay; magnify: drive the
-    // native Windows Magnifier via injected Win+Plus/Minus, the DRM-safe fallback) ---
+    // --- Magnifier model (render: DXGI Desktop Duplication + D3D11 overlay; transform: DWM
+    // fullscreen transform; hybrid: both, picked per zoom-in) ---
     std::unique_ptr<IMagnifierModel> model;       // primary engine (also the hybrid's render half)
     std::unique_ptr<IMagnifierModel> model2;      // hybrid only: the transform half
-    if (cfg.model == "magnify") {
-        model = std::make_unique<MagnifyModel>();
-        // Our injected chords must never be swallowed/tracked by our own keyboard hook
-        // (NumPad +/- are bindable zoom keys; see InputRouter::setIgnoreInjectedKeys).
-        g_input.setIgnoreInjectedKeys(true);
-    } else if (cfg.model == "transform") {
+    if (cfg.model == "transform") {
         // Revived for issue #148: the DWM-internal fullscreen transform - zero app presents, so
         // it holds compositor-rate smoothness over a heavy game where every overlay present path
         // throttles (measured). Cursor is anchored, not centered (documented model tradeoff).
@@ -3161,7 +3129,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     ts.lastMtime = ConfigMTime(iniPath);
     // Seed the UI-only-change fingerprint from the CURRENT ini, or the first settings write
     // after launch always reloads (empty fingerprint = "unknown") - the first theme flip of a
-    // session still collapsed the zoom (Max field report on the StripUiOnlyKeys fix).
+    // session still collapsed the zoom (field report on the StripUiOnlyKeys fix).
     ts.lastCoreIni = wind::StripUiOnlyKeys(wind::ReadTextFile(iniPath));
     // Watch the directory holding the ini so config hot-reload doesn't stat magnifier.ini every
     // second on the render thread (see RunTick). LAST_WRITE catches in-place saves; FILE_NAME

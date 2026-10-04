@@ -5,7 +5,7 @@
 # reverses through zero velocity. Reported as more noticeable in games (DOOM), and absent under
 # native Windows Magnifier.
 #
-# WHY A NEW PROBE. tools/dwm_wake_probe.ps1 and tools/mag_wake_latency.ps1 already asked a version
+# WHY A NEW PROBE. Two earlier desktop probes (removed; see git history) already asked a version
 # of this and came back clean (DWM 6.94ms median across a 3s idle, zero missed frames; wake write
 # latency +0.59ms). Both drove the magnifier with SendInput ON THE DESKTOP. Neither could see a
 # game: a fullscreen game runs on an independent-flip / MPO plane, and the cost of waking DWM's
@@ -388,8 +388,7 @@ if ($FocusExe) {
 
 # Native Windows Magnifier, for the matched comparison. Same full-screen magnification damage as
 # Wind, driven by the same injected hand - which an unzoomed control cannot give us. The user's
-# Magnifier registry is snapshotted and put back in the finally block below; Wind keeps its own
-# backup of these keys for its magnify model, so leaving them modified would poison that too.
+# Magnifier registry is snapshotted and put back in the finally block below.
 $magBackup = $null
 $magKey = 'HKCU:\Software\Microsoft\ScreenMagnifier'
 if ($Native) {

@@ -1,5 +1,5 @@
 # Ramp-shimmer probe (issue #229): measures how much the CURSOR's rendered pixels churn while
-# the zoom level changes, which is the artifact Max reports on the high-resolution cursor.
+# the zoom level changes, which is the artifact the field report describes on the high-resolution cursor.
 #
 # WHY THIS AND NOT THE GEOMETRY METRIC. The suite's ramp check says the sprite holds the screen
 # centre to 0.6px during a ramp, with smoothing on or off - so the shake is not placement. What

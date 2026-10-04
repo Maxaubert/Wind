@@ -752,7 +752,7 @@ bool OpenFlyout() {
         DestroyWindow(s->hwnd);        // WM_DESTROY releases and frees
         return false;
     }
-    // No tooltips: users learn the icons (Max, 2026-10-02).
+    // No tooltips: users learn the icons (owner decision).
     {
         BOOL on = TRUE;   // Windows "Show animations in Windows": off = no animation at all
         if (SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &on, 0)) s->animOn = on != FALSE;

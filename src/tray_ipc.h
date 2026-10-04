@@ -74,7 +74,7 @@ inline TrayStatus ReadTrayStatus(const TrayShared* b) {
     if (!TrayBlockValid(b)) return s;
     s.level = b->level.load(std::memory_order_relaxed);
     const int32_t e = b->engine.load(std::memory_order_relaxed);
-    s.engine = (e >= 0 && e <= (int32_t)TrayEngine::System) ? (TrayEngine)e : TrayEngine::Advanced;
+    s.engine = (e >= 0 && e <= (int32_t)TrayEngine::Render) ? (TrayEngine)e : TrayEngine::Advanced;
     s.panning = b->panning.load(std::memory_order_relaxed) != 0;
     return s;
 }

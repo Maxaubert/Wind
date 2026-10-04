@@ -1,5 +1,5 @@
 <script>
-  // Theme picker (mockup option A, Max 2026-10-02): ONE row of mini window preview cards with the theme name
+  // Theme picker (mockup option A, owner decision): ONE row of mini window preview cards with the theme name
   // under each and the selected card outlined. There are four themes, so they always fit: no scrolling, no
   // arrow buttons, no edge fades. Left/Right (and Up/Down, Home, End) move the selection and apply it.
   // Each swatch is a tiny window drawn with that theme's real tokens: it is its own .wnd element carrying

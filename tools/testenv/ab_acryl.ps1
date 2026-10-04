@@ -4,7 +4,7 @@
 # rate per 1000 ticks on the three acrylic scenarios plus the solid control, which is the number
 # the defect is stated in.
 #
-#   powershell -File tools\testenv\ab_acryl.ps1 -Configs "txMinOffsetPx=2","txKeepAliveMaxLevel=0","" -Rounds 3
+#   powershell -File tools\testenv\ab_acryl.ps1 -Configs "txMinOffsetPx=2","txWarmMode=0","" -Rounds 3
 param([string[]]$Configs = @(''), [int]$Rounds = 3)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib.ps1')
