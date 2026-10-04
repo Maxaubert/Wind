@@ -22,7 +22,12 @@ public:
     // The caret of the focused Java text component, screen px. False when there is none.
     bool caret(HWND javaWindow, RECT& out);
     bool loaded() const { return mod_ != nullptr; }
+    // The last successful read: which bridge call answered and the caret index (trackLog).
+    const char* lastSrc() const { return lastSrc_; }
+    int lastIndex() const { return lastIndex_; }
 private:
+    const char* lastSrc_ = "";
+    int lastIndex_ = -1;
     HMODULE mod_ = nullptr;
     std::set<std::wstring> failedDirs_;      // app folders with no usable bridge DLL (retried per folder)
     bool enabledDone_ = false;
