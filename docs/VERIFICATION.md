@@ -1,112 +1,53 @@
-# Wind manual verification
+# Release smoke checklist
 
-Build with `build.bat`, then run `Wind.exe` (it copies/creates `magnifier.ini` next
-to it on first run). Wind sits in the system tray. Then verify:
+Install the build under test, launch Wind from a normal (non-elevated) shell, and work through the
+list. Ctrl+Alt+Q quits cleanly at any time. Settings live in `%LOCALAPPDATA%\Wind\magnifier.ini`.
+`build.bat installer` already checks the installer's files, generated layout and a silent
+install/uninstall round trip (`tools\installer_check.ps1`).
 
-**Safety:** press **Ctrl+Alt+Q** anytime to quit cleanly (restores the cursor + unzooms),
-even while the render overlay covers the screen. The tray right-click -> Quit also works.
+## Install and uninstall
+- [ ] Fresh install: files in `C:\Program Files\Wind`, entry in Settings > Apps, Run value in Task Manager > Startup, tray icon after Finish.
+- [ ] The setup window is frameless, centred, the loop plays and wraps without a jump; buttons light up on hover and hit where they look.
+- [ ] Licence screen: Install stays disabled until the box is ticked; "Read the full licence" opens LICENSE.txt.
+- [ ] The progress bar sits on the drawn trough in Wind's accent colour (#5b5bd6), not Windows green.
+- [ ] Finish opens Wind only when "Open Wind now" is ticked, and that Wind is not elevated (Task Manager > Details > Elevated).
+- [ ] Upgrade while Wind runs zoomed: no "file in use" error, the OS cursor is visible afterwards. Upgrade with Settings open: WindConfig closes.
+- [ ] Uninstall keeping settings: `magnifier.ini` survives. Uninstall removing settings: it does not.
+- [ ] At 100% and 225% DPI the setup window is sharp and its hit targets line up.
 
-## Desktop
-- [ ] Hold forward (XButton2): screen zooms in smoothly (no steps), follows the cursor.
-- [ ] Hold back (XButton1): zooms out smoothly; stops at 1.0x (screen back to normal).
-- [ ] Release mid-zoom: level stays put.
-- [ ] Move the mouse while zoomed: the lens follows the cursor.
-- [ ] Quit from the tray (right-click -> Quit): screen returns to 1x (never left zoomed).
-- [ ] Edit magnifier.ini (set maxLevel=4.0), save: new max applies within ~1s.
-- [ ] Tray right-click -> "Edit config" opens magnifier.ini in Notepad.
+## Desktop zoom
+- [ ] First launch runs the guided setup; the chosen binds work.
+- [ ] Hold zoom-in: smooth ramp, no steps. Hold zoom-out: back to 1x. Release mid-zoom: the level stays.
+- [ ] Wheel zoom with the chosen modifiers; plain scrolling is unaffected.
+- [ ] Keyboard panning while zoomed; at 1x the keys reach the app.
+- [ ] Clicks, hover, drag and text selection land under the cursor while zoomed.
+- [ ] Ctrl+Alt+Q and tray Quit both leave the screen at 1x with a visible cursor.
 
-## In a borderless-fullscreen game (cursor hidden / center-locked)
-- [ ] Hold forward: the game view zooms in.
-- [ ] Move the mouse: the lens PANS even though the game hides/locks the cursor
-      (this is the core feature - Raw Input driving the lens).
-- [ ] The forward/back side buttons do not trigger anything unexpected in-game.
+## Game (borderless)
+- [ ] Zoom in a game that hides or centre-locks the cursor: the view pans with the mouse.
+- [ ] Clicks and drags in the game work while zoomed; no visible frame-rate drop while panning.
 
-## Performance
-- [ ] Task Manager: Wind CPU stays near 0% idle-zoomed; low while panning.
-- [ ] No noticeable stutter added to the game.
+## Tracking
+- [ ] Typing in Notepad, a browser and VS Code moves the view with the caret; a mouse move takes it back.
+- [ ] Caret tracking in IntelliJ or PyCharm (Java Access Bridge).
 
-## Own GPU renderer (model=render)
+## Colour
+- [ ] Warmth and Brightness change the screen at 1x and zoomed in both engines; the pointer is tinted at 1x.
+- [ ] Quitting Wind clears the filter.
 
-The own capture+Direct3D renderer (DXGI Desktop Duplication). Select with `model=render`
-in magnifier.ini; the shipped default is `model=hybrid` ("Auto" in the settings UI), which
-picks render or the DWM transform engine per zoom-in. `model=magnify` drives the native
-Windows Magnifier instead (works over DRM video like Netflix, which Desktop Duplication
-captures as black); the old `engine=mag` key was removed (issue #20).
+## Settings
+- [ ] Tray > Open Settings opens; a slider applies at once; Save and Discard behave; the engine row restarts Wind.
+- [ ] Killing the WebView2 browser process: Settings recovers with unsaved edits kept.
 
-**Auto-verified (CI/dev, via render-then-dump PNGs):**
-- D3D11 device + click-through overlay + flip-swapchain present.
-- Desktop Duplication capture (cursor excluded; overlay excluded from capture via
-  WDA_EXCLUDEFROMCAPTURE so we don't magnify our own output).
-- Sub-pixel float source-rect magnify shader (bilinear).
-- Real cursor decoded (GetCursorInfo) and drawn centered, alpha-blended, scaled by zoom.
-- Cursor hide + SetCursorPos click-sync + clean shutdown (cursor restored).
-- End-to-end: `WIND_SELFTEST=1 Wind.exe` drives the real path and dumps `wind_selftest.png`.
+## Tray flyout
+- [ ] Opens from the icon, closes on Esc and outside click; sliders, toggles and the engine dropdown apply; Quit prompts when there are unsaved changes.
 
-**Human-only checks (please verify when you return):**
-- [ ] Zoom in (model=render): exactly ONE cursor visible (not two). If two, the OS-cursor
-      hide needs the documented fallback (see KNOWN-ISSUES "Own renderer").
-- [ ] Pan while zoomed: cursor stays centered and BUTTER SMOOTH (no L-pixel hop) - the goal.
-- [ ] Content pans smoothly at high zoom (8x) - no judder.
-- [ ] Click something while zoomed: it lands where the centered cursor points.
-- [ ] DRM video (e.g. Netflix) shows BLACK in the magnified layer (known DDA limit).
-- [ ] Quit from tray: cursor + screen back to normal everywhere.
-- [ ] A/B vs model=magnify and vs Windows Magnifier for smoothness/feel.
+## Profiles
+- [ ] Create, switch and delete a profile from Settings; switch from the tray; a profile with another engine restarts Wind.
 
-## Installer (issue #213)
+## HDR
+- [ ] With Windows HDR on, zooming in and out shows no brightness step, also after moving the SDR content brightness slider.
 
-Spec `docs/superpowers/specs/2026-08-20-installer-design.md`, sources in `installer/`.
-
-**Auto-verified** by `build.bat installer`, which compiles the script and then runs
-`tools\installer_check.ps1`:
-- every `File` source the script packs exists, `/nonfatal` ones included,
-- every rectangle the screens read is present in the generated `over.nsh` (the failure a
-  rename in `over.html` causes, which a compile does not catch),
-- a silent install lands the payload, the ARP key and the Run value, and a silent uninstall
-  removes all three and KEEPS `%LOCALAPPDATA%\Wind`.
-  The install half needs an elevated shell and skips itself without one.
-
-Also rig-verified once, by probe rather than by suite:
-- the `Local\Wind_QuitRequest` handshake stops a running Wind on its own, mutex released
-  after 3 ms, no `taskkill` needed,
-- an install over a running Wind writes the clean-shutdown line
-  (`MagUninitialize -> refs=0`) to `wind-core.log`, so the polite path really ran,
-- launching through `explorer.exe` yields a NOT-elevated Wind where a plain launch from the
-  same elevated context yields an ELEVATED one.
-
-**The limit worth stating:** `/S` exercises the section, not the drawn UI, and the drawn UI
-is most of the code. Three approaches to capturing the live window failed (`PrintWindow`
-returns blank on the DIB-into-static drawing), so the screens below are human-only.
-
-**Human-only checks:**
-- [ ] Fresh install on a machine with no Wind: files in `C:\Program Files\Wind`, entry in
-      Settings > Apps, Run value in Task Manager > Startup, tray icon after Finish.
-- [ ] The window is frameless with rounded corners, centred, and the loop plays smoothly and
-      wraps without a visible jump.
-- [ ] Hover Install, Back, minimise and close: each one lights up, and the hit area matches
-      what it looks like. Drag the caption strip: the window moves.
-- [ ] Licence screen: Install/Next does nothing until the accept box is ticked. "Read the
-      full licence" opens LICENSE.txt in the default text viewer (not elevated). Going Back
-      to Welcome and forward again keeps the box's state.
-- [ ] The setup screen shows `C:\Program Files\Wind` in Consolas, in the gap left for it.
-- [ ] Toggle "Start Wind when I sign in", go forward, come Back: the box kept its state.
-- [ ] The progress bar sits ON the drawn trough, in Wind's indigo, not the Windows green.
-- [ ] The done screen's two boxes toggle, and Finish opens Wind only when "Open Wind now" is
-      ticked. The Wind it opens is NOT elevated (Task Manager > Details > Elevated column).
-- [ ] Upgrade while Wind is running AND zoomed: no "file in use" error, and the OS cursor is
-      visible afterwards. A stranded hidden cursor means the polite quit was skipped.
-- [ ] Upgrade with the Settings window open: WindConfig closes, no orphan process.
-- [ ] Uninstall, answer NO to removing settings: `%LOCALAPPDATA%\Wind\magnifier.ini` survives.
-- [ ] Uninstall, answer YES: it does not.
-- [ ] At 100% DPI and at 225%: window centred, type sharp, hit targets land where they look.
-      225% loads the 1440 overlays, 100% loads the 960 set.
-- [ ] Tray > Open Settings works after install (proves WebView2 is present or was installed).
-
-## Notes / known v1 behavior
-- Editing the config while running keeps the current zoom level, clamped into a lowered
-  maxLevel if needed; it no longer collapses to 1.0x (fixed, issue #234/#235).
-- Renderer knobs (cursorSensitivity, cursorConstantSize, bilinear) apply on restart.
-- Primary monitor by default; `multiMonitor=1` opts into following the cursor's monitor.
-  `model=magnify` still serves DRM-protected video (Netflix etc.), which Desktop Duplication
-  captures as black.
-- Recenter is unbound by default (recenterVk=0); keyboard zoom/recenter/cursorLock binds go
-  through a WH_KEYBOARD_LL hook (src/input_router.cpp).
+## DRM video
+- [ ] Netflix or another protected stream in Auto: the magnified view shows the video, not black.
+- [ ] With `model=render` the same video shows black (expected).

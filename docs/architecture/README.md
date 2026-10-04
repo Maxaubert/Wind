@@ -1,17 +1,11 @@
-# Wind Architecture
+# Wind architecture
 
-The developer book for Wind, a lightweight standalone fullscreen magnifier for Windows. These
-chapters are the canonical description of how Wind works, end to end: read them in order for a
-guided tour, or jump straight to the subsystem you are touching. Historical design specs and
-field investigations are linked from each chapter as evidence; when this book and an old spec
-disagree, the book (and above it, the code) wins.
-
-Current as of v0.10.3.
+Developer documentation for Wind. The code is authoritative; specs and findings files are history.
 
 ## The system at a glance
 
-**One paced tick loop drives two processes worth of machinery: input flows in through hooks and
-Raw Input, a pure mapper turns it into a view, and one of four engines puts that view on screen.**
+One paced tick loop in `Wind.exe` reads input from hooks and Raw Input, turns it into a view with
+pure mapper logic, and hands the view to one of two engines. Auto picks the engine per session.
 
 ```mermaid
 flowchart LR
@@ -22,48 +16,58 @@ flowchart LR
   subgraph core [Wind.exe tick loop]
     IR --> RT[RunTick\nmain.cpp]
     ZC[ZoomController] --> RT
-    CM[CursorMapper\npure view math] --> RT
-    LD[LockDetector\nfree vs game-locked] --> RT
+    CM[CursorMapper] --> RT
+    LD[LockDetector] --> RT
     CFG[(magnifier.ini\nhot reload)] --> RT
   end
   subgraph engines [Engines]
     RT --> PICK{engine pick\nengine_pick.h}
-    PICK --> REN[Render engine\nDDA + D3D11 overlay]
-    PICK --> TX[Transform engine\nDWM fullscreen transform]
-    PICK --> MAG[Magnify model\ndrives native Magnifier]
+    PICK --> REN[Render\nDDA + D3D11 overlay]
+    PICK --> TX[Transform\nDWM fullscreen transform]
   end
-  subgraph ui [WindConfig.exe]
-    SV[Svelte settings app] --> WV[WebView2 host]
-    WV -->|writes| CFG
+  subgraph apps [Other processes]
+    SV[WindConfig.exe\nsettings] -->|writes| CFG
+    TR[WindTray.exe\ntray flyout] -->|writes| CFG
   end
   REN --> SCREEN[(Screen)]
   TX --> DWM[DWM compositor] --> SCREEN
-  MAG --> NM[Magnify.exe] --> DWM
 ```
+
+There are three engines (Auto, Render, Transform); Auto is the default and switches between the
+other two.
 
 ## Chapters
 
-| # | Chapter | One line |
-|---|---------|----------|
-| 01 | [Overview](01-overview.md) | What Wind is, its product rules, the two binaries, the repo map |
-| 02 | [The tick loop](02-tick-loop.md) | RunTick's phases, pacing, and config hot-reload |
-| 03 | [Engines and the hybrid pick](03-engines.md) | The four engines and the pure predicate that chooses between them |
-| 04 | [The render engine](04-render-engine.md) | Own capture + GPU scale, and the compositor rules learned the hard way |
-| 05 | [The transform engine](05-transform-engine.md) | Magnifying inside DWM: channels, cadence, MPO, the input transform |
-| 06 | [The input pipeline](06-input.md) | Hooks, Raw Input, key swallowing and its limits |
-| 07 | [The cursor system](07-cursor.md) | Free cursor, the weld, the sprite, lock detection, Inspect mode, tracking (caret/focus/mouse edge) |
-| 08 | [Config and profiles](08-config-profiles.md) | The ini as the single source of truth, and profiles on top |
-| 09 | [The settings UI](09-settings-ui.md) | The WebView2 host, the schema-driven Svelte app, the bridge |
-| 10 | [The magnify model](10-magnify-model.md) | Driving the native Magnifier, and the measured dead ends |
-| 11 | [Build, test, release](11-build-test-release.md) | build.bat, the pure-test split, signing, the release pipeline |
-| 12 | [Instrumentation and field method](12-instrumentation.md) | The measurement harnesses and the measure-don't-assume culture |
+| # | Chapter | Covers |
+|---|---------|--------|
+| 01 | [Overview](01-overview.md) | Product rules, the three binaries, the pure/Win32 split, source map |
+| 02 | [The tick loop](02-tick-loop.md) | `RunTick` phases, pacing, idle sleep, config hot-reload, threads |
+| 03 | [Engines and the hybrid pick](03-engines.md) | The engine interface, the pick, handover, why Wind does not drive the built-in Magnifier |
+| 04 | [The render engine](04-render-engine.md) | Capture, overlay, reveal gating, HDR, colour filters |
+| 05 | [The transform engine](05-transform-engine.md) | The Magnification runtime, write channels and cadence, MPO, the input transform |
+| 06 | [The input pipeline](06-input.md) | Hooks, swallowing, bind rules, safety nets, Raw Input limits |
+| 07 | [The cursor system](07-cursor.md) | Mapper, weld, sprite, lock detection, Inspect, tracking, keyboard panning |
+| 08 | [Config and profiles](08-config-profiles.md) | The ini as IPC, parsing, hot vs restart, profiles, key reference |
+| 09 | [The settings UI](09-settings-ui.md) | WebView2 host, bridge, schema, session model, themes, tests |
+| 11 | [Build, test, release](11-build-test-release.md) | `build.bat`, the test split, deploy, installer, release and alpha workflows |
+| 12 | [Instrumentation](12-instrumentation.md) | Logging, diagnostic knobs, measurement scripts |
 
-## How this book relates to the other docs
+`CLAUDE.md` at the repo root holds the rules for coding agents and points here.
 
-- **`CLAUDE.md`** (repo root) is the compressed working-notes version of the same knowledge,
-  optimized for density. This book is the readable version, optimized for understanding.
-- **`docs/superpowers/specs/`** hold the original design documents per feature. They are
-  historical: amendments live in the code and here.
-- **`docs/*.md` findings files** (WOBBLE-CAPTURE, POINTER-HITTEST-FINDINGS, HITCH-FINDINGS,
-  PERF-ACRYLIC-PARITY, ...) are field investigations: the raw evidence behind conclusions this
-  book states in one sentence.
+## Docs index
+
+| File | What it is | State |
+|---|---|---|
+| [../VERIFICATION.md](../VERIFICATION.md) | Hands-on release checklist | Live |
+| [../HITCH-FINDINGS.md](../HITCH-FINDINGS.md) | Transform hitching: the live-context tax, the pan-start hitch, vetted configs, zoom response | Open (#310) |
+| [../NATIVE-MAGNIFIER-STOMP.md](../NATIVE-MAGNIFIER-STOMP.md) | A running built-in Magnifier fights the transform engine; the stomp guard | Closed, follow-up parked |
+| [../POINTER-HITTEST-FINDINGS.md](../POINTER-HITTEST-FINDINGS.md) | Hover dead zones on the transform desktop; the source-rect input transform | Closed |
+| [../PERF-ACRYLIC-PARITY-2026-08-21.md](../PERF-ACRYLIC-PARITY-2026-08-21.md) | Zoom-in stalls over acrylic; the `txMaxStepPct` cap | Closed |
+| [../TRACKING-FINDINGS.md](../TRACKING-FINDINGS.md) | Caret, focus and edge tracking per app | Live |
+| [../SHELL-PANEL-CURSOR-FINDINGS.md](../SHELL-PANEL-CURSOR-FINDINGS.md) | The cursor over the emoji picker and other shell panels | Closed |
+| [../COLOUR-FILTER-FINDINGS.md](../COLOUR-FILTER-FINDINGS.md) | Warmth and brightness: mechanism, HDR maths, rejected filters | Live |
+| [../specs/](../specs/) | Original design specs of shipped features | History |
+| `../../tools/testenv/README.md` | The automated proving ground | Live |
+| `../../installer/README.md` | The installer layout and build | Live |
+
+Plans and open work are tracked in GitHub issues.

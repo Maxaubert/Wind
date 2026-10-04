@@ -4,46 +4,41 @@
 *.pdb
 *.ilk
 *.lib
-# ...but the VENDORED WebView2 import library is not build output, it is part of the SDK we
-# ship in-tree, and WindConfig.exe cannot link without it. Ignoring it worked for years only
-# because every build was local; CI failed on the first run with LNK1181.
-!third_party/webview2/x64/*.lib
 *.exp
 *.res
 build/
+dist/
+# Vendored binaries that are part of the tree, not build output
+!third_party/webview2/x64/*.lib
+!installer/MicrosoftEdgeWebview2Setup.exe
+# installer/media/ stays committed: CI cannot regenerate it (see installer/README.md)
+
 # Editor / OS
 .vs/
 *.user
 Thumbs.db
-# Claude local (machine-specific) settings and worktrees
+
+# Claude Code: machine-specific settings, worktrees, plans and brainstorm output
+.claude/settings.json
 .claude/settings.local.json
+.claude/worktrees/
 .worktrees/
-# Runtime config copy (generated next to the exe by LoadConfig on first run)
+.superpowers/
+docs/superpowers/
+
+# Runtime and diagnostic output
 /magnifier.ini
-# Diagnostic logs
 *.log
-# PresentMon / perf captures
 *.csv
-# WebView2 user-data folder (created next to WindConfig.exe at runtime)
 *.WebView2/
-# Self-test / diagnostic dumps
 wind_selftest.png
 wind_hdr_diag.txt
-# Stray build-log redirects
 build_*.txt
-.superpowers/
 
-# graphify knowledge-graph output (generated)
+# Generated
 graphify-out/
 
-# Installer release artifacts. The generated media under installer/media/ is NOT ignored:
-# CI builds the installer on every push to main and cannot regenerate frames and overlays
-# without ffmpeg, ImageMagick, Playwright and the source clip. It is ~13 MB and changes only
-# when the footage or the copy does. Regenerate with installer/make-loop.mjs + make-over.mjs.
-dist/
-# ...but the WebView2 bootstrapper stub IS committed; it is a Microsoft
-# redistributable the installer packs, not build output. Overrides *.exe above.
-!installer/MicrosoftEdgeWebview2Setup.exe
+# Test harness
 tools/testenv/results/
 tools/testenv/gamesim.exe
 tools/testenv/*.obj

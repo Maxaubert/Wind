@@ -1,317 +1,236 @@
 # 04. The render engine
 
-The render engine is Wind's own magnifier: it captures the desktop with DXGI Desktop Duplication,
-scales a sub-pixel source rectangle on the GPU with Direct3D 11, and presents the result onto a
-fullscreen, click-through, capture-excluded overlay window. Since issue #272 it is the fallback engine for desktop sessions (the transform engine is now
-the default there too, `desktopTransform=1`) and for everything else the transform engine is
-refused: non-primary monitors (no cross-adapter transform chase), apps on `transformExclude`,
-learned churny apps (unless the tdr test harness forces transform), and any desktop session
-without a verified input-transform publish (no UIAccess). Capture-protected (DRM) content and
-apps on `renderExclude` still get the transform engine even then, since Desktop Duplication
-returns black for protected content and the render engine would show nothing at all. Almost every design
-decision in `src/render_engine.cpp` exists because the obvious alternative was tried and failed in
-a measurable way; this chapter treats those hard-won rules as first-class architecture, not trivia.
+The render engine captures the desktop with DXGI Desktop Duplication, scales a sub-pixel source
+rectangle on the GPU with Direct3D 11 and presents it onto a fullscreen, click-through,
+capture-excluded overlay. In Auto it is the engine for everything the transform is refused: other
+monitors, `transformExclude` apps, learned churny apps, and desktop sessions without a verified
+input transform (no UIAccess). Protected content never uses it: Desktop Duplication returns black
+for it ([03](03-engines.md)).
 
-## The shape of the thing
+## Structure
 
-`RenderEngine` (src/render_engine.h) is a PIMPL class; all D3D/DXGI headers stay inside
-`src/render_engine.cpp`. The tick loop never talks to it directly: `RenderModel`
-(src/render_model.cpp) adapts it to the `IMagnifierModel` interface from
-[the engines chapter](03-engines.md), and `RunTick` in `src/main.cpp` owns the activation and
-reveal choreography, because parts of it need information the engine does not have (whether the
-foreground window covers the monitor, which tick is the idle-to-active edge).
+`RenderEngine` (`src/render_engine.h`) is a PIMPL class; D3D and DXGI headers stay in
+`src/render_engine.cpp`. `RenderModel` (`src/render_model.cpp`) adapts it to `IMagnifierModel`.
+`RunTick` owns activation and reveal, because they need facts the engine does not have (does the
+foreground cover the monitor, is this the idle-to-active edge).
 
-Per frame the flow is: `renderFrame(RenderFrameParams)` captures the desktop if it changed,
-draws three passes into the back buffer (magnify, edge outline, cursor sprite), and presents. The
-magnified view is a float source rect (`srcLeft`/`srcTop` plus `level`), so panning is sub-pixel
-smooth; the pure math that produces the rect lives in `src/cursor_mapper` and `src/transform`,
-covered in [the tick loop](02-tick-loop.md).
-
-The original design spec is
-[2026-05-25-own-renderer-design.md](../superpowers/specs/2026-05-25-own-renderer-design.md)
-(issue #4). Where this chapter and the spec disagree, the code has moved on and this chapter
-follows the code.
+Per frame, `renderFrame(RenderFrameParams)` captures if the desktop changed, draws three passes
+(magnify, outline, cursor) and presents. The view is a float source rect (`srcLeft`/`srcTop` plus
+`level`), so panning is sub-pixel.
 
 ## The overlay window
 
-`RenderEngine::initialize` creates one borderless popup (`WindRenderOverlay` class) covering the
-target monitor. Every extended style on it is load-bearing:
+`RenderEngine::initialize` creates one borderless popup (`WindRenderOverlay`) over the target
+monitor. Every style is required:
 
 | Style / attribute | Why |
 |---|---|
-| `WS_EX_LAYERED` + `SetLayeredWindowAttributes(.., LWA_ALPHA)` | True cross-process click-through, and the alpha channel is the show/hide mechanism (below). `WS_EX_TRANSPARENT` + `HTTRANSPARENT` alone only forwards clicks to same-thread windows; other apps' clicks were eaten. |
-| `WS_EX_TRANSPARENT` + `HTTRANSPARENT` in `OverlayProc` | Belt and braces for the hit-test path. |
-| `WS_EX_TOPMOST`, `WS_EX_NOACTIVATE`, `WS_EX_TOOLWINDOW` | Stay above app overlays, never steal focus, never appear in alt-tab. |
-| `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` | THE number one gotcha. Without it, Desktop Duplication captures our own presented frame, we magnify our own output, and the image degenerates into a black feedback loop. The window stays visible on screen but invisible to DDA, so we always capture the real desktop beneath. |
-| `DwmSetWindowAttribute(DWMWA_EXCLUDED_FROM_PEEK)` | Aero Peek is a compositor effect, not a window, so no z-band beats it; excluded, the overlay keeps magnifying during a taskbar-thumbnail peek (issue #141). |
+| `WS_EX_LAYERED` + `SetLayeredWindowAttributes(.., LWA_ALPHA)` | Cross-process click-through, and the alpha byte is the show/hide switch. `WS_EX_TRANSPARENT` + `HTTRANSPARENT` alone forward clicks only to same-thread windows. |
+| `WS_EX_TRANSPARENT` + `HTTRANSPARENT` in `OverlayProc` | The hit-test path. |
+| `WS_EX_TOPMOST`, `WS_EX_NOACTIVATE`, `WS_EX_TOOLWINDOW` | Above app overlays, never takes focus, not in alt-tab. |
+| `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` | **Required.** Without it Desktop Duplication captures Wind's own output and the view degenerates into a black feedback loop. |
+| `DwmSetWindowAttribute(DWMWA_EXCLUDED_FROM_PEEK)` | Keeps the view during a taskbar-thumbnail Aero Peek. |
 
-Because the overlay is capture-excluded, external screenshots cannot verify it. Verification is
-done from inside the process: `WIND_SELFTEST=1 Wind.exe` dumps `wind_selftest.png` via
-`RenderEngine::dumpFrame`, which renders without presenting so the PNG matches the drawn frame.
+Because the overlay is capture-excluded, external screenshots cannot see it. Verify from inside the
+process: `WIND_SELFTEST=1 Wind.exe` writes `wind_selftest.png` (`RenderEngine::dumpFrame`).
 
-## The present path: blt, and only blt
+## Present: blt model only
 
-The swapchain (`RenderEngine::State::buildPresent`) is deliberately old-fashioned:
-`DXGI_SWAP_EFFECT_DISCARD`, one buffer, windowed, on the layered HWND, with
-`IDXGIDevice1::SetMaximumFrameLatency(1)` capping latency. A blt-model present composites through
-the window's DWM redirection surface, which means it can never tear: DWM always composites it at
-vblank.
+The swapchain is `DXGI_SWAP_EFFECT_DISCARD`, one buffer, windowed, on the layered HWND, with
+`SetMaximumFrameLatency(1)`. A blt present composites through DWM's redirection surface and never
+tears.
 
-A DirectComposition flip-model path was built and abandoned twice (issues #11 and #69), and the
-conclusion is a standing rule: DWM promotes a fullscreen dcomp visual to an independent-flip / MPO
-plane that scans out unsynced, and on a VRR/G-SYNC display it tears exactly on loop hitches.
-Forcing it back onto the composited path with `DwmFlush` stopped the tear but chained the present
-rate to the VRR-floated composite rate (~68 Hz on a 23-143 Hz panel). Net: dcomp is never a win on
-this layered click-through overlay. Do not re-attempt it.
+**Do not use a DirectComposition flip-model path.** It was built twice (issues #11, #69). DWM
+promotes the fullscreen visual to an independent-flip plane that tears on loop hitches on a VRR
+display; forcing it back onto composition with `DwmFlush` tied the present rate to the floating
+VRR composite rate (~68 Hz on a 23–143 Hz panel). RTSS is a quick tell: its overlay shows over blt
+and vanishes over dcomp.
 
-The blt path's one artifact is a phase-mismatch microstutter against DWM's composition clock,
-tamed by the `dwmFlush` ini knob (Config in src/config.h, applied in the pacing section of
-`RunTick`): `dwmFlush=0` (default) presents with `Present(1,0)` and lets vsync pace the loop;
-`dwmFlush=1` presents immediately and then calls `DwmFlush()` after the tick to align 1:1 with
-composition. Both are hot-reloadable. `RenderFrameParams.syncOverride` can also force
-`Present(N,0)`; the game half-rate mode uses N=2 so every frame gets two vblanks of slack, which
-turns an irregular hitch into a steady cadence (steadiness is what reads as smooth, issue #148).
+The blt path's one artifact is a phase-mismatch microstutter, tuned by `dwmFlush`: `0` (default)
+presents with `Present(1,0)`; `1` presents immediately and calls `DwmFlush()` after the tick. Both
+are hot. The game half-rate mode uses `Present(2,0)` (`syncOverride`) to turn irregular hitches
+into a steady cadence.
 
-## Parking: the overlay's geometry alone taxes games
+## Parking
 
-The overlay window is created shown and stays shown for the process lifetime, but while Wind is
-idle it is **parked**: moved just past the right edge of the virtual desktop
-(`RenderEngine::setParked`). The reason is one of the most expensive lessons in the codebase: a
-fullscreen topmost layered window stacked over a fullscreen game keeps DWM from granting the game
-its independent-flip plane **by geometry alone, even at alpha 0**. A game ran DWM-composited for
-its entire session just because Wind sat idle in the tray, and it looked model-independent and
-sticky because every model creates the overlay at startup. PresentMon on RDR2, same session, no
-game restart, before/after parking: 3% to 99.8% "Hardware: Independent Flip", mean frametime
-12.28 ms to 7.26 ms, p99 18.3 ms to 9.5 ms.
+**The overlay is parked whenever Wind is not rendering**: moved past the right edge of the virtual
+desktop (`setParked`). A shown fullscreen topmost layered window keeps a fullscreen game off its
+independent-flip plane by geometry alone, even at alpha 0. Measured on RDR2 with PresentMon:
+parking raised Independent Flip from 3% to 99.8% and cut mean frame time from 12.28 to 7.26 ms.
 
-Parking is a **move**, never `SW_HIDE` (that reintroduces the stale-frame flash below) and never a
-resize to 1x1 (shrinking makes DWM reallocate the redirection surface, and the fresh allocation is
-undefined until presented into, which showed as a one-frame black flash per zoom over a game). A
-move leaves the surface and the swapchain untouched. Each park/unpark is a `SetWindowPos` over the
-game, i.e. a synchronous DWM z-order transaction that hitches it, so two per zoom session is the
-floor; do not add more. The park lands past the virtual desktop's right edge specifically so it
-cannot sit on another monitor and demote a fullscreen app there. `WIND_NOPARK=1` disables parking
-for A/B measurement.
+- Park by **moving**. `SW_HIDE` brings back the stale-frame flash (next section). Resizing to 1x1
+  makes DWM reallocate the redirection surface, which shows one black frame per zoom.
+- Each park or unpark is a synchronous DWM z-order transaction over the game, so two per session
+  is the floor. Do not add more.
+- The park position is past the virtual desktop's right edge so it cannot cover another monitor.
+- `WIND_NOPARK=1` disables parking for A/B tests.
 
-## Show and hide by alpha, never SW_HIDE
+## Show and hide by alpha
 
-`RenderEngine::setVisible` flips `SetLayeredWindowAttributes` between alpha 0 and 255. A layered
-window that is hidden with `SW_HIDE` and later re-shown makes DWM cache and re-display the frame
-from when it was last visible, flashing the previous zoom session's content on the next zoom-in
-(worst right after an alt-tab). So the window is created shown at alpha 0 and its visibility only
-ever changes through the alpha byte.
+`setVisible` flips the layer alpha between 0 and 255. A layered window hidden with `SW_HIDE` and
+shown again makes DWM show the frame it had when last visible, which flashed the previous session.
+The window is created shown at alpha 0 and only the alpha changes.
 
-On hide, `setVisible(false)` also presents one black **scrub frame**, strictly *after* the alpha-0
-flip: the redirection surface otherwise retains the session's last magnified frame forever, and any
-residual reveal race in a future zoom-in could only ever flash black instead of stale content.
-Scrub-then-hide (the other order) flashed black on every zoom-out, because DWM composited the black
-frame while the overlay was still visible. The scrub is skipped when the previous present is still
-in flight on a starved GPU (checked via the present fence), because a blocking `Present` on the
-teardown path could wedge the cursor restore; the reveal gate protects the next zoom-in anyway.
+On hide, one black **scrub frame** is presented strictly after the alpha-0 flip, so the surface
+never keeps the last session's content. The other order flashed black on every zoom-out. The scrub
+is skipped while the previous present is still in flight on a starved GPU, because a blocking
+`Present` on the teardown path could delay the cursor restore.
 
 ## The reveal gate
 
-Presenting the live frame before flipping the alpha is necessary but not sufficient (issue #140).
-The `Present` blt into the redirection surface is **GPU work**; the alpha flip is a **CPU call**
-DWM honors at its next composite. Under GPU load the flip wins the race and DWM shows the
-surface's retained frame, i.e. the previous session's last present. Two independent mechanisms
-close the race, both owned by `RunTick` in `src/main.cpp` with the primitives in `RenderEngine`:
+Presenting before flipping the alpha is not enough (issue #140). The blt is GPU work; the alpha
+flip is a CPU call DWM honours at its next composite. Under GPU load the flip wins and DWM shows
+the surface's retained frame. Two gates close the race:
 
-1. **The present fence.** `RenderModel::onActivate` calls `armRevealFence()`; the session's first
-   `Present` then issues a D3D event query (`revealFence` in `renderFrame`).
-   `revealFrameDone()` reports true only once that Present has executed on the GPU, so the surface
-   provably holds this session's content. On an ordinary desktop zoom-in `RunTick` spins a 3 ms
-   budget on it so the common idle-GPU case still reveals within the same tick (the instant feel is
-   kept); a loaded GPU defers to per-tick checks.
-2. **The composite evidence gate**, for fullscreen apps only. A game on an independent-flip/MPO
-   plane is invisible to Desktop Duplication (issue #90), so `RunTick` calls `primeReveal()`:
-   alpha 1, visually imperceptible, but enough to make DWM de-promote the game and composite it.
-   `frameCompositedSincePrime()` then reports true once `capture()` has copied a desktop frame
-   whose `LastPresentTime` is newer than the prime's QPC timestamp, which is hard evidence the game
-   is actually in the capture. A fixed tick deferral was tried first and flashed the pre-alt-tab
-   window under GPU load.
+1. **Present fence.** `onActivate` arms it; the session's first `Present` issues a D3D event query.
+   `revealFrameDone()` is true once that Present executed on the GPU. On the desktop `RunTick`
+   spins up to 3 ms so an idle GPU still reveals in the same tick.
+2. **Composite evidence** (fullscreen apps only). A game on an independent-flip plane is invisible
+   to Desktop Duplication (issue #90). `primeReveal()` sets alpha 1, which makes DWM composite the
+   game, and `frameCompositedSincePrime()` turns true once a captured frame is newer than the
+   prime. A fixed tick delay flashed the pre-alt-tab window under GPU load.
 
-Both gates are non-blocking; the smooth-zoom ramp runs undisturbed while they pend. A fallback cap
-(`revealPending`, about a quarter second of ticks) guarantees the reveal can never wedge.
-
-**The zoom-in reveal sequence, from idle to visible overlay:**
+Both are non-blocking; the zoom ramp runs while they pend. `revealPending` (~250 ms of ticks) is
+the fallback cap.
 
 ```mermaid
 flowchart TD
-  A[Zoom-in edge in RunTick] --> B[RenderModel::onActivate\ninvalidateCapture + armRevealFence]
-  B --> C{Foreground covers\nthe monitor?}
-  C -- no, desktop --> D[renderFrame: unpark, capture\ndrains to latest frame, Present\nissues the reveal fence]
-  C -- yes, fullscreen app --> P[primeReveal: unpark,\nalpha 1, timestamp QPC]
-  P --> D2[keep rendering normal ticks\nnon-blocking]
-  D --> E{revealFrameDone?\nspin up to 3 ms}
-  D2 --> F{revealFrameDone AND\nframeCompositedSincePrime?}
-  E -- yes --> G[setVisible true:\nalpha 255 over the live frame]
-  E -- not yet --> H[re-check each tick]
+  A[Zoom-in edge] --> B[onActivate: invalidateCapture + armRevealFence]
+  B --> C{Foreground covers the monitor?}
+  C -- no --> D[renderFrame: unpark, capture, Present issues the fence]
+  C -- yes --> P[primeReveal: unpark, alpha 1, timestamp]
+  P --> D2[keep rendering]
+  D --> E{revealFrameDone? spin up to 3 ms}
+  D2 --> F{revealFrameDone AND frameCompositedSincePrime?}
+  E -- yes --> G[alpha 255 over the live frame]
   F -- yes --> G
-  F -- not yet --> H
-  H --> I{revealPending\nticks exhausted?}
-  I -- yes, ~250 ms cap --> G
-  I -- no --> H
+  E -- no --> H{cap reached?}
+  F -- no --> H
+  H -- yes --> G
+  H -- no --> D2
 ```
 
-## The capture path
+## Capture
 
-`RenderEngine::State::capture` has two regimes, and the split matters:
+- **Steady state** polls `AcquireNextFrame` once with a 0 ms timeout. A static screen returns
+  `WAIT_TIMEOUT` and the engine re-pans its cached copy (`desktopCopy`); an 8 ms wait here once
+  stalled every pan frame. A frame with `LastPresentTime == 0` is pointer-only and copies nothing,
+  because the cursor comes from `GetCursorInfo`.
+- **Fresh grabs** (zoom-in, `invalidateCapture()`) drain to the latest frame, not the first: the
+  first frame after recreating a duplication can be a transitional composite, which flashed the
+  window underneath. Bounded at ~3 ms per attempt and 100 ms in total.
+- **Dirty rects.** `copyChangedRegions` patches only the rects DDA reports and falls back to a full
+  `CopyResource` whenever a partial update is not provably safe (no previous frame, move rects,
+  missing metadata, out-of-range rect).
+- **Crop to the view.** On a near-full repaint the copy can be cropped to the magnified view.
+  `cropCapture=0` by default (a desktop window switch would leave stale pixels outside the view);
+  `gameCrop=1` (default) crops while the foreground covers the monitor, where every pixel is dirty
+  again next frame.
+- Rotated outputs are not supported; `recreateDupl` logs them.
+- A dedicated capture thread was considered and deferred: high risk (feedback exclusion, HDR
+  format changes, retarget, cross-thread texture sharing), no measured stall.
 
-- **Steady state** polls `AcquireNextFrame` with a 0 ms timeout, once. A static screen returns
-  `WAIT_TIMEOUT` immediately and the engine re-pans its cached copy (`desktopCopy`), so panning is
-  never gated on a desktop change; an earlier 8 ms wait here stalled every pan frame into
-  microstutter. A frame whose `LastPresentTime` is zero means only the pointer moved, and since the
-  cursor is drawn from `GetCursorInfo` rather than the captured image, nothing is copied at all.
-- **Fresh grabs** (zoom-in, via `invalidateCapture()`, which drops the duplication so the next
-  `AcquireNextFrame` returns the whole desktop) block briefly to land the first frame and then
-  **drain to the latest one**: the first frame after (re)creating a duplication can be a
-  transitional composite, the window *underneath* the current one, and taking it flashed that
-  window on reveal. The drain is bounded (about 3 ms per extra attempt, 100 ms wall-clock budget),
-  and giving up frameless just retries next tick.
+## Staying on top, and the z-band
 
-Steady-state copies are minimized by `copyChangedRegions`: only the dirty rects DDA reports are
-patched into `desktopCopy`, falling back to a full `CopyResource` whenever a partial update is not
-provably safe (no previous frame, move/scroll rects present, missing metadata, out-of-range rect).
-On a near-full repaint (dirty area over half the screen, i.e. a game) the copy can additionally be
-**cropped to the magnified view**: `cropCapture=0` by default because on the desktop a
-window-switch repaint would leave stale pixels outside the view, but `gameCrop=1` (default) forces
-it while the foreground covers the monitor, where every pixel is dirty again next frame so
-staleness cannot survive. At 4K FP16 that crop cuts the per-frame copy roughly by zoom squared.
+An always-on-top window above the overlay (RTSS, Task Manager) draws an unmagnified copy over the
+view. `renderFrame` re-asserts `HWND_TOPMOST` only when displaced (`overlayDisplaced`, one
+`GetWindow` call in the common case), because a per-frame `SetWindowPos` synchronizes with DWM and
+stutters. A 1 s backstop catches misses and is skipped while a fullscreen game is foreground.
 
-Rotated (portrait) outputs are not supported by the copy/UV math; `recreateDupl` detects and logs
-them loudly rather than magnifying garbage.
+**The band is a trade-off; the default is `zorderBand=0` (unbanded).** Both bandable windows go
+through `wind::CreateBandedWindow` (`src/band_window.h`), which cascades the requested band to 16
+to unbanded and logs every refusal.
 
-## Staying on top, and the band trade-off
+| Band | Covers Start, taskbar, tray flyouts | Snipping Tool (Win+Shift+S) |
+|---|---|---|
+| 0 (default) | No | Works |
+| 16 (UIAccess build) | Yes | The snip overlay composites over Wind: unmagnified screen and no cursor at all |
+| 17 | Refused by `CreateWindowInBand` (build 26200) | – |
 
-If an always-on-top app overlay (RTSS, Task Manager) sits above us, it draws a second, unmagnified
-copy over the view. `renderFrame` therefore re-asserts `HWND_TOPMOST`, but **only when actually
-displaced**: `overlayDisplaced` walks the windows above the overlay (one cheap `GetWindow` syscall
-in the common already-on-top case, ignoring cloaked and non-overlapping windows), because a
-per-frame `SetWindowPos` synchronizes with DWM and caused constant microstutter. A 1 s
-unconditional backstop self-heals missed cases, and is itself skipped while a fullscreen game is
-foreground (`RenderFrameParams.fsGame`), since that transaction hitches the game once a second and
-nothing the displaced check misses can displace us over a fullscreen app.
+Do not restore 16 without re-testing both columns. Diagnostic trap: `ScreenClippingHost.exe` holds
+foreground with no visible top-level window, so a z-order walk shows Wind at index 0 while it is
+covered. The transform cursor sprite switches bands on its own, see [07](07-cursor.md).
 
-Above ordinary topmost sits the z-order **band** question (issue #162). Both bandable windows go
-through `wind::CreateBandedWindow` (src/band_window.h), which cascades the requested band to 16 to
-unbanded and logs any refusal, because a silently refused band (band 17 is rejected outright by
-`CreateWindowInBand` on Windows 26200) once masqueraded as a fix. The shipped default is
-`zorderBand=0`, unbanded, and it is a deliberate trade: band 16 covers the Start menu and taskbar
-flyouts, but the Snipping Tool's capture overlay then composites over *us*, showing the unmagnified
-screen with no cursor at all (we hide the OS pointer and draw a replacement, so covering the
-replacement leaves nothing). Band 0 makes snipping work; the shell surfaces are the price. Do not
-restore 16 without re-testing both halves. Diagnostic trap: `ScreenClippingHost.exe` holds
-foreground with no visible top-level window, so a z-order walk "proves" we are at index 0 while we
-are plainly covered; never verify band problems that way.
+## HDR
 
-## HDR: scRGB in, SDR out, never cache the slider
+On an HDR desktop the duplication requests FP16 scRGB (`DuplicateOutput1`) and the magnify shader
+tonemaps to SDR (`hdrTonemap=1`, default).
 
-On an HDR desktop the duplication is created with `DuplicateOutput1` requesting FP16 scRGB
-(`recreateDupl`, gated on the `hdrTonemap` config and on `GetHdrEnabled` for the *target* device;
-the DXGI color space is not trusted because some monitors report HDR10 with Windows HDR off). The
-magnify shader then tonemaps: scRGB encodes 80 nits as 1.0, and Windows' "SDR content brightness"
-slider sets the white level SDR content composites at, so the shader divides by
-`ScrRgbScale = 80 / sdrWhiteNits` to land SDR white back on 1.0 before the sRGB encode. DWM applies
-the same white level again when compositing our BGRA8 overlay, making the round trip exact, **but
-only while our scale tracks the live slider** (issue #160). The white level was once sampled per
-device build; any later slider move left a permanent brightness step of actual/cached on every
-zoom-in and zoom-out. Now it is re-read on every duplication rebuild (i.e. every zoom-in) and on a
-4 Hz throttle while rendering (`refreshSdrWhite`; the DisplayConfig query measures ~0.007 ms), and
-a failed query keeps the last known good value, because snapping to a default would itself be a
-visible step. The pure math and the throttle predicate live in `src/hdr_scale.h`
-(`ScRgbScale`, `AcceptSdrWhiteNits`, `ShouldRefreshSdrWhite`), unit-tested without `<windows.h>`.
-`ensureDesktopCopy` recreates `desktopCopy` to match whatever format the capture actually delivers,
-so a runtime HDR toggle can never mismatch the copy (which used to black-screen the magnify pass).
-This is render-model-only: the transform and magnify engines magnify inside DWM and never convert
-color.
+- **Gate on Windows' advanced-colour state for the target display (`GetHdrEnabled`), not the DXGI
+  colour space**: some monitors report HDR10 with Windows HDR off, which would dim SDR content.
+- The shader divides by `ScrRgbScale = 80 / sdrWhiteNits`, so SDR white lands on 1.0. DWM applies
+  the same white level when compositing the overlay, so the round trip is exact.
+- **Never cache the SDR white level** (issue #160). A cached value left a brightness step on every
+  zoom-in and zoom-out after the user moved the slider. It is re-read on every duplication rebuild
+  and at 4 Hz while rendering (`refreshSdrWhite`, ~0.007 ms per query), matched by GDI device name,
+  and a failed query keeps the last good value.
+- `ensureDesktopCopy` recreates the copy in whatever format the capture delivers, so a runtime HDR
+  toggle cannot mismatch it.
+- Pure maths and the throttle: `src/hdr_scale.h`. The transform engine magnifies inside DWM and
+  never converts colour.
 
-## Drawing: three passes, and the cursor
+## Colour filters
 
-`State::render` draws the magnified desktop as one full-screen opaque triangle (skipping the clear
-whenever a desktop copy exists, saving a 4K clear per frame), then the edge outline, then the
-cursor. The outline is deliberately **one** full-screen quad whose pixel shader colors only the
-border band and discards the interior; an earlier four-quads-in-a-loop version dropped individual
-edges on some GPUs. The frame is inset 6 px from the screen edge because at non-integer DPI
-(observed at 4K 225% on an RTX 5090) DWM can mis-composite the layered blt present with a small
-down-left offset that clips a flush left/bottom band off the panel; that is a driver/DWM artifact,
-not draw code, so do not chase it as a render bug.
+Warmth and brightness (`colorWarmPct`, `colorDimPct`) are one colour matrix (`src/color_matrix.h`),
+applied by `ColorFilterController` (`src/color_filter.*`) through `MagSetFullscreenColorEffect`.
 
-The cursor sprite comes from `GetCursorInfo` + `DecodeCursorBGRA` (it works while the OS cursor is
-hidden), cached per `HCURSOR` with a 5 s staleness bound because the OS recycles handles, and drawn
-with an invert blend for I-beam-style cursors. `cursorMode` 0 (auto) draws only when the focused
-app shows its own cursor, so a game that hid its pointer never gets one painted back. In Inspect
-mode the 48x48 crosshair from `BuildCrosshairBGRA` (src/crosshair.cpp, shared with the transform
-engine) replaces it. The engine also keeps the hidden OS pointer parked under the drawn cursor via
-`SetCursorPos` so clicks land where the user sees the pointer, reports `parkedLastFrame()` so the
-pan oracle can measure rather than assume its baseline, and suspends the park entirely while a
-mouse button is held (`suppressCursorSync`, drag-follow). The full story of the weld, the oracle
-invariants, and issue #169 belongs to [the cursor system](07-cursor.md).
+- **Desktop Duplication sees the DWM effect.** While a render session is visible the DWM effect is
+  set to identity and the render shader applies the matrix instead; otherwise the overlay would be
+  filtered twice. The drawn cursor, crosshair and outline are filtered too; an inverting text beam
+  is drawn untinted.
+- Colour follows the visible engine (`RenderModel::visible()`), so a pending reveal or a resting
+  overlay in a handover keeps the right filter.
+- **A filter holds the Magnification runtime at 1x**, which taxes cursor changes in other apps
+  ([05](05-transform-engine.md)). Off by default.
+- At 1x the hardware pointer is outside the DWM effect, so Wind swaps the system pointers for
+  tinted copies (`src/cursor_tint.*`).
+- Windows clears the effect when the process dies, so a crash never leaves the screen filtered.
 
-## Surviving games: priority, gating, and the fps cap
+Measurements and rejected filters: [../COLOUR-FILTER-FINDINGS.md](../COLOUR-FILTER-FINDINGS.md).
 
-Issue #148 produced a small toolkit for coexisting with a GPU-saturating game, all wired through
-`RunTick` (the "game" tell is `ForegroundCoversMonitor`, which also matches maximized windows,
-which is exactly why none of these engage by default on the desktop path):
+## Drawing and the cursor
 
-- **`gpuPriority`** (ini, restart): -1 / 0 / +1 via `IDXGIDevice::SetGPUThreadPriority(+/-7)` plus
-  a best-effort `D3DKMTSetProcessSchedulingPriorityClass` (`ApplyProcessGpuPriority`; the raise can
-  be denied without privileges, logged, non-fatal). +1 makes Wind's small per-frame job jump a
-  saturated game's queue so the zoomed view hits every vblank; -1 yields to the game and accepts
-  that the view can freeze in heavy scenes. The legacy `lowGpuPriority=1` still means
-  `gpuPriority=-1` via `EffectiveGpuPriority` (src/config.h).
-- **The present-fence gate** (`gatePresent`): with low priority a saturated game starved Wind's
-  GPU work for minutes, and a blocking vsync `Present` then wedged the whole main thread, input,
-  teardown, and the cursor restore included. When the gate is engaged, `renderFrame` skips the
-  entire frame while the previous present has not executed on the GPU (an event query after every
-  Present); cursor sync and the topmost check still run, so clicks stay live.
-- **`gameFpsCap`** (ini, hot): the reduced-push mode. Measured under a game, DWM services the
-  redirected window's presents at only ~78/s while compositing at 144/s; pushing 144 presents/s
-  builds a standing queue and every Present waits a queue's worth with jitter. The cap presents
-  every Nth vblank (N = ceil(hz/cap)), below the service rate, so the queue stays empty; skipped
-  ticks block on `RenderEngine::waitVBlank` (`IDXGIOutput::WaitForVBlank`) to stay vblank-locked,
-  and input sampling plus panning still run every tick. Activation and reveal-pending ticks always
-  present, because the reveal gate needs frames reaching the redirection surface.
+The magnified desktop is one full-screen triangle (no clear when a copy exists), then the outline,
+then the cursor.
 
-`debugPerf` splits CPU time building the frame from time blocked inside `Present` (where GPU
-contention shows) and counts gate skips; [instrumentation](12-instrumentation.md) covers how those
-counters are read in the field.
+- The outline is **one** full-screen pass that colours the border band and discards the interior;
+  four separate quads dropped edges on some GPUs. It is inset 6 px because at non-integer DPI DWM
+  can offset the layered present down-left and clip a flush edge. That is a DWM artifact, not draw
+  code.
+- The cursor comes from `GetCursorInfo` + `DecodeCursorBGRA`, cached per `HCURSOR` with a 5 s
+  staleness bound (handles are recycled), with an invert blend for I-beam cursors. `cursorMode` 0
+  draws only when the app shows its own cursor.
+- Inspect replaces it with the crosshair from `BuildCrosshairBGRA` (`src/crosshair.cpp`).
+- The hidden OS pointer is parked under the drawn cursor with `SetCursorPos` so clicks land where
+  the user sees the pointer; `parkedLastFrame()` reports whether the park ran, and the park pauses
+  while a mouse button is held. See [07](07-cursor.md).
 
-## Multi-monitor retarget and device loss
+## Surviving games
 
-`retarget` re-points the engine at the monitor the cursor is on at zoom-in (`multiMonitor=1`). It
-validates first, mutates second: the target output must be on our D3D device's adapter
-(`selectOutput` by GDI device name; a cross-GPU monitor returns false and the caller keeps the
-current one), and the swapchain `ResizeBuffers`, the only fallible step, runs before the window is
-moved, with a best-effort RTV restore on failure. On commit it adopts the new geometry, moves the
-overlay (respecting the parked state), and forces a fresh capture on the new output. The pipeline
-works in local monitor pixels; the `(originX, originY)` offset is applied only at the
-`GetCursorPos`/`SetCursorPos` boundary.
+The game tell is `ForegroundCoversMonitor`, which also matches maximized windows, so none of these
+engage by default on the desktop.
 
-A TDR or driver update surfaces as `DXGI_ERROR_DEVICE_REMOVED/RESET` from `Present` or
-`AcquireNextFrame`; the engine latches `deviceLost()` and becomes a no-op until the caller paces
-`recoverDeviceLost()`, which releases every device-dependent resource and rebuilds the whole set
-through the same `buildDeviceResources` that `initialize` uses, so the two paths cannot drift. The
-HWND, geometry, and zoom state survive. Teardown (`shutdown`, plus the
-`SetUnhandledExceptionFilter` crash net `CursorRestoreFilter`) always restores the OS cursor and
-releases any `ClipCursor`, because leaving a user cursorless is the one failure mode Wind never
-accepts. Cursor hiding itself goes through `wind::MagApiAcquire`/`MagApiRelease` (src/mag_host.h),
-the shared Magnification-runtime refcount both engines must use; see
-[the engines chapter](03-engines.md) for why independent init/uninit pairs break each other.
+| Lever | Effect |
+|---|---|
+| `gpuPriority` (restart) | -1/0/+1 via `SetGPUThreadPriority` and the process scheduling class. +1 lets Wind's small frame jump a saturated game's queue; -1 yields and can freeze the view. `lowGpuPriority=1` means -1. |
+| Present-fence gate (`gatePresent`) | With low priority, skip the frame while the previous present has not executed, so a blocking `Present` never wedges input and teardown. Cursor sync still runs. |
+| `gameFpsCap` (hot) | Present every Nth vblank, below the rate DWM services a redirected window under a game (~78/s while compositing at 144). Skipped ticks wait on `WaitForVBlank`; input still runs every tick. |
 
-## Pointers
+`debugPerf` splits frame-build CPU time from time blocked in `Present`; see
+[12](12-instrumentation.md).
 
-- `src/render_engine.h` / `src/render_engine.cpp`: the engine itself, every rule above.
-- `src/render_model.h` / `src/render_model.cpp`: the `IMagnifierModel` adapter; `onActivate` arms
-  the reveal machinery.
-- `src/main.cpp` (`RunTick`): reveal choreography, pacing modes, the game-survival lever wiring.
-- `src/hdr_scale.h`, `src/hdr_info.cpp`: the pure tonemap math and the OS white-level query.
-- `src/band_window.h`: `CreateBandedWindow` and the band cascade.
-- `src/crosshair.cpp`, `src/cursor_decode.*`: the Inspect crosshair and cursor decoding.
-- Spec: [own renderer design](../superpowers/specs/2026-05-25-own-renderer-design.md) (issue #4).
-- Evidence files: [HITCH-FINDINGS](../HITCH-FINDINGS.md),
-  [PERFORMANCE-FINDINGS](../PERFORMANCE-FINDINGS.md),
-  [WOBBLE-CAPTURE-2026-08-21](../WOBBLE-CAPTURE-2026-08-21.md).
-- Related chapters: [Engines and the hybrid pick](03-engines.md),
-  [The transform engine](05-transform-engine.md), [The cursor system](07-cursor.md),
-  [Instrumentation](12-instrumentation.md).
+## Multi-monitor and device loss
+
+- `retarget` moves the engine to the cursor's monitor at zoom-in (`multiMonitor=1`). It validates
+  first: the output must be on the D3D device's adapter (`selectOutput` by GDI device name), or it
+  returns false and the session stays put. The fallible `ResizeBuffers` runs before the window
+  moves. The pipeline works in monitor-local pixels; the origin offset is applied only at
+  `GetCursorPos`/`SetCursorPos`.
+- `DXGI_ERROR_DEVICE_REMOVED/RESET` latches `deviceLost()`. `recoverDeviceLost()` rebuilds through
+  the same `buildDeviceResources` as `initialize`, so the paths cannot drift.
+- **Always restore the OS cursor.** `shutdown` and the crash filter (`CursorRestoreFilter`) restore
+  the pointer and release any `ClipCursor`. Cursor hiding goes through
+  `MagApiAcquire`/`MagApiRelease`; see [05](05-transform-engine.md) for why the pairing must be
+  shared.
+
+Design history: [../specs/2026-05-25-own-renderer-design.md](../specs/2026-05-25-own-renderer-design.md).

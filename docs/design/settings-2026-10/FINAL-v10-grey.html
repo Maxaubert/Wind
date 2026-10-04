@@ -395,7 +395,7 @@ const EXP=[{id:'adv',label:'Advanced',n:15,subs:['Engine','Apps','Fine tuning']}
 const ALL=NAV.concat(EXP);
 
 // ---------- options ----------
-// Max's baseline (2026-10-01). Fixed; only the OPTS below are still open.
+// Owner's baseline (2026-10-01). Fixed; only the OPTS below are still open.
 const BASE={exp:'bottom',icons:'terminal',isz:'16',font:'cascadia',w:'500',case:'none',hl:'grey',rad:'8',target:'sub',rail:'progress',side:'black',counts:'off',themectl:'icons',addkey:'filled',subs:'off',slider:'grey',hicon:'terminal',head:'large',sfill:'teal',sknob:'teal',strack:'dark',themeloc:'titlebar'};
 // Slider colours: [dark theme, light theme].
 const FILL={grey:['#8a8a8a','#7a7a7a'],white:['#f2f2f2','#0a0a0a'],silver:['#bdbdbd','#5a5a5a'],dim:['#555555','#b5b5b5'],
@@ -513,7 +513,7 @@ const KNOBS=[
   ['capsule','Upright capsule'],['bracket','Brackets [ ]'],['cap','No knob, bright end cap'],['none','No knob, plain fill'],
   ['thick','Thick bar, no knob'],['segments','Segmented blocks'],['glow','Soft glowing dot'],['small','Small solid dot'],
 ];
-// Round 9: Max picked v10-soft-combo with the end-cap knob. Only the aurora colour is open.
+// Round 9: the owner picked v10-soft-combo with the end-cap knob. Only the aurora colour is open.
 Object.assign(BASE,{kshape:'cap'});
 const OPTS=[
   ['still','Northern lights colour',(window.AURORA_COLOURS||[['c-teal','Teal (current)']]),'select'],
@@ -639,7 +639,7 @@ function renderMain(){
     const L=S.theme==='light'?1:0, col=(BANDBG.find(b=>b[0]===S.wbg)||BANDBG[0])[L?3:2];
     // The still sits on a ::before layer so "how subtle" (opacity) and "where it starts" (mask) apply to it alone.
     const look='band', art=' imgbg';
-    const style='background-color:'+col+';--bimg:url(./'+S.still+'.jpg);--bop:'+Math.min(1,(+S.wsub)*0.55)+';--bfrom:'+(+S.wfrom*100)+'%';
+    const style='background-color:'+col+';--bimg:url(../../../ui/public/'+S.still+'.jpg);--bop:'+Math.min(1,(+S.wsub)*0.55)+';--bfrom:'+(+S.wfrom*100)+'%';
     document.getElementById('main').innerHTML='<header class="banner look-'+look+art+' size-'+S.bsize+'" style="'+style.replace(/"/g,'&quot;')+'">'+ic+'<div><h1>'+g.label+'</h1>'+d+'</div></header>'+body+
       '<div class="capsule" role="status"><b>2 unsaved changes</b><button class="btn g">Discard</button><button class="btn p">Save</button></div>';
     return;
