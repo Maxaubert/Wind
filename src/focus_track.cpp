@@ -223,6 +223,18 @@ void FocusTracker::run() {
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     IUIAutomation* uia = nullptr;
     CoCreateInstance(__uuidof(CUIAutomation), nullptr, CLSCTX_INPROC_SERVER, __uuidof(IUIAutomation), (void**)&uia);
+    // Every UIA call is a round trip into the target app, and one app that does not answer stalls
+    // ALL tracking for the default timeouts (field 2026-10-04: GetFocusedElement blocked 3016 ms
+    // right after an app switch, and the next app's typing went unfollowed). Cap both waits: a slow
+    // app now costs at most half a second, and the 16 ms poll simply asks again.
+    if (uia) {
+        IUIAutomation2* uia2 = nullptr;
+        if (SUCCEEDED(uia->QueryInterface(__uuidof(IUIAutomation2), (void**)&uia2)) && uia2) {
+            uia2->put_ConnectionTimeout(500);
+            uia2->put_TransactionTimeout(500);
+            uia2->Release();
+        }
+    }
     FocusHandler* fh = nullptr;
     if (uia) { fh = new FocusHandler(); if (FAILED(uia->AddFocusChangedEventHandler(nullptr, fh))) { fh->Release(); fh = nullptr; } }
     HWINEVENTHOOK h1 = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr, FocusTrackImpl::OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
@@ -316,6 +328,50 @@ void FocusTracker::run() {
     };
 
     // Caret, fastest source first. Releases everything it acquires.
+    // VS Code's editor (and Monaco elsewhere) is an EditContext element, "native-edit-context",
+    // whose UIA caret and selection stay at the START of the line wherever the caret is on it
+    // (probe 2026-10-04: x=263 through End, typing and arrows). Chromium's MSAA system caret for
+    // magnifiers tracks it exactly, so for that element only the MSAA caret wins when it is on
+    // the same line. Not for other Chromium text (Edge textareas): their UIA caret is right and
+    // the MSAA one lags it by about 100 ms. The class is asked once per focus; the 60 Hz poll
+    // reuses the last MSAA answer for 100 ms, a caret event always asks fresh.
+    struct EditContextCache {
+        unsigned gen = ~0u; HWND fg = nullptr; bool is = false;
+        bool have = false; RECT msaa{}; ULONGLONG at = 0;
+    } edc;
+    auto editContextCaret = [&](IUIAutomationElement* el, RECT& rc, const char*& src, bool fromPoll) {
+        if (!el) return;
+        // Keyed on the window too: a resolve can run before the next app's focus event arrives,
+        // and a stale "is VS Code" must never send MSAA queries into another app (field: Notepad
+        // tracking went silent for 2.5 s right after leaving VS Code).
+        const HWND fgNow = GetForegroundWindow();
+        if (edc.gen != focusGen || edc.fg != fgNow) {
+            edc = EditContextCache{}; edc.gen = focusGen; edc.fg = fgNow;
+            BSTR cls = nullptr;
+            const ULONGLONG c0 = GetTickCount64();
+            const HRESULT hr = el->get_CurrentClassName(&cls);
+            if (GetTickCount64() - c0 > 100)
+                wind::Log(wind::LogLevel::Info, "track", "slow class name %llums", GetTickCount64() - c0);
+            if (SUCCEEDED(hr) && cls) {
+                edc.is = wcscmp(cls, L"native-edit-context") == 0;
+                SysFreeString(cls);
+            }
+        }
+        if (!edc.is) return;
+        const ULONGLONG now = GetTickCount64();
+        if (!(fromPoll && edc.have && now - edc.at < 100)) {
+            RECT m{};
+            edc.have = MsaaCaret(m);
+            if (edc.have) edc.msaa = m;
+            edc.at = now;
+        }
+        if (!edc.have) return;
+        const LONG lineH = rc.bottom - rc.top;
+        const LONG dy = edc.msaa.top - rc.top;
+        if ((dy < 0 ? -dy : dy) > (lineH > 16 ? lineH / 2 : 8)) return;   // another line: stale, keep UIA
+        rc = edc.msaa;
+        src = "msaa-editcontext";
+    };
     auto findCaret = [&](IUIAutomationElement* el, RECT& rc, const char*& src, bool fromPoll) -> bool {
         if (Win32Caret(rc)) { src = "win32"; return true; }
         if (!el) return false;
@@ -333,7 +389,7 @@ void FocusTracker::run() {
             }
             tp2->Release();
         }
-        if (ok) return true;
+        if (ok) { editContextCaret(el, rc, src, fromPoll); return true; }
         IUIAutomationTextPattern* tp = nullptr;
         if (SUCCEEDED(el->GetCurrentPatternAs(UIA_TextPatternId, __uuidof(IUIAutomationTextPattern), (void**)&tp)) && tp) {
             IUIAutomationTextRangeArray* sel = nullptr;
@@ -352,6 +408,7 @@ void FocusTracker::run() {
             }
             tp->Release();
         }
+        if (ok) editContextCaret(el, rc, src, fromPoll);
         return ok;
     };
 
@@ -376,9 +433,21 @@ void FocusTracker::run() {
                                            javaCaret.right - javaCaret.left, javaCaret.bottom - javaCaret.top);
             }
         }
+        // Slow-resolve log (#365 diagnosis): a cross-process call that blocks stalls ALL tracking.
+        const ULONGLONG rs0 = GetTickCount64();
         IUIAutomationElement* el = nullptr;
-        if (uia) uia->GetFocusedElement(&el);
         RECT b{};                                   // the focused element's bounds (empty = unknown)
+        // An app with a classic Win32 caret needs no UIA at all while focus-following is off: that
+        // caret wins in findCaret anyway. Skipping the lookup matters: GetFocusedElement blocked
+        // for 3 s at Notepad's activation (field 2026-10-04), a fixed wait the UIA timeouts do not
+        // cap, and it froze tracking into the next app. The caret window's rect stands in for the
+        // element bounds (the focus identity and the Gecko check).
+        GUITHREADINFO cgi{}; cgi.cbSize = sizeof(cgi);
+        const bool win32Only = !java && !wantFocus_.load() &&
+            GetGUIThreadInfo(GetWindowThreadProcessId(fg, nullptr), &cgi) && cgi.hwndCaret;
+        if (win32Only) GetWindowRect(cgi.hwndCaret, &b);
+        else if (uia) uia->GetFocusedElement(&el);
+        const ULONGLONG rs1 = GetTickCount64();
         if (el && FAILED(el->get_CurrentBoundingRectangle(&b))) b = RECT{};
         // 1. A focus change: follow the focused control (if wanted). Its caret becomes the baseline.
         //    A container-sized focus (the page after leaving a text box, a pane, the window) is not
@@ -397,7 +466,12 @@ void FocusTracker::run() {
         // 2. The caret: published only when it moved within the same focus.
         if (wantCaret_.load()) {
             RECT rc{}; const char* src = "";
+            const ULONGLONG fc0 = GetTickCount64();
             const bool found = java ? (javaHave ? (rc = javaCaret, src = "java", true) : false) : findCaret(el, rc, src, fromPoll);
+            const ULONGLONG fc1 = GetTickCount64();
+            if (fc1 - rs0 > 200)
+                wind::Log(wind::LogLevel::Info, "track", "slow resolve %llums (focused element %llums, caret %llums, src %s, poll=%d)",
+                          fc1 - rs0, rs1 - rs0, fc1 - fc0, found ? src : "-", (int)fromPoll);
             if (found) {
                 // #337: a caret rect that also spans blank lines above (Chromium web editors, both its
                 // UIA and Win32 carets) is trimmed to one line at its bottom, the real caret line. The

@@ -212,6 +212,15 @@ default off). `FocusTracker` (`src/focus_track.*`) runs on its own thread with W
   clears the key, so it still only baselines.
 - Caret rects are corrected in `src/caret_rect.h` (tall Chromium rects trimmed to the line, a
   whole-line rect recognised).
+- **VS Code (EditContext).** Its editor element (`native-edit-context`, also Monaco elsewhere)
+  reports the UIA caret at the start of the line wherever the caret is on it. For that class only,
+  Chromium's MSAA system caret (`OBJID_CARET`) on the same line wins (`msaa-editcontext`). Not for
+  other Chromium text: Edge textareas have a correct UIA caret and an MSAA one that lags ~100 ms.
+  The class is cached per focus and window; the poll reuses the MSAA answer for 100 ms.
+- **A blocking app stalls all tracking.** UIA calls are capped at 500 ms
+  (`IUIAutomation2` timeouts). `GetFocusedElement` ignores them (3 s at Notepad's activation), so
+  with focus-following off an app with a Win32 caret skips UIA entirely. Calls over 200 ms log
+  `slow resolve` with the phase.
 - The glide is a critically damped spring (`SpringToward`, `src/view_glide.h`, `trackGlideMs`).
 - **Java apps** (IntelliJ, PyCharm) expose the caret only through the Java Access Bridge
   (`src/java_bridge.*`). UIPI drops the JVM's handshake to a UIAccess process, so the bridge's
