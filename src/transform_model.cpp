@@ -718,7 +718,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // Both rects in VIRTUAL-SCREEN coordinates (the old 0,0-based dst was wrong off-primary).
     // Needs UIAccess: the ENABLED publish fails without it (rig-measured ERROR_ACCESS_DENIED;
     // the DISABLED call succeeds regardless - never probe availability with the disable shape).
-    // Stomp guard (issue #217, docs/WOBBLE-CAPTURE-2026-08-21.md): the input transform is ONE
+    // Stomp guard (issue #217, docs/NATIVE-MAGNIFIER-STOMP.md): the input transform is ONE
     // system-wide slot, and native Magnifier re-publishes an ENABLED IDENTITY into it
     // continuously while it runs - even sitting unzoomed at 100%. Under a Wind zoom that
     // identity mapping unmoors the visible cursor (the wobble); a dirty Magnifier exit strands

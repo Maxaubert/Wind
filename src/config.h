@@ -66,7 +66,7 @@ struct Config {
     int    hideCursorVk     = 0;
     int    hideCursorMods   = 0;
     double maxLevel         = 12.0;  // how FAR you can zoom (does not affect zoom SPEED)
-    // --- Zoom experience (see docs/superpowers/specs/2026-05-26-configurable-zoom-design.md) ---
+    // --- Zoom experience (see docs/specs/2026-05-26-configurable-zoom-design.md) ---
     // Per-direction rate multipliers (1.0 = default speed); apply in BOTH linear and smooth modes.
     // Speed is independent of maxLevel (a fixed doublings/sec base inside ZoomController).
     double zoomInSpeed  = 1.0;       // 0.25-4.0
@@ -258,7 +258,7 @@ struct Config {
     //       "DWM parks on static values anyway" comment claims it does NOT - measure, don't assume.
     //   3 = INPUT-TRANSFORM republish only: touches no visual channel whatsoever, so it cannot
     //       shimmer even in principle. This is what native is known to do continuously
-    //       (docs/WOBBLE-CAPTURE-2026-08-21.md: it republishes an enabled identity even while
+    //       (docs/NATIVE-MAGNIFIER-STOMP.md: it republishes an enabled identity even while
     //       sitting unzoomed at 100%).
     // Resting magnification level between sessions. 1.0 = TRUE identity (default).
     // >1.0 keeps DWM in fullscreen-magnification mode even while Wind is idle, which is the one

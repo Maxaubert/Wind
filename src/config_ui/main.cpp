@@ -773,6 +773,9 @@ static void CreateWebView(HWND hwnd) {
                     g_controller->get_CoreWebView2(&g_webview);
                     { ComPtr<ICoreWebView2Settings> s0;
                       if (SUCCEEDED(g_webview->get_Settings(&s0))) {
+                          // No browser menu (Back, Reload, Print, Inspect) on right-click (#355). The page's own
+                          // contextmenu handlers still fire: right-click clears a keybind.
+                          s0->put_AreDefaultContextMenusEnabled(FALSE);
                           ComPtr<ICoreWebView2Settings9> s9;
                           if (SUCCEEDED(s0.As(&s9)) && s9)
                               s9->put_IsNonClientRegionSupportEnabled(TRUE);

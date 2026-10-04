@@ -3,7 +3,7 @@
 // (taskbar on any edge, any monitor, any DPI), the layout of its rows in DIPs, hit-testing, the
 // slider specs and value text, and the view model built from the ini, the tray layout and Wind's
 // shared status. flyout_draw.cpp paints a View; flyout_window.cpp owns the window.
-// Spec: docs/superpowers/specs/2026-10-01-tray-flyout-design.md (issue #313).
+// Spec: docs/specs/2026-10-01-tray-flyout-design.md (issue #313).
 #include <algorithm>
 #include <cmath>
 #include <cstdio>

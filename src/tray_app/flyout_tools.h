@@ -2,7 +2,7 @@
 // The tray tools' PURE logic (issue #315, no <windows.h>, unit-tested): the main-engine dropdown's
 // values, labels and restart rule, and the stretched segmented toggle group's layout.
 // engine_dropdown.cpp and flyout_window.cpp wire these to Win32.
-// Spec: docs/superpowers/specs/2026-10-02-tray-tools-design.md.
+// Spec: docs/specs/2026-10-02-tray-tools-design.md.
 #include <string>
 #include <vector>
 

@@ -1,7 +1,7 @@
 #pragma once
 // Wind.exe's side of the tray split (issue #291). Wind no longer owns a tray icon: it creates the
 // shared status block (tray_ipc.h) and keeps WindTray.exe running next to it. See
-// docs/superpowers/specs/2026-09-29-tray-process-design.md.
+// docs/specs/2026-09-29-tray-process-design.md.
 #include <string>
 
 namespace wind {
