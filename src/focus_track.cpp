@@ -1,4 +1,5 @@
 #include "focus_track.h"
+#include "focus_identity.h"   // repeat focus events keep the caret followed
 #include "logging.h"
 #include "track_filter.h"
 #include "caret_rect.h"   // trim tall UIA caret rects (#337)
@@ -261,6 +262,10 @@ void FocusTracker::run() {
     // the 60 Hz backstop poll cannot publish the new field's caret in the 30 ms before that.
     unsigned focusGen = 0, caretGen = ~0u;
     RECT lastCaret{};
+    // The control the current baseline belongs to. A focus event for that same control is a
+    // repeat, not a change (focus_identity.h); an activation (zoom-in) clears it, so a zoom-in
+    // still only baselines.
+    wind::FocusKey baseKey;
     wind::CaretLineState caretLine;   // one-line caret height in the current focus (#337)
     wind::CaretHoldState caretHold;   // last caret line, for mid-scroll Enter reports (#337)
 
@@ -365,8 +370,9 @@ void FocusTracker::run() {
                 javaHave = jab.caret(fg, javaCaret);
                 javaDirty = false;
                 if (!javaHave) javaRetryAt = now + 250;
-                if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "java read %s (poll=%d events=%u): %ld,%ld %ldx%ld",
-                                           javaHave ? "ok" : "none", (int)fromPoll, javaEvents, javaCaret.left, javaCaret.top,
+                if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "java read %s via %s index=%d (poll=%d events=%u): %ld,%ld %ldx%ld",
+                                           javaHave ? "ok" : "none", jab.lastSrc(), jab.lastIndex(),
+                                           (int)fromPoll, javaEvents, javaCaret.left, javaCaret.top,
                                            javaCaret.right - javaCaret.left, javaCaret.bottom - javaCaret.top);
             }
         }
@@ -396,6 +402,18 @@ void FocusTracker::run() {
                 // #337: a caret rect that also spans blank lines above (Chromium web editors, both its
                 // UIA and Win32 carets) is trimmed to one line at its bottom, the real caret line. The
                 // line height is per focus; Java carets come from the bridge and are left alone.
+                wind::FocusKey key;
+                {
+                    GUITHREADINFO gi{}; gi.cbSize = sizeof(gi);
+                    GetGUIThreadInfo(GetWindowThreadProcessId(fg, nullptr), &gi);
+                    key.fg = fg; key.focus = gi.hwndFocus;
+                    key.l = b.left; key.t = b.top; key.r = b.right; key.b = b.bottom;
+                    key.valid = fg != nullptr;
+                }
+                if (caretGen != focusGen && wind::SameFocus(key, baseKey)) {
+                    caretGen = focusGen;   // same control: keep following (no new baseline)
+                    if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "focus repeat (same control): caret still followed");
+                }
                 if (caretGen != focusGen) { caretLine = wind::CaretLineState{}; caretHold = wind::CaretHoldState{}; }
                 if (!java) {
                     const LONG rawTop = rc.top;
@@ -411,7 +429,7 @@ void FocusTracker::run() {
                     rc.top = top; rc.bottom = bot;
                 }
                 if (caretGen != focusGen) {
-                    caretGen = focusGen; lastCaret = rc;                       // baseline, not followed
+                    caretGen = focusGen; lastCaret = rc; baseKey = key;        // baseline, not followed
                     if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "caret baseline via %s: %ld,%ld", src, rc.left, rc.top);
                 } else if (!EqualRect(&rc, &lastCaret)) {
                     lastCaret = rc;
@@ -442,6 +460,7 @@ void FocusTracker::run() {
             } else if (m.wParam == 0) {
                 pendingCaret = true;
                 ++focusGen;          // (re)activation: the caret found now is a baseline too
+                baseKey = wind::FocusKey{};   // never a "repeat" of a focus from before the zoom-in
             } else if (m.wParam == JavaBridge::kJavaFocus) {
                 pendingFocus = true; javaDirty = true; ++javaEvents;
                 ++focusGen;          // a Java focus change: its caret is a baseline, like any other

@@ -1,6 +1,8 @@
 #include "java_bridge.h"
 #include "java_bridge_util.h"
 #include "logging.h"
+#include <shellscalingapi.h>   // GetDpiForMonitor: Java caret user space to device px
+#pragma comment(lib, "shcore.lib")
 #include <softpub.h>
 #include <wintrust.h>
 #pragma comment(lib, "wintrust.lib")
@@ -25,6 +27,7 @@ static JabIsJavaWindow     s_isJava = nullptr;
 static JabContextWithFocus s_withFocus = nullptr;
 static JabTextInfoFn       s_textInfo = nullptr;
 static JabTextRectFn       s_textRect = nullptr;
+static JabTextRectFn       s_caretLoc = nullptr;   // getCaretLocation: the caret itself (#365)
 static JabRelease          s_release = nullptr;
 static DWORD s_wakeTid = 0;
 static UINT  s_wakeMsg = 0;
@@ -189,6 +192,7 @@ bool JavaBridge::ensure(HWND javaWindow, DWORD wakeTid, UINT wakeMsg, bool log) 
     s_withFocus = (JabContextWithFocus)GetProcAddress(mod_, "getAccessibleContextWithFocus");
     s_textInfo = (JabTextInfoFn)GetProcAddress(mod_, "getAccessibleTextInfo");
     s_textRect = (JabTextRectFn)GetProcAddress(mod_, "getAccessibleTextRect");
+    s_caretLoc = (JabTextRectFn)GetProcAddress(mod_, "getCaretLocation");
     s_release = (JabRelease)GetProcAddress(mod_, "releaseJavaObject");
     auto setCaret = (JabSetEventFP)GetProcAddress(mod_, "setCaretUpdateFP");
     auto setFocus = (JabSetEventFP)GetProcAddress(mod_, "setFocusGainedFP");
@@ -230,13 +234,30 @@ bool JavaBridge::caret(HWND javaWindow, RECT& out) {
     // not responding, skip it rather than block the tracker thread (and with it all other tracking).
     if (IsHungAppWindow(javaWindow) || !s_isJava(javaWindow)) return false;
     long vm = 0; JOBJECT64 ac = 0;
-    if (!s_withFocus(javaWindow, &vm, &ac) || !ac) return false;   // ac 0 = no focus owner (inactive app)
+    if (!s_withFocus(javaWindow, &vm, &ac) || !ac) { lastSrc_ = "no-focus-owner"; return false; }   // inactive app
     bool ok = false;
+    lastSrc_ = "no-text";   // until a read below answers
     JabTextInfo ti{ -1, -1, -1 };
     if (s_textInfo(vm, ac, &ti, 0, 0) && ti.caretIndex >= 0 && ti.caretIndex <= ti.charCount) {
         JabTextRect r{ 0, 0, 0, 0 };
         auto good = [&] { return r.height > 0 && r.height < 4096 && r.width >= 0; };
-        if (s_textRect(vm, ac, &r, ti.caretIndex) && good()) {
+        // The caret's own location first (#365): the bounds of the character AT the caret came
+        // back wrong from Swing text areas (x pinned at 2, y at the top or bottom of the view,
+        // field 2026-10-04). Character bounds stay the fallback for bridges without it.
+        if (s_caretLoc && s_caretLoc(vm, ac, &r, ti.caretIndex) && good()) {
+            // Java answers in its user space: device px divided by the monitor scale (at 225%,
+            // x=59 for a caret at device x=134, field 2026-10-04). A DPI-unaware Java app is
+            // stretched by the same monitor scale, so the monitor DPI converts both.
+            UINT dx = 96, dy = 96;
+            GetDpiForMonitor(MonitorFromWindow(javaWindow, MONITOR_DEFAULTTONEAREST), MDT_EFFECTIVE_DPI, &dx, &dy);
+            const double s = dx / 96.0;
+            auto px = [s](int v) { return (LONG)(v * s + (v >= 0 ? 0.5 : -0.5)); };
+            const LONG w = px(r.width) > 2 ? px(r.width) : 2;
+            out = { px(r.x), px(r.y), px(r.x) + w, px(r.y + r.height) };
+            ok = true;
+            lastSrc_ = "caretloc";
+        } else if (s_textRect(vm, ac, &r, ti.caretIndex) && good()) {
+            lastSrc_ = "charrect";
             out = { r.x, r.y, r.x + (r.width > 1 ? r.width : 2), r.y + r.height };
             ok = true;
         } else if (ti.caretIndex > 0 && s_textRect(vm, ac, &r, ti.caretIndex - 1) && good()) {
@@ -244,7 +265,9 @@ bool JavaBridge::caret(HWND javaWindow, RECT& out) {
             // of the one before it.
             out = { r.x + r.width, r.y, r.x + r.width + 2, r.y + r.height };
             ok = true;
+            lastSrc_ = "charrect-prev";
         }
+        lastIndex_ = ti.caretIndex;
     }
     s_release(vm, ac);
     return ok;

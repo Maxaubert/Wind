@@ -205,6 +205,11 @@ default off). `FocusTracker` (`src/focus_track.*`) runs on its own thread with W
 - **Only keyboard-driven caret moves are followed.** The first caret after a focus change is a
   baseline. After a click there is a 1 s quiet period, ended early by a fresh non-modifier key down
   (`src/typing_key.h`), never by key-ups, auto-repeat or Ctrl/Shift.
+- **A focus event for the same control is not a focus change** (`src/focus_identity.h`). Notepad
+  and VS Code fire them while typing, about three per app switch, and each used to re-baseline, so
+  the first second of typing after a switch was not followed. Same foreground window, same focus
+  window and same element bounds keep the caret followed (`focus repeat` in trackLog). Zoom-in
+  clears the key, so it still only baselines.
 - Caret rects are corrected in `src/caret_rect.h` (tall Chromium rects trimmed to the line, a
   whole-line rect recognised).
 - The glide is a critically damped spring (`SpringToward`, `src/view_glide.h`, `trackGlideMs`).
@@ -212,7 +217,9 @@ default off). `FocusTracker` (`src/focus_track.*`) runs on its own thread with W
   (`src/java_bridge.*`). UIPI drops the JVM's handshake to a UIAccess process, so the bridge's
   hidden windows get a narrow `ChangeWindowMessageFilterEx` allowance. Never poll the bridge (each
   read runs on the Java app's UI thread); read only after bridge callbacks. Load only
-  Authenticode-signed bridge DLLs.
+  Authenticode-signed bridge DLLs. Read the caret with `getCaretLocation`, scaled by the monitor
+  DPI (Java answers in its user space, device px / scale). The older character bounds
+  (`getAccessibleTextRect`) gave x=2 for every Swing caret and stay only as a fallback.
 - **Mouse edge mode** (`mouseAlign=1`, free-pointer sessions only): the pointer is unwelded and
   `EdgePanCenter` (`src/edge_pan.h`) moves the view only when the cursor's visible body leaves the
   margin band (`mouseMarginPct`). Edge-pinned motion is hidden from the lock detector
