@@ -649,6 +649,13 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     if (cfg.txSmoothLadder != 0 && cfg.txSamplingMode == 1 && applyLevel > 1.001) {
         if (applyLevel == level && level == ladderReq_ && ladderOut_ > 0.0) {
             applyLevel = ladderOut_;
+        } else if (rampStopped && applyLevel == level && lastLevel_ > 1.001 &&
+                   std::fabs(lastLevel_ - level) <= level * 0.005) {
+            // The zoom just stopped: keep the level already on screen rather than re-snapping, so
+            // releasing the key never nudges the zoom in or out (field 2026-10-07).
+            ladderReq_ = level;
+            ladderOut_ = lastLevel_;
+            applyLevel = lastLevel_;
         } else {
             const int dir = applyLevel > lastLevel_ ? 1 : (applyLevel < lastLevel_ ? -1 : 0);
             const double snapped = SnapSmoothLevel(applyLevel, r.centerX, r.centerY, mon_.w, mon_.h,

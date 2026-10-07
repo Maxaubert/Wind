@@ -64,13 +64,21 @@ inline double SmoothLadderTolerance(double z) {
 // half of the screen is under tolerance on both axes; `want` itself when none is found. Never
 // steps behind `floorLevel` in the ramp's direction (dir > 0 zooming in, < 0 out, 0 settled), so a
 // snapped ramp cannot visibly reverse.
+// Tiered (field 2026-10-07: snapping up to 5 % away made zooms jump forwards and back and changed
+// the level on key-up): only levels within +-maxRel (0.5 %) of the request are considered. First
+// choice clean over the middle half of the screen, second clean at the pointer, else the request
+// itself (that frame may shake a little, but the zoom never visibly jumps).
 inline double SnapSmoothLevel(double want, double centreX, double centreY, int w, int h,
-                              double floorLevel = 0.0, int dir = 0, double maxRel = 0.05) {
+                              double floorLevel = 0.0, int dir = 0, double maxRel = 0.005) {
     if (want <= 1.001 || w <= 0 || h <= 0) return want;
-    auto ok = [&](double z) {
+    auto areaOk = [&](double z) {
         const double tol = SmoothLadderTolerance(z);
         return SmoothRoundingErrorArea(z, w, centreX) < tol &&
                SmoothRoundingErrorArea(z, h, centreY) < tol;
+    };
+    auto ptrOk = [&](double z) {
+        return std::fabs(SmoothRoundingError(z, w, centreX)) < 1.0 &&
+               std::fabs(SmoothRoundingError(z, h, centreY)) < 1.0;
     };
     auto allowed = [&](double z) {
         if (z <= 1.001) return false;
@@ -80,11 +88,14 @@ inline double SnapSmoothLevel(double want, double centreX, double centreY, int w
     };
     const double step = want * 1e-5;
     const int steps = (int)(maxRel / 1e-5);
-    if (allowed(want) && ok(want)) return want;
-    for (int i = 1; i <= steps; ++i) {
-        const double a = want + i * step, b = want - i * step;
-        if (allowed(a) && ok(a)) return a;
-        if (allowed(b) && ok(b)) return b;
+    for (int pass = 0; pass < 2; ++pass) {
+        auto ok = [&](double z) { return pass == 0 ? areaOk(z) : ptrOk(z); };
+        if (allowed(want) && ok(want)) return want;
+        for (int i = 1; i <= steps; ++i) {
+            const double a = want + i * step, b = want - i * step;
+            if (allowed(a) && ok(a)) return a;
+            if (allowed(b) && ok(b)) return b;
+        }
     }
     return want;
 }

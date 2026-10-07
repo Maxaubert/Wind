@@ -1776,11 +1776,15 @@ static void RunTick(TickState& t) {
         // So: MPO on + nearest = walls, ALWAYS. Smooth keeps the #191 ghost-gated lift (shown +
         // settled >=350ms + rect intact; fail-closed). tdrTest=4 is the field harness override.
         const bool nearestSampling = t.cfg.txSamplingMode == 0;
-        // MPO guard lift (issue #369, src/mpo_guard.h): with the guard effect on, DWM composes the zoomed
-        // desktop and no plane carries the translation, so neither the walls nor the write clamp are
-        // needed. Behind mpoGuardLiftWall until an MPO-on boot proves it at the far edge (default off).
-        const bool guardLift = mpoExposed && nearestSampling && t.cfg.mpoGuard != 0 &&
-                               t.cfg.mpoGuardLiftWall != 0;
+        // PLANE-FREE SESSION (issue #369): smooth sampling (the resample property) and the MPO guard
+        // effect both make the scaled desktop visual need an external layer, so DWM composes the zoomed
+        // desktop and no hardware plane carries the translation. Measured on an MPO boot: a full-screen
+        // flip app goes from Hardware Composed: Independent Flip to Composed: Flip at zoom-in in both
+        // cases. Then the pan walls, the write clamp and the MPO ghost are all unnecessary; the ghost
+        // alone cost 5-7 ms at every zoom-out (16-21 ms landing stalls). Behind mpoGuardLiftWall until
+        // the far edge is proven on an MPO boot (default off).
+        const bool guardLift = mpoExposed && t.cfg.mpoGuardLiftWall != 0 &&
+                               (!nearestSampling || t.cfg.mpoGuard != 0);
         const bool wallNeeded = mpoExposed && t.cfg.tdrTest != 4 && !guardLift &&
                                 (nearestSampling ||
                                  !(t.cfg.mpoBuster != 0 && tmWall->mpoGhostSettled()));
@@ -1789,7 +1793,7 @@ static void RunTick(TickState& t) {
         // strip above ~16.2x on 2160 was reachable-lethal with the X-only wall.
         t.mapper.setMaxSourceTop(wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0);
         if (tmWall) {
-            tmWall->setMpoBusterWanted(mpoExposed && t.cfg.mpoBuster != 0);
+            tmWall->setMpoBusterWanted(mpoExposed && t.cfg.mpoBuster != 0 && !guardLift);
             tmWall->setMpoExposed(mpoExposed && !guardLift);   // no write clamp under the guard lift
         }
         if (transformGame) t.lastTransformGameMs = GetTickCount64();   // device-lost backstop window
