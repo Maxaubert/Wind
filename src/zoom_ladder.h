@@ -76,8 +76,13 @@ inline double SnapWindow(double z) {
 
 // Tiered: the middle half of the screen clean within 0.5 %, else the pointer clean within
 // SnapWindow, else the request itself (that frame may shake a little; the zoom never jumps).
+// stepRel (> 0) caps both windows at the zoom's own motion this frame: a fast zoom has room to
+// pick clean levels, a decelerating one almost none, so the ease-out after the key is released
+// glides out exactly instead of holding a level and hopping to the next (field 2026-10-07: the
+// zoom visibly "settled" after the key was released).
 inline double SnapSmoothLevel(double want, double centreX, double centreY, int w, int h,
-                              double floorLevel = 0.0, int dir = 0, double maxRel = -1.0) {
+                              double floorLevel = 0.0, int dir = 0, double maxRel = -1.0,
+                              double stepRel = -1.0) {
     if (want <= 1.001 || w <= 0 || h <= 0) return want;
     auto areaOk = [&](double z) {
         const double tol = SmoothLadderTolerance(z);
@@ -96,7 +101,8 @@ inline double SnapSmoothLevel(double want, double centreX, double centreY, int w
     };
     const double step = want * 1e-5;
     for (int pass = 0; pass < 2; ++pass) {
-        const double rel = maxRel > 0.0 ? maxRel : (pass == 0 ? 0.005 : SnapWindow(want));
+        double rel = maxRel > 0.0 ? maxRel : (pass == 0 ? 0.005 : SnapWindow(want));
+        if (stepRel > 0.0 && stepRel < rel) rel = stepRel;
         const int steps = (int)(rel / 1e-5);
         auto ok = [&](double z) { return pass == 0 ? areaOk(z) : ptrOk(z); };
         if (allowed(want) && ok(want)) return want;

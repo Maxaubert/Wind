@@ -68,3 +68,11 @@ TEST_CASE("the snap window grows with zoom and high zoom still finds pointer-cle
     }
     CHECK(found >= total * 9 / 10);
 }
+
+TEST_CASE("a slow (easing) zoom is barely snapped: the snap never exceeds the frame's own motion") {
+    for (double want = 3.0; want < 30.0; want *= 1.01) {
+        const double step = 0.0003;   // ease-out: 0.03 % this frame
+        const double z = SnapSmoothLevel(want, 1920.0, 1080.0, 3840, 2160, 0.0, 0, -1.0, step);
+        CHECK(std::fabs(z - want) <= want * (step + 1e-6));
+    }
+}

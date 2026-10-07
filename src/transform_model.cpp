@@ -658,8 +658,11 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             applyLevel = lastLevel_;
         } else {
             const int dir = applyLevel > lastLevel_ ? 1 : (applyLevel < lastLevel_ ? -1 : 0);
+            // Snap no further than the zoom moves this frame (min 0.02 %, so a ramp start still snaps).
+            const double stepRel = lastLevel_ > 1.0 ? std::fabs(applyLevel - lastLevel_) / applyLevel : 1.0;
             const double snapped = SnapSmoothLevel(applyLevel, r.centerX, r.centerY, mon_.w, mon_.h,
-                                                   lastLevel_ > 1.0 ? lastLevel_ : 0.0, dir);
+                                                   lastLevel_ > 1.0 ? lastLevel_ : 0.0, dir, -1.0,
+                                                   stepRel > 0.0002 ? stepRel : 0.0002);
             ladderReq_ = level;
             ladderOut_ = snapped;
             applyLevel = snapped;
