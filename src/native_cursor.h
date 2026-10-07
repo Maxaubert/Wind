@@ -23,6 +23,20 @@ inline bool UseNativeCursor(int txNativeCursor) {
     return txNativeCursor != 0;
 }
 
+// A VISIBLE POINTER IS A FREE POINTER (field video 2026-10-07, DOOM: The Dark Ages menus). lockApps
+// and the lock tells put a session on the locked path: the view pans from raw mickeys and the weld
+// re-parks the real pointer at the view's centre once per tick. With the sprite that was invisible -
+// the sprite is drawn at the re-parked point. The native cursor is the REAL pointer, drawn by DWM
+// wherever the hand has moved it between ticks, so the locked path made it wander around the centre
+// and snap back every tick (measured at 4.7x: 22 px spread slow, 74 px medium, jumps to 118 px;
+// free with DWM centring: 0 px). A game shows the pointer only where it is a pointer (menus,
+// inventories, maps), and hides it for mouselook - the case the locked path exists for. So in a
+// native-cursor session the lock applies only while the pointer is hidden; a shown pointer gets
+// DWM centring, exactly what Windows Magnifier does there. The sprite path keeps the old rule.
+inline bool LockApplies(bool locked, bool nativeCursor, bool pointerShowing) {
+    return locked && !(nativeCursor && pointerShowing);
+}
+
 // When DWM may own the pan (DWM centring on). Only where the view is a pure function of the
 // real pointer, centred on it - exactly what DWM computes. Everything else needs Wind's offsets.
 struct DwmCentreIn {

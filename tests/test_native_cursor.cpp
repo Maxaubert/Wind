@@ -71,3 +71,10 @@ TEST_CASE("DWM centring yields only near an armed wall, not everywhere it is rea
     CHECK(NearWall(true, 1000.0, 2620.0, 12.0, 32000.0, 64.0) == true);   // bottom wall
     CHECK(NearWall(false, 2650.0, 2650.0, 12.0, 32000.0, 64.0) == false); // walls off
 }
+
+TEST_CASE("a shown pointer is free in a native-cursor session; mouselook keeps the lock") {
+    CHECK(LockApplies(true, true, true) == false);    // game menu (lockApps): DWM centring
+    CHECK(LockApplies(true, true, false) == true);    // mouselook, pointer hidden: locked pan
+    CHECK(LockApplies(true, false, true) == true);    // sprite path keeps the old rule
+    CHECK(LockApplies(false, true, false) == false);  // nothing locked
+}
