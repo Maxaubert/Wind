@@ -235,6 +235,9 @@ Config ParseConfig(const std::string& text) {
             else if (key == "txWriteHz")          c.txWriteHz = std::stoi(val);
             else if (key == "txFreeCursor")       c.txFreeCursor = std::stoi(val);
             else if (key == "txNativeCursor")     c.txNativeCursor = std::stoi(val);
+            else if (key == "txDwmCentre")        c.txDwmCentre = std::stoi(val);
+            else if (key == "txRampNearest")      c.txRampNearest = std::stoi(val);
+            else if (key == "txRampNearestSettleMs") c.txRampNearestSettleMs = std::stoi(val);
             else if (key == "lockedBallistics")   c.lockedBallistics = std::stoi(val);
             else if (key == "edgeClip")           c.edgeClip = std::stoi(val);
             else if (key == "txPace")             c.txPace = std::stoi(val);

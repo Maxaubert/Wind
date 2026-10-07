@@ -164,6 +164,8 @@ private:
     bool forceWrite_ = false;                        // a centring switch owes DWM one real write
     bool lensLogged_ = false;                        // one-shot log of the cursor-lens warm-up
     bool lensFailed_ = false;                        // the idle lens build failed: do not retry per tick
+    double ixPubLevel_ = 0.0;                        // level of the last input-transform publish (#369)
+    unsigned long long lastLevelMoveMs_ = 0;         // txRampNearest experiment (#369)
     void setDwmCentre(bool on);
     bool cursorHidden_ = false;                      // we called MagShowSystemCursor(FALSE)
     bool haveLastClick_ = false;                     // dedup the per-tick cursor weld

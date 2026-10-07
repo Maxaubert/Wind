@@ -200,8 +200,15 @@ DWM magnifies with nearest neighbour unless something calls
 - The flag is DWM-global and outlives the process that set it until DWM restarts, so a stale
   smooth state can make a build look smooth that is not. The model re-applies its mode per context
   with up to 3 retries.
-- Under smooth, level ramps shimmer slightly (the filter re-interpolates each scale step); pans are
-  clean. Swapping to nearest during ramps shifted the image 1–2 px per swap and was rejected.
+- Smooth is DWM's xBR scaler (internal resample mode 2; mode 1 is Lanczos, selectable only by the
+  `ResampleModeOverride` DWM registry value read at DWM start). xBR re-shapes edges at every new
+  scale, which is the zoom "shake": measured 2026-10-07, cursor tip jitter 8-10 px p95 with 33-39
+  direction reversals per zoom-in at smooth, 2 px and 3-7 at nearest, for the sprite and the native
+  pointer alike. Pans are clean.
+- `txRampNearest=1` (experiment, off, MPO-off boots only): nearest while the level moves, smooth
+  once it has been still for `txRampNearestSettleMs` (100). Measured: max tip step 4 px, no jump
+  over 6 px including the switch back. The older "swap shifted the image 1-2 px, rejected" verdict
+  predates the working setter (see above) and is void.
 - Smoothing once crashed dwm.exe over Mica and acrylic at high zoom; it did not reproduce on a
   newer driver. If dwm.exe crashes return, set `txSamplingMode=0` first.
 

@@ -54,4 +54,22 @@ inline bool SendWrite(bool dwmCentring, bool levelMoved, bool forceWrite) {
     return !dwmCentring || levelMoved || forceWrite;
 }
 
+// INPUT TRANSFORM vs the composed pointer (measured 2026-10-07). A MagSetInputTransform publish that
+// changes the SCALE makes DWM stop drawing the composed pointer until the next cursor event: zooming
+// in with a still mouse left no pointer in any frame of the ramp (2 of 225 frames), and with the
+// publish off it was in every frame (225 of 225). Pan-only publishes do not do it. Windows
+// Magnifier never publishes during a zoom animation, only once it ends, and from inside its mouse
+// hook, before the event that repaints the pointer. So in a native-cursor session:
+//   - hold the publish while the level ramps (a foreign stomp still forces it);
+//   - after a publish whose level differs from the last published one, nudge the pointer a pixel
+//     and back so DWM draws it again.
+inline bool HoldInputPublish(bool nativeSession, bool ramping, bool stomped) {
+    return nativeSession && ramping && !stomped;
+}
+
+inline bool NudgeAfterPublish(bool nativeSession, double publishedLevel, double previousLevel) {
+    const double d = publishedLevel - previousLevel;
+    return nativeSession && (d > 1e-4 || d < -1e-4);
+}
+
 }  // namespace wind

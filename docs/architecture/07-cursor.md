@@ -111,6 +111,14 @@ slightly during zoom ramps, nearest keeps it pixelated and steady. Pure rules:
   Wind sends only level changes (`SendWrite`) and no warm pulses: a same-level write would put a
   tick-old offset on screen. Caret, focus, keyboard pan, edge mode, Inspect and locked games switch
   it off and Wind writes the view as before; each switch forces one write.
+- **Cursor events, not style flips, switch DWM.** win32k sends the new cursor mode to DWM only on
+  the next pointer update, so zoom-in nudges the pointer a pixel and back right after turning the
+  lens style on (otherwise the small hardware pointer stayed for the whole zoom while the hand was
+  still). A `MagSetInputTransform` publish that changes the scale also stops DWM drawing the
+  pointer until the next cursor event, so native sessions hold the publish while the level ramps
+  (Windows Magnifier does the same) and nudge after a scale-changing publish (`HoldInputPublish`,
+  `NudgeAfterPublish`).
+- `txDwmCentre=0` keeps the native pointer but lets Wind write the view itself (kill switch).
 - **DWM's learned offset.** DWM learns the gap between `GetCursorPos` and its own cursor point and
   relearns it only when the cursor HANDLE changes, so a learn taken mid-jump can sit a few px off
   until the next shape change. Windows Magnifier has the same behaviour.

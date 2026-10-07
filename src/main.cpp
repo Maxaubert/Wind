@@ -2290,7 +2290,7 @@ static void RunTick(TickState& t) {
             dc.wallNeeded = wind::WallBinding(wallNeeded, lvl, t.mon.w, t.mon.h, kMaxSafeTxMagnitude);
             dc.quiesce = quiesceHold;
             dc.hookWrite = hookWrite;
-            ex.dwmCentre = wind::WantDwmCentring(dc);
+            ex.dwmCentre = t.cfg.txDwmCentre != 0 && wind::WantDwmCentring(dc);
         }
         // Our tray menu is open (in WindTray.exe, flagged through the shared block): the pointer
         // belongs to the USER (they are aiming at menu items),

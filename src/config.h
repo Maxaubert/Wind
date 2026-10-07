@@ -389,6 +389,15 @@ struct Config {
     // pointer and DWM's own centring instead of the sprite, at either sampling mode. 0 = the sprite
     // (A/B and kill switch). Read at zoom-in (hot).
     int txNativeCursor = 1;
+    // DWM centring for native-cursor sessions (issue #369): 1 = DWM re-centres on every cursor
+    // update where the view is a pure function of the pointer; 0 = Wind always writes the view (hot).
+    int txDwmCentre = 1;
+    // EXPERIMENT (issue #369): with smooth sampling, use nearest while the level moves and switch
+    // back to smooth once it has been still for txRampNearestSettleMs. Smooth is DWM's xBR scaler,
+    // whose edges re-shape at every new scale (the zoom "shake": 10 px p95 tip jitter vs 2 px at
+    // nearest). Only when MPO is off at boot (nearest + MPO is the TDR combo). 0 = off (hot).
+    int txRampNearest = 0;
+    int txRampNearestSettleMs = 100;
     // WRITE CADENCE - SHIPPED OFF (tried ON 2026-08-26, REVERTED the same day on field report).
     // The theory (issue #204) is sound: we write ~144/s where native writes ~49/s, and each write
     // makes DWM redo work proportional to the zoom. Turning it on scored well in the automated

@@ -50,3 +50,16 @@ TEST_CASE("an armed MPO wall only blocks DWM centring where the view can reach i
     CHECK(WallBinding(true, 9.5, 3840, 2160, 32000.0) == true);      // 32640: reachable
     CHECK(WallBinding(true, 1.0, 3840, 2160, 32000.0) == false);
 }
+
+TEST_CASE("input transform: held while a native session ramps, unless a foreign writer stomped it") {
+    CHECK(HoldInputPublish(true, true, false) == true);
+    CHECK(HoldInputPublish(true, true, true) == false);    // correctness of the mapping wins
+    CHECK(HoldInputPublish(true, false, false) == false);  // settled: publish
+    CHECK(HoldInputPublish(false, true, false) == false);  // sprite path: unchanged behaviour
+}
+
+TEST_CASE("pointer nudge only after a scale-changing publish in a native session") {
+    CHECK(NudgeAfterPublish(true, 3.0, 1.0) == true);
+    CHECK(NudgeAfterPublish(true, 3.0, 3.0) == false);     // pan-only publish
+    CHECK(NudgeAfterPublish(false, 3.0, 1.0) == false);
+}

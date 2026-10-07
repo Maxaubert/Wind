@@ -48,6 +48,7 @@ void TransformModel::resetTransformState() {
     panelPrimed_ = false;   // a rebuilt context needs its own public prime (#283, review #284)
     nativePrimed_ = false;  // ...and so does the native cursor (#369)
     forceWrite_ = false;    // lastLevel_ = 0 already forces the next write
+    ixPubLevel_ = 0.0;
     // Everything the write path caches must be forgotten across a teardown, or the next session
     // compares against values DWM no longer holds and skips the writes that would re-apply them.
     lastLevel_ = 0.0; lastRequestedLevel_ = 0.0;
@@ -399,8 +400,15 @@ void TransformModel::setActive(bool active) {
         // once per zoom-in regardless - that is DWM building its machinery.)
         ensureMag();
         // Native cursor: switch the pointer to DWM's composition (0.2 ms once the lens exists; a
-        // first zoom before the idle warm-up pays the lens build here, once).
-        if (nativeSession_ && host_.createCursorLens()) host_.setCursorLens(true);
+        // first zoom before the idle warm-up pays the lens build here, once). win32k sends the
+        // new cursor mode to DWM only on the next pointer update (move or shape), so without a
+        // cursor event the small hardware pointer stays on screen for the whole zoom-in while the
+        // hand is still (measured: no composed pointer in any ramp frame). Nudge a pixel and back.
+        if (nativeSession_ && host_.createCursorLens()) {
+            host_.setCursorLens(true);
+            POINT np;
+            if (GetCursorPos(&np)) { SetCursorPos(np.x + 1, np.y); SetCursorPos(np.x, np.y); }
+        }
         QueryPerformanceCounter(&z2);
         lastEnter_.bridgeMs = double(z1.QuadPart - z0.QuadPart) * 1000.0 / zf.QuadPart;
         lastEnter_.ensureMagMs = double(z2.QuadPart - z1.QuadPart) * 1000.0 / zf.QuadPart;
@@ -640,17 +648,25 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // in this rig's logs, 245 of 245, was the setter never being found: it was resolved by a
     // non-existent ordinal until #369.) Up to 3 attempts, 1 s apart, then
     // accept. The mode is DWM-global state, so a genuine miss is also re-tried per context.
-    if (cfg.txSamplingMode >= 0 && appliedSampling_ != cfg.txSamplingMode) {
+    int wantSampling = cfg.txSamplingMode;
+    if (cfg.txRampNearest != 0 && wantSampling == 1 && !mpoExposed_) {
+        // Experiment (issue #369, see config.h): nearest while the level moves.
+        const unsigned long long nowS = GetTickCount64();
+        if (!rampStopped || applyLevel != lastLevel_) lastLevelMoveMs_ = nowS;
+        if (nowS - lastLevelMoveMs_ < (unsigned long long)cfg.txRampNearestSettleMs) wantSampling = 0;
+    }
+    if (wantSampling >= 0 && appliedSampling_ != wantSampling) {
         const unsigned long long now = GetTickCount64();
-        if (sampleTryMode_ != cfg.txSamplingMode) { sampleTryMode_ = cfg.txSamplingMode; sampleTries_ = 0; }
+        if (sampleTryMode_ != wantSampling) { sampleTryMode_ = wantSampling; sampleTries_ = 0; }
         if (sampleTries_ == 0 || now - sampleLastTryMs_ >= 1000) {
-            const bool ok = host_.setSamplingMode((unsigned)cfg.txSamplingMode);
+            const bool ok = host_.setSamplingMode((unsigned)wantSampling);
             ++sampleTries_;
             sampleLastTryMs_ = now;
             if (ok || sampleTries_ >= 3) {
-                wind::Log(wind::LogLevel::Info, "transform", "bitmap smoothing %d applied=%d (tries %d)",
-                          cfg.txSamplingMode, ok ? 1 : 0, sampleTries_);
-                appliedSampling_ = cfg.txSamplingMode;
+                if (cfg.txRampNearest == 0)
+                    wind::Log(wind::LogLevel::Info, "transform", "bitmap smoothing %d applied=%d (tries %d)",
+                              wantSampling, ok ? 1 : 0, sampleTries_);
+                appliedSampling_ = wantSampling;
             }
         }
     }
@@ -881,7 +897,10 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         const bool rest = !changed;
         // warmIxOnly bypasses the decimation for the same reason a stomp does: the publish IS the
         // work here, and decimating it away would defeat the whole mode.
-        if (ixForce || warmIxOnly || rest || ++ixTick_ >= cfg.ixDecimate) {
+        // Native cursor (#369): no publish while the level ramps (it hides the composed pointer);
+        // the pending flag carries it to the first settled tick.
+        const bool hold = HoldInputPublish(nativeSession_, ramping, ixForce);
+        if (!hold && (ixForce || warmIxOnly || rest || ++ixTick_ >= cfg.ixDecimate)) {
             ixTick_ = 0;
             ixPending_ = false;
             // srcL/srcT, not r.srcLeft/srcTop: when the ramp limiters make applyLevel != level
@@ -921,6 +940,13 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
                     ok = true;
             }
             noteIxWrite(double(b.QuadPart - a.QuadPart) * 1000.0 / fr.QuadPart, ok);
+            if (ok && NudgeAfterPublish(nativeSession_, applyLevel, ixPubLevel_)) {
+                // A scale-changing publish stops DWM drawing the composed pointer until the next
+                // cursor event: give it one, a pixel and back.
+                POINT np;
+                if (GetCursorPos(&np)) { SetCursorPos(np.x + 1, np.y); SetCursorPos(np.x, np.y); }
+            }
+            if (ok) ixPubLevel_ = applyLevel;
             if (ok) {
                 ixExpectedValid_ = true;
                 ixExpectedOn_ = enable;
