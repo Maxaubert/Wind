@@ -32,16 +32,45 @@ inline double SmoothRoundingError(double z, int extent, double centre) {
     return c * (extent / z - n) / n - (std::floor(o + 0.5) - o) * z;
 }
 
-// The level nearest `want` (within +-maxRel) whose predicted error is under tol on both axes;
-// `want` itself when none is found. Never steps behind `floorLevel` in the ramp's direction
-// (dir > 0 zooming in, < 0 out, 0 settled), so a snapped ramp cannot visibly reverse.
+// Worst predicted displacement on one axis over the pointer and the middle half of the screen.
+// The size-ratio term grows linearly with the screen position, so a level that is clean at the
+// pointer can still move content elsewhere by several px (field: a horizontal line shook while
+// the cursor was steady; up to 6 px predicted). The middle half is where the eye is; requiring
+// the whole screen leaves 5-11 % gaps between clean levels above 12x. Predicted p95 over a sweep:
+// pointer-only rule 3.2 px in the middle half / 6.4 px at the edges; this rule 1.0 / 2.0 px.
+inline double SmoothRoundingErrorArea(double z, int extent, double centre) {
+    double n = std::floor(extent / z + 0.5);
+    if (n < 1.0) n = 1.0;
+    const double o = LadderOrigin(centre, z, extent);
+    const double slope = (extent / z - n) / n;
+    const double shift = (std::floor(o + 0.5) - o) * z;
+    const double cPtr = (centre - o) * z;
+    double worst = std::fabs(slope * cPtr - shift);
+    const double lo = std::fabs(slope * extent * 0.25 - shift), hi = std::fabs(slope * extent * 0.75 - shift);
+    if (lo > worst) worst = lo;
+    if (hi > worst) worst = hi;
+    return worst;
+}
+
+// Allowed predicted error: 1 px up to 12x (clean levels at most 1.1 % apart), then growing slowly
+// (1.4 px at 20x, 2 px at 32x) so the clean levels stay at most 3.1 % apart at 12-20x and 4.7 % above,
+// where one source pixel already spans 12-30 screen px.
+inline double SmoothLadderTolerance(double z) {
+    const double t = 0.05 * z + 0.4;
+    return (z <= 12.0 || t < 1.0) ? 1.0 : t;
+}
+
+// The level nearest `want` (within +-maxRel) whose predicted error over the pointer and the middle
+// half of the screen is under tolerance on both axes; `want` itself when none is found. Never
+// steps behind `floorLevel` in the ramp's direction (dir > 0 zooming in, < 0 out, 0 settled), so a
+// snapped ramp cannot visibly reverse.
 inline double SnapSmoothLevel(double want, double centreX, double centreY, int w, int h,
-                              double floorLevel = 0.0, int dir = 0,
-                              double tol = 1.0, double maxRel = 0.02) {
+                              double floorLevel = 0.0, int dir = 0, double maxRel = 0.05) {
     if (want <= 1.001 || w <= 0 || h <= 0) return want;
     auto ok = [&](double z) {
-        return std::fabs(SmoothRoundingError(z, w, centreX)) < tol &&
-               std::fabs(SmoothRoundingError(z, h, centreY)) < tol;
+        const double tol = SmoothLadderTolerance(z);
+        return SmoothRoundingErrorArea(z, w, centreX) < tol &&
+               SmoothRoundingErrorArea(z, h, centreY) < tol;
     };
     auto allowed = [&](double z) {
         if (z <= 1.001) return false;
