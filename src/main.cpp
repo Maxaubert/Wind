@@ -33,6 +33,7 @@
 #include "transform_model.h"
 #include "native_cursor.h"   // UseNativeCursor, WantDwmCentring (issue #369)
 #include "mpo_guard.h"       // WantMpoGuard, GuardedColorMatrix (issue #369)
+#include "zoom_ladder.h"     // EaseOutShouldStop (issue #369)
 #include "hitch_record.h"   // hitch recorder (#361)
 #include "tick_span.h"
 #include "input_router.h"
@@ -1358,15 +1359,16 @@ static void RunTick(TickState& t) {
     // smooth ramp, merely delayed. Gated on level > 1.0 so the session still enters and the
     // freeze holds it at ~1.01 until the hold expires.
     const bool quiesceFreeze = QuiesceHoldActive(t) && t.zoom.level() > 1.0;
-    // SMOOTH-ZOOM RELEASE (issue #369). With smooth sampling and the zoom ladder, a slow ease-out
-    // must cross DWM's whole-pixel rounding steps, and each crossing jumps the image by about the
-    // level in px; snapping it instead hopped, holding it froze then caught up (all field-tested).
-    // So the zoom stops where it is on screen at the moment the key or button is released.
+    // SMOOTH-ZOOM RELEASE (issue #369, src/zoom_ladder.h EaseOutShouldStop). With smooth sampling and
+    // the zoom ladder, a slow zoom must cross DWM's whole-pixel rounding steps, each an image jump of
+    // about the level in px; snapping the slow tail hopped, holding it froze then caught up (field).
+    // So after a release the user's ease-out runs (snapped like a held zoom) until it moves less per
+    // frame than clean levels are apart, then the zoom stops on the level on screen.
     {
         auto& zs = g_input.state();
         const bool held = zs.inHeld.load() || zs.outHeld.load() || g_input.anyBoundKeyPressed();
-        if (t.prevZoomHeld && !held && !t.zoom.hasTarget() && t.cfg.txSamplingMode == 1 &&
-            t.cfg.txSmoothLadder != 0) {
+        if (!held && !t.zoom.hasTarget() && t.cfg.txSamplingMode == 1 && t.cfg.txSmoothLadder != 0 &&
+            t.zoom.level() != t.prevLvl && wind::EaseOutShouldStop(t.zoom.level(), t.prevLvl)) {
             if (auto* tmStop = dynamic_cast<TransformModel*>(t.model)) {
                 const double shown = tmStop->writtenLevel();
                 if (shown > 1.001) { t.zoom.setLevel(shown); t.zoom.stopGlide(); }

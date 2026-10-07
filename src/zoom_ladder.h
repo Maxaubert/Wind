@@ -132,4 +132,14 @@ inline bool SameRoundingCell(double z1, double z2, double centreX, double centre
     return n1x == n2x && o1x == o2x && n1y == n2y && o1y == o2y;
 }
 
+// TRUNCATED EASE-OUT (field 2026-10-07). After a release the user's ease-out runs, snapped to
+// clean levels like a held zoom; once it moves less per frame than clean levels are apart, the
+// ladder could only hop or jump, so the zoom stops there on the level on screen. The fast part of
+// the glide (nearly all of it) survives; only the barely-moving tail is cut.
+inline bool EaseOutShouldStop(double level, double prevLevel) {
+    if (level <= 1.001 || prevLevel <= 1.001) return false;
+    const double step = std::fabs(level - prevLevel) / level;
+    return step < 0.6 * SnapWindow(level);
+}
+
 }  // namespace wind

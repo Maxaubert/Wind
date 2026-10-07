@@ -85,3 +85,10 @@ TEST_CASE("rounding cells: a tiny step usually stays inside, a long glide leaves
     CHECK(SameRoundingCell(4.0, 6.0, 1920.0, 1080.0, 3840, 2160) == false);
     CHECK(SameRoundingCell(5.0, 5.0, 1920.0, 1080.0, 3840, 2160) == true);
 }
+
+TEST_CASE("the ease-out runs while it moves faster than the clean-level spacing, then stops") {
+    CHECK(EaseOutShouldStop(5.0, 5.0 / 1.02) == false);    // 2 % per frame: still gliding
+    CHECK(EaseOutShouldStop(5.0, 5.0 / 1.001) == true);    // 0.1 % per frame: the tail, stop
+    CHECK(EaseOutShouldStop(25.0, 25.0 / 1.004) == true);  // 0.4 % at 25x (window 1.2 %)
+    CHECK(EaseOutShouldStop(1.0, 1.0) == false);
+}
