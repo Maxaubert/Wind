@@ -694,6 +694,10 @@ double OutlineDwellSeconds(bool inBand, double prevSeconds, double dt, double th
 // The first-run ini text; LoadConfig writes it and returns ParseConfig of it (issue #274).
 std::string DefaultIniText();
 Config LoadConfig(const std::wstring& path);
+// Hot-reload form: false when the ini exists but could not be read (another process is replacing
+// it, or it reads empty). The caller keeps its current Config and tries again later. Only a
+// MISSING ini is ever (re)created with the defaults.
+bool TryLoadConfig(const std::wstring& path, Config& out);
 // I/O: last write time as a comparable tick count; 0 if missing.
 unsigned long long ConfigMTime(const std::wstring& path);
 }

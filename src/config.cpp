@@ -638,20 +638,37 @@ std::string DefaultIniText() {
 // --- File I/O (excluded from the pure test build via WIND_TESTS) ------------
 #include <windows.h>
 #include <fstream>
+#include "profiles_io.h"   // ReadTextFileOk / WriteTextFileAtomic: retry through the replace window
+#include "logging.h"
 namespace wind {
-Config LoadConfig(const std::wstring& path) {
-    std::ifstream f(path);
-    if (!f) {
-        // Write defaults so the user has something to edit, and run with exactly what was
+bool TryLoadConfig(const std::wstring& path, Config& out) {
+    std::string text;
+    if (!ReadTextFileOk(path, text)) {
+        // NEVER write the defaults over an ini that exists (field 2026-10-07): an open that failed
+        // while the tray replaced the file took this branch and reset every setting mid-zoom.
+        if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) return false;
+        const DWORD e = GetLastError();
+        if (e != ERROR_FILE_NOT_FOUND && e != ERROR_PATH_NOT_FOUND) return false;
+        // Missing: write defaults so the user has something to edit, and run with exactly what was
         // written (issue #274): returning Config{} here let the template and the struct
         // defaults drift apart silently - the cursorScaleWithZoom trap in another form.
-        const std::string text = DefaultIniText();
-        std::ofstream out(path);
-        out << text;
-        return ParseConfig(text);
+        text = DefaultIniText();
+        WriteTextFileAtomic(path, text);
+        out = ParseConfig(text);
+        return true;
     }
-    std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-    return ParseConfig(text);
+    // An ini with no settings at all is a half-written or truncated file, not a user's choice.
+    if (text.find('=') == std::string::npos) return false;
+    out = ParseConfig(text);
+    return true;
+}
+Config LoadConfig(const std::wstring& path) {
+    Config c;
+    if (TryLoadConfig(path, c)) return c;
+    // Unreadable at startup: run on the defaults in memory, leave the file alone.
+    wind::Log(wind::LogLevel::Warn, "config", "magnifier.ini unreadable at load (err=%lu); running on defaults, file untouched",
+              GetLastError());
+    return ParseConfig(DefaultIniText());
 }
 unsigned long long ConfigMTime(const std::wstring& path) {
     WIN32_FILE_ATTRIBUTE_DATA d{};

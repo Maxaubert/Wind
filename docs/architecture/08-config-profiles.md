@@ -17,6 +17,18 @@ others are not).
 - Every writer uses `wind::WriteTextFileAtomic` (`src/profiles_io.h`): write a temp file, then
   `MoveFileExW(MOVEFILE_REPLACE_EXISTING)`. The temp name embeds the process id, so two writers
   never clobber each other's temp file.
+- **Around each replace the name briefly refuses opens.** Measured 2026-10-07: during a burst of
+  replaces ~1% of reads failed with `ERROR_ACCESS_DENIED` (the replaced file is delete-pending), and
+  a replace fails while a reader holds the file. So `ReadTextFileOk` and `WriteTextFileAtomic`
+  retry sharing and access errors until a deadline (250 ms; the core's tick reads with 20 ms and
+  re-checks on its next poll), and reads share delete so they never block a replace.
+- **An unreadable ini is never a missing one.** Before this, a failed open in `LoadConfig` wrote the
+  defaults over the user's file, and a failed `ReadTextFile` returned "" to read-modify-write
+  callers. Field: dragging the tray's Night light slider mid-zoom made the core reload defaults
+  (zoom keys unbound, so the zoom stuck; `onboarded=0`, so the next start opened the setup).
+  `LoadConfig` creates the defaults only for a missing file; the hot-reload keeps its settings and
+  retries (`config  ini unreadable on reload`); writers that read the live ini first use
+  `ReadLiveIni` and stop when it fails.
 - The only cross-process kernel objects are the single-instance mutexes and the
   `Local\Wind_QuitRequest` event (quit, restart handshake, installer). A window message would not
   work: UIPI drops `PostMessage` from a normal process to a UIAccess one.

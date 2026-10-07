@@ -94,6 +94,8 @@ There is no settings IPC. `WindConfig.exe` writes `magnifier.ini` and the core n
   kernel transition 144 times a second for a file a human changes. Without a watch handle the loop
   falls back to a ~1 s timed poll.
 - Only a changed mtime (`ConfigMTime`) proceeds to a reload.
+- An unreadable ini (another process mid-replace) keeps the running settings: the mtime is not
+  taken and `t.configRetry` re-checks on the next poll. See [08](08-config-profiles.md).
 
 **UI-only writes never reload.** A reload rebuilds `ZoomController`, which collapses an active zoom
 to 1x. `StripUiOnlyKeys` (`src/config.cpp`) drops `uiTheme`, `uiPalette`, `showAdvanced` and

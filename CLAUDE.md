@@ -121,6 +121,9 @@ Chapter numbers refer to `docs/architecture/NN-*.md`.
   for the process, not `taskkill`.
 - Program Files is read-only for the runtime: resolve the ini with `wind::ResolveIniPath()`, logs with
   `ResolveLogDir`, and keep the explicit WebView2 user-data folder. Never write next to the exe.
+- An unreadable ini is not a missing one (another process may be mid-replace). Read the live ini for
+  a read-modify-write with `wind::ReadLiveIni` and stop when it fails; never write defaults over an
+  existing file. See 08.
 
 ## Toolchain and workflow
 - Visual Studio is a prerelease channel here; `build.bat` calls vswhere with `-all -prerelease`.

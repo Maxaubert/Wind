@@ -106,7 +106,12 @@ void SwitchToProfile(const std::wstring& ini, const std::wstring& nameW) {
         Notify(L"Wind", L"That profile's file looks corrupt; settings unchanged.");
         return;
     } }
-    const std::string oldLive = wind::ReadTextFile(ini);
+    std::string oldLive;
+    if (!wind::ReadLiveIni(ini, oldLive)) {
+        wind::Log(wind::LogLevel::Warn, "profile", "switch aborted: live ini unreadable");
+        Notify(L"Wind", L"Could not switch profile (config file is locked).");
+        return;
+    }
     // Capture hand edits (openIni) into the outgoing profile before the live ini is replaced.
     wind::MirrorLiveToActiveProfile(ini, oldLive);
     const std::string newLive = wind::MakeLiveText(profText, oldLive, wind::NarrowUtf8(nameW));
