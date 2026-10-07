@@ -33,6 +33,9 @@ struct PresentExtras {
     // draws above its panels) instead of the sprite, and prime one public-API write so DWM draws
     // that pointer magnified. Transform model only.
     bool  realPointer = false;
+    // The view is a pure function of the real pointer this tick (free cursor, mouse-owned, no
+    // walls, no quiesce): a native-cursor session may hand the pan to DWM (issue #369).
+    bool  dwmCentre = false;
     // Colour filter for the render engine's pixel shader (issue #288). Its capture already
     // contains the DWM colour effect, so RunTick clears that effect during a render session and
     // hands the matrix here instead. Transform and 1x use the DWM effect.

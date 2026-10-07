@@ -31,6 +31,7 @@
 #include "hdr_info.h"   // issue #288
 #include "cursor_tint.h"   // tinted pointer at 1x (#288)
 #include "transform_model.h"
+#include "native_cursor.h"   // UseNativeCursor, WantDwmCentring (issue #369)
 #include "hitch_record.h"   // hitch recorder (#361)
 #include "tick_span.h"
 #include "input_router.h"
@@ -1169,6 +1170,8 @@ static void RunTick(TickState& t) {
             if (auto* tmHot = dynamic_cast<TransformModel*>(
                     t.mTransform ? t.mTransform : t.model))
                 tmHot->setIdleReleaseMs(nc.txIdleReleaseMs);
+            if (auto* tmHot = dynamic_cast<TransformModel*>(t.mTransform ? t.mTransform : t.model))
+                tmHot->setNativeCursorPref(wind::UseNativeCursor(nc.txNativeCursor, nc.txSamplingMode));
             t.cfg = nc;   // pick up renderer knobs (smoothing, filter, cursor scale, zoom speed)
             // transformExclude / renderExclude / the per-window-type engine keys may all have
             // changed: drop the cache so every exe-derived predicate is re-resolved. Without this
@@ -1812,7 +1815,10 @@ static void RunTick(TickState& t) {
         // write: the hand's motion arrives as ballistics-cooked raw input (the Inspect machinery).
         // Hook-thread writes were tried first and rejected: owning the runtime there marshals every
         // write onto the input thread (field: hitches). Tracking and edge mode pause meanwhile.
-        const bool panel = t.cfg.panelPointer != 0 && freeCursor && lvl > 1.001 && g_track.shellPanelOpen();
+        // A native-cursor session (issue #369) needs none of this: DWM's pointer is already drawn
+        // above the panels and DWM keeps it centred, so the hand moves the pointer directly.
+        const bool panel = t.cfg.panelPointer != 0 && freeCursor && lvl > 1.001 && g_track.shellPanelOpen() &&
+                           !(tmWall && tmWall->nativeSession());
         if (panel && !t.panelFreeze) {
             GetClipCursor(&t.panelSavedClip);
             POINT p{}; GetCursorPos(&p);
@@ -2274,6 +2280,18 @@ static void RunTick(TickState& t) {
         const bool quiesceHold = QuiesceHoldActive(t);
         ex.pauseWrites = t.clickPauseTicks > 0 || quiesceHold;
         if (quiesceHold) ex.suppressCursorSync = true;
+        // Native cursor (issue #369): DWM may own the pan only where the view is a pure function of
+        // the pointer. The model applies it only in a native-cursor session.
+        {
+            wind::DwmCentreIn dc;
+            dc.zoomed = lvl > 1.001;
+            dc.freeCursor = freeCursor && !panel;
+            dc.viewDetached = t.viewDetached;
+            dc.wallNeeded = wind::WallBinding(wallNeeded, lvl, t.mon.w, t.mon.h, kMaxSafeTxMagnitude);
+            dc.quiesce = quiesceHold;
+            dc.hookWrite = hookWrite;
+            ex.dwmCentre = wind::WantDwmCentring(dc);
+        }
         // Our tray menu is open (in WindTray.exe, flagged through the shared block): the pointer
         // belongs to the USER (they are aiming at menu items),
         // so the weld must not re-park it - at full tick rate it pins the cursor outright
@@ -3075,6 +3093,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                                                    cfg.cursorSprite != 0, cfg.zorderBand,
                                                    cfg.spriteBand16 != 0, cfg.cursorBandAuto != 0);
         tm->setIdleReleaseMs(cfg.txIdleReleaseMs);
+        tm->setNativeCursorPref(wind::UseNativeCursor(cfg.txNativeCursor, cfg.txSamplingMode));
         tm->setSpriteCapturable(cfg.spriteCapturable != 0);
         model = std::move(tm);
     } else {
@@ -3089,6 +3108,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                                                         cfg.cursorSprite != 0, cfg.zorderBand,
                                                         cfg.spriteBand16 != 0, cfg.cursorBandAuto != 0);
             tm2->setIdleReleaseMs(cfg.txIdleReleaseMs);
+            tm2->setNativeCursorPref(wind::UseNativeCursor(cfg.txNativeCursor, cfg.txSamplingMode));
             tm2->setSpriteCapturable(cfg.spriteCapturable != 0);
             model2 = std::move(tm2);
         }

@@ -24,6 +24,12 @@ public:
           zorderBand_(zorderBand), spriteBand16_(spriteBand16), cursorBandAuto_(cursorBandAuto) {}
     // Before initialize(). The dualcursor rig measures the sprite from captures (issue #269).
     void setSpriteCapturable(bool on) { spriteCapturable_ = on; }
+    // Native cursor preference (issue #369, src/native_cursor.h): UseNativeCursor(txNativeCursor,
+    // effective sampling). Latched into the session at zoom-in; present() keeps it current.
+    void setNativeCursorPref(bool on) { nativePref_ = on; }
+    // This session draws DWM's own pointer (no sprite, no blanking). RunTick skips the shell-panel
+    // pointer freeze for it: DWM's pointer is already above the panels.
+    bool nativeSession() const { return active_ && nativeSession_; }
     bool initialize(const MonitorTarget& monitor) override;
     // MONITOR GEOMETRY CAN CHANGE UNDER A LIVE SESSION (issue #230). mon_ feeds the clamp bounds in
     // ComputeMagTransform, the sprite's placement offsets and the MagSetInputTransform rects, and
@@ -148,6 +154,17 @@ private:
     // zoomed). So the context lives only around real zoom sessions.
     bool magUp_ = false;
     bool panelPrimed_ = false;                       // #283: public write done for this panel
+    // Native cursor (issue #369). nativePrimed_: the context's one public write that makes DWM
+    // draw the real pointer magnified. dwmCentreOn_: DWM owns the pan (DWMUpdated TRUE).
+    bool nativePref_ = false;
+    bool nativeSession_ = false;
+    bool nativePrimed_ = false;
+    bool dwmCentreOn_ = false;
+    bool dwmCentreBroken_ = false;                   // the export is missing or refused: never retry
+    bool forceWrite_ = false;                        // a centring switch owes DWM one real write
+    bool lensLogged_ = false;                        // one-shot log of the cursor-lens warm-up
+    bool lensFailed_ = false;                        // the idle lens build failed: do not retry per tick
+    void setDwmCentre(bool on);
     bool cursorHidden_ = false;                      // we called MagShowSystemCursor(FALSE)
     bool haveLastClick_ = false;                     // dedup the per-tick cursor weld
     int  lastClickX_ = 0, lastClickY_ = 0;

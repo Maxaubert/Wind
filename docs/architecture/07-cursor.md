@@ -81,10 +81,46 @@ desktop space and DWM magnifies it; the render engine scales its drawn cursor to
 cursor kept at desktop size read as tiny next to the transform. `cursorConstantSize=1` is the
 render-only opt-in for the old constant size. `cursorScaleWithZoom` is retired and ignored.
 
-## Hiding the real pointer: blanker and sprite
+## Native cursor (High resolution cursor on)
 
-In a zoomed transform session the real pointer would draw unmagnified at its raw position, so it
-is hidden and a stand-in drawn.
+With **High resolution cursor** on (`txSamplingMode=1`) and `txNativeCursor=1` (default), transform
+sessions use the pointer Windows Magnifier uses: the real pointer, drawn by DWM into the magnified
+frame. Pure rules: `src/native_cursor.h` (tested).
+
+- **The cursor lens.** `MagHost::createCursorLens` makes a hidden window of the documented
+  magnifier control class (`WC_MAGNIFIER`) on the runtime's owner thread. With
+  `MS_SHOWMAGNIFIEDCURSOR` set, win32k hands the pointer to DWM: magnified, sampled like the content
+  (smooth = sharp), drawn above every band (thumbnails, Start, the emoji panel, menus, UAC, the
+  Snipping Tool), latched in the same composition pass as the view. The style is ON only while
+  zoomed (`setActive`), 0.2 ms per toggle.
+- **Built at idle, kept warm.** The lens build costs 60-125 ms, so `idleTick` builds it at 1x right
+  after launch and the context is never released at idle (no `txIdleReleaseMs` in this mode).
+  Measured: context + lens with the style OFF costs a pointer-toggling full-screen app nothing
+  (Independent Flip, 0 spike frames); the style ON at 1x costs it 19 spikes of 20-42 ms in 6 s. So
+  the cursor-change tax belongs to the composed pointer, not to the context.
+- **No public prime.** Magnification.dll builds the same lens itself on the first public
+  `MagSetFullscreenTransform` above 1x, which blocks 200-260 ms. Owning the lens avoids that write;
+  it stays only as a fallback when the lens cannot be built.
+- **DWM centring.** Where the view is a pure function of the pointer (free cursor, mouse owns the
+  view, no reachable MPO wall, no launch quiesce: `WantDwmCentring`), the model calls
+  `SetFullscreenMagnifierOffsetsDWMUpdated(TRUE, 0, 0)` and DWM re-centres the view on every cursor
+  update. Measured per displayed frame at 3x: the pointer stays on one screen point at every speed,
+  where a tick-paced write drifts 18-24 px at medium speed and up to 96 px fast. While DWM centres,
+  Wind sends only level changes (`SendWrite`) and no warm pulses: a same-level write would put a
+  tick-old offset on screen. Caret, focus, keyboard pan, edge mode, Inspect and locked games switch
+  it off and Wind writes the view as before; each switch forces one write.
+- **DWM's learned offset.** DWM learns the gap between `GetCursorPos` and its own cursor point and
+  relearns it only when the cursor HANDLE changes, so a learn taken mid-jump can sit a few px off
+  until the next shape change. Windows Magnifier has the same behaviour.
+- No sprite, no blanker, no shell-panel freeze (`panelPointer` is skipped). The hide-cursor hotkey
+  blanks the pointer the way Inspect does. Inspect keeps its crosshair sprite.
+- **Off** (nearest sampling, or `txNativeCursor=0`): the sprite path below. It suits games: a
+  composed pointer costs a visible-cursor full-screen app its Independent Flip while zoomed.
+
+## Hiding the real pointer: blanker and sprite (High resolution cursor off)
+
+In a zoomed sprite-path transform session the real pointer would draw unmagnified at its raw
+position, so it is hidden and a stand-in drawn.
 
 - **`CursorBlanker`** (`src/cursor_blanker.*`) swaps the 14 system cursors for transparent ones and
   keeps the originals. It first reloads the user's scheme, so a previously killed Wind's blanks are
@@ -249,9 +285,9 @@ turns held pan keys into a view delta in screen space, so the feel does not chan
 - While panning, KeyPan owns the view ahead of caret events. The delta is clamped to the monitor
   and the MPO wall. The pointer does not move; the next mouse move places it in the view.
 
-## Shell input panels
+## Shell input panels (sprite path)
 
-The emoji picker, clipboard history and touch keyboard are composed above every window band, so
+Native-cursor sessions need none of this: DWM's pointer is already above the panels. The emoji picker, clipboard history and touch keyboard are composed above every window band, so
 the sprite goes under them. While one is open (`FocusTracker::shellPanelOpen`, from TextInputHost
 cloak events) and `panelPointer=1` (default), the transform hides the sprite, restores the real
 pointer and makes one public `MagSetFullscreenTransform` write, after which DWM draws the pointer

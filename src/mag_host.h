@@ -43,6 +43,27 @@ public:
     // NOTE: the state is not ours alone - it survives our process and is reset when DWM restarts,
     // which is why smoothing appeared to come and go across builds. Set it every session.
     bool setSamplingMode(unsigned mode);
+    // user32!SetFullscreenMagnifierOffsetsDWMUpdated (undocumented, resolved by name; issue #369).
+    // TRUE,0,0 = DWM re-centres the view on the pointer itself at every cursor update, in the
+    // same composition pass that draws the pointer (Magnify.exe's centred mode). FALSE,0.8,0.8 =
+    // the client owns the offsets (Magnify.exe's other modes). A TRUE call makes DWM keep the
+    // factor of the NEXT write, so always write the transform right after switching it on.
+    bool setDwmCentring(bool on);
+    // CURSOR LENS (issue #369). A hidden window of the documented magnifier control class
+    // (WC_MAGNIFIER) registers a window lens with win32k; with MS_SHOWMAGNIFIEDCURSOR set, win32k
+    // switches the pointer to DWM's composition, so DWM draws the REAL pointer into the magnified
+    // frame (above every band, sampled like the content). Measured on this PC:
+    //   - creating the lens costs 60-125 ms on the owner thread (once); a lens created on any other
+    //     thread registers nothing;
+    //   - toggling MS_SHOWMAGNIFIEDCURSOR costs 0.2 ms and switches the composed pointer at once;
+    //   - with the style OFF a live context + lens costs nothing: a pointer-toggling full-screen app
+    //     keeps Independent Flip with 0 spike frames. With the style ON at 1x the same app drops to
+    //     composed with 19 spikes of 20-42 ms in 6 s (the "cursor-change tax"); so ON only while zoomed.
+    // Magnification.dll builds the same lens itself on the first PUBLIC write above 1x, which is
+    // why that write blocks for 200-260 ms; owning the lens avoids that write entirely.
+    bool createCursorLens();
+    bool setCursorLens(bool on);
+    bool cursorLensReady() const { return lens_ != nullptr; }
     void shutdown();
 private:
     bool initialized_ = false;
@@ -50,5 +71,9 @@ private:
     int  (__stdcall* setMagDesktop_)(double, int, int) = nullptr;
     int  (__stdcall* setBitmapSmoothing_)(int) = nullptr;
     int  (__stdcall* setSamplingRaw_)(DWORD*) = nullptr;   // modes 2-4 (undocumented)
+    BOOL (__stdcall* setDwmUpdated_)(BOOL, float, float) = nullptr;
+    HWND lensHost_ = nullptr;
+    HWND lens_ = nullptr;
+    void destroyCursorLens();
 };
 }

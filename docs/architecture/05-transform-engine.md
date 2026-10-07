@@ -24,13 +24,17 @@ independent pairs break each other:
 
 Holds must be symmetric: take one when you need it, drop it the moment you stop.
 
-**A live context taxes every cursor change any app makes.** While a magnification context exists,
-DWM composites magnification-aware, and each cursor visibility or shape change costs a
+**The composed pointer taxes every cursor change any app makes.** While DWM draws the pointer into
+the magnified frame (a show-magnified-cursor lens: Magnification.dll's own after a public write
+above 1x, or Wind's cursor lens with its style on), each cursor visibility or shape change costs a
 re-composite. Measured in a game that toggles its pointer on middle-click: 17 spike frames per 14
-clicks with a live context, 0 without. Writing level 1.0 does not leave this mode; only releasing
-the runtime does. So the context lives only around real sessions, and there is no warm-up write at
-launch (24 spike frames with one, 0 without). Colour filters hold the runtime at 1x and pay this
-tax ([04](04-render-engine.md)).
+clicks with that state live, 0 without; and on 2026-10-07 with a full-screen app blinking its
+pointer: 19 spikes of 20-42 ms in 6 s with the composed pointer at 1x, 0 with a context alone, a
+context after a private-channel zoom, or a context plus the cursor lens with its style off (all
+three kept Independent Flip). So the sprite path keeps the context only around real sessions, and
+there is no warm-up write at launch; the native cursor keeps context and lens warm with the style
+off at 1x ([07](07-cursor.md#native-cursor-high-resolution-cursor-on)). Colour filters hold the
+runtime at 1x ([04](04-render-engine.md)).
 
 **Calls are thread-affine.** Only the thread that called `MagInitialize` can drive the transform;
 a write from another thread returns FALSE and changes nothing (`src/mag_thread.h`). Every entry
@@ -112,10 +116,27 @@ stateDiagram-v2
 - `setActive(false)` parks DWM at identity at once. Returning to identity costs a ~150 ms
   compositor stall, so it is paid during the zoom-out motion, not seconds later in a game.
 - `idleTick()` releases the context once `txIdleReleaseMs` (default 1200, hot) passes, long enough
-  that quick zoom flicks skip the ~36 ms rebuild.
+  that quick zoom flicks skip the ~36 ms rebuild. Native-cursor mode never releases at idle: it
+  builds the context and the cursor lens at 1x after launch and keeps them, style off.
+- Native-cursor sessions skip the blanker and the sprite stand-up at zoom-in (no cursor swaps) and
+  only switch the cursor lens style; zoom-out switches it off after the identity park and nudges
+  the pointer so the hardware plane repaints.
 - `teardownMag` restores cursor state **first** (`MagShowSystemCursor(TRUE)` needs a live context),
   then `resetTransformState()` forgets every cached value, so the next session does not skip writes
   DWM no longer holds.
+
+## DWM centring (native cursor)
+
+`MagHost::setDwmCentring` wraps `SetFullscreenMagnifierOffsetsDWMUpdated` (user32, undocumented,
+resolved by name): TRUE,0,0 hands the pan to DWM, which re-centres on every cursor update; FALSE,0.8,0.8
+gives it back. Rules (`src/native_cursor.h`, tested):
+
+- On only where the view is a pure function of the pointer and no MPO wall is in reach
+  (`WallBinding`: above ~9.3x on a 3840 wide monitor, 15.8x on 2160 high, when armed).
+- While on, only level changes are written; warm pulses stop. DWM keeps the factor of the write
+  that follows a TRUE call, so every switch forces one write (`forceWrite_`, survives paused ticks).
+- `MagGetFullscreenTransform` does not see DWM's own moves: win32k's copy keeps Wind's last write.
+  Judge centring on screen, not by read-back.
 
 ## Clamping
 

@@ -385,6 +385,10 @@ struct Config {
     int txHookWrite = 0;
     int panelPointer = 1;   // #283: real magnified pointer, frozen and moved by Wind, while a shell input panel is open
     int txFreeCursor = 1;
+    // Native cursor (issue #369, src/native_cursor.h): with High resolution cursor on (smooth
+    // sampling), transform sessions use DWM's own magnified pointer and DWM's own centring instead
+    // of the sprite. 0 = always the sprite (A/B and kill switch). Read at zoom-in (hot).
+    int txNativeCursor = 1;
     // WRITE CADENCE - SHIPPED OFF (tried ON 2026-08-26, REVERTED the same day on field report).
     // The theory (issue #204) is sound: we write ~144/s where native writes ~49/s, and each write
     // makes DWM redo work proportional to the zoom. Turning it on scored well in the automated
