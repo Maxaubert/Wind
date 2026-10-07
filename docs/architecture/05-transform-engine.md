@@ -177,10 +177,12 @@ Defences (wall arming in `RunTick`, write clamp in `TransformModel::present`):
   plane.
 - A write-site clamp backs the walls up when the session is exposed and the ghost is not settled,
   because the walls divide by the controller level while the write uses the step-capped level.
-- Settings couples the two: the **High resolution cursor** option sets smooth sampling and stages
-  MPO re-enable; turning it off sets nearest and stages MPO-disable, both applied at the restart.
-  Nearest with MPO on is never offered (`EffectiveSamplingMode` keeps the boot state's mode until
-  the reboot lands).
+- Since #369 the **High resolution cursor** option only switches sampling, live: smooth (resample
+  layer) and nearest with the MPO guard (colour layer) are both plane-free while zoomed, so the page
+  no longer stages MPO or asks for a restart. `mpoNearestGuard=0` restores the old rule
+  (`EffectiveSamplingMode` then keeps the boot state's mode until a reboot).
+- Plane-free sessions (`mpoGuardLiftWall=1`, default) also drop the pan walls, the write clamp and
+  the MPO ghost. Field-run on an MPO boot at up to 31x, far right and bottom: no driver reset.
 - `tdrTest` is the field harness: 2 probes the clamp, 4 lifts the wall.
 - **MPO nearest guard** (`src/mpo_guard.h`, issue #369). Zoomed at nearest on an MPO boot, Wind
   applies an invisible colour effect (0.998 on R, G, B). A colour transform, like the resample

@@ -396,14 +396,14 @@ struct Config {
     // boot, with an invisible colour effect while zoomed so DWM composes the desktop itself (no
     // plane, no 16-bit overflow). 0 (default until verified on an MPO boot) = nearest on MPO boots
     // is turned into smooth as before. The pan walls stay armed either way. Restart to apply.
-    int mpoNearestGuard = 0;
+    int mpoNearestGuard = 1;
     // Smooth-zoom ladder (issue #369, src/zoom_ladder.h): with smooth sampling, zoom only through
     // levels where DWM's per-frame scratch rounding predicts under 1 px of movement (the zoom shake:
     // 11 px p95 -> 0.7 px measured at 10-25x). 0 = off (hot).
     int txSmoothLadder = 1;
     int mpoGuardTest = 0;   // diagnostic: apply the MPO guard effect even on an MPO-off boot (hot)
     int mpoGuard = 1;       // diagnostic: 0 = never apply the guard effect (A/B on an MPO boot; hot)
-    int mpoGuardLiftWall = 0;   // 1 = no pan walls / write clamp while the guard is on (needs proof; hot)
+    int mpoGuardLiftWall = 1;   // no pan walls / write clamp / ghost while the session is plane-free (hot)
     // WRITE CADENCE - SHIPPED OFF (tried ON 2026-08-26, REVERTED the same day on field report).
     // The theory (issue #204) is sound: we write ~144/s where native writes ~49/s, and each write
     // makes DWM redo work proportional to the zoom. Turning it on scored well in the automated

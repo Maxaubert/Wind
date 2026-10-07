@@ -96,6 +96,9 @@ int EffectiveGpuPriority(const Config& c) {
 int EffectiveSamplingMode(int iniValue, bool mpoDisabledAtBoot, bool mpoDisabledInRegistry,
                           int tdrTest, bool nearestGuard) {
     if (tdrTest != 0) return iniValue;
+    // With the MPO guard both looks are safe on any boot (#369): the ini value runs as is, no
+    // restart-pending hold.
+    if (nearestGuard) return iniValue;
     if (mpoDisabledAtBoot != mpoDisabledInRegistry)     // restart pending: hold the boot look
         return mpoDisabledAtBoot ? 0 : 1;
     if (iniValue == 0 && !mpoDisabledAtBoot && !nearestGuard) return 1;  // crisp on an MPO boot = the TDR combo

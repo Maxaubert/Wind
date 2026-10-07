@@ -88,8 +88,9 @@ Chapter numbers refer to `docs/architecture/NN-*.md`.
   stay 0); do not gate the sprite on "the view moved".
 - Keep the 2 px right/bottom clamp and the 1-texel left/top floor in `ComputeMagTransform` (TDR and
   grey-edge classes).
-- MPO on + nearest sampling overflows a 16-bit driver field above ~9.3x at the far right: walls
-  always. Never offer nearest with MPO on.
+- MPO on + nearest sampling overflows a 16-bit driver field above ~9.3x at the far right unless the
+  MPO guard (`src/mpo_guard.h`, default on) keeps apps off planes while zoomed. Never turn the guard
+  off with nearest on an MPO boot; walls come back only when it is off.
 - `txWarmMode`/`txWarmHz`: every warm write is a full DWM re-render; composition-rate metrics miss
   the pan-start hitch. Field-verify in a game.
 - Publish the source-rect input transform on every change (needs UIAccess); identity or none gives

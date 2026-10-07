@@ -245,24 +245,17 @@ test('engine change writes the ini, then Restart Wind relaunches; a failed relau
   expect(await page.evaluate(() => window.__live.model)).toBe('hybrid');
 });
 
-test('High resolution cursor: the registry write follows the toggle and a dismissed UAC reverts it', async ({ page }) => {
-  await page.addInitScript(() => {
-    const orig = window.chrome.webview.postMessage;
-    window.chrome.webview.postMessage = (msg) => {
-      orig(msg);
-      if (msg.type === 'setMpoDisabled')
-        window.__hostSend({ type: 'mpoApplied', ok: false, disabled: false });
-    };
-  });
+test('High resolution cursor applies live: no MPO registry write, no restart prompt (#369)', async ({ page }) => {
   await page.goto('/');
   await go(page, 'view');
   const sw = page.locator('[data-key="txSamplingMode"]').getByRole('switch');
-  await sw.check({ force: true });   // high resolution on: MPO already enabled, no registry write
-  expect(await sent(page, 'setMpoDisabled')).toHaveLength(0);
-  await sw.click({ force: true }); // crisp: needs MPO disabled, the admin prompt is dismissed
-  await expect(page.getByRole('dialog', { name: 'MPO change not applied' })).toBeVisible();
-  expect(await sent(page, 'setMpoDisabled')).toHaveLength(1);
+  await sw.check({ force: true });
   expect(await page.evaluate(() => window.__live.txSamplingMode)).toBe('1');
+  await sw.click({ force: true });
+  expect(await page.evaluate(() => window.__live.txSamplingMode)).toBe('0');
+  expect(await sent(page, 'setMpoDisabled')).toHaveLength(0);
+  await expect(page.getByRole('dialog', { name: 'Restart to finish' })).toHaveCount(0);
+  await expect(page.locator('[data-key="txSamplingMode"]').getByText('Requires restart')).toHaveCount(0);
 });
 
 test('the tray switching profile reloads the session', async ({ page }) => {
