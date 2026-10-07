@@ -94,11 +94,11 @@ int EffectiveGpuPriority(const Config& c) {
 }
 
 int EffectiveSamplingMode(int iniValue, bool mpoDisabledAtBoot, bool mpoDisabledInRegistry,
-                          int tdrTest) {
+                          int tdrTest, bool nearestGuard) {
     if (tdrTest != 0) return iniValue;
     if (mpoDisabledAtBoot != mpoDisabledInRegistry)     // restart pending: hold the boot look
         return mpoDisabledAtBoot ? 0 : 1;
-    if (iniValue == 0 && !mpoDisabledAtBoot) return 1;  // crisp on an MPO boot = the TDR combo
+    if (iniValue == 0 && !mpoDisabledAtBoot && !nearestGuard) return 1;  // crisp on an MPO boot = the TDR combo
     return iniValue;
 }
 
@@ -236,6 +236,8 @@ Config ParseConfig(const std::string& text) {
             else if (key == "txFreeCursor")       c.txFreeCursor = std::stoi(val);
             else if (key == "txNativeCursor")     c.txNativeCursor = std::stoi(val);
             else if (key == "txDwmCentre")        c.txDwmCentre = std::stoi(val);
+            else if (key == "mpoNearestGuard")    c.mpoNearestGuard = std::stoi(val);
+            else if (key == "mpoGuardTest")       c.mpoGuardTest = std::stoi(val);
             else if (key == "lockedBallistics")   c.lockedBallistics = std::stoi(val);
             else if (key == "edgeClip")           c.edgeClip = std::stoi(val);
             else if (key == "txPace")             c.txPace = std::stoi(val);

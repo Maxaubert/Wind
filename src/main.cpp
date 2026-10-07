@@ -32,6 +32,7 @@
 #include "cursor_tint.h"   // tinted pointer at 1x (#288)
 #include "transform_model.h"
 #include "native_cursor.h"   // UseNativeCursor, WantDwmCentring (issue #369)
+#include "mpo_guard.h"       // WantMpoGuard, GuardedColorMatrix (issue #369)
 #include "hitch_record.h"   // hitch recorder (#361)
 #include "tick_span.h"
 #include "input_router.h"
@@ -869,7 +870,8 @@ static bool RenderOverlayShown(TickState& t) {
     return rm && rm->visible();
 }
 static void UpdateColorFilter(TickState& t, bool zoomedNow, bool renderSession, PresentExtras* ex) {
-    (void)zoomedNow;   // applies zoomed and at 1x alike (owner decision 2026-09-29)
+    // The user's filter applies zoomed and at 1x alike (owner decision 2026-09-29); zoomedNow gates
+    // only the MPO guard below.
     const double w = t.cfg.colorWarmPct / 100.0, d = t.cfg.colorDimPct / 100.0;
     // Toggling HDR is not guaranteed to raise WM_DISPLAYCHANGE (and may settle after it), so while a
     // filter is on the state is re-read once a second. A DisplayConfig query is microseconds (the
@@ -883,9 +885,17 @@ static void UpdateColorFilter(TickState& t, bool zoomedNow, bool renderSession, 
     const wind::ColorMatrix enc = wind::BuildColorMatrix(w, d, false);
     const bool inShader = renderSession && !wind::IsIdentity(enc);
     if (ex) { ex->colorOn = inShader; ex->color = enc; }
-    const wind::ColorMatrix dwm = inShader ? wind::IdentityColorMatrix()
-                                           : wind::BuildColorMatrix(w, d, g_hdrOn.load(std::memory_order_relaxed));
-    g_color.apply(dwm, !wind::IsIdentity(dwm));
+    wind::ColorMatrix dwm = inShader ? wind::IdentityColorMatrix()
+                                     : wind::BuildColorMatrix(w, d, g_hdrOn.load(std::memory_order_relaxed));
+    // MPO guard (issue #369, src/mpo_guard.h): zoomed at nearest on an MPO boot, an invisible
+    // non-identity effect makes DWM compose the desktop itself, so no plane can take the 16-bit
+    // translation. The engine's runtime carries it (zoomed only), so it never needs our own hold.
+    const bool mpoGuard = wind::WantMpoGuard(zoomedNow, dynamic_cast<TransformModel*>(t.model) != nullptr,
+                                             !g_mpoDisabled || t.cfg.mpoGuardTest != 0,
+                                             t.cfg.txSamplingMode);
+    const bool userFilter = !wind::IsIdentity(dwm);
+    dwm = wind::GuardedColorMatrix(dwm, mpoGuard);
+    g_color.apply(dwm, userFilter);
 }
 
 // Tinted pointer at 1x (spec 2026-09-30-cursor-tint-design.md): the hardware pointer is out of the
@@ -1121,7 +1131,8 @@ static void RunTick(TickState& t) {
             // crisp never runs on an MPO-enabled boot (the 16-bit TDR combo; covers profile
             // switches and hand edits too). The ini keeps the user's intent.
             if (int eff = EffectiveSamplingMode(nc.txSamplingMode, g_mpoDisabled,
-                                                wind::MpoDisabledInRegistry(), nc.tdrTest);
+                                                wind::MpoDisabledInRegistry(), nc.tdrTest,
+                                                nc.mpoNearestGuard != 0);
                 eff != nc.txSamplingMode) {
                 wind::Log(wind::LogLevel::Info, "config",
                           "sampling %d deferred, running %d: MPO restart pending or MPO-enabled "
@@ -2995,7 +3006,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // an MPO-enabled boot (the 16-bit TDR combo). The ini keeps the user's intent. Mirrored at
     // the hot-reload site in RunTick, which also covers profile switches and hand edits.
     if (int eff = EffectiveSamplingMode(cfg.txSamplingMode, g_mpoDisabled,
-                                        wind::MpoDisabledInRegistry(), cfg.tdrTest);
+                                        wind::MpoDisabledInRegistry(), cfg.tdrTest,
+                                        cfg.mpoNearestGuard != 0);
         eff != cfg.txSamplingMode) {
         wind::Log(wind::LogLevel::Info, "config",
                   "sampling %d deferred, running %d: MPO restart pending or MPO-enabled boot "

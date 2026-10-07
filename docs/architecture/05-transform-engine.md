@@ -182,6 +182,13 @@ Defences (wall arming in `RunTick`, write clamp in `TransformModel::present`):
   Nearest with MPO on is never offered (`EffectiveSamplingMode` keeps the boot state's mode until
   the reboot lands).
 - `tdrTest` is the field harness: 2 probes the clamp, 4 lifts the wall.
+- **MPO nearest guard** (`src/mpo_guard.h`, issue #369). Zoomed at nearest on an MPO boot, Wind
+  applies an invisible colour effect (0.998 on R, G, B). A colour transform, like the resample
+  property, makes the scaled desktop visual require an external layer, and nothing under such a
+  visual is recorded as a plane candidate, so no plane can carry the overflowing translation.
+  `mpoNearestGuard=1` (default 0 until verified) lets nearest run on MPO boots with the guard;
+  `mpoGuardTest=1` forces the effect on an MPO-off boot to check its look. The pan walls stay
+  armed for nearest either way until an MPO-on boot proves the guard (fail-closed).
 
 ## Bitmap smoothing
 
