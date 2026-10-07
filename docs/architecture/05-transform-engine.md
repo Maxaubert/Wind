@@ -214,6 +214,11 @@ DWM magnifies with nearest neighbour unless something calls
   2 px and 3-7 at nearest; same for the sprite and the native pointer. Pans are clean. Suspected
   cause (untested): the scratch target snaps to whole source pixels while the private channel
   positions the view in screen pixels, so the image can jump up to one source pixel times the zoom.
+- **Smooth-zoom ladder** (`txSmoothLadder=1`, `src/zoom_ladder.h`): the smooth path's scratch image
+  has its size and origin rounded to whole pixels every frame, and two closed terms predict the
+  resulting shift per level. While smooth, the applied level snaps to the nearest level predicting
+  under 1 px (never backwards in a ramp; held once the zoom settles). Measured standalone at
+  3840x2160: 10-25x jitter 11 px -> 0.7 px p95, worst jump 42 px -> 2 px; 2-10x 4.7 px -> 0.8 px.
 - Nearest while the level moves and smooth at rest was tried: steady, but the switch from pixel to
   smooth is plainly visible, so it was rejected (2026-10-07). The older "swap shifted the image
   1-2 px" verdict predates the working setter and is void.

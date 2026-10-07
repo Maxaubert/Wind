@@ -397,6 +397,10 @@ struct Config {
     // plane, no 16-bit overflow). 0 (default until verified on an MPO boot) = nearest on MPO boots
     // is turned into smooth as before. The pan walls stay armed either way. Restart to apply.
     int mpoNearestGuard = 0;
+    // Smooth-zoom ladder (issue #369, src/zoom_ladder.h): with smooth sampling, zoom only through
+    // levels where DWM's per-frame scratch rounding predicts under 1 px of movement (the zoom shake:
+    // 11 px p95 -> 0.7 px measured at 10-25x). 0 = off (hot).
+    int txSmoothLadder = 1;
     int mpoGuardTest = 0;   // diagnostic: apply the MPO guard effect even on an MPO-off boot (hot)
     // WRITE CADENCE - SHIPPED OFF (tried ON 2026-08-26, REVERTED the same day on field report).
     // The theory (issue #204) is sound: we write ~144/s where native writes ~49/s, and each write

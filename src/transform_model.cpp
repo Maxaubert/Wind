@@ -9,6 +9,7 @@
 #include "config_path.h"   // ResolveLogDir
 #include "tick_span.h"     // per-tick spans (#361)
 #include "native_cursor.h" // UseNativeCursor, NudgeAfterWrite (pure, tested): issue #369
+#include "zoom_ladder.h"   // SnapSmoothLevel (pure, tested): issue #369
 #include <cstdio>
 #include <windows.h>
 #include <magnification.h>
@@ -49,6 +50,7 @@ void TransformModel::resetTransformState() {
     nativePrimed_ = false;  // ...and so does the native cursor (#369)
     forceWrite_ = false;    // lastLevel_ = 0 already forces the next write
     ixPubLevel_ = 0.0;
+    ladderReq_ = 0.0; ladderOut_ = 0.0;
     // Everything the write path caches must be forgotten across a teardown, or the next session
     // compares against values DWM no longer holds and skips the writes that would re-apply them.
     lastLevel_ = 0.0; lastRequestedLevel_ = 0.0;
@@ -620,6 +622,22 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         double snapped = std::pow(g, std::floor(k + 0.5));
         if (snapped < 1.0) snapped = 1.0;
         applyLevel = snapped;
+    }
+    // SMOOTH-ZOOM LADDER (issue #369, src/zoom_ladder.h): with smooth sampling DWM rounds its scratch
+    // image's size and origin every frame, which shakes a continuous zoom; snap to the nearest level
+    // whose predicted rounding error is under 1 px (never backwards in the ramp). Once the zoom has
+    // settled the chosen level is held: panning at a fixed level does not shake, re-snapping would.
+    if (cfg.txSmoothLadder != 0 && cfg.txSamplingMode == 1 && applyLevel > 1.001) {
+        if (applyLevel == level && level == ladderReq_ && ladderOut_ > 0.0) {
+            applyLevel = ladderOut_;
+        } else {
+            const int dir = applyLevel > lastLevel_ ? 1 : (applyLevel < lastLevel_ ? -1 : 0);
+            const double snapped = SnapSmoothLevel(applyLevel, r.centerX, r.centerY, mon_.w, mon_.h,
+                                                   lastLevel_ > 1.0 ? lastLevel_ : 0.0, dir);
+            ladderReq_ = level;
+            ladderOut_ = snapped;
+            applyLevel = snapped;
+        }
     }
     double srcL = r.srcLeft, srcT = r.srcTop;
     if (applyLevel != level) {

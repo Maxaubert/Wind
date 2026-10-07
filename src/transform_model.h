@@ -165,6 +165,7 @@ private:
     bool lensLogged_ = false;                        // one-shot log of the cursor-lens warm-up
     bool lensFailed_ = false;                        // the idle lens build failed: do not retry per tick
     double ixPubLevel_ = 0.0;                        // level of the last input-transform publish (#369)
+    double ladderReq_ = 0.0, ladderOut_ = 0.0;       // smooth-zoom ladder: settled request -> held level
     void setDwmCentre(bool on);
     bool cursorHidden_ = false;                      // we called MagShowSystemCursor(FALSE)
     bool haveLastClick_ = false;                     // dedup the per-tick cursor weld
