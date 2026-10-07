@@ -839,6 +839,10 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         const bool prime = nativeSession_ && !nativePrimed_ && !host_.cursorLensReady() && lvlOut > 1.001;
         writeTransform((float)lvlOut, m.offX, m.offY, m.txX + txJitter, m.txY, fastPan_ && !prime, false);
         if (prime) nativePrimed_ = true;
+        if (NudgeAfterLevelWrite(dwmCentreOn_, ci.levelMoved, true)) {
+            POINT np;
+            if (GetCursorPos(&np)) { SetCursorPos(np.x + 1, np.y); SetCursorPos(np.x, np.y); }
+        }
         forceWrite_ = false;
     }
     warmLevelJitter_ = false;

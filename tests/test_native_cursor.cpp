@@ -63,3 +63,10 @@ TEST_CASE("pointer nudge only after a scale-changing publish in a native session
     CHECK(NudgeAfterPublish(true, 3.0, 3.0) == false);     // pan-only publish
     CHECK(NudgeAfterPublish(false, 3.0, 1.0) == false);
 }
+
+TEST_CASE("while DWM centres, a level write is followed by a cursor event (one centre during zoom)") {
+    CHECK(NudgeAfterLevelWrite(true, true, true) == true);
+    CHECK(NudgeAfterLevelWrite(true, false, true) == false);   // pan-only: DWM already owns it
+    CHECK(NudgeAfterLevelWrite(false, true, true) == false);   // Wind owns the view
+    CHECK(NudgeAfterLevelWrite(true, true, false) == false);   // nothing written
+}

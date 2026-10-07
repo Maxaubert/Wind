@@ -72,4 +72,14 @@ inline bool NudgeAfterPublish(bool nativeSession, double publishedLevel, double 
     return nativeSession && (d > 1e-4 || d < -1e-4);
 }
 
+// ONE CENTRE DURING ZOOM (user field test 2026-10-07). DWM centres on its own cursor point plus a
+// learned hotspot offset that can be 1-2 desktop px off Wind's exact centre; a level write puts the
+// view on Wind's centre and the next cursor event puts it back on DWM's, so a zoom with a still hand
+// sat 5-10 px off at ~5x and snapped back when the zoom stopped (gone with txDwmCentre=0). So while
+// DWM centres, every level write is followed by a cursor event (a pixel and back), which makes DWM
+// re-centre by its own rule in the same frame: one centre throughout.
+inline bool NudgeAfterLevelWrite(bool dwmCentring, bool levelMoved, bool wrote) {
+    return dwmCentring && levelMoved && wrote;
+}
+
 }  // namespace wind

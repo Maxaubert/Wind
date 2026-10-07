@@ -118,7 +118,13 @@ slightly during zoom ramps, nearest keeps it pixelated and steady. Pure rules:
   pointer until the next cursor event, so native sessions hold the publish while the level ramps
   (Windows Magnifier does the same) and nudge after a scale-changing publish (`HoldInputPublish`,
   `NudgeAfterPublish`).
-- `txDwmCentre=0` keeps the native pointer but lets Wind write the view itself (kill switch).
+- **One centre during zoom.** DWM centres on its cursor point plus a learned hotspot offset that can
+  sit 1-2 desktop px off Wind's exact centre; a level write puts the view on Wind's centre, the next
+  cursor event back on DWM's (a 5-10 px shift at ~5x that snapped back when the zoom stopped). While
+  DWM centres, every level write is followed by a pixel-and-back nudge, so DWM re-centres by its own
+  rule in the same frame (`NudgeAfterLevelWrite`). Field-verified: shift gone, pans steady.
+- `txDwmCentre=0` keeps the native pointer but lets Wind write the view itself (kill switch; pans
+  then wobble by speed x tick x zoom).
 - **DWM's learned offset.** DWM learns the gap between `GetCursorPos` and its own cursor point and
   relearns it only when the cursor HANDLE changes, so a learn taken mid-jump can sit a few px off
   until the next shape change. Windows Magnifier has the same behaviour.
