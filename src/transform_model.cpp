@@ -648,13 +648,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // in this rig's logs, 245 of 245, was the setter never being found: it was resolved by a
     // non-existent ordinal until #369.) Up to 3 attempts, 1 s apart, then
     // accept. The mode is DWM-global state, so a genuine miss is also re-tried per context.
-    int wantSampling = cfg.txSamplingMode;
-    if (cfg.txRampNearest != 0 && wantSampling == 1 && !mpoExposed_) {
-        // Experiment (issue #369, see config.h): nearest while the level moves.
-        const unsigned long long nowS = GetTickCount64();
-        if (!rampStopped || applyLevel != lastLevel_) lastLevelMoveMs_ = nowS;
-        if (nowS - lastLevelMoveMs_ < (unsigned long long)cfg.txRampNearestSettleMs) wantSampling = 0;
-    }
+    const int wantSampling = cfg.txSamplingMode;
     if (wantSampling >= 0 && appliedSampling_ != wantSampling) {
         const unsigned long long now = GetTickCount64();
         if (sampleTryMode_ != wantSampling) { sampleTryMode_ = wantSampling; sampleTries_ = 0; }
@@ -663,9 +657,8 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             ++sampleTries_;
             sampleLastTryMs_ = now;
             if (ok || sampleTries_ >= 3) {
-                if (cfg.txRampNearest == 0)
-                    wind::Log(wind::LogLevel::Info, "transform", "bitmap smoothing %d applied=%d (tries %d)",
-                              wantSampling, ok ? 1 : 0, sampleTries_);
+                wind::Log(wind::LogLevel::Info, "transform", "bitmap smoothing %d applied=%d (tries %d)",
+                          wantSampling, ok ? 1 : 0, sampleTries_);
                 appliedSampling_ = wantSampling;
             }
         }
