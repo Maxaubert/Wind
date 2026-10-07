@@ -10,8 +10,8 @@
   import './design/themes.css';
   import { groups } from './settings-schema.js';
   import { getSession, setConfig, setConfigPersist, saveSession, discardSession, openIni,
-           exportDiagnostics, openRepo, pickExe, windowControl, onMessage, getMpoState,
-           setMpoDisabled, rebootNow, setDirty, switchProfile, createProfile, deleteProfile } from './bridge.js';
+           exportDiagnostics, openRepo, pickExe, windowControl, onMessage,
+           setDirty, switchProfile, createProfile, deleteProfile } from './bridge.js';
   import { fill, changedKeys, GLOBAL_KEYS } from './session.js';
   import { themes, normalizePalette } from './design/themes.js';
   import { droppedBinds } from './lib/keybindRules.js';
@@ -75,25 +75,10 @@
     loaded = true;
   }
 
-  // --- MPO (issue #164, #242) -----------------------------------------------------------------
-  // High resolution cursor couples to the registry. The registry write needs UAC, so it runs the
-  // moment the toggle moves; a dismissed prompt reverts the toggle. mpoBoot is what DWM loaded at
-  // boot and alone decides whether a restart is required.
-  let mpoLive = $state(false), mpoBoot = $state(false), mpoKnown = $state(false);
-  let mpoRestartPrompt = $state(false), mpoFailed = $state(false);
-  const mpoNeedsRestart = $derived(mpoKnown && mpoLive !== mpoBoot);
-  async function syncMpo(prevTx) {
-    if (!mpoKnown) return;
-    const want = Number(values.txSamplingMode) !== 1;   // crisp sampling -> MPO disabled
-    if (want === mpoLive) return;
-    const res = await setMpoDisabled(want);
-    mpoLive = res.disabled;
-    if (!res.ok || res.disabled !== want) {
-      mpoFailed = true;
-      // The ini half must not land alone: crisp sampling with MPO still on is the driver-crash combo.
-      values = { ...values, txSamplingMode: prevTx }; setConfig('txSamplingMode', prevTx);
-    } else if (res.disabled !== mpoBoot) mpoRestartPrompt = true;
-  }
+  // High resolution cursor no longer touches MPO (issue #369): smooth sampling and the MPO guard
+  // (an invisible colour effect while zoomed at nearest) both keep apps off hardware planes, so
+  // either look is safe with MPO on and the toggle applies live, with no registry write or restart.
+  const mpoNeedsRestart = false;
 
   // --- Changes --------------------------------------------------------------------------------
   function change(key, val) {
@@ -102,7 +87,6 @@
     const prev = values[key];
     values = { ...values, [key]: val };
     setConfig(key, val);
-    if (key === 'txSamplingMode') syncMpo(prev);
   }
   // Keybind captures: live AND saved at once, so the hook stops swallowing the old binding and a
   // later Save or Discard cannot lose them.
@@ -136,10 +120,6 @@
     ];
     (async () => {
       await load();
-      const s = await getMpoState();
-      mpoLive = s.disabled; mpoKnown = true;
-      // No record for this boot -> assume the registry is what DWM loaded.
-      mpoBoot = s.bootKnown ? s.atBoot : s.disabled;
     })();
     return () => { offs.forEach((o) => o()); };
   });
@@ -351,19 +331,6 @@
             onEsc={() => (deleteTarget = '')}
             buttons={[{ label: 'Cancel', onClick: () => (deleteTarget = '') },
                       { label: 'Delete', kind: 'danger', onClick: () => { const name = deleteTarget; deleteTarget = ''; profileAction('delete', { name }); } }]} />
-  {/if}
-  {#if mpoRestartPrompt}
-    <Prompt id="mpo" title="Restart to finish"
-            text={'MPO is now ' + (mpoLive ? 'disabled' : 'enabled') + ' in the registry. Windows only reads this setting when it starts, so it takes effect after a restart.'}
-            onEsc={() => (mpoRestartPrompt = false)}
-            buttons={[{ label: 'Cancel', onClick: () => (mpoRestartPrompt = false) },
-                      { label: 'Restart now', kind: 'primary', onClick: () => { mpoRestartPrompt = false; rebootNow(); } }]} />
-  {/if}
-  {#if mpoFailed}
-    <Prompt id="mpof" title="MPO change not applied"
-            text="The registry was not changed. This happens if the administrator prompt was dismissed. Nothing else in your settings was affected."
-            onEsc={() => (mpoFailed = false)}
-            buttons={[{ label: 'Close', kind: 'primary', onClick: () => (mpoFailed = false) }]} />
   {/if}
   {#if restartError}
     <Prompt id="rst" title="Couldn't restart Wind"

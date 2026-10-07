@@ -24,13 +24,17 @@ independent pairs break each other:
 
 Holds must be symmetric: take one when you need it, drop it the moment you stop.
 
-**A live context taxes every cursor change any app makes.** While a magnification context exists,
-DWM composites magnification-aware, and each cursor visibility or shape change costs a
+**The composed pointer taxes every cursor change any app makes.** While DWM draws the pointer into
+the magnified frame (a show-magnified-cursor lens: Magnification.dll's own after a public write
+above 1x, or Wind's cursor lens with its style on), each cursor visibility or shape change costs a
 re-composite. Measured in a game that toggles its pointer on middle-click: 17 spike frames per 14
-clicks with a live context, 0 without. Writing level 1.0 does not leave this mode; only releasing
-the runtime does. So the context lives only around real sessions, and there is no warm-up write at
-launch (24 spike frames with one, 0 without). Colour filters hold the runtime at 1x and pay this
-tax ([04](04-render-engine.md)).
+clicks with that state live, 0 without; and on 2026-10-07 with a full-screen app blinking its
+pointer: 19 spikes of 20-42 ms in 6 s with the composed pointer at 1x, 0 with a context alone, a
+context after a private-channel zoom, or a context plus the cursor lens with its style off (all
+three kept Independent Flip). So the sprite path keeps the context only around real sessions, and
+there is no warm-up write at launch; the native cursor keeps context and lens warm with the style
+off at 1x ([07](07-cursor.md#native-cursor)). Colour filters hold the
+runtime at 1x ([04](04-render-engine.md)).
 
 **Calls are thread-affine.** Only the thread that called `MagInitialize` can drive the transform;
 a write from another thread returns FALSE and changes nothing (`src/mag_thread.h`). Every entry
@@ -112,10 +116,27 @@ stateDiagram-v2
 - `setActive(false)` parks DWM at identity at once. Returning to identity costs a ~150 ms
   compositor stall, so it is paid during the zoom-out motion, not seconds later in a game.
 - `idleTick()` releases the context once `txIdleReleaseMs` (default 1200, hot) passes, long enough
-  that quick zoom flicks skip the ~36 ms rebuild.
+  that quick zoom flicks skip the ~36 ms rebuild. Native-cursor mode never releases at idle: it
+  builds the context and the cursor lens at 1x after launch and keeps them, style off.
+- Native-cursor sessions skip the blanker and the sprite stand-up at zoom-in (no cursor swaps) and
+  only switch the cursor lens style; zoom-out switches it off after the identity park and nudges
+  the pointer so the hardware plane repaints.
 - `teardownMag` restores cursor state **first** (`MagShowSystemCursor(TRUE)` needs a live context),
   then `resetTransformState()` forgets every cached value, so the next session does not skip writes
   DWM no longer holds.
+
+## DWM centring (native cursor)
+
+`MagHost::setDwmCentring` wraps `SetFullscreenMagnifierOffsetsDWMUpdated` (user32, undocumented,
+resolved by name): TRUE,0,0 hands the pan to DWM, which re-centres on every cursor update; FALSE,0.8,0.8
+gives it back. Rules (`src/native_cursor.h`, tested):
+
+- On only where the view is a pure function of the pointer and no MPO wall is in reach
+  (`WallBinding`: above ~9.3x on a 3840 wide monitor, 15.8x on 2160 high, when armed).
+- While on, only level changes are written; warm pulses stop. DWM keeps the factor of the write
+  that follows a TRUE call, so every switch forces one write (`forceWrite_`, survives paused ticks).
+- `MagGetFullscreenTransform` does not see DWM's own moves: win32k's copy keeps Wind's last write.
+  Judge centring on screen, not by read-back.
 
 ## Clamping
 
@@ -156,17 +177,31 @@ Defences (wall arming in `RunTick`, write clamp in `TransformModel::present`):
   plane.
 - A write-site clamp backs the walls up when the session is exposed and the ghost is not settled,
   because the walls divide by the controller level while the write uses the step-capped level.
-- Settings couples the two: the **High resolution cursor** option sets smooth sampling and stages
-  MPO re-enable; turning it off sets nearest and stages MPO-disable, both applied at the restart.
-  Nearest with MPO on is never offered (`EffectiveSamplingMode` keeps the boot state's mode until
-  the reboot lands).
+- Since #369 the **High resolution cursor** option only switches sampling, live: smooth (resample
+  layer) and nearest with the MPO guard (colour layer) are both plane-free while zoomed, so the page
+  no longer stages MPO or asks for a restart. `mpoNearestGuard=0` restores the old rule
+  (`EffectiveSamplingMode` then keeps the boot state's mode until a reboot).
+- Plane-free sessions (`mpoGuardLiftWall=1`, default) also drop the pan walls, the write clamp and
+  the MPO ghost. Field-tested 2026-10-07 on an MPO boot (RTX 5090): nearest with the guard, panned
+  into the far-right and bottom-right corner above 10x, no driver reset; daily use up to 31x.
 - `tdrTest` is the field harness: 2 probes the clamp, 4 lifts the wall.
+- **MPO nearest guard** (`src/mpo_guard.h`, issue #369). Zoomed at nearest on an MPO boot, Wind
+  applies an invisible colour effect (0.998 on R, G, B). A colour transform, like the resample
+  property, makes the scaled desktop visual require an external layer, and nothing under such a
+  visual is recorded as a plane candidate, so no plane can carry the overflowing translation.
+  `mpoNearestGuard=1` (default 0 until verified) lets nearest run on MPO boots with the guard;
+  `mpoGuardTest=1` forces the effect on an MPO-off boot to check its look. The pan walls stay
+  armed for nearest either way until an MPO-on boot proves the guard (fail-closed).
 
 ## Bitmap smoothing
 
 DWM magnifies with nearest neighbour unless something calls
-`MagSetFullscreenUseBitmapSmoothing` (Magnification.dll ordinal 1, undocumented, resolved by
-ordinal). `txSamplingMode`: 0 nearest (default), 1 smooth.
+`MagSetFullscreenUseBitmapSmoothing` (Magnification.dll, undocumented, resolved BY NAME).
+`txSamplingMode`: 0 nearest (default), 1 smooth.
+
+- Until 0.24.0 it was resolved by ordinal 1, which does not exist (the export ordinals start at
+  100), so Wind never set the filter: the image showed whatever state another process had left.
+  Measured 2026-10-07: from a smooth DWM state Wind at nearest stayed smooth; by name it switches.
 
 - The flag is the whole quality gap to the built-in Magnifier, image and cursor alike.
 - The raw user32 `SetMagnificationDesktopSamplingMode` takes a DWORD **pointer**; a by-value call
@@ -174,9 +209,22 @@ ordinal). `txSamplingMode`: 0 nearest (default), 1 smooth.
 - Modes 2–4, which the kernel accepts, render as nearest. There is no middle filter.
 - The flag is DWM-global and outlives the process that set it until DWM restarts, so a stale
   smooth state can make a build look smooth that is not. The model re-applies its mode per context
-  with up to 3 retries; the setter's return value is unreliable.
-- Under smooth, level ramps shimmer slightly (the filter re-interpolates each scale step); pans are
-  clean. Swapping to nearest during ramps shifted the image 1–2 px per swap and was rejected.
+  with up to 3 retries.
+- Smooth renders the magnified subtree into a scratch target at source resolution and scales it
+  with Lanczos (`CResampleLayer::RenderLanczos`; the DWM registry value `ResampleModeOverride=1`
+  would force xBR instead, any other value is an error). Zoom "shake", measured 2026-10-07: cursor
+  tip jitter 8-10 px p95, jumps up to 18-26 px, 33-39 direction reversals per zoom-in at smooth;
+  2 px and 3-7 at nearest; same for the sprite and the native pointer. Pans are clean. Suspected
+  cause (untested): the scratch target snaps to whole source pixels while the private channel
+  positions the view in screen pixels, so the image can jump up to one source pixel times the zoom.
+- **Smooth-zoom ladder** (`txSmoothLadder=1`, `src/zoom_ladder.h`): the smooth path's scratch image
+  has its size and origin rounded to whole pixels every frame, and two closed terms predict the
+  resulting shift per level. While smooth, the applied level snaps to the nearest level predicting
+  under 1 px (never backwards in a ramp; held once the zoom settles). Measured standalone at
+  3840x2160: 10-25x jitter 11 px -> 0.7 px p95, worst jump 42 px -> 2 px; 2-10x 4.7 px -> 0.8 px.
+- Nearest while the level moves and smooth at rest was tried: steady, but the switch from pixel to
+  smooth is plainly visible, so it was rejected (2026-10-07). The older "swap shifted the image
+  1-2 px" verdict predates the working setter and is void.
 - Smoothing once crashed dwm.exe over Mica and acrylic at high zoom; it did not reproduce on a
   newer driver. If dwm.exe crashes return, set `txSamplingMode=0` first.
 

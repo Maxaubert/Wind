@@ -94,11 +94,14 @@ int EffectiveGpuPriority(const Config& c) {
 }
 
 int EffectiveSamplingMode(int iniValue, bool mpoDisabledAtBoot, bool mpoDisabledInRegistry,
-                          int tdrTest) {
+                          int tdrTest, bool nearestGuard) {
     if (tdrTest != 0) return iniValue;
+    // With the MPO guard both looks are safe on any boot (#369): the ini value runs as is, no
+    // restart-pending hold.
+    if (nearestGuard) return iniValue;
     if (mpoDisabledAtBoot != mpoDisabledInRegistry)     // restart pending: hold the boot look
         return mpoDisabledAtBoot ? 0 : 1;
-    if (iniValue == 0 && !mpoDisabledAtBoot) return 1;  // crisp on an MPO boot = the TDR combo
+    if (iniValue == 0 && !mpoDisabledAtBoot && !nearestGuard) return 1;  // crisp on an MPO boot = the TDR combo
     return iniValue;
 }
 
@@ -234,6 +237,13 @@ Config ParseConfig(const std::string& text) {
             else if (key == "txWarmLevelEps")     c.txWarmLevelEps = std::stod(val);
             else if (key == "txWriteHz")          c.txWriteHz = std::stoi(val);
             else if (key == "txFreeCursor")       c.txFreeCursor = std::stoi(val);
+            else if (key == "txNativeCursor")     c.txNativeCursor = std::stoi(val);
+            else if (key == "txDwmCentre")        c.txDwmCentre = std::stoi(val);
+            else if (key == "mpoNearestGuard")    c.mpoNearestGuard = std::stoi(val);
+            else if (key == "txSmoothLadder")     c.txSmoothLadder = std::stoi(val);
+            else if (key == "mpoGuardTest")       c.mpoGuardTest = std::stoi(val);
+            else if (key == "mpoGuard")           c.mpoGuard = std::stoi(val);
+            else if (key == "mpoGuardLiftWall")   c.mpoGuardLiftWall = std::stoi(val);
             else if (key == "lockedBallistics")   c.lockedBallistics = std::stoi(val);
             else if (key == "edgeClip")           c.edgeClip = std::stoi(val);
             else if (key == "txPace")             c.txPace = std::stoi(val);

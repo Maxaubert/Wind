@@ -26,6 +26,7 @@ public:
     double level() const { return level_; }
     void reset();                  // level=min, dir=None, held cleared
     void setLevel(double l);       // instant snap to a level (clamped to [min,max]); dir_ untouched
+    void stopGlide() { rate_ = 0.0; }   // end the ease-out now (issue #369: smooth-zoom release)
     // Scroll-wheel zoom (#285): move a TARGET level by x(1+step) per step (negative = out), clamped;
     // tick() glides the level to it. Steps stack on the target, so fast scrolling reads as one
     // continuous zoom. A held zoom direction takes over at once (the target is dropped).

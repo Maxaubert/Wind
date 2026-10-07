@@ -385,6 +385,25 @@ struct Config {
     int txHookWrite = 0;
     int panelPointer = 1;   // #283: real magnified pointer, frozen and moved by Wind, while a shell input panel is open
     int txFreeCursor = 1;
+    // Native cursor (issue #369, src/native_cursor.h): transform sessions use DWM's own magnified
+    // pointer and DWM's own centring instead of the sprite, at either sampling mode. 0 = the sprite
+    // (A/B and kill switch). Read at zoom-in (hot).
+    int txNativeCursor = 1;
+    // DWM centring for native-cursor sessions (issue #369): 1 = DWM re-centres on every cursor
+    // update where the view is a pure function of the pointer; 0 = Wind always writes the view (hot).
+    int txDwmCentre = 1;
+    // MPO nearest guard (issue #369, src/mpo_guard.h): 1 = nearest sampling is allowed on an MPO-on
+    // boot, with an invisible colour effect while zoomed so DWM composes the desktop itself (no
+    // plane, no 16-bit overflow). 0 (default until verified on an MPO boot) = nearest on MPO boots
+    // is turned into smooth as before. The pan walls stay armed either way. Restart to apply.
+    int mpoNearestGuard = 1;
+    // Smooth-zoom ladder (issue #369, src/zoom_ladder.h): with smooth sampling, zoom only through
+    // levels where DWM's per-frame scratch rounding predicts under 1 px of movement (the zoom shake:
+    // 11 px p95 -> 0.7 px measured at 10-25x). 0 = off (hot).
+    int txSmoothLadder = 1;
+    int mpoGuardTest = 0;   // diagnostic: apply the MPO guard effect even on an MPO-off boot (hot)
+    int mpoGuard = 1;       // diagnostic: 0 = never apply the guard effect (A/B on an MPO boot; hot)
+    int mpoGuardLiftWall = 1;   // no pan walls / write clamp / ghost while the session is plane-free (hot)
     // WRITE CADENCE - SHIPPED OFF (tried ON 2026-08-26, REVERTED the same day on field report).
     // The theory (issue #204) is sound: we write ~144/s where native writes ~49/s, and each write
     // makes DWM redo work proportional to the zoom. Turning it on scored well in the automated
@@ -649,8 +668,10 @@ int EffectiveGpuPriority(const Config& c);
 // The ini always keeps the user's intent. A deliberate steady smooth+MPO-off config (legacy
 // setups) is untouched by rule 1 because nothing is pending. Applied at EVERY config load.
 // tdrTest != 0 bypasses (the field harness must be able to repro nearest+MPO deliberately).
+// nearestGuard (mpoNearestGuard, issue #369): nearest is allowed on an MPO boot because the MPO
+// guard (src/mpo_guard.h) forces DWM's external layer while zoomed.
 int EffectiveSamplingMode(int iniValue, bool mpoDisabledAtBoot, bool mpoDisabledInRegistry,
-                          int tdrTest);
+                          int tdrTest, bool nearestGuard = false);
 
 // Pure: whether the edge outline should show at this zoom level, given the master `outline`
 // toggle and the optional low-zoom cutoff. (The "are we zoomed" level > 1.0 gate stays in the
