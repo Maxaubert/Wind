@@ -649,6 +649,13 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     if (cfg.txSmoothLadder != 0 && cfg.txSamplingMode == 1 && applyLevel > 1.001) {
         if (applyLevel == level && level == ladderReq_ && ladderOut_ > 0.0) {
             applyLevel = ladderOut_;
+        } else if (!ex.zoomDriven && !rampStopped && lastLevel_ > 1.001) {
+            // EASE-OUT after the key was released: follow the request exactly while it stays in
+            // the current rounding cell, stop just before it would cross into the next one.
+            if (!SameRoundingCell(applyLevel, lastLevel_, r.centerX, r.centerY, mon_.w, mon_.h))
+                applyLevel = lastLevel_;
+            ladderReq_ = level;
+            ladderOut_ = applyLevel;
         } else if (rampStopped && applyLevel == level && lastLevel_ > 1.001 &&
                    std::fabs(lastLevel_ - level) <= level * (SnapWindow(level) + 1e-5)) {
             // The zoom just stopped: keep the level already on screen rather than re-snapping, so

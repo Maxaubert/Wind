@@ -115,4 +115,21 @@ inline double SnapSmoothLevel(double want, double centreX, double centreY, int w
     return want;
 }
 
+// THE EASE-OUT MAY NOT CROSS A ROUNDING STEP (field 2026-10-07). After the zoom key is released the
+// zoom decelerates; snapping there hopped between clean levels (read as settling), and not snapping
+// let the slow zoom cross one of DWM's whole-pixel rounding steps, which jumps the image by up to
+// the level in px (read as the view and cursor shifting once the zoom settled). Within one rounding
+// cell (same scratch size n and same rounded origin on both axes) the image moves continuously, so
+// the ease-out follows the request while it stays in the cell and stops just before it would leave.
+inline bool SameRoundingCell(double z1, double z2, double centreX, double centreY, int w, int h) {
+    auto cell = [](double z, int extent, double centre, double& n, double& o) {
+        n = std::floor(extent / z + 0.5);
+        o = std::floor(LadderOrigin(centre, z, extent) + 0.5);
+    };
+    double n1x, o1x, n2x, o2x, n1y, o1y, n2y, o2y;
+    cell(z1, w, centreX, n1x, o1x); cell(z2, w, centreX, n2x, o2x);
+    cell(z1, h, centreY, n1y, o1y); cell(z2, h, centreY, n2y, o2y);
+    return n1x == n2x && o1x == o2x && n1y == n2y && o1y == o2y;
+}
+
 }  // namespace wind

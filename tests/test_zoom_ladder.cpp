@@ -76,3 +76,12 @@ TEST_CASE("a slow (easing) zoom is barely snapped: the snap never exceeds the fr
         CHECK(std::fabs(z - want) <= want * (step + 1e-6));
     }
 }
+
+TEST_CASE("rounding cells: a tiny step usually stays inside, a long glide leaves") {
+    int same = 0, total = 0;
+    for (double z = 3.0; z < 20.0; z *= 1.003, ++total)
+        if (SameRoundingCell(z, z * 1.00005, 1920.0, 1080.0, 3840, 2160)) ++same;
+    CHECK(same > total * 8 / 10);
+    CHECK(SameRoundingCell(4.0, 6.0, 1920.0, 1080.0, 3840, 2160) == false);
+    CHECK(SameRoundingCell(5.0, 5.0, 1920.0, 1080.0, 3840, 2160) == true);
+}

@@ -2299,6 +2299,11 @@ static void RunTick(TickState& t) {
         // (the old tick countdown only decremented while zoomed, which did exactly that).
         const bool quiesceHold = QuiesceHoldActive(t);
         ex.pauseWrites = t.clickPauseTicks > 0 || quiesceHold;
+        {
+            auto& zs = g_input.state();
+            ex.zoomDriven = zs.inHeld.load() || zs.outHeld.load() || g_input.anyBoundKeyPressed() ||
+                            t.zoom.hasTarget();
+        }
         if (quiesceHold) ex.suppressCursorSync = true;
         // Native cursor (issue #369): DWM may own the pan only where the view is a pure function of
         // the pointer. The model applies it only in a native-cursor session.

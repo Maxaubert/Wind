@@ -36,6 +36,9 @@ struct PresentExtras {
     // The view is a pure function of the real pointer this tick (free cursor, mouse-owned, no
     // walls, no quiesce): a native-cursor session may hand the pan to DWM (issue #369).
     bool  dwmCentre = false;
+    // A zoom key or button is held, or the controller is heading for an explicit target (wheel,
+    // quick zoom). False while the zoom eases out after a release (issue #369 ladder).
+    bool  zoomDriven = true;
     // Colour filter for the render engine's pixel shader (issue #288). Its capture already
     // contains the DWM colour effect, so RunTick clears that effect during a render session and
     // hands the matrix here instead. Transform and 1x use the DWM effect.
