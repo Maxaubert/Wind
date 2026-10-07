@@ -105,13 +105,11 @@ export const groups = [
         { key: 'mouseAlign', type: 'select', label: 'Pointer position', keywords: ['mouse position', 'mouse', 'cursor', 'pointer', 'where', 'centred', 'centered', 'center', 'centre', 'middle', 'edge', 'edges', 'within the edges', 'align', 'alignment', 'lock to center', 'follow mode', 'placement'], desc: 'Where the mouse pointer sits while the view moves.', options: ['0', '1'], optionLabels: { '0': 'Centred', '1': 'Within the edges' }, def: '0' },
         { key: 'mouseMarginPct', type: 'slider', label: 'Edge margin', keywords: ['edge', 'edges', 'border', 'padding', 'distance', 'boundary', 'margin', 'pointer', 'mouse', 'percent', 'dead zone', 'how near'], desc: 'How near the edge the pointer gets before the view moves.', min: 0, max: 30, step: 1, def: 0, unit: '%',
           showIf: { key: 'mouseAlign', eq: '1' } },
-        // High resolution cursor (#227) + MPO, ONE option (#242). Ini key stays txSamplingMode
-        // (0 nearest / 1 smooth); the MPO half lives in HKLM and is staged by the page. The two are
-        // safety-coupled: crisp with MPO enabled is the NVIDIA 16-bit overflow TDR combo (#148), so
-        // turning high-res OFF also stages MPO-disable and turning it ON stages MPO re-enable, both
-        // atomic at the Windows restart (the core holds the boot state's look until then).
+        // High resolution cursor (#227). Ini key txSamplingMode (0 nearest / 1 smooth). No longer
+        // coupled to MPO (#369): both looks keep apps off hardware planes while zoomed (smooth via the
+        // resample layer, nearest via the MPO guard), so the toggle applies live with no restart.
         { key: 'txSamplingMode', type: 'highres', label: 'High resolution cursor', keywords: ['sharp', 'crisp', 'smooth', 'blurry', 'pixelated', 'hidpi', 'sampling', 'quality', 'nearest', 'mpo', 'overlay', 'cursor', 'pointer', 'resolution', '4k', 'antialiasing', 'restart', 'registry'],
-          desc: 'A sharper pointer and image at high zoom.', def: 0 },
+          desc: 'A smoother image and pointer at high zoom. Off keeps them pixel-sharp and steady while zooming.', def: 0 },
         // Zoom lock detection (#221): games like DOOM pin the mouse to the screen centre, which would
         // pin the zoom view there too. Listed apps get the view UNLOCKED from the pointer.
         { key: 'lockApps', type: 'applist', adv: true, label: 'Mouse-locked games', keywords: ['lock', 'locked', 'fps', 'shooter', 'first person', 'mouselook', 'mouse look', 'camera', 'game', 'exe', 'program', 'unlock', 'exception', 'apps', 'pinned', 'centre'],

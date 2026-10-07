@@ -8,6 +8,8 @@
 #include "sprite_layer.h"  // PickSpriteLayer (pure, tested): issue #269
 #include "config_path.h"   // ResolveLogDir
 #include "tick_span.h"     // per-tick spans (#361)
+#include "native_cursor.h" // UseNativeCursor, NudgeAfterWrite (pure, tested): issue #369
+#include "zoom_ladder.h"   // SnapSmoothLevel (pure, tested): issue #369
 #include <cstdio>
 #include <windows.h>
 #include <magnification.h>
@@ -34,6 +36,21 @@ static bool ShowSystemCursorMarshalled(BOOL show) {
     if (!ok) g_showCursorFails.fetch_add(1, std::memory_order_relaxed);
     return ok;
 }
+// The pixel-and-back cursor event the native cursor relies on (issue #369). Never while a click is
+// in progress: a nudge between button-down and button-up made some clicks fail to register (field
+// report), so nothing is injected while the left, right or middle button is held or for 250 ms
+// after it was last seen down. The side buttons are exempt: they are Wind's zoom keys.
+static unsigned long long g_lastButtonMs = 0;
+static bool ClickInProgress() {
+    const unsigned long long now = GetTickCount64();
+    if ((GetAsyncKeyState(VK_LBUTTON) | GetAsyncKeyState(VK_RBUTTON) | GetAsyncKeyState(VK_MBUTTON)) & 0x8000)
+        g_lastButtonMs = now;
+    return g_lastButtonMs != 0 && now - g_lastButtonMs < 250;
+}
+static void NudgePointer(POINT& np) {
+    if (ClickInProgress()) return;
+    if (GetCursorPos(&np)) { SetCursorPos(np.x + 1, np.y); SetCursorPos(np.x, np.y); }
+}
 unsigned long long TransformCursorHideFailures() {
     return g_showCursorFails.load(std::memory_order_relaxed);
 }
@@ -45,6 +62,10 @@ static const unsigned long long kSettleMs = 100;
 
 void TransformModel::resetTransformState() {
     panelPrimed_ = false;   // a rebuilt context needs its own public prime (#283, review #284)
+    nativePrimed_ = false;  // ...and so does the native cursor (#369)
+    forceWrite_ = false;    // lastLevel_ = 0 already forces the next write
+    ixPubLevel_ = 0.0;
+    ladderReq_ = 0.0; ladderOut_ = 0.0;
     // Everything the write path caches must be forgotten across a teardown, or the next session
     // compares against values DWM no longer holds and skips the writes that would re-apply them.
     lastLevel_ = 0.0; lastRequestedLevel_ = 0.0;
@@ -90,7 +111,8 @@ void TransformModel::teardownMag() {
     if (cursorHidden_) { ShowSystemCursorMarshalled(TRUE); cursorHidden_ = false; }
     if (sprite_) sprite_->hide();
     cage_.hide();
-    if (blanker_) blanker_->restore();
+    if (blanker_ && (!nativeSession_ || blanker_->blanked())) blanker_->restore();
+    setDwmCentre(false);
     host_.setTransform(1.0f, 0, 0, 0, 0, false);   // leave DWM at identity before releasing
     RECT full{ 0, 0, mon_.w, mon_.h };
     host_.setInputTransform(false, full, full);
@@ -100,6 +122,15 @@ void TransformModel::teardownMag() {
     idleSinceMs_ = 0;
     identityParked_ = false;
     resetTransformState();
+    if (nativeSession_ && active_) {
+        // Released mid-session (shutdown, model swap): the pointer leaves DWM's composition for the
+        // hardware plane, which Windows repaints only on the next cursor EVENT, so nudge it a pixel
+        // and back (the same trick the zoom-out uses).
+        POINT np;
+        NudgePointer(np);
+    }
+    nativeSession_ = false;
+    lensFailed_ = false;      // a fresh context may build the lens
     QueryPerformanceCounter(&b);
     wind::Log(wind::LogLevel::Info, "transform", "magnification context released in %.1fms",
               double(b.QuadPart - a.QuadPart) * 1000.0 / fr.QuadPart);
@@ -258,6 +289,23 @@ void TransformModel::writeTransform(float lvl, int offX, int offY, int tx, int t
     noteWrite(double(b.QuadPart - a.QuadPart) * 1000.0 / fr.QuadPart, ok);
 }
 
+// DWM centring switch (issue #369). Turning it on hands the pan to DWM; turning it off hands it
+// back. Either way the caller forces the next transform write: after TRUE, DWM keeps the factor of
+// the next write (it would otherwise centre with a stale one), and after FALSE the view must be
+// put back on Wind's own offset.
+void TransformModel::setDwmCentre(bool on) {
+    if (on == dwmCentreOn_) return;
+    if (on && dwmCentreBroken_) return;
+    const bool ok = host_.setDwmCentring(on);
+    if (on && !ok) {
+        dwmCentreBroken_ = true;
+        wind::Log(wind::LogLevel::Warn, "transform",
+                  "DWM centring unavailable (SetFullscreenMagnifierOffsetsDWMUpdated) - Wind keeps the pan");
+        return;
+    }
+    dwmCentreOn_ = on;
+}
+
 void TransformModel::hideSystemCursor(bool hide) {
     if (!useSprite_ || !blanker_) return;
     if (hide && !ensureMag()) return;   // MagShowSystemCursor needs a live context
@@ -327,6 +375,9 @@ void TransformModel::setActive(bool active) {
         LARGE_INTEGER zf, z0, z1, z2;   // zoom timeline split (#310): a few QPC reads, always on
         QueryPerformanceFrequency(&zf); QueryPerformanceCounter(&z0);
         lastEnter_.wasWarm = magUp_;
+        // Native cursor (issue #369): DWM draws the real pointer, so there is nothing to stand
+        // up and nothing to blank - no cursor swaps at zoom-in at all.
+        nativeSession_ = nativePref_;
         // Blank the system cursor set BEFORE the magnification context exists (issue #189): the
         // blanker swaps 14 system cursors, and under a LIVE context every cursor change costs a
         // DWM re-composite (the documented per-change tax) - running the burst inside the fresh
@@ -334,7 +385,7 @@ void TransformModel::setActive(bool active) {
         // zoom-in hitch. Plain SetSystemCursor needs no context, so it is free out here. The
         // present() hide branch keeps its blank() call as the fallback (idempotent) and still
         // owns MagShowSystemCursor + cursorHidden_ bookkeeping.
-        if (useSprite_ && blanker_) {
+        if (useSprite_ && blanker_ && !nativeSession_) {
             // Bridge the swap gap (issue #221 field report: zoom-in BLINKS the cursor): the
             // blank hides the real pointer instantly, but the sprite's first present is a
             // context build (~36ms) plus a reveal away - a visible cursor-less gap. Stand the
@@ -365,6 +416,16 @@ void TransformModel::setActive(bool active) {
         // per 3 cycles vs 2, and it added zoom-out spikes. Entering magnification costs ~36ms
         // once per zoom-in regardless - that is DWM building its machinery.)
         ensureMag();
+        // Native cursor: switch the pointer to DWM's composition (0.2 ms once the lens exists; a
+        // first zoom before the idle warm-up pays the lens build here, once). win32k sends the
+        // new cursor mode to DWM only on the next pointer update (move or shape), so without a
+        // cursor event the small hardware pointer stays on screen for the whole zoom-in while the
+        // hand is still (measured: no composed pointer in any ramp frame). Nudge a pixel and back.
+        if (nativeSession_ && host_.createCursorLens()) {
+            host_.setCursorLens(true);
+            POINT np;
+            NudgePointer(np);
+        }
         QueryPerformanceCounter(&z2);
         lastEnter_.bridgeMs = double(z1.QuadPart - z0.QuadPart) * 1000.0 / zf.QuadPart;
         lastEnter_.ensureMagMs = double(z2.QuadPart - z1.QuadPart) * 1000.0 / zf.QuadPart;
@@ -399,7 +460,9 @@ void TransformModel::setActive(bool active) {
     // Unconditional (and idempotent): setActive(true) pre-blanks BEFORE the context exists, so
     // a session that never entered the draw branch (cursorVisibility=never, hide-hotkey) still
     // has blanked system cursors to give back even though cursorHidden_ never went true.
-    if (blanker_) {
+    // Native sessions never blanked, so there is nothing to restore (and no scheme reload).
+    setDwmCentre(false);   // before the identity park, so DWM does not re-centre against it
+    if (blanker_ && (!nativeSession_ || blanker_->blanked())) {
         // Windows repaints the pointer plane only on the next cursor EVENT, so a restored-but-
         // still pointer stays invisible until the hand moves (field-verified). A 1px nudge and
         // back generates that event invisibly. It must FOLLOW the restore, which runs on the
@@ -407,7 +470,7 @@ void TransformModel::setActive(bool active) {
         // the nudge rides along on the worker too.
         blanker_->restore([] {
             POINT np;
-            if (GetCursorPos(&np)) { SetCursorPos(np.x + 1, np.y); SetCursorPos(np.x, np.y); }
+            NudgePointer(np);
         });
         step(1);   // system cursor restore queued (it was the whole teardown cost)
     }
@@ -437,6 +500,14 @@ void TransformModel::setActive(bool active) {
     const double parkMs = double(pb.QuadPart - pa.QuadPart) * 1000.0 / fr.QuadPart;
     if (parkMs > 5.0)
         wind::Log(wind::LogLevel::Info, "transform", "identity park took %.1fms", parkMs);
+    if (nativeSession_ && host_.cursorLensReady()) {
+        // Native cursor: back to the hardware pointer at 1x (the composed one taxes every cursor
+        // change a game makes). The hardware plane repaints only on the next cursor EVENT, so
+        // nudge the pointer a pixel and back.
+        host_.setCursorLens(false);
+        POINT np;
+        NudgePointer(np);
+    }
     RECT full{ 0, 0, mon_.w, mon_.h };
     host_.setInputTransform(false, full, full);   // input mapping back to identity at 1x
     step(6);
@@ -458,6 +529,27 @@ void TransformModel::setActive(bool active) {
 }
 
 void TransformModel::idleTick() {
+    // NATIVE CURSOR (issue #369): keep the context and the cursor lens alive at 1x instead of
+    // releasing them. With the lens style OFF this costs nothing (measured: a pointer-toggling
+    // full-screen app keeps Independent Flip, 0 spike frames), and it moves the one-time 60-125 ms
+    // lens build off the zoom path: it runs here, at 1x, shortly after launch. The old release
+    // existed for the cursor-change tax, which only the composed pointer (style ON) causes.
+    if (nativePref_ && !active_) {
+        if ((!magUp_ || !host_.cursorLensReady()) && !lensFailed_) {
+            LARGE_INTEGER fr, a, b;
+            QueryPerformanceFrequency(&fr); QueryPerformanceCounter(&a);
+            const bool ok = ensureMag() && host_.createCursorLens();
+            QueryPerformanceCounter(&b);
+            lensFailed_ = !ok;   // no 100 ms retry loop; zoom-in falls back to the public prime
+            if (!lensLogged_) {
+                lensLogged_ = true;
+                wind::Log(ok ? wind::LogLevel::Info : wind::LogLevel::Warn, "transform",
+                          "cursor lens %s in %.1fms (kept warm at 1x)", ok ? "ready" : "FAILED",
+                          double(b.QuadPart - a.QuadPart) * 1000.0 / fr.QuadPart);
+            }
+        }
+        return;
+    }
     if (!magUp_ || active_ || idleSinceMs_ == 0) return;
     // Holding a non-identity rest level is pointless if the context is then released: the release
     // returns DWM to identity anyway. So the two go together.
@@ -546,12 +638,42 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         if (snapped < 1.0) snapped = 1.0;
         applyLevel = snapped;
     }
+    // SMOOTH-ZOOM LADDER (issue #369, src/zoom_ladder.h): with smooth sampling DWM rounds its scratch
+    // image's size and origin every frame, which shakes a continuous zoom; snap to the nearest level
+    // whose predicted rounding error is under 1 px (never backwards in the ramp). Once the zoom has
+    // settled the chosen level is held: panning at a fixed level does not shake, re-snapping would.
+    // The ladder's held level differs from the requested one on purpose, so "still ramping" must be
+    // judged on the level BEFORE the snap: comparing the snapped level with `level` read as a ramp
+    // that never ended, which held the input-transform publish forever (hover dead zones).
+    const double preLadderLevel = applyLevel;
+    if (cfg.txSmoothLadder != 0 && cfg.txSamplingMode == 1 && applyLevel > 1.001) {
+        if (applyLevel == level && level == ladderReq_ && ladderOut_ > 0.0) {
+            applyLevel = ladderOut_;
+        } else if (rampStopped && applyLevel == level && lastLevel_ > 1.001 &&
+                   std::fabs(lastLevel_ - level) <= level * (SnapWindow(level) + 1e-5)) {
+            // The zoom just stopped: keep the level already on screen rather than re-snapping, so
+            // releasing the key never nudges the zoom in or out (field 2026-10-07).
+            ladderReq_ = level;
+            ladderOut_ = lastLevel_;
+            applyLevel = lastLevel_;
+        } else {
+            const int dir = applyLevel > lastLevel_ ? 1 : (applyLevel < lastLevel_ ? -1 : 0);
+            // (The slow tail of an ease-out never reaches here: RunTick stops the glide first.)
+            const double snapped = SnapSmoothLevel(applyLevel, r.centerX, r.centerY, mon_.w, mon_.h,
+                                                   lastLevel_ > 1.0 ? lastLevel_ : 0.0, dir);
+            ladderReq_ = level;
+            ladderOut_ = snapped;
+            applyLevel = snapped;
+        }
+    }
     double srcL = r.srcLeft, srcT = r.srcTop;
     if (applyLevel != level) {
         OffsetF o = ComputeOffsetF(r.centerX, r.centerY, applyLevel, mon_.w, mon_.h);
         srcL = o.x; srcT = o.y;
     }
     idleReleaseMs_ = cfg.txIdleReleaseMs;   // hot-reloadable release window
+    nativePref_ = UseNativeCursor(cfg.txNativeCursor);   // next zoom-in (#369)
+    ClickInProgress();   // keep the click window current between nudges
     restLevel_ = cfg.txRestLevel;           // hot
     if (!ensureMag()) return;   // lazy context: the session's first write brings DWM up
     // Bitmap smoothing (issue #197/#227), once per magnification context. The smooth filter
@@ -568,28 +690,29 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // The flag is DWM-global and dies with a DWM restart, hence per-context re-apply.
     // A failed apply is retried, a little (issue #274): the call used to be recorded as applied
     // before it ran, so a wrong-thread failure left the filter unapplied for the whole context.
-    // BOUNDED, because the setter's return value is not a reliable success signal: mode 0 via
-    // ordinal 1 has reported FALSE on every call in this rig's logs (245 of 245) while working,
-    // so an unbounded retry would re-issue it every tick. Up to 3 attempts, 1 s apart, then
+    // BOUNDED, so a failing setter can never re-issue every tick. (The "FALSE on every call" seen
+    // in this rig's logs, 245 of 245, was the setter never being found: it was resolved by a
+    // non-existent ordinal until #369.) Up to 3 attempts, 1 s apart, then
     // accept. The mode is DWM-global state, so a genuine miss is also re-tried per context.
-    if (cfg.txSamplingMode >= 0 && appliedSampling_ != cfg.txSamplingMode) {
+    const int wantSampling = cfg.txSamplingMode;
+    if (wantSampling >= 0 && appliedSampling_ != wantSampling) {
         const unsigned long long now = GetTickCount64();
-        if (sampleTryMode_ != cfg.txSamplingMode) { sampleTryMode_ = cfg.txSamplingMode; sampleTries_ = 0; }
+        if (sampleTryMode_ != wantSampling) { sampleTryMode_ = wantSampling; sampleTries_ = 0; }
         if (sampleTries_ == 0 || now - sampleLastTryMs_ >= 1000) {
-            const bool ok = host_.setSamplingMode((unsigned)cfg.txSamplingMode);
+            const bool ok = host_.setSamplingMode((unsigned)wantSampling);
             ++sampleTries_;
             sampleLastTryMs_ = now;
             if (ok || sampleTries_ >= 3) {
                 wind::Log(wind::LogLevel::Info, "transform", "bitmap smoothing %d applied=%d (tries %d)",
-                          cfg.txSamplingMode, ok ? 1 : 0, sampleTries_);
-                appliedSampling_ = cfg.txSamplingMode;
+                          wantSampling, ok ? 1 : 0, sampleTries_);
+                appliedSampling_ = wantSampling;
             }
         }
     }
     traceOn_ = cfg.txTrace != 0;
     cfgWobbleCage_ = cfg.txWobbleCage;        // diagnostic cage + threshold px (issue #229)
     if (level > sessionMaxLevel_) sessionMaxLevel_ = level;
-    const bool ramping = applyLevel != level || (applyLevel != lastLevel_ && lastLevel_ > 0.0);
+    const bool ramping = preLadderLevel != level || (applyLevel != lastLevel_ && lastLevel_ > 0.0);
     // Edge sampling margin (see transform.h) applied to the SOURCE, not just to the written
     // transform: srcL/srcT go on to feed the input-transform publish below, and a visual rect
     // that sat one texel inside a published rect that did not would put the pointer framework's
@@ -631,6 +754,21 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         if (m.txX < -32000) m.txX = -32000;
     }
     bool txWroteThisTick = false;   // the sprite follows the VIEW, not the tick (see below)
+    // DWM CENTRING (issue #369, src/native_cursor.h). In a native-cursor session where the view is
+    // a pure function of the pointer (RunTick's ex.dwmCentre), DWM re-centres the view itself on
+    // every cursor update, latched with the pointer it draws: no tick-to-frame drift at any speed.
+    // Switching off is allowed on a paused tick (it stops DWM moving the view); switching on waits
+    // for a tick that may write, because the switch needs the forced write that follows it.
+    // The owed write survives paused ticks (forceWrite_), so a switch-off during a pause still puts
+    // Wind's offset back on the first tick that may write.
+    {
+        const bool want = nativeSession_ && ex.dwmCentre && applyLevel > 1.001;
+        if (want != dwmCentreOn_ && (!want || !ex.pauseWrites)) {
+            setDwmCentre(want);
+            forceWrite_ = true;
+            wind::Log(wind::LogLevel::Info, "transform", "DWM centring %s", dwmCentreOn_ ? "ON" : "off");
+        }
+    }
     // Trace inputs, captured here and appended at the END of present() so the sprite position
     // recorded is this tick's, not the previous one's.
     bool trChanged = false, trRamping = ramping, trWarm = false;
@@ -670,7 +808,8 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     ci.writeHz          = cfg.txWriteHz;
     ci.minOffsetPx      = cfg.txMinOffsetPx;
     ci.settleMs         = kSettleMs;
-    const bool writeNow = ShouldWriteTransform(ci);
+    const bool forceWrite = forceWrite_;
+    const bool writeNow = ShouldWriteTransform(ci) || forceWrite;
 
     if (writeNow) {
         lastOffX_ = m.offX; lastOffY_ = m.offY; lastTxX_ = m.txX; lastTxY_ = m.txY;
@@ -703,7 +842,9 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     wi.warmHz             = cfg.txWarmHz;
     wi.pulseOpen          = keepAliveTick_ != 0;
     wi.sinceLastWarmMs    = nowMs - (lastWarmMs_ > lastChangeMs_ ? lastWarmMs_ : lastChangeMs_);
-    switch (WarmAction(wi)) {
+    // No warm pulses while DWM centres: each one would put Wind's offset back on screen for a
+    // frame, and DWM's own per-cursor-update moves are the pan (native has no warm-keeping).
+    switch (dwmCentreOn_ ? TxWarm::None : WarmAction(wi)) {
         case TxWarm::Jitter1px:
             keepAliveTick_ ^= 1;
             txJitter = keepAliveTick_;   // BOTH parities must write (the return-to-true half too)
@@ -737,7 +878,17 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         // write always sends the true level. See the mode 4 note above for why it has to change
         // at all and why this is the cheapest honest thing to change.
         const double lvlOut = warmLevelJitter_ ? applyLevel * (1.0 + cfg.txWarmLevelEps) : applyLevel;
-        writeTransform((float)lvlOut, m.offX, m.offY, m.txX + txJitter, m.txY, fastPan_, false);
+        // Native cursor (#369): the context's first zoomed write goes through the PUBLIC API, which
+        // is what makes DWM draw the real pointer magnified; the private channel keeps it after.
+        // (Fallback only: normally the cursor lens does this without the 200-260 ms public write.)
+        const bool prime = nativeSession_ && !nativePrimed_ && !host_.cursorLensReady() && lvlOut > 1.001;
+        writeTransform((float)lvlOut, m.offX, m.offY, m.txX + txJitter, m.txY, fastPan_ && !prime, false);
+        if (prime) nativePrimed_ = true;
+        if (NudgeAfterWrite(dwmCentreOn_, true)) {
+            POINT np;
+            NudgePointer(np);
+        }
+        forceWrite_ = false;
     }
     warmLevelJitter_ = false;
     // Input transform. Mode 1 (THE SHIPPED DEFAULT; field-verified 4x-20x,
@@ -788,7 +939,12 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         const bool rest = !changed;
         // warmIxOnly bypasses the decimation for the same reason a stomp does: the publish IS the
         // work here, and decimating it away would defeat the whole mode.
-        if (ixForce || warmIxOnly || rest || ++ixTick_ >= cfg.ixDecimate) {
+        // Native cursor (#369): no publish while the level ramps (it hides the composed pointer);
+        // the pending flag carries it to the first settled tick.
+        // Held only while a zoom key/button drives the ramp: during the release ease-out hover must
+        // follow (field 2026-10-07: tab hover waited for the whole 300 ms glide to end).
+        const bool hold = HoldInputPublish(nativeSession_, ramping && ex.zoomDriven, ixForce);
+        if (!hold && (ixForce || warmIxOnly || rest || ++ixTick_ >= cfg.ixDecimate)) {
             ixTick_ = 0;
             ixPending_ = false;
             // srcL/srcT, not r.srcLeft/srcTop: when the ramp limiters make applyLevel != level
@@ -828,6 +984,13 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
                     ok = true;
             }
             noteIxWrite(double(b.QuadPart - a.QuadPart) * 1000.0 / fr.QuadPart, ok);
+            if (ok && NudgeAfterPublish(nativeSession_, applyLevel, ixPubLevel_)) {
+                // A scale-changing publish stops DWM drawing the composed pointer until the next
+                // cursor event: give it one, a pixel and back.
+                POINT np;
+                NudgePointer(np);
+            }
+            if (ok) ixPubLevel_ = applyLevel;
             if (ok) {
                 ixExpectedValid_ = true;
                 ixExpectedOn_ = enable;
@@ -935,6 +1098,25 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         lastSpriteY_ = spriteBand16_ ? (int)(r.cursorScreenY + 0.5) + mon_.y
                                      : r.clickDesktopY + mon_.y;
         sprite_->keepOnTop();
+    } else if (nativeSession_ && level > 1.001) {
+        // NATIVE CURSOR (issue #369): DWM draws the real pointer into the magnified frame, above
+        // every band, so there is no sprite. Only the hide-cursor hotkey / cursorVisibility=never
+        // hides it, the same way Inspect does (blanker for standard shapes, MagShowSystemCursor
+        // for app-custom ones).
+        spriteShown_ = false;
+        panelPrimed_ = false;
+        if (sprite_) sprite_->hide();
+        if (!ex.drawCursor) {
+            if (!cursorHidden_ && blanker_) {
+                blanker_->blank();
+                ShowSystemCursorMarshalled(FALSE);
+                cursorHidden_ = true;
+            }
+        } else if (cursorHidden_) {
+            ShowSystemCursorMarshalled(TRUE);
+            if (blanker_) blanker_->restore();
+            cursorHidden_ = false;
+        }
     } else if (useSprite_ && sprite_ && ex.realPointer && ex.drawCursor && level > 1.001) {
         // SHELL INPUT PANEL (issue #283). The emoji picker and its siblings are composed by the shell
         // above every window band, so the sprite goes under them. The real pointer is the one thing

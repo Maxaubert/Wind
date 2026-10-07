@@ -62,17 +62,23 @@ bool MagHost::initialize() {
         setMagDesktop_ = reinterpret_cast<int(__stdcall*)(double, int, int)>(
             u32 ? GetProcAddress(u32, "SetMagnificationDesktopMagnification") : nullptr);
         HMODULE magDll = GetModuleHandleW(L"Magnification.dll");
+        // BY NAME (issue #369). It was resolved by ordinal 1, which does not exist: the export
+        // table's ordinal base is 100 (this function is 104 on 26200), so the lookup returned NULL
+        // and every setSamplingMode call failed - Wind never set the filter at all, and the image
+        // showed whatever smoothing state another process (Windows Magnifier) had left in DWM.
         setBitmapSmoothing_ = reinterpret_cast<int(__stdcall*)(int)>(
-            magDll ? GetProcAddress(magDll, MAKEINTRESOURCEA(1)) : nullptr);
+            magDll ? GetProcAddress(magDll, "MagSetFullscreenUseBitmapSmoothing") : nullptr);
         setSamplingRaw_ = reinterpret_cast<int(__stdcall*)(DWORD*)>(
             u32 ? GetProcAddress(u32, "SetMagnificationDesktopSamplingMode") : nullptr);
+        setDwmUpdated_ = reinterpret_cast<BOOL(__stdcall*)(BOOL, float, float)>(
+            u32 ? GetProcAddress(u32, "SetFullscreenMagnifierOffsetsDWMUpdated") : nullptr);
     }
     return initialized_;
 }
 
 bool MagHost::setSamplingMode(unsigned mode) {
     if (!initialized_) return false;
-    // Modes 0/1 go through Magnification.dll ordinal 1 (the documented-shape BOOL wrapper that
+    // Modes 0/1 go through MagSetFullscreenUseBitmapSmoothing (the documented-shape BOOL wrapper that
     // native Magnifier uses). Modes 2-4 exist only on the raw user32 setter: the kernel accepts
     // and round-trips 0..4 though the wrapper exposes just two, and nothing is published about
     // what the extra three do. They are worth trying because mode 1's edge-preserving filter is
@@ -94,6 +100,59 @@ bool MagHost::setSamplingMode(unsigned mode) {
         if (!smooth) return false;
         return smooth(mode != 0 ? 1 : 0) != 0;
     });
+}
+
+bool MagHost::setDwmCentring(bool on) {
+    if (!initialized_ || !setDwmUpdated_) return false;
+    // Not a Magnification-context call (it goes straight to DWM for the caller's desktop), but it
+    // pairs with the transform writes, so it runs on the same owner thread for ordering.
+    auto fn = setDwmUpdated_;
+    return MagThreadInvoke([fn, on]() -> bool {
+        return fn(on ? TRUE : FALSE, on ? 0.0f : 0.8f, on ? 0.0f : 0.8f) != FALSE;
+    });
+}
+
+bool MagHost::createCursorLens() {
+    if (!initialized_) return false;
+    if (lens_) return true;
+    // On the owner thread: the lens registers with the CALLING thread's magnification context.
+    HWND host = nullptr, lens = nullptr;
+    const bool ok = MagThreadInvoke([&host, &lens]() -> bool {
+        HINSTANCE inst = GetModuleHandleW(nullptr);
+        host = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"Static", L"Wind cursor lens",
+                               WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, inst, nullptr);
+        if (!host) return false;
+        lens = CreateWindowExW(0, WC_MAGNIFIERW, L"", WS_CHILD, 0, 0, 0, 0, host, nullptr, inst, nullptr);
+        if (!lens) { DestroyWindow(host); host = nullptr; return false; }
+        return true;
+    });
+    if (!ok) return false;
+    lensHost_ = host;
+    lens_ = lens;
+    return true;
+}
+
+bool MagHost::setCursorLens(bool on) {
+    if (!lens_) return false;
+    HWND lens = lens_;
+    return MagThreadInvoke([lens, on]() -> bool {
+        const LONG_PTR st = GetWindowLongPtrW(lens, GWL_STYLE);
+        const LONG_PTR want = on ? (st | MS_SHOWMAGNIFIEDCURSOR) : (st & ~(LONG_PTR)MS_SHOWMAGNIFIEDCURSOR);
+        if (want != st) SetWindowLongPtrW(lens, GWL_STYLE, want);
+        return true;
+    });
+}
+
+void MagHost::destroyCursorLens() {
+    if (!lens_ && !lensHost_) return;
+    HWND lens = lens_, host = lensHost_;
+    MagThreadInvoke([lens, host]() -> bool {
+        if (lens) DestroyWindow(lens);
+        if (host) DestroyWindow(host);
+        return true;
+    });
+    lens_ = nullptr;
+    lensHost_ = nullptr;
 }
 
 bool MagHost::setTransform(float zoom, int offX, int offY, int tx, int ty, bool fastPan) {
@@ -147,6 +206,7 @@ bool MagHost::getInputTransform(bool& active, RECT& src, RECT& dst) {
 
 void MagHost::shutdown() {
     if (!initialized_) return;
+    destroyCursorLens();   // before MagUninitialize, which unregisters the window class
     // Reset and release as ONE marshalled unit: split across two invokes another thread could slip
     // a write in between the identity reset and the release.
     MagThreadInvoke([]() -> bool {

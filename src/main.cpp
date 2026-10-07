@@ -31,6 +31,9 @@
 #include "hdr_info.h"   // issue #288
 #include "cursor_tint.h"   // tinted pointer at 1x (#288)
 #include "transform_model.h"
+#include "native_cursor.h"   // UseNativeCursor, WantDwmCentring (issue #369)
+#include "mpo_guard.h"       // WantMpoGuard, GuardedColorMatrix (issue #369)
+#include "zoom_ladder.h"     // EaseOutShouldStop (issue #369)
 #include "hitch_record.h"   // hitch recorder (#361)
 #include "tick_span.h"
 #include "input_router.h"
@@ -392,7 +395,8 @@ struct TickState {
     DWORD  quiescedPid = 0;         // fires at most once per process instance
     HWND   lastCoverFg = nullptr;   // edge-detect cover-takeover foregrounds
     unsigned long long lastCoverProbeMs = 0;
-    double prevTickLevel = 0.0;      // hook-write arming: only while the level is settled (#206)   // throttles the idle-tick cover watch to ~4Hz
+    double prevTickLevel = 0.0;
+    bool   prevZoomHeld = false;     // #369: release edge of the zoom keys/buttons      // hook-write arming: only while the level is settled (#206)   // throttles the idle-tick cover watch to ~4Hz
     IMagnifierModel* wantModel = nullptr;   // hybrid stickiness: candidate engine and how long it
     unsigned long long wantSinceMs = 0;     //   has been the candidate (debounces foreground reads)
     unsigned long long kbHookDivergentSinceMs = 0;  // LL keyboard-hook watchdog dwell (issue #156)
@@ -868,7 +872,8 @@ static bool RenderOverlayShown(TickState& t) {
     return rm && rm->visible();
 }
 static void UpdateColorFilter(TickState& t, bool zoomedNow, bool renderSession, PresentExtras* ex) {
-    (void)zoomedNow;   // applies zoomed and at 1x alike (owner decision 2026-09-29)
+    // The user's filter applies zoomed and at 1x alike (owner decision 2026-09-29); zoomedNow gates
+    // only the MPO guard below.
     const double w = t.cfg.colorWarmPct / 100.0, d = t.cfg.colorDimPct / 100.0;
     // Toggling HDR is not guaranteed to raise WM_DISPLAYCHANGE (and may settle after it), so while a
     // filter is on the state is re-read once a second. A DisplayConfig query is microseconds (the
@@ -882,9 +887,17 @@ static void UpdateColorFilter(TickState& t, bool zoomedNow, bool renderSession, 
     const wind::ColorMatrix enc = wind::BuildColorMatrix(w, d, false);
     const bool inShader = renderSession && !wind::IsIdentity(enc);
     if (ex) { ex->colorOn = inShader; ex->color = enc; }
-    const wind::ColorMatrix dwm = inShader ? wind::IdentityColorMatrix()
-                                           : wind::BuildColorMatrix(w, d, g_hdrOn.load(std::memory_order_relaxed));
-    g_color.apply(dwm, !wind::IsIdentity(dwm));
+    wind::ColorMatrix dwm = inShader ? wind::IdentityColorMatrix()
+                                     : wind::BuildColorMatrix(w, d, g_hdrOn.load(std::memory_order_relaxed));
+    // MPO guard (issue #369, src/mpo_guard.h): zoomed at nearest on an MPO boot, an invisible
+    // non-identity effect makes DWM compose the desktop itself, so no plane can take the 16-bit
+    // translation. The engine's runtime carries it (zoomed only), so it never needs our own hold.
+    const bool mpoGuard = t.cfg.mpoGuard != 0 && wind::WantMpoGuard(zoomedNow, dynamic_cast<TransformModel*>(t.model) != nullptr,
+                                             !g_mpoDisabled || t.cfg.mpoGuardTest != 0,
+                                             t.cfg.txSamplingMode);
+    const bool userFilter = !wind::IsIdentity(dwm);
+    dwm = wind::GuardedColorMatrix(dwm, mpoGuard);
+    g_color.apply(dwm, userFilter);
 }
 
 // Tinted pointer at 1x (spec 2026-09-30-cursor-tint-design.md): the hardware pointer is out of the
@@ -1120,7 +1133,8 @@ static void RunTick(TickState& t) {
             // crisp never runs on an MPO-enabled boot (the 16-bit TDR combo; covers profile
             // switches and hand edits too). The ini keeps the user's intent.
             if (int eff = EffectiveSamplingMode(nc.txSamplingMode, g_mpoDisabled,
-                                                wind::MpoDisabledInRegistry(), nc.tdrTest);
+                                                wind::MpoDisabledInRegistry(), nc.tdrTest,
+                                                nc.mpoNearestGuard != 0);
                 eff != nc.txSamplingMode) {
                 wind::Log(wind::LogLevel::Info, "config",
                           "sampling %d deferred, running %d: MPO restart pending or MPO-enabled "
@@ -1169,6 +1183,8 @@ static void RunTick(TickState& t) {
             if (auto* tmHot = dynamic_cast<TransformModel*>(
                     t.mTransform ? t.mTransform : t.model))
                 tmHot->setIdleReleaseMs(nc.txIdleReleaseMs);
+            if (auto* tmHot = dynamic_cast<TransformModel*>(t.mTransform ? t.mTransform : t.model))
+                tmHot->setNativeCursorPref(wind::UseNativeCursor(nc.txNativeCursor));
             t.cfg = nc;   // pick up renderer knobs (smoothing, filter, cursor scale, zoom speed)
             // transformExclude / renderExclude / the per-window-type engine keys may all have
             // changed: drop the cache so every exe-derived predicate is re-resolved. Without this
@@ -1343,6 +1359,23 @@ static void RunTick(TickState& t) {
     // smooth ramp, merely delayed. Gated on level > 1.0 so the session still enters and the
     // freeze holds it at ~1.01 until the hold expires.
     const bool quiesceFreeze = QuiesceHoldActive(t) && t.zoom.level() > 1.0;
+    // SMOOTH-ZOOM RELEASE (issue #369, src/zoom_ladder.h EaseOutShouldStop). With smooth sampling and
+    // the zoom ladder, a slow zoom must cross DWM's whole-pixel rounding steps, each an image jump of
+    // about the level in px; snapping the slow tail hopped, holding it froze then caught up (field).
+    // So after a release the user's ease-out runs (snapped like a held zoom) until it moves less per
+    // frame than clean levels are apart, then the zoom stops on the level on screen.
+    {
+        auto& zs = g_input.state();
+        const bool held = zs.inHeld.load() || zs.outHeld.load() || g_input.anyBoundKeyPressed();
+        if (!held && !t.zoom.hasTarget() && t.cfg.txSamplingMode == 1 && t.cfg.txSmoothLadder != 0 &&
+            t.zoom.level() != t.prevLvl && wind::EaseOutShouldStop(t.zoom.level(), t.prevLvl)) {
+            if (auto* tmStop = dynamic_cast<TransformModel*>(t.model)) {
+                const double shown = tmStop->writtenLevel();
+                if (shown > 1.001) { t.zoom.setLevel(shown); t.zoom.stopGlide(); }
+            }
+        }
+        t.prevZoomHeld = held;
+    }
     if (!quiesceFreeze) t.zoom.tick(dt < kMaxZoomDt ? dt : kMaxZoomDt);
     // Recenter on a recenterVk key press (rising edge).
     bool recenter = false;
@@ -1762,7 +1795,16 @@ static void RunTick(TickState& t) {
         // So: MPO on + nearest = walls, ALWAYS. Smooth keeps the #191 ghost-gated lift (shown +
         // settled >=350ms + rect intact; fail-closed). tdrTest=4 is the field harness override.
         const bool nearestSampling = t.cfg.txSamplingMode == 0;
-        const bool wallNeeded = mpoExposed && t.cfg.tdrTest != 4 &&
+        // PLANE-FREE SESSION (issue #369): smooth sampling (the resample property) and the MPO guard
+        // effect both make the scaled desktop visual need an external layer, so DWM composes the zoomed
+        // desktop and no hardware plane carries the translation. Measured on an MPO boot: a full-screen
+        // flip app goes from Hardware Composed: Independent Flip to Composed: Flip at zoom-in in both
+        // cases. Then the pan walls, the write clamp and the MPO ghost are all unnecessary; the ghost
+        // alone cost 5-7 ms at every zoom-out (16-21 ms landing stalls). Behind mpoGuardLiftWall until
+        // the far edge is proven on an MPO boot (default off).
+        const bool guardLift = mpoExposed && t.cfg.mpoGuardLiftWall != 0 &&
+                               (!nearestSampling || t.cfg.mpoGuard != 0);
+        const bool wallNeeded = mpoExposed && t.cfg.tdrTest != 4 && !guardLift &&
                                 (nearestSampling ||
                                  !(t.cfg.mpoBuster != 0 && tmWall->mpoGhostSettled()));
         t.mapper.setMaxSourceLeft(wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0);
@@ -1770,8 +1812,8 @@ static void RunTick(TickState& t) {
         // strip above ~16.2x on 2160 was reachable-lethal with the X-only wall.
         t.mapper.setMaxSourceTop(wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0);
         if (tmWall) {
-            tmWall->setMpoBusterWanted(mpoExposed && t.cfg.mpoBuster != 0);
-            tmWall->setMpoExposed(mpoExposed);
+            tmWall->setMpoBusterWanted(mpoExposed && t.cfg.mpoBuster != 0 && !guardLift);
+            tmWall->setMpoExposed(mpoExposed && !guardLift);   // no write clamp under the guard lift
         }
         if (transformGame) t.lastTransformGameMs = GetTickCount64();   // device-lost backstop window
         // Launch quiesce: per-tick cover tracking while zoomed (a mid-session takeover by a
@@ -1812,7 +1854,10 @@ static void RunTick(TickState& t) {
         // write: the hand's motion arrives as ballistics-cooked raw input (the Inspect machinery).
         // Hook-thread writes were tried first and rejected: owning the runtime there marshals every
         // write onto the input thread (field: hitches). Tracking and edge mode pause meanwhile.
-        const bool panel = t.cfg.panelPointer != 0 && freeCursor && lvl > 1.001 && g_track.shellPanelOpen();
+        // A native-cursor session (issue #369) needs none of this: DWM's pointer is already drawn
+        // above the panels and DWM keeps it centred, so the hand moves the pointer directly.
+        const bool panel = t.cfg.panelPointer != 0 && freeCursor && lvl > 1.001 && g_track.shellPanelOpen() &&
+                           !(tmWall && tmWall->nativeSession());
         if (panel && !t.panelFreeze) {
             GetClipCursor(&t.panelSavedClip);
             POINT p{}; GetCursorPos(&p);
@@ -2273,7 +2318,24 @@ static void RunTick(TickState& t) {
         // (the old tick countdown only decremented while zoomed, which did exactly that).
         const bool quiesceHold = QuiesceHoldActive(t);
         ex.pauseWrites = t.clickPauseTicks > 0 || quiesceHold;
+        {
+            auto& zs = g_input.state();
+            ex.zoomDriven = zs.inHeld.load() || zs.outHeld.load() || g_input.anyBoundKeyPressed() ||
+                            t.zoom.hasTarget();
+        }
         if (quiesceHold) ex.suppressCursorSync = true;
+        // Native cursor (issue #369): DWM may own the pan only where the view is a pure function of
+        // the pointer. The model applies it only in a native-cursor session.
+        {
+            wind::DwmCentreIn dc;
+            dc.zoomed = lvl > 1.001;
+            dc.freeCursor = freeCursor && !panel;
+            dc.viewDetached = t.viewDetached;
+            dc.wallNeeded = wind::NearWall(wallNeeded, r.srcLeft, r.srcTop, lvl, kMaxSafeTxMagnitude, 64.0);
+            dc.quiesce = quiesceHold;
+            dc.hookWrite = hookWrite;
+            ex.dwmCentre = t.cfg.txDwmCentre != 0 && wind::WantDwmCentring(dc);
+        }
         // Our tray menu is open (in WindTray.exe, flagged through the shared block): the pointer
         // belongs to the USER (they are aiming at menu items),
         // so the weld must not re-park it - at full tick rate it pins the cursor outright
@@ -2977,7 +3039,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // an MPO-enabled boot (the 16-bit TDR combo). The ini keeps the user's intent. Mirrored at
     // the hot-reload site in RunTick, which also covers profile switches and hand edits.
     if (int eff = EffectiveSamplingMode(cfg.txSamplingMode, g_mpoDisabled,
-                                        wind::MpoDisabledInRegistry(), cfg.tdrTest);
+                                        wind::MpoDisabledInRegistry(), cfg.tdrTest,
+                                        cfg.mpoNearestGuard != 0);
         eff != cfg.txSamplingMode) {
         wind::Log(wind::LogLevel::Info, "config",
                   "sampling %d deferred, running %d: MPO restart pending or MPO-enabled boot "
@@ -3075,6 +3138,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                                                    cfg.cursorSprite != 0, cfg.zorderBand,
                                                    cfg.spriteBand16 != 0, cfg.cursorBandAuto != 0);
         tm->setIdleReleaseMs(cfg.txIdleReleaseMs);
+        tm->setNativeCursorPref(wind::UseNativeCursor(cfg.txNativeCursor));
         tm->setSpriteCapturable(cfg.spriteCapturable != 0);
         model = std::move(tm);
     } else {
@@ -3089,6 +3153,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                                                         cfg.cursorSprite != 0, cfg.zorderBand,
                                                         cfg.spriteBand16 != 0, cfg.cursorBandAuto != 0);
             tm2->setIdleReleaseMs(cfg.txIdleReleaseMs);
+            tm2->setNativeCursorPref(wind::UseNativeCursor(cfg.txNativeCursor));
             tm2->setSpriteCapturable(cfg.spriteCapturable != 0);
             model2 = std::move(tm2);
         }

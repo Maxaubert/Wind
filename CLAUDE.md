@@ -37,8 +37,10 @@ Chapter numbers refer to `docs/architecture/NN-*.md`.
 - Never call `MagInitialize`/`MagUninitialize` directly; use `wind::MagApiAcquire()`/`MagApiRelease()`
   (`src/mag_host.*`). Independent pairs break each other: two cursors, or transform writes returning
   FALSE. Keep every hold symmetric.
-- A live magnification context taxes every cursor change any app makes, even at level 1.0; only
-  releasing the runtime leaves that mode. So: no warm-up write at launch, context only around sessions.
+- The COMPOSED pointer (DWM drawing it into the magnified frame) taxes every cursor change any app
+  makes; a context alone does not (measured 2026-10-07). Sprite path: no warm-up write at launch,
+  context only around sessions. Native cursor: context + cursor lens kept warm, lens style ON only
+  while zoomed. See 05 and 07.
 - Colour filters (warmth/brightness) hold the runtime at 1x and pay that tax. Measure a
   cursor-toggling game with colour on before blaming anything else. See 04.
 - Magnification calls are thread-affine: only the owning thread's writes take effect.
@@ -52,6 +54,11 @@ Chapter numbers refer to `docs/architecture/NN-*.md`.
   never reload. Add new UI-only keys there.
 
 **Cursor (07)**
+- Native cursor (`txNativeCursor=1`, both sampling modes; `src/native_cursor.h`): DWM draws the real pointer via
+  Wind's cursor lens (a hidden `WC_MAGNIFIER` window, built on the owner thread at idle) and
+  centres the view itself (`SetFullscreenMagnifierOffsetsDWMUpdated`). While DWM centres, never
+  write a same-level transform or warm pulse. Never use a public write to get the composed pointer:
+  it blocks 200-260 ms. `MagGetFullscreenTransform` cannot see DWM's centring.
 - The cursor grows with the zoom in every engine (#253). Do not restore constant size;
   `cursorConstantSize=1` is the render-only opt-in. Test defaults on a wiped `%LOCALAPPDATA%\Wind`:
   the dev ini differs from a clean install.
@@ -81,8 +88,9 @@ Chapter numbers refer to `docs/architecture/NN-*.md`.
   stay 0); do not gate the sprite on "the view moved".
 - Keep the 2 px right/bottom clamp and the 1-texel left/top floor in `ComputeMagTransform` (TDR and
   grey-edge classes).
-- MPO on + nearest sampling overflows a 16-bit driver field above ~9.3x at the far right: walls
-  always. Never offer nearest with MPO on.
+- MPO on + nearest sampling overflows a 16-bit driver field above ~9.3x at the far right unless the
+  MPO guard (`src/mpo_guard.h`, default on) keeps apps off planes while zoomed. Never turn the guard
+  off with nearest on an MPO boot; walls come back only when it is off.
 - `txWarmMode`/`txWarmHz`: every warm write is a full DWM re-render; composition-rate metrics miss
   the pan-start hitch. Field-verify in a game.
 - Publish the source-rect input transform on every change (needs UIAccess); identity or none gives

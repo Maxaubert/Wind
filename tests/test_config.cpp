@@ -415,6 +415,14 @@ TEST_CASE("the high-res/MPO option is atomic at restart (issue #242)") {
     // The field harness must be able to repro nearest+MPO deliberately.
     CHECK(EffectiveSamplingMode(0, false, false, 2) == 0);
     CHECK(EffectiveSamplingMode(0, false, true,  4) == 0);
+    // MPO nearest guard (issue #369): nearest may run on an MPO boot when the guard is on; a pending
+    // restart still holds the boot look.
+    CHECK(EffectiveSamplingMode(0, false, false, 0, true) == 0);
+    CHECK(EffectiveSamplingMode(0, false, true,  0, true) == 0);   // no restart-pending hold
+    CHECK(EffectiveSamplingMode(1, true,  false, 0, true) == 1);
+    CHECK(ParseConfig("").mpoNearestGuard == 1);
+    CHECK(ParseConfig("mpoNearestGuard=0\n").mpoNearestGuard == 0);
+    CHECK(ParseConfig("mpoNearestGuard=1\n").mpoNearestGuard == 1);
 }
 
 TEST_CASE("cursorBandAuto defaults on and parses off (issue #269)") {
