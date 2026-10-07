@@ -394,7 +394,8 @@ struct TickState {
     DWORD  quiescedPid = 0;         // fires at most once per process instance
     HWND   lastCoverFg = nullptr;   // edge-detect cover-takeover foregrounds
     unsigned long long lastCoverProbeMs = 0;
-    double prevTickLevel = 0.0;      // hook-write arming: only while the level is settled (#206)   // throttles the idle-tick cover watch to ~4Hz
+    double prevTickLevel = 0.0;
+    bool   prevZoomHeld = false;     // #369: release edge of the zoom keys/buttons      // hook-write arming: only while the level is settled (#206)   // throttles the idle-tick cover watch to ~4Hz
     IMagnifierModel* wantModel = nullptr;   // hybrid stickiness: candidate engine and how long it
     unsigned long long wantSinceMs = 0;     //   has been the candidate (debounces foreground reads)
     unsigned long long kbHookDivergentSinceMs = 0;  // LL keyboard-hook watchdog dwell (issue #156)
@@ -1357,6 +1358,22 @@ static void RunTick(TickState& t) {
     // smooth ramp, merely delayed. Gated on level > 1.0 so the session still enters and the
     // freeze holds it at ~1.01 until the hold expires.
     const bool quiesceFreeze = QuiesceHoldActive(t) && t.zoom.level() > 1.0;
+    // SMOOTH-ZOOM RELEASE (issue #369). With smooth sampling and the zoom ladder, a slow ease-out
+    // must cross DWM's whole-pixel rounding steps, and each crossing jumps the image by about the
+    // level in px; snapping it instead hopped, holding it froze then caught up (all field-tested).
+    // So the zoom stops where it is on screen at the moment the key or button is released.
+    {
+        auto& zs = g_input.state();
+        const bool held = zs.inHeld.load() || zs.outHeld.load() || g_input.anyBoundKeyPressed();
+        if (t.prevZoomHeld && !held && !t.zoom.hasTarget() && t.cfg.txSamplingMode == 1 &&
+            t.cfg.txSmoothLadder != 0) {
+            if (auto* tmStop = dynamic_cast<TransformModel*>(t.model)) {
+                const double shown = tmStop->writtenLevel();
+                if (shown > 1.001) { t.zoom.setLevel(shown); t.zoom.stopGlide(); }
+            }
+        }
+        t.prevZoomHeld = held;
+    }
     if (!quiesceFreeze) t.zoom.tick(dt < kMaxZoomDt ? dt : kMaxZoomDt);
     // Recenter on a recenterVk key press (rising edge).
     bool recenter = false;
