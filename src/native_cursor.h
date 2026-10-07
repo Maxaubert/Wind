@@ -47,12 +47,14 @@ inline bool WantDwmCentring(const DwmCentreIn& in) {
            !in.hookWrite;
 }
 
-// While DWM centres, a write at an unchanged level would put Wind's tick-old offset back on
-// screen until the next cursor update (a one-frame twitch per write), so only level changes and
-// the one write that follows a centring switch go out. The bookkeeping still advances.
-inline bool SendWrite(bool dwmCentring, bool levelMoved, bool forceWrite) {
-    return !dwmCentring || levelMoved || forceWrite;
-}
+// KEEP WRITING WHILE DWM CENTRES (user field test 2026-10-07). DWM's own centring moves only DWM's
+// copy of the view; win32k's copy (what MagGetFullscreenTransform returns) changes only on a client
+// write, and pointer-framework hit-testing (the taskbar, XAML, Chromium) maps points with it. When
+// Wind sent only level changes, that copy froze at the last write and taskbar hover landed on the
+// neighbouring icon, worse with zoom (gone with txDwmCentre=0). Windows Magnifier writes the view on
+// every mouse event even in centred mode. So every changed tick is written, and each write is
+// followed by a cursor event so DWM re-centres by its own rule in the same frame (NudgeAfterWrite).
+// (Measured 2026-10-07: DWM's centring matches Wind's formula to under 1 px at every edge.)
 
 // INPUT TRANSFORM vs the composed pointer (measured 2026-10-07). A MagSetInputTransform publish that
 // changes the SCALE makes DWM stop drawing the composed pointer until the next cursor event: zooming
@@ -72,14 +74,13 @@ inline bool NudgeAfterPublish(bool nativeSession, double publishedLevel, double 
     return nativeSession && (d > 1e-4 || d < -1e-4);
 }
 
-// ONE CENTRE DURING ZOOM (user field test 2026-10-07). DWM centres on its own cursor point plus a
-// learned hotspot offset that can be 1-2 desktop px off Wind's exact centre; a level write puts the
-// view on Wind's centre and the next cursor event puts it back on DWM's, so a zoom with a still hand
-// sat 5-10 px off at ~5x and snapped back when the zoom stopped (gone with txDwmCentre=0). So while
-// DWM centres, every level write is followed by a cursor event (a pixel and back), which makes DWM
-// re-centre by its own rule in the same frame: one centre throughout.
-inline bool NudgeAfterLevelWrite(bool dwmCentring, bool levelMoved, bool wrote) {
-    return dwmCentring && levelMoved && wrote;
+// ONE CENTRE (user field test 2026-10-07). DWM centres on its own cursor point plus a learned
+// hotspot offset that can be 1-2 desktop px off Wind's exact centre; a Wind write puts the view on
+// Wind's centre and the next cursor event puts it back on DWM's, so a zoom with a still hand sat
+// 5-10 px off at ~5x and snapped back when the zoom stopped. So while DWM centres, every write is
+// followed by a cursor event (a pixel and back): DWM re-centres by its own rule in the same frame.
+inline bool NudgeAfterWrite(bool dwmCentring, bool wrote) {
+    return dwmCentring && wrote;
 }
 
 }  // namespace wind

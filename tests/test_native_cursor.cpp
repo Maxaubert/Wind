@@ -35,12 +35,6 @@ TEST_CASE("DWM centring is off wherever Wind must own the offset") {
     CHECK(WantDwmCentring(in) == false);
 }
 
-TEST_CASE("while DWM centres, only level changes and forced writes go out") {
-    CHECK(SendWrite(false, false, false) == true);   // Wind owns the pan: every write
-    CHECK(SendWrite(true, false, false) == false);   // pan-only write would twitch the view
-    CHECK(SendWrite(true, true, false) == true);     // zoom ramp
-    CHECK(SendWrite(true, false, true) == true);     // the write after a centring switch
-}
 
 TEST_CASE("an armed MPO wall only blocks DWM centring where the view can reach it") {
     // 3840x2160, wall at |src*level| <= 32000.
@@ -64,9 +58,8 @@ TEST_CASE("pointer nudge only after a scale-changing publish in a native session
     CHECK(NudgeAfterPublish(false, 3.0, 1.0) == false);
 }
 
-TEST_CASE("while DWM centres, a level write is followed by a cursor event (one centre during zoom)") {
-    CHECK(NudgeAfterLevelWrite(true, true, true) == true);
-    CHECK(NudgeAfterLevelWrite(true, false, true) == false);   // pan-only: DWM already owns it
-    CHECK(NudgeAfterLevelWrite(false, true, true) == false);   // Wind owns the view
-    CHECK(NudgeAfterLevelWrite(true, true, false) == false);   // nothing written
+TEST_CASE("while DWM centres, every write is followed by a cursor event (one centre)") {
+    CHECK(NudgeAfterWrite(true, true) == true);
+    CHECK(NudgeAfterWrite(false, true) == false);   // Wind owns the view
+    CHECK(NudgeAfterWrite(true, false) == false);   // nothing written
 }

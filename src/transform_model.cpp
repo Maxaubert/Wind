@@ -8,7 +8,7 @@
 #include "sprite_layer.h"  // PickSpriteLayer (pure, tested): issue #269
 #include "config_path.h"   // ResolveLogDir
 #include "tick_span.h"     // per-tick spans (#361)
-#include "native_cursor.h" // UseNativeCursor, SendWrite (pure, tested): issue #369
+#include "native_cursor.h" // UseNativeCursor, NudgeAfterWrite (pure, tested): issue #369
 #include <cstdio>
 #include <windows.h>
 #include <magnification.h>
@@ -827,8 +827,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // anyway (measured), so skipping is free; the next changed/keep-alive tick writes as before.
     // suppressTransformWrite: the mouse hook is the single writer this session (issue #206). The
     // state above is still maintained, so turning the hook path off mid-session resumes cleanly.
-    if ((changedAndWriting || keepAliveActive) && !ex.suppressTransformWrite &&
-        SendWrite(dwmCentreOn_, ci.levelMoved, forceWrite)) {
+    if ((changedAndWriting || keepAliveActive) && !ex.suppressTransformWrite) {
         // warmLevelJitter_ (mode 4) perturbs only the LEVEL, and only on warm ticks - a real
         // write always sends the true level. See the mode 4 note above for why it has to change
         // at all and why this is the cheapest honest thing to change.
@@ -839,7 +838,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         const bool prime = nativeSession_ && !nativePrimed_ && !host_.cursorLensReady() && lvlOut > 1.001;
         writeTransform((float)lvlOut, m.offX, m.offY, m.txX + txJitter, m.txY, fastPan_ && !prime, false);
         if (prime) nativePrimed_ = true;
-        if (NudgeAfterLevelWrite(dwmCentreOn_, ci.levelMoved, true)) {
+        if (NudgeAfterWrite(dwmCentreOn_, true)) {
             POINT np;
             if (GetCursorPos(&np)) { SetCursorPos(np.x + 1, np.y); SetCursorPos(np.x, np.y); }
         }
