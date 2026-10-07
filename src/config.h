@@ -402,6 +402,8 @@ struct Config {
     // 11 px p95 -> 0.7 px measured at 10-25x). 0 = off (hot).
     int txSmoothLadder = 1;
     int mpoGuardTest = 0;   // diagnostic: apply the MPO guard effect even on an MPO-off boot (hot)
+    int mpoGuard = 1;       // diagnostic: 0 = never apply the guard effect (A/B on an MPO boot; hot)
+    int mpoGuardLiftWall = 0;   // 1 = no pan walls / write clamp while the guard is on (needs proof; hot)
     // WRITE CADENCE - SHIPPED OFF (tried ON 2026-08-26, REVERTED the same day on field report).
     // The theory (issue #204) is sound: we write ~144/s where native writes ~49/s, and each write
     // makes DWM redo work proportional to the zoom. Turning it on scored well in the automated

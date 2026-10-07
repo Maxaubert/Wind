@@ -239,6 +239,8 @@ Config ParseConfig(const std::string& text) {
             else if (key == "mpoNearestGuard")    c.mpoNearestGuard = std::stoi(val);
             else if (key == "txSmoothLadder")     c.txSmoothLadder = std::stoi(val);
             else if (key == "mpoGuardTest")       c.mpoGuardTest = std::stoi(val);
+            else if (key == "mpoGuard")           c.mpoGuard = std::stoi(val);
+            else if (key == "mpoGuardLiftWall")   c.mpoGuardLiftWall = std::stoi(val);
             else if (key == "lockedBallistics")   c.lockedBallistics = std::stoi(val);
             else if (key == "edgeClip")           c.edgeClip = std::stoi(val);
             else if (key == "txPace")             c.txPace = std::stoi(val);

@@ -890,7 +890,7 @@ static void UpdateColorFilter(TickState& t, bool zoomedNow, bool renderSession, 
     // MPO guard (issue #369, src/mpo_guard.h): zoomed at nearest on an MPO boot, an invisible
     // non-identity effect makes DWM compose the desktop itself, so no plane can take the 16-bit
     // translation. The engine's runtime carries it (zoomed only), so it never needs our own hold.
-    const bool mpoGuard = wind::WantMpoGuard(zoomedNow, dynamic_cast<TransformModel*>(t.model) != nullptr,
+    const bool mpoGuard = t.cfg.mpoGuard != 0 && wind::WantMpoGuard(zoomedNow, dynamic_cast<TransformModel*>(t.model) != nullptr,
                                              !g_mpoDisabled || t.cfg.mpoGuardTest != 0,
                                              t.cfg.txSamplingMode);
     const bool userFilter = !wind::IsIdentity(dwm);
@@ -1776,7 +1776,12 @@ static void RunTick(TickState& t) {
         // So: MPO on + nearest = walls, ALWAYS. Smooth keeps the #191 ghost-gated lift (shown +
         // settled >=350ms + rect intact; fail-closed). tdrTest=4 is the field harness override.
         const bool nearestSampling = t.cfg.txSamplingMode == 0;
-        const bool wallNeeded = mpoExposed && t.cfg.tdrTest != 4 &&
+        // MPO guard lift (issue #369, src/mpo_guard.h): with the guard effect on, DWM composes the zoomed
+        // desktop and no plane carries the translation, so neither the walls nor the write clamp are
+        // needed. Behind mpoGuardLiftWall until an MPO-on boot proves it at the far edge (default off).
+        const bool guardLift = mpoExposed && nearestSampling && t.cfg.mpoGuard != 0 &&
+                               t.cfg.mpoGuardLiftWall != 0;
+        const bool wallNeeded = mpoExposed && t.cfg.tdrTest != 4 && !guardLift &&
                                 (nearestSampling ||
                                  !(t.cfg.mpoBuster != 0 && tmWall->mpoGhostSettled()));
         t.mapper.setMaxSourceLeft(wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0);
@@ -1785,7 +1790,7 @@ static void RunTick(TickState& t) {
         t.mapper.setMaxSourceTop(wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0);
         if (tmWall) {
             tmWall->setMpoBusterWanted(mpoExposed && t.cfg.mpoBuster != 0);
-            tmWall->setMpoExposed(mpoExposed);
+            tmWall->setMpoExposed(mpoExposed && !guardLift);   // no write clamp under the guard lift
         }
         if (transformGame) t.lastTransformGameMs = GetTickCount64();   // device-lost backstop window
         // Launch quiesce: per-tick cover tracking while zoomed (a mid-session takeover by a

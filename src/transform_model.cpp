@@ -36,6 +36,21 @@ static bool ShowSystemCursorMarshalled(BOOL show) {
     if (!ok) g_showCursorFails.fetch_add(1, std::memory_order_relaxed);
     return ok;
 }
+// The pixel-and-back cursor event the native cursor relies on (issue #369). Never while a click is
+// in progress: a nudge between button-down and button-up made some clicks fail to register (field
+// report), so nothing is injected while the left, right or middle button is held or for 250 ms
+// after it was last seen down. The side buttons are exempt: they are Wind's zoom keys.
+static unsigned long long g_lastButtonMs = 0;
+static bool ClickInProgress() {
+    const unsigned long long now = GetTickCount64();
+    if ((GetAsyncKeyState(VK_LBUTTON) | GetAsyncKeyState(VK_RBUTTON) | GetAsyncKeyState(VK_MBUTTON)) & 0x8000)
+        g_lastButtonMs = now;
+    return g_lastButtonMs != 0 && now - g_lastButtonMs < 250;
+}
+static void NudgePointer(POINT& np) {
+    if (ClickInProgress()) return;
+    if (GetCursorPos(&np)) { SetCursorPos(np.x + 1, np.y); SetCursorPos(np.x, np.y); }
+}
 unsigned long long TransformCursorHideFailures() {
     return g_showCursorFails.load(std::memory_order_relaxed);
 }
@@ -112,7 +127,7 @@ void TransformModel::teardownMag() {
         // hardware plane, which Windows repaints only on the next cursor EVENT, so nudge it a pixel
         // and back (the same trick the zoom-out uses).
         POINT np;
-        if (GetCursorPos(&np)) { SetCursorPos(np.x + 1, np.y); SetCursorPos(np.x, np.y); }
+        NudgePointer(np);
     }
     nativeSession_ = false;
     lensFailed_ = false;      // a fresh context may build the lens
@@ -409,7 +424,7 @@ void TransformModel::setActive(bool active) {
         if (nativeSession_ && host_.createCursorLens()) {
             host_.setCursorLens(true);
             POINT np;
-            if (GetCursorPos(&np)) { SetCursorPos(np.x + 1, np.y); SetCursorPos(np.x, np.y); }
+            NudgePointer(np);
         }
         QueryPerformanceCounter(&z2);
         lastEnter_.bridgeMs = double(z1.QuadPart - z0.QuadPart) * 1000.0 / zf.QuadPart;
@@ -455,7 +470,7 @@ void TransformModel::setActive(bool active) {
         // the nudge rides along on the worker too.
         blanker_->restore([] {
             POINT np;
-            if (GetCursorPos(&np)) { SetCursorPos(np.x + 1, np.y); SetCursorPos(np.x, np.y); }
+            NudgePointer(np);
         });
         step(1);   // system cursor restore queued (it was the whole teardown cost)
     }
@@ -491,7 +506,7 @@ void TransformModel::setActive(bool active) {
         // nudge the pointer a pixel and back.
         host_.setCursorLens(false);
         POINT np;
-        if (GetCursorPos(&np)) { SetCursorPos(np.x + 1, np.y); SetCursorPos(np.x, np.y); }
+        NudgePointer(np);
     }
     RECT full{ 0, 0, mon_.w, mon_.h };
     host_.setInputTransform(false, full, full);   // input mapping back to identity at 1x
@@ -646,6 +661,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     }
     idleReleaseMs_ = cfg.txIdleReleaseMs;   // hot-reloadable release window
     nativePref_ = UseNativeCursor(cfg.txNativeCursor);   // next zoom-in (#369)
+    ClickInProgress();   // keep the click window current between nudges
     restLevel_ = cfg.txRestLevel;           // hot
     if (!ensureMag()) return;   // lazy context: the session's first write brings DWM up
     // Bitmap smoothing (issue #197/#227), once per magnification context. The smooth filter
@@ -858,7 +874,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         if (prime) nativePrimed_ = true;
         if (NudgeAfterWrite(dwmCentreOn_, true)) {
             POINT np;
-            if (GetCursorPos(&np)) { SetCursorPos(np.x + 1, np.y); SetCursorPos(np.x, np.y); }
+            NudgePointer(np);
         }
         forceWrite_ = false;
     }
@@ -958,7 +974,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
                 // A scale-changing publish stops DWM drawing the composed pointer until the next
                 // cursor event: give it one, a pixel and back.
                 POINT np;
-                if (GetCursorPos(&np)) { SetCursorPos(np.x + 1, np.y); SetCursorPos(np.x, np.y); }
+                NudgePointer(np);
             }
             if (ok) ixPubLevel_ = applyLevel;
             if (ok) {
