@@ -2303,7 +2303,7 @@ static void RunTick(TickState& t) {
             dc.zoomed = lvl > 1.001;
             dc.freeCursor = freeCursor && !panel;
             dc.viewDetached = t.viewDetached;
-            dc.wallNeeded = wind::WallBinding(wallNeeded, lvl, t.mon.w, t.mon.h, kMaxSafeTxMagnitude);
+            dc.wallNeeded = wind::NearWall(wallNeeded, r.srcLeft, r.srcTop, lvl, kMaxSafeTxMagnitude, 64.0);
             dc.quiesce = quiesceHold;
             dc.hookWrite = hookWrite;
             ex.dwmCentre = t.cfg.txDwmCentre != 0 && wind::WantDwmCentring(dc);

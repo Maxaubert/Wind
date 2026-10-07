@@ -63,3 +63,11 @@ TEST_CASE("while DWM centres, every write is followed by a cursor event (one cen
     CHECK(NudgeAfterWrite(false, true) == false);   // Wind owns the view
     CHECK(NudgeAfterWrite(true, false) == false);   // nothing written
 }
+
+TEST_CASE("DWM centring yields only near an armed wall, not everywhere it is reachable") {
+    // 12x: wall at 32000/12 = 2666.7 source px.
+    CHECK(NearWall(true, 1000.0, 500.0, 12.0, 32000.0, 64.0) == false);   // middle of the screen
+    CHECK(NearWall(true, 2610.0, 500.0, 12.0, 32000.0, 64.0) == true);    // within a tick of the wall
+    CHECK(NearWall(true, 1000.0, 2620.0, 12.0, 32000.0, 64.0) == true);   // bottom wall
+    CHECK(NearWall(false, 2650.0, 2650.0, 12.0, 32000.0, 64.0) == false); // walls off
+}

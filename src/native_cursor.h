@@ -42,6 +42,19 @@ inline bool WallBinding(bool wallArmed, double level, int w, int h, double maxSa
     return (w * level - w) > maxSafe || (h * level - h) > maxSafe;
 }
 
+// Whether the view is close enough to an armed MPO pan wall that DWM's own (unclamped) centring
+// could cross it before Wind's next tick. Only then does Wind take the pan back. The earlier rule
+// (WallBinding: the wall is reachable at this level at all) switched centring off everywhere above
+// ~9.3x, and the switch made the view jump and the pan wobble in the middle of the screen (field
+// video 2026-10-07). marginSrc covers one tick of fast hand motion; the 32000 limit itself already
+// sits under the real 32767 field.
+inline bool NearWall(bool wallArmed, double srcLeft, double srcTop, double level, double maxSafe,
+                     double marginSrc) {
+    if (!wallArmed || level <= 1.0) return false;
+    const double wall = maxSafe / level;
+    return srcLeft > wall - marginSrc || srcTop > wall - marginSrc;
+}
+
 inline bool WantDwmCentring(const DwmCentreIn& in) {
     return in.zoomed && in.freeCursor && !in.viewDetached && !in.wallNeeded && !in.quiesce &&
            !in.hookWrite;
