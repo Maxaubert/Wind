@@ -33,7 +33,7 @@ pointer: 19 spikes of 20-42 ms in 6 s with the composed pointer at 1x, 0 with a 
 context after a private-channel zoom, or a context plus the cursor lens with its style off (all
 three kept Independent Flip). So the sprite path keeps the context only around real sessions, and
 there is no warm-up write at launch; the native cursor keeps context and lens warm with the style
-off at 1x ([07](07-cursor.md#native-cursor-high-resolution-cursor-on)). Colour filters hold the
+off at 1x ([07](07-cursor.md#native-cursor)). Colour filters hold the
 runtime at 1x ([04](04-render-engine.md)).
 
 **Calls are thread-affine.** Only the thread that called `MagInitialize` can drive the transform;
@@ -186,8 +186,12 @@ Defences (wall arming in `RunTick`, write clamp in `TransformModel::present`):
 ## Bitmap smoothing
 
 DWM magnifies with nearest neighbour unless something calls
-`MagSetFullscreenUseBitmapSmoothing` (Magnification.dll ordinal 1, undocumented, resolved by
-ordinal). `txSamplingMode`: 0 nearest (default), 1 smooth.
+`MagSetFullscreenUseBitmapSmoothing` (Magnification.dll, undocumented, resolved BY NAME).
+`txSamplingMode`: 0 nearest (default), 1 smooth.
+
+- Until 0.24.0 it was resolved by ordinal 1, which does not exist (the export ordinals start at
+  100), so Wind never set the filter: the image showed whatever state another process had left.
+  Measured 2026-10-07: from a smooth DWM state Wind at nearest stayed smooth; by name it switches.
 
 - The flag is the whole quality gap to the built-in Magnifier, image and cursor alike.
 - The raw user32 `SetMagnificationDesktopSamplingMode` takes a DWORD **pointer**; a by-value call
@@ -195,7 +199,7 @@ ordinal). `txSamplingMode`: 0 nearest (default), 1 smooth.
 - Modes 2–4, which the kernel accepts, render as nearest. There is no middle filter.
 - The flag is DWM-global and outlives the process that set it until DWM restarts, so a stale
   smooth state can make a build look smooth that is not. The model re-applies its mode per context
-  with up to 3 retries; the setter's return value is unreliable.
+  with up to 3 retries.
 - Under smooth, level ramps shimmer slightly (the filter re-interpolates each scale step); pans are
   clean. Swapping to nearest during ramps shifted the image 1–2 px per swap and was rejected.
 - Smoothing once crashed dwm.exe over Mica and acrylic at high zoom; it did not reproduce on a

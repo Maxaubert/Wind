@@ -619,7 +619,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         srcL = o.x; srcT = o.y;
     }
     idleReleaseMs_ = cfg.txIdleReleaseMs;   // hot-reloadable release window
-    nativePref_ = UseNativeCursor(cfg.txNativeCursor, cfg.txSamplingMode);   // next zoom-in (#369)
+    nativePref_ = UseNativeCursor(cfg.txNativeCursor);   // next zoom-in (#369)
     restLevel_ = cfg.txRestLevel;           // hot
     if (!ensureMag()) return;   // lazy context: the session's first write brings DWM up
     // Bitmap smoothing (issue #197/#227), once per magnification context. The smooth filter
@@ -636,9 +636,9 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // The flag is DWM-global and dies with a DWM restart, hence per-context re-apply.
     // A failed apply is retried, a little (issue #274): the call used to be recorded as applied
     // before it ran, so a wrong-thread failure left the filter unapplied for the whole context.
-    // BOUNDED, because the setter's return value is not a reliable success signal: mode 0 via
-    // ordinal 1 has reported FALSE on every call in this rig's logs (245 of 245) while working,
-    // so an unbounded retry would re-issue it every tick. Up to 3 attempts, 1 s apart, then
+    // BOUNDED, so a failing setter can never re-issue every tick. (The "FALSE on every call" seen
+    // in this rig's logs, 245 of 245, was the setter never being found: it was resolved by a
+    // non-existent ordinal until #369.) Up to 3 attempts, 1 s apart, then
     // accept. The mode is DWM-global state, so a genuine miss is also re-tried per context.
     if (cfg.txSamplingMode >= 0 && appliedSampling_ != cfg.txSamplingMode) {
         const unsigned long long now = GetTickCount64();

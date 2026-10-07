@@ -3,11 +3,9 @@
 
 using namespace wind;
 
-TEST_CASE("native cursor needs the knob AND smooth sampling") {
-    CHECK(UseNativeCursor(1, 1) == true);
-    CHECK(UseNativeCursor(1, 0) == false);   // high resolution cursor off: the sprite path
-    CHECK(UseNativeCursor(0, 1) == false);   // kill switch
-    CHECK(UseNativeCursor(0, 0) == false);
+TEST_CASE("native cursor follows the knob alone, at either sampling mode") {
+    CHECK(UseNativeCursor(1) == true);
+    CHECK(UseNativeCursor(0) == false);   // kill switch: the sprite path
 }
 
 static DwmCentreIn Mouse() {

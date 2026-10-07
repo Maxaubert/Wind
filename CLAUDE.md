@@ -54,7 +54,7 @@ Chapter numbers refer to `docs/architecture/NN-*.md`.
   never reload. Add new UI-only keys there.
 
 **Cursor (07)**
-- High resolution cursor on = native cursor (`src/native_cursor.h`): DWM draws the real pointer via
+- Native cursor (`txNativeCursor=1`, both sampling modes; `src/native_cursor.h`): DWM draws the real pointer via
   Wind's cursor lens (a hidden `WC_MAGNIFIER` window, built on the owner thread at idle) and
   centres the view itself (`SetFullscreenMagnifierOffsetsDWMUpdated`). While DWM centres, never
   write a same-level transform or warm pulse. Never use a public write to get the composed pointer:

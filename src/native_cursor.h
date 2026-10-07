@@ -1,8 +1,9 @@
 #pragma once
 // Native cursor (issue #369) - PURE, no <windows.h>, so it is unit-testable.
 //
-// With High resolution cursor on (smooth sampling), transform sessions use the pointer Windows
-// Magnifier uses instead of Wind's sprite:
+// Transform sessions use the pointer Windows Magnifier uses instead of Wind's sprite, at either
+// sampling mode (DWM samples the pointer like the content: smooth = sharp but shimmers during zoom
+// ramps, nearest = pixelated and steady):
 //   - ONE public MagSetFullscreenTransform write makes DWM draw the REAL pointer into the
 //     magnified frame: magnified, above every window band (thumbnails, emoji panel, menus, UAC,
 //     the Snipping Tool), sampled like the content (smooth = high res). Later private writes keep
@@ -13,14 +14,13 @@
 //     DWM alone), where a tick-paced write drifts 18-24 px at medium speed and up to 96 px fast.
 //     DWM re-learns a small hotspot offset only when the cursor HANDLE changes; a learn taken
 //     mid-jump can sit a few px off until the next shape change (native has the same).
-// Off (nearest sampling) keeps the sprite path: the cheaper choice for games, because a composed
-// pointer costs a visible-cursor game its Independent Flip.
+// txNativeCursor=0 keeps the old sprite path as a fallback. Games pay nothing extra: a zoomed
+// full-screen window is composed anyway, and at 1x the lens style is off (hardware pointer).
 namespace wind {
 
-// Whether a transform session uses the native cursor. Decided once at zoom-in; sampling is a
-// restart-staged setting, so it cannot change under a session anyway.
-inline bool UseNativeCursor(int txNativeCursor, int effectiveSamplingMode) {
-    return txNativeCursor != 0 && effectiveSamplingMode == 1;
+// Whether a transform session uses the native cursor. Decided once at zoom-in.
+inline bool UseNativeCursor(int txNativeCursor) {
+    return txNativeCursor != 0;
 }
 
 // When DWM may own the pan (DWM centring on). Only where the view is a pure function of the

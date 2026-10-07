@@ -24,8 +24,8 @@ public:
           zorderBand_(zorderBand), spriteBand16_(spriteBand16), cursorBandAuto_(cursorBandAuto) {}
     // Before initialize(). The dualcursor rig measures the sprite from captures (issue #269).
     void setSpriteCapturable(bool on) { spriteCapturable_ = on; }
-    // Native cursor preference (issue #369, src/native_cursor.h): UseNativeCursor(txNativeCursor,
-    // effective sampling). Latched into the session at zoom-in; present() keeps it current.
+    // Native cursor preference (issue #369, src/native_cursor.h): UseNativeCursor(txNativeCursor).
+    // Latched into the session at zoom-in; present() keeps it current.
     void setNativeCursorPref(bool on) { nativePref_ = on; }
     // This session draws DWM's own pointer (no sprite, no blanking). RunTick skips the shell-panel
     // pointer freeze for it: DWM's pointer is already above the panels.

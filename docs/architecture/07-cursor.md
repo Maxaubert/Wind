@@ -81,11 +81,13 @@ desktop space and DWM magnifies it; the render engine scales its drawn cursor to
 cursor kept at desktop size read as tiny next to the transform. `cursorConstantSize=1` is the
 render-only opt-in for the old constant size. `cursorScaleWithZoom` is retired and ignored.
 
-## Native cursor (High resolution cursor on)
+## Native cursor
 
-With **High resolution cursor** on (`txSamplingMode=1`) and `txNativeCursor=1` (default), transform
-sessions use the pointer Windows Magnifier uses: the real pointer, drawn by DWM into the magnified
-frame. Pure rules: `src/native_cursor.h` (tested).
+With `txNativeCursor=1` (default), transform sessions use the pointer Windows Magnifier uses: the
+real pointer, drawn by DWM into the magnified frame. It works at either sampling mode, because DWM
+samples it like the content: High resolution cursor (smooth) makes it sharp but it shimmers
+slightly during zoom ramps, nearest keeps it pixelated and steady. Pure rules:
+`src/native_cursor.h` (tested).
 
 - **The cursor lens.** `MagHost::createCursorLens` makes a hidden window of the documented
   magnifier control class (`WC_MAGNIFIER`) on the runtime's owner thread. With
@@ -114,10 +116,11 @@ frame. Pure rules: `src/native_cursor.h` (tested).
   until the next shape change. Windows Magnifier has the same behaviour.
 - No sprite, no blanker, no shell-panel freeze (`panelPointer` is skipped). The hide-cursor hotkey
   blanks the pointer the way Inspect does. Inspect keeps its crosshair sprite.
-- **Off** (nearest sampling, or `txNativeCursor=0`): the sprite path below. It suits games: a
-  composed pointer costs a visible-cursor full-screen app its Independent Flip while zoomed.
+- **Off** (`txNativeCursor=0`): the sprite path below, kept as a fallback. Games pay nothing extra
+  for the native cursor: a zoomed full-screen window is composed anyway, and at 1x the lens style
+  is off.
 
-## Hiding the real pointer: blanker and sprite (High resolution cursor off)
+## Hiding the real pointer: blanker and sprite (txNativeCursor=0)
 
 In a zoomed sprite-path transform session the real pointer would draw unmagnified at its raw
 position, so it is hidden and a stand-in drawn.

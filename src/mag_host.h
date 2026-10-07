@@ -34,8 +34,8 @@ public:
     // republish. Also the truth for publish success: on this rig MagSetInputTransform can return
     // FALSE while the publish lands, so the return value alone must never be trusted.
     bool getInputTransform(bool& active, RECT& src, RECT& dst);
-    // Magnification bitmap smoothing: MagSetFullscreenUseBitmapSmoothing, Magnification.dll
-    // ORDINAL 1 (undocumented, no header - Magnify.exe imports it; it is what the "smooth edges
+    // Magnification bitmap smoothing: MagSetFullscreenUseBitmapSmoothing, exported BY NAME from
+    // Magnification.dll (undocumented, no header - Magnify.exe imports it; it is what the "smooth edges
     // of images and text" option flips). A session that never sets it samples NEAREST NEIGHBOUR,
     // which is the blocky magnified image/cursor. Callable without UIAccess, needs a live
     // MagInitialize. NEVER call the raw user32 SetMagnificationDesktopSamplingMode instead - it

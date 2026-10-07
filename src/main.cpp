@@ -1171,7 +1171,7 @@ static void RunTick(TickState& t) {
                     t.mTransform ? t.mTransform : t.model))
                 tmHot->setIdleReleaseMs(nc.txIdleReleaseMs);
             if (auto* tmHot = dynamic_cast<TransformModel*>(t.mTransform ? t.mTransform : t.model))
-                tmHot->setNativeCursorPref(wind::UseNativeCursor(nc.txNativeCursor, nc.txSamplingMode));
+                tmHot->setNativeCursorPref(wind::UseNativeCursor(nc.txNativeCursor));
             t.cfg = nc;   // pick up renderer knobs (smoothing, filter, cursor scale, zoom speed)
             // transformExclude / renderExclude / the per-window-type engine keys may all have
             // changed: drop the cache so every exe-derived predicate is re-resolved. Without this
@@ -3093,7 +3093,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                                                    cfg.cursorSprite != 0, cfg.zorderBand,
                                                    cfg.spriteBand16 != 0, cfg.cursorBandAuto != 0);
         tm->setIdleReleaseMs(cfg.txIdleReleaseMs);
-        tm->setNativeCursorPref(wind::UseNativeCursor(cfg.txNativeCursor, cfg.txSamplingMode));
+        tm->setNativeCursorPref(wind::UseNativeCursor(cfg.txNativeCursor));
         tm->setSpriteCapturable(cfg.spriteCapturable != 0);
         model = std::move(tm);
     } else {
@@ -3108,7 +3108,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                                                         cfg.cursorSprite != 0, cfg.zorderBand,
                                                         cfg.spriteBand16 != 0, cfg.cursorBandAuto != 0);
             tm2->setIdleReleaseMs(cfg.txIdleReleaseMs);
-            tm2->setNativeCursorPref(wind::UseNativeCursor(cfg.txNativeCursor, cfg.txSamplingMode));
+            tm2->setNativeCursorPref(wind::UseNativeCursor(cfg.txNativeCursor));
             tm2->setSpriteCapturable(cfg.spriteCapturable != 0);
             model2 = std::move(tm2);
         }

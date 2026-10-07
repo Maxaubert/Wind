@@ -62,8 +62,12 @@ bool MagHost::initialize() {
         setMagDesktop_ = reinterpret_cast<int(__stdcall*)(double, int, int)>(
             u32 ? GetProcAddress(u32, "SetMagnificationDesktopMagnification") : nullptr);
         HMODULE magDll = GetModuleHandleW(L"Magnification.dll");
+        // BY NAME (issue #369). It was resolved by ordinal 1, which does not exist: the export
+        // table's ordinal base is 100 (this function is 104 on 26200), so the lookup returned NULL
+        // and every setSamplingMode call failed - Wind never set the filter at all, and the image
+        // showed whatever smoothing state another process (Windows Magnifier) had left in DWM.
         setBitmapSmoothing_ = reinterpret_cast<int(__stdcall*)(int)>(
-            magDll ? GetProcAddress(magDll, MAKEINTRESOURCEA(1)) : nullptr);
+            magDll ? GetProcAddress(magDll, "MagSetFullscreenUseBitmapSmoothing") : nullptr);
         setSamplingRaw_ = reinterpret_cast<int(__stdcall*)(DWORD*)>(
             u32 ? GetProcAddress(u32, "SetMagnificationDesktopSamplingMode") : nullptr);
         setDwmUpdated_ = reinterpret_cast<BOOL(__stdcall*)(BOOL, float, float)>(
@@ -74,7 +78,7 @@ bool MagHost::initialize() {
 
 bool MagHost::setSamplingMode(unsigned mode) {
     if (!initialized_) return false;
-    // Modes 0/1 go through Magnification.dll ordinal 1 (the documented-shape BOOL wrapper that
+    // Modes 0/1 go through MagSetFullscreenUseBitmapSmoothing (the documented-shape BOOL wrapper that
     // native Magnifier uses). Modes 2-4 exist only on the raw user32 setter: the kernel accepts
     // and round-trips 0..4 though the wrapper exposes just two, and nothing is published about
     // what the extra three do. They are worth trying because mode 1's edge-preserving filter is

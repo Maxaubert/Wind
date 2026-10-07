@@ -111,7 +111,7 @@ export const groups = [
         // turning high-res OFF also stages MPO-disable and turning it ON stages MPO re-enable, both
         // atomic at the Windows restart (the core holds the boot state's look until then).
         { key: 'txSamplingMode', type: 'highres', label: 'High resolution cursor', keywords: ['sharp', 'crisp', 'smooth', 'blurry', 'pixelated', 'hidpi', 'sampling', 'quality', 'nearest', 'mpo', 'overlay', 'cursor', 'pointer', 'resolution', '4k', 'antialiasing', 'restart', 'registry'],
-          desc: 'A sharp pointer, drawn by Windows above every panel, and a smoother image. Off is lighter for games.', def: 0 },
+          desc: 'A smoother image and pointer at high zoom. Off keeps them pixel-sharp and steady while zooming.', def: 0 },
         // Zoom lock detection (#221): games like DOOM pin the mouse to the screen centre, which would
         // pin the zoom view there too. Listed apps get the view UNLOCKED from the pointer.
         { key: 'lockApps', type: 'applist', adv: true, label: 'Mouse-locked games', keywords: ['lock', 'locked', 'fps', 'shooter', 'first person', 'mouselook', 'mouse look', 'camera', 'game', 'exe', 'program', 'unlock', 'exception', 'apps', 'pinned', 'centre'],
