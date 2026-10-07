@@ -182,8 +182,8 @@ Defences (wall arming in `RunTick`, write clamp in `TransformModel::present`):
   no longer stages MPO or asks for a restart. `mpoNearestGuard=0` restores the old rule
   (`EffectiveSamplingMode` then keeps the boot state's mode until a reboot).
 - Plane-free sessions (`mpoGuardLiftWall=1`, default) also drop the pan walls, the write clamp and
-  the MPO ghost. In daily use on an MPO boot (up to 31x) without a driver reset so far; the
-  far-right/bottom corner above ~9.3x has not been tested deliberately yet.
+  the MPO ghost. Field-tested 2026-10-07 on an MPO boot (RTX 5090): nearest with the guard, panned
+  into the far-right and bottom-right corner above 10x, no driver reset; daily use up to 31x.
 - `tdrTest` is the field harness: 2 probes the clamp, 4 lifts the wall.
 - **MPO nearest guard** (`src/mpo_guard.h`, issue #369). Zoomed at nearest on an MPO boot, Wind
   applies an invisible colour effect (0.998 on R, G, B). A colour transform, like the resample
