@@ -1359,6 +1359,7 @@ static void RunTick(TickState& t) {
     // smooth ramp, merely delayed. Gated on level > 1.0 so the session still enters and the
     // freeze holds it at ~1.01 until the hold expires.
     const bool quiesceFreeze = QuiesceHoldActive(t) && t.zoom.level() > 1.0;
+    if (!quiesceFreeze) t.zoom.tick(dt < kMaxZoomDt ? dt : kMaxZoomDt);
     // SMOOTH-ZOOM RELEASE (issue #369, src/zoom_ladder.h EaseOutShouldStop). With smooth sampling and
     // the zoom ladder, a slow zoom must cross DWM's whole-pixel rounding steps, each an image jump of
     // about the level in px; snapping the slow tail hopped, holding it froze then caught up (field).
@@ -1367,6 +1368,8 @@ static void RunTick(TickState& t) {
     {
         auto& zs = g_input.state();
         const bool held = zs.inHeld.load() || zs.outHeld.load() || g_input.anyBoundKeyPressed();
+        // AFTER the controller ticked: before it, level() still equals last frame's level, so the
+        // "still moving" test never fired and the ease-out always ran its slow tail (#375).
         if (!held && !t.zoom.hasTarget() && t.cfg.txSamplingMode == 1 && t.cfg.txSmoothLadder != 0 &&
             t.zoom.level() != t.prevLvl && wind::EaseOutShouldStop(t.zoom.level(), t.prevLvl)) {
             if (auto* tmStop = dynamic_cast<TransformModel*>(t.model)) {
@@ -1376,7 +1379,6 @@ static void RunTick(TickState& t) {
         }
         t.prevZoomHeld = held;
     }
-    if (!quiesceFreeze) t.zoom.tick(dt < kMaxZoomDt ? dt : kMaxZoomDt);
     // Recenter on a recenterVk key press (rising edge).
     bool recenter = false;
     bool recenterDown = comboHeld(t.cfg.recenterVk, t.cfg.recenterMods);   // mods since #307
