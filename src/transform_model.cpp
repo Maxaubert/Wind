@@ -642,6 +642,10 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // image's size and origin every frame, which shakes a continuous zoom; snap to the nearest level
     // whose predicted rounding error is under 1 px (never backwards in the ramp). Once the zoom has
     // settled the chosen level is held: panning at a fixed level does not shake, re-snapping would.
+    // The ladder's held level differs from the requested one on purpose, so "still ramping" must be
+    // judged on the level BEFORE the snap: comparing the snapped level with `level` read as a ramp
+    // that never ended, which held the input-transform publish forever (hover dead zones).
+    const double preLadderLevel = applyLevel;
     if (cfg.txSmoothLadder != 0 && cfg.txSamplingMode == 1 && applyLevel > 1.001) {
         if (applyLevel == level && level == ladderReq_ && ladderOut_ > 0.0) {
             applyLevel = ladderOut_;
@@ -700,7 +704,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     traceOn_ = cfg.txTrace != 0;
     cfgWobbleCage_ = cfg.txWobbleCage;        // diagnostic cage + threshold px (issue #229)
     if (level > sessionMaxLevel_) sessionMaxLevel_ = level;
-    const bool ramping = applyLevel != level || (applyLevel != lastLevel_ && lastLevel_ > 0.0);
+    const bool ramping = preLadderLevel != level || (applyLevel != lastLevel_ && lastLevel_ > 0.0);
     // Edge sampling margin (see transform.h) applied to the SOURCE, not just to the written
     // transform: srcL/srcT go on to feed the input-transform publish below, and a visual rect
     // that sat one texel inside a published rect that did not would put the pointer framework's
