@@ -64,12 +64,20 @@ inline double SmoothLadderTolerance(double z) {
 // half of the screen is under tolerance on both axes; `want` itself when none is found. Never
 // steps behind `floorLevel` in the ramp's direction (dir > 0 zooming in, < 0 out, 0 settled), so a
 // snapped ramp cannot visibly reverse.
-// Tiered (field 2026-10-07: snapping up to 5 % away made zooms jump forwards and back and changed
-// the level on key-up): only levels within +-maxRel (0.5 %) of the request are considered. First
-// choice clean over the middle half of the screen, second clean at the pointer, else the request
-// itself (that frame may shake a little, but the zoom never visibly jumps).
+// How far from the request a snap may go. Field 2026-10-07: up to 5 % made zooms jump forwards and
+// back; a flat 0.5 % found no clean level at 20-31x (predicted shake back to 15 px p95). Clean
+// levels thin out with zoom, so the window grows with it: 0.5 % up to 12x, then to 1.2 % at 24x and
+// above (predicted at 20-31x: 0 px at the pointer, under 3 px over the middle half).
+inline double SnapWindow(double z) {
+    if (z <= 12.0) return 0.005;
+    const double w = 0.005 + (z - 12.0) * (0.007 / 12.0);
+    return w > 0.012 ? 0.012 : w;
+}
+
+// Tiered: the middle half of the screen clean within 0.5 %, else the pointer clean within
+// SnapWindow, else the request itself (that frame may shake a little; the zoom never jumps).
 inline double SnapSmoothLevel(double want, double centreX, double centreY, int w, int h,
-                              double floorLevel = 0.0, int dir = 0, double maxRel = 0.005) {
+                              double floorLevel = 0.0, int dir = 0, double maxRel = -1.0) {
     if (want <= 1.001 || w <= 0 || h <= 0) return want;
     auto areaOk = [&](double z) {
         const double tol = SmoothLadderTolerance(z);
@@ -87,8 +95,9 @@ inline double SnapSmoothLevel(double want, double centreX, double centreY, int w
         return true;
     };
     const double step = want * 1e-5;
-    const int steps = (int)(maxRel / 1e-5);
     for (int pass = 0; pass < 2; ++pass) {
+        const double rel = maxRel > 0.0 ? maxRel : (pass == 0 ? 0.005 : SnapWindow(want));
+        const int steps = (int)(rel / 1e-5);
         auto ok = [&](double z) { return pass == 0 ? areaOk(z) : ptrOk(z); };
         if (allowed(want) && ok(want)) return want;
         for (int i = 1; i <= steps; ++i) {

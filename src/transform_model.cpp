@@ -650,7 +650,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         if (applyLevel == level && level == ladderReq_ && ladderOut_ > 0.0) {
             applyLevel = ladderOut_;
         } else if (rampStopped && applyLevel == level && lastLevel_ > 1.001 &&
-                   std::fabs(lastLevel_ - level) <= level * 0.005) {
+                   std::fabs(lastLevel_ - level) <= level * (SnapWindow(level) + 1e-5)) {
             // The zoom just stopped: keep the level already on screen rather than re-snapping, so
             // releasing the key never nudges the zoom in or out (field 2026-10-07).
             ladderReq_ = level;

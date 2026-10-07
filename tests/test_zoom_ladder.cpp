@@ -22,7 +22,7 @@ TEST_CASE("smooth rounding error grows at awkward levels") {
 TEST_CASE("snapped levels are low-error, close to the request, and never reverse a ramp") {
     for (double want = 2.0; want < 25.0; want *= 1.013) {
         const double z = SnapSmoothLevel(want, 1920.0, 1080.0, 3840, 2160);
-        CHECK(std::fabs(z - want) <= want * 0.00501);
+        CHECK(std::fabs(z - want) <= want * (SnapWindow(want) + 1e-5));
         if (z != want) {   // a snap is always clean at least at the pointer
             const bool area = SmoothRoundingErrorArea(z, 3840, 1920.0) < SmoothLadderTolerance(z) &&
                               SmoothRoundingErrorArea(z, 2160, 1080.0) < SmoothLadderTolerance(z);
@@ -54,4 +54,17 @@ TEST_CASE("the area error covers more than the pointer: clean at the centre is n
     CHECK(SmoothLadderTolerance(5.0) == 1.0);
     CHECK(SmoothLadderTolerance(12.0) == 1.0);
     CHECK(SmoothLadderTolerance(20.0) == doctest::Approx(1.4));
+}
+
+TEST_CASE("the snap window grows with zoom and high zoom still finds pointer-clean levels") {
+    CHECK(SnapWindow(5.0) == 0.005);
+    CHECK(SnapWindow(12.0) == 0.005);
+    CHECK(SnapWindow(30.0) == doctest::Approx(0.012));
+    int found = 0, total = 0;
+    for (double want = 20.0; want < 31.0; want *= 1.007, ++total) {
+        const double z = SnapSmoothLevel(want, 1920.0, 1080.0, 3840, 2160);
+        if (std::fabs(SmoothRoundingError(z, 3840, 1920.0)) < 1.0 &&
+            std::fabs(SmoothRoundingError(z, 2160, 1080.0)) < 1.0) ++found;
+    }
+    CHECK(found >= total * 9 / 10);
 }
