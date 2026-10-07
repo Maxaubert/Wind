@@ -941,7 +941,9 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         // work here, and decimating it away would defeat the whole mode.
         // Native cursor (#369): no publish while the level ramps (it hides the composed pointer);
         // the pending flag carries it to the first settled tick.
-        const bool hold = HoldInputPublish(nativeSession_, ramping, ixForce);
+        // Held only while a zoom key/button drives the ramp: during the release ease-out hover must
+        // follow (field 2026-10-07: tab hover waited for the whole 300 ms glide to end).
+        const bool hold = HoldInputPublish(nativeSession_, ramping && ex.zoomDriven, ixForce);
         if (!hold && (ixForce || warmIxOnly || rest || ++ixTick_ >= cfg.ixDecimate)) {
             ixTick_ = 0;
             ixPending_ = false;
