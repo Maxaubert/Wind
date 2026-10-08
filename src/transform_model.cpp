@@ -2,7 +2,6 @@
 #include "transform.h"   // ComputeMagTransform
 #include "tx_cadence.h"  // ShouldWriteTransform (pure, tested)
 #include "tx_warm.h"     // WarmAction (pure, tested): the pan-start hitch fix
-#include "mag_thread.h"     // MagThreadInvoke: the API is thread-affine (issue #229)
 #include "logging.h"
 #include "sprite_layer.h"  // PickSpriteLayer (pure, tested): issue #269
 #include "config_path.h"   // ResolveLogDir
@@ -18,13 +17,10 @@
 namespace wind {
 
 // MagShowSystemCursor hides or restores the real pointer for Inspect and the hide-cursor hotkey.
-// The Magnification API is thread-affine (issue #229), so the call goes through MagThreadInvoke
-// like every other Magnification call.
-static bool ShowSystemCursorMarshalled(BOOL show) {
+// Thread-affine like the rest of the Magnification API: only the tick thread calls it.
+static bool ShowSystemCursor(BOOL show) {
     wind::SpanScope span(wind::kSpanCursor);
-    return wind::MagThreadInvoke([show]() -> bool {
-        return MagShowSystemCursor(show) != FALSE;
-    });
+    return MagShowSystemCursor(show) != FALSE;
 }
 // The pixel-and-back cursor event the native cursor relies on (issue #369). Never while a click is
 // in progress: a nudge between button-down and button-up made some clicks fail to register (field
@@ -90,7 +86,7 @@ void TransformModel::teardownMag() {
     QueryPerformanceFrequency(&fr); QueryPerformanceCounter(&a);
     // Cursor state FIRST: MagShowSystemCursor needs a live context, so undoing it after
     // MagUninitialize would silently fail and strand the pointer hidden.
-    if (cursorHidden_) { ShowSystemCursorMarshalled(TRUE); cursorHidden_ = false; }
+    if (cursorHidden_) { ShowSystemCursor(TRUE); cursorHidden_ = false; }
     sprite_->hide();
     cage_.hide();
     if (blanker_->blanked()) blanker_->restore();
@@ -277,8 +273,8 @@ void TransformModel::hideSystemCursor(bool hide) {
     // calls this. It is called only for INSPECT sessions, where the frozen real pointer must vanish
     // under the crosshair: blanker for standard cursors, MagShowSystemCursor for the plane
     // wholesale (app-custom cursors). Both are undone on exit.
-    if (hide) { blanker_->blank(); ShowSystemCursorMarshalled(FALSE); }
-    else      { sprite_->hide(); ShowSystemCursorMarshalled(TRUE); blanker_->restore(); }
+    if (hide) { blanker_->blank(); ShowSystemCursor(FALSE); }
+    else      { sprite_->hide(); ShowSystemCursor(TRUE); blanker_->restore(); }
 }
 
 
@@ -379,7 +375,7 @@ void TransformModel::setActive(bool active) {
     // it). Done here, while the context is still alive - MagShowSystemCursor needs one.
     if (cursorHidden_) {
         sprite_->hide();
-        ShowSystemCursorMarshalled(TRUE);
+        ShowSystemCursor(TRUE);
         cursorHidden_ = false;
     }
     step(0);   // crosshair hide + system cursor show
@@ -778,9 +774,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // Same-value hygiene (issue #189): once the keep-alive window has lapsed (or above its level
     // gate), a zoomed-idle tick would push an identical write 144x/s. DWM parks on static values
     // anyway (measured), so skipping is free; the next changed/keep-alive tick writes as before.
-    // suppressTransformWrite: the mouse hook is the single writer this session (issue #206). The
-    // state above is still maintained, so turning the hook path off mid-session resumes cleanly.
-    if ((changedAndWriting || keepAliveActive) && !ex.suppressTransformWrite) {
+    if (changedAndWriting || keepAliveActive) {
         // warmLevelJitter_ (mode 4) perturbs only the LEVEL, and only on warm ticks - a real
         // write always sends the true level. See the mode 4 note above for why it has to change
         // at all and why this is the cheapest honest thing to change.
@@ -825,7 +819,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             // The same foreign writer owns the shared cursor-visibility global
             // (MagShowSystemCursor) - re-assert our hide on the stomp tick so the raw pointer
             // plane it re-showed does not stay visible under the Inspect crosshair.
-            if (cursorHidden_) ShowSystemCursorMarshalled(FALSE);
+            if (cursorHidden_) ShowSystemCursor(FALSE);
             if (!ixStompWarned_) {
                 ixStompWarned_ = true;
                 wind::Log(wind::LogLevel::Warn, "transform",
@@ -968,11 +962,11 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             if (!ex.drawCursor) {
                 if (!cursorHidden_) {
                     blanker_->blank();
-                    ShowSystemCursorMarshalled(FALSE);
+                    ShowSystemCursor(FALSE);
                     cursorHidden_ = true;
                 }
             } else if (cursorHidden_) {
-                ShowSystemCursorMarshalled(TRUE);
+                ShowSystemCursor(TRUE);
                 blanker_->restore();
                 cursorHidden_ = false;
             }

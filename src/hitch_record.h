@@ -21,7 +21,7 @@ enum TickSpan : int {
     kSpanTrack = 0,   // focus tracker hand-off and snapshot
     kSpanColor,       // colour filter
     kSpanPresent,     // the model's present (everything a zoomed frame does)
-    kSpanTxWrite,     // transform writes (MagSetFullscreenTransform, marshalled to the owner thread)
+    kSpanTxWrite,     // transform writes (MagSetFullscreenTransform)
     kSpanIx,          // input-transform publish and read-back
     kSpanSprite,      // Inspect crosshair window moves and show/hide
     kSpanActivate,    // zoom-in / zoom-out session start and end

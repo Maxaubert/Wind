@@ -24,11 +24,6 @@ struct PresentExtras {
     // centre this tick - the weld would fight the hand and the dragged content flickers between the
     // two positions. The lens follows the pointer instead (RunTick feeds unscaled deltas).
     bool  suppressCursorSync = false;
-    // The mouse hook owns transform writes this tick (issue #206). SINGLE WRITER: two writers
-    // sampling the cursor at different instants alternate between two positions at tick rate,
-    // which is the wobble class #205 removed. The tick still triggers writes, but through the
-    // hook's own function so there is one formula.
-    bool  suppressTransformWrite = false;
     // The view is a pure function of the real pointer this tick (free cursor, mouse-owned, no
     // walls, no quiesce): the transform model may hand the pan to DWM (issue #369).
     bool  dwmCentre = false;

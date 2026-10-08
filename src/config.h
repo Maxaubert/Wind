@@ -372,7 +372,6 @@ struct Config {
     // never fighting a TIGHTER clip (a game confine, Inspect's 1px freeze). 0 = off (hot).
     int edgeClip = 1;
     int txPace = 0;
-    int txHookWrite = 0;
     // MPO nearest guard (issue #369, src/mpo_guard.h): 1 = nearest sampling is allowed on an MPO-on
     // boot, with an invisible colour effect while zoomed so DWM composes the desktop itself (no
     // plane, no 16-bit overflow). 0 (default until verified on an MPO boot) = nearest on MPO boots

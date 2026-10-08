@@ -41,7 +41,6 @@ struct DwmCentreIn {
     bool viewDetached = false;    // caret, focus, keyboard pan or mouse edge mode own the view
     bool wallNeeded = false;      // an MPO pan wall is in reach (WallBinding): DWM would pan past it
     bool quiesce = false;         // launch quiesce: no magnification activity at all
-    bool hookWrite = false;       // the mouse hook owns transform writes (txHookWrite)
 };
 
 // Whether an armed MPO pan wall can actually stop the view at this level: the wall caps the source
@@ -66,8 +65,7 @@ inline bool NearWall(bool wallArmed, double srcLeft, double srcTop, double level
 }
 
 inline bool WantDwmCentring(const DwmCentreIn& in) {
-    return in.zoomed && in.freeCursor && !in.viewDetached && !in.wallNeeded && !in.quiesce &&
-           !in.hookWrite;
+    return in.zoomed && in.freeCursor && !in.viewDetached && !in.wallNeeded && !in.quiesce;
 }
 
 // KEEP WRITING WHILE DWM CENTRES (user field test 2026-10-07). DWM's own centring moves only DWM's

@@ -35,7 +35,7 @@ public:
                  const MonitorTarget& mon, const PresentExtras& ex) override;
     bool coversShell() const override { return false; }
     // Written-transform readbacks for the telemetry channel (issue #227): what the tick path
-    // last actually applied (the hook writer keeps its own cache and is not reflected here).
+    // last actually applied.
     double writtenLevel() const { return lastLevel_; }
     int    writtenTxX() const { return lastTxX_; }
     int    writtenTxY() const { return lastTxY_; }
@@ -60,9 +60,6 @@ public:
     void setMpoBusterWanted(bool wanted) { mpoBusterWanted_ = wanted; }
     void setMpoExposed(bool exposed) { mpoExposed_ = exposed; }
     bool mpoGhostSettled() const { return mpoGhost_.settled(GetTickCount64()); }
-    // For the hook write path (issue #206): the hook needs the SAME host, since the runtime is
-    // refcounted per process and a second one would not be the context DWM is holding.
-    MagHost* magHost() { return &host_; }
 private:
     bool fastPan_, smoothPan_;
     bool warmLevelJitter_ = false;   // mode 4: perturb the level, not the position (this tick only)

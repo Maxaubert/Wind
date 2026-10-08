@@ -18,8 +18,6 @@
 #include <thread>
 #include <atomic>
 #include <intrin.h>   // __rdtsc: thread cycle calibration (#361)
-#include "hook_transform.h"   // inline transform writes from the mouse hook (issue #206)
-#include "mag_thread.h"
 #include "mpo_boot.h"
 #include "config_ui/ini_edit.h"   // wind::UpdateIniText - flip the model key in place
 #include "config_ui/mpo.h"        // wind::MpoDisabledInRegistry - the #242 restart-pending tell
@@ -377,10 +375,6 @@ struct TickState {
                                         // locked ticks replay it (gain_learner.h)
     bool   inspectGame = false;         // game-inspect (issue #144): foreground stolen from a mouselook
                                         //   game so its raw-input camera stops receiving the mouse
-    // Content-vs-cursor lag at the last composite boundary, screen px (issue #229). Sampled
-    // in the pacing block right after DwmFlush - the instant DWM pairs the transform it holds
-    // with the pointer it draws - and reported per tick in the telemetry.
-    double lagPx = 0.0;
     bool   inspectStealPending = false; // steal deferred past the reveal logic (it must read the true fg)
     HWND   inspectPrevFg = nullptr;     // the game window foreground is handed back to on exit
     int    clickPauseTicks = 0;     // ticks to skip transform writes around an Inspect click's
@@ -391,9 +385,7 @@ struct TickState {
                                     //   SIGHT time, never at zoom-in (issue #199).
     DWORD  quiescedPid = 0;         // fires at most once per process instance
     HWND   lastCoverFg = nullptr;   // edge-detect cover-takeover foregrounds
-    unsigned long long lastCoverProbeMs = 0;
-    double prevTickLevel = 0.0;
-    bool   prevZoomHeld = false;     // #369: release edge of the zoom keys/buttons      // hook-write arming: only while the level is settled (#206)   // throttles the idle-tick cover watch to ~4Hz
+    unsigned long long lastCoverProbeMs = 0;   // throttles the idle-tick cover watch to ~4Hz
     IMagnifierModel* wantModel = nullptr;   // hybrid stickiness: candidate engine and how long it
     unsigned long long wantSinceMs = 0;     //   has been the candidate (debounces foreground reads)
     unsigned long long kbHookDivergentSinceMs = 0;  // LL keyboard-hook watchdog dwell (issue #156)
@@ -1373,7 +1365,6 @@ static void RunTick(TickState& t) {
                 if (shown > 1.001) { t.zoom.setLevel(shown); t.zoom.stopGlide(); }
             }
         }
-        t.prevZoomHeld = held;
     }
     // Recenter on a recenterVk key press (rising edge).
     bool recenter = false;
@@ -1863,12 +1854,6 @@ static void RunTick(TickState& t) {
             POINT cp;
             if (GetCursorPos(&cp)) {
                 t.mapper.reset(double(cp.x - t.mon.x), double(cp.y - t.mon.y));
-                // The lag metric's anchor for the TICK path (issue #229): this is the pointer
-                // sample this frame's geometry is derived from, so it is the honest counterpart
-                // to the hook path's event position. Recorded here rather than in the model,
-                // where only the mapper's click point is available - measuring that instead
-                // reported hundreds of px of phantom lag on a build the eye calls clean.
-                wind::NoteWriteCursor((double)cp.x, (double)cp.y);
             }
         }
         // Feed the MEASURED tick interval so the lens easing decays per unit time, not per tick.
@@ -2255,36 +2240,6 @@ static void RunTick(TickState& t) {
         // view already positioned so the pointer lands centre-screen, SetCursorPos has nothing to
         // correct and only reintroduces the feedback loop.
         ex.suppressCursorSync = dragFollow || freeCursor || t.viewDetached;   // tracking never moves the pointer (#276)
-        // HOOK WRITE PATH (issue #206). When free cursor is active the view is a pure function of
-        // the cursor, so the mouse hook can compute and write it inline - 0.58ms-class latency
-        // instead of waiting up to a full 6.94ms tick. Publish what the hook needs, then let it be
-        // the SINGLE writer: two writers sampling the cursor at different instants would alternate
-        // between positions at tick rate, which is exactly the wobble #205 removed.
-        // Arm ONLY while the level is settled. During a ramp the level changes every tick and the
-        // hook would have to be fed a fresh level per tick anyway, so there is nothing to win and a
-        // second writer to lose by; the transform model keeps the ramp exactly as it is today. The
-        // latency that matters is panning at a steady level, which is what this arms for.
-        const bool levelSettled = (lvl == t.prevTickLevel);
-        t.prevTickLevel = lvl;
-        const bool hookWrite = freeCursor && t.cfg.txHookWrite != 0 && wind::MagThreadOwned() &&
-                               tmWall != nullptr && lvl > 1.0 && levelSettled && !t.viewDetached;
-        if (hookWrite) {
-            wind::HookTransformState hs;
-            hs.armed = true;
-            hs.level = lvl;
-            hs.monX = t.mon.x; hs.monY = t.mon.y; hs.monW = t.mon.w; hs.monH = t.mon.h;
-            // Same pan wall the mapper got above, so the hook cannot pan somewhere the tick would
-            // have refused (the issue #148/#191 16-bit overflow).
-            hs.maxSrcX = wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0;
-            hs.maxSrcY = wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0;
-            hs.edgeMargin = t.cfg.txEdgeMargin;
-            hs.fastPan = t.cfg.fastPan != 0;
-            hs.host = tmWall->magHost();
-            wind::PublishHookTransform(hs);
-        } else {
-            wind::DisarmHookTransform();
-        }
-        ex.suppressTransformWrite = hookWrite;
         { wind::SpanScope span_(wind::kSpanColor); UpdateColorFilter(t, lvl > 1.0, RenderOverlayShown(t), &ex); }
         // Serialize transform writes around an Inspect click's injected absolute move (issue #148
         // TDR class): the injection and a transform write racing each other is the proven trigger.
@@ -2308,7 +2263,6 @@ static void RunTick(TickState& t) {
             dc.viewDetached = t.viewDetached;
             dc.wallNeeded = wind::NearWall(wallNeeded, r.srcLeft, r.srcTop, lvl, kMaxSafeTxMagnitude, 64.0);
             dc.quiesce = quiesceHold;
-            dc.hookWrite = hookWrite;
             ex.dwmCentre = wind::WantDwmCentring(dc);
         }
         // Our tray menu is open (in WindTray.exe, flagged through the shared block): the pointer
@@ -2404,11 +2358,6 @@ static void RunTick(TickState& t) {
             if (t.zt.armed && t.zt.step == 0 && t.zt.presentMs == 0) {
                 LARGE_INTEGER zp1; QueryPerformanceCounter(&zp1); t.zt.presentMs = QpcMs(t, zp0.QuadPart, zp1.QuadPart);
             }
-            // The hook covers cursor MOVEMENT; this covers everything else that must still land -
-            // a level ramp, or a settled view with the mouse held still. Same function, same
-            // formula, same dedupe cache as the hook path, so it writes only when the hook has not
-            // already put those exact values in (and therefore cannot fight it).
-            if (ex.suppressTransformWrite && !ex.pauseWrites) wind::RequestHookTransformWrite();
         } else if (capVsync) {
             // Reduced-push skip tick: block to the next vblank so the loop cadence stays
             // vblank-locked (Present paces the present ticks, this paces the skips). Fallback
@@ -2698,19 +2647,6 @@ static void RunTick(TickState& t) {
         if (tmT) {
             s.wLevel = tmT->writtenLevel();
             s.wTxX = tmT->writtenTxX(); s.wTxY = tmT->writtenTxY();
-            // Prefer the LIVE state: while the hook owns the writes the model's cache is stale
-            // by construction, and every metric derived from it reads a build as clean no
-            // matter what DWM is actually showing (issue #229).
-            double hl = 0.0; int htx = 0, hty = 0;
-            if (wind::HookTransformArmed() && wind::GetHookLiveTransform(hl, htx, hty)) {
-                s.wLevel = hl; s.wTxX = htx; s.wTxY = hty;
-            }
-        }
-        s.lagPx = t.lagPx;
-        {   // Hook-write counter (issue #229): the swim metric's raw input.
-            unsigned long long hw = 0, tw = 0;
-            wind::HookTransformStats(hw, tw);
-            s.wHook = hw;
         }
         g_testlog.write(s);
     }
@@ -3060,12 +2996,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     RegisterQuickZoomHotkey(hwnd, (cfg.quickZoomHotkeyMode && cfg.quickZoomVk) ? cfg.quickZoomVk : 0,
                             cfg.quickZoomMods);
 
-    // Whether the hook thread should own the Magnification runtime. Worth its cost only if
-    // something writes from the hook; with txHookWrite off (the default) it would just marshal the
-    // tick thread's calls onto the system input thread for nothing. Read once here - thread affinity
-    // means ownership can never move once MagInitialize has run, so this needs a restart to change.
-    wind::SetMagThreadClaimEnabled(cfg.txHookWrite != 0);
-    wind::SetHookFrameGate(cfg.txHookWrite == 2);   // mode 2 = one hook write per composite
     // Every bind, modifiers included, is in place BEFORE the hooks go live (#285): installed first
     // with bare button ids, a Ctrl+Alt+left bind briefly matched (and ate) plain left clicks.
     g_input.setButtonBinds(cfg.zoomInButton, cfg.zoomInButtonMods, cfg.zoomInButton2, cfg.zoomInButton2Mods,
@@ -3409,7 +3339,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                 LARGE_INTEGER wa; QueryPerformanceCounter(&wa);
                 const DWORD w = WaitForSingleObject(g_compEvt, frameMs);
                 LARGE_INTEGER wb; QueryPerformanceCounter(&wb);
-                wind::MarkComposite();
                 {   // Hitch recorder (#361): the wait, and who was late if it was long.
                     auto& h = ts.hitch;
                     h.pendFlags |= wind::kTickPacePulse;
@@ -3507,23 +3436,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                 LARGE_INTEGER fb; QueryPerformanceCounter(&fb);
                 ts.hitch.cur.flushMs = (float)QpcMs(ts, fa.QuadPart, fb.QuadPart);
                 ts.hitch.cur.flags |= wind::kTickPaceFlush;
-            }
-            wind::MarkComposite();  // frame boundary: the hook may write once more (issue #229)
-            // Content-vs-cursor lag, measured where it actually matters (issue #229): DWM has
-            // just paired the transform it holds with the pointer it draws. The transform is
-            // anchored so T(cursor) == cursor, so content sits |cursor now - cursor the write
-            // used| * (level - 1) screen px away from the pointer. A steady value is an
-            // invisible trail; a value that jumps frame to frame is the visible wobble.
-            if (ts.prevLvl > 1.0) {
-                double wx = 0.0, wy = 0.0;
-                wind::GetWriteCursor(wx, wy);
-                POINT cp;
-                if (wx != 0.0 && GetCursorPos(&cp)) {
-                    const double dx = (double)cp.x - wx, dy = (double)cp.y - wy;
-                    ts.lagPx = std::sqrt(dx * dx + dy * dy) * (ts.prevLvl - 1.0);
-                }
-            } else {
-                ts.lagPx = 0.0;
             }
         }
     }

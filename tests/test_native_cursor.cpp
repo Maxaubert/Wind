@@ -26,8 +26,6 @@ TEST_CASE("DWM centring is off wherever Wind must own the offset") {
     CHECK(WantDwmCentring(in) == false);
     in = Mouse(); in.quiesce = true;            // launch quiesce
     CHECK(WantDwmCentring(in) == false);
-    in = Mouse(); in.hookWrite = true;
-    CHECK(WantDwmCentring(in) == false);
 }
 
 
