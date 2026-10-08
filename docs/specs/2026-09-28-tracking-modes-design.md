@@ -74,7 +74,7 @@ the pointer after the mouse moved).
 ### 3.3 Glide
 
 Time-based exponential ease so it is identical at any refresh rate (VRR included): the view covers
-95% of the distance in `trackGlideMs` (default 200 ms, field pick 2026-09-29). Field revision: a critically damped spring (`SpringToward`, hidden `trackGlideMode=1`, default) replaced the exponential ease, because it carries velocity across keystrokes so typing glides continuously without lagging. Consecutive caret moves while typing retarget
+95% of the distance in `trackGlideMs` (default 200 ms, field pick 2026-09-29). Field revision: a critically damped spring (`SpringToward`) replaced the exponential ease (the ease and its hidden switch have since been removed), because it carries velocity across keystrokes so typing glides continuously without lagging. Consecutive caret moves while typing retarget
 the glide smoothly (no restart jolt).
 
 ### 3.4 The pointer while the view is detached
@@ -101,7 +101,7 @@ scrolls out of view with the content, exactly like Windows Magnifier. Clicks go 
 | Unit | Kind | Responsibility |
 |---|---|---|
 | `src/view_target.h` | pure, doctested | Owner state machine (`StepViewOwner`) and mouse-activity threshold |
-| `src/view_glide.h` | pure, doctested | `GlideToward` (time-based ease), `TrackTargetCenter` (centred / within-edges target for a rect, clamped to the monitor) |
+| `src/view_glide.h` | pure, doctested | `SpringToward` (critically damped glide), `TrackTargetCenter` (centred / within-edges target for a rect, clamped to the monitor) |
 | `src/detached_view.h` | pure, doctested | `DetachedMap`: builds a `MapResult` whose view is centred at (cx,cy) while the cursor fields report the REAL pointer |
 | `src/edge_pan.h` (phase 2) | pure, doctested | `EdgePanCenter`: the view centre that keeps the pointer inside the margin |
 | `src/focus_track.h/.cpp` | Win32 I/O thread | Finds caret and focus rectangles and publishes a snapshot |
@@ -155,7 +155,6 @@ Per tick, after the regime's `dx/dy` and before `mapper.update`:
 | `trackAlign` | 0 (centred) | Select "Keep the text cursor and focus: Centred / Within the edges" |
 | `mouseAlign` | 0 (centred) | Select "Keep the mouse pointer: Centred / Within the edges" (phase 2) |
 | `trackGlideMs` | 200 | ini only |
-| `trackGlideMode` | 1 (spring) | ini only, hidden; 0 = old exponential ease |
 | `trackMarginPct` | 15 | ini only |
 | `trackLog` | 0 | ini only, hidden |
 

@@ -38,7 +38,7 @@ follows only the terminal caret there.
   releasing Ctrl after a Ctrl+click handed the view to the click's own caret.
 - **Glide: critically damped spring, 200 ms** (A/B of 0, 25, 150, 200 ms and old ease versus
   spring). The old exponential ease restarted on every keystroke; the spring carries its velocity,
-  so typing becomes one continuous glide. `trackGlideMode=0` restores the old ease.
+  so typing becomes one continuous glide. The old ease is gone.
 
 ## Mouse edge mode
 

@@ -8,7 +8,7 @@
 #
 #   powershell -File tools\testenv\sweep.ps1 -Plan plan.json
 #
-# Plan format: [{ "name": "...", "knobs": { "txGrid": "20", "txSamplingMode": "1" } }, ...]
+# Plan format: [{ "name": "...", "knobs": { "txWarmHz": "24", "txSamplingMode": "1" } }, ...]
 # A knob set to "" is removed from the ini (back to the built-in default).
 param(
   [Parameter(Mandatory = $true)][string]$Plan,

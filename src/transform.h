@@ -47,7 +47,7 @@ MagTransform ComputeMagTransform(double srcLeft, double srcTop, double level,
                                  int screenW, int screenH, double edgeMargin = 0.0);
 
 // The low-side margin that is actually applicable at this level, so every caller that needs the
-// source rect (the visual write, the input-transform publish, the sprite/weld geometry) derives
+// source rect (the visual write, the input-transform publish, the weld geometry) derives
 // it from ONE formula and they can never describe different rects. Near 1x there is no room for a
 // margin at all (the source rect IS the screen), and there the result is 0 - the identity
 // transform at rest must stay exactly identity.

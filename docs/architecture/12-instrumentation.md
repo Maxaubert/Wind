@@ -56,8 +56,8 @@ Every tick fills a `TickRec` (`src/hitch_record.h`): its dt, the pacing wait bef
 late that wait returned, its wall time and its thread CPU time (`QueryThreadCycleTime`, calibrated
 against QPC in the first second), and spans for the parts that can block. `SpanScope`
 (`src/tick_span.h`) times a call into the current record from anywhere on the tick thread; it is
-a null check on other threads. Spans: `track`, `color`, `present`, `txwrite` (MagHost writes,
-marshal included), `ix`, `sprite`, `activate`. A ring keeps the last 512 records. Cost: about
+a null check on other threads. Spans: `track`, `color`, `present`, `txwrite` (MagHost writes),
+`ix`, `sprite` (the Inspect crosshair window), `activate`, `cursor`. A ring keeps the last 512 records. Cost: about
 a dozen QPC reads per tick, no allocation, no I/O.
 
 When a zoomed frame exceeds `hitchThresholdPct` (default 150) of the refresh interval,
@@ -67,8 +67,6 @@ rest are counted on the next line). `hitchLog=0` turns the lines off.
 | cause | meaning | next step |
 |---|---|---|
 | `late-wake` | the pacing wait should have ended, the tick thread was not run | CPU contention: system context, WPR |
-| `compositor-late` | txPace=2: the composite pulse came late, DWM did not compose | DWM/GPU side |
-| `pulse-thread-late` | DWM composed on time, the pulse thread signalled late | its priority |
 | `blocked in X` | the tick was off the CPU inside span X: a wait, or preempted in it | the call in X |
 | `busy in X` | the tick was on the CPU in X: Wind's own work | a code fix |
 | `slow-tick in X` | a long tick in the first second, before CPU time is calibrated | either of the two above |
@@ -84,7 +82,7 @@ Every transform zoom-out logs one `txsession session end` line with the teardown
 (cursor show, blanker restore, nudge, clip, trace hand-off, identity park, input transform, pin,
 ghost). The compositor stall after the park happens after the call returns and is not in it.
 
-Threads are named (`Wind tick`, `Wind input hooks`, `Wind composite pulse`, `Wind log writer`),
+Threads are named (`Wind tick`, `Wind input hooks`, `Wind log writer`),
 so a WPR trace shows them by name.
 
 **Per-second and edge lines** (logged only when worth reading):
@@ -113,7 +111,6 @@ Zero cost when off.
 | `tdrTest` (hot) | Field harness: >0 forces Transform past the churny list; 2 probes the clamp; 4 lifts the MPO wall |
 | `probeClicks` | 1 logs every coordinate space per click (Ctrl+click marks a dead spot); 2 adds a ~36 Hz pointer trace |
 | `lockForce=1` (hot) | Forces the locked pan regime, to separate detector bugs from locked-path bugs |
-| `txWobbleCage` | Draws bars around the cursor that flash on a screen-space wobble (`src/wobble_cage.*`) |
 | `diagnostics=1` | Also logs render frame-build time apart from time blocked in `Present` (`RenderEngine::debugPerf`) |
 
 ## tools/
@@ -136,7 +133,6 @@ the cursor-change tax while it runs.
 | `warm_cadence_sweep.ps1` | Scores `txWarmHz` values: pan-start hitch against GPU cost at rest |
 | `gpu_ab.ps1` | dwm.exe and Wind.exe GPU per scenario, Wind versus built-in |
 | `plane_race_probe.ps1` | Whether a session pulls a fullscreen game off its overlay plane |
-| `wind_cadence_ab.ps1` | Wind's write cadence across ini configs, with `txwrite` timings |
 | `wind_drive_probe.ps1` | Confirms injected side-button input reaches Wind's zoom bind |
 | `magtrace.ps1` | Level, offsets and cadence of whichever magnifier is active |
 | `flipwatch.ps1` | Presentation mode via PresentMon (independent flip versus composed) |

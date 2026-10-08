@@ -2,9 +2,11 @@
 
 A fullscreen magnifier has two cursor positions that must never disagree: where the pointer is
 (what Windows hit-tests and clicks with) and where it appears inside the magnified view. Every
-design here either welds the two together or makes one a pure function of the other. This chapter
-covers the mapper, the free-cursor model, the weld, drag-follow, the sprite, lock detection,
-Inspect, tracking, keyboard panning and shell panels.
+design here either welds the two together or makes one a pure function of the other. The transform
+engine draws Windows' own pointer (the native cursor) and makes the view a function of it; the
+render engine hides the pointer, draws its own and welds the real one to the lens. This chapter
+covers the mapper, the free-cursor model, the weld, drag-follow, the native cursor, the blanker and
+Inspect crosshair, lock detection, Inspect, tracking and keyboard panning.
 
 ## The mapper
 
@@ -15,7 +17,7 @@ one `MapResult`:
 | Field | Meaning | Used by |
 |---|---|---|
 | `srcLeft/srcTop` | Float top-left of the source rect (`ComputeOffsetF`) | Both engines' view |
-| `cursorScreenX/Y` | Where the lens centre displays | Sprite and crosshair |
+| `cursorScreenX/Y` | Where the lens centre displays | Render engine's cursor and crosshair |
 | `clickDesktopX/Y` | The centre rounded to a pixel | `SetCursorPos` weld target |
 | `centerX/Y` | The unrounded centre | Transform anchor |
 
@@ -23,7 +25,7 @@ one `MapResult`:
 click lands on what the user sees. Do not move the click point to the unsmoothed target.
 
 The mapper also holds the MPO pan walls (`setMaxSourceLeft/Top`); it bounds the centre, so lens,
-sprite and click point stop together. See [05](05-transform-engine.md).
+cursor and click point stop together. See [05](05-transform-engine.md).
 
 ## Free cursor (transform sessions)
 
@@ -35,18 +37,19 @@ offset = clamp(cursor - screen/(2*level), 0, screen - screen/level)
 ```
 
 Wind's older model integrated deltas into a smoothed centre and welded the pointer back to it: a
-feedback loop, and the source of the transform wobble. With `txFreeCursor=1` (default, hot), a free
-transform session pins the mapper to the real cursor every tick (`reset(cursorPos)` then
-`update(0, 0, lvl)`) and suppresses the weld. `cursorSensitivity` and `cursorSmoothing` do not apply
-there. The formula lives in `ComputeFreeCursorSrc` (`src/hook_geometry.h`).
+feedback loop, and the source of the transform wobble. A free transform session (not Inspect, not
+locked) pins the mapper to the real cursor every tick (`reset(cursorPos)` then `update(0, 0, lvl)`)
+and never welds. `cursorSensitivity` and `cursorSmoothing` do not apply there; the mapper clamps the
+source rect exactly as the formula above does.
 
 Render sessions keep delta integration plus the weld, because the render engine hides the real
-pointer and draws its own.
+pointer and draws its own. Locked and Inspect transform sessions integrate too (raw mickeys) and
+weld, since the pointer is not the truth there.
 
 ## The weld and the measured baseline
 
-Where the weld runs (render sessions; transform with `txFreeCursor=0`), the engine parks the real
-pointer at the lens point each tick. Both weld sites are deduped (no `SetCursorPos` when the pixel
+Where the weld runs (render sessions; the locked and Inspect regimes of a transform session), the
+engine parks the real pointer at the lens point each tick. Both weld sites are deduped (no `SetCursorPos` when the pixel
 is unchanged) and report whether the park really ran: `parkedLastFrame()`, `weldedLastFrame()`.
 
 **The oracle baseline is measured, never assumed.** The park can be deduped, suppressed
@@ -58,7 +61,7 @@ hand motion made during the blocking `Present`.
 
 ## The oracle and cursorSensitivity
 
-In welded free sessions, panning matches the OS cursor without reimplementing ballistics: each tick
+In welded free render sessions, panning matches the OS cursor without reimplementing ballistics: each tick
 reads the cursor's own movement since Wind last placed it (`cur - t.lastSetVirtual`), with Windows'
 acceleration already applied, times `cursorSensitivity` (1.0 = exact). This works only because the
 read comes before the pointer is re-set. Raw mickeys are collected in parallel for the lock
@@ -70,33 +73,34 @@ a regime switch never snaps.
 While a mouse button is held, the pointer is the interaction (window drag, text selection), and a
 per-tick weld fights the hand: the dragged content flickered ~85 px between two positions.
 `ShouldDragFollow` (`src/drag_follow.h`) suspends the weld for exactly the button-hold, and the
-lens follows the pointer 1:1, unscaled. The press landed under the welded cursor; the release lands
+lens follows the pointer 1:1, unscaled. Only the render engine welds a free session; a free
+transform session never welds, so the rule decides nothing there. The press landed under the welded cursor; the release lands
 where pointer and content are. On release `renderFrame` invalidates its park dedupe so the next
 frame re-parks. Locked and Inspect sessions never drag-follow.
 
 ## The cursor grows with the zoom
 
-**The cursor grows with the zoom in every engine** (issue #253). The transform sprite lives in
-desktop space and DWM magnifies it; the render engine scales its drawn cursor to match. A render
+**The cursor grows with the zoom in every engine** (issue #253). DWM magnifies the transform
+engine's pointer with the content; the render engine scales its drawn cursor to match. A render
 cursor kept at desktop size read as tiny next to the transform. `cursorConstantSize=1` is the
 render-only opt-in for the old constant size. `cursorScaleWithZoom` is retired and ignored.
 
 ## Native cursor
 
-With `txNativeCursor=1` (default), transform sessions use the pointer Windows Magnifier uses: the
-real pointer, drawn by DWM into the magnified frame. It works at either sampling mode, because DWM
+Transform sessions use the pointer Windows Magnifier uses: the real pointer, drawn by DWM into the
+magnified frame. It is the transform engine's only cursor. It works at either sampling mode, because DWM
 samples it like the content: High resolution cursor (smooth) makes it sharp but it shimmers
 slightly during zoom ramps, nearest keeps it pixelated and steady. Pure rules:
 `src/native_cursor.h` (tested).
 
 - **The cursor lens.** `MagHost::createCursorLens` makes a hidden window of the documented
-  magnifier control class (`WC_MAGNIFIER`) on the runtime's owner thread. With
+  magnifier control class (`WC_MAGNIFIER`) on the tick thread (the thread that owns the runtime). With
   `MS_SHOWMAGNIFIEDCURSOR` set, win32k hands the pointer to DWM: magnified, sampled like the content
   (smooth = sharp), drawn above every band (thumbnails, Start, the emoji panel, menus, UAC, the
   Snipping Tool), latched in the same composition pass as the view. The style is ON only while
   zoomed (`setActive`), 0.2 ms per toggle.
 - **Built at idle, kept warm.** The lens build costs 60-125 ms, so `idleTick` builds it at 1x right
-  after launch and the context is never released at idle (no `txIdleReleaseMs` in this mode).
+  after launch and the context is never released at idle.
   Measured: context + lens with the style OFF costs a pointer-toggling full-screen app nothing
   (Independent Flip, 0 spike frames); the style ON at 1x costs it 19 spikes of 20-42 ms in 6 s. So
   the cursor-change tax belongs to the composed pointer, not to the context.
@@ -117,7 +121,9 @@ slightly during zoom ramps, nearest keeps it pixelated and steady. Pure rules:
   still). A `MagSetInputTransform` publish that changes the scale also stops DWM drawing the
   pointer until the next cursor event, so native sessions hold the publish while the level ramps
   (Windows Magnifier does the same) and nudge after a scale-changing publish (`HoldInputPublish`,
-  `NudgeAfterPublish`).
+  `NudgeAfterPublish`). These pixel-and-back nudges are the one place Wind injects cursor events
+  next to a transform write: sequential after it, never racing it (a write racing a cursor-position
+  update is the proven TDR class), and skipped while a click is in progress.
 - **One centre during zoom.** DWM centres on its cursor point plus a learned hotspot offset that can
   sit 1-2 desktop px off Wind's exact centre; a level write puts the view on Wind's centre, the next
   cursor event back on DWM's (a 5-10 px shift at ~5x that snapped back when the zoom stopped). While
@@ -127,48 +133,40 @@ slightly during zoom ramps, nearest keeps it pixelated and steady. Pure rules:
   some clicks fail), so a pan write during a held click would leave Wind's centre on screen until the
   next cursor event: drag-selects and held clicks shook. Pan-only writes are held for the click
   window instead (`HoldWriteForClick`); level changes and forced writes still go out.
-- `txDwmCentre=0` keeps the native pointer but lets Wind write the view itself (kill switch; pans
-  then wobble by speed x tick x zoom).
 - **DWM's learned offset.** DWM learns the gap between `GetCursorPos` and its own cursor point and
   relearns it only when the cursor HANDLE changes, so a learn taken mid-jump can sit a few px off
   until the next shape change. Windows Magnifier has the same behaviour.
-- No sprite, no blanker, no shell-panel freeze (`panelPointer` is skipped). The hide-cursor hotkey
-  blanks the pointer the way Inspect does. Inspect keeps its crosshair sprite.
-- **Off** (`txNativeCursor=0`): the sprite path below, kept as a fallback. Games pay nothing extra
-  for the native cursor: a zoomed full-screen window is composed anyway, and at 1x the lens style
-  is off.
+- No cursor sprite, no blanking and no shell-panel handling in a normal zoom. The hide-cursor hotkey
+  and `cursorVisibility=never` blank the pointer the way Inspect does (below). Inspect keeps its
+  crosshair window. Games pay nothing extra for the native cursor: a zoomed full-screen window is
+  composed anyway, and at 1x the lens style is off.
 
-## Hiding the real pointer: blanker and sprite (txNativeCursor=0)
+## Hiding the real pointer: blanker and crosshair
 
-In a zoomed sprite-path transform session the real pointer would draw unmagnified at its raw
-position, so it is hidden and a stand-in drawn.
+Inspect and the hide-cursor hotkey (`cursorVisibility=never`) hide DWM's pointer in a transform
+session; the Inspect crosshair is then a window of Wind's.
 
 - **`CursorBlanker`** (`src/cursor_blanker.*`) swaps the 14 system cursors for transparent ones and
   keeps the originals. It first reloads the user's scheme, so a previously killed Wind's blanks are
-  never captured as originals. `MagShowSystemCursor(FALSE)` covers app-custom cursors. The blank
-  runs before the magnification context exists, because each swap under a live context costs a
-  re-composite. The swaps run in order on the `Wind cursor swaps` worker thread (#363): the restore
-  is a full `SPI_SETCURSORS` scheme reload (8 ms median, up to 90 ms under load) and the blank 14
-  `SetSystemCursor` calls, which froze the zoom-in and the 1x landing frame on the tick thread.
-  The zoom-out repaint nudge rides on the worker after the restore. `restoreSync()` waits (the
-  input-panel clip nudge, shutdown); the crash filter restores directly.
-- **`CursorSprite`** (`src/cursor_sprite.*`) is a small layered window painting the current shape,
-  or the Inspect crosshair. It sits at the lens point in desktop coordinates, so DWM shows it at the
-  view's centre, magnified. `keepOnTop()` re-asserts topmost only when displaced.
-- **Zoom-in handoff.** `setActive(true)` stands the sprite up on the pointer before blanking and
-  runs two `DwmFlush` passes; one flush still blinked. Skipped when the app hides its own cursor.
-- **Zoom-out handoff.** Windows repaints the restored pointer only on the next cursor event, so a
+  never captured as originals. `MagShowSystemCursor(FALSE)` covers app-custom cursors. The swaps
+  run in order on the `Wind cursor swaps` worker thread (#363): the restore is a full
+  `SPI_SETCURSORS` scheme reload (8 ms median, up to 90 ms under load) and the blank 14
+  `SetSystemCursor` calls, which froze the 1x landing frame on the tick thread. The zoom-out repaint
+  nudge rides on the worker after the restore. `restoreSync()` waits (shutdown); the crash filter
+  restores directly. The blanker and the crosshair window are always created, whatever the config.
+- **`CursorSprite`** (`src/cursor_sprite.*`) is a small layered window that only ever carries the
+  Inspect crosshair (`showCrosshair`; it renders no cursor shape any more). It sits at the look point
+  in desktop coordinates, so DWM shows it at the view's centre, magnified. `keepOnTop()` re-asserts
+  topmost only when displaced.
+- **Zoom-out handoff.** Windows repaints a restored pointer only on the next cursor event, so a
   1 px `SetCursorPos` nudge and back makes it appear without moving the hand.
 
-**Bands.** A UIAccess sprite lands in band 2; Start, taskbar thumbnails and tray flyouts are band
-16; the Snipping Tool overlay is band 17. `cursorBandAuto=1` (default) keeps twin sprites: the
+**Bands.** A UIAccess crosshair lands in band 2; Start, taskbar thumbnails and tray flyouts are band
+16; the Snipping Tool overlay is band 17. `cursorBandAuto=1` (default) keeps twin windows: the
 band-16 one shows unless the foreground window's band is above 16, when the low one shows instead
-(pure rule: `src/sprite_layer.h`). The sprite is excluded from capture (otherwise it is frozen into
-snip screenshots) and from Aero Peek. `spriteBand16=1` (restart) is an experiment, off by default:
-a band-16 screen-space sprite for a constant-size cursor. Its field test was negative (band-16
-windows are magnified too, [../NATIVE-MAGNIFIER-STOMP.md](../NATIVE-MAGNIFIER-STOMP.md)).
-`tools/testenv/dualcursor.ps1` turns on
-the hidden `spriteCapturable=1` because it measures the sprite from captures.
+(pure rule: `src/sprite_layer.h`; checked only while the crosshair is drawn). `zorderBand` places the
+low window. The window is excluded from capture (otherwise it is frozen into snip screenshots) and
+from Aero Peek. The native pointer needs none of this: DWM draws it above every band.
 
 The render engine draws its cursor into the D3D scene and hides the OS cursor through the shared
 Magnification runtime ([04](04-render-engine.md)).
@@ -192,14 +190,14 @@ mickeys. `LockDetector` (`src/lock_detector.*`, pure) decides, with hysteresis.
 - Tick counts derive from the refresh rate (`setTickRate`).
 - **Forced locks go through the detector** (`seedLock()`), so the lock persists across ticks; a
   tick-local flag once left the view pinned to the warped pointer.
-- **A shown pointer is a free pointer in a native-cursor session** (`LockApplies`,
+- **A shown pointer is a free pointer in a transform session** (`LockApplies`,
   `src/native_cursor.h`; the tick's result is `t.lockEff`, which every gate reads). The locked path
-  pans from raw mickeys and re-parks the real pointer once per tick; the sprite hid that, but the
-  native cursor IS the real pointer, so DWM drew it wherever the hand had moved it between ticks.
+  pans from raw mickeys and re-parks the real pointer once per tick; the native cursor IS the real
+  pointer, so DWM drew it wherever the hand had moved it between ticks.
   Field case: DOOM: The Dark Ages menus under `lockApps` (2026-10-07), measured at 4.7x as 22 px
   spread slow and 74 px medium with jumps to 118 px, against 0-2 px free. Games show the pointer
   in menus and hide it for mouselook, so the lock applies only while `GetCursorInfo` reports it
-  hidden. The sprite path keeps the old rule. The log line is `lock  pointer shown: free`.
+  hidden. The render engine keeps the plain rule. The log line is `lock  pointer shown: free`.
 - `lockForce=1` locks everywhere, for diagnosis only: locked mode has no ballistics or drag-follow.
 
 ```mermaid
@@ -220,7 +218,7 @@ flowchart TD
     I -- yes --> IN[look point from cooked raw mickeys, pointer frozen]
     I -- no --> L{locked?}
     L -- yes --> LK[raw mickeys * cursorSensitivity]
-    L -- no --> F{transform + txFreeCursor?}
+    L -- no --> F{transform session?}
     F -- yes --> FC[mapper pinned to the real cursor, no weld]
     F -- no --> D{mouse button held?}
     D -- yes --> DF[drag-follow 1:1, weld suspended]
@@ -237,7 +235,7 @@ the mouse hook only swallows clicks.
 - **Entry.** The real cursor is frozen in place with a 1 px `ClipCursor` (`t.frozenCursor`) and
   hidden, so a hover or tooltip under it stays alive. The look point is the mapper centre and pans
   from ballistics-cooked raw mickeys ([06](06-input.md)).
-- **Crosshair.** Render draws it when `cursorLocked`; the transform repaints the sprite
+- **Crosshair.** Render draws it when `cursorLocked`; the transform shows its crosshair window
   (`showCrosshair`). The overlay stays active while Inspect is on, so the crosshair roams the whole
   screen at 1x.
 - **Clicks** go to the look point: the hook swallows the real press, `RunTick` injects an absolute
@@ -314,19 +312,12 @@ turns held pan keys into a view delta in screen space, so the feel does not chan
 - While panning, KeyPan owns the view ahead of caret events. The delta is clamped to the monitor
   and the MPO wall. The pointer does not move; the next mouse move places it in the view.
 
-## Shell input panels (sprite path)
+## Shell input panels
 
-Native-cursor sessions need none of this: DWM's pointer is already above the panels. The emoji picker, clipboard history and touch keyboard are composed above every window band, so
-the sprite goes under them. While one is open (`FocusTracker::shellPanelOpen`, from TextInputHost
-cloak events) and `panelPointer=1` (default), the transform hides the sprite, restores the real
-pointer and makes one public `MagSetFullscreenTransform` write, after which DWM draws the pointer
-magnified. The pointer is frozen with a 1 px clip and moved only by Wind, right after each view
-write, so the two never drift.
-
-- Do not write from the hook thread for this: runtime ownership marshals every write onto the input
-  thread and hitches.
-- The freeze is hidden from the lock detector (a flapping lock flickers); tracking and edge mode
-  pause; the saved clip is restored on close.
-
+The emoji picker, clipboard history and touch keyboard are composed above every window band. The
+transform engine needs nothing for them: DWM draws the native pointer above the panels and keeps it
+centred, so the hand moves the pointer directly. The earlier workaround for the sprite cursor (a
+frozen real pointer moved by Wind after each view write, driven by `TextInputHost` cloak events)
+was removed with the sprite. The render engine's pointer sits under the panels, as before.
 Evidence and the rejected hook-write variant:
 [../SHELL-PANEL-CURSOR-FINDINGS.md](../SHELL-PANEL-CURSOR-FINDINGS.md).

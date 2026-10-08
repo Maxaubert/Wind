@@ -646,7 +646,9 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     const int trTxX = m.txX, trOffX = m.offX;
     // pauseWrites (issue #148): a click's injected cursor move is in flight - a transform write
     // racing a cursor-position update is the proven TDR, so those ticks write NOTHING. State is
-    // untouched; the next unpaused tick lands the same values.
+    // untouched; the next unpaused tick lands the same values. (The native cursor's pixel-and-back
+    // nudges are the intentional exception to "no cursor events beside a write": they run right
+    // AFTER the write on the same thread, never racing it, and never during a click.)
     if (!ex.pauseWrites) {
     const unsigned long long nowMs = GetTickCount64();
     const bool changed = m.offX != lastOffX_ || m.offY != lastOffY_ ||
