@@ -123,6 +123,10 @@ slightly during zoom ramps, nearest keeps it pixelated and steady. Pure rules:
   cursor event back on DWM's (a 5-10 px shift at ~5x that snapped back when the zoom stopped). While
   DWM centres, every level write is followed by a pixel-and-back nudge, so DWM re-centres by its own
   rule in the same frame (`NudgeAfterLevelWrite`). Field-verified: shift gone, pans steady.
+- **No write without its nudge (#381).** The nudge is skipped while a mouse button is held (it made
+  some clicks fail), so a pan write during a held click would leave Wind's centre on screen until the
+  next cursor event: drag-selects and held clicks shook. Pan-only writes are held for the click
+  window instead (`HoldWriteForClick`); level changes and forced writes still go out.
 - `txDwmCentre=0` keeps the native pointer but lets Wind write the view itself (kill switch; pans
   then wobble by speed x tick x zoom).
 - **DWM's learned offset.** DWM learns the gap between `GetCursorPos` and its own cursor point and
