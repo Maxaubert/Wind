@@ -31,7 +31,7 @@
 #include "hdr_info.h"   // issue #288
 #include "cursor_tint.h"   // tinted pointer at 1x (#288)
 #include "transform_model.h"
-#include "native_cursor.h"   // UseNativeCursor, WantDwmCentring (issue #369)
+#include "native_cursor.h"   // WantDwmCentring, LockApplies (issue #369)
 #include "mpo_guard.h"       // WantMpoGuard, GuardedColorMatrix (issue #369)
 #include "zoom_ladder.h"     // EaseOutShouldStop (issue #369)
 #include "hitch_record.h"   // hitch recorder (#361)
@@ -349,11 +349,8 @@ struct TickState {
         long long press = 0, start = 0;
         double setActiveMs = 0, presentMs = 0, outSetActiveMs = 0, work[7] = {};
         unsigned long long cFrame0 = 0; long long firstComp = 0; unsigned comps = 0;
-        const char* engine = ""; bool warm = false; double bridgeMs = 0, ensureMs = 0;
+        const char* engine = ""; bool warm = false; double ensureMs = 0;
     } zt;
-    bool   panelFreeze = false;    // #283: the real pointer is frozen and moved by Wind
-    double panelX = 0, panelY = 0; // its desktop position (sub-pixel)
-    RECT   panelSavedClip{};       // the clip to give back when the panel closes
     double viewVx = 0, viewVy = 0; // tracking spring velocity (trackGlideMode=1)
     // trackLog diagnostics (#326): the last logged caret seq and the last tracking-enable reason.
     unsigned diagSeq = 0;
@@ -384,9 +381,6 @@ struct TickState {
     // in the pacing block right after DwmFlush - the instant DWM pairs the transform it holds
     // with the pointer it draws - and reported per tick in the telemetry.
     double lagPx = 0.0;
-    double spriteLagPx = 0.0;   // sprite window position vs requested, at composite (#229)
-    double clampLagPx = 0.0;    // cursor-vs-sprite drift on a CLAMPED axis (#229)
-    long long lastCompositeQpc = 0;   // when DwmFlush last returned (late sprite refresh)
     bool   inspectStealPending = false; // steal deferred past the reveal logic (it must read the true fg)
     HWND   inspectPrevFg = nullptr;     // the game window foreground is handed back to on exit
     int    clickPauseTicks = 0;     // ticks to skip transform writes around an Inspect click's
@@ -837,20 +831,6 @@ static wind::CursorBody CurrentCursorBody(TickState& t) {
     return t.cursorBody;
 }
 
-// Leave the shell-panel freeze (#283): stop cooking and give the saved clip back. Runs from the
-// in-session exit AND the active -> idle teardown: a quick-zoom snap-out drops the level from ~10x to
-// 1x in one tick, skipping the in-session branch, which left the pointer pinned to one pixel (review
-// #284). The clip is restored only while it is still our 1px pin: anything that took the clip since
-// (a game, Inspect, another tool) wins, and a stale snapshot is never forced back over it.
-static void EndPanelFreeze(TickState& t) {
-    if (!t.panelFreeze) return;
-    g_input.state().cookActive.store(false);
-    RECT cur{};
-    if (GetClipCursor(&cur) && cur.right - cur.left <= 1 && cur.bottom - cur.top <= 1)
-        ClipCursor(&t.panelSavedClip);
-    t.panelFreeze = false;
-}
-
 // COLOUR (issue #288): warmth + brightness, always on when set. Transform sessions and 1x use
 // the DWM colour effect; a render session clears it and filters in its pixel shader instead, because
 // its capture already contains the effect (docs/COLOUR-FILTER-FINDINGS.md). The controller dedupes, so
@@ -1059,9 +1039,9 @@ static void ZoomTimelineStep(TickState& t, long long nowQpc) {
     const double pressToTick = z.press ? QpcMs(t, z.press, z.start) : -1.0;
     const double pressToComp = (z.press && z.firstComp) ? QpcMs(t, z.press, z.firstComp) : -1.0;
     wind::Log(wind::LogLevel::Info, "zoomtrace",
-              "in: engine=%s warm=%d press->tick=%.2f setActive=%.2f (bridge=%.2f ensureMag=%.2f) "
+              "in: engine=%s warm=%d press->tick=%.2f setActive=%.2f (ensureMag=%.2f) "
               "present=%.2f enterTick=%.2f press->firstComposite=%.2f (composites seen %u) next=%.1f,%.1f,%.1f,%.1f,%.1f,%.1f",
-              z.engine, (int)z.warm, pressToTick, z.setActiveMs, z.bridgeMs, z.ensureMs, z.presentMs,
+              z.engine, (int)z.warm, pressToTick, z.setActiveMs, z.ensureMs, z.presentMs,
               z.work[0], pressToComp, z.comps, z.work[1], z.work[2], z.work[3], z.work[4], z.work[5], z.work[6]);
     (void)nowQpc;
 }
@@ -1201,13 +1181,6 @@ static void RunTick(TickState& t) {
                 RegisterQuickZoomHotkey(t.hwnd, (nc.quickZoomHotkeyMode && nc.quickZoomVk) ? nc.quickZoomVk : 0,
                                         nc.quickZoomMods);
             }
-            // txIdleReleaseMs is documented hot-reloadable; push it into whichever transform
-            // model exists (pure-transform t.model or hybrid's t.mTransform - never both).
-            if (auto* tmHot = dynamic_cast<TransformModel*>(
-                    t.mTransform ? t.mTransform : t.model))
-                tmHot->setIdleReleaseMs(nc.txIdleReleaseMs);
-            if (auto* tmHot = dynamic_cast<TransformModel*>(t.mTransform ? t.mTransform : t.model))
-                tmHot->setNativeCursorPref(wind::UseNativeCursor(nc.txNativeCursor));
             t.cfg = nc;   // pick up renderer knobs (smoothing, filter, cursor scale, zoom speed)
             // transformExclude / renderExclude / the per-window-type engine keys may all have
             // changed: drop the cache so every exe-derived predicate is re-resolved. Without this
@@ -1493,9 +1466,10 @@ static void RunTick(TickState& t) {
         bool enterActive  = !t.prevActive;            // idle -> active (overlay just turned on)
         bool inspectEnter = inspect && !t.prevInspect;
         if (enterActive) {
-            // Pristine pointers back BEFORE any engine hides or captures the pointer: the transform
-            // sprite and the render engine draw the real shape and filter it themselves, so a
-            // tinted source would be tinted twice (#288). Direct swaps, no scheme reload.
+            // Pristine pointers back BEFORE any engine hides or captures the pointer: DWM composes
+            // the transform engine's pointer through the colour effect and the render engine draws
+            // and filters the real shape itself, so a tinted source would be tinted twice (#288).
+            // Direct swaps, no scheme reload.
             g_tint.restore(false);
             t.outlineIdleSec = 0.0;   // each activation starts with the outline fully shown
             // Follow the cursor's monitor (multiMonitor on, only when zoomed). Only reconfigure when
@@ -1590,11 +1564,11 @@ static void RunTick(TickState& t) {
                               "seeded LOCKED at zoom-in (app cursor hidden, covering foreground)");
                 }
             }
-            // Transform sessions run the WELDED-cursor design (re-test of the #148 weld; see
-            // transform_model.cpp): the transform welds the REAL cursor to the lens point, so
-            // hover, drags, and clicks are native - same contract as the render engine. The old
-            // game-session FREEZE (1px clip + sprite aim point + click re-routing) was retired
-            // with it; git history has the machinery if the re-test fails.
+            // Transform sessions use the REAL cursor (issue #369): a free session never welds and
+            // DWM centres on the pointer; only the locked and Inspect regimes weld it to the lens
+            // point (see transform_model.cpp). Hover, drags and clicks are native either way. The
+            // old game-session FREEZE (1px clip + sprite aim point + click re-routing) was retired;
+            // git history has the machinery.
             if (dynamic_cast<TransformModel*>(t.model)) {
                 // Record the session app for the device-lost churny backstop: if the GPU resets
                 // within 30s of a transform game session, that app is remembered in
@@ -1706,11 +1680,6 @@ static void RunTick(TickState& t) {
             if (t.cfg.mouseAlign == 1 && t.viewDetached && !clipConfined &&
                 wind::PointerPinnedAtEdge(cur.x, cur.y, clip.left, clip.top, clip.right, clip.bottom))
                 rawMag = 0;
-            // Shell panel freeze (#283): the 1px clip and the frozen pointer are OURS, and they look
-            // exactly like mouselook. Fed to the tell, it flapped LOCKED/free every ~20 ms, each flip
-            // leaving and re-entering the panel regime (sprite/real pointer and the cursor set swapped
-            // per flip): the field flicker and frame drops. Hide both while the freeze is ours.
-            if (t.panelFreeze) { clipConfined = false; rawMag = 0; }
             bool locked = t.detector.update(clipConfined,
                                             rawMag,
                                             std::abs(curDx) + std::abs(curDy),
@@ -1735,17 +1704,16 @@ static void RunTick(TickState& t) {
                           (locked && t.detector.warpLocked()) ? " (warp-anchor)" : "", lvl);
                 t.prevDetLocked = locked;
             }
-            // A shown pointer is a free pointer in a native-cursor session (LockApplies): a game's
+            // A shown pointer is a free pointer in a transform session (LockApplies): a game's
             // menus keep DWM centring, its mouselook (pointer hidden) keeps the locked pan.
             {
-                const bool nativeTx = wind::UseNativeCursor(t.cfg.txNativeCursor) &&
-                                      dynamic_cast<TransformModel*>(t.model) != nullptr;
+                const bool transformTx = dynamic_cast<TransformModel*>(t.model) != nullptr;
                 bool showing = false;
-                if (locked && nativeTx) {
+                if (locked && transformTx) {
                     CURSORINFO ci{}; ci.cbSize = sizeof(ci);
                     showing = GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING) && ci.hCursor != nullptr;
                 }
-                const bool applies = wind::LockApplies(locked, nativeTx, showing);
+                const bool applies = wind::LockApplies(locked, transformTx, showing);
                 const bool freed = locked && !applies;
                 if (freed != t.lockFreed)
                     wind::Log(wind::LogLevel::Info, "lock", "%s lvl=%.2f",
@@ -1791,8 +1759,7 @@ static void RunTick(TickState& t) {
                 // rawDx/rawDy went in, curDx/curDy came out - so teach the learner the REAL
                 // ballistics at this speed. Gated on no confining clip: a clamped cursor
                 // under-reports output and would teach a too-low gain.
-                // Not during the shell-panel freeze: the pointer moves only by Wind then (review #284).
-            if (!clipConfined && !t.panelFreeze && (std::abs(rawDx) + std::abs(rawDy)) >= wind::GainLearner::kMinCounts) {
+            if (!clipConfined && (std::abs(rawDx) + std::abs(rawDy)) >= wind::GainLearner::kMinCounts) {
                     const double dtMs_ = dt * 1000.0;
                     const double inC  = std::sqrt((double)rawDx * rawDx + (double)rawDy * rawDy);
                     const double outC = std::sqrt((double)curDx * curDx + (double)curDy * curDy);
@@ -1888,40 +1855,11 @@ static void RunTick(TickState& t) {
         //     the view solid;
         //   - a mouselook game clips/recentres the pointer, which is exactly why the locked path
         //     integrates raw deltas instead (issue #3 / #158).
-        const bool freeCursor = t.cfg.txFreeCursor != 0 && !inspect && !t.lockEff &&
+        const bool freeCursor = !inspect && !t.lockEff &&
                                 dynamic_cast<TransformModel*>(t.model) != nullptr;
-        // SHELL INPUT PANEL REGIME (issue #283): while the emoji picker (or clipboard history, touch
-        // keyboard) is open, the real pointer replaces the sprite (the shell composes its panels above
-        // every window band; only the real pointer is drawn above them). A real pointer the hand moves
-        // between ticks drifts off the view by speed x tick x level (the wobble, 44 px at 10.7x), so it
-        // is FROZEN with a 1px clip and moved only by Wind, in the same tick and right next to the view
-        // write: the hand's motion arrives as ballistics-cooked raw input (the Inspect machinery).
-        // Hook-thread writes were tried first and rejected: owning the runtime there marshals every
-        // write onto the input thread (field: hitches). Tracking and edge mode pause meanwhile.
-        // A native-cursor session (issue #369) needs none of this: DWM's pointer is already drawn
-        // above the panels and DWM keeps it centred, so the hand moves the pointer directly.
-        const bool panel = t.cfg.panelPointer != 0 && freeCursor && lvl > 1.001 && g_track.shellPanelOpen() &&
-                           !(tmWall && tmWall->nativeSession());
-        if (panel && !t.panelFreeze) {
-            GetClipCursor(&t.panelSavedClip);
-            POINT p{}; GetCursorPos(&p);
-            t.panelX = p.x; t.panelY = p.y;
-            double dx0, dy0; g_input.drainCooked(dx0, dy0);        // start from zero
-            g_input.state().cookActive.store(true);
-            t.panelFreeze = true;
-        } else if (!panel && t.panelFreeze) {
-            EndPanelFreeze(t);                                      // this rig keeps a work-area clip
-        }
-        if (panel) {
-            double cdx, cdy; g_input.drainCooked(cdx, cdy);
-            t.panelX += cdx * t.cfg.cursorSensitivity;
-            t.panelY += cdy * t.cfg.cursorSensitivity;
-            const double lo = 0.0;
-            t.panelX = t.panelX < t.mon.x + lo ? t.mon.x + lo : (t.panelX > t.mon.x + t.mon.w - 1 ? t.mon.x + t.mon.w - 1 : t.panelX);
-            t.panelY = t.panelY < t.mon.y + lo ? t.mon.y + lo : (t.panelY > t.mon.y + t.mon.h - 1 ? t.mon.y + t.mon.h - 1 : t.panelY);
-            t.mapper.reset(t.panelX - t.mon.x, t.panelY - t.mon.y);
-            wind::NoteWriteCursor(t.panelX, t.panelY);
-        } else if (freeCursor) {
+        // (A shell input panel needs nothing special: DWM draws its pointer above the panels and
+        // keeps it centred, so the hand moves the pointer directly.)
+        if (freeCursor) {
             POINT cp;
             if (GetCursorPos(&cp)) {
                 t.mapper.reset(double(cp.x - t.mon.x), double(cp.y - t.mon.y));
@@ -1944,22 +1882,22 @@ static void RunTick(TickState& t) {
         // fsCover (read once above, see the "Foreground facts for this tick" comment) is the
         // borderless-fullscreen-game tell; reused here rather than a second ForegroundCoversMonitor
         // call (it is also what fsGame below aliases).
-        const bool trackEnabled = lvl > 1.001 && !panel && !inspect && !t.lockEff && !fsCover &&
+        const bool trackEnabled = lvl > 1.001 && !inspect && !t.lockEff && !fsCover &&
                                   (t.cfg.trackCaret != 0 || t.cfg.trackFocus != 0);
         { wind::SpanScope span_(wind::kSpanTrack); g_track.setActive(trackEnabled, t.cfg.trackCaret != 0, t.cfg.trackFocus != 0, t.cfg.trackLog != 0); }
         if (t.cfg.trackLog) {   // #326: why tracking is on or off, logged on every change
-            const int bits = (lvl > 1.001 ? 1 : 0) | (panel ? 2 : 0) | (inspect ? 4 : 0) |
+            const int bits = (lvl > 1.001 ? 1 : 0) | (inspect ? 4 : 0) |
                              (t.lockEff ? 8 : 0) | (fsCover ? 16 : 0);
             if (bits != t.diagEnableBits) {
                 t.diagEnableBits = bits;
-                wind::Log(wind::LogLevel::Info, "track", "diag enabled=%d zoomed=%d panel=%d inspect=%d locked=%d fsCover=%d lvl=%.2f",
-                          trackEnabled ? 1 : 0, bits & 1 ? 1 : 0, bits & 2 ? 1 : 0, bits & 4 ? 1 : 0,
+                wind::Log(wind::LogLevel::Info, "track", "diag enabled=%d zoomed=%d inspect=%d locked=%d fsCover=%d lvl=%.2f",
+                          trackEnabled ? 1 : 0, bits & 1 ? 1 : 0, bits & 4 ? 1 : 0,
                           bits & 8 ? 1 : 0, bits & 16 ? 1 : 0, lvl);
             }
         }
         // Keyboard panning (#287): only presses the hook swallowed count (a key that went to the app
         // at 1x never pans after a zoom-in mid-press); without the hook, the polled combo.
-        const bool panEnabled = panArmed && !panel;
+        const bool panEnabled = panArmed;
         double panDx = 0, panDy = 0;
         if (panEnabled) {
             const bool kb = g_input.kbHookActive();
@@ -2075,7 +2013,7 @@ static void RunTick(TickState& t) {
                 t.lastSetVirtual = cur;
                 r = wind::DetachedMap(t.viewCx, t.viewCy, px, py, lvl, t.mon.w, t.mon.h);
                 t.viewDetached = edges;               // edge mode keeps the view where it is
-            } else if (t.cfg.mouseAlign == 1 && lvl > 1.001 && !panel && !inspect && !t.lockEff) {
+            } else if (t.cfg.mouseAlign == 1 && lvl > 1.001 && !inspect && !t.lockEff) {
                 // MOUSE EDGE MODE (issue #276 phase 2): the pointer roams freely inside the view and
                 // the view moves only when it reaches the margin band, just far enough. No weld:
                 // the pointer is real, so clicks are native. Mouselook (locked) and Inspect keep the
@@ -2328,7 +2266,7 @@ static void RunTick(TickState& t) {
         // latency that matters is panning at a steady level, which is what this arms for.
         const bool levelSettled = (lvl == t.prevTickLevel);
         t.prevTickLevel = lvl;
-        const bool hookWrite = freeCursor && !panel && t.cfg.txHookWrite != 0 && wind::MagThreadOwned() &&
+        const bool hookWrite = freeCursor && t.cfg.txHookWrite != 0 && wind::MagThreadOwned() &&
                                tmWall != nullptr && lvl > 1.0 && levelSettled && !t.viewDetached;
         if (hookWrite) {
             wind::HookTransformState hs;
@@ -2342,18 +2280,11 @@ static void RunTick(TickState& t) {
             hs.edgeMargin = t.cfg.txEdgeMargin;
             hs.fastPan = t.cfg.fastPan != 0;
             hs.host = tmWall->magHost();
-            // The hook moves the sprite together with the transform (issue #229): a sprite
-            // placed by the tick while the hook rewrites the view lands off-centre by the
-            // cursor drift times the zoom - the second, lagging cursor.
-            hs.spriteHwnd = tmWall->spriteHwnd();
-            hs.spriteHotX = tmWall->spriteHotX();
-            hs.spriteHotY = tmWall->spriteHotY();
             wind::PublishHookTransform(hs);
         } else {
             wind::DisarmHookTransform();
         }
         ex.suppressTransformWrite = hookWrite;
-        ex.realPointer = panel;
         { wind::SpanScope span_(wind::kSpanColor); UpdateColorFilter(t, lvl > 1.0, RenderOverlayShown(t), &ex); }
         // Serialize transform writes around an Inspect click's injected absolute move (issue #148
         // TDR class): the injection and a transform write racing each other is the proven trigger.
@@ -2369,16 +2300,16 @@ static void RunTick(TickState& t) {
         }
         if (quiesceHold) ex.suppressCursorSync = true;
         // Native cursor (issue #369): DWM may own the pan only where the view is a pure function of
-        // the pointer. The model applies it only in a native-cursor session.
+        // the pointer.
         {
             wind::DwmCentreIn dc;
             dc.zoomed = lvl > 1.001;
-            dc.freeCursor = freeCursor && !panel;
+            dc.freeCursor = freeCursor;
             dc.viewDetached = t.viewDetached;
             dc.wallNeeded = wind::NearWall(wallNeeded, r.srcLeft, r.srcTop, lvl, kMaxSafeTxMagnitude, 64.0);
             dc.quiesce = quiesceHold;
             dc.hookWrite = hookWrite;
-            ex.dwmCentre = t.cfg.txDwmCentre != 0 && wind::WantDwmCentring(dc);
+            ex.dwmCentre = wind::WantDwmCentring(dc);
         }
         // Our tray menu is open (in WindTray.exe, flagged through the shared block): the pointer
         // belongs to the USER (they are aiming at menu items),
@@ -2539,7 +2470,7 @@ static void RunTick(TickState& t) {
             if (t.zt.armed) {
                 LARGE_INTEGER zs1; QueryPerformanceCounter(&zs1); t.zt.setActiveMs = QpcMs(t, zs0.QuadPart, zs1.QuadPart);
                 if (auto* tm = dynamic_cast<TransformModel*>(t.model)) {
-                    const auto sp = tm->lastEnter(); t.zt.bridgeMs = sp.bridgeMs; t.zt.ensureMs = sp.ensureMagMs;
+                    const auto sp = tm->lastEnter(); t.zt.ensureMs = sp.ensureMagMs;
                 }
                 DWM_TIMING_INFO ti{}; ti.cbSize = sizeof(ti);   // the composite count the first write must beat
                 if (SUCCEEDED(DwmGetCompositionTimingInfo(nullptr, &ti))) t.zt.cFrame0 = ti.cFrame;
@@ -2629,7 +2560,6 @@ static void RunTick(TickState& t) {
             }
         }
     } else if (t.prevActive) {                        // active -> idle: tear the overlay down
-        EndPanelFreeze(t);                            // #283: never leave the pointer pinned (review #284)
         // The caret/focus watcher is switched off only from the zoomed view block; a zoom-out that
         // snaps straight to 1.0 skipped it and left the watcher polling at 1x (#71).
         { wind::SpanScope span_(wind::kSpanTrack); g_track.setActive(false, t.cfg.trackCaret != 0, t.cfg.trackFocus != 0, t.cfg.trackLog != 0); }
@@ -2777,14 +2707,6 @@ static void RunTick(TickState& t) {
             }
         }
         s.lagPx = t.lagPx;
-        if (tmT) {
-            s.spriteX = tmT->spriteDesktopX();
-            s.spriteY = tmT->spriteDesktopY();
-            s.spriteOn = tmT->spriteShown() ? 1 : 0;
-            s.hideFails = wind::TransformCursorHideFailures();
-            s.spriteLagPx = t.spriteLagPx;
-            s.clampLagPx = t.clampLagPx;
-        }
         {   // Hook-write counter (issue #229): the swim metric's raw input.
             unsigned long long hw = 0, tw = 0;
             wind::HookTransformStats(hw, tw);
@@ -3178,13 +3100,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         // Revived for issue #148: the DWM-internal fullscreen transform - zero app presents, so
         // it holds compositor-rate smoothness over a heavy game where every overlay present path
         // throttles (measured). Cursor is anchored, not centered (documented model tradeoff).
-        auto tm = std::make_unique<TransformModel>(cfg.fastPan != 0, cfg.smoothPan != 0,
-                                                   cfg.cursorSprite != 0, cfg.zorderBand,
-                                                   cfg.spriteBand16 != 0, cfg.cursorBandAuto != 0);
-        tm->setIdleReleaseMs(cfg.txIdleReleaseMs);
-        tm->setNativeCursorPref(wind::UseNativeCursor(cfg.txNativeCursor));
-        tm->setSpriteCapturable(cfg.spriteCapturable != 0);
-        model = std::move(tm);
+        model = std::make_unique<TransformModel>(cfg.fastPan != 0, cfg.smoothPan != 0,
+                                                 cfg.zorderBand, cfg.cursorBandAuto != 0);
     } else {
         model = std::make_unique<RenderModel>(cfg.zorderBand, cfg.hdrTonemap != 0,
                                               EffectiveGpuPriority(cfg));
@@ -3193,13 +3110,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             // levels), transform model whenever a fullscreen app is foreground at zoom-in
             // (compositor-internal - the only path that stays smooth over a heavy game). The
             // engine is picked per zoom-in session in RunTick; both stay initialized.
-            auto tm2 = std::make_unique<TransformModel>(cfg.fastPan != 0, cfg.smoothPan != 0,
-                                                        cfg.cursorSprite != 0, cfg.zorderBand,
-                                                        cfg.spriteBand16 != 0, cfg.cursorBandAuto != 0);
-            tm2->setIdleReleaseMs(cfg.txIdleReleaseMs);
-            tm2->setNativeCursorPref(wind::UseNativeCursor(cfg.txNativeCursor));
-            tm2->setSpriteCapturable(cfg.spriteCapturable != 0);
-            model2 = std::move(tm2);
+            model2 = std::make_unique<TransformModel>(cfg.fastPan != 0, cfg.smoothPan != 0,
+                                                      cfg.zorderBand, cfg.cursorBandAuto != 0);
         }
     }
     if (!model->initialize(startupMon)) {
@@ -3472,10 +3384,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         // blt-model microstutter); else vsync=1 -> Present(1,0) blocks; else the timer paces.
         // The render model keeps its configurable self-pacing (blocking Present / DwmFlush). The
         // transform model submits via MagSetFullscreenTransform (no blocking present), so DwmFlush is
-        // its ONLY coherent pace while zoomed: it blocks one composite per tick so the sprite update
-        // and the transform land in the SAME frame. A plain timer lets them drift into different
-        // composites, so the cursor beats against the panning view (the flicker) - exactly what
-        // DwmFlush prevents (and it paces at refresh, so no flood either). Bloom paces this way too.
+        // its ONLY coherent pace while zoomed: it blocks one composite per tick so the write and the
+        // pointer it is paired with land in the SAME frame. A plain timer lets them drift into
+        // different composites, so the cursor beats against the panning view (the flicker) - exactly
+        // what DwmFlush prevents (and it paces at refresh, so no flood either). Bloom paces this way too.
         // txPace (EXPERIMENTAL, hot; see config.h): 0 = DwmFlush-paced (one write per composite,
         // but the whole pipeline follows VRR droop). 1 = free timer (measured WOBBLY: uneven
         // writes per composite). 2 = DwmFlush with a one-frame-timeout backfill: phase-locked
@@ -3597,61 +3509,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                 ts.hitch.cur.flags |= wind::kTickPaceFlush;
             }
             wind::MarkComposite();  // frame boundary: the hook may write once more (issue #229)
-            {   // Composite timestamp: the late sprite refresh above measures its wait from here.
-                LARGE_INTEGER qc; QueryPerformanceCounter(&qc);
-                ts.lastCompositeQpc = qc.QuadPart;
-            }
             // Content-vs-cursor lag, measured where it actually matters (issue #229): DWM has
             // just paired the transform it holds with the pointer it draws. The transform is
             // anchored so T(cursor) == cursor, so content sits |cursor now - cursor the write
             // used| * (level - 1) screen px away from the pointer. A steady value is an
             // invisible trail; a value that jumps frame to frame is the visible wobble.
-            // SPRITE WINDOW LAG (issue #229): ask the window manager where the sprite window
-            // actually IS at this composite and compare with where we asked it to be. A
-            // SetWindowPos that has not landed yet means DWM is magnifying a stale sprite
-            // position while the transform has already moved - the lagging second cursor. The
-            // only metric here that is not coherent by construction.
-            if (auto* tmLag = dynamic_cast<TransformModel*>(
-                    ts.mTransform ? ts.mTransform : ts.model)) {
-                HWND sh = tmLag->spriteHwnd();
-                if (sh && tmLag->spriteShown() && ts.prevLvl > 1.0) {
-                    RECT rc{};
-                    if (GetWindowRect(sh, &rc)) {
-                        const double wantX = (double)(tmLag->spriteDesktopX() - tmLag->spriteHotX());
-                        const double wantY = (double)(tmLag->spriteDesktopY() - tmLag->spriteHotY());
-                        const double dx = (double)rc.left - wantX, dy = (double)rc.top - wantY;
-                        ts.spriteLagPx = std::sqrt(dx * dx + dy * dy) * ts.prevLvl;
-                    }
-                } else {
-                    ts.spriteLagPx = 0.0;
-                }
-                // CLAMPED-VIEW CURSOR LAG (issue #229). Where the view is pinned against an
-                // edge it cannot pan, so the cursor crosses the screen itself at level x hand
-                // speed and a sprite placed from the previous tick's sample is drawn |drift| *
-                // level from the hand - the "cursor lagging wildly behind, worse the faster I
-                // move" the field reports at 2.5x with offX pinned at 0. Measured only on the
-                // CLAMPED axis: on a free axis the view pans instead and the cursor stays put
-                // on screen, so drift there is invisible. This is the one state every other
-                // metric deliberately excludes, which is why they all read clean at bad spots.
-                ts.clampLagPx = 0.0;
-                if (tmLag->spriteShown() && ts.prevLvl > 1.001) {
-                    const double lvlC = tmLag->writtenLevel();
-                    if (lvlC > 1.001) {
-                        const double srcL = -(double)tmLag->writtenTxX() / lvlC;
-                        const double srcT = -(double)tmLag->writtenTxY() / lvlC;
-                        const double maxL = (double)ts.mon.w - (double)ts.mon.w / lvlC;
-                        const double maxT = (double)ts.mon.h - (double)ts.mon.h / lvlC;
-                        const bool clX = srcL <= 1.0 || srcL >= maxL - 3.0;
-                        const bool clY = srcT <= 1.0 || srcT >= maxT - 3.0;
-                        POINT cpC;
-                        if ((clX || clY) && GetCursorPos(&cpC)) {
-                            const double dxc = clX ? (double)cpC.x - (double)tmLag->spriteDesktopX() : 0.0;
-                            const double dyc = clY ? (double)cpC.y - (double)tmLag->spriteDesktopY() : 0.0;
-                            ts.clampLagPx = std::sqrt(dxc * dxc + dyc * dyc) * lvlC;
-                        }
-                    }
-                }
-            }
             if (ts.prevLvl > 1.0) {
                 double wx = 0.0, wy = 0.0;
                 wind::GetWriteCursor(wx, wy);

@@ -192,7 +192,6 @@ Config ParseConfig(const std::string& text) {
             else if (key == "model")              c.model = val;
             else if (key == "fastPan")            c.fastPan = std::stoi(val);
             else if (key == "smoothPan")          c.smoothPan = std::stoi(val);
-            else if (key == "cursorSprite")       c.cursorSprite = std::stoi(val);
             else if (key == "magInputTransform")  c.magInputTransform = std::stoi(val);
             else if (key == "bilinear")           c.bilinear = std::stoi(val);
             else if (key == "sharpness")          c.sharpness = std::stod(val);
@@ -209,7 +208,6 @@ Config ParseConfig(const std::string& text) {
             else if (key == "tdrTest")            c.tdrTest = std::stoi(val);
             else if (key == "probeClicks")        c.probeClicks = std::stoi(val);
             else if (key == "desktopTransform")   c.desktopTransform = std::stoi(val);
-            else if (key == "spriteBand16")       c.spriteBand16 = std::stoi(val);
             else if (key == "cursorBandAuto")     c.cursorBandAuto = std::stoi(val);
             else if (key == "trackCaret")         c.trackCaret = std::stoi(val);
             else if (key == "trackFocus")         c.trackFocus = std::stoi(val);
@@ -218,10 +216,8 @@ Config ParseConfig(const std::string& text) {
             else if (key == "trackGlideMs")       c.trackGlideMs = std::stoi(val);
             else if (key == "trackGlideMode")     c.trackGlideMode = std::stoi(val);
             else if (key == "trackMarginPct")     c.trackMarginPct = std::stoi(val);
-            else if (key == "panelPointer")       c.panelPointer = std::stoi(val);
             else if (key == "mouseMarginPct")     c.mouseMarginPct = std::stoi(val);
             else if (key == "trackLog")           c.trackLog = std::stoi(val);
-            else if (key == "spriteCapturable")   c.spriteCapturable = std::stoi(val);
             else if (key == "ixDecimate")         c.ixDecimate = std::stoi(val);
             else if (key == "mpoBuster")          c.mpoBuster = std::stoi(val);
             else if (key == "txSamplingMode")     c.txSamplingMode = std::stoi(val);
@@ -236,9 +232,6 @@ Config ParseConfig(const std::string& text) {
             else if (key == "txWarmHz")           c.txWarmHz = std::stoi(val);
             else if (key == "txWarmLevelEps")     c.txWarmLevelEps = std::stod(val);
             else if (key == "txWriteHz")          c.txWriteHz = std::stoi(val);
-            else if (key == "txFreeCursor")       c.txFreeCursor = std::stoi(val);
-            else if (key == "txNativeCursor")     c.txNativeCursor = std::stoi(val);
-            else if (key == "txDwmCentre")        c.txDwmCentre = std::stoi(val);
             else if (key == "mpoNearestGuard")    c.mpoNearestGuard = std::stoi(val);
             else if (key == "txSmoothLadder")     c.txSmoothLadder = std::stoi(val);
             else if (key == "mpoGuardTest")       c.mpoGuardTest = std::stoi(val);
@@ -249,7 +242,6 @@ Config ParseConfig(const std::string& text) {
             else if (key == "txPace")             c.txPace = std::stoi(val);
             else if (key == "txHookWrite")        c.txHookWrite = std::stoi(val);
             else if (key == "txMinOffsetPx")      c.txMinOffsetPx = std::stoi(val);
-            else if (key == "txIdleReleaseMs")    c.txIdleReleaseMs = std::stoi(val);
             else if (key == "txMaxStepPct")       c.txMaxStepPct = std::stoi(val);
             else if (key == "warpLock")           c.warpLock = std::stoi(val);
             else if (key == "lockForce")          c.lockForce = std::stoi(val);
@@ -302,7 +294,6 @@ Config ParseConfig(const std::string& text) {
     if (c.tdrTest > 4) c.tdrTest = 4;
     if (c.ixDecimate < 1)  c.ixDecimate = 1;       // 1 = publish every changed tick
     if (c.ixDecimate > 16) c.ixDecimate = 16;
-    if (c.txIdleReleaseMs < 0) c.txIdleReleaseMs = 0;
     if (c.txRestLevel < 1.0)   c.txRestLevel = 1.0;
     if (c.txRestLevel > 1.01)  c.txRestLevel = 1.01;   // visually identity only
     if (c.txPace < 0)          c.txPace = 0;
@@ -522,14 +513,16 @@ std::string DefaultIniText() {
                "bilinear=1\n"
                "; sharpness: 0=off; 0.1-1.0 sharpens the magnified image (crisper text/detail)\n"
                "sharpness=0.0\n"
-               "; zorderBand: 0=ordinary topmost (shipped): the Snipping Tool capture overlay works -\n"
-               ";   magnified view and cursor stay visible under Win+Shift+S. 16=above the shell\n"
-               ";   (needs the UIAccess build): covers the Start menu / taskbar / tray flyouts, but\n"
-               ";   the snip overlay then covers US and a zoom there shows no cursor at all.\n"
+               "; zorderBand: z-band of the render engine's overlay and the Inspect crosshair. 0=ordinary\n"
+               ";   topmost (shipped): the Snipping Tool capture overlay works - magnified view and cursor\n"
+               ";   stay visible under Win+Shift+S. 16=above the shell (needs the UIAccess build): covers\n"
+               ";   the Start menu / taskbar / tray flyouts, but the snip overlay then covers US and a\n"
+               ";   render-engine zoom there shows no cursor at all.\n"
                "zorderBand=0\n"
-               "; cursorBandAuto: 1=the zoomed cursor (transform engine) sits above taskbar previews,\n"
-               ";   Start and tray flyouts, and drops below them only while the Snipping Tool overlay\n"
-               ";   is up, so it stays visible there too (needs UIAccess; restart). 0=use zorderBand.\n"
+               "; cursorBandAuto: 1=the Inspect crosshair sits above taskbar previews, Start and tray\n"
+               ";   flyouts, and drops below them only while the Snipping Tool overlay is up, so it stays\n"
+               ";   visible there too (needs UIAccess; restart). 0=use zorderBand. The transform engine's\n"
+               ";   pointer is Windows' own and is always above every band.\n"
                "cursorBandAuto=1\n"
                "; trackCaret: 1=the zoomed view follows the text cursor while you type; 0=off\n"
                "trackCaret=1\n"
@@ -543,7 +536,7 @@ std::string DefaultIniText() {
                "trackGlideMs=200\n"
                "; trackMarginPct: within-the-edges margin, percent of the view on each side\n"
                "trackMarginPct=15\n"
-               "; mouseMarginPct: mouse edge mode, how close (percent of the view) the pointer gets to the edge before the view moves\n"
+               "; mouseMarginPct: mouse edge mode (mouseAlign=1 only), how close (percent of the view) the pointer gets to the edge before the view moves\n"
                "mouseMarginPct=0\n"
                "; brightness: magnified-view output multiplier (1.0=unchanged; fine-tune for HDR)\n"
                "brightness=1.0\n"

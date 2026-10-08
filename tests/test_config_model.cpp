@@ -64,11 +64,24 @@ TEST_CASE("transform-model knobs default and parse") {
     Config d = ParseConfig("");
     CHECK(d.fastPan == 1);
     CHECK(d.smoothPan == 0);
-    CHECK(d.cursorSprite == 1);
-    Config c = ParseConfig("fastPan=0\nsmoothPan=1\ncursorSprite=0\n");
+    Config c = ParseConfig("fastPan=0\nsmoothPan=1\n");
     CHECK(c.fastPan == 0);
     CHECK(c.smoothPan == 1);
-    CHECK(c.cursorSprite == 0);
+}
+
+TEST_CASE("keys of the removed sprite cursor are ignored, and change nothing else") {
+    // The old sprite cursor, its tuning knobs and the experiments around it are gone; an ini that
+    // still carries them parses exactly like one without (unknown keys are skipped).
+    const Config d = ParseConfig("");
+    const Config c = ParseConfig("txNativeCursor=0\ncursorSprite=0\ntxDwmCentre=0\ntxFreeCursor=0\n"
+                                 "panelPointer=0\nspriteBand16=1\nspriteCapturable=1\ntxHookWrite=1\n"
+                                 "txIdleReleaseMs=0\n");
+    CHECK(c.fastPan == d.fastPan);
+    CHECK(c.smoothPan == d.smoothPan);
+    CHECK(c.cursorBandAuto == d.cursorBandAuto);
+    CHECK(c.zorderBand == d.zorderBand);
+    CHECK(c.edgeClip == d.edgeClip);
+    CHECK(c.model == d.model);
 }
 
 TEST_CASE("unknown model value falls back to hybrid, same as a missing key") {

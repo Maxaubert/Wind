@@ -156,8 +156,6 @@ struct Config {
                           //     (sub-pixel); falls back to the public API automatically if unavailable.
     int smoothPan   = 0;  // 1 = hold the display composited while zoomed (1px pin) so flip-model games
                           //     do not stutter while panning, at a capped frame rate while zoomed.
-    int cursorSprite = 1; // 1 = hide the OS cursor and draw a scene-locked sprite welded to the
-                          //     transform (fixes cursor/click divergence near screen edges).
     // Transform engine on the desktop (issue #185, hot): 1 (DEFAULT since issue #271, owner
     // decision 2026-09-28) = hybrid picks the transform on the DESKTOP too, not just games, WHEN
     // the input transform is verified available (UIAccess, which every install gets since the
@@ -165,17 +163,11 @@ struct Config {
     // render. Not in the ini template or the Settings UI, so the default reaches existing
     // installs; only an explicit desktopTransform=0 keeps render.
     int desktopTransform = 1;
-    // P2 experiment (issue #185, restart-applied, UIAccess build): create the transform cursor
-    // sprite in band 16 positioned in SCREEN space. Hypothesis: high-band windows escape the DWM
-    // fullscreen transform (native Magnifier's own fullscreen UI stays unmagnified), giving a
-    // crisp CONSTANT-SIZE centered cursor. Two prior field measurements about layered windows
-    // under the transform CONTRADICT each other (transform.h header vs transform_model.cpp), so
-    // this needs one visual verdict from the field: zoomed, is the sprite unmagnified?
-    int spriteBand16 = 0;
-    // Transform cursor z-band switching (issue #269, restart): 1 = the sprite lives in band 16
-    // (above taskbar thumbnails, Start, tray flyouts) and drops to the low window only while the
-    // foreground sits above band 16 (the Snipping Tool overlay, band 17). Needs UIAccess; 0 = one
-    // window in zorderBand, as before.
+    // Z-band switching for the Inspect crosshair (issue #269, restart): 1 = the crosshair window
+    // lives in band 16 (above taskbar thumbnails, Start, tray flyouts) and drops to the low window
+    // only while the foreground sits above band 16 (the Snipping Tool overlay, band 17). Needs
+    // UIAccess; 0 = one window in zorderBand. The transform engine's pointer itself is DWM's
+    // (native cursor, issue #369) and is always above every band, so this only moves the crosshair.
     int cursorBandAuto = 1;
     // Tracking modes (issue #276, hot). The view can follow the text caret and keyboard focus;
     // the pointer is never moved by tracking. Caret on by default, focus off.
@@ -188,9 +180,6 @@ struct Config {
     int trackGlideMode = 1;  // hidden: 1 = spring (carries velocity, field pick), 0 = old exponential ease
     int mouseMarginPct = 0;  // mouse edge mode (mouseAlign=1): how close to the view edge the pointer may go
     int trackLog = 0;        // hidden: log every resolved caret/focus event with its source
-    // Hidden test knob (not in the template or the UI): 1 leaves the transform cursor visible to
-    // screen capture, for tools/testenv/dualcursor.ps1. Users always get it hidden (issue #269).
-    int spriteCapturable = 0;
     // Input-transform publish decimation (issue #189, hot): publish every Nth CHANGED tick during
     // motion (1 = every tick, the pre-#189 behavior), with a guaranteed publish the moment motion
     // rests - so hover hit-testing is exact whenever the view is still, and stale by at most
@@ -369,7 +358,8 @@ struct Config {
     // coalescing wrecks any per-packet speed estimate. 0 = raw mickeys x cursorSensitivity (the
     // historical behavior, measurably slower than the desktop cursor).
     int lockedBallistics = 1;
-    // Left/top edge cursor-shape flicker (field 2026-08-28, DOOM and KCD): when the welded
+    // Left/top edge cursor-shape flicker (field 2026-08-28, DOOM and KCD, recorded with the old
+    // welded pointer; the real pointer can still rest there): when the
     // pointer rests ON the outermost pixel column, the cursor shape flip-flops between the
     // game's cursor and the system arrow (captured: hCursor 0x67910FD3 <-> 0x10003 pinned at
     // (0,y)) - the outermost pixel is contested by shell edge zones and third-party edge hooks.
@@ -383,15 +373,6 @@ struct Config {
     int edgeClip = 1;
     int txPace = 0;
     int txHookWrite = 0;
-    int panelPointer = 1;   // #283: real magnified pointer, frozen and moved by Wind, while a shell input panel is open
-    int txFreeCursor = 1;
-    // Native cursor (issue #369, src/native_cursor.h): transform sessions use DWM's own magnified
-    // pointer and DWM's own centring instead of the sprite, at either sampling mode. 0 = the sprite
-    // (A/B and kill switch). Read at zoom-in (hot).
-    int txNativeCursor = 1;
-    // DWM centring for native-cursor sessions (issue #369): 1 = DWM re-centres on every cursor
-    // update where the view is a pure function of the pointer; 0 = Wind always writes the view (hot).
-    int txDwmCentre = 1;
     // MPO nearest guard (issue #369, src/mpo_guard.h): 1 = nearest sampling is allowed on an MPO-on
     // boot, with an invisible colour effect while zoomed so DWM composes the desktop itself (no
     // plane, no 16-bit overflow). 0 (default until verified on an MPO boot) = nearest on MPO boots
@@ -476,11 +457,6 @@ struct Config {
                           //         anchor, confinement box, hidden-cursor zoom-in seeding) for
                           //         UNLISTED games - can transiently lock over e.g. fullscreen
                           //         video with an auto-hidden cursor (~100ms, self-heals).
-    int txIdleReleaseMs = 1200;  // how long the DWM magnification context lingers after a zoom
-                          //     ends before it is released. Longer = repeat zooms skip the
-                          //     rebuild (fewer big entry spikes) but DWM stays magnification-
-                          //     aware, which taxes cursor changes; shorter = the reverse.
-                          //     Hot-reloadable.
     int probeClicks = 0;  // dead-zone probe (hot, diagnostic): while a TRANSFORM session is
                           //   zoomed, every left-click logs a full coordinate-chain snapshot to
                           //   wind-core.log tagged OK, or DEAD when Ctrl is held - the field
@@ -517,16 +493,18 @@ struct Config {
     // Adaptive sharpening of the magnified image (counters upscale blur; crisps text/detail).
     // 0 = off (cheapest, single tap). 0.1-1.0 = strength. Folded into the magnify pass (no extra pass).
     double sharpness = 0.0;
-    // z-order band for the overlay (a band >0 needs the UIAccess build, run from Program Files):
-    // 0 = ordinary topmost window; 16 = ZBID_SYSTEM_TOOLS (above the shell's immersive bands).
+    // z-order band for the render overlay and the Inspect crosshair (a band >0 needs the UIAccess
+    // build, run from Program Files): 0 = ordinary topmost window; 16 = ZBID_SYSTEM_TOOLS (above
+    // the shell's immersive bands).
     //
     // SHIPPED 0 (issue #162). This is a genuine trade-off, not an obvious win, so do not "restore"
     // 16 without re-testing both halves:
     //   band 16  - covers the Start menu / taskbar thumbnails / tray flyouts (they otherwise draw
     //              an unmagnified copy over the view), BUT the Snipping Tool capture overlay
     //              composites over US. Zooming under Win+Shift+S then shows the unmagnified screen
-    //              with NO cursor at all, in every model - we hide the OS cursor plane and draw a
-    //              replacement, so covering the replacement leaves nothing. Measured on the rig.
+    //              with NO cursor at all in the render engine, which hides the OS cursor plane and
+    //              draws a replacement, so covering the replacement leaves nothing. Measured on the
+    //              rig. (The transform engine's native pointer is DWM's own and stays visible.)
     //   band 0   - the snip overlay works (view magnified, cursor visible), at the cost of the
     //              shell surfaces above.
     // Band 17 (ZBID_LOCK) would be the "cover both" answer and is REJECTED by CreateWindowInBand

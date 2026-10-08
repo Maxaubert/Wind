@@ -1,9 +1,9 @@
 #pragma once
 // Native cursor (issue #369) - PURE, no <windows.h>, so it is unit-testable.
 //
-// Transform sessions use the pointer Windows Magnifier uses instead of Wind's sprite, at either
-// sampling mode (DWM samples the pointer like the content: smooth = sharp but shimmers during zoom
-// ramps, nearest = pixelated and steady):
+// Transform sessions use the pointer Windows Magnifier uses, at either sampling mode (DWM samples
+// the pointer like the content: smooth = sharp but shimmers during zoom ramps, nearest = pixelated
+// and steady). It is the only cursor the transform engine has; the render engine draws its own:
 //   - ONE public MagSetFullscreenTransform write makes DWM draw the REAL pointer into the
 //     magnified frame: magnified, above every window band (thumbnails, emoji panel, menus, UAC,
 //     the Snipping Tool), sampled like the content (smooth = high res). Later private writes keep
@@ -14,27 +14,23 @@
 //     DWM alone), where a tick-paced write drifts 18-24 px at medium speed and up to 96 px fast.
 //     DWM re-learns a small hotspot offset only when the cursor HANDLE changes; a learn taken
 //     mid-jump can sit a few px off until the next shape change (native has the same).
-// txNativeCursor=0 keeps the old sprite path as a fallback. Games pay nothing extra: a zoomed
-// full-screen window is composed anyway, and at 1x the lens style is off (hardware pointer).
+// Games pay nothing extra: a zoomed full-screen window is composed anyway, and at 1x the lens style
+// is off (hardware pointer). The only window Wind still draws in a transform session is the Inspect
+// crosshair.
 namespace wind {
-
-// Whether a transform session uses the native cursor. Decided once at zoom-in.
-inline bool UseNativeCursor(int txNativeCursor) {
-    return txNativeCursor != 0;
-}
 
 // A VISIBLE POINTER IS A FREE POINTER (field video 2026-10-07, DOOM: The Dark Ages menus). lockApps
 // and the lock tells put a session on the locked path: the view pans from raw mickeys and the weld
-// re-parks the real pointer at the view's centre once per tick. With the sprite that was invisible -
-// the sprite is drawn at the re-parked point. The native cursor is the REAL pointer, drawn by DWM
-// wherever the hand has moved it between ticks, so the locked path made it wander around the centre
-// and snap back every tick (measured at 4.7x: 22 px spread slow, 74 px medium, jumps to 118 px;
-// free with DWM centring: 0 px). A game shows the pointer only where it is a pointer (menus,
-// inventories, maps), and hides it for mouselook - the case the locked path exists for. So in a
-// native-cursor session the lock applies only while the pointer is hidden; a shown pointer gets
-// DWM centring, exactly what Windows Magnifier does there. The sprite path keeps the old rule.
-inline bool LockApplies(bool locked, bool nativeCursor, bool pointerShowing) {
-    return locked && !(nativeCursor && pointerShowing);
+// re-parks the real pointer at the view's centre once per tick. The native cursor is the REAL
+// pointer, drawn by DWM wherever the hand has moved it between ticks, so the locked path made it
+// wander around the centre and snap back every tick (measured at 4.7x: 22 px spread slow, 74 px
+// medium, jumps to 118 px; free with DWM centring: 0 px). A game shows the pointer only where it is
+// a pointer (menus, inventories, maps), and hides it for mouselook - the case the locked path
+// exists for. So in a transform session the lock applies only while the pointer is hidden; a shown
+// pointer gets DWM centring, exactly what Windows Magnifier does there. The render engine draws its
+// own pointer and keeps the plain rule.
+inline bool LockApplies(bool locked, bool transformEngine, bool pointerShowing) {
+    return locked && !(transformEngine && pointerShowing);
 }
 
 // When DWM may own the pan (DWM centring on). Only where the view is a pure function of the
@@ -78,7 +74,7 @@ inline bool WantDwmCentring(const DwmCentreIn& in) {
 // copy of the view; win32k's copy (what MagGetFullscreenTransform returns) changes only on a client
 // write, and pointer-framework hit-testing (the taskbar, XAML, Chromium) maps points with it. When
 // Wind sent only level changes, that copy froze at the last write and taskbar hover landed on the
-// neighbouring icon, worse with zoom (gone with txDwmCentre=0). Windows Magnifier writes the view on
+// neighbouring icon, worse with zoom (gone when Wind wrote the view itself). Windows Magnifier writes the view on
 // every mouse event even in centred mode. So every changed tick is written, and each write is
 // followed by a cursor event so DWM re-centres by its own rule in the same frame (NudgeAfterWrite).
 // (Measured 2026-10-07: DWM's centring matches Wind's formula to under 1 px at every edge.)
@@ -88,17 +84,17 @@ inline bool WantDwmCentring(const DwmCentreIn& in) {
 // in with a still mouse left no pointer in any frame of the ramp (2 of 225 frames), and with the
 // publish off it was in every frame (225 of 225). Pan-only publishes do not do it. Windows
 // Magnifier never publishes during a zoom animation, only once it ends, and from inside its mouse
-// hook, before the event that repaints the pointer. So in a native-cursor session:
+// hook, before the event that repaints the pointer. So in a transform session:
 //   - hold the publish while the level ramps (a foreign stomp still forces it);
 //   - after a publish whose level differs from the last published one, nudge the pointer a pixel
 //     and back so DWM draws it again.
-inline bool HoldInputPublish(bool nativeSession, bool ramping, bool stomped) {
-    return nativeSession && ramping && !stomped;
+inline bool HoldInputPublish(bool ramping, bool stomped) {
+    return ramping && !stomped;
 }
 
-inline bool NudgeAfterPublish(bool nativeSession, double publishedLevel, double previousLevel) {
+inline bool NudgeAfterPublish(double publishedLevel, double previousLevel) {
     const double d = publishedLevel - previousLevel;
-    return nativeSession && (d > 1e-4 || d < -1e-4);
+    return d > 1e-4 || d < -1e-4;
 }
 
 // ONE CENTRE (user field test 2026-10-07). DWM centres on its own cursor point plus a learned

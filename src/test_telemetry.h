@@ -39,49 +39,20 @@ struct TelemetrySample {
     // |cursor now - cursor the live transform was written for| * (level - 1). Constant lag is
     // invisible; the per-frame CHANGE of this value is the wobble the eye sees.
     double lagPx;
-    // Sprite placement (issue #229 two-cursor metric): the DESKTOP position Wind last gave the
-    // cursor sprite, and whether it is on screen. DWM magnifies the sprite with the content, so
-    // its screen position depends on the transform live at composite time - the analyzer
-    // reconstructs it and compares against the real pointer.
-    int    spriteX, spriteY, spriteOn;
-    // Cumulative MagShowSystemCursor failures (issue #229): a hide that did not take leaves the
-    // real pointer drawn beside our sprite - the two-cursor artifact.
-    unsigned long long hideFails;
-    // SPRITE WINDOW LAG (issue #229), screen px, sampled at the composite boundary: the distance
-    // between where Wind asked the sprite window to be and where the window manager actually has
-    // it, times the zoom. Every other metric reads values from a single tick and is therefore
-    // coherent BY CONSTRUCTION - it cannot see that a SetWindowPos has not landed yet. This can:
-    // a transform write reaches DWM directly while a window move goes through the window
-    // manager, so the two do not arrive in the same composite and the sprite is drawn at a stale
-    // position while the view has already moved. That is the "second cursor lagging behind",
-    // and it grows with cursor speed exactly as the field reports.
-    double spriteLagPx;
-    // CLAMPED-VIEW CURSOR LAG (issue #229), screen px at the composite boundary. While the view
-    // is clamped against a screen edge it cannot pan, so the cursor SWEEPS the screen at
-    // level x hand speed instead of sitting at the centre - and a sprite placed from a sample
-    // one frame old is drawn |cursor drift| * level from where the hand actually is. Unclamped
-    // this is invisible (content and sprite move together); clamped it is the "cursor lagging
-    // wildly behind, worse the faster I move" the field reports. Every other metric EXCLUDES
-    // clamped frames because the view legitimately leaves the centre there - which is exactly
-    // why they all read clean at the spots that wobble.
-    double clampLagPx;
 };
 
 inline const char* TelemetryHeader() {
     return "t_ms,dt_ms,active,engine,level,map_x,map_y,mon_x,mon_y,cur_x,cur_y,welded,"
-           "w_level,w_tx,w_ty,w_hook,lag_px,spr_x,spr_y,spr_on,hide_fail,spr_lag,clamp_lag\n";
+           "w_level,w_tx,w_ty,w_hook,lag_px\n";
 }
 
 // Formats one CSV line into buf; returns the length written (0 if it did not fit).
 inline int FormatTelemetryLine(char* buf, int cap, const TelemetrySample& s) {
     const int n = std::snprintf(buf, (size_t)cap,
-                                "%.3f,%.3f,%d,%c,%.4f,%.2f,%.2f,%d,%d,%ld,%ld,%d,%.6f,%d,%d,%llu,%.2f,"
-                                "%d,%d,%d,%llu,%.2f,%.2f\n",
+                                "%.3f,%.3f,%d,%c,%.4f,%.2f,%.2f,%d,%d,%ld,%ld,%d,%.6f,%d,%d,%llu,%.2f\n",
                                 s.tMs, s.dtMs, s.active, s.engine, s.level,
                                 s.mapX, s.mapY, s.monX, s.monY, s.curX, s.curY, s.welded,
-                                s.wLevel, s.wTxX, s.wTxY, s.wHook, s.lagPx,
-                                s.spriteX, s.spriteY, s.spriteOn, s.hideFails, s.spriteLagPx,
-                                s.clampLagPx);
+                                s.wLevel, s.wTxX, s.wTxY, s.wHook, s.lagPx);
     return (n > 0 && n < cap) ? n : 0;
 }
 

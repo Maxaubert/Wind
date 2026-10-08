@@ -14,7 +14,6 @@ const char* TickSpanName(int span) {
         case kSpanSprite:   return "sprite";
         case kSpanActivate: return "activate";
         case kSpanCursor:   return "cursor";
-        case kSpanShape:    return "shape";
     }
     return "?";
 }
