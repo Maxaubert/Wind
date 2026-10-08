@@ -138,6 +138,10 @@ slightly during zoom ramps, nearest keeps it pixelated and steady. Pure rules:
   some clicks fail), so a pan write during a held click would leave Wind's centre on screen until the
   next cursor event: drag-selects and held clicks shook. Pan-only writes are held for the click
   window instead (`HoldWriteForClick`); level changes and forced writes still go out.
+- **A held press is a drag.** Those level writes had no nudge either, so zooming during a drag-select
+  flipped the view about 90 px every frame (field video 2026-10-08). A button held for the whole
+  250 ms click window counts as a drag and is nudged as usual (`NudgeBlockedByClick`); short clicks
+  and the window after a release still are not.
 - **DWM's learned offset.** DWM learns the gap between `GetCursorPos` and its own cursor point and
   relearns it only when the cursor HANDLE changes, so a learn taken mid-jump can sit a few px off
   until the next shape change. Windows Magnifier has the same behaviour.

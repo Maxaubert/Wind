@@ -29,24 +29,34 @@ static bool ShowSystemCursor(BOOL show) {
 // stamp is atomic and only ever moves forward.
 static std::atomic<unsigned long long> g_lastButtonMs{0};
 static std::atomic<bool> g_nudgeOwed{false};
+static std::atomic<unsigned long long> g_heldSinceMs{0};   // first tick a button was seen down; 0 = up
 static bool ClickInProgress() {
     const unsigned long long now = GetTickCount64();
     if ((GetAsyncKeyState(VK_LBUTTON) | GetAsyncKeyState(VK_RBUTTON) | GetAsyncKeyState(VK_MBUTTON)) & 0x8000) {
         unsigned long long prev = g_lastButtonMs.load(std::memory_order_relaxed);
         while (prev < now && !g_lastButtonMs.compare_exchange_weak(prev, now, std::memory_order_relaxed)) {}
+        unsigned long long none = 0;
+        g_heldSinceMs.compare_exchange_strong(none, now, std::memory_order_relaxed);
+    } else {
+        g_heldSinceMs.store(0, std::memory_order_relaxed);
     }
     return WithinClickWindow(now, g_lastButtonMs.load(std::memory_order_relaxed));
 }
+static bool NudgeBlocked() {
+    const bool click = ClickInProgress();
+    return NudgeBlockedByClick(click, GetTickCount64(), g_heldSinceMs.load(std::memory_order_relaxed));
+}
 // A nudge skipped for a click is recorded as owed; DeliverOwedNudge sends it once the click window
 // has ended (zoom can be bound to a mouse button, so the transition often lands inside the window
-// and a still pointer would otherwise stay invisible until the hand moved).
+// and a still pointer would otherwise stay invisible until the hand moved). A press held past the
+// window is a drag and is nudged as usual (NudgeBlockedByClick).
 static void NudgePointer(POINT& np) {
-    if (ClickInProgress()) { g_nudgeOwed.store(true, std::memory_order_relaxed); return; }
+    if (NudgeBlocked()) { g_nudgeOwed.store(true, std::memory_order_relaxed); return; }
     g_nudgeOwed.store(false, std::memory_order_relaxed);
     if (GetCursorPos(&np)) { SetCursorPos(np.x + 1, np.y); SetCursorPos(np.x, np.y); }
 }
 static void DeliverOwedNudge() {
-    if (!NudgeDue(g_nudgeOwed.load(std::memory_order_relaxed), ClickInProgress())) return;
+    if (!NudgeDue(g_nudgeOwed.load(std::memory_order_relaxed), NudgeBlocked())) return;
     POINT np;
     NudgePointer(np);
 }

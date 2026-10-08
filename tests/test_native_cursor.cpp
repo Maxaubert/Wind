@@ -101,3 +101,13 @@ TEST_CASE("a nudge a click skipped is owed and delivered once the click window e
     CHECK(NudgeDue(false, false) == false);     // nothing owed
     CHECK(NudgeDue(false, true) == false);
 }
+
+TEST_CASE("a press held past the click window is a drag and may be nudged") {
+    CHECK(NudgeBlockedByClick(false, 1000, 0) == false);      // no click: never blocked
+    CHECK(NudgeBlockedByClick(true, 1000, 900) == true);      // held 100 ms: still a click
+    CHECK(NudgeBlockedByClick(true, 1000, 751) == true);
+    CHECK(NudgeBlockedByClick(true, 1000, 750) == false);     // held the whole window: a drag
+    CHECK(NudgeBlockedByClick(true, 5000, 1000) == false);    // a long drag-select
+    CHECK(NudgeBlockedByClick(true, 1000, 0) == true);        // released, inside the window after it
+    CHECK(NudgeBlockedByClick(true, 1000, 1003) == true);     // stamp newer than the clock read
+}
