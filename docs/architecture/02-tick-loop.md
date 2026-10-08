@@ -47,7 +47,9 @@ flowchart TD
    game (`QuiesceHoldActive`), the controller is frozen too, or the level would land as one jump
    when writes resume. Quick zoom then snaps the level via the pure `ApplyQuickZoom`.
 5. **Inspect edges.** The toggle edge snapshots whether the cursor was showing and whether Wind was
-   hiding it; both feed `ShouldGameInspect` (`src/inspect_focus.h`). Inspect keeps the overlay
+   hiding it (`t.cursorHiddenByUs`, which a transform session reads back from
+   `TransformModel::pointerHidden()` after each present, since the model also hides and restores the
+   pointer on its own); both feed `ShouldGameInspect` (`src/inspect_focus.h`). Inspect keeps the overlay
    active at 1x (`active = zoomed || inspect`). Details in [07](07-cursor.md).
 6. **Pan delta.** One of three regimes, see [below](#pan-delta-three-regimes).
 7. **Foreground facts and the pan wall.** `GetForegroundWindow`, `ForegroundCoversMonitor` and the

@@ -41,6 +41,10 @@ public:
     // suppressed). Only the locked and Inspect regimes weld now; RunTick's #169 measured-baseline
     // logic reads it exactly like RenderEngine::parkedLastFrame().
     bool weldedLastFrame() const { return weldedLastFrame_; }
+    // Whether WE currently hide the real pointer (Inspect, or the hide-cursor hotkey in a native
+    // session, which present() applies on its own). The tick loop mirrors it into
+    // cursorHiddenByUs, the game-inspect tell, instead of tracking the calls itself.
+    bool pointerHidden() const { return cursorHidden_; }
     // Whether MagSetInputTransform is usable (probed once at initialize; needs UIAccess). The
     // hybrid DESKTOP pick requires this: without the source-rect input transform, transform
     // desktop sessions have the pointer-framework hover dead zones (POINTER-HITTEST-FINDINGS.md).
@@ -116,7 +120,7 @@ private:
     // dwmCentreOn_: DWM owns the pan (DWMUpdated TRUE).
     bool nativePrimed_ = false;
     bool dwmCentreOn_ = false;
-    bool dwmCentreBroken_ = false;                   // the export is missing or refused: never retry
+    bool dwmCentreBroken_ = false;                   // the export is missing or refused: never retry, log once
     bool forceWrite_ = false;                        // a centring switch owes DWM one real write
     bool lensLogged_ = false;                        // one-shot log of the cursor-lens warm-up
     bool lensFailed_ = false;                        // the idle lens build failed: do not retry per tick

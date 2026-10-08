@@ -136,6 +136,9 @@ gives it back. Rules (`src/native_cursor.h`, tested):
   that follows a TRUE call, so every switch forces one write (`forceWrite_`, survives paused ticks).
 - `MagGetFullscreenTransform` does not see DWM's own moves: win32k's copy keeps Wind's last write.
   Judge centring on screen, not by read-back.
+- When the export is missing or refuses the call, `dwmCentreBroken_` latches (one Warn) and
+  `WantDwmCentreSwitch` stops asking, so a build without it keeps the pan without a forced write
+  and a log line on every tick.
 
 ## Clamping
 

@@ -123,7 +123,12 @@ slightly during zoom ramps, nearest keeps it pixelated and steady. Pure rules:
   (Windows Magnifier does the same) and nudge after a scale-changing publish (`HoldInputPublish`,
   `NudgeAfterPublish`). These pixel-and-back nudges are the one place Wind injects cursor events
   next to a transform write: sequential after it, never racing it (a write racing a cursor-position
-  update is the proven TDR class), and skipped while a click is in progress.
+  update is the proven TDR class), and skipped while a click is in progress. A skipped nudge is
+  owed, not dropped: the first tick after the click window ends delivers it (`NudgeDue`), including
+  at 1x (`idleTick`), so a zoom bound to a mouse button never leaves a still pointer invisible. The
+  session-end reset of `ixPubLevel_` keeps a quick zoom back to the same level from skipping the
+  publish nudge, and the hide-cursor hotkey's show-again transition nudges after the blanker
+  restore like the zoom-out does.
 - **One centre during zoom.** DWM centres on its cursor point plus a learned hotspot offset that can
   sit 1-2 desktop px off Wind's exact centre; a level write puts the view on Wind's centre, the next
   cursor event back on DWM's (a 5-10 px shift at ~5x that snapped back when the zoom stopped). While
@@ -190,6 +195,9 @@ mickeys. `LockDetector` (`src/lock_detector.*`, pure) decides, with hysteresis.
 - Tick counts derive from the refresh rate (`setTickRate`).
 - **Forced locks go through the detector** (`seedLock()`), so the lock persists across ticks; a
   tick-local flag once left the view pinned to the warped pointer.
+- **`t.lockEff` has no memory across sessions.** It is recomputed only in the free zoomed branch, so
+  outside it (1x, Inspect) the tick clears it (and `lockFreed`); `panArmed` reads it before that
+  recompute and would otherwise act on the previous session's value for a tick.
 - **A shown pointer is a free pointer in a transform session** (`LockApplies`,
   `src/native_cursor.h`; the tick's result is `t.lockEff`, which every gate reads). The locked path
   pans from raw mickeys and re-parks the real pointer once per tick; the native cursor IS the real
@@ -273,6 +281,10 @@ default off). `FocusTracker` (`src/focus_track.*`) runs on its own thread with W
   the first second of typing after a switch was not followed. Same foreground window, same focus
   window and same element bounds keep the caret followed (`focus repeat` in trackLog). Zoom-in
   clears the key, so it still only baselines.
+- **Each zoom session starts with the mouse in charge.** `StepViewOwner` runs only while zoomed, so
+  the enter tick calls `ResetViewOwnerForSession` (owner, latched target, `wasTracking`), clears
+  `viewDetached`, the spring velocity and the pan keys; otherwise the next zoom-in opened on the
+  previous session's caret.
 - Caret rects are corrected in `src/caret_rect.h` (tall Chromium rects trimmed to the line, a
   whole-line rect recognised).
 - **VS Code (EditContext).** Its editor element (`native-edit-context`, also Monaco elsewhere)
@@ -293,7 +305,11 @@ default off). `FocusTracker` (`src/focus_track.*`) runs on its own thread with W
   read runs on the Java app's UI thread); read only after bridge callbacks. Load only
   Authenticode-signed bridge DLLs. Read the caret with `getCaretLocation`, scaled by the monitor
   DPI (Java answers in its user space, device px / scale). The older character bounds
-  (`getAccessibleTextRect`) gave x=2 for every Swing caret and stay only as a fallback.
+  (`getAccessibleTextRect`) gave x=2 for every Swing caret and stay only as a fallback, scaled the
+  same way (`JavaSpanRectPx`). A bridge probe that fails backs off per process (2 s doubling to
+  60 s), and the retry after a failed read backs off 250 ms doubling to 4 s; a bridge event or a
+  window switch resets it. The MSAA caret (`MsaaCaret`) skips windows Windows reports as hung and
+  sits out 2 s after a call over 250 ms.
 - **Mouse edge mode** (`mouseAlign=1`, free-pointer sessions only): the pointer is unwelded and
   `EdgePanCenter` (`src/edge_pan.h`) moves the view only when the cursor's visible body leaves the
   margin band (`mouseMarginPct`). Edge-pinned motion is hidden from the lock detector
