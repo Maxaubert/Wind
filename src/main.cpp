@@ -295,6 +295,7 @@ struct TickState {
     LockDetector   detector;    // free vs game-locked cursor
     bool           prevDetLocked = false;   // edge-log the detector state (issue #221)
     std::string    lastCoreIni;             // stripped ini fingerprint (skip UI-only reloads)
+    bool           configRetry = false;     // last reload found the ini unreadable: check again
     POINT          lastSetVirtual{};  // MEASURED post-present pointer position (virtual px), the
                                       // baseline for the next tick's hand delta (issue #169: never
                                       // assume the weld landed - measure)
@@ -1102,6 +1103,7 @@ static void RunTick(TickState& t) {
         t.sinceCheck += rawDt;
         if (t.sinceCheck >= 0.25) {
             t.sinceCheck = 0.0;
+            if (t.configRetry) checkConfig = true;   // the change that failed to read is not re-notified
             if (WaitForSingleObject(t.configWatch, 0) == WAIT_OBJECT_0) {
                 checkConfig = true;
                 // Re-arm for the next change. If that fails (e.g. the watched dir vanished), close
@@ -1120,14 +1122,33 @@ static void RunTick(TickState& t) {
     if (checkConfig) {
         unsigned long long m = ConfigMTime(t.iniPath);
         if (m != t.lastMtime) {
-            t.lastMtime = m;
             // Skip the reload when only UI-owned keys changed (uiTheme/uiPalette/showAdvanced/onboarded):
             // the settings app writes those, the core never reads them, and the reload below
             // resets the ZoomController - a theme toggle mid-zoom collapsed the zoom to 1x.
-            std::string stripped = wind::StripUiOnlyKeys(wind::ReadTextFile(t.iniPath));
-            if (t.lastCoreIni.empty() || stripped != t.lastCoreIni) {
+            // An UNREADABLE ini (another process mid-replace, see ReadTextFileOk) is not a change:
+            // keep the running settings and look again on the next check (lastMtime not taken).
+            // A MISSING ini is recreated with the defaults, as at startup (TryLoadConfig).
+            std::string raw;
+            // Short budget: this is the tick thread, and an unreadable ini is simply re-read next poll.
+            bool readOk = wind::ReadTextFileOk(t.iniPath, raw, 20) && raw.find('=') != std::string::npos;
+            if (!readOk && GetFileAttributesW(t.iniPath.c_str()) == INVALID_FILE_ATTRIBUTES) {
+                Config fresh;
+                readOk = wind::TryLoadConfig(t.iniPath, fresh) && wind::ReadTextFileOk(t.iniPath, raw, 20);
+            }
+            std::string stripped = readOk ? wind::StripUiOnlyKeys(raw) : std::string();
+            const bool loaded = readOk && (t.lastCoreIni.empty() || stripped != t.lastCoreIni);
+            Config nc;
+            if (loaded) nc = ParseConfig(raw);
+            if (!readOk) {
+                if (!t.configRetry)
+                    wind::Log(wind::LogLevel::Warn, "config", "ini unreadable on reload, keeping the running settings");
+                t.configRetry = true;
+            } else {
+                t.lastMtime = m;
+                t.configRetry = false;
+            }
+            if (loaded) {
             t.lastCoreIni = stripped;
-            Config nc = LoadConfig(t.iniPath);
             // Issue #242: the high-res/MPO option is atomic at restart - while an MPO restart is
             // pending (registry != boot) the BOOT state's look holds in both directions, and
             // crisp never runs on an MPO-enabled boot (the 16-bit TDR combo; covers profile

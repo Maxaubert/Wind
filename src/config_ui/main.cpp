@@ -212,7 +212,8 @@ static std::string DoSwitchProfile(const std::string& name) {
     std::string profText;
     if (!wind::ReadTextFileOk(pp, profText)) return "Could not read the profile file";
     { std::string terr = wind::ProfileTextError(profText); if (!terr.empty()) return terr; }
-    const std::string oldLive = ReadFileUtf8(IniPath());
+    std::string oldLive;
+    if (!wind::ReadLiveIni(IniPath(), oldLive)) return "Could not read the config file";
     // Capture hand edits (openIni) into the outgoing profile before the live ini is replaced.
     wind::MirrorLiveToActiveProfile(IniPath(), oldLive);
     const std::string newLive = wind::MakeLiveText(profText, oldLive, name);
@@ -346,8 +347,9 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
             // failed write (AV lock, a sharing violation on the replace) used to vanish - the page
             // showed the new value while the ini kept the old one. Tell the page, which says so.
             // setConfig writes the live ini (the session) only; the profile file changes on Save.
-            if (!WriteFileAtomic(IniPath(),
-                                 wind::UpdateIniText(ReadFileUtf8(IniPath()), key, value))) {
+            std::string live;
+            if (!wind::ReadLiveIni(IniPath(), live) ||
+                !WriteFileAtomic(IniPath(), wind::UpdateIniText(live, key, value))) {
                 wind::Log(wind::LogLevel::Warn, "config", "setConfig: writing %s=%s failed",
                           key.c_str(), value.c_str());
                 wv->PostWebMessageAsJson(
@@ -523,8 +525,9 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
         if (err.empty() && wind::SameProfileName(vals["profile"], from)) {
             // The pointer update must land or the live ini names a file that no longer exists;
             // verify the write and roll the rename back if it failed.
-            if (!wind::WriteTextFileAtomic(IniPath(),
-                    wind::UpdateIniText(ReadFileUtf8(IniPath()), "profile", to))) {
+            std::string live;
+            if (!wind::ReadLiveIni(IniPath(), live) ||
+                !wind::WriteTextFileAtomic(IniPath(), wind::UpdateIniText(live, "profile", to))) {
                 MoveFileExW(ProfilePath(to).c_str(), ProfilePath(from).c_str(), 0);
                 err = "Could not update the config file; rename undone";
             }
