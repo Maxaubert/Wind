@@ -221,17 +221,11 @@ Config ParseConfig(const std::string& text) {
             else if (key == "ixDecimate")         c.ixDecimate = std::stoi(val);
             else if (key == "mpoBuster")          c.mpoBuster = std::stoi(val);
             else if (key == "txSamplingMode")     c.txSamplingMode = std::stoi(val);
-            else if (key == "txWobbleCage")       c.txWobbleCage = std::stoi(val);
-            else if (key == "txWobbleCageSize")   c.txWobbleCageSize = std::stoi(val);
             else if (key == "txWarmMode")         c.txWarmMode = std::stoi(val);
             else if (key == "txTrace")            c.txTrace = std::stoi(val);
             else if (key == "txRestLevel")        c.txRestLevel = std::stod(val);
-            else if (key == "txWarmMaxLevel")     c.txWarmMaxLevel = std::stoi(val);
             else if (key == "launchQuiesce")      c.launchQuiesce = std::stoi(val);
-            else if (key == "txWarmWindowMs")     c.txWarmWindowMs = std::stoi(val);
             else if (key == "txWarmHz")           c.txWarmHz = std::stoi(val);
-            else if (key == "txWarmLevelEps")     c.txWarmLevelEps = std::stod(val);
-            else if (key == "txWriteHz")          c.txWriteHz = std::stoi(val);
             else if (key == "mpoNearestGuard")    c.mpoNearestGuard = std::stoi(val);
             else if (key == "txSmoothLadder")     c.txSmoothLadder = std::stoi(val);
             else if (key == "mpoGuardTest")       c.mpoGuardTest = std::stoi(val);
@@ -239,14 +233,10 @@ Config ParseConfig(const std::string& text) {
             else if (key == "mpoGuardLiftWall")   c.mpoGuardLiftWall = std::stoi(val);
             else if (key == "lockedBallistics")   c.lockedBallistics = std::stoi(val);
             else if (key == "edgeClip")           c.edgeClip = std::stoi(val);
-            else if (key == "txPace")             c.txPace = std::stoi(val);
-            else if (key == "txMinOffsetPx")      c.txMinOffsetPx = std::stoi(val);
             else if (key == "txMaxStepPct")       c.txMaxStepPct = std::stoi(val);
             else if (key == "warpLock")           c.warpLock = std::stoi(val);
             else if (key == "lockForce")          c.lockForce = std::stoi(val);
-            else if (key == "txLevelStep")        c.txLevelStep = std::stoi(val);
             else if (key == "txEdgeMargin")       c.txEdgeMargin = std::stod(val);
-            else if (key == "txGrid")             c.txGrid = std::stoi(val);
             else if (key == "gameFpsCap")         c.gameFpsCap = std::stoi(val);
             else if (key == "onboarded")          c.onboarded = std::stoi(val);
             else if (key == "quickZoomDefault")   c.quickZoomDefault = std::stod(val);
@@ -295,29 +285,15 @@ Config ParseConfig(const std::string& text) {
     if (c.ixDecimate > 16) c.ixDecimate = 16;
     if (c.txRestLevel < 1.0)   c.txRestLevel = 1.0;
     if (c.txRestLevel > 1.01)  c.txRestLevel = 1.01;   // visually identity only
-    if (c.txPace < 0)          c.txPace = 0;
-    if (c.txPace > 2)          c.txPace = 2;
     if (c.zoomEaseOutMs < 0)   c.zoomEaseOutMs = 0;
     if (c.zoomEaseOutMs > 300) c.zoomEaseOutMs = 300;
     if (c.txWarmMode < 0)      c.txWarmMode = 0;
-    if (c.txWarmMode > 4)      c.txWarmMode = 4;
-    if (c.txWarmMaxLevel < 0)  c.txWarmMaxLevel = 0;
+    if (c.txWarmMode > 1)      c.txWarmMode = 1;     // the retired modes 2-4 read as the shipped pulse
     c.launchQuiesce = c.launchQuiesce ? 1 : 0;
-    if (c.txWarmWindowMs < 0)  c.txWarmWindowMs = 0;
     if (c.txWarmHz < 0)        c.txWarmHz = 0;       // 0 = every tick
     if (c.txWarmHz > 1000)     c.txWarmHz = 1000;
-    if (c.txWarmLevelEps < 0.0)     c.txWarmLevelEps = 0.0;
-    if (c.txWarmLevelEps > 0.01)    c.txWarmLevelEps = 0.01;
-    if (c.txWriteHz < 0)    c.txWriteHz = 0;        // 0 = uncapped (per-tick)
-    if (c.txWriteHz > 1000) c.txWriteHz = 1000;
-    if (c.txMinOffsetPx < 0)  c.txMinOffsetPx = 0;  // 0 = write every change
-    if (c.txMinOffsetPx > 32) c.txMinOffsetPx = 32;
-    if (c.txLevelStep < 0)   c.txLevelStep = 0;    // per mille; 0 = per-tick level writes
-    if (c.txLevelStep > 200) c.txLevelStep = 200;
     if (c.txEdgeMargin < 0.0) c.txEdgeMargin = 0.0;
     if (c.txEdgeMargin > 8.0) c.txEdgeMargin = 8.0;   // beyond this the lost border is the bug
-    if (c.txGrid < 0)   c.txGrid = 0;              // per mille geometric grid; 0 = continuous
-    if (c.txGrid > 250) c.txGrid = 250;
     c.outlineIdleSeconds = clampd(c.outlineIdleSeconds, 0.5, 60.0);
     // "transform" is a first-class model again (revived for issue #148: the compositor-internal
     // zoom that stays smooth over heavy games); anything unknown falls back to hybrid, the

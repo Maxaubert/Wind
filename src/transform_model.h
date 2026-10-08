@@ -4,7 +4,6 @@
 #include "comp_pin.h"
 #include "cursor_blanker.h"
 #include "cursor_sprite.h"
-#include "wobble_cage.h"
 #include <memory>
 #include <vector>
 #include <thread>
@@ -62,7 +61,6 @@ public:
     bool mpoGhostSettled() const { return mpoGhost_.settled(GetTickCount64()); }
 private:
     bool fastPan_, smoothPan_;
-    bool warmLevelJitter_ = false;   // mode 4: perturb the level, not the position (this tick only)
     // Per-tick trace (cfg.txTrace). Fixed ring, no allocation on the tick path.
     struct TxTick { double ms; double level; int txX, offX;
                     unsigned char wrote, changed, ramping, warm; };
@@ -92,9 +90,6 @@ private:
     unsigned long long ghostSessionStartMs_ = 0;     // 0 = not started; drives the opening burst
     bool mpoExposed_ = false;                        // apply the 16-bit write clamp
     unsigned long long lastGhostAssertMs_ = 0;       // 500ms assert cadence
-    WobbleCage cage_;                                // opt-in visible wobble detector (#229)
-    bool cageOn_ = false;
-    int  cfgWobbleCage_ = 0;
     int  appliedSampling_ = -2;                      // sampling mode DWM currently holds (-2 = unknown)
     int  sampleTryMode_ = -2;                        // sampling mode being attempted (#274)
     int  sampleTries_ = 0;                           // attempts so far for it (bounded at 3)
@@ -111,7 +106,6 @@ private:
     double sessionMaxLevel_ = 0.0;      // logged at teardown: scripted-run engagement proof
     unsigned long long lastChangeMs_ = 0;            // when the transform last REALLY changed
     unsigned long long lastWarmMs_ = 0;              // when the last warm pulse CLOSED (issue #246)
-    unsigned long long lastWriteMs_ = 0;             // when a write last actually went out (#204)
     // Magnification context lifetime (issues #148, #369). The context is built at idle and kept for
     // the process (idleTick): a context alone costs nothing, it is the COMPOSED pointer (cursor lens
     // style ON) that taxes every cursor change an app makes (a game toggling its pointer on
@@ -140,11 +134,9 @@ private:
     bool ensureMag();
     void teardownMag();
     void resetTransformState();                      // forget cached values across a teardown
-    // Transform WRITE path (issue #148 hitch hunt): the DWM call can block for tens of ms, which
-    // stalls our whole tick (measured: 34-86ms tick stalls coinciding with 31-59ms game frames).
-    // asyncTx=1 hands the write to a dedicated thread with latest-value coalescing so the tick
-    // never waits. Instrumentation logs per-second max/avg write time either way.
-    void writeTransform(float lvl, int offX, int offY, int tx, int ty, bool fast, bool unusedAsync);
+    // Transform WRITE path: always on the tick thread (the API is thread-affine; an async writer
+    // was tried and every call failed). Logs per-second max/avg write time.
+    void writeTransform(float lvl, int offX, int offY, int tx, int ty, bool fast);
     void noteWrite(double ms, bool ok);
     void noteIxWrite(double ms, bool ok);            // input-transform publish stats (issue #189)
     void noteIxStomp();                              // foreign writer overwrote our publish (#217)

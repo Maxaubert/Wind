@@ -69,13 +69,21 @@ TEST_CASE("transform-model knobs default and parse") {
     CHECK(c.smoothPan == 1);
 }
 
+TEST_CASE("warm modes 2-4 are retired: they read as the shipped pulse, 0 still turns it off") {
+    CHECK(ParseConfig("").txWarmMode == 1);
+    CHECK(ParseConfig("txWarmMode=0\n").txWarmMode == 0);
+    CHECK(ParseConfig("txWarmMode=4\n").txWarmMode == 1);
+    CHECK(ParseConfig("txWarmMode=-3\n").txWarmMode == 0);
+}
+
 TEST_CASE("keys of the removed sprite cursor are ignored, and change nothing else") {
     // The old sprite cursor, its tuning knobs and the experiments around it are gone; an ini that
     // still carries them parses exactly like one without (unknown keys are skipped).
     const Config d = ParseConfig("");
     const Config c = ParseConfig("txNativeCursor=0\ncursorSprite=0\ntxDwmCentre=0\ntxFreeCursor=0\n"
                                  "panelPointer=0\nspriteBand16=1\nspriteCapturable=1\ntxHookWrite=1\n"
-                                 "txIdleReleaseMs=0\n");
+                                 "txIdleReleaseMs=0\ntxWriteHz=60\ntxMinOffsetPx=2\ntxLevelStep=5\ntxGrid=50\ntxPace=2\n"
+                                 "txWarmWindowMs=700\ntxWarmMaxLevel=8\ntxWarmLevelEps=0.001\ntxWobbleCage=1\n");
     CHECK(c.fastPan == d.fastPan);
     CHECK(c.smoothPan == d.smoothPan);
     CHECK(c.cursorBandAuto == d.cursorBandAuto);

@@ -22,8 +22,6 @@ const char* HitchCauseName(HitchCause c) {
     switch (c) {
         case HitchCause::None:            return "none";
         case HitchCause::LateWake:        return "late-wake";
-        case HitchCause::CompositorLate:  return "compositor-late";
-        case HitchCause::PulseThreadLate: return "pulse-thread-late";
         case HitchCause::Blocked:         return "blocked";
         case HitchCause::Busy:            return "busy";
         case HitchCause::SlowTick:        return "slow-tick";
@@ -60,15 +58,6 @@ HitchVerdict ClassifyHitch(const TickRec& prev, const TickRec& cur, double frame
 
     if (cur.wakeLateMs > 0) consider(HitchCause::LateWake, -1, cur.wakeLateMs);
 
-    if ((cur.flags & kTickPacePulse) && cur.pulseGapMs > frame) {
-        const float excess = cur.pulseGapMs - frame;
-        // DWM composed, but the pulse thread signalled late: that delay is the scheduler's.
-        if (cur.pulseDelayMs > 0 && cur.pulseDelayMs >= 0.5f * excess)
-            consider(HitchCause::PulseThreadLate, -1, cur.pulseDelayMs);
-        else
-            consider(HitchCause::CompositorLate, -1, excess);
-    }
-
     if (prev.workMs > 0) {
         const int span = DominantSpan(prev);
         HitchCause c = HitchCause::SlowTick;          // no CPU time yet: cannot tell which
@@ -89,8 +78,7 @@ static const char* EngineName(unsigned f) {
     return (f & kTickTransform) ? "transform" : (f & kTickRender) ? "render" : "-";
 }
 static const char* PaceName(unsigned f) {
-    return (f & kTickPacePulse) ? "pulse" : (f & kTickPaceTimer) ? "timer"
-         : (f & kTickPaceFlush) ? "dwmflush" : "present";
+    return (f & kTickPaceTimer) ? "timer" : (f & kTickPaceFlush) ? "dwmflush" : "present";
 }
 
 std::string FormatHitchLine(const TickRec& prev, const TickRec& cur, const HitchVerdict& v,
@@ -102,17 +90,12 @@ std::string FormatHitchLine(const TickRec& prev, const TickRec& cur, const Hitch
     o += b;
     if (v.cause == HitchCause::Blocked || v.cause == HitchCause::Busy || v.cause == HitchCause::SlowTick)
         o += std::string(" in ") + (v.span >= 0 ? TickSpanName(v.span) : "untracked");
-    std::snprintf(b, sizeof(b), " %.1fms | eng=%s pace=%s lvl=%.2f%s%s%s", v.ms,
+    std::snprintf(b, sizeof(b), " %.1fms | eng=%s pace=%s lvl=%.2f%s%s", v.ms,
                   EngineName(prev.flags), PaceName(cur.flags), prev.level,
-                  (prev.flags & kTickEnter) ? " zoom-in" : "", (prev.flags & kTickExit) ? " zoom-out" : "",
-                  (cur.flags & kTickPulseTimeout) ? " pulse-timeout" : "");
+                  (prev.flags & kTickEnter) ? " zoom-in" : "", (prev.flags & kTickExit) ? " zoom-out" : "");
     o += b;
     std::snprintf(b, sizeof(b), " | wait=%.1f late=%.1f", cur.waitMs, cur.wakeLateMs);
     o += b;
-    if (cur.flags & kTickPacePulse) {
-        std::snprintf(b, sizeof(b), " pulseGap=%.1f pulseDelay=%.1f", cur.pulseGapMs, cur.pulseDelayMs);
-        o += b;
-    }
     std::snprintf(b, sizeof(b), " | prev work=%.1f cpu=%.1f flush=%.1f | spans", prev.workMs, prev.cpuMs, prev.flushMs);
     o += b;
     bool any = false;
@@ -141,7 +124,7 @@ void HitchSummary::addTick(const TickRec& r) {
 void HitchSummary::addHitch(const TickRec& cur, const HitchVerdict& v) {
     ++hitches;
     const int ci = (int)v.cause;
-    if (ci >= 0 && ci < 9) byCause[ci]++;
+    if (ci >= 0 && ci < kHitchCauseCount) byCause[ci]++;
     if (cur.dtMs > worstDt) { worstDt = cur.dtMs; worstCause = v.cause; }
 }
 
@@ -154,7 +137,7 @@ std::string HitchSummary::format() const {
     std::string o = b;
     if (hitches) {
         o += " | by cause";
-        for (int i = 1; i < 9; ++i) {
+        for (int i = 1; i < kHitchCauseCount; ++i) {
             if (!byCause[i]) continue;
             std::snprintf(b, sizeof(b), " %s=%u", HitchCauseName((HitchCause)i), byCause[i]);
             o += b;

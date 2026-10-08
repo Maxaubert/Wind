@@ -50,38 +50,6 @@
 #include "tray_ipc.h"      // the status block shared with WindTray.exe
 #include "pointer_binds.h"  // kWindInjectTag: tag our own injected clicks (#285)
 
-// txPace=2 composite signal (see config.h). One thread blocks in DwmFlush forever and pulses an
-// auto-reset event per real composite; the pacing loop waits on the event WITH A TIMEOUT, so a
-// drooping composition backfills ticks instead of dragging the whole pipeline down with it.
-// Started lazily on first use; harmless at idle (DwmFlush at composition rate, no work between).
-static HANDLE g_compEvt = nullptr;
-// Hitch recorder (#361): when the pulse thread signalled, the signal before that, and DWM's own
-// compose time for that composite. Lets a long frame say whether DWM composed late or the pulse
-// thread itself was not run. Written by the pulse thread only; torn reads only blur one record.
-static std::atomic<long long> g_pulseQpc{0}, g_pulsePrevQpc{0}, g_pulseComposeQpc{0};
-static void EnsureCompositePulse() {
-    if (g_compEvt) return;
-    g_compEvt = CreateEventW(nullptr, FALSE, FALSE, nullptr);   // auto-reset
-    if (!g_compEvt) return;
-    HANDLE th = CreateThread(nullptr, 0, [](LPVOID) -> DWORD {
-        SetThreadDescription(GetCurrentThread(), L"Wind composite pulse");
-        // HIGHEST like the tick it paces (#363): at normal priority a build starved it and the
-        // tick waited on a late pulse (pulse-thread-late hitches). It only blocks in DwmFlush.
-        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
-        for (;;) {
-            if (DwmFlush() != S_OK) Sleep(50);   // DWM restarting: back off, keep trying
-            DWM_TIMING_INFO ti{}; ti.cbSize = sizeof(ti);
-            const long long comp = SUCCEEDED(DwmGetCompositionTimingInfo(nullptr, &ti)) ? (long long)ti.qpcCompose : 0;
-            LARGE_INTEGER q; QueryPerformanceCounter(&q);
-            g_pulsePrevQpc.store(g_pulseQpc.load(std::memory_order_relaxed), std::memory_order_relaxed);
-            g_pulseComposeQpc.store(comp, std::memory_order_relaxed);
-            g_pulseQpc.store(q.QuadPart, std::memory_order_release);
-            SetEvent(g_compEvt);
-        }
-        return 0;
-    }, nullptr, 0, nullptr);
-    if (th) CloseHandle(th);   // runs for the life of the process; nobody waits on it (#274)
-}
 #include "lock_detector.h"
 #include "test_telemetry.h"
 #include "shell_desktop.h"
@@ -334,7 +302,7 @@ struct TickState {
         wind::TickRing ring;
         wind::TickRec cur;
         bool havePrev = false;
-        float pendWait = -1, pendLate = -1, pendPulseGap = -1, pendPulseDelay = -1;
+        float pendWait = -1, pendLate = -1;
         unsigned pendFlags = 0;
         wind::HitchSummary minute;
         unsigned long long minuteStartMs = 0, lineWindowMs = 0;
@@ -939,9 +907,8 @@ static void HitchBegin(TickState& t, long long now) {
     cur.qpcStart = now;
     cur.dtMs = h.havePrev ? (float)QpcMs(t, prev.qpcStart, now) : 0.0f;
     cur.waitMs = h.pendWait; cur.wakeLateMs = h.pendLate;
-    cur.pulseGapMs = h.pendPulseGap; cur.pulseDelayMs = h.pendPulseDelay;
     cur.flags = h.pendFlags | (t.wokeFromIdle ? wind::kTickWoke : 0u);
-    h.pendWait = h.pendLate = h.pendPulseGap = h.pendPulseDelay = -1; h.pendFlags = 0;
+    h.pendWait = h.pendLate = -1; h.pendFlags = 0;
     if (h.havePrev) {
         const unsigned long long nowMs = GetTickCount64();
         const double frameMs = 1000.0 / (t.hz > 0 ? t.hz : 60);
@@ -3318,60 +3285,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         // pointer it is paired with land in the SAME frame. A plain timer lets them drift into
         // different composites, so the cursor beats against the panning view (the flicker) - exactly
         // what DwmFlush prevents (and it paces at refresh, so no flood either). Bloom paces this way too.
-        // txPace (EXPERIMENTAL, hot; see config.h): 0 = DwmFlush-paced (one write per composite,
-        // but the whole pipeline follows VRR droop). 1 = free timer (measured WOBBLY: uneven
-        // writes per composite). 2 = DwmFlush with a one-frame-timeout backfill: phase-locked
-        // while composition is healthy, full-rate ticks when it droops.
-        const int txPaceMode = renderModelActive ? 0 : ts.cfg.txPace;
-        bool dwmPaces = zoomed && (renderModelActive ? (ts.cfg.dwmFlush != 0)
-                                                     : (txPaceMode == 0));
-        if (zoomed && !renderModelActive && txPaceMode == 2) {
-            EnsureCompositePulse();
-            if (g_compEvt) {
-                // 1.5 frames, not 1 (field-tuned 2026-08-28): with a one-frame timeout, a pulse
-                // arriving just after the timeout released the NEXT wait immediately - write
-                // pairs, breaking the one-write-per-composite regularity this mode exists to
-                // keep, felt as intermittent chop. At 1.5 frames a healthy composition ALWAYS
-                // wins the race (identical to plain DwmFlush pacing), and the backfill engages
-                // only on genuine droop - at ~2/3 of the panel max rather than full rate, which
-                // still keeps the weld tight without fighting the composite phase.
-                const DWORD frameMs = ts.hz > 0 ? (DWORD)(1500 / ts.hz + 1) : 11;
-                LARGE_INTEGER wa; QueryPerformanceCounter(&wa);
-                const DWORD w = WaitForSingleObject(g_compEvt, frameMs);
-                LARGE_INTEGER wb; QueryPerformanceCounter(&wb);
-                {   // Hitch recorder (#361): the wait, and who was late if it was long.
-                    auto& h = ts.hitch;
-                    h.pendFlags |= wind::kTickPacePulse;
-                    h.pendWait = (float)QpcMs(ts, wa.QuadPart, wb.QuadPart);
-                    const long long ps = g_pulseQpc.load(std::memory_order_acquire);
-                    const long long pp = g_pulsePrevQpc.load(std::memory_order_relaxed);
-                    const long long pc = g_pulseComposeQpc.load(std::memory_order_relaxed);
-                    if (w == WAIT_OBJECT_0) {
-                        // Signalled before the wait began: no wake latency to blame.
-                        h.pendLate = ps > wa.QuadPart ? (float)QpcMs(ts, ps, wb.QuadPart) : 0.0f;
-                        if (pp && ps > pp) h.pendPulseGap = (float)QpcMs(ts, pp, ps);
-                        if (pc && ps >= pc) h.pendPulseDelay = (float)QpcMs(ts, pc, ps);
-                    } else {
-                        h.pendFlags |= wind::kTickPulseTimeout;
-                        if (ps) h.pendPulseGap = (float)QpcMs(ts, ps, wb.QuadPart);   // still no pulse
-                    }
-                }
-                // Telemetry: a droop episode is invisible in tick dt now that backfill exists, so
-                // count it here. Logged once a second only when timeouts happened.
-                static unsigned s_pulses = 0, s_timeouts = 0;
-                static unsigned long long s_paceLogMs = 0;
-                if (w == WAIT_TIMEOUT) ++s_timeouts; else ++s_pulses;
-                const unsigned long long nowP = GetTickCount64();
-                if (nowP - s_paceLogMs >= 1000) {
-                    if (s_timeouts > 0)
-                        wind::Log(wind::LogLevel::Info, "pace",
-                                  "composition drooping: pulses=%u timeouts=%u this second",
-                                  s_pulses, s_timeouts);
-                    s_pulses = 0; s_timeouts = 0; s_paceLogMs = nowP;
-                }
-            }
-            dwmPaces = false;   // paced here; skip both the timer and the post-tick DwmFlush
-        }
+        bool dwmPaces = zoomed && (renderModelActive ? (ts.cfg.dwmFlush != 0) : true);
         // Game pacing engaged: presents are non-blocking Present(0,0) frames (and may be skipped
         // by the fence gate), so the blocking-present pace is unavailable - fall through to the
         // timer (full tick rate; frame work skips inside renderFrame as needed).
@@ -3380,8 +3294,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         // present-paced here and must NOT also wait on the timer.
         bool renderPresentPaces = renderModelActive && zoomed && !dwmPaces && ts.cfg.vsync != 0 &&
                                   !ts.gamePacing;
-        const bool pacedByPulse = zoomed && !renderModelActive && txPaceMode == 2;
-        if (!renderPresentPaces && !dwmPaces && !pacedByPulse) {
+        if (!renderPresentPaces && !dwmPaces) {
             // Recompute the timer interval if the paced refresh changed (retarget to a different-Hz
             // monitor updates ts.hz). Cheap equality check; only recomputes on an actual change (#74).
             if (ts.hz > 0 && ts.hz != pacedHz) { pacedHz = ts.hz; due.QuadPart = -(10000000LL / pacedHz); }

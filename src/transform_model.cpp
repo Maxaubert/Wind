@@ -1,6 +1,5 @@
 #include "transform_model.h"
 #include "transform.h"   // ComputeMagTransform
-#include "tx_cadence.h"  // ShouldWriteTransform (pure, tested)
 #include "tx_warm.h"     // WarmAction (pure, tested): the pan-start hitch fix
 #include "logging.h"
 #include "sprite_layer.h"  // PickSpriteLayer (pure, tested): issue #269
@@ -37,11 +36,6 @@ static void NudgePointer(POINT& np) {
     if (ClickInProgress()) return;
     if (GetCursorPos(&np)) { SetCursorPos(np.x + 1, np.y); SetCursorPos(np.x, np.y); }
 }
-// How long a write may be held back by the cadence gates before it goes out anyway (issue #204).
-// Without this a sub-threshold residual movement at the end of a pan would never be written and
-// the view would rest up to txMinOffsetPx off where the cursor actually is.
-static const unsigned long long kSettleMs = 100;
-
 void TransformModel::resetTransformState() {
     nativePrimed_ = false;  // a rebuilt context needs its own public prime (#369)
     forceWrite_ = false;    // lastLevel_ = 0 already forces the next write
@@ -51,8 +45,7 @@ void TransformModel::resetTransformState() {
     // compares against values DWM no longer holds and skips the writes that would re-apply them.
     lastLevel_ = 0.0; lastRequestedLevel_ = 0.0;
     lastOffX_ = lastOffY_ = lastTxX_ = lastTxY_ = 0;
-    lastChangeMs_ = 0; lastWriteMs_ = 0; lastWarmMs_ = 0; keepAliveTick_ = 0;
-    warmLevelJitter_ = false;
+    lastChangeMs_ = 0; lastWarmMs_ = 0; keepAliveTick_ = 0;
     ghostSessionStartMs_ = 0;
     lastInputXformOn_ = false;
     ixTick_ = 0; ixPending_ = false;
@@ -88,7 +81,6 @@ void TransformModel::teardownMag() {
     // MagUninitialize would silently fail and strand the pointer hidden.
     if (cursorHidden_) { ShowSystemCursor(TRUE); cursorHidden_ = false; }
     sprite_->hide();
-    cage_.hide();
     if (blanker_->blanked()) blanker_->restore();
     setDwmCentre(false);
     host_.setTransform(1.0f, 0, 0, 0, 0, false);   // leave DWM at identity before releasing
@@ -238,10 +230,9 @@ void TransformModel::noteWrite(double ms, bool ok) {
 // thread-affine, so a writer thread's calls ALL FAIL (measured: fails=144/144) - Wind believed
 // it was zoomed while DWM applied nothing. It is also pointless: the write call measures
 // 0.02ms avg / 0.5ms max, so it never stalls the tick. The hitch is DWM's ASYNCHRONOUS
-// re-scale work, addressed by txLevelStep. Writes stay on the tick thread; only the timing
+// re-scale work, addressed by txMaxStepPct. Writes stay on the tick thread; only the timing
 // instrumentation remains.
-void TransformModel::writeTransform(float lvl, int offX, int offY, int tx, int ty,
-                                    bool fast, bool) {
+void TransformModel::writeTransform(float lvl, int offX, int offY, int tx, int ty, bool fast) {
     LARGE_INTEGER fr, a, b;
     QueryPerformanceFrequency(&fr); QueryPerformanceCounter(&a);
     bool ok = host_.setTransform(lvl, offX, offY, tx, ty, fast);
@@ -498,17 +489,8 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // where each re-scale is most expensive; big discrete jumps are the measured-costly
     // pattern, small continuous ones the cheap one.)
     double applyLevel = level;
-    // txLevelStep (issue #148 hitch work): every LEVEL write makes DWM re-scale its cached
-    // surfaces asynchronously - that async work is the hitch (the write call itself measures
-    // 0.02ms). Skip level updates whose relative change is under the knob while a ramp is
-    // running; the ramp's FINAL level always lands (level == the last requested level means
-    // the ramp stopped). Pan/translation keeps updating per tick.
-    const bool rampStopped = (level == lastRequestedLevel_);
+    const bool rampStopped = (level == lastRequestedLevel_);   // the controller stopped requesting new levels
     lastRequestedLevel_ = level;
-    if (cfg.txLevelStep > 0 && !rampStopped && lastLevel_ > 1.0 && level > 1.0) {
-        const double rel = std::abs(level - lastLevel_) / lastLevel_;
-        if (rel < cfg.txLevelStep / 1000.0) applyLevel = lastLevel_;
-    }
     // txMaxStepPct: rate-limit the APPLIED level change per tick. Each change makes DWM re-scale
     // its cached surfaces and that cost grows with the level, so an unclamped fast ramp demands
     // the most expensive re-scales back to back exactly at the top - measured (#219): ~15% of
@@ -523,17 +505,6 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     if (cfg.txMaxStepPct > 0 && lastLevel_ > 1.0 && applyLevel > lastLevel_) {
         const double up = lastLevel_ * (1.0 + cfg.txMaxStepPct / 1000.0);
         if (applyLevel > up) applyLevel = up;
-    }
-    // txGrid: snap to a fixed GEOMETRIC ladder (1.0 * g^k) so every zoom reuses the same small
-    // set of scale factors instead of minting ~200 fresh ones - DWM's per-factor surface cache
-    // then hits instead of missing. Applied on the ramp only; the settled level snaps too (a
-    // grid level IS the resting level, so the view never drifts off-grid).
-    if (cfg.txGrid > 0 && applyLevel > 1.0) {
-        const double g = 1.0 + cfg.txGrid / 1000.0;
-        const double k = std::log(applyLevel) / std::log(g);
-        double snapped = std::pow(g, std::floor(k + 0.5));
-        if (snapped < 1.0) snapped = 1.0;
-        applyLevel = snapped;
     }
     // SMOOTH-ZOOM LADDER (issue #369, src/zoom_ladder.h): with smooth sampling DWM rounds its scratch
     // image's size and origin every frame, which shakes a continuous zoom; snap to the nearest level
@@ -611,7 +582,6 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         }
     }
     traceOn_ = cfg.txTrace != 0;
-    cfgWobbleCage_ = cfg.txWobbleCage;        // diagnostic cage + threshold px (issue #229)
     if (level > sessionMaxLevel_) sessionMaxLevel_ = level;
     const bool ramping = preLadderLevel != level || (applyLevel != lastLevel_ && lastLevel_ > 0.0);
     // Edge sampling margin (see transform.h) applied to the SOURCE, not just to the written
@@ -682,43 +652,21 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     const bool changed = m.offX != lastOffX_ || m.offY != lastOffY_ ||
                          m.txX != lastTxX_ || m.txY != lastTxY_ || applyLevel != lastLevel_;
 
-    // WRITE CADENCE (issue #204). Traced against native Magnifier: it writes ~59/s while ramping
-    // and ~49/s while panning, in ~2.24px steps. We wrote 120/s and 92/s in 1.41px steps, with a
-    // THIRD of all writes moving the image by exactly one pixel - because we wrote per tick on a
-    // 144Hz panel. Our timing was MORE regular than native's (p95 interval 7.56ms vs 31.44ms), so
-    // the surplus was not buying smoothness; every write makes DWM redo work proportional to the
-    // level, and we were saturating it. These two gates COALESCE writes - they never drop a
-    // destination state, because the next tick recomputes from the same mapper.
-    // The decision itself is pure and unit-tested (src/tx_cadence.h, tests/test_tx_cadence.cpp) -
-    // the escapes that stop a gate stranding the view are exactly the kind of thing that is easy
-    // to get wrong once and never notice.
-    TxCadenceIn ci;
-    ci.changed          = changed;
-    ci.levelMoved       = applyLevel != lastLevel_;
-    ci.rampStopped      = rampStopped;
-    ci.applyLevel       = applyLevel;
-    // DESTINATION space: tx is screen pixels, whereas offX is SOURCE pixels, where at 20x a 1px
-    // step is a 20px jump on screen. Thresholding the wrong one would gate ~nothing at high zoom.
-    {
-        int dtx = m.txX - lastTxX_; if (dtx < 0) dtx = -dtx;
-        int dty = m.txY - lastTxY_; if (dty < 0) dty = -dty;
-        ci.dMoveDest = dtx > dty ? dtx : dty;
-    }
-    ci.sinceLastWriteMs = nowMs - lastWriteMs_;
-    ci.writeHz          = cfg.txWriteHz;
-    ci.minOffsetPx      = cfg.txMinOffsetPx;
-    ci.settleMs         = kSettleMs;
+    // EVERY changed tick is written. Issue #204 traced native Magnifier writing ~half as often and
+    // tried to coalesce ours (a write-rate cap and a minimum pan step); both were field-rejected the
+    // same day (the step reads as wobble under a slow hand, the cap as low fps at high zoom) and
+    // are gone. The level is written straight, per tick, for the same reason.
+    const bool levelMoved = applyLevel != lastLevel_;
     const bool forceWrite = forceWrite_;
     // A pan write while DWM centres must be followed by its nudge, which a click in progress
     // forbids: hold it until the click window ends (HoldWriteForClick, issue #381).
-    const bool clickHold = HoldWriteForClick(dwmCentreOn_, ClickInProgress(), ci.levelMoved, forceWrite);
-    const bool writeNow = (ShouldWriteTransform(ci) || forceWrite) && !clickHold;
+    const bool clickHold = HoldWriteForClick(dwmCentreOn_, ClickInProgress(), levelMoved, forceWrite);
+    const bool writeNow = (changed || forceWrite) && !clickHold;
 
     if (writeNow) {
         lastOffX_ = m.offX; lastOffY_ = m.offY; lastTxX_ = m.txX; lastTxY_ = m.txY;
         lastLevel_ = applyLevel;
         lastChangeMs_ = nowMs;
-        lastWriteMs_ = nowMs;
         keepAliveTick_ = 0;
     }
     // Everything below keys off whether the write ACTUALLY goes out this tick, not merely whether
@@ -728,18 +676,16 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     trChanged = changed;
     int txJitter = 0;
     bool keepAliveActive = false;
-    bool warmIxOnly = false;
     // WARM-KEEPING (see src/tx_warm.h for the measurements). At rest Wind would otherwise stop
     // writing entirely and DWM's composition falls back to the game's present rate, so the first
-    // movement after a pause lands late - the hitch felt at every direction reversal.
+    // movement after a pause lands late - the hitch felt at every direction reversal. Only views
+    // Wind writes itself need it (locked, Inspect, a detached view): DWM's own centring moves
+    // the view on every cursor update.
     TxWarmIn wi;
     wi.wroteThisTick      = changedAndWriting;
     wi.ramping            = ramping;
     wi.mode               = cfg.txWarmMode;
     wi.applyLevel         = applyLevel;
-    wi.maxLevel           = cfg.txWarmMaxLevel;
-    wi.windowMs           = cfg.txWarmWindowMs;
-    wi.sinceLastChangeMs  = nowMs - lastChangeMs_;
     // Cadence (issue #246): the period counts from whichever came last, the previous pulse
     // closing or a real write (a real write resets keepAliveTick_ above, so no pulse is open).
     wi.warmHz             = cfg.txWarmHz;
@@ -747,43 +693,23 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     wi.sinceLastWarmMs    = nowMs - (lastWarmMs_ > lastChangeMs_ ? lastWarmMs_ : lastChangeMs_);
     // No warm pulses while DWM centres: each one would put Wind's offset back on screen for a
     // frame, and DWM's own per-cursor-update moves are the pan (native has no warm-keeping).
-    switch (dwmCentreOn_ ? TxWarm::None : WarmAction(wi)) {
-        case TxWarm::Jitter1px:
-            keepAliveTick_ ^= 1;
-            txJitter = keepAliveTick_;   // BOTH parities must write (the return-to-true half too)
-            keepAliveActive = true;
-            if (keepAliveTick_ == 0) lastWarmMs_ = nowMs;   // pulse closed: the period starts here
-            break;
-        case TxWarm::SameValue:
-            keepAliveActive = true;
-            break;
-        case TxWarm::InputTransform:
-            warmIxOnly = true;
-            break;
-        case TxWarm::LevelEpsilon:
-            keepAliveTick_ ^= 1;
-            warmLevelJitter_ = keepAliveTick_ != 0;
-            keepAliveActive = true;
-            trWarm = true;
-            if (keepAliveTick_ == 0) lastWarmMs_ = nowMs;
-            break;
-        case TxWarm::None:
-            break;
+    if ((dwmCentreOn_ ? TxWarm::None : WarmAction(wi)) == TxWarm::Jitter1px) {
+        keepAliveTick_ ^= 1;
+        txJitter = keepAliveTick_;   // BOTH parities must write (the return-to-true half too)
+        keepAliveActive = true;
+        trWarm = true;
+        if (keepAliveTick_ == 0) lastWarmMs_ = nowMs;   // pulse closed: the period starts here
     }
 
-    // Same-value hygiene (issue #189): once the keep-alive window has lapsed (or above its level
-    // gate), a zoomed-idle tick would push an identical write 144x/s. DWM parks on static values
-    // anyway (measured), so skipping is free; the next changed/keep-alive tick writes as before.
+    // Same-value hygiene (issue #189): a zoomed-idle tick with nothing to write and no pulse due
+    // would push an identical write 144x/s. DWM parks on static values anyway (measured), so
+    // skipping is free; the next changed/keep-alive tick writes as before.
     if (changedAndWriting || keepAliveActive) {
-        // warmLevelJitter_ (mode 4) perturbs only the LEVEL, and only on warm ticks - a real
-        // write always sends the true level. See the mode 4 note above for why it has to change
-        // at all and why this is the cheapest honest thing to change.
-        const double lvlOut = warmLevelJitter_ ? applyLevel * (1.0 + cfg.txWarmLevelEps) : applyLevel;
         // Native cursor (#369): the context's first zoomed write goes through the PUBLIC API, which
         // is what makes DWM draw the real pointer magnified; the private channel keeps it after.
         // (Fallback only: normally the cursor lens does this without the 200-260 ms public write.)
-        const bool prime = !nativePrimed_ && !host_.cursorLensReady() && lvlOut > 1.001;
-        writeTransform((float)lvlOut, m.offX, m.offY, m.txX + txJitter, m.txY, fastPan_ && !prime, false);
+        const bool prime = !nativePrimed_ && !host_.cursorLensReady() && applyLevel > 1.001;
+        writeTransform((float)applyLevel, m.offX, m.offY, m.txX + txJitter, m.txY, fastPan_ && !prime);
         if (prime) nativePrimed_ = true;
         if (NudgeAfterWrite(dwmCentreOn_, true)) {
             POINT np;
@@ -791,7 +717,6 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         }
         forceWrite_ = false;
     }
-    warmLevelJitter_ = false;
     // Input transform. Mode 1 (THE SHIPPED DEFAULT; field-verified 4x-20x,
     // POINTER-HITTEST-FINDINGS.md): publish the visual source rect on every change, exactly
     // like native Magnifier. Pointer-framework apps (Explorer/Settings/shell) hit-test mouse
@@ -828,7 +753,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             }
         }
     }
-    if (cfg.magInputTransform != 0 && (changed || ixPending_ || ixForce || warmIxOnly)) {
+    if (cfg.magInputTransform != 0 && (changed || ixPending_ || ixForce)) {
         // Decimation (issue #189): the publish exists for pointer-framework HOVER hit-testing
         // (clicks ride the welded cursor and never consult it), so it does not need the 144Hz
         // motion rate - every Nth changed tick suffices, with a GUARANTEED publish the moment
@@ -838,14 +763,12 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         // A stomp bypasses the decimation entirely: correctness of the mapping beats hygiene.
         if (changed) ixPending_ = true;
         const bool rest = !changed;
-        // warmIxOnly bypasses the decimation for the same reason a stomp does: the publish IS the
-        // work here, and decimating it away would defeat the whole mode.
         // Native cursor (#369): no publish while the level ramps (it hides the composed pointer);
         // the pending flag carries it to the first settled tick.
         // Held only while a zoom key/button drives the ramp: during the release ease-out hover must
         // follow (field 2026-10-07: tab hover waited for the whole 300 ms glide to end).
         const bool hold = HoldInputPublish(ramping && ex.zoomDriven, ixForce);
-        if (!hold && (ixForce || warmIxOnly || rest || ++ixTick_ >= cfg.ixDecimate)) {
+        if (!hold && (ixForce || rest || ++ixTick_ >= cfg.ixDecimate)) {
             ixTick_ = 0;
             ixPending_ = false;
             // srcL/srcT, not r.srcLeft/srcTop: when the ramp limiters make applyLevel != level
