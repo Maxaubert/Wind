@@ -394,8 +394,8 @@ struct Config {
     int txDwmCentre = 1;
     // MPO nearest guard (issue #369, src/mpo_guard.h): 1 = nearest sampling is allowed on an MPO-on
     // boot, with an invisible colour effect while zoomed so DWM composes the desktop itself (no
-    // plane, no 16-bit overflow). 0 (default until verified on an MPO boot) = nearest on MPO boots
-    // is turned into smooth as before. The pan walls stay armed either way. Restart to apply.
+    // plane, no 16-bit overflow); field-tested on an MPO boot 2026-10-07, so it ships on. 0 = nearest
+    // on MPO boots is turned into smooth as before. The pan walls stay armed either way. Restart to apply.
     int mpoNearestGuard = 1;
     // Smooth-zoom ladder (issue #369, src/zoom_ladder.h): with smooth sampling, zoom only through
     // levels where DWM's per-frame scratch rounding predicts under 1 px of movement (the zoom shake:
@@ -628,10 +628,11 @@ bool IsForbiddenBindVk(int vk);
 // True when exeName (bare file name, any case) appears in a comma-separated list. Used for the
 // Auto/hybrid transform exclusion (fullscreen browser video must stay on the render engine).
 bool IsExeInList(const std::string& exeName, const std::string& list);
-// The ini text with UI-ONLY lines removed (uiTheme, showAdvanced, onboarded): the settings app
-// owns those keys and the core never consumes them, yet every write hot-reloads the core - and
-// the reload resets the ZoomController, so toggling the app theme while zoomed collapsed the
-// zoom to 1x (field report). The core compares this stripped form across reloads and skips
+// The ini text with UI-ONLY lines removed (uiTheme, uiPalette, showAdvanced, onboarded and the five
+// tray layout keys trayPerf, traySliders, traySliderOrder, trayToggles, trayToggleOrder): the
+// settings app and the tray own those keys and the core never consumes them, yet every write
+// hot-reloads the core - and the reload resets the ZoomController, so toggling the app theme or
+// editing the tray layout while zoomed collapsed the zoom to 1x (field report). The core compares this stripped form across reloads and skips
 // the reload when nothing it consumes changed. 'profile' stays IN: the core mirrors setConfig
 // into the active profile, so a profile change must still reload.
 std::string StripUiOnlyKeys(const std::string& iniText);

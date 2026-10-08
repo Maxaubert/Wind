@@ -386,7 +386,10 @@ std::string StripUiOnlyKeys(const std::string& iniText) {
         size_t b = line.find_first_not_of(" \t");
         bool uiOnly = false;
         if (b != std::string::npos) {
-            for (const char* k : { "uiTheme=", "uiPalette=", "showAdvanced=", "onboarded=" }) {
+            // Keep in step with IsGlobalProfileKey (src/profiles.cpp) minus "profile": a test pins it.
+            for (const char* k : { "uiTheme=", "uiPalette=", "showAdvanced=", "onboarded=",
+                                   "trayPerf=", "traySliders=", "traySliderOrder=", "trayToggles=",
+                                   "trayToggleOrder=" }) {
                 if (line.compare(b, strlen(k), k) == 0) { uiOnly = true; break; }
             }
         }

@@ -189,7 +189,7 @@ Defences (wall arming in `RunTick`, write clamp in `TransformModel::present`):
   applies an invisible colour effect (0.998 on R, G, B). A colour transform, like the resample
   property, makes the scaled desktop visual require an external layer, and nothing under such a
   visual is recorded as a plane candidate, so no plane can carry the overflowing translation.
-  `mpoNearestGuard=1` (default 0 until verified) lets nearest run on MPO boots with the guard;
+  `mpoNearestGuard=1` (the default; field-tested on an MPO boot 2026-10-07) lets nearest run on MPO boots with the guard;
   `mpoGuardTest=1` forces the effect on an MPO-off boot to check its look. The pan walls stay
   armed for nearest either way until an MPO-on boot proves the guard (fail-closed).
 
