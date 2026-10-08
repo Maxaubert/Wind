@@ -815,7 +815,10 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     ci.minOffsetPx      = cfg.txMinOffsetPx;
     ci.settleMs         = kSettleMs;
     const bool forceWrite = forceWrite_;
-    const bool writeNow = ShouldWriteTransform(ci) || forceWrite;
+    // A pan write while DWM centres must be followed by its nudge, which a click in progress
+    // forbids: hold it until the click window ends (HoldWriteForClick, issue #381).
+    const bool clickHold = HoldWriteForClick(dwmCentreOn_, ClickInProgress(), ci.levelMoved, forceWrite);
+    const bool writeNow = (ShouldWriteTransform(ci) || forceWrite) && !clickHold;
 
     if (writeNow) {
         lastOffX_ = m.offX; lastOffY_ = m.offY; lastTxX_ = m.txX; lastTxY_ = m.txY;

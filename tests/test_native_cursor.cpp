@@ -64,6 +64,14 @@ TEST_CASE("while DWM centres, every write is followed by a cursor event (one cen
     CHECK(NudgeAfterWrite(true, false) == false);   // nothing written
 }
 
+TEST_CASE("A pan write is held while a click forbids its nudge (#381)") {
+    CHECK(HoldWriteForClick(true, true, false, false) == true);    // held button, DWM centres: hold
+    CHECK(HoldWriteForClick(true, false, false, false) == false);  // no click: write and nudge
+    CHECK(HoldWriteForClick(false, true, false, false) == false);  // Wind owns the view: write
+    CHECK(HoldWriteForClick(true, true, true, false) == false);    // a zoom during a drag still writes
+    CHECK(HoldWriteForClick(true, true, false, true) == false);    // a forced write (centring switch)
+}
+
 TEST_CASE("DWM centring yields only near an armed wall, not everywhere it is reachable") {
     // 12x: wall at 32000/12 = 2666.7 source px.
     CHECK(NearWall(true, 1000.0, 500.0, 12.0, 32000.0, 64.0) == false);   // middle of the screen

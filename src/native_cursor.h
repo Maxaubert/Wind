@@ -110,4 +110,16 @@ inline bool NudgeAfterWrite(bool dwmCentring, bool wrote) {
     return dwmCentring && wrote;
 }
 
+// NO WRITE WITHOUT ITS NUDGE (issue #381, field report 2026-10-08: zoomed, holding the left button
+// for a drag-select or a held click made the view shake; plain panning was fine). The nudge is
+// skipped while a click is in progress (it made some clicks fail), but the write it belongs to
+// still went out, so during a hold every changed tick put Wind's centre on screen and the next
+// cursor event put DWM's back: the view alternated between the two. While DWM centres, a pan-only
+// write is held for the click instead; DWM keeps centring on every cursor event, and the first tick
+// after the click window writes and nudges as usual. Level changes and forced writes still go out
+// (a zoom during a drag must not freeze, and a centring switch needs its write).
+inline bool HoldWriteForClick(bool dwmCentring, bool clickInProgress, bool levelMoved, bool forced) {
+    return dwmCentring && clickInProgress && !levelMoved && !forced;
+}
+
 }  // namespace wind
