@@ -89,3 +89,14 @@ TEST_CASE("cadence: a real write closes an open pulse by itself") {
     in.wroteThisTick = true;
     CHECK(WarmAction(in) == TxWarm::None);
 }
+
+TEST_CASE("no pulses for a free pointer's view, but an open pulse still closes") {
+    TxWarmIn in = Resting();
+    in.allowed = false;                       // following a caret with a free pointer
+    CHECK(WarmAction(in) == TxWarm::None);
+    in.pulseOpen = true;                      // owner changed mid-pulse: the return half still goes out
+    CHECK(WarmAction(in) == TxWarm::Jitter1px);
+    in = Resting();
+    in.allowed = true;                        // locked mouselook or Inspect
+    CHECK(WarmAction(in) == TxWarm::Jitter1px);
+}

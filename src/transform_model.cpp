@@ -723,6 +723,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     wi.wroteThisTick      = changedAndWriting;
     wi.ramping            = ramping;
     wi.mode               = cfg.txWarmMode;
+    wi.allowed            = ex.warmAllowed;
     wi.applyLevel         = applyLevel;
     // Cadence (issue #246): the period counts from whichever came last, the previous pulse
     // closing or a real write (a real write resets keepAliveTick_ above, so no pulse is open).

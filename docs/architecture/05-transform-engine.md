@@ -85,8 +85,10 @@ pan-start hitch). A 1 px translation displacement and return is a real source ch
 warm. Re-sending the same transform, republishing the input transform and a sub-pixel level nudge
 were tried (they were warm modes 2-4) and do not work: the level nudge passes every
 composition-rate metric and still hitches, so do not trust composition-rate metrics here. Only
-views Wind writes itself are warmed (locked, Inspect, detached); while DWM centres there is
-nothing to warm.
+views Wind writes itself with the pointer not free are warmed (locked, Inspect); while DWM centres
+there is nothing to warm. A free pointer's detached view (caret, focus, keyboard pan) is not warmed
+either: following a Discord caret, each pulse showed as a 1 px shake (field video 2026-10-08), and
+the hitch it guards is a game one (`ex.warmAllowed`).
 
 - Every warm write is a full DWM re-render. Per-tick warming cost 16% dwm.exe GPU with the mouse
   still (the built-in Magnifier: 0.2%). So `txWarmHz` (default 12) makes it a pulse: one
