@@ -2714,7 +2714,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 // above, since a live hook swallows bound keys so the poller can never see one.
                 const RAWKEYBOARD& kb = ri->data.keyboard;
                 if ((kb.Flags & RI_KEY_BREAK) && kb.VKey > 0 && kb.VKey < 256)
-                    g_input.rawKeyUp(static_cast<int>(kb.VKey));
+                    g_input.rawKeyUp(static_cast<int>(kb.VKey), static_cast<uint32_t>(GetMessageTime()));
                 // Key activity (down and up) feeds only tracking's key clock (#289), never held state. Raw Input
                 // keeps arriving while the hook is suspended (fullscreen game, noSwallowApps), so
                 // the clock stays true there instead of the gate switching off (review #289).
@@ -2741,12 +2741,15 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 // (idempotent with the hook's own clear; never falsely holds). It does not touch the
                 // hook's g_swallowedDown record, so swallowing is unaffected.
                 USHORT bf = m.usButtonFlags;
-                if (bf & RI_MOUSE_BUTTON_4_UP) g_input.rawButtonUp(1);
-                if (bf & RI_MOUSE_BUTTON_5_UP) g_input.rawButtonUp(2);
+                // The UP's event time is the WM_INPUT's queue time, not now: the hook's reordering
+                // guard compares event times (src/event_order.h), so a main-thread stall is harmless.
+                const uint32_t rawTime = static_cast<uint32_t>(GetMessageTime());
+                if (bf & RI_MOUSE_BUTTON_4_UP) g_input.rawButtonUp(1, rawTime);
+                if (bf & RI_MOUSE_BUTTON_5_UP) g_input.rawButtonUp(2, rawTime);
                 // Same net for left/right/middle click binds (#285); a no-op unless one holds a zoom.
-                if (bf & RI_MOUSE_LEFT_BUTTON_UP)   g_input.rawButtonUp(3);
-                if (bf & RI_MOUSE_RIGHT_BUTTON_UP)  g_input.rawButtonUp(4);
-                if (bf & RI_MOUSE_MIDDLE_BUTTON_UP) g_input.rawButtonUp(5);
+                if (bf & RI_MOUSE_LEFT_BUTTON_UP)   g_input.rawButtonUp(3, rawTime);
+                if (bf & RI_MOUSE_RIGHT_BUTTON_UP)  g_input.rawButtonUp(4, rawTime);
+                if (bf & RI_MOUSE_MIDDLE_BUTTON_UP) g_input.rawButtonUp(5, rawTime);
                 if (!g_input.hookActive()) {
                     if (bf & RI_MOUSE_BUTTON_4_DOWN) g_input.setButtonState(1, true);
                     if (bf & RI_MOUSE_BUTTON_5_DOWN) g_input.setButtonState(2, true);

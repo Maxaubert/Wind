@@ -1,5 +1,6 @@
 #pragma once
 #include <atomic>
+#include <cstdint>
 #include "mouse_ballistics.h"   // BallisticsConfig (pure; Inspect-mode speed match)
 namespace wind {
 // Holds input state shared between the hook/raw-input callbacks and the tick thread.
@@ -108,14 +109,16 @@ public:
     // held forever. UP only: it can only ever clear held state, never set it, so it cannot falsely
     // hold a key and is idempotent with the hook's own clear. The mouse side-buttons have had the
     // same net since #113; this is the keyboard half.
-    void rawKeyUp(int vk);
+    void rawKeyUp(int vk, uint32_t eventTimeMs);
     // Same safety net for the side-buttons: honor a WM_INPUT button UP unless the live hook saw a
-    // DOWN for that button within the last ~30 ms (a queued raw UP processed after the hook's next
-    // DOWN would cancel a hold that is physically down - no auto-repeat re-asserts a button).
-    void rawButtonUp(int xbuttonId);
-    // Hook-thread recency stamps consumed by the two guards above.
-    void noteHookKeyDown(int vk);
-    void noteHookButtonDown(int xbuttonId);
+    // DOWN for that button AFTER it (a queued raw UP processed after the hook's next DOWN would
+    // cancel a hold that is physically down - no auto-repeat re-asserts a button).
+    // eventTimeMs is GetMessageTime() of the WM_INPUT; the guard compares event times with the
+    // hook's own stamps (src/event_order.h), never the wall clock, so a main-thread stall is harmless.
+    void rawButtonUp(int xbuttonId, uint32_t eventTimeMs);
+    // Hook-thread event-time stamps (KBDLLHOOKSTRUCT / MSLLHOOKSTRUCT .time) consumed by the guards.
+    void noteHookKeyDown(int vk, uint32_t eventTimeMs);
+    void noteHookButtonDown(int xbuttonId, uint32_t eventTimeMs);
     // True once the LL KEYBOARD hook is installed. When false (install failed or WIND_NOHOOK), main
     // must fall back to GetAsyncKeyState and no keyboard swallowing happens.
     bool kbHookActive() const { return kbHookActive_.load(std::memory_order_relaxed); }
@@ -198,7 +201,7 @@ private:
     std::atomic<int> panVk_[4]{}, panMods_[4]{};
     std::atomic<int> panPresses_[4]{};
     std::atomic<bool> panArmed_{false};
-    // Recency stamps for the raw-UP reordering guards (see rawKeyUp/rawButtonUp).
+    // Event-time stamps (PackEventStamp, 0 = none) for the raw-UP reordering guards (rawKeyUp/rawButtonUp).
     std::atomic<unsigned long long> kbLastHookDownMs_[256]{};
 public:
     // Any key down, injected included (on-screen keyboards, voice typing), GetTickCount64 ms. 0 = none
