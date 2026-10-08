@@ -268,3 +268,39 @@ test('the tray switching profile reloads the session', async ({ page }) => {
   await expect(maxLevel(page)).toHaveValue('30');
   await expect(capsule(page)).toHaveCount(0);
 });
+
+test('regaining focus re-reads the ini, so a tray or hand edit shows up (and only a real change does)', async ({ page }) => {
+  await page.goto('/');
+  await go(page, 'zoom');
+  await expect(maxLevel(page)).toHaveValue('12');
+  const before = (await sent(page, 'getConfig')).length;
+  await page.evaluate(() => { window.__live.maxLevel = '25'; window.dispatchEvent(new Event('focus')); });
+  await expect(maxLevel(page)).toHaveValue('25');
+  await expect(capsule(page)).toContainText('1 unsaved change');   // the tray edit is unsaved, like any live write
+  expect((await sent(page, 'getConfig')).length).toBeGreaterThan(before);
+});
+
+test('a failed settings write re-reads the ini, so the page does not keep the value the ini refused', async ({ page }) => {
+  await page.goto('/');
+  await go(page, 'zoom');
+  await maxLevel(page).fill('30');
+  // The host kept the old value: undo the mock's write, then report the failure.
+  await page.evaluate(() => { window.__live.maxLevel = '12'; window.__hostSend({ type: 'configWriteFailed', key: 'maxLevel' }); });
+  await expect(maxLevel(page)).toHaveValue('12');
+  await expect(capsule(page)).toHaveCount(0);
+});
+
+test('an unreadable ini is retried, never shown as all defaults', async ({ page }) => {
+  await page.addInitScript(() => {
+    const orig = window.chrome.webview.postMessage;
+    let n = 0;
+    window.chrome.webview.postMessage = (msg) => {
+      if (msg.type === 'getConfig' && n++ < 2) { window.__msgs.push(msg); window.__hostSend({ type: 'configUnreadable' }); return; }
+      orig(msg);
+    };
+  });
+  await page.goto('/');
+  await go(page, 'zoom');
+  await expect(maxLevel(page)).toHaveValue('12');   // the real value, after two refused reads
+  expect((await sent(page, 'getConfig')).length).toBe(3);
+});

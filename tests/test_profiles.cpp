@@ -180,3 +180,55 @@ TEST_CASE("uiPalette survives a profile switch and never lands in a profile file
     CHECK(v["maxLevel"] == "3");
     CHECK_FALSE(SessionDiffers("a=1\nuiPalette=ember\n", "a=1\nuiPalette=hicon\n"));
 }
+TEST_CASE("SessionDiffers: an explicit default equals a missing key (tray drag back to default)") {
+    // panKeysOn is in the first-run template with its default; the tray writes the key, the profile never had it.
+    const auto d = ReadIniValues(DefaultIniText());
+    REQUIRE(d.count("panKeysOn") == 1);
+    const std::string dv = d.at("panKeysOn");
+    CHECK_FALSE(SessionDiffers("maxLevel=8\npanKeysOn=" + dv + "\n", "maxLevel=8\n"));
+    CHECK_FALSE(SessionDiffers("maxLevel=8\n", "maxLevel=8\npanKeysOn=" + dv + "\n"));
+    // A non-default value is still a change, in either direction.
+    const std::string other = dv == "0" ? "1" : "0";
+    CHECK(SessionDiffers("maxLevel=8\npanKeysOn=" + other + "\n", "maxLevel=8\n"));
+    CHECK(SessionDiffers("maxLevel=8\n", "maxLevel=8\npanKeysOn=" + other + "\n"));
+}
+TEST_CASE("SessionDiffers: numeric spelling does not count as a change") {
+    CHECK_FALSE(SessionDiffers("zoomInSpeed=1.0\n", "zoomInSpeed=1\n"));
+    CHECK_FALSE(SessionDiffers("zoomInSpeed=1.50\n", "zoomInSpeed=1.5\n"));
+    CHECK(SessionDiffers("zoomInSpeed=1.5\n", "zoomInSpeed=1.6\n"));
+    CHECK(SessionDiffers("model=render\n", "model=hybrid\n"));        // text values still compare as text
+}
+TEST_CASE("SessionDiffers: keys outside the template stay missing-vs-present") {
+    CHECK(SessionDiffers("someFutureKey=0\n", ""));
+    CHECK(SessionDiffers("", "someFutureKey=0\n"));
+}
+TEST_CASE("SessionDiffers: model is never filled from the template default") {
+    // The core's missing-key engine and the template's explicit one are different questions.
+    CHECK(SessionDiffers("model=hybrid\n", ""));
+}
+TEST_CASE("ParseIniTmpName recognises WriteTextFileAtomic's leftover temp names") {
+    unsigned long pid = 0;
+    CHECK(ParseIniTmpName(L"magnifier.ini.1234.tmp", pid)); CHECK(pid == 1234);
+    CHECK(ParseIniTmpName(L"Game night.ini.77.tmp", pid));  CHECK(pid == 77);
+    CHECK(ParseIniTmpName(L"MAGNIFIER.INI.5.TMP", pid));    CHECK(pid == 5);
+    CHECK_FALSE(ParseIniTmpName(L"magnifier.ini.tmp", pid));        // no pid
+    CHECK_FALSE(ParseIniTmpName(L"magnifier.ini.12a.tmp", pid));    // not all digits
+    CHECK_FALSE(ParseIniTmpName(L"magnifier.ini.1234", pid));       // not a temp
+    CHECK_FALSE(ParseIniTmpName(L"notes.txt.1234.tmp", pid));       // not an ini temp: never touch other files
+    CHECK_FALSE(ParseIniTmpName(L".ini.1234.tmp", pid));            // empty stem
+    CHECK_FALSE(ParseIniTmpName(L"x.ini.99999999999.tmp", pid));    // pid out of range
+}
+TEST_CASE("StripUiOnlyKeys strips every global key except profile (tray edits must not reload the core)") {
+    const char* globals[] = { "onboarded", "uiTheme", "uiPalette", "showAdvanced", "trayPerf", "traySliders",
+                              "traySliderOrder", "trayToggles", "trayToggleOrder" };
+    for (const char* k : globals) {
+        REQUIRE(IsGlobalProfileKey(k));
+        const std::string line = std::string(k) + "=1\n";
+        CHECK(StripUiOnlyKeys("maxLevel=8\n" + line) == "maxLevel=8\n");
+        CHECK(StripUiOnlyKeys("maxLevel=8\n" + std::string(k) + "=2\n") == StripUiOnlyKeys("maxLevel=8\n" + line));
+    }
+    // profile stays IN the fingerprint: a profile switch must still reload the core.
+    CHECK(StripUiOnlyKeys("profile=A\n") != StripUiOnlyKeys("profile=B\n"));
+    // Prefix siblings are different keys.
+    CHECK(StripUiOnlyKeys("traySlidersX=1\n") == "traySlidersX=1\n");
+}
