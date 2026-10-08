@@ -3,19 +3,10 @@
 #include <cmath>
 namespace wind {
 
-// Time-based ease: 95% of the gap in glideMs whatever the tick interval (VRR-safe, the same
-// reasoning as CursorMapper::setTickDeltaMs). keep = 0.05^(dt/glideMs).
-inline double GlideToward(double cur, double target, double dtMs, double glideMs) {
-    if (glideMs <= 0.0) return target;
-    if (dtMs <= 0.0) return cur;
-    const double keep = std::pow(0.05, dtMs / glideMs);
-    return target + (cur - target) * keep;
-}
-
-// Critically damped spring (SmoothDamp form, stable at any dt). Unlike GlideToward it CARRIES its
-// velocity across retargets, so a caret stepping one character per keystroke becomes one continuous
-// glide instead of a fresh jolt per key (field ask 2026-09-29: "glide more as you type, never lag").
-// glideMs is matched to GlideToward's: 95% of a step in glideMs (critically damped: ~4.74/omega).
+// Critically damped spring (SmoothDamp form, stable at any dt, time-based so VRR-safe). It CARRIES
+// its velocity across retargets, so a caret stepping one character per keystroke becomes one
+// continuous glide instead of a fresh jolt per key (field ask 2026-09-29: "glide more as you type,
+// never lag"). 95% of a step in glideMs (critically damped: ~4.74/omega).
 inline double SpringToward(double cur, double target, double& vel, double dtMs, double glideMs) {
     if (glideMs <= 0.0) { vel = 0; return target; }
     if (dtMs <= 0.0) return cur;

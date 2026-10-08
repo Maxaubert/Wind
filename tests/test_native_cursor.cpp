@@ -29,15 +29,6 @@ TEST_CASE("DWM centring is off wherever Wind must own the offset") {
 }
 
 
-TEST_CASE("an armed MPO wall only blocks DWM centring where the view can reach it") {
-    // 3840x2160, wall at |src*level| <= 32000.
-    CHECK(WallBinding(false, 20.0, 3840, 2160, 32000.0) == false);   // not armed
-    CHECK(WallBinding(true, 3.0, 3840, 2160, 32000.0) == false);     // 3x: max reach 7680
-    CHECK(WallBinding(true, 9.0, 3840, 2160, 32000.0) == false);     // 30720: still inside
-    CHECK(WallBinding(true, 9.5, 3840, 2160, 32000.0) == true);      // 32640: reachable
-    CHECK(WallBinding(true, 1.0, 3840, 2160, 32000.0) == false);
-}
-
 TEST_CASE("input transform: held while a session ramps, unless a foreign writer stomped it") {
     CHECK(HoldInputPublish(true, false) == true);
     CHECK(HoldInputPublish(true, true) == false);    // correctness of the mapping wins

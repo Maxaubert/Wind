@@ -95,11 +95,6 @@ TEST_CASE("cursorLockVk: unbound by default, parseable, forbidden-sanitized") {
     CHECK(ParseConfig("cursorLockVk=8\n").cursorLockVk == 0);       // Backspace -> sanitized to unbound
 }
 
-TEST_CASE("swapModelVk is retired: the ini key is ignored (feature removed; Auto replaces it)") {
-    CHECK(ParseConfig("").swapModelVk == 0);
-    CHECK(ParseConfig("swapModelVk=112\n").swapModelVk == 0);
-}
-
 
 TEST_CASE("IsForbiddenBindVk blocks keys Wind must never swallow, allows the rest") {
     CHECK(IsForbiddenBindVk(0x01));   // VK_LBUTTON (left click)
@@ -507,7 +502,7 @@ TEST_CASE("tracking settings: defaults and parsing (issue #276)") {
     CHECK(d.trackFocus == 0);
     CHECK(d.trackAlign == 0);
     CHECK(d.mouseAlign == 0);
-    CHECK(d.trackGlideMs == 200); CHECK(d.trackGlideMode == 1);
+    CHECK(d.trackGlideMs == 200);
     CHECK(d.trackMarginPct == 15);
     CHECK(d.trackLog == 0);
     Config c = ParseConfig("trackCaret=0\ntrackFocus=1\ntrackAlign=1\nmouseAlign=1\n"

@@ -317,7 +317,7 @@ struct TickState {
         unsigned long long cFrame0 = 0; long long firstComp = 0; unsigned comps = 0;
         const char* engine = ""; bool warm = false; double ensureMs = 0;
     } zt;
-    double viewVx = 0, viewVy = 0; // tracking spring velocity (trackGlideMode=1)
+    double viewVx = 0, viewVy = 0; // tracking spring velocity
     // trackLog diagnostics (#326): the last logged caret seq and the last tracking-enable reason.
     unsigned diagSeq = 0;
     int diagEnableBits = -1;
@@ -1706,13 +1706,11 @@ static void RunTick(TickState& t) {
                 // desync the lens from the pointer that owns the drag. The press itself landed
                 // under the welded cursor (the weld was live until the button went down), and the
                 // release lands where the pointer and the dragged content both are - correct by
-                // construction. Weld resumes on release. BOTH engines weld now (the transform
-                // joined with the 8a52040 re-test), so both take this path.
+                // construction. Weld resumes on release. Only the render engine welds a free session
+                // (a transform one never does), so this path matters for it alone.
                 const bool anyButtonDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) ||
                                            (GetAsyncKeyState(VK_RBUTTON) & 0x8000) ||
                                            (GetAsyncKeyState(VK_MBUTTON) & 0x8000);
-                const bool weldActive = dynamic_cast<RenderModel*>(t.model) != nullptr ||
-                                        dynamic_cast<TransformModel*>(t.model) != nullptr;
                 // FREE tick: both ends of the OS pointer pipeline are visible right here -
                 // rawDx/rawDy went in, curDx/curDy came out - so teach the learner the REAL
                 // ballistics at this speed. Gated on no confining clip: a clamped cursor
@@ -1723,7 +1721,7 @@ static void RunTick(TickState& t) {
                     const double outC = std::sqrt((double)curDx * curDx + (double)curDy * curDy);
                     t.gainLearner.observe(inC, outC, dtMs_);
                 }
-                dragFollow = wind::ShouldDragFollow(weldActive, locked, inspect, anyButtonDown);
+                dragFollow = wind::ShouldDragFollow(locked, inspect, anyButtonDown);
                 if (dragFollow) {
                     dx = curDx;
                     dy = curDy;
@@ -1937,13 +1935,8 @@ static void RunTick(TickState& t) {
                 if (wind::TrackTargetCenter(rc, t.viewCx, t.viewCy, lvl, t.mon.w, t.mon.h,
                                             t.cfg.trackAlign, t.cfg.trackMarginPct, ox, oy)) { tx = ox; ty = oy; }
                 if (was == wind::ViewOwner::Mouse) { t.viewVx = 0; t.viewVy = 0; }
-                if (t.cfg.trackGlideMode == 1) {
-                    t.viewCx = wind::SpringToward(t.viewCx, tx, t.viewVx, vi.dtMs, t.cfg.trackGlideMs);
-                    t.viewCy = wind::SpringToward(t.viewCy, ty, t.viewVy, vi.dtMs, t.cfg.trackGlideMs);
-                } else {
-                    t.viewCx = wind::GlideToward(t.viewCx, tx, vi.dtMs, t.cfg.trackGlideMs);
-                    t.viewCy = wind::GlideToward(t.viewCy, ty, vi.dtMs, t.cfg.trackGlideMs);
-                }
+                t.viewCx = wind::SpringToward(t.viewCx, tx, t.viewVx, vi.dtMs, t.cfg.trackGlideMs);
+                t.viewCy = wind::SpringToward(t.viewCy, ty, t.viewVy, vi.dtMs, t.cfg.trackGlideMs);
                 r = wind::DetachedMap(t.viewCx, t.viewCy, ptrX, ptrY, lvl, t.mon.w, t.mon.h);
                 t.mapper.reset(t.viewCx, t.viewCy);   // hybrid switches and the next tick start here
                 t.lastSetVirtual = cur;               // measure the next hand motion from here

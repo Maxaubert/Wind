@@ -56,9 +56,6 @@ struct Config {
     int    panUpVk   = 0, panUpMods   = 0, panDownVk  = 0, panDownMods  = 0;
                                      // while zoomed. Swallowed system-wide like recenterVk (VK only,
                                      // no modifier - the keyboard hook swallows the bare key).
-    int    swapModelVk      = 0;     // RETIRED (the hybrid "Auto" model replaced it). The field
-                                     // stays only so ParseConfig can keep asserting the ini key
-                                     // is IGNORED; nothing binds, swallows, or reads it.
     // Hotkey to toggle the magnified cursor's visibility while zoomed. Edge-detected in the tick
     // loop and flips a runtime-only bool (NEVER written back to the ini), so pressing it does not
     // trigger the config hot-reload and the zoom level is preserved. 0 = unbound. Modifier mask
@@ -177,7 +174,6 @@ struct Config {
     int mouseAlign = 0;      // mouse: 0 = centred (today), 1 = within the edges (phase 2)
     int trackGlideMs = 200;  // glide time to 95% of the distance (field pick 2026-09-29, spring)
     int trackMarginPct = 15; // within-edges margin, % of the view on each side
-    int trackGlideMode = 1;  // hidden: 1 = spring (carries velocity, field pick), 0 = old exponential ease
     int mouseMarginPct = 0;  // mouse edge mode (mouseAlign=1): how close to the view edge the pointer may go
     int trackLog = 0;        // hidden: log every resolved caret/focus event with its source
     // Input-transform publish decimation (issue #189, hot): publish every Nth CHANGED tick during

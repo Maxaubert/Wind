@@ -28,7 +28,6 @@ public:
     bool ready() const override { return ready_; }
     void hideSystemCursor(bool hide) override;
     void setActive(bool active) override;
-    void onActivate() override {}                 // no capture to prime
     void idleTick() override;                     // keeps the context and the cursor lens warm at 1x
     void present(const MapResult& r, double level, const Config& cfg,
                  const MonitorTarget& mon, const PresentExtras& ex) override;

@@ -39,24 +39,15 @@ struct DwmCentreIn {
     bool zoomed = false;          // level above 1x
     bool freeCursor = false;      // free-cursor transform session (not Inspect, not locked)
     bool viewDetached = false;    // caret, focus, keyboard pan or mouse edge mode own the view
-    bool wallNeeded = false;      // an MPO pan wall is in reach (WallBinding): DWM would pan past it
+    bool wallNeeded = false;      // an MPO pan wall is in reach (NearWall): DWM would pan past it
     bool quiesce = false;         // launch quiesce: no magnification activity at all
 };
 
-// Whether an armed MPO pan wall can actually stop the view at this level: the wall caps the source
-// origin at maxSafe/level, and the view can only travel to w - w/level. Below ~9.3x on a 3840 wide
-// monitor (15.8x on 2160 high) the wall is out of reach, so DWM's own pan cannot cross it.
-inline bool WallBinding(bool wallArmed, double level, int w, int h, double maxSafe) {
-    if (!wallArmed || level <= 1.0) return false;
-    return (w * level - w) > maxSafe || (h * level - h) > maxSafe;
-}
-
 // Whether the view is close enough to an armed MPO pan wall that DWM's own (unclamped) centring
-// could cross it before Wind's next tick. Only then does Wind take the pan back. The earlier rule
-// (WallBinding: the wall is reachable at this level at all) switched centring off everywhere above
-// ~9.3x, and the switch made the view jump and the pan wobble in the middle of the screen (field
-// video 2026-10-07). marginSrc covers one tick of fast hand motion; the 32000 limit itself already
-// sits under the real 32767 field.
+// could cross it before Wind's next tick. Only then does Wind take the pan back. Taking it back
+// everywhere the wall is reachable at all (above ~9.3x on a 3840 wide monitor) made the view jump
+// and the pan wobble in the middle of the screen (field video 2026-10-07). marginSrc covers one
+// tick of fast hand motion; the 32000 limit itself already sits under the real 32767 field.
 inline bool NearWall(bool wallArmed, double srcLeft, double srcTop, double level, double maxSafe,
                      double marginSrc) {
     if (!wallArmed || level <= 1.0) return false;
