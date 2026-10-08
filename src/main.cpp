@@ -294,6 +294,8 @@ struct TickState {
     CursorMapper   mapper;
     LockDetector   detector;    // free vs game-locked cursor
     bool           prevDetLocked = false;   // edge-log the detector state (issue #221)
+    bool           lockEff = false;         // the lock that APPLIES this tick (LockApplies, native_cursor.h)
+    bool           lockFreed = false;       // locked, but freed by a shown pointer (edge-logged)
     std::string    lastCoreIni;             // stripped ini fingerprint (skip UI-only reloads)
     bool           configRetry = false;     // last reload found the ini unreadable: check again
     POINT          lastSetVirtual{};  // MEASURED post-present pointer position (virtual px), the
@@ -1483,7 +1485,7 @@ static void RunTick(TickState& t) {
     // Keyboard panning (#287): the hook swallows pan keys only while this is set, so at 1x
     // the pan keys reach the app (e.g. Ctrl+Alt+Left/Right = IntelliJ navigate back/forward). Mouselook games and Inspect
     // keep them too. Published once per tick, before anything reads the pan keys.
-    const bool panArmed = lvl > 1.001 && !inspect && !t.detector.locked();
+    const bool panArmed = lvl > 1.001 && !inspect && !t.lockEff;
     g_input.setPanArmed(panArmed);
     if (!panArmed) t.keyPan.reset();
 
@@ -1733,6 +1735,25 @@ static void RunTick(TickState& t) {
                           (locked && t.detector.warpLocked()) ? " (warp-anchor)" : "", lvl);
                 t.prevDetLocked = locked;
             }
+            // A shown pointer is a free pointer in a native-cursor session (LockApplies): a game's
+            // menus keep DWM centring, its mouselook (pointer hidden) keeps the locked pan.
+            {
+                const bool nativeTx = wind::UseNativeCursor(t.cfg.txNativeCursor) &&
+                                      dynamic_cast<TransformModel*>(t.model) != nullptr;
+                bool showing = false;
+                if (locked && nativeTx) {
+                    CURSORINFO ci{}; ci.cbSize = sizeof(ci);
+                    showing = GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING) && ci.hCursor != nullptr;
+                }
+                const bool applies = wind::LockApplies(locked, nativeTx, showing);
+                const bool freed = locked && !applies;
+                if (freed != t.lockFreed)
+                    wind::Log(wind::LogLevel::Info, "lock", "%s lvl=%.2f",
+                              freed ? "pointer shown: free (native cursor)" : "lock applies", lvl);
+                t.lockFreed = freed;
+                t.lockEff = applies;
+                locked = applies;
+            }
             if (locked) {
                 // LOCKED pan at the TRUE desktop-cursor speed (issue: "cursor slower zoomed
                 // in DOOM"). Not modelled - MEASURED: free ticks record the OS's own in->out
@@ -1867,7 +1888,7 @@ static void RunTick(TickState& t) {
         //     the view solid;
         //   - a mouselook game clips/recentres the pointer, which is exactly why the locked path
         //     integrates raw deltas instead (issue #3 / #158).
-        const bool freeCursor = t.cfg.txFreeCursor != 0 && !inspect && !t.detector.locked() &&
+        const bool freeCursor = t.cfg.txFreeCursor != 0 && !inspect && !t.lockEff &&
                                 dynamic_cast<TransformModel*>(t.model) != nullptr;
         // SHELL INPUT PANEL REGIME (issue #283): while the emoji picker (or clipboard history, touch
         // keyboard) is open, the real pointer replaces the sprite (the shell composes its panels above
@@ -1923,12 +1944,12 @@ static void RunTick(TickState& t) {
         // fsCover (read once above, see the "Foreground facts for this tick" comment) is the
         // borderless-fullscreen-game tell; reused here rather than a second ForegroundCoversMonitor
         // call (it is also what fsGame below aliases).
-        const bool trackEnabled = lvl > 1.001 && !panel && !inspect && !t.detector.locked() && !fsCover &&
+        const bool trackEnabled = lvl > 1.001 && !panel && !inspect && !t.lockEff && !fsCover &&
                                   (t.cfg.trackCaret != 0 || t.cfg.trackFocus != 0);
         { wind::SpanScope span_(wind::kSpanTrack); g_track.setActive(trackEnabled, t.cfg.trackCaret != 0, t.cfg.trackFocus != 0, t.cfg.trackLog != 0); }
         if (t.cfg.trackLog) {   // #326: why tracking is on or off, logged on every change
             const int bits = (lvl > 1.001 ? 1 : 0) | (panel ? 2 : 0) | (inspect ? 4 : 0) |
-                             (t.detector.locked() ? 8 : 0) | (fsCover ? 16 : 0);
+                             (t.lockEff ? 8 : 0) | (fsCover ? 16 : 0);
             if (bits != t.diagEnableBits) {
                 t.diagEnableBits = bits;
                 wind::Log(wind::LogLevel::Info, "track", "diag enabled=%d zoomed=%d panel=%d inspect=%d locked=%d fsCover=%d lvl=%.2f",
@@ -2054,7 +2075,7 @@ static void RunTick(TickState& t) {
                 t.lastSetVirtual = cur;
                 r = wind::DetachedMap(t.viewCx, t.viewCy, px, py, lvl, t.mon.w, t.mon.h);
                 t.viewDetached = edges;               // edge mode keeps the view where it is
-            } else if (t.cfg.mouseAlign == 1 && lvl > 1.001 && !panel && !inspect && !t.detector.locked()) {
+            } else if (t.cfg.mouseAlign == 1 && lvl > 1.001 && !panel && !inspect && !t.lockEff) {
                 // MOUSE EDGE MODE (issue #276 phase 2): the pointer roams freely inside the view and
                 // the view moves only when it reaches the margin band, just far enough. No weld:
                 // the pointer is real, so clicks are native. Mouselook (locked) and Inspect keep the

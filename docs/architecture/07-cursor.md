@@ -186,8 +186,16 @@ mickeys. `LockDetector` (`src/lock_detector.*`, pure) decides, with hysteresis.
 - **A clip is a lock signal only when meaningfully smaller than the monitor.** A machine-wide
   work-area clip (desktop minus taskbar, ~95%) is common; any-clip ran every desktop session locked.
 - Tick counts derive from the refresh rate (`setTickRate`).
-- **Forced locks go through the detector** (`seedLock()`), because the free-cursor gate reads
-  `t.detector.locked()`; a tick-local flag once left the view pinned to the warped pointer.
+- **Forced locks go through the detector** (`seedLock()`), so the lock persists across ticks; a
+  tick-local flag once left the view pinned to the warped pointer.
+- **A shown pointer is a free pointer in a native-cursor session** (`LockApplies`,
+  `src/native_cursor.h`; the tick's result is `t.lockEff`, which every gate reads). The locked path
+  pans from raw mickeys and re-parks the real pointer once per tick; the sprite hid that, but the
+  native cursor IS the real pointer, so DWM drew it wherever the hand had moved it between ticks.
+  Field case: DOOM: The Dark Ages menus under `lockApps` (2026-10-07), measured at 4.7x as 22 px
+  spread slow and 74 px medium with jumps to 118 px, against 0-2 px free. Games show the pointer
+  in menus and hide it for mouselook, so the lock applies only while `GetCursorInfo` reports it
+  hidden. The sprite path keeps the old rule. The log line is `lock  pointer shown: free`.
 - `lockForce=1` locks everywhere, for diagnosis only: locked mode has no ballistics or drag-follow.
 
 ```mermaid

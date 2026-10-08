@@ -54,6 +54,8 @@ Chapter numbers refer to `docs/architecture/NN-*.md`.
   never reload. Add new UI-only keys there.
 
 **Cursor (07)**
+- In a native-cursor session the lock (`lockApps`, tells) applies only while the pointer is hidden
+  (`LockApplies`); gates read `t.lockEff`, not `t.detector.locked()`. See 07.
 - Native cursor (`txNativeCursor=1`, both sampling modes; `src/native_cursor.h`): DWM draws the real pointer via
   Wind's cursor lens (a hidden `WC_MAGNIFIER` window, built on the owner thread at idle) and
   centres the view itself (`SetFullscreenMagnifierOffsetsDWMUpdated`). While DWM centres, never
