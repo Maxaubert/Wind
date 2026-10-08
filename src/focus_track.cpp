@@ -173,18 +173,32 @@ static bool Win32Caret(RECT& out) {
 
 // The MSAA system caret object (OBJID_CARET) of the focused window: Chromium/Electron maintain it for
 // screen magnifiers even where their UIA caret is only a line (#341). Rejected when empty or line-wide.
+//
+// These are synchronous cross-process calls on the tracker thread with no deadline of their own, so a
+// hung renderer would stall all tracking until it answers. Not a true deadline (that needs a helper
+// thread, as FocusLookup has), but it bounds the damage: a window Windows reports as not responding
+// is skipped, and a call that took over 250 ms puts the source on a 2 s cooldown, so a slow app
+// costs one slow call per two seconds instead of one per poll.
 static bool MsaaCaret(RECT& out) {
+    static ULONGLONG s_skipUntil = 0;   // tracker thread only
     HWND fg = GetForegroundWindow();
     if (!fg || IsOwnOrTooltip(fg)) return false;
+    const ULONGLONG t0 = GetTickCount64();
+    if (t0 < s_skipUntil) return false;
     GUITHREADINFO gi{ sizeof(gi) };
     HWND h = fg;
     if (GetGUIThreadInfo(GetWindowThreadProcessId(fg, nullptr), &gi) && gi.hwndFocus) h = gi.hwndFocus;
+    if (IsHungAppWindow(fg)) { s_skipUntil = t0 + 2000; return false; }
     IAccessible* acc = nullptr;
-    if (FAILED(AccessibleObjectFromWindow(h, (DWORD)OBJID_CARET, IID_IAccessible, (void**)&acc)) || !acc) return false;
+    if (FAILED(AccessibleObjectFromWindow(h, (DWORD)OBJID_CARET, IID_IAccessible, (void**)&acc)) || !acc) {
+        if (GetTickCount64() - t0 > 250) s_skipUntil = GetTickCount64() + 2000;
+        return false;
+    }
     VARIANT self; VariantInit(&self); self.vt = VT_I4; self.lVal = CHILDID_SELF;
     long x = 0, y = 0, w = 0, hh = 0;
     const bool got = SUCCEEDED(acc->accLocation(&x, &y, &w, &hh, self));
     acc->Release();
+    if (GetTickCount64() - t0 > 250) s_skipUntil = GetTickCount64() + 2000;
     if (!got || hh <= 0 || (x == 0 && y == 0)) return false;
     out = { x, y, x + (w > 1 ? w : 2), y + hh };
     return !wind::IsLineWideCaret(out.left, out.top, out.right, out.bottom);
@@ -340,7 +354,8 @@ void FocusTracker::run() {
     HWND javaWnd = nullptr;
     bool javaHave = false;
     RECT javaCaret{};
-    ULONGLONG javaRetryAt = 0;              // a failed read is retried at most every 250 ms
+    ULONGLONG javaRetryAt = 0;              // a failed read is retried after javaBackoff, which grows
+    ULONGLONG javaBackoff = 0;              // 250 ms, doubling to 4 s; a Java event or window switch resets it
     unsigned javaEvents = 0;
 
     // #341 line-wide fallback, cached per focus (review #349): the character at the caret or the MSAA
@@ -472,12 +487,19 @@ void FocusTracker::run() {
         if (java) {
             if (fg != javaWnd) { javaWnd = fg; javaDirty = true; }
             const ULONGLONG now = GetTickCount64();
-            // Only after a Java event or window switch (javaDirty), or one retry per 250 ms after a
-            // failed read: unrelated system-wide wakes must not become Java round trips (review #281).
+            // Only after a Java event or window switch (javaDirty), or a retry after a failed read
+            // that backs off (250 ms, doubling to 4 s while focus sits on a non-text component): the
+            // bridge is never polled at a fixed rate, and unrelated system-wide wakes must not become
+            // Java round trips (review #281).
             if (javaDirty || (!javaHave && now >= javaRetryAt)) {
+                if (javaDirty) javaBackoff = 0;   // an event or a window switch is fresh evidence
                 javaHave = jab.caret(fg, javaCaret);
                 javaDirty = false;
-                if (!javaHave) javaRetryAt = now + 250;
+                if (javaHave) javaBackoff = 0;
+                else {
+                    javaBackoff = wind::BackoffMs(javaBackoff, 250, 4000);
+                    javaRetryAt = now + javaBackoff;
+                }
                 if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "java read %s via %s index=%d (poll=%d events=%u): %ld,%ld %ldx%ld",
                                            javaHave ? "ok" : "none", jab.lastSrc(), jab.lastIndex(),
                                            (int)fromPoll, javaEvents, javaCaret.left, javaCaret.top,
