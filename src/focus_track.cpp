@@ -377,6 +377,7 @@ void FocusTracker::run() {
     wind::FocusKey baseKey;
     wind::CaretLineState caretLine;   // one-line caret height in the current focus (#337)
     wind::CaretHoldState caretHold;   // last caret line, for mid-scroll Enter reports (#337)
+    wind::CaretGhostState caretGhost; // last caret followed, for line-end ghosts (#387)
 
     // Java apps (issue #281): the bridge is asked only when something may have moved (a bridge caret
     // or focus callback, or any tracker wake), never by the 60 Hz poll, which reuses the last answer.
@@ -591,7 +592,7 @@ void FocusTracker::run() {
                     caretGen = focusGen;   // same control: keep following (no new baseline)
                     if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "focus repeat (same control): caret still followed");
                 }
-                if (caretGen != focusGen) { caretLine = wind::CaretLineState{}; caretHold = wind::CaretHoldState{}; }
+                if (caretGen != focusGen) { caretLine = wind::CaretLineState{}; caretHold = wind::CaretHoldState{}; caretGhost = wind::CaretGhostState{}; }
                 if (!java) {
                     const LONG rawTop = rc.top;
                     int top = (int)rc.top;
@@ -607,6 +608,7 @@ void FocusTracker::run() {
                 }
                 if (caretGen != focusGen) {
                     caretGen = focusGen; lastCaret = rc; baseKey = key;        // baseline, not followed
+                    wind::NoteFollowedCaret((int)rc.left, (int)rc.top, (int)rc.bottom, caretGhost);
                     if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "caret baseline via %s: %ld,%ld", src, rc.left, rc.top);
                 } else if (!EqualRect(&rc, &lastCaret)) {
                     lastCaret = rc;
@@ -619,7 +621,12 @@ void FocusTracker::run() {
                         !CaretInsideElement({ rc.left, rc.top, rc.right, rc.bottom }, { b.left, b.top, b.right, b.bottom })) {
                         if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "caret skipped (outside its element %ld,%ld %ldx%ld) via %s: %ld,%ld",
                                                    b.left, b.top, b.right - b.left, b.bottom - b.top, src, rc.left, rc.top);
+                    } else if (wind::IsLineEndGhost((int)rc.left, (int)rc.top, (int)rc.bottom, caretGhost)) {
+                        // A line-end ghost (#387): the view stays on the text until the next real caret.
+                        if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "caret skipped (line-end ghost) via %s: %ld,%ld %ldx%ld",
+                                                   src, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top);
                     } else {
+                        wind::NoteFollowedCaret((int)rc.left, (int)rc.top, (int)rc.bottom, caretGhost);
                         publish(TrackKind::Caret, rc.left, rc.top, rc.right, rc.bottom, src);
                     }
                 }
