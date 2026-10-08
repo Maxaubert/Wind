@@ -43,12 +43,55 @@ inline std::vector<std::wstring> ListProfileFiles(const std::wstring& dir) {
               [](const std::wstring& a, const std::wstring& b) { return _wcsicmp(a.c_str(), b.c_str()) < 0; });
     return names;
 }
+// REPLACE WINDOW (field 2026-10-07: tray slider drags reset the whole ini to defaults). The writers
+// replace the ini atomically (WriteTextFileAtomic), but for a moment around each MoveFileEx the
+// name refuses opens: measured on this rig, ~1% of reads during a burst of replaces failed with
+// ERROR_ACCESS_DENIED (the replaced file is delete-pending), and a replace fails while a reader
+// holds the file. A failed read used to look like an EMPTY or MISSING ini to every caller - the
+// core's hot-reload then wrote the defaults over it (unbound zoom keys mid-zoom, onboarded=0, the
+// setup at the next start). So reads and replaces retry through that window (sharing violations
+// and access-denied on a file that exists) until a DEADLINE, not a count: a background process's
+// Sleep(1) can last a whole 15.6 ms timer tick on Windows 11, so a count is no time bound. The core's
+// tick thread reads with a short budget (it re-checks on its next poll anyway); the settings apps
+// and the tray use the default.
+inline bool TransientFileError(DWORD e) {
+    return e == ERROR_SHARING_VIOLATION || e == ERROR_ACCESS_DENIED || e == ERROR_LOCK_VIOLATION;
+}
 // False when the file exists but could not be opened (locked, permissions) OR is missing; `out` is
 // only written on success. Callers that must distinguish "missing" pre-check GetFileAttributesW.
-inline bool ReadTextFileOk(const std::wstring& path, std::string& out) {
-    std::ifstream f(path, std::ios::binary);
-    if (!f) return false;
-    std::stringstream ss; ss << f.rdbuf(); out = ss.str(); return true;
+inline bool ReadTextFileOk(const std::wstring& path, std::string& out, unsigned waitMs = 250) {
+    const ULONGLONG deadline = GetTickCount64() + waitMs;
+    for (;;) {
+        HANDLE h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                               nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h == INVALID_HANDLE_VALUE) {
+            if (TransientFileError(GetLastError()) && GetTickCount64() < deadline) { Sleep(1); continue; }
+            return false;
+        }
+        std::string text;
+        char buf[16384];
+        DWORD got = 0;
+        bool ok = true;
+        while ((ok = ReadFile(h, buf, sizeof(buf), &got, nullptr) != 0) && got > 0) text.append(buf, got);
+        CloseHandle(h);
+        if (!ok) {
+            if (GetTickCount64() < deadline) { Sleep(1); continue; }
+            return false;
+        }
+        out.swap(text);
+        return true;
+    }
+}
+// For READ-MODIFY-WRITE of the live ini: true with the text, or with "" when the file is MISSING;
+// false when it exists but stays unreadable. A caller that writes back must stop on false - an
+// unreadable ini read as "" and written back with one key changed is every other setting lost.
+inline bool ReadLiveIni(const std::wstring& path, std::string& out) {
+    if (ReadTextFileOk(path, out)) return true;
+    if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) return false;
+    const DWORD e = GetLastError();
+    if (e != ERROR_FILE_NOT_FOUND && e != ERROR_PATH_NOT_FOUND) return false;
+    out.clear();
+    return true;
 }
 inline std::string ReadTextFile(const std::wstring& path) {
     std::string out;
@@ -62,11 +105,16 @@ inline bool WriteTextFileAtomic(const std::wstring& path, const std::string& tex
     { std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
       if (!f) return false;
       f.write(text.data(), (std::streamsize)text.size()); }
-    if (!MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    // A reader holding the ini open makes the replace fail for a moment (see ReadTextFileOk).
+    const ULONGLONG deadline = GetTickCount64() + 250;
+    for (;;) {
+        if (MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) return true;
+        const DWORD e = GetLastError();
+        if (TransientFileError(e) && GetTickCount64() < deadline) { Sleep(1); continue; }
         DeleteFileW(tmp.c_str());
+        SetLastError(e);
         return false;
     }
-    return true;
 }
 // Live-bound contract, switch-time half: capture the CURRENT live settings into the OUTGOING
 // profile's file before a switch overwrites the live ini. The setConfig mirror covers every write
@@ -91,8 +139,9 @@ inline void EnsureProfilesSeeded(const std::wstring& iniPath) {
     std::wstring dir = ProfilesDirFromIni(iniPath);
     if (GetFileAttributesW(dir.c_str()) != INVALID_FILE_ATTRIBUTES) return;
     if (!CreateDirectoryW(dir.c_str(), nullptr)) return;
-    std::string live = ReadTextFile(iniPath);
-    if (!WriteTextFileAtomic(dir + L"\\Default.ini", MakeProfileText(live))) {
+    std::string live;
+    if (!ReadLiveIni(iniPath, live) ||
+        !WriteTextFileAtomic(dir + L"\\Default.ini", MakeProfileText(live))) {
         RemoveDirectoryW(dir.c_str());   // dir is still empty; retry the whole seed next launch
         return;
     }
@@ -135,7 +184,8 @@ inline void ResetSessionToProfile(const std::wstring& iniPath) {
         DeleteFileW(keep.c_str());
         return;
     }
-    std::string live = ReadTextFile(iniPath);
+    std::string live;
+    if (!ReadLiveIni(iniPath, live)) return;
     auto vals = ReadIniValues(live);
     auto it = vals.find("profile");
     if (it == vals.end() || it->second.empty()) return;

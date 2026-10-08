@@ -63,9 +63,10 @@ bool SetMainEngine(const std::wstring& ini, int picked) {
     wind::Log(wind::LogLevel::Warn, "tray", "engine pick: relaunch FAILED (rc=%lld haveExe=%d); reverting model",
               static_cast<long long>(rc), (int)haveExe);
     DeleteFileW(wind::SessionKeepPath().c_str());
-    const std::string cur = wind::ReadTextFile(ini);
-    wind::WriteTextFileAtomic(ini, oldModel.empty() ? wind::UpdateIniText(cur, Flyout::kEngineKey, "hybrid")
-                                                    : wind::UpdateIniText(cur, Flyout::kEngineKey, oldModel));
+    std::string cur;
+    if (wind::ReadLiveIni(ini, cur))
+        wind::WriteTextFileAtomic(ini, oldModel.empty() ? wind::UpdateIniText(cur, Flyout::kEngineKey, "hybrid")
+                                                        : wind::UpdateIniText(cur, Flyout::kEngineKey, oldModel));
     Notify(L"Wind", L"Could not restart Wind; kept the current engine.");
     return false;
 }
