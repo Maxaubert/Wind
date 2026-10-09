@@ -153,6 +153,13 @@ wide along the left (and top) edge once the view rests there. `SrcEdgeFloor` kee
 input-transform publish and the hook writer, so they never describe different rects. It resolves
 to 0 where there is no headroom, so identity stays identity.
 
+**Both margins are nearest-only** (`EdgeMarginsFor`). Each keeps desktop texels out of the view,
+and the pointer-framework hit-test ignores a pointer outside it: zoomed, a click on the
+bottom-left corner pixel did not open Start, while native Magnifier opens it at every level
+(field probe 2026-10-09; either margin alone kills the corner, both at 0 fix it). Smooth sampling
+clamps to edge and survives the far corner, as native does, so it uses native's exact rect: 0 and 0.
+Nearest keeps 1 and 2, and with them the dead corner pixel.
+
 ## The MPO 16-bit overflow
 
 With MPO enabled, the NVIDIA driver packs DWM's magnification translation into a 16-bit field on

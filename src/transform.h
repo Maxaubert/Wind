@@ -44,7 +44,19 @@ OffsetF ComputeFixedPointOffset(double centerX, double centerY, double level);
 // held `edgeMargin` texels inside the texture on the LOW side too. edgeMargin 0 = old behaviour.
 struct MagTransform { int offX; int offY; int txX; int txY; };
 MagTransform ComputeMagTransform(double srcLeft, double srcTop, double level,
-                                 int screenW, int screenH, double edgeMargin = 0.0);
+                                 int screenW, int screenH, double edgeMargin = 0.0,
+                                 double farMargin = 2.0);
+
+// EDGE MARGINS FOLLOW THE SAMPLING MODE (field report 2026-10-09: zoomed, a click in the
+// bottom-left corner did not open Start; native Magnifier opens it at every level). Both margins
+// keep desktop texels out of the view, and the pointer-framework hit-test ignores a pointer outside
+// the view, so the corner pixel was dead: measured, either margin alone kills it, both at 0 fix it.
+// Both margins defend the NEAREST path: the low one hides its grey border line, the far one the
+// right/bottom driver reset (#148; the 16-bit MPO field that lives in the nearest path). Smooth
+// sampling takes a float path, clamps to edge and survives the same corner, as native Magnifier
+// does, so it gets native's exact rect: 0 and 0. Nearest (and an unset mode) keeps both.
+struct EdgeMargins { double lo; double hi; };
+EdgeMargins EdgeMarginsFor(int samplingMode, double cfgLowMargin);
 
 // The low-side margin that is actually applicable at this level, so every caller that needs the
 // source rect (the visual write, the input-transform publish, the sprite/weld geometry) derives

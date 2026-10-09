@@ -723,14 +723,15 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // transform: srcL/srcT go on to feed the input-transform publish below, and a visual rect
     // that sat one texel inside a published rect that did not would put the pointer framework's
     // hover hit-test one source pixel off along that edge - level px on screen. One rect.
+    const EdgeMargins margins = EdgeMarginsFor(cfg.txSamplingMode, cfg.txEdgeMargin);
     {
-        const double loX = SrcEdgeFloor(cfg.txEdgeMargin, applyLevel, mon_.w);
-        const double loY = SrcEdgeFloor(cfg.txEdgeMargin, applyLevel, mon_.h);
+        const double loX = SrcEdgeFloor(margins.lo, applyLevel, mon_.w);
+        const double loY = SrcEdgeFloor(margins.lo, applyLevel, mon_.h);
         if (srcL < loX) srcL = loX;
         if (srcT < loY) srcT = loY;
     }
     MagTransform m = ComputeMagTransform(srcL, srcT, applyLevel, mon_.w, mon_.h,
-                                         cfg.txEdgeMargin);
+                                         margins.lo, margins.hi);
     // 2D write-site 16-bit backstop (issue #191): when the session is MPO-exposed AND the ghost
     // is not verifiably holding the game off its overlay plane, the never-exceed-32767 invariant
     // is enforced HERE, structurally, regardless of the mapper walls (which divide by the

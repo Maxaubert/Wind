@@ -31,6 +31,11 @@ static int iround(double v) {
     return (lower & 1) ? lower + 1 : lower;
 }
 
+EdgeMargins EdgeMarginsFor(int samplingMode, double cfgLowMargin) {
+    if (samplingMode == 1) return EdgeMargins{ 0.0, 0.0 };
+    return EdgeMargins{ cfgLowMargin, 2.0 };
+}
+
 double SrcEdgeFloor(double edgeMargin, double level, int screenExtent) {
     if (edgeMargin <= 0.0 || level <= 1.0) return 0.0;
     // Never past the UPPER bound: at a level with less headroom than the margin the two clamps
@@ -41,7 +46,8 @@ double SrcEdgeFloor(double edgeMargin, double level, int screenExtent) {
 }
 
 MagTransform ComputeMagTransform(double srcLeft, double srcTop, double level,
-                                 int screenW, int screenH, double edgeMargin) {
+                                 int screenW, int screenH, double edgeMargin,
+                                 double farMargin) {
     if (level < 1.0) level = 1.0;
     int offX = iround(srcLeft), offY = iround(srcTop);
     int txX = iround(-srcLeft * level), txY = iround(-srcTop * level);
@@ -53,7 +59,7 @@ MagTransform ComputeMagTransform(double srcLeft, double srcTop, double level,
     // same corner passed at fractional mid-ramp levels, which the floor alone keeps inside).
     // Public offsets: off + screenW/level <= screenW - margin.
     // Private translations: the same bound in level-space, margin scaled by level.
-    const double kMargin = 2.0;
+    const double kMargin = farMargin > 0.0 ? farMargin : 0.0;   // 0 for smooth: EdgeMarginsFor
     const double maxX = screenW - screenW / level - kMargin;
     const double maxY = screenH - screenH / level - kMargin;
     // LOW side: the edge sampling margin (see the header note). Both channels get the SAME

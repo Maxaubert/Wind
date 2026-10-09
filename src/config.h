@@ -436,6 +436,7 @@ struct Config {
     // Magnifier is smooth-sampled, whose filter clamps to edge, which is why it never shows it.
     // 0 = old behaviour (for A/B); raise to 2 if a thinner line survives at 1. The cost is the
     // outermost source pixel becoming unreachable - exactly what the right/bottom already pay.
+    // Nearest only: smooth sampling uses no margin on any side (EdgeMarginsFor, transform.h).
     double txEdgeMargin = 1.0;
     int txGrid = 0;       // Snap the applied level to a geometric ladder (per mille; 50 = 5%).
                           //     Theory: DWM caches scaled surfaces per scale factor, so reusing
