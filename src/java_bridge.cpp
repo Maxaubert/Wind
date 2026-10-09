@@ -164,11 +164,23 @@ bool JavaBridge::ensure(HWND javaWindow, DWORD wakeTid, UINT wakeMsg, bool log) 
         if (!enabledDone_) enableRetryAt_ = now + 30000;     // a locked file: try again in 30 s
     }
     if (mod_) return true;
+    // The caller asks on every poll of a Java foreground window. A probe that failed backs off per
+    // process, checked before ProcessDir's OpenProcess: a bridge-less Java app used to cost ~60
+    // process opens per second.
+    DWORD pid = 0; GetWindowThreadProcessId(javaWindow, &pid);
+    auto fail = probeFail_.find(pid);
+    if (fail != probeFail_.end() && now < fail->second.until) return false;
+    auto noteFail = [&] {
+        if (probeFail_.size() > 64) probeFail_.clear();
+        ProbeFail& f = probeFail_[pid];
+        f.backoffMs = BackoffMs(f.backoffMs, 2000, 60000);
+        f.until = now + f.backoffMs;
+    };
     const std::wstring dir = ProcessDir(javaWindow);
-    if (dir.empty()) return false;          // retry on the next Java window
+    if (dir.empty()) { noteFail(); return false; }          // retry after the backoff
     // A miss is remembered per app folder, never for the whole session: one Java app without a
     // bridge DLL must not switch Java tracking off for IntelliJ later (review #281).
-    if (failedDirs_.count(dir)) return false;
+    if (failedDirs_.count(dir)) { noteFail(); return false; }
     for (const std::wstring& c : JavaBridgeDllCandidates(dir)) {
         if (GetFileAttributesW(c.c_str()) == INVALID_FILE_ATTRIBUTES) continue;
         mod_ = LoadVerified(c, log);
@@ -184,6 +196,7 @@ bool JavaBridge::ensure(HWND javaWindow, DWORD wakeTid, UINT wakeMsg, bool log) 
     }
     if (!mod_) {
         failedDirs_.insert(dir);
+        noteFail();
         wind::Log(wind::LogLevel::Info, "track", "java: no usable Access Bridge DLL near %ls", dir.c_str());
         return false;
     }
@@ -201,6 +214,7 @@ bool JavaBridge::ensure(HWND javaWindow, DWORD wakeTid, UINT wakeMsg, bool log) 
         FreeLibrary(mod_); mod_ = nullptr;
         s_isJava = nullptr; s_withFocus = nullptr; s_textInfo = nullptr; s_textRect = nullptr; s_release = nullptr;
         failedDirs_.insert(dir);
+        noteFail();
         return false;
     }
     s_wakeTid = wakeTid; s_wakeMsg = wakeMsg;
@@ -244,27 +258,23 @@ bool JavaBridge::caret(HWND javaWindow, RECT& out) {
         // The caret's own location first (#365): the bounds of the character AT the caret came
         // back wrong from Swing text areas (x pinned at 2, y at the top or bottom of the view,
         // field 2026-10-04). Character bounds stay the fallback for bridges without it.
+        // Java answers in its user space (see JavaUserToPx). A DPI-unaware Java app is stretched by
+        // the same monitor scale, so the monitor DPI converts every answer, the character-bounds
+        // fallbacks included (they used to come back unscaled, off by the scale at 150-225%).
+        UINT dx = 96, dy = 96;
+        GetDpiForMonitor(MonitorFromWindow(javaWindow, MONITOR_DEFAULTTONEAREST), MDT_EFFECTIVE_DPI, &dx, &dy);
+        const double s = dx / 96.0;
+        auto set = [&](const JavaRectPx& p) { out = { p.left, p.top, p.right, p.bottom }; ok = true; };
         if (s_caretLoc && s_caretLoc(vm, ac, &r, ti.caretIndex) && good()) {
-            // Java answers in its user space: device px divided by the monitor scale (at 225%,
-            // x=59 for a caret at device x=134, field 2026-10-04). A DPI-unaware Java app is
-            // stretched by the same monitor scale, so the monitor DPI converts both.
-            UINT dx = 96, dy = 96;
-            GetDpiForMonitor(MonitorFromWindow(javaWindow, MONITOR_DEFAULTTONEAREST), MDT_EFFECTIVE_DPI, &dx, &dy);
-            const double s = dx / 96.0;
-            auto px = [s](int v) { return (LONG)(v * s + (v >= 0 ? 0.5 : -0.5)); };
-            const LONG w = px(r.width) > 2 ? px(r.width) : 2;
-            out = { px(r.x), px(r.y), px(r.x) + w, px(r.y + r.height) };
-            ok = true;
+            set(JavaSpanRectPx(r.x, r.y, r.width, r.height, s));
             lastSrc_ = "caretloc";
         } else if (s_textRect(vm, ac, &r, ti.caretIndex) && good()) {
             lastSrc_ = "charrect";
-            out = { r.x, r.y, r.x + (r.width > 1 ? r.width : 2), r.y + r.height };
-            ok = true;
+            set(JavaSpanRectPx(r.x, r.y, r.width, r.height, s));
         } else if (ti.caretIndex > 0 && s_textRect(vm, ac, &r, ti.caretIndex - 1) && good()) {
             // At the very end of the text there is no character under the caret: use the right edge
             // of the one before it.
-            out = { r.x + r.width, r.y, r.x + r.width + 2, r.y + r.height };
-            ok = true;
+            set(JavaAfterRectPx(r.x, r.y, r.width, r.height, s));
             lastSrc_ = "charrect-prev";
         }
         lastIndex_ = ti.caretIndex;

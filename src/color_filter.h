@@ -1,6 +1,6 @@
 #pragma once
 // Colour filter controller (issue #288). Applies the DWM colour effect (MagSetFullscreenColorEffect)
-// through the Magnification runtime's owner thread, deduped so an unchanged filter costs one compare
+// on the tick thread, deduped so an unchanged filter costs one compare
 // per tick. At 1x it holds its OWN runtime reference while a filter is on, because the effect only
 // exists while a runtime lives, and a live runtime taxes every cursor change any app makes (so it is
 // held only while it has to be). Windows clears the effect when the process dies

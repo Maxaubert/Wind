@@ -105,4 +105,34 @@ inline bool HoldMidScrollCaret(int left, int& top, int& bottom, int lineH, Caret
     return held;
 }
 
+// Line-end ghost (#387, Discord field 2026-10-08, trackLog + recording at 7.4x). Typing at the point
+// where a line is about to wrap, Chromium reports the caret for a keystroke at the right edge of the
+// text box (after the trailing space that hangs past the wrap): 2996,1944 1x49 -> 3375,1942 2x54,
+// then the next real position (the start of the next line, or back where it was). Following it put
+// the view on the composer's buttons with the text off screen. The ghost is on the SAME line (its
+// top within half a line) but a DIFFERENT box (2 px higher, 5 px taller), and far to the right of
+// the last caret after a single key (380 px, where a character is 8-30 px). End and a click move as
+// far, but the caret keeps its own box there, so they are followed.
+struct CaretGhostState {
+    bool have = false;
+    int left = 0, top = 0, h = 0;   // the last caret followed
+};
+
+inline constexpr double kGhostJumpLines = 3.0;   // further right than this many line heights in one report
+inline constexpr int    kGhostBoxPx = 2;         // the box changed by at least this much (top or height)
+
+inline bool IsLineEndGhost(int left, int top, int bottom, const CaretGhostState& s) {
+    if (!s.have || s.h <= 0) return false;
+    const int h = bottom - top;
+    const int dTop = top - s.top, dH = h - s.h;
+    const bool sameLine = (dTop < 0 ? -dTop : dTop) < s.h / 2;
+    const bool otherBox = (dTop < 0 ? -dTop : dTop) >= kGhostBoxPx || (dH < 0 ? -dH : dH) >= kGhostBoxPx;
+    return sameLine && otherBox && left - s.left > s.h * kGhostJumpLines;
+}
+
+// Remember a caret that was followed (never a ghost, so a held ghost stays a ghost).
+inline void NoteFollowedCaret(int left, int top, int bottom, CaretGhostState& s) {
+    s.have = true; s.left = left; s.top = top; s.h = bottom - top;
+}
+
 }  // namespace wind

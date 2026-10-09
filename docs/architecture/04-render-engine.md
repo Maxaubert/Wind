@@ -149,7 +149,7 @@ to unbanded and logs every refusal.
 
 Do not restore 16 without re-testing both columns. Diagnostic trap: `ScreenClippingHost.exe` holds
 foreground with no visible top-level window, so a z-order walk shows Wind at index 0 while it is
-covered. The transform cursor sprite switches bands on its own, see [07](07-cursor.md).
+covered. The transform engine's Inspect crosshair switches bands on its own, see [07](07-cursor.md).
 
 ## HDR
 

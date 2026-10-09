@@ -102,9 +102,27 @@ inline bool WriteTextFileAtomic(const std::wstring& path, const std::string& tex
     // Per-process temp name: Wind.exe (tray switch) and WindConfig.exe both write magnifier.ini
     // through this path, and a shared "<ini>.tmp" would let their temp writes clobber each other.
     std::wstring tmp = path + L"." + std::to_wstring(GetCurrentProcessId()) + L".tmp";
-    { std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
-      if (!f) return false;
-      f.write(text.data(), (std::streamsize)text.size()); }
+    // The write is CHECKED and flushed before the rename: on a full disk or a quota the temp comes
+    // out short, and renaming it over the good file would replace the user's settings with a
+    // fragment (MOVEFILE_WRITE_THROUGH covers the move, not the data). Any failure drops the temp
+    // and leaves the old file untouched.
+    HANDLE h = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    bool wrote = true;
+    for (size_t off = 0; wrote && off < text.size();) {
+        const DWORD want = (DWORD)(std::min)(text.size() - off, (size_t)(1u << 20));
+        DWORD got = 0;
+        wrote = WriteFile(h, text.data() + off, want, &got, nullptr) && got == want;
+        off += got;
+    }
+    if (wrote) wrote = FlushFileBuffers(h) != 0;
+    DWORD werr = GetLastError();
+    if (!CloseHandle(h) && wrote) { wrote = false; werr = GetLastError(); }
+    if (!wrote) {
+        DeleteFileW(tmp.c_str());
+        SetLastError(werr);
+        return false;
+    }
     // A reader holding the ini open makes the replace fail for a moment (see ReadTextFileOk).
     const ULONGLONG deadline = GetTickCount64() + 250;
     for (;;) {
@@ -114,6 +132,31 @@ inline bool WriteTextFileAtomic(const std::wstring& path, const std::string& tex
         DeleteFileW(tmp.c_str());
         SetLastError(e);
         return false;
+    }
+}
+// Sweep the temp files a killed process left behind (WriteTextFileAtomic's "<file>.ini.<pid>.tmp"):
+// the installer force-kills WindConfig.exe and Wind can crash between the write and the rename.
+// Looks in the ini's folder and in profiles\. A live writer's temp exists for milliseconds, so
+// anything older than a minute that is not ours is litter.
+inline void SweepStaleIniTmp(const std::wstring& iniPath) {
+    size_t slash = iniPath.find_last_of(L"\\/");
+    const std::wstring iniDir = (slash == std::wstring::npos) ? L"." : iniPath.substr(0, slash);
+    FILETIME nowFt; GetSystemTimeAsFileTime(&nowFt);
+    ULARGE_INTEGER now; now.LowPart = nowFt.dwLowDateTime; now.HighPart = nowFt.dwHighDateTime;
+    const ULONGLONG minute = 60ULL * 10000000ULL;
+    for (const std::wstring& dir : { iniDir, ProfilesDirFromIni(iniPath) }) {
+        WIN32_FIND_DATAW fd{};
+        HANDLE h = FindFirstFileW((dir + L"\\*.tmp").c_str(), &fd);
+        if (h == INVALID_HANDLE_VALUE) continue;
+        do {
+            unsigned long pid = 0;
+            if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || !ParseIniTmpName(fd.cFileName, pid)) continue;
+            if (pid == GetCurrentProcessId()) continue;
+            ULARGE_INTEGER w; w.LowPart = fd.ftLastWriteTime.dwLowDateTime; w.HighPart = fd.ftLastWriteTime.dwHighDateTime;
+            if (now.QuadPart > w.QuadPart && now.QuadPart - w.QuadPart > minute)
+                DeleteFileW((dir + L"\\" + fd.cFileName).c_str());
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
     }
 }
 // Live-bound contract, switch-time half: capture the CURRENT live settings into the OUTGOING
@@ -136,11 +179,18 @@ inline void MirrorLiveToActiveProfile(const std::wstring& iniPath, const std::st
 // which is why a failed Default.ini capture rolls the (still empty) dir back, so the seed retries on
 // the next launch instead of leaving a permanent half-migrated state.
 inline void EnsureProfilesSeeded(const std::wstring& iniPath) {
+    SweepStaleIniTmp(iniPath);
     std::wstring dir = ProfilesDirFromIni(iniPath);
     if (GetFileAttributesW(dir.c_str()) != INVALID_FILE_ATTRIBUTES) return;
     if (!CreateDirectoryW(dir.c_str(), nullptr)) return;
     std::string live;
-    if (!ReadLiveIni(iniPath, live) ||
+    // First run: no ini yet. Seed from the documented default template (what LoadConfig would have
+    // created), so the live ini is the commented file users expect rather than the single line
+    // "profile=Default" that TryLoadConfig would then accept as an existing, complete ini.
+    const bool iniMissing = GetFileAttributesW(iniPath.c_str()) == INVALID_FILE_ATTRIBUTES;
+    const bool readOk = ReadLiveIni(iniPath, live);
+    if (readOk && iniMissing) live = DefaultIniText();
+    if (!readOk ||
         !WriteTextFileAtomic(dir + L"\\Default.ini", MakeProfileText(live))) {
         RemoveDirectoryW(dir.c_str());   // dir is still empty; retry the whole seed next launch
         return;
