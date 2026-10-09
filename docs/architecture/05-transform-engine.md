@@ -227,6 +227,10 @@ DWM magnifies with nearest neighbour unless something calls
   1-2 px" verdict predates the working setter and is void.
 - Smoothing once crashed dwm.exe over Mica and acrylic at high zoom; it did not reproduce on a
   newer driver. If dwm.exe crashes return, set `txSamplingMode=0` first.
+  It returned on 2026-10-09 (RTX 5090, dwm.exe 10.0.26100.9549): an app window with its
+  see-through acrylic setting on, smooth sampling, zoom in to about 11x, then zoom out.
+  dwmcore.dll faulted with 0x80070057 at offset 0x87565 during the zoom-out; Wind's next write
+  blocked 4.8 s while DWM restarted, and Wind itself kept running.
 
 ## The input transform
 
