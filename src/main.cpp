@@ -58,6 +58,7 @@
 #include "launch_quiesce.h"
 #include "sched_priority.h"   // tick thread priority + no power throttling (#334)
 #include "typing_key.h"       // typing-key stamp for the click quiet period (#328)
+#include "dwm_watch.h"        // StartDwmWatch (#396)
 #include "resource.h"
 
 using namespace wind;
@@ -2915,6 +2916,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             wind::Log(wind::LogLevel::Info, "session", "unsaved settings reset to the saved profile at start");
     }
     Config cfg = LoadConfig(iniPath);
+    wind::StartDwmWatch();   // notices dwm.exe restarts so DWM-held state is re-applied (#396)
     // Issue #242: the high-res/MPO option is atomic at restart - while an MPO restart is pending
     // (registry != boot) the BOOT state's look holds in both directions, and crisp never runs on
     // an MPO-enabled boot (the 16-bit TDR combo). The ini keeps the user's intent. Mirrored at

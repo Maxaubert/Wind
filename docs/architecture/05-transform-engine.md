@@ -221,6 +221,9 @@ DWM magnifies with nearest neighbour unless something calls
 - The flag is DWM-global and outlives the process that set it until DWM restarts, so a stale
   smooth state can make a build look smooth that is not. The model re-applies its mode per context
   with up to 3 retries.
+- A DWM restart resets it to nearest while win32k still reads back smooth, so a read-back cannot
+  tell. `src/dwm_watch.*` watches this session's dwm.exe process id once a second (no handle to
+  dwm.exe) and the model re-applies its mode when the generation changes (#396).
 - Smooth renders the magnified subtree into a scratch target at source resolution and scales it
   with Lanczos (`CResampleLayer::RenderLanczos`; the DWM registry value `ResampleModeOverride=1`
   would force xBR instead, any other value is an error). Zoom "shake", measured 2026-10-07: cursor
