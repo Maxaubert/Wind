@@ -9,6 +9,7 @@
 #include "config_path.h"   // ResolveLogDir
 #include "tick_span.h"     // per-tick spans (#361)
 #include "native_cursor.h" // UseNativeCursor, NudgeAfterWrite (pure, tested): issue #369
+#include "dwm_watch.h"     // DwmGeneration: re-apply DWM-held state after a restart (#396)
 #include "zoom_ladder.h"   // SnapSmoothLevel (pure, tested): issue #369
 #include <cstdio>
 #include <windows.h>
@@ -700,6 +701,13 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // in this rig's logs, 245 of 245, was the setter never being found: it was resolved by a
     // non-existent ordinal until #369.) Up to 3 attempts, 1 s apart, then
     // accept. The mode is DWM-global state, so a genuine miss is also re-tried per context.
+    // A restarted dwm.exe starts nearest whatever win32k says (#396): forget what was applied.
+    const unsigned long dwmGen = DwmGeneration();
+    if (dwmGen != dwmGenSeen_) {
+        dwmGenSeen_ = dwmGen;
+        appliedSampling_ = -2;
+        sampleTryMode_ = -2;
+    }
     const int wantSampling = cfg.txSamplingMode;
     if (wantSampling >= 0 && appliedSampling_ != wantSampling) {
         const unsigned long long now = GetTickCount64();

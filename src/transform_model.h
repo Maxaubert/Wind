@@ -130,6 +130,7 @@ private:
     int  cfgWobbleCage_ = 0;
     int  appliedSampling_ = -2;                      // sampling mode DWM currently holds (-2 = unknown)
     int  sampleTryMode_ = -2;                        // sampling mode being attempted (#274)
+    unsigned long dwmGenSeen_ = 0;                   // DwmGeneration() last acted on (#396)
     int  sampleTries_ = 0;                           // attempts so far for it (bounded at 3)
     unsigned long long sampleLastTryMs_ = 0;         // when the last attempt ran
     std::unique_ptr<CursorBlanker> blanker_;
