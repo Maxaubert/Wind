@@ -25,16 +25,40 @@ static bool ShowSystemCursor(BOOL show) {
 // in progress: a nudge between button-down and button-up made some clicks fail to register (field
 // report), so nothing is injected while the left, right or middle button is held or for 250 ms
 // after it was last seen down. The side buttons are exempt: they are Wind's zoom keys.
-static unsigned long long g_lastButtonMs = 0;
+// Shared by the tick thread and the cursor blanker's worker (its restore callback nudges), so the
+// stamp is atomic and only ever moves forward.
+static std::atomic<unsigned long long> g_lastButtonMs{0};
+static std::atomic<bool> g_nudgeOwed{false};
+static std::atomic<unsigned long long> g_heldSinceMs{0};   // first tick a button was seen down; 0 = up
 static bool ClickInProgress() {
     const unsigned long long now = GetTickCount64();
-    if ((GetAsyncKeyState(VK_LBUTTON) | GetAsyncKeyState(VK_RBUTTON) | GetAsyncKeyState(VK_MBUTTON)) & 0x8000)
-        g_lastButtonMs = now;
-    return g_lastButtonMs != 0 && now - g_lastButtonMs < 250;
+    if ((GetAsyncKeyState(VK_LBUTTON) | GetAsyncKeyState(VK_RBUTTON) | GetAsyncKeyState(VK_MBUTTON)) & 0x8000) {
+        unsigned long long prev = g_lastButtonMs.load(std::memory_order_relaxed);
+        while (prev < now && !g_lastButtonMs.compare_exchange_weak(prev, now, std::memory_order_relaxed)) {}
+        unsigned long long none = 0;
+        g_heldSinceMs.compare_exchange_strong(none, now, std::memory_order_relaxed);
+    } else {
+        g_heldSinceMs.store(0, std::memory_order_relaxed);
+    }
+    return WithinClickWindow(now, g_lastButtonMs.load(std::memory_order_relaxed));
 }
+static bool NudgeBlocked() {
+    const bool click = ClickInProgress();
+    return NudgeBlockedByClick(click, GetTickCount64(), g_heldSinceMs.load(std::memory_order_relaxed));
+}
+// A nudge skipped for a click is recorded as owed; DeliverOwedNudge sends it once the click window
+// has ended (zoom can be bound to a mouse button, so the transition often lands inside the window
+// and a still pointer would otherwise stay invisible until the hand moved). A press held past the
+// window is a drag and is nudged as usual (NudgeBlockedByClick).
 static void NudgePointer(POINT& np) {
-    if (ClickInProgress()) return;
+    if (NudgeBlocked()) { g_nudgeOwed.store(true, std::memory_order_relaxed); return; }
+    g_nudgeOwed.store(false, std::memory_order_relaxed);
     if (GetCursorPos(&np)) { SetCursorPos(np.x + 1, np.y); SetCursorPos(np.x, np.y); }
+}
+static void DeliverOwedNudge() {
+    if (!NudgeDue(g_nudgeOwed.load(std::memory_order_relaxed), NudgeBlocked())) return;
+    POINT np;
+    NudgePointer(np);
 }
 void TransformModel::resetTransformState() {
     nativePrimed_ = false;  // a rebuilt context needs its own public prime (#369)
@@ -418,6 +442,10 @@ void TransformModel::setActive(bool active) {
     }
     RECT full{ 0, 0, mon_.w, mon_.h };
     host_.setInputTransform(false, full, full);   // input mapping back to identity at 1x
+    // The context outlives the session (idleTick keeps it), so resetTransformState does not run
+    // between sessions: forget the last publish level here, or a quick zoom back to the same level
+    // compares equal and skips the nudge that makes DWM draw the pointer again.
+    ixPubLevel_ = 0.0;
     step(6);
     // Stomp-guard expectation (issue #217): the slot should now read DISABLED. Kept valid across
     // the idle so the next session's first tick catches a rect stranded meanwhile (e.g. a native
@@ -437,6 +465,7 @@ void TransformModel::setActive(bool active) {
 }
 
 void TransformModel::idleTick() {
+    DeliverOwedNudge();   // a nudge a click skipped at the zoom-out is still owed at 1x
     // NATIVE CURSOR (issue #369): keep the context and the cursor lens alive at 1x instead of
     // releasing them. With the lens style OFF this costs nothing (measured: a pointer-toggling
     // full-screen app keeps Independent Flip, 0 spike frames), and it moves the one-time 60-125 ms
@@ -546,6 +575,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         srcL = o.x; srcT = o.y;
     }
     ClickInProgress();   // keep the click window current between nudges
+    DeliverOwedNudge();
     restLevel_ = cfg.txRestLevel;           // hot
     if (!ensureMag()) return;   // lazy context: the session's first write brings DWM up
     // Bitmap smoothing (issue #197/#227), once per magnification context. The smooth filter
@@ -633,11 +663,17 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // The owed write survives paused ticks (forceWrite_), so a switch-off during a pause still puts
     // Wind's offset back on the first tick that may write.
     {
+        // A broken export (dwmCentreBroken_) removes the wish, so the switch is not retried (and the
+        // write forced, the line logged) on every tick; the failure itself is logged once, in
+        // setDwmCentre.
         const bool want = ex.dwmCentre && applyLevel > 1.001;
-        if (want != dwmCentreOn_ && (!want || !ex.pauseWrites)) {
+        if (WantDwmCentreSwitch(want, dwmCentreOn_, dwmCentreBroken_, ex.pauseWrites)) {
+            const bool before = dwmCentreOn_;
             setDwmCentre(want);
-            forceWrite_ = true;
-            wind::Log(wind::LogLevel::Info, "transform", "DWM centring %s", dwmCentreOn_ ? "ON" : "off");
+            if (dwmCentreOn_ != before) {
+                forceWrite_ = true;
+                wind::Log(wind::LogLevel::Info, "transform", "DWM centring %s", dwmCentreOn_ ? "ON" : "off");
+            }
         }
     }
     // Trace inputs, captured here and appended at the END of present().
@@ -687,6 +723,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     wi.wroteThisTick      = changedAndWriting;
     wi.ramping            = ramping;
     wi.mode               = cfg.txWarmMode;
+    wi.allowed            = ex.warmAllowed;
     wi.applyLevel         = applyLevel;
     // Cadence (issue #246): the period counts from whichever came last, the previous pulse
     // closing or a real write (a real write resets keepAliveTick_ above, so no pulse is open).
@@ -892,7 +929,12 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
                 }
             } else if (cursorHidden_) {
                 ShowSystemCursor(TRUE);
-                blanker_->restore();
+                // A restored-but-still pointer stays invisible until a cursor EVENT, so the nudge
+                // follows the restore on the blanker's worker, as at the zoom-out.
+                blanker_->restore([] {
+                    POINT np;
+                    NudgePointer(np);
+                });
                 cursorHidden_ = false;
             }
         }

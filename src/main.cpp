@@ -1403,6 +1403,10 @@ static void RunTick(TickState& t) {
     bool active = zoomed || inspect;                 // overlay runs while zoomed OR Inspect-frozen
     if (active) t.lastActiveMs = GetTickCount64();   // event-driven idle settle window (#71)
     else t.viewOwner.wasTracking = false;            // 1x only: the next zoom-in re-baselines the tracker (#310)
+    // The lock that APPLIES is recomputed only in the free zoomed branch below, and panArmed reads it
+    // first: a value left by the previous session (or from before Inspect) would arm or disarm the
+    // pan keys for a tick on stale evidence. Outside a free zoomed tick there is no lock.
+    if (!active || inspect) { t.lockEff = false; t.lockFreed = false; }
     if (active && !t.prevActive && t.cfg.zoomTrace) {  // zoom timeline (#310): arm on the enter tick
         auto& z = t.zt;
         z = TickState::ZoomTimeline{};
@@ -1430,6 +1434,13 @@ static void RunTick(TickState& t) {
             // Direct swaps, no scheme reload.
             g_tint.restore(false);
             t.outlineIdleSec = 0.0;   // each activation starts with the outline fully shown
+            // StepViewOwner runs only while zoomed, so the owner, its latched caret target and the
+            // detached view survived the 1x gap and the next zoom-in opened on the previous
+            // session's caret. Every session starts with the mouse in charge.
+            wind::ResetViewOwnerForSession(t.viewOwner);
+            t.viewDetached = false;
+            t.viewVx = 0; t.viewVy = 0;
+            t.keyPan.reset();
             // Follow the cursor's monitor (multiMonitor on, only when zoomed). Only reconfigure when
             // it actually changed; retarget() returns false on multi-GPU/failure, in which case we keep
             // the current monitor. The overlay is still at alpha 0 here, so a move never flashes.
@@ -2224,6 +2235,7 @@ static void RunTick(TickState& t) {
             dc.wallNeeded = wind::NearWall(wallNeeded, r.srcLeft, r.srcTop, lvl, kMaxSafeTxMagnitude, 64.0);
             dc.quiesce = quiesceHold;
             ex.dwmCentre = wind::WantDwmCentring(dc);
+            ex.warmAllowed = !freeCursor;
         }
         // Our tray menu is open (in WindTray.exe, flagged through the shared block): the pointer
         // belongs to the USER (they are aiming at menu items),
@@ -2313,8 +2325,12 @@ static void RunTick(TickState& t) {
             t.presentAccum = 0.0;
         }
         if (doPresent) {
-            LARGE_INTEGER zp0; if (t.zt.armed && t.zt.step == 0) QueryPerformanceCounter(&zp0);
+            LARGE_INTEGER zp0{}; if (t.zt.armed && t.zt.step == 0) QueryPerformanceCounter(&zp0);
             { wind::SpanScope span_(wind::kSpanPresent); t.model->present(r, lvl, t.cfg, t.mon, ex); }      // render+present (never blocks the ramp)
+            // The transform model hides and restores the pointer on its own (Inspect exit, the
+            // hide-cursor hotkey), so read its state back: a mirrored flag went stale after both and
+            // made the next Inspect toggle read our own hiding as the app's mouselook tell.
+            if (auto* tm = dynamic_cast<TransformModel*>(t.model)) t.cursorHiddenByUs = tm->pointerHidden();
             if (t.zt.armed && t.zt.step == 0 && t.zt.presentMs == 0) {
                 LARGE_INTEGER zp1; QueryPerformanceCounter(&zp1); t.zt.presentMs = QpcMs(t, zp0.QuadPart, zp1.QuadPart);
             }
@@ -2699,7 +2715,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 // above, since a live hook swallows bound keys so the poller can never see one.
                 const RAWKEYBOARD& kb = ri->data.keyboard;
                 if ((kb.Flags & RI_KEY_BREAK) && kb.VKey > 0 && kb.VKey < 256)
-                    g_input.rawKeyUp(static_cast<int>(kb.VKey));
+                    g_input.rawKeyUp(static_cast<int>(kb.VKey), static_cast<uint32_t>(GetMessageTime()));
                 // Key activity (down and up) feeds only tracking's key clock (#289), never held state. Raw Input
                 // keeps arriving while the hook is suspended (fullscreen game, noSwallowApps), so
                 // the clock stays true there instead of the gate switching off (review #289).
@@ -2726,12 +2742,15 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 // (idempotent with the hook's own clear; never falsely holds). It does not touch the
                 // hook's g_swallowedDown record, so swallowing is unaffected.
                 USHORT bf = m.usButtonFlags;
-                if (bf & RI_MOUSE_BUTTON_4_UP) g_input.rawButtonUp(1);
-                if (bf & RI_MOUSE_BUTTON_5_UP) g_input.rawButtonUp(2);
+                // The UP's event time is the WM_INPUT's queue time, not now: the hook's reordering
+                // guard compares event times (src/event_order.h), so a main-thread stall is harmless.
+                const uint32_t rawTime = static_cast<uint32_t>(GetMessageTime());
+                if (bf & RI_MOUSE_BUTTON_4_UP) g_input.rawButtonUp(1, rawTime);
+                if (bf & RI_MOUSE_BUTTON_5_UP) g_input.rawButtonUp(2, rawTime);
                 // Same net for left/right/middle click binds (#285); a no-op unless one holds a zoom.
-                if (bf & RI_MOUSE_LEFT_BUTTON_UP)   g_input.rawButtonUp(3);
-                if (bf & RI_MOUSE_RIGHT_BUTTON_UP)  g_input.rawButtonUp(4);
-                if (bf & RI_MOUSE_MIDDLE_BUTTON_UP) g_input.rawButtonUp(5);
+                if (bf & RI_MOUSE_LEFT_BUTTON_UP)   g_input.rawButtonUp(3, rawTime);
+                if (bf & RI_MOUSE_RIGHT_BUTTON_UP)  g_input.rawButtonUp(4, rawTime);
+                if (bf & RI_MOUSE_MIDDLE_BUTTON_UP) g_input.rawButtonUp(5, rawTime);
                 if (!g_input.hookActive()) {
                     if (bf & RI_MOUSE_BUTTON_4_DOWN) g_input.setButtonState(1, true);
                     if (bf & RI_MOUSE_BUTTON_5_DOWN) g_input.setButtonState(2, true);

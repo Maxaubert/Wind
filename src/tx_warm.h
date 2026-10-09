@@ -49,6 +49,7 @@ struct TxWarmIn {
     bool   wroteThisTick      = false;  // a real, changed write already went out - nothing to warm
     bool   ramping            = false;  // the level is moving on its own; it is already waking DWM
     int    mode               = 1;      // 0 = off, anything else = the 1px pulse
+    bool   allowed            = true;   // RunTick's ex.warmAllowed: false for a free pointer's view
     double applyLevel         = 1.0;
     int    warmHz             = 0;      // pulses per second; 0 = every tick
     bool   pulseOpen          = false;  // the displacing half went out; the return half is owed
@@ -57,6 +58,10 @@ struct TxWarmIn {
 
 inline TxWarm WarmAction(const TxWarmIn& in) {
     if (in.mode <= 0) return TxWarm::None;
+    // Not for a free pointer's detached view (field video 2026-10-08: following a Discord caret,
+    // the pulses showed as a 1 px shake). An open pulse still closes, so a view is never left
+    // displaced when the owner changes mid-pulse.
+    if (!in.allowed && !in.pulseOpen) return TxWarm::None;
     // A real write this tick already did the job, and a ramp writes a new level every tick anyway.
     if (in.wroteThisTick || in.ramping) return TxWarm::None;
     // Never warm at rest level. Below this the session is not magnifying, and poking DWM there is

@@ -70,6 +70,33 @@ inline std::string EnableAccessBridgeText(const std::string& text, bool& changed
     return out;
 }
 
+// Java answers in its own user space: device px divided by the monitor scale (at 225%, x=59 for a
+// caret at device x=134, field 2026-10-04). Every bridge answer, the caret location AND the character
+// bounds the fallbacks use, goes through these so they land in the same (device px) space.
+struct JavaRectPx { long left, top, right, bottom; };
+inline long JavaUserToPx(int v, double scale) { return (long)(v * scale + (v >= 0 ? 0.5 : -0.5)); }
+// A span (the caret, or the character at it): at least 2 px wide.
+inline JavaRectPx JavaSpanRectPx(int x, int y, int w, int h, double scale) {
+    const long pw = JavaUserToPx(w, scale);
+    return { JavaUserToPx(x, scale), JavaUserToPx(y, scale),
+             JavaUserToPx(x, scale) + (pw > 2 ? pw : 2), JavaUserToPx(y + h, scale) };
+}
+// The right edge of a character (the caret after the last one): a 2 px sliver.
+inline JavaRectPx JavaAfterRectPx(int x, int y, int w, int h, double scale) {
+    const long r = JavaUserToPx(x + w, scale);
+    return { r, JavaUserToPx(y, scale), r + 2, JavaUserToPx(y + h, scale) };
+}
+
+// Retry delay that doubles per consecutive failure (`first` on the first, capped at `cap`): the Java
+// bridge is never polled at a fixed rate, a failure backs off until an event or a window switch
+// resets it.
+inline unsigned long long BackoffMs(unsigned long long current, unsigned long long first,
+                                    unsigned long long cap) {
+    if (current == 0) return first;
+    const unsigned long long next = current * 2;
+    return next > cap ? cap : next;
+}
+
 // A Java top-level window: AWT/Swing frames and dialogs (IntelliJ, PyCharm, NetBeans, ...).
 inline bool IsJavaWindowClass(const std::wstring& cls) {
     return cls == L"SunAwtFrame" || cls == L"SunAwtDialog";

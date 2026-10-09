@@ -59,6 +59,46 @@ inline bool WantDwmCentring(const DwmCentreIn& in) {
     return in.zoomed && in.freeCursor && !in.viewDetached && !in.wallNeeded && !in.quiesce;
 }
 
+// Whether present() should try a DWM centring switch this tick. `broken` (the export is missing or
+// refused the call) removes the wish: the switch used to be retried on every unpaused tick, each
+// try forcing a transform write and an Info log line at tick rate. Switching OFF is allowed on a
+// paused tick (it stops DWM moving the view); switching ON waits for a tick that may write, because
+// the switch needs the forced write that follows it.
+inline bool WantDwmCentreSwitch(bool want, bool centreOn, bool broken, bool pauseWrites) {
+    const bool eff = want && !broken;
+    return eff != centreOn && (!eff || !pauseWrites);
+}
+
+// The click window the pointer nudge respects: a button seen down within `windowMs` of `nowMs`. The
+// stamp is written by the tick thread and read by it and the cursor blanker's worker, so `nowMs` can
+// predate a newer stamp; that reads as "a click just happened", never as an unsigned underflow.
+inline bool WithinClickWindow(unsigned long long nowMs, unsigned long long lastButtonMs,
+                              unsigned long long windowMs = 250) {
+    if (lastButtonMs == 0) return false;
+    if (nowMs < lastButtonMs) return true;
+    return nowMs - lastButtonMs < windowMs;
+}
+
+// A nudge skipped for a click is OWED, not dropped (field: zoom bound to a mouse button, released
+// inside the window, left a still pointer invisible). It is delivered on the first tick after the
+// click window ends, and never during one.
+inline bool NudgeDue(bool owed, bool clickInProgress) {
+    return owed && !clickInProgress;
+}
+
+// A PRESS HELD PAST THE CLICK WINDOW IS A DRAG (field report 2026-10-08: zooming while holding a
+// drag-select made the view jump about 90 px back and forth every frame). A level write still goes
+// out during a click (HoldWriteForClick), and without its nudge DWM showed Wind's centre for that
+// frame and its own on the next cursor event. The nudge is kept out of clicks because it made some
+// clicks fail; once a button has been held for the whole window the press is a drag, and a pixel and
+// back under the hand changes nothing it does. Inside the window after a release, still blocked.
+inline bool NudgeBlockedByClick(bool clickInProgress, unsigned long long nowMs, unsigned long long heldSinceMs,
+                                unsigned long long windowMs = 250) {
+    if (!clickInProgress) return false;
+    const bool drag = heldSinceMs != 0 && nowMs >= heldSinceMs && nowMs - heldSinceMs >= windowMs;
+    return !drag;
+}
+
 // KEEP WRITING WHILE DWM CENTRES (user field test 2026-10-07). DWM's own centring moves only DWM's
 // copy of the view; win32k's copy (what MagGetFullscreenTransform returns) changes only on a client
 // write, and pointer-framework hit-testing (the taskbar, XAML, Chromium) maps points with it. When
