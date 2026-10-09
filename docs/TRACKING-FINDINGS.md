@@ -91,3 +91,14 @@ follows only the terminal caret there.
   (`ExpandToEnclosingUnit(Character)`) or the MSAA system caret (`OBJID_CARET`); with neither, it is
   ignored, never guessed. The answer is cached per focus and re-asked on a real event, a changed
   line rect, or at most every 250 ms.
+
+## Chromium line-end ghost caret (issue #387)
+
+Field 2026-10-08 (Discord, uia-selection, 7.4x, trackLog plus a screen recording): typing where a line is
+about to wrap, the caret is reported for one keystroke at the right edge of the text box, after the trailing
+space that hangs past the wrap: `2996,1944 1x49` -> `3375,1942 2x54` -> the next real position. Following it
+put the view on the composer's buttons with the text off screen. The ghost sits on the same line but in a
+different box (2 px higher, 5 px taller) and far to the right after a single key (380 px; a character is
+8-30 px). `IsLineEndGhost` (src/caret_rect.h) skips a caret on the same line whose box changed by 2 px or
+more and that jumped right by more than 3 line heights; End and clicks keep the caret's box, so they are
+followed. trackLog logs `caret skipped (line-end ghost)`.
