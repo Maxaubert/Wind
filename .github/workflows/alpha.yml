@@ -90,12 +90,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          ALPHA_NOTE: ${{ inputs.note }}
         run: |
           $ErrorActionPreference = 'Continue'
           $PSNativeCommandUseErrorActionPreference = $false
           $tag  = '${{ steps.ver.outputs.tag }}'
           $exe  = '${{ steps.asset.outputs.path }}'
-          $note = '${{ inputs.note }}'
+          $note = $env:ALPHA_NOTE   # data, never spliced into the script
           $body = @"
           **Alpha build - not a release.** Installs over a normal Wind install and shares its
           settings; roll back by running the stable installer from the Latest release.
@@ -112,7 +113,7 @@ jobs:
           Unsigned, like the stable build - SmartScreen will warn.
           "@
           $body | Set-Content notes.md -NoNewline
-          gh release create $tag $exe --prerelease --title "Wind ${{ steps.ver.outputs.alpha }}" --notes-file notes.md
+          gh release create $tag $exe --prerelease --target '${{ github.sha }}' --title "Wind ${{ steps.ver.outputs.alpha }}" --notes-file notes.md
           if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
 
       # Alphas are disposable and accumulate fast. Keep the newest few so a bisect across recent

@@ -2,6 +2,16 @@
 #include "../src/inspect_focus.h"
 
 using wind::ShouldGameInspect;
+using wind::InspectLockTell;
+
+TEST_CASE("a pointer pinned at an unconfined edge is not a game lock (review M4)") {
+    CHECK(InspectLockTell(true, false));          // locked, not pinned: real capture
+    CHECK_FALSE(InspectLockTell(true, true));     // pushed into a desktop edge: not capture
+    CHECK_FALSE(InspectLockTell(false, false));
+    // Render session on the desktop, pointer pushed into a corner: normal Inspect, no foreground
+    // steal (the steal made Inspect drop its clicks).
+    CHECK_FALSE(ShouldGameInspect(true, InspectLockTell(true, true), true, true));
+}
 
 TEST_CASE("zoomed while WE hide the cursor: the LockDetector decides") {
     // Render sessions hide + weld the OS cursor, so its visibility says nothing about the app.

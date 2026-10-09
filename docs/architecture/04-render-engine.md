@@ -126,7 +126,9 @@ flowchart TD
   `cropCapture=0` by default (a desktop window switch would leave stale pixels outside the view);
   `gameCrop=1` (default) crops while the foreground covers the monitor, where every pixel is dirty
   again next frame.
-- Rotated outputs are not supported; `recreateDupl` logs them.
+- Rotated outputs are not supported: `recreateDupl` logs them, the engine pick sends them to
+  Transform, and a captured surface whose size differs from the desktop is never copied (the last
+  good frame stays, logged once).
 - A dedicated capture thread was considered and deferred: high risk (feedback exclusion, HDR
   format changes, retarget, cross-thread texture sharing), no measured stall.
 

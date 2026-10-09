@@ -120,7 +120,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'gh release upload failed' }
           } else {
             Write-Host "creating release $tag"
-            gh release create $tag $exe $stable --title "Wind $v" --notes-file notes.md
+            gh release create $tag $exe $stable --target '${{ github.sha }}' --title "Wind $v" --notes-file notes.md
             if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
           }
 

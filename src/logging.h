@@ -62,6 +62,10 @@ std::string BuildSnapshot(const SystemInfo& si);
 // processTag is a short, filename-safe tag: "core" -> wind-core.log, "config" -> wind-config.log.
 // Resolves the log dir, rotates if the existing file is at/over kLogMaxBytes, opens for append.
 void LogInit(const wchar_t* processTag);
+// Call once this process is THE instance (after the single-instance mutex): a log that had to fall
+// back to a per-PID file because the previous instance still held the shared one moves onto the
+// shared log, where it rotates. No-op when it already owns it.
+void LogClaimBase();
 // Queue one event line. Thread-safe and NON-BLOCKING (#361): the caller formats into a lock-free
 // queue and a low-priority writer thread does the disk I/O (and the flush on Warn/Error). A full
 // queue drops the line and the writer reports the count. Safe on the tick and hook threads, but

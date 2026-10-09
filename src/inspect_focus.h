@@ -20,6 +20,15 @@ namespace wind {
 //
 // The detector is deliberately not consulted at 1x - it only updates while the overlay is active,
 // so an idle Wind holds the last session's stale verdict.
+// The detector's lock verdict as Inspect may use it (review 2026-10-09 M4). A free pointer pushed
+// into a screen edge or corner keeps receiving raw motion while it cannot move - exactly the
+// detector's mouselook tell - so on a plain desktop Inspect stole foreground and dropped clicks.
+// A pinned pointer that no clip confines is not evidence of capture; a game that confines the
+// pointer, or recentres it, never sits pinned at an unconfined edge.
+inline bool InspectLockTell(bool detectorLocked, bool pinnedAtUnconfinedEdge) {
+    return detectorLocked && !pinnedAtUnconfinedEdge;
+}
+
 inline bool ShouldGameInspect(bool zoomed, bool detectorLocked, bool cursorWasShowing,
                               bool magnifierHidCursor) {
     if (!zoomed) return !cursorWasShowing;

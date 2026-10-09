@@ -31,7 +31,8 @@ unit-tested; the Win32 half is excluded from the test build.
 
 - **Files.** `%LOCALAPPDATA%\Wind\logs\` (`ResolveLogDir`): `wind-core.log` from Wind.exe,
   `wind-config.log` from WindConfig.exe. Rotation at 1 MiB over three generations. A second
-  instance that cannot open the shared log writes `wind-core-<pid>.log`.
+  instance that cannot open the shared log writes `wind-core-<pid>.log`; once it holds the
+  single-instance mutex (a restart), `LogClaimBase` moves it onto `wind-core.log`, so it rotates.
 - **Lines.** `wind::Log(level, category, fmt, ...)` gives
   `2026-05-31T08:14:22.137Z  +962862007.114  t57132  WARN  render  <msg>`: precise UTC, the QPC
   clock in ms (the clock of PresentMon `--qpc_time_ms`, ETW and the tick records) and the thread id.
