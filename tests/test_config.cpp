@@ -95,11 +95,6 @@ TEST_CASE("cursorLockVk: unbound by default, parseable, forbidden-sanitized") {
     CHECK(ParseConfig("cursorLockVk=8\n").cursorLockVk == 0);       // Backspace -> sanitized to unbound
 }
 
-TEST_CASE("swapModelVk is retired: the ini key is ignored (feature removed; Auto replaces it)") {
-    CHECK(ParseConfig("").swapModelVk == 0);
-    CHECK(ParseConfig("swapModelVk=112\n").swapModelVk == 0);
-}
-
 
 TEST_CASE("IsForbiddenBindVk blocks keys Wind must never swallow, allows the rest") {
     CHECK(IsForbiddenBindVk(0x01));   // VK_LBUTTON (left click)
@@ -431,11 +426,6 @@ TEST_CASE("cursorBandAuto defaults on and parses off (issue #269)") {
     CHECK(ParseConfig("cursorBandAuto=1\n").cursorBandAuto == 1);
 }
 
-TEST_CASE("spriteCapturable is a hidden test knob, off by default (issue #269)") {
-    CHECK(ParseConfig("").spriteCapturable == 0);
-    CHECK(ParseConfig("spriteCapturable=1\n").spriteCapturable == 1);
-}
-
 TEST_CASE("the transform engine is the desktop default (issue #271)") {
     CHECK(ParseConfig("").desktopTransform == 1);
     CHECK(ParseConfig("desktopTransform=0\n").desktopTransform == 0);
@@ -512,7 +502,7 @@ TEST_CASE("tracking settings: defaults and parsing (issue #276)") {
     CHECK(d.trackFocus == 0);
     CHECK(d.trackAlign == 0);
     CHECK(d.mouseAlign == 0);
-    CHECK(d.trackGlideMs == 200); CHECK(d.trackGlideMode == 1);
+    CHECK(d.trackGlideMs == 200);
     CHECK(d.trackMarginPct == 15);
     CHECK(d.trackLog == 0);
     Config c = ParseConfig("trackCaret=0\ntrackFocus=1\ntrackAlign=1\nmouseAlign=1\n"

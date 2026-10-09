@@ -4,35 +4,22 @@
 #include "comp_pin.h"
 #include "cursor_blanker.h"
 #include "cursor_sprite.h"
-#include "wobble_cage.h"
 #include <memory>
 #include <vector>
 #include <thread>
 #include <mutex>
 #include <condition_variable>
 namespace wind {
-// Count of MagShowSystemCursor calls that did NOT take (thread-affinity, dead context). A
-// non-zero value while zoomed means the real pointer may be visible next to our sprite - the
-// two-cursor artifact (issue #229).
-unsigned long long TransformCursorHideFailures();
-
 class TransformModel : public IMagnifierModel {
 public:
-    TransformModel(bool fastPan, bool smoothPan, bool useSprite, int zorderBand,
-                   bool spriteBand16 = false, bool cursorBandAuto = false)
-        : fastPan_(fastPan), smoothPan_(smoothPan), useSprite_(useSprite),
-          zorderBand_(zorderBand), spriteBand16_(spriteBand16), cursorBandAuto_(cursorBandAuto) {}
-    // Before initialize(). The dualcursor rig measures the sprite from captures (issue #269).
-    void setSpriteCapturable(bool on) { spriteCapturable_ = on; }
-    // Native cursor preference (issue #369, src/native_cursor.h): UseNativeCursor(txNativeCursor).
-    // Latched into the session at zoom-in; present() keeps it current.
-    void setNativeCursorPref(bool on) { nativePref_ = on; }
-    // This session draws DWM's own pointer (no sprite, no blanking). RunTick skips the shell-panel
-    // pointer freeze for it: DWM's pointer is already above the panels.
-    bool nativeSession() const { return active_ && nativeSession_; }
+    // Every session draws DWM's own pointer (issue #369, src/native_cursor.h); the sprite window
+    // exists only for the Inspect crosshair, and zorderBand / cursorBandAuto place that window.
+    TransformModel(bool fastPan, bool smoothPan, int zorderBand, bool cursorBandAuto = false)
+        : fastPan_(fastPan), smoothPan_(smoothPan),
+          zorderBand_(zorderBand), cursorBandAuto_(cursorBandAuto) {}
     bool initialize(const MonitorTarget& monitor) override;
     // MONITOR GEOMETRY CAN CHANGE UNDER A LIVE SESSION (issue #230). mon_ feeds the clamp bounds in
-    // ComputeMagTransform, the sprite's placement offsets and the MagSetInputTransform rects, and
+    // ComputeMagTransform, the crosshair's placement offsets and the MagSetInputTransform rects, and
     // it used to be written once at startup: retarget() was declared render-only, so a display-mode
     // change - a game switching to a lower resolution - left the transform clamping against the old
     // size and the view could be panned off the real desktop.
@@ -41,40 +28,25 @@ public:
     bool ready() const override { return ready_; }
     void hideSystemCursor(bool hide) override;
     void setActive(bool active) override;
-    void onActivate() override {}                 // no capture to prime
-    void idleTick() override;                     // tears the mag context down once idle (#148)
-    void setIdleReleaseMs(int ms) { idleReleaseMs_ = ms < 0 ? 0 : ms; }
+    void idleTick() override;                     // keeps the context and the cursor lens warm at 1x
     void present(const MapResult& r, double level, const Config& cfg,
                  const MonitorTarget& mon, const PresentExtras& ex) override;
     bool coversShell() const override { return false; }
-    // True when THIS present actually called SetCursorPos (weld executed; not deduped, not
-    // suppressed by drag-follow). RunTick's #169 measured-baseline logic reads it exactly like
-    // RenderEngine::parkedLastFrame(): baseline on the weld point only when the weld really fired.
     // Written-transform readbacks for the telemetry channel (issue #227): what the tick path
-    // last actually applied (the hook writer keeps its own cache and is not reflected here).
-    // Sprite placement readback for the two-cursor metric (issue #229). The sprite is placed
-    // in DESKTOP space and DWM magnifies it with the content, so its SCREEN position is
-    // (spriteDesktop - src) * level, recomputed by DWM from whatever transform is live at
-    // composite time. Placed once per tick, the transform possibly many times per tick: the
-    // gap between where the sprite lands and where the real pointer is IS the reported
-    // "two cursors, one lagging". Needs the real placement, not an inferred one.
-    bool spriteShown() const { return spriteShown_; }
-    // Sprite window + hotspot for the hook's coherent repositioning (issue #229).
-    HWND spriteHwnd() const { return sprite_ ? sprite_->hwnd() : nullptr; }
-    int  spriteHotX() const { return sprite_ ? sprite_->hotX() : 0; }
-    int  spriteHotY() const { return sprite_ ? sprite_->hotY() : 0; }
-    int  spriteDesktopX() const { return lastSpriteX_; }
-    int  spriteDesktopY() const { return lastSpriteY_; }
+    // last actually applied.
     double writtenLevel() const { return lastLevel_; }
     int    writtenTxX() const { return lastTxX_; }
     int    writtenTxY() const { return lastTxY_; }
+    // True when THIS present actually called SetCursorPos (weld executed; not deduped, not
+    // suppressed). Only the locked and Inspect regimes weld now; RunTick's #169 measured-baseline
+    // logic reads it exactly like RenderEngine::parkedLastFrame().
     bool weldedLastFrame() const { return weldedLastFrame_; }
     // Whether MagSetInputTransform is usable (probed once at initialize; needs UIAccess). The
     // hybrid DESKTOP pick requires this: without the source-rect input transform, transform
     // desktop sessions have the pointer-framework hover dead zones (POINTER-HITTEST-FINDINGS.md).
     bool inputTransformAvailable() const { return inputTransformAvailable_; }
     // Zoom timeline (#310, zoomTrace): where the last setActive(true) spent its time.
-    struct EnterSplit { double bridgeMs = 0, ensureMagMs = 0; bool wasWarm = false; };
+    struct EnterSplit { double ensureMagMs = 0; bool wasWarm = false; };
     EnterSplit lastEnter() const { return lastEnter_; }
     // Whether the DWM magnification context is up right now. Read BEFORE the enter tick's first
     // present (which builds it) to know if a zoom-in starts warm or cold.
@@ -86,15 +58,10 @@ public:
     void setMpoBusterWanted(bool wanted) { mpoBusterWanted_ = wanted; }
     void setMpoExposed(bool exposed) { mpoExposed_ = exposed; }
     bool mpoGhostSettled() const { return mpoGhost_.settled(GetTickCount64()); }
-    // For the hook write path (issue #206): the hook needs the SAME host, since the runtime is
-    // refcounted per process and a second one would not be the context DWM is holding.
-    MagHost* magHost() { return &host_; }
 private:
-    bool fastPan_, smoothPan_, useSprite_;
-    bool warmLevelJitter_ = false;   // mode 4: perturb the level, not the position (this tick only)
-    bool spriteFirst_ = false;       // sprite placed at least once this session (lockstep gate)
+    bool fastPan_, smoothPan_;
     // Per-tick trace (cfg.txTrace). Fixed ring, no allocation on the tick path.
-    struct TxTick { double ms; double level; int txX, offX, spriteX, spriteY;
+    struct TxTick { double ms; double level; int txX, offX;
                     unsigned char wrote, changed, ramping, warm; };
     static const int kTraceCap = 8192;
     TxTick traceBuf_[kTraceCap]{};
@@ -102,13 +69,11 @@ private:
     bool traceOn_ = false;
     void traceDump();
     static void WriteTraceCsv(const std::vector<TxTick>& rows);   // background thread
-    int  zorderBand_;                                // sprite z-band (above the shell); needs UIAccess
-    bool spriteBand16_ = false;                      // P2 experiment: band-16 SCREEN-space sprite
+    int  zorderBand_;                                // crosshair z-band (above the shell); needs UIAccess
     bool cursorBandAuto_ = false;                    // issue #269: band 16 unless the snip overlay is up
     HWND layerFg_ = nullptr;                         // foreground the layer verdict was read for
     int  layerFgBand_ = 0;                           // ...and its z-band
-    void updateSpriteLayer();                        // pick the sprite window for this tick (#269)
-    bool spriteCapturable_ = false;                  // test rig only: keep the sprite capturable
+    void updateSpriteLayer();                        // pick the crosshair window for this tick (#269)
     bool ready_ = false;
     bool active_ = false;
     MonitorTarget mon_{};
@@ -124,40 +89,31 @@ private:
     unsigned long long ghostSessionStartMs_ = 0;     // 0 = not started; drives the opening burst
     bool mpoExposed_ = false;                        // apply the 16-bit write clamp
     unsigned long long lastGhostAssertMs_ = 0;       // 500ms assert cadence
-    bool spriteShown_ = false;                       // sprite visible this frame (#229 metric)
-    WobbleCage cage_;                                // opt-in visible wobble detector (#229)
-    bool cageOn_ = false;
-    int  cfgWobbleCage_ = 0;
     int  appliedSampling_ = -2;                      // sampling mode DWM currently holds (-2 = unknown)
     int  sampleTryMode_ = -2;                        // sampling mode being attempted (#274)
     int  sampleTries_ = 0;                           // attempts so far for it (bounded at 3)
     unsigned long long sampleLastTryMs_ = 0;         // when the last attempt ran
-    std::unique_ptr<CursorBlanker> blanker_;
-    std::unique_ptr<CursorSprite> sprite_;
+    std::unique_ptr<CursorBlanker> blanker_;         // Inspect and the hide-cursor hotkey blank the real pointer
+    std::unique_ptr<CursorSprite> sprite_;           // the Inspect crosshair
     unsigned long long lastPinAssertMs_ = 0;
     int  keepAliveTick_ = 0;                         // alternates the tx keep-alive (issue #148)
     bool inputXformWarned_ = false;                  // one-shot warn when MagSetInputTransform fails
     bool lastInputXformOn_ = false;                  // knob edge: disable the OS transform on 1->0
-    int  hiRampTick_ = 0;                            // >8x ramp divisor (TDR guard, issue #148)
     int  lastOffX_ = 0, lastOffY_ = 0, lastTxX_ = 0, lastTxY_ = 0;   // last applied transform
     double lastLevel_ = 0.0;
     double lastRequestedLevel_ = 0.0;
     double sessionMaxLevel_ = 0.0;      // logged at teardown: scripted-run engagement proof
     unsigned long long lastChangeMs_ = 0;            // when the transform last REALLY changed
     unsigned long long lastWarmMs_ = 0;              // when the last warm pulse CLOSED (issue #246)
-    unsigned long long lastWriteMs_ = 0;             // when a write last actually went out (#204)
-    int  lastSpriteX_ = INT_MIN, lastSpriteY_ = INT_MIN;   // dedup the game-session sprite move
-    // Magnification context lifetime (issue #148). While a context is alive DWM composites
-    // magnification-aware, so every cursor visibility/shape change an app makes costs a
-    // re-composite: a game that toggles its pointer on middle-click hitches even at 1x
-    // (measured 17 spike frames per 14 clicks after a zoom; 0 with no context, 0 while actually
-    // zoomed). So the context lives only around real zoom sessions.
+    // Magnification context lifetime (issues #148, #369). The context is built at idle and kept for
+    // the process (idleTick): a context alone costs nothing, it is the COMPOSED pointer (cursor lens
+    // style ON) that taxes every cursor change an app makes (a game toggling its pointer on
+    // middle-click: measured 17 spike frames per 14 clicks), and the lens is ON only while zoomed.
+    // The context is released at shutdown and when the model is swapped out.
     bool magUp_ = false;
-    bool panelPrimed_ = false;                       // #283: public write done for this panel
     // Native cursor (issue #369). nativePrimed_: the context's one public write that makes DWM
-    // draw the real pointer magnified. dwmCentreOn_: DWM owns the pan (DWMUpdated TRUE).
-    bool nativePref_ = false;
-    bool nativeSession_ = false;
+    // draw the real pointer magnified (the fallback when the cursor lens could not be built).
+    // dwmCentreOn_: DWM owns the pan (DWMUpdated TRUE).
     bool nativePrimed_ = false;
     bool dwmCentreOn_ = false;
     bool dwmCentreBroken_ = false;                   // the export is missing or refused: never retry
@@ -173,19 +129,13 @@ private:
     bool weldedLastFrame_ = false;                   // SetCursorPos ran in the last present()
     bool inputTransformAvailable_ = false;           // MagSetInputTransform probe (UIAccess)
     EnterSplit lastEnter_;
-    unsigned long long idleSinceMs_ = 0;             // when the last session ended (0 = none)
-    int  idleReleaseMs_ = 1200;                      // cfg.txIdleReleaseMs (hot)
     double restLevel_ = 1.0;                         // cfg.txRestLevel (hot): >1 keeps DWM magnifying
-    bool identityParked_ = false;                    // phase 1 of the release done (see idleTick)
-    unsigned long long parkedAtMs_ = 0;
     bool ensureMag();
     void teardownMag();
     void resetTransformState();                      // forget cached values across a teardown
-    // Transform WRITE path (issue #148 hitch hunt): the DWM call can block for tens of ms, which
-    // stalls our whole tick (measured: 34-86ms tick stalls coinciding with 31-59ms game frames).
-    // asyncTx=1 hands the write to a dedicated thread with latest-value coalescing so the tick
-    // never waits. Instrumentation logs per-second max/avg write time either way.
-    void writeTransform(float lvl, int offX, int offY, int tx, int ty, bool fast, bool unusedAsync);
+    // Transform WRITE path: always on the tick thread (the API is thread-affine; an async writer
+    // was tried and every call failed). Logs per-second max/avg write time.
+    void writeTransform(float lvl, int offX, int offY, int tx, int ty, bool fast);
     void noteWrite(double ms, bool ok);
     void noteIxWrite(double ms, bool ok);            // input-transform publish stats (issue #189)
     void noteIxStomp();                              // foreign writer overwrote our publish (#217)

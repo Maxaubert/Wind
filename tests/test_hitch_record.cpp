@@ -9,8 +9,8 @@ static const double kFrame = 1000.0 / 144.0;   // 6.94 ms
 static TickRec Normal() {
     TickRec r;
     r.dtMs = (float)kFrame; r.workMs = 0.8f; r.cpuMs = 0.7f; r.level = 2.0f;
-    r.flags = kTickTransform | kTickPacePulse;
-    r.waitMs = 6.0f; r.wakeLateMs = 0.1f; r.pulseGapMs = (float)kFrame; r.pulseDelayMs = 0.2f;
+    r.flags = kTickTransform | kTickPaceTimer;
+    r.waitMs = 6.0f; r.wakeLateMs = 0.1f;
     return r;
 }
 
@@ -30,17 +30,6 @@ TEST_CASE("Classify: the tick thread woke late (scheduler)") {
     const HitchVerdict v = ClassifyHitch(prev, cur, kFrame);
     CHECK(v.cause == HitchCause::LateWake);
     CHECK(v.ms == doctest::Approx(30.0f));
-}
-
-TEST_CASE("Classify: DWM composed late vs the pulse thread ran late") {
-    TickRec prev = Normal(), cur = Normal();
-    cur.dtMs = 30.0f; cur.waitMs = 29.0f; cur.wakeLateMs = 0.1f;
-    cur.pulseGapMs = 29.5f; cur.pulseDelayMs = 0.3f;          // compose to signal was quick
-    CHECK(ClassifyHitch(prev, cur, kFrame).cause == HitchCause::CompositorLate);
-    cur.pulseDelayMs = 21.0f;                                  // composed on time, signalled late
-    const HitchVerdict v = ClassifyHitch(prev, cur, kFrame);
-    CHECK(v.cause == HitchCause::PulseThreadLate);
-    CHECK(v.ms == doctest::Approx(21.0f));
 }
 
 TEST_CASE("Classify: blocked (off CPU) vs busy (on CPU) in the dominant span") {
@@ -85,14 +74,14 @@ TEST_CASE("FormatHitchLine carries the evidence") {
     prev.flags |= kTickExit; prev.workMs = 22.0f; prev.cpuMs = 1.5f;
     prev.span[kSpanActivate] = 21.0f;
     cur.dtMs = 28.0f;
-    cur.flags = kTickPacePulse; cur.level = 1.0f;   // the new tick has not run: no engine, no level
+    cur.flags = kTickPaceTimer; cur.level = 1.0f;   // the new tick has not run: no engine, no level
     const HitchVerdict v = ClassifyHitch(prev, cur, kFrame);
     const float recent[3] = { 6.9f, 7.0f, 6.9f };
     const std::string s = FormatHitchLine(prev, cur, v, kFrame, recent, 3, 4);
     CHECK(s.rfind("hitch dt=28.0ms", 0) == 0);
     CHECK(s.find("cause=blocked in activate") != std::string::npos);
     CHECK(s.find("zoom-out") != std::string::npos);
-    CHECK(s.find("eng=transform pace=pulse lvl=2.00") != std::string::npos);   // from the tick that ran
+    CHECK(s.find("eng=transform pace=timer lvl=2.00") != std::string::npos);   // from the tick that ran
     CHECK(s.find("activate=21.0") != std::string::npos);
     CHECK(s.find("recent dt 6.9 7.0 6.9") != std::string::npos);
     CHECK(s.find("+4 more since last line") != std::string::npos);

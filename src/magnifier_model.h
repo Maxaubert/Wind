@@ -24,17 +24,8 @@ struct PresentExtras {
     // centre this tick - the weld would fight the hand and the dragged content flickers between the
     // two positions. The lens follows the pointer instead (RunTick feeds unscaled deltas).
     bool  suppressCursorSync = false;
-    // The mouse hook owns transform writes this tick (issue #206). SINGLE WRITER: two writers
-    // sampling the cursor at different instants alternate between two positions at tick rate,
-    // which is the wobble class #205 removed. The tick still triggers writes, but through the
-    // hook's own function so there is one formula.
-    bool  suppressTransformWrite = false;
-    // A shell input panel is open (issue #283): show the REAL pointer (the only thing the shell
-    // draws above its panels) instead of the sprite, and prime one public-API write so DWM draws
-    // that pointer magnified. Transform model only.
-    bool  realPointer = false;
     // The view is a pure function of the real pointer this tick (free cursor, mouse-owned, no
-    // walls, no quiesce): a native-cursor session may hand the pan to DWM (issue #369).
+    // walls, no quiesce): the transform model may hand the pan to DWM (issue #369).
     bool  dwmCentre = false;
     // A zoom key or button is held, or the controller is heading for an explicit target (wheel,
     // quick zoom). False while the zoom eases out after a release (issue #369 ladder).
@@ -59,9 +50,8 @@ struct IMagnifierModel {
     virtual void hideSystemCursor(bool hide) = 0;
     virtual void setActive(bool active) = 0;          // reveal/hide overlay, or enable/disable transform
     virtual void onActivate() {}                      // called on idle->active (render: invalidateCapture/prime)
-    // Called every tick while IDLE (not zoomed, no Inspect). The transform model releases its
-    // magnification context here: a live context keeps DWM in magnification-aware compositing,
-    // where every cursor change an app makes costs a re-composite (issue #148).
+    // Called every tick while IDLE (not zoomed, no Inspect). The transform model builds its
+    // magnification context and cursor lens here, once, so the first zoom does not pay for them.
     virtual void idleTick() {}
     virtual bool retarget(const MonitorTarget& m) { (void)m; return false; }  // render-only; false = unchanged
     virtual void present(const MapResult& r, double level, const Config& cfg,

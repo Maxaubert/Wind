@@ -10,13 +10,11 @@
 #include <oleacc.h>
 #include <oleauto.h>
 #include <UIAutomation.h>
-#include <dwmapi.h>
 #include <chrono>
 #include <condition_variable>
 #include <memory>
 #include <string>
 #pragma comment(lib, "oleacc.lib")
-#pragma comment(lib, "dwmapi.lib")
 namespace wind {
 
 static const UINT kWakeMsg = WM_APP + 0x61;       // an event arrived: resolve after coalescing
@@ -24,40 +22,7 @@ static const UINT kActiveMsg = WM_APP + 0x62;     // active_ changed (wParam = n
 static const UINT_PTR kCoalesceTimer = 1;
 static FocusTracker* g_self = nullptr;            // WinEvent callbacks have no context pointer
 
-// The shell's input panels (emoji picker, clipboard history, touch keyboard) are hosted by
-// TextInputHost.exe and composed by the shell ABOVE every app window, so no band Wind can create
-// covers them (issue #283, measured 2026-09-29). They never change as windows either: the only
-// reliable signal is TextInputHost's "IME" window, uncloaked while a panel shows and cloaked when it
-// closes (every open/close in the field recording matched). "IME" is a common class name (every GUI
-// thread has one), so the owning process is checked too.
-static bool IsShellPanelWindow(HWND h) {
-    wchar_t cls[16] = {};
-    if (!GetClassNameW(h, cls, 16) || wcscmp(cls, L"IME") != 0) return false;
-    DWORD pid = 0; GetWindowThreadProcessId(h, &pid);
-    HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-    if (!p) return false;
-    wchar_t path[MAX_PATH]; DWORD n = MAX_PATH;
-    bool yes = false;
-    if (QueryFullProcessImageNameW(p, 0, path, &n)) {
-        const wchar_t* base = wcsrchr(path, L'\\');
-        yes = _wcsicmp(base ? base + 1 : path, L"TextInputHost.exe") == 0;
-    }
-    CloseHandle(p);
-    return yes;
-}
-
 struct FocusTrackImpl {
-    static void SetPanel(bool open, HWND h) {
-        if (!g_self) return;
-        g_self->panelHwnd_.store(open ? h : nullptr);
-        if (g_self->panelOpen_.exchange(open) != open)
-            wind::Log(wind::LogLevel::Info, "track", "shell input panel %s", open ? "open" : "closed");
-    }
-    static void CALLBACK OnCloak(HWINEVENTHOOK, DWORD ev, HWND h, LONG obj, LONG, DWORD, DWORD) {
-        if (!g_self || !h || obj != OBJID_WINDOW) return;
-        if (!IsShellPanelWindow(h)) return;
-        SetPanel(ev == EVENT_OBJECT_UNCLOAKED, h);
-    }
     static void CALLBACK OnWinEvent(HWINEVENTHOOK, DWORD ev, HWND, LONG obj, LONG, DWORD, DWORD) {
         if (!g_self || !g_self->active_.load()) return;
         if (ev == EVENT_OBJECT_LOCATIONCHANGE && obj != OBJID_CARET) return;
@@ -338,8 +303,7 @@ void FocusTracker::run() {
     HWINEVENTHOOK h2 = SetWinEventHook(EVENT_SYSTEM_MENUPOPUPSTART, EVENT_SYSTEM_MENUPOPUPSTART, nullptr, FocusTrackImpl::OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     HWINEVENTHOOK h3 = SetWinEventHook(EVENT_OBJECT_FOCUS, EVENT_OBJECT_FOCUS, nullptr, FocusTrackImpl::OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     // LOCATIONCHANGE fires for every moving window and caret system-wide: installed only while the
-    // tracker is active (zoomed), never at 1x (#71). The 16 ms caret backstop likewise; while idle a
-    // 250 ms timer only re-checks a shell panel marked open.
+    // tracker is active (zoomed), never at 1x (#71). The 16 ms caret backstop likewise.
     HWINEVENTHOOK h4 = nullptr;
     UINT_PTR pollTimer = 0;
     auto retune = [&](bool on) {
@@ -347,18 +311,8 @@ void FocusTracker::run() {
             h4 = SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE, nullptr, FocusTrackImpl::OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
         if (!on && h4) { UnhookWinEvent(h4); h4 = nullptr; }
         if (pollTimer) KillTimer(nullptr, pollTimer);
-        pollTimer = SetTimer(nullptr, 0, on ? 16 : 250, nullptr);
+        pollTimer = on ? SetTimer(nullptr, 0, 16, nullptr) : 0;
     };
-    HWINEVENTHOOK h5 = SetWinEventHook(EVENT_OBJECT_CLOAKED, EVENT_OBJECT_UNCLOAKED, nullptr, FocusTrackImpl::OnCloak, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
-    // A panel already open when we start raised its UNCLOAKED before the hook existed (review #284).
-    EnumWindows([](HWND h, LPARAM) -> BOOL {
-        DWORD cloaked = 1;
-        if (IsShellPanelWindow(h) && SUCCEEDED(DwmGetWindowAttribute(h, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && !cloaked) {
-            FocusTrackImpl::SetPanel(true, h);
-            return FALSE;
-        }
-        return TRUE;
-    }, 0);
     retune(active_.load());   // an activation that raced thread start-up is picked up here
     bool pendingFocus = false, pendingCaret = false;
     UINT_PTR coalesce = 0;
@@ -651,21 +605,12 @@ void FocusTracker::run() {
             KillTimer(nullptr, coalesce); coalesce = 0;
             resolve(pendingFocus, false); pendingFocus = pendingCaret = false;
         } else if (m.message == WM_TIMER) {
-            // A missed close (TextInputHost restarted, an event dropped) must not leave the real
-            // pointer on for good: re-check the remembered panel window while it is marked open.
-            if (panelOpen_.load()) {
-                HWND ph = static_cast<HWND>(panelHwnd_.load());
-                DWORD cloaked = 0;
-                if (!ph || !IsWindow(ph) ||
-                    (SUCCEEDED(DwmGetWindowAttribute(ph, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked))
-                    FocusTrackImpl::SetPanel(false, nullptr);
-            }
             if (active_.load() && wantCaret_.load()) resolve(false, true);              // backstop poll
         }
         TranslateMessage(&m); DispatchMessageW(&m);
     }
     if (pollTimer) KillTimer(nullptr, pollTimer);
-    for (HWINEVENTHOOK h : { h1, h2, h3, h4, h5 }) if (h) UnhookWinEvent(h);
+    for (HWINEVENTHOOK h : { h1, h2, h3, h4 }) if (h) UnhookWinEvent(h);
     if (uia && fh) uia->RemoveFocusChangedEventHandler(fh);
     if (fh) fh->Release();
     focusLookup.reset();

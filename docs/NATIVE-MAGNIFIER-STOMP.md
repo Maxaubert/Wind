@@ -38,10 +38,11 @@ is judged by read-back, because `MagSetInputTransform` can return FALSE while th
   stranded by a killed Magnify.exe (one republish wins) and reliably detects a foreign writer.
 - The wobble reproduced on the fixed build, so the identity input transform is a symptom of
   Magnify.exe running, not the wobble mechanism.
-- `spriteBand16=1`: negative. Band-16 windows are magnified like everything else on build 26200;
-  the screen-space sprite was misplaced.
-- `cursorSprite=0` (raw welded cursor): negative for Transform. The cursor plane composites
-  outside the magnification and points at the wrong content.
+- A band-16 screen-space cursor sprite: negative. Band-16 windows are magnified like everything
+  else on build 26200; the screen-space sprite was misplaced.
+- A raw welded cursor (no sprite): negative for Transform. The cursor plane composites outside the
+  magnification and points at the wrong content. (Both experiments are gone: the transform engine
+  now draws Windows' own pointer through DWM.)
 - `model=render` with Magnify.exe open: clean. Render draws its cursor in its own frame and is
   immune to these shared-state stomps.
 
