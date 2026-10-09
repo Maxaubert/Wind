@@ -111,6 +111,47 @@ TEST_CASE("edge margin: rest level 1.0 stays exactly identity whatever the margi
     }
 }
 
+TEST_CASE("edge margins follow sampling: smooth gets native's exact rect, nearest keeps both") {
+    EdgeMargins s = EdgeMarginsFor(1, 1.0);
+    CHECK(s.lo == 0.0);
+    CHECK(s.hi == 0.0);
+    EdgeMargins n = EdgeMarginsFor(0, 1.0);
+    CHECK(n.lo == 1.0);
+    CHECK(n.hi == 2.0);
+    EdgeMargins u = EdgeMarginsFor(-1, 1.0);   // mode left alone: the safe nearest margins
+    CHECK(u.lo == 1.0);
+    CHECK(u.hi == 2.0);
+}
+
+TEST_CASE("smooth margins: the bottom-left corner pixel is inside the view (Start corner click)") {
+    const int W = 3840, H = 2160;
+    const double levels[6] = { 2.0, 3.0, 4.452, 6.904, 11.0, 16.0 };
+    for (int i = 0; i < 6; ++i) {
+        const double level = levels[i];
+        const EdgeMargins mg = EdgeMarginsFor(1, 1.0);
+        MagTransform m = ComputeMagTransform(0.0, H - H / level, level, W, H, mg.lo, mg.hi);
+        CHECK(m.offX == 0);                                  // column 0 in view
+        CHECK(m.offY + H / level > (double)(H - 1));         // last row in view
+        CHECK(m.offY + H / level <= (double)H);              // and never past the texture
+    }
+}
+
+TEST_CASE("input rect from the written offsets matches the visual rect at the far edge") {
+    // The publish used the unclamped source and rounded it to nearest, while the visual write
+    // floors at the far edge: up to a source px apart along the right/bottom (review of #394).
+    const int W = 3840, H = 2160;
+    const double levels[5] = { 2.0, 4.452, 6.904, 12.0, 31.0 };
+    for (int i = 0; i < 5; ++i) {
+        const double level = levels[i];
+        const MagTransform m = ComputeMagTransform(W - W / level, H - H / level, level, W, H, 0.0, 0.0);
+        const InputTransformRects ir = ComputeInputTransformRects((double)m.offX, (double)m.offY, level, 0, 0, W, H);
+        CHECK(ir.sl == m.offX);
+        CHECK(ir.st == m.offY);
+        CHECK(ir.sr <= W);
+        CHECK(ir.sb <= H);
+    }
+}
+
 TEST_CASE("edge margin: a source already inside the margin is left alone") {
     MagTransform m = ComputeMagTransform(500.0, 300.0, 4.0, 3840, 2160, 2.0);
     CHECK(m.offX == 500);

@@ -319,6 +319,7 @@ struct Config {
     // Magnifier is smooth-sampled, whose filter clamps to edge, which is why it never shows it.
     // 0 = old behaviour (for A/B); raise to 2 if a thinner line survives at 1. The cost is the
     // outermost source pixel becoming unreachable - exactly what the right/bottom already pay.
+    // Nearest only: smooth sampling uses no margin on any side (EdgeMarginsFor, transform.h).
     double txEdgeMargin = 1.0;
     // Every changed tick is written and the level is written straight, per tick: write-rate and
     // step gates, a level grid and a minimum level step were all field-rejected (issues #148, #204)
