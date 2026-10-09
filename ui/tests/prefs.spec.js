@@ -40,7 +40,9 @@ test.beforeEach(async ({ page }) => {
         else if (msg.type === 'createProfile') {
           // The host starts a new profile from the defaults (globals carry over) and switches to it.
           window.__profiles.names.push(msg.name); window.__profiles.active = msg.name;
-          window.__live = { model: 'hybrid', uiTheme: window.__live.uiTheme }; window.__saved = { ...window.__live };
+          // fromCurrent: the host builds the profile from the live session, unsaved changes included.
+          if (msg.fromCurrent === '1') window.__saved = { ...window.__live };
+          else { window.__live = { model: 'hybrid', uiTheme: window.__live.uiTheme }; window.__saved = { ...window.__live }; }
           reply();
         } else if (msg.type === 'deleteProfile') {
           window.__profiles.names = window.__profiles.names.filter((n) => n !== msg.name);
@@ -285,7 +287,7 @@ test('New: the dialog suggests a name, checks it, and New starts from the defaul
   await dlg.getByRole('button', { name: 'New', exact: true }).click();
   await expect(dlg).toHaveCount(0);
   await expect(trig(page)).toHaveText('Fresh');
-  expect((await sent(page, 'createProfile')).map((m) => m.name)).toEqual(['Fresh']);
+  expect((await sent(page, 'createProfile')).map((m) => [m.name, m.fromCurrent])).toEqual([['Fresh', '0']]);
   expect(await sent(page, 'setConfigPersist')).toHaveLength(0);   // defaults: nothing copied in
 });
 
@@ -301,13 +303,12 @@ test('New from the current settings copies them into the new profile, even with 
   await dlg.getByRole('button', { name: 'Duplicate current' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);   // no Save / Discard question: the changes come along
   await expect(trig(page)).toHaveText('Copy');
-  expect((await sent(page, 'createProfile')).map((m) => m.name)).toEqual(['Copy']);
-  // The new profile holds them: persisted into the live ini AND the profile file, so nothing is unsaved.
+  // The host builds the profile from the live session (fromCurrent), so nothing is written back from
+  // the page: no model patch, no per-key persist, and the outgoing profile is never mirrored into.
+  expect((await sent(page, 'createProfile')).map((m) => [m.name, m.fromCurrent])).toEqual([['Copy', '1']]);
   await expect.poll(async () => page.evaluate(() => [window.__live.maxLevel, window.__saved.maxLevel])).toEqual(['20', '20']);
   await expect(page.locator('.capsule')).toHaveCount(0);
-  expect((await sent(page, 'setConfigPersist')).some((m) => m.key === 'maxLevel' && m.value === '20')).toBe(true);
-  // Global keys do not travel as profile data.
-  expect((await sent(page, 'setConfigPersist')).some((m) => m.key === 'uiTheme' || m.key === 'uiPalette')).toBe(false);
+  expect(await sent(page, 'setConfigPersist')).toHaveLength(0);
 });
 
 test('New from the defaults with unsaved changes asks Save / Discard first', async ({ page }) => {

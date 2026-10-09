@@ -16,7 +16,11 @@ others are not).
 
 - Every writer uses `wind::WriteTextFileAtomic` (`src/profiles_io.h`): write a temp file, then
   `MoveFileExW(MOVEFILE_REPLACE_EXISTING)`. The temp name embeds the process id, so two writers
-  never clobber each other's temp file.
+  never clobber each other's temp file. The temp is written with `WriteFile`, every byte count is
+  checked and the data is flushed before the rename: a full disk fails the write and leaves the old
+  file in place instead of renaming a truncated one over it. A temp left by a killed process
+  (`<file>.ini.<pid>.tmp`) is swept at start by `SweepStaleIniTmp` (core and Settings) once it is
+  over a minute old.
 - **Around each replace the name briefly refuses opens.** Measured 2026-10-07: during a burst of
   replaces ~1% of reads failed with `ERROR_ACCESS_DENIED` (the replaced file is delete-pending), and
   a replace fails while a reader holds the file. So `ReadTextFileOk` and `WriteTextFileAtomic`
@@ -69,8 +73,9 @@ as an initializer, so a missing or malformed key keeps the default; parsing neve
 ## Hot-reload and the UI-only fingerprint
 
 The reload mechanics are in [02](02-tick-loop.md). A reload rebuilds `ZoomController`, so it
-collapses an active zoom; therefore `StripUiOnlyKeys` removes the four keys the core never reads
-(`uiTheme`, `uiPalette`, `showAdvanced`, `onboarded`) and the reload is skipped when the stripped
+collapses an active zoom; therefore `StripUiOnlyKeys` removes the nine keys the core never reads
+(`uiTheme`, `uiPalette`, `showAdvanced`, `onboarded` and the five tray layout keys `trayPerf`,
+`traySliders`, `traySliderOrder`, `trayToggles`, `trayToggleOrder`) and the reload is skipped when the stripped
 text is unchanged. `profile` stays in the fingerprint, so a profile switch reloads.
 
 **Hot or restart follows from how a value is read.** A key read from `t.cfg` per tick or per
@@ -101,6 +106,10 @@ comments and order.
 - The profile file changes on Save (`saveSession`) or when a keybind is captured
   (`setConfigPersist`, which writes that key to both).
 - Unsaved means `SessionDiffers(live, profile)`: a profile-scoped key differs; globals ignored.
+  Values compare trimmed and numerically (`1.0` equals `1`), and a key one side lacks reads as its
+  built-in default when the first-run template carries it, so a tray slider dragged back to its
+  default is not "unsaved" (`model` is excluded from that rule; keys outside the template stay
+  missing-versus-present).
 - At start the core runs `ResetSessionToProfile`, so unsaved changes never survive a restart,
   unless `%LOCALAPPDATA%\Wind\session.keep` marks a restart Wind triggered itself (engine change,
   profile switch with a model change). It is consumed once.
@@ -124,10 +133,16 @@ clean exit restores the OS cursor and releases `ClipCursor`.
 
 **An empty profile file means factory defaults**: every profile key falls back to its `ParseConfig`
 default. "New profile" writes a near-empty file (a comment plus `model=hybrid`) and switches to it.
+"Duplicate current" (`createProfile` with `fromCurrent=1`) instead writes `MakeProfileText(live)`: the
+session as it stands, unsaved changes included, so `model` is unchanged (no restart) and the
+outgoing profile is not mirrored into (`DoSwitchProfile(name, mirrorOutgoing=false)`).
 
 **Seeding.** `EnsureProfilesSeeded` runs at startup before the ini mtime is recorded. With no
 `profiles\` directory it creates one, saves the current settings as `Default.ini` and writes
-`profile=Default`. The directory is the latch, so a failed `Default.ini` write removes it again.
+`profile=Default`. The directory is the latch, so a failed `Default.ini` write removes it again. On a
+first run with no ini at all the seed text is `DefaultIniText()` (the commented template), so the
+live ini is the template plus `profile=Default`, not a one-line file that `LoadConfig` would accept
+as complete.
 
 **Names** become file names: `ProfileNameError` rejects path and control characters, leading or
 trailing dots and spaces, reserved device names and names over 40 characters. Matching is

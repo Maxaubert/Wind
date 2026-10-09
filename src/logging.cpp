@@ -172,11 +172,13 @@ static void PruneOldCrashes(const std::wstring& dir) {
     }
 }
 
-// Delete all but the kCrashKeep most-recent per-PID straggler log files.
+// Delete all but the kCrashKeep most-recently WRITTEN per-PID straggler log files (by last-write
+// time: PIDs are not chronological and the tag comes first in the name, so sorting by name kept
+// whole tags and deleted the newest logs of the others).
 // Matches names like "wind-core-12345.log" (two dashes, all-digit suffix) but NOT
 // "wind-core.log" or "wind-core.1.log" (no dash before the numeric part).
 static void PruneStrayPidLogs(const std::wstring& dir) {
-    std::vector<std::wstring> pidLogs;
+    std::vector<std::pair<unsigned long long, std::wstring>> pidLogs;   // (last write, name)
     WIN32_FIND_DATAW fd{};
     std::wstring pat = dir + L"\\wind-*-*.log";
     HANDLE h = FindFirstFileW(pat.c_str(), &fd);
@@ -191,14 +193,17 @@ static void PruneStrayPidLogs(const std::wstring& dir) {
             std::wstring suffix = name.substr(lastDash + 1, dotPos - lastDash - 1);
             bool allDigits = !suffix.empty();
             for (wchar_t c : suffix) { if (c < L'0' || c > L'9') { allDigits = false; break; } }
-            if (allDigits) pidLogs.push_back(name);
+            if (allDigits) {
+                ULARGE_INTEGER w; w.LowPart = fd.ftLastWriteTime.dwLowDateTime; w.HighPart = fd.ftLastWriteTime.dwHighDateTime;
+                pidLogs.emplace_back(w.QuadPart, name);
+            }
         } while (FindNextFileW(h, &fd));
         FindClose(h);
     }
     if ((int)pidLogs.size() <= kCrashKeep) return;
-    std::sort(pidLogs.begin(), pidLogs.end());
+    std::sort(pidLogs.begin(), pidLogs.end());   // oldest write first
     for (size_t i = 0; i + (size_t)kCrashKeep < pidLogs.size(); ++i) {
-        DeleteFileW((dir + L"\\" + pidLogs[i]).c_str());
+        DeleteFileW((dir + L"\\" + pidLogs[i].second).c_str());
     }
 }
 

@@ -47,7 +47,7 @@ follows only the terminal caret there.
   from the corner. In edge mode that motion is hidden from the tell (`PointerPinnedAtEdge`).
 - **Uneven edges.** The band was measured to the hotspot (the arrow's tip), so the left edge kept an
   arrow-wide gap. It is now measured to the cursor's visible body, re-measured on cursor change.
-- **Margin.** `mouseMarginPct` (default 0, Settings 0–30%) for edge mode; `trackMarginPct` (15%) for
+- **Margin.** `mouseMarginPct` (default 0, Settings 0–40%) for edge mode; `trackMarginPct` (15%) for
   caret and focus.
 
 ## Firefox in a zoomed iframe (issue #278)

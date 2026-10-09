@@ -100,8 +100,9 @@ There is no settings IPC. `WindConfig.exe` writes `magnifier.ini` and the core n
   taken and `t.configRetry` re-checks on the next poll. See [08](08-config-profiles.md).
 
 **UI-only writes never reload.** A reload rebuilds `ZoomController`, which collapses an active zoom
-to 1x. `StripUiOnlyKeys` (`src/config.cpp`) drops `uiTheme`, `uiPalette`, `showAdvanced` and
-`onboarded`, and the result is compared with the fingerprint of the last applied config
+to 1x. `StripUiOnlyKeys` (`src/config.cpp`) drops `uiTheme`, `uiPalette`, `showAdvanced`,
+`onboarded` and the five tray layout keys (`trayPerf`, `traySliders`, `traySliderOrder`,
+`trayToggles`, `trayToggleOrder`), and the result is compared with the fingerprint of the last applied config
 (`t.lastCoreIni`). An identical fingerprint skips the reload. The fingerprint is seeded at startup;
 an empty one would make the first Settings write of a session reload.
 

@@ -1,6 +1,8 @@
 #include "profiles.h"
 #include "config_ui/ini_edit.h"
+#include "config.h"   // DefaultIniText: the built-in default of every templated key
 #include <sstream>
+#include <cstdlib>
 namespace wind {
 static std::string lower(const std::string& s) {
     std::string o = s;
@@ -93,12 +95,64 @@ std::string ProfileTextError(const std::string& text) {
     }
     return "";
 }
+// Two ini values mean the same setting: identical text, or both numbers with the same value
+// ("1.0" vs "1").
+static bool SameIniValue(const std::string& x, const std::string& y) {
+    if (x == y) return true;
+    if (x.empty() || y.empty()) return false;
+    char* ex = nullptr; char* ey = nullptr;
+    const double dx = std::strtod(x.c_str(), &ex);
+    const double dy = std::strtod(y.c_str(), &ey);
+    return *ex == '\0' && *ey == '\0' && dx == dy;
+}
 bool SessionDiffers(const std::string& liveText, const std::string& profileText) {
     auto a = ReadIniValues(liveText);
     auto b = ReadIniValues(profileText);
     for (auto it = a.begin(); it != a.end();) it = IsGlobalProfileKey(it->first) ? a.erase(it) : std::next(it);
     for (auto it = b.begin(); it != b.end();) it = IsGlobalProfileKey(it->first) ? b.erase(it) : std::next(it);
-    return a != b;
+    // A key one side lacks reads as the built-in default (the first-run template carries each
+    // templated key's default), so a tray drag that wrote an explicit default back (Warmth 0 -> 40
+    // -> 0) is not "unsaved". Keys outside the template stay missing-vs-present. "model" is left
+    // out: the core's missing-key engine and the template's explicit one are different questions
+    // (see createProfile in config_ui/main.cpp).
+    static const std::map<std::string, std::string> defaults = ReadIniValues(DefaultIniText());
+    auto valueOf = [&](const std::map<std::string, std::string>& m, const std::string& k, std::string& out) {
+        auto it = m.find(k);
+        if (it != m.end()) { out = it->second; return true; }
+        if (k == "model") return false;
+        auto d = defaults.find(k);
+        if (d == defaults.end()) return false;
+        out = d->second;
+        return true;
+    };
+    std::vector<std::string> keys;
+    for (const auto& kv : a) keys.push_back(kv.first);
+    for (const auto& kv : b) keys.push_back(kv.first);
+    for (const auto& k : keys) {
+        std::string va, vb;
+        const bool ha = valueOf(a, k, va), hb = valueOf(b, k, vb);
+        if (ha != hb) return true;
+        if (ha && !SameIniValue(va, vb)) return true;
+    }
+    return false;
+}
+bool ParseIniTmpName(const std::wstring& fileName, unsigned long& pid) {
+    auto low = [](wchar_t c) { return (c >= L'A' && c <= L'Z') ? (wchar_t)(c + 32) : c; };
+    const std::wstring tmp = L".tmp", ini = L".ini";
+    if (fileName.size() <= tmp.size() + ini.size() + 2) return false;   // stem + ".ini" + "." + digit + ".tmp"
+    const size_t end = fileName.size() - tmp.size();
+    for (size_t i = 0; i < tmp.size(); ++i) if (low(fileName[end + i]) != tmp[i]) return false;
+    size_t d = end;
+    while (d > 0 && fileName[d - 1] >= L'0' && fileName[d - 1] <= L'9') --d;
+    if (d == end || d == 0 || fileName[d - 1] != L'.' || end - d > 10) return false;
+    const size_t stemEnd = d - 1;   // the "." before the pid
+    if (stemEnd < ini.size() + 1) return false;
+    for (size_t i = 0; i < ini.size(); ++i) if (low(fileName[stemEnd - ini.size() + i]) != ini[i]) return false;
+    unsigned long long v = 0;
+    for (size_t i = d; i < end; ++i) v = v * 10 + (unsigned)(fileName[i] - L'0');
+    if (v > 0xFFFFFFFFULL) return false;
+    pid = (unsigned long)v;
+    return true;
 }
 std::string UpdateProfileKey(const std::string& profileText, const std::string& key,
                              const std::string& value) {

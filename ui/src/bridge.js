@@ -21,11 +21,17 @@ export function getSession() {
     });
   }
   return new Promise(resolve => {
+    // configUnreadable: the host could not read the ini right now (another process is replacing it).
+    // That is not an empty ini, so ask again instead of rendering every setting as its default.
+    let tries = 0;
     const off = onMessage(m => {
       if (m && m.type === 'config') {
         off();
         resolve({ values: m.values || {}, saved: m.saved || m.values || {},
                   profiles: m.profiles || { names: [], active: '' } });
+      } else if (m && m.type === 'configUnreadable') {
+        if (++tries < 8) setTimeout(() => post({ type: 'getConfig' }), 250);
+        else { off(); resolve({ values: {}, saved: {}, profiles: { names: [], active: '' } }); }
       }
     });
     post({ type: 'getConfig' });
@@ -52,6 +58,9 @@ export function discardSession() {
         off();
         resolve({ values: m.values || {}, saved: m.saved || m.values || {},
                   profiles: m.profiles || { names: [], active: '' } });
+      } else if (m && m.type === 'configUnreadable') {
+        off();
+        resolve(getSession());   // nothing was discarded; fetch the state with getSession's retries
       }
     });
     post({ type: 'discardSession' });
@@ -118,6 +127,8 @@ function profileRequest(msg) {
   });
 }
 export const switchProfile    = (name)     => profileRequest({ type: 'switchProfile', name });
-export const createProfile    = (name)     => profileRequest({ type: 'createProfile', name });
+// fromCurrent: "Duplicate current" - the host builds the profile from the live session as it stands.
+export const createProfile    = (name, fromCurrent = false) =>
+  profileRequest({ type: 'createProfile', name, fromCurrent: fromCurrent ? '1' : '0' });
 export const renameProfile    = (from, to) => profileRequest({ type: 'renameProfile', from, to });
 export const deleteProfile    = (name)     => profileRequest({ type: 'deleteProfile', name });

@@ -53,7 +53,7 @@ the reply invalid and the page waits forever.
 
 | Message | Kind | Effect |
 |---|---|---|
-| `getConfig` | reply `config` | Every live key and value, plus the saved profile values |
+| `getConfig` | reply `config` | Every live key and value, plus the saved profile values. An ini that exists but cannot be read gets `configUnreadable` instead, and the page asks again (never an empty ini shown as all defaults) |
 | `setConfig` | fire | Atomic write of one key to the live ini |
 | `setConfigPersist` | fire | Same, and the key in the active profile file (keybind captures) |
 | `saveSession` | reply `sessionSaved` | Write `MakeProfileText(live)` over the profile |
@@ -62,7 +62,7 @@ the reply invalid and the page waits forever.
 | `window` | fire | `minimize`, `close`, `quitWind`, `restartWind` (writes `session.keep` first) |
 | `dirty` | fire | Unsaved flag, so `WM_CLOSE` can prompt |
 | `openIni` | fire | Open `magnifier.ini` in the `.ini` handler or Notepad |
-| `exportDiagnostics` | fire | Zip `%LOCALAPPDATA%\Wind\logs` to the Desktop |
+| `exportDiagnostics` | fire | Zip `%LOCALAPPDATA%\Wind\logs` to the Desktop on a worker thread (the window stays responsive; a repeat click while it runs is ignored), then reveal it in Explorer |
 | `pickExe` | reply `exePicked` | File picker; replies with the bare exe name, because app lists match by name |
 | `mpoState` | reply `mpoState` | Registry value and the state DWM loaded at boot |
 | `setMpoDisabled` | reply `mpoApplied` | Elevated registry write; replies with the re-read state, so a cancelled UAC reverts |
@@ -123,7 +123,11 @@ The live ini is the session and the profile file is the saved state ([08](08-con
 - Save writes the session into the profile; Discard rewrites the live ini from it.
 - The page derives the Save capsule from `changedKeys(values, saved)` (`ui/src/session.js`, pure,
   defaults filled on both sides). The C++ twin is `SessionDiffers`.
-- Keybind captures use `setConfigPersist`, so a capture survives Discard.
+- Keybind captures use `setConfigPersist`, so a capture survives Discard. Onboarding's keys use it
+  too: the core seeds `Default.ini` before onboarding, so a live-only write would open Settings
+  dirty and be dropped by the next plain start.
+- The ini is shared with the tray flyout and hand edits, so the page re-reads it when the window
+  regains focus and after a `configWriteFailed`, and reloads only if something differs.
 - Global keys are written directly and never count as unsaved.
 - **Prompts** (`ui/src/prompts/Prompt.svelte`, focus-trapped by `lib/dialog.js`): closing with
   unsaved changes offers Save, Discard or Keep for this session; switching profile offers Save,
@@ -170,8 +174,8 @@ and offers New (defaults) or Duplicate current; Enter duplicates. Rename and dup
 
 - Operations that replace the live settings (switch, new from defaults, deleting the active
   profile) go through the unsaved-changes prompt.
-- Duplicate current creates the profile from defaults, then writes the differing keys with
-  `setConfigPersist`, so nothing is left unsaved.
+- Duplicate current sends `createProfile` with `fromCurrent: '1'`; the host builds the profile from
+  the live text, so nothing is written back by the page and nothing is left unsaved.
 - After a mutation the page reloads the config before checking `ok`: a failed operation can still
   have rewritten the live ini.
 
