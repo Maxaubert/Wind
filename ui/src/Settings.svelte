@@ -12,7 +12,7 @@
   import { getSession, setConfig, setConfigPersist, saveSession, discardSession, openIni,
            exportDiagnostics, openRepo, pickExe, windowControl, onMessage,
            setDirty, switchProfile, createProfile, deleteProfile } from './bridge.js';
-  import { fill, changedKeys, GLOBAL_KEYS } from './session.js';
+  import { fill, changedKeys } from './session.js';
   import { themes, normalizePalette } from './design/themes.js';
   import { droppedBinds } from './lib/keybindRules.js';
   import TitleBar from './shell/TitleBar.svelte';
@@ -84,7 +84,6 @@
   function change(key, val) {
     if (key === 'model') announce('Magnifier model set to ' + val + '. Some display options changed.');
     if (key === 'uiPalette') announce('Theme ' + (themes.find((t) => t.id === val)?.label ?? val));
-    const prev = values[key];
     values = { ...values, [key]: val };
     setConfig(key, val);
   }
@@ -95,12 +94,24 @@
     values = { ...values, ...patch };
     saved = { ...saved, ...patch };
   }
+  // The ini is shared with the tray flyout and hand edits, so the page can fall behind it. Re-read it
+  // when the window regains focus (that is when the user comes back from the flyout or an editor),
+  // and after a failed write (the page then shows a value the ini never took). Only a real
+  // difference touches the page, so nothing flickers.
+  async function refresh() {
+    if (!loaded) return;
+    const s = await getSession();
+    const f = fill(s);
+    if (s.profiles) prof = { names: s.profiles.names || [], active: s.profiles.active || '' };
+    if (JSON.stringify(f.values) === JSON.stringify(values) && JSON.stringify(f.saved) === JSON.stringify(saved)) return;
+    await load(s);
+  }
   let restartError = $state(false);
   let writeError = $state('');
   let saveError = $state(false);
   onMount(() => {
     const offs = [
-      onMessage((m) => { if (m && m.type === 'configWriteFailed') writeError = m.key || 'a setting'; }),
+      onMessage((m) => { if (m && m.type === 'configWriteFailed') { writeError = m.key || 'a setting'; refresh(); } }),
       // Maximized: no window outline (the host reports the state on every resize).
       onMessage((m) => { if (m && m.type === 'windowState') { maximized = !!m.maximized; document.documentElement.toggleAttribute('data-maximized', maximized); } }),
       onMessage((m) => {
@@ -121,7 +132,8 @@
     (async () => {
       await load();
     })();
-    return () => { offs.forEach((o) => o()); };
+    window.addEventListener('focus', refresh);
+    return () => { offs.forEach((o) => o()); window.removeEventListener('focus', refresh); };
   });
 
   // --- Save / Discard -------------------------------------------------------------------------
@@ -161,10 +173,9 @@
   async function runProfileAction(kind, payload) {
     profileError = '';
     const prevActive = prof.active;
-    const snapshot = { ...values };   // what "start from the current settings" copies
     let r;
     if (kind === 'switch') r = await switchProfile(payload.name);
-    else if (kind === 'create') r = await createProfile(payload.name);
+    else if (kind === 'create') r = await createProfile(payload.name, payload.from === 'current');
     else if (kind === 'delete') r = await deleteProfile(payload.name);
     else return;
     prof = { names: r.names, active: r.active };
@@ -173,14 +184,8 @@
     if (!r.ok) { profileError = r.error || 'Profile operation failed'; return; }
     if (kind === 'switch') announce('Switched to profile ' + payload.name + '. Settings reloaded.');
     else if (kind === 'create' && payload.from === 'current') {
-      // The host starts a new profile from the defaults, so write the current settings into it. Persisted
-      // (profile file and live ini), so the new profile holds them and nothing shows as unsaved.
-      const patch = {};
-      for (const k of Object.keys(snapshot)) {
-        if (GLOBAL_KEYS.has(k) || k[0] === '_') continue;
-        if (String(snapshot[k]) !== String(values[k])) patch[k] = snapshot[k];
-      }
-      live(patch);
+      // The host built the new profile from the live session (unsaved changes included), so the
+      // reload above already shows them as saved: nothing to write back from here.
       announce('Created profile ' + payload.name + ' from the current settings.');
     }
     else if (kind === 'create') announce('Created profile ' + payload.name + ' with the default settings.');

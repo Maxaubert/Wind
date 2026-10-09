@@ -31,20 +31,18 @@ re-composite. Measured in a game that toggles its pointer on middle-click: 17 sp
 clicks with that state live, 0 without; and on 2026-10-07 with a full-screen app blinking its
 pointer: 19 spikes of 20-42 ms in 6 s with the composed pointer at 1x, 0 with a context alone, a
 context after a private-channel zoom, or a context plus the cursor lens with its style off (all
-three kept Independent Flip). So the sprite path keeps the context only around real sessions, and
-there is no warm-up write at launch; the native cursor keeps context and lens warm with the style
-off at 1x ([07](07-cursor.md#native-cursor)). Colour filters hold the
-runtime at 1x ([04](04-render-engine.md)).
+three kept Independent Flip). So there is no warm-up write at launch, and Wind keeps the context and
+the cursor lens warm with the lens style off at 1x ([07](07-cursor.md#native-cursor)). Colour
+filters hold the runtime at 1x ([04](04-render-engine.md)).
 
 **Calls are thread-affine.** Only the thread that called `MagInitialize` can drive the transform;
-a write from another thread returns FALSE and changes nothing (`src/mag_thread.h`). Every entry
-point goes through `MagThreadInvoke`, which runs inline when the caller owns the runtime or when no
-owner was claimed. Ownership is decided once at startup and stays on the tick thread unless
-`txHookWrite=1` (see [Hook writes](#hook-writes-not-shipped)).
+a write from another thread returns FALSE and changes nothing. That is the tick thread, and every
+Magnification call is made on it; nothing marshals (the owner-thread scheme that existed for hook
+writes is gone, see [Hook writes](#hook-writes-removed)).
 
 ## Write channels
 
-`MagHost::setTransformOwned` knows two channels for the same DWM state:
+`MagHost::setTransform` knows two channels for the same DWM state:
 
 | Channel | Call | Notes |
 |---|---|---|
@@ -58,8 +56,10 @@ describe the same rect.
 ## Write cadence
 
 **Apply the level every tick, continuously.** Large discrete level jumps are what cost DWM (each
-re-scales its cached surfaces); small continuous deltas are cheap. Do not re-quantize ramps.
-`txGrid` and `txLevelStep` remain as diagnostic knobs and must stay 0.
+re-scales its cached surfaces); small continuous deltas are cheap. Do not re-quantize ramps. Snapping
+the level to a geometric grid (to reuse DWM's per-scale surface cache) measured much worse (0 spikes
+against 7-8 spike-seconds and 550-580 ms worst frames), and skipping small level steps measured no
+better than continuous; both knobs are gone.
 
 **`txMaxStepPct`** (default 25, i.e. 2.5% per tick) caps the per-tick relative level change.
 Uncapped, ~15% of 15x zoom-ins over acrylic stalled 35–43 ms in DWM and then snapped 1.2–1.9
@@ -73,22 +73,27 @@ catch-up snap.
 - When the applied level trails the requested one, the source rect is recomputed for the applied
   level, so geometry and level never disagree.
 
-**Do not throttle the view.** `ShouldWriteTransform` (`src/tx_cadence.h`, unit-tested) can cap the
-write rate (`txWriteHz`) and the minimum pan step (`txMinOffsetPx`) the way the built-in Magnifier
-paces itself (~50–60 writes/s). Both ship 0: Wind welds the cursor every tick, so a throttled view
-desynchronizes from the pointer (2 px steps wobble at low zoom; 60 Hz looks like low fps at high
-zoom). Gating the cursor sprite on "the view moved" froze the cursor in the edge zones.
+**Do not throttle the view.** Every changed tick is written. The built-in Magnifier paces itself at
+~50–60 writes/s, and a write-rate cap plus a minimum pan step were tried to match it (issue #204),
+then reverted the same day: a throttled view desynchronizes from the pointer (2 px steps wobble at
+low zoom; 60 Hz looks like low fps at high zoom). Do not bring a write gate back without a test
+that watches the view under a SLOW hand, not just stall counts.
 
 **Warm-keeping** (`txWarmMode=1`, pure gate in `src/tx_warm.h`). DWM's magnification re-render goes
 cold when the source rect sits still, and the first real pan after a pause pays ~25 ms (the
 pan-start hitch). A 1 px translation displacement and return is a real source change and keeps it
-warm. A sub-pixel level nudge passes every composition-rate metric and still hitches, so do not
-trust composition-rate metrics here.
+warm. Re-sending the same transform, republishing the input transform and a sub-pixel level nudge
+were tried (they were warm modes 2-4) and do not work: the level nudge passes every
+composition-rate metric and still hitches, so do not trust composition-rate metrics here. Only
+views Wind writes itself with the pointer not free are warmed (locked, Inspect); while DWM centres
+there is nothing to warm. A free pointer's detached view (caret, focus, keyboard pan) is not warmed
+either: following a Discord caret, each pulse showed as a 1 px shake (field video 2026-10-08), and
+the hitch it guards is a game one (`ex.warmAllowed`).
 
 - Every warm write is a full DWM re-render. Per-tick warming cost 16% dwm.exe GPU with the mouse
   still (the built-in Magnifier: 0.2%). So `txWarmHz` (default 12) makes it a pulse: one
   displacement plus return per period, 4.6% at rest. 0 means every tick.
-- An open pulse always closes before any other gate applies, so the view is never left 1 px off.
+- An open pulse always closes before the cadence gate applies, so the view is never left 1 px off.
 - The hitch reproduces only in games; `tools/warm_cadence_sweep.ps1` and `tools/gpu_ab.ps1` measure
   the cadence trade-off. Details: [../HITCH-FINDINGS.md](../HITCH-FINDINGS.md).
 
@@ -100,30 +105,25 @@ around an Inspect injected click; a write racing an injected cursor move is a TD
 ```mermaid
 stateDiagram-v2
     [*] --> Idle
-    Idle: Idle, no context
-    Active: Active, context live, per-tick writes
-    Parked: Identity parked, context live, countdown
+    Idle: Idle, context and cursor lens warm, identity transform
+    Active: Active, per-tick writes, lens style on
     Idle --> Active: zoom-in
-    Active --> Parked: zoom-out writes identity, disables input transform
-    Parked --> Active: re-zoom before timeout
-    Parked --> Idle: txIdleReleaseMs elapsed, teardownMag
-    Active --> Idle: shutdown or model swap
+    Active --> Idle: zoom-out writes identity, lens style off, input transform off
+    Active --> Released: shutdown or model swap (teardownMag)
 ```
 
-- `setActive(true)` blanks the system cursors **before** creating the context: each of the 14
-  swaps pays the live-context tax otherwise. It stands the sprite up with two `DwmFlush` passes so
-  blank-to-sprite does not blink.
+- `idleTick()` builds the context and the cursor lens at 1x after launch (60-125 ms, once) and keeps
+  them, lens style off. A failed build is not retried every tick (`lensFailed_`); zoom-in then falls
+  back to one public write that makes DWM build its own lens.
+- `setActive(true)` turns the lens style on and nudges the pointer a pixel and back so the composed
+  pointer appears at once. Nothing is blanked and no sprite is stood up; only Inspect and the
+  hide-cursor hotkey touch the cursor set ([07](07-cursor.md)).
 - `setActive(false)` parks DWM at identity at once. Returning to identity costs a ~150 ms
-  compositor stall, so it is paid during the zoom-out motion, not seconds later in a game.
-- `idleTick()` releases the context once `txIdleReleaseMs` (default 1200, hot) passes, long enough
-  that quick zoom flicks skip the ~36 ms rebuild. Native-cursor mode never releases at idle: it
-  builds the context and the cursor lens at 1x after launch and keeps them, style off.
-- Native-cursor sessions skip the blanker and the sprite stand-up at zoom-in (no cursor swaps) and
-  only switch the cursor lens style; zoom-out switches it off after the identity park and nudges
-  the pointer so the hardware plane repaints.
-- `teardownMag` restores cursor state **first** (`MagShowSystemCursor(TRUE)` needs a live context),
-  then `resetTransformState()` forgets every cached value, so the next session does not skip writes
-  DWM no longer holds.
+  compositor stall, so it is paid during the zoom-out motion, not seconds later in a game. It then
+  switches the lens style off and nudges the pointer so the hardware plane repaints.
+- `teardownMag` (shutdown and model swaps only) restores cursor state **first**
+  (`MagShowSystemCursor(TRUE)` needs a live context), then `resetTransformState()` forgets every
+  cached value, so the next session does not skip writes DWM no longer holds.
 
 ## DWM centring (native cursor)
 
@@ -131,12 +131,16 @@ stateDiagram-v2
 resolved by name): TRUE,0,0 hands the pan to DWM, which re-centres on every cursor update; FALSE,0.8,0.8
 gives it back. Rules (`src/native_cursor.h`, tested):
 
-- On only where the view is a pure function of the pointer and no MPO wall is in reach
-  (`WallBinding`: above ~9.3x on a 3840 wide monitor, 15.8x on 2160 high, when armed).
+- On only where the view is a pure function of the pointer and no armed MPO wall is within a tick
+  of the view (`NearWall`, a 64 source px margin: DWM's own pan is unclamped and could cross a wall
+  before Wind's next tick; above ~9.3x on a 3840 wide monitor, 15.8x on 2160 high).
 - While on, only level changes are written; warm pulses stop. DWM keeps the factor of the write
   that follows a TRUE call, so every switch forces one write (`forceWrite_`, survives paused ticks).
 - `MagGetFullscreenTransform` does not see DWM's own moves: win32k's copy keeps Wind's last write.
   Judge centring on screen, not by read-back.
+- When the export is missing or refuses the call, `dwmCentreBroken_` latches (one Warn) and
+  `WantDwmCentreSwitch` stops asking, so a build without it keeps the pan without a forced write
+  and a log line on every tick.
 
 ## Clamping
 
@@ -149,8 +153,8 @@ or bottom edge. `ComputeMagTransform` clamps both forms with a 2 px margin. The 
 **Left and top: one texel inside.** DWM's nearest path samples around a half-texel offset, so at
 source 0 the first columns read outside the texture and show a light-grey line about `level/2` px
 wide along the left (and top) edge once the view rests there. `SrcEdgeFloor` keeps the rect
-`txEdgeMargin` texels inside (default 1; 0 for A/B). One formula feeds `ComputeMagTransform`, the
-input-transform publish and the hook writer, so they never describe different rects. It resolves
+`txEdgeMargin` texels inside (default 1; 0 for A/B). One formula feeds `ComputeMagTransform` and the
+input-transform publish, so they never describe different rects. It resolves
 to 0 where there is no headroom, so identity stays identity.
 
 **Both margins are nearest-only** (`EdgeMarginsFor`). Each keeps desktop texels out of the view,
@@ -196,7 +200,7 @@ Defences (wall arming in `RunTick`, write clamp in `TransformModel::present`):
   applies an invisible colour effect (0.998 on R, G, B). A colour transform, like the resample
   property, makes the scaled desktop visual require an external layer, and nothing under such a
   visual is recorded as a plane candidate, so no plane can carry the overflowing translation.
-  `mpoNearestGuard=1` (default 0 until verified) lets nearest run on MPO boots with the guard;
+  `mpoNearestGuard=1` (default, field-tested 2026-10-07) lets nearest run on MPO boots with the guard;
   `mpoGuardTest=1` forces the effect on an MPO-off boot to check its look. The pan walls stay
   armed for nearest either way until an MPO-on boot proves the guard (fail-closed).
 
@@ -221,7 +225,7 @@ DWM magnifies with nearest neighbour unless something calls
   with Lanczos (`CResampleLayer::RenderLanczos`; the DWM registry value `ResampleModeOverride=1`
   would force xBR instead, any other value is an error). Zoom "shake", measured 2026-10-07: cursor
   tip jitter 8-10 px p95, jumps up to 18-26 px, 33-39 direction reversals per zoom-in at smooth;
-  2 px and 3-7 at nearest; same for the sprite and the native pointer. Pans are clean. Suspected
+  2 px and 3-7 at nearest; the same for the native pointer (and for the old sprite). Pans are clean. Suspected
   cause (untested): the scratch target snaps to whole source pixels while the private channel
   positions the view in screen pixels, so the image can jump up to one source pixel times the zoom.
 - **Smooth-zoom ladder** (`txSmoothLadder=1`, `src/zoom_ladder.h`): the smooth path's scratch image
@@ -249,7 +253,7 @@ welded cursor has hover dead zones. Identity or no publish both produce dead zon
   write. A verified-failed publish clears `inputTransformAvailable_`, which stops Auto picking
   Transform for the desktop.
 - `ixDecimate` (default 4) publishes every Nth changed tick during motion, and always when motion
-  rests. Clicks ride the welded cursor and never consult the transform.
+  rests. Clicks ride the real pointer and never consult the transform.
 
 **Stomp guard.** The input transform is one system-wide slot. A running Magnify.exe republishes an
 enabled identity into it continuously, and a dirty Magnifier exit leaves its last rect there,
@@ -276,11 +280,12 @@ layered, click-through, tool, non-activating or no-redirection-bitmap windows. W
 Snipping Tool overlay froze the view for 1.5 s on every snip. `WS_EX_TOPMOST` is not in the veto
 set, because games set it. `launchQuiesce=0` disables the hold; it is a test knob only.
 
-## Hook writes (not shipped)
+## Hook writes (removed)
 
-`txHookWrite=1` (restart) moves runtime ownership to the hook thread and lets `MouseProc` write the
-transform from each mouse event (`src/hook_transform.*`), under a single-writer contract: while
-armed the hook owns position writes and the tick routes ramps through the same function. It
-reached 0.37 ms cursor-to-write latency but ships off: writing 434–685 times a second against a
-144 Hz compositor rewrote the view 4–5 times per frame and the cursor swam. Frame coherence, not
-time-to-write, is the metric. Do not enable it without one write per composited frame.
+A removed experiment moved runtime ownership to the mouse-hook thread and
+let `MouseProc` write the transform from each mouse event under a single-writer contract. It
+reached 0.37 ms cursor-to-write latency but never shipped on: writing 434–685 times a second
+against a 144 Hz compositor rewrote the view 4–5 times per frame and the cursor swam. Frame
+coherence, not time-to-write, is the metric. A revival would need one write per composited frame;
+it is also incompatible with DWM centring, which makes it moot. Details:
+[../HITCH-FINDINGS.md](../HITCH-FINDINGS.md).

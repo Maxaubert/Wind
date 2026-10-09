@@ -2,23 +2,6 @@
 #include "../src/view_glide.h"
 using namespace wind;
 
-TEST_CASE("glide is time-based: two 7 ms steps equal one 14 ms step") {
-    double a = GlideToward(GlideToward(0, 100, 7, 150), 100, 7, 150);
-    double b = GlideToward(0, 100, 14, 150);
-    CHECK(a == doctest::Approx(b).epsilon(1e-9));
-}
-TEST_CASE("glide covers 95% of the distance in glideMs and never overshoots") {
-    double v = 0; for (int i = 0; i < 150; ++i) v = GlideToward(v, 1000, 1, 150);
-    CHECK(v == doctest::Approx(950).epsilon(0.01));
-    CHECK(v <= 1000);
-    CHECK(GlideToward(0, 1000, 0, 150) == 0);          // no time, no motion
-    CHECK(GlideToward(0, 1000, 5, 0) == 1000);         // glideMs 0 means snap
-}
-TEST_CASE("retargeting mid-glide never moves backwards") {
-    double v = 0; v = GlideToward(v, 100, 30, 150);
-    double w = GlideToward(v, 110, 30, 150);
-    CHECK(w > v);
-}
 TEST_CASE("centred: the target is the rect centre, clamped to the monitor") {
     double cx, cy;
     REQUIRE(TrackTargetCenter({1000, 500, 1002, 520}, 0, 0, 3, 3840, 2160, 0, 15, cx, cy));

@@ -3,11 +3,12 @@
 // only through the bridge, not the Win32 caret or UI Automation. Every call here runs on the
 // FocusTracker thread, never the tick: a bridge call is a round trip into the Java app (1-12 ms,
 // field-measured outliers over 100 ms). The bridge is EVENT-DRIVEN: it is queried only when the Java
-// app reports a caret or focus change or becomes the foreground window (plus one retry per 250 ms
-// after a failed read), never on the 60 Hz poll, so Wind adds no steady load to the Java app's own
-// UI thread. A window Windows reports as not responding is skipped. The client DLL must be
+// app reports a caret or focus change or becomes the foreground window (plus a retry after a failed
+// read, backing off from 250 ms to 4 s), never on the 60 Hz poll, so Wind adds no steady load to the
+// Java app's own UI thread. A window Windows reports as not responding is skipped. The client DLL must be
 // Authenticode-signed (Wind is UIAccess; see LoadVerified).
 #include <windows.h>
+#include <map>
 #include <set>
 #include <string>
 namespace wind {
@@ -30,6 +31,9 @@ private:
     int lastIndex_ = -1;
     HMODULE mod_ = nullptr;
     std::set<std::wstring> failedDirs_;      // app folders with no usable bridge DLL (retried per folder)
+    // Per-process probe backoff: ensure() is asked on every poll of a Java foreground window.
+    struct ProbeFail { unsigned long long until = 0, backoffMs = 0; };
+    std::map<DWORD, ProbeFail> probeFail_;
     bool enabledDone_ = false;
     unsigned long long enableRetryAt_ = 0;
 };

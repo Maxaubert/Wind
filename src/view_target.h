@@ -57,6 +57,18 @@ inline constexpr double kMouseTakeoverPx = 3.0, kMouseTakeoverWindowMs = 100.0;
 inline constexpr double kClickQuietMs = 1000.0;
 inline constexpr double kKeyDrivenMs = 1000.0;
 
+// A new zoom session starts with the mouse in charge (main.cpp, enter tick). StepViewOwner runs only
+// while zoomed, so without this the owner and its latched target outlive the 1x gap and the next
+// zoom-in follows the previous session's caret. wasTracking = false re-baselines lastSeq on the
+// first tracking tick (#310), so nothing published before the zoom-in fires.
+inline void ResetViewOwnerForSession(ViewOwnerState& s) {
+    s.owner = ViewOwner::Mouse;
+    s.target = TrackSnapshot{};
+    s.warpPointer = false;
+    s.moveAccum = 0; s.moveWindowMs = 0;
+    s.wasTracking = false;
+}
+
 inline ViewOwner StepViewOwner(ViewOwnerState& s, const ViewOwnerInputs& in) {
     s.warpPointer = false;
     const bool detached = s.owner != ViewOwner::Mouse;

@@ -92,8 +92,10 @@ Both hooks have a Raw Input backstop for lost UP events, in the `WM_INPUT` handl
 - **Mouse:** button UPs call `rawButtonUp`. UP only, so the net can clear held state but never set
   it.
 - **Reordering guard.** `WM_INPUT` drains up to a tick late, so a raw UP can arrive after the hook
-  recorded the next press. The net skips the clear when the hook stamped a DOWN for that input in
-  the last ~30 ms.
+  recorded the next press. The net skips the clear when the hook recorded a DOWN for that input
+  AFTER the UP, comparing event times (`GetMessageTime()` of the `WM_INPUT` against the hook
+  struct's `.time`, `src/event_order.h`), not the wall clock, so a main-thread stall of any length
+  cannot make a stale UP cancel a live hold.
 - DOWN edges stay hook-authoritative while the hook is active; `WM_INPUT` writes down-state only in
   the no-hook fallback.
 

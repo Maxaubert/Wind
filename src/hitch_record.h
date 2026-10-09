@@ -5,8 +5,6 @@
 //
 // The question it answers is not "was there a hitch" but "where did the extra time go":
 //  - late wake:        the pacing wait should have returned, Wind's thread was not run yet
-//  - compositor late:  (txPace=2) the composite pulse itself came late, DWM did not compose
-//  - pulse thread late:(txPace=2) DWM composed on time, the pulse thread was not run yet
 //  - blocked in X:     the tick was off the CPU inside call X (a wait, or preempted in it)
 //  - busy in X:        the tick was on the CPU in X (Wind's own work)
 //  - slow tick in X:   long tick before the CPU clock is calibrated (first second): either of the two
@@ -21,12 +19,11 @@ enum TickSpan : int {
     kSpanTrack = 0,   // focus tracker hand-off and snapshot
     kSpanColor,       // colour filter
     kSpanPresent,     // the model's present (everything a zoomed frame does)
-    kSpanTxWrite,     // transform writes (MagSetFullscreenTransform, marshalled to the owner thread)
+    kSpanTxWrite,     // transform writes (MagSetFullscreenTransform)
     kSpanIx,          // input-transform publish and read-back
-    kSpanSprite,      // cursor sprite window moves and show/hide
+    kSpanSprite,      // Inspect crosshair window moves and show/hide
     kSpanActivate,    // zoom-in / zoom-out session start and end
     kSpanCursor,      // system cursor set swaps (blank / restore) and show/hide
-    kSpanShape,       // reading and rendering the cursor shape for the sprite
     kSpanCount
 };
 const char* TickSpanName(int span);
@@ -37,8 +34,6 @@ enum TickFlag : unsigned {
     kTickExit         = 1u << 2,   // zoom-out tick
     kTickTransform    = 1u << 3,   // engine of this tick
     kTickRender       = 1u << 4,
-    kTickPacePulse    = 1u << 5,   // paced by the composite pulse (txPace=2)
-    kTickPulseTimeout = 1u << 6,   // the pulse wait timed out (backfill tick)
     kTickPaceTimer    = 1u << 7,   // paced by the waitable timer
     kTickPaceFlush    = 1u << 8,   // paced by a post-tick DwmFlush
 };
@@ -48,8 +43,6 @@ struct TickRec {
     float dtMs = 0;             // tick start to tick start (the on-screen frame interval)
     float waitMs = -1;          // pacing wait just before this tick; -1 = none
     float wakeLateMs = -1;      // how long after the wait should have ended it returned; -1 = unknown
-    float pulseGapMs = -1;      // txPace=2: interval between the last two composite pulses
-    float pulseDelayMs = -1;    // txPace=2: DWM compose time to the pulse thread's signal
     float workMs = 0;           // the tick's own wall time
     float cpuMs = -1;           // the tick thread's CPU time inside it; -1 = not calibrated yet
     float flushMs = 0;          // post-tick DwmFlush wait
@@ -58,7 +51,8 @@ struct TickRec {
     unsigned flags = 0;
 };
 
-enum class HitchCause { None, LateWake, CompositorLate, PulseThreadLate, Blocked, Busy, SlowTick, FlushWait, LoopOther };
+enum class HitchCause { None, LateWake, Blocked, Busy, SlowTick, FlushWait, LoopOther };
+constexpr int kHitchCauseCount = 7;   // the enumerators above
 const char* HitchCauseName(HitchCause c);
 
 struct HitchVerdict {
@@ -92,7 +86,7 @@ private:
 // Per-minute roll-up of zoomed ticks, so a quiet minute and a rough one read differently.
 struct HitchSummary {
     unsigned ticks = 0, hitches = 0;
-    unsigned byCause[9] = {};
+    unsigned byCause[kHitchCauseCount] = {};
     float worstDt = 0, worstLate = 0, maxWork = 0;
     double sumWork = 0;
     HitchCause worstCause = HitchCause::None;

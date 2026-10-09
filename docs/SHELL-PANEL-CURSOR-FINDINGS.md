@@ -3,8 +3,9 @@
 Field report: with the emoji picker (Win+.) open, Wind's cursor went UNDER the picker (still drawn,
 just covered). Same for clipboard history (Win+V) and the touch keyboard, which share the host.
 
-> **Status.** Closed; the freeze shipped (`panelPointer=1`). Design:
-> [architecture/07](architecture/07-cursor.md#shell-input-panels).
+> **Status.** Closed and removed. The freeze was a workaround for the sprite cursor; the native
+> cursor is drawn by DWM above the panels and needs none ([architecture/07](architecture/07-cursor.md#shell-input-panels)).
+> This record stays for the measurements.
 
 ## Known limitation
 

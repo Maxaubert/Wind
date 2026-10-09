@@ -33,9 +33,14 @@ bool SameProfileName(const std::string& a, const std::string& b);
 // so a corrupt file can never be silently applied as "factory defaults" on switch.
 std::string ProfileTextError(const std::string& text);
 // True when any profile-scoped key differs between the live session text and the saved profile
-// text. Global keys are ignored; a key missing on one side compares as missing (not as a default);
-// values are compared trimmed.
+// text. Global keys are ignored; values are compared trimmed and numerically ("1.0" == "1"). A key
+// missing on one side compares as the built-in default when the first-run template carries that key
+// (so an explicit default is not a change), and as missing otherwise.
 bool SessionDiffers(const std::string& liveText, const std::string& profileText);
+// True for the per-process temp name WriteTextFileAtomic leaves behind when a process dies between
+// its write and its rename: "<anything>.ini.<pid>.tmp" (ASCII case-insensitive). `pid` receives the
+// number. Used by the stale-temp sweep (SweepStaleIniTmp in profiles_io.h).
+bool ParseIniTmpName(const std::wstring& fileName, unsigned long& pid);
 // UpdateIniText for profile-scoped keys only: a global key returns the input unchanged.
 std::string UpdateProfileKey(const std::string& profileText, const std::string& key,
                              const std::string& value);

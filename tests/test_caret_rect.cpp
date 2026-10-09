@@ -156,3 +156,21 @@ TEST_CASE("caret rect: Down into a heading below is learned, even with its botto
     CHECK(top == 161);
     CHECK(s.lineH == 20);
 }
+
+TEST_CASE("caret ghost: Discord's line-end caret is not followed (#387)") {
+    wind::CaretGhostState s;
+    wind::NoteFollowedCaret(2996, 1944, 1993, s);                     // 1x49, typing
+    CHECK(wind::IsLineEndGhost(3375, 1942, 1996, s));                  // 2x54, 380 px right: the ghost
+    CHECK_FALSE(wind::IsLineEndGhost(3015, 1944, 1993, s));            // the next character
+    CHECK_FALSE(wind::IsLineEndGhost(1727, 1993, 2042, s));            // the wrap to the next line
+}
+
+TEST_CASE("caret ghost: End and a click far right keep the caret's box, so they are followed (#387)") {
+    wind::CaretGhostState s;
+    wind::NoteFollowedCaret(1000, 1944, 1993, s);
+    CHECK_FALSE(wind::IsLineEndGhost(3300, 1944, 1993, s));            // End: same box
+    CHECK_FALSE(wind::IsLineEndGhost(1100, 1942, 1996, s));            // a small move with a new box
+    CHECK_FALSE(wind::IsLineEndGhost(400, 1942, 1996, s));             // left, never a line-end ghost
+    wind::CaretGhostState none;
+    CHECK_FALSE(wind::IsLineEndGhost(3375, 1942, 1996, none));         // nothing followed yet
+}

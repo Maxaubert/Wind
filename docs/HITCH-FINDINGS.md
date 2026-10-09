@@ -1,10 +1,15 @@
 # Transform-model hitching: findings and vetted builds (issue #148)
 
-> **Status.** Live design: no magnification context outside sessions, identity park at zoom-out,
-> release after `txIdleReleaseMs`, per-tick level writes, the `txWarmHz` warm pulse
-> ([05](architecture/05-transform-engine.md)). Open work: zoom-in response time (#310). The cursor
-> grows with the zoom in every engine by owner decision (#253), so the transform's magnified
-> pointer is intended, not a defect.
+> **Status.** Live design: the context and the cursor lens are built at idle and kept (lens style
+> off at 1x, the native cursor), identity park at zoom-out, per-tick level writes, the `txWarmHz`
+> warm pulse ([05](architecture/05-transform-engine.md)). Open work: zoom-in response time (#310).
+> The cursor grows with the zoom in every engine by owner decision (#253), so the transform's
+> magnified pointer is intended, not a defect.
+>
+> **History.** The experiments and knobs named in the measurements below (releasing the context
+> after an idle delay, write-rate and level gates, a level grid, warm modes 2-4, composite-pulse
+> pacing, hook writes, the sprite capture rig) were removed with the legacy sprite cursor. The
+> numbers stay as the record of why; the code and the architecture docs are authoritative.
 
 Everything below is harness-measured over Foundation (an OpenGL city builder) on the 4K/144Hz
 RTX 5090 box with MPO disabled. Game frametimes come from RTSS shared memory (`rtssread.exe`);
