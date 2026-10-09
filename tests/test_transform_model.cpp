@@ -136,6 +136,22 @@ TEST_CASE("smooth margins: the bottom-left corner pixel is inside the view (Star
     }
 }
 
+TEST_CASE("input rect from the written offsets matches the visual rect at the far edge") {
+    // The publish used the unclamped source and rounded it to nearest, while the visual write
+    // floors at the far edge: up to a source px apart along the right/bottom (review of #394).
+    const int W = 3840, H = 2160;
+    const double levels[5] = { 2.0, 4.452, 6.904, 12.0, 31.0 };
+    for (int i = 0; i < 5; ++i) {
+        const double level = levels[i];
+        const MagTransform m = ComputeMagTransform(W - W / level, H - H / level, level, W, H, 0.0, 0.0);
+        const InputTransformRects ir = ComputeInputTransformRects((double)m.offX, (double)m.offY, level, 0, 0, W, H);
+        CHECK(ir.sl == m.offX);
+        CHECK(ir.st == m.offY);
+        CHECK(ir.sr <= W);
+        CHECK(ir.sb <= H);
+    }
+}
+
 TEST_CASE("edge margin: a source already inside the margin is left alone") {
     MagTransform m = ComputeMagTransform(500.0, 300.0, 4.0, 3840, 2160, 2.0);
     CHECK(m.offX == 500);

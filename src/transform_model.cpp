@@ -957,11 +957,13 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         if (!hold && (ixForce || warmIxOnly || rest || ++ixTick_ >= cfg.ixDecimate)) {
             ixTick_ = 0;
             ixPending_ = false;
-            // srcL/srcT, not r.srcLeft/srcTop: when the ramp limiters make applyLevel != level
-            // the VISUAL transform uses the recomputed origin, and the input mapping must
-            // describe what is actually on screen.
+            // The rect actually WRITTEN (m), not r.srcLeft/srcTop or srcL/srcT: the ramp
+            // limiters, the far-edge floor in ComputeMagTransform and the 16-bit backstop all move
+            // the visual origin after srcL/srcT, and the input mapping must describe what is on
+            // screen. Publishing the unclamped source put hover hit-testing up to a source px
+            // (level px on screen) off along the right/bottom edge (review of #394).
             InputTransformRects ir = ComputeInputTransformRects(
-                srcL, srcT, applyLevel, mon_.x, mon_.y, mon_.w, mon_.h);
+                (double)m.offX, (double)m.offY, applyLevel, mon_.x, mon_.y, mon_.w, mon_.h);
             RECT dst{ ir.dl, ir.dt, ir.dr, ir.db };
             RECT src = (cfg.magInputTransform == 2) ? dst : RECT{ ir.sl, ir.st, ir.sr, ir.sb };
             const bool enable = applyLevel > 1.001;
