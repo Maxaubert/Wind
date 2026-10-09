@@ -1,10 +1,8 @@
 #include "mag_host.h"
 #include "tick_span.h"   // #361: per-tick spans
-#include "mag_thread.h"
 #include "logging.h"
 #include <windows.h>
 #include <magnification.h>
-#include <memory>
 
 namespace wind {
 
@@ -12,20 +10,10 @@ namespace wind {
 // only the tick thread touches the Magnification API (it is thread-affine anyway).
 static int g_magRefs = 0;
 
-// Every entry point below marshals to the thread that owns the runtime (issue #206). The API is
-// thread-affine - a call from any other thread returns FALSE and changes nothing - and ownership
-// now lives on the input hook thread so MouseProc can write the transform inline. MagThreadInvoke
-// runs inline when already on the owner, or when no owner was claimed, so nothing here changes
-// behaviour for a build whose hook failed to install.
+// The Magnification API is thread-affine: a call from any thread but the one that ran MagInitialize
+// returns FALSE and changes nothing (measured, issue #206). That thread is the tick thread; nothing
+// here marshals anywhere.
 bool MagApiAcquire() {
-    return MagThreadInvoke([]() -> bool { return MagApiAcquireOwned(); });
-}
-
-void MagApiRelease() {
-    MagThreadInvoke([]() -> bool { MagApiReleaseOwned(); return true; });
-}
-
-bool MagApiAcquireOwned() {
     if (g_magRefs > 0) {
         ++g_magRefs;
         wind::Log(wind::LogLevel::Info, "magapi", "acquire -> refs=%d (already up)", g_magRefs);
@@ -40,7 +28,7 @@ bool MagApiAcquireOwned() {
     return true;
 }
 
-void MagApiReleaseOwned() {
+void MagApiRelease() {
     if (g_magRefs <= 0) return;
     if (--g_magRefs == 0) {
         MagUninitialize();
@@ -53,8 +41,6 @@ void MagApiReleaseOwned() {
 bool MagApiAlive() { return g_magRefs > 0; }
 
 bool MagHost::initialize() {
-    // Resolved inside the invoke so the GetProcAddress lookups happen on the owning thread too,
-    // alongside the MagInitialize they belong to.
     initialized_ = MagApiAcquire();
     privateBroken_ = false;   // re-probe the private channel on every (re-)init, not once ever
     if (initialized_) {
@@ -86,47 +72,32 @@ bool MagHost::setSamplingMode(unsigned mode) {
     // a cheaper filter may look smooth without taking the compositor down.
     // The raw setter takes a DWORD POINTER, not a value: passing the value by mistake
     // dereferences it and access-violates (field crash 2026-08-13).
-    // Thread-affine like every other call in this file (issue #274): unmarshalled, it silently
-    // failed once txHookWrite moved ownership to the hook thread.
-    auto raw = setSamplingRaw_;
-    auto smooth = setBitmapSmoothing_;
-    if ((mode >= 2 && !raw) || (mode < 2 && !smooth)) return false;   // nothing to marshal
-    return MagThreadInvoke([mode, raw, smooth]() -> bool {
-        if (mode >= 2) {
-            if (!raw) return false;
-            DWORD m = mode;
-            return raw(&m) != 0;
-        }
-        if (!smooth) return false;
-        return smooth(mode != 0 ? 1 : 0) != 0;
-    });
+    if (mode >= 2) {
+        if (!setSamplingRaw_) return false;
+        DWORD m = mode;
+        return setSamplingRaw_(&m) != 0;
+    }
+    if (!setBitmapSmoothing_) return false;
+    return setBitmapSmoothing_(mode != 0 ? 1 : 0) != 0;
 }
 
 bool MagHost::setDwmCentring(bool on) {
     if (!initialized_ || !setDwmUpdated_) return false;
     // Not a Magnification-context call (it goes straight to DWM for the caller's desktop), but it
-    // pairs with the transform writes, so it runs on the same owner thread for ordering.
-    auto fn = setDwmUpdated_;
-    return MagThreadInvoke([fn, on]() -> bool {
-        return fn(on ? TRUE : FALSE, on ? 0.0f : 0.8f, on ? 0.0f : 0.8f) != FALSE;
-    });
+    // pairs with the transform writes, so it runs on the same thread for ordering.
+    return setDwmUpdated_(on ? TRUE : FALSE, on ? 0.0f : 0.8f, on ? 0.0f : 0.8f) != FALSE;
 }
 
 bool MagHost::createCursorLens() {
     if (!initialized_) return false;
     if (lens_) return true;
-    // On the owner thread: the lens registers with the CALLING thread's magnification context.
-    HWND host = nullptr, lens = nullptr;
-    const bool ok = MagThreadInvoke([&host, &lens]() -> bool {
-        HINSTANCE inst = GetModuleHandleW(nullptr);
-        host = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"Static", L"Wind cursor lens",
-                               WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, inst, nullptr);
-        if (!host) return false;
-        lens = CreateWindowExW(0, WC_MAGNIFIERW, L"", WS_CHILD, 0, 0, 0, 0, host, nullptr, inst, nullptr);
-        if (!lens) { DestroyWindow(host); host = nullptr; return false; }
-        return true;
-    });
-    if (!ok) return false;
+    // The lens registers with the CALLING thread's magnification context (the tick thread).
+    HINSTANCE inst = GetModuleHandleW(nullptr);
+    HWND host = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"Static", L"Wind cursor lens",
+                                WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, inst, nullptr);
+    if (!host) return false;
+    HWND lens = CreateWindowExW(0, WC_MAGNIFIERW, L"", WS_CHILD, 0, 0, 0, 0, host, nullptr, inst, nullptr);
+    if (!lens) { DestroyWindow(host); return false; }
     lensHost_ = host;
     lens_ = lens;
     return true;
@@ -134,38 +105,23 @@ bool MagHost::createCursorLens() {
 
 bool MagHost::setCursorLens(bool on) {
     if (!lens_) return false;
-    HWND lens = lens_;
-    return MagThreadInvoke([lens, on]() -> bool {
-        const LONG_PTR st = GetWindowLongPtrW(lens, GWL_STYLE);
-        const LONG_PTR want = on ? (st | MS_SHOWMAGNIFIEDCURSOR) : (st & ~(LONG_PTR)MS_SHOWMAGNIFIEDCURSOR);
-        if (want != st) SetWindowLongPtrW(lens, GWL_STYLE, want);
-        return true;
-    });
+    const LONG_PTR st = GetWindowLongPtrW(lens_, GWL_STYLE);
+    const LONG_PTR want = on ? (st | MS_SHOWMAGNIFIEDCURSOR) : (st & ~(LONG_PTR)MS_SHOWMAGNIFIEDCURSOR);
+    if (want != st) SetWindowLongPtrW(lens_, GWL_STYLE, want);
+    return true;
 }
 
 void MagHost::destroyCursorLens() {
     if (!lens_ && !lensHost_) return;
-    HWND lens = lens_, host = lensHost_;
-    MagThreadInvoke([lens, host]() -> bool {
-        if (lens) DestroyWindow(lens);
-        if (host) DestroyWindow(host);
-        return true;
-    });
+    if (lens_) DestroyWindow(lens_);
+    if (lensHost_) DestroyWindow(lensHost_);
     lens_ = nullptr;
     lensHost_ = nullptr;
 }
 
 bool MagHost::setTransform(float zoom, int offX, int offY, int tx, int ty, bool fastPan) {
     if (!initialized_) return false;
-    SpanScope span(kSpanTxWrite);   // includes the marshal to the owner thread
-    // The hot path. Inline (zero marshalling) when the caller IS the owner - which is the whole
-    // point of moving ownership to the hook thread.
-    return MagThreadInvoke([=]() -> bool {
-        return setTransformOwned(zoom, offX, offY, tx, ty, fastPan);
-    });
-}
-
-bool MagHost::setTransformOwned(float zoom, int offX, int offY, int tx, int ty, bool fastPan) {
+    SpanScope span(kSpanTxWrite);
     // (A 16-bit-translation theory for the issue #148 corner TDRs was tested and DISPROVEN:
     // routing big-|tx| writes through the public API crashed identically. The real lethal
     // condition is magnifying the far-right source region above ~9x over a heavy game - see
@@ -180,40 +136,27 @@ bool MagHost::setTransformOwned(float zoom, int offX, int offY, int tx, int ty, 
 bool MagHost::setInputTransform(bool active, const RECT& src, const RECT& dst) {
     if (!initialized_) return false;
     SpanScope span(kSpanIx);
-    // By value (issue #274): MagThreadInvoke's contract is that the callable owns what it uses.
-    return MagThreadInvoke([active, src, dst]() -> bool {
-        RECT s = src, d = dst;   // API takes non-const LPRECT
-        return MagSetInputTransform(active ? TRUE : FALSE, &s, &d) != FALSE;
-    });
+    RECT s = src, d = dst;   // API takes non-const LPRECT
+    return MagSetInputTransform(active ? TRUE : FALSE, &s, &d) != FALSE;
 }
 
 bool MagHost::getInputTransform(bool& active, RECT& src, RECT& dst) {
     if (!initialized_) return false;
     SpanScope span(kSpanIx);
-    // Results travel through a heap block the callable co-owns, and reach the caller's
-    // out-params only after a successful invoke, on the caller's own thread (issue #274).
-    struct Out { BOOL en = FALSE; RECT s{}, d{}; };
-    auto out = std::make_shared<Out>();
-    const bool ok = MagThreadInvoke([out]() -> bool {
-        return MagGetInputTransform(&out->en, &out->s, &out->d) != FALSE;
-    });
-    if (!ok) return false;
-    active = out->en != FALSE;
-    src = out->s;
-    dst = out->d;
+    // The out-params are written only after a successful call.
+    BOOL en = FALSE; RECT s{}, d{};
+    if (MagGetInputTransform(&en, &s, &d) == FALSE) return false;
+    active = en != FALSE;
+    src = s;
+    dst = d;
     return true;
 }
 
 void MagHost::shutdown() {
     if (!initialized_) return;
     destroyCursorLens();   // before MagUninitialize, which unregisters the window class
-    // Reset and release as ONE marshalled unit: split across two invokes another thread could slip
-    // a write in between the identity reset and the release.
-    MagThreadInvoke([]() -> bool {
-        MagSetFullscreenTransform(1.0f, 0, 0);   // public reset restores shared state
-        MagApiReleaseOwned();
-        return true;
-    });
+    MagSetFullscreenTransform(1.0f, 0, 0);   // public reset restores shared state
+    MagApiRelease();
     initialized_ = false;
 }
 }

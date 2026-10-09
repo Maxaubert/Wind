@@ -1,6 +1,5 @@
 #include "color_filter.h"
 #include "mag_host.h"
-#include "mag_thread.h"
 #include "logging.h"
 #include <windows.h>
 #include <magnification.h>
@@ -11,8 +10,7 @@ static bool WriteEffect(const ColorMatrix& m) {
     MAGCOLOREFFECT e{};
     static_assert(sizeof(e.transform) == sizeof(m.m), "MAGCOLOREFFECT is 5x5 floats");
     std::memcpy(e.transform, m.m, sizeof(m.m));
-    // Thread-affine like every Magnification call: run on the runtime's owner (inline when we are it).
-    return MagThreadInvoke([e]() mutable -> bool { return MagSetFullscreenColorEffect(&e) != FALSE; });
+    return MagSetFullscreenColorEffect(&e) != FALSE;
 }
 
 void ColorFilterController::apply(const ColorMatrix& want, bool needOwnHold) {

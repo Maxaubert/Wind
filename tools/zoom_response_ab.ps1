@@ -18,8 +18,8 @@
 # Desktop scenario: PresentMon is skipped (dwm.exe presents only on change, so idle gaps would
 # dominate); the capture metrics cover it.
 #
-# Configurations alternate ABAB so drift cancels: txIdleReleaseMs 1200 (context rebuilt every zoom:
-# the post-zoom-out gap is 3 s) vs 15000 (context kept warm across the cycle). Pointer still or
+# Blocks alternate ABAB (the same configuration twice, so drift between blocks shows and the
+# build under test can be compared to another with -Label). Pointer still or
 # moving (a slow circle during the cycle). The ini is backed up and restored; Brightness is forced to
 # 100% during measuring and left as it was found afterwards.
 param(
@@ -143,7 +143,7 @@ function PmStats($csv) { if (-not (Test-Path $csv)) { return [ordered]@{ error =
 # Restore exactly the keys this script touches, to their original values or absence. The originals
 # file is written once; if a previous run died before restoring, it is applied first (never refreshed
 # from an already-modified ini).
-$touched = @('zoomTrace', 'trackLog', 'colorDimPct', 'colorWarmPct', 'txIdleReleaseMs')
+$touched = @('zoomTrace', 'trackLog', 'colorDimPct', 'colorWarmPct')
 $origFile = "$OutDir\ini-originals.json"
 function ReadKey($t, $k) { $m = [regex]::Match($t, "(?m)^$k=([^\r\n]*)"); if ($m.Success) { $m.Groups[1].Value } else { $null } }
 function RestoreOriginals {
@@ -165,11 +165,10 @@ try {
   else { $proc = $GameExe; $target = (Get-Process ($GameExe -replace '\.exe$','') | Select-Object -First 1).MainWindowHandle }
   if ($target -eq [IntPtr]::Zero) { throw "no target window for $Scenario" }
   $rx = 1920 + 700; $ry = 1080 + 400; $rw = 160; $rh = 120          # off-centre: the zoom moves it
-  $configs = @(@{ name = 'cold1200'; rel = 1200 }, @{ name = 'warm15000'; rel = 15000 })
+  $configs = @(@{ name = 'blockA' }, @{ name = 'blockB' })
   foreach ($c in $configs) { $results.configs[$c.name] = [ordered]@{ start = @(); vis = @(); stalls = @(); longest = @(); gap = @(); levels = @(); trace = @(); caretJumps = 0; pm = @() } }
   for ($b = 0; $b -lt $Blocks; $b++) {
     $c = $configs[$b % 2]; $r = $results.configs[$c.name]
-    SetIni @{ txIdleReleaseMs = $c.rel }
     [ZR]::Focus($target); [ZR]::Pump(800); if ($Scenario -eq 'desktop') { [ZR]::SetCursorPos(1920, 1080) }
     [ZR]::Moving = $false; $x = [ZR]::Cycle($rx, $ry, $rw, $rh, 400); [ZR]::Pump(3000)   # discard: the ini flip lands on the next session
     $logStart = (Get-Item $log).Length
@@ -179,7 +178,7 @@ try {
       $v = [ZR]::Cycle($rx, $ry, $rw, $rh, 400)
       if ($Scenario -eq 'desktop') { $r.vis += $v[0]; $r.stalls += $v[1]; $r.longest += $v[2]; $r.gap += $v[4] }
       $r.levels += $v[3]; $r.start += $v[5]
-      [ZR]::Pump(3000)                         # 3 s after zoom-out: cold config really releases
+      [ZR]::Pump(3000)                         # 3 s after zoom-out: back to a quiet 1x
     }
     if ($csv) { PmWait; $r.pm += PmStats $csv }
     $fs = [IO.File]::Open($log, 'Open', 'Read', 'ReadWrite'); $fs.Seek($logStart, 'Begin') | Out-Null

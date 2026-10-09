@@ -10,13 +10,11 @@
 #include <oleacc.h>
 #include <oleauto.h>
 #include <UIAutomation.h>
-#include <dwmapi.h>
 #include <chrono>
 #include <condition_variable>
 #include <memory>
 #include <string>
 #pragma comment(lib, "oleacc.lib")
-#pragma comment(lib, "dwmapi.lib")
 namespace wind {
 
 static const UINT kWakeMsg = WM_APP + 0x61;       // an event arrived: resolve after coalescing
@@ -24,40 +22,7 @@ static const UINT kActiveMsg = WM_APP + 0x62;     // active_ changed (wParam = n
 static const UINT_PTR kCoalesceTimer = 1;
 static FocusTracker* g_self = nullptr;            // WinEvent callbacks have no context pointer
 
-// The shell's input panels (emoji picker, clipboard history, touch keyboard) are hosted by
-// TextInputHost.exe and composed by the shell ABOVE every app window, so no band Wind can create
-// covers them (issue #283, measured 2026-09-29). They never change as windows either: the only
-// reliable signal is TextInputHost's "IME" window, uncloaked while a panel shows and cloaked when it
-// closes (every open/close in the field recording matched). "IME" is a common class name (every GUI
-// thread has one), so the owning process is checked too.
-static bool IsShellPanelWindow(HWND h) {
-    wchar_t cls[16] = {};
-    if (!GetClassNameW(h, cls, 16) || wcscmp(cls, L"IME") != 0) return false;
-    DWORD pid = 0; GetWindowThreadProcessId(h, &pid);
-    HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-    if (!p) return false;
-    wchar_t path[MAX_PATH]; DWORD n = MAX_PATH;
-    bool yes = false;
-    if (QueryFullProcessImageNameW(p, 0, path, &n)) {
-        const wchar_t* base = wcsrchr(path, L'\\');
-        yes = _wcsicmp(base ? base + 1 : path, L"TextInputHost.exe") == 0;
-    }
-    CloseHandle(p);
-    return yes;
-}
-
 struct FocusTrackImpl {
-    static void SetPanel(bool open, HWND h) {
-        if (!g_self) return;
-        g_self->panelHwnd_.store(open ? h : nullptr);
-        if (g_self->panelOpen_.exchange(open) != open)
-            wind::Log(wind::LogLevel::Info, "track", "shell input panel %s", open ? "open" : "closed");
-    }
-    static void CALLBACK OnCloak(HWINEVENTHOOK, DWORD ev, HWND h, LONG obj, LONG, DWORD, DWORD) {
-        if (!g_self || !h || obj != OBJID_WINDOW) return;
-        if (!IsShellPanelWindow(h)) return;
-        SetPanel(ev == EVENT_OBJECT_UNCLOAKED, h);
-    }
     static void CALLBACK OnWinEvent(HWINEVENTHOOK, DWORD ev, HWND, LONG obj, LONG, DWORD, DWORD) {
         if (!g_self || !g_self->active_.load()) return;
         if (ev == EVENT_OBJECT_LOCATIONCHANGE && obj != OBJID_CARET) return;
@@ -208,18 +173,32 @@ static bool Win32Caret(RECT& out) {
 
 // The MSAA system caret object (OBJID_CARET) of the focused window: Chromium/Electron maintain it for
 // screen magnifiers even where their UIA caret is only a line (#341). Rejected when empty or line-wide.
+//
+// These are synchronous cross-process calls on the tracker thread with no deadline of their own, so a
+// hung renderer would stall all tracking until it answers. Not a true deadline (that needs a helper
+// thread, as FocusLookup has), but it bounds the damage: a window Windows reports as not responding
+// is skipped, and a call that took over 250 ms puts the source on a 2 s cooldown, so a slow app
+// costs one slow call per two seconds instead of one per poll.
 static bool MsaaCaret(RECT& out) {
+    static ULONGLONG s_skipUntil = 0;   // tracker thread only
     HWND fg = GetForegroundWindow();
     if (!fg || IsOwnOrTooltip(fg)) return false;
+    const ULONGLONG t0 = GetTickCount64();
+    if (t0 < s_skipUntil) return false;
     GUITHREADINFO gi{ sizeof(gi) };
     HWND h = fg;
     if (GetGUIThreadInfo(GetWindowThreadProcessId(fg, nullptr), &gi) && gi.hwndFocus) h = gi.hwndFocus;
+    if (IsHungAppWindow(fg)) { s_skipUntil = t0 + 2000; return false; }
     IAccessible* acc = nullptr;
-    if (FAILED(AccessibleObjectFromWindow(h, (DWORD)OBJID_CARET, IID_IAccessible, (void**)&acc)) || !acc) return false;
+    if (FAILED(AccessibleObjectFromWindow(h, (DWORD)OBJID_CARET, IID_IAccessible, (void**)&acc)) || !acc) {
+        if (GetTickCount64() - t0 > 250) s_skipUntil = GetTickCount64() + 2000;
+        return false;
+    }
     VARIANT self; VariantInit(&self); self.vt = VT_I4; self.lVal = CHILDID_SELF;
     long x = 0, y = 0, w = 0, hh = 0;
     const bool got = SUCCEEDED(acc->accLocation(&x, &y, &w, &hh, self));
     acc->Release();
+    if (GetTickCount64() - t0 > 250) s_skipUntil = GetTickCount64() + 2000;
     if (!got || hh <= 0 || (x == 0 && y == 0)) return false;
     out = { x, y, x + (w > 1 ? w : 2), y + hh };
     return !wind::IsLineWideCaret(out.left, out.top, out.right, out.bottom);
@@ -338,8 +317,7 @@ void FocusTracker::run() {
     HWINEVENTHOOK h2 = SetWinEventHook(EVENT_SYSTEM_MENUPOPUPSTART, EVENT_SYSTEM_MENUPOPUPSTART, nullptr, FocusTrackImpl::OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     HWINEVENTHOOK h3 = SetWinEventHook(EVENT_OBJECT_FOCUS, EVENT_OBJECT_FOCUS, nullptr, FocusTrackImpl::OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     // LOCATIONCHANGE fires for every moving window and caret system-wide: installed only while the
-    // tracker is active (zoomed), never at 1x (#71). The 16 ms caret backstop likewise; while idle a
-    // 250 ms timer only re-checks a shell panel marked open.
+    // tracker is active (zoomed), never at 1x (#71). The 16 ms caret backstop likewise.
     HWINEVENTHOOK h4 = nullptr;
     UINT_PTR pollTimer = 0;
     auto retune = [&](bool on) {
@@ -347,18 +325,8 @@ void FocusTracker::run() {
             h4 = SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE, nullptr, FocusTrackImpl::OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
         if (!on && h4) { UnhookWinEvent(h4); h4 = nullptr; }
         if (pollTimer) KillTimer(nullptr, pollTimer);
-        pollTimer = SetTimer(nullptr, 0, on ? 16 : 250, nullptr);
+        pollTimer = on ? SetTimer(nullptr, 0, 16, nullptr) : 0;
     };
-    HWINEVENTHOOK h5 = SetWinEventHook(EVENT_OBJECT_CLOAKED, EVENT_OBJECT_UNCLOAKED, nullptr, FocusTrackImpl::OnCloak, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
-    // A panel already open when we start raised its UNCLOAKED before the hook existed (review #284).
-    EnumWindows([](HWND h, LPARAM) -> BOOL {
-        DWORD cloaked = 1;
-        if (IsShellPanelWindow(h) && SUCCEEDED(DwmGetWindowAttribute(h, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && !cloaked) {
-            FocusTrackImpl::SetPanel(true, h);
-            return FALSE;
-        }
-        return TRUE;
-    }, 0);
     retune(active_.load());   // an activation that raced thread start-up is picked up here
     bool pendingFocus = false, pendingCaret = false;
     UINT_PTR coalesce = 0;
@@ -386,7 +354,8 @@ void FocusTracker::run() {
     HWND javaWnd = nullptr;
     bool javaHave = false;
     RECT javaCaret{};
-    ULONGLONG javaRetryAt = 0;              // a failed read is retried at most every 250 ms
+    ULONGLONG javaRetryAt = 0;              // a failed read is retried after javaBackoff, which grows
+    ULONGLONG javaBackoff = 0;              // 250 ms, doubling to 4 s; a Java event or window switch resets it
     unsigned javaEvents = 0;
 
     // #341 line-wide fallback, cached per focus (review #349): the character at the caret or the MSAA
@@ -518,12 +487,19 @@ void FocusTracker::run() {
         if (java) {
             if (fg != javaWnd) { javaWnd = fg; javaDirty = true; }
             const ULONGLONG now = GetTickCount64();
-            // Only after a Java event or window switch (javaDirty), or one retry per 250 ms after a
-            // failed read: unrelated system-wide wakes must not become Java round trips (review #281).
+            // Only after a Java event or window switch (javaDirty), or a retry after a failed read
+            // that backs off (250 ms, doubling to 4 s while focus sits on a non-text component): the
+            // bridge is never polled at a fixed rate, and unrelated system-wide wakes must not become
+            // Java round trips (review #281).
             if (javaDirty || (!javaHave && now >= javaRetryAt)) {
+                if (javaDirty) javaBackoff = 0;   // an event or a window switch is fresh evidence
                 javaHave = jab.caret(fg, javaCaret);
                 javaDirty = false;
-                if (!javaHave) javaRetryAt = now + 250;
+                if (javaHave) javaBackoff = 0;
+                else {
+                    javaBackoff = wind::BackoffMs(javaBackoff, 250, 4000);
+                    javaRetryAt = now + javaBackoff;
+                }
                 if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "java read %s via %s index=%d (poll=%d events=%u): %ld,%ld %ldx%ld",
                                            javaHave ? "ok" : "none", jab.lastSrc(), jab.lastIndex(),
                                            (int)fromPoll, javaEvents, javaCaret.left, javaCaret.top,
@@ -651,21 +627,12 @@ void FocusTracker::run() {
             KillTimer(nullptr, coalesce); coalesce = 0;
             resolve(pendingFocus, false); pendingFocus = pendingCaret = false;
         } else if (m.message == WM_TIMER) {
-            // A missed close (TextInputHost restarted, an event dropped) must not leave the real
-            // pointer on for good: re-check the remembered panel window while it is marked open.
-            if (panelOpen_.load()) {
-                HWND ph = static_cast<HWND>(panelHwnd_.load());
-                DWORD cloaked = 0;
-                if (!ph || !IsWindow(ph) ||
-                    (SUCCEEDED(DwmGetWindowAttribute(ph, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked))
-                    FocusTrackImpl::SetPanel(false, nullptr);
-            }
             if (active_.load() && wantCaret_.load()) resolve(false, true);              // backstop poll
         }
         TranslateMessage(&m); DispatchMessageW(&m);
     }
     if (pollTimer) KillTimer(nullptr, pollTimer);
-    for (HWINEVENTHOOK h : { h1, h2, h3, h4, h5 }) if (h) UnhookWinEvent(h);
+    for (HWINEVENTHOOK h : { h1, h2, h3, h4 }) if (h) UnhookWinEvent(h);
     if (uia && fh) uia->RemoveFocusChangedEventHandler(fh);
     if (fh) fh->Release();
     focusLookup.reset();

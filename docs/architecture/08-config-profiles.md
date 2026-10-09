@@ -80,8 +80,13 @@ text is unchanged. `profile` stays in the fingerprint, so a profile switch reloa
 
 **Hot or restart follows from how a value is read.** A key read from `t.cfg` per tick or per
 zoom-in is hot. A key baked into state at initialization needs a restart: `model` (which engines
-exist), `txHookWrite` (runtime thread ownership), `gpuPriority` (device build), `spriteBand16`
-(sprite creation), `zorderBand` (overlay creation). The comment on each `Config` field says which.
+exist), `gpuPriority` (device build), `zorderBand` and `cursorBandAuto` (overlay and Inspect
+crosshair creation). The comment on each `Config` field says which.
+
+Keys of features that were removed (the old sprite cursor and its experiments, the hook write path,
+the write-rate and level gates, warm modes 2-4, the composite pulse pacing, the wobble cage) are
+simply ignored if an old ini or profile still carries them. `txWarmMode`
+values above 1 read as 1.
 
 ## Profiles
 

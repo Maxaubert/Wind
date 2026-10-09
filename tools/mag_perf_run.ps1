@@ -384,7 +384,7 @@ try {
 
   if ($Mode -eq 'rezoom') {
     # The bounce repro (wind only): zoom deep, zoom fully out, zoom straight back in within the
-    # context linger window (txIdleReleaseMs) so no teardown resets the cached write state.
+    # idle window so no teardown resets the cached write state.
     [PF]::StartFlushForever()
     [PF]::MoveAbs([int]($SW/2), [int]($SH/2), $SW, $SH); Start-Sleep -Milliseconds 300
     for ($c = 1; $c -le $Cycles; $c++) {

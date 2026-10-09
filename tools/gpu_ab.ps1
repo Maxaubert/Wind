@@ -33,7 +33,7 @@ param(
   [switch]$SkipWind,
   [switch]$NoIdleGate,
   [switch]$Probe,
-  [switch]$RestartVariants,   # knobs read at startup (fastPan, cursorSprite): quit + relaunch Wind per variant
+  [switch]$RestartVariants,   # knobs read at startup (fastPan): quit + relaunch Wind per variant
   [string[]]$Variants = @(),  # override the hot-knob list: 'name|knob=val;knob=val' per entry
   [string[]]$Motions  = @(),  # with -Variants: motions per variant (default still,wiggle,pan)
   [string]$Out = "$env:TEMP\wind_gpu_ab.csv"
@@ -205,7 +205,7 @@ function WindZoomOut() {
   $t = [Diagnostics.Stopwatch]::StartNew()
   while ([GA]::L -gt 1.001 -and $t.ElapsedMilliseconds -lt 5000) { Start-Sleep -Milliseconds 5 }
   [GA]::XBtn($false, 1)
-  Start-Sleep -Milliseconds 1800     # past txIdleReleaseMs so the context is released
+  Start-Sleep -Milliseconds 1800     # let DWM settle back to 1x before the next sample
 }
 function WaitWindGone() {
   $t = [Diagnostics.Stopwatch]::StartNew()
@@ -256,10 +256,8 @@ try {
     $variantList = @(
       @{ name='default';            knobs=@{} },
       @{ name='txWarmMode=0';       knobs=@{ txWarmMode=0 } },
-      @{ name='txWriteHz=72';       knobs=@{ txWriteHz=72 } },
       @{ name='txSamplingMode=1';   knobs=@{ txSamplingMode=1 } },
       @{ name='magInputTransform=0';knobs=@{ magInputTransform=0 } },
-      @{ name='txPace=0';           knobs=@{ txPace=0 } },
       @{ name='edgeClip=0';         knobs=@{ edgeClip=0 } }
     )
     if ($Variants.Count -gt 0) {
@@ -288,9 +286,7 @@ try {
   if ($RestartVariants -and $windWasRunning) {
     if (-not $iniBackup) { $iniBackup = Get-Content $iniPath -Raw }
     $rv = @(
-      @{ name='fastPan=0 (public API)'; knobs=@{ fastPan=0 } },
-      @{ name='cursorSprite=0';         knobs=@{ cursorSprite=0 } },
-      @{ name='cursorSprite=0+txWarmMode=0'; knobs=@{ cursorSprite=0; txWarmMode=0 } }
+      @{ name='fastPan=0 (public API)'; knobs=@{ fastPan=0 } }
     )
     foreach ($v in $rv) {
       RestoreIni; foreach ($k in $v.knobs.Keys) { SetKnob $k $v.knobs[$k] }
