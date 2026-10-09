@@ -329,6 +329,7 @@ void FocusTracker::run() {
     };
     retune(active_.load());   // an activation that raced thread start-up is picked up here
     bool pendingFocus = false, pendingCaret = false;
+    int focusRetries = 0;   // re-resolves of a focus change whose lookup went unanswered (M5)
     UINT_PTR coalesce = 0;
 
     // FOLLOW ONLY WHAT THE KEYBOARD MOVES (field test 2026-09-29). Landing in a field, by Tab or by a
@@ -479,10 +480,14 @@ void FocusTracker::run() {
         return ok;
     };
 
-    auto resolve = [&](bool focusChanged, bool fromPoll) {
-        if (!active_.load()) return;
+    // Returns true when a focus change could not be answered (the focused-element lookup timed out
+    // or came back empty), so the caller keeps it pending and tries again (review 2026-10-09 M5:
+    // in slow UIA apps a Tab was otherwise lost for good, because the backstop poll never
+    // re-resolves a focus change).
+    auto resolve = [&](bool focusChanged, bool fromPoll) -> bool {
+        if (!active_.load()) return false;
         HWND fg = GetForegroundWindow();
-        if (IsOwnOrTooltip(fg)) return;
+        if (IsOwnOrTooltip(fg)) return false;
         // Java app: the bridge is the only caret source (its Win32/UIA views have no caret).
         const bool java = wantCaret_.load() && IsJavaWindow(fg) && jab.ensure(fg, tid_.load(), kWakeMsg, log_.load());
         if (java) {
@@ -528,6 +533,8 @@ void FocusTracker::run() {
             lookupStuckLogged = timedOut;
         }
         const ULONGLONG rs1 = GetTickCount64();
+        const bool focusUnanswered = focusChanged && wantFocus_.load() && !win32Only && !java &&
+                                     focusLookup && !el;
         if (el && FAILED(el->get_CurrentBoundingRectangle(&b))) b = RECT{};
         // 1. A focus change: follow the focused control (if wanted). Its caret becomes the baseline.
         //    A container-sized focus (the page after leaving a text box, a pane, the window) is not
@@ -609,6 +616,7 @@ void FocusTracker::run() {
             }
         }
         if (el) el->Release();
+        return focusUnanswered;
     };
 
     while (GetMessageW(&m, nullptr, 0, 0) > 0) {
@@ -632,7 +640,16 @@ void FocusTracker::run() {
             if (!coalesce) coalesce = SetTimer(nullptr, kCoalesceTimer, 30, nullptr);   // NVDA's ~30 ms
         } else if (m.message == WM_TIMER && m.wParam == coalesce && coalesce) {
             KillTimer(nullptr, coalesce); coalesce = 0;
-            resolve(pendingFocus, false); pendingFocus = pendingCaret = false;
+            const bool unanswered = resolve(pendingFocus, false);
+            pendingCaret = false;
+            // Bounded: a hung app answers nothing, and each try can hold this thread 150 ms.
+            if (pendingFocus && unanswered && focusRetries < 3) {
+                ++focusRetries;
+                coalesce = SetTimer(nullptr, kCoalesceTimer, 30, nullptr);
+            } else {
+                pendingFocus = false;
+                focusRetries = 0;
+            }
         } else if (m.message == WM_TIMER) {
             if (active_.load() && wantCaret_.load()) resolve(false, true);              // backstop poll
         }

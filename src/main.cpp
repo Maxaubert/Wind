@@ -112,6 +112,16 @@ static void DetectMpoDisabled() {
 // Refresh rate of a specific display (GDI device name, e.g. "\\.\DISPLAY2"); nullptr/empty = the
 // primary/current display. Re-queried on retarget so pacing tracks the monitor we're actually on
 // (a mixed-refresh multi-monitor setup would otherwise pace a 60Hz panel at the startup 144) (#74).
+// Whether the output is rotated to portrait (90/270). The render engine cannot capture those
+// (review 2026-10-09 M3), so the engine pick needs it before the session starts.
+static bool DetectRotatedOutput(const wchar_t* device) {
+    DEVMODEW dm{}; dm.dmSize = sizeof(dm);
+    const wchar_t* dev = (device && device[0]) ? device : nullptr;
+    if (!EnumDisplaySettingsW(dev, ENUM_CURRENT_SETTINGS, &dm)) return false;
+    return (dm.dmFields & DM_DISPLAYORIENTATION) &&
+           (dm.dmDisplayOrientation == DMDO_90 || dm.dmDisplayOrientation == DMDO_270);
+}
+
 static int DetectRefreshHz(const wchar_t* device = nullptr) {
     DEVMODEW dm{}; dm.dmSize = sizeof(dm);
     const wchar_t* dev = (device && device[0]) ? device : nullptr;
@@ -374,6 +384,7 @@ struct TickState {
     bool fgCacheBackdrop = false;    // window declares a DWM system backdrop (Mica/acrylic/tabbed)
     bool fgCacheProtected = false;   // window or a descendant is capture-protected (DRM)
     bool fgCacheRenderExcl = false;  // exe listed in renderExclude
+    bool monRotated = false;         // target output is portrait; read at each zoom-in (M3)
     bool probePrevLDown = false;    // dead-zone probe (probeClicks=1): left-click edge detect
     unsigned probeTraceTick = 0;    // dead-zone probe (probeClicks=2): trace decimation counter
     bool   inspectCursorWasShowing = true; // cursor visibility at the toggle edge (the mouselook tell)
@@ -420,11 +431,10 @@ static TickState* g_tick = nullptr;
 // cursor SHAPE (SetCursor from hover logic - what real games do whenever the mouse moves) makes
 // per-tick fullscreen-transform writes reset the GPU driver within seconds, at ANY write rate
 // (50Hz still died; quiet-cursor apps are clean at 144Hz). Wind cannot stop another process's
-// SetCursor traffic, so hybrid LEARNS: a transform game session that detects shape churn
-// instant-switches to render and records the app here; later zoom-ins over it pick render
-// directly. Persisted so the lesson survives restarts. The render device-lost path is the
-// backstop: a TDR that slips through (e.g. an animated cursor, invisible to handle polling)
-// marks the app too - one crash ever per exotic app, then never again.
+// SetCursor traffic, so hybrid LEARNS: the render device-lost path (the only writer, see
+// MarkChurnyApp's caller) attributes a driver reset to the transform game session that was live
+// just before it and records the app here; later zoom-ins over it pick render directly.
+// Persisted so the lesson survives restarts: one crash ever per such app, then never again.
 static std::set<std::wstring> g_churnyApps;
 
 static std::wstring ChurnyFilePath() {
@@ -726,6 +736,7 @@ static void FillCategoryInputs(const TickState& t, wind::EnginePickInputs& pin) 
     pin.pref = wind::ParseEnginePref(*sel);
     pin.captureProtected = t.fgCacheProtected;
     pin.renderExcluded   = t.fgCacheRenderExcl;
+    pin.rotatedOutput    = t.monRotated;
 }
 
 // Hand foreground back to the game when game-inspect ends. Called on EVERY inspect exit path
@@ -1480,7 +1491,13 @@ static void RunTick(TickState& t) {
                 // Only ever swapped here or in the settled instant-switch below, so every
                 // activation's teardown calls route to the same engine that activated.
                 HWND fgw = GetForegroundWindow();
+                // Re-derive once per zoom-in even for the same window (review 2026-10-09 M1): the
+                // cache is keyed on the HWND, but what it caches can change under the same handle
+                // (an app marked churny after a driver reset keeps its window; a DRM child surface
+                // appears later). The mid-zoom re-pick below still reuses it every tick.
+                t.fgCacheHwnd = nullptr;
                 RefreshFgCache(t, fgw);
+                t.monRotated = DetectRotatedOutput(t.mon.device);
                 auto* tAvail = dynamic_cast<TransformModel*>(t.mTransform);
                 EnginePickInputs pin;
                 pin.coversMonitor  = ForegroundCoversMonitor(t.mon);
@@ -1553,6 +1570,13 @@ static void RunTick(TickState& t) {
         if (inspectEnter) {
             // Freeze the real cursor where it is; the look point (mapper center) starts there.
             POINT pt; GetCursorPos(&pt);
+            // Read before the freeze clip below replaces the clip (M4, InspectLockTell).
+            RECT preClip{}; GetClipCursor(&preClip);
+            const bool pinnedAtEdge =
+                !wind::ClipRectConfines((int)(preClip.right - preClip.left),
+                                        (int)(preClip.bottom - preClip.top), t.mon.w, t.mon.h) &&
+                wind::PointerPinnedAtEdge(pt.x, pt.y, preClip.left, preClip.top,
+                                          preClip.right, preClip.bottom);
             t.frozenCursor = pt;
             t.clickReleaseTicks = 0;   // start frozen (clear any stale click-release window)
             // Match the desktop cursor speed: snapshot the OS pointer-speed/accel and baseline the
@@ -1571,7 +1595,8 @@ static void RunTick(TickState& t) {
             // the invisible helper so the game stops getting input. Deferred via
             // inspectStealPending: the reveal logic later this tick must still see the GAME as
             // foreground (ForegroundCoversMonitor decides the composite-gated reveal).
-            t.inspectGame = wind::ShouldGameInspect(zoomed, t.detector.locked(),
+            t.inspectGame = wind::ShouldGameInspect(zoomed,
+                                                    wind::InspectLockTell(t.detector.locked(), pinnedAtEdge),
                                                     t.inspectCursorWasShowing,
                                                     t.inspectMagHidCursor);
             if (t.inspectGame) {
@@ -1581,9 +1606,9 @@ static void RunTick(TickState& t) {
             // Logged either way: a DECLINE is the interesting case in the field (the camera keeps
             // moving), and without the inputs there is nothing to diagnose it from.
             wind::Log(wind::LogLevel::Info, "inspect",
-                      "game-inspect %s (zoomed=%d detLocked=%d cursorShown=%d weHid=%d)",
+                      "game-inspect %s (zoomed=%d detLocked=%d pinned=%d cursorShown=%d weHid=%d)",
                       t.inspectGame ? "engaged" : "DECLINED", (int)zoomed,
-                      (int)t.detector.locked(), (int)t.inspectCursorWasShowing,
+                      (int)t.detector.locked(), (int)pinnedAtEdge, (int)t.inspectCursorWasShowing,
                       (int)t.inspectMagHidCursor);
         }
         bool inspectExit = !inspect && t.prevInspect;   // Inspect just turned off but overlay stays (zoomed)
@@ -1781,8 +1806,11 @@ static void RunTick(TickState& t) {
         // cases. Then the pan walls, the write clamp and the MPO ghost are all unnecessary; the ghost
         // alone cost 5-7 ms at every zoom-out (16-21 ms landing stalls). Behind mpoGuardLiftWall until
         // the far edge is proven on an MPO boot (default off).
-        const bool guardLift = mpoExposed && t.cfg.mpoGuardLiftWall != 0 &&
-                               (!nearestSampling || t.cfg.mpoGuard != 0);
+        // What a TRANSFORM session would get, whichever engine is active now: the mid-zoom
+        // render -> transform switch below hands the same tick to an engine this block did not see.
+        const bool liftIfTransform = !g_mpoDisabled && t.cfg.mpoGuardLiftWall != 0 &&
+                                     (!nearestSampling || t.cfg.mpoGuard != 0);
+        const bool guardLift = mpoExposed && liftIfTransform;
         const bool wallNeeded = mpoExposed && t.cfg.tdrTest != 4 && !guardLift &&
                                 (nearestSampling ||
                                  !(t.cfg.mpoBuster != 0 && tmWall->mpoGhostSettled()));
@@ -2150,6 +2178,17 @@ static void RunTick(TickState& t) {
                     // render -> transform: activate the transform THIS tick, keep the overlay up
                     // for the same short overlap, then drop it.
                     { wind::SpanScope span_(wind::kSpanActivate); t.model->setActive(true); }
+                    // The pan wall and MPO state above were computed for the outgoing render
+                    // engine (review 2026-10-09 M2), so this tick's view was mapped without walls.
+                    // Give the incoming transform its MPO state now: its write-site backstop then
+                    // keeps |translation| under the 16-bit field on this first present (the ghost
+                    // is not settled yet, so the backstop is armed at either sampling). The next
+                    // tick computes the walls for the transform as usual.
+                    if (auto* tmIn = dynamic_cast<TransformModel*>(t.model)) {
+                        const bool exposedIn = !g_mpoDisabled;
+                        tmIn->setMpoBusterWanted(exposedIn && t.cfg.mpoBuster != 0 && !liftIfTransform);
+                        tmIn->setMpoExposed(exposedIn && !liftIfTransform);
+                    }
                     t.restAfterReveal = old;
                     t.restOverlapTicks = TicksAtHz(3, t.hz);
                 }
@@ -2881,6 +2920,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     RestoreInputState();
     HANDLE mtx = nullptr;
     if (!AcquireSingleInstance(mtx)) { RestoreInputState(); return 0; }
+    wind::LogClaimBase();   // a restart's per-PID fallback log moves onto wind-core.log (M6)
     atexit(AtExitRestore);
     // Installed before either magnifier model is constructed so a crash under model=transform (which
     // never touches RenderEngine, so RenderEngine's own filter is never installed) still heals a
@@ -3256,6 +3296,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             if (!ts.transformExe.empty() &&
                 GetTickCount64() - ts.lastTransformGameMs < 30000) {
                 MarkChurnyApp(ts.transformExe, "device-lost backstop");
+                ts.fgCacheHwnd = nullptr;   // the game usually keeps its HWND: re-read churny (M1)
             }
             // Restore through the ACTIVE model: in a transform session the transform half (not
             // the render engine) hid the cursor, and only it restores its blanker state too.

@@ -54,6 +54,8 @@ In order:
 1. **Protected content forces Transform.** `captureProtected` (the foreground or a child window
    has display-affinity capture protection: Netflix, Apple TV, PlayReady) or an exe on
    `renderExclude`. On Render such a window is a black rectangle, so this beats every other rule.
+   A rotated (portrait) target output counts the same: Desktop Duplication returns the unrotated
+   panel surface and Render has no rotation path (`rotatedOutput`, read at each zoom-in).
 2. **The per-category preference applies next.** `ClassifyWindow` sorts the foreground into Game,
    Acrylic, Desktop or Other, and `engineGame`, `engineAcrylic`, `engineDesktop` and `engineOther`
    (each Auto, Transform or Render) choose for it. Render is honoured outright; Transform still
@@ -71,7 +73,7 @@ In order:
 
 ```mermaid
 flowchart TD
-    A[Zoom-in edge or foreground change while zoomed] --> D{capture-protected or renderExclude?}
+    A[Zoom-in edge or foreground change while zoomed] --> D{capture-protected, renderExclude or rotated output?}
     D -- yes --> T[TRANSFORM]
     D -- no --> PR{category preference}
     PR -- Render --> R[RENDER]

@@ -150,6 +150,16 @@ TEST_CASE("an explicit transform preference still respects the correctness limit
     CHECK_FALSE(ShouldPickTransform(ex));
 }
 
+TEST_CASE("a rotated output never gets render: duplication cannot capture it (review M3)") {
+    EnginePickInputs in;
+    in.rotatedOutput = true;
+    in.pref = EnginePref::Render;
+    CHECK(ShouldPickTransform(in));
+    EnginePickInputs flat;               // the same inputs on a landscape output: render
+    flat.pref = EnginePref::Render;
+    CHECK_FALSE(ShouldPickTransform(flat));
+}
+
 TEST_CASE("protected content never gets render, whatever anything else says") {
     // Desktop Duplication captures DRM surfaces as black, so render shows nothing at all.
     EnginePickInputs in;

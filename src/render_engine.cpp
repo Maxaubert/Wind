@@ -116,6 +116,7 @@ struct RenderEngine::State {
     void refreshSdrWhite();                  // re-query + fold in (keeps last known good on failure)
     DXGI_FORMAT copyFormat = DXGI_FORMAT_B8G8R8A8_UNORM;  // current desktopCopy format
     int copyW = 0, copyH = 0;                             // current desktopCopy dimensions
+    bool sizeMismatchLogged = false;                      // captured surface != desktop size (M3)
     bool ensureDesktopCopy(DXGI_FORMAT fmt);  // (re)create desktopCopy+SRV to match the capture
 
     // Magnify pass.
@@ -428,6 +429,21 @@ bool RenderEngine::State::capture(const RECT& view, bool crop) {
                 // Steady state: copy only the rects DDA reports changed, so a tiny once-a-second
                 // on-screen element costs a tiny copy, not a full-screen one. Fall back to a full
                 // copy for fresh/zoom-in grabs, scrolling (move rects), or missing metadata.
+                // A surface of another size (a rotated output hands back the transposed panel
+                // surface) cannot be copied: CopyResource between different sizes is invalid and
+                // leaves the copy undefined. Keep the last good frame and say so once (M3; the
+                // engine pick sends rotated outputs to the transform engine).
+                if (td.Width != (UINT)copyW || td.Height != (UINT)copyH) {
+                    if (!sizeMismatchLogged) {
+                        RLog("capture: surface %ux%u != desktop %dx%d (rotated=%d) - frame skipped",
+                             td.Width, td.Height, copyW, copyH, (int)rotated);
+                        sizeMismatchLogged = true;
+                    }
+                    SafeRelease(tex);
+                    SafeRelease(res);
+                    dupl->ReleaseFrame();
+                    return haveDesktop;
+                }
                 if (fresh || !copyChangedRegions(tex, fi, view, crop))
                     ctx->CopyResource(desktopCopy.Get(), tex);
                 if (!haveDesktop)

@@ -52,6 +52,11 @@ struct EnginePickInputs {
     // Exe listed in renderExclude: the manual escape hatch for protected apps the affinity probe
     // does not catch. Same effect as captureProtected.
     bool renderExcluded = false;
+    // The target output is rotated (portrait 90/270). Desktop Duplication hands back the panel's
+    // unrotated surface and the render engine has no rotation path, so it would show a wrong
+    // image (review 2026-10-09 M3); DWM's own magnification handles rotation. Same effect as
+    // captureProtected.
+    bool rotatedOutput = false;
 };
 
 inline bool ShouldPickTransform(const EnginePickInputs& in) {
@@ -60,7 +65,7 @@ inline bool ShouldPickTransform(const EnginePickInputs& in) {
     //    exists to avoid a RARE dwm crash at high zoom that the pan wall and the MPO buster
     //    already mitigate. Netflix inside a browser is both at once, and this is the case that
     //    ordering resolves: black video every time beats an occasional crash risk.
-    if (in.captureProtected || in.renderExcluded) return true;
+    if (in.captureProtected || in.renderExcluded || in.rotatedOutput) return true;
     // 2. An explicit user preference for this window category. Transform is still refused off the
     //    primary monitor (no cross-adapter transform chase) and on an excluded exe, because those
     //    are correctness limits rather than taste.

@@ -124,6 +124,7 @@ namespace {
     std::wstring g_logDir, g_logStem;
     bool        g_ownsBase = false;               // false = per-PID fallback file: never rotate it
     unsigned long long g_fileBytes = 0;
+    std::atomic<int> g_claimTries{0};              // LogClaimBase: writer attempts left (M6)
     wchar_t g_crashDir[MAX_PATH] = L"";   // crash dir pre-resolved at LogInit; handler builds paths heap-free
 
     unsigned long long NowMsUtc() {
@@ -227,10 +228,41 @@ static void WriterRotateIfNeeded() {
     g_fileBytes = 0;
 }
 
+// Move a per-PID fallback log onto the shared base log once this process owns the app (review
+// 2026-10-09 M6). A Wind started while the previous instance still held wind-core.log fell back to
+// wind-core-<pid>.log and, never owning the base, never rotated it: a self-restarted Wind logged
+// without a size cap for its whole life. Writer-thread only, like every other use of the file.
+static void WriterClaimBaseIfRequested() {
+    if (g_claimTries.load() <= 0) return;
+    if (g_ownsBase) { g_claimTries.store(0); return; }
+    g_claimTries.fetch_sub(1);
+    const std::wstring base = g_logDir + L"\\" + g_logStem + L".log";
+    HANDLE probe = CreateFileW(base.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ,
+                               nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (probe == INVALID_HANDLE_VALUE) return;   // the old instance still holds it: next pass
+    CloseHandle(probe);
+    if (g_logFile != INVALID_HANDLE_VALUE) { FlushFileBuffers(g_logFile); CloseHandle(g_logFile); }
+    RotateIfNeeded(g_logDir, g_logStem);
+    HANDLE f = CreateFileW(base.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ,
+                           nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (f == INVALID_HANDLE_VALUE) {             // lost a race: back onto the per-PID file
+        g_logFile = CreateFileW(g_logPath.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ,
+                                nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        return;
+    }
+    g_logFile = f;
+    g_logPath = base;
+    g_ownsBase = true;
+    g_claimTries.store(0);
+    LARGE_INTEGER sz{};
+    g_fileBytes = GetFileSizeEx(g_logFile, &sz) ? (unsigned long long)sz.QuadPart : 0;
+}
+
 static DWORD WINAPI LogWriterMain(LPVOID) {
     std::string batch;
     batch.reserve(64 * 1024);
     for (;;) {
+        WriterClaimBaseIfRequested();
         const unsigned long long reqGen = g_flushReqGen.load();   // before the drain: covers its lines
         bool needFlush = reqGen != g_flushDoneGen.load();
         unsigned long long n = 0;
@@ -313,6 +345,11 @@ void LogInit(const wchar_t* processTag) {
     if (!g_writer) { g_running.store(false); return; }
     SetThreadPriority(g_writer, THREAD_PRIORITY_BELOW_NORMAL);
     SetThreadDescription(g_writer, L"Wind log writer");
+}
+
+void LogClaimBase() {
+    g_claimTries.store(30);   // the writer wakes at least once a second: ~30 s for the old owner to close
+    WakeWriter();
 }
 
 void Log(LogLevel lvl, const char* category, const char* fmt, ...) {
