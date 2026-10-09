@@ -238,6 +238,20 @@ DWM magnifies with nearest neighbour unless something calls
   1-2 px" verdict predates the working setter and is void.
 - Smoothing once crashed dwm.exe over Mica and acrylic at high zoom; it did not reproduce on a
   newer driver. If dwm.exe crashes return, set `txSamplingMode=0` first.
+  It returned on 2026-10-09 (RTX 5090, dwm.exe 10.0.26100.9549): an app window with its
+  see-through acrylic setting on, smooth sampling, zoom in to about 11x, then zoom out.
+  dwmcore.dll faulted with 0x80070057 at offset 0x87565 during the zoom-out; Wind's next write
+  blocked 4.8 s while DWM restarted, and Wind itself kept running.
+  **Root cause (crash dumps, 2026-10-09): a DWM bug, not Wind's.** Stack:
+  `CCachedVisualImage::EnsureRenderTargetBitmap` -> `CResampleLayer::Create` ->
+  `CD3DDevice::CreateScratchRenderTargetBitmap` -> `CreateTexture` -> E_INVALIDARG -> fail-fast.
+  Redrawing the cached backdrop that acrylic blurs, DWM pushes the smoothing layer and asks for
+  a scratch render target of the whole screen at zoomed size: 45168 x 24138 (R16G16B16A16_FLOAT),
+  past the 16384 texture limit. Native Magnifier crashes DWM the same way (12x, same stack,
+  Wind closed), so this is native parity; the only full avoidance is nearest sampling.
+  Repro: smooth sampling, an acrylic window, zoom in (11x-31x), zoom out; it dies mid zoom-out.
+  A slower zoom-out, no edge margins, the public write channel, no ladder and no warm pulses
+  all still crash (field A/B the same evening).
 
 ## The input transform
 
