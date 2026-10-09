@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { setConfig, windowControl } from './bridge.js';
+  import { setConfig, setConfigPersist, windowControl } from './bridge.js';
   import { ic } from './lib/icons.js';
   import KeybindCapture from './lib/KeybindCapture.svelte';
   import { normalizePalette } from './design/themes.js';
@@ -12,12 +12,15 @@
   // Keybinds start blank (Unbound) and are ACTUALLY cleared in the ini on mount, not just shown as
   // blank: a previous halted onboarding attempt may have written real keys, and showing "Unbound"
   // while those stay live underneath is misleading. Writing 0 makes the display match reality; the
-  // KeybindCapture below then writes setConfig live as the user captures.
+  // KeybindCapture below then writes live as the user captures. All of it goes through
+  // setConfigPersist (live ini AND the active profile): the core seeds Default.ini before onboarding,
+  // so a session-only write would open Settings as "unsaved", prompt on Quit, and be dropped by the
+  // next plain start (ResetSessionToProfile).
   let keys = { zoomInButton:'0', zoomInVk:'0', zoomOutButton:'0', zoomOutVk:'0',
                zoomInMods:'0', zoomOutMods:'0', zoomInButtonMods:'0', zoomOutButtonMods:'0' };
-  onMount(() => { for (const k of Object.keys(keys)) setConfig(k, keys[k]); });
+  onMount(() => { for (const k of Object.keys(keys)) setConfigPersist(k, keys[k]); });
   function live(patch) {
-    for (const k of Object.keys(patch)) setConfig(k, patch[k]);
+    for (const k of Object.keys(patch)) setConfigPersist(k, patch[k]);
     keys = { ...keys, ...patch };
   }
   const stepTitles = ['Welcome to Wind', 'Set your zoom keys', "You're all set"];

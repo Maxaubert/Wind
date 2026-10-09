@@ -35,7 +35,14 @@ void OpenSettings() {
 // the profile right here, so the switch's own capture of the outgoing live settings cannot save
 // them after all). Returns false when the user cancels.
 static bool ConfirmUnsaved(const std::wstring& ini, bool forSwitch) {
-    const std::string live = wind::ReadTextFile(ini);
+    // An unreadable ini is not a clean one: skipping the prompt would let Quit or a switch drop the
+    // session unasked. Stop and let the user retry (a missing ini reads as empty and passes).
+    std::string live;
+    if (!wind::ReadLiveIni(ini, live)) {
+        Notify(L"Wind", forSwitch ? L"Could not read the settings (config file is locked); profile not switched."
+                                  : L"Could not read the settings (config file is locked); Wind keeps running.");
+        return false;
+    }
     auto vals = wind::ReadIniValues(live);
     auto it = vals.find("profile");
     if (it == vals.end() || it->second.empty()) return true;
@@ -59,6 +66,14 @@ static bool ConfirmUnsaved(const std::wstring& ini, bool forSwitch) {
     cfg.nDefaultButton = ID_SAVE;
     int pressed = 0;
     if (FAILED(TaskDialogIndirect(&cfg, &pressed, nullptr, nullptr))) return true;
+    if (pressed != ID_SAVE && pressed != ID_DISCARD) return false;
+    // The dialog blocks for as long as the user takes; Settings, the flyout or a hand edit may have
+    // written the ini meanwhile. Act on the CURRENT text, not the snapshot the prompt was built from
+    // (Save would store a stale session, Discard would overwrite newer globals such as the theme).
+    if (!wind::ReadLiveIni(ini, live)) {
+        Notify(L"Wind", L"Could not read the settings (config file is locked); nothing was changed.");
+        return false;
+    }
     if (pressed == ID_SAVE) {
         if (!wind::WriteTextFileAtomic(pp, wind::MakeProfileText(live))) {
             wind::Log(wind::LogLevel::Warn, "profile", "quit save failed (err=%lu)", GetLastError());
@@ -68,7 +83,6 @@ static bool ConfirmUnsaved(const std::wstring& ini, bool forSwitch) {
         }
         return true;
     }
-    if (pressed != ID_DISCARD) return false;
     if (forSwitch && !wind::WriteTextFileAtomic(ini, wind::MakeLiveText(profile, live, it->second))) {
         Notify(L"Wind", L"Could not discard the settings; the profile stays as it is.");
         return false;
@@ -142,7 +156,10 @@ void SwitchToProfile(const std::wstring& ini, const std::wstring& nameW) {
             wind::Log(wind::LogLevel::Warn, "profile",
                       "relaunch FAILED (rc=%lld haveExe=%d); reverting model to %s",
                       static_cast<long long>(rc), (int)haveExe, oldModel.c_str());
-            wind::WriteTextFileAtomic(ini, wind::UpdateIniText(newLive, "model", oldModel));
+            // Re-read: Settings or the flyout may have written since newLive was built.
+            std::string cur;
+            if (!wind::ReadLiveIni(ini, cur)) cur = newLive;
+            wind::WriteTextFileAtomic(ini, wind::UpdateIniText(cur, "model", oldModel));
             Notify(L"Wind", L"Profile switched; kept the current model (restart failed).");
         }
     }

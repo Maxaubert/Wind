@@ -7,7 +7,8 @@
 #include <thread>
 #include <unordered_map>
 namespace wind {
-// Swaps the system cursor set for blanks while Wind draws its own pointer, and back.
+// Swaps the system cursor set for blanks while the real pointer is hidden (Inspect, the hide-cursor
+// hotkey), and back.
 //
 // The swaps run on a worker thread, in order (#363). Each one is 14 SetSystemCursor calls or a
 // full SPI_SETCURSORS scheme reload from disk: measured 8 ms median and up to 90 ms per zoom-out
@@ -19,14 +20,12 @@ public:
     ~CursorBlanker();
     CursorBlanker(const CursorBlanker&) = delete;
     CursorBlanker& operator=(const CursorBlanker&) = delete;
-    const std::unordered_map<HCURSOR, HCURSOR>& originals() const { return originals_; }
     bool blanked() const { return blanked_; }
     void blank();
     // after (optional) runs on the worker once the cursors are back: the repaint nudge, which
     // must follow the restore to show the restored shape.
     void restore(std::function<void()> after = nullptr);
-    // Restore and wait for it (up to 2 s). For paths that act on the restored pointer in the same
-    // breath (the input-panel clip nudge) and for shutdown.
+    // Restore and wait for it (up to 2 s). For shutdown, which must not exit with blank cursors.
     void restoreSync();
 private:
     void post(std::function<void()> op);

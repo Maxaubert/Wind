@@ -7,22 +7,15 @@ namespace wind {
 // breaks the other (field: hybrid switching game<->desktop left two cursors, then no zoom at
 // all, because the transform's idle release killed the render model's cursor hiding and the
 // next transform write failed). Everything goes through this refcount instead: the runtime is
-// alive while ANY holder needs it and released exactly when the last one lets go.
+// alive while ANY holder needs it and released exactly when the last one lets go. The refcount is
+// not synchronised: the Magnification API is thread-affine, so only the tick thread calls it.
 bool MagApiAcquire();
-// The un-marshalled bodies. Call ONLY from the runtime's owning thread (issue #206); everything
-// else must go through MagApiAcquire/MagApiRelease, which marshal.
-bool MagApiAcquireOwned();
-void MagApiReleaseOwned();
 void MagApiRelease();
 bool MagApiAlive();
 class MagHost {
 public:
     bool initialize();
     bool setTransform(float zoom, int offX, int offY, int tx, int ty, bool fastPan);
-    // Same call with NO marshalling - valid only on the runtime's owning thread. MouseProc uses
-    // this directly (issue #206): it already runs on the owner, and the whole latency win is in
-    // not taking a detour to get there.
-    bool setTransformOwned(float zoom, int offX, int offY, int tx, int ty, bool fastPan);
     // Tell the INPUT stack how to invert the magnification (MagSetInputTransform - what the
     // native Magnifier does). Documented for pen/touch, and modern pointer-stack frameworks
     // (XAML/Explorer, Chromium) consult it for hit-testing too (issue #148 desktop dead zones).
@@ -53,7 +46,7 @@ public:
     // (WC_MAGNIFIER) registers a window lens with win32k; with MS_SHOWMAGNIFIEDCURSOR set, win32k
     // switches the pointer to DWM's composition, so DWM draws the REAL pointer into the magnified
     // frame (above every band, sampled like the content). Measured on this PC:
-    //   - creating the lens costs 60-125 ms on the owner thread (once); a lens created on any other
+    //   - creating the lens costs 60-125 ms on the tick thread (once); a lens created on any other
     //     thread registers nothing;
     //   - toggling MS_SHOWMAGNIFIEDCURSOR costs 0.2 ms and switches the composed pointer at once;
     //   - with the style OFF a live context + lens costs nothing: a pointer-toggling full-screen app

@@ -9,7 +9,7 @@ test.beforeEach(async ({ page }) => {
       postMessage: (msg) => {
         if (msg.type === 'getConfig')
           listeners.forEach(fn => fn({ data: { type: 'config', values: { uiTheme: 'auto' } } }));
-        if (msg.type === 'setConfig') window.__sets.push(msg);
+        if (msg.type === 'setConfig' || msg.type === 'setConfigPersist') window.__sets.push(msg);
       },
     }};
   });
@@ -24,6 +24,9 @@ test('onboarding walks 3 steps, applies keys on advance, sets onboarded', async 
   await page.getByText('Zoom in', { exact: true }).locator('xpath=../..').getByRole('button').first().click();
   await page.keyboard.press('F2'); // keyCode 113
   expect(await page.evaluate(() => window.__sets.some(s => s.key === 'zoomInVk' && s.value === '113'))).toBeTruthy();
+  // The keys must land in the active profile too (setConfigPersist): the core seeds Default.ini before
+  // onboarding, and a live-only write would show as unsaved and be dropped by the next plain start.
+  expect(await page.evaluate(() => window.__sets.every(s => s.key === 'onboarded' || s.type === 'setConfigPersist'))).toBeTruthy();
   await page.getByRole('button', { name: 'Next' }).click();
   await expect(page.getByRole('heading', { name: "You're all set" })).toBeVisible();
   await page.getByRole('button', { name: 'Open Settings' }).click();

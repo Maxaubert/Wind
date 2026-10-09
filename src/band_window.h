@@ -2,7 +2,7 @@
 #include <windows.h>
 
 // Shared z-band window creation for the two windows that must sit above the shell: the render
-// overlay and the transform model's cursor sprite. Both used to open-code the same dynamic
+// overlay and the transform model's Inspect crosshair. Both used to open-code the same dynamic
 // CreateWindowInBand dance with a single band and a plain-topmost fallback.
 //
 // The DEFAULT is now band 0 (issue #162), i.e. neither window is banded and this helper does

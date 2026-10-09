@@ -703,9 +703,16 @@ bool OpenFlyout() {
         wind::Log(wind::LogLevel::Error, "tray", "flyout: Direct2D init failed");
         return false;
     }
+    // A failed read is not an empty ini: the flyout would show the defaults and a toggle click would
+    // write the inverse of a state that was never the user's. Missing is fine (empty = defaults).
+    const std::wstring iniPath = wind::ResolveIniPath();
+    std::string text;
+    if (!wind::ReadLiveIni(iniPath, text)) {
+        wind::Log(wind::LogLevel::Warn, "tray", "flyout: ini unreadable (err=%lu); not opening", GetLastError());
+        return false;
+    }
     auto* s = new State;
-    s->iniPath = wind::ResolveIniPath();
-    const std::string text = wind::ReadTextFile(s->iniPath);
+    s->iniPath = iniPath;
     s->ini = wind::ReadIniValues(text);
     s->layout = ParseTrayLayout(s->ini);
     s->palette = UsesPalette(text);

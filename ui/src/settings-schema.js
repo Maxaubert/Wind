@@ -103,7 +103,7 @@ export const groups = [
       ] },
       { caption: 'Pointer', rows: [
         { key: 'mouseAlign', type: 'select', label: 'Pointer position', keywords: ['mouse position', 'mouse', 'cursor', 'pointer', 'where', 'centred', 'centered', 'center', 'centre', 'middle', 'edge', 'edges', 'within the edges', 'align', 'alignment', 'lock to center', 'follow mode', 'placement'], desc: 'Where the mouse pointer sits while the view moves.', options: ['0', '1'], optionLabels: { '0': 'Centred', '1': 'Within the edges' }, def: '0' },
-        { key: 'mouseMarginPct', type: 'slider', label: 'Edge margin', keywords: ['edge', 'edges', 'border', 'padding', 'distance', 'boundary', 'margin', 'pointer', 'mouse', 'percent', 'dead zone', 'how near'], desc: 'How near the edge the pointer gets before the view moves.', min: 0, max: 30, step: 1, def: 0, unit: '%',
+        { key: 'mouseMarginPct', type: 'slider', label: 'Edge margin', keywords: ['edge', 'edges', 'border', 'padding', 'distance', 'boundary', 'margin', 'pointer', 'mouse', 'percent', 'dead zone', 'how near'], desc: 'How near the edge the pointer gets before the view moves.', min: 0, max: 40, step: 1, def: 0, unit: '%',
           showIf: { key: 'mouseAlign', eq: '1' } },
         // High resolution cursor (#227). Ini key txSamplingMode (0 nearest / 1 smooth). No longer
         // coupled to MPO (#369): both looks keep apps off hardware planes while zoomed (smooth via the

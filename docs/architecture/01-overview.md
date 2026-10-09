@@ -79,7 +79,7 @@ build. See [11](11-build-test-release.md).
 | Loop and session state | `main.cpp` (`wWinMain`, `RunTick`), `idle_policy.h`, `sched_priority.h`, `tick_stats.h` |
 | Engine contract and pick | `magnifier_model.h`, `engine_pick.h`, `shell_desktop.h`, `launch_quiesce.h` |
 | Render engine | `render_engine.*`, `render_model.*`, `render_shaders.h`, `hdr_info.*`, `hdr_scale.h`, `band_window.h`, `png_dump.*` |
-| Transform engine | `transform_model.*`, `transform.*`, `mag_host.*`, `mag_thread.*`, `tx_cadence.h`, `tx_warm.h`, `comp_pin.*`, `mpo_boot.h`, `hook_transform.*`, `hook_geometry.h` |
+| Transform engine | `transform_model.*`, `transform.*`, `mag_host.*`, `tx_warm.h`, `comp_pin.*`, `mpo_boot.h`, `native_cursor.h`, `zoom_ladder.h` |
 | Colour | `color_filter.*`, `color_matrix.h`, `cursor_tint.*` |
 | Input | `input_router.*`, `keybind_rules.h`, `pointer_binds.h`, `mouse_ballistics.*`, `keyboard_pan.h`, `typing_key.h` |
 | Cursor and lock | `cursor_mapper.*`, `lock_detector.*`, `drag_follow.h`, `gain_learner.h`, `cursor_sprite.*`, `cursor_blanker.*`, `cursor_decode.*`, `sprite_layer.h`, `crosshair.*`, `cursor_lock.*`, `inspect_focus.h` |
@@ -88,7 +88,7 @@ build. See [11](11-build-test-release.md).
 | Config and profiles | `config.*`, `config_path.h`, `profiles.*`, `profiles_io.h` |
 | Tray | `tray_host.*`, `tray_ipc.h`, `tray_items.*`, `tray_status.h`, `tray_app/` |
 | Settings host | `config_ui/` (`main.cpp`, `ini_edit.*`, `mpo.h`, `wind_watchdog.h`, `webview_recover.h`) |
-| Logging and diagnostics | `logging.*`, `test_telemetry.h`, `wobble_cage.*` |
+| Logging and diagnostics | `logging.*`, `test_telemetry.h`, `hitch_record.*`, `tick_span.h` |
 | Installer support | `installer_state.h`, `webview2_probe.h`, `version.h` |
 
 Other top-level folders: `ui/` (Svelte settings app and Playwright tests), `tests/` (doctest),
