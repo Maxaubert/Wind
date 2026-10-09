@@ -37,6 +37,12 @@ public static class WM {
   [DllImport("user32.dll")] public static extern int GetSystemMetrics(int i);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowW(string cls, string name);
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  // The sprite window exists hidden for the Inspect crosshair; only a visible one is a drawn cursor.
+  static IntPtr FindSpriteWindow() {
+    IntPtr h = FindWindowW("WindCursorSprite", null);
+    return (h != IntPtr.Zero && IsWindowVisible(h)) ? h : IntPtr.Zero;
+  }
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
   [DllImport("dwmapi.dll")] public static extern int DwmFlush();
@@ -70,7 +76,7 @@ public static class WM {
     // Magnifier publishes while zoomed. A stale ENABLED rect surviving wm's exit is the leak suspect.
     w.WriteLine("time,lvl,act,spd,devXmed,devXp95,devYmed,staleMs,writes,rev,spriteX,mag,fg,ixEn,ixL,ixT,ixR,ixB,dwmFps,dwmMaxMs,dwmOver25");
     var t = System.Diagnostics.Stopwatch.StartNew();
-    IntPtr sprite = FindWindowW("WindCursorSprite", null);
+    IntPtr sprite = FindSpriteWindow();
     int lastOx = int.MinValue, lastOy = int.MinValue, lastPx = int.MinValue, lastPy = int.MinValue;
     int secStart = 0, dirSign = 0, writes = 0, rev = 0;
     double dist = 0, maxLvl = 0;
@@ -122,7 +128,7 @@ public static class WM {
           ixOk ? (ixEn ? 1 : 0) : -1, ixS.L, ixS.T, ixS.R, ixS.B, fc, fm, fo));
         dx.Clear(); dy.Clear(); sx.Clear(); dist = 0; writes = 0; rev = 0; maxLvl = 0;
         secStart = sec;
-        if (sprite == IntPtr.Zero) sprite = FindWindowW("WindCursorSprite", null);
+        if (sprite == IntPtr.Zero) sprite = FindSpriteWindow();
       }
       System.Threading.Thread.SpinWait(80);
     }

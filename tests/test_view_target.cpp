@@ -176,3 +176,31 @@ TEST_CASE("tracking turning on mid-zoom (alt-tab back from a game) also re-basel
     in.snap = Snap(TrackKind::Caret, 5);
     CHECK(StepViewOwner(s, in) == ViewOwner::Caret);
 }
+
+TEST_CASE("a new session starts with the mouse in charge, not on the previous session's caret") {
+    ViewOwnerState s;
+    ViewOwnerInputs in = Base(); in.msSinceKey = 5; in.snap = Snap(TrackKind::Caret, 1);
+    CHECK(StepViewOwner(s, in) == ViewOwner::Caret);             // typed in a field, caret owns the view
+    CHECK(s.target.seq == 1);
+    // Zoom out, zoom in: no StepViewOwner ran at 1x, so the owner survived the gap.
+    ResetViewOwnerForSession(s);
+    CHECK(s.owner == ViewOwner::Mouse);
+    CHECK(s.target.kind == TrackKind::None);
+    CHECK(s.target.seq == 0);
+    CHECK_FALSE(s.warpPointer);
+    CHECK_FALSE(s.wasTracking);
+    // The first tick of the new session re-baselines instead of following what happened before it.
+    in.snap = Snap(TrackKind::Caret, 2); in.msSinceKey = 100;
+    CHECK(StepViewOwner(s, in) == ViewOwner::Mouse);
+    in.snap = Snap(TrackKind::Caret, 3); in.msSinceKey = 5;      // typing in the new session still follows
+    CHECK(StepViewOwner(s, in) == ViewOwner::Caret);
+}
+TEST_CASE("a keyboard-pan owner does not survive into the next session either") {
+    ViewOwnerState s;
+    ViewOwnerInputs in = Base(); in.panning = true;
+    CHECK(StepViewOwner(s, in) == ViewOwner::Keys);
+    ResetViewOwnerForSession(s);
+    CHECK(s.owner == ViewOwner::Mouse);
+    in.panning = false;
+    CHECK(StepViewOwner(s, in) == ViewOwner::Mouse);
+}

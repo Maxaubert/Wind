@@ -115,7 +115,6 @@ gate) and `register_nightly.ps1` (scheduled full run on the dev machine).
 | `baselines.json` | Per-scenario PASS numbers from the dev machine |
 | `sweep.ps1` | Runs a list of configurations through the gates, cheap gate first, and logs every result |
 | `ab_acryl.ps1` | Round-robin multi-config run of the acrylic hitch scenarios (issue #229) |
-| `dualcursor.ps1` | Black-backdrop capture test for a second or flickering cursor; sets `spriteCapturable=1` |
 | `cursor_area_probe.py` | Optical probe: cursor area and position per captured frame |
 | `cursor_flicker.py` | Analyzer for the optical probe: does the cursor oscillate while panning |
 | `shimmer_ab.ps1` | Ramp-shimmer A/B per configuration, hand still, blank backdrop |

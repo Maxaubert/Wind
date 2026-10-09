@@ -39,6 +39,7 @@ public static class WB {
   [DllImport("user32.dll")] public static extern int GetSystemMetrics(int i);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowW(string cls, string name);
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L,T,R,B; }
   [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
   [StructLayout(LayoutKind.Sequential)] public struct MOUSEINPUT { public int dx, dy; public uint mouseData, dwFlags, time; public IntPtr dwExtraInfo; }
@@ -73,15 +74,19 @@ public static class WB {
   public static double ReversalPx = 0;      // total backwards travel, screen px
   public static int WritesForward = 0;
 
-  // THE CURSOR ITSELF. Wind hides the real pointer (cursorSprite=1) and draws its own sprite,
-  // moved from present() on the TICK - while the view is now written from the mouse HOOK. Two
-  // independent update paths at different instants, so the drawn cursor and the content underneath
-  // can disagree. Every earlier metric measured the VIEW and was therefore blind to this. Native
-  // has no sprite: DWM composites the real cursor with the same transform, so it cannot desync.
+  // THE CURSOR ITSELF. The old transform engine hid the real pointer and drew its own sprite window,
+  // placed from the tick while the view was written elsewhere: two independent update paths at
+  // different instants, so the drawn cursor and the content underneath could disagree. Every earlier
+  // metric measured the VIEW and was blind to this. Wind now has no cursor sprite in transform
+  // sessions (DWM composites the real cursor with the same transform, so it cannot desync); the
+  // only sprite window left is the Inspect crosshair, and a hidden one is not measured.
   public static List<double> SpriteDev = new List<double>();   // sprite centre vs screen centre, px
   public static List<double> SpriteDevT = new List<double>();  // sample time, ms
   public static IntPtr Sprite = IntPtr.Zero;
-  public static void FindSprite() { Sprite = FindWindowW("WindCursorSprite", null); }
+  public static void FindSprite() {
+    IntPtr h = FindWindowW("WindCursorSprite", null);
+    Sprite = (h != IntPtr.Zero && IsWindowVisible(h)) ? h : IntPtr.Zero;
+  }
   // ONE managed loop: P and O have to be sampled together. A PowerShell loop around the two reads
   // would insert its own skew between them and manufacture a deviation that is not there.
   public static void Run(int sw, int sh, double seconds, double speed, double settleMs) {

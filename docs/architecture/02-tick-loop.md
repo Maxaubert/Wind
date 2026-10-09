@@ -47,7 +47,9 @@ flowchart TD
    game (`QuiesceHoldActive`), the controller is frozen too, or the level would land as one jump
    when writes resume. Quick zoom then snaps the level via the pure `ApplyQuickZoom`.
 5. **Inspect edges.** The toggle edge snapshots whether the cursor was showing and whether Wind was
-   hiding it; both feed `ShouldGameInspect` (`src/inspect_focus.h`). Inspect keeps the overlay
+   hiding it (`t.cursorHiddenByUs`, which a transform session reads back from
+   `TransformModel::pointerHidden()` after each present, since the model also hides and restores the
+   pointer on its own); both feed `ShouldGameInspect` (`src/inspect_focus.h`). Inspect keeps the overlay
    active at 1x (`active = zoomed || inspect`). Details in [07](07-cursor.md).
 6. **Pan delta.** One of three regimes, see [below](#pan-delta-three-regimes).
 7. **Foreground facts and the pan wall.** `GetForegroundWindow`, `ForegroundCoversMonitor` and the
@@ -98,16 +100,15 @@ There is no settings IPC. `WindConfig.exe` writes `magnifier.ini` and the core n
   taken and `t.configRetry` re-checks on the next poll. See [08](08-config-profiles.md).
 
 **UI-only writes never reload.** A reload rebuilds `ZoomController`, which collapses an active zoom
-to 1x. `StripUiOnlyKeys` (`src/config.cpp`) drops `uiTheme`, `uiPalette`, `showAdvanced` and
-`onboarded`, and the result is compared with the fingerprint of the last applied config
+to 1x. `StripUiOnlyKeys` (`src/config.cpp`) drops `uiTheme`, `uiPalette`, `showAdvanced`,
+`onboarded` and the five tray layout keys (`trayPerf`, `traySliders`, `traySliderOrder`,
+`trayToggles`, `trayToggleOrder`), and the result is compared with the fingerprint of the last applied config
 (`t.lastCoreIni`). An identical fingerprint skips the reload. The fingerprint is seeded at startup;
 an empty one would make the first Settings write of a session reload.
 
 A real reload re-binds the hook's buttons and swallowed keys (`g_input.setButtons`/`setKeys`),
-re-registers the hotkeys, pushes `txIdleReleaseMs` into the transform model, invalidates the
-foreground cache, and rebuilds `ZoomController` and `CursorMapper` with the mapper's centre kept.
-Engine-shaped keys (`model`, `txHookWrite`) need a restart: they decide which models exist and
-which thread owns the Magnification runtime.
+re-registers the hotkeys, invalidates the foreground cache, and rebuilds `ZoomController` and `CursorMapper` with the mapper's centre kept.
+Engine-shaped keys (`model`) need a restart: they decide which models exist.
 
 ## Pan delta: three regimes
 
@@ -124,10 +125,11 @@ which thread owns the Magnification runtime.
   (`seedLock()`), because downstream gates read `t.detector.locked()`.
 - **Tracking** overrides the result afterwards: caret, focus or mouse-edge mode can detach the view
   from the pointer (`t.viewDetached`), see [07](07-cursor.md).
-- `ShouldDragFollow` (`src/drag_follow.h`) suspends the weld while a mouse button is held and
-  follows the pointer 1:1.
-- With `txFreeCursor` in a transform session, the mapper is reset to the real cursor each tick and
-  fed zero delta: the view is a pure function of the pointer.
+- `ShouldDragFollow` (`src/drag_follow.h`) suspends the render engine's weld while a mouse button is
+  held and follows the pointer 1:1.
+- In a free transform session (not Inspect, not locked) the mapper is reset to the real cursor each
+  tick and fed zero delta: the view is a pure function of the pointer, nothing welds, and the free
+  tick only feeds the gain learner.
 - One clamp bounds any single tick's pan to the monitor span.
 
 ## Pacing
@@ -187,5 +189,5 @@ composition. It does not help when the GPU is the bottleneck.
   and UI Automation can block and want their own message loop and COM apartment. The tick only
   calls `setActive()` and reads `snapshot()`. See [07](07-cursor.md).
 - **Magnification runtime owner.** Magnification calls are thread-affine: only the thread that
-  called `MagInitialize` can drive the transform. By default that is the tick thread; the opt-in
-  `txHookWrite` moves ownership to the hook thread. See [05](05-transform-engine.md).
+  called `MagInitialize` can drive the transform. That is the tick thread, and every Magnification
+  call is made on it. See [05](05-transform-engine.md).

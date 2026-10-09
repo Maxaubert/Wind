@@ -46,7 +46,7 @@ other two.
 | 04 | [The render engine](04-render-engine.md) | Capture, overlay, reveal gating, HDR, colour filters |
 | 05 | [The transform engine](05-transform-engine.md) | The Magnification runtime, write channels and cadence, MPO, the input transform |
 | 06 | [The input pipeline](06-input.md) | Hooks, swallowing, bind rules, safety nets, Raw Input limits |
-| 07 | [The cursor system](07-cursor.md) | Mapper, weld, sprite, lock detection, Inspect, tracking, keyboard panning |
+| 07 | [The cursor system](07-cursor.md) | Mapper, weld, native cursor, lock detection, Inspect, tracking, keyboard panning |
 | 08 | [Config and profiles](08-config-profiles.md) | The ini as IPC, parsing, hot vs restart, profiles, key reference |
 | 09 | [The settings UI](09-settings-ui.md) | WebView2 host, bridge, schema, session model, themes, tests |
 | 11 | [Build, test, release](11-build-test-release.md) | `build.bat`, the test split, deploy, installer, release and alpha workflows |
