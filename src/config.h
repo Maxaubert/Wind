@@ -320,10 +320,11 @@ struct Config {
     // with an undefined light-grey border: the vertical line down the left edge (and its
     // horizontal twin along the top) once the view is parked against that boundary. Native
     // Magnifier is smooth-sampled, whose filter clamps to edge, which is why it never shows it.
-    // 0 = old behaviour (for A/B); raise to 2 if a thinner line survives at 1. The cost is the
-    // outermost source pixel becoming unreachable - exactly what the right/bottom already pay.
-    // Nearest only: smooth sampling uses no margin on any side (EdgeMarginsFor, transform.h).
-    double txEdgeMargin = 1.0;
+    // The cost is the outermost source pixel becoming unreachable, which kills the Start corner
+    // click while zoomed. DEFAULT 0 since #432: no margin on any side in any sampling mode
+    // (field-tested clean). Kill switch: 1 (or 2) brings back this low margin AND the 2 px far
+    // margin for nearest sampling. Smooth sampling never uses either (EdgeMarginsFor, transform.h).
+    double txEdgeMargin = 0.0;
     // Every changed tick is written and the level is written straight, per tick: write-rate and
     // step gates, a level grid and a minimum level step were all field-rejected (issues #148, #204)
     // and are gone. Only the ramp-step cap below survives.

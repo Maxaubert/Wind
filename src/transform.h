@@ -36,10 +36,12 @@ MagTransform ComputeMagTransform(double srcLeft, double srcTop, double level,
 // bottom-left corner did not open Start; native Magnifier opens it at every level). Both margins
 // keep desktop texels out of the view, and the pointer-framework hit-test ignores a pointer outside
 // the view, so the corner pixel was dead: measured, either margin alone kills it, both at 0 fix it.
-// Both margins defend the NEAREST path: the low one hides its grey border line, the far one the
+// Both margins defended the NEAREST path: the low one hid its grey border line, the far one the
 // right/bottom driver reset (#148; the 16-bit MPO field that lives in the nearest path). Smooth
-// sampling takes a float path, clamps to edge and survives the same corner, as native Magnifier
-// does, so it gets native's exact rect: 0 and 0. Nearest (and an unset mode) keeps both.
+// sampling clamps to edge and survives the same corner, as native Magnifier does, so it always gets
+// native's exact rect: 0 and 0. Nearest gets 0 and 0 too since #432 (field test 2026-10-10: Start
+// corner works, no grey line, no reset; the 16-bit overflow now has its own guards). txEdgeMargin
+// above 0 is the kill switch: nearest then keeps that low margin and the 2 px far margin again.
 struct EdgeMargins { double lo; double hi; };
 EdgeMargins EdgeMarginsFor(int samplingMode, double cfgLowMargin);
 

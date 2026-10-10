@@ -25,7 +25,7 @@ static int iround(double v) {
 }
 
 EdgeMargins EdgeMarginsFor(int samplingMode, double cfgLowMargin) {
-    if (samplingMode == 1) return EdgeMargins{ 0.0, 0.0 };
+    if (samplingMode == 1 || cfgLowMargin <= 0.0) return EdgeMargins{ 0.0, 0.0 };
     return EdgeMargins{ cfgLowMargin, 2.0 };
 }
 

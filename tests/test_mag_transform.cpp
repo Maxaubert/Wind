@@ -1,6 +1,7 @@
 #include "doctest.h"
 #include "../src/transform.h"
 #include "../src/cursor_mapper.h"
+#include "../src/config.h"
 
 using namespace wind;
 
@@ -111,16 +112,34 @@ TEST_CASE("edge margin: rest level 1.0 stays exactly identity whatever the margi
     }
 }
 
-TEST_CASE("edge margins follow sampling: smooth gets native's exact rect, nearest keeps both") {
-    EdgeMargins s = EdgeMarginsFor(1, 1.0);
+TEST_CASE("edge margins: native's exact rect by default, nearest keeps both only on the kill switch") {
+    Config def;
+    CHECK(def.txEdgeMargin == 0.0);                      // #432: no margins by default
+    EdgeMargins n0 = EdgeMarginsFor(0, def.txEdgeMargin);
+    CHECK(n0.lo == 0.0);
+    CHECK(n0.hi == 0.0);
+    EdgeMargins s = EdgeMarginsFor(1, 1.0);              // smooth never takes them
     CHECK(s.lo == 0.0);
     CHECK(s.hi == 0.0);
-    EdgeMargins n = EdgeMarginsFor(0, 1.0);
+    EdgeMargins n = EdgeMarginsFor(0, 1.0);              // kill switch: both come back
     CHECK(n.lo == 1.0);
     CHECK(n.hi == 2.0);
-    EdgeMargins u = EdgeMarginsFor(-1, 1.0);   // mode left alone: the safe nearest margins
+    EdgeMargins u = EdgeMarginsFor(-1, 1.0);
     CHECK(u.lo == 1.0);
     CHECK(u.hi == 2.0);
+}
+
+TEST_CASE("default nearest margins: the bottom-left corner pixel is inside the view (#432)") {
+    const int W = 3840, H = 2160;
+    const double levels[6] = { 2.0, 3.0, 4.452, 6.904, 11.0, 16.0 };
+    for (int i = 0; i < 6; ++i) {
+        const double level = levels[i];
+        const EdgeMargins mg = EdgeMarginsFor(0, Config{}.txEdgeMargin);
+        MagTransform m = ComputeMagTransform(0.0, H - H / level, level, W, H, mg.lo, mg.hi);
+        CHECK(m.offX == 0);
+        CHECK(m.offY + H / level > (double)(H - 1));
+        CHECK(m.offY + H / level <= (double)H);
+    }
 }
 
 TEST_CASE("smooth margins: the bottom-left corner pixel is inside the view (Start corner click)") {
