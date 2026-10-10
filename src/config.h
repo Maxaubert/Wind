@@ -523,8 +523,9 @@ bool IsForbiddenBindVk(int vk);
 // True when exeName (bare file name, any case) appears in a comma-separated list. Used for the
 // Auto/hybrid transform exclusion (fullscreen browser video must stay on the render engine).
 bool IsExeInList(const std::string& exeName, const std::string& list);
-// The ini text with UI-ONLY lines removed (uiTheme, uiPalette, showAdvanced, onboarded and the five
-// tray layout keys trayPerf, traySliders, traySliderOrder, trayToggles, trayToggleOrder): the
+// The ini text with UI-ONLY lines removed (uiTheme, uiPalette, showAdvanced, onboarded, trayPinned,
+// uiHighResNoticeOff and the five tray layout keys trayPerf, traySliders, traySliderOrder,
+// trayToggles, trayToggleOrder): the
 // settings app and the tray own those keys and the core never consumes them, yet every write
 // hot-reloads the core - and the reload resets the ZoomController, so toggling the app theme or
 // editing the tray layout while zoomed collapsed the zoom to 1x (field report). The core compares this stripped form across reloads and skips

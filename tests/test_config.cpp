@@ -709,6 +709,11 @@ TEST_CASE("ParseConfig clamps trackGlideMs and txMaxStepPct (review #72)") {
     CHECK(ParseConfig("txMaxStepPct=-5\n").txMaxStepPct == 0);
     CHECK(ParseConfig("txMaxStepPct=99999\n").txMaxStepPct == 1000);
 }
+TEST_CASE("uiHighResNoticeOff is UI-only: never reloads the core and never travels with a profile (#441)") {
+    CHECK(StripUiOnlyKeys("a=1\nuiHighResNoticeOff=0\nb=2\n") == "a=1\nb=2\n");
+    CHECK(StripUiOnlyKeys("a=1\nuiHighResNoticeOff=0\n") == StripUiOnlyKeys("a=1\nuiHighResNoticeOff=1\n"));
+    CHECK(StripUiOnlyKeys("uiHighResNoticeOffX=1\n") == "uiHighResNoticeOffX=1\n");
+}
 TEST_CASE("trayPinned ships off, clamps to 0..1 and is UI-only: never reloads the core (#436)") {
     CHECK(ParseConfig("").trayPinned == 0);
     CHECK(ParseConfig("trayPinned=0\n").trayPinned == 0);

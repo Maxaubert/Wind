@@ -249,7 +249,8 @@ test('High resolution cursor applies live: no MPO registry write, no restart pro
   await page.goto('/');
   await go(page, 'view');
   const sw = page.locator('[data-key="txSamplingMode"]').getByRole('switch');
-  await sw.check({ force: true });
+  await sw.click({ force: true });
+  await page.getByRole('button', { name: 'Turn on' }).click();   // the experimental notice (#441)
   expect(await page.evaluate(() => window.__live.txSamplingMode)).toBe('1');
   await sw.click({ force: true });
   expect(await page.evaluate(() => window.__live.txSamplingMode)).toBe('0');

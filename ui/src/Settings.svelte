@@ -77,7 +77,20 @@
   }
 
   // --- Changes --------------------------------------------------------------------------------
+  // High resolution cursor notice (#441): turning it ON asks first, unless the user opted out
+  // (uiHighResNoticeOff, a global UI-only key). Every row that renders the key (page and search) comes here.
+  let highResPrompt = $state(false);
+  let highResSkip = $state(false);
+  function acceptHighRes() {
+    if (highResSkip) { values = { ...values, uiHighResNoticeOff: '1' }; setConfig('uiHighResNoticeOff', '1'); }
+    highResPrompt = false; highResSkip = false;
+    values = { ...values, txSamplingMode: 1 };
+    setConfig('txSamplingMode', 1);
+  }
+  function cancelHighRes() { highResPrompt = false; highResSkip = false; }
   function change(key, val) {
+    if (key === 'txSamplingMode' && Number(val) === 1 && Number(values.txSamplingMode) !== 1 &&
+        String(values.uiHighResNoticeOff) !== '1') { highResSkip = false; highResPrompt = true; return; }
     if (key === 'model') announce('Magnifier model set to ' + val + '. Some display options changed.');
     if (key === 'uiPalette') announce('Theme ' + (themes.find((t) => t.id === val)?.label ?? val));
     values = { ...values, [key]: val };
@@ -301,6 +314,14 @@
   <SaveCapsule {count} onSave={save} onDiscard={discard} />
   <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">{announcement}</div>
 
+  {#if highResPrompt}
+    <Prompt id="hires" title="High resolution cursor is experimental"
+            text="It makes the zoomed image and the pointer smoother. Windows smooths the image as it scales it, which can make the view and pointer shake slightly while you zoom. Wind compensates as well as it can, but this limits some features, such as the zoom glide after you let go, which stops a little early."
+            checkLabel="Don't show this again" bind:checked={highResSkip}
+            onEsc={cancelHighRes}
+            buttons={[{ label: 'Cancel', onClick: cancelHighRes },
+                      { label: 'Turn on', kind: 'primary', onClick: acceptHighRes }]} />
+  {/if}
   {#if closePrompt}
     <Prompt id="close" title="Unsaved changes"
             text="You have changes that are not saved. Save them to the profile, discard them, or keep them for this session (they apply until Wind quits)."

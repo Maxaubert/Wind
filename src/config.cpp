@@ -398,7 +398,7 @@ std::string StripUiOnlyKeys(const std::string& iniText) {
             // Keep in step with IsGlobalProfileKey (src/profiles.cpp) minus "profile": a test pins it.
             for (const char* k : { "uiTheme=", "uiPalette=", "showAdvanced=", "onboarded=",
                                    "trayPerf=", "traySliders=", "traySliderOrder=", "trayToggles=",
-                                   "trayToggleOrder=", "trayPinned=" }) {
+                                   "trayToggleOrder=", "trayPinned=", "uiHighResNoticeOff=" }) {
                 if (line.compare(b, strlen(k), k) == 0) { uiOnly = true; break; }
             }
         }
@@ -533,6 +533,9 @@ std::string DefaultIniText() {
                ";   to Windows, normally the hidden icons overflow (default). Applied by WindTray, never\n"
                ";   reloads the core\n"
                "trayPinned=0\n"
+               "; uiHighResNoticeOff: 1=never show the High resolution cursor notice again (its Don't\n"
+               ";   show this again box). UI only, never reloads the core\n"
+               "uiHighResNoticeOff=0\n"
                "; cursorVisibility: auto=hide our cursor when the focused app hides its own (games);\n"
                ";   always=always draw it; never=never draw it\n"
                "cursorVisibility=auto\n"

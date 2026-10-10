@@ -1,15 +1,19 @@
 <script>
   // One modal prompt. buttons: [{ label, kind: 'primary' | 'danger' | '', onClick }]. Esc calls onEsc (omit to
   // make Esc do nothing). Focus moves into the box and Tab is held there by the dialog action.
+  // checkLabel (optional) adds a labelled checkbox between the text and the buttons; bind:checked reads it.
   import { dialog } from '../lib/dialog.js';
-  let { id = 'p', title = '', text = '', buttons = [], onEsc = undefined } = $props();
+  let { id = 'p', title = '', text = '', buttons = [], onEsc = undefined, checkLabel = '', checked = $bindable(false) } = $props();
 </script>
 
 <div class="mbackdrop">
   <div class="mbox" role="dialog" aria-modal="true" aria-labelledby="{id}-t" aria-describedby="{id}-d"
        use:dialog={{ onClose: onEsc }}>
     <h2 id="{id}-t">{title}</h2>
-    <p id="{id}-d">{text}</p>
+    <p id="{id}-d" class:tight={!!checkLabel}>{text}</p>
+    {#if checkLabel}
+      <label class="chk"><input type="checkbox" bind:checked /><span>{checkLabel}</span></label>
+    {/if}
     <div class="mbtns">
       {#each buttons as b (b.label)}
         <button type="button" class:primary={b.kind === 'primary'} class:danger={b.kind === 'danger'} onclick={b.onClick}>{b.label}</button>
@@ -22,13 +26,18 @@
   .mbackdrop { position: fixed; inset: 0; background: var(--scrim); display: flex;
                align-items: center; justify-content: center; z-index: 50; }
   .mbox { background: var(--card); color: var(--fg); border: 1px solid var(--line2); border-radius: var(--rc);
-          padding: 22px 24px; width: 440px; max-width: calc(100vw - 48px); box-shadow: var(--shadow); }
+          padding: 22px 24px; width: 440px; max-width: calc(100vw - 48px); box-shadow: var(--shadow);
+          max-height: calc(100vh - 32px); overflow-y: auto; }
   .mbackdrop { animation: fade var(--dur) var(--ease); }
   .mbox { animation: pop var(--dur) var(--ease); }
   @keyframes fade { from { opacity: 0; } }
   @keyframes pop { from { opacity: 0; transform: scale(.98); } }
   h2 { margin: 0 0 8px; font: 600 15px var(--s); }
   p { margin: 0 0 20px; font: 13px/1.5 var(--s); color: var(--fg2); }
+  p.tight { margin-bottom: 14px; }
+  .chk { display: flex; align-items: center; gap: 8px; margin: 0 0 20px; font: 13px var(--s); color: var(--fg); cursor: pointer; }
+  .chk input { margin: 0; width: 16px; height: 16px; flex: none; accent-color: var(--accent); cursor: pointer; }
+  .chk input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   .mbtns { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
   button { height: 32px; padding: 0 16px; border-radius: var(--rp); border: 1px solid var(--chipb);
            background: var(--chip); color: var(--fg); font: 600 12.5px var(--s); }
