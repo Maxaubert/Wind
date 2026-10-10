@@ -78,3 +78,16 @@ TEST_CASE("the tick ring inside the block works from zero-filled memory") {
     CHECK(out[0] == doctest::Approx(6.9f));
     CHECK(out[1] == doctest::Approx(7.0f));
 }
+
+TEST_CASE("InitTrayBlock clears a leftover pacing ring and menu flag (review 2026-10-09 #89)") {
+    auto b = Fresh();
+    InitTrayBlock(*b, 1);
+    b->ticks.push(16.7f);
+    b->ticks.push(16.7f);
+    SetTrayMenuOpen(b.get(), true);
+    REQUIRE_FALSE(b->ticks.empty());
+    InitTrayBlock(*b, 2);                        // a new Wind adopting the same mapping
+    CHECK(b->ticks.empty());
+    CHECK_FALSE(TrayMenuOpen(b.get()));
+    CHECK(b->windPid.load() == 2u);
+}

@@ -237,6 +237,8 @@ static std::string DoSwitchProfile(const std::string& name, bool mirrorOutgoing 
     std::string profText;
     if (!wind::ReadTextFileOk(pp, profText)) return "Could not read the profile file";
     { std::string terr = wind::ProfileTextError(profText); if (!terr.empty()) return terr; }
+    // Held to the end: the whole read-modify-write (and the rollback) is one unit (review item 71).
+    wind::IniWriteLock iniLock;
     std::string oldLive;
     if (!wind::ReadLiveIni(IniPath(), oldLive)) return "Could not read the config file";
     // Capture hand edits (openIni) into the outgoing profile before the live ini is replaced.
@@ -397,8 +399,7 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
             // showed the new value while the ini kept the old one. Tell the page, which says so.
             // setConfig writes the live ini (the session) only; the profile file changes on Save.
             std::string live;
-            if (!wind::ReadLiveIni(IniPath(), live) ||
-                !WriteFileAtomic(IniPath(), wind::UpdateIniText(live, key, value))) {
+            if (wind::UpdateIniKeys(IniPath(), { { key, value } }, &live) != wind::IniUpdate::Ok) {
                 wind::Log(wind::LogLevel::Warn, "config", "setConfig: writing %s=%s failed",
                           key.c_str(), value.c_str());
                 wv->PostWebMessageAsJson(
@@ -410,7 +411,7 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
                 // Keybind captures: also written straight into the active profile so they survive
                 // a later Discard or restart while other changes stay unsaved. Only this one key
                 // moves; the rest of the profile file stays as saved.
-                const std::string active = ActiveProfileName(wind::UpdateIniText(live, key, value));
+                const std::string active = ActiveProfileName(live);
                 std::string prof;
                 if (!active.empty() && SafeName(active) &&
                     GetFileAttributesW(ProfilePath(active).c_str()) != INVALID_FILE_ATTRIBUTES &&
@@ -431,6 +432,7 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
             Widen(std::string("{\"type\":\"sessionSaved\",\"ok\":") + (ok ? "true" : "false") + "}").c_str());
     } else if (type == "discardSession") {
         // Discard: the live ini goes back to the saved profile (globals kept); reply with fresh state.
+        wind::IniWriteLock iniLock;   // item 71
         std::string live;
         if (ReadIni(live)) {
             const std::string active = ActiveProfileName(live);
@@ -542,9 +544,8 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
         PostProfiles(wv, err.empty(), err);
     } else if (type == "createProfile") {
         // Factory defaults by design (spec): absent keys fall back to built-in defaults. `model` is
-        // seeded EXPLICITLY because the UI schema default (hybrid/"Auto") and the core's missing-key
-        // default (render) disagree; writing the documented product default keeps core, host, tray,
-        // and UI in agreement. Globals (onboarded=1, uiPalette, showAdvanced) carry over in MakeLiveText.
+        // seeded EXPLICITLY so a fresh profile file always names its engine (the
+        // core's own missing-key default is hybrid, the same as the UI schema's "Auto"). Globals (onboarded=1, uiPalette, showAdvanced) carry over in MakeLiveText.
         // fromCurrent ("Duplicate current"): the new profile is the live session as it stands, unsaved
         // changes included, built here from the live text so `model` (and everything else) is exactly
         // what is running: no restart, no write-back by the page, and the outgoing profile is NOT
@@ -593,6 +594,7 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
         if (err.empty() && wind::SameProfileName(vals["profile"], from)) {
             // The pointer update must land or the live ini names a file that no longer exists;
             // verify the write and roll the rename back if it failed.
+            wind::IniWriteLock iniLock;   // item 71
             std::string live;
             if (!wind::ReadLiveIni(IniPath(), live) ||
                 !wind::WriteTextFileAtomic(IniPath(), wind::UpdateIniText(live, "profile", to))) {

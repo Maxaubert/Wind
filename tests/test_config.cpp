@@ -686,3 +686,25 @@ TEST_CASE("txSamplingMode folds the nearest aliases 2..4 to 0 (review 2026-10-09
     // Folded to 0, the MPO guard sees an MPO-enabled boot's nearest and swaps in smooth.
     CHECK(EffectiveSamplingMode(ParseConfig("txSamplingMode=3\n").txSamplingMode, false, false, 0) == 1);
 }
+
+TEST_CASE("ParseConfig rejects NaN, infinity, hex and trailing junk, and keeps the default (review 2026-10-09 #72)") {
+    CHECK(ParseConfig("maxLevel=nan\n").maxLevel == doctest::Approx(12.0));
+    CHECK(ParseConfig("maxLevel=inf\n").maxLevel == doctest::Approx(12.0));
+    CHECK(ParseConfig("maxLevel=0x10\n").maxLevel == doctest::Approx(12.0));
+    CHECK(ParseConfig("maxLevel=8abc\n").maxLevel == doctest::Approx(12.0));
+    CHECK(ParseConfig("txMaxStepPct=0x10\n").txMaxStepPct == 25);
+    CHECK(ParseConfig("txMaxStepPct=7junk\n").txMaxStepPct == 25);
+    CHECK(ParseConfig("maxLevel=8\n").maxLevel == doctest::Approx(8.0));
+    CHECK(ParseConfig("maxLevel=8.5\n").maxLevel == doctest::Approx(8.5));
+    CHECK(ParseConfig("txMaxStepPct=40\n").txMaxStepPct == 40);
+    CHECK(ParseConfig("txMaxStepPct=10.0\n").txMaxStepPct == 10);   // a float written for an integer key still reads
+}
+TEST_CASE("ParseConfig strips a UTF-8 BOM so the first key is not lost (review #72)") {
+    CHECK(ParseConfig("\xEF\xBB\xBFmaxLevel=8\n").maxLevel == doctest::Approx(8.0));
+}
+TEST_CASE("ParseConfig clamps trackGlideMs and txMaxStepPct (review #72)") {
+    CHECK(ParseConfig("trackGlideMs=-50\n").trackGlideMs == 0);
+    CHECK(ParseConfig("trackGlideMs=999999\n").trackGlideMs == 5000);
+    CHECK(ParseConfig("txMaxStepPct=-5\n").txMaxStepPct == 0);
+    CHECK(ParseConfig("txMaxStepPct=99999\n").txMaxStepPct == 1000);
+}

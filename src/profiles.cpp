@@ -22,7 +22,10 @@ bool IsGlobalProfileKey(const std::string& key) {
 }
 std::string ProfileNameError(const std::string& name) {
     if (name.empty()) return "Name cannot be empty";
-    if (name.size() > 40) return "Name is too long (max 40 characters)";
+    // 40 characters, not bytes: count UTF-8 lead bytes so a non-ASCII name gets the same room as in the UI.
+    size_t chars = 0;
+    for (unsigned char c : name) if ((c & 0xC0) != 0x80) ++chars;
+    if (chars > 40) return "Name is too long (max 40 characters)";
     for (unsigned char c : name) {
         if (c < 0x20) return "Name contains a control character";
         if (std::string("\\/:*?\"<>|").find((char)c) != std::string::npos)
@@ -33,8 +36,10 @@ std::string ProfileNameError(const std::string& name) {
     static const char* reserved[] = {"con","prn","aux","nul",
         "com1","com2","com3","com4","com5","com6","com7","com8","com9",
         "lpt1","lpt2","lpt3","lpt4","lpt5","lpt6","lpt7","lpt8","lpt9"};
-    const std::string l = lower(name);
-    for (const char* r : reserved) if (l == r) return "That name is reserved by Windows";
+    // Windows reserves the device name with ANY extension too ("con.x", "NUL.txt", "com1 .ini").
+    std::string stem = lower(name.substr(0, name.find('.')));
+    while (!stem.empty() && stem.back() == ' ') stem.pop_back();
+    for (const char* r : reserved) if (stem == r) return "That name is reserved by Windows";
     return "";
 }
 bool ProfileNameTaken(const std::string& name, const std::vector<std::string>& names) {
@@ -112,14 +117,19 @@ bool SessionDiffers(const std::string& liveText, const std::string& profileText)
     for (auto it = b.begin(); it != b.end();) it = IsGlobalProfileKey(it->first) ? b.erase(it) : std::next(it);
     // A key one side lacks reads as the built-in default (the first-run template carries each
     // templated key's default), so a tray drag that wrote an explicit default back (Warmth 0 -> 40
-    // -> 0) is not "unsaved". Keys outside the template stay missing-vs-present. "model" is left
-    // out: the core's missing-key engine and the template's explicit one are different questions
-    // (see createProfile in config_ui/main.cpp).
-    static const std::map<std::string, std::string> defaults = ReadIniValues(DefaultIniText());
+    // -> 0) is not "unsaved". The UI keys the template omits take theirs from Config itself, so
+    // dragging "Release glide" back to 45 is not "unsaved" either (review item 70).
+    static const std::map<std::string, std::string> defaults = [] {
+        std::map<std::string, std::string> d = ReadIniValues(DefaultIniText());
+        const Config c;
+        d.emplace("txSamplingMode", std::to_string(c.txSamplingMode));
+        d.emplace("zoomEaseOutMs", std::to_string(c.zoomEaseOutMs));
+        d.emplace("lockApps", c.lockApps);
+        return d;
+    }();
     auto valueOf = [&](const std::map<std::string, std::string>& m, const std::string& k, std::string& out) {
         auto it = m.find(k);
         if (it != m.end()) { out = it->second; return true; }
-        if (k == "model") return false;
         auto d = defaults.find(k);
         if (d == defaults.end()) return false;
         out = d->second;

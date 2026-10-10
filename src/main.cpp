@@ -3261,7 +3261,20 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         if (!(GetEnvironmentVariableA("WIND_TESTLOG", tlPath, sizeof(tlPath)) > 0 && tlPath[0])) {
             char ctl[512] = {};
             if (ExpandEnvironmentStringsA("%LOCALAPPDATA%\\Wind\\testlog.txt", ctl, sizeof(ctl)) > 0) {
-                if (FILE* cf = fopen(ctl, "rb")) {
+                // Ignore a control file older than a day: a leftover would record telemetry on every launch.
+                WIN32_FILE_ATTRIBUTE_DATA cfa{};
+                bool fresh = true;
+                if (GetFileAttributesExA(ctl, GetFileExInfoStandard, &cfa)) {
+                    FILETIME nowFt; GetSystemTimeAsFileTime(&nowFt);
+                    ULARGE_INTEGER a, b;
+                    a.LowPart = nowFt.dwLowDateTime; a.HighPart = nowFt.dwHighDateTime;
+                    b.LowPart = cfa.ftLastWriteTime.dwLowDateTime; b.HighPart = cfa.ftLastWriteTime.dwHighDateTime;
+                    const long long ageSec = ((long long)a.QuadPart - (long long)b.QuadPart) / 10000000LL;
+                    fresh = wind::TestlogControlFresh(ageSec);
+                    if (!fresh)
+                        wind::Log(wind::LogLevel::Warn, "test", "ignoring stale testlog.txt (%lld s old)", ageSec);
+                }
+                if (fresh) if (FILE* cf = fopen(ctl, "rb")) {
                     size_t n = fread(tlPath, 1, sizeof(tlPath) - 1, cf);
                     fclose(cf);
                     while (n > 0 && (tlPath[n - 1] == '\r' || tlPath[n - 1] == '\n' ||
@@ -3272,7 +3285,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             }
         }
         if (tlPath[0] && g_testlog.open(tlPath))
-            wind::Log(wind::LogLevel::Info, "test", "telemetry -> %s", tlPath);
+            wind::Log(wind::LogLevel::Warn, "test", "telemetry -> %s", tlPath);
     }
 
     // Auto-detect the display refresh rate so we never assume a fixed rate (the dev's 144Hz).

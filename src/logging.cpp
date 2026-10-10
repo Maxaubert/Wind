@@ -135,12 +135,17 @@ namespace {
     }
 
     // wind-<tag>.log -> wind-<tag>.1.log -> wind-<tag>.2.log; oldest dropped.
-    void RotateIfNeeded(const std::wstring& dir, const std::wstring& stem) {
+    // Returns false only when the base log is over the cap and could NOT be moved aside (a tailer
+    // without FILE_SHARE_DELETE holds it): the caller keeps appending and backs off (review item 68).
+    // The base moves to a side name FIRST, so a refused move leaves every older generation intact.
+    bool RotateIfNeeded(const std::wstring& dir, const std::wstring& stem) {
         std::wstring base = dir + L"\\" + stem + L".log";
         WIN32_FILE_ATTRIBUTE_DATA d{};
-        if (!GetFileAttributesExW(base.c_str(), GetFileExInfoStandard, &d)) return;
+        if (!GetFileAttributesExW(base.c_str(), GetFileExInfoStandard, &d)) return true;
         ULARGE_INTEGER sz; sz.LowPart = d.nFileSizeLow; sz.HighPart = d.nFileSizeHigh;
-        if (!ShouldRotate(sz.QuadPart, kLogMaxBytes)) return;
+        if (!ShouldRotate(sz.QuadPart, kLogMaxBytes)) return true;
+        std::wstring side = dir + L"\\" + stem + L".rotating.log";
+        if (!MoveFileExW(base.c_str(), side.c_str(), MOVEFILE_REPLACE_EXISTING)) return false;
         // Drop the oldest, shift the rest up by one generation.
         std::wstring oldest = dir + L"\\" + stem + L"." + std::to_wstring(kLogGenerations - 1) + L".log";
         DeleteFileW(oldest.c_str());
@@ -150,7 +155,9 @@ namespace {
             MoveFileExW(from.c_str(), to.c_str(), MOVEFILE_REPLACE_EXISTING);
         }
         std::wstring to1 = dir + L"\\" + stem + L".1.log";
-        MoveFileExW(base.c_str(), to1.c_str(), MOVEFILE_REPLACE_EXISTING);
+        if (!MoveFileExW(side.c_str(), to1.c_str(), MOVEFILE_REPLACE_EXISTING))
+            DeleteFileW(side.c_str());   // .1 is held open: drop the old data rather than leave it behind
+        return true;
     }
 }  // namespace
 
@@ -212,20 +219,32 @@ static void PruneStrayPidLogs(const std::wstring& dir) {
 // by or a LogFlush asked, rotates at the cap. Below normal priority: nothing waits on it except
 // LogFlush callers (export, crash, shutdown).
 static void WriterAppend(const std::string& batch) {
-    if (batch.empty() || g_logFile == INVALID_HANDLE_VALUE) return;
+    if (batch.empty()) return;
+    if (g_logFile == INVALID_HANDLE_VALUE) {   // a failed reopen after rotation: retry, do not stay silent
+        g_logFile = CreateFileW(g_logPath.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ,
+                                nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (g_logFile == INVALID_HANDLE_VALUE) return;
+    }
     DWORD wrote = 0;
     WriteFile(g_logFile, batch.data(), (DWORD)batch.size(), &wrote, nullptr);
     g_fileBytes += wrote;
 }
 
 static void WriterRotateIfNeeded() {
-    if (!g_ownsBase || !ShouldRotate(g_fileBytes, kLogMaxBytes)) return;
+    if (!g_ownsBase || g_logFile == INVALID_HANDLE_VALUE || !ShouldRotate(g_fileBytes, kLogMaxBytes)) return;
     FlushFileBuffers(g_logFile);
     CloseHandle(g_logFile);
-    RotateIfNeeded(g_logDir, g_logStem);
+    const bool moved = RotateIfNeeded(g_logDir, g_logStem);
     g_logFile = CreateFileW(g_logPath.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ,
                             nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     g_fileBytes = 0;
+    if (!moved && g_logFile != INVALID_HANDLE_VALUE) {
+        // The base could not be moved aside: it is still the live log. Count its real size less one
+        // cap's worth, so the next attempt comes after another cap of lines, not on every pass.
+        LARGE_INTEGER sz{};
+        if (GetFileSizeEx(g_logFile, &sz) && (unsigned long long)sz.QuadPart > kLogMaxBytes)
+            g_fileBytes = (unsigned long long)sz.QuadPart - kLogMaxBytes;
+    }
 }
 
 // Move a per-PID fallback log onto the shared base log once this process owns the app (review
@@ -596,7 +615,10 @@ bool ZipLogDir(const wchar_t* destZipPath) {
 
     auto psQuote = [](const std::wstring& s) {
         std::wstring out = L"'";
-        for (wchar_t c : s) { if (c == L'\'') out += L"''"; else out += c; }
+        // PowerShell reads the typographic quotes U+2018-201B as single quotes too: double them all.
+        for (wchar_t c : s) {
+            if (c == L'\'' || (c >= 0x2018 && c <= 0x201B)) { out += c; out += c; } else out += c;
+        }
         out += L"'";
         return out;
     };

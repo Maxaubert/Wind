@@ -50,6 +50,8 @@ inline void InitTrayBlock(TrayShared& b, uint32_t pid) {
     b.level.store(1.0, std::memory_order_relaxed);
     b.engine.store(0, std::memory_order_relaxed);
     b.panning.store(0, std::memory_order_relaxed);
+    b.menuOpen.store(0, std::memory_order_relaxed);   // a leftover block may carry the last tray's "open"
+    b.ticks.reset();                                  // ...and the last Wind's pacing samples (review item 89)
     b.version.store(TrayShared::kVersion, std::memory_order_relaxed);
     b.magic.store(TrayShared::kMagic, std::memory_order_release);
 }

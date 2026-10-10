@@ -7,13 +7,36 @@
 #include <string>
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <cstdlib>
+#include <stdexcept>
 namespace wind {
-static double clampd(double v, double lo, double hi) { return v < lo ? lo : (v > hi ? hi : v); }
+static double clampd(double v, double lo, double hi) {
+    if (v != v) return lo;   // NaN fails every comparison below and would pass through unclamped
+    return v < lo ? lo : (v > hi ? hi : v);
+}
 static std::string trim(const std::string& s) {
     size_t a = s.find_first_not_of(" \t\r\n");
     if (a == std::string::npos) return "";
     size_t b = s.find_last_not_of(" \t\r\n");
     return s.substr(a, b - a + 1);
+}
+
+// Number parsing for ini values: the whole value must be a plain decimal number. The std::sto*
+// calls accepted "12abc" as 12, "0x10" as 0, and strtod-based ones take "nan", "inf" and hex floats
+// (review item 72). A bad value throws, and ParseConfig keeps the default for that key.
+static double ParseDoubleStrict(const std::string& v) {
+    if (v.empty() || v.find_first_not_of("0123456789+-.eE") != std::string::npos)
+        throw std::invalid_argument("not a decimal number");
+    char* end = nullptr;
+    const double d = std::strtod(v.c_str(), &end);
+    if (end == v.c_str() || *end != '\0' || !std::isfinite(d)) throw std::invalid_argument("not a finite number");
+    return d;
+}
+static int ParseIntStrict(const std::string& v) {
+    const double d = ParseDoubleStrict(v);
+    if (d < -2147483648.0 || d > 2147483647.0) throw std::out_of_range("integer out of range");
+    return (int)d;
 }
 
 bool IsForbiddenBindVk(int vk) {
@@ -107,7 +130,8 @@ int EffectiveSamplingMode(int iniValue, bool mpoDisabledAtBoot, bool mpoDisabled
 
 Config ParseConfig(const std::string& text) {
     Config c;
-    std::istringstream in(text);
+    // A UTF-8 BOM (Notepad's "UTF-8 with BOM") would glue itself to the first key and lose it.
+    std::istringstream in(text.compare(0, 3, "\xEF\xBB\xBF") == 0 ? text.substr(3) : text);
     std::string line;
     while (std::getline(in, line)) {
         std::string t = trim(line);
@@ -135,127 +159,127 @@ Config ParseConfig(const std::string& text) {
         if (key == "engineOther")   { c.engineOther   = val.empty() ? "auto" : val; continue; }
         if (val.empty()) continue;
         try {
-            if (key == "zoomInButton")          c.zoomInButton = std::stoi(val);
-            else if (key == "zoomOutButton")    c.zoomOutButton = std::stoi(val);
-            else if (key == "zoomInButton2")    c.zoomInButton2 = std::stoi(val);
-            else if (key == "zoomOutButton2")   c.zoomOutButton2 = std::stoi(val);
-            else if (key == "recenterVk")       c.recenterVk = std::stoi(val);
-            else if (key == "cursorLockVk")     c.cursorLockVk = std::stoi(val);
-            else if (key == "recenterMods")     c.recenterMods = std::stoi(val);
-            else if (key == "cursorLockMods")   c.cursorLockMods = std::stoi(val);
-            else if (key == "panLeftVk")        c.panLeftVk = std::stoi(val);
-            else if (key == "panLeftMods")      c.panLeftMods = std::stoi(val);
-            else if (key == "panRightVk")       c.panRightVk = std::stoi(val);
-            else if (key == "panRightMods")     c.panRightMods = std::stoi(val);
-            else if (key == "panUpVk")          c.panUpVk = std::stoi(val);
-            else if (key == "panUpMods")        c.panUpMods = std::stoi(val);
-            else if (key == "panDownVk")        c.panDownVk = std::stoi(val);
-            else if (key == "panDownMods")      c.panDownMods = std::stoi(val);
-            else if (key == "panSpeed")         c.panSpeed = std::stod(val);
-            else if (key == "zoomTrace")        c.zoomTrace = std::stoi(val);
-            else if (key == "hitchLog")         c.hitchLog = std::stoi(val);
-            else if (key == "hitchThresholdPct") c.hitchThresholdPct = std::clamp(std::stoi(val), 110, 1000);
+            if (key == "zoomInButton")          c.zoomInButton = ParseIntStrict(val);
+            else if (key == "zoomOutButton")    c.zoomOutButton = ParseIntStrict(val);
+            else if (key == "zoomInButton2")    c.zoomInButton2 = ParseIntStrict(val);
+            else if (key == "zoomOutButton2")   c.zoomOutButton2 = ParseIntStrict(val);
+            else if (key == "recenterVk")       c.recenterVk = ParseIntStrict(val);
+            else if (key == "cursorLockVk")     c.cursorLockVk = ParseIntStrict(val);
+            else if (key == "recenterMods")     c.recenterMods = ParseIntStrict(val);
+            else if (key == "cursorLockMods")   c.cursorLockMods = ParseIntStrict(val);
+            else if (key == "panLeftVk")        c.panLeftVk = ParseIntStrict(val);
+            else if (key == "panLeftMods")      c.panLeftMods = ParseIntStrict(val);
+            else if (key == "panRightVk")       c.panRightVk = ParseIntStrict(val);
+            else if (key == "panRightMods")     c.panRightMods = ParseIntStrict(val);
+            else if (key == "panUpVk")          c.panUpVk = ParseIntStrict(val);
+            else if (key == "panUpMods")        c.panUpMods = ParseIntStrict(val);
+            else if (key == "panDownVk")        c.panDownVk = ParseIntStrict(val);
+            else if (key == "panDownMods")      c.panDownMods = ParseIntStrict(val);
+            else if (key == "panSpeed")         c.panSpeed = ParseDoubleStrict(val);
+            else if (key == "zoomTrace")        c.zoomTrace = ParseIntStrict(val);
+            else if (key == "hitchLog")         c.hitchLog = ParseIntStrict(val);
+            else if (key == "hitchThresholdPct") c.hitchThresholdPct = std::clamp(ParseIntStrict(val), 110, 1000);
             // The chain is split in two: MSVC caps if/else nesting depth (C1061). Keys are unique,
             // so a second chain changes nothing.
-            if (key == "hideCursorVk")     c.hideCursorVk = std::stoi(val);
-            else if (key == "hideCursorMods")   c.hideCursorMods = std::stoi(val);
-            else if (key == "zoomInVk")         c.zoomInVk = std::stoi(val);
-            else if (key == "zoomOutVk")        c.zoomOutVk = std::stoi(val);
-            else if (key == "zoomInVk2")        c.zoomInVk2 = std::stoi(val);
-            else if (key == "zoomOutVk2")       c.zoomOutVk2 = std::stoi(val);
-            else if (key == "zoomInMods")       c.zoomInMods = std::stoi(val);
-            else if (key == "zoomOutMods")      c.zoomOutMods = std::stoi(val);
-            else if (key == "zoomInMods2")      c.zoomInMods2 = std::stoi(val);
-            else if (key == "zoomOutMods2")     c.zoomOutMods2 = std::stoi(val);
-            else if (key == "zoomInButtonMods")   c.zoomInButtonMods = std::stoi(val);
-            else if (key == "zoomOutButtonMods")  c.zoomOutButtonMods = std::stoi(val);
-            else if (key == "zoomInButton2Mods")  c.zoomInButton2Mods = std::stoi(val);
-            else if (key == "zoomOutButton2Mods") c.zoomOutButton2Mods = std::stoi(val);
-            else if (key == "zoomWheelMods")      c.zoomWheelMods = std::stoi(val);
-            else if (key == "panKeysOn")          c.panKeysOn = std::stoi(val) != 0 ? 1 : 0;
-            else if (key == "hideCursorOn")       c.hideCursorOn = std::stoi(val) != 0 ? 1 : 0;
-            else if (key == "cursorLockOn")       c.cursorLockOn = std::stoi(val) != 0 ? 1 : 0;
-            else if (key == "maxLevel")         c.maxLevel = std::stod(val);
-            else if (key == "zoomInSpeed")      c.zoomInSpeed = std::stod(val);
-            else if (key == "zoomOutSpeed")     c.zoomOutSpeed = std::stod(val);
-            else if (key == "smoothZoom")       c.smoothZoom = std::stoi(val);
-            else if (key == "smoothZoomAccel")  c.smoothZoomAccel = std::stod(val);
-            else if (key == "smoothZoomRamp")   c.smoothZoomRamp = std::stod(val);
-            else if (key == "zoomEaseOutMs")    c.zoomEaseOutMs = std::stoi(val);
-            else if (key == "vsync")            c.vsync = std::stoi(val);
-            else if (key == "dwmFlush")         c.dwmFlush = std::stoi(val);
-            else if (key == "diagnostics")      c.diagnostics = std::stoi(val);
-            else if (key == "cursorSensitivity")  c.cursorSensitivity = std::stod(val);
-            else if (key == "cursorSmoothing")    c.cursorSmoothing = std::stod(val);
-            else if (key == "cursorConstantSize") c.cursorConstantSize = std::stoi(val);
+            if (key == "hideCursorVk")     c.hideCursorVk = ParseIntStrict(val);
+            else if (key == "hideCursorMods")   c.hideCursorMods = ParseIntStrict(val);
+            else if (key == "zoomInVk")         c.zoomInVk = ParseIntStrict(val);
+            else if (key == "zoomOutVk")        c.zoomOutVk = ParseIntStrict(val);
+            else if (key == "zoomInVk2")        c.zoomInVk2 = ParseIntStrict(val);
+            else if (key == "zoomOutVk2")       c.zoomOutVk2 = ParseIntStrict(val);
+            else if (key == "zoomInMods")       c.zoomInMods = ParseIntStrict(val);
+            else if (key == "zoomOutMods")      c.zoomOutMods = ParseIntStrict(val);
+            else if (key == "zoomInMods2")      c.zoomInMods2 = ParseIntStrict(val);
+            else if (key == "zoomOutMods2")     c.zoomOutMods2 = ParseIntStrict(val);
+            else if (key == "zoomInButtonMods")   c.zoomInButtonMods = ParseIntStrict(val);
+            else if (key == "zoomOutButtonMods")  c.zoomOutButtonMods = ParseIntStrict(val);
+            else if (key == "zoomInButton2Mods")  c.zoomInButton2Mods = ParseIntStrict(val);
+            else if (key == "zoomOutButton2Mods") c.zoomOutButton2Mods = ParseIntStrict(val);
+            else if (key == "zoomWheelMods")      c.zoomWheelMods = ParseIntStrict(val);
+            else if (key == "panKeysOn")          c.panKeysOn = ParseIntStrict(val) != 0 ? 1 : 0;
+            else if (key == "hideCursorOn")       c.hideCursorOn = ParseIntStrict(val) != 0 ? 1 : 0;
+            else if (key == "cursorLockOn")       c.cursorLockOn = ParseIntStrict(val) != 0 ? 1 : 0;
+            else if (key == "maxLevel")         c.maxLevel = ParseDoubleStrict(val);
+            else if (key == "zoomInSpeed")      c.zoomInSpeed = ParseDoubleStrict(val);
+            else if (key == "zoomOutSpeed")     c.zoomOutSpeed = ParseDoubleStrict(val);
+            else if (key == "smoothZoom")       c.smoothZoom = ParseIntStrict(val);
+            else if (key == "smoothZoomAccel")  c.smoothZoomAccel = ParseDoubleStrict(val);
+            else if (key == "smoothZoomRamp")   c.smoothZoomRamp = ParseDoubleStrict(val);
+            else if (key == "zoomEaseOutMs")    c.zoomEaseOutMs = ParseIntStrict(val);
+            else if (key == "vsync")            c.vsync = ParseIntStrict(val);
+            else if (key == "dwmFlush")         c.dwmFlush = ParseIntStrict(val);
+            else if (key == "diagnostics")      c.diagnostics = ParseIntStrict(val);
+            else if (key == "cursorSensitivity")  c.cursorSensitivity = ParseDoubleStrict(val);
+            else if (key == "cursorSmoothing")    c.cursorSmoothing = ParseDoubleStrict(val);
+            else if (key == "cursorConstantSize") c.cursorConstantSize = ParseIntStrict(val);
             else if (key == "cursorVisibility")   c.cursorVisibility = val;
             else if (key == "model")              c.model = val;
-            else if (key == "fastPan")            c.fastPan = std::stoi(val);
-            else if (key == "smoothPan")          c.smoothPan = std::stoi(val);
-            else if (key == "magInputTransform")  c.magInputTransform = std::stoi(val);
-            else if (key == "bilinear")           c.bilinear = std::stoi(val);
-            else if (key == "sharpness")          c.sharpness = std::stod(val);
-            else if (key == "zorderBand")         c.zorderBand = std::stoi(val);
-            else if (key == "brightness")         c.brightness = std::stod(val);
-            else if (key == "colorWarmPct")       c.colorWarmPct = std::stoi(val);
-            else if (key == "colorDimPct")        c.colorDimPct = std::stoi(val);
-            else if (key == "hdrTonemap")         c.hdrTonemap = std::stoi(val);
-            else if (key == "multiMonitor")       c.multiMonitor = std::stoi(val);
-            else if (key == "cropCapture")        c.cropCapture = std::stoi(val);
-            else if (key == "lowGpuPriority")     c.lowGpuPriority = std::stoi(val);
-            else if (key == "gpuPriority")        c.gpuPriority = std::stoi(val);
-            else if (key == "gameCrop")           c.gameCrop = std::stoi(val);
-            else if (key == "tdrTest")            c.tdrTest = std::stoi(val);
-            else if (key == "probeClicks")        c.probeClicks = std::stoi(val);
-            else if (key == "desktopTransform")   c.desktopTransform = std::stoi(val);
-            else if (key == "cursorBandAuto")     c.cursorBandAuto = std::stoi(val);
-            else if (key == "trackCaret")         c.trackCaret = std::stoi(val);
-            else if (key == "trackFocus")         c.trackFocus = std::stoi(val);
-            else if (key == "trackAlign")         c.trackAlign = std::stoi(val);
-            else if (key == "mouseAlign")         c.mouseAlign = std::stoi(val);
-            else if (key == "trackGlideMs")       c.trackGlideMs = std::stoi(val);
-            else if (key == "trackMarginPct")     c.trackMarginPct = std::stoi(val);
-            else if (key == "mouseMarginPct")     c.mouseMarginPct = std::stoi(val);
-            else if (key == "trackLog")           c.trackLog = std::stoi(val);
-            else if (key == "ixDecimate")         c.ixDecimate = std::stoi(val);
-            else if (key == "mpoBuster")          c.mpoBuster = std::stoi(val);
+            else if (key == "fastPan")            c.fastPan = ParseIntStrict(val);
+            else if (key == "smoothPan")          c.smoothPan = ParseIntStrict(val);
+            else if (key == "magInputTransform")  c.magInputTransform = ParseIntStrict(val);
+            else if (key == "bilinear")           c.bilinear = ParseIntStrict(val);
+            else if (key == "sharpness")          c.sharpness = ParseDoubleStrict(val);
+            else if (key == "zorderBand")         c.zorderBand = ParseIntStrict(val);
+            else if (key == "brightness")         c.brightness = ParseDoubleStrict(val);
+            else if (key == "colorWarmPct")       c.colorWarmPct = ParseIntStrict(val);
+            else if (key == "colorDimPct")        c.colorDimPct = ParseIntStrict(val);
+            else if (key == "hdrTonemap")         c.hdrTonemap = ParseIntStrict(val);
+            else if (key == "multiMonitor")       c.multiMonitor = ParseIntStrict(val);
+            else if (key == "cropCapture")        c.cropCapture = ParseIntStrict(val);
+            else if (key == "lowGpuPriority")     c.lowGpuPriority = ParseIntStrict(val);
+            else if (key == "gpuPriority")        c.gpuPriority = ParseIntStrict(val);
+            else if (key == "gameCrop")           c.gameCrop = ParseIntStrict(val);
+            else if (key == "tdrTest")            c.tdrTest = ParseIntStrict(val);
+            else if (key == "probeClicks")        c.probeClicks = ParseIntStrict(val);
+            else if (key == "desktopTransform")   c.desktopTransform = ParseIntStrict(val);
+            else if (key == "cursorBandAuto")     c.cursorBandAuto = ParseIntStrict(val);
+            else if (key == "trackCaret")         c.trackCaret = ParseIntStrict(val);
+            else if (key == "trackFocus")         c.trackFocus = ParseIntStrict(val);
+            else if (key == "trackAlign")         c.trackAlign = ParseIntStrict(val);
+            else if (key == "mouseAlign")         c.mouseAlign = ParseIntStrict(val);
+            else if (key == "trackGlideMs")       c.trackGlideMs = ParseIntStrict(val);
+            else if (key == "trackMarginPct")     c.trackMarginPct = ParseIntStrict(val);
+            else if (key == "mouseMarginPct")     c.mouseMarginPct = ParseIntStrict(val);
+            else if (key == "trackLog")           c.trackLog = ParseIntStrict(val);
+            else if (key == "ixDecimate")         c.ixDecimate = ParseIntStrict(val);
+            else if (key == "mpoBuster")          c.mpoBuster = ParseIntStrict(val);
             else if (key == "txSamplingMode") {
                 // Only 0 (nearest), 1 (smooth) and -1 (leave DWM alone) are meaningful. 2..4 are
                 // kernel aliases of nearest that would slip past the MPO sampling guard; anything
                 // else folds to nearest so EffectiveSamplingMode guards it (review 2026-10-09 #23).
-                const int v = std::stoi(val);
+                const int v = ParseIntStrict(val);
                 c.txSamplingMode = (v == 1 || v == -1) ? v : 0;
             }
-            else if (key == "txWarmMode")         c.txWarmMode = std::stoi(val);
-            else if (key == "txTrace")            c.txTrace = std::stoi(val);
-            else if (key == "txRestLevel")        c.txRestLevel = std::stod(val);
-            else if (key == "launchQuiesce")      c.launchQuiesce = std::stoi(val);
-            else if (key == "txWarmHz")           c.txWarmHz = std::stoi(val);
-            else if (key == "mpoNearestGuard")    c.mpoNearestGuard = std::stoi(val);
-            else if (key == "txSmoothLadder")     c.txSmoothLadder = std::stoi(val);
-            else if (key == "mpoGuardTest")       c.mpoGuardTest = std::stoi(val);
-            else if (key == "mpoGuard")           c.mpoGuard = std::stoi(val);
-            else if (key == "mpoGuardLiftWall")   c.mpoGuardLiftWall = std::stoi(val);
-            else if (key == "lockedBallistics")   c.lockedBallistics = std::stoi(val);
-            else if (key == "edgeClip")           c.edgeClip = std::stoi(val);
-            else if (key == "txMaxStepPct")       c.txMaxStepPct = std::stoi(val);
-            else if (key == "warpLock")           c.warpLock = std::stoi(val);
-            else if (key == "lockForce")          c.lockForce = std::stoi(val);
-            else if (key == "txEdgeMargin")       c.txEdgeMargin = std::stod(val);
-            else if (key == "gameFpsCap")         c.gameFpsCap = std::stoi(val);
-            else if (key == "onboarded")          c.onboarded = std::stoi(val);
-            else if (key == "quickZoomDefault")   c.quickZoomDefault = std::stod(val);
+            else if (key == "txWarmMode")         c.txWarmMode = ParseIntStrict(val);
+            else if (key == "txTrace")            c.txTrace = ParseIntStrict(val);
+            else if (key == "txRestLevel")        c.txRestLevel = ParseDoubleStrict(val);
+            else if (key == "launchQuiesce")      c.launchQuiesce = ParseIntStrict(val);
+            else if (key == "txWarmHz")           c.txWarmHz = ParseIntStrict(val);
+            else if (key == "mpoNearestGuard")    c.mpoNearestGuard = ParseIntStrict(val);
+            else if (key == "txSmoothLadder")     c.txSmoothLadder = ParseIntStrict(val);
+            else if (key == "mpoGuardTest")       c.mpoGuardTest = ParseIntStrict(val);
+            else if (key == "mpoGuard")           c.mpoGuard = ParseIntStrict(val);
+            else if (key == "mpoGuardLiftWall")   c.mpoGuardLiftWall = ParseIntStrict(val);
+            else if (key == "lockedBallistics")   c.lockedBallistics = ParseIntStrict(val);
+            else if (key == "edgeClip")           c.edgeClip = ParseIntStrict(val);
+            else if (key == "txMaxStepPct")       c.txMaxStepPct = ParseIntStrict(val);
+            else if (key == "warpLock")           c.warpLock = ParseIntStrict(val);
+            else if (key == "lockForce")          c.lockForce = ParseIntStrict(val);
+            else if (key == "txEdgeMargin")       c.txEdgeMargin = ParseDoubleStrict(val);
+            else if (key == "gameFpsCap")         c.gameFpsCap = ParseIntStrict(val);
+            else if (key == "onboarded")          c.onboarded = ParseIntStrict(val);
+            else if (key == "quickZoomDefault")   c.quickZoomDefault = ParseDoubleStrict(val);
             else if (key == "quickZoomModifier")  c.quickZoomModifier = val;
-            else if (key == "quickZoomHotkeyMode") c.quickZoomHotkeyMode = std::stoi(val);
-            else if (key == "quickZoomVk")        c.quickZoomVk = std::stoi(val);
-            else if (key == "quickZoomMods")      c.quickZoomMods = std::stoi(val);
-            else if (key == "outline")            c.outline = std::stoi(val);
-            else if (key == "outlineThickness")   c.outlineThickness = std::stoi(val);
+            else if (key == "quickZoomHotkeyMode") c.quickZoomHotkeyMode = ParseIntStrict(val);
+            else if (key == "quickZoomVk")        c.quickZoomVk = ParseIntStrict(val);
+            else if (key == "quickZoomMods")      c.quickZoomMods = ParseIntStrict(val);
+            else if (key == "outline")            c.outline = ParseIntStrict(val);
+            else if (key == "outlineThickness")   c.outlineThickness = ParseIntStrict(val);
             else if (key == "outlineColor")     { c.outlineColor = val; ParseHexColor(val, c.outlineR, c.outlineG, c.outlineB); }
-            else if (key == "outlineLowZoomOnly") c.outlineLowZoomOnly = std::stoi(val);
-            else if (key == "outlineLowZoomMax")  c.outlineLowZoomMax = std::stod(val);
-            else if (key == "outlineIdleHide")    c.outlineIdleHide = std::stoi(val);
-            else if (key == "outlineIdleSeconds") c.outlineIdleSeconds = std::stod(val);
+            else if (key == "outlineLowZoomOnly") c.outlineLowZoomOnly = ParseIntStrict(val);
+            else if (key == "outlineLowZoomMax")  c.outlineLowZoomMax = ParseDoubleStrict(val);
+            else if (key == "outlineIdleHide")    c.outlineIdleHide = ParseIntStrict(val);
+            else if (key == "outlineIdleSeconds") c.outlineIdleSeconds = ParseDoubleStrict(val);
         } catch (...) { /* keep default on bad value */ }
     }
     // Clamp numeric fields to their documented ranges. The ini is a hand-editable surface, and an
@@ -280,6 +304,10 @@ Config ParseConfig(const std::string& text) {
     if (c.outlineThickness < 1)  c.outlineThickness = 1;
     if (c.outlineThickness > 40) c.outlineThickness = 40;
     c.outlineLowZoomMax  = clampd(c.outlineLowZoomMax,  1.0, 50.0);
+    if (c.trackGlideMs < 0)    c.trackGlideMs = 0;      // glide time; a negative one would run the spring backwards
+    if (c.trackGlideMs > 5000) c.trackGlideMs = 5000;
+    if (c.txMaxStepPct < 0)    c.txMaxStepPct = 0;      // 0 = uncapped
+    if (c.txMaxStepPct > 1000) c.txMaxStepPct = 1000;
     if (c.gameFpsCap < 0)   c.gameFpsCap = 0;      // 0 = off
     if (c.gameFpsCap > 240) c.gameFpsCap = 240;
     if (c.gpuPriority < -1) c.gpuPriority = -1;    // tri-state: -1 low / 0 normal / +1 high

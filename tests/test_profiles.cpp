@@ -202,10 +202,6 @@ TEST_CASE("SessionDiffers: keys outside the template stay missing-vs-present") {
     CHECK(SessionDiffers("someFutureKey=0\n", ""));
     CHECK(SessionDiffers("", "someFutureKey=0\n"));
 }
-TEST_CASE("SessionDiffers: model is never filled from the template default") {
-    // The core's missing-key engine and the template's explicit one are different questions.
-    CHECK(SessionDiffers("model=hybrid\n", ""));
-}
 TEST_CASE("ParseIniTmpName recognises WriteTextFileAtomic's leftover temp names") {
     unsigned long pid = 0;
     CHECK(ParseIniTmpName(L"magnifier.ini.1234.tmp", pid)); CHECK(pid == 1234);
@@ -231,4 +227,29 @@ TEST_CASE("StripUiOnlyKeys strips every global key except profile (tray edits mu
     CHECK(StripUiOnlyKeys("profile=A\n") != StripUiOnlyKeys("profile=B\n"));
     // Prefix siblings are different keys.
     CHECK(StripUiOnlyKeys("traySlidersX=1\n") == "traySlidersX=1\n");
+}
+
+TEST_CASE("profile names: a device name is reserved with any extension, and the cap counts characters (review 2026-10-09 #73, #90)") {
+    CHECK(ProfileNameError("con.x") != "");
+    CHECK(ProfileNameError("NUL.txt") != "");
+    CHECK(ProfileNameError("com1 .ini") != "");
+    CHECK(ProfileNameError("Lpt9.a.b") != "");
+    CHECK(ProfileNameError("console") == "");        // only the exact device stem is reserved
+    CHECK(ProfileNameError("con x") == "");
+    // 40 two-byte characters (80 bytes) fit; 41 do not.
+    std::string accents; for (int i = 0; i < 40; ++i) accents += "\xC3\xA6";
+    CHECK(ProfileNameError(accents) == "");
+    CHECK(ProfileNameError(accents + "\xC3\xA6") != "");
+}
+
+TEST_CASE("SessionDiffers: UI keys outside the first-run template read as their built-in default (review #70, #76)") {
+    CHECK_FALSE(SessionDiffers("zoomEaseOutMs=45\n", "maxLevel=12\n"));
+    CHECK(SessionDiffers("zoomEaseOutMs=100\n", "maxLevel=12\n"));
+    CHECK_FALSE(SessionDiffers("txSamplingMode=0\n", ""));
+    CHECK(SessionDiffers("txSamplingMode=1\n", ""));
+    CHECK_FALSE(SessionDiffers("lockApps=\n", ""));
+    CHECK(SessionDiffers("lockApps=game.exe\n", ""));
+    // The core's missing-key engine is hybrid, the template's too: no special case for `model`.
+    CHECK_FALSE(SessionDiffers("model=hybrid\n", ""));
+    CHECK(SessionDiffers("model=render\n", ""));
 }

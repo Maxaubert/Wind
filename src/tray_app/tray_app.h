@@ -4,6 +4,7 @@
 // starts it with its PID; the helper exits when that process does. See
 // docs/specs/2026-09-29-tray-process-design.md.
 #include <windows.h>
+#include <map>
 #include <string>
 
 namespace wind {
@@ -35,7 +36,9 @@ int RunFlyoutTest();
 // engine_dropdown.cpp - the flyout's main-engine dropdown (#315): writes `model` to the live ini and
 // restarts the Wind core (no prompt), keeping the unsaved session like Settings does. False = nothing
 // changed (same engine, or the write or relaunch failed, which it reports itself).
-bool SetMainEngine(const std::wstring& ini, int picked);
+// `carry`: ini keys the flyout still held unwritten; they are written in the same locked update.
+bool SetMainEngine(const std::wstring& ini, int picked,
+                   const std::map<std::string, std::string>& carry = {});
 
 // tray_menu.cpp - what the flyout's buttons do (no UI of their own).
 int UsesPalette(const std::string& iniText);     // Wind's uiPalette as an index into Flyout::kPalettes; unknown or absent = 0 (Wind grey)

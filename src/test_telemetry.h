@@ -46,6 +46,11 @@ inline int FormatTelemetryLine(char* buf, int cap, const TelemetrySample& s) {
     return (n > 0 && n < cap) ? n : 0;
 }
 
+// The testlog.txt control file is written by the harness right before a launch and deleted after
+// the suite. One older than a day is a leftover: honouring it would record per-tick CSV (about
+// 50 MB/h) on every launch forever (review item 69). A negative age (clock skew) counts as fresh.
+inline bool TestlogControlFresh(long long ageSeconds) { return ageSeconds < 24LL * 3600LL; }
+
 // Buffered appender. Lines are cheap (~70 bytes); flush every kFlushLines so a crash mid-run
 // loses at most a fraction of a second of samples and the harness can tail the file live.
 class TestTelemetry {
@@ -58,14 +63,15 @@ public:
         if (!f_) return false;
         std::fputs(TelemetryHeader(), f_);
         lines_ = 0;
+        bytes_ = 0;
         return true;
     }
     bool enabled() const { return f_ != nullptr; }
     void write(const TelemetrySample& s) {
-        if (!f_) return;
+        if (!f_ || bytes_ >= kMaxBytes) return;   // size cap: a forgotten opt-in cannot fill the disk
         char buf[192];
         const int n = FormatTelemetryLine(buf, (int)sizeof(buf), s);
-        if (n > 0) std::fwrite(buf, 1, (size_t)n, f_);
+        if (n > 0) { std::fwrite(buf, 1, (size_t)n, f_); bytes_ += (unsigned long long)n; }
         if (++lines_ >= kFlushLines) { std::fflush(f_); lines_ = 0; }
     }
     void close() {
@@ -73,8 +79,10 @@ public:
     }
 private:
     static constexpr int kFlushLines = 32;
+    static constexpr unsigned long long kMaxBytes = 64ULL * 1024ULL * 1024ULL;
     std::FILE* f_ = nullptr;
     int lines_ = 0;
+    unsigned long long bytes_ = 0;
 };
 
 } // namespace wind
