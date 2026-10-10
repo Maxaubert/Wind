@@ -83,12 +83,12 @@ TEST_CASE("slider value formatting for the ini: whole numbers or two decimals") 
     CHECK(FormatIniValue(*FindSliderSpec("zoomEaseOutMs"), 45.0) == "45");
     CHECK(FormatIniValue(*FindSliderSpec("zoomInSpeed"), 1.05) == "1.05");
     CHECK(FormatIniValue(*FindSliderSpec("zoomInSpeed"), 1.0) == "1.00");
-    CHECK(FormatIniValue(*FindSliderSpec("cursorSmoothing"), 0.4) == "0.40");
+    CHECK(FormatIniValue(*FindSliderSpec("panGlideMaxPx"), 40) == "40");
 }
 
 TEST_CASE("slider value round trip: what is written is what the flyout reads back and shows") {
     for (const char* key : { "colorWarmPct", "colorDimPct", "maxLevel", "zoomInSpeed", "zoomOutSpeed",
-                             "panSpeed", "cursorSmoothing", "zoomEaseOutMs" }) {
+                             "panSpeed", "panGlideMaxPx", "zoomEaseOutMs" }) {
         const SliderSpec& s = *FindSliderSpec(key);
         for (int i = 0; i <= 20; ++i) {
             const double v = SnapSlider(s, s.min + (s.max - s.min) * i / 20.0);

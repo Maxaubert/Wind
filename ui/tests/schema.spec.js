@@ -10,7 +10,7 @@ const OLD_KEYS = [
   '__zoomIn', '__zoomOut', '__zoomWheel', '__pan',  // was four rows (Pan left/right/up/down); their ini keys live in OLD_BIND_KEYS
   'noSwallowApps', 'maxLevel', 'zoomInSpeed', 'zoomOutSpeed', 'panSpeed', 'smoothZoomAccel',
   'smoothZoomRamp', 'zoomEaseOutMs', 'txSamplingMode', '__hideCursor', '__cursorLock', 'lockApps',
-  'cursorSensitivity', 'cursorSmoothing', 'trackCaret', 'trackFocus', 'trackAlign', 'mouseAlign',
+  'cursorSensitivity', 'panGlideMaxPx', 'panGlideMs', 'trackCaret', 'trackFocus', 'trackAlign', 'mouseAlign',
   'mouseMarginPct', 'colorWarmPct', 'colorDimPct', 'model', 'engineGame', 'engineAcrylic',
   'engineDesktop', 'engineOther', 'renderExclude', 'diagnostics', '__about',
 ];
@@ -57,7 +57,7 @@ test('a captioned section has two or more rows, and the advanced rows are the on
     if (base.length) expect(base.length, g.id + ' / ' + c.caption + ' (advanced off)').toBeGreaterThanOrEqual(2);
   }
   expect(allRows.filter((r) => r.adv).map((r) => r.key).sort()).toEqual(
-    ['engineAcrylic', 'engineDesktop', 'engineGame', 'engineOther', 'lockApps', 'model', 'noSwallowApps', 'smoothZoomAccel', 'smoothZoomRamp'].sort());
+    ['engineAcrylic', 'engineDesktop', 'engineGame', 'engineOther', 'lockApps', 'model', 'noSwallowApps', 'panGlideMs', 'smoothZoomAccel', 'smoothZoomRamp'].sort());
   // Troubleshooting is never advanced, and the extra keys carry their switch key.
   for (const k of ['diagnostics', '__diagnostics', '__openIni']) expect(allRows.find((r) => r.key === k).adv).toBeUndefined();
   expect(Object.fromEntries(allRows.filter((r) => r.onKey).map((r) => [r.key, r.onKey]))).toEqual(

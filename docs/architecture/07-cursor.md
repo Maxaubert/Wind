@@ -11,7 +11,7 @@ Inspect crosshair, lock detection, Inspect, tracking and keyboard panning.
 ## The mapper
 
 `CursorMapper` (`src/cursor_mapper.*`, pure, tested) integrates per-tick deltas into a float lens
-centre `(cx_, cy_)` in monitor-local pixels, eased by `cursorSmoothing`. Each tick `update` returns
+centre `(cx_, cy_)` in monitor-local pixels (no easing: `cursorSmoothing` was removed in #430). Each tick `update` returns
 one `MapResult`:
 
 | Field | Meaning | Used by |
@@ -39,7 +39,7 @@ offset = clamp(cursor - screen/(2*level), 0, screen - screen/level)
 Wind's older model integrated deltas into a smoothed centre and welded the pointer back to it: a
 feedback loop, and the source of the transform wobble. A free transform session (not Inspect, not
 locked) pins the mapper to the real cursor every tick (`reset(cursorPos)` then `update(0, 0, lvl)`)
-and never welds. `cursorSensitivity` and `cursorSmoothing` do not apply there; the mapper clamps the
+and never welds. `cursorSensitivity` does not apply there; the mapper clamps the
 source rect exactly as the formula above does.
 
 Render sessions keep delta integration plus the weld, because the render engine hides the real
@@ -131,6 +131,14 @@ slightly during zoom ramps, nearest keeps it pixelated and steady. Pure rules:
   session-end reset of `ixPubLevel_` keeps a quick zoom back to the same level from skipping the
   publish nudge, and the hide-cursor hotkey's show-again transition nudges after the blanker
   restore like the zoom-out does.
+- **Pan glide (#430, `panGlideMaxPx`, experimental, 0 = off).** A soft stop: when a mouse movement
+  stops, the POINTER eases on at the hand's speed and slows to rest within `panGlideMaxPx` SCREEN px
+  at any zoom (`src/pan_glide.h`); `panGlideMs` is the ease's time constant, shortened for a fast hand
+  so the cap holds. The view follows by DWM centring. Any hand movement, a mouse button, a game,
+  Inspect, a detached view or 1x ends it. Wind's own steps move the tick baseline (`lastSetVirtual`),
+  so the lock detector and the gain learner only ever see hand motion. A first, uncapped version
+  (momentum = speed x time) could throw the pointer across the screen and was replaced. It replaces
+  Pan smoothing (`cursorSmoothing`), which eased the view toward the pointer: lag, never momentum.
 - **One centre during zoom.** DWM centres on its cursor point plus a learned hotspot offset that can
   sit 1-2 desktop px off Wind's exact centre; a level write puts the view on Wind's centre, the next
   cursor event back on DWM's (a 5-10 px shift at ~5x that snapped back when the zoom stopped). While

@@ -46,6 +46,7 @@
 #include "cursor_decode.h"   // edge mode measures the cursor body
 #include "focus_track.h"     // tracking: caret/focus watcher thread
 #include "tray_host.h"     // WindTray.exe owns the icon and menu (#291)
+#include "pan_glide.h"     // momentum after a flick (#430)
 #include "gain_learner.h"  // learned pointer ballistics: locked pan at TRUE desktop speed
 #include "tray_ipc.h"      // the status block shared with WindTray.exe
 #include "pointer_binds.h"  // kWindInjectTag: tag our own injected clicks (#285)
@@ -351,6 +352,7 @@ struct TickState {
     double lockedPanRemY = 0.0;
     bool   renderStale = false;         // the render overlay refused a retarget (multi-GPU) and still sits
                                         //   on an old monitor: sessions use the transform engine
+    wind::PanGlide glide;               // momentum after a flick (#430, src/pan_glide.h)
     GainLearner gainLearner;            // free ticks teach it the real in->out ratio;
                                         // locked ticks replay it (gain_learner.h)
     bool   inspectGame = false;         // game-inspect (issue #144): foreground stolen from a mouselook
@@ -423,7 +425,7 @@ struct TickState {
     TickState(IMagnifierModel* mdl, const MonitorTarget& m, const Config& c)
         : model(mdl), mon(m), cfg(c),
           zoom(1.0, c.maxLevel),
-          mapper(m.w, m.h, c.cursorSmoothing) {}
+          mapper(m.w, m.h) {}
 };
 static TickState* g_tick = nullptr;
 
@@ -1158,7 +1160,7 @@ static void RunTick(TickState& t) {
             t.zoom = ZoomController(1.0, nc.maxLevel);
             t.zoom.setLevel(keepLevel);
             double ocx = t.mapper.centerX(), ocy = t.mapper.centerY();   // preserve position
-            t.mapper = CursorMapper(t.mon.w, t.mon.h, nc.cursorSmoothing, t.hz);
+            t.mapper = CursorMapper(t.mon.w, t.mon.h);
             t.mapper.reset(ocx, ocy);
             }   // core-relevant change guard (StripUiOnlyKeys)
         }
@@ -1476,7 +1478,7 @@ static void RunTick(TickState& t) {
                     int nhz = DetectRefreshHz(nt.device);   // pace off the new monitor's refresh (#74)
                     if (nhz > 0) t.hz = nhz;
                     // Everything tuned in ticks follows the new tick rate (issue #223).
-                    t.mapper = CursorMapper(nt.w, nt.h, t.cfg.cursorSmoothing, t.hz);
+                    t.mapper = CursorMapper(nt.w, nt.h);
                     t.detector.setTickRate(t.hz);
                 }
             }
@@ -1522,7 +1524,7 @@ static void RunTick(TickState& t) {
                 if (curHz > 0 && curHz != t.hz) {
                     wind::Log(wind::LogLevel::Info, "tick", "refresh rate %dHz -> %dHz", t.hz, curHz);
                     t.hz = curHz;
-                    t.mapper = CursorMapper(t.mon.w, t.mon.h, t.cfg.cursorSmoothing, t.hz);
+                    t.mapper = CursorMapper(t.mon.w, t.mon.h);
                     t.detector.setTickRate(t.hz);
                 }
             }
@@ -1844,8 +1846,8 @@ static void RunTick(TickState& t) {
         //
         // Pinning the mapper to the real cursor each tick reproduces native's formula exactly (the
         // mapper already clamps the source rect the same way) and leaves nothing to feed back.
-        // cursorSensitivity and cursorSmoothing do NOT apply here by construction: the pointer IS
-        // the input, so there is no delta to scale and no target to ease toward.
+        // cursorSensitivity does NOT apply here by construction: the pointer IS the input, so there
+        // is no delta to scale.
         //
         // Gated OFF wherever the OS cursor is not the truth:
         //   - Inspect mode freezes the pointer and pans from raw mickeys, so reading it would pin
@@ -1856,18 +1858,40 @@ static void RunTick(TickState& t) {
                                 dynamic_cast<TransformModel*>(t.model) != nullptr;
         // (A shell input panel needs nothing special: DWM draws its pointer above the panels and
         // keeps it centred, so the hand moves the pointer directly.)
+        // PAN GLIDE (issue #430, src/pan_glide.h): a soft stop, a few screen px at most. The pointer
+        // itself eases on and the view follows by DWM centring. curDx/curDy is this tick's HAND motion: during a
+        // glide the previous tick ended with the baseline on Wind's own step, so any motion here is
+        // the hand, which (like a button or leaving a plain zoomed desktop pan) ends the glide.
+        {
+            const bool btn = ((GetAsyncKeyState(VK_LBUTTON) | GetAsyncKeyState(VK_RBUTTON) |
+                               GetAsyncKeyState(VK_MBUTTON)) & 0x8000) != 0;
+            const bool glideOk = t.cfg.panGlideMaxPx > 0 && freeCursor && lvl > 1.001 && !fsCover &&
+                                 !t.viewDetached && !btn;
+            if (t.glide.active && (!glideOk || curDx != 0 || curDy != 0)) wind::PanGlideCancel(t.glide);
+            if (!t.glide.active)
+                wind::PanGlideObserve(t.glide, curDx, curDy, dt, cur.x, cur.y, t.cfg.panGlideMs / 1000.0,
+                                      t.cfg.panGlideMaxPx / lvl, glideOk);   // the cap is in screen px
+            double gx = 0.0, gy = 0.0;
+            if (t.glide.active && wind::PanGlideStep(t.glide, dt, gx, gy)) {
+                POINT np{ (LONG)std::lround(gx), (LONG)std::lround(gy) };
+                const LONG l = t.mon.x, tp = t.mon.y, r = t.mon.x + t.mon.w - 1, b = t.mon.y + t.mon.h - 1;
+                if (np.x < l || np.x > r || np.y < tp || np.y > b) {      // reached the edge: stop there
+                    np.x = (std::min)((std::max)(np.x, l), r);
+                    np.y = (std::min)((std::max)(np.y, tp), b);
+                    wind::PanGlideCancel(t.glide);
+                }
+                if (np.x != cur.x || np.y != cur.y) {
+                    SetCursorPos(np.x, np.y);
+                    cur = np;   // the tick's baseline ends here, so the next tick reads hand motion only
+                }
+            }
+        }
         if (freeCursor) {
             POINT cp;
             if (GetCursorPos(&cp)) {
                 t.mapper.reset(double(cp.x - t.mon.x), double(cp.y - t.mon.y));
             }
         }
-        // Feed the MEASURED tick interval so the lens easing decays per unit time, not per tick.
-        // The transform model paces on DwmFlush, so on a VRR display this interval swings with
-        // whatever the game is doing (6.9 -> 13.4 -> 25ms with G-Sync following a 73fps game) and a
-        // fixed per-tick keep-fraction turns a steady hand into an unsteady lens. Clamped: after a
-        // real stall we want the lens to catch up, but a 500ms gap should not snap it.
-        t.mapper.setTickDeltaMs(dt > 0.05 ? 50.0 : dt * 1000.0);
         MapResult r = t.mapper.update(freeCursor ? 0 : dx, freeCursor ? 0 : dy, lvl);
         // --- Tracking (issue #276): caret / focus own the view; the pointer is never moved. ---
         // fsCover (read once above, see the "Foreground facts for this tick" comment) is the
@@ -3292,10 +3316,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // Paces the idle/1x loop and the vsync=0 path; while zoomed, DwmFlush/vsync pace instead.
     ts.hz = DetectRefreshHz();
     if (ts.hz <= 0) ts.hz = 60;              // query failed at startup: assume the safe common case
-    // Everything tuned in ticks (lock-detector streaks/windows, cursor smoothing inertia)
-    // derives from the detected rate too, so a tick stays the same real-time span (issue #223).
+    // Everything tuned in ticks (lock-detector streaks/windows) derives from the detected rate
+    // too, so a tick stays the same real-time span (issue #223).
     ts.detector.setTickRate(ts.hz);
-    ts.mapper.setTickRate(ts.hz);
     int pacedHz = ts.hz;                              // hz the timer interval below is computed for
     LARGE_INTEGER due; due.QuadPart = -(10000000LL / pacedHz);
     long long timerDeadlineQ = 0;   // absolute QPC target of the next timer-paced tick (0 = unset)

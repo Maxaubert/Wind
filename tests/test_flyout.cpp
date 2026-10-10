@@ -107,7 +107,7 @@ TEST_CASE("slider value text") {
     CHECK(fmt("maxLevel", 12) == L"12x");
     CHECK(fmt("zoomInSpeed", 1) == L"1.00x");
     CHECK(fmt("panSpeed", 0.25) == L"0.25x");
-    CHECK(fmt("cursorSmoothing", 0.4) == L"0.40");
+    CHECK(fmt("panGlideMaxPx", 40) == L"40 px");
     CHECK(fmt("zoomEaseOutMs", 45) == L"45 ms");
 }
 

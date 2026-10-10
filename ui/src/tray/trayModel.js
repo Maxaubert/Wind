@@ -13,7 +13,7 @@ export const SLIDERS = [
   { key: 'zoomInSpeed', icon: 'zin', name: 'Zoom-in speed', desc: 'How quickly the view magnifies.' },
   { key: 'zoomOutSpeed', icon: 'zout', name: 'Zoom-out speed', desc: 'How quickly the view returns.' },
   { key: 'panSpeed', icon: 'pan', name: 'Arrow key speed', desc: 'How fast the view pans.' },
-  { key: 'cursorSmoothing', icon: 'smooth', name: 'Pan smoothing', desc: 'Gentle inertia while panning.' },
+  { key: 'panGlideMaxPx', icon: 'smooth', name: 'Pan glide', desc: 'How far the pointer eases on when you stop.' },
   { key: 'zoomEaseOutMs', icon: 'glide', name: 'Release glide', desc: 'How softly the zoom coasts to a stop.' },
 ];
 export const TOGGLES = [

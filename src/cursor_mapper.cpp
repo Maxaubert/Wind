@@ -2,79 +2,35 @@
 #include "transform.h"
 #include <cmath>
 namespace wind {
-CursorMapper::CursorMapper(int screenW, int screenH, double smoothing, int tickHz)
-    : sw_(screenW), sh_(screenH), smoothing_(smoothing),
-      cx_(screenW / 2.0), cy_(screenH / 2.0), tx_(screenW / 2.0), ty_(screenH / 2.0) {
-    setTickRate(tickHz);
-}
-
-void CursorMapper::setTickRate(int tickHz) {
-    if (tickHz <= 0) tickHz = 144;
-    // The easing recurrence keeps a fraction (1 - alpha) of the gap each tick. The configured
-    // smoothing is that keep-fraction at the 144Hz baseline; keeping the SAME real-time decay at
-    // another tick rate means keep_hz = smoothing^(144/hz) (issue #223) - otherwise the felt
-    // inertia stretched by hz/144 (0.4 at 60Hz lagged like ~0.68 at 144Hz).
-    double keep = 0.0;
-    if (smoothing_ > 0.0) {
-        double s = smoothing_ > 0.95 ? 0.95 : smoothing_;
-        keep = std::pow(s, 144.0 / (double)tickHz);
-    }
-    nominalDtMs_ = 1000.0 / (double)tickHz;
-    alpha_ = 1.0 - keep;
-    if (alpha_ > 1.0) alpha_ = 1.0;
-    if (alpha_ < 0.05) alpha_ = 0.05;     // never fully stall (keep responsiveness)
-}
+CursorMapper::CursorMapper(int screenW, int screenH)
+    : sw_(screenW), sh_(screenH), cx_(screenW / 2.0), cy_(screenH / 2.0) {}
 
 void CursorMapper::reset(double centerX, double centerY) {
-    cx_ = tx_ = centerX; cy_ = ty_ = centerY;
+    cx_ = centerX; cy_ = centerY;
 }
 
 MapResult CursorMapper::update(int dx, int dy, double level) {
     if (level < 1.0) level = 1.0;
     // Apply the caller-resolved pixel delta at *desktop* speed (not divided by zoom): the focus
     // reaches things at the same hand-speed whether at 2x or 8x, matching Windows Magnifier.
-    tx_ += dx;
-    ty_ += dy;
-    if (tx_ < 0) tx_ = 0; else if (tx_ > sw_) tx_ = sw_;
-    if (ty_ < 0) ty_ = 0; else if (ty_ > sh_) ty_ = sh_;
+    cx_ += dx;
+    cy_ += dy;
+    if (cx_ < 0) cx_ = 0; else if (cx_ > sw_) cx_ = sw_;
+    if (cy_ < 0) cy_ = 0; else if (cy_ > sh_) cy_ = sh_;
     // Pan wall (issue #148): keep the SOURCE left edge at or under maxSrcX_ by bounding the
-    // center. Bounds the eased center too: during a zoom ramp at the right edge the wall
-    // moves inward with the level, and the rendered center must follow it the same tick.
+    // center. During a zoom ramp at the right edge the wall moves inward with the level, and the
+    // center follows it the same tick.
     if (maxSrcX_ >= 0.0) {
         double centerMax = maxSrcX_ + (sw_ / level) / 2.0;
         if (centerMax > sw_) centerMax = sw_;
-        if (tx_ > centerMax) tx_ = centerMax;
         if (cx_ > centerMax) cx_ = centerMax;
     }
     // Y wall (issue #191): identical shape - the 16-bit wrap is per-axis and Y was unguarded.
     if (maxSrcY_ >= 0.0) {
         double centerMaxY = maxSrcY_ + (sh_ / level) / 2.0;
         if (centerMaxY > sh_) centerMaxY = sh_;
-        if (ty_ > centerMaxY) ty_ = centerMaxY;
         if (cy_ > centerMaxY) cy_ = centerMaxY;
     }
-
-    // Light inertia: ease the rendered center toward the target. Smooths jerk and the uneven
-    // per-frame delta steps; alpha = 1 means no smoothing (snaps to target).
-    //
-    // TIME-BASED, NOT TICK-BASED (2026-08-27). alpha_ is derived from a NOMINAL tick rate, which is
-    // right only while ticks are evenly spaced. On a VRR display they are not: the transform model
-    // paces on DwmFlush, and with G-Sync following a 73fps game the composite interval swings
-    // 6.9 -> 13.4 -> 25ms. A fixed per-tick keep-fraction then means the decay per unit TIME
-    // changes every tick, so a steady hand produces an unsteady lens - felt as judder that no
-    // amount of write-cadence tuning can remove. Re-deriving the keep-fraction from the MEASURED
-    // interval makes the inertia identical in real time whatever the refresh is doing.
-    double a = alpha_;
-    if (dtMs_ > 0.0 && smoothing_ > 0.0 && nominalDtMs_ > 0.0) {
-        const double keepNominal = 1.0 - alpha_;
-        if (keepNominal > 0.0) {
-            a = 1.0 - std::pow(keepNominal, dtMs_ / nominalDtMs_);
-            if (a > 1.0) a = 1.0;
-            if (a < 0.05) a = 0.05;      // same floor as setTickRate: never fully stall
-        }
-    }
-    cx_ += (tx_ - cx_) * a;
-    cy_ += (ty_ - cy_) * a;
 
     OffsetF o = ComputeOffsetF(cx_, cy_, level, sw_, sh_);
     MapResult r;

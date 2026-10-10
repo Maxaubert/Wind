@@ -8,7 +8,7 @@ TEST_CASE("CursorMapper pan wall: source left never exceeds the bound (issue #14
     // Transform game sessions set maxSourceLeft = 32000/level each tick: the driver resets
     // when the far-right strip is magnified above ~9.3x. Pan hard right at 12x and assert the
     // source rect's left edge stays at/under the wall while Y (never overflowing) reaches max.
-    CursorMapper m(3840, 2160, 0.0);
+    CursorMapper m(3840, 2160);
     m.reset(1920.0, 1080.0);
     const double level = 12.0;
     m.setMaxSourceLeft(32000.0 / level);
@@ -27,7 +27,7 @@ TEST_CASE("CursorMapper pan wall Y: source top never exceeds the bound (issue #1
     // The shipped wall was X-only: |srcY*level| overflows the SAME 16-bit plane field, and the
     // bottom strip above ~16.2x on 2160 was reachable-lethal. Grind toward the bottom-right at
     // 20x with BOTH walls set and assert both axes hold the driver-safe bound.
-    CursorMapper m(3840, 2160, 0.0);
+    CursorMapper m(3840, 2160);
     m.reset(1920.0, 1080.0);
     const double level = 20.0;
     m.setMaxSourceLeft(32000.0 / level);
@@ -45,7 +45,7 @@ TEST_CASE("CursorMapper pan wall Y: source top never exceeds the bound (issue #1
 }
 
 TEST_CASE("CursorMapper pan wall Y: unset by default (desktop/render sessions unrestricted)") {
-    CursorMapper m(3840, 2160, 0.0);
+    CursorMapper m(3840, 2160);
     m.reset(1920.0, 1080.0);
     MapResult r{};
     for (int i = 0; i < 600; ++i) r = m.update(0, 12, 18.0);

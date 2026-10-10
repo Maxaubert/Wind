@@ -98,7 +98,7 @@ test('typo tolerance: distance 1 for 4-7 letters, 2 for 8+, prefixes, substrings
   expect(keys('brigthness')[0]).toBe('colorDimPct');         // 10 letters
   expect(keys('brihtness')[0]).toBe('colorDimPct');          // dropped letter
   expect(keys('inertai')).toEqual(expect.arrayContaining(['zoomEaseOutMs']));
-  expect(keys('smothing')).toContain('cursorSmoothing');
+  expect(keys('smothing')).toContain('panGlideMaxPx');
   expect(keys('sensitivty')).toContain('cursorSensitivity'); // keyword, 10 letters, one missing
   expect(keys('nite light')).toEqual(expect.arrayContaining(['colorWarmPct']));
   expect(keys('nite light')[0]).toBe('colorWarmPct');

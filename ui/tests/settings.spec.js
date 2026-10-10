@@ -122,7 +122,7 @@ test('Show advanced settings reveals the advanced rows inline, with no marker, a
   for (const k of ['model', 'engineGame', 'smoothZoomAccel', 'smoothZoomRamp']) await expect(key(page, k)).toHaveCount(0);
   await go(page, 'view');
   await expect(key(page, 'lockApps')).toHaveCount(0);
-  await expect(key(page, 'cursorSmoothing')).toBeVisible();   // Pan smoothing is a plain row (#423)
+  await expect(key(page, 'panGlideMaxPx')).toBeVisible();   // Pan glide is a plain row (#430)
   await expect(key(page, 'mouseAlign')).toBeVisible();
   // Troubleshooting is always there; the switch itself is a global key, so it never raises the capsule.
   await go(page, 'prefs');

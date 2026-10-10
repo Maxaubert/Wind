@@ -187,7 +187,7 @@ inline Hit HitTest(const Geometry& g, int x, int y) {
 
 // ---------------------------------------------------------------- items
 
-enum class ValueFmt { Percent, TimesInt, Times2, Dec2, Millis };
+enum class ValueFmt { Percent, TimesInt, Times2, Millis, Pixels };
 
 struct SliderSpec {
     const char* key;
@@ -207,7 +207,7 @@ inline const SliderSpec* SliderSpecs(int* count) {
         { "zoomInSpeed",    L"Zoom-in speed",  0.25, 4,    1,    ValueFmt::Times2,   "zin", 0.05 },
         { "zoomOutSpeed",   L"Zoom-out speed", 0.25, 4,    1,    ValueFmt::Times2,   "zout", 0.05 },
         { "panSpeed",       L"Arrow key speed", 0.25, 4,    1,    ValueFmt::Times2,   "pan", 0.05 },
-        { "cursorSmoothing",L"Pan smoothing",  0,    0.95, 0.4,  ValueFmt::Dec2,     "smooth", 0.05 },
+        { "panGlideMaxPx",  L"Pan glide",      0,    200,  0,    ValueFmt::Pixels,   "smooth", 5 },
         { "zoomEaseOutMs",  L"Release glide",  0,    300,  45,   ValueFmt::Millis,   "glide", 5 },
     };
     if (count) *count = (int)(sizeof(k) / sizeof(k[0]));
@@ -272,8 +272,8 @@ inline std::wstring FormatSliderValue(const SliderSpec& s, double v) {
         case ValueFmt::Percent:  std::snprintf(b, sizeof b, "%d%%", (int)std::lround(v)); break;
         case ValueFmt::TimesInt: std::snprintf(b, sizeof b, "%dx", (int)std::lround(v)); break;
         case ValueFmt::Times2:   std::snprintf(b, sizeof b, "%.2fx", v); break;
-        case ValueFmt::Dec2:     std::snprintf(b, sizeof b, "%.2f", v); break;
         case ValueFmt::Millis:   std::snprintf(b, sizeof b, "%d ms", (int)std::lround(v)); break;
+        case ValueFmt::Pixels:   std::snprintf(b, sizeof b, "%d px", (int)std::lround(v)); break;
     }
     return Widen(b);
 }
@@ -468,7 +468,7 @@ inline double StepSlider(const SliderSpec& s, double cur, int dir, bool big) {
 inline std::string FormatIniValue(const SliderSpec& s, double v) {
     char b[32];
     switch (s.fmt) {
-        case ValueFmt::Percent: case ValueFmt::TimesInt: case ValueFmt::Millis:
+        case ValueFmt::Percent: case ValueFmt::TimesInt: case ValueFmt::Millis: case ValueFmt::Pixels:
             std::snprintf(b, sizeof b, "%d", (int)std::lround(v)); break;
         default: std::snprintf(b, sizeof b, "%.2f", v); break;
     }
