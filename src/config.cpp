@@ -211,6 +211,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "diagnostics")      c.diagnostics = ParseIntStrict(val);
             else if (key == "cursorSensitivity")  c.cursorSensitivity = ParseDoubleStrict(val);
             else if (key == "panGlideMaxPx")      c.panGlideMaxPx = ParseIntStrict(val);
+            else if (key == "gameCursorLagMs")    c.gameCursorLagMs = ParseIntStrict(val);
             else if (key == "cursorConstantSize") c.cursorConstantSize = ParseIntStrict(val);
             else if (key == "trayPinned")         c.trayPinned = ParseIntStrict(val);
             else if (key == "cursorVisibility")   c.cursorVisibility = val;
@@ -305,6 +306,8 @@ Config ParseConfig(const std::string& text) {
     if (c.txRampMinStep > 100) c.txRampMinStep = 100;
     if (c.txRampMinFrom < 1.0) c.txRampMinFrom = 1.0;
     if (c.panGlideMaxPx > 400) c.panGlideMaxPx = 400;
+    if (c.gameCursorLagMs < -1) c.gameCursorLagMs = -1;
+    if (c.gameCursorLagMs > 100) c.gameCursorLagMs = 100;
     c.sharpness       = clampd(c.sharpness,       0.0, 1.0);
     c.brightness      = clampd(c.brightness,      0.5, 1.5);
     c.colorWarmPct    = (int)clampd(c.colorWarmPct, 0, 100);
@@ -526,6 +529,10 @@ std::string DefaultIniText() {
                "; panGlideMaxPx: when a mouse movement stops the pointer eases on at most this many screen\n"
                ";   px before it rests (Transform engine, zoomed); 0=off. A longer glide also eases longer\n"
                "panGlideMaxPx=0\n"
+               "; gameCursorLagMs: a full-screen game that hides the pointer and draws its own cursor shows it\n"
+               ";   a frame late; the zoomed view follows the pointer this many ms late to stay on it.\n"
+               ";   -1=one display frame (default), 0=off\n"
+               "gameCursorLagMs=-1\n"
                "; cursorConstantSize: 0=the cursor grows with the zoom (default); 1=keep it at normal\n"
                ";   desktop size at every zoom (render engine only). Replaces cursorScaleWithZoom (ignored).\n"
                "cursorConstantSize=0\n"

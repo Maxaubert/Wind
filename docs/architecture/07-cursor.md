@@ -131,6 +131,16 @@ slightly during zoom ramps, nearest keeps it pixelated and steady. Pure rules:
   session-end reset of `ixPubLevel_` keeps a quick zoom back to the same level from skipping the
   publish nudge, and the hide-cursor hotkey's show-again transition nudges after the blanker
   restore like the zoom-out does.
+- **Game-drawn cursor (#443, `gameCursorLagMs`, -1 = one display frame, 0 = off).** Some games
+  hide the pointer and draw their own cursor at its position (Cyberpunk 2077 menus). That cursor
+  reaches the screen about a display frame after the pointer moved, while DWM centring shows the
+  newest pointer, so the game's cursor swung behind every movement and flipped side on each change of
+  direction: rms 54 screen px at 6.5x and 1000 desktop px/s (2026-10-11, 3 runs). While a covering
+  foreground app hides the pointer (`GameDrawsCursor`, `src/game_cursor.h`; not Wind's own hiding),
+  DWM centring is off and the view follows the pointer `gameCursorLagMs` late, read back from a
+  per-tick `PointerHistory`: rms 15-23 px at 1000 px/s, 6 px at 400 (29 before). Wind's own write
+  without the delay measured the same as DWM centring, so the gain is the delay. The rest is the
+  game's frame timing. A mouselook game that recentres the pointer is locked and unaffected.
 - **Pan glide (#430, `panGlideMaxPx`, 0 = off).** A soft stop: when a mouse movement
   stops, the POINTER eases on at the hand's speed and slows to rest within `panGlideMaxPx` SCREEN px
   at any zoom (`src/pan_glide.h`). One setting since #434: the ease's time constant follows the

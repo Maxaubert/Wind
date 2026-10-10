@@ -176,6 +176,7 @@ Every key works in the ini whether or not Settings shows it. Keys hot-reload unl
 |---|---|
 | `maxLevel` (12), `zoomInSpeed`, `zoomOutSpeed`, `zoomEaseOutMs`, `smoothZoom*` | Range and feel of the zoom |
 | `cursorSensitivity` (1.0), `panSpeed` (1.0), `panGlideMaxPx` (0) | Mouse and arrow-key pan speed; the pan glide's distance, which also sets its ease (#430, #434) |
+| `gameCursorLagMs` (-1) | How late the view follows the pointer while a full-screen game hides it and draws its own cursor; -1 = one display frame, 0 = off (#443). Ini only |
 | `mouseAlign` (0 centred, 1 within the edges), `mouseMarginPct` | Where the pointer sits while the view moves |
 | `trackCaret` (1), `trackFocus` (0), `trackAlign`, `trackGlideMs` (200) | Follow the text caret and keyboard focus |
 | `lockApps`, `warpLock` (0) | Games whose sessions pan from raw mouse motion; heuristics for unlisted games |

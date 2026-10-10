@@ -391,6 +391,10 @@ struct Config {
     // (0 = off, the default). The ease's time follows the distance (PanGlideTauS, one setting since
     // #434; the old panGlideMs key is ignored). Hot. Replaces cursorSmoothing (ignored).
     int    panGlideMaxPx = 0;
+    // Game-drawn cursor (issue #443, src/game_cursor.h): while a covering foreground app hides the
+    // pointer and draws its own cursor, the view follows the pointer this many ms late so it stays
+    // on the game's cursor. -1 (default) = one display frame, 0 = off (DWM centring). Hot.
+    int    gameCursorLagMs = -1;
     // 0 (default) = the render engine's cursor grows with the zoom, matching the transform
     // engine (DWM magnifies its sprite); 1 = opt-in constant desktop-size pointer. Replaces
     // cursorScaleWithZoom (issue #253), which is IGNORED: the default template wrote it as an
