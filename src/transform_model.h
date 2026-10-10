@@ -133,6 +133,8 @@ private:
     int  lastClickX_ = 0, lastClickY_ = 0;
     bool weldedLastFrame_ = false;                   // SetCursorPos ran in the last present()
     bool inputTransformAvailable_ = false;           // MagSetInputTransform probe (UIAccess)
+    bool uiAccessProbe_ = false;                     // the token's UIAccess bit, the re-arm value
+    bool inputXformDenied_ = false;                  // publish failed ERROR_ACCESS_DENIED: stay off
     EnterSplit lastEnter_;
     double restLevel_ = 1.0;                         // cfg.txRestLevel (hot): >1 keeps DWM magnifying
     bool ensureMag();

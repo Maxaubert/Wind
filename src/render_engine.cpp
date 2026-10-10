@@ -480,6 +480,12 @@ RenderEngine::~RenderEngine() { shutdown(); delete s_; s_ = nullptr; }
 bool RenderEngine::ready() const { return s_ && s_->ready; }
 bool RenderEngine::deviceLost() const { return s_ && s_->deviceLost; }
 
+void RenderEngine::pollDeviceRemoved() {
+    if (!s_ || !s_->ready || s_->deviceLost || !s_->device) return;
+    const HRESULT hr = s_->device->GetDeviceRemovedReason();
+    if (FAILED(hr)) { s_->deviceLost = true; RLog("poll: device removed hr=0x%08lX", (unsigned long)hr); }
+}
+
 bool RenderEngine::parkedLastFrame() const { return s_ && s_->parkedLastFrame; }
 
 bool RenderEngine::recoverDeviceLost() {

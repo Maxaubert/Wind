@@ -188,3 +188,12 @@ TEST_CASE("Netflix in a browser: protected beats transformExclude") {
     in.captureProtected = false;
     CHECK_FALSE(ShouldPickTransform(in));
 }
+
+TEST_CASE("a lost render device sends every pick to the transform engine (review 2026-10-09 #13)") {
+    EnginePickInputs in;                 // a plain captioned desktop foreground: render as a rule
+    CHECK_FALSE(ShouldPickTransform(in));
+    in.renderLost = true;
+    CHECK(ShouldPickTransform(in));
+    in.pref = wind::EnginePref::Render;  // even an explicit render pin cannot be honoured
+    CHECK(ShouldPickTransform(in));
+}

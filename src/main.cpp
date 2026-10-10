@@ -723,6 +723,12 @@ static void RefreshFgCache(TickState& t, HWND fgw) {
 // instant switch) must agree exactly - that is why the pure decision was extracted in the first
 // place - and the category/preference/override plumbing is now big enough that duplicating it by
 // hand would be the obvious place for the two to drift apart.
+// The render engine's device is lost and not yet recovered: picks must go to the transform engine.
+static bool RenderDeviceLost(const TickState& t) {
+    auto* rm = dynamic_cast<RenderModel*>(t.mRender);
+    return rm && rm->deviceLost();
+}
+
 static void FillCategoryInputs(const TickState& t, wind::EnginePickInputs& pin) {
     const wind::WindowCategory cat = wind::ClassifyWindow(
         pin.coversMonitor, pin.borderless, pin.shellDesktop, t.fgCacheBackdrop);
@@ -1509,6 +1515,7 @@ static void RunTick(TickState& t) {
                 pin.tdrHarness     = t.cfg.tdrTest > 0;
                 pin.desktopTransformOptIn = t.cfg.desktopTransform != 0;
                 pin.inputTransformOk      = tAvail && tAvail->inputTransformAvailable();
+                pin.renderLost            = RenderDeviceLost(t);
                 FillCategoryInputs(t, pin);
                 IMagnifierModel* pick = ShouldPickTransform(pin) ? t.mTransform : t.mRender;
                 if (pick && pick != t.model) t.model = pick;
@@ -2136,6 +2143,7 @@ static void RunTick(TickState& t) {
             pin.tdrHarness     = t.cfg.tdrTest > 0;
             pin.desktopTransformOptIn = t.cfg.desktopTransform != 0;
             pin.inputTransformOk      = tAvail && tAvail->inputTransformAvailable();
+            pin.renderLost            = RenderDeviceLost(t);
             FillCategoryInputs(t, pin);
             IMagnifierModel* want = ShouldPickTransform(pin) ? t.mTransform : t.mRender;
             // STICKY (field: the engine flapped render<->transform inside one zoom session, and
@@ -3267,6 +3275,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     bool running = true;
     unsigned long long nextRecoverMs = 0;   // device-lost recovery backoff gate (GetTickCount64)
+    bool lostSeen = false;                  // this device loss already attributed (backstop runs once)
     // The transform model does no blocking present, so it can never self-pace via Present(1,0) or
     // DwmFlush the way the render model does. It must always be timer-paced (like the idle/1x path),
     // or the zoomed loop spins flat out and floods MagSetFullscreenTransform, backing up DWM's
@@ -3288,16 +3297,31 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         // D3D device was removed; rebuild it on a backoff so we don't spin (the driver may take a
         // moment to return). Crucially, un-hide the OS cursor first so the user is never left without
         // a pointer while we are unable to draw the magnified one. Skip the normal tick this iteration.
-        if (auto* rm = dynamic_cast<RenderModel*>(ts.mRender); rm && rm->deviceLost()) {
+        auto* rm = dynamic_cast<RenderModel*>(ts.mRender);
+        // The render engine is idle while a transform session runs, so its own Present/Acquire
+        // never sees a TDR then; ask the device directly (review 2026-10-09 #12). Without this the
+        // loss surfaced only after the session, often past the 30 s attribution window below.
+        if (rm && ts.mTransform && ts.model == ts.mTransform) rm->pollDeviceRemoved();
+        if (rm && !rm->deviceLost()) lostSeen = false;
+        if (rm && rm->deviceLost()) {
             // TDR backstop (issue #148): if a transform GAME session was live within the last
             // 30s, this device-lost almost certainly IS the driver reset that session caused
             // (e.g. an animated cursor churning invisibly to the handle poll). Remember the app
             // so it never gets the transform path again - one crash ever, then render.
-            if (!ts.transformExe.empty() &&
-                GetTickCount64() - ts.lastTransformGameMs < 30000) {
-                MarkChurnyApp(ts.transformExe, "device-lost backstop");
-                ts.fgCacheHwnd = nullptr;   // the game usually keeps its HWND: re-read churny (M1)
+            if (!lostSeen) {
+                lostSeen = true;
+                if (!ts.transformExe.empty() &&
+                    GetTickCount64() - ts.lastTransformGameMs < 30000) {
+                    MarkChurnyApp(ts.transformExe, "device-lost backstop");
+                    ts.fgCacheHwnd = nullptr;   // the game usually keeps its HWND: re-read churny (M1)
+                }
             }
+            // The render engine owns the view (or idles at 1x) vs a transform session in flight:
+            // the render-side cleanup below must not touch a live transform session (its Inspect
+            // clip, cursor and lock state are valid).
+            const bool renderOwnsView = ts.model == ts.mRender;
+            const bool canFailOver = ts.mTransform != nullptr;
+            if (renderOwnsView) {
             // Restore through the ACTIVE model: in a transform session the transform half (not
             // the render engine) hid the cursor, and only it restores its blanker state too.
             SetSystemCursorHidden(ts, ts.model, false);
@@ -3314,13 +3338,26 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                 g_input.state().commitRight.exchange(0);
             }
             EndGameInspect(ts);   // device-lost must not strand the game backgrounded
-            unsigned long long now = GetTickCount64();
-            if (now >= nextRecoverMs) {
-                if (!rm->recoverDeviceLost()) nextRecoverMs = now + 500;   // retry in 0.5s
-                else { ts.prevLvl = 1.0; ts.zoom = ZoomController(1.0, ts.cfg.maxLevel); }  // back to 1x, clean
+            if (canFailOver) {
+                // A render device that stays lost must not freeze the app (hotkeys, reload, the
+                // transform engine all ride RunTick): end the dead render session, hand the view
+                // to the transform engine at a clean 1x and keep ticking. Picks stay on transform
+                // while the device is lost (EnginePickInputs::renderLost); recovery below retries.
+                if (ts.prevLvl > 1.0) ts.model->setActive(false);   // parks the overlay; safe when lost
+                ts.model = ts.mTransform;
+                ts.prevLvl = 1.0; ts.zoom = ZoomController(1.0, ts.cfg.maxLevel);
             }
-            Sleep(50);
-            continue;
+            }
+            unsigned long long now = GetTickCount64();
+            // A transform session in flight keeps the loop; rebuilding the device waits for 1x.
+            if (now >= nextRecoverMs && (renderOwnsView || ts.prevLvl <= 1.0)) {
+                if (!rm->recoverDeviceLost()) nextRecoverMs = now + 500;   // retry in 0.5s
+                else if (renderOwnsView) { ts.prevLvl = 1.0; ts.zoom = ZoomController(1.0, ts.cfg.maxLevel); }  // back to 1x, clean
+            }
+            if (renderOwnsView && !canFailOver) {
+                Sleep(50);
+                continue;
+            }
         }
 
         // Pacing while zoomed:

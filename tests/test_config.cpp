@@ -675,3 +675,14 @@ TEST_CASE("the first-run ini carries the new keys and parses to the struct defau
     CHECK(t.panKeysOn == 1); CHECK(t.hideCursorOn == 1); CHECK(t.cursorLockOn == 1);
     CHECK(t.zoomWheelMods == 0);
 }
+
+TEST_CASE("txSamplingMode folds the nearest aliases 2..4 to 0 (review 2026-10-09 #23)") {
+    CHECK(ParseConfig("txSamplingMode=0\n").txSamplingMode == 0);
+    CHECK(ParseConfig("txSamplingMode=1\n").txSamplingMode == 1);
+    CHECK(ParseConfig("txSamplingMode=-1\n").txSamplingMode == -1);   // leave DWM alone stays valid
+    CHECK(ParseConfig("txSamplingMode=2\n").txSamplingMode == 0);
+    CHECK(ParseConfig("txSamplingMode=4\n").txSamplingMode == 0);
+    CHECK(ParseConfig("txSamplingMode=99\n").txSamplingMode == 0);
+    // Folded to 0, the MPO guard sees an MPO-enabled boot's nearest and swaps in smooth.
+    CHECK(EffectiveSamplingMode(ParseConfig("txSamplingMode=3\n").txSamplingMode, false, false, 0) == 1);
+}

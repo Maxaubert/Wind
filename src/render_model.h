@@ -30,6 +30,7 @@ public:
     RenderEngine& engine();   // escape hatch for render-only main-loop code (device-lost, priming, selftest)
     bool deviceLost() const;  // forwarded (main loop calls this)
     bool recoverDeviceLost();
+    void pollDeviceRemoved();  // see RenderEngine::pollDeviceRemoved
     void primeReveal();
     bool frameCompositedSincePrime() const;
     bool revealFrameDone(double spinBudgetMs = 0.0);

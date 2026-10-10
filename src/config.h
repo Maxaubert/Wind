@@ -201,7 +201,8 @@ struct Config {
     //   2..4 = undocumented modes the kernel accepts and round-trips. FIELD-TESTED 2026-08-13:
     //       all three render IDENTICALLY to nearest, i.e. they are aliases, not cheaper filters.
     //       Mode 1 is the only real smooth path. Do not re-test these hoping for a middle
-    //       ground - there isn't one on this Windows build.
+    //       ground - there isn't one on this Windows build. ParseConfig folds 2..4 (and any
+    //       other value) to 0, so the MPO sampling guard sees them as nearest.
     //   -1 = leave whatever DWM currently has alone.
     // The state is global to DWM and resets when DWM restarts, which is why smoothing appeared
     // to come and go between builds; it is re-applied per magnification context. KNOWN
