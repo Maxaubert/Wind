@@ -185,17 +185,14 @@ test('View: the edge margin shows only when the pointer is kept within the edges
   await expect(key(page, 'mouseMarginPct')).toBeVisible();
 });
 
-test('High resolution cursor is tagged Experimental and turns the release glide off (#427)', async ({ page }) => {
+test('High resolution cursor is tagged Experimental and keeps the release glide (#439)', async ({ page }) => {
   await page.goto('/');
   await go(page, 'view');
   await expect(key(page, 'txSamplingMode').locator('.tag')).toHaveText('Experimental');
-  await go(page, 'zoom');
-  await expect(key(page, 'zoomEaseOutMs')).not.toHaveClass(/disabled/);
-  await go(page, 'view');
   await key(page, 'txSamplingMode').getByRole('switch').check({ force: true });
   await go(page, 'zoom');
-  await expect(key(page, 'zoomEaseOutMs')).toHaveClass(/disabled/);
-  await expect(key(page, 'zoomEaseOutMs').locator('input[type=range]')).toBeDisabled();
+  await expect(key(page, 'zoomEaseOutMs')).not.toHaveClass(/disabled/);
+  await expect(key(page, 'zoomEaseOutMs').locator('input[type=range]')).toBeEnabled();
 });
 
 test('Typing and focus: caret on, focus off by default; a toggle writes at once', async ({ page }) => {
