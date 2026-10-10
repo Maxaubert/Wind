@@ -4,7 +4,7 @@
 
 #define WIND_VER_MAJOR 0
 #define WIND_VER_MINOR 24
-#define WIND_VER_PATCH 13
+#define WIND_VER_PATCH 14
 
 // String form for logs/snapshot/UI. Keep in sync with the numeric parts above.
-#define WIND_VERSION_STR "0.24.13"
+#define WIND_VERSION_STR "0.24.14"

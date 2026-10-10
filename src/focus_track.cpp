@@ -11,6 +11,7 @@
 #include <oleauto.h>
 #include <UIAutomation.h>
 #include <chrono>
+#include <algorithm>
 #include <condition_variable>
 #include <memory>
 #include <string>
@@ -82,6 +83,7 @@ class FocusLookup {
         IUIAutomationElement* result = nullptr;
         ULONGLONG resultAt = 0;      // when the worker produced result
         HWND resultFg = nullptr;     // the foreground window it was asked for
+        unsigned resultGen = 0;      // the tracker's focus generation it was asked under
     };
 public:
     explicit FocusLookup(IUIAutomation* uia) : st_(std::make_shared<State>()) {
@@ -97,7 +99,7 @@ public:
     }
     // The focused element (AddRef'd, caller releases), or null. timedOut: not answered in time, or
     // the previous lookup is still stuck.
-    IUIAutomationElement* get(unsigned deadlineMs, bool& timedOut) {
+    IUIAutomationElement* get(unsigned deadlineMs, bool& timedOut, unsigned gen) {
         timedOut = false;
         State& s = *st_;
         const HWND fg = GetForegroundWindow();
@@ -108,11 +110,14 @@ public:
             // A late answer (it missed the last deadline): still good if fresh and for this window.
             // Slow-but-alive apps (Edge answers in ~200 ms) then cost one skipped round, not every round.
             IUIAutomationElement* late = s.result; s.result = nullptr;
-            if (s.resultFg == fg && GetTickCount64() - s.resultAt < 250) return late;
+            // A focus event since the lookup started (a newer generation) makes it the previous
+            // control's answer, however fresh.
+            if (s.resultFg == fg && s.resultGen == gen && GetTickCount64() - s.resultAt < 250) return late;
             late->Release();
         }
         s.busy = true;
         s.resultFg = fg;
+        s.resultGen = gen;
         const unsigned job = ++s.want;
         s.cv.notify_all();
         if (!s.cv.wait_for(lk, std::chrono::milliseconds(deadlineMs), [&] { return s.done == job; })) {
@@ -167,7 +172,8 @@ static bool Win32Caret(RECT& out) {
     if (rc.right <= rc.left && rc.bottom <= rc.top) return false;
     POINT a{ rc.left, rc.top }, b{ rc.right, rc.bottom };
     if (!ClientToScreen(gi.hwndCaret, &a) || !ClientToScreen(gi.hwndCaret, &b)) return false;
-    out = { a.x, a.y, b.x, b.y };
+    // A mirrored (RTL) window flips x in ClientToScreen: normalise so left <= right.
+    out = { (std::min)(a.x, b.x), (std::min)(a.y, b.y), (std::max)(a.x, b.x), (std::max)(a.y, b.y) };
     return true;
 }
 
@@ -246,8 +252,10 @@ static bool RangeRect(IUIAutomationTextRange* range, RECT& out) {
     double* d = nullptr;
     LONG n = sa->rgsabound[0].cElements;
     if (n >= 4 && SUCCEEDED(SafeArrayAccessData(sa, (void**)&d))) {
-        out = { (LONG)d[0], (LONG)d[1], (LONG)(d[0] + (d[2] > 1 ? d[2] : 1)), (LONG)(d[1] + d[3]) };
-        ok = d[3] > 0;
+        // The LAST line's rect, so a selection grown with Shift+arrow moves what is followed.
+        const double* r = d + wind::LastRectOffset((int)n);
+        out = { (LONG)r[0], (LONG)r[1], (LONG)(r[0] + (r[2] > 1 ? r[2] : 1)), (LONG)(r[1] + r[3]) };
+        ok = r[3] > 0;
         SafeArrayUnaccessData(sa);
     } else if (n == 0) {
         // An empty caret range has no rectangle: widen it by one character, then use its left edge.
@@ -264,10 +272,14 @@ static bool RangeRect(IUIAutomationTextRange* range, RECT& out) {
 bool FocusTracker::start() {
     if (th_.joinable()) return true;
     g_self = this;
+    stopRequested_.store(false);
     th_ = std::thread([this] { run(); });
     return true;
 }
 void FocusTracker::stop() {
+    // The flag covers a stop() that lands before run() has published its queue (no thread id yet, so
+    // no WM_QUIT could be posted and join() would wait forever): run() checks it right after.
+    stopRequested_.store(true);
     const unsigned long t = tid_.load();
     if (t) PostThreadMessageW(t, WM_QUIT, 0, 0);
     if (th_.joinable()) th_.join();
@@ -291,8 +303,11 @@ void FocusTracker::publish(TrackKind k, double l, double t, double r, double b, 
 }
 
 void FocusTracker::run() {
-    tid_ = GetCurrentThreadId();
+    // Create the queue BEFORE publishing the thread id: a WM_QUIT posted to a thread without a
+    // queue is lost, and stop() would then join forever.
     MSG m; PeekMessageW(&m, nullptr, WM_USER, WM_USER, PM_NOREMOVE);   // make the queue exist
+    tid_ = GetCurrentThreadId();
+    if (stopRequested_.load()) { tid_ = 0; return; }
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     IUIAutomation* uia = nullptr;
     CoCreateInstance(__uuidof(CUIAutomation), nullptr, CLSCTX_INPROC_SERVER, __uuidof(IUIAutomation), (void**)&uia);
@@ -407,8 +422,10 @@ void FocusTracker::run() {
         unsigned gen = ~0u; HWND fg = nullptr; bool is = false;
         bool have = false; RECT msaa{}; ULONGLONG at = 0;
     } edc;
-    auto editContextCaret = [&](IUIAutomationElement* el, RECT& rc, const char*& src, bool fromPoll) {
-        if (!el) return;
+    // False only when this IS an EditContext element and MSAA gave no caret: the UIA rect is then
+    // the start of the line, which is wrong, so the caller reports not-found instead of it.
+    auto editContextCaret = [&](IUIAutomationElement* el, RECT& rc, const char*& src, bool fromPoll) -> bool {
+        if (!el) return true;
         // Keyed on the window too: a resolve can run before the next app's focus event arrives,
         // and a stale "is VS Code" must never send MSAA queries into another app (field: Notepad
         // tracking went silent for 2.5 s right after leaving VS Code).
@@ -425,7 +442,7 @@ void FocusTracker::run() {
                 SysFreeString(cls);
             }
         }
-        if (!edc.is) return;
+        if (!edc.is) return true;
         const ULONGLONG now = GetTickCount64();
         if (!(fromPoll && edc.have && now - edc.at < 100)) {
             RECT m{};
@@ -433,12 +450,13 @@ void FocusTracker::run() {
             if (edc.have) edc.msaa = m;
             edc.at = now;
         }
-        if (!edc.have) return;
+        if (!edc.have) return false;
         const LONG lineH = rc.bottom - rc.top;
         const LONG dy = edc.msaa.top - rc.top;
-        if ((dy < 0 ? -dy : dy) > (lineH > 16 ? lineH / 2 : 8)) return;   // another line: stale, keep UIA
+        if ((dy < 0 ? -dy : dy) > (lineH > 16 ? lineH / 2 : 8)) return true;   // another line: stale, keep UIA
         rc = edc.msaa;
         src = "msaa-editcontext";
+        return true;
     };
     auto findCaret = [&](IUIAutomationElement* el, RECT& rc, const char*& src, bool fromPoll) -> bool {
         if (Win32Caret(rc)) { src = "win32"; return true; }
@@ -457,7 +475,7 @@ void FocusTracker::run() {
             }
             tp2->Release();
         }
-        if (ok) { editContextCaret(el, rc, src, fromPoll); return true; }
+        if (ok) return editContextCaret(el, rc, src, fromPoll);
         IUIAutomationTextPattern* tp = nullptr;
         if (SUCCEEDED(el->GetCurrentPatternAs(UIA_TextPatternId, __uuidof(IUIAutomationTextPattern), (void**)&tp)) && tp) {
             IUIAutomationTextRangeArray* sel = nullptr;
@@ -476,7 +494,7 @@ void FocusTracker::run() {
             }
             tp->Release();
         }
-        if (ok) editContextCaret(el, rc, src, fromPoll);
+        if (ok) ok = editContextCaret(el, rc, src, fromPoll);
         return ok;
     };
 
@@ -527,7 +545,7 @@ void FocusTracker::run() {
         if (win32Only) GetWindowRect(cgi.hwndCaret, &b);
         else if (focusLookup) {
             bool timedOut = false;
-            el = focusLookup->get(150, timedOut);
+            el = focusLookup->get(150, timedOut, focusGen);
             if (timedOut && !lookupStuckLogged && log_.load())
                 wind::Log(wind::LogLevel::Info, "track", "focused element lookup not answered in 150 ms: resolving without UIA");
             lookupStuckLogged = timedOut;
@@ -608,10 +626,18 @@ void FocusTracker::run() {
                         // A line-end ghost (#387): the view stays on the text until the next real caret.
                         if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "caret skipped (line-end ghost) via %s: %ld,%ld %ldx%ld",
                                                    src, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top);
+                        wind::NoteGhostHeld((int)rc.left, (int)rc.top, (int)rc.bottom, (long long)GetTickCount64(), caretGhost);
                     } else {
                         wind::NoteFollowedCaret((int)rc.left, (int)rc.top, (int)rc.bottom, caretGhost);
                         publish(TrackKind::Caret, rc.left, rc.top, rc.right, rc.bottom, src);
                     }
+                } else if (caretGhost.holding &&
+                           wind::GhostHoldExpired((int)rc.left, (int)rc.top, (int)rc.bottom, (long long)GetTickCount64(), caretGhost)) {
+                    // The suppressed report never went away: a real ghost is replaced by the next key,
+                    // so this is the caret, and holding it forever would strand the view.
+                    if (log_.load()) wind::Log(wind::LogLevel::Info, "track", "line-end ghost confirmed as the caret via %s: %ld,%ld", src, rc.left, rc.top);
+                    wind::NoteFollowedCaret((int)rc.left, (int)rc.top, (int)rc.bottom, caretGhost);
+                    publish(TrackKind::Caret, rc.left, rc.top, rc.right, rc.bottom, src);
                 }
             }
         }

@@ -286,7 +286,8 @@ static LRESULT CALLBACK KbProc(int code, WPARAM wParam, LPARAM lParam) {
             g_maskedThisHold.store(false, std::memory_order_relaxed);
         // Any key activity, down OR up: tracking's keyboard gate (#289). Ups count so a focus change
         // committed by a release (Alt+Tab held for a while) is still keyboard-driven (review).
-        if (down || up) g_router->noteAnyKeyDown(GetTickCount64());
+        // Wind's own mask keystroke (VK 0xE8) is not a user key: it must not stamp the clock.
+        if ((down || up) && vk != kMaskVk) g_router->noteAnyKeyDown(GetTickCount64());
         // Typing (#328): only a fresh non-modifier down ends the click quiet period.
         if ((down || up) && g_typingKeys.note(vk, down)) g_router->noteTypingKeyDown(GetTickCount64());
         // Only bound (non-forbidden) keys are tracked/swallowed; every other keystroke passes through
@@ -310,6 +311,8 @@ static LRESULT CALLBACK KbProc(int code, WPARAM wParam, LPARAM lParam) {
                         // Alt or Win held: mask it so its release is not a lone tap (Start / menu bar).
                         if (NeedsMaskKey(held)) InjectMaskKey();
                         swallow = true;
+                    } else {
+                        g_kbSwallowedDown[vk].store(false);   // a stale record must not eat this press's UP
                     }
                 } else {
                     swallow = g_kbSwallowedDown[vk].load();
@@ -359,6 +362,9 @@ static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
                         return 1;
                     }
                 }
+                // Not swallowed: drop any record left by a DOWN whose UP never arrived, or this
+                // click's UP would be eaten on its strength.
+                g_swallowedDown[cb].store(false);
             } else if (cb && cbUp) {
                 if (g_btnDir[cb].exchange(0, std::memory_order_relaxed) != 0) PublishButtonHeld(g_router->state());
                 // Balanced: swallow an up iff we swallowed its down, even if the modifiers were
@@ -399,6 +405,7 @@ static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
                 pending.fetch_add(1, std::memory_order_relaxed);
                 return 1;   // eat the real DOWN; the tick fires the click at the look point
             }
+            if (cDown) g_commitDown[cDown].store(false, std::memory_order_relaxed);   // stale record from a lost UP
             // Swallow an UP iff THIS button's DOWN was swallowed (per-button, so a chord never strands one).
             if (cUp && g_commitDown[cUp].exchange(false, std::memory_order_relaxed)) return 1;
         }
@@ -487,6 +494,9 @@ static DWORD WINAPI HookThreadProc(LPVOID) {
             // rather than let a stale record eat an unrelated UP later (stuck key). No synthetic UP
             // is needed: we only ever swallow our OWN binds, so no other app saw the DOWN.
             for (int vk = 0; vk < 256; ++vk) { g_kbSwallowedDown[vk].store(false); g_kbPressed[vk].store(false); }
+            // The once-per-hold mask flag is stale across the gap too: the Alt/Win UP that clears it
+            // may have been missed, which would suppress every later mask keystroke.
+            g_maskedThisHold.store(false, std::memory_order_relaxed);
             if (want) g_kbHook = SetWindowsHookExW(WH_KEYBOARD_LL, KbProc, hmod, 0);
             if (g_router) g_router->onKbHookStateChanged(want && g_kbHook != nullptr);
             continue;
@@ -630,22 +640,8 @@ void InputRouter::drainRaw(int& dx, int& dy) {
     dy = state_.rawDy.exchange(0);
 }
 
-// Per-packet ballistic cooking for the Inspect-mode pan. Only needed while Inspect is on (the OS
-// cursor is frozen then, so raw mickeys drive the look point); skipped otherwise so it costs nothing
-// in the normal path. Windows accelerates per packet on each packet's magnitude, so cook here (one
-// WM_INPUT = one packet) and accumulate the sub-pixel result; the tick drains it via drainCooked.
-void InputRouter::cookPacket(int dx, int dy) {
-    if (!state_.inspectActive.load(std::memory_order_relaxed) &&
-        !state_.cookActive.load(std::memory_order_relaxed)) return;
-    double cx, cy;
-    CookMickeyPacket(ballistics_, dx, dy, cx, cy);
-    cookedX_ += cx;
-    cookedY_ += cy;
-}
-
 void AccumulateRaw(InputRouter& r, int dx, int dy) {
     r.state().rawDx.fetch_add(dx);
     r.state().rawDy.fetch_add(dy);
-    r.cookPacket(dx, dy);   // Inspect-mode speed match (no-op unless Inspect is active)
 }
 }

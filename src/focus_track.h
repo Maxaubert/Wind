@@ -20,6 +20,7 @@ private:
     friend class FocusHandler;
     std::thread th_;
     std::atomic<unsigned long> tid_{0};
+    std::atomic<bool> stopRequested_{false};
     std::atomic<bool> active_{false}, wantCaret_{false}, wantFocus_{false}, log_{false};
     mutable std::mutex mu_;
     TrackSnapshot snap_;

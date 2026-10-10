@@ -30,7 +30,8 @@ Both LL hooks are installed by `HookThreadProc`, a thread that only pumps messag
 - **A callback that misses `LowLevelHooksTimeout` gets the hook evicted**, so the thread runs at
   `THREAD_PRIORITY_TIME_CRITICAL`. That is safe because it does no other work.
 - Callbacks touch only atomics on `InputState`/`InputRouter`: no I/O, no allocation. Hooks and
-  `WM_INPUT` write; the tick drains (`drainRaw`, `drainCooked`, `keyPressed`, the held flags).
+  `WM_INPUT` write; the tick drains (`drainRaw`, `keyPressed`, the held flags). Inspect pans from raw mickeys
+  times the learned gain; the old per-packet ballistic cooking is gone.
 
 One mouse movement reaches both paths: the hook (latency-critical, stateless) and `WM_INPUT`
 (accumulators for the tick). In a free desktop session neither pans the view; the tick's
@@ -136,9 +137,6 @@ fast double-click is not lost. The tick fires an absolute click at the look poin
 injected click carries `LLMHF_INJECTED` (the hook skips it) and its absolute move is ignored by the
 raw accumulator, so the look point does not move. In game-inspect the presses are discarded.
 
-**Ballistics** (`src/mouse_ballistics.*`, pure). The frozen cursor makes the normal pan oracle read
-zero, so the look point pans from raw mickeys run through Windows' pointer ballistics per
-`WM_INPUT` packet: the pointer-speed multiplier plus, with "Enhance pointer precision", the
-SmoothMouse curve, normalized so slow movement is 1:1 with the slider. The curve is blended at
-`accelStrength` (default 0.3) because `WM_INPUT` can coalesce HID reports and over-accelerate.
-`cookPacket` runs only while `inspectActive`; the tick drains with a sub-pixel carry.
+**Ballistics.** The frozen cursor makes the normal pan oracle read zero, so the look point pans from
+raw mickeys scaled by the measured desktop gain (`GainLearner::gainFor`, the same replay the locked
+path uses; the old modelled `mouse_ballistics` code is gone). The tick keeps a sub-pixel carry.

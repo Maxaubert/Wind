@@ -1,7 +1,6 @@
 #pragma once
 #include <atomic>
 #include <cstdint>
-#include "mouse_ballistics.h"   // BallisticsConfig (pure; Inspect-mode speed match)
 namespace wind {
 // Holds input state shared between the hook/raw-input callbacks and the tick thread.
 struct InputState {
@@ -21,7 +20,6 @@ struct InputState {
     // and hands the tick PER-BUTTON pending counts; the tick fires a clean click at the look point per
     // pending press (counts, not a single flag, so a fast second click before the tick drains isn't lost).
     std::atomic<bool> inspectActive{false};  // tick -> hook: Inspect on, swallow clicks
-    std::atomic<bool> cookActive{false};     // tick -> router: cook raw input (shell-panel freeze, #283)
     std::atomic<int>  commitLeft{0};         // hook -> tick: pending left clicks to fire at the look point
     std::atomic<int>  commitRight{0};        // hook -> tick: pending right clicks
     // --- Diagnostics for the intermittent stuck-side-button (issue #113). Each side-button
@@ -46,15 +44,6 @@ public:
     InputState& state() { return state_; }
     // Atomically read and zero the accumulated raw deltas.
     void drainRaw(int& dx, int& dy);
-    // Inspect-mode speed match: the OS cursor is frozen, so the look point pans from raw mickeys.
-    // Raw mickeys are pre-acceleration / pre-pointer-speed, so they feel slower than the desktop
-    // cursor. setBallistics() supplies the current Windows pointer-speed + acceleration settings;
-    // cookPacket() (called per WM_INPUT packet) converts that packet to cooked pixels and sums them
-    // while Inspect is active; drainCooked() reads and zeroes the accumulated cooked delta. All of
-    // this runs on the main thread (WM_INPUT, the tick, and the setters are all main-thread).
-    void setBallistics(const BallisticsConfig& c) { ballistics_ = c; }
-    void cookPacket(int dx, int dy);
-    void drainCooked(double& dx, double& dy) { dx = cookedX_; dy = cookedY_; cookedX_ = 0.0; cookedY_ = 0.0; }
     // Map an XBUTTON id (1 = XBUTTON1, 2 = XBUTTON2) to the in/out held state, using the
     // configured zoom buttons. Shared by the WH_MOUSE_LL hook and main's WM_INPUT path.
     void setButtonState(int xbuttonId, bool down);
@@ -212,7 +201,12 @@ public:
     // period (#328): releasing Ctrl/Shift after a Ctrl/Shift+click must not count as typing (review #349).
     unsigned long long lastTypingKeyDownMs() const { return kbLastTypingDownMs_.load(std::memory_order_relaxed); }
     void noteTypingKeyDown(unsigned long long ms) { kbLastTypingDownMs_.store(ms, std::memory_order_relaxed); }
+    // A left/right/middle button edge (down or up) from Raw Input, GetTickCount64 ms. Feeds the click quiet
+    // period without depending on the tick sampling GetAsyncKeyState while the button is held.
+    unsigned long long lastButtonEdgeMs() const { return btnLastEdgeMs_.load(std::memory_order_relaxed); }
+    void noteButtonEdge(unsigned long long ms) { btnLastEdgeMs_.store(ms, std::memory_order_relaxed); }
 private:
+    std::atomic<unsigned long long> btnLastEdgeMs_{0};
     std::atomic<unsigned long long> kbLastAnyDownMs_{0};
     std::atomic<unsigned long long> kbLastTypingDownMs_{0};
     std::atomic<unsigned long long> btnLastHookDownMs_[6]{};   // button ids 1..5
@@ -220,10 +214,6 @@ private:
     std::atomic<unsigned> kbHookReinstalls_{0};  // watchdog recoveries this session
     std::atomic<bool> kbHookWanted_{true};       // false while a fullscreen game is foreground
     std::atomic<bool> kbHookRecovering_{false};  // distinguishes watchdog recovery from a resume
-    // Inspect-mode cooked-pixel accumulator (main-thread only: WM_INPUT cooks, the tick drains).
-    BallisticsConfig ballistics_{};
-    double cookedX_ = 0.0;
-    double cookedY_ = 0.0;
 };
 
 // Called from main.cpp's WM_INPUT handler with decoded relative mouse deltas.

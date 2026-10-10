@@ -276,8 +276,8 @@ struct Config {
     // speed, LEARNED from the OS itself: free-cursor ticks record the raw-in -> cursor-out ratio
     // per speed (src/gain_learner.h) and locked sessions replay it - slider, acceleration curve,
     // polling rate and every undocumented constant included, nothing to tune. Modelling this
-    // pipeline (per-packet Windows-ballistics cooking, src/mouse_ballistics, which Inspect still
-    // uses) was tried twice and missed both ways, because WM_INPUT coalescing wrecks any
+    // pipeline (per-packet Windows-ballistics cooking, since removed; Inspect now replays the
+    // learned gain too) was tried twice and missed both ways, because WM_INPUT coalescing wrecks any
     // per-packet speed estimate. 0 = raw mickeys x cursorSensitivity (the historical behavior,
     // measurably slower than the desktop cursor).
     int lockedBallistics = 1;

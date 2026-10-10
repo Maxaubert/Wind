@@ -116,7 +116,15 @@ inline bool HoldMidScrollCaret(int left, int& top, int& bottom, int lineH, Caret
 struct CaretGhostState {
     bool have = false;
     int left = 0, top = 0, h = 0;   // the last caret followed
+    // The report currently being suppressed as a ghost, and since when. A real ghost is transient
+    // (the next keystroke replaces it); one that just sits there is the caret, so the suppression
+    // must not be sticky (review 2026-10-09 #56).
+    bool holding = false;
+    int hLeft = 0, hTop = 0, hBottom = 0;
+    long long since = 0;
 };
+
+inline constexpr long long kGhostConfirmMs = 300;   // a suppressed report this stable is a real caret
 
 inline constexpr double kGhostJumpLines = 3.0;   // further right than this many line heights in one report
 inline constexpr int    kGhostBoxPx = 2;         // the box changed by at least this much (top or height)
@@ -133,6 +141,27 @@ inline bool IsLineEndGhost(int left, int top, int bottom, const CaretGhostState&
 // Remember a caret that was followed (never a ghost, so a held ghost stays a ghost).
 inline void NoteFollowedCaret(int left, int top, int bottom, CaretGhostState& s) {
     s.have = true; s.left = left; s.top = top; s.h = bottom - top;
+    s.holding = false;
+}
+
+// A report was just suppressed as a ghost: start (or keep) timing it.
+inline void NoteGhostHeld(int left, int top, int bottom, long long nowMs, CaretGhostState& s) {
+    if (s.holding && s.hLeft == left && s.hTop == top && s.hBottom == bottom) return;
+    s.holding = true; s.hLeft = left; s.hTop = top; s.hBottom = bottom; s.since = nowMs;
+}
+
+// The same rect that was suppressed has now persisted long enough to be the real caret: follow it.
+inline bool GhostHoldExpired(int left, int top, int bottom, long long nowMs, const CaretGhostState& s) {
+    return s.holding && s.hLeft == left && s.hTop == top && s.hBottom == bottom &&
+           nowMs - s.since >= kGhostConfirmMs;
+}
+
+// A UIA text range reports one rectangle per line (4 doubles each). A selection grown with
+// Shift+arrow keeps its FIRST rectangle (the start) fixed, so following it never sees the growth
+// (review 2026-10-09 #64): use the LAST rectangle, where the selection's moving end is. Returns the
+// double offset of the rectangle to use for n array elements (0 for a single rect or fewer than 4).
+inline int LastRectOffset(int n) {
+    return n >= 8 ? (n / 4 - 1) * 4 : 0;
 }
 
 }  // namespace wind
