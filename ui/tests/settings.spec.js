@@ -189,7 +189,8 @@ test('High resolution cursor is tagged Experimental and keeps the release glide 
   await page.goto('/');
   await go(page, 'view');
   await expect(key(page, 'txSamplingMode').locator('.tag')).toHaveText('Experimental');
-  await key(page, 'txSamplingMode').getByRole('switch').check({ force: true });
+  await key(page, 'txSamplingMode').getByRole('switch').click({ force: true });
+  await page.getByRole('button', { name: 'Turn on' }).click();   // the experimental notice (#441)
   await go(page, 'zoom');
   await expect(key(page, 'zoomEaseOutMs')).not.toHaveClass(/disabled/);
   await expect(key(page, 'zoomEaseOutMs').locator('input[type=range]')).toBeEnabled();

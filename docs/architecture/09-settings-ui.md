@@ -129,6 +129,11 @@ The live ini is the session and the profile file is the saved state ([08](08-con
 - The ini is shared with the tray flyout and hand edits, so the page re-reads it when the window
   regains focus and after a `configWriteFailed`, and reloads only if something differs.
 - Global keys are written directly and never count as unsaved.
+- **High resolution cursor notice** (#441): `change()` in `Settings.svelte` holds back
+  `txSamplingMode` 0 to 1 and shows a `Prompt` (with its optional `checkLabel`/`bind:checked`
+  checkbox) unless the global UI-only key `uiHighResNoticeOff=1` is set. Turn on writes the
+  opt-out (when ticked) and then `txSamplingMode=1`; Cancel and Esc write nothing, and
+  `HighRes.svelte` resets the switch to the prop. Search results use the same `change()`.
 - **Prompts** (`ui/src/prompts/Prompt.svelte`, focus-trapped by `lib/dialog.js`): closing with
   unsaved changes offers Save, Discard or Keep for this session; switching profile offers Save,
   Discard or Cancel. Tray Quit decides from the files (`ConfirmQuit` in

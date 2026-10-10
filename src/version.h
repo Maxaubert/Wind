@@ -3,8 +3,8 @@
 #pragma once
 
 #define WIND_VER_MAJOR 0
-#define WIND_VER_MINOR 28
+#define WIND_VER_MINOR 29
 #define WIND_VER_PATCH 0
 
 // String form for logs/snapshot/UI. Keep in sync with the numeric parts above.
-#define WIND_VERSION_STR "0.28.0"
+#define WIND_VERSION_STR "0.29.0"

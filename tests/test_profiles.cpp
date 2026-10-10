@@ -214,9 +214,16 @@ TEST_CASE("ParseIniTmpName recognises WriteTextFileAtomic's leftover temp names"
     CHECK_FALSE(ParseIniTmpName(L".ini.1234.tmp", pid));            // empty stem
     CHECK_FALSE(ParseIniTmpName(L"x.ini.99999999999.tmp", pid));    // pid out of range
 }
+TEST_CASE("uiHighResNoticeOff is global: stripped from profiles, carried into the live text (#441)") {
+    CHECK(IsGlobalProfileKey("uiHighResNoticeOff"));
+    CHECK(MakeProfileText("a=1\nuiHighResNoticeOff=1\n") == "a=1\n");
+    const std::string live = MakeLiveText("a=2\n", "a=1\nuiHighResNoticeOff=1\n", "P");
+    CHECK(live.find("uiHighResNoticeOff=1") != std::string::npos);
+    CHECK(live.find("a=2") != std::string::npos);
+}
 TEST_CASE("StripUiOnlyKeys strips every global key except profile (tray edits must not reload the core)") {
     const char* globals[] = { "onboarded", "uiTheme", "uiPalette", "showAdvanced", "trayPerf", "traySliders",
-                              "traySliderOrder", "trayToggles", "trayToggleOrder", "trayPinned" };
+                              "traySliderOrder", "trayToggles", "trayToggleOrder", "trayPinned", "uiHighResNoticeOff" };
     for (const char* k : globals) {
         REQUIRE(IsGlobalProfileKey(k));
         const std::string line = std::string(k) + "=1\n";
