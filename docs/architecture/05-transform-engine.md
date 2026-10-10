@@ -156,16 +156,19 @@ or bottom edge. `ComputeMagTransform` clamps both forms with a 2 px margin. The 
 **Left and top: one texel inside.** DWM's nearest path samples around a half-texel offset, so at
 source 0 the first columns read outside the texture and show a light-grey line about `level/2` px
 wide along the left (and top) edge once the view rests there. `SrcEdgeFloor` keeps the rect
-`txEdgeMargin` texels inside (default 1; 0 for A/B). One formula feeds `ComputeMagTransform` and the
+`txEdgeMargin` texels inside (default 0 since #432; 1 is the kill switch). One formula feeds `ComputeMagTransform` and the
 input-transform publish, so they never describe different rects. It resolves
 to 0 where there is no headroom, so identity stays identity.
 
-**Both margins are nearest-only** (`EdgeMarginsFor`). Each keeps desktop texels out of the view,
+**Both margins are off by default** (`EdgeMarginsFor`). Each keeps desktop texels out of the view,
 and the pointer-framework hit-test ignores a pointer outside it: zoomed, a click on the
 bottom-left corner pixel did not open Start, while native Magnifier opens it at every level
 (field probe 2026-10-09; either margin alone kills the corner, both at 0 fix it). Smooth sampling
-clamps to edge and survives the far corner, as native does, so it uses native's exact rect: 0 and 0.
-Nearest keeps 1 and 2, and with them the dead corner pixel.
+clamps to edge and survives the far corner, as native does, so it always uses native's exact rect.
+Nearest dropped both in #432 after a field test (2026-10-10: Start corner works, no grey line, no
+driver reset, games included); the 16-bit overflow the far margin partly guarded now has its own
+guards (pan walls, MPO nearest guard, write-site clamp). `txEdgeMargin=1` is the kill switch: nearest
+gets the 1 texel low margin and the 2 px far margin back.
 
 ## The MPO 16-bit overflow
 
