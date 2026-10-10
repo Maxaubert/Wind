@@ -152,4 +152,39 @@ inline bool GlideTailUnsnapped(bool fullGlide, bool zoomDriven, double level, do
     return fullGlide && !zoomDriven && EaseOutShouldStop(level, prevLevel);
 }
 
+// The last level reachable from z, moving in `dir`, without leaving z's rounding cell (z itself when
+// dir is 0). Field 2026-10-10: the unsnapped tail shook the cursor exactly where it crossed DWM's
+// rounding steps; inside the cell the image moves continuously. Searched within maxRel of z.
+inline double RoundingCellEdge(double z, int dir, double centreX, double centreY, int w, int h,
+                               double maxRel = 0.03) {
+    if (dir == 0 || z <= 1.001) return z;
+    const double step = z * 2e-4;
+    double prev = z;
+    for (double t = step; t <= z * maxRel; t += step) {
+        const double q = z + dir * t;
+        if (q <= 1.001) return prev;
+        if (!SameRoundingCell(z, q, centreX, centreY, w, h)) {
+            double a = prev, b = q;                 // a inside, b outside: bisect the step
+            for (int i = 0; i < 40; ++i) {
+                const double m = 0.5 * (a + b);
+                if (SameRoundingCell(z, m, centreX, centreY, w, h)) a = m; else b = m;
+            }
+            return a;
+        }
+        prev = q;
+    }
+    return z + dir * z * maxRel;
+}
+
+// Map the tail's requested progress (level units travelled since the tail began, >= 0) onto a path
+// that eases into `edge` and never reaches it: start + (edge - start) * (1 - e^(-progress / gap)).
+// Its slope at the start is 1, so the hand-over from the glide keeps its speed; it slows smoothly as
+// it nears the edge, so the glide decelerates to rest instead of stopping or crossing a step.
+inline double SoftApproach(double start, double edge, double progress) {
+    const double gap = std::fabs(edge - start);
+    if (gap <= 0.0 || progress <= 0.0) return start;
+    const double s = edge > start ? 1.0 : -1.0;
+    return start + s * gap * (1.0 - std::exp(-progress / gap));
+}
+
 }  // namespace wind

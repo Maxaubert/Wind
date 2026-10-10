@@ -66,6 +66,7 @@ void TransformModel::resetTransformState() {
     forceWrite_ = false;    // lastLevel_ = 0 already forces the next write
     ixPubLevel_ = 0.0;
     ladderReq_ = 0.0; ladderOut_ = 0.0;
+    tailActive_ = false; tailDir_ = 0; lastPreLadder_ = 0.0;
     // Everything the write path caches must be forgotten across a teardown, or the next session
     // compares against values DWM no longer holds and skips the writes that would re-apply them.
     lastLevel_ = 0.0; lastRequestedLevel_ = 0.0;
@@ -554,15 +555,26 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             ladderOut_ = lastLevel_;
             applyLevel = lastLevel_;
         } else if (rampStopped && applyLevel == level && lastLevel_ > 1.001 &&
-                   std::fabs(lastLevel_ - level) <= level * (SnapWindow(level) + 1e-5)) {
+                   (tailActive_ || std::fabs(lastLevel_ - level) <= level * (SnapWindow(level) + 1e-5))) {
+            // (A full-glide tail stopped short of its cell edge on purpose: keep it there too.)
             // The zoom just stopped: keep the level already on screen rather than re-snapping, so
             // releasing the key never nudges the zoom in or out (field 2026-10-07).
             ladderReq_ = level;
             ladderOut_ = lastLevel_;
             applyLevel = lastLevel_;
         } else if (GlideTailUnsnapped(cfg.txGlideTail != 0, ex.zoomDriven, applyLevel, lastLevel_)) {
-            // Full release glide (#425): the slow tail is written as requested, so it decelerates
-            // to rest instead of holding and hopping between clean levels.
+            // Full release glide (#425): the slow tail is not snapped (a step smaller than the clean
+            // levels are apart can only hold and hop), and it never leaves the rounding cell it is
+            // in, where the image moves continuously: its progress eases into the cell edge.
+            const int dir = applyLevel > lastLevel_ ? 1 : -1;
+            if (!tailActive_ || dir != tailDir_) {
+                tailActive_ = true;
+                tailDir_ = dir;
+                tailStart_ = lastLevel_;
+                tailReqStart_ = lastPreLadder_ > 1.001 ? lastPreLadder_ : lastLevel_;
+                tailEdge_ = RoundingCellEdge(tailStart_, dir, r.centerX, r.centerY, mon_.w, mon_.h);
+            }
+            applyLevel = SoftApproach(tailStart_, tailEdge_, std::fabs(applyLevel - tailReqStart_));
             ladderReq_ = level;
             ladderOut_ = applyLevel;
         } else {
@@ -576,6 +588,8 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             applyLevel = snapped;
         }
     }
+    if (!(cfg.txGlideTail != 0 && !ex.zoomDriven)) tailActive_ = false;   // a held zoom ends any tail
+    lastPreLadder_ = preLadderLevel;
     double srcL = r.srcLeft, srcT = r.srcTop;
     if (applyLevel != level) {
         OffsetF o = ComputeOffsetF(r.centerX, r.centerY, applyLevel, mon_.w, mon_.h);

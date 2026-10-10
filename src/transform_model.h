@@ -95,6 +95,10 @@ private:
     unsigned long long lastGhostAssertMs_ = 0;       // 500ms assert cadence
     int  appliedSampling_ = -2;                      // sampling mode DWM currently holds (-2 = unknown)
     int  sampleTryMode_ = -2;                        // sampling mode being attempted (#274)
+    // Full release glide tail (#425): eases into the rounding-cell edge instead of crossing it.
+    bool   tailActive_ = false;
+    int    tailDir_ = 0;
+    double tailStart_ = 0.0, tailEdge_ = 0.0, tailReqStart_ = 0.0, lastPreLadder_ = 0.0;
     unsigned long dwmGenSeen_ = 0;                   // DwmGeneration() last acted on (#396)
     int  sampleTries_ = 0;                           // attempts so far for it (bounded at 3)
     unsigned long long sampleLastTryMs_ = 0;         // when the last attempt ran

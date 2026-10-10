@@ -1345,6 +1345,17 @@ static void RunTick(TickState& t) {
                 if (shown > 1.001) { t.zoom.setLevel(shown); t.zoom.stopGlide(); }
             }
         }
+        // Full glide (#425): the tail eases into a rounding-cell edge and can rest short of where the
+        // controller's glide ended. Once the controller is still, it takes the level on screen, so
+        // the next zoom starts from what is shown rather than jumping to the controller's level.
+        if (!held && !t.zoom.hasTarget() && t.cfg.txSamplingMode == 1 && t.cfg.txSmoothLadder != 0 &&
+            t.cfg.txGlideTail != 0 && t.zoom.level() == t.prevLvl && t.zoom.level() > 1.001) {
+            if (auto* tmRest = dynamic_cast<TransformModel*>(t.model)) {
+                const double shown = tmRest->writtenLevel();
+                if (shown > 1.001 && std::fabs(shown - t.zoom.level()) > t.zoom.level() * 1e-7)
+                    t.zoom.setLevel(shown);
+            }
+        }
     }
     // Recenter on a recenterVk key press (rising edge).
     bool recenter = false;

@@ -99,3 +99,25 @@ TEST_CASE("full release glide: only the released slow tail goes unsnapped (#425)
     CHECK(GlideTailUnsnapped(true, true, 5.0, 5.0 / 1.001) == false);    // key held: always snap
     CHECK(GlideTailUnsnapped(false, false, 5.0, 5.0 / 1.001) == false);  // option off: unchanged
 }
+
+TEST_CASE("the glide tail eases into its rounding cell's edge and never crosses it (#425)") {
+    const int W = 3840, H = 2160;
+    const double cx = 1920.0, cy = 1080.0;
+    for (double z = 2.0; z < 30.0; z *= 1.137) {
+        for (int dir = -1; dir <= 1; dir += 2) {
+            const double edge = RoundingCellEdge(z, dir, cx, cy, W, H);
+            CHECK(SameRoundingCell(z, edge, cx, cy, W, H));                      // edge is inside
+            CHECK_FALSE(SameRoundingCell(z, edge + dir * z * 1e-6, cx, cy, W, H)); // a hair further is not
+            double prev = z;
+            for (double p = 0.0; p <= z * 0.05; p += z * 0.0005) {
+                const double q = SoftApproach(z, edge, p);
+                CHECK(SameRoundingCell(z, q, cx, cy, W, H));                     // never leaves the cell
+                CHECK((q - prev) * dir >= 0.0);                                  // monotonic
+                prev = q;
+            }
+        }
+    }
+    // Hand-over keeps the glide's speed: slope 1 at the start.
+    CHECK(SoftApproach(5.0, 5.1, 1e-6) == doctest::Approx(5.0 + 1e-6).epsilon(1e-9));
+    CHECK(SoftApproach(5.0, 4.9, 0.0) == 5.0);
+}
