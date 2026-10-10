@@ -73,8 +73,8 @@ the reply invalid and the page waits forever.
 
 ## The schema-driven app
 
-The page is generated from `groups` in `ui/src/settings-schema.js`. Seven groups: Hotkeys, Zoom,
-View, Screen, then below a divider Preferences, Tray menu and About. Each group has a label, an
+The page is generated from `groups` in `ui/src/settings-schema.js`. Six groups: Hotkeys, Zoom,
+View, then below a divider Preferences (with the Screen light card), Tray menu and About. Each group has a label, an
 icon, a banner description and cards of rows; each row names its ini key, type, label, description
 and default. `Settings.svelte` is the shell (title bar, sidebar, banner, save capsule, search), and
 `controls/SettingRow.svelte` renders every row by type:

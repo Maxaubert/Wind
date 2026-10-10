@@ -49,11 +49,11 @@ test('Settings opens on Hotkeys; the sidebar is four pages, a divider, then thre
   await page.goto('/');
   await expect(page.locator('h1')).toHaveText('Hotkeys');
   await expect(page.locator('.side .it.sel')).toContainText('Hotkeys');
-  await expect(page.locator('.side nav:not(.bottom) .it')).toHaveText([/Hotkeys/, /Zoom/, /View/, /Screen/]);
+  await expect(page.locator('.side nav:not(.bottom) .it')).toHaveText([/Hotkeys/, /Zoom/, /View/]);
   await expect(page.locator('.side nav.bottom .it')).toHaveText([/Preferences/, /Tray menu/, /About/]);
   await expect(page.locator('.side .lbl')).toHaveCount(0);
   await expect(page.locator('.side .it[data-g="advanced"]')).toHaveCount(0);   // no Advanced tab
-  for (const [g, title] of [['zoom', 'Zoom'], ['view', 'View'], ['screen', 'Screen'], ['prefs', 'Preferences'],
+  for (const [g, title] of [['zoom', 'Zoom'], ['view', 'View'], ['prefs', 'Preferences'],
     ['tray', 'Tray menu'], ['about', 'About'], ['hotkeys', 'Hotkeys']]) {
     await go(page, g);
     await expect(page.locator('h1')).toHaveText(title);
@@ -70,12 +70,10 @@ test('pages show their sections; a section with nothing to show is dropped', asy
   await expect(page.locator('main .cap')).toHaveText(['Level and speed']);   // Easing and Engine are advanced
   await go(page, 'view');
   await expect(page.locator('main .cap')).toHaveText(['Speed', 'Pointer', 'Typing and focus']);
-  await go(page, 'screen');
-  await expect(page.locator('main .cap')).toHaveText(['Screen light']);
   await go(page, 'prefs');
-  await expect(page.locator('main .cap')).toHaveText(['General', 'Troubleshooting']);
+  await expect(page.locator('main .cap')).toHaveText(['General', 'Screen light', 'Troubleshooting']);
   // Never fewer than two rows in a section while the advanced switch is off.
-  for (const g of ['hotkeys', 'zoom', 'view', 'screen', 'prefs']) {
+  for (const g of ['hotkeys', 'zoom', 'view', 'prefs']) {
     await go(page, g);
     const counts = await page.locator('main .card').evaluateAll((cs) => cs.map((c) => c.querySelectorAll('.row').length));
     for (const n of counts) expect(n, g).toBeGreaterThanOrEqual(2);
@@ -123,7 +121,8 @@ test('Show advanced settings reveals the advanced rows inline, with no marker, a
   await go(page, 'zoom');
   for (const k of ['model', 'engineGame', 'smoothZoomAccel', 'smoothZoomRamp']) await expect(key(page, k)).toHaveCount(0);
   await go(page, 'view');
-  for (const k of ['cursorSmoothing', 'lockApps']) await expect(key(page, k)).toHaveCount(0);
+  await expect(key(page, 'lockApps')).toHaveCount(0);
+  await expect(key(page, 'cursorSmoothing')).toBeVisible();   // Pan smoothing is a plain row (#423)
   await expect(key(page, 'mouseAlign')).toBeVisible();
   // Troubleshooting is always there; the switch itself is a global key, so it never raises the capsule.
   await go(page, 'prefs');
@@ -136,7 +135,7 @@ test('Show advanced settings reveals the advanced rows inline, with no marker, a
   for (const k of ['model', 'engineGame', 'smoothZoomAccel', 'smoothZoomRamp']) await expect(key(page, k)).toBeVisible();
   await expect(page.locator('main .cap')).toHaveText(['Level and speed', 'Easing', 'Engine']);
   await go(page, 'view');
-  for (const k of ['cursorSmoothing', 'lockApps']) await expect(key(page, k)).toBeVisible();
+  await expect(key(page, 'lockApps')).toBeVisible();
   await go(page, 'hotkeys');
   await expect(key(page, 'noSwallowApps')).toBeVisible();
   // No marker: an advanced row reads exactly like a plain one.
@@ -196,9 +195,9 @@ test('Typing and focus: caret on, focus off by default; a toggle writes at once'
   await expect(page.locator('.capsule')).toContainText('1 unsaved change');
 });
 
-test('Screen page: only warmth and brightness, neutral by default (no warmth, full brightness)', async ({ page }) => {
+test('Screen light (in Preferences): warmth and brightness, neutral by default (no warmth, full brightness)', async ({ page }) => {
   await page.goto('/');
-  await go(page, 'screen');
+  await go(page, 'prefs');
   await expect(page.locator('main input[type=range]')).toHaveCount(2);
   await expect(key(page, 'colorWarmPct').locator('input[type=range]')).toHaveValue('0');
   await expect(key(page, 'colorDimPct').locator('input[type=range]')).toHaveValue('100');

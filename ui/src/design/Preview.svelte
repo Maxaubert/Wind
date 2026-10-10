@@ -18,7 +18,6 @@
     { id: 'hotkeys', label: 'Hotkeys', icon: 'hotkeys' },
     { id: 'zoom', label: 'Zoom', icon: 'zoom' },
     { id: 'view', label: 'View', icon: 'view' },
-    { id: 'screen', label: 'Screen', icon: 'screen' },
   ];
   const bottom = [
     { id: 'prefs', label: 'Preferences', icon: 'general' },

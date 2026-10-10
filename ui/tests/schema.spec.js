@@ -24,7 +24,7 @@ const OLD_BIND_KEYS = [
 const NEW_KEYS = ['uiPalette', '__profiles', '__diagnostics', '__openIni', 'trayPerf', 'showAdvanced'];
 
 test('group ids, order and shape follow the spec', () => {
-  expect(groups.map((g) => g.id)).toEqual(['hotkeys', 'zoom', 'view', 'screen', 'prefs', 'tray', 'about']);
+  expect(groups.map((g) => g.id)).toEqual(['hotkeys', 'zoom', 'view', 'prefs', 'tray', 'about']);
   expect(groups.filter((g) => g.bottom).map((g) => g.id)).toEqual(['prefs', 'tray', 'about']);   // below the divider
   for (const g of groups) {
     expect(typeof g.label).toBe('string');
@@ -37,8 +37,7 @@ test('group ids, order and shape follow the spec', () => {
   expect(cap('hotkeys')).toEqual(['Zoom', 'Extra keys']);
   expect(cap('zoom')).toEqual(['Level and speed', 'Easing', 'Engine']);
   expect(cap('view')).toEqual(['Speed', 'Pointer', 'Typing and focus']);
-  expect(cap('screen')).toEqual(['Screen light']);
-  expect(cap('prefs')).toEqual(['General', 'Troubleshooting']);
+  expect(cap('prefs')).toEqual(['General', 'Screen light', 'Troubleshooting']);
   expect(cap('tray')).toEqual(['']);
 });
 
@@ -58,7 +57,7 @@ test('a captioned section has two or more rows, and the advanced rows are the on
     if (base.length) expect(base.length, g.id + ' / ' + c.caption + ' (advanced off)').toBeGreaterThanOrEqual(2);
   }
   expect(allRows.filter((r) => r.adv).map((r) => r.key).sort()).toEqual(
-    ['cursorSmoothing', 'engineAcrylic', 'engineDesktop', 'engineGame', 'engineOther', 'lockApps', 'model', 'noSwallowApps', 'smoothZoomAccel', 'smoothZoomRamp'].sort());
+    ['engineAcrylic', 'engineDesktop', 'engineGame', 'engineOther', 'lockApps', 'model', 'noSwallowApps', 'smoothZoomAccel', 'smoothZoomRamp'].sort());
   // Troubleshooting is never advanced, and the extra keys carry their switch key.
   for (const k of ['diagnostics', '__diagnostics', '__openIni']) expect(allRows.find((r) => r.key === k).adv).toBeUndefined();
   expect(Object.fromEntries(allRows.filter((r) => r.onKey).map((r) => [r.key, r.onKey]))).toEqual(
@@ -104,7 +103,7 @@ test('rows land in the groups the spec names', () => {
   expect(where('txSamplingMode')).toBe('view');
   expect(where('lockApps')).toBe('view');
   expect(where('trackAlign')).toBe('view');
-  expect(where('colorDimPct')).toBe('screen');
+  expect(where('colorDimPct')).toBe('prefs');
   expect(where('__profiles')).toBe('prefs');
   expect(where('showAdvanced')).toBe('prefs');
   expect(where('diagnostics')).toBe('prefs');
@@ -224,7 +223,7 @@ test('about page shows the logo and link; controls read on the dark surface', as
   await expect(page.getByText('Barely there. Everywhere.')).toBeVisible();
   await page.getByRole('button', { name: 'Star on GitHub' }).click();
   expect(await page.evaluate(() => window.__calls)).toEqual(['repo']);
-  await page.goto('/controls.html?group=screen');
+  await page.goto('/controls.html?group=prefs');
   const sl = ctl(page, 'colorWarmPct').locator('input');
   expect(await css(sl, 'accent-color')).not.toBe('');
   expect(await css(ctl(page, 'colorWarmPct').locator('.val'), 'color')).toBe('rgb(242, 242, 242)');
