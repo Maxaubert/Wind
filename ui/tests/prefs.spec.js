@@ -371,9 +371,10 @@ test('New profile: Tab walks name, Cancel, New, Duplicate current, and Cancel cr
 test('Troubleshooting is always there, and the advanced switch is the last row of General', async ({ page }) => {
   await page.goto('/');
   await go(page, 'prefs');
-  await expect(page.locator('main .cap')).toHaveText(['General', 'Troubleshooting']);
+  await expect(page.locator('main .cap')).toHaveText(['General', 'Screen light', 'Troubleshooting']);
   await expect(page.locator('main .card').first().locator('.row .label')).toHaveText(['Theme', 'Profile', 'Show advanced settings']);
-  await expect(page.locator('main .card').nth(1).locator('.row .label')).toHaveText(['Frame time logging', 'Export diagnostics', 'Open settings file']);
+  await expect(page.locator('main .card').nth(1).locator('.row .label')).toHaveText(['Warmth', 'Brightness']);
+  await expect(page.locator('main .card').nth(2).locator('.row .label')).toHaveText(['Frame time logging', 'Export diagnostics', 'Open settings file']);
 });
 
 test('prefs files contain no em-dash', () => {

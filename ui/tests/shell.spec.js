@@ -40,7 +40,7 @@ test('the title bar carries only the window buttons and the sidebar has a divide
   await expect(page.locator('header.tb button')).toHaveCount(3);
   await expect(page.locator('[data-theme-cycle]')).toHaveCount(0);
   await expect(page.locator('.side .lbl')).toHaveCount(0);
-  await expect(page.locator('.side nav:not(.bottom) .it')).toHaveCount(4);
+  await expect(page.locator('.side nav:not(.bottom) .it')).toHaveCount(3);
   await expect(page.locator('.side nav.bottom .it')).toHaveCount(3);
   expect(await css(page.locator('.side nav.bottom'), 'border-top-width')).toBe('1px');
 });

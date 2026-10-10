@@ -6,7 +6,7 @@
 // them is invisible in a screenshot.
 import { test, expect } from '@playwright/test';
 
-const GROUPS = ['hotkeys', 'zoom', 'view', 'screen', 'prefs', 'tray', 'about'];
+const GROUPS = ['hotkeys', 'zoom', 'view', 'prefs', 'tray', 'about'];
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {

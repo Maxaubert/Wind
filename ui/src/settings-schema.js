@@ -20,8 +20,6 @@
 // its label, no symbols or product names.
 
 const hybrid = { key: 'model', eq: 'hybrid' };
-// The Transform engine follows the pointer directly, so the mouse speed and smoothing sliders do nothing there.
-const notTransform = { key: 'model', ne: 'transform' };
 const engineOpts = ['auto', 'transform', 'render'];
 const engineLabels = { auto: 'Auto', transform: 'Transform', render: 'Render' };
 
@@ -100,8 +98,8 @@ export const groups = [
     cards: [
       { caption: 'Speed', rows: [
         { key: 'panSpeed', type: 'slider', label: 'Arrow key speed', keywords: ['pan', 'pan speed', 'arrows', 'move', 'scroll', 'keyboard', 'how fast', 'velocity', 'shift view', 'rate'], desc: 'How fast the arrow keys move the view.', min: 0.25, max: 4, step: 0.05, def: 1.0, unit: 'times' },
-        { key: 'cursorSensitivity', type: 'slider', label: 'Mouse speed', keywords: ['sensitivity', 'pointer speed', 'cursor speed', 'dpi', 'pan', 'follow', 'tracking speed', 'how fast', 'velocity', 'mouse sensitivity', 'rate'], desc: 'Speed of the view in the Render engine and in mouse-locked games. In the Transform engine the view follows the pointer directly, so this has no effect there.', min: 0.25, max: 4, step: 0.05, def: 1.0, unit: 'times', showIf: notTransform },
-        { key: 'cursorSmoothing', type: 'slider', adv: true, label: 'Pan smoothing', keywords: ['inertia', 'smooth', 'smoothing', 'glide', 'momentum', 'lag', 'delay', 'damping', 'gentle', 'filter', 'mouse'], desc: 'Adds gentle inertia when the view moves in the Render engine. In the Transform engine the view follows the pointer directly, so this has no effect there.', min: 0, max: 0.95, step: 0.05, def: 0.4, showIf: notTransform },
+        { key: 'cursorSensitivity', type: 'slider', label: 'Mouse speed', keywords: ['sensitivity', 'pointer speed', 'cursor speed', 'dpi', 'pan', 'follow', 'tracking speed', 'how fast', 'velocity', 'mouse sensitivity', 'rate'], desc: 'How fast the view moves with the mouse in the Render engine, in Inspect mode and in mouse-locked games. With Transform the view otherwise follows the pointer directly.', min: 0.25, max: 4, step: 0.05, def: 1.0, unit: 'times' },
+        { key: 'cursorSmoothing', type: 'slider', label: 'Pan smoothing', keywords: ['inertia', 'smooth', 'smoothing', 'glide', 'momentum', 'lag', 'delay', 'damping', 'gentle', 'filter', 'mouse'], desc: 'Gentle inertia when the view pans in the Render engine, in Inspect mode and in mouse-locked games. With Transform the view otherwise follows the pointer directly.', min: 0, max: 0.95, step: 0.05, def: 0.4 },
       ] },
       { caption: 'Pointer', rows: [
         { key: 'mouseAlign', type: 'select', label: 'Pointer position', keywords: ['mouse position', 'mouse', 'cursor', 'pointer', 'where', 'centred', 'centered', 'center', 'centre', 'middle', 'edge', 'edges', 'within the edges', 'align', 'alignment', 'lock to center', 'follow mode', 'placement'], desc: 'Where the mouse pointer sits while the view moves.', options: ['0', '1'], optionLabels: { '0': 'Centred', '1': 'Within the edges' }, def: '0' },
@@ -124,18 +122,8 @@ export const groups = [
       ] },
     ] },
 
-  // Screen (#288): warmth and brightness, one DWM colour matrix (the render engine applies it in its shader).
-  { id: 'screen', label: 'Screen', icon: 'screen',
-    desc: 'Warmth and brightness of the screen.',
-    cards: [
-      { caption: 'Screen light', rows: [
-        { key: 'colorWarmPct', type: 'slider', label: 'Warmth', keywords: ['night light', 'blue light', 'yellow', 'orange', 'warm', 'colour temperature', 'color temperature', 'temperature', 'eye strain', 'tint', 'filter', 'evening', 'sleep', 'amber', 'red', 'colour', 'color', 'reduce blue', 'kelvin'], desc: 'Makes the screen warmer.', min: 0, max: 100, step: 5, def: 0, unit: '%' },
-        { key: 'colorDimPct', type: 'slider', label: 'Brightness', keywords: ['dim', 'dark', 'darker', 'dimmer', 'light', 'luminance', 'backlight', 'night', 'screen', 'intensity', 'contrast', 'colour', 'color', 'lower', 'reduce'], desc: 'Dims the whole screen.', min: 1, max: 100, step: 1, def: 100, unit: '%' },
-      ] },
-    ] },
-
   { id: 'prefs', label: 'Preferences', icon: 'general', bottom: true,
-    desc: 'Appearance, profiles and troubleshooting.',
+    desc: 'Appearance, screen light, profiles and troubleshooting.',
     cards: [
       { caption: 'General', rows: [
         // Global UI-only key (uiPalette): the built-in theme, shared by Settings and the tray menu. One row of mini window cards, right-aligned like the other controls.
@@ -143,6 +131,12 @@ export const groups = [
         { key: '__profiles', type: 'profiles', label: 'Profile', keywords: ['preset', 'config', 'configuration', 'save', 'saved', 'profiles', 'switch', 'load', 'new', 'create', 'delete', 'rename', 'duplicate', 'set of settings', 'game profile', 'scheme', 'layout'], desc: 'A saved set of all settings.' },
         // Global UI-only key: shows the advanced rows of every page.
         { key: 'showAdvanced', type: 'toggle', label: 'Show advanced settings', keywords: ['expert', 'extra', 'more', 'hidden', 'options', 'all settings', 'power user', 'developer', 'reveal', 'show all', 'additional'], desc: 'Shows extra options on every page.', def: 0 },
+      ] },
+      // Screen light (#288): warmth and brightness, one DWM colour matrix (the render engine applies it
+      // in its shader). Was its own page; two sliders read better next to the other preferences (#423).
+      { caption: 'Screen light', rows: [
+        { key: 'colorWarmPct', type: 'slider', label: 'Warmth', keywords: ['night light', 'blue light', 'yellow', 'orange', 'warm', 'colour temperature', 'color temperature', 'temperature', 'eye strain', 'tint', 'filter', 'evening', 'sleep', 'amber', 'red', 'colour', 'color', 'reduce blue', 'kelvin'], desc: 'Makes the screen warmer.', min: 0, max: 100, step: 5, def: 0, unit: '%' },
+        { key: 'colorDimPct', type: 'slider', label: 'Brightness', keywords: ['dim', 'dark', 'darker', 'dimmer', 'light', 'luminance', 'backlight', 'night', 'screen', 'intensity', 'contrast', 'colour', 'color', 'lower', 'reduce'], desc: 'Dims the whole screen.', min: 1, max: 100, step: 1, def: 100, unit: '%' },
       ] },
       { caption: 'Troubleshooting', rows: [
         // Always visible: these are not advanced settings.
