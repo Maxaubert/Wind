@@ -7,6 +7,7 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <map>
 #include "profiles.h"
 #include "config_ui/ini_edit.h"
 #include "config.h"   // MigrateWheelMods (pure)
@@ -133,6 +134,42 @@ inline bool WriteTextFileAtomic(const std::wstring& path, const std::string& tex
         SetLastError(e);
         return false;
     }
+}
+// Cross-process lock for read-modify-write of the live ini (review item 71). Settings, the tray flyout
+// and the engine pick all read the ini, change a key and replace the file; two of them interleaving
+// lost one write. A named mutex serialises them. A timeout proceeds unlocked (no worse than before);
+// an abandoned mutex (a writer died holding it) is simply taken over.
+class IniWriteLock {
+public:
+    explicit IniWriteLock(DWORD waitMs = 3000) {
+        h_ = CreateMutexW(nullptr, FALSE, L"Local\\Wind_IniWrite");
+        if (h_) {
+            const DWORD r = WaitForSingleObject(h_, waitMs);
+            owned_ = (r == WAIT_OBJECT_0 || r == WAIT_ABANDONED);
+        }
+    }
+    ~IniWriteLock() {
+        if (h_) { if (owned_) ReleaseMutex(h_); CloseHandle(h_); }
+    }
+    IniWriteLock(const IniWriteLock&) = delete;
+    IniWriteLock& operator=(const IniWriteLock&) = delete;
+private:
+    HANDLE h_ = nullptr;
+    bool owned_ = false;
+};
+enum class IniUpdate { Ok, Unreadable, WriteFailed };
+// Locked read-modify-write of the live ini: sets every key in `kv`. Unreadable = the file exists but
+// could not be read (nothing written); WriteFailed = the atomic replace failed. If `outText` is given
+// it receives the new text on success.
+inline IniUpdate UpdateIniKeys(const std::wstring& path, const std::map<std::string, std::string>& kv,
+                               std::string* outText = nullptr) {
+    IniWriteLock lock;
+    std::string text;
+    if (!ReadLiveIni(path, text)) return IniUpdate::Unreadable;
+    for (const auto& e : kv) text = UpdateIniText(text, e.first, e.second);
+    if (!WriteTextFileAtomic(path, text)) return IniUpdate::WriteFailed;
+    if (outText) *outText = text;
+    return IniUpdate::Ok;
 }
 // Sweep the temp files a killed process left behind (WriteTextFileAtomic's "<file>.ini.<pid>.tmp"):
 // the installer force-kills WindConfig.exe and Wind can crash between the write and the rename.

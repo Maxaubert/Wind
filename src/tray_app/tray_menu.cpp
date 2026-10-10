@@ -70,6 +70,7 @@ static bool ConfirmUnsaved(const std::wstring& ini, bool forSwitch) {
     // The dialog blocks for as long as the user takes; Settings, the flyout or a hand edit may have
     // written the ini meanwhile. Act on the CURRENT text, not the snapshot the prompt was built from
     // (Save would store a stale session, Discard would overwrite newer globals such as the theme).
+    wind::IniWriteLock iniLock;   // read-modify-write of the live ini (review item 71)
     if (!wind::ReadLiveIni(ini, live)) {
         Notify(L"Wind", L"Could not read the settings (config file is locked); nothing was changed.");
         return false;
@@ -120,6 +121,7 @@ void SwitchToProfile(const std::wstring& ini, const std::wstring& nameW) {
         Notify(L"Wind", L"That profile's file looks corrupt; settings unchanged.");
         return;
     } }
+    wind::IniWriteLock iniLock;   // held to the end, rollback included (review item 71)
     std::string oldLive;
     if (!wind::ReadLiveIni(ini, oldLive)) {
         wind::Log(wind::LogLevel::Warn, "profile", "switch aborted: live ini unreadable");

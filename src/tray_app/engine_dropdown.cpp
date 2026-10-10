@@ -28,23 +28,32 @@ void WriteSessionKeep() {
 }
 }  // namespace
 
-bool SetMainEngine(const std::wstring& ini, int picked) {
-    std::string live;
-    if (GetFileAttributesW(ini.c_str()) != INVALID_FILE_ATTRIBUTES && !wind::ReadTextFileOk(ini, live)) {
-        wind::Log(wind::LogLevel::Warn, "tray", "engine pick: ini unreadable (err=%lu)", GetLastError());
-        Notify(L"Wind", L"Could not change the engine (config file is locked).");
-        return false;
-    }
-    const IniValues vals = wind::ReadIniValues(live);
-    auto mi = vals.find(Flyout::kEngineKey);
-    const std::string oldModel = mi == vals.end() ? std::string() : mi->second;
-    if (!Flyout::EnginePickChanges(Flyout::EngineIndex(oldModel), picked)) return false;
-
+bool SetMainEngine(const std::wstring& ini, int picked, const std::map<std::string, std::string>& carry) {
+    std::string oldModel;
     const char* value = Flyout::EngineValue(picked);
-    if (!wind::WriteTextFileAtomic(ini, wind::UpdateIniText(live, Flyout::kEngineKey, value))) {
-        wind::Log(wind::LogLevel::Warn, "tray", "engine pick: ini write failed (err=%lu)", GetLastError());
-        Notify(L"Wind", L"Could not change the engine (config file is locked).");
-        return false;
+    {
+        // The whole read-modify-write under the shared ini lock, so a Settings write cannot slip in
+        // between and be lost (review item 71).
+        wind::IniWriteLock lock;
+        std::string live;
+        if (!wind::ReadLiveIni(ini, live)) {
+            wind::Log(wind::LogLevel::Warn, "tray", "engine pick: ini unreadable (err=%lu)", GetLastError());
+            Notify(L"Wind", L"Could not change the engine (config file is locked).");
+            return false;
+        }
+        const IniValues vals = wind::ReadIniValues(live);
+        auto mi = vals.find(Flyout::kEngineKey);
+        oldModel = mi == vals.end() ? std::string() : mi->second;
+        for (const auto& kv : carry) live = wind::UpdateIniText(live, kv.first, kv.second);
+        if (!Flyout::EnginePickChanges(Flyout::EngineIndex(oldModel), picked)) {
+            if (!carry.empty()) wind::WriteTextFileAtomic(ini, live);
+            return false;
+        }
+        if (!wind::WriteTextFileAtomic(ini, wind::UpdateIniText(live, Flyout::kEngineKey, value))) {
+            wind::Log(wind::LogLevel::Warn, "tray", "engine pick: ini write failed (err=%lu)", GetLastError());
+            Notify(L"Wind", L"Could not change the engine (config file is locked).");
+            return false;
+        }
     }
     wind::Log(wind::LogLevel::Info, "tray", "engine pick: model %s -> %s (restarting Wind)",
               oldModel.empty() ? "(unset)" : oldModel.c_str(), value);
@@ -63,6 +72,7 @@ bool SetMainEngine(const std::wstring& ini, int picked) {
     wind::Log(wind::LogLevel::Warn, "tray", "engine pick: relaunch FAILED (rc=%lld haveExe=%d); reverting model",
               static_cast<long long>(rc), (int)haveExe);
     DeleteFileW(wind::SessionKeepPath().c_str());
+    wind::IniWriteLock iniLock;   // item 71
     std::string cur;
     if (wind::ReadLiveIni(ini, cur))
         wind::WriteTextFileAtomic(ini, oldModel.empty() ? wind::UpdateIniText(cur, Flyout::kEngineKey, "hybrid")

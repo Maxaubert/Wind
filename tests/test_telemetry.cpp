@@ -49,3 +49,11 @@ TEST_CASE("telemetry line formatting never overflows a small buffer") {
     char tiny[8];
     CHECK(FormatTelemetryLine(tiny, (int)sizeof(tiny), s) == 0);
 }
+
+TEST_CASE("a stale testlog.txt control file is ignored (review 2026-10-09 #69)") {
+    CHECK(wind::TestlogControlFresh(0));
+    CHECK(wind::TestlogControlFresh(3600));
+    CHECK(wind::TestlogControlFresh(-5));              // clock skew counts as fresh
+    CHECK_FALSE(wind::TestlogControlFresh(24 * 3600));
+    CHECK_FALSE(wind::TestlogControlFresh(30LL * 24 * 3600));
+}

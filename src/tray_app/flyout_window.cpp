@@ -276,28 +276,30 @@ Flyout::Hit HitAt(const State& s, LPARAM l) {
 // ---------------------------------------------------------------- applying changes
 
 // Writes the pending keys into the live ini (read-modify-write, atomic), so a hand edit or a
-// Settings write made meanwhile is kept. A locked ini keeps the changes pending and retries.
-void FlushPending(State& s) {
+// Settings write made meanwhile is kept. A locked ini, or a failed write, keeps the changes pending
+// and retries (bounded); true = written, false = still pending or dropped.
+bool FlushPending(State& s) {
     if (s.flushArmed) { KillTimer(s.hwnd, kFlushTimerId); s.flushArmed = false; }
-    if (s.pending.empty()) return;
-    std::string text;
-    if (GetFileAttributesW(s.iniPath.c_str()) != INVALID_FILE_ATTRIBUTES &&
-        !wind::ReadTextFileOk(s.iniPath, text)) {
-        if (++s.flushRetries <= kMaxFlushRetries && !s.closing) {
-            SetTimer(s.hwnd, kFlushTimerId, Flyout::WriteThrottle::kMinMs, nullptr);
-            s.flushArmed = true;
-        } else {
-            wind::Log(wind::LogLevel::Warn, "tray", "flyout: ini unreadable, %zu change(s) dropped", s.pending.size());
-            s.pending.clear();
-        }
-        return;
+    if (s.pending.empty()) return true;
+    DWORD err = 0;
+    const wind::IniUpdate r = wind::UpdateIniKeys(s.iniPath, s.pending);
+    if (r == wind::IniUpdate::Ok) {
+        s.pending.clear();
+        s.flushRetries = 0;
+        s.thr.wrote(GetTickCount64());
+        return true;
     }
-    for (const auto& kv : s.pending) text = wind::UpdateIniText(text, kv.first, kv.second);
-    if (!wind::WriteTextFileAtomic(s.iniPath, text))
-        wind::Log(wind::LogLevel::Warn, "tray", "flyout: ini write failed (err=%lu)", GetLastError());
-    s.pending.clear();
-    s.flushRetries = 0;
-    s.thr.wrote(GetTickCount64());
+    if (r == wind::IniUpdate::WriteFailed) err = GetLastError();
+    if (++s.flushRetries <= kMaxFlushRetries && !s.closing) {
+        SetTimer(s.hwnd, kFlushTimerId, Flyout::WriteThrottle::kMinMs, nullptr);
+        s.flushArmed = true;
+    } else {
+        wind::Log(wind::LogLevel::Warn, "tray", "flyout: ini %s (err=%lu), %zu change(s) dropped",
+                  r == wind::IniUpdate::Unreadable ? "unreadable" : "write failed", err, s.pending.size());
+        s.pending.clear();
+        s.flushRetries = 0;
+    }
+    return false;
 }
 
 // Applies changes to the in-memory ini and the view at once; the file write is immediate when
@@ -362,9 +364,12 @@ void ChooseEngine(int idx) {
     const std::wstring ini = g_f->iniPath;
     CloseList();
     if (same) return;
-    FlushPending(*g_f);
+    // A slider write still pending (locked ini) rides along in the engine write instead of dying
+    // with the flyout (review item 87).
+    std::map<std::string, std::string> carry;
+    if (!FlushPending(*g_f)) carry = g_f->pending;
     CloseFlyout();
-    SetMainEngine(ini, idx);
+    SetMainEngine(ini, idx, carry);
 }
 
 void ChooseProfile(int idx) {

@@ -13,7 +13,22 @@
 
 namespace wind {
 
+// Writability probe: a create-and-delete-on-close sentinel with a PER-PROCESS name. The old shared
+// ".windwritetest" opened with share mode 0 failed for the second of two processes starting at the
+// same moment, which then fell back to %LOCALAPPDATA% and split the ini and logs (review item 74).
+inline bool DirIsWritable(const std::wstring& dir) {
+    std::wstring sentinel = dir + L"\\.windwritetest." + std::to_wstring(GetCurrentProcessId());
+    HANDLE h = CreateFileW(sentinel.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                           nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    CloseHandle(h);
+    return true;
+}
+
+// Resolved once per process: the exe location and its writability do not change, and every caller
+// (tick reload, settings, tray) would otherwise repeat the probe and the seed check.
 inline std::wstring ResolveIniPath() {
+    static const std::wstring cached = [] {
     wchar_t exePathBuf[MAX_PATH];
     GetModuleFileNameW(nullptr, exePathBuf, MAX_PATH);
     wchar_t* slash = wcsrchr(exePathBuf, L'\\');
@@ -21,13 +36,8 @@ inline std::wstring ResolveIniPath() {
     std::wstring exeDir(exePathBuf);
     std::wstring exeIni = exeDir + L"\\magnifier.ini";
 
-    // Write a sentinel file that is auto-deleted on close, to probe writability without leaving a
-    // trace. If this succeeds the exe dir is fine (dev / portable install).
-    std::wstring sentinel = exeDir + L"\\.windwritetest";
-    HANDLE h = CreateFileW(sentinel.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
-                           FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
-    bool exeDirWritable = (h != INVALID_HANDLE_VALUE);
-    if (exeDirWritable) { CloseHandle(h); return exeIni; }
+    // If the probe succeeds the exe dir is fine (dev / portable install).
+    if (DirIsWritable(exeDir)) return exeIni;
 
     // Read-only install (typically C:\Program Files\Wind). Fall back to %LOCALAPPDATA%\Wind.
     wchar_t buf[MAX_PATH];
@@ -44,6 +54,8 @@ inline std::wstring ResolveIniPath() {
         CopyFileW(exeIni.c_str(), lapIni.c_str(), FALSE);
     }
     return lapIni;
+    }();
+    return cached;
 }
 
 // Directory for logs + crash dumps. Mirrors ResolveIniPath: exe dir if writable (dev/portable),
@@ -59,11 +71,8 @@ inline std::wstring ResolveLogDir() {
         if (slash) *slash = L'\0';
         std::wstring exeDir(exePathBuf);
 
-        std::wstring sentinel = exeDir + L"\\.windwritetest";
-        HANDLE h = CreateFileW(sentinel.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
-                               FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
         std::wstring base;
-        if (h != INVALID_HANDLE_VALUE) { CloseHandle(h); base = exeDir; }
+        if (DirIsWritable(exeDir)) base = exeDir;
         else {
             wchar_t buf[MAX_PATH];
             DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
