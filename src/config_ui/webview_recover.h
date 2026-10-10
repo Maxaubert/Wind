@@ -35,12 +35,4 @@ inline WvRecovery DecideWvRecovery(int kind, WvRecoverBudget& b, unsigned long l
     return r;
 }
 
-// The page's unsaved edits travel as a JSON object of string values; only something shaped like one
-// is ever echoed back into the page.
-inline bool LooksLikeJsonObject(const char* s, unsigned long long len) {
-    unsigned long long a = 0, z = len;
-    while (a < z && (s[a] == ' ' || s[a] == '\n' || s[a] == '\r' || s[a] == '\t')) ++a;
-    while (z > a && (s[z - 1] == ' ' || s[z - 1] == '\n' || s[z - 1] == '\r' || s[z - 1] == '\t')) --z;
-    return z - a >= 2 && s[a] == '{' && s[z - 1] == '}';
-}
 }  // namespace wind

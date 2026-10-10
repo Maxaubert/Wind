@@ -47,8 +47,6 @@ public:
     // Map an XBUTTON id (1 = XBUTTON1, 2 = XBUTTON2) to the in/out held state, using the
     // configured zoom buttons. Shared by the WH_MOUSE_LL hook and main's WM_INPUT path.
     void setButtonState(int xbuttonId, bool down);
-    // Whether the id is one of the configured zoom buttons (used to decide swallowing).
-    bool isZoomButton(int xbuttonId) const;
     // Whether the hook should swallow the configured zoom buttons (set in start()).
     bool swallowEnabled() const { return swallow_; }
     // --- Keyboard binds (WH_KEYBOARD_LL hook) -------------------------------------------------
@@ -148,11 +146,10 @@ public:
     // (Raw Input still delivers the transition even though the hook swallows the legacy message, so
     // both writing would race/double-count). WM_INPUT button writes are only the WIND_NOHOOK fallback.
     bool hookActive() const { return hookActive_.load(std::memory_order_relaxed); }
-    // Live-rebind the configured zoom buttons (called from the tick thread on hot-reload).
-    // Atomic so the hook thread's reads in setButtonState/isZoomButton stay race-free, and the
+    // Live-rebind the configured zoom buttons (called from the tick thread on hot-reload), with a
+    // modifier mask per slot; button ids 3/4/5 = left/right/middle click (#285).
+    // Atomic so the hook thread's reads in setButtonState stay race-free, and the
     // held flags are cleared so a stale press of the previous button does not stick.
-    void setButtons(int inButtonId, int inButtonId2, int outButtonId, int outButtonId2);
-    // #285: the same with a modifier mask per slot, and button ids 3/4/5 = left/right/middle click.
     void setButtonBinds(int inButtonId, int inMods, int inButtonId2, int inMods2,
                         int outButtonId, int outMods, int outButtonId2, int outMods2);
     // The slot a button press belongs to, given the modifiers held (hook thread). False = not a bind.

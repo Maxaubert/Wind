@@ -55,6 +55,5 @@ private:
     int     scale_ = 1;
     bool    visible_ = false;
     bool    crosshairMode_ = false;          // window currently holds the crosshair pixels
-    unsigned long long lastTopmostMs_ = 0;   // last HWND_TOPMOST re-assert (throttled)
 };
 }

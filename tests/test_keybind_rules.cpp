@@ -6,6 +6,24 @@
 #include <vector>
 using namespace wind;
 
+// Fixture spelling of each verdict; only this test needs the names.
+static inline const char* BindVerdictName(BindVerdict v) {
+    switch (v) {
+        case BindVerdict::Ok: return "ok";
+        case BindVerdict::NeverBindable: return "never";
+        case BindVerdict::ModifierAsKey: return "modifier";
+        case BindVerdict::NotAlone: return "notalone";
+        case BindVerdict::ShiftTypes: return "shifttypes";
+        case BindVerdict::AltGrTypes: return "altgr";
+        case BindVerdict::SystemReserved: return "system";
+        case BindVerdict::WindowsReserved: return "windows";
+        case BindVerdict::NeedsModifier: return "needsmod";
+        case BindVerdict::CtrlAlone: return "ctrlalone";
+        case BindVerdict::ShiftAlone: return "shiftalone";
+    }
+    return "?";
+}
+
 // Runs every case in the shared list (also read by the UI mirror's tests).
 TEST_CASE("keybind safety rules match the shared case list (#285)") {
     // The cwd varies (repo root from build.bat, a build dir elsewhere), so also try the folder

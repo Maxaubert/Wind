@@ -6,7 +6,6 @@
 #include <memory>
 #include <mutex>
 #include <thread>
-#include <unordered_map>
 namespace wind {
 // Swaps the system cursor set for blanks while the real pointer is hidden (Inspect, the hide-cursor
 // hotkey), and back.
@@ -41,7 +40,6 @@ private:
     void post(std::function<void()> op);
     bool runSync(std::function<void()> op);
     static void run(std::shared_ptr<State> st);
-    std::unordered_map<HCURSOR, HCURSOR> originals_;
     bool blanked_ = false;
     std::shared_ptr<State> st_;
     std::thread worker_;

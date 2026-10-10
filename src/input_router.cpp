@@ -33,7 +33,7 @@ static bool    g_hookOk       = false;     // result of SetWindowsHookExW, publi
 // Only an UP whose DOWN we swallowed may be swallowed too, so the system's down/up view stays
 // balanced and a button can never be left believed-held. Reset on remap so a stale flag from a
 // previous binding can't cause a later UP to be wrongly swallowed. ATOMIC: touched by three
-// contexts - the hook thread (MouseProc), the tick thread (setButtons on hot-reload), and the
+// contexts - the hook thread (MouseProc), the tick thread (setButtonBinds on hot-reload), and the
 // teardown caller (ReleaseSwallowedButtons via stop()) - so plain bools would be a data race.
 static wind::SwallowLedger<6> g_swallowedDown;   // index = button id 1..5 (#285: 3/4/5 = L/R/M)
 // Which direction a pressed bound button is holding (1 in, 2 out, 0 none) and that bind's modifiers,
@@ -142,15 +142,6 @@ void InputRouter::setButtonState(int buttonId, bool down) {
         g_btnDir[buttonId].store(0, std::memory_order_relaxed);
     }
     PublishButtonHeld(state_);
-}
-bool InputRouter::isZoomButton(int xbuttonId) const {
-    return xbuttonId == inButtonId_.load(std::memory_order_relaxed)
-        || xbuttonId == inButtonId2_.load(std::memory_order_relaxed)
-        || xbuttonId == outButtonId_.load(std::memory_order_relaxed)
-        || xbuttonId == outButtonId2_.load(std::memory_order_relaxed);
-}
-void InputRouter::setButtons(int inButtonId, int inButtonId2, int outButtonId, int outButtonId2) {
-    setButtonBinds(inButtonId, 0, inButtonId2, 0, outButtonId, 0, outButtonId2, 0);
 }
 void InputRouter::setButtonBinds(int inButtonId, int inMods, int inButtonId2, int inMods2,
                                  int outButtonId, int outMods, int outButtonId2, int outMods2) {

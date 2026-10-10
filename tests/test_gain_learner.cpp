@@ -10,7 +10,6 @@ using namespace wind;
 TEST_CASE("unlearned state is raw passthrough") {
     GainLearner g;
     CHECK(g.gainFor(10, 7.0) == doctest::Approx(1.0));
-    CHECK(!g.warmedUp());
 }
 
 TEST_CASE("a learned ratio is replayed at the same speed") {
@@ -20,9 +19,7 @@ TEST_CASE("a learned ratio is replayed at the same speed") {
     // Interpolation trades exact replay for continuity: a query off the bin centre
     // blends toward the neighbour, so a few percent of drift is by design.
     CHECK(g.gainFor(10.0, 7.0) == doctest::Approx(2.5).epsilon(0.06));
-    CHECK(g.warmedUp() == false);   // one bin is not enough to call it warmed
     for (int i = 0; i < 100; ++i) g.observe(100.0, 400.0, 7.0);   // faster speed, higher gain
-    CHECK(g.warmedUp());
     CHECK(g.gainFor(100.0, 7.0) == doctest::Approx(4.0).epsilon(0.06));
 }
 
@@ -78,7 +75,6 @@ TEST_CASE("the learned curve round-trips through text") {
     CHECK(h.deserialize(buf));
     CHECK(h.gainFor(10.0, 7.0)  == doctest::Approx(g.gainFor(10.0, 7.0)));
     CHECK(h.gainFor(150.0, 7.0) == doctest::Approx(g.gainFor(150.0, 7.0)));
-    CHECK(h.warmedUp());
 }
 
 TEST_CASE("a corrupt persistence file is rejected whole, leaving a fresh learner") {

@@ -782,12 +782,6 @@ bool OpenFlyout() {
 
 bool FlyoutIsOpen() { return g_f != nullptr; }
 
-void FlyoutRefresh() {
-    if (!g_f || g_f->closing) return;
-    RebuildView(*g_f);
-    Render(*g_f);
-}
-
 void CloseFlyout() {
     if (!g_f) return;
     g_f->closing = true;

@@ -89,7 +89,7 @@ build. See [11](11-build-test-release.md).
 | Tray | `tray_host.*`, `tray_ipc.h`, `tray_items.*`, `tray_status.h`, `tray_app/` |
 | Settings host | `config_ui/` (`main.cpp`, `ini_edit.*`, `mpo.h`, `wind_watchdog.h`, `webview_recover.h`) |
 | Logging and diagnostics | `logging.*`, `test_telemetry.h`, `hitch_record.*`, `tick_span.h` |
-| Installer support | `installer_state.h`, `webview2_probe.h`, `version.h` |
+| Installer support | `installer_state.h` (ParseVersion), `webview2_probe.h`, `version.h` |
 
 Other top-level folders: `ui/` (Svelte settings app and Playwright tests), `tests/` (doctest),
 `tools/` (deploy, release and measurement scripts, [12](12-instrumentation.md)), `installer/`

@@ -92,20 +92,4 @@ inline BindVerdict CheckClickBind(int button, int mods) {
     return BindVerdict::Ok;
 }
 
-inline const char* BindVerdictName(BindVerdict v) {
-    switch (v) {
-        case BindVerdict::Ok: return "ok";
-        case BindVerdict::NeverBindable: return "never";
-        case BindVerdict::ModifierAsKey: return "modifier";
-        case BindVerdict::NotAlone: return "notalone";
-        case BindVerdict::ShiftTypes: return "shifttypes";
-        case BindVerdict::AltGrTypes: return "altgr";
-        case BindVerdict::SystemReserved: return "system";
-        case BindVerdict::WindowsReserved: return "windows";
-        case BindVerdict::NeedsModifier: return "needsmod";
-        case BindVerdict::CtrlAlone: return "ctrlalone";
-        case BindVerdict::ShiftAlone: return "shiftalone";
-    }
-    return "?";
-}
 }  // namespace wind
