@@ -316,7 +316,7 @@ static DWORD WINAPI LogWriterMain(LPVOID) {
         g_writerIdle.store(true);
         std::atomic_thread_fence(std::memory_order_seq_cst);
         if (!g_q.ready() && g_flushReqGen.load() == g_flushDoneGen.load() && g_running.load())
-            WaitForSingleObject(g_wakeEvt, 1000);
+            WaitForSingleObject(g_wakeEvt, g_claimTries.load() > 0 ? 1000 : 5000);   // timeout = backstop only
         g_writerIdle.store(false);
     }
     return 0;

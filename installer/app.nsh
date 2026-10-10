@@ -25,6 +25,7 @@ Var WantAutostart
 Var WantDesktop
 Var RunAfter
 Var Accepted     ; the licence box: Continue does nothing until this is 1
+Var WindSession  ; this installer's Windows session: Wind is per session, so stop only that one
 Var LicenceDir   ; where "Read the full licence" put its copy, empty until then
 
 ; ---- stop a running Wind -----------------------------------------------------
@@ -40,10 +41,17 @@ Var LicenceDir   ; where "Read the full licence" put its copy, empty until then
 !macro WIND_QUIT_RUNNING
   DetailPrint "Closing Wind..."
 
+  ; Every Wind object here is session-local (the quit event, the mutex), and an HKLM Run entry
+  ; starts one Wind per logged-on user. So the process checks and the force-kill fallback below
+  ; are limited to this session; another user's Wind keeps running.
+  System::Call 'kernel32::GetCurrentProcessId() i .r0'
+  System::Call 'kernel32::ProcessIdToSessionId(i r0, *i .r1)'
+  StrCpy $WindSession $1
+
   ; WindConfig first, so it cannot relaunch Wind while we are stopping it. Force, because
   ; a WM_CLOSE with unsaved settings opens a confirm dialog that would hang setup
   ; (src\config_ui\main.cpp:490). It holds no OS state, so there is nothing to lose.
-  nsExec::Exec 'taskkill /IM WindConfig.exe /F'
+  nsExec::Exec 'taskkill /IM WindConfig.exe /FI "SESSION eq $WindSession" /F'
   Pop $0
 
   System::Call 'kernel32::OpenEventW(i ${EVENT_MODIFY_STATE}, i 0, w "${WIND_QUIT}") p .r0'
@@ -74,7 +82,7 @@ Var LicenceDir   ; where "Read the full licence" put its copy, empty until then
     ; case costs a quarter of a second.
     StrCpy $3 0
     ${Do}
-      nsExec::Exec 'cmd /c tasklist /FI "IMAGENAME eq Wind.exe" /NH | find /I "Wind.exe"'
+      nsExec::Exec 'cmd /c tasklist /FI "IMAGENAME eq Wind.exe" /FI "SESSION eq $WindSession" /NH | find /I "Wind.exe"'
       Pop $4
       ${If} $4 != 0
         ${Break}               ; find found nothing: the process is gone
@@ -88,11 +96,11 @@ Var LicenceDir   ; where "Read the full licence" put its copy, empty until then
   ; older build, a hung tick loop). Checked first rather than fired unconditionally, so a
   ; Wind that IS shutting down cleanly is never cut off partway through. The installer is
   ; elevated, so this succeeds even against the signed UIAccess build's integrity level.
-  nsExec::Exec 'cmd /c tasklist /FI "IMAGENAME eq Wind.exe" /NH | find /I "Wind.exe"'
+  nsExec::Exec 'cmd /c tasklist /FI "IMAGENAME eq Wind.exe" /FI "SESSION eq $WindSession" /NH | find /I "Wind.exe"'
   Pop $4
   ${If} $4 == 0
     DetailPrint "Wind did not respond to the quit request; stopping it."
-    nsExec::Exec 'taskkill /IM Wind.exe /F'
+    nsExec::Exec 'taskkill /IM Wind.exe /FI "SESSION eq $WindSession" /F'
     Pop $0
   ${EndIf}
 
@@ -101,7 +109,7 @@ Var LicenceDir   ; where "Read the full licence" put its copy, empty until then
   ; passes over it, and its exe must not be held open while setup replaces it.
   StrCpy $3 0
   ${Do}
-    nsExec::Exec 'cmd /c tasklist /FI "IMAGENAME eq WindTray.exe" /NH | find /I "WindTray.exe"'
+    nsExec::Exec 'cmd /c tasklist /FI "IMAGENAME eq WindTray.exe" /FI "SESSION eq $WindSession" /NH | find /I "WindTray.exe"'
     Pop $4
     ${If} $4 != 0
       ${Break}
@@ -110,7 +118,7 @@ Var LicenceDir   ; where "Read the full licence" put its copy, empty until then
     IntOp $3 $3 + 1
   ${LoopUntil} $3 >= 20
   ${If} $4 == 0
-    nsExec::Exec 'taskkill /IM WindTray.exe /F'
+    nsExec::Exec 'taskkill /IM WindTray.exe /FI "SESSION eq $WindSession" /F'
     Pop $0
   ${EndIf}
   Sleep 300

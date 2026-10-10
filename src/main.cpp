@@ -386,6 +386,7 @@ struct TickState {
     bool fgCacheBackdrop = false;    // window declares a DWM system backdrop (Mica/acrylic/tabbed)
     bool fgCacheProtected = false;   // window or a descendant is capture-protected (DRM)
     bool fgCacheRenderExcl = false;  // exe listed in renderExclude
+    bool fgCacheLockApp = false;     // exe listed in lockApps
     bool monRotated = false;         // target output is portrait; read at each zoom-in (M3)
     bool probePrevLDown = false;    // dead-zone probe (probeClicks=1): left-click edge detect
     unsigned probeTraceTick = 0;    // dead-zone probe (probeClicks=2): trace decimation counter
@@ -719,6 +720,7 @@ static void RefreshFgCache(TickState& t, HWND fgw) {
     t.fgCacheBackdrop = HasSystemBackdrop(fgw);
     t.fgCacheProtected = IsCaptureProtectedFg(fgw);
     t.fgCacheRenderExcl = FgExeInList(fgw, t.cfg.renderExclude);   // same narrowing as transformExclude
+    t.fgCacheLockApp = FgExeInList(fgw, t.cfg.lockApps);
 }
 
 // Fill the per-window-type half of the pick inputs. Both pick sites (zoom-in and the mid-zoom
@@ -1079,11 +1081,12 @@ static void RunTick(TickState& t) {
             // keep the running settings and look again on the next check (lastMtime not taken).
             // A MISSING ini is recreated with the defaults, as at startup (TryLoadConfig).
             std::string raw;
-            // Short budget: this is the tick thread, and an unreadable ini is simply re-read next poll.
-            bool readOk = wind::ReadTextFileOk(t.iniPath, raw, 20) && raw.find('=') != std::string::npos;
+            // No wait budget: this is the tick thread, and an unreadable ini is re-read by the
+            // configRetry poll (~4x/s) instead of Sleep-looping here.
+            bool readOk = wind::ReadTextFileOk(t.iniPath, raw, 0) && raw.find('=') != std::string::npos;
             if (!readOk && GetFileAttributesW(t.iniPath.c_str()) == INVALID_FILE_ATTRIBUTES) {
                 Config fresh;
-                readOk = wind::TryLoadConfig(t.iniPath, fresh) && wind::ReadTextFileOk(t.iniPath, raw, 20);
+                readOk = wind::TryLoadConfig(t.iniPath, fresh) && wind::ReadTextFileOk(t.iniPath, raw, 0);
             }
             std::string stripped = readOk ? wind::StripUiOnlyKeys(raw) : std::string();
             const bool loaded = readOk && (t.lastCoreIni.empty() || stripped != t.lastCoreIni);
@@ -1380,7 +1383,9 @@ static void RunTick(TickState& t) {
     t.prevInHeld = inHeld; t.prevOutHeld = outHeld;
     bool hotkeyTrigger = t.quickZoomHotkey.exchange(false);   // always consume (only set in hotkey mode)
     bool modZoomTrigger = modKeyDown && (inEdge || outEdge);  // modKeyDown implies modifier mode + enabled
-    if (hotkeyTrigger || modZoomTrigger) {
+    // Not during the launch quiesce: the level change would land as the discrete jump the ramp freeze
+    // (quiesceFreeze) exists to prevent. The trigger is consumed above, so it does not fire late.
+    if ((hotkeyTrigger || modZoomTrigger) && !QuiesceHoldActive(t)) {
         QuickZoomResult qr = ApplyQuickZoom(t.zoom.level(), t.quickZoomStored,
                                             t.cfg.quickZoomDefault, t.cfg.maxLevel);
         t.zoom.setLevel(qr.newLevel);
@@ -1683,9 +1688,12 @@ static void RunTick(TickState& t) {
             // reads t.detector.locked() below, and a local-only force left the transform view
             // pinned to the warped pointer (field regression: the list "did nothing" once the
             // zoom-in seeding was scoped behind warpLock - gameplay had been riding the seed).
-            const bool forcedLock = t.cfg.lockForce != 0 ||
-                (!t.cfg.lockApps.empty() &&
-                 FgExeInList(GetForegroundWindow(), t.cfg.lockApps));
+            bool lockAppFg = false;
+            if (!t.cfg.lockApps.empty()) {
+                RefreshFgCache(t, GetForegroundWindow());   // per-HWND cache: no OpenProcess every tick
+                lockAppFg = t.fgCacheLockApp;
+            }
+            const bool forcedLock = t.cfg.lockForce != 0 || lockAppFg;
             if (forcedLock && !locked) {
                 t.detector.seedLock();
                 locked = true;
@@ -2974,6 +2982,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         else if (wind::ReadTextFile(iniPath) != before)
             wind::Log(wind::LogLevel::Info, "session", "unsaved settings reset to the saved profile at start");
     }
+    // Seed the reload mtime and fingerprint from the text the config is loaded from, not from a
+    // later read: a write landing after this point then differs from the seed and is applied.
+    const unsigned long long iniMtimeAtLoad = ConfigMTime(iniPath);
+    const std::string iniCoreAtLoad = wind::StripUiOnlyKeys(wind::ReadTextFile(iniPath));
     Config cfg = LoadConfig(iniPath);
     wind::StartDwmWatch();   // notices dwm.exe restarts so DWM-held state is re-applied (#396)
     // Issue #242: the high-res/MPO option is atomic at restart - while an MPO restart is pending
@@ -3232,11 +3244,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     QueryPerformanceFrequency(&ts.freq);
     QueryPerformanceCounter(&ts.prev);
     ts.iniPath = iniPath;
-    ts.lastMtime = ConfigMTime(iniPath);
-    // Seed the UI-only-change fingerprint from the CURRENT ini, or the first settings write
-    // after launch always reloads (empty fingerprint = "unknown") - the first theme flip of a
-    // session still collapsed the zoom (field report on the StripUiOnlyKeys fix).
-    ts.lastCoreIni = wind::StripUiOnlyKeys(wind::ReadTextFile(iniPath));
+    ts.lastMtime = iniMtimeAtLoad;
+    // Seed the UI-only-change fingerprint from the ini the config was loaded from, or the first
+    // settings write after launch always reloads (empty fingerprint = "unknown") - the first theme
+    // flip of a session still collapsed the zoom (field report on the StripUiOnlyKeys fix).
+    ts.lastCoreIni = iniCoreAtLoad;
     // Watch the directory holding the ini so config hot-reload doesn't stat magnifier.ini every
     // second on the render thread (see RunTick). LAST_WRITE catches in-place saves; FILE_NAME
     // catches write-temp-then-rename saves. nullptr/INVALID on failure -> RunTick falls back to
@@ -3245,6 +3257,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     std::wstring iniDir = iniPath.substr(0, iniPath.find_last_of(L"\\/"));
     ts.configWatch = FindFirstChangeNotificationW(iniDir.c_str(), FALSE,
         FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_FILE_NAME);
+    // A write between the load and the watch above raised no notification: check once on the first poll.
+    if (ConfigMTime(iniPath) != iniMtimeAtLoad) ts.configRetry = true;
 
     // quitEvent: created in AcquireSingleInstance.
     HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr,
@@ -3298,6 +3312,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     ts.mapper.setTickRate(ts.hz);
     int pacedHz = ts.hz;                              // hz the timer interval below is computed for
     LARGE_INTEGER due; due.QuadPart = -(10000000LL / pacedHz);
+    long long timerDeadlineQ = 0;   // absolute QPC target of the next timer-paced tick (0 = unset)
 
     // Background CPU load must not stall a zoom (#334): this thread runs the tick loop.
     wind::RaiseTickThreadPriority();
@@ -3417,6 +3432,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         // present-paced here and must NOT also wait on the timer.
         bool renderPresentPaces = renderModelActive && zoomed && !dwmPaces && ts.cfg.vsync != 0 &&
                                   !ts.gamePacing;
+        if (renderPresentPaces || dwmPaces) timerDeadlineQ = 0;   // another pace owns the loop: resync later
         if (!renderPresentPaces && !dwmPaces) {
             // Recompute the timer interval if the paced refresh changed (retarget to a different-Hz
             // monitor updates ts.hz). Cheap equality check; only recomputes on an actual change (#74).
@@ -3433,6 +3449,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                 if (n == 2 && r == WAIT_OBJECT_0 + 1) { running = false; break; }   // quit request
                 if (r == WAIT_OBJECT_0 || r == WAIT_OBJECT_0 + n || r == WAIT_TIMEOUT) {
                     slept = true;
+                    timerDeadlineQ = 0;
                     ts.wokeFromIdle = true;
                     // Drain now, so a hotkey or settings message is seen by THIS tick, not the next.
                     while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
@@ -3446,8 +3463,23 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             }
             if (!slept) {
                 LARGE_INTEGER wa; QueryPerformanceCounter(&wa);
+                // Absolute deadline: a relative one-shot re-armed after each tick adds the tick's own
+                // run time to every period, so the paced rate sat below the refresh. Carry the target
+                // forward one period at a time; resync when the loop fell more than a period behind
+                // (a hitch) or the deadline is stale (first tick, retarget to another refresh rate).
+                // The wait never drops below half a period, so a late tick cannot run back to back.
+                double expectMs = 1000.0 / (double)pacedHz;
                 if (timer) {
-                    SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);
+                    const long long periodQ = ts.freq.QuadPart / pacedHz;
+                    const long long nowQ = wa.QuadPart;
+                    if (timerDeadlineQ == 0 || nowQ - timerDeadlineQ > periodQ || timerDeadlineQ - nowQ > 2 * periodQ)
+                        timerDeadlineQ = nowQ + periodQ;
+                    long long waitQ = timerDeadlineQ - nowQ;
+                    if (waitQ < periodQ / 2) waitQ = periodQ / 2;
+                    timerDeadlineQ += periodQ;
+                    expectMs = (double)waitQ * 1000.0 / (double)ts.freq.QuadPart;
+                    LARGE_INTEGER dueRel; dueRel.QuadPart = -(waitQ * 10000000LL / ts.freq.QuadPart);
+                    SetWaitableTimer(timer, &dueRel, 0, nullptr, nullptr, FALSE);
                     WaitForSingleObject(timer, INFINITE);
                 } else {
                     Sleep(1000 / pacedHz);
@@ -3457,7 +3489,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                 auto& h = ts.hitch;
                 h.pendFlags |= wind::kTickPaceTimer;
                 h.pendWait = (float)QpcMs(ts, wa.QuadPart, wb.QuadPart);
-                const float late = h.pendWait - 1000.0f / (float)pacedHz;
+                const float late = h.pendWait - (float)expectMs;
                 h.pendLate = late > 0 ? late : 0.0f;
             }
         }
@@ -3492,6 +3524,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     if (model2) model2->shutdown();
     g_input.stop();
     g_track.stop();
+    wind::StopDwmWatch();
     {   // Persist the learned gain curve (see startup load). Best-effort: a failed write just
         // means the next run re-warms from live use.
         char buf[1024];

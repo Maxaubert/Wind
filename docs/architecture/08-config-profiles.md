@@ -180,6 +180,7 @@ Every key works in the ini whether or not Settings shows it. Keys hot-reload unl
 | Keys | Meaning |
 |---|---|
 | `txSamplingMode` (0) | Transform sampling: 0 nearest, 1 smooth ("High resolution cursor", coupled to MPO, [05](05-transform-engine.md)) |
+| `edgeClip` (1, hot) | While a transform session is zoomed, clips the pointer 1 px inside the monitor so it cannot rest on the contested outermost pixel (cursor-shape flicker at the left/top edge). Side effect: in a native-cursor session the pointer cannot reach the last pixel row and column. A tighter existing clip (game confine, Inspect) always wins; 0 turns it off. Rationale: `Config::edgeClip` in `src/config.h`, mechanics in `TransformModel::edgeClipManage` |
 | `bilinear`, `sharpness`, `brightness`, `hdrTonemap` (1) | Render engine image |
 | `cursorConstantSize` (0), `cursorVisibility` (`auto`) | Render cursor size and when it is drawn |
 | `colorWarmPct` (0), `colorDimPct` (100) | Warmth and brightness filter |

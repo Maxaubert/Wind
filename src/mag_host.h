@@ -67,6 +67,7 @@ public:
 private:
     bool initialized_ = false;
     bool privateBroken_ = false;
+    unsigned long privateBrokenGen_ = 0;   // DwmGeneration() when privateBroken_ latched
     int  (__stdcall* setMagDesktop_)(double, int, int) = nullptr;
     int  (__stdcall* setBitmapSmoothing_)(int) = nullptr;
     int  (__stdcall* setSamplingRaw_)(DWORD*) = nullptr;   // modes 2-4 (undocumented)

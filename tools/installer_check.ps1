@@ -118,7 +118,15 @@ if (-not (Test-Path $setup)) {
 } else {
     # A real install already on this machine would be clobbered by the ARP/Run writes below,
     # so its values are saved and put back afterwards.
-    $savedArp = Get-ItemProperty $ARP -ErrorAction SilentlyContinue
+    # Every value with its registry kind (DisplayName, the NoModify/NoRepair/EstimatedSize DWORDs, ...),
+    # not a fixed list: a value the installer gains later is restored without touching this script.
+    $savedArp = $null
+    $arpKey = Get-Item $ARP -ErrorAction SilentlyContinue
+    if ($arpKey) {
+        $savedArp = @(foreach ($n in $arpKey.GetValueNames()) {
+            [pscustomobject]@{ Name = $n; Value = $arpKey.GetValue($n); Kind = $arpKey.GetValueKind($n) }
+        })
+    }
     $savedRun = (Get-ItemProperty $RUN -ErrorAction SilentlyContinue).Wind
     # The same goes for the real install's local-signing root: the smoke install replaces it and
     # the smoke uninstall removes it, which would leave that install's uiAccess Wind.exe unable
@@ -219,8 +227,9 @@ if (-not (Test-Path $setup)) {
         # Put back whatever was here before the smoke test.
         if ($savedArp) {
             New-Item -Path $ARP -Force | Out-Null
-            foreach ($n in 'DisplayName','DisplayVersion','Publisher','DisplayIcon','InstallLocation','UninstallString') {
-                if ($null -ne $savedArp.$n) { New-ItemProperty $ARP -Name $n -Value $savedArp.$n -PropertyType String -Force | Out-Null }
+            foreach ($v in $savedArp) {
+                if ($v.Name -eq '') { continue }   # the key's unnamed default value is not set by the installer
+                New-ItemProperty $ARP -Name $v.Name -Value $v.Value -PropertyType $v.Kind -Force | Out-Null
             }
         }
         if ($savedRun) { New-ItemProperty $RUN -Name 'Wind' -Value $savedRun -PropertyType String -Force | Out-Null }

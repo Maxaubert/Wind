@@ -28,9 +28,9 @@ try {
     $lock = "$root\ui\package-lock.json"
     $installed = "$root\ui\node_modules\.package-lock.json"
     if ((Test-Path $lock) -and (-not (Test-Path $installed) -or (Get-Item $lock).LastWriteTime -gt (Get-Item $installed).LastWriteTime)) {
-        Write-Output "ui packages are older than package-lock.json: npm ci"
+        Write-Output "ui packages are older than package-lock.json: npm ci (--ignore-scripts: this script is elevated, so no package lifecycle script runs here)"
         Push-Location "$root\ui"
-        try { & cmd /c "npm ci"; if ($LASTEXITCODE -ne 0) { throw "npm ci failed." } } finally { Pop-Location }
+        try { & cmd /c "npm ci --ignore-scripts"; if ($LASTEXITCODE -ne 0) { throw "npm ci failed." } } finally { Pop-Location }
     }
     if (Test-Path $uiSrc) { Remove-Item -LiteralPath $uiSrc -Recurse -Force }
     & cmd /c "`"$root\build.bat`" config"
@@ -49,7 +49,7 @@ try {
         $cert = New-SelfSignedCertificate -Type CodeSigningCert `
             -Subject $subject `
             -CertStoreLocation Cert:\LocalMachine\My `
-            -KeyExportPolicy Exportable -NotAfter (Get-Date).AddYears(2)
+            -KeyExportPolicy NonExportable -NotAfter (Get-Date).AddYears(2)
         Write-Output "created cert thumbprint=$($cert.Thumbprint)"
     }
 
