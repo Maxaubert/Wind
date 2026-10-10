@@ -1869,7 +1869,7 @@ static void RunTick(TickState& t) {
                                  !t.viewDetached && !btn;
             if (t.glide.active && (!glideOk || curDx != 0 || curDy != 0)) wind::PanGlideCancel(t.glide);
             if (!t.glide.active)
-                wind::PanGlideObserve(t.glide, curDx, curDy, dt, cur.x, cur.y, t.cfg.panGlideMs / 1000.0,
+                wind::PanGlideObserve(t.glide, curDx, curDy, dt, cur.x, cur.y, wind::PanGlideTauS(t.cfg.panGlideMaxPx),
                                       t.cfg.panGlideMaxPx / lvl, glideOk);   // the cap is in screen px
             double gx = 0.0, gy = 0.0;
             if (t.glide.active && wind::PanGlideStep(t.glide, dt, gx, gy)) {

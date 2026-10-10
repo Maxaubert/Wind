@@ -131,10 +131,10 @@ slightly during zoom ramps, nearest keeps it pixelated and steady. Pure rules:
   session-end reset of `ixPubLevel_` keeps a quick zoom back to the same level from skipping the
   publish nudge, and the hide-cursor hotkey's show-again transition nudges after the blanker
   restore like the zoom-out does.
-- **Pan glide (#430, `panGlideMaxPx`, experimental, 0 = off).** A soft stop: when a mouse movement
+- **Pan glide (#430, `panGlideMaxPx`, 0 = off).** A soft stop: when a mouse movement
   stops, the POINTER eases on at the hand's speed and slows to rest within `panGlideMaxPx` SCREEN px
-  at any zoom (`src/pan_glide.h`); `panGlideMs` is the ease's time constant, shortened for a fast hand
-  so the cap holds. The view follows by DWM centring. Any hand movement, a mouse button, a game,
+  at any zoom (`src/pan_glide.h`). One setting since #434: the ease's time constant follows the
+  distance (`PanGlideTauS`, 40 px = 60 ms), shortened for a fast hand so the cap holds. The view follows by DWM centring. Any hand movement, a mouse button, a game,
   Inspect, a detached view or 1x ends it. Wind's own steps move the tick baseline (`lastSetVirtual`),
   so the lock detector and the gain learner only ever see hand motion. A first, uncapped version
   (momentum = speed x time) could throw the pointer across the screen and was replaced. It replaces

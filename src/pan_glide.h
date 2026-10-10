@@ -29,6 +29,14 @@ inline constexpr double kGlideVelTauS = 0.03;          // velocity estimate: the
 inline constexpr double kGlideMinStartSpeed = 40.0;    // px/s: below this the hand was resting anyway
 inline constexpr double kGlideStopDist = 0.5;          // desktop px left to travel: the glide is over
 
+// One setting drives the glide (#434): its ease time grows with its distance, so a longer glide also
+// slows down more gently. 40 px gives 60 ms, the old separate default.
+inline double PanGlideTauS(int maxPx) {
+    double ms = 40.0 + maxPx * 0.5;
+    if (ms > 240.0) ms = 240.0;
+    return ms / 1000.0;
+}
+
 // One tick of hand motion (dx, dy desktop px over dt s), with the pointer now at (curX, curY).
 // Starts a glide (returns true) on the first still tick after motion when the session allows it.
 // tauS is the ease's time constant; maxDist (desktop px, > 0) caps how far it travels: a hand fast
