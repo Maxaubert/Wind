@@ -215,7 +215,7 @@
   function clearSearch() { query = ''; const i = searchInput(); if (i) i.value = ''; }
   // A result's control is the real one; a row hidden on its page by showIf (it only applies under another
   // setting) shows dimmed, like the rest of the app shows a gated control.
-  const isDisabled = (r) => !visible(r);
+  const isDisabled = (r) => !visible(r) || isOff(r);
   // Enter or Down in the search box moves into the best result's control (Tab then walks the rest).
   function focusFirstResult() {
     const c = main && main.querySelector('.res .hit button, .res .hit input, .res .hit select, .res .hit [tabindex="0"]');
@@ -244,6 +244,8 @@
     else if (a === 'exportDiagnostics') exportDiagnostics();
     else if (a === 'quitWind') requestQuit();
   }
+  // offIf: the row stays in place but dimmed and inert while another setting has that value (#427).
+  const isOff = (r) => !!r.offIf && String(values[r.offIf.key]) === String(r.offIf.eq);
   const visible = (r) => !r.showIf || (r.showIf.ne !== undefined ? String(values[r.showIf.key]) !== String(r.showIf.ne) : String(values[r.showIf.key]) === String(r.showIf.eq));
   // Advanced rows show on their page only while the global switch is on; search results show them always.
   const advOn = $derived(Number(values.showAdvanced) === 1);
@@ -280,7 +282,7 @@
         {#if rows.length}
         <Card caption={card.caption}>
           {#each rows as r (r.key)}
-            <SettingRow row={r} value={values[r.key]} {values} {extra} {live}
+            <SettingRow row={r} value={values[r.key]} {values} {extra} {live} disabled={isOff(r)}
                         onChange={(v) => change(r.key, v)} onSet={change} />
           {/each}
         </Card>

@@ -36,7 +36,7 @@
 {:else}
   <div class="row" class:disabled class:wide={row.wide} data-key={row.key}>
     <div class="meta">
-      {#if row.label}<div class="lrow"><div class="label" id={labelId}>{row.label}</div>{#if tab}<span class="tab">{tab}</span>{/if}</div>{/if}
+      {#if row.label}<div class="lrow"><div class="label" id={labelId}>{row.label}</div>{#if row.tag}<span class="tag">{row.tag}</span>{/if}{#if tab}<span class="tab">{tab}</span>{/if}</div>{/if}
       {#if row.desc}<div class="desc" id={descId}>{row.desc}</div>{/if}
     </div>
     <div class="ctl">
@@ -94,6 +94,8 @@
   .meta { min-width: 0; }
   .lrow { display: flex; align-items: baseline; gap: 10px; }
   .tab { font: 11px var(--s); letter-spacing: .02em; color: var(--fg3); opacity: .8; }
+  .tag { font: 500 10.5px var(--s); letter-spacing: .03em; color: var(--fg3); padding: 1px 6px;
+         border: 1px solid var(--chipb); border-radius: 999px; }
   .label { font: 500 13.5px var(--s); color: var(--fg); }
   .desc { margin-top: 1px; font: 12.5px var(--s); color: var(--fg3); }
   .ctl { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
