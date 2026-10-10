@@ -1,4 +1,5 @@
 #include "comp_pin.h"
+#include "mpo_guard.h"
 namespace wind {
 
 static const wchar_t* kPinClass = L"WindCompositionPin";
@@ -98,10 +99,11 @@ void MpoGhost::destroy() {
 
 bool MpoGhost::settled(unsigned long long nowMs) const {
     if (!hwnd_ || !visible_ || shownAtMs_ == 0) return false;
-    if (nowMs - shownAtMs_ < 350) return false;      // plane-demotion settle window
-    if (!IsWindowVisible(hwnd_)) return false;       // verify, never assume (fail-closed)
+    if (nowMs - shownAtMs_ < kMpoSettleMs) return false;        // still settling: no window call yet
+    const bool vis = IsWindowVisible(hwnd_) != FALSE;           // verify, never assume (fail-closed)
     RECT rc{};
-    if (!GetWindowRect(hwnd_, &rc)) return false;
-    return rc.left == x_ && rc.top == y_ && rc.right == x_ + w_ && rc.bottom == y_ + h_;
+    const bool known = vis && GetWindowRect(hwnd_, &rc);
+    const bool match = known && rc.left == x_ && rc.top == y_ && rc.right == x_ + w_ && rc.bottom == y_ + h_;
+    return MpoGhostSettled(true, true, shownAtMs_, nowMs, vis, known, match);
 }
 }
