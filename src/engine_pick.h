@@ -72,7 +72,10 @@ inline bool ShouldPickTransform(const EnginePickInputs& in) {
     if (in.renderLost || in.captureProtected || in.renderExcluded || in.rotatedOutput) return true;
     // 2. An explicit user preference for this window category. Transform is still refused off the
     //    primary monitor (no cross-adapter transform chase) and on an excluded exe, because those
-    //    are correctness limits rather than taste.
+    //    are correctness limits rather than taste. The churny list and the input-transform check
+    //    are deliberately NOT applied here: they only keep the AUTO pick conservative, and an
+    //    explicit per-category Transform choice is the user accepting that trade (review
+    //    2026-10-09 #44).
     if (in.pref == EnginePref::Render) return false;
     if (in.pref == EnginePref::Transform) return in.primaryMonitor && !in.excluded;
     // 3. Auto: the historical behaviour, unchanged.

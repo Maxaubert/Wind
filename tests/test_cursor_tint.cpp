@@ -40,6 +40,15 @@ TEST_CASE("a monochrome pointer becomes colour: black, white, transparent, inver
     CHECK(out[2] == 0xFF000000u);   // transparent, but next to the inverting pixel: outline
     CHECK(out[3] == 0xFFFFFFFFu);   // inverting pixel drawn white
 }
+TEST_CASE("only a pointer of invert and transparent pixels uses the invert blend") {
+    const uint8_t andAll[4] = { 0xF0, 0, 0, 0 };    // 4x1, every AND bit 1
+    const uint8_t xorOne[4] = { 0x40, 0, 0, 0 };    // one XOR bit set
+    const uint8_t xorNone[4] = { 0, 0, 0, 0 };
+    CHECK(MonoIsPureInvert(andAll, xorOne, 4, 4, 1));
+    CHECK_FALSE(MonoIsPureInvert(andAll, xorNone, 4, 4, 1));   // nothing to invert at all
+    const uint8_t andOpaque[4] = { 0x70, 0, 0, 0 };            // x=3 is opaque
+    CHECK_FALSE(MonoIsPureInvert(andOpaque, xorOne, 4, 4, 1));
+}
 TEST_CASE("the outline only hugs inverting pixels; plain transparency stays clear") {
     // 5x1: [invert][transparent][transparent][transparent][transparent]
     const uint8_t andBits[4] = { 0xF8, 0, 0, 0 };   // all 1
