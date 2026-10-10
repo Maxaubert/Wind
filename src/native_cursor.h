@@ -71,6 +71,16 @@ inline bool InspectExitWarps(bool lookMoved, bool transformEngine) {
     return lookMoved || !transformEngine;
 }
 
+// The way back (#445, field 2026-10-11): once the look point moved, Inspect showed Wind's own centre,
+// and handing the view back to DWM at the exit toggle moved it by DWM's pixel. Wind keeps writing
+// its centre after the exit until the hand first moves the pointer, which hides the hand-over.
+inline bool HoldWindViewAfterInspect(bool lookMoved, bool transformEngine) {
+    return lookMoved && transformEngine;
+}
+inline bool PostInspectHoldKeeps(bool held, bool handMoved) {
+    return held && !handMoved;
+}
+
 inline bool WantDwmCentring(const DwmCentreIn& in) {
     return in.zoomed && in.freeCursor && !in.viewDetached && !in.wallNeeded && !in.quiesce;
 }

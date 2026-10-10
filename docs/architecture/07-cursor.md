@@ -270,7 +270,10 @@ the mouse hook only swallows clicks.
 
 - **No shift at the toggle (#445).** In a transform session DWM centring stays on after entry
   until the look point first moves (`InspectKeepsDwmView`), and leaving without having moved skips
-  the warp and its 1 px shape jiggle (`InspectExitWarps`). Switching to Wind's own centre at the
+  the warp and its 1 px shape jiggle (`InspectExitWarps`). Once the look point moved, Inspect shows Wind's own
+  centre, so after the exit Wind keeps writing it until the hand first moves the pointer
+  (`HoldWindViewAfterInspect`): handing the view back to DWM at the toggle shifted it (field
+  2026-10-11), during the first movement it is hidden. Switching to Wind's own centre at the
   toggle moved the view by DWM's 1 px offset (above): measured at 10.5x, entry shifted 10-12 px in
   every run, now 0; exit shifted in about half the runs, now in 1 of 3 (DWM relearns its offset
   when the pointer is shown again).

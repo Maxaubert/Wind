@@ -128,3 +128,12 @@ TEST_CASE("leaving Inspect warps only when the look point moved or the render en
     CHECK(InspectExitWarps(false, false));
     CHECK(InspectExitWarps(true, false));
 }
+
+TEST_CASE("after Inspect, Wind keeps its centre until the hand moves, only if the look point moved (#445)") {
+    CHECK(HoldWindViewAfterInspect(true, true));
+    CHECK_FALSE(HoldWindViewAfterInspect(false, true));   // DWM kept the view: nothing to hand back
+    CHECK_FALSE(HoldWindViewAfterInspect(true, false));   // render engine: no DWM centring
+    CHECK(PostInspectHoldKeeps(true, false));
+    CHECK_FALSE(PostInspectHoldKeeps(true, true));
+    CHECK_FALSE(PostInspectHoldKeeps(false, false));
+}
