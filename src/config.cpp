@@ -258,6 +258,8 @@ Config ParseConfig(const std::string& text) {
             else if (key == "txWarmHz")           c.txWarmHz = ParseIntStrict(val);
             else if (key == "mpoNearestGuard")    c.mpoNearestGuard = ParseIntStrict(val);
             else if (key == "txSmoothLadder")     c.txSmoothLadder = ParseIntStrict(val);
+            else if (key == "txRampMinStep")      c.txRampMinStep = ParseIntStrict(val);
+            else if (key == "txRampMinFrom")      c.txRampMinFrom = ParseDoubleStrict(val);
             else if (key == "mpoGuardTest")       c.mpoGuardTest = ParseIntStrict(val);
             else if (key == "mpoGuard")           c.mpoGuard = ParseIntStrict(val);
             else if (key == "mpoGuardLiftWall")   c.mpoGuardLiftWall = ParseIntStrict(val);
@@ -289,7 +291,9 @@ Config ParseConfig(const std::string& text) {
     // config UI sliders / the struct-comment docs.
     c.trackMarginPct  = (int)clampd(c.trackMarginPct, 0, 40);
     c.mouseMarginPct  = (int)clampd(c.mouseMarginPct, 0, 40);
-    c.maxLevel        = clampd(c.maxLevel,        1.0, 50.0);   // must be >= the 1.0 min zoom level
+    // 30x cap (#429): above it the smooth path's half-texel jumps reach 15-25 px and the pointer
+    // runs off the screen; must be >= the 1.0 min zoom level.
+    c.maxLevel        = clampd(c.maxLevel,        1.0, 30.0);
     c.zoomInSpeed     = clampd(c.zoomInSpeed,     0.25, 4.0);
     c.zoomOutSpeed    = clampd(c.zoomOutSpeed,    0.25, 4.0);
     c.panSpeed        = clampd(c.panSpeed,        0.25, 4.0);
@@ -297,13 +301,16 @@ Config ParseConfig(const std::string& text) {
     c.smoothZoomRamp  = clampd(c.smoothZoomRamp,  0.1, 3.0);
     c.cursorSensitivity = clampd(c.cursorSensitivity, 0.25, 4.0);
     if (c.panGlideMaxPx < 0) c.panGlideMaxPx = 0;
+    if (c.txRampMinStep < 0) c.txRampMinStep = 0;
+    if (c.txRampMinStep > 100) c.txRampMinStep = 100;
+    if (c.txRampMinFrom < 1.0) c.txRampMinFrom = 1.0;
     if (c.panGlideMaxPx > 400) c.panGlideMaxPx = 400;
     c.sharpness       = clampd(c.sharpness,       0.0, 1.0);
     c.brightness      = clampd(c.brightness,      0.5, 1.5);
     c.colorWarmPct    = (int)clampd(c.colorWarmPct, 0, 100);
     c.colorDimPct     = (int)clampd(c.colorDimPct, 1, 100);
     c.trayPinned      = (int)clampd(c.trayPinned, 0, 1);
-    c.quickZoomDefault  = clampd(c.quickZoomDefault, 1.0, 50.0);
+    c.quickZoomDefault  = clampd(c.quickZoomDefault, 1.0, 30.0);
     if (c.outlineThickness < 1)  c.outlineThickness = 1;
     if (c.outlineThickness > 40) c.outlineThickness = 40;
     c.outlineLowZoomMax  = clampd(c.outlineLowZoomMax,  1.0, 50.0);

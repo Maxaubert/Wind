@@ -107,6 +107,7 @@ private:
     int  lastOffX_ = 0, lastOffY_ = 0, lastTxX_ = 0, lastTxY_ = 0;   // last applied transform
     double lastLevel_ = 0.0;
     double lastRequestedLevel_ = 0.0;
+    bool rampStepHeld_ = false;   // the last tick held the level for RampStepHeld (#429)
     double sessionMaxLevel_ = 0.0;      // logged at teardown: scripted-run engagement proof
     unsigned long long lastChangeMs_ = 0;            // when the transform last REALLY changed
     unsigned long long lastWarmMs_ = 0;              // when the last warm pulse CLOSED (issue #246)

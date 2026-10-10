@@ -517,6 +517,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // pattern, small continuous ones the cheap one.)
     double applyLevel = level;
     const bool rampStopped = (level == lastRequestedLevel_);   // the controller stopped requesting new levels
+    const double prevRequestedLevel = lastRequestedLevel_;
     lastRequestedLevel_ = level;
     // txMaxStepPct: rate-limit the APPLIED level change per tick. Each change makes DWM re-scale
     // its cached surfaces and that cost grows with the level, so an unclamped fast ramp demands
@@ -542,7 +543,12 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // that never ended, which held the input-transform publish forever (hover dead zones).
     const double preLadderLevel = applyLevel;
     if (cfg.txSmoothLadder != 0 && cfg.txSamplingMode == 1 && applyLevel > 1.001) {
-        if (applyLevel == level && level == ladderReq_ && ladderOut_ > 0.0) {
+        if (rampStopped && applyLevel == level && level >= cfg.maxLevel - 1e-6) {
+            // Stopped at the maximum: land on it exactly. A level at rest does not shake, and the
+            // coarser steps above (RampStepHeld) could otherwise leave a clean level just under it.
+            ladderReq_ = level;
+            ladderOut_ = level;
+        } else if (applyLevel == level && level == ladderReq_ && ladderOut_ > 0.0) {
             applyLevel = ladderOut_;
         } else if (lastLevel_ > 1.001 && std::fabs(applyLevel - lastLevel_) <= applyLevel * 1e-9) {
             // The request IS the level on screen (RunTick stopped the ease-out there): never re-snap
@@ -550,7 +556,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             ladderReq_ = level;
             ladderOut_ = lastLevel_;
             applyLevel = lastLevel_;
-        } else if (rampStopped && applyLevel == level && lastLevel_ > 1.001 &&
+        } else if (rampStopped && !rampStepHeld_ && applyLevel == level && lastLevel_ > 1.001 &&
                    std::fabs(lastLevel_ - level) <= level * (SnapWindow(level) + 1e-5)) {
             // The zoom just stopped: keep the level already on screen rather than re-snapping, so
             // releasing the key never nudges the zoom in or out (field 2026-10-07).
@@ -558,15 +564,27 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             ladderOut_ = lastLevel_;
             applyLevel = lastLevel_;
         } else {
-            const int dir = applyLevel > lastLevel_ ? 1 : (applyLevel < lastLevel_ ? -1 : 0);
-            // (The slow tail of an ease-out never reaches here: RunTick stops the glide first.)
-            const double snapped = SnapSmoothLevel(applyLevel, r.centerX, r.centerY, mon_.w, mon_.h,
-                                                   lastLevel_ > 1.0 ? lastLevel_ : 0.0, dir);
-            ladderReq_ = level;
-            ladderOut_ = snapped;
-            applyLevel = snapped;
+            // Direction from the requests, not from the level on screen (LadderDir, #429).
+            const int dir = LadderDir(level, prevRequestedLevel, lastLevel_);
+            if (LadderHoldsLevel(dir, applyLevel, lastLevel_)) {
+                ladderReq_ = level;
+                ladderOut_ = lastLevel_;
+                applyLevel = lastLevel_;
+            } else {
+                // (The slow tail of an ease-out never reaches here: RunTick stops the glide first.)
+                const double snapped = SnapSmoothLevel(applyLevel, r.centerX, r.centerY, mon_.w, mon_.h,
+                                                       lastLevel_ > 1.0 ? lastLevel_ : 0.0, dir);
+                ladderReq_ = level;
+                ladderOut_ = snapped;
+                applyLevel = snapped;
+            }
         }
     }
+    // Smooth high-zoom steps (#429, RampStepHeld): while DWM centres, step the level less often.
+    // A stopped request after a held step lands exactly, not on the ladder's "keep what is shown".
+    rampStepHeld_ = cfg.txSamplingMode == 1 && dwmCentreOn_ &&
+                    RampStepHeld(applyLevel, lastLevel_, cfg.txRampMinStep / 1000.0, cfg.txRampMinFrom, rampStopped);
+    if (rampStepHeld_) applyLevel = lastLevel_;
     double srcL = r.srcLeft, srcT = r.srcTop;
     if (applyLevel != level) {
         OffsetF o = ComputeOffsetF(r.centerX, r.centerY, applyLevel, mon_.w, mon_.h);

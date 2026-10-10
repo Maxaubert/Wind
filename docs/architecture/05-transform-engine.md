@@ -249,6 +249,19 @@ DWM magnifies with nearest neighbour unless something calls
   slow held zoom shows small image jumps (predicted 3.6-4.2 px p95 at 12-20x). Capped, rate-keeping
   and stricter snaps were all simulated against the trace and the ladder's own model: each traded
   the shake for uneven speed or lurches, so the ladder stays as it is.
+- High-zoom jumps (#429, measured 2026-10-10): about 1 % of level changes show one frame half a
+  source pixel off (0.44-0.50 x the zoom: 10 px at 20x, 20 px at 40x). It is inside DWM's smooth
+  path: it happens with or without the nudge, and the ladder predicts 0 px for those levels
+  (DWM's centre-mode formula, decompiled: `(int)((P - (W/z)/2) * z + 0.5)` on the integer cursor
+  point, is exactly what Wind writes). The ladder used to take the ramp direction from the level
+  on screen and snapped back below a request it had overtaken (19 % of the writes in a slow zoom);
+  `LadderDir` takes it from the requests, which cut the jumps from 10-16 to 1-5 per slow 1x-50x
+  zoom. Changing the level less often removes the rest (`txRampMinStep`, none at 2 % steps), but
+  2 % steps made the top of a slow zoom visibly coarse in the field, so it ships off. A zoom that
+  stops at the maximum lands on it exactly. Max zoom is capped at 30x (`maxLevel`,
+  `quickZoomDefault`): above it the jumps reach 15-25 px and the pointer runs off the screen.
+  Report:
+  `Documents\Claude\research\wind\2026-10-10-high-zoom-shake.md`.
 - No release glide with the high resolution cursor (#427): the ladder could only cut a glide short
   or let its slow tail cross rounding steps (which shook the image and showed it doubled, closed
   #426), so `zoomEaseOutMs` is not applied while `txSamplingMode=1`; the zoom stops on release.

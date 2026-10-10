@@ -203,7 +203,7 @@ inline const SliderSpec* SliderSpecs(int* count) {
     static const SliderSpec k[] = {
         { "colorWarmPct",   L"Warmth",         0,    100,  0,    ValueFmt::Percent,  "warm", 5 },
         { "colorDimPct",    L"Brightness",     1,    100,  100,  ValueFmt::Percent,  "bright", 1 },
-        { "maxLevel",       L"Max zoom",       2,    50,   12,   ValueFmt::TimesInt, "maxz", 1 },
+        { "maxLevel",       L"Max zoom",       2,    30,   12,   ValueFmt::TimesInt, "maxz", 1 },
         { "zoomInSpeed",    L"Zoom-in speed",  0.25, 4,    1,    ValueFmt::Times2,   "zin", 0.05 },
         { "zoomOutSpeed",   L"Zoom-out speed", 0.25, 4,    1,    ValueFmt::Times2,   "zout", 0.05 },
         { "panSpeed",       L"Arrow key speed", 0.25, 4,    1,    ValueFmt::Times2,   "pan", 0.05 },

@@ -115,6 +115,33 @@ inline double SnapSmoothLevel(double want, double centreX, double centreY, int w
     return want;
 }
 
+// RAMP DIRECTION COMES FROM THE REQUESTS (#429, measured 2026-10-10). The ladder may snap a level
+// ahead of the request; judged against the level on screen, the next tick's request then looked like
+// a zoom the other way and the ladder snapped back below it: 19 % of the writes in a slow 1x-50x zoom
+// stepped backwards, and every needless write while DWM centres can show one off-centre frame.
+// The direction is the request's own trend; a request still behind the level on screen in that
+// direction keeps the level on screen (no write) until it catches up.
+inline int LadderDir(double request, double prevRequest, double onScreen) {
+    if (prevRequest > 1.0 && request != prevRequest) return request > prevRequest ? 1 : -1;
+    return request > onScreen ? 1 : (request < onScreen ? -1 : 0);
+}
+inline bool LadderHoldsLevel(int dir, double request, double onScreen) {
+    if (onScreen <= 1.001) return false;
+    return (dir > 0 && request <= onScreen) || (dir < 0 && request >= onScreen);
+}
+
+// SMOOTH HIGH-ZOOM STEPS (#429, measured 2026-10-10, OFF by default). About 1 % of level changes
+// show one frame half a source pixel off (0.44-0.50 x the zoom: 10 px at 20x, 20 px at 40x), inside
+// DWM's smooth path: with or without the nudge, and the ladder predicts 0 px for those levels. Fewer
+// changes, fewer such frames: per slow 1x-50x zoom 3-5 at every tick, 1-2 with 1-1.5 % steps, none
+// with 2 %; but 2 % steps made the top of a slow zoom visibly coarse, so the default is every tick.
+// When on, above `fromLevel` the level only moves once the request is at least `minRel` away from
+// the level on screen. A request that has stopped always lands (the zoom reaches its target).
+inline bool RampStepHeld(double request, double onScreen, double minRel, double fromLevel, bool stopped) {
+    if (stopped || minRel <= 0.0 || onScreen <= fromLevel || request == onScreen) return false;
+    return std::fabs(request - onScreen) < onScreen * minRel;
+}
+
 // TRUNCATED EASE-OUT (field 2026-10-07). After a release the user's ease-out runs, snapped to
 // clean levels like a held zoom; once it moves less per frame than clean levels are apart, the
 // ladder could only hop or jump, so the zoom stops there on the level on screen. The fast part of

@@ -170,7 +170,8 @@ TEST_CASE("numeric fields are clamped to documented ranges") {
     // maxLevel < 1 would invert ZoomController's clamp and disable zoom; must clamp up to 1.0.
     CHECK(ParseConfig("maxLevel=0\n").maxLevel == doctest::Approx(1.0));
     CHECK(ParseConfig("maxLevel=-5\n").maxLevel == doctest::Approx(1.0));
-    CHECK(ParseConfig("maxLevel=999\n").maxLevel == doctest::Approx(50.0));   // capped
+    CHECK(ParseConfig("maxLevel=999\n").maxLevel == doctest::Approx(30.0));   // capped (#429)
+    CHECK(ParseConfig("maxLevel=50\n").maxLevel == doctest::Approx(30.0));
     // Speeds, accel, ramp, sensitivity, smoothing, sharpness, brightness clamp to their ranges.
     CHECK(ParseConfig("zoomInSpeed=0\n").zoomInSpeed == doctest::Approx(0.25));
     CHECK(ParseConfig("zoomOutSpeed=99\n").zoomOutSpeed == doctest::Approx(4.0));
@@ -257,7 +258,7 @@ TEST_CASE("quick-zoom config parses and clamps") {
     CHECK(off.quickZoomModifier == "None");
 
     Config hi = ParseConfig("quickZoomDefault=99\n");
-    CHECK(hi.quickZoomDefault == doctest::Approx(50.0)); // clamped to max
+    CHECK(hi.quickZoomDefault == doctest::Approx(30.0)); // clamped to max
     Config lo = ParseConfig("quickZoomDefault=0.1\n");
     CHECK(lo.quickZoomDefault == doctest::Approx(1.0));  // clamped to min
 }
