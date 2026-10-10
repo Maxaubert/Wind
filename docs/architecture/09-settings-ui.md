@@ -53,7 +53,7 @@ the reply invalid and the page waits forever.
 
 | Message | Kind | Effect |
 |---|---|---|
-| `getConfig` | reply `config` | Every live key and value, plus the saved profile values. An ini that exists but cannot be read gets `configUnreadable` instead, and the page asks again (never an empty ini shown as all defaults) |
+| `getConfig` | reply `config` | Every live key and value, plus the saved profile values, and `runningModel` (the engine the live Wind loaded, from `%LOCALAPPDATA%\Wind\running.model`; absent when Wind is not running, then the page uses the ini). An ini that exists but cannot be read gets `configUnreadable` instead, and the page asks again (never an empty ini shown as all defaults) |
 | `setConfig` | fire | Atomic write of one key to the live ini |
 | `setConfigPersist` | fire | Same, and the key in the active profile file (keybind captures) |
 | `saveSession` | reply `sessionSaved` | Write `MakeProfileText(live)` over the profile |
@@ -64,10 +64,7 @@ the reply invalid and the page waits forever.
 | `openIni` | fire | Open `magnifier.ini` in the `.ini` handler or Notepad |
 | `exportDiagnostics` | fire | Zip `%LOCALAPPDATA%\Wind\logs` to the Desktop on a worker thread (the window stays responsive; a repeat click while it runs is ignored), then reveal it in Explorer |
 | `pickExe` | reply `exePicked` | File picker; replies with the bare exe name, because app lists match by name |
-| `mpoState` | reply `mpoState` | Registry value and the state DWM loaded at boot |
-| `setMpoDisabled` | reply `mpoApplied` | Elevated registry write; replies with the re-read state, so a cancelled UAC reverts |
-| `rebootNow` | fire | `shutdown.exe /r /t 0`, without `/f` |
-| `listProfiles`, `switchProfile`, `createProfile`, `renameProfile`, `duplicateProfile`, `deleteProfile` | reply `profiles` | Every reply carries the full `{names, active}`. The page uses switch, create and delete |
+| `switchProfile`, `createProfile`, `deleteProfile` | reply `profiles` | Every reply carries the full `{names, active}` |
 
 - An unsolicited `profiles` message (tray switch) is marked `push:true`, so it is never taken for a
   pending reply.

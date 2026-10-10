@@ -8,7 +8,8 @@ export function post(msg) {
   else if (window.__windMock) window.__windMock(msg);
 }
 // Session model: the live ini is the session, the active profile file is the saved state.
-// getSession() resolves { values, saved, profiles: {names, active} }. The first call after
+// getSession() resolves { values, saved, runningModel, profiles: {names, active} } (runningModel: the
+// engine the live Wind process runs, '' when the host cannot tell). The first call after
 // load is answered from window.__windInit (injected by the host before the page runs); it is
 // consumed once, so later calls (and a reload) always ask the host for fresh state.
 export function getSession() {
@@ -16,7 +17,7 @@ export function getSession() {
   if (init) {
     delete window.__windInit;
     return Promise.resolve({
-      values: init.values || {}, saved: init.saved || init.values || {},
+      values: init.values || {}, saved: init.saved || init.values || {}, runningModel: init.runningModel || '',
       profiles: init.profiles || { names: [], active: '' },
     });
   }
@@ -27,7 +28,7 @@ export function getSession() {
     const off = onMessage(m => {
       if (m && m.type === 'config') {
         off();
-        resolve({ values: m.values || {}, saved: m.saved || m.values || {},
+        resolve({ values: m.values || {}, saved: m.saved || m.values || {}, runningModel: m.runningModel || '',
                   profiles: m.profiles || { names: [], active: '' } });
       } else if (m && m.type === 'configUnreadable') {
         if (++tries < 8) setTimeout(() => post({ type: 'getConfig' }), 250);
@@ -56,7 +57,7 @@ export function discardSession() {
     const off = onMessage(m => {
       if (m && m.type === 'config') {
         off();
-        resolve({ values: m.values || {}, saved: m.saved || m.values || {},
+        resolve({ values: m.values || {}, saved: m.saved || m.values || {}, runningModel: m.runningModel || '',
                   profiles: m.profiles || { names: [], active: '' } });
       } else if (m && m.type === 'configUnreadable') {
         off();
@@ -78,32 +79,6 @@ export function windowControl(action, force = false) {
 // Mirror the staged/unsaved state to the host so its WM_CLOSE can put up the guard for Alt+F4 and
 // the system menu too, not just our own title-bar button.
 export function setDirty(v) { post({ type: 'dirty', value: v ? '1' : '0' }); }
-// MPO (Multi-Plane Overlay) lives in HKLM, so reading is free but writing needs elevation.
-// getMpoState is a plain read; setMpoDisabled raises a UAC prompt in the host and resolves with the
-// RE-READ state, so a cancelled prompt reverts the row rather than showing a change that never was.
-// Resolves { disabled, bootKnown, atBoot }. `atBoot` is what DWM actually loaded at boot, which is
-// the only honest thing to compare against when deciding whether a restart is required.
-export function getMpoState() {
-  return new Promise(resolve => {
-    const off = onMessage(m => {
-      if (m && m.type === 'mpoState') {
-        off();
-        resolve({ disabled: !!m.disabled, bootKnown: !!m.bootKnown, atBoot: !!m.atBoot });
-      }
-    });
-    post({ type: 'mpoState' });
-  });
-}
-export function setMpoDisabled(disabled) {
-  return new Promise(resolve => {
-    const off = onMessage(m => {
-      if (m && m.type === 'mpoApplied') { off(); resolve({ ok: !!m.ok, disabled: !!m.disabled }); }
-    });
-    post({ type: 'setMpoDisabled', value: disabled ? '1' : '0' });
-  });
-}
-// Offered only after an MPO change lands: DWM reads OverlayTestMode at boot.
-export function rebootNow() { post({ type: 'rebootNow' }); }
 // "Edit config file" -> host opens magnifier.ini with the registered .ini handler (Notepad fallback).
 export function openIni() { post({ type: 'openIni' }); }
 // "Export diagnostics" -> host zips %LOCALAPPDATA%\Wind\logs to the Desktop and reveals it.
@@ -130,5 +105,4 @@ export const switchProfile    = (name)     => profileRequest({ type: 'switchProf
 // fromCurrent: "Duplicate current" - the host builds the profile from the live session as it stands.
 export const createProfile    = (name, fromCurrent = false) =>
   profileRequest({ type: 'createProfile', name, fromCurrent: fromCurrent ? '1' : '0' });
-export const renameProfile    = (from, to) => profileRequest({ type: 'renameProfile', from, to });
 export const deleteProfile    = (name)     => profileRequest({ type: 'deleteProfile', name });

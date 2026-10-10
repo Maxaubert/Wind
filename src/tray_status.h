@@ -7,27 +7,13 @@
 
 namespace wind {
 
-// Which engine is actually running this session - NOT what the ini asked for. "Advanced" is the
-// hybrid model: it is the mode that picks per window type, which is what the name should say.
-enum class TrayEngine { Advanced, Transform, Render };
-
 struct TrayStatus {
     double      level   = 1.0;                    // 1.0 = not zoomed
-    TrayEngine  engine  = TrayEngine::Advanced;
-    bool        panning = false;
 };
 
 // The transport (Wind.exe -> WindTray.exe) is the shared block in tray_ipc.h.
 
 // --- pure label logic, unit-tested ---------------------------------------------------------
-
-inline const wchar_t* EngineLabel(TrayEngine e) {
-    switch (e) {
-        case TrayEngine::Transform: return L"TRANSFORM";
-        case TrayEngine::Render:    return L"RENDER";
-        default:                    return L"ADVANCED";
-    }
-}
 
 // The headline. Anything at or below 1.001x is idle - the same threshold the transform model uses
 // to decide a session is live, so the tray can never claim "1.0x zoomed" while the model calls it

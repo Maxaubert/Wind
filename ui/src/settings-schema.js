@@ -10,7 +10,7 @@
 // Row types: keybind, slider, toggle, select, applist, highres, engine (the engine select with the
 // inline "Restart Wind"), palette (the Theme picker, `wide`: its control sits under the
 // text), profiles (dropdown + New), button, about. A row may carry showIf
-// { key, eq } to hide it unless another setting has that value. A keybind row may carry `max` (how
+// { key, eq } to hide it unless another setting has that value ({ key, ne } hides it when it does). A keybind row may carry `max` (how
 // many bindings it takes, default 1) and `onKey` (the on/off switch key of an extra key).
 //
 // Every labelled row carries `keywords`: synonyms and related words people might type (never displayed,
@@ -20,6 +20,8 @@
 // its label, no symbols or product names.
 
 const hybrid = { key: 'model', eq: 'hybrid' };
+// The Transform engine follows the pointer directly, so the mouse speed and smoothing sliders do nothing there.
+const notTransform = { key: 'model', ne: 'transform' };
 const engineOpts = ['auto', 'transform', 'render'];
 const engineLabels = { auto: 'Auto', transform: 'Transform', render: 'Render' };
 
@@ -98,8 +100,8 @@ export const groups = [
     cards: [
       { caption: 'Speed', rows: [
         { key: 'panSpeed', type: 'slider', label: 'Arrow key speed', keywords: ['pan', 'pan speed', 'arrows', 'move', 'scroll', 'keyboard', 'how fast', 'velocity', 'shift view', 'rate'], desc: 'How fast the arrow keys move the view.', min: 0.25, max: 4, step: 0.05, def: 1.0, unit: 'times' },
-        { key: 'cursorSensitivity', type: 'slider', label: 'Mouse speed', keywords: ['sensitivity', 'pointer speed', 'cursor speed', 'dpi', 'pan', 'follow', 'tracking speed', 'how fast', 'velocity', 'mouse sensitivity', 'rate'], desc: 'How fast the view follows the mouse.', min: 0.25, max: 4, step: 0.05, def: 1.0, unit: 'times' },
-        { key: 'cursorSmoothing', type: 'slider', adv: true, label: 'Pan smoothing', keywords: ['inertia', 'smooth', 'smoothing', 'glide', 'momentum', 'lag', 'delay', 'damping', 'gentle', 'filter', 'mouse'], desc: 'Adds gentle inertia when the view moves.', min: 0, max: 0.95, step: 0.05, def: 0.4 },
+        { key: 'cursorSensitivity', type: 'slider', label: 'Mouse speed', keywords: ['sensitivity', 'pointer speed', 'cursor speed', 'dpi', 'pan', 'follow', 'tracking speed', 'how fast', 'velocity', 'mouse sensitivity', 'rate'], desc: 'Speed of the view in the Render engine and in mouse-locked games. In the Transform engine the view follows the pointer directly, so this has no effect there.', min: 0.25, max: 4, step: 0.05, def: 1.0, unit: 'times', showIf: notTransform },
+        { key: 'cursorSmoothing', type: 'slider', adv: true, label: 'Pan smoothing', keywords: ['inertia', 'smooth', 'smoothing', 'glide', 'momentum', 'lag', 'delay', 'damping', 'gentle', 'filter', 'mouse'], desc: 'Adds gentle inertia when the view moves in the Render engine. In the Transform engine the view follows the pointer directly, so this has no effect there.', min: 0, max: 0.95, step: 0.05, def: 0.4, showIf: notTransform },
       ] },
       { caption: 'Pointer', rows: [
         { key: 'mouseAlign', type: 'select', label: 'Pointer position', keywords: ['mouse position', 'mouse', 'cursor', 'pointer', 'where', 'centred', 'centered', 'center', 'centre', 'middle', 'edge', 'edges', 'within the edges', 'align', 'alignment', 'lock to center', 'follow mode', 'placement'], desc: 'Where the mouse pointer sits while the view moves.', options: ['0', '1'], optionLabels: { '0': 'Centred', '1': 'Within the edges' }, def: '0' },

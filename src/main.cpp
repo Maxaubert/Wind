@@ -1388,17 +1388,10 @@ static void RunTick(TickState& t) {
     }
     double lvl = t.zoom.level();
     {
-        // Snapshot for the tray menu, published every tick into the shared block and read by
-        // WindTray.exe (relaxed atomics) while its menu is open. "Advanced" is
-        // the hybrid model: the mode that picks an engine per window type; renamed from "Auto"
-        // because Auto undersold what it does.
+        // Snapshot for the tray flyout, published every tick into the shared block and read by
+        // WindTray.exe (relaxed atomics) while it is open.
         wind::TrayStatus ts_;
         ts_.level = lvl;
-        const std::string& mdl = t.cfg.model;
-        ts_.engine = mdl == "transform" ? wind::TrayEngine::Transform
-                   : mdl == "render"    ? wind::TrayEngine::Render
-                                        : wind::TrayEngine::Advanced;
-        ts_.panning = lvl > 1.001;
         wind::PublishTrayStatus(g_trayBlock, ts_);
     }
 
@@ -3110,6 +3103,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         wind::Log(wind::LogLevel::Warn, "startup", "hybrid: transform half failed to init; render-only");
         model2.reset();
     }
+    // Tell the settings host which engine this process actually runs (fixed until the next start).
+    // Written after the engine init, so a hybrid that fell back to one engine reports that one.
+    wind::WriteTextFileAtomic(wind::RunningModelPath(),
+        model2 ? "hybrid" : (dynamic_cast<TransformModel*>(model.get()) ? "transform" : "render"));
 
     // The tray icon and menu live in WindTray.exe (issue #291): a UIAccess process's menu stacks
     // above the cursor and the Snipping Tool overlay, an ordinary process's menu does not.
