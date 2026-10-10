@@ -291,7 +291,9 @@ Config ParseConfig(const std::string& text) {
     // config UI sliders / the struct-comment docs.
     c.trackMarginPct  = (int)clampd(c.trackMarginPct, 0, 40);
     c.mouseMarginPct  = (int)clampd(c.mouseMarginPct, 0, 40);
-    c.maxLevel        = clampd(c.maxLevel,        1.0, 50.0);   // must be >= the 1.0 min zoom level
+    // 30x cap (#429): above it the smooth path's half-texel jumps reach 15-25 px and the pointer
+    // runs off the screen; must be >= the 1.0 min zoom level.
+    c.maxLevel        = clampd(c.maxLevel,        1.0, 30.0);
     c.zoomInSpeed     = clampd(c.zoomInSpeed,     0.25, 4.0);
     c.zoomOutSpeed    = clampd(c.zoomOutSpeed,    0.25, 4.0);
     c.panSpeed        = clampd(c.panSpeed,        0.25, 4.0);
@@ -308,7 +310,7 @@ Config ParseConfig(const std::string& text) {
     c.colorWarmPct    = (int)clampd(c.colorWarmPct, 0, 100);
     c.colorDimPct     = (int)clampd(c.colorDimPct, 1, 100);
     c.trayPinned      = (int)clampd(c.trayPinned, 0, 1);
-    c.quickZoomDefault  = clampd(c.quickZoomDefault, 1.0, 50.0);
+    c.quickZoomDefault  = clampd(c.quickZoomDefault, 1.0, 30.0);
     if (c.outlineThickness < 1)  c.outlineThickness = 1;
     if (c.outlineThickness > 40) c.outlineThickness = 40;
     c.outlineLowZoomMax  = clampd(c.outlineLowZoomMax,  1.0, 50.0);

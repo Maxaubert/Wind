@@ -258,7 +258,9 @@ DWM magnifies with nearest neighbour unless something calls
   `LadderDir` takes it from the requests, which cut the jumps from 10-16 to 1-5 per slow 1x-50x
   zoom. Changing the level less often removes the rest (`txRampMinStep`, none at 2 % steps), but
   2 % steps made the top of a slow zoom visibly coarse in the field, so it ships off. A zoom that
-  stops at the maximum lands on it exactly. Report:
+  stops at the maximum lands on it exactly. Max zoom is capped at 30x (`maxLevel`,
+  `quickZoomDefault`): above it the jumps reach 15-25 px and the pointer runs off the screen.
+  Report:
   `Documents\Claude\research\wind\2026-10-10-high-zoom-shake.md`.
 - No release glide with the high resolution cursor (#427): the ladder could only cut a glide short
   or let its slow tail cross rounding steps (which shook the image and showed it doubled, closed

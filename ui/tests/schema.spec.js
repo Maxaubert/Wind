@@ -149,7 +149,7 @@ test('hotkeys page: one box per binding, "or" between them, and the old keybind 
   await page.goto('/controls.html?group=zoom');
   const sl = ctl(page, 'maxLevel').locator('input[type=range]');
   await expect(sl).toHaveAttribute('aria-valuetext', '12 times');
-  expect(parseFloat(await css(sl, '--pct'))).toBeCloseTo(20.83, 1);
+  expect(parseFloat(await css(sl, '--pct'))).toBeCloseTo(35.71, 1);   // 12x on the 2-30x range (#429)
   await sl.fill('30');
   await expect(ctl(page, 'maxLevel').locator('.val')).toHaveText('30x');
 });
