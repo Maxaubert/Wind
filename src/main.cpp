@@ -1293,7 +1293,10 @@ static void RunTick(TickState& t) {
     // root-caused elsewhere - issue #148 - so the user's configured speed applies everywhere.)
     t.zoom.setProfile(t.cfg.zoomInSpeed, t.cfg.zoomOutSpeed, t.cfg.smoothZoom != 0,
                       t.cfg.smoothZoomAccel, t.cfg.smoothZoomRamp);
-    t.zoom.setEaseOut(t.cfg.zoomEaseOutMs / 1000.0);
+    // No release glide with the high resolution cursor (#427): its ladder can only cut a glide short
+    // (EaseOutShouldStop) or let the slow tail cross DWM's rounding steps, which shook the image and
+    // showed it doubled (field 2026-10-10, closed #426). The zoom stops on release instead.
+    t.zoom.setEaseOut(t.cfg.txSamplingMode == 1 ? 0.0 : t.cfg.zoomEaseOutMs / 1000.0);
     // Quick-zoom trigger. Modifier mode (quickZoomHotkeyMode==0): hold the configured modifier
     // (Ctrl/Alt/Shift; "None" = off) and tap a zoom key. While the modifier is held it toggles quick
     // zoom (below) instead of hold-zooming, so suppress the hold-zoom direction (the toggle snaps the

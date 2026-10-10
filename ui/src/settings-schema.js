@@ -10,7 +10,9 @@
 // Row types: keybind, slider, toggle, select, applist, highres, engine (the engine select with the
 // inline "Restart Wind"), palette (the Theme picker, `wide`: its control sits under the
 // text), profiles (dropdown + New), button, about. A row may carry showIf
-// { key, eq } to hide it unless another setting has that value ({ key, ne } hides it when it does). A keybind row may carry `max` (how
+// { key, eq } to hide it unless another setting has that value ({ key, ne } hides it when it does), or
+// offIf { key, eq } to keep it in place but dimmed and inert while that setting has the value; `tag`
+// adds a small label after the row's name (Experimental). A keybind row may carry `max` (how
 // many bindings it takes, default 1) and `onKey` (the on/off switch key of an extra key).
 //
 // Every labelled row carries `keywords`: synonyms and related words people might type (never displayed,
@@ -64,7 +66,8 @@ export const groups = [
         { key: 'maxLevel', type: 'slider', label: 'Max zoom', keywords: ['maximum', 'limit', 'highest', 'magnification', 'level', 'cap', 'zoom level', 'factor', 'times', 'upper'], desc: 'The highest zoom level.', min: 2, max: 50, step: 1, def: 12.0, unit: 'times' },
         { key: 'zoomInSpeed', type: 'slider', label: 'Zoom-in speed', keywords: ['faster', 'slower', 'rate', 'magnify speed', 'zoom rate', 'acceleration', 'velocity', 'how fast'], desc: 'How fast the view zooms in.', min: 0.25, max: 4, step: 0.05, def: 1.0, unit: 'times' },
         { key: 'zoomOutSpeed', type: 'slider', label: 'Zoom-out speed', keywords: ['faster', 'slower', 'rate', 'zoom rate', 'velocity', 'how fast'], desc: 'How fast the view zooms out.', min: 0.25, max: 4, step: 0.05, def: 1.0, unit: 'times' },
-        { key: 'zoomEaseOutMs', type: 'slider', label: 'Release glide', keywords: ['inertia', 'coast', 'momentum', 'ease out', 'easing', 'smooth stop', 'slow down', 'deceleration', 'stop', 'let go', 'release', 'delay', 'milliseconds'], desc: 'How long the zoom coasts after you let go.', min: 0, max: 300, step: 5, def: 45, unit: 'ms' },
+        { key: 'zoomEaseOutMs', type: 'slider', label: 'Release glide', keywords: ['inertia', 'coast', 'momentum', 'ease out', 'easing', 'smooth stop', 'slow down', 'deceleration', 'stop', 'let go', 'release', 'delay', 'milliseconds'], desc: 'How long the zoom coasts after you let go. Off while the high resolution cursor is on.', min: 0, max: 300, step: 5, def: 45, unit: 'ms',
+          offIf: { key: 'txSamplingMode', eq: '1' } },
       ] },
       { caption: 'Easing', rows: [
         // Smooth zoom is always on (core default 1); its shape sliders are advanced.
@@ -108,7 +111,7 @@ export const groups = [
         // High resolution cursor (#227). Ini key txSamplingMode (0 nearest / 1 smooth). No longer
         // coupled to MPO (#369): both looks keep apps off hardware planes while zoomed (smooth via the
         // resample layer, nearest via the MPO guard), so the toggle applies live with no restart.
-        { key: 'txSamplingMode', type: 'highres', label: 'High resolution cursor', keywords: ['sharp', 'crisp', 'smooth', 'blurry', 'pixelated', 'hidpi', 'sampling', 'quality', 'nearest', 'mpo', 'overlay', 'cursor', 'pointer', 'resolution', '4k', 'antialiasing', 'restart', 'registry'],
+        { key: 'txSamplingMode', type: 'highres', label: 'High resolution cursor', tag: 'Experimental', keywords: ['sharp', 'crisp', 'smooth', 'blurry', 'pixelated', 'hidpi', 'sampling', 'quality', 'nearest', 'mpo', 'overlay', 'cursor', 'pointer', 'resolution', '4k', 'antialiasing', 'restart', 'registry'],
           desc: 'A smoother image and pointer at high zoom. Off keeps them pixel-sharp and steady while zooming.', def: 0 },
         // Zoom lock detection (#221): games like DOOM pin the mouse to the screen centre, which would
         // pin the zoom view there too. Listed apps get the view UNLOCKED from the pointer.

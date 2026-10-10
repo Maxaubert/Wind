@@ -85,6 +85,7 @@ struct Config {
     // Release ease-out (2026-08-28, hot): the applied zoom rate glides to a stop over roughly
     // 3x this time constant instead of freezing the instant the button lifts (the square-wave
     // stop read as harsh). ~45ms tau = ~150ms felt glide. 0 = off (the old dead stop).
+    // Not applied with the high resolution cursor (txSamplingMode=1), which stops on release (#427).
     int zoomEaseOutMs = 45;
     // Present sync while zoomed (render engine): 1 = vsync (Present sync-interval 1, locked to
     // the display refresh); 0 = no vsync (Present 0), with the loop paced by the timer instead.

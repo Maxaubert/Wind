@@ -73,7 +73,10 @@ the reply invalid and the page waits forever.
 
 ## The schema-driven app
 
-The page is generated from `groups` in `ui/src/settings-schema.js`. Six groups: Hotkeys, Zoom,
+The page is generated from `groups` in `ui/src/settings-schema.js`. A row may carry `showIf` (hidden
+unless another setting has a value), `offIf` (kept in place but dimmed and inert while another
+setting has a value: Release glide while the high resolution cursor is on) and `tag` (a small label
+after the name: High resolution cursor is tagged Experimental). Six groups: Hotkeys, Zoom,
 View, then below a divider Preferences (with the Screen light card), Tray menu and About. Each group has a label, an
 icon, a banner description and cards of rows; each row names its ini key, type, label, description
 and default. `Settings.svelte` is the shell (title bar, sidebar, banner, save capsule, search), and
