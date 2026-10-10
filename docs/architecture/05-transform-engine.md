@@ -236,6 +236,13 @@ DWM magnifies with nearest neighbour unless something calls
   resulting shift per level. While smooth, the applied level snaps to the nearest level predicting
   under 1 px (never backwards in a ramp; held once the zoom settles). Measured standalone at
   3840x2160: 10-25x jitter 11 px -> 0.7 px p95, worst jump 42 px -> 2 px; 2-10x 4.7 px -> 0.8 px.
+- The ladder's cost is uneven speed: above ~6x clean levels are ~0.9 % apart while a tick moves ~3 %,
+  so single ticks run 15-40 % fast or slow (measured 2026-10-10: tick-to-tick rate change 8-21 %
+  median above 6x, against 1-5 % with the ladder off or nearest). Capped or rate-keeping snaps were
+  simulated against the trace and all brought most of the image jitter back, so the ladder stays.
+- Release glide: by default the ease-out stops once it moves slower than clean levels are apart
+  (`EaseOutShouldStop`, about 10-20 % of full speed). `txGlideTail=1` glides it out to rest like
+  nearest, the slow tail unsnapped (`GlideTailUnsnapped`, a few small image jumps at the end).
 - Nearest while the level moves and smooth at rest was tried: steady, but the switch from pixel to
   smooth is plainly visible, so it was rejected (2026-10-07). The older "swap shifted the image
   1-2 px" verdict predates the working setter and is void.

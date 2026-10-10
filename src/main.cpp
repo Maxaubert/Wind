@@ -1338,6 +1338,7 @@ static void RunTick(TickState& t) {
         // AFTER the controller ticked: before it, level() still equals last frame's level, so the
         // "still moving" test never fired and the ease-out always ran its slow tail (#375).
         if (!held && !t.zoom.hasTarget() && t.cfg.txSamplingMode == 1 && t.cfg.txSmoothLadder != 0 &&
+            t.cfg.txGlideTail == 0 &&   // full glide (#425): the tail runs unsnapped instead
             t.zoom.level() != t.prevLvl && wind::EaseOutShouldStop(t.zoom.level(), t.prevLvl)) {
             if (auto* tmStop = dynamic_cast<TransformModel*>(t.model)) {
                 const double shown = tmStop->writtenLevel();

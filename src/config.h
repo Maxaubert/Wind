@@ -302,6 +302,10 @@ struct Config {
     // levels where DWM's per-frame scratch rounding predicts under 1 px of movement (the zoom shake:
     // 11 px p95 -> 0.7 px measured at 10-25x). 0 = off (hot).
     int txSmoothLadder = 1;
+    // Release glide with the ladder (issue #425, src/zoom_ladder.h GlideTailUnsnapped): 0 (default)
+    // stops the ease-out once it moves slower than clean levels are apart; 1 glides it out to rest
+    // like nearest sampling, its slow tail unsnapped (a few small image jumps at the very end). Hot.
+    int txGlideTail = 0;
     int mpoGuardTest = 0;   // diagnostic: apply the MPO guard effect even on an MPO-off boot (hot)
     int mpoGuard = 1;       // diagnostic: 0 = never apply the guard effect (A/B on an MPO boot; hot)
     int mpoGuardLiftWall = 1;   // no pan walls / write clamp / ghost while the session is plane-free (hot)

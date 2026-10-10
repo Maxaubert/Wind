@@ -560,9 +560,15 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             ladderReq_ = level;
             ladderOut_ = lastLevel_;
             applyLevel = lastLevel_;
+        } else if (GlideTailUnsnapped(cfg.txGlideTail != 0, ex.zoomDriven, applyLevel, lastLevel_)) {
+            // Full release glide (#425): the slow tail is written as requested, so it decelerates
+            // to rest instead of holding and hopping between clean levels.
+            ladderReq_ = level;
+            ladderOut_ = applyLevel;
         } else {
             const int dir = applyLevel > lastLevel_ ? 1 : (applyLevel < lastLevel_ ? -1 : 0);
-            // (The slow tail of an ease-out never reaches here: RunTick stops the glide first.)
+            // (With txGlideTail=0 the slow tail of an ease-out never reaches here: RunTick stops the
+            // glide first.)
             const double snapped = SnapSmoothLevel(applyLevel, r.centerX, r.centerY, mon_.w, mon_.h,
                                                    lastLevel_ > 1.0 ? lastLevel_ : 0.0, dir);
             ladderReq_ = level;

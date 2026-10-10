@@ -142,4 +142,14 @@ inline bool EaseOutShouldStop(double level, double prevLevel) {
     return step < 0.6 * SnapWindow(level);
 }
 
+// FULL RELEASE GLIDE (issue #425, txGlideTail=1). The truncated ease-out above made a high-res
+// release stop at 10-20 % of its speed while nearest sampling glides to rest (field 2026-10-10:
+// "drives 50, then from 15 straight to 0"). With the option on, the glide is not cut; its slow tail
+// (the part EaseOutShouldStop would cut) is written UNSNAPPED, because snapping a step smaller than
+// the clean-level spacing can only hold and hop. The cost is the few DWM rounding steps the tail
+// crosses, each a small image jump. Snapping still applies while a zoom key is held.
+inline bool GlideTailUnsnapped(bool fullGlide, bool zoomDriven, double level, double prevLevel) {
+    return fullGlide && !zoomDriven && EaseOutShouldStop(level, prevLevel);
+}
+
 }  // namespace wind

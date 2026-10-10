@@ -92,3 +92,10 @@ TEST_CASE("the ease-out runs while it moves faster than the clean-level spacing,
     CHECK(EaseOutShouldStop(25.0, 25.0 / 1.004) == true);  // 0.4 % at 25x (window 1.2 %)
     CHECK(EaseOutShouldStop(1.0, 1.0) == false);
 }
+
+TEST_CASE("full release glide: only the released slow tail goes unsnapped (#425)") {
+    CHECK(GlideTailUnsnapped(true, false, 5.0, 5.0 / 1.001) == true);    // released, in the tail
+    CHECK(GlideTailUnsnapped(true, false, 5.0, 5.0 / 1.02) == false);    // released, still fast: snap
+    CHECK(GlideTailUnsnapped(true, true, 5.0, 5.0 / 1.001) == false);    // key held: always snap
+    CHECK(GlideTailUnsnapped(false, false, 5.0, 5.0 / 1.001) == false);  // option off: unchanged
+}
