@@ -55,6 +55,22 @@ inline bool NearWall(bool wallArmed, double srcLeft, double srcTop, double level
     return srcLeft > wall - marginSrc || srcTop > wall - marginSrc;
 }
 
+// Inspect keeps DWM's view until the look point first moves (#445). DWM centring sits a desktop
+// pixel off Wind's own centre (it learns that from Wind's pixel-and-back nudges, which panning needs:
+// without them the pointer shook up to 30 px), so switching it off at the Inspect toggle shifted the
+// view about 11 screen px at 10x (measured 2026-10-11). With the frozen pointer still at the look point
+// DWM's view is the right one; the switch waits for the first look-point motion, which hides it.
+inline bool InspectKeepsDwmView(bool inspect, bool lookMoved) {
+    return inspect && !lookMoved;
+}
+
+// Leaving Inspect warps the pointer to the look point and jiggles it a pixel to refresh its shape.
+// In a transform session where the look point never moved the pointer is already there with the
+// right shape, and the jiggle is what made DWM re-centre a pixel off on the way out (#445).
+inline bool InspectExitWarps(bool lookMoved, bool transformEngine) {
+    return lookMoved || !transformEngine;
+}
+
 inline bool WantDwmCentring(const DwmCentreIn& in) {
     return in.zoomed && in.freeCursor && !in.viewDetached && !in.wallNeeded && !in.quiesce;
 }

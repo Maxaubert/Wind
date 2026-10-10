@@ -349,6 +349,7 @@ struct TickState {
     POINT  frozenCursor{};          // where the real cursor is frozen while Inspect is on (virtual px)
     int    clickReleaseTicks = 0;   // after a committed click: ticks to keep the freeze clip released so
                                     //   the synthesized click reaches the look point (then re-freeze)
+    bool   inspectLookMoved = false;  // the Inspect look point moved since entry (#445)
     double inspectPanRemX = 0.0;    // sub-pixel carry for the cooked Inspect-mode pan (slow motion not lost)
     double inspectPanRemY = 0.0;
     double lockedPanRemX = 0.0;         // sub-pixel carry for the locked pan
@@ -1585,6 +1586,7 @@ static void RunTick(TickState& t) {
             // pans by zero.
             rawDx = 0; rawDy = 0;
             t.inspectPanRemX = 0.0; t.inspectPanRemY = 0.0;
+            t.inspectLookMoved = false;
             t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y);
             t.lastSetVirtual = pt;
             RECT fz{ pt.x, pt.y, pt.x + 1, pt.y + 1 };
@@ -1627,16 +1629,20 @@ static void RunTick(TickState& t) {
             ClipCursor(nullptr);
             POINT lp{ (int)(t.mapper.centerX() + 0.5) + t.mon.x,
                       (int)(t.mapper.centerY() + 0.5) + t.mon.y };
-            SetCursorPos(lp.x, lp.y);
-            t.lastSetVirtual = lp;
+            const bool warp = wind::InspectExitWarps(t.inspectLookMoved,
+                                                     dynamic_cast<TransformModel*>(t.model) != nullptr);
+            if (warp) SetCursorPos(lp.x, lp.y);
+            t.lastSetVirtual = warp ? lp : t.frozenCursor;
             // The cursor SHAPE is stale after the warp (issue #229): Windows re-evaluates the
             // shape only on a cursor event, so GetCursorInfo keeps reporting whatever cursor
             // was active at the FROZEN spot (an I-beam over text, a link hand) and the sprite
             // draws that stale shape until the user happens to move. Same 1px jiggle the
             // transform model's session-end path uses - a zero-delta injected move is DROPPED
             // by Windows and refreshes nothing (field-verified).
-            SetCursorPos(lp.x + 1, lp.y);
-            SetCursorPos(lp.x, lp.y);
+            if (warp) {
+                SetCursorPos(lp.x + 1, lp.y);
+                SetCursorPos(lp.x, lp.y);
+            }
         }
         if (recenter) { POINT pt; GetCursorPos(&pt); t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y); t.lastSetVirtual = pt; }
         // Resolve the pan delta. FREE: the OS cursor's own motion since we last placed it - Windows'
@@ -1662,6 +1668,7 @@ static void RunTick(TickState& t) {
             t.inspectPanRemY += rawDy * g * t.cfg.cursorSensitivity;
             dx = (int)t.inspectPanRemX; t.inspectPanRemX -= dx;   // truncate toward zero, carry the rest
             dy = (int)t.inspectPanRemY; t.inspectPanRemY -= dy;
+            if (dx != 0 || dy != 0) t.inspectLookMoved = true;
         } else {
             RECT clip{}; GetClipCursor(&clip);
             // A clip is a lock signal only when it is meaningfully SMALLER than the monitor
@@ -2325,7 +2332,8 @@ static void RunTick(TickState& t) {
         {
             wind::DwmCentreIn dc;
             dc.zoomed = lvl > 1.001;
-            dc.freeCursor = freeCursor && !gameCursor;   // a delayed view is Wind's to write (#443)
+            dc.freeCursor = (freeCursor && !gameCursor) ||   // a delayed view is Wind's to write (#443)
+                            wind::InspectKeepsDwmView(inspect, t.inspectLookMoved);   // #445
             dc.viewDetached = t.viewDetached;
             dc.wallNeeded = wind::NearWall(wallNeeded, r.srcLeft, r.srcTop, lvl, kMaxSafeTxMagnitude, 64.0);
             dc.quiesce = quiesceHold;

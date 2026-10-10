@@ -111,3 +111,20 @@ TEST_CASE("a press held past the click window is a drag and may be nudged") {
     CHECK(NudgeBlockedByClick(true, 1000, 0) == true);        // released, inside the window after it
     CHECK(NudgeBlockedByClick(true, 1000, 1003) == true);     // stamp newer than the clock read
 }
+
+TEST_CASE("Inspect keeps DWM's view until the look point moves (#445)") {
+    CHECK(InspectKeepsDwmView(true, false));
+    CHECK_FALSE(InspectKeepsDwmView(true, true));
+    CHECK_FALSE(InspectKeepsDwmView(false, false));
+    DwmCentreIn in; in.zoomed = true; in.freeCursor = InspectKeepsDwmView(true, false);
+    CHECK(WantDwmCentring(in));
+    in.freeCursor = InspectKeepsDwmView(true, true);
+    CHECK_FALSE(WantDwmCentring(in));
+}
+
+TEST_CASE("leaving Inspect warps only when the look point moved or the render engine draws (#445)") {
+    CHECK_FALSE(InspectExitWarps(false, true));
+    CHECK(InspectExitWarps(true, true));
+    CHECK(InspectExitWarps(false, false));
+    CHECK(InspectExitWarps(true, false));
+}

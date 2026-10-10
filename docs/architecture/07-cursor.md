@@ -165,6 +165,10 @@ slightly during zoom ramps, nearest keeps it pixelated and steady. Pure rules:
 - **DWM's learned offset.** DWM learns the gap between `GetCursorPos` and its own cursor point and
   relearns it only when the cursor HANDLE changes, so a learn taken mid-jump can sit a few px off
   until the next shape change. Windows Magnifier has the same behaviour.
+  Measured 2026-10-11 (#445): Wind's own pixel-and-back nudges leave DWM centred 1 desktop px off
+  the pointer in x (either side, about 11 screen px at 10x). With every zoomed nudge removed DWM
+  matched Wind's centre exactly, but panning then shook the pointer up to 30 px, so the nudges stay.
+  A zero-distance injected move is dropped by Windows, so it is no substitute.
 - No cursor sprite, no blanking and no shell-panel handling in a normal zoom. The hide-cursor hotkey
   and `cursorVisibility=never` blank the pointer the way Inspect does (below). Inspect keeps its
   crosshair window. Games pay nothing extra for the native cursor: a zoomed full-screen window is
@@ -264,6 +268,12 @@ Tracking (below) can then detach the view from all of these.
 Inspect (`cursorLockVk`) freezes the cursor and adds a free-look crosshair. It runs in `RunTick`;
 the mouse hook only swallows clicks.
 
+- **No shift at the toggle (#445).** In a transform session DWM centring stays on after entry
+  until the look point first moves (`InspectKeepsDwmView`), and leaving without having moved skips
+  the warp and its 1 px shape jiggle (`InspectExitWarps`). Switching to Wind's own centre at the
+  toggle moved the view by DWM's 1 px offset (above): measured at 10.5x, entry shifted 10-12 px in
+  every run, now 0; exit shifted in about half the runs, now in 1 of 3 (DWM relearns its offset
+  when the pointer is shown again).
 - **Entry.** The real cursor is frozen in place with a 1 px `ClipCursor` (`t.frozenCursor`) and
   hidden, so a hover or tooltip under it stays alive. The look point is the mapper centre and pans
   from ballistics-cooked raw mickeys ([06](06-input.md)).
