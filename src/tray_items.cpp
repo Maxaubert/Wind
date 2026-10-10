@@ -3,7 +3,7 @@
 namespace wind {
 const std::vector<std::string>& EligibleSliders() {
     static const std::vector<std::string> k = {"colorWarmPct", "colorDimPct", "maxLevel", "zoomInSpeed",
-                                               "zoomOutSpeed", "panSpeed", "cursorSmoothing", "zoomEaseOutMs"};
+                                               "zoomOutSpeed", "panSpeed", "panGlideMaxPx", "zoomEaseOutMs"};
     return k;
 }
 const std::vector<std::string>& EligibleToggles() {

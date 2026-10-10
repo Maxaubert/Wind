@@ -38,7 +38,7 @@ static MapResult FreeCursorMap(CursorMapper& m, double curX, double curY, double
 }
 
 TEST_CASE("free cursor reproduces native Magnifier's measured source rect at 8x") {
-    CursorMapper m(3840, 2160, 0.0);
+    CursorMapper m(3840, 2160);
     for (const NativeSample& s : kNative8x) {
         MapResult r = FreeCursorMap(m, s.curX, s.curY, 8.0);
         CHECK(std::llround(r.srcLeft) == s.offX);
@@ -46,28 +46,12 @@ TEST_CASE("free cursor reproduces native Magnifier's measured source rect at 8x"
     }
 }
 
-TEST_CASE("cursorSmoothing cannot introduce lag in free-cursor mode") {
-    // THE point of the change. The welded model eased the rendered centre toward a delta-integrated
-    // target, so the view trailed the hand - the "inertia" complaint - and the weld then dragged the
-    // pointer toward that trailing centre, closing a feedback loop (issue #169, and the wobble).
-    // reset() pins target AND rendered centre together, so a shipped smoothing of 0.4 is inert here.
-    CursorMapper eased(3840, 2160, 0.4);
-    CursorMapper none(3840, 2160, 0.0);
-    for (const NativeSample& s : kNative8x) {
-        MapResult a = FreeCursorMap(eased, s.curX, s.curY, 8.0);
-        MapResult b = FreeCursorMap(none, s.curX, s.curY, 8.0);
-        CHECK(a.srcLeft == doctest::Approx(b.srcLeft));
-        CHECK(a.srcTop == doctest::Approx(b.srcTop));
-        CHECK(std::llround(a.srcLeft) == s.offX);
-    }
-}
-
 TEST_CASE("free cursor is stateless: history cannot change where the view lands") {
     // Native's view position is a pure function of the CURRENT cursor position. Ours must be too,
     // or the wobble has somewhere to hide. Reaching one point by wildly different routes must give
     // bit-identical geometry.
-    CursorMapper direct(3840, 2160, 0.4);
-    CursorMapper wandered(3840, 2160, 0.4);
+    CursorMapper direct(3840, 2160);
+    CursorMapper wandered(3840, 2160);
     for (int i = 0; i < 200; ++i) {                 // drag it all over first
         FreeCursorMap(wandered, (i * 137) % 3840, (i * 91) % 2160, 3.0 + (i % 9));
     }
@@ -82,7 +66,7 @@ TEST_CASE("free cursor is stateless: history cannot change where the view lands"
 TEST_CASE("the pointer lands screen-centre except where the view clamps") {
     // Exactly the behaviour asked for: "centered in the middle of the zoom window following it,
     // unless it gets to the edges".
-    CursorMapper m(3840, 2160, 0.0);
+    CursorMapper m(3840, 2160);
     static const double kLevels[] = { 2.0, 4.0, 8.0, 20.0 };
     for (int li = 0; li < 4; ++li) {
         const double level = kLevels[li];
@@ -103,7 +87,7 @@ TEST_CASE("free cursor matches native's formula across levels, not just the samp
     // offset = clamp(cursor - screen/(2*level), 0, screen - screen/level), the fit confirmed at
     // 92/99 exact against the real magnifier (the misses were samples caught mid-ease).
     const double W = 3840, H = 2160;
-    CursorMapper m(3840, 2160, 0.25);
+    CursorMapper m(3840, 2160);
     for (double level = 1.5; level <= 20.0; level += 0.37) {
         for (int cx = 0; cx <= 3840; cx += 137) {
             for (int cy = 0; cy <= 2160; cy += 331) {
@@ -124,7 +108,7 @@ TEST_CASE("free cursor matches native's formula across levels, not just the samp
 TEST_CASE("the source rect always stays inside the desktop") {
     // The clamp is load-bearing for more than looks: sampling outside the desktop texture is the
     // issue #148 driver-reset class.
-    CursorMapper m(3840, 2160, 0.0);
+    CursorMapper m(3840, 2160);
     // Out-of-desktop cursor values included deliberately: a multi-monitor origin offset or a
     // stale sample can hand us one, and the clamp must survive it.
     static const int kX[] = { -5000, -1, 0, 1920, 3839, 3840, 9000 };

@@ -57,7 +57,8 @@ TEST_CASE("renderer knobs have sane defaults") {
     CHECK(c.cursorConstantSize == 0);          // cursor grows with the zoom, like transform (issue #253)
     CHECK(c.bilinear == 1);
     CHECK(c.sharpness == doctest::Approx(0.0));   // off by default
-    CHECK(c.cursorSmoothing == doctest::Approx(0.4));
+    CHECK(c.panGlideMaxPx == 0);
+    CHECK(c.panGlideMs == 60);
     CHECK(c.zorderBand == 0);                  // shipped unbanded (issue #162): band 16 sat UNDER the
                                                // Snipping Tool overlay, which cost the cursor entirely
     CHECK(c.brightness == doctest::Approx(1.0));
@@ -139,9 +140,9 @@ TEST_CASE("hdrTonemap can be disabled") {
     Config c = ParseConfig("hdrTonemap=0\n");
     CHECK(c.hdrTonemap == 0);
 }
-TEST_CASE("parses cursorSmoothing, z-order band, brightness") {
-    Config c = ParseConfig("cursorSmoothing=0.7\nzorderBand=16\nbrightness=0.85\n");
-    CHECK(c.cursorSmoothing == doctest::Approx(0.7));
+TEST_CASE("parses panGlideMs, z-order band, brightness; the old cursorSmoothing is ignored") {
+    Config c = ParseConfig("panGlideMs=150\ncursorSmoothing=0.7\nzorderBand=16\nbrightness=0.85\n");
+    CHECK(c.panGlideMs == 150);
     CHECK(c.zorderBand == 16);
     CHECK(c.brightness == doctest::Approx(0.85));
 }
@@ -177,13 +178,14 @@ TEST_CASE("numeric fields are clamped to documented ranges") {
     CHECK(ParseConfig("smoothZoomAccel=0\n").smoothZoomAccel == doctest::Approx(1.0));
     CHECK(ParseConfig("smoothZoomRamp=-1\n").smoothZoomRamp == doctest::Approx(0.1));
     CHECK(ParseConfig("cursorSensitivity=10\n").cursorSensitivity == doctest::Approx(4.0));
-    CHECK(ParseConfig("cursorSmoothing=5\n").cursorSmoothing == doctest::Approx(0.95));
-    CHECK(ParseConfig("cursorSmoothing=-1\n").cursorSmoothing == doctest::Approx(0.0));
+    CHECK(ParseConfig("panGlideMs=5000\n").panGlideMs == 300);
+    CHECK(ParseConfig("panGlideMs=-1\n").panGlideMs == 10);
+    CHECK(ParseConfig("panGlideMaxPx=9999\n").panGlideMaxPx == 400);
     CHECK(ParseConfig("sharpness=9\n").sharpness == doctest::Approx(1.0));
     CHECK(ParseConfig("brightness=0\n").brightness == doctest::Approx(0.5));
     // In-range values pass through untouched.
     CHECK(ParseConfig("maxLevel=8\n").maxLevel == doctest::Approx(8.0));
-    CHECK(ParseConfig("cursorSmoothing=0.4\n").cursorSmoothing == doctest::Approx(0.4));
+    CHECK(ParseConfig("panGlideMs=150\n").panGlideMs == 150);
 }
 TEST_CASE("multiMonitor can be set") {
     CHECK(ParseConfig("multiMonitor=0\n").multiMonitor == 0);
@@ -458,7 +460,8 @@ TEST_CASE("the first-run ini template parses to the struct defaults (issue #274)
     CHECK(t.dwmFlush == d.dwmFlush);
     CHECK(t.diagnostics == d.diagnostics);
     CHECK(t.cursorSensitivity == doctest::Approx(d.cursorSensitivity));
-    CHECK(t.cursorSmoothing == doctest::Approx(d.cursorSmoothing));
+    CHECK(t.panGlideMs == d.panGlideMs);
+    CHECK(t.panGlideMaxPx == d.panGlideMaxPx);
     CHECK(t.cursorConstantSize == d.cursorConstantSize);
     CHECK(t.cursorVisibility == d.cursorVisibility);
     CHECK(t.bilinear == d.bilinear);

@@ -28,7 +28,7 @@ TEST_CASE("tray layout: an explicit trayPerf=0 and an empty toggle list still hi
 
 TEST_CASE("eligible lists match the owner's choice") {
     CHECK(EligibleSliders() == V{"colorWarmPct", "colorDimPct", "maxLevel", "zoomInSpeed",
-                                 "zoomOutSpeed", "panSpeed", "cursorSmoothing", "zoomEaseOutMs"});
+                                 "zoomOutSpeed", "panSpeed", "panGlideMaxPx", "zoomEaseOutMs"});
     CHECK(EligibleToggles() == V{"trackCaret", "trackFocus", "keepEdges", "engine"});
 }
 
@@ -36,7 +36,7 @@ TEST_CASE("tray layout round trip keeps order and enabled state") {
     TrayLayout l = ParseTrayLayout({});
     // Move panSpeed to the front, enable it, disable warmth; enable two toggles in a custom order.
     l.sliders = {{"panSpeed", true}, {"colorDimPct", true}, {"colorWarmPct", false}, {"maxLevel", true},
-                 {"zoomInSpeed", false}, {"zoomOutSpeed", false}, {"cursorSmoothing", false},
+                 {"zoomInSpeed", false}, {"zoomOutSpeed", false}, {"panGlideMaxPx", false},
                  {"zoomEaseOutMs", false}};
     l.toggles = {{"keepEdges", true}, {"trackCaret", false}, {"trackFocus", true}, {"engine", false}};
     l.perf = true;
@@ -81,7 +81,7 @@ TEST_CASE("unknown keys are dropped and missing eligible items appended off") {
     TrayLayout l = ParseTrayLayout(v);
     CHECK(Keys(l.sliders, false) ==
           V{"zoomInSpeed", "panSpeed", "colorWarmPct", "colorDimPct", "maxLevel", "zoomOutSpeed",
-            "cursorSmoothing", "zoomEaseOutMs"});
+            "panGlideMaxPx", "zoomEaseOutMs"});
     CHECK(Keys(l.sliders, true) == V{"panSpeed", "colorWarmPct"});
     CHECK(Keys(l.toggles, false) == V{"trackFocus", "trackCaret", "keepEdges", "engine"});
     CHECK(Keys(l.toggles, true) == V{"trackFocus"});

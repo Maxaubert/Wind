@@ -51,7 +51,7 @@ test('model: round trip keeps order and enabled, drops unknown keys, appends mis
   const v = { traySliders: 'zoomInSpeed,colorWarmPct,bogus', traySliderOrder: 'panSpeed,zoomInSpeed,nope,colorWarmPct',
               trayToggles: 'keepEdges', trayToggleOrder: 'keepEdges,trackCaret' };
   const s = parseList(v, 'sliders');
-  expect(s.map((i) => i.key)).toEqual(['panSpeed', 'zoomInSpeed', 'colorWarmPct', 'colorDimPct', 'maxLevel', 'zoomOutSpeed', 'cursorSmoothing', 'zoomEaseOutMs']);
+  expect(s.map((i) => i.key)).toEqual(['panSpeed', 'zoomInSpeed', 'colorWarmPct', 'colorDimPct', 'maxLevel', 'zoomOutSpeed', 'panGlideMaxPx', 'zoomEaseOutMs']);
   expect(s.filter((i) => i.on).map((i) => i.key)).toEqual(['zoomInSpeed', 'colorWarmPct']);
   const w = serialiseList('sliders', s);
   expect(w.traySliders).toBe('zoomInSpeed,colorWarmPct');
@@ -85,7 +85,7 @@ test('tab: below the sidebar divider, banner, performance card and both lists', 
   await expect(page.getByRole('switch', { name: 'Performance in the tray' })).toBeChecked();   // on by default (#329)
   await expect(page.locator('#cap-sliders')).toHaveText('Sliders');
   await expect(page.locator('#cap-toggles')).toHaveText('Toggles');
-  expect(await names(page, 'sliders')).toEqual(['Warmth', 'Brightness', 'Max zoom', 'Zoom-in speed', 'Zoom-out speed', 'Arrow key speed', 'Pan smoothing', 'Release glide']);
+  expect(await names(page, 'sliders')).toEqual(['Warmth', 'Brightness', 'Max zoom', 'Zoom-in speed', 'Zoom-out speed', 'Arrow key speed', 'Pan glide', 'Release glide']);
   expect(await names(page, 'toggles')).toEqual(['Follow the text cursor', 'Follow keyboard focus', 'Keep cursor centred', 'Engine']);
   await expect(page.locator('[data-cnt="sliders"]')).toHaveText('2 of 4');
   await expect(page.locator('[data-cnt="toggles"]')).toHaveText('4 on');   // every toggle on by default (#329)
@@ -116,7 +116,7 @@ test('check and uncheck write the enabled list and the full order', async ({ pag
   await chk(page, 'sliders', 'Arrow key speed').click();
   let v = await live(page);
   expect(v.traySliders).toBe('colorWarmPct,colorDimPct,panSpeed');
-  expect(v.traySliderOrder).toBe('colorWarmPct,colorDimPct,maxLevel,zoomInSpeed,zoomOutSpeed,panSpeed,cursorSmoothing,zoomEaseOutMs');
+  expect(v.traySliderOrder).toBe('colorWarmPct,colorDimPct,maxLevel,zoomInSpeed,zoomOutSpeed,panSpeed,panGlideMaxPx,zoomEaseOutMs');
   await expect(page.locator('[data-cnt="sliders"]')).toHaveText('3 of 4');
   await chk(page, 'sliders', 'Warmth').click();
   v = await live(page);
