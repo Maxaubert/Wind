@@ -128,6 +128,11 @@ if (-not (Test-Path $setup)) {
             ForEach-Object { [pscustomobject]@{ Store = $s; Raw = $_.RawData } }
     })
 
+    # The installer closes a running Wind/WindTray (that is its job), which would also quit the
+    # developer's own session. Remember what is running and start it again afterwards.
+    $wasRunning = @(Get-Process -Name Wind, WindTray -ErrorAction SilentlyContinue |
+        ForEach-Object { $_.Path } | Where-Object { $_ })
+
     $scratch = Join-Path $env:TEMP 'wind-installer-check'
     if (Test-Path $scratch) { Remove-Item -LiteralPath $scratch -Recurse -Force }
 
@@ -140,89 +145,94 @@ if (-not (Test-Path $setup)) {
     $appData = Join-Path $env:LOCALAPPDATA 'Wind'
     $seeded = $false
     $marker = Join-Path $appData 'installer-check-marker.txt'
-    if (-not (Test-Path $appData)) {
-        New-Item -ItemType Directory -Force $appData | Out-Null
-        Set-Content -LiteralPath $marker -Value 'seeded by tools/installer_check.ps1' -NoNewline
-        $seeded = $true
-    }
+    try {
+        if (-not (Test-Path $appData)) {
+            New-Item -ItemType Directory -Force $appData | Out-Null
+            Set-Content -LiteralPath $marker -Value 'seeded by tools/installer_check.ps1' -NoNewline
+            $seeded = $true
+        }
 
-    # /D must be the last argument and unquoted. That is an NSIS rule, not a typo.
-    Start-Process $setup -ArgumentList '/S', "/D=$scratch" -Wait
-    Check "silent install placed Wind.exe"       { Test-Path (Join-Path $scratch 'Wind.exe') }
-    Check "silent install placed WindConfig.exe" { Test-Path (Join-Path $scratch 'WindConfig.exe') }
-    Check "silent install placed WindTray.exe"   { Test-Path (Join-Path $scratch 'WindTray.exe') }
-    Check "silent install placed ui\dist"        { Test-Path (Join-Path $scratch 'ui\dist\index.html') }
-    # Local signing (issue #261): only when this build packed the uiAccess variant.
-    if (Test-Path (Join-Path $root 'WindUA.exe')) {
-        $sig = Get-AuthenticodeSignature (Join-Path $scratch 'Wind.exe')
-        Check "local signing: Wind.exe signature is Valid" { $sig.Status -eq 'Valid' }
-        Check "local signing: signed by CN=Wind Local Signing" { $sig.SignerCertificate.Subject -eq 'CN=Wind Local Signing' }
-        Check "local signing: WindTray.exe signature is Valid" {
-            (Get-AuthenticodeSignature (Join-Path $scratch 'WindTray.exe')).Status -eq 'Valid'
+        # /D must be the last argument and unquoted. That is an NSIS rule, not a typo.
+        Start-Process $setup -ArgumentList '/S', "/D=$scratch" -Wait
+        Check "silent install placed Wind.exe"       { Test-Path (Join-Path $scratch 'Wind.exe') }
+        Check "silent install placed WindConfig.exe" { Test-Path (Join-Path $scratch 'WindConfig.exe') }
+        Check "silent install placed WindTray.exe"   { Test-Path (Join-Path $scratch 'WindTray.exe') }
+        Check "silent install placed ui\dist"        { Test-Path (Join-Path $scratch 'ui\dist\index.html') }
+        # Local signing (issue #261): only when this build packed the uiAccess variant.
+        if (Test-Path (Join-Path $root 'WindUA.exe')) {
+            $sig = Get-AuthenticodeSignature (Join-Path $scratch 'Wind.exe')
+            Check "local signing: Wind.exe signature is Valid" { $sig.Status -eq 'Valid' }
+            Check "local signing: signed by CN=Wind Local Signing" { $sig.SignerCertificate.Subject -eq 'CN=Wind Local Signing' }
+            Check "local signing: WindTray.exe signature is Valid" {
+                (Get-AuthenticodeSignature (Join-Path $scratch 'WindTray.exe')).Status -eq 'Valid'
+            }
+            Check "local signing: the signing key is gone" {
+                -not (Get-ChildItem Cert:\LocalMachine\My | Where-Object Subject -eq 'CN=Wind Local Signing')
+            }
+            Check "local signing: exactly one trusted root" {
+                @(Get-ChildItem Cert:\LocalMachine\Root | Where-Object Subject -eq 'CN=Wind Local Signing').Count -eq 1
+            }
         }
-        Check "local signing: the signing key is gone" {
-            -not (Get-ChildItem Cert:\LocalMachine\My | Where-Object Subject -eq 'CN=Wind Local Signing')
+        Check "ARP DisplayVersion is $version" {
+            (Get-ItemProperty $ARP -ErrorAction SilentlyContinue).DisplayVersion -eq $version
         }
-        Check "local signing: exactly one trusted root" {
-            @(Get-ChildItem Cert:\LocalMachine\Root | Where-Object Subject -eq 'CN=Wind Local Signing').Count -eq 1
+        Check "Run value points at the install" {
+            (Get-ItemProperty $RUN -ErrorAction SilentlyContinue).Wind -match 'Wind\.exe'
         }
-    }
-    Check "ARP DisplayVersion is $version" {
-        (Get-ItemProperty $ARP -ErrorAction SilentlyContinue).DisplayVersion -eq $version
-    }
-    Check "Run value points at the install" {
-        (Get-ItemProperty $RUN -ErrorAction SilentlyContinue).Wind -match 'Wind\.exe'
-    }
 
-    $uninst = Join-Path $scratch 'Uninstall.exe'
-    if (Test-Path $uninst) {
-        # _?= keeps the uninstaller in place so -Wait actually waits for it. Without it NSIS
-        # copies itself to TEMP and returns immediately. The cost is that Uninstall.exe
-        # cannot delete itself, which is why it is not checked for below.
-        Start-Process $uninst -ArgumentList '/S', ('_?=' + $scratch) -Wait
-        Start-Sleep -Milliseconds 1200
-        Check "uninstall removed Wind.exe"    { -not (Test-Path (Join-Path $scratch 'Wind.exe')) }
-        Check "uninstall removed WindTray.exe" { -not (Test-Path (Join-Path $scratch 'WindTray.exe')) }
-        Check "uninstall removed ui\dist"     { -not (Test-Path (Join-Path $scratch 'ui')) }
-        Check "uninstall removed the ARP key" { $null -eq (Get-ItemProperty $ARP -ErrorAction SilentlyContinue) }
-        Check "uninstall removed every Wind Local Signing root" {
-            -not (Get-ChildItem Cert:\LocalMachine\Root, Cert:\LocalMachine\TrustedPublisher |
-                  Where-Object Subject -eq 'CN=Wind Local Signing')
+        $uninst = Join-Path $scratch 'Uninstall.exe'
+        if (Test-Path $uninst) {
+            # _?= keeps the uninstaller in place so -Wait actually waits for it. Without it NSIS
+            # copies itself to TEMP and returns immediately. The cost is that Uninstall.exe
+            # cannot delete itself, which is why it is not checked for below.
+            Start-Process $uninst -ArgumentList '/S', ('_?=' + $scratch) -Wait
+            Start-Sleep -Milliseconds 1200
+            Check "uninstall removed Wind.exe"    { -not (Test-Path (Join-Path $scratch 'Wind.exe')) }
+            Check "uninstall removed WindTray.exe" { -not (Test-Path (Join-Path $scratch 'WindTray.exe')) }
+            Check "uninstall removed ui\dist"     { -not (Test-Path (Join-Path $scratch 'ui')) }
+            Check "uninstall removed the ARP key" { $null -eq (Get-ItemProperty $ARP -ErrorAction SilentlyContinue) }
+            Check "uninstall removed every Wind Local Signing root" {
+                -not (Get-ChildItem Cert:\LocalMachine\Root, Cert:\LocalMachine\TrustedPublisher |
+                      Where-Object Subject -eq 'CN=Wind Local Signing')
+            }
+            Check "uninstall removed the Run value" {
+                $null -eq (Get-ItemProperty $RUN -ErrorAction SilentlyContinue).Wind
+            }
+            # A silent uninstall answers the keep-or-delete prompt with /SD IDNO, so the settings
+            # must still be there. Deleting them silently would be the worst bug in the installer.
+            Check "uninstall kept %LOCALAPPDATA%\Wind" { Test-Path $appData }
+            if ($seeded) { Check "uninstall kept the seeded file" { Test-Path $marker } }
+        } else {
+            Check "uninstaller was written" { $false }
         }
-        Check "uninstall removed the Run value" {
-            $null -eq (Get-ItemProperty $RUN -ErrorAction SilentlyContinue).Wind
+    } finally {
+        # Take back only what this script created; a real settings folder is never touched.
+        if ($seeded) {
+            Remove-Item -LiteralPath $marker -Force -ErrorAction SilentlyContinue
+            if (-not (Get-ChildItem $appData -Force -ErrorAction SilentlyContinue)) {
+                Remove-Item -LiteralPath $appData -Force -ErrorAction SilentlyContinue
+            }
         }
-        # A silent uninstall answers the keep-or-delete prompt with /SD IDNO, so the settings
-        # must still be there. Deleting them silently would be the worst bug in the installer.
-        Check "uninstall kept %LOCALAPPDATA%\Wind" { Test-Path $appData }
-        if ($seeded) { Check "uninstall kept the seeded file" { Test-Path $marker } }
-    } else {
-        Check "uninstaller was written" { $false }
-    }
 
-    # Take back only what this script created; a real settings folder is never touched.
-    if ($seeded) {
-        Remove-Item -LiteralPath $marker -Force -ErrorAction SilentlyContinue
-        if (-not (Get-ChildItem $appData -Force -ErrorAction SilentlyContinue)) {
-            Remove-Item -LiteralPath $appData -Force -ErrorAction SilentlyContinue
-        }
-    }
+        if (Test-Path $scratch) { Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue }
 
-    if (Test-Path $scratch) { Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue }
-
-    # Put back whatever was here before the smoke test.
-    if ($savedArp) {
-        New-Item -Path $ARP -Force | Out-Null
-        foreach ($n in 'DisplayName','DisplayVersion','Publisher','DisplayIcon','InstallLocation','UninstallString') {
-            if ($null -ne $savedArp.$n) { New-ItemProperty $ARP -Name $n -Value $savedArp.$n -PropertyType String -Force | Out-Null }
+        # Put back whatever was here before the smoke test.
+        if ($savedArp) {
+            New-Item -Path $ARP -Force | Out-Null
+            foreach ($n in 'DisplayName','DisplayVersion','Publisher','DisplayIcon','InstallLocation','UninstallString') {
+                if ($null -ne $savedArp.$n) { New-ItemProperty $ARP -Name $n -Value $savedArp.$n -PropertyType String -Force | Out-Null }
+            }
         }
-    }
-    if ($savedRun) { New-ItemProperty $RUN -Name 'Wind' -Value $savedRun -PropertyType String -Force | Out-Null }
-    foreach ($r in $savedRoots) {
-        $st = New-Object System.Security.Cryptography.X509Certificates.X509Store($r.Store, 'LocalMachine')
-        $st.Open('ReadWrite')
-        $st.Add([System.Security.Cryptography.X509Certificates.X509Certificate2]::new([byte[]]$r.Raw))
-        $st.Close()
+        if ($savedRun) { New-ItemProperty $RUN -Name 'Wind' -Value $savedRun -PropertyType String -Force | Out-Null }
+        foreach ($r in $savedRoots) {
+            $st = New-Object System.Security.Cryptography.X509Certificates.X509Store($r.Store, 'LocalMachine')
+            $st.Open('ReadWrite')
+            $st.Add([System.Security.Cryptography.X509Certificates.X509Certificate2]::new([byte[]]$r.Raw))
+            $st.Close()
+        }
+        foreach ($exe in $wasRunning) {
+            if (Test-Path -LiteralPath $exe) { Start-Process -FilePath $exe -ErrorAction SilentlyContinue }
+        }
     }
 }
 

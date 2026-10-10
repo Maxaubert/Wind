@@ -30,7 +30,7 @@ headlessly, so the unit tests are the only verification loop that runs everywher
 - The `test` target compiles `tests\*.cpp` with `/DWIND_TESTS` against only the pure sources. The
   authoritative list is the `:test` target in `build.bat`; today it is `transform`,
   `zoom_controller`, `config`, `profiles`, `cursor_mapper`, `lock_detector`, `cursor_lock`,
-  `mouse_ballistics`, `crosshair`, `config_ui/ini_edit`, `logging` and `tray_items`.
+  `mouse_ballistics`, `crosshair`, `config_ui/ini_edit`, `logging`, `tray_items` and `hitch_record`.
 - Header-only pure modules (`engine_pick.h`, `drag_follow.h`, `hdr_scale.h`, `keybind_rules.h`,
   `config_ui/wind_watchdog.h` and others) ride in through their test files.
 - One test file per module (`tests/test_<module>.cpp`). A new pure `.cpp` also goes into the
@@ -38,15 +38,17 @@ headlessly, so the unit tests are the only verification loop that runs everywher
 - Files that straddle the line put their OS half under `#ifndef WIND_TESTS`. `src/config.cpp` is
   the example: `ParseConfig` and `StripUiOnlyKeys` above, `LoadConfig` and the only
   `#include <windows.h>` below.
-- `tests/fixtures/keybind_cases.txt` is shared by the C++ and the JavaScript bind rules.
+- `tests/fixtures/keybind_cases.txt` is shared by the C++ and the JavaScript bind rules. The JS half
+  is `ui/tests/keybind-rules.nodetest.mjs`, run by `npm run test:rules` in `ui/` (`node --test`, no
+  browser) and by CI.
 
-**UI suite.** `ui/tests/` holds 12 Playwright specs, run with `npx playwright test` in `ui/` (the
+**UI suite.** `ui/tests/` holds 11 Playwright specs, run with `npx playwright test` in `ui/` (the
 config starts the Vite server). A fake `window.chrome.webview` answers the host's messages and
 records them in `window.__msgs`. When you add a bridge message to `HandleWebMessage`, extend the
 mock in the same change. Details in [09](09-settings-ui.md).
 
 **CI** (`.github/workflows/build.yml`, on pull requests and pushes to `main`) builds the app and
-runs the doctest suite. It does not run the UI suite; that is a local gate for UI changes.
+runs the doctest suite. It also runs the JS keybind-rule test. The Playwright UI suite is a local gate for UI changes.
 
 ## Local UIAccess deploy
 

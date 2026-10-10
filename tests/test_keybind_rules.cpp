@@ -3,11 +3,21 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 using namespace wind;
 
 // Runs every case in the shared list (also read by the UI mirror's tests).
 TEST_CASE("keybind safety rules match the shared case list (#285)") {
-    std::ifstream f("tests/fixtures/keybind_cases.txt");
+    // The cwd varies (repo root from build.bat, a build dir elsewhere), so also try the folder
+    // this file sits in, then walk up from the cwd.
+    std::string here = __FILE__;
+    const size_t cut = here.find_last_of("/\\");
+    std::vector<std::string> tries;
+    if (cut != std::string::npos) tries.push_back(here.substr(0, cut) + "/fixtures/keybind_cases.txt");
+    for (const char* up : { "", "../", "../../", "../../../" })
+        tries.push_back(std::string(up) + "tests/fixtures/keybind_cases.txt");
+    std::ifstream f;
+    for (const std::string& p : tries) { f.open(p); if (f.good()) break; f.clear(); }
     REQUIRE(f.good());
     std::string line;
     int cases = 0;

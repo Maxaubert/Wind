@@ -91,19 +91,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           ALPHA_NOTE: ${{ inputs.note }}
+          ALPHA_BRANCH: ${{ github.ref_name }}   # a branch name can hold $( ) and backticks
         run: |
           $ErrorActionPreference = 'Continue'
           $PSNativeCommandUseErrorActionPreference = $false
           $tag  = '${{ steps.ver.outputs.tag }}'
           $exe  = '${{ steps.asset.outputs.path }}'
           $note = $env:ALPHA_NOTE   # data, never spliced into the script
+          $branch = $env:ALPHA_BRANCH
           $body = @"
           **Alpha build - not a release.** Installs over a normal Wind install and shares its
           settings; roll back by running the stable installer from the Latest release.
 
           | | |
           |---|---|
-          | branch | ``${{ github.ref_name }}`` |
+          | branch | ``$branch`` |
           | commit | ``${{ steps.ver.outputs.sha7 }}`` |
           | base version | ``${{ steps.ver.outputs.version }}`` |
           | sha256 | ``${{ steps.asset.outputs.sha256 }}`` |
@@ -138,10 +140,12 @@ jobs:
 
       - name: Summary
         shell: pwsh
+        env:
+          ALPHA_BRANCH: ${{ github.ref_name }}
         run: |
           "## Wind ${{ steps.ver.outputs.alpha }} (pre-release)"        >> $env:GITHUB_STEP_SUMMARY
           ""                                                             >> $env:GITHUB_STEP_SUMMARY
-          "- branch ``${{ github.ref_name }}``"                          >> $env:GITHUB_STEP_SUMMARY
+          "- branch ``$env:ALPHA_BRANCH``"                                >> $env:GITHUB_STEP_SUMMARY
           "- tag ``${{ steps.ver.outputs.tag }}``"                       >> $env:GITHUB_STEP_SUMMARY
           "- sha256 ``${{ steps.asset.outputs.sha256 }}``"               >> $env:GITHUB_STEP_SUMMARY
           "- the stable release keeps the Latest badge; this does not"   >> $env:GITHUB_STEP_SUMMARY

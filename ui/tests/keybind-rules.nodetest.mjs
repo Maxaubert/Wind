@@ -1,9 +1,11 @@
-import { test, expect } from '@playwright/test';
+import test from 'node:test';
+import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { checkKeyBind, checkWheelBind, checkClickBind } from '../src/lib/keybindRules.js';
 
+// Plain node:test, no browser: run with `npm run test:rules` (CI runs it too).
 // The UI mirror must agree with the C++ rules on every shared case (issue #285).
 test('UI keybind rules match the shared case list', () => {
   const here = dirname(fileURLToPath(import.meta.url));
@@ -17,8 +19,8 @@ test('UI keybind rules match the shared case list', () => {
     else if (p[0] === 'wheel') got = checkWheelBind(Number(p[1]));
     else if (p[0] === 'click') got = checkClickBind(Number(p[1]), Number(p[2]));
     const want = p[p.length - 1];
-    expect(got, line).toBe(want);
+    assert.equal(got, want, line);
     n++;
   }
-  expect(n).toBeGreaterThan(90);
+  assert.ok(n > 90, `only ${n} cases read`);
 });
