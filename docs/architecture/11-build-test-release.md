@@ -30,9 +30,9 @@ headlessly, so the unit tests are the only verification loop that runs everywher
 - The `test` target compiles `tests\*.cpp` with `/DWIND_TESTS` against only the pure sources. The
   authoritative list is the `:test` target in `build.bat`; today it is `transform`,
   `zoom_controller`, `config`, `profiles`, `cursor_mapper`, `lock_detector`, `cursor_lock`,
-  `crosshair`, `config_ui/ini_edit`, `logging`, `tray_items` and `hitch_record`.
+  `crosshair`, `config_ui/ini_edit`, `logging`, `tray_items`, `hitch_record` and `render_params`.
 - Header-only pure modules (`engine_pick.h`, `drag_follow.h`, `hdr_scale.h`, `keybind_rules.h`,
-  `config_ui/wind_watchdog.h` and others) ride in through their test files.
+  `config_ui/wind_watchdog.h`, `swallow_ledger.h`, `reload_gate.h` and others) ride in through their test files.
 - One test file per module (`tests/test_<module>.cpp`). A new pure `.cpp` also goes into the
   `:test` list.
 - Files that straddle the line put their OS half under `#ifndef WIND_TESTS`. `src/config.cpp` is

@@ -33,4 +33,15 @@ inline ColorMatrix GuardedColorMatrix(const ColorMatrix& wanted, bool guard) {
     return (guard && IsIdentity(wanted)) ? MpoGuardMatrix() : wanted;
 }
 
+// Pure core of MpoGhost::settled (comp_pin.cpp reads the window facts, this decides). Fail-closed:
+// the walls lift only when every fact checks out and the settle window has elapsed.
+constexpr unsigned long long kMpoSettleMs = 350;   // plane-demotion settle window
+inline bool MpoGhostSettled(bool created, bool shown, unsigned long long shownAtMs,
+                            unsigned long long nowMs, bool windowVisible, bool rectKnown,
+                            bool rectMatches) {
+    if (!created || !shown || shownAtMs == 0) return false;
+    if (nowMs - shownAtMs < kMpoSettleMs) return false;
+    if (!windowVisible) return false;
+    return rectKnown && rectMatches;
+}
 }  // namespace wind

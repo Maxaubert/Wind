@@ -59,6 +59,7 @@
 #include "sched_priority.h"   // tick thread priority + no power throttling (#334)
 #include "typing_key.h"       // typing-key stamp for the click quiet period (#328)
 #include "dwm_watch.h"        // StartDwmWatch (#396)
+#include "reload_gate.h"      // DecideReload + bind-change predicates (pure, tested)
 #include "resource.h"
 
 using namespace wind;
@@ -1089,14 +1090,15 @@ static void RunTick(TickState& t) {
                 readOk = wind::TryLoadConfig(t.iniPath, fresh) && wind::ReadTextFileOk(t.iniPath, raw, 0);
             }
             std::string stripped = readOk ? wind::StripUiOnlyKeys(raw) : std::string();
-            const bool loaded = readOk && (t.lastCoreIni.empty() || stripped != t.lastCoreIni);
+            const wind::ReloadVerdict verdict = wind::DecideReload(readOk, stripped, t.lastCoreIni);
+            const bool loaded = verdict.reload;
             Config nc;
             if (loaded) nc = ParseConfig(raw);
-            if (!readOk) {
+            if (verdict.retry) {
                 if (!t.configRetry)
                     wind::Log(wind::LogLevel::Warn, "config", "ini unreadable on reload, keeping the running settings");
                 t.configRetry = true;
-            } else {
+            } else if (verdict.takeMtime) {
                 t.lastMtime = m;
                 t.configRetry = false;
             }
@@ -1118,28 +1120,20 @@ static void RunTick(TickState& t) {
             // Re-bind the hook's button mapping if the user changed it via the config UI; without
             // this the hook would keep firing the OLD button (the new VK works via GetAsyncKeyState
             // but the mouse mapping is captured once in g_input.start at app launch).
-            if (nc.zoomInButton != t.cfg.zoomInButton || nc.zoomOutButton != t.cfg.zoomOutButton
-             || nc.zoomInButton2 != t.cfg.zoomInButton2 || nc.zoomOutButton2 != t.cfg.zoomOutButton2
-             || nc.zoomInButtonMods != t.cfg.zoomInButtonMods || nc.zoomOutButtonMods != t.cfg.zoomOutButtonMods
-             || nc.zoomInButton2Mods != t.cfg.zoomInButton2Mods || nc.zoomOutButton2Mods != t.cfg.zoomOutButton2Mods) {
+            if (wind::ButtonBindsChanged(nc, t.cfg)) {
                 g_input.setButtonBinds(nc.zoomInButton, nc.zoomInButtonMods, nc.zoomInButton2, nc.zoomInButton2Mods,
                                        nc.zoomOutButton, nc.zoomOutButtonMods, nc.zoomOutButton2, nc.zoomOutButton2Mods);
             }
             g_input.setWheelMods(nc.zoomWheelMods);   // scroll-wheel zoom (#285); one relaxed store
             // Re-bind the keyboard hook's tracked/swallowed keys when any keyboard zoom/recenter
             // bind changed (else the hook keeps swallowing the OLD key and ignores the new one).
-            if (nc.zoomInVk != t.cfg.zoomInVk || nc.zoomOutVk != t.cfg.zoomOutVk
-             || nc.zoomInVk2 != t.cfg.zoomInVk2 || nc.zoomOutVk2 != t.cfg.zoomOutVk2
-             || nc.recenterVk != t.cfg.recenterVk || nc.cursorLockVk != t.cfg.cursorLockVk) {
+            if (wind::KeyBindsChanged(nc, t.cfg)) {
                 g_input.setKeys(nc.zoomInVk, nc.zoomInVk2, nc.zoomOutVk, nc.zoomOutVk2, nc.recenterVk,
                                 nc.cursorLockVk);
             }
             g_input.setKeyMods(nc.zoomInMods, nc.zoomInMods2, nc.zoomOutMods, nc.zoomOutMods2,
                                nc.recenterMods, nc.cursorLockMods);
-            if (nc.panLeftVk != t.cfg.panLeftVk || nc.panLeftMods != t.cfg.panLeftMods
-             || nc.panRightVk != t.cfg.panRightVk || nc.panRightMods != t.cfg.panRightMods
-             || nc.panUpVk != t.cfg.panUpVk || nc.panUpMods != t.cfg.panUpMods
-             || nc.panDownVk != t.cfg.panDownVk || nc.panDownMods != t.cfg.panDownMods) {
+            if (wind::PanBindsChanged(nc, t.cfg)) {
                 const int pv[4] = { nc.panLeftVk, nc.panRightVk, nc.panUpVk, nc.panDownVk };
                 const int pm[4] = { nc.panLeftMods, nc.panRightMods, nc.panUpMods, nc.panDownMods };
                 g_input.setPanKeys(pv, pm);   // keyboard panning (#287)

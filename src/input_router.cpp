@@ -1,6 +1,7 @@
 #include "input_router.h"
 #include "config.h"     // IsForbiddenBindVk (keyboard-bind safety blocklist)
 #include "pointer_binds.h" // button/wheel bind matching, the mask keystroke (#285)
+#include "swallow_ledger.h" // the swallowed-DOWN records (pure, tested)
 #include "logging.h"    // hook-watchdog events (issue #156)
 #include "typing_key.h" // the typing-key stamp for the click quiet period (#328)
 #include "event_order.h" // raw-UP reordering guard on event times
@@ -19,7 +20,7 @@ static TypingKeyFilter g_typingKeys;       // hook thread only: fresh non-modifi
 // the DOWN, so only the matching UP is swallowed too (keeps the system's down/up view balanced and a
 // key can never be left believed-held).
 static std::atomic<bool> g_kbPressed[256]      = {};
-static std::atomic<bool> g_kbSwallowedDown[256] = {};
+static wind::SwallowLedger<256> g_kbSwallowedDown;
 // The WH_MOUSE_LL hook lives on its OWN thread (see start()): Windows services a low-level hook on
 // the thread that installed it and holds each mouse event until that thread responds, so the hook
 // MUST sit on a thread that pumps messages constantly. On the main thread it was starved behind the
@@ -34,7 +35,7 @@ static bool    g_hookOk       = false;     // result of SetWindowsHookExW, publi
 // previous binding can't cause a later UP to be wrongly swallowed. ATOMIC: touched by three
 // contexts - the hook thread (MouseProc), the tick thread (setButtons on hot-reload), and the
 // teardown caller (ReleaseSwallowedButtons via stop()) - so plain bools would be a data race.
-static std::atomic<bool> g_swallowedDown[6] = {};   // index = button id 1..5 (#285: 3/4/5 = L/R/M)
+static wind::SwallowLedger<6> g_swallowedDown;   // index = button id 1..5 (#285: 3/4/5 = L/R/M)
 // Which direction a pressed bound button is holding (1 in, 2 out, 0 none) and that bind's modifiers,
 // per button id. The directions' held flags are derived from these, so two buttons on the same
 // direction (a side button and Ctrl+Alt+click) can never release each other.
@@ -200,7 +201,7 @@ void InputRouter::notePanPress(int vk) {
 }
 bool InputRouter::keySwallowed(int vk) const {
     if (vk <= 0 || vk > 255) return false;
-    return g_kbSwallowedDown[vk].load(std::memory_order_relaxed);
+    return g_kbSwallowedDown.isSet(vk);
 }
 void InputRouter::setKeyMods(int zoomInMods, int zoomInMods2, int zoomOutMods, int zoomOutMods2,
                              int recenterMods, int cursorLockMods) {
@@ -243,7 +244,7 @@ void InputRouter::rawKeyUp(int vk, uint32_t eventTimeMs) {
     // a real hold; an evicted hook stops stamping, so the net still fires).
     if (kbHookActive() && RawUpIsStale(kbLastHookDownMs_[vk].load(std::memory_order_relaxed), eventTimeMs)) return;
     g_kbPressed[vk].store(false, std::memory_order_relaxed);
-    g_kbSwallowedDown[vk].store(false, std::memory_order_relaxed);
+    g_kbSwallowedDown.clear(vk);
 }
 void InputRouter::rawButtonUp(int xbuttonId, uint32_t eventTimeMs) {
     if (xbuttonId < 1 || xbuttonId > 5) return;
@@ -272,7 +273,7 @@ void InputRouter::setKeys(int zoomInVk, int zoomInVk2, int zoomOutVk, int zoomOu
     kbCursorLockVk_.store(cursorLockVk, std::memory_order_relaxed);
     // Clear per-key pressed + swallowed records so a remap mid-press (keybind capture clears the old
     // binding) can't leave a held flag stuck or cause a later, unrelated UP to be swallowed.
-    for (int i = 0; i < 256; ++i) { g_kbPressed[i].store(false); g_kbSwallowedDown[i].store(false); }
+    for (int i = 0; i < 256; ++i) { g_kbPressed[i].store(false); g_kbSwallowedDown.clear(i); }
 }
 
 static LRESULT CALLBACK KbProc(int code, WPARAM wParam, LPARAM lParam) {
@@ -306,21 +307,21 @@ static LRESULT CALLBACK KbProc(int code, WPARAM wParam, LPARAM lParam) {
                     // decision, so a key the app already saw going down is never swallowed mid-press.
                     const int held = HeldModsNow();
                     if (g_router->swallowEnabled() && g_router->keyBindMatches(vk, held)) {
-                        g_kbSwallowedDown[vk].store(true);
+                        g_kbSwallowedDown.markDown(vk);
                         g_router->notePanPress(vk);   // a tap between two tick samples still nudges
                         // Alt or Win held: mask it so its release is not a lone tap (Start / menu bar).
                         if (NeedsMaskKey(held)) InjectMaskKey();
                         swallow = true;
                     } else {
-                        g_kbSwallowedDown[vk].store(false);   // a stale record must not eat this press's UP
+                        g_kbSwallowedDown.clear(vk);   // a stale record must not eat this press's UP
                     }
                 } else {
-                    swallow = g_kbSwallowedDown[vk].load();
+                    swallow = g_kbSwallowedDown.isSet(vk);
                 }
             } else { // up: swallow iff we swallowed its DOWN, so the system's down/up view stays balanced.
                 g_kbPressed[vk].store(false);
                 WakeMain();
-                if (g_kbSwallowedDown[vk].exchange(false)) swallow = true;
+                if (g_kbSwallowedDown.consumeUp(vk)) swallow = true;
             }
             if (swallow) return 1; // eat the key so the focused app never sees the zoom/recenter bind
         }
@@ -357,19 +358,19 @@ static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
                     g_btnDir[cb].store(dir, std::memory_order_relaxed);
                     PublishButtonHeld(g_router->state());
                     if (g_router->swallowEnabled() && g_router->keyboardHookWanted()) {
-                        g_swallowedDown[cb].store(true);
+                        g_swallowedDown.markDown(cb);
                         if (NeedsMaskKey(held)) InjectMaskKey();
                         return 1;
                     }
                 }
                 // Not swallowed: drop any record left by a DOWN whose UP never arrived, or this
                 // click's UP would be eaten on its strength.
-                g_swallowedDown[cb].store(false);
+                g_swallowedDown.clear(cb);
             } else if (cb && cbUp) {
                 if (g_btnDir[cb].exchange(0, std::memory_order_relaxed) != 0) PublishButtonHeld(g_router->state());
                 // Balanced: swallow an up iff we swallowed its down, even if the modifiers were
                 // released in between, so the app never sees a lone click-up.
-                if (g_swallowedDown[cb].exchange(false)) return 1;
+                if (g_swallowedDown.consumeUp(cb)) return 1;
             }
             // Scroll-wheel zoom: a notch with the bound modifiers held zooms instead of scrolling.
             // Wheel up / down are zoom binds (#318, button codes 6/7 in the zoom slots); the legacy
@@ -433,14 +434,14 @@ static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
                 // Swallow the DOWN only if it matched a zoom bind now (modifiers included, #285);
                 // remember it so the matching UP is swallowed too (balanced down/up view).
                 if (g_router->swallowEnabled() && g_btnDir[id].load(std::memory_order_relaxed) != 0) {
-                    g_swallowedDown[id].store(true);
+                    g_swallowedDown.markDown(id);
                     swallow = true;
                     const int held = HeldModsNow();
                     if (NeedsMaskKey(held)) InjectMaskKey();
                 }
             } else { // up: swallow iff we swallowed its DOWN. Never swallow an UP whose DOWN the
                      // system already saw - that is exactly what left the button stuck-down.
-                if (g_swallowedDown[id].exchange(false)) {
+                if (g_swallowedDown.consumeUp(id)) {
                     swallow = true;
                 }
             }
@@ -493,7 +494,7 @@ static DWORD WINAPI HookThreadProc(LPVOID) {
             // was never seen, and a deliberate uninstall means later UPs arrive unhooked. Clear them
             // rather than let a stale record eat an unrelated UP later (stuck key). No synthetic UP
             // is needed: we only ever swallow our OWN binds, so no other app saw the DOWN.
-            for (int vk = 0; vk < 256; ++vk) { g_kbSwallowedDown[vk].store(false); g_kbPressed[vk].store(false); }
+            for (int vk = 0; vk < 256; ++vk) { g_kbSwallowedDown.clear(vk); g_kbPressed[vk].store(false); }
             // The once-per-hold mask flag is stale across the gap too: the Alt/Win UP that clears it
             // may have been missed, which would suppress every later mask keystroke.
             g_maskedThisHold.store(false, std::memory_order_relaxed);
@@ -544,14 +545,14 @@ bool InputRouter::start(int inButtonId, int inButtonId2, int outButtonId, int ou
 // the button is held, and a lone synthesised UP had effects of its own (a right-click menu, browser
 // Back/Forward, a drag finished in the wrong window). Only our own records are cleared.
 static void ReleaseSwallowedButtons() {
-    for (int id = 1; id <= 5; ++id) g_swallowedDown[id].store(false);
+    for (int id = 1; id <= 5; ++id) g_swallowedDown.clear(id);
 }
 // Keys differ from buttons: synthesize a KEYUP for any bound key whose DOWN we
 // swallowed but whose UP we never passed through, so teardown mid-press can't leave any consumer
 // believing the key is held. A lone keyup with no matching down is harmless (apps ignore it).
 static void ReleaseSwallowedKeys() {
     for (int vk = 0; vk < 256; ++vk) {
-        if (!g_kbSwallowedDown[vk].exchange(false)) continue;
+        if (!g_kbSwallowedDown.consumeUp(vk)) continue;
         INPUT in{};
         in.type = INPUT_KEYBOARD;
         in.ki.wVk = static_cast<WORD>(vk);
