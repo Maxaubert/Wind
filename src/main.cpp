@@ -350,6 +350,8 @@ struct TickState {
     double inspectPanRemY = 0.0;
     double lockedPanRemX = 0.0;         // sub-pixel carry for the locked pan
     double lockedPanRemY = 0.0;
+    bool   renderStale = false;         // the render overlay refused a retarget (multi-GPU) and still sits
+                                        //   on an old monitor: sessions use the transform engine
     GainLearner gainLearner;            // free ticks teach it the real in->out ratio;
                                         // locked ticks replay it (gain_learner.h)
     bool   inspectGame = false;         // game-inspect (issue #144): foreground stolen from a mouselook
@@ -758,6 +760,9 @@ static void EndGameInspect(TickState& t) {
         SetForegroundWindow(t.inspectPrevFg);
     }
     t.inspectPrevFg = nullptr;
+    // The helper stays a topmost 1x1 at the monitor origin otherwise (invisible, but still a
+    // window sitting over the game). EnsureFocusStealer re-shows it on the next steal.
+    if (g_focusStealer && IsWindow(g_focusStealer)) ShowWindow(g_focusStealer, SW_HIDE);
     wind::Log(wind::LogLevel::Info, "inspect", "game-inspect ended (foreground returned)");
 }
 
@@ -774,20 +779,6 @@ static void DiagLog(const char* fmt, ...) {
 static void RegisterHideCursorHotkey(HWND hwnd, int vk, int mods);
 // Same pattern for the quick-zoom hotkey (hotkey mode). Pass vk=0 to unregister.
 static void RegisterQuickZoomHotkey(HWND hwnd, int vk, int mods);
-
-// Read the current Windows pointer-speed + acceleration settings into a BallisticsConfig so Inspect
-// mode pans the look point at the same speed as the desktop cursor. Refreshed on each Inspect entry
-// (these settings change rarely). SystemParametersInfo only: the SmoothMouse curve shape is the
-// standard hardcoded default (rarely customized) and is normalized to the slider baseline in
-// mouse_ballistics, so its absolute scale does not matter.
-static BallisticsConfig ReadMouseBallistics() {
-    BallisticsConfig c;   // xCurve/yCurve keep the standard Win10 "Enhance pointer precision" defaults
-    int speed = 10;
-    if (SystemParametersInfo(SPI_GETMOUSESPEED, 0, &speed, 0)) c.sliderMult = PointerSpeedMultiplier(speed);
-    int mp[3] = { 0, 0, 0 };
-    if (SystemParametersInfo(SPI_GETMOUSE, 0, mp, 0)) c.accelEnabled = (mp[2] != 0);
-    return c;
-}
 
 // One magnifier tick: advance zoom, hot-reload config, then pan/draw via the render engine.
 // Pure of any pacing wait - the caller paces. Safe to call from the main loop or from a
@@ -1473,16 +1464,23 @@ static void RunTick(TickState& t) {
             // render model was retargeted, leaving the transform clamping against the old size.
             // A game that switches to a lower resolution therefore let the view pan off the real
             // desktop. Both engines are retargeted now, and the geometry is tracked either way.
-            if (zoomed) {
+            // Inspect at 1x also needs the session's monitor (the look point maps onto it).
+            if (zoomed || inspect) {
                 MonitorTarget nt = t.cfg.multiMonitor ? MonitorUnderCursor() : PrimaryMonitor();
                 IMagnifierModel* rt = t.mRender ? t.mRender : t.model;
                 bool ok = SameMonitor(nt, t.mon) ? false : rt->retarget(nt);
+                const bool renderOk = ok;
+                const bool hadTransformHalf = t.mTransform && t.mTransform != rt;
                 // The transform half owns its own bounds and must follow even when the render
                 // half refuses (retarget returns false across adapters, where the overlay cannot
                 // move but the transform is still valid on the new geometry).
                 if (!SameMonitor(nt, t.mon) && t.mTransform && t.mTransform != rt) {
                     if (t.mTransform->retarget(nt)) ok = true;
                 }
+                // Hybrid with a render half that refused while the transform half took it: the
+                // overlay is left on the old monitor, so this session must not pick render.
+                if (ok && hadTransformHalf && !renderOk) t.renderStale = true;
+                else if (ok) t.renderStale = false;
                 if (ok) {
                     t.mon = nt;
                     int nhz = DetectRefreshHz(nt.device);   // pace off the new monitor's refresh (#74)
@@ -1517,7 +1515,7 @@ static void RunTick(TickState& t) {
                 pin.inputTransformOk      = tAvail && tAvail->inputTransformAvailable();
                 pin.renderLost            = RenderDeviceLost(t);
                 FillCategoryInputs(t, pin);
-                IMagnifierModel* pick = ShouldPickTransform(pin) ? t.mTransform : t.mRender;
+                IMagnifierModel* pick = (ShouldPickTransform(pin) || t.renderStale) ? t.mTransform : t.mRender;
                 if (pick && pick != t.model) t.model = pick;
             }
             t.vbounds = QueryVirtualBounds();   // refresh cached clip-detect bounds (topology may have changed)
@@ -1586,10 +1584,9 @@ static void RunTick(TickState& t) {
                                           preClip.right, preClip.bottom);
             t.frozenCursor = pt;
             t.clickReleaseTicks = 0;   // start frozen (clear any stale click-release window)
-            // Match the desktop cursor speed: snapshot the OS pointer-speed/accel and baseline the
-            // cooked accumulator + sub-pixel carry so the first tick after entry pans by zero.
-            g_input.setBallistics(ReadMouseBallistics());
-            double cbx, cby; g_input.drainCooked(cbx, cby); (void)cbx; (void)cby;
+            // Zero the sub-pixel carry and this tick's raw motion so the first tick after entry
+            // pans by zero.
+            rawDx = 0; rawDy = 0;
             t.inspectPanRemX = 0.0; t.inspectPanRemY = 0.0;
             t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y);
             t.lastSetVirtual = pt;
@@ -1657,14 +1654,15 @@ static void RunTick(TickState& t) {
         int dx, dy;
         bool dragFollow = false;   // set in the free render branch below; drives ex.suppressCursorSync
         if (inspect) {
-            // The OS cursor is frozen, so pan the look point from the COOKED mickeys - Windows'
-            // pointer-speed + acceleration applied per packet (see mouse_ballistics) - not raw
-            // counts, so the look point moves at the same speed/DPI as the desktop cursor.
-            // cursorSensitivity stays a user multiplier on top; carry the sub-pixel remainder so
-            // slow precise motion is not quantized away.
-            double cdx, cdy; g_input.drainCooked(cdx, cdy);
-            t.inspectPanRemX += cdx * t.cfg.cursorSensitivity;
-            t.inspectPanRemY += cdy * t.cfg.cursorSensitivity;
+            // The OS cursor is frozen, so pan the look point from raw mickeys scaled by the
+            // MEASURED desktop gain (GainLearner, the same replay as the locked path) so the look
+            // point moves at the same speed/DPI as the desktop cursor. cursorSensitivity stays a
+            // user multiplier on top; carry the sub-pixel remainder so slow precise motion is not
+            // quantized away.
+            const double inC = std::sqrt((double)rawDx * rawDx + (double)rawDy * rawDy);
+            const double g = t.gainLearner.gainFor(inC, dt * 1000.0);
+            t.inspectPanRemX += rawDx * g * t.cfg.cursorSensitivity;
+            t.inspectPanRemY += rawDy * g * t.cfg.cursorSensitivity;
             dx = (int)t.inspectPanRemX; t.inspectPanRemX -= dx;   // truncate toward zero, carry the rest
             dy = (int)t.inspectPanRemY; t.inspectPanRemY -= dy;
         } else {
@@ -1759,7 +1757,10 @@ static void RunTick(TickState& t) {
                 // rawDx/rawDy went in, curDx/curDy came out - so teach the learner the REAL
                 // ballistics at this speed. Gated on no confining clip: a clamped cursor
                 // under-reports output and would teach a too-low gain.
-            if (!clipConfined && (std::abs(rawDx) + std::abs(rawDy)) >= wind::GainLearner::kMinCounts) {
+            // Also skip a pointer pinned against the clip bound: it cannot move, so the output
+            // under-reports exactly like a confined clip (modest downward bias otherwise).
+            if (!clipConfined && (std::abs(rawDx) + std::abs(rawDy)) >= wind::GainLearner::kMinCounts &&
+                !wind::PointerPinnedAtEdge(cur.x, cur.y, clip.left, clip.top, clip.right, clip.bottom)) {
                     const double dtMs_ = dt * 1000.0;
                     const double inC  = std::sqrt((double)rawDx * rawDx + (double)rawDy * rawDy);
                     const double outC = std::sqrt((double)curDx * curDx + (double)curDy * curDy);
@@ -1919,6 +1920,7 @@ static void RunTick(TickState& t) {
                             (GetAsyncKeyState(VK_MBUTTON) & 0x8000);
             const unsigned long long nowMs = GetTickCount64();
             if (vi.buttonDown) t.lastButtonMs = nowMs;
+            { const unsigned long long edge = g_input.lastButtonEdgeMs(); if (edge > t.lastButtonMs) t.lastButtonMs = edge; }
             vi.msSinceButton = t.lastButtonMs ? double(nowMs - t.lastButtonMs) : 1e9;
             // Keyboard-driven only (#289). The hook and Raw Input both stamp the clock, so a suspended
             // hook no longer switches the gate off. No stamp at all and no hook: no information, no gate.
@@ -2145,7 +2147,7 @@ static void RunTick(TickState& t) {
             pin.inputTransformOk      = tAvail && tAvail->inputTransformAvailable();
             pin.renderLost            = RenderDeviceLost(t);
             FillCategoryInputs(t, pin);
-            IMagnifierModel* want = ShouldPickTransform(pin) ? t.mTransform : t.mRender;
+            IMagnifierModel* want = (ShouldPickTransform(pin) || t.renderStale) ? t.mTransform : t.mRender;
             // STICKY (field: the engine flapped render<->transform inside one zoom session, and
             // each flip releases and rebuilds DWM's magnification context - a stall every time).
             // A real alt-tab still switches; a one-frame wobble in the foreground reads does not.
@@ -2767,7 +2769,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 // Key activity (down and up) feeds only tracking's key clock (#289), never held state. Raw Input
                 // keeps arriving while the hook is suspended (fullscreen game, noSwallowApps), so
                 // the clock stays true there instead of the gate switching off (review #289).
-                if (kb.VKey > 0 && kb.VKey < 256)
+                if (kb.VKey > 0 && kb.VKey < 256 && kb.VKey != wind::kMaskVk)   // Wind's own mask key is not a user key
                     g_input.noteAnyKeyDown(GetTickCount64());   // downs and ups, like the hook
                 // Typing stamp (#328), like the hook: fresh non-modifier downs only.
                 static wind::TypingKeyFilter rawTyping;
@@ -2793,6 +2795,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 // The UP's event time is the WM_INPUT's queue time, not now: the hook's reordering
                 // guard compares event times (src/event_order.h), so a main-thread stall is harmless.
                 const uint32_t rawTime = static_cast<uint32_t>(GetMessageTime());
+                // Click quiet period: stamp the edge here instead of relying on the tick to catch the
+                // button down in GetAsyncKeyState (a click shorter than a tick was missed).
+                if (bf & (RI_MOUSE_LEFT_BUTTON_DOWN | RI_MOUSE_LEFT_BUTTON_UP | RI_MOUSE_RIGHT_BUTTON_DOWN |
+                          RI_MOUSE_RIGHT_BUTTON_UP | RI_MOUSE_MIDDLE_BUTTON_DOWN | RI_MOUSE_MIDDLE_BUTTON_UP))
+                    g_input.noteButtonEdge(GetTickCount64());
                 if (bf & RI_MOUSE_BUTTON_4_UP) g_input.rawButtonUp(1, rawTime);
                 if (bf & RI_MOUSE_BUTTON_5_UP) g_input.rawButtonUp(2, rawTime);
                 // Same net for left/right/middle click binds (#285); a no-op unless one holds a zoom.
@@ -3104,10 +3111,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         model2.reset();
     }
 
-    // Inspect's cooked-pan ballistics from the real system settings at startup (previously read
-    // only on Inspect entry). The LOCKED path no longer models ballistics at all - it replays the
-    // learned desktop gain instead (gain_learner.h).
-    g_input.setBallistics(ReadMouseBallistics());
     // The tray icon and menu live in WindTray.exe (issue #291): a UIAccess process's menu stacks
     // above the cursor and the Snipping Tool overlay, an ordinary process's menu does not.
     g_trayBlock = wind::TrayHost::Start(exePath);

@@ -30,7 +30,7 @@ headlessly, so the unit tests are the only verification loop that runs everywher
 - The `test` target compiles `tests\*.cpp` with `/DWIND_TESTS` against only the pure sources. The
   authoritative list is the `:test` target in `build.bat`; today it is `transform`,
   `zoom_controller`, `config`, `profiles`, `cursor_mapper`, `lock_detector`, `cursor_lock`,
-  `mouse_ballistics`, `crosshair`, `config_ui/ini_edit`, `logging`, `tray_items` and `hitch_record`.
+  `crosshair`, `config_ui/ini_edit`, `logging`, `tray_items` and `hitch_record`.
 - Header-only pure modules (`engine_pick.h`, `drag_follow.h`, `hdr_scale.h`, `keybind_rules.h`,
   `config_ui/wind_watchdog.h` and others) ride in through their test files.
 - One test file per module (`tests/test_<module>.cpp`). A new pure `.cpp` also goes into the

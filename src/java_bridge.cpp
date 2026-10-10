@@ -149,9 +149,21 @@ static HMODULE LoadVerified(const std::wstring& path, bool log) {
         if (ok && GetFileAttributesW(d.c_str()) != INVALID_FILE_ATTRIBUTES)
             ok = hold(d) && SignedFile(d);
     }
+    // Any validly signed DLL passes the check above, and loading runs its DllMain. So look for the
+    // bridge's entry points in a copy mapped WITHOUT running DllMain or resolving imports first; only
+    // a DLL that exports them is loaded for real (review 2026-10-09 #58).
+    if (ok) {
+        HMODULE probe = LoadLibraryExW(path.c_str(), nullptr, DONT_RESOLVE_DLL_REFERENCES);
+        const bool exports = probe && GetProcAddress(probe, "Windows_run") && GetProcAddress(probe, "isJavaWindow");
+        if (probe) FreeLibrary(probe);
+        if (!exports) {
+            ok = false;
+            wind::Log(wind::LogLevel::Warn, "track", "java: %ls does not export the Access Bridge entry points; skipped", path.c_str());
+        }
+    }
     HMODULE m = nullptr;
     if (ok) m = LoadLibraryExW(path.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
-    else wind::Log(wind::LogLevel::Warn, "track", "java: refused unsigned bridge DLL (or dependency) at %ls", path.c_str());
+    else wind::Log(wind::LogLevel::Warn, "track", "java: refused bridge DLL (unsigned or not a bridge) at %ls", path.c_str());
     release();
     (void)log;
     return m;

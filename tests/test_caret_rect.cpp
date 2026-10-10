@@ -174,3 +174,24 @@ TEST_CASE("caret ghost: End and a click far right keep the caret's box, so they 
     wind::CaretGhostState none;
     CHECK_FALSE(wind::IsLineEndGhost(3375, 1942, 1996, none));         // nothing followed yet
 }
+
+TEST_CASE("caret ghost: a suppressed report that persists is confirmed as the caret (review #56)") {
+    wind::CaretGhostState s;
+    wind::NoteFollowedCaret(1000, 1944, 1993, s);
+    CHECK_FALSE(wind::GhostHoldExpired(3375, 1942, 1996, 5000, s));    // nothing held yet
+    wind::NoteGhostHeld(3375, 1942, 1996, 1000, s);
+    CHECK_FALSE(wind::GhostHoldExpired(3375, 1942, 1996, 1100, s));    // too fresh: still a ghost
+    wind::NoteGhostHeld(3375, 1942, 1996, 1200, s);                    // same rect again keeps the first stamp
+    CHECK(wind::GhostHoldExpired(3375, 1942, 1996, 1000 + wind::kGhostConfirmMs, s));
+    CHECK_FALSE(wind::GhostHoldExpired(3376, 1942, 1996, 9000, s));    // a different report is not the held one
+    wind::NoteFollowedCaret(3375, 1942, 1996, s);                      // followed: the hold is cleared
+    CHECK_FALSE(wind::GhostHoldExpired(3375, 1942, 1996, 9000, s));
+}
+
+TEST_CASE("selection rect: the last line's rectangle is used so Shift+arrow growth is followed (review #64)") {
+    CHECK(wind::LastRectOffset(0) == 0);
+    CHECK(wind::LastRectOffset(4) == 0);     // one line
+    CHECK(wind::LastRectOffset(8) == 4);     // two lines: the second
+    CHECK(wind::LastRectOffset(12) == 8);
+    CHECK(wind::LastRectOffset(10) == 4);    // a ragged array still lands on a whole rectangle
+}

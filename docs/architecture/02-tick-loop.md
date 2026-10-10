@@ -116,7 +116,7 @@ Engine-shaped keys (`model`) need a restart: they decide which models exist.
 |---|---|---|
 | Free (desktop) | The OS cursor | `GetCursorPos - lastSetVirtual`, times `cursorSensitivity` |
 | Locked (game holds the mouse) | Raw Input mickeys | `rawDx/rawDy * cursorSensitivity` |
-| Inspect (cursor frozen) | Ballistics-cooked mickeys | `drainCooked` with a sub-pixel carry |
+| Inspect (cursor frozen) | Raw mickeys x learned gain | `GainLearner::gainFor` with a sub-pixel carry |
 
 - **Free** reads the cursor's own movement since Wind last placed it, so Windows' pointer
   acceleration is already applied.

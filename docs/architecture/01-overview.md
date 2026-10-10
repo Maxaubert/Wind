@@ -81,7 +81,7 @@ build. See [11](11-build-test-release.md).
 | Render engine | `render_engine.*`, `render_model.*`, `render_shaders.h`, `hdr_info.*`, `hdr_scale.h`, `band_window.h`, `png_dump.*` |
 | Transform engine | `transform_model.*`, `transform.*`, `mag_host.*`, `tx_warm.h`, `comp_pin.*`, `mpo_boot.h`, `native_cursor.h`, `zoom_ladder.h` |
 | Colour | `color_filter.*`, `color_matrix.h`, `cursor_tint.*` |
-| Input | `input_router.*`, `keybind_rules.h`, `pointer_binds.h`, `mouse_ballistics.*`, `keyboard_pan.h`, `typing_key.h` |
+| Input | `input_router.*`, `keybind_rules.h`, `pointer_binds.h`, `keyboard_pan.h`, `typing_key.h` |
 | Cursor and lock | `cursor_mapper.*`, `lock_detector.*`, `drag_follow.h`, `gain_learner.h`, `cursor_sprite.*`, `cursor_blanker.*`, `cursor_decode.*`, `sprite_layer.h`, `crosshair.*`, `cursor_lock.*`, `inspect_focus.h` |
 | Tracking | `focus_track.*`, `view_target.h`, `view_glide.h`, `detached_view.h`, `edge_pan.h`, `caret_rect.h`, `track_filter.h`, `java_bridge*` |
 | Zoom | `zoom_controller.*` |
