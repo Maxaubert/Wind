@@ -109,7 +109,7 @@ There is no settings IPC. `WindConfig.exe` writes `magnifier.ini` and the core n
 **UI-only writes never reload.** A reload rebuilds `ZoomController` and `CursorMapper`, which is
 wasted work and risks a visible hitch mid-zoom (the live level and mapper centre are carried over
 since #234, so the view no longer collapses to 1x). `StripUiOnlyKeys` (`src/config.cpp`) drops `uiTheme`, `uiPalette`, `showAdvanced`,
-`onboarded` and the five tray layout keys (`trayPerf`, `traySliders`, `traySliderOrder`,
+`onboarded`, `trayPinned` and the five tray layout keys (`trayPerf`, `traySliders`, `traySliderOrder`,
 `trayToggles`, `trayToggleOrder`), and the result is compared with the fingerprint of the last applied config
 (`t.lastCoreIni`). An identical fingerprint skips the reload. The fingerprint is seeded at startup;
 an empty one would make the first Settings write of a session reload.

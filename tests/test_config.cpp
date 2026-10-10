@@ -459,6 +459,7 @@ TEST_CASE("the first-run ini template parses to the struct defaults (issue #274)
     CHECK(t.cursorSensitivity == doctest::Approx(d.cursorSensitivity));
     CHECK(t.panGlideMaxPx == d.panGlideMaxPx);
     CHECK(t.cursorConstantSize == d.cursorConstantSize);
+    CHECK(t.trayPinned == d.trayPinned);
     CHECK(t.cursorVisibility == d.cursorVisibility);
     CHECK(t.bilinear == d.bilinear);
     CHECK(t.sharpness == doctest::Approx(d.sharpness));
@@ -706,4 +707,15 @@ TEST_CASE("ParseConfig clamps trackGlideMs and txMaxStepPct (review #72)") {
     CHECK(ParseConfig("trackGlideMs=999999\n").trackGlideMs == 5000);
     CHECK(ParseConfig("txMaxStepPct=-5\n").txMaxStepPct == 0);
     CHECK(ParseConfig("txMaxStepPct=99999\n").txMaxStepPct == 1000);
+}
+TEST_CASE("trayPinned ships off, clamps to 0..1 and is UI-only: never reloads the core (#436)") {
+    CHECK(ParseConfig("").trayPinned == 0);
+    CHECK(ParseConfig("trayPinned=0\n").trayPinned == 0);
+    CHECK(ParseConfig("trayPinned=1\n").trayPinned == 1);
+    CHECK(ParseConfig("trayPinned=7\n").trayPinned == 1);
+    CHECK(ParseConfig("trayPinned=-3\n").trayPinned == 0);
+    CHECK(ParseConfig("trayPinned=abc\n").trayPinned == 0);   // strict parser: junk keeps the default
+    CHECK(StripUiOnlyKeys("a=1\ntrayPinned=0\nb=2\n") == "a=1\nb=2\n");
+    CHECK(StripUiOnlyKeys("a=1\ntrayPinned=0\n") == StripUiOnlyKeys("a=1\ntrayPinned=1\n"));
+    CHECK(StripUiOnlyKeys("trayPinnedX=1\n") == "trayPinnedX=1\n");
 }

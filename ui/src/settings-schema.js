@@ -132,6 +132,8 @@ export const groups = [
         // Global UI-only key (uiPalette): the built-in theme, shared by Settings and the tray menu. One row of mini window cards, right-aligned like the other controls.
         { key: 'uiPalette', type: 'palette', label: 'Theme', keywords: ['palette', 'colour', 'color', 'colours', 'colors', 'appearance', 'look', 'dark', 'grey', 'gray', 'ember', 'ocean', 'high contrast', 'hicon', 'skin', 'style', 'accent', 'ui', 'interface'], desc: 'Pick the look of the app', def: 'grey' },
         { key: '__profiles', type: 'profiles', label: 'Profile', keywords: ['preset', 'config', 'configuration', 'save', 'saved', 'profiles', 'switch', 'load', 'new', 'create', 'delete', 'rename', 'duplicate', 'set of settings', 'game profile', 'scheme', 'layout'], desc: 'A saved set of all settings' },
+        // Global UI-only key (trayPinned, #436): WindTray writes the shell's IsPromoted flag for its own icon; the core never reads it.
+        { key: 'trayPinned', type: 'toggle', label: 'Pin to taskbar', keywords: ['tray', 'taskbar', 'notification area', 'icon', 'clock', 'system tray', 'overflow', 'hidden icons', 'show', 'pin', 'corner', 'always visible', 'tray icon'], desc: 'Keeps the Wind icon next to the clock', def: 0 },
         // Global UI-only key: shows the advanced rows of every page.
         { key: 'showAdvanced', type: 'toggle', label: 'Show advanced settings', keywords: ['expert', 'extra', 'more', 'hidden', 'options', 'all settings', 'power user', 'developer', 'reveal', 'show all', 'additional'], desc: 'Shows extra options on every page', def: 0 },
       ] },
