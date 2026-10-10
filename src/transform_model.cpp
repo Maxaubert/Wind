@@ -758,7 +758,11 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         // is what makes DWM draw the real pointer magnified; the private channel keeps it after.
         // (Fallback only: normally the cursor lens does this without the 200-260 ms public write.)
         const bool prime = !nativePrimed_ && !host_.cursorLensReady() && applyLevel > 1.001;
-        writeTransform((float)applyLevel, m.offX, m.offY, m.txX + txJitter, m.txY, fastPan_ && !prime);
+        // The pulse also has to reach the PUBLIC channel (prime write, or after a private-channel
+        // failure), which ignores the translation and reads the source offset: shift offX there by
+        // 1 px, inward from the floor so the 1-texel left clamp and 2 px right clamp still hold.
+        const int offJitter = (m.offX >= 2) ? -txJitter : txJitter;
+        writeTransform((float)applyLevel, m.offX + offJitter, m.offY, m.txX + txJitter, m.txY, fastPan_ && !prime);
         if (prime) nativePrimed_ = true;
         if (NudgeAfterWrite(dwmCentreOn_, true)) {
             POINT np;
@@ -1008,6 +1012,7 @@ bool TransformModel::retarget(const MonitorTarget& m) {
     if (m.x == mon_.x && m.y == mon_.y && m.w == mon_.w && m.h == mon_.h) return true;
     wind::Log(wind::LogLevel::Info, "transform", "retarget %dx%d at (%d,%d) -> %dx%d at (%d,%d)",
               mon_.w, mon_.h, mon_.x, mon_.y, m.w, m.h, m.x, m.y);
+    edgeClipManage(false);   // the 1 px inset clip describes the OLD monitor: give it back first
     mon_ = m;
     // The cached level/translation describe the OLD geometry, and the write path skips a value it
     // believes DWM already holds - so without this the first write after a resolution change is

@@ -18,5 +18,6 @@ inline bool DwmRestarted(unsigned long prevPid, unsigned long pid) {
 }
 
 void StartDwmWatch();             // idempotent
+void StopDwmWatch();              // ends the thread (Wind exit); a no-op when not started
 unsigned long DwmGeneration();    // +1 per observed restart of this session's dwm.exe
 }

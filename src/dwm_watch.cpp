@@ -8,6 +8,8 @@ namespace wind {
 namespace {
 std::atomic<unsigned long> g_gen{0};
 std::atomic<bool> g_started{false};
+HANDLE g_stop = nullptr;     // signalled by StopDwmWatch
+HANDLE g_thread = nullptr;
 
 // This session's dwm.exe, or 0 while none runs.
 unsigned long FindDwmPid(DWORD session) {
@@ -27,6 +29,7 @@ unsigned long FindDwmPid(DWORD session) {
 
 void StartDwmWatch() {
     if (g_started.exchange(true)) return;
+    g_stop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     HANDLE th = CreateThread(nullptr, 0, [](LPVOID) -> DWORD {
         SetThreadDescription(GetCurrentThread(), L"Wind DWM watch");
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
@@ -34,7 +37,8 @@ void StartDwmWatch() {
         ProcessIdToSessionId(GetCurrentProcessId(), &session);
         unsigned long last = FindDwmPid(session);
         for (;;) {
-            Sleep(1000);
+            // The stop event doubles as the 1 s poll interval: Wind exit ends the thread at once.
+            if (WaitForSingleObject(g_stop, 1000) == WAIT_OBJECT_0) break;
             const unsigned long pid = FindDwmPid(session);
             if (DwmRestarted(last, pid)) {
                 const unsigned long gen = g_gen.fetch_add(1, std::memory_order_release) + 1;
@@ -43,9 +47,19 @@ void StartDwmWatch() {
             }
             if (pid != 0) last = pid;
         }
+        return 0;
     }, nullptr, 0, nullptr);
-    if (th) CloseHandle(th);
-    else g_started.store(false);
+    if (th) g_thread = th;
+    else { CloseHandle(g_stop); g_stop = nullptr; g_started.store(false); }
+}
+
+void StopDwmWatch() {
+    if (!g_thread) return;
+    SetEvent(g_stop);
+    WaitForSingleObject(g_thread, 1000);   // a snapshot walk in flight finishes well inside this
+    CloseHandle(g_thread); g_thread = nullptr;
+    CloseHandle(g_stop); g_stop = nullptr;
+    g_started.store(false);
 }
 
 unsigned long DwmGeneration() { return g_gen.load(std::memory_order_acquire); }

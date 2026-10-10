@@ -1,6 +1,7 @@
 #include "mag_host.h"
 #include "tick_span.h"   // #361: per-tick spans
 #include "logging.h"
+#include "dwm_watch.h"   // DwmGeneration: re-probe the private channel after a DWM restart
 #include <windows.h>
 #include <magnification.h>
 
@@ -136,9 +137,15 @@ bool MagHost::setTransform(float zoom, int offX, int offY, int tx, int ty, bool 
     // routing big-|tx| writes through the public API crashed identically. The real lethal
     // condition is magnifying the far-right source region above ~9x over a heavy game - see
     // the hybrid level threshold in main.cpp. No channel guard needed here.)
+    // A failed private write latches the public channel, but only until DWM restarts: the failure
+    // may have been a dying or restarting DWM, and a fresh one deserves a fresh probe.
+    if (privateBroken_ && DwmGeneration() != privateBrokenGen_) privateBroken_ = false;
     if (fastPan && !privateBroken_ && setMagDesktop_) {
         if (setMagDesktop_(zoom, tx, ty) != 0) return true;
-        privateBroken_ = true;   // fall back permanently this session
+        privateBroken_ = true;
+        privateBrokenGen_ = DwmGeneration();
+        wind::Log(wind::LogLevel::Warn, "magapi", "private transform write failed (err=%lu); public channel until DWM restarts",
+                  GetLastError());
     }
     return MagSetFullscreenTransform(zoom, offX, offY) != FALSE;
 }

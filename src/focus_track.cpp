@@ -462,6 +462,7 @@ void FocusTracker::run() {
         if (Win32Caret(rc)) { src = "win32"; return true; }
         if (!el) return false;
         bool ok = false;
+        bool lwFailed = false; RECT lwRect{};   // a line-wide rect whose fix already failed in this call
         IUIAutomationTextPattern2* tp2 = nullptr;
         if (SUCCEEDED(el->GetCurrentPatternAs(UIA_TextPattern2Id, __uuidof(IUIAutomationTextPattern2), (void**)&tp2)) && tp2) {
             BOOL active = FALSE; IUIAutomationTextRange* cr = nullptr;
@@ -469,7 +470,11 @@ void FocusTracker::run() {
                 if (active && RangeRect(cr, rc)) {
                     ok = true; src = "uia-caret";
                     if (wind::IsLineWideCaret(rc.left, rc.top, rc.right, rc.bottom))   // a caret range is collapsed
+                    {
+                        const RECT wide = rc;
                         ok = fixLineWide(cr, rc, src, fromPoll);
+                        if (!ok) { lwFailed = true; lwRect = wide; }
+                    }
                 }
                 cr->Release();
             }
@@ -485,8 +490,12 @@ void FocusTracker::run() {
                 if (n > 0 && SUCCEEDED(sel->GetElement(0, &r0)) && r0) {
                     if (RangeRect(r0, rc)) {
                         ok = true; src = "uia-selection";
-                        if (wind::IsLineWideCaret(rc.left, rc.top, rc.right, rc.bottom) && RangeIsEmpty(r0))
-                            ok = fixLineWide(r0, rc, src, fromPoll);
+                        if (wind::IsLineWideCaret(rc.left, rc.top, rc.right, rc.bottom) && RangeIsEmpty(r0)) {
+                            // The caret range above already failed on this same rect: a second
+                            // character-rect and MSAA round trip would fail the same way.
+                            if (lwFailed && EqualRect(&lwRect, &rc)) ok = false;
+                            else ok = fixLineWide(r0, rc, src, fromPoll);
+                        }
                     }
                     r0->Release();
                 }
@@ -543,7 +552,7 @@ void FocusTracker::run() {
         const bool win32Only = !java && !wantFocus_.load() &&
             GetGUIThreadInfo(GetWindowThreadProcessId(fg, nullptr), &cgi) && cgi.hwndCaret;
         if (win32Only) GetWindowRect(cgi.hwndCaret, &b);
-        else if (focusLookup) {
+        else if (focusLookup && !(java && !wantFocus_.load())) {   // a Java caret comes from the bridge: no cross-process lookup unless focus-following needs it
             bool timedOut = false;
             el = focusLookup->get(150, timedOut, focusGen);
             if (timedOut && !lookupStuckLogged && log_.load())
