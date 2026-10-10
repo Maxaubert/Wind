@@ -3,7 +3,9 @@
 // only subtlety is that Microsoft's uninstaller leaves the value behind set to "0.0.0.0"
 // rather than deleting it, so a non-empty value is not proof of presence.
 // WindConfig.exe paints an empty shell without the runtime, which is why this is checked.
-// NO <windows.h>: pure, so the rule is testable.
+// NO <windows.h>: pure, so the rule is testable. Nothing in the C++ binaries calls it: the check
+// that matters runs in the NSIS installer (installer\app.nsh, WIND_ENSURE_WEBVIEW2), which mirrors
+// this rule and cannot include it. Keep the two in step.
 #include <string>
 #include "installer_state.h"
 

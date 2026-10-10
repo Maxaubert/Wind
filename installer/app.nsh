@@ -8,7 +8,9 @@
 
 !include "LogicLib.nsh"
 
-!define WV2_CLIENT "SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+; The machine-wide install is under WOW6432Node; the per-user install is not (no WOW6432Node in HKCU).
+!define WV2_CLIENT_HKLM "SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+!define WV2_CLIENT_HKCU "Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 
 ; Wind's own two kernel objects. Both are Local\, i.e. session-scoped, and UAC elevation
 ; stays inside the session, so the elevated installer and the user's Wind see the same
@@ -117,12 +119,14 @@ Var LicenceDir   ; where "Read the full licence" put its copy, empty until then
 ; ---- WebView2 ----------------------------------------------------------------
 ; WindConfig.exe paints an empty shell without the Evergreen runtime. Microsoft's
 ; uninstaller leaves `pv` behind set to "0.0.0.0" rather than deleting it, so a value
-; being present is not proof (src\webview2_probe.h pins that rule and tests it).
+; being present is not proof. src\webview2_probe.h is the tested statement of that rule; NSIS
+; cannot call it, so this macro mirrors it for the two values the uninstaller leaves.
 !macro WIND_ENSURE_WEBVIEW2
   StrCpy $0 ""
-  ReadRegStr $0 HKLM "${WV2_CLIENT}" "pv"
+  ReadRegStr $0 HKLM "${WV2_CLIENT_HKLM}" "pv"
   ${If} $0 == ""
-    ReadRegStr $0 HKCU "${WV2_CLIENT}" "pv"
+  ${OrIf} $0 == "0.0.0.0"
+    ReadRegStr $0 HKCU "${WV2_CLIENT_HKCU}" "pv"
   ${EndIf}
   ${If} $0 == ""
   ${OrIf} $0 == "0.0.0.0"

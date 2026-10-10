@@ -1,5 +1,5 @@
 // Mirror of src/keybind_rules.h (issue #285). Both are tested against tests/fixtures/keybind_cases.txt
-// (ui/tests/keybind-rules.spec.js and tests/test_keybind_rules.cpp), so a rule changed in one place
+// (ui/tests/keybind-rules.nodetest.mjs and tests/test_keybind_rules.cpp), so a rule changed in one place
 // fails the other's tests until it is changed there too.
 const MOD = { ctrl: 1, alt: 2, shift: 4, win: 8 };
 

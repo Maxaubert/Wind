@@ -25,6 +25,10 @@ jobs:
         shell: cmd
         working-directory: ui
         run: npm ci
+      - name: Keybind rules, JS half (node --test)
+        shell: cmd
+        working-directory: ui
+        run: npm run test:rules
       - name: Build settings host and UI (WindConfig.exe, ui/dist)
         shell: cmd
         run: build.bat config
