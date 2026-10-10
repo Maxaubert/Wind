@@ -237,10 +237,12 @@ void RenderEngine::State::refreshSdrWhite() {
 // Recreate the duplication interface (after ACCESS_LOST or first use).
 bool RenderEngine::State::recreateDupl() {
     dupl.Reset();
-    // Capture the target monitor's output (matched by device name), falling back to the first
-    // output for the legacy single-monitor path (empty targetDevice) or any name mismatch.
-    IDXGIOutput* output = selectOutput(targetDevice, /*fallbackToFirst=*/true);
-    if (!output) return false;
+    // Capture the target monitor's output (matched by device name). Only the legacy
+    // single-monitor path (empty targetDevice) falls back to the first output: a NAMED monitor
+    // that is not on our adapter (multi-GPU) fails, as retarget() does, rather than silently
+    // capturing another monitor's pixels.
+    IDXGIOutput* output = selectOutput(targetDevice, /*fallbackToFirst=*/targetDevice[0] == 0);
+    if (!output) { RLog("recreateDupl: no output for targetDevice=%ls on our adapter", targetDevice); return false; }
     RLog("recreateDupl: targetDevice=%ls", targetDevice[0] ? targetDevice : L"(first)");
     // Diagnostics: the output's color space + bit depth (HDR detection).
     IDXGIOutput6* output6 = nullptr;
@@ -1200,8 +1202,10 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
         // Inspect mode while zoomed: draw the 48x48 thin full-length crosshair sprite (centered) in
         // place of the captured cursor. Otherwise draw the captured cursor.
         bool useCross = p.cursorLocked && crosshairSRV;
-        double cw = useCross ? 46.0 : curW, ch = useCross ? 46.0 : curH;
-        double chx = useCross ? 23.0 : hotX, chy = useCross ? 23.0 : hotY;
+        // The crosshair texture is 48x48 with its centre between texels 23 and 24: draw all 48
+        // texels (a 46 px quad squeezed them, ~0.48*scale px off) and put the hotspot at 23.5.
+        double cw = useCross ? 48.0 : curW, ch = useCross ? 48.0 : curH;
+        double chx = useCross ? 23.5 : hotX, chy = useCross ? 23.5 : hotY;
         double drawW = cw * scale, drawH = ch * scale;
         double tlX = p.cursorScreenX - chx * scale;   // top-left so the hotspot lands at cursorScreen
         double tlY = p.cursorScreenY - chy * scale;

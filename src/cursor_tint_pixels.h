@@ -42,6 +42,19 @@ inline void AlphaFromMask(uint32_t* px, int w, int h, const uint8_t* andBits, in
         }
 }
 
+// True when a monochrome pointer (AND + XOR masks) has at least one "invert the screen" pixel
+// (AND 1, XOR 1) and no opaque black/white pixel (AND 0). Such a pointer (the classic text beam)
+// is drawn with the invert blend instead of as opaque pixels.
+inline bool MonoIsPureInvert(const uint8_t* andBits, const uint8_t* xorBits, int stride, int w, int h) {
+    bool anyInvert = false;
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            if (!MaskBit(andBits, stride, x, y)) return false;
+            if (MaskBit(xorBits, stride, x, y)) anyInvert = true;
+        }
+    return anyInvert;
+}
+
 // A monochrome pointer (AND + XOR masks) as a colour one:
 //   AND 0 XOR 0 -> black, AND 0 XOR 1 -> white, AND 1 XOR 0 -> transparent,
 //   AND 1 XOR 1 -> "invert the screen": drawn white, and every transparent pixel touching one
