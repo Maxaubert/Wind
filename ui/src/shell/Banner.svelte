@@ -22,7 +22,7 @@
 </header>
 
 <style>
-  .banner { margin: 0 -40px; padding: 28px 40px; display: flex; align-items: center; gap: 18px; position: relative;
+  .banner { margin: 0 calc(-1 * var(--gx, 40px)); padding: 28px var(--gx, 40px); display: flex; align-items: center; gap: 18px; position: relative;
             background-color: var(--band); border-bottom: 1px solid var(--line); isolation: isolate; }
   .aurora { position: absolute; inset: 0; pointer-events: none;
     background: right center / cover no-repeat; opacity: var(--bandimg-op); filter: var(--bnfilter);
@@ -34,8 +34,9 @@
     -webkit-mask-image: linear-gradient(90deg, transparent var(--bandimg-from), #000 calc(var(--bandimg-from) + 30%));
     mask-image: linear-gradient(90deg, transparent var(--bandimg-from), #000 calc(var(--bandimg-from) + 30%)); }
   .banner > :not(.aurora):not(.tint) { position: relative; }
-  h1 { margin: 0; font: 600 28px/1.1 var(--s); letter-spacing: -.4px; }
-  .bdesc { margin: 6px 0 0; color: var(--fg3); font: 13.5px var(--s); }
+  .banner > div { min-width: 0; }
+  h1 { margin: 0; overflow-wrap: break-word; font: 600 28px/1.1 var(--s); letter-spacing: -.4px; }
+  .bdesc { margin: 6px 0 0; text-wrap: pretty; color: var(--fg3); font: 13.5px var(--s); }
   .bico { width: 48px; height: 48px; display: grid; place-items: center; flex: none;
           border: 1px solid var(--line2); border-radius: var(--rc); }
 </style>

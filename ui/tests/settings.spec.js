@@ -83,14 +83,14 @@ test('pages show their sections; a section with nothing to show is dropped', asy
 test('copy: the row names and descriptions follow the table, and "Never use Render for" is gone', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('[data-key="__zoomIn"] .label')).toHaveText('Zoom in');
-  await expect(page.locator('[data-key="__zoomIn"] .desc')).toHaveText('Hold or scroll to magnify the view.');
+  await expect(page.locator('[data-key="__zoomIn"] .desc')).toHaveText('Hold a key or scroll to zoom in');
   await expect(page.locator('[data-key="__hideCursor"] .label')).toHaveText('Hide pointer');
-  await expect(page.locator('[data-key="__pan"] .desc')).toHaveText('Hold the modifiers and press an arrow key to move the view.');
+  await expect(page.locator('[data-key="__pan"] .desc')).toHaveText('Hold modifier keys and an arrow to pan');
   await advanced(page, true);
   await go(page, 'zoom');
   await expect(page.locator('main .cap')).toHaveText(['Level and speed', 'Easing', 'Engine']);
   await expect(page.locator('[data-key="smoothZoomAccel"] .label')).toHaveText('Soft start');
-  await expect(page.locator('[data-key="engineGame"] .desc')).toHaveText('Full-screen and borderless games.');
+  await expect(page.locator('[data-key="engineGame"] .desc')).toHaveText('Full screen and borderless games');
   await expect(page.getByText('Never use Render for')).toHaveCount(0);
   await expect(key(page, 'renderExclude')).toHaveCount(0);
 });

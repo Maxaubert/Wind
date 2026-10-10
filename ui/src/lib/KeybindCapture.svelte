@@ -217,7 +217,7 @@
         on:click={arm}
         on:blur={() => { if (armed) cancel(); }}
         on:contextmenu|preventDefault={onContextMenu}
-        title="Click to bind (combos like Ctrl+Alt+F1 work), right-click to clear">
+        title="Click to set a key and right click to clear">
   {#if armed}
     {row.modsOnly ? 'Hold the modifier keys...' : row.buttonKey ? 'Press a key, combo, or button...' : 'Press a key or combo...'}
   {:else if split && lbl !== null}

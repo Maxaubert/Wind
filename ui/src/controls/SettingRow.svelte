@@ -87,18 +87,25 @@
 {/if}
 
 <style>
-  .row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 24px; min-height: 62px; padding: 8px 18px; }
+  .row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px 24px; min-height: 62px; padding: 8px 18px; }
   .row.disabled { opacity: .45; }
   .row.wide { grid-template-columns: minmax(0, 1fr); gap: 10px; padding-bottom: 12px; }   /* the control sits under the text, full width */
   .row.wide .ctl { justify-content: flex-start; min-width: 0; }
   .meta { min-width: 0; }
-  .lrow { display: flex; align-items: baseline; gap: 10px; }
+  .lrow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; }
   .tab { font: 11px var(--s); letter-spacing: .02em; color: var(--fg3); opacity: .8; }
   .tag { font: 500 10.5px var(--s); letter-spacing: .03em; color: var(--fg3); padding: 1px 6px;
          border: 1px solid var(--chipb); border-radius: 999px; }
   .label { font: 500 13.5px var(--s); color: var(--fg); }
-  .desc { margin-top: 1px; font: 12.5px var(--s); color: var(--fg3); }
-  .ctl { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+  .desc { margin-top: 1px; font: 12.5px var(--s); color: var(--fg3); text-wrap: pretty; overflow-wrap: break-word; }
+  .ctl { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; max-width: 100%; flex-wrap: wrap; }
+  /* A narrow card stacks the control under the label and subtext instead of squeezing the text. */
+  @container (max-width: 640px) {
+    .row { grid-template-columns: minmax(0, 1fr); gap: 8px; padding-bottom: 12px; }
+    .row .ctl { justify-content: flex-start; }
+    .row .ctl :global(.sl) { width: 100%; }
+    .row .ctl :global(.sl input) { flex: 1 1 120px; width: auto; }
+  }
   .chip { height: 28px; padding: 0 12px; border-radius: var(--srad); background: var(--chip);
           border: 1px solid var(--chipb); color: var(--fg); font: 13px var(--s); }
   .chip:hover:not(:disabled) { border-color: var(--outline); }

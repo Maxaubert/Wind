@@ -210,7 +210,6 @@ Config ParseConfig(const std::string& text) {
             else if (key == "dwmFlush")         c.dwmFlush = ParseIntStrict(val);
             else if (key == "diagnostics")      c.diagnostics = ParseIntStrict(val);
             else if (key == "cursorSensitivity")  c.cursorSensitivity = ParseDoubleStrict(val);
-            else if (key == "panGlideMs")         c.panGlideMs = ParseIntStrict(val);
             else if (key == "panGlideMaxPx")      c.panGlideMaxPx = ParseIntStrict(val);
             else if (key == "cursorConstantSize") c.cursorConstantSize = ParseIntStrict(val);
             else if (key == "trayPinned")         c.trayPinned = ParseIntStrict(val);
@@ -297,8 +296,6 @@ Config ParseConfig(const std::string& text) {
     c.smoothZoomAccel = clampd(c.smoothZoomAccel, 1.0, 8.0);
     c.smoothZoomRamp  = clampd(c.smoothZoomRamp,  0.1, 3.0);
     c.cursorSensitivity = clampd(c.cursorSensitivity, 0.25, 4.0);
-    if (c.panGlideMs < 10) c.panGlideMs = 10;
-    if (c.panGlideMs > 300) c.panGlideMs = 300;
     if (c.panGlideMaxPx < 0) c.panGlideMaxPx = 0;
     if (c.panGlideMaxPx > 400) c.panGlideMaxPx = 400;
     c.sharpness       = clampd(c.sharpness,       0.0, 1.0);
@@ -520,9 +517,8 @@ std::string DefaultIniText() {
                ";   No effect in a free transform session (the pointer itself drives the view)\n"
                "cursorSensitivity=1.0\n"
                "; panGlideMaxPx: when a mouse movement stops the pointer eases on at most this many screen\n"
-               ";   px before it rests (Transform engine, zoomed); 0=off. panGlideMs: the ease's time (ms)\n"
+               ";   px before it rests (Transform engine, zoomed); 0=off. A longer glide also eases longer\n"
                "panGlideMaxPx=0\n"
-               "panGlideMs=60\n"
                "; cursorConstantSize: 0=the cursor grows with the zoom (default); 1=keep it at normal\n"
                ";   desktop size at every zoom (render engine only). Replaces cursorScaleWithZoom (ignored).\n"
                "cursorConstantSize=0\n"

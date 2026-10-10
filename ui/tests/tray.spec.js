@@ -81,7 +81,7 @@ test('tab: below the sidebar divider, banner, performance card and both lists', 
   await expect(page.locator('.side nav:not(.bottom) .it[data-g="tray"]')).toHaveCount(0);
   await page.locator('.side .it[data-g="tray"]').click();
   await expect(page.locator('h1')).toHaveText('Tray menu');
-  await expect(page.locator('.bdesc')).toHaveText('Choose what the tray menu shows, and in what order.');
+  await expect(page.locator('.bdesc')).toHaveText('What the tray menu shows and in what order');
   await expect(page.getByRole('switch', { name: 'Performance in the tray' })).toBeChecked();   // on by default (#329)
   await expect(page.locator('#cap-sliders')).toHaveText('Sliders');
   await expect(page.locator('#cap-toggles')).toHaveText('Toggles');
@@ -129,11 +129,11 @@ test('check and uncheck write the enabled list and the full order', async ({ pag
   await expect(page.locator('[data-cnt="toggles"]')).toHaveText('3 on');
 });
 
-test('slider cap: at four the unchecked boxes are disabled with a note, unchecking frees them', async ({ page }) => {
+test('slider cap: at four the unchecked boxes are disabled and the count says full', async ({ page }) => {
   await open(page);
   await chk(page, 'sliders', 'Max zoom').click();
   await chk(page, 'sliders', 'Arrow key speed').click();
-  await expect(page.locator('[data-cnt="sliders"]')).toHaveText('4 of 4 · Uncheck one to add another');
+  await expect(page.locator('[data-cnt="sliders"]')).toHaveText('4 of 4 full');
   await expect(chk(page, 'sliders', 'Zoom-in speed')).toBeDisabled();
   await expect(chk(page, 'sliders', 'Release glide')).toBeDisabled();
   await expect(chk(page, 'sliders', 'Warmth')).toBeEnabled();

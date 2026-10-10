@@ -47,4 +47,13 @@
   .n { margin-left: auto; font: 400 10.5px var(--m); color: var(--fg3); }   /* right-aligned to the row padding, as in the mockup */
   /* A thin divider, no labels; the bottom group sits right under the list, not pinned to the window bottom. */
   .bottom { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line2); }
+  /* Narrow window: search on its own row, then the pages as a wrapped strip above the content. */
+  @media (max-width: 700px) {
+    .side { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 12px; border-right: 0;
+            border-bottom: 1px solid var(--line); overflow-y: visible; }
+    .search { flex: 1 1 100%; margin-bottom: 2px; }
+    nav { flex-direction: row; flex-wrap: wrap; gap: 2px; }
+    .it { width: auto; height: 32px; padding: 0 10px 0 6px; gap: 6px; }
+    .bottom { margin-top: 0; padding-top: 0; border-top: 0; flex-basis: 100%; }
+  }
 </style>

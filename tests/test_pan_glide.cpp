@@ -37,6 +37,14 @@ TEST_CASE("the cap bounds the distance at any speed and keeps the hand's start s
     }
 }
 
+TEST_CASE("one setting: the ease time grows with the distance (#434)") {
+    CHECK(PanGlideTauS(40) == doctest::Approx(0.060));   // the old separate default
+    CHECK(PanGlideTauS(0) == doctest::Approx(0.040));
+    CHECK(PanGlideTauS(200) == doctest::Approx(0.140));
+    CHECK(PanGlideTauS(400) == doctest::Approx(0.240));
+    CHECK(PanGlideTauS(1000) == doctest::Approx(0.240));
+}
+
 TEST_CASE("no glide when it is off or the session does not allow it") {
     PanGlide off;
     CHECK_FALSE(Flick(off, 20, 20.0, 0.0, 0.0));      // panGlideMs = 0

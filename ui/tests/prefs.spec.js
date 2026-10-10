@@ -100,10 +100,10 @@ test('the theme picker is one row of the four theme cards, no scrolling, no arro
   expect(await css(picker, 'overflow-x')).toBe('visible');
   await expect(key(page, 'uiPalette').locator('button')).toHaveCount(4);   // the four cards only
   expect(await css(picker, 'mask-image')).toBe('none');
-  // Right-aligned like the other controls: the last card ends at the row's right edge.
+  // At this width the row stacks (control under the text): the last card stays inside the row.
   const rowBox = await key(page, 'uiPalette').boundingBox();
   const lastBox = await picker.getByRole('radio').last().boundingBox();
-  expect(rowBox.x + rowBox.width - (lastBox.x + lastBox.width)).toBeLessThan(40);
+  expect(lastBox.x + lastBox.width).toBeLessThanOrEqual(rowBox.x + rowBox.width);
   await expect(picker.getByRole('radio', { checked: true })).toHaveAccessibleName('Wind grey');
   await expect(picker.locator('.nm')).toHaveCount(0);   // cards only, no names (owner decision)
   // Each card is drawn in its own theme: the mini windows differ.

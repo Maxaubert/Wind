@@ -380,10 +380,9 @@ struct Config {
     double cursorSensitivity = 1.0;
     // Pan glide (issue #430, src/pan_glide.h): when a mouse movement stops, the pointer eases on and
     // comes to rest instead of halting dead. panGlideMaxPx caps how far, in SCREEN px at any zoom
-    // (0 = off, the default); panGlideMs is the ease's time constant (a fast hand eases more steeply
-    // to stay inside the cap). Hot. Replaces cursorSmoothing (ignored).
+    // (0 = off, the default). The ease's time follows the distance (PanGlideTauS, one setting since
+    // #434; the old panGlideMs key is ignored). Hot. Replaces cursorSmoothing (ignored).
     int    panGlideMaxPx = 0;
-    int    panGlideMs = 60;
     // 0 (default) = the render engine's cursor grows with the zoom, matching the transform
     // engine (DWM magnifies its sprite); 1 = opt-in constant desktop-size pointer. Replaces
     // cursorScaleWithZoom (issue #253), which is IGNORED: the default template wrote it as an

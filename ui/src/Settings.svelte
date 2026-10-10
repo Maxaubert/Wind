@@ -369,15 +369,23 @@
 <style>
   /* Hidden until the session is loaded, so no empty controls flash; the host paints the theme background behind it. */
   .app.pending { visibility: hidden; }
-  .app { width: 100vw; height: 100vh; display: grid; grid-template-rows: 38px 1fr; position: relative; overflow: hidden; }
-  .body { display: grid; grid-template-columns: 240px 1fr; min-height: 0; }
+  .app { --side-w: 240px; width: 100vw; height: 100vh; display: grid; grid-template-rows: 38px 1fr; position: relative; overflow: hidden; }
+  .body { display: grid; grid-template-columns: var(--side-w) minmax(0, 1fr); min-height: 0; }
+  /* Narrow window: the sidebar moves above the page as a wrapped strip instead of eating the content. */
+  @media (max-width: 700px) {
+    .app { --side-w: 0px; }
+    .body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  }
   .body { position: relative; }   /* the scroll chip sits on the right edge of the page column */
   /* No native scrollbar on the page: ScrollChip shows the position instead (#329). */
-  .main { position: relative; min-height: 0; overflow-y: auto; padding: 0 40px; outline: none; scrollbar-width: none; }
+  /* The page is a size container: --gx is the side gutter (smaller when narrow) and caps the content at 960px on wide windows. */
+  .main { position: relative; min-height: 0; min-width: 0; overflow-y: auto; overflow-x: hidden; padding: 0; outline: none; scrollbar-width: none;
+          container-type: inline-size; }
+  .page, .tail { --gx: max(clamp(16px, 4cqw, 40px), calc((100cqw - 960px) / 2)); padding-inline: var(--gx); }
   .main[data-page="tray"] :global(.banner + .card) { margin-top: 20px; }   /* k01: a caption-less first card sits 20px under the band */
   .page.fade { animation: pagein var(--dur-fast) var(--ease); }
   @keyframes pagein { from { opacity: 0; } }
-  .tail { height: 110px; }   /* clearance so the capsule never covers the last row */
+  .tail { height: 110px; padding: 0; }   /* clearance so the capsule never covers the last row */
   .main[data-page="tray"] .tail { height: 120px; }   /* k01: the scroller pads 120px under the last card */
   .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
              clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
