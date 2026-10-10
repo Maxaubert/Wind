@@ -390,6 +390,10 @@ struct Config {
     // explicit 0 into every ini, so fresh installs got a tiny cursor in render and a changed
     // default alone could never have reached them.
     int    cursorConstantSize = 0;
+    // Pin to taskbar (#436): 1 (default) = WindTray keeps its icon on the taskbar next to the clock,
+    // 0 = leave it in the hidden-icons overflow. Applied by WindTray alone (NotifyIconSettings
+    // IsPromoted); the core never reads it, so it is a UI-only key (StripUiOnlyKeys) and global.
+    int    trayPinned = 1;
     // Cursor visibility while zoomed: "auto" = follow the focused app (don't draw a cursor
     // when a game hides its own via ShowCursor(FALSE); detected with GetCursorInfo's
     // CURSOR_SHOWING flag, which our own MagShowSystemCursor hide does NOT affect);

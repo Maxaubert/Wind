@@ -372,9 +372,26 @@ test('Troubleshooting is always there, and the advanced switch is the last row o
   await page.goto('/');
   await go(page, 'prefs');
   await expect(page.locator('main .cap')).toHaveText(['General', 'Screen light', 'Troubleshooting']);
-  await expect(page.locator('main .card').first().locator('.row .label')).toHaveText(['Theme', 'Profile', 'Show advanced settings']);
+  await expect(page.locator('main .card').first().locator('.row .label')).toHaveText(['Theme', 'Profile', 'Pin to taskbar', 'Show advanced settings']);
   await expect(page.locator('main .card').nth(1).locator('.row .label')).toHaveText(['Warmth', 'Brightness']);
   await expect(page.locator('main .card').nth(2).locator('.row .label')).toHaveText(['Frame time logging', 'Export diagnostics', 'Open settings file']);
+});
+
+test('Pin to taskbar (#436): on by default, writes trayPinned, never an unsaved change', async ({ page }) => {
+  await page.goto('/');
+  await go(page, 'prefs');
+  const row = key(page, 'trayPinned');
+  await expect(row.locator('.label')).toHaveText('Pin to taskbar');
+  await expect(row.locator('.desc')).toHaveText('Keeps the Wind icon next to the clock');
+  const sw = row.getByRole('switch');
+  await expect(sw).toBeChecked();   // ships on
+  await sw.uncheck({ force: true });
+  expect((await sent(page, 'setConfig')).filter((m) => m.key === 'trayPinned').map((m) => m.value)).toEqual(['0']);
+  await sw.check({ force: true });
+  expect((await sent(page, 'setConfig')).filter((m) => m.key === 'trayPinned').map((m) => m.value)).toEqual(['0', '1']);
+  // A global key: flipping it must not light up the unsaved-changes state.
+  await sw.uncheck({ force: true });
+  await expect(page.locator('.capsule')).toHaveCount(0);
 });
 
 test('prefs files contain no em-dash', () => {

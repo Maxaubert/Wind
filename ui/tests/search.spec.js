@@ -50,7 +50,7 @@ test('stopwords never outrank content words and fuzzy skips free text', () => {
   expect(zi[0]).toBe('Zoom in');
   expect(zi.indexOf('Zoom out')).toBeGreaterThan(-1);
   expect(zi.indexOf('Zoom out')).toBeLessThan(zi.indexOf('Performance in the tray'));
-  expect(search(groups, 'tray').map((h) => h.label)).toEqual(['Performance in the tray']);
+  expect(search(groups, 'tray').map((h) => h.label)).toEqual(['Performance in the tray', 'Pin to taskbar']);
   expect(search(groups, 'theme').map((h) => h.label)).toEqual(['Theme']);
 });
 
@@ -154,7 +154,12 @@ test('Tray menu: only its normal switch row is indexed, never the item lists', (
   // The lists are drawn by the custom page, so no key of theirs is a schema row.
   for (const k of ['trayTools', 'traySliders', 'trayToggles', 'trayOrder', 'keepEdges']) expect(allRows.map((r) => r.key)).not.toContain(k);
   for (const q of ['slider', 'toggle', 'quick', 'segment', 'drag', 'reorder', 'keep cursor centred'])
-    expect(keys(q).filter((k) => k.startsWith('tray') && k !== 'trayPerf')).toEqual([]);
+    expect(keys(q).filter((k) => k.startsWith('tray') && k !== 'trayPerf' && k !== 'trayPinned')).toEqual([]);
+});
+
+test('Pin to taskbar is found by its natural words (#436)', () => {
+  for (const q of ['taskbar', 'notification area', 'clock', 'hidden icons', 'system tray', 'overflow'])
+    expect(keys(q), q).toContain('trayPinned');
 });
 
 test('search files contain no em-dash', () => {
@@ -249,9 +254,9 @@ test('tray item lists never appear in results; the Performance switch does', asy
   await expect(page.locator('.res .hit[data-hit="trayPerf"]')).toBeVisible();
   await expect(page.locator('.res .hit').filter({ has: page.locator('.drag, [draggable=true]') })).toHaveCount(0);
   const ids = await page.locator('.res .hit').evaluateAll((els) => els.map((e) => e.getAttribute('data-hit')));
-  expect(ids.filter((k) => k.startsWith('tray') && k !== 'trayPerf')).toEqual([]);
+  expect(ids.filter((k) => k.startsWith('tray') && k !== 'trayPerf' && k !== 'trayPinned')).toEqual([]);
   await input(page).fill('slider');
-  await expect(page.locator('.res [data-hit^="tray"]:not([data-hit="trayPerf"])')).toHaveCount(0);
+  await expect(page.locator('.res [data-hit^="tray"]:not([data-hit="trayPerf"]):not([data-hit="trayPinned"])')).toHaveCount(0);
 });
 
 test('Esc clears, Ctrl+F focuses with a ring, Enter moves into the first result, Tab walks the controls', async ({ page }) => {

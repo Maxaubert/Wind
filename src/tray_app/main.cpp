@@ -7,6 +7,10 @@
 #include "tray_app.h"
 #include "../logging.h"
 #include "../tray_ipc.h"
+#include "../config.h"
+#include "../config_path.h"
+#include "../profiles_io.h"
+#include "tray_pin.h"
 #include <shellapi.h>
 #include <cwchar>
 #include <string>
@@ -33,6 +37,40 @@ using namespace wind;
 
 static UINT g_taskbarCreated = 0;
 
+// Pin to taskbar (#436). The tray never learned about ini changes before (the flyout reads the ini when
+// it opens), so main watches the ini folder: a change re-reads trayPinned after a short debounce and
+// writes IsPromoted only when the wanted value changed. See src/tray_app/tray_pin.h.
+static constexpr UINT_PTR kPinTimerId = 1;      // retry: Explorer creates our entry only after the icon is added
+static constexpr UINT_PTR kCfgTimerId = 2;      // debounce for an ini change
+static constexpr int      kPinMaxAttempts = 12; // x 1 s
+static int g_pinWanted = -1;                    // -1 = not read yet
+static int g_pinAttempts = 0;
+static bool g_cfgPending = false;               // a debounce timer is already running
+
+static void ApplyPin(HWND h) {
+    const TrayPin::Result r = TrayPin::ApplyPinned(g_pinWanted != 0, 1);   // uID 1 is the id AddIcon uses
+    if (r == TrayPin::Result::NoEntry && g_pinAttempts < kPinMaxAttempts) {
+        ++g_pinAttempts;
+        SetTimer(h, kPinTimerId, 1000, nullptr);
+    } else {
+        KillTimer(h, kPinTimerId);
+        if (r == TrayPin::Result::NoEntry || r == TrayPin::Result::Error)
+            wind::Log(wind::LogLevel::Warn, "tray", "taskbar pin: not applied (%s)",
+                      r == TrayPin::Result::Error ? "registry error" : "no icon entry");
+    }
+}
+
+// force: apply even when the value is unchanged (the icon was added again).
+static void RefreshPin(HWND h, bool force) {
+    int want = g_pinWanted < 0 ? 1 : g_pinWanted;   // an unreadable ini keeps what we had
+    std::string text;
+    if (wind::ReadLiveIni(wind::ResolveIniPath(), text)) want = wind::ParseConfig(text).trayPinned;
+    if (!force && want == g_pinWanted) return;
+    g_pinWanted = want;
+    g_pinAttempts = 0;
+    ApplyPin(h);
+}
+
 static LRESULT CALLBACK TrayWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (m == TrayApp::WM_TRAY && (l == WM_RBUTTONUP || l == WM_LBUTTONUP)) {
         TrayApp::ToggleFlyout();
@@ -42,8 +80,11 @@ static LRESULT CALLBACK TrayWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         // Explorer restarted: the shell forgot every icon. AddIcon deletes before adding, so this
         // can never leave two.
         TrayApp::AddIcon(h, GetModuleHandleW(nullptr));
+        RefreshPin(h, true);
         return 0;
     }
+    if (m == WM_TIMER && w == kPinTimerId) { KillTimer(h, kPinTimerId); ApplyPin(h); return 0; }
+    if (m == WM_TIMER && w == kCfgTimerId) { KillTimer(h, kCfgTimerId); g_cfgPending = false; RefreshPin(h, false); return 0; }
     if (m == WM_DESTROY) { PostQuitMessage(0); return 0; }
     return DefWindowProcW(h, m, w, l);
 }
@@ -121,12 +162,32 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR cmdLine, int) {
     g_taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
     // Explorer runs at the same integrity, but allow the broadcast explicitly in case it does not.
     ChangeWindowMessageFilterEx(hwnd, g_taskbarCreated, MSGFLT_ALLOW, nullptr);
+    // Watch the ini folder (Settings replaces the file atomically, so the name changes too).
+    HANDLE hCfg = INVALID_HANDLE_VALUE;
+    {
+        std::wstring dir = wind::ResolveIniPath();
+        const size_t cut = dir.find_last_of(L"\\/");
+        if (cut != std::wstring::npos) {
+            dir.resize(cut);
+            hCfg = FindFirstChangeNotificationW(dir.c_str(), FALSE,
+                       FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_SIZE);
+        }
+    }
+
     TrayApp::AddIcon(hwnd, hInst);
+    RefreshPin(hwnd, true);
     wind::Log(wind::LogLevel::Info, "tray", "serving Wind pid=%lu", windPid);
 
     bool running = true;
     while (running) {
-        const DWORD w = MsgWaitForMultipleObjects(1, &hWind, FALSE, INFINITE, QS_ALLINPUT);
+        HANDLE waits[2] = { hWind, hCfg };
+        const DWORD nWaits = hCfg != INVALID_HANDLE_VALUE ? 2 : 1;
+        const DWORD w = MsgWaitForMultipleObjects(nWaits, waits, FALSE, INFINITE, QS_ALLINPUT);
+        if (w == WAIT_OBJECT_0 + 1 && nWaits == 2) {
+            FindNextChangeNotification(hCfg);
+            if (!g_cfgPending) { g_cfgPending = true; SetTimer(hwnd, kCfgTimerId, 300, nullptr); }   // fixed delay, cannot be starved by a busy folder
+            continue;
+        }
         if (w == WAIT_OBJECT_0) {
             wind::Log(wind::LogLevel::Info, "tray", "Wind exited; removing the icon");
             break;
@@ -144,6 +205,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR cmdLine, int) {
     // "open".
     TrayApp::CloseFlyout();
     TrayApp::RemoveIcon();
+    if (hCfg != INVALID_HANDLE_VALUE) FindCloseChangeNotification(hCfg);
     SetTrayMenuOpen(TrayApp::g_block, false);
     wind::LogShutdown();
     ExitProcess(0);

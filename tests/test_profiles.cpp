@@ -216,12 +216,15 @@ TEST_CASE("ParseIniTmpName recognises WriteTextFileAtomic's leftover temp names"
 }
 TEST_CASE("StripUiOnlyKeys strips every global key except profile (tray edits must not reload the core)") {
     const char* globals[] = { "onboarded", "uiTheme", "uiPalette", "showAdvanced", "trayPerf", "traySliders",
-                              "traySliderOrder", "trayToggles", "trayToggleOrder" };
+                              "traySliderOrder", "trayToggles", "trayToggleOrder", "trayPinned" };
     for (const char* k : globals) {
         REQUIRE(IsGlobalProfileKey(k));
         const std::string line = std::string(k) + "=1\n";
         CHECK(StripUiOnlyKeys("maxLevel=8\n" + line) == "maxLevel=8\n");
         CHECK(StripUiOnlyKeys("maxLevel=8\n" + std::string(k) + "=2\n") == StripUiOnlyKeys("maxLevel=8\n" + line));
+        // The carry-over list in MakeLiveText keeps the live value across a profile switch; profiles never store it.
+        CHECK(ReadIniValues(MakeLiveText("", std::string(k) + "=0\n", "X"))[k] == "0");
+        CHECK(MakeProfileText("maxLevel=8\n" + line).find(std::string(k) + "=") == std::string::npos);
     }
     // profile stays IN the fingerprint: a profile switch must still reload the core.
     CHECK(StripUiOnlyKeys("profile=A\n") != StripUiOnlyKeys("profile=B\n"));

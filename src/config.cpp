@@ -213,6 +213,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "panGlideMs")         c.panGlideMs = ParseIntStrict(val);
             else if (key == "panGlideMaxPx")      c.panGlideMaxPx = ParseIntStrict(val);
             else if (key == "cursorConstantSize") c.cursorConstantSize = ParseIntStrict(val);
+            else if (key == "trayPinned")         c.trayPinned = ParseIntStrict(val);
             else if (key == "cursorVisibility")   c.cursorVisibility = val;
             else if (key == "model")              c.model = val;
             else if (key == "fastPan")            c.fastPan = ParseIntStrict(val);
@@ -304,6 +305,7 @@ Config ParseConfig(const std::string& text) {
     c.brightness      = clampd(c.brightness,      0.5, 1.5);
     c.colorWarmPct    = (int)clampd(c.colorWarmPct, 0, 100);
     c.colorDimPct     = (int)clampd(c.colorDimPct, 1, 100);
+    c.trayPinned      = (int)clampd(c.trayPinned, 0, 1);
     c.quickZoomDefault  = clampd(c.quickZoomDefault, 1.0, 50.0);
     if (c.outlineThickness < 1)  c.outlineThickness = 1;
     if (c.outlineThickness > 40) c.outlineThickness = 40;
@@ -392,7 +394,7 @@ std::string StripUiOnlyKeys(const std::string& iniText) {
             // Keep in step with IsGlobalProfileKey (src/profiles.cpp) minus "profile": a test pins it.
             for (const char* k : { "uiTheme=", "uiPalette=", "showAdvanced=", "onboarded=",
                                    "trayPerf=", "traySliders=", "traySliderOrder=", "trayToggles=",
-                                   "trayToggleOrder=" }) {
+                                   "trayToggleOrder=", "trayPinned=" }) {
                 if (line.compare(b, strlen(k), k) == 0) { uiOnly = true; break; }
             }
         }
@@ -524,6 +526,9 @@ std::string DefaultIniText() {
                "; cursorConstantSize: 0=the cursor grows with the zoom (default); 1=keep it at normal\n"
                ";   desktop size at every zoom (render engine only). Replaces cursorScaleWithZoom (ignored).\n"
                "cursorConstantSize=0\n"
+               "; trayPinned: 1=keep the Wind tray icon on the taskbar next to the clock (default);\n"
+               ";   0=leave it in the hidden icons overflow. Applied by WindTray, never reloads the core\n"
+               "trayPinned=1\n"
                "; cursorVisibility: auto=hide our cursor when the focused app hides its own (games);\n"
                ";   always=always draw it; never=never draw it\n"
                "cursorVisibility=auto\n"

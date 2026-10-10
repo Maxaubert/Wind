@@ -165,6 +165,32 @@ card by pointer drag, or with the keyboard: Space to pick up and drop, arrows to
 global, not profile keys. Spec:
 [../specs/2026-10-01-tray-flyout-design.md](../specs/2026-10-01-tray-flyout-design.md).
 
+## Pin to taskbar
+
+The Preferences row `trayPinned` (General card, default on) keeps WindTray's icon on the taskbar
+next to the clock instead of in the hidden-icons overflow. The page only writes the ini key; it is
+global and UI-only (`StripUiOnlyKeys`, `IsGlobalProfileKey`), so it never reloads the core and never
+travels with a profile. WindTray applies it (`src/tray_app/main.cpp`, `tray_pin.*`):
+
+- At startup right after `AddIcon`, after an Explorer restart (`TaskbarCreated`), and whenever the
+  ini changes. The tray watches the ini folder with `FindFirstChangeNotificationW` as a second wait
+  handle of its message loop; a 300 ms debounce timer then re-reads `trayPinned` and applies only
+  when the value changed.
+- Windows keeps one registry key per icon: `HKCU\Control Panel\NotifyIconSettings\<id>` with
+  `ExecutablePath` (plain, or `{known-folder GUID}\rest` such as `{6D809377-...}` =
+  FOLDERID_ProgramFilesX64), `UID` (the `NOTIFYICONDATA` uID, Wind uses 1), `InitialTooltip` and
+  `IsPromoted` (DWORD, 1 = taskbar, 0 or absent = overflow). WindTray touches only the entry whose
+  expanded `ExecutablePath` equals its own module path (case-insensitive) and whose `UID` is 1;
+  entries of other builds stay as they are. The matching is pure and tested
+  (`tray_pin_logic.cpp`, `tests/test_tray_pin.cpp`).
+- Explorer creates the entry only after the icon is first added, so on a first run the write retries
+  once a second for up to 12 s. Explorer applies a changed `IsPromoted` within about a second.
+- Wind re-applies the value at each tray start, so it overrides an unpin made in Windows Settings while
+  the row is on.
+
+Source: tested on this machine (Windows 11 26200), 2026-10-10: toggled `IsPromoted` 0 and 1 and
+checked the icon position through UI Automation. The key is undocumented by Microsoft.
+
 ## Profiles
 
 The Profile row (`prefs/ProfilePicker.svelte`) is a dropdown plus New. Each profile except the last

@@ -73,8 +73,8 @@ as an initializer, so a missing or malformed key keeps the default; parsing neve
 ## Hot-reload and the UI-only fingerprint
 
 The reload mechanics are in [02](02-tick-loop.md). A reload rebuilds `ZoomController`, so it
-collapses an active zoom; therefore `StripUiOnlyKeys` removes the nine keys the core never reads
-(`uiTheme`, `uiPalette`, `showAdvanced`, `onboarded` and the five tray layout keys `trayPerf`,
+collapses an active zoom; therefore `StripUiOnlyKeys` removes the ten keys the core never reads
+(`uiTheme`, `uiPalette`, `showAdvanced`, `onboarded`, `trayPinned` and the five tray layout keys `trayPerf`,
 `traySliders`, `traySliderOrder`, `trayToggles`, `trayToggleOrder`) and the reload is skipped when the stripped
 text is unchanged. `profile` stays in the fingerprint, so a profile switch reloads.
 
@@ -99,7 +99,7 @@ A profile is a named full snapshot of the settings, keybinds included, stored as
 in `src/profiles.*` (tested); I/O in `src/profiles_io.h`.
 
 **Global keys never travel with a profile.** `IsGlobalProfileKey` covers `profile`, `onboarded`,
-`uiTheme`, `uiPalette`, `showAdvanced` and the five tray layout keys (`trayPerf`, `traySliders`,
+`uiTheme`, `uiPalette`, `showAdvanced`, `trayPinned` and the five tray layout keys (`trayPerf`, `traySliders`,
 `traySliderOrder`, `trayToggles`, `trayToggleOrder`). `MakeProfileText` strips them from profile
 files; `MakeLiveText` carries them over from the old live text. Both work line by line and keep
 comments and order.
@@ -202,7 +202,8 @@ Every key works in the ini whether or not Settings shows it. Keys hot-reload unl
 | `zorderBand` (0, restart) | 16 covers the shell in the UIAccess build, at the cost of the Snipping Tool ([04](04-render-engine.md)) |
 
 **Global and UI.** `profile`, `onboarded`, `uiPalette` (`grey`, `ember`, `ocean`, `hicon`),
-`showAdvanced`, `trayPerf`, `traySliders`, `traySliderOrder`, `trayToggles`, `trayToggleOrder`.
+`showAdvanced`, `trayPerf`, `traySliders`, `traySliderOrder`, `trayToggles`, `trayToggleOrder`,
+`trayPinned` (1 = keep the tray icon on the taskbar, 0 = hidden-icons overflow; applied by WindTray).
 `uiTheme` is a legacy key, ignored.
 
 **Transform and diagnostics.** Hot unless noted; the full text is on the `Config` field.
