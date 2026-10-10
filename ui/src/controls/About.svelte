@@ -10,7 +10,7 @@
   <p class="tag">Barely there. Everywhere.</p>
   {#if version}<p class="ver">v{version}</p>{/if}
   <button type="button" class="link" onclick={onRepo}>Star on GitHub</button>
-  <p class="ask">If Wind helps you, a star helps others find it.</p>
+  <p class="ask">A star helps others find Wind</p>
 </div>
 
 <style>

@@ -37,9 +37,9 @@
 </div>
 
 <style>
-  .sl { display: inline-flex; align-items: center; gap: 6px; }
+  .sl { display: inline-flex; max-width: 100%; min-width: 0; align-items: center; gap: 6px; }
   .sl.disabled { opacity: .45; }
-  input { -webkit-appearance: none; appearance: none; width: 220px; height: 20px; margin: 0 10px 0 0;
+  input { -webkit-appearance: none; appearance: none; width: 220px; max-width: 100%; flex: 1 1 120px; min-width: 0; height: 20px; margin: 0 10px 0 0;
           background: transparent; cursor: pointer; }
   input::-webkit-slider-runnable-track {
     height: 3px; border-radius: 2px;

@@ -25,7 +25,7 @@
   const blocked = (kind, it) => kind === 'sliders' && !it.on && full;
 </script>
 
-<div class="thint">Checked items appear in the tray. Drag to reorder.</div>
+<div class="thint">Check items to show them and drag to reorder</div>
 
 {#snippet itemRow(kind, it)}
   <span class="tic" title={it.name}>{@html iconSvg(it.icon, 24)}</span>
@@ -41,7 +41,7 @@
 
 <div class="tcap">
   <span id="cap-sliders">Sliders</span>
-  <span class="cnt" data-cnt="sliders">{sliderCount} of {MAX_SLIDERS}{full ? ' · Uncheck one to add another' : ''}</span>
+  <span class="cnt" data-cnt="sliders">{sliderCount} of {MAX_SLIDERS}{full ? ' full' : ''}</span>
 </div>
 <DragList items={sliders} labelledby="cap-sliders" {announce}
           onRowClick={(it) => flip('sliders', sliders, it)}
