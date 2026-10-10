@@ -11,7 +11,9 @@ All state that feeds the view is read and written on the tick thread, in one pas
 across threads makes the view and the cursor sample different instants, which shows as a visible
 beat (the wobble class in [../NATIVE-MAGNIFIER-STOMP.md](../NATIVE-MAGNIFIER-STOMP.md)).
 
-`RunTick` never sleeps or waits; the caller paces it (see [Pacing](#pacing)).
+`RunTick` does not pace itself; the caller does (see [Pacing](#pacing)). It can still block
+briefly: a config reload reads the ini with a short retry budget (up to 20 ms, see
+[Config hot-reload](#config-hot-reload)), and the game pacing modes wait on a vblank inside it.
 
 ## The phases of a tick
 
@@ -52,13 +54,17 @@ flowchart TD
    active at 1x (`active = zoomed || inspect`). Details in [07](07-cursor.md).
 6. **Pan delta.** One of three regimes, see [below](#pan-delta-three-regimes).
 7. **Foreground facts and the pan wall.** `GetForegroundWindow`, `ForegroundCoversMonitor` and the
-   borderless check are read once per tick into locals (`fgTick`, `fsCover`, `fgBorderless`), so
-   no two reads in one tick disagree. They feed the MPO pan wall
+   borderless check are read once into locals (`fgTick`, `fsCover`, `fgBorderless`) for the engine
+   pick, the instant switch and the pacing levers. Earlier phases of the same tick read the
+   foreground on their own (the `noSwallowApps` hook suspension, the `lockApps` match, the
+   activation pick, Inspect's entry), so those reads can differ from `fgTick` if the foreground
+   changes mid-tick. The locals feed the MPO pan wall
    (`setMaxSourceLeft`/`setMaxSourceTop`, see [05](05-transform-engine.md)), the churny backstop,
    the launch quiesce and the game pacing levers.
 8. **Activation pick and instant switch.** On the idle-to-active edge the tick retargets to the
-   cursor's monitor when `multiMonitor=1` (and re-reads its refresh rate), then runs the engine
-   pick. The same pick runs every zoomed tick; a changed result hands over with controller and
+   monitor the session will use (the cursor's monitor when `multiMonitor=1`, else the primary one;
+   `multiMonitor` picks which monitor, not whether a changed geometry is noticed) in both engines,
+   re-reads its refresh rate, then runs the engine pick. The same pick runs every zoomed tick; a changed result hands over with controller and
    mapper untouched. The switch needs a stable candidate for 350 ms and is frozen while a
    transient overlay or the game-inspect focus stealer holds foreground. See [03](03-engines.md).
 9. **Present.** The tick fills `PresentExtras` (`src/magnifier_model.h`): outline visibility and
@@ -82,7 +88,8 @@ flowchart TD
 **Teardown and idle.** On the active-to-idle edge the overlay deactivates, the cursor is restored,
 Inspect residue (clip, swallowed clicks, foreground steal) is cleaned and pending reveals are
 cancelled. While idle the tick still calls `idleTick()` on the model, which is how the transform
-releases its magnification context ~1.2 s after a zoom ends. The tick ends with the stuck-input
+builds its magnification context and cursor lens at 1x and keeps them warm (#369, see
+[05](05-transform-engine.md)); it no longer releases them after a zoom. The tick ends with the stuck-input
 timeline and, under `diagnostics=1`, the 2 s frame-pacing window.
 
 ## Config hot-reload
@@ -95,33 +102,38 @@ There is no settings IPC. `WindConfig.exe` writes `magnifier.ini` and the core n
   kernel transition 144 times a second for a file a human changes. Without a watch handle the loop
   falls back to a ~1 s timed poll.
 - Only a changed mtime (`ConfigMTime`) proceeds to a reload.
+- The read is `ReadTextFileOk` with a 20 ms retry budget, which can sleep on the tick thread.
 - An unreadable ini (another process mid-replace) keeps the running settings: the mtime is not
   taken and `t.configRetry` re-checks on the next poll. See [08](08-config-profiles.md).
 
-**UI-only writes never reload.** A reload rebuilds `ZoomController`, which collapses an active zoom
-to 1x. `StripUiOnlyKeys` (`src/config.cpp`) drops `uiTheme`, `uiPalette`, `showAdvanced`,
+**UI-only writes never reload.** A reload rebuilds `ZoomController` and `CursorMapper`, which is
+wasted work and risks a visible hitch mid-zoom (the live level and mapper centre are carried over
+since #234, so the view no longer collapses to 1x). `StripUiOnlyKeys` (`src/config.cpp`) drops `uiTheme`, `uiPalette`, `showAdvanced`,
 `onboarded` and the five tray layout keys (`trayPerf`, `traySliders`, `traySliderOrder`,
 `trayToggles`, `trayToggleOrder`), and the result is compared with the fingerprint of the last applied config
 (`t.lastCoreIni`). An identical fingerprint skips the reload. The fingerprint is seeded at startup;
 an empty one would make the first Settings write of a session reload.
 
 A real reload re-binds the hook's buttons and swallowed keys (`g_input.setButtonBinds`/`setKeys`),
-re-registers the hotkeys, invalidates the foreground cache, and rebuilds `ZoomController` and `CursorMapper` with the mapper's centre kept.
-Engine-shaped keys (`model`) need a restart: they decide which models exist.
+re-registers the hotkeys, invalidates the foreground cache, and rebuilds `ZoomController` (the live
+zoom level is kept and clamped into the new `maxLevel`, #234) and `CursorMapper` (centre kept).
+Engine-shaped keys (`model`) and the other restart-only keys need a restart, see
+[08](08-config-profiles.md#hot-reload-and-the-ui-only-fingerprint).
 
 ## Pan delta: three regimes
 
 | Regime | Source of truth | Delta |
 |---|---|---|
 | Free (desktop) | The OS cursor | `GetCursorPos - lastSetVirtual`, times `cursorSensitivity` |
-| Locked (game holds the mouse) | Raw Input mickeys | `rawDx/rawDy * cursorSensitivity` |
+| Locked (game holds the mouse) | Raw Input mickeys | `rawDx/rawDy * learned gain * cursorSensitivity` (`GainLearner`; plain `rawDx/rawDy * cursorSensitivity` when `lockedBallistics=0`) |
 | Inspect (cursor frozen) | Raw mickeys x learned gain | `GainLearner::gainFor` with a sub-pixel carry |
 
 - **Free** reads the cursor's own movement since Wind last placed it, so Windows' pointer
   acceleration is already applied.
 - **Locked** applies when `LockDetector` says a game owns the pointer, see [07](07-cursor.md). A
   forced lock (`lockApps`, the `warpLock` zoom-in seed) goes through the detector
-  (`seedLock()`), because downstream gates read `t.detector.locked()`.
+  (`seedLock()`). Free ticks teach `GainLearner` the OS's real input-to-output pointer ratio per
+  speed, and the locked pan replays it, so a locked game pans at desktop-cursor speed.
 - **Tracking** overrides the result afterwards: caret, focus or mouse-edge mode can detach the view
   from the pointer (`t.viewDetached`), see [07](07-cursor.md).
 - `ShouldDragFollow` (`src/drag_follow.h`) suspends the render engine's weld while a mouse button is
@@ -141,7 +153,7 @@ The main loop in `wWinMain` paces the tick:
 | Active, no blocking present | High-resolution waitable timer at the detected refresh rate |
 | Render, vsync (default) | `Present(1,0)` blocks to the refresh; the timer is skipped |
 | Render, `dwmFlush=1` | `Present(0,0)`, then `DwmFlush()` after the tick |
-| Transform | Always `DwmFlush`; an unpaced loop floods DWM's transform queue until the view lags |
+| Transform | Always `DwmFlush` while zoomed (the write and the pointer land in one composite); an unpaced loop would flood DWM's transform queue until the view lags. Idle at 1x uses the timer or the idle sleep |
 | Game pacing modes | Paced inside `RunTick` (vblank waits or the present accumulator) |
 
 `DetectRefreshHz` reads the current monitor's real rate and is re-read on retarget. **Tick counts
@@ -183,6 +195,23 @@ The tick thread runs at `THREAD_PRIORITY_HIGHEST` and the process opts out of po
 composition. It does not help when the GPU is the bottleneck.
 
 ## Threads
+
+The core process runs these threads. Named threads show up by name in WPA and debuggers.
+
+| Thread | Name | Source | Job |
+|---|---|---|---|
+| Tick | `Wind tick` | `src/main.cpp` | The loop and every Magnification call. Highest priority, see above |
+| Input hooks | `Wind input hooks` | `src/input_router.cpp` | LL mouse and keyboard hooks, Raw Input registration |
+| Focus tracker | (WinEvent loop) | `src/focus_track.cpp` | Caret and focus tracking, own COM apartment |
+| Focus lookup | `Wind focus lookup` | `src/focus_track.cpp` | One UIA focus query at a time, detached on timeout |
+| Cursor swaps | `Wind cursor swaps` | `src/cursor_blanker.cpp` | System cursor hide, tint and restore swaps, off the tick |
+| DWM watch | `Wind DWM watch` | `src/dwm_watch.cpp` | Polls for a dwm.exe restart once a second, bumps a generation |
+| Log writer | `Wind log writer` | `src/logging.cpp` | Drains the log queue to disk (1000 ms wait) |
+| Tray supervisor | (unnamed) | `src/tray_host.cpp` | Keeps `WindTray.exe` running, rate limited |
+| Trace dump | (short lived) | `src/transform_model.cpp` | Writes the `txTrace=1` CSV at session end, below normal priority |
+
+WindConfig has its own short-lived export thread, and the timer-polling threads (DWM watch, log
+writer) wake on a timer even at 1x, a known cost of the idle design.
 
 - **Hook thread** (`src/input_router.cpp`). LL hook callbacks must return fast or Windows evicts the
   hook, and they stall system input while running, so they cannot share a thread that blocks in

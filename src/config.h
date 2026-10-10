@@ -229,8 +229,9 @@ struct Config {
     //   1 = 1px translation pulse (shipped). The cost is honest and known: the view sits 1px off
     //       the truth for one tick per pulse. It is shipped anyway because the hitch it removes is
     //       worse; 0 turns it off for anyone who disagrees.
-    // Only views Wind writes itself are warmed (locked mouselook, Inspect, a caret/focus tracked
-    // view); while DWM centres the view there is nothing to warm. Any value above 1 reads as 1.
+    // Only views Wind writes itself are warmed (locked mouselook, Inspect); while DWM centres the
+    // view there is nothing to warm, and a free pointer's detached view (caret, focus, keyboard
+    // pan) is not warmed either (078adb1). Any value above 1 reads as 1.
     int txWarmMode = 1;
     // WARM CADENCE (issue #246, hot). Every warm write is a real source-rect change, so DWM
     // re-renders the whole magnified screen for it: per-tick warming made a zoomed session

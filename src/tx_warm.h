@@ -25,8 +25,9 @@
 //
 // The 1px translation jitter is the one that works, at a known cost: the view sits 1px off the
 // truth for one tick per pulse (smooth sampling can render that as shaking; nearest masks it).
-// Warm pulses only run where Wind writes the view itself (locked mouselook, Inspect, a caret or
-// focus tracked view); DWM's own centring needs none.
+// Warm pulses only run where Wind writes the view itself (locked mouselook, Inspect); DWM's own
+// centring needs none, and a free pointer's detached view (caret, focus, keyboard pan) is excluded
+// because the pulse showed there as a one-pixel shake (078adb1).
 //
 // docs/HITCH-FINDINGS.md carries the full write-up and the measured dead ends.
 namespace wind {

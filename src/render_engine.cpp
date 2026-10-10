@@ -140,7 +140,7 @@ struct RenderEngine::State {
     ComPtr<ID3D11BlendState> blendInvert;      // invert blend for I-beam-style cursors
     ComPtr<ID3D11Texture2D> cursorTex;         // the ACTIVE cursor's texture (an alias into the cache)
     ComPtr<ID3D11ShaderResourceView> cursorSRV;
-    ComPtr<ID3D11ShaderResourceView> crosshairSRV;  // Inspect-mode crosshair sprite (32x32, built once)
+    ComPtr<ID3D11ShaderResourceView> crosshairSRV;  // Inspect-mode crosshair sprite (48x48, built once)
     HCURSOR lastCursor = nullptr;              // re-decode only when the OS cursor changes
     int curW = 0, curH = 0, hotX = 0, hotY = 0;
     bool cursorReady = false;
@@ -1359,7 +1359,7 @@ bool RenderEngine::renderFrame(const RenderFrameParams& p) {
 }
 
 // Render one frame and dump it WITHOUT presenting, so the PNG reflects exactly the drawn
-// frame (a FLIP_DISCARD back-buffer read after Present is undefined). Verification only.
+// frame (a DISCARD swap-chain back-buffer read after Present is undefined). Verification only.
 bool RenderEngine::dumpFrame(const RenderFrameParams& p, const wchar_t* path) {
     if (!s_->ready) return false;
     s_->render(p);

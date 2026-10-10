@@ -64,8 +64,10 @@ follows only the terminal caret there.
 - Java apps expose the caret only through the bridge (the built-in Magnifier does not follow them
   either). Reads take 1–12 ms (outlier 134 ms) and work only while the Java window is active.
 - UIPI drops the JVM's handshake messages to a UIAccess process, so Wind allows exactly the bridge
-  protocol's messages on the bridge's own hidden windows. Reads happen only after bridge callbacks,
-  never on the poll; hung Java windows (`IsHungAppWindow`) are skipped.
+  protocol's messages on the bridge's own hidden windows. Reads follow bridge callbacks and window
+  switches; there is no fixed-rate poll. While the last read found nothing, a backed-off retry
+  (250 ms doubling to 4 s, reset by any Java event or window switch) reads again. Hung Java windows
+  (`IsHungAppWindow`) are skipped.
 - The client DLL and any `vcruntime140.dll` beside it must carry a valid Authenticode signature and
   are held open against replacement. Wind enables the bridge in
   `%USERPROFILE%\.accessibility.properties`, rewriting the file only after a clean read.

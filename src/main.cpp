@@ -438,9 +438,9 @@ static TickState* g_tick = nullptr;
 static std::set<std::wstring> g_churnyApps;
 
 static std::wstring ChurnyFilePath() {
-    std::wstring dir = wind::ResolveLogDir();          // %LOCALAPPDATA%\Wind\logs
+    std::wstring dir = wind::ResolveLogDir();          // exe-dir\logs, else %LOCALAPPDATA%\Wind\logs
     size_t cut = dir.find_last_of(L"\\/");
-    if (cut != std::wstring::npos) dir.resize(cut);    // -> %LOCALAPPDATA%\Wind
+    if (cut != std::wstring::npos) dir.resize(cut);    // -> the log dir's parent
     return dir + L"\\churny_apps.txt";
 }
 static std::wstring ExeNameOf(HWND h) {
@@ -1803,7 +1803,7 @@ static void RunTick(TickState& t) {
         // flip app goes from Hardware Composed: Independent Flip to Composed: Flip at zoom-in in both
         // cases. Then the pan walls, the write clamp and the MPO ghost are all unnecessary; the ghost
         // alone cost 5-7 ms at every zoom-out (16-21 ms landing stalls). Behind mpoGuardLiftWall until
-        // the far edge is proven on an MPO boot (default off).
+        // the far edge is proven on an MPO boot (shipped on: mpoGuardLiftWall=1).
         // What a TRANSFORM session would get, whichever engine is active now: the mid-zoom
         // render -> transform switch below hands the same tick to an engine this block did not see.
         const bool liftIfTransform = !g_mpoDisabled && t.cfg.mpoGuardLiftWall != 0 &&
@@ -3305,11 +3305,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     bool running = true;
     unsigned long long nextRecoverMs = 0;   // device-lost recovery backoff gate (GetTickCount64)
     bool lostSeen = false;                  // this device loss already attributed (backstop runs once)
-    // The transform model does no blocking present, so it can never self-pace via Present(1,0) or
-    // DwmFlush the way the render model does. It must always be timer-paced (like the idle/1x path),
-    // or the zoomed loop spins flat out and floods MagSetFullscreenTransform, backing up DWM's
-    // desktop-transform queue so the view lags ~1-2s behind input. Cache the model kind once.
-    // hybrid swaps engines per zoom-in: current-engine check is per-iteration in the loop
+    // Pacing is decided per iteration below (hybrid swaps engines per zoom-in, so the current
+    // engine is checked every pass): see "Pacing while zoomed". The transform model does no
+    // blocking present, so while zoomed it is DwmFlush-paced; an unpaced loop would flood
+    // MagSetFullscreenTransform and back up DWM's desktop-transform queue (~1-2 s of view lag).
     while (running) {
         MSG msg;
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {

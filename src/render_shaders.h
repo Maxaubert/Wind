@@ -2,7 +2,8 @@
 namespace wind {
 
 // Constant buffer: source sub-rect UV bounds, output brightness, HDR tonemap params, sharpening
-// strength, and the source texel size. 48 bytes (three 16-byte registers).
+// strength, the source texel size and the colour matrix. 128 bytes: eight 16-byte registers
+// (three scalar registers plus the five colour-matrix rows).
 // hdrMode: 0 = SDR passthrough, 1 = scRGB (FP16 linear Rec.709) -> SDR.
 // scRgbScale = 80 / SDR-white-nits (scRGB 1.0 = 80 nits; SDR white maps to 1.0).
 // sharpness: 0 = off (single tap, cheapest); >0 = adaptive sharpen strength.
@@ -13,6 +14,7 @@ struct MagCB {
     float texelW, texelH, colorOn, pad1;              // reg 2 (colorOn: issue #288)
     float cm[5][4];                                   // reg 3-7: colour matrix rows (RGBA in, RGBA out) + offsets
 };
+static_assert(sizeof(MagCB) == 128, "MagCB must match the HLSL cbuffer CB (8 x 16-byte registers)");
 
 // Fullscreen-triangle magnify shader. The VS maps the visible [0,1] screen UV into the
 // source sub-rect; the PS samples the captured desktop, optionally sharpens (adaptive, clamped to

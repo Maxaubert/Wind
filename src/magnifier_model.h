@@ -57,7 +57,9 @@ struct IMagnifierModel {
     // Called every tick while IDLE (not zoomed, no Inspect). The transform model builds its
     // magnification context and cursor lens here, once, so the first zoom does not pay for them.
     virtual void idleTick() {}
-    virtual bool retarget(const MonitorTarget& m) { (void)m; return false; }  // render-only; false = unchanged
+    // Move to another monitor or resolution. Both engines implement it (render also validates the
+    // adapter and returns false across GPUs); the default is "unchanged".
+    virtual bool retarget(const MonitorTarget& m) { (void)m; return false; }
     virtual void present(const MapResult& r, double level, const Config& cfg,
                          const MonitorTarget& mon, const PresentExtras& ex) = 0;  // the per-tick draw
     virtual bool coversShell() const = 0;             // whether the magnified view covers the shell

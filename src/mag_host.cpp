@@ -78,9 +78,9 @@ bool MagHost::setSamplingMode(unsigned mode) {
     // Modes 0/1 go through MagSetFullscreenUseBitmapSmoothing (the documented-shape BOOL wrapper that
     // native Magnifier uses). Modes 2-4 exist only on the raw user32 setter: the kernel accepts
     // and round-trips 0..4 though the wrapper exposes just two, and nothing is published about
-    // what the extra three do. They are worth trying because mode 1's edge-preserving filter is
-    // a confirmed dwmcore crash trigger over complex (Mica/acrylic) geometry at high zoom -
-    // a cheaper filter may look smooth without taking the compositor down.
+    // what the extra three do. They were tried as a cheaper filter than mode 1 (a confirmed dwmcore
+    // crash trigger over Mica/acrylic at high zoom) and field-tested 2026-08-13: all three render
+    // identically to nearest (see Config::txSamplingMode), so they are kept for diagnostics only.
     // The raw setter takes a DWORD POINTER, not a value: passing the value by mistake
     // dereferences it and access-violates (field crash 2026-08-13).
     if (mode >= 2) {

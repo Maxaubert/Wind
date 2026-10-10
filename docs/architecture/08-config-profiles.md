@@ -80,8 +80,12 @@ text is unchanged. `profile` stays in the fingerprint, so a profile switch reloa
 
 **Hot or restart follows from how a value is read.** A key read from `t.cfg` per tick or per
 zoom-in is hot. A key baked into state at initialization needs a restart: `model` (which engines
-exist), `gpuPriority` (device build), `zorderBand` and `cursorBandAuto` (overlay and Inspect
-crosshair creation). The comment on each `Config` field says which.
+exist), `zorderBand` and `cursorBandAuto` (overlay and Inspect crosshair creation), `hdrTonemap`
+(render engine init), `fastPan` and `smoothPan` (passed to the `TransformModel` constructor), and
+`gpuPriority`, which is only half hot: the device build applies it at init, but the game-pacing
+decision in `RunTick` reads it live, so a change mid-session can mismatch the two until a restart.
+The comment on each `Config` field says which. `lowGpuPriority` is a legacy alias: `gpuPriority`
+wins when set, else `lowGpuPriority=1` means `gpuPriority=-1` (`EffectiveGpuPriority`).
 
 Keys of features that were removed (the old sprite cursor and its experiments, the hook write path,
 the write-rate and level gates, warm modes 2-4, the composite pulse pacing, the wobble cage) are
@@ -120,8 +124,8 @@ comments and order.
 1. Read and check the profile with `ProfileTextError`, which rejects binary, oversized or
    unparseable text. A read failure is distinct from an empty file; treating a locked file as empty
    would reset the user to defaults.
-2. Settings asks Save, Discard or Cancel when the session has unsaved changes. The tray does not
-   prompt.
+2. Settings asks Save, Discard or Cancel when the session has unsaved changes. The tray flyout
+   asks too, through its own `ConfirmSwitch` prompt (`src/tray_app/`).
 3. Write `MakeLiveText(profile, oldLive, name)` over the live ini.
 4. The core hot-reloads everything except `model`. When the parsed `model` differs, the surface
    relaunches `Wind.exe`. If the relaunch fails, it writes the old `model` back, so the ini always
@@ -201,6 +205,18 @@ Every key works in the ini whether or not Settings shows it. Keys hot-reload unl
 `showAdvanced`, `trayPerf`, `traySliders`, `traySliderOrder`, `trayToggles`, `trayToggleOrder`.
 `uiTheme` is a legacy key, ignored.
 
-**Diagnostics.** `diagnostics=1` writes the frame-pacing log; the rest is in
-[12](12-instrumentation.md). Transform tuning keys (`tx*`, `ixDecimate`, `mpoBuster`, `tdrTest`)
-are documented on their `Config` fields in `src/config.h`.
+**Transform and diagnostics.** Hot unless noted; the full text is on the `Config` field.
+
+| Keys | Meaning |
+|---|---|
+| `edgeClip` (1) | While a transform session is zoomed, `ClipCursor` 1 px inside the monitor keeps the pointer off the contested outermost pixels (edge cursor-shape flicker); 0 lets the pointer reach the corner pixel. The trade-off is recorded at `Config::edgeClip` in `src/config.h` |
+| `lockedBallistics` (1) | Locked games pan with the learned input-to-output gain (`GainLearner`); 0 pans with plain raw mickeys |
+| `smoothPan` (0, restart) | Hold the display composited while zoomed (a 1 px pin) so flip-model games keep DWM's pan path |
+| `fastPan` (1, restart) | Pan through the private `SetMagnificationDesktopMagnification` channel (finer than the public write) |
+| `mpoGuard` (1), `mpoGuardLiftWall` (1), `mpoGuardTest` (0) | The MPO guard effect, whether it lifts the pan walls while plane-free, and a diagnostic that applies it on an MPO-off boot |
+| `txRestLevel` (1.0) | Level the transform rests at when idle; above 1.0 parks a hair off identity (costs a composed desktop) |
+| `txTrace` (0) | 1 records a per-tick trace and writes `txtrace-<ms>.csv` to the log folder at each session end |
+
+`diagnostics=1` writes the frame-pacing log; the rest is in [12](12-instrumentation.md). The other
+transform tuning keys (`tx*`, `ixDecimate`, `mpoBuster`, `tdrTest`) are documented on their `Config`
+fields in `src/config.h`.

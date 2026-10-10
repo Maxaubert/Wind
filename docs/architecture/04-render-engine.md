@@ -223,7 +223,8 @@ engage by default on the desktop.
 
 ## Multi-monitor and device loss
 
-- `retarget` moves the engine to the cursor's monitor at zoom-in (`multiMonitor=1`). It validates
+- `retarget` moves the engine to the session's monitor at zoom-in (the cursor's monitor with
+  `multiMonitor=1`, else the primary; the transform half is retargeted too). It validates
   first: the output must be on the D3D device's adapter (`selectOutput` by GDI device name), or it
   returns false and the session stays put. The fallible `ResizeBuffers` runs before the window
   moves. The pipeline works in monitor-local pixels; the origin offset is applied only at

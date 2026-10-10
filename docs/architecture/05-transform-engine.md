@@ -68,8 +68,9 @@ catch-up snap.
 
 - It caps up-steps only. A down clamp made a quick re-zoom start backwards (the session-start
   bounce).
-- `setActive(false)` writes identity outside `writeTransform`, so it sets `lastLevel_ = 1.0`
-  explicitly. Forgetting that is the same bounce.
+- `setActive(false)` writes the rest level (identity, 1.0 as shipped; `txRestLevel`) outside
+  `writeTransform`, so it sets `lastLevel_ = restLevel_` explicitly. Forgetting that is the same
+  bounce.
 - When the applied level trails the requested one, the source rect is recomputed for the applied
   level, so geometry and level never disagree.
 
@@ -134,8 +135,10 @@ gives it back. Rules (`src/native_cursor.h`, tested):
 - On only where the view is a pure function of the pointer and no armed MPO wall is within a tick
   of the view (`NearWall`, a 64 source px margin: DWM's own pan is unclamped and could cross a wall
   before Wind's next tick; above ~9.3x on a 3840 wide monitor, 15.8x on 2160 high).
-- While on, only level changes are written; warm pulses stop. DWM keeps the factor of the write
-  that follows a TRUE call, so every switch forces one write (`forceWrite_`, survives paused ticks).
+- While on, Wind still writes every changed tick (win32k's copy feeds pointer-framework
+  hit-testing) and each write is followed by a pixel-and-back nudge (`NudgeAfterWrite`); warm
+  pulses stop. DWM keeps the factor of the write that follows a TRUE call, so every switch forces
+  one write (`forceWrite_`, survives paused ticks).
 - `MagGetFullscreenTransform` does not see DWM's own moves: win32k's copy keeps Wind's last write.
   Judge centring on screen, not by read-back.
 - When the export is missing or refuses the call, `dwmCentreBroken_` latches (one Warn) and

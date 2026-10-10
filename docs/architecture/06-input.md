@@ -4,7 +4,7 @@ Wind never has keyboard focus, yet it must see every bind press and every mouse 
 system-wide without breaking input for other programs. This chapter covers the input channels, the
 hook thread, the swallowing rules, the bind safety rules and the recovery from silently evicted
 hooks. The code is `src/input_router.*`, the `WM_INPUT` handling in `src/main.cpp`,
-`src/keybind_rules.h` and `src/mouse_ballistics.*`.
+`src/keybind_rules.h`, `src/swallow_ledger.h` and `src/gain_learner.h`.
 
 ## Channels
 
@@ -44,15 +44,21 @@ Bound inputs are eaten so they never also fire in the focused app.
 - **Balanced down/up.** A DOWN of a bound input is swallowed and recorded (`g_swallowedDown`,
   `g_kbSwallowedDown`); an UP is swallowed only if its DOWN was. Swallowing an UP whose DOWN the
   system saw leaves the input held system-wide (the stuck side-button bug, issue #113).
-- **No stranded keys.** Records are cleared on every remap (`setButtonBinds`, `setKeys`), and teardown
-  runs `ReleaseSwallowedButtons`/`ReleaseSwallowedKeys`, which synthesize the missing UP.
+- **No stranded keys.** Key records are cleared on a key remap (`setKeys`; `setPanKeys` keeps the
+  swallow records). Button records are NOT cleared by a remap (`setButtonBinds`, #301): an UP whose
+  DOWN was swallowed must still be swallowed, or the app sees a lone XBUTTONUP (browser Back).
+  Each record clears on its own UP. Teardown drops the button records without a synthetic UP (a
+  lone UP has effects of its own); `ReleaseSwallowedKeys` does synthesize a KEYUP for a swallowed
+  key, because a lone key-up is harmless.
 - **Decide once per press.** A key bind is swallowed only when a bind on that key has all its
   modifiers held (`keyBindMatches`). A VK-only test once ate a plain F1 system-wide for a Ctrl+F1
   bind.
 - **Mask key with Alt or Win.** Swallowing a key while Alt or Win is held injects one mask key (VK
   0xE8); otherwise Windows sees the modifier tapped alone and opens Start or the app's menu bar.
-- **Wind's own injections** carry `kWindInjectTag` in `dwExtraInfo` and are skipped by the bind
-  matcher. Other injectors (AutoHotkey) count as real input.
+- **Wind's own injections** carry `kWindInjectTag` in `dwExtraInfo`. Only the mouse hook skips
+  them (Inspect's injected click also carries `LLMHF_INJECTED`). The keyboard hook does not check
+  the tag, so the mask keystroke counts as a key event there. Other injectors (AutoHotkey) count
+  as real input.
 - Hide pointer and hotkey-mode quick zoom are suppressed by `RegisterHotKey`, not the hook.
 
 ## Bind rules
