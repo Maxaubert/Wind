@@ -66,8 +66,7 @@ export const groups = [
         { key: 'maxLevel', type: 'slider', label: 'Max zoom', keywords: ['maximum', 'limit', 'highest', 'magnification', 'level', 'cap', 'zoom level', 'factor', 'times', 'upper'], desc: 'The highest zoom level', min: 2, max: 30, step: 1, def: 12.0, unit: 'times' },
         { key: 'zoomInSpeed', type: 'slider', label: 'Zoom-in speed', keywords: ['faster', 'slower', 'rate', 'magnify speed', 'zoom rate', 'acceleration', 'velocity', 'how fast'], desc: 'How fast the view zooms in', min: 0.25, max: 4, step: 0.05, def: 1.0, unit: 'times' },
         { key: 'zoomOutSpeed', type: 'slider', label: 'Zoom-out speed', keywords: ['faster', 'slower', 'rate', 'zoom rate', 'velocity', 'how fast'], desc: 'How fast the view zooms out', min: 0.25, max: 4, step: 0.05, def: 1.0, unit: 'times' },
-        { key: 'zoomEaseOutMs', type: 'slider', label: 'Release glide', keywords: ['inertia', 'coast', 'momentum', 'ease out', 'easing', 'smooth stop', 'slow down', 'deceleration', 'stop', 'let go', 'release', 'delay', 'milliseconds'], desc: 'How long the zoom coasts after you let go', min: 0, max: 300, step: 5, def: 45, unit: 'ms',
-          offIf: { key: 'txSamplingMode', eq: '1' } },
+        { key: 'zoomEaseOutMs', type: 'slider', label: 'Release glide', keywords: ['inertia', 'coast', 'momentum', 'ease out', 'easing', 'smooth stop', 'slow down', 'deceleration', 'stop', 'let go', 'release', 'delay', 'milliseconds'], desc: 'How long the zoom coasts after you let go', min: 0, max: 300, step: 5, def: 45, unit: 'ms' },
       ] },
       { caption: 'Easing', rows: [
         // Smooth zoom is always on (core default 1); its shape sliders are advanced.

@@ -77,13 +77,6 @@ TEST_CASE("a slow (easing) zoom is barely snapped: the snap never exceeds the fr
     }
 }
 
-TEST_CASE("the ease-out runs while it moves faster than the clean-level spacing, then stops") {
-    CHECK(EaseOutShouldStop(5.0, 5.0 / 1.02) == false);    // 2 % per frame: still gliding
-    CHECK(EaseOutShouldStop(5.0, 5.0 / 1.001) == true);    // 0.1 % per frame: the tail, stop
-    CHECK(EaseOutShouldStop(25.0, 25.0 / 1.004) == true);  // 0.4 % at 25x (window 1.2 %)
-    CHECK(EaseOutShouldStop(1.0, 1.0) == false);
-}
-
 TEST_CASE("ramp direction comes from the requests, so a snap ahead never steps back (#429)") {
     // The ladder showed 16.81 while the request was 16.70 on its way up: still zooming in.
     CHECK(LadderDir(16.70, 16.66, 16.81) == 1);

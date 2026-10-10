@@ -571,7 +571,6 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
                 ladderOut_ = lastLevel_;
                 applyLevel = lastLevel_;
             } else {
-                // (The slow tail of an ease-out never reaches here: RunTick stops the glide first.)
                 const double snapped = SnapSmoothLevel(applyLevel, r.centerX, r.centerY, mon_.w, mon_.h,
                                                        lastLevel_ > 1.0 ? lastLevel_ : 0.0, dir);
                 ladderReq_ = level;
