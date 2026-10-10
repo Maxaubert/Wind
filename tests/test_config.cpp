@@ -185,6 +185,13 @@ TEST_CASE("numeric fields are clamped to documented ranges") {
     CHECK(ParseConfig("maxLevel=8\n").maxLevel == doctest::Approx(8.0));
     CHECK(ParseConfig("panGlideMaxPx=40\n").panGlideMaxPx == 40);
 }
+TEST_CASE("gameCursorLagMs defaults to one frame (-1) and clamps to -1..100 (#443)") {
+    CHECK(ParseConfig("").gameCursorLagMs == -1);
+    CHECK(ParseConfig("gameCursorLagMs=0\n").gameCursorLagMs == 0);
+    CHECK(ParseConfig("gameCursorLagMs=12\n").gameCursorLagMs == 12);
+    CHECK(ParseConfig("gameCursorLagMs=-7\n").gameCursorLagMs == -1);
+    CHECK(ParseConfig("gameCursorLagMs=500\n").gameCursorLagMs == 100);
+}
 TEST_CASE("multiMonitor can be set") {
     CHECK(ParseConfig("multiMonitor=0\n").multiMonitor == 0);
     CHECK(ParseConfig("multiMonitor=1\n").multiMonitor == 1);

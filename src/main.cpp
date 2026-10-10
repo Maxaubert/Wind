@@ -46,7 +46,8 @@
 #include "cursor_decode.h"   // edge mode measures the cursor body
 #include "focus_track.h"     // tracking: caret/focus watcher thread
 #include "tray_host.h"     // WindTray.exe owns the icon and menu (#291)
-#include "pan_glide.h"     // momentum after a flick (#430)
+#include "pan_glide.h"
+#include "game_cursor.h"     // momentum after a flick (#430)
 #include "gain_learner.h"  // learned pointer ballistics: locked pan at TRUE desktop speed
 #include "tray_ipc.h"      // the status block shared with WindTray.exe
 #include "pointer_binds.h"  // kWindInjectTag: tag our own injected clicks (#285)
@@ -273,6 +274,8 @@ struct TickState {
     bool           prevDetLocked = false;   // edge-log the detector state (issue #221)
     bool           lockEff = false;         // the lock that APPLIES this tick (LockApplies, native_cursor.h)
     bool           lockFreed = false;       // locked, but freed by a shown pointer (edge-logged)
+    wind::PointerHistory ptrHist;           // the pointer per tick, for a game-drawn cursor (#443)
+    bool           gameCursor = false;      // a game draws its own cursor (edge-logged)
     std::string    lastCoreIni;             // stripped ini fingerprint (skip UI-only reloads)
     bool           configRetry = false;     // last reload found the ini unreadable: check again
     POINT          lastSetVirtual{};  // MEASURED post-present pointer position (virtual px), the
@@ -1888,11 +1891,34 @@ static void RunTick(TickState& t) {
                 }
             }
         }
+        // GAME-DRAWN CURSOR (issue #443, src/game_cursor.h): a covering app that hides the pointer
+        // draws its own cursor about a display frame late, so the view follows the pointer that late
+        // (and Wind, not DWM centring, writes it). The pointer itself is untouched.
+        bool gameCursor = false;
+        const double gameLagMs = wind::GameCursorLagMs(t.cfg.gameCursorLagMs, t.hz);
+        if (freeCursor && fsCover && gameLagMs > 0.0) {
+            CURSORINFO ci{}; ci.cbSize = sizeof(ci);
+            const bool showing = !GetCursorInfo(&ci) || (ci.flags & CURSOR_SHOWING) != 0;
+            const bool byWind = t.cursorHidden || t.cursorHiddenByUs || t.cfg.cursorVisibility == "never";
+            gameCursor = wind::GameDrawsCursor(freeCursor, fsCover, showing, byWind);
+        }
+        if (gameCursor != t.gameCursor) {
+            wind::Log(wind::LogLevel::Info, "lock", "game-drawn cursor %s (lag %.1f ms) lvl=%.2f",
+                      gameCursor ? "on" : "off", gameLagMs, lvl);
+            t.gameCursor = gameCursor;
+        }
         if (freeCursor) {
             POINT cp;
             if (GetCursorPos(&cp)) {
-                t.mapper.reset(double(cp.x - t.mon.x), double(cp.y - t.mon.y));
+                LARGE_INTEGER qc; QueryPerformanceCounter(&qc);
+                const double nowMs = double(qc.QuadPart) * 1000.0 / double(t.freq.QuadPart);
+                t.ptrHist.push(nowMs, double(cp.x), double(cp.y));
+                double px = cp.x, py = cp.y;
+                if (gameCursor) t.ptrHist.at(nowMs - gameLagMs, px, py);
+                t.mapper.reset(px - t.mon.x, py - t.mon.y);
             }
+        } else {
+            t.ptrHist.clear();
         }
         MapResult r = t.mapper.update(freeCursor ? 0 : dx, freeCursor ? 0 : dy, lvl);
         // --- Tracking (issue #276): caret / focus own the view; the pointer is never moved. ---
@@ -2299,7 +2325,7 @@ static void RunTick(TickState& t) {
         {
             wind::DwmCentreIn dc;
             dc.zoomed = lvl > 1.001;
-            dc.freeCursor = freeCursor;
+            dc.freeCursor = freeCursor && !gameCursor;   // a delayed view is Wind's to write (#443)
             dc.viewDetached = t.viewDetached;
             dc.wallNeeded = wind::NearWall(wallNeeded, r.srcLeft, r.srcTop, lvl, kMaxSafeTxMagnitude, 64.0);
             dc.quiesce = quiesceHold;
