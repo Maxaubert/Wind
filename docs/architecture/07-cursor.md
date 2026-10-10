@@ -156,9 +156,9 @@ Inspect and the hide-cursor hotkey (`cursorVisibility=never`) hide DWM's pointer
 session; the Inspect crosshair is then a window of Wind's.
 
 - **`CursorBlanker`** (`src/cursor_blanker.*`) swaps the 14 system cursors for transparent ones and
-  keeps the originals. It first reloads the user's scheme, so a previously killed Wind's blanks are
-  never captured as originals. `MagShowSystemCursor(FALSE)` covers app-custom cursors. The swaps
-  run in order on the `Wind cursor swaps` worker thread (#363): the restore is a full
+  restores them by reloading the user's scheme (no cached originals). The constructor reloads it
+  first, so a previously killed Wind's blanks never outlive it. `MagShowSystemCursor(FALSE)` covers
+  app-custom cursors. The swaps run in order on the `Wind cursor swaps` worker thread (#363): the restore is a full
   `SPI_SETCURSORS` scheme reload (8 ms median, up to 90 ms under load) and the blank 14
   `SetSystemCursor` calls, which froze the 1x landing frame on the tick thread. The zoom-out repaint
   nudge rides on the worker after the restore. `restoreSync()` waits (shutdown); the crash filter

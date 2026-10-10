@@ -44,7 +44,7 @@ Bound inputs are eaten so they never also fire in the focused app.
 - **Balanced down/up.** A DOWN of a bound input is swallowed and recorded (`g_swallowedDown`,
   `g_kbSwallowedDown`); an UP is swallowed only if its DOWN was. Swallowing an UP whose DOWN the
   system saw leaves the input held system-wide (the stuck side-button bug, issue #113).
-- **No stranded keys.** Records are cleared on every remap (`setButtons`, `setKeys`), and teardown
+- **No stranded keys.** Records are cleared on every remap (`setButtonBinds`, `setKeys`), and teardown
   runs `ReleaseSwallowedButtons`/`ReleaseSwallowedKeys`, which synthesize the missing UP.
 - **Decide once per press.** A key bind is swallowed only when a bind on that key has all its
   modifiers held (`keyBindMatches`). A VK-only test once ate a plain F1 system-wide for a Ctrl+F1

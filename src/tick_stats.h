@@ -63,7 +63,7 @@ inline double MedianMs(const float* v, int n) {
 // cancel in a mean, while the median sits on whichever half of the pair is more common - which
 // is how the tray read "145 fps" on a 144Hz panel (field 2026-08-28). A lone stall barely moves
 // a 256-sample mean (~0.07ms), and a SUSTAINED slowdown moving it is the figure being honest.
-// The median stays the anchor for the sparkline scale and the LateCount threshold, where
+// The median stays the anchor for the sparkline scale, where
 // robustness against stalls is exactly what is wanted.
 inline double MeanMs(const float* v, int n) {
     if (!v || n <= 0) return 0.0;
@@ -74,15 +74,5 @@ inline double MeanMs(const float* v, int n) {
 
 // Frames per second implied by an interval. 0 in, 0 out - never a divide by zero into the UI.
 inline double FpsFromMs(double ms) { return ms > 0.0001 ? 1000.0 / ms : 0.0; }
-
-// How many of the samples were LATE: over 1.5x the median. The same 1.5x threshold the pan-wake
-// harness uses, so the tray and the diagnostics agree about what counts as a stall.
-inline int LateCount(const float* v, int n) {
-    if (!v || n <= 0) return 0;
-    const double thr = MedianMs(v, n) * 1.5;
-    int late = 0;
-    for (int i = 0; i < n; ++i) if ((double)v[i] > thr) ++late;
-    return late;
-}
 
 }  // namespace wind

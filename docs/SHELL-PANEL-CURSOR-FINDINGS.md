@@ -54,7 +54,7 @@ transform: it drifts off the view centre by speed x tick x level.
   which marshals every tick write onto the system-wide mouse input thread. Field: hitches on zoom,
   worst when zooming with the picker open (the public write, 3-9 ms, landed on that thread too).
 - **Shipped: freeze.** While a panel is open the pointer is pinned with a 1px `ClipCursor`; the hand's
-  motion arrives as ballistics-cooked raw input (the Inspect machinery, `cookActive`), and the
+  motion arrives as ballistics-cooked raw input (the Inspect machinery), and the
   transform model moves the clip (which moves the pointer) right after writing the view, on the tick
   thread. Owner-verified: no wobble, no flicker, normal hitch-free zoom.
 

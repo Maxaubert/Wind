@@ -33,14 +33,8 @@ static void RestoreAll() {
 
 CursorBlanker::CursorBlanker() : st_(std::make_shared<State>()) {
     // If a previous Wind was hard-killed while cursors were blanked, the desktop still has blank
-    // shared cursors; reload the user's scheme FIRST or the blanks get captured as "originals".
+    // shared cursors; reload the user's scheme so they do not outlive the crash.
     RestoreAll();
-    for (UINT id : kStandardIds) {
-        HCURSOR shared = LoadCursorW(nullptr, MAKEINTRESOURCEW(id));
-        if (!shared) continue;
-        HCURSOR copy = CopyCursor(shared);
-        if (copy) originals_[shared] = copy;
-    }
     worker_ = std::thread([st = st_] { run(st); });
 }
 

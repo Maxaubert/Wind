@@ -11,8 +11,7 @@ All state that feeds the view is read and written on the tick thread, in one pas
 across threads makes the view and the cursor sample different instants, which shows as a visible
 beat (the wobble class in [../NATIVE-MAGNIFIER-STOMP.md](../NATIVE-MAGNIFIER-STOMP.md)).
 
-`RunTick` never sleeps or waits; the caller paces it (see [Pacing](#pacing)). That is also why it
-is safe to call from the `WM_TIMER` branch in `WndProc` during a modal loop.
+`RunTick` never sleeps or waits; the caller paces it (see [Pacing](#pacing)).
 
 ## The phases of a tick
 
@@ -106,7 +105,7 @@ to 1x. `StripUiOnlyKeys` (`src/config.cpp`) drops `uiTheme`, `uiPalette`, `showA
 (`t.lastCoreIni`). An identical fingerprint skips the reload. The fingerprint is seeded at startup;
 an empty one would make the first Settings write of a session reload.
 
-A real reload re-binds the hook's buttons and swallowed keys (`g_input.setButtons`/`setKeys`),
+A real reload re-binds the hook's buttons and swallowed keys (`g_input.setButtonBinds`/`setKeys`),
 re-registers the hotkeys, invalidates the foreground cache, and rebuilds `ZoomController` and `CursorMapper` with the mapper's centre kept.
 Engine-shaped keys (`model`) need a restart: they decide which models exist.
 

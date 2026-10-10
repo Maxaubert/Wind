@@ -258,10 +258,8 @@ static VirtualBounds QueryVirtualBounds() {
 }
 
 // --- Per-tick state -------------------------------------------------------------------------
-// All the state one magnifier tick mutates, in one struct so the tick can run from BOTH the
-// main loop AND a WM_TIMER. The tray context menu's TrackPopupMenu spins its own modal message
-// loop that owns the thread until it closes; without a timer-driven tick the lens froze for
-// the duration. The timer (set around the menu) dispatches WM_TIMER into WndProc, which ticks.
+// All the state one magnifier tick mutates, in one struct. The main loop owns the only tick;
+// WndProc reaches it through g_tick for the hotkey messages.
 struct TickState {
     IMagnifierModel* model;                    // CURRENT engine (hybrid swaps at zoom-in)
     IMagnifierModel* mRender = nullptr;        // hybrid: the two engines (null when not hybrid)
@@ -414,8 +412,6 @@ struct TickState {
     bool   dbgPrevOutHeld     = false;
     double dbgInHeldSec       = 0.0;
     double dbgOutHeldSec      = 0.0;
-    bool   dbgInOverstayLogged  = false;       // one overstay WARN per stuck episode
-    bool   dbgOutOverstayLogged = false;
     std::atomic<bool> quickZoomHotkey{false};  // set by WM_HOTKEY (hotkey-mode quick zoom), consumed in RunTick
     bool   cursorHidden       = false;         // runtime-only override (no ini write, no hot-reload)
     double outlineIdleSec = 0.0;   // seconds the cursor has been still (drives the outline idle fade)
@@ -784,8 +780,7 @@ static void RegisterHideCursorHotkey(HWND hwnd, int vk, int mods);
 static void RegisterQuickZoomHotkey(HWND hwnd, int vk, int mods);
 
 // One magnifier tick: advance zoom, hot-reload config, then pan/draw via the render engine.
-// Pure of any pacing wait - the caller paces. Safe to call from the main loop or from a
-// WM_TIMER during a modal loop.
+// Pure of any pacing wait - the caller paces.
 // Test telemetry (issue #225): the proving-ground harness sets WIND_TESTLOG=<path> and every
 // tick appends one CSV sample. Disabled (one branch per tick) in normal runs.
 static wind::TestTelemetry g_testlog;
@@ -2578,12 +2573,12 @@ static void RunTick(TickState& t) {
     // Diagnostics (issue #113): log the side-button held-state timeline so the intermittent stuck can
     // be diagnosed from the log. On every rise/fall, dump the hook + Raw Input event counters and the
     // held duration; a stuck shows as a rise with no matching fall (and the next event only on
-    // re-click). Also WARN once if a hold overstays 6 s (well past any hold-to-zoom, which caps in
+    // re-click). Also WARN once if a hold overstays (first line at 10 s, then every 5 s; well past any hold-to-zoom, which caps in
     // ~2 s) - that line, with static counters, pinpoints a stuck episode. Edges/overstay only, so
     // Log() is never hit on the per-frame path.
     {
         auto& st = g_input.state();
-        auto snap = [&](const char* tag, bool held, bool& prev, double& secs, bool& warned) {
+        auto snap = [&](const char* tag, bool held, bool& prev, double& secs) {
             if (held != prev) {
                 // Edge: `secs` still holds the accumulated duration (meaningful on a fall; ~0 on a rise).
                 wind::Log(wind::LogLevel::Info, "input",
@@ -2594,7 +2589,6 @@ static void RunTick(TickState& t) {
                           st.dbgRawDown[1].load(), st.dbgRawUp[1].load(),
                           st.dbgRawDown[2].load(), st.dbgRawUp[2].load(),
                           g_input.hookActive() ? 1 : 0, lvl);
-                warned = false;            // arm the overstay warning for the next episode
                 prev = held;
             // Re-fire every 5 s while a hold overstays, not once. A stuck hold has no falling edge,
             // so a single sample can never show HOW FAST the runaway zoom is climbing - and that
@@ -2610,7 +2604,6 @@ static void RunTick(TickState& t) {
                           st.dbgHookDown[2].load(), st.dbgHookUp[2].load(), st.dbgHookDbl[2].load(),
                           st.dbgRawDown[1].load(), st.dbgRawUp[1].load(),
                           st.dbgRawDown[2].load(), st.dbgRawUp[2].load(), lvl);
-                warned = true;
             }
             // Accumulate AFTER edge handling so a fall reports the pre-reset duration; cleared at 0 when up.
             secs = held ? (secs + dt) : 0.0;
@@ -2620,8 +2613,8 @@ static void RunTick(TickState& t) {
         // detector could not see, which is why episodes of #167 never left a STUCK? line in the
         // log despite being hit repeatedly. inHeld/outHeld are the same values that drive the
         // zoom, so the diagnostic now reports what actually happened rather than half of it.
-        snap("in",  inHeld,  t.dbgPrevInHeld,  t.dbgInHeldSec,  t.dbgInOverstayLogged);
-        snap("out", outHeld, t.dbgPrevOutHeld, t.dbgOutHeldSec, t.dbgOutOverstayLogged);
+        snap("in",  inHeld,  t.dbgPrevInHeld,  t.dbgInHeldSec);
+        snap("out", outHeld, t.dbgPrevOutHeld, t.dbgOutHeldSec);
     }
 
     // Frame-pacing diagnostics: a 2 s window of loop-interval stats (dt = time between ticks =
@@ -2734,10 +2727,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (g_tick) g_tick->quickZoomHotkey.store(true);   // RunTick consumes it (rising-edge via MOD_NOREPEAT)
         return 0;
     }
-    // Keep ticking while a modal loop (the tray menu) owns the thread. The tray sets a timer
-    // around TrackPopupMenu; its WM_TIMER lands here so the lens doesn't freeze. (No other
-    // WM_TIMER exists in this process.)
-    if (msg == WM_TIMER) { if (g_tick) RunTick(*g_tick); return 0; }
     if (msg == WM_INPUT) {
         // One syscall, not two: RAWINPUT for mouse/keyboard always fits the fixed buffer, so the
         // size-query round trip per packet (hundreds/s while panning) bought nothing.
@@ -3123,7 +3112,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     ts.mRender = model.get();
     ts.mTransform = model2.get();
     ts.hwnd = hwnd;                       // so RunTick can re-register the hide-cursor hotkey
-    g_tick = &ts;   // so the WM_TIMER tick (during the tray menu's modal loop) can run
+    g_tick = &ts;   // so WndProc's hotkey messages can reach the tick state
     {   // Restore the learned gain curve so the first locked session after a restart pans at the
         // learned desktop speed instead of raw passthrough ("default to the last read value").
         // Corrupt or missing = fresh learner, which re-warms from live use in seconds.

@@ -1,6 +1,6 @@
 #pragma once
 // The tray flyout's PURE model (no <windows.h>, so it is unit-tested): where the window opens
-// (taskbar on any edge, any monitor, any DPI), the layout of its rows in DIPs, hit-testing, the
+// (at the click point, any monitor, any DPI), the layout of its rows in DIPs, hit-testing, the
 // slider specs and value text, and the view model built from the ini, the tray layout and Wind's
 // shared status. flyout_draw.cpp paints a View; flyout_window.cpp owns the window.
 // Spec: docs/specs/2026-10-01-tray-flyout-design.md (issue #313).
@@ -31,53 +31,11 @@ inline int ToDip(int px, int dpi) { return dpi > 0 ? (px * 96 + dpi / 2) / dpi :
 
 // ---------------------------------------------------------------- placement
 
-enum class Edge { Bottom, Top, Left, Right };
-struct Placement { int x = 0, y = 0; Edge edge = Edge::Bottom; };
+struct Placement { int x = 0, y = 0; };
 
 inline int ClampInt(int v, int lo, int hi) {
     if (hi < lo) return lo;           // not enough room: keep the top/left edge on screen
     return v < lo ? lo : (v > hi ? hi : v);
-}
-
-// Which edge the taskbar is on, from the part of the monitor the work area does not cover. With no
-// visible taskbar (auto-hide, or an icon on another monitor) it falls back to the edge nearest the
-// tray icon, which is where the shell will slide the bar in.
-inline Edge DetectEdge(const IRect& monitor, const IRect& work, const IRect& icon) {
-    const int dl = work.l - monitor.l, dt = work.t - monitor.t;
-    const int dr = monitor.r - work.r, db = monitor.b - work.b;
-    const int m = (std::max)((std::max)(dl, dr), (std::max)(dt, db));
-    if (m > 0) {
-        if (db == m) return Edge::Bottom;
-        if (dt == m) return Edge::Top;
-        if (dr == m) return Edge::Right;
-        return Edge::Left;
-    }
-    const int cx = (icon.l + icon.r) / 2, cy = (icon.t + icon.b) / 2;
-    const int toL = cx - monitor.l, toR = monitor.r - cx, toT = cy - monitor.t, toB = monitor.b - cy;
-    const int n = (std::min)((std::min)(toL, toR), (std::min)(toT, toB));
-    if (n == toB) return Edge::Bottom;
-    if (n == toT) return Edge::Top;
-    if (n == toR) return Edge::Right;
-    return Edge::Left;
-}
-
-// Top-left of a w x h window (pixels) next to the tray icon: just inside the work area on the
-// taskbar's side, centred on the icon along the taskbar, clamped to the work area, `gap` px from
-// every edge. All arguments are physical pixels of the icon's monitor.
-inline Placement PlaceFlyout(const IRect& icon, const IRect& monitor, const IRect& work,
-                             int w, int h, int gap) {
-    Placement p;
-    p.edge = DetectEdge(monitor, work, icon);
-    const int cx = (icon.l + icon.r) / 2, cy = (icon.t + icon.b) / 2;
-    switch (p.edge) {
-        case Edge::Bottom: p.x = cx - w / 2; p.y = work.b - h - gap; break;
-        case Edge::Top:    p.x = cx - w / 2; p.y = work.t + gap; break;
-        case Edge::Left:   p.x = work.l + gap; p.y = cy - h / 2; break;
-        case Edge::Right:  p.x = work.r - w - gap; p.y = cy - h / 2; break;
-    }
-    p.x = ClampInt(p.x, work.l + gap, work.r - w - gap);
-    p.y = ClampInt(p.y, work.t + gap, work.b - h - gap);
-    return p;
 }
 
 // Top-left of a w x h window opened at the click point, the way the old TrackPopupMenu tray menu

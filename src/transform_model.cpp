@@ -51,15 +51,15 @@ static bool NudgeBlocked() {
 // has ended (zoom can be bound to a mouse button, so the transition often lands inside the window
 // and a still pointer would otherwise stay invisible until the hand moved). A press held past the
 // window is a drag and is nudged as usual (NudgeBlockedByClick).
-static void NudgePointer(POINT& np) {
+static void NudgePointer() {
     if (NudgeBlocked()) { g_nudgeOwed.store(true, std::memory_order_relaxed); return; }
     g_nudgeOwed.store(false, std::memory_order_relaxed);
+    POINT np;
     if (GetCursorPos(&np)) { SetCursorPos(np.x + 1, np.y); SetCursorPos(np.x, np.y); }
 }
 static void DeliverOwedNudge() {
     if (!NudgeDue(g_nudgeOwed.load(std::memory_order_relaxed), NudgeBlocked())) return;
-    POINT np;
-    NudgePointer(np);
+    NudgePointer();
 }
 void TransformModel::resetTransformState() {
     nativePrimed_ = false;  // a rebuilt context needs its own public prime (#369)
@@ -119,8 +119,7 @@ void TransformModel::teardownMag() {
         // Released mid-session (shutdown, model swap): the pointer leaves DWM's composition for the
         // hardware plane, which Windows repaints only on the next cursor EVENT, so nudge it a pixel
         // and back (the same trick the zoom-out uses).
-        POINT np;
-        NudgePointer(np);
+        NudgePointer();
     }
     lensFailed_ = false;      // a fresh context may build the lens
     QueryPerformanceCounter(&b);
@@ -365,8 +364,7 @@ void TransformModel::setActive(bool active) {
         // hand is still (measured: no composed pointer in any ramp frame). Nudge a pixel and back.
         if (host_.createCursorLens()) {
             host_.setCursorLens(true);
-            POINT np;
-            NudgePointer(np);
+            NudgePointer();
         }
         QueryPerformanceCounter(&z2);
         lastEnter_.ensureMagMs = double(z2.QuadPart - z1.QuadPart) * 1000.0 / zf.QuadPart;
@@ -406,8 +404,7 @@ void TransformModel::setActive(bool active) {
         // blanker's worker (#363: the scheme reload froze the 1x landing frame for 8-90 ms), so
         // the nudge rides along on the worker too.
         blanker_->restore([] {
-            POINT np;
-            NudgePointer(np);
+            NudgePointer();
         });
         step(1);   // system cursor restore queued (it was the whole teardown cost)
     }
@@ -439,8 +436,7 @@ void TransformModel::setActive(bool active) {
         // change a game makes). The hardware plane repaints only on the next cursor EVENT, so
         // nudge the pointer a pixel and back.
         host_.setCursorLens(false);
-        POINT np;
-        NudgePointer(np);
+        NudgePointer();
     }
     RECT full{ 0, 0, mon_.w, mon_.h };
     host_.setInputTransform(false, full, full);   // input mapping back to identity at 1x
@@ -765,8 +761,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         writeTransform((float)applyLevel, m.offX + offJitter, m.offY, m.txX + txJitter, m.txY, fastPan_ && !prime);
         if (prime) nativePrimed_ = true;
         if (NudgeAfterWrite(dwmCentreOn_, true)) {
-            POINT np;
-            NudgePointer(np);
+            NudgePointer();
         }
         forceWrite_ = false;
     }
@@ -866,8 +861,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             if (ok && NudgeAfterPublish(applyLevel, ixPubLevel_)) {
                 // A scale-changing publish stops DWM drawing the composed pointer until the next
                 // cursor event: give it one, a pixel and back.
-                POINT np;
-                NudgePointer(np);
+                NudgePointer();
             }
             if (ok) ixPubLevel_ = applyLevel;
             if (ok) {
@@ -953,8 +947,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
                 // A restored-but-still pointer stays invisible until a cursor EVENT, so the nudge
                 // follows the restore on the blanker's worker, as at the zoom-out.
                 blanker_->restore([] {
-                    POINT np;
-                    NudgePointer(np);
+                    NudgePointer();
                 });
                 cursorHidden_ = false;
             }

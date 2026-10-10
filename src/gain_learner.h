@@ -78,12 +78,6 @@ public:
         return gain_[lo] + (gain_[hi] - gain_[lo]) * (t < 0.0 ? 0.0 : (t > 1.0 ? 1.0 : t));
     }
 
-    bool warmedUp() const {
-        int have = 0;
-        for (int i = 0; i < kBins; ++i) if (n_[i] > 0) ++have;
-        return have >= 2;
-    }
-
     void reset() { for (int i = 0; i < kBins; ++i) { gain_[i] = 1.0; n_[i] = 0; } }
 
     // Text round-trip, so a restart starts from the last learned curve instead of raw passthrough

@@ -83,13 +83,6 @@ TEST_CASE("the fps figure uses the mean so jitter pairs cancel to the true rate"
     CHECK(MeanMs(nullptr, 0) == doctest::Approx(0.0));
 }
 
-TEST_CASE("late frames are counted at 1.5x the median, matching the pan-wake harness") {
-    float v[10] = {7,7,7,7,7,7,7,7,7,25};
-    CHECK(LateCount(v, 10) == 1);
-    float clean[5] = {7,7,7,7,7};
-    CHECK(LateCount(clean, 5) == 0);
-}
-
 TEST_CASE("fps never divides by zero") {
     CHECK(FpsFromMs(0.0) == doctest::Approx(0.0));
     CHECK(FpsFromMs(-1.0) == doctest::Approx(0.0));
