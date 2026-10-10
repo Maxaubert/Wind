@@ -263,12 +263,13 @@ DWM magnifies with nearest neighbour unless something calls
   Report:
   `Documents\Claude\research\wind\2026-10-10-high-zoom-shake.md`.
 - Release glide at both sampling modes (#439, measured 2026-10-10). The high resolution cursor
-  had its glide cut short (#375) and then turned off (#427) because the slow tail shook and showed
-  the image doubled; that was the ladder stepping back below a request it had overtaken (#429,
-  `LadderDir`). With that fixed the full glide (zoomInSpeed 2.7, 115 ms) runs 480-550 ms instead
-  of 240-260 ms with no backward step and the pointer steady (max 5 px). Capping the snap at the
-  glide's own motion per frame (`stepRel`) eases perfectly but shook 11-13 px, so the tail keeps
-  the ladder and lands in 0.5-0.9 % hops above ~10x.
+  had its glide turned off (#427) because the slow tail shook and showed the image doubled; the
+  doubling was the ladder stepping back below a request it had overtaken (#429, `LadderDir`). The
+  glide is back and stops just before its slow tail (`EaseOutShouldStop`, on the level on screen):
+  240-260 ms at zoomInSpeed 2.7 / 115 ms, no backward step, pointer steady. The full tail runs
+  480-550 ms but lands in 0.5-0.9 % ladder hops, which the field read as shake; snapping it to
+  the exact glide level (`stepRel` capped at the glide's own motion) eases perfectly but shook
+  11-13 px. Both rejected.
 - Nearest while the level moves and smooth at rest was tried: steady, but the switch from pixel to
   smooth is plainly visible, so it was rejected (2026-10-07). The older "swap shifted the image
   1-2 px" verdict predates the working setter and is void.

@@ -31,6 +31,7 @@
 #include "transform_model.h"
 #include "native_cursor.h"   // WantDwmCentring, LockApplies (issue #369)
 #include "mpo_guard.h"       // WantMpoGuard, GuardedColorMatrix (issue #369)
+#include "zoom_ladder.h"     // EaseOutShouldStop (issue #369)
 #include "hitch_record.h"   // hitch recorder (#361)
 #include "tick_span.h"
 #include "input_router.h"
@@ -1294,10 +1295,11 @@ static void RunTick(TickState& t) {
     // root-caused elsewhere - issue #148 - so the user's configured speed applies everywhere.)
     t.zoom.setProfile(t.cfg.zoomInSpeed, t.cfg.zoomOutSpeed, t.cfg.smoothZoom != 0,
                       t.cfg.smoothZoomAccel, t.cfg.smoothZoomRamp);
-    // The release glide runs in full at both sampling modes (#439). With the high resolution cursor it
-    // was cut short (#375) and then turned off (#427): its slow tail shook and showed the image doubled.
-    // That was the ladder stepping back below a request it had overtaken (#429, LadderDir); measured
-    // 2026-10-10, the full glide runs twice as long with the pointer steady and no backward step.
+    // The release glide runs at both sampling modes (#439). With the high resolution cursor it stops
+    // just before its slow tail (EaseOutShouldStop below): the full tail lands in ladder hops, which
+    // the field reads as shake (2026-10-10). Turned off in #427 because the tail also showed the image
+    // doubled; that was the ladder stepping back below a request it had overtaken (#429, LadderDir).
+    // Measured with the cut (speed 2.7, 115 ms): 240-260 ms of glide, no backward step, pointer steady.
     t.zoom.setEaseOut(t.cfg.zoomEaseOutMs / 1000.0);
     // Quick-zoom trigger. Modifier mode (quickZoomHotkeyMode==0): hold the configured modifier
     // (Ctrl/Alt/Shift; "None" = off) and tap a zoom key. While the modifier is held it toggles quick
@@ -1321,6 +1323,24 @@ static void RunTick(TickState& t) {
     // freeze holds it at ~1.01 until the hold expires.
     const bool quiesceFreeze = QuiesceHoldActive(t) && t.zoom.level() > 1.0;
     if (!quiesceFreeze) t.zoom.tick(dt < kMaxZoomDt ? dt : kMaxZoomDt);
+    // SMOOTH-ZOOM RELEASE (issue #369, src/zoom_ladder.h EaseOutShouldStop). With smooth sampling and
+    // the zoom ladder, a slow zoom must cross DWM's whole-pixel rounding steps, each an image jump of
+    // about the level in px; snapping the slow tail hopped, holding it froze then caught up (field).
+    // So after a release the user's ease-out runs (snapped like a held zoom) until it moves less per
+    // frame than clean levels are apart, then the zoom stops on the level on screen.
+    {
+        auto& zs = g_input.state();
+        const bool held = zs.inHeld.load() || zs.outHeld.load() || g_input.anyBoundKeyPressed();
+        // AFTER the controller ticked: before it, level() still equals last frame's level, so the
+        // "still moving" test never fired and the ease-out always ran its slow tail (#375).
+        if (!held && !t.zoom.hasTarget() && t.cfg.txSamplingMode == 1 && t.cfg.txSmoothLadder != 0 &&
+            t.zoom.level() != t.prevLvl && wind::EaseOutShouldStop(t.zoom.level(), t.prevLvl)) {
+            if (auto* tmStop = dynamic_cast<TransformModel*>(t.model)) {
+                const double shown = tmStop->writtenLevel();
+                if (shown > 1.001) { t.zoom.setLevel(shown); t.zoom.stopGlide(); }
+            }
+        }
+    }
     // Recenter on a recenterVk key press (rising edge).
     bool recenter = false;
     bool recenterDown = comboHeld(t.cfg.recenterVk, t.cfg.recenterMods);   // mods since #307
