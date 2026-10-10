@@ -113,6 +113,10 @@ public:
     // update, adapter change). The caller should stop rendering and call recoverDeviceLost() (with
     // backoff). Until recovery succeeds, renderFrame() is a no-op.
     bool deviceLost() const;
+    // Ask the device whether it was removed (GetDeviceRemovedReason) and latch deviceLost if so.
+    // Present/AcquireNextFrame only notice a TDR while this engine draws, so during a transform
+    // session (this engine idle) the main loop polls here (review 2026-10-09 #12). Cheap.
+    void pollDeviceRemoved();
     // Did the LAST renderFrame call actually SetCursorPos the pointer? (issue #169) The pan
     // oracle's baseline must be the park point when a park landed and the pointer's true position
     // when it did not (weld deduped on an unchanged pixel, drag-follow suppressed, device lost).

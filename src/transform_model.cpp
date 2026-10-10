@@ -191,7 +191,7 @@ bool TransformModel::initialize(const MonitorTarget& monitor) {
         if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &tok)) {
             DWORD uiAccess = 0, len = 0;
             if (GetTokenInformation(tok, TokenUIAccess, &uiAccess, sizeof(uiAccess), &len))
-                inputTransformAvailable_ = uiAccess != 0;
+                inputTransformAvailable_ = uiAccessProbe_ = uiAccess != 0;
             CloseHandle(tok);
         }
         wind::Log(wind::LogLevel::Info, "transform", "input transform %s (token UIAccess=%d)",
@@ -346,6 +346,7 @@ void TransformModel::edgeClipManage(bool wantActive) {
 
 void TransformModel::setActive(bool active) {
     active_ = active;
+    if (!active && !inputXformDenied_) inputTransformAvailable_ = uiAccessProbe_;   // re-arm a transient failure
     if (active) {
         LARGE_INTEGER zf, z1, z2;   // zoom timeline split (#310): a few QPC reads, always on
         QueryPerformanceFrequency(&zf);
@@ -873,7 +874,12 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
                 // Self-heal (spec constraint 1): a VERIFIED-failed ENABLED publish means this
                 // build cannot fix the pointer-framework dead zones - the DESKTOP pick must stop
                 // choosing the transform. Games are unaffected (legacy input surfaces).
+                // Only ERROR_ACCESS_DENIED (no UIAccess) is permanent. Any other single failed
+                // publish is treated as transient: the flag is re-armed from the token probe when
+                // the session ends (setActive(false)), so one hiccup no longer disables the
+                // desktop pick until restart (review 2026-10-09 #25).
                 inputTransformAvailable_ = false;
+                if (setGle == ERROR_ACCESS_DENIED) inputXformDenied_ = true;
                 if (!inputXformWarned_) {
                     inputXformWarned_ = true;
                     wind::Log(wind::LogLevel::Warn, "transform",

@@ -219,7 +219,13 @@ Config ParseConfig(const std::string& text) {
             else if (key == "trackLog")           c.trackLog = std::stoi(val);
             else if (key == "ixDecimate")         c.ixDecimate = std::stoi(val);
             else if (key == "mpoBuster")          c.mpoBuster = std::stoi(val);
-            else if (key == "txSamplingMode")     c.txSamplingMode = std::stoi(val);
+            else if (key == "txSamplingMode") {
+                // Only 0 (nearest), 1 (smooth) and -1 (leave DWM alone) are meaningful. 2..4 are
+                // kernel aliases of nearest that would slip past the MPO sampling guard; anything
+                // else folds to nearest so EffectiveSamplingMode guards it (review 2026-10-09 #23).
+                const int v = std::stoi(val);
+                c.txSamplingMode = (v == 1 || v == -1) ? v : 0;
+            }
             else if (key == "txWarmMode")         c.txWarmMode = std::stoi(val);
             else if (key == "txTrace")            c.txTrace = std::stoi(val);
             else if (key == "txRestLevel")        c.txRestLevel = std::stod(val);

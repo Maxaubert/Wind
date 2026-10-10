@@ -57,6 +57,9 @@ struct EnginePickInputs {
     // image (review 2026-10-09 M3); DWM's own magnification handles rotation. Same effect as
     // captureProtected.
     bool rotatedOutput = false;
+    // The render engine's D3D device is lost and not yet recovered (GPU TDR). Nothing can be drawn
+    // by it, so every pick goes to the transform engine until recovery (review 2026-10-09 #13).
+    bool renderLost = false;
 };
 
 inline bool ShouldPickTransform(const EnginePickInputs& in) {
@@ -65,7 +68,8 @@ inline bool ShouldPickTransform(const EnginePickInputs& in) {
     //    exists to avoid a RARE dwm crash at high zoom that the pan wall and the MPO buster
     //    already mitigate. Netflix inside a browser is both at once, and this is the case that
     //    ordering resolves: black video every time beats an occasional crash risk.
-    if (in.captureProtected || in.renderExcluded || in.rotatedOutput) return true;
+    //    A lost render device is the same hard limit: it cannot draw anything, so transform it is.
+    if (in.renderLost || in.captureProtected || in.renderExcluded || in.rotatedOutput) return true;
     // 2. An explicit user preference for this window category. Transform is still refused off the
     //    primary monitor (no cross-adapter transform chase) and on an excluded exe, because those
     //    are correctness limits rather than taste.

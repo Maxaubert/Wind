@@ -182,8 +182,9 @@ Defences (wall arming in `RunTick`, write clamp in `TransformModel::present`):
 | On | Smooth | Lifted while the MPO ghost (`mpoBuster=1`) is shown and settled; fail-closed |
 | Off | Either | None |
 
-- The registry is read once at startup; the boot state governs until reboot, because DWM reads it
-  only at boot (`src/mpo_boot.h`).
+- The registry is read once at startup; the recorded state governs until dwm.exe restarts, because
+  DWM reads it only when it starts. The record (`src/mpo_boot.h`, pure half `mpo_boot_logic.h`) is
+  keyed on dwm.exe's creation time, read without opening the process; OS boot time is the fallback.
 - The ghost is a fullscreen alpha-1 click-through window that demotes surfaces off the overlay
   plane.
 - A write-site clamp backs the walls up when the session is exposed and the ghost is not settled,
@@ -268,7 +269,8 @@ welded cursor has hover dead zones. Identity or no publish both produce dead zon
 - **It needs UIAccess.** Availability is read from the process token's `TokenUIAccess` bit at
   `initialize`, with zero Magnification calls; an acquire/release probe would run an identity
   write. A verified-failed publish clears `inputTransformAvailable_`, which stops Auto picking
-  Transform for the desktop.
+  Transform for the desktop. Only `ERROR_ACCESS_DENIED` is permanent; any other failure is re-armed
+  from the token probe when the session ends.
 - `ixDecimate` (default 4) publishes every Nth changed tick during motion, and always when motion
   rests. Clicks ride the real pointer and never consult the transform.
 

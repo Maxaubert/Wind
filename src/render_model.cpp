@@ -57,6 +57,7 @@ bool RenderModel::retarget(const MonitorTarget& m) { return engine_.retarget(m);
 bool RenderModel::coversShell() const { return true; }
 RenderEngine& RenderModel::engine() { return engine_; }
 bool RenderModel::deviceLost() const { return engine_.deviceLost(); }
+void RenderModel::pollDeviceRemoved() { engine_.pollDeviceRemoved(); }
 bool RenderModel::recoverDeviceLost() { return engine_.recoverDeviceLost(); }
 void RenderModel::primeReveal() { engine_.primeReveal(); }
 bool RenderModel::frameCompositedSincePrime() const { return engine_.frameCompositedSincePrime(); }
