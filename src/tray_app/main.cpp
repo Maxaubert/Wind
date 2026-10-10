@@ -60,14 +60,16 @@ static void ApplyPin(HWND h) {
     }
 }
 
-// force: apply even when the value is unchanged (the icon was added again).
+// force: the icon was (re)added. Off is the default and then leaves the icon to Windows, so a pin
+// made in the taskbar settings survives a restart; only switching the row off in Wind unpins.
 static void RefreshPin(HWND h, bool force) {
-    int want = g_pinWanted < 0 ? 1 : g_pinWanted;   // an unreadable ini keeps what we had
+    int want = g_pinWanted < 0 ? 0 : g_pinWanted;   // an unreadable ini keeps what we had
     std::string text;
     if (wind::ReadLiveIni(wind::ResolveIniPath(), text)) want = wind::ParseConfig(text).trayPinned;
     if (!force && want == g_pinWanted) return;
     g_pinWanted = want;
     g_pinAttempts = 0;
+    if (force && want == 0) { KillTimer(h, kPinTimerId); return; }
     ApplyPin(h);
 }
 

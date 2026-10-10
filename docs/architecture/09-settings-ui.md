@@ -167,13 +167,14 @@ global, not profile keys. Spec:
 
 ## Pin to taskbar
 
-The Preferences row `trayPinned` (General card, default on) keeps WindTray's icon on the taskbar
+The Preferences row `trayPinned` (General card, default off) keeps WindTray's icon on the taskbar
 next to the clock instead of in the hidden-icons overflow. The page only writes the ini key; it is
 global and UI-only (`StripUiOnlyKeys`, `IsGlobalProfileKey`), so it never reloads the core and never
 travels with a profile. WindTray applies it (`src/tray_app/main.cpp`, `tray_pin.*`):
 
-- At startup right after `AddIcon`, after an Explorer restart (`TaskbarCreated`), and whenever the
-  ini changes. The tray watches the ini folder with `FindFirstChangeNotificationW` as a second wait
+- At startup right after `AddIcon` and after an Explorer restart (`TaskbarCreated`), but only when
+  on: off (the default) leaves the icon to Windows, so a pin made in the taskbar settings survives.
+  Whenever the ini changes, both ways: switching the row off unpins. The tray watches the ini folder with `FindFirstChangeNotificationW` as a second wait
   handle of its message loop; a 300 ms debounce timer then re-reads `trayPinned` and applies only
   when the value changed.
 - Windows keeps one registry key per icon: `HKCU\Control Panel\NotifyIconSettings\<id>` with

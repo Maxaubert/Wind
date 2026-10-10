@@ -377,20 +377,20 @@ test('Troubleshooting is always there, and the advanced switch is the last row o
   await expect(page.locator('main .card').nth(2).locator('.row .label')).toHaveText(['Frame time logging', 'Export diagnostics', 'Open settings file']);
 });
 
-test('Pin to taskbar (#436): on by default, writes trayPinned, never an unsaved change', async ({ page }) => {
+test('Pin to taskbar (#436): off by default, writes trayPinned, never an unsaved change', async ({ page }) => {
   await page.goto('/');
   await go(page, 'prefs');
   const row = key(page, 'trayPinned');
   await expect(row.locator('.label')).toHaveText('Pin to taskbar');
   await expect(row.locator('.desc')).toHaveText('Keeps the Wind icon next to the clock');
   const sw = row.getByRole('switch');
-  await expect(sw).toBeChecked();   // ships on
-  await sw.uncheck({ force: true });
-  expect((await sent(page, 'setConfig')).filter((m) => m.key === 'trayPinned').map((m) => m.value)).toEqual(['0']);
+  await expect(sw).not.toBeChecked();   // ships off: the icon stays in the overflow
   await sw.check({ force: true });
-  expect((await sent(page, 'setConfig')).filter((m) => m.key === 'trayPinned').map((m) => m.value)).toEqual(['0', '1']);
-  // A global key: flipping it must not light up the unsaved-changes state.
+  expect((await sent(page, 'setConfig')).filter((m) => m.key === 'trayPinned').map((m) => m.value)).toEqual(['1']);
   await sw.uncheck({ force: true });
+  expect((await sent(page, 'setConfig')).filter((m) => m.key === 'trayPinned').map((m) => m.value)).toEqual(['1', '0']);
+  // A global key: flipping it must not light up the unsaved-changes state.
+  await sw.check({ force: true });
   await expect(page.locator('.capsule')).toHaveCount(0);
 });
 

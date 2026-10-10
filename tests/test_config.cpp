@@ -712,13 +712,13 @@ TEST_CASE("ParseConfig clamps trackGlideMs and txMaxStepPct (review #72)") {
     CHECK(ParseConfig("txMaxStepPct=-5\n").txMaxStepPct == 0);
     CHECK(ParseConfig("txMaxStepPct=99999\n").txMaxStepPct == 1000);
 }
-TEST_CASE("trayPinned ships on, clamps to 0..1 and is UI-only: never reloads the core (#436)") {
-    CHECK(ParseConfig("").trayPinned == 1);
+TEST_CASE("trayPinned ships off, clamps to 0..1 and is UI-only: never reloads the core (#436)") {
+    CHECK(ParseConfig("").trayPinned == 0);
     CHECK(ParseConfig("trayPinned=0\n").trayPinned == 0);
     CHECK(ParseConfig("trayPinned=1\n").trayPinned == 1);
     CHECK(ParseConfig("trayPinned=7\n").trayPinned == 1);
     CHECK(ParseConfig("trayPinned=-3\n").trayPinned == 0);
-    CHECK(ParseConfig("trayPinned=abc\n").trayPinned == 1);   // strict parser: junk keeps the default
+    CHECK(ParseConfig("trayPinned=abc\n").trayPinned == 0);   // strict parser: junk keeps the default
     CHECK(StripUiOnlyKeys("a=1\ntrayPinned=0\nb=2\n") == "a=1\nb=2\n");
     CHECK(StripUiOnlyKeys("a=1\ntrayPinned=0\n") == StripUiOnlyKeys("a=1\ntrayPinned=1\n"));
     CHECK(StripUiOnlyKeys("trayPinnedX=1\n") == "trayPinnedX=1\n");
