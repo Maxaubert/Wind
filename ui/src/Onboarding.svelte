@@ -32,8 +32,8 @@
   }
   function back() { if (cur > 0) cur -= 1; }
   function skip() { setConfig('onboarded', '1'); onDone(); }
-  const zoomInRow  = { label:'Zoom in',  desc:'Hold to magnify',  buttonKey:'zoomInButton',  vkKey:'zoomInVk',  modsKey:'zoomInMods',  buttonModsKey:'zoomInButtonMods' };
-  const zoomOutRow = { label:'Zoom out', desc:'Hold to zoom back', buttonKey:'zoomOutButton', vkKey:'zoomOutVk', modsKey:'zoomOutMods', buttonModsKey:'zoomOutButtonMods' };
+  const zoomInRow  = { label:'Zoom in',  desc:'Hold to zoom in',  buttonKey:'zoomInButton',  vkKey:'zoomInVk',  modsKey:'zoomInMods',  buttonModsKey:'zoomInButtonMods' };
+  const zoomOutRow = { label:'Zoom out', desc:'Hold to zoom out', buttonKey:'zoomOutButton', vkKey:'zoomOutVk', modsKey:'zoomOutMods', buttonModsKey:'zoomOutButtonMods' };
 </script>
 <div class="wnd win" data-palette={palette}>
   <div class="caption" style="app-region:drag;-webkit-app-region:drag">
@@ -68,16 +68,16 @@
         </svg>
       </div>
       <h1>Welcome to Wind</h1>
-      <p>Barely there. Everywhere. Let's set up the essentials.</p>
+      <p>A few quick steps to get started</p>
     </div>
     <!-- Step 1: Set your zoom keys -->
     <div class="step" class:show={cur === 1}>
       <h1>Set your zoom keys</h1>
-      <p>Pick the buttons you'll hold to zoom. Mouse side-buttons work great, or choose keyboard keys.</p>
-      <div class="orow"><div class="ot"><div class="rlabel" id="ob-in-l">Zoom in</div><div class="rdesc" id="ob-in-d">Hold to magnify</div></div>
+      <p>Pick the buttons or keys you hold to zoom</p>
+      <div class="orow"><div class="ot"><div class="rlabel" id="ob-in-l">Zoom in</div><div class="rdesc" id="ob-in-d">Hold to zoom in</div></div>
         <div class="rctl"><KeybindCapture row={zoomInRow} values={keys} onChange={live}
                             labelledby="ob-in-l ob-in-v" describedby="ob-in-d" valueId="ob-in-v" /></div></div>
-      <div class="orow"><div class="ot"><div class="rlabel" id="ob-out-l">Zoom out</div><div class="rdesc" id="ob-out-d">Hold to zoom back</div></div>
+      <div class="orow"><div class="ot"><div class="rlabel" id="ob-out-l">Zoom out</div><div class="rdesc" id="ob-out-d">Hold to zoom out</div></div>
         <div class="rctl"><KeybindCapture row={zoomOutRow} values={keys} onChange={live}
                             labelledby="ob-out-l ob-out-v" describedby="ob-out-d" valueId="ob-out-v" /></div></div>
     </div>
