@@ -150,7 +150,7 @@ public:
     // Verification only: copy the back-buffer to a 32bpp BGRA PNG.
     bool dumpBackbufferPng(const wchar_t* path);
     // Verification only: render one frame and dump it before Present (so the PNG matches the
-    // drawn frame; a FLIP_DISCARD back-buffer read after Present is undefined).
+    // drawn frame; a DISCARD swap-chain back-buffer read after Present is undefined).
     bool dumpFrame(const RenderFrameParams& p, const wchar_t* path);
 
 private:

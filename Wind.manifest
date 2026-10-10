@@ -3,13 +3,10 @@
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>
-        <!-- uiAccess=true is REQUIRED for MagSetInputTransform, which routes mouse input
-             to the magnified element (fixes clicks/I-beam misaligning while zoomed). The
-             OS only honours this for a code-signed binary run from a secure location
-             (C:\Program Files\Wind). Build, then run tools\uiaccess_setup.ps1 (elevated)
-             to sign + deploy. The unsigned dev build in the repo will NOT launch with
-             this set ("A referral was returned from the server") - that is expected;
-             run the deployed copy. -->
+        <!-- The PLAIN manifest: asInvoker, uiAccess=false, so the build runs from anywhere
+             (build.bat, and always WindTray.exe). The uiAccess=true variant, needed for
+             MagSetInputTransform and the optional high z-order band, is Wind.uiaccess.manifest
+             (build.bat uiaccess; it only launches signed from C:\Program Files\Wind). -->
         <requestedExecutionLevel level="asInvoker" uiAccess="false" />
       </requestedPrivileges>
     </security>

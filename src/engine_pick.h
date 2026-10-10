@@ -3,14 +3,20 @@
 // predicate in the app is unit-tested (issues #148 exclusion, #172 shell desktop) instead of
 // living inline in two RunTick sites that had to stay identical by hand.
 //
-// transform is picked ONLY for a borderless foreground that covers the PRIMARY target monitor
-// (games, F11 video): compositor-internal magnification survives a heavy game's present load.
+// Order of the rules (see ShouldPickTransform): capture-protected, renderExclude or rotated output
+// -> transform always; then the per-window-category preference; then the Auto rule.
+//
+// Auto picks transform on the PRIMARY target monitor for (a) a borderless foreground that covers
+// the monitor (games, F11 video: compositor-internal magnification survives a heavy game's present
+// load) or (b) the desktop, when desktopTransform=1 (shipped) and the input transform is verified.
 // Everything else gets the render engine:
 //  - a maximized desktop app covers but keeps its caption -> render (documented trap),
-//  - the shell desktop (Win+D) reads as a borderless cover -> render (issue #172),
+//  - the shell desktop (Win+D) reads as a borderless cover, so it is never a game -> render
+//    on the game path (issue #172); only the desktop path may take it,
 //  - excluded exes (fullscreen browser video wants a desktop-style cursor) -> render,
 //  - learned cursor-shape churners -> render, unless the tdrTest harness forces transform,
 //  - any non-primary monitor -> render (no cross-adapter transform chase).
+// An explicit Transform category preference skips the churny and input-transform checks.
 #include <string>
 
 namespace wind {

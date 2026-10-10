@@ -59,7 +59,7 @@ the reply invalid and the page waits forever.
 | `saveSession` | reply `sessionSaved` | Write `MakeProfileText(live)` over the profile |
 | `discardSession` | reply `config` | Rewrite the live ini from the profile |
 | `ready` | fire | Two frames after mount; the host logs launch-to-paint |
-| `window` | fire | `minimize`, `close`, `quitWind`, `restartWind` (writes `session.keep` first) |
+| `window` | fire | `minimize`, `maximize` (toggles restore), `close`, `quitWind`, `restartWind` (writes `session.keep` first) |
 | `dirty` | fire | Unsaved flag, so `WM_CLOSE` can prompt |
 | `openIni` | fire | Open `magnifier.ini` in the `.ini` handler or Notepad |
 | `exportDiagnostics` | fire | Zip `%LOCALAPPDATA%\Wind\logs` to the Desktop on a worker thread (the window stays responsive; a repeat click while it runs is ignored), then reveal it in Explorer |
@@ -81,7 +81,7 @@ and default. `Settings.svelte` is the shell (title bar, sidebar, banner, save ca
 
 | Type | Widget | Notes |
 |---|---|---|
-| `keybind` | `lib/KeybindCapture.svelte` + `controls/Keycaps.svelte` | State lives in sibling keys (`buttonKey`, `vkKey`, `modsKey`); zoom rows take two slots |
+| `keybind` | `controls/Bindings.svelte` (onboarding uses `lib/KeybindCapture.svelte`) | State lives in sibling keys (`buttonKey`, `vkKey`, `modsKey`); zoom rows take two slots |
 | `toggle` | `controls/Toggle.svelte` | `1`/`0` |
 | `slider` | `controls/Slider.svelte` | `min`, `max`, `step`, `unit` (also `aria-valuetext`) |
 | `select` | `controls/Select.svelte` | `options` + `optionLabels` |

@@ -112,8 +112,10 @@ slightly during zoom ramps, nearest keeps it pixelated and steady. Pure rules:
   `SetFullscreenMagnifierOffsetsDWMUpdated(TRUE, 0, 0)` and DWM re-centres the view on every cursor
   update. Measured per displayed frame at 3x: the pointer stays on one screen point at every speed,
   where a tick-paced write drifts 18-24 px at medium speed and up to 96 px fast. While DWM centres,
-  Wind sends only level changes (`SendWrite`) and no warm pulses: a same-level write would put a
-  tick-old offset on screen. Caret, focus, keyboard pan, edge mode, Inspect and locked games switch
+  Wind still writes every changed tick (win32k's copy of the view, which pointer-framework
+  hit-testing reads, only changes on a client write) and sends no warm pulses. Each write is followed
+  by a pixel-and-back cursor nudge (`NudgeAfterWrite`) so DWM re-centres by its own rule in the same
+  frame; a pan write is held while a click is in progress (`HoldWriteForClick`, #381). Caret, focus, keyboard pan, edge mode, Inspect and locked games switch
   it off and Wind writes the view as before; each switch forces one write.
 - **Cursor events, not style flips, switch DWM.** win32k sends the new cursor mode to DWM only on
   the next pointer update, so zoom-in nudges the pointer a pixel and back right after turning the
@@ -132,8 +134,8 @@ slightly during zoom ramps, nearest keeps it pixelated and steady. Pure rules:
 - **One centre during zoom.** DWM centres on its cursor point plus a learned hotspot offset that can
   sit 1-2 desktop px off Wind's exact centre; a level write puts the view on Wind's centre, the next
   cursor event back on DWM's (a 5-10 px shift at ~5x that snapped back when the zoom stopped). While
-  DWM centres, every level write is followed by a pixel-and-back nudge, so DWM re-centres by its own
-  rule in the same frame (`NudgeAfterLevelWrite`). Field-verified: shift gone, pans steady.
+  DWM centres, every write is followed by a pixel-and-back nudge, so DWM re-centres by its own
+  rule in the same frame (`NudgeAfterWrite`). Field-verified: shift gone, pans steady.
 - **No write without its nudge (#381).** The nudge is skipped while a mouse button is held (it made
   some clicks fail), so a pan write during a held click would leave Wind's centre on screen until the
   next cursor event: drag-selects and held clicks shook. Pan-only writes are held for the click
@@ -188,7 +190,7 @@ mickeys. `LockDetector` (`src/lock_detector.*`, pure) decides, with hysteresis.
 | Tell | Rule | When |
 |---|---|---|
 | Confined clip | `ClipCursor` rect under 90% of the monitor in either dimension (`ClipRectConfines`) | Always |
-| Raw active, cursor frozen | 6 ticks lock (`kLockTicks`); 3 ticks of the cursor tracking input unlock (`kFreeTicks`) | Always |
+| Raw active, cursor frozen | 42 ms lock (`kLockMs`, 6 ticks at 144 Hz); 21 ms of the cursor tracking input unlock (`kFreeMs`, 3 ticks) | Always |
 | Warp anchor | Jumps of 100 px or more landing within 6 px of one anchor, repeatedly; a recent landing blocks unlocking | `warpLock=1` |
 | Confinement box | 400+ mickeys in ~170 ms while every cursor position stays in a 30 px box | `warpLock=1` |
 | Hidden-cursor seed | Zoom-in over a covering foreground whose app already hid the cursor calls `seedLock()` | `warpLock=1` |

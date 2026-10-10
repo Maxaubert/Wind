@@ -30,8 +30,8 @@ whatever `TickState::model` points at:
 | `setActive(bool)` | Show or hide the magnified view (render: layer alpha; transform: enable/disable the DWM transform). |
 | `onActivate()` | Idle-to-active edge: grab a live frame, not a cached one. |
 | `present(...)` | The per-tick draw, with the mapper's `MapResult`, the level, config, monitor and `PresentExtras`. |
-| `idleTick()` | Every idle tick. The transform releases its Magnification context here, see [05](05-transform-engine.md). |
-| `retarget(MonitorTarget)` | Render only, for `multiMonitor`. |
+| `idleTick()` | Every idle tick. The transform builds its Magnification context and cursor lens here and keeps them warm, see [05](05-transform-engine.md). |
+| `retarget(MonitorTarget)` | Both engines, at activation (`multiMonitor` picks the monitor; a changed resolution is followed either way). Render returns false across adapters. |
 
 `model` in `magnifier.ini` takes `hybrid`, `render` or `transform` and is read once at launch, so
 changing it restarts Wind. Anything else, including an old `model=magnify`, reads as `hybrid`.
@@ -40,7 +40,7 @@ changing it restarts Wind. Anything else, including an old `model=magnify`, read
 |---|---|---|
 | `hybrid` ("Auto") | `TickState` holds a `RenderModel` (`mRender`) and a `TransformModel` (`mTransform`) and points `model` at one per session | The default |
 | `render` | DXGI Desktop Duplication + D3D11 onto a click-through, capture-excluded overlay (`src/render_engine.*`) | Sub-pixel pan, cursor in the same frame, shell coverage. [04](04-render-engine.md) |
-| `transform` | The DWM fullscreen transform, no presents of its own (`src/transform_model.cpp`) | Games and protected video. [05](05-transform-engine.md) |
+| `transform` | The DWM fullscreen transform, no presents of its own (`src/transform_model.cpp`) | Games, protected video and rotated outputs, plus the desktop when `desktopTransform=1` and the input transform is verified. [05](05-transform-engine.md) |
 
 If the transform half fails to initialize, Auto logs a warning and runs render only; every pick
 site checks `t.mTransform`.

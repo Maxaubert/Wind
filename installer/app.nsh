@@ -77,7 +77,7 @@ Var LicenceDir   ; where "Read the full licence" put its copy, empty until then
 
     ; Now wait for the PROCESS. This gate is the whole point of asking politely: killing
     ; Wind between "released the mutex" and "finished shutting down" would skip the cursor
-    ; restore, the ClipCursor release and the Magnifier registry restore, which is exactly
+    ; restore, the ClipCursor release and the zoom reset, which is exactly
     ; the damage the quit event exists to avoid. Up to 5 s in 250 ms steps, so the normal
     ; case costs a quarter of a second.
     StrCpy $3 0

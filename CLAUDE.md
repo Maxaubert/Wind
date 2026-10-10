@@ -74,14 +74,15 @@ Chapter numbers refer to `docs/architecture/NN-*.md`.
 - A clip is a lock signal only when under 90% of the monitor (`ClipRectConfines`); work-area clips
   are common.
 - Tracking never moves the pointer: detached views (`t.viewDetached`); the pointer comes to the view
-  on a mouse move. Never poll the Java Access Bridge; load only Authenticode-signed bridge DLLs.
+  on a mouse move. Never poll the Java Access Bridge at a fixed rate (reads follow bridge events,
+  a window switch or a backed-off retry); load only Authenticode-signed bridge DLLs.
 - Shell input panels need nothing special in the transform engine: DWM draws its pointer above them.
   Do not bring back pointer freezing or hook-thread view writes.
 
 **Input (06)**
 - Bound keys are swallowed by LL hooks with balanced down/up; release swallowed keys on teardown.
-- The keyboard hook is the authority for bound-key state; the hook skips Wind's own injections
-  (`kWindInjectTag`).
+- The keyboard hook is the authority for bound-key state; only the mouse hook skips Wind's own
+  injections (`kWindInjectTag`), the keyboard hook counts the Alt/Win mask key.
 - Bind rules live in `src/keybind_rules.h` and `ui/src/lib/keybindRules.js`, both tested against
   `tests/fixtures/keybind_cases.txt`: change both.
 - LL hooks cannot block Raw Input, so bound keys still reach raw-input games. No driver-based fix.

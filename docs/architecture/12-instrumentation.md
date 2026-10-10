@@ -29,7 +29,9 @@ Details: `tools/testenv/README.md`.
 Both binaries log through `src/logging.cpp`. The pure half (formatting, rotation, snapshot text) is
 unit-tested; the Win32 half is excluded from the test build.
 
-- **Files.** `%LOCALAPPDATA%\Wind\logs\` (`ResolveLogDir`): `wind-core.log` from Wind.exe,
+- **Files.** The `logs\` folder next to the exe when that folder is writable (dev and portable
+  builds), else `%LOCALAPPDATA%\Wind\logs\` (the Program Files install; `ResolveLogDir`, the same
+  rule as the ini): `wind-core.log` from Wind.exe,
   `wind-config.log` from WindConfig.exe. Rotation at 1 MiB over three generations. A second
   instance that cannot open the shared log writes `wind-core-<pid>.log`; once it holds the
   single-instance mutex (a restart), `LogClaimBase` moves it onto `wind-core.log`, so it rotates.
