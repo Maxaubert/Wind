@@ -12,8 +12,6 @@ TEST_CASE("a zero-filled block is not live data") {
     CHECK_FALSE(TrayBlockValid(b.get()));
     const TrayStatus s = ReadTrayStatus(b.get());
     CHECK(s.level == doctest::Approx(1.0));
-    CHECK(s.engine == TrayEngine::Advanced);
-    CHECK(s.panning == false);
 }
 
 TEST_CASE("a missing block reads as defaults, never crashes") {
@@ -29,33 +27,22 @@ TEST_CASE("status survives a publish/read round trip through the block") {
     InitTrayBlock(*b, 4242);
     REQUIRE(TrayBlockValid(b.get()));
     CHECK(b->windPid.load() == 4242u);
-    TrayStatus s; s.level = 7.4; s.engine = TrayEngine::Transform; s.panning = true;
+    TrayStatus s; s.level = 7.4;
     PublishTrayStatus(b.get(), s);
     const TrayStatus r = ReadTrayStatus(b.get());
     CHECK(r.level == doctest::Approx(7.4));
-    CHECK(r.engine == TrayEngine::Transform);
-    CHECK(r.panning == true);
 }
 
 TEST_CASE("a different layout version is not read as live values") {
     auto b = Fresh();
     InitTrayBlock(*b, 1);
-    PublishTrayStatus(b.get(), TrayStatus{ 5.0, TrayEngine::Render, true });
+    PublishTrayStatus(b.get(), TrayStatus{ 5.0 });
     b->version.store(TrayShared::kVersion + 1);
     CHECK_FALSE(TrayBlockValid(b.get()));
     CHECK(ReadTrayStatus(b.get()).level == doctest::Approx(1.0));
     b->version.store(TrayShared::kVersion);
     b->magic.store(0xDEADBEEFu);
     CHECK_FALSE(TrayBlockValid(b.get()));
-}
-
-TEST_CASE("an out-of-range engine value falls back to Advanced") {
-    auto b = Fresh();
-    InitTrayBlock(*b, 1);
-    b->engine.store(99);
-    CHECK(ReadTrayStatus(b.get()).engine == TrayEngine::Advanced);
-    b->engine.store(-1);
-    CHECK(ReadTrayStatus(b.get()).engine == TrayEngine::Advanced);
 }
 
 TEST_CASE("menuOpen round-trips, and a foreign block reads as closed") {

@@ -34,15 +34,6 @@ TEST_CASE("a too-small buffer is refused rather than overrun") {
     CHECK(FormatZoom(7.4, b, 4) == false);
 }
 
-// --- engine labels ---------------------------------------------------------------------
-
-TEST_CASE("hybrid reads Advanced, not Auto") {
-    // Renamed 2026-08-28: "Auto" undersold it - hybrid is the mode that picks per window type.
-    CHECK(std::wstring(EngineLabel(TrayEngine::Advanced))  == L"ADVANCED");
-    CHECK(std::wstring(EngineLabel(TrayEngine::Transform)) == L"TRANSFORM");
-    CHECK(std::wstring(EngineLabel(TrayEngine::Render))    == L"RENDER");
-}
-
 // --- tick statistics -------------------------------------------------------------------
 
 TEST_CASE("the ring returns the newest samples oldest-first") {

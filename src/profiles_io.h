@@ -261,6 +261,13 @@ inline std::wstring SessionKeepPath() {
     std::wstring base = (n == 0 || n >= MAX_PATH) ? std::wstring(L".") : std::wstring(buf, n);
     return base + L"\\Wind\\session.keep";
 }
+// %LOCALAPPDATA%\Wind\running.model: the engine the Wind process loaded at its start (`model` is read
+// once at launch). Written by Wind.exe, read by the settings host so a model change that was never
+// applied still shows as pending after the window is reopened, instead of looking applied.
+inline std::wstring RunningModelPath() {
+    std::wstring p = SessionKeepPath();
+    return p.substr(0, p.size() - 12) + L"running.model";   // 12 = len("session.keep")
+}
 
 // Settings session model: the live ini is the session, the active profile file is the saved state.
 // A plain start discards unsaved changes by rewriting the live ini from the profile (globals kept).

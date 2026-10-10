@@ -7,7 +7,7 @@
   //   onSet     onSet(key, val) for a sibling key (the extra-key switches)
   //   live      live(patch) for keybind captures (written immediately by the page)
   //   tab       optional quiet tab name shown beside the label (search results)
-  //   extra     { mpoNeedsRestart, runningModel, onRestart,
+  //   extra     { runningModel, onRestart,
   //             profiles: {names, active, onSwitch, onNew, onDelete}, version, onRepo, onAction(name) }
   import Toggle from './Toggle.svelte';
   import Slider from './Slider.svelte';
@@ -70,8 +70,8 @@
         <AppList {value} title={row.label} {disabled} onChange={onChange}
                  labelledby={withValue} describedby={descId} {valueId} pick={extra.pick} />
       {:else if row.type === 'highres'}
-        <HighRes {value} {disabled} onChange={onChange} needsRestart={!!extra.mpoNeedsRestart}
-                 labelledby={labelId} describedby={descId} tagId={rid + '-t'} />
+        <HighRes {value} {disabled} onChange={onChange}
+                 labelledby={labelId} describedby={descId} />
       {:else if row.type === 'palette'}
         <ThemePicker value={value ?? 'grey'} onChange={onChange}
                      labelledby={labelId} describedby={descId} />

@@ -9,12 +9,30 @@
   const SUFFIX = { times: 'x', '%': '%', ms: ' ms', seconds: ' s' };
   const decimals = $derived((String(step).split('.')[1] || '').length);
   const shown = $derived(Number(value).toFixed(decimals) + (SUFFIX[unit] ?? ''));
+
+  // A drag fires input on every pixel and each onChange is an ini write through the host. Send the
+  // first at once, then at most one per 50 ms (the latest value, trailing); release flushes.
+  const GAP = 50;
+  let last = 0, timer = null, pending = null;
+  function send(v) { last = performance.now(); pending = null; onChange(v); }
+  function flush() {
+    if (timer) { clearTimeout(timer); timer = null; }
+    if (pending !== null) send(pending);
+  }
+  function onInput(v) {
+    pending = v;
+    if (timer) return;
+    const wait = GAP - (performance.now() - last);
+    if (wait <= 0) send(v);
+    else timer = setTimeout(() => { timer = null; if (pending !== null) send(pending); }, wait);
+  }
+  $effect(() => () => flush());
 </script>
 
 <div class="sl" class:disabled>
   <input type="range" {min} {max} {step} {value} {disabled} style="--pct:{pct}%"
          aria-labelledby={labelledby} aria-describedby={describedby} aria-valuetext={text}
-         oninput={(e) => onChange(e.currentTarget.value)} />
+         oninput={(e) => onInput(e.currentTarget.value)} onchange={flush} onblur={flush} />
   <span class="val" aria-hidden="true">{shown}</span>
 </div>
 

@@ -302,7 +302,15 @@ static std::string SessionPayload(const std::string& live) {
     std::string names = "["; bool first = true;
     for (const auto& n : ProfileNamesUtf8()) { if (!first) names += ","; first = false; names += "\"" + JsonEscape(n) + "\""; }
     names += "]";
+    // The engine the live Wind process actually runs (it writes running.model at start). Only trusted
+    // while Wind is up; otherwise the next start loads the ini, so the page falls back to that.
+    std::string running;
+    if (WindRunning() && wind::ReadTextFileOk(wind::RunningModelPath(), running)) {
+        while (!running.empty() && (running.back() == '\r' || running.back() == '\n' || running.back() == ' ')) running.pop_back();
+        if (running != "render" && running != "transform" && running != "hybrid") running.clear();
+    }
     return "\"values\":" + JsonObjectOf(values) + ",\"saved\":" + JsonObjectOf(saved) +
+           (running.empty() ? std::string() : ",\"runningModel\":\"" + running + "\"") +
            ",\"profiles\":{\"names\":" + names + ",\"active\":\"" + JsonEscape(active) + "\"}";
 }
 static std::string UiPaletteOf(const std::string& live) {
@@ -393,7 +401,13 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
         PostConfig(wv);
     } else if (type == "setConfig" || type == "setConfigPersist") {
         std::string key = JsonField(j, "key"), value = JsonField(j, "value");
-        if (!key.empty()) {
+        // The page is ours, but the bridge still refuses a key that is not a plain identifier and a
+        // value that would split the line (CR/LF/NUL): either would let a message plant another key.
+        if (!wind::IsSafeIniKey(key) || !wind::IsSafeIniValue(value)) {
+            wind::Log(wind::LogLevel::Warn, "config", "%s: refused an unsafe key or value", type.c_str());
+            return;
+        }
+        {
             // Checked (issue #274): this is the path every slider, toggle and keybind takes, and a
             // failed write (AV lock, a sharing violation on the replace) used to vanish - the page
             // showed the new value while the ini kept the old one. Tell the page, which says so.
@@ -443,33 +457,6 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
                 WriteFileAtomic(IniPath(), wind::MakeLiveText(prof, live, active));
         }
         PostConfig(wv);
-    } else if (type == "mpoState") {
-        // Read-only probe: HKLM reads do not need elevation, so the Advanced row can always show
-        // the true state without ever prompting. `atBoot` is what DWM actually loaded (see
-        // mpo_boot.h); bootKnown=false means no record for this boot, and the UI then falls back to
-        // comparing against the registry rather than inventing an answer.
-        bool atBoot = false;
-        const bool bootKnown = wind::MpoStateAtBoot(atBoot);
-        std::string out = std::string("{\"type\":\"mpoState\",\"disabled\":") +
-                          (wind::MpoDisabledInRegistry() ? "true" : "false") +
-                          ",\"bootKnown\":" + (bootKnown ? "true" : "false") +
-                          ",\"atBoot\":" + (atBoot ? "true" : "false") + "}";
-        wv->PostWebMessageAsJson(Widen(out).c_str());
-    } else if (type == "setMpoDisabled") {
-        // Applied only from the Apply button, never on the toggle itself: this raises UAC and
-        // changes a system-wide display setting, so it follows the same staged model as every other
-        // setting. Reply with the RE-READ state, so a cancelled UAC prompt reverts the row instead
-        // of leaving it showing a change that never happened.
-        const bool want = JsonField(j, "value") == "1";
-        const bool ok = wind::SetMpoDisabled(want, g_hwnd);
-        std::string out = std::string("{\"type\":\"mpoApplied\",\"ok\":") + (ok ? "true" : "false") +
-                          ",\"disabled\":" + (wind::MpoDisabledInRegistry() ? "true" : "false") + "}";
-        wv->PostWebMessageAsJson(Widen(out).c_str());
-    } else if (type == "rebootNow") {
-        // Offered only after an MPO change, which DWM reads at boot. shutdown.exe rather than
-        // ExitWindowsEx: it handles acquiring SE_SHUTDOWN_NAME for us, and /t 0 with no /f lets
-        // other apps object so the user never loses unsaved work elsewhere.
-        ShellExecuteW(nullptr, L"open", L"shutdown.exe", L"/r /t 0", nullptr, SW_HIDE);
     } else if (type == "dirty") {
         g_dirty = JsonField(j, "value") == "1";
     } else if (type == "window") {
@@ -537,8 +524,6 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
             HANDLE th = CreateThread(nullptr, 0, ExportDiagnosticsThread, nullptr, 0, nullptr);
             if (th) CloseHandle(th); else g_exporting = false;
         }
-    } else if (type == "listProfiles") {
-        PostProfiles(wv, true, "");
     } else if (type == "switchProfile") {
         const std::string err = DoSwitchProfile(JsonField(j, "name"));
         PostProfiles(wv, err.empty(), err);
@@ -885,6 +870,25 @@ static void CreateWebView(HWND hwnd) {
                             COREWEBVIEW2_PROCESS_FAILED_KIND k = COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED;
                             if (args) args->get_ProcessFailedKind(&k);
                             PostMessageW(g_hwnd, WM_APP_WV_FAILED, (WPARAM)k, 0);
+                            return S_OK;
+                        }).Get(), &tok);
+                    // The page only ever lives on the mapped host: any other navigation or new window
+                    // (a link, a script, injected content) is cancelled, so no outside page reaches
+                    // the message bridge.
+                    g_webview->add_NavigationStarting(
+                        Callback<ICoreWebView2NavigationStartingEventHandler>(
+                        [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs* args) -> HRESULT {
+                            LPWSTR uri = nullptr;
+                            if (SUCCEEDED(args->get_Uri(&uri)) && uri) {
+                                if (wcsncmp(uri, L"https://wind.config/", 20) != 0) args->put_Cancel(TRUE);
+                                CoTaskMemFree(uri);
+                            }
+                            return S_OK;
+                        }).Get(), &tok);
+                    g_webview->add_NewWindowRequested(
+                        Callback<ICoreWebView2NewWindowRequestedEventHandler>(
+                        [](ICoreWebView2*, ICoreWebView2NewWindowRequestedEventArgs* args) -> HRESULT {
+                            args->put_Handled(TRUE);
                             return S_OK;
                         }).Get(), &tok);
                     g_webview->add_NavigationCompleted(

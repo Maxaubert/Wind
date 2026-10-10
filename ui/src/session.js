@@ -37,12 +37,22 @@ export function fill(session) {
   return { values: { ...d, ...(session.values || {}) }, saved: { ...d, ...(session.saved || session.values || {}) } };
 }
 
-// Keys whose live value differs from the saved profile (global keys ignored, values compared as text).
+// Same setting: identical trimmed text, or both plain numbers with the same value ("1.0" vs "1"),
+// matching the host's SameIniValue so the page and the close guard agree.
+function sameValue(a, b) {
+  const x = String(a ?? '').trim(), y = String(b ?? '').trim();
+  if (x === y) return true;
+  if (x === '' || y === '') return false;
+  const nx = Number(x), ny = Number(y);
+  return Number.isFinite(nx) && Number.isFinite(ny) && nx === ny;
+}
+
+// Keys whose live value differs from the saved profile (global keys ignored; text or numeric equality).
 export function changedKeys(values, saved) {
   const out = [];
   for (const k of Object.keys(values)) {
     if (GLOBAL_KEYS.has(k)) continue;
-    if (String(values[k] ?? '').trim() !== String(saved[k] ?? '').trim()) out.push(k);
+    if (!sameValue(values[k], saved[k])) out.push(k);
   }
   return out;
 }

@@ -20,10 +20,10 @@
     if (!r.key.startsWith('__') && !(r.key in values)) values[r.key] = r.def ?? '';
     for (const k of bindKeys(r)) if (!(k in values)) values[k] = '0';
   }
-  const visible = (r) => !r.showIf || String(values[r.showIf.key]) === String(r.showIf.eq);
+  const visible = (r) => !r.showIf || (r.showIf.ne !== undefined ? String(values[r.showIf.key]) !== String(r.showIf.ne) : String(values[r.showIf.key]) === String(r.showIf.eq));
   const set = (key, val) => { values[key] = val; calls.push([key, val]); };
   const extra = {
-    runningModel: 'hybrid', mpoNeedsRestart: false, version: '0.22.5',
+    runningModel: 'hybrid', version: '0.22.5',
     onRestart: () => calls.push('restart'), onAction: (a) => calls.push(['action', a]),
     onRepo: () => calls.push('repo'),
     pick: async () => 'RDR2.exe',

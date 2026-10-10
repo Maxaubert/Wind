@@ -8,6 +8,22 @@ TEST_CASE("ReadIniValues parses key=value, skipping comments and blanks") {
     CHECK(m["zoomInSpeed"] == "1.2");
     CHECK(m.count("c") == 0);
 }
+TEST_CASE("the bridge accepts plain keys and refuses injection") {
+    CHECK(IsSafeIniKey("maxLevel"));
+    CHECK(IsSafeIniKey("panLeftVk2"));
+    CHECK_FALSE(IsSafeIniKey(""));
+    CHECK_FALSE(IsSafeIniKey("1abc"));
+    CHECK_FALSE(IsSafeIniKey("a=b"));
+    CHECK_FALSE(IsSafeIniKey("a b"));
+    CHECK_FALSE(IsSafeIniKey("[profile]"));
+    CHECK_FALSE(IsSafeIniKey("a\nb"));
+    CHECK_FALSE(IsSafeIniKey(std::string(65, 'a')));
+    CHECK(IsSafeIniValue("RDR2.exe;GTA5.exe"));
+    CHECK(IsSafeIniValue(""));
+    CHECK_FALSE(IsSafeIniValue("1\nvsync=0"));
+    CHECK_FALSE(IsSafeIniValue("1\rx"));
+    CHECK_FALSE(IsSafeIniValue(std::string("a\0b", 3)));
+}
 TEST_CASE("UpdateIniText replaces an existing key in place, preserving the rest") {
     std::string t = "; speed knob\nzoomInSpeed=1.0\nmaxLevel=8.0\n";
     std::string r = UpdateIniText(t, "zoomInSpeed", "2.0");

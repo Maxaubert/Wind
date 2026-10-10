@@ -71,14 +71,10 @@
     }
     values = f.values; saved = f.saved;
     if (s.profiles) prof = { names: s.profiles.names || [], active: s.profiles.active || '' };
-    if (!runningModel) runningModel = String(f.values.model);
+    // The host reports the engine Wind really runs; the ini only says what it will run next start.
+    if (!runningModel) runningModel = s.runningModel || String(f.values.model);
     loaded = true;
   }
-
-  // High resolution cursor no longer touches MPO (issue #369): smooth sampling and the MPO guard
-  // (an invisible colour effect while zoomed at nearest) both keep apps off hardware planes, so
-  // either look is safe with MPO on and the toggle applies live, with no registry write or restart.
-  const mpoNeedsRestart = false;
 
   // --- Changes --------------------------------------------------------------------------------
   function change(key, val) {
@@ -248,12 +244,12 @@
     else if (a === 'exportDiagnostics') exportDiagnostics();
     else if (a === 'quitWind') requestQuit();
   }
-  const visible = (r) => !r.showIf || String(values[r.showIf.key]) === String(r.showIf.eq);
+  const visible = (r) => !r.showIf || (r.showIf.ne !== undefined ? String(values[r.showIf.key]) !== String(r.showIf.ne) : String(values[r.showIf.key]) === String(r.showIf.eq));
   // Advanced rows show on their page only while the global switch is on; search results show them always.
   const advOn = $derived(Number(values.showAdvanced) === 1);
   const shown = (r) => visible(r) && (!r.adv || advOn);
   const extra = $derived({
-    mpoNeedsRestart, runningModel, version: VERSION, onRepo: openRepo,
+    runningModel, version: VERSION, onRepo: openRepo,
     onAction, pick: pickExe,
     onRestart: () => { restartError = false; windowControl('restartWind'); },
     profiles: {

@@ -10,7 +10,7 @@
 //
 // Writers: Wind writes everything except `menuOpen`; the tray writes only `menuOpen`. Every field
 // is a lock-free atomic, so a reader in the other process never needs a lock, and a torn pairing
-// (last tick's level with this tick's engine) is invisible in a menu. A freshly created mapping is
+// (last tick's level with this tick's ring) is invisible in a menu. A freshly created mapping is
 // zero-filled, which is a valid "no live data" state (magic 0 fails the check).
 #include <atomic>
 #include <cstdint>
@@ -24,14 +24,12 @@ inline constexpr const wchar_t* kTrayMutexName = L"Local\\Wind_Tray";
 
 struct TrayShared {
     static constexpr uint32_t kMagic   = 0x59525457u;   // "WTRY"
-    static constexpr uint32_t kVersion = 1;
+    static constexpr uint32_t kVersion = 2;   // 2: engine/panning removed (the flyout never read them)
 
     std::atomic<uint32_t> magic;
     std::atomic<uint32_t> version;
     std::atomic<uint32_t> windPid;    // the running core
     std::atomic<double>   level;      // 1.0 = not zoomed
-    std::atomic<int32_t>  engine;     // TrayEngine
-    std::atomic<uint32_t> panning;
     std::atomic<uint32_t> menuOpen;   // tray -> Wind: the menu's modal loop is live
     TickStats             ticks;      // frame-pacing ring for the header's fps and sparkline
 };
@@ -39,7 +37,6 @@ struct TrayShared {
 // Cross-process atomics must not hide a lock inside the object (a lock would live in one
 // process's memory only).
 static_assert(std::atomic<uint32_t>::is_always_lock_free, "shared block needs lock-free u32");
-static_assert(std::atomic<int32_t>::is_always_lock_free,  "shared block needs lock-free i32");
 static_assert(std::atomic<double>::is_always_lock_free,   "shared block needs lock-free double");
 static_assert(std::atomic<unsigned>::is_always_lock_free, "TickStats head must be lock-free");
 
@@ -48,8 +45,6 @@ static_assert(std::atomic<unsigned>::is_always_lock_free, "TickStats head must b
 inline void InitTrayBlock(TrayShared& b, uint32_t pid) {
     b.windPid.store(pid, std::memory_order_relaxed);
     b.level.store(1.0, std::memory_order_relaxed);
-    b.engine.store(0, std::memory_order_relaxed);
-    b.panning.store(0, std::memory_order_relaxed);
     b.menuOpen.store(0, std::memory_order_relaxed);   // a leftover block may carry the last tray's "open"
     b.ticks.reset();                                  // ...and the last Wind's pacing samples (review item 89)
     b.version.store(TrayShared::kVersion, std::memory_order_relaxed);
@@ -66,18 +61,13 @@ inline bool TrayBlockValid(const TrayShared* b) {
 inline void PublishTrayStatus(TrayShared* b, const TrayStatus& s) {
     if (!b) return;
     b->level.store(s.level, std::memory_order_relaxed);
-    b->engine.store((int32_t)s.engine, std::memory_order_relaxed);
-    b->panning.store(s.panning ? 1u : 0u, std::memory_order_relaxed);
 }
 
-// Default status (Idle, Advanced) when the block is missing or foreign.
+// Default status (Idle) when the block is missing or foreign.
 inline TrayStatus ReadTrayStatus(const TrayShared* b) {
     TrayStatus s;
     if (!TrayBlockValid(b)) return s;
     s.level = b->level.load(std::memory_order_relaxed);
-    const int32_t e = b->engine.load(std::memory_order_relaxed);
-    s.engine = (e >= 0 && e <= (int32_t)TrayEngine::Render) ? (TrayEngine)e : TrayEngine::Advanced;
-    s.panning = b->panning.load(std::memory_order_relaxed) != 0;
     return s;
 }
 

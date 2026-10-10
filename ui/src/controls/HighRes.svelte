@@ -1,18 +1,13 @@
 <script>
-  // High resolution cursor: the toggle drives txSamplingMode; the page mirrors the staged MPO half
-  // (#242). "Requires restart" says an applied change has not taken effect yet.
+  // High resolution cursor: the toggle drives txSamplingMode. It applies live (#369), so no restart tag.
   import Toggle from './Toggle.svelte';
-  let { value = 0, onChange = () => {}, needsRestart = false, disabled = false, labelledby, describedby, tagId } = $props();
+  let { value = 0, onChange = () => {}, disabled = false, labelledby, describedby } = $props();
 </script>
 
 <div class="hr">
-  {#if needsRestart}<span class="tag" id={tagId}>Requires restart</span>{/if}
-  <Toggle {value} {onChange} {disabled} {labelledby}
-          describedby={needsRestart && tagId ? `${describedby ?? ''} ${tagId}`.trim() : describedby} />
+  <Toggle {value} {onChange} {disabled} {labelledby} {describedby} />
 </div>
 
 <style>
   .hr { display: inline-flex; align-items: center; gap: 10px; }
-  .tag { background: var(--chip); color: var(--fg3); border: 1px solid var(--chipb); border-radius: var(--rp);
-         padding: 2px 9px; font-size: 11px; white-space: nowrap; }
 </style>
