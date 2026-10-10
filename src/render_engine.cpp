@@ -1366,19 +1366,6 @@ bool RenderEngine::dumpFrame(const RenderFrameParams& p, const wchar_t* path) {
     return dumpBackbufferPng(path);
 }
 
-// Crash safety net: if we go down while the cursor is hidden, force it visible again so the
-// user is never left without a pointer. The magnification runtime is process-scoped (so exit
-// usually restores it), but a hard crash mid-hide is exactly when this matters.
-static LONG WINAPI CursorRestoreFilter(EXCEPTION_POINTERS* ep) {
-    static LONG s_inHandler = 0;
-    if (InterlockedExchange(&s_inHandler, 1)) return EXCEPTION_CONTINUE_SEARCH;
-    MagShowSystemCursor(TRUE);
-    ClipCursor(nullptr);                 // never leave the cursor clipped if we crash while Inspect-locked
-    SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, SPIF_SENDCHANGE);
-    wind::WriteCrashReport(ep);          // minidump + text summary into the log dir
-    return EXCEPTION_CONTINUE_SEARCH;   // let the default handler still report the crash
-}
-
 bool RenderEngine::waitVBlank() {
     if (!s_ || !s_->waitOutput) return false;
     return SUCCEEDED(s_->waitOutput->WaitForVBlank());
@@ -1393,7 +1380,7 @@ void RenderEngine::hideSystemCursor(bool hide) {
     if (hide) {
         if (!s_->magInited) {
             s_->magInited = wind::MagApiAcquire();
-            SetUnhandledExceptionFilter(CursorRestoreFilter);   // installed once, before first hide
+            SetUnhandledExceptionFilter(wind::CursorCrashFilter);   // installed once, before first hide
         }
         if (s_->magInited && MagShowSystemCursor(FALSE) == FALSE)
             wind::Log(wind::LogLevel::Warn, "render", "MagShowSystemCursor(FALSE) failed");

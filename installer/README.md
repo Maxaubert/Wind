@@ -49,7 +49,8 @@ which makes `wind.nsi` define `LOCAL_SIGN`. Setup then runs `local-sign.ps1`:
   signs the executables, and has its private key deleted at once, so nothing can sign with that root
   again. Older Wind roots are retired on every install; the uninstaller removes them
   (`local-sign.ps1 -Remove`).
-- Setup installs the ordinary build first and signs the UIAccess build in `$PLUGINSDIR`, copying it
+- Setup installs the ordinary build first and signs the UIAccess build in the admin-only
+  `$INSTDIR\.stage` (removed afterwards; never the user-writable `$PLUGINSDIR`), copying it
   over only after its signature verifies. An unsigned UIAccess `Wind.exe` does not start at all, so
   any failure leaves the ordinary build.
 - A release signed with a real certificate has no `WindUA.exe` and skips this.

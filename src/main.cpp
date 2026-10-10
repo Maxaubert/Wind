@@ -2832,7 +2832,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 // leave the machine with a hidden/locked cursor - the next launch (and our own exit) heals it.
 static void RestoreInputState() {
     ClipCursor(nullptr);                                         // release any cursor confinement
-    if (MagInitialize()) { MagShowSystemCursor(TRUE); MagUninitialize(); }   // un-hide the OS cursor
+    if (wind::MagApiAcquire()) { MagShowSystemCursor(TRUE); wind::MagApiRelease(); }   // un-hide the OS cursor
     SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, SPIF_SENDCHANGE);      // reload system cursors
     for (int i = 0; i < 8 && ShowCursor(TRUE) < 0; ++i) {}       // bump our show-count back to visible
 }
@@ -2840,26 +2840,15 @@ static void RestoreInputState() {
 // Minimal restore for abnormal CRT exit (atexit / ExitProcess). Non-blocking: must not touch the
 // hook thread (its stop() waits, which could hang during teardown); the hook dies with the process
 // and only swallows side-buttons anyway. The damaging state (hidden/confined cursor) is undone here.
-static void AtExitRestore() { RestoreInputState(); }
+// Only while we own the single-instance mutex: a refused or lingering second process must not heal
+// global state under the live owner, and a normal exit restores BEFORE releasing the mutex (see
+// ReleaseInstance), so a successor's tint capture never sees a half-restored scheme.
+static std::atomic<bool> g_ownsInstance{false};
+static void AtExitRestore() { if (g_ownsInstance.load()) RestoreInputState(); }
 
-// Crash safety net installed BEFORE the magnifier model is constructed. RenderModel hides the OS
-// cursor via the process-scoped Magnification API (auto-reverts on process death), but the
-// SPI_SETCURSORS reload is kept as a general heal for any
-// stale cursor scheme a crashed predecessor left behind. Body mirrors render_engine.cpp's
-// CursorRestoreFilter (minimal, allocation-light, one-shot via InterlockedExchange, returns
-// EXCEPTION_CONTINUE_SEARCH so the default handler still reports the crash). RenderEngine::
-// hideSystemCursor installs its own filter on the render path's first cursor hide, which REPLACES
-// this one (SetUnhandledExceptionFilter keeps only the latest); that is safe because CursorRestoreFilter
-// does the identical restore + crash report, so nothing is lost by the replacement.
-static LONG WINAPI EarlyCursorRestoreFilter(EXCEPTION_POINTERS* ep) {
-    static LONG s_inHandler = 0;
-    if (InterlockedExchange(&s_inHandler, 1)) return EXCEPTION_CONTINUE_SEARCH;
-    MagShowSystemCursor(TRUE);           // no-op if the Magnification API was never initialized this run
-    ClipCursor(nullptr);                 // never leave the cursor clipped if we crash while Inspect-locked
-    SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, SPIF_SENDCHANGE);   // heals a blanked cursor scheme
-    wind::WriteCrashReport(ep);          // minidump + text summary into the log dir
-    return EXCEPTION_CONTINUE_SEARCH;   // let the default handler still report the crash
-}
+// Crash safety net installed BEFORE the magnifier model is constructed, so a crash under
+// model=transform (which never touches RenderEngine) still heals the cursor. RenderEngine installs
+// the same shared filter (wind::CursorCrashFilter, mag_host.cpp) on its first cursor hide.
 
 // Single-instance startup events route through the unified logger (category "startup").
 static void SiLog(const char* msg, unsigned long val) {
@@ -2894,25 +2883,42 @@ static void TerminateOtherWind() {
 // two cursor-warp loops = a system-wide input lock. (The previous kill-only version failed here:
 // TerminateProcess is blocked across the signed UIAccess build's integrity, and it had removed the
 // refuse-to-start backstop, so a second instance proceeded anyway and locked input.)
-static bool AcquireSingleInstance(HANDLE& mtx) {
+//
+// quitEvent is created here, as soon as the mutex is ours, so a successor that finds us busy can
+// always signal it (it used to exist only after the whole startup). A null mutex fails closed.
+static bool AcquireSingleInstance(HANDLE& mtx, HANDLE& quitEvent) {
     mtx = CreateMutexW(nullptr, FALSE, L"Local\\Wind_Magnifier_SingleInstance");
     SiLog("createmutex err", GetLastError());
-    if (!mtx) { SiLog("mutex null - proceeding unprotected", 0); return true; }   // rare; don't block
+    if (!mtx) { SiLog("mutex null - REFUSING TO START (cannot guard against a second instance)", 0); return false; }
+    // Quit-request channel for WindConfig.exe (onboarding close) and for a successor Wind. A window
+    // message can't be used: the deployed Wind.exe is UIAccess, and UIPI silently blocks PostMessage
+    // from the non-UIAccess WindConfig. A named event is a kernel object (not gated by UIPI) and
+    // both run as the same user in the same session. Auto-reset, initially unsignaled.
+    auto makeQuitEvent = [&] { quitEvent = CreateEventW(nullptr, FALSE, FALSE, L"Local\\Wind_QuitRequest"); };
     DWORD w = WaitForSingleObject(mtx, 0);   // WAIT_ABANDONED = prior owner died holding it -> ours now
-    if (w == WAIT_OBJECT_0 || w == WAIT_ABANDONED) { SiLog("acquired immediately w", w); return true; }
+    if (w == WAIT_OBJECT_0 || w == WAIT_ABANDONED) { makeQuitEvent(); SiLog("acquired immediately w", w); return true; }
     SiLog("busy - signaling quit, w", w);
     HANDLE ev = OpenEventW(EVENT_MODIFY_STATE, FALSE, L"Local\\Wind_QuitRequest");
     if (ev) { SetEvent(ev); CloseHandle(ev); SiLog("quit event set", 0); }
     else SiLog("quit event open err", GetLastError());
     w = WaitForSingleObject(mtx, 3000);                       // wait for it to release on clean exit
-    if (w == WAIT_OBJECT_0 || w == WAIT_ABANDONED) { SiLog("acquired after quit w", w); return true; }
+    if (w == WAIT_OBJECT_0 || w == WAIT_ABANDONED) { makeQuitEvent(); SiLog("acquired after quit w", w); return true; }
     SiLog("still busy after quit - terminating, w", w);
     TerminateOtherWind();                                     // fallback: kill the straggler
     w = WaitForSingleObject(mtx, 2000);
-    if (w == WAIT_OBJECT_0 || w == WAIT_ABANDONED) { SiLog("acquired after terminate w", w); return true; }
+    if (w == WAIT_OBJECT_0 || w == WAIT_ABANDONED) { makeQuitEvent(); SiLog("acquired after terminate w", w); return true; }
     SiLog("REFUSING TO START - another instance alive, w", w);
     CloseHandle(mtx); mtx = nullptr;
     return false;                                             // never stack a second hook/cursor loop
+}
+
+// Normal-exit hand-over: heal the input state while the mutex is still ours, then release it.
+static void ReleaseInstance(HANDLE mtx) {
+    if (!mtx) return;
+    RestoreInputState();
+    g_ownsInstance.store(false);
+    ReleaseMutex(mtx);
+    CloseHandle(mtx);
 }
 
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
@@ -2925,15 +2931,20 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     SiLog("=== launch ===", 0);
     LoadChurnyApps();   // issue #148: learned cursor-churning apps (transform -> render for them)
     DetectMpoDisabled();   // issue #148: MPO boot state decides whether the pan wall is needed
-    RestoreInputState();
+    // Heal only once we OWN the single-instance mutex (a refused start must not touch the live
+    // owner's state), and AFTER any hung predecessor was killed, so the scheme a tint capture sees
+    // is clean.
     HANDLE mtx = nullptr;
-    if (!AcquireSingleInstance(mtx)) { RestoreInputState(); return 0; }
+    HANDLE quitEvent = nullptr;
+    if (!AcquireSingleInstance(mtx, quitEvent)) return 0;
+    g_ownsInstance.store(true);
+    RestoreInputState();
     wind::LogClaimBase();   // a restart's per-PID fallback log moves onto wind-core.log (M6)
     atexit(AtExitRestore);
     // Installed before either magnifier model is constructed so a crash under model=transform (which
     // never touches RenderEngine, so RenderEngine's own filter is never installed) still heals a
-    // blanked system cursor. See EarlyCursorRestoreFilter for why the render path safely replaces this.
-    SetUnhandledExceptionFilter(EarlyCursorRestoreFilter);
+    // blanked system cursor. The render path installs the same filter again, which is harmless.
+    SetUnhandledExceptionFilter(wind::CursorCrashFilter);
 
     // Resolve magnifier.ini next to the exe (not the launch cwd).
     wchar_t exePath[MAX_PATH];
@@ -3073,7 +3084,15 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                                                       cfg.zorderBand, cfg.cursorBandAuto != 0);
         }
     }
-    if (!model->initialize(startupMon)) {
+    bool primaryOk = model->initialize(startupMon);
+    if (!primaryOk && model2 && model2->initialize(PrimaryMonitor())) {
+        // Hybrid whose render half cannot start (no D3D / Desktop Duplication): the transform half
+        // needs neither, so run as model=transform instead of exiting.
+        wind::Log(wind::LogLevel::Warn, "startup", "hybrid: render half failed to init; transform-only");
+        model = std::move(model2);
+        primaryOk = true;
+    }
+    if (!primaryOk) {
         MessageBoxW(nullptr, L"Could not start the renderer (Direct3D 11 / Desktop Duplication "
                              L"unavailable on this system).", L"Wind", MB_ICONERROR);
         g_input.stop();
@@ -3140,7 +3159,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         g_input.stop();
         g_track.stop();
         wind::TrayHost::Stop();
-        ReleaseMutex(mtx);
+        ReleaseInstance(mtx);
         return 0;
     }
 
@@ -3187,7 +3206,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         g_input.stop();
         g_track.stop();
         wind::TrayHost::Stop();
-        ReleaseMutex(mtx);
+        ReleaseInstance(mtx);
         return 0;
     }
 
@@ -3196,14 +3215,18 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // to the tray. Resolve by full path (exePath is our own dir) so it works regardless of the cwd.
     if (cfg.onboarded == 0) {
         std::wstring configExe = std::wstring(exePath) + L"\\WindConfig.exe";
-        wchar_t cmd[] = L"WindConfig.exe --onboard";
-        STARTUPINFOW si{}; si.cb = sizeof(si);
-        PROCESS_INFORMATION pi{};
-        if (CreateProcessW(configExe.c_str(), cmd, nullptr, nullptr, FALSE,
-                           0, nullptr, nullptr, &si, &pi)) {
-            CloseHandle(pi.hThread);
-            CloseHandle(pi.hProcess);
-        }
+        // ShellExecuteEx, never CreateProcess with our token: Wind.exe is UIAccess and a child made
+        // with CreateProcess inherits it. A shell launch gives WindConfig an ordinary token (the
+        // same way LaunchTray starts WindTray).
+        SHELLEXECUTEINFOW sei{};
+        sei.cbSize = sizeof(sei);
+        sei.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC;
+        sei.lpVerb = L"open";
+        sei.lpFile = configExe.c_str();
+        sei.lpParameters = L"--onboard";
+        sei.lpDirectory = exePath;
+        sei.nShow = SW_SHOWNORMAL;
+        if (ShellExecuteExW(&sei) && sei.hProcess) CloseHandle(sei.hProcess);
     }
 
     QueryPerformanceFrequency(&ts.freq);
@@ -3223,12 +3246,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     ts.configWatch = FindFirstChangeNotificationW(iniDir.c_str(), FALSE,
         FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_FILE_NAME);
 
-    // Quit-request channel for WindConfig.exe (onboarding close). A window message can't be used:
-    // the deployed Wind.exe is UIAccess, and UIPI silently blocks PostMessage from the non-UIAccess
-    // WindConfig. A named event is a kernel object (not gated by UIPI) and both run as the same user
-    // in the same session, so it works in dev and deployed. Auto-reset, initially unsignaled.
-    HANDLE quitEvent = CreateEventW(nullptr, FALSE, FALSE, L"Local\\Wind_QuitRequest");
-
+    // quitEvent: created in AcquireSingleInstance.
     HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr,
         CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
     // Test telemetry opt-in (issue #225). Two channels, either enables it:
@@ -3468,7 +3486,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         wind::WriteTextFileAtomic(wind::ResolveLogDir() + L"/learned_gain.txt", buf);  // Win32 accepts '/'
     }
     wind::TrayHost::Stop();
-    if (mtx) { ReleaseMutex(mtx); CloseHandle(mtx); }
+    ReleaseInstance(mtx);
     wind::LogShutdown();
     return 0;
 }

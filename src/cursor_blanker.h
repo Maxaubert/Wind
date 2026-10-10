@@ -3,6 +3,7 @@
 #include <condition_variable>
 #include <deque>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <unordered_map>
@@ -28,15 +29,21 @@ public:
     // Restore and wait for it (up to 2 s). For shutdown, which must not exit with blank cursors.
     void restoreSync();
 private:
+    // The queue is shared with the worker, so a worker wedged in a system call at exit can be
+    // detached without leaving it a dangling `this` (the same shape as FocusLookup).
+    struct State {
+        std::mutex mx;
+        std::condition_variable cv;       // wakes the worker
+        std::condition_variable exitCv;   // wakes the destructor when the worker has returned
+        std::deque<std::function<void()>> q;
+        bool stop = false, exited = false;
+    };
     void post(std::function<void()> op);
     bool runSync(std::function<void()> op);
-    void run();
+    static void run(std::shared_ptr<State> st);
     std::unordered_map<HCURSOR, HCURSOR> originals_;
     bool blanked_ = false;
-    std::mutex mx_;
-    std::condition_variable cv_;
-    std::deque<std::function<void()>> q_;
-    bool stop_ = false;
+    std::shared_ptr<State> st_;
     std::thread worker_;
 };
 }

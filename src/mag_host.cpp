@@ -40,6 +40,16 @@ void MagApiRelease() {
 
 bool MagApiAlive() { return g_magRefs > 0; }
 
+LONG WINAPI CursorCrashFilter(EXCEPTION_POINTERS* ep) {
+    static LONG s_inHandler = 0;
+    if (InterlockedExchange(&s_inHandler, 1)) return EXCEPTION_CONTINUE_SEARCH;
+    wind::WriteCrashReport(ep);          // minidump + text summary into the log dir
+    MagShowSystemCursor(TRUE);           // no-op if the Magnification API was never initialized this run
+    ClipCursor(nullptr);                 // never leave the cursor clipped if we crash while Inspect-locked
+    SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, 0);   // heals a blanked cursor scheme, no broadcast
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
 bool MagHost::initialize() {
     initialized_ = MagApiAcquire();
     privateBroken_ = false;   // re-probe the private channel on every (re-)init, not once ever
