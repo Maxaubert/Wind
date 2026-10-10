@@ -83,3 +83,24 @@ TEST_CASE("the ease-out runs while it moves faster than the clean-level spacing,
     CHECK(EaseOutShouldStop(25.0, 25.0 / 1.004) == true);  // 0.4 % at 25x (window 1.2 %)
     CHECK(EaseOutShouldStop(1.0, 1.0) == false);
 }
+
+TEST_CASE("ramp direction comes from the requests, so a snap ahead never steps back (#429)") {
+    // The ladder showed 16.81 while the request was 16.70 on its way up: still zooming in.
+    CHECK(LadderDir(16.70, 16.66, 16.81) == 1);
+    CHECK(LadderHoldsLevel(1, 16.70, 16.81));          // hold 16.81 until the request passes it
+    CHECK_FALSE(LadderHoldsLevel(1, 16.90, 16.81));
+    CHECK(LadderDir(16.70, 16.75, 16.60) == -1);       // zooming out
+    CHECK(LadderHoldsLevel(-1, 16.70, 16.60));
+    CHECK(LadderDir(5.0, 1.0, 1.0) == 1);              // first tick of a session: judged on screen
+    CHECK_FALSE(LadderHoldsLevel(1, 1.5, 1.0));        // nothing on screen yet
+}
+
+TEST_CASE("smooth high-zoom steps: small changes wait above the threshold, a stopped request lands (#429)") {
+    CHECK(RampStepHeld(30.3, 30.0, 0.02, 12.0, false));          // 1 %: wait
+    CHECK_FALSE(RampStepHeld(30.7, 30.0, 0.02, 12.0, false));    // 2.3 %: step
+    CHECK(RampStepHeld(29.7, 30.0, 0.02, 12.0, false));          // zooming out too
+    CHECK_FALSE(RampStepHeld(10.1, 10.0, 0.02, 12.0, false));    // below 12x: every tick
+    CHECK_FALSE(RampStepHeld(50.0, 49.55, 0.02, 12.0, true));    // the zoom stopped: reach 50
+    CHECK_FALSE(RampStepHeld(30.3, 30.0, 0.0, 12.0, false));     // off
+    CHECK_FALSE(RampStepHeld(30.0, 30.0, 0.02, 12.0, false));
+}

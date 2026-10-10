@@ -305,6 +305,13 @@ struct Config {
     // levels where DWM's per-frame scratch rounding predicts under 1 px of movement (the zoom shake:
     // 11 px p95 -> 0.7 px measured at 10-25x). 0 = off (hot).
     int txSmoothLadder = 1;
+    // Smooth high-zoom steps (issue #429, RampStepHeld in src/zoom_ladder.h): with smooth sampling
+    // and DWM centring, above txRampMinFrom the level only changes in steps of at least
+    // txRampMinStep per mille. Every level write can show one frame off DWM's centre by up to a
+    // source pixel times the zoom (10-25 px at 25-50x); measured per slow 1x-50x zoom: 10-16 such
+    // frames at 0, 1-2 at 10-15, none at 20 or 30 (5 runs each). 0 = off (hot).
+    int txRampMinStep = 20;
+    double txRampMinFrom = 12.0;
     int mpoGuardTest = 0;   // diagnostic: apply the MPO guard effect even on an MPO-off boot (hot)
     int mpoGuard = 1;       // diagnostic: 0 = never apply the guard effect (A/B on an MPO boot; hot)
     int mpoGuardLiftWall = 1;   // no pan walls / write clamp / ghost while the session is plane-free (hot)
