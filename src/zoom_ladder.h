@@ -130,12 +130,13 @@ inline bool LadderHoldsLevel(int dir, double request, double onScreen) {
     return (dir > 0 && request <= onScreen) || (dir < 0 && request >= onScreen);
 }
 
-// SMOOTH HIGH-ZOOM STEPS (#429, measured 2026-10-10). While DWM centres, every level write can show
-// one frame on Wind's centre instead of DWM's: off by up to a source pixel times the zoom, 10-25 px
-// at 25-50x. Fewer writes, fewer such frames: per slow 1x-50x zoom 10-16 of them at every tick,
-// 1-2 with 1-1.5 % steps, none with 2 % or 3 % (5 runs each). So above `fromLevel` the level only
-// moves once the request is at least `minRel` away from the level on screen; a fast zoom moves more
-// than that per tick anyway. A request that has stopped always lands (the zoom reaches its target).
+// SMOOTH HIGH-ZOOM STEPS (#429, measured 2026-10-10, OFF by default). About 1 % of level changes
+// show one frame half a source pixel off (0.44-0.50 x the zoom: 10 px at 20x, 20 px at 40x), inside
+// DWM's smooth path: with or without the nudge, and the ladder predicts 0 px for those levels. Fewer
+// changes, fewer such frames: per slow 1x-50x zoom 3-5 at every tick, 1-2 with 1-1.5 % steps, none
+// with 2 %; but 2 % steps made the top of a slow zoom visibly coarse, so the default is every tick.
+// When on, above `fromLevel` the level only moves once the request is at least `minRel` away from
+// the level on screen. A request that has stopped always lands (the zoom reaches its target).
 inline bool RampStepHeld(double request, double onScreen, double minRel, double fromLevel, bool stopped) {
     if (stopped || minRel <= 0.0 || onScreen <= fromLevel || request == onScreen) return false;
     return std::fabs(request - onScreen) < onScreen * minRel;

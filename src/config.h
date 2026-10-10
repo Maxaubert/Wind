@@ -307,10 +307,11 @@ struct Config {
     int txSmoothLadder = 1;
     // Smooth high-zoom steps (issue #429, RampStepHeld in src/zoom_ladder.h): with smooth sampling
     // and DWM centring, above txRampMinFrom the level only changes in steps of at least
-    // txRampMinStep per mille. Every level write can show one frame off DWM's centre by up to a
-    // source pixel times the zoom (10-25 px at 25-50x); measured per slow 1x-50x zoom: 10-16 such
-    // frames at 0, 1-2 at 10-15, none at 20 or 30 (5 runs each). 0 = off (hot).
-    int txRampMinStep = 20;
+    // txRampMinStep per mille. About 1 % of level changes show one frame half a source pixel off
+    // (inside DWM, with or without the nudge), so fewer changes mean fewer jumps: per slow 1x-50x
+    // zoom about 3-5 at 0, 1-2 at 10-15, none at 20. Field 2026-10-10: 20 made the top of a slow
+    // zoom move in visibly coarse steps, rejected; fine steps win. 0 = off (DEFAULT, hot).
+    int txRampMinStep = 0;
     double txRampMinFrom = 12.0;
     int mpoGuardTest = 0;   // diagnostic: apply the MPO guard effect even on an MPO-off boot (hot)
     int mpoGuard = 1;       // diagnostic: 0 = never apply the guard effect (A/B on an MPO boot; hot)
