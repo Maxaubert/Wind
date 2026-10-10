@@ -12,6 +12,12 @@ namespace wind {
 bool MagApiAcquire();
 void MagApiRelease();
 bool MagApiAlive();
+// Crash safety net shared by main.cpp (installed at startup) and RenderEngine (on its first cursor
+// hide): if we go down while the cursor is hidden or confined, make it visible and free again.
+// Writes the crash report FIRST (the restore can otherwise delay the dump), restores without the
+// SPI broadcast (SENDCHANGE would run other windows' handlers, our own tint capture included,
+// inside a faulted process), and returns EXCEPTION_CONTINUE_SEARCH so the default handler still runs.
+LONG WINAPI CursorCrashFilter(EXCEPTION_POINTERS* ep);
 class MagHost {
 public:
     bool initialize();

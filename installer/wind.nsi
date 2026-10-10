@@ -97,7 +97,7 @@ Section "Wind" SEC_WIND
   ; LocalMachine certificate stores are the machine's either way, but the PKI cmdlets are only
   ; guaranteed in the native one.
   ;
-  ; The standard build goes in FIRST, and the uiAccess build is signed in $PLUGINSDIR and only
+  ; The standard build goes in FIRST, and the uiAccess build is signed in $INSTDIR\.stage and only
   ; copied over it once its signature verifies. An unsigned uiAccess build does not start at
   ; all ("A referral was returned from the server"), so setup must never leave one in place:
   ; killed mid-signing, it did exactly that (reproduced 2026-09-28). This way an interruption
@@ -105,16 +105,19 @@ Section "Wind" SEC_WIND
   File "..\Wind.exe"
   File "..\WindConfig.exe"
   File "..\WindTray.exe"
-  InitPluginsDir
-  CreateDirectory "$PLUGINSDIR\ua"
-  File "/oname=$PLUGINSDIR\ua\Wind.exe" "..\WindUA.exe"
-  File "/oname=$PLUGINSDIR\local-sign.ps1" "local-sign.ps1"
+  ; Staged under $INSTDIR, not in $PLUGINSDIR: that is the user's %TEMP%, writable by a
+  ; non-elevated process, and this step runs a script and signs a binary as admin. Program
+  ; Files is admin-only, so nothing unprivileged can swap either between copy and use.
+  RMDir /r "$INSTDIR\.stage"
+  CreateDirectory "$INSTDIR\.stage\ua"
+  File "/oname=$INSTDIR\.stage\ua\Wind.exe" "..\WindUA.exe"
+  File "/oname=$INSTDIR\.stage\local-sign.ps1" "local-sign.ps1"
   DetailPrint "Signing Wind on this PC..."
-  nsExec::ExecToLog '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\local-sign.ps1" -Stage "$PLUGINSDIR\ua\Wind.exe" -Dir "$INSTDIR"'
+  nsExec::ExecToLog '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\.stage\local-sign.ps1" -Stage "$INSTDIR\.stage\ua\Wind.exe" -Dir "$INSTDIR"'
   Pop $0
   ${If} $0 == 0
     ClearErrors
-    CopyFiles /SILENT "$PLUGINSDIR\ua\Wind.exe" "$INSTDIR\Wind.exe"
+    CopyFiles /SILENT "$INSTDIR\.stage\ua\Wind.exe" "$INSTDIR\Wind.exe"
     ${If} ${Errors}
       DetailPrint "Could not place the signed build; keeping the standard one."
       File "..\Wind.exe"
@@ -124,6 +127,7 @@ Section "Wind" SEC_WIND
     ; menus and the Snipping Tool is lost.
     DetailPrint "Local signing failed ($0); keeping the standard build."
   ${EndIf}
+  RMDir /r "$INSTDIR\.stage"
 !else
   File "..\Wind.exe"
   File "..\WindConfig.exe"
@@ -181,10 +185,11 @@ Section "Uninstall"
 
   ; Retire the trust setup added for the local signature. Always, not only when this build
   ; signed: an older install may have, and a root left behind for an uninstalled app is litter.
-  InitPluginsDir
-  File "/oname=$PLUGINSDIR\local-sign.ps1" "local-sign.ps1"
-  nsExec::ExecToLog '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\local-sign.ps1" -Remove'
+  CreateDirectory "$INSTDIR\.stage"
+  File "/oname=$INSTDIR\.stage\local-sign.ps1" "local-sign.ps1"
+  nsExec::ExecToLog '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\.stage\local-sign.ps1" -Remove'
   Pop $0
+  RMDir /r "$INSTDIR\.stage"
 
   Delete "$INSTDIR\Wind.exe"
   Delete "$INSTDIR\WindConfig.exe"
