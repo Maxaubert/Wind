@@ -195,3 +195,14 @@ TEST_CASE("selection rect: the last line's rectangle is used so Shift+arrow grow
     CHECK(wind::LastRectOffset(12) == 8);
     CHECK(wind::LastRectOffset(10) == 4);    // a ragged array still lands on a whole rectangle
 }
+
+TEST_CASE("caret rect: xterm.js input textarea is recognised by its class (Prism, field 2026-10-12)") {
+    CHECK(IsXtermInput(L"xterm-helper-textarea"));
+    CHECK(IsXtermInput(L"foo xterm-helper-textarea bar"));
+    CHECK(IsXtermInput(L"  xterm-helper-textarea"));
+    CHECK_FALSE(IsXtermInput(L"xterm-helper-textarea-x"));
+    CHECK_FALSE(IsXtermInput(L"my-xterm-helper-textarea"));
+    CHECK_FALSE(IsXtermInput(L"native-edit-context"));
+    CHECK_FALSE(IsXtermInput(L""));
+    CHECK_FALSE(IsXtermInput(nullptr));
+}

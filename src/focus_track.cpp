@@ -420,28 +420,33 @@ void FocusTracker::run() {
     // reuses the last MSAA answer for 100 ms, a caret event always asks fresh.
     struct EditContextCache {
         unsigned gen = ~0u; HWND fg = nullptr; bool is = false;
+        bool xterm = false;   // an xterm.js input textarea (caret_rect.h IsXtermInput)
         bool have = false; RECT msaa{}; ULONGLONG at = 0;
     } edc;
+    // The focused element's class, asked once per focus. Keyed on the window too: a resolve can run
+    // before the next app's focus event arrives, and a stale "is VS Code" must never send MSAA
+    // queries into another app (field: Notepad tracking went silent for 2.5 s right after leaving
+    // VS Code).
+    auto focusClass = [&](IUIAutomationElement* el) {
+        const HWND fgNow = GetForegroundWindow();
+        if (edc.gen == focusGen && edc.fg == fgNow) return;
+        edc = EditContextCache{}; edc.gen = focusGen; edc.fg = fgNow;
+        BSTR cls = nullptr;
+        const ULONGLONG c0 = GetTickCount64();
+        const HRESULT hr = el->get_CurrentClassName(&cls);
+        if (GetTickCount64() - c0 > 100)
+            wind::Log(wind::LogLevel::Info, "track", "slow class name %llums", GetTickCount64() - c0);
+        if (SUCCEEDED(hr) && cls) {
+            edc.is = wcscmp(cls, L"native-edit-context") == 0;
+            edc.xterm = wind::IsXtermInput(cls);
+            SysFreeString(cls);
+        }
+    };
     // False only when this IS an EditContext element and MSAA gave no caret: the UIA rect is then
     // the start of the line, which is wrong, so the caller reports not-found instead of it.
     auto editContextCaret = [&](IUIAutomationElement* el, RECT& rc, const char*& src, bool fromPoll) -> bool {
         if (!el) return true;
-        // Keyed on the window too: a resolve can run before the next app's focus event arrives,
-        // and a stale "is VS Code" must never send MSAA queries into another app (field: Notepad
-        // tracking went silent for 2.5 s right after leaving VS Code).
-        const HWND fgNow = GetForegroundWindow();
-        if (edc.gen != focusGen || edc.fg != fgNow) {
-            edc = EditContextCache{}; edc.gen = focusGen; edc.fg = fgNow;
-            BSTR cls = nullptr;
-            const ULONGLONG c0 = GetTickCount64();
-            const HRESULT hr = el->get_CurrentClassName(&cls);
-            if (GetTickCount64() - c0 > 100)
-                wind::Log(wind::LogLevel::Info, "track", "slow class name %llums", GetTickCount64() - c0);
-            if (SUCCEEDED(hr) && cls) {
-                edc.is = wcscmp(cls, L"native-edit-context") == 0;
-                SysFreeString(cls);
-            }
-        }
+        focusClass(el);
         if (!edc.is) return true;
         const ULONGLONG now = GetTickCount64();
         if (!(fromPoll && edc.have && now - edc.at < 100)) {
@@ -458,7 +463,15 @@ void FocusTracker::run() {
         src = "msaa-editcontext";
         return true;
     };
-    auto findCaret = [&](IUIAutomationElement* el, RECT& rc, const char*& src, bool fromPoll) -> bool {
+    // elB: the focused element's bounds (empty = unknown).
+    auto findCaret = [&](IUIAutomationElement* el, const RECT& elB, RECT& rc, const char*& src, bool fromPoll) -> bool {
+        // An xterm.js terminal (Prism, VS Code's terminal...): its input textarea is the cursor cell,
+        // moved on every cursor move, while Chromium's text range rect for it goes stale for seconds
+        // (field 2026-10-12, Prism: 60 moves of the textarea, 6 changes of its selection rect).
+        if (el) {
+            focusClass(el);
+            if (edc.xterm && elB.right > elB.left && elB.bottom > elB.top) { rc = elB; src = "xterm-input"; return true; }
+        }
         if (Win32Caret(rc)) { src = "win32"; return true; }
         if (!el) return false;
         bool ok = false;
@@ -581,7 +594,7 @@ void FocusTracker::run() {
         if (wantCaret_.load()) {
             RECT rc{}; const char* src = "";
             const ULONGLONG fc0 = GetTickCount64();
-            const bool found = java ? (javaHave ? (rc = javaCaret, src = "java", true) : false) : findCaret(el, rc, src, fromPoll);
+            const bool found = java ? (javaHave ? (rc = javaCaret, src = "java", true) : false) : findCaret(el, b, rc, src, fromPoll);
             const ULONGLONG fc1 = GetTickCount64();
             if (fc1 - rs0 > 200)
                 wind::Log(wind::LogLevel::Info, "track", "slow resolve %llums (focused element %llums, caret %llums, src %s, poll=%d)",
@@ -595,7 +608,8 @@ void FocusTracker::run() {
                     GUITHREADINFO gi{}; gi.cbSize = sizeof(gi);
                     GetGUIThreadInfo(GetWindowThreadProcessId(fg, nullptr), &gi);
                     key.fg = fg; key.focus = gi.hwndFocus;
-                    key.l = b.left; key.t = b.top; key.r = b.right; key.b = b.bottom;
+                    // An xterm.js input moves with its cursor: its bounds are the caret, not an identity.
+                    if (!(el && edc.xterm)) { key.l = b.left; key.t = b.top; key.r = b.right; key.b = b.bottom; }
                     key.valid = fg != nullptr;
                 }
                 if (caretGen != focusGen && wind::SameFocus(key, baseKey)) {

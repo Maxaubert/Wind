@@ -16,7 +16,8 @@ machine (3840x2160, 225%, signed UIAccess build, `trackLog=1`).
 | Notepad, classic Win32 dialogs | `win32` (GetGUIThreadInfo) | `uia-focus` |
 | Chrome / Edge, VS Code, Electron | `uia-caret` (TextPattern2::GetCaretRange), corrected (below) | `uia-focus` |
 | Firefox and forks (Gecko) | `uia-caret` / `win32`, skipped when outside its element (below) | `uia-focus` |
-| Windows Terminal / Prism | `uia-selection` (TextPattern::GetSelection) | `uia-focus` |
+| Windows Terminal | `uia-selection` (TextPattern::GetSelection) | `uia-focus` |
+| xterm.js terminals (Prism, VS Code's terminal) | `xterm-input` (the input textarea's bounds, below) | `uia-focus` |
 | IntelliJ, PyCharm, other Java (Swing/AWT) apps | `java` (Java Access Bridge, issue #281) | (none) |
 
 Known limit: terminal TUI option pickers do not expose the highlighted option through UIA, so Wind
@@ -84,6 +85,16 @@ follows only the terminal caret there.
 - Enter on the last visible line reports the new line part-way through the page scroll. A caret
   that moves back left by 0.2–0.8 of a line is held on the current line while the same raw report
   repeats (`HoldMidScrollCaret`).
+
+## xterm.js terminals: a stale selection rect (field 2026-10-12)
+
+- In Prism (Claude Code), the view followed the caret only every 30-40 characters; switching tabs
+  made it follow again for a while. The focused element is xterm's `xterm-helper-textarea`, which
+  xterm moves onto the cursor cell on every cursor move, but Chromium's selection rect for it goes
+  stale for seconds (one typed line: ~60 textarea moves, 6 selection-rect changes).
+- For that class (`IsXtermInput`, `src/caret_rect.h`) the textarea's own bounds are the caret
+  (`xterm-input` in trackLog), and its bounds are left out of the focus identity, since they move
+  with every key.
 
 ## VS Code and Electron: the caret as the whole line (issue #341)
 
