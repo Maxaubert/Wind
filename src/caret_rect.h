@@ -66,6 +66,27 @@ inline bool IsLineWideCaret(int left, int top, int right, int bottom) {
     return h > 0 && w > h * kWideCaretRatio;
 }
 
+// xterm.js terminals (Prism, VS Code's terminal, field 2026-10-12): the focused element is the
+// "xterm-helper-textarea", which xterm moves onto the cursor cell on every cursor move. Its own
+// bounds are the caret; Chromium's text range rect for it goes stale for seconds. cls is the UIA
+// class name, a space-separated class list.
+inline bool IsXtermInput(const wchar_t* cls) {
+    static const wchar_t kTok[] = L"xterm-helper-textarea";
+    const int n = (int)(sizeof(kTok) / sizeof(kTok[0])) - 1;
+    for (const wchar_t* p = cls; p && *p;) {
+        while (*p == L' ') ++p;
+        const wchar_t* e = p;
+        while (*e && *e != L' ') ++e;
+        if (e - p == n) {
+            int i = 0;
+            while (i < n && p[i] == kTok[i]) ++i;
+            if (i == n) return true;
+        }
+        p = e;
+    }
+    return false;
+}
+
 // Mid-scroll Enter (#337, field 2026-10-03): Enter on the last visible line reports the new line part-way
 // through the page's scroll (line 1965-2009, then the new line at 1989-2033: half a line lower), and the
 // page settles it exactly where the old line was without reporting the caret again until the next key.
