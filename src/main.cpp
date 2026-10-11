@@ -46,8 +46,8 @@
 #include "cursor_decode.h"   // edge mode measures the cursor body
 #include "focus_track.h"     // tracking: caret/focus watcher thread
 #include "tray_host.h"     // WindTray.exe owns the icon and menu (#291)
-#include "pan_glide.h"
-#include "game_cursor.h"     // momentum after a flick (#430)
+#include "pan_glide.h"       // momentum after a flick (#430)
+#include "game_cursor.h"     // the view follows a game-drawn cursor late (#443)
 #include "gain_learner.h"  // learned pointer ballistics: locked pan at TRUE desktop speed
 #include "tray_ipc.h"      // the status block shared with WindTray.exe
 #include "pointer_binds.h"  // kWindInjectTag: tag our own injected clicks (#285)
@@ -1446,6 +1446,7 @@ static void RunTick(TickState& t) {
             // detached view survived the 1x gap and the next zoom-in opened on the previous
             // session's caret. Every session starts with the mouse in charge.
             wind::ResetViewOwnerForSession(t.viewOwner);
+            t.ptrHist.clear();   // no samples from the previous session in the first lagged read (#443)
             t.postInspectHold = false;   // a new session starts with DWM centring (#445)
             t.viewDetached = false;
             t.viewVx = 0; t.viewVy = 0;
@@ -1912,7 +1913,8 @@ static void RunTick(TickState& t) {
             CURSORINFO ci{}; ci.cbSize = sizeof(ci);
             const bool showing = !GetCursorInfo(&ci) || (ci.flags & CURSOR_SHOWING) != 0;
             const bool byWind = t.cursorHidden || t.cursorHiddenByUs || t.cfg.cursorVisibility == "never";
-            gameCursor = wind::GameDrawsCursor(freeCursor, fsCover, showing, byWind);
+            gameCursor = wind::GameCursorStep(t.gameCursor, wind::GameDrawsCursor(freeCursor, fsCover, showing, byWind),
+                                              curDx != 0 || curDy != 0);
         }
         if (gameCursor != t.gameCursor) {
             wind::Log(wind::LogLevel::Info, "lock", "game-drawn cursor %s (lag %.1f ms) lvl=%.2f",
@@ -2343,7 +2345,9 @@ static void RunTick(TickState& t) {
             dc.wallNeeded = wind::NearWall(wallNeeded, r.srcLeft, r.srcTop, lvl, kMaxSafeTxMagnitude, 64.0);
             dc.quiesce = quiesceHold;
             ex.dwmCentre = wind::WantDwmCentring(dc);
-            ex.warmAllowed = !freeCursor;
+            // Warm pulses wherever Wind, not DWM centring, writes the view: a game-drawn cursor and
+            // the hold after Inspect write it from a free pointer too (review of #444/#446).
+            ex.warmAllowed = !dc.freeCursor;
         }
         // Our tray menu is open (in WindTray.exe, flagged through the shared block): the pointer
         // belongs to the USER (they are aiming at menu items),
