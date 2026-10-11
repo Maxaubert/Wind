@@ -111,3 +111,29 @@ TEST_CASE("a press held past the click window is a drag and may be nudged") {
     CHECK(NudgeBlockedByClick(true, 1000, 0) == true);        // released, inside the window after it
     CHECK(NudgeBlockedByClick(true, 1000, 1003) == true);     // stamp newer than the clock read
 }
+
+TEST_CASE("Inspect keeps DWM's view until the look point moves (#445)") {
+    CHECK(InspectKeepsDwmView(true, false));
+    CHECK_FALSE(InspectKeepsDwmView(true, true));
+    CHECK_FALSE(InspectKeepsDwmView(false, false));
+    DwmCentreIn in; in.zoomed = true; in.freeCursor = InspectKeepsDwmView(true, false);
+    CHECK(WantDwmCentring(in));
+    in.freeCursor = InspectKeepsDwmView(true, true);
+    CHECK_FALSE(WantDwmCentring(in));
+}
+
+TEST_CASE("leaving Inspect warps only when the look point moved or the render engine draws (#445)") {
+    CHECK_FALSE(InspectExitWarps(false, true));
+    CHECK(InspectExitWarps(true, true));
+    CHECK(InspectExitWarps(false, false));
+    CHECK(InspectExitWarps(true, false));
+}
+
+TEST_CASE("after Inspect, Wind keeps its centre until the hand moves, only if the look point moved (#445)") {
+    CHECK(HoldWindViewAfterInspect(true, true));
+    CHECK_FALSE(HoldWindViewAfterInspect(false, true));   // DWM kept the view: nothing to hand back
+    CHECK_FALSE(HoldWindViewAfterInspect(true, false));   // render engine: no DWM centring
+    CHECK(PostInspectHoldKeeps(true, false));
+    CHECK_FALSE(PostInspectHoldKeeps(true, true));
+    CHECK_FALSE(PostInspectHoldKeeps(false, false));
+}
