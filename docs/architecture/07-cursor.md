@@ -141,6 +141,10 @@ slightly during zoom ramps, nearest keeps it pixelated and steady. Pure rules:
   per-tick `PointerHistory`: rms 15-23 px at 1000 px/s, 6 px at 400 (29 before). Wind's own write
   without the delay measured the same as DWM centring, so the gain is the delay. The rest is the
   game's frame timing. A mouselook game that recentres the pointer is locked and unaffected.
+  It switches on only while the hidden pointer moves (`GameCursorStep`): a video player hiding an
+  idle pointer, or typing, would otherwise hand the view to Wind and move it by DWM's pixel (#445).
+  Warm pulses follow who writes the view (`!dc.freeCursor`), so they run here and in the hold after
+  Inspect.
 - **Pan glide (#430, `panGlideMaxPx`, 0 = off).** A soft stop: when a mouse movement
   stops, the POINTER eases on at the hand's speed and slows to rest within `panGlideMaxPx` SCREEN px
   at any zoom (`src/pan_glide.h`). One setting since #434: the ease's time constant follows the

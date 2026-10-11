@@ -17,6 +17,15 @@ inline bool GameDrawsCursor(bool freeCursor, bool fsCover, bool pointerShowing, 
     return freeCursor && fsCover && !pointerShowing && !hiddenByWind;
 }
 
+// On only while the hidden pointer MOVES (review of #444): a fullscreen video player hiding an idle
+// pointer, or Windows hiding it while typing, also clears CURSOR_SHOWING over a covering window, and
+// the hand-over to Wind's own write moves the view by DWM's pixel (#445). A pointer that is hidden and
+// still never switches; a game menu hides it while the hand moves it, which also hides the hand-over.
+// Off as soon as the pointer shows or the window stops qualifying.
+inline bool GameCursorStep(bool wasOn, bool drawsCursor, bool handMoved) {
+    return drawsCursor && (wasOn || handMoved);
+}
+
 // The delay in ms: cfg < 0 means one display frame at hz, 0 turns the delay off (DWM centring as for
 // any other window), anything else is used as given (capped at 100 ms).
 inline double GameCursorLagMs(int cfgMs, double hz) {

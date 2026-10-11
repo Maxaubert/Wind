@@ -43,3 +43,11 @@ TEST_CASE("the pointer history wraps and keeps the newest samples") {
     CHECK(h.at(newest - 7.0 * 1.5, x, y)); CHECK(x == doctest::Approx(PointerHistory::kN + 9 - 1.5));
     CHECK(h.at(0.0, x, y)); CHECK(x == doctest::Approx(10));   // the oldest kept sample
 }
+
+TEST_CASE("game cursor turns on only while the hidden pointer moves, off when it shows") {
+    CHECK_FALSE(GameCursorStep(false, true, false));   // hidden and still: video player, typing
+    CHECK(GameCursorStep(false, true, true));          // hidden and moving: a game menu
+    CHECK(GameCursorStep(true, true, false));          // stays on when the hand pauses
+    CHECK_FALSE(GameCursorStep(true, false, false));   // pointer shown again
+    CHECK_FALSE(GameCursorStep(true, false, true));
+}
