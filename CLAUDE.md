@@ -18,7 +18,7 @@ Plans and brainstorm output are not committed.
 ## Stack and map
 - Three binaries: `Wind.exe` (core, UIAccess when installed), `WindConfig.exe` (WebView2 settings),
   `WindTray.exe` (tray flyout, never UIAccess). Settings travel only through `magnifier.ini`. See 01.
-- Engines behind `IMagnifierModel`, chosen by `model=` (restart to switch): `hybrid` (Auto, default)
+- Engines behind `IMagnifierModel`, chosen by `model=` (applies live: both engines are always built): `hybrid` (Auto, default)
   picks `render` or `transform` per session via the pure `src/engine_pick.h`. `model=magnify` is
   parsed as `hybrid`; the magnify engine is retired, do not revive it. See 03, 04, 05.
 - Profiles: `profiles\<Name>.ini` next to the live ini; the live ini is the session, the profile file

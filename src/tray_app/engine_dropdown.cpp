@@ -1,8 +1,9 @@
 // The tray flyout's main-engine dropdown, the Win32 half (WindTray.exe, issue #315). The options,
 // labels and the "does this pick change anything" rule are pure and unit-tested (flyout_tools.h).
 //
-// `model` is read once at Wind's launch, so a pick writes it and restarts the Wind core, with no
-// prompt. It is a SESSION change exactly like the Settings "Engine" row followed by its
+// A pick writes `model`. A Wind with both engines up (running.model "live") applies it on the config
+// reload, nothing else happens. One with a single engine left reads `model` once at launch, so then
+// the pick also restarts the Wind core, with no prompt. It is a SESSION change exactly like the Settings "Engine" row followed by its
 // Restart Wind button: only the live ini is written (the active profile is not touched, so the
 // Settings Save capsule shows it as unsaved), and session.keep is dropped first so the restarted
 // Wind keeps that unsaved session instead of resetting the live ini to the profile
@@ -54,6 +55,11 @@ bool SetMainEngine(const std::wstring& ini, int picked, const std::map<std::stri
             Notify(L"Wind", L"Could not change the engine (config file is locked).");
             return false;
         }
+    }
+    if (wind::EngineSwitchesLive()) {
+        wind::Log(wind::LogLevel::Info, "tray", "engine pick: model %s -> %s (applies live)",
+                  oldModel.empty() ? "(unset)" : oldModel.c_str(), value);
+        return true;
     }
     wind::Log(wind::LogLevel::Info, "tray", "engine pick: model %s -> %s (restarting Wind)",
               oldModel.empty() ? "(unset)" : oldModel.c_str(), value);

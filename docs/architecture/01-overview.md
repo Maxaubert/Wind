@@ -43,8 +43,8 @@ flowchart LR
 | `WindConfig.exe` | On-demand settings: a C++ WebView2 host around the Svelte app in `ui/` | [09](09-settings-ui.md) |
 | `WindTray.exe` | Tray icon and flyout, a separate non-UIAccess process | below |
 
-**Settings travel only through `magnifier.ini`.** Engine-shaped keys (`model`) need a restart; the
-rest hot-reload. See [08](08-config-profiles.md).
+**Settings travel only through `magnifier.ini`.** Everything hot-reloads, the engine
+(`model`) included. See [08](08-config-profiles.md).
 
 **The tray is a separate process because Wind.exe is UIAccess.** Windows stacks a UIAccess
 process's popups above almost everything, including the magnified cursor and the Snipping Tool

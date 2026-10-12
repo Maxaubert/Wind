@@ -197,3 +197,23 @@ TEST_CASE("a lost render device sends every pick to the transform engine (review
     in.pref = wind::EnginePref::Render;  // even an explicit render pin cannot be honoured
     CHECK(ShouldPickTransform(in));
 }
+
+TEST_CASE("the engine setting applies live: a pinned engine wins, Auto keeps its rule") {
+    EnginePickInputs desktop;                          // the plain desktop: Auto picks render
+    desktop.primaryMonitor = true;
+    CHECK_FALSE(PickTransformFor("hybrid", desktop, false));
+    CHECK(PickTransformFor("transform", desktop, false));
+    CHECK_FALSE(PickTransformFor("render", desktop, false));
+
+    EnginePickInputs game = desktop;                   // a borderless covering game: Auto picks transform
+    game.coversMonitor = true; game.borderless = true;
+    CHECK(PickTransformFor("hybrid", game, false));
+    CHECK_FALSE(PickTransformFor("render", game, false));   // pinned Render stays render over a game
+    CHECK(PickTransformFor("transform", game, false));
+
+    // Pinned Render still falls back when render cannot draw at all, or sits on the wrong monitor.
+    EnginePickInputs lost = desktop; lost.renderLost = true;
+    CHECK(PickTransformFor("render", lost, false));
+    CHECK(PickTransformFor("render", desktop, true));
+    CHECK(PickTransformFor("hybrid", desktop, true));
+}

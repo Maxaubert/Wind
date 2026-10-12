@@ -33,8 +33,13 @@ whatever `TickState::model` points at:
 | `idleTick()` | Every idle tick. The transform builds its Magnification context and cursor lens here and keeps them warm, see [05](05-transform-engine.md). |
 | `retarget(MonitorTarget)` | Both engines, at activation (`multiMonitor` picks the monitor; a changed resolution is followed either way). Render returns false across adapters. |
 
-`model` in `magnifier.ini` takes `hybrid`, `render` or `transform` and is read once at launch, so
-changing it restarts Wind. Anything else, including an old `model=magnify`, reads as `hybrid`.
+`model` in `magnifier.ini` takes `hybrid`, `render` or `transform`. Anything else, including an old
+`model=magnify`, reads as `hybrid`. Both engines are built at startup whatever it says (`mRender`,
+`mTransform`), and `model` only decides the pick (`PickTransformFor`, `src/engine_pick.h`): a change
+applies on the config reload, at the next zoom-in or, while zoomed, through the instant switch. A
+pinned Render still falls back to transform when the render device is lost or its overlay could not
+follow the monitor. `running.model` says `live`; if one engine fails to init it names the one left,
+and only then does an engine change relaunch Wind (Settings' Restart Wind button, the tray).
 
 | Model | What it is | For |
 |---|---|---|

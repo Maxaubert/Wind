@@ -105,4 +105,14 @@ inline WindowCategory ClassifyWindow(bool coversMonitor, bool borderless, bool s
     return WindowCategory::Other;
 }
 
+// THE ENGINE SETTING (`model`), applied live. Both engines are built at startup whatever `model`
+// says, so a change takes effect on the next pick without a restart. Auto: the automatic rule above.
+// A pinned engine: Transform always; Render unless the render engine cannot draw at all (device
+// lost) or its overlay sits on the wrong monitor (renderStale), where showing nothing is worse.
+inline bool PickTransformFor(const std::string& model, const EnginePickInputs& in, bool renderStale) {
+    if (model == "transform") return true;
+    if (model == "render") return in.renderLost || renderStale;
+    return ShouldPickTransform(in) || renderStale;
+}
+
 }  // namespace wind

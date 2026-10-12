@@ -261,12 +261,21 @@ inline std::wstring SessionKeepPath() {
     std::wstring base = (n == 0 || n >= MAX_PATH) ? std::wstring(L".") : std::wstring(buf, n);
     return base + L"\\Wind\\session.keep";
 }
-// %LOCALAPPDATA%\Wind\running.model: the engine the Wind process loaded at its start (`model` is read
-// once at launch). Written by Wind.exe, read by the settings host so a model change that was never
-// applied still shows as pending after the window is reopened, instead of looking applied.
+// %LOCALAPPDATA%\Wind\running.model: what the Wind process can run, written at its start. "live" =
+// both engines are up, so any `model` applies on the config reload; "render" / "transform" = only
+// that engine started (the other failed to init), so an engine change needs a relaunch. Read by the
+// settings host and the tray to decide whether a `model` change restarts Wind.
 inline std::wstring RunningModelPath() {
     std::wstring p = SessionKeepPath();
     return p.substr(0, p.size() - 12) + L"running.model";   // 12 = len("session.keep")
+}
+// True when the running Wind applies a `model` change live (running.model says "live"). A stale
+// file from a Wind that has exited also reads live, which is right: the next start loads the ini.
+inline bool EngineSwitchesLive() {
+    std::string s;
+    if (!ReadTextFileOk(RunningModelPath(), s)) return false;
+    while (!s.empty() && (s.back() == '\r' || s.back() == '\n' || s.back() == ' ')) s.pop_back();
+    return s == "live";
 }
 
 // Settings session model: the live ini is the session, the active profile file is the saved state.

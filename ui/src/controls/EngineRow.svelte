@@ -1,11 +1,12 @@
 <script>
-  // The Engine select. The engine is read once at launch, so a change needs a relaunch:
-  // once the chosen value differs from the engine the running Wind has, an inline "Restart Wind"
-  // appears beside the select. `running` is that engine (empty = unknown, no button).
+  // The Engine select. A running Wind with both engines up applies a change live on its reload
+  // (`running` is "live": no button). One whose other engine failed to start runs that one engine
+  // until it restarts: once the chosen value differs from it, an inline "Restart Wind" appears
+  // beside the select. `running` empty = unknown, no button.
   import Select from './Select.svelte';
   let { value = 'hybrid', options = [], labels = null, running = '', onChange = () => {},
         onRestart = () => {}, disabled = false, labelledby, describedby } = $props();
-  const pending = $derived(!!running && value !== running);
+  const pending = $derived(!!running && running !== 'live' && value !== running);
 </script>
 
 <div class="en">
