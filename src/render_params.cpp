@@ -18,7 +18,9 @@ void FillRenderParams(RenderFrameParams& p, const MapResult& r, const Config& cf
     // clickDesktop is local monitor px; SetCursorPos needs virtual-desktop coords.
     p.clickDesktopX = r.clickDesktopX + mon.x; p.clickDesktopY = r.clickDesktopY + mon.y;
     p.cursorScaleWithZoom = (cfg.cursorConstantSize == 0);   // issue #253
-    p.bilinear = (cfg.bilinear != 0);
+    p.scaling = cfg.renderScaling;               // issue #456: nearest, xBR or NIS
+    p.bilinear = (cfg.renderScaling != 0);       // the plain pass: point for nearest, bilinear as the filters' fallback
+    p.upscaleTiming = (cfg.upscaleTiming != 0);
     p.sharpness = cfg.sharpness;
     p.brightness = cfg.brightness;
     p.cursorMode = CursorModeFromCfg(cfg);

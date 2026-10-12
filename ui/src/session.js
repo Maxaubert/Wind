@@ -32,10 +32,18 @@ function schemaDefaults() {
   return d;
 }
 
+// Issue #456: renderScaling replaced bilinear. An ini (or profile) without it reads the way the core
+// migrates it (ParseConfig): bilinear=0 keeps Nearest, anything else is the xBR default.
+function migrate(m) {
+  if (m.renderScaling === undefined && String(m.bilinear) === '0') return { ...m, renderScaling: '0' };
+  return m;
+}
+
 // session: { values, saved } as the host reports them. Returns both maps with defaults filled in.
 export function fill(session) {
   const d = schemaDefaults();
-  return { values: { ...d, ...(session.values || {}) }, saved: { ...d, ...(session.saved || session.values || {}) } };
+  return { values: { ...d, ...migrate(session.values || {}) },
+           saved: { ...d, ...migrate(session.saved || session.values || {}) } };
 }
 
 // Same setting: identical trimmed text, or both plain numbers with the same value ("1.0" vs "1"),

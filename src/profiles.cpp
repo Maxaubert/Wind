@@ -116,6 +116,12 @@ bool SessionDiffers(const std::string& liveText, const std::string& profileText)
     auto b = ReadIniValues(profileText);
     for (auto it = a.begin(); it != a.end();) it = IsGlobalProfileKey(it->first) ? a.erase(it) : std::next(it);
     for (auto it = b.begin(); it != b.end();) it = IsGlobalProfileKey(it->first) ? b.erase(it) : std::next(it);
+    // Issue #456: renderScaling replaced bilinear; a side without it reads as ParseConfig migrates it.
+    for (auto* m : { &a, &b }) {
+        auto bl = m->find("bilinear");
+        if (!m->count("renderScaling") && bl != m->end() && bl->second == "0") (*m)["renderScaling"] = "0";
+        if (bl != m->end()) m->erase("bilinear");
+    }
     // A key one side lacks reads as the built-in default (the first-run template carries each
     // templated key's default), so a tray drag that wrote an explicit default back (Warmth 0 -> 40
     // -> 0) is not "unsaved". The UI keys the template omits take theirs from Config itself, so

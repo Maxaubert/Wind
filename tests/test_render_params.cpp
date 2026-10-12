@@ -44,8 +44,12 @@ TEST_CASE("FillRenderParams interprets the config switches") {
     CHECK(p.cursorScaleWithZoom);                       // #253: the cursor grows with the zoom
     c.cursorConstantSize = 1; FillRenderParams(p, Map(), c, mon, 2.0);
     CHECK_FALSE(p.cursorScaleWithZoom);
-    c.bilinear = 0; FillRenderParams(p, Map(), c, mon, 2.0);
+    c.renderScaling = 0; FillRenderParams(p, Map(), c, mon, 2.0);
     CHECK_FALSE(p.bilinear);
+    CHECK(p.scaling == 0);
+    c.renderScaling = 2; FillRenderParams(p, Map(), c, mon, 2.0);
+    CHECK(p.bilinear);   // the plain pass stays bilinear as the filters' fallback
+    CHECK(p.scaling == 2);
     c.vsync = 1; c.dwmFlush = 0; FillRenderParams(p, Map(), c, mon, 2.0);
     CHECK(p.vsync);
     c.dwmFlush = 1; FillRenderParams(p, Map(), c, mon, 2.0);

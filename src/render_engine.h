@@ -21,7 +21,9 @@ struct RenderFrameParams {
     double cursorScreenX, cursorScreenY; // where to draw the cursor sprite (screen px)
     int    clickDesktopX, clickDesktopY; // SetCursorPos target (desktop px) for click hit-test
     bool   cursorScaleWithZoom;          // draw the cursor scaled by zoom vs native size
-    bool   bilinear;                     // bilinear (smooth) vs point sampling
+    bool   bilinear;                     // the plain pass's sampling: bilinear (smooth) vs point
+    int    scaling = 0;                  // RenderScaling (upscale_shaders.h): 0 nearest, 1 xBR, 2 NIS (#456)
+    bool   upscaleTiming = false;        // log the magnify pass's GPU time (upscaleTiming=1)
     double sharpness;                    // 0 = off; >0 = adaptive sharpen strength (crisps upscaled detail)
     double brightness;                   // output multiplier (1.0 = unchanged; <1 dims for HDR)
     bool   colorOn = false;              // apply `color` in the pixel shader (issue #288)

@@ -85,9 +85,11 @@ export const groups = [
         { key: 'txSamplingMode', type: 'select', label: 'Transform scaling', tag: 'Experimental', keywords: ['scaling', 'upscaling', 'filter', 'sharp', 'crisp', 'smooth', 'blurry', 'pixelated', 'hidpi', 'sampling', 'quality', 'nearest', 'lanczos', 'bitmap smoothing', 'high resolution cursor', 'mpo', 'overlay', 'cursor', 'pointer', 'resolution', '4k', 'antialiasing'],
           desc: 'Smooth also sharpens the pointer at high zoom', options: ['0', '1'], optionLabels: { '0': 'Nearest', '1': 'Smooth' }, def: '0',
           showIf: { key: 'model', ne: 'render' } },
-        // Render: the shader's sampler (bilinear 1 / 0 nearest). Applies on the config reload.
-        { key: 'bilinear', type: 'select', label: 'Render scaling', keywords: ['scaling', 'upscaling', 'filter', 'sharp', 'crisp', 'smooth', 'blurry', 'pixelated', 'sampling', 'quality', 'nearest', 'bilinear', 'point', 'resolution', 'antialiasing'],
-          desc: 'How the image is enlarged', options: ['0', '1'], optionLabels: { '0': 'Nearest', '1': 'Bilinear' }, def: '1',
+        // Render: renderScaling (issue #456), the engine's scaling filter: nearest, xBR (default) or
+        // NVIDIA Image Scaling, picked in the 2026-10-12 upscaler A/B. Applies on the config reload.
+        { key: 'renderScaling', type: 'select', label: 'Render scaling', keywords: ['scaling', 'upscaling', 'filter', 'sharp', 'crisp', 'smooth', 'blurry', 'pixelated', 'sampling', 'quality', 'nearest', 'xbr', 'nis', 'nvidia', 'image scaling', 'bilinear', 'point', 'resolution', 'antialiasing'],
+          desc: 'How the image is enlarged', options: ['0', '1', '2'],
+          optionLabels: { '0': 'Nearest', '1': 'xBR', '2': 'NVIDIA Image Scaling' }, def: '1',
           showIf: { key: 'model', ne: 'transform' } },
         // PER-WINDOW-TYPE ENGINE (2026-08-24). Every row defaults to Auto so an untouched install
         // behaves as before. They only apply when the engine above is Auto, so showIf hides them

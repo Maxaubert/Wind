@@ -133,6 +133,7 @@ Config ParseConfig(const std::string& text) {
     // A UTF-8 BOM (Notepad's "UTF-8 with BOM") would glue itself to the first key and lose it.
     std::istringstream in(text.compare(0, 3, "\xEF\xBB\xBF") == 0 ? text.substr(3) : text);
     std::string line;
+    bool haveRenderScaling = false;   // issue #456: without the key, `bilinear` decides (migration)
     while (std::getline(in, line)) {
         std::string t = trim(line);
         if (t.empty() || t[0] == ';' || t[0] == '#') continue;
@@ -220,6 +221,8 @@ Config ParseConfig(const std::string& text) {
             else if (key == "smoothPan")          c.smoothPan = ParseIntStrict(val);
             else if (key == "magInputTransform")  c.magInputTransform = ParseIntStrict(val);
             else if (key == "bilinear")           c.bilinear = ParseIntStrict(val);
+            else if (key == "renderScaling")      { c.renderScaling = ParseIntStrict(val); haveRenderScaling = true; }
+            else if (key == "upscaleTiming")      c.upscaleTiming = ParseIntStrict(val);
             else if (key == "sharpness")          c.sharpness = ParseDoubleStrict(val);
             else if (key == "zorderBand")         c.zorderBand = ParseIntStrict(val);
             else if (key == "brightness")         c.brightness = ParseDoubleStrict(val);
@@ -309,6 +312,8 @@ Config ParseConfig(const std::string& text) {
     if (c.gameCursorLagMs < -1) c.gameCursorLagMs = -1;
     if (c.gameCursorLagMs > 100) c.gameCursorLagMs = 100;
     c.sharpness       = clampd(c.sharpness,       0.0, 1.0);
+    if (!haveRenderScaling) c.renderScaling = c.bilinear == 0 ? 0 : 1;   // bilinear retired (#456)
+    if (c.renderScaling < 0 || c.renderScaling > 2) c.renderScaling = 1;
     c.brightness      = clampd(c.brightness,      0.5, 1.5);
     c.colorWarmPct    = (int)clampd(c.colorWarmPct, 0, 100);
     c.colorDimPct     = (int)clampd(c.colorDimPct, 1, 100);
@@ -546,8 +551,9 @@ std::string DefaultIniText() {
                "; cursorVisibility: auto=hide our cursor when the focused app hides its own (games);\n"
                ";   always=always draw it; never=never draw it\n"
                "cursorVisibility=auto\n"
-               "; bilinear: 1=smooth scaling, 0=crisp/point\n"
-               "bilinear=1\n"
+               "; renderScaling: render engine filter, 0=nearest (crisp pixels), 1=xBR (smooth, default),\n"
+               ";   2=NVIDIA Image Scaling (smooth and sharpened)\n"
+               "renderScaling=1\n"
                "; sharpness: 0=off; 0.1-1.0 sharpens the magnified image (crisper text/detail)\n"
                "sharpness=0.0\n"
                "; zorderBand: z-band of the render engine's overlay and the Inspect crosshair. 0=ordinary\n"
