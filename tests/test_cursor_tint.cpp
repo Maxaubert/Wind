@@ -60,3 +60,24 @@ TEST_CASE("the outline only hugs inverting pixels; plain transparency stays clea
     CHECK(out[2] == 0x00000000u);   // two away: clear
     CHECK(out[4] == 0x00000000u);
 }
+
+TEST_CASE("a colour pointer with no alpha, nothing opaque and white pixels inverts (scaled text beam, 2026-10-12)") {
+    // 3x3, AND mask all 1 (one byte per row padded to 4), centre pixel white: the beam.
+    const uint8_t allAnd[12] = { 0xE0, 0, 0, 0, 0xE0, 0, 0, 0, 0xE0, 0, 0, 0 };
+    uint32_t px[9] = { 0, 0, 0, 0, 0x00FFFFFFu, 0, 0, 0, 0 };
+    CHECK(ColorIsPureInvert(px, 3, 3, allAnd, 4));
+    uint32_t blank[9] = {};
+    CHECK_FALSE(ColorIsPureInvert(blank, 3, 3, allAnd, 4));       // nothing to invert: just transparent
+    const uint8_t oneOpaque[12] = { 0x60, 0, 0, 0, 0xE0, 0, 0, 0, 0xE0, 0, 0, 0 };   // (0,0) opaque
+    CHECK_FALSE(ColorIsPureInvert(px, 3, 3, oneOpaque, 4));       // a real colour pointer: alpha from the mask
+
+    uint32_t m[9]; for (int i = 0; i < 9; ++i) m[i] = px[i];
+    ColorInvertMask(m, 9);
+    CHECK(m[4] == 0xFFFFFFFFu);
+    CHECK(m[0] == 0u);
+
+    uint32_t t[9]; for (int i = 0; i < 9; ++i) t[i] = px[i];
+    ColorInvertToArgb(t, 3, 3);
+    CHECK(t[4] == 0xFFFFFFFFu);                                   // the beam: white
+    for (int i : { 0, 1, 2, 3, 5, 6, 7, 8 }) CHECK(t[i] == 0xFF000000u);   // ringed by a black outline
+}

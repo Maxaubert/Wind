@@ -68,7 +68,10 @@ static HCURSOR BuildTinted(HCURSOR src, const ColorMatrix& m) {
         ok = ReadBits(dc, ii.hbmColor, w, h, 32, col, cStride);
         if (ok) {
             memcpy(px.data(), col.data(), px.size() * 4);
-            if (!AnyAlpha(px.data(), (int)px.size())) AlphaFromMask(px.data(), w, h, mask.data(), mStride);
+            if (!AnyAlpha(px.data(), (int)px.size())) {
+                if (ColorIsPureInvert(px.data(), w, h, mask.data(), mStride)) ColorInvertToArgb(px.data(), w, h);
+                else AlphaFromMask(px.data(), w, h, mask.data(), mStride);
+            }
         }
     } else if (ok) {
         MonoToArgb(mask.data(), mask.data() + (size_t)mStride * h, mStride, w, h, px.data());

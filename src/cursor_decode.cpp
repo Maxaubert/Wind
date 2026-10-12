@@ -41,10 +41,17 @@ bool DecodeCursorBGRA(HCURSOR hc, std::vector<uint32_t>& out,
         if (!anyAlpha) {
             // An old-style colour cursor: no alpha channel, its AND mask says which pixels are
             // opaque (the same rule CursorTint uses). Drawn as plain colour, not inverted.
+            // One with nothing opaque and non-black colour is an inverting pointer (the text beam at
+            // a scaled pointer size): the invert blend, like the monochrome beam below.
             std::vector<uint8_t> andBits; int mStride = 0;
-            if (ii.hbmMask && ReadMask1bpp(hdc, ii.hbmMask, w, h, andBits, mStride))
-                AlphaFromMask(out.data(), w, h, andBits.data(), mStride);
-            else
+            if (ii.hbmMask && ReadMask1bpp(hdc, ii.hbmMask, w, h, andBits, mStride)) {
+                if (ColorIsPureInvert(out.data(), w, h, andBits.data(), mStride)) {
+                    isInvert = true;
+                    ColorInvertMask(out.data(), (int)out.size());
+                } else {
+                    AlphaFromMask(out.data(), w, h, andBits.data(), mStride);
+                }
+            } else
                 for (uint32_t& px : out) px |= 0xFF000000u;   // no mask: opaque beats invisible
         }
         ok = true;
