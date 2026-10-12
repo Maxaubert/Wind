@@ -21,7 +21,7 @@ const OLD_BIND_KEYS = [
   'panLeftVk', 'panLeftMods', 'panRightVk', 'panRightMods', 'panUpVk', 'panUpMods', 'panDownVk', 'panDownMods',
   'hideCursorVk', 'hideCursorMods', 'cursorLockVk', 'cursorLockMods',
 ];
-const NEW_KEYS = ['uiPalette', '__profiles', '__diagnostics', '__openIni', 'trayPerf', 'trayPinned', 'showAdvanced'];
+const NEW_KEYS = ['bilinear', 'uiPalette', '__profiles', '__diagnostics', '__openIni', 'trayPerf', 'trayPinned', 'showAdvanced'];
 
 test('group ids, order and shape follow the spec', () => {
   expect(groups.map((g) => g.id)).toEqual(['hotkeys', 'zoom', 'view', 'prefs', 'tray', 'about']);
@@ -36,7 +36,7 @@ test('group ids, order and shape follow the spec', () => {
   const cap = (id) => groups.find((g) => g.id === id).cards.map((c) => c.caption);
   expect(cap('hotkeys')).toEqual(['Zoom', 'Extra keys']);
   expect(cap('zoom')).toEqual(['Level and speed', 'Easing', 'Engine']);
-  expect(cap('view')).toEqual(['Speed', 'Pointer', 'Typing and focus']);
+  expect(cap('view')).toEqual(['Movement', 'Typing and focus']);
   expect(cap('prefs')).toEqual(['General', 'Screen light', 'Troubleshooting']);
   expect(cap('tray')).toEqual(['']);
 });
@@ -100,7 +100,8 @@ test('rows land in the groups the spec names', () => {
   expect(where('__cursorLock')).toBe('hotkeys');
   expect(where('panSpeed')).toBe('view');
   expect(where('mouseAlign')).toBe('view');
-  expect(where('txSamplingMode')).toBe('view');
+  expect(where('txSamplingMode')).toBe('zoom');
+  expect(where('bilinear')).toBe('zoom');
   expect(where('lockApps')).toBe('view');
   expect(where('trackAlign')).toBe('view');
   expect(where('colorDimPct')).toBe('prefs');
@@ -188,10 +189,10 @@ test('engine row offers Restart Wind and per-window rows follow Auto; the share-
   expect(calls).toContainEqual(['noSwallowApps', 'netflix.exe,RDR2.exe']);
 });
 
-test('view page: high resolution toggle; hotkeys page: inspect box and its switch', async ({ page }) => {
-  await page.goto('/controls.html?group=view');
-  await ctl(page, 'txSamplingMode').getByRole('switch').check({ force: true });
-  expect(await page.evaluate(() => window.__calls)).toEqual([['txSamplingMode', 1]]);
+test('zoom page: transform scaling select; hotkeys page: inspect box and its switch', async ({ page }) => {
+  await page.goto('/controls.html?group=zoom');
+  await ctl(page, 'txSamplingMode').locator('select').selectOption('1');
+  expect(await page.evaluate(() => window.__calls)).toEqual([['txSamplingMode', '1']]);
   await page.goto('/controls.html?group=hotkeys');
   const ins = ctl(page, '__cursorLock');
   await expect(ins.locator('.kc.ghost')).toHaveText('Set key');

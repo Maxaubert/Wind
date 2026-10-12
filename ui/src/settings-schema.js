@@ -7,7 +7,7 @@
 // uncaptioned card). A row flagged `adv` is an advanced row: it shows inline only while the global
 // showAdvanced key is on (Preferences), carries no marker, and search still finds it.
 //
-// Row types: keybind, slider, toggle, select, applist, highres, engine (the engine select with the
+// Row types: keybind, slider, toggle, select, applist, engine (the engine select with the
 // inline "Restart Wind"), palette (the Theme picker, `wide`: its control sits under the
 // text), profiles (dropdown + New), button, about. A row may carry showIf
 // { key, eq } to hide it unless another setting has that value ({ key, ne } hides it when it does), or
@@ -78,6 +78,17 @@ export const groups = [
           options: ['hybrid', 'render', 'transform'],
           optionLabels: { hybrid: 'Auto', render: 'Render', transform: 'Transform' },
           def: 'hybrid' },
+        // SCALING: how each engine enlarges the screen, under the engine it belongs to (Auto uses
+        // both, so it shows both). Not advanced, so the card stays reachable without them.
+        // Transform: txSamplingMode, DWM's own filter (0 nearest / 1 smooth = Lanczos, the former High
+        // resolution cursor toggle, #227). It applies live (#369) and turning Smooth on asks first (#441).
+        { key: 'txSamplingMode', type: 'select', label: 'Transform scaling', tag: 'Experimental', keywords: ['scaling', 'upscaling', 'filter', 'sharp', 'crisp', 'smooth', 'blurry', 'pixelated', 'hidpi', 'sampling', 'quality', 'nearest', 'lanczos', 'bitmap smoothing', 'high resolution cursor', 'mpo', 'overlay', 'cursor', 'pointer', 'resolution', '4k', 'antialiasing'],
+          desc: 'Smooth also sharpens the pointer at high zoom', options: ['0', '1'], optionLabels: { '0': 'Nearest', '1': 'Smooth' }, def: '0',
+          showIf: { key: 'model', ne: 'render' } },
+        // Render: the shader's sampler (bilinear 1 / 0 nearest). Applies on the config reload.
+        { key: 'bilinear', type: 'select', label: 'Render scaling', keywords: ['scaling', 'upscaling', 'filter', 'sharp', 'crisp', 'smooth', 'blurry', 'pixelated', 'sampling', 'quality', 'nearest', 'bilinear', 'point', 'resolution', 'antialiasing'],
+          desc: 'How the image is enlarged', options: ['0', '1'], optionLabels: { '0': 'Nearest', '1': 'Bilinear' }, def: '1',
+          showIf: { key: 'model', ne: 'transform' } },
         // PER-WINDOW-TYPE ENGINE (2026-08-24). Every row defaults to Auto so an untouched install
         // behaves as before. They only apply when the engine above is Auto, so showIf hides them
         // when a single engine is pinned. ("Never use Render for" left Settings in #318; the
@@ -98,20 +109,15 @@ export const groups = [
   { id: 'view', label: 'View', icon: 'view',
     desc: 'How the view follows the mouse and typing',
     cards: [
-      { caption: 'Speed', rows: [
+      // Speed and Pointer are one section since the High resolution cursor left Pointer for the Engine
+      // card: Pointer alone would carry one row with the advanced switch off.
+      { caption: 'Movement', rows: [
         { key: 'panSpeed', type: 'slider', label: 'Arrow key speed', keywords: ['pan', 'pan speed', 'arrows', 'move', 'scroll', 'keyboard', 'how fast', 'velocity', 'shift view', 'rate'], desc: 'How fast the arrow keys move the view', min: 0.25, max: 4, step: 0.05, def: 1.0, unit: 'times' },
         { key: 'cursorSensitivity', type: 'slider', label: 'Mouse speed', keywords: ['sensitivity', 'pointer speed', 'cursor speed', 'dpi', 'pan', 'follow', 'tracking speed', 'how fast', 'velocity', 'mouse sensitivity', 'rate'], desc: 'How fast the view moves with the mouse', min: 0.25, max: 4, step: 0.05, def: 1.0, unit: 'times' },
         { key: 'panGlideMaxPx', type: 'slider', label: 'Pan glide', keywords: ['inertia', 'momentum', 'glide', 'coast', 'ease', 'ease out', 'soft stop', 'stop', 'slide', 'smooth', 'smoothing', 'mouse', 'pan', 'drift', 'deceleration'], desc: 'How far the pointer coasts after you stop', min: 0, max: 200, step: 5, def: 0, unit: 'px' },
-      ] },
-      { caption: 'Pointer', rows: [
         { key: 'mouseAlign', type: 'select', label: 'Pointer position', keywords: ['mouse position', 'mouse', 'cursor', 'pointer', 'where', 'centred', 'centered', 'center', 'centre', 'middle', 'edge', 'edges', 'within the edges', 'align', 'alignment', 'lock to center', 'follow mode', 'placement'], desc: 'Where the pointer sits while the view moves', options: ['0', '1'], optionLabels: { '0': 'Centred', '1': 'Within the edges' }, def: '0' },
         { key: 'mouseMarginPct', type: 'slider', label: 'Edge margin', keywords: ['edge', 'edges', 'border', 'padding', 'distance', 'boundary', 'margin', 'pointer', 'mouse', 'percent', 'dead zone', 'how near'], desc: 'How close to the edge before the view moves', min: 0, max: 40, step: 1, def: 0, unit: '%',
           showIf: { key: 'mouseAlign', eq: '1' } },
-        // High resolution cursor (#227). Ini key txSamplingMode (0 nearest / 1 smooth). No longer
-        // coupled to MPO (#369): both looks keep apps off hardware planes while zoomed (smooth via the
-        // resample layer, nearest via the MPO guard), so the toggle applies live with no restart.
-        { key: 'txSamplingMode', type: 'highres', label: 'High resolution cursor', tag: 'Experimental', keywords: ['sharp', 'crisp', 'smooth', 'blurry', 'pixelated', 'hidpi', 'sampling', 'quality', 'nearest', 'mpo', 'overlay', 'cursor', 'pointer', 'resolution', '4k', 'antialiasing', 'restart', 'registry'],
-          desc: 'A smoother image and pointer at high zoom', def: 0 },
         // Zoom lock detection (#221): games like DOOM pin the mouse to the screen centre, which would
         // pin the zoom view there too. Listed apps get the view UNLOCKED from the pointer.
         { key: 'lockApps', type: 'applist', adv: true, label: 'Mouse-locked games', keywords: ['lock', 'locked', 'fps', 'shooter', 'first person', 'mouselook', 'mouse look', 'camera', 'game', 'exe', 'program', 'unlock', 'exception', 'apps', 'pinned', 'centre'],

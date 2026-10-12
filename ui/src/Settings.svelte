@@ -77,7 +77,7 @@
   }
 
   // --- Changes --------------------------------------------------------------------------------
-  // High resolution cursor notice (#441): turning it ON asks first, unless the user opted out
+  // Smooth transform scaling notice (#441, formerly the High resolution cursor toggle): choosing Smooth asks first, unless the user opted out
   // (uiHighResNoticeOff, a global UI-only key). Every row that renders the key (page and search) comes here.
   let highResPrompt = $state(false);
   let highResSkip = $state(false);
@@ -315,12 +315,12 @@
   <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">{announcement}</div>
 
   {#if highResPrompt}
-    <Prompt id="hires" title="High resolution cursor is experimental"
+    <Prompt id="hires" title="Smooth scaling is experimental"
             text="It makes the zoomed image and the pointer smoother. Windows smooths the image as it scales it, which can make the view and pointer shake slightly while you zoom. Wind compensates as well as it can, but this limits some features, such as the zoom glide after you let go, which stops a little early."
             checkLabel="Don't show this again" bind:checked={highResSkip}
             onEsc={cancelHighRes}
             buttons={[{ label: 'Cancel', onClick: cancelHighRes },
-                      { label: 'Turn on', kind: 'primary', onClick: acceptHighRes }]} />
+                      { label: 'Use Smooth', kind: 'primary', onClick: acceptHighRes }]} />
   {/if}
   {#if closePrompt}
     <Prompt id="close" title="Unsaved changes"

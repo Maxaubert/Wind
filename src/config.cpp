@@ -540,7 +540,7 @@ std::string DefaultIniText() {
                ";   to Windows, normally the hidden icons overflow (default). Applied by WindTray, never\n"
                ";   reloads the core\n"
                "trayPinned=0\n"
-               "; uiHighResNoticeOff: 1=never show the High resolution cursor notice again (its Don't\n"
+               "; uiHighResNoticeOff: 1=never show the Smooth transform scaling notice again (its Don't\n"
                ";   show this again box). UI only, never reloads the core\n"
                "uiHighResNoticeOff=0\n"
                "; cursorVisibility: auto=hide our cursor when the focused app hides its own (games);\n"

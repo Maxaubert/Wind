@@ -195,7 +195,7 @@ Defences (wall arming in `RunTick`, write clamp in `TransformModel::present`):
   plane.
 - A write-site clamp backs the walls up when the session is exposed and the ghost is not settled,
   because the walls divide by the controller level while the write uses the step-capped level.
-- Since #369 the **High resolution cursor** option only switches sampling, live: smooth (resample
+- Since #369 the **Transform scaling** setting (formerly the High resolution cursor toggle) only switches sampling, live: smooth (resample
   layer) and nearest with the MPO guard (colour layer) are both plane-free while zoomed, so the page
   no longer stages MPO or asks for a restart. `mpoNearestGuard=0` restores the old rule
   (`EffectiveSamplingMode` then keeps the boot state's mode until a reboot).

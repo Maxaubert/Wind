@@ -186,9 +186,9 @@ Every key works in the ini whether or not Settings shows it. Keys hot-reload unl
 
 | Keys | Meaning |
 |---|---|
-| `txSamplingMode` (0) | Transform sampling: 0 nearest, 1 smooth ("High resolution cursor", coupled to MPO, [05](05-transform-engine.md)) |
+| `txSamplingMode` (0) | Transform sampling: 0 nearest, 1 smooth (Settings: Transform scaling, formerly "High resolution cursor", [05](05-transform-engine.md)) |
 | `edgeClip` (1, hot) | While a transform session is zoomed, clips the pointer 1 px inside the monitor so it cannot rest on the contested outermost pixel (cursor-shape flicker at the left/top edge). Side effect: in a native-cursor session the pointer cannot reach the last pixel row and column. A tighter existing clip (game confine, Inspect) always wins; 0 turns it off. Rationale: `Config::edgeClip` in `src/config.h`, mechanics in `TransformModel::edgeClipManage` |
-| `bilinear`, `sharpness`, `brightness`, `hdrTonemap` (1) | Render engine image |
+| `bilinear`, `sharpness`, `brightness`, `hdrTonemap` (1) | Render engine image (`bilinear` is Settings: Render scaling) |
 | `cursorConstantSize` (0), `cursorVisibility` (`auto`) | Render cursor size and when it is drawn |
 | `colorWarmPct` (0), `colorDimPct` (100) | Warmth and brightness filter |
 | `outline*` | Zoom outline |
@@ -207,7 +207,7 @@ Every key works in the ini whether or not Settings shows it. Keys hot-reload unl
 **Global and UI.** `profile`, `onboarded`, `uiPalette` (`grey`, `ember`, `ocean`, `hicon`),
 `showAdvanced`, `trayPerf`, `traySliders`, `traySliderOrder`, `trayToggles`, `trayToggleOrder`,
 `trayPinned` (1 = keep the tray icon on the taskbar, 0 = hidden-icons overflow; applied by WindTray),
-`uiHighResNoticeOff` (1 = the High resolution cursor notice is never shown; set by its
+`uiHighResNoticeOff` (1 = the Smooth transform scaling notice is never shown; set by its
 "Don't show this again" box, #441).
 `uiTheme` is a legacy key, ignored.
 

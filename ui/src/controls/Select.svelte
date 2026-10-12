@@ -1,14 +1,22 @@
 <script>
   // Native select drawn flat to match the cards (chevron, soft fill). Native keeps the keyboard and
   // screen-reader contract for free; the colours come from the tokens.
+  import { tick } from 'svelte';
   let { value = '', options = [], labels = null, onChange = () => {}, disabled = false,
         labelledby, describedby } = $props();
+  // The page may hold a change back (a confirm notice, #441), leaving `value` as it was: draw the
+  // select from the prop again after each change, so it never shows a value the page did not take.
+  let sel = $state();
+  function pick(v) {
+    onChange(v);
+    tick().then(() => { if (sel) sel.value = String(value); });
+  }
   const show = (o) => (labels && labels[o]) || o;
 </script>
 
 <span class="sel" class:disabled>
-  <select {disabled} value={String(value)} aria-labelledby={labelledby} aria-describedby={describedby}
-          onchange={(e) => onChange(e.currentTarget.value)}>
+  <select bind:this={sel} {disabled} value={String(value)} aria-labelledby={labelledby} aria-describedby={describedby}
+          onchange={(e) => pick(e.currentTarget.value)}>
     {#each options as o (o)}<option value={o}>{show(o)}</option>{/each}
   </select>
   <svg class="chev" viewBox="0 0 10 10" width="10" height="10" aria-hidden="true" focusable="false">

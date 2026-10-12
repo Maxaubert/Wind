@@ -245,14 +245,14 @@ test('engine change writes the ini, then Restart Wind relaunches; a failed relau
   expect(await page.evaluate(() => window.__live.model)).toBe('hybrid');
 });
 
-test('High resolution cursor applies live: no MPO registry write, no restart prompt (#369)', async ({ page }) => {
+test('Smooth transform scaling applies live: no MPO registry write, no restart prompt (#369)', async ({ page }) => {
   await page.goto('/');
-  await go(page, 'view');
-  const sw = page.locator('[data-key="txSamplingMode"]').getByRole('switch');
-  await sw.click({ force: true });
-  await page.getByRole('button', { name: 'Turn on' }).click();   // the experimental notice (#441)
+  await go(page, 'zoom');
+  const sel = page.locator('[data-key="txSamplingMode"] select');
+  await sel.selectOption('1');
+  await page.getByRole('button', { name: 'Use Smooth' }).click();   // the experimental notice (#441)
   expect(await page.evaluate(() => window.__live.txSamplingMode)).toBe('1');
-  await sw.click({ force: true });
+  await sel.selectOption('0');
   expect(await page.evaluate(() => window.__live.txSamplingMode)).toBe('0');
   expect(await sent(page, 'setMpoDisabled')).toHaveLength(0);
   await expect(page.getByRole('dialog', { name: 'Restart to finish' })).toHaveCount(0);

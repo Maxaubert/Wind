@@ -16,7 +16,6 @@
   import PanBinding from './PanBinding.svelte';
   import './bindings.css';
   import AppList from './AppList.svelte';
-  import HighRes from './HighRes.svelte';
   import EngineRow from './EngineRow.svelte';
   import ThemePicker from '../prefs/ThemePicker.svelte';
   import ProfilePicker from '../prefs/ProfilePicker.svelte';
@@ -69,9 +68,6 @@
       {:else if row.type === 'applist'}
         <AppList {value} title={row.label} {disabled} onChange={onChange}
                  labelledby={withValue} describedby={descId} {valueId} pick={extra.pick} />
-      {:else if row.type === 'highres'}
-        <HighRes {value} {disabled} onChange={onChange}
-                 labelledby={labelId} describedby={descId} />
       {:else if row.type === 'palette'}
         <ThemePicker value={value ?? 'grey'} onChange={onChange}
                      labelledby={labelId} describedby={descId} />
