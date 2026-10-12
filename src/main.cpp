@@ -3199,7 +3199,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             renderEngine.hideSystemCursor(true);
             renderEngine.setVisible(true);
             RenderFrameParams p{};
-            for (int i = 0; i < 20; ++i) {
+            // PROTOTYPE: WIND_SELFTEST_FRAMES lets the asynchronous AI filter deliver before the dump.
+            wchar_t fb[16] = {}; const int frames = GetEnvironmentVariableW(L"WIND_SELFTEST_FRAMES", fb, 16) ? _wtoi(fb) : 20;
+            for (int i = 0; i < (frames > 0 ? frames : 20); ++i) {
                 MSG m; while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&m); DispatchMessageW(&m); }
                 MapResult r = ts.mapper.update(0, 0, 4.0);
                 FillRenderParams(p, r, cfg, ts.mon, 4.0);
@@ -3209,6 +3211,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                 Sleep(16);
             }
             renderEngine.dumpFrame(p, L"wind_selftest.png");
+            if (FILE* uf = nullptr; _wfopen_s(&uf, L"wind_upscale_status.txt", L"w") == 0 && uf) {   // PROTOTYPE
+                fprintf(uf, "filter=%d drawn=%d\n", p.filter, renderEngine.debugUpscaleDrawn() ? 1 : 0);
+                fclose(uf);
+            }
             unsigned ddaFmt = 0; int cs = -1, bpc = 0; renderEngine.debugHdr(ddaFmt, cs, bpc);
             FILE* hf = nullptr; _wfopen_s(&hf, L"wind_hdr_diag.txt", L"w");
             if (hf) { fprintf(hf, "ddaFormat=%u outColorSpace=%d bitsPerColor=%d\n", ddaFmt, cs, bpc); fclose(hf); }

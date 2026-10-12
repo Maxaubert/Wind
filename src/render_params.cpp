@@ -19,6 +19,9 @@ void FillRenderParams(RenderFrameParams& p, const MapResult& r, const Config& cf
     p.clickDesktopX = r.clickDesktopX + mon.x; p.clickDesktopY = r.clickDesktopY + mon.y;
     p.cursorScaleWithZoom = (cfg.cursorConstantSize == 0);   // issue #253
     p.bilinear = (cfg.bilinear != 0);
+    p.filter = cfg.renderFilter >= 0 ? cfg.renderFilter : (cfg.bilinear != 0 ? 1 : 0);   // prototype
+    if (p.filter == 0) p.bilinear = false;
+    if (p.filter == 1) p.bilinear = true;
     p.sharpness = cfg.sharpness;
     p.brightness = cfg.brightness;
     p.cursorMode = CursorModeFromCfg(cfg);

@@ -21,6 +21,14 @@ call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
 if errorlevel 1 (echo [build] vcvars64.bat failed & exit /b 1)
 cd /d "%ROOT%"
 
+rem PROTOTYPE (proto/upscalers): optional local SDKs in .deps (git-ignored, never committed).
+rem RTX Video SDK -> WIND_RTXVSR (static NGX lib); ONNX Runtime headers -> WIND_ORT (the DLL loads at runtime).
+set "UPDEFS="
+set "UPLIBS="
+if exist "%ROOT%.deps\rtxvideo\include\nvsdk_ngx.h" set "UPDEFS=/DWIND_RTXVSR /I .deps\rtxvideo\include"
+if exist "%ROOT%.deps\rtxvideo\include\nvsdk_ngx.h" set "UPLIBS=.deps\rtxvideo\lib\Windows\x64\nvsdk_ngx_s.lib"
+if exist "%ROOT%.deps\ort\build\native\include\onnxruntime_c_api.h" set "UPDEFS=!UPDEFS! /DWIND_ORT /I .deps\ort\build\native\include"
+
 if /i "%1"=="test" goto :test
 if /i "%1"=="check" goto :check
 if /i "%1"=="uiaccess" goto :uiaccess
@@ -32,10 +40,10 @@ rem --- App build (normal: uiAccess=false, runs from anywhere) ----------------
 rem Compile the app-icon resource (rc.exe ships with the Windows SDK, on PATH via vcvars).
 rc /nologo /fo "%ROOT%src\wind.res" "%ROOT%src\wind.rc"
 if errorlevel 1 (echo [build] rc.exe failed & exit /b 1)
-cl /nologo /std:c++17 /EHsc /O2 /W4 /Zi /DUNICODE /D_UNICODE ^
+cl /nologo /std:c++17 /EHsc /O2 /W4 /Zi /DUNICODE /D_UNICODE !UPDEFS! ^
    src\*.cpp src\config_ui\ini_edit.cpp src\wind.res ^
    /Fe:Wind.exe ^
-   /link Magnification.lib Dwmapi.lib user32.lib shell32.lib gdi32.lib Dbghelp.lib ^
+   /link !UPLIBS! Magnification.lib Dwmapi.lib user32.lib shell32.lib gdi32.lib Dbghelp.lib ^
    d3d11.lib dxgi.lib dxguid.lib d3dcompiler.lib windowscodecs.lib ole32.lib oleaut32.lib uuid.lib advapi32.lib ^
    /MANIFEST:EMBED /MANIFESTUAC:NO /MANIFESTINPUT:Wind.manifest /SUBSYSTEM:WINDOWS ^
    /DEBUG /OPT:REF /OPT:ICF
@@ -50,10 +58,10 @@ rem    Deploy via tools\uiaccess_setup.ps1.
 :uiaccess
 rc /nologo /fo "%ROOT%src\wind.res" "%ROOT%src\wind.rc"
 if errorlevel 1 (echo [build] rc.exe failed & exit /b 1)
-cl /nologo /std:c++17 /EHsc /O2 /W4 /Zi /DUNICODE /D_UNICODE /DWIND_UIACCESS ^
+cl /nologo /std:c++17 /EHsc /O2 /W4 /Zi /DUNICODE /D_UNICODE /DWIND_UIACCESS !UPDEFS! ^
    src\*.cpp src\config_ui\ini_edit.cpp src\wind.res ^
    /Fe:Wind.exe ^
-   /link Magnification.lib Dwmapi.lib user32.lib shell32.lib gdi32.lib Dbghelp.lib ^
+   /link !UPLIBS! Magnification.lib Dwmapi.lib user32.lib shell32.lib gdi32.lib Dbghelp.lib ^
    d3d11.lib dxgi.lib dxguid.lib d3dcompiler.lib windowscodecs.lib ole32.lib oleaut32.lib uuid.lib advapi32.lib ^
    /MANIFEST:EMBED /MANIFESTUAC:NO /MANIFESTINPUT:Wind.uiaccess.manifest /SUBSYSTEM:WINDOWS ^
    /DEBUG /OPT:REF /OPT:ICF

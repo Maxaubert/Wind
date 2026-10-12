@@ -259,6 +259,20 @@ test('a Wind with both engines up switches engine live: no Restart Wind button',
   }
 });
 
+test('prototype: the Smooth filter row asks the host (registry, not the ini) and shows its answer', async ({ page }) => {
+  await page.addInitScript(() => { window.__live.txSamplingMode = '1'; window.__saved.txSamplingMode = '1'; });
+  await page.goto('/');
+  await go(page, 'zoom');
+  const sel = page.locator('[data-key="__dwmResample"] select');
+  await expect(sel).toHaveValue('0');
+  await sel.selectOption('1');
+  expect(await sent(page, 'dwmResample')).toEqual([{ type: 'dwmResample', mode: '1' }]);
+  expect((await sent(page, 'setConfig')).filter((m) => m.key === '__dwmResample')).toHaveLength(0);
+  await page.evaluate(() => window.__hostSend({ type: 'dwmResample', ok: false, mode: 0 }));   // UAC cancelled
+  await expect(sel).toHaveValue('0');
+  await expect(page.locator('.capsule')).toHaveCount(0);
+});
+
 test('Smooth transform scaling applies live: no MPO registry write, no restart prompt (#369)', async ({ page }) => {
   await page.goto('/');
   await go(page, 'zoom');

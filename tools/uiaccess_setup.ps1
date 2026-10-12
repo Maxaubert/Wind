@@ -92,6 +92,13 @@ try {
     New-Item -ItemType Directory -Force "$dst\ui" | Out-Null
     Copy-Item $uiSrc $uiDst -Recurse -Force
     Write-Output "deployed: Wind.exe, WindTray.exe, WindConfig.exe, ui\dist\"
+    # PROTOTYPE (proto/upscalers): runtime files for the AI upscalers, staged in .deps\deploy
+    # (git-ignored): nvngx_vsr.dll, onnxruntime.dll, DirectML.dll and models\.
+    $upDeploy = "$root\.deps\deploy"
+    if (Test-Path $upDeploy) {
+        Copy-Item "$upDeploy\*" $dst -Recurse -Force
+        Write-Output "deployed prototype upscaler runtime: $((Get-ChildItem $upDeploy -Recurse -File).Name -join ', ')"
+    }
 
     Write-Output "=== 5. magnifier.ini: NOT deployed - the app owns the single copy in %LOCALAPPDATA% ==="
     # We intentionally do NOT write a magnifier.ini into Program Files. Wind.exe resolves its ini to

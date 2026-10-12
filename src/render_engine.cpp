@@ -9,6 +9,7 @@
 #include "logging.h"
 #include "band_window.h"
 #include "mag_host.h"   // shared Magnification-runtime refcount (both models use the API)
+#include "upscale_pass.h"   // PROTOTYPE: selectable upscale filters (proto/upscalers)
 #include <windows.h>
 #include <d3d11.h>
 #include <dxgi1_6.h>
@@ -191,6 +192,8 @@ struct RenderEngine::State {
     bool copyChangedRegions(ID3D11Texture2D* src, const DXGI_OUTDUPL_FRAME_INFO& fi,
                             const RECT& view, bool crop);
     void render(const RenderFrameParams& p);  // draw into the back-buffer (no Present)
+    UpscalePass upscale;                      // PROTOTYPE: renderFilter 2-10 + per-filter GPU timing
+    bool upscaleDrawn = false;                // PROTOTYPE: the last frame's filter drew (selftest status)
 };
 
 IDXGIOutput* RenderEngine::State::selectOutput(const wchar_t* deviceName, bool fallbackToFirst) {
@@ -504,6 +507,7 @@ bool RenderEngine::recoverDeviceLost() {
     s_->presentFence.Reset(); s_->presentFenceIssued = false;
     s_->revealFence.Reset();
     s_->cursorCache.clear();   // cached cursor textures belong to the dead device
+    s_->upscale.reset();       // prototype upscale filters: device objects
     s_->vs.Reset(); s_->ps.Reset(); s_->cvs.Reset(); s_->cps.Reset();
     s_->cb.Reset(); s_->ccb.Reset();
     s_->bvs.Reset(); s_->bps.Reset(); s_->bcb.Reset();
@@ -521,6 +525,7 @@ bool RenderEngine::recoverDeviceLost() {
 void RenderEngine::debugInfo(int& screenW, int& screenH, int& curW, int& curH, int& hotX, int& hotY) const {
     screenW = s_->sw; screenH = s_->sh; curW = s_->curW; curH = s_->curH; hotX = s_->hotX; hotY = s_->hotY;
 }
+bool RenderEngine::debugUpscaleDrawn() const { return s_->upscaleDrawn; }
 void RenderEngine::debugHdr(unsigned& ddaFormat, int& colorSpace, int& bitsPerColor) const {
     ddaFormat = s_->ddaFormat; colorSpace = s_->outColorSpace; bitsPerColor = s_->outBitsPerColor;
 }
@@ -1101,8 +1106,10 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
     // full-screen repaint to cut the 4K HDR copy.
     double vlevel = p.level < 1.0 ? 1.0 : p.level;
     double vw = sw / vlevel, vh = sh / vlevel;
-    double vl = p.srcLeft - 1.0, vt = p.srcTop - 1.0;
-    double vr = p.srcLeft + vw + 1.0, vb = p.srcTop + vh + 1.0;
+    // PROTOTYPE: the wider filters (Lanczos 3, xBR, NIS, the AI region) read up to 3 texels outside.
+    const double margin = p.filter >= 2 ? 4.0 : 1.0;
+    double vl = p.srcLeft - margin, vt = p.srcTop - margin;
+    double vr = p.srcLeft + vw + margin, vb = p.srcTop + vh + margin;
     if (vl < 0) vl = 0;            if (vt < 0) vt = 0;
     if (vr > sw) vr = sw;          if (vb > sh) vb = sh;
     RECT view{ (LONG)vl, (LONG)vt, (LONG)vr, (LONG)vb };
@@ -1139,6 +1146,15 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
             (sw > 0 ? 1.0f / (float)sw : 0.0f), (sh > 0 ? 1.0f / (float)sh : 0.0f), p.colorOn ? 1.0f : 0.0f, 0.0f, {} };
         for (int i = 0; i < 5; ++i)
             for (int j = 0; j < 4; ++j) cbv.cm[i][j] = p.color.m[i][j];
+        upscale.timeBegin(device.Get(), c);
+        UpscaleInputs ui;
+        ui.dev = device.Get(); ui.ctx = c; ui.desktopSrv = desktopSRV.Get(); ui.backRtv = rtv.Get();
+        ui.linear = sampLinear.Get(); ui.point = sampPoint.Get(); ui.magCb = &cbv;
+        ui.sw = sw; ui.sh = sh; ui.srcLeft = p.srcLeft; ui.srcTop = p.srcTop; ui.viewW = vw; ui.viewH = vh;
+        ui.level = vlevel; ui.filter = p.filter;
+        const bool upDrawn = p.filter >= 2 && upscale.draw(ui);
+        upscaleDrawn = upDrawn;
+        if (!upDrawn) {
         c->UpdateSubresource(cb.Get(), 0, nullptr, &cbv, 0, 0);
         c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         c->VSSetShader(vs.Get(), nullptr, 0);
@@ -1146,9 +1162,11 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
         c->PSSetShader(ps.Get(), nullptr, 0);
         c->PSSetConstantBuffers(0, 1, cb.GetAddressOf());     // PS needs brightness/HDR params
         c->PSSetShaderResources(0, 1, desktopSRV.GetAddressOf());
-        ID3D11SamplerState* samp = (p.bilinear ? sampLinear : sampPoint).Get();
+        ID3D11SamplerState* samp = ((p.bilinear || p.filter >= 2) ? sampLinear : sampPoint).Get();
         c->PSSetSamplers(0, 1, &samp);
         c->Draw(3, 0);
+        }
+        upscale.timeEnd(c, upDrawn ? p.filter : (p.bilinear || p.filter >= 2 ? 1 : 0), vlevel);
     }
 
     // Edge-outline pass: ONE full-screen quad whose pixel shader colors only the border band (within

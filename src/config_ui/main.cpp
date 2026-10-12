@@ -14,9 +14,11 @@
 #include <sstream>
 #include <map>
 #include <memory>
+#include <thread>
 #include "ini_edit.h"
 #include "wind_watchdog.h"
 #include "mpo.h"
+#include "dwm_resample.h"   // PROTOTYPE (proto/upscalers): transform xBR
 #include "../mpo_boot.h"
 #include "../config_path.h"
 #include "../config.h"
@@ -45,6 +47,7 @@ static std::wstring g_initScriptId;   // AddScriptToExecuteOnDocumentCreated id 
 static bool g_onboard = false;   // launched with --onboard; cleared once onboarding is done (ini)
 static const UINT WM_APP_WV_FAILED = WM_APP + 0x31;
 static const UINT WM_APP_DIAG_DONE = WM_APP + 0x32;   // lParam = new std::wstring (zip path, "" = failed)
+static const UINT WM_APP_DWM_DONE = WM_APP + 0x33;    // PROTOTYPE: wParam = 1 ok, lParam = requested mode
 static bool g_exporting = false;                       // a diagnostics export is running (UI thread only)
 static void CreateWebView(HWND hwnd);
 static HWND g_hwnd = nullptr;
@@ -313,6 +316,7 @@ static std::string SessionPayload(const std::string& live) {
     }
     return "\"values\":" + JsonObjectOf(values) + ",\"saved\":" + JsonObjectOf(saved) +
            (running.empty() ? std::string() : ",\"runningModel\":\"" + running + "\"") +
+           ",\"dwmResample\":" + std::to_string(wind::DwmResampleMode()) +   // PROTOTYPE: transform xBR
            ",\"profiles\":{\"names\":" + names + ",\"active\":\"" + JsonEscape(active) + "\"}";
 }
 static std::string UiPaletteOf(const std::string& live) {
@@ -622,6 +626,25 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
                 err = "Could not delete the profile file";
         }
         PostProfiles(wv, err.empty(), err);
+    } else if (type == "dwmResample") {
+        // PROTOTYPE (proto/upscalers): DWM's resampling filter needs admin and a DWM restart, so an
+        // elevated copy of this exe applies it (one UAC prompt); the result comes back by message.
+        const int mode = std::atoi(JsonField(j, "mode").c_str()) & 3;
+        std::thread([mode] {
+            wchar_t exe[MAX_PATH]; GetModuleFileNameW(nullptr, exe, MAX_PATH);
+            std::wstring args = L"--dwm-resample " + std::to_wstring(mode);
+            SHELLEXECUTEINFOW se{ sizeof(se) };
+            se.fMask = SEE_MASK_NOCLOSEPROCESS; se.lpVerb = L"runas"; se.lpFile = exe;
+            se.lpParameters = args.c_str(); se.nShow = SW_HIDE;
+            DWORD code = 1;
+            if (ShellExecuteExW(&se) && se.hProcess) {
+                WaitForSingleObject(se.hProcess, 30000);
+                GetExitCodeProcess(se.hProcess, &code);
+                CloseHandle(se.hProcess);
+            }
+            wind::Log(wind::LogLevel::Info, "config", "dwm resample mode %d: %s", mode, code == 0 ? "applied" : "failed or cancelled");
+            if (g_hwnd) PostMessageW(g_hwnd, WM_APP_DWM_DONE, code == 0 ? 1 : 0, mode);
+        }).detach();
     } else if (type == "openRepo") {
         // About's "Star on GitHub". In the user's default browser, where they are signed in and can
         // star; a link followed inside the WebView would open a bare popup instead. The URL is fixed
@@ -723,6 +746,14 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                            L"such as RivaTuner may be interfering.", L"Wind", MB_ICONWARNING | MB_OK);
             break;
         default: break;
+        }
+        return 0;
+    }
+    if (m == WM_APP_DWM_DONE) {   // PROTOTYPE: report the DWM filter now in force
+        if (g_webview) {
+            std::string js = "{\"type\":\"dwmResample\",\"ok\":" + std::string(w ? "true" : "false") +
+                             ",\"mode\":" + std::to_string(wind::DwmResampleMode()) + "}";
+            g_webview->PostWebMessageAsJson(Widen(js).c_str());
         }
         return 0;
     }
@@ -933,6 +964,12 @@ static void CreateWebView(HWND hwnd) {
 }
 
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
+    // PROTOTYPE (proto/upscalers): the elevated helper run of Settings' DWM filter switch. Exits
+    // before the single-instance check, so the running Settings window is left alone.
+    if (lpCmdLine && wcsstr(lpCmdLine, L"--dwm-resample ")) {
+        const int mode = _wtoi(wcsstr(lpCmdLine, L"--dwm-resample ") + 15) & 3;
+        return wind::DwmResampleApply(mode) ? 0 : 1;
+    }
     // Single-instance: opening Settings from the tray (or any second launch) focuses the existing
     // window instead of stacking another WindConfig.exe with its own WebView2.
     HANDLE mtx = CreateMutexW(nullptr, TRUE, L"WindConfig_SingleInstance");

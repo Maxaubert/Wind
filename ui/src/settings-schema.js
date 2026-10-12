@@ -85,10 +85,21 @@ export const groups = [
         { key: 'txSamplingMode', type: 'select', label: 'Transform scaling', tag: 'Experimental', keywords: ['scaling', 'upscaling', 'filter', 'sharp', 'crisp', 'smooth', 'blurry', 'pixelated', 'hidpi', 'sampling', 'quality', 'nearest', 'lanczos', 'bitmap smoothing', 'high resolution cursor', 'mpo', 'overlay', 'cursor', 'pointer', 'resolution', '4k', 'antialiasing'],
           desc: 'Smooth also sharpens the pointer at high zoom', options: ['0', '1'], optionLabels: { '0': 'Nearest', '1': 'Smooth' }, def: '0',
           showIf: { key: 'model', ne: 'render' } },
-        // Render: the shader's sampler (bilinear 1 / 0 nearest). Applies on the config reload.
-        { key: 'bilinear', type: 'select', label: 'Render scaling', keywords: ['scaling', 'upscaling', 'filter', 'sharp', 'crisp', 'smooth', 'blurry', 'pixelated', 'sampling', 'quality', 'nearest', 'bilinear', 'point', 'resolution', 'antialiasing'],
-          desc: 'How the image is enlarged', options: ['0', '1'], optionLabels: { '0': 'Nearest', '1': 'Bilinear' }, def: '1',
-          showIf: { key: 'model', ne: 'transform' } },
+        // PROTOTYPE (proto/upscalers): DWM's own filter behind Smooth, a system-wide registry value
+        // (UAC + a DWM restart, the screen flashes). Not an ini key: the host reads the registry.
+        { key: '__dwmResample', type: 'select', label: 'Smooth filter', tag: 'Test', keywords: ['xbr', 'lanczos', 'linear', 'dwm', 'filter', 'smooth', 'upscaling', 'scaling', 'transform'],
+          desc: 'Which filter Windows smooths with, for every app', options: ['0', '1', '2', '3'],
+          optionLabels: { '0': 'Lanczos', '1': 'xBR', '2': 'Lanczos in linear light', '3': 'xBR in linear light' }, def: '0',
+          showIf: { key: 'txSamplingMode', eq: '1' } },
+        // Render: the shader's upscale filter (upscale_shaders.h). Applies on the config reload; the
+        // prototype's extra filters are tagged "test" in their labels.
+        { key: 'renderFilter', type: 'select', label: 'Render scaling', keywords: ['scaling', 'upscaling', 'filter', 'sharp', 'crisp', 'smooth', 'blurry', 'pixelated', 'sampling', 'quality', 'nearest', 'bilinear', 'bicubic', 'lanczos', 'xbr', 'fsr', 'nis', 'rtx', 'vsr', 'ai', 'esrgan', 'point', 'resolution', 'antialiasing'],
+          desc: 'How the image is enlarged',
+          options: ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10'],
+          optionLabels: { '0': 'Nearest', '1': 'Bilinear', '2': 'Sharp bilinear (test)', '3': 'Bicubic (test)',
+            '4': 'Lanczos 2 (test)', '5': 'Lanczos 3 (test)', '6': 'xBR (test)', '7': 'AMD FSR 1 (test)',
+            '8': 'NVIDIA Image Scaling (test)', '9': 'NVIDIA RTX Video Super Resolution (test)', '10': 'AI model, Real-ESRGAN (test)' },
+          def: '1', showIf: { key: 'model', ne: 'transform' } },
         // PER-WINDOW-TYPE ENGINE (2026-08-24). Every row defaults to Auto so an untouched install
         // behaves as before. They only apply when the engine above is Auto, so showIf hides them
         // when a single engine is pinned. ("Never use Render for" left Settings in #318; the

@@ -21,7 +21,7 @@ const OLD_BIND_KEYS = [
   'panLeftVk', 'panLeftMods', 'panRightVk', 'panRightMods', 'panUpVk', 'panUpMods', 'panDownVk', 'panDownMods',
   'hideCursorVk', 'hideCursorMods', 'cursorLockVk', 'cursorLockMods',
 ];
-const NEW_KEYS = ['bilinear', 'uiPalette', '__profiles', '__diagnostics', '__openIni', 'trayPerf', 'trayPinned', 'showAdvanced'];
+const NEW_KEYS = ['renderFilter', '__dwmResample', 'uiPalette', '__profiles', '__diagnostics', '__openIni', 'trayPerf', 'trayPinned', 'showAdvanced'];
 
 test('group ids, order and shape follow the spec', () => {
   expect(groups.map((g) => g.id)).toEqual(['hotkeys', 'zoom', 'view', 'prefs', 'tray', 'about']);
@@ -101,7 +101,8 @@ test('rows land in the groups the spec names', () => {
   expect(where('panSpeed')).toBe('view');
   expect(where('mouseAlign')).toBe('view');
   expect(where('txSamplingMode')).toBe('zoom');
-  expect(where('bilinear')).toBe('zoom');
+  expect(where('renderFilter')).toBe('zoom');
+  expect(where('__dwmResample')).toBe('zoom');
   expect(where('lockApps')).toBe('view');
   expect(where('trackAlign')).toBe('view');
   expect(where('colorDimPct')).toBe('prefs');

@@ -11,7 +11,7 @@
   import { groups } from './settings-schema.js';
   import { getSession, setConfig, setConfigPersist, saveSession, discardSession, openIni,
            exportDiagnostics, openRepo, pickExe, windowControl, onMessage,
-           setDirty, switchProfile, createProfile, deleteProfile } from './bridge.js';
+           setDirty, switchProfile, createProfile, deleteProfile, setDwmResample } from './bridge.js';
   import { fill, changedKeys } from './session.js';
   import { themes, normalizePalette } from './design/themes.js';
   import { droppedBinds } from './lib/keybindRules.js';
@@ -91,6 +91,12 @@
   function change(key, val) {
     if (key === 'txSamplingMode' && Number(val) === 1 && Number(values.txSamplingMode) !== 1 &&
         String(values.uiHighResNoticeOff) !== '1') { highResSkip = false; highResPrompt = true; return; }
+    if (key === '__dwmResample') {   // PROTOTYPE: the registry, not the ini (UAC + DWM restart)
+      values = { ...values, __dwmResample: String(val) };
+      saved = { ...saved, __dwmResample: String(val) };
+      setDwmResample(val);
+      return;
+    }
     if (key === 'model') announce('Magnifier model set to ' + val + '. Some display options changed.');
     if (key === 'uiPalette') announce('Theme ' + (themes.find((t) => t.id === val)?.label ?? val));
     values = { ...values, [key]: val };
@@ -123,6 +129,13 @@
       onMessage((m) => { if (m && m.type === 'configWriteFailed') { writeError = m.key || 'a setting'; refresh(); } }),
       // Maximized: no window outline (the host reports the state on every resize).
       onMessage((m) => { if (m && m.type === 'windowState') { maximized = !!m.maximized; document.documentElement.toggleAttribute('data-maximized', maximized); } }),
+      // PROTOTYPE: the DWM filter the host found in force after the elevated switch (cancelled UAC = unchanged).
+      onMessage((m) => {
+        if (!m || m.type !== 'dwmResample') return;
+        values = { ...values, __dwmResample: String(m.mode) };
+        saved = { ...saved, __dwmResample: String(m.mode) };
+        if (!m.ok) announce('The smooth filter was not changed');
+      }),
       onMessage((m) => {
         if (m && m.type === 'restartFailed') {
           values = { ...values, model: runningModel }; setConfig('model', runningModel);

@@ -22,6 +22,7 @@ struct RenderFrameParams {
     int    clickDesktopX, clickDesktopY; // SetCursorPos target (desktop px) for click hit-test
     bool   cursorScaleWithZoom;          // draw the cursor scaled by zoom vs native size
     bool   bilinear;                     // bilinear (smooth) vs point sampling
+    int    filter = 1;                   // PROTOTYPE: wind::UpFilter (0 nearest, 1 bilinear, 2+ upscale_shaders.h)
     double sharpness;                    // 0 = off; >0 = adaptive sharpen strength (crisps upscaled detail)
     double brightness;                   // output multiplier (1.0 = unchanged; <1 dims for HDR)
     bool   colorOn = false;              // apply `color` in the pixel shader (issue #288)
@@ -140,6 +141,8 @@ public:
     void debugInfo(int& screenW, int& screenH, int& curW, int& curH, int& hotX, int& hotY) const;
     // Verification only: duplication surface format + output color space / bit depth (HDR).
     void debugHdr(unsigned& ddaFormat, int& colorSpace, int& bitsPerColor) const;
+    // PROTOTYPE (proto/upscalers): did the last frame's upscale filter draw (else bilinear fallback)?
+    bool debugUpscaleDrawn() const;
     // Frame-perf counters since the last reset: CPU milliseconds spent building the frame
     // (capture+draw submission) and spent blocked inside Present, sum + max, over `frames`
     // presented frames plus `gateSkips` frames dropped by the present-fence gate. Present block

@@ -411,6 +411,9 @@ struct Config {
     // "always" = always draw it; "never" = never draw it.
     std::string cursorVisibility = "auto";
     int    bilinear = 1;             // 1 = bilinear sampling (smooth), 0 = point (crisp pixels)
+    // PROTOTYPE (proto/upscalers): the render upscale filter, wind::UpFilter (upscale_shaders.h).
+    // -1 = unset: follows `bilinear` (0 nearest, 1 bilinear).
+    int    renderFilter = -1;
     // Adaptive sharpening of the magnified image (counters upscale blur; crisps text/detail).
     // 0 = off (cheapest, single tap). 0.1-1.0 = strength. Folded into the magnify pass (no extra pass).
     double sharpness = 0.0;

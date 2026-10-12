@@ -18,7 +18,7 @@ export function getSession() {
     delete window.__windInit;
     return Promise.resolve({
       values: init.values || {}, saved: init.saved || init.values || {}, runningModel: init.runningModel || '',
-      profiles: init.profiles || { names: [], active: '' },
+      dwmResample: init.dwmResample, profiles: init.profiles || { names: [], active: '' },
     });
   }
   return new Promise(resolve => {
@@ -29,7 +29,7 @@ export function getSession() {
       if (m && m.type === 'config') {
         off();
         resolve({ values: m.values || {}, saved: m.saved || m.values || {}, runningModel: m.runningModel || '',
-                  profiles: m.profiles || { names: [], active: '' } });
+                  dwmResample: m.dwmResample, profiles: m.profiles || { names: [], active: '' } });
       } else if (m && m.type === 'configUnreadable') {
         if (++tries < 8) setTimeout(() => post({ type: 'getConfig' }), 250);
         else { off(); resolve({ values: {}, saved: {}, profiles: { names: [], active: '' } }); }
@@ -81,6 +81,9 @@ export function windowControl(action, force = false) {
 export function setDirty(v) { post({ type: 'dirty', value: v ? '1' : '0' }); }
 // "Edit config file" -> host opens magnifier.ini with the registered .ini handler (Notepad fallback).
 export function openIni() { post({ type: 'openIni' }); }
+// PROTOTYPE (proto/upscalers): set DWM's resampling filter (UAC + a DWM restart); answered by a
+// { type: 'dwmResample', ok, mode } message.
+export function setDwmResample(mode) { post({ type: 'dwmResample', mode: String(mode) }); }
 // "Export diagnostics" -> host zips %LOCALAPPDATA%\Wind\logs to the Desktop and reveals it.
 export function exportDiagnostics() { post({ type: 'exportDiagnostics' }); }
 // "+" on an app list -> host shows a file picker and replies with the bare exe NAME (not a path:

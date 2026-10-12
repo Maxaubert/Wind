@@ -6,7 +6,8 @@ import { groups, groupRows, bindKeys } from './settings-schema.js';
 // count as an unsaved change. The five tray keys (#313) live in the live ini only.
 // uiHighResNoticeOff (#441) is the opt-out of the High resolution cursor notice.
 export const GLOBAL_KEYS = new Set(['profile', 'onboarded', 'uiTheme', 'uiPalette', 'showAdvanced',
-  'trayPerf', 'traySliders', 'traySliderOrder', 'trayToggles', 'trayToggleOrder', 'trayPinned', 'uiHighResNoticeOff']);
+  'trayPerf', 'traySliders', 'traySliderOrder', 'trayToggles', 'trayToggleOrder', 'trayPinned', 'uiHighResNoticeOff',
+  '__dwmResample']);   // PROTOTYPE: DWM's filter lives in the registry, never in a profile
 
 // Must match the core's shipped defaults (src/config.h): every keybind ships unbound except Quick
 // zoom. Seeding anything else here would invent a binding the user never chose.
@@ -35,7 +36,10 @@ function schemaDefaults() {
 // session: { values, saved } as the host reports them. Returns both maps with defaults filled in.
 export function fill(session) {
   const d = schemaDefaults();
-  return { values: { ...d, ...(session.values || {}) }, saved: { ...d, ...(session.saved || session.values || {}) } };
+  const out = { values: { ...d, ...(session.values || {}) }, saved: { ...d, ...(session.saved || session.values || {}) } };
+  // PROTOTYPE (proto/upscalers): DWM's resampling filter, read from the registry by the host.
+  out.values.__dwmResample = out.saved.__dwmResample = String(session.dwmResample ?? 0);
+  return out;
 }
 
 // Same setting: identical trimmed text, or both plain numbers with the same value ("1.0" vs "1"),

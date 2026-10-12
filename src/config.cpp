@@ -220,6 +220,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "smoothPan")          c.smoothPan = ParseIntStrict(val);
             else if (key == "magInputTransform")  c.magInputTransform = ParseIntStrict(val);
             else if (key == "bilinear")           c.bilinear = ParseIntStrict(val);
+            else if (key == "renderFilter")       c.renderFilter = ParseIntStrict(val);
             else if (key == "sharpness")          c.sharpness = ParseDoubleStrict(val);
             else if (key == "zorderBand")         c.zorderBand = ParseIntStrict(val);
             else if (key == "brightness")         c.brightness = ParseDoubleStrict(val);
@@ -309,6 +310,7 @@ Config ParseConfig(const std::string& text) {
     if (c.gameCursorLagMs < -1) c.gameCursorLagMs = -1;
     if (c.gameCursorLagMs > 100) c.gameCursorLagMs = 100;
     c.sharpness       = clampd(c.sharpness,       0.0, 1.0);
+    if (c.renderFilter < -1 || c.renderFilter > 10) c.renderFilter = -1;   // prototype filter range
     c.brightness      = clampd(c.brightness,      0.5, 1.5);
     c.colorWarmPct    = (int)clampd(c.colorWarmPct, 0, 100);
     c.colorDimPct     = (int)clampd(c.colorDimPct, 1, 100);
@@ -548,6 +550,8 @@ std::string DefaultIniText() {
                "cursorVisibility=auto\n"
                "; bilinear: 1=smooth scaling, 0=crisp/point\n"
                "bilinear=1\n"
+               "; renderFilter: PROTOTYPE upscale filter (0 nearest, 1 bilinear, 2-10 test filters)\n"
+               "renderFilter=1\n"
                "; sharpness: 0=off; 0.1-1.0 sharpens the magnified image (crisper text/detail)\n"
                "sharpness=0.0\n"
                "; zorderBand: z-band of the render engine's overlay and the Inspect crosshair. 0=ordinary\n"
