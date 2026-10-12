@@ -188,8 +188,8 @@ test('View: the edge margin shows only when the pointer is kept within the edges
 test('Smooth transform scaling is tagged Experimental and keeps the release glide (#439)', async ({ page }) => {
   await page.goto('/');
   await go(page, 'zoom');
-  await expect(key(page, 'txSamplingMode').locator('.tag')).toHaveText('Experimental');
-  await key(page, 'txSamplingMode').locator('select').selectOption('1');
+  await expect(key(page, '__txScale').locator('.tag')).toHaveText('Experimental');
+  await key(page, '__txScale').locator('select').selectOption('1');
   await page.getByRole('button', { name: 'Use Smooth' }).click();   // the experimental notice (#441)
   await expect(key(page, 'zoomEaseOutMs')).not.toHaveClass(/disabled/);
   await expect(key(page, 'zoomEaseOutMs').locator('input[type=range]')).toBeEnabled();

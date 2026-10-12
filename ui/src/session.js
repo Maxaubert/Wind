@@ -7,7 +7,7 @@ import { groups, groupRows, bindKeys } from './settings-schema.js';
 // uiHighResNoticeOff (#441) is the opt-out of the High resolution cursor notice.
 export const GLOBAL_KEYS = new Set(['profile', 'onboarded', 'uiTheme', 'uiPalette', 'showAdvanced',
   'trayPerf', 'traySliders', 'traySliderOrder', 'trayToggles', 'trayToggleOrder', 'trayPinned', 'uiHighResNoticeOff',
-  '__dwmResample']);   // PROTOTYPE: DWM's filter lives in the registry, never in a profile
+  '__dwmResample', '__txScale']);   // PROTOTYPE: DWM's filter lives in the registry, never in a profile
 
 // Must match the core's shipped defaults (src/config.h): every keybind ships unbound except Quick
 // zoom. Seeding anything else here would invent a binding the user never chose.
@@ -30,7 +30,14 @@ function schemaDefaults() {
     if (r.key[0] !== '_' && r.def !== undefined) d[r.key] = r.def;
     for (const k of bindKeys(r)) if (!(k in d)) d[k] = '0';
   }
+  d.txSamplingMode = '0';   // PROTOTYPE: no row of its own (it is inside __txScale), still a profile key
   return d;
+}
+
+// PROTOTYPE (proto/upscalers): the Transform scaling dropdown's value, derived from the sampling
+// mode and DWM's smooth filter: 0 nearest, 1-4 smooth with DWM filter 0-3.
+export function txScaleOf(v) {
+  return Number(v.txSamplingMode) === 1 ? String((Number(v.__dwmResample) || 0) + 1) : '0';
 }
 
 // session: { values, saved } as the host reports them. Returns both maps with defaults filled in.
@@ -39,6 +46,7 @@ export function fill(session) {
   const out = { values: { ...d, ...(session.values || {}) }, saved: { ...d, ...(session.saved || session.values || {}) } };
   // PROTOTYPE (proto/upscalers): DWM's resampling filter, read from the registry by the host.
   out.values.__dwmResample = out.saved.__dwmResample = String(session.dwmResample ?? 0);
+  out.values.__txScale = out.saved.__txScale = txScaleOf(out.values);
   return out;
 }
 

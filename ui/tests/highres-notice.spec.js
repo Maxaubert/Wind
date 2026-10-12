@@ -23,7 +23,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 const go = (page, g) => page.locator('.side .it[data-g="' + g + '"]').click();
-const sel = (page) => page.locator('[data-key="txSamplingMode"] select');
+const sel = (page) => page.locator('[data-key="__txScale"] select');
 const on = (page, row = sel(page)) => row.selectOption('1');
 const off = (page, row = sel(page)) => row.selectOption('0');
 const notice = (page) => page.getByRole('dialog', { name: 'Smooth scaling is experimental' });
@@ -117,7 +117,7 @@ test('an ini that already has the opt-out shows no notice', async ({ page }) => 
 test('a search result for the same row asks too, and Use Smooth writes through', async ({ page }) => {
   await page.goto('/');
   await page.locator('.side .search input').fill('high resolution cursor');
-  const row = page.locator('.res [data-key="txSamplingMode"] select');
+  const row = page.locator('.res [data-key="__txScale"] select');
   await on(page, row);
   await expect(notice(page)).toBeVisible();
   await notice(page).getByRole('button', { name: 'Cancel' }).click();

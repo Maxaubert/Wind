@@ -5,7 +5,7 @@ import { groups, allRows, groupRows, bindKeys } from '../src/settings-schema.js'
 // Row keys of the #303 schema. Every one must still appear exactly once after #318, except the two
 // REMOVED rows: the scroll-wheel row (the wheel is a Zoom in / Zoom out binding now) and "Never use
 // Render for" (renderExclude stays in the ini and the core, not in Settings).
-const REMOVED = ['__zoomWheel', 'renderExclude'];
+const REMOVED = ['__zoomWheel', 'renderExclude', 'txSamplingMode'];   // txSamplingMode: now inside __txScale (prototype)
 const OLD_KEYS = [
   '__zoomIn', '__zoomOut', '__zoomWheel', '__pan',  // was four rows (Pan left/right/up/down); their ini keys live in OLD_BIND_KEYS
   'noSwallowApps', 'maxLevel', 'zoomInSpeed', 'zoomOutSpeed', 'panSpeed', 'smoothZoomAccel',
@@ -21,7 +21,7 @@ const OLD_BIND_KEYS = [
   'panLeftVk', 'panLeftMods', 'panRightVk', 'panRightMods', 'panUpVk', 'panUpMods', 'panDownVk', 'panDownMods',
   'hideCursorVk', 'hideCursorMods', 'cursorLockVk', 'cursorLockMods',
 ];
-const NEW_KEYS = ['renderFilter', '__dwmResample', 'uiPalette', '__profiles', '__diagnostics', '__openIni', 'trayPerf', 'trayPinned', 'showAdvanced'];
+const NEW_KEYS = ['renderFilter', '__txScale', 'uiPalette', '__profiles', '__diagnostics', '__openIni', 'trayPerf', 'trayPinned', 'showAdvanced'];
 
 test('group ids, order and shape follow the spec', () => {
   expect(groups.map((g) => g.id)).toEqual(['hotkeys', 'zoom', 'view', 'prefs', 'tray', 'about']);
@@ -100,9 +100,8 @@ test('rows land in the groups the spec names', () => {
   expect(where('__cursorLock')).toBe('hotkeys');
   expect(where('panSpeed')).toBe('view');
   expect(where('mouseAlign')).toBe('view');
-  expect(where('txSamplingMode')).toBe('zoom');
   expect(where('renderFilter')).toBe('zoom');
-  expect(where('__dwmResample')).toBe('zoom');
+  expect(where('__txScale')).toBe('zoom');
   expect(where('lockApps')).toBe('view');
   expect(where('trackAlign')).toBe('view');
   expect(where('colorDimPct')).toBe('prefs');
@@ -192,8 +191,8 @@ test('engine row offers Restart Wind and per-window rows follow Auto; the share-
 
 test('zoom page: transform scaling select; hotkeys page: inspect box and its switch', async ({ page }) => {
   await page.goto('/controls.html?group=zoom');
-  await ctl(page, 'txSamplingMode').locator('select').selectOption('1');
-  expect(await page.evaluate(() => window.__calls)).toEqual([['txSamplingMode', '1']]);
+  await ctl(page, '__txScale').locator('select').selectOption('1');
+  expect(await page.evaluate(() => window.__calls)).toEqual([['__txScale', '1']]);
   await page.goto('/controls.html?group=hotkeys');
   const ins = ctl(page, '__cursorLock');
   await expect(ins.locator('.kc.ghost')).toHaveText('Set key');

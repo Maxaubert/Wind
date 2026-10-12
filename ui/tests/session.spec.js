@@ -259,24 +259,26 @@ test('a Wind with both engines up switches engine live: no Restart Wind button',
   }
 });
 
-test('prototype: the Smooth filter row asks the host (registry, not the ini) and shows its answer', async ({ page }) => {
+test('prototype: one Transform scaling dropdown sets the sampling mode and DWM\'s smooth filter', async ({ page }) => {
   await page.addInitScript(() => { window.__live.txSamplingMode = '1'; window.__saved.txSamplingMode = '1'; });
   await page.goto('/');
   await go(page, 'zoom');
-  const sel = page.locator('[data-key="__dwmResample"] select');
-  await expect(sel).toHaveValue('0');
-  await sel.selectOption('1');
+  const sel = page.locator('[data-key="__txScale"] select');
+  await expect(sel).toHaveValue('1');                      // Smooth, Lanczos
+  await sel.selectOption('2');                             // Smooth, xBR: the registry, not the ini
   expect(await sent(page, 'dwmResample')).toEqual([{ type: 'dwmResample', mode: '1' }]);
-  expect((await sent(page, 'setConfig')).filter((m) => m.key === '__dwmResample')).toHaveLength(0);
+  expect((await sent(page, 'setConfig')).filter((m) => m.key.startsWith('__'))).toHaveLength(0);
   await page.evaluate(() => window.__hostSend({ type: 'dwmResample', ok: false, mode: 0 }));   // UAC cancelled
-  await expect(sel).toHaveValue('0');
-  await expect(page.locator('.capsule')).toHaveCount(0);
+  await expect(sel).toHaveValue('1');
+  await sel.selectOption('0');                             // Nearest: only the sampling mode
+  expect(await page.evaluate(() => window.__live.txSamplingMode)).toBe('0');
+  expect(await sent(page, 'dwmResample')).toHaveLength(1);   // Nearest leaves DWM's filter alone
 });
 
 test('Smooth transform scaling applies live: no MPO registry write, no restart prompt (#369)', async ({ page }) => {
   await page.goto('/');
   await go(page, 'zoom');
-  const sel = page.locator('[data-key="txSamplingMode"] select');
+  const sel = page.locator('[data-key="__txScale"] select');
   await sel.selectOption('1');
   await page.getByRole('button', { name: 'Use Smooth' }).click();   // the experimental notice (#441)
   expect(await page.evaluate(() => window.__live.txSamplingMode)).toBe('1');
@@ -284,7 +286,7 @@ test('Smooth transform scaling applies live: no MPO registry write, no restart p
   expect(await page.evaluate(() => window.__live.txSamplingMode)).toBe('0');
   expect(await sent(page, 'setMpoDisabled')).toHaveLength(0);
   await expect(page.getByRole('dialog', { name: 'Restart to finish' })).toHaveCount(0);
-  await expect(page.locator('[data-key="txSamplingMode"]').getByText('Requires restart')).toHaveCount(0);
+  await expect(page.locator('[data-key="__txScale"]').getByText('Requires restart')).toHaveCount(0);
 });
 
 test('the tray switching profile reloads the session', async ({ page }) => {

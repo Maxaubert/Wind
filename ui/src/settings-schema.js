@@ -82,15 +82,14 @@ export const groups = [
         // both, so it shows both). Not advanced, so the card stays reachable without them.
         // Transform: txSamplingMode, DWM's own filter (0 nearest / 1 smooth = Lanczos, the former High
         // resolution cursor toggle, #227). It applies live (#369) and turning Smooth on asks first (#441).
-        { key: 'txSamplingMode', type: 'select', label: 'Transform scaling', tag: 'Experimental', keywords: ['scaling', 'upscaling', 'filter', 'sharp', 'crisp', 'smooth', 'blurry', 'pixelated', 'hidpi', 'sampling', 'quality', 'nearest', 'lanczos', 'bitmap smoothing', 'high resolution cursor', 'mpo', 'overlay', 'cursor', 'pointer', 'resolution', '4k', 'antialiasing'],
-          desc: 'Smooth also sharpens the pointer at high zoom', options: ['0', '1'], optionLabels: { '0': 'Nearest', '1': 'Smooth' }, def: '0',
-          showIf: { key: 'model', ne: 'render' } },
-        // PROTOTYPE (proto/upscalers): DWM's own filter behind Smooth, a system-wide registry value
-        // (UAC + a DWM restart, the screen flashes). Not an ini key: the host reads the registry.
-        { key: '__dwmResample', type: 'select', label: 'Smooth filter', tag: 'Test', keywords: ['xbr', 'lanczos', 'linear', 'dwm', 'filter', 'smooth', 'upscaling', 'scaling', 'transform'],
-          desc: 'Which filter Windows smooths with, for every app', options: ['0', '1', '2', '3'],
-          optionLabels: { '0': 'Lanczos', '1': 'xBR', '2': 'Lanczos in linear light', '3': 'xBR in linear light' }, def: '0',
-          showIf: { key: 'txSamplingMode', eq: '1' } },
+        // PROTOTYPE (proto/upscalers): one dropdown for every transform filter, for A/B testing. It
+        // combines txSamplingMode (0 nearest / 1 smooth) with DWM's own smooth filter, a system-wide
+        // registry value (__dwmResample: changing it asks for UAC and restarts DWM, the screen
+        // flashes). __txScale is derived from the two (session.js txScaleOf), never written to the ini.
+        { key: '__txScale', type: 'select', label: 'Transform scaling', tag: 'Experimental', keywords: ['scaling', 'upscaling', 'filter', 'sharp', 'crisp', 'smooth', 'blurry', 'pixelated', 'hidpi', 'sampling', 'quality', 'nearest', 'lanczos', 'xbr', 'linear', 'dwm', 'bitmap smoothing', 'high resolution cursor', 'mpo', 'overlay', 'cursor', 'pointer', 'resolution', '4k', 'antialiasing'],
+          desc: 'Smooth also sharpens the pointer at high zoom', options: ['0', '1', '2', '3', '4'],
+          optionLabels: { '0': 'Nearest', '1': 'Smooth, Lanczos', '2': 'Smooth, xBR (test)', '3': 'Smooth, Lanczos in linear light (test)', '4': 'Smooth, xBR in linear light (test)' },
+          def: '0', showIf: { key: 'model', ne: 'render' } },
         // Render: the shader's upscale filter (upscale_shaders.h). Applies on the config reload; the
         // prototype's extra filters are tagged "test" in their labels.
         { key: 'renderFilter', type: 'select', label: 'Render scaling', keywords: ['scaling', 'upscaling', 'filter', 'sharp', 'crisp', 'smooth', 'blurry', 'pixelated', 'sampling', 'quality', 'nearest', 'bilinear', 'bicubic', 'lanczos', 'xbr', 'fsr', 'nis', 'rtx', 'vsr', 'ai', 'esrgan', 'point', 'resolution', 'antialiasing'],

@@ -12,7 +12,7 @@
   import { getSession, setConfig, setConfigPersist, saveSession, discardSession, openIni,
            exportDiagnostics, openRepo, pickExe, windowControl, onMessage,
            setDirty, switchProfile, createProfile, deleteProfile, setDwmResample } from './bridge.js';
-  import { fill, changedKeys } from './session.js';
+  import { fill, changedKeys, txScaleOf } from './session.js';
   import { themes, normalizePalette } from './design/themes.js';
   import { droppedBinds } from './lib/keybindRules.js';
   import TitleBar from './shell/TitleBar.svelte';
@@ -81,20 +81,41 @@
   // (uiHighResNoticeOff, a global UI-only key). Every row that renders the key (page and search) comes here.
   let highResPrompt = $state(false);
   let highResSkip = $state(false);
+  let pendingDwm = null;   // PROTOTYPE: the DWM filter a held-back Smooth choice also asked for
   function acceptHighRes() {
     if (highResSkip) { values = { ...values, uiHighResNoticeOff: '1' }; setConfig('uiHighResNoticeOff', '1'); }
     highResPrompt = false; highResSkip = false;
     values = { ...values, txSamplingMode: 1 };
     setConfig('txSamplingMode', 1);
+    if (pendingDwm !== null) setDwm(pendingDwm);
+    pendingDwm = null;
+    syncTxScale();
   }
-  function cancelHighRes() { highResPrompt = false; highResSkip = false; }
+  function cancelHighRes() { highResPrompt = false; highResSkip = false; pendingDwm = null; }
+  // PROTOTYPE: DWM's filter lives in the registry (UAC + DWM restart), never in the ini or a profile.
+  function setDwm(mode) {
+    if (Number(values.__dwmResample) === mode) return;
+    values = { ...values, __dwmResample: String(mode) };
+    saved = { ...saved, __dwmResample: String(mode) };
+    setDwmResample(mode);
+  }
+  function syncTxScale() {
+    const t = txScaleOf(values);
+    values = { ...values, __txScale: t };
+    saved = { ...saved, __txScale: t };
+  }
   function change(key, val) {
     if (key === 'txSamplingMode' && Number(val) === 1 && Number(values.txSamplingMode) !== 1 &&
         String(values.uiHighResNoticeOff) !== '1') { highResSkip = false; highResPrompt = true; return; }
-    if (key === '__dwmResample') {   // PROTOTYPE: the registry, not the ini (UAC + DWM restart)
-      values = { ...values, __dwmResample: String(val) };
-      saved = { ...saved, __dwmResample: String(val) };
-      setDwmResample(val);
+    if (key === '__txScale') {   // PROTOTYPE: one dropdown = the sampling mode + DWM's smooth filter
+      const v = Number(val), sampling = v > 0 ? 1 : 0;
+      const dwm = v > 0 ? v - 1 : null;   // Nearest leaves DWM's filter as it is
+      if (sampling === 1 && Number(values.txSamplingMode) !== 1 && String(values.uiHighResNoticeOff) !== '1') {
+        pendingDwm = dwm; highResSkip = false; highResPrompt = true; return;
+      }
+      if (dwm !== null) setDwm(dwm);
+      if (Number(values.txSamplingMode) !== sampling) { values = { ...values, txSamplingMode: sampling }; setConfig('txSamplingMode', sampling); }
+      syncTxScale();
       return;
     }
     if (key === 'model') announce('Magnifier model set to ' + val + '. Some display options changed.');
@@ -134,6 +155,7 @@
         if (!m || m.type !== 'dwmResample') return;
         values = { ...values, __dwmResample: String(m.mode) };
         saved = { ...saved, __dwmResample: String(m.mode) };
+        syncTxScale();
         if (!m.ok) announce('The smooth filter was not changed');
       }),
       onMessage((m) => {
