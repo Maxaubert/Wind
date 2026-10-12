@@ -55,6 +55,45 @@ inline bool MonoIsPureInvert(const uint8_t* andBits, const uint8_t* xorBits, int
     return anyInvert;
 }
 
+// The same inverting pointer stored as an old-style COLOUR cursor (no alpha): every AND bit is 1 and
+// the colour pixels that are not black XOR onto the screen. Windows' text beam at a scaled pointer
+// size (field 2026-10-12: 64x64 32bpp, AND all 1, 186 white pixels). AlphaFromMask would make every
+// pixel transparent, so the beam vanished in the zoomed view.
+inline bool ColorIsPureInvert(const uint32_t* px, int w, int h, const uint8_t* andBits, int stride) {
+    bool anyInvert = false;
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            if (!MaskBit(andBits, stride, x, y)) return false;
+            if (px[y * w + x] & 0x00FFFFFFu) anyInvert = true;
+        }
+    return anyInvert;
+}
+
+// Inverting colour pixels for the invert blend: white where the cursor inverts, black (no change)
+// elsewhere. In place.
+inline void ColorInvertMask(uint32_t* px, int n) {
+    for (int i = 0; i < n; ++i) px[i] = (px[i] & 0x00FFFFFFu) ? 0xFFFFFFFFu : 0x00000000u;
+}
+
+// An inverting colour pointer (ColorIsPureInvert) as a tintable colour one, like MonoToArgb: the
+// inverting pixels white, every transparent pixel touching one a black outline. In place.
+inline void ColorInvertToArgb(uint32_t* px, int w, int h) {
+    auto inv = [&](int x, int y) {
+        // Pixels already done are white (inverting) or black/clear (colour 0), so this reads the same.
+        return x >= 0 && y >= 0 && x < w && y < h && (px[y * w + x] & 0x00FFFFFFu) != 0;
+    };
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            uint32_t& p = px[y * w + x];
+            if (p & 0x00FFFFFFu) { p = 0xFFFFFFFFu; continue; }
+            bool edge = false;
+            for (int dy = -1; dy <= 1 && !edge; ++dy)
+                for (int dx = -1; dx <= 1 && !edge; ++dx)
+                    if ((dx || dy) && inv(x + dx, y + dy)) edge = true;
+            p = edge ? 0xFF000000u : 0x00000000u;
+        }
+}
+
 // A monochrome pointer (AND + XOR masks) as a colour one:
 //   AND 0 XOR 0 -> black, AND 0 XOR 1 -> white, AND 1 XOR 0 -> transparent,
 //   AND 1 XOR 1 -> "invert the screen": drawn white, and every transparent pixel touching one
