@@ -9,6 +9,7 @@
 #include "logging.h"
 #include "band_window.h"
 #include "mag_host.h"   // shared Magnification-runtime refcount (both models use the API)
+#include "upscale_pass.h"   // the xBR / NIS scaling filters (issue #456)
 #include <windows.h>
 #include <d3d11.h>
 #include <dxgi1_6.h>
@@ -191,6 +192,7 @@ struct RenderEngine::State {
     bool copyChangedRegions(ID3D11Texture2D* src, const DXGI_OUTDUPL_FRAME_INFO& fi,
                             const RECT& view, bool crop);
     void render(const RenderFrameParams& p);  // draw into the back-buffer (no Present)
+    UpscalePass upscale;                      // renderScaling xBR / NIS (issue #456)
 };
 
 IDXGIOutput* RenderEngine::State::selectOutput(const wchar_t* deviceName, bool fallbackToFirst) {
@@ -504,6 +506,7 @@ bool RenderEngine::recoverDeviceLost() {
     s_->presentFence.Reset(); s_->presentFenceIssued = false;
     s_->revealFence.Reset();
     s_->cursorCache.clear();   // cached cursor textures belong to the dead device
+    s_->upscale.reset();       // the scaling filters' shaders and timers
     s_->vs.Reset(); s_->ps.Reset(); s_->cvs.Reset(); s_->cps.Reset();
     s_->cb.Reset(); s_->ccb.Reset();
     s_->bvs.Reset(); s_->bps.Reset(); s_->bcb.Reset();
@@ -1097,12 +1100,14 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
     // once and reuse it. acquireBackbufferRtv() runs only on (re)build or resize, not per frame.
     if (!rtv && !acquireBackbufferRtv()) return;
     // Magnified source rect in desktop pixels (what the magnify pass samples below), clamped to the
-    // screen with a 1px margin for bilinear edge taps. capture() can copy only this region on a
+    // screen with a margin for the filter taps: 1 px for bilinear, 4 for xBR and NIS (they read up to
+    // 2-3 texels outside the view, issue #456). capture() can copy only this region on a
     // full-screen repaint to cut the 4K HDR copy.
     double vlevel = p.level < 1.0 ? 1.0 : p.level;
     double vw = sw / vlevel, vh = sh / vlevel;
-    double vl = p.srcLeft - 1.0, vt = p.srcTop - 1.0;
-    double vr = p.srcLeft + vw + 1.0, vb = p.srcTop + vh + 1.0;
+    const double margin = p.scaling != 0 ? 4.0 : 1.0;
+    double vl = p.srcLeft - margin, vt = p.srcTop - margin;
+    double vr = p.srcLeft + vw + margin, vb = p.srcTop + vh + margin;
     if (vl < 0) vl = 0;            if (vt < 0) vt = 0;
     if (vr > sw) vr = sw;          if (vb > sh) vb = sh;
     RECT view{ (LONG)vl, (LONG)vt, (LONG)vr, (LONG)vb };
@@ -1139,6 +1144,15 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
             (sw > 0 ? 1.0f / (float)sw : 0.0f), (sh > 0 ? 1.0f / (float)sh : 0.0f), p.colorOn ? 1.0f : 0.0f, 0.0f, {} };
         for (int i = 0; i < 5; ++i)
             for (int j = 0; j < 4; ++j) cbv.cm[i][j] = p.color.m[i][j];
+        if (p.upscaleTiming) upscale.timeBegin(device.Get(), c);
+        // xBR / NIS (issue #456) draw the whole magnify pass; nearest, or a filter whose shader
+        // failed to build, takes the plain pass below.
+        UpscaleInputs ui;
+        ui.dev = device.Get(); ui.ctx = c; ui.desktopSrv = desktopSRV.Get(); ui.backRtv = rtv.Get();
+        ui.linear = sampLinear.Get(); ui.point = sampPoint.Get(); ui.magCb = &cbv;
+        ui.sw = sw; ui.sh = sh; ui.scaling = p.scaling;
+        const bool filtered = p.scaling != 0 && upscale.draw(ui);
+        if (!filtered) {
         c->UpdateSubresource(cb.Get(), 0, nullptr, &cbv, 0, 0);
         c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         c->VSSetShader(vs.Get(), nullptr, 0);
@@ -1149,6 +1163,8 @@ void RenderEngine::State::render(const RenderFrameParams& p) {
         ID3D11SamplerState* samp = (p.bilinear ? sampLinear : sampPoint).Get();
         c->PSSetSamplers(0, 1, &samp);
         c->Draw(3, 0);
+        }
+        if (p.upscaleTiming) upscale.timeEnd(c, filtered ? p.scaling : 0, vlevel);
     }
 
     // Edge-outline pass: ONE full-screen quad whose pixel shader colors only the border band (within

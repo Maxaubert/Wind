@@ -43,6 +43,17 @@ TEST_CASE("parses renderer knobs") {
     CHECK(c.cursorConstantSize == 1);
     CHECK(c.bilinear == 1);
 }
+// Issue #456: bilinear is retired. An ini that never had renderScaling keeps nearest when it chose
+// bilinear=0, and every other one gets the new default, xBR; an explicit renderScaling wins.
+TEST_CASE("renderScaling migrates from the retired bilinear key") {
+    CHECK(ParseConfig("bilinear=0\n").renderScaling == 0);
+    CHECK(ParseConfig("bilinear=1\n").renderScaling == 1);
+    CHECK(ParseConfig("").renderScaling == 1);
+    CHECK(ParseConfig("bilinear=0\nrenderScaling=2\n").renderScaling == 2);
+    CHECK(ParseConfig("renderScaling=1\nbilinear=0\n").renderScaling == 1);   // order does not matter
+    CHECK(ParseConfig("renderScaling=7\n").renderScaling == 1);               // out of range: default
+    CHECK(ParseConfig("upscaleTiming=1\n").upscaleTiming == 1);
+}
 // Issue #253: every ini written before 0.6.3 carries an explicit cursorScaleWithZoom=0 from the
 // default template (no UI ever exposed it, so nobody chose it), which pinned the render engine's
 // cursor at desktop size - a tiny pointer on every fresh install. The key is retired so the
@@ -55,7 +66,8 @@ TEST_CASE("renderer knobs have sane defaults") {
     Config c = ParseConfig("");
     CHECK(c.cursorSensitivity == doctest::Approx(1.0));
     CHECK(c.cursorConstantSize == 0);          // cursor grows with the zoom, like transform (issue #253)
-    CHECK(c.bilinear == 1);
+    CHECK(c.renderScaling == 1);                  // xBR (issue #456)
+    CHECK(c.upscaleTiming == 0);
     CHECK(c.sharpness == doctest::Approx(0.0));   // off by default
     CHECK(c.panGlideMaxPx == 0);
     CHECK(c.zorderBand == 0);                  // shipped unbanded (issue #162): band 16 sat UNDER the
@@ -469,7 +481,7 @@ TEST_CASE("the first-run ini template parses to the struct defaults (issue #274)
     CHECK(t.cursorConstantSize == d.cursorConstantSize);
     CHECK(t.trayPinned == d.trayPinned);
     CHECK(t.cursorVisibility == d.cursorVisibility);
-    CHECK(t.bilinear == d.bilinear);
+    CHECK(t.renderScaling == d.renderScaling);
     CHECK(t.sharpness == doctest::Approx(d.sharpness));
     CHECK(t.zorderBand == d.zorderBand);
     CHECK(t.cursorBandAuto == d.cursorBandAuto);

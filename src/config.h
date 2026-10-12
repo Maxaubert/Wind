@@ -410,7 +410,11 @@ struct Config {
     // CURSOR_SHOWING flag, which our own MagShowSystemCursor hide does NOT affect);
     // "always" = always draw it; "never" = never draw it.
     std::string cursorVisibility = "auto";
-    int    bilinear = 1;             // 1 = bilinear sampling (smooth), 0 = point (crisp pixels)
+    int    bilinear = 1;             // RETIRED (issue #456): read only to migrate to renderScaling
+    // Render engine scaling filter (issue #456, upscale_shaders.h): 0 nearest, 1 xBR, 2 NVIDIA Image
+    // Scaling. An ini without the key migrates from `bilinear` (0 keeps nearest, else xBR).
+    int    renderScaling = 1;
+    int    upscaleTiming = 0;        // 1 = log the magnify pass's GPU time every 2 s while zoomed
     // Adaptive sharpening of the magnified image (counters upscale blur; crisps text/detail).
     // 0 = off (cheapest, single tap). 0.1-1.0 = strength. Folded into the magnify pass (no extra pass).
     double sharpness = 0.0;

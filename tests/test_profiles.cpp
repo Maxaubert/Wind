@@ -151,6 +151,13 @@ TEST_CASE("ProfileTextError accepts real and factory-default profiles, rejects g
     CHECK(ProfileTextError(std::string(300 * 1024, 'a')) != "");  // absurd size
 }
 
+// Issue #456: a profile saved before renderScaling (bilinear=0) matches a live ini that already
+// says renderScaling=0, and the retired bilinear key alone is never a difference.
+TEST_CASE("SessionDiffers: bilinear migrates to renderScaling") {
+    CHECK_FALSE(SessionDiffers("renderScaling=0\n", "bilinear=0\n"));
+    CHECK(SessionDiffers("renderScaling=1\n", "bilinear=0\n"));
+    CHECK_FALSE(SessionDiffers("bilinear=1\nrenderScaling=2\n", "renderScaling=2\n"));
+}
 TEST_CASE("SessionDiffers: identical texts do not differ") {
     CHECK_FALSE(SessionDiffers("model=a\nzoom=2\n", "model=a\nzoom=2\n"));
 }

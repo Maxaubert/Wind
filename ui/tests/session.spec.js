@@ -273,6 +273,16 @@ test('Smooth transform scaling applies live: no MPO registry write, no restart p
   await expect(page.locator('[data-key="txSamplingMode"]').getByText('Requires restart')).toHaveCount(0);
 });
 
+test('an ini from before renderScaling keeps Nearest when it had bilinear=0 (#456)', async ({ page }) => {
+  await page.addInitScript(() => { window.__live.bilinear = '0'; window.__saved.bilinear = '0'; });
+  await page.goto('/');
+  await go(page, 'zoom');
+  await expect(page.locator('[data-key="renderScaling"] select')).toHaveValue('0');
+  await expect(page.locator('.capsule')).toHaveCount(0);
+  await page.locator('[data-key="renderScaling"] select').selectOption('2');
+  expect(await page.evaluate(() => window.__live.renderScaling)).toBe('2');
+});
+
 test('the tray switching profile reloads the session', async ({ page }) => {
   await page.goto('/');
   await go(page, 'zoom');

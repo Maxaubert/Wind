@@ -42,3 +42,6 @@ graphify-out/
 tools/testenv/results/
 tools/testenv/gamesim.exe
 tools/testenv/*.obj
+
+# Local SDKs and models for upscaler experiments (proto/upscalers): never committed (NVIDIA licence, size)
+.deps/

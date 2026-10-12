@@ -195,6 +195,17 @@ Measurements and rejected filters: [../COLOUR-FILTER-FINDINGS.md](../COLOUR-FILT
 The magnified desktop is one full-screen triangle (no clear when a copy exists), then the outline,
 then the cursor.
 
+- **Scaling filter** (`renderScaling`, Settings: Render scaling, issue #456): Nearest uses the
+  plain pass with point sampling; xBR (the default) and NVIDIA Image Scaling are their own pixel
+  shaders (`src/upscale_shaders.h`, `src/upscale_nis.h`, drawn by `UpscalePass`). They read texels
+  through `Tap()`, which tonemaps first, so they work in display space on SDR and HDR alike, and the
+  capture crop keeps a 4-texel margin for their taps. A shader that fails to build falls back to the
+  plain bilinear pass (logged once). Chosen in an A/B of eleven filters on 2026-10-12 (xBR 0.24 ms,
+  NIS 0.32 ms GPU per frame at 4K; RTX VSR and an ONNX model were choppy); the rest live on the
+  `proto/upscalers` branch, results in research/wind/2026-10-12-upscaler-findings.md.
+  `upscaleTiming=1` logs the magnify pass's GPU time every 2 s while zoomed.
+  `bilinear` is retired: an ini without `renderScaling` migrates (`bilinear=0` keeps Nearest).
+
 - The outline is **one** full-screen pass that colours the border band and discards the interior;
   four separate quads dropped edges on some GPUs. It is inset 6 px because at non-integer DPI DWM
   can offset the layered present down-left and clip a flush edge. That is a DWM artifact, not draw

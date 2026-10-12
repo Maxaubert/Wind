@@ -19,6 +19,16 @@ Setup runs it only when the WebView2 runtime is absent. Microsoft Software Licen
 Copyright (c) 2016-2026 Svelte contributors. The Svelte runtime is compiled into `ui/dist`,
 which ships inside the installer. https://github.com/sveltejs/svelte
 
+### xBR-lv2 shader (MIT)
+Copyright (C) 2011-2022 Hyllian (sergiogdb@gmail.com). Ported to HLSL in `src/upscale_shaders.h`
+(the render engine's xBR scaling) from the libretro slang-shaders
+`edge-smoothing/xbr/shaders/xbr-lv2-standalone.slang`. https://github.com/libretro/slang-shaders
+
+### NVIDIA Image Scaling 1.0.2 (MIT)
+Copyright (c) 2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved. Ported to a pixel shader
+in `src/upscale_nis.h` (the render engine's NVIDIA Image Scaling) via agyild's mpv port.
+https://github.com/NVIDIAGameWorks/NVIDIAImageScaling
+
 ## Build and test only, not shipped
 
 doctest (MIT, `third_party/doctest.h`, compiled only into `wind_tests.exe`), Vite, @sveltejs/vite-plugin-svelte and @playwright/test (MIT and Apache-2.0) are build and test tooling, not linked into any shipped binary.

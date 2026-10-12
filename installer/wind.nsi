@@ -135,6 +135,8 @@ Section "Wind" SEC_WIND
 !endif
   ; the licence the user accepted, kept next to the app so the terms are always findable
   File "/oname=LICENSE.txt" "..\LICENSE"
+  ; the open-source notices for what ships inside (Svelte, the xBR and NIS shaders, WebView2)
+  File "/oname=THIRD-PARTY-NOTICES.txt" "..\THIRD-PARTY-NOTICES.md"
   SetOutPath "$INSTDIR\ui\dist"
   File /r "..\ui\dist\*.*"
   SetOutPath "$INSTDIR"
@@ -195,6 +197,7 @@ Section "Uninstall"
   Delete "$INSTDIR\WindConfig.exe"
   Delete "$INSTDIR\WindTray.exe"
   Delete "$INSTDIR\LICENSE.txt"
+  Delete "$INSTDIR\THIRD-PARTY-NOTICES.txt"
   Delete "$INSTDIR\Uninstall.exe"
   RMDir /r "$INSTDIR\ui"
   ; Not RMDir /r on $INSTDIR itself: a stray recursive delete of the wrong directory is
