@@ -94,8 +94,8 @@ static bool ConfirmUnsaved(const std::wstring& ini, bool forSwitch) {
 bool ConfirmQuit(const std::wstring& ini) { return ConfirmUnsaved(ini, false); }
 bool ConfirmSwitch(const std::wstring& ini) { return ConfirmUnsaved(ini, true); }
 // Switch the active profile from the tray: rewrite the live ini from the profile file (globals
-// preserved); the core's dir-watch hot-reloads everything except `model`, which is read once at
-// launch - a model change relaunches Wind.exe from our folder (the new instance evicts the running
+// preserved); the core's dir-watch hot-reloads everything, `model` included when both engines are up
+// (running.model "live"). With one engine left `model` is read once at launch, and a model change relaunches Wind.exe from our folder (the new instance evicts the running
 // one via the single-instance handshake, same as the swap-model path in Wind's main.cpp).
 void SwitchToProfile(const std::wstring& ini, const std::wstring& nameW) {
     // Every step logs (issue #184: a field switch failed with no trace - the balloon is
@@ -136,13 +136,13 @@ void SwitchToProfile(const std::wstring& ini, const std::wstring& nameW) {
         Notify(L"Wind", L"Could not switch profile (config file is locked).");
         return;
     }
-    // Model is not hot-swappable: relaunch so the new instance boots on the profile's model.
+    // A single-engine Wind cannot swap the model: relaunch so the new instance boots on the profile's model.
     const std::string oldModel = wind::ParseConfig(oldLive).model;
     const std::string newModel = wind::ParseConfig(newLive).model;
+    const bool relaunch = oldModel != newModel && !wind::EngineSwitchesLive();
     wind::Log(wind::LogLevel::Info, "profile", "switch applied: model %s -> %s%s",
-              oldModel.c_str(), newModel.c_str(),
-              oldModel != newModel ? " (relaunching)" : " (hot)");
-    if (oldModel != newModel) {
+              oldModel.c_str(), newModel.c_str(), relaunch ? " (relaunching)" : " (hot)");
+    if (relaunch) {
         // Wind.exe, NOT our own exe (GetModuleFileNameW here is WindTray.exe).
         const std::wstring exe = AppDir() + L"\\Wind.exe";
         const bool haveExe = GetFileAttributesW(exe.c_str()) != INVALID_FILE_ATTRIBUTES;

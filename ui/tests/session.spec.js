@@ -14,6 +14,7 @@ test.beforeEach(async ({ page }) => {
     const send = (data) => listeners.forEach((fn) => fn({ data }));
     window.__hostSend = send;
     const cfg = () => ({ type: 'config', values: { ...window.__live }, saved: { ...window.__saved },
+                         ...(window.__running ? { runningModel: window.__running } : {}),
                          profiles: { ...window.__profiles, names: [...window.__profiles.names] } });
     const reply = (ok = true) => send({ type: 'profiles', names: [...window.__profiles.names], active: window.__profiles.active, ok, error: '' });
     window.chrome = { webview: {
@@ -243,6 +244,19 @@ test('engine change writes the ini, then Restart Wind relaunches; a failed relau
   await page.getByRole('button', { name: 'Close' }).last().click();
   await expect(page.locator('[data-key="model"] select')).toHaveValue('hybrid');
   expect(await page.evaluate(() => window.__live.model)).toBe('hybrid');
+});
+
+test('a Wind with both engines up switches engine live: no Restart Wind button', async ({ page }) => {
+  await page.addInitScript(() => { window.__running = 'live'; });
+  await page.goto('/');
+  await go(page, 'prefs');
+  await page.locator('[data-key="showAdvanced"]').getByRole('switch').check({ force: true });   // the engine row is advanced
+  await go(page, 'zoom');
+  for (const m of ['render', 'transform', 'hybrid']) {
+    await page.locator('[data-key="model"] select').selectOption(m);
+    expect(await page.evaluate(() => window.__live.model)).toBe(m);
+    await expect(page.getByRole('button', { name: 'Restart Wind' })).toHaveCount(0);
+  }
 });
 
 test('Smooth transform scaling applies live: no MPO registry write, no restart prompt (#369)', async ({ page }) => {

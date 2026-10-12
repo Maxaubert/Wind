@@ -1148,6 +1148,8 @@ static void RunTick(TickState& t) {
                 RegisterQuickZoomHotkey(t.hwnd, (nc.quickZoomHotkeyMode && nc.quickZoomVk) ? nc.quickZoomVk : 0,
                                         nc.quickZoomMods);
             }
+            if (nc.model != t.cfg.model)   // both engines are built: the next pick follows it, no restart
+                wind::Log(wind::LogLevel::Info, "config", "engine %s -> %s (applies live)", t.cfg.model.c_str(), nc.model.c_str());
             t.cfg = nc;   // pick up renderer knobs (smoothing, filter, cursor scale, zoom speed)
             // transformExclude / renderExclude / the per-window-type engine keys may all have
             // changed: drop the cache so every exe-derived predicate is re-resolved. Without this
@@ -1516,7 +1518,7 @@ static void RunTick(TickState& t) {
                 pin.inputTransformOk      = tAvail && tAvail->inputTransformAvailable();
                 pin.renderLost            = RenderDeviceLost(t);
                 FillCategoryInputs(t, pin);
-                IMagnifierModel* pick = (ShouldPickTransform(pin) || t.renderStale) ? t.mTransform : t.mRender;
+                IMagnifierModel* pick = wind::PickTransformFor(t.cfg.model, pin, t.renderStale) ? t.mTransform : t.mRender;
                 if (pick && pick != t.model) t.model = pick;
             }
             t.vbounds = QueryVirtualBounds();   // refresh cached clip-detect bounds (topology may have changed)
@@ -2206,7 +2208,7 @@ static void RunTick(TickState& t) {
             pin.inputTransformOk      = tAvail && tAvail->inputTransformAvailable();
             pin.renderLost            = RenderDeviceLost(t);
             FillCategoryInputs(t, pin);
-            IMagnifierModel* want = (ShouldPickTransform(pin) || t.renderStale) ? t.mTransform : t.mRender;
+            IMagnifierModel* want = wind::PickTransformFor(t.cfg.model, pin, t.renderStale) ? t.mTransform : t.mRender;
             // STICKY (field: the engine flapped render<->transform inside one zoom session, and
             // each flip releases and rebuilds DWM's magnification context - a stall every time).
             // A real alt-tab still switches; a one-frame wobble in the foreground reads does not.
@@ -3130,32 +3132,21 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                                    ? MonitorUnderCursor() : PrimaryMonitor();
 
     // --- Magnifier model (render: DXGI Desktop Duplication + D3D11 overlay; transform: DWM
-    // fullscreen transform; hybrid: both, picked per zoom-in) ---
-    std::unique_ptr<IMagnifierModel> model;       // primary engine (also the hybrid's render half)
-    std::unique_ptr<IMagnifierModel> model2;      // hybrid only: the transform half
-    if (cfg.model == "transform") {
-        // Revived for issue #148: the DWM-internal fullscreen transform - zero app presents, so
-        // it holds compositor-rate smoothness over a heavy game where every overlay present path
-        // throttles (measured). Cursor is anchored, not centered (documented model tradeoff).
-        model = std::make_unique<TransformModel>(cfg.fastPan != 0, cfg.smoothPan != 0,
-                                                 cfg.zorderBand, cfg.cursorBandAuto != 0);
-    } else {
-        model = std::make_unique<RenderModel>(cfg.zorderBand, cfg.hdrTonemap != 0,
-                                              EffectiveGpuPriority(cfg));
-        if (cfg.model == "hybrid") {
-            // Hybrid (issue #148): render model on the desktop (centered cursor, unlimited
-            // levels), transform model whenever a fullscreen app is foreground at zoom-in
-            // (compositor-internal - the only path that stays smooth over a heavy game). The
-            // engine is picked per zoom-in session in RunTick; both stay initialized.
-            model2 = std::make_unique<TransformModel>(cfg.fastPan != 0, cfg.smoothPan != 0,
-                                                      cfg.zorderBand, cfg.cursorBandAuto != 0);
-        }
-    }
+    // fullscreen transform). BOTH engines are built whatever `model` says, the way hybrid always
+    // did: `model` only decides which one a session picks (PickTransformFor, engine_pick.h), so
+    // changing it in Settings or the tray applies live on the config reload, no restart. Hybrid
+    // (issue #148) picks per zoom-in: render on the desktop, transform over a fullscreen app.
+    std::unique_ptr<IMagnifierModel> model;       // the render engine
+    std::unique_ptr<IMagnifierModel> model2;      // the transform engine
+    model = std::make_unique<RenderModel>(cfg.zorderBand, cfg.hdrTonemap != 0,
+                                          EffectiveGpuPriority(cfg));
+    model2 = std::make_unique<TransformModel>(cfg.fastPan != 0, cfg.smoothPan != 0,
+                                              cfg.zorderBand, cfg.cursorBandAuto != 0);
     bool primaryOk = model->initialize(startupMon);
     if (!primaryOk && model2 && model2->initialize(PrimaryMonitor())) {
         // Hybrid whose render half cannot start (no D3D / Desktop Duplication): the transform half
         // needs neither, so run as model=transform instead of exiting.
-        wind::Log(wind::LogLevel::Warn, "startup", "hybrid: render half failed to init; transform-only");
+        wind::Log(wind::LogLevel::Warn, "startup", "render engine failed to init; transform-only");
         model = std::move(model2);
         primaryOk = true;
     }
@@ -3167,13 +3158,14 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         return 1;
     }
     if (model2 && !model2->initialize(PrimaryMonitor())) {
-        wind::Log(wind::LogLevel::Warn, "startup", "hybrid: transform half failed to init; render-only");
+        wind::Log(wind::LogLevel::Warn, "startup", "transform engine failed to init; render-only");
         model2.reset();
     }
-    // Tell the settings host which engine this process actually runs (fixed until the next start).
-    // Written after the engine init, so a hybrid that fell back to one engine reports that one.
+    // Tell the settings host and the tray what this process can run: "live" when both engines are
+    // up (any `model` applies on the reload), else the one engine left (fixed until the next start,
+    // so only then does an engine change need a relaunch).
     wind::WriteTextFileAtomic(wind::RunningModelPath(),
-        model2 ? "hybrid" : (dynamic_cast<TransformModel*>(model.get()) ? "transform" : "render"));
+        model2 ? "live" : (dynamic_cast<TransformModel*>(model.get()) ? "transform" : "render"));
 
     // The tray icon and menu live in WindTray.exe (issue #291): a UIAccess process's menu stacks
     // above the cursor and the Snipping Tool overlay, an ordinary process's menu does not.
@@ -3181,8 +3173,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     g_tint.capture();   // the scheme is clean here: RestoreInputState reloaded it at start-up (#288)
     TickState ts(model.get(), startupMon, cfg);
+    // With one engine left (the other failed to init), mTransform is null and no pick ever runs.
     ts.mRender = model.get();
     ts.mTransform = model2.get();
+    if (cfg.model == "transform" && ts.mTransform) ts.model = ts.mTransform;   // start on the pinned engine
     ts.hwnd = hwnd;                       // so RunTick can re-register the hide-cursor hotkey
     g_tick = &ts;   // so WndProc's hotkey messages can reach the tick state
     {   // Restore the learned gain curve so the first locked session after a restart pans at the

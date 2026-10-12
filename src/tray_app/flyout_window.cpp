@@ -355,9 +355,9 @@ void CloseList() {
     DestroyWindow(g_list->sf.hwnd);       // WM_DESTROY frees the state
 }
 
-// A pick in the engine list: writes `model` (a session change, like Settings) and restarts Wind.
-// Pending slider writes land first so the restart cannot lose them; the flyout closes because Wind
-// (and with it this tray process) is replaced.
+// A pick in the engine list: writes `model` (a session change, like Settings); it applies live, or
+// restarts Wind when only one engine is up (SetMainEngine). Pending slider writes land first so a
+// restart cannot lose them; the flyout closes either way.
 void ChooseEngine(int idx) {
     if (!g_list || !g_f || idx < 0 || idx >= (int)g_list->view.names.size()) return;
     const bool same = idx == g_list->view.active;

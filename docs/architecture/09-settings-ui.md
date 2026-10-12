@@ -91,7 +91,7 @@ and default. `Settings.svelte` is the shell (title bar, sidebar, banner, save ca
 | `slider` | `controls/Slider.svelte` | `min`, `max`, `step`, `unit` (also `aria-valuetext`) |
 | `select` | `controls/Select.svelte` | `options` + `optionLabels` |
 | `applist` | `controls/AppList.svelte` | One comma-separated string of exe names |
-| `engine` | `controls/EngineRow.svelte` | `model`; applies on an inline Restart Wind button |
+| `engine` | `controls/EngineRow.svelte` | `model`; applies live, an inline Restart Wind button only when Wind runs one engine |
 | `palette` | `prefs/ThemePicker.svelte` | Four mini window cards; writes `uiPalette` |
 | `profiles` | `prefs/ProfilePicker.svelte` | Dropdown plus New |
 | `button`, `about` | `SettingRow`, `controls/About.svelte` | Actions and the logo |
@@ -140,9 +140,10 @@ The live ini is the session and the profile file is the saved state ([08](08-con
   Discard or Cancel. Tray Quit decides from the files (`ConfirmQuit` in
   `src/tray_app/tray_menu.cpp`), even with Settings closed.
 
-**Engine and MPO keep special handling.** `model` is read once at launch, so the engine row writes
-the ini, then `restartWind` writes `session.keep` and starts `Wind.exe`, which evicts the old
-instance. On `restartFailed` the page reverts the row and the ini. MPO is a registry value, and
+**Engine and MPO keep special handling.** `model` applies live when the host reports
+`runningModel: "live"` (both engines up). Otherwise Wind runs one engine until it restarts, so the
+engine row writes the ini, then `restartWind` writes `session.keep` and starts `Wind.exe`, which
+evicts the old instance. On `restartFailed` the page reverts the row and the ini. MPO is a registry value, and
 `highres` tracks three states that must not be conflated: `mpoLive` (registry), `mpoStaged` (what
 the toggle shows) and `mpoBoot` (what DWM loaded, the only honest basis for "restart required").
 

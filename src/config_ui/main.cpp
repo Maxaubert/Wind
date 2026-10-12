@@ -250,7 +250,8 @@ static std::string DoSwitchProfile(const std::string& name, bool mirrorOutgoing 
     // ParseConfig canonicalizes (unknown or retired models -> hybrid), same
     // comparison as the tray path, so the two surfaces can never disagree about restarting.
     const std::string oldModel = wind::ParseConfig(oldLive).model;
-    const bool modelChanged = oldModel != wind::ParseConfig(newLive).model;
+    // A Wind that switches engines live (running.model "live") takes the new model on its reload.
+    const bool modelChanged = oldModel != wind::ParseConfig(newLive).model && !wind::EngineSwitchesLive();
     if (modelChanged) WriteSessionKeep();   // our own restart: the start must not reset the session
     if (modelChanged && !LaunchWind()) {
         ClearSessionKeep();
@@ -307,7 +308,8 @@ static std::string SessionPayload(const std::string& live) {
     std::string running;
     if (WindRunning() && wind::ReadTextFileOk(wind::RunningModelPath(), running)) {
         while (!running.empty() && (running.back() == '\r' || running.back() == '\n' || running.back() == ' ')) running.pop_back();
-        if (running != "render" && running != "transform" && running != "hybrid") running.clear();
+        // "live": both engines are up and any engine applies without a restart (no Restart button).
+        if (running != "render" && running != "transform" && running != "hybrid" && running != "live") running.clear();
     }
     return "\"values\":" + JsonObjectOf(values) + ",\"saved\":" + JsonObjectOf(saved) +
            (running.empty() ? std::string() : ",\"runningModel\":\"" + running + "\"") +
@@ -478,7 +480,8 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
             PostMessageW(g_hwnd, WM_CLOSE, 0, 0);
         }
         else if (action == "restartWind") {
-            // `model` is read once at launch, so switching it needs a real restart. The UI has
+            // Only offered when the running Wind has one engine left (running.model is not "live"):
+            // then `model` is fixed until the next start, so switching it needs a real restart. The UI has
             // already written the new value to the ini. Just launch Wind again: the new instance
             // evicts the incumbent via the Local\Wind_QuitRequest handshake. On failure the
             // incumbent is untouched (it is only ever signalled BY a successfully started instance),
