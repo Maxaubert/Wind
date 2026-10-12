@@ -89,7 +89,7 @@ render-only opt-in for the old constant size. `cursorScaleWithZoom` is retired a
 
 Transform sessions use the pointer Windows Magnifier uses: the real pointer, drawn by DWM into the
 magnified frame. It is the transform engine's only cursor. It works at either sampling mode, because DWM
-samples it like the content: High resolution cursor (smooth) makes it sharp but it shimmers
+samples it like the content: Smooth transform scaling makes it sharp but it shimmers
 slightly during zoom ramps, nearest keeps it pixelated and steady. Pure rules:
 `src/native_cursor.h` (tested).
 

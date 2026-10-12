@@ -79,7 +79,7 @@ test('ranking tiers: exact label > label prefix > label substring > keyword > de
   const caret = keys('caret');
   expect(caret.slice(0, 2).sort()).toEqual(['trackAlign', 'trackCaret']);
   // Description-only hit ranks below a label hit: "pointer" is a label word of Pointer position and
-  // High resolution cursor's description.
+  // Transform scaling's description.
   expect(rank('pointer', 'mouseAlign')).toBeLessThan(rank('pointer', 'txSamplingMode'));
   // Card caption and tab name still find rows, last.
   expect(keys('troubleshooting')).toEqual(expect.arrayContaining(['diagnostics', '__diagnostics', '__openIni']));

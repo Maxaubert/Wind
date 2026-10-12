@@ -75,8 +75,10 @@ the reply invalid and the page waits forever.
 
 The page is generated from `groups` in `ui/src/settings-schema.js`. A row may carry `showIf` (hidden
 unless another setting has a value), `offIf` (kept in place but dimmed and inert while another
-setting has a value: Release glide while the high resolution cursor is on) and `tag` (a small label
-after the name: High resolution cursor is tagged Experimental). Six groups: Hotkeys, Zoom,
+setting has a value: Release glide while Smooth transform scaling is on) and `tag` (a small label
+after the name: Transform scaling is tagged Experimental). The Engine card's two Scaling rows
+follow the engine: Transform scaling (`txSamplingMode`) unless it is Render, Render scaling
+(`bilinear`) unless it is Transform, so Auto shows both. Six groups: Hotkeys, Zoom,
 View, then below a divider Preferences (with the Screen light card), Tray menu and About. Each group has a label, an
 icon, a banner description and cards of rows; each row names its ini key, type, label, description
 and default. `Settings.svelte` is the shell (title bar, sidebar, banner, save capsule, search), and
@@ -89,7 +91,6 @@ and default. `Settings.svelte` is the shell (title bar, sidebar, banner, save ca
 | `slider` | `controls/Slider.svelte` | `min`, `max`, `step`, `unit` (also `aria-valuetext`) |
 | `select` | `controls/Select.svelte` | `options` + `optionLabels` |
 | `applist` | `controls/AppList.svelte` | One comma-separated string of exe names |
-| `highres` | `controls/HighRes.svelte` | High resolution cursor + MPO, with its UAC and restart step |
 | `engine` | `controls/EngineRow.svelte` | `model`; applies on an inline Restart Wind button |
 | `palette` | `prefs/ThemePicker.svelte` | Four mini window cards; writes `uiPalette` |
 | `profiles` | `prefs/ProfilePicker.svelte` | Dropdown plus New |
@@ -129,11 +130,11 @@ The live ini is the session and the profile file is the saved state ([08](08-con
 - The ini is shared with the tray flyout and hand edits, so the page re-reads it when the window
   regains focus and after a `configWriteFailed`, and reloads only if something differs.
 - Global keys are written directly and never count as unsaved.
-- **High resolution cursor notice** (#441): `change()` in `Settings.svelte` holds back
+- **Smooth transform scaling notice** (#441): `change()` in `Settings.svelte` holds back
   `txSamplingMode` 0 to 1 and shows a `Prompt` (with its optional `checkLabel`/`bind:checked`
-  checkbox) unless the global UI-only key `uiHighResNoticeOff=1` is set. Turn on writes the
+  checkbox) unless the global UI-only key `uiHighResNoticeOff=1` is set. Use Smooth writes the
   opt-out (when ticked) and then `txSamplingMode=1`; Cancel and Esc write nothing, and
-  `HighRes.svelte` resets the switch to the prop. Search results use the same `change()`.
+  `Select.svelte` redraws the select from the prop after every change. Search results use the same `change()`.
 - **Prompts** (`ui/src/prompts/Prompt.svelte`, focus-trapped by `lib/dialog.js`): closing with
   unsaved changes offers Save, Discard or Keep for this session; switching profile offers Save,
   Discard or Cancel. Tray Quit decides from the files (`ConfirmQuit` in

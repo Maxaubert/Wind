@@ -67,9 +67,9 @@ test('pages show their sections; a section with nothing to show is dropped', asy
   await expect(page.locator('main .card')).toHaveCount(2);                // Zoom, Extra keys
   await expect(page.locator('main .cap')).toHaveText(['Zoom', 'Extra keys']);
   await go(page, 'zoom');
-  await expect(page.locator('main .cap')).toHaveText(['Level and speed']);   // Easing and Engine are advanced
+  await expect(page.locator('main .cap')).toHaveText(['Level and speed', 'Engine']);   // Easing is advanced; Engine keeps its scaling rows
   await go(page, 'view');
-  await expect(page.locator('main .cap')).toHaveText(['Speed', 'Pointer', 'Typing and focus']);
+  await expect(page.locator('main .cap')).toHaveText(['Movement', 'Typing and focus']);
   await go(page, 'prefs');
   await expect(page.locator('main .cap')).toHaveText(['General', 'Screen light', 'Troubleshooting']);
   // Never fewer than two rows in a section while the advanced switch is off.
@@ -185,13 +185,12 @@ test('View: the edge margin shows only when the pointer is kept within the edges
   await expect(key(page, 'mouseMarginPct')).toBeVisible();
 });
 
-test('High resolution cursor is tagged Experimental and keeps the release glide (#439)', async ({ page }) => {
+test('Smooth transform scaling is tagged Experimental and keeps the release glide (#439)', async ({ page }) => {
   await page.goto('/');
-  await go(page, 'view');
-  await expect(key(page, 'txSamplingMode').locator('.tag')).toHaveText('Experimental');
-  await key(page, 'txSamplingMode').getByRole('switch').click({ force: true });
-  await page.getByRole('button', { name: 'Turn on' }).click();   // the experimental notice (#441)
   await go(page, 'zoom');
+  await expect(key(page, 'txSamplingMode').locator('.tag')).toHaveText('Experimental');
+  await key(page, 'txSamplingMode').locator('select').selectOption('1');
+  await page.getByRole('button', { name: 'Use Smooth' }).click();   // the experimental notice (#441)
   await expect(key(page, 'zoomEaseOutMs')).not.toHaveClass(/disabled/);
   await expect(key(page, 'zoomEaseOutMs').locator('input[type=range]')).toBeEnabled();
 });
