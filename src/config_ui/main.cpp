@@ -276,6 +276,8 @@ static DWORD WINAPI ExportDiagnosticsThread(LPVOID) {
     return 0;
 }
 
+// Bridge message handlers, one per message, in dispatch order. HandleWebMessage below is the
+// authoritative message list; a one- or two-line branch stays inline there.
 static void OnReady() {
     if (!g_loggedReady && g_launchTick) {
         g_loggedReady = true;
