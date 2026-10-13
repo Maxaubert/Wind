@@ -172,6 +172,7 @@ private:
     // Input-transform publish: decimation, ramp hold, read-back verdict and self-heal.
     void publishInputTransform(const MagTransform& m, double applyLevel, bool ramping, bool changed,
                                const Config& cfg, const PresentExtras& ex);
+    bool guardInputTransformStomp(double applyLevel, const Config& cfg);   // true: republish now (#217)
     std::mutex statMx_;
     unsigned long long statLogMs_ = 0;
     double statMaxMs_ = 0.0, statSumMs_ = 0.0;

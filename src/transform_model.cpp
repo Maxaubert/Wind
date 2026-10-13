@@ -795,34 +795,7 @@ void TransformModel::publishInputTransform(const MagTransform& m, double applyLe
     // Both rects in VIRTUAL-SCREEN coordinates (the old 0,0-based dst was wrong off-primary).
     // Needs UIAccess: the ENABLED publish fails without it (rig-measured ERROR_ACCESS_DENIED;
     // the DISABLED call succeeds regardless - never probe availability with the disable shape).
-    // Stomp guard (issue #217, docs/history/NATIVE-MAGNIFIER-STOMP.md): the input transform is ONE
-    // system-wide slot, and native Magnifier re-publishes an ENABLED IDENTITY into it
-    // continuously while it runs - even sitting unzoomed at 100%. Under a Wind zoom that
-    // identity mapping unmoors the visible cursor (the wobble); a dirty Magnifier exit strands
-    // its last rect the same way. So every zoomed tick reads the slot back (~0.1ms) and, when
-    // it does not hold what we last published, forces a republish past the decimation. Wind at
-    // tick rate wins the two-writer war for as long as the foreign writer lives, and a stale
-    // corpse is overwritten on the first tick of the next session.
-    bool ixForce = false;
-    if (cfg.magInputTransform == 1 && applyLevel > 1.001 && ixExpectedValid_) {
-        bool aOn = false; RECT aSrc{}, aDst{};
-        if (host_.getInputTransform(aOn, aSrc, aDst) &&
-            InputTransformStomped(ixExpectedOn_, ixExpL_, ixExpT_, ixExpR_, ixExpB_,
-                                  aOn, aSrc.left, aSrc.top, aSrc.right, aSrc.bottom)) {
-            ixForce = true;
-            noteIxStomp();
-            // The same foreign writer owns the shared cursor-visibility global
-            // (MagShowSystemCursor) - re-assert our hide on the stomp tick so the raw pointer
-            // plane it re-showed does not stay visible under the Inspect crosshair.
-            if (cursorHidden_) ShowSystemCursor(FALSE);
-            if (!ixStompWarned_) {
-                ixStompWarned_ = true;
-                wind::Log(wind::LogLevel::Warn, "transform",
-                          "foreign input-transform writer detected (native Magnifier running?) - "
-                          "republishing per tick");
-            }
-        }
-    }
+    const bool ixForce = guardInputTransformStomp(applyLevel, cfg);
     if (cfg.magInputTransform != 0 && (changed || ixPending_ || ixForce)) {
         // Decimation (issue #189): the publish exists for pointer-framework HOVER hit-testing
         // (clicks ride the welded cursor and never consult it), so it does not need the 144Hz
@@ -914,6 +887,38 @@ void TransformModel::publishInputTransform(const MagTransform& m, double applyLe
         ixExpectedOn_ = false;
     }
     if (changed) lastInputXformOn_ = cfg.magInputTransform != 0;
+}
+
+bool TransformModel::guardInputTransformStomp(double applyLevel, const Config& cfg) {
+    // Stomp guard (issue #217, docs/history/NATIVE-MAGNIFIER-STOMP.md): the input transform is ONE
+    // system-wide slot, and native Magnifier re-publishes an ENABLED IDENTITY into it
+    // continuously while it runs - even sitting unzoomed at 100%. Under a Wind zoom that
+    // identity mapping unmoors the visible cursor (the wobble); a dirty Magnifier exit strands
+    // its last rect the same way. So every zoomed tick reads the slot back (~0.1ms) and, when
+    // it does not hold what we last published, forces a republish past the decimation. Wind at
+    // tick rate wins the two-writer war for as long as the foreign writer lives, and a stale
+    // corpse is overwritten on the first tick of the next session.
+    bool ixForce = false;
+    if (cfg.magInputTransform == 1 && applyLevel > 1.001 && ixExpectedValid_) {
+        bool aOn = false; RECT aSrc{}, aDst{};
+        if (host_.getInputTransform(aOn, aSrc, aDst) &&
+            InputTransformStomped(ixExpectedOn_, ixExpL_, ixExpT_, ixExpR_, ixExpB_,
+                                  aOn, aSrc.left, aSrc.top, aSrc.right, aSrc.bottom)) {
+            ixForce = true;
+            noteIxStomp();
+            // The same foreign writer owns the shared cursor-visibility global
+            // (MagShowSystemCursor) - re-assert our hide on the stomp tick so the raw pointer
+            // plane it re-showed does not stay visible under the Inspect crosshair.
+            if (cursorHidden_) ShowSystemCursor(FALSE);
+            if (!ixStompWarned_) {
+                ixStompWarned_ = true;
+                wind::Log(wind::LogLevel::Warn, "transform",
+                          "foreign input-transform writer detected (native Magnifier running?) - "
+                          "republishing per tick");
+            }
+        }
+    }
+    return ixForce;
 }
 
 void TransformModel::present(const MapResult& r, double level, const Config& cfg,
