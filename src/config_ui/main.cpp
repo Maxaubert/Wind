@@ -374,6 +374,30 @@ static void OnWindowAction(ICoreWebView2* wv, const std::string& j) {
         if (!LaunchWind()) { wind::ClearSessionKeep(); wv->PostWebMessageAsJson(L"{\"type\":\"restartFailed\"}"); }
     }
 }
+static void OnPickExe(ICoreWebView2* wv) {
+    // "+" on the key-release app list: browse for a program and hand back just its FILE NAME.
+    // The core matches on the bare exe name (IsExeInList), never a full path, so returning the
+    // path would silently never match. Replies with an empty name on cancel so the UI can
+    // simply ignore it rather than having to distinguish cancel from failure.
+    wchar_t file[MAX_PATH] = L"";
+    OPENFILENAMEW ofn{};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner   = g_hwnd;
+    ofn.lpstrFile   = file;
+    ofn.nMaxFile    = MAX_PATH;
+    ofn.lpstrFilter = L"Programs\0*.exe\0All files\0*.*\0";
+    ofn.lpstrTitle  = L"Select a program";
+    // NOCHANGEDIR matters: without it the dialog moves this process's working directory, which
+    // would break every later relative path the host resolves.
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_EXPLORER;
+    std::string name;
+    if (GetOpenFileNameW(&ofn)) {
+        const wchar_t* base = PathFindFileNameW(file);
+        if (base) name = Narrow(base);
+    }
+    wv->PostWebMessageAsJson(
+        Widen("{\"type\":\"exePicked\",\"name\":\"" + JsonEscape(name) + "\"}").c_str());
+}
 static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
     std::string j = Narrow(jsonW);
     std::string type = JsonField(j, "type");
@@ -393,28 +417,7 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
     } else if (type == "window") {
         OnWindowAction(wv, j);
     } else if (type == "pickExe") {
-        // "+" on the key-release app list: browse for a program and hand back just its FILE NAME.
-        // The core matches on the bare exe name (IsExeInList), never a full path, so returning the
-        // path would silently never match. Replies with an empty name on cancel so the UI can
-        // simply ignore it rather than having to distinguish cancel from failure.
-        wchar_t file[MAX_PATH] = L"";
-        OPENFILENAMEW ofn{};
-        ofn.lStructSize = sizeof(ofn);
-        ofn.hwndOwner   = g_hwnd;
-        ofn.lpstrFile   = file;
-        ofn.nMaxFile    = MAX_PATH;
-        ofn.lpstrFilter = L"Programs\0*.exe\0All files\0*.*\0";
-        ofn.lpstrTitle  = L"Select a program";
-        // NOCHANGEDIR matters: without it the dialog moves this process's working directory, which
-        // would break every later relative path the host resolves.
-        ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_EXPLORER;
-        std::string name;
-        if (GetOpenFileNameW(&ofn)) {
-            const wchar_t* base = PathFindFileNameW(file);
-            if (base) name = Narrow(base);
-        }
-        wv->PostWebMessageAsJson(
-            Widen("{\"type\":\"exePicked\",\"name\":\"" + JsonEscape(name) + "\"}").c_str());
+        OnPickExe(wv);
     } else if (type == "openIni") {
         // Open the ini with the registered .ini handler (usually Notepad), matching the bridge's
         // "default editor" contract. Fall back to explicitly launching Notepad if no handler is
