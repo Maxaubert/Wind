@@ -1503,6 +1503,38 @@ static void RetargetSessionMonitor(TickState& t, bool zoomed, bool inspect) {
     }
 }
 
+// Session enter: the hybrid engine pick for this zoom-in session.
+static void PickEngineAtZoomIn(TickState& t) {
+    if (t.mTransform) {
+        // Hybrid engine pick, per zoom-in session (pure predicate: engine_pick.h, tested).
+        // Only ever swapped here or in the settled instant-switch below, so every
+        // activation's teardown calls route to the same engine that activated.
+        HWND fgw = GetForegroundWindow();
+        // Re-derive once per zoom-in even for the same window (review 2026-10-09 M1): the
+        // cache is keyed on the HWND, but what it caches can change under the same handle
+        // (an app marked churny after a driver reset keeps its window; a DRM child surface
+        // appears later). The mid-zoom re-pick below still reuses it every tick.
+        t.fgCacheHwnd = nullptr;
+        RefreshFgCache(t, fgw);
+        t.monRotated = DetectRotatedOutput(t.mon.device);
+        auto* tAvail = dynamic_cast<TransformModel*>(t.mTransform);
+        EnginePickInputs pin;
+        pin.coversMonitor  = ForegroundCoversMonitor(t.mon);
+        pin.borderless     = fgw && !(GetWindowLongPtrW(fgw, GWL_STYLE) & WS_CAPTION);
+        pin.primaryMonitor = t.mon.x == 0 && t.mon.y == 0;
+        pin.shellDesktop   = t.fgCacheShell;
+        pin.excluded       = t.fgCacheExcluded;
+        pin.churny         = t.fgCacheChurny;
+        pin.tdrHarness     = t.cfg.tdrTest > 0;
+        pin.desktopTransformOptIn = t.cfg.desktopTransform != 0;
+        pin.inputTransformOk      = tAvail && tAvail->inputTransformAvailable();
+        pin.renderLost            = RenderDeviceLost(t);
+        FillCategoryInputs(t, pin);
+        IMagnifierModel* pick = wind::PickTransformFor(t.cfg.model, pin, t.renderStale) ? t.mTransform : t.mRender;
+        if (pick && pick != t.model) t.model = pick;
+    }
+}
+
 static void RunTick(TickState& t) {
     TickWorkTimer workTimer(t);
     const TickClock clk = BeginTick(t);
@@ -1545,34 +1577,7 @@ static void RunTick(TickState& t) {
             t.viewVx = 0; t.viewVy = 0;
             t.keyPan.reset();
             RetargetSessionMonitor(t, zoomed, inspect);
-            if (t.mTransform) {
-                // Hybrid engine pick, per zoom-in session (pure predicate: engine_pick.h, tested).
-                // Only ever swapped here or in the settled instant-switch below, so every
-                // activation's teardown calls route to the same engine that activated.
-                HWND fgw = GetForegroundWindow();
-                // Re-derive once per zoom-in even for the same window (review 2026-10-09 M1): the
-                // cache is keyed on the HWND, but what it caches can change under the same handle
-                // (an app marked churny after a driver reset keeps its window; a DRM child surface
-                // appears later). The mid-zoom re-pick below still reuses it every tick.
-                t.fgCacheHwnd = nullptr;
-                RefreshFgCache(t, fgw);
-                t.monRotated = DetectRotatedOutput(t.mon.device);
-                auto* tAvail = dynamic_cast<TransformModel*>(t.mTransform);
-                EnginePickInputs pin;
-                pin.coversMonitor  = ForegroundCoversMonitor(t.mon);
-                pin.borderless     = fgw && !(GetWindowLongPtrW(fgw, GWL_STYLE) & WS_CAPTION);
-                pin.primaryMonitor = t.mon.x == 0 && t.mon.y == 0;
-                pin.shellDesktop   = t.fgCacheShell;
-                pin.excluded       = t.fgCacheExcluded;
-                pin.churny         = t.fgCacheChurny;
-                pin.tdrHarness     = t.cfg.tdrTest > 0;
-                pin.desktopTransformOptIn = t.cfg.desktopTransform != 0;
-                pin.inputTransformOk      = tAvail && tAvail->inputTransformAvailable();
-                pin.renderLost            = RenderDeviceLost(t);
-                FillCategoryInputs(t, pin);
-                IMagnifierModel* pick = wind::PickTransformFor(t.cfg.model, pin, t.renderStale) ? t.mTransform : t.mRender;
-                if (pick && pick != t.model) t.model = pick;
-            }
+            PickEngineAtZoomIn(t);
             t.vbounds = QueryVirtualBounds();   // refresh cached clip-detect bounds (topology may have changed)
             // REFRESH RATE CAN CHANGE WITHOUT THE GEOMETRY CHANGING (issue #232). The retarget
             // above only fires when SameMonitor is false, and that compares origin, size and
