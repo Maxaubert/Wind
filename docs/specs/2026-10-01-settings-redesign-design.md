@@ -12,7 +12,7 @@ change how settings are kept: changes apply instantly but only for the session u
   colours, fonts, icons, radii). "A similar look" is a failed review.
 - `docs/design/settings-2026-10/FINAL-v10-grey.html`: the mockup source, the authority for exact
   tokens (colours, spacing, radii, font sizes, icon paths, the banner and slider CSS). Also
-  `FINAL-v10-grey-dark.png` / `-light.png` and the banner image `c-grey.jpg`.
+  `FINAL-v10-grey-dark.png` and the banner image `c-grey.jpg` (in `ui/public`).
 - Design history: `C:\Users\Admin\Documents\Claude\wind-settings-mockups\` (rounds 1-9, `keepers/README.md`).
 
 ### Visual spec (from the mockup)
