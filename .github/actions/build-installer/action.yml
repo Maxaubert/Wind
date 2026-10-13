@@ -1,0 +1,58 @@
+# The installer build shared by release.yml and alpha.yml, so a build step is changed in one place.
+#
+# Runs after actions/checkout. It reads the version from src/version.h, runs every test gate and
+# leaves dist/Wind-Setup-x64-<version>.exe behind; publishing stays in the calling workflow. A
+# failing gate fails the job, so nothing is published from a red build.
+#
+# The gates match build.yml: the doctest suite, the JS half of the keybind rules and the settings
+# UI's Playwright suite. The UI tests run before the installer build (Playwright starts its own
+# Vite dev server and does not need ui/dist), so a red UI suite fails before the long build.
+name: Build installer
+description: Read the version, run the unit and UI test gates, and build the installer into dist/.
+
+outputs:
+  version:
+    description: The version src/version.h declares (major.minor.patch).
+    value: ${{ steps.ver.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Read version from src/version.h
+      id: ver
+      shell: pwsh
+      run: |
+        . ./tools/version.ps1      # Get-WindVersion: the one src/version.h reader
+        "version=$(Get-WindVersion (Get-Location).Path)" >> $env:GITHUB_OUTPUT
+
+    - name: Install NSIS
+      shell: pwsh
+      run: choco install nsis --no-progress -y
+
+    - name: Unit tests
+      shell: cmd
+      run: build.bat test
+
+    # Owner decision (review 2026-10-13): nothing is published unless the UI tests pass. Node
+    # comes with the runner image. npm ci also hands build.bat config a lockfile-exact node_modules.
+    - name: Install UI dependencies
+      shell: cmd
+      working-directory: ui
+      run: npm ci
+
+    - name: Keybind rules, JS half (node --test)
+      shell: cmd
+      working-directory: ui
+      run: npm run test:rules
+
+    - name: UI tests (Playwright, headless)
+      shell: cmd
+      working-directory: ui
+      run: npx playwright install chromium && npx playwright test --reporter=line
+
+    # Builds Wind.exe + WindConfig.exe + ui/dist, then compiles the installer and runs
+    # tools/installer_check.ps1. The runner is administrator, so the gate's silent
+    # install/uninstall round-trip actually executes rather than skipping itself.
+    - name: Build installer
+      shell: pwsh
+      run: pwsh -File tools/release.ps1

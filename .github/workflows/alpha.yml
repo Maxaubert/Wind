@@ -14,10 +14,9 @@
 # back is running the stable installer again - it is always one click away on the releases page,
 # because it keeps the "Latest" badge.
 #
-# NOTE ON DUPLICATION: the build steps below mirror release.yml on purpose rather than sharing a
-# composite action. The stable release path works and is not worth destabilising for DRY. If these
-# ever drift in a way that matters, extract .github/actions/build-installer and have BOTH use it -
-# do not fix it by editing only one.
+# Build steps: the version read, test gates and installer build live in the composite action
+# .github/actions/build-installer, which release.yml uses too. Change a build step there, never
+# by adding steps to only one workflow. The alpha tag and asset naming below stay alpha-only.
 name: alpha
 
 on:
@@ -41,30 +40,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Read version and compose the alpha tag
+      # Same build and gates as the stable release (version read, unit tests, keybind JS test,
+      # Playwright UI suite, tools/release.ps1): an alpha that fails them is not worth installing.
+      - name: Build installer (shared with release.yml)
+        id: build
+        uses: ./.github/actions/build-installer
+
+      - name: Compose the alpha tag
         id: ver
         shell: pwsh
         run: |
-          . ./tools/version.ps1      # Get-WindVersion: the one src/version.h reader
-          $v = Get-WindVersion (Get-Location).Path
+          $v = '${{ steps.build.outputs.version }}'
           $sha = '${{ github.sha }}'.Substring(0,7)
           "version=$v"                >> $env:GITHUB_OUTPUT
           "alpha=$v-alpha.$sha"       >> $env:GITHUB_OUTPUT
           "tag=v$v-alpha.$sha"        >> $env:GITHUB_OUTPUT
           "sha7=$sha"                 >> $env:GITHUB_OUTPUT
-
-      - name: Install NSIS
-        shell: pwsh
-        run: choco install nsis --no-progress -y
-
-      # Same gate as the stable release: an alpha that fails the unit suite is not worth installing.
-      - name: Unit tests
-        shell: cmd
-        run: build.bat test
-
-      - name: Build installer
-        shell: pwsh
-        run: pwsh -File tools/release.ps1
 
       # tools/release.ps1 names the artefact from src/version.h, which an alpha does not bump - so
       # rename it to carry the alpha suffix. Without this every alpha asset would be called
