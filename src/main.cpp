@@ -1691,6 +1691,158 @@ static void ExitInspect(TickState& t) {
     }
 }
 
+// Active tick: the pan delta in one of three regimes (free, locked, Inspect), with the lock
+// detector, lockApps, LockApplies, the gain learner and drag-follow. cur is the start-of-tick read.
+struct PanDelta { POINT cur; int curDx, curDy; int dx, dy; bool dragFollow; };
+static PanDelta ResolvePanDelta(TickState& t, bool inspect, double lvl, double dt, int rawDx, int rawDy) {
+    // Resolve the pan delta. FREE: the OS cursor's own motion since we last placed it - Windows'
+    // pointer acceleration is already applied, so we auto-match the real cursor (DPI/accel), then
+    // scale by cursorSensitivity as a speed knob (1.0 = exact match, the default). LOCKED: a game
+    // has the cursor clipped/recentered, so pan from raw mickeys scaled by the same cursorSensitivity
+    // (acceleration doesn't apply to relative-mouse game input). INSPECT: the real cursor is frozen
+    // in place, so its delta is irrelevant; the look point roams from raw mickeys instead.
+    POINT cur; GetCursorPos(&cur);
+    int curDx = cur.x - t.lastSetVirtual.x;
+    int curDy = cur.y - t.lastSetVirtual.y;
+    t.postInspectHold = wind::PostInspectHoldKeeps(t.postInspectHold && !inspect, curDx != 0 || curDy != 0);
+    int dx, dy;
+    bool dragFollow = false;   // set in the free render branch below; drives ex.suppressCursorSync
+    if (inspect) {
+        // The OS cursor is frozen, so pan the look point from raw mickeys scaled by the
+        // MEASURED desktop gain (GainLearner, the same replay as the locked path) so the look
+        // point moves at the same speed/DPI as the desktop cursor. cursorSensitivity stays a
+        // user multiplier on top; carry the sub-pixel remainder so slow precise motion is not
+        // quantized away.
+        const double inC = std::sqrt((double)rawDx * rawDx + (double)rawDy * rawDy);
+        const double g = t.gainLearner.gainFor(inC, dt * 1000.0);
+        t.inspectPanRemX += rawDx * g * t.cfg.cursorSensitivity;
+        t.inspectPanRemY += rawDy * g * t.cfg.cursorSensitivity;
+        dx = (int)t.inspectPanRemX; t.inspectPanRemX -= dx;   // truncate toward zero, carry the rest
+        dy = (int)t.inspectPanRemY; t.inspectPanRemY -= dy;
+        if (dx != 0 || dy != 0) t.inspectLookMoved = true;
+    } else {
+        RECT clip{}; GetClipCursor(&clip);
+        // A clip is a lock signal only when it is meaningfully SMALLER than the monitor
+        // (issue #169): a machine-wide work-area clip (desktop minus taskbar, ~95%) is
+        // desktop-like, not a game confining the pointer - the old any-clip test made every
+        // zoomed desktop session run the locked path on this rig. See ClipRectConfines.
+        bool clipConfined = wind::ClipRectConfines((int)(clip.right - clip.left),
+                                                   (int)(clip.bottom - clip.top),
+                                                   t.mon.w, t.mon.h);
+        int rawMag = std::abs(rawDx) + std::abs(rawDy);
+        // Mouse edge mode: the pointer is real and free, so pushing it into a screen edge or
+        // corner is not mouselook. Hide that motion from the lock tell (see PointerPinnedAtEdge).
+        if (t.cfg.mouseAlign == 1 && t.viewDetached && !clipConfined &&
+            wind::PointerPinnedAtEdge(cur.x, cur.y, clip.left, clip.top, clip.right, clip.bottom))
+            rawMag = 0;
+        bool locked = t.detector.update(clipConfined,
+                                        rawMag,
+                                        std::abs(curDx) + std::abs(curDy),
+                                        t.cfg.warpLock != 0, cur.x, cur.y);
+        // lockApps (issue #221): listed foreground exe = locked outright, no heuristics.
+        // The list IS the feature (empty = off); warpLock=1 adds the smart tells globally.
+        // MUST force through the DETECTOR, not just this tick's local: the free-cursor gate
+        // reads t.detector.locked() below, and a local-only force left the transform view
+        // pinned to the warped pointer (field regression: the list "did nothing" once the
+        // zoom-in seeding was scoped behind warpLock - gameplay had been riding the seed).
+        bool lockAppFg = false;
+        if (!t.cfg.lockApps.empty()) {
+            RefreshFgCache(t, GetForegroundWindow());   // per-HWND cache: no OpenProcess every tick
+            lockAppFg = t.fgCacheLockApp;
+        }
+        const bool forcedLock = t.cfg.lockForce != 0 || lockAppFg;
+        if (forcedLock && !locked) {
+            t.detector.seedLock();
+            locked = true;
+        }
+        if (locked != t.prevDetLocked) {
+            // Field diagnosis (issue #221): which tell engaged, and when, in wind-core.log.
+            wind::Log(wind::LogLevel::Info, "lock", "detector %s%s lvl=%.2f",
+                      locked ? "LOCKED" : "free",
+                      (locked && t.detector.warpLocked()) ? " (warp-anchor)" : "", lvl);
+            t.prevDetLocked = locked;
+        }
+        // A shown pointer is a free pointer in a transform session (LockApplies): a game's
+        // menus keep DWM centring, its mouselook (pointer hidden) keeps the locked pan. The
+        // legacy sprite session (txNativeCursor=0, #463) keeps the old rule, like render.
+        {
+            const auto* tmLock = dynamic_cast<TransformModel*>(t.model);
+            const bool transformTx = tmLock != nullptr && tmLock->nativeSession();
+            bool showing = false;
+            if (locked && transformTx) {
+                CURSORINFO ci{}; ci.cbSize = sizeof(ci);
+                showing = GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING) && ci.hCursor != nullptr;
+            }
+            const bool applies = wind::LockApplies(locked, transformTx, showing);
+            const bool freed = locked && !applies;
+            if (freed != t.lockFreed)
+                wind::Log(wind::LogLevel::Info, "lock", "%s lvl=%.2f",
+                          freed ? "pointer shown: free (native cursor)" : "lock applies", lvl);
+            t.lockFreed = freed;
+            t.lockEff = applies;
+            locked = applies;
+        }
+        if (locked) {
+            // LOCKED pan at the TRUE desktop-cursor speed (issue: "cursor slower zoomed
+            // in DOOM"). Not modelled - MEASURED: free ticks record the OS's own in->out
+            // ratio per speed (gain_learner.h) and this replays it. Modelling was tried
+            // twice and missed both ways (raw = too slow, cooked curve = too fast) because
+            // a per-packet speed estimate cannot see WM_INPUT coalescing.
+            if (t.cfg.lockedBallistics != 0) {
+                const double inC = std::sqrt((double)rawDx * rawDx + (double)rawDy * rawDy);
+                const double g = t.gainLearner.gainFor(inC, dt * 1000.0);
+                t.lockedPanRemX += rawDx * g * t.cfg.cursorSensitivity;
+                t.lockedPanRemY += rawDy * g * t.cfg.cursorSensitivity;
+                dx = (int)t.lockedPanRemX; t.lockedPanRemX -= dx;
+                dy = (int)t.lockedPanRemY; t.lockedPanRemY -= dy;
+            } else {
+                dx = (int)std::lround(rawDx * t.cfg.cursorSensitivity);
+                dy = (int)std::lround(rawDy * t.cfg.cursorSensitivity);
+                t.lockedPanRemX = 0.0; t.lockedPanRemY = 0.0;
+            }
+        } else {
+            // Drag-follow (issue #169): while a mouse button is physically held, the pointer IS
+            // the interaction (window drag, text selection) - the per-tick weld would fight the
+            // hand and the dragged content flickers between the two positions. Suspend the weld
+            // (ex.suppressCursorSync below) and follow the pointer 1:1 unscaled: scaling would
+            // desync the lens from the pointer that owns the drag. The press itself landed
+            // under the welded cursor (the weld was live until the button went down), and the
+            // release lands where the pointer and the dragged content both are - correct by
+            // construction. Weld resumes on release. Only the render engine welds a free session
+            // (a transform one never does), so this path matters for it alone.
+            const bool anyButtonDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) ||
+                                       (GetAsyncKeyState(VK_RBUTTON) & 0x8000) ||
+                                       (GetAsyncKeyState(VK_MBUTTON) & 0x8000);
+            // FREE tick: both ends of the OS pointer pipeline are visible right here -
+            // rawDx/rawDy went in, curDx/curDy came out - so teach the learner the REAL
+            // ballistics at this speed. Gated on no confining clip: a clamped cursor
+            // under-reports output and would teach a too-low gain.
+        // Also skip a pointer pinned against the clip bound: it cannot move, so the output
+        // under-reports exactly like a confined clip (modest downward bias otherwise).
+        if (!clipConfined && (std::abs(rawDx) + std::abs(rawDy)) >= wind::GainLearner::kMinCounts &&
+            !wind::PointerPinnedAtEdge(cur.x, cur.y, clip.left, clip.top, clip.right, clip.bottom)) {
+                const double dtMs_ = dt * 1000.0;
+                const double inC  = std::sqrt((double)rawDx * rawDx + (double)rawDy * rawDy);
+                const double outC = std::sqrt((double)curDx * curDx + (double)curDy * curDy);
+                t.gainLearner.observe(inC, outC, dtMs_);
+            }
+            dragFollow = wind::ShouldDragFollow(locked, inspect, anyButtonDown);
+            if (dragFollow) {
+                dx = curDx;
+                dy = curDy;
+            } else {
+                dx = (int)std::lround(curDx * t.cfg.cursorSensitivity);   // auto-matched OS delta, speed-scaled
+                dy = (int)std::lround(curDy * t.cfg.cursorSensitivity);
+            }
+        }
+    }
+    // Defensive: bound one tick's pan to the monitor span so a stray cursor jump (e.g. the OS
+    // cursor briefly escaping to another monitor) cannot teleport the lens. cx_ also clamps.
+    if (dx >  t.mon.w) dx =  t.mon.w; else if (dx < -t.mon.w) dx = -t.mon.w;
+    if (dy >  t.mon.h) dy =  t.mon.h; else if (dy < -t.mon.h) dy = -t.mon.h;
+    return { cur, curDx, curDy, dx, dy, dragFollow };
+}
+
 static void RunTick(TickState& t) {
     TickWorkTimer workTimer(t);
     const TickClock clk = BeginTick(t);
@@ -1727,151 +1879,11 @@ static void RunTick(TickState& t) {
             ExitInspect(t);
         }
         if (recenter) { POINT pt; GetCursorPos(&pt); t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y); t.lastSetVirtual = pt; }
-        // Resolve the pan delta. FREE: the OS cursor's own motion since we last placed it - Windows'
-        // pointer acceleration is already applied, so we auto-match the real cursor (DPI/accel), then
-        // scale by cursorSensitivity as a speed knob (1.0 = exact match, the default). LOCKED: a game
-        // has the cursor clipped/recentered, so pan from raw mickeys scaled by the same cursorSensitivity
-        // (acceleration doesn't apply to relative-mouse game input). INSPECT: the real cursor is frozen
-        // in place, so its delta is irrelevant; the look point roams from raw mickeys instead.
-        POINT cur; GetCursorPos(&cur);
-        int curDx = cur.x - t.lastSetVirtual.x;
-        int curDy = cur.y - t.lastSetVirtual.y;
-        t.postInspectHold = wind::PostInspectHoldKeeps(t.postInspectHold && !inspect, curDx != 0 || curDy != 0);
-        int dx, dy;
-        bool dragFollow = false;   // set in the free render branch below; drives ex.suppressCursorSync
-        if (inspect) {
-            // The OS cursor is frozen, so pan the look point from raw mickeys scaled by the
-            // MEASURED desktop gain (GainLearner, the same replay as the locked path) so the look
-            // point moves at the same speed/DPI as the desktop cursor. cursorSensitivity stays a
-            // user multiplier on top; carry the sub-pixel remainder so slow precise motion is not
-            // quantized away.
-            const double inC = std::sqrt((double)rawDx * rawDx + (double)rawDy * rawDy);
-            const double g = t.gainLearner.gainFor(inC, dt * 1000.0);
-            t.inspectPanRemX += rawDx * g * t.cfg.cursorSensitivity;
-            t.inspectPanRemY += rawDy * g * t.cfg.cursorSensitivity;
-            dx = (int)t.inspectPanRemX; t.inspectPanRemX -= dx;   // truncate toward zero, carry the rest
-            dy = (int)t.inspectPanRemY; t.inspectPanRemY -= dy;
-            if (dx != 0 || dy != 0) t.inspectLookMoved = true;
-        } else {
-            RECT clip{}; GetClipCursor(&clip);
-            // A clip is a lock signal only when it is meaningfully SMALLER than the monitor
-            // (issue #169): a machine-wide work-area clip (desktop minus taskbar, ~95%) is
-            // desktop-like, not a game confining the pointer - the old any-clip test made every
-            // zoomed desktop session run the locked path on this rig. See ClipRectConfines.
-            bool clipConfined = wind::ClipRectConfines((int)(clip.right - clip.left),
-                                                       (int)(clip.bottom - clip.top),
-                                                       t.mon.w, t.mon.h);
-            int rawMag = std::abs(rawDx) + std::abs(rawDy);
-            // Mouse edge mode: the pointer is real and free, so pushing it into a screen edge or
-            // corner is not mouselook. Hide that motion from the lock tell (see PointerPinnedAtEdge).
-            if (t.cfg.mouseAlign == 1 && t.viewDetached && !clipConfined &&
-                wind::PointerPinnedAtEdge(cur.x, cur.y, clip.left, clip.top, clip.right, clip.bottom))
-                rawMag = 0;
-            bool locked = t.detector.update(clipConfined,
-                                            rawMag,
-                                            std::abs(curDx) + std::abs(curDy),
-                                            t.cfg.warpLock != 0, cur.x, cur.y);
-            // lockApps (issue #221): listed foreground exe = locked outright, no heuristics.
-            // The list IS the feature (empty = off); warpLock=1 adds the smart tells globally.
-            // MUST force through the DETECTOR, not just this tick's local: the free-cursor gate
-            // reads t.detector.locked() below, and a local-only force left the transform view
-            // pinned to the warped pointer (field regression: the list "did nothing" once the
-            // zoom-in seeding was scoped behind warpLock - gameplay had been riding the seed).
-            bool lockAppFg = false;
-            if (!t.cfg.lockApps.empty()) {
-                RefreshFgCache(t, GetForegroundWindow());   // per-HWND cache: no OpenProcess every tick
-                lockAppFg = t.fgCacheLockApp;
-            }
-            const bool forcedLock = t.cfg.lockForce != 0 || lockAppFg;
-            if (forcedLock && !locked) {
-                t.detector.seedLock();
-                locked = true;
-            }
-            if (locked != t.prevDetLocked) {
-                // Field diagnosis (issue #221): which tell engaged, and when, in wind-core.log.
-                wind::Log(wind::LogLevel::Info, "lock", "detector %s%s lvl=%.2f",
-                          locked ? "LOCKED" : "free",
-                          (locked && t.detector.warpLocked()) ? " (warp-anchor)" : "", lvl);
-                t.prevDetLocked = locked;
-            }
-            // A shown pointer is a free pointer in a transform session (LockApplies): a game's
-            // menus keep DWM centring, its mouselook (pointer hidden) keeps the locked pan. The
-            // legacy sprite session (txNativeCursor=0, #463) keeps the old rule, like render.
-            {
-                const auto* tmLock = dynamic_cast<TransformModel*>(t.model);
-                const bool transformTx = tmLock != nullptr && tmLock->nativeSession();
-                bool showing = false;
-                if (locked && transformTx) {
-                    CURSORINFO ci{}; ci.cbSize = sizeof(ci);
-                    showing = GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING) && ci.hCursor != nullptr;
-                }
-                const bool applies = wind::LockApplies(locked, transformTx, showing);
-                const bool freed = locked && !applies;
-                if (freed != t.lockFreed)
-                    wind::Log(wind::LogLevel::Info, "lock", "%s lvl=%.2f",
-                              freed ? "pointer shown: free (native cursor)" : "lock applies", lvl);
-                t.lockFreed = freed;
-                t.lockEff = applies;
-                locked = applies;
-            }
-            if (locked) {
-                // LOCKED pan at the TRUE desktop-cursor speed (issue: "cursor slower zoomed
-                // in DOOM"). Not modelled - MEASURED: free ticks record the OS's own in->out
-                // ratio per speed (gain_learner.h) and this replays it. Modelling was tried
-                // twice and missed both ways (raw = too slow, cooked curve = too fast) because
-                // a per-packet speed estimate cannot see WM_INPUT coalescing.
-                if (t.cfg.lockedBallistics != 0) {
-                    const double inC = std::sqrt((double)rawDx * rawDx + (double)rawDy * rawDy);
-                    const double g = t.gainLearner.gainFor(inC, dt * 1000.0);
-                    t.lockedPanRemX += rawDx * g * t.cfg.cursorSensitivity;
-                    t.lockedPanRemY += rawDy * g * t.cfg.cursorSensitivity;
-                    dx = (int)t.lockedPanRemX; t.lockedPanRemX -= dx;
-                    dy = (int)t.lockedPanRemY; t.lockedPanRemY -= dy;
-                } else {
-                    dx = (int)std::lround(rawDx * t.cfg.cursorSensitivity);
-                    dy = (int)std::lround(rawDy * t.cfg.cursorSensitivity);
-                    t.lockedPanRemX = 0.0; t.lockedPanRemY = 0.0;
-                }
-            } else {
-                // Drag-follow (issue #169): while a mouse button is physically held, the pointer IS
-                // the interaction (window drag, text selection) - the per-tick weld would fight the
-                // hand and the dragged content flickers between the two positions. Suspend the weld
-                // (ex.suppressCursorSync below) and follow the pointer 1:1 unscaled: scaling would
-                // desync the lens from the pointer that owns the drag. The press itself landed
-                // under the welded cursor (the weld was live until the button went down), and the
-                // release lands where the pointer and the dragged content both are - correct by
-                // construction. Weld resumes on release. Only the render engine welds a free session
-                // (a transform one never does), so this path matters for it alone.
-                const bool anyButtonDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) ||
-                                           (GetAsyncKeyState(VK_RBUTTON) & 0x8000) ||
-                                           (GetAsyncKeyState(VK_MBUTTON) & 0x8000);
-                // FREE tick: both ends of the OS pointer pipeline are visible right here -
-                // rawDx/rawDy went in, curDx/curDy came out - so teach the learner the REAL
-                // ballistics at this speed. Gated on no confining clip: a clamped cursor
-                // under-reports output and would teach a too-low gain.
-            // Also skip a pointer pinned against the clip bound: it cannot move, so the output
-            // under-reports exactly like a confined clip (modest downward bias otherwise).
-            if (!clipConfined && (std::abs(rawDx) + std::abs(rawDy)) >= wind::GainLearner::kMinCounts &&
-                !wind::PointerPinnedAtEdge(cur.x, cur.y, clip.left, clip.top, clip.right, clip.bottom)) {
-                    const double dtMs_ = dt * 1000.0;
-                    const double inC  = std::sqrt((double)rawDx * rawDx + (double)rawDy * rawDy);
-                    const double outC = std::sqrt((double)curDx * curDx + (double)curDy * curDy);
-                    t.gainLearner.observe(inC, outC, dtMs_);
-                }
-                dragFollow = wind::ShouldDragFollow(locked, inspect, anyButtonDown);
-                if (dragFollow) {
-                    dx = curDx;
-                    dy = curDy;
-                } else {
-                    dx = (int)std::lround(curDx * t.cfg.cursorSensitivity);   // auto-matched OS delta, speed-scaled
-                    dy = (int)std::lround(curDy * t.cfg.cursorSensitivity);
-                }
-            }
-        }
-        // Defensive: bound one tick's pan to the monitor span so a stray cursor jump (e.g. the OS
-        // cursor briefly escaping to another monitor) cannot teleport the lens. cx_ also clamps.
-        if (dx >  t.mon.w) dx =  t.mon.w; else if (dx < -t.mon.w) dx = -t.mon.w;
-        if (dy >  t.mon.h) dy =  t.mon.h; else if (dy < -t.mon.h) dy = -t.mon.h;
+        const PanDelta pd = ResolvePanDelta(t, inspect, lvl, dt, rawDx, rawDy);
+        POINT cur = pd.cur;
+        const int curDx = pd.curDx, curDy = pd.curDy;
+        const int dx = pd.dx, dy = pd.dy;
+        const bool dragFollow = pd.dragFollow;
         // Foreground facts for this tick, read ONCE and reused by the pan wall, the perf levers,
         // and the hybrid instant switch below (GetForegroundWindow + window queries per tick add
         // up at 144Hz, and split reads can disagree mid-tick).
