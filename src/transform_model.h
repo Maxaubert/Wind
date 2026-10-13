@@ -169,6 +169,9 @@ private:
     // The transform write and the warm pulse; returns whether the values changed this tick.
     bool writeAndWarm(const MagTransform& m, double applyLevel, bool ramping, const Config& cfg,
                       const PresentExtras& ex, bool& txWroteThisTick, bool& trChanged, bool& trWarm);
+    // Input-transform publish: decimation, ramp hold, read-back verdict and self-heal.
+    void publishInputTransform(const MagTransform& m, double applyLevel, bool ramping, bool changed,
+                               const Config& cfg, const PresentExtras& ex);
     std::mutex statMx_;
     unsigned long long statLogMs_ = 0;
     double statMaxMs_ = 0.0, statSumMs_ = 0.0;
