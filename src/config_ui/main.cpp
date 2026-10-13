@@ -319,6 +319,17 @@ static void OnSetConfig(ICoreWebView2* wv, const std::string& j, const std::stri
         }
     }
 }
+static void OnSaveSession(ICoreWebView2* wv) {
+    // Save: the live session (profile-scoped keys) becomes the active profile file.
+    std::string live;
+    const bool readOk = ReadIni(live);
+    const std::string active = ActiveProfileName(live);
+    const bool ok = readOk && !active.empty() && SafeName(active) &&
+                    wind::WriteTextFileAtomic(ProfilePath(active), wind::MakeProfileText(live));
+    if (!ok) wind::Log(wind::LogLevel::Warn, "config", "saveSession failed (profile '%s')", active.c_str());
+    wv->PostWebMessageAsJson(
+        Widen(std::string("{\"type\":\"sessionSaved\",\"ok\":") + (ok ? "true" : "false") + "}").c_str());
+}
 static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
     std::string j = Narrow(jsonW);
     std::string type = JsonField(j, "type");
@@ -330,15 +341,7 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
     } else if (type == "setConfig" || type == "setConfigPersist") {
         OnSetConfig(wv, j, type);
     } else if (type == "saveSession") {
-        // Save: the live session (profile-scoped keys) becomes the active profile file.
-        std::string live;
-        const bool readOk = ReadIni(live);
-        const std::string active = ActiveProfileName(live);
-        const bool ok = readOk && !active.empty() && SafeName(active) &&
-                        wind::WriteTextFileAtomic(ProfilePath(active), wind::MakeProfileText(live));
-        if (!ok) wind::Log(wind::LogLevel::Warn, "config", "saveSession failed (profile '%s')", active.c_str());
-        wv->PostWebMessageAsJson(
-            Widen(std::string("{\"type\":\"sessionSaved\",\"ok\":") + (ok ? "true" : "false") + "}").c_str());
+        OnSaveSession(wv);
     } else if (type == "discardSession") {
         // Discard: the live ini goes back to the saved profile (globals kept); reply with fresh state.
         wind::IniWriteLock iniLock;   // item 71
