@@ -13,7 +13,7 @@ deploy, the installer's elevation rules and the release workflows.
 |---|---|---|
 | (none) | `Wind.exe` + `WindTray.exe` | The app with the `uiAccess=false` manifest. It refuses to start without UIAccess (issue #460) unless `WIND_ALLOW_NO_UIACCESS=1` or `WIND_SELFTEST=1` is set |
 | `test` | `wind_tests.exe` | The doctest binary over the pure sources; runs it and returns its exit code |
-| `check` | – | Compile-only pass over `src\*.cpp` |
+| `check` | – | Compile-only pass over `src\*.cpp`, `src\tray_app\*.cpp` and `src\config_ui\main.cpp` |
 | `uiaccess` | `Wind.exe` + `WindTray.exe` | `Wind.uiaccess.manifest` and `/DWIND_UIACCESS`; useful only signed and in Program Files. `WindTray.exe` always keeps the plain manifest |
 | `tray` | `WindTray.exe` | The tray helper alone, objects in `src\tray_app\` |
 | `config` | `WindConfig.exe` | Builds the Svelte app to `ui/dist/`, then the WebView2 host against `third_party/webview2` |
@@ -44,7 +44,8 @@ headlessly, so the unit tests are the only verification loop that runs everywher
   temp files. They need no Wind runtime, so they still run headless.
 - `tests/fixtures/keybind_cases.txt` is shared by the C++ and the JavaScript bind rules. The JS half
   is `ui/tests/keybind-rules.nodetest.mjs`, run by `npm run test:rules` in `ui/` (`node --test`, no
-  browser) and by CI.
+  browser) and by CI. `tests/fixtures/global_keys.txt` does the same for the profile-global keys
+  (`ui/tests/global-keys.nodetest.mjs`).
 - Config defaults are checked from both sides. `tests/test_config_defaults.cpp` walks every key of
   `DefaultIniText()` against `Config{}` (a new template key needs an `F(key)` line there) and compares
   `tests/fixtures/config_defaults.txt` (key, clamp min and max, default; generated from `Config{}` and
@@ -122,7 +123,8 @@ flowchart TD
 
 - **`src/version.h` is the only version declaration.** Bumping it cuts a new release `v<ver>`; a
   push that leaves it alone refreshes the current release's assets in place with `--clobber`, in
-  this repo.
+  this repo. Scripts and both workflows read it through `Get-WindVersion` (`tools/version.ps1`);
+  `tests/test_version.cpp` fails when `WIND_VERSION_STR` drifts from the three numbers.
 - Each release carries the installer twice: `Wind-Setup-x64-<ver>.exe` and the stable name
   `Wind-Setup-x64.exe`, so `releases/latest/download/Wind-Setup-x64.exe` always serves the newest.
 - Release notes come from `.github/release-notes.md`; the workflow fills `__VERSION__`,

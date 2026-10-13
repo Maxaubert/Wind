@@ -33,9 +33,10 @@ others are not).
   `LoadConfig` creates the defaults only for a missing file; the hot-reload keeps its settings and
   retries (`config  ini unreadable on reload`); writers that read the live ini first use
   `ReadLiveIni` and stop when it fails.
-- The only cross-process kernel objects are the single-instance mutexes and the
-  `Local\Wind_QuitRequest` event (quit, restart handshake, installer). A window message would not
-  work: UIPI drops `PostMessage` from a normal process to a UIAccess one.
+- The only cross-process kernel objects are the single-instance mutexes, the ini write lock and
+  the `Local\Wind_QuitRequest` event (quit, restart handshake, installer). A window message would not
+  work: UIPI drops `PostMessage` from a normal process to a UIAccess one. Their names are constants
+  in `src/tray_ipc.h` (`kQuitEventName` and the rest); the NSIS and PowerShell copies point there.
 - The tray's status block (`Local\Wind_TrayState_v1`) carries status, not settings
   ([01](01-overview.md)).
 
@@ -59,6 +60,9 @@ flowchart LR
 - **Never hardcode `L"magnifier.ini"`.** Program Files is read-only for the non-admin runtime, and a
   write next to the exe fails silently. The same applies to logs (`ResolveLogDir`) and the WebView2
   user-data folder (`%LOCALAPPDATA%\Wind\WebView2`).
+- `config_path.h` also holds the two folder lookups every binary uses: `ExeDir()` (the folder of the
+  running exe, which also holds the other two) and `UserDataDir()` (`%LOCALAPPDATA%\Wind`, created
+  on first use; `session.keep` and `running.model` live there).
 
 ## Parsing
 
@@ -74,8 +78,8 @@ as an initializer, so a missing or malformed key keeps the default; parsing neve
 
 The reload mechanics are in [02](02-tick-loop.md). A reload rebuilds `ZoomController`, so it
 collapses an active zoom; therefore `StripUiOnlyKeys` removes the eleven keys the core never reads
-(`uiTheme`, `uiPalette`, `showAdvanced`, `onboarded`, `trayPinned`, `uiHighResNoticeOff` and
-the five tray layout keys `trayPerf`,
+(`kUiOnlyKeys` in `src/profiles.h`: `uiTheme`, `uiPalette`, `showAdvanced`, `onboarded`, `trayPinned`,
+`uiHighResNoticeOff` and the five tray layout keys `trayPerf`,
 `traySliders`, `traySliderOrder`, `trayToggles`, `trayToggleOrder`) and the reload is skipped when the stripped
 text is unchanged. `profile` stays in the fingerprint, so a profile switch reloads.
 
@@ -100,12 +104,14 @@ A profile is a named full snapshot of the settings, keybinds included, stored as
 `profiles\<Name>.ini` next to the resolved ini, with `profile=<name>` in the live ini. Pure logic is
 in `src/profiles.*` (tested); I/O in `src/profiles_io.h`.
 
-**Global keys never travel with a profile.** `IsGlobalProfileKey` covers `profile`, `onboarded`,
-`uiTheme`, `uiPalette`, `showAdvanced`, `trayPinned`, `uiHighResNoticeOff` and the five tray
-layout keys (`trayPerf`, `traySliders`,
+**Global keys never travel with a profile.** `IsGlobalProfileKey` covers `profile` plus the
+`kUiOnlyKeys` list (`src/profiles.h`): `onboarded`, `uiTheme`, `uiPalette`, `showAdvanced`,
+`trayPinned`, `uiHighResNoticeOff` and the five tray layout keys (`trayPerf`, `traySliders`,
 `traySliderOrder`, `trayToggles`, `trayToggleOrder`). `MakeProfileText` strips them from profile
 files; `MakeLiveText` carries them over from the old live text. Both work line by line and keep
-comments and order.
+comments and order. `kUiOnlyKeys` is the only C++ copy of the list; the UI's `GLOBAL_KEYS`
+(`ui/src/session.js`) is pinned to it through `tests/fixtures/global_keys.txt`, which a doctest and
+a node test (`npm run test:rules`) both read.
 
 **Session model: the live ini is the session, the profile file is the saved state.**
 
@@ -123,7 +129,8 @@ comments and order.
   consumed once.
 - Tray Quit compares the files and prompts Save, Discard or Cancel.
 
-**Switching** (Settings or the tray flyout, the same sequence):
+**Switching** (Settings or the tray flyout, one implementation: `wind::SwitchProfile` in
+`src/profile_switch.h`; each surface only maps its result to its own messages):
 
 1. Read and check the profile with `ProfileTextError`, which rejects binary, oversized or
    unparseable text. A read failure is distinct from an empty file; treating a locked file as empty
@@ -133,8 +140,9 @@ comments and order.
 3. Write `MakeLiveText(profile, oldLive, name)` over the live ini.
 4. The core hot-reloads it, `model` included (`running.model` reads `live`). Only when Wind runs
    one engine (`running.model` names it) and the parsed `model` differs does the surface relaunch
-   `Wind.exe` (`EngineSwitchesLive`, `src/profiles_io.h`). If that relaunch fails, it writes the
-   old `model` back, so the ini always matches the running engine.
+   `Wind.exe` (`EngineSwitchesLive`, `src/profiles_io.h`), writing `session.keep` first. If that
+   relaunch fails, it writes the old `model` back (`RevertModelAfterFailedRelaunch`, also used by
+   the tray's engine pick), so the ini always matches the running engine.
 
 **That relaunch uses the eviction handshake, never a kill.** The new instance finds the
 single-instance mutex held, sets `Local\Wind_QuitRequest` and waits for the old one to exit. Only a
