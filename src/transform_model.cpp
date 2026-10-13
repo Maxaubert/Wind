@@ -1024,6 +1024,42 @@ void TransformModel::appendTrace(double trLevel, int trTxX, int trOffX, bool txW
     }
 }
 
+void TransformModel::pinAndGhostUpkeep(double level) {
+    if (smoothPan_ && level > 1.0) {
+        unsigned long long now = GetTickCount64();
+        if (now - lastPinAssertMs_ >= 500) { lastPinAssertMs_ = now; pin_.assert_(); }
+    } else {
+        pin_.hide();
+    }
+    // MPO buster (issue #191): keep the ghost asserted while wanted (500ms cadence; assert_
+    // also shows it on the first wanted tick). Hidden promptly when the session stops being
+    // MPO-exposed (alt-tab to the desktop mid-zoom, knob turned off).
+    if (mpoBusterWanted_ && level > 1.001) {
+        unsigned long long nowG = GetTickCount64();
+        // THE DEMOTION IS A RACE, AND A BLIND 500ms CADENCE LOSES IT (measured 2026-08-26 with
+        // tools/plane_race_probe.ps1: 3 of 6 alt-tab sessions left the game on its overlay plane
+        // for ~2.5s, against native Magnifier's 6 of 6 composited on the same machine). While the
+        // game holds a hardware plane DWM is not compositing it, so nothing we write can drive the
+        // composition rate and every pan start lands late - that IS the field stutter, and its
+        // per-session randomness is this race.
+        //
+        // So the OPENING of a session is asserted hard and the steady state stays calm: the first
+        // kGhostAggressiveMs are re-asserted every kGhostFastMs, which is what actually has to win
+        // against DWM re-promoting the game as it takes the foreground back. assert_() is already
+        // read-first (it transacts only when the ghost is hidden, moved, or stripped of TOPMOST),
+        // so a tighter cadence costs three cheap reads per tick, not a z-order transaction.
+        static constexpr unsigned long long kGhostAggressiveMs = 2000;
+        static constexpr unsigned long long kGhostFastMs       = 100;
+        if (ghostSessionStartMs_ == 0) ghostSessionStartMs_ = nowG;
+        const bool opening = (nowG - ghostSessionStartMs_) < kGhostAggressiveMs;
+        const unsigned long long cadence = opening ? kGhostFastMs : 500;
+        if (nowG - lastGhostAssertMs_ >= cadence) { lastGhostAssertMs_ = nowG; mpoGhost_.assert_(); }
+    } else {
+        ghostSessionStartMs_ = 0;   // next session re-opens with the aggressive window
+        mpoGhost_.hide();
+    }
+}
+
 void TransformModel::present(const MapResult& r, double level, const Config& cfg,
                              const MonitorTarget& mon, const PresentExtras& ex) {
     (void)mon;
@@ -1083,39 +1119,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     presentCursor(r, level, ex);
 
     appendTrace(trLevel, trTxX, trOffX, txWroteThisTick, trChanged, trRamping, trWarm);
-    if (smoothPan_ && level > 1.0) {
-        unsigned long long now = GetTickCount64();
-        if (now - lastPinAssertMs_ >= 500) { lastPinAssertMs_ = now; pin_.assert_(); }
-    } else {
-        pin_.hide();
-    }
-    // MPO buster (issue #191): keep the ghost asserted while wanted (500ms cadence; assert_
-    // also shows it on the first wanted tick). Hidden promptly when the session stops being
-    // MPO-exposed (alt-tab to the desktop mid-zoom, knob turned off).
-    if (mpoBusterWanted_ && level > 1.001) {
-        unsigned long long nowG = GetTickCount64();
-        // THE DEMOTION IS A RACE, AND A BLIND 500ms CADENCE LOSES IT (measured 2026-08-26 with
-        // tools/plane_race_probe.ps1: 3 of 6 alt-tab sessions left the game on its overlay plane
-        // for ~2.5s, against native Magnifier's 6 of 6 composited on the same machine). While the
-        // game holds a hardware plane DWM is not compositing it, so nothing we write can drive the
-        // composition rate and every pan start lands late - that IS the field stutter, and its
-        // per-session randomness is this race.
-        //
-        // So the OPENING of a session is asserted hard and the steady state stays calm: the first
-        // kGhostAggressiveMs are re-asserted every kGhostFastMs, which is what actually has to win
-        // against DWM re-promoting the game as it takes the foreground back. assert_() is already
-        // read-first (it transacts only when the ghost is hidden, moved, or stripped of TOPMOST),
-        // so a tighter cadence costs three cheap reads per tick, not a z-order transaction.
-        static constexpr unsigned long long kGhostAggressiveMs = 2000;
-        static constexpr unsigned long long kGhostFastMs       = 100;
-        if (ghostSessionStartMs_ == 0) ghostSessionStartMs_ = nowG;
-        const bool opening = (nowG - ghostSessionStartMs_) < kGhostAggressiveMs;
-        const unsigned long long cadence = opening ? kGhostFastMs : 500;
-        if (nowG - lastGhostAssertMs_ >= cadence) { lastGhostAssertMs_ = nowG; mpoGhost_.assert_(); }
-    } else {
-        ghostSessionStartMs_ = 0;   // next session re-opens with the aggressive window
-        mpoGhost_.hide();
-    }
+    pinAndGhostUpkeep(level);
 }
 
 bool TransformModel::retarget(const MonitorTarget& m) {

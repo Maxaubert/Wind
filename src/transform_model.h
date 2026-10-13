@@ -178,6 +178,7 @@ private:
     void presentCursor(const MapResult& r, double level, const PresentExtras& ex);
     void appendTrace(double trLevel, int trTxX, int trOffX, bool txWroteThisTick, bool trChanged,
                      bool trRamping, bool trWarm);   // one txTrace row
+    void pinAndGhostUpkeep(double level);            // composition pin + MPO ghost cadence (#191)
     std::mutex statMx_;
     unsigned long long statLogMs_ = 0;
     double statMaxMs_ = 0.0, statSumMs_ = 0.0;
