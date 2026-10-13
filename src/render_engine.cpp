@@ -11,6 +11,7 @@
 #include "mag_host.h"   // shared Magnification-runtime refcount (both models use the API)
 #include "upscale_pass.h"   // the xBR / NIS scaling filters (issue #456)
 #include "dwm_watch.h"      // DwmGeneration: re-apply the overlay's exclusions after a DWM restart (#458)
+#include "hlsl_compile.h"   // CompileHlsl: the one D3DCompile wrapper
 #include <windows.h>
 #include <d3d11.h>
 #include <dxgi1_6.h>
@@ -40,21 +41,11 @@ namespace wind {
 using Microsoft::WRL::ComPtr;
 
 // Render-engine events route through the unified logger (category "render").
-static void RLog(const char* fmt, ...) {
-    char msg[1024];
-    va_list ap; va_start(ap, fmt);
-    _vsnprintf_s(msg, sizeof(msg), _TRUNCATE, fmt, ap);
-    va_end(ap);
-    wind::Log(wind::LogLevel::Info, "render", "%s", msg);
-}
+#define RLog(...) wind::Log(wind::LogLevel::Info, "render", __VA_ARGS__)
 
+// Default compile flags; the caller owns (and releases) the returned blob.
 static ID3DBlob* CompileShader(const char* src, const char* entry, const char* target) {
-    ID3DBlob* code = nullptr; ID3DBlob* err = nullptr;
-    HRESULT hr = D3DCompile(src, std::strlen(src), nullptr, nullptr, nullptr,
-                            entry, target, 0, 0, &code, &err);
-    if (err) err->Release();
-    if (FAILED(hr)) { SafeRelease(code); return nullptr; }
-    return code;
+    return CompileHlsl(src, std::strlen(src), nullptr, entry, target, 0, "render").Detach();
 }
 
 // ---------------------------------------------------------------------------

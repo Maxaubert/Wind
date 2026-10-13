@@ -5,6 +5,7 @@
 #include "render_shaders.h"   // MagCB
 #include "logging.h"
 #include <d3dcompiler.h>
+#include "hlsl_compile.h"   // CompileHlsl: the one D3DCompile wrapper
 #include <wrl/client.h>
 #include <string>
 #include <cstdarg>
@@ -13,13 +14,7 @@
 namespace wind {
 using Microsoft::WRL::ComPtr;
 
-static void ULog(const char* fmt, ...) {
-    char msg[1024];
-    va_list ap; va_start(ap, fmt);
-    _vsnprintf_s(msg, sizeof(msg), _TRUNCATE, fmt, ap);
-    va_end(ap);
-    wind::Log(wind::LogLevel::Info, "upscale", "%s", msg);
-}
+#define ULog(...) wind::Log(wind::LogLevel::Info, "upscale", __VA_ARGS__)
 
 namespace {
 constexpr int kFilters = 3;   // RenderScaling values
@@ -35,14 +30,7 @@ std::string Source(int id) {
 }
 
 ComPtr<ID3DBlob> Compile(const std::string& src, const char* entry, const char* target, const char* tag) {
-    ComPtr<ID3DBlob> code, err;
-    HRESULT hr = D3DCompile(src.data(), src.size(), tag, nullptr, nullptr, entry, target,
-                            D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, code.GetAddressOf(), err.GetAddressOf());
-    if (FAILED(hr)) {
-        ULog("shader %s %s failed: %s", tag, entry, err ? (const char*)err->GetBufferPointer() : "?");
-        return nullptr;
-    }
-    return code;
+    return CompileHlsl(src.data(), src.size(), tag, entry, target, D3DCOMPILE_OPTIMIZATION_LEVEL3, "upscale");
 }
 
 struct TimerSlot {
