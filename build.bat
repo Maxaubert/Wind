@@ -29,16 +29,7 @@ if /i "%1"=="installer" goto :installer
 if /i "%1"=="tray" goto :tray
 
 rem --- App build (normal: uiAccess=false, runs from anywhere) ----------------
-rem Compile the app-icon resource (rc.exe ships with the Windows SDK, on PATH via vcvars).
-rc /nologo /fo "%ROOT%src\wind.res" "%ROOT%src\wind.rc"
-if errorlevel 1 (echo [build] rc.exe failed & exit /b 1)
-cl /nologo /std:c++17 /EHsc /O2 /W4 /Zi /DUNICODE /D_UNICODE ^
-   src\*.cpp src\wind.res ^
-   /Fe:Wind.exe ^
-   /link Magnification.lib Dwmapi.lib user32.lib shell32.lib gdi32.lib Dbghelp.lib ^
-   d3d11.lib dxgi.lib dxguid.lib d3dcompiler.lib windowscodecs.lib ole32.lib oleaut32.lib uuid.lib advapi32.lib ^
-   /MANIFEST:EMBED /MANIFESTUAC:NO /MANIFESTINPUT:Wind.manifest /SUBSYSTEM:WINDOWS ^
-   /DEBUG /OPT:REF /OPT:ICF
+call :core_exe "" Wind.manifest
 if errorlevel 1 exit /b 1
 call :tray_exe
 exit /b %errorlevel%
@@ -48,17 +39,24 @@ rem    Embeds Wind.uiaccess.manifest so the overlay CAN use a high z-band (opt-i
 rem    to cover the Start menu / taskbar / tray. Shipped default is 0 - see issue #162.
 rem    Deploy via tools\uiaccess_setup.ps1.
 :uiaccess
+call :core_exe /DWIND_UIACCESS Wind.uiaccess.manifest
+if errorlevel 1 exit /b 1
+call :tray_exe
+exit /b %errorlevel%
+
+rem --- Wind.exe itself, shared by the app and uiaccess targets. %1 = extra define ("" for none),
+rem    %2 = the manifest to embed. Everything else (sources, flags, libraries) is the same.
+:core_exe
+rem Compile the app-icon resource (rc.exe ships with the Windows SDK, on PATH via vcvars).
 rc /nologo /fo "%ROOT%src\wind.res" "%ROOT%src\wind.rc"
 if errorlevel 1 (echo [build] rc.exe failed & exit /b 1)
-cl /nologo /std:c++17 /EHsc /O2 /W4 /Zi /DUNICODE /D_UNICODE /DWIND_UIACCESS ^
+cl /nologo /std:c++17 /EHsc /O2 /W4 /Zi /DUNICODE /D_UNICODE %~1 ^
    src\*.cpp src\wind.res ^
    /Fe:Wind.exe ^
    /link Magnification.lib Dwmapi.lib user32.lib shell32.lib gdi32.lib Dbghelp.lib ^
    d3d11.lib dxgi.lib dxguid.lib d3dcompiler.lib windowscodecs.lib ole32.lib oleaut32.lib uuid.lib advapi32.lib ^
-   /MANIFEST:EMBED /MANIFESTUAC:NO /MANIFESTINPUT:Wind.uiaccess.manifest /SUBSYSTEM:WINDOWS ^
+   /MANIFEST:EMBED /MANIFESTUAC:NO /MANIFESTINPUT:%~2 /SUBSYSTEM:WINDOWS ^
    /DEBUG /OPT:REF /OPT:ICF
-if errorlevel 1 exit /b 1
-call :tray_exe
 exit /b %errorlevel%
 
 rem --- Tray helper (WindTray.exe, issue #291). ALWAYS the plain manifest (asInvoker, NO uiAccess):
@@ -124,6 +122,10 @@ cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c src\*.cpp
 if errorlevel 1 exit /b 1
 rem WindTray.exe sources (issue #291); own object dir, its main.cpp would overwrite Wind's main.obj.
 cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c /Fo"%ROOT%src\tray_app\\" src\tray_app\*.cpp
+if errorlevel 1 exit /b 1
+rem WindConfig.exe's host (same flags as :config); own object dir for the same reason.
+cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c /I third_party\webview2\include ^
+   /Fo"%ROOT%src\config_ui\\" src\config_ui\main.cpp
 exit /b %errorlevel%
 
 rem --- Installer (needs NSIS; winget install NSIS.NSIS) ---------------------
