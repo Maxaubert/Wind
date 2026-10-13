@@ -1658,6 +1658,39 @@ static void EnterInspect(TickState& t, bool zoomed, int& rawDx, int& rawDy) {
               (int)t.inspectMagHidCursor);
 }
 
+// Inspect exit while the overlay stays (zoomed): end game-inspect, drop pending clicks, release
+// the freeze and resume at the look point.
+static void ExitInspect(TickState& t) {
+    EndGameInspect(t);   // hand foreground back to the game before resuming normal follow
+    // Un-drained swallowed clicks die with the session: a click swallowed in the final
+    // tick before toggle-off would otherwise linger and fire as a phantom injected click
+    // at the lens centre on the NEXT activation (possibly much later, anywhere on screen).
+    g_input.state().commitLeft.exchange(0);
+    g_input.state().commitRight.exchange(0);
+    // Leaving Inspect resumes at the LOOK POINT for BOTH models: the crosshair is what the
+    // user was aiming with, so the cursor belongs there - snapping back to the pre-Inspect
+    // position (which the transform model used to do, because it was forbidden from
+    // placing the cursor) throws away the aim the user just spent the mode establishing.
+    ClipCursor(nullptr);
+    POINT lp{ (int)(t.mapper.centerX() + 0.5) + t.mon.x,
+              (int)(t.mapper.centerY() + 0.5) + t.mon.y };
+    const bool transformTx = dynamic_cast<TransformModel*>(t.model) != nullptr;
+    const bool warp = wind::InspectExitWarps(t.inspectLookMoved, transformTx);
+    t.postInspectHold = wind::HoldWindViewAfterInspect(t.inspectLookMoved, transformTx);
+    if (warp) SetCursorPos(lp.x, lp.y);
+    t.lastSetVirtual = warp ? lp : t.frozenCursor;
+    // The cursor SHAPE is stale after the warp (issue #229): Windows re-evaluates the
+    // shape only on a cursor event, so GetCursorInfo keeps reporting whatever cursor
+    // was active at the FROZEN spot (an I-beam over text, a link hand) and the sprite
+    // draws that stale shape until the user happens to move. Same 1px jiggle the
+    // transform model's session-end path uses - a zero-delta injected move is DROPPED
+    // by Windows and refreshes nothing (field-verified).
+    if (warp) {
+        SetCursorPos(lp.x + 1, lp.y);
+        SetCursorPos(lp.x, lp.y);
+    }
+}
+
 static void RunTick(TickState& t) {
     TickWorkTimer workTimer(t);
     const TickClock clk = BeginTick(t);
@@ -1691,34 +1724,7 @@ static void RunTick(TickState& t) {
         }
         bool inspectExit = !inspect && t.prevInspect;   // Inspect just turned off but overlay stays (zoomed)
         if (inspectExit) {
-            EndGameInspect(t);   // hand foreground back to the game before resuming normal follow
-            // Un-drained swallowed clicks die with the session: a click swallowed in the final
-            // tick before toggle-off would otherwise linger and fire as a phantom injected click
-            // at the lens centre on the NEXT activation (possibly much later, anywhere on screen).
-            g_input.state().commitLeft.exchange(0);
-            g_input.state().commitRight.exchange(0);
-            // Leaving Inspect resumes at the LOOK POINT for BOTH models: the crosshair is what the
-            // user was aiming with, so the cursor belongs there - snapping back to the pre-Inspect
-            // position (which the transform model used to do, because it was forbidden from
-            // placing the cursor) throws away the aim the user just spent the mode establishing.
-            ClipCursor(nullptr);
-            POINT lp{ (int)(t.mapper.centerX() + 0.5) + t.mon.x,
-                      (int)(t.mapper.centerY() + 0.5) + t.mon.y };
-            const bool transformTx = dynamic_cast<TransformModel*>(t.model) != nullptr;
-            const bool warp = wind::InspectExitWarps(t.inspectLookMoved, transformTx);
-            t.postInspectHold = wind::HoldWindViewAfterInspect(t.inspectLookMoved, transformTx);
-            if (warp) SetCursorPos(lp.x, lp.y);
-            t.lastSetVirtual = warp ? lp : t.frozenCursor;
-            // The cursor SHAPE is stale after the warp (issue #229): Windows re-evaluates the
-            // shape only on a cursor event, so GetCursorInfo keeps reporting whatever cursor
-            // was active at the FROZEN spot (an I-beam over text, a link hand) and the sprite
-            // draws that stale shape until the user happens to move. Same 1px jiggle the
-            // transform model's session-end path uses - a zero-delta injected move is DROPPED
-            // by Windows and refreshes nothing (field-verified).
-            if (warp) {
-                SetCursorPos(lp.x + 1, lp.y);
-                SetCursorPos(lp.x, lp.y);
-            }
+            ExitInspect(t);
         }
         if (recenter) { POINT pt; GetCursorPos(&pt); t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y); t.lastSetVirtual = pt; }
         // Resolve the pan delta. FREE: the OS cursor's own motion since we last placed it - Windows'
