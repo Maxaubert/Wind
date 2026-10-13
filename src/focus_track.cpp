@@ -513,15 +513,9 @@ struct FocusRun {
         return ok;
     }
 
-    // Returns true when a focus change could not be answered (the focused-element lookup timed out
-    // or came back empty), so the caller keeps it pending and tries again (review 2026-10-09 M5:
-    // in slow UIA apps a Tab was otherwise lost for good, because the backstop poll never
-    // re-resolves a focus change).
-    bool resolve(bool focusChanged, bool fromPoll) {
-        if (!active_.load()) return false;
-        HWND fg = GetForegroundWindow();
-        if (IsOwnOrTooltip(fg)) return false;
-        // Java app: the bridge is the only caret source (its Win32/UIA views have no caret).
+    // Java app: the bridge is the only caret source (its Win32/UIA views have no caret). True when the
+    // foreground window is a Java window with a bridge; the read lands in javaHave/javaCaret.
+    bool readJavaCaret(HWND fg, bool fromPoll) {
         const bool java = wantCaret_.load() && IsJavaWindow(fg) && jab.ensure(fg, tid_.load(), kWakeMsg, log_.load());
         if (java) {
             if (fg != javaWnd) { javaWnd = fg; javaDirty = true; }
@@ -545,6 +539,17 @@ struct FocusRun {
                                            javaCaret.right - javaCaret.left, javaCaret.bottom - javaCaret.top);
             }
         }
+        return java;
+    }
+    // Returns true when a focus change could not be answered (the focused-element lookup timed out
+    // or came back empty), so the caller keeps it pending and tries again (review 2026-10-09 M5:
+    // in slow UIA apps a Tab was otherwise lost for good, because the backstop poll never
+    // re-resolves a focus change).
+    bool resolve(bool focusChanged, bool fromPoll) {
+        if (!active_.load()) return false;
+        HWND fg = GetForegroundWindow();
+        if (IsOwnOrTooltip(fg)) return false;
+        const bool java = readJavaCaret(fg, fromPoll);
         // Slow-resolve log (#365 diagnosis): a cross-process call that blocks stalls ALL tracking.
         const ULONGLONG rs0 = GetTickCount64();
         IUIAutomationElement* el = nullptr;
