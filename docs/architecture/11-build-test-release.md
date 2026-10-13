@@ -61,7 +61,10 @@ the host's messages and records them in `window.__msgs`. When you add a bridge m
 `HandleWebMessage`, extend the mocks of the specs that use it in the same change. Details in [09](09-settings-ui.md).
 
 **CI** (`.github/workflows/build.yml`, on pull requests and pushes to `main`) builds the app and
-runs the doctest suite. It also runs the JS node tests (`npm run test:rules`: keybind rules and config defaults). The Playwright UI suite is a local gate for UI changes.
+runs the doctest suite, the JS node tests (`npm run test:rules`: keybind rules, config defaults and
+global keys) and the Playwright UI suite. Run the Playwright suite locally too when anything under
+`ui/` changes. The release and alpha workflows run the same gates before they publish (see Release
+automation).
 
 ## Local UIAccess deploy
 
@@ -115,7 +118,8 @@ flowchart TD
     F -- yes --> S[skip]
     F -- no --> V[read version from src/version.h]
     V --> T[build.bat test]
-    T --> B[pwsh tools/release.ps1]
+    T --> UI[npm run test:rules + Playwright]
+    UI --> B[pwsh tools/release.ps1]
     B --> R{release v&lt;ver&gt; exists?}
     R -- no --> C[gh release create]
     R -- yes --> U[gh release upload --clobber]
@@ -129,7 +133,10 @@ flowchart TD
   `Wind-Setup-x64.exe`, so `releases/latest/download/Wind-Setup-x64.exe` always serves the newest.
 - Release notes come from `.github/release-notes.md`; the workflow fills `__VERSION__`,
   `__SHA256__` and `__COMMIT__`.
-- Tests gate the build. A concurrency group serializes runs.
+- Tests gate the build: the doctest suite, the JS keybind-rule test and the Playwright UI suite
+  must all pass before anything is published. A concurrency group serializes runs.
+- The build itself (version read, test gates, `tools/release.ps1`) is the composite action
+  `.github/actions/build-installer`, shared with the alpha workflow. Change build steps there.
 - **Never hand-upload a release asset.** The workflow owns them.
 
 **Signing.** `tools/release.ps1` is the shared build driver for CI and local releases. Signing is
@@ -146,4 +153,5 @@ environment-driven: `WIND_SIGN_THUMBPRINT`, or `WIND_SIGN_PFX` plus `WIND_SIGN_P
 **Alpha channel** (`.github/workflows/alpha.yml`, run by hand from Actions). It builds an installer
 from any branch and publishes a pre-release `v<version>-alpha.<short-sha>`, which GitHub's Latest
 pointer ignores, so the stable download is unaffected. It does not bump `src/version.h` and keeps
-the newest 5 alphas. Its build steps mirror `release.yml`; change both together.
+the newest 5 alphas. It builds through the same `.github/actions/build-installer` as the release,
+so it runs the same gates; only the alpha tag, asset name and pruning are its own.

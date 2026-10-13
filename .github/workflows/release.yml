@@ -47,27 +47,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Read version from src/version.h
+      # Version read, unit tests, keybind JS test, Playwright UI suite and tools/release.ps1, shared
+      # with alpha.yml. Any failing gate fails the job before anything is published.
+      - name: Build installer (shared with alpha.yml)
         id: ver
-        shell: pwsh
-        run: |
-          . ./tools/version.ps1      # Get-WindVersion: the one src/version.h reader
-          "version=$(Get-WindVersion (Get-Location).Path)" >> $env:GITHUB_OUTPUT
-
-      - name: Install NSIS
-        shell: pwsh
-        run: choco install nsis --no-progress -y
-
-      - name: Unit tests
-        shell: cmd
-        run: build.bat test
-
-      # Builds Wind.exe + WindConfig.exe + ui/dist, then compiles the installer and runs
-      # tools/installer_check.ps1. The runner is administrator, so the gate's silent
-      # install/uninstall round-trip actually executes rather than skipping itself.
-      - name: Build installer
-        shell: pwsh
-        run: pwsh -File tools/release.ps1
+        uses: ./.github/actions/build-installer
 
       - name: Compose release notes
         id: notes
