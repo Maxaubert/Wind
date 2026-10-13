@@ -4,6 +4,7 @@
 #include "comp_pin.h"
 #include "cursor_blanker.h"
 #include "cursor_sprite.h"
+#include <climits>
 #include <memory>
 #include <vector>
 #include <thread>
@@ -12,11 +13,17 @@
 namespace wind {
 class TransformModel : public IMagnifierModel {
 public:
-    // Every session draws DWM's own pointer (issue #369, src/native_cursor.h); the sprite window
-    // exists only for the Inspect crosshair, and zorderBand / cursorBandAuto place that window.
+    // Sessions draw DWM's own pointer (issue #369, src/native_cursor.h); the sprite window is the
+    // Inspect crosshair, and zorderBand / cursorBandAuto place that window. The legacy sprite session
+    // (txNativeCursor=0, issue #463) paints the system cursor into it instead.
     TransformModel(bool fastPan, bool smoothPan, int zorderBand, bool cursorBandAuto = false)
         : fastPan_(fastPan), smoothPan_(smoothPan),
           zorderBand_(zorderBand), cursorBandAuto_(cursorBandAuto) {}
+    // UseNativeCursor(txNativeCursor), latched into the session at zoom-in (hot for the next one).
+    void setNativeCursorPref(bool on) { nativePref_ = on; }
+    // This session draws DWM's pointer (false: the legacy sprite session). Before the session's
+    // setActive(true) it answers for the session about to start.
+    bool nativeSession() const { return active_ ? nativeSession_ : nativePref_; }
     bool initialize(const MonitorTarget& monitor) override;
     // MONITOR GEOMETRY CAN CHANGE UNDER A LIVE SESSION (issue #230). mon_ feeds the clamp bounds in
     // ComputeMagTransform, the crosshair's placement offsets and the MagSetInputTransform rects, and
@@ -41,8 +48,8 @@ public:
     // suppressed). Only the locked and Inspect regimes weld now; RunTick's #169 measured-baseline
     // logic reads it exactly like RenderEngine::parkedLastFrame().
     bool weldedLastFrame() const { return weldedLastFrame_; }
-    // Whether WE currently hide the real pointer (Inspect, or the hide-cursor hotkey in a native
-    // session, which present() applies on its own). The tick loop mirrors it into
+    // Whether WE currently hide the real pointer (Inspect, the hide-cursor hotkey, or the legacy
+    // sprite standing in for it, which present() applies on its own). The tick loop mirrors it into
     // cursorHiddenByUs, the game-inspect tell, instead of tracking the calls itself.
     bool pointerHidden() const { return cursorHidden_; }
     // Whether MagSetInputTransform is usable (probed once at initialize; needs UIAccess). The
@@ -117,6 +124,9 @@ private:
     // middle-click: measured 17 spike frames per 14 clicks), and the lens is ON only while zoomed.
     // The context is released at shutdown and when the model is swapped out.
     bool magUp_ = false;
+    bool nativePref_ = true;                         // txNativeCursor (#463): the next session's kind
+    bool nativeSession_ = true;                      // latched at zoom-in; false = legacy sprite session
+    int  lastSpriteX_ = INT_MIN, lastSpriteY_ = INT_MIN;   // dedup the legacy sprite move
     // Native cursor (issue #369). nativePrimed_: the context's one public write that makes DWM
     // draw the real pointer magnified (the fallback when the cursor lens could not be built).
     // dwmCentreOn_: DWM owns the pan (DWMUpdated TRUE).

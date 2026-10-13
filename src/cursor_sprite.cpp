@@ -11,9 +11,10 @@ namespace wind {
 
 static const wchar_t* kClassName = L"WindCursorSprite";
 
-// A topmost click-through layered window that carries the Inspect crosshair. It is positioned in
+// A topmost click-through layered window that carries the Inspect crosshair, and in the legacy
+// sprite session (txNativeCursor=0, issue #463) a copy of the system cursor. It is positioned in
 // desktop coordinates on the look point, in the same tick that sets the fullscreen transform; the
-// transform magnifies it together with the content beneath it, so crosshair and view are rigidly
+// transform magnifies it together with the content beneath it, so sprite and view are rigidly
 // locked and cannot wobble against each other.
 
 HWND CursorSprite::makeWindow(int band, int* usedBand) {
@@ -89,7 +90,9 @@ void CursorSprite::setLayer(SpriteLayer l) {
     HWND from = hwnd_;
     hwnd_ = to;
     layer_ = l;
-    // The incoming window holds stale or no pixels: force the next showCrosshair() to paint it.
+    // The incoming window holds stale or no pixels: force the next refreshShape()/showCrosshair()
+    // to paint it, even though the cursor handle has not changed.
+    lastCursor_ = nullptr;
     crosshairMode_ = false;
     reapplyPosition();
     if (visible_) {
@@ -97,6 +100,260 @@ void CursorSprite::setLayer(SpriteLayer l) {
         pendingHide_ = from;       // ...and only then hides this one
     }
 }
+
+// Re-evaluates the system cursor and, for shapes that can be rendered
+// faithfully, repaints the layered sprite bitmap. Cursors whose single-pass
+// render comes back fully transparent (no per-pixel alpha - the modern
+// I-beam caret among them) are rendered with a two-pass mask/inversion
+// technique instead: opaque pixels keep their color, genuinely transparent
+// pixels stay transparent, and inverting pixels are inked white and given a
+// black outline (see renderMaskShape). The real system cursor is shown only
+// while ShapeStatus::Hidden is returned, i.e. the cursor is suppressed/hidden
+// or its shape could not be captured this tick.
+CursorSprite::ShapeStatus CursorSprite::refreshShape() {
+    wind::SpanScope span(wind::kSpanSprite);
+    CURSORINFO info{};
+    info.cbSize = sizeof(CURSORINFO);
+    if (!GetCursorInfo(&info)) return ShapeStatus::Hidden;
+    if ((info.flags & CURSOR_SHOWING) == 0) return ShapeStatus::Hidden;
+    if ((info.flags & CURSOR_SUPPRESSED) != 0) return ShapeStatus::Hidden;
+
+    if (info.hCursor == lastCursor_) return lastVerdict_;
+
+    // The on-screen object for standard cursors is blanked while magnifying; render from the
+    // original shape the blanker copied before blanking. A handle not in the map is an APP-CUSTOM
+    // cursor (games!): it was never blanked, but the model hides the whole cursor plane via
+    // MagShowSystemCursor, so we must render it ourselves too - the handle itself is a valid
+    // shape source (issue #148: Foundation's cursor went unrendered and the raw cursor roamed).
+    HCURSOR shapeSource = info.hCursor;
+    if (originals_) {
+        auto it = originals_->find(info.hCursor);
+        if (it != originals_->end()) shapeSource = it->second;
+    }
+
+    HICON hIconCopy = CopyIcon((HICON)shapeSource);
+    if (hIconCopy == nullptr) return ShapeStatus::Hidden; // transient failure; don't imitate
+
+    ICONINFO iconInfo{};
+    if (!GetIconInfo(hIconCopy, &iconInfo)) {
+        DestroyIcon(hIconCopy);
+        return ShapeStatus::Hidden;
+    }
+    // These mask/color bitmaps are owned by us once GetIconInfo returns; read the native size
+    // (needed to scale DrawIconEx) and the hotspot, then free them immediately - otherwise they
+    // leak every tick the cursor shape changes. Mask-only cursors report a double-height mask.
+    BITMAP bm{};
+    if (iconInfo.hbmColor && GetObjectW(iconInfo.hbmColor, sizeof(bm), &bm)) {
+        natW_ = bm.bmWidth; natH_ = bm.bmHeight;
+    } else if (iconInfo.hbmMask && GetObjectW(iconInfo.hbmMask, sizeof(bm), &bm)) {
+        natW_ = bm.bmWidth; natH_ = bm.bmHeight / 2;
+    }
+    if (natW_ <= 0 || natW_ > kSize) natW_ = 32;
+    if (natH_ <= 0 || natH_ > kSize) natH_ = 32;
+    if (iconInfo.hbmMask) DeleteObject(iconInfo.hbmMask);
+    if (iconInfo.hbmColor) DeleteObject(iconInfo.hbmColor);
+    int hotX = (int)iconInfo.xHotspot * scale_;   // hotspots live in FINAL (scaled) pixels
+    int hotY = (int)iconInfo.yHotspot * scale_;
+
+    const int S = bufSize();
+    HDC screenDc = GetDC(nullptr);
+    HDC memDc = CreateCompatibleDC(screenDc);
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = S;
+    bmi.bmiHeader.biHeight = -S; // top-down DIB
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    void* bits = nullptr;
+    HBITMAP dib = CreateDIBSection(screenDc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    if (dib == nullptr || bits == nullptr) {
+        if (dib != nullptr) DeleteObject(dib);
+        DeleteDC(memDc);
+        ReleaseDC(nullptr, screenDc);
+        DestroyIcon(hIconCopy);
+        return ShapeStatus::Hidden;
+    }
+    HGDIOBJ oldBmp = SelectObject(memDc, dib);
+
+    // Zero the bits buffer before drawing so unpainted pixels are
+    // transparent rather than whatever garbage the allocation happened to
+    // contain. DrawIconEx with DI_NORMAL onto a zeroed 32bpp DIB gives
+    // usable premultiplied alpha for cursors that carry their own
+    // per-pixel alpha channel - this single pass is tried for every
+    // cursor, regardless of whether GetIconInfo reported an hbmColor.
+    // Drawn at native * scale_ so the sprite matches the zoom level.
+    memset(bits, 0, (size_t)S * S * 4);
+    DrawIconEx(memDc, 0, 0, hIconCopy, natW_ * scale_, natH_ * scale_, 0, nullptr, DI_NORMAL);
+
+    // Some cursors (the modern I-beam among them) report a color bitmap
+    // via GetIconInfo, but that color bitmap's alpha channel is empty, so
+    // the single pass above yields a fully transparent result (every
+    // pixel's alpha byte is 0). Detect the all-transparent case here, by
+    // output rather than by type, and fall back to the two-pass
+    // mask/inversion renderer for these mask cursors.
+    bool anyAlpha = false;
+    uint32_t* pixels = (uint32_t*)bits;
+    for (int i = 0; i < S * S; i++) {
+        if ((pixels[i] & 0xFF000000u) != 0) { anyAlpha = true; break; }
+    }
+
+    if (!anyAlpha) {
+        SelectObject(memDc, oldBmp);
+        DeleteObject(dib);
+        DeleteDC(memDc);
+        ReleaseDC(nullptr, screenDc);
+
+        DestroyIcon(iconCopy_); // destroy the previous copy we were holding
+        iconCopy_ = hIconCopy;
+        hotX_ = hotX;
+        hotY_ = hotY;
+        lastCursor_ = info.hCursor;
+        lastVerdict_ = ShapeStatus::Rendered;
+        renderMaskShape();
+        crosshairMode_ = false;   // the window now holds the cursor shape again
+        // Same as the alpha path below (issue #229): the hotspot changed with the shape, and
+        // nothing else re-places the window until the pointer moves. Missing here, a mask cursor
+        // (the Snipping Tool's cross, the I-beam) sat off by the old hotspot until the first
+        // move, most visibly on the band switch into the snip overlay (issue #269).
+        reapplyPosition();
+        return ShapeStatus::Rendered;
+    }
+
+    BLENDFUNCTION blend{};
+    blend.BlendOp = AC_SRC_OVER;
+    blend.BlendFlags = 0;
+    blend.SourceConstantAlpha = 255;
+    blend.AlphaFormat = AC_SRC_ALPHA;
+    SIZE size{ S, S };
+    POINT srcPt{ 0, 0 };
+    UpdateLayeredWindow(hwnd_, nullptr, nullptr, &size, memDc, &srcPt, 0, &blend, ULW_ALPHA);
+
+    SelectObject(memDc, oldBmp);
+    DeleteObject(dib);
+    DeleteDC(memDc);
+    ReleaseDC(nullptr, screenDc);
+
+    DestroyIcon(iconCopy_); // destroy the previous copy we were holding
+    iconCopy_ = hIconCopy;
+    hotX_ = hotX;
+    hotY_ = hotY;
+    lastCursor_ = info.hCursor;
+    lastVerdict_ = ShapeStatus::Rendered;
+    crosshairMode_ = false;   // the window now holds the cursor shape again
+    reapplyPosition();        // the hotspot may have changed with the shape (issue #229)
+    return ShapeStatus::Rendered;
+}
+
+// Two-pass mask/inversion renderer for cursors whose single-pass render came
+// back fully transparent (legacy AND/XOR mask cursors, e.g. the I-beam
+// caret). Draws iconCopy_ once onto an opaque black-filled DIB and once onto
+// an opaque white-filled DIB: pixels where both renders agree are opaque
+// color pixels; pixels that stayed background-colored (white on black bg,
+// black on white bg) are transparent; pixels that inverted (black on the
+// white-bg render, white on the black-bg render) are the inverting/mask pixels.
+//
+// An inverting pixel has no colour of its own, so the sprite replacing it must
+// choose one. Sampling the background to pick black or white ink cannot be made
+// stable: a mixed or mid-grey background sits near the decision threshold, so
+// the caret flicks between inks as it moves, and no dead-band or hysteresis
+// removes that (it only shrinks the band where it happens, and leaves the caret
+// low-contrast there). Instead paint the mask pixels white and synthesise a 1px
+// black outline around the shape, which is what the standard arrow cursor does.
+// Contrast then comes from the outline rather than from a guess about what lies
+// underneath, so the caret is legible on any background and there is no verdict
+// left to oscillate.
+void CursorSprite::renderMaskShape() {
+    const int S = bufSize();
+    HDC screenDc = GetDC(nullptr);
+    HDC memDc = CreateCompatibleDC(screenDc);
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = S;
+    bmi.bmiHeader.biHeight = -S; // top-down DIB
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    void* blackBits = nullptr;
+    void* whiteBits = nullptr;
+    HBITMAP blackDib = CreateDIBSection(screenDc, &bmi, DIB_RGB_COLORS, &blackBits, nullptr, 0);
+    HBITMAP whiteDib = nullptr;
+    if (blackDib != nullptr) whiteDib = CreateDIBSection(screenDc, &bmi, DIB_RGB_COLORS, &whiteBits, nullptr, 0);
+    if (blackDib == nullptr || whiteDib == nullptr) {
+        if (blackDib != nullptr) DeleteObject(blackDib);
+        DeleteDC(memDc);
+        ReleaseDC(nullptr, screenDc);
+        return;
+    }
+
+    HGDIOBJ oldBmp = SelectObject(memDc, blackDib);
+    std::fill_n((uint32_t*)blackBits, (size_t)S * S, 0xFF000000u);
+    DrawIconEx(memDc, 0, 0, iconCopy_, natW_ * scale_, natH_ * scale_, 0, nullptr, DI_NORMAL);
+
+    SelectObject(memDc, whiteDib);
+    std::fill_n((uint32_t*)whiteBits, (size_t)S * S, 0xFFFFFFFFu);
+    DrawIconEx(memDc, 0, 0, iconCopy_, natW_ * scale_, natH_ * scale_, 0, nullptr, DI_NORMAL);
+
+    const uint32_t kOpaqueWhite = 0xFFFFFFFFu;   // premultiplied opaque white (the ink)
+    const uint32_t kOpaqueBlack = 0xFF000000u;   // premultiplied opaque black (the outline)
+    uint32_t* black = (uint32_t*)blackBits;
+    uint32_t* white = (uint32_t*)whiteBits;
+    // shape[i] = 1 for every opaque pixel of the cursor: a baked colour pixel, or an inverting
+    // pixel we are inking white. The outline pass below dilates this, so it must be recorded
+    // BEFORE the outline is drawn, or the outline would feed on itself and keep growing.
+    std::vector<uint8_t> shape((size_t)S * S);   // heap: S*S is up to 512x512 at max scale
+    for (int i = 0; i < S * S; i++) {
+        uint32_t rgbB = black[i] & 0x00FFFFFFu;
+        uint32_t rgbW = white[i] & 0x00FFFFFFu;
+        if (rgbB == rgbW) {
+            white[i] = rgbB | 0xFF000000u; // opaque, alpha 255, premultiplied color from either render
+            shape[i] = 1;
+        } else {
+            int lumB = (int)(rgbB & 0xFFu) + (int)((rgbB >> 8) & 0xFFu) + (int)((rgbB >> 16) & 0xFFu);
+            int lumW = (int)(rgbW & 0xFFu) + (int)((rgbW >> 8) & 0xFFu) + (int)((rgbW >> 16) & 0xFFu);
+            bool inverting = lumB > lumW;
+            white[i] = inverting ? kOpaqueWhite : 0u;
+            shape[i] = inverting ? 1 : 0;
+        }
+    }
+
+    // Outline: every transparent pixel touching the shape (8-neighbourhood) becomes opaque black.
+    // One desktop pixel thick, so the fullscreen transform magnifies it in step with the ink, the
+    // same way the arrow cursor's own outline scales.
+    for (int y = 0; y < S; y++) {
+        for (int x = 0; x < S; x++) {
+            int i = y * S + x;
+            if (shape[i]) continue;                  // already ink or baked colour
+            bool touches = false;
+            for (int dy = -1; dy <= 1 && !touches; dy++) {
+                for (int dx = -1; dx <= 1 && !touches; dx++) {
+                    int ny = y + dy, nx = x + dx;
+                    if (ny < 0 || nx < 0 || ny >= S || nx >= S) continue;
+                    if (shape[ny * S + nx]) touches = true;
+                }
+            }
+            if (touches) white[i] = kOpaqueBlack;
+        }
+    }
+
+    BLENDFUNCTION blend{};
+    blend.BlendOp = AC_SRC_OVER;
+    blend.BlendFlags = 0;
+    blend.SourceConstantAlpha = 255;
+    blend.AlphaFormat = AC_SRC_ALPHA;
+    SIZE size{ S, S };
+    POINT srcPt{ 0, 0 };
+    UpdateLayeredWindow(hwnd_, nullptr, nullptr, &size, memDc, &srcPt, 0, &blend, ULW_ALPHA);
+
+    SelectObject(memDc, oldBmp);
+    DeleteObject(whiteDib);
+    DeleteObject(blackDib);
+    DeleteDC(memDc);
+    ReleaseDC(nullptr, screenDc);
+}
+
 
 // Moves the sprite so its hotspot sits at the given desktop point. The target is remembered:
 // painting the crosshair sets a NEW hotspot, and the window must then be repositioned even though
@@ -204,6 +461,9 @@ void CursorSprite::showCrosshair() {
         crosshairMode_ = true;
         hotX_ = hotY_ = (bufSize() - 2) / 2;   // the cross centers on this texel (see BuildCrosshairBGRA)
         reapplyPosition();                     // new hotspot, same target (issue #229)
+        // The window no longer holds the cursor pixels, so the next refreshShape() (Inspect off in a
+        // legacy sprite session) must repaint even if the cursor HANDLE never changed.
+        lastCursor_ = nullptr;
     }
     show();
 }
@@ -224,5 +484,6 @@ void CursorSprite::destroy() {
     if (hwndLow_)  { DestroyWindow(hwndLow_);  hwndLow_ = nullptr; }
     if (hwndHigh_) { DestroyWindow(hwndHigh_); hwndHigh_ = nullptr; }
     hwnd_ = nullptr;
+    if (iconCopy_) { DestroyIcon(iconCopy_); iconCopy_ = nullptr; }
 }
 }

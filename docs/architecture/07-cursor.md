@@ -178,6 +178,19 @@ slightly during zoom ramps, nearest keeps it pixelated and steady. Pure rules:
   crosshair window. Games pay nothing extra for the native cursor: a zoomed full-screen window is
   composed anyway, and at 1x the lens style is off.
 
+### Legacy sprite session (`txNativeCursor=0`)
+
+An ini-only A/B fallback (#463) to the transform cursor as it was before the native cursor (#369):
+Wind writes every view itself (no DWM centring, no cursor lens), hides the real pointer (blanker plus
+`MagShowSystemCursor`) and paints its shape into the sprite window (`CursorSprite::refreshShape`,
+from the blanker's copies of the standard cursors), placed at the lens point in desktop
+coordinates so DWM magnifies it with the content. At zoom-in the sprite is stood up on the pointer
+before the blank (two `DwmFlush` passes) so the hand-off does not blink. The lock rule is the old
+one: a locked session stays locked with the pointer shown (`LockApplies` gets `nativeSession()`).
+Read at zoom-in, so a change applies to the next session. Not ported: the shell-panel pointer
+freeze (#283), so the emoji picker and Win+V draw above the sprite; the hook write path, cadence
+gates and idle context release, all off or superseded before #369.
+
 ## Hiding the real pointer: blanker and crosshair
 
 Inspect and the hide-cursor hotkey (`cursorVisibility=never`) hide DWM's pointer in a transform
