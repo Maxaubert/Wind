@@ -157,6 +157,78 @@ static void SanitizeBinds(Config& c) {
     if (!c.cursorLockOn) { c.cursorLockVk = 0; c.cursorLockMods = 0; }
 }
 
+// ParseConfig's range pass, after every key is read. haveRenderScaling: the ini had the key (#456).
+static void ClampConfig(Config& c, bool haveRenderScaling) {
+    // Clamp numeric fields to their documented ranges. The ini is a hand-editable surface, and an
+    // out-of-range value (e.g. maxLevel=0, which would invert ZoomController's clamp and disable zoom,
+    // or a negative ramp) would otherwise silently break behavior with no feedback. Ranges mirror the
+    // config UI sliders / the struct-comment docs.
+    c.trackMarginPct  = (int)clampd(c.trackMarginPct, 0, 40);
+    c.mouseMarginPct  = (int)clampd(c.mouseMarginPct, 0, 40);
+    // 30x cap (#429): above it the smooth path's half-texel jumps reach 15-25 px and the pointer
+    // runs off the screen; must be >= the 1.0 min zoom level.
+    c.maxLevel        = clampd(c.maxLevel,        1.0, 30.0);
+    c.zoomInSpeed     = clampd(c.zoomInSpeed,     0.25, 4.0);
+    c.zoomOutSpeed    = clampd(c.zoomOutSpeed,    0.25, 4.0);
+    c.panSpeed        = clampd(c.panSpeed,        0.25, 4.0);
+    c.smoothZoomAccel = clampd(c.smoothZoomAccel, 1.0, 8.0);
+    c.smoothZoomRamp  = clampd(c.smoothZoomRamp,  0.1, 3.0);
+    c.cursorSensitivity = clampd(c.cursorSensitivity, 0.25, 4.0);
+    if (c.panGlideMaxPx < 0) c.panGlideMaxPx = 0;
+    if (c.txRampMinStep < 0) c.txRampMinStep = 0;
+    if (c.txRampMinStep > 100) c.txRampMinStep = 100;
+    if (c.txRampMinFrom < 1.0) c.txRampMinFrom = 1.0;
+    if (c.panGlideMaxPx > 400) c.panGlideMaxPx = 400;
+    if (c.gameCursorLagMs < -1) c.gameCursorLagMs = -1;
+    if (c.gameCursorLagMs > 100) c.gameCursorLagMs = 100;
+    c.sharpness       = clampd(c.sharpness,       0.0, 1.0);
+    if (!haveRenderScaling) c.renderScaling = c.bilinear == 0 ? 0 : 1;   // bilinear retired (#456)
+    if (c.renderScaling < 0 || c.renderScaling > 2) c.renderScaling = 1;
+    c.brightness      = clampd(c.brightness,      0.5, 1.5);
+    c.colorWarmPct    = (int)clampd(c.colorWarmPct, 0, 100);
+    c.colorDimPct     = (int)clampd(c.colorDimPct, 1, 100);
+    c.trayPinned      = (int)clampd(c.trayPinned, 0, 1);
+    c.quickZoomDefault  = clampd(c.quickZoomDefault, 1.0, 30.0);
+    if (c.outlineThickness < 1)  c.outlineThickness = 1;
+    if (c.outlineThickness > 40) c.outlineThickness = 40;
+    c.outlineLowZoomMax  = clampd(c.outlineLowZoomMax,  1.0, 50.0);
+    if (c.trackGlideMs < 0)    c.trackGlideMs = 0;      // glide time; a negative one would run the spring backwards
+    if (c.trackGlideMs > 5000) c.trackGlideMs = 5000;
+    if (c.txMaxStepPct < 0)    c.txMaxStepPct = 0;      // 0 = uncapped
+    if (c.txMaxStepPct > 1000) c.txMaxStepPct = 1000;
+    if (c.gameFpsCap < 0)   c.gameFpsCap = 0;      // 0 = off
+    if (c.gameFpsCap > 240) c.gameFpsCap = 240;
+    if (c.gpuPriority < -1) c.gpuPriority = -1;    // tri-state: -1 low / 0 normal / +1 high
+    if (c.gpuPriority >  1) c.gpuPriority = 1;
+    if (c.tdrTest < 0) c.tdrTest = 0;              // diagnostic harness (issue #148)
+    if (c.tdrTest > 4) c.tdrTest = 4;
+    if (c.ixDecimate < 1)  c.ixDecimate = 1;       // 1 = publish every changed tick
+    if (c.ixDecimate > 16) c.ixDecimate = 16;
+    if (c.txRestLevel < 1.0)   c.txRestLevel = 1.0;
+    if (c.txRestLevel > 1.01)  c.txRestLevel = 1.01;   // visually identity only
+    if (c.zoomEaseOutMs < 0)   c.zoomEaseOutMs = 0;
+    if (c.zoomEaseOutMs > 300) c.zoomEaseOutMs = 300;
+    if (c.txWarmMode < 0)      c.txWarmMode = 0;
+    if (c.txWarmMode > 1)      c.txWarmMode = 1;     // the retired modes 2-4 read as the shipped pulse
+    c.launchQuiesce = c.launchQuiesce ? 1 : 0;
+    if (c.txWarmHz < 0)        c.txWarmHz = 0;       // 0 = every tick
+    if (c.txWarmHz > 1000)     c.txWarmHz = 1000;
+    if (c.txEdgeMargin < 0.0) c.txEdgeMargin = 0.0;
+    if (c.txEdgeMargin > 8.0) c.txEdgeMargin = 8.0;   // beyond this the lost border is the bug
+    c.outlineIdleSeconds = clampd(c.outlineIdleSeconds, 0.5, 60.0);
+    // "transform" is a first-class model again (revived for issue #148: the compositor-internal
+    // zoom that stays smooth over heavy games); anything unknown falls back to hybrid, the
+    // product default ("Auto" in the UI) - same fallback as a missing key (struct default).
+    // "magnify" (the retired Windows Magnifier driver) is unknown too, so an old ini that still
+    // says so runs Auto.
+    if (c.model != "render" && c.model != "transform" && c.model != "hybrid") c.model = "hybrid";
+    // (The old transform/hybrid maxLevel<=12 clamp is GONE: the "TDR territory above 12x" was
+    // root-caused 2026-07-26 to NVIDIA's 16-bit MPO plane-programming overflow - see issue
+    // #148 - which the mapper's MPO-aware pan wall now guards at ANY level, so maxLevel is one
+    // shared setting across all models. High levels still cost DWM re-scale time; that is a
+    // perf trade the user owns, not a crash.)
+}
+
 Config ParseConfig(const std::string& text) {
     Config c;
     // A UTF-8 BOM (Notepad's "UTF-8 with BOM") would glue itself to the first key and lose it.
@@ -319,74 +391,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "outlineIdleSeconds") c.outlineIdleSeconds = ParseDoubleStrict(val);
         } catch (...) { /* keep default on bad value */ }
     }
-    // Clamp numeric fields to their documented ranges. The ini is a hand-editable surface, and an
-    // out-of-range value (e.g. maxLevel=0, which would invert ZoomController's clamp and disable zoom,
-    // or a negative ramp) would otherwise silently break behavior with no feedback. Ranges mirror the
-    // config UI sliders / the struct-comment docs.
-    c.trackMarginPct  = (int)clampd(c.trackMarginPct, 0, 40);
-    c.mouseMarginPct  = (int)clampd(c.mouseMarginPct, 0, 40);
-    // 30x cap (#429): above it the smooth path's half-texel jumps reach 15-25 px and the pointer
-    // runs off the screen; must be >= the 1.0 min zoom level.
-    c.maxLevel        = clampd(c.maxLevel,        1.0, 30.0);
-    c.zoomInSpeed     = clampd(c.zoomInSpeed,     0.25, 4.0);
-    c.zoomOutSpeed    = clampd(c.zoomOutSpeed,    0.25, 4.0);
-    c.panSpeed        = clampd(c.panSpeed,        0.25, 4.0);
-    c.smoothZoomAccel = clampd(c.smoothZoomAccel, 1.0, 8.0);
-    c.smoothZoomRamp  = clampd(c.smoothZoomRamp,  0.1, 3.0);
-    c.cursorSensitivity = clampd(c.cursorSensitivity, 0.25, 4.0);
-    if (c.panGlideMaxPx < 0) c.panGlideMaxPx = 0;
-    if (c.txRampMinStep < 0) c.txRampMinStep = 0;
-    if (c.txRampMinStep > 100) c.txRampMinStep = 100;
-    if (c.txRampMinFrom < 1.0) c.txRampMinFrom = 1.0;
-    if (c.panGlideMaxPx > 400) c.panGlideMaxPx = 400;
-    if (c.gameCursorLagMs < -1) c.gameCursorLagMs = -1;
-    if (c.gameCursorLagMs > 100) c.gameCursorLagMs = 100;
-    c.sharpness       = clampd(c.sharpness,       0.0, 1.0);
-    if (!haveRenderScaling) c.renderScaling = c.bilinear == 0 ? 0 : 1;   // bilinear retired (#456)
-    if (c.renderScaling < 0 || c.renderScaling > 2) c.renderScaling = 1;
-    c.brightness      = clampd(c.brightness,      0.5, 1.5);
-    c.colorWarmPct    = (int)clampd(c.colorWarmPct, 0, 100);
-    c.colorDimPct     = (int)clampd(c.colorDimPct, 1, 100);
-    c.trayPinned      = (int)clampd(c.trayPinned, 0, 1);
-    c.quickZoomDefault  = clampd(c.quickZoomDefault, 1.0, 30.0);
-    if (c.outlineThickness < 1)  c.outlineThickness = 1;
-    if (c.outlineThickness > 40) c.outlineThickness = 40;
-    c.outlineLowZoomMax  = clampd(c.outlineLowZoomMax,  1.0, 50.0);
-    if (c.trackGlideMs < 0)    c.trackGlideMs = 0;      // glide time; a negative one would run the spring backwards
-    if (c.trackGlideMs > 5000) c.trackGlideMs = 5000;
-    if (c.txMaxStepPct < 0)    c.txMaxStepPct = 0;      // 0 = uncapped
-    if (c.txMaxStepPct > 1000) c.txMaxStepPct = 1000;
-    if (c.gameFpsCap < 0)   c.gameFpsCap = 0;      // 0 = off
-    if (c.gameFpsCap > 240) c.gameFpsCap = 240;
-    if (c.gpuPriority < -1) c.gpuPriority = -1;    // tri-state: -1 low / 0 normal / +1 high
-    if (c.gpuPriority >  1) c.gpuPriority = 1;
-    if (c.tdrTest < 0) c.tdrTest = 0;              // diagnostic harness (issue #148)
-    if (c.tdrTest > 4) c.tdrTest = 4;
-    if (c.ixDecimate < 1)  c.ixDecimate = 1;       // 1 = publish every changed tick
-    if (c.ixDecimate > 16) c.ixDecimate = 16;
-    if (c.txRestLevel < 1.0)   c.txRestLevel = 1.0;
-    if (c.txRestLevel > 1.01)  c.txRestLevel = 1.01;   // visually identity only
-    if (c.zoomEaseOutMs < 0)   c.zoomEaseOutMs = 0;
-    if (c.zoomEaseOutMs > 300) c.zoomEaseOutMs = 300;
-    if (c.txWarmMode < 0)      c.txWarmMode = 0;
-    if (c.txWarmMode > 1)      c.txWarmMode = 1;     // the retired modes 2-4 read as the shipped pulse
-    c.launchQuiesce = c.launchQuiesce ? 1 : 0;
-    if (c.txWarmHz < 0)        c.txWarmHz = 0;       // 0 = every tick
-    if (c.txWarmHz > 1000)     c.txWarmHz = 1000;
-    if (c.txEdgeMargin < 0.0) c.txEdgeMargin = 0.0;
-    if (c.txEdgeMargin > 8.0) c.txEdgeMargin = 8.0;   // beyond this the lost border is the bug
-    c.outlineIdleSeconds = clampd(c.outlineIdleSeconds, 0.5, 60.0);
-    // "transform" is a first-class model again (revived for issue #148: the compositor-internal
-    // zoom that stays smooth over heavy games); anything unknown falls back to hybrid, the
-    // product default ("Auto" in the UI) - same fallback as a missing key (struct default).
-    // "magnify" (the retired Windows Magnifier driver) is unknown too, so an old ini that still
-    // says so runs Auto.
-    if (c.model != "render" && c.model != "transform" && c.model != "hybrid") c.model = "hybrid";
-    // (The old transform/hybrid maxLevel<=12 clamp is GONE: the "TDR territory above 12x" was
-    // root-caused 2026-07-26 to NVIDIA's 16-bit MPO plane-programming overflow - see issue
-    // #148 - which the mapper's MPO-aware pan wall now guards at ANY level, so maxLevel is one
-    // shared setting across all models. High levels still cost DWM re-scale time; that is a
-    // perf trade the user owns, not a crash.)
+    ClampConfig(c, haveRenderScaling);
     SanitizeBinds(c);
     return c;
 }
