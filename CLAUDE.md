@@ -150,7 +150,8 @@ Chapter numbers refer to `docs/architecture/NN-*.md`.
 - CI signs nothing. Setup signs the UIAccess build per PC (`installer/local-sign.ps1`). Never put the
   self-signed dev certificate in CI.
 - `alpha.yml` (manual) builds any branch as pre-release `v<ver>-alpha.<sha>`; it keeps the newest 5
-  and does not bump the version. Its build steps mirror `release.yml`: change both together.
+  and does not bump the version. Both workflows build through `.github/actions/build-installer`
+  (version read, unit + UI test gates, `release.ps1`): change build steps there, not in one workflow.
 - Anything deployed locally that is not on `main` is one installer run from being lost.
 - Changes with a runtime surface are verified by deploying the signed UIAccess build. Deploy
   (elevated; give it a 2 minute timeout):
