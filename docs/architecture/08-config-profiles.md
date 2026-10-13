@@ -152,7 +152,7 @@ as complete.
 
 **Names** become file names: `ProfileNameError` rejects path and control characters, leading or
 trailing dots and spaces, reserved device names and names over 40 characters. Matching is
-case-insensitive (`SameProfileName`). `NextCopyName` produces "Name copy", "Name copy 2".
+case-insensitive (`SameProfileName`).
 
 ## Key reference
 

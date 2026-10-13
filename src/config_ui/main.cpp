@@ -264,7 +264,7 @@ static std::string DoSwitchProfile(const std::string& name, bool mirrorOutgoing 
     }
     return "";
 }
-// Shared create/rename validation: trimmed name must pass the pure rules and be unique. The
+// New-profile validation: trimmed name must pass the pure rules and be unique. The
 // filesystem probe is the authority for collisions (NTFS folds Unicode case; our pure check only
 // folds ASCII, so "CAFE\xcc\x81" vs "cafe\xcc\x81" is caught here, not by ProfileNameTaken).
 static std::string ValidateNewName(const std::string& name) {
@@ -559,46 +559,6 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
                 else err = DoSwitchProfile(name, !fromCurrent);
             }
         }
-        PostProfiles(wv, err.empty(), err);
-    } else if (type == "renameProfile") {
-        const std::string from = JsonField(j, "from"), to = JsonField(j, "to");
-        std::string err;
-        if (!SafeName(from)) err = "Invalid profile name";
-        // Checked read: an unreadable ini must not look like "no active profile" and leave the
-        // profile= pointer on a file that no longer exists.
-        std::string liveNow;
-        if (err.empty() && !ReadIni(liveNow)) err = "Could not read the config file";
-        auto vals = wind::ReadIniValues(liveNow);
-        // Renaming to a different casing of itself is allowed; any other collision is not.
-        if (err.empty()) {
-            if (wind::SameProfileName(from, to)) err = wind::ProfileNameError(to);
-            else err = ValidateNewName(to);
-        }
-        // No MOVEFILE_REPLACE_EXISTING: a case-only self-rename succeeds without it (same file on
-        // NTFS), and for a genuine collision the filesystem's own Unicode case folding refuses the
-        // move where our ASCII-only ProfileNameTaken might have missed it.
-        if (err.empty() && !MoveFileExW(ProfilePath(from).c_str(), ProfilePath(to).c_str(), 0))
-            err = "Could not rename the profile file";
-        if (err.empty() && wind::SameProfileName(vals["profile"], from)) {
-            // The pointer update must land or the live ini names a file that no longer exists;
-            // verify the write and roll the rename back if it failed.
-            wind::IniWriteLock iniLock;   // item 71
-            std::string live;
-            if (!wind::ReadLiveIni(IniPath(), live) ||
-                !wind::WriteTextFileAtomic(IniPath(), wind::UpdateIniText(live, "profile", to))) {
-                MoveFileExW(ProfilePath(to).c_str(), ProfilePath(from).c_str(), 0);
-                err = "Could not update the config file; rename undone";
-            }
-        }
-        PostProfiles(wv, err.empty(), err);
-    } else if (type == "duplicateProfile") {
-        const std::string name = JsonField(j, "name");
-        std::string err;
-        if (!SafeName(name)) err = "Invalid profile name";
-        const std::string copy = wind::NextCopyName(name, ProfileNamesUtf8());
-        if (err.empty() && !wind::ProfileNameError(copy).empty()) err = "The copy's name would be invalid";
-        if (err.empty() && !CopyFileW(ProfilePath(name).c_str(), ProfilePath(copy).c_str(), TRUE))
-            err = "Could not copy the profile file";
         PostProfiles(wv, err.empty(), err);
     } else if (type == "deleteProfile") {
         const std::string name = JsonField(j, "name");

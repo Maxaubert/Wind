@@ -204,7 +204,7 @@ checked the icon position through UI Automation. The key is undocumented by Micr
 The Profile row (`prefs/ProfilePicker.svelte`) is a dropdown plus New. Each profile except the last
 one and Default has a delete button with a confirm prompt. New
 (`prefs/NewProfileDialog.svelte`) takes a name (checked by `prefs/profileName.js`, the host's rules)
-and offers New (defaults) or Duplicate current; Enter duplicates. Rename and duplicate have no UI.
+and offers New (defaults) or Duplicate current; Enter duplicates. There is no rename.
 
 - Operations that replace the live settings (switch, new from defaults, deleting the active
   profile) go through the unsaved-changes prompt.
