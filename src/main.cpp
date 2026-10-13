@@ -1014,8 +1014,10 @@ static void ZoomTimelineStep(TickState& t, long long nowQpc) {
     (void)nowQpc;
 }
 
-static void RunTick(TickState& t) {
-    TickWorkTimer workTimer(t);
+// Tick phase: timing. The idle colour filter, dt (raw, and clamped to one frame after an idle
+// wake), the zoom timeline step, the stale press stamp and the tray's frame-time sample.
+struct TickClock { LARGE_INTEGER now; double dt; double rawDt; bool woke; };
+static TickClock BeginTick(TickState& t) {
     // Idle (1x) colour filter; a zoomed tick re-decides below with the engine known.
     if (!t.prevActive) UpdateColorFilter(t, false, false, nullptr);
     LARGE_INTEGER now;
@@ -1039,6 +1041,15 @@ static void RunTick(TickState& t) {
     // One float store per tick, for the tray's frame-pacing readout. Deliberately the cheapest
     // possible coupling to the hot path: no lock, no allocation, and nothing reads it here.
     if (g_trayBlock && !woke) g_trayBlock->ticks.push((float)(dt * 1000.0));
+    return { now, dt, rawDt, woke };
+}
+
+static void RunTick(TickState& t) {
+    TickWorkTimer workTimer(t);
+    const TickClock clk = BeginTick(t);
+    const LARGE_INTEGER now = clk.now;
+    const double dt = clk.dt, rawDt = clk.rawDt;
+    const bool woke = clk.woke;
 
     // Config hot-reload. A directory-change notification tells us WHEN to re-check magnifier.ini,
     // so the idle render thread does NO per-second filesystem stat (the old 1 Hz GetFileAttributesExW
