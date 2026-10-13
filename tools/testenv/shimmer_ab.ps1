@@ -23,13 +23,9 @@ $allKeys = @($Modes | ForEach-Object { $_.Split(';') } | Where-Object { $_ } |
              ForEach-Object { $_.Split('=')[0] } | Select-Object -Unique)
 
 function Set-Mode([string]$spec) {
-  $c = Get-Content $ini
-  foreach ($k in $allKeys) { $c = $c | Where-Object { $_ -notmatch "^$k=" } }
-  foreach ($kv in $spec.Split(';')) { if ($kv.Trim()) { $c += $kv } }
-  Set-Content $ini $c
-  try { $ev = [System.Threading.EventWaitHandle]::OpenExisting('Local\Wind_QuitRequest'); [void]$ev.Set(); Start-Sleep 2 } catch {}
-  Start-Process 'C:\Program Files\Wind\Wind.exe'
-  Start-Sleep 3
+  Update-IniKnobs $ini $allKeys $spec   # lib.ps1: safe read-modify-write, atomic replace
+  Restart-WindClean                     # lib.ps1: waits for the clean exit, then starts Wind
+  Start-Sleep 1                         # with Start-Wind's 2 s, the same settle time as before
 }
 
 Start-Tone

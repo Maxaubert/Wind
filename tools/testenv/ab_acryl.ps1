@@ -16,7 +16,7 @@ $allKeys = @($Configs | ForEach-Object { $_.Split(';') } | Where-Object { $_ } |
 
 function Use-Config([string]$spec) {
   Update-IniKnobs $ini $allKeys $spec
-  try { $ev = [System.Threading.EventWaitHandle]::OpenExisting('Local\Wind_QuitRequest'); [void]$ev.Set(); Start-Sleep 2 } catch {}
+  Stop-Wind   # lib.ps1: waits for the clean exit (run.ps1 starts Wind for the suite)
 }
 
 $rows = @()
