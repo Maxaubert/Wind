@@ -31,7 +31,6 @@
   const mods = (e) => (e.ctrlKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.shiftKey ? 4 : 0) | (e.metaKey ? 8 : 0);
   const text = (m, name) => [...modList(m), name].join('+');
   const nameOf = (u) => u.caps.join(' + ');
-  const FORBIDDEN_VK = new Set([1, 2, 8, 91, 92]);
 
   function arm(unit, idx) {
     if (disabled || armed) return;
@@ -71,7 +70,6 @@
     e.preventDefault();
     if (!e.keyCode || [16, 17, 18, 91, 92].includes(e.keyCode)) return;
     const m = mods(e);
-    if (FORBIDDEN_VK.has(e.keyCode)) { refuse('never', vkName(e.keyCode)); return; }
     if (popcount(m) > 2) { refuse('twomods', text(m, vkName(e.keyCode))); return; }
     const v = checkKeyBind(e.keyCode, row.modsKey ? m : 0);
     if (v !== 'ok') { refuse(v, row.modsKey ? text(m, vkName(e.keyCode)) : vkName(e.keyCode)); return; }
