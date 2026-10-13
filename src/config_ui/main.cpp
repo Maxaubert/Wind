@@ -14,9 +14,8 @@
 #include <sstream>
 #include <map>
 #include <memory>
-#include "ini_edit.h"
+#include "../ini_edit.h"
 #include "wind_watchdog.h"
-#include "mpo.h"
 #include "../mpo_boot.h"
 #include "../config_path.h"
 #include "../config.h"

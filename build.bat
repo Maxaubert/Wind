@@ -33,7 +33,7 @@ rem Compile the app-icon resource (rc.exe ships with the Windows SDK, on PATH vi
 rc /nologo /fo "%ROOT%src\wind.res" "%ROOT%src\wind.rc"
 if errorlevel 1 (echo [build] rc.exe failed & exit /b 1)
 cl /nologo /std:c++17 /EHsc /O2 /W4 /Zi /DUNICODE /D_UNICODE ^
-   src\*.cpp src\config_ui\ini_edit.cpp src\wind.res ^
+   src\*.cpp src\wind.res ^
    /Fe:Wind.exe ^
    /link Magnification.lib Dwmapi.lib user32.lib shell32.lib gdi32.lib Dbghelp.lib ^
    d3d11.lib dxgi.lib dxguid.lib d3dcompiler.lib windowscodecs.lib ole32.lib oleaut32.lib uuid.lib advapi32.lib ^
@@ -51,7 +51,7 @@ rem    Deploy via tools\uiaccess_setup.ps1.
 rc /nologo /fo "%ROOT%src\wind.res" "%ROOT%src\wind.rc"
 if errorlevel 1 (echo [build] rc.exe failed & exit /b 1)
 cl /nologo /std:c++17 /EHsc /O2 /W4 /Zi /DUNICODE /D_UNICODE /DWIND_UIACCESS ^
-   src\*.cpp src\config_ui\ini_edit.cpp src\wind.res ^
+   src\*.cpp src\wind.res ^
    /Fe:Wind.exe ^
    /link Magnification.lib Dwmapi.lib user32.lib shell32.lib gdi32.lib Dbghelp.lib ^
    d3d11.lib dxgi.lib dxguid.lib d3dcompiler.lib windowscodecs.lib ole32.lib oleaut32.lib uuid.lib advapi32.lib ^
@@ -74,7 +74,7 @@ if errorlevel 1 (echo [build] rc.exe failed for WindTray & exit /b 1)
 rem Objects go to src\tray_app\ so the shared sources never overwrite Wind.exe's .obj files.
 cl /nologo /std:c++17 /EHsc /O2 /W4 /Zi /DUNICODE /D_UNICODE ^
    /Fo"%ROOT%src\tray_app\\" /Fd"%ROOT%WindTray.pdb" ^
-   src\tray_app\*.cpp src\tray_items.cpp src\profiles.cpp src\config.cpp src\logging.cpp src\config_ui\ini_edit.cpp ^
+   src\tray_app\*.cpp src\tray_items.cpp src\profiles.cpp src\config.cpp src\logging.cpp src\ini_edit.cpp ^
    src\tray_app\wind_tray.res ^
    /Fe:WindTray.exe ^
    /link user32.lib shell32.lib gdi32.lib Dwmapi.lib Dbghelp.lib shlwapi.lib ole32.lib version.lib ^
@@ -101,7 +101,7 @@ rc /nologo /fo "%ROOT%src\wind.res" "%ROOT%src\wind.rc"
 if errorlevel 1 (echo [build] rc.exe failed & exit /b 1)
 cl /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE ^
    /I third_party\webview2\include ^
-   src\config_ui\main.cpp src\config_ui\ini_edit.cpp src\profiles.cpp src\config.cpp src\logging.cpp src\wind.res ^
+   src\config_ui\main.cpp src\ini_edit.cpp src\profiles.cpp src\config.cpp src\logging.cpp src\wind.res ^
    /Fe:WindConfig.exe ^
    /link third_party\webview2\x64\WebView2LoaderStatic.lib ^
    user32.lib shell32.lib shlwapi.lib ole32.lib version.lib advapi32.lib ntdll.lib Dwmapi.lib /SUBSYSTEM:WINDOWS
@@ -112,7 +112,7 @@ rem --- Test build (pure-logic sources only; no <windows.h>) -----------------
 rem /wd5285 silences a known doctest 2.4.11 header warning under MSVC /W4.
 cl /nologo /std:c++17 /EHsc /W4 /wd5285 /DWIND_TESTS /I third_party ^
    tests\*.cpp ^
-   src\transform.cpp src\zoom_controller.cpp src\config.cpp src\profiles.cpp src\cursor_mapper.cpp src\lock_detector.cpp src\cursor_lock.cpp src\crosshair.cpp src\config_ui\ini_edit.cpp src\logging.cpp src\tray_items.cpp src\hitch_record.cpp src\render_params.cpp src\tray_app\tray_pin_logic.cpp ^
+   src\transform.cpp src\zoom_controller.cpp src\config.cpp src\profiles.cpp src\cursor_mapper.cpp src\lock_detector.cpp src\cursor_lock.cpp src\crosshair.cpp src\ini_edit.cpp src\logging.cpp src\tray_items.cpp src\hitch_record.cpp src\render_params.cpp src\tray_app\tray_pin_logic.cpp ^
    /Fe:wind_tests.exe
 if errorlevel 1 exit /b 1
 "%ROOT%wind_tests.exe"

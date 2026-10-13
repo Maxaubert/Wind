@@ -1,5 +1,5 @@
 #include "profiles.h"
-#include "config_ui/ini_edit.h"
+#include "ini_edit.h"
 #include "config.h"   // DefaultIniText: the built-in default of every templated key
 #include <sstream>
 #include <cstdlib>

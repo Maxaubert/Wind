@@ -9,7 +9,7 @@
 #include <algorithm>
 #include <map>
 #include "profiles.h"
-#include "config_ui/ini_edit.h"
+#include "ini_edit.h"
 #include "config.h"   // MigrateWheelMods (pure)
 namespace wind {
 inline std::wstring ProfilesDirFromIni(const std::wstring& iniPath) {

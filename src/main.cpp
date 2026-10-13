@@ -19,8 +19,8 @@
 #include <atomic>
 #include <intrin.h>   // __rdtsc: thread cycle calibration (#361)
 #include "mpo_boot.h"
-#include "config_ui/ini_edit.h"   // wind::UpdateIniText - flip the model key in place
-#include "config_ui/mpo.h"        // wind::MpoDisabledInRegistry - the #242 restart-pending tell
+#include "ini_edit.h"   // wind::UpdateIniText - flip the model key in place
+#include "mpo.h"        // wind::MpoDisabledInRegistry - the #242 restart-pending tell
 #include "logging.h"
 #pragma comment(lib, "Dwmapi.lib")
 #include "render_engine.h"

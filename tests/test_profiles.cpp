@@ -1,6 +1,6 @@
 #include "doctest.h"
 #include "../src/profiles.h"
-#include "../src/config_ui/ini_edit.h"
+#include "../src/ini_edit.h"
 #include "../src/config.h"
 using namespace wind;
 
