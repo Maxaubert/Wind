@@ -53,6 +53,17 @@ A failed private write latches `privateBroken_` and the session falls back to pu
 init. Both forms come from the pure `ComputeMagTransform` (`src/transform.h`), so they always
 describe the same rect.
 
+## The tick path
+
+`TransformModel::present` runs one zoomed tick as a fixed sequence of private steps (declared in
+`src/transform_model.h` in call order): `resolveLevel` (step cap, smooth-zoom ladder, held ramp
+steps), `applySamplingMode`, `writeSiteTransform` (edge floor and the 16-bit backstop),
+`switchDwmCentre`, then, unless the click pauses writes, `writeAndWarm` (the transform write and
+warm pulse) and `publishInputTransform` (stomp guard, decimation, self-heal). After those come the
+edge clip, `weldPointer`, `presentCursor` (Inspect crosshair, legacy sprite session, native hide),
+`appendTrace` and `pinAndGhostUpkeep`. The order is load-bearing: keep new work inside the step it
+belongs to.
+
 ## Write cadence
 
 **Apply the level every tick, continuously.** Large discrete level jumps are what cost DWM (each
@@ -180,7 +191,7 @@ channels and on the plain desktop too. With MPO disabled
 Smooth sampling takes a float path and survives the same corner, as does the built-in Magnifier,
 which samples smooth.
 
-Defences (wall arming in `RunTick`, write clamp in `TransformModel::present`):
+Defences (wall arming in `RunTick`, write clamp in `TransformModel::writeSiteTransform`):
 
 | MPO at boot | Sampling | Pan walls (`setMaxSourceLeft/Top`, `|src*level| <= 32000`) |
 |---|---|---|
