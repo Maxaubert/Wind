@@ -1610,6 +1610,54 @@ static void EnterSession(TickState& t, bool zoomed, bool inspect) {
     { wind::SpanScope span_(wind::kSpanActivate); t.model->onActivate(); }     // grab a live frame, not a stale cached one
 }
 
+// Inspect enter: freeze the real cursor, seed the look point, and decide game-inspect.
+// Zeroes this tick's raw motion so the first tick after entry pans by zero.
+static void EnterInspect(TickState& t, bool zoomed, int& rawDx, int& rawDy) {
+    // Freeze the real cursor where it is; the look point (mapper center) starts there.
+    POINT pt; GetCursorPos(&pt);
+    // Read before the freeze clip below replaces the clip (M4, InspectLockTell).
+    RECT preClip{}; GetClipCursor(&preClip);
+    const bool pinnedAtEdge =
+        !wind::ClipRectConfines((int)(preClip.right - preClip.left),
+                                (int)(preClip.bottom - preClip.top), t.mon.w, t.mon.h) &&
+        wind::PointerPinnedAtEdge(pt.x, pt.y, preClip.left, preClip.top,
+                                  preClip.right, preClip.bottom);
+    t.frozenCursor = pt;
+    t.clickReleaseTicks = 0;   // start frozen (clear any stale click-release window)
+    // Zero the sub-pixel carry and this tick's raw motion so the first tick after entry
+    // pans by zero.
+    rawDx = 0; rawDy = 0;
+    t.inspectPanRemX = 0.0; t.inspectPanRemY = 0.0;
+    t.inspectLookMoved = false;
+    t.postInspectHold = false;
+    t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y);
+    t.lastSetVirtual = pt;
+    RECT fz{ pt.x, pt.y, pt.x + 1, pt.y + 1 };
+    ClipCursor(&fz);
+    SetSystemCursorHidden(t, t.model, true);   // hide the real cursor; we draw the crosshair
+    { wind::SpanScope span_(wind::kSpanActivate); t.model->onActivate(); }
+    // Game-inspect (issue #144): if a mouselook game holds the mouse, the freeze alone is
+    // not enough - its raw-input camera still receives every mickey. Steal foreground to
+    // the invisible helper so the game stops getting input. Deferred via
+    // inspectStealPending: the reveal logic later this tick must still see the GAME as
+    // foreground (ForegroundCoversMonitor decides the composite-gated reveal).
+    t.inspectGame = wind::ShouldGameInspect(zoomed,
+                                            wind::InspectLockTell(t.detector.locked(), pinnedAtEdge),
+                                            t.inspectCursorWasShowing,
+                                            t.inspectMagHidCursor);
+    if (t.inspectGame) {
+        t.inspectPrevFg = GetForegroundWindow();
+        t.inspectStealPending = true;
+    }
+    // Logged either way: a DECLINE is the interesting case in the field (the camera keeps
+    // moving), and without the inputs there is nothing to diagnose it from.
+    wind::Log(wind::LogLevel::Info, "inspect",
+              "game-inspect %s (zoomed=%d detLocked=%d pinned=%d cursorShown=%d weHid=%d)",
+              t.inspectGame ? "engaged" : "DECLINED", (int)zoomed,
+              (int)t.detector.locked(), (int)pinnedAtEdge, (int)t.inspectCursorWasShowing,
+              (int)t.inspectMagHidCursor);
+}
+
 static void RunTick(TickState& t) {
     TickWorkTimer workTimer(t);
     const TickClock clk = BeginTick(t);
@@ -1639,49 +1687,7 @@ static void RunTick(TickState& t) {
             EnterSession(t, zoomed, inspect);
         }
         if (inspectEnter) {
-            // Freeze the real cursor where it is; the look point (mapper center) starts there.
-            POINT pt; GetCursorPos(&pt);
-            // Read before the freeze clip below replaces the clip (M4, InspectLockTell).
-            RECT preClip{}; GetClipCursor(&preClip);
-            const bool pinnedAtEdge =
-                !wind::ClipRectConfines((int)(preClip.right - preClip.left),
-                                        (int)(preClip.bottom - preClip.top), t.mon.w, t.mon.h) &&
-                wind::PointerPinnedAtEdge(pt.x, pt.y, preClip.left, preClip.top,
-                                          preClip.right, preClip.bottom);
-            t.frozenCursor = pt;
-            t.clickReleaseTicks = 0;   // start frozen (clear any stale click-release window)
-            // Zero the sub-pixel carry and this tick's raw motion so the first tick after entry
-            // pans by zero.
-            rawDx = 0; rawDy = 0;
-            t.inspectPanRemX = 0.0; t.inspectPanRemY = 0.0;
-            t.inspectLookMoved = false;
-            t.postInspectHold = false;
-            t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y);
-            t.lastSetVirtual = pt;
-            RECT fz{ pt.x, pt.y, pt.x + 1, pt.y + 1 };
-            ClipCursor(&fz);
-            SetSystemCursorHidden(t, t.model, true);   // hide the real cursor; we draw the crosshair
-            { wind::SpanScope span_(wind::kSpanActivate); t.model->onActivate(); }
-            // Game-inspect (issue #144): if a mouselook game holds the mouse, the freeze alone is
-            // not enough - its raw-input camera still receives every mickey. Steal foreground to
-            // the invisible helper so the game stops getting input. Deferred via
-            // inspectStealPending: the reveal logic later this tick must still see the GAME as
-            // foreground (ForegroundCoversMonitor decides the composite-gated reveal).
-            t.inspectGame = wind::ShouldGameInspect(zoomed,
-                                                    wind::InspectLockTell(t.detector.locked(), pinnedAtEdge),
-                                                    t.inspectCursorWasShowing,
-                                                    t.inspectMagHidCursor);
-            if (t.inspectGame) {
-                t.inspectPrevFg = GetForegroundWindow();
-                t.inspectStealPending = true;
-            }
-            // Logged either way: a DECLINE is the interesting case in the field (the camera keeps
-            // moving), and without the inputs there is nothing to diagnose it from.
-            wind::Log(wind::LogLevel::Info, "inspect",
-                      "game-inspect %s (zoomed=%d detLocked=%d pinned=%d cursorShown=%d weHid=%d)",
-                      t.inspectGame ? "engaged" : "DECLINED", (int)zoomed,
-                      (int)t.detector.locked(), (int)pinnedAtEdge, (int)t.inspectCursorWasShowing,
-                      (int)t.inspectMagHidCursor);
+            EnterInspect(t, zoomed, rawDx, rawDy);
         }
         bool inspectExit = !inspect && t.prevInspect;   // Inspect just turned off but overlay stays (zoomed)
         if (inspectExit) {
