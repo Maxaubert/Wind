@@ -302,47 +302,40 @@ void FocusTracker::publish(TrackKind k, double l, double t, double r, double b, 
                         k == TrackKind::Caret ? "caret" : "focus", src, l, t, r - l, b - t);
 }
 
-void FocusTracker::run() {
-    // Create the queue BEFORE publishing the thread id: a WM_QUIT posted to a thread without a
-    // queue is lost, and stop() would then join forever.
-    MSG m; PeekMessageW(&m, nullptr, WM_USER, WM_USER, PM_NOREMOVE);   // make the queue exist
-    tid_ = GetCurrentThreadId();
-    if (stopRequested_.load()) { tid_ = 0; return; }
-    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+// FocusTracker::run's state and steps, all on the tracker thread (#477: split out of run()). The
+// tracker members the steps use are aliased, so the moved code reads as it did inside run().
+struct FocusRun {
+    explicit FocusRun(FocusTracker& tracker)
+        : tracker(tracker), tid_(tracker.tid_), active_(tracker.active_), wantCaret_(tracker.wantCaret_),
+          wantFocus_(tracker.wantFocus_), log_(tracker.log_) {}
+    FocusTracker& tracker;
+    std::atomic<unsigned long>& tid_;
+    std::atomic<bool>& active_;
+    std::atomic<bool>& wantCaret_;
+    std::atomic<bool>& wantFocus_;
+    std::atomic<bool>& log_;
+    void publish(TrackKind k, double l, double t, double r, double b, const char* src) { tracker.publish(k, l, t, r, b, src); }
+
+    void setUp();                // COM, UIA and its timeouts, the focus lookup, the event hooks
+    void messageLoop(MSG& m);    // wakes, coalescing and the backstop poll until WM_QUIT
+    void tearDown();             // undoes setUp
+
     IUIAutomation* uia = nullptr;
-    CoCreateInstance(__uuidof(CUIAutomation), nullptr, CLSCTX_INPROC_SERVER, __uuidof(IUIAutomation), (void**)&uia);
-    // Every UIA call is a round trip into the target app, and one app that does not answer stalls
-    // ALL tracking for the default timeouts (field 2026-10-04: GetFocusedElement blocked 3016 ms
-    // right after an app switch, and the next app's typing went unfollowed). Cap both waits: a slow
-    // app now costs at most half a second, and the 16 ms poll simply asks again.
-    if (uia) {
-        IUIAutomation2* uia2 = nullptr;
-        if (SUCCEEDED(uia->QueryInterface(__uuidof(IUIAutomation2), (void**)&uia2)) && uia2) {
-            uia2->put_ConnectionTimeout(500);
-            uia2->put_TransactionTimeout(500);
-            uia2->Release();
-        }
-    }
     std::unique_ptr<FocusLookup> focusLookup;
-    if (uia) focusLookup = std::make_unique<FocusLookup>(uia);
     bool lookupStuckLogged = false;
     FocusHandler* fh = nullptr;
-    if (uia) { fh = new FocusHandler(); if (FAILED(uia->AddFocusChangedEventHandler(nullptr, fh))) { fh->Release(); fh = nullptr; } }
-    HWINEVENTHOOK h1 = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr, FocusTrackImpl::OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
-    HWINEVENTHOOK h2 = SetWinEventHook(EVENT_SYSTEM_MENUPOPUPSTART, EVENT_SYSTEM_MENUPOPUPSTART, nullptr, FocusTrackImpl::OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
-    HWINEVENTHOOK h3 = SetWinEventHook(EVENT_OBJECT_FOCUS, EVENT_OBJECT_FOCUS, nullptr, FocusTrackImpl::OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    HWINEVENTHOOK h1 = nullptr, h2 = nullptr, h3 = nullptr;
     // LOCATIONCHANGE fires for every moving window and caret system-wide: installed only while the
     // tracker is active (zoomed), never at 1x (#71). The 16 ms caret backstop likewise.
     HWINEVENTHOOK h4 = nullptr;
     UINT_PTR pollTimer = 0;
-    auto retune = [&](bool on) {
+    void retune(bool on) {
         if (on && !h4)
             h4 = SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE, nullptr, FocusTrackImpl::OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
         if (!on && h4) { UnhookWinEvent(h4); h4 = nullptr; }
         if (pollTimer) KillTimer(nullptr, pollTimer);
         pollTimer = on ? SetTimer(nullptr, 0, 16, nullptr) : 0;
-    };
-    retune(active_.load());   // an activation that raced thread start-up is picked up here
+    }
     bool pendingFocus = false, pendingCaret = false;
     int focusRetries = 0;   // re-resolves of a focus change whose lookup went unanswered (M5)
     UINT_PTR coalesce = 0;
@@ -391,7 +384,7 @@ void FocusTracker::run() {
     // strip) says nothing about where the caret is. The character at the caret, when the editor exposes
     // it, gives the real x; else Chromium's system caret object for screen magnifiers (OBJID_CARET); else
     // no caret rather than a guess. Only for a collapsed range: a real selection keeps its own rect.
-    auto fixLineWide = [&](IUIAutomationTextRange* range, RECT& rc, const char*& src, bool fromPoll) -> bool {
+    bool fixLineWide(IUIAutomationTextRange* range, RECT& rc, const char*& src, bool fromPoll) {
         const ULONGLONG now = GetTickCount64();
         if (lineWide.gen == focusGen && EqualRect(&lineWide.line, &rc) && fromPoll && now < lineWide.retryAt) {
             if (lineWide.ok) { rc = lineWide.rc; src = lineWide.src; }
@@ -408,7 +401,7 @@ void FocusTracker::run() {
         lineWide.retryAt = now + 250;
         if (ok) { rc = out; src = outSrc; }
         return ok;
-    };
+    }
 
     // Caret, fastest source first. Releases everything it acquires.
     // VS Code's editor (and Monaco elsewhere) is an EditContext element, "native-edit-context",
@@ -427,7 +420,7 @@ void FocusTracker::run() {
     // before the next app's focus event arrives, and a stale "is VS Code" must never send MSAA
     // queries into another app (field: Notepad tracking went silent for 2.5 s right after leaving
     // VS Code).
-    auto focusClass = [&](IUIAutomationElement* el) {
+    void focusClass(IUIAutomationElement* el) {
         const HWND fgNow = GetForegroundWindow();
         if (edc.gen == focusGen && edc.fg == fgNow) return;
         edc = EditContextCache{}; edc.gen = focusGen; edc.fg = fgNow;
@@ -441,10 +434,10 @@ void FocusTracker::run() {
             edc.xterm = wind::IsXtermInput(cls);
             SysFreeString(cls);
         }
-    };
+    }
     // False only when this IS an EditContext element and MSAA gave no caret: the UIA rect is then
     // the start of the line, which is wrong, so the caller reports not-found instead of it.
-    auto editContextCaret = [&](IUIAutomationElement* el, RECT& rc, const char*& src, bool fromPoll) -> bool {
+    bool editContextCaret(IUIAutomationElement* el, RECT& rc, const char*& src, bool fromPoll) {
         if (!el) return true;
         focusClass(el);
         if (!edc.is) return true;
@@ -462,9 +455,9 @@ void FocusTracker::run() {
         rc = edc.msaa;
         src = "msaa-editcontext";
         return true;
-    };
+    }
     // elB: the focused element's bounds (empty = unknown).
-    auto findCaret = [&](IUIAutomationElement* el, const RECT& elB, RECT& rc, const char*& src, bool fromPoll) -> bool {
+    bool findCaret(IUIAutomationElement* el, const RECT& elB, RECT& rc, const char*& src, bool fromPoll) {
         // An xterm.js terminal (Prism, VS Code's terminal...): its input textarea is the cursor cell,
         // moved on every cursor move, while Chromium's text range rect for it goes stale for seconds
         // (field 2026-10-12, Prism: 60 moves of the textarea, 6 changes of its selection rect).
@@ -518,13 +511,13 @@ void FocusTracker::run() {
         }
         if (ok) ok = editContextCaret(el, rc, src, fromPoll);
         return ok;
-    };
+    }
 
     // Returns true when a focus change could not be answered (the focused-element lookup timed out
     // or came back empty), so the caller keeps it pending and tries again (review 2026-10-09 M5:
     // in slow UIA apps a Tab was otherwise lost for good, because the backstop poll never
     // re-resolves a focus change).
-    auto resolve = [&](bool focusChanged, bool fromPoll) -> bool {
+    bool resolve(bool focusChanged, bool fromPoll) {
         if (!active_.load()) return false;
         HWND fg = GetForegroundWindow();
         if (IsOwnOrTooltip(fg)) return false;
@@ -666,8 +659,33 @@ void FocusTracker::run() {
         }
         if (el) el->Release();
         return focusUnanswered;
-    };
+    }
+};
 
+void FocusRun::setUp() {
+    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    CoCreateInstance(__uuidof(CUIAutomation), nullptr, CLSCTX_INPROC_SERVER, __uuidof(IUIAutomation), (void**)&uia);
+    // Every UIA call is a round trip into the target app, and one app that does not answer stalls
+    // ALL tracking for the default timeouts (field 2026-10-04: GetFocusedElement blocked 3016 ms
+    // right after an app switch, and the next app's typing went unfollowed). Cap both waits: a slow
+    // app now costs at most half a second, and the 16 ms poll simply asks again.
+    if (uia) {
+        IUIAutomation2* uia2 = nullptr;
+        if (SUCCEEDED(uia->QueryInterface(__uuidof(IUIAutomation2), (void**)&uia2)) && uia2) {
+            uia2->put_ConnectionTimeout(500);
+            uia2->put_TransactionTimeout(500);
+            uia2->Release();
+        }
+    }
+    if (uia) focusLookup = std::make_unique<FocusLookup>(uia);
+    if (uia) { fh = new FocusHandler(); if (FAILED(uia->AddFocusChangedEventHandler(nullptr, fh))) { fh->Release(); fh = nullptr; } }
+    h1 = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr, FocusTrackImpl::OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    h2 = SetWinEventHook(EVENT_SYSTEM_MENUPOPUPSTART, EVENT_SYSTEM_MENUPOPUPSTART, nullptr, FocusTrackImpl::OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    h3 = SetWinEventHook(EVENT_OBJECT_FOCUS, EVENT_OBJECT_FOCUS, nullptr, FocusTrackImpl::OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    retune(active_.load());   // an activation that raced thread start-up is picked up here
+}
+
+void FocusRun::messageLoop(MSG& m) {
     while (GetMessageW(&m, nullptr, 0, 0) > 0) {
         if (m.message == kActiveMsg) { retune(m.wParam != 0); continue; }
         if (m.message == kWakeMsg) {
@@ -704,6 +722,9 @@ void FocusTracker::run() {
         }
         TranslateMessage(&m); DispatchMessageW(&m);
     }
+}
+
+void FocusRun::tearDown() {
     if (pollTimer) KillTimer(nullptr, pollTimer);
     for (HWINEVENTHOOK h : { h1, h2, h3, h4 }) if (h) UnhookWinEvent(h);
     if (uia && fh) uia->RemoveFocusChangedEventHandler(fh);
@@ -711,6 +732,18 @@ void FocusTracker::run() {
     focusLookup.reset();
     if (uia) uia->Release();
     CoUninitialize();
+}
+
+void FocusTracker::run() {
+    // Create the queue BEFORE publishing the thread id: a WM_QUIT posted to a thread without a
+    // queue is lost, and stop() would then join forever.
+    MSG m; PeekMessageW(&m, nullptr, WM_USER, WM_USER, PM_NOREMOVE);   // make the queue exist
+    tid_ = GetCurrentThreadId();
+    if (stopRequested_.load()) { tid_ = 0; return; }
+    FocusRun r(*this);
+    r.setUp();
+    r.messageLoop(m);
+    r.tearDown();
     tid_ = 0;
 }
 }  // namespace wind

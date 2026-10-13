@@ -18,6 +18,7 @@ private:
     void run();
     friend struct FocusTrackImpl;
     friend class FocusHandler;
+    friend struct FocusRun;     // run()'s state and steps (focus_track.cpp)
     std::thread th_;
     std::atomic<unsigned long> tid_{0};
     std::atomic<bool> stopRequested_{false};
