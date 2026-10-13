@@ -384,6 +384,18 @@ static bool ApplyEmptyableKey(Config& c, const std::string& key, const std::stri
     return false;
 }
 
+// One ini line to a trimmed key and value; false for a blank, comment, '='-less or keyless line.
+static bool SplitIniLine(const std::string& line, std::string& key, std::string& val) {
+    std::string t = TrimWs(line);
+    if (t.empty() || t[0] == ';' || t[0] == '#') return false;
+    size_t eq = t.find('=');
+    if (eq == std::string::npos) return false;
+    key = TrimWs(t.substr(0, eq));
+    val = TrimWs(t.substr(eq + 1));
+    if (key.empty()) return false;
+    return true;
+}
+
 Config ParseConfig(const std::string& text) {
     Config c;
     // A UTF-8 BOM (Notepad's "UTF-8 with BOM") would glue itself to the first key and lose it.
@@ -391,13 +403,8 @@ Config ParseConfig(const std::string& text) {
     std::string line;
     bool haveRenderScaling = false;   // issue #456: without the key, `bilinear` decides (migration)
     while (std::getline(in, line)) {
-        std::string t = TrimWs(line);
-        if (t.empty() || t[0] == ';' || t[0] == '#') continue;
-        size_t eq = t.find('=');
-        if (eq == std::string::npos) continue;
-        std::string key = TrimWs(t.substr(0, eq));
-        std::string val = TrimWs(t.substr(eq + 1));
-        if (key.empty()) continue;
+        std::string key, val;
+        if (!SplitIniLine(line, key, val)) continue;
         if (ApplyEmptyableKey(c, key, val)) continue;
         if (val.empty()) continue;
         try {
