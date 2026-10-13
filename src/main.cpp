@@ -1422,23 +1422,10 @@ static TickInput ResolveInputAndZoom(TickState& t, double dt) {
     return { kbHook, inHeld, outHeld, recenter, lvl };
 }
 
-static void RunTick(TickState& t) {
-    TickWorkTimer workTimer(t);
-    const TickClock clk = BeginTick(t);
-    const LARGE_INTEGER now = clk.now;
-    const double dt = clk.dt, rawDt = clk.rawDt;
-    const bool woke = clk.woke;
-
-    PollConfigReload(t, rawDt);
-
-    WatchForegroundAndKbHook(t);
-    const TickInput in = ResolveInputAndZoom(t, dt);
-    const bool kbHook = in.kbHook;
-    auto comboHeld = [&](int vk, int mods) { return BindComboHeld(kbHook, vk, mods); };
-    const bool inHeld = in.inHeld, outHeld = in.outHeld;
-    const bool recenter = in.recenter;
-    const double lvl = in.lvl;
-
+// Tick phase: this tick's modes. Raw motion, zoomed / Inspect / active, the stale-lock reset, the
+// zoom timeline arm on the enter tick, and the keyboard-pan arm published to the hook.
+struct TickModes { int rawDx, rawDy; bool zoomed, inspect, active, panArmed; };
+static TickModes ResolveTickModes(TickState& t, double lvl, const LARGE_INTEGER& now) {
     int rawDx, rawDy; g_input.drainRaw(rawDx, rawDy);
     // Raw motion from before this activation (up to a 100 ms idle sleep of it, #71) never pans the
     // first zoomed frame: at 1x it is unused, so an idle->active tick starts from zero.
@@ -1469,6 +1456,30 @@ static void RunTick(TickState& t) {
     const bool panArmed = lvl > 1.001 && !inspect && !t.lockEff;
     g_input.setPanArmed(panArmed);
     if (!panArmed) t.keyPan.reset();
+    return { rawDx, rawDy, zoomed, inspect, active, panArmed };
+}
+
+static void RunTick(TickState& t) {
+    TickWorkTimer workTimer(t);
+    const TickClock clk = BeginTick(t);
+    const LARGE_INTEGER now = clk.now;
+    const double dt = clk.dt, rawDt = clk.rawDt;
+    const bool woke = clk.woke;
+
+    PollConfigReload(t, rawDt);
+
+    WatchForegroundAndKbHook(t);
+    const TickInput in = ResolveInputAndZoom(t, dt);
+    const bool kbHook = in.kbHook;
+    auto comboHeld = [&](int vk, int mods) { return BindComboHeld(kbHook, vk, mods); };
+    const bool inHeld = in.inHeld, outHeld = in.outHeld;
+    const bool recenter = in.recenter;
+    const double lvl = in.lvl;
+
+    const TickModes md = ResolveTickModes(t, lvl, now);
+    int rawDx = md.rawDx, rawDy = md.rawDy;
+    const bool zoomed = md.zoomed, inspect = md.inspect, active = md.active;
+    const bool panArmed = md.panArmed;
 
     if (active) {
         bool enterActive  = !t.prevActive;            // idle -> active (overlay just turned on)
