@@ -921,6 +921,26 @@ bool TransformModel::guardInputTransformStomp(double applyLevel, const Config& c
     return ixForce;
 }
 
+void TransformModel::weldPointer(const MapResult& r, const PresentExtras& ex) {
+    // WELD: the locked (mouselook, pointer hidden) and Inspect regimes park the real pointer on the
+    // lens point once per tick (ex.suppressCursorSync is false there). A free session never welds:
+    // the pointer is the input and DWM centres on it. Deduped so an idle tick injects nothing.
+    // Inspect pins the point via clickOverride; otherwise clickDesktop is monitor-local, so add the
+    // monitor origin. Drag-follow (#169) belongs to the render engine. weldedLastFrame_ records
+    // whether SetCursorPos REALLY ran, so RunTick can baseline on the weld point only when it did
+    // (#169 measured-baseline law; assuming it landed is the unstable-servo bug).
+    weldedLastFrame_ = false;
+    if (!ex.suppressCursorSync) {
+        int cx = ex.clickOverride ? ex.clickDesktopX : (r.clickDesktopX + mon_.x);
+        int cy = ex.clickOverride ? ex.clickDesktopY : (r.clickDesktopY + mon_.y);
+        if (!haveLastClick_ || cx != lastClickX_ || cy != lastClickY_) {
+            SetCursorPos(cx, cy);
+            lastClickX_ = cx; lastClickY_ = cy; haveLastClick_ = true;
+            weldedLastFrame_ = true;
+        }
+    }
+}
+
 void TransformModel::present(const MapResult& r, double level, const Config& cfg,
                              const MonitorTarget& mon, const PresentExtras& ex) {
     (void)mon;
@@ -975,23 +995,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     if (cfg.edgeClip != 0 || edgeClipActive_)
         edgeClipManage(cfg.edgeClip != 0 && applyLevel > 1.001 && !ex.clickOverride);
 
-    // WELD: the locked (mouselook, pointer hidden) and Inspect regimes park the real pointer on the
-    // lens point once per tick (ex.suppressCursorSync is false there). A free session never welds:
-    // the pointer is the input and DWM centres on it. Deduped so an idle tick injects nothing.
-    // Inspect pins the point via clickOverride; otherwise clickDesktop is monitor-local, so add the
-    // monitor origin. Drag-follow (#169) belongs to the render engine. weldedLastFrame_ records
-    // whether SetCursorPos REALLY ran, so RunTick can baseline on the weld point only when it did
-    // (#169 measured-baseline law; assuming it landed is the unstable-servo bug).
-    weldedLastFrame_ = false;
-    if (!ex.suppressCursorSync) {
-        int cx = ex.clickOverride ? ex.clickDesktopX : (r.clickDesktopX + mon_.x);
-        int cy = ex.clickOverride ? ex.clickDesktopY : (r.clickDesktopY + mon_.y);
-        if (!haveLastClick_ || cx != lastClickX_ || cy != lastClickY_) {
-            SetCursorPos(cx, cy);
-            lastClickX_ = cx; lastClickY_ = cy; haveLastClick_ = true;
-            weldedLastFrame_ = true;
-        }
-    }
+    weldPointer(r, ex);
 
     if (ex.cursorLocked && ex.drawCursor) {
         // Inspect mode: the real cursor is frozen at the (overridden) click point, but the thing the
