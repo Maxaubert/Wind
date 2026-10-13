@@ -1843,6 +1843,68 @@ static PanDelta ResolvePanDelta(TickState& t, bool inspect, double lvl, double d
     return { cur, curDx, curDy, dx, dy, dragFollow };
 }
 
+// Active tick: the foreground facts (read once per tick), the MPO pan wall and write clamp, the
+// device-lost backstop stamp and the launch-quiesce cover tracking.
+struct TickForeground { HWND fgTick; bool fsCover, fgBorderless; bool wallNeeded, liftIfTransform; };
+static TickForeground ReadForegroundAndArmWall(TickState& t, double lvl) {
+    // Foreground facts for this tick, read ONCE and reused by the pan wall, the perf levers,
+    // and the hybrid instant switch below (GetForegroundWindow + window queries per tick add
+    // up at 144Hz, and split reads can disagree mid-tick).
+    HWND fgTick = GetForegroundWindow();
+    const bool fsCover = ForegroundCoversMonitor(t.mon);
+    const bool fgBorderless = fgTick && !(GetWindowLongPtrW(fgTick, GWL_STYLE) & WS_CAPTION);
+    // Pan wall (issue #148) - EVERY transform session on an MPO-enabled machine, not just
+    // games (issue #197). The driver packs DWM's magnification translation into a 16-bit
+    // overlay-plane field, so |src*level| > 32767 wraps and takes the compositor or the
+    // driver down. #148 assumed only fullscreen GAMES ride overlay planes; the field
+    // disproved it - a Mica-backdrop BROWSER at high zoom crashed dwm.exe in dwmcore.dll
+    // five times in twenty minutes. Desktop-class windows get planes too, so the guard is
+    // keyed to the ENGINE and the MPO boot state alone.
+    auto* tmWall = dynamic_cast<TransformModel*>(t.model);
+    const bool transformGame = tmWall != nullptr && fsCover && fgBorderless;
+    const bool mpoExposed = tmWall != nullptr && !g_mpoDisabled;
+    // SAMPLING MODE DECIDES THE CRASH PATH (field 2026-08-29, issue #242; refines #148/#191).
+    // Three TDR episodes (LiveKernelEvent 117, nvlddmkm storms) at 25x bottom-right on the
+    // plain DESKTOP, every one under NEAREST sampling with the MPO ghost verifiably shown and
+    // settled - the #191 "ghost settled -> no plane -> no 16-bit field" lift is FALSIFIED for
+    // nearest: the field lives in the nearest magnification path itself (plausibly DWM handing
+    // the scale+pan to plane hardware), which no window geometry can demote. SMOOTH sampling
+    // takes the shader/float path: the same corner at the same level survived repeated A/B/A
+    // on this rig, and native Magnifier (smooth by default) survives it too.
+    // So: MPO on + nearest = walls, ALWAYS. Smooth keeps the #191 ghost-gated lift (shown +
+    // settled >=350ms + rect intact; fail-closed). tdrTest=4 is the field harness override.
+    const bool nearestSampling = t.cfg.txSamplingMode == 0;
+    // PLANE-FREE SESSION (issue #369): smooth sampling (the resample property) and the MPO guard
+    // effect both make the scaled desktop visual need an external layer, so DWM composes the zoomed
+    // desktop and no hardware plane carries the translation. Measured on an MPO boot: a full-screen
+    // flip app goes from Hardware Composed: Independent Flip to Composed: Flip at zoom-in in both
+    // cases. Then the pan walls, the write clamp and the MPO ghost are all unnecessary; the ghost
+    // alone cost 5-7 ms at every zoom-out (16-21 ms landing stalls). Behind mpoGuardLiftWall until
+    // the far edge is proven on an MPO boot (shipped on: mpoGuardLiftWall=1).
+    // What a TRANSFORM session would get, whichever engine is active now: the mid-zoom
+    // render -> transform switch below hands the same tick to an engine this block did not see.
+    const bool liftIfTransform = !g_mpoDisabled && t.cfg.mpoGuardLiftWall != 0 &&
+                                 (!nearestSampling || t.cfg.mpoGuard != 0);
+    const bool guardLift = mpoExposed && liftIfTransform;
+    const bool wallNeeded = mpoExposed && t.cfg.tdrTest != 4 && !guardLift &&
+                            (nearestSampling ||
+                             !(t.cfg.mpoBuster != 0 && tmWall->mpoGhostSettled()));
+    t.mapper.setMaxSourceLeft(wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0);
+    // Y wall too (issue #191): |srcY*level| overflows the same 16-bit field - the bottom
+    // strip above ~16.2x on 2160 was reachable-lethal with the X-only wall.
+    t.mapper.setMaxSourceTop(wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0);
+    if (tmWall) {
+        tmWall->setMpoBusterWanted(mpoExposed && t.cfg.mpoBuster != 0 && !guardLift);
+        tmWall->setMpoExposed(mpoExposed && !guardLift);   // no write clamp under the guard lift
+    }
+    if (transformGame) t.lastTransformGameMs = GetTickCount64();   // device-lost backstop window
+    // Launch quiesce: per-tick cover tracking while zoomed (a mid-session takeover by a
+    // launching game must still arm the hold). Anchoring and the once-per-process rule live
+    // in TrackLaunchCover; the hold is consumed via QuiesceHoldActive below.
+    TrackLaunchCover(t, fgTick, fsCover, fgBorderless);
+    return { fgTick, fsCover, fgBorderless, wallNeeded, liftIfTransform };
+}
+
 static void RunTick(TickState& t) {
     TickWorkTimer workTimer(t);
     const TickClock clk = BeginTick(t);
@@ -1884,61 +1946,10 @@ static void RunTick(TickState& t) {
         const int curDx = pd.curDx, curDy = pd.curDy;
         const int dx = pd.dx, dy = pd.dy;
         const bool dragFollow = pd.dragFollow;
-        // Foreground facts for this tick, read ONCE and reused by the pan wall, the perf levers,
-        // and the hybrid instant switch below (GetForegroundWindow + window queries per tick add
-        // up at 144Hz, and split reads can disagree mid-tick).
-        HWND fgTick = GetForegroundWindow();
-        const bool fsCover = ForegroundCoversMonitor(t.mon);
-        const bool fgBorderless = fgTick && !(GetWindowLongPtrW(fgTick, GWL_STYLE) & WS_CAPTION);
-        // Pan wall (issue #148) - EVERY transform session on an MPO-enabled machine, not just
-        // games (issue #197). The driver packs DWM's magnification translation into a 16-bit
-        // overlay-plane field, so |src*level| > 32767 wraps and takes the compositor or the
-        // driver down. #148 assumed only fullscreen GAMES ride overlay planes; the field
-        // disproved it - a Mica-backdrop BROWSER at high zoom crashed dwm.exe in dwmcore.dll
-        // five times in twenty minutes. Desktop-class windows get planes too, so the guard is
-        // keyed to the ENGINE and the MPO boot state alone.
-        auto* tmWall = dynamic_cast<TransformModel*>(t.model);
-        const bool transformGame = tmWall != nullptr && fsCover && fgBorderless;
-        const bool mpoExposed = tmWall != nullptr && !g_mpoDisabled;
-        // SAMPLING MODE DECIDES THE CRASH PATH (field 2026-08-29, issue #242; refines #148/#191).
-        // Three TDR episodes (LiveKernelEvent 117, nvlddmkm storms) at 25x bottom-right on the
-        // plain DESKTOP, every one under NEAREST sampling with the MPO ghost verifiably shown and
-        // settled - the #191 "ghost settled -> no plane -> no 16-bit field" lift is FALSIFIED for
-        // nearest: the field lives in the nearest magnification path itself (plausibly DWM handing
-        // the scale+pan to plane hardware), which no window geometry can demote. SMOOTH sampling
-        // takes the shader/float path: the same corner at the same level survived repeated A/B/A
-        // on this rig, and native Magnifier (smooth by default) survives it too.
-        // So: MPO on + nearest = walls, ALWAYS. Smooth keeps the #191 ghost-gated lift (shown +
-        // settled >=350ms + rect intact; fail-closed). tdrTest=4 is the field harness override.
-        const bool nearestSampling = t.cfg.txSamplingMode == 0;
-        // PLANE-FREE SESSION (issue #369): smooth sampling (the resample property) and the MPO guard
-        // effect both make the scaled desktop visual need an external layer, so DWM composes the zoomed
-        // desktop and no hardware plane carries the translation. Measured on an MPO boot: a full-screen
-        // flip app goes from Hardware Composed: Independent Flip to Composed: Flip at zoom-in in both
-        // cases. Then the pan walls, the write clamp and the MPO ghost are all unnecessary; the ghost
-        // alone cost 5-7 ms at every zoom-out (16-21 ms landing stalls). Behind mpoGuardLiftWall until
-        // the far edge is proven on an MPO boot (shipped on: mpoGuardLiftWall=1).
-        // What a TRANSFORM session would get, whichever engine is active now: the mid-zoom
-        // render -> transform switch below hands the same tick to an engine this block did not see.
-        const bool liftIfTransform = !g_mpoDisabled && t.cfg.mpoGuardLiftWall != 0 &&
-                                     (!nearestSampling || t.cfg.mpoGuard != 0);
-        const bool guardLift = mpoExposed && liftIfTransform;
-        const bool wallNeeded = mpoExposed && t.cfg.tdrTest != 4 && !guardLift &&
-                                (nearestSampling ||
-                                 !(t.cfg.mpoBuster != 0 && tmWall->mpoGhostSettled()));
-        t.mapper.setMaxSourceLeft(wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0);
-        // Y wall too (issue #191): |srcY*level| overflows the same 16-bit field - the bottom
-        // strip above ~16.2x on 2160 was reachable-lethal with the X-only wall.
-        t.mapper.setMaxSourceTop(wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0);
-        if (tmWall) {
-            tmWall->setMpoBusterWanted(mpoExposed && t.cfg.mpoBuster != 0 && !guardLift);
-            tmWall->setMpoExposed(mpoExposed && !guardLift);   // no write clamp under the guard lift
-        }
-        if (transformGame) t.lastTransformGameMs = GetTickCount64();   // device-lost backstop window
-        // Launch quiesce: per-tick cover tracking while zoomed (a mid-session takeover by a
-        // launching game must still arm the hold). Anchoring and the once-per-process rule live
-        // in TrackLaunchCover; the hold is consumed via QuiesceHoldActive below.
-        TrackLaunchCover(t, fgTick, fsCover, fgBorderless);
+        const TickForeground tf = ReadForegroundAndArmWall(t, lvl);
+        const HWND fgTick = tf.fgTick;
+        const bool fsCover = tf.fsCover, fgBorderless = tf.fgBorderless;
+        const bool wallNeeded = tf.wallNeeded, liftIfTransform = tf.liftIfTransform;
         // FREE CURSOR (issue #205) - native Magnifier's model, measured not assumed.
         //
         // tools/mag_formula_probe.ps1 + mag_trackmode_probe.ps1 drove the real Magnifier and read
