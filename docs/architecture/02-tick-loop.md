@@ -118,7 +118,8 @@ an empty one would make the first Settings write of a session reload.
 A real reload re-binds the hook's buttons and swallowed keys (`g_input.setButtonBinds`/`setKeys`),
 re-registers the hotkeys, invalidates the foreground cache, and rebuilds `ZoomController` (the live
 zoom level is kept and clamped into the new `maxLevel`, #234) and `CursorMapper` (centre kept).
-Engine-shaped keys (`model`) and the other restart-only keys need a restart, see
+`model` applies live: both engines are built, so the next pick follows it (Wind relaunches only
+when one engine failed to init). The restart-only keys need a restart, see
 [08](08-config-profiles.md#hot-reload-and-the-ui-only-fingerprint).
 
 ## Pan delta: three regimes

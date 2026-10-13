@@ -80,8 +80,9 @@ the five tray layout keys `trayPerf`,
 text is unchanged. `profile` stays in the fingerprint, so a profile switch reloads.
 
 **Hot or restart follows from how a value is read.** A key read from `t.cfg` per tick or per
-zoom-in is hot. A key baked into state at initialization needs a restart: `model` (which engines
-exist), `zorderBand` and `cursorBandAuto` (overlay and Inspect crosshair creation), `hdrTonemap`
+zoom-in is hot. `model` is hot too: both engines are built at startup and it only decides the pick
+(a relaunch is needed only when one engine failed to init, see below). A key baked into state at
+initialization needs a restart: `zorderBand` and `cursorBandAuto` (overlay and Inspect crosshair creation), `hdrTonemap`
 (render engine init), `fastPan` and `smoothPan` (passed to the `TransformModel` constructor), and
 `gpuPriority`, which is only half hot: the device build applies it at init, but the game-pacing
 decision in `RunTick` reads it live, so a change mid-session can mismatch the two until a restart.
@@ -117,8 +118,9 @@ comments and order.
   default is not "unsaved" (`model` is excluded from that rule; keys outside the template stay
   missing-versus-present).
 - At start the core runs `ResetSessionToProfile`, so unsaved changes never survive a restart,
-  unless `%LOCALAPPDATA%\Wind\session.keep` marks a restart Wind triggered itself (engine change,
-  profile switch with a model change). It is consumed once.
+  unless `%LOCALAPPDATA%\Wind\session.keep` marks a restart Wind triggered itself (Restart Wind, or
+  an engine change or profile switch with a model change while Wind runs one engine). It is
+  consumed once.
 - Tray Quit compares the files and prompts Save, Discard or Cancel.
 
 **Switching** (Settings or the tray flyout, the same sequence):
@@ -129,11 +131,12 @@ comments and order.
 2. Settings asks Save, Discard or Cancel when the session has unsaved changes. The tray flyout
    asks too, through its own `ConfirmSwitch` prompt (`src/tray_app/`).
 3. Write `MakeLiveText(profile, oldLive, name)` over the live ini.
-4. The core hot-reloads everything except `model`. When the parsed `model` differs, the surface
-   relaunches `Wind.exe`. If the relaunch fails, it writes the old `model` back, so the ini always
-   matches the running engine.
+4. The core hot-reloads it, `model` included (`running.model` reads `live`). Only when Wind runs
+   one engine (`running.model` names it) and the parsed `model` differs does the surface relaunch
+   `Wind.exe` (`EngineSwitchesLive`, `src/profiles_io.h`). If that relaunch fails, it writes the
+   old `model` back, so the ini always matches the running engine.
 
-**The relaunch uses the eviction handshake, never a kill.** The new instance finds the
+**That relaunch uses the eviction handshake, never a kill.** The new instance finds the
 single-instance mutex held, sets `Local\Wind_QuitRequest` and waits for the old one to exit. Only a
 clean exit restores the OS cursor and releases `ClipCursor`.
 
@@ -194,7 +197,8 @@ Every key works in the ini whether or not Settings shows it. Keys hot-reload unl
 | `colorWarmPct` (0), `colorDimPct` (100) | Warmth and brightness filter |
 | `outline*` | Zoom outline |
 
-**Engine.** `model` needs a restart.
+**Engine.** `model` applies live on the config reload (#455); Wind relaunches only when one engine
+failed to init.
 
 | Keys | Meaning |
 |---|---|

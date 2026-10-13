@@ -61,8 +61,9 @@ overlay; an ordinary process's popups do not.
   [09](09-settings-ui.md).
 - WindTray also applies `trayPinned` (Pin to taskbar, #436): it watches the ini folder and writes
   `IsPromoted` for its own icon (`src/tray_app/tray_pin.*`, [09](09-settings-ui.md#pin-to-taskbar)).
-- The flyout's engine dropdown writes `model` to the live ini, drops `session.keep` and restarts
-  Wind without a prompt (`src/tray_app/engine_dropdown.cpp`).
+- The flyout's engine dropdown writes `model` to the live ini, and the core applies it live on the
+  config reload. Only when `running.model` is not `live` (one engine failed to init) does it drop
+  `session.keep` and relaunch Wind without a prompt (`src/tray_app/engine_dropdown.cpp`).
 - `WindTray.exe --render-test out.png [--palette <id>]` renders the flyout headless for visual
   checks.
 

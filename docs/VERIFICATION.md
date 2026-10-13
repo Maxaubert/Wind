@@ -14,6 +14,7 @@ install/uninstall round trip (`tools\installer_check.ps1`).
 - [ ] Upgrade while Wind runs zoomed: no "file in use" error, the OS cursor is visible afterwards. Upgrade with Settings open: WindConfig closes.
 - [ ] Uninstall keeping settings: `magnifier.ini` survives. Uninstall removing settings: it does not.
 - [ ] At 100% and 225% DPI the setup window is sharp and its hit targets line up.
+- [ ] Without UIAccess Wind refuses to start: a plain `build.bat` Wind.exe (no `WIND_ALLOW_NO_UIACCESS`) shows the "Wind can't start" dialog telling you to run the installer again, then exits with no tray icon and no magnifier.
 
 ## Desktop zoom
 - [ ] First launch runs the guided setup; the chosen binds work.
@@ -36,14 +37,14 @@ install/uninstall round trip (`tools\installer_check.ps1`).
 - [ ] Quitting Wind clears the filter.
 
 ## Settings
-- [ ] Tray > Open Settings opens; a slider applies at once; Save and Discard behave; the engine row restarts Wind.
+- [ ] Tray > Open Settings opens; a slider applies at once; Save and Discard behave; changing the engine row applies live, without a restart (the log says `applies live`).
 - [ ] Killing the WebView2 browser process: Settings recovers with unsaved edits kept.
 
 ## Tray flyout
 - [ ] Opens from the icon, closes on Esc and outside click; sliders, toggles and the engine dropdown apply; Quit prompts when there are unsaved changes.
 
 ## Profiles
-- [ ] Create, switch and delete a profile from Settings; switch from the tray; a profile with another engine restarts Wind.
+- [ ] Create, switch and delete a profile from Settings; switch from the tray; a profile with another engine switches it live, without a restart.
 
 ## HDR
 - [ ] With Windows HDR on, zooming in and out shows no brightness step, also after moving the SDR content brightness slider.

@@ -139,15 +139,23 @@ smoothness, which is why the transform model stays the default for games.
   crash trigger; clicks survive only because they are rare.
 - **Innocent, measured**: input hooks, GPU priority, the cursor sprite window, the render model.
 
-## Vetted configurations (one binary, chosen in magnifier.ini)
+## Engine configurations (one binary, chosen in magnifier.ini)
 
-All three run the same deployed build; switch with the `model` key (restart Wind to apply).
+Both engines are built at startup, so `model` and the per-category keys apply live on the config
+reload (#455); no restart. The pick rules are in [03](architecture/03-engines.md) and
+`src/engine_pick.h`.
 
-| config | ini | measured |
+| config | ini | behaviour today |
 |---|---|---|
-| **A – default** | `model=hybrid` | transform in games, render on the desktop. Middle-click recipes all 0 spikes; while zoomed 144 fps / 1 hitch; one ~36 ms spike per zoom-in. Cursor magnifies with zoom. |
-| **B – render everywhere** | `model=render` | Middle-click recipes 0 spikes; no zoom-in spike. Cost: the magnifier's own loop runs 92 fps with many hitches while panning. |
-| **C – per-app opt-out** | `model=hybrid` + the app's exe in `%LOCALAPPDATA%\Wind\churny_apps.txt` | keeps transform for other fullscreen apps (F11 video) while a specific game uses render. |
+| **A – Auto (default)** | `model=hybrid` | Transform for a borderless foreground that covers the primary monitor (games, F11 video) and, with `desktopTransform=1` (shipped) and a verified input transform, on the desktop too. Capture-protected windows, `renderExclude` exes and rotated outputs always get transform. Render for maximized captioned apps, excluded exes, learned cursor-shape churners and non-primary monitors. The `engineGame`/`engineAcrylic`/`engineDesktop`/`engineOther` preferences come before the Auto rule. |
+| **B – render everywhere** | `model=render` | Render for every session (protected video shows black). Falls back to transform only when the render device is lost or its overlay cannot follow the monitor. |
+| **C – transform everywhere** | `model=transform` | The DWM transform for every session. |
+| **D – per-app opt-out** | `model=hybrid` + the app's exe in `%LOCALAPPDATA%\Wind\churny_apps.txt` (or `transformExclude`) | Keeps transform for other fullscreen apps while a specific game uses render. |
+
+Measured in the original #148 run, when Auto meant "transform in games, render on the desktop": A
+had all middle-click recipes at 0 spikes, 144 fps / 1 hitch while zoomed and one ~36 ms spike per
+zoom-in; B had 0 spikes and no zoom-in spike, but the magnifier's own loop ran 92 fps with many
+hitches while panning.
 
 Correctness gate for A (`validate.ps1`, teardown between every session): PASS – 6/6 sessions
 reach 12x, 6 releases, cursor never stranded.
