@@ -28,6 +28,9 @@ are frozen history cited from code, not kept in step with it.
 - Settings UI: schema-driven Svelte (`ui/src/settings-schema.js`); `HandleWebMessage` in
   `src/config_ui/main.cpp` is the authoritative bridge message set; extend the Playwright mocks when
   adding one. See 09.
+- Defaults live in `config.h` and the template, and are copied by the schema: `tests/fixtures/config_defaults.txt`
+  links them. After changing a default or clamp, run `set WIND_UPDATE_FIXTURES=1 && build.bat test`,
+  then `npm run test:rules` in `ui/`. See 11.
 - **Logic the tests cover stays free of `<windows.h>`.** The test build compiles only the `.cpp`
   files listed in `build.bat :test`, with `WIND_TESTS` defined; a file that straddles puts its OS
   half under `#ifndef WIND_TESTS` (`config.cpp`). Thin Win32 I/O headers may be tested from a test

@@ -81,7 +81,7 @@ profile. Preferences > Show advanced settings shows the rest. Every setting is a
 `build.bat` builds Wind, `build.bat test` runs the unit tests, and `build.bat config` builds the
 Settings app. A plain `build.bat` build has no UIAccess, so Wind refuses to start; run it with
 `WIND_ALLOW_NO_UIACCESS=1` set, or deploy the signed build with `tools\uiaccess_setup.ps1`. In `ui/`,
-`npm run test:rules` runs the JS bind-rule tests and `npx playwright test` the Settings UI tests.
+`npm run test:rules` runs the JS bind-rule and config-defaults tests and `npx playwright test` the Settings UI tests.
 The developer docs are in [docs/architecture](docs/architecture/README.md).
 
 ## Licence
