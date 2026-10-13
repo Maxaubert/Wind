@@ -1,6 +1,7 @@
 #pragma once
 #include "magnifier_model.h"
 #include "mag_host.h"
+#include "transform.h"   // MagTransform
 #include "comp_pin.h"
 #include "cursor_blanker.h"
 #include "cursor_sprite.h"
@@ -162,6 +163,8 @@ private:
     // level before the ladder snap (the ramp test reads it).
     double resolveLevel(const MapResult& r, double level, const Config& cfg, double& preLadderOut);
     void applySamplingMode(const Config& cfg);       // bitmap smoothing, bounded retries (#274)
+    // The transform to write: edge floor, ComputeMagTransform, 16-bit backstop, tdrTest probe.
+    MagTransform writeSiteTransform(double srcL, double srcT, double applyLevel, const Config& cfg);
     std::mutex statMx_;
     unsigned long long statLogMs_ = 0;
     double statMaxMs_ = 0.0, statSumMs_ = 0.0;

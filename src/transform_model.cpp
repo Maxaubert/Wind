@@ -638,37 +638,7 @@ void TransformModel::applySamplingMode(const Config& cfg) {
     }
 }
 
-void TransformModel::present(const MapResult& r, double level, const Config& cfg,
-                             const MonitorTarget& mon, const PresentExtras& ex) {
-    (void)mon;
-    // CENTERED-CURSOR geometry (issue #148 revival). Wind's identity is the centred cursor, and the
-    // render model's mapper already solves the whole centered geometry - including the edge zones,
-    // where the pointer slides away from the centre as the source rect clamps. So the mapper's
-    // CENTERED source rect is the transform, and DWM draws the real pointer into the magnified frame
-    // itself (native cursor, issue #369): nothing here places a pointer of our own.
-    // KEEP-ALIVE v2 (issue #148 action-start spike): DWM discards its magnification resources
-    // when the transform VALUE sits still and pays a ~1fps rebuild on the next real change.
-    // v1 jittered the LEVEL by an epsilon - that forced a full re-SCALE of every cached surface
-    // every tick, whose cost grows with zoom (constant ~1fps at 16x: the cure was the disease).
-    // v2 jitters only the private-channel TRANSLATION by 1 screen px on alternating ticks - a
-    // re-COMPOSITE of already-scaled surfaces, cheap at any level - and only while within 1.5s
-    // of the last REAL change: brief pauses (the pan-stop-pan pattern) stay hot, while true idle
-    // lets DWM park legitimately (one spike after a long idle is acceptable; one per pause was not).
-    double preLadderLevel = 0.0;   // the level before the smooth-zoom ladder snapped it
-    const double applyLevel = resolveLevel(r, level, cfg, preLadderLevel);
-    double srcL = r.srcLeft, srcT = r.srcTop;
-    if (applyLevel != level) {
-        OffsetF o = ComputeOffsetF(r.centerX, r.centerY, applyLevel, mon_.w, mon_.h);
-        srcL = o.x; srcT = o.y;
-    }
-    ClickInProgress();   // keep the click window current between nudges
-    DeliverOwedNudge();
-    restLevel_ = cfg.txRestLevel;           // hot
-    if (!ensureMag()) return;   // lazy context: the session's first write brings DWM up
-    applySamplingMode(cfg);
-    traceOn_ = cfg.txTrace != 0;
-    if (level > sessionMaxLevel_) sessionMaxLevel_ = level;
-    const bool ramping = preLadderLevel != level || (applyLevel != lastLevel_ && lastLevel_ > 0.0);
+MagTransform TransformModel::writeSiteTransform(double srcL, double srcT, double applyLevel, const Config& cfg) {
     // Edge sampling margin (see transform.h) applied to the SOURCE, not just to the written
     // transform: srcL/srcT go on to feed the input-transform publish below, and a visual rect
     // that sat one texel inside a published rect that did not would put the pointer framework's
@@ -710,6 +680,41 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         if (m.offX > maxOff) m.offX = maxOff;
         if (m.txX < -32000) m.txX = -32000;
     }
+    return m;
+}
+
+void TransformModel::present(const MapResult& r, double level, const Config& cfg,
+                             const MonitorTarget& mon, const PresentExtras& ex) {
+    (void)mon;
+    // CENTERED-CURSOR geometry (issue #148 revival). Wind's identity is the centred cursor, and the
+    // render model's mapper already solves the whole centered geometry - including the edge zones,
+    // where the pointer slides away from the centre as the source rect clamps. So the mapper's
+    // CENTERED source rect is the transform, and DWM draws the real pointer into the magnified frame
+    // itself (native cursor, issue #369): nothing here places a pointer of our own.
+    // KEEP-ALIVE v2 (issue #148 action-start spike): DWM discards its magnification resources
+    // when the transform VALUE sits still and pays a ~1fps rebuild on the next real change.
+    // v1 jittered the LEVEL by an epsilon - that forced a full re-SCALE of every cached surface
+    // every tick, whose cost grows with zoom (constant ~1fps at 16x: the cure was the disease).
+    // v2 jitters only the private-channel TRANSLATION by 1 screen px on alternating ticks - a
+    // re-COMPOSITE of already-scaled surfaces, cheap at any level - and only while within 1.5s
+    // of the last REAL change: brief pauses (the pan-stop-pan pattern) stay hot, while true idle
+    // lets DWM park legitimately (one spike after a long idle is acceptable; one per pause was not).
+    double preLadderLevel = 0.0;   // the level before the smooth-zoom ladder snapped it
+    const double applyLevel = resolveLevel(r, level, cfg, preLadderLevel);
+    double srcL = r.srcLeft, srcT = r.srcTop;
+    if (applyLevel != level) {
+        OffsetF o = ComputeOffsetF(r.centerX, r.centerY, applyLevel, mon_.w, mon_.h);
+        srcL = o.x; srcT = o.y;
+    }
+    ClickInProgress();   // keep the click window current between nudges
+    DeliverOwedNudge();
+    restLevel_ = cfg.txRestLevel;           // hot
+    if (!ensureMag()) return;   // lazy context: the session's first write brings DWM up
+    applySamplingMode(cfg);
+    traceOn_ = cfg.txTrace != 0;
+    if (level > sessionMaxLevel_) sessionMaxLevel_ = level;
+    const bool ramping = preLadderLevel != level || (applyLevel != lastLevel_ && lastLevel_ > 0.0);
+    MagTransform m = writeSiteTransform(srcL, srcT, applyLevel, cfg);
     bool txWroteThisTick = false;   // for the trace
     // DWM CENTRING (issue #369, src/native_cursor.h). In a native-cursor session where the view is
     // a pure function of the pointer (RunTick's ex.dwmCentre), DWM re-centres the view itself on
