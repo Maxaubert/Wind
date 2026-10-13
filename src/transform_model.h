@@ -161,6 +161,7 @@ private:
     // The level this tick applies: step cap, smooth-zoom ladder, held ramp steps. Also reports the
     // level before the ladder snap (the ramp test reads it).
     double resolveLevel(const MapResult& r, double level, const Config& cfg, double& preLadderOut);
+    void applySamplingMode(const Config& cfg);       // bitmap smoothing, bounded retries (#274)
     std::mutex statMx_;
     unsigned long long statLogMs_ = 0;
     double statMaxMs_ = 0.0, statSumMs_ = 0.0;
