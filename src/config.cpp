@@ -363,6 +363,27 @@ static void ApplyValueKey(Config& c, const std::string& key, const std::string& 
     else if (key == "outlineIdleSeconds") c.outlineIdleSeconds = ParseDoubleStrict(val);
 }
 
+// Keys that take an empty value; returns true when key is one of them (ParseConfig moves on).
+static bool ApplyEmptyableKey(Config& c, const std::string& key, const std::string& val) {
+    // The exe LISTS must accept an empty value: "key=" with nothing after it is how the user
+    // clears one, and it is exactly what the config UI writes when the last entry is removed.
+    // They are handled before the empty-value guard in ParseConfig, which exists because the numeric
+    // settings cannot take one (stoi("") throws). Without this, clearing a list in the UI wrote
+    // the ini correctly and the core silently kept the previous value - including the shipped
+    // defaults, so a list with defaults could never be emptied at all.
+    if (key == "transformExclude") { c.transformExclude = val; return true; }
+    if (key == "renderExclude")    { c.renderExclude    = val; return true; }
+    if (key == "noSwallowApps")    { c.noSwallowApps    = val; return true; }
+    if (key == "lockApps")         { c.lockApps         = val; return true; }
+    // Per-window-type engine preferences. Parsed here with the lists rather than in ApplyValueKey,
+    // because an empty value must mean "back to auto" and the numeric guard would skip it.
+    if (key == "engineGame")    { c.engineGame    = val.empty() ? "auto" : val; return true; }
+    if (key == "engineAcrylic") { c.engineAcrylic = val.empty() ? "auto" : val; return true; }
+    if (key == "engineDesktop") { c.engineDesktop = val.empty() ? "auto" : val; return true; }
+    if (key == "engineOther")   { c.engineOther   = val.empty() ? "auto" : val; return true; }
+    return false;
+}
+
 Config ParseConfig(const std::string& text) {
     Config c;
     // A UTF-8 BOM (Notepad's "UTF-8 with BOM") would glue itself to the first key and lose it.
@@ -377,22 +398,7 @@ Config ParseConfig(const std::string& text) {
         std::string key = TrimWs(t.substr(0, eq));
         std::string val = TrimWs(t.substr(eq + 1));
         if (key.empty()) continue;
-        // The exe LISTS must accept an empty value: "key=" with nothing after it is how the user
-        // clears one, and it is exactly what the config UI writes when the last entry is removed.
-        // They are handled before the empty-value guard below, which exists because the numeric
-        // settings cannot take one (stoi("") throws). Without this, clearing a list in the UI wrote
-        // the ini correctly and the core silently kept the previous value - including the shipped
-        // defaults, so a list with defaults could never be emptied at all.
-        if (key == "transformExclude") { c.transformExclude = val; continue; }
-        if (key == "renderExclude")    { c.renderExclude    = val; continue; }
-        if (key == "noSwallowApps")    { c.noSwallowApps    = val; continue; }
-        if (key == "lockApps")         { c.lockApps         = val; continue; }
-        // Per-window-type engine preferences. Parsed here with the lists rather than below,
-        // because an empty value must mean "back to auto" and the numeric guard would skip it.
-        if (key == "engineGame")    { c.engineGame    = val.empty() ? "auto" : val; continue; }
-        if (key == "engineAcrylic") { c.engineAcrylic = val.empty() ? "auto" : val; continue; }
-        if (key == "engineDesktop") { c.engineDesktop = val.empty() ? "auto" : val; continue; }
-        if (key == "engineOther")   { c.engineOther   = val.empty() ? "auto" : val; continue; }
+        if (ApplyEmptyableKey(c, key, val)) continue;
         if (val.empty()) continue;
         try {
             ApplyValueKey(c, key, val, haveRenderScaling);
