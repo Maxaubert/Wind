@@ -3,6 +3,11 @@
 
 using namespace wind;
 
+TEST_CASE("native cursor: on by default, txNativeCursor=0 is the legacy sprite (#463)") {
+    CHECK(UseNativeCursor(1));
+    CHECK_FALSE(UseNativeCursor(0));
+}
+
 static DwmCentreIn Mouse() {
     DwmCentreIn in;
     in.zoomed = true;

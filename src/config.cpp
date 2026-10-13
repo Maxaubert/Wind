@@ -261,6 +261,7 @@ Config ParseConfig(const std::string& text) {
             else if (key == "launchQuiesce")      c.launchQuiesce = ParseIntStrict(val);
             else if (key == "txWarmHz")           c.txWarmHz = ParseIntStrict(val);
             else if (key == "mpoNearestGuard")    c.mpoNearestGuard = ParseIntStrict(val);
+            else if (key == "txNativeCursor")     c.txNativeCursor = ParseIntStrict(val);
             else if (key == "txSmoothLadder")     c.txSmoothLadder = ParseIntStrict(val);
             else if (key == "txRampMinStep")      c.txRampMinStep = ParseIntStrict(val);
             else if (key == "txRampMinFrom")      c.txRampMinFrom = ParseDoubleStrict(val);

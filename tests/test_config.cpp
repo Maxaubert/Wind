@@ -439,6 +439,11 @@ TEST_CASE("the high-res/MPO option is atomic at restart (issue #242)") {
     CHECK(ParseConfig("mpoNearestGuard=1\n").mpoNearestGuard == 1);
 }
 
+TEST_CASE("txNativeCursor defaults on and parses the legacy sprite fallback (issue #463)") {
+    CHECK(ParseConfig("").txNativeCursor == 1);
+    CHECK(ParseConfig("txNativeCursor=0\n").txNativeCursor == 0);
+}
+
 TEST_CASE("cursorBandAuto defaults on and parses off (issue #269)") {
     CHECK(ParseConfig("").cursorBandAuto == 1);
     CHECK(ParseConfig("cursorBandAuto=0\n").cursorBandAuto == 0);

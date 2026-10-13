@@ -1,12 +1,19 @@
 #pragma once
 #include <windows.h>
+#include <unordered_map>
 #include "sprite_layer.h"
 namespace wind {
 // The Inspect crosshair window. Since the native cursor (issue #369) DWM draws the real pointer, so
-// this window never renders a cursor shape: it is created hidden, painted once with the crosshair,
-// placed on the look point and hidden again when Inspect ends.
+// in a native session this window never renders a cursor shape: it is created hidden, painted once
+// with the crosshair, placed on the look point and hidden again when Inspect ends. The legacy sprite
+// session (txNativeCursor=0, issue #463) also paints the system cursor into it (refreshShape).
 class CursorSprite {
 public:
+    enum class ShapeStatus { Rendered, Hidden, Unsupported };
+    // originals: the blanker's copies of the standard cursors (CursorBlanker::originals), the shape
+    // source while the set is blanked. Must outlive the sprite.
+    explicit CursorSprite(const std::unordered_map<HCURSOR, HCURSOR>* originals = nullptr)
+        : originals_(originals) {}
     // zorderBand > 0 -> CreateWindowInBand (above the shell; needs UIAccess). autoHigh (issue
     // #269) also creates a second window in band 16; setLayer() then picks which one shows.
     bool create(int zorderBand = 0, bool autoHigh = false);
@@ -19,6 +26,9 @@ public:
     void setLayer(SpriteLayer l);
     // The band the window ACTUALLY got (the cascade can refuse the request; band_window logs it).
     int usedBand() const { return usedBand_; }
+    // Legacy sprite session: repaint from the current system cursor when its handle changed.
+    // Hidden = the app hides its pointer (or the shape could not be read): show nothing of ours.
+    ShapeStatus refreshShape();
     void moveTo(int desktopX, int desktopY);
     void reapplyPosition();   // re-place after a hotspot change (the crosshair centres its hotspot)
     void show();
@@ -41,11 +51,17 @@ private:
     HWND hwndHigh_ = nullptr;          // band 16, only with autoHigh
     HWND pendingHide_ = nullptr;       // the outgoing window after a switch, hidden by show()/hide()
     SpriteLayer layer_ = SpriteLayer::Low;
+    void renderMaskShape();
     void renderCrosshair();
     bool displaced() const;            // a visible, overlapping window sits above us in z-order
     static const int kSize = 64;       // base (1x) logical canvas; buffers are kSize * scale_
     int bufSize() const { return kSize * scale_; }
+    const std::unordered_map<HCURSOR, HCURSOR>* originals_ = nullptr;
     HWND    hwnd_ = nullptr;           // the active window: hwndLow_ or hwndHigh_
+    HCURSOR lastCursor_ = nullptr;     // the cursor handle the window was last painted from
+    ShapeStatus lastVerdict_ = ShapeStatus::Hidden;
+    HICON   iconCopy_ = nullptr;
+    int     natW_ = 0, natH_ = 0;      // icon's native size (DrawIconEx scales to nat * scale_)
     int     hotX_ = 0, hotY_ = 0;      // in FINAL (scaled) sprite pixels
     int     lastTargetX_ = 0, lastTargetY_ = 0;   // last moveTo target (hotspot-independent)
     bool    haveTarget_ = false;

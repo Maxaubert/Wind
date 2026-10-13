@@ -1151,6 +1151,9 @@ static void RunTick(TickState& t) {
             }
             if (nc.model != t.cfg.model)   // both engines are built: the next pick follows it, no restart
                 wind::Log(wind::LogLevel::Info, "config", "engine %s -> %s (applies live)", t.cfg.model.c_str(), nc.model.c_str());
+            // txNativeCursor (#463): the next transform session's cursor (latched at zoom-in).
+            if (auto* tmHot = dynamic_cast<TransformModel*>(t.mTransform ? t.mTransform : t.model))
+                tmHot->setNativeCursorPref(wind::UseNativeCursor(nc.txNativeCursor));
             t.cfg = nc;   // pick up renderer knobs (smoothing, filter, cursor scale, zoom speed)
             // transformExclude / renderExclude / the per-window-type engine keys may all have
             // changed: drop the cache so every exe-derived predicate is re-resolved. Without this
@@ -1721,9 +1724,11 @@ static void RunTick(TickState& t) {
                 t.prevDetLocked = locked;
             }
             // A shown pointer is a free pointer in a transform session (LockApplies): a game's
-            // menus keep DWM centring, its mouselook (pointer hidden) keeps the locked pan.
+            // menus keep DWM centring, its mouselook (pointer hidden) keeps the locked pan. The
+            // legacy sprite session (txNativeCursor=0, #463) keeps the old rule, like render.
             {
-                const bool transformTx = dynamic_cast<TransformModel*>(t.model) != nullptr;
+                const auto* tmLock = dynamic_cast<TransformModel*>(t.model);
+                const bool transformTx = tmLock != nullptr && tmLock->nativeSession();
                 bool showing = false;
                 if (locked && transformTx) {
                     CURSORINFO ci{}; ci.cbSize = sizeof(ci);
@@ -3161,8 +3166,12 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     std::unique_ptr<IMagnifierModel> model2;      // the transform engine
     model = std::make_unique<RenderModel>(cfg.zorderBand, cfg.hdrTonemap != 0,
                                           EffectiveGpuPriority(cfg));
-    model2 = std::make_unique<TransformModel>(cfg.fastPan != 0, cfg.smoothPan != 0,
-                                              cfg.zorderBand, cfg.cursorBandAuto != 0);
+    {
+        auto tm = std::make_unique<TransformModel>(cfg.fastPan != 0, cfg.smoothPan != 0,
+                                                   cfg.zorderBand, cfg.cursorBandAuto != 0);
+        tm->setNativeCursorPref(wind::UseNativeCursor(cfg.txNativeCursor));   // #463
+        model2 = std::move(tm);
+    }
     bool primaryOk = model->initialize(startupMon);
     if (!primaryOk && model2 && model2->initialize(PrimaryMonitor())) {
         // Hybrid whose render half cannot start (no D3D / Desktop Duplication): the transform half
