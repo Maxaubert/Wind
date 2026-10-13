@@ -330,6 +330,20 @@ static void OnSaveSession(ICoreWebView2* wv) {
     wv->PostWebMessageAsJson(
         Widen(std::string("{\"type\":\"sessionSaved\",\"ok\":") + (ok ? "true" : "false") + "}").c_str());
 }
+static void OnDiscardSession(ICoreWebView2* wv) {
+    // Discard: the live ini goes back to the saved profile (globals kept); reply with fresh state.
+    wind::IniWriteLock iniLock;   // item 71
+    std::string live;
+    if (ReadIni(live)) {
+        const std::string active = ActiveProfileName(live);
+        std::string prof;
+        if (!active.empty() && SafeName(active) &&
+            GetFileAttributesW(ProfilePath(active).c_str()) != INVALID_FILE_ATTRIBUTES &&
+            wind::ReadTextFileOk(ProfilePath(active), prof))
+            WriteFileAtomic(IniPath(), wind::MakeLiveText(prof, live, active));
+    }
+    PostConfig(wv);
+}
 static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
     std::string j = Narrow(jsonW);
     std::string type = JsonField(j, "type");
@@ -343,18 +357,7 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
     } else if (type == "saveSession") {
         OnSaveSession(wv);
     } else if (type == "discardSession") {
-        // Discard: the live ini goes back to the saved profile (globals kept); reply with fresh state.
-        wind::IniWriteLock iniLock;   // item 71
-        std::string live;
-        if (ReadIni(live)) {
-            const std::string active = ActiveProfileName(live);
-            std::string prof;
-            if (!active.empty() && SafeName(active) &&
-                GetFileAttributesW(ProfilePath(active).c_str()) != INVALID_FILE_ATTRIBUTES &&
-                wind::ReadTextFileOk(ProfilePath(active), prof))
-                WriteFileAtomic(IniPath(), wind::MakeLiveText(prof, live, active));
-        }
-        PostConfig(wv);
+        OnDiscardSession(wv);
     } else if (type == "dirty") {
         g_dirty = JsonField(j, "value") == "1";
     } else if (type == "window") {
