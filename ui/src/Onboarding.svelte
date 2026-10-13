@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { setConfig, setConfigPersist, windowControl } from './bridge.js';
-  import { ic } from './lib/icons.js';
+  import { iconSvg } from './design/icons.js';
   import KeybindCapture from './lib/KeybindCapture.svelte';
   import { normalizePalette } from './design/themes.js';
   export let onDone;
@@ -38,11 +38,11 @@
 <div class="wnd win" data-palette={palette}>
   <div class="caption" style="app-region:drag;-webkit-app-region:drag">
     <div class="tbtns" style="app-region:no-drag;-webkit-app-region:no-drag">
-      <button class="tbtn" title="Minimize" aria-label="Minimize" on:click={() => windowControl('minimize')}>{@html ic.min}</button>
+      <button class="tbtn" title="Minimize" aria-label="Minimize" on:click={() => windowControl('minimize')}>{@html iconSvg('minimize')}</button>
       <!-- Closing onboarding without finishing it quits the whole Wind app (the host signals the
            magnifier to exit). Completing or skipping instead sets onboarded=1 and goes to Settings,
            leaving Wind running in the tray. -->
-      <button class="tbtn close" title="Close" aria-label="Close" on:click={() => windowControl('quitWind')}>{@html ic.close}</button>
+      <button class="tbtn close" title="Close" aria-label="Close" on:click={() => windowControl('quitWind')}>{@html iconSvg('close')}</button>
     </div>
   </div>
   <main class="wizbody">
@@ -110,6 +110,7 @@
   .tbtn { width: 46px; height: 100%; display: grid; place-items: center; color: var(--fg3); border: 0; background: transparent; cursor: pointer; }
   .tbtn:hover { background: var(--hover); color: var(--fg); }
   .tbtn.close:hover { background: #e81123; color: #fff; }
+  .tbtn :global(svg.ic) { width: 15px; height: 15px; stroke-width: 1.75; }   /* as the Settings title bar */
 
   .wizbody { flex: 1; overflow: auto; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 8px 52px; }
   .step { display: none; width: 100%; max-width: 430px; }

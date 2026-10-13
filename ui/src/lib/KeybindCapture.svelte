@@ -125,12 +125,8 @@
   // Capture on keydown so a combo (Ctrl+Alt+F1) is captured the instant the main key fires while
   // all modifiers are held. Modifier-only presses (Ctrl/Alt/Shift/Win) are skipped so we wait for
   // the main key. keyCode 0 is ignored (Fn/IME/synthesized events would otherwise clear the binding).
-  // VKs the core refuses to bind (mirrors IsForbiddenBindVk in config.cpp): a bound key is swallowed
-  // system-wide, so binding one of these would make the user lose it everywhere. Left/right click
-  // (1/2) can't arrive here as a keyCode and the Win keys (91/92) are skipped below as modifier-only,
-  // but we list them all so the rule is explicit and Backspace (8) is rejected. Stay armed so the
-  // user can press a different key.
-  const FORBIDDEN_VK = new Set([1, 2, 8, 91, 92]);
+  // checkKeyBind (keybindRules.js, the mirror of src/keybind_rules.h) refuses keys that must never be
+  // bound, such as Backspace; a refusal stays armed so the user can press a different key.
   function onKey(e) {
     if (!armed) return;
     if (e.key === 'Escape') { e.preventDefault(); cancel(); return; }
@@ -143,7 +139,6 @@
     if (!e.keyCode) return;
     if (e.keyCode === 16 || e.keyCode === 17 || e.keyCode === 18 || e.keyCode === 91 || e.keyCode === 92) return;
     const mods = eventMods(e);
-    if (FORBIDDEN_VK.has(e.keyCode)) { refuse('never', vkName(e.keyCode)); return; }
     // Rows without a modifier slot (Inspect) bind the bare key; judge it as one.
     const verdict = checkKeyBind(e.keyCode, row.modsKey ? mods : 0);
     if (verdict !== 'ok') { refuse(verdict, row.modsKey ? comboName(mods, e.keyCode) : vkName(e.keyCode)); return; }

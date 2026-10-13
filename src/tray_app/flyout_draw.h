@@ -15,7 +15,6 @@ namespace wind { namespace Flyout {
 // Shared factories, text formats and the decoded aurora image. Main thread only; COM must be
 // initialised. Safe to call twice.
 bool DrawInit();
-void DrawShutdown();
 
 // Width in DIPs of the profile name in the bottom row (the layout needs it for the button).
 int MeasureProfileText(const std::wstring& name);

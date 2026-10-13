@@ -1,7 +1,8 @@
 /* Design tokens for the redesigned Settings window.
    Source of truth: docs/design/settings-2026-10/FINAL-v10-grey.html (baseline + the v10 overrides
-   at the end of its stylesheet). Scoped to .wnd so the legacy theme.css keeps working until the
-   pages move over. Dark only (light mode was removed in 0.20.0, #324). */
+   at the end of its stylesheet). Scoped to .wnd; the global theme.css keeps the page-wide rules
+   (selection, focus, reduced motion) and the root tokens used outside .wnd. Dark only
+   (light mode was removed in 0.20.0, #324). */
 :root {
   /* Motion: calm and quick. Everything below is switched off by the prefers-reduced-motion rule in theme.css. */
   --dur-fast: 120ms; --dur: 180ms; --ease: cubic-bezier(.2, .7, .2, 1);

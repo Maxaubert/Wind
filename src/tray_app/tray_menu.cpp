@@ -7,7 +7,7 @@
 #include "../config_path.h"
 #include "../profiles_io.h"
 #include "../config.h"
-#include "../config_ui/ini_edit.h"
+#include "../ini_edit.h"
 #include "../tray_ipc.h"
 #include <shellapi.h>
 #include <commctrl.h>

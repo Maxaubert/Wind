@@ -550,9 +550,6 @@ bool RenderEngine::recoverDeviceLost() {
     return true;
 }
 
-void RenderEngine::debugInfo(int& screenW, int& screenH, int& curW, int& curH, int& hotX, int& hotY) const {
-    screenW = s_->sw; screenH = s_->sh; curW = s_->curW; curH = s_->curH; hotX = s_->hotX; hotY = s_->hotY;
-}
 void RenderEngine::debugHdr(unsigned& ddaFormat, int& colorSpace, int& bitsPerColor) const {
     ddaFormat = s_->ddaFormat; colorSpace = s_->outColorSpace; bitsPerColor = s_->outBitsPerColor;
 }
@@ -597,13 +594,8 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
     // surface (LWA_ALPHA 255 = fully opaque). A DirectComposition flip-model present was tried
     // twice (#11, #69) and abandoned: it tears on a VRR display and droops to the VRR-floated
     // composite rate when forced onto DwmFlush, so blt is the only present path.
-    // WIND_NOLAYERED=1: measurement-only diagnostic (issue #148) - drop WS_EX_LAYERED to test
-    // whether DWM's layered-window update path is what throttles present consumption under a
-    // game. BREAKS click-through and alpha show/hide; never ship a session with it set.
-    const bool noLayered = GetEnvironmentVariableW(L"WIND_NOLAYERED", nullptr, 0) > 0;
-    const DWORD exStyle = (noLayered ? 0 : WS_EX_LAYERED) | WS_EX_TRANSPARENT | WS_EX_TOPMOST |
+    const DWORD exStyle = WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST |
                           WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
-    if (noLayered) RLog("initialize: WIND_NOLAYERED diagnostic build path (no WS_EX_LAYERED)");
     s_->hwnd = nullptr;
     // Higher z-band (needs UIAccess) so we draw above the shell's immersive bands - the only
     // way an overlay can cover the Start menu / taskbar / tray flyouts, and (band 17, issue #162)
@@ -1455,42 +1447,3 @@ bool RenderEngine::dumpBackbufferPng(const wchar_t* path) {
 }
 
 }  // namespace wind
-
-// ---------------------------------------------------------------------------
-// Standalone smoke test (built only with /DWIND_RENDER_SMOKE).
-#ifdef WIND_RENDER_SMOKE
-int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
-    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-    int sw = GetSystemMetrics(SM_CXSCREEN), sh = GetSystemMetrics(SM_CYSCREEN);
-    wind::MonitorTarget mon; mon.x = 0; mon.y = 0; mon.w = sw; mon.h = sh;
-    wind::RenderEngine eng;
-    if (!eng.initialize(mon)) { MessageBoxW(nullptr, L"init failed", L"smoke", 0); return 1; }
-    eng.setVisible(true);
-    wind::RenderFrameParams p{};
-    p.level = 4.0; p.srcLeft = sw * 0.375; p.srcTop = sh * 0.375;
-    p.cursorScreenX = sw / 2.0; p.cursorScreenY = sh / 2.0;
-    p.clickDesktopX = sw / 2; p.clickDesktopY = sh / 2;
-    p.cursorScaleWithZoom = true; p.bilinear = true;
-    eng.hideSystemCursor(true);     // exercise the hide path; shutdown restores it
-    for (int i = 0; i < 20; ++i) {
-        MSG m; while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&m); DispatchMessageW(&m); }
-        eng.renderFrame(p);
-        Sleep(16);
-    }
-    eng.dumpFrame(p, L"render_smoke.png");   // render-then-dump (pre-Present) for a true capture
-    int dsw, dsh, cw, ch, hx, hy; eng.debugInfo(dsw, dsh, cw, ch, hx, hy);
-    FILE* f = nullptr; _wfopen_s(&f, L"render_smoke_diag.txt", L"w");
-    if (f) {
-        fprintf(f, "GetSystemMetrics sw=%d sh=%d\n", sw, sh);
-        fprintf(f, "engine sw=%d sh=%d\n", dsw, dsh);
-        fprintf(f, "cursor w=%d h=%d hotX=%d hotY=%d\n", cw, ch, hx, hy);
-        fprintf(f, "params cursorScreenX=%.1f cursorScreenY=%.1f level=%.1f\n",
-                p.cursorScreenX, p.cursorScreenY, p.level);
-        fprintf(f, "dpiForSystem=%u\n", GetDpiForSystem());
-        fclose(f);
-    }
-    Sleep(200);
-    eng.shutdown();
-    return 0;
-}
-#endif

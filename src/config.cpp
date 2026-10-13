@@ -1,6 +1,6 @@
 #include "config.h"
 #include "keybind_rules.h"   // one safety rule set for every bind (#285)
-#include "config_ui/ini_edit.h"   // wheel migration (#318): pure text edits
+#include "ini_edit.h"   // wheel migration (#318): pure text edits
 #include <map>
 #include <cstring>
 #include <sstream>

@@ -1,7 +1,5 @@
 :root {
-  --bg:#0e0e12; --rail:#17171b; --panel-line:rgba(255,255,255,.06);
-  --text:#f3f3f6; --muted:#85858f; --line:#1f1f25; --hover:rgba(255,255,255,.07);
-  --accent:#5b5bd6; --accent-icon:#9090f2; --accent-soft:rgba(91,91,214,.22);
+  --bg:#0e0e12; --text:#f3f3f6; --line:#1f1f25; --hover:rgba(255,255,255,.07); --accent:#5b5bd6;
   --track:rgba(255,255,255,.16); --chip:rgba(255,255,255,.06); --focus:#a5a5ff;
   color-scheme: dark;
 }

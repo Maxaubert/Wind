@@ -1,6 +1,6 @@
 #include "doctest.h"
 #include "../src/profiles.h"
-#include "../src/config_ui/ini_edit.h"
+#include "../src/ini_edit.h"
 #include "../src/config.h"
 using namespace wind;
 
@@ -114,22 +114,6 @@ TEST_CASE("round trip: switch A -> B -> A preserves A's settings including keybi
     CHECK(vA["zoomInButton"] == "2");
     CHECK(vA["onboarded"] == "1");
     CHECK(vA["profile"] == "A");
-}
-
-TEST_CASE("NextCopyName picks the first free suffix, case-insensitively") {
-    CHECK(NextCopyName("Gaming", {"Gaming"}) == "Gaming copy");
-    CHECK(NextCopyName("Gaming", {"Gaming", "Gaming copy"}) == "Gaming copy 2");
-    CHECK(NextCopyName("Gaming", {"Gaming", "gaming copy", "Gaming copy 2"}) == "Gaming copy 3");
-}
-
-TEST_CASE("NextCopyName keeps the result inside the 40-char name cap") {
-    const std::string base(40, 'x');   // itself at the cap
-    const std::string c1 = NextCopyName(base, {base});
-    CHECK(ProfileNameError(c1) == "");
-    CHECK(c1.size() <= 40);
-    const std::string c2 = NextCopyName(base, {base, c1});
-    CHECK(ProfileNameError(c2) == "");
-    CHECK(c2 != c1);
 }
 
 TEST_CASE("leading dots are rejected like trailing ones") {

@@ -1,5 +1,5 @@
 #include "profiles.h"
-#include "config_ui/ini_edit.h"
+#include "ini_edit.h"
 #include "config.h"   // DefaultIniText: the built-in default of every templated key
 #include <sstream>
 #include <cstdlib>
@@ -74,18 +74,6 @@ std::string MakeLiveText(const std::string& profileText, const std::string& oldL
         if (it != oldVals.end()) out = UpdateIniText(out, k, it->second);
     }
     return UpdateIniText(out, "profile", name);
-}
-std::string NextCopyName(const std::string& base, const std::vector<std::string>& names) {
-    // Truncate the base so "<base><suffix>" always fits the 40-char cap (the suffix grows with N).
-    auto fit = [&](const std::string& suffix) {
-        std::string b = base;
-        if (b.size() + suffix.size() > 40) b = trim(b.substr(0, 40 - suffix.size()));
-        return b + suffix;
-    };
-    std::string cand = fit(" copy");
-    for (int i = 2; ProfileNameTaken(cand, names); ++i)
-        cand = fit(" copy " + std::to_string(i));
-    return cand;
 }
 bool SameProfileName(const std::string& a, const std::string& b) { return lower(a) == lower(b); }
 std::string ProfileTextError(const std::string& text) {

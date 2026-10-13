@@ -16,7 +16,7 @@
 #include "../config_path.h"
 #include "../profiles_io.h"
 #include "../tray_items.h"     // IniValues
-#include "../config_ui/ini_edit.h"
+#include "../ini_edit.h"
 #include <string>
 
 namespace wind { namespace TrayApp {
