@@ -22,21 +22,24 @@ Thumbs.db
 .claude/settings.json
 .claude/settings.local.json
 .claude/worktrees/
-.worktrees/
+.claude/scheduled_tasks.lock
 .superpowers/
 docs/superpowers/
 
-# Runtime and diagnostic output
+# Runtime and diagnostic output (a dev build keeps its ini, profiles and logs next to the exe)
 /magnifier.ini
+/profiles/
+/logs/
+/mpo_boot.txt
+/churny_apps.txt
 *.log
 *.csv
+*.dmp
 *.WebView2/
 wind_selftest.png
 wind_hdr_diag.txt
+render_smoke*
 build_*.txt
-
-# Generated
-graphify-out/
 
 # Test harness
 tools/testenv/results/
