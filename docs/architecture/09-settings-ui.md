@@ -59,12 +59,13 @@ the reply invalid and the page waits forever.
 | `saveSession` | reply `sessionSaved` | Write `MakeProfileText(live)` over the profile |
 | `discardSession` | reply `config` | Rewrite the live ini from the profile |
 | `ready` | fire | Two frames after mount; the host logs launch-to-paint |
-| `window` | fire | `minimize`, `maximize` (toggles restore), `close`, `quitWind`, `restartWind` (writes `session.keep` first) |
+| `window` | fire | `minimize`, `maximize` (toggles restore), `close`, `quitWind`, `restartWind` (writes `session.keep` first; replies `restartFailed` when Wind cannot be launched) |
 | `dirty` | fire | Unsaved flag, so `WM_CLOSE` can prompt |
 | `openIni` | fire | Open `magnifier.ini` in the `.ini` handler or Notepad |
 | `exportDiagnostics` | fire | Zip `%LOCALAPPDATA%\Wind\logs` to the Desktop on a worker thread (the window stays responsive; a repeat click while it runs is ignored), then reveal it in Explorer |
 | `pickExe` | reply `exePicked` | File picker; replies with the bare exe name, because app lists match by name |
 | `switchProfile`, `createProfile`, `deleteProfile` | reply `profiles` | Every reply carries the full `{names, active}` |
+| `openRepo` | fire | About's "Star on GitHub": opens the fixed repo URL in the default browser; nothing in the message is used |
 
 - An unsolicited `profiles` message (tray switch) is marked `push:true`, so it is never taken for a
   pending reply.
@@ -140,12 +141,10 @@ The live ini is the session and the profile file is the saved state ([08](08-con
   Discard or Cancel. Tray Quit decides from the files (`ConfirmQuit` in
   `src/tray_app/tray_menu.cpp`), even with Settings closed.
 
-**Engine and MPO keep special handling.** `model` applies live when the host reports
+**The engine keeps special handling.** `model` applies live when the host reports
 `runningModel: "live"` (both engines up). Otherwise Wind runs one engine until it restarts, so the
 engine row writes the ini, then `restartWind` writes `session.keep` and starts `Wind.exe`, which
-evicts the old instance. On `restartFailed` the page reverts the row and the ini. MPO is a registry value, and
-`highres` tracks three states that must not be conflated: `mpoLive` (registry), `mpoStaged` (what
-the toggle shows) and `mpoBoot` (what DWM loaded, the only honest basis for "restart required").
+evicts the old instance. On `restartFailed` the page reverts the row and the ini.
 
 ```mermaid
 sequenceDiagram
@@ -252,12 +251,17 @@ text is their value (select, keycap, app list) list both label and value.
 
 ## Testing
 
-`ui/tests/` holds 12 Playwright specs that run the real app in Chromium with a fake
-`window.chrome.webview` installed by `addInitScript`. The mock answers `getConfig` with a live and
-a saved snapshot, records every message in `window.__msgs`, and simulates host failures:
-`__restartFail`, `__mpoOk = false`, `__profileFail`, `__pick`. Run `npx playwright test` in `ui/`
-(Playwright starts the Vite server). CI runs only the doctest suite; the UI suite is the local gate
-for UI changes. The host's own pure logic is compiled into the doctest build instead.
+`ui/tests/` holds the Playwright specs (`*.spec.js`) that run the real app in Chromium with a fake
+`window.chrome.webview` installed by `addInitScript`. There is no shared mock: each spec installs
+its own, so a new bridge message is added to the specs that need it. The mocks answer `getConfig`
+from `window.__live` and `window.__saved` (a test adds keys through `__cfgExtra` or `__liveExtra`,
+and the running engine through `__running`), record every message in `window.__msgs`, push host
+messages through `window.__hostSend`, and simulate a failed Save with `__saveOk = false`.
+`__windInit` stands in for the first-paint config the host
+injects. The smooth scaling notice is covered by `scaling-notice.spec.js`; the JS bind rules have a
+node test (`npm run test:rules`). Run `npx playwright test` in `ui/`
+(Playwright starts the Vite server). CI (`.github/workflows/build.yml`) runs the doctest suite,
+`test:rules` and the Playwright suite on every PR. The host's own pure logic is compiled into the doctest build instead.
 
 Specs: [../specs/2026-05-27-config-ui-polish-onboarding-design.md](../specs/2026-05-27-config-ui-polish-onboarding-design.md),
 [../specs/2026-08-12-profiles-design.md](../specs/2026-08-12-profiles-design.md),
