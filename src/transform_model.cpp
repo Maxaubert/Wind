@@ -1009,6 +1009,21 @@ void TransformModel::presentCursor(const MapResult& r, double level, const Prese
     }
 }
 
+void TransformModel::appendTrace(double trLevel, int trTxX, int trOffX, bool txWroteThisTick, bool trChanged,
+                                 bool trRamping, bool trWarm) {
+    if (traceOn_) {
+        LARGE_INTEGER qf, qc; QueryPerformanceFrequency(&qf); QueryPerformanceCounter(&qc);
+        TxTick& e = traceBuf_[traceHead_ % kTraceCap];
+        e.ms = double(qc.QuadPart) * 1000.0 / double(qf.QuadPart);
+        e.level = trLevel; e.txX = trTxX; e.offX = trOffX;
+        e.wrote = (unsigned char)(txWroteThisTick ? 1 : 0);
+        e.changed = (unsigned char)(trChanged ? 1 : 0);
+        e.ramping = (unsigned char)(trRamping ? 1 : 0);
+        e.warm = (unsigned char)(trWarm ? 1 : 0);
+        ++traceHead_;
+    }
+}
+
 void TransformModel::present(const MapResult& r, double level, const Config& cfg,
                              const MonitorTarget& mon, const PresentExtras& ex) {
     (void)mon;
@@ -1067,17 +1082,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
 
     presentCursor(r, level, ex);
 
-    if (traceOn_) {
-        LARGE_INTEGER qf, qc; QueryPerformanceFrequency(&qf); QueryPerformanceCounter(&qc);
-        TxTick& e = traceBuf_[traceHead_ % kTraceCap];
-        e.ms = double(qc.QuadPart) * 1000.0 / double(qf.QuadPart);
-        e.level = trLevel; e.txX = trTxX; e.offX = trOffX;
-        e.wrote = (unsigned char)(txWroteThisTick ? 1 : 0);
-        e.changed = (unsigned char)(trChanged ? 1 : 0);
-        e.ramping = (unsigned char)(trRamping ? 1 : 0);
-        e.warm = (unsigned char)(trWarm ? 1 : 0);
-        ++traceHead_;
-    }
+    appendTrace(trLevel, trTxX, trOffX, txWroteThisTick, trChanged, trRamping, trWarm);
     if (smoothPan_ && level > 1.0) {
         unsigned long long now = GetTickCount64();
         if (now - lastPinAssertMs_ >= 500) { lastPinAssertMs_ = now; pin_.assert_(); }

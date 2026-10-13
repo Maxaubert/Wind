@@ -176,6 +176,8 @@ private:
     void weldPointer(const MapResult& r, const PresentExtras& ex);   // sets weldedLastFrame_
     // Inspect crosshair, legacy sprite session (#463), or the native pointer's hide/restore.
     void presentCursor(const MapResult& r, double level, const PresentExtras& ex);
+    void appendTrace(double trLevel, int trTxX, int trOffX, bool txWroteThisTick, bool trChanged,
+                     bool trRamping, bool trWarm);   // one txTrace row
     std::mutex statMx_;
     unsigned long long statLogMs_ = 0;
     double statMaxMs_ = 0.0, statSumMs_ = 0.0;
