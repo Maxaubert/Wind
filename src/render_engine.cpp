@@ -10,6 +10,7 @@
 #include "band_window.h"
 #include "mag_host.h"   // shared Magnification-runtime refcount (both models use the API)
 #include "upscale_pass.h"   // the xBR / NIS scaling filters (issue #456)
+#include "dwm_watch.h"      // DwmGeneration: re-apply the overlay's exclusions after a DWM restart (#458)
 #include <windows.h>
 #include <d3d11.h>
 #include <dxgi1_6.h>
@@ -71,6 +72,8 @@ struct RenderEngine::State {
     unsigned long long lastTopmostMs = 0;       // last HWND_TOPMOST re-assert (throttled)
     bool inBand = false;                        // created in a high z-order band (CreateWindowInBand)
     bool parked = false;                        // overlay shrunk to 1x1 while idle (see setParked)
+    unsigned long dwmGenSeen = 0;               // DwmGeneration() the exclusions were applied in (#458)
+    void applyExclusions();                     // capture + Peek exclusion on the overlay (DWM-held)
 
     // Desktop Duplication.
     ComPtr<IDXGIOutputDuplication> dupl;
@@ -237,7 +240,33 @@ void RenderEngine::State::refreshSdrWhite() {
 }
 
 // Recreate the duplication interface (after ACCESS_LOST or first use).
+void RenderEngine::State::applyExclusions() {
+    // CRITICAL: exclude our own overlay from screen capture, or Desktop Duplication captures
+    // our presented frame and we magnify our own output -> a feedback loop (degenerates to
+    // black). WDA_EXCLUDEFROMCAPTURE (Win10 2004+) keeps the window visible on screen but
+    // invisible to DDA, so we always capture the real desktop beneath it.
+    SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
+    // Exempt the overlay from Aero Peek's glass-sheet treatment (taskbar thumbnail hover shows a
+    // full-screen preview). Peek is a compositor effect, not a window, so no z-order band can beat
+    // it: DWM hides every window except the previewed one - including this overlay, which made the
+    // preview cover the magnifier unmagnified. Excluded, the overlay stays visible during peek and
+    // keeps magnifying what Desktop Duplication captures (issue #141).
+    BOOL exPeek = TRUE;
+    DwmSetWindowAttribute(hwnd, DWMWA_EXCLUDED_FROM_PEEK, &exPeek, sizeof(exPeek));
+}
+
 bool RenderEngine::State::recreateDupl() {
+    // A restarted dwm.exe forgets the capture exclusion while win32k still reports it, so every
+    // zoom then captured the overlay itself and went black until Wind restarted (#458). Re-apply it
+    // here (once per zoom-in, before any frame is captured or revealed). Clear first: setting the
+    // value win32k already holds may not reach the new DWM.
+    if (hwnd && DwmGeneration() != dwmGenSeen) {
+        dwmGenSeen = DwmGeneration();
+        SetWindowDisplayAffinity(hwnd, WDA_NONE);
+        applyExclusions();
+        DWORD aff = 0; GetWindowDisplayAffinity(hwnd, &aff);
+        RLog("dwm restarted: overlay exclusions re-applied (affinity=0x%lx)", (unsigned long)aff);
+    }
     dupl.Reset();
     // Capture the target monitor's output (matched by device name). Only the legacy
     // single-monitor path (empty targetDevice) falls back to the first output: a NAMED monitor
@@ -594,18 +623,8 @@ bool RenderEngine::initialize(const MonitorTarget& monitor, int zorderBand, bool
                                    wc.hInstance, nullptr);
     }
     if (!s_->hwnd) { RLog("initialize: CreateWindow failed gle=%lu", (unsigned long)GetLastError()); return false; }
-    // CRITICAL: exclude our own overlay from screen capture, or Desktop Duplication captures
-    // our presented frame and we magnify our own output -> a feedback loop (degenerates to
-    // black). WDA_EXCLUDEFROMCAPTURE (Win10 2004+) keeps the window visible on screen but
-    // invisible to DDA, so we always capture the real desktop beneath it.
-    SetWindowDisplayAffinity(s_->hwnd, WDA_EXCLUDEFROMCAPTURE);
-    // Exempt the overlay from Aero Peek's glass-sheet treatment (taskbar thumbnail hover shows a
-    // full-screen preview). Peek is a compositor effect, not a window, so no z-order band can beat
-    // it: DWM hides every window except the previewed one - including this overlay, which made the
-    // preview cover the magnifier unmagnified. Excluded, the overlay stays visible during peek and
-    // keeps magnifying what Desktop Duplication captures (issue #141).
-    BOOL exPeek = TRUE;
-    DwmSetWindowAttribute(s_->hwnd, DWMWA_EXCLUDED_FROM_PEEK, &exPeek, sizeof(exPeek));
+    s_->dwmGenSeen = DwmGeneration();
+    s_->applyExclusions();
 
     if (!s_->buildDeviceResources()) return false;
 
