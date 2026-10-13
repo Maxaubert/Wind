@@ -398,6 +398,14 @@ static void OnPickExe(ICoreWebView2* wv) {
     wv->PostWebMessageAsJson(
         Widen("{\"type\":\"exePicked\",\"name\":\"" + JsonEscape(name) + "\"}").c_str());
 }
+static void OnOpenIni() {
+    // Open the ini with the registered .ini handler (usually Notepad), matching the bridge's
+    // "default editor" contract. Fall back to explicitly launching Notepad if no handler is
+    // associated (ShellExecute returns <= 32) so the button never silently does nothing.
+    HINSTANCE r = ShellExecuteW(nullptr, L"open", IniPath().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    if (reinterpret_cast<INT_PTR>(r) <= 32)
+        ShellExecuteW(nullptr, L"open", L"notepad.exe", IniPath().c_str(), nullptr, SW_SHOWNORMAL);
+}
 static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
     std::string j = Narrow(jsonW);
     std::string type = JsonField(j, "type");
@@ -419,12 +427,7 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
     } else if (type == "pickExe") {
         OnPickExe(wv);
     } else if (type == "openIni") {
-        // Open the ini with the registered .ini handler (usually Notepad), matching the bridge's
-        // "default editor" contract. Fall back to explicitly launching Notepad if no handler is
-        // associated (ShellExecute returns <= 32) so the button never silently does nothing.
-        HINSTANCE r = ShellExecuteW(nullptr, L"open", IniPath().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-        if (reinterpret_cast<INT_PTR>(r) <= 32)
-            ShellExecuteW(nullptr, L"open", L"notepad.exe", IniPath().c_str(), nullptr, SW_SHOWNORMAL);
+        OnOpenIni();
     } else if (type == "exportDiagnostics") {
         // Off the window thread (see ExportDiagnosticsThread); a second click while one runs is ignored.
         if (!g_exporting) {
