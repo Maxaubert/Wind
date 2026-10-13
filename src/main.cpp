@@ -1459,6 +1459,50 @@ static TickModes ResolveTickModes(TickState& t, double lvl, const LARGE_INTEGER&
     return { rawDx, rawDy, zoomed, inspect, active, panArmed };
 }
 
+// Session enter: retarget both engines to the session's monitor (before the engine pick).
+static void RetargetSessionMonitor(TickState& t, bool zoomed, bool inspect) {
+    // Follow the cursor's monitor (multiMonitor on, only when zoomed). Only reconfigure when
+    // it actually changed; retarget() returns false on multi-GPU/failure, in which case we keep
+    // the current monitor. The overlay is still at alpha 0 here, so a move never flashes.
+    // RETARGET BEFORE THE ENGINE PICK: the pick must evaluate the SESSION's monitor - the
+    // old order evaluated the PREVIOUS session's monitor, so switching monitors between
+    // zooms could hand a secondary-monitor session the transform engine (or a primary
+    // game session the render one). Retarget through the render model: it owns the
+    // overlay, and hybrid may still be holding the transform half from the last session.
+    // multiMonitor decides WHICH monitor to follow, not WHETHER to notice the current
+    // one's geometry (issue #230). It used to gate both, so with it off - the shipped
+    // default - a display-mode change was never picked up at all; and with it on, only the
+    // render model was retargeted, leaving the transform clamping against the old size.
+    // A game that switches to a lower resolution therefore let the view pan off the real
+    // desktop. Both engines are retargeted now, and the geometry is tracked either way.
+    // Inspect at 1x also needs the session's monitor (the look point maps onto it).
+    if (zoomed || inspect) {
+        MonitorTarget nt = t.cfg.multiMonitor ? MonitorUnderCursor() : PrimaryMonitor();
+        IMagnifierModel* rt = t.mRender ? t.mRender : t.model;
+        bool ok = SameMonitor(nt, t.mon) ? false : rt->retarget(nt);
+        const bool renderOk = ok;
+        const bool hadTransformHalf = t.mTransform && t.mTransform != rt;
+        // The transform half owns its own bounds and must follow even when the render
+        // half refuses (retarget returns false across adapters, where the overlay cannot
+        // move but the transform is still valid on the new geometry).
+        if (!SameMonitor(nt, t.mon) && t.mTransform && t.mTransform != rt) {
+            if (t.mTransform->retarget(nt)) ok = true;
+        }
+        // Hybrid with a render half that refused while the transform half took it: the
+        // overlay is left on the old monitor, so this session must not pick render.
+        if (ok && hadTransformHalf && !renderOk) t.renderStale = true;
+        else if (ok) t.renderStale = false;
+        if (ok) {
+            t.mon = nt;
+            int nhz = DetectRefreshHz(nt.device);   // pace off the new monitor's refresh (#74)
+            if (nhz > 0) t.hz = nhz;
+            // Everything tuned in ticks follows the new tick rate (issue #223).
+            t.mapper = CursorMapper(nt.w, nt.h);
+            t.detector.setTickRate(t.hz);
+        }
+    }
+}
+
 static void RunTick(TickState& t) {
     TickWorkTimer workTimer(t);
     const TickClock clk = BeginTick(t);
@@ -1500,46 +1544,7 @@ static void RunTick(TickState& t) {
             t.viewDetached = false;
             t.viewVx = 0; t.viewVy = 0;
             t.keyPan.reset();
-            // Follow the cursor's monitor (multiMonitor on, only when zoomed). Only reconfigure when
-            // it actually changed; retarget() returns false on multi-GPU/failure, in which case we keep
-            // the current monitor. The overlay is still at alpha 0 here, so a move never flashes.
-            // RETARGET BEFORE THE ENGINE PICK: the pick must evaluate the SESSION's monitor - the
-            // old order evaluated the PREVIOUS session's monitor, so switching monitors between
-            // zooms could hand a secondary-monitor session the transform engine (or a primary
-            // game session the render one). Retarget through the render model: it owns the
-            // overlay, and hybrid may still be holding the transform half from the last session.
-            // multiMonitor decides WHICH monitor to follow, not WHETHER to notice the current
-            // one's geometry (issue #230). It used to gate both, so with it off - the shipped
-            // default - a display-mode change was never picked up at all; and with it on, only the
-            // render model was retargeted, leaving the transform clamping against the old size.
-            // A game that switches to a lower resolution therefore let the view pan off the real
-            // desktop. Both engines are retargeted now, and the geometry is tracked either way.
-            // Inspect at 1x also needs the session's monitor (the look point maps onto it).
-            if (zoomed || inspect) {
-                MonitorTarget nt = t.cfg.multiMonitor ? MonitorUnderCursor() : PrimaryMonitor();
-                IMagnifierModel* rt = t.mRender ? t.mRender : t.model;
-                bool ok = SameMonitor(nt, t.mon) ? false : rt->retarget(nt);
-                const bool renderOk = ok;
-                const bool hadTransformHalf = t.mTransform && t.mTransform != rt;
-                // The transform half owns its own bounds and must follow even when the render
-                // half refuses (retarget returns false across adapters, where the overlay cannot
-                // move but the transform is still valid on the new geometry).
-                if (!SameMonitor(nt, t.mon) && t.mTransform && t.mTransform != rt) {
-                    if (t.mTransform->retarget(nt)) ok = true;
-                }
-                // Hybrid with a render half that refused while the transform half took it: the
-                // overlay is left on the old monitor, so this session must not pick render.
-                if (ok && hadTransformHalf && !renderOk) t.renderStale = true;
-                else if (ok) t.renderStale = false;
-                if (ok) {
-                    t.mon = nt;
-                    int nhz = DetectRefreshHz(nt.device);   // pace off the new monitor's refresh (#74)
-                    if (nhz > 0) t.hz = nhz;
-                    // Everything tuned in ticks follows the new tick rate (issue #223).
-                    t.mapper = CursorMapper(nt.w, nt.h);
-                    t.detector.setTickRate(t.hz);
-                }
-            }
+            RetargetSessionMonitor(t, zoomed, inspect);
             if (t.mTransform) {
                 // Hybrid engine pick, per zoom-in session (pure predicate: engine_pick.h, tested).
                 // Only ever swapped here or in the settled instant-switch below, so every
