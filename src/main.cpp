@@ -1535,6 +1535,81 @@ static void PickEngineAtZoomIn(TickState& t) {
     }
 }
 
+// Session enter (idle -> active): reset the per-session view state, retarget, pick the engine,
+// re-read the refresh rate, seed the mapper, baseline and lock detector, and activate the engine.
+static void EnterSession(TickState& t, bool zoomed, bool inspect) {
+    // Pristine pointers back BEFORE any engine hides or captures the pointer: DWM composes
+    // the transform engine's pointer through the colour effect and the render engine draws
+    // and filters the real shape itself, so a tinted source would be tinted twice (#288).
+    // Direct swaps, no scheme reload.
+    g_tint.restore(false);
+    t.outlineIdleSec = 0.0;   // each activation starts with the outline fully shown
+    // StepViewOwner runs only while zoomed, so the owner, its latched caret target and the
+    // detached view survived the 1x gap and the next zoom-in opened on the previous
+    // session's caret. Every session starts with the mouse in charge.
+    wind::ResetViewOwnerForSession(t.viewOwner);
+    t.ptrHist.clear();   // no samples from the previous session in the first lagged read (#443)
+    t.postInspectHold = false;   // a new session starts with DWM centring (#445)
+    t.viewDetached = false;
+    t.viewVx = 0; t.viewVy = 0;
+    t.keyPan.reset();
+    RetargetSessionMonitor(t, zoomed, inspect);
+    PickEngineAtZoomIn(t);
+    t.vbounds = QueryVirtualBounds();   // refresh cached clip-detect bounds (topology may have changed)
+    // REFRESH RATE CAN CHANGE WITHOUT THE GEOMETRY CHANGING (issue #232). The retarget
+    // above only fires when SameMonitor is false, and that compares origin, size and
+    // device name - not the rate. A game switching to 60Hz at the desktop's resolution,
+    // or a driver-side refresh toggle, therefore left t.hz at its startup value forever.
+    // Everything derived from it is then wrong by that ratio: the timer pacing, the
+    // mapper's smoothing, the lock detector, and the tick counts TicksAtHz scales (its
+    // own comment notes a 144Hz-tuned count runs 2.4x longer at 60Hz). One
+    // EnumDisplaySettingsW per zoom-in is a cheap price for not being silently mistuned.
+    {
+        const int curHz = DetectRefreshHz(t.mon.device);
+        if (curHz > 0 && curHz != t.hz) {
+            wind::Log(wind::LogLevel::Info, "tick", "refresh rate %dHz -> %dHz", t.hz, curHz);
+            t.hz = curHz;
+            t.mapper = CursorMapper(t.mon.w, t.mon.h);
+            t.detector.setTickRate(t.hz);
+        }
+    }
+    POINT pt; GetCursorPos(&pt);
+    t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y);   // virtual -> local monitor coords
+    t.lastSetVirtual = pt;        // baseline for the OS-cursor delta (first delta = 0)
+    t.detector.reset();           // start free
+    // Warp-lock seeding (issue #221 round 3, field report: any motion-based tell still needs a
+    // wiggle as evidence). Zooming in over a COVERING app whose cursor is already
+    // hidden by the APP is mouselook with near-certainty (the game-inspect tell, valid
+    // at this instant because this session has hidden nothing yet) - start LOCKED so
+    // the raw-mickey pan works from the first tick, motionless. A menu or the desktop
+    // (cursor shown) seeds nothing; a wrong seed over fullscreen video self-heals in
+    // ~100ms once the player re-shows the pointer and it tracks the hand.
+    if (t.cfg.warpLock != 0 && !t.cursorHiddenByUs && ForegroundCoversMonitor(t.mon)) {
+        CURSORINFO ci{}; ci.cbSize = sizeof(ci);
+        if (GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING) == 0) {
+            t.detector.seedLock();
+            t.prevDetLocked = true;
+            wind::Log(wind::LogLevel::Info, "lock",
+                      "seeded LOCKED at zoom-in (app cursor hidden, covering foreground)");
+        }
+    }
+    // Transform sessions use the REAL cursor (issue #369): a free session never welds and
+    // DWM centres on the pointer; only the locked and Inspect regimes weld it to the lens
+    // point (see transform_model.cpp). Hover, drags and clicks are native either way. The
+    // old game-session FREEZE (1px clip + sprite aim point + click re-routing) was retired;
+    // git history has the machinery.
+    if (dynamic_cast<TransformModel*>(t.model)) {
+        // Record the session app for the device-lost churny backstop: if the GPU resets
+        // within 30s of a transform game session, that app is remembered in
+        // churny_apps.txt and future zoom-ins over it pick render (one crash, never two).
+        t.transformExe = ExeNameOf(GetForegroundWindow());
+        wind::Log(wind::LogLevel::Info, "hybrid", "transform session (welded cursor)");
+    } else {
+        SetSystemCursorHidden(t, t.model, true);
+    }
+    { wind::SpanScope span_(wind::kSpanActivate); t.model->onActivate(); }     // grab a live frame, not a stale cached one
+}
+
 static void RunTick(TickState& t) {
     TickWorkTimer workTimer(t);
     const TickClock clk = BeginTick(t);
@@ -1561,76 +1636,7 @@ static void RunTick(TickState& t) {
         bool enterActive  = !t.prevActive;            // idle -> active (overlay just turned on)
         bool inspectEnter = inspect && !t.prevInspect;
         if (enterActive) {
-            // Pristine pointers back BEFORE any engine hides or captures the pointer: DWM composes
-            // the transform engine's pointer through the colour effect and the render engine draws
-            // and filters the real shape itself, so a tinted source would be tinted twice (#288).
-            // Direct swaps, no scheme reload.
-            g_tint.restore(false);
-            t.outlineIdleSec = 0.0;   // each activation starts with the outline fully shown
-            // StepViewOwner runs only while zoomed, so the owner, its latched caret target and the
-            // detached view survived the 1x gap and the next zoom-in opened on the previous
-            // session's caret. Every session starts with the mouse in charge.
-            wind::ResetViewOwnerForSession(t.viewOwner);
-            t.ptrHist.clear();   // no samples from the previous session in the first lagged read (#443)
-            t.postInspectHold = false;   // a new session starts with DWM centring (#445)
-            t.viewDetached = false;
-            t.viewVx = 0; t.viewVy = 0;
-            t.keyPan.reset();
-            RetargetSessionMonitor(t, zoomed, inspect);
-            PickEngineAtZoomIn(t);
-            t.vbounds = QueryVirtualBounds();   // refresh cached clip-detect bounds (topology may have changed)
-            // REFRESH RATE CAN CHANGE WITHOUT THE GEOMETRY CHANGING (issue #232). The retarget
-            // above only fires when SameMonitor is false, and that compares origin, size and
-            // device name - not the rate. A game switching to 60Hz at the desktop's resolution,
-            // or a driver-side refresh toggle, therefore left t.hz at its startup value forever.
-            // Everything derived from it is then wrong by that ratio: the timer pacing, the
-            // mapper's smoothing, the lock detector, and the tick counts TicksAtHz scales (its
-            // own comment notes a 144Hz-tuned count runs 2.4x longer at 60Hz). One
-            // EnumDisplaySettingsW per zoom-in is a cheap price for not being silently mistuned.
-            {
-                const int curHz = DetectRefreshHz(t.mon.device);
-                if (curHz > 0 && curHz != t.hz) {
-                    wind::Log(wind::LogLevel::Info, "tick", "refresh rate %dHz -> %dHz", t.hz, curHz);
-                    t.hz = curHz;
-                    t.mapper = CursorMapper(t.mon.w, t.mon.h);
-                    t.detector.setTickRate(t.hz);
-                }
-            }
-            POINT pt; GetCursorPos(&pt);
-            t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y);   // virtual -> local monitor coords
-            t.lastSetVirtual = pt;        // baseline for the OS-cursor delta (first delta = 0)
-            t.detector.reset();           // start free
-            // Warp-lock seeding (issue #221 round 3, field report: any motion-based tell still needs a
-            // wiggle as evidence). Zooming in over a COVERING app whose cursor is already
-            // hidden by the APP is mouselook with near-certainty (the game-inspect tell, valid
-            // at this instant because this session has hidden nothing yet) - start LOCKED so
-            // the raw-mickey pan works from the first tick, motionless. A menu or the desktop
-            // (cursor shown) seeds nothing; a wrong seed over fullscreen video self-heals in
-            // ~100ms once the player re-shows the pointer and it tracks the hand.
-            if (t.cfg.warpLock != 0 && !t.cursorHiddenByUs && ForegroundCoversMonitor(t.mon)) {
-                CURSORINFO ci{}; ci.cbSize = sizeof(ci);
-                if (GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING) == 0) {
-                    t.detector.seedLock();
-                    t.prevDetLocked = true;
-                    wind::Log(wind::LogLevel::Info, "lock",
-                              "seeded LOCKED at zoom-in (app cursor hidden, covering foreground)");
-                }
-            }
-            // Transform sessions use the REAL cursor (issue #369): a free session never welds and
-            // DWM centres on the pointer; only the locked and Inspect regimes weld it to the lens
-            // point (see transform_model.cpp). Hover, drags and clicks are native either way. The
-            // old game-session FREEZE (1px clip + sprite aim point + click re-routing) was retired;
-            // git history has the machinery.
-            if (dynamic_cast<TransformModel*>(t.model)) {
-                // Record the session app for the device-lost churny backstop: if the GPU resets
-                // within 30s of a transform game session, that app is remembered in
-                // churny_apps.txt and future zoom-ins over it pick render (one crash, never two).
-                t.transformExe = ExeNameOf(GetForegroundWindow());
-                wind::Log(wind::LogLevel::Info, "hybrid", "transform session (welded cursor)");
-            } else {
-                SetSystemCursorHidden(t, t.model, true);
-            }
-            { wind::SpanScope span_(wind::kSpanActivate); t.model->onActivate(); }     // grab a live frame, not a stale cached one
+            EnterSession(t, zoomed, inspect);
         }
         if (inspectEnter) {
             // Freeze the real cursor where it is; the look point (mapper center) starts there.
