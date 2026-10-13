@@ -683,6 +683,30 @@ MagTransform TransformModel::writeSiteTransform(double srcL, double srcT, double
     return m;
 }
 
+void TransformModel::switchDwmCentre(double applyLevel, const PresentExtras& ex) {
+    // DWM CENTRING (issue #369, src/native_cursor.h). In a native-cursor session where the view is
+    // a pure function of the pointer (RunTick's ex.dwmCentre), DWM re-centres the view itself on
+    // every cursor update, latched with the pointer it draws: no tick-to-frame drift at any speed.
+    // Switching off is allowed on a paused tick (it stops DWM moving the view); switching on waits
+    // for a tick that may write, because the switch needs the forced write that follows it.
+    // The owed write survives paused ticks (forceWrite_), so a switch-off during a pause still puts
+    // Wind's offset back on the first tick that may write.
+    {
+        // A broken export (dwmCentreBroken_) removes the wish, so the switch is not retried (and the
+        // write forced, the line logged) on every tick; the failure itself is logged once, in
+        // setDwmCentre.
+        const bool want = nativeSession_ && ex.dwmCentre && applyLevel > 1.001;
+        if (WantDwmCentreSwitch(want, dwmCentreOn_, dwmCentreBroken_, ex.pauseWrites)) {
+            const bool before = dwmCentreOn_;
+            setDwmCentre(want);
+            if (dwmCentreOn_ != before) {
+                forceWrite_ = true;
+                wind::Log(wind::LogLevel::Info, "transform", "DWM centring %s", dwmCentreOn_ ? "ON" : "off");
+            }
+        }
+    }
+}
+
 void TransformModel::present(const MapResult& r, double level, const Config& cfg,
                              const MonitorTarget& mon, const PresentExtras& ex) {
     (void)mon;
@@ -716,27 +740,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     const bool ramping = preLadderLevel != level || (applyLevel != lastLevel_ && lastLevel_ > 0.0);
     MagTransform m = writeSiteTransform(srcL, srcT, applyLevel, cfg);
     bool txWroteThisTick = false;   // for the trace
-    // DWM CENTRING (issue #369, src/native_cursor.h). In a native-cursor session where the view is
-    // a pure function of the pointer (RunTick's ex.dwmCentre), DWM re-centres the view itself on
-    // every cursor update, latched with the pointer it draws: no tick-to-frame drift at any speed.
-    // Switching off is allowed on a paused tick (it stops DWM moving the view); switching on waits
-    // for a tick that may write, because the switch needs the forced write that follows it.
-    // The owed write survives paused ticks (forceWrite_), so a switch-off during a pause still puts
-    // Wind's offset back on the first tick that may write.
-    {
-        // A broken export (dwmCentreBroken_) removes the wish, so the switch is not retried (and the
-        // write forced, the line logged) on every tick; the failure itself is logged once, in
-        // setDwmCentre.
-        const bool want = nativeSession_ && ex.dwmCentre && applyLevel > 1.001;
-        if (WantDwmCentreSwitch(want, dwmCentreOn_, dwmCentreBroken_, ex.pauseWrites)) {
-            const bool before = dwmCentreOn_;
-            setDwmCentre(want);
-            if (dwmCentreOn_ != before) {
-                forceWrite_ = true;
-                wind::Log(wind::LogLevel::Info, "transform", "DWM centring %s", dwmCentreOn_ ? "ON" : "off");
-            }
-        }
-    }
+    switchDwmCentre(applyLevel, ex);
     // Trace inputs, captured here and appended at the END of present().
     bool trChanged = false, trRamping = ramping, trWarm = false;
     const double trLevel = applyLevel;

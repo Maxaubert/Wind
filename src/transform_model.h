@@ -165,6 +165,7 @@ private:
     void applySamplingMode(const Config& cfg);       // bitmap smoothing, bounded retries (#274)
     // The transform to write: edge floor, ComputeMagTransform, 16-bit backstop, tdrTest probe.
     MagTransform writeSiteTransform(double srcL, double srcT, double applyLevel, const Config& cfg);
+    void switchDwmCentre(double applyLevel, const PresentExtras& ex);
     std::mutex statMx_;
     unsigned long long statLogMs_ = 0;
     double statMaxMs_ = 0.0, statSumMs_ = 0.0;
