@@ -174,6 +174,8 @@ private:
                                const Config& cfg, const PresentExtras& ex);
     bool guardInputTransformStomp(double applyLevel, const Config& cfg);   // true: republish now (#217)
     void weldPointer(const MapResult& r, const PresentExtras& ex);   // sets weldedLastFrame_
+    // Inspect crosshair, legacy sprite session (#463), or the native pointer's hide/restore.
+    void presentCursor(const MapResult& r, double level, const PresentExtras& ex);
     std::mutex statMx_;
     unsigned long long statLogMs_ = 0;
     double statMaxMs_ = 0.0, statSumMs_ = 0.0;
