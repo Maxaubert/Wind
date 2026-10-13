@@ -51,12 +51,8 @@ jobs:
         id: ver
         shell: pwsh
         run: |
-          $h = Get-Content src/version.h -Raw
-          $maj = [regex]::Match($h, '#define\s+WIND_VER_MAJOR\s+(\d+)').Groups[1].Value
-          $min = [regex]::Match($h, '#define\s+WIND_VER_MINOR\s+(\d+)').Groups[1].Value
-          $pat = [regex]::Match($h, '#define\s+WIND_VER_PATCH\s+(\d+)').Groups[1].Value
-          if (-not $maj) { throw 'could not read WIND_VER_MAJOR from src/version.h' }
-          "version=$maj.$min.$pat" >> $env:GITHUB_OUTPUT
+          . ./tools/version.ps1      # Get-WindVersion: the one src/version.h reader
+          "version=$(Get-WindVersion (Get-Location).Path)" >> $env:GITHUB_OUTPUT
 
       - name: Install NSIS
         shell: pwsh

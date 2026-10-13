@@ -23,14 +23,7 @@ param([switch]$SkipBuild)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 
-function Get-WindVersion {
-    $h = Get-Content "$root\src\version.h" -Raw
-    $maj = [regex]::Match($h, '#define\s+WIND_VER_MAJOR\s+(\d+)').Groups[1].Value
-    $min = [regex]::Match($h, '#define\s+WIND_VER_MINOR\s+(\d+)').Groups[1].Value
-    $pat = [regex]::Match($h, '#define\s+WIND_VER_PATCH\s+(\d+)').Groups[1].Value
-    if (-not $maj) { throw "could not read WIND_VER_MAJOR from src\version.h" }
-    "$maj.$min.$pat"
-}
+. (Join-Path $PSScriptRoot 'version.ps1')   # Get-WindVersion: the one src\version.h reader
 
 function Get-SigningCert {
     if ($env:WIND_SIGN_THUMBPRINT) {

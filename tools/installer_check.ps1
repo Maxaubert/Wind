@@ -97,11 +97,8 @@ if (Test-Path $over) {
 }
 
 # --- 3. silent install and uninstall ------------------------------------------
-$h = Get-Content (Join-Path $root 'src\version.h') -Raw
-$version = '{0}.{1}.{2}' -f
-    [regex]::Match($h, 'WIND_VER_MAJOR\s+(\d+)').Groups[1].Value,
-    [regex]::Match($h, 'WIND_VER_MINOR\s+(\d+)').Groups[1].Value,
-    [regex]::Match($h, 'WIND_VER_PATCH\s+(\d+)').Groups[1].Value
+. (Join-Path $PSScriptRoot 'version.ps1')   # Get-WindVersion: the one src\version.h reader
+$version = Get-WindVersion $root
 $setup = Join-Path $root "dist\Wind-Setup-x64-$version.exe"
 
 $elevated = ([Security.Principal.WindowsPrincipal] `
