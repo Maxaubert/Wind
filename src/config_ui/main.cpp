@@ -283,6 +283,42 @@ static void OnReady() {
                   (unsigned long long)(GetTickCount64() - g_launchTick));
     }
 }
+static void OnSetConfig(ICoreWebView2* wv, const std::string& j, const std::string& type) {
+    std::string key = JsonField(j, "key"), value = JsonField(j, "value");
+    // The page is ours, but the bridge still refuses a key that is not a plain identifier and a
+    // value that would split the line (CR/LF/NUL): either would let a message plant another key.
+    if (!wind::IsSafeIniKey(key) || !wind::IsSafeIniValue(value)) {
+        wind::Log(wind::LogLevel::Warn, "config", "%s: refused an unsafe key or value", type.c_str());
+        return;
+    }
+    {
+        // Checked (issue #274): this is the path every slider, toggle and keybind takes, and a
+        // failed write (AV lock, a sharing violation on the replace) used to vanish - the page
+        // showed the new value while the ini kept the old one. Tell the page, which says so.
+        // setConfig writes the live ini (the session) only; the profile file changes on Save.
+        std::string live;
+        if (wind::UpdateIniKeys(IniPath(), { { key, value } }, &live) != wind::IniUpdate::Ok) {
+            wind::Log(wind::LogLevel::Warn, "config", "setConfig: writing %s=%s failed",
+                      key.c_str(), value.c_str());
+            wv->PostWebMessageAsJson(
+                Widen("{\"type\":\"configWriteFailed\",\"key\":\"" + JsonEscape(key) + "\"}").c_str());
+            return;
+        }
+        if (key == "uiPalette") ApplyWindowTheme();
+        if (type == "setConfigPersist") {
+            // Keybind captures: also written straight into the active profile so they survive
+            // a later Discard or restart while other changes stay unsaved. Only this one key
+            // moves; the rest of the profile file stays as saved.
+            const std::string active = ActiveProfileName(live);
+            std::string prof;
+            if (!active.empty() && SafeName(active) &&
+                GetFileAttributesW(ProfilePath(active).c_str()) != INVALID_FILE_ATTRIBUTES &&
+                wind::ReadTextFileOk(ProfilePath(active), prof) &&
+                !wind::WriteTextFileAtomic(ProfilePath(active), wind::UpdateProfileKey(prof, key, value)))
+                wind::Log(wind::LogLevel::Warn, "config", "setConfigPersist: profile write of %s failed", key.c_str());
+        }
+    }
+}
 static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
     std::string j = Narrow(jsonW);
     std::string type = JsonField(j, "type");
@@ -292,40 +328,7 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
         PostWindowState(g_hwnd);
         PostConfig(wv);
     } else if (type == "setConfig" || type == "setConfigPersist") {
-        std::string key = JsonField(j, "key"), value = JsonField(j, "value");
-        // The page is ours, but the bridge still refuses a key that is not a plain identifier and a
-        // value that would split the line (CR/LF/NUL): either would let a message plant another key.
-        if (!wind::IsSafeIniKey(key) || !wind::IsSafeIniValue(value)) {
-            wind::Log(wind::LogLevel::Warn, "config", "%s: refused an unsafe key or value", type.c_str());
-            return;
-        }
-        {
-            // Checked (issue #274): this is the path every slider, toggle and keybind takes, and a
-            // failed write (AV lock, a sharing violation on the replace) used to vanish - the page
-            // showed the new value while the ini kept the old one. Tell the page, which says so.
-            // setConfig writes the live ini (the session) only; the profile file changes on Save.
-            std::string live;
-            if (wind::UpdateIniKeys(IniPath(), { { key, value } }, &live) != wind::IniUpdate::Ok) {
-                wind::Log(wind::LogLevel::Warn, "config", "setConfig: writing %s=%s failed",
-                          key.c_str(), value.c_str());
-                wv->PostWebMessageAsJson(
-                    Widen("{\"type\":\"configWriteFailed\",\"key\":\"" + JsonEscape(key) + "\"}").c_str());
-                return;
-            }
-            if (key == "uiPalette") ApplyWindowTheme();
-            if (type == "setConfigPersist") {
-                // Keybind captures: also written straight into the active profile so they survive
-                // a later Discard or restart while other changes stay unsaved. Only this one key
-                // moves; the rest of the profile file stays as saved.
-                const std::string active = ActiveProfileName(live);
-                std::string prof;
-                if (!active.empty() && SafeName(active) &&
-                    GetFileAttributesW(ProfilePath(active).c_str()) != INVALID_FILE_ATTRIBUTES &&
-                    wind::ReadTextFileOk(ProfilePath(active), prof) &&
-                    !wind::WriteTextFileAtomic(ProfilePath(active), wind::UpdateProfileKey(prof, key, value)))
-                    wind::Log(wind::LogLevel::Warn, "config", "setConfigPersist: profile write of %s failed", key.c_str());
-            }
-        }
+        OnSetConfig(wv, j, type);
     } else if (type == "saveSession") {
         // Save: the live session (profile-scoped keys) becomes the active profile file.
         std::string live;
