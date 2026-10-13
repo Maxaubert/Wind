@@ -73,6 +73,11 @@ as an initializer, so a missing or malformed key keeps the default; parsing neve
 - `model` must be `render`, `transform` or `hybrid`; anything else becomes `hybrid`.
 - Unsafe binds read as unbound (`src/keybind_rules.h`, [06](06-input.md)).
 - `LoadConfig` is the I/O wrapper, excluded from the test build by `WIND_TESTS`.
+- Structure: per line `SplitIniLine` (key and value), `ApplyEmptyableKey` (the exe lists and
+  `engine*`, which accept an empty value), then `ApplyValueKey` (one parser per key; a bad value
+  throws and keeps the default). After the loop `ClampConfig` (ranges, the `renderScaling`
+  migration, the `model` fallback) and `SanitizeBinds`. A new key goes in `ApplyValueKey`, its
+  range in `ClampConfig`.
 
 ## Hot-reload and the UI-only fingerprint
 

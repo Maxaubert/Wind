@@ -106,7 +106,7 @@ and default. `Settings.svelte` is the shell (title bar, sidebar, banner, save ca
 - **Removed from the UI is not removed from the product.** Many keys have no row (quick zoom
   setup, outline, `sharpness`, `multiMonitor`, the `tx*` knobs). The core still parses
   them, and Open settings file is the way to edit them.
-- Adding a setting is normally a schema row plus a `ParseConfig` entry.
+- Adding a setting is normally a schema row plus a `ParseConfig` entry (`ApplyValueKey`, see 08).
 - Copy rules (in the schema header): plain language, no toggle label starting with "Enable", no
   description that restates its label.
 
