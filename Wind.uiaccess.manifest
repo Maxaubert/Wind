@@ -12,8 +12,8 @@
              location (C:\Program Files\Wind): build with `build.bat uiaccess`, then run
              tools\uiaccess_setup.ps1 (elevated) to sign + deploy. An unsigned uiAccess build
              will NOT launch ("A referral was returned from the server") - that is expected;
-             run the deployed copy. For casual use without shell coverage, the normal
-             `build.bat` (uiAccess=false) build runs from anywhere. -->
+             run the deployed copy. The plain `build.bat` (uiAccess=false) build refuses to
+             start without UIAccess (issue #460); for dev runs set WIND_ALLOW_NO_UIACCESS=1. -->
         <requestedExecutionLevel level="asInvoker" uiAccess="true" />
       </requestedPrivileges>
     </security>

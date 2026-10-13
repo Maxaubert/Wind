@@ -6,7 +6,7 @@ screen's overlay on top and copies the result into one static control; the same 
 pointer. There are no native buttons.
 
 Wind installs per-machine and elevated, and there is no install-location screen: UIAccess is granted
-only to a signed binary in a secure location, so an install elsewhere would silently disable it.
+only to a signed binary in a secure location, so an install elsewhere could not get it, and Wind refuses to start without it.
 The elevation rules (HKLM autostart, launching through `explorer.exe`, stopping Wind through
 `Local\Wind_QuitRequest`) are in
 [docs/architecture/11](../docs/architecture/11-build-test-release.md#the-installer).
@@ -26,6 +26,7 @@ The elevation rules (HKLM autostart, launching through `explorer.exe`, stopping 
 | `over.nsh` | Generated: control rectangles in 640x480 units |
 | `media/<size>/` | Generated: `v/` frames, `o/` overlays, `o/back.png` (shade and caption scrim under every screen). Committed, because CI cannot regenerate it |
 | `local-sign.ps1` | Per-PC signing of the UIAccess build |
+| `user-localappdata.ps1` | Finds the signed-in user's `%LOCALAPPDATA%` from the elevated setup and uninstaller |
 | `MicrosoftEdgeWebview2Setup.exe` | Microsoft's Evergreen WebView2 bootstrapper |
 
 ## Build
@@ -52,7 +53,8 @@ which makes `wind.nsi` define `LOCAL_SIGN`. Setup then runs `local-sign.ps1`:
 - Setup installs the ordinary build first and signs the UIAccess build in the admin-only
   `$INSTDIR\.stage` (removed afterwards; never the user-writable `$PLUGINSDIR`), copying it
   over only after its signature verifies. An unsigned UIAccess `Wind.exe` does not start at all, so
-  any failure leaves the ordinary build. Wind refuses to start without UIAccess (issue #460), so setup then shows an error and does not launch it.
+  any failure leaves the ordinary build. Wind refuses to start without UIAccess (issue #460), so
+  setup then shows an error and does not launch it.
 - A release signed with a real certificate has no `WindUA.exe` and skips this.
 
 ## Licence screen
@@ -79,6 +81,9 @@ edit. Each screen is two layers: `back.png` (shared) and a per-screen overlay wi
 controls, so the shared gradient is stored once.
 
 ## Replacing the clip
+
+The loop in `media/<size>/v` is still Prism's placeholder clip. Swap it with `make-loop.mjs` once a
+Wind clip exists:
 
 ```
 node installer/make-loop.mjs "C:\path\to\clip.mp4" --len 16 --fps 24
