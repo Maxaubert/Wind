@@ -229,6 +229,140 @@ static void ClampConfig(Config& c, bool haveRenderScaling) {
     // perf trade the user owns, not a crash.)
 }
 
+// One non-empty key=value: each key keeps its own parser (ParseIntStrict, ParseDoubleStrict or the
+// raw string). A bad number throws and ParseConfig's catch keeps the default. haveRenderScaling is
+// set when the renderScaling key is seen (issue #456).
+static void ApplyValueKey(Config& c, const std::string& key, const std::string& val, bool& haveRenderScaling) {
+    if (key == "zoomInButton")          c.zoomInButton = ParseIntStrict(val);
+    else if (key == "zoomOutButton")    c.zoomOutButton = ParseIntStrict(val);
+    else if (key == "zoomInButton2")    c.zoomInButton2 = ParseIntStrict(val);
+    else if (key == "zoomOutButton2")   c.zoomOutButton2 = ParseIntStrict(val);
+    else if (key == "recenterVk")       c.recenterVk = ParseIntStrict(val);
+    else if (key == "cursorLockVk")     c.cursorLockVk = ParseIntStrict(val);
+    else if (key == "recenterMods")     c.recenterMods = ParseIntStrict(val);
+    else if (key == "cursorLockMods")   c.cursorLockMods = ParseIntStrict(val);
+    else if (key == "panLeftVk")        c.panLeftVk = ParseIntStrict(val);
+    else if (key == "panLeftMods")      c.panLeftMods = ParseIntStrict(val);
+    else if (key == "panRightVk")       c.panRightVk = ParseIntStrict(val);
+    else if (key == "panRightMods")     c.panRightMods = ParseIntStrict(val);
+    else if (key == "panUpVk")          c.panUpVk = ParseIntStrict(val);
+    else if (key == "panUpMods")        c.panUpMods = ParseIntStrict(val);
+    else if (key == "panDownVk")        c.panDownVk = ParseIntStrict(val);
+    else if (key == "panDownMods")      c.panDownMods = ParseIntStrict(val);
+    else if (key == "panSpeed")         c.panSpeed = ParseDoubleStrict(val);
+    else if (key == "zoomTrace")        c.zoomTrace = ParseIntStrict(val);
+    else if (key == "hitchLog")         c.hitchLog = ParseIntStrict(val);
+    else if (key == "hitchThresholdPct") c.hitchThresholdPct = std::clamp(ParseIntStrict(val), 110, 1000);
+    // The chain is split in two: MSVC caps if/else nesting depth (C1061). Keys are unique,
+    // so a second chain changes nothing.
+    if (key == "hideCursorVk")     c.hideCursorVk = ParseIntStrict(val);
+    else if (key == "hideCursorMods")   c.hideCursorMods = ParseIntStrict(val);
+    else if (key == "zoomInVk")         c.zoomInVk = ParseIntStrict(val);
+    else if (key == "zoomOutVk")        c.zoomOutVk = ParseIntStrict(val);
+    else if (key == "zoomInVk2")        c.zoomInVk2 = ParseIntStrict(val);
+    else if (key == "zoomOutVk2")       c.zoomOutVk2 = ParseIntStrict(val);
+    else if (key == "zoomInMods")       c.zoomInMods = ParseIntStrict(val);
+    else if (key == "zoomOutMods")      c.zoomOutMods = ParseIntStrict(val);
+    else if (key == "zoomInMods2")      c.zoomInMods2 = ParseIntStrict(val);
+    else if (key == "zoomOutMods2")     c.zoomOutMods2 = ParseIntStrict(val);
+    else if (key == "zoomInButtonMods")   c.zoomInButtonMods = ParseIntStrict(val);
+    else if (key == "zoomOutButtonMods")  c.zoomOutButtonMods = ParseIntStrict(val);
+    else if (key == "zoomInButton2Mods")  c.zoomInButton2Mods = ParseIntStrict(val);
+    else if (key == "zoomOutButton2Mods") c.zoomOutButton2Mods = ParseIntStrict(val);
+    else if (key == "zoomWheelMods")      c.zoomWheelMods = ParseIntStrict(val);
+    else if (key == "panKeysOn")          c.panKeysOn = ParseIntStrict(val) != 0 ? 1 : 0;
+    else if (key == "hideCursorOn")       c.hideCursorOn = ParseIntStrict(val) != 0 ? 1 : 0;
+    else if (key == "cursorLockOn")       c.cursorLockOn = ParseIntStrict(val) != 0 ? 1 : 0;
+    else if (key == "maxLevel")         c.maxLevel = ParseDoubleStrict(val);
+    else if (key == "zoomInSpeed")      c.zoomInSpeed = ParseDoubleStrict(val);
+    else if (key == "zoomOutSpeed")     c.zoomOutSpeed = ParseDoubleStrict(val);
+    else if (key == "smoothZoom")       c.smoothZoom = ParseIntStrict(val);
+    else if (key == "smoothZoomAccel")  c.smoothZoomAccel = ParseDoubleStrict(val);
+    else if (key == "smoothZoomRamp")   c.smoothZoomRamp = ParseDoubleStrict(val);
+    else if (key == "zoomEaseOutMs")    c.zoomEaseOutMs = ParseIntStrict(val);
+    else if (key == "vsync")            c.vsync = ParseIntStrict(val);
+    else if (key == "dwmFlush")         c.dwmFlush = ParseIntStrict(val);
+    else if (key == "diagnostics")      c.diagnostics = ParseIntStrict(val);
+    else if (key == "cursorSensitivity")  c.cursorSensitivity = ParseDoubleStrict(val);
+    else if (key == "panGlideMaxPx")      c.panGlideMaxPx = ParseIntStrict(val);
+    else if (key == "gameCursorLagMs")    c.gameCursorLagMs = ParseIntStrict(val);
+    else if (key == "cursorConstantSize") c.cursorConstantSize = ParseIntStrict(val);
+    else if (key == "trayPinned")         c.trayPinned = ParseIntStrict(val);
+    else if (key == "cursorVisibility")   c.cursorVisibility = val;
+    else if (key == "model")              c.model = val;
+    else if (key == "fastPan")            c.fastPan = ParseIntStrict(val);
+    else if (key == "smoothPan")          c.smoothPan = ParseIntStrict(val);
+    else if (key == "magInputTransform")  c.magInputTransform = ParseIntStrict(val);
+    else if (key == "bilinear")           c.bilinear = ParseIntStrict(val);
+    else if (key == "renderScaling")      { c.renderScaling = ParseIntStrict(val); haveRenderScaling = true; }
+    else if (key == "upscaleTiming")      c.upscaleTiming = ParseIntStrict(val);
+    else if (key == "sharpness")          c.sharpness = ParseDoubleStrict(val);
+    else if (key == "zorderBand")         c.zorderBand = ParseIntStrict(val);
+    else if (key == "brightness")         c.brightness = ParseDoubleStrict(val);
+    else if (key == "colorWarmPct")       c.colorWarmPct = ParseIntStrict(val);
+    else if (key == "colorDimPct")        c.colorDimPct = ParseIntStrict(val);
+    else if (key == "hdrTonemap")         c.hdrTonemap = ParseIntStrict(val);
+    else if (key == "multiMonitor")       c.multiMonitor = ParseIntStrict(val);
+    else if (key == "cropCapture")        c.cropCapture = ParseIntStrict(val);
+    else if (key == "lowGpuPriority")     c.lowGpuPriority = ParseIntStrict(val);
+    else if (key == "gpuPriority")        c.gpuPriority = ParseIntStrict(val);
+    else if (key == "gameCrop")           c.gameCrop = ParseIntStrict(val);
+    else if (key == "tdrTest")            c.tdrTest = ParseIntStrict(val);
+    else if (key == "probeClicks")        c.probeClicks = ParseIntStrict(val);
+    else if (key == "desktopTransform")   c.desktopTransform = ParseIntStrict(val);
+    else if (key == "cursorBandAuto")     c.cursorBandAuto = ParseIntStrict(val);
+    else if (key == "trackCaret")         c.trackCaret = ParseIntStrict(val);
+    else if (key == "trackFocus")         c.trackFocus = ParseIntStrict(val);
+    else if (key == "trackAlign")         c.trackAlign = ParseIntStrict(val);
+    else if (key == "mouseAlign")         c.mouseAlign = ParseIntStrict(val);
+    else if (key == "trackGlideMs")       c.trackGlideMs = ParseIntStrict(val);
+    else if (key == "trackMarginPct")     c.trackMarginPct = ParseIntStrict(val);
+    else if (key == "mouseMarginPct")     c.mouseMarginPct = ParseIntStrict(val);
+    else if (key == "trackLog")           c.trackLog = ParseIntStrict(val);
+    else if (key == "ixDecimate")         c.ixDecimate = ParseIntStrict(val);
+    else if (key == "mpoBuster")          c.mpoBuster = ParseIntStrict(val);
+    else if (key == "txSamplingMode") {
+        // Only 0 (nearest), 1 (smooth) and -1 (leave DWM alone) are meaningful. 2..4 are
+        // kernel aliases of nearest that would slip past the MPO sampling guard; anything
+        // else folds to nearest so EffectiveSamplingMode guards it (review 2026-10-09 #23).
+        const int v = ParseIntStrict(val);
+        c.txSamplingMode = (v == 1 || v == -1) ? v : 0;
+    }
+    else if (key == "txWarmMode")         c.txWarmMode = ParseIntStrict(val);
+    else if (key == "txTrace")            c.txTrace = ParseIntStrict(val);
+    else if (key == "txRestLevel")        c.txRestLevel = ParseDoubleStrict(val);
+    else if (key == "launchQuiesce")      c.launchQuiesce = ParseIntStrict(val);
+    else if (key == "txWarmHz")           c.txWarmHz = ParseIntStrict(val);
+    else if (key == "mpoNearestGuard")    c.mpoNearestGuard = ParseIntStrict(val);
+    else if (key == "txNativeCursor")     c.txNativeCursor = ParseIntStrict(val);
+    else if (key == "txSmoothLadder")     c.txSmoothLadder = ParseIntStrict(val);
+    else if (key == "txRampMinStep")      c.txRampMinStep = ParseIntStrict(val);
+    else if (key == "txRampMinFrom")      c.txRampMinFrom = ParseDoubleStrict(val);
+    else if (key == "mpoGuardTest")       c.mpoGuardTest = ParseIntStrict(val);
+    else if (key == "mpoGuard")           c.mpoGuard = ParseIntStrict(val);
+    else if (key == "mpoGuardLiftWall")   c.mpoGuardLiftWall = ParseIntStrict(val);
+    else if (key == "lockedBallistics")   c.lockedBallistics = ParseIntStrict(val);
+    else if (key == "edgeClip")           c.edgeClip = ParseIntStrict(val);
+    else if (key == "txMaxStepPct")       c.txMaxStepPct = ParseIntStrict(val);
+    else if (key == "warpLock")           c.warpLock = ParseIntStrict(val);
+    else if (key == "lockForce")          c.lockForce = ParseIntStrict(val);
+    else if (key == "txEdgeMargin")       c.txEdgeMargin = ParseDoubleStrict(val);
+    else if (key == "gameFpsCap")         c.gameFpsCap = ParseIntStrict(val);
+    else if (key == "onboarded")          c.onboarded = ParseIntStrict(val);
+    else if (key == "quickZoomDefault")   c.quickZoomDefault = ParseDoubleStrict(val);
+    else if (key == "quickZoomModifier")  c.quickZoomModifier = val;
+    else if (key == "quickZoomHotkeyMode") c.quickZoomHotkeyMode = ParseIntStrict(val);
+    else if (key == "quickZoomVk")        c.quickZoomVk = ParseIntStrict(val);
+    else if (key == "quickZoomMods")      c.quickZoomMods = ParseIntStrict(val);
+    else if (key == "outline")            c.outline = ParseIntStrict(val);
+    else if (key == "outlineThickness")   c.outlineThickness = ParseIntStrict(val);
+    else if (key == "outlineColor")     { c.outlineColor = val; ParseHexColor(val, c.outlineR, c.outlineG, c.outlineB); }
+    else if (key == "outlineLowZoomOnly") c.outlineLowZoomOnly = ParseIntStrict(val);
+    else if (key == "outlineLowZoomMax")  c.outlineLowZoomMax = ParseDoubleStrict(val);
+    else if (key == "outlineIdleHide")    c.outlineIdleHide = ParseIntStrict(val);
+    else if (key == "outlineIdleSeconds") c.outlineIdleSeconds = ParseDoubleStrict(val);
+}
+
 Config ParseConfig(const std::string& text) {
     Config c;
     // A UTF-8 BOM (Notepad's "UTF-8 with BOM") would glue itself to the first key and lose it.
@@ -261,134 +395,7 @@ Config ParseConfig(const std::string& text) {
         if (key == "engineOther")   { c.engineOther   = val.empty() ? "auto" : val; continue; }
         if (val.empty()) continue;
         try {
-            if (key == "zoomInButton")          c.zoomInButton = ParseIntStrict(val);
-            else if (key == "zoomOutButton")    c.zoomOutButton = ParseIntStrict(val);
-            else if (key == "zoomInButton2")    c.zoomInButton2 = ParseIntStrict(val);
-            else if (key == "zoomOutButton2")   c.zoomOutButton2 = ParseIntStrict(val);
-            else if (key == "recenterVk")       c.recenterVk = ParseIntStrict(val);
-            else if (key == "cursorLockVk")     c.cursorLockVk = ParseIntStrict(val);
-            else if (key == "recenterMods")     c.recenterMods = ParseIntStrict(val);
-            else if (key == "cursorLockMods")   c.cursorLockMods = ParseIntStrict(val);
-            else if (key == "panLeftVk")        c.panLeftVk = ParseIntStrict(val);
-            else if (key == "panLeftMods")      c.panLeftMods = ParseIntStrict(val);
-            else if (key == "panRightVk")       c.panRightVk = ParseIntStrict(val);
-            else if (key == "panRightMods")     c.panRightMods = ParseIntStrict(val);
-            else if (key == "panUpVk")          c.panUpVk = ParseIntStrict(val);
-            else if (key == "panUpMods")        c.panUpMods = ParseIntStrict(val);
-            else if (key == "panDownVk")        c.panDownVk = ParseIntStrict(val);
-            else if (key == "panDownMods")      c.panDownMods = ParseIntStrict(val);
-            else if (key == "panSpeed")         c.panSpeed = ParseDoubleStrict(val);
-            else if (key == "zoomTrace")        c.zoomTrace = ParseIntStrict(val);
-            else if (key == "hitchLog")         c.hitchLog = ParseIntStrict(val);
-            else if (key == "hitchThresholdPct") c.hitchThresholdPct = std::clamp(ParseIntStrict(val), 110, 1000);
-            // The chain is split in two: MSVC caps if/else nesting depth (C1061). Keys are unique,
-            // so a second chain changes nothing.
-            if (key == "hideCursorVk")     c.hideCursorVk = ParseIntStrict(val);
-            else if (key == "hideCursorMods")   c.hideCursorMods = ParseIntStrict(val);
-            else if (key == "zoomInVk")         c.zoomInVk = ParseIntStrict(val);
-            else if (key == "zoomOutVk")        c.zoomOutVk = ParseIntStrict(val);
-            else if (key == "zoomInVk2")        c.zoomInVk2 = ParseIntStrict(val);
-            else if (key == "zoomOutVk2")       c.zoomOutVk2 = ParseIntStrict(val);
-            else if (key == "zoomInMods")       c.zoomInMods = ParseIntStrict(val);
-            else if (key == "zoomOutMods")      c.zoomOutMods = ParseIntStrict(val);
-            else if (key == "zoomInMods2")      c.zoomInMods2 = ParseIntStrict(val);
-            else if (key == "zoomOutMods2")     c.zoomOutMods2 = ParseIntStrict(val);
-            else if (key == "zoomInButtonMods")   c.zoomInButtonMods = ParseIntStrict(val);
-            else if (key == "zoomOutButtonMods")  c.zoomOutButtonMods = ParseIntStrict(val);
-            else if (key == "zoomInButton2Mods")  c.zoomInButton2Mods = ParseIntStrict(val);
-            else if (key == "zoomOutButton2Mods") c.zoomOutButton2Mods = ParseIntStrict(val);
-            else if (key == "zoomWheelMods")      c.zoomWheelMods = ParseIntStrict(val);
-            else if (key == "panKeysOn")          c.panKeysOn = ParseIntStrict(val) != 0 ? 1 : 0;
-            else if (key == "hideCursorOn")       c.hideCursorOn = ParseIntStrict(val) != 0 ? 1 : 0;
-            else if (key == "cursorLockOn")       c.cursorLockOn = ParseIntStrict(val) != 0 ? 1 : 0;
-            else if (key == "maxLevel")         c.maxLevel = ParseDoubleStrict(val);
-            else if (key == "zoomInSpeed")      c.zoomInSpeed = ParseDoubleStrict(val);
-            else if (key == "zoomOutSpeed")     c.zoomOutSpeed = ParseDoubleStrict(val);
-            else if (key == "smoothZoom")       c.smoothZoom = ParseIntStrict(val);
-            else if (key == "smoothZoomAccel")  c.smoothZoomAccel = ParseDoubleStrict(val);
-            else if (key == "smoothZoomRamp")   c.smoothZoomRamp = ParseDoubleStrict(val);
-            else if (key == "zoomEaseOutMs")    c.zoomEaseOutMs = ParseIntStrict(val);
-            else if (key == "vsync")            c.vsync = ParseIntStrict(val);
-            else if (key == "dwmFlush")         c.dwmFlush = ParseIntStrict(val);
-            else if (key == "diagnostics")      c.diagnostics = ParseIntStrict(val);
-            else if (key == "cursorSensitivity")  c.cursorSensitivity = ParseDoubleStrict(val);
-            else if (key == "panGlideMaxPx")      c.panGlideMaxPx = ParseIntStrict(val);
-            else if (key == "gameCursorLagMs")    c.gameCursorLagMs = ParseIntStrict(val);
-            else if (key == "cursorConstantSize") c.cursorConstantSize = ParseIntStrict(val);
-            else if (key == "trayPinned")         c.trayPinned = ParseIntStrict(val);
-            else if (key == "cursorVisibility")   c.cursorVisibility = val;
-            else if (key == "model")              c.model = val;
-            else if (key == "fastPan")            c.fastPan = ParseIntStrict(val);
-            else if (key == "smoothPan")          c.smoothPan = ParseIntStrict(val);
-            else if (key == "magInputTransform")  c.magInputTransform = ParseIntStrict(val);
-            else if (key == "bilinear")           c.bilinear = ParseIntStrict(val);
-            else if (key == "renderScaling")      { c.renderScaling = ParseIntStrict(val); haveRenderScaling = true; }
-            else if (key == "upscaleTiming")      c.upscaleTiming = ParseIntStrict(val);
-            else if (key == "sharpness")          c.sharpness = ParseDoubleStrict(val);
-            else if (key == "zorderBand")         c.zorderBand = ParseIntStrict(val);
-            else if (key == "brightness")         c.brightness = ParseDoubleStrict(val);
-            else if (key == "colorWarmPct")       c.colorWarmPct = ParseIntStrict(val);
-            else if (key == "colorDimPct")        c.colorDimPct = ParseIntStrict(val);
-            else if (key == "hdrTonemap")         c.hdrTonemap = ParseIntStrict(val);
-            else if (key == "multiMonitor")       c.multiMonitor = ParseIntStrict(val);
-            else if (key == "cropCapture")        c.cropCapture = ParseIntStrict(val);
-            else if (key == "lowGpuPriority")     c.lowGpuPriority = ParseIntStrict(val);
-            else if (key == "gpuPriority")        c.gpuPriority = ParseIntStrict(val);
-            else if (key == "gameCrop")           c.gameCrop = ParseIntStrict(val);
-            else if (key == "tdrTest")            c.tdrTest = ParseIntStrict(val);
-            else if (key == "probeClicks")        c.probeClicks = ParseIntStrict(val);
-            else if (key == "desktopTransform")   c.desktopTransform = ParseIntStrict(val);
-            else if (key == "cursorBandAuto")     c.cursorBandAuto = ParseIntStrict(val);
-            else if (key == "trackCaret")         c.trackCaret = ParseIntStrict(val);
-            else if (key == "trackFocus")         c.trackFocus = ParseIntStrict(val);
-            else if (key == "trackAlign")         c.trackAlign = ParseIntStrict(val);
-            else if (key == "mouseAlign")         c.mouseAlign = ParseIntStrict(val);
-            else if (key == "trackGlideMs")       c.trackGlideMs = ParseIntStrict(val);
-            else if (key == "trackMarginPct")     c.trackMarginPct = ParseIntStrict(val);
-            else if (key == "mouseMarginPct")     c.mouseMarginPct = ParseIntStrict(val);
-            else if (key == "trackLog")           c.trackLog = ParseIntStrict(val);
-            else if (key == "ixDecimate")         c.ixDecimate = ParseIntStrict(val);
-            else if (key == "mpoBuster")          c.mpoBuster = ParseIntStrict(val);
-            else if (key == "txSamplingMode") {
-                // Only 0 (nearest), 1 (smooth) and -1 (leave DWM alone) are meaningful. 2..4 are
-                // kernel aliases of nearest that would slip past the MPO sampling guard; anything
-                // else folds to nearest so EffectiveSamplingMode guards it (review 2026-10-09 #23).
-                const int v = ParseIntStrict(val);
-                c.txSamplingMode = (v == 1 || v == -1) ? v : 0;
-            }
-            else if (key == "txWarmMode")         c.txWarmMode = ParseIntStrict(val);
-            else if (key == "txTrace")            c.txTrace = ParseIntStrict(val);
-            else if (key == "txRestLevel")        c.txRestLevel = ParseDoubleStrict(val);
-            else if (key == "launchQuiesce")      c.launchQuiesce = ParseIntStrict(val);
-            else if (key == "txWarmHz")           c.txWarmHz = ParseIntStrict(val);
-            else if (key == "mpoNearestGuard")    c.mpoNearestGuard = ParseIntStrict(val);
-            else if (key == "txNativeCursor")     c.txNativeCursor = ParseIntStrict(val);
-            else if (key == "txSmoothLadder")     c.txSmoothLadder = ParseIntStrict(val);
-            else if (key == "txRampMinStep")      c.txRampMinStep = ParseIntStrict(val);
-            else if (key == "txRampMinFrom")      c.txRampMinFrom = ParseDoubleStrict(val);
-            else if (key == "mpoGuardTest")       c.mpoGuardTest = ParseIntStrict(val);
-            else if (key == "mpoGuard")           c.mpoGuard = ParseIntStrict(val);
-            else if (key == "mpoGuardLiftWall")   c.mpoGuardLiftWall = ParseIntStrict(val);
-            else if (key == "lockedBallistics")   c.lockedBallistics = ParseIntStrict(val);
-            else if (key == "edgeClip")           c.edgeClip = ParseIntStrict(val);
-            else if (key == "txMaxStepPct")       c.txMaxStepPct = ParseIntStrict(val);
-            else if (key == "warpLock")           c.warpLock = ParseIntStrict(val);
-            else if (key == "lockForce")          c.lockForce = ParseIntStrict(val);
-            else if (key == "txEdgeMargin")       c.txEdgeMargin = ParseDoubleStrict(val);
-            else if (key == "gameFpsCap")         c.gameFpsCap = ParseIntStrict(val);
-            else if (key == "onboarded")          c.onboarded = ParseIntStrict(val);
-            else if (key == "quickZoomDefault")   c.quickZoomDefault = ParseDoubleStrict(val);
-            else if (key == "quickZoomModifier")  c.quickZoomModifier = val;
-            else if (key == "quickZoomHotkeyMode") c.quickZoomHotkeyMode = ParseIntStrict(val);
-            else if (key == "quickZoomVk")        c.quickZoomVk = ParseIntStrict(val);
-            else if (key == "quickZoomMods")      c.quickZoomMods = ParseIntStrict(val);
-            else if (key == "outline")            c.outline = ParseIntStrict(val);
-            else if (key == "outlineThickness")   c.outlineThickness = ParseIntStrict(val);
-            else if (key == "outlineColor")     { c.outlineColor = val; ParseHexColor(val, c.outlineR, c.outlineG, c.outlineB); }
-            else if (key == "outlineLowZoomOnly") c.outlineLowZoomOnly = ParseIntStrict(val);
-            else if (key == "outlineLowZoomMax")  c.outlineLowZoomMax = ParseDoubleStrict(val);
-            else if (key == "outlineIdleHide")    c.outlineIdleHide = ParseIntStrict(val);
-            else if (key == "outlineIdleSeconds") c.outlineIdleSeconds = ParseDoubleStrict(val);
+            ApplyValueKey(c, key, val, haveRenderScaling);
         } catch (...) { /* keep default on bad value */ }
     }
     ClampConfig(c, haveRenderScaling);
