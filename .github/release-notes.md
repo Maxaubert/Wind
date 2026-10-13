@@ -13,8 +13,8 @@ sign in, and adds the WebView2 runtime if it is missing. Settings, profiles and 
 The installer is not signed, so SmartScreen warns on first run: choose **More info**, then
 **Run anyway**. Some browsers and managed work computers block the download. During setup, Wind is
 signed locally with a certificate created for your PC, whose private key is deleted straight away;
-this lets zoom keys work over elevated windows. If that step fails, setup installs a build without
-that ability.
+this gives Wind the UIAccess permission it needs. If that step fails, setup says so, and Wind will
+not start until you run the installer again.
 
 ## Verify
 

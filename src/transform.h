@@ -52,8 +52,8 @@ EdgeMargins EdgeMarginsFor(int samplingMode, double cfgLowMargin);
 // transform at rest must stay exactly identity.
 double SrcEdgeFloor(double edgeMargin, double level, int screenExtent);
 
-// MagSetInputTransform rects (issue #185; docs/POINTER-HITTEST-FINDINGS.md): pointer-framework
-// apps hit-test mouse input through the system input transform under a fullscreen
+// MagSetInputTransform rects (issue #185; docs/history/POINTER-HITTEST-FINDINGS.md):
+// pointer-framework apps hit-test mouse input through the system input transform under a fullscreen
 // magnification, so every transform change must publish src = the magnified source region and
 // dst = the monitor rect - BOTH in virtual-screen coordinates (srcLeft/srcTop arrive
 // monitor-local; monX/monY are the monitor origin). Rounding nearest; extent = monitor/level.

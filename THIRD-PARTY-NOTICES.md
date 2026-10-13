@@ -15,6 +15,15 @@ https://developer.microsoft.com/microsoft-edge/webview2/
 `installer/MicrosoftEdgeWebview2Setup.exe`, redistributed unmodified as published by Microsoft.
 Setup runs it only when the WebView2 runtime is absent. Microsoft Software License Terms apply.
 
+### NSIS and its LZMA compression module
+The setup (`Wind-Setup-x64.exe`) is built with NSIS (Nullsoft Scriptable Install System), so its
+installer stub and the plug-ins it uses (`System`, `nsExec`, `nsDialogs`) are part of the shipped file. NSIS is
+Copyright (C) 1999-2026 NSIS contributors and licensed under the zlib/libpng licence, which asks
+for no attribution. The payload is compressed with NSIS's LZMA compression module (by Igor Pavlov
+and Amir Szekely), licensed under the Common Public License 1.0 with a special exception that lets
+code link to it without becoming subject to the CPL; the upstream LZMA SDK it derives from is
+public domain. https://nsis.sourceforge.io/License
+
 ### Svelte 5 (MIT)
 Copyright (c) 2016-2026 Svelte contributors. The Svelte runtime is compiled into `ui/dist`,
 which ships inside the installer. https://github.com/sveltejs/svelte

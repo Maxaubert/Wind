@@ -1,7 +1,7 @@
 # The built-in Magnifier stomps the transform engine (issue #217)
 
 > **Status.** Closed. The stomp guard shipped (PR #218). Picking Render while a foreign magnifier
-> runs is parked. Design: [architecture/05](architecture/05-transform-engine.md#the-input-transform).
+> runs is parked. Design: [architecture/05](../architecture/05-transform-engine.md#the-input-transform).
 
 ## Symptom
 

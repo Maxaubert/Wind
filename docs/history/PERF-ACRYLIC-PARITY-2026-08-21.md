@@ -1,7 +1,7 @@
 # Wind versus the built-in Magnifier over acrylic (issue #219)
 
 > **Status.** Closed. Shipped `txMaxStepPct=25`, capping up-steps only
-> ([architecture/05](architecture/05-transform-engine.md#write-cadence)).
+> ([architecture/05](../architecture/05-transform-engine.md#write-cadence)).
 
 ## Problem
 

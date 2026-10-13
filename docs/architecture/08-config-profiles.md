@@ -80,8 +80,9 @@ the five tray layout keys `trayPerf`,
 text is unchanged. `profile` stays in the fingerprint, so a profile switch reloads.
 
 **Hot or restart follows from how a value is read.** A key read from `t.cfg` per tick or per
-zoom-in is hot. A key baked into state at initialization needs a restart: `model` (which engines
-exist), `zorderBand` and `cursorBandAuto` (overlay and Inspect crosshair creation), `hdrTonemap`
+zoom-in is hot. `model` is hot too: both engines are built at startup and it only decides the pick
+(a relaunch is needed only when one engine failed to init, see below). A key baked into state at
+initialization needs a restart: `zorderBand` and `cursorBandAuto` (overlay and Inspect crosshair creation), `hdrTonemap`
 (render engine init), `fastPan` and `smoothPan` (passed to the `TransformModel` constructor), and
 `gpuPriority`, which is only half hot: the device build applies it at init, but the game-pacing
 decision in `RunTick` reads it live, so a change mid-session can mismatch the two until a restart.
@@ -117,8 +118,9 @@ comments and order.
   default is not "unsaved" (`model` is excluded from that rule; keys outside the template stay
   missing-versus-present).
 - At start the core runs `ResetSessionToProfile`, so unsaved changes never survive a restart,
-  unless `%LOCALAPPDATA%\Wind\session.keep` marks a restart Wind triggered itself (engine change,
-  profile switch with a model change). It is consumed once.
+  unless `%LOCALAPPDATA%\Wind\session.keep` marks a restart Wind triggered itself (Restart Wind, or
+  an engine change or profile switch with a model change while Wind runs one engine). It is
+  consumed once.
 - Tray Quit compares the files and prompts Save, Discard or Cancel.
 
 **Switching** (Settings or the tray flyout, the same sequence):
@@ -129,11 +131,12 @@ comments and order.
 2. Settings asks Save, Discard or Cancel when the session has unsaved changes. The tray flyout
    asks too, through its own `ConfirmSwitch` prompt (`src/tray_app/`).
 3. Write `MakeLiveText(profile, oldLive, name)` over the live ini.
-4. The core hot-reloads everything except `model`. When the parsed `model` differs, the surface
-   relaunches `Wind.exe`. If the relaunch fails, it writes the old `model` back, so the ini always
-   matches the running engine.
+4. The core hot-reloads it, `model` included (`running.model` reads `live`). Only when Wind runs
+   one engine (`running.model` names it) and the parsed `model` differs does the surface relaunch
+   `Wind.exe` (`EngineSwitchesLive`, `src/profiles_io.h`). If that relaunch fails, it writes the
+   old `model` back, so the ini always matches the running engine.
 
-**The relaunch uses the eviction handshake, never a kill.** The new instance finds the
+**That relaunch uses the eviction handshake, never a kill.** The new instance finds the
 single-instance mutex held, sets `Local\Wind_QuitRequest` and waits for the old one to exit. Only a
 clean exit restores the OS cursor and releases `ClipCursor`.
 
@@ -166,7 +169,7 @@ Every key works in the ini whether or not Settings shows it. Keys hot-reload unl
 | `panLeftVk`, `panRightVk`, `panUpVk`, `panDownVk` + `*Mods`, `panKeysOn` | Keyboard panning while zoomed |
 | `hideCursorVk`/`hideCursorMods`, `hideCursorOn` | Toggle the pointer while zoomed |
 | `cursorLockVk`/`cursorLockMods`, `cursorLockOn` | Inspect mode |
-| `recenterVk` | Recentre the view on the cursor |
+| `recenterVk`/`recenterMods` | Recentre the view on the cursor |
 | `quickZoomHotkeyMode`, `quickZoomModifier` (default Ctrl), `quickZoomVk`/`quickZoomMods`, `quickZoomDefault` (4.0) | Quick zoom: modifier + a zoom key (mode 0) or a dedicated hotkey (mode 1) toggles between 1x and the remembered level |
 | `noSwallowApps` | Exes where the keyboard hook is dropped |
 
@@ -178,7 +181,7 @@ Every key works in the ini whether or not Settings shows it. Keys hot-reload unl
 | `cursorSensitivity` (1.0), `panSpeed` (1.0), `panGlideMaxPx` (0) | Mouse and arrow-key pan speed; the pan glide's distance, which also sets its ease (#430, #434) |
 | `gameCursorLagMs` (-1) | How late the view follows the pointer while a full-screen game hides it and draws its own cursor; -1 = one display frame, 0 = off (#443). Ini only |
 | `mouseAlign` (0 centred, 1 within the edges), `mouseMarginPct` | Where the pointer sits while the view moves |
-| `trackCaret` (1), `trackFocus` (0), `trackAlign`, `trackGlideMs` (200) | Follow the text caret and keyboard focus |
+| `trackCaret` (1), `trackFocus` (0), `trackAlign`, `trackGlideMs` (200), `trackMarginPct` (15) | Follow the text caret and keyboard focus; `trackMarginPct` is the within-edges margin, % of the view on each side |
 | `lockApps`, `warpLock` (0) | Games whose sessions pan from raw mouse motion; heuristics for unlisted games |
 | `multiMonitor` (0) | 1 follows the cursor's monitor at each zoom-in |
 
@@ -194,7 +197,8 @@ Every key works in the ini whether or not Settings shows it. Keys hot-reload unl
 | `colorWarmPct` (0), `colorDimPct` (100) | Warmth and brightness filter |
 | `outline*` | Zoom outline |
 
-**Engine.** `model` needs a restart.
+**Engine.** `model` applies live on the config reload (#455); Wind relaunches only when one engine
+failed to init.
 
 | Keys | Meaning |
 |---|---|
@@ -221,8 +225,10 @@ Every key works in the ini whether or not Settings shows it. Keys hot-reload unl
 | `smoothPan` (0, restart) | Hold the display composited while zoomed (a 1 px pin) so flip-model games keep DWM's pan path |
 | `fastPan` (1, restart) | Pan through the private `SetMagnificationDesktopMagnification` channel (finer than the public write) |
 | `mpoGuard` (1), `mpoGuardLiftWall` (1), `mpoGuardTest` (0) | The MPO guard effect, whether it lifts the pan walls while plane-free, and a diagnostic that applies it on an MPO-off boot |
+| `mpoNearestGuard` (1) | Allow nearest sampling on an MPO-on boot, relying on the guard; 0 turns nearest into smooth on such boots ([05](05-transform-engine.md)) |
 | `txRestLevel` (1.0) | Level the transform rests at when idle; above 1.0 parks a hair off identity (costs a composed desktop) |
 | `txTrace` (0) | 1 records a per-tick trace and writes `txtrace-<ms>.csv` to the log folder at each session end |
+| `zoomTrace` (0) | 1 logs a zoom-in/zoom-out timeline per zoom (#310) |
 
 `diagnostics=1` writes the frame-pacing log; the rest is in [12](12-instrumentation.md). The other
 transform tuning keys (`tx*`, `ixDecimate`, `mpoBuster`, `tdrTest`) are documented on their `Config`

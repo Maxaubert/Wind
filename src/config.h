@@ -299,7 +299,8 @@ struct Config {
     // MPO nearest guard (issue #369, src/mpo_guard.h): 1 (DEFAULT, field-tested 2026-10-07) =
     // nearest sampling is allowed on an MPO-on boot, with an invisible colour effect while zoomed
     // so DWM composes the desktop itself (no plane, no 16-bit overflow). 0 = nearest on MPO boots
-    // is turned into smooth as before. The pan walls stay armed either way. Restart to apply.
+    // is turned into smooth as before. The pan walls stay armed either way. Hot: read on every
+    // config load (EffectiveSamplingMode).
     int mpoNearestGuard = 1;
     // Smooth-zoom ladder (issue #369, src/zoom_ladder.h): with smooth sampling, zoom only through
     // levels where DWM's per-frame scratch rounding predicts under 1 px of movement (the zoom shake:

@@ -3,10 +3,12 @@
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>
-        <!-- The PLAIN manifest: asInvoker, uiAccess=false, so the build runs from anywhere
-             (build.bat, and always WindTray.exe). The uiAccess=true variant, needed for
-             MagSetInputTransform and the optional high z-order band, is Wind.uiaccess.manifest
-             (build.bat uiaccess; it only launches signed from C:\Program Files\Wind). -->
+        <!-- The PLAIN manifest: asInvoker, uiAccess=false. Always used by WindTray.exe; a plain
+             build.bat Wind.exe refuses to start without UIAccess (issue #460), so it runs only
+             for dev with WIND_ALLOW_NO_UIACCESS=1 (or WIND_SELFTEST=1). The uiAccess=true
+             variant, needed for MagSetInputTransform and the optional high z-order band, is
+             Wind.uiaccess.manifest (build.bat uiaccess; it only launches signed from
+             C:\Program Files\Wind). -->
         <requestedExecutionLevel level="asInvoker" uiAccess="false" />
       </requestedPrivileges>
     </security>

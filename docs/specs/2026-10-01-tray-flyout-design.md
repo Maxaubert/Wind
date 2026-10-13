@@ -7,8 +7,8 @@ pinnable quick controls (like Control Center), and add a "Tray menu" tab to Sett
 order them. Stacks on the Settings redesign (#303, PR #312).
 
 ## The target
-- Flyout: `docs/design/tray-2026-10/j01-calm-tint.html` (+ `-dark.png`, `-light.png`, `-hover.png`).
-- Settings tab: `docs/design/tray-2026-10/k01-sliders-toggles.html` (+ screenshots), with NO
+- Flyout: `docs/design/tray-2026-10/j01-calm-tint.html` (+ `j01-calm-tint-dark.png`).
+- Settings tab: `docs/design/tray-2026-10/k01-sliders-toggles.html`, with NO
   background box behind the item icons (just the line icon).
 - Same review rule as #303: the built UI is compared side by side with these at the same size and
   every visible difference is fixed or justified.
@@ -99,7 +99,7 @@ slider drag, the old owner-drawn menu (removed).
 - Playwright: the Tray menu tab (toggle, check/uncheck, drag reorder in both lists, keyboard
   reorder, persisted ini keys via the mock bridge).
 - Visual: flyout rendered to a bitmap by a test hook (`WindTray.exe --render-test out.png` with fake
-  status) compared with `j01-calm-tint-dark.png`; Settings tab screenshot vs `k01` dark/light.
+  status) compared with `j01-calm-tint-dark.png`; Settings tab screenshot vs `k01-sliders-toggles.html`.
 - Manual on the deployed build: open the flyout, drag Warmth (screen warms live), toggle Follow
   text cursor, Keep within the edges (both alignment rows in Settings change together), Performance on/off from Settings, reorder in Settings and see the
   flyout follow, profile switch, Quit prompt.

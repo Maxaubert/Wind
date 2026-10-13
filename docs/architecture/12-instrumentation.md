@@ -137,6 +137,9 @@ the cursor-change tax while it runs.
 | `gpu_ab.ps1` | dwm.exe and Wind.exe GPU per scenario, Wind versus built-in |
 | `plane_race_probe.ps1` | Whether a session pulls a fullscreen game off its overlay plane |
 | `wind_drive_probe.ps1` | Confirms injected side-button input reaches Wind's zoom bind |
+| `mag_formula_probe.ps1` | Fits the built-in Magnifier's source-rect formula from a grid of cursor positions (#205; the evidence behind the free-cursor formula) |
+| `mag_trackmode_probe.ps1` | Tells the built-in Magnifier's centred and within-edges tracking modes apart with small cursor steps (#205) |
+| `upscale_testcard.py` | Full-screen static test card for comparing the render scaling filters (#456); `--png` only writes it. Needs Pillow |
 | `magtrace.ps1` | Level, offsets and cadence of whichever magnifier is active |
 | `flipwatch.ps1` | Presentation mode via PresentMon (independent flip versus composed) |
 | `dwm_memprobe.ps1` | DWM memory from outside, surviving a dwm.exe crash |

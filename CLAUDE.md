@@ -2,7 +2,8 @@
 
 Windows fullscreen magnifier (C++17, MSVC, DXGI/D3D11, DWM). Developer docs: `docs/architecture/`
 (start at its README). Keep them in step with the code; the code wins when they disagree.
-Plans and brainstorm output are not committed.
+New plans and brainstorm output are not committed. `docs/specs`, `docs/design` and `docs/history`
+are frozen history cited from code, not kept in step with it.
 
 ## Commands
 - `build.bat`: `Wind.exe` + `WindTray.exe` (uiAccess=false). Wind refuses to start without UIAccess;
@@ -25,10 +26,12 @@ Plans and brainstorm output are not committed.
 - Profiles: `profiles\<Name>.ini` next to the live ini; the live ini is the session, the profile file
   the saved state. See 08.
 - Settings UI: schema-driven Svelte (`ui/src/settings-schema.js`); `HandleWebMessage` in
-  `src/config_ui/main.cpp` is the authoritative bridge message set; extend the Playwright mock when
+  `src/config_ui/main.cpp` is the authoritative bridge message set; extend the Playwright mocks when
   adding one. See 09.
-- **Pure-logic files must not include `<windows.h>`.** The test build compiles only the pure `.cpp`
-  files listed in `build.bat :test`, with `WIND_TESTS` defined. See 11.
+- **Logic the tests cover stays free of `<windows.h>`.** The test build compiles only the `.cpp`
+  files listed in `build.bat :test`, with `WIND_TESTS` defined; a file that straddles puts its OS
+  half under `#ifndef WIND_TESTS` (`config.cpp`). Thin Win32 I/O headers may be tested from a test
+  file that includes `<windows.h>` itself (`test_profiles_io.cpp`). See 11.
 
 Chapter numbers refer to `docs/architecture/NN-*.md`.
 

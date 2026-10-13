@@ -30,7 +30,8 @@ headlessly, so the unit tests are the only verification loop that runs everywher
 - The `test` target compiles `tests\*.cpp` with `/DWIND_TESTS` against only the pure sources. The
   authoritative list is the `:test` target in `build.bat`; today it is `transform`,
   `zoom_controller`, `config`, `profiles`, `cursor_mapper`, `lock_detector`, `cursor_lock`,
-  `crosshair`, `ini_edit`, `logging`, `tray_items`, `hitch_record` and `render_params`.
+  `crosshair`, `ini_edit`, `logging`, `tray_items`, `hitch_record`, `render_params` and
+  `tray_app/tray_pin_logic`.
 - Header-only pure modules (`engine_pick.h`, `drag_follow.h`, `hdr_scale.h`, `keybind_rules.h`,
   `config_ui/wind_watchdog.h`, `swallow_ledger.h`, `reload_gate.h` and others) ride in through their test files.
 - One test file per module (`tests/test_<module>.cpp`). A new pure `.cpp` also goes into the
@@ -38,14 +39,17 @@ headlessly, so the unit tests are the only verification loop that runs everywher
 - Files that straddle the line put their OS half under `#ifndef WIND_TESTS`. `src/config.cpp` is
   the example: `ParseConfig` and `StripUiOnlyKeys` above, `LoadConfig` and the only
   `#include <windows.h>` below.
+- Thin header-only Win32 I/O layers may be tested too, from a test file that includes
+  `<windows.h>` itself: `tests/test_profiles_io.cpp` exercises `src/profiles_io.h` against real
+  temp files. They need no Wind runtime, so they still run headless.
 - `tests/fixtures/keybind_cases.txt` is shared by the C++ and the JavaScript bind rules. The JS half
   is `ui/tests/keybind-rules.nodetest.mjs`, run by `npm run test:rules` in `ui/` (`node --test`, no
   browser) and by CI.
 
-**UI suite.** `ui/tests/` holds 11 Playwright specs, run with `npx playwright test` in `ui/` (the
-config starts the Vite server). A fake `window.chrome.webview` answers the host's messages and
-records them in `window.__msgs`. When you add a bridge message to `HandleWebMessage`, extend the
-mock in the same change. Details in [09](09-settings-ui.md).
+**UI suite.** `ui/tests/*.spec.js` are Playwright specs, run with `npx playwright test` in `ui/`
+(the config starts the Vite server). Each spec installs a fake `window.chrome.webview` that answers
+the host's messages and records them in `window.__msgs`. When you add a bridge message to
+`HandleWebMessage`, extend the mocks of the specs that use it in the same change. Details in [09](09-settings-ui.md).
 
 **CI** (`.github/workflows/build.yml`, on pull requests and pushes to `main`) builds the app and
 runs the doctest suite. It also runs the JS keybind-rule test. The Playwright UI suite is a local gate for UI changes.

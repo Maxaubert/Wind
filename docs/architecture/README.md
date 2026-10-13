@@ -52,6 +52,10 @@ other two.
 | 11 | [Build, test, release](11-build-test-release.md) | `build.bat`, the test split, deploy, installer, release and alpha workflows |
 | 12 | [Instrumentation](12-instrumentation.md) | Logging, diagnostic knobs, measurement scripts |
 
+There is no chapter 10: it covered the magnify engine, which was retired (#353), and the chapter
+went with it (#358). The other chapters keep their numbers because CLAUDE.md and the chapters cite
+them.
+
 `CLAUDE.md` at the repo root holds the rules for coding agents and points here.
 
 ## Docs index
@@ -59,14 +63,12 @@ other two.
 | File | What it is | State |
 |---|---|---|
 | [../VERIFICATION.md](../VERIFICATION.md) | Hands-on release checklist | Live |
-| [../HITCH-FINDINGS.md](../HITCH-FINDINGS.md) | Transform hitching: the live-context tax, the pan-start hitch, vetted configs, zoom response | Open (#310) |
-| [../NATIVE-MAGNIFIER-STOMP.md](../NATIVE-MAGNIFIER-STOMP.md) | A running built-in Magnifier fights the transform engine; the stomp guard | Closed, follow-up parked |
-| [../POINTER-HITTEST-FINDINGS.md](../POINTER-HITTEST-FINDINGS.md) | Hover dead zones on the transform desktop; the source-rect input transform | Closed |
-| [../PERF-ACRYLIC-PARITY-2026-08-21.md](../PERF-ACRYLIC-PARITY-2026-08-21.md) | Zoom-in stalls over acrylic; the `txMaxStepPct` cap | Closed |
+| [../HITCH-FINDINGS.md](../HITCH-FINDINGS.md) | Transform hitching: the live-context tax, the pan-start hitch, engine configurations, zoom response | Open (#310) |
 | [../TRACKING-FINDINGS.md](../TRACKING-FINDINGS.md) | Caret, focus and edge tracking per app | Live |
-| [../SHELL-PANEL-CURSOR-FINDINGS.md](../SHELL-PANEL-CURSOR-FINDINGS.md) | The cursor over the emoji picker and other shell panels | Closed |
 | [../COLOUR-FILTER-FINDINGS.md](../COLOUR-FILTER-FINDINGS.md) | Warmth and brightness: mechanism, HDR maths, rejected filters | Live |
-| [../specs/](../specs/) | Original design specs of shipped features | History |
+| [../history/](../history/README.md) | Closed investigations: the built-in Magnifier stomp, pointer hit-testing, acrylic parity, shell panels | History |
+| [../specs/](../specs/README.md) | Original design specs of shipped features | History (frozen) |
+| `../design/` | Mockups the specs and code cite (`FINAL-v10-grey.html`, `j01-calm-tint.html`, `k01-sliders-toggles.html`) | History (frozen) |
 | `../../tools/testenv/README.md` | The automated proving ground | Live |
 | `../../installer/README.md` | The installer layout and build | Live |
 

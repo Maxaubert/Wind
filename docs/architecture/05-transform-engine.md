@@ -5,7 +5,7 @@ scale-and-translate applied inside the compositor, the mechanism the built-in Ma
 There is no capture, no swapchain and no Wind window in the composition path, so a game keeps its
 independent-flip presentation and Wind's per-frame cost is a sub-millisecond API write. Measured
 against the built-in Magnifier over acrylic windows, Wind is at least as smooth on every protocol
-tried ([../PERF-ACRYLIC-PARITY-2026-08-21.md](../PERF-ACRYLIC-PARITY-2026-08-21.md)).
+tried ([../history/PERF-ACRYLIC-PARITY-2026-08-21.md](../history/PERF-ACRYLIC-PARITY-2026-08-21.md)).
 
 Auto picks it for games and protected video, and on the desktop when `desktopTransform=1` (the
 default) and the input transform is available ([03](03-engines.md)). The cost is that the
@@ -297,7 +297,7 @@ virtual-screen coordinates (`ComputeInputTransformRects`). Pointer frameworks (X
 Explorer, Settings, the shell, Chromium) hit-test mouse input through it; without the publish the
 welded cursor has hover dead zones. Identity or no publish both produce dead zones.
 `magInputTransform=1` is the default; 0 and 2 are diagnostics. Evidence:
-[../POINTER-HITTEST-FINDINGS.md](../POINTER-HITTEST-FINDINGS.md).
+[../history/POINTER-HITTEST-FINDINGS.md](../history/POINTER-HITTEST-FINDINGS.md).
 
 - **It needs UIAccess.** Availability is read from the process token's `TokenUIAccess` bit at
   `initialize`, with zero Magnification calls; an acquire/release probe would run an identity
@@ -318,7 +318,7 @@ surviving Wind restarts and DWM restarts.
 - Success is judged by read-back, not the return value, which can be FALSE when the publish landed.
 - Against a running Magnify.exe the guard loses every race; it detects and heals, it cannot win.
   Picking Render while a foreign magnifier runs is parked work. See
-  [../NATIVE-MAGNIFIER-STOMP.md](../NATIVE-MAGNIFIER-STOMP.md).
+  [../history/NATIVE-MAGNIFIER-STOMP.md](../history/NATIVE-MAGNIFIER-STOMP.md).
 
 ## Launch quiesce
 
