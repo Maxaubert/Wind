@@ -344,6 +344,36 @@ static void OnDiscardSession(ICoreWebView2* wv) {
     }
     PostConfig(wv);
 }
+static void OnWindowAction(ICoreWebView2* wv, const std::string& j) {
+    std::string action = JsonField(j, "action");
+    if (action == "minimize") ShowWindow(g_hwnd, SW_MINIMIZE);
+    else if (action == "maximize") ShowWindow(g_hwnd, IsZoomed(g_hwnd) ? SW_RESTORE : SW_MAXIMIZE);   // the title bar button toggles
+    else if (action == "close") {
+        // "force" is the Discard path from the confirm dialog: skip the guard, do not re-ask.
+        if (JsonField(j, "force") == "1") { g_forceClose = true; g_dirty = false; }
+        PostMessageW(g_hwnd, WM_CLOSE, 0, 0);
+    }
+    else if (action == "quitWind") {
+        // Onboarding was closed (X) without completing: end the whole Wind app, not just this
+        // window. Signal the magnifier via a named event, NOT a window message: the deployed
+        // Wind.exe is UIAccess and UIPI silently blocks PostMessage from this non-UIAccess
+        // process. A kernel event isn't gated by UIPI and works in dev + deployed. Then close us.
+        HANDLE ev = OpenEventW(EVENT_MODIFY_STATE, FALSE, wind::kQuitEventName);
+        if (ev) { SetEvent(ev); CloseHandle(ev); }
+        PostMessageW(g_hwnd, WM_CLOSE, 0, 0);
+    }
+    else if (action == "restartWind") {
+        // Only offered when the running Wind has one engine left (running.model is not "live"):
+        // then `model` is fixed until the next start, so switching it needs a real restart. The UI has
+        // already written the new value to the ini. Just launch Wind again: the new instance
+        // evicts the incumbent via the Local\Wind_QuitRequest handshake. On failure the
+        // incumbent is untouched (it is only ever signalled BY a successfully started instance),
+        // so report back rather than leaving the user with a silently ignored button.
+        // session.keep first: this restart is ours, so the unsaved session must survive it.
+        wind::WriteSessionKeep();
+        if (!LaunchWind()) { wind::ClearSessionKeep(); wv->PostWebMessageAsJson(L"{\"type\":\"restartFailed\"}"); }
+    }
+}
 static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
     std::string j = Narrow(jsonW);
     std::string type = JsonField(j, "type");
@@ -361,34 +391,7 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
     } else if (type == "dirty") {
         g_dirty = JsonField(j, "value") == "1";
     } else if (type == "window") {
-        std::string action = JsonField(j, "action");
-        if (action == "minimize") ShowWindow(g_hwnd, SW_MINIMIZE);
-        else if (action == "maximize") ShowWindow(g_hwnd, IsZoomed(g_hwnd) ? SW_RESTORE : SW_MAXIMIZE);   // the title bar button toggles
-        else if (action == "close") {
-            // "force" is the Discard path from the confirm dialog: skip the guard, do not re-ask.
-            if (JsonField(j, "force") == "1") { g_forceClose = true; g_dirty = false; }
-            PostMessageW(g_hwnd, WM_CLOSE, 0, 0);
-        }
-        else if (action == "quitWind") {
-            // Onboarding was closed (X) without completing: end the whole Wind app, not just this
-            // window. Signal the magnifier via a named event, NOT a window message: the deployed
-            // Wind.exe is UIAccess and UIPI silently blocks PostMessage from this non-UIAccess
-            // process. A kernel event isn't gated by UIPI and works in dev + deployed. Then close us.
-            HANDLE ev = OpenEventW(EVENT_MODIFY_STATE, FALSE, wind::kQuitEventName);
-            if (ev) { SetEvent(ev); CloseHandle(ev); }
-            PostMessageW(g_hwnd, WM_CLOSE, 0, 0);
-        }
-        else if (action == "restartWind") {
-            // Only offered when the running Wind has one engine left (running.model is not "live"):
-            // then `model` is fixed until the next start, so switching it needs a real restart. The UI has
-            // already written the new value to the ini. Just launch Wind again: the new instance
-            // evicts the incumbent via the Local\Wind_QuitRequest handshake. On failure the
-            // incumbent is untouched (it is only ever signalled BY a successfully started instance),
-            // so report back rather than leaving the user with a silently ignored button.
-            // session.keep first: this restart is ours, so the unsaved session must survive it.
-            wind::WriteSessionKeep();
-            if (!LaunchWind()) { wind::ClearSessionKeep(); wv->PostWebMessageAsJson(L"{\"type\":\"restartFailed\"}"); }
-        }
+        OnWindowAction(wv, j);
     } else if (type == "pickExe") {
         // "+" on the key-release app list: browse for a program and hand back just its FILE NAME.
         // The core matches on the bare exe name (IsExeInList), never a full path, so returning the
