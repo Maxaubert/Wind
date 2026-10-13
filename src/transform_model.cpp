@@ -506,22 +506,7 @@ void TransformModel::idleTick() {
     }
 }
 
-void TransformModel::present(const MapResult& r, double level, const Config& cfg,
-                             const MonitorTarget& mon, const PresentExtras& ex) {
-    (void)mon;
-    // CENTERED-CURSOR geometry (issue #148 revival). Wind's identity is the centred cursor, and the
-    // render model's mapper already solves the whole centered geometry - including the edge zones,
-    // where the pointer slides away from the centre as the source rect clamps. So the mapper's
-    // CENTERED source rect is the transform, and DWM draws the real pointer into the magnified frame
-    // itself (native cursor, issue #369): nothing here places a pointer of our own.
-    // KEEP-ALIVE v2 (issue #148 action-start spike): DWM discards its magnification resources
-    // when the transform VALUE sits still and pays a ~1fps rebuild on the next real change.
-    // v1 jittered the LEVEL by an epsilon - that forced a full re-SCALE of every cached surface
-    // every tick, whose cost grows with zoom (constant ~1fps at 16x: the cure was the disease).
-    // v2 jitters only the private-channel TRANSLATION by 1 screen px on alternating ticks - a
-    // re-COMPOSITE of already-scaled surfaces, cheap at any level - and only while within 1.5s
-    // of the last REAL change: brief pauses (the pan-stop-pan pattern) stay hot, while true idle
-    // lets DWM park legitimately (one spike after a long idle is acceptable; one per pause was not).
+double TransformModel::resolveLevel(const MapResult& r, double level, const Config& cfg, double& preLadderOut) {
     // Ramp cost limiter (measured: 150-215ms spikes during zoom ramps at high level): every LEVEL
     // change makes DWM re-scale its cached surfaces, and the cost grows with the level. Apply the
     // ramping level at most every 3rd tick (48Hz on a 144Hz panel - visually still a smooth ramp);
@@ -606,6 +591,28 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     rampStepHeld_ = cfg.txSamplingMode == 1 && dwmCentreOn_ &&
                     RampStepHeld(applyLevel, lastLevel_, cfg.txRampMinStep / 1000.0, cfg.txRampMinFrom, rampStopped);
     if (rampStepHeld_) applyLevel = lastLevel_;
+    preLadderOut = preLadderLevel;
+    return applyLevel;
+}
+
+void TransformModel::present(const MapResult& r, double level, const Config& cfg,
+                             const MonitorTarget& mon, const PresentExtras& ex) {
+    (void)mon;
+    // CENTERED-CURSOR geometry (issue #148 revival). Wind's identity is the centred cursor, and the
+    // render model's mapper already solves the whole centered geometry - including the edge zones,
+    // where the pointer slides away from the centre as the source rect clamps. So the mapper's
+    // CENTERED source rect is the transform, and DWM draws the real pointer into the magnified frame
+    // itself (native cursor, issue #369): nothing here places a pointer of our own.
+    // KEEP-ALIVE v2 (issue #148 action-start spike): DWM discards its magnification resources
+    // when the transform VALUE sits still and pays a ~1fps rebuild on the next real change.
+    // v1 jittered the LEVEL by an epsilon - that forced a full re-SCALE of every cached surface
+    // every tick, whose cost grows with zoom (constant ~1fps at 16x: the cure was the disease).
+    // v2 jitters only the private-channel TRANSLATION by 1 screen px on alternating ticks - a
+    // re-COMPOSITE of already-scaled surfaces, cheap at any level - and only while within 1.5s
+    // of the last REAL change: brief pauses (the pan-stop-pan pattern) stay hot, while true idle
+    // lets DWM park legitimately (one spike after a long idle is acceptable; one per pause was not).
+    double preLadderLevel = 0.0;   // the level before the smooth-zoom ladder snapped it
+    const double applyLevel = resolveLevel(r, level, cfg, preLadderLevel);
     double srcL = r.srcLeft, srcT = r.srcTop;
     if (applyLevel != level) {
         OffsetF o = ComputeOffsetF(r.centerX, r.centerY, applyLevel, mon_.w, mon_.h);

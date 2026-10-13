@@ -157,6 +157,10 @@ private:
     void noteWrite(double ms, bool ok);
     void noteIxWrite(double ms, bool ok);            // input-transform publish stats (issue #189)
     void noteIxStomp();                              // foreign writer overwrote our publish (#217)
+    // present() steps, in call order (split out of present(), issue #476).
+    // The level this tick applies: step cap, smooth-zoom ladder, held ramp steps. Also reports the
+    // level before the ladder snap (the ramp test reads it).
+    double resolveLevel(const MapResult& r, double level, const Config& cfg, double& preLadderOut);
     std::mutex statMx_;
     unsigned long long statLogMs_ = 0;
     double statMaxMs_ = 0.0, statSumMs_ = 0.0;
