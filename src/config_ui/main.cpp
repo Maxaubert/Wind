@@ -406,6 +406,14 @@ static void OnOpenIni() {
     if (reinterpret_cast<INT_PTR>(r) <= 32)
         ShellExecuteW(nullptr, L"open", L"notepad.exe", IniPath().c_str(), nullptr, SW_SHOWNORMAL);
 }
+static void OnExportDiagnostics() {
+    // Off the window thread (see ExportDiagnosticsThread); a second click while one runs is ignored.
+    if (!g_exporting) {
+        g_exporting = true;
+        HANDLE th = CreateThread(nullptr, 0, ExportDiagnosticsThread, nullptr, 0, nullptr);
+        if (th) CloseHandle(th); else g_exporting = false;
+    }
+}
 static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
     std::string j = Narrow(jsonW);
     std::string type = JsonField(j, "type");
@@ -429,12 +437,7 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
     } else if (type == "openIni") {
         OnOpenIni();
     } else if (type == "exportDiagnostics") {
-        // Off the window thread (see ExportDiagnosticsThread); a second click while one runs is ignored.
-        if (!g_exporting) {
-            g_exporting = true;
-            HANDLE th = CreateThread(nullptr, 0, ExportDiagnosticsThread, nullptr, 0, nullptr);
-            if (th) CloseHandle(th); else g_exporting = false;
-        }
+        OnExportDiagnostics();
     } else if (type == "switchProfile") {
         const std::string err = DoSwitchProfile(JsonField(j, "name"));
         PostProfiles(wv, err.empty(), err);
