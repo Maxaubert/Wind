@@ -588,6 +588,13 @@ struct FocusRun {
                 publish(TrackKind::Focus, b.left, b.top, b.right, b.bottom, "uia-focus");
             }
         }
+        followCaret(el, b, fg, java, fromPoll, rs0, rs1);
+        if (el) el->Release();
+        return focusUnanswered;
+    }
+    // el, b: the focused element and its bounds as resolve found them; rs0/rs1 time the lookup.
+    void followCaret(IUIAutomationElement* el, const RECT& b, HWND fg, bool java, bool fromPoll,
+                     ULONGLONG rs0, ULONGLONG rs1) {
         // 2. The caret: published only when it moved within the same focus.
         if (wantCaret_.load()) {
             RECT rc{}; const char* src = "";
@@ -662,8 +669,6 @@ struct FocusRun {
                 }
             }
         }
-        if (el) el->Release();
-        return focusUnanswered;
     }
 };
 
