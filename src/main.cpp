@@ -1044,13 +1044,8 @@ static TickClock BeginTick(TickState& t) {
     return { now, dt, rawDt, woke };
 }
 
-static void RunTick(TickState& t) {
-    TickWorkTimer workTimer(t);
-    const TickClock clk = BeginTick(t);
-    const LARGE_INTEGER now = clk.now;
-    const double dt = clk.dt, rawDt = clk.rawDt;
-    const bool woke = clk.woke;
-
+// Tick phase: config hot-reload (rawDt drives the check cadence).
+static void PollConfigReload(TickState& t, double rawDt) {
     // Config hot-reload. A directory-change notification tells us WHEN to re-check magnifier.ini,
     // so the idle render thread does NO per-second filesystem stat (the old 1 Hz GetFileAttributesExW
     // poll caused a ~1s frametime spike under AV/disk contention). WaitForSingleObject(h, 0) is a
@@ -1181,6 +1176,16 @@ static void RunTick(TickState& t) {
             }   // core-relevant change guard (StripUiOnlyKeys)
         }
     }
+}
+
+static void RunTick(TickState& t) {
+    TickWorkTimer workTimer(t);
+    const TickClock clk = BeginTick(t);
+    const LARGE_INTEGER now = clk.now;
+    const double dt = clk.dt, rawDt = clk.rawDt;
+    const bool woke = clk.woke;
+
+    PollConfigReload(t, rawDt);
 
     // Effective held state = mouse side-button (set by the hook/raw input) OR keyboard key held.
     // Lets users without side-buttons zoom from the keyboard. When the LL keyboard hook is active it
