@@ -11,7 +11,7 @@ deploy, the installer's elevation rules and the release workflows.
 
 | Target | Output | What it is |
 |---|---|---|
-| (none) | `Wind.exe` + `WindTray.exe` | The app with the `uiAccess=false` manifest; runs from anywhere |
+| (none) | `Wind.exe` + `WindTray.exe` | The app with the `uiAccess=false` manifest. It refuses to start without UIAccess (issue #460) unless `WIND_ALLOW_NO_UIACCESS=1` or `WIND_SELFTEST=1` is set |
 | `test` | `wind_tests.exe` | The doctest binary over the pure sources; runs it and returns its exit code |
 | `check` | – | Compile-only pass over `src\*.cpp` |
 | `uiaccess` | `Wind.exe` + `WindTray.exe` | `Wind.uiaccess.manifest` and `/DWIND_UIACCESS`; useful only signed and in Program Files. `WindTray.exe` always keeps the plain manifest |
@@ -125,7 +125,7 @@ environment-driven: `WIND_SIGN_THUMBPRINT`, or `WIND_SIGN_PFX` plus `WIND_SIGN_P
   before makensis packs it (UIAccess is granted on `Wind.exe`'s own signature).
 - Without one (CI today) it packs both variants: the ordinary build and the UIAccess build as
   `WindUA.exe`. Setup signs `WindUA.exe` on each PC with a per-machine certificate whose private key
-  it deletes at once (`installer/local-sign.ps1`); if that fails, setup installs the ordinary build.
+  it deletes at once (`installer/local-sign.ps1`). If that fails, setup keeps the ordinary build, says signing failed and does not start Wind: without UIAccess, Wind refuses to start ("Wind can't start", `src/uiaccess_gate.h`).
 - **Never put the self-signed dev certificate in CI**: it is trusted by nobody and looks worse than
   no signature.
 

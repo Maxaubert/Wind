@@ -24,6 +24,7 @@
 Var WantAutostart
 Var WantDesktop
 Var RunAfter
+Var SignFailed ; 1 when local signing failed: Wind has no UIAccess and will not start (#460)
 Var Accepted     ; the licence box: Continue does nothing until this is 1
 Var WindSession  ; this installer's Windows session: Wind is per session, so stop only that one
 Var LicenceDir   ; where "Read the full licence" put its copy, empty until then

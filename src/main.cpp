@@ -61,6 +61,7 @@
 #include "sched_priority.h"   // tick thread priority + no power throttling (#334)
 #include "typing_key.h"       // typing-key stamp for the click quiet period (#328)
 #include "dwm_watch.h"        // StartDwmWatch (#396)
+#include "uiaccess_gate.h"     // refuse to start without UIAccess (#460)
 #include "reload_gate.h"      // DecideReload + bind-change predicates (pure, tested)
 #include "resource.h"
 
@@ -2994,6 +2995,26 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     wind::LogInit(L"core");
     atexit(wind::LogShutdown);
     SiLog("=== launch ===", 0);
+    // No UIAccess: refuse and say how to fix it (issue #460). Before the single-instance claim, so
+    // a refused start never evicts a working Wind.
+    {
+        DWORD uiAccess = 0, len = 0;
+        HANDLE tok = nullptr;
+        if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &tok)) {
+            if (!GetTokenInformation(tok, TokenUIAccess, &uiAccess, sizeof(uiAccess), &len)) uiAccess = 0;
+            CloseHandle(tok);
+        }
+        const bool allow = GetEnvironmentVariableW(L"WIND_ALLOW_NO_UIACCESS", nullptr, 0) > 0;
+        const bool selftest = GetEnvironmentVariableW(L"WIND_SELFTEST", nullptr, 0) > 0;
+        if (wind::MustRefuseWithoutUiAccess(uiAccess != 0, allow, selftest)) {
+            wind::Log(wind::LogLevel::Warn, "startup", "no UIAccess: refusing to start (issue #460)");
+            MessageBoxW(nullptr, wind::UiAccessRefusalText(), wind::UiAccessRefusalTitle(),
+                        MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
+            return 1;
+        }
+        if (uiAccess == 0)
+            wind::Log(wind::LogLevel::Warn, "startup", "no UIAccess: running anyway (developer override)");
+    }
     LoadChurnyApps();   // issue #148: learned cursor-churning apps (transform -> render for them)
     DetectMpoDisabled();   // issue #148: MPO boot state decides whether the pan wall is needed
     // Heal only once we OWN the single-instance mutex (a refused start must not touch the live
