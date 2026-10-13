@@ -1178,19 +1178,9 @@ static void PollConfigReload(TickState& t, double rawDt) {
     }
 }
 
-static void RunTick(TickState& t) {
-    TickWorkTimer workTimer(t);
-    const TickClock clk = BeginTick(t);
-    const LARGE_INTEGER now = clk.now;
-    const double dt = clk.dt, rawDt = clk.rawDt;
-    const bool woke = clk.woke;
-
-    PollConfigReload(t, rawDt);
-
-    // Effective held state = mouse side-button (set by the hook/raw input) OR keyboard key held.
-    // Lets users without side-buttons zoom from the keyboard. When the LL keyboard hook is active it
-    // is the authority for bound-key down-state (a swallowed key never appears in GetAsyncKeyState),
-    // so read keyPressed(); otherwise (hook install failed / WIND_NOHOOK) fall back to polling.
+// Tick phase: foreground watch (launch-quiesce cover, noSwallowApps hook suspension) and the
+// LL keyboard-hook watchdog.
+static void WatchForegroundAndKbHook(TickState& t) {
     // Suspend the LL keyboard hook while a borderless fullscreen app (a game) is foreground.
     //
     // A WH_KEYBOARD_LL hook taxes the SYSTEM's input pipeline, not just ours: the raw input thread
@@ -1270,6 +1260,22 @@ static void RunTick(TickState& t) {
     } else {
         t.kbHookDivergentSinceMs = 0;
     }
+}
+
+static void RunTick(TickState& t) {
+    TickWorkTimer workTimer(t);
+    const TickClock clk = BeginTick(t);
+    const LARGE_INTEGER now = clk.now;
+    const double dt = clk.dt, rawDt = clk.rawDt;
+    const bool woke = clk.woke;
+
+    PollConfigReload(t, rawDt);
+
+    // Effective held state = mouse side-button (set by the hook/raw input) OR keyboard key held.
+    // Lets users without side-buttons zoom from the keyboard. When the LL keyboard hook is active it
+    // is the authority for bound-key down-state (a swallowed key never appears in GetAsyncKeyState),
+    // so read keyPressed(); otherwise (hook install failed / WIND_NOHOOK) fall back to polling.
+    WatchForegroundAndKbHook(t);
     const bool kbHook = g_input.kbHookActive();
     auto keyDown = [&](int vk) {
         if (vk == 0) return false;
