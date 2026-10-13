@@ -1283,16 +1283,10 @@ static bool BindModsHeld(int mods) {
 }
 static bool BindComboHeld(bool kbHook, int vk, int mods) { return BindKeyDown(kbHook, vk) && BindModsHeld(mods); }
 
-static void RunTick(TickState& t) {
-    TickWorkTimer workTimer(t);
-    const TickClock clk = BeginTick(t);
-    const LARGE_INTEGER now = clk.now;
-    const double dt = clk.dt, rawDt = clk.rawDt;
-    const bool woke = clk.woke;
-
-    PollConfigReload(t, rawDt);
-
-    WatchForegroundAndKbHook(t);
+// Tick phase: input and zoom. Held binds (mouse, keyboard, wheel), the ZoomController step, the
+// smooth-zoom release stop, the recenter and Inspect toggle edges, quick zoom, and the tray level.
+struct TickInput { bool kbHook; bool inHeld, outHeld; bool recenter; double lvl; };
+static TickInput ResolveInputAndZoom(TickState& t, double dt) {
     const bool kbHook = g_input.kbHookActive();
     auto comboHeld = [&](int vk, int mods) { return BindComboHeld(kbHook, vk, mods); };
     // Quick-zoom modifier mode (see below): holding the modifier turns a zoom-key press into a
@@ -1425,6 +1419,25 @@ static void RunTick(TickState& t) {
         ts_.level = lvl;
         wind::PublishTrayStatus(g_trayBlock, ts_);
     }
+    return { kbHook, inHeld, outHeld, recenter, lvl };
+}
+
+static void RunTick(TickState& t) {
+    TickWorkTimer workTimer(t);
+    const TickClock clk = BeginTick(t);
+    const LARGE_INTEGER now = clk.now;
+    const double dt = clk.dt, rawDt = clk.rawDt;
+    const bool woke = clk.woke;
+
+    PollConfigReload(t, rawDt);
+
+    WatchForegroundAndKbHook(t);
+    const TickInput in = ResolveInputAndZoom(t, dt);
+    const bool kbHook = in.kbHook;
+    auto comboHeld = [&](int vk, int mods) { return BindComboHeld(kbHook, vk, mods); };
+    const bool inHeld = in.inHeld, outHeld = in.outHeld;
+    const bool recenter = in.recenter;
+    const double lvl = in.lvl;
 
     int rawDx, rawDy; g_input.drainRaw(rawDx, rawDy);
     // Raw motion from before this activation (up to a 100 ms idle sleep of it, #71) never pans the
