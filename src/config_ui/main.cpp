@@ -445,6 +445,29 @@ static void OnCreateProfile(ICoreWebView2* wv, const std::string& j) {
     }
     PostProfiles(wv, err.empty(), err);
 }
+static void OnDeleteProfile(ICoreWebView2* wv, const std::string& j) {
+    const std::string name = JsonField(j, "name");
+    std::string err;
+    if (!SafeName(name)) err = "Invalid profile name";
+    // The seeded home profile is permanently protected (the UI disables its Delete too).
+    if (err.empty() && wind::SameProfileName(name, "Default"))
+        err = "The Default profile cannot be deleted";
+    auto names = ProfileNamesUtf8();
+    std::string liveNow;
+    if (err.empty() && !ReadIni(liveNow)) err = "Could not read the config file";   // never decide from a failed read
+    if (err.empty() && names.size() <= 1) err = "The last profile cannot be deleted";
+    else if (err.empty()) {
+        auto vals = wind::ReadIniValues(liveNow);
+        if (wind::SameProfileName(vals["profile"], name)) {
+            // Deleting the active profile: land on the first remaining one (spec).
+            for (const auto& n : names)
+                if (!wind::SameProfileName(n, name)) { err = DoSwitchProfile(n); break; }
+        }
+        if (err.empty() && !DeleteFileW(ProfilePath(name).c_str()))
+            err = "Could not delete the profile file";
+    }
+    PostProfiles(wv, err.empty(), err);
+}
 static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
     std::string j = Narrow(jsonW);
     std::string type = JsonField(j, "type");
@@ -475,27 +498,7 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
     } else if (type == "createProfile") {
         OnCreateProfile(wv, j);
     } else if (type == "deleteProfile") {
-        const std::string name = JsonField(j, "name");
-        std::string err;
-        if (!SafeName(name)) err = "Invalid profile name";
-        // The seeded home profile is permanently protected (the UI disables its Delete too).
-        if (err.empty() && wind::SameProfileName(name, "Default"))
-            err = "The Default profile cannot be deleted";
-        auto names = ProfileNamesUtf8();
-        std::string liveNow;
-        if (err.empty() && !ReadIni(liveNow)) err = "Could not read the config file";   // never decide from a failed read
-        if (err.empty() && names.size() <= 1) err = "The last profile cannot be deleted";
-        else if (err.empty()) {
-            auto vals = wind::ReadIniValues(liveNow);
-            if (wind::SameProfileName(vals["profile"], name)) {
-                // Deleting the active profile: land on the first remaining one (spec).
-                for (const auto& n : names)
-                    if (!wind::SameProfileName(n, name)) { err = DoSwitchProfile(n); break; }
-            }
-            if (err.empty() && !DeleteFileW(ProfilePath(name).c_str()))
-                err = "Could not delete the profile file";
-        }
-        PostProfiles(wv, err.empty(), err);
+        OnDeleteProfile(wv, j);
     } else if (type == "openRepo") {
         // About's "Star on GitHub". In the user's default browser, where they are signed in and can
         // star; a link followed inside the WebView would open a bare popup instead. The URL is fixed
