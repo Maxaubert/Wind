@@ -138,8 +138,6 @@ public:
     bool waitVBlank();
     void shutdown();                               // restore cursor, destroy everything
     bool ready() const;
-    // Verification only: decoded cursor metrics + the screen size the engine is using.
-    void debugInfo(int& screenW, int& screenH, int& curW, int& curH, int& hotX, int& hotY) const;
     // Verification only: duplication surface format + output color space / bit depth (HDR).
     void debugHdr(unsigned& ddaFormat, int& colorSpace, int& bitsPerColor) const;
     // Frame-perf counters since the last reset: CPU milliseconds spent building the frame

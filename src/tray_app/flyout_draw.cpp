@@ -209,14 +209,6 @@ bool DrawInit() {
     return true;
 }
 
-void DrawShutdown() {
-    g_s.icons.clear();
-    g_s.sans28.Reset(); g_s.mono12.Reset(); g_s.mono12b.Reset();
-    g_s.wic.Reset(); g_s.dw.Reset(); g_s.d2d.Reset();
-    g_s.aurora.clear();
-    g_s.ok = false;
-}
-
 int MeasureProfileText(const std::wstring& name) {
     if (!g_s.ok || name.empty()) return 0;
     ComPtr<IDWriteTextLayout> lay;
