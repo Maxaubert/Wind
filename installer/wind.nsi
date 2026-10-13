@@ -121,13 +121,19 @@ Section "Wind" SEC_WIND
     ${If} ${Errors}
       DetailPrint "Could not place the signed build; keeping the standard one."
       File "..\Wind.exe"
+      StrCpy $SignFailed 1
     ${EndIf}
   ${Else}
-    ; The standard build stays: it runs everywhere, and only the cursor over the taskbar
-    ; menus and the Snipping Tool is lost.
     DetailPrint "Local signing failed ($0); keeping the standard build."
+    StrCpy $SignFailed 1
   ${EndIf}
   RMDir /r "$INSTDIR\.stage"
+  ; The standard build has no UIAccess, and Wind refuses to start without it (issue #460), so
+  ; say so here rather than leave a Wind that shows "Wind can't start" on its first launch.
+  ${If} $SignFailed == 1
+    StrCpy $RunAfter 0
+    MessageBox MB_ICONSTOP|MB_OK "Setup couldn't sign Wind on this PC, so Windows won't give it UI Access, and Wind can't start without it.$\r$\n$\r$\nRun the Wind installer again. If this keeps happening, check that security software isn't blocking PowerShell while Setup runs." /SD IDOK
+  ${EndIf}
 !else
   File "..\Wind.exe"
   File "..\WindConfig.exe"
@@ -243,6 +249,7 @@ Function .onInit
   StrCpy $WantAutostart 1
   StrCpy $WantDesktop 0
   StrCpy $RunAfter 1
+  StrCpy $SignFailed 0
   ; the licence starts unaccepted; only the licence screen's box sets it
   StrCpy $Accepted 0
 FunctionEnd

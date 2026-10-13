@@ -5,7 +5,8 @@ Windows fullscreen magnifier (C++17, MSVC, DXGI/D3D11, DWM). Developer docs: `do
 Plans and brainstorm output are not committed.
 
 ## Commands
-- `build.bat`: `Wind.exe` + `WindTray.exe` (uiAccess=false, runs anywhere).
+- `build.bat`: `Wind.exe` + `WindTray.exe` (uiAccess=false). Wind refuses to start without UIAccess;
+  run a plain build with `WIND_ALLOW_NO_UIACCESS=1` (or `WIND_SELFTEST=1`).
 - `build.bat test`: builds and runs the doctest binary; exit 0 = pass.
 - `build.bat check`: compile-only pass over `src\*.cpp`.
 - `build.bat uiaccess`: the uiAccess=true build; works only signed and run from `C:\Program Files\Wind`.
