@@ -23,6 +23,8 @@
 #include "../profiles.h"
 #include "../profiles_io.h"
 #include "../logging.h"
+#include "../tray_ipc.h"   // kQuitEventName
+#include "../profile_switch.h"   // SwitchProfile, LaunchWindExe, session.keep: shared with the tray
 #include <vector>
 #include "../resource.h"
 #pragma comment(lib, "shlwapi.lib")
@@ -57,10 +59,6 @@ static HWND g_hwnd = nullptr;
 static bool g_dirty = false;
 static bool g_forceClose = false;
 
-static std::wstring ExeDir() {
-    wchar_t p[MAX_PATH]; GetModuleFileNameW(nullptr, p, MAX_PATH);
-    PathRemoveFileSpecW(p); return p;
-}
 // Is the Wind.exe magnifier process running? Uses a Toolhelp process-name scan, which works across
 // integrity levels (the deployed Wind.exe is UIAccess/higher IL than this normal-IL config host, so
 // opening its single-instance mutex could be access-denied; reading process names is not). Lets us
@@ -86,15 +84,11 @@ static bool WindRunning() {
     CloseHandle(snap);
     return found;
 }
-// Launch the magnifier that sits next to us. Returns false when ShellExecuteW failed (<= 32).
-// Relaunching while Wind is ALREADY running is how a model switch restarts it: the new instance
-// finds the single-instance mutex held, signals Local\Wind_QuitRequest to the incumbent, waits for
-// it to exit cleanly, then takes over (src/main.cpp:801-817). No extra IPC is needed here.
-static bool LaunchWind() {
-    std::wstring windExe = ExeDir() + L"\\Wind.exe";
-    HINSTANCE r = ShellExecuteW(nullptr, L"open", windExe.c_str(), nullptr, nullptr, SW_SHOW);
-    return reinterpret_cast<INT_PTR>(r) > 32;
-}
+// Launch the magnifier that sits next to us (wind::LaunchWindExe). Returns false when Wind.exe is
+// missing or ShellExecuteW failed (<= 32). Relaunching while Wind is ALREADY running is how a model
+// switch restarts it: the new instance evicts the incumbent through the quit event (AcquireSingleInstance
+// in src/main.cpp). No extra IPC is needed here.
+static bool LaunchWind() { return wind::LaunchWindExe() > 32; }
 // Resolved at first call (and cached) so reads and writes always land on the same file the Wind
 // core uses. Falls back to %LOCALAPPDATA%\Wind\magnifier.ini when the exe dir is read-only.
 static std::wstring IniPath() {
@@ -151,52 +145,22 @@ static void PostProfiles(ICoreWebView2* wv, bool ok, const std::string& err, boo
 // Names arriving over the bridge become file paths; anything the pure validator rejects (traversal
 // characters, reserved names, dots) must never reach ProfilePath.
 static bool SafeName(const std::string& n) { return wind::ProfileNameError(n).empty(); }
-// session.keep tells the next Wind start to keep the unsaved session (see ResetSessionToProfile).
-static void WriteSessionKeep() {
-    HANDLE h = CreateFileW(wind::SessionKeepPath().c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
-                           FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
-}
-static void ClearSessionKeep() { DeleteFileW(wind::SessionKeepPath().c_str()); }
-// Rewrite the live ini from a profile file (globals preserved). The core hot-reloads; a model
-// change additionally relaunches Wind (LaunchWind: the new instance evicts the incumbent).
-// `mirrorOutgoing` captures the live ini into the OUTGOING profile first (hand edits made via "Edit
-// config file" would otherwise be lost). A create-from-current must pass false: its unsaved changes
-// belong to the new profile, and mirroring them would save them into the old one unasked.
+// Rewrite the live ini from a profile file (globals preserved). The steps, the relaunch for a
+// single-engine Wind and the rollback are shared with the tray (wind::SwitchProfile,
+// profile_switch.h); this maps the result to the page's messages. A create-from-current passes
+// mirrorOutgoing=false: its unsaved changes belong to the new profile, not the old one.
 static std::string DoSwitchProfile(const std::string& name, bool mirrorOutgoing = true) {
     if (!SafeName(name)) return "Invalid profile name";
-    const std::wstring pp = ProfilePath(name);
-    if (GetFileAttributesW(pp.c_str()) == INVALID_FILE_ATTRIBUTES) return "Profile file is missing";
-    // A read failure must not masquerade as an empty profile (empty = factory defaults by design),
-    // and corrupt content must never be applied wholesale to the live ini.
-    std::string profText;
-    if (!wind::ReadTextFileOk(pp, profText)) return "Could not read the profile file";
-    { std::string terr = wind::ProfileTextError(profText); if (!terr.empty()) return terr; }
-    // Held to the end: the whole read-modify-write (and the rollback) is one unit (review item 71).
-    wind::IniWriteLock iniLock;
-    std::string oldLive;
-    if (!wind::ReadLiveIni(IniPath(), oldLive)) return "Could not read the config file";
-    // Capture hand edits (openIni) into the outgoing profile before the live ini is replaced.
-    if (mirrorOutgoing) wind::MirrorLiveToActiveProfile(IniPath(), oldLive);
-    const std::string newLive = wind::MakeLiveText(profText, oldLive, name);
-    // WriteTextFileAtomic checks the write and the replace itself; its result is the verdict (a
-    // re-read can fail on its own and would report a successful switch as a failed one).
-    if (!WriteFileAtomic(IniPath(), newLive)) return "Could not write the config file";
-    // ParseConfig canonicalizes (unknown or retired models -> hybrid), same
-    // comparison as the tray path, so the two surfaces can never disagree about restarting.
-    const std::string oldModel = wind::ParseConfig(oldLive).model;
-    // A Wind that switches engines live (running.model "live") takes the new model on its reload.
-    const bool modelChanged = oldModel != wind::ParseConfig(newLive).model && !wind::EngineSwitchesLive();
-    if (modelChanged) WriteSessionKeep();   // our own restart: the start must not reset the session
-    if (modelChanged && !LaunchWind()) {
-        ClearSessionKeep();
-        // Keep "ini model == running model" (mirrors the Settings restartFailed handler).
-        // Re-read: Settings or the tray may have written since newLive was built.
-        std::string cur;
-        if (!ReadIni(cur)) cur = newLive;
-        WriteFileAtomic(IniPath(), wind::UpdateIniText(cur, "model", oldModel));
-        return "Switched, but restarting Wind failed; kept the current model";
+    const wind::ProfileSwitchResult r = wind::SwitchProfile(IniPath(), ProfilePath(name), name, mirrorOutgoing);
+    switch (r.error) {
+    case wind::ProfileSwitchError::None: break;
+    case wind::ProfileSwitchError::FileMissing: return "Profile file is missing";
+    case wind::ProfileSwitchError::ReadFailed: return "Could not read the profile file";
+    case wind::ProfileSwitchError::Corrupt: return r.reason;
+    case wind::ProfileSwitchError::LiveUnreadable: return "Could not read the config file";
+    case wind::ProfileSwitchError::WriteFailed: return "Could not write the config file";
     }
+    if (r.relaunchFailed) return "Switched, but restarting Wind failed; kept the current model";
     return "";
 }
 // New-profile validation: trimmed name must pass the pure rules and be unique. The
@@ -404,7 +368,7 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
             // window. Signal the magnifier via a named event, NOT a window message: the deployed
             // Wind.exe is UIAccess and UIPI silently blocks PostMessage from this non-UIAccess
             // process. A kernel event isn't gated by UIPI and works in dev + deployed. Then close us.
-            HANDLE ev = OpenEventW(EVENT_MODIFY_STATE, FALSE, L"Local\\Wind_QuitRequest");
+            HANDLE ev = OpenEventW(EVENT_MODIFY_STATE, FALSE, wind::kQuitEventName);
             if (ev) { SetEvent(ev); CloseHandle(ev); }
             PostMessageW(g_hwnd, WM_CLOSE, 0, 0);
         }
@@ -416,8 +380,8 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
             // incumbent is untouched (it is only ever signalled BY a successfully started instance),
             // so report back rather than leaving the user with a silently ignored button.
             // session.keep first: this restart is ours, so the unsaved session must survive it.
-            WriteSessionKeep();
-            if (!LaunchWind()) { ClearSessionKeep(); wv->PostWebMessageAsJson(L"{\"type\":\"restartFailed\"}"); }
+            wind::WriteSessionKeep();
+            if (!LaunchWind()) { wind::ClearSessionKeep(); wv->PostWebMessageAsJson(L"{\"type\":\"restartFailed\"}"); }
         }
     } else if (type == "pickExe") {
         // "+" on the key-release app list: browse for a program and hand back just its FILE NAME.
@@ -696,16 +660,9 @@ static void CreateWebView(HWND hwnd) {
     // (<exeDir>\WindConfig.exe.WebView2), which is fine in dev but read-only when the exe is
     // installed under Program Files - causing the environment to fail and the window to render
     // as an empty shell. Force it to %LOCALAPPDATA%\Wind\WebView2 so it always works.
-    std::wstring userData;
-    {
-        wchar_t buf[MAX_PATH];
-        DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
-        if (n == 0 || n >= MAX_PATH) { GetTempPathW(MAX_PATH, buf); }
-        userData = std::wstring(buf) + L"\\Wind\\WebView2";
-        CreateDirectoryW((std::wstring(buf) + L"\\Wind").c_str(), nullptr);
-        CreateDirectoryW(userData.c_str(), nullptr);
-    }
-    const std::wstring uiDir = ExeDir() + L"\\ui\\dist";
+    const std::wstring userData = wind::UserDataDir() + L"\\WebView2";
+    CreateDirectoryW(userData.c_str(), nullptr);
+    const std::wstring uiDir = wind::ExeDir() + L"\\ui\\dist";
     const bool onboard = g_onboard;
     CreateCoreWebView2EnvironmentWithOptions(nullptr, userData.c_str(), nullptr,
         Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(

@@ -2,6 +2,11 @@
 #include <string>
 #include <map>
 namespace wind {
+// The one whitespace trim (' ', tab, CR, LF at both ends) for ini keys, values and list items. Pure.
+inline std::string TrimWs(const std::string& s) {
+    const size_t b = s.find_first_not_of(" \t\r\n"), e = s.find_last_not_of(" \t\r\n");
+    return b == std::string::npos ? std::string() : s.substr(b, e - b + 1);
+}
 // Parse INI text into key->value, skipping ';'/'#' comments and blank lines; keys/values trimmed.
 std::map<std::string, std::string> ReadIniValues(const std::string& text);
 // Return INI text with `key`'s value replaced IN PLACE, preserving every other line (comments,

@@ -5,9 +5,17 @@
 #include <string>
 #include <vector>
 namespace wind {
-// Machine/app state that never travels with a profile: the active-profile pointer itself,
-// the onboarding flag, the UI-only theme/palette/advanced toggles (uiTheme, uiPalette, showAdvanced), the five tray-menu keys (#313),
-// trayPinned (#436) and uiHighResNoticeOff (#441).
+// THE list of UI-only keys: the core never reads them, they never travel with a profile, and a
+// change to one never reloads the core (StripUiOnlyKeys). The onboarding flag, the theme/palette/
+// advanced toggles, the five tray-menu keys (#313), trayPinned (#436) and uiHighResNoticeOff (#441).
+// Add a new UI-only key here and to tests/fixtures/global_keys.txt (which the UI's GLOBAL_KEYS in
+// ui/src/session.js is tested against); every C++ site loops over this array.
+inline constexpr const char* kUiOnlyKeys[] = {
+    "onboarded", "uiTheme", "uiPalette", "showAdvanced", "trayPerf", "traySliders", "traySliderOrder",
+    "trayToggles", "trayToggleOrder", "trayPinned", "uiHighResNoticeOff",
+};
+// Machine/app state that never travels with a profile: the active-profile pointer `profile` itself
+// plus every kUiOnlyKeys entry.
 bool IsGlobalProfileKey(const std::string& key);
 // "" when the (already-trimmed) name is a valid profile name, else a short user-facing reason.
 std::string ProfileNameError(const std::string& name);

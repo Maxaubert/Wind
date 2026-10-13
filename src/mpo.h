@@ -18,9 +18,10 @@ inline const wchar_t* kOverlayTestMode = L"OverlayTestMode";
 // the Windows default) means MPO is enabled.
 inline constexpr DWORD kOverlayTestModeDisabled = 5;
 
-// Is MPO currently disabled in the registry? This is the BOOT state, not necessarily what DWM is
-// running: the value is read by DWM at boot, so a change needs a restart to take effect.
-inline bool MpoDisabledInRegistry() {
+// The one read of HKLM\...\Dwm\OverlayTestMode. False (and raw = 0) when the key or value is
+// absent or the value is not a REG_DWORD.
+inline bool ReadOverlayTestMode(DWORD& raw) {
+    raw = 0;
     HKEY key = nullptr;
     // KEY_WOW64_64KEY is deliberate: a 32-bit host build would otherwise be redirected to
     // Wow6432Node and read a key DWM never looks at, reporting "MPO enabled" forever.
@@ -32,7 +33,16 @@ inline bool MpoDisabledInRegistry() {
     LSTATUS st = RegQueryValueExW(key, kOverlayTestMode, nullptr, &type,
                                   reinterpret_cast<LPBYTE>(&value), &size);
     RegCloseKey(key);
-    return st == ERROR_SUCCESS && type == REG_DWORD && value == kOverlayTestModeDisabled;
+    if (st != ERROR_SUCCESS || type != REG_DWORD) return false;
+    raw = value;
+    return true;
+}
+
+// Is MPO currently disabled in the registry? This is the BOOT state, not necessarily what DWM is
+// running: the value is read by DWM at boot, so a change needs a restart to take effect.
+inline bool MpoDisabledInRegistry() {
+    DWORD value = 0;
+    return ReadOverlayTestMode(value) && value == kOverlayTestModeDisabled;
 }
 
 }  // namespace wind

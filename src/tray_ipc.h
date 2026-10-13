@@ -7,6 +7,7 @@
 // popup menu above the cursor sprite and above the Snipping Tool overlay (measured 2026-09-29).
 // The tray icon and its menu live in WindTray.exe, which runs WITHOUT UIAccess, so its menu is an
 // ordinary app menu. This block is the only coupling between the two besides the quit event.
+// The names of every kernel object the binaries share live here too (kQuitEventName and others).
 //
 // Writers: Wind writes everything except `menuOpen`; the tray writes only `menuOpen`. Every field
 // is a lock-free atomic, so a reader in the other process never needs a lock, and a torn pairing
@@ -19,8 +20,19 @@
 
 namespace wind {
 
+// Every named kernel object Wind's binaries share. All are Local\ (session-scoped; UAC elevation
+// stays in the session, so the elevated installer sees the user's objects). Copies outside C++ must
+// match these exactly: installer/app.nsh (WIND_MUTEX, WIND_QUIT), tools/testenv/lib.ps1 (Stop-Wind),
+// tools/gpu_ab.ps1 (QuitWind) and tools/zoom_response_ab.ps1 (the status block).
 inline constexpr const wchar_t* kTrayBlockName = L"Local\\Wind_TrayState_v1";
 inline constexpr const wchar_t* kTrayMutexName = L"Local\\Wind_Tray";
+// Wind.exe's single-instance mutex.
+inline constexpr const wchar_t* kInstanceMutexName = L"Local\\Wind_Magnifier_SingleInstance";
+// Auto-reset event Wind waits on: set it to make Wind quit cleanly (tray, Settings, installer, and a
+// successor Wind evicting the incumbent).
+inline constexpr const wchar_t* kQuitEventName = L"Local\\Wind_QuitRequest";
+// Serialises read-modify-write of the live ini across processes (profiles_io.h IniWriteLock).
+inline constexpr const wchar_t* kIniWriteMutexName = L"Local\\Wind_IniWrite";
 
 struct TrayShared {
     static constexpr uint32_t kMagic   = 0x59525457u;   // "WTRY"

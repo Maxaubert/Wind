@@ -2,7 +2,35 @@
 #include "../src/profiles.h"
 #include "../src/ini_edit.h"
 #include "../src/config.h"
+#include <fstream>
+#include <set>
+#include <vector>
 using namespace wind;
+
+// tests/fixtures/global_keys.txt is the cross-language copy of the global keys: this test pins it to
+// kUiOnlyKeys + "profile", and ui/tests/global-keys.nodetest.mjs pins the UI's GLOBAL_KEYS to it.
+TEST_CASE("global keys: kUiOnlyKeys + profile match the shared fixture the UI is tested against") {
+    std::string here = __FILE__;
+    const size_t cut = here.find_last_of("/\\");
+    std::vector<std::string> tries;
+    if (cut != std::string::npos) tries.push_back(here.substr(0, cut) + "/fixtures/global_keys.txt");
+    for (const char* up : { "", "../", "../../", "../../../" })
+        tries.push_back(std::string(up) + "tests/fixtures/global_keys.txt");
+    std::ifstream f;
+    for (const std::string& p : tries) { f.open(p); if (f.good()) break; f.clear(); }
+    REQUIRE(f.good());
+    std::set<std::string> fixture;
+    std::string line;
+    while (std::getline(f, line)) {
+        line = TrimWs(line);
+        if (line.empty() || line[0] == 0x23) continue;
+        CHECK(IsGlobalProfileKey(line));
+        fixture.insert(line);
+    }
+    std::set<std::string> code = { "profile" };
+    for (const char* k : kUiOnlyKeys) code.insert(k);
+    CHECK(fixture == code);
+}
 
 TEST_CASE("global keys are exactly profile/onboarded/uiTheme/uiPalette/showAdvanced") {
     CHECK(IsGlobalProfileKey("profile"));
@@ -213,9 +241,7 @@ TEST_CASE("uiHighResNoticeOff is global: stripped from profiles, carried into th
     CHECK(live.find("a=2") != std::string::npos);
 }
 TEST_CASE("StripUiOnlyKeys strips every global key except profile (tray edits must not reload the core)") {
-    const char* globals[] = { "onboarded", "uiTheme", "uiPalette", "showAdvanced", "trayPerf", "traySliders",
-                              "traySliderOrder", "trayToggles", "trayToggleOrder", "trayPinned", "uiHighResNoticeOff" };
-    for (const char* k : globals) {
+    for (const char* k : kUiOnlyKeys) {
         REQUIRE(IsGlobalProfileKey(k));
         const std::string line = std::string(k) + "=1\n";
         CHECK(StripUiOnlyKeys("maxLevel=8\n" + line) == "maxLevel=8\n");

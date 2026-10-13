@@ -11,6 +11,8 @@
 #include "profiles.h"
 #include "ini_edit.h"
 #include "config.h"   // MigrateWheelMods (pure)
+#include "config_path.h"   // UserDataDir
+#include "tray_ipc.h"      // kIniWriteMutexName
 namespace wind {
 inline std::wstring ProfilesDirFromIni(const std::wstring& iniPath) {
     size_t slash = iniPath.find_last_of(L"\\/");
@@ -142,7 +144,7 @@ inline bool WriteTextFileAtomic(const std::wstring& path, const std::string& tex
 class IniWriteLock {
 public:
     explicit IniWriteLock(DWORD waitMs = 3000) {
-        h_ = CreateMutexW(nullptr, FALSE, L"Local\\Wind_IniWrite");
+        h_ = CreateMutexW(nullptr, FALSE, kIniWriteMutexName);
         if (h_) {
             const DWORD r = WaitForSingleObject(h_, waitMs);
             owned_ = (r == WAIT_OBJECT_0 || r == WAIT_ABANDONED);
@@ -255,20 +257,12 @@ inline IniMigrationResult MigrateIniFiles(const std::wstring& iniPath) {
 }
 // %LOCALAPPDATA%\Wind\session.keep: written by the host right before a restart Wind triggers itself
 // (engine change, profile switch with a model change) so the next start keeps the unsaved session.
-inline std::wstring SessionKeepPath() {
-    wchar_t buf[MAX_PATH];
-    DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
-    std::wstring base = (n == 0 || n >= MAX_PATH) ? std::wstring(L".") : std::wstring(buf, n);
-    return base + L"\\Wind\\session.keep";
-}
+inline std::wstring SessionKeepPath() { return UserDataDir() + L"\\session.keep"; }
 // %LOCALAPPDATA%\Wind\running.model: what the Wind process can run, written at its start. "live" =
 // both engines are up, so any `model` applies on the config reload; "render" / "transform" = only
 // that engine started (the other failed to init), so an engine change needs a relaunch. Read by the
 // settings host and the tray to decide whether a `model` change restarts Wind.
-inline std::wstring RunningModelPath() {
-    std::wstring p = SessionKeepPath();
-    return p.substr(0, p.size() - 12) + L"running.model";   // 12 = len("session.keep")
-}
+inline std::wstring RunningModelPath() { return UserDataDir() + L"\\running.model"; }
 // True when the running Wind applies a `model` change live (running.model says "live"). A stale
 // file from a Wind that has exited also reads live, which is right: the next start loads the ini.
 inline bool EngineSwitchesLive() {

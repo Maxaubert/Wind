@@ -6,6 +6,7 @@
 #include "../logging.h"
 #include "../config_path.h"
 #include "../profiles_io.h"
+#include "../profile_switch.h"   // SwitchProfile: shared with Settings
 #include "../config.h"
 #include "../ini_edit.h"
 #include "../tray_ipc.h"
@@ -25,8 +26,8 @@ int UsesPalette(const std::string& iniText) {
 }
 
 void OpenSettings() {
-    ShellExecuteW(nullptr, L"open", (AppDir() + L"\\WindConfig.exe").c_str(), nullptr,
-                  AppDir().c_str(), SW_SHOW);
+    ShellExecuteW(nullptr, L"open", (ExeDir() + L"\\WindConfig.exe").c_str(), nullptr,
+                  ExeDir().c_str(), SW_SHOW);
 }
 
 // Unsaved-settings guard for Quit and for a profile switch: the tray decides from the files (live
@@ -93,77 +94,47 @@ static bool ConfirmUnsaved(const std::wstring& ini, bool forSwitch) {
 
 bool ConfirmQuit(const std::wstring& ini) { return ConfirmUnsaved(ini, false); }
 bool ConfirmSwitch(const std::wstring& ini) { return ConfirmUnsaved(ini, true); }
-// Switch the active profile from the tray: rewrite the live ini from the profile file (globals
-// preserved); the core's dir-watch hot-reloads everything, `model` included when both engines are up
-// (running.model "live"). With one engine left `model` is read once at launch, and a model change relaunches Wind.exe from our folder (the new instance evicts the running
-// one via the single-instance handshake, same as the swap-model path in Wind's main.cpp).
+// Switch the active profile from the tray. The steps, the relaunch for a single-engine Wind and the
+// rollback are shared with Settings (profile_switch.h); this keeps the tray's balloons and logs.
 void SwitchToProfile(const std::wstring& ini, const std::wstring& nameW) {
     // Every step logs (issue #184: a field switch failed with no trace - the balloon is
     // transient, the log is not).
     wind::Log(wind::LogLevel::Info, "profile", "tray switch -> %ls", nameW.c_str());
     const std::wstring profPath = wind::ProfilesDirFromIni(ini) + L"\\" + nameW + L".ini";
-    if (GetFileAttributesW(profPath.c_str()) == INVALID_FILE_ATTRIBUTES) {
+    const wind::ProfileSwitchResult r = wind::SwitchProfile(ini, profPath, wind::NarrowUtf8(nameW), true);
+    switch (r.error) {
+    case wind::ProfileSwitchError::None: break;
+    case wind::ProfileSwitchError::FileMissing:
         wind::Log(wind::LogLevel::Warn, "profile", "switch aborted: file missing");
         Notify(L"Wind", L"That profile's file is missing; settings unchanged.");
         return;
-    }
-    // A read failure must NOT masquerade as an empty profile: empty legitimately means factory
-    // defaults, so silently treating a locked/corrupt file as empty would wipe the live settings.
-    std::string profText;
-    if (!wind::ReadTextFileOk(profPath, profText)) {
-        wind::Log(wind::LogLevel::Warn, "profile", "switch aborted: read failed (err=%lu)", GetLastError());
+    case wind::ProfileSwitchError::ReadFailed:
+        wind::Log(wind::LogLevel::Warn, "profile", "switch aborted: read failed (err=%lu)", r.lastError);
         Notify(L"Wind", L"Could not read that profile's file; settings unchanged.");
         return;
-    }
-    { std::string terr = wind::ProfileTextError(profText);
-      if (!terr.empty()) {
-        wind::Log(wind::LogLevel::Warn, "profile", "switch aborted: %s", terr.c_str());
+    case wind::ProfileSwitchError::Corrupt:
+        wind::Log(wind::LogLevel::Warn, "profile", "switch aborted: %s", r.reason.c_str());
         Notify(L"Wind", L"That profile's file looks corrupt; settings unchanged.");
         return;
-    } }
-    wind::IniWriteLock iniLock;   // held to the end, rollback included (review item 71)
-    std::string oldLive;
-    if (!wind::ReadLiveIni(ini, oldLive)) {
+    case wind::ProfileSwitchError::LiveUnreadable:
         wind::Log(wind::LogLevel::Warn, "profile", "switch aborted: live ini unreadable");
         Notify(L"Wind", L"Could not switch profile (config file is locked).");
         return;
-    }
-    // Capture hand edits (openIni) into the outgoing profile before the live ini is replaced.
-    wind::MirrorLiveToActiveProfile(ini, oldLive);
-    const std::string newLive = wind::MakeLiveText(profText, oldLive, wind::NarrowUtf8(nameW));
-    if (!wind::WriteTextFileAtomic(ini, newLive)) {
-        wind::Log(wind::LogLevel::Warn, "profile", "switch aborted: live ini write failed (err=%lu)", GetLastError());
+    case wind::ProfileSwitchError::WriteFailed:
+        wind::Log(wind::LogLevel::Warn, "profile", "switch aborted: live ini write failed (err=%lu)", r.lastError);
         Notify(L"Wind", L"Could not switch profile (config file is locked).");
         return;
     }
-    // A single-engine Wind cannot swap the model: relaunch so the new instance boots on the profile's model.
-    const std::string oldModel = wind::ParseConfig(oldLive).model;
-    const std::string newModel = wind::ParseConfig(newLive).model;
-    const bool relaunch = oldModel != newModel && !wind::EngineSwitchesLive();
     wind::Log(wind::LogLevel::Info, "profile", "switch applied: model %s -> %s%s",
-              oldModel.c_str(), newModel.c_str(), relaunch ? " (relaunching)" : " (hot)");
-    if (relaunch) {
-        // Wind.exe, NOT our own exe (GetModuleFileNameW here is WindTray.exe).
-        const std::wstring exe = AppDir() + L"\\Wind.exe";
-        const bool haveExe = GetFileAttributesW(exe.c_str()) != INVALID_FILE_ATTRIBUTES;
-        INT_PTR rc = haveExe
-            ? reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", exe.c_str(), nullptr,
-                                                      AppDir().c_str(), SW_SHOWNORMAL))
-            : 0;
-        if (rc > 32) {
-            Notify(L"Wind", (L"Switched to \"" + nameW + L"\" (restarting for its model).").c_str());
-        } else {
-            // Keep the "ini model == running model" invariant (same rule as the Settings
-            // restartFailed path): the switch stays, only the model is kept.
-            wind::Log(wind::LogLevel::Warn, "profile",
-                      "relaunch FAILED (rc=%lld haveExe=%d); reverting model to %s",
-                      static_cast<long long>(rc), (int)haveExe, oldModel.c_str());
-            // Re-read: Settings or the flyout may have written since newLive was built.
-            std::string cur;
-            if (!wind::ReadLiveIni(ini, cur)) cur = newLive;
-            wind::WriteTextFileAtomic(ini, wind::UpdateIniText(cur, "model", oldModel));
-            Notify(L"Wind", L"Profile switched; kept the current model (restart failed).");
-        }
+              r.oldModel.c_str(), r.newModel.c_str(), r.relaunched ? " (relaunching)" : " (hot)");
+    if (!r.relaunched) return;
+    if (!r.relaunchFailed) {
+        Notify(L"Wind", (L"Switched to \"" + nameW + L"\" (restarting for its model).").c_str());
+    } else {
+        // The switch stays, only the model is kept (the same rule as the Settings restartFailed path).
+        wind::Log(wind::LogLevel::Warn, "profile", "relaunch FAILED (rc=%lld); reverted model to %s",
+                  static_cast<long long>(r.launchRc), r.oldModel.c_str());
+        Notify(L"Wind", L"Profile switched; kept the current model (restart failed).");
     }
 }
 

@@ -4,6 +4,7 @@
 #include "logging.h"
 #include "sprite_layer.h"  // PickSpriteLayer (pure, tested): issue #269
 #include "config_path.h"   // ResolveLogDir
+#include "uiaccess_token.h" // ProcessHasUiAccess
 #include "tick_span.h"     // per-tick spans (#361)
 #include "native_cursor.h" // NudgeAfterWrite, HoldInputPublish (pure, tested): issue #369
 #include "dwm_watch.h"     // DwmGeneration: re-apply DWM-held state after a restart (#396)
@@ -182,20 +183,11 @@ bool TransformModel::initialize(const MonitorTarget& monitor) {
     // Input-transform availability (issue #185): MagSetInputTransform's ENABLED publish needs
     // UIAccess, and the hybrid DESKTOP pick must know availability BEFORE any session exists (a
     // transform desktop session without it has the pointer-framework dead zones). Read the
-    // process token's UIAccess bit directly - ZERO Magnification calls at startup. Two probe
-    // shapes are BANNED here (self-review, rig-measured): a DISABLED MagSetInputTransform
-    // succeeds WITHOUT UIAccess (false positive), and any Mag acquire/release at startup runs
-    // MagHost::shutdown's identity transform WRITE - violating the no-warm-up law above and
-    // resetting a running native Magnifier's zoom. The in-session enabled publish remains the
+    // process token's UIAccess bit directly - ZERO Magnification calls at startup (the banned
+    // probe shapes are listed in uiaccess_token.h). The in-session enabled publish remains the
     // authority: its first failure clears this flag (self-heal in present()).
     {
-        HANDLE tok = nullptr;
-        if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &tok)) {
-            DWORD uiAccess = 0, len = 0;
-            if (GetTokenInformation(tok, TokenUIAccess, &uiAccess, sizeof(uiAccess), &len))
-                inputTransformAvailable_ = uiAccessProbe_ = uiAccess != 0;
-            CloseHandle(tok);
-        }
+        inputTransformAvailable_ = uiAccessProbe_ = wind::ProcessHasUiAccess();
         wind::Log(wind::LogLevel::Info, "transform", "input transform %s (token UIAccess=%d)",
                   inputTransformAvailable_ ? "AVAILABLE" : "unavailable",
                   inputTransformAvailable_ ? 1 : 0);
