@@ -6,9 +6,9 @@
 // otherwise, so after a DWM crash (e.g. the smooth-sampling acrylic crash, #397) Wind kept zooming
 // pixelated until it was restarted. Nothing in the write path notices a restart either: DwmFlush
 // just blocks for the few seconds DWM is down. So a background thread watches this session's
-// dwm.exe process id (a snapshot enumeration once a second; no handle to dwm.exe is ever opened)
+// dwm.exe process id (a WTS process enumeration once a second; no handle to dwm.exe is ever opened)
 // and bumps a generation counter when it is replaced. Consumers re-apply their DWM-held state when
-// the generation changes.
+// the generation changes. The render overlay's capture exclusion is DWM-held too (#458).
 namespace wind {
 
 // Pure: a restart is a NEW process id after a known one. 0 means "not running right now" (DWM is

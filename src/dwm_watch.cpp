@@ -1,8 +1,10 @@
 #include "dwm_watch.h"
 #include <windows.h>
-#include <tlhelp32.h>
+#include <wtsapi32.h>
 #include <atomic>
 #include "logging.h"
+
+#pragma comment(lib, "wtsapi32.lib")
 
 namespace wind {
 namespace {
@@ -11,18 +13,19 @@ std::atomic<bool> g_started{false};
 HANDLE g_stop = nullptr;     // signalled by StopDwmWatch
 HANDLE g_thread = nullptr;
 
-// This session's dwm.exe, or 0 while none runs.
+// This session's dwm.exe, or 0 while none runs. The WTS list carries each process's session, so
+// dwm.exe is never opened: ProcessIdToSessionId on it fails with access denied, which kept this
+// watch from ever seeing a restart (#458).
 unsigned long FindDwmPid(DWORD session) {
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap == INVALID_HANDLE_VALUE) return 0;
-    PROCESSENTRY32W pe{}; pe.dwSize = sizeof(pe);
+    WTS_PROCESS_INFOW* list = nullptr;
+    DWORD n = 0;
+    if (!WTSEnumerateProcessesW(WTS_CURRENT_SERVER_HANDLE, 0, 1, &list, &n) || !list) return 0;
     unsigned long pid = 0;
-    for (BOOL ok = Process32FirstW(snap, &pe); ok; ok = Process32NextW(snap, &pe)) {
-        if (_wcsicmp(pe.szExeFile, L"dwm.exe") != 0) continue;
-        DWORD s = 0;
-        if (ProcessIdToSessionId(pe.th32ProcessID, &s) && s == session) { pid = pe.th32ProcessID; break; }
+    for (DWORD i = 0; i < n; ++i) {
+        if (list[i].SessionId == session && list[i].pProcessName &&
+            _wcsicmp(list[i].pProcessName, L"dwm.exe") == 0) { pid = list[i].ProcessId; break; }
     }
-    CloseHandle(snap);
+    WTSFreeMemory(list);
     return pid;
 }
 }  // namespace
