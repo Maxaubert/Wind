@@ -1,19 +1,21 @@
 # Cursor over shell input panels (issue #283)
 
-Field report: with the emoji picker (Win+.) open, Wind's cursor went UNDER the picker (still drawn,
-just covered). Same for clipboard history (Win+V) and the touch keyboard, which share the host.
+> **Status: historical record.** Closed, and the workaround described here (the pointer freeze) has
+> been removed. It existed only because of the old sprite cursor; the native cursor, now the
+> transform engine's only cursor, is drawn by DWM above the shell panels and needs nothing special
+> ([architecture/07](../architecture/07-cursor.md#shell-input-panels)). Do not bring the freeze
+> back. Everything below describes the state at the time and stays for its measurements.
 
-> **Status.** Closed and removed. The freeze was a workaround for the sprite cursor; the native
-> cursor is drawn by DWM above the panels and needs none ([architecture/07](architecture/07-cursor.md#shell-input-panels)).
-> This record stays for the measurements.
+Field report (sprite cursor era): with the emoji picker (Win+.) open, Wind's cursor went UNDER the
+picker (still drawn, just covered). Same for clipboard history (Win+V) and the touch keyboard, which
+share the host.
 
-## Known limitation
+## The limitation the freeze had
 
-While a shell panel is open and Wind is zoomed in, the real pointer is frozen and moved only from
+While a shell panel was open and Wind was zoomed in, the real pointer was frozen and moved only from
 mouse (relative) raw input. Pens, touch screens and remote-desktop pointers set ABSOLUTE positions,
-which the 1px clip blocks, so they cannot steer the pointer over the panel meanwhile (accepted by
-the owner). Zooming out, or closing the panel, restores
-normal behaviour. A possible later fix: skip the freeze when the last pointer input was absolute.
+which the 1px clip blocked, so they could not steer the pointer over the panel meanwhile (accepted
+by the owner at the time). Zooming out, or closing the panel, restored normal behaviour.
 
 ## What the picker is
 
@@ -53,10 +55,10 @@ transform: it drifts off the view centre by speed x tick x level.
   write even after its own `MagInitialize`), so hook writes need the hook thread to OWN the runtime,
   which marshals every tick write onto the system-wide mouse input thread. Field: hitches on zoom,
   worst when zooming with the picker open (the public write, 3-9 ms, landed on that thread too).
-- **Shipped: freeze.** While a panel is open the pointer is pinned with a 1px `ClipCursor`; the hand's
-  motion arrives as ballistics-cooked raw input (the Inspect machinery), and the
-  transform model moves the clip (which moves the pointer) right after writing the view, on the tick
-  thread. Owner-verified: no wobble, no flicker, normal hitch-free zoom.
+- **Shipped, then removed: freeze.** While a panel was open the pointer was pinned with a 1px
+  `ClipCursor`; the hand's motion arrived as ballistics-cooked raw input (the Inspect machinery),
+  and the transform model moved the clip (which moved the pointer) right after writing the view, on
+  the tick thread. Owner-verified at the time: no wobble, no flicker, normal hitch-free zoom.
 
 ## Pitfalls hit on the way (each field-visible)
 
@@ -70,9 +72,10 @@ transform: it drifts off the view centre by speed x tick x level.
 - **The saved clip matters.** This PC keeps a permanent work-area clip; the freeze snapshots it and
   gives it back on close.
 
-## Why not use the real pointer everywhere
+## Why the freeze was not used everywhere (at the time)
 
-Considered and declined (owner decision): the freeze replaces direct pointer motion with
-reconstructed ballistics (feel differs slightly), blocks absolute devices (pens, touch, remote tools)
-and apps that move the pointer, moves a clip every frame, and interferes with mouselook detection.
-The sprite stays the everyday cursor; the real pointer is used only while a shell panel is open.
+Considered and declined then (owner decision): the freeze replaced direct pointer motion with
+reconstructed ballistics (feel differed slightly), blocked absolute devices (pens, touch, remote
+tools) and apps that move the pointer, moved a clip every frame, and interfered with mouselook
+detection. The sprite stayed the everyday cursor and the real pointer was used only while a shell
+panel was open. Both are gone now: the native cursor replaced the sprite, and with it the freeze.

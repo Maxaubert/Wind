@@ -1,7 +1,7 @@
 # Pointer-framework hit-testing under the DWM fullscreen transform (issue #185)
 
 > **Status.** Closed. The source-rect input transform publish ships (`magInputTransform=1`).
-> Design: [architecture/05](architecture/05-transform-engine.md#the-input-transform).
+> Design: [architecture/05](../architecture/05-transform-engine.md#the-input-transform).
 
 The definitive record of the transform-desktop hover dead zones: symptom, the measurement
 chain, the WRONG intermediate verdict, and the proven fix. Field rounds on the test machine

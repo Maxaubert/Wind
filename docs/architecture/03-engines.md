@@ -71,7 +71,7 @@ In order:
      (Win+D reads as a borderless cover, issue #172); or
    - **desktop path**: `desktopTransform=1` (the default) and the source-rect input transform was
      verified at init (`inputTransformAvailable`, needs UIAccess). Without it pointer frameworks
-     get hover dead zones ([../POINTER-HITTEST-FINDINGS.md](../POINTER-HITTEST-FINDINGS.md)).
+     get hover dead zones ([../history/POINTER-HITTEST-FINDINGS.md](../history/POINTER-HITTEST-FINDINGS.md)).
 
    Everything else gets Render. A maximized desktop app covers the monitor but keeps its caption,
    so it stays on Render.
@@ -153,4 +153,4 @@ removed. The approaches measured on the way, so nobody repeats them:
 
 Registry facts from the same probes: `Magnification` values above 1600 are ignored, not clamped,
 and a same-value write fires no change notification. A running Magnify.exe also fights Wind's
-transform; see [../NATIVE-MAGNIFIER-STOMP.md](../NATIVE-MAGNIFIER-STOMP.md).
+transform; see [../history/NATIVE-MAGNIFIER-STOMP.md](../history/NATIVE-MAGNIFIER-STOMP.md).

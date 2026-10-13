@@ -377,4 +377,4 @@ centred, so the hand moves the pointer directly. The earlier workaround for the 
 frozen real pointer moved by Wind after each view write, driven by `TextInputHost` cloak events)
 was removed with the sprite. The render engine's pointer sits under the panels, as before.
 Evidence and the rejected hook-write variant:
-[../SHELL-PANEL-CURSOR-FINDINGS.md](../SHELL-PANEL-CURSOR-FINDINGS.md).
+[../history/SHELL-PANEL-CURSOR-FINDINGS.md](../history/SHELL-PANEL-CURSOR-FINDINGS.md).

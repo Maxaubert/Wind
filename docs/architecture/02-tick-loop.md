@@ -9,7 +9,7 @@ beside the loop.
 
 All state that feeds the view is read and written on the tick thread, in one pass. Splitting it
 across threads makes the view and the cursor sample different instants, which shows as a visible
-beat (the wobble class in [../NATIVE-MAGNIFIER-STOMP.md](../NATIVE-MAGNIFIER-STOMP.md)).
+beat (the wobble class in [../history/NATIVE-MAGNIFIER-STOMP.md](../history/NATIVE-MAGNIFIER-STOMP.md)).
 
 `RunTick` does not pace itself; the caller does (see [Pacing](#pacing)). It can still block
 briefly: a config reload reads the ini with a short retry budget (up to 20 ms, see
