@@ -25,27 +25,46 @@ inline bool DirIsWritable(const std::wstring& dir) {
     return true;
 }
 
+// The folder holding this exe, without a trailing backslash. Cached: it cannot change while the
+// process runs. Wind.exe, WindTray.exe and WindConfig.exe sit in the same folder.
+inline const std::wstring& ExeDir() {
+    static const std::wstring cached = [] {
+        wchar_t buf[MAX_PATH];
+        if (!GetModuleFileNameW(nullptr, buf, MAX_PATH)) return std::wstring();
+        wchar_t* slash = wcsrchr(buf, L'\\');
+        if (slash) *slash = L'\0';
+        return std::wstring(buf);
+    }();
+    return cached;
+}
+
+// %LOCALAPPDATA%\Wind (under %TEMP% when LOCALAPPDATA is unset), created on first use. No trailing
+// backslash. Holds the ini and logs of a read-only install, session.keep, running.model and the
+// WebView2 user-data folder.
+inline const std::wstring& UserDataDir() {
+    static const std::wstring cached = [] {
+        wchar_t buf[MAX_PATH];
+        DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
+        if (n == 0 || n >= MAX_PATH) { GetTempPathW(MAX_PATH, buf); }
+        std::wstring dir = std::wstring(buf) + L"\\Wind";
+        CreateDirectoryW(dir.c_str(), nullptr);
+        return dir;
+    }();
+    return cached;
+}
+
 // Resolved once per process: the exe location and its writability do not change, and every caller
 // (tick reload, settings, tray) would otherwise repeat the probe and the seed check.
 inline std::wstring ResolveIniPath() {
     static const std::wstring cached = [] {
-    wchar_t exePathBuf[MAX_PATH];
-    GetModuleFileNameW(nullptr, exePathBuf, MAX_PATH);
-    wchar_t* slash = wcsrchr(exePathBuf, L'\\');
-    if (slash) *slash = L'\0';
-    std::wstring exeDir(exePathBuf);
+    const std::wstring& exeDir = ExeDir();
     std::wstring exeIni = exeDir + L"\\magnifier.ini";
 
     // If the probe succeeds the exe dir is fine (dev / portable install).
     if (DirIsWritable(exeDir)) return exeIni;
 
     // Read-only install (typically C:\Program Files\Wind). Fall back to %LOCALAPPDATA%\Wind.
-    wchar_t buf[MAX_PATH];
-    DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
-    if (n == 0 || n >= MAX_PATH) { GetTempPathW(MAX_PATH, buf); }
-    std::wstring dir = std::wstring(buf) + L"\\Wind";
-    CreateDirectoryW(dir.c_str(), nullptr);
-    std::wstring lapIni = dir + L"\\magnifier.ini";
+    std::wstring lapIni = UserDataDir() + L"\\magnifier.ini";
 
     // Seed the user copy from the install template on first run, so deploy-time defaults
     // (zorderBand, the user's previous bindings) carry over to the writable location.
@@ -65,21 +84,8 @@ inline std::wstring ResolveLogDir() {
     // Resolve once: the exe location and its writability don't change over a process lifetime, so cache
     // the result (and the create+delete sentinel probe / CreateDirectory) instead of redoing it per call.
     static const std::wstring cached = [] {
-        wchar_t exePathBuf[MAX_PATH];
-        GetModuleFileNameW(nullptr, exePathBuf, MAX_PATH);
-        wchar_t* slash = wcsrchr(exePathBuf, L'\\');
-        if (slash) *slash = L'\0';
-        std::wstring exeDir(exePathBuf);
-
-        std::wstring base;
-        if (DirIsWritable(exeDir)) base = exeDir;
-        else {
-            wchar_t buf[MAX_PATH];
-            DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
-            if (n == 0 || n >= MAX_PATH) { GetTempPathW(MAX_PATH, buf); }
-            base = std::wstring(buf) + L"\\Wind";
-            CreateDirectoryW(base.c_str(), nullptr);
-        }
+        const std::wstring& exeDir = ExeDir();
+        const std::wstring base = DirIsWritable(exeDir) ? exeDir : UserDataDir();
         std::wstring logs = base + L"\\logs";
         CreateDirectoryW(logs.c_str(), nullptr);
         return logs;

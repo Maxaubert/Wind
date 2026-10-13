@@ -20,7 +20,7 @@
 #include <intrin.h>   // __rdtsc: thread cycle calibration (#361)
 #include "mpo_boot.h"
 #include "ini_edit.h"   // wind::UpdateIniText - flip the model key in place
-#include "mpo.h"        // wind::MpoDisabledInRegistry - the #242 restart-pending tell
+#include "mpo.h"        // the OverlayTestMode read: startup MPO state and the #242 restart-pending tell
 #include "logging.h"
 #pragma comment(lib, "Dwmapi.lib")
 #include "render_engine.h"
@@ -62,6 +62,7 @@
 #include "typing_key.h"       // typing-key stamp for the click quiet period (#328)
 #include "dwm_watch.h"        // StartDwmWatch (#396)
 #include "uiaccess_gate.h"     // refuse to start without UIAccess (#460)
+#include "uiaccess_token.h"    // ProcessHasUiAccess: the token bit the gate reads
 #include "reload_gate.h"      // DecideReload + bind-change predicates (pure, tested)
 #include "resource.h"
 
@@ -80,11 +81,8 @@ static constexpr double kMaxSafeTxMagnitude = 32000.0;
 static bool g_mpoDisabled = false;   // boot state of OverlayTestMode (read once at startup)
 
 static void DetectMpoDisabled() {
-    DWORD v = 0, sz = sizeof(v);
-    bool regDisabled = false;
-    if (RegGetValueW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\Dwm",
-                     L"OverlayTestMode", RRF_RT_REG_DWORD, nullptr, &v, &sz) == ERROR_SUCCESS)
-        regDisabled = (v == 5);
+    DWORD v = 0;
+    const bool regDisabled = wind::ReadOverlayTestMode(v) && v == wind::kOverlayTestModeDisabled;
     g_mpoDisabled = regDisabled;
     // Persist the earliest post-boot reading (issue #164). No-ops if this boot is already recorded.
     wind::RecordMpoBootState(g_mpoDisabled);
@@ -775,11 +773,7 @@ static void EndGameInspect(TickState& t) {
 
 // Frame-pacing diagnostics (diagnostics=1) as "diag" lines in wind-core.log. Formerly its own
 // fopen/append file in %TEMP% from the tick thread; now a queue push like every log line (#361).
-static void DiagLog(const char* fmt, ...) {
-    char buf[1024];
-    va_list ap; va_start(ap, fmt); _vsnprintf_s(buf, sizeof(buf), _TRUNCATE, fmt, ap); va_end(ap);
-    wind::Log(wind::LogLevel::Info, "diag", "%s", buf);
-}
+#define DiagLog(...) wind::Log(wind::LogLevel::Info, "diag", __VA_ARGS__)
 
 // Forward-declared so RunTick can re-register the hide-cursor hotkey on config hot-reload;
 // the definition (with the static state it manages) lives near WndProc / kHideCursorHotkeyId.
@@ -2958,18 +2952,18 @@ static void TerminateOtherWind() {
 // quitEvent is created here, as soon as the mutex is ours, so a successor that finds us busy can
 // always signal it (it used to exist only after the whole startup). A null mutex fails closed.
 static bool AcquireSingleInstance(HANDLE& mtx, HANDLE& quitEvent) {
-    mtx = CreateMutexW(nullptr, FALSE, L"Local\\Wind_Magnifier_SingleInstance");
+    mtx = CreateMutexW(nullptr, FALSE, wind::kInstanceMutexName);
     SiLog("createmutex err", GetLastError());
     if (!mtx) { SiLog("mutex null - REFUSING TO START (cannot guard against a second instance)", 0); return false; }
     // Quit-request channel for WindConfig.exe (onboarding close) and for a successor Wind. A window
     // message can't be used: the deployed Wind.exe is UIAccess, and UIPI silently blocks PostMessage
     // from the non-UIAccess WindConfig. A named event is a kernel object (not gated by UIPI) and
     // both run as the same user in the same session. Auto-reset, initially unsignaled.
-    auto makeQuitEvent = [&] { quitEvent = CreateEventW(nullptr, FALSE, FALSE, L"Local\\Wind_QuitRequest"); };
+    auto makeQuitEvent = [&] { quitEvent = CreateEventW(nullptr, FALSE, FALSE, wind::kQuitEventName); };
     DWORD w = WaitForSingleObject(mtx, 0);   // WAIT_ABANDONED = prior owner died holding it -> ours now
     if (w == WAIT_OBJECT_0 || w == WAIT_ABANDONED) { makeQuitEvent(); SiLog("acquired immediately w", w); return true; }
     SiLog("busy - signaling quit, w", w);
-    HANDLE ev = OpenEventW(EVENT_MODIFY_STATE, FALSE, L"Local\\Wind_QuitRequest");
+    HANDLE ev = OpenEventW(EVENT_MODIFY_STATE, FALSE, wind::kQuitEventName);
     if (ev) { SetEvent(ev); CloseHandle(ev); SiLog("quit event set", 0); }
     else SiLog("quit event open err", GetLastError());
     w = WaitForSingleObject(mtx, 3000);                       // wait for it to release on clean exit
@@ -3003,21 +2997,16 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // No UIAccess: refuse and say how to fix it (issue #460). Before the single-instance claim, so
     // a refused start never evicts a working Wind.
     {
-        DWORD uiAccess = 0, len = 0;
-        HANDLE tok = nullptr;
-        if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &tok)) {
-            if (!GetTokenInformation(tok, TokenUIAccess, &uiAccess, sizeof(uiAccess), &len)) uiAccess = 0;
-            CloseHandle(tok);
-        }
+        const bool uiAccess = wind::ProcessHasUiAccess();
         const bool allow = GetEnvironmentVariableW(L"WIND_ALLOW_NO_UIACCESS", nullptr, 0) > 0;
         const bool selftest = GetEnvironmentVariableW(L"WIND_SELFTEST", nullptr, 0) > 0;
-        if (wind::MustRefuseWithoutUiAccess(uiAccess != 0, allow, selftest)) {
+        if (wind::MustRefuseWithoutUiAccess(uiAccess, allow, selftest)) {
             wind::Log(wind::LogLevel::Warn, "startup", "no UIAccess: refusing to start (issue #460)");
             MessageBoxW(nullptr, wind::UiAccessRefusalText(), wind::UiAccessRefusalTitle(),
                         MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
             return 1;
         }
-        if (uiAccess == 0)
+        if (!uiAccess)
             wind::Log(wind::LogLevel::Warn, "startup", "no UIAccess: running anyway (developer override)");
     }
     LoadChurnyApps();   // issue #148: learned cursor-churning apps (transform -> render for them)
@@ -3038,11 +3027,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     SetUnhandledExceptionFilter(wind::CursorCrashFilter);
 
     // Resolve magnifier.ini next to the exe (not the launch cwd).
-    wchar_t exePath[MAX_PATH];
-    if (GetModuleFileNameW(nullptr, exePath, MAX_PATH)) {
-        wchar_t* slash = wcsrchr(exePath, L'\\');
-        if (slash) { *slash = L'\0'; SetCurrentDirectoryW(exePath); }
-    }
+    if (!wind::ExeDir().empty()) SetCurrentDirectoryW(wind::ExeDir().c_str());
 
     // Resolve magnifier.ini's runtime path (exe-dir if writable, else %LOCALAPPDATA%\Wind\). Same
     // resolution is used by WindConfig.exe so both processes always touch the same file.
@@ -3199,7 +3184,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     // The tray icon and menu live in WindTray.exe (issue #291): a UIAccess process's menu stacks
     // above the cursor and the Snipping Tool overlay, an ordinary process's menu does not.
-    g_trayBlock = wind::TrayHost::Start(exePath);
+    g_trayBlock = wind::TrayHost::Start(wind::ExeDir());
 
     g_tint.capture();   // the scheme is clean here: RestoreInputState reloaded it at start-up (#288)
     TickState ts(model.get(), startupMon, cfg);
@@ -3303,9 +3288,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     // First launch: open the guided setup once (at startup, before the tick loop). onboarded==0
     // covers a freshly created ini too. Non-blocking: spawn WindConfig.exe --onboard, then continue
-    // to the tray. Resolve by full path (exePath is our own dir) so it works regardless of the cwd.
+    // to the tray. Resolve by full path (wind::ExeDir()) so it works regardless of the cwd.
     if (cfg.onboarded == 0) {
-        std::wstring configExe = std::wstring(exePath) + L"\\WindConfig.exe";
+        std::wstring configExe = wind::ExeDir() + L"\\WindConfig.exe";
         // ShellExecuteEx, never CreateProcess with our token: Wind.exe is UIAccess and a child made
         // with CreateProcess inherits it. A shell launch gives WindConfig an ordinary token (the
         // same way LaunchTray starts WindTray).
@@ -3315,7 +3300,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
         sei.lpVerb = L"open";
         sei.lpFile = configExe.c_str();
         sei.lpParameters = L"--onboard";
-        sei.lpDirectory = exePath;
+        sei.lpDirectory = wind::ExeDir().c_str();
         sei.nShow = SW_SHOWNORMAL;
         if (ShellExecuteExW(&sei) && sei.hProcess) CloseHandle(sei.hProcess);
     }

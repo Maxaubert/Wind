@@ -5,6 +5,8 @@
 //
 //   node tools/gen-flyout-palettes.cjs [mockup-ia-dir]
 //
+// WindConfig paints its window background from kPalettes[i].dark.menu before the page loads; tests/test_flyout_palettes.cpp
+// checks it against each theme's --bg in ui/src/design/themes.css (gen-themes.cjs), so rerun both generators together.
 // Wind grey keeps the values the flyout already drew (docs/design/tray-2026-10/j01), like Settings keeps today's tokens.
 const fs = require('fs');
 const path = require('path');

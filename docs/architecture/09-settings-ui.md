@@ -227,7 +227,9 @@ and offers New (defaults) or Duplicate current; Enter duplicates. There is no re
 - Components use tokens (`--sel`, `--onfill`, `--focus`, `--danger*`, `--scrim`, the radii), never
   fixed colours.
 - WindConfig's pre-paint window colour follows `uiPalette` (`ThemeBackground` in
-  `src/config_ui/main.cpp`); update it when a theme is added.
+  `src/config_ui/main.cpp`), read from the generated flyout palettes (`src/tray_app/flyout_palettes.h`).
+  `tests/test_flyout_palettes.cpp` checks each palette's menu colour against that theme's `--bg` in
+  `ui/src/design/themes.css`, so rerun both generators when a theme is added.
 
 ## Onboarding
 

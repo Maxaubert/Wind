@@ -14,7 +14,7 @@
 
 ; Wind's own two kernel objects. Both are Local\, i.e. session-scoped, and UAC elevation
 ; stays inside the session, so the elevated installer and the user's Wind see the same
-; objects. Names must match src\main.cpp:1911 and src\main.cpp:2199 exactly.
+; objects. Names must match kInstanceMutexName and kQuitEventName in src\tray_ipc.h exactly.
 !define WIND_MUTEX "Local\Wind_Magnifier_SingleInstance"
 !define WIND_QUIT  "Local\Wind_QuitRequest"
 

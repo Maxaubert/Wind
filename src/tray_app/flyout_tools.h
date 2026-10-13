@@ -5,6 +5,7 @@
 // Spec: docs/specs/2026-10-02-tray-tools-design.md.
 #include <string>
 #include <vector>
+#include "../ini_edit.h"   // TrimWs
 
 namespace wind { namespace Flyout {
 
@@ -24,10 +25,6 @@ inline const wchar_t* EngineLabel(int i) {
     switch (i) { case 1: return L"Render"; case 2: return L"Transform"; default: return L"Auto"; }
 }
 
-inline std::string TrimWs(const std::string& s) {
-    const size_t b = s.find_first_not_of(" \t\r\n"), e = s.find_last_not_of(" \t\r\n");
-    return b == std::string::npos ? std::string() : s.substr(b, e - b + 1);
-}
 // The option a `model` value means. Missing or unknown reads as Auto, exactly like the core's config
 // parse (src/config.cpp falls back to "hybrid").
 inline int EngineIndex(const std::string& model) {

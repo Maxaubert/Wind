@@ -79,17 +79,17 @@ build. See [11](11-build-test-release.md).
 
 | Area | Files |
 |---|---|
-| Loop and session state | `main.cpp` (`wWinMain`, `RunTick`), `uiaccess_gate.h` (refuse to start without UIAccess), `idle_policy.h`, `sched_priority.h`, `tick_stats.h` |
+| Loop and session state | `main.cpp` (`wWinMain`, `RunTick`), `uiaccess_gate.h` (refuse to start without UIAccess), `uiaccess_token.h`, `idle_policy.h`, `sched_priority.h`, `tick_stats.h` |
 | Engine contract and pick | `magnifier_model.h`, `engine_pick.h`, `shell_desktop.h`, `launch_quiesce.h` |
 
-| Render engine | `render_engine.*`, `render_model.*`, `render_params.cpp`, `render_shaders.h`, `upscale_pass.*`, `upscale_shaders.h`, `upscale_nis.h`, `hdr_info.*`, `hdr_scale.h`, `band_window.h`, `png_dump.*` |
+| Render engine | `render_engine.*`, `render_model.*`, `render_params.cpp`, `render_shaders.h`, `hlsl_compile.h`, `upscale_pass.*`, `upscale_shaders.h`, `upscale_nis.h`, `hdr_info.*`, `hdr_scale.h`, `band_window.h`, `png_dump.*` |
 | Transform engine | `transform_model.*`, `transform.*`, `mag_host.*`, `tx_warm.h`, `comp_pin.*`, `mpo.h`, `mpo_boot.h`, `mpo_boot_logic.h`, `mpo_guard.h`, `native_cursor.h`, `zoom_ladder.h`, `dwm_watch.*` |
 | Colour | `color_filter.*`, `color_matrix.h`, `cursor_tint.*`, `cursor_tint_pixels.h` |
 | Input | `input_router.*`, `keybind_rules.h`, `pointer_binds.h`, `keyboard_pan.h`, `typing_key.h`, `event_order.h`, `swallow_ledger.h` |
 | Cursor and lock | `cursor_mapper.*`, `lock_detector.*`, `drag_follow.h`, `gain_learner.h`, `cursor_sprite.*`, `cursor_blanker.*`, `cursor_decode.*`, `sprite_layer.h`, `crosshair.*`, `cursor_lock.*`, `inspect_focus.h`, `game_cursor.h`, `pan_glide.h` |
 | Tracking | `focus_track.*`, `view_target.h`, `view_glide.h`, `detached_view.h`, `edge_pan.h`, `caret_rect.h`, `track_filter.h`, `java_bridge*`, `focus_identity.h` |
 | Zoom | `zoom_controller.*` |
-| Config and profiles | `config.*`, `config_path.h`, `ini_edit.*`, `profiles.*`, `profiles_io.h` |
+| Config and profiles | `config.*`, `config_path.h`, `ini_edit.*`, `profiles.*`, `profiles_io.h`, `profile_switch.h` |
 | Tray | `tray_host.*`, `tray_ipc.h`, `tray_items.*`, `tray_status.h`, `tray_app/` |
 | Settings host | `config_ui/` (`main.cpp`, `bridge_json.h`, `wind_watchdog.h`, `webview_recover.h`) |
 | Logging and diagnostics | `logging.*`, `log_queue.h`, `test_telemetry.h`, `hitch_record.*`, `tick_span.h`, `com_util.h`, `reload_gate.h` |

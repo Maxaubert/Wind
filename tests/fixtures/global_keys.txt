@@ -1,0 +1,16 @@
+# The profile-global ini keys, one per line: never stored in a profile, and every key but `profile`
+# is UI-only (the core never reads it, StripUiOnlyKeys drops it so editing it never reloads Wind).
+# Must equal kUiOnlyKeys + "profile" (src/profiles.h) and GLOBAL_KEYS (ui/src/session.js).
+# Read by tests/test_profiles.cpp and ui/tests/global-keys.nodetest.mjs.
+profile
+onboarded
+uiTheme
+uiPalette
+showAdvanced
+trayPerf
+traySliders
+traySliderOrder
+trayToggles
+trayToggleOrder
+trayPinned
+uiHighResNoticeOff

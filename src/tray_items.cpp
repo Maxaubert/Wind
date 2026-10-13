@@ -1,4 +1,5 @@
 #include "tray_items.h"
+#include "ini_edit.h"   // TrimWs
 #include <algorithm>
 namespace wind {
 const std::vector<std::string>& EligibleSliders() {
@@ -11,17 +12,13 @@ const std::vector<std::string>& EligibleToggles() {
     return k;
 }
 
-static std::string Trim(const std::string& s) {
-    size_t b = s.find_first_not_of(" \t\r\n"), e = s.find_last_not_of(" \t\r\n");
-    return b == std::string::npos ? std::string() : s.substr(b, e - b + 1);
-}
 static std::vector<std::string> SplitList(const std::string& s) {
     std::vector<std::string> out;
     size_t pos = 0;
     while (pos <= s.size()) {
         size_t c = s.find(',', pos);
         if (c == std::string::npos) c = s.size();
-        std::string t = Trim(s.substr(pos, c - pos));
+        std::string t = TrimWs(s.substr(pos, c - pos));
         if (!t.empty()) out.push_back(t);
         pos = c + 1;
     }
@@ -73,7 +70,7 @@ static std::string Join(const std::vector<TrayItem>& items, bool onlyEnabled) {
 TrayLayout ParseTrayLayout(const IniValues& v) {
     TrayLayout l;
     const std::string* p = Find(v, "trayPerf");
-    l.perf = !p || Trim(*p) == "1";   // shown by default (#329); an explicit 0 hides it
+    l.perf = !p || TrimWs(*p) == "1";   // shown by default (#329); an explicit 0 hides it
     l.sliders = ParseList(v, "traySliders", "traySliderOrder", EligibleSliders(),
                           {"colorWarmPct", "colorDimPct"}, kMaxTraySliders);
     // Every toggle item is on by default (#329): follow caret, follow focus, keep centred, engine.

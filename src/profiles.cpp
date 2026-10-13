@@ -9,17 +9,10 @@ static std::string lower(const std::string& s) {
     for (auto& c : o) if (c >= 'A' && c <= 'Z') c += 32;
     return o;
 }
-static std::string trim(const std::string& s) {
-    size_t a = s.find_first_not_of(" \t\r\n");
-    if (a == std::string::npos) return "";
-    size_t b = s.find_last_not_of(" \t\r\n");
-    return s.substr(a, b - a + 1);
-}
 bool IsGlobalProfileKey(const std::string& key) {
-    return key == "profile" || key == "onboarded" || key == "uiTheme" || key == "uiPalette" || key == "showAdvanced" ||
-           key == "trayPerf" || key == "traySliders" || key == "traySliderOrder" ||
-           key == "trayToggles" || key == "trayToggleOrder" || key == "trayPinned" ||
-           key == "uiHighResNoticeOff";
+    if (key == "profile") return true;
+    for (const char* k : kUiOnlyKeys) if (key == k) return true;
+    return false;
 }
 std::string ProfileNameError(const std::string& name) {
     if (name.empty()) return "Name cannot be empty";
@@ -53,11 +46,11 @@ static std::string StripGlobalKeyLines(const std::string& text) {
     std::istringstream in(text);
     std::string line, out;
     while (std::getline(in, line)) {
-        std::string t = trim(line);
+        std::string t = TrimWs(line);
         bool drop = false;
         if (!t.empty() && t[0] != ';' && t[0] != '#') {
             size_t eq = t.find('=');
-            if (eq != std::string::npos && IsGlobalProfileKey(trim(t.substr(0, eq)))) drop = true;
+            if (eq != std::string::npos && IsGlobalProfileKey(TrimWs(t.substr(0, eq)))) drop = true;
         }
         if (!drop) out += line + "\n";
     }
@@ -68,8 +61,7 @@ std::string MakeLiveText(const std::string& profileText, const std::string& oldL
                          const std::string& name) {
     std::string out = StripGlobalKeyLines(profileText);
     auto oldVals = ReadIniValues(oldLiveText);
-    for (const char* k : {"onboarded", "uiTheme", "uiPalette", "showAdvanced", "trayPerf", "traySliders",
-                           "traySliderOrder", "trayToggles", "trayToggleOrder", "trayPinned", "uiHighResNoticeOff"}) {
+    for (const char* k : kUiOnlyKeys) {
         auto it = oldVals.find(k);
         if (it != oldVals.end()) out = UpdateIniText(out, k, it->second);
     }
@@ -84,7 +76,7 @@ std::string ProfileTextError(const std::string& text) {
     std::istringstream in(text);
     std::string line;
     while (std::getline(in, line)) {
-        std::string t = trim(line);
+        std::string t = TrimWs(line);
         if (!t.empty() && t[0] != ';' && t[0] != '#') return "Profile file is not a Wind profile";
     }
     return "";

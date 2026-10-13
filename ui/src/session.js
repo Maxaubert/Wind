@@ -2,8 +2,9 @@
 // profile file is the saved state. No bridge, no DOM, so Playwright can import it directly.
 import { groups, groupRows, bindKeys } from './settings-schema.js';
 
-// Mirrors IsGlobalProfileKey in src/profiles.cpp: these are never part of a profile, so they never
-// count as an unsaved change. The five tray keys (#313) live in the live ini only.
+// Mirrors IsGlobalProfileKey (kUiOnlyKeys + profile, src/profiles.h): these are never part of a
+// profile, so they never count as an unsaved change. tests/global-keys.nodetest.mjs pins the two
+// lists together through tests/fixtures/global_keys.txt. The five tray keys (#313) live in the live ini only.
 // uiHighResNoticeOff (#441) is the opt-out of the High resolution cursor notice.
 export const GLOBAL_KEYS = new Set(['profile', 'onboarded', 'uiTheme', 'uiPalette', 'showAdvanced',
   'trayPerf', 'traySliders', 'traySliderOrder', 'trayToggles', 'trayToggleOrder', 'trayPinned', 'uiHighResNoticeOff']);

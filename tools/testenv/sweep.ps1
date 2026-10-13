@@ -20,18 +20,16 @@ $ErrorActionPreference = 'Stop'
 $ini = "$env:LOCALAPPDATA\Wind\magnifier.ini"
 $candidates = Get-Content $Plan -Raw | ConvertFrom-Json
 
+# lib.ps1's safe read-modify-write: every knob is cleared, then the non-empty ones are set.
 function Set-Knobs($knobs) {
-  $c = Get-Content $ini
-  foreach ($k in $knobs.PSObject.Properties) {
-    $c = $c | Where-Object { $_ -notmatch "^$($k.Name)=" }
-    if ($k.Value -ne '') { $c += "$($k.Name)=$($k.Value)" }
-  }
-  Set-Content $ini $c
+  $names = @($knobs.PSObject.Properties | ForEach-Object { $_.Name })
+  $spec = (@($knobs.PSObject.Properties | Where-Object { $_.Value -ne '' } |
+             ForEach-Object { "$($_.Name)=$($_.Value)" }) -join ';')
+  Update-IniKnobs $ini $names $spec
 }
 function Restart-Wind {
-  try { $ev = [System.Threading.EventWaitHandle]::OpenExisting('Local\Wind_QuitRequest'); [void]$ev.Set(); Start-Sleep 2 } catch {}
-  Start-Process 'C:\Program Files\Wind\Wind.exe'
-  Start-Sleep 3
+  Restart-WindClean      # lib.ps1: waits for the clean exit, then starts the installed Wind
+  Start-Sleep 1          # with Start-Wind's 2 s, the same settle time as before
 }
 # Pulls the numbers out of a suite's JSON so the log carries values, not just a verdict.
 function Read-Result($path) {

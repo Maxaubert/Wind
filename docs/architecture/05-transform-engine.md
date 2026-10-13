@@ -300,7 +300,7 @@ welded cursor has hover dead zones. Identity or no publish both produce dead zon
 [../history/POINTER-HITTEST-FINDINGS.md](../history/POINTER-HITTEST-FINDINGS.md).
 
 - **It needs UIAccess.** Availability is read from the process token's `TokenUIAccess` bit at
-  `initialize`, with zero Magnification calls; an acquire/release probe would run an identity
+  `initialize` (`ProcessHasUiAccess`, `src/uiaccess_token.h`), with zero Magnification calls; an acquire/release probe would run an identity
   write. A verified-failed publish clears `inputTransformAvailable_`, which stops Auto picking
   Transform for the desktop. Only `ERROR_ACCESS_DENIED` is permanent; any other failure is re-armed
   from the token probe when the session ends.

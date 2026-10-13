@@ -1,6 +1,7 @@
 #include "config.h"
 #include "keybind_rules.h"   // one safety rule set for every bind (#285)
 #include "ini_edit.h"   // wheel migration (#318): pure text edits
+#include "profiles.h"   // kUiOnlyKeys: what StripUiOnlyKeys drops
 #include <map>
 #include <cstring>
 #include <sstream>
@@ -14,12 +15,6 @@ namespace wind {
 static double clampd(double v, double lo, double hi) {
     if (v != v) return lo;   // NaN fails every comparison below and would pass through unclamped
     return v < lo ? lo : (v > hi ? hi : v);
-}
-static std::string trim(const std::string& s) {
-    size_t a = s.find_first_not_of(" \t\r\n");
-    if (a == std::string::npos) return "";
-    size_t b = s.find_last_not_of(" \t\r\n");
-    return s.substr(a, b - a + 1);
 }
 
 // Number parsing for ini values: the whole value must be a plain decimal number. The std::sto*
@@ -65,7 +60,7 @@ bool IsExeInList(const std::string& exeName, const std::string& list) {
         size_t comma = haystack.find(',', pos);
         std::string item = haystack.substr(pos, comma == std::string::npos ? std::string::npos
                                                                           : comma - pos);
-        item = trim(item);
+        item = TrimWs(item);
         if (!item.empty() && item == needle) return true;
         if (comma == std::string::npos) break;
         pos = comma + 1;
@@ -135,12 +130,12 @@ Config ParseConfig(const std::string& text) {
     std::string line;
     bool haveRenderScaling = false;   // issue #456: without the key, `bilinear` decides (migration)
     while (std::getline(in, line)) {
-        std::string t = trim(line);
+        std::string t = TrimWs(line);
         if (t.empty() || t[0] == ';' || t[0] == '#') continue;
         size_t eq = t.find('=');
         if (eq == std::string::npos) continue;
-        std::string key = trim(t.substr(0, eq));
-        std::string val = trim(t.substr(eq + 1));
+        std::string key = TrimWs(t.substr(0, eq));
+        std::string val = TrimWs(t.substr(eq + 1));
         if (key.empty()) continue;
         // The exe LISTS must accept an empty value: "key=" with nothing after it is how the user
         // clears one, and it is exactly what the config UI writes when the last entry is removed.
@@ -404,11 +399,11 @@ std::string StripUiOnlyKeys(const std::string& iniText) {
         size_t b = line.find_first_not_of(" \t");
         bool uiOnly = false;
         if (b != std::string::npos) {
-            // Keep in step with IsGlobalProfileKey (src/profiles.cpp) minus "profile": a test pins it.
-            for (const char* k : { "uiTheme=", "uiPalette=", "showAdvanced=", "onboarded=",
-                                   "trayPerf=", "traySliders=", "traySliderOrder=", "trayToggles=",
-                                   "trayToggleOrder=", "trayPinned=", "uiHighResNoticeOff=" }) {
-                if (line.compare(b, strlen(k), k) == 0) { uiOnly = true; break; }
+            // The global keys minus "profile" (kUiOnlyKeys, src/profiles.h): a profile switch must
+            // still reload the core.
+            for (const char* k : kUiOnlyKeys) {
+                const size_t n = strlen(k);
+                if (line.compare(b, n, k) == 0 && b + n < line.size() && line[b + n] == '=') { uiOnly = true; break; }
             }
         }
         if (!uiOnly) { out += line; out += '\n'; }
@@ -422,7 +417,7 @@ namespace wind {
 static const char* const kUiPalettes[] = { "grey", "ember", "ocean", "hicon" };
 const char* const* UiPaletteIds(int& count) { count = (int)(sizeof(kUiPalettes) / sizeof(kUiPalettes[0])); return kUiPalettes; }
 std::string NormalizeUiPalette(const std::string& value) {
-    const std::string v = trim(value);
+    const std::string v = TrimWs(value);
     for (const char* id : kUiPalettes) if (v == id) return v;
     return "grey";
 }

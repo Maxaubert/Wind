@@ -15,19 +15,12 @@
 #include "../logging.h"
 #include "../config_path.h"
 #include "../profiles_io.h"
+#include "../profile_switch.h"   // WriteSessionKeep, LaunchWindExe, RevertModelAfterFailedRelaunch
 #include "../tray_items.h"     // IniValues
 #include "../ini_edit.h"
 #include <string>
 
 namespace wind { namespace TrayApp {
-
-namespace {
-void WriteSessionKeep() {
-    HANDLE h = CreateFileW(wind::SessionKeepPath().c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
-                           FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
-}
-}  // namespace
 
 bool SetMainEngine(const std::wstring& ini, int picked, const std::map<std::string, std::string>& carry) {
     std::string oldModel;
@@ -64,25 +57,15 @@ bool SetMainEngine(const std::wstring& ini, int picked, const std::map<std::stri
     wind::Log(wind::LogLevel::Info, "tray", "engine pick: model %s -> %s (restarting Wind)",
               oldModel.empty() ? "(unset)" : oldModel.c_str(), value);
 
-    WriteSessionKeep();    // our own restart: the unsaved session (this very change) must survive it
-    const std::wstring exe = AppDir() + L"\\Wind.exe";
-    const bool haveExe = GetFileAttributesW(exe.c_str()) != INVALID_FILE_ATTRIBUTES;
-    const INT_PTR rc = haveExe
-        ? reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", exe.c_str(), nullptr, AppDir().c_str(),
-                                                  SW_SHOWNORMAL))
-        : 0;
+    wind::WriteSessionKeep();    // our own restart: the unsaved session (this very change) must survive it
+    const INT_PTR rc = wind::LaunchWindExe();
     if (rc > 32) return true;
 
     // Keep "ini model == running model" (the same rule as the Settings restartFailed path and the
     // profile switch): put the old value back and drop the marker.
-    wind::Log(wind::LogLevel::Warn, "tray", "engine pick: relaunch FAILED (rc=%lld haveExe=%d); reverting model",
-              static_cast<long long>(rc), (int)haveExe);
-    DeleteFileW(wind::SessionKeepPath().c_str());
-    wind::IniWriteLock iniLock;   // item 71
-    std::string cur;
-    if (wind::ReadLiveIni(ini, cur))
-        wind::WriteTextFileAtomic(ini, oldModel.empty() ? wind::UpdateIniText(cur, Flyout::kEngineKey, "hybrid")
-                                                        : wind::UpdateIniText(cur, Flyout::kEngineKey, oldModel));
+    wind::Log(wind::LogLevel::Warn, "tray", "engine pick: relaunch FAILED (rc=%lld); reverting model",
+              static_cast<long long>(rc));
+    wind::RevertModelAfterFailedRelaunch(ini, oldModel, nullptr);
     Notify(L"Wind", L"Could not restart Wind; kept the current engine.");
     return false;
 }

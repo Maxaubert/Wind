@@ -211,6 +211,7 @@ $script:WindExe = 'C:\Program Files\Wind\Wind.exe'
 function Stop-Wind {
   if (-not (Get-Process -Name Wind -ErrorAction SilentlyContinue)) { return }
   try {
+    # Must match kQuitEventName in src/tray_ipc.h.
     $ev = [System.Threading.EventWaitHandle]::OpenExisting('Local\Wind_QuitRequest')
     [void]$ev.Set()
   } catch { }

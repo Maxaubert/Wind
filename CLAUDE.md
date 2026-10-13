@@ -9,7 +9,7 @@ are frozen history cited from code, not kept in step with it.
 - `build.bat`: `Wind.exe` + `WindTray.exe` (uiAccess=false). Wind refuses to start without UIAccess;
   run a plain build with `WIND_ALLOW_NO_UIACCESS=1` (or `WIND_SELFTEST=1`).
 - `build.bat test`: builds and runs the doctest binary; exit 0 = pass.
-- `build.bat check`: compile-only pass over `src\*.cpp`.
+- `build.bat check`: compile-only pass over `src\*.cpp`, the tray sources and WindConfig's host.
 - `build.bat uiaccess`: the uiAccess=true build; works only signed and run from `C:\Program Files\Wind`.
 - `build.bat config`: builds the Svelte UI (`ui/` -> `ui/dist/`) and `WindConfig.exe`.
 - `build.bat tray`: `WindTray.exe` alone. It always uses the plain manifest; never make it uiAccess.
@@ -58,7 +58,8 @@ Chapter numbers refer to `docs/architecture/NN-*.md`.
   Never add `QS_RAWINPUT`/`QS_INPUT` to the mask.
 - Tick counts depend on the refresh rate; derive new ones through `TicksAtHz`/`setTickRate`.
 - A config reload rebuilds `ZoomController`; UI-only keys are stripped by `StripUiOnlyKeys` so they
-  never reload. Add new UI-only keys there.
+  never reload. Add new UI-only keys to `kUiOnlyKeys` (`src/profiles.h`) and
+  `tests/fixtures/global_keys.txt` (the UI's `GLOBAL_KEYS` is tested against it).
 
 **Cursor (07)**
 - In a transform session the lock (`lockApps`, tells) applies only while the pointer is hidden

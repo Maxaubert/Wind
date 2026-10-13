@@ -18,15 +18,13 @@
 namespace wind { namespace TrayApp {
 
 static TrayShared*  g_block = nullptr;
-static std::wstring g_appDir;
 
 TrayShared* Block() { return g_block; }
-std::wstring AppDir() { return g_appDir; }
 
 void RequestWindQuit() {
     // The same clean-exit path the installer and Settings use: Wind restores cursor, clip and
     // Magnifier state as on any quit. A window message could not reach Wind anyway (UIPI).
-    HANDLE ev = OpenEventW(EVENT_MODIFY_STATE, FALSE, L"Local\\Wind_QuitRequest");
+    HANDLE ev = OpenEventW(EVENT_MODIFY_STATE, FALSE, kQuitEventName);
     if (ev) { SetEvent(ev); CloseHandle(ev); }
     else wind::Log(wind::LogLevel::Warn, "tray", "quit: event open failed (err=%lu)", GetLastError());
 }
@@ -108,11 +106,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR cmdLine, int) {
     wind::LogInit(L"tray");
     const DWORD windPid = ParseWindPid(cmdLine);
 
-    wchar_t exe[MAX_PATH];
-    if (GetModuleFileNameW(nullptr, exe, MAX_PATH)) {
-        wchar_t* slash = wcsrchr(exe, L'\\');
-        if (slash) { *slash = L'\0'; TrayApp::g_appDir = exe; SetCurrentDirectoryW(exe); }
-    }
+    if (!wind::ExeDir().empty()) SetCurrentDirectoryW(wind::ExeDir().c_str());
 
     // The Wind we serve. No PID or a dead PID: there is nothing to show a tray for.
     HANDLE hWind = windPid ? OpenProcess(SYNCHRONIZE, FALSE, windPid) : nullptr;
