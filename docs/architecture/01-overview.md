@@ -91,7 +91,7 @@ build. See [11](11-build-test-release.md).
 | Zoom | `zoom_controller.*` |
 | Config and profiles | `config.*`, `config_path.h`, `ini_edit.*`, `profiles.*`, `profiles_io.h` |
 | Tray | `tray_host.*`, `tray_ipc.h`, `tray_items.*`, `tray_status.h`, `tray_app/` |
-| Settings host | `config_ui/` (`main.cpp`, `wind_watchdog.h`, `webview_recover.h`) |
+| Settings host | `config_ui/` (`main.cpp`, `bridge_json.h`, `wind_watchdog.h`, `webview_recover.h`) |
 | Logging and diagnostics | `logging.*`, `log_queue.h`, `test_telemetry.h`, `hitch_record.*`, `tick_span.h`, `com_util.h`, `reload_gate.h` |
 | Installer support | `installer_state.h`, `webview2_probe.h`, `version.h`, `resource.h`, `wind.rc` |
 

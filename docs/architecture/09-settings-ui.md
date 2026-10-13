@@ -48,8 +48,10 @@ onboarded.
 
 The page posts JSON with `window.chrome.webview.postMessage`; `HandleWebMessage` is the
 authoritative message list, and `ui/src/bridge.js` mirrors it (request/reply pairs become
-promises). The host's JSON escaping covers every control character: one unescaped newline makes
-the reply invalid and the page waits forever.
+promises). The host's JSON helpers live in the pure `src/config_ui/bridge_json.h`
+(`tests/test_bridge_json.cpp`): `JsonField` reads one top-level string field and nothing else (the
+page stringifies every value), and `JsonEscape` covers every control character: one unescaped
+newline makes the reply invalid and the page waits forever.
 
 | Message | Kind | Effect |
 |---|---|---|
@@ -258,8 +260,9 @@ from `window.__live` and `window.__saved` (a test adds keys through `__cfgExtra`
 and the running engine through `__running`), record every message in `window.__msgs`, push host
 messages through `window.__hostSend`, and simulate a failed Save with `__saveOk = false`.
 `__windInit` stands in for the first-paint config the host
-injects. The smooth scaling notice is covered by `scaling-notice.spec.js`; the JS bind rules have a
-node test (`npm run test:rules`). Run `npx playwright test` in `ui/`
+injects. The smooth scaling notice is covered by `scaling-notice.spec.js`. Two node tests run with
+`npm run test:rules`: the JS bind rules, and `config-defaults.nodetest.mjs`, which checks every schema
+default and slider range against the core (see [11](11-build-test-release.md)). Run `npx playwright test` in `ui/`
 (Playwright starts the Vite server). CI (`.github/workflows/build.yml`) runs the doctest suite,
 `test:rules` and the Playwright suite on every PR. The host's own pure logic is compiled into the doctest build instead.
 

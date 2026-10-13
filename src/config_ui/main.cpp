@@ -16,6 +16,7 @@
 #include <memory>
 #include "../ini_edit.h"
 #include "wind_watchdog.h"
+#include "bridge_json.h"
 #include "../mpo_boot.h"
 #include "../config_path.h"
 #include "../config.h"
@@ -29,6 +30,7 @@
 #pragma comment(lib, "gdi32.lib")
 
 using namespace Microsoft::WRL;
+using wind::JsonEscape; using wind::JsonField; using wind::JsonObjectOf;   // bridge_json.h
 static ComPtr<ICoreWebView2Controller> g_controller;
 static ComPtr<ICoreWebView2> g_webview;
 // Tells the page whether the window is maximized (it hides its 1px outline then). Sent on every
@@ -112,72 +114,6 @@ static bool WriteFileAtomic(const std::wstring& path, const std::string& text) {
 }
 static std::wstring Widen(const std::string& s) { return wind::WidenUtf8(s); }
 static std::string Narrow(const std::wstring& w) { return wind::NarrowUtf8(w); }
-static std::string JsonUnescape(const std::string& s);   // defined below; used by JsonField
-static std::string JsonField(const std::string& j, const std::string& key) {
-    // Find "key" as an object key (preceded by { or , so a value containing the literal text of a
-    // field name can't be matched), then read the quoted string after the colon, honoring backslash
-    // escapes so a value containing a quote/newline isn't truncated.
-    const std::string needle = "\"" + key + "\"";
-    size_t k = 0;
-    for (;;) {
-        k = j.find(needle, k); if (k == std::string::npos) return "";
-        size_t p = k; while (p > 0 && (j[p-1]==' '||j[p-1]=='\t'||j[p-1]=='\n'||j[p-1]=='\r')) --p;
-        char before = (p == 0) ? '{' : j[p-1];
-        if (before == '{' || before == ',') break;
-        k += needle.size();
-    }
-    size_t c = j.find(':', k + needle.size()); if (c == std::string::npos) return "";
-    size_t q1 = j.find('"', c + 1); if (q1 == std::string::npos) return "";
-    size_t i = q1 + 1;
-    for (; i < j.size(); ++i) { if (j[i] == '\\') { ++i; continue; } if (j[i] == '"') break; }
-    if (i >= j.size()) return "";
-    return JsonUnescape(j.substr(q1 + 1, i - q1 - 1));
-}
-static std::string JsonEscape(const std::string& s) {
-    // Escape the full JSON control set, not just quote/backslash: an unescaped control char (e.g. a
-    // stray newline/tab a user left in the ini) makes the emitted string invalid JSON, which
-    // PostWebMessageAsJson rejects -> the WebView never receives the config -> the UI hangs on load.
-    static const char* hex = "0123456789abcdef";
-    std::string o;
-    for (unsigned char ch : s) {
-        switch (ch) {
-            case '"':  o += "\\\""; break;
-            case '\\': o += "\\\\"; break;
-            case '\b': o += "\\b";  break;
-            case '\f': o += "\\f";  break;
-            case '\n': o += "\\n";  break;
-            case '\r': o += "\\r";  break;
-            case '\t': o += "\\t";  break;
-            default:
-                if (ch < 0x20) { o += "\\u00"; o += hex[(ch >> 4) & 0xF]; o += hex[ch & 0xF]; }
-                else o += (char)ch;
-        }
-    }
-    return o;
-}
-// Unescape a JSON string body (the chars between the quotes), reversing JsonEscape's set.
-static std::string JsonUnescape(const std::string& s) {
-    std::string o; o.reserve(s.size());
-    for (size_t i = 0; i < s.size(); ++i) {
-        if (s[i] != '\\' || i + 1 >= s.size()) { o += s[i]; continue; }
-        char n = s[++i];
-        switch (n) {
-            case '"': o += '"'; break; case '\\': o += '\\'; break; case '/': o += '/'; break;
-            case 'b': o += '\b'; break; case 'f': o += '\f'; break; case 'n': o += '\n'; break;
-            case 'r': o += '\r'; break; case 't': o += '\t'; break;
-            case 'u': {  // \uXXXX - handle the ASCII range we emit (\u00xx); pass others through literally
-                if (i + 4 < s.size()) {
-                    auto hexv = [](char c)->int{ return (c>='0'&&c<='9')?c-'0':(c>='a'&&c<='f')?c-'a'+10:(c>='A'&&c<='F')?c-'A'+10:-1; };
-                    int h1=hexv(s[i+1]),h2=hexv(s[i+2]),h3=hexv(s[i+3]),h4=hexv(s[i+4]);
-                    if (h1>=0&&h2>=0&&h3>=0&&h4>=0) { int cp=(h1<<12)|(h2<<8)|(h3<<4)|h4; if (cp<0x80){ o+=(char)cp; i+=4; break; } }
-                }
-                o += 'u'; break;  // non-ASCII/malformed: leave as-is (config values are ASCII)
-            }
-            default: o += n; break;
-        }
-    }
-    return o;
-}
 // ---- Profiles (spec 2026-08-12): the host owns all profile file ops ------------------------------
 // Current profile list as UTF-8 names + the active pointer from the live ini.
 static std::vector<std::string> ProfileNamesUtf8() {
@@ -280,12 +216,6 @@ static std::string ActiveProfileName(const std::string& liveText) {
     auto vals = wind::ReadIniValues(liveText);
     auto it = vals.find("profile");
     return it == vals.end() ? std::string() : it->second;
-}
-static std::string JsonObjectOf(const std::map<std::string, std::string>& m) {
-    std::string out = "{"; bool first = true;
-    for (auto& kv : m) { if (!first) out += ","; first = false;
-        out += "\"" + JsonEscape(kv.first) + "\":\"" + JsonEscape(kv.second) + "\""; }
-    return out + "}";
 }
 // `"values":{...},"saved":{...},"profiles":{"names":[...],"active":"..."}` (no outer braces): shared
 // by getConfig, discardSession and the window.__windInit injection. `saved` is the active profile's

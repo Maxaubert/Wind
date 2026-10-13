@@ -33,7 +33,7 @@ headlessly, so the unit tests are the only verification loop that runs everywher
   `crosshair`, `ini_edit`, `logging`, `tray_items`, `hitch_record`, `render_params` and
   `tray_app/tray_pin_logic`.
 - Header-only pure modules (`engine_pick.h`, `drag_follow.h`, `hdr_scale.h`, `keybind_rules.h`,
-  `config_ui/wind_watchdog.h`, `swallow_ledger.h`, `reload_gate.h` and others) ride in through their test files.
+  `config_ui/wind_watchdog.h`, `config_ui/bridge_json.h`, `swallow_ledger.h`, `reload_gate.h` and others) ride in through their test files.
 - One test file per module (`tests/test_<module>.cpp`). A new pure `.cpp` also goes into the
   `:test` list.
 - Files that straddle the line put their OS half under `#ifndef WIND_TESTS`. `src/config.cpp` is
@@ -45,6 +45,14 @@ headlessly, so the unit tests are the only verification loop that runs everywher
 - `tests/fixtures/keybind_cases.txt` is shared by the C++ and the JavaScript bind rules. The JS half
   is `ui/tests/keybind-rules.nodetest.mjs`, run by `npm run test:rules` in `ui/` (`node --test`, no
   browser) and by CI.
+- Config defaults are checked from both sides. `tests/test_config_defaults.cpp` walks every key of
+  `DefaultIniText()` against `Config{}` (a new template key needs an `F(key)` line there) and compares
+  `tests/fixtures/config_defaults.txt` (key, clamp min and max, default; generated from `Config{}` and
+  `ParseConfig`) with what the build computes. `ui/tests/config-defaults.nodetest.mjs` (also in
+  `npm run test:rules`) checks the Settings schema's defaults and slider ranges against that fixture;
+  a slider may be narrower than the core's clamp only when listed there with a reason. After an
+  intended change to a default or a clamp, regenerate the fixture with
+  `set WIND_UPDATE_FIXTURES=1 && build.bat test` and review its diff.
 
 **UI suite.** `ui/tests/*.spec.js` are Playwright specs, run with `npx playwright test` in `ui/`
 (the config starts the Vite server). Each spec installs a fake `window.chrome.webview` that answers
@@ -52,7 +60,7 @@ the host's messages and records them in `window.__msgs`. When you add a bridge m
 `HandleWebMessage`, extend the mocks of the specs that use it in the same change. Details in [09](09-settings-ui.md).
 
 **CI** (`.github/workflows/build.yml`, on pull requests and pushes to `main`) builds the app and
-runs the doctest suite. It also runs the JS keybind-rule test. The Playwright UI suite is a local gate for UI changes.
+runs the doctest suite. It also runs the JS node tests (`npm run test:rules`: keybind rules and config defaults). The Playwright UI suite is a local gate for UI changes.
 
 ## Local UIAccess deploy
 
