@@ -123,6 +123,40 @@ int EffectiveSamplingMode(int iniValue, bool mpoDisabledAtBoot, bool mpoDisabled
     return iniValue;
 }
 
+// ParseConfig's last pass: unsafe binds and switched-off extra keys read as unbound.
+static void SanitizeBinds(Config& c) {
+    // Reject keybinds to keys Wind must never swallow (see IsForbiddenBindVk). A bound key is
+    // eaten system-wide, so binding e.g. Backspace or the Windows key would make it unusable
+    // everywhere; treat a forbidden bind as unbound regardless of how it got into the ini.
+    // Since #285 every bind goes through the one shared rule set (src/keybind_rules.h), which also
+    // refuses typing keys alone, Shift/AltGr + a typing key and system-reserved combos: an unsafe bind
+    // in an ini (hand-edited, or from an older version) reads as unbound.
+    auto sanitizeKey = [](int& vk, int* mods) {
+        const int m = mods ? *mods : 0;
+        if (CheckKeyBind(vk, m) != BindVerdict::Ok) { vk = 0; if (mods) *mods = 0; }
+    };
+    sanitizeKey(c.zoomInVk, &c.zoomInMods);    sanitizeKey(c.zoomInVk2, &c.zoomInMods2);
+    sanitizeKey(c.zoomOutVk, &c.zoomOutMods);  sanitizeKey(c.zoomOutVk2, &c.zoomOutMods2);
+    sanitizeKey(c.recenterVk, &c.recenterMods);
+    sanitizeKey(c.cursorLockVk, &c.cursorLockMods);
+    sanitizeKey(c.panLeftVk, &c.panLeftMods);  sanitizeKey(c.panRightVk, &c.panRightMods);
+    sanitizeKey(c.panUpVk, &c.panUpMods);      sanitizeKey(c.panDownVk, &c.panDownMods);
+    sanitizeKey(c.hideCursorVk, &c.hideCursorMods);
+    sanitizeKey(c.quickZoomVk, &c.quickZoomMods);
+    auto sanitizeButton = [](int& b, int& mods) {
+        if (CheckClickBind(b, mods) != BindVerdict::Ok) { b = 0; mods = 0; }
+    };
+    sanitizeButton(c.zoomInButton, c.zoomInButtonMods);    sanitizeButton(c.zoomInButton2, c.zoomInButton2Mods);
+    sanitizeButton(c.zoomOutButton, c.zoomOutButtonMods);  sanitizeButton(c.zoomOutButton2, c.zoomOutButton2Mods);
+    if (c.zoomWheelMods != 0 && CheckWheelBind(c.zoomWheelMods) != BindVerdict::Ok) c.zoomWheelMods = 0;
+    // Extra-key switches (#318): off = unbound as far as the core is concerned (no hook tracking, no
+    // swallowing, no RegisterHotKey). The ini keeps the binding; only this parsed copy is cleared.
+    if (!c.panKeysOn) { c.panLeftVk = c.panRightVk = c.panUpVk = c.panDownVk = 0;
+                        c.panLeftMods = c.panRightMods = c.panUpMods = c.panDownMods = 0; }
+    if (!c.hideCursorOn) { c.hideCursorVk = 0; c.hideCursorMods = 0; }
+    if (!c.cursorLockOn) { c.cursorLockVk = 0; c.cursorLockMods = 0; }
+}
+
 Config ParseConfig(const std::string& text) {
     Config c;
     // A UTF-8 BOM (Notepad's "UTF-8 with BOM") would glue itself to the first key and lose it.
@@ -353,36 +387,7 @@ Config ParseConfig(const std::string& text) {
     // #148 - which the mapper's MPO-aware pan wall now guards at ANY level, so maxLevel is one
     // shared setting across all models. High levels still cost DWM re-scale time; that is a
     // perf trade the user owns, not a crash.)
-    // Reject keybinds to keys Wind must never swallow (see IsForbiddenBindVk). A bound key is
-    // eaten system-wide, so binding e.g. Backspace or the Windows key would make it unusable
-    // everywhere; treat a forbidden bind as unbound regardless of how it got into the ini.
-    // Since #285 every bind goes through the one shared rule set (src/keybind_rules.h), which also
-    // refuses typing keys alone, Shift/AltGr + a typing key and system-reserved combos: an unsafe bind
-    // in an ini (hand-edited, or from an older version) reads as unbound.
-    auto sanitizeKey = [](int& vk, int* mods) {
-        const int m = mods ? *mods : 0;
-        if (CheckKeyBind(vk, m) != BindVerdict::Ok) { vk = 0; if (mods) *mods = 0; }
-    };
-    sanitizeKey(c.zoomInVk, &c.zoomInMods);    sanitizeKey(c.zoomInVk2, &c.zoomInMods2);
-    sanitizeKey(c.zoomOutVk, &c.zoomOutMods);  sanitizeKey(c.zoomOutVk2, &c.zoomOutMods2);
-    sanitizeKey(c.recenterVk, &c.recenterMods);
-    sanitizeKey(c.cursorLockVk, &c.cursorLockMods);
-    sanitizeKey(c.panLeftVk, &c.panLeftMods);  sanitizeKey(c.panRightVk, &c.panRightMods);
-    sanitizeKey(c.panUpVk, &c.panUpMods);      sanitizeKey(c.panDownVk, &c.panDownMods);
-    sanitizeKey(c.hideCursorVk, &c.hideCursorMods);
-    sanitizeKey(c.quickZoomVk, &c.quickZoomMods);
-    auto sanitizeButton = [](int& b, int& mods) {
-        if (CheckClickBind(b, mods) != BindVerdict::Ok) { b = 0; mods = 0; }
-    };
-    sanitizeButton(c.zoomInButton, c.zoomInButtonMods);    sanitizeButton(c.zoomInButton2, c.zoomInButton2Mods);
-    sanitizeButton(c.zoomOutButton, c.zoomOutButtonMods);  sanitizeButton(c.zoomOutButton2, c.zoomOutButton2Mods);
-    if (c.zoomWheelMods != 0 && CheckWheelBind(c.zoomWheelMods) != BindVerdict::Ok) c.zoomWheelMods = 0;
-    // Extra-key switches (#318): off = unbound as far as the core is concerned (no hook tracking, no
-    // swallowing, no RegisterHotKey). The ini keeps the binding; only this parsed copy is cleared.
-    if (!c.panKeysOn) { c.panLeftVk = c.panRightVk = c.panUpVk = c.panDownVk = 0;
-                        c.panLeftMods = c.panRightMods = c.panUpMods = c.panDownMods = 0; }
-    if (!c.hideCursorOn) { c.hideCursorVk = 0; c.hideCursorMods = 0; }
-    if (!c.cursorLockOn) { c.cursorLockVk = 0; c.cursorLockMods = 0; }
+    SanitizeBinds(c);
     return c;
 }
 }
