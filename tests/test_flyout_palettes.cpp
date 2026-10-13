@@ -4,9 +4,45 @@
 #include "../third_party/doctest.h"
 #include "../src/tray_app/flyout_palettes.h"
 #include "../src/config.h"
+#include <cctype>
+#include <fstream>
+#include <sstream>
 #include <string>
+#include <vector>
 using namespace wind;
 using namespace wind::Flyout;
+
+// The generated C++ themes and the generated Settings themes must not drift apart: WindConfig paints its
+// window with kPalettes[i].dark.menu before the page loads, so it must equal that theme's --bg in
+// ui/src/design/themes.css (both generators read the same mockup palettes).
+TEST_CASE("flyout palettes: each menu background equals the Settings --bg of the same theme") {
+    std::string here = __FILE__;
+    const size_t cut = here.find_last_of("/\\");
+    std::vector<std::string> tries;
+    if (cut != std::string::npos) tries.push_back(here.substr(0, cut) + "/../ui/src/design/themes.css");
+    for (const char* up : { "", "../", "../../", "../../../" })
+        tries.push_back(std::string(up) + "ui/src/design/themes.css");
+    std::ifstream f;
+    for (const std::string& p : tries) { f.open(p); if (f.good()) break; f.clear(); }
+    REQUIRE(f.good());
+    std::stringstream ss; ss << f.rdbuf();
+    const std::string css = ss.str();
+    for (int i = 0; i < kPaletteCount; ++i) {
+        CAPTURE(kPalettes[i].id);
+        const size_t block = css.find(std::string(".wnd[data-palette=\"") + kPalettes[i].id + "\"]");
+        REQUIRE(block != std::string::npos);
+        const size_t bg = css.find("--bg:", block);
+        REQUIRE(bg != std::string::npos);
+        const size_t hash = css.find('#', bg);
+        REQUIRE(hash != std::string::npos);
+        size_t end = hash + 1;
+        while (end < css.size() && std::isxdigit(static_cast<unsigned char>(css[end]))) ++end;
+        std::string hex = css.substr(hash + 1, end - hash - 1);
+        if (hex.size() == 3) hex = std::string{hex[0], hex[0], hex[1], hex[1], hex[2], hex[2]};
+        REQUIRE(hex.size() == 6);
+        CHECK(std::stoul(hex, nullptr, 16) == kPalettes[i].dark.menu);
+    }
+}
 
 TEST_CASE("flyout palettes: one row per Settings palette, same ids in the same order") {
     int n = 0;

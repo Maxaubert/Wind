@@ -25,6 +25,7 @@
 #include "../logging.h"
 #include "../tray_ipc.h"   // kQuitEventName
 #include "../profile_switch.h"   // SwitchProfile, LaunchWindExe, session.keep: shared with the tray
+#include "../tray_app/flyout_palettes.h"   // the theme colours (generated): the window background
 #include <vector>
 #include "../resource.h"
 #pragma comment(lib, "shlwapi.lib")
@@ -214,19 +215,12 @@ static std::string UiPaletteOf(const std::string& live) {
     return wind::NormalizeUiPalette(it == v.end() ? std::string() : it->second);
 }
 // Window/WebView background from uiPalette so first paint never flashes the wrong colour. Always dark (#324:
-// light mode is gone; uiTheme is an ignored legacy key). Colours are the --bg tokens of
-// ui/src/design/themes.css (generated; keep in step when a theme is added): grey, ember, ocean, hicon.
+// light mode is gone; uiTheme is an ignored legacy key). The colour is the generated flyout palette's menu
+// background, which equals the Settings --bg token (tests/test_flyout_palettes.cpp checks it against
+// ui/src/design/themes.css). Unknown or empty is Wind grey. 0xRRGGBB -> COLORREF (0x00BBGGRR).
 static COLORREF ThemeBackground(const std::string& palette) {
-    static const COLORREF kBg[4] = {
-        RGB(0x00, 0x00, 0x00),   // grey
-        RGB(0x0c, 0x09, 0x08),   // ember
-        RGB(0x0c, 0x11, 0x17),   // ocean
-        RGB(0x00, 0x00, 0x00),   // hicon
-    };
-    int n = 0; const char* const* ids = wind::UiPaletteIds(n);
-    int idx = 0;
-    for (int i = 0; i < n && i < 4; ++i) if (palette == ids[i]) idx = i;
-    return kBg[idx];
+    const unsigned rgb = wind::Flyout::FindPalette(palette).dark.menu;
+    return RGB((rgb >> 16) & 0xff, (rgb >> 8) & 0xff, rgb & 0xff);
 }
 static void ApplyWindowTheme() {
     // A failed read keeps the palette last applied (grey before any), not a flash of the default.
