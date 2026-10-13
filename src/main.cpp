@@ -1262,6 +1262,27 @@ static void WatchForegroundAndKbHook(TickState& t) {
     }
 }
 
+// Effective held state = mouse side-button (set by the hook/raw input) OR keyboard key held.
+// Lets users without side-buttons zoom from the keyboard. When the LL keyboard hook is active it
+// is the authority for bound-key down-state (a swallowed key never appears in GetAsyncKeyState),
+// so read keyPressed(); otherwise (hook install failed / WIND_NOHOOK) fall back to polling.
+// kbHook is the tick's one read of g_input.kbHookActive().
+static bool BindKeyDown(bool kbHook, int vk) {
+    if (vk == 0) return false;
+    if (kbHook && g_input.isBoundKey(vk)) return g_input.keyPressed(vk);
+    return (GetAsyncKeyState(vk) & 0x8000) != 0;
+}
+// Modifier mask: bit 1=Ctrl, 2=Alt, 4=Shift, 8=Win. 0 = no modifiers required. Extra modifiers
+// never disqualify (so a "Ctrl+F1" combo still fires when Ctrl+Shift+F1 is held).
+static bool BindModsHeld(int mods) {
+    if ((mods & 1) && !(GetAsyncKeyState(VK_CONTROL) & 0x8000)) return false;
+    if ((mods & 2) && !(GetAsyncKeyState(VK_MENU)    & 0x8000)) return false;
+    if ((mods & 4) && !(GetAsyncKeyState(VK_SHIFT)   & 0x8000)) return false;
+    if ((mods & 8) && !((GetAsyncKeyState(VK_LWIN) & 0x8000) || (GetAsyncKeyState(VK_RWIN) & 0x8000))) return false;
+    return true;
+}
+static bool BindComboHeld(bool kbHook, int vk, int mods) { return BindKeyDown(kbHook, vk) && BindModsHeld(mods); }
+
 static void RunTick(TickState& t) {
     TickWorkTimer workTimer(t);
     const TickClock clk = BeginTick(t);
@@ -1271,27 +1292,9 @@ static void RunTick(TickState& t) {
 
     PollConfigReload(t, rawDt);
 
-    // Effective held state = mouse side-button (set by the hook/raw input) OR keyboard key held.
-    // Lets users without side-buttons zoom from the keyboard. When the LL keyboard hook is active it
-    // is the authority for bound-key down-state (a swallowed key never appears in GetAsyncKeyState),
-    // so read keyPressed(); otherwise (hook install failed / WIND_NOHOOK) fall back to polling.
     WatchForegroundAndKbHook(t);
     const bool kbHook = g_input.kbHookActive();
-    auto keyDown = [&](int vk) {
-        if (vk == 0) return false;
-        if (kbHook && g_input.isBoundKey(vk)) return g_input.keyPressed(vk);
-        return (GetAsyncKeyState(vk) & 0x8000) != 0;
-    };
-    // Modifier mask: bit 1=Ctrl, 2=Alt, 4=Shift, 8=Win. 0 = no modifiers required. Extra modifiers
-    // never disqualify (so a "Ctrl+F1" combo still fires when Ctrl+Shift+F1 is held).
-    auto modsHeld = [](int mods) {
-        if ((mods & 1) && !(GetAsyncKeyState(VK_CONTROL) & 0x8000)) return false;
-        if ((mods & 2) && !(GetAsyncKeyState(VK_MENU)    & 0x8000)) return false;
-        if ((mods & 4) && !(GetAsyncKeyState(VK_SHIFT)   & 0x8000)) return false;
-        if ((mods & 8) && !((GetAsyncKeyState(VK_LWIN) & 0x8000) || (GetAsyncKeyState(VK_RWIN) & 0x8000))) return false;
-        return true;
-    };
-    auto comboHeld = [&](int vk, int mods) { return keyDown(vk) && modsHeld(mods); };
+    auto comboHeld = [&](int vk, int mods) { return BindComboHeld(kbHook, vk, mods); };
     // Quick-zoom modifier mode (see below): holding the modifier turns a zoom-key press into a
     // quick-zoom tap. A bind that ITSELF includes that modifier (Ctrl+Alt+click with the Ctrl
     // modifier, #285) is a normal hold-to-zoom bind, so every held bind is sorted into "includes the
