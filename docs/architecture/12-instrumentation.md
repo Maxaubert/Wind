@@ -140,8 +140,7 @@ the cursor-change tax while it runs.
 | `magtrace.ps1` | Level, offsets and cadence of whichever magnifier is active |
 | `flipwatch.ps1` | Presentation mode via PresentMon (independent flip versus composed) |
 | `dwm_memprobe.ps1` | DWM memory from outside, surviving a dwm.exe crash |
-| `gpu_breakdown.ps1`, `gpu_nvsmi.ps1` | Per-process GPU counters; whole-GPU load via nvidia-smi |
-| `grid_window.ps1`, `acrylic_window.ps1`, `test_target_window.ps1` | Test targets: grid, real acrylic backdrop, solid control |
+| `test_target_window.ps1` | Flat solid-colour control target (no grid, no backdrop); grid and acrylic targets are `testenv/backdrop.ps1 -Kind` |
 
 `PresentMon.exe` is not committed; `flipwatch.ps1` expects it in `tools/`. Build and release
 scripts (`uiaccess_setup.ps1`, `installer_check.ps1`, `release.ps1`, `make_icon.mjs`) are covered
