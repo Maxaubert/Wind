@@ -320,6 +320,10 @@ the mouse hook only swallows clicks.
 The view can follow the text caret (`trackCaret`, default on) and keyboard focus (`trackFocus`,
 default off). `FocusTracker` (`src/focus_track.*`) runs on its own thread with WinEvents,
 `GetGUIThreadInfo` and UI Automation, and publishes a snapshot; the tick never calls UIA.
+`FocusTracker::run` hands that thread to `FocusRun` (`focus_track.cpp`): `setUp` (COM, UIA timeouts,
+`FocusLookup`, WinEvent hooks), `messageLoop` (wakes, 30 ms coalescing, the 16 ms backstop poll) and
+`tearDown`. A wake calls `resolve`, which reads Java carets in `readJavaCaret`, follows focus, and
+leaves the caret to `followCaret` (sources in `findCaret`: xterm input, Win32, UIA, MSAA fixes).
 
 - **Tracking never moves the pointer.** While caret or focus owns the view, the view is detached
   (`t.viewDetached`, weld off): `DetachedMap` (`src/detached_view.h`) maps the glided centre while
