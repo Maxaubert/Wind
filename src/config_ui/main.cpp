@@ -414,6 +414,37 @@ static void OnExportDiagnostics() {
         if (th) CloseHandle(th); else g_exporting = false;
     }
 }
+static void OnCreateProfile(ICoreWebView2* wv, const std::string& j) {
+    // Factory defaults by design (spec): absent keys fall back to built-in defaults. `model` is
+    // seeded EXPLICITLY so a fresh profile file always names its engine (the
+    // core's own missing-key default is hybrid, the same as the UI schema's "Auto"). Globals (onboarded=1, uiPalette, showAdvanced) carry over in MakeLiveText.
+    // fromCurrent ("Duplicate current"): the new profile is the live session as it stands, unsaved
+    // changes included, built here from the live text so `model` (and everything else) is exactly
+    // what is running: no restart, no write-back by the page, and the outgoing profile is NOT
+    // mirrored into (its unsaved changes moved to the new one).
+    const bool fromCurrent = JsonField(j, "fromCurrent") == "1";
+    const std::string name = JsonField(j, "name");
+    std::string err = ValidateNewName(name);
+    if (err.empty()) {
+        // Pre-migration guard: creating a profile before the core ever seeded would create the
+        // profiles dir (the seed latch) and then wipe the user's settings with no Default.ini
+        // capture, permanently. Seed Default from the CURRENT settings first; no-op once seeded.
+        wind::EnsureProfilesSeeded(IniPath());
+        CreateDirectoryW(wind::ProfilesDirFromIni(IniPath()).c_str(), nullptr);
+        std::string seed = "; Wind profile. Keys absent here fall back to Wind's built-in defaults.\n"
+                           "model=hybrid\n";
+        if (fromCurrent) {
+            std::string live;
+            if (!ReadIni(live)) err = "Could not read the config file";
+            else seed = wind::MakeProfileText(live);
+        }
+        if (err.empty()) {
+            if (!wind::WriteTextFileAtomic(ProfilePath(name), seed)) err = "Could not create the profile file";
+            else err = DoSwitchProfile(name, !fromCurrent);
+        }
+    }
+    PostProfiles(wv, err.empty(), err);
+}
 static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
     std::string j = Narrow(jsonW);
     std::string type = JsonField(j, "type");
@@ -442,35 +473,7 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
         const std::string err = DoSwitchProfile(JsonField(j, "name"));
         PostProfiles(wv, err.empty(), err);
     } else if (type == "createProfile") {
-        // Factory defaults by design (spec): absent keys fall back to built-in defaults. `model` is
-        // seeded EXPLICITLY so a fresh profile file always names its engine (the
-        // core's own missing-key default is hybrid, the same as the UI schema's "Auto"). Globals (onboarded=1, uiPalette, showAdvanced) carry over in MakeLiveText.
-        // fromCurrent ("Duplicate current"): the new profile is the live session as it stands, unsaved
-        // changes included, built here from the live text so `model` (and everything else) is exactly
-        // what is running: no restart, no write-back by the page, and the outgoing profile is NOT
-        // mirrored into (its unsaved changes moved to the new one).
-        const bool fromCurrent = JsonField(j, "fromCurrent") == "1";
-        const std::string name = JsonField(j, "name");
-        std::string err = ValidateNewName(name);
-        if (err.empty()) {
-            // Pre-migration guard: creating a profile before the core ever seeded would create the
-            // profiles dir (the seed latch) and then wipe the user's settings with no Default.ini
-            // capture, permanently. Seed Default from the CURRENT settings first; no-op once seeded.
-            wind::EnsureProfilesSeeded(IniPath());
-            CreateDirectoryW(wind::ProfilesDirFromIni(IniPath()).c_str(), nullptr);
-            std::string seed = "; Wind profile. Keys absent here fall back to Wind's built-in defaults.\n"
-                               "model=hybrid\n";
-            if (fromCurrent) {
-                std::string live;
-                if (!ReadIni(live)) err = "Could not read the config file";
-                else seed = wind::MakeProfileText(live);
-            }
-            if (err.empty()) {
-                if (!wind::WriteTextFileAtomic(ProfilePath(name), seed)) err = "Could not create the profile file";
-                else err = DoSwitchProfile(name, !fromCurrent);
-            }
-        }
-        PostProfiles(wv, err.empty(), err);
+        OnCreateProfile(wv, j);
     } else if (type == "deleteProfile") {
         const std::string name = JsonField(j, "name");
         std::string err;
