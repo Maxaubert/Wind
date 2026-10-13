@@ -276,15 +276,18 @@ static DWORD WINAPI ExportDiagnosticsThread(LPVOID) {
     return 0;
 }
 
+static void OnReady() {
+    if (!g_loggedReady && g_launchTick) {
+        g_loggedReady = true;
+        wind::Log(wind::LogLevel::Info, "config", "startup: first paint %llu ms after launch",
+                  (unsigned long long)(GetTickCount64() - g_launchTick));
+    }
+}
 static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
     std::string j = Narrow(jsonW);
     std::string type = JsonField(j, "type");
     if (type == "ready") {
-        if (!g_loggedReady && g_launchTick) {
-            g_loggedReady = true;
-            wind::Log(wind::LogLevel::Info, "config", "startup: first paint %llu ms after launch",
-                      (unsigned long long)(GetTickCount64() - g_launchTick));
-        }
+        OnReady();
     } else if (type == "getConfig") {
         PostWindowState(g_hwnd);
         PostConfig(wv);
