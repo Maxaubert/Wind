@@ -2849,6 +2849,34 @@ static void LogHeldState(TickState& t, bool inHeld, bool outHeld, double lvl, do
     snap("out", outHeld, t.dbgPrevOutHeld, t.dbgOutHeldSec);
 }
 
+// Tick diagnostics: frame-pacing stats (diagnostics=1).
+static void LogFramePacing(TickState& t, double lvl, double dt, bool woke) {
+    // Frame-pacing diagnostics: a 2 s window of loop-interval stats (dt = time between ticks =
+    // the on-screen frame interval, since Present(1,0) paces while zoomed). maxDt and the hitch
+    // count expose microstutter that an average would hide.
+    if (t.cfg.diagnostics && !woke) {
+        const double target = 1.0 / (t.hz > 0 ? t.hz : 60);
+        t.diagSumDt += dt; t.diagFrames++; t.diagAccum += dt;
+        if (dt > t.diagMaxDt) t.diagMaxDt = dt;
+        if (dt > target * 1.5) t.diagHitches++;
+        if (t.diagAccum >= 2.0 && t.diagFrames > 0) {
+            // Render/present CPU split from the engine (render model only): avg/max ms building
+            // the frame vs blocked inside Present - the present column is where GPU contention
+            // with a game shows up (issue #148).
+            double rSum = 0, rMax = 0, pSum = 0, pMax = 0; int pf = 0, skips = 0;
+            if (auto* rm = dynamic_cast<RenderModel*>(t.model))
+                rm->engine().debugPerf(rSum, rMax, pSum, pMax, pf, skips, /*reset=*/true);
+            DiagLog("zoom=%.2f frames=%d ~fps=%.0f avgDt=%.2fms maxDt=%.2fms hitches>1.5x=%d "
+                    "render(avg=%.2f max=%.2f)ms present(avg=%.2f max=%.2f)ms presented=%d gateSkips=%d",
+                    lvl, t.diagFrames, t.diagFrames / t.diagAccum,
+                    t.diagSumDt / t.diagFrames * 1000.0, t.diagMaxDt * 1000.0, t.diagHitches,
+                    pf > 0 ? rSum / pf : 0.0, rMax, pf > 0 ? pSum / pf : 0.0, pMax, pf, skips);
+            t.diagAccum = 0.0; t.diagSumDt = 0.0; t.diagMaxDt = 0.0;
+            t.diagFrames = 0; t.diagHitches = 0;
+        }
+    }
+}
+
 static void RunTick(TickState& t) {
     TickWorkTimer workTimer(t);
     const TickClock clk = BeginTick(t);
@@ -2883,30 +2911,7 @@ static void RunTick(TickState& t) {
 
     LogHeldState(t, inHeld, outHeld, lvl, dt);
 
-    // Frame-pacing diagnostics: a 2 s window of loop-interval stats (dt = time between ticks =
-    // the on-screen frame interval, since Present(1,0) paces while zoomed). maxDt and the hitch
-    // count expose microstutter that an average would hide.
-    if (t.cfg.diagnostics && !woke) {
-        const double target = 1.0 / (t.hz > 0 ? t.hz : 60);
-        t.diagSumDt += dt; t.diagFrames++; t.diagAccum += dt;
-        if (dt > t.diagMaxDt) t.diagMaxDt = dt;
-        if (dt > target * 1.5) t.diagHitches++;
-        if (t.diagAccum >= 2.0 && t.diagFrames > 0) {
-            // Render/present CPU split from the engine (render model only): avg/max ms building
-            // the frame vs blocked inside Present - the present column is where GPU contention
-            // with a game shows up (issue #148).
-            double rSum = 0, rMax = 0, pSum = 0, pMax = 0; int pf = 0, skips = 0;
-            if (auto* rm = dynamic_cast<RenderModel*>(t.model))
-                rm->engine().debugPerf(rSum, rMax, pSum, pMax, pf, skips, /*reset=*/true);
-            DiagLog("zoom=%.2f frames=%d ~fps=%.0f avgDt=%.2fms maxDt=%.2fms hitches>1.5x=%d "
-                    "render(avg=%.2f max=%.2f)ms present(avg=%.2f max=%.2f)ms presented=%d gateSkips=%d",
-                    lvl, t.diagFrames, t.diagFrames / t.diagAccum,
-                    t.diagSumDt / t.diagFrames * 1000.0, t.diagMaxDt * 1000.0, t.diagHitches,
-                    pf > 0 ? rSum / pf : 0.0, rMax, pf > 0 ? pSum / pf : 0.0, pMax, pf, skips);
-            t.diagAccum = 0.0; t.diagSumDt = 0.0; t.diagMaxDt = 0.0;
-            t.diagFrames = 0; t.diagHitches = 0;
-        }
-    }
+    LogFramePacing(t, lvl, dt, woke);
 
     // Test telemetry (issue #225): one CSV sample per tick when the harness enabled it. The
     // engine queries run only on this path - the disabled cost is the single enabled() branch.
