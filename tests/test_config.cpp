@@ -1,6 +1,6 @@
 #include "doctest.h"
-#include "../src/config.h"
-#include "../src/ini_edit.h"
+#include "config.h"
+#include "ini_edit.h"
 using namespace wind;
 
 TEST_CASE("defaults when text is empty") {

@@ -143,7 +143,7 @@ smoothness, which is why the transform model stays the default for games.
 
 Both engines are built at startup, so `model` and the per-category keys apply live on the config
 reload (#455); no restart. The pick rules are in [03](architecture/03-engines.md) and
-`src/engine_pick.h`.
+`src/engine/engine_pick.h`.
 
 | config | ini | behaviour today |
 |---|---|---|

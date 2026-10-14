@@ -9,7 +9,7 @@
   // #285: row.buttonModsKey = modifier mask for the button slot (left/right/middle click need one);
   // The scroll-wheel row is gone (#318: wheel up/down are zoom bindings on the Hotkeys page, see
   // controls/Bindings.svelte); this capture stays for the onboarding. Every capture goes through the shared
-  // safety rules (keybindRules.js, mirrored from src/keybind_rules.h); a refused press keeps the row
+  // safety rules (keybindRules.js, mirrored from src/input/keybind_rules.h); a refused press keeps the row
   // listening and says why, on screen and to screen readers.
   import { checkKeyBind, checkClickBind, refusalText } from './keybindRules.js';
   import { MOD_BITS, vkName, BUTTON_NAMES, shortButtonName } from './bindNames.js';
@@ -125,7 +125,7 @@
   // Capture on keydown so a combo (Ctrl+Alt+F1) is captured the instant the main key fires while
   // all modifiers are held. Modifier-only presses (Ctrl/Alt/Shift/Win) are skipped so we wait for
   // the main key. keyCode 0 is ignored (Fn/IME/synthesized events would otherwise clear the binding).
-  // checkKeyBind (keybindRules.js, the mirror of src/keybind_rules.h) refuses keys that must never be
+  // checkKeyBind (keybindRules.js, the mirror of src/input/keybind_rules.h) refuses keys that must never be
   // bound, such as Backspace; a refusal stays armed so the user can press a different key.
   function onKey(e) {
     if (!armed) return;

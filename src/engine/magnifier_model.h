@@ -27,7 +27,7 @@ struct PresentExtras {
     // The view is a pure function of the real pointer this tick (free cursor, mouse-owned, no
     // walls, no quiesce): the transform model may hand the pan to DWM (issue #369).
     bool  dwmCentre = false;
-    // Warm-keeping pulses may run (src/tx_warm.h): only where the pointer is not free (locked
+    // Warm-keeping pulses may run (src/transform/tx_warm.h): only where the pointer is not free (locked
     // mouselook, Inspect). A free pointer's detached view (caret, focus, keyboard pan) is a desktop
     // app, where the pulse's 1 px flash is the visible defect and there is no game frame rate to wake.
     bool  warmAllowed = true;

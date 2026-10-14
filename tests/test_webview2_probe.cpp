@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/webview2_probe.h"
+#include "webview2_probe.h"
 
 using namespace wind;
 

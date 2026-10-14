@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/sprite_layer.h"
+#include "sprite_layer.h"
 
 using wind::PickSpriteLayer;
 using wind::SpriteLayer;

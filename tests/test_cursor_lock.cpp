@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/cursor_lock.h"
+#include "cursor_lock.h"
 
 using wind::CursorLockController;
 

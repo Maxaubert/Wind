@@ -11,7 +11,7 @@ are frozen history cited from code, not kept in step with it.
 - `build.bat`: `Wind.exe` + `WindTray.exe` (uiAccess=false). Wind refuses to start without UIAccess;
   run a plain build with `WIND_ALLOW_NO_UIACCESS=1` (or `WIND_SELFTEST=1`).
 - `build.bat test`: builds and runs the doctest binary; exit 0 = pass.
-- `build.bat check`: compile-only pass over `src\*.cpp`, the tray sources and WindConfig's host.
+- `build.bat check`: compile-only pass over Wind.exe's sources, the tray sources and WindConfig's host.
 - `build.bat uiaccess`: the uiAccess=true build; works only signed and run from `C:\Program Files\Wind`.
 - `build.bat config`: builds the Svelte UI (`ui/` -> `ui/dist/`) and `WindConfig.exe`.
 - `build.bat tray`: `WindTray.exe` alone. It always uses the plain manifest; never make it uiAccess.
@@ -22,8 +22,13 @@ are frozen history cited from code, not kept in step with it.
 ## Stack and map
 - Three binaries: `Wind.exe` (core, UIAccess when installed), `WindConfig.exe` (WebView2 settings),
   `WindTray.exe` (tray flyout, never UIAccess). Settings travel only through `magnifier.ini`. See 01.
+- `src/` is grouped by area (`core`, `engine`, `render`, `transform`, `color`, `input`, `cursor`,
+  `track`, `zoom`, `config`, `tray`, `platform`, `tray_app`, `config_ui`; map in 01). Include a Wind
+  header by bare name (`"config.h"`, never a path); `build.bat`'s `WIND_INC` puts every folder on the
+  include path, and a new folder goes there (and in `CORE_SRC` if Wind.exe compiles it). `version.h`,
+  `resource.h` and `wind.rc` stay in `src/` itself. See 11.
 - Engines behind `IMagnifierModel`, chosen by `model=` (applies live: both engines are always built): `hybrid` (Auto, default)
-  picks `render` or `transform` per session via the pure `src/engine_pick.h`. `model=magnify` is
+  picks `render` or `transform` per session via the pure `src/engine/engine_pick.h`. `model=magnify` is
   parsed as `hybrid`; the magnify engine is retired, do not revive it. See 03, 04, 05.
 - Profiles: `profiles\<Name>.ini` next to the live ini; the live ini is the session, the profile file
   the saved state. See 08.
@@ -44,7 +49,7 @@ Chapter numbers refer to `docs/architecture/NN-*.md`.
 
 **Magnification runtime (05)**
 - Never call `MagInitialize`/`MagUninitialize` directly; use `wind::MagApiAcquire()`/`MagApiRelease()`
-  (`src/mag_host.*`). Independent pairs break each other: two cursors, or transform writes returning
+  (`src/transform/mag_host.*`). Independent pairs break each other: two cursors, or transform writes returning
   FALSE. Keep every hold symmetric.
 - The COMPOSED pointer (DWM drawing it into the magnified frame) taxes every cursor change any app
   makes; a context alone does not (measured 2026-10-07). The transform engine builds the context +
@@ -60,13 +65,13 @@ Chapter numbers refer to `docs/architecture/NN-*.md`.
   Never add `QS_RAWINPUT`/`QS_INPUT` to the mask.
 - Tick counts depend on the refresh rate; derive new ones through `TicksAtHz`/`setTickRate`.
 - A config reload rebuilds `ZoomController`; UI-only keys are stripped by `StripUiOnlyKeys` so they
-  never reload. Add new UI-only keys to `kUiOnlyKeys` (`src/profiles.h`) and
+  never reload. Add new UI-only keys to `kUiOnlyKeys` (`src/config/profiles.h`) and
   `tests/fixtures/global_keys.txt` (the UI's `GLOBAL_KEYS` is tested against it).
 
 **Cursor (07)**
 - In a transform session the lock (`lockApps`, tells) applies only while the pointer is hidden
   (`LockApplies`); gates read `t.lockEff`, not `t.detector.locked()`. See 07.
-- Native cursor (the transform engine's only cursor, both sampling modes; `src/native_cursor.h`): DWM
+- Native cursor (the transform engine's only cursor, both sampling modes; `src/transform/native_cursor.h`): DWM
   draws the real pointer via Wind's cursor lens (a hidden `WC_MAGNIFIER` window, built on the tick
   thread at idle) and centres the view itself (`SetFullscreenMagnifierOffsetsDWMUpdated`). While DWM
   centres, never write a same-level transform or warm pulse. Never use a public write to get the
@@ -95,7 +100,7 @@ Chapter numbers refer to `docs/architecture/NN-*.md`.
 - Bound keys are swallowed by LL hooks with balanced down/up; release swallowed keys on teardown.
 - The keyboard hook is the authority for bound-key state; only the mouse hook skips Wind's own
   injections (`kWindInjectTag`), the keyboard hook counts the Alt/Win mask key.
-- Bind rules live in `src/keybind_rules.h` and `ui/src/lib/keybindRules.js`, both tested against
+- Bind rules live in `src/input/keybind_rules.h` and `ui/src/lib/keybindRules.js`, both tested against
   `tests/fixtures/keybind_cases.txt`: change both.
 - LL hooks cannot block Raw Input, so bound keys still reach raw-input games. No driver-based fix.
 
@@ -105,7 +110,7 @@ Chapter numbers refer to `docs/architecture/NN-*.md`.
 - Keep the 2 px right/bottom clamp and the 1-texel left/top floor in `ComputeMagTransform` (TDR and
   grey-edge classes).
 - MPO on + nearest sampling overflows a 16-bit driver field above ~9.3x at the far right unless the
-  MPO guard (`src/mpo_guard.h`, default on) keeps apps off planes while zoomed. Never turn the guard
+  MPO guard (`src/transform/mpo_guard.h`, default on) keeps apps off planes while zoomed. Never turn the guard
   off with nearest on an MPO boot; walls come back only when it is off.
 - `txWarmMode`/`txWarmHz`: every warm write is a full DWM re-render; composition-rate metrics miss
   the pan-start hitch. Field-verify in a game.

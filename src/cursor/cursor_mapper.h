@@ -18,7 +18,7 @@ class CursorMapper {
 public:
     // The lens centre follows its target exactly. (The old cursorSmoothing eased it toward the
     // target over several frames: lag, never momentum, so it was removed in #430. Momentum after a
-    // flick is the pan glide, src/pan_glide.h.)
+    // flick is the pan glide, src/cursor/pan_glide.h.)
     CursorMapper(int screenW, int screenH);
     void reset(double centerX, double centerY);    // pin both target + rendered center
     // Pan wall (issue #148): upper bound for the source rect's LEFT edge (desktop px), or a

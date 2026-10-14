@@ -1,8 +1,8 @@
 // tests/test_render_params.cpp - FillRenderParams / CursorModeFromCfg (render_params.cpp) and the
 // pure MPO ghost settle decision (mpo_guard.h).
 #include "doctest.h"
-#include "../src/render_model.h"
-#include "../src/mpo_guard.h"
+#include "render_model.h"
+#include "mpo_guard.h"
 using namespace wind;
 
 static MapResult Map() {

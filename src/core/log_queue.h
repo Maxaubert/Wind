@@ -1,4 +1,4 @@
-// src/log_queue.h
+// src/core/log_queue.h
 // Bounded multi-producer / single-consumer queue for log lines (#361). Pure (no <windows.h>).
 //
 // The point is that a producer NEVER waits: not on the disk, not on the consumer, not on a lock

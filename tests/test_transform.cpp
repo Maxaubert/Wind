@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/transform.h"
+#include "transform.h"
 
 TEST_CASE("ComputeOffsetF centers sub-pixel at 2x") {
     wind::OffsetF o = wind::ComputeOffsetF(960.25, 540.0, 2.0, 1920, 1080);

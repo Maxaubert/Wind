@@ -14,20 +14,20 @@
 #include <sstream>
 #include <map>
 #include <memory>
-#include "../ini_edit.h"
+#include "ini_edit.h"
 #include "wind_watchdog.h"
 #include "bridge_json.h"
-#include "../mpo_boot.h"
-#include "../config_path.h"
-#include "../config.h"
-#include "../profiles.h"
-#include "../profiles_io.h"
-#include "../logging.h"
-#include "../tray_ipc.h"   // kQuitEventName
-#include "../profile_switch.h"   // SwitchProfile, LaunchWindExe, session.keep: shared with the tray
-#include "../tray_app/flyout_palettes.h"   // the theme colours (generated): the window background
+#include "mpo_boot.h"
+#include "config_path.h"
+#include "config.h"
+#include "profiles.h"
+#include "profiles_io.h"
+#include "logging.h"
+#include "tray_ipc.h"   // kQuitEventName
+#include "profile_switch.h"   // SwitchProfile, LaunchWindExe, session.keep: shared with the tray
+#include "flyout_palettes.h"   // the theme colours (generated): the window background
 #include <vector>
-#include "../resource.h"
+#include "resource.h"
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "comdlg32.lib")
 #pragma comment(lib, "gdi32.lib")
@@ -88,7 +88,7 @@ static bool WindRunning() {
 // Launch the magnifier that sits next to us (wind::LaunchWindExe). Returns false when Wind.exe is
 // missing or ShellExecuteW failed (<= 32). Relaunching while Wind is ALREADY running is how a model
 // switch restarts it: the new instance evicts the incumbent through the quit event (AcquireSingleInstance
-// in src/main.cpp). No extra IPC is needed here.
+// in src/core/main.cpp). No extra IPC is needed here.
 static bool LaunchWind() { return wind::LaunchWindExe() > 32; }
 // Resolved at first call (and cached) so reads and writes always land on the same file the Wind
 // core uses. Falls back to %LOCALAPPDATA%\Wind\magnifier.ini when the exe dir is read-only.

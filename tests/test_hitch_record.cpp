@@ -1,6 +1,6 @@
 // tests/test_hitch_record.cpp - hitch classification and the hitch line (#361).
 #include "doctest.h"
-#include "../src/hitch_record.h"
+#include "hitch_record.h"
 #include <string>
 using namespace wind;
 

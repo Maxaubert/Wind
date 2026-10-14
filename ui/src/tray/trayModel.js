@@ -1,5 +1,5 @@
 // Tray menu lists (pure, no DOM): which quick controls the tray flyout shows and in what order.
-// Mirrors src/tray_items.cpp (ParseTrayLayout / WriteTrayLayout) so the page and WindTray read the
+// Mirrors src/tray/tray_items.cpp (ParseTrayLayout / WriteTrayLayout) so the page and WindTray read the
 // same five global ini keys the same way: trayPerf, traySliders, traySliderOrder, trayToggles,
 // trayToggleOrder. Items and limits: docs/specs/2026-10-01-tray-flyout-design.md.
 

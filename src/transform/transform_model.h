@@ -14,7 +14,7 @@
 namespace wind {
 class TransformModel : public IMagnifierModel {
 public:
-    // Sessions draw DWM's own pointer (issue #369, src/native_cursor.h); the sprite window is the
+    // Sessions draw DWM's own pointer (issue #369, src/transform/native_cursor.h); the sprite window is the
     // Inspect crosshair, and zorderBand / cursorBandAuto place that window. The legacy sprite session
     // (txNativeCursor=0, issue #463) paints the system cursor into it instead.
     TransformModel(bool fastPan, bool smoothPan, int zorderBand, bool cursorBandAuto = false)

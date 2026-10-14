@@ -3,13 +3,13 @@
 // owns the window. The old owner-drawn HMENU that lived here is gone (menus cannot host sliders).
 #include "tray_app.h"
 #include "flyout_palettes.h"
-#include "../logging.h"
-#include "../config_path.h"
-#include "../profiles_io.h"
-#include "../profile_switch.h"   // SwitchProfile: shared with Settings
-#include "../config.h"
-#include "../ini_edit.h"
-#include "../tray_ipc.h"
+#include "logging.h"
+#include "config_path.h"
+#include "profiles_io.h"
+#include "profile_switch.h"   // SwitchProfile: shared with Settings
+#include "config.h"
+#include "ini_edit.h"
+#include "tray_ipc.h"
 #include <shellapi.h>
 #include <commctrl.h>
 #pragma comment(lib, "comctl32.lib")

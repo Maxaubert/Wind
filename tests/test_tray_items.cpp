@@ -1,7 +1,7 @@
 #include "doctest.h"
-#include "../src/tray_items.h"
-#include "../src/profiles.h"
-#include "../src/ini_edit.h"
+#include "tray_items.h"
+#include "profiles.h"
+#include "ini_edit.h"
 using namespace wind;
 
 static std::vector<std::string> Keys(const std::vector<TrayItem>& v, bool onlyOn) {

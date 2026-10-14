@@ -21,7 +21,7 @@ that can happen:
 
 ## The model interface
 
-Every engine implements `wind::IMagnifierModel` (`src/magnifier_model.h`). `RunTick` drives
+Every engine implements `wind::IMagnifierModel` (`src/engine/magnifier_model.h`). `RunTick` drives
 whatever `TickState::model` points at:
 
 | Method | Purpose |
@@ -35,7 +35,7 @@ whatever `TickState::model` points at:
 
 `model` in `magnifier.ini` takes `hybrid`, `render` or `transform`. Anything else, including an old
 `model=magnify`, reads as `hybrid`. Both engines are built at startup whatever it says (`mRender`,
-`mTransform`), and `model` only decides the pick (`PickTransformFor`, `src/engine_pick.h`): a change
+`mTransform`), and `model` only decides the pick (`PickTransformFor`, `src/engine/engine_pick.h`): a change
 applies on the config reload, at the next zoom-in or, while zoomed, through the instant switch. A
 pinned Render still falls back to transform when the render device is lost or its overlay could not
 follow the monitor. `running.model` says `live`; if one engine fails to init it names the one left,
@@ -44,15 +44,15 @@ and only then does an engine change relaunch Wind (Settings' Restart Wind button
 | Model | What it is | For |
 |---|---|---|
 | `hybrid` ("Auto") | `TickState` holds a `RenderModel` (`mRender`) and a `TransformModel` (`mTransform`) and points `model` at one per session | The default |
-| `render` | DXGI Desktop Duplication + D3D11 onto a click-through, capture-excluded overlay (`src/render_engine.*`) | Sub-pixel pan, cursor in the same frame, shell coverage. [04](04-render-engine.md) |
-| `transform` | The DWM fullscreen transform, no presents of its own (`src/transform_model.cpp`) | Games, protected video and rotated outputs, plus the desktop when `desktopTransform=1` and the input transform is verified. [05](05-transform-engine.md) |
+| `render` | DXGI Desktop Duplication + D3D11 onto a click-through, capture-excluded overlay (`src/render/render_engine.*`) | Sub-pixel pan, cursor in the same frame, shell coverage. [04](04-render-engine.md) |
+| `transform` | The DWM fullscreen transform, no presents of its own (`src/transform/transform_model.cpp`) | Games, protected video and rotated outputs, plus the desktop when `desktopTransform=1` and the input transform is verified. [05](05-transform-engine.md) |
 
 If the transform half fails to initialize, Auto logs a warning and runs render only; every pick
 site checks `t.mTransform`.
 
 ## The pick
 
-`wind::ShouldPickTransform` (`src/engine_pick.h`) is header-only, has no `<windows.h>` and is
+`wind::ShouldPickTransform` (`src/engine/engine_pick.h`) is header-only, has no `<windows.h>` and is
 doctested. It runs at the zoom-in edge and every zoomed tick, with the same `EnginePickInputs`.
 In order:
 

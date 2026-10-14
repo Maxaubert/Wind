@@ -101,7 +101,7 @@ public:
     // DOWN for that button AFTER it (a queued raw UP processed after the hook's next DOWN would
     // cancel a hold that is physically down - no auto-repeat re-asserts a button).
     // eventTimeMs is GetMessageTime() of the WM_INPUT; the guard compares event times with the
-    // hook's own stamps (src/event_order.h), never the wall clock, so a main-thread stall is harmless.
+    // hook's own stamps (src/input/event_order.h), never the wall clock, so a main-thread stall is harmless.
     void rawButtonUp(int xbuttonId, uint32_t eventTimeMs);
     // Hook-thread event-time stamps (KBDLLHOOKSTRUCT / MSLLHOOKSTRUCT .time) consumed by the guards.
     void noteHookKeyDown(int vk, uint32_t eventTimeMs);
@@ -194,7 +194,7 @@ public:
     // yet. Tracking uses it: only keyboard-driven caret/focus changes move the view (issue #289).
     unsigned long long lastAnyKeyDownMs() const { return kbLastAnyDownMs_.load(std::memory_order_relaxed); }
     void noteAnyKeyDown(unsigned long long ms) { kbLastAnyDownMs_.store(ms, std::memory_order_relaxed); }
-    // A fresh down of a non-modifier key (no ups, no auto-repeat; src/typing_key.h). Ends the click quiet
+    // A fresh down of a non-modifier key (no ups, no auto-repeat; src/input/typing_key.h). Ends the click quiet
     // period (#328): releasing Ctrl/Shift after a Ctrl/Shift+click must not count as typing (review #349).
     unsigned long long lastTypingKeyDownMs() const { return kbLastTypingDownMs_.load(std::memory_order_relaxed); }
     void noteTypingKeyDown(unsigned long long ms) { kbLastTypingDownMs_.store(ms, std::memory_order_relaxed); }

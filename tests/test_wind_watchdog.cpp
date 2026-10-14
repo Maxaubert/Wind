@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/config_ui/wind_watchdog.h"
+#include "wind_watchdog.h"
 
 using wind::ShouldCloseOnWindGone;
 

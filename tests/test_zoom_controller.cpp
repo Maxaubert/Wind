@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/zoom_controller.h"
+#include "zoom_controller.h"
 #include <cmath>
 using namespace wind;
 

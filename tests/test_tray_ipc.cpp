@@ -1,5 +1,5 @@
 #include "../third_party/doctest.h"
-#include "../src/tray_ipc.h"
+#include "tray_ipc.h"
 #include <memory>
 
 using namespace wind;

@@ -8,7 +8,7 @@
 //   set WIND_UPDATE_FIXTURES=1 && build.bat test
 // then check the diff and run `npm run test:rules` in ui/.
 #include "doctest.h"
-#include "../src/config.h"
+#include "config.h"
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>

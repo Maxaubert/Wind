@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/shell_desktop.h"
+#include "shell_desktop.h"
 
 // Issue #172: the shell desktop (Win+D) is a caption-less monitor-covering window, so only this
 // class test keeps the hybrid pick from reading it as a borderless fullscreen game.

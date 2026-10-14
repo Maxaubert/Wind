@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/cursor_tint_pixels.h"
+#include "cursor_tint_pixels.h"
 #include <vector>
 using namespace wind;
 

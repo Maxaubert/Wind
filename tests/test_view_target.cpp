@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/view_target.h"
+#include "view_target.h"
 using namespace wind;
 
 static ViewOwnerInputs Base() {

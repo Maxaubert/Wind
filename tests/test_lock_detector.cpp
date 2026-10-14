@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/lock_detector.h"
+#include "lock_detector.h"
 
 using wind::LockDetector;
 

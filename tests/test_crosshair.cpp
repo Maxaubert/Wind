@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/crosshair.h"
+#include "crosshair.h"
 using namespace wind;
 
 static uint32_t at(const std::vector<uint32_t>& px, int n, int x, int y) { return px[(size_t)y * n + x]; }

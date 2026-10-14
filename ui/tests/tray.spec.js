@@ -1,6 +1,6 @@
 // Settings "Tray menu" tab (#313): the Performance switch, the Sliders and Toggles lists with
 // check, drag and keyboard reorder, the four-slider cap, and the five global ini keys written
-// through the mock bridge. Plus the pure list model that mirrors src/tray_items.cpp.
+// through the mock bridge. Plus the pure list model that mirrors src/tray/tray_items.cpp.
 import { test, expect } from '@playwright/test';
 import { parseTray, parseList, serialiseList, MAX_SLIDERS, SLIDERS, TOGGLES } from '../src/tray/trayModel.js';
 

@@ -1,5 +1,5 @@
 #include "../third_party/doctest.h"
-#include "../src/gain_learner.h"
+#include "gain_learner.h"
 #include <cmath>
 
 using namespace wind;

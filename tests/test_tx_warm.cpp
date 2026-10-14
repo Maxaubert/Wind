@@ -1,9 +1,9 @@
 #include "../third_party/doctest.h"
-#include "../src/tx_warm.h"
+#include "tx_warm.h"
 
 using namespace wind;
 
-// The pan-start hitch these guard is described in src/tx_warm.h with the measurements.
+// The pan-start hitch these guard is described in src/transform/tx_warm.h with the measurements.
 
 static TxWarmIn Resting(double level = 7.0) {
     TxWarmIn in;

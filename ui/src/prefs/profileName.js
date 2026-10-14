@@ -1,4 +1,4 @@
-// Profile name rules, mirroring the host's ValidateNewName (src/config_ui/main.cpp, src/profiles.*): a
+// Profile name rules, mirroring the host's ValidateNewName (src/config_ui/main.cpp, src/config/profiles.*): a
 // profile is a file, so the name must be a legal Windows file name. Pure, no DOM, so tests import it.
 const forbidden = /[\\/:*?"<>|]/;
 const reserved = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;

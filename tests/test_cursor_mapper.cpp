@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/cursor_mapper.h"
+#include "cursor_mapper.h"
 
 using wind::CursorMapper;
 

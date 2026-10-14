@@ -1,6 +1,6 @@
 #include "../third_party/doctest.h"
-#include "../src/tray_status.h"
-#include "../src/tick_stats.h"
+#include "tray_status.h"
+#include "tick_stats.h"
 #include <string>
 
 using namespace wind;

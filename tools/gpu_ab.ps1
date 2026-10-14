@@ -119,7 +119,7 @@ public static class GA {
   }
   public static void StopMotion() { _mrun = false; if (_mt != null) _mt.Join(1000); _mt = null; }
   public static bool QuitWind() {
-    // Must match kQuitEventName in src/tray_ipc.h.
+    // Must match kQuitEventName in src/tray/tray_ipc.h.
     IntPtr h = OpenEvent(0x0002, false, "Local\\Wind_QuitRequest");
     if (h == IntPtr.Zero) return false;
     bool ok = SetEvent(h); CloseHandle(h); return ok;

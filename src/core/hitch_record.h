@@ -1,4 +1,4 @@
-// src/hitch_record.h
+// src/core/hitch_record.h
 // Per-tick flight recorder and hitch classifier (#361). Pure (no <windows.h>): the tick loop fills
 // TickRec with QPC spans and thread CPU time; this file decides what a long frame was and renders
 // the log line. Unit-tested in tests/test_hitch_record.cpp.

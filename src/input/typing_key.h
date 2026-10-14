@@ -1,4 +1,4 @@
-// src/typing_key.h - which keystrokes count as typing for the click quiet period (#328, review #349).
+// src/input/typing_key.h - which keystrokes count as typing for the click quiet period (#328, review #349).
 //
 // #328 ends the 1 s click quiet period early when a key goes down after the click (clicking into Notepad
 // and typing at once). Its first stamp was the tracking key clock, which also counts key-ups and

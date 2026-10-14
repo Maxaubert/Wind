@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/config_ui/webview_recover.h"
+#include "webview_recover.h"
 #include <cstring>
 using namespace wind;
 

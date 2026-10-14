@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/config_ui/bridge_json.h"
+#include "bridge_json.h"
 using namespace wind;
 
 TEST_CASE("JsonField reads the string fields the page sends") {

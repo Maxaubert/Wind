@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { GLOBAL_KEYS } from '../src/session.js';
 
 // Plain node:test, no browser: run with `npm run test:rules` (CI runs it too).
-// GLOBAL_KEYS must be the same set as the C++ kUiOnlyKeys + "profile" (src/profiles.h); both sides
+// GLOBAL_KEYS must be the same set as the C++ kUiOnlyKeys + "profile" (src/config/profiles.h); both sides
 // are checked against this shared fixture.
 test('UI global keys match the shared list', () => {
   const here = dirname(fileURLToPath(import.meta.url));

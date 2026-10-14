@@ -1,7 +1,7 @@
 #include "doctest.h"
-#include "../src/transform.h"
-#include "../src/cursor_mapper.h"
-#include "../src/config.h"
+#include "transform.h"
+#include "cursor_mapper.h"
+#include "config.h"
 
 using namespace wind;
 

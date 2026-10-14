@@ -1,4 +1,4 @@
-// src/caret_rect.h - trim a caret rect that spans more than the caret's own line (issue #337).
+// src/track/caret_rect.h - trim a caret rect that spans more than the caret's own line (issue #337).
 //
 // Chromium web editors (Outlook on the web) report the caret as one line right after Enter
 // (field: 1927,1159 h44), but from the first typed character as a rect that also covers the blank

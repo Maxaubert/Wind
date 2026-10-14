@@ -1,4 +1,4 @@
-// src/focus_identity.h
+// src/track/focus_identity.h
 // Which focus a caret baseline belongs to. Pure (no <windows.h>): handles travel as void*.
 //
 // Apps fire focus events for a control that already has focus (Notepad and VS Code while typing,

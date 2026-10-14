@@ -51,7 +51,7 @@ circle – where wobble hides), `hold` (dead stop – wobble at rest), `rezoom` 
 
 ## Telemetry
 
-Wind writes one CSV line per tick when enabled (`src/test_telemetry.h`): level, engine, mapper
+Wind writes one CSV line per tick when enabled (`src/core/test_telemetry.h`): level, engine, mapper
 centre, cursor, welded flag, tick duration, QPC timestamp. The runner's phase marks use the
 same QPC clock, so scenarios index directly into the file. Enablement travels via
 `%LOCALAPPDATA%\Wind\testlog.txt` (a control file – the signed uiAccess build launches

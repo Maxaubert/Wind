@@ -2,8 +2,8 @@
 // maths and ini formatting, the toggle writes (incl. "Keep within the edges" = two keys), keyboard
 // focus order and the profile list popup. All pure; flyout_window.cpp wires them to messages.
 #include "../third_party/doctest.h"
-#include "../src/tray_app/flyout_model.h"
-#include "../src/tray_app/flyout_icons.h"
+#include "flyout_model.h"
+#include "flyout_icons.h"
 using namespace wind;
 using namespace wind::Flyout;
 

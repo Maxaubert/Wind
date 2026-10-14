@@ -225,7 +225,7 @@ struct Config {
     //     this tick: dt=25.01ms  wrote=1 changed=1   <- the FIRST REAL pan write
     // DWM kept compositing at 143Hz through the rest and still paid ~25ms the moment the magnified
     // SOURCE REGION actually moved, so only a real change to the sampled region keeps it warm. The
-    // measurements and the channels that do NOT work are in src/tx_warm.h.
+    // measurements and the channels that do NOT work are in src/transform/tx_warm.h.
     //   0 = off (no warm-keeping)
     //   1 = 1px translation pulse (shipped). The cost is honest and known: the view sits 1px off
     //       the truth for one tick per pulse. It is shipped anyway because the hitch it removes is
@@ -240,7 +240,7 @@ struct Config {
     // where native Magnifier at rest costs 0.2%, and that was the entire GPU gap the field saw -
     // panning costs both about the same (Wind 16%, native 12%). So the warm write is a PULSE on
     // this cadence: one 1px displacement and its return per period, nothing in between. 0 = every
-    // tick (the 2026-08-27 behaviour). The pure gate is WarmAction (src/tx_warm.h).
+    // tick (the 2026-08-27 behaviour). The pure gate is WarmAction (src/transform/tx_warm.h).
     // Rest cost measured per cadence (same rig, dwm.exe 3D %): every tick 9-16, 48Hz 10.1,
     // 24Hz 8.3, 12Hz 4.6, 6Hz 2.4, off 0.0 - roughly 0.2% per re-render/s. The pan-start hitch
     // does NOT reproduce on the desktop at any cadence (tools/warm_cadence_sweep.ps1: wake-write
@@ -276,7 +276,7 @@ struct Config {
     int launchQuiesce = 1;
     // Locked-regime pan speed (2026-08-28, hot). 1 (DEFAULT) = pan at the TRUE desktop cursor
     // speed, LEARNED from the OS itself: free-cursor ticks record the raw-in -> cursor-out ratio
-    // per speed (src/gain_learner.h) and locked sessions replay it - slider, acceleration curve,
+    // per speed (src/cursor/gain_learner.h) and locked sessions replay it - slider, acceleration curve,
     // polling rate and every undocumented constant included, nothing to tune. Modelling this
     // pipeline (per-packet Windows-ballistics cooking, since removed; Inspect now replays the
     // learned gain too) was tried twice and missed both ways, because WM_INPUT coalescing wrecks any
@@ -296,23 +296,23 @@ struct Config {
     // intersected with whatever clip already exists, and never fighting a TIGHTER clip (a game
     // confine, Inspect's 1px freeze). 0 = off (hot).
     int edgeClip = 1;
-    // MPO nearest guard (issue #369, src/mpo_guard.h): 1 (DEFAULT, field-tested 2026-10-07) =
+    // MPO nearest guard (issue #369, src/transform/mpo_guard.h): 1 (DEFAULT, field-tested 2026-10-07) =
     // nearest sampling is allowed on an MPO-on boot, with an invisible colour effect while zoomed
     // so DWM composes the desktop itself (no plane, no 16-bit overflow). 0 = nearest on MPO boots
     // is turned into smooth as before. The pan walls stay armed either way. Hot: read on every
     // config load (EffectiveSamplingMode).
     int mpoNearestGuard = 1;
-    // Native cursor (issue #369, src/native_cursor.h): 1 (DEFAULT) = transform sessions use DWM's
+    // Native cursor (issue #369, src/transform/native_cursor.h): 1 (DEFAULT) = transform sessions use DWM's
     // own magnified pointer and DWM's centring. 0 = the pre-#369 legacy sprite session, kept as an
     // ini-only A/B fallback (issue #463): Wind hides the real pointer, draws its shape in a sprite
     // welded to the view, and writes every view itself. Not in the Settings UI or the ini template.
     // Read at zoom-in (hot for the next session).
     int txNativeCursor = 1;
-    // Smooth-zoom ladder (issue #369, src/zoom_ladder.h): with smooth sampling, zoom only through
+    // Smooth-zoom ladder (issue #369, src/transform/zoom_ladder.h): with smooth sampling, zoom only through
     // levels where DWM's per-frame scratch rounding predicts under 1 px of movement (the zoom shake:
     // 11 px p95 -> 0.7 px measured at 10-25x). 0 = off (hot).
     int txSmoothLadder = 1;
-    // Smooth high-zoom steps (issue #429, RampStepHeld in src/zoom_ladder.h): with smooth sampling
+    // Smooth high-zoom steps (issue #429, RampStepHeld in src/transform/zoom_ladder.h): with smooth sampling
     // and DWM centring, above txRampMinFrom the level only changes in steps of at least
     // txRampMinStep per mille. About 1 % of level changes show one frame half a source pixel off
     // (inside DWM, with or without the nudge), so fewer changes mean fewer jumps: per slow 1x-50x
@@ -393,12 +393,12 @@ struct Config {
     // is then scaled by this (1.0 = exact match, the default); it also scales the raw-input pan while
     // a game has the cursor locked (relative-mouse mode).
     double cursorSensitivity = 1.0;
-    // Pan glide (issue #430, src/pan_glide.h): when a mouse movement stops, the pointer eases on and
+    // Pan glide (issue #430, src/cursor/pan_glide.h): when a mouse movement stops, the pointer eases on and
     // comes to rest instead of halting dead. panGlideMaxPx caps how far, in SCREEN px at any zoom
     // (0 = off, the default). The ease's time follows the distance (PanGlideTauS, one setting since
     // #434; the old panGlideMs key is ignored). Hot. Replaces cursorSmoothing (ignored).
     int    panGlideMaxPx = 0;
-    // Game-drawn cursor (issue #443, src/game_cursor.h): while a covering foreground app hides the
+    // Game-drawn cursor (issue #443, src/cursor/game_cursor.h): while a covering foreground app hides the
     // pointer and draws its own cursor, the view follows the pointer this many ms late so it stays
     // on the game's cursor. -1 (default) = one display frame, 0 = off (DWM centring). Hot.
     int    gameCursorLagMs = -1;
@@ -581,7 +581,7 @@ int EffectiveGpuPriority(const Config& c);
 // setups) is untouched by rule 1 because nothing is pending. Applied at EVERY config load.
 // tdrTest != 0 bypasses (the field harness must be able to repro nearest+MPO deliberately).
 // nearestGuard (mpoNearestGuard, issue #369): nearest is allowed on an MPO boot because the MPO
-// guard (src/mpo_guard.h) forces DWM's external layer while zoomed.
+// guard (src/transform/mpo_guard.h) forces DWM's external layer while zoomed.
 int EffectiveSamplingMode(int iniValue, bool mpoDisabledAtBoot, bool mpoDisabledInRegistry,
                           int tdrTest, bool nearestGuard = false);
 

@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/color_matrix.h"
+#include "color_matrix.h"
 using namespace wind;
 
 static void Rgb(const ColorMatrix& m, double r, double g, double b, double& o0, double& o1, double& o2) {

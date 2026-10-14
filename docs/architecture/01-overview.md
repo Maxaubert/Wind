@@ -15,7 +15,7 @@ These are commitments. Code that breaks one is a bug even if it works.
   app under the drawn cursor. See [04](04-render-engine.md) and [07](07-cursor.md).
 - **Zoom is a hold gesture.** Hold zoom-in to ramp in, hold zoom-out to ramp back, release to stay.
   Both held freezes the level. Quick zoom toggles between 1x and a remembered level
-  (`src/zoom_controller.h`). Binds ship unbound; first launch runs a guided setup.
+  (`src/zoom/zoom_controller.h`). Binds ship unbound; first launch runs a guided setup.
 - **One shared `maxLevel`**, the same for every engine.
 - **No driver, no injection into other processes.** Mouse motion comes from Raw Input, binds are
   swallowed with ordinary LL hooks. The cost: a bound key still reaches a raw-input game
@@ -52,12 +52,12 @@ overlay; an ordinary process's popups do not.
 
 - Wind starts `WindTray.exe` with `ShellExecuteExW` (never `CreateProcess`, which would pass on the
   UIAccess token) and its PID, restarts it if it dies (at most 3 launches a minute,
-  `src/tray_host.cpp`), and the tray exits with its Wind.
-- The shared block `Local\Wind_TrayState_v1` (`src/tray_ipc.h`) carries status and a frame-pacing
+  `src/tray/tray_host.cpp`), and the tray exits with its Wind.
+- The shared block `Local\Wind_TrayState_v1` (`src/tray/tray_ipc.h`) carries status and a frame-pacing
   ring one way and `menuOpen` back (it pauses the cursor re-park while the user aims at the
   flyout). Quit sets `Local\Wind_QuitRequest`.
 - The flyout is a Direct2D window, not a menu (`src/tray_app/flyout_*`). Its content is chosen in
-  Settings > Tray menu and stored in the global `tray*` keys (`src/tray_items.*`). Details in
+  Settings > Tray menu and stored in the global `tray*` keys (`src/tray/tray_items.*`). Details in
   [09](09-settings-ui.md).
 - WindTray also applies `trayPinned` (Pin to taskbar, #436): it watches the ini folder and writes
   `IsPromoted` for its own icon (`src/tray_app/tray_pin.*`, [09](09-settings-ui.md#pin-to-taskbar)).
@@ -77,23 +77,28 @@ build. See [11](11-build-test-release.md).
 
 ## Source map
 
-| Area | Files |
-|---|---|
-| Loop and session state | `main.cpp` (`wWinMain`, `RunTick`), `uiaccess_gate.h` (refuse to start without UIAccess), `uiaccess_token.h`, `idle_policy.h`, `sched_priority.h`, `tick_stats.h` |
-| Engine contract and pick | `magnifier_model.h`, `engine_pick.h`, `shell_desktop.h`, `launch_quiesce.h` |
+Every file lives in the `src/` folder named in the second column. A header is included by its bare
+file name; see [11](11-build-test-release.md#source-folders-and-includes) for the rule and the
+build's include path.
 
-| Render engine | `render_engine.*`, `render_model.*`, `render_params.cpp`, `render_shaders.h`, `hlsl_compile.h`, `upscale_pass.*`, `upscale_shaders.h`, `upscale_nis.h`, `hdr_info.*`, `hdr_scale.h`, `band_window.h`, `png_dump.*` |
-| Transform engine | `transform_model.*`, `transform.*`, `mag_host.*`, `tx_warm.h`, `comp_pin.*`, `mpo.h`, `mpo_boot.h`, `mpo_boot_logic.h`, `mpo_guard.h`, `native_cursor.h`, `zoom_ladder.h`, `dwm_watch.*` |
-| Colour | `color_filter.*`, `color_matrix.h`, `cursor_tint.*`, `cursor_tint_pixels.h` |
-| Input | `input_router.*`, `keybind_rules.h`, `pointer_binds.h`, `keyboard_pan.h`, `typing_key.h`, `event_order.h`, `swallow_ledger.h` |
-| Cursor and lock | `cursor_mapper.*`, `lock_detector.*`, `drag_follow.h`, `gain_learner.h`, `cursor_sprite.*`, `cursor_blanker.*`, `cursor_decode.*`, `sprite_layer.h`, `crosshair.*`, `cursor_lock.*`, `inspect_focus.h`, `game_cursor.h`, `pan_glide.h` |
-| Tracking | `focus_track.*`, `view_target.h`, `view_glide.h`, `detached_view.h`, `edge_pan.h`, `caret_rect.h`, `track_filter.h`, `java_bridge*`, `focus_identity.h` |
-| Zoom | `zoom_controller.*` |
-| Config and profiles | `config.*`, `config_path.h`, `ini_edit.*`, `profiles.*`, `profiles_io.h`, `profile_switch.h` |
-| Tray | `tray_host.*`, `tray_ipc.h`, `tray_items.*`, `tray_status.h`, `tray_app/` |
-| Settings host | `config_ui/` (`main.cpp`, `bridge_json.h`, `wind_watchdog.h`, `webview_recover.h`) |
-| Logging and diagnostics | `logging.*`, `log_queue.h`, `test_telemetry.h`, `hitch_record.*`, `tick_span.h`, `com_util.h`, `reload_gate.h` |
-| Installer support | `installer_state.h`, `webview2_probe.h`, `version.h`, `resource.h`, `wind.rc` |
+| Area | Folder | Files |
+|---|---|---|
+| Loop and session state | `core/` | `main.cpp` (`wWinMain`, `RunTick`), `uiaccess_gate.h` (refuse to start without UIAccess), `uiaccess_token.h`, `idle_policy.h`, `sched_priority.h`, `tick_stats.h` |
+| Logging and diagnostics | `core/` | `logging.*`, `log_queue.h`, `test_telemetry.h`, `hitch_record.*`, `tick_span.h`, `com_util.h`, `reload_gate.h` |
+| Engine contract and pick | `engine/` | `magnifier_model.h`, `engine_pick.h`, `shell_desktop.h`, `launch_quiesce.h` |
+| Render engine | `render/` | `render_engine.*`, `render_model.*`, `render_params.cpp`, `render_shaders.h`, `hlsl_compile.h`, `upscale_pass.*`, `upscale_shaders.h`, `upscale_nis.h`, `hdr_info.*`, `hdr_scale.h`, `band_window.h`, `png_dump.*` |
+| Transform engine | `transform/` | `transform_model.*`, `transform.*`, `mag_host.*`, `tx_warm.h`, `comp_pin.*`, `mpo.h`, `mpo_boot.h`, `mpo_boot_logic.h`, `mpo_guard.h`, `native_cursor.h`, `zoom_ladder.h`, `dwm_watch.*` |
+| Colour | `color/` | `color_filter.*`, `color_matrix.h`, `cursor_tint.*`, `cursor_tint_pixels.h` |
+| Input | `input/` | `input_router.*`, `keybind_rules.h`, `pointer_binds.h`, `keyboard_pan.h`, `typing_key.h`, `event_order.h`, `swallow_ledger.h` |
+| Cursor and lock | `cursor/` | `cursor_mapper.*`, `lock_detector.*`, `drag_follow.h`, `gain_learner.h`, `cursor_sprite.*`, `cursor_blanker.*`, `cursor_decode.*`, `sprite_layer.h`, `crosshair.*`, `cursor_lock.*`, `inspect_focus.h`, `game_cursor.h`, `pan_glide.h` |
+| Tracking | `track/` | `focus_track.*`, `view_target.h`, `view_glide.h`, `detached_view.h`, `edge_pan.h`, `caret_rect.h`, `track_filter.h`, `java_bridge*`, `focus_identity.h` |
+| Zoom | `zoom/` | `zoom_controller.*` |
+| Config and profiles | `config/` | `config.*`, `config_path.h`, `ini_edit.*`, `profiles.*`, `profiles_io.h`, `profile_switch.h` |
+| Tray (core side) | `tray/` | `tray_host.*`, `tray_ipc.h`, `tray_items.*`, `tray_status.h` |
+| Tray helper (`WindTray.exe`) | `tray_app/` | `main.cpp`, `flyout_*`, `tray_*`, `engine_dropdown.cpp`, `svg_path.h` |
+| Settings host | `config_ui/` | `main.cpp`, `bridge_json.h`, `wind_watchdog.h`, `webview_recover.h` |
+| Installer support | `platform/` | `installer_state.h`, `webview2_probe.h` |
+| Version and resources | `src/` itself | `version.h`, `resource.h`, `wind.rc` (where the version readers and rc.exe expect them) |
 
 Other top-level folders: `ui/` (Svelte settings app and Playwright tests), `tests/` (doctest),
 `tools/` (deploy, release and measurement scripts, [12](12-instrumentation.md)), `installer/`

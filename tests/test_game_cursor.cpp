@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/game_cursor.h"
+#include "game_cursor.h"
 
 using namespace wind;
 

@@ -35,7 +35,7 @@ follows only the terminal caret there.
   field's caret early.
 - **Click quiet period, 1 s.** A click that opens a page moves focus somewhere the user never asked
   to look, so caret and focus changes within 1 s of a mouse button are not followed. A fresh down of
-  a non-modifier key ends it early (#328, `src/typing_key.h`); key-ups and auto-repeat must not, or
+  a non-modifier key ends it early (#328, `src/input/typing_key.h`); key-ups and auto-repeat must not, or
   releasing Ctrl after a Ctrl+click handed the view to the click's own caret.
 - **Glide: critically damped spring, 200 ms** (A/B of 0, 25, 150, 200 ms and old ease versus
   spring). The old exponential ease restarted on every keystroke; the spring carries its velocity,
@@ -78,7 +78,7 @@ follows only the terminal caret there.
 - Outlook on the web reports the caret as one line after Enter, then as a rect that also covers the
   blank lines above; the bottom stays on the caret line. Centring on it pushed the text lower with
   every blank line.
-- `src/caret_rect.h` learns the one-line height per focus and trims a rect taller than 1.4 lines to
+- `src/track/caret_rect.h` learns the one-line height per focus and trims a rect taller than 1.4 lines to
   one line at its bottom, but only when its top climbed more than half a line above the previous
   line's top (headings and font changes grow downward and are learned instead). UIA and Win32 carets
   are trimmed; Java carets are not.
@@ -92,7 +92,7 @@ follows only the terminal caret there.
   made it follow again for a while. The focused element is xterm's `xterm-helper-textarea`, which
   xterm moves onto the cursor cell on every cursor move, but Chromium's selection rect for it goes
   stale for seconds (one typed line: ~60 textarea moves, 6 selection-rect changes).
-- For that class (`IsXtermInput`, `src/caret_rect.h`) the textarea's own bounds are the caret
+- For that class (`IsXtermInput`, `src/track/caret_rect.h`) the textarea's own bounds are the caret
   (`xterm-input` in trackLog), and its bounds are left out of the focus identity, since they move
   with every key.
 
@@ -112,6 +112,6 @@ about to wrap, the caret is reported for one keystroke at the right edge of the 
 space that hangs past the wrap: `2996,1944 1x49` -> `3375,1942 2x54` -> the next real position. Following it
 put the view on the composer's buttons with the text off screen. The ghost sits on the same line but in a
 different box (2 px higher, 5 px taller) and far to the right after a single key (380 px; a character is
-8-30 px). `IsLineEndGhost` (src/caret_rect.h) skips a caret on the same line whose box changed by 2 px or
+8-30 px). `IsLineEndGhost` (src/track/caret_rect.h) skips a caret on the same line whose box changed by 2 px or
 more and that jumped right by more than 3 line heights; End and clicks keep the caret's box, so they are
 followed. trackLog logs `caret skipped (line-end ghost)`.

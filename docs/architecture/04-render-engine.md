@@ -9,9 +9,9 @@ for it ([03](03-engines.md)).
 
 ## Structure
 
-`RenderEngine` (`src/render_engine.h`) is a PIMPL class; D3D and DXGI headers stay in
-`src/render_engine.cpp`. `RenderModel` (`src/render_model.cpp`) adapts it to `IMagnifierModel`.
-`RunTick` owns activation and reveal (`EnterSession`, `RevealAndHandover` in `src/main.cpp`),
+`RenderEngine` (`src/render/render_engine.h`) is a PIMPL class; D3D and DXGI headers stay in
+`src/render/render_engine.cpp`. `RenderModel` (`src/render/render_model.cpp`) adapts it to `IMagnifierModel`.
+`RunTick` owns activation and reveal (`EnterSession`, `RevealAndHandover` in `src/core/main.cpp`),
 because they need facts the engine does not have (does the foreground cover the monitor, is this
 the idle-to-active edge).
 
@@ -142,7 +142,7 @@ view. `renderFrame` re-asserts `HWND_TOPMOST` only when displaced (`overlayDispl
 stutters. A 1 s backstop catches misses and is skipped while a fullscreen game is foreground.
 
 **The band is a trade-off; the default is `zorderBand=0` (unbanded).** Both bandable windows go
-through `wind::CreateBandedWindow` (`src/band_window.h`), which cascades the requested band to 16
+through `wind::CreateBandedWindow` (`src/render/band_window.h`), which cascades the requested band to 16
 to unbanded and logs every refusal.
 
 | Band | Covers Start, taskbar, tray flyouts | Snipping Tool (Win+Shift+S) |
@@ -170,13 +170,13 @@ tonemaps to SDR (`hdrTonemap=1`, default).
   and a failed query keeps the last good value.
 - `ensureDesktopCopy` recreates the copy in whatever format the capture delivers, so a runtime HDR
   toggle cannot mismatch it.
-- Pure maths and the throttle: `src/hdr_scale.h`. The transform engine magnifies inside DWM and
+- Pure maths and the throttle: `src/render/hdr_scale.h`. The transform engine magnifies inside DWM and
   never converts colour.
 
 ## Colour filters
 
-Warmth and brightness (`colorWarmPct`, `colorDimPct`) are one colour matrix (`src/color_matrix.h`),
-applied by `ColorFilterController` (`src/color_filter.*`) through `MagSetFullscreenColorEffect`.
+Warmth and brightness (`colorWarmPct`, `colorDimPct`) are one colour matrix (`src/color/color_matrix.h`),
+applied by `ColorFilterController` (`src/color/color_filter.*`) through `MagSetFullscreenColorEffect`.
 
 - **Desktop Duplication sees the DWM effect.** While a render session is visible the DWM effect is
   set to identity and the render shader applies the matrix instead; otherwise the overlay would be
@@ -187,7 +187,7 @@ applied by `ColorFilterController` (`src/color_filter.*`) through `MagSetFullscr
 - **A filter holds the Magnification runtime at 1x**, which taxes cursor changes in other apps
   ([05](05-transform-engine.md)). Off by default.
 - At 1x the hardware pointer is outside the DWM effect, so Wind swaps the system pointers for
-  tinted copies (`src/cursor_tint.*`).
+  tinted copies (`src/color/cursor_tint.*`).
 - Windows clears the effect when the process dies, so a crash never leaves the screen filtered.
 
 Measurements and rejected filters: [../COLOUR-FILTER-FINDINGS.md](../COLOUR-FILTER-FINDINGS.md).
@@ -199,7 +199,7 @@ then the cursor.
 
 - **Scaling filter** (`renderScaling`, Settings: Render scaling, issue #456): Nearest uses the
   plain pass with point sampling; xBR (the default) and NVIDIA Image Scaling are their own pixel
-  shaders (`src/upscale_shaders.h`, `src/upscale_nis.h`, drawn by `UpscalePass`). They read texels
+  shaders (`src/render/upscale_shaders.h`, `src/render/upscale_nis.h`, drawn by `UpscalePass`). They read texels
   through `Tap()`, which tonemaps first, so they work in display space on SDR and HDR alike, and the
   capture crop keeps a 4-texel margin for their taps. A shader that fails to build falls back to the
   plain bilinear pass (logged once). Chosen in an A/B of eleven filters on 2026-10-12 (xBR 0.24 ms,
@@ -215,7 +215,7 @@ then the cursor.
 - The cursor comes from `GetCursorInfo` + `DecodeCursorBGRA`, cached per `HCURSOR` with a 5 s
   staleness bound (handles are recycled), with an invert blend for I-beam cursors. `cursorMode` 0
   draws only when the app shows its own cursor.
-- Inspect replaces it with the crosshair from `BuildCrosshairBGRA` (`src/crosshair.cpp`).
+- Inspect replaces it with the crosshair from `BuildCrosshairBGRA` (`src/cursor/crosshair.cpp`).
 - The hidden OS pointer is parked under the drawn cursor with `SetCursorPos` so clicks land where
   the user sees the pointer; `parkedLastFrame()` reports whether the park ran, and the park pauses
   while a mouse button is held. See [07](07-cursor.md).

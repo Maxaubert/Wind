@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/mpo_guard.h"
+#include "mpo_guard.h"
 
 using namespace wind;
 

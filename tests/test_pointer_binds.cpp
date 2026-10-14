@@ -1,7 +1,7 @@
 #include <cmath>
 #include "doctest.h"
-#include "../src/pointer_binds.h"
-#include "../src/zoom_controller.h"
+#include "pointer_binds.h"
+#include "zoom_controller.h"
 using namespace wind;
 
 TEST_CASE("a click bind matches only with its modifiers held; extra modifiers are fine") {

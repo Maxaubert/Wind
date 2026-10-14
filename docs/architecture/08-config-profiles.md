@@ -14,7 +14,7 @@ resolve it through `wind::ResolveIniPath()`. The settings app can crash or resta
 the magnifier, and the processes run at different integrity levels (`Wind.exe` is UIAccess, the
 others are not).
 
-- Every writer uses `wind::WriteTextFileAtomic` (`src/profiles_io.h`): write a temp file, then
+- Every writer uses `wind::WriteTextFileAtomic` (`src/config/profiles_io.h`): write a temp file, then
   `MoveFileExW(MOVEFILE_REPLACE_EXISTING)`. The temp name embeds the process id, so two writers
   never clobber each other's temp file. The temp is written with `WriteFile`, every byte count is
   checked and the data is flushed before the rename: a full disk fails the write and leaves the old
@@ -36,7 +36,7 @@ others are not).
 - The only cross-process kernel objects are the single-instance mutexes, the ini write lock and
   the `Local\Wind_QuitRequest` event (quit, restart handshake, installer). A window message would not
   work: UIPI drops `PostMessage` from a normal process to a UIAccess one. Their names are constants
-  in `src/tray_ipc.h` (`kQuitEventName` and the rest); the NSIS and PowerShell copies point there.
+  in `src/tray/tray_ipc.h` (`kQuitEventName` and the rest); the NSIS and PowerShell copies point there.
 - The tray's status block (`Local\Wind_TrayState_v1`) carries status, not settings
   ([01](01-overview.md)).
 
@@ -51,7 +51,7 @@ flowchart LR
 
 ## Where the file lives
 
-`wind::ResolveIniPath()` (`src/config_path.h`) probes whether the exe's directory is writable
+`wind::ResolveIniPath()` (`src/config/config_path.h`) probes whether the exe's directory is writable
 (a sentinel file opened with `FILE_FLAG_DELETE_ON_CLOSE`).
 
 - Writable (dev build): the ini sits next to the exe, in `build\` (see [11](11-build-test-release.md)).
@@ -66,12 +66,12 @@ flowchart LR
 
 ## Parsing
 
-`wind::ParseConfig` (`src/config.cpp`) is pure and tested. Every `Config` field carries its default
+`wind::ParseConfig` (`src/config/config.cpp`) is pure and tested. Every `Config` field carries its default
 as an initializer, so a missing or malformed key keeps the default; parsing never fails.
 
 - Numeric values are clamped to tested ranges.
 - `model` must be `render`, `transform` or `hybrid`; anything else becomes `hybrid`.
-- Unsafe binds read as unbound (`src/keybind_rules.h`, [06](06-input.md)).
+- Unsafe binds read as unbound (`src/input/keybind_rules.h`, [06](06-input.md)).
 - `LoadConfig` is the I/O wrapper, excluded from the test build by `WIND_TESTS`.
 - Structure: per line `SplitIniLine` (key and value), `ApplyEmptyableKey` (the exe lists and
   `engine*`, which accept an empty value), then `ApplyValueKey` (one parser per key; a bad value
@@ -83,7 +83,7 @@ as an initializer, so a missing or malformed key keeps the default; parsing neve
 
 The reload mechanics are in [02](02-tick-loop.md). A reload rebuilds `ZoomController`, so it
 collapses an active zoom; therefore `StripUiOnlyKeys` removes the eleven keys the core never reads
-(`kUiOnlyKeys` in `src/profiles.h`: `uiTheme`, `uiPalette`, `showAdvanced`, `onboarded`, `trayPinned`,
+(`kUiOnlyKeys` in `src/config/profiles.h`: `uiTheme`, `uiPalette`, `showAdvanced`, `onboarded`, `trayPinned`,
 `uiHighResNoticeOff` and the five tray layout keys `trayPerf`,
 `traySliders`, `traySliderOrder`, `trayToggles`, `trayToggleOrder`) and the reload is skipped when the stripped
 text is unchanged. `profile` stays in the fingerprint, so a profile switch reloads.
@@ -107,10 +107,10 @@ values above 1 read as 1.
 
 A profile is a named full snapshot of the settings, keybinds included, stored as
 `profiles\<Name>.ini` next to the resolved ini, with `profile=<name>` in the live ini. Pure logic is
-in `src/profiles.*` (tested); I/O in `src/profiles_io.h`.
+in `src/config/profiles.*` (tested); I/O in `src/config/profiles_io.h`.
 
 **Global keys never travel with a profile.** `IsGlobalProfileKey` covers `profile` plus the
-`kUiOnlyKeys` list (`src/profiles.h`): `onboarded`, `uiTheme`, `uiPalette`, `showAdvanced`,
+`kUiOnlyKeys` list (`src/config/profiles.h`): `onboarded`, `uiTheme`, `uiPalette`, `showAdvanced`,
 `trayPinned`, `uiHighResNoticeOff` and the five tray layout keys (`trayPerf`, `traySliders`,
 `traySliderOrder`, `trayToggles`, `trayToggleOrder`). `MakeProfileText` strips them from profile
 files; `MakeLiveText` carries them over from the old live text. Both work line by line and keep
@@ -135,7 +135,7 @@ a node test (`npm run test:rules`) both read.
 - Tray Quit compares the files and prompts Save, Discard or Cancel.
 
 **Switching** (Settings or the tray flyout, one implementation: `wind::SwitchProfile` in
-`src/profile_switch.h`; each surface only maps its result to its own messages):
+`src/config/profile_switch.h`; each surface only maps its result to its own messages):
 
 1. Read and check the profile with `ProfileTextError`, which rejects binary, oversized or
    unparseable text. A read failure is distinct from an empty file; treating a locked file as empty
@@ -145,7 +145,7 @@ a node test (`npm run test:rules`) both read.
 3. Write `MakeLiveText(profile, oldLive, name)` over the live ini.
 4. The core hot-reloads it, `model` included (`running.model` reads `live`). Only when Wind runs
    one engine (`running.model` names it) and the parsed `model` differs does the surface relaunch
-   `Wind.exe` (`EngineSwitchesLive`, `src/profiles_io.h`), writing `session.keep` first. If that
+   `Wind.exe` (`EngineSwitchesLive`, `src/config/profiles_io.h`), writing `session.keep` first. If that
    relaunch fails, it writes the old `model` back (`RevertModelAfterFailedRelaunch`, also used by
    the tray's engine pick), so the ini always matches the running engine.
 
@@ -203,7 +203,7 @@ Every key works in the ini whether or not Settings shows it. Keys hot-reload unl
 | Keys | Meaning |
 |---|---|
 | `txSamplingMode` (0) | Transform sampling: 0 nearest, 1 smooth (Settings: Transform scaling, formerly "High resolution cursor", [05](05-transform-engine.md)) |
-| `edgeClip` (1, hot) | While a transform session is zoomed, clips the pointer 1 px inside the monitor so it cannot rest on the contested outermost pixel (cursor-shape flicker at the left/top edge). Side effect: in a native-cursor session the pointer cannot reach the last pixel row and column. A tighter existing clip (game confine, Inspect) always wins; 0 turns it off. Rationale: `Config::edgeClip` in `src/config.h`, mechanics in `TransformModel::edgeClipManage` |
+| `edgeClip` (1, hot) | While a transform session is zoomed, clips the pointer 1 px inside the monitor so it cannot rest on the contested outermost pixel (cursor-shape flicker at the left/top edge). Side effect: in a native-cursor session the pointer cannot reach the last pixel row and column. A tighter existing clip (game confine, Inspect) always wins; 0 turns it off. Rationale: `Config::edgeClip` in `src/config/config.h`, mechanics in `TransformModel::edgeClipManage` |
 | `renderScaling` (1), `upscaleTiming` (0) | Render engine scaling: 0 nearest, 1 xBR, 2 NVIDIA Image Scaling (Settings: Render scaling, [04](04-render-engine.md)); `bilinear` is retired and only migrates (0 keeps nearest). `upscaleTiming=1` logs the filter's GPU time |
 | `sharpness`, `brightness`, `hdrTonemap` (1) | Render engine image |
 | `cursorConstantSize` (0), `cursorVisibility` (`auto`) | Render cursor size and when it is drawn |
@@ -233,7 +233,7 @@ failed to init.
 
 | Keys | Meaning |
 |---|---|
-| `edgeClip` (1) | While a transform session is zoomed, `ClipCursor` 1 px inside the monitor keeps the pointer off the contested outermost pixels (edge cursor-shape flicker); 0 lets the pointer reach the corner pixel. The trade-off is recorded at `Config::edgeClip` in `src/config.h` |
+| `edgeClip` (1) | While a transform session is zoomed, `ClipCursor` 1 px inside the monitor keeps the pointer off the contested outermost pixels (edge cursor-shape flicker); 0 lets the pointer reach the corner pixel. The trade-off is recorded at `Config::edgeClip` in `src/config/config.h` |
 | `lockedBallistics` (1) | Locked games pan with the learned input-to-output gain (`GainLearner`); 0 pans with plain raw mickeys |
 | `smoothPan` (0, restart) | Hold the display composited while zoomed (a 1 px pin) so flip-model games keep DWM's pan path |
 | `fastPan` (1, restart) | Pan through the private `SetMagnificationDesktopMagnification` channel (finer than the public write) |
@@ -246,4 +246,4 @@ failed to init.
 
 `diagnostics=1` writes the frame-pacing log; the rest is in [12](12-instrumentation.md). The other
 transform tuning keys (`tx*`, `ixDecimate`, `mpoBuster`, `tdrTest`) are documented on their `Config`
-fields in `src/config.h`.
+fields in `src/config/config.h`.

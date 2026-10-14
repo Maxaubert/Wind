@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/launch_quiesce.h"
+#include "launch_quiesce.h"
 
 using namespace wind;
 

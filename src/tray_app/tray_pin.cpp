@@ -1,5 +1,5 @@
 #include "tray_pin.h"
-#include "../logging.h"
+#include "logging.h"
 #include <windows.h>
 #include <shlobj.h>
 #include <knownfolders.h>

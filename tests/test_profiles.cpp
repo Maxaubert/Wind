@@ -1,7 +1,7 @@
 #include "doctest.h"
-#include "../src/profiles.h"
-#include "../src/ini_edit.h"
-#include "../src/config.h"
+#include "profiles.h"
+#include "ini_edit.h"
+#include "config.h"
 #include <fstream>
 #include <set>
 #include <vector>

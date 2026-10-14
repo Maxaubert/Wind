@@ -540,7 +540,7 @@ double TransformModel::resolveLevel(const MapResult& r, double level, const Conf
         const double up = lastLevel_ * (1.0 + cfg.txMaxStepPct / 1000.0);
         if (applyLevel > up) applyLevel = up;
     }
-    // SMOOTH-ZOOM LADDER (issue #369, src/zoom_ladder.h): with smooth sampling DWM rounds its scratch
+    // SMOOTH-ZOOM LADDER (issue #369, src/transform/zoom_ladder.h): with smooth sampling DWM rounds its scratch
     // image's size and origin every frame, which shakes a continuous zoom; snap to the nearest level
     // whose predicted rounding error is under 1 px (never backwards in the ramp). Once the zoom has
     // settled the chosen level is held: panning at a fixed level does not shake, re-snapping would.
@@ -684,7 +684,7 @@ MagTransform TransformModel::writeSiteTransform(double srcL, double srcT, double
 }
 
 void TransformModel::switchDwmCentre(double applyLevel, const PresentExtras& ex) {
-    // DWM CENTRING (issue #369, src/native_cursor.h). In a native-cursor session where the view is
+    // DWM CENTRING (issue #369, src/transform/native_cursor.h). In a native-cursor session where the view is
     // a pure function of the pointer (RunTick's ex.dwmCentre), DWM re-centres the view itself on
     // every cursor update, latched with the pointer it draws: no tick-to-frame drift at any speed.
     // Switching off is allowed on a paused tick (it stops DWM moving the view); switching on waits
@@ -737,7 +737,7 @@ bool TransformModel::writeAndWarm(const MagTransform& m, double applyLevel, bool
     trChanged = changed;
     int txJitter = 0;
     bool keepAliveActive = false;
-    // WARM-KEEPING (see src/tx_warm.h for the measurements). At rest Wind would otherwise stop
+    // WARM-KEEPING (see src/transform/tx_warm.h for the measurements). At rest Wind would otherwise stop
     // writing entirely and DWM's composition falls back to the game's present rate, so the first
     // movement after a pause lands late - the hitch felt at every direction reversal. Only views
     // Wind writes itself need it (locked, Inspect, a detached view): DWM's own centring moves

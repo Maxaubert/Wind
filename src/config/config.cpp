@@ -128,7 +128,7 @@ static void SanitizeBinds(Config& c) {
     // Reject keybinds to keys Wind must never swallow (see IsForbiddenBindVk). A bound key is
     // eaten system-wide, so binding e.g. Backspace or the Windows key would make it unusable
     // everywhere; treat a forbidden bind as unbound regardless of how it got into the ini.
-    // Since #285 every bind goes through the one shared rule set (src/keybind_rules.h), which also
+    // Since #285 every bind goes through the one shared rule set (src/input/keybind_rules.h), which also
     // refuses typing keys alone, Shift/AltGr + a typing key and system-reserved combos: an unsafe bind
     // in an ini (hand-edited, or from an older version) reads as unbound.
     auto sanitizeKey = [](int& vk, int* mods) {
@@ -429,7 +429,7 @@ std::string StripUiOnlyKeys(const std::string& iniText) {
         size_t b = line.find_first_not_of(" \t");
         bool uiOnly = false;
         if (b != std::string::npos) {
-            // The global keys minus "profile" (kUiOnlyKeys, src/profiles.h): a profile switch must
+            // The global keys minus "profile" (kUiOnlyKeys, src/config/profiles.h): a profile switch must
             // still reload the core.
             for (const char* k : kUiOnlyKeys) {
                 const size_t n = strlen(k);
@@ -491,7 +491,7 @@ std::string DefaultIniText() {
                ";   side-button mouse. The bound key is SWALLOWED (it won't reach the focused app), so\n"
                ";   it can't double-fire. Typing keys, Backspace, a bare modifier, system combos (Alt+F4,\n"
                ";   Alt+Tab...) and Windows-reserved Win combos can't be bound (they'd be lost system-wide;\n"
-               ";   src/keybind_rules.h). e.g. 33=PageUp 34=PageDown 107/109=NumPad +/- 112=F1.\n"
+               ";   src/input/keybind_rules.h). e.g. 33=PageUp 34=PageDown 107/109=NumPad +/- 112=F1.\n"
                "zoomInVk=0\nzoomOutVk=0\n"
                "; Modifier mask required with each zoom key (bit 1=Ctrl, 2=Alt, 4=Shift, 8=Win;\n"
                ";   0=no modifier). e.g. 3 = Ctrl+Alt. Extra modifiers held don't disqualify.\n"

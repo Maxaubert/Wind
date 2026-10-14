@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/view_glide.h"
+#include "view_glide.h"
 using namespace wind;
 
 TEST_CASE("centred: the target is the rect centre, clamped to the monitor") {

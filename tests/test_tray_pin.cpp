@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/tray_app/tray_pin.h"
+#include "tray_pin.h"
 using namespace wind::TrayPin;
 
 static const GuidResolver kResolver = [](const std::wstring& g, std::wstring& out) {

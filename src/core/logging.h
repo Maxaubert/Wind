@@ -1,4 +1,4 @@
-// src/logging.h
+// src/core/logging.h
 #pragma once
 #include <string>
 #include <vector>

@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/drag_follow.h"
+#include "drag_follow.h"
 
 using wind::ShouldDragFollow;
 
