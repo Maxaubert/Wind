@@ -50,7 +50,7 @@ runs:
       working-directory: ui
       run: npx playwright install chromium && npx playwright test --reporter=line
 
-    # Builds Wind.exe + WindConfig.exe + ui/dist, then compiles the installer and runs
+    # Builds build/Wind.exe + WindConfig.exe + ui/dist, then compiles the installer and runs
     # tools/installer_check.ps1. The runner is administrator, so the gate's silent
     # install/uninstall round-trip actually executes rather than skipping itself.
     - name: Build installer

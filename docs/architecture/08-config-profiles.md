@@ -54,7 +54,7 @@ flowchart LR
 `wind::ResolveIniPath()` (`src/config_path.h`) probes whether the exe's directory is writable
 (a sentinel file opened with `FILE_FLAG_DELETE_ON_CLOSE`).
 
-- Writable (dev build): the ini sits next to the exe.
+- Writable (dev build): the ini sits next to the exe, in `build\` (see [11](11-build-test-release.md)).
 - Read-only (`C:\Program Files\Wind`): `%LOCALAPPDATA%\Wind\magnifier.ini`, seeded from a template
   next to the exe if one exists, otherwise created by `LoadConfig` with a commented header.
 - **Never hardcode `L"magnifier.ini"`.** Program Files is read-only for the non-admin runtime, and a

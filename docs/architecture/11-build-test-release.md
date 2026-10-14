@@ -7,17 +7,30 @@ deploy, the installer's elevation rules and the release workflows.
 
 ## build.bat targets
 
-`build.bat` locates MSVC with vswhere, runs `vcvars64.bat` and dispatches on its first argument:
+`build.bat` locates MSVC with vswhere, runs `vcvars64.bat` and dispatches on its first argument.
+**Nothing is written to the repo root.** Binaries and their linker PDBs go to `build\`, which is
+laid out like an install (`Wind.exe`, `WindTray.exe`, `WindConfig.exe` and `ui\dist` side by side,
+so `ExeDir()` lookups work unchanged). Objects, compiler PDBs and `.res` files go to
+`build\obj\<target>\` (`wind`, `wind_uiaccess`, `tray`, `config`, `test`, `check\*`): targets
+compile the same sources with different defines, and the tray and settings hosts each have a
+`main.cpp`. The working directory stays the repo root.
 
 | Target | Output | What it is |
 |---|---|---|
-| (none) | `Wind.exe` + `WindTray.exe` | The app with the `uiAccess=false` manifest. It refuses to start without UIAccess (issue #460) unless `WIND_ALLOW_NO_UIACCESS=1` or `WIND_SELFTEST=1` is set |
-| `test` | `wind_tests.exe` | The doctest binary over the pure sources; runs it and returns its exit code |
-| `check` | – | Compile-only pass over `src\*.cpp`, `src\tray_app\*.cpp` and `src\config_ui\main.cpp` |
-| `uiaccess` | `Wind.exe` + `WindTray.exe` | `Wind.uiaccess.manifest` and `/DWIND_UIACCESS`; useful only signed and in Program Files. `WindTray.exe` always keeps the plain manifest |
-| `tray` | `WindTray.exe` | The tray helper alone, objects in `src\tray_app\` |
-| `config` | `WindConfig.exe` | Builds the Svelte app to `ui/dist/`, then the WebView2 host against `third_party/webview2` |
-| `installer` | `dist\Wind-Setup-x64-<ver>.exe` | `makensis /WX installer\wind.nsi`, then `tools\installer_check.ps1` |
+| (none) | `build\Wind.exe` + `build\WindTray.exe` | The app with the `uiAccess=false` manifest. It refuses to start without UIAccess (issue #460) unless `WIND_ALLOW_NO_UIACCESS=1` or `WIND_SELFTEST=1` is set |
+| `test` | `build\wind_tests.exe` | The doctest binary over the pure sources; runs it from the repo root (it finds `tests\fixtures` there) and returns its exit code |
+| `check` | – | Compile-only pass over `src\*.cpp`, `src\tray_app\*.cpp` and `src\config_ui\main.cpp`, objects in `build\obj\check\` |
+| `uiaccess` | `build\Wind.exe` + `build\WindTray.exe` | `Wind.uiaccess.manifest` and `/DWIND_UIACCESS`; useful only signed and in Program Files. `WindTray.exe` always keeps the plain manifest |
+| `tray` | `build\WindTray.exe` | The tray helper alone |
+| `config` | `build\WindConfig.exe` | Builds the Svelte app to `ui/dist/`, then the WebView2 host against `third_party/webview2`, then mirrors `ui\dist` to `build\ui\dist` (the host loads `<exe dir>\ui\dist`) |
+| `installer` | `dist\Wind-Setup-x64-<ver>.exe` | `makensis /WX installer\wind.nsi` (packs `build\*.exe` and `ui\dist`), then `tools\installer_check.ps1` |
+
+**A dev build's runtime files live in `build\`.** `build\` is writable, so `ResolveIniPath()` and
+`ResolveLogDir()` keep a dev build's `magnifier.ini`, `profiles\` and `logs\` next to
+`build\Wind.exe`, as they did at the root before. Deleting `build\` deletes them too; an ini left at
+the root by an older clone is no longer read (move it into `build\` to keep it). A self-test writes
+`wind_selftest.png` and `wind_hdr_diag.txt` to its working directory, so
+`WIND_SELFTEST=1 build\Wind.exe` from the repo root leaves them at the root (gitignored).
 
 The installer treats NSIS warnings as errors: an unreferenced define in generated layout data is
 how a page ends up wired to nothing.
@@ -74,8 +87,8 @@ locally trusted certificate and run from a secure location, in practice `C:\Prog
 Without it, Wind reads `TokenUIAccess` at init and Auto keeps the desktop on Render.
 
 `tools/uiaccess_setup.ps1` (elevated) stops Wind, builds `uiaccess` and `config`, creates or reuses
-a self-signed "Wind Dev Test Cert", trusts it, signs all three exes (unsigned fresh builds trip a
-Defender false positive) and copies them with `ui\dist` to Program Files. It does not deploy an
+a self-signed "Wind Dev Test Cert", trusts it, signs all three exes in `build\` (unsigned fresh
+builds trip a Defender false positive) and copies them with `ui\dist` to Program Files. It does not deploy an
 ini. It logs to `tools\uiaccess_setup.log`; a good deploy ends with `status=Valid` and `DONE`.
 
 - Pass an **absolute** `-File` path: the elevated process starts in System32.
@@ -145,7 +158,7 @@ environment-driven: `WIND_SIGN_THUMBPRINT`, or `WIND_SIGN_PFX` plus `WIND_SIGN_P
 - With a certificate it signs the three exes and the installer, signing the payload
   before makensis packs it (UIAccess is granted on `Wind.exe`'s own signature).
 - Without one (CI today) it packs both variants: the ordinary build and the UIAccess build as
-  `WindUA.exe`. Setup signs `WindUA.exe` on each PC with a per-machine certificate whose private key
+  `build\WindUA.exe` (the `uiaccess` build's `build\Wind.exe`, renamed). Setup signs `WindUA.exe` on each PC with a per-machine certificate whose private key
   it deletes at once (`installer/local-sign.ps1`). If that fails, setup keeps the ordinary build, says signing failed and does not start Wind: without UIAccess, Wind refuses to start ("Wind can't start", `src/uiaccess_gate.h`).
 - **Never put the self-signed dev certificate in CI**: it is trusted by nobody and looks worse than
   no signature.

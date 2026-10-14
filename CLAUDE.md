@@ -6,6 +6,8 @@ New plans and brainstorm output are not committed. `docs/specs`, `docs/design` a
 are frozen history cited from code, not kept in step with it.
 
 ## Commands
+- All build output goes to `build\` (exes, PDBs, `ui\dist` copy; objects in `build\obj\<target>\`),
+  never the repo root. A dev `build\Wind.exe` keeps its ini, profiles and logs in `build\`. See 11.
 - `build.bat`: `Wind.exe` + `WindTray.exe` (uiAccess=false). Wind refuses to start without UIAccess;
   run a plain build with `WIND_ALLOW_NO_UIACCESS=1` (or `WIND_SELFTEST=1`).
 - `build.bat test`: builds and runs the doctest binary; exit 0 = pass.
@@ -121,7 +123,8 @@ Chapter numbers refer to `docs/architecture/NN-*.md`.
   session is the floor.
 - The reveal is gated on the present fence (and composite evidence over fullscreen apps).
 - Always restore the OS cursor and release `ClipCursor` on every exit path, including the crash filter.
-- Verify the overlay only from inside: `WIND_SELFTEST=1 Wind.exe` writes `wind_selftest.png`.
+- Verify the overlay only from inside: `WIND_SELFTEST=1 build\Wind.exe` writes `wind_selftest.png`
+  to its working directory (the repo root when started from there).
 - `zorderBand` ships 0: band 16 covers the shell but loses the cursor under the Snipping Tool.
   Re-test both before changing it. Never let a refused band be silent (`CreateBandedWindow`).
 

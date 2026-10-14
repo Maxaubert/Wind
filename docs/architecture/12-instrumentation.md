@@ -30,7 +30,7 @@ Both binaries log through `src/logging.cpp`. The pure half (formatting, rotation
 unit-tested; the Win32 half is excluded from the test build.
 
 - **Files.** The `logs\` folder next to the exe when that folder is writable (dev and portable
-  builds), else `%LOCALAPPDATA%\Wind\logs\` (the Program Files install; `ResolveLogDir`, the same
+  builds; a dev build's is `build\logs\`), else `%LOCALAPPDATA%\Wind\logs\` (the Program Files install; `ResolveLogDir`, the same
   rule as the ini): `wind-core.log` from Wind.exe,
   `wind-config.log` from WindConfig.exe. Rotation at 1 MiB over three generations. A second
   instance that cannot open the shared log writes `wind-core-<pid>.log`; once it holds the
@@ -107,7 +107,7 @@ Zero cost when off.
 
 | Knob | Effect |
 |---|---|
-| `WIND_SELFTEST=1` | Renders headlessly and writes `wind_selftest.png`; the only way to capture the render overlay |
+| `WIND_SELFTEST=1` | Renders headlessly and writes `wind_selftest.png` to the working directory; the only way to capture the render overlay |
 | `WIND_PACINGTEST=1` | Runs the render path at a forced cadence (proved the blt microstutter is DWM phase, not the loop) |
 | `WIND_NOPARK=1` | Disables overlay parking for A/B |
 | `WIND_NOHOOK` | Skips the LL hooks to exercise the polling fallback |
