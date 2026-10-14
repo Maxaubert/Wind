@@ -120,6 +120,12 @@ export const groups = [
         { key: 'mouseAlign', type: 'select', label: 'Pointer position', keywords: ['mouse position', 'mouse', 'cursor', 'pointer', 'where', 'centred', 'centered', 'center', 'centre', 'middle', 'edge', 'edges', 'within the edges', 'align', 'alignment', 'lock to center', 'follow mode', 'placement'], desc: 'Where the pointer sits while the view moves', options: ['0', '1'], optionLabels: { '0': 'Centred', '1': 'Within the edges' }, def: '0' },
         { key: 'mouseMarginPct', type: 'slider', label: 'Edge margin', keywords: ['edge', 'edges', 'border', 'padding', 'distance', 'boundary', 'margin', 'pointer', 'mouse', 'percent', 'dead zone', 'how near'], desc: 'How close to the edge before the view moves', min: 0, max: 40, step: 1, def: 0, unit: '%',
           showIf: { key: 'mouseAlign', eq: '1' } },
+        // Mouse tracking (txNativeCursor, #463): Native = Windows' own magnifier logic (DWM centres the
+        // view and draws the real pointer, #369); Wind = Wind writes every view and draws its own copy of
+        // the pointer (the pre-#369 session). Transform engine only; read at the next zoom-in.
+        { key: 'txNativeCursor', type: 'select', label: 'Mouse tracking', keywords: ['tracking', 'mouse', 'pointer', 'cursor', 'native', 'windows', 'magnifier', 'follow', 'centring', 'centering', 'sprite', 'dwm', 'smooth', 'lag', 'wind'],
+          desc: 'Who follows the mouse while zoomed', options: ['1', '0'], optionLabels: { '1': 'Native', '0': 'Wind' }, def: '0',
+          showIf: { key: 'model', ne: 'render' } },
         // Zoom lock detection (#221): games like DOOM pin the mouse to the screen centre, which would
         // pin the zoom view there too. Listed apps get the view UNLOCKED from the pointer.
         { key: 'lockApps', type: 'applist', adv: true, label: 'Mouse-locked games', keywords: ['lock', 'locked', 'fps', 'shooter', 'first person', 'mouselook', 'mouse look', 'camera', 'game', 'exe', 'program', 'unlock', 'exception', 'apps', 'pinned', 'centre'],

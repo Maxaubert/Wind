@@ -125,7 +125,7 @@ private:
     // middle-click: measured 17 spike frames per 14 clicks), and the lens is ON only while zoomed.
     // The context is released at shutdown and when the model is swapped out.
     bool magUp_ = false;
-    bool nativePref_ = true;                         // txNativeCursor (#463): the next session's kind
+    bool nativePref_ = false;                        // txNativeCursor (#463): the next session's kind
     bool nativeSession_ = true;                      // latched at zoom-in; false = legacy sprite session
     int  lastSpriteX_ = INT_MIN, lastSpriteY_ = INT_MIN;   // dedup the legacy sprite move
     // Native cursor (issue #369). nativePrimed_: the context's one public write that makes DWM

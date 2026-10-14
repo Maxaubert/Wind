@@ -21,7 +21,7 @@ const OLD_BIND_KEYS = [
   'panLeftVk', 'panLeftMods', 'panRightVk', 'panRightMods', 'panUpVk', 'panUpMods', 'panDownVk', 'panDownMods',
   'hideCursorVk', 'hideCursorMods', 'cursorLockVk', 'cursorLockMods',
 ];
-const NEW_KEYS = ['renderScaling', 'uiPalette', '__profiles', '__diagnostics', '__openIni', 'trayPerf', 'trayPinned', 'showAdvanced'];
+const NEW_KEYS = ['renderScaling', 'txNativeCursor', 'uiPalette', '__profiles', '__diagnostics', '__openIni', 'trayPerf', 'trayPinned', 'showAdvanced'];
 
 test('group ids, order and shape follow the spec', () => {
   expect(groups.map((g) => g.id)).toEqual(['hotkeys', 'zoom', 'view', 'prefs', 'tray', 'about']);

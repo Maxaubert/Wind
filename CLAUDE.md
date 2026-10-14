@@ -71,14 +71,14 @@ Chapter numbers refer to `docs/architecture/NN-*.md`.
 **Cursor (07)**
 - In a transform session the lock (`lockApps`, tells) applies only while the pointer is hidden
   (`LockApplies`); gates read `t.lockEff`, not `t.detector.locked()`. See 07.
-- Native cursor (the transform engine's only cursor, both sampling modes; `src/transform/native_cursor.h`): DWM
+- Native cursor (Mouse tracking = Native, both sampling modes; `src/transform/native_cursor.h`): DWM
   draws the real pointer via Wind's cursor lens (a hidden `WC_MAGNIFIER` window, built on the tick
   thread at idle) and centres the view itself (`SetFullscreenMagnifierOffsetsDWMUpdated`). While DWM
   centres, never write a same-level transform or warm pulse. Never use a public write to get the
   composed pointer: it blocks 200-260 ms. `MagGetFullscreenTransform` cannot see DWM's centring.
-  The only window Wind still draws in a transform session is the Inspect crosshair, except in the
-  ini-only A/B fallback `txNativeCursor=0` (the pre-#369 sprite session, 07): gate native-only paths
-  on `nativeSession_`.
+  In a native session the only window Wind draws is the Inspect crosshair. Mouse tracking = Wind
+  (`txNativeCursor=0`, the DEFAULT) is the pre-#369 sprite session (07): gate native-only paths on
+  `nativeSession_`.
 - The cursor grows with the zoom in every engine (#253). Do not restore constant size;
   `cursorConstantSize=1` is the render-only opt-in. Test defaults on a wiped `%LOCALAPPDATA%\Wind`:
   the dev ini differs from a clean install.

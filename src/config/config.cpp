@@ -601,6 +601,8 @@ std::string DefaultIniText() {
                "trackAlign=0\n"
                "; mouseAlign: mouse pointer, 0=keep centred, 1=keep within the edges\n"
                "mouseAlign=0\n"
+               "; txNativeCursor: mouse tracking (transform engine), 0=Wind (Wind moves the view and draws the pointer), 1=Native (Windows' magnifier logic)\n"
+               "txNativeCursor=0\n"
                "; trackGlideMs: how long the view takes to glide to the caret/focus/pointer (ms)\n"
                "trackGlideMs=200\n"
                "; trackMarginPct: within-the-edges margin, percent of the view on each side\n"

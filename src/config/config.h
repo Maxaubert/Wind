@@ -302,12 +302,12 @@ struct Config {
     // is turned into smooth as before. The pan walls stay armed either way. Hot: read on every
     // config load (EffectiveSamplingMode).
     int mpoNearestGuard = 1;
-    // Native cursor (issue #369, src/transform/native_cursor.h): 1 (DEFAULT) = transform sessions use DWM's
-    // own magnified pointer and DWM's centring. 0 = the pre-#369 legacy sprite session, kept as an
-    // ini-only A/B fallback (issue #463): Wind hides the real pointer, draws its shape in a sprite
-    // welded to the view, and writes every view itself. Not in the Settings UI or the ini template.
+    // Mouse tracking (Settings > View, issues #369, #463; src/transform/native_cursor.h). Transform
+    // engine only. 0 (DEFAULT, owner pick 2026-10-14) = Wind: Wind writes every view and hides the
+    // real pointer, drawing its shape in a sprite welded to the view (the pre-#369 session).
+    // 1 = Native: DWM's own magnified pointer and DWM's centring, as Windows Magnifier does.
     // Read at zoom-in (hot for the next session).
-    int txNativeCursor = 1;
+    int txNativeCursor = 0;
     // Smooth-zoom ladder (issue #369, src/transform/zoom_ladder.h): with smooth sampling, zoom only through
     // levels where DWM's per-frame scratch rounding predicts under 1 px of movement (the zoom shake:
     // 11 px p95 -> 0.7 px measured at 10-25x). 0 = off (hot).
