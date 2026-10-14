@@ -1014,8 +1014,10 @@ static void ZoomTimelineStep(TickState& t, long long nowQpc) {
     (void)nowQpc;
 }
 
-static void RunTick(TickState& t) {
-    TickWorkTimer workTimer(t);
+// Tick phase: timing. The idle colour filter, dt (raw, and clamped to one frame after an idle
+// wake), the zoom timeline step, the stale press stamp and the tray's frame-time sample.
+struct TickClock { LARGE_INTEGER now; double dt; double rawDt; bool woke; };
+static TickClock BeginTick(TickState& t) {
     // Idle (1x) colour filter; a zoomed tick re-decides below with the engine known.
     if (!t.prevActive) UpdateColorFilter(t, false, false, nullptr);
     LARGE_INTEGER now;
@@ -1039,7 +1041,83 @@ static void RunTick(TickState& t) {
     // One float store per tick, for the tray's frame-pacing readout. Deliberately the cheapest
     // possible coupling to the hot path: no lock, no allocation, and nothing reads it here.
     if (g_trayBlock && !woke) g_trayBlock->ticks.push((float)(dt * 1000.0));
+    return { now, dt, rawDt, woke };
+}
 
+// Config hot-reload, core-relevant change: apply the newly parsed config nc (re-binds, hotkeys,
+// live engine prefs) and rebuild the zoom controller and mapper with the live level and centre.
+static void ApplyReloadedConfig(TickState& t, Config& nc, const std::string& stripped) {
+    t.lastCoreIni = stripped;
+    // Issue #242: the high-res/MPO option is atomic at restart - while an MPO restart is
+    // pending (registry != boot) the BOOT state's look holds in both directions, and
+    // crisp never runs on an MPO-enabled boot (the 16-bit TDR combo; covers profile
+    // switches and hand edits too). The ini keeps the user's intent.
+    if (int eff = EffectiveSamplingMode(nc.txSamplingMode, g_mpoDisabled,
+                                        wind::MpoDisabledInRegistry(), nc.tdrTest,
+                                        nc.mpoNearestGuard != 0);
+        eff != nc.txSamplingMode) {
+        wind::Log(wind::LogLevel::Info, "config",
+                  "sampling %d deferred, running %d: MPO restart pending or MPO-enabled "
+                  "boot (issue #242)", nc.txSamplingMode, eff);
+        nc.txSamplingMode = eff;
+    }
+    // Re-bind the hook's button mapping if the user changed it via the config UI; without
+    // this the hook would keep firing the OLD button (the new VK works via GetAsyncKeyState
+    // but the mouse mapping is captured once in g_input.start at app launch).
+    if (wind::ButtonBindsChanged(nc, t.cfg)) {
+        g_input.setButtonBinds(nc.zoomInButton, nc.zoomInButtonMods, nc.zoomInButton2, nc.zoomInButton2Mods,
+                               nc.zoomOutButton, nc.zoomOutButtonMods, nc.zoomOutButton2, nc.zoomOutButton2Mods);
+    }
+    g_input.setWheelMods(nc.zoomWheelMods);   // scroll-wheel zoom (#285); one relaxed store
+    // Re-bind the keyboard hook's tracked/swallowed keys when any keyboard zoom/recenter
+    // bind changed (else the hook keeps swallowing the OLD key and ignores the new one).
+    if (wind::KeyBindsChanged(nc, t.cfg)) {
+        g_input.setKeys(nc.zoomInVk, nc.zoomInVk2, nc.zoomOutVk, nc.zoomOutVk2, nc.recenterVk,
+                        nc.cursorLockVk);
+    }
+    g_input.setKeyMods(nc.zoomInMods, nc.zoomInMods2, nc.zoomOutMods, nc.zoomOutMods2,
+                       nc.recenterMods, nc.cursorLockMods);
+    if (wind::PanBindsChanged(nc, t.cfg)) {
+        const int pv[4] = { nc.panLeftVk, nc.panRightVk, nc.panUpVk, nc.panDownVk };
+        const int pm[4] = { nc.panLeftMods, nc.panRightMods, nc.panUpMods, nc.panDownMods };
+        g_input.setPanKeys(pv, pm);   // keyboard panning (#287)
+    }
+    if (nc.hideCursorVk != t.cfg.hideCursorVk || nc.hideCursorMods != t.cfg.hideCursorMods) {
+        RegisterHideCursorHotkey(t.hwnd, nc.hideCursorVk, nc.hideCursorMods);
+    }
+    if (nc.quickZoomHotkeyMode != t.cfg.quickZoomHotkeyMode
+     || nc.quickZoomVk != t.cfg.quickZoomVk || nc.quickZoomMods != t.cfg.quickZoomMods) {
+        RegisterQuickZoomHotkey(t.hwnd, (nc.quickZoomHotkeyMode && nc.quickZoomVk) ? nc.quickZoomVk : 0,
+                                nc.quickZoomMods);
+    }
+    if (nc.model != t.cfg.model)   // both engines are built: the next pick follows it, no restart
+        wind::Log(wind::LogLevel::Info, "config", "engine %s -> %s (applies live)", t.cfg.model.c_str(), nc.model.c_str());
+    // txNativeCursor (#463): the next transform session's cursor (latched at zoom-in).
+    if (auto* tmHot = dynamic_cast<TransformModel*>(t.mTransform ? t.mTransform : t.model))
+        tmHot->setNativeCursorPref(wind::UseNativeCursor(nc.txNativeCursor));
+    t.cfg = nc;   // pick up renderer knobs (smoothing, filter, cursor scale, zoom speed)
+    // transformExclude / renderExclude / the per-window-type engine keys may all have
+    // changed: drop the cache so every exe-derived predicate is re-resolved. Without this
+    // an edited list only took effect on the next foreground change, which reads as the
+    // setting not working.
+    t.fgCacheHwnd = nullptr;
+    // PRESERVE THE LIVE ZOOM ACROSS THE RELOAD (issue #234). ZoomController starts at its
+    // minimum, so rebuilding it for a possibly-changed maxLevel used to drop whatever the
+    // user was zoomed to: change any core setting while zoomed and the view collapsed to
+    // 1x instantly. That is exactly the moment someone tunes zoom speed or smoothing and
+    // watches the effect. setLevel clamps into the new range, so a maxLevel lowered below
+    // the current level lands on the new ceiling rather than snapping home. The mapper's
+    // centre is preserved two lines below for the same reason; the level was just missed.
+    const double keepLevel = t.zoom.level();
+    t.zoom = ZoomController(1.0, nc.maxLevel);
+    t.zoom.setLevel(keepLevel);
+    double ocx = t.mapper.centerX(), ocy = t.mapper.centerY();   // preserve position
+    t.mapper = CursorMapper(t.mon.w, t.mon.h);
+    t.mapper.reset(ocx, ocy);
+}
+
+// Tick phase: config hot-reload (rawDt drives the check cadence).
+static void PollConfigReload(TickState& t, double rawDt) {
     // Config hot-reload. A directory-change notification tells us WHEN to re-check magnifier.ini,
     // so the idle render thread does NO per-second filesystem stat (the old 1 Hz GetFileAttributesExW
     // poll caused a ~1s frametime spike under AV/disk contention). WaitForSingleObject(h, 0) is a
@@ -1099,82 +1177,14 @@ static void RunTick(TickState& t) {
                 t.lastMtime = m;
                 t.configRetry = false;
             }
-            if (loaded) {
-            t.lastCoreIni = stripped;
-            // Issue #242: the high-res/MPO option is atomic at restart - while an MPO restart is
-            // pending (registry != boot) the BOOT state's look holds in both directions, and
-            // crisp never runs on an MPO-enabled boot (the 16-bit TDR combo; covers profile
-            // switches and hand edits too). The ini keeps the user's intent.
-            if (int eff = EffectiveSamplingMode(nc.txSamplingMode, g_mpoDisabled,
-                                                wind::MpoDisabledInRegistry(), nc.tdrTest,
-                                                nc.mpoNearestGuard != 0);
-                eff != nc.txSamplingMode) {
-                wind::Log(wind::LogLevel::Info, "config",
-                          "sampling %d deferred, running %d: MPO restart pending or MPO-enabled "
-                          "boot (issue #242)", nc.txSamplingMode, eff);
-                nc.txSamplingMode = eff;
-            }
-            // Re-bind the hook's button mapping if the user changed it via the config UI; without
-            // this the hook would keep firing the OLD button (the new VK works via GetAsyncKeyState
-            // but the mouse mapping is captured once in g_input.start at app launch).
-            if (wind::ButtonBindsChanged(nc, t.cfg)) {
-                g_input.setButtonBinds(nc.zoomInButton, nc.zoomInButtonMods, nc.zoomInButton2, nc.zoomInButton2Mods,
-                                       nc.zoomOutButton, nc.zoomOutButtonMods, nc.zoomOutButton2, nc.zoomOutButton2Mods);
-            }
-            g_input.setWheelMods(nc.zoomWheelMods);   // scroll-wheel zoom (#285); one relaxed store
-            // Re-bind the keyboard hook's tracked/swallowed keys when any keyboard zoom/recenter
-            // bind changed (else the hook keeps swallowing the OLD key and ignores the new one).
-            if (wind::KeyBindsChanged(nc, t.cfg)) {
-                g_input.setKeys(nc.zoomInVk, nc.zoomInVk2, nc.zoomOutVk, nc.zoomOutVk2, nc.recenterVk,
-                                nc.cursorLockVk);
-            }
-            g_input.setKeyMods(nc.zoomInMods, nc.zoomInMods2, nc.zoomOutMods, nc.zoomOutMods2,
-                               nc.recenterMods, nc.cursorLockMods);
-            if (wind::PanBindsChanged(nc, t.cfg)) {
-                const int pv[4] = { nc.panLeftVk, nc.panRightVk, nc.panUpVk, nc.panDownVk };
-                const int pm[4] = { nc.panLeftMods, nc.panRightMods, nc.panUpMods, nc.panDownMods };
-                g_input.setPanKeys(pv, pm);   // keyboard panning (#287)
-            }
-            if (nc.hideCursorVk != t.cfg.hideCursorVk || nc.hideCursorMods != t.cfg.hideCursorMods) {
-                RegisterHideCursorHotkey(t.hwnd, nc.hideCursorVk, nc.hideCursorMods);
-            }
-            if (nc.quickZoomHotkeyMode != t.cfg.quickZoomHotkeyMode
-             || nc.quickZoomVk != t.cfg.quickZoomVk || nc.quickZoomMods != t.cfg.quickZoomMods) {
-                RegisterQuickZoomHotkey(t.hwnd, (nc.quickZoomHotkeyMode && nc.quickZoomVk) ? nc.quickZoomVk : 0,
-                                        nc.quickZoomMods);
-            }
-            if (nc.model != t.cfg.model)   // both engines are built: the next pick follows it, no restart
-                wind::Log(wind::LogLevel::Info, "config", "engine %s -> %s (applies live)", t.cfg.model.c_str(), nc.model.c_str());
-            // txNativeCursor (#463): the next transform session's cursor (latched at zoom-in).
-            if (auto* tmHot = dynamic_cast<TransformModel*>(t.mTransform ? t.mTransform : t.model))
-                tmHot->setNativeCursorPref(wind::UseNativeCursor(nc.txNativeCursor));
-            t.cfg = nc;   // pick up renderer knobs (smoothing, filter, cursor scale, zoom speed)
-            // transformExclude / renderExclude / the per-window-type engine keys may all have
-            // changed: drop the cache so every exe-derived predicate is re-resolved. Without this
-            // an edited list only took effect on the next foreground change, which reads as the
-            // setting not working.
-            t.fgCacheHwnd = nullptr;
-            // PRESERVE THE LIVE ZOOM ACROSS THE RELOAD (issue #234). ZoomController starts at its
-            // minimum, so rebuilding it for a possibly-changed maxLevel used to drop whatever the
-            // user was zoomed to: change any core setting while zoomed and the view collapsed to
-            // 1x instantly. That is exactly the moment someone tunes zoom speed or smoothing and
-            // watches the effect. setLevel clamps into the new range, so a maxLevel lowered below
-            // the current level lands on the new ceiling rather than snapping home. The mapper's
-            // centre is preserved two lines below for the same reason; the level was just missed.
-            const double keepLevel = t.zoom.level();
-            t.zoom = ZoomController(1.0, nc.maxLevel);
-            t.zoom.setLevel(keepLevel);
-            double ocx = t.mapper.centerX(), ocy = t.mapper.centerY();   // preserve position
-            t.mapper = CursorMapper(t.mon.w, t.mon.h);
-            t.mapper.reset(ocx, ocy);
-            }   // core-relevant change guard (StripUiOnlyKeys)
+            if (loaded) ApplyReloadedConfig(t, nc, stripped);   // core-relevant change guard (StripUiOnlyKeys)
         }
     }
+}
 
-    // Effective held state = mouse side-button (set by the hook/raw input) OR keyboard key held.
-    // Lets users without side-buttons zoom from the keyboard. When the LL keyboard hook is active it
-    // is the authority for bound-key down-state (a swallowed key never appears in GetAsyncKeyState),
-    // so read keyPressed(); otherwise (hook install failed / WIND_NOHOOK) fall back to polling.
+// Tick phase: foreground watch (launch-quiesce cover, noSwallowApps hook suspension) and the
+// LL keyboard-hook watchdog.
+static void WatchForegroundAndKbHook(TickState& t) {
     // Suspend the LL keyboard hook while a borderless fullscreen app (a game) is foreground.
     //
     // A WH_KEYBOARD_LL hook taxes the SYSTEM's input pipeline, not just ours: the raw input thread
@@ -1254,22 +1264,35 @@ static void RunTick(TickState& t) {
     } else {
         t.kbHookDivergentSinceMs = 0;
     }
+}
+
+// Effective held state = mouse side-button (set by the hook/raw input) OR keyboard key held.
+// Lets users without side-buttons zoom from the keyboard. When the LL keyboard hook is active it
+// is the authority for bound-key down-state (a swallowed key never appears in GetAsyncKeyState),
+// so read keyPressed(); otherwise (hook install failed / WIND_NOHOOK) fall back to polling.
+// kbHook is the tick's one read of g_input.kbHookActive().
+static bool BindKeyDown(bool kbHook, int vk) {
+    if (vk == 0) return false;
+    if (kbHook && g_input.isBoundKey(vk)) return g_input.keyPressed(vk);
+    return (GetAsyncKeyState(vk) & 0x8000) != 0;
+}
+// Modifier mask: bit 1=Ctrl, 2=Alt, 4=Shift, 8=Win. 0 = no modifiers required. Extra modifiers
+// never disqualify (so a "Ctrl+F1" combo still fires when Ctrl+Shift+F1 is held).
+static bool BindModsHeld(int mods) {
+    if ((mods & 1) && !(GetAsyncKeyState(VK_CONTROL) & 0x8000)) return false;
+    if ((mods & 2) && !(GetAsyncKeyState(VK_MENU)    & 0x8000)) return false;
+    if ((mods & 4) && !(GetAsyncKeyState(VK_SHIFT)   & 0x8000)) return false;
+    if ((mods & 8) && !((GetAsyncKeyState(VK_LWIN) & 0x8000) || (GetAsyncKeyState(VK_RWIN) & 0x8000))) return false;
+    return true;
+}
+static bool BindComboHeld(bool kbHook, int vk, int mods) { return BindKeyDown(kbHook, vk) && BindModsHeld(mods); }
+
+// Tick phase: input and zoom. Held binds (mouse, keyboard, wheel), the ZoomController step, the
+// smooth-zoom release stop, the recenter and Inspect toggle edges, quick zoom, and the tray level.
+struct TickInput { bool kbHook; bool inHeld, outHeld; bool recenter; double lvl; };
+static TickInput ResolveInputAndZoom(TickState& t, double dt) {
     const bool kbHook = g_input.kbHookActive();
-    auto keyDown = [&](int vk) {
-        if (vk == 0) return false;
-        if (kbHook && g_input.isBoundKey(vk)) return g_input.keyPressed(vk);
-        return (GetAsyncKeyState(vk) & 0x8000) != 0;
-    };
-    // Modifier mask: bit 1=Ctrl, 2=Alt, 4=Shift, 8=Win. 0 = no modifiers required. Extra modifiers
-    // never disqualify (so a "Ctrl+F1" combo still fires when Ctrl+Shift+F1 is held).
-    auto modsHeld = [](int mods) {
-        if ((mods & 1) && !(GetAsyncKeyState(VK_CONTROL) & 0x8000)) return false;
-        if ((mods & 2) && !(GetAsyncKeyState(VK_MENU)    & 0x8000)) return false;
-        if ((mods & 4) && !(GetAsyncKeyState(VK_SHIFT)   & 0x8000)) return false;
-        if ((mods & 8) && !((GetAsyncKeyState(VK_LWIN) & 0x8000) || (GetAsyncKeyState(VK_RWIN) & 0x8000))) return false;
-        return true;
-    };
-    auto comboHeld = [&](int vk, int mods) { return keyDown(vk) && modsHeld(mods); };
+    auto comboHeld = [&](int vk, int mods) { return BindComboHeld(kbHook, vk, mods); };
     // Quick-zoom modifier mode (see below): holding the modifier turns a zoom-key press into a
     // quick-zoom tap. A bind that ITSELF includes that modifier (Ctrl+Alt+click with the Ctrl
     // modifier, #285) is a normal hold-to-zoom bind, so every held bind is sorted into "includes the
@@ -1400,7 +1423,13 @@ static void RunTick(TickState& t) {
         ts_.level = lvl;
         wind::PublishTrayStatus(g_trayBlock, ts_);
     }
+    return { kbHook, inHeld, outHeld, recenter, lvl };
+}
 
+// Tick phase: this tick's modes. Raw motion, zoomed / Inspect / active, the stale-lock reset, the
+// zoom timeline arm on the enter tick, and the keyboard-pan arm published to the hook.
+struct TickModes { int rawDx, rawDy; bool zoomed, inspect, active, panArmed; };
+static TickModes ResolveTickModes(TickState& t, double lvl, const LARGE_INTEGER& now) {
     int rawDx, rawDy; g_input.drainRaw(rawDx, rawDy);
     // Raw motion from before this activation (up to a 100 ms idle sleep of it, #71) never pans the
     // first zoomed frame: at 1x it is unused, so an idle->active tick starts from zero.
@@ -1431,1266 +1460,1401 @@ static void RunTick(TickState& t) {
     const bool panArmed = lvl > 1.001 && !inspect && !t.lockEff;
     g_input.setPanArmed(panArmed);
     if (!panArmed) t.keyPan.reset();
+    return { rawDx, rawDy, zoomed, inspect, active, panArmed };
+}
 
-    if (active) {
-        bool enterActive  = !t.prevActive;            // idle -> active (overlay just turned on)
-        bool inspectEnter = inspect && !t.prevInspect;
-        if (enterActive) {
-            // Pristine pointers back BEFORE any engine hides or captures the pointer: DWM composes
-            // the transform engine's pointer through the colour effect and the render engine draws
-            // and filters the real shape itself, so a tinted source would be tinted twice (#288).
-            // Direct swaps, no scheme reload.
-            g_tint.restore(false);
-            t.outlineIdleSec = 0.0;   // each activation starts with the outline fully shown
-            // StepViewOwner runs only while zoomed, so the owner, its latched caret target and the
-            // detached view survived the 1x gap and the next zoom-in opened on the previous
-            // session's caret. Every session starts with the mouse in charge.
-            wind::ResetViewOwnerForSession(t.viewOwner);
-            t.ptrHist.clear();   // no samples from the previous session in the first lagged read (#443)
-            t.postInspectHold = false;   // a new session starts with DWM centring (#445)
-            t.viewDetached = false;
-            t.viewVx = 0; t.viewVy = 0;
-            t.keyPan.reset();
-            // Follow the cursor's monitor (multiMonitor on, only when zoomed). Only reconfigure when
-            // it actually changed; retarget() returns false on multi-GPU/failure, in which case we keep
-            // the current monitor. The overlay is still at alpha 0 here, so a move never flashes.
-            // RETARGET BEFORE THE ENGINE PICK: the pick must evaluate the SESSION's monitor - the
-            // old order evaluated the PREVIOUS session's monitor, so switching monitors between
-            // zooms could hand a secondary-monitor session the transform engine (or a primary
-            // game session the render one). Retarget through the render model: it owns the
-            // overlay, and hybrid may still be holding the transform half from the last session.
-            // multiMonitor decides WHICH monitor to follow, not WHETHER to notice the current
-            // one's geometry (issue #230). It used to gate both, so with it off - the shipped
-            // default - a display-mode change was never picked up at all; and with it on, only the
-            // render model was retargeted, leaving the transform clamping against the old size.
-            // A game that switches to a lower resolution therefore let the view pan off the real
-            // desktop. Both engines are retargeted now, and the geometry is tracked either way.
-            // Inspect at 1x also needs the session's monitor (the look point maps onto it).
-            if (zoomed || inspect) {
-                MonitorTarget nt = t.cfg.multiMonitor ? MonitorUnderCursor() : PrimaryMonitor();
-                IMagnifierModel* rt = t.mRender ? t.mRender : t.model;
-                bool ok = SameMonitor(nt, t.mon) ? false : rt->retarget(nt);
-                const bool renderOk = ok;
-                const bool hadTransformHalf = t.mTransform && t.mTransform != rt;
-                // The transform half owns its own bounds and must follow even when the render
-                // half refuses (retarget returns false across adapters, where the overlay cannot
-                // move but the transform is still valid on the new geometry).
-                if (!SameMonitor(nt, t.mon) && t.mTransform && t.mTransform != rt) {
-                    if (t.mTransform->retarget(nt)) ok = true;
-                }
-                // Hybrid with a render half that refused while the transform half took it: the
-                // overlay is left on the old monitor, so this session must not pick render.
-                if (ok && hadTransformHalf && !renderOk) t.renderStale = true;
-                else if (ok) t.renderStale = false;
-                if (ok) {
-                    t.mon = nt;
-                    int nhz = DetectRefreshHz(nt.device);   // pace off the new monitor's refresh (#74)
-                    if (nhz > 0) t.hz = nhz;
-                    // Everything tuned in ticks follows the new tick rate (issue #223).
-                    t.mapper = CursorMapper(nt.w, nt.h);
-                    t.detector.setTickRate(t.hz);
-                }
-            }
-            if (t.mTransform) {
-                // Hybrid engine pick, per zoom-in session (pure predicate: engine_pick.h, tested).
-                // Only ever swapped here or in the settled instant-switch below, so every
-                // activation's teardown calls route to the same engine that activated.
-                HWND fgw = GetForegroundWindow();
-                // Re-derive once per zoom-in even for the same window (review 2026-10-09 M1): the
-                // cache is keyed on the HWND, but what it caches can change under the same handle
-                // (an app marked churny after a driver reset keeps its window; a DRM child surface
-                // appears later). The mid-zoom re-pick below still reuses it every tick.
-                t.fgCacheHwnd = nullptr;
-                RefreshFgCache(t, fgw);
-                t.monRotated = DetectRotatedOutput(t.mon.device);
-                auto* tAvail = dynamic_cast<TransformModel*>(t.mTransform);
-                EnginePickInputs pin;
-                pin.coversMonitor  = ForegroundCoversMonitor(t.mon);
-                pin.borderless     = fgw && !(GetWindowLongPtrW(fgw, GWL_STYLE) & WS_CAPTION);
-                pin.primaryMonitor = t.mon.x == 0 && t.mon.y == 0;
-                pin.shellDesktop   = t.fgCacheShell;
-                pin.excluded       = t.fgCacheExcluded;
-                pin.churny         = t.fgCacheChurny;
-                pin.tdrHarness     = t.cfg.tdrTest > 0;
-                pin.desktopTransformOptIn = t.cfg.desktopTransform != 0;
-                pin.inputTransformOk      = tAvail && tAvail->inputTransformAvailable();
-                pin.renderLost            = RenderDeviceLost(t);
-                FillCategoryInputs(t, pin);
-                IMagnifierModel* pick = wind::PickTransformFor(t.cfg.model, pin, t.renderStale) ? t.mTransform : t.mRender;
-                if (pick && pick != t.model) t.model = pick;
-            }
-            t.vbounds = QueryVirtualBounds();   // refresh cached clip-detect bounds (topology may have changed)
-            // REFRESH RATE CAN CHANGE WITHOUT THE GEOMETRY CHANGING (issue #232). The retarget
-            // above only fires when SameMonitor is false, and that compares origin, size and
-            // device name - not the rate. A game switching to 60Hz at the desktop's resolution,
-            // or a driver-side refresh toggle, therefore left t.hz at its startup value forever.
-            // Everything derived from it is then wrong by that ratio: the timer pacing, the
-            // mapper's smoothing, the lock detector, and the tick counts TicksAtHz scales (its
-            // own comment notes a 144Hz-tuned count runs 2.4x longer at 60Hz). One
-            // EnumDisplaySettingsW per zoom-in is a cheap price for not being silently mistuned.
-            {
-                const int curHz = DetectRefreshHz(t.mon.device);
-                if (curHz > 0 && curHz != t.hz) {
-                    wind::Log(wind::LogLevel::Info, "tick", "refresh rate %dHz -> %dHz", t.hz, curHz);
-                    t.hz = curHz;
-                    t.mapper = CursorMapper(t.mon.w, t.mon.h);
-                    t.detector.setTickRate(t.hz);
-                }
-            }
-            POINT pt; GetCursorPos(&pt);
-            t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y);   // virtual -> local monitor coords
-            t.lastSetVirtual = pt;        // baseline for the OS-cursor delta (first delta = 0)
-            t.detector.reset();           // start free
-            // Warp-lock seeding (issue #221 round 3, field report: any motion-based tell still needs a
-            // wiggle as evidence). Zooming in over a COVERING app whose cursor is already
-            // hidden by the APP is mouselook with near-certainty (the game-inspect tell, valid
-            // at this instant because this session has hidden nothing yet) - start LOCKED so
-            // the raw-mickey pan works from the first tick, motionless. A menu or the desktop
-            // (cursor shown) seeds nothing; a wrong seed over fullscreen video self-heals in
-            // ~100ms once the player re-shows the pointer and it tracks the hand.
-            if (t.cfg.warpLock != 0 && !t.cursorHiddenByUs && ForegroundCoversMonitor(t.mon)) {
+// Session enter: retarget both engines to the session's monitor (before the engine pick).
+static void RetargetSessionMonitor(TickState& t, bool zoomed, bool inspect) {
+    // Follow the cursor's monitor (multiMonitor on, only when zoomed). Only reconfigure when
+    // it actually changed; retarget() returns false on multi-GPU/failure, in which case we keep
+    // the current monitor. The overlay is still at alpha 0 here, so a move never flashes.
+    // RETARGET BEFORE THE ENGINE PICK: the pick must evaluate the SESSION's monitor - the
+    // old order evaluated the PREVIOUS session's monitor, so switching monitors between
+    // zooms could hand a secondary-monitor session the transform engine (or a primary
+    // game session the render one). Retarget through the render model: it owns the
+    // overlay, and hybrid may still be holding the transform half from the last session.
+    // multiMonitor decides WHICH monitor to follow, not WHETHER to notice the current
+    // one's geometry (issue #230). It used to gate both, so with it off - the shipped
+    // default - a display-mode change was never picked up at all; and with it on, only the
+    // render model was retargeted, leaving the transform clamping against the old size.
+    // A game that switches to a lower resolution therefore let the view pan off the real
+    // desktop. Both engines are retargeted now, and the geometry is tracked either way.
+    // Inspect at 1x also needs the session's monitor (the look point maps onto it).
+    if (zoomed || inspect) {
+        MonitorTarget nt = t.cfg.multiMonitor ? MonitorUnderCursor() : PrimaryMonitor();
+        IMagnifierModel* rt = t.mRender ? t.mRender : t.model;
+        bool ok = SameMonitor(nt, t.mon) ? false : rt->retarget(nt);
+        const bool renderOk = ok;
+        const bool hadTransformHalf = t.mTransform && t.mTransform != rt;
+        // The transform half owns its own bounds and must follow even when the render
+        // half refuses (retarget returns false across adapters, where the overlay cannot
+        // move but the transform is still valid on the new geometry).
+        if (!SameMonitor(nt, t.mon) && t.mTransform && t.mTransform != rt) {
+            if (t.mTransform->retarget(nt)) ok = true;
+        }
+        // Hybrid with a render half that refused while the transform half took it: the
+        // overlay is left on the old monitor, so this session must not pick render.
+        if (ok && hadTransformHalf && !renderOk) t.renderStale = true;
+        else if (ok) t.renderStale = false;
+        if (ok) {
+            t.mon = nt;
+            int nhz = DetectRefreshHz(nt.device);   // pace off the new monitor's refresh (#74)
+            if (nhz > 0) t.hz = nhz;
+            // Everything tuned in ticks follows the new tick rate (issue #223).
+            t.mapper = CursorMapper(nt.w, nt.h);
+            t.detector.setTickRate(t.hz);
+        }
+    }
+}
+
+// Session enter: the hybrid engine pick for this zoom-in session.
+static void PickEngineAtZoomIn(TickState& t) {
+    if (t.mTransform) {
+        // Hybrid engine pick, per zoom-in session (pure predicate: engine_pick.h, tested).
+        // Only ever swapped here or in the settled instant-switch below, so every
+        // activation's teardown calls route to the same engine that activated.
+        HWND fgw = GetForegroundWindow();
+        // Re-derive once per zoom-in even for the same window (review 2026-10-09 M1): the
+        // cache is keyed on the HWND, but what it caches can change under the same handle
+        // (an app marked churny after a driver reset keeps its window; a DRM child surface
+        // appears later). The mid-zoom re-pick below still reuses it every tick.
+        t.fgCacheHwnd = nullptr;
+        RefreshFgCache(t, fgw);
+        t.monRotated = DetectRotatedOutput(t.mon.device);
+        auto* tAvail = dynamic_cast<TransformModel*>(t.mTransform);
+        EnginePickInputs pin;
+        pin.coversMonitor  = ForegroundCoversMonitor(t.mon);
+        pin.borderless     = fgw && !(GetWindowLongPtrW(fgw, GWL_STYLE) & WS_CAPTION);
+        pin.primaryMonitor = t.mon.x == 0 && t.mon.y == 0;
+        pin.shellDesktop   = t.fgCacheShell;
+        pin.excluded       = t.fgCacheExcluded;
+        pin.churny         = t.fgCacheChurny;
+        pin.tdrHarness     = t.cfg.tdrTest > 0;
+        pin.desktopTransformOptIn = t.cfg.desktopTransform != 0;
+        pin.inputTransformOk      = tAvail && tAvail->inputTransformAvailable();
+        pin.renderLost            = RenderDeviceLost(t);
+        FillCategoryInputs(t, pin);
+        IMagnifierModel* pick = wind::PickTransformFor(t.cfg.model, pin, t.renderStale) ? t.mTransform : t.mRender;
+        if (pick && pick != t.model) t.model = pick;
+    }
+}
+
+// Session enter (idle -> active): reset the per-session view state, retarget, pick the engine,
+// re-read the refresh rate, seed the mapper, baseline and lock detector, and activate the engine.
+static void EnterSession(TickState& t, bool zoomed, bool inspect) {
+    // Pristine pointers back BEFORE any engine hides or captures the pointer: DWM composes
+    // the transform engine's pointer through the colour effect and the render engine draws
+    // and filters the real shape itself, so a tinted source would be tinted twice (#288).
+    // Direct swaps, no scheme reload.
+    g_tint.restore(false);
+    t.outlineIdleSec = 0.0;   // each activation starts with the outline fully shown
+    // StepViewOwner runs only while zoomed, so the owner, its latched caret target and the
+    // detached view survived the 1x gap and the next zoom-in opened on the previous
+    // session's caret. Every session starts with the mouse in charge.
+    wind::ResetViewOwnerForSession(t.viewOwner);
+    t.ptrHist.clear();   // no samples from the previous session in the first lagged read (#443)
+    t.postInspectHold = false;   // a new session starts with DWM centring (#445)
+    t.viewDetached = false;
+    t.viewVx = 0; t.viewVy = 0;
+    t.keyPan.reset();
+    RetargetSessionMonitor(t, zoomed, inspect);
+    PickEngineAtZoomIn(t);
+    t.vbounds = QueryVirtualBounds();   // refresh cached clip-detect bounds (topology may have changed)
+    // REFRESH RATE CAN CHANGE WITHOUT THE GEOMETRY CHANGING (issue #232). The retarget
+    // above only fires when SameMonitor is false, and that compares origin, size and
+    // device name - not the rate. A game switching to 60Hz at the desktop's resolution,
+    // or a driver-side refresh toggle, therefore left t.hz at its startup value forever.
+    // Everything derived from it is then wrong by that ratio: the timer pacing, the
+    // mapper's smoothing, the lock detector, and the tick counts TicksAtHz scales (its
+    // own comment notes a 144Hz-tuned count runs 2.4x longer at 60Hz). One
+    // EnumDisplaySettingsW per zoom-in is a cheap price for not being silently mistuned.
+    {
+        const int curHz = DetectRefreshHz(t.mon.device);
+        if (curHz > 0 && curHz != t.hz) {
+            wind::Log(wind::LogLevel::Info, "tick", "refresh rate %dHz -> %dHz", t.hz, curHz);
+            t.hz = curHz;
+            t.mapper = CursorMapper(t.mon.w, t.mon.h);
+            t.detector.setTickRate(t.hz);
+        }
+    }
+    POINT pt; GetCursorPos(&pt);
+    t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y);   // virtual -> local monitor coords
+    t.lastSetVirtual = pt;        // baseline for the OS-cursor delta (first delta = 0)
+    t.detector.reset();           // start free
+    // Warp-lock seeding (issue #221 round 3, field report: any motion-based tell still needs a
+    // wiggle as evidence). Zooming in over a COVERING app whose cursor is already
+    // hidden by the APP is mouselook with near-certainty (the game-inspect tell, valid
+    // at this instant because this session has hidden nothing yet) - start LOCKED so
+    // the raw-mickey pan works from the first tick, motionless. A menu or the desktop
+    // (cursor shown) seeds nothing; a wrong seed over fullscreen video self-heals in
+    // ~100ms once the player re-shows the pointer and it tracks the hand.
+    if (t.cfg.warpLock != 0 && !t.cursorHiddenByUs && ForegroundCoversMonitor(t.mon)) {
+        CURSORINFO ci{}; ci.cbSize = sizeof(ci);
+        if (GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING) == 0) {
+            t.detector.seedLock();
+            t.prevDetLocked = true;
+            wind::Log(wind::LogLevel::Info, "lock",
+                      "seeded LOCKED at zoom-in (app cursor hidden, covering foreground)");
+        }
+    }
+    // Transform sessions use the REAL cursor (issue #369): a free session never welds and
+    // DWM centres on the pointer; only the locked and Inspect regimes weld it to the lens
+    // point (see transform_model.cpp). Hover, drags and clicks are native either way. The
+    // old game-session FREEZE (1px clip + sprite aim point + click re-routing) was retired;
+    // git history has the machinery.
+    if (dynamic_cast<TransformModel*>(t.model)) {
+        // Record the session app for the device-lost churny backstop: if the GPU resets
+        // within 30s of a transform game session, that app is remembered in
+        // churny_apps.txt and future zoom-ins over it pick render (one crash, never two).
+        t.transformExe = ExeNameOf(GetForegroundWindow());
+        wind::Log(wind::LogLevel::Info, "hybrid", "transform session (welded cursor)");
+    } else {
+        SetSystemCursorHidden(t, t.model, true);
+    }
+    { wind::SpanScope span_(wind::kSpanActivate); t.model->onActivate(); }     // grab a live frame, not a stale cached one
+}
+
+// Inspect enter: freeze the real cursor, seed the look point, and decide game-inspect.
+// Zeroes this tick's raw motion so the first tick after entry pans by zero.
+static void EnterInspect(TickState& t, bool zoomed, int& rawDx, int& rawDy) {
+    // Freeze the real cursor where it is; the look point (mapper center) starts there.
+    POINT pt; GetCursorPos(&pt);
+    // Read before the freeze clip below replaces the clip (M4, InspectLockTell).
+    RECT preClip{}; GetClipCursor(&preClip);
+    const bool pinnedAtEdge =
+        !wind::ClipRectConfines((int)(preClip.right - preClip.left),
+                                (int)(preClip.bottom - preClip.top), t.mon.w, t.mon.h) &&
+        wind::PointerPinnedAtEdge(pt.x, pt.y, preClip.left, preClip.top,
+                                  preClip.right, preClip.bottom);
+    t.frozenCursor = pt;
+    t.clickReleaseTicks = 0;   // start frozen (clear any stale click-release window)
+    // Zero the sub-pixel carry and this tick's raw motion so the first tick after entry
+    // pans by zero.
+    rawDx = 0; rawDy = 0;
+    t.inspectPanRemX = 0.0; t.inspectPanRemY = 0.0;
+    t.inspectLookMoved = false;
+    t.postInspectHold = false;
+    t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y);
+    t.lastSetVirtual = pt;
+    RECT fz{ pt.x, pt.y, pt.x + 1, pt.y + 1 };
+    ClipCursor(&fz);
+    SetSystemCursorHidden(t, t.model, true);   // hide the real cursor; we draw the crosshair
+    { wind::SpanScope span_(wind::kSpanActivate); t.model->onActivate(); }
+    // Game-inspect (issue #144): if a mouselook game holds the mouse, the freeze alone is
+    // not enough - its raw-input camera still receives every mickey. Steal foreground to
+    // the invisible helper so the game stops getting input. Deferred via
+    // inspectStealPending: the reveal logic later this tick must still see the GAME as
+    // foreground (ForegroundCoversMonitor decides the composite-gated reveal).
+    t.inspectGame = wind::ShouldGameInspect(zoomed,
+                                            wind::InspectLockTell(t.detector.locked(), pinnedAtEdge),
+                                            t.inspectCursorWasShowing,
+                                            t.inspectMagHidCursor);
+    if (t.inspectGame) {
+        t.inspectPrevFg = GetForegroundWindow();
+        t.inspectStealPending = true;
+    }
+    // Logged either way: a DECLINE is the interesting case in the field (the camera keeps
+    // moving), and without the inputs there is nothing to diagnose it from.
+    wind::Log(wind::LogLevel::Info, "inspect",
+              "game-inspect %s (zoomed=%d detLocked=%d pinned=%d cursorShown=%d weHid=%d)",
+              t.inspectGame ? "engaged" : "DECLINED", (int)zoomed,
+              (int)t.detector.locked(), (int)pinnedAtEdge, (int)t.inspectCursorWasShowing,
+              (int)t.inspectMagHidCursor);
+}
+
+// Inspect exit while the overlay stays (zoomed): end game-inspect, drop pending clicks, release
+// the freeze and resume at the look point.
+static void ExitInspect(TickState& t) {
+    EndGameInspect(t);   // hand foreground back to the game before resuming normal follow
+    // Un-drained swallowed clicks die with the session: a click swallowed in the final
+    // tick before toggle-off would otherwise linger and fire as a phantom injected click
+    // at the lens centre on the NEXT activation (possibly much later, anywhere on screen).
+    g_input.state().commitLeft.exchange(0);
+    g_input.state().commitRight.exchange(0);
+    // Leaving Inspect resumes at the LOOK POINT for BOTH models: the crosshair is what the
+    // user was aiming with, so the cursor belongs there - snapping back to the pre-Inspect
+    // position (which the transform model used to do, because it was forbidden from
+    // placing the cursor) throws away the aim the user just spent the mode establishing.
+    ClipCursor(nullptr);
+    POINT lp{ (int)(t.mapper.centerX() + 0.5) + t.mon.x,
+              (int)(t.mapper.centerY() + 0.5) + t.mon.y };
+    const bool transformTx = dynamic_cast<TransformModel*>(t.model) != nullptr;
+    const bool warp = wind::InspectExitWarps(t.inspectLookMoved, transformTx);
+    t.postInspectHold = wind::HoldWindViewAfterInspect(t.inspectLookMoved, transformTx);
+    if (warp) SetCursorPos(lp.x, lp.y);
+    t.lastSetVirtual = warp ? lp : t.frozenCursor;
+    // The cursor SHAPE is stale after the warp (issue #229): Windows re-evaluates the
+    // shape only on a cursor event, so GetCursorInfo keeps reporting whatever cursor
+    // was active at the FROZEN spot (an I-beam over text, a link hand) and the sprite
+    // draws that stale shape until the user happens to move. Same 1px jiggle the
+    // transform model's session-end path uses - a zero-delta injected move is DROPPED
+    // by Windows and refreshes nothing (field-verified).
+    if (warp) {
+        SetCursorPos(lp.x + 1, lp.y);
+        SetCursorPos(lp.x, lp.y);
+    }
+}
+
+// Active tick: the pan delta in one of three regimes (free, locked, Inspect), with the lock
+// detector, lockApps, LockApplies, the gain learner and drag-follow. cur is the start-of-tick read.
+struct PanDelta { POINT cur; int curDx, curDy; int dx, dy; bool dragFollow; };
+static PanDelta ResolvePanDelta(TickState& t, bool inspect, double lvl, double dt, int rawDx, int rawDy) {
+    // Resolve the pan delta. FREE: the OS cursor's own motion since we last placed it - Windows'
+    // pointer acceleration is already applied, so we auto-match the real cursor (DPI/accel), then
+    // scale by cursorSensitivity as a speed knob (1.0 = exact match, the default). LOCKED: a game
+    // has the cursor clipped/recentered, so pan from raw mickeys scaled by the same cursorSensitivity
+    // (acceleration doesn't apply to relative-mouse game input). INSPECT: the real cursor is frozen
+    // in place, so its delta is irrelevant; the look point roams from raw mickeys instead.
+    POINT cur; GetCursorPos(&cur);
+    int curDx = cur.x - t.lastSetVirtual.x;
+    int curDy = cur.y - t.lastSetVirtual.y;
+    t.postInspectHold = wind::PostInspectHoldKeeps(t.postInspectHold && !inspect, curDx != 0 || curDy != 0);
+    int dx, dy;
+    bool dragFollow = false;   // set in the free render branch below; drives ex.suppressCursorSync
+    if (inspect) {
+        // The OS cursor is frozen, so pan the look point from raw mickeys scaled by the
+        // MEASURED desktop gain (GainLearner, the same replay as the locked path) so the look
+        // point moves at the same speed/DPI as the desktop cursor. cursorSensitivity stays a
+        // user multiplier on top; carry the sub-pixel remainder so slow precise motion is not
+        // quantized away.
+        const double inC = std::sqrt((double)rawDx * rawDx + (double)rawDy * rawDy);
+        const double g = t.gainLearner.gainFor(inC, dt * 1000.0);
+        t.inspectPanRemX += rawDx * g * t.cfg.cursorSensitivity;
+        t.inspectPanRemY += rawDy * g * t.cfg.cursorSensitivity;
+        dx = (int)t.inspectPanRemX; t.inspectPanRemX -= dx;   // truncate toward zero, carry the rest
+        dy = (int)t.inspectPanRemY; t.inspectPanRemY -= dy;
+        if (dx != 0 || dy != 0) t.inspectLookMoved = true;
+    } else {
+        RECT clip{}; GetClipCursor(&clip);
+        // A clip is a lock signal only when it is meaningfully SMALLER than the monitor
+        // (issue #169): a machine-wide work-area clip (desktop minus taskbar, ~95%) is
+        // desktop-like, not a game confining the pointer - the old any-clip test made every
+        // zoomed desktop session run the locked path on this rig. See ClipRectConfines.
+        bool clipConfined = wind::ClipRectConfines((int)(clip.right - clip.left),
+                                                   (int)(clip.bottom - clip.top),
+                                                   t.mon.w, t.mon.h);
+        int rawMag = std::abs(rawDx) + std::abs(rawDy);
+        // Mouse edge mode: the pointer is real and free, so pushing it into a screen edge or
+        // corner is not mouselook. Hide that motion from the lock tell (see PointerPinnedAtEdge).
+        if (t.cfg.mouseAlign == 1 && t.viewDetached && !clipConfined &&
+            wind::PointerPinnedAtEdge(cur.x, cur.y, clip.left, clip.top, clip.right, clip.bottom))
+            rawMag = 0;
+        bool locked = t.detector.update(clipConfined,
+                                        rawMag,
+                                        std::abs(curDx) + std::abs(curDy),
+                                        t.cfg.warpLock != 0, cur.x, cur.y);
+        // lockApps (issue #221): listed foreground exe = locked outright, no heuristics.
+        // The list IS the feature (empty = off); warpLock=1 adds the smart tells globally.
+        // MUST force through the DETECTOR, not just this tick's local: the free-cursor gate
+        // reads t.detector.locked() below, and a local-only force left the transform view
+        // pinned to the warped pointer (field regression: the list "did nothing" once the
+        // zoom-in seeding was scoped behind warpLock - gameplay had been riding the seed).
+        bool lockAppFg = false;
+        if (!t.cfg.lockApps.empty()) {
+            RefreshFgCache(t, GetForegroundWindow());   // per-HWND cache: no OpenProcess every tick
+            lockAppFg = t.fgCacheLockApp;
+        }
+        const bool forcedLock = t.cfg.lockForce != 0 || lockAppFg;
+        if (forcedLock && !locked) {
+            t.detector.seedLock();
+            locked = true;
+        }
+        if (locked != t.prevDetLocked) {
+            // Field diagnosis (issue #221): which tell engaged, and when, in wind-core.log.
+            wind::Log(wind::LogLevel::Info, "lock", "detector %s%s lvl=%.2f",
+                      locked ? "LOCKED" : "free",
+                      (locked && t.detector.warpLocked()) ? " (warp-anchor)" : "", lvl);
+            t.prevDetLocked = locked;
+        }
+        // A shown pointer is a free pointer in a transform session (LockApplies): a game's
+        // menus keep DWM centring, its mouselook (pointer hidden) keeps the locked pan. The
+        // legacy sprite session (txNativeCursor=0, #463) keeps the old rule, like render.
+        {
+            const auto* tmLock = dynamic_cast<TransformModel*>(t.model);
+            const bool transformTx = tmLock != nullptr && tmLock->nativeSession();
+            bool showing = false;
+            if (locked && transformTx) {
                 CURSORINFO ci{}; ci.cbSize = sizeof(ci);
-                if (GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING) == 0) {
-                    t.detector.seedLock();
-                    t.prevDetLocked = true;
-                    wind::Log(wind::LogLevel::Info, "lock",
-                              "seeded LOCKED at zoom-in (app cursor hidden, covering foreground)");
-                }
+                showing = GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING) && ci.hCursor != nullptr;
             }
-            // Transform sessions use the REAL cursor (issue #369): a free session never welds and
-            // DWM centres on the pointer; only the locked and Inspect regimes weld it to the lens
-            // point (see transform_model.cpp). Hover, drags and clicks are native either way. The
-            // old game-session FREEZE (1px clip + sprite aim point + click re-routing) was retired;
-            // git history has the machinery.
-            if (dynamic_cast<TransformModel*>(t.model)) {
-                // Record the session app for the device-lost churny backstop: if the GPU resets
-                // within 30s of a transform game session, that app is remembered in
-                // churny_apps.txt and future zoom-ins over it pick render (one crash, never two).
-                t.transformExe = ExeNameOf(GetForegroundWindow());
-                wind::Log(wind::LogLevel::Info, "hybrid", "transform session (welded cursor)");
+            const bool applies = wind::LockApplies(locked, transformTx, showing);
+            const bool freed = locked && !applies;
+            if (freed != t.lockFreed)
+                wind::Log(wind::LogLevel::Info, "lock", "%s lvl=%.2f",
+                          freed ? "pointer shown: free (native cursor)" : "lock applies", lvl);
+            t.lockFreed = freed;
+            t.lockEff = applies;
+            locked = applies;
+        }
+        if (locked) {
+            // LOCKED pan at the TRUE desktop-cursor speed (issue: "cursor slower zoomed
+            // in DOOM"). Not modelled - MEASURED: free ticks record the OS's own in->out
+            // ratio per speed (gain_learner.h) and this replays it. Modelling was tried
+            // twice and missed both ways (raw = too slow, cooked curve = too fast) because
+            // a per-packet speed estimate cannot see WM_INPUT coalescing.
+            if (t.cfg.lockedBallistics != 0) {
+                const double inC = std::sqrt((double)rawDx * rawDx + (double)rawDy * rawDy);
+                const double g = t.gainLearner.gainFor(inC, dt * 1000.0);
+                t.lockedPanRemX += rawDx * g * t.cfg.cursorSensitivity;
+                t.lockedPanRemY += rawDy * g * t.cfg.cursorSensitivity;
+                dx = (int)t.lockedPanRemX; t.lockedPanRemX -= dx;
+                dy = (int)t.lockedPanRemY; t.lockedPanRemY -= dy;
             } else {
-                SetSystemCursorHidden(t, t.model, true);
+                dx = (int)std::lround(rawDx * t.cfg.cursorSensitivity);
+                dy = (int)std::lround(rawDy * t.cfg.cursorSensitivity);
+                t.lockedPanRemX = 0.0; t.lockedPanRemY = 0.0;
             }
-            { wind::SpanScope span_(wind::kSpanActivate); t.model->onActivate(); }     // grab a live frame, not a stale cached one
-        }
-        if (inspectEnter) {
-            // Freeze the real cursor where it is; the look point (mapper center) starts there.
-            POINT pt; GetCursorPos(&pt);
-            // Read before the freeze clip below replaces the clip (M4, InspectLockTell).
-            RECT preClip{}; GetClipCursor(&preClip);
-            const bool pinnedAtEdge =
-                !wind::ClipRectConfines((int)(preClip.right - preClip.left),
-                                        (int)(preClip.bottom - preClip.top), t.mon.w, t.mon.h) &&
-                wind::PointerPinnedAtEdge(pt.x, pt.y, preClip.left, preClip.top,
-                                          preClip.right, preClip.bottom);
-            t.frozenCursor = pt;
-            t.clickReleaseTicks = 0;   // start frozen (clear any stale click-release window)
-            // Zero the sub-pixel carry and this tick's raw motion so the first tick after entry
-            // pans by zero.
-            rawDx = 0; rawDy = 0;
-            t.inspectPanRemX = 0.0; t.inspectPanRemY = 0.0;
-            t.inspectLookMoved = false;
-            t.postInspectHold = false;
-            t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y);
-            t.lastSetVirtual = pt;
-            RECT fz{ pt.x, pt.y, pt.x + 1, pt.y + 1 };
-            ClipCursor(&fz);
-            SetSystemCursorHidden(t, t.model, true);   // hide the real cursor; we draw the crosshair
-            { wind::SpanScope span_(wind::kSpanActivate); t.model->onActivate(); }
-            // Game-inspect (issue #144): if a mouselook game holds the mouse, the freeze alone is
-            // not enough - its raw-input camera still receives every mickey. Steal foreground to
-            // the invisible helper so the game stops getting input. Deferred via
-            // inspectStealPending: the reveal logic later this tick must still see the GAME as
-            // foreground (ForegroundCoversMonitor decides the composite-gated reveal).
-            t.inspectGame = wind::ShouldGameInspect(zoomed,
-                                                    wind::InspectLockTell(t.detector.locked(), pinnedAtEdge),
-                                                    t.inspectCursorWasShowing,
-                                                    t.inspectMagHidCursor);
-            if (t.inspectGame) {
-                t.inspectPrevFg = GetForegroundWindow();
-                t.inspectStealPending = true;
-            }
-            // Logged either way: a DECLINE is the interesting case in the field (the camera keeps
-            // moving), and without the inputs there is nothing to diagnose it from.
-            wind::Log(wind::LogLevel::Info, "inspect",
-                      "game-inspect %s (zoomed=%d detLocked=%d pinned=%d cursorShown=%d weHid=%d)",
-                      t.inspectGame ? "engaged" : "DECLINED", (int)zoomed,
-                      (int)t.detector.locked(), (int)pinnedAtEdge, (int)t.inspectCursorWasShowing,
-                      (int)t.inspectMagHidCursor);
-        }
-        bool inspectExit = !inspect && t.prevInspect;   // Inspect just turned off but overlay stays (zoomed)
-        if (inspectExit) {
-            EndGameInspect(t);   // hand foreground back to the game before resuming normal follow
-            // Un-drained swallowed clicks die with the session: a click swallowed in the final
-            // tick before toggle-off would otherwise linger and fire as a phantom injected click
-            // at the lens centre on the NEXT activation (possibly much later, anywhere on screen).
-            g_input.state().commitLeft.exchange(0);
-            g_input.state().commitRight.exchange(0);
-            // Leaving Inspect resumes at the LOOK POINT for BOTH models: the crosshair is what the
-            // user was aiming with, so the cursor belongs there - snapping back to the pre-Inspect
-            // position (which the transform model used to do, because it was forbidden from
-            // placing the cursor) throws away the aim the user just spent the mode establishing.
-            ClipCursor(nullptr);
-            POINT lp{ (int)(t.mapper.centerX() + 0.5) + t.mon.x,
-                      (int)(t.mapper.centerY() + 0.5) + t.mon.y };
-            const bool transformTx = dynamic_cast<TransformModel*>(t.model) != nullptr;
-            const bool warp = wind::InspectExitWarps(t.inspectLookMoved, transformTx);
-            t.postInspectHold = wind::HoldWindViewAfterInspect(t.inspectLookMoved, transformTx);
-            if (warp) SetCursorPos(lp.x, lp.y);
-            t.lastSetVirtual = warp ? lp : t.frozenCursor;
-            // The cursor SHAPE is stale after the warp (issue #229): Windows re-evaluates the
-            // shape only on a cursor event, so GetCursorInfo keeps reporting whatever cursor
-            // was active at the FROZEN spot (an I-beam over text, a link hand) and the sprite
-            // draws that stale shape until the user happens to move. Same 1px jiggle the
-            // transform model's session-end path uses - a zero-delta injected move is DROPPED
-            // by Windows and refreshes nothing (field-verified).
-            if (warp) {
-                SetCursorPos(lp.x + 1, lp.y);
-                SetCursorPos(lp.x, lp.y);
-            }
-        }
-        if (recenter) { POINT pt; GetCursorPos(&pt); t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y); t.lastSetVirtual = pt; }
-        // Resolve the pan delta. FREE: the OS cursor's own motion since we last placed it - Windows'
-        // pointer acceleration is already applied, so we auto-match the real cursor (DPI/accel), then
-        // scale by cursorSensitivity as a speed knob (1.0 = exact match, the default). LOCKED: a game
-        // has the cursor clipped/recentered, so pan from raw mickeys scaled by the same cursorSensitivity
-        // (acceleration doesn't apply to relative-mouse game input). INSPECT: the real cursor is frozen
-        // in place, so its delta is irrelevant; the look point roams from raw mickeys instead.
-        POINT cur; GetCursorPos(&cur);
-        int curDx = cur.x - t.lastSetVirtual.x;
-        int curDy = cur.y - t.lastSetVirtual.y;
-        t.postInspectHold = wind::PostInspectHoldKeeps(t.postInspectHold && !inspect, curDx != 0 || curDy != 0);
-        int dx, dy;
-        bool dragFollow = false;   // set in the free render branch below; drives ex.suppressCursorSync
-        if (inspect) {
-            // The OS cursor is frozen, so pan the look point from raw mickeys scaled by the
-            // MEASURED desktop gain (GainLearner, the same replay as the locked path) so the look
-            // point moves at the same speed/DPI as the desktop cursor. cursorSensitivity stays a
-            // user multiplier on top; carry the sub-pixel remainder so slow precise motion is not
-            // quantized away.
-            const double inC = std::sqrt((double)rawDx * rawDx + (double)rawDy * rawDy);
-            const double g = t.gainLearner.gainFor(inC, dt * 1000.0);
-            t.inspectPanRemX += rawDx * g * t.cfg.cursorSensitivity;
-            t.inspectPanRemY += rawDy * g * t.cfg.cursorSensitivity;
-            dx = (int)t.inspectPanRemX; t.inspectPanRemX -= dx;   // truncate toward zero, carry the rest
-            dy = (int)t.inspectPanRemY; t.inspectPanRemY -= dy;
-            if (dx != 0 || dy != 0) t.inspectLookMoved = true;
         } else {
+            // Drag-follow (issue #169): while a mouse button is physically held, the pointer IS
+            // the interaction (window drag, text selection) - the per-tick weld would fight the
+            // hand and the dragged content flickers between the two positions. Suspend the weld
+            // (ex.suppressCursorSync below) and follow the pointer 1:1 unscaled: scaling would
+            // desync the lens from the pointer that owns the drag. The press itself landed
+            // under the welded cursor (the weld was live until the button went down), and the
+            // release lands where the pointer and the dragged content both are - correct by
+            // construction. Weld resumes on release. Only the render engine welds a free session
+            // (a transform one never does), so this path matters for it alone.
+            const bool anyButtonDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) ||
+                                       (GetAsyncKeyState(VK_RBUTTON) & 0x8000) ||
+                                       (GetAsyncKeyState(VK_MBUTTON) & 0x8000);
+            // FREE tick: both ends of the OS pointer pipeline are visible right here -
+            // rawDx/rawDy went in, curDx/curDy came out - so teach the learner the REAL
+            // ballistics at this speed. Gated on no confining clip: a clamped cursor
+            // under-reports output and would teach a too-low gain.
+        // Also skip a pointer pinned against the clip bound: it cannot move, so the output
+        // under-reports exactly like a confined clip (modest downward bias otherwise).
+        if (!clipConfined && (std::abs(rawDx) + std::abs(rawDy)) >= wind::GainLearner::kMinCounts &&
+            !wind::PointerPinnedAtEdge(cur.x, cur.y, clip.left, clip.top, clip.right, clip.bottom)) {
+                const double dtMs_ = dt * 1000.0;
+                const double inC  = std::sqrt((double)rawDx * rawDx + (double)rawDy * rawDy);
+                const double outC = std::sqrt((double)curDx * curDx + (double)curDy * curDy);
+                t.gainLearner.observe(inC, outC, dtMs_);
+            }
+            dragFollow = wind::ShouldDragFollow(locked, inspect, anyButtonDown);
+            if (dragFollow) {
+                dx = curDx;
+                dy = curDy;
+            } else {
+                dx = (int)std::lround(curDx * t.cfg.cursorSensitivity);   // auto-matched OS delta, speed-scaled
+                dy = (int)std::lround(curDy * t.cfg.cursorSensitivity);
+            }
+        }
+    }
+    // Defensive: bound one tick's pan to the monitor span so a stray cursor jump (e.g. the OS
+    // cursor briefly escaping to another monitor) cannot teleport the lens. cx_ also clamps.
+    if (dx >  t.mon.w) dx =  t.mon.w; else if (dx < -t.mon.w) dx = -t.mon.w;
+    if (dy >  t.mon.h) dy =  t.mon.h; else if (dy < -t.mon.h) dy = -t.mon.h;
+    return { cur, curDx, curDy, dx, dy, dragFollow };
+}
+
+// Active tick: the foreground facts (read once per tick), the MPO pan wall and write clamp, the
+// device-lost backstop stamp and the launch-quiesce cover tracking.
+struct TickForeground { HWND fgTick; bool fsCover, fgBorderless; bool wallNeeded, liftIfTransform; };
+static TickForeground ReadForegroundAndArmWall(TickState& t, double lvl) {
+    // Foreground facts for this tick, read ONCE and reused by the pan wall, the perf levers,
+    // and the hybrid instant switch below (GetForegroundWindow + window queries per tick add
+    // up at 144Hz, and split reads can disagree mid-tick).
+    HWND fgTick = GetForegroundWindow();
+    const bool fsCover = ForegroundCoversMonitor(t.mon);
+    const bool fgBorderless = fgTick && !(GetWindowLongPtrW(fgTick, GWL_STYLE) & WS_CAPTION);
+    // Pan wall (issue #148) - EVERY transform session on an MPO-enabled machine, not just
+    // games (issue #197). The driver packs DWM's magnification translation into a 16-bit
+    // overlay-plane field, so |src*level| > 32767 wraps and takes the compositor or the
+    // driver down. #148 assumed only fullscreen GAMES ride overlay planes; the field
+    // disproved it - a Mica-backdrop BROWSER at high zoom crashed dwm.exe in dwmcore.dll
+    // five times in twenty minutes. Desktop-class windows get planes too, so the guard is
+    // keyed to the ENGINE and the MPO boot state alone.
+    auto* tmWall = dynamic_cast<TransformModel*>(t.model);
+    const bool transformGame = tmWall != nullptr && fsCover && fgBorderless;
+    const bool mpoExposed = tmWall != nullptr && !g_mpoDisabled;
+    // SAMPLING MODE DECIDES THE CRASH PATH (field 2026-08-29, issue #242; refines #148/#191).
+    // Three TDR episodes (LiveKernelEvent 117, nvlddmkm storms) at 25x bottom-right on the
+    // plain DESKTOP, every one under NEAREST sampling with the MPO ghost verifiably shown and
+    // settled - the #191 "ghost settled -> no plane -> no 16-bit field" lift is FALSIFIED for
+    // nearest: the field lives in the nearest magnification path itself (plausibly DWM handing
+    // the scale+pan to plane hardware), which no window geometry can demote. SMOOTH sampling
+    // takes the shader/float path: the same corner at the same level survived repeated A/B/A
+    // on this rig, and native Magnifier (smooth by default) survives it too.
+    // So: MPO on + nearest = walls, ALWAYS. Smooth keeps the #191 ghost-gated lift (shown +
+    // settled >=350ms + rect intact; fail-closed). tdrTest=4 is the field harness override.
+    const bool nearestSampling = t.cfg.txSamplingMode == 0;
+    // PLANE-FREE SESSION (issue #369): smooth sampling (the resample property) and the MPO guard
+    // effect both make the scaled desktop visual need an external layer, so DWM composes the zoomed
+    // desktop and no hardware plane carries the translation. Measured on an MPO boot: a full-screen
+    // flip app goes from Hardware Composed: Independent Flip to Composed: Flip at zoom-in in both
+    // cases. Then the pan walls, the write clamp and the MPO ghost are all unnecessary; the ghost
+    // alone cost 5-7 ms at every zoom-out (16-21 ms landing stalls). Behind mpoGuardLiftWall until
+    // the far edge is proven on an MPO boot (shipped on: mpoGuardLiftWall=1).
+    // What a TRANSFORM session would get, whichever engine is active now: the mid-zoom
+    // render -> transform switch below hands the same tick to an engine this block did not see.
+    const bool liftIfTransform = !g_mpoDisabled && t.cfg.mpoGuardLiftWall != 0 &&
+                                 (!nearestSampling || t.cfg.mpoGuard != 0);
+    const bool guardLift = mpoExposed && liftIfTransform;
+    const bool wallNeeded = mpoExposed && t.cfg.tdrTest != 4 && !guardLift &&
+                            (nearestSampling ||
+                             !(t.cfg.mpoBuster != 0 && tmWall->mpoGhostSettled()));
+    t.mapper.setMaxSourceLeft(wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0);
+    // Y wall too (issue #191): |srcY*level| overflows the same 16-bit field - the bottom
+    // strip above ~16.2x on 2160 was reachable-lethal with the X-only wall.
+    t.mapper.setMaxSourceTop(wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0);
+    if (tmWall) {
+        tmWall->setMpoBusterWanted(mpoExposed && t.cfg.mpoBuster != 0 && !guardLift);
+        tmWall->setMpoExposed(mpoExposed && !guardLift);   // no write clamp under the guard lift
+    }
+    if (transformGame) t.lastTransformGameMs = GetTickCount64();   // device-lost backstop window
+    // Launch quiesce: per-tick cover tracking while zoomed (a mid-session takeover by a
+    // launching game must still arm the hold). Anchoring and the once-per-process rule live
+    // in TrackLaunchCover; the hold is consumed via QuiesceHoldActive below.
+    TrackLaunchCover(t, fgTick, fsCover, fgBorderless);
+    return { fgTick, fsCover, fgBorderless, wallNeeded, liftIfTransform };
+}
+
+// Active tick: the free-cursor decision, the pan glide, the game-drawn cursor lag, pinning the
+// mapper to the real pointer, and the mapper step. The glide may move the pointer (cur follows).
+struct PointerMap { MapResult r; bool freeCursor, gameCursor; };
+static PointerMap MapPointer(TickState& t, bool inspect, double lvl, double dt, bool fsCover,
+                             POINT& cur, int curDx, int curDy, int dx, int dy) {
+    // FREE CURSOR (issue #205) - native Magnifier's model, measured not assumed.
+    //
+    // tools/mag_formula_probe.ps1 + mag_trackmode_probe.ps1 drove the real Magnifier and read
+    // back what it wrote via MagGetFullscreenTransform:
+    //   offset = clamp(cursor - screen/(2*level), 0, screen - screen/level), truncated
+    // and it tracks the pointer CONTINUOUSLY, 1:1 (45/45 twelve-pixel steps moved the view by
+    // exactly twelve, none left it still). Its view position is a PURE FUNCTION of the current
+    // cursor position - no integration, no smoothing, no state.
+    //
+    // Ours was structurally different: integrate per-tick deltas into a SMOOTHED centre, then
+    // WELD the pointer to that centre with SetCursorPos. The cursor position then depends on
+    // the centre and the centre depends on cursor deltas - a feedback loop, which is what
+    // issue #169 chased and what the long-standing wobble is. Native has no loop to oscillate.
+    //
+    // Pinning the mapper to the real cursor each tick reproduces native's formula exactly (the
+    // mapper already clamps the source rect the same way) and leaves nothing to feed back.
+    // cursorSensitivity does NOT apply here by construction: the pointer IS the input, so there
+    // is no delta to scale.
+    //
+    // Gated OFF wherever the OS cursor is not the truth:
+    //   - Inspect mode freezes the pointer and pans from raw mickeys, so reading it would pin
+    //     the view solid;
+    //   - a mouselook game clips/recentres the pointer, which is exactly why the locked path
+    //     integrates raw deltas instead (issue #3 / #158).
+    const bool freeCursor = !inspect && !t.lockEff &&
+                            dynamic_cast<TransformModel*>(t.model) != nullptr;
+    // (A shell input panel needs nothing special: DWM draws its pointer above the panels and
+    // keeps it centred, so the hand moves the pointer directly.)
+    // PAN GLIDE (issue #430, src/pan_glide.h): a soft stop, a few screen px at most. The pointer
+    // itself eases on and the view follows by DWM centring. curDx/curDy is this tick's HAND motion: during a
+    // glide the previous tick ended with the baseline on Wind's own step, so any motion here is
+    // the hand, which (like a button or leaving a plain zoomed desktop pan) ends the glide.
+    {
+        const bool btn = ((GetAsyncKeyState(VK_LBUTTON) | GetAsyncKeyState(VK_RBUTTON) |
+                           GetAsyncKeyState(VK_MBUTTON)) & 0x8000) != 0;
+        const bool glideOk = t.cfg.panGlideMaxPx > 0 && freeCursor && lvl > 1.001 && !fsCover &&
+                             !t.viewDetached && !btn;
+        if (t.glide.active && (!glideOk || curDx != 0 || curDy != 0)) wind::PanGlideCancel(t.glide);
+        if (!t.glide.active)
+            wind::PanGlideObserve(t.glide, curDx, curDy, dt, cur.x, cur.y, wind::PanGlideTauS(t.cfg.panGlideMaxPx),
+                                  t.cfg.panGlideMaxPx / lvl, glideOk);   // the cap is in screen px
+        double gx = 0.0, gy = 0.0;
+        if (t.glide.active && wind::PanGlideStep(t.glide, dt, gx, gy)) {
+            POINT np{ (LONG)std::lround(gx), (LONG)std::lround(gy) };
+            const LONG l = t.mon.x, tp = t.mon.y, r = t.mon.x + t.mon.w - 1, b = t.mon.y + t.mon.h - 1;
+            if (np.x < l || np.x > r || np.y < tp || np.y > b) {      // reached the edge: stop there
+                np.x = (std::min)((std::max)(np.x, l), r);
+                np.y = (std::min)((std::max)(np.y, tp), b);
+                wind::PanGlideCancel(t.glide);
+            }
+            if (np.x != cur.x || np.y != cur.y) {
+                SetCursorPos(np.x, np.y);
+                cur = np;   // the tick's baseline ends here, so the next tick reads hand motion only
+            }
+        }
+    }
+    // GAME-DRAWN CURSOR (issue #443, src/game_cursor.h): a covering app that hides the pointer
+    // draws its own cursor about a display frame late, so the view follows the pointer that late
+    // (and Wind, not DWM centring, writes it). The pointer itself is untouched.
+    bool gameCursor = false;
+    const double gameLagMs = wind::GameCursorLagMs(t.cfg.gameCursorLagMs, t.hz);
+    if (freeCursor && fsCover && gameLagMs > 0.0) {
+        CURSORINFO ci{}; ci.cbSize = sizeof(ci);
+        const bool showing = !GetCursorInfo(&ci) || (ci.flags & CURSOR_SHOWING) != 0;
+        const bool byWind = t.cursorHidden || t.cursorHiddenByUs || t.cfg.cursorVisibility == "never";
+        gameCursor = wind::GameCursorStep(t.gameCursor, wind::GameDrawsCursor(freeCursor, fsCover, showing, byWind),
+                                          curDx != 0 || curDy != 0);
+    }
+    if (gameCursor != t.gameCursor) {
+        wind::Log(wind::LogLevel::Info, "lock", "game-drawn cursor %s (lag %.1f ms) lvl=%.2f",
+                  gameCursor ? "on" : "off", gameLagMs, lvl);
+        t.gameCursor = gameCursor;
+    }
+    if (freeCursor) {
+        POINT cp;
+        if (GetCursorPos(&cp)) {
+            LARGE_INTEGER qc; QueryPerformanceCounter(&qc);
+            const double nowMs = double(qc.QuadPart) * 1000.0 / double(t.freq.QuadPart);
+            t.ptrHist.push(nowMs, double(cp.x), double(cp.y));
+            double px = cp.x, py = cp.y;
+            if (gameCursor) t.ptrHist.at(nowMs - gameLagMs, px, py);
+            t.mapper.reset(px - t.mon.x, py - t.mon.y);
+        }
+    } else {
+        t.ptrHist.clear();
+    }
+    MapResult r = t.mapper.update(freeCursor ? 0 : dx, freeCursor ? 0 : dy, lvl);
+    return { r, freeCursor, gameCursor };
+}
+
+// Active tick: caret/focus tracking, keyboard panning and the view owner. May detach the view,
+// warp the pointer into it (cur follows) and replace the mapped result r.
+static void StepTracking(TickState& t, double lvl, bool inspect, bool fsCover, bool panArmed, bool kbHook,
+                         double dt, bool wallNeeded, POINT& cur, int curDx, int curDy, MapResult& r) {
+    auto comboHeld = [&](int vk, int mods) { return BindComboHeld(kbHook, vk, mods); };
+    // --- Tracking (issue #276): caret / focus own the view; the pointer is never moved. ---
+    // fsCover (read once above, see the "Foreground facts for this tick" comment) is the
+    // borderless-fullscreen-game tell; reused here rather than a second ForegroundCoversMonitor
+    // call (it is also what fsGame below aliases).
+    const bool trackEnabled = lvl > 1.001 && !inspect && !t.lockEff && !fsCover &&
+                              (t.cfg.trackCaret != 0 || t.cfg.trackFocus != 0);
+    { wind::SpanScope span_(wind::kSpanTrack); g_track.setActive(trackEnabled, t.cfg.trackCaret != 0, t.cfg.trackFocus != 0, t.cfg.trackLog != 0); }
+    if (t.cfg.trackLog) {   // #326: why tracking is on or off, logged on every change
+        const int bits = (lvl > 1.001 ? 1 : 0) | (inspect ? 4 : 0) |
+                         (t.lockEff ? 8 : 0) | (fsCover ? 16 : 0);
+        if (bits != t.diagEnableBits) {
+            t.diagEnableBits = bits;
+            wind::Log(wind::LogLevel::Info, "track", "diag enabled=%d zoomed=%d inspect=%d locked=%d fsCover=%d lvl=%.2f",
+                      trackEnabled ? 1 : 0, bits & 1 ? 1 : 0, bits & 4 ? 1 : 0,
+                      bits & 8 ? 1 : 0, bits & 16 ? 1 : 0, lvl);
+        }
+    }
+    // Keyboard panning (#287): only presses the hook swallowed count (a key that went to the app
+    // at 1x never pans after a zoom-in mid-press); without the hook, the polled combo.
+    const bool panEnabled = panArmed;
+    double panDx = 0, panDy = 0;
+    if (panEnabled) {
+        const bool kb = g_input.kbHookActive();
+        auto panHeld = [&](int vk, int mods) { return vk && (kb ? g_input.keySwallowed(vk) : comboHeld(vk, mods)); };
+        bool held[4] = { panHeld(t.cfg.panLeftVk, t.cfg.panLeftMods), panHeld(t.cfg.panRightVk, t.cfg.panRightMods),
+                         panHeld(t.cfg.panUpVk, t.cfg.panUpMods),     panHeld(t.cfg.panDownVk, t.cfg.panDownMods) };
+        // A tap that went down and up between two samples counts as held for this step.
+        for (int i = 0; i < 4; ++i) if (g_input.drainPanPresses(i) > 0) held[i] = true;
+        t.keyPan.step(held, (dt > 0.05 ? 0.05 : dt) * 1000.0, lvl, t.mon.w, t.mon.h, t.cfg.panSpeed, panDx, panDy);
+    } else {
+        t.keyPan.reset();
+    }
+    {
+        wind::ViewOwnerInputs vi;
+        vi.enabled = trackEnabled || panEnabled;
+        vi.panning = panEnabled && t.keyPan.active();
+        vi.trackActive = trackEnabled;
+        vi.trackCaret = t.cfg.trackCaret != 0; vi.trackFocus = t.cfg.trackFocus != 0;
+        vi.mouseDx = curDx; vi.mouseDy = curDy;
+        vi.buttonDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) ||
+                        (GetAsyncKeyState(VK_RBUTTON) & 0x8000) ||
+                        (GetAsyncKeyState(VK_MBUTTON) & 0x8000);
+        const unsigned long long nowMs = GetTickCount64();
+        if (vi.buttonDown) t.lastButtonMs = nowMs;
+        { const unsigned long long edge = g_input.lastButtonEdgeMs(); if (edge > t.lastButtonMs) t.lastButtonMs = edge; }
+        vi.msSinceButton = t.lastButtonMs ? double(nowMs - t.lastButtonMs) : 1e9;
+        // Keyboard-driven only (#289). The hook and Raw Input both stamp the clock, so a suspended
+        // hook no longer switches the gate off. No stamp at all and no hook: no information, no gate.
+        const unsigned long long lastKey = g_input.lastAnyKeyDownMs();
+        vi.msSinceKey = lastKey ? double(nowMs - lastKey) : (g_input.kbHookActive() ? 1e9 : 0.0);
+        // #328: a key after the last mouse button means typing, so the click quiet period ends early.
+        // Only a fresh non-modifier key down counts: a Ctrl/Shift release after a Ctrl/Shift+click,
+        // or auto-repeat, is not typing (review #349).
+        vi.keyAfterButton = wind::KeyAfterButton(g_input.lastTypingKeyDownMs(), t.lastButtonMs);
+        vi.dtMs = dt * 1000.0;
+        { wind::SpanScope span_(wind::kSpanTrack); vi.snap = g_track.snapshot(); }
+        const wind::ViewOwner was = t.viewOwner.owner;
+        const unsigned diagTargetSeqBefore = t.viewOwner.target.seq;
+        const wind::ViewOwner owner = wind::StepViewOwner(t.viewOwner, vi);
+        if (t.cfg.trackLog && vi.snap.seq != t.diagSeq) {   // #326: every caret/focus event, with the gate inputs
+            t.diagSeq = vi.snap.seq;
+            const bool latched = t.viewOwner.target.seq == vi.snap.seq && t.viewOwner.target.seq != diagTargetSeqBefore;
+            double ax = -1, ay = -1;
+            const wind::TrackRect drc{ vi.snap.l - t.mon.x, vi.snap.t - t.mon.y, vi.snap.r - t.mon.x, vi.snap.b - t.mon.y };
+            wind::TrackTargetCenter(drc, t.viewCx, t.viewCy, lvl, t.mon.w, t.mon.h, t.cfg.trackAlign, t.cfg.trackMarginPct, ax, ay);
+            static const char* kOwn[] = { "mouse", "caret", "focus", "keys" };
+            wind::Log(wind::LogLevel::Info, "track",
+                      "diag evt seq=%u kind=%d rect=%.0f,%.0f-%.0f,%.0f owner=%s latched=%d msKey=%.0f msBtn=%.0f en=%d lvl=%.2f view=%.0f,%.0f (%s) aim=%.0f,%.0f viewW=%.0f",
+                      vi.snap.seq, (int)vi.snap.kind, drc.l, drc.t, drc.r, drc.b, kOwn[(int)owner], latched ? 1 : 0,
+                      vi.msSinceKey, vi.msSinceButton, vi.enabled ? 1 : 0, lvl,
+                      t.viewDetached ? t.viewCx : r.centerX, t.viewDetached ? t.viewCy : r.centerY,
+                      t.viewDetached ? "detached" : "mouse", ax, ay, t.mon.w / lvl);
+        }
+        if (owner != was && t.cfg.trackLog) {
+            static const char* kName[] = { "mouse", "caret", "focus", "keys" };
+            wind::Log(wind::LogLevel::Info, "track", "view %s -> %s%s", kName[(int)was], kName[(int)owner],
+                      t.viewOwner.warpPointer ? " (pointer placed in the view)" : "");
+        }
+        if (owner == wind::ViewOwner::Keys) {
+            // Keyboard panning (#287): the view moves by the KeyPan delta, the pointer stays put
+            // until the mouse moves (then it comes to the view, the warpPointer branch below).
+            // From a centred view seed at the pointer's view; mouse edge mode's detached centre
+            // is already the real view (seeding from the mapper there jumped the view).
+            if (was == wind::ViewOwner::Mouse && !t.viewDetached) { t.viewCx = r.centerX; t.viewCy = r.centerY; }
+            t.viewVx = 0; t.viewVy = 0;
+            const double hw = t.mon.w / (2.0 * lvl), hh = t.mon.h / (2.0 * lvl);
+            double nx = t.viewCx + panDx, ny = t.viewCy + panDy;
+            // The MPO wall (#148/#242) caps the source left/top like mouse edge mode does.
+            const double wall = wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0;
+            if (wall >= 0) { if (nx - hw > wall) nx = wall + hw; if (ny - hh > wall) ny = wall + hh; }
+            nx = (std::min)((std::max)(nx, hw), t.mon.w - hw);
+            ny = (std::min)((std::max)(ny, hh), t.mon.h - hh);
+            t.viewCx = nx; t.viewCy = ny;
+            r = wind::DetachedMap(t.viewCx, t.viewCy, cur.x - t.mon.x, cur.y - t.mon.y, lvl, t.mon.w, t.mon.h);
+            t.mapper.reset(t.viewCx, t.viewCy);
+            t.lastSetVirtual = cur;
+            t.viewDetached = true;
+        } else if (owner != wind::ViewOwner::Mouse) {
+            if (was == wind::ViewOwner::Mouse && !t.viewDetached) { t.viewCx = r.centerX; t.viewCy = r.centerY; }   // glide from where we are
+            const double ptrX = cur.x - t.mon.x, ptrY = cur.y - t.mon.y;
+            double tx = t.viewCx, ty = t.viewCy;
+            // The LATCHED target: only caret/focus events that passed the gates move the view.
+            const wind::TrackSnapshot& tg = t.viewOwner.target;
+            const wind::TrackRect rc{ tg.l - t.mon.x, tg.t - t.mon.y, tg.r - t.mon.x, tg.b - t.mon.y };
+            double ox, oy;
+            if (wind::TrackTargetCenter(rc, t.viewCx, t.viewCy, lvl, t.mon.w, t.mon.h,
+                                        t.cfg.trackAlign, t.cfg.trackMarginPct, ox, oy)) { tx = ox; ty = oy; }
+            if (was == wind::ViewOwner::Mouse) { t.viewVx = 0; t.viewVy = 0; }
+            t.viewCx = wind::SpringToward(t.viewCx, tx, t.viewVx, vi.dtMs, t.cfg.trackGlideMs);
+            t.viewCy = wind::SpringToward(t.viewCy, ty, t.viewVy, vi.dtMs, t.cfg.trackGlideMs);
+            r = wind::DetachedMap(t.viewCx, t.viewCy, ptrX, ptrY, lvl, t.mon.w, t.mon.h);
+            t.mapper.reset(t.viewCx, t.viewCy);   // hybrid switches and the next tick start here
+            t.lastSetVirtual = cur;               // measure the next hand motion from here
+            t.viewDetached = true;
+        } else if (t.viewOwner.warpPointer) {
+            // The mouse moved while the view showed the caret/focus: the POINTER comes to the
+            // view, the view stays (owner decision, field test 2026-09-29). Centred mode places
+            // it at the view centre; edge mode (mouseAlign=1) just inside the band, nearest to
+            // where it was.
+            const bool edges = t.cfg.mouseAlign == 1;
+            double px = t.viewCx, py = t.viewCy;
+            if (edges)
+                wind::EdgeClampPointer(t.viewCx, t.viewCy, cur.x - t.mon.x, cur.y - t.mon.y, lvl,
+                                       t.mon.w, t.mon.h, t.cfg.mouseMarginPct, px, py, CurrentCursorBody(t));
+            const int wx = (int)(px + 0.5) + t.mon.x, wy = (int)(py + 0.5) + t.mon.y;
+            SetCursorPos(wx, wy);
+            cur.x = wx; cur.y = wy;
+            t.mapper.reset(edges ? t.viewCx : px, edges ? t.viewCy : py);
+            t.lastSetVirtual = cur;
+            r = wind::DetachedMap(t.viewCx, t.viewCy, px, py, lvl, t.mon.w, t.mon.h);
+            t.viewDetached = edges;               // edge mode keeps the view where it is
+        } else if (t.cfg.mouseAlign == 1 && lvl > 1.001 && !inspect && !t.lockEff) {
+            // MOUSE EDGE MODE (issue #276 phase 2): the pointer roams freely inside the view and
+            // the view moves only when it reaches the margin band, just far enough. No weld:
+            // the pointer is real, so clicks are native. Mouselook (locked) and Inspect keep the
+            // centred path.
+            if (!t.viewDetached) { t.viewCx = r.centerX; t.viewCy = r.centerY; }   // start from here
+            const double ptrX = cur.x - t.mon.x, ptrY = cur.y - t.mon.y;
+            const double wall = wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0;
+            double ecx, ecy;
+            wind::EdgePanCenter(t.viewCx, t.viewCy, ptrX, ptrY, lvl, t.mon.w, t.mon.h,
+                                t.cfg.mouseMarginPct, wall, wall, ecx, ecy, CurrentCursorBody(t));
+            t.viewCx = ecx; t.viewCy = ecy;       // no glide: the hand pushes the view directly
+            r = wind::DetachedMap(t.viewCx, t.viewCy, ptrX, ptrY, lvl, t.mon.w, t.mon.h);
+            t.mapper.reset(t.viewCx, t.viewCy);
+            t.lastSetVirtual = cur;
+            t.viewDetached = true;
+        } else {
+            t.viewDetached = false;
+        }
+    }
+}
+
+// Active tick: the dead-zone probe (probeClicks=1/2, diagnostic only).
+static void ProbeClicks(TickState& t, double lvl, const POINT& cur, const MapResult& r) {
+    // Dead-zone probe (probeClicks=1, diagnostic): the field annotates hover dead zones by
+    // clicking. Plain click = "hover works here" (OK), Ctrl+click = "dead here" (DEAD). Each
+    // click logs every coordinate space in the chain plus what Windows hit-tests at the
+    // pointer, so a divergence between the weld point, the applied DWM transform, and the
+    // hit-test target names itself. Zero cost unless the knob is on AND transform is active.
+    if (t.cfg.probeClicks && dynamic_cast<TransformModel*>(t.model)) {
+        // Mode 2: continuous trace (every 4th tick ~36Hz) of the physical pre-weld cursor vs
+        // the weld target - the physical stream is what pointer-framework apps perceive
+        // (SetCursorPos emits no pointer frames; rig-proven), so a divergence here IS the
+        // hover input XAML actually gets.
+        if (t.cfg.probeClicks == 2 && (++t.probeTraceTick & 3) == 0) {
+            auto* tw = dynamic_cast<TransformModel*>(t.model);
+            wind::Log(wind::LogLevel::Info, "ptrace",
+                      "lvl=%.2f pre=(%ld,%ld) weld=(%d,%d) d=(%ld,%ld) welded=%d src=(%.1f,%.1f) cs=(%.1f,%.1f)",
+                      lvl, cur.x, cur.y,
+                      r.clickDesktopX + t.mon.x, r.clickDesktopY + t.mon.y,
+                      cur.x - (r.clickDesktopX + t.mon.x), cur.y - (r.clickDesktopY + t.mon.y),
+                      tw && tw->weldedLastFrame() ? 1 : 0,
+                      r.srcLeft, r.srcTop, r.cursorScreenX, r.cursorScreenY);
+        }
+        const bool lDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+        if (lDown && !t.probePrevLDown) {
+            const bool dead = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+            POINT cp{}; GetCursorPos(&cp);
             RECT clip{}; GetClipCursor(&clip);
-            // A clip is a lock signal only when it is meaningfully SMALLER than the monitor
-            // (issue #169): a machine-wide work-area clip (desktop minus taskbar, ~95%) is
-            // desktop-like, not a game confining the pointer - the old any-clip test made every
-            // zoomed desktop session run the locked path on this rig. See ClipRectConfines.
-            bool clipConfined = wind::ClipRectConfines((int)(clip.right - clip.left),
-                                                       (int)(clip.bottom - clip.top),
-                                                       t.mon.w, t.mon.h);
-            int rawMag = std::abs(rawDx) + std::abs(rawDy);
-            // Mouse edge mode: the pointer is real and free, so pushing it into a screen edge or
-            // corner is not mouselook. Hide that motion from the lock tell (see PointerPinnedAtEdge).
-            if (t.cfg.mouseAlign == 1 && t.viewDetached && !clipConfined &&
-                wind::PointerPinnedAtEdge(cur.x, cur.y, clip.left, clip.top, clip.right, clip.bottom))
-                rawMag = 0;
-            bool locked = t.detector.update(clipConfined,
-                                            rawMag,
-                                            std::abs(curDx) + std::abs(curDy),
-                                            t.cfg.warpLock != 0, cur.x, cur.y);
-            // lockApps (issue #221): listed foreground exe = locked outright, no heuristics.
-            // The list IS the feature (empty = off); warpLock=1 adds the smart tells globally.
-            // MUST force through the DETECTOR, not just this tick's local: the free-cursor gate
-            // reads t.detector.locked() below, and a local-only force left the transform view
-            // pinned to the warped pointer (field regression: the list "did nothing" once the
-            // zoom-in seeding was scoped behind warpLock - gameplay had been riding the seed).
-            bool lockAppFg = false;
-            if (!t.cfg.lockApps.empty()) {
-                RefreshFgCache(t, GetForegroundWindow());   // per-HWND cache: no OpenProcess every tick
-                lockAppFg = t.fgCacheLockApp;
-            }
-            const bool forcedLock = t.cfg.lockForce != 0 || lockAppFg;
-            if (forcedLock && !locked) {
-                t.detector.seedLock();
-                locked = true;
-            }
-            if (locked != t.prevDetLocked) {
-                // Field diagnosis (issue #221): which tell engaged, and when, in wind-core.log.
-                wind::Log(wind::LogLevel::Info, "lock", "detector %s%s lvl=%.2f",
-                          locked ? "LOCKED" : "free",
-                          (locked && t.detector.warpLocked()) ? " (warp-anchor)" : "", lvl);
-                t.prevDetLocked = locked;
-            }
-            // A shown pointer is a free pointer in a transform session (LockApplies): a game's
-            // menus keep DWM centring, its mouselook (pointer hidden) keeps the locked pan. The
-            // legacy sprite session (txNativeCursor=0, #463) keeps the old rule, like render.
-            {
-                const auto* tmLock = dynamic_cast<TransformModel*>(t.model);
-                const bool transformTx = tmLock != nullptr && tmLock->nativeSession();
-                bool showing = false;
-                if (locked && transformTx) {
-                    CURSORINFO ci{}; ci.cbSize = sizeof(ci);
-                    showing = GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING) && ci.hCursor != nullptr;
+            float mLvl = 0.f; int mOffX = 0, mOffY = 0;
+            MagGetFullscreenTransform(&mLvl, &mOffX, &mOffY);
+            HWND under = WindowFromPoint(cp);
+            wchar_t ucls[64]{}; if (under) GetClassNameW(under, ucls, 64);
+            DWORD upid = 0; if (under) GetWindowThreadProcessId(under, &upid);
+            // Cross-space check: what sits at the SCREEN position where the aim point is
+            // DISPLAYED (if hover follows this instead of the weld point, spaces are mixed).
+            POINT sp{ (int)(r.cursorScreenX + 0.5) + t.mon.x, (int)(r.cursorScreenY + 0.5) + t.mon.y };
+            HWND underS = WindowFromPoint(sp);
+            wchar_t scls[64]{}; if (underS) GetClassNameW(underS, scls, 64);
+            DWORD spid = 0; if (underS) GetWindowThreadProcessId(underS, &spid);
+            const DWORD ourPid = GetCurrentProcessId();
+            wind::Log(wind::LogLevel::Info, "probe",
+                "%s lvl=%.2f weld=(%d,%d) cur=(%ld,%ld) src=(%.1f,%.1f) center=(%.1f,%.1f) "
+                "cursorScreen=(%.1f,%.1f) dwm(lvl=%.2f off=%d,%d) clip=(%ld,%ld)-(%ld,%ld) "
+                "underCur=%ls%s underScreen=%ls%s",
+                dead ? "DEAD" : "OK", lvl,
+                r.clickDesktopX + t.mon.x, r.clickDesktopY + t.mon.y, cp.x, cp.y,
+                r.srcLeft, r.srcTop, r.centerX, r.centerY,
+                r.cursorScreenX, r.cursorScreenY, mLvl, mOffX, mOffY,
+                clip.left, clip.top, clip.right, clip.bottom,
+                ucls, upid == ourPid ? L" (OURS)" : L"",
+                scls, spid == ourPid ? L" (OURS)" : L"");
+        }
+        t.probePrevLDown = lDown;
+    }
+}
+
+// Active tick: fire the Inspect clicks the hook swallowed at the look point.
+static void CommitInspectClicks(TickState& t, const MapResult& r) {
+    // Inspect click-to-look-point: the hook swallowed real click(s) and handed us per-button counts
+    // (counts, not a flag, so a fast double-click before this drains isn't lost). Fire a clean ABSOLUTE
+    // click at the crosshair (mapper center = look point) per pending press, so each lands where you
+    // aim, at any zoom. ABSOLUTE coords are immune to the re-freeze SetCursorPos below, and an absolute
+    // injected move is skipped by the raw accumulator (WM_INPUT ignores MOUSE_MOVE_ABSOLUTE), so the
+    // look point isn't disturbed. Inspect stays on; the cursor re-freezes at frozenCursor afterwards.
+    int nLeft  = g_input.state().commitLeft.exchange(0);
+    int nRight = g_input.state().commitRight.exchange(0);
+    // Game-inspect: drain but DISCARD clicks. A synthesized click over the game window would
+    // re-activate it (mouse clicks activate), re-engaging mouselook mid-inspect; with the game
+    // backgrounded and cursorless there is nothing meaningful to click anyway.
+    if (nLeft + nRight > 0 && !t.inspectGame) {
+        ClipCursor(nullptr);       // release the 1px freeze so the absolute click can reach the look point
+        t.clickReleaseTicks = TicksAtHz(2, t.hz);   // ...and keep it released ~14ms before re-freezing (below)
+        const VirtualBounds& vb = t.vbounds;   // cached at activation; equals the SM_*VIRTUALSCREEN metrics
+        if (vb.w > 1 && vb.h > 1) {
+            int lx = r.clickDesktopX + t.mon.x, ly = r.clickDesktopY + t.mon.y;
+            LONG ax = (LONG)((lx - vb.x) * 65535.0 / (vb.w - 1) + 0.5);
+            LONG ay = (LONG)((ly - vb.y) * 65535.0 / (vb.h - 1) + 0.5);
+            auto fireClicks = [&](DWORD downF, DWORD upF, int count) {
+                for (int k = 0; k < count; ++k) {
+                    INPUT clk[3] = {};
+                    for (int i = 0; i < 3; ++i) { clk[i].type = INPUT_MOUSE; clk[i].mi.dx = ax; clk[i].mi.dy = ay;
+                                                  clk[i].mi.dwExtraInfo = (ULONG_PTR)wind::kWindInjectTag; }   // never a click bind (#285)
+                    clk[0].mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+                    clk[1].mi.dwFlags = downF | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+                    clk[2].mi.dwFlags = upF   | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+                    SendInput(3, clk, sizeof(INPUT));
                 }
-                const bool applies = wind::LockApplies(locked, transformTx, showing);
-                const bool freed = locked && !applies;
-                if (freed != t.lockFreed)
-                    wind::Log(wind::LogLevel::Info, "lock", "%s lvl=%.2f",
-                              freed ? "pointer shown: free (native cursor)" : "lock applies", lvl);
-                t.lockFreed = freed;
-                t.lockEff = applies;
-                locked = applies;
-            }
-            if (locked) {
-                // LOCKED pan at the TRUE desktop-cursor speed (issue: "cursor slower zoomed
-                // in DOOM"). Not modelled - MEASURED: free ticks record the OS's own in->out
-                // ratio per speed (gain_learner.h) and this replays it. Modelling was tried
-                // twice and missed both ways (raw = too slow, cooked curve = too fast) because
-                // a per-packet speed estimate cannot see WM_INPUT coalescing.
-                if (t.cfg.lockedBallistics != 0) {
-                    const double inC = std::sqrt((double)rawDx * rawDx + (double)rawDy * rawDy);
-                    const double g = t.gainLearner.gainFor(inC, dt * 1000.0);
-                    t.lockedPanRemX += rawDx * g * t.cfg.cursorSensitivity;
-                    t.lockedPanRemY += rawDy * g * t.cfg.cursorSensitivity;
-                    dx = (int)t.lockedPanRemX; t.lockedPanRemX -= dx;
-                    dy = (int)t.lockedPanRemY; t.lockedPanRemY -= dy;
-                } else {
-                    dx = (int)std::lround(rawDx * t.cfg.cursorSensitivity);
-                    dy = (int)std::lround(rawDy * t.cfg.cursorSensitivity);
-                    t.lockedPanRemX = 0.0; t.lockedPanRemY = 0.0;
-                }
-            } else {
-                // Drag-follow (issue #169): while a mouse button is physically held, the pointer IS
-                // the interaction (window drag, text selection) - the per-tick weld would fight the
-                // hand and the dragged content flickers between the two positions. Suspend the weld
-                // (ex.suppressCursorSync below) and follow the pointer 1:1 unscaled: scaling would
-                // desync the lens from the pointer that owns the drag. The press itself landed
-                // under the welded cursor (the weld was live until the button went down), and the
-                // release lands where the pointer and the dragged content both are - correct by
-                // construction. Weld resumes on release. Only the render engine welds a free session
-                // (a transform one never does), so this path matters for it alone.
-                const bool anyButtonDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) ||
-                                           (GetAsyncKeyState(VK_RBUTTON) & 0x8000) ||
-                                           (GetAsyncKeyState(VK_MBUTTON) & 0x8000);
-                // FREE tick: both ends of the OS pointer pipeline are visible right here -
-                // rawDx/rawDy went in, curDx/curDy came out - so teach the learner the REAL
-                // ballistics at this speed. Gated on no confining clip: a clamped cursor
-                // under-reports output and would teach a too-low gain.
-            // Also skip a pointer pinned against the clip bound: it cannot move, so the output
-            // under-reports exactly like a confined clip (modest downward bias otherwise).
-            if (!clipConfined && (std::abs(rawDx) + std::abs(rawDy)) >= wind::GainLearner::kMinCounts &&
-                !wind::PointerPinnedAtEdge(cur.x, cur.y, clip.left, clip.top, clip.right, clip.bottom)) {
-                    const double dtMs_ = dt * 1000.0;
-                    const double inC  = std::sqrt((double)rawDx * rawDx + (double)rawDy * rawDy);
-                    const double outC = std::sqrt((double)curDx * curDx + (double)curDy * curDy);
-                    t.gainLearner.observe(inC, outC, dtMs_);
-                }
-                dragFollow = wind::ShouldDragFollow(locked, inspect, anyButtonDown);
-                if (dragFollow) {
-                    dx = curDx;
-                    dy = curDy;
-                } else {
-                    dx = (int)std::lround(curDx * t.cfg.cursorSensitivity);   // auto-matched OS delta, speed-scaled
-                    dy = (int)std::lround(curDy * t.cfg.cursorSensitivity);
-                }
+            };
+            fireClicks(MOUSEEVENTF_LEFTDOWN,  MOUSEEVENTF_LEFTUP,  nLeft);
+            fireClicks(MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, nRight);
+            if (dynamic_cast<TransformModel*>(t.model)) {
+                // The injected absolute move races transform writes (issue #148 TDR class), so
+                // SERIALIZE: skip transform writes for a couple ticks around it (ex.pauseWrites).
+                t.clickPauseTicks = TicksAtHz(3, t.hz);
             }
         }
-        // Defensive: bound one tick's pan to the monitor span so a stray cursor jump (e.g. the OS
-        // cursor briefly escaping to another monitor) cannot teleport the lens. cx_ also clamps.
-        if (dx >  t.mon.w) dx =  t.mon.w; else if (dx < -t.mon.w) dx = -t.mon.w;
-        if (dy >  t.mon.h) dy =  t.mon.h; else if (dy < -t.mon.h) dy = -t.mon.h;
-        // Foreground facts for this tick, read ONCE and reused by the pan wall, the perf levers,
-        // and the hybrid instant switch below (GetForegroundWindow + window queries per tick add
-        // up at 144Hz, and split reads can disagree mid-tick).
-        HWND fgTick = GetForegroundWindow();
-        const bool fsCover = ForegroundCoversMonitor(t.mon);
-        const bool fgBorderless = fgTick && !(GetWindowLongPtrW(fgTick, GWL_STYLE) & WS_CAPTION);
-        // Pan wall (issue #148) - EVERY transform session on an MPO-enabled machine, not just
-        // games (issue #197). The driver packs DWM's magnification translation into a 16-bit
-        // overlay-plane field, so |src*level| > 32767 wraps and takes the compositor or the
-        // driver down. #148 assumed only fullscreen GAMES ride overlay planes; the field
-        // disproved it - a Mica-backdrop BROWSER at high zoom crashed dwm.exe in dwmcore.dll
-        // five times in twenty minutes. Desktop-class windows get planes too, so the guard is
-        // keyed to the ENGINE and the MPO boot state alone.
-        auto* tmWall = dynamic_cast<TransformModel*>(t.model);
-        const bool transformGame = tmWall != nullptr && fsCover && fgBorderless;
-        const bool mpoExposed = tmWall != nullptr && !g_mpoDisabled;
-        // SAMPLING MODE DECIDES THE CRASH PATH (field 2026-08-29, issue #242; refines #148/#191).
-        // Three TDR episodes (LiveKernelEvent 117, nvlddmkm storms) at 25x bottom-right on the
-        // plain DESKTOP, every one under NEAREST sampling with the MPO ghost verifiably shown and
-        // settled - the #191 "ghost settled -> no plane -> no 16-bit field" lift is FALSIFIED for
-        // nearest: the field lives in the nearest magnification path itself (plausibly DWM handing
-        // the scale+pan to plane hardware), which no window geometry can demote. SMOOTH sampling
-        // takes the shader/float path: the same corner at the same level survived repeated A/B/A
-        // on this rig, and native Magnifier (smooth by default) survives it too.
-        // So: MPO on + nearest = walls, ALWAYS. Smooth keeps the #191 ghost-gated lift (shown +
-        // settled >=350ms + rect intact; fail-closed). tdrTest=4 is the field harness override.
-        const bool nearestSampling = t.cfg.txSamplingMode == 0;
-        // PLANE-FREE SESSION (issue #369): smooth sampling (the resample property) and the MPO guard
-        // effect both make the scaled desktop visual need an external layer, so DWM composes the zoomed
-        // desktop and no hardware plane carries the translation. Measured on an MPO boot: a full-screen
-        // flip app goes from Hardware Composed: Independent Flip to Composed: Flip at zoom-in in both
-        // cases. Then the pan walls, the write clamp and the MPO ghost are all unnecessary; the ghost
-        // alone cost 5-7 ms at every zoom-out (16-21 ms landing stalls). Behind mpoGuardLiftWall until
-        // the far edge is proven on an MPO boot (shipped on: mpoGuardLiftWall=1).
-        // What a TRANSFORM session would get, whichever engine is active now: the mid-zoom
-        // render -> transform switch below hands the same tick to an engine this block did not see.
-        const bool liftIfTransform = !g_mpoDisabled && t.cfg.mpoGuardLiftWall != 0 &&
-                                     (!nearestSampling || t.cfg.mpoGuard != 0);
-        const bool guardLift = mpoExposed && liftIfTransform;
-        const bool wallNeeded = mpoExposed && t.cfg.tdrTest != 4 && !guardLift &&
-                                (nearestSampling ||
-                                 !(t.cfg.mpoBuster != 0 && tmWall->mpoGhostSettled()));
-        t.mapper.setMaxSourceLeft(wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0);
-        // Y wall too (issue #191): |srcY*level| overflows the same 16-bit field - the bottom
-        // strip above ~16.2x on 2160 was reachable-lethal with the X-only wall.
-        t.mapper.setMaxSourceTop(wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0);
-        if (tmWall) {
-            tmWall->setMpoBusterWanted(mpoExposed && t.cfg.mpoBuster != 0 && !guardLift);
-            tmWall->setMpoExposed(mpoExposed && !guardLift);   // no write clamp under the guard lift
-        }
-        if (transformGame) t.lastTransformGameMs = GetTickCount64();   // device-lost backstop window
-        // Launch quiesce: per-tick cover tracking while zoomed (a mid-session takeover by a
-        // launching game must still arm the hold). Anchoring and the once-per-process rule live
-        // in TrackLaunchCover; the hold is consumed via QuiesceHoldActive below.
-        TrackLaunchCover(t, fgTick, fsCover, fgBorderless);
-        // FREE CURSOR (issue #205) - native Magnifier's model, measured not assumed.
-        //
-        // tools/mag_formula_probe.ps1 + mag_trackmode_probe.ps1 drove the real Magnifier and read
-        // back what it wrote via MagGetFullscreenTransform:
-        //   offset = clamp(cursor - screen/(2*level), 0, screen - screen/level), truncated
-        // and it tracks the pointer CONTINUOUSLY, 1:1 (45/45 twelve-pixel steps moved the view by
-        // exactly twelve, none left it still). Its view position is a PURE FUNCTION of the current
-        // cursor position - no integration, no smoothing, no state.
-        //
-        // Ours was structurally different: integrate per-tick deltas into a SMOOTHED centre, then
-        // WELD the pointer to that centre with SetCursorPos. The cursor position then depends on
-        // the centre and the centre depends on cursor deltas - a feedback loop, which is what
-        // issue #169 chased and what the long-standing wobble is. Native has no loop to oscillate.
-        //
-        // Pinning the mapper to the real cursor each tick reproduces native's formula exactly (the
-        // mapper already clamps the source rect the same way) and leaves nothing to feed back.
-        // cursorSensitivity does NOT apply here by construction: the pointer IS the input, so there
-        // is no delta to scale.
-        //
-        // Gated OFF wherever the OS cursor is not the truth:
-        //   - Inspect mode freezes the pointer and pans from raw mickeys, so reading it would pin
-        //     the view solid;
-        //   - a mouselook game clips/recentres the pointer, which is exactly why the locked path
-        //     integrates raw deltas instead (issue #3 / #158).
-        const bool freeCursor = !inspect && !t.lockEff &&
-                                dynamic_cast<TransformModel*>(t.model) != nullptr;
-        // (A shell input panel needs nothing special: DWM draws its pointer above the panels and
-        // keeps it centred, so the hand moves the pointer directly.)
-        // PAN GLIDE (issue #430, src/pan_glide.h): a soft stop, a few screen px at most. The pointer
-        // itself eases on and the view follows by DWM centring. curDx/curDy is this tick's HAND motion: during a
-        // glide the previous tick ended with the baseline on Wind's own step, so any motion here is
-        // the hand, which (like a button or leaving a plain zoomed desktop pan) ends the glide.
-        {
-            const bool btn = ((GetAsyncKeyState(VK_LBUTTON) | GetAsyncKeyState(VK_RBUTTON) |
-                               GetAsyncKeyState(VK_MBUTTON)) & 0x8000) != 0;
-            const bool glideOk = t.cfg.panGlideMaxPx > 0 && freeCursor && lvl > 1.001 && !fsCover &&
-                                 !t.viewDetached && !btn;
-            if (t.glide.active && (!glideOk || curDx != 0 || curDy != 0)) wind::PanGlideCancel(t.glide);
-            if (!t.glide.active)
-                wind::PanGlideObserve(t.glide, curDx, curDy, dt, cur.x, cur.y, wind::PanGlideTauS(t.cfg.panGlideMaxPx),
-                                      t.cfg.panGlideMaxPx / lvl, glideOk);   // the cap is in screen px
-            double gx = 0.0, gy = 0.0;
-            if (t.glide.active && wind::PanGlideStep(t.glide, dt, gx, gy)) {
-                POINT np{ (LONG)std::lround(gx), (LONG)std::lround(gy) };
-                const LONG l = t.mon.x, tp = t.mon.y, r = t.mon.x + t.mon.w - 1, b = t.mon.y + t.mon.h - 1;
-                if (np.x < l || np.x > r || np.y < tp || np.y > b) {      // reached the edge: stop there
-                    np.x = (std::min)((std::max)(np.x, l), r);
-                    np.y = (std::min)((std::max)(np.y, tp), b);
-                    wind::PanGlideCancel(t.glide);
-                }
-                if (np.x != cur.x || np.y != cur.y) {
-                    SetCursorPos(np.x, np.y);
-                    cur = np;   // the tick's baseline ends here, so the next tick reads hand motion only
-                }
+    }
+}
+
+// Active tick: the hybrid instant switch (re-pick the engine mid-session on a foreground change).
+static void InstantHybridSwitch(TickState& t, bool enterActive, bool inspect, HWND fgTick, bool fsCover,
+                                bool fgBorderless, bool liftIfTransform) {
+    // Instant hybrid switch (always on): re-pick the engine WHILE ZOOMED when the foreground
+    // changes, handing over mid-session. The controller and mapper are untouched, so the
+    // zoom level and lens position carry across the swap (render 8x -> tab into a game ->
+    // transform 8x). Inspect sessions are never switched under.
+    // Freeze the engine choice while an overlay is in front (see IsOverlayFg). Skipping the
+    // whole block, rather than just the swap, is deliberate: it leaves wantModel/wantSinceMs
+    // untouched, so the overlay never becomes the settled candidate and handing foreground back
+    // is a no-op instead of a second handover.
+    if (t.mTransform && !enterActive && !inspect && !IsOverlayFg(fgTick)) {
+        // Same pure predicate as the zoom-in pick (engine_pick.h) - the two sites can no
+        // longer drift apart. Exe-derived inputs come from the per-HWND cache: this block
+        // runs every zoomed tick and the process-open per tick was measurable waste.
+        RefreshFgCache(t, fgTick);
+        auto* tAvail = dynamic_cast<TransformModel*>(t.mTransform);
+        EnginePickInputs pin;
+        pin.coversMonitor  = fsCover;
+        pin.borderless     = fgBorderless;
+        pin.primaryMonitor = t.mon.x == 0 && t.mon.y == 0;
+        pin.shellDesktop   = t.fgCacheShell;
+        pin.excluded       = t.fgCacheExcluded;
+        pin.churny         = t.fgCacheChurny;
+        pin.tdrHarness     = t.cfg.tdrTest > 0;
+        pin.desktopTransformOptIn = t.cfg.desktopTransform != 0;
+        pin.inputTransformOk      = tAvail && tAvail->inputTransformAvailable();
+        pin.renderLost            = RenderDeviceLost(t);
+        FillCategoryInputs(t, pin);
+        IMagnifierModel* want = wind::PickTransformFor(t.cfg.model, pin, t.renderStale) ? t.mTransform : t.mRender;
+        // STICKY (field: the engine flapped render<->transform inside one zoom session, and
+        // each flip releases and rebuilds DWM's magnification context - a stall every time).
+        // A real alt-tab still switches; a one-frame wobble in the foreground reads does not.
+        if (want != t.wantModel) { t.wantModel = want; t.wantSinceMs = GetTickCount64(); }
+        const bool wantSettled = GetTickCount64() - t.wantSinceMs >= 350;
+        const bool fgIsStealer = fgTick && fgTick == g_focusStealer;   // game-inspect helper holds fg
+        if (want && want != t.model && wantSettled && !fgIsStealer) {
+            if (t.restAfterReveal) {   // rapid double-switch: settle the previous handover
+                { wind::SpanScope span_(wind::kSpanActivate); t.restAfterReveal->setActive(false); }
+                t.restAfterReveal = nullptr;
+                t.restOverlapTicks = 0;
+                UpdateColorFilter(t, true, RenderOverlayShown(t), nullptr);   // colour follows what is visible
             }
-        }
-        // GAME-DRAWN CURSOR (issue #443, src/game_cursor.h): a covering app that hides the pointer
-        // draws its own cursor about a display frame late, so the view follows the pointer that late
-        // (and Wind, not DWM centring, writes it). The pointer itself is untouched.
-        bool gameCursor = false;
-        const double gameLagMs = wind::GameCursorLagMs(t.cfg.gameCursorLagMs, t.hz);
-        if (freeCursor && fsCover && gameLagMs > 0.0) {
-            CURSORINFO ci{}; ci.cbSize = sizeof(ci);
-            const bool showing = !GetCursorInfo(&ci) || (ci.flags & CURSOR_SHOWING) != 0;
-            const bool byWind = t.cursorHidden || t.cursorHiddenByUs || t.cfg.cursorVisibility == "never";
-            gameCursor = wind::GameCursorStep(t.gameCursor, wind::GameDrawsCursor(freeCursor, fsCover, showing, byWind),
-                                              curDx != 0 || curDy != 0);
-        }
-        if (gameCursor != t.gameCursor) {
-            wind::Log(wind::LogLevel::Info, "lock", "game-drawn cursor %s (lag %.1f ms) lvl=%.2f",
-                      gameCursor ? "on" : "off", gameLagMs, lvl);
-            t.gameCursor = gameCursor;
-        }
-        if (freeCursor) {
-            POINT cp;
-            if (GetCursorPos(&cp)) {
-                LARGE_INTEGER qc; QueryPerformanceCounter(&qc);
-                const double nowMs = double(qc.QuadPart) * 1000.0 / double(t.freq.QuadPart);
-                t.ptrHist.push(nowMs, double(cp.x), double(cp.y));
-                double px = cp.x, py = cp.y;
-                if (gameCursor) t.ptrHist.at(nowMs - gameLagMs, px, py);
-                t.mapper.reset(px - t.mon.x, py - t.mon.y);
-            }
-        } else {
-            t.ptrHist.clear();
-        }
-        MapResult r = t.mapper.update(freeCursor ? 0 : dx, freeCursor ? 0 : dy, lvl);
-        // --- Tracking (issue #276): caret / focus own the view; the pointer is never moved. ---
-        // fsCover (read once above, see the "Foreground facts for this tick" comment) is the
-        // borderless-fullscreen-game tell; reused here rather than a second ForegroundCoversMonitor
-        // call (it is also what fsGame below aliases).
-        const bool trackEnabled = lvl > 1.001 && !inspect && !t.lockEff && !fsCover &&
-                                  (t.cfg.trackCaret != 0 || t.cfg.trackFocus != 0);
-        { wind::SpanScope span_(wind::kSpanTrack); g_track.setActive(trackEnabled, t.cfg.trackCaret != 0, t.cfg.trackFocus != 0, t.cfg.trackLog != 0); }
-        if (t.cfg.trackLog) {   // #326: why tracking is on or off, logged on every change
-            const int bits = (lvl > 1.001 ? 1 : 0) | (inspect ? 4 : 0) |
-                             (t.lockEff ? 8 : 0) | (fsCover ? 16 : 0);
-            if (bits != t.diagEnableBits) {
-                t.diagEnableBits = bits;
-                wind::Log(wind::LogLevel::Info, "track", "diag enabled=%d zoomed=%d inspect=%d locked=%d fsCover=%d lvl=%.2f",
-                          trackEnabled ? 1 : 0, bits & 1 ? 1 : 0, bits & 4 ? 1 : 0,
-                          bits & 8 ? 1 : 0, bits & 16 ? 1 : 0, lvl);
-            }
-        }
-        // Keyboard panning (#287): only presses the hook swallowed count (a key that went to the app
-        // at 1x never pans after a zoom-in mid-press); without the hook, the polled combo.
-        const bool panEnabled = panArmed;
-        double panDx = 0, panDy = 0;
-        if (panEnabled) {
-            const bool kb = g_input.kbHookActive();
-            auto panHeld = [&](int vk, int mods) { return vk && (kb ? g_input.keySwallowed(vk) : comboHeld(vk, mods)); };
-            bool held[4] = { panHeld(t.cfg.panLeftVk, t.cfg.panLeftMods), panHeld(t.cfg.panRightVk, t.cfg.panRightMods),
-                             panHeld(t.cfg.panUpVk, t.cfg.panUpMods),     panHeld(t.cfg.panDownVk, t.cfg.panDownMods) };
-            // A tap that went down and up between two samples counts as held for this step.
-            for (int i = 0; i < 4; ++i) if (g_input.drainPanPresses(i) > 0) held[i] = true;
-            t.keyPan.step(held, (dt > 0.05 ? 0.05 : dt) * 1000.0, lvl, t.mon.w, t.mon.h, t.cfg.panSpeed, panDx, panDy);
-        } else {
-            t.keyPan.reset();
-        }
-        {
-            wind::ViewOwnerInputs vi;
-            vi.enabled = trackEnabled || panEnabled;
-            vi.panning = panEnabled && t.keyPan.active();
-            vi.trackActive = trackEnabled;
-            vi.trackCaret = t.cfg.trackCaret != 0; vi.trackFocus = t.cfg.trackFocus != 0;
-            vi.mouseDx = curDx; vi.mouseDy = curDy;
-            vi.buttonDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) ||
-                            (GetAsyncKeyState(VK_RBUTTON) & 0x8000) ||
-                            (GetAsyncKeyState(VK_MBUTTON) & 0x8000);
-            const unsigned long long nowMs = GetTickCount64();
-            if (vi.buttonDown) t.lastButtonMs = nowMs;
-            { const unsigned long long edge = g_input.lastButtonEdgeMs(); if (edge > t.lastButtonMs) t.lastButtonMs = edge; }
-            vi.msSinceButton = t.lastButtonMs ? double(nowMs - t.lastButtonMs) : 1e9;
-            // Keyboard-driven only (#289). The hook and Raw Input both stamp the clock, so a suspended
-            // hook no longer switches the gate off. No stamp at all and no hook: no information, no gate.
-            const unsigned long long lastKey = g_input.lastAnyKeyDownMs();
-            vi.msSinceKey = lastKey ? double(nowMs - lastKey) : (g_input.kbHookActive() ? 1e9 : 0.0);
-            // #328: a key after the last mouse button means typing, so the click quiet period ends early.
-            // Only a fresh non-modifier key down counts: a Ctrl/Shift release after a Ctrl/Shift+click,
-            // or auto-repeat, is not typing (review #349).
-            vi.keyAfterButton = wind::KeyAfterButton(g_input.lastTypingKeyDownMs(), t.lastButtonMs);
-            vi.dtMs = dt * 1000.0;
-            { wind::SpanScope span_(wind::kSpanTrack); vi.snap = g_track.snapshot(); }
-            const wind::ViewOwner was = t.viewOwner.owner;
-            const unsigned diagTargetSeqBefore = t.viewOwner.target.seq;
-            const wind::ViewOwner owner = wind::StepViewOwner(t.viewOwner, vi);
-            if (t.cfg.trackLog && vi.snap.seq != t.diagSeq) {   // #326: every caret/focus event, with the gate inputs
-                t.diagSeq = vi.snap.seq;
-                const bool latched = t.viewOwner.target.seq == vi.snap.seq && t.viewOwner.target.seq != diagTargetSeqBefore;
-                double ax = -1, ay = -1;
-                const wind::TrackRect drc{ vi.snap.l - t.mon.x, vi.snap.t - t.mon.y, vi.snap.r - t.mon.x, vi.snap.b - t.mon.y };
-                wind::TrackTargetCenter(drc, t.viewCx, t.viewCy, lvl, t.mon.w, t.mon.h, t.cfg.trackAlign, t.cfg.trackMarginPct, ax, ay);
-                static const char* kOwn[] = { "mouse", "caret", "focus", "keys" };
-                wind::Log(wind::LogLevel::Info, "track",
-                          "diag evt seq=%u kind=%d rect=%.0f,%.0f-%.0f,%.0f owner=%s latched=%d msKey=%.0f msBtn=%.0f en=%d lvl=%.2f view=%.0f,%.0f (%s) aim=%.0f,%.0f viewW=%.0f",
-                          vi.snap.seq, (int)vi.snap.kind, drc.l, drc.t, drc.r, drc.b, kOwn[(int)owner], latched ? 1 : 0,
-                          vi.msSinceKey, vi.msSinceButton, vi.enabled ? 1 : 0, lvl,
-                          t.viewDetached ? t.viewCx : r.centerX, t.viewDetached ? t.viewCy : r.centerY,
-                          t.viewDetached ? "detached" : "mouse", ax, ay, t.mon.w / lvl);
-            }
-            if (owner != was && t.cfg.trackLog) {
-                static const char* kName[] = { "mouse", "caret", "focus", "keys" };
-                wind::Log(wind::LogLevel::Info, "track", "view %s -> %s%s", kName[(int)was], kName[(int)owner],
-                          t.viewOwner.warpPointer ? " (pointer placed in the view)" : "");
-            }
-            if (owner == wind::ViewOwner::Keys) {
-                // Keyboard panning (#287): the view moves by the KeyPan delta, the pointer stays put
-                // until the mouse moves (then it comes to the view, the warpPointer branch below).
-                // From a centred view seed at the pointer's view; mouse edge mode's detached centre
-                // is already the real view (seeding from the mapper there jumped the view).
-                if (was == wind::ViewOwner::Mouse && !t.viewDetached) { t.viewCx = r.centerX; t.viewCy = r.centerY; }
-                t.viewVx = 0; t.viewVy = 0;
-                const double hw = t.mon.w / (2.0 * lvl), hh = t.mon.h / (2.0 * lvl);
-                double nx = t.viewCx + panDx, ny = t.viewCy + panDy;
-                // The MPO wall (#148/#242) caps the source left/top like mouse edge mode does.
-                const double wall = wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0;
-                if (wall >= 0) { if (nx - hw > wall) nx = wall + hw; if (ny - hh > wall) ny = wall + hh; }
-                nx = (std::min)((std::max)(nx, hw), t.mon.w - hw);
-                ny = (std::min)((std::max)(ny, hh), t.mon.h - hh);
-                t.viewCx = nx; t.viewCy = ny;
-                r = wind::DetachedMap(t.viewCx, t.viewCy, cur.x - t.mon.x, cur.y - t.mon.y, lvl, t.mon.w, t.mon.h);
-                t.mapper.reset(t.viewCx, t.viewCy);
-                t.lastSetVirtual = cur;
-                t.viewDetached = true;
-            } else if (owner != wind::ViewOwner::Mouse) {
-                if (was == wind::ViewOwner::Mouse && !t.viewDetached) { t.viewCx = r.centerX; t.viewCy = r.centerY; }   // glide from where we are
-                const double ptrX = cur.x - t.mon.x, ptrY = cur.y - t.mon.y;
-                double tx = t.viewCx, ty = t.viewCy;
-                // The LATCHED target: only caret/focus events that passed the gates move the view.
-                const wind::TrackSnapshot& tg = t.viewOwner.target;
-                const wind::TrackRect rc{ tg.l - t.mon.x, tg.t - t.mon.y, tg.r - t.mon.x, tg.b - t.mon.y };
-                double ox, oy;
-                if (wind::TrackTargetCenter(rc, t.viewCx, t.viewCy, lvl, t.mon.w, t.mon.h,
-                                            t.cfg.trackAlign, t.cfg.trackMarginPct, ox, oy)) { tx = ox; ty = oy; }
-                if (was == wind::ViewOwner::Mouse) { t.viewVx = 0; t.viewVy = 0; }
-                t.viewCx = wind::SpringToward(t.viewCx, tx, t.viewVx, vi.dtMs, t.cfg.trackGlideMs);
-                t.viewCy = wind::SpringToward(t.viewCy, ty, t.viewVy, vi.dtMs, t.cfg.trackGlideMs);
-                r = wind::DetachedMap(t.viewCx, t.viewCy, ptrX, ptrY, lvl, t.mon.w, t.mon.h);
-                t.mapper.reset(t.viewCx, t.viewCy);   // hybrid switches and the next tick start here
-                t.lastSetVirtual = cur;               // measure the next hand motion from here
-                t.viewDetached = true;
-            } else if (t.viewOwner.warpPointer) {
-                // The mouse moved while the view showed the caret/focus: the POINTER comes to the
-                // view, the view stays (owner decision, field test 2026-09-29). Centred mode places
-                // it at the view centre; edge mode (mouseAlign=1) just inside the band, nearest to
-                // where it was.
-                const bool edges = t.cfg.mouseAlign == 1;
-                double px = t.viewCx, py = t.viewCy;
-                if (edges)
-                    wind::EdgeClampPointer(t.viewCx, t.viewCy, cur.x - t.mon.x, cur.y - t.mon.y, lvl,
-                                           t.mon.w, t.mon.h, t.cfg.mouseMarginPct, px, py, CurrentCursorBody(t));
-                const int wx = (int)(px + 0.5) + t.mon.x, wy = (int)(py + 0.5) + t.mon.y;
-                SetCursorPos(wx, wy);
-                cur.x = wx; cur.y = wy;
-                t.mapper.reset(edges ? t.viewCx : px, edges ? t.viewCy : py);
-                t.lastSetVirtual = cur;
-                r = wind::DetachedMap(t.viewCx, t.viewCy, px, py, lvl, t.mon.w, t.mon.h);
-                t.viewDetached = edges;               // edge mode keeps the view where it is
-            } else if (t.cfg.mouseAlign == 1 && lvl > 1.001 && !inspect && !t.lockEff) {
-                // MOUSE EDGE MODE (issue #276 phase 2): the pointer roams freely inside the view and
-                // the view moves only when it reaches the margin band, just far enough. No weld:
-                // the pointer is real, so clicks are native. Mouselook (locked) and Inspect keep the
-                // centred path.
-                if (!t.viewDetached) { t.viewCx = r.centerX; t.viewCy = r.centerY; }   // start from here
-                const double ptrX = cur.x - t.mon.x, ptrY = cur.y - t.mon.y;
-                const double wall = wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0;
-                double ecx, ecy;
-                wind::EdgePanCenter(t.viewCx, t.viewCy, ptrX, ptrY, lvl, t.mon.w, t.mon.h,
-                                    t.cfg.mouseMarginPct, wall, wall, ecx, ecy, CurrentCursorBody(t));
-                t.viewCx = ecx; t.viewCy = ecy;       // no glide: the hand pushes the view directly
-                r = wind::DetachedMap(t.viewCx, t.viewCy, ptrX, ptrY, lvl, t.mon.w, t.mon.h);
-                t.mapper.reset(t.viewCx, t.viewCy);
-                t.lastSetVirtual = cur;
-                t.viewDetached = true;
-            } else {
-                t.viewDetached = false;
-            }
-        }
-        // Dead-zone probe (probeClicks=1, diagnostic): the field annotates hover dead zones by
-        // clicking. Plain click = "hover works here" (OK), Ctrl+click = "dead here" (DEAD). Each
-        // click logs every coordinate space in the chain plus what Windows hit-tests at the
-        // pointer, so a divergence between the weld point, the applied DWM transform, and the
-        // hit-test target names itself. Zero cost unless the knob is on AND transform is active.
-        if (t.cfg.probeClicks && dynamic_cast<TransformModel*>(t.model)) {
-            // Mode 2: continuous trace (every 4th tick ~36Hz) of the physical pre-weld cursor vs
-            // the weld target - the physical stream is what pointer-framework apps perceive
-            // (SetCursorPos emits no pointer frames; rig-proven), so a divergence here IS the
-            // hover input XAML actually gets.
-            if (t.cfg.probeClicks == 2 && (++t.probeTraceTick & 3) == 0) {
-                auto* tw = dynamic_cast<TransformModel*>(t.model);
-                wind::Log(wind::LogLevel::Info, "ptrace",
-                          "lvl=%.2f pre=(%ld,%ld) weld=(%d,%d) d=(%ld,%ld) welded=%d src=(%.1f,%.1f) cs=(%.1f,%.1f)",
-                          lvl, cur.x, cur.y,
-                          r.clickDesktopX + t.mon.x, r.clickDesktopY + t.mon.y,
-                          cur.x - (r.clickDesktopX + t.mon.x), cur.y - (r.clickDesktopY + t.mon.y),
-                          tw && tw->weldedLastFrame() ? 1 : 0,
-                          r.srcLeft, r.srcTop, r.cursorScreenX, r.cursorScreenY);
-            }
-            const bool lDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
-            if (lDown && !t.probePrevLDown) {
-                const bool dead = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
-                POINT cp{}; GetCursorPos(&cp);
-                RECT clip{}; GetClipCursor(&clip);
-                float mLvl = 0.f; int mOffX = 0, mOffY = 0;
-                MagGetFullscreenTransform(&mLvl, &mOffX, &mOffY);
-                HWND under = WindowFromPoint(cp);
-                wchar_t ucls[64]{}; if (under) GetClassNameW(under, ucls, 64);
-                DWORD upid = 0; if (under) GetWindowThreadProcessId(under, &upid);
-                // Cross-space check: what sits at the SCREEN position where the aim point is
-                // DISPLAYED (if hover follows this instead of the weld point, spaces are mixed).
-                POINT sp{ (int)(r.cursorScreenX + 0.5) + t.mon.x, (int)(r.cursorScreenY + 0.5) + t.mon.y };
-                HWND underS = WindowFromPoint(sp);
-                wchar_t scls[64]{}; if (underS) GetClassNameW(underS, scls, 64);
-                DWORD spid = 0; if (underS) GetWindowThreadProcessId(underS, &spid);
-                const DWORD ourPid = GetCurrentProcessId();
-                wind::Log(wind::LogLevel::Info, "probe",
-                    "%s lvl=%.2f weld=(%d,%d) cur=(%ld,%ld) src=(%.1f,%.1f) center=(%.1f,%.1f) "
-                    "cursorScreen=(%.1f,%.1f) dwm(lvl=%.2f off=%d,%d) clip=(%ld,%ld)-(%ld,%ld) "
-                    "underCur=%ls%s underScreen=%ls%s",
-                    dead ? "DEAD" : "OK", lvl,
-                    r.clickDesktopX + t.mon.x, r.clickDesktopY + t.mon.y, cp.x, cp.y,
-                    r.srcLeft, r.srcTop, r.centerX, r.centerY,
-                    r.cursorScreenX, r.cursorScreenY, mLvl, mOffX, mOffY,
-                    clip.left, clip.top, clip.right, clip.bottom,
-                    ucls, upid == ourPid ? L" (OURS)" : L"",
-                    scls, spid == ourPid ? L" (OURS)" : L"");
-            }
-            t.probePrevLDown = lDown;
-        }
-        // Inspect click-to-look-point: the hook swallowed real click(s) and handed us per-button counts
-        // (counts, not a flag, so a fast double-click before this drains isn't lost). Fire a clean ABSOLUTE
-        // click at the crosshair (mapper center = look point) per pending press, so each lands where you
-        // aim, at any zoom. ABSOLUTE coords are immune to the re-freeze SetCursorPos below, and an absolute
-        // injected move is skipped by the raw accumulator (WM_INPUT ignores MOUSE_MOVE_ABSOLUTE), so the
-        // look point isn't disturbed. Inspect stays on; the cursor re-freezes at frozenCursor afterwards.
-        int nLeft  = g_input.state().commitLeft.exchange(0);
-        int nRight = g_input.state().commitRight.exchange(0);
-        // Game-inspect: drain but DISCARD clicks. A synthesized click over the game window would
-        // re-activate it (mouse clicks activate), re-engaging mouselook mid-inspect; with the game
-        // backgrounded and cursorless there is nothing meaningful to click anyway.
-        if (nLeft + nRight > 0 && !t.inspectGame) {
-            ClipCursor(nullptr);       // release the 1px freeze so the absolute click can reach the look point
-            t.clickReleaseTicks = TicksAtHz(2, t.hz);   // ...and keep it released ~14ms before re-freezing (below)
-            const VirtualBounds& vb = t.vbounds;   // cached at activation; equals the SM_*VIRTUALSCREEN metrics
-            if (vb.w > 1 && vb.h > 1) {
-                int lx = r.clickDesktopX + t.mon.x, ly = r.clickDesktopY + t.mon.y;
-                LONG ax = (LONG)((lx - vb.x) * 65535.0 / (vb.w - 1) + 0.5);
-                LONG ay = (LONG)((ly - vb.y) * 65535.0 / (vb.h - 1) + 0.5);
-                auto fireClicks = [&](DWORD downF, DWORD upF, int count) {
-                    for (int k = 0; k < count; ++k) {
-                        INPUT clk[3] = {};
-                        for (int i = 0; i < 3; ++i) { clk[i].type = INPUT_MOUSE; clk[i].mi.dx = ax; clk[i].mi.dy = ay;
-                                                      clk[i].mi.dwExtraInfo = (ULONG_PTR)wind::kWindInjectTag; }   // never a click bind (#285)
-                        clk[0].mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
-                        clk[1].mi.dwFlags = downF | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
-                        clk[2].mi.dwFlags = upF   | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
-                        SendInput(3, clk, sizeof(INPUT));
-                    }
-                };
-                fireClicks(MOUSEEVENTF_LEFTDOWN,  MOUSEEVENTF_LEFTUP,  nLeft);
-                fireClicks(MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, nRight);
-                if (dynamic_cast<TransformModel*>(t.model)) {
-                    // The injected absolute move races transform writes (issue #148 TDR class), so
-                    // SERIALIZE: skip transform writes for a couple ticks around it (ex.pauseWrites).
-                    t.clickPauseTicks = TicksAtHz(3, t.hz);
-                }
-            }
-        }
-        // Fullscreen-game tell for the per-tick perf levers (issue #148): crop the capture copy to
-        // the magnified region (gameCrop), skip the periodic topmost backstop, and optionally cap
-        // our own present rate (gameFpsCap). fgTick/fsCover/fgBorderless were read once above.
-        const bool fsGame = fsCover;
-        // Instant hybrid switch (always on): re-pick the engine WHILE ZOOMED when the foreground
-        // changes, handing over mid-session. The controller and mapper are untouched, so the
-        // zoom level and lens position carry across the swap (render 8x -> tab into a game ->
-        // transform 8x). Inspect sessions are never switched under.
-        // Freeze the engine choice while an overlay is in front (see IsOverlayFg). Skipping the
-        // whole block, rather than just the swap, is deliberate: it leaves wantModel/wantSinceMs
-        // untouched, so the overlay never becomes the settled candidate and handing foreground back
-        // is a no-op instead of a second handover.
-        if (t.mTransform && !enterActive && !inspect && !IsOverlayFg(fgTick)) {
-            // Same pure predicate as the zoom-in pick (engine_pick.h) - the two sites can no
-            // longer drift apart. Exe-derived inputs come from the per-HWND cache: this block
-            // runs every zoomed tick and the process-open per tick was measurable waste.
-            RefreshFgCache(t, fgTick);
-            auto* tAvail = dynamic_cast<TransformModel*>(t.mTransform);
-            EnginePickInputs pin;
-            pin.coversMonitor  = fsCover;
-            pin.borderless     = fgBorderless;
-            pin.primaryMonitor = t.mon.x == 0 && t.mon.y == 0;
-            pin.shellDesktop   = t.fgCacheShell;
-            pin.excluded       = t.fgCacheExcluded;
-            pin.churny         = t.fgCacheChurny;
-            pin.tdrHarness     = t.cfg.tdrTest > 0;
-            pin.desktopTransformOptIn = t.cfg.desktopTransform != 0;
-            pin.inputTransformOk      = tAvail && tAvail->inputTransformAvailable();
-            pin.renderLost            = RenderDeviceLost(t);
-            FillCategoryInputs(t, pin);
-            IMagnifierModel* want = wind::PickTransformFor(t.cfg.model, pin, t.renderStale) ? t.mTransform : t.mRender;
-            // STICKY (field: the engine flapped render<->transform inside one zoom session, and
-            // each flip releases and rebuilds DWM's magnification context - a stall every time).
-            // A real alt-tab still switches; a one-frame wobble in the foreground reads does not.
-            if (want != t.wantModel) { t.wantModel = want; t.wantSinceMs = GetTickCount64(); }
-            const bool wantSettled = GetTickCount64() - t.wantSinceMs >= 350;
-            const bool fgIsStealer = fgTick && fgTick == g_focusStealer;   // game-inspect helper holds fg
-            if (want && want != t.model && wantSettled && !fgIsStealer) {
-                if (t.restAfterReveal) {   // rapid double-switch: settle the previous handover
-                    { wind::SpanScope span_(wind::kSpanActivate); t.restAfterReveal->setActive(false); }
-                    t.restAfterReveal = nullptr;
-                    t.restOverlapTicks = 0;
-                    UpdateColorFilter(t, true, RenderOverlayShown(t), nullptr);   // colour follows what is visible
-                }
-                IMagnifierModel* old = t.model;
-                SetSystemCursorHidden(t, old, false);
-                t.model = want;
-                // Both engines weld the cursor to the lens point, so the handover is seamless:
-                // render hides the OS cursor immediately; the transform hides it in its own
-                // present (level > 1.001) and re-welds at the same point.
-                if (dynamic_cast<RenderModel*>(t.model)) SetSystemCursorHidden(t, t.model, true);
-                else t.transformExe = ExeNameOf(fgTick);   // device-lost backstop attribution
-                { wind::SpanScope span_(wind::kSpanActivate); t.model->onActivate(); }
-                if (auto* rm = dynamic_cast<RenderModel*>(t.model)) {
-                    t.revealNeedsComposite = ForegroundCoversMonitor(t.mon);
-                    if (t.revealNeedsComposite) rm->primeReveal();
-                    t.revealPending = (t.hz > 0 ? t.hz : 60) / 4;
-                    if (t.revealPending < 2) t.revealPending = 2;
-                    // SEAMLESS HANDOVER (field report: a bare-desktop frame flashed at the 9x
-                    // crossover): the transform keeps the screen magnified while the overlay's
-                    // evidence-gated reveal is pending, and RESTS A FEW TICKS AFTER the reveal
-                    // lands - the rest write and the alpha flip travel different DWM channels,
-                    // so a same-tick rest still left a one-composite unmagnified gap. The
-                    // overlap's worst case is a ~14ms over-zoom pulse (still magnified content),
-                    // never a bare desktop.
-                    t.restAfterReveal = old;
-                    t.restOverlapTicks = 0;   // armed when the reveal actually fires
-                } else {
-                    // render -> transform: activate the transform THIS tick, keep the overlay up
-                    // for the same short overlap, then drop it.
-                    { wind::SpanScope span_(wind::kSpanActivate); t.model->setActive(true); }
-                    // The pan wall and MPO state above were computed for the outgoing render
-                    // engine (review 2026-10-09 M2), so this tick's view was mapped without walls.
-                    // Give the incoming transform its MPO state now: its write-site backstop then
-                    // keeps |translation| under the 16-bit field on this first present (the ghost
-                    // is not settled yet, so the backstop is armed at either sampling). The next
-                    // tick computes the walls for the transform as usual.
-                    if (auto* tmIn = dynamic_cast<TransformModel*>(t.model)) {
-                        const bool exposedIn = !g_mpoDisabled;
-                        tmIn->setMpoBusterWanted(exposedIn && t.cfg.mpoBuster != 0 && !liftIfTransform);
-                        tmIn->setMpoExposed(exposedIn && !liftIfTransform);
-                    }
-                    t.restAfterReveal = old;
-                    t.restOverlapTicks = TicksAtHz(3, t.hz);
-                }
-                // Name the trigger: if another transient surface ever ping-pongs the engine the
-                // way the taskbar flyout did (issue #180), the log identifies it directly.
-                wchar_t fgCls[64]{};
-                if (fgTick) GetClassNameW(fgTick, fgCls, 64);
-                wind::Log(wind::LogLevel::Info, "hybrid",
-                          "instant switch -> %s (level preserved; fg cls=%ls exe=%ls)",
-                          dynamic_cast<RenderModel*>(t.model) ? "render" : "transform",
-                          fgCls, ExeNameOf(fgTick).c_str());
-            }
-        }
-        // Per-tick render-only overrides go through PresentExtras; the model's present() runs
-        // FillRenderParams and applies these on top. ex.outline seeds with the same base value
-        // FillRenderParams would compute, so the dwell/idle logic below reads an identical start.
-        PresentExtras ex;
-        ex.fsGame = fsGame;
-        ex.forceCrop = fsGame && t.cfg.gameCrop != 0;
-        ex.outline = OutlineVisibleAtLevel(t.cfg, lvl);
-        ex.outlineAlpha = 1.0f;
-        ex.cursorMode = CursorModeFromCfg(t.cfg);
-        ex.cursorLocked = false;
-        // Low-zoom dwell: with "only at low zoom" on, show the outline only after the zoom settles
-        // at a STABLE level inside the band for kOutlineDwellSec. "Stable" = the level is unchanged
-        // since last tick (the controller freezes the level exactly when no zoom direction is held),
-        // so an actively-changing level - zooming through the band, or repeatedly nudging in/out -
-        // never accumulates: the countdown starts only once you stop on a level in the band. Any
-        // level change or leaving the band resets it (OutlineDwellSeconds returns 0 when !inBand).
-        // Always-on mode (lowZoomOnly off) is unaffected. The reset also fires on zoom-out to idle
-        // via the teardown branch below, so cycling 1x<->in-band can never bank partial dwell.
-        if (t.cfg.outline != 0 && t.cfg.outlineLowZoomOnly != 0) {
-            const double kOutlineDwellSec = 1.0;
-            bool stable = std::fabs(lvl - t.prevLvl) <= 1e-4;   // level held constant => settled
-            bool inBand = ex.outline && lvl > 1.0 && stable;
-            t.outlineZoneSec = OutlineDwellSeconds(inBand, t.outlineZoneSec, dt, kOutlineDwellSec);
-            if (t.outlineZoneSec < kOutlineDwellSec) ex.outline = false;   // not dwelled long enough yet
-        } else {
-            t.outlineZoneSec = 0.0;   // keep ready for when the cutoff is toggled on mid-session
-        }
-        // Idle-hide fade: when enabled and the outline is visible, accumulate idle time (reset on
-        // any hand motion - free OS-cursor delta or raw mickeys), then map it to the fade alpha.
-        // dt is the per-tick elapsed time computed at the top of RunTick. Fade duration is 0.3s.
-        const bool outlineMoved = (std::abs(curDx) + std::abs(curDy) + std::abs(rawDx) + std::abs(rawDy)) > 0;
-        if (t.cfg.outlineIdleHide && ex.outline) {
-            t.outlineIdleSec = outlineMoved ? 0.0 : (t.outlineIdleSec + dt);
-            ex.outlineAlpha = (float)OutlineIdleAlpha(t.outlineIdleSec, t.cfg.outlineIdleSeconds, 0.3);
-        } else {
-            t.outlineIdleSec = 0.0;   // keep ready for when idle-hide is toggled on mid-session
-        }
-        if (t.cursorHidden) ex.cursorMode = 2;   // hotkey override; CursorModeFromCfg already set 0/1/2 from cfg
-        // cursorMode is now final for this tick; derive drawCursor from it so the transform model
-        // (which only reads drawCursor, not cursorMode - see magnifier_model.h) also honours
-        // cursorVisibility=never and the hide-cursor hotkey. The render model never reads drawCursor
-        // (it reads cursorMode directly via FillRenderParams), so this cannot change render behaviour.
-        ex.drawCursor = (ex.cursorMode != 2);
-        // Drag-follow (issue #169): the pan resolve above chose to follow the pointer this tick, so
-        // neither engine may weld it back to the lens centre - suspend the SetCursorPos.
-        // freeCursor: never weld. The weld is what the whole native-model change removes - with the
-        // view already positioned so the pointer lands centre-screen, SetCursorPos has nothing to
-        // correct and only reintroduces the feedback loop.
-        ex.suppressCursorSync = dragFollow || freeCursor || t.viewDetached;   // tracking never moves the pointer (#276)
-        { wind::SpanScope span_(wind::kSpanColor); UpdateColorFilter(t, lvl > 1.0, RenderOverlayShown(t), &ex); }
-        // Serialize transform writes around an Inspect click's injected absolute move (issue #148
-        // TDR class): the injection and a transform write racing each other is the proven trigger.
-        // The launch quiesce holds writes AND the weld for its whole window (see above).
-        // Deadline-based, so a short press can never strand leftover hold into the next session
-        // (the old tick countdown only decremented while zoomed, which did exactly that).
-        const bool quiesceHold = QuiesceHoldActive(t);
-        ex.pauseWrites = t.clickPauseTicks > 0 || quiesceHold;
-        {
-            auto& zs = g_input.state();
-            ex.zoomDriven = zs.inHeld.load() || zs.outHeld.load() || g_input.anyBoundKeyPressed() ||
-                            t.zoom.hasTarget();
-        }
-        if (quiesceHold) ex.suppressCursorSync = true;
-        // Native cursor (issue #369): DWM may own the pan only where the view is a pure function of
-        // the pointer.
-        {
-            wind::DwmCentreIn dc;
-            dc.zoomed = lvl > 1.001;
-            dc.freeCursor = (freeCursor && !gameCursor && !t.postInspectHold) ||   // #443, #445
-                            wind::InspectKeepsDwmView(inspect, t.inspectLookMoved);   // #445
-            dc.viewDetached = t.viewDetached;
-            dc.wallNeeded = wind::NearWall(wallNeeded, r.srcLeft, r.srcTop, lvl, kMaxSafeTxMagnitude, 64.0);
-            dc.quiesce = quiesceHold;
-            ex.dwmCentre = wind::WantDwmCentring(dc);
-            // Warm pulses wherever Wind, not DWM centring, writes the view: a game-drawn cursor and
-            // the hold after Inspect write it from a free pointer too (review of #444/#446).
-            ex.warmAllowed = !dc.freeCursor;
-        }
-        // Our tray menu is open (in WindTray.exe, flagged through the shared block): the pointer
-        // belongs to the USER (they are aiming at menu items),
-        // so the weld must not re-park it - at full tick rate it pins the cursor outright
-        // (field-reported as a frozen cursor the moment the tray opened). The view keeps panning;
-        // only the cursor re-park is suspended, exactly like drag-follow during a button hold.
-        if (wind::TrayMenuOpen(g_trayBlock)) ex.suppressCursorSync = true;
-        if (t.clickPauseTicks > 0) --t.clickPauseTicks;
-        if (inspect) {
-            if (t.clickReleaseTicks > 0) {
-                // A click was just committed: keep the freeze released for these ticks so the synthesized
-                // absolute click reaches the look point (re-clamping to the 1px frozen rect would send the
-                // click to the frozen point instead). Leave p.clickDesktop at the look point so renderFrame
-                // holds the cursor there for the click; re-freeze once the window elapses.
-                --t.clickReleaseTicks;
-            } else {
-                // Re-assert the freeze (Windows can drop a clip on focus changes) and pin renderFrame's
-                // SetCursorPos at the frozen point (a no-op inside the clip). DEDUPED (issue #148):
-                // ClipCursor is a win32k cursor-subsystem write - the TDR class under an active
-                // fullscreen transform - so it only runs when the read shows the clip was lost.
-                RECT have{}; GetClipCursor(&have);
-                if (have.left != t.frozenCursor.x || have.top != t.frozenCursor.y ||
-                    have.right != t.frozenCursor.x + 1 || have.bottom != t.frozenCursor.y + 1) {
-                    RECT fz{ t.frozenCursor.x, t.frozenCursor.y, t.frozenCursor.x + 1, t.frozenCursor.y + 1 };
-                    ClipCursor(&fz);
-                }
-                ex.clickOverride = true;
-                ex.clickDesktopX = t.frozenCursor.x;
-                ex.clickDesktopY = t.frozenCursor.y;
-            }
-            ex.cursorLocked = true;        // draw the crosshair at the look point (cursorScreen)
-            if (!zoomed) ex.outline = false;   // no lens outline on the 1:1 view at 1x
-        }
-        // Game pacing (issue #148): ONLY for the opt-in knobs. The default zoomed path keeps the
-        // vsync-locked blocking Present - it is what makes panning smooth (refresh-locked cadence),
-        // and at normal GPU priority it blocks a few frames at worst, never wedges. The timer-paced
-        // Present(0,0) + fence-gate mode below exists because lowGpuPriority=1 can starve our GPU
-        // work for MINUTES under a saturated game (a blocking present then wedges input, teardown,
-        // and the cursor restore), and because gameFpsCap needs presents decoupled from ticks. Both
-        // trade present cadence for safety/headroom, so they must never engage by default - an
-        // earlier build enabled this mode for every "foreground covers the monitor" case (which
-        // also matches any MAXIMIZED desktop window) and made panning judder everywhere.
-        // While engaged: the main-loop timer paces (t.gamePacing), presents are Present(0,0)
-        // (ex.noVsync), and renderFrame skips the whole frame while the previous present hasn't
-        // executed on the GPU (ex.gatePresent). Skipped ticks still sample input and advance the
-        // mapper. The activation and reveal-pending ticks always attempt a present (the gated
-        // reveal depends on frames reaching the redirection surface).
-        bool doPresent = true;
-        // Reduced-PUSH game mode (issue #148, measured in Foundation): under a game, DWM
-        // services our redirected window's presents at only ~78/s while compositing at 144/s -
-        // pushing 144 presents/s into that path builds a standing queue, so every Present waits
-        // ~a queue's worth with jitter (the stutter). gameFpsCap>0 over a fullscreen game
-        // presents every Nth vblank instead (N = ceil(hz/cap)), BELOW the service rate, so the
-        // queue stays empty and each present retires on the next composite. Skip ticks block on
-        // IDXGIOutput::WaitForVBlank (in the skip branch below), keeping the loop vblank-locked
-        // with no timer jitter; input/pan still samples every tick. Activation/reveal ticks
-        // always present (the gated reveal needs frames on the redirection surface).
-        const bool capVsync = fsGame && zoomed && t.cfg.gameFpsCap > 0 &&
-                              t.cfg.vsync != 0 && t.cfg.dwmFlush == 0;
-        if (capVsync && !(enterActive || t.revealPending > 0)) {
-            int div = (t.hz + t.cfg.gameFpsCap - 1) / t.cfg.gameFpsCap;   // ceil(hz/cap)
-            if (div < 1) div = 1;
-            if (++t.pushPhase >= div) t.pushPhase = 0;
-            if (t.pushPhase != 0) doPresent = false;
-        } else {
-            t.pushPhase = 0;
-        }
-        const bool gamePacing = fsGame && zoomed && !capVsync &&
-                                (EffectiveGpuPriority(t.cfg) < 0 || t.cfg.gameFpsCap > 0);
-        t.gamePacing = gamePacing;
-        if (gamePacing) {
-            ex.noVsync = true;
-            ex.gatePresent = true;
-            if (t.cfg.gameFpsCap > 0) {
-                const double interval = 1.0 / (double)t.cfg.gameFpsCap;
-                t.presentAccum += dt;
-                if (enterActive || t.revealPending > 0) {
-                    t.presentAccum = 0.0;                   // reveal path: present every tick
-                } else if (t.presentAccum >= interval) {
-                    t.presentAccum -= interval;
-                    if (t.presentAccum > interval) t.presentAccum = interval;  // hitch: no burst catch-up
-                } else {
-                    doPresent = false;
-                }
-            }
-        } else {
-            t.presentAccum = 0.0;
-        }
-        if (doPresent) {
-            LARGE_INTEGER zp0{}; if (t.zt.armed && t.zt.step == 0) QueryPerformanceCounter(&zp0);
-            { wind::SpanScope span_(wind::kSpanPresent); t.model->present(r, lvl, t.cfg, t.mon, ex); }      // render+present (never blocks the ramp)
-            // The transform model hides and restores the pointer on its own (Inspect exit, the
-            // hide-cursor hotkey), so read its state back: a mirrored flag went stale after both and
-            // made the next Inspect toggle read our own hiding as the app's mouselook tell.
-            if (auto* tm = dynamic_cast<TransformModel*>(t.model)) t.cursorHiddenByUs = tm->pointerHidden();
-            if (t.zt.armed && t.zt.step == 0 && t.zt.presentMs == 0) {
-                LARGE_INTEGER zp1; QueryPerformanceCounter(&zp1); t.zt.presentMs = QpcMs(t, zp0.QuadPart, zp1.QuadPart);
-            }
-        } else if (capVsync) {
-            // Reduced-push skip tick: block to the next vblank so the loop cadence stays
-            // vblank-locked (Present paces the present ticks, this paces the skips). Fallback
-            // sleep if the output can't wait (device transition) so we never spin.
+            IMagnifierModel* old = t.model;
+            SetSystemCursorHidden(t, old, false);
+            t.model = want;
+            // Both engines weld the cursor to the lens point, so the handover is seamless:
+            // render hides the OS cursor immediately; the transform hides it in its own
+            // present (level > 1.001) and re-welds at the same point.
+            if (dynamic_cast<RenderModel*>(t.model)) SetSystemCursorHidden(t, t.model, true);
+            else t.transformExe = ExeNameOf(fgTick);   // device-lost backstop attribution
+            { wind::SpanScope span_(wind::kSpanActivate); t.model->onActivate(); }
             if (auto* rm = dynamic_cast<RenderModel*>(t.model)) {
-                if (!rm->waitVBlank()) Sleep(3);
-            }
-        }
-        // Reveal AFTER the live frame is presented: setVisible flips the layer alpha over the
-        // now-current front buffer, so the overlay never shows its retained previous-session
-        // frame (the alt-tab "previous window"). capture() also drained to the latest frame.
-        // Reveal/prime is render-specific (needs ForegroundCoversMonitor + capture priming); guard it
-        // behind the RenderModel downcast. A non-render model just reveals immediately on activation.
-        if (auto* rm = dynamic_cast<RenderModel*>(t.model)) {
-            if (enterActive) {
-                // EVERY reveal is gated on the session's first Present having EXECUTED on the GPU
-                // (revealFrameDone: an event query fenced right after Present). The blt into the
-                // layered redirection surface is GPU work, but the alpha flip is a CPU call DWM
-                // honours at its next composite - under GPU load the flip won that race and DWM
-                // composited the surface's RETAINED frame: the last thing the PREVIOUS zoom
-                // session presented (issue #140, second mechanism; the first was capture-side).
-                // A fullscreen app (game on an independent-flip/MPO plane, issue #90) additionally
-                // needs a post-prime composite in the capture (frameCompositedSincePrime), since
-                // Desktop Duplication can't see the game until the alpha-1 prime forces DWM to
-                // composite it. All non-blocking - the smooth-zoom ramp runs undisturbed;
-                // revealPending is only the fallback cap (~250 ms) so nothing can wedge the reveal.
-                t.revealNeedsComposite = fsGame;   // same ForegroundCoversMonitor read, this tick
+                t.revealNeedsComposite = ForegroundCoversMonitor(t.mon);
                 if (t.revealNeedsComposite) rm->primeReveal();
                 t.revealPending = (t.hz > 0 ? t.hz : 60) / 4;
                 if (t.revealPending < 2) t.revealPending = 2;
-                // Ordinary desktop zoom-in: spin a tiny budget on the fence so the idle-GPU common
-                // case still reveals within this same tick (the instant feel is kept); a loaded
-                // GPU misses the budget and defers to the per-tick checks below.
-                if (!t.revealNeedsComposite && rm->revealFrameDone(3.0)) {
-                    { wind::SpanScope span_(wind::kSpanActivate); rm->setActive(true); }
-                    t.revealPending = 0;
-                    // Real-time overlap, same as the render -> transform path (issue #274):
-                    // raw ticks were right only at 144 Hz.
-                    if (t.restAfterReveal) t.restOverlapTicks = TicksAtHz(3, t.hz);
-                }
-            } else if (t.revealPending > 0) {
-                --t.revealPending;
-                const bool frameDone  = rm->revealFrameDone();
-                const bool composited = !t.revealNeedsComposite || rm->frameCompositedSincePrime();
-                if ((frameDone && composited) || t.revealPending == 0) {
-                    { wind::SpanScope span_(wind::kSpanActivate); rm->setActive(true); }
-                    wind::Log(wind::LogLevel::Info, "render",
-                              "deferred reveal: frameDone=%d composited=%d ticksLeft=%d",
-                              (int)frameDone, (int)composited, t.revealPending);
-                    t.revealPending = 0;
-                    // Real-time overlap, same as the render -> transform path (issue #274):
-                    // raw ticks were right only at 144 Hz.
-                    if (t.restAfterReveal) t.restOverlapTicks = TicksAtHz(3, t.hz);
-                }
-            }
-        } else if (enterActive) {
-            LARGE_INTEGER zs0; QueryPerformanceCounter(&zs0);
-            { wind::SpanScope span_(wind::kSpanActivate); t.model->setActive(true); }   // transform: reveal immediately, no capture priming
-            if (t.zt.armed) {
-                LARGE_INTEGER zs1; QueryPerformanceCounter(&zs1); t.zt.setActiveMs = QpcMs(t, zs0.QuadPart, zs1.QuadPart);
-                if (auto* tm = dynamic_cast<TransformModel*>(t.model)) {
-                    const auto sp = tm->lastEnter(); t.zt.ensureMs = sp.ensureMagMs;
-                }
-                DWM_TIMING_INFO ti{}; ti.cbSize = sizeof(ti);   // the composite count the first write must beat
-                if (SUCCEEDED(DwmGetCompositionTimingInfo(nullptr, &ti))) t.zt.cFrame0 = ti.cFrame;
-            }
-        }
-        // Handover overlap: the outgoing engine rests a few ticks after the incoming one is
-        // live, so the crossover never composites a bare unmagnified frame (see instant switch).
-        if (t.restAfterReveal && t.restOverlapTicks > 0 && --t.restOverlapTicks == 0) {
-            { wind::SpanScope span_(wind::kSpanActivate); t.restAfterReveal->setActive(false); }
-            t.restAfterReveal = nullptr;
-            // The render overlay just left the screen: the DWM effect takes the colour back THIS
-            // tick, not next tick's top-of-tick call (a one-frame unfiltered flash otherwise).
-            { wind::SpanScope span_(wind::kSpanColor); UpdateColorFilter(t, true, RenderOverlayShown(t), nullptr); }
-        }
-        // Execute the deferred game-inspect steal now that the reveal logic has read the true
-        // foreground, and RE-assert it if the game pulled foreground back mid-inspect (some
-        // engines re-grab on their own timers; a user alt-tab to a THIRD app is respected).
-        // If the steal fails (unsigned dev build denied by the foreground lock), drop back to
-        // normal inspect: the camera moves again, but the state is never inconsistent.
-        if (inspect && t.inspectGame) {
-            HWND fg = GetForegroundWindow();
-            bool wantSteal = t.inspectStealPending || (t.inspectPrevFg && fg == t.inspectPrevFg);
-            t.inspectStealPending = false;
-            if (wantSteal && !StealForeground(EnsureFocusStealer(t.mon))) {
-                wind::Log(wind::LogLevel::Warn, "inspect",
-                          "game-inspect: foreground steal failed; falling back to normal inspect");
-                t.inspectGame = false;
-                t.inspectPrevFg = nullptr;
-            }
-        }
-        // Bookkeeping for next tick's GetCursorPos delta. INSPECT keeps the explicit frozen point
-        // (the 1px clip pins the pointer there; explicit is immune to the click-release window).
-        // Everything else uses a MEASURED read (issue #169) - the baseline must be where the
-        // pointer actually IS after this tick's present, never where we intended to put it:
-        //  - welded (render park OR transform weld; both report whether SetCursorPos REALLY ran
-        //    this frame): the call is synchronous, so the read equals the park/weld point -
-        //    identical to the old assumed baseline.
-        //  - weld deduped/suppressed (unchanged centre pixel, drag-follow, gatePresent or
-        //    fps-cap skip ticks): the old code assumed the park landed anyway and baselined on
-        //    the lens centre. The next delta then measured hand + (pointer - centre) gap, the
-        //    mapper integrated the gap, the centre overshot the pointer, and the sign flipped
-        //    every tick: an unstable servo, oscillating with amplitude proportional to hand
-        //    speed. That was the #169 window-drag flicker - and, before the transform weld was
-        //    recognized here, the #181 corner drift in transform game sessions.
-        if (inspect) {
-            t.lastSetVirtual = t.frozenCursor;
-        } else {
-            // Parked -> the park point: hand motion after the park (including during the Present
-            // block) is measured next tick from there. Not parked (weld deduped/suppressed,
-            // transform FOLLOW, skipped frame) -> THIS tick's start-of-tick read `cur`: motion
-            // after that read is measured next tick. NEVER a fresh post-present read - Present
-            // blocks ~a frame at vsync, and a read taken after it swallows all hand motion that
-            // occurred during the block, so the lens pans slower than the hand and the weld drags
-            // the pointer backwards (field-reported as stalling/slowed cursor; first shipped
-            // version of this fix had exactly that bug).
-            auto* rmodel = dynamic_cast<RenderModel*>(t.model);
-            auto* tweld  = dynamic_cast<TransformModel*>(t.model);
-            const bool parkedNow = doPresent &&
-                ((rmodel && rmodel->engine().parkedLastFrame()) ||
-                 (tweld && tweld->weldedLastFrame()));
-            if (parkedNow) {
-                t.lastSetVirtual.x = r.clickDesktopX + t.mon.x;
-                t.lastSetVirtual.y = r.clickDesktopY + t.mon.y;
+                // SEAMLESS HANDOVER (field report: a bare-desktop frame flashed at the 9x
+                // crossover): the transform keeps the screen magnified while the overlay's
+                // evidence-gated reveal is pending, and RESTS A FEW TICKS AFTER the reveal
+                // lands - the rest write and the alpha flip travel different DWM channels,
+                // so a same-tick rest still left a one-composite unmagnified gap. The
+                // overlap's worst case is a ~14ms over-zoom pulse (still magnified content),
+                // never a bare desktop.
+                t.restAfterReveal = old;
+                t.restOverlapTicks = 0;   // armed when the reveal actually fires
             } else {
-                t.lastSetVirtual = cur;
-            }
-            // Divergence diagnostics (issue #169, diagnostics=1 only): once a second, log how far
-            // the pointer sits from the lens centre and how many ticks drag-followed. If any
-            // oscillation survives the fix, this pinpoints the fighting pair from the field log.
-            if (t.cfg.diagnostics) {
-                const double divX = t.lastSetVirtual.x - (double)(r.clickDesktopX + t.mon.x);
-                const double divY = t.lastSetVirtual.y - (double)(r.clickDesktopY + t.mon.y);
-                const double div = std::sqrt(divX * divX + divY * divY);
-                if (div > t.dbgMaxDivergence) t.dbgMaxDivergence = div;
-                if (dragFollow) t.dbgDragFollowTicks++;
-                const unsigned long long nowD = GetTickCount64();
-                if (nowD - t.dbgDivergenceLogMs >= 1000) {
-                    if (t.dbgDivergenceLogMs != 0) {
-                        wind::Log(wind::LogLevel::Info, "cursor",
-                                  "divergence max=%.0fpx dragFollowTicks=%u lvl=%.2f",
-                                  t.dbgMaxDivergence, t.dbgDragFollowTicks, lvl);
-                    }
-                    t.dbgDivergenceLogMs = nowD;
-                    t.dbgMaxDivergence = 0.0;
-                    t.dbgDragFollowTicks = 0;
+                // render -> transform: activate the transform THIS tick, keep the overlay up
+                // for the same short overlap, then drop it.
+                { wind::SpanScope span_(wind::kSpanActivate); t.model->setActive(true); }
+                // The pan wall and MPO state above were computed for the outgoing render
+                // engine (review 2026-10-09 M2), so this tick's view was mapped without walls.
+                // Give the incoming transform its MPO state now: its write-site backstop then
+                // keeps |translation| under the 16-bit field on this first present (the ghost
+                // is not settled yet, so the backstop is armed at either sampling). The next
+                // tick computes the walls for the transform as usual.
+                if (auto* tmIn = dynamic_cast<TransformModel*>(t.model)) {
+                    const bool exposedIn = !g_mpoDisabled;
+                    tmIn->setMpoBusterWanted(exposedIn && t.cfg.mpoBuster != 0 && !liftIfTransform);
+                    tmIn->setMpoExposed(exposedIn && !liftIfTransform);
                 }
+                t.restAfterReveal = old;
+                t.restOverlapTicks = TicksAtHz(3, t.hz);
+            }
+            // Name the trigger: if another transient surface ever ping-pongs the engine the
+            // way the taskbar flyout did (issue #180), the log identifies it directly.
+            wchar_t fgCls[64]{};
+            if (fgTick) GetClassNameW(fgTick, fgCls, 64);
+            wind::Log(wind::LogLevel::Info, "hybrid",
+                      "instant switch -> %s (level preserved; fg cls=%ls exe=%ls)",
+                      dynamic_cast<RenderModel*>(t.model) ? "render" : "transform",
+                      fgCls, ExeNameOf(fgTick).c_str());
+        }
+    }
+}
+
+// Active tick: build this tick's PresentExtras (outline dwell and idle fade, cursor mode, weld
+// suppression, colour, write pauses, DWM centring) and keep the Inspect freeze.
+static PresentExtras BuildPresentExtras(TickState& t, double lvl, double dt, bool zoomed, bool inspect,
+                                        bool fsGame, bool wallNeeded, bool freeCursor, bool gameCursor,
+                                        bool dragFollow, int curDx, int curDy, int rawDx, int rawDy,
+                                        const MapResult& r) {
+    // Per-tick render-only overrides go through PresentExtras; the model's present() runs
+    // FillRenderParams and applies these on top. ex.outline seeds with the same base value
+    // FillRenderParams would compute, so the dwell/idle logic below reads an identical start.
+    PresentExtras ex;
+    ex.fsGame = fsGame;
+    ex.forceCrop = fsGame && t.cfg.gameCrop != 0;
+    ex.outline = OutlineVisibleAtLevel(t.cfg, lvl);
+    ex.outlineAlpha = 1.0f;
+    ex.cursorMode = CursorModeFromCfg(t.cfg);
+    ex.cursorLocked = false;
+    // Low-zoom dwell: with "only at low zoom" on, show the outline only after the zoom settles
+    // at a STABLE level inside the band for kOutlineDwellSec. "Stable" = the level is unchanged
+    // since last tick (the controller freezes the level exactly when no zoom direction is held),
+    // so an actively-changing level - zooming through the band, or repeatedly nudging in/out -
+    // never accumulates: the countdown starts only once you stop on a level in the band. Any
+    // level change or leaving the band resets it (OutlineDwellSeconds returns 0 when !inBand).
+    // Always-on mode (lowZoomOnly off) is unaffected. The reset also fires on zoom-out to idle
+    // via the teardown branch below, so cycling 1x<->in-band can never bank partial dwell.
+    if (t.cfg.outline != 0 && t.cfg.outlineLowZoomOnly != 0) {
+        const double kOutlineDwellSec = 1.0;
+        bool stable = std::fabs(lvl - t.prevLvl) <= 1e-4;   // level held constant => settled
+        bool inBand = ex.outline && lvl > 1.0 && stable;
+        t.outlineZoneSec = OutlineDwellSeconds(inBand, t.outlineZoneSec, dt, kOutlineDwellSec);
+        if (t.outlineZoneSec < kOutlineDwellSec) ex.outline = false;   // not dwelled long enough yet
+    } else {
+        t.outlineZoneSec = 0.0;   // keep ready for when the cutoff is toggled on mid-session
+    }
+    // Idle-hide fade: when enabled and the outline is visible, accumulate idle time (reset on
+    // any hand motion - free OS-cursor delta or raw mickeys), then map it to the fade alpha.
+    // dt is the per-tick elapsed time computed at the top of RunTick. Fade duration is 0.3s.
+    const bool outlineMoved = (std::abs(curDx) + std::abs(curDy) + std::abs(rawDx) + std::abs(rawDy)) > 0;
+    if (t.cfg.outlineIdleHide && ex.outline) {
+        t.outlineIdleSec = outlineMoved ? 0.0 : (t.outlineIdleSec + dt);
+        ex.outlineAlpha = (float)OutlineIdleAlpha(t.outlineIdleSec, t.cfg.outlineIdleSeconds, 0.3);
+    } else {
+        t.outlineIdleSec = 0.0;   // keep ready for when idle-hide is toggled on mid-session
+    }
+    if (t.cursorHidden) ex.cursorMode = 2;   // hotkey override; CursorModeFromCfg already set 0/1/2 from cfg
+    // cursorMode is now final for this tick; derive drawCursor from it so the transform model
+    // (which only reads drawCursor, not cursorMode - see magnifier_model.h) also honours
+    // cursorVisibility=never and the hide-cursor hotkey. The render model never reads drawCursor
+    // (it reads cursorMode directly via FillRenderParams), so this cannot change render behaviour.
+    ex.drawCursor = (ex.cursorMode != 2);
+    // Drag-follow (issue #169): the pan resolve above chose to follow the pointer this tick, so
+    // neither engine may weld it back to the lens centre - suspend the SetCursorPos.
+    // freeCursor: never weld. The weld is what the whole native-model change removes - with the
+    // view already positioned so the pointer lands centre-screen, SetCursorPos has nothing to
+    // correct and only reintroduces the feedback loop.
+    ex.suppressCursorSync = dragFollow || freeCursor || t.viewDetached;   // tracking never moves the pointer (#276)
+    { wind::SpanScope span_(wind::kSpanColor); UpdateColorFilter(t, lvl > 1.0, RenderOverlayShown(t), &ex); }
+    // Serialize transform writes around an Inspect click's injected absolute move (issue #148
+    // TDR class): the injection and a transform write racing each other is the proven trigger.
+    // The launch quiesce holds writes AND the weld for its whole window (see above).
+    // Deadline-based, so a short press can never strand leftover hold into the next session
+    // (the old tick countdown only decremented while zoomed, which did exactly that).
+    const bool quiesceHold = QuiesceHoldActive(t);
+    ex.pauseWrites = t.clickPauseTicks > 0 || quiesceHold;
+    {
+        auto& zs = g_input.state();
+        ex.zoomDriven = zs.inHeld.load() || zs.outHeld.load() || g_input.anyBoundKeyPressed() ||
+                        t.zoom.hasTarget();
+    }
+    if (quiesceHold) ex.suppressCursorSync = true;
+    // Native cursor (issue #369): DWM may own the pan only where the view is a pure function of
+    // the pointer.
+    {
+        wind::DwmCentreIn dc;
+        dc.zoomed = lvl > 1.001;
+        dc.freeCursor = (freeCursor && !gameCursor && !t.postInspectHold) ||   // #443, #445
+                        wind::InspectKeepsDwmView(inspect, t.inspectLookMoved);   // #445
+        dc.viewDetached = t.viewDetached;
+        dc.wallNeeded = wind::NearWall(wallNeeded, r.srcLeft, r.srcTop, lvl, kMaxSafeTxMagnitude, 64.0);
+        dc.quiesce = quiesceHold;
+        ex.dwmCentre = wind::WantDwmCentring(dc);
+        // Warm pulses wherever Wind, not DWM centring, writes the view: a game-drawn cursor and
+        // the hold after Inspect write it from a free pointer too (review of #444/#446).
+        ex.warmAllowed = !dc.freeCursor;
+    }
+    // Our tray menu is open (in WindTray.exe, flagged through the shared block): the pointer
+    // belongs to the USER (they are aiming at menu items),
+    // so the weld must not re-park it - at full tick rate it pins the cursor outright
+    // (field-reported as a frozen cursor the moment the tray opened). The view keeps panning;
+    // only the cursor re-park is suspended, exactly like drag-follow during a button hold.
+    if (wind::TrayMenuOpen(g_trayBlock)) ex.suppressCursorSync = true;
+    if (t.clickPauseTicks > 0) --t.clickPauseTicks;
+    if (inspect) {
+        if (t.clickReleaseTicks > 0) {
+            // A click was just committed: keep the freeze released for these ticks so the synthesized
+            // absolute click reaches the look point (re-clamping to the 1px frozen rect would send the
+            // click to the frozen point instead). Leave p.clickDesktop at the look point so renderFrame
+            // holds the cursor there for the click; re-freeze once the window elapses.
+            --t.clickReleaseTicks;
+        } else {
+            // Re-assert the freeze (Windows can drop a clip on focus changes) and pin renderFrame's
+            // SetCursorPos at the frozen point (a no-op inside the clip). DEDUPED (issue #148):
+            // ClipCursor is a win32k cursor-subsystem write - the TDR class under an active
+            // fullscreen transform - so it only runs when the read shows the clip was lost.
+            RECT have{}; GetClipCursor(&have);
+            if (have.left != t.frozenCursor.x || have.top != t.frozenCursor.y ||
+                have.right != t.frozenCursor.x + 1 || have.bottom != t.frozenCursor.y + 1) {
+                RECT fz{ t.frozenCursor.x, t.frozenCursor.y, t.frozenCursor.x + 1, t.frozenCursor.y + 1 };
+                ClipCursor(&fz);
+            }
+            ex.clickOverride = true;
+            ex.clickDesktopX = t.frozenCursor.x;
+            ex.clickDesktopY = t.frozenCursor.y;
+        }
+        ex.cursorLocked = true;        // draw the crosshair at the look point (cursorScreen)
+        if (!zoomed) ex.outline = false;   // no lens outline on the 1:1 view at 1x
+    }
+    return ex;
+}
+
+// Active tick: game pacing (reduced-push and timer-paced modes), then the engine present.
+// Returns whether this tick presented.
+static bool PaceAndPresent(TickState& t, PresentExtras& ex, const MapResult& r, double lvl, double dt,
+                           bool zoomed, bool fsGame, bool enterActive) {
+    // Game pacing (issue #148): ONLY for the opt-in knobs. The default zoomed path keeps the
+    // vsync-locked blocking Present - it is what makes panning smooth (refresh-locked cadence),
+    // and at normal GPU priority it blocks a few frames at worst, never wedges. The timer-paced
+    // Present(0,0) + fence-gate mode below exists because lowGpuPriority=1 can starve our GPU
+    // work for MINUTES under a saturated game (a blocking present then wedges input, teardown,
+    // and the cursor restore), and because gameFpsCap needs presents decoupled from ticks. Both
+    // trade present cadence for safety/headroom, so they must never engage by default - an
+    // earlier build enabled this mode for every "foreground covers the monitor" case (which
+    // also matches any MAXIMIZED desktop window) and made panning judder everywhere.
+    // While engaged: the main-loop timer paces (t.gamePacing), presents are Present(0,0)
+    // (ex.noVsync), and renderFrame skips the whole frame while the previous present hasn't
+    // executed on the GPU (ex.gatePresent). Skipped ticks still sample input and advance the
+    // mapper. The activation and reveal-pending ticks always attempt a present (the gated
+    // reveal depends on frames reaching the redirection surface).
+    bool doPresent = true;
+    // Reduced-PUSH game mode (issue #148, measured in Foundation): under a game, DWM
+    // services our redirected window's presents at only ~78/s while compositing at 144/s -
+    // pushing 144 presents/s into that path builds a standing queue, so every Present waits
+    // ~a queue's worth with jitter (the stutter). gameFpsCap>0 over a fullscreen game
+    // presents every Nth vblank instead (N = ceil(hz/cap)), BELOW the service rate, so the
+    // queue stays empty and each present retires on the next composite. Skip ticks block on
+    // IDXGIOutput::WaitForVBlank (in the skip branch below), keeping the loop vblank-locked
+    // with no timer jitter; input/pan still samples every tick. Activation/reveal ticks
+    // always present (the gated reveal needs frames on the redirection surface).
+    const bool capVsync = fsGame && zoomed && t.cfg.gameFpsCap > 0 &&
+                          t.cfg.vsync != 0 && t.cfg.dwmFlush == 0;
+    if (capVsync && !(enterActive || t.revealPending > 0)) {
+        int div = (t.hz + t.cfg.gameFpsCap - 1) / t.cfg.gameFpsCap;   // ceil(hz/cap)
+        if (div < 1) div = 1;
+        if (++t.pushPhase >= div) t.pushPhase = 0;
+        if (t.pushPhase != 0) doPresent = false;
+    } else {
+        t.pushPhase = 0;
+    }
+    const bool gamePacing = fsGame && zoomed && !capVsync &&
+                            (EffectiveGpuPriority(t.cfg) < 0 || t.cfg.gameFpsCap > 0);
+    t.gamePacing = gamePacing;
+    if (gamePacing) {
+        ex.noVsync = true;
+        ex.gatePresent = true;
+        if (t.cfg.gameFpsCap > 0) {
+            const double interval = 1.0 / (double)t.cfg.gameFpsCap;
+            t.presentAccum += dt;
+            if (enterActive || t.revealPending > 0) {
+                t.presentAccum = 0.0;                   // reveal path: present every tick
+            } else if (t.presentAccum >= interval) {
+                t.presentAccum -= interval;
+                if (t.presentAccum > interval) t.presentAccum = interval;  // hitch: no burst catch-up
+            } else {
+                doPresent = false;
             }
         }
-    } else if (t.prevActive) {                        // active -> idle: tear the overlay down
-        // The caret/focus watcher is switched off only from the zoomed view block; a zoom-out that
-        // snaps straight to 1.0 skipped it and left the watcher polling at 1x (#71).
-        { wind::SpanScope span_(wind::kSpanTrack); g_track.setActive(false, t.cfg.trackCaret != 0, t.cfg.trackFocus != 0, t.cfg.trackLog != 0); }
-        if (t.restAfterReveal) { t.restAfterReveal->setActive(false); t.restAfterReveal = nullptr; }
-        // DWM effect back BEFORE the overlay hides: worst case one double-filtered frame, never a
-        // bright unfiltered one (review 2026-09-30).
-        { wind::SpanScope span_(wind::kSpanColor); UpdateColorFilter(t, false, false, nullptr); }
-        LARGE_INTEGER zo0; QueryPerformanceCounter(&zo0);
-        { wind::SpanScope span_(wind::kSpanActivate); t.model->setActive(false); }
-        if (t.cfg.zoomTrace) {
-            LARGE_INTEGER zo1; QueryPerformanceCounter(&zo1);
-            t.zt.outSetActiveMs = QpcMs(t, zo0.QuadPart, zo1.QuadPart); t.zt.outPending = true;
-        }
-        SetSystemCursorHidden(t, t.model, false);
-        t.outlineZoneSec = 0.0;                       // zoom-out clears the low-zoom dwell (no banked partial)
-        t.gamePacing = false;                         // idle: normal timer pacing
-        t.pushPhase = 0;
-        t.presentAccum = 0.0;
-        if (t.prevInspect) {
-            EndGameInspect(t);   // teardown-to-idle exits game-inspect too (foreground returned)
-            ClipCursor(nullptr);
-            // Same phantom-click guard as the zoomed Inspect exit: swallowed-but-undrained clicks
-            // must not survive into the next activation.
-            g_input.state().commitLeft.exchange(0);
-            g_input.state().commitRight.exchange(0);
-            POINT lp{ (int)(t.mapper.centerX() + 0.5) + t.mon.x, (int)(t.mapper.centerY() + 0.5) + t.mon.y };
-            SetCursorPos(lp.x, lp.y);                  // resume at the look point
-            t.lastSetVirtual = lp;
-        }
-        t.revealPending = 0;                          // a quick tap may zoom out before the deferred reveal
-        g_tint.invalidate();                          // the engines put the scheme back: re-tint when idle
     } else {
-        // Idle: let the transform model release its magnification context shortly after a zoom
-        // ends. While a context is alive, DWM composites magnification-aware and every cursor
-        // change an app makes costs a re-composite - a game that toggles its pointer on
-        // middle-click hitches at 1x (issue #148). Both the active model and hybrid's transform
-        // half get the tick (in model=transform the transform IS t.model); others no-op.
-        t.model->idleTick();
-        if (t.mTransform && t.mTransform != t.model) t.mTransform->idleTick();
-        UpdateCursorTint(t);
+        t.presentAccum = 0.0;
     }
-    t.prevLvl = lvl;
-    t.prevActive = active;
-    t.prevInspect = inspect;
+    if (doPresent) {
+        LARGE_INTEGER zp0{}; if (t.zt.armed && t.zt.step == 0) QueryPerformanceCounter(&zp0);
+        { wind::SpanScope span_(wind::kSpanPresent); t.model->present(r, lvl, t.cfg, t.mon, ex); }      // render+present (never blocks the ramp)
+        // The transform model hides and restores the pointer on its own (Inspect exit, the
+        // hide-cursor hotkey), so read its state back: a mirrored flag went stale after both and
+        // made the next Inspect toggle read our own hiding as the app's mouselook tell.
+        if (auto* tm = dynamic_cast<TransformModel*>(t.model)) t.cursorHiddenByUs = tm->pointerHidden();
+        if (t.zt.armed && t.zt.step == 0 && t.zt.presentMs == 0) {
+            LARGE_INTEGER zp1; QueryPerformanceCounter(&zp1); t.zt.presentMs = QpcMs(t, zp0.QuadPart, zp1.QuadPart);
+        }
+    } else if (capVsync) {
+        // Reduced-push skip tick: block to the next vblank so the loop cadence stays
+        // vblank-locked (Present paces the present ticks, this paces the skips). Fallback
+        // sleep if the output can't wait (device transition) so we never spin.
+        if (auto* rm = dynamic_cast<RenderModel*>(t.model)) {
+            if (!rm->waitVBlank()) Sleep(3);
+        }
+    }
+    return doPresent;
+}
 
+// Active tick: the gated reveal after the present (render) or the immediate activation (transform),
+// then the engine-handover overlap countdown.
+static void RevealAndHandover(TickState& t, bool enterActive, bool fsGame) {
+    // Reveal AFTER the live frame is presented: setVisible flips the layer alpha over the
+    // now-current front buffer, so the overlay never shows its retained previous-session
+    // frame (the alt-tab "previous window"). capture() also drained to the latest frame.
+    // Reveal/prime is render-specific (needs ForegroundCoversMonitor + capture priming); guard it
+    // behind the RenderModel downcast. A non-render model just reveals immediately on activation.
+    if (auto* rm = dynamic_cast<RenderModel*>(t.model)) {
+        if (enterActive) {
+            // EVERY reveal is gated on the session's first Present having EXECUTED on the GPU
+            // (revealFrameDone: an event query fenced right after Present). The blt into the
+            // layered redirection surface is GPU work, but the alpha flip is a CPU call DWM
+            // honours at its next composite - under GPU load the flip won that race and DWM
+            // composited the surface's RETAINED frame: the last thing the PREVIOUS zoom
+            // session presented (issue #140, second mechanism; the first was capture-side).
+            // A fullscreen app (game on an independent-flip/MPO plane, issue #90) additionally
+            // needs a post-prime composite in the capture (frameCompositedSincePrime), since
+            // Desktop Duplication can't see the game until the alpha-1 prime forces DWM to
+            // composite it. All non-blocking - the smooth-zoom ramp runs undisturbed;
+            // revealPending is only the fallback cap (~250 ms) so nothing can wedge the reveal.
+            t.revealNeedsComposite = fsGame;   // same ForegroundCoversMonitor read, this tick
+            if (t.revealNeedsComposite) rm->primeReveal();
+            t.revealPending = (t.hz > 0 ? t.hz : 60) / 4;
+            if (t.revealPending < 2) t.revealPending = 2;
+            // Ordinary desktop zoom-in: spin a tiny budget on the fence so the idle-GPU common
+            // case still reveals within this same tick (the instant feel is kept); a loaded
+            // GPU misses the budget and defers to the per-tick checks below.
+            if (!t.revealNeedsComposite && rm->revealFrameDone(3.0)) {
+                { wind::SpanScope span_(wind::kSpanActivate); rm->setActive(true); }
+                t.revealPending = 0;
+                // Real-time overlap, same as the render -> transform path (issue #274):
+                // raw ticks were right only at 144 Hz.
+                if (t.restAfterReveal) t.restOverlapTicks = TicksAtHz(3, t.hz);
+            }
+        } else if (t.revealPending > 0) {
+            --t.revealPending;
+            const bool frameDone  = rm->revealFrameDone();
+            const bool composited = !t.revealNeedsComposite || rm->frameCompositedSincePrime();
+            if ((frameDone && composited) || t.revealPending == 0) {
+                { wind::SpanScope span_(wind::kSpanActivate); rm->setActive(true); }
+                wind::Log(wind::LogLevel::Info, "render",
+                          "deferred reveal: frameDone=%d composited=%d ticksLeft=%d",
+                          (int)frameDone, (int)composited, t.revealPending);
+                t.revealPending = 0;
+                // Real-time overlap, same as the render -> transform path (issue #274):
+                // raw ticks were right only at 144 Hz.
+                if (t.restAfterReveal) t.restOverlapTicks = TicksAtHz(3, t.hz);
+            }
+        }
+    } else if (enterActive) {
+        LARGE_INTEGER zs0; QueryPerformanceCounter(&zs0);
+        { wind::SpanScope span_(wind::kSpanActivate); t.model->setActive(true); }   // transform: reveal immediately, no capture priming
+        if (t.zt.armed) {
+            LARGE_INTEGER zs1; QueryPerformanceCounter(&zs1); t.zt.setActiveMs = QpcMs(t, zs0.QuadPart, zs1.QuadPart);
+            if (auto* tm = dynamic_cast<TransformModel*>(t.model)) {
+                const auto sp = tm->lastEnter(); t.zt.ensureMs = sp.ensureMagMs;
+            }
+            DWM_TIMING_INFO ti{}; ti.cbSize = sizeof(ti);   // the composite count the first write must beat
+            if (SUCCEEDED(DwmGetCompositionTimingInfo(nullptr, &ti))) t.zt.cFrame0 = ti.cFrame;
+        }
+    }
+    // Handover overlap: the outgoing engine rests a few ticks after the incoming one is
+    // live, so the crossover never composites a bare unmagnified frame (see instant switch).
+    if (t.restAfterReveal && t.restOverlapTicks > 0 && --t.restOverlapTicks == 0) {
+        { wind::SpanScope span_(wind::kSpanActivate); t.restAfterReveal->setActive(false); }
+        t.restAfterReveal = nullptr;
+        // The render overlay just left the screen: the DWM effect takes the colour back THIS
+        // tick, not next tick's top-of-tick call (a one-frame unfiltered flash otherwise).
+        { wind::SpanScope span_(wind::kSpanColor); UpdateColorFilter(t, true, RenderOverlayShown(t), nullptr); }
+    }
+}
+
+// Active tick: execute or re-assert the game-inspect foreground steal.
+static void AssertGameInspectSteal(TickState& t, bool inspect) {
+    // Execute the deferred game-inspect steal now that the reveal logic has read the true
+    // foreground, and RE-assert it if the game pulled foreground back mid-inspect (some
+    // engines re-grab on their own timers; a user alt-tab to a THIRD app is respected).
+    // If the steal fails (unsigned dev build denied by the foreground lock), drop back to
+    // normal inspect: the camera moves again, but the state is never inconsistent.
+    if (inspect && t.inspectGame) {
+        HWND fg = GetForegroundWindow();
+        bool wantSteal = t.inspectStealPending || (t.inspectPrevFg && fg == t.inspectPrevFg);
+        t.inspectStealPending = false;
+        if (wantSteal && !StealForeground(EnsureFocusStealer(t.mon))) {
+            wind::Log(wind::LogLevel::Warn, "inspect",
+                      "game-inspect: foreground steal failed; falling back to normal inspect");
+            t.inspectGame = false;
+            t.inspectPrevFg = nullptr;
+        }
+    }
+}
+
+// Active tick: the measured cursor baseline for the next tick's delta, plus the divergence
+// diagnostics (diagnostics=1).
+static void UpdateCursorBaseline(TickState& t, bool inspect, bool doPresent, bool dragFollow, double lvl,
+                                 const POINT& cur, const MapResult& r) {
+    // Bookkeeping for next tick's GetCursorPos delta. INSPECT keeps the explicit frozen point
+    // (the 1px clip pins the pointer there; explicit is immune to the click-release window).
+    // Everything else uses a MEASURED read (issue #169) - the baseline must be where the
+    // pointer actually IS after this tick's present, never where we intended to put it:
+    //  - welded (render park OR transform weld; both report whether SetCursorPos REALLY ran
+    //    this frame): the call is synchronous, so the read equals the park/weld point -
+    //    identical to the old assumed baseline.
+    //  - weld deduped/suppressed (unchanged centre pixel, drag-follow, gatePresent or
+    //    fps-cap skip ticks): the old code assumed the park landed anyway and baselined on
+    //    the lens centre. The next delta then measured hand + (pointer - centre) gap, the
+    //    mapper integrated the gap, the centre overshot the pointer, and the sign flipped
+    //    every tick: an unstable servo, oscillating with amplitude proportional to hand
+    //    speed. That was the #169 window-drag flicker - and, before the transform weld was
+    //    recognized here, the #181 corner drift in transform game sessions.
+    if (inspect) {
+        t.lastSetVirtual = t.frozenCursor;
+    } else {
+        // Parked -> the park point: hand motion after the park (including during the Present
+        // block) is measured next tick from there. Not parked (weld deduped/suppressed,
+        // transform FOLLOW, skipped frame) -> THIS tick's start-of-tick read `cur`: motion
+        // after that read is measured next tick. NEVER a fresh post-present read - Present
+        // blocks ~a frame at vsync, and a read taken after it swallows all hand motion that
+        // occurred during the block, so the lens pans slower than the hand and the weld drags
+        // the pointer backwards (field-reported as stalling/slowed cursor; first shipped
+        // version of this fix had exactly that bug).
+        auto* rmodel = dynamic_cast<RenderModel*>(t.model);
+        auto* tweld  = dynamic_cast<TransformModel*>(t.model);
+        const bool parkedNow = doPresent &&
+            ((rmodel && rmodel->engine().parkedLastFrame()) ||
+             (tweld && tweld->weldedLastFrame()));
+        if (parkedNow) {
+            t.lastSetVirtual.x = r.clickDesktopX + t.mon.x;
+            t.lastSetVirtual.y = r.clickDesktopY + t.mon.y;
+        } else {
+            t.lastSetVirtual = cur;
+        }
+        // Divergence diagnostics (issue #169, diagnostics=1 only): once a second, log how far
+        // the pointer sits from the lens centre and how many ticks drag-followed. If any
+        // oscillation survives the fix, this pinpoints the fighting pair from the field log.
+        if (t.cfg.diagnostics) {
+            const double divX = t.lastSetVirtual.x - (double)(r.clickDesktopX + t.mon.x);
+            const double divY = t.lastSetVirtual.y - (double)(r.clickDesktopY + t.mon.y);
+            const double div = std::sqrt(divX * divX + divY * divY);
+            if (div > t.dbgMaxDivergence) t.dbgMaxDivergence = div;
+            if (dragFollow) t.dbgDragFollowTicks++;
+            const unsigned long long nowD = GetTickCount64();
+            if (nowD - t.dbgDivergenceLogMs >= 1000) {
+                if (t.dbgDivergenceLogMs != 0) {
+                    wind::Log(wind::LogLevel::Info, "cursor",
+                              "divergence max=%.0fpx dragFollowTicks=%u lvl=%.2f",
+                              t.dbgMaxDivergence, t.dbgDragFollowTicks, lvl);
+                }
+                t.dbgDivergenceLogMs = nowD;
+                t.dbgMaxDivergence = 0.0;
+                t.dbgDragFollowTicks = 0;
+            }
+        }
+    }
+}
+
+// Session exit (active -> idle): tear the overlay down, restore the cursor and leave Inspect.
+static void TeardownSession(TickState& t) {
+    // The caret/focus watcher is switched off only from the zoomed view block; a zoom-out that
+    // snaps straight to 1.0 skipped it and left the watcher polling at 1x (#71).
+    { wind::SpanScope span_(wind::kSpanTrack); g_track.setActive(false, t.cfg.trackCaret != 0, t.cfg.trackFocus != 0, t.cfg.trackLog != 0); }
+    if (t.restAfterReveal) { t.restAfterReveal->setActive(false); t.restAfterReveal = nullptr; }
+    // DWM effect back BEFORE the overlay hides: worst case one double-filtered frame, never a
+    // bright unfiltered one (review 2026-09-30).
+    { wind::SpanScope span_(wind::kSpanColor); UpdateColorFilter(t, false, false, nullptr); }
+    LARGE_INTEGER zo0; QueryPerformanceCounter(&zo0);
+    { wind::SpanScope span_(wind::kSpanActivate); t.model->setActive(false); }
+    if (t.cfg.zoomTrace) {
+        LARGE_INTEGER zo1; QueryPerformanceCounter(&zo1);
+        t.zt.outSetActiveMs = QpcMs(t, zo0.QuadPart, zo1.QuadPart); t.zt.outPending = true;
+    }
+    SetSystemCursorHidden(t, t.model, false);
+    t.outlineZoneSec = 0.0;                       // zoom-out clears the low-zoom dwell (no banked partial)
+    t.gamePacing = false;                         // idle: normal timer pacing
+    t.pushPhase = 0;
+    t.presentAccum = 0.0;
+    if (t.prevInspect) {
+        EndGameInspect(t);   // teardown-to-idle exits game-inspect too (foreground returned)
+        ClipCursor(nullptr);
+        // Same phantom-click guard as the zoomed Inspect exit: swallowed-but-undrained clicks
+        // must not survive into the next activation.
+        g_input.state().commitLeft.exchange(0);
+        g_input.state().commitRight.exchange(0);
+        POINT lp{ (int)(t.mapper.centerX() + 0.5) + t.mon.x, (int)(t.mapper.centerY() + 0.5) + t.mon.y };
+        SetCursorPos(lp.x, lp.y);                  // resume at the look point
+        t.lastSetVirtual = lp;
+    }
+    t.revealPending = 0;                          // a quick tap may zoom out before the deferred reveal
+    g_tint.invalidate();                          // the engines put the scheme back: re-tint when idle
+}
+
+// Idle tick (1x, no Inspect): engine idle work and the 1x cursor tint.
+static void IdleTick(TickState& t) {
+    // Idle: let the transform model release its magnification context shortly after a zoom
+    // ends. While a context is alive, DWM composites magnification-aware and every cursor
+    // change an app makes costs a re-composite - a game that toggles its pointer on
+    // middle-click hitches at 1x (issue #148). Both the active model and hybrid's transform
+    // half get the tick (in model=transform the transform IS t.model); others no-op.
+    t.model->idleTick();
+    if (t.mTransform && t.mTransform != t.model) t.mTransform->idleTick();
+    UpdateCursorTint(t);
+}
+
+// Active tick (zoomed or Inspect): the session phases in order, from the enter/Inspect edges to
+// the measured baseline for the next tick. rawDx/rawDy are this tick's raw motion (Inspect entry
+// zeroes the local copy).
+static void RunActiveTick(TickState& t, double lvl, double dt, bool zoomed, bool inspect, bool recenter,
+                          bool panArmed, bool kbHook, int rawDx, int rawDy) {
+    bool enterActive  = !t.prevActive;            // idle -> active (overlay just turned on)
+    bool inspectEnter = inspect && !t.prevInspect;
+    if (enterActive) {
+        EnterSession(t, zoomed, inspect);
+    }
+    if (inspectEnter) {
+        EnterInspect(t, zoomed, rawDx, rawDy);
+    }
+    bool inspectExit = !inspect && t.prevInspect;   // Inspect just turned off but overlay stays (zoomed)
+    if (inspectExit) {
+        ExitInspect(t);
+    }
+    if (recenter) { POINT pt; GetCursorPos(&pt); t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y); t.lastSetVirtual = pt; }
+    const PanDelta pd = ResolvePanDelta(t, inspect, lvl, dt, rawDx, rawDy);
+    POINT cur = pd.cur;
+    const int curDx = pd.curDx, curDy = pd.curDy;
+    const int dx = pd.dx, dy = pd.dy;
+    const bool dragFollow = pd.dragFollow;
+    const TickForeground tf = ReadForegroundAndArmWall(t, lvl);
+    const HWND fgTick = tf.fgTick;
+    const bool fsCover = tf.fsCover, fgBorderless = tf.fgBorderless;
+    const bool wallNeeded = tf.wallNeeded, liftIfTransform = tf.liftIfTransform;
+    const PointerMap pm = MapPointer(t, inspect, lvl, dt, fsCover, cur, curDx, curDy, dx, dy);
+    const bool freeCursor = pm.freeCursor, gameCursor = pm.gameCursor;
+    MapResult r = pm.r;
+    StepTracking(t, lvl, inspect, fsCover, panArmed, kbHook, dt, wallNeeded, cur, curDx, curDy, r);
+    ProbeClicks(t, lvl, cur, r);
+    CommitInspectClicks(t, r);
+    // Fullscreen-game tell for the per-tick perf levers (issue #148): crop the capture copy to
+    // the magnified region (gameCrop), skip the periodic topmost backstop, and optionally cap
+    // our own present rate (gameFpsCap). fgTick/fsCover/fgBorderless were read once above.
+    const bool fsGame = fsCover;
+    InstantHybridSwitch(t, enterActive, inspect, fgTick, fsCover, fgBorderless, liftIfTransform);
+    PresentExtras ex = BuildPresentExtras(t, lvl, dt, zoomed, inspect, fsGame, wallNeeded, freeCursor,
+                                          gameCursor, dragFollow, curDx, curDy, rawDx, rawDy, r);
+    const bool doPresent = PaceAndPresent(t, ex, r, lvl, dt, zoomed, fsGame, enterActive);
+    RevealAndHandover(t, enterActive, fsGame);
+    AssertGameInspectSteal(t, inspect);
+    UpdateCursorBaseline(t, inspect, doPresent, dragFollow, lvl, cur, r);
+}
+
+// Tick diagnostics: the held-state timeline (issue #113 / #167).
+static void LogHeldState(TickState& t, bool inHeld, bool outHeld, double lvl, double dt) {
     // Diagnostics (issue #113): log the side-button held-state timeline so the intermittent stuck can
     // be diagnosed from the log. On every rise/fall, dump the hook + Raw Input event counters and the
     // held duration; a stuck shows as a rise with no matching fall (and the next event only on
     // re-click). Also WARN once if a hold overstays (first line at 10 s, then every 5 s; well past any hold-to-zoom, which caps in
     // ~2 s) - that line, with static counters, pinpoints a stuck episode. Edges/overstay only, so
     // Log() is never hit on the per-frame path.
-    {
-        auto& st = g_input.state();
-        auto snap = [&](const char* tag, bool held, bool& prev, double& secs) {
-            if (held != prev) {
-                // Edge: `secs` still holds the accumulated duration (meaningful on a fall; ~0 on a rise).
-                wind::Log(wind::LogLevel::Info, "input",
-                          "%sHeld %d->%d held=%.2fs hook[d=%u u=%u dbl=%u / d=%u u=%u dbl=%u] raw[d=%u u=%u / d=%u u=%u] hookActive=%d lvl=%.2f",
-                          tag, prev ? 1 : 0, held ? 1 : 0, secs,
-                          st.dbgHookDown[1].load(), st.dbgHookUp[1].load(), st.dbgHookDbl[1].load(),
-                          st.dbgHookDown[2].load(), st.dbgHookUp[2].load(), st.dbgHookDbl[2].load(),
-                          st.dbgRawDown[1].load(), st.dbgRawUp[1].load(),
-                          st.dbgRawDown[2].load(), st.dbgRawUp[2].load(),
-                          g_input.hookActive() ? 1 : 0, lvl);
-                prev = held;
-            // Re-fire every 5 s while a hold overstays, not once. A stuck hold has no falling edge,
-            // so a single sample can never show HOW FAST the runaway zoom is climbing - and that
-            // rate (reported slower than the configured zoomInSpeed) is the open half of #167. A
-            // series of lvl= samples 5 s apart makes it computable from the log. Gated on the
-            // 5 s window rather than a flag, so it costs no extra state and cannot spam per tick.
-            } else if (held && secs > 6.0 &&
-                       static_cast<int>(secs / 5.0) != static_cast<int>((secs - dt) / 5.0)) {
-                wind::Log(wind::LogLevel::Warn, "input",
-                          "%sHeld STUCK? held=%.1fs hook[d=%u u=%u dbl=%u / d=%u u=%u dbl=%u] raw[d=%u u=%u / d=%u u=%u] lvl=%.2f",
-                          tag, secs,
-                          st.dbgHookDown[1].load(), st.dbgHookUp[1].load(), st.dbgHookDbl[1].load(),
-                          st.dbgHookDown[2].load(), st.dbgHookUp[2].load(), st.dbgHookDbl[2].load(),
-                          st.dbgRawDown[1].load(), st.dbgRawUp[1].load(),
-                          st.dbgRawDown[2].load(), st.dbgRawUp[2].load(), lvl);
-            }
-            // Accumulate AFTER edge handling so a fall reports the pre-reset duration; cleared at 0 when up.
-            secs = held ? (secs + dt) : 0.0;
-        };
-        // Watch the EFFECTIVE held state - side-buttons OR keyboard binds - not just the
-        // side-button half (issue #167). A stuck KEYBOARD bind drove a runaway zoom that this
-        // detector could not see, which is why episodes of #167 never left a STUCK? line in the
-        // log despite being hit repeatedly. inHeld/outHeld are the same values that drive the
-        // zoom, so the diagnostic now reports what actually happened rather than half of it.
-        snap("in",  inHeld,  t.dbgPrevInHeld,  t.dbgInHeldSec);
-        snap("out", outHeld, t.dbgPrevOutHeld, t.dbgOutHeldSec);
-    }
+    auto& st = g_input.state();
+    auto snap = [&](const char* tag, bool held, bool& prev, double& secs) {
+        if (held != prev) {
+            // Edge: `secs` still holds the accumulated duration (meaningful on a fall; ~0 on a rise).
+            wind::Log(wind::LogLevel::Info, "input",
+                      "%sHeld %d->%d held=%.2fs hook[d=%u u=%u dbl=%u / d=%u u=%u dbl=%u] raw[d=%u u=%u / d=%u u=%u] hookActive=%d lvl=%.2f",
+                      tag, prev ? 1 : 0, held ? 1 : 0, secs,
+                      st.dbgHookDown[1].load(), st.dbgHookUp[1].load(), st.dbgHookDbl[1].load(),
+                      st.dbgHookDown[2].load(), st.dbgHookUp[2].load(), st.dbgHookDbl[2].load(),
+                      st.dbgRawDown[1].load(), st.dbgRawUp[1].load(),
+                      st.dbgRawDown[2].load(), st.dbgRawUp[2].load(),
+                      g_input.hookActive() ? 1 : 0, lvl);
+            prev = held;
+        // Re-fire every 5 s while a hold overstays, not once. A stuck hold has no falling edge,
+        // so a single sample can never show HOW FAST the runaway zoom is climbing - and that
+        // rate (reported slower than the configured zoomInSpeed) is the open half of #167. A
+        // series of lvl= samples 5 s apart makes it computable from the log. Gated on the
+        // 5 s window rather than a flag, so it costs no extra state and cannot spam per tick.
+        } else if (held && secs > 6.0 &&
+                   static_cast<int>(secs / 5.0) != static_cast<int>((secs - dt) / 5.0)) {
+            wind::Log(wind::LogLevel::Warn, "input",
+                      "%sHeld STUCK? held=%.1fs hook[d=%u u=%u dbl=%u / d=%u u=%u dbl=%u] raw[d=%u u=%u / d=%u u=%u] lvl=%.2f",
+                      tag, secs,
+                      st.dbgHookDown[1].load(), st.dbgHookUp[1].load(), st.dbgHookDbl[1].load(),
+                      st.dbgHookDown[2].load(), st.dbgHookUp[2].load(), st.dbgHookDbl[2].load(),
+                      st.dbgRawDown[1].load(), st.dbgRawUp[1].load(),
+                      st.dbgRawDown[2].load(), st.dbgRawUp[2].load(), lvl);
+        }
+        // Accumulate AFTER edge handling so a fall reports the pre-reset duration; cleared at 0 when up.
+        secs = held ? (secs + dt) : 0.0;
+    };
+    // Watch the EFFECTIVE held state - side-buttons OR keyboard binds - not just the
+    // side-button half (issue #167). A stuck KEYBOARD bind drove a runaway zoom that this
+    // detector could not see, which is why episodes of #167 never left a STUCK? line in the
+    // log despite being hit repeatedly. inHeld/outHeld are the same values that drive the
+    // zoom, so the diagnostic now reports what actually happened rather than half of it.
+    snap("in",  inHeld,  t.dbgPrevInHeld,  t.dbgInHeldSec);
+    snap("out", outHeld, t.dbgPrevOutHeld, t.dbgOutHeldSec);
+}
 
+// Tick diagnostics: frame-pacing stats (diagnostics=1).
+static void LogFramePacing(TickState& t, double lvl, double dt, bool woke) {
     // Frame-pacing diagnostics: a 2 s window of loop-interval stats (dt = time between ticks =
     // the on-screen frame interval, since Present(1,0) paces while zoomed). maxDt and the hitch
     // count expose microstutter that an average would hide.
@@ -2715,7 +2879,10 @@ static void RunTick(TickState& t) {
             t.diagFrames = 0; t.diagHitches = 0;
         }
     }
+}
 
+// Tick diagnostics: the proving-ground telemetry sample (WIND_TESTLOG).
+static void WriteTestTelemetry(TickState& t, const LARGE_INTEGER& now, double dt, bool active, double lvl) {
     // Test telemetry (issue #225): one CSV sample per tick when the harness enabled it. The
     // engine queries run only on this path - the disabled cost is the single enabled() branch.
     if (g_testlog.enabled()) {
@@ -2738,6 +2905,45 @@ static void RunTick(TickState& t) {
         }
         g_testlog.write(s);
     }
+}
+
+static void RunTick(TickState& t) {
+    TickWorkTimer workTimer(t);
+    const TickClock clk = BeginTick(t);
+    const LARGE_INTEGER now = clk.now;
+    const double dt = clk.dt, rawDt = clk.rawDt;
+    const bool woke = clk.woke;
+
+    PollConfigReload(t, rawDt);
+
+    WatchForegroundAndKbHook(t);
+    const TickInput in = ResolveInputAndZoom(t, dt);
+    const bool kbHook = in.kbHook;
+    const bool inHeld = in.inHeld, outHeld = in.outHeld;
+    const bool recenter = in.recenter;
+    const double lvl = in.lvl;
+
+    const TickModes md = ResolveTickModes(t, lvl, now);
+    const int rawDx = md.rawDx, rawDy = md.rawDy;
+    const bool zoomed = md.zoomed, inspect = md.inspect, active = md.active;
+    const bool panArmed = md.panArmed;
+
+    if (active) {
+        RunActiveTick(t, lvl, dt, zoomed, inspect, recenter, panArmed, kbHook, rawDx, rawDy);
+    } else if (t.prevActive) {                        // active -> idle: tear the overlay down
+        TeardownSession(t);
+    } else {
+        IdleTick(t);
+    }
+    t.prevLvl = lvl;
+    t.prevActive = active;
+    t.prevInspect = inspect;
+
+    LogHeldState(t, inHeld, outHeld, lvl, dt);
+
+    LogFramePacing(t, lvl, dt, woke);
+
+    WriteTestTelemetry(t, now, dt, active, lvl);
 }
 
 // Message-handler: decodes raw mouse movement (survives cursor lock) and routes tray msgs.

@@ -191,7 +191,7 @@ channels and on the plain desktop too. With MPO disabled
 Smooth sampling takes a float path and survives the same corner, as does the built-in Magnifier,
 which samples smooth.
 
-Defences (wall arming in `RunTick`, write clamp in `TransformModel::writeSiteTransform`):
+Defences (wall arming in `RunTick`'s `ReadForegroundAndArmWall`, write clamp in `TransformModel::writeSiteTransform`):
 
 | MPO at boot | Sampling | Pan walls (`setMaxSourceLeft/Top`, `|src*level| <= 32000`) |
 |---|---|---|

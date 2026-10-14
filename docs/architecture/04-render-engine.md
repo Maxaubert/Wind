@@ -11,8 +11,9 @@ for it ([03](03-engines.md)).
 
 `RenderEngine` (`src/render_engine.h`) is a PIMPL class; D3D and DXGI headers stay in
 `src/render_engine.cpp`. `RenderModel` (`src/render_model.cpp`) adapts it to `IMagnifierModel`.
-`RunTick` owns activation and reveal, because they need facts the engine does not have (does the
-foreground cover the monitor, is this the idle-to-active edge).
+`RunTick` owns activation and reveal (`EnterSession`, `RevealAndHandover` in `src/main.cpp`),
+because they need facts the engine does not have (does the foreground cover the monitor, is this
+the idle-to-active edge).
 
 Per frame, `renderFrame(RenderFrameParams)` captures if the desktop changed, draws three passes
 (magnify, outline, cursor) and presents. The view is a float source rect (`srcLeft`/`srcTop` plus
