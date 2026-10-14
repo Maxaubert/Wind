@@ -2551,6 +2551,79 @@ static bool PaceAndPresent(TickState& t, PresentExtras& ex, const MapResult& r, 
     return doPresent;
 }
 
+// Active tick: the gated reveal after the present (render) or the immediate activation (transform),
+// then the engine-handover overlap countdown.
+static void RevealAndHandover(TickState& t, bool enterActive, bool fsGame) {
+    // Reveal AFTER the live frame is presented: setVisible flips the layer alpha over the
+    // now-current front buffer, so the overlay never shows its retained previous-session
+    // frame (the alt-tab "previous window"). capture() also drained to the latest frame.
+    // Reveal/prime is render-specific (needs ForegroundCoversMonitor + capture priming); guard it
+    // behind the RenderModel downcast. A non-render model just reveals immediately on activation.
+    if (auto* rm = dynamic_cast<RenderModel*>(t.model)) {
+        if (enterActive) {
+            // EVERY reveal is gated on the session's first Present having EXECUTED on the GPU
+            // (revealFrameDone: an event query fenced right after Present). The blt into the
+            // layered redirection surface is GPU work, but the alpha flip is a CPU call DWM
+            // honours at its next composite - under GPU load the flip won that race and DWM
+            // composited the surface's RETAINED frame: the last thing the PREVIOUS zoom
+            // session presented (issue #140, second mechanism; the first was capture-side).
+            // A fullscreen app (game on an independent-flip/MPO plane, issue #90) additionally
+            // needs a post-prime composite in the capture (frameCompositedSincePrime), since
+            // Desktop Duplication can't see the game until the alpha-1 prime forces DWM to
+            // composite it. All non-blocking - the smooth-zoom ramp runs undisturbed;
+            // revealPending is only the fallback cap (~250 ms) so nothing can wedge the reveal.
+            t.revealNeedsComposite = fsGame;   // same ForegroundCoversMonitor read, this tick
+            if (t.revealNeedsComposite) rm->primeReveal();
+            t.revealPending = (t.hz > 0 ? t.hz : 60) / 4;
+            if (t.revealPending < 2) t.revealPending = 2;
+            // Ordinary desktop zoom-in: spin a tiny budget on the fence so the idle-GPU common
+            // case still reveals within this same tick (the instant feel is kept); a loaded
+            // GPU misses the budget and defers to the per-tick checks below.
+            if (!t.revealNeedsComposite && rm->revealFrameDone(3.0)) {
+                { wind::SpanScope span_(wind::kSpanActivate); rm->setActive(true); }
+                t.revealPending = 0;
+                // Real-time overlap, same as the render -> transform path (issue #274):
+                // raw ticks were right only at 144 Hz.
+                if (t.restAfterReveal) t.restOverlapTicks = TicksAtHz(3, t.hz);
+            }
+        } else if (t.revealPending > 0) {
+            --t.revealPending;
+            const bool frameDone  = rm->revealFrameDone();
+            const bool composited = !t.revealNeedsComposite || rm->frameCompositedSincePrime();
+            if ((frameDone && composited) || t.revealPending == 0) {
+                { wind::SpanScope span_(wind::kSpanActivate); rm->setActive(true); }
+                wind::Log(wind::LogLevel::Info, "render",
+                          "deferred reveal: frameDone=%d composited=%d ticksLeft=%d",
+                          (int)frameDone, (int)composited, t.revealPending);
+                t.revealPending = 0;
+                // Real-time overlap, same as the render -> transform path (issue #274):
+                // raw ticks were right only at 144 Hz.
+                if (t.restAfterReveal) t.restOverlapTicks = TicksAtHz(3, t.hz);
+            }
+        }
+    } else if (enterActive) {
+        LARGE_INTEGER zs0; QueryPerformanceCounter(&zs0);
+        { wind::SpanScope span_(wind::kSpanActivate); t.model->setActive(true); }   // transform: reveal immediately, no capture priming
+        if (t.zt.armed) {
+            LARGE_INTEGER zs1; QueryPerformanceCounter(&zs1); t.zt.setActiveMs = QpcMs(t, zs0.QuadPart, zs1.QuadPart);
+            if (auto* tm = dynamic_cast<TransformModel*>(t.model)) {
+                const auto sp = tm->lastEnter(); t.zt.ensureMs = sp.ensureMagMs;
+            }
+            DWM_TIMING_INFO ti{}; ti.cbSize = sizeof(ti);   // the composite count the first write must beat
+            if (SUCCEEDED(DwmGetCompositionTimingInfo(nullptr, &ti))) t.zt.cFrame0 = ti.cFrame;
+        }
+    }
+    // Handover overlap: the outgoing engine rests a few ticks after the incoming one is
+    // live, so the crossover never composites a bare unmagnified frame (see instant switch).
+    if (t.restAfterReveal && t.restOverlapTicks > 0 && --t.restOverlapTicks == 0) {
+        { wind::SpanScope span_(wind::kSpanActivate); t.restAfterReveal->setActive(false); }
+        t.restAfterReveal = nullptr;
+        // The render overlay just left the screen: the DWM effect takes the colour back THIS
+        // tick, not next tick's top-of-tick call (a one-frame unfiltered flash otherwise).
+        { wind::SpanScope span_(wind::kSpanColor); UpdateColorFilter(t, true, RenderOverlayShown(t), nullptr); }
+    }
+}
+
 static void RunTick(TickState& t) {
     TickWorkTimer workTimer(t);
     const TickClock clk = BeginTick(t);
@@ -2609,74 +2682,7 @@ static void RunTick(TickState& t) {
         PresentExtras ex = BuildPresentExtras(t, lvl, dt, zoomed, inspect, fsGame, wallNeeded, freeCursor,
                                               gameCursor, dragFollow, curDx, curDy, rawDx, rawDy, r);
         const bool doPresent = PaceAndPresent(t, ex, r, lvl, dt, zoomed, fsGame, enterActive);
-        // Reveal AFTER the live frame is presented: setVisible flips the layer alpha over the
-        // now-current front buffer, so the overlay never shows its retained previous-session
-        // frame (the alt-tab "previous window"). capture() also drained to the latest frame.
-        // Reveal/prime is render-specific (needs ForegroundCoversMonitor + capture priming); guard it
-        // behind the RenderModel downcast. A non-render model just reveals immediately on activation.
-        if (auto* rm = dynamic_cast<RenderModel*>(t.model)) {
-            if (enterActive) {
-                // EVERY reveal is gated on the session's first Present having EXECUTED on the GPU
-                // (revealFrameDone: an event query fenced right after Present). The blt into the
-                // layered redirection surface is GPU work, but the alpha flip is a CPU call DWM
-                // honours at its next composite - under GPU load the flip won that race and DWM
-                // composited the surface's RETAINED frame: the last thing the PREVIOUS zoom
-                // session presented (issue #140, second mechanism; the first was capture-side).
-                // A fullscreen app (game on an independent-flip/MPO plane, issue #90) additionally
-                // needs a post-prime composite in the capture (frameCompositedSincePrime), since
-                // Desktop Duplication can't see the game until the alpha-1 prime forces DWM to
-                // composite it. All non-blocking - the smooth-zoom ramp runs undisturbed;
-                // revealPending is only the fallback cap (~250 ms) so nothing can wedge the reveal.
-                t.revealNeedsComposite = fsGame;   // same ForegroundCoversMonitor read, this tick
-                if (t.revealNeedsComposite) rm->primeReveal();
-                t.revealPending = (t.hz > 0 ? t.hz : 60) / 4;
-                if (t.revealPending < 2) t.revealPending = 2;
-                // Ordinary desktop zoom-in: spin a tiny budget on the fence so the idle-GPU common
-                // case still reveals within this same tick (the instant feel is kept); a loaded
-                // GPU misses the budget and defers to the per-tick checks below.
-                if (!t.revealNeedsComposite && rm->revealFrameDone(3.0)) {
-                    { wind::SpanScope span_(wind::kSpanActivate); rm->setActive(true); }
-                    t.revealPending = 0;
-                    // Real-time overlap, same as the render -> transform path (issue #274):
-                    // raw ticks were right only at 144 Hz.
-                    if (t.restAfterReveal) t.restOverlapTicks = TicksAtHz(3, t.hz);
-                }
-            } else if (t.revealPending > 0) {
-                --t.revealPending;
-                const bool frameDone  = rm->revealFrameDone();
-                const bool composited = !t.revealNeedsComposite || rm->frameCompositedSincePrime();
-                if ((frameDone && composited) || t.revealPending == 0) {
-                    { wind::SpanScope span_(wind::kSpanActivate); rm->setActive(true); }
-                    wind::Log(wind::LogLevel::Info, "render",
-                              "deferred reveal: frameDone=%d composited=%d ticksLeft=%d",
-                              (int)frameDone, (int)composited, t.revealPending);
-                    t.revealPending = 0;
-                    // Real-time overlap, same as the render -> transform path (issue #274):
-                    // raw ticks were right only at 144 Hz.
-                    if (t.restAfterReveal) t.restOverlapTicks = TicksAtHz(3, t.hz);
-                }
-            }
-        } else if (enterActive) {
-            LARGE_INTEGER zs0; QueryPerformanceCounter(&zs0);
-            { wind::SpanScope span_(wind::kSpanActivate); t.model->setActive(true); }   // transform: reveal immediately, no capture priming
-            if (t.zt.armed) {
-                LARGE_INTEGER zs1; QueryPerformanceCounter(&zs1); t.zt.setActiveMs = QpcMs(t, zs0.QuadPart, zs1.QuadPart);
-                if (auto* tm = dynamic_cast<TransformModel*>(t.model)) {
-                    const auto sp = tm->lastEnter(); t.zt.ensureMs = sp.ensureMagMs;
-                }
-                DWM_TIMING_INFO ti{}; ti.cbSize = sizeof(ti);   // the composite count the first write must beat
-                if (SUCCEEDED(DwmGetCompositionTimingInfo(nullptr, &ti))) t.zt.cFrame0 = ti.cFrame;
-            }
-        }
-        // Handover overlap: the outgoing engine rests a few ticks after the incoming one is
-        // live, so the crossover never composites a bare unmagnified frame (see instant switch).
-        if (t.restAfterReveal && t.restOverlapTicks > 0 && --t.restOverlapTicks == 0) {
-            { wind::SpanScope span_(wind::kSpanActivate); t.restAfterReveal->setActive(false); }
-            t.restAfterReveal = nullptr;
-            // The render overlay just left the screen: the DWM effect takes the colour back THIS
-            // tick, not next tick's top-of-tick call (a one-frame unfiltered flash otherwise).
-            { wind::SpanScope span_(wind::kSpanColor); UpdateColorFilter(t, true, RenderOverlayShown(t), nullptr); }
-        }
+        RevealAndHandover(t, enterActive, fsGame);
         // Execute the deferred game-inspect steal now that the reveal logic has read the true
         // foreground, and RE-assert it if the game pulled foreground back mid-inspect (some
         // engines re-grab on their own timers; a user alt-tab to a THIRD app is respected).
