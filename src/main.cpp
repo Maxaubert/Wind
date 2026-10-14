@@ -1905,6 +1905,101 @@ static TickForeground ReadForegroundAndArmWall(TickState& t, double lvl) {
     return { fgTick, fsCover, fgBorderless, wallNeeded, liftIfTransform };
 }
 
+// Active tick: the free-cursor decision, the pan glide, the game-drawn cursor lag, pinning the
+// mapper to the real pointer, and the mapper step. The glide may move the pointer (cur follows).
+struct PointerMap { MapResult r; bool freeCursor, gameCursor; };
+static PointerMap MapPointer(TickState& t, bool inspect, double lvl, double dt, bool fsCover,
+                             POINT& cur, int curDx, int curDy, int dx, int dy) {
+    // FREE CURSOR (issue #205) - native Magnifier's model, measured not assumed.
+    //
+    // tools/mag_formula_probe.ps1 + mag_trackmode_probe.ps1 drove the real Magnifier and read
+    // back what it wrote via MagGetFullscreenTransform:
+    //   offset = clamp(cursor - screen/(2*level), 0, screen - screen/level), truncated
+    // and it tracks the pointer CONTINUOUSLY, 1:1 (45/45 twelve-pixel steps moved the view by
+    // exactly twelve, none left it still). Its view position is a PURE FUNCTION of the current
+    // cursor position - no integration, no smoothing, no state.
+    //
+    // Ours was structurally different: integrate per-tick deltas into a SMOOTHED centre, then
+    // WELD the pointer to that centre with SetCursorPos. The cursor position then depends on
+    // the centre and the centre depends on cursor deltas - a feedback loop, which is what
+    // issue #169 chased and what the long-standing wobble is. Native has no loop to oscillate.
+    //
+    // Pinning the mapper to the real cursor each tick reproduces native's formula exactly (the
+    // mapper already clamps the source rect the same way) and leaves nothing to feed back.
+    // cursorSensitivity does NOT apply here by construction: the pointer IS the input, so there
+    // is no delta to scale.
+    //
+    // Gated OFF wherever the OS cursor is not the truth:
+    //   - Inspect mode freezes the pointer and pans from raw mickeys, so reading it would pin
+    //     the view solid;
+    //   - a mouselook game clips/recentres the pointer, which is exactly why the locked path
+    //     integrates raw deltas instead (issue #3 / #158).
+    const bool freeCursor = !inspect && !t.lockEff &&
+                            dynamic_cast<TransformModel*>(t.model) != nullptr;
+    // (A shell input panel needs nothing special: DWM draws its pointer above the panels and
+    // keeps it centred, so the hand moves the pointer directly.)
+    // PAN GLIDE (issue #430, src/pan_glide.h): a soft stop, a few screen px at most. The pointer
+    // itself eases on and the view follows by DWM centring. curDx/curDy is this tick's HAND motion: during a
+    // glide the previous tick ended with the baseline on Wind's own step, so any motion here is
+    // the hand, which (like a button or leaving a plain zoomed desktop pan) ends the glide.
+    {
+        const bool btn = ((GetAsyncKeyState(VK_LBUTTON) | GetAsyncKeyState(VK_RBUTTON) |
+                           GetAsyncKeyState(VK_MBUTTON)) & 0x8000) != 0;
+        const bool glideOk = t.cfg.panGlideMaxPx > 0 && freeCursor && lvl > 1.001 && !fsCover &&
+                             !t.viewDetached && !btn;
+        if (t.glide.active && (!glideOk || curDx != 0 || curDy != 0)) wind::PanGlideCancel(t.glide);
+        if (!t.glide.active)
+            wind::PanGlideObserve(t.glide, curDx, curDy, dt, cur.x, cur.y, wind::PanGlideTauS(t.cfg.panGlideMaxPx),
+                                  t.cfg.panGlideMaxPx / lvl, glideOk);   // the cap is in screen px
+        double gx = 0.0, gy = 0.0;
+        if (t.glide.active && wind::PanGlideStep(t.glide, dt, gx, gy)) {
+            POINT np{ (LONG)std::lround(gx), (LONG)std::lround(gy) };
+            const LONG l = t.mon.x, tp = t.mon.y, r = t.mon.x + t.mon.w - 1, b = t.mon.y + t.mon.h - 1;
+            if (np.x < l || np.x > r || np.y < tp || np.y > b) {      // reached the edge: stop there
+                np.x = (std::min)((std::max)(np.x, l), r);
+                np.y = (std::min)((std::max)(np.y, tp), b);
+                wind::PanGlideCancel(t.glide);
+            }
+            if (np.x != cur.x || np.y != cur.y) {
+                SetCursorPos(np.x, np.y);
+                cur = np;   // the tick's baseline ends here, so the next tick reads hand motion only
+            }
+        }
+    }
+    // GAME-DRAWN CURSOR (issue #443, src/game_cursor.h): a covering app that hides the pointer
+    // draws its own cursor about a display frame late, so the view follows the pointer that late
+    // (and Wind, not DWM centring, writes it). The pointer itself is untouched.
+    bool gameCursor = false;
+    const double gameLagMs = wind::GameCursorLagMs(t.cfg.gameCursorLagMs, t.hz);
+    if (freeCursor && fsCover && gameLagMs > 0.0) {
+        CURSORINFO ci{}; ci.cbSize = sizeof(ci);
+        const bool showing = !GetCursorInfo(&ci) || (ci.flags & CURSOR_SHOWING) != 0;
+        const bool byWind = t.cursorHidden || t.cursorHiddenByUs || t.cfg.cursorVisibility == "never";
+        gameCursor = wind::GameCursorStep(t.gameCursor, wind::GameDrawsCursor(freeCursor, fsCover, showing, byWind),
+                                          curDx != 0 || curDy != 0);
+    }
+    if (gameCursor != t.gameCursor) {
+        wind::Log(wind::LogLevel::Info, "lock", "game-drawn cursor %s (lag %.1f ms) lvl=%.2f",
+                  gameCursor ? "on" : "off", gameLagMs, lvl);
+        t.gameCursor = gameCursor;
+    }
+    if (freeCursor) {
+        POINT cp;
+        if (GetCursorPos(&cp)) {
+            LARGE_INTEGER qc; QueryPerformanceCounter(&qc);
+            const double nowMs = double(qc.QuadPart) * 1000.0 / double(t.freq.QuadPart);
+            t.ptrHist.push(nowMs, double(cp.x), double(cp.y));
+            double px = cp.x, py = cp.y;
+            if (gameCursor) t.ptrHist.at(nowMs - gameLagMs, px, py);
+            t.mapper.reset(px - t.mon.x, py - t.mon.y);
+        }
+    } else {
+        t.ptrHist.clear();
+    }
+    MapResult r = t.mapper.update(freeCursor ? 0 : dx, freeCursor ? 0 : dy, lvl);
+    return { r, freeCursor, gameCursor };
+}
+
 static void RunTick(TickState& t) {
     TickWorkTimer workTimer(t);
     const TickClock clk = BeginTick(t);
@@ -1950,93 +2045,9 @@ static void RunTick(TickState& t) {
         const HWND fgTick = tf.fgTick;
         const bool fsCover = tf.fsCover, fgBorderless = tf.fgBorderless;
         const bool wallNeeded = tf.wallNeeded, liftIfTransform = tf.liftIfTransform;
-        // FREE CURSOR (issue #205) - native Magnifier's model, measured not assumed.
-        //
-        // tools/mag_formula_probe.ps1 + mag_trackmode_probe.ps1 drove the real Magnifier and read
-        // back what it wrote via MagGetFullscreenTransform:
-        //   offset = clamp(cursor - screen/(2*level), 0, screen - screen/level), truncated
-        // and it tracks the pointer CONTINUOUSLY, 1:1 (45/45 twelve-pixel steps moved the view by
-        // exactly twelve, none left it still). Its view position is a PURE FUNCTION of the current
-        // cursor position - no integration, no smoothing, no state.
-        //
-        // Ours was structurally different: integrate per-tick deltas into a SMOOTHED centre, then
-        // WELD the pointer to that centre with SetCursorPos. The cursor position then depends on
-        // the centre and the centre depends on cursor deltas - a feedback loop, which is what
-        // issue #169 chased and what the long-standing wobble is. Native has no loop to oscillate.
-        //
-        // Pinning the mapper to the real cursor each tick reproduces native's formula exactly (the
-        // mapper already clamps the source rect the same way) and leaves nothing to feed back.
-        // cursorSensitivity does NOT apply here by construction: the pointer IS the input, so there
-        // is no delta to scale.
-        //
-        // Gated OFF wherever the OS cursor is not the truth:
-        //   - Inspect mode freezes the pointer and pans from raw mickeys, so reading it would pin
-        //     the view solid;
-        //   - a mouselook game clips/recentres the pointer, which is exactly why the locked path
-        //     integrates raw deltas instead (issue #3 / #158).
-        const bool freeCursor = !inspect && !t.lockEff &&
-                                dynamic_cast<TransformModel*>(t.model) != nullptr;
-        // (A shell input panel needs nothing special: DWM draws its pointer above the panels and
-        // keeps it centred, so the hand moves the pointer directly.)
-        // PAN GLIDE (issue #430, src/pan_glide.h): a soft stop, a few screen px at most. The pointer
-        // itself eases on and the view follows by DWM centring. curDx/curDy is this tick's HAND motion: during a
-        // glide the previous tick ended with the baseline on Wind's own step, so any motion here is
-        // the hand, which (like a button or leaving a plain zoomed desktop pan) ends the glide.
-        {
-            const bool btn = ((GetAsyncKeyState(VK_LBUTTON) | GetAsyncKeyState(VK_RBUTTON) |
-                               GetAsyncKeyState(VK_MBUTTON)) & 0x8000) != 0;
-            const bool glideOk = t.cfg.panGlideMaxPx > 0 && freeCursor && lvl > 1.001 && !fsCover &&
-                                 !t.viewDetached && !btn;
-            if (t.glide.active && (!glideOk || curDx != 0 || curDy != 0)) wind::PanGlideCancel(t.glide);
-            if (!t.glide.active)
-                wind::PanGlideObserve(t.glide, curDx, curDy, dt, cur.x, cur.y, wind::PanGlideTauS(t.cfg.panGlideMaxPx),
-                                      t.cfg.panGlideMaxPx / lvl, glideOk);   // the cap is in screen px
-            double gx = 0.0, gy = 0.0;
-            if (t.glide.active && wind::PanGlideStep(t.glide, dt, gx, gy)) {
-                POINT np{ (LONG)std::lround(gx), (LONG)std::lround(gy) };
-                const LONG l = t.mon.x, tp = t.mon.y, r = t.mon.x + t.mon.w - 1, b = t.mon.y + t.mon.h - 1;
-                if (np.x < l || np.x > r || np.y < tp || np.y > b) {      // reached the edge: stop there
-                    np.x = (std::min)((std::max)(np.x, l), r);
-                    np.y = (std::min)((std::max)(np.y, tp), b);
-                    wind::PanGlideCancel(t.glide);
-                }
-                if (np.x != cur.x || np.y != cur.y) {
-                    SetCursorPos(np.x, np.y);
-                    cur = np;   // the tick's baseline ends here, so the next tick reads hand motion only
-                }
-            }
-        }
-        // GAME-DRAWN CURSOR (issue #443, src/game_cursor.h): a covering app that hides the pointer
-        // draws its own cursor about a display frame late, so the view follows the pointer that late
-        // (and Wind, not DWM centring, writes it). The pointer itself is untouched.
-        bool gameCursor = false;
-        const double gameLagMs = wind::GameCursorLagMs(t.cfg.gameCursorLagMs, t.hz);
-        if (freeCursor && fsCover && gameLagMs > 0.0) {
-            CURSORINFO ci{}; ci.cbSize = sizeof(ci);
-            const bool showing = !GetCursorInfo(&ci) || (ci.flags & CURSOR_SHOWING) != 0;
-            const bool byWind = t.cursorHidden || t.cursorHiddenByUs || t.cfg.cursorVisibility == "never";
-            gameCursor = wind::GameCursorStep(t.gameCursor, wind::GameDrawsCursor(freeCursor, fsCover, showing, byWind),
-                                              curDx != 0 || curDy != 0);
-        }
-        if (gameCursor != t.gameCursor) {
-            wind::Log(wind::LogLevel::Info, "lock", "game-drawn cursor %s (lag %.1f ms) lvl=%.2f",
-                      gameCursor ? "on" : "off", gameLagMs, lvl);
-            t.gameCursor = gameCursor;
-        }
-        if (freeCursor) {
-            POINT cp;
-            if (GetCursorPos(&cp)) {
-                LARGE_INTEGER qc; QueryPerformanceCounter(&qc);
-                const double nowMs = double(qc.QuadPart) * 1000.0 / double(t.freq.QuadPart);
-                t.ptrHist.push(nowMs, double(cp.x), double(cp.y));
-                double px = cp.x, py = cp.y;
-                if (gameCursor) t.ptrHist.at(nowMs - gameLagMs, px, py);
-                t.mapper.reset(px - t.mon.x, py - t.mon.y);
-            }
-        } else {
-            t.ptrHist.clear();
-        }
-        MapResult r = t.mapper.update(freeCursor ? 0 : dx, freeCursor ? 0 : dy, lvl);
+        const PointerMap pm = MapPointer(t, inspect, lvl, dt, fsCover, cur, curDx, curDy, dx, dy);
+        const bool freeCursor = pm.freeCursor, gameCursor = pm.gameCursor;
+        MapResult r = pm.r;
         // --- Tracking (issue #276): caret / focus own the view; the pointer is never moved. ---
         // fsCover (read once above, see the "Foreground facts for this tick" comment) is the
         // borderless-fullscreen-game tell; reused here rather than a second ForegroundCoversMonitor
