@@ -1044,6 +1044,78 @@ static TickClock BeginTick(TickState& t) {
     return { now, dt, rawDt, woke };
 }
 
+// Config hot-reload, core-relevant change: apply the newly parsed config nc (re-binds, hotkeys,
+// live engine prefs) and rebuild the zoom controller and mapper with the live level and centre.
+static void ApplyReloadedConfig(TickState& t, Config& nc, const std::string& stripped) {
+    t.lastCoreIni = stripped;
+    // Issue #242: the high-res/MPO option is atomic at restart - while an MPO restart is
+    // pending (registry != boot) the BOOT state's look holds in both directions, and
+    // crisp never runs on an MPO-enabled boot (the 16-bit TDR combo; covers profile
+    // switches and hand edits too). The ini keeps the user's intent.
+    if (int eff = EffectiveSamplingMode(nc.txSamplingMode, g_mpoDisabled,
+                                        wind::MpoDisabledInRegistry(), nc.tdrTest,
+                                        nc.mpoNearestGuard != 0);
+        eff != nc.txSamplingMode) {
+        wind::Log(wind::LogLevel::Info, "config",
+                  "sampling %d deferred, running %d: MPO restart pending or MPO-enabled "
+                  "boot (issue #242)", nc.txSamplingMode, eff);
+        nc.txSamplingMode = eff;
+    }
+    // Re-bind the hook's button mapping if the user changed it via the config UI; without
+    // this the hook would keep firing the OLD button (the new VK works via GetAsyncKeyState
+    // but the mouse mapping is captured once in g_input.start at app launch).
+    if (wind::ButtonBindsChanged(nc, t.cfg)) {
+        g_input.setButtonBinds(nc.zoomInButton, nc.zoomInButtonMods, nc.zoomInButton2, nc.zoomInButton2Mods,
+                               nc.zoomOutButton, nc.zoomOutButtonMods, nc.zoomOutButton2, nc.zoomOutButton2Mods);
+    }
+    g_input.setWheelMods(nc.zoomWheelMods);   // scroll-wheel zoom (#285); one relaxed store
+    // Re-bind the keyboard hook's tracked/swallowed keys when any keyboard zoom/recenter
+    // bind changed (else the hook keeps swallowing the OLD key and ignores the new one).
+    if (wind::KeyBindsChanged(nc, t.cfg)) {
+        g_input.setKeys(nc.zoomInVk, nc.zoomInVk2, nc.zoomOutVk, nc.zoomOutVk2, nc.recenterVk,
+                        nc.cursorLockVk);
+    }
+    g_input.setKeyMods(nc.zoomInMods, nc.zoomInMods2, nc.zoomOutMods, nc.zoomOutMods2,
+                       nc.recenterMods, nc.cursorLockMods);
+    if (wind::PanBindsChanged(nc, t.cfg)) {
+        const int pv[4] = { nc.panLeftVk, nc.panRightVk, nc.panUpVk, nc.panDownVk };
+        const int pm[4] = { nc.panLeftMods, nc.panRightMods, nc.panUpMods, nc.panDownMods };
+        g_input.setPanKeys(pv, pm);   // keyboard panning (#287)
+    }
+    if (nc.hideCursorVk != t.cfg.hideCursorVk || nc.hideCursorMods != t.cfg.hideCursorMods) {
+        RegisterHideCursorHotkey(t.hwnd, nc.hideCursorVk, nc.hideCursorMods);
+    }
+    if (nc.quickZoomHotkeyMode != t.cfg.quickZoomHotkeyMode
+     || nc.quickZoomVk != t.cfg.quickZoomVk || nc.quickZoomMods != t.cfg.quickZoomMods) {
+        RegisterQuickZoomHotkey(t.hwnd, (nc.quickZoomHotkeyMode && nc.quickZoomVk) ? nc.quickZoomVk : 0,
+                                nc.quickZoomMods);
+    }
+    if (nc.model != t.cfg.model)   // both engines are built: the next pick follows it, no restart
+        wind::Log(wind::LogLevel::Info, "config", "engine %s -> %s (applies live)", t.cfg.model.c_str(), nc.model.c_str());
+    // txNativeCursor (#463): the next transform session's cursor (latched at zoom-in).
+    if (auto* tmHot = dynamic_cast<TransformModel*>(t.mTransform ? t.mTransform : t.model))
+        tmHot->setNativeCursorPref(wind::UseNativeCursor(nc.txNativeCursor));
+    t.cfg = nc;   // pick up renderer knobs (smoothing, filter, cursor scale, zoom speed)
+    // transformExclude / renderExclude / the per-window-type engine keys may all have
+    // changed: drop the cache so every exe-derived predicate is re-resolved. Without this
+    // an edited list only took effect on the next foreground change, which reads as the
+    // setting not working.
+    t.fgCacheHwnd = nullptr;
+    // PRESERVE THE LIVE ZOOM ACROSS THE RELOAD (issue #234). ZoomController starts at its
+    // minimum, so rebuilding it for a possibly-changed maxLevel used to drop whatever the
+    // user was zoomed to: change any core setting while zoomed and the view collapsed to
+    // 1x instantly. That is exactly the moment someone tunes zoom speed or smoothing and
+    // watches the effect. setLevel clamps into the new range, so a maxLevel lowered below
+    // the current level lands on the new ceiling rather than snapping home. The mapper's
+    // centre is preserved two lines below for the same reason; the level was just missed.
+    const double keepLevel = t.zoom.level();
+    t.zoom = ZoomController(1.0, nc.maxLevel);
+    t.zoom.setLevel(keepLevel);
+    double ocx = t.mapper.centerX(), ocy = t.mapper.centerY();   // preserve position
+    t.mapper = CursorMapper(t.mon.w, t.mon.h);
+    t.mapper.reset(ocx, ocy);
+}
+
 // Tick phase: config hot-reload (rawDt drives the check cadence).
 static void PollConfigReload(TickState& t, double rawDt) {
     // Config hot-reload. A directory-change notification tells us WHEN to re-check magnifier.ini,
@@ -1105,75 +1177,7 @@ static void PollConfigReload(TickState& t, double rawDt) {
                 t.lastMtime = m;
                 t.configRetry = false;
             }
-            if (loaded) {
-            t.lastCoreIni = stripped;
-            // Issue #242: the high-res/MPO option is atomic at restart - while an MPO restart is
-            // pending (registry != boot) the BOOT state's look holds in both directions, and
-            // crisp never runs on an MPO-enabled boot (the 16-bit TDR combo; covers profile
-            // switches and hand edits too). The ini keeps the user's intent.
-            if (int eff = EffectiveSamplingMode(nc.txSamplingMode, g_mpoDisabled,
-                                                wind::MpoDisabledInRegistry(), nc.tdrTest,
-                                                nc.mpoNearestGuard != 0);
-                eff != nc.txSamplingMode) {
-                wind::Log(wind::LogLevel::Info, "config",
-                          "sampling %d deferred, running %d: MPO restart pending or MPO-enabled "
-                          "boot (issue #242)", nc.txSamplingMode, eff);
-                nc.txSamplingMode = eff;
-            }
-            // Re-bind the hook's button mapping if the user changed it via the config UI; without
-            // this the hook would keep firing the OLD button (the new VK works via GetAsyncKeyState
-            // but the mouse mapping is captured once in g_input.start at app launch).
-            if (wind::ButtonBindsChanged(nc, t.cfg)) {
-                g_input.setButtonBinds(nc.zoomInButton, nc.zoomInButtonMods, nc.zoomInButton2, nc.zoomInButton2Mods,
-                                       nc.zoomOutButton, nc.zoomOutButtonMods, nc.zoomOutButton2, nc.zoomOutButton2Mods);
-            }
-            g_input.setWheelMods(nc.zoomWheelMods);   // scroll-wheel zoom (#285); one relaxed store
-            // Re-bind the keyboard hook's tracked/swallowed keys when any keyboard zoom/recenter
-            // bind changed (else the hook keeps swallowing the OLD key and ignores the new one).
-            if (wind::KeyBindsChanged(nc, t.cfg)) {
-                g_input.setKeys(nc.zoomInVk, nc.zoomInVk2, nc.zoomOutVk, nc.zoomOutVk2, nc.recenterVk,
-                                nc.cursorLockVk);
-            }
-            g_input.setKeyMods(nc.zoomInMods, nc.zoomInMods2, nc.zoomOutMods, nc.zoomOutMods2,
-                               nc.recenterMods, nc.cursorLockMods);
-            if (wind::PanBindsChanged(nc, t.cfg)) {
-                const int pv[4] = { nc.panLeftVk, nc.panRightVk, nc.panUpVk, nc.panDownVk };
-                const int pm[4] = { nc.panLeftMods, nc.panRightMods, nc.panUpMods, nc.panDownMods };
-                g_input.setPanKeys(pv, pm);   // keyboard panning (#287)
-            }
-            if (nc.hideCursorVk != t.cfg.hideCursorVk || nc.hideCursorMods != t.cfg.hideCursorMods) {
-                RegisterHideCursorHotkey(t.hwnd, nc.hideCursorVk, nc.hideCursorMods);
-            }
-            if (nc.quickZoomHotkeyMode != t.cfg.quickZoomHotkeyMode
-             || nc.quickZoomVk != t.cfg.quickZoomVk || nc.quickZoomMods != t.cfg.quickZoomMods) {
-                RegisterQuickZoomHotkey(t.hwnd, (nc.quickZoomHotkeyMode && nc.quickZoomVk) ? nc.quickZoomVk : 0,
-                                        nc.quickZoomMods);
-            }
-            if (nc.model != t.cfg.model)   // both engines are built: the next pick follows it, no restart
-                wind::Log(wind::LogLevel::Info, "config", "engine %s -> %s (applies live)", t.cfg.model.c_str(), nc.model.c_str());
-            // txNativeCursor (#463): the next transform session's cursor (latched at zoom-in).
-            if (auto* tmHot = dynamic_cast<TransformModel*>(t.mTransform ? t.mTransform : t.model))
-                tmHot->setNativeCursorPref(wind::UseNativeCursor(nc.txNativeCursor));
-            t.cfg = nc;   // pick up renderer knobs (smoothing, filter, cursor scale, zoom speed)
-            // transformExclude / renderExclude / the per-window-type engine keys may all have
-            // changed: drop the cache so every exe-derived predicate is re-resolved. Without this
-            // an edited list only took effect on the next foreground change, which reads as the
-            // setting not working.
-            t.fgCacheHwnd = nullptr;
-            // PRESERVE THE LIVE ZOOM ACROSS THE RELOAD (issue #234). ZoomController starts at its
-            // minimum, so rebuilding it for a possibly-changed maxLevel used to drop whatever the
-            // user was zoomed to: change any core setting while zoomed and the view collapsed to
-            // 1x instantly. That is exactly the moment someone tunes zoom speed or smoothing and
-            // watches the effect. setLevel clamps into the new range, so a maxLevel lowered below
-            // the current level lands on the new ceiling rather than snapping home. The mapper's
-            // centre is preserved two lines below for the same reason; the level was just missed.
-            const double keepLevel = t.zoom.level();
-            t.zoom = ZoomController(1.0, nc.maxLevel);
-            t.zoom.setLevel(keepLevel);
-            double ocx = t.mapper.centerX(), ocy = t.mapper.centerY();   // preserve position
-            t.mapper = CursorMapper(t.mon.w, t.mon.h);
-            t.mapper.reset(ocx, ocy);
-            }   // core-relevant change guard (StripUiOnlyKeys)
+            if (loaded) ApplyReloadedConfig(t, nc, stripped);   // core-relevant change guard (StripUiOnlyKeys)
         }
     }
 }
