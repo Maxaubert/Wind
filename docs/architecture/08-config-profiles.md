@@ -240,7 +240,7 @@ failed to init.
 | `mpoGuard` (1), `mpoGuardLiftWall` (1), `mpoGuardTest` (0) | The MPO guard effect, whether it lifts the pan walls while plane-free, and a diagnostic that applies it on an MPO-off boot |
 | `mpoNearestGuard` (1) | Allow nearest sampling on an MPO-on boot, relying on the guard; 0 turns nearest into smooth on such boots ([05](05-transform-engine.md)) |
 | `txRestLevel` (1.0) | Level the transform rests at when idle; above 1.0 parks a hair off identity (costs a composed desktop) |
-| `txNativeCursor` (1) | 0 = the legacy sprite session, the pre-#369 transform cursor kept for A/B testing ([07](07-cursor.md#legacy-sprite-session-txnativecursor0)); read at zoom-in. A profile key: set it in `profiles\<Name>.ini` too, or the next launch restores the profile's value |
+| `txNativeCursor` (0) | Mouse tracking (Settings > View, transform engine): 0 = Wind, Wind moves the view and draws its own pointer; 1 = Native, Windows' magnifier logic ([07](07-cursor.md#wind-mouse-tracking-txnativecursor0-the-default)); read at zoom-in |
 | `txTrace` (0) | 1 records a per-tick trace and writes `txtrace-<ms>.csv` to the log folder at each session end |
 | `zoomTrace` (0) | 1 logs a zoom-in/zoom-out timeline per zoom (#310) |
 

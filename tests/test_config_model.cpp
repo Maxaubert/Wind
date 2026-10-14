@@ -80,7 +80,7 @@ TEST_CASE("keys of the removed sprite cursor are ignored, and change nothing els
     // The old sprite cursor, its tuning knobs and the experiments around it are gone; an ini that
     // still carries them parses exactly like one without (unknown keys are skipped).
     const Config d = ParseConfig("");
-    const Config c = ParseConfig("txNativeCursor=0\ncursorSprite=0\ntxDwmCentre=0\ntxFreeCursor=0\n"
+    const Config c = ParseConfig("cursorSprite=0\ntxDwmCentre=0\ntxFreeCursor=0\n"
                                  "panelPointer=0\nspriteBand16=1\nspriteCapturable=1\ntxHookWrite=1\n"
                                  "txIdleReleaseMs=0\ntxWriteHz=60\ntxMinOffsetPx=2\ntxLevelStep=5\ntxGrid=50\ntxPace=2\n"
                                  "txWarmWindowMs=700\ntxWarmMaxLevel=8\ntxWarmLevelEps=0.001\ntxWobbleCage=1\n");

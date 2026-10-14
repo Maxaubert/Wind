@@ -3,7 +3,7 @@
 
 using namespace wind;
 
-TEST_CASE("native cursor: on by default, txNativeCursor=0 is the legacy sprite (#463)") {
+TEST_CASE("native cursor: txNativeCursor=1 is Native, 0 is the Wind sprite session (#463)") {
     CHECK(UseNativeCursor(1));
     CHECK_FALSE(UseNativeCursor(0));
 }

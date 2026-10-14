@@ -103,7 +103,7 @@ txRestLevel	1	1.01	1
 launchQuiesce	-	-	1
 txWarmHz	0	1000	12
 mpoNearestGuard	-	-	1
-txNativeCursor	-	-	1
+txNativeCursor	-	-	0
 txSmoothLadder	-	-	1
 txRampMinStep	0	100	0
 txRampMinFrom	1	-	12

@@ -17,8 +17,8 @@
 // Games pay nothing extra: a zoomed full-screen window is composed anyway, and at 1x the lens style
 // is off (hardware pointer). The only window Wind still draws in a transform session is the Inspect
 // crosshair.
-// txNativeCursor=0 (ini only, issue #463) brings back the pre-#369 session for A/B testing: Wind's
-// own cursor sprite, welded to a view Wind writes itself, no DWM centring.
+// Settings > View > Mouse tracking (txNativeCursor, issue #463) picks this (Native) or the pre-#369
+// session (Wind, the default): Wind's own cursor sprite, welded to a view Wind writes, no DWM centring.
 namespace wind {
 
 // Whether a transform session uses the native cursor. Decided once per session, at zoom-in.

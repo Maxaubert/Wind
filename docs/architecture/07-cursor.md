@@ -88,7 +88,7 @@ render-only opt-in for the old constant size. `cursorScaleWithZoom` is retired a
 ## Native cursor
 
 Transform sessions use the pointer Windows Magnifier uses: the real pointer, drawn by DWM into the
-magnified frame. It is the transform engine's only cursor. It works at either sampling mode, because DWM
+magnified frame (Mouse tracking = Native; the default is Wind, below). It works at either sampling mode, because DWM
 samples it like the content: Smooth transform scaling makes it sharp but it shimmers
 slightly during zoom ramps, nearest keeps it pixelated and steady. Pure rules:
 `src/transform/native_cursor.h` (tested).
@@ -178,9 +178,10 @@ slightly during zoom ramps, nearest keeps it pixelated and steady. Pure rules:
   crosshair window. Games pay nothing extra for the native cursor: a zoomed full-screen window is
   composed anyway, and at 1x the lens style is off.
 
-### Legacy sprite session (`txNativeCursor=0`)
+### Wind mouse tracking (`txNativeCursor=0`, the default)
 
-An ini-only A/B fallback (#463) to the transform cursor as it was before the native cursor (#369):
+Settings > View > Mouse tracking picks Native (above) or Wind (#463), the transform session as it
+was before the native cursor (#369), and the default since the owner chose it on 2026-10-14:
 Wind writes every view itself (no DWM centring, no cursor lens), hides the real pointer (blanker plus
 `MagShowSystemCursor`) and paints its shape into the sprite window (`CursorSprite::refreshShape`,
 from the blanker's copies of the standard cursors), placed at the lens point in desktop
