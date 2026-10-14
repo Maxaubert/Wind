@@ -2624,6 +2624,26 @@ static void RevealAndHandover(TickState& t, bool enterActive, bool fsGame) {
     }
 }
 
+// Active tick: execute or re-assert the game-inspect foreground steal.
+static void AssertGameInspectSteal(TickState& t, bool inspect) {
+    // Execute the deferred game-inspect steal now that the reveal logic has read the true
+    // foreground, and RE-assert it if the game pulled foreground back mid-inspect (some
+    // engines re-grab on their own timers; a user alt-tab to a THIRD app is respected).
+    // If the steal fails (unsigned dev build denied by the foreground lock), drop back to
+    // normal inspect: the camera moves again, but the state is never inconsistent.
+    if (inspect && t.inspectGame) {
+        HWND fg = GetForegroundWindow();
+        bool wantSteal = t.inspectStealPending || (t.inspectPrevFg && fg == t.inspectPrevFg);
+        t.inspectStealPending = false;
+        if (wantSteal && !StealForeground(EnsureFocusStealer(t.mon))) {
+            wind::Log(wind::LogLevel::Warn, "inspect",
+                      "game-inspect: foreground steal failed; falling back to normal inspect");
+            t.inspectGame = false;
+            t.inspectPrevFg = nullptr;
+        }
+    }
+}
+
 static void RunTick(TickState& t) {
     TickWorkTimer workTimer(t);
     const TickClock clk = BeginTick(t);
@@ -2683,22 +2703,7 @@ static void RunTick(TickState& t) {
                                               gameCursor, dragFollow, curDx, curDy, rawDx, rawDy, r);
         const bool doPresent = PaceAndPresent(t, ex, r, lvl, dt, zoomed, fsGame, enterActive);
         RevealAndHandover(t, enterActive, fsGame);
-        // Execute the deferred game-inspect steal now that the reveal logic has read the true
-        // foreground, and RE-assert it if the game pulled foreground back mid-inspect (some
-        // engines re-grab on their own timers; a user alt-tab to a THIRD app is respected).
-        // If the steal fails (unsigned dev build denied by the foreground lock), drop back to
-        // normal inspect: the camera moves again, but the state is never inconsistent.
-        if (inspect && t.inspectGame) {
-            HWND fg = GetForegroundWindow();
-            bool wantSteal = t.inspectStealPending || (t.inspectPrevFg && fg == t.inspectPrevFg);
-            t.inspectStealPending = false;
-            if (wantSteal && !StealForeground(EnsureFocusStealer(t.mon))) {
-                wind::Log(wind::LogLevel::Warn, "inspect",
-                          "game-inspect: foreground steal failed; falling back to normal inspect");
-                t.inspectGame = false;
-                t.inspectPrevFg = nullptr;
-            }
-        }
+        AssertGameInspectSteal(t, inspect);
         // Bookkeeping for next tick's GetCursorPos delta. INSPECT keeps the explicit frozen point
         // (the 1px clip pins the pointer there; explicit is immune to the click-release window).
         // Everything else uses a MEASURED read (issue #169) - the baseline must be where the
