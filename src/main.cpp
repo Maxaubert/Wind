@@ -2352,6 +2352,125 @@ static void InstantHybridSwitch(TickState& t, bool enterActive, bool inspect, HW
     }
 }
 
+// Active tick: build this tick's PresentExtras (outline dwell and idle fade, cursor mode, weld
+// suppression, colour, write pauses, DWM centring) and keep the Inspect freeze.
+static PresentExtras BuildPresentExtras(TickState& t, double lvl, double dt, bool zoomed, bool inspect,
+                                        bool fsGame, bool wallNeeded, bool freeCursor, bool gameCursor,
+                                        bool dragFollow, int curDx, int curDy, int rawDx, int rawDy,
+                                        const MapResult& r) {
+    // Per-tick render-only overrides go through PresentExtras; the model's present() runs
+    // FillRenderParams and applies these on top. ex.outline seeds with the same base value
+    // FillRenderParams would compute, so the dwell/idle logic below reads an identical start.
+    PresentExtras ex;
+    ex.fsGame = fsGame;
+    ex.forceCrop = fsGame && t.cfg.gameCrop != 0;
+    ex.outline = OutlineVisibleAtLevel(t.cfg, lvl);
+    ex.outlineAlpha = 1.0f;
+    ex.cursorMode = CursorModeFromCfg(t.cfg);
+    ex.cursorLocked = false;
+    // Low-zoom dwell: with "only at low zoom" on, show the outline only after the zoom settles
+    // at a STABLE level inside the band for kOutlineDwellSec. "Stable" = the level is unchanged
+    // since last tick (the controller freezes the level exactly when no zoom direction is held),
+    // so an actively-changing level - zooming through the band, or repeatedly nudging in/out -
+    // never accumulates: the countdown starts only once you stop on a level in the band. Any
+    // level change or leaving the band resets it (OutlineDwellSeconds returns 0 when !inBand).
+    // Always-on mode (lowZoomOnly off) is unaffected. The reset also fires on zoom-out to idle
+    // via the teardown branch below, so cycling 1x<->in-band can never bank partial dwell.
+    if (t.cfg.outline != 0 && t.cfg.outlineLowZoomOnly != 0) {
+        const double kOutlineDwellSec = 1.0;
+        bool stable = std::fabs(lvl - t.prevLvl) <= 1e-4;   // level held constant => settled
+        bool inBand = ex.outline && lvl > 1.0 && stable;
+        t.outlineZoneSec = OutlineDwellSeconds(inBand, t.outlineZoneSec, dt, kOutlineDwellSec);
+        if (t.outlineZoneSec < kOutlineDwellSec) ex.outline = false;   // not dwelled long enough yet
+    } else {
+        t.outlineZoneSec = 0.0;   // keep ready for when the cutoff is toggled on mid-session
+    }
+    // Idle-hide fade: when enabled and the outline is visible, accumulate idle time (reset on
+    // any hand motion - free OS-cursor delta or raw mickeys), then map it to the fade alpha.
+    // dt is the per-tick elapsed time computed at the top of RunTick. Fade duration is 0.3s.
+    const bool outlineMoved = (std::abs(curDx) + std::abs(curDy) + std::abs(rawDx) + std::abs(rawDy)) > 0;
+    if (t.cfg.outlineIdleHide && ex.outline) {
+        t.outlineIdleSec = outlineMoved ? 0.0 : (t.outlineIdleSec + dt);
+        ex.outlineAlpha = (float)OutlineIdleAlpha(t.outlineIdleSec, t.cfg.outlineIdleSeconds, 0.3);
+    } else {
+        t.outlineIdleSec = 0.0;   // keep ready for when idle-hide is toggled on mid-session
+    }
+    if (t.cursorHidden) ex.cursorMode = 2;   // hotkey override; CursorModeFromCfg already set 0/1/2 from cfg
+    // cursorMode is now final for this tick; derive drawCursor from it so the transform model
+    // (which only reads drawCursor, not cursorMode - see magnifier_model.h) also honours
+    // cursorVisibility=never and the hide-cursor hotkey. The render model never reads drawCursor
+    // (it reads cursorMode directly via FillRenderParams), so this cannot change render behaviour.
+    ex.drawCursor = (ex.cursorMode != 2);
+    // Drag-follow (issue #169): the pan resolve above chose to follow the pointer this tick, so
+    // neither engine may weld it back to the lens centre - suspend the SetCursorPos.
+    // freeCursor: never weld. The weld is what the whole native-model change removes - with the
+    // view already positioned so the pointer lands centre-screen, SetCursorPos has nothing to
+    // correct and only reintroduces the feedback loop.
+    ex.suppressCursorSync = dragFollow || freeCursor || t.viewDetached;   // tracking never moves the pointer (#276)
+    { wind::SpanScope span_(wind::kSpanColor); UpdateColorFilter(t, lvl > 1.0, RenderOverlayShown(t), &ex); }
+    // Serialize transform writes around an Inspect click's injected absolute move (issue #148
+    // TDR class): the injection and a transform write racing each other is the proven trigger.
+    // The launch quiesce holds writes AND the weld for its whole window (see above).
+    // Deadline-based, so a short press can never strand leftover hold into the next session
+    // (the old tick countdown only decremented while zoomed, which did exactly that).
+    const bool quiesceHold = QuiesceHoldActive(t);
+    ex.pauseWrites = t.clickPauseTicks > 0 || quiesceHold;
+    {
+        auto& zs = g_input.state();
+        ex.zoomDriven = zs.inHeld.load() || zs.outHeld.load() || g_input.anyBoundKeyPressed() ||
+                        t.zoom.hasTarget();
+    }
+    if (quiesceHold) ex.suppressCursorSync = true;
+    // Native cursor (issue #369): DWM may own the pan only where the view is a pure function of
+    // the pointer.
+    {
+        wind::DwmCentreIn dc;
+        dc.zoomed = lvl > 1.001;
+        dc.freeCursor = (freeCursor && !gameCursor && !t.postInspectHold) ||   // #443, #445
+                        wind::InspectKeepsDwmView(inspect, t.inspectLookMoved);   // #445
+        dc.viewDetached = t.viewDetached;
+        dc.wallNeeded = wind::NearWall(wallNeeded, r.srcLeft, r.srcTop, lvl, kMaxSafeTxMagnitude, 64.0);
+        dc.quiesce = quiesceHold;
+        ex.dwmCentre = wind::WantDwmCentring(dc);
+        // Warm pulses wherever Wind, not DWM centring, writes the view: a game-drawn cursor and
+        // the hold after Inspect write it from a free pointer too (review of #444/#446).
+        ex.warmAllowed = !dc.freeCursor;
+    }
+    // Our tray menu is open (in WindTray.exe, flagged through the shared block): the pointer
+    // belongs to the USER (they are aiming at menu items),
+    // so the weld must not re-park it - at full tick rate it pins the cursor outright
+    // (field-reported as a frozen cursor the moment the tray opened). The view keeps panning;
+    // only the cursor re-park is suspended, exactly like drag-follow during a button hold.
+    if (wind::TrayMenuOpen(g_trayBlock)) ex.suppressCursorSync = true;
+    if (t.clickPauseTicks > 0) --t.clickPauseTicks;
+    if (inspect) {
+        if (t.clickReleaseTicks > 0) {
+            // A click was just committed: keep the freeze released for these ticks so the synthesized
+            // absolute click reaches the look point (re-clamping to the 1px frozen rect would send the
+            // click to the frozen point instead). Leave p.clickDesktop at the look point so renderFrame
+            // holds the cursor there for the click; re-freeze once the window elapses.
+            --t.clickReleaseTicks;
+        } else {
+            // Re-assert the freeze (Windows can drop a clip on focus changes) and pin renderFrame's
+            // SetCursorPos at the frozen point (a no-op inside the clip). DEDUPED (issue #148):
+            // ClipCursor is a win32k cursor-subsystem write - the TDR class under an active
+            // fullscreen transform - so it only runs when the read shows the clip was lost.
+            RECT have{}; GetClipCursor(&have);
+            if (have.left != t.frozenCursor.x || have.top != t.frozenCursor.y ||
+                have.right != t.frozenCursor.x + 1 || have.bottom != t.frozenCursor.y + 1) {
+                RECT fz{ t.frozenCursor.x, t.frozenCursor.y, t.frozenCursor.x + 1, t.frozenCursor.y + 1 };
+                ClipCursor(&fz);
+            }
+            ex.clickOverride = true;
+            ex.clickDesktopX = t.frozenCursor.x;
+            ex.clickDesktopY = t.frozenCursor.y;
+        }
+        ex.cursorLocked = true;        // draw the crosshair at the look point (cursorScreen)
+        if (!zoomed) ex.outline = false;   // no lens outline on the 1:1 view at 1x
+    }
+    return ex;
+}
+
 static void RunTick(TickState& t) {
     TickWorkTimer workTimer(t);
     const TickClock clk = BeginTick(t);
@@ -2407,116 +2526,8 @@ static void RunTick(TickState& t) {
         // our own present rate (gameFpsCap). fgTick/fsCover/fgBorderless were read once above.
         const bool fsGame = fsCover;
         InstantHybridSwitch(t, enterActive, inspect, fgTick, fsCover, fgBorderless, liftIfTransform);
-        // Per-tick render-only overrides go through PresentExtras; the model's present() runs
-        // FillRenderParams and applies these on top. ex.outline seeds with the same base value
-        // FillRenderParams would compute, so the dwell/idle logic below reads an identical start.
-        PresentExtras ex;
-        ex.fsGame = fsGame;
-        ex.forceCrop = fsGame && t.cfg.gameCrop != 0;
-        ex.outline = OutlineVisibleAtLevel(t.cfg, lvl);
-        ex.outlineAlpha = 1.0f;
-        ex.cursorMode = CursorModeFromCfg(t.cfg);
-        ex.cursorLocked = false;
-        // Low-zoom dwell: with "only at low zoom" on, show the outline only after the zoom settles
-        // at a STABLE level inside the band for kOutlineDwellSec. "Stable" = the level is unchanged
-        // since last tick (the controller freezes the level exactly when no zoom direction is held),
-        // so an actively-changing level - zooming through the band, or repeatedly nudging in/out -
-        // never accumulates: the countdown starts only once you stop on a level in the band. Any
-        // level change or leaving the band resets it (OutlineDwellSeconds returns 0 when !inBand).
-        // Always-on mode (lowZoomOnly off) is unaffected. The reset also fires on zoom-out to idle
-        // via the teardown branch below, so cycling 1x<->in-band can never bank partial dwell.
-        if (t.cfg.outline != 0 && t.cfg.outlineLowZoomOnly != 0) {
-            const double kOutlineDwellSec = 1.0;
-            bool stable = std::fabs(lvl - t.prevLvl) <= 1e-4;   // level held constant => settled
-            bool inBand = ex.outline && lvl > 1.0 && stable;
-            t.outlineZoneSec = OutlineDwellSeconds(inBand, t.outlineZoneSec, dt, kOutlineDwellSec);
-            if (t.outlineZoneSec < kOutlineDwellSec) ex.outline = false;   // not dwelled long enough yet
-        } else {
-            t.outlineZoneSec = 0.0;   // keep ready for when the cutoff is toggled on mid-session
-        }
-        // Idle-hide fade: when enabled and the outline is visible, accumulate idle time (reset on
-        // any hand motion - free OS-cursor delta or raw mickeys), then map it to the fade alpha.
-        // dt is the per-tick elapsed time computed at the top of RunTick. Fade duration is 0.3s.
-        const bool outlineMoved = (std::abs(curDx) + std::abs(curDy) + std::abs(rawDx) + std::abs(rawDy)) > 0;
-        if (t.cfg.outlineIdleHide && ex.outline) {
-            t.outlineIdleSec = outlineMoved ? 0.0 : (t.outlineIdleSec + dt);
-            ex.outlineAlpha = (float)OutlineIdleAlpha(t.outlineIdleSec, t.cfg.outlineIdleSeconds, 0.3);
-        } else {
-            t.outlineIdleSec = 0.0;   // keep ready for when idle-hide is toggled on mid-session
-        }
-        if (t.cursorHidden) ex.cursorMode = 2;   // hotkey override; CursorModeFromCfg already set 0/1/2 from cfg
-        // cursorMode is now final for this tick; derive drawCursor from it so the transform model
-        // (which only reads drawCursor, not cursorMode - see magnifier_model.h) also honours
-        // cursorVisibility=never and the hide-cursor hotkey. The render model never reads drawCursor
-        // (it reads cursorMode directly via FillRenderParams), so this cannot change render behaviour.
-        ex.drawCursor = (ex.cursorMode != 2);
-        // Drag-follow (issue #169): the pan resolve above chose to follow the pointer this tick, so
-        // neither engine may weld it back to the lens centre - suspend the SetCursorPos.
-        // freeCursor: never weld. The weld is what the whole native-model change removes - with the
-        // view already positioned so the pointer lands centre-screen, SetCursorPos has nothing to
-        // correct and only reintroduces the feedback loop.
-        ex.suppressCursorSync = dragFollow || freeCursor || t.viewDetached;   // tracking never moves the pointer (#276)
-        { wind::SpanScope span_(wind::kSpanColor); UpdateColorFilter(t, lvl > 1.0, RenderOverlayShown(t), &ex); }
-        // Serialize transform writes around an Inspect click's injected absolute move (issue #148
-        // TDR class): the injection and a transform write racing each other is the proven trigger.
-        // The launch quiesce holds writes AND the weld for its whole window (see above).
-        // Deadline-based, so a short press can never strand leftover hold into the next session
-        // (the old tick countdown only decremented while zoomed, which did exactly that).
-        const bool quiesceHold = QuiesceHoldActive(t);
-        ex.pauseWrites = t.clickPauseTicks > 0 || quiesceHold;
-        {
-            auto& zs = g_input.state();
-            ex.zoomDriven = zs.inHeld.load() || zs.outHeld.load() || g_input.anyBoundKeyPressed() ||
-                            t.zoom.hasTarget();
-        }
-        if (quiesceHold) ex.suppressCursorSync = true;
-        // Native cursor (issue #369): DWM may own the pan only where the view is a pure function of
-        // the pointer.
-        {
-            wind::DwmCentreIn dc;
-            dc.zoomed = lvl > 1.001;
-            dc.freeCursor = (freeCursor && !gameCursor && !t.postInspectHold) ||   // #443, #445
-                            wind::InspectKeepsDwmView(inspect, t.inspectLookMoved);   // #445
-            dc.viewDetached = t.viewDetached;
-            dc.wallNeeded = wind::NearWall(wallNeeded, r.srcLeft, r.srcTop, lvl, kMaxSafeTxMagnitude, 64.0);
-            dc.quiesce = quiesceHold;
-            ex.dwmCentre = wind::WantDwmCentring(dc);
-            // Warm pulses wherever Wind, not DWM centring, writes the view: a game-drawn cursor and
-            // the hold after Inspect write it from a free pointer too (review of #444/#446).
-            ex.warmAllowed = !dc.freeCursor;
-        }
-        // Our tray menu is open (in WindTray.exe, flagged through the shared block): the pointer
-        // belongs to the USER (they are aiming at menu items),
-        // so the weld must not re-park it - at full tick rate it pins the cursor outright
-        // (field-reported as a frozen cursor the moment the tray opened). The view keeps panning;
-        // only the cursor re-park is suspended, exactly like drag-follow during a button hold.
-        if (wind::TrayMenuOpen(g_trayBlock)) ex.suppressCursorSync = true;
-        if (t.clickPauseTicks > 0) --t.clickPauseTicks;
-        if (inspect) {
-            if (t.clickReleaseTicks > 0) {
-                // A click was just committed: keep the freeze released for these ticks so the synthesized
-                // absolute click reaches the look point (re-clamping to the 1px frozen rect would send the
-                // click to the frozen point instead). Leave p.clickDesktop at the look point so renderFrame
-                // holds the cursor there for the click; re-freeze once the window elapses.
-                --t.clickReleaseTicks;
-            } else {
-                // Re-assert the freeze (Windows can drop a clip on focus changes) and pin renderFrame's
-                // SetCursorPos at the frozen point (a no-op inside the clip). DEDUPED (issue #148):
-                // ClipCursor is a win32k cursor-subsystem write - the TDR class under an active
-                // fullscreen transform - so it only runs when the read shows the clip was lost.
-                RECT have{}; GetClipCursor(&have);
-                if (have.left != t.frozenCursor.x || have.top != t.frozenCursor.y ||
-                    have.right != t.frozenCursor.x + 1 || have.bottom != t.frozenCursor.y + 1) {
-                    RECT fz{ t.frozenCursor.x, t.frozenCursor.y, t.frozenCursor.x + 1, t.frozenCursor.y + 1 };
-                    ClipCursor(&fz);
-                }
-                ex.clickOverride = true;
-                ex.clickDesktopX = t.frozenCursor.x;
-                ex.clickDesktopY = t.frozenCursor.y;
-            }
-            ex.cursorLocked = true;        // draw the crosshair at the look point (cursorScreen)
-            if (!zoomed) ex.outline = false;   // no lens outline on the 1:1 view at 1x
-        }
+        PresentExtras ex = BuildPresentExtras(t, lvl, dt, zoomed, inspect, fsGame, wallNeeded, freeCursor,
+                                              gameCursor, dragFollow, curDx, curDy, rawDx, rawDy, r);
         // Game pacing (issue #148): ONLY for the opt-in knobs. The default zoomed path keeps the
         // vsync-locked blocking Present - it is what makes panning smooth (refresh-locked cadence),
         // and at normal GPU priority it blocks a few frames at worst, never wedges. The timer-paced
