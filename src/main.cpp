@@ -2755,6 +2755,52 @@ static void IdleTick(TickState& t) {
     UpdateCursorTint(t);
 }
 
+// Active tick (zoomed or Inspect): the session phases in order, from the enter/Inspect edges to
+// the measured baseline for the next tick. rawDx/rawDy are this tick's raw motion (Inspect entry
+// zeroes the local copy).
+static void RunActiveTick(TickState& t, double lvl, double dt, bool zoomed, bool inspect, bool recenter,
+                          bool panArmed, bool kbHook, int rawDx, int rawDy) {
+    bool enterActive  = !t.prevActive;            // idle -> active (overlay just turned on)
+    bool inspectEnter = inspect && !t.prevInspect;
+    if (enterActive) {
+        EnterSession(t, zoomed, inspect);
+    }
+    if (inspectEnter) {
+        EnterInspect(t, zoomed, rawDx, rawDy);
+    }
+    bool inspectExit = !inspect && t.prevInspect;   // Inspect just turned off but overlay stays (zoomed)
+    if (inspectExit) {
+        ExitInspect(t);
+    }
+    if (recenter) { POINT pt; GetCursorPos(&pt); t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y); t.lastSetVirtual = pt; }
+    const PanDelta pd = ResolvePanDelta(t, inspect, lvl, dt, rawDx, rawDy);
+    POINT cur = pd.cur;
+    const int curDx = pd.curDx, curDy = pd.curDy;
+    const int dx = pd.dx, dy = pd.dy;
+    const bool dragFollow = pd.dragFollow;
+    const TickForeground tf = ReadForegroundAndArmWall(t, lvl);
+    const HWND fgTick = tf.fgTick;
+    const bool fsCover = tf.fsCover, fgBorderless = tf.fgBorderless;
+    const bool wallNeeded = tf.wallNeeded, liftIfTransform = tf.liftIfTransform;
+    const PointerMap pm = MapPointer(t, inspect, lvl, dt, fsCover, cur, curDx, curDy, dx, dy);
+    const bool freeCursor = pm.freeCursor, gameCursor = pm.gameCursor;
+    MapResult r = pm.r;
+    StepTracking(t, lvl, inspect, fsCover, panArmed, kbHook, dt, wallNeeded, cur, curDx, curDy, r);
+    ProbeClicks(t, lvl, cur, r);
+    CommitInspectClicks(t, r);
+    // Fullscreen-game tell for the per-tick perf levers (issue #148): crop the capture copy to
+    // the magnified region (gameCrop), skip the periodic topmost backstop, and optionally cap
+    // our own present rate (gameFpsCap). fgTick/fsCover/fgBorderless were read once above.
+    const bool fsGame = fsCover;
+    InstantHybridSwitch(t, enterActive, inspect, fgTick, fsCover, fgBorderless, liftIfTransform);
+    PresentExtras ex = BuildPresentExtras(t, lvl, dt, zoomed, inspect, fsGame, wallNeeded, freeCursor,
+                                          gameCursor, dragFollow, curDx, curDy, rawDx, rawDy, r);
+    const bool doPresent = PaceAndPresent(t, ex, r, lvl, dt, zoomed, fsGame, enterActive);
+    RevealAndHandover(t, enterActive, fsGame);
+    AssertGameInspectSteal(t, inspect);
+    UpdateCursorBaseline(t, inspect, doPresent, dragFollow, lvl, cur, r);
+}
+
 static void RunTick(TickState& t) {
     TickWorkTimer workTimer(t);
     const TickClock clk = BeginTick(t);
@@ -2772,50 +2818,12 @@ static void RunTick(TickState& t) {
     const double lvl = in.lvl;
 
     const TickModes md = ResolveTickModes(t, lvl, now);
-    int rawDx = md.rawDx, rawDy = md.rawDy;
+    const int rawDx = md.rawDx, rawDy = md.rawDy;
     const bool zoomed = md.zoomed, inspect = md.inspect, active = md.active;
     const bool panArmed = md.panArmed;
 
     if (active) {
-        bool enterActive  = !t.prevActive;            // idle -> active (overlay just turned on)
-        bool inspectEnter = inspect && !t.prevInspect;
-        if (enterActive) {
-            EnterSession(t, zoomed, inspect);
-        }
-        if (inspectEnter) {
-            EnterInspect(t, zoomed, rawDx, rawDy);
-        }
-        bool inspectExit = !inspect && t.prevInspect;   // Inspect just turned off but overlay stays (zoomed)
-        if (inspectExit) {
-            ExitInspect(t);
-        }
-        if (recenter) { POINT pt; GetCursorPos(&pt); t.mapper.reset(pt.x - t.mon.x, pt.y - t.mon.y); t.lastSetVirtual = pt; }
-        const PanDelta pd = ResolvePanDelta(t, inspect, lvl, dt, rawDx, rawDy);
-        POINT cur = pd.cur;
-        const int curDx = pd.curDx, curDy = pd.curDy;
-        const int dx = pd.dx, dy = pd.dy;
-        const bool dragFollow = pd.dragFollow;
-        const TickForeground tf = ReadForegroundAndArmWall(t, lvl);
-        const HWND fgTick = tf.fgTick;
-        const bool fsCover = tf.fsCover, fgBorderless = tf.fgBorderless;
-        const bool wallNeeded = tf.wallNeeded, liftIfTransform = tf.liftIfTransform;
-        const PointerMap pm = MapPointer(t, inspect, lvl, dt, fsCover, cur, curDx, curDy, dx, dy);
-        const bool freeCursor = pm.freeCursor, gameCursor = pm.gameCursor;
-        MapResult r = pm.r;
-        StepTracking(t, lvl, inspect, fsCover, panArmed, kbHook, dt, wallNeeded, cur, curDx, curDy, r);
-        ProbeClicks(t, lvl, cur, r);
-        CommitInspectClicks(t, r);
-        // Fullscreen-game tell for the per-tick perf levers (issue #148): crop the capture copy to
-        // the magnified region (gameCrop), skip the periodic topmost backstop, and optionally cap
-        // our own present rate (gameFpsCap). fgTick/fsCover/fgBorderless were read once above.
-        const bool fsGame = fsCover;
-        InstantHybridSwitch(t, enterActive, inspect, fgTick, fsCover, fgBorderless, liftIfTransform);
-        PresentExtras ex = BuildPresentExtras(t, lvl, dt, zoomed, inspect, fsGame, wallNeeded, freeCursor,
-                                              gameCursor, dragFollow, curDx, curDy, rawDx, rawDy, r);
-        const bool doPresent = PaceAndPresent(t, ex, r, lvl, dt, zoomed, fsGame, enterActive);
-        RevealAndHandover(t, enterActive, fsGame);
-        AssertGameInspectSteal(t, inspect);
-        UpdateCursorBaseline(t, inspect, doPresent, dragFollow, lvl, cur, r);
+        RunActiveTick(t, lvl, dt, zoomed, inspect, recenter, panArmed, kbHook, rawDx, rawDy);
     } else if (t.prevActive) {                        // active -> idle: tear the overlay down
         TeardownSession(t);
     } else {
