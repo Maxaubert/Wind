@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/ini_edit.h"
+#include "ini_edit.h"
 using namespace wind;
 
 TEST_CASE("ReadIniValues parses key=value, skipping comments and blanks") {

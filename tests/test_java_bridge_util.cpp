@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/java_bridge_util.h"
+#include "java_bridge_util.h"
 using namespace wind;
 
 TEST_CASE("bridge DLL candidates: JetBrains bundled runtime comes right after the exe's own folder") {

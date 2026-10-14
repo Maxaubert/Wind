@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/detached_view.h"
+#include "detached_view.h"
 using namespace wind;
 
 TEST_CASE("detached map: view from the given centre, cursor fields from the real pointer") {

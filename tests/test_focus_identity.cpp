@@ -1,6 +1,6 @@
 // tests/test_focus_identity.cpp - repeat focus events for the same control keep caret following.
 #include "doctest.h"
-#include "../src/focus_identity.h"
+#include "focus_identity.h"
 using namespace wind;
 
 static FocusKey Key(int fg, int focus, long l, long t, long r, long b) {

@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/hdr_scale.h"
+#include "hdr_scale.h"
 
 using wind::AcceptSdrWhiteNits;
 using wind::ScRgbScale;

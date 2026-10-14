@@ -2,9 +2,9 @@
 // segmented toggle group and engine dropdown (stretched geometry, hit testing, list alignment, arrow-key
 // navigation). All pure; engine_dropdown.cpp / flyout_window.cpp wire them to Win32.
 #include "../third_party/doctest.h"
-#include "../src/tray_app/flyout_model.h"
-#include "../src/tray_app/flyout_icons.h"
-#include "../src/config.h"
+#include "flyout_model.h"
+#include "flyout_icons.h"
+#include "config.h"
 #include <algorithm>
 #include <vector>
 using namespace wind;

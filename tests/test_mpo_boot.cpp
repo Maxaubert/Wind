@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/mpo_boot_logic.h"
+#include "mpo_boot_logic.h"
 
 using namespace wind;
 

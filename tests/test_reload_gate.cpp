@@ -1,6 +1,6 @@
 // tests/test_reload_gate.cpp - config hot-reload decisions (reload_gate.h).
 #include "doctest.h"
-#include "../src/reload_gate.h"
+#include "reload_gate.h"
 using namespace wind;
 
 TEST_CASE("an unreadable ini retries and never takes the mtime or reloads") {

@@ -1,5 +1,5 @@
 #include "../third_party/doctest.h"
-#include "../src/tx_warm.h"
+#include "tx_warm.h"
 
 using namespace wind;
 

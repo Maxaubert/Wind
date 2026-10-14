@@ -12,12 +12,12 @@
 // single-instance handshake, and Wind then starts a fresh tray.
 #include "tray_app.h"
 #include "flyout_tools.h"
-#include "../logging.h"
-#include "../config_path.h"
-#include "../profiles_io.h"
-#include "../profile_switch.h"   // WriteSessionKeep, LaunchWindExe, RevertModelAfterFailedRelaunch
-#include "../tray_items.h"     // IniValues
-#include "../ini_edit.h"
+#include "logging.h"
+#include "config_path.h"
+#include "profiles_io.h"
+#include "profile_switch.h"   // WriteSessionKeep, LaunchWindExe, RevertModelAfterFailedRelaunch
+#include "tray_items.h"     // IniValues
+#include "ini_edit.h"
 #include <string>
 
 namespace wind { namespace TrayApp {

@@ -33,6 +33,14 @@ set "BUILD=%ROOT%build"
 set "OBJ=%BUILD%\obj"
 if not exist "%BUILD%" mkdir "%BUILD%"
 
+rem --- Source folders ---------------------------------------------------------------
+rem src\ is grouped by area (the source map in docs\architecture\01-overview.md). Wind headers are
+rem included by bare file name ("config.h", never a path), so every compile gets every src folder on
+rem its include path. A new folder goes in WIND_INC, and in CORE_SRC when it holds Wind.exe sources.
+rem wind.rc, resource.h and version.h stay in src\ itself: the version readers expect them there.
+set "WIND_INC=/I src /I src\core /I src\engine /I src\render /I src\transform /I src\color /I src\input /I src\cursor /I src\track /I src\zoom /I src\config /I src\tray /I src\platform /I src\tray_app /I src\config_ui"
+set "CORE_SRC=src\core\*.cpp src\render\*.cpp src\transform\*.cpp src\color\*.cpp src\input\*.cpp src\cursor\*.cpp src\track\*.cpp src\zoom\*.cpp src\config\*.cpp src\tray\*.cpp"
+
 if /i "%1"=="test" goto :test
 if /i "%1"=="check" goto :check
 if /i "%1"=="uiaccess" goto :uiaccess
@@ -65,9 +73,9 @@ if not exist "%CORE_OBJ%" mkdir "%CORE_OBJ%"
 rem Compile the app-icon resource (rc.exe ships with the Windows SDK, on PATH via vcvars).
 rc /nologo /fo "%CORE_OBJ%\wind.res" "%ROOT%src\wind.rc"
 if errorlevel 1 (echo [build] rc.exe failed & exit /b 1)
-cl /nologo /std:c++17 /EHsc /O2 /W4 /Zi /DUNICODE /D_UNICODE %~1 ^
+cl /nologo /std:c++17 /EHsc /O2 /W4 /Zi /DUNICODE /D_UNICODE %~1 %WIND_INC% ^
    /Fo"%CORE_OBJ%\\" /Fd"%CORE_OBJ%\\" ^
-   src\*.cpp "%CORE_OBJ%\wind.res" ^
+   %CORE_SRC% "%CORE_OBJ%\wind.res" ^
    /Fe:"%BUILD%\Wind.exe" ^
    /link Magnification.lib Dwmapi.lib user32.lib shell32.lib gdi32.lib Dbghelp.lib ^
    d3d11.lib dxgi.lib dxguid.lib d3dcompiler.lib windowscodecs.lib ole32.lib oleaut32.lib uuid.lib advapi32.lib ^
@@ -87,9 +95,9 @@ if not exist "%OBJ%\tray" mkdir "%OBJ%\tray"
 rc /nologo /fo "%OBJ%\tray\wind_tray.res" "%ROOT%src\tray_app\wind_tray.rc"
 if errorlevel 1 (echo [build] rc.exe failed for WindTray & exit /b 1)
 rem Own object dir (build\obj\tray) so the shared sources never overwrite Wind.exe's .obj files.
-cl /nologo /std:c++17 /EHsc /O2 /W4 /Zi /DUNICODE /D_UNICODE ^
+cl /nologo /std:c++17 /EHsc /O2 /W4 /Zi /DUNICODE /D_UNICODE %WIND_INC% ^
    /Fo"%OBJ%\tray\\" /Fd"%OBJ%\tray\\" ^
-   src\tray_app\*.cpp src\tray_items.cpp src\profiles.cpp src\config.cpp src\logging.cpp src\ini_edit.cpp ^
+   src\tray_app\*.cpp src\tray\tray_items.cpp src\config\profiles.cpp src\config\config.cpp src\core\logging.cpp src\config\ini_edit.cpp ^
    "%OBJ%\tray\wind_tray.res" ^
    /Fe:"%BUILD%\WindTray.exe" ^
    /link user32.lib shell32.lib gdi32.lib Dwmapi.lib Dbghelp.lib shlwapi.lib ole32.lib version.lib ^
@@ -116,9 +124,9 @@ rem Same app-icon resource as Wind.exe (rc.exe ships with the Windows SDK, on PA
 rc /nologo /fo "%OBJ%\config\wind.res" "%ROOT%src\wind.rc"
 if errorlevel 1 (echo [build] rc.exe failed & exit /b 1)
 cl /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE ^
-   /I third_party\webview2\include ^
+   /I third_party\webview2\include %WIND_INC% ^
    /Fo"%OBJ%\config\\" /Fd"%OBJ%\config\\" ^
-   src\config_ui\main.cpp src\ini_edit.cpp src\profiles.cpp src\config.cpp src\logging.cpp "%OBJ%\config\wind.res" ^
+   src\config_ui\main.cpp src\config\ini_edit.cpp src\config\profiles.cpp src\config\config.cpp src\core\logging.cpp "%OBJ%\config\wind.res" ^
    /Fe:"%BUILD%\WindConfig.exe" ^
    /link third_party\webview2\x64\WebView2LoaderStatic.lib ^
    user32.lib shell32.lib shlwapi.lib ole32.lib version.lib advapi32.lib ntdll.lib Dwmapi.lib /SUBSYSTEM:WINDOWS
@@ -136,10 +144,10 @@ rem --- Test build (pure-logic sources only; no <windows.h>) -----------------
 :test
 rem /wd5285 silences a known doctest 2.4.11 header warning under MSVC /W4.
 if not exist "%OBJ%\test" mkdir "%OBJ%\test"
-cl /nologo /std:c++17 /EHsc /W4 /wd5285 /DWIND_TESTS /I third_party ^
+cl /nologo /std:c++17 /EHsc /W4 /wd5285 /DWIND_TESTS /I third_party %WIND_INC% ^
    /Fo"%OBJ%\test\\" /Fd"%OBJ%\test\\" ^
    tests\*.cpp ^
-   src\transform.cpp src\zoom_controller.cpp src\config.cpp src\profiles.cpp src\cursor_mapper.cpp src\lock_detector.cpp src\cursor_lock.cpp src\crosshair.cpp src\ini_edit.cpp src\logging.cpp src\tray_items.cpp src\hitch_record.cpp src\render_params.cpp src\tray_app\tray_pin_logic.cpp ^
+   src\transform\transform.cpp src\zoom\zoom_controller.cpp src\config\config.cpp src\config\profiles.cpp src\cursor\cursor_mapper.cpp src\cursor\lock_detector.cpp src\cursor\cursor_lock.cpp src\cursor\crosshair.cpp src\config\ini_edit.cpp src\core\logging.cpp src\tray\tray_items.cpp src\core\hitch_record.cpp src\render\render_params.cpp src\tray_app\tray_pin_logic.cpp ^
    /Fe:"%BUILD%\wind_tests.exe"
 if errorlevel 1 exit /b 1
 rem Runs from the repo root (the current directory): the tests find tests\fixtures from there.
@@ -149,13 +157,13 @@ exit /b %errorlevel%
 rem --- Compile-only check (no link; verifies all sources compile) -----------
 :check
 for %%D in (core tray config) do if not exist "%OBJ%\check\%%D" mkdir "%OBJ%\check\%%D"
-cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c /Fo"%OBJ%\check\core\\" src\*.cpp
+cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c %WIND_INC% /Fo"%OBJ%\check\core\\" %CORE_SRC%
 if errorlevel 1 exit /b 1
 rem WindTray.exe sources (issue #291); own object dir, its main.cpp would overwrite Wind's main.obj.
-cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c /Fo"%OBJ%\check\tray\\" src\tray_app\*.cpp
+cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c %WIND_INC% /Fo"%OBJ%\check\tray\\" src\tray_app\*.cpp
 if errorlevel 1 exit /b 1
 rem WindConfig.exe's host (same flags as :config); own object dir for the same reason.
-cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c /I third_party\webview2\include ^
+cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c /I third_party\webview2\include %WIND_INC% ^
    /Fo"%OBJ%\check\config\\" src\config_ui\main.cpp
 exit /b %errorlevel%
 

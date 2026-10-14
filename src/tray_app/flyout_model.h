@@ -10,9 +10,9 @@
 #include <cstdlib>
 #include <string>
 #include <vector>
-#include "../tick_stats.h"
-#include "../tray_items.h"
-#include "../tray_status.h"
+#include "tick_stats.h"
+#include "tray_items.h"
+#include "tray_status.h"
 #include "flyout_tools.h"
 
 namespace wind { namespace Flyout {

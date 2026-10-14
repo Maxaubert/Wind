@@ -5,7 +5,7 @@
 // Spec: docs/specs/2026-10-02-tray-tools-design.md.
 #include <string>
 #include <vector>
-#include "../ini_edit.h"   // TrimWs
+#include "ini_edit.h"   // TrimWs
 
 namespace wind { namespace Flyout {
 

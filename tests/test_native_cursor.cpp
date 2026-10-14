@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/native_cursor.h"
+#include "native_cursor.h"
 
 using namespace wind;
 

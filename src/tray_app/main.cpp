@@ -5,11 +5,11 @@
 // UIAccess token). We serve exactly that process and exit when it exits, removing the icon on the
 // way out, so a Wind killed from Task Manager leaves no ghost icon. Single instance per session.
 #include "tray_app.h"
-#include "../logging.h"
-#include "../tray_ipc.h"
-#include "../config.h"
-#include "../config_path.h"
-#include "../profiles_io.h"
+#include "logging.h"
+#include "tray_ipc.h"
+#include "config.h"
+#include "config_path.h"
+#include "profiles_io.h"
 #include "tray_pin.h"
 #include <shellapi.h>
 #include <cwchar>

@@ -14,7 +14,7 @@
 #include "tray_app.h"
 #include "flyout_draw.h"
 #include "flyout_model.h"
-#include "../logging.h"
+#include "logging.h"
 #include <shellapi.h>
 #include <string>
 

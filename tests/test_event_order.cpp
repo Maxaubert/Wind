@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/event_order.h"
+#include "event_order.h"
 using namespace wind;
 
 TEST_CASE("a raw UP is stale only when the hook saw a later DOWN of the same input") {

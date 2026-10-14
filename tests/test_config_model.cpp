@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/config.h"
+#include "config.h"
 
 using namespace wind;
 

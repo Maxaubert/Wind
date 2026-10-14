@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/pan_glide.h"
+#include "pan_glide.h"
 #include <cmath>
 
 using namespace wind;

@@ -14,20 +14,20 @@
 #include <sstream>
 #include <map>
 #include <memory>
-#include "../ini_edit.h"
+#include "ini_edit.h"
 #include "wind_watchdog.h"
 #include "bridge_json.h"
-#include "../mpo_boot.h"
-#include "../config_path.h"
-#include "../config.h"
-#include "../profiles.h"
-#include "../profiles_io.h"
-#include "../logging.h"
-#include "../tray_ipc.h"   // kQuitEventName
-#include "../profile_switch.h"   // SwitchProfile, LaunchWindExe, session.keep: shared with the tray
-#include "../tray_app/flyout_palettes.h"   // the theme colours (generated): the window background
+#include "mpo_boot.h"
+#include "config_path.h"
+#include "config.h"
+#include "profiles.h"
+#include "profiles_io.h"
+#include "logging.h"
+#include "tray_ipc.h"   // kQuitEventName
+#include "profile_switch.h"   // SwitchProfile, LaunchWindExe, session.keep: shared with the tray
+#include "flyout_palettes.h"   // the theme colours (generated): the window background
 #include <vector>
-#include "../resource.h"
+#include "resource.h"
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "comdlg32.lib")
 #pragma comment(lib, "gdi32.lib")

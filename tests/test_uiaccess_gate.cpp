@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/uiaccess_gate.h"
+#include "uiaccess_gate.h"
 #include <cwchar>
 
 using wind::MustRefuseWithoutUiAccess;

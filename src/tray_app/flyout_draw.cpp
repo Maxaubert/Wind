@@ -4,7 +4,7 @@
 #include "flyout_icons.h"
 #include "flyout_palettes.h"
 #include "svg_path.h"
-#include "../resource.h"
+#include "resource.h"
 #include <d2d1helper.h>
 #include <dwrite_1.h>
 #include <wincodec.h>

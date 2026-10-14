@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/edge_pan.h"
+#include "edge_pan.h"
 using namespace wind;
 
 // level 4 on 3840x2160: view 960x540; at (1920,1080) the band is x 1584..2256, y 891..1269.

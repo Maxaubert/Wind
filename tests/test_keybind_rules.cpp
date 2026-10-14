@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/keybind_rules.h"
+#include "keybind_rules.h"
 #include <fstream>
 #include <sstream>
 #include <string>

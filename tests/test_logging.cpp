@@ -1,6 +1,6 @@
 // tests/test_logging.cpp
 #include "doctest.h"
-#include "../src/logging.h"
+#include "logging.h"
 using namespace wind;
 
 TEST_CASE("LogLevelName maps levels") {

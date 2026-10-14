@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/zoom_ladder.h"
+#include "zoom_ladder.h"
 #include <cmath>
 
 using namespace wind;

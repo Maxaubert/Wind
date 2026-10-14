@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/idle_policy.h"
+#include "idle_policy.h"
 using namespace wind;
 
 static IdleInputs Quiet() {

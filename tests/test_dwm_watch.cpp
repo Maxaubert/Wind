@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/dwm_watch.h"
+#include "dwm_watch.h"
 
 using namespace wind;
 

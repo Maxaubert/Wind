@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/engine_pick.h"
+#include "engine_pick.h"
 
 using wind::EnginePickInputs;
 using wind::ShouldPickTransform;

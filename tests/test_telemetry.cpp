@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/test_telemetry.h"
+#include "test_telemetry.h"
 #include <cstring>
 #include <string>
 

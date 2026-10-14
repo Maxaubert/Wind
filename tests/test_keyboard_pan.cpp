@@ -1,6 +1,6 @@
 #include <cmath>
 #include "doctest.h"
-#include "../src/keyboard_pan.h"
+#include "keyboard_pan.h"
 using namespace wind;
 
 // Index order: Left, Right, Up, Down.

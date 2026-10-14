@@ -1,6 +1,6 @@
 // tests/test_log_queue.cpp - the non-blocking log queue (#361).
 #include "doctest.h"
-#include "../src/log_queue.h"
+#include "log_queue.h"
 #include <thread>
 #include <vector>
 using namespace wind;

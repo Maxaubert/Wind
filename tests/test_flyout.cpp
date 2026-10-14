@@ -1,8 +1,8 @@
 #include "../third_party/doctest.h"
-#include "../src/tray_app/flyout_model.h"
-#include "../src/tray_app/flyout_icons.h"
-#include "../src/tray_app/flyout_palettes.h"
-#include "../src/tray_app/svg_path.h"
+#include "flyout_model.h"
+#include "flyout_icons.h"
+#include "flyout_palettes.h"
+#include "svg_path.h"
 using namespace wind;
 using namespace wind::Flyout;
 

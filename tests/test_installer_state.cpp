@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/installer_state.h"
+#include "installer_state.h"
 
 using namespace wind;
 

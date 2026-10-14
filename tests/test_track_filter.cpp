@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/track_filter.h"
+#include "track_filter.h"
 using namespace wind;
 
 TEST_CASE("caret inside its element is trusted; the field-recorded Firefox iframe caret is not") {

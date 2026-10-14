@@ -1,6 +1,6 @@
 #include "doctest.h"
-#include "../src/typing_key.h"
-#include "../src/view_target.h"
+#include "typing_key.h"
+#include "view_target.h"
 using namespace wind;
 
 TEST_CASE("typing key: only a fresh non-modifier down counts (#328, review #349)") {

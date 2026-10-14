@@ -2,7 +2,7 @@
 // atomic write/read, the missing-vs-unreadable contract and profile listing.
 #include "doctest.h"
 #include <windows.h>
-#include "../src/profiles_io.h"
+#include "profiles_io.h"
 using namespace wind;
 
 namespace {

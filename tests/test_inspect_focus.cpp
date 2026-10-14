@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/inspect_focus.h"
+#include "inspect_focus.h"
 
 using wind::ShouldGameInspect;
 using wind::InspectLockTell;

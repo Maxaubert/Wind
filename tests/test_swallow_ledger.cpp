@@ -1,6 +1,6 @@
 // tests/test_swallow_ledger.cpp - the hook swallow records (swallow_ledger.h).
 #include "doctest.h"
-#include "../src/swallow_ledger.h"
+#include "swallow_ledger.h"
 #include <thread>
 using namespace wind;
 

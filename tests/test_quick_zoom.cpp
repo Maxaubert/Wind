@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/zoom_controller.h"
+#include "zoom_controller.h"
 using namespace wind;
 
 TEST_CASE("ApplyQuickZoom: zoomed above 200% snaps out and remembers") {

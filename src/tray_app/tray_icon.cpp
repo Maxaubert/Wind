@@ -1,5 +1,5 @@
 #include "tray_app.h"
-#include "../resource.h"
+#include "resource.h"
 #include <shellapi.h>
 
 namespace wind { namespace TrayApp {

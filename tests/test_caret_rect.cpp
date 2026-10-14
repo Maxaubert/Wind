@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "../src/caret_rect.h"
+#include "caret_rect.h"
 using namespace wind;
 
 TEST_CASE("caret rect: a rect spanning blank lines above is trimmed to its bottom line (#337, UIA)") {
