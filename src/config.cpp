@@ -123,168 +123,42 @@ int EffectiveSamplingMode(int iniValue, bool mpoDisabledAtBoot, bool mpoDisabled
     return iniValue;
 }
 
-Config ParseConfig(const std::string& text) {
-    Config c;
-    // A UTF-8 BOM (Notepad's "UTF-8 with BOM") would glue itself to the first key and lose it.
-    std::istringstream in(text.compare(0, 3, "\xEF\xBB\xBF") == 0 ? text.substr(3) : text);
-    std::string line;
-    bool haveRenderScaling = false;   // issue #456: without the key, `bilinear` decides (migration)
-    while (std::getline(in, line)) {
-        std::string t = TrimWs(line);
-        if (t.empty() || t[0] == ';' || t[0] == '#') continue;
-        size_t eq = t.find('=');
-        if (eq == std::string::npos) continue;
-        std::string key = TrimWs(t.substr(0, eq));
-        std::string val = TrimWs(t.substr(eq + 1));
-        if (key.empty()) continue;
-        // The exe LISTS must accept an empty value: "key=" with nothing after it is how the user
-        // clears one, and it is exactly what the config UI writes when the last entry is removed.
-        // They are handled before the empty-value guard below, which exists because the numeric
-        // settings cannot take one (stoi("") throws). Without this, clearing a list in the UI wrote
-        // the ini correctly and the core silently kept the previous value - including the shipped
-        // defaults, so a list with defaults could never be emptied at all.
-        if (key == "transformExclude") { c.transformExclude = val; continue; }
-        if (key == "renderExclude")    { c.renderExclude    = val; continue; }
-        if (key == "noSwallowApps")    { c.noSwallowApps    = val; continue; }
-        if (key == "lockApps")         { c.lockApps         = val; continue; }
-        // Per-window-type engine preferences. Parsed here with the lists rather than below,
-        // because an empty value must mean "back to auto" and the numeric guard would skip it.
-        if (key == "engineGame")    { c.engineGame    = val.empty() ? "auto" : val; continue; }
-        if (key == "engineAcrylic") { c.engineAcrylic = val.empty() ? "auto" : val; continue; }
-        if (key == "engineDesktop") { c.engineDesktop = val.empty() ? "auto" : val; continue; }
-        if (key == "engineOther")   { c.engineOther   = val.empty() ? "auto" : val; continue; }
-        if (val.empty()) continue;
-        try {
-            if (key == "zoomInButton")          c.zoomInButton = ParseIntStrict(val);
-            else if (key == "zoomOutButton")    c.zoomOutButton = ParseIntStrict(val);
-            else if (key == "zoomInButton2")    c.zoomInButton2 = ParseIntStrict(val);
-            else if (key == "zoomOutButton2")   c.zoomOutButton2 = ParseIntStrict(val);
-            else if (key == "recenterVk")       c.recenterVk = ParseIntStrict(val);
-            else if (key == "cursorLockVk")     c.cursorLockVk = ParseIntStrict(val);
-            else if (key == "recenterMods")     c.recenterMods = ParseIntStrict(val);
-            else if (key == "cursorLockMods")   c.cursorLockMods = ParseIntStrict(val);
-            else if (key == "panLeftVk")        c.panLeftVk = ParseIntStrict(val);
-            else if (key == "panLeftMods")      c.panLeftMods = ParseIntStrict(val);
-            else if (key == "panRightVk")       c.panRightVk = ParseIntStrict(val);
-            else if (key == "panRightMods")     c.panRightMods = ParseIntStrict(val);
-            else if (key == "panUpVk")          c.panUpVk = ParseIntStrict(val);
-            else if (key == "panUpMods")        c.panUpMods = ParseIntStrict(val);
-            else if (key == "panDownVk")        c.panDownVk = ParseIntStrict(val);
-            else if (key == "panDownMods")      c.panDownMods = ParseIntStrict(val);
-            else if (key == "panSpeed")         c.panSpeed = ParseDoubleStrict(val);
-            else if (key == "zoomTrace")        c.zoomTrace = ParseIntStrict(val);
-            else if (key == "hitchLog")         c.hitchLog = ParseIntStrict(val);
-            else if (key == "hitchThresholdPct") c.hitchThresholdPct = std::clamp(ParseIntStrict(val), 110, 1000);
-            // The chain is split in two: MSVC caps if/else nesting depth (C1061). Keys are unique,
-            // so a second chain changes nothing.
-            if (key == "hideCursorVk")     c.hideCursorVk = ParseIntStrict(val);
-            else if (key == "hideCursorMods")   c.hideCursorMods = ParseIntStrict(val);
-            else if (key == "zoomInVk")         c.zoomInVk = ParseIntStrict(val);
-            else if (key == "zoomOutVk")        c.zoomOutVk = ParseIntStrict(val);
-            else if (key == "zoomInVk2")        c.zoomInVk2 = ParseIntStrict(val);
-            else if (key == "zoomOutVk2")       c.zoomOutVk2 = ParseIntStrict(val);
-            else if (key == "zoomInMods")       c.zoomInMods = ParseIntStrict(val);
-            else if (key == "zoomOutMods")      c.zoomOutMods = ParseIntStrict(val);
-            else if (key == "zoomInMods2")      c.zoomInMods2 = ParseIntStrict(val);
-            else if (key == "zoomOutMods2")     c.zoomOutMods2 = ParseIntStrict(val);
-            else if (key == "zoomInButtonMods")   c.zoomInButtonMods = ParseIntStrict(val);
-            else if (key == "zoomOutButtonMods")  c.zoomOutButtonMods = ParseIntStrict(val);
-            else if (key == "zoomInButton2Mods")  c.zoomInButton2Mods = ParseIntStrict(val);
-            else if (key == "zoomOutButton2Mods") c.zoomOutButton2Mods = ParseIntStrict(val);
-            else if (key == "zoomWheelMods")      c.zoomWheelMods = ParseIntStrict(val);
-            else if (key == "panKeysOn")          c.panKeysOn = ParseIntStrict(val) != 0 ? 1 : 0;
-            else if (key == "hideCursorOn")       c.hideCursorOn = ParseIntStrict(val) != 0 ? 1 : 0;
-            else if (key == "cursorLockOn")       c.cursorLockOn = ParseIntStrict(val) != 0 ? 1 : 0;
-            else if (key == "maxLevel")         c.maxLevel = ParseDoubleStrict(val);
-            else if (key == "zoomInSpeed")      c.zoomInSpeed = ParseDoubleStrict(val);
-            else if (key == "zoomOutSpeed")     c.zoomOutSpeed = ParseDoubleStrict(val);
-            else if (key == "smoothZoom")       c.smoothZoom = ParseIntStrict(val);
-            else if (key == "smoothZoomAccel")  c.smoothZoomAccel = ParseDoubleStrict(val);
-            else if (key == "smoothZoomRamp")   c.smoothZoomRamp = ParseDoubleStrict(val);
-            else if (key == "zoomEaseOutMs")    c.zoomEaseOutMs = ParseIntStrict(val);
-            else if (key == "vsync")            c.vsync = ParseIntStrict(val);
-            else if (key == "dwmFlush")         c.dwmFlush = ParseIntStrict(val);
-            else if (key == "diagnostics")      c.diagnostics = ParseIntStrict(val);
-            else if (key == "cursorSensitivity")  c.cursorSensitivity = ParseDoubleStrict(val);
-            else if (key == "panGlideMaxPx")      c.panGlideMaxPx = ParseIntStrict(val);
-            else if (key == "gameCursorLagMs")    c.gameCursorLagMs = ParseIntStrict(val);
-            else if (key == "cursorConstantSize") c.cursorConstantSize = ParseIntStrict(val);
-            else if (key == "trayPinned")         c.trayPinned = ParseIntStrict(val);
-            else if (key == "cursorVisibility")   c.cursorVisibility = val;
-            else if (key == "model")              c.model = val;
-            else if (key == "fastPan")            c.fastPan = ParseIntStrict(val);
-            else if (key == "smoothPan")          c.smoothPan = ParseIntStrict(val);
-            else if (key == "magInputTransform")  c.magInputTransform = ParseIntStrict(val);
-            else if (key == "bilinear")           c.bilinear = ParseIntStrict(val);
-            else if (key == "renderScaling")      { c.renderScaling = ParseIntStrict(val); haveRenderScaling = true; }
-            else if (key == "upscaleTiming")      c.upscaleTiming = ParseIntStrict(val);
-            else if (key == "sharpness")          c.sharpness = ParseDoubleStrict(val);
-            else if (key == "zorderBand")         c.zorderBand = ParseIntStrict(val);
-            else if (key == "brightness")         c.brightness = ParseDoubleStrict(val);
-            else if (key == "colorWarmPct")       c.colorWarmPct = ParseIntStrict(val);
-            else if (key == "colorDimPct")        c.colorDimPct = ParseIntStrict(val);
-            else if (key == "hdrTonemap")         c.hdrTonemap = ParseIntStrict(val);
-            else if (key == "multiMonitor")       c.multiMonitor = ParseIntStrict(val);
-            else if (key == "cropCapture")        c.cropCapture = ParseIntStrict(val);
-            else if (key == "lowGpuPriority")     c.lowGpuPriority = ParseIntStrict(val);
-            else if (key == "gpuPriority")        c.gpuPriority = ParseIntStrict(val);
-            else if (key == "gameCrop")           c.gameCrop = ParseIntStrict(val);
-            else if (key == "tdrTest")            c.tdrTest = ParseIntStrict(val);
-            else if (key == "probeClicks")        c.probeClicks = ParseIntStrict(val);
-            else if (key == "desktopTransform")   c.desktopTransform = ParseIntStrict(val);
-            else if (key == "cursorBandAuto")     c.cursorBandAuto = ParseIntStrict(val);
-            else if (key == "trackCaret")         c.trackCaret = ParseIntStrict(val);
-            else if (key == "trackFocus")         c.trackFocus = ParseIntStrict(val);
-            else if (key == "trackAlign")         c.trackAlign = ParseIntStrict(val);
-            else if (key == "mouseAlign")         c.mouseAlign = ParseIntStrict(val);
-            else if (key == "trackGlideMs")       c.trackGlideMs = ParseIntStrict(val);
-            else if (key == "trackMarginPct")     c.trackMarginPct = ParseIntStrict(val);
-            else if (key == "mouseMarginPct")     c.mouseMarginPct = ParseIntStrict(val);
-            else if (key == "trackLog")           c.trackLog = ParseIntStrict(val);
-            else if (key == "ixDecimate")         c.ixDecimate = ParseIntStrict(val);
-            else if (key == "mpoBuster")          c.mpoBuster = ParseIntStrict(val);
-            else if (key == "txSamplingMode") {
-                // Only 0 (nearest), 1 (smooth) and -1 (leave DWM alone) are meaningful. 2..4 are
-                // kernel aliases of nearest that would slip past the MPO sampling guard; anything
-                // else folds to nearest so EffectiveSamplingMode guards it (review 2026-10-09 #23).
-                const int v = ParseIntStrict(val);
-                c.txSamplingMode = (v == 1 || v == -1) ? v : 0;
-            }
-            else if (key == "txWarmMode")         c.txWarmMode = ParseIntStrict(val);
-            else if (key == "txTrace")            c.txTrace = ParseIntStrict(val);
-            else if (key == "txRestLevel")        c.txRestLevel = ParseDoubleStrict(val);
-            else if (key == "launchQuiesce")      c.launchQuiesce = ParseIntStrict(val);
-            else if (key == "txWarmHz")           c.txWarmHz = ParseIntStrict(val);
-            else if (key == "mpoNearestGuard")    c.mpoNearestGuard = ParseIntStrict(val);
-            else if (key == "txNativeCursor")     c.txNativeCursor = ParseIntStrict(val);
-            else if (key == "txSmoothLadder")     c.txSmoothLadder = ParseIntStrict(val);
-            else if (key == "txRampMinStep")      c.txRampMinStep = ParseIntStrict(val);
-            else if (key == "txRampMinFrom")      c.txRampMinFrom = ParseDoubleStrict(val);
-            else if (key == "mpoGuardTest")       c.mpoGuardTest = ParseIntStrict(val);
-            else if (key == "mpoGuard")           c.mpoGuard = ParseIntStrict(val);
-            else if (key == "mpoGuardLiftWall")   c.mpoGuardLiftWall = ParseIntStrict(val);
-            else if (key == "lockedBallistics")   c.lockedBallistics = ParseIntStrict(val);
-            else if (key == "edgeClip")           c.edgeClip = ParseIntStrict(val);
-            else if (key == "txMaxStepPct")       c.txMaxStepPct = ParseIntStrict(val);
-            else if (key == "warpLock")           c.warpLock = ParseIntStrict(val);
-            else if (key == "lockForce")          c.lockForce = ParseIntStrict(val);
-            else if (key == "txEdgeMargin")       c.txEdgeMargin = ParseDoubleStrict(val);
-            else if (key == "gameFpsCap")         c.gameFpsCap = ParseIntStrict(val);
-            else if (key == "onboarded")          c.onboarded = ParseIntStrict(val);
-            else if (key == "quickZoomDefault")   c.quickZoomDefault = ParseDoubleStrict(val);
-            else if (key == "quickZoomModifier")  c.quickZoomModifier = val;
-            else if (key == "quickZoomHotkeyMode") c.quickZoomHotkeyMode = ParseIntStrict(val);
-            else if (key == "quickZoomVk")        c.quickZoomVk = ParseIntStrict(val);
-            else if (key == "quickZoomMods")      c.quickZoomMods = ParseIntStrict(val);
-            else if (key == "outline")            c.outline = ParseIntStrict(val);
-            else if (key == "outlineThickness")   c.outlineThickness = ParseIntStrict(val);
-            else if (key == "outlineColor")     { c.outlineColor = val; ParseHexColor(val, c.outlineR, c.outlineG, c.outlineB); }
-            else if (key == "outlineLowZoomOnly") c.outlineLowZoomOnly = ParseIntStrict(val);
-            else if (key == "outlineLowZoomMax")  c.outlineLowZoomMax = ParseDoubleStrict(val);
-            else if (key == "outlineIdleHide")    c.outlineIdleHide = ParseIntStrict(val);
-            else if (key == "outlineIdleSeconds") c.outlineIdleSeconds = ParseDoubleStrict(val);
-        } catch (...) { /* keep default on bad value */ }
-    }
+// ParseConfig's last pass: unsafe binds and switched-off extra keys read as unbound.
+static void SanitizeBinds(Config& c) {
+    // Reject keybinds to keys Wind must never swallow (see IsForbiddenBindVk). A bound key is
+    // eaten system-wide, so binding e.g. Backspace or the Windows key would make it unusable
+    // everywhere; treat a forbidden bind as unbound regardless of how it got into the ini.
+    // Since #285 every bind goes through the one shared rule set (src/keybind_rules.h), which also
+    // refuses typing keys alone, Shift/AltGr + a typing key and system-reserved combos: an unsafe bind
+    // in an ini (hand-edited, or from an older version) reads as unbound.
+    auto sanitizeKey = [](int& vk, int* mods) {
+        const int m = mods ? *mods : 0;
+        if (CheckKeyBind(vk, m) != BindVerdict::Ok) { vk = 0; if (mods) *mods = 0; }
+    };
+    sanitizeKey(c.zoomInVk, &c.zoomInMods);    sanitizeKey(c.zoomInVk2, &c.zoomInMods2);
+    sanitizeKey(c.zoomOutVk, &c.zoomOutMods);  sanitizeKey(c.zoomOutVk2, &c.zoomOutMods2);
+    sanitizeKey(c.recenterVk, &c.recenterMods);
+    sanitizeKey(c.cursorLockVk, &c.cursorLockMods);
+    sanitizeKey(c.panLeftVk, &c.panLeftMods);  sanitizeKey(c.panRightVk, &c.panRightMods);
+    sanitizeKey(c.panUpVk, &c.panUpMods);      sanitizeKey(c.panDownVk, &c.panDownMods);
+    sanitizeKey(c.hideCursorVk, &c.hideCursorMods);
+    sanitizeKey(c.quickZoomVk, &c.quickZoomMods);
+    auto sanitizeButton = [](int& b, int& mods) {
+        if (CheckClickBind(b, mods) != BindVerdict::Ok) { b = 0; mods = 0; }
+    };
+    sanitizeButton(c.zoomInButton, c.zoomInButtonMods);    sanitizeButton(c.zoomInButton2, c.zoomInButton2Mods);
+    sanitizeButton(c.zoomOutButton, c.zoomOutButtonMods);  sanitizeButton(c.zoomOutButton2, c.zoomOutButton2Mods);
+    if (c.zoomWheelMods != 0 && CheckWheelBind(c.zoomWheelMods) != BindVerdict::Ok) c.zoomWheelMods = 0;
+    // Extra-key switches (#318): off = unbound as far as the core is concerned (no hook tracking, no
+    // swallowing, no RegisterHotKey). The ini keeps the binding; only this parsed copy is cleared.
+    if (!c.panKeysOn) { c.panLeftVk = c.panRightVk = c.panUpVk = c.panDownVk = 0;
+                        c.panLeftMods = c.panRightMods = c.panUpMods = c.panDownMods = 0; }
+    if (!c.hideCursorOn) { c.hideCursorVk = 0; c.hideCursorMods = 0; }
+    if (!c.cursorLockOn) { c.cursorLockVk = 0; c.cursorLockMods = 0; }
+}
+
+// ParseConfig's range pass, after every key is read. haveRenderScaling: the ini had the key (#456).
+static void ClampConfig(Config& c, bool haveRenderScaling) {
     // Clamp numeric fields to their documented ranges. The ini is a hand-editable surface, and an
     // out-of-range value (e.g. maxLevel=0, which would invert ZoomController's clamp and disable zoom,
     // or a negative ramp) would otherwise silently break behavior with no feedback. Ranges mirror the
@@ -353,36 +227,192 @@ Config ParseConfig(const std::string& text) {
     // #148 - which the mapper's MPO-aware pan wall now guards at ANY level, so maxLevel is one
     // shared setting across all models. High levels still cost DWM re-scale time; that is a
     // perf trade the user owns, not a crash.)
-    // Reject keybinds to keys Wind must never swallow (see IsForbiddenBindVk). A bound key is
-    // eaten system-wide, so binding e.g. Backspace or the Windows key would make it unusable
-    // everywhere; treat a forbidden bind as unbound regardless of how it got into the ini.
-    // Since #285 every bind goes through the one shared rule set (src/keybind_rules.h), which also
-    // refuses typing keys alone, Shift/AltGr + a typing key and system-reserved combos: an unsafe bind
-    // in an ini (hand-edited, or from an older version) reads as unbound.
-    auto sanitizeKey = [](int& vk, int* mods) {
-        const int m = mods ? *mods : 0;
-        if (CheckKeyBind(vk, m) != BindVerdict::Ok) { vk = 0; if (mods) *mods = 0; }
-    };
-    sanitizeKey(c.zoomInVk, &c.zoomInMods);    sanitizeKey(c.zoomInVk2, &c.zoomInMods2);
-    sanitizeKey(c.zoomOutVk, &c.zoomOutMods);  sanitizeKey(c.zoomOutVk2, &c.zoomOutMods2);
-    sanitizeKey(c.recenterVk, &c.recenterMods);
-    sanitizeKey(c.cursorLockVk, &c.cursorLockMods);
-    sanitizeKey(c.panLeftVk, &c.panLeftMods);  sanitizeKey(c.panRightVk, &c.panRightMods);
-    sanitizeKey(c.panUpVk, &c.panUpMods);      sanitizeKey(c.panDownVk, &c.panDownMods);
-    sanitizeKey(c.hideCursorVk, &c.hideCursorMods);
-    sanitizeKey(c.quickZoomVk, &c.quickZoomMods);
-    auto sanitizeButton = [](int& b, int& mods) {
-        if (CheckClickBind(b, mods) != BindVerdict::Ok) { b = 0; mods = 0; }
-    };
-    sanitizeButton(c.zoomInButton, c.zoomInButtonMods);    sanitizeButton(c.zoomInButton2, c.zoomInButton2Mods);
-    sanitizeButton(c.zoomOutButton, c.zoomOutButtonMods);  sanitizeButton(c.zoomOutButton2, c.zoomOutButton2Mods);
-    if (c.zoomWheelMods != 0 && CheckWheelBind(c.zoomWheelMods) != BindVerdict::Ok) c.zoomWheelMods = 0;
-    // Extra-key switches (#318): off = unbound as far as the core is concerned (no hook tracking, no
-    // swallowing, no RegisterHotKey). The ini keeps the binding; only this parsed copy is cleared.
-    if (!c.panKeysOn) { c.panLeftVk = c.panRightVk = c.panUpVk = c.panDownVk = 0;
-                        c.panLeftMods = c.panRightMods = c.panUpMods = c.panDownMods = 0; }
-    if (!c.hideCursorOn) { c.hideCursorVk = 0; c.hideCursorMods = 0; }
-    if (!c.cursorLockOn) { c.cursorLockVk = 0; c.cursorLockMods = 0; }
+}
+
+// One non-empty key=value: each key keeps its own parser (ParseIntStrict, ParseDoubleStrict or the
+// raw string). A bad number throws and ParseConfig's catch keeps the default. haveRenderScaling is
+// set when the renderScaling key is seen (issue #456).
+static void ApplyValueKey(Config& c, const std::string& key, const std::string& val, bool& haveRenderScaling) {
+    if (key == "zoomInButton")          c.zoomInButton = ParseIntStrict(val);
+    else if (key == "zoomOutButton")    c.zoomOutButton = ParseIntStrict(val);
+    else if (key == "zoomInButton2")    c.zoomInButton2 = ParseIntStrict(val);
+    else if (key == "zoomOutButton2")   c.zoomOutButton2 = ParseIntStrict(val);
+    else if (key == "recenterVk")       c.recenterVk = ParseIntStrict(val);
+    else if (key == "cursorLockVk")     c.cursorLockVk = ParseIntStrict(val);
+    else if (key == "recenterMods")     c.recenterMods = ParseIntStrict(val);
+    else if (key == "cursorLockMods")   c.cursorLockMods = ParseIntStrict(val);
+    else if (key == "panLeftVk")        c.panLeftVk = ParseIntStrict(val);
+    else if (key == "panLeftMods")      c.panLeftMods = ParseIntStrict(val);
+    else if (key == "panRightVk")       c.panRightVk = ParseIntStrict(val);
+    else if (key == "panRightMods")     c.panRightMods = ParseIntStrict(val);
+    else if (key == "panUpVk")          c.panUpVk = ParseIntStrict(val);
+    else if (key == "panUpMods")        c.panUpMods = ParseIntStrict(val);
+    else if (key == "panDownVk")        c.panDownVk = ParseIntStrict(val);
+    else if (key == "panDownMods")      c.panDownMods = ParseIntStrict(val);
+    else if (key == "panSpeed")         c.panSpeed = ParseDoubleStrict(val);
+    else if (key == "zoomTrace")        c.zoomTrace = ParseIntStrict(val);
+    else if (key == "hitchLog")         c.hitchLog = ParseIntStrict(val);
+    else if (key == "hitchThresholdPct") c.hitchThresholdPct = std::clamp(ParseIntStrict(val), 110, 1000);
+    // The chain is split in two: MSVC caps if/else nesting depth (C1061). Keys are unique,
+    // so a second chain changes nothing.
+    if (key == "hideCursorVk")     c.hideCursorVk = ParseIntStrict(val);
+    else if (key == "hideCursorMods")   c.hideCursorMods = ParseIntStrict(val);
+    else if (key == "zoomInVk")         c.zoomInVk = ParseIntStrict(val);
+    else if (key == "zoomOutVk")        c.zoomOutVk = ParseIntStrict(val);
+    else if (key == "zoomInVk2")        c.zoomInVk2 = ParseIntStrict(val);
+    else if (key == "zoomOutVk2")       c.zoomOutVk2 = ParseIntStrict(val);
+    else if (key == "zoomInMods")       c.zoomInMods = ParseIntStrict(val);
+    else if (key == "zoomOutMods")      c.zoomOutMods = ParseIntStrict(val);
+    else if (key == "zoomInMods2")      c.zoomInMods2 = ParseIntStrict(val);
+    else if (key == "zoomOutMods2")     c.zoomOutMods2 = ParseIntStrict(val);
+    else if (key == "zoomInButtonMods")   c.zoomInButtonMods = ParseIntStrict(val);
+    else if (key == "zoomOutButtonMods")  c.zoomOutButtonMods = ParseIntStrict(val);
+    else if (key == "zoomInButton2Mods")  c.zoomInButton2Mods = ParseIntStrict(val);
+    else if (key == "zoomOutButton2Mods") c.zoomOutButton2Mods = ParseIntStrict(val);
+    else if (key == "zoomWheelMods")      c.zoomWheelMods = ParseIntStrict(val);
+    else if (key == "panKeysOn")          c.panKeysOn = ParseIntStrict(val) != 0 ? 1 : 0;
+    else if (key == "hideCursorOn")       c.hideCursorOn = ParseIntStrict(val) != 0 ? 1 : 0;
+    else if (key == "cursorLockOn")       c.cursorLockOn = ParseIntStrict(val) != 0 ? 1 : 0;
+    else if (key == "maxLevel")         c.maxLevel = ParseDoubleStrict(val);
+    else if (key == "zoomInSpeed")      c.zoomInSpeed = ParseDoubleStrict(val);
+    else if (key == "zoomOutSpeed")     c.zoomOutSpeed = ParseDoubleStrict(val);
+    else if (key == "smoothZoom")       c.smoothZoom = ParseIntStrict(val);
+    else if (key == "smoothZoomAccel")  c.smoothZoomAccel = ParseDoubleStrict(val);
+    else if (key == "smoothZoomRamp")   c.smoothZoomRamp = ParseDoubleStrict(val);
+    else if (key == "zoomEaseOutMs")    c.zoomEaseOutMs = ParseIntStrict(val);
+    else if (key == "vsync")            c.vsync = ParseIntStrict(val);
+    else if (key == "dwmFlush")         c.dwmFlush = ParseIntStrict(val);
+    else if (key == "diagnostics")      c.diagnostics = ParseIntStrict(val);
+    else if (key == "cursorSensitivity")  c.cursorSensitivity = ParseDoubleStrict(val);
+    else if (key == "panGlideMaxPx")      c.panGlideMaxPx = ParseIntStrict(val);
+    else if (key == "gameCursorLagMs")    c.gameCursorLagMs = ParseIntStrict(val);
+    else if (key == "cursorConstantSize") c.cursorConstantSize = ParseIntStrict(val);
+    else if (key == "trayPinned")         c.trayPinned = ParseIntStrict(val);
+    else if (key == "cursorVisibility")   c.cursorVisibility = val;
+    else if (key == "model")              c.model = val;
+    else if (key == "fastPan")            c.fastPan = ParseIntStrict(val);
+    else if (key == "smoothPan")          c.smoothPan = ParseIntStrict(val);
+    else if (key == "magInputTransform")  c.magInputTransform = ParseIntStrict(val);
+    else if (key == "bilinear")           c.bilinear = ParseIntStrict(val);
+    else if (key == "renderScaling")      { c.renderScaling = ParseIntStrict(val); haveRenderScaling = true; }
+    else if (key == "upscaleTiming")      c.upscaleTiming = ParseIntStrict(val);
+    else if (key == "sharpness")          c.sharpness = ParseDoubleStrict(val);
+    else if (key == "zorderBand")         c.zorderBand = ParseIntStrict(val);
+    else if (key == "brightness")         c.brightness = ParseDoubleStrict(val);
+    else if (key == "colorWarmPct")       c.colorWarmPct = ParseIntStrict(val);
+    else if (key == "colorDimPct")        c.colorDimPct = ParseIntStrict(val);
+    else if (key == "hdrTonemap")         c.hdrTonemap = ParseIntStrict(val);
+    else if (key == "multiMonitor")       c.multiMonitor = ParseIntStrict(val);
+    else if (key == "cropCapture")        c.cropCapture = ParseIntStrict(val);
+    else if (key == "lowGpuPriority")     c.lowGpuPriority = ParseIntStrict(val);
+    else if (key == "gpuPriority")        c.gpuPriority = ParseIntStrict(val);
+    else if (key == "gameCrop")           c.gameCrop = ParseIntStrict(val);
+    else if (key == "tdrTest")            c.tdrTest = ParseIntStrict(val);
+    else if (key == "probeClicks")        c.probeClicks = ParseIntStrict(val);
+    else if (key == "desktopTransform")   c.desktopTransform = ParseIntStrict(val);
+    else if (key == "cursorBandAuto")     c.cursorBandAuto = ParseIntStrict(val);
+    else if (key == "trackCaret")         c.trackCaret = ParseIntStrict(val);
+    else if (key == "trackFocus")         c.trackFocus = ParseIntStrict(val);
+    else if (key == "trackAlign")         c.trackAlign = ParseIntStrict(val);
+    else if (key == "mouseAlign")         c.mouseAlign = ParseIntStrict(val);
+    else if (key == "trackGlideMs")       c.trackGlideMs = ParseIntStrict(val);
+    else if (key == "trackMarginPct")     c.trackMarginPct = ParseIntStrict(val);
+    else if (key == "mouseMarginPct")     c.mouseMarginPct = ParseIntStrict(val);
+    else if (key == "trackLog")           c.trackLog = ParseIntStrict(val);
+    else if (key == "ixDecimate")         c.ixDecimate = ParseIntStrict(val);
+    else if (key == "mpoBuster")          c.mpoBuster = ParseIntStrict(val);
+    else if (key == "txSamplingMode") {
+        // Only 0 (nearest), 1 (smooth) and -1 (leave DWM alone) are meaningful. 2..4 are
+        // kernel aliases of nearest that would slip past the MPO sampling guard; anything
+        // else folds to nearest so EffectiveSamplingMode guards it (review 2026-10-09 #23).
+        const int v = ParseIntStrict(val);
+        c.txSamplingMode = (v == 1 || v == -1) ? v : 0;
+    }
+    else if (key == "txWarmMode")         c.txWarmMode = ParseIntStrict(val);
+    else if (key == "txTrace")            c.txTrace = ParseIntStrict(val);
+    else if (key == "txRestLevel")        c.txRestLevel = ParseDoubleStrict(val);
+    else if (key == "launchQuiesce")      c.launchQuiesce = ParseIntStrict(val);
+    else if (key == "txWarmHz")           c.txWarmHz = ParseIntStrict(val);
+    else if (key == "mpoNearestGuard")    c.mpoNearestGuard = ParseIntStrict(val);
+    else if (key == "txNativeCursor")     c.txNativeCursor = ParseIntStrict(val);
+    else if (key == "txSmoothLadder")     c.txSmoothLadder = ParseIntStrict(val);
+    else if (key == "txRampMinStep")      c.txRampMinStep = ParseIntStrict(val);
+    else if (key == "txRampMinFrom")      c.txRampMinFrom = ParseDoubleStrict(val);
+    else if (key == "mpoGuardTest")       c.mpoGuardTest = ParseIntStrict(val);
+    else if (key == "mpoGuard")           c.mpoGuard = ParseIntStrict(val);
+    else if (key == "mpoGuardLiftWall")   c.mpoGuardLiftWall = ParseIntStrict(val);
+    else if (key == "lockedBallistics")   c.lockedBallistics = ParseIntStrict(val);
+    else if (key == "edgeClip")           c.edgeClip = ParseIntStrict(val);
+    else if (key == "txMaxStepPct")       c.txMaxStepPct = ParseIntStrict(val);
+    else if (key == "warpLock")           c.warpLock = ParseIntStrict(val);
+    else if (key == "lockForce")          c.lockForce = ParseIntStrict(val);
+    else if (key == "txEdgeMargin")       c.txEdgeMargin = ParseDoubleStrict(val);
+    else if (key == "gameFpsCap")         c.gameFpsCap = ParseIntStrict(val);
+    else if (key == "onboarded")          c.onboarded = ParseIntStrict(val);
+    else if (key == "quickZoomDefault")   c.quickZoomDefault = ParseDoubleStrict(val);
+    else if (key == "quickZoomModifier")  c.quickZoomModifier = val;
+    else if (key == "quickZoomHotkeyMode") c.quickZoomHotkeyMode = ParseIntStrict(val);
+    else if (key == "quickZoomVk")        c.quickZoomVk = ParseIntStrict(val);
+    else if (key == "quickZoomMods")      c.quickZoomMods = ParseIntStrict(val);
+    else if (key == "outline")            c.outline = ParseIntStrict(val);
+    else if (key == "outlineThickness")   c.outlineThickness = ParseIntStrict(val);
+    else if (key == "outlineColor")     { c.outlineColor = val; ParseHexColor(val, c.outlineR, c.outlineG, c.outlineB); }
+    else if (key == "outlineLowZoomOnly") c.outlineLowZoomOnly = ParseIntStrict(val);
+    else if (key == "outlineLowZoomMax")  c.outlineLowZoomMax = ParseDoubleStrict(val);
+    else if (key == "outlineIdleHide")    c.outlineIdleHide = ParseIntStrict(val);
+    else if (key == "outlineIdleSeconds") c.outlineIdleSeconds = ParseDoubleStrict(val);
+}
+
+// Keys that take an empty value; returns true when key is one of them (ParseConfig moves on).
+static bool ApplyEmptyableKey(Config& c, const std::string& key, const std::string& val) {
+    // The exe LISTS must accept an empty value: "key=" with nothing after it is how the user
+    // clears one, and it is exactly what the config UI writes when the last entry is removed.
+    // They are handled before the empty-value guard in ParseConfig, which exists because the numeric
+    // settings cannot take one (stoi("") throws). Without this, clearing a list in the UI wrote
+    // the ini correctly and the core silently kept the previous value - including the shipped
+    // defaults, so a list with defaults could never be emptied at all.
+    if (key == "transformExclude") { c.transformExclude = val; return true; }
+    if (key == "renderExclude")    { c.renderExclude    = val; return true; }
+    if (key == "noSwallowApps")    { c.noSwallowApps    = val; return true; }
+    if (key == "lockApps")         { c.lockApps         = val; return true; }
+    // Per-window-type engine preferences. Parsed here with the lists rather than in ApplyValueKey,
+    // because an empty value must mean "back to auto" and the numeric guard would skip it.
+    if (key == "engineGame")    { c.engineGame    = val.empty() ? "auto" : val; return true; }
+    if (key == "engineAcrylic") { c.engineAcrylic = val.empty() ? "auto" : val; return true; }
+    if (key == "engineDesktop") { c.engineDesktop = val.empty() ? "auto" : val; return true; }
+    if (key == "engineOther")   { c.engineOther   = val.empty() ? "auto" : val; return true; }
+    return false;
+}
+
+// One ini line to a trimmed key and value; false for a blank, comment, '='-less or keyless line.
+static bool SplitIniLine(const std::string& line, std::string& key, std::string& val) {
+    std::string t = TrimWs(line);
+    if (t.empty() || t[0] == ';' || t[0] == '#') return false;
+    size_t eq = t.find('=');
+    if (eq == std::string::npos) return false;
+    key = TrimWs(t.substr(0, eq));
+    val = TrimWs(t.substr(eq + 1));
+    if (key.empty()) return false;
+    return true;
+}
+
+Config ParseConfig(const std::string& text) {
+    Config c;
+    // A UTF-8 BOM (Notepad's "UTF-8 with BOM") would glue itself to the first key and lose it.
+    std::istringstream in(text.compare(0, 3, "\xEF\xBB\xBF") == 0 ? text.substr(3) : text);
+    std::string line;
+    bool haveRenderScaling = false;   // issue #456: without the key, `bilinear` decides (migration)
+    while (std::getline(in, line)) {
+        std::string key, val;
+        if (!SplitIniLine(line, key, val)) continue;
+        if (ApplyEmptyableKey(c, key, val)) continue;
+        if (val.empty()) continue;
+        try {
+            ApplyValueKey(c, key, val, haveRenderScaling);
+        } catch (...) { /* keep default on bad value */ }
+    }
+    ClampConfig(c, haveRenderScaling);
+    SanitizeBinds(c);
     return c;
 }
 }
