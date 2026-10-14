@@ -2708,6 +2708,41 @@ static void UpdateCursorBaseline(TickState& t, bool inspect, bool doPresent, boo
     }
 }
 
+// Session exit (active -> idle): tear the overlay down, restore the cursor and leave Inspect.
+static void TeardownSession(TickState& t) {
+    // The caret/focus watcher is switched off only from the zoomed view block; a zoom-out that
+    // snaps straight to 1.0 skipped it and left the watcher polling at 1x (#71).
+    { wind::SpanScope span_(wind::kSpanTrack); g_track.setActive(false, t.cfg.trackCaret != 0, t.cfg.trackFocus != 0, t.cfg.trackLog != 0); }
+    if (t.restAfterReveal) { t.restAfterReveal->setActive(false); t.restAfterReveal = nullptr; }
+    // DWM effect back BEFORE the overlay hides: worst case one double-filtered frame, never a
+    // bright unfiltered one (review 2026-09-30).
+    { wind::SpanScope span_(wind::kSpanColor); UpdateColorFilter(t, false, false, nullptr); }
+    LARGE_INTEGER zo0; QueryPerformanceCounter(&zo0);
+    { wind::SpanScope span_(wind::kSpanActivate); t.model->setActive(false); }
+    if (t.cfg.zoomTrace) {
+        LARGE_INTEGER zo1; QueryPerformanceCounter(&zo1);
+        t.zt.outSetActiveMs = QpcMs(t, zo0.QuadPart, zo1.QuadPart); t.zt.outPending = true;
+    }
+    SetSystemCursorHidden(t, t.model, false);
+    t.outlineZoneSec = 0.0;                       // zoom-out clears the low-zoom dwell (no banked partial)
+    t.gamePacing = false;                         // idle: normal timer pacing
+    t.pushPhase = 0;
+    t.presentAccum = 0.0;
+    if (t.prevInspect) {
+        EndGameInspect(t);   // teardown-to-idle exits game-inspect too (foreground returned)
+        ClipCursor(nullptr);
+        // Same phantom-click guard as the zoomed Inspect exit: swallowed-but-undrained clicks
+        // must not survive into the next activation.
+        g_input.state().commitLeft.exchange(0);
+        g_input.state().commitRight.exchange(0);
+        POINT lp{ (int)(t.mapper.centerX() + 0.5) + t.mon.x, (int)(t.mapper.centerY() + 0.5) + t.mon.y };
+        SetCursorPos(lp.x, lp.y);                  // resume at the look point
+        t.lastSetVirtual = lp;
+    }
+    t.revealPending = 0;                          // a quick tap may zoom out before the deferred reveal
+    g_tint.invalidate();                          // the engines put the scheme back: re-tint when idle
+}
+
 static void RunTick(TickState& t) {
     TickWorkTimer workTimer(t);
     const TickClock clk = BeginTick(t);
@@ -2770,37 +2805,7 @@ static void RunTick(TickState& t) {
         AssertGameInspectSteal(t, inspect);
         UpdateCursorBaseline(t, inspect, doPresent, dragFollow, lvl, cur, r);
     } else if (t.prevActive) {                        // active -> idle: tear the overlay down
-        // The caret/focus watcher is switched off only from the zoomed view block; a zoom-out that
-        // snaps straight to 1.0 skipped it and left the watcher polling at 1x (#71).
-        { wind::SpanScope span_(wind::kSpanTrack); g_track.setActive(false, t.cfg.trackCaret != 0, t.cfg.trackFocus != 0, t.cfg.trackLog != 0); }
-        if (t.restAfterReveal) { t.restAfterReveal->setActive(false); t.restAfterReveal = nullptr; }
-        // DWM effect back BEFORE the overlay hides: worst case one double-filtered frame, never a
-        // bright unfiltered one (review 2026-09-30).
-        { wind::SpanScope span_(wind::kSpanColor); UpdateColorFilter(t, false, false, nullptr); }
-        LARGE_INTEGER zo0; QueryPerformanceCounter(&zo0);
-        { wind::SpanScope span_(wind::kSpanActivate); t.model->setActive(false); }
-        if (t.cfg.zoomTrace) {
-            LARGE_INTEGER zo1; QueryPerformanceCounter(&zo1);
-            t.zt.outSetActiveMs = QpcMs(t, zo0.QuadPart, zo1.QuadPart); t.zt.outPending = true;
-        }
-        SetSystemCursorHidden(t, t.model, false);
-        t.outlineZoneSec = 0.0;                       // zoom-out clears the low-zoom dwell (no banked partial)
-        t.gamePacing = false;                         // idle: normal timer pacing
-        t.pushPhase = 0;
-        t.presentAccum = 0.0;
-        if (t.prevInspect) {
-            EndGameInspect(t);   // teardown-to-idle exits game-inspect too (foreground returned)
-            ClipCursor(nullptr);
-            // Same phantom-click guard as the zoomed Inspect exit: swallowed-but-undrained clicks
-            // must not survive into the next activation.
-            g_input.state().commitLeft.exchange(0);
-            g_input.state().commitRight.exchange(0);
-            POINT lp{ (int)(t.mapper.centerX() + 0.5) + t.mon.x, (int)(t.mapper.centerY() + 0.5) + t.mon.y };
-            SetCursorPos(lp.x, lp.y);                  // resume at the look point
-            t.lastSetVirtual = lp;
-        }
-        t.revealPending = 0;                          // a quick tap may zoom out before the deferred reveal
-        g_tint.invalidate();                          // the engines put the scheme back: re-tint when idle
+        TeardownSession(t);
     } else {
         // Idle: let the transform model release its magnification context shortly after a zoom
         // ends. While a context is alive, DWM composites magnification-aware and every cursor
