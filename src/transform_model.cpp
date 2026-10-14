@@ -506,22 +506,7 @@ void TransformModel::idleTick() {
     }
 }
 
-void TransformModel::present(const MapResult& r, double level, const Config& cfg,
-                             const MonitorTarget& mon, const PresentExtras& ex) {
-    (void)mon;
-    // CENTERED-CURSOR geometry (issue #148 revival). Wind's identity is the centred cursor, and the
-    // render model's mapper already solves the whole centered geometry - including the edge zones,
-    // where the pointer slides away from the centre as the source rect clamps. So the mapper's
-    // CENTERED source rect is the transform, and DWM draws the real pointer into the magnified frame
-    // itself (native cursor, issue #369): nothing here places a pointer of our own.
-    // KEEP-ALIVE v2 (issue #148 action-start spike): DWM discards its magnification resources
-    // when the transform VALUE sits still and pays a ~1fps rebuild on the next real change.
-    // v1 jittered the LEVEL by an epsilon - that forced a full re-SCALE of every cached surface
-    // every tick, whose cost grows with zoom (constant ~1fps at 16x: the cure was the disease).
-    // v2 jitters only the private-channel TRANSLATION by 1 screen px on alternating ticks - a
-    // re-COMPOSITE of already-scaled surfaces, cheap at any level - and only while within 1.5s
-    // of the last REAL change: brief pauses (the pan-stop-pan pattern) stay hot, while true idle
-    // lets DWM park legitimately (one spike after a long idle is acceptable; one per pause was not).
+double TransformModel::resolveLevel(const MapResult& r, double level, const Config& cfg, double& preLadderOut) {
     // Ramp cost limiter (measured: 150-215ms spikes during zoom ramps at high level): every LEVEL
     // change makes DWM re-scale its cached surfaces, and the cost grows with the level. Apply the
     // ramping level at most every 3rd tick (48Hz on a 144Hz panel - visually still a smooth ramp);
@@ -606,15 +591,11 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     rampStepHeld_ = cfg.txSamplingMode == 1 && dwmCentreOn_ &&
                     RampStepHeld(applyLevel, lastLevel_, cfg.txRampMinStep / 1000.0, cfg.txRampMinFrom, rampStopped);
     if (rampStepHeld_) applyLevel = lastLevel_;
-    double srcL = r.srcLeft, srcT = r.srcTop;
-    if (applyLevel != level) {
-        OffsetF o = ComputeOffsetF(r.centerX, r.centerY, applyLevel, mon_.w, mon_.h);
-        srcL = o.x; srcT = o.y;
-    }
-    ClickInProgress();   // keep the click window current between nudges
-    DeliverOwedNudge();
-    restLevel_ = cfg.txRestLevel;           // hot
-    if (!ensureMag()) return;   // lazy context: the session's first write brings DWM up
+    preLadderOut = preLadderLevel;
+    return applyLevel;
+}
+
+void TransformModel::applySamplingMode(const Config& cfg) {
     // Bitmap smoothing (issue #197/#227), once per magnification context. The smooth filter
     // is the WHOLE quality gap to native Magnifier: sharp magnified image and a cursor that
     // grows naturally with the zoom instead of pixelating. Known trade, accepted after a full
@@ -655,9 +636,9 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             }
         }
     }
-    traceOn_ = cfg.txTrace != 0;
-    if (level > sessionMaxLevel_) sessionMaxLevel_ = level;
-    const bool ramping = preLadderLevel != level || (applyLevel != lastLevel_ && lastLevel_ > 0.0);
+}
+
+MagTransform TransformModel::writeSiteTransform(double srcL, double srcT, double applyLevel, const Config& cfg) {
     // Edge sampling margin (see transform.h) applied to the SOURCE, not just to the written
     // transform: srcL/srcT go on to feed the input-transform publish below, and a visual rect
     // that sat one texel inside a published rect that did not would put the pointer framework's
@@ -699,7 +680,10 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         if (m.offX > maxOff) m.offX = maxOff;
         if (m.txX < -32000) m.txX = -32000;
     }
-    bool txWroteThisTick = false;   // for the trace
+    return m;
+}
+
+void TransformModel::switchDwmCentre(double applyLevel, const PresentExtras& ex) {
     // DWM CENTRING (issue #369, src/native_cursor.h). In a native-cursor session where the view is
     // a pure function of the pointer (RunTick's ex.dwmCentre), DWM re-centres the view itself on
     // every cursor update, latched with the pointer it draws: no tick-to-frame drift at any speed.
@@ -721,16 +705,10 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             }
         }
     }
-    // Trace inputs, captured here and appended at the END of present().
-    bool trChanged = false, trRamping = ramping, trWarm = false;
-    const double trLevel = applyLevel;
-    const int trTxX = m.txX, trOffX = m.offX;
-    // pauseWrites (issue #148): a click's injected cursor move is in flight - a transform write
-    // racing a cursor-position update is the proven TDR, so those ticks write NOTHING. State is
-    // untouched; the next unpaused tick lands the same values. (The native cursor's pixel-and-back
-    // nudges are the intentional exception to "no cursor events beside a write": they run right
-    // AFTER the write on the same thread, never racing it, and never during a click.)
-    if (!ex.pauseWrites) {
+}
+
+bool TransformModel::writeAndWarm(const MagTransform& m, double applyLevel, bool ramping, const Config& cfg,
+                                  const PresentExtras& ex, bool& txWroteThisTick, bool& trChanged, bool& trWarm) {
     const unsigned long long nowMs = GetTickCount64();
     const bool changed = m.offX != lastOffX_ || m.offY != lastOffY_ ||
                          m.txX != lastTxX_ || m.txY != lastTxY_ || applyLevel != lastLevel_;
@@ -804,6 +782,11 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         }
         forceWrite_ = false;
     }
+    return changed;
+}
+
+void TransformModel::publishInputTransform(const MagTransform& m, double applyLevel, bool ramping, bool changed,
+                                           const Config& cfg, const PresentExtras& ex) {
     // Input transform. Mode 1 (THE SHIPPED DEFAULT; field-verified 4x-20x,
     // POINTER-HITTEST-FINDINGS.md): publish the visual source rect on every change, exactly
     // like native Magnifier. Pointer-framework apps (Explorer/Settings/shell) hit-test mouse
@@ -812,34 +795,7 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // Both rects in VIRTUAL-SCREEN coordinates (the old 0,0-based dst was wrong off-primary).
     // Needs UIAccess: the ENABLED publish fails without it (rig-measured ERROR_ACCESS_DENIED;
     // the DISABLED call succeeds regardless - never probe availability with the disable shape).
-    // Stomp guard (issue #217, docs/history/NATIVE-MAGNIFIER-STOMP.md): the input transform is ONE
-    // system-wide slot, and native Magnifier re-publishes an ENABLED IDENTITY into it
-    // continuously while it runs - even sitting unzoomed at 100%. Under a Wind zoom that
-    // identity mapping unmoors the visible cursor (the wobble); a dirty Magnifier exit strands
-    // its last rect the same way. So every zoomed tick reads the slot back (~0.1ms) and, when
-    // it does not hold what we last published, forces a republish past the decimation. Wind at
-    // tick rate wins the two-writer war for as long as the foreign writer lives, and a stale
-    // corpse is overwritten on the first tick of the next session.
-    bool ixForce = false;
-    if (cfg.magInputTransform == 1 && applyLevel > 1.001 && ixExpectedValid_) {
-        bool aOn = false; RECT aSrc{}, aDst{};
-        if (host_.getInputTransform(aOn, aSrc, aDst) &&
-            InputTransformStomped(ixExpectedOn_, ixExpL_, ixExpT_, ixExpR_, ixExpB_,
-                                  aOn, aSrc.left, aSrc.top, aSrc.right, aSrc.bottom)) {
-            ixForce = true;
-            noteIxStomp();
-            // The same foreign writer owns the shared cursor-visibility global
-            // (MagShowSystemCursor) - re-assert our hide on the stomp tick so the raw pointer
-            // plane it re-showed does not stay visible under the Inspect crosshair.
-            if (cursorHidden_) ShowSystemCursor(FALSE);
-            if (!ixStompWarned_) {
-                ixStompWarned_ = true;
-                wind::Log(wind::LogLevel::Warn, "transform",
-                          "foreign input-transform writer detected (native Magnifier running?) - "
-                          "republishing per tick");
-            }
-        }
-    }
+    const bool ixForce = guardInputTransformStomp(applyLevel, cfg);
     if (cfg.magInputTransform != 0 && (changed || ixPending_ || ixForce)) {
         // Decimation (issue #189): the publish exists for pointer-framework HOVER hit-testing
         // (clicks ride the welded cursor and never consult it), so it does not need the 144Hz
@@ -931,14 +887,41 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         ixExpectedOn_ = false;
     }
     if (changed) lastInputXformOn_ = cfg.magInputTransform != 0;
-    }   // !ex.pauseWrites
-    // Edge clip: engaged while genuinely zoomed and the pointer is OURS to manage (not Inspect,
-    // whose 1px freeze clip must never be disturbed - ex.clickOverride marks it).
-    // Hot like the other knobs: switched off mid-zoom, give the clip back now rather than at the
-    // end of the session (issue #274). Gated so an unused edgeClip costs no per-tick syscall.
-    if (cfg.edgeClip != 0 || edgeClipActive_)
-        edgeClipManage(cfg.edgeClip != 0 && applyLevel > 1.001 && !ex.clickOverride);
+}
 
+bool TransformModel::guardInputTransformStomp(double applyLevel, const Config& cfg) {
+    // Stomp guard (issue #217, docs/history/NATIVE-MAGNIFIER-STOMP.md): the input transform is ONE
+    // system-wide slot, and native Magnifier re-publishes an ENABLED IDENTITY into it
+    // continuously while it runs - even sitting unzoomed at 100%. Under a Wind zoom that
+    // identity mapping unmoors the visible cursor (the wobble); a dirty Magnifier exit strands
+    // its last rect the same way. So every zoomed tick reads the slot back (~0.1ms) and, when
+    // it does not hold what we last published, forces a republish past the decimation. Wind at
+    // tick rate wins the two-writer war for as long as the foreign writer lives, and a stale
+    // corpse is overwritten on the first tick of the next session.
+    bool ixForce = false;
+    if (cfg.magInputTransform == 1 && applyLevel > 1.001 && ixExpectedValid_) {
+        bool aOn = false; RECT aSrc{}, aDst{};
+        if (host_.getInputTransform(aOn, aSrc, aDst) &&
+            InputTransformStomped(ixExpectedOn_, ixExpL_, ixExpT_, ixExpR_, ixExpB_,
+                                  aOn, aSrc.left, aSrc.top, aSrc.right, aSrc.bottom)) {
+            ixForce = true;
+            noteIxStomp();
+            // The same foreign writer owns the shared cursor-visibility global
+            // (MagShowSystemCursor) - re-assert our hide on the stomp tick so the raw pointer
+            // plane it re-showed does not stay visible under the Inspect crosshair.
+            if (cursorHidden_) ShowSystemCursor(FALSE);
+            if (!ixStompWarned_) {
+                ixStompWarned_ = true;
+                wind::Log(wind::LogLevel::Warn, "transform",
+                          "foreign input-transform writer detected (native Magnifier running?) - "
+                          "republishing per tick");
+            }
+        }
+    }
+    return ixForce;
+}
+
+void TransformModel::weldPointer(const MapResult& r, const PresentExtras& ex) {
     // WELD: the locked (mouselook, pointer hidden) and Inspect regimes park the real pointer on the
     // lens point once per tick (ex.suppressCursorSync is false there). A free session never welds:
     // the pointer is the input and DWM centres on it. Deduped so an idle tick injects nothing.
@@ -956,7 +939,9 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             weldedLastFrame_ = true;
         }
     }
+}
 
+void TransformModel::presentCursor(const MapResult& r, double level, const PresentExtras& ex) {
     if (ex.cursorLocked && ex.drawCursor) {
         // Inspect mode: the real cursor is frozen at the (overridden) click point, but the thing the
         // user aims with is the LOOK POINT (mapper center). Draw the crosshair (the same design the
@@ -1022,7 +1007,10 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
             }
         }
     }
+}
 
+void TransformModel::appendTrace(double trLevel, int trTxX, int trOffX, bool txWroteThisTick, bool trChanged,
+                                 bool trRamping, bool trWarm) {
     if (traceOn_) {
         LARGE_INTEGER qf, qc; QueryPerformanceFrequency(&qf); QueryPerformanceCounter(&qc);
         TxTick& e = traceBuf_[traceHead_ % kTraceCap];
@@ -1034,6 +1022,9 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         e.warm = (unsigned char)(trWarm ? 1 : 0);
         ++traceHead_;
     }
+}
+
+void TransformModel::pinAndGhostUpkeep(double level) {
     if (smoothPan_ && level > 1.0) {
         unsigned long long now = GetTickCount64();
         if (now - lastPinAssertMs_ >= 500) { lastPinAssertMs_ = now; pin_.assert_(); }
@@ -1067,6 +1058,68 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
         ghostSessionStartMs_ = 0;   // next session re-opens with the aggressive window
         mpoGhost_.hide();
     }
+}
+
+void TransformModel::present(const MapResult& r, double level, const Config& cfg,
+                             const MonitorTarget& mon, const PresentExtras& ex) {
+    (void)mon;
+    // CENTERED-CURSOR geometry (issue #148 revival). Wind's identity is the centred cursor, and the
+    // render model's mapper already solves the whole centered geometry - including the edge zones,
+    // where the pointer slides away from the centre as the source rect clamps. So the mapper's
+    // CENTERED source rect is the transform, and DWM draws the real pointer into the magnified frame
+    // itself (native cursor, issue #369): nothing here places a pointer of our own.
+    // KEEP-ALIVE v2 (issue #148 action-start spike): DWM discards its magnification resources
+    // when the transform VALUE sits still and pays a ~1fps rebuild on the next real change.
+    // v1 jittered the LEVEL by an epsilon - that forced a full re-SCALE of every cached surface
+    // every tick, whose cost grows with zoom (constant ~1fps at 16x: the cure was the disease).
+    // v2 jitters only the private-channel TRANSLATION by 1 screen px on alternating ticks - a
+    // re-COMPOSITE of already-scaled surfaces, cheap at any level - and only while within 1.5s
+    // of the last REAL change: brief pauses (the pan-stop-pan pattern) stay hot, while true idle
+    // lets DWM park legitimately (one spike after a long idle is acceptable; one per pause was not).
+    double preLadderLevel = 0.0;   // the level before the smooth-zoom ladder snapped it
+    const double applyLevel = resolveLevel(r, level, cfg, preLadderLevel);
+    double srcL = r.srcLeft, srcT = r.srcTop;
+    if (applyLevel != level) {
+        OffsetF o = ComputeOffsetF(r.centerX, r.centerY, applyLevel, mon_.w, mon_.h);
+        srcL = o.x; srcT = o.y;
+    }
+    ClickInProgress();   // keep the click window current between nudges
+    DeliverOwedNudge();
+    restLevel_ = cfg.txRestLevel;           // hot
+    if (!ensureMag()) return;   // lazy context: the session's first write brings DWM up
+    applySamplingMode(cfg);
+    traceOn_ = cfg.txTrace != 0;
+    if (level > sessionMaxLevel_) sessionMaxLevel_ = level;
+    const bool ramping = preLadderLevel != level || (applyLevel != lastLevel_ && lastLevel_ > 0.0);
+    MagTransform m = writeSiteTransform(srcL, srcT, applyLevel, cfg);
+    bool txWroteThisTick = false;   // for the trace
+    switchDwmCentre(applyLevel, ex);
+    // Trace inputs, captured here and appended at the END of present().
+    bool trChanged = false, trRamping = ramping, trWarm = false;
+    const double trLevel = applyLevel;
+    const int trTxX = m.txX, trOffX = m.offX;
+    // pauseWrites (issue #148): a click's injected cursor move is in flight - a transform write
+    // racing a cursor-position update is the proven TDR, so those ticks write NOTHING. State is
+    // untouched; the next unpaused tick lands the same values. (The native cursor's pixel-and-back
+    // nudges are the intentional exception to "no cursor events beside a write": they run right
+    // AFTER the write on the same thread, never racing it, and never during a click.)
+    if (!ex.pauseWrites) {
+        const bool changed = writeAndWarm(m, applyLevel, ramping, cfg, ex, txWroteThisTick, trChanged, trWarm);
+        publishInputTransform(m, applyLevel, ramping, changed, cfg, ex);
+    }   // !ex.pauseWrites
+    // Edge clip: engaged while genuinely zoomed and the pointer is OURS to manage (not Inspect,
+    // whose 1px freeze clip must never be disturbed - ex.clickOverride marks it).
+    // Hot like the other knobs: switched off mid-zoom, give the clip back now rather than at the
+    // end of the session (issue #274). Gated so an unused edgeClip costs no per-tick syscall.
+    if (cfg.edgeClip != 0 || edgeClipActive_)
+        edgeClipManage(cfg.edgeClip != 0 && applyLevel > 1.001 && !ex.clickOverride);
+
+    weldPointer(r, ex);
+
+    presentCursor(r, level, ex);
+
+    appendTrace(trLevel, trTxX, trOffX, txWroteThisTick, trChanged, trRamping, trWarm);
+    pinAndGhostUpkeep(level);
 }
 
 bool TransformModel::retarget(const MonitorTarget& m) {

@@ -1,6 +1,7 @@
 #pragma once
 #include "magnifier_model.h"
 #include "mag_host.h"
+#include "transform.h"   // MagTransform
 #include "comp_pin.h"
 #include "cursor_blanker.h"
 #include "cursor_sprite.h"
@@ -157,6 +158,27 @@ private:
     void noteWrite(double ms, bool ok);
     void noteIxWrite(double ms, bool ok);            // input-transform publish stats (issue #189)
     void noteIxStomp();                              // foreign writer overwrote our publish (#217)
+    // present() steps, in call order (split out of present(), issue #476).
+    // The level this tick applies: step cap, smooth-zoom ladder, held ramp steps. Also reports the
+    // level before the ladder snap (the ramp test reads it).
+    double resolveLevel(const MapResult& r, double level, const Config& cfg, double& preLadderOut);
+    void applySamplingMode(const Config& cfg);       // bitmap smoothing, bounded retries (#274)
+    // The transform to write: edge floor, ComputeMagTransform, 16-bit backstop, tdrTest probe.
+    MagTransform writeSiteTransform(double srcL, double srcT, double applyLevel, const Config& cfg);
+    void switchDwmCentre(double applyLevel, const PresentExtras& ex);
+    // The transform write and the warm pulse; returns whether the values changed this tick.
+    bool writeAndWarm(const MagTransform& m, double applyLevel, bool ramping, const Config& cfg,
+                      const PresentExtras& ex, bool& txWroteThisTick, bool& trChanged, bool& trWarm);
+    // Input-transform publish: decimation, ramp hold, read-back verdict and self-heal.
+    void publishInputTransform(const MagTransform& m, double applyLevel, bool ramping, bool changed,
+                               const Config& cfg, const PresentExtras& ex);
+    bool guardInputTransformStomp(double applyLevel, const Config& cfg);   // true: republish now (#217)
+    void weldPointer(const MapResult& r, const PresentExtras& ex);   // sets weldedLastFrame_
+    // Inspect crosshair, legacy sprite session (#463), or the native pointer's hide/restore.
+    void presentCursor(const MapResult& r, double level, const PresentExtras& ex);
+    void appendTrace(double trLevel, int trTxX, int trOffX, bool txWroteThisTick, bool trChanged,
+                     bool trRamping, bool trWarm);   // one txTrace row
+    void pinAndGhostUpkeep(double level);            // composition pin + MPO ghost cadence (#191)
     std::mutex statMx_;
     unsigned long long statLogMs_ = 0;
     double statMaxMs_ = 0.0, statSumMs_ = 0.0;
