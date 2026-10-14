@@ -33,7 +33,8 @@ monitor. Every style is required:
 | `DwmSetWindowAttribute(DWMWA_EXCLUDED_FROM_PEEK)` | Keeps the view during a taskbar-thumbnail Aero Peek. |
 
 Because the overlay is capture-excluded, external screenshots cannot see it. Verify from inside the
-process: `WIND_SELFTEST=1 Wind.exe` writes `wind_selftest.png` (`RenderEngine::dumpFrame`).
+process: `WIND_SELFTEST=1 build\Wind.exe` writes `wind_selftest.png` to its working directory
+(`RenderEngine::dumpFrame`).
 
 ## Present: blt model only
 

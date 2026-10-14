@@ -1,4 +1,10 @@
-# Build output
+# Build output: build.bat writes everything to build/ (binaries, plus build/obj/<target>/), and
+# a dev build keeps its magnifier.ini, profiles and logs next to its exe there too. The installer
+# goes to dist/.
+build/
+dist/
+# Anywhere else: clones that predate build/ still hold root-level .obj/.exe/.pdb files, and
+# tools/testenv builds gamesim.exe in place. Kept so none of those can be committed by accident.
 *.obj
 *.exe
 *.pdb
@@ -6,8 +12,6 @@
 *.lib
 *.exp
 *.res
-build/
-dist/
 # Vendored binaries that are part of the tree, not build output
 !third_party/webview2/x64/*.lib
 !installer/MicrosoftEdgeWebview2Setup.exe
@@ -26,7 +30,10 @@ Thumbs.db
 .superpowers/
 docs/superpowers/
 
-# Runtime and diagnostic output (a dev build keeps its ini, profiles and logs next to the exe)
+# Runtime and diagnostic output. A dev build keeps its ini, profiles and logs next to the exe,
+# now build/ (ignored above); the root entries cover clones that ran a pre-build/ Wind.exe.
+# A self-test (WIND_SELFTEST=1) writes wind_selftest.png and wind_hdr_diag.txt to its working
+# directory, normally the repo root.
 /magnifier.ini
 /profiles/
 /logs/

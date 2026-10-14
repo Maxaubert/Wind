@@ -8,9 +8,11 @@ $log = Join-Path $PSScriptRoot 'uiaccess_setup.log'
 Start-Transcript -Path $log -Force
 try {
     $root = Split-Path -Parent $PSScriptRoot
-    $src = "$root\Wind.exe"
-    $cfgSrc = "$root\WindConfig.exe"
-    $traySrc = "$root\WindTray.exe"   # built by build.bat uiaccess; plain manifest, NO uiAccess (#291)
+    # build.bat writes every binary to build\ (never the repo root). ui\dist is the UI build itself;
+    # build.bat config also mirrors it to build\ui\dist, but this deploys the source copy.
+    $src = "$root\build\Wind.exe"
+    $cfgSrc = "$root\build\WindConfig.exe"
+    $traySrc = "$root\build\WindTray.exe"   # built by build.bat uiaccess; plain manifest, NO uiAccess (#291)
     $uiSrc = "$root\ui\dist"
 
     Write-Output "=== 0a. stop any running Wind / WindConfig (dev or deployed) so the exes are not locked ==="

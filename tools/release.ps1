@@ -8,7 +8,7 @@
         $env:WIND_SIGN_PASSWORD     its password
 
     With a certificate this builds the uiAccess=true variant and signs it. Without one it
-    builds BOTH: the ordinary Wind.exe, and the uiAccess variant as WindUA.exe, which setup
+    builds BOTH: the ordinary build\Wind.exe, and the uiAccess variant as build\WindUA.exe, which setup
     signs on the PC it installs to (installer\local-sign.ps1, issue #261). If that signing
     fails, setup installs the ordinary build, and the app degrades correctly:
     transform_model.cpp probes TokenUIAccess and disables the desktop transform pick.
@@ -86,7 +86,9 @@ if ($cert) {
     Write-Warning "unsigned release: setup signs the uiAccess build on each PC (installer\local-sign.ps1)."
 }
 
-$ua = "$root\WindUA.exe"
+# build.bat puts every binary in build\ (never the repo root); the installer packs them from there.
+$bin = "$root\build"
+$ua = "$bin\WindUA.exe"
 if (-not $SkipBuild) {
     # No certificate: build the uiAccess variant as well, as WindUA.exe. Setup signs it on the
     # PC it installs to (installer\local-sign.ps1, issue #261) and keeps the standard build as
@@ -96,7 +98,7 @@ if (-not $SkipBuild) {
     if (-not $cert) {
         Write-Host "=== building WindUA.exe (uiaccess, signed at install) ==="
         Invoke-Build 'uiaccess'
-        Move-Item "$root\Wind.exe" $ua -Force
+        Move-Item "$bin\Wind.exe" $ua -Force
     }
     Write-Host "=== building Wind.exe ($(if ($variant) { $variant } else { 'standard' })) ==="
     Invoke-Build $variant
@@ -105,16 +107,16 @@ if (-not $SkipBuild) {
 }
 
 foreach ($f in 'Wind.exe', 'WindTray.exe', 'WindConfig.exe') {
-    if (-not (Test-Path "$root\$f")) { throw "missing build output: $f" }
+    if (-not (Test-Path "$bin\$f")) { throw "missing build output: build\$f" }
 }
 if (-not (Test-Path "$root\ui\dist\index.html")) { throw "missing ui\dist (build.bat config)" }
 
 # The payload is signed BEFORE makensis packs it: signing the installer does not sign what
 # is inside it, and UIAccess is granted on Wind.exe's own signature.
 if ($cert) {
-    Invoke-Sign "$root\Wind.exe" $cert
-    Invoke-Sign "$root\WindConfig.exe" $cert
-    Invoke-Sign "$root\WindTray.exe" $cert
+    Invoke-Sign "$bin\Wind.exe" $cert
+    Invoke-Sign "$bin\WindConfig.exe" $cert
+    Invoke-Sign "$bin\WindTray.exe" $cert
 }
 
 Write-Host "=== compiling the installer ==="

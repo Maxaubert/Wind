@@ -21,6 +21,18 @@ call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
 if errorlevel 1 (echo [build] vcvars64.bat failed & exit /b 1)
 cd /d "%ROOT%"
 
+rem --- Build output ------------------------------------------------------------
+rem Everything the compiler, linker and rc.exe produce goes under build\, never the repo root:
+rem the binaries in build\ itself (the install layout, so a dev Wind.exe finds WindTray.exe,
+rem WindConfig.exe and ui\dist next to it the way an installed one does), and objects, compiler
+rem PDBs and .res files in build\obj\<target>\. One object dir per target, because targets compile
+rem the same sources with different defines (WIND_UIACCESS, WIND_TESTS), and the tray and settings
+rem hosts each have their own main.cpp. The working directory stays the repo root, so the test
+rem binary finds tests\fixtures and a self-test writes its files where it is started from.
+set "BUILD=%ROOT%build"
+set "OBJ=%BUILD%\obj"
+if not exist "%BUILD%" mkdir "%BUILD%"
+
 if /i "%1"=="test" goto :test
 if /i "%1"=="check" goto :check
 if /i "%1"=="uiaccess" goto :uiaccess
@@ -29,7 +41,7 @@ if /i "%1"=="installer" goto :installer
 if /i "%1"=="tray" goto :tray
 
 rem --- App build (normal: uiAccess=false, runs from anywhere) ----------------
-call :core_exe "" Wind.manifest
+call :core_exe "" Wind.manifest wind
 if errorlevel 1 exit /b 1
 call :tray_exe
 exit /b %errorlevel%
@@ -39,20 +51,24 @@ rem    Embeds Wind.uiaccess.manifest so the overlay CAN use a high z-band (opt-i
 rem    to cover the Start menu / taskbar / tray. Shipped default is 0 - see issue #162.
 rem    Deploy via tools\uiaccess_setup.ps1.
 :uiaccess
-call :core_exe /DWIND_UIACCESS Wind.uiaccess.manifest
+call :core_exe /DWIND_UIACCESS Wind.uiaccess.manifest wind_uiaccess
 if errorlevel 1 exit /b 1
 call :tray_exe
 exit /b %errorlevel%
 
 rem --- Wind.exe itself, shared by the app and uiaccess targets. %1 = extra define ("" for none),
-rem    %2 = the manifest to embed. Everything else (sources, flags, libraries) is the same.
+rem    %2 = the manifest to embed, %3 = its object dir under build\obj. Everything else (sources,
+rem    flags, libraries) is the same. Output: build\Wind.exe and build\Wind.pdb.
 :core_exe
+set "CORE_OBJ=%OBJ%\%~3"
+if not exist "%CORE_OBJ%" mkdir "%CORE_OBJ%"
 rem Compile the app-icon resource (rc.exe ships with the Windows SDK, on PATH via vcvars).
-rc /nologo /fo "%ROOT%src\wind.res" "%ROOT%src\wind.rc"
+rc /nologo /fo "%CORE_OBJ%\wind.res" "%ROOT%src\wind.rc"
 if errorlevel 1 (echo [build] rc.exe failed & exit /b 1)
 cl /nologo /std:c++17 /EHsc /O2 /W4 /Zi /DUNICODE /D_UNICODE %~1 ^
-   src\*.cpp src\wind.res ^
-   /Fe:Wind.exe ^
+   /Fo"%CORE_OBJ%\\" /Fd"%CORE_OBJ%\\" ^
+   src\*.cpp "%CORE_OBJ%\wind.res" ^
+   /Fe:"%BUILD%\Wind.exe" ^
    /link Magnification.lib Dwmapi.lib user32.lib shell32.lib gdi32.lib Dbghelp.lib ^
    d3d11.lib dxgi.lib dxguid.lib d3dcompiler.lib windowscodecs.lib ole32.lib oleaut32.lib uuid.lib advapi32.lib ^
    /MANIFEST:EMBED /MANIFESTUAC:NO /MANIFESTINPUT:%~2 /SUBSYSTEM:WINDOWS ^
@@ -67,14 +83,15 @@ call :tray_exe
 exit /b %errorlevel%
 
 :tray_exe
-rc /nologo /fo "%ROOT%src\tray_app\wind_tray.res" "%ROOT%src\tray_app\wind_tray.rc"
+if not exist "%OBJ%\tray" mkdir "%OBJ%\tray"
+rc /nologo /fo "%OBJ%\tray\wind_tray.res" "%ROOT%src\tray_app\wind_tray.rc"
 if errorlevel 1 (echo [build] rc.exe failed for WindTray & exit /b 1)
-rem Objects go to src\tray_app\ so the shared sources never overwrite Wind.exe's .obj files.
+rem Own object dir (build\obj\tray) so the shared sources never overwrite Wind.exe's .obj files.
 cl /nologo /std:c++17 /EHsc /O2 /W4 /Zi /DUNICODE /D_UNICODE ^
-   /Fo"%ROOT%src\tray_app\\" /Fd"%ROOT%WindTray.pdb" ^
+   /Fo"%OBJ%\tray\\" /Fd"%OBJ%\tray\\" ^
    src\tray_app\*.cpp src\tray_items.cpp src\profiles.cpp src\config.cpp src\logging.cpp src\ini_edit.cpp ^
-   src\tray_app\wind_tray.res ^
-   /Fe:WindTray.exe ^
+   "%OBJ%\tray\wind_tray.res" ^
+   /Fe:"%BUILD%\WindTray.exe" ^
    /link user32.lib shell32.lib gdi32.lib Dwmapi.lib Dbghelp.lib shlwapi.lib ole32.lib version.lib ^
    advapi32.lib ntdll.lib ^
    /MANIFEST:EMBED /MANIFESTUAC:NO /MANIFESTINPUT:Wind.manifest /SUBSYSTEM:WINDOWS ^
@@ -94,38 +111,52 @@ if exist "%ROOT%ui\package.json" (
   if not exist dist\index.html (popd & echo [build] ui build produced no dist\index.html & exit /b 1)
   popd
 )
+if not exist "%OBJ%\config" mkdir "%OBJ%\config"
 rem Same app-icon resource as Wind.exe (rc.exe ships with the Windows SDK, on PATH via vcvars).
-rc /nologo /fo "%ROOT%src\wind.res" "%ROOT%src\wind.rc"
+rc /nologo /fo "%OBJ%\config\wind.res" "%ROOT%src\wind.rc"
 if errorlevel 1 (echo [build] rc.exe failed & exit /b 1)
 cl /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE ^
    /I third_party\webview2\include ^
-   src\config_ui\main.cpp src\ini_edit.cpp src\profiles.cpp src\config.cpp src\logging.cpp src\wind.res ^
-   /Fe:WindConfig.exe ^
+   /Fo"%OBJ%\config\\" /Fd"%OBJ%\config\\" ^
+   src\config_ui\main.cpp src\ini_edit.cpp src\profiles.cpp src\config.cpp src\logging.cpp "%OBJ%\config\wind.res" ^
+   /Fe:"%BUILD%\WindConfig.exe" ^
    /link third_party\webview2\x64\WebView2LoaderStatic.lib ^
    user32.lib shell32.lib shlwapi.lib ole32.lib version.lib advapi32.lib ntdll.lib Dwmapi.lib /SUBSYSTEM:WINDOWS
-exit /b %errorlevel%
+if errorlevel 1 exit /b 1
+rem WindConfig.exe loads its page from <exe dir>\ui\dist, so mirror the UI into build\ui\dist, the
+rem install layout. ui\dist stays the copy the installer and tools\uiaccess_setup.ps1 ship.
+rem robocopy exit codes below 8 mean success.
+if exist "%ROOT%ui\dist\index.html" (
+  robocopy "%ROOT%ui\dist" "%BUILD%\ui\dist" /MIR /NJH /NJS /NFL /NDL /NP >nul
+  if errorlevel 8 (echo [build] copying ui\dist to build\ui\dist failed & exit /b 1)
+)
+exit /b 0
 
 rem --- Test build (pure-logic sources only; no <windows.h>) -----------------
 :test
 rem /wd5285 silences a known doctest 2.4.11 header warning under MSVC /W4.
+if not exist "%OBJ%\test" mkdir "%OBJ%\test"
 cl /nologo /std:c++17 /EHsc /W4 /wd5285 /DWIND_TESTS /I third_party ^
+   /Fo"%OBJ%\test\\" /Fd"%OBJ%\test\\" ^
    tests\*.cpp ^
    src\transform.cpp src\zoom_controller.cpp src\config.cpp src\profiles.cpp src\cursor_mapper.cpp src\lock_detector.cpp src\cursor_lock.cpp src\crosshair.cpp src\ini_edit.cpp src\logging.cpp src\tray_items.cpp src\hitch_record.cpp src\render_params.cpp src\tray_app\tray_pin_logic.cpp ^
-   /Fe:wind_tests.exe
+   /Fe:"%BUILD%\wind_tests.exe"
 if errorlevel 1 exit /b 1
-"%ROOT%wind_tests.exe"
+rem Runs from the repo root (the current directory): the tests find tests\fixtures from there.
+"%BUILD%\wind_tests.exe"
 exit /b %errorlevel%
 
 rem --- Compile-only check (no link; verifies all sources compile) -----------
 :check
-cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c src\*.cpp
+for %%D in (core tray config) do if not exist "%OBJ%\check\%%D" mkdir "%OBJ%\check\%%D"
+cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c /Fo"%OBJ%\check\core\\" src\*.cpp
 if errorlevel 1 exit /b 1
 rem WindTray.exe sources (issue #291); own object dir, its main.cpp would overwrite Wind's main.obj.
-cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c /Fo"%ROOT%src\tray_app\\" src\tray_app\*.cpp
+cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c /Fo"%OBJ%\check\tray\\" src\tray_app\*.cpp
 if errorlevel 1 exit /b 1
 rem WindConfig.exe's host (same flags as :config); own object dir for the same reason.
 cl /nologo /std:c++17 /EHsc /W4 /DUNICODE /D_UNICODE /c /I third_party\webview2\include ^
-   /Fo"%ROOT%src\config_ui\\" src\config_ui\main.cpp
+   /Fo"%OBJ%\check\config\\" src\config_ui\main.cpp
 exit /b %errorlevel%
 
 rem --- Installer (needs NSIS; winget install NSIS.NSIS) ---------------------

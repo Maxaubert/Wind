@@ -53,9 +53,9 @@ VIAddVersionKey "LegalCopyright"  "Copyright (c) 2026 ${PUBLISHER}"
 
 ; UIAccess for everyone (issue #261). A release with a real code-signing certificate ships
 ; Wind.exe already signed as the uiAccess build, and there is nothing to do. Without one,
-; tools\release.ps1 also builds the uiAccess variant as WindUA.exe, and setup signs it on the
+; tools\release.ps1 also builds the uiAccess variant as build\WindUA.exe, and setup signs it on the
 ; PC it installs to (local-sign.ps1 says how, and why that is safe). Its presence decides.
-!if /FileExists "..\WindUA.exe"
+!if /FileExists "..\build\WindUA.exe"
   !define LOCAL_SIGN
 !endif
 
@@ -102,15 +102,15 @@ Section "Wind" SEC_WIND
   ; all ("A referral was returned from the server"), so setup must never leave one in place:
   ; killed mid-signing, it did exactly that (reproduced 2026-09-28). This way an interruption
   ; at any point leaves a Wind that runs.
-  File "..\Wind.exe"
-  File "..\WindConfig.exe"
-  File "..\WindTray.exe"
+  File "..\build\Wind.exe"
+  File "..\build\WindConfig.exe"
+  File "..\build\WindTray.exe"
   ; Staged under $INSTDIR, not in $PLUGINSDIR: that is the user's %TEMP%, writable by a
   ; non-elevated process, and this step runs a script and signs a binary as admin. Program
   ; Files is admin-only, so nothing unprivileged can swap either between copy and use.
   RMDir /r "$INSTDIR\.stage"
   CreateDirectory "$INSTDIR\.stage\ua"
-  File "/oname=$INSTDIR\.stage\ua\Wind.exe" "..\WindUA.exe"
+  File "/oname=$INSTDIR\.stage\ua\Wind.exe" "..\build\WindUA.exe"
   File "/oname=$INSTDIR\.stage\local-sign.ps1" "local-sign.ps1"
   DetailPrint "Signing Wind on this PC..."
   nsExec::ExecToLog '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\.stage\local-sign.ps1" -Stage "$INSTDIR\.stage\ua\Wind.exe" -Dir "$INSTDIR"'
@@ -120,7 +120,7 @@ Section "Wind" SEC_WIND
     CopyFiles /SILENT "$INSTDIR\.stage\ua\Wind.exe" "$INSTDIR\Wind.exe"
     ${If} ${Errors}
       DetailPrint "Could not place the signed build; keeping the standard one."
-      File "..\Wind.exe"
+      File "..\build\Wind.exe"
       StrCpy $SignFailed 1
     ${EndIf}
   ${Else}
@@ -135,9 +135,9 @@ Section "Wind" SEC_WIND
     MessageBox MB_ICONSTOP|MB_OK "Setup couldn't sign Wind on this PC, so Windows won't give it UI Access, and Wind can't start without it.$\r$\n$\r$\nRun the Wind installer again. If this keeps happening, check that security software isn't blocking PowerShell while Setup runs." /SD IDOK
   ${EndIf}
 !else
-  File "..\Wind.exe"
-  File "..\WindConfig.exe"
-  File "..\WindTray.exe"
+  File "..\build\Wind.exe"
+  File "..\build\WindConfig.exe"
+  File "..\build\WindTray.exe"
 !endif
   ; the licence the user accepted, kept next to the app so the terms are always findable
   File "/oname=LICENSE.txt" "..\LICENSE"

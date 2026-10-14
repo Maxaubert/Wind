@@ -35,7 +35,8 @@ The elevation rules (HKLM autostart, launching through `explorer.exe`, stopping 
 build.bat installer
 ```
 
-Needs NSIS (`winget install NSIS.NSIS`). The target compiles the script and runs
+Needs NSIS (`winget install NSIS.NSIS`). It packs the binaries from `build\` (`build.bat`,
+`build.bat config`) and the UI from `ui\dist`, so build those first. The target compiles the script and runs
 `tools\installer_check.ps1`, which checks that every packed file exists, that every rectangle the
 screens read was generated, and that a silent install and uninstall round-trip (the round trip
 needs an elevated shell). For a release artifact use `tools\release.ps1`, which builds the payload,
@@ -43,7 +44,7 @@ signs it when a certificate is configured, and packs the installer.
 
 ## Local signing
 
-Without a code-signing certificate, `release.ps1` also builds the UIAccess variant as `WindUA.exe`,
+Without a code-signing certificate, `release.ps1` also builds the UIAccess variant as `build\WindUA.exe`,
 which makes `wind.nsi` define `LOCAL_SIGN`. Setup then runs `local-sign.ps1`:
 
 - A fresh `CN=Wind Local Signing` certificate is trusted in LocalMachine Root and TrustedPublisher,
