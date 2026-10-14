@@ -2801,6 +2801,54 @@ static void RunActiveTick(TickState& t, double lvl, double dt, bool zoomed, bool
     UpdateCursorBaseline(t, inspect, doPresent, dragFollow, lvl, cur, r);
 }
 
+// Tick diagnostics: the held-state timeline (issue #113 / #167).
+static void LogHeldState(TickState& t, bool inHeld, bool outHeld, double lvl, double dt) {
+    // Diagnostics (issue #113): log the side-button held-state timeline so the intermittent stuck can
+    // be diagnosed from the log. On every rise/fall, dump the hook + Raw Input event counters and the
+    // held duration; a stuck shows as a rise with no matching fall (and the next event only on
+    // re-click). Also WARN once if a hold overstays (first line at 10 s, then every 5 s; well past any hold-to-zoom, which caps in
+    // ~2 s) - that line, with static counters, pinpoints a stuck episode. Edges/overstay only, so
+    // Log() is never hit on the per-frame path.
+    auto& st = g_input.state();
+    auto snap = [&](const char* tag, bool held, bool& prev, double& secs) {
+        if (held != prev) {
+            // Edge: `secs` still holds the accumulated duration (meaningful on a fall; ~0 on a rise).
+            wind::Log(wind::LogLevel::Info, "input",
+                      "%sHeld %d->%d held=%.2fs hook[d=%u u=%u dbl=%u / d=%u u=%u dbl=%u] raw[d=%u u=%u / d=%u u=%u] hookActive=%d lvl=%.2f",
+                      tag, prev ? 1 : 0, held ? 1 : 0, secs,
+                      st.dbgHookDown[1].load(), st.dbgHookUp[1].load(), st.dbgHookDbl[1].load(),
+                      st.dbgHookDown[2].load(), st.dbgHookUp[2].load(), st.dbgHookDbl[2].load(),
+                      st.dbgRawDown[1].load(), st.dbgRawUp[1].load(),
+                      st.dbgRawDown[2].load(), st.dbgRawUp[2].load(),
+                      g_input.hookActive() ? 1 : 0, lvl);
+            prev = held;
+        // Re-fire every 5 s while a hold overstays, not once. A stuck hold has no falling edge,
+        // so a single sample can never show HOW FAST the runaway zoom is climbing - and that
+        // rate (reported slower than the configured zoomInSpeed) is the open half of #167. A
+        // series of lvl= samples 5 s apart makes it computable from the log. Gated on the
+        // 5 s window rather than a flag, so it costs no extra state and cannot spam per tick.
+        } else if (held && secs > 6.0 &&
+                   static_cast<int>(secs / 5.0) != static_cast<int>((secs - dt) / 5.0)) {
+            wind::Log(wind::LogLevel::Warn, "input",
+                      "%sHeld STUCK? held=%.1fs hook[d=%u u=%u dbl=%u / d=%u u=%u dbl=%u] raw[d=%u u=%u / d=%u u=%u] lvl=%.2f",
+                      tag, secs,
+                      st.dbgHookDown[1].load(), st.dbgHookUp[1].load(), st.dbgHookDbl[1].load(),
+                      st.dbgHookDown[2].load(), st.dbgHookUp[2].load(), st.dbgHookDbl[2].load(),
+                      st.dbgRawDown[1].load(), st.dbgRawUp[1].load(),
+                      st.dbgRawDown[2].load(), st.dbgRawUp[2].load(), lvl);
+        }
+        // Accumulate AFTER edge handling so a fall reports the pre-reset duration; cleared at 0 when up.
+        secs = held ? (secs + dt) : 0.0;
+    };
+    // Watch the EFFECTIVE held state - side-buttons OR keyboard binds - not just the
+    // side-button half (issue #167). A stuck KEYBOARD bind drove a runaway zoom that this
+    // detector could not see, which is why episodes of #167 never left a STUCK? line in the
+    // log despite being hit repeatedly. inHeld/outHeld are the same values that drive the
+    // zoom, so the diagnostic now reports what actually happened rather than half of it.
+    snap("in",  inHeld,  t.dbgPrevInHeld,  t.dbgInHeldSec);
+    snap("out", outHeld, t.dbgPrevOutHeld, t.dbgOutHeldSec);
+}
+
 static void RunTick(TickState& t) {
     TickWorkTimer workTimer(t);
     const TickClock clk = BeginTick(t);
@@ -2833,52 +2881,7 @@ static void RunTick(TickState& t) {
     t.prevActive = active;
     t.prevInspect = inspect;
 
-    // Diagnostics (issue #113): log the side-button held-state timeline so the intermittent stuck can
-    // be diagnosed from the log. On every rise/fall, dump the hook + Raw Input event counters and the
-    // held duration; a stuck shows as a rise with no matching fall (and the next event only on
-    // re-click). Also WARN once if a hold overstays (first line at 10 s, then every 5 s; well past any hold-to-zoom, which caps in
-    // ~2 s) - that line, with static counters, pinpoints a stuck episode. Edges/overstay only, so
-    // Log() is never hit on the per-frame path.
-    {
-        auto& st = g_input.state();
-        auto snap = [&](const char* tag, bool held, bool& prev, double& secs) {
-            if (held != prev) {
-                // Edge: `secs` still holds the accumulated duration (meaningful on a fall; ~0 on a rise).
-                wind::Log(wind::LogLevel::Info, "input",
-                          "%sHeld %d->%d held=%.2fs hook[d=%u u=%u dbl=%u / d=%u u=%u dbl=%u] raw[d=%u u=%u / d=%u u=%u] hookActive=%d lvl=%.2f",
-                          tag, prev ? 1 : 0, held ? 1 : 0, secs,
-                          st.dbgHookDown[1].load(), st.dbgHookUp[1].load(), st.dbgHookDbl[1].load(),
-                          st.dbgHookDown[2].load(), st.dbgHookUp[2].load(), st.dbgHookDbl[2].load(),
-                          st.dbgRawDown[1].load(), st.dbgRawUp[1].load(),
-                          st.dbgRawDown[2].load(), st.dbgRawUp[2].load(),
-                          g_input.hookActive() ? 1 : 0, lvl);
-                prev = held;
-            // Re-fire every 5 s while a hold overstays, not once. A stuck hold has no falling edge,
-            // so a single sample can never show HOW FAST the runaway zoom is climbing - and that
-            // rate (reported slower than the configured zoomInSpeed) is the open half of #167. A
-            // series of lvl= samples 5 s apart makes it computable from the log. Gated on the
-            // 5 s window rather than a flag, so it costs no extra state and cannot spam per tick.
-            } else if (held && secs > 6.0 &&
-                       static_cast<int>(secs / 5.0) != static_cast<int>((secs - dt) / 5.0)) {
-                wind::Log(wind::LogLevel::Warn, "input",
-                          "%sHeld STUCK? held=%.1fs hook[d=%u u=%u dbl=%u / d=%u u=%u dbl=%u] raw[d=%u u=%u / d=%u u=%u] lvl=%.2f",
-                          tag, secs,
-                          st.dbgHookDown[1].load(), st.dbgHookUp[1].load(), st.dbgHookDbl[1].load(),
-                          st.dbgHookDown[2].load(), st.dbgHookUp[2].load(), st.dbgHookDbl[2].load(),
-                          st.dbgRawDown[1].load(), st.dbgRawUp[1].load(),
-                          st.dbgRawDown[2].load(), st.dbgRawUp[2].load(), lvl);
-            }
-            // Accumulate AFTER edge handling so a fall reports the pre-reset duration; cleared at 0 when up.
-            secs = held ? (secs + dt) : 0.0;
-        };
-        // Watch the EFFECTIVE held state - side-buttons OR keyboard binds - not just the
-        // side-button half (issue #167). A stuck KEYBOARD bind drove a runaway zoom that this
-        // detector could not see, which is why episodes of #167 never left a STUCK? line in the
-        // log despite being hit repeatedly. inHeld/outHeld are the same values that drive the
-        // zoom, so the diagnostic now reports what actually happened rather than half of it.
-        snap("in",  inHeld,  t.dbgPrevInHeld,  t.dbgInHeldSec);
-        snap("out", outHeld, t.dbgPrevOutHeld, t.dbgOutHeldSec);
-    }
+    LogHeldState(t, inHeld, outHeld, lvl, dt);
 
     // Frame-pacing diagnostics: a 2 s window of loop-interval stats (dt = time between ticks =
     // the on-screen frame interval, since Present(1,0) paces while zoomed). maxDt and the hitch
