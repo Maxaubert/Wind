@@ -2471,6 +2471,86 @@ static PresentExtras BuildPresentExtras(TickState& t, double lvl, double dt, boo
     return ex;
 }
 
+// Active tick: game pacing (reduced-push and timer-paced modes), then the engine present.
+// Returns whether this tick presented.
+static bool PaceAndPresent(TickState& t, PresentExtras& ex, const MapResult& r, double lvl, double dt,
+                           bool zoomed, bool fsGame, bool enterActive) {
+    // Game pacing (issue #148): ONLY for the opt-in knobs. The default zoomed path keeps the
+    // vsync-locked blocking Present - it is what makes panning smooth (refresh-locked cadence),
+    // and at normal GPU priority it blocks a few frames at worst, never wedges. The timer-paced
+    // Present(0,0) + fence-gate mode below exists because lowGpuPriority=1 can starve our GPU
+    // work for MINUTES under a saturated game (a blocking present then wedges input, teardown,
+    // and the cursor restore), and because gameFpsCap needs presents decoupled from ticks. Both
+    // trade present cadence for safety/headroom, so they must never engage by default - an
+    // earlier build enabled this mode for every "foreground covers the monitor" case (which
+    // also matches any MAXIMIZED desktop window) and made panning judder everywhere.
+    // While engaged: the main-loop timer paces (t.gamePacing), presents are Present(0,0)
+    // (ex.noVsync), and renderFrame skips the whole frame while the previous present hasn't
+    // executed on the GPU (ex.gatePresent). Skipped ticks still sample input and advance the
+    // mapper. The activation and reveal-pending ticks always attempt a present (the gated
+    // reveal depends on frames reaching the redirection surface).
+    bool doPresent = true;
+    // Reduced-PUSH game mode (issue #148, measured in Foundation): under a game, DWM
+    // services our redirected window's presents at only ~78/s while compositing at 144/s -
+    // pushing 144 presents/s into that path builds a standing queue, so every Present waits
+    // ~a queue's worth with jitter (the stutter). gameFpsCap>0 over a fullscreen game
+    // presents every Nth vblank instead (N = ceil(hz/cap)), BELOW the service rate, so the
+    // queue stays empty and each present retires on the next composite. Skip ticks block on
+    // IDXGIOutput::WaitForVBlank (in the skip branch below), keeping the loop vblank-locked
+    // with no timer jitter; input/pan still samples every tick. Activation/reveal ticks
+    // always present (the gated reveal needs frames on the redirection surface).
+    const bool capVsync = fsGame && zoomed && t.cfg.gameFpsCap > 0 &&
+                          t.cfg.vsync != 0 && t.cfg.dwmFlush == 0;
+    if (capVsync && !(enterActive || t.revealPending > 0)) {
+        int div = (t.hz + t.cfg.gameFpsCap - 1) / t.cfg.gameFpsCap;   // ceil(hz/cap)
+        if (div < 1) div = 1;
+        if (++t.pushPhase >= div) t.pushPhase = 0;
+        if (t.pushPhase != 0) doPresent = false;
+    } else {
+        t.pushPhase = 0;
+    }
+    const bool gamePacing = fsGame && zoomed && !capVsync &&
+                            (EffectiveGpuPriority(t.cfg) < 0 || t.cfg.gameFpsCap > 0);
+    t.gamePacing = gamePacing;
+    if (gamePacing) {
+        ex.noVsync = true;
+        ex.gatePresent = true;
+        if (t.cfg.gameFpsCap > 0) {
+            const double interval = 1.0 / (double)t.cfg.gameFpsCap;
+            t.presentAccum += dt;
+            if (enterActive || t.revealPending > 0) {
+                t.presentAccum = 0.0;                   // reveal path: present every tick
+            } else if (t.presentAccum >= interval) {
+                t.presentAccum -= interval;
+                if (t.presentAccum > interval) t.presentAccum = interval;  // hitch: no burst catch-up
+            } else {
+                doPresent = false;
+            }
+        }
+    } else {
+        t.presentAccum = 0.0;
+    }
+    if (doPresent) {
+        LARGE_INTEGER zp0{}; if (t.zt.armed && t.zt.step == 0) QueryPerformanceCounter(&zp0);
+        { wind::SpanScope span_(wind::kSpanPresent); t.model->present(r, lvl, t.cfg, t.mon, ex); }      // render+present (never blocks the ramp)
+        // The transform model hides and restores the pointer on its own (Inspect exit, the
+        // hide-cursor hotkey), so read its state back: a mirrored flag went stale after both and
+        // made the next Inspect toggle read our own hiding as the app's mouselook tell.
+        if (auto* tm = dynamic_cast<TransformModel*>(t.model)) t.cursorHiddenByUs = tm->pointerHidden();
+        if (t.zt.armed && t.zt.step == 0 && t.zt.presentMs == 0) {
+            LARGE_INTEGER zp1; QueryPerformanceCounter(&zp1); t.zt.presentMs = QpcMs(t, zp0.QuadPart, zp1.QuadPart);
+        }
+    } else if (capVsync) {
+        // Reduced-push skip tick: block to the next vblank so the loop cadence stays
+        // vblank-locked (Present paces the present ticks, this paces the skips). Fallback
+        // sleep if the output can't wait (device transition) so we never spin.
+        if (auto* rm = dynamic_cast<RenderModel*>(t.model)) {
+            if (!rm->waitVBlank()) Sleep(3);
+        }
+    }
+    return doPresent;
+}
+
 static void RunTick(TickState& t) {
     TickWorkTimer workTimer(t);
     const TickClock clk = BeginTick(t);
@@ -2528,79 +2608,7 @@ static void RunTick(TickState& t) {
         InstantHybridSwitch(t, enterActive, inspect, fgTick, fsCover, fgBorderless, liftIfTransform);
         PresentExtras ex = BuildPresentExtras(t, lvl, dt, zoomed, inspect, fsGame, wallNeeded, freeCursor,
                                               gameCursor, dragFollow, curDx, curDy, rawDx, rawDy, r);
-        // Game pacing (issue #148): ONLY for the opt-in knobs. The default zoomed path keeps the
-        // vsync-locked blocking Present - it is what makes panning smooth (refresh-locked cadence),
-        // and at normal GPU priority it blocks a few frames at worst, never wedges. The timer-paced
-        // Present(0,0) + fence-gate mode below exists because lowGpuPriority=1 can starve our GPU
-        // work for MINUTES under a saturated game (a blocking present then wedges input, teardown,
-        // and the cursor restore), and because gameFpsCap needs presents decoupled from ticks. Both
-        // trade present cadence for safety/headroom, so they must never engage by default - an
-        // earlier build enabled this mode for every "foreground covers the monitor" case (which
-        // also matches any MAXIMIZED desktop window) and made panning judder everywhere.
-        // While engaged: the main-loop timer paces (t.gamePacing), presents are Present(0,0)
-        // (ex.noVsync), and renderFrame skips the whole frame while the previous present hasn't
-        // executed on the GPU (ex.gatePresent). Skipped ticks still sample input and advance the
-        // mapper. The activation and reveal-pending ticks always attempt a present (the gated
-        // reveal depends on frames reaching the redirection surface).
-        bool doPresent = true;
-        // Reduced-PUSH game mode (issue #148, measured in Foundation): under a game, DWM
-        // services our redirected window's presents at only ~78/s while compositing at 144/s -
-        // pushing 144 presents/s into that path builds a standing queue, so every Present waits
-        // ~a queue's worth with jitter (the stutter). gameFpsCap>0 over a fullscreen game
-        // presents every Nth vblank instead (N = ceil(hz/cap)), BELOW the service rate, so the
-        // queue stays empty and each present retires on the next composite. Skip ticks block on
-        // IDXGIOutput::WaitForVBlank (in the skip branch below), keeping the loop vblank-locked
-        // with no timer jitter; input/pan still samples every tick. Activation/reveal ticks
-        // always present (the gated reveal needs frames on the redirection surface).
-        const bool capVsync = fsGame && zoomed && t.cfg.gameFpsCap > 0 &&
-                              t.cfg.vsync != 0 && t.cfg.dwmFlush == 0;
-        if (capVsync && !(enterActive || t.revealPending > 0)) {
-            int div = (t.hz + t.cfg.gameFpsCap - 1) / t.cfg.gameFpsCap;   // ceil(hz/cap)
-            if (div < 1) div = 1;
-            if (++t.pushPhase >= div) t.pushPhase = 0;
-            if (t.pushPhase != 0) doPresent = false;
-        } else {
-            t.pushPhase = 0;
-        }
-        const bool gamePacing = fsGame && zoomed && !capVsync &&
-                                (EffectiveGpuPriority(t.cfg) < 0 || t.cfg.gameFpsCap > 0);
-        t.gamePacing = gamePacing;
-        if (gamePacing) {
-            ex.noVsync = true;
-            ex.gatePresent = true;
-            if (t.cfg.gameFpsCap > 0) {
-                const double interval = 1.0 / (double)t.cfg.gameFpsCap;
-                t.presentAccum += dt;
-                if (enterActive || t.revealPending > 0) {
-                    t.presentAccum = 0.0;                   // reveal path: present every tick
-                } else if (t.presentAccum >= interval) {
-                    t.presentAccum -= interval;
-                    if (t.presentAccum > interval) t.presentAccum = interval;  // hitch: no burst catch-up
-                } else {
-                    doPresent = false;
-                }
-            }
-        } else {
-            t.presentAccum = 0.0;
-        }
-        if (doPresent) {
-            LARGE_INTEGER zp0{}; if (t.zt.armed && t.zt.step == 0) QueryPerformanceCounter(&zp0);
-            { wind::SpanScope span_(wind::kSpanPresent); t.model->present(r, lvl, t.cfg, t.mon, ex); }      // render+present (never blocks the ramp)
-            // The transform model hides and restores the pointer on its own (Inspect exit, the
-            // hide-cursor hotkey), so read its state back: a mirrored flag went stale after both and
-            // made the next Inspect toggle read our own hiding as the app's mouselook tell.
-            if (auto* tm = dynamic_cast<TransformModel*>(t.model)) t.cursorHiddenByUs = tm->pointerHidden();
-            if (t.zt.armed && t.zt.step == 0 && t.zt.presentMs == 0) {
-                LARGE_INTEGER zp1; QueryPerformanceCounter(&zp1); t.zt.presentMs = QpcMs(t, zp0.QuadPart, zp1.QuadPart);
-            }
-        } else if (capVsync) {
-            // Reduced-push skip tick: block to the next vblank so the loop cadence stays
-            // vblank-locked (Present paces the present ticks, this paces the skips). Fallback
-            // sleep if the output can't wait (device transition) so we never spin.
-            if (auto* rm = dynamic_cast<RenderModel*>(t.model)) {
-                if (!rm->waitVBlank()) Sleep(3);
-            }
-        }
+        const bool doPresent = PaceAndPresent(t, ex, r, lvl, dt, zoomed, fsGame, enterActive);
         // Reveal AFTER the live frame is presented: setVisible flips the layer alpha over the
         // now-current front buffer, so the overlay never shows its retained previous-session
         // frame (the alt-tab "previous window"). capture() also drained to the latest frame.
