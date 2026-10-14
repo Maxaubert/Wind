@@ -2644,6 +2644,70 @@ static void AssertGameInspectSteal(TickState& t, bool inspect) {
     }
 }
 
+// Active tick: the measured cursor baseline for the next tick's delta, plus the divergence
+// diagnostics (diagnostics=1).
+static void UpdateCursorBaseline(TickState& t, bool inspect, bool doPresent, bool dragFollow, double lvl,
+                                 const POINT& cur, const MapResult& r) {
+    // Bookkeeping for next tick's GetCursorPos delta. INSPECT keeps the explicit frozen point
+    // (the 1px clip pins the pointer there; explicit is immune to the click-release window).
+    // Everything else uses a MEASURED read (issue #169) - the baseline must be where the
+    // pointer actually IS after this tick's present, never where we intended to put it:
+    //  - welded (render park OR transform weld; both report whether SetCursorPos REALLY ran
+    //    this frame): the call is synchronous, so the read equals the park/weld point -
+    //    identical to the old assumed baseline.
+    //  - weld deduped/suppressed (unchanged centre pixel, drag-follow, gatePresent or
+    //    fps-cap skip ticks): the old code assumed the park landed anyway and baselined on
+    //    the lens centre. The next delta then measured hand + (pointer - centre) gap, the
+    //    mapper integrated the gap, the centre overshot the pointer, and the sign flipped
+    //    every tick: an unstable servo, oscillating with amplitude proportional to hand
+    //    speed. That was the #169 window-drag flicker - and, before the transform weld was
+    //    recognized here, the #181 corner drift in transform game sessions.
+    if (inspect) {
+        t.lastSetVirtual = t.frozenCursor;
+    } else {
+        // Parked -> the park point: hand motion after the park (including during the Present
+        // block) is measured next tick from there. Not parked (weld deduped/suppressed,
+        // transform FOLLOW, skipped frame) -> THIS tick's start-of-tick read `cur`: motion
+        // after that read is measured next tick. NEVER a fresh post-present read - Present
+        // blocks ~a frame at vsync, and a read taken after it swallows all hand motion that
+        // occurred during the block, so the lens pans slower than the hand and the weld drags
+        // the pointer backwards (field-reported as stalling/slowed cursor; first shipped
+        // version of this fix had exactly that bug).
+        auto* rmodel = dynamic_cast<RenderModel*>(t.model);
+        auto* tweld  = dynamic_cast<TransformModel*>(t.model);
+        const bool parkedNow = doPresent &&
+            ((rmodel && rmodel->engine().parkedLastFrame()) ||
+             (tweld && tweld->weldedLastFrame()));
+        if (parkedNow) {
+            t.lastSetVirtual.x = r.clickDesktopX + t.mon.x;
+            t.lastSetVirtual.y = r.clickDesktopY + t.mon.y;
+        } else {
+            t.lastSetVirtual = cur;
+        }
+        // Divergence diagnostics (issue #169, diagnostics=1 only): once a second, log how far
+        // the pointer sits from the lens centre and how many ticks drag-followed. If any
+        // oscillation survives the fix, this pinpoints the fighting pair from the field log.
+        if (t.cfg.diagnostics) {
+            const double divX = t.lastSetVirtual.x - (double)(r.clickDesktopX + t.mon.x);
+            const double divY = t.lastSetVirtual.y - (double)(r.clickDesktopY + t.mon.y);
+            const double div = std::sqrt(divX * divX + divY * divY);
+            if (div > t.dbgMaxDivergence) t.dbgMaxDivergence = div;
+            if (dragFollow) t.dbgDragFollowTicks++;
+            const unsigned long long nowD = GetTickCount64();
+            if (nowD - t.dbgDivergenceLogMs >= 1000) {
+                if (t.dbgDivergenceLogMs != 0) {
+                    wind::Log(wind::LogLevel::Info, "cursor",
+                              "divergence max=%.0fpx dragFollowTicks=%u lvl=%.2f",
+                              t.dbgMaxDivergence, t.dbgDragFollowTicks, lvl);
+                }
+                t.dbgDivergenceLogMs = nowD;
+                t.dbgMaxDivergence = 0.0;
+                t.dbgDragFollowTicks = 0;
+            }
+        }
+    }
+}
+
 static void RunTick(TickState& t) {
     TickWorkTimer workTimer(t);
     const TickClock clk = BeginTick(t);
@@ -2704,64 +2768,7 @@ static void RunTick(TickState& t) {
         const bool doPresent = PaceAndPresent(t, ex, r, lvl, dt, zoomed, fsGame, enterActive);
         RevealAndHandover(t, enterActive, fsGame);
         AssertGameInspectSteal(t, inspect);
-        // Bookkeeping for next tick's GetCursorPos delta. INSPECT keeps the explicit frozen point
-        // (the 1px clip pins the pointer there; explicit is immune to the click-release window).
-        // Everything else uses a MEASURED read (issue #169) - the baseline must be where the
-        // pointer actually IS after this tick's present, never where we intended to put it:
-        //  - welded (render park OR transform weld; both report whether SetCursorPos REALLY ran
-        //    this frame): the call is synchronous, so the read equals the park/weld point -
-        //    identical to the old assumed baseline.
-        //  - weld deduped/suppressed (unchanged centre pixel, drag-follow, gatePresent or
-        //    fps-cap skip ticks): the old code assumed the park landed anyway and baselined on
-        //    the lens centre. The next delta then measured hand + (pointer - centre) gap, the
-        //    mapper integrated the gap, the centre overshot the pointer, and the sign flipped
-        //    every tick: an unstable servo, oscillating with amplitude proportional to hand
-        //    speed. That was the #169 window-drag flicker - and, before the transform weld was
-        //    recognized here, the #181 corner drift in transform game sessions.
-        if (inspect) {
-            t.lastSetVirtual = t.frozenCursor;
-        } else {
-            // Parked -> the park point: hand motion after the park (including during the Present
-            // block) is measured next tick from there. Not parked (weld deduped/suppressed,
-            // transform FOLLOW, skipped frame) -> THIS tick's start-of-tick read `cur`: motion
-            // after that read is measured next tick. NEVER a fresh post-present read - Present
-            // blocks ~a frame at vsync, and a read taken after it swallows all hand motion that
-            // occurred during the block, so the lens pans slower than the hand and the weld drags
-            // the pointer backwards (field-reported as stalling/slowed cursor; first shipped
-            // version of this fix had exactly that bug).
-            auto* rmodel = dynamic_cast<RenderModel*>(t.model);
-            auto* tweld  = dynamic_cast<TransformModel*>(t.model);
-            const bool parkedNow = doPresent &&
-                ((rmodel && rmodel->engine().parkedLastFrame()) ||
-                 (tweld && tweld->weldedLastFrame()));
-            if (parkedNow) {
-                t.lastSetVirtual.x = r.clickDesktopX + t.mon.x;
-                t.lastSetVirtual.y = r.clickDesktopY + t.mon.y;
-            } else {
-                t.lastSetVirtual = cur;
-            }
-            // Divergence diagnostics (issue #169, diagnostics=1 only): once a second, log how far
-            // the pointer sits from the lens centre and how many ticks drag-followed. If any
-            // oscillation survives the fix, this pinpoints the fighting pair from the field log.
-            if (t.cfg.diagnostics) {
-                const double divX = t.lastSetVirtual.x - (double)(r.clickDesktopX + t.mon.x);
-                const double divY = t.lastSetVirtual.y - (double)(r.clickDesktopY + t.mon.y);
-                const double div = std::sqrt(divX * divX + divY * divY);
-                if (div > t.dbgMaxDivergence) t.dbgMaxDivergence = div;
-                if (dragFollow) t.dbgDragFollowTicks++;
-                const unsigned long long nowD = GetTickCount64();
-                if (nowD - t.dbgDivergenceLogMs >= 1000) {
-                    if (t.dbgDivergenceLogMs != 0) {
-                        wind::Log(wind::LogLevel::Info, "cursor",
-                                  "divergence max=%.0fpx dragFollowTicks=%u lvl=%.2f",
-                                  t.dbgMaxDivergence, t.dbgDragFollowTicks, lvl);
-                    }
-                    t.dbgDivergenceLogMs = nowD;
-                    t.dbgMaxDivergence = 0.0;
-                    t.dbgDragFollowTicks = 0;
-                }
-            }
-        }
+        UpdateCursorBaseline(t, inspect, doPresent, dragFollow, lvl, cur, r);
     } else if (t.prevActive) {                        // active -> idle: tear the overlay down
         // The caret/focus watcher is switched off only from the zoomed view block; a zoom-out that
         // snaps straight to 1.0 skipped it and left the watcher polling at 1x (#71).
