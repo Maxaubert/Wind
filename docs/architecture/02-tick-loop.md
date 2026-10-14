@@ -1,9 +1,10 @@
 # 02. The tick loop
 
-Everything Wind does at runtime happens in one function, `RunTick` in `src/main.cpp`. Each tick
-samples input, advances the zoom, resolves a pan and asks the current engine to present. This
-chapter lists the phases in source order, then covers pacing, idle sleep and the threads that sit
-beside the loop.
+Everything Wind does at runtime happens in one tick, `RunTick` in `src/main.cpp`. `RunTick` is a
+short sequence of calls to static phase functions in the same file (see
+[Phase functions](#phase-functions)). Each tick samples input, advances the zoom, resolves a pan and
+asks the current engine to present. This chapter lists the phases in source order, then covers
+pacing, idle sleep and the threads that sit beside the loop.
 
 ## Why one loop
 
@@ -92,13 +93,43 @@ builds its magnification context and cursor lens at 1x and keeps them warm (#369
 [05](05-transform-engine.md)); it no longer releases them after a zoom. The tick ends with the stuck-input
 timeline and, under `diagnostics=1`, the 2 s frame-pacing window.
 
+### Phase functions
+
+`RunTick` calls these in order; locals that a later phase reads come back in small structs
+(`TickClock`, `TickInput`, `TickModes`, `PanDelta`, `TickForeground`, `PointerMap`). Everything
+else lives in `TickState`. Add new per-tick work to the phase it belongs to, not to `RunTick`.
+
+| Phase | Function |
+|---|---|
+| Timing, idle colour filter, zoom timeline step | `BeginTick` |
+| Config hot-reload (apply: `ApplyReloadedConfig`) | `PollConfigReload` |
+| Launch-cover watch, `noSwallowApps`, keyboard-hook watchdog | `WatchForegroundAndKbHook` |
+| Held binds, zoom step, recenter and Inspect edges, quick zoom | `ResolveInputAndZoom` (bind state: `BindComboHeld`) |
+| Raw motion, zoomed / Inspect / active, pan arm | `ResolveTickModes` |
+| Active tick (zoomed or Inspect) | `RunActiveTick`, which calls the rows below |
+| Session enter: resets, retarget, engine pick, seeds | `EnterSession` (`RetargetSessionMonitor`, `PickEngineAtZoomIn`) |
+| Inspect edges | `EnterInspect`, `ExitInspect` |
+| Pan delta | `ResolvePanDelta` |
+| Foreground facts, pan wall, launch cover | `ReadForegroundAndArmWall` |
+| Free cursor, pan glide, game-drawn cursor, mapper step | `MapPointer` |
+| Tracking, keyboard pan, view owner | `StepTracking` |
+| Dead-zone probe, Inspect clicks | `ProbeClicks`, `CommitInspectClicks` |
+| Hybrid instant switch | `InstantHybridSwitch` |
+| `PresentExtras` | `BuildPresentExtras` |
+| Game pacing and present | `PaceAndPresent` |
+| Reveal gating and handover overlap | `RevealAndHandover` |
+| Game-inspect foreground steal | `AssertGameInspectSteal` |
+| Baseline | `UpdateCursorBaseline` |
+| Teardown / idle | `TeardownSession` / `IdleTick` |
+| Diagnostics and telemetry | `LogHeldState`, `LogFramePacing`, `WriteTestTelemetry` |
+
 ## Config hot-reload
 
 There is no settings IPC. `WindConfig.exe` writes `magnifier.ini` and the core notices:
 
 - `wWinMain` arms `FindFirstChangeNotificationW` on the ini's directory (`LAST_WRITE` +
   `FILE_NAME`, so rename-based saves fire it too).
-- `RunTick` polls the handle with a zero timeout about four times a second. Per-tick polling is a
+- The tick (`PollConfigReload`) polls the handle with a zero timeout about four times a second. Per-tick polling is a
   kernel transition 144 times a second for a file a human changes. Without a watch handle the loop
   falls back to a ~1 s timed poll.
 - Only a changed mtime (`ConfigMTime`) proceeds to a reload.
@@ -156,7 +187,7 @@ The main loop in `wWinMain` paces the tick:
 | Render, vsync (default) | `Present(1,0)` blocks to the refresh; the timer is skipped |
 | Render, `dwmFlush=1` | `Present(0,0)`, then `DwmFlush()` after the tick |
 | Transform | Always `DwmFlush` while zoomed (the write and the pointer land in one composite); an unpaced loop would flood DWM's transform queue until the view lags. Idle at 1x uses the timer or the idle sleep |
-| Game pacing modes | Paced inside `RunTick` (vblank waits or the present accumulator) |
+| Game pacing modes | Paced inside the tick, `PaceAndPresent` (vblank waits or the present accumulator) |
 
 `DetectRefreshHz` reads the current monitor's real rate and is re-read on retarget. **Tick counts
 are refresh-rate dependent**, so every tick-tuned constant derives from the detected rate:
