@@ -2213,6 +2213,49 @@ static void ProbeClicks(TickState& t, double lvl, const POINT& cur, const MapRes
     }
 }
 
+// Active tick: fire the Inspect clicks the hook swallowed at the look point.
+static void CommitInspectClicks(TickState& t, const MapResult& r) {
+    // Inspect click-to-look-point: the hook swallowed real click(s) and handed us per-button counts
+    // (counts, not a flag, so a fast double-click before this drains isn't lost). Fire a clean ABSOLUTE
+    // click at the crosshair (mapper center = look point) per pending press, so each lands where you
+    // aim, at any zoom. ABSOLUTE coords are immune to the re-freeze SetCursorPos below, and an absolute
+    // injected move is skipped by the raw accumulator (WM_INPUT ignores MOUSE_MOVE_ABSOLUTE), so the
+    // look point isn't disturbed. Inspect stays on; the cursor re-freezes at frozenCursor afterwards.
+    int nLeft  = g_input.state().commitLeft.exchange(0);
+    int nRight = g_input.state().commitRight.exchange(0);
+    // Game-inspect: drain but DISCARD clicks. A synthesized click over the game window would
+    // re-activate it (mouse clicks activate), re-engaging mouselook mid-inspect; with the game
+    // backgrounded and cursorless there is nothing meaningful to click anyway.
+    if (nLeft + nRight > 0 && !t.inspectGame) {
+        ClipCursor(nullptr);       // release the 1px freeze so the absolute click can reach the look point
+        t.clickReleaseTicks = TicksAtHz(2, t.hz);   // ...and keep it released ~14ms before re-freezing (below)
+        const VirtualBounds& vb = t.vbounds;   // cached at activation; equals the SM_*VIRTUALSCREEN metrics
+        if (vb.w > 1 && vb.h > 1) {
+            int lx = r.clickDesktopX + t.mon.x, ly = r.clickDesktopY + t.mon.y;
+            LONG ax = (LONG)((lx - vb.x) * 65535.0 / (vb.w - 1) + 0.5);
+            LONG ay = (LONG)((ly - vb.y) * 65535.0 / (vb.h - 1) + 0.5);
+            auto fireClicks = [&](DWORD downF, DWORD upF, int count) {
+                for (int k = 0; k < count; ++k) {
+                    INPUT clk[3] = {};
+                    for (int i = 0; i < 3; ++i) { clk[i].type = INPUT_MOUSE; clk[i].mi.dx = ax; clk[i].mi.dy = ay;
+                                                  clk[i].mi.dwExtraInfo = (ULONG_PTR)wind::kWindInjectTag; }   // never a click bind (#285)
+                    clk[0].mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+                    clk[1].mi.dwFlags = downF | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+                    clk[2].mi.dwFlags = upF   | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+                    SendInput(3, clk, sizeof(INPUT));
+                }
+            };
+            fireClicks(MOUSEEVENTF_LEFTDOWN,  MOUSEEVENTF_LEFTUP,  nLeft);
+            fireClicks(MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, nRight);
+            if (dynamic_cast<TransformModel*>(t.model)) {
+                // The injected absolute move races transform writes (issue #148 TDR class), so
+                // SERIALIZE: skip transform writes for a couple ticks around it (ex.pauseWrites).
+                t.clickPauseTicks = TicksAtHz(3, t.hz);
+            }
+        }
+    }
+}
+
 static void RunTick(TickState& t) {
     TickWorkTimer workTimer(t);
     const TickClock clk = BeginTick(t);
@@ -2262,45 +2305,7 @@ static void RunTick(TickState& t) {
         MapResult r = pm.r;
         StepTracking(t, lvl, inspect, fsCover, panArmed, kbHook, dt, wallNeeded, cur, curDx, curDy, r);
         ProbeClicks(t, lvl, cur, r);
-        // Inspect click-to-look-point: the hook swallowed real click(s) and handed us per-button counts
-        // (counts, not a flag, so a fast double-click before this drains isn't lost). Fire a clean ABSOLUTE
-        // click at the crosshair (mapper center = look point) per pending press, so each lands where you
-        // aim, at any zoom. ABSOLUTE coords are immune to the re-freeze SetCursorPos below, and an absolute
-        // injected move is skipped by the raw accumulator (WM_INPUT ignores MOUSE_MOVE_ABSOLUTE), so the
-        // look point isn't disturbed. Inspect stays on; the cursor re-freezes at frozenCursor afterwards.
-        int nLeft  = g_input.state().commitLeft.exchange(0);
-        int nRight = g_input.state().commitRight.exchange(0);
-        // Game-inspect: drain but DISCARD clicks. A synthesized click over the game window would
-        // re-activate it (mouse clicks activate), re-engaging mouselook mid-inspect; with the game
-        // backgrounded and cursorless there is nothing meaningful to click anyway.
-        if (nLeft + nRight > 0 && !t.inspectGame) {
-            ClipCursor(nullptr);       // release the 1px freeze so the absolute click can reach the look point
-            t.clickReleaseTicks = TicksAtHz(2, t.hz);   // ...and keep it released ~14ms before re-freezing (below)
-            const VirtualBounds& vb = t.vbounds;   // cached at activation; equals the SM_*VIRTUALSCREEN metrics
-            if (vb.w > 1 && vb.h > 1) {
-                int lx = r.clickDesktopX + t.mon.x, ly = r.clickDesktopY + t.mon.y;
-                LONG ax = (LONG)((lx - vb.x) * 65535.0 / (vb.w - 1) + 0.5);
-                LONG ay = (LONG)((ly - vb.y) * 65535.0 / (vb.h - 1) + 0.5);
-                auto fireClicks = [&](DWORD downF, DWORD upF, int count) {
-                    for (int k = 0; k < count; ++k) {
-                        INPUT clk[3] = {};
-                        for (int i = 0; i < 3; ++i) { clk[i].type = INPUT_MOUSE; clk[i].mi.dx = ax; clk[i].mi.dy = ay;
-                                                      clk[i].mi.dwExtraInfo = (ULONG_PTR)wind::kWindInjectTag; }   // never a click bind (#285)
-                        clk[0].mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
-                        clk[1].mi.dwFlags = downF | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
-                        clk[2].mi.dwFlags = upF   | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
-                        SendInput(3, clk, sizeof(INPUT));
-                    }
-                };
-                fireClicks(MOUSEEVENTF_LEFTDOWN,  MOUSEEVENTF_LEFTUP,  nLeft);
-                fireClicks(MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, nRight);
-                if (dynamic_cast<TransformModel*>(t.model)) {
-                    // The injected absolute move races transform writes (issue #148 TDR class), so
-                    // SERIALIZE: skip transform writes for a couple ticks around it (ex.pauseWrites).
-                    t.clickPauseTicks = TicksAtHz(3, t.hz);
-                }
-            }
-        }
+        CommitInspectClicks(t, r);
         // Fullscreen-game tell for the per-tick perf levers (issue #148): crop the capture copy to
         // the magnified region (gameCrop), skip the periodic topmost backstop, and optionally cap
         // our own present rate (gameFpsCap). fgTick/fsCover/fgBorderless were read once above.
