@@ -47,7 +47,8 @@ onboarded.
 ## The bridge
 
 The page posts JSON with `window.chrome.webview.postMessage`; `HandleWebMessage` is the
-authoritative message list, and `ui/src/bridge.js` mirrors it (request/reply pairs become
+authoritative message list (its dispatch chain in `src/config_ui/main.cpp`; each longer message has
+its own `On<Message>` handler just above it), and `ui/src/bridge.js` mirrors it (request/reply pairs become
 promises). The host's JSON helpers live in the pure `src/config_ui/bridge_json.h`
 (`tests/test_bridge_json.cpp`): `JsonField` reads one top-level string field and nothing else (the
 page stringifies every value), and `JsonEscape` covers every control character: one unescaped

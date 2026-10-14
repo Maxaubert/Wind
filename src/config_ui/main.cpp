@@ -276,199 +276,231 @@ static DWORD WINAPI ExportDiagnosticsThread(LPVOID) {
     return 0;
 }
 
-static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
-    std::string j = Narrow(jsonW);
-    std::string type = JsonField(j, "type");
-    if (type == "ready") {
-        if (!g_loggedReady && g_launchTick) {
-            g_loggedReady = true;
-            wind::Log(wind::LogLevel::Info, "config", "startup: first paint %llu ms after launch",
-                      (unsigned long long)(GetTickCount64() - g_launchTick));
-        }
-    } else if (type == "getConfig") {
-        PostWindowState(g_hwnd);
-        PostConfig(wv);
-    } else if (type == "setConfig" || type == "setConfigPersist") {
-        std::string key = JsonField(j, "key"), value = JsonField(j, "value");
-        // The page is ours, but the bridge still refuses a key that is not a plain identifier and a
-        // value that would split the line (CR/LF/NUL): either would let a message plant another key.
-        if (!wind::IsSafeIniKey(key) || !wind::IsSafeIniValue(value)) {
-            wind::Log(wind::LogLevel::Warn, "config", "%s: refused an unsafe key or value", type.c_str());
+// Bridge message handlers, one per message, in dispatch order. HandleWebMessage below is the
+// authoritative message list; a one- or two-line branch stays inline there.
+static void OnReady() {
+    if (!g_loggedReady && g_launchTick) {
+        g_loggedReady = true;
+        wind::Log(wind::LogLevel::Info, "config", "startup: first paint %llu ms after launch",
+                  (unsigned long long)(GetTickCount64() - g_launchTick));
+    }
+}
+static void OnSetConfig(ICoreWebView2* wv, const std::string& j, const std::string& type) {
+    std::string key = JsonField(j, "key"), value = JsonField(j, "value");
+    // The page is ours, but the bridge still refuses a key that is not a plain identifier and a
+    // value that would split the line (CR/LF/NUL): either would let a message plant another key.
+    if (!wind::IsSafeIniKey(key) || !wind::IsSafeIniValue(value)) {
+        wind::Log(wind::LogLevel::Warn, "config", "%s: refused an unsafe key or value", type.c_str());
+        return;
+    }
+    {
+        // Checked (issue #274): this is the path every slider, toggle and keybind takes, and a
+        // failed write (AV lock, a sharing violation on the replace) used to vanish - the page
+        // showed the new value while the ini kept the old one. Tell the page, which says so.
+        // setConfig writes the live ini (the session) only; the profile file changes on Save.
+        std::string live;
+        if (wind::UpdateIniKeys(IniPath(), { { key, value } }, &live) != wind::IniUpdate::Ok) {
+            wind::Log(wind::LogLevel::Warn, "config", "setConfig: writing %s=%s failed",
+                      key.c_str(), value.c_str());
+            wv->PostWebMessageAsJson(
+                Widen("{\"type\":\"configWriteFailed\",\"key\":\"" + JsonEscape(key) + "\"}").c_str());
             return;
         }
-        {
-            // Checked (issue #274): this is the path every slider, toggle and keybind takes, and a
-            // failed write (AV lock, a sharing violation on the replace) used to vanish - the page
-            // showed the new value while the ini kept the old one. Tell the page, which says so.
-            // setConfig writes the live ini (the session) only; the profile file changes on Save.
-            std::string live;
-            if (wind::UpdateIniKeys(IniPath(), { { key, value } }, &live) != wind::IniUpdate::Ok) {
-                wind::Log(wind::LogLevel::Warn, "config", "setConfig: writing %s=%s failed",
-                          key.c_str(), value.c_str());
-                wv->PostWebMessageAsJson(
-                    Widen("{\"type\":\"configWriteFailed\",\"key\":\"" + JsonEscape(key) + "\"}").c_str());
-                return;
-            }
-            if (key == "uiPalette") ApplyWindowTheme();
-            if (type == "setConfigPersist") {
-                // Keybind captures: also written straight into the active profile so they survive
-                // a later Discard or restart while other changes stay unsaved. Only this one key
-                // moves; the rest of the profile file stays as saved.
-                const std::string active = ActiveProfileName(live);
-                std::string prof;
-                if (!active.empty() && SafeName(active) &&
-                    GetFileAttributesW(ProfilePath(active).c_str()) != INVALID_FILE_ATTRIBUTES &&
-                    wind::ReadTextFileOk(ProfilePath(active), prof) &&
-                    !wind::WriteTextFileAtomic(ProfilePath(active), wind::UpdateProfileKey(prof, key, value)))
-                    wind::Log(wind::LogLevel::Warn, "config", "setConfigPersist: profile write of %s failed", key.c_str());
-            }
-        }
-    } else if (type == "saveSession") {
-        // Save: the live session (profile-scoped keys) becomes the active profile file.
-        std::string live;
-        const bool readOk = ReadIni(live);
-        const std::string active = ActiveProfileName(live);
-        const bool ok = readOk && !active.empty() && SafeName(active) &&
-                        wind::WriteTextFileAtomic(ProfilePath(active), wind::MakeProfileText(live));
-        if (!ok) wind::Log(wind::LogLevel::Warn, "config", "saveSession failed (profile '%s')", active.c_str());
-        wv->PostWebMessageAsJson(
-            Widen(std::string("{\"type\":\"sessionSaved\",\"ok\":") + (ok ? "true" : "false") + "}").c_str());
-    } else if (type == "discardSession") {
-        // Discard: the live ini goes back to the saved profile (globals kept); reply with fresh state.
-        wind::IniWriteLock iniLock;   // item 71
-        std::string live;
-        if (ReadIni(live)) {
+        if (key == "uiPalette") ApplyWindowTheme();
+        if (type == "setConfigPersist") {
+            // Keybind captures: also written straight into the active profile so they survive
+            // a later Discard or restart while other changes stay unsaved. Only this one key
+            // moves; the rest of the profile file stays as saved.
             const std::string active = ActiveProfileName(live);
             std::string prof;
             if (!active.empty() && SafeName(active) &&
                 GetFileAttributesW(ProfilePath(active).c_str()) != INVALID_FILE_ATTRIBUTES &&
-                wind::ReadTextFileOk(ProfilePath(active), prof))
-                WriteFileAtomic(IniPath(), wind::MakeLiveText(prof, live, active));
+                wind::ReadTextFileOk(ProfilePath(active), prof) &&
+                !wind::WriteTextFileAtomic(ProfilePath(active), wind::UpdateProfileKey(prof, key, value)))
+                wind::Log(wind::LogLevel::Warn, "config", "setConfigPersist: profile write of %s failed", key.c_str());
         }
+    }
+}
+static void OnSaveSession(ICoreWebView2* wv) {
+    // Save: the live session (profile-scoped keys) becomes the active profile file.
+    std::string live;
+    const bool readOk = ReadIni(live);
+    const std::string active = ActiveProfileName(live);
+    const bool ok = readOk && !active.empty() && SafeName(active) &&
+                    wind::WriteTextFileAtomic(ProfilePath(active), wind::MakeProfileText(live));
+    if (!ok) wind::Log(wind::LogLevel::Warn, "config", "saveSession failed (profile '%s')", active.c_str());
+    wv->PostWebMessageAsJson(
+        Widen(std::string("{\"type\":\"sessionSaved\",\"ok\":") + (ok ? "true" : "false") + "}").c_str());
+}
+static void OnDiscardSession(ICoreWebView2* wv) {
+    // Discard: the live ini goes back to the saved profile (globals kept); reply with fresh state.
+    wind::IniWriteLock iniLock;   // item 71
+    std::string live;
+    if (ReadIni(live)) {
+        const std::string active = ActiveProfileName(live);
+        std::string prof;
+        if (!active.empty() && SafeName(active) &&
+            GetFileAttributesW(ProfilePath(active).c_str()) != INVALID_FILE_ATTRIBUTES &&
+            wind::ReadTextFileOk(ProfilePath(active), prof))
+            WriteFileAtomic(IniPath(), wind::MakeLiveText(prof, live, active));
+    }
+    PostConfig(wv);
+}
+static void OnWindowAction(ICoreWebView2* wv, const std::string& j) {
+    std::string action = JsonField(j, "action");
+    if (action == "minimize") ShowWindow(g_hwnd, SW_MINIMIZE);
+    else if (action == "maximize") ShowWindow(g_hwnd, IsZoomed(g_hwnd) ? SW_RESTORE : SW_MAXIMIZE);   // the title bar button toggles
+    else if (action == "close") {
+        // "force" is the Discard path from the confirm dialog: skip the guard, do not re-ask.
+        if (JsonField(j, "force") == "1") { g_forceClose = true; g_dirty = false; }
+        PostMessageW(g_hwnd, WM_CLOSE, 0, 0);
+    }
+    else if (action == "quitWind") {
+        // Onboarding was closed (X) without completing: end the whole Wind app, not just this
+        // window. Signal the magnifier via a named event, NOT a window message: the deployed
+        // Wind.exe is UIAccess and UIPI silently blocks PostMessage from this non-UIAccess
+        // process. A kernel event isn't gated by UIPI and works in dev + deployed. Then close us.
+        HANDLE ev = OpenEventW(EVENT_MODIFY_STATE, FALSE, wind::kQuitEventName);
+        if (ev) { SetEvent(ev); CloseHandle(ev); }
+        PostMessageW(g_hwnd, WM_CLOSE, 0, 0);
+    }
+    else if (action == "restartWind") {
+        // Only offered when the running Wind has one engine left (running.model is not "live"):
+        // then `model` is fixed until the next start, so switching it needs a real restart. The UI has
+        // already written the new value to the ini. Just launch Wind again: the new instance
+        // evicts the incumbent via the Local\Wind_QuitRequest handshake. On failure the
+        // incumbent is untouched (it is only ever signalled BY a successfully started instance),
+        // so report back rather than leaving the user with a silently ignored button.
+        // session.keep first: this restart is ours, so the unsaved session must survive it.
+        wind::WriteSessionKeep();
+        if (!LaunchWind()) { wind::ClearSessionKeep(); wv->PostWebMessageAsJson(L"{\"type\":\"restartFailed\"}"); }
+    }
+}
+static void OnPickExe(ICoreWebView2* wv) {
+    // "+" on the key-release app list: browse for a program and hand back just its FILE NAME.
+    // The core matches on the bare exe name (IsExeInList), never a full path, so returning the
+    // path would silently never match. Replies with an empty name on cancel so the UI can
+    // simply ignore it rather than having to distinguish cancel from failure.
+    wchar_t file[MAX_PATH] = L"";
+    OPENFILENAMEW ofn{};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner   = g_hwnd;
+    ofn.lpstrFile   = file;
+    ofn.nMaxFile    = MAX_PATH;
+    ofn.lpstrFilter = L"Programs\0*.exe\0All files\0*.*\0";
+    ofn.lpstrTitle  = L"Select a program";
+    // NOCHANGEDIR matters: without it the dialog moves this process's working directory, which
+    // would break every later relative path the host resolves.
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_EXPLORER;
+    std::string name;
+    if (GetOpenFileNameW(&ofn)) {
+        const wchar_t* base = PathFindFileNameW(file);
+        if (base) name = Narrow(base);
+    }
+    wv->PostWebMessageAsJson(
+        Widen("{\"type\":\"exePicked\",\"name\":\"" + JsonEscape(name) + "\"}").c_str());
+}
+static void OnOpenIni() {
+    // Open the ini with the registered .ini handler (usually Notepad), matching the bridge's
+    // "default editor" contract. Fall back to explicitly launching Notepad if no handler is
+    // associated (ShellExecute returns <= 32) so the button never silently does nothing.
+    HINSTANCE r = ShellExecuteW(nullptr, L"open", IniPath().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    if (reinterpret_cast<INT_PTR>(r) <= 32)
+        ShellExecuteW(nullptr, L"open", L"notepad.exe", IniPath().c_str(), nullptr, SW_SHOWNORMAL);
+}
+static void OnExportDiagnostics() {
+    // Off the window thread (see ExportDiagnosticsThread); a second click while one runs is ignored.
+    if (!g_exporting) {
+        g_exporting = true;
+        HANDLE th = CreateThread(nullptr, 0, ExportDiagnosticsThread, nullptr, 0, nullptr);
+        if (th) CloseHandle(th); else g_exporting = false;
+    }
+}
+static void OnCreateProfile(ICoreWebView2* wv, const std::string& j) {
+    // Factory defaults by design (spec): absent keys fall back to built-in defaults. `model` is
+    // seeded EXPLICITLY so a fresh profile file always names its engine (the
+    // core's own missing-key default is hybrid, the same as the UI schema's "Auto"). Globals (onboarded=1, uiPalette, showAdvanced) carry over in MakeLiveText.
+    // fromCurrent ("Duplicate current"): the new profile is the live session as it stands, unsaved
+    // changes included, built here from the live text so `model` (and everything else) is exactly
+    // what is running: no restart, no write-back by the page, and the outgoing profile is NOT
+    // mirrored into (its unsaved changes moved to the new one).
+    const bool fromCurrent = JsonField(j, "fromCurrent") == "1";
+    const std::string name = JsonField(j, "name");
+    std::string err = ValidateNewName(name);
+    if (err.empty()) {
+        // Pre-migration guard: creating a profile before the core ever seeded would create the
+        // profiles dir (the seed latch) and then wipe the user's settings with no Default.ini
+        // capture, permanently. Seed Default from the CURRENT settings first; no-op once seeded.
+        wind::EnsureProfilesSeeded(IniPath());
+        CreateDirectoryW(wind::ProfilesDirFromIni(IniPath()).c_str(), nullptr);
+        std::string seed = "; Wind profile. Keys absent here fall back to Wind's built-in defaults.\n"
+                           "model=hybrid\n";
+        if (fromCurrent) {
+            std::string live;
+            if (!ReadIni(live)) err = "Could not read the config file";
+            else seed = wind::MakeProfileText(live);
+        }
+        if (err.empty()) {
+            if (!wind::WriteTextFileAtomic(ProfilePath(name), seed)) err = "Could not create the profile file";
+            else err = DoSwitchProfile(name, !fromCurrent);
+        }
+    }
+    PostProfiles(wv, err.empty(), err);
+}
+static void OnDeleteProfile(ICoreWebView2* wv, const std::string& j) {
+    const std::string name = JsonField(j, "name");
+    std::string err;
+    if (!SafeName(name)) err = "Invalid profile name";
+    // The seeded home profile is permanently protected (the UI disables its Delete too).
+    if (err.empty() && wind::SameProfileName(name, "Default"))
+        err = "The Default profile cannot be deleted";
+    auto names = ProfileNamesUtf8();
+    std::string liveNow;
+    if (err.empty() && !ReadIni(liveNow)) err = "Could not read the config file";   // never decide from a failed read
+    if (err.empty() && names.size() <= 1) err = "The last profile cannot be deleted";
+    else if (err.empty()) {
+        auto vals = wind::ReadIniValues(liveNow);
+        if (wind::SameProfileName(vals["profile"], name)) {
+            // Deleting the active profile: land on the first remaining one (spec).
+            for (const auto& n : names)
+                if (!wind::SameProfileName(n, name)) { err = DoSwitchProfile(n); break; }
+        }
+        if (err.empty() && !DeleteFileW(ProfilePath(name).c_str()))
+            err = "Could not delete the profile file";
+    }
+    PostProfiles(wv, err.empty(), err);
+}
+static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
+    std::string j = Narrow(jsonW);
+    std::string type = JsonField(j, "type");
+    if (type == "ready") {
+        OnReady();
+    } else if (type == "getConfig") {
+        PostWindowState(g_hwnd);
         PostConfig(wv);
+    } else if (type == "setConfig" || type == "setConfigPersist") {
+        OnSetConfig(wv, j, type);
+    } else if (type == "saveSession") {
+        OnSaveSession(wv);
+    } else if (type == "discardSession") {
+        OnDiscardSession(wv);
     } else if (type == "dirty") {
         g_dirty = JsonField(j, "value") == "1";
     } else if (type == "window") {
-        std::string action = JsonField(j, "action");
-        if (action == "minimize") ShowWindow(g_hwnd, SW_MINIMIZE);
-        else if (action == "maximize") ShowWindow(g_hwnd, IsZoomed(g_hwnd) ? SW_RESTORE : SW_MAXIMIZE);   // the title bar button toggles
-        else if (action == "close") {
-            // "force" is the Discard path from the confirm dialog: skip the guard, do not re-ask.
-            if (JsonField(j, "force") == "1") { g_forceClose = true; g_dirty = false; }
-            PostMessageW(g_hwnd, WM_CLOSE, 0, 0);
-        }
-        else if (action == "quitWind") {
-            // Onboarding was closed (X) without completing: end the whole Wind app, not just this
-            // window. Signal the magnifier via a named event, NOT a window message: the deployed
-            // Wind.exe is UIAccess and UIPI silently blocks PostMessage from this non-UIAccess
-            // process. A kernel event isn't gated by UIPI and works in dev + deployed. Then close us.
-            HANDLE ev = OpenEventW(EVENT_MODIFY_STATE, FALSE, wind::kQuitEventName);
-            if (ev) { SetEvent(ev); CloseHandle(ev); }
-            PostMessageW(g_hwnd, WM_CLOSE, 0, 0);
-        }
-        else if (action == "restartWind") {
-            // Only offered when the running Wind has one engine left (running.model is not "live"):
-            // then `model` is fixed until the next start, so switching it needs a real restart. The UI has
-            // already written the new value to the ini. Just launch Wind again: the new instance
-            // evicts the incumbent via the Local\Wind_QuitRequest handshake. On failure the
-            // incumbent is untouched (it is only ever signalled BY a successfully started instance),
-            // so report back rather than leaving the user with a silently ignored button.
-            // session.keep first: this restart is ours, so the unsaved session must survive it.
-            wind::WriteSessionKeep();
-            if (!LaunchWind()) { wind::ClearSessionKeep(); wv->PostWebMessageAsJson(L"{\"type\":\"restartFailed\"}"); }
-        }
+        OnWindowAction(wv, j);
     } else if (type == "pickExe") {
-        // "+" on the key-release app list: browse for a program and hand back just its FILE NAME.
-        // The core matches on the bare exe name (IsExeInList), never a full path, so returning the
-        // path would silently never match. Replies with an empty name on cancel so the UI can
-        // simply ignore it rather than having to distinguish cancel from failure.
-        wchar_t file[MAX_PATH] = L"";
-        OPENFILENAMEW ofn{};
-        ofn.lStructSize = sizeof(ofn);
-        ofn.hwndOwner   = g_hwnd;
-        ofn.lpstrFile   = file;
-        ofn.nMaxFile    = MAX_PATH;
-        ofn.lpstrFilter = L"Programs\0*.exe\0All files\0*.*\0";
-        ofn.lpstrTitle  = L"Select a program";
-        // NOCHANGEDIR matters: without it the dialog moves this process's working directory, which
-        // would break every later relative path the host resolves.
-        ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_EXPLORER;
-        std::string name;
-        if (GetOpenFileNameW(&ofn)) {
-            const wchar_t* base = PathFindFileNameW(file);
-            if (base) name = Narrow(base);
-        }
-        wv->PostWebMessageAsJson(
-            Widen("{\"type\":\"exePicked\",\"name\":\"" + JsonEscape(name) + "\"}").c_str());
+        OnPickExe(wv);
     } else if (type == "openIni") {
-        // Open the ini with the registered .ini handler (usually Notepad), matching the bridge's
-        // "default editor" contract. Fall back to explicitly launching Notepad if no handler is
-        // associated (ShellExecute returns <= 32) so the button never silently does nothing.
-        HINSTANCE r = ShellExecuteW(nullptr, L"open", IniPath().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-        if (reinterpret_cast<INT_PTR>(r) <= 32)
-            ShellExecuteW(nullptr, L"open", L"notepad.exe", IniPath().c_str(), nullptr, SW_SHOWNORMAL);
+        OnOpenIni();
     } else if (type == "exportDiagnostics") {
-        // Off the window thread (see ExportDiagnosticsThread); a second click while one runs is ignored.
-        if (!g_exporting) {
-            g_exporting = true;
-            HANDLE th = CreateThread(nullptr, 0, ExportDiagnosticsThread, nullptr, 0, nullptr);
-            if (th) CloseHandle(th); else g_exporting = false;
-        }
+        OnExportDiagnostics();
     } else if (type == "switchProfile") {
         const std::string err = DoSwitchProfile(JsonField(j, "name"));
         PostProfiles(wv, err.empty(), err);
     } else if (type == "createProfile") {
-        // Factory defaults by design (spec): absent keys fall back to built-in defaults. `model` is
-        // seeded EXPLICITLY so a fresh profile file always names its engine (the
-        // core's own missing-key default is hybrid, the same as the UI schema's "Auto"). Globals (onboarded=1, uiPalette, showAdvanced) carry over in MakeLiveText.
-        // fromCurrent ("Duplicate current"): the new profile is the live session as it stands, unsaved
-        // changes included, built here from the live text so `model` (and everything else) is exactly
-        // what is running: no restart, no write-back by the page, and the outgoing profile is NOT
-        // mirrored into (its unsaved changes moved to the new one).
-        const bool fromCurrent = JsonField(j, "fromCurrent") == "1";
-        const std::string name = JsonField(j, "name");
-        std::string err = ValidateNewName(name);
-        if (err.empty()) {
-            // Pre-migration guard: creating a profile before the core ever seeded would create the
-            // profiles dir (the seed latch) and then wipe the user's settings with no Default.ini
-            // capture, permanently. Seed Default from the CURRENT settings first; no-op once seeded.
-            wind::EnsureProfilesSeeded(IniPath());
-            CreateDirectoryW(wind::ProfilesDirFromIni(IniPath()).c_str(), nullptr);
-            std::string seed = "; Wind profile. Keys absent here fall back to Wind's built-in defaults.\n"
-                               "model=hybrid\n";
-            if (fromCurrent) {
-                std::string live;
-                if (!ReadIni(live)) err = "Could not read the config file";
-                else seed = wind::MakeProfileText(live);
-            }
-            if (err.empty()) {
-                if (!wind::WriteTextFileAtomic(ProfilePath(name), seed)) err = "Could not create the profile file";
-                else err = DoSwitchProfile(name, !fromCurrent);
-            }
-        }
-        PostProfiles(wv, err.empty(), err);
+        OnCreateProfile(wv, j);
     } else if (type == "deleteProfile") {
-        const std::string name = JsonField(j, "name");
-        std::string err;
-        if (!SafeName(name)) err = "Invalid profile name";
-        // The seeded home profile is permanently protected (the UI disables its Delete too).
-        if (err.empty() && wind::SameProfileName(name, "Default"))
-            err = "The Default profile cannot be deleted";
-        auto names = ProfileNamesUtf8();
-        std::string liveNow;
-        if (err.empty() && !ReadIni(liveNow)) err = "Could not read the config file";   // never decide from a failed read
-        if (err.empty() && names.size() <= 1) err = "The last profile cannot be deleted";
-        else if (err.empty()) {
-            auto vals = wind::ReadIniValues(liveNow);
-            if (wind::SameProfileName(vals["profile"], name)) {
-                // Deleting the active profile: land on the first remaining one (spec).
-                for (const auto& n : names)
-                    if (!wind::SameProfileName(n, name)) { err = DoSwitchProfile(n); break; }
-            }
-            if (err.empty() && !DeleteFileW(ProfilePath(name).c_str()))
-                err = "Could not delete the profile file";
-        }
-        PostProfiles(wv, err.empty(), err);
+        OnDeleteProfile(wv, j);
     } else if (type == "openRepo") {
         // About's "Star on GitHub". In the user's default browser, where they are signed in and can
         // star; a link followed inside the WebView would open a bare popup instead. The URL is fixed
