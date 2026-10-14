@@ -2877,6 +2877,32 @@ static void LogFramePacing(TickState& t, double lvl, double dt, bool woke) {
     }
 }
 
+// Tick diagnostics: the proving-ground telemetry sample (WIND_TESTLOG).
+static void WriteTestTelemetry(TickState& t, const LARGE_INTEGER& now, double dt, bool active, double lvl) {
+    // Test telemetry (issue #225): one CSV sample per tick when the harness enabled it. The
+    // engine queries run only on this path - the disabled cost is the single enabled() branch.
+    if (g_testlog.enabled()) {
+        wind::TelemetrySample s{};
+        s.tMs   = double(now.QuadPart) / double(t.freq.QuadPart) * 1000.0;
+        s.dtMs  = dt * 1000.0;
+        s.active = active ? 1 : 0;
+        s.level  = lvl;
+        auto* rmT = dynamic_cast<RenderModel*>(t.model);
+        auto* tmT = dynamic_cast<TransformModel*>(t.model);
+        s.engine = rmT ? 'R' : (tmT ? 'T' : '-');
+        s.mapX = t.mapper.centerX(); s.mapY = t.mapper.centerY();
+        s.monX = t.mon.x; s.monY = t.mon.y;
+        s.curX = t.lastSetVirtual.x; s.curY = t.lastSetVirtual.y;
+        s.welded = (rmT && rmT->engine().parkedLastFrame()) ||
+                   (tmT && tmT->weldedLastFrame()) ? 1 : 0;
+        if (tmT) {
+            s.wLevel = tmT->writtenLevel();
+            s.wTxX = tmT->writtenTxX(); s.wTxY = tmT->writtenTxY();
+        }
+        g_testlog.write(s);
+    }
+}
+
 static void RunTick(TickState& t) {
     TickWorkTimer workTimer(t);
     const TickClock clk = BeginTick(t);
@@ -2913,28 +2939,7 @@ static void RunTick(TickState& t) {
 
     LogFramePacing(t, lvl, dt, woke);
 
-    // Test telemetry (issue #225): one CSV sample per tick when the harness enabled it. The
-    // engine queries run only on this path - the disabled cost is the single enabled() branch.
-    if (g_testlog.enabled()) {
-        wind::TelemetrySample s{};
-        s.tMs   = double(now.QuadPart) / double(t.freq.QuadPart) * 1000.0;
-        s.dtMs  = dt * 1000.0;
-        s.active = active ? 1 : 0;
-        s.level  = lvl;
-        auto* rmT = dynamic_cast<RenderModel*>(t.model);
-        auto* tmT = dynamic_cast<TransformModel*>(t.model);
-        s.engine = rmT ? 'R' : (tmT ? 'T' : '-');
-        s.mapX = t.mapper.centerX(); s.mapY = t.mapper.centerY();
-        s.monX = t.mon.x; s.monY = t.mon.y;
-        s.curX = t.lastSetVirtual.x; s.curY = t.lastSetVirtual.y;
-        s.welded = (rmT && rmT->engine().parkedLastFrame()) ||
-                   (tmT && tmT->weldedLastFrame()) ? 1 : 0;
-        if (tmT) {
-            s.wLevel = tmT->writtenLevel();
-            s.wTxX = tmT->writtenTxX(); s.wTxY = tmT->writtenTxY();
-        }
-        g_testlog.write(s);
-    }
+    WriteTestTelemetry(t, now, dt, active, lvl);
 }
 
 // Message-handler: decodes raw mouse movement (survives cursor lock) and routes tray msgs.
