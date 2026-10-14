@@ -356,7 +356,7 @@ struct TickState {
     double lockedPanRemY = 0.0;
     bool   renderStale = false;         // the render overlay refused a retarget (multi-GPU) and still sits
                                         //   on an old monitor: sessions use the transform engine
-    wind::PanGlide glide;               // momentum after a flick (#430, src/pan_glide.h)
+    wind::PanGlide glide;               // momentum after a flick (#430, src/cursor/pan_glide.h)
     GainLearner gainLearner;            // free ticks teach it the real in->out ratio;
                                         // locked ticks replay it (gain_learner.h)
     bool   inspectGame = false;         // game-inspect (issue #144): foreground stolen from a mouselook
@@ -841,7 +841,7 @@ static void UpdateColorFilter(TickState& t, bool zoomedNow, bool renderSession, 
     if (ex) { ex->colorOn = inShader; ex->color = enc; }
     wind::ColorMatrix dwm = inShader ? wind::IdentityColorMatrix()
                                      : wind::BuildColorMatrix(w, d, g_hdrOn.load(std::memory_order_relaxed));
-    // MPO guard (issue #369, src/mpo_guard.h): zoomed at nearest on an MPO boot, an invisible
+    // MPO guard (issue #369, src/transform/mpo_guard.h): zoomed at nearest on an MPO boot, an invisible
     // non-identity effect makes DWM compose the desktop itself, so no plane can take the 16-bit
     // translation. The engine's runtime carries it (zoomed only), so it never needs our own hold.
     const bool mpoGuard = t.cfg.mpoGuard != 0 && wind::WantMpoGuard(zoomedNow, dynamic_cast<TransformModel*>(t.model) != nullptr,
@@ -1351,7 +1351,7 @@ static TickInput ResolveInputAndZoom(TickState& t, double dt) {
     // freeze holds it at ~1.01 until the hold expires.
     const bool quiesceFreeze = QuiesceHoldActive(t) && t.zoom.level() > 1.0;
     if (!quiesceFreeze) t.zoom.tick(dt < kMaxZoomDt ? dt : kMaxZoomDt);
-    // SMOOTH-ZOOM RELEASE (issue #369, src/zoom_ladder.h EaseOutShouldStop). With smooth sampling and
+    // SMOOTH-ZOOM RELEASE (issue #369, src/transform/zoom_ladder.h EaseOutShouldStop). With smooth sampling and
     // the zoom ladder, a slow zoom must cross DWM's whole-pixel rounding steps, each an image jump of
     // about the level in px; snapping the slow tail hopped, holding it froze then caught up (field).
     // So after a release the user's ease-out runs (snapped like a held zoom) until it moves less per
@@ -1942,7 +1942,7 @@ static PointerMap MapPointer(TickState& t, bool inspect, double lvl, double dt, 
                             dynamic_cast<TransformModel*>(t.model) != nullptr;
     // (A shell input panel needs nothing special: DWM draws its pointer above the panels and
     // keeps it centred, so the hand moves the pointer directly.)
-    // PAN GLIDE (issue #430, src/pan_glide.h): a soft stop, a few screen px at most. The pointer
+    // PAN GLIDE (issue #430, src/cursor/pan_glide.h): a soft stop, a few screen px at most. The pointer
     // itself eases on and the view follows by DWM centring. curDx/curDy is this tick's HAND motion: during a
     // glide the previous tick ended with the baseline on Wind's own step, so any motion here is
     // the hand, which (like a button or leaving a plain zoomed desktop pan) ends the glide.
@@ -1970,7 +1970,7 @@ static PointerMap MapPointer(TickState& t, bool inspect, double lvl, double dt, 
             }
         }
     }
-    // GAME-DRAWN CURSOR (issue #443, src/game_cursor.h): a covering app that hides the pointer
+    // GAME-DRAWN CURSOR (issue #443, src/cursor/game_cursor.h): a covering app that hides the pointer
     // draws its own cursor about a display frame late, so the view follows the pointer that late
     // (and Wind, not DWM centring, writes it). The pointer itself is untouched.
     bool gameCursor = false;
@@ -3057,7 +3057,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 // hook's g_swallowedDown record, so swallowing is unaffected.
                 USHORT bf = m.usButtonFlags;
                 // The UP's event time is the WM_INPUT's queue time, not now: the hook's reordering
-                // guard compares event times (src/event_order.h), so a main-thread stall is harmless.
+                // guard compares event times (src/input/event_order.h), so a main-thread stall is harmless.
                 const uint32_t rawTime = static_cast<uint32_t>(GetMessageTime());
                 // Click quiet period: stamp the edge here instead of relying on the tick to catch the
                 // button down in GetAsyncKeyState (a click shorter than a tick was missed).

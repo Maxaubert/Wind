@@ -2,7 +2,7 @@
 
 Wind's output is compositor state on a real display and its input is a real mouse, so most
 questions are settled by measurement on hardware. This chapter covers the logging built into the
-binaries (`src/logging.*`), the diagnostic knobs compiled into Wind, and the scripts in `tools/`.
+binaries (`src/core/logging.*`), the diagnostic knobs compiled into Wind, and the scripts in `tools/`.
 
 ## Field method
 
@@ -19,14 +19,14 @@ Write the conclusion into a findings file under `docs/` (index:
 ## The proving ground
 
 `tools/testenv/` is the reusable automated environment: `run.ps1` restarts Wind with per-tick
-telemetry (`src/test_telemetry.h`, `WIND_TESTLOG` or `%LOCALAPPDATA%\Wind\testlog.txt`), drives
+telemetry (`src/core/test_telemetry.h`, `WIND_TESTLOG` or `%LOCALAPPDATA%\Wind\testlog.txt`), drives
 scenarios (backdrop x zoom x movement) and compares pacing, ramp back-steps, cursor jitter and RAM
 against `baselines.json`; `-CI` exits nonzero on regression. Suites run from ~1 to ~8 minutes.
 Details: `tools/testenv/README.md`.
 
 ## Logging
 
-Both binaries log through `src/logging.cpp`. The pure half (formatting, rotation, snapshot text) is
+Both binaries log through `src/core/logging.cpp`. The pure half (formatting, rotation, snapshot text) is
 unit-tested; the Win32 half is excluded from the test build.
 
 - **Files.** The `logs\` folder next to the exe when that folder is writable (dev and portable
@@ -38,7 +38,7 @@ unit-tested; the Win32 half is excluded from the test build.
 - **Lines.** `wind::Log(level, category, fmt, ...)` gives
   `2026-05-31T08:14:22.137Z  +962862007.114  t57132  WARN  render  <msg>`: precise UTC, the QPC
   clock in ms (the clock of PresentMon `--qpc_time_ms`, ETW and the tick records) and the thread id.
-- **Non-blocking (#361).** `Log` formats into a lock-free queue (`src/log_queue.h`, 1024 lines)
+- **Non-blocking (#361).** `Log` formats into a lock-free queue (`src/core/log_queue.h`, 1024 lines)
   and returns; the `Wind log writer` thread (below normal priority) writes in batches, flushes on
   Warn and Error, and rotates at runtime. A caller never waits on the disk, an EDR scan or another
   thread, so the tick and hook threads may log. A full queue drops the line and the writer logs
@@ -55,10 +55,10 @@ unit-tested; the Win32 half is excluded from the test build.
 
 ## Hitch recorder (#361)
 
-Every tick fills a `TickRec` (`src/hitch_record.h`): its dt, the pacing wait before it and how
+Every tick fills a `TickRec` (`src/core/hitch_record.h`): its dt, the pacing wait before it and how
 late that wait returned, its wall time and its thread CPU time (`QueryThreadCycleTime`, calibrated
 against QPC in the first second), and spans for the parts that can block. `SpanScope`
-(`src/tick_span.h`) times a call into the current record from anywhere on the tick thread; it is
+(`src/core/tick_span.h`) times a call into the current record from anywhere on the tick thread; it is
 a null check on other threads. Spans: `track`, `color`, `present`, `txwrite` (MagHost writes),
 `ix`, `sprite` (the Inspect crosshair window), `activate`, `cursor`. A ring keeps the last 512 records. Cost: about
 a dozen QPC reads per tick, no allocation, no I/O.

@@ -19,7 +19,7 @@ compile the same sources with different defines, and the tray and settings hosts
 |---|---|---|
 | (none) | `build\Wind.exe` + `build\WindTray.exe` | The app with the `uiAccess=false` manifest. It refuses to start without UIAccess (issue #460) unless `WIND_ALLOW_NO_UIACCESS=1` or `WIND_SELFTEST=1` is set |
 | `test` | `build\wind_tests.exe` | The doctest binary over the pure sources; runs it from the repo root (it finds `tests\fixtures` there) and returns its exit code |
-| `check` | – | Compile-only pass over `src\*.cpp`, `src\tray_app\*.cpp` and `src\config_ui\main.cpp`, objects in `build\obj\check\` |
+| `check` | – | Compile-only pass over Wind.exe's sources (`CORE_SRC`), `src\tray_app\*.cpp` and `src\config_ui\main.cpp`, objects in `build\obj\check\` |
 | `uiaccess` | `build\Wind.exe` + `build\WindTray.exe` | `Wind.uiaccess.manifest` and `/DWIND_UIACCESS`; useful only signed and in Program Files. `WindTray.exe` always keeps the plain manifest |
 | `tray` | `build\WindTray.exe` | The tray helper alone |
 | `config` | `build\WindConfig.exe` | Builds the Svelte app to `ui/dist/`, then the WebView2 host against `third_party/webview2`, then mirrors `ui\dist` to `build\ui\dist` (the host loads `<exe dir>\ui\dist`) |
@@ -35,6 +35,20 @@ the root by an older clone is no longer read (move it into `build\` to keep it).
 The installer treats NSIS warnings as errors: an unreferenced define in generated layout data is
 how a page ends up wired to nothing.
 
+## Source folders and includes
+
+`src\` is grouped by area, one folder per row of the source map in [01](01-overview.md#source-map):
+`core`, `engine`, `render`, `transform`, `color`, `input`, `cursor`, `track`, `zoom`, `config`, `tray`,
+`platform`, plus `tray_app` and `config_ui`. `wind.rc`, `resource.h` and `version.h` stay in `src\`
+itself, where `tools\version.ps1`, `installer\wind.nsi` and `ui/vite.config.js` read the version.
+
+**A Wind header is always included by its bare file name** (`#include "config.h"`, never
+`"../config.h"` or `"../src/config/config.h"`), from `src\` and `tests\` alike. `build.bat` puts every
+src folder on every compile's include path (`WIND_INC`) and lists Wind.exe's source folders once
+(`CORE_SRC`). A new folder goes into `WIND_INC`, and into `CORE_SRC` when it holds Wind.exe sources.
+Header file names must stay unique across `src\`. The `.rc` files are the exception: rc.exe gets no
+include path, so `src\tray_app\wind_tray.rc` reaches `resource.h` and `version.h` through `..\`.
+
 ## Pure versus Win32
 
 **Anything with real logic compiles without `<windows.h>`.** The magnifier cannot be driven
@@ -49,11 +63,11 @@ headlessly, so the unit tests are the only verification loop that runs everywher
   `config_ui/wind_watchdog.h`, `config_ui/bridge_json.h`, `swallow_ledger.h`, `reload_gate.h` and others) ride in through their test files.
 - One test file per module (`tests/test_<module>.cpp`). A new pure `.cpp` also goes into the
   `:test` list.
-- Files that straddle the line put their OS half under `#ifndef WIND_TESTS`. `src/config.cpp` is
+- Files that straddle the line put their OS half under `#ifndef WIND_TESTS`. `src/config/config.cpp` is
   the example: `ParseConfig` and `StripUiOnlyKeys` above, `LoadConfig` and the only
   `#include <windows.h>` below.
 - Thin header-only Win32 I/O layers may be tested too, from a test file that includes
-  `<windows.h>` itself: `tests/test_profiles_io.cpp` exercises `src/profiles_io.h` against real
+  `<windows.h>` itself: `tests/test_profiles_io.cpp` exercises `src/config/profiles_io.h` against real
   temp files. They need no Wind runtime, so they still run headless.
 - `tests/fixtures/keybind_cases.txt` is shared by the C++ and the JavaScript bind rules. The JS half
   is `ui/tests/keybind-rules.nodetest.mjs`, run by `npm run test:rules` in `ui/` (`node --test`, no
@@ -159,7 +173,7 @@ environment-driven: `WIND_SIGN_THUMBPRINT`, or `WIND_SIGN_PFX` plus `WIND_SIGN_P
   before makensis packs it (UIAccess is granted on `Wind.exe`'s own signature).
 - Without one (CI today) it packs both variants: the ordinary build and the UIAccess build as
   `build\WindUA.exe` (the `uiaccess` build's `build\Wind.exe`, renamed). Setup signs `WindUA.exe` on each PC with a per-machine certificate whose private key
-  it deletes at once (`installer/local-sign.ps1`). If that fails, setup keeps the ordinary build, says signing failed and does not start Wind: without UIAccess, Wind refuses to start ("Wind can't start", `src/uiaccess_gate.h`).
+  it deletes at once (`installer/local-sign.ps1`). If that fails, setup keeps the ordinary build, says signing failed and does not start Wind: without UIAccess, Wind refuses to start ("Wind can't start", `src/core/uiaccess_gate.h`).
 - **Never put the self-signed dev certificate in CI**: it is trusted by nobody and looks worse than
   no signature.
 

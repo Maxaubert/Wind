@@ -26,7 +26,7 @@ inline const wchar_t* EngineLabel(int i) {
 }
 
 // The option a `model` value means. Missing or unknown reads as Auto, exactly like the core's config
-// parse (src/config.cpp falls back to "hybrid").
+// parse (src/config/config.cpp falls back to "hybrid").
 inline int EngineIndex(const std::string& model) {
     const std::string m = TrimWs(model);
     for (int i = 0; i < kEngineCount; ++i) if (m == EngineValue(i)) return i;

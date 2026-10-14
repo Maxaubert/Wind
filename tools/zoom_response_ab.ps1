@@ -67,7 +67,7 @@ public static class ZR {
   [DllImport("kernel32.dll", CharSet=CharSet.Unicode)] static extern IntPtr OpenFileMappingW(uint a, bool i, string n);
   [DllImport("kernel32.dll")] static extern IntPtr MapViewOfFile(IntPtr h, uint a, uint hi, uint lo, UIntPtr n);
   static IntPtr view = IntPtr.Zero;
-  // The name must match kTrayBlockName in src/tray_ipc.h; offset 16 is TrayShared::level.
+  // The name must match kTrayBlockName in src/tray/tray_ipc.h; offset 16 is TrayShared::level.
   public static double Level() {
     if (view == IntPtr.Zero) { var m = OpenFileMappingW(4, false, "Local\\Wind_TrayState_v1"); view = MapViewOfFile(m, 4, 0, 0, UIntPtr.Zero); }
     return BitConverter.Int64BitsToDouble(Marshal.ReadInt64(view, 16));

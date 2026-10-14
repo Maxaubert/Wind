@@ -1,4 +1,4 @@
-// src/logging.cpp
+// src/core/logging.cpp
 #include "logging.h"
 #include <cstdio>
 #include <ctime>

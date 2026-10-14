@@ -726,7 +726,7 @@ bool RenderEngine::State::buildDeviceResources() {
     // --- Inspect-mode crosshair sprite (48x48). Thin full-length cross: the vertical and horizontal
     // lines run continuously through the center (no gap), light-grey core + black outline so it reads
     // on any background; drawn (scaled by zoom) in place of the cursor while Inspect mode is on. The
-    // pixel design lives in BuildCrosshairBGRA (src/crosshair.cpp, pure + unit-tested) and is shared
+    // pixel design lives in BuildCrosshairBGRA (src/cursor/crosshair.cpp, pure + unit-tested) and is shared
     // with the transform model's layered-window crosshair, so the two models stay identical. ---
     {
         const int N = 48;

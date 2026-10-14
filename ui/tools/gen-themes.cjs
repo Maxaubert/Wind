@@ -11,7 +11,7 @@
 // dangerbtn dangerbtnfg scrim bnfilter bntint bntop rc rp rsw rkn.
 // Wind grey takes the app's own tokens.css values for every token the app already had, so
 // today's look is exactly preserved; every other theme comes from the mockup palettes.
-// Palette ids in the app: grey ember ocean hicon (the core's kUiPalettes, src/config.cpp). Four themes only (owner decision 2026-10-02).
+// Palette ids in the app: grey ember ocean hicon (the core's kUiPalettes, src/config/config.cpp). Four themes only (owner decision 2026-10-02).
 // Dark only since 0.20.0 (#324): the mockup palettes' light halves are not read.
 const fs = require('fs');
 const path = require('path');

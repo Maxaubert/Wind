@@ -88,7 +88,7 @@ static bool WindRunning() {
 // Launch the magnifier that sits next to us (wind::LaunchWindExe). Returns false when Wind.exe is
 // missing or ShellExecuteW failed (<= 32). Relaunching while Wind is ALREADY running is how a model
 // switch restarts it: the new instance evicts the incumbent through the quit event (AcquireSingleInstance
-// in src/main.cpp). No extra IPC is needed here.
+// in src/core/main.cpp). No extra IPC is needed here.
 static bool LaunchWind() { return wind::LaunchWindExe() > 32; }
 // Resolved at first call (and cached) so reads and writes always land on the same file the Wind
 // core uses. Falls back to %LOCALAPPDATA%\Wind\magnifier.ini when the exe dir is read-only.

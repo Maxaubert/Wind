@@ -1,4 +1,4 @@
-// src/tick_span.h
+// src/core/tick_span.h
 // Time a part of the tick into the current TickRec (#361). The tick loop points tl_tickSpans at
 // the record it is filling; anywhere on the tick thread can then wrap a call in
 //   wind::SpanScope s(wind::kSpanTxWrite);

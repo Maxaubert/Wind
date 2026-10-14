@@ -3,8 +3,8 @@
 Wind never has keyboard focus, yet it must see every bind press and every mouse movement
 system-wide without breaking input for other programs. This chapter covers the input channels, the
 hook thread, the swallowing rules, the bind safety rules and the recovery from silently evicted
-hooks. The code is `src/input_router.*`, the `WM_INPUT` handling in `src/main.cpp`,
-`src/keybind_rules.h`, `src/swallow_ledger.h` and `src/gain_learner.h`.
+hooks. The code is `src/input/input_router.*`, the `WM_INPUT` handling in `src/core/main.cpp`,
+`src/input/keybind_rules.h`, `src/input/swallow_ledger.h` and `src/cursor/gain_learner.h`.
 
 ## Channels
 
@@ -63,7 +63,7 @@ Bound inputs are eaten so they never also fire in the focused app.
 
 ## Bind rules
 
-**One rule set for every bind:** `src/keybind_rules.h` (`CheckKeyBind`, `CheckWheelBind`,
+**One rule set for every bind:** `src/input/keybind_rules.h` (`CheckKeyBind`, `CheckWheelBind`,
 `CheckClickBind`), mirrored in `ui/src/lib/keybindRules.js`. Both are tested against
 `tests/fixtures/keybind_cases.txt`, so change both or the tests fail.
 
@@ -88,7 +88,7 @@ for 0.1 s. The old `zoomWheelMods` key is migrated into free slots once at start
 **Keyboard panning** (`panLeftVk` .. `panDownVk` + mods, unbound by default). Pan slots match only
 while the tick arms them (`setPanArmed`: zoomed, not Inspect, no mouselook lock), so at 1x the keys
 reach apps. The swallow is decided once per press, and the tick pans only on presses the hook
-swallowed (`keySwallowed`), as the `ViewOwner::Keys` detached view (`src/keyboard_pan.h`).
+swallowed (`keySwallowed`), as the `ViewOwner::Keys` detached view (`src/input/keyboard_pan.h`).
 
 ## Raw Input as the safety net
 
@@ -101,7 +101,7 @@ Both hooks have a Raw Input backstop for lost UP events, in the `WM_INPUT` handl
 - **Reordering guard.** `WM_INPUT` drains up to a tick late, so a raw UP can arrive after the hook
   recorded the next press. The net skips the clear when the hook recorded a DOWN for that input
   AFTER the UP, comparing event times (`GetMessageTime()` of the `WM_INPUT` against the hook
-  struct's `.time`, `src/event_order.h`), not the wall clock, so a main-thread stall of any length
+  struct's `.time`, `src/input/event_order.h`), not the wall clock, so a main-thread stall of any length
   cannot make a stale UP cancel a live hold.
 - DOWN edges stay hook-authoritative while the hook is active; `WM_INPUT` writes down-state only in
   the no-hook fallback.

@@ -1,6 +1,6 @@
 # 02. The tick loop
 
-Everything Wind does at runtime happens in one tick, `RunTick` in `src/main.cpp`. `RunTick` is a
+Everything Wind does at runtime happens in one tick, `RunTick` in `src/core/main.cpp`. `RunTick` is a
 short sequence of calls to static phase functions in the same file (see
 [Phase functions](#phase-functions)). Each tick samples input, advances the zoom, resolves a pan and
 asks the current engine to present. This chapter lists the phases in source order, then covers
@@ -51,7 +51,7 @@ flowchart TD
 5. **Inspect edges.** The toggle edge snapshots whether the cursor was showing and whether Wind was
    hiding it (`t.cursorHiddenByUs`, which a transform session reads back from
    `TransformModel::pointerHidden()` after each present, since the model also hides and restores the
-   pointer on its own); both feed `ShouldGameInspect` (`src/inspect_focus.h`). Inspect keeps the overlay
+   pointer on its own); both feed `ShouldGameInspect` (`src/cursor/inspect_focus.h`). Inspect keeps the overlay
    active at 1x (`active = zoomed || inspect`). Details in [07](07-cursor.md).
 6. **Pan delta.** One of three regimes, see [below](#pan-delta-three-regimes).
 7. **Foreground facts and the pan wall.** `GetForegroundWindow`, `ForegroundCoversMonitor` and the
@@ -68,7 +68,7 @@ flowchart TD
    re-reads its refresh rate, then runs the engine pick. The same pick runs every zoomed tick; a changed result hands over with controller and
    mapper untouched. The switch needs a stable candidate for 350 ms and is frozen while a
    transient overlay or the game-inspect focus stealer holds foreground. See [03](03-engines.md).
-9. **Present.** The tick fills `PresentExtras` (`src/magnifier_model.h`): outline visibility and
+9. **Present.** The tick fills `PresentExtras` (`src/engine/magnifier_model.h`): outline visibility and
    fades, cursor mode, `suppressCursorSync` (drag-follow, free cursor or a detached tracking view),
    transform write pauses (Inspect clicks, launch quiesce) and the game pacing flags, then calls
    `model->present`. The opt-in game pacing modes (`gameFpsCap`, `lowGpuPriority`) can skip
@@ -139,8 +139,8 @@ There is no settings IPC. `WindConfig.exe` writes `magnifier.ini` and the core n
 
 **UI-only writes never reload.** A reload rebuilds `ZoomController` and `CursorMapper`, which is
 wasted work and risks a visible hitch mid-zoom (the live level and mapper centre are carried over
-since #234, so the view no longer collapses to 1x). `StripUiOnlyKeys` (`src/config.cpp`) drops
-the `kUiOnlyKeys` list (`src/profiles.h`): `uiTheme`, `uiPalette`,
+since #234, so the view no longer collapses to 1x). `StripUiOnlyKeys` (`src/config/config.cpp`) drops
+the `kUiOnlyKeys` list (`src/config/profiles.h`): `uiTheme`, `uiPalette`,
 `showAdvanced`, `onboarded`, `trayPinned`, `uiHighResNoticeOff` and the five tray layout keys
 (`trayPerf`, `traySliders`, `traySliderOrder`, `trayToggles`, `trayToggleOrder`), and the result is compared with the fingerprint of the last applied
 config (`t.lastCoreIni`). An identical fingerprint skips the reload. The fingerprint is seeded at startup;
@@ -169,7 +169,7 @@ when one engine failed to init). The restart-only keys need a restart, see
   speed, and the locked pan replays it, so a locked game pans at desktop-cursor speed.
 - **Tracking** overrides the result afterwards: caret, focus or mouse-edge mode can detach the view
   from the pointer (`t.viewDetached`), see [07](07-cursor.md).
-- `ShouldDragFollow` (`src/drag_follow.h`) suspends the render engine's weld while a mouse button is
+- `ShouldDragFollow` (`src/cursor/drag_follow.h`) suspends the render engine's weld while a mouse button is
   held and follows the pointer 1:1.
 - In a free transform session (not Inspect, not locked) the mapper is reset to the real cursor each
   tick and fed zero delta: the view is a pure function of the pointer, nothing welds, and the free
@@ -206,7 +206,7 @@ Transform while the device stays lost (`EnginePickInputs::renderLost`).
 
 At 1x with nothing in flight the loop sleeps in `MsgWaitForMultipleObjectsEx` on the input
 router's wake event and the quit event (100 ms timeout, mask
-`QS_POSTMESSAGE | QS_SENDMESSAGE | QS_HOTKEY`). The rule is `IdleNow` (pure, `src/idle_policy.h`).
+`QS_POSTMESSAGE | QS_SENDMESSAGE | QS_HOTKEY`). The rule is `IdleNow` (pure, `src/core/idle_policy.h`).
 Measured: Wind's CPU at 1x went from 37.5 to 3.1 ms per second, and a zoom starts 3–6 ms after the
 waking wheel notch.
 
@@ -223,7 +223,7 @@ waking wheel notch.
 ## Priority under background load
 
 The tick thread runs at `THREAD_PRIORITY_HIGHEST` and the process opts out of power throttling
-(`src/sched_priority.h`). At normal priority a busy machine queued the tick behind other threads
+(`src/core/sched_priority.h`). At normal priority a busy machine queued the tick behind other threads
 (139–737 ms stalls mid-zoom). One step above normal stays below DWM, so the tick never delays
 composition. It does not help when the GPU is the bottleneck.
 
@@ -233,24 +233,24 @@ The core process runs these threads. Named threads show up by name in WPA and de
 
 | Thread | Name | Source | Job |
 |---|---|---|---|
-| Tick | `Wind tick` | `src/main.cpp` | The loop and every Magnification call. Highest priority, see above |
-| Input hooks | `Wind input hooks` | `src/input_router.cpp` | LL mouse and keyboard hooks, Raw Input registration |
-| Focus tracker | (WinEvent loop) | `src/focus_track.cpp` | Caret and focus tracking, own COM apartment |
-| Focus lookup | `Wind focus lookup` | `src/focus_track.cpp` | One UIA focus query at a time, detached on timeout |
-| Cursor swaps | `Wind cursor swaps` | `src/cursor_blanker.cpp` | System cursor hide, tint and restore swaps, off the tick |
-| DWM watch | `Wind DWM watch` | `src/dwm_watch.cpp` | Polls for a dwm.exe restart once a second, bumps a generation |
-| Log writer | `Wind log writer` | `src/logging.cpp` | Drains the log queue to disk (1000 ms wait) |
-| Tray supervisor | (unnamed) | `src/tray_host.cpp` | Keeps `WindTray.exe` running, rate limited |
-| Trace dump | (short lived) | `src/transform_model.cpp` | Writes the `txTrace=1` CSV at session end, below normal priority |
+| Tick | `Wind tick` | `src/core/main.cpp` | The loop and every Magnification call. Highest priority, see above |
+| Input hooks | `Wind input hooks` | `src/input/input_router.cpp` | LL mouse and keyboard hooks, Raw Input registration |
+| Focus tracker | (WinEvent loop) | `src/track/focus_track.cpp` | Caret and focus tracking, own COM apartment |
+| Focus lookup | `Wind focus lookup` | `src/track/focus_track.cpp` | One UIA focus query at a time, detached on timeout |
+| Cursor swaps | `Wind cursor swaps` | `src/cursor/cursor_blanker.cpp` | System cursor hide, tint and restore swaps, off the tick |
+| DWM watch | `Wind DWM watch` | `src/transform/dwm_watch.cpp` | Polls for a dwm.exe restart once a second, bumps a generation |
+| Log writer | `Wind log writer` | `src/core/logging.cpp` | Drains the log queue to disk (1000 ms wait) |
+| Tray supervisor | (unnamed) | `src/tray/tray_host.cpp` | Keeps `WindTray.exe` running, rate limited |
+| Trace dump | (short lived) | `src/transform/transform_model.cpp` | Writes the `txTrace=1` CSV at session end, below normal priority |
 
 WindConfig has its own short-lived export thread, and the timer-polling threads (DWM watch, log
 writer) wake on a timer even at 1x, a known cost of the idle design.
 
-- **Hook thread** (`src/input_router.cpp`). LL hook callbacks must return fast or Windows evicts the
+- **Hook thread** (`src/input/input_router.cpp`). LL hook callbacks must return fast or Windows evicts the
   hook, and they stall system input while running, so they cannot share a thread that blocks in
   `Present`. The hook thread sets atomics, counts mickeys and swallows bound keys. See
   [06](06-input.md).
-- **Focus-tracker thread** (`FocusTracker`, `src/focus_track.cpp`). WinEvents, `GetGUIThreadInfo`
+- **Focus-tracker thread** (`FocusTracker`, `src/track/focus_track.cpp`). WinEvents, `GetGUIThreadInfo`
   and UI Automation can block and want their own message loop and COM apartment. The tick only
   calls `setActive()` and reads `snapshot()`. See [07](07-cursor.md).
 - **Magnification runtime owner.** Magnification calls are thread-affine: only the thread that

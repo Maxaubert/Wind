@@ -47,7 +47,7 @@ struct ViewOwnerInputs {
     bool buttonDown = false;
     double msSinceButton = 1e9;   // time since a mouse button was last down
     double msSinceKey = 0;        // time since any key went down (0 when unknown: no gate)
-    bool keyAfterButton = false;  // a typing key (fresh non-modifier down, src/typing_key.h) went down AFTER the last mouse button: the click quiet period is over (#328)
+    bool keyAfterButton = false;  // a typing key (fresh non-modifier down, src/input/typing_key.h) went down AFTER the last mouse button: the click quiet period is over (#328)
     double dtMs = 0;
     TrackSnapshot snap;
     bool panning = false;         // a pan key is held or its motion is still gliding (#287)

@@ -1,6 +1,6 @@
 # 05. The transform engine
 
-The transform engine (`src/transform_model.*`) asks DWM to magnify the desktop: one fullscreen
+The transform engine (`src/transform/transform_model.*`) asks DWM to magnify the desktop: one fullscreen
 scale-and-translate applied inside the compositor, the mechanism the built-in Magnifier uses.
 There is no capture, no swapchain and no Wind window in the composition path, so a game keeps its
 independent-flip presentation and Wind's per-frame cost is a sub-millisecond API write. Measured
@@ -15,7 +15,7 @@ machinery is shared, global and partly undocumented; most of this chapter is the
 
 **Never call `MagInitialize`/`MagUninitialize` directly.** The runtime is process-scoped and both
 engines use it (transform: the fullscreen transform; render: `MagShowSystemCursor`). Use
-`wind::MagApiAcquire()`/`MagApiRelease()` (`src/mag_host.cpp`), a process-wide refcount. Two
+`wind::MagApiAcquire()`/`MagApiRelease()` (`src/transform/mag_host.cpp`), a process-wide refcount. Two
 independent pairs break each other:
 
 - The transform's idle release killed render's cursor hiding: two cursors.
@@ -50,13 +50,13 @@ writes is gone, see [Hook writes](#hook-writes-removed)).
 | Public (fallback) | `MagSetFullscreenTransform(zoom, offX, offY)` | Whole source pixels. |
 
 A failed private write latches `privateBroken_` and the session falls back to public until the next
-init. Both forms come from the pure `ComputeMagTransform` (`src/transform.h`), so they always
+init. Both forms come from the pure `ComputeMagTransform` (`src/transform/transform.h`), so they always
 describe the same rect.
 
 ## The tick path
 
 `TransformModel::present` runs one zoomed tick as a fixed sequence of private steps (declared in
-`src/transform_model.h` in call order): `resolveLevel` (step cap, smooth-zoom ladder, held ramp
+`src/transform/transform_model.h` in call order): `resolveLevel` (step cap, smooth-zoom ladder, held ramp
 steps), `applySamplingMode`, `writeSiteTransform` (edge floor and the 16-bit backstop),
 `switchDwmCentre`, then, unless the click pauses writes, `writeAndWarm` (the transform write and
 warm pulse) and `publishInputTransform` (stomp guard, decimation, self-heal). After those come the
@@ -91,7 +91,7 @@ then reverted the same day: a throttled view desynchronizes from the pointer (2 
 low zoom; 60 Hz looks like low fps at high zoom). Do not bring a write gate back without a test
 that watches the view under a SLOW hand, not just stall counts.
 
-**Warm-keeping** (`txWarmMode=1`, pure gate in `src/tx_warm.h`). DWM's magnification re-render goes
+**Warm-keeping** (`txWarmMode=1`, pure gate in `src/transform/tx_warm.h`). DWM's magnification re-render goes
 cold when the source rect sits still, and the first real pan after a pause pays ~25 ms (the
 pan-start hitch). A 1 px translation displacement and return is a real source change and keeps it
 warm. Re-sending the same transform, republishing the input transform and a sub-pixel level nudge
@@ -141,7 +141,7 @@ stateDiagram-v2
 
 `MagHost::setDwmCentring` wraps `SetFullscreenMagnifierOffsetsDWMUpdated` (user32, undocumented,
 resolved by name): TRUE,0,0 hands the pan to DWM, which re-centres on every cursor update; FALSE,0.8,0.8
-gives it back. Rules (`src/native_cursor.h`, tested):
+gives it back. Rules (`src/transform/native_cursor.h`, tested):
 
 - On only where the view is a pure function of the pointer and no armed MPO wall is within a tick
   of the view (`NearWall`, a 64 source px margin: DWM's own pan is unclamped and could cross a wall
@@ -162,7 +162,7 @@ gives it back. Rules (`src/native_cursor.h`, tested):
 `w - w/level`, fractional mid-ramp, and rounding can push the integer offset or private translation
 past it, so the rect samples outside the desktop texture: a GPU driver reset, always at the right
 or bottom edge. `ComputeMagTransform` clamps both forms with a 2 px margin. The comment block in
-`src/transform.h` is the contract.
+`src/transform/transform.h` is the contract.
 
 **Left and top: one texel inside.** DWM's nearest path samples around a half-texel offset, so at
 source 0 the first columns read outside the texture and show a light-grey line about `level/2` px
@@ -200,7 +200,7 @@ Defences (wall arming in `RunTick`'s `ReadForegroundAndArmWall`, write clamp in 
 | Off | Either | None |
 
 - The registry is read once at startup; the recorded state governs until dwm.exe restarts, because
-  DWM reads it only when it starts. The record (`src/mpo_boot.h`, pure half `mpo_boot_logic.h`) is
+  DWM reads it only when it starts. The record (`src/transform/mpo_boot.h`, pure half `mpo_boot_logic.h`) is
   keyed on dwm.exe's creation time, read without opening the process; OS boot time is the fallback.
 - The ghost is a fullscreen alpha-1 click-through window that demotes surfaces off the overlay
   plane.
@@ -214,7 +214,7 @@ Defences (wall arming in `RunTick`'s `ReadForegroundAndArmWall`, write clamp in 
   the MPO ghost. Field-tested 2026-10-07 on an MPO boot (RTX 5090): nearest with the guard, panned
   into the far-right and bottom-right corner above 10x, no driver reset; daily use up to 31x.
 - `tdrTest` is the field harness: 2 probes the clamp, 4 lifts the wall.
-- **MPO nearest guard** (`src/mpo_guard.h`, issue #369). Zoomed at nearest on an MPO boot, Wind
+- **MPO nearest guard** (`src/transform/mpo_guard.h`, issue #369). Zoomed at nearest on an MPO boot, Wind
   applies an invisible colour effect (0.998 on R, G, B). A colour transform, like the resample
   property, makes the scaled desktop visual require an external layer, and nothing under such a
   visual is recorded as a plane candidate, so no plane can carry the overflowing translation.
@@ -240,7 +240,7 @@ DWM magnifies with nearest neighbour unless something calls
   smooth state can make a build look smooth that is not. The model re-applies its mode per context
   with up to 3 retries.
 - A DWM restart resets it to nearest while win32k still reads back smooth, so a read-back cannot
-  tell. `src/dwm_watch.*` watches this session's dwm.exe process id once a second (no handle to
+  tell. `src/transform/dwm_watch.*` watches this session's dwm.exe process id once a second (no handle to
   dwm.exe) and the model re-applies its mode when the generation changes (#396).
 - Smooth renders the magnified subtree into a scratch target at source resolution and scales it
   with Lanczos (`CResampleLayer::RenderLanczos`; the DWM registry value `ResampleModeOverride=1`
@@ -249,7 +249,7 @@ DWM magnifies with nearest neighbour unless something calls
   2 px and 3-7 at nearest; the same for the native pointer (and for the old sprite). Pans are clean. Suspected
   cause (untested): the scratch target snaps to whole source pixels while the private channel
   positions the view in screen pixels, so the image can jump up to one source pixel times the zoom.
-- **Smooth-zoom ladder** (`txSmoothLadder=1`, `src/zoom_ladder.h`): the smooth path's scratch image
+- **Smooth-zoom ladder** (`txSmoothLadder=1`, `src/transform/zoom_ladder.h`): the smooth path's scratch image
   has its size and origin rounded to whole pixels every frame, and two closed terms predict the
   resulting shift per level. While smooth, the applied level snaps to the nearest level predicting
   under 1 px (never backwards in a ramp; held once the zoom settles). Measured standalone at
@@ -311,7 +311,7 @@ welded cursor has hover dead zones. Identity or no publish both produce dead zon
 [../history/POINTER-HITTEST-FINDINGS.md](../history/POINTER-HITTEST-FINDINGS.md).
 
 - **It needs UIAccess.** Availability is read from the process token's `TokenUIAccess` bit at
-  `initialize` (`ProcessHasUiAccess`, `src/uiaccess_token.h`), with zero Magnification calls; an acquire/release probe would run an identity
+  `initialize` (`ProcessHasUiAccess`, `src/core/uiaccess_token.h`), with zero Magnification calls; an acquire/release probe would run an identity
   write. A verified-failed publish clears `inputTransformAvailable_`, which stops Auto picking
   Transform for the desktop. Only `ERROR_ACCESS_DENIED` is permanent; any other failure is re-armed
   from the token probe when the session ends.
@@ -338,7 +338,7 @@ dwmcore (RDR2 at 20x, issue #199). When a process younger than 60 s newly covers
 borderless, Wind holds transform writes, the weld and the zoom ramp for ~1.5 s
 (`TrackLaunchCover`/`QuiesceHoldActive`).
 
-The pure `ShouldArmLaunchQuiesce` (`src/launch_quiesce.h`) vetoes composition-only overlays:
+The pure `ShouldArmLaunchQuiesce` (`src/engine/launch_quiesce.h`) vetoes composition-only overlays:
 layered, click-through, tool, non-activating or no-redirection-bitmap windows. Without the veto the
 Snipping Tool overlay froze the view for 1.5 s on every snip. `WS_EX_TOPMOST` is not in the veto
 set, because games set it. `launchQuiesce=0` disables the hold; it is a test knob only.

@@ -14,7 +14,7 @@
 
 ; Wind's own two kernel objects. Both are Local\, i.e. session-scoped, and UAC elevation
 ; stays inside the session, so the elevated installer and the user's Wind see the same
-; objects. Names must match kInstanceMutexName and kQuitEventName in src\tray_ipc.h exactly.
+; objects. Names must match kInstanceMutexName and kQuitEventName in src\tray\tray_ipc.h exactly.
 !define WIND_MUTEX "Local\Wind_Magnifier_SingleInstance"
 !define WIND_QUIT  "Local\Wind_QuitRequest"
 
@@ -31,7 +31,7 @@ Var LicenceDir   ; where "Read the full licence" put its copy, empty until then
 
 ; ---- stop a running Wind -----------------------------------------------------
 ; An upgrade always runs over a live tray app holding its own exe open. Wind exposes an
-; auto-reset named event for exactly this (src\main.cpp:2199); setting it makes Wind exit
+; auto-reset named event for exactly this (src\core\main.cpp:2199); setting it makes Wind exit
 ; CLEANLY, which restores the OS cursor, releases any ClipCursor and releases the shared
 ; Magnification runtime. Killing the process skips all of that and can leave the
 ; pointer hidden or pinned to one pixel. So: ask, wait, and only then kill.
@@ -128,7 +128,7 @@ Var LicenceDir   ; where "Read the full licence" put its copy, empty until then
 ; ---- WebView2 ----------------------------------------------------------------
 ; WindConfig.exe paints an empty shell without the Evergreen runtime. Microsoft's
 ; uninstaller leaves `pv` behind set to "0.0.0.0" rather than deleting it, so a value
-; being present is not proof. src\webview2_probe.h is the tested statement of that rule; NSIS
+; being present is not proof. src\platform\webview2_probe.h is the tested statement of that rule; NSIS
 ; cannot call it, so this macro mirrors it for the two values the uninstaller leaves.
 !macro WIND_ENSURE_WEBVIEW2
   StrCpy $0 ""

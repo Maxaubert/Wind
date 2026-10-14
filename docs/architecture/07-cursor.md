@@ -10,7 +10,7 @@ Inspect crosshair, lock detection, Inspect, tracking and keyboard panning.
 
 ## The mapper
 
-`CursorMapper` (`src/cursor_mapper.*`, pure, tested) integrates per-tick deltas into a float lens
+`CursorMapper` (`src/cursor/cursor_mapper.*`, pure, tested) integrates per-tick deltas into a float lens
 centre `(cx_, cy_)` in monitor-local pixels (no easing: `cursorSmoothing` was removed in #430). Each tick `update` returns
 one `MapResult`:
 
@@ -72,7 +72,7 @@ a regime switch never snaps.
 
 While a mouse button is held, the pointer is the interaction (window drag, text selection), and a
 per-tick weld fights the hand: the dragged content flickered ~85 px between two positions.
-`ShouldDragFollow` (`src/drag_follow.h`) suspends the weld for exactly the button-hold, and the
+`ShouldDragFollow` (`src/cursor/drag_follow.h`) suspends the weld for exactly the button-hold, and the
 lens follows the pointer 1:1, unscaled. Only the render engine welds a free session; a free
 transform session never welds, so the rule decides nothing there. The press landed under the welded cursor; the release lands
 where pointer and content are. On release `renderFrame` invalidates its park dedupe so the next
@@ -91,7 +91,7 @@ Transform sessions use the pointer Windows Magnifier uses: the real pointer, dra
 magnified frame. It is the transform engine's only cursor. It works at either sampling mode, because DWM
 samples it like the content: Smooth transform scaling makes it sharp but it shimmers
 slightly during zoom ramps, nearest keeps it pixelated and steady. Pure rules:
-`src/native_cursor.h` (tested).
+`src/transform/native_cursor.h` (tested).
 
 - **The cursor lens.** `MagHost::createCursorLens` makes a hidden window of the documented
   magnifier control class (`WC_MAGNIFIER`) on the tick thread (the thread that owns the runtime). With
@@ -136,7 +136,7 @@ slightly during zoom ramps, nearest keeps it pixelated and steady. Pure rules:
   reaches the screen about a display frame after the pointer moved, while DWM centring shows the
   newest pointer, so the game's cursor swung behind every movement and flipped side on each change of
   direction: rms 54 screen px at 6.5x and 1000 desktop px/s (2026-10-11, 3 runs). While a covering
-  foreground app hides the pointer (`GameDrawsCursor`, `src/game_cursor.h`; not Wind's own hiding),
+  foreground app hides the pointer (`GameDrawsCursor`, `src/cursor/game_cursor.h`; not Wind's own hiding),
   DWM centring is off and the view follows the pointer `gameCursorLagMs` late, read back from a
   per-tick `PointerHistory`: rms 15-23 px at 1000 px/s, 6 px at 400 (29 before). Wind's own write
   without the delay measured the same as DWM centring, so the gain is the delay. The rest is the
@@ -147,7 +147,7 @@ slightly during zoom ramps, nearest keeps it pixelated and steady. Pure rules:
   Inspect.
 - **Pan glide (#430, `panGlideMaxPx`, 0 = off).** A soft stop: when a mouse movement
   stops, the POINTER eases on at the hand's speed and slows to rest within `panGlideMaxPx` SCREEN px
-  at any zoom (`src/pan_glide.h`). One setting since #434: the ease's time constant follows the
+  at any zoom (`src/cursor/pan_glide.h`). One setting since #434: the ease's time constant follows the
   distance (`PanGlideTauS`, 40 px = 60 ms), shortened for a fast hand so the cap holds. The view follows by DWM centring. Any hand movement, a mouse button, a game,
   Inspect, a detached view or 1x ends it. Wind's own steps move the tick baseline (`lastSetVirtual`),
   so the lock detector and the gain learner only ever see hand motion. A first, uncapped version
@@ -196,7 +196,7 @@ gates and idle context release, all off or superseded before #369.
 Inspect and the hide-cursor hotkey (`cursorVisibility=never`) hide DWM's pointer in a transform
 session; the Inspect crosshair is then a window of Wind's.
 
-- **`CursorBlanker`** (`src/cursor_blanker.*`) swaps the 14 system cursors for transparent ones and
+- **`CursorBlanker`** (`src/cursor/cursor_blanker.*`) swaps the 14 system cursors for transparent ones and
   restores them by reloading the user's scheme (no cached originals). The constructor reloads it
   first, so a previously killed Wind's blanks never outlive it. `MagShowSystemCursor(FALSE)` covers
   app-custom cursors. The swaps run in order on the `Wind cursor swaps` worker thread (#363): the restore is a full
@@ -204,7 +204,7 @@ session; the Inspect crosshair is then a window of Wind's.
   `SetSystemCursor` calls, which froze the 1x landing frame on the tick thread. The zoom-out repaint
   nudge rides on the worker after the restore. `restoreSync()` waits (shutdown); the crash filter
   restores directly. The blanker and the crosshair window are always created, whatever the config.
-- **`CursorSprite`** (`src/cursor_sprite.*`) is a small layered window that only ever carries the
+- **`CursorSprite`** (`src/cursor/cursor_sprite.*`) is a small layered window that only ever carries the
   Inspect crosshair (`showCrosshair`; it renders no cursor shape any more). It sits at the look point
   in desktop coordinates, so DWM shows it at the view's centre, magnified. `keepOnTop()` re-asserts
   topmost only when displaced.
@@ -214,7 +214,7 @@ session; the Inspect crosshair is then a window of Wind's.
 **Bands.** A UIAccess crosshair lands in band 2; Start, taskbar thumbnails and tray flyouts are band
 16; the Snipping Tool overlay is band 17. `cursorBandAuto=1` (default) keeps twin windows: the
 band-16 one shows unless the foreground window's band is above 16, when the low one shows instead
-(pure rule: `src/sprite_layer.h`; checked only while the crosshair is drawn). `zorderBand` places the
+(pure rule: `src/cursor/sprite_layer.h`; checked only while the crosshair is drawn). `zorderBand` places the
 low window. The window is excluded from capture (otherwise it is frozen into snip screenshots) and
 from Aero Peek. The native pointer needs none of this: DWM draws it above every band.
 
@@ -224,7 +224,7 @@ Magnification runtime ([04](04-render-engine.md)).
 ## Lock detection
 
 A mouselook game owns the pointer (clips, freezes or warps it), so panning must come from raw
-mickeys. `LockDetector` (`src/lock_detector.*`, pure) decides, with hysteresis.
+mickeys. `LockDetector` (`src/cursor/lock_detector.*`, pure) decides, with hysteresis.
 
 | Tell | Rule | When |
 |---|---|---|
@@ -244,7 +244,7 @@ mickeys. `LockDetector` (`src/lock_detector.*`, pure) decides, with hysteresis.
   outside it (1x, Inspect) the tick clears it (and `lockFreed`); `panArmed` reads it before that
   recompute and would otherwise act on the previous session's value for a tick.
 - **A shown pointer is a free pointer in a transform session** (`LockApplies`,
-  `src/native_cursor.h`; the tick's result is `t.lockEff`, which every gate reads). The locked path
+  `src/transform/native_cursor.h`; the tick's result is `t.lockEff`, which every gate reads). The locked path
   pans from raw mickeys and re-parks the real pointer once per tick; the native cursor IS the real
   pointer, so DWM drew it wherever the hand had moved it between ticks.
   Field case: DOOM: The Dark Ages menus under `lockApps` (2026-10-07), measured at 4.7x as 22 px
@@ -305,7 +305,7 @@ the mouse hook only swallows clicks.
   deduped through `GetClipCursor` (a clip write under a live transform is in the TDR class).
   Transform writes pause ~3 ticks around the click. Inspect stays on after a click.
 - **Game-inspect.** A raw-input game's camera cannot be blocked by a hook, so when
-  `ShouldGameInspect` (`src/inspect_focus.h`) sees a mouselook game, Wind moves foreground to an
+  `ShouldGameInspect` (`src/cursor/inspect_focus.h`) sees a mouselook game, Wind moves foreground to an
   invisible 1x1 helper window: the backgrounded game stops receiving raw input and its camera
   freezes, while Wind's `RIDEV_INPUTSINK` pan keeps working. The tell is a cursor hidden by the app
   while Wind is not hiding it; a detector lock also engages it. Do not make the zoomed path
@@ -318,7 +318,7 @@ the mouse hook only swallows clicks.
 ## Tracking: caret, focus and mouse edge mode
 
 The view can follow the text caret (`trackCaret`, default on) and keyboard focus (`trackFocus`,
-default off). `FocusTracker` (`src/focus_track.*`) runs on its own thread with WinEvents,
+default off). `FocusTracker` (`src/track/focus_track.*`) runs on its own thread with WinEvents,
 `GetGUIThreadInfo` and UI Automation, and publishes a snapshot; the tick never calls UIA.
 `FocusTracker::run` hands that thread to `FocusRun` (`focus_track.cpp`): `setUp` (COM, UIA timeouts,
 `FocusLookup`, WinEvent hooks), `messageLoop` (wakes, 30 ms coalescing, the 16 ms backstop poll) and
@@ -326,15 +326,15 @@ default off). `FocusTracker` (`src/focus_track.*`) runs on its own thread with W
 leaves the caret to `followCaret` (sources in `findCaret`: xterm input, Win32, UIA, MSAA fixes).
 
 - **Tracking never moves the pointer.** While caret or focus owns the view, the view is detached
-  (`t.viewDetached`, weld off): `DetachedMap` (`src/detached_view.h`) maps the glided centre while
+  (`t.viewDetached`, weld off): `DetachedMap` (`src/track/detached_view.h`) maps the glided centre while
   the cursor fields report the real pointer. On a mouse-move takeover the pointer is placed into the
   view; the view does not jump to the pointer.
-- `StepViewOwner` (`src/view_target.h`) picks one owner per tick: the latest caret or focus change
+- `StepViewOwner` (`src/track/view_target.h`) picks one owner per tick: the latest caret or focus change
   wins; real mouse motion or a button takes it back.
 - **Only keyboard-driven caret moves are followed.** The first caret after a focus change is a
   baseline. After a click there is a 1 s quiet period, ended early by a fresh non-modifier key down
-  (`src/typing_key.h`), never by key-ups, auto-repeat or Ctrl/Shift.
-- **A focus event for the same control is not a focus change** (`src/focus_identity.h`). Notepad
+  (`src/input/typing_key.h`), never by key-ups, auto-repeat or Ctrl/Shift.
+- **A focus event for the same control is not a focus change** (`src/track/focus_identity.h`). Notepad
   and VS Code fire them while typing, about three per app switch, and each used to re-baseline, so
   the first second of typing after a switch was not followed. Same foreground window, same focus
   window and same element bounds keep the caret followed (`focus repeat` in trackLog). Zoom-in
@@ -343,7 +343,7 @@ leaves the caret to `followCaret` (sources in `findCaret`: xterm input, Win32, U
   the enter tick calls `ResetViewOwnerForSession` (owner, latched target, `wasTracking`), clears
   `viewDetached`, the spring velocity and the pan keys; otherwise the next zoom-in opened on the
   previous session's caret.
-- Caret rects are corrected in `src/caret_rect.h` (tall Chromium rects trimmed to the line, a
+- Caret rects are corrected in `src/track/caret_rect.h` (tall Chromium rects trimmed to the line, a
   whole-line rect recognised).
 - **VS Code (EditContext).** Its editor element (`native-edit-context`, also Monaco elsewhere)
   reports the UIA caret at the start of the line wherever the caret is on it. For that class only,
@@ -356,9 +356,9 @@ leaves the caret to `followCaret` (sources in `findCaret`: xterm input, Win32, U
   without UIA; no new lookup starts while one is stuck; a late answer is used if under 250 ms old
   and for the same window. With focus-following off, an app with a Win32 caret skips the lookup.
   Calls over 200 ms log `slow resolve` with the phase.
-- The glide is a critically damped spring (`SpringToward`, `src/view_glide.h`, `trackGlideMs`).
+- The glide is a critically damped spring (`SpringToward`, `src/track/view_glide.h`, `trackGlideMs`).
 - **Java apps** (IntelliJ, PyCharm) expose the caret only through the Java Access Bridge
-  (`src/java_bridge.*`). UIPI drops the JVM's handshake to a UIAccess process, so the bridge's
+  (`src/track/java_bridge.*`). UIPI drops the JVM's handshake to a UIAccess process, so the bridge's
   hidden windows get a narrow `ChangeWindowMessageFilterEx` allowance. Never poll the bridge (each
   read runs on the Java app's UI thread); read only after bridge callbacks. Load only
   Authenticode-signed bridge DLLs. Read the caret with `getCaretLocation`, scaled by the monitor
@@ -369,7 +369,7 @@ leaves the caret to `followCaret` (sources in `findCaret`: xterm input, Win32, U
   window switch resets it. The MSAA caret (`MsaaCaret`) skips windows Windows reports as hung and
   sits out 2 s after a call over 250 ms.
 - **Mouse edge mode** (`mouseAlign=1`, free-pointer sessions only): the pointer is unwelded and
-  `EdgePanCenter` (`src/edge_pan.h`) moves the view only when the cursor's visible body leaves the
+  `EdgePanCenter` (`src/track/edge_pan.h`) moves the view only when the cursor's visible body leaves the
   margin band (`mouseMarginPct`). Edge-pinned motion is hidden from the lock detector
   (`PointerPinnedAtEdge`), or corners fling the pointer. `trackAlign` does the same for the caret.
 
@@ -377,7 +377,7 @@ Field notes: [../TRACKING-FINDINGS.md](../TRACKING-FINDINGS.md).
 
 ## Keyboard panning
 
-`ViewOwner::Keys` is a detached owner next to caret and focus. `KeyPan` (`src/keyboard_pan.h`, pure)
+`ViewOwner::Keys` is a detached owner next to caret and focus. `KeyPan` (`src/input/keyboard_pan.h`, pure)
 turns held pan keys into a view delta in screen space, so the feel does not change with zoom:
 
 - A hold pans at `panSpeed x 1.25` screen widths per second at high zoom, scaled down at low zoom

@@ -1,4 +1,4 @@
-// src/sched_priority.h - keep the tick loop on time when the rest of the PC is busy (issue #334).
+// src/core/sched_priority.h - keep the tick loop on time when the rest of the PC is busy (issue #334).
 //
 // The tick thread ran at normal priority, so under heavy background CPU load (renders, builds) it
 // queued behind every other normal thread and a zoom in/out froze for a few frames (traces: 139-737 ms
