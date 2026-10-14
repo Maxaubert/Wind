@@ -2743,6 +2743,18 @@ static void TeardownSession(TickState& t) {
     g_tint.invalidate();                          // the engines put the scheme back: re-tint when idle
 }
 
+// Idle tick (1x, no Inspect): engine idle work and the 1x cursor tint.
+static void IdleTick(TickState& t) {
+    // Idle: let the transform model release its magnification context shortly after a zoom
+    // ends. While a context is alive, DWM composites magnification-aware and every cursor
+    // change an app makes costs a re-composite - a game that toggles its pointer on
+    // middle-click hitches at 1x (issue #148). Both the active model and hybrid's transform
+    // half get the tick (in model=transform the transform IS t.model); others no-op.
+    t.model->idleTick();
+    if (t.mTransform && t.mTransform != t.model) t.mTransform->idleTick();
+    UpdateCursorTint(t);
+}
+
 static void RunTick(TickState& t) {
     TickWorkTimer workTimer(t);
     const TickClock clk = BeginTick(t);
@@ -2807,14 +2819,7 @@ static void RunTick(TickState& t) {
     } else if (t.prevActive) {                        // active -> idle: tear the overlay down
         TeardownSession(t);
     } else {
-        // Idle: let the transform model release its magnification context shortly after a zoom
-        // ends. While a context is alive, DWM composites magnification-aware and every cursor
-        // change an app makes costs a re-composite - a game that toggles its pointer on
-        // middle-click hitches at 1x (issue #148). Both the active model and hybrid's transform
-        // half get the tick (in model=transform the transform IS t.model); others no-op.
-        t.model->idleTick();
-        if (t.mTransform && t.mTransform != t.model) t.mTransform->idleTick();
-        UpdateCursorTint(t);
+        IdleTick(t);
     }
     t.prevLvl = lvl;
     t.prevActive = active;
