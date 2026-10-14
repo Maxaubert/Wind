@@ -2000,6 +2000,164 @@ static PointerMap MapPointer(TickState& t, bool inspect, double lvl, double dt, 
     return { r, freeCursor, gameCursor };
 }
 
+// Active tick: caret/focus tracking, keyboard panning and the view owner. May detach the view,
+// warp the pointer into it (cur follows) and replace the mapped result r.
+static void StepTracking(TickState& t, double lvl, bool inspect, bool fsCover, bool panArmed, bool kbHook,
+                         double dt, bool wallNeeded, POINT& cur, int curDx, int curDy, MapResult& r) {
+    auto comboHeld = [&](int vk, int mods) { return BindComboHeld(kbHook, vk, mods); };
+    // --- Tracking (issue #276): caret / focus own the view; the pointer is never moved. ---
+    // fsCover (read once above, see the "Foreground facts for this tick" comment) is the
+    // borderless-fullscreen-game tell; reused here rather than a second ForegroundCoversMonitor
+    // call (it is also what fsGame below aliases).
+    const bool trackEnabled = lvl > 1.001 && !inspect && !t.lockEff && !fsCover &&
+                              (t.cfg.trackCaret != 0 || t.cfg.trackFocus != 0);
+    { wind::SpanScope span_(wind::kSpanTrack); g_track.setActive(trackEnabled, t.cfg.trackCaret != 0, t.cfg.trackFocus != 0, t.cfg.trackLog != 0); }
+    if (t.cfg.trackLog) {   // #326: why tracking is on or off, logged on every change
+        const int bits = (lvl > 1.001 ? 1 : 0) | (inspect ? 4 : 0) |
+                         (t.lockEff ? 8 : 0) | (fsCover ? 16 : 0);
+        if (bits != t.diagEnableBits) {
+            t.diagEnableBits = bits;
+            wind::Log(wind::LogLevel::Info, "track", "diag enabled=%d zoomed=%d inspect=%d locked=%d fsCover=%d lvl=%.2f",
+                      trackEnabled ? 1 : 0, bits & 1 ? 1 : 0, bits & 4 ? 1 : 0,
+                      bits & 8 ? 1 : 0, bits & 16 ? 1 : 0, lvl);
+        }
+    }
+    // Keyboard panning (#287): only presses the hook swallowed count (a key that went to the app
+    // at 1x never pans after a zoom-in mid-press); without the hook, the polled combo.
+    const bool panEnabled = panArmed;
+    double panDx = 0, panDy = 0;
+    if (panEnabled) {
+        const bool kb = g_input.kbHookActive();
+        auto panHeld = [&](int vk, int mods) { return vk && (kb ? g_input.keySwallowed(vk) : comboHeld(vk, mods)); };
+        bool held[4] = { panHeld(t.cfg.panLeftVk, t.cfg.panLeftMods), panHeld(t.cfg.panRightVk, t.cfg.panRightMods),
+                         panHeld(t.cfg.panUpVk, t.cfg.panUpMods),     panHeld(t.cfg.panDownVk, t.cfg.panDownMods) };
+        // A tap that went down and up between two samples counts as held for this step.
+        for (int i = 0; i < 4; ++i) if (g_input.drainPanPresses(i) > 0) held[i] = true;
+        t.keyPan.step(held, (dt > 0.05 ? 0.05 : dt) * 1000.0, lvl, t.mon.w, t.mon.h, t.cfg.panSpeed, panDx, panDy);
+    } else {
+        t.keyPan.reset();
+    }
+    {
+        wind::ViewOwnerInputs vi;
+        vi.enabled = trackEnabled || panEnabled;
+        vi.panning = panEnabled && t.keyPan.active();
+        vi.trackActive = trackEnabled;
+        vi.trackCaret = t.cfg.trackCaret != 0; vi.trackFocus = t.cfg.trackFocus != 0;
+        vi.mouseDx = curDx; vi.mouseDy = curDy;
+        vi.buttonDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) ||
+                        (GetAsyncKeyState(VK_RBUTTON) & 0x8000) ||
+                        (GetAsyncKeyState(VK_MBUTTON) & 0x8000);
+        const unsigned long long nowMs = GetTickCount64();
+        if (vi.buttonDown) t.lastButtonMs = nowMs;
+        { const unsigned long long edge = g_input.lastButtonEdgeMs(); if (edge > t.lastButtonMs) t.lastButtonMs = edge; }
+        vi.msSinceButton = t.lastButtonMs ? double(nowMs - t.lastButtonMs) : 1e9;
+        // Keyboard-driven only (#289). The hook and Raw Input both stamp the clock, so a suspended
+        // hook no longer switches the gate off. No stamp at all and no hook: no information, no gate.
+        const unsigned long long lastKey = g_input.lastAnyKeyDownMs();
+        vi.msSinceKey = lastKey ? double(nowMs - lastKey) : (g_input.kbHookActive() ? 1e9 : 0.0);
+        // #328: a key after the last mouse button means typing, so the click quiet period ends early.
+        // Only a fresh non-modifier key down counts: a Ctrl/Shift release after a Ctrl/Shift+click,
+        // or auto-repeat, is not typing (review #349).
+        vi.keyAfterButton = wind::KeyAfterButton(g_input.lastTypingKeyDownMs(), t.lastButtonMs);
+        vi.dtMs = dt * 1000.0;
+        { wind::SpanScope span_(wind::kSpanTrack); vi.snap = g_track.snapshot(); }
+        const wind::ViewOwner was = t.viewOwner.owner;
+        const unsigned diagTargetSeqBefore = t.viewOwner.target.seq;
+        const wind::ViewOwner owner = wind::StepViewOwner(t.viewOwner, vi);
+        if (t.cfg.trackLog && vi.snap.seq != t.diagSeq) {   // #326: every caret/focus event, with the gate inputs
+            t.diagSeq = vi.snap.seq;
+            const bool latched = t.viewOwner.target.seq == vi.snap.seq && t.viewOwner.target.seq != diagTargetSeqBefore;
+            double ax = -1, ay = -1;
+            const wind::TrackRect drc{ vi.snap.l - t.mon.x, vi.snap.t - t.mon.y, vi.snap.r - t.mon.x, vi.snap.b - t.mon.y };
+            wind::TrackTargetCenter(drc, t.viewCx, t.viewCy, lvl, t.mon.w, t.mon.h, t.cfg.trackAlign, t.cfg.trackMarginPct, ax, ay);
+            static const char* kOwn[] = { "mouse", "caret", "focus", "keys" };
+            wind::Log(wind::LogLevel::Info, "track",
+                      "diag evt seq=%u kind=%d rect=%.0f,%.0f-%.0f,%.0f owner=%s latched=%d msKey=%.0f msBtn=%.0f en=%d lvl=%.2f view=%.0f,%.0f (%s) aim=%.0f,%.0f viewW=%.0f",
+                      vi.snap.seq, (int)vi.snap.kind, drc.l, drc.t, drc.r, drc.b, kOwn[(int)owner], latched ? 1 : 0,
+                      vi.msSinceKey, vi.msSinceButton, vi.enabled ? 1 : 0, lvl,
+                      t.viewDetached ? t.viewCx : r.centerX, t.viewDetached ? t.viewCy : r.centerY,
+                      t.viewDetached ? "detached" : "mouse", ax, ay, t.mon.w / lvl);
+        }
+        if (owner != was && t.cfg.trackLog) {
+            static const char* kName[] = { "mouse", "caret", "focus", "keys" };
+            wind::Log(wind::LogLevel::Info, "track", "view %s -> %s%s", kName[(int)was], kName[(int)owner],
+                      t.viewOwner.warpPointer ? " (pointer placed in the view)" : "");
+        }
+        if (owner == wind::ViewOwner::Keys) {
+            // Keyboard panning (#287): the view moves by the KeyPan delta, the pointer stays put
+            // until the mouse moves (then it comes to the view, the warpPointer branch below).
+            // From a centred view seed at the pointer's view; mouse edge mode's detached centre
+            // is already the real view (seeding from the mapper there jumped the view).
+            if (was == wind::ViewOwner::Mouse && !t.viewDetached) { t.viewCx = r.centerX; t.viewCy = r.centerY; }
+            t.viewVx = 0; t.viewVy = 0;
+            const double hw = t.mon.w / (2.0 * lvl), hh = t.mon.h / (2.0 * lvl);
+            double nx = t.viewCx + panDx, ny = t.viewCy + panDy;
+            // The MPO wall (#148/#242) caps the source left/top like mouse edge mode does.
+            const double wall = wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0;
+            if (wall >= 0) { if (nx - hw > wall) nx = wall + hw; if (ny - hh > wall) ny = wall + hh; }
+            nx = (std::min)((std::max)(nx, hw), t.mon.w - hw);
+            ny = (std::min)((std::max)(ny, hh), t.mon.h - hh);
+            t.viewCx = nx; t.viewCy = ny;
+            r = wind::DetachedMap(t.viewCx, t.viewCy, cur.x - t.mon.x, cur.y - t.mon.y, lvl, t.mon.w, t.mon.h);
+            t.mapper.reset(t.viewCx, t.viewCy);
+            t.lastSetVirtual = cur;
+            t.viewDetached = true;
+        } else if (owner != wind::ViewOwner::Mouse) {
+            if (was == wind::ViewOwner::Mouse && !t.viewDetached) { t.viewCx = r.centerX; t.viewCy = r.centerY; }   // glide from where we are
+            const double ptrX = cur.x - t.mon.x, ptrY = cur.y - t.mon.y;
+            double tx = t.viewCx, ty = t.viewCy;
+            // The LATCHED target: only caret/focus events that passed the gates move the view.
+            const wind::TrackSnapshot& tg = t.viewOwner.target;
+            const wind::TrackRect rc{ tg.l - t.mon.x, tg.t - t.mon.y, tg.r - t.mon.x, tg.b - t.mon.y };
+            double ox, oy;
+            if (wind::TrackTargetCenter(rc, t.viewCx, t.viewCy, lvl, t.mon.w, t.mon.h,
+                                        t.cfg.trackAlign, t.cfg.trackMarginPct, ox, oy)) { tx = ox; ty = oy; }
+            if (was == wind::ViewOwner::Mouse) { t.viewVx = 0; t.viewVy = 0; }
+            t.viewCx = wind::SpringToward(t.viewCx, tx, t.viewVx, vi.dtMs, t.cfg.trackGlideMs);
+            t.viewCy = wind::SpringToward(t.viewCy, ty, t.viewVy, vi.dtMs, t.cfg.trackGlideMs);
+            r = wind::DetachedMap(t.viewCx, t.viewCy, ptrX, ptrY, lvl, t.mon.w, t.mon.h);
+            t.mapper.reset(t.viewCx, t.viewCy);   // hybrid switches and the next tick start here
+            t.lastSetVirtual = cur;               // measure the next hand motion from here
+            t.viewDetached = true;
+        } else if (t.viewOwner.warpPointer) {
+            // The mouse moved while the view showed the caret/focus: the POINTER comes to the
+            // view, the view stays (owner decision, field test 2026-09-29). Centred mode places
+            // it at the view centre; edge mode (mouseAlign=1) just inside the band, nearest to
+            // where it was.
+            const bool edges = t.cfg.mouseAlign == 1;
+            double px = t.viewCx, py = t.viewCy;
+            if (edges)
+                wind::EdgeClampPointer(t.viewCx, t.viewCy, cur.x - t.mon.x, cur.y - t.mon.y, lvl,
+                                       t.mon.w, t.mon.h, t.cfg.mouseMarginPct, px, py, CurrentCursorBody(t));
+            const int wx = (int)(px + 0.5) + t.mon.x, wy = (int)(py + 0.5) + t.mon.y;
+            SetCursorPos(wx, wy);
+            cur.x = wx; cur.y = wy;
+            t.mapper.reset(edges ? t.viewCx : px, edges ? t.viewCy : py);
+            t.lastSetVirtual = cur;
+            r = wind::DetachedMap(t.viewCx, t.viewCy, px, py, lvl, t.mon.w, t.mon.h);
+            t.viewDetached = edges;               // edge mode keeps the view where it is
+        } else if (t.cfg.mouseAlign == 1 && lvl > 1.001 && !inspect && !t.lockEff) {
+            // MOUSE EDGE MODE (issue #276 phase 2): the pointer roams freely inside the view and
+            // the view moves only when it reaches the margin band, just far enough. No weld:
+            // the pointer is real, so clicks are native. Mouselook (locked) and Inspect keep the
+            // centred path.
+            if (!t.viewDetached) { t.viewCx = r.centerX; t.viewCy = r.centerY; }   // start from here
+            const double ptrX = cur.x - t.mon.x, ptrY = cur.y - t.mon.y;
+            const double wall = wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0;
+            double ecx, ecy;
+            wind::EdgePanCenter(t.viewCx, t.viewCy, ptrX, ptrY, lvl, t.mon.w, t.mon.h,
+                                t.cfg.mouseMarginPct, wall, wall, ecx, ecy, CurrentCursorBody(t));
+            t.viewCx = ecx; t.viewCy = ecy;       // no glide: the hand pushes the view directly
+            r = wind::DetachedMap(t.viewCx, t.viewCy, ptrX, ptrY, lvl, t.mon.w, t.mon.h);
+            t.mapper.reset(t.viewCx, t.viewCy);
+            t.lastSetVirtual = cur;
+            t.viewDetached = true;
+        } else {
+            t.viewDetached = false;
+        }
+    }
+}
+
 static void RunTick(TickState& t) {
     TickWorkTimer workTimer(t);
     const TickClock clk = BeginTick(t);
@@ -2012,7 +2170,6 @@ static void RunTick(TickState& t) {
     WatchForegroundAndKbHook(t);
     const TickInput in = ResolveInputAndZoom(t, dt);
     const bool kbHook = in.kbHook;
-    auto comboHeld = [&](int vk, int mods) { return BindComboHeld(kbHook, vk, mods); };
     const bool inHeld = in.inHeld, outHeld = in.outHeld;
     const bool recenter = in.recenter;
     const double lvl = in.lvl;
@@ -2048,157 +2205,7 @@ static void RunTick(TickState& t) {
         const PointerMap pm = MapPointer(t, inspect, lvl, dt, fsCover, cur, curDx, curDy, dx, dy);
         const bool freeCursor = pm.freeCursor, gameCursor = pm.gameCursor;
         MapResult r = pm.r;
-        // --- Tracking (issue #276): caret / focus own the view; the pointer is never moved. ---
-        // fsCover (read once above, see the "Foreground facts for this tick" comment) is the
-        // borderless-fullscreen-game tell; reused here rather than a second ForegroundCoversMonitor
-        // call (it is also what fsGame below aliases).
-        const bool trackEnabled = lvl > 1.001 && !inspect && !t.lockEff && !fsCover &&
-                                  (t.cfg.trackCaret != 0 || t.cfg.trackFocus != 0);
-        { wind::SpanScope span_(wind::kSpanTrack); g_track.setActive(trackEnabled, t.cfg.trackCaret != 0, t.cfg.trackFocus != 0, t.cfg.trackLog != 0); }
-        if (t.cfg.trackLog) {   // #326: why tracking is on or off, logged on every change
-            const int bits = (lvl > 1.001 ? 1 : 0) | (inspect ? 4 : 0) |
-                             (t.lockEff ? 8 : 0) | (fsCover ? 16 : 0);
-            if (bits != t.diagEnableBits) {
-                t.diagEnableBits = bits;
-                wind::Log(wind::LogLevel::Info, "track", "diag enabled=%d zoomed=%d inspect=%d locked=%d fsCover=%d lvl=%.2f",
-                          trackEnabled ? 1 : 0, bits & 1 ? 1 : 0, bits & 4 ? 1 : 0,
-                          bits & 8 ? 1 : 0, bits & 16 ? 1 : 0, lvl);
-            }
-        }
-        // Keyboard panning (#287): only presses the hook swallowed count (a key that went to the app
-        // at 1x never pans after a zoom-in mid-press); without the hook, the polled combo.
-        const bool panEnabled = panArmed;
-        double panDx = 0, panDy = 0;
-        if (panEnabled) {
-            const bool kb = g_input.kbHookActive();
-            auto panHeld = [&](int vk, int mods) { return vk && (kb ? g_input.keySwallowed(vk) : comboHeld(vk, mods)); };
-            bool held[4] = { panHeld(t.cfg.panLeftVk, t.cfg.panLeftMods), panHeld(t.cfg.panRightVk, t.cfg.panRightMods),
-                             panHeld(t.cfg.panUpVk, t.cfg.panUpMods),     panHeld(t.cfg.panDownVk, t.cfg.panDownMods) };
-            // A tap that went down and up between two samples counts as held for this step.
-            for (int i = 0; i < 4; ++i) if (g_input.drainPanPresses(i) > 0) held[i] = true;
-            t.keyPan.step(held, (dt > 0.05 ? 0.05 : dt) * 1000.0, lvl, t.mon.w, t.mon.h, t.cfg.panSpeed, panDx, panDy);
-        } else {
-            t.keyPan.reset();
-        }
-        {
-            wind::ViewOwnerInputs vi;
-            vi.enabled = trackEnabled || panEnabled;
-            vi.panning = panEnabled && t.keyPan.active();
-            vi.trackActive = trackEnabled;
-            vi.trackCaret = t.cfg.trackCaret != 0; vi.trackFocus = t.cfg.trackFocus != 0;
-            vi.mouseDx = curDx; vi.mouseDy = curDy;
-            vi.buttonDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) ||
-                            (GetAsyncKeyState(VK_RBUTTON) & 0x8000) ||
-                            (GetAsyncKeyState(VK_MBUTTON) & 0x8000);
-            const unsigned long long nowMs = GetTickCount64();
-            if (vi.buttonDown) t.lastButtonMs = nowMs;
-            { const unsigned long long edge = g_input.lastButtonEdgeMs(); if (edge > t.lastButtonMs) t.lastButtonMs = edge; }
-            vi.msSinceButton = t.lastButtonMs ? double(nowMs - t.lastButtonMs) : 1e9;
-            // Keyboard-driven only (#289). The hook and Raw Input both stamp the clock, so a suspended
-            // hook no longer switches the gate off. No stamp at all and no hook: no information, no gate.
-            const unsigned long long lastKey = g_input.lastAnyKeyDownMs();
-            vi.msSinceKey = lastKey ? double(nowMs - lastKey) : (g_input.kbHookActive() ? 1e9 : 0.0);
-            // #328: a key after the last mouse button means typing, so the click quiet period ends early.
-            // Only a fresh non-modifier key down counts: a Ctrl/Shift release after a Ctrl/Shift+click,
-            // or auto-repeat, is not typing (review #349).
-            vi.keyAfterButton = wind::KeyAfterButton(g_input.lastTypingKeyDownMs(), t.lastButtonMs);
-            vi.dtMs = dt * 1000.0;
-            { wind::SpanScope span_(wind::kSpanTrack); vi.snap = g_track.snapshot(); }
-            const wind::ViewOwner was = t.viewOwner.owner;
-            const unsigned diagTargetSeqBefore = t.viewOwner.target.seq;
-            const wind::ViewOwner owner = wind::StepViewOwner(t.viewOwner, vi);
-            if (t.cfg.trackLog && vi.snap.seq != t.diagSeq) {   // #326: every caret/focus event, with the gate inputs
-                t.diagSeq = vi.snap.seq;
-                const bool latched = t.viewOwner.target.seq == vi.snap.seq && t.viewOwner.target.seq != diagTargetSeqBefore;
-                double ax = -1, ay = -1;
-                const wind::TrackRect drc{ vi.snap.l - t.mon.x, vi.snap.t - t.mon.y, vi.snap.r - t.mon.x, vi.snap.b - t.mon.y };
-                wind::TrackTargetCenter(drc, t.viewCx, t.viewCy, lvl, t.mon.w, t.mon.h, t.cfg.trackAlign, t.cfg.trackMarginPct, ax, ay);
-                static const char* kOwn[] = { "mouse", "caret", "focus", "keys" };
-                wind::Log(wind::LogLevel::Info, "track",
-                          "diag evt seq=%u kind=%d rect=%.0f,%.0f-%.0f,%.0f owner=%s latched=%d msKey=%.0f msBtn=%.0f en=%d lvl=%.2f view=%.0f,%.0f (%s) aim=%.0f,%.0f viewW=%.0f",
-                          vi.snap.seq, (int)vi.snap.kind, drc.l, drc.t, drc.r, drc.b, kOwn[(int)owner], latched ? 1 : 0,
-                          vi.msSinceKey, vi.msSinceButton, vi.enabled ? 1 : 0, lvl,
-                          t.viewDetached ? t.viewCx : r.centerX, t.viewDetached ? t.viewCy : r.centerY,
-                          t.viewDetached ? "detached" : "mouse", ax, ay, t.mon.w / lvl);
-            }
-            if (owner != was && t.cfg.trackLog) {
-                static const char* kName[] = { "mouse", "caret", "focus", "keys" };
-                wind::Log(wind::LogLevel::Info, "track", "view %s -> %s%s", kName[(int)was], kName[(int)owner],
-                          t.viewOwner.warpPointer ? " (pointer placed in the view)" : "");
-            }
-            if (owner == wind::ViewOwner::Keys) {
-                // Keyboard panning (#287): the view moves by the KeyPan delta, the pointer stays put
-                // until the mouse moves (then it comes to the view, the warpPointer branch below).
-                // From a centred view seed at the pointer's view; mouse edge mode's detached centre
-                // is already the real view (seeding from the mapper there jumped the view).
-                if (was == wind::ViewOwner::Mouse && !t.viewDetached) { t.viewCx = r.centerX; t.viewCy = r.centerY; }
-                t.viewVx = 0; t.viewVy = 0;
-                const double hw = t.mon.w / (2.0 * lvl), hh = t.mon.h / (2.0 * lvl);
-                double nx = t.viewCx + panDx, ny = t.viewCy + panDy;
-                // The MPO wall (#148/#242) caps the source left/top like mouse edge mode does.
-                const double wall = wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0;
-                if (wall >= 0) { if (nx - hw > wall) nx = wall + hw; if (ny - hh > wall) ny = wall + hh; }
-                nx = (std::min)((std::max)(nx, hw), t.mon.w - hw);
-                ny = (std::min)((std::max)(ny, hh), t.mon.h - hh);
-                t.viewCx = nx; t.viewCy = ny;
-                r = wind::DetachedMap(t.viewCx, t.viewCy, cur.x - t.mon.x, cur.y - t.mon.y, lvl, t.mon.w, t.mon.h);
-                t.mapper.reset(t.viewCx, t.viewCy);
-                t.lastSetVirtual = cur;
-                t.viewDetached = true;
-            } else if (owner != wind::ViewOwner::Mouse) {
-                if (was == wind::ViewOwner::Mouse && !t.viewDetached) { t.viewCx = r.centerX; t.viewCy = r.centerY; }   // glide from where we are
-                const double ptrX = cur.x - t.mon.x, ptrY = cur.y - t.mon.y;
-                double tx = t.viewCx, ty = t.viewCy;
-                // The LATCHED target: only caret/focus events that passed the gates move the view.
-                const wind::TrackSnapshot& tg = t.viewOwner.target;
-                const wind::TrackRect rc{ tg.l - t.mon.x, tg.t - t.mon.y, tg.r - t.mon.x, tg.b - t.mon.y };
-                double ox, oy;
-                if (wind::TrackTargetCenter(rc, t.viewCx, t.viewCy, lvl, t.mon.w, t.mon.h,
-                                            t.cfg.trackAlign, t.cfg.trackMarginPct, ox, oy)) { tx = ox; ty = oy; }
-                if (was == wind::ViewOwner::Mouse) { t.viewVx = 0; t.viewVy = 0; }
-                t.viewCx = wind::SpringToward(t.viewCx, tx, t.viewVx, vi.dtMs, t.cfg.trackGlideMs);
-                t.viewCy = wind::SpringToward(t.viewCy, ty, t.viewVy, vi.dtMs, t.cfg.trackGlideMs);
-                r = wind::DetachedMap(t.viewCx, t.viewCy, ptrX, ptrY, lvl, t.mon.w, t.mon.h);
-                t.mapper.reset(t.viewCx, t.viewCy);   // hybrid switches and the next tick start here
-                t.lastSetVirtual = cur;               // measure the next hand motion from here
-                t.viewDetached = true;
-            } else if (t.viewOwner.warpPointer) {
-                // The mouse moved while the view showed the caret/focus: the POINTER comes to the
-                // view, the view stays (owner decision, field test 2026-09-29). Centred mode places
-                // it at the view centre; edge mode (mouseAlign=1) just inside the band, nearest to
-                // where it was.
-                const bool edges = t.cfg.mouseAlign == 1;
-                double px = t.viewCx, py = t.viewCy;
-                if (edges)
-                    wind::EdgeClampPointer(t.viewCx, t.viewCy, cur.x - t.mon.x, cur.y - t.mon.y, lvl,
-                                           t.mon.w, t.mon.h, t.cfg.mouseMarginPct, px, py, CurrentCursorBody(t));
-                const int wx = (int)(px + 0.5) + t.mon.x, wy = (int)(py + 0.5) + t.mon.y;
-                SetCursorPos(wx, wy);
-                cur.x = wx; cur.y = wy;
-                t.mapper.reset(edges ? t.viewCx : px, edges ? t.viewCy : py);
-                t.lastSetVirtual = cur;
-                r = wind::DetachedMap(t.viewCx, t.viewCy, px, py, lvl, t.mon.w, t.mon.h);
-                t.viewDetached = edges;               // edge mode keeps the view where it is
-            } else if (t.cfg.mouseAlign == 1 && lvl > 1.001 && !inspect && !t.lockEff) {
-                // MOUSE EDGE MODE (issue #276 phase 2): the pointer roams freely inside the view and
-                // the view moves only when it reaches the margin band, just far enough. No weld:
-                // the pointer is real, so clicks are native. Mouselook (locked) and Inspect keep the
-                // centred path.
-                if (!t.viewDetached) { t.viewCx = r.centerX; t.viewCy = r.centerY; }   // start from here
-                const double ptrX = cur.x - t.mon.x, ptrY = cur.y - t.mon.y;
-                const double wall = wallNeeded ? kMaxSafeTxMagnitude / lvl : -1.0;
-                double ecx, ecy;
-                wind::EdgePanCenter(t.viewCx, t.viewCy, ptrX, ptrY, lvl, t.mon.w, t.mon.h,
-                                    t.cfg.mouseMarginPct, wall, wall, ecx, ecy, CurrentCursorBody(t));
-                t.viewCx = ecx; t.viewCy = ecy;       // no glide: the hand pushes the view directly
-                r = wind::DetachedMap(t.viewCx, t.viewCy, ptrX, ptrY, lvl, t.mon.w, t.mon.h);
-                t.mapper.reset(t.viewCx, t.viewCy);
-                t.lastSetVirtual = cur;
-                t.viewDetached = true;
-            } else {
-                t.viewDetached = false;
-            }
-        }
+        StepTracking(t, lvl, inspect, fsCover, panArmed, kbHook, dt, wallNeeded, cur, curDx, curDy, r);
         // Dead-zone probe (probeClicks=1, diagnostic): the field annotates hover dead zones by
         // clicking. Plain click = "hover works here" (OK), Ctrl+click = "dead here" (DEAD). Each
         // click logs every coordinate space in the chain plus what Windows hit-tests at the
