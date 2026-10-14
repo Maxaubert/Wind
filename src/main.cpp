@@ -2256,6 +2256,102 @@ static void CommitInspectClicks(TickState& t, const MapResult& r) {
     }
 }
 
+// Active tick: the hybrid instant switch (re-pick the engine mid-session on a foreground change).
+static void InstantHybridSwitch(TickState& t, bool enterActive, bool inspect, HWND fgTick, bool fsCover,
+                                bool fgBorderless, bool liftIfTransform) {
+    // Instant hybrid switch (always on): re-pick the engine WHILE ZOOMED when the foreground
+    // changes, handing over mid-session. The controller and mapper are untouched, so the
+    // zoom level and lens position carry across the swap (render 8x -> tab into a game ->
+    // transform 8x). Inspect sessions are never switched under.
+    // Freeze the engine choice while an overlay is in front (see IsOverlayFg). Skipping the
+    // whole block, rather than just the swap, is deliberate: it leaves wantModel/wantSinceMs
+    // untouched, so the overlay never becomes the settled candidate and handing foreground back
+    // is a no-op instead of a second handover.
+    if (t.mTransform && !enterActive && !inspect && !IsOverlayFg(fgTick)) {
+        // Same pure predicate as the zoom-in pick (engine_pick.h) - the two sites can no
+        // longer drift apart. Exe-derived inputs come from the per-HWND cache: this block
+        // runs every zoomed tick and the process-open per tick was measurable waste.
+        RefreshFgCache(t, fgTick);
+        auto* tAvail = dynamic_cast<TransformModel*>(t.mTransform);
+        EnginePickInputs pin;
+        pin.coversMonitor  = fsCover;
+        pin.borderless     = fgBorderless;
+        pin.primaryMonitor = t.mon.x == 0 && t.mon.y == 0;
+        pin.shellDesktop   = t.fgCacheShell;
+        pin.excluded       = t.fgCacheExcluded;
+        pin.churny         = t.fgCacheChurny;
+        pin.tdrHarness     = t.cfg.tdrTest > 0;
+        pin.desktopTransformOptIn = t.cfg.desktopTransform != 0;
+        pin.inputTransformOk      = tAvail && tAvail->inputTransformAvailable();
+        pin.renderLost            = RenderDeviceLost(t);
+        FillCategoryInputs(t, pin);
+        IMagnifierModel* want = wind::PickTransformFor(t.cfg.model, pin, t.renderStale) ? t.mTransform : t.mRender;
+        // STICKY (field: the engine flapped render<->transform inside one zoom session, and
+        // each flip releases and rebuilds DWM's magnification context - a stall every time).
+        // A real alt-tab still switches; a one-frame wobble in the foreground reads does not.
+        if (want != t.wantModel) { t.wantModel = want; t.wantSinceMs = GetTickCount64(); }
+        const bool wantSettled = GetTickCount64() - t.wantSinceMs >= 350;
+        const bool fgIsStealer = fgTick && fgTick == g_focusStealer;   // game-inspect helper holds fg
+        if (want && want != t.model && wantSettled && !fgIsStealer) {
+            if (t.restAfterReveal) {   // rapid double-switch: settle the previous handover
+                { wind::SpanScope span_(wind::kSpanActivate); t.restAfterReveal->setActive(false); }
+                t.restAfterReveal = nullptr;
+                t.restOverlapTicks = 0;
+                UpdateColorFilter(t, true, RenderOverlayShown(t), nullptr);   // colour follows what is visible
+            }
+            IMagnifierModel* old = t.model;
+            SetSystemCursorHidden(t, old, false);
+            t.model = want;
+            // Both engines weld the cursor to the lens point, so the handover is seamless:
+            // render hides the OS cursor immediately; the transform hides it in its own
+            // present (level > 1.001) and re-welds at the same point.
+            if (dynamic_cast<RenderModel*>(t.model)) SetSystemCursorHidden(t, t.model, true);
+            else t.transformExe = ExeNameOf(fgTick);   // device-lost backstop attribution
+            { wind::SpanScope span_(wind::kSpanActivate); t.model->onActivate(); }
+            if (auto* rm = dynamic_cast<RenderModel*>(t.model)) {
+                t.revealNeedsComposite = ForegroundCoversMonitor(t.mon);
+                if (t.revealNeedsComposite) rm->primeReveal();
+                t.revealPending = (t.hz > 0 ? t.hz : 60) / 4;
+                if (t.revealPending < 2) t.revealPending = 2;
+                // SEAMLESS HANDOVER (field report: a bare-desktop frame flashed at the 9x
+                // crossover): the transform keeps the screen magnified while the overlay's
+                // evidence-gated reveal is pending, and RESTS A FEW TICKS AFTER the reveal
+                // lands - the rest write and the alpha flip travel different DWM channels,
+                // so a same-tick rest still left a one-composite unmagnified gap. The
+                // overlap's worst case is a ~14ms over-zoom pulse (still magnified content),
+                // never a bare desktop.
+                t.restAfterReveal = old;
+                t.restOverlapTicks = 0;   // armed when the reveal actually fires
+            } else {
+                // render -> transform: activate the transform THIS tick, keep the overlay up
+                // for the same short overlap, then drop it.
+                { wind::SpanScope span_(wind::kSpanActivate); t.model->setActive(true); }
+                // The pan wall and MPO state above were computed for the outgoing render
+                // engine (review 2026-10-09 M2), so this tick's view was mapped without walls.
+                // Give the incoming transform its MPO state now: its write-site backstop then
+                // keeps |translation| under the 16-bit field on this first present (the ghost
+                // is not settled yet, so the backstop is armed at either sampling). The next
+                // tick computes the walls for the transform as usual.
+                if (auto* tmIn = dynamic_cast<TransformModel*>(t.model)) {
+                    const bool exposedIn = !g_mpoDisabled;
+                    tmIn->setMpoBusterWanted(exposedIn && t.cfg.mpoBuster != 0 && !liftIfTransform);
+                    tmIn->setMpoExposed(exposedIn && !liftIfTransform);
+                }
+                t.restAfterReveal = old;
+                t.restOverlapTicks = TicksAtHz(3, t.hz);
+            }
+            // Name the trigger: if another transient surface ever ping-pongs the engine the
+            // way the taskbar flyout did (issue #180), the log identifies it directly.
+            wchar_t fgCls[64]{};
+            if (fgTick) GetClassNameW(fgTick, fgCls, 64);
+            wind::Log(wind::LogLevel::Info, "hybrid",
+                      "instant switch -> %s (level preserved; fg cls=%ls exe=%ls)",
+                      dynamic_cast<RenderModel*>(t.model) ? "render" : "transform",
+                      fgCls, ExeNameOf(fgTick).c_str());
+        }
+    }
+}
+
 static void RunTick(TickState& t) {
     TickWorkTimer workTimer(t);
     const TickClock clk = BeginTick(t);
@@ -2310,97 +2406,7 @@ static void RunTick(TickState& t) {
         // the magnified region (gameCrop), skip the periodic topmost backstop, and optionally cap
         // our own present rate (gameFpsCap). fgTick/fsCover/fgBorderless were read once above.
         const bool fsGame = fsCover;
-        // Instant hybrid switch (always on): re-pick the engine WHILE ZOOMED when the foreground
-        // changes, handing over mid-session. The controller and mapper are untouched, so the
-        // zoom level and lens position carry across the swap (render 8x -> tab into a game ->
-        // transform 8x). Inspect sessions are never switched under.
-        // Freeze the engine choice while an overlay is in front (see IsOverlayFg). Skipping the
-        // whole block, rather than just the swap, is deliberate: it leaves wantModel/wantSinceMs
-        // untouched, so the overlay never becomes the settled candidate and handing foreground back
-        // is a no-op instead of a second handover.
-        if (t.mTransform && !enterActive && !inspect && !IsOverlayFg(fgTick)) {
-            // Same pure predicate as the zoom-in pick (engine_pick.h) - the two sites can no
-            // longer drift apart. Exe-derived inputs come from the per-HWND cache: this block
-            // runs every zoomed tick and the process-open per tick was measurable waste.
-            RefreshFgCache(t, fgTick);
-            auto* tAvail = dynamic_cast<TransformModel*>(t.mTransform);
-            EnginePickInputs pin;
-            pin.coversMonitor  = fsCover;
-            pin.borderless     = fgBorderless;
-            pin.primaryMonitor = t.mon.x == 0 && t.mon.y == 0;
-            pin.shellDesktop   = t.fgCacheShell;
-            pin.excluded       = t.fgCacheExcluded;
-            pin.churny         = t.fgCacheChurny;
-            pin.tdrHarness     = t.cfg.tdrTest > 0;
-            pin.desktopTransformOptIn = t.cfg.desktopTransform != 0;
-            pin.inputTransformOk      = tAvail && tAvail->inputTransformAvailable();
-            pin.renderLost            = RenderDeviceLost(t);
-            FillCategoryInputs(t, pin);
-            IMagnifierModel* want = wind::PickTransformFor(t.cfg.model, pin, t.renderStale) ? t.mTransform : t.mRender;
-            // STICKY (field: the engine flapped render<->transform inside one zoom session, and
-            // each flip releases and rebuilds DWM's magnification context - a stall every time).
-            // A real alt-tab still switches; a one-frame wobble in the foreground reads does not.
-            if (want != t.wantModel) { t.wantModel = want; t.wantSinceMs = GetTickCount64(); }
-            const bool wantSettled = GetTickCount64() - t.wantSinceMs >= 350;
-            const bool fgIsStealer = fgTick && fgTick == g_focusStealer;   // game-inspect helper holds fg
-            if (want && want != t.model && wantSettled && !fgIsStealer) {
-                if (t.restAfterReveal) {   // rapid double-switch: settle the previous handover
-                    { wind::SpanScope span_(wind::kSpanActivate); t.restAfterReveal->setActive(false); }
-                    t.restAfterReveal = nullptr;
-                    t.restOverlapTicks = 0;
-                    UpdateColorFilter(t, true, RenderOverlayShown(t), nullptr);   // colour follows what is visible
-                }
-                IMagnifierModel* old = t.model;
-                SetSystemCursorHidden(t, old, false);
-                t.model = want;
-                // Both engines weld the cursor to the lens point, so the handover is seamless:
-                // render hides the OS cursor immediately; the transform hides it in its own
-                // present (level > 1.001) and re-welds at the same point.
-                if (dynamic_cast<RenderModel*>(t.model)) SetSystemCursorHidden(t, t.model, true);
-                else t.transformExe = ExeNameOf(fgTick);   // device-lost backstop attribution
-                { wind::SpanScope span_(wind::kSpanActivate); t.model->onActivate(); }
-                if (auto* rm = dynamic_cast<RenderModel*>(t.model)) {
-                    t.revealNeedsComposite = ForegroundCoversMonitor(t.mon);
-                    if (t.revealNeedsComposite) rm->primeReveal();
-                    t.revealPending = (t.hz > 0 ? t.hz : 60) / 4;
-                    if (t.revealPending < 2) t.revealPending = 2;
-                    // SEAMLESS HANDOVER (field report: a bare-desktop frame flashed at the 9x
-                    // crossover): the transform keeps the screen magnified while the overlay's
-                    // evidence-gated reveal is pending, and RESTS A FEW TICKS AFTER the reveal
-                    // lands - the rest write and the alpha flip travel different DWM channels,
-                    // so a same-tick rest still left a one-composite unmagnified gap. The
-                    // overlap's worst case is a ~14ms over-zoom pulse (still magnified content),
-                    // never a bare desktop.
-                    t.restAfterReveal = old;
-                    t.restOverlapTicks = 0;   // armed when the reveal actually fires
-                } else {
-                    // render -> transform: activate the transform THIS tick, keep the overlay up
-                    // for the same short overlap, then drop it.
-                    { wind::SpanScope span_(wind::kSpanActivate); t.model->setActive(true); }
-                    // The pan wall and MPO state above were computed for the outgoing render
-                    // engine (review 2026-10-09 M2), so this tick's view was mapped without walls.
-                    // Give the incoming transform its MPO state now: its write-site backstop then
-                    // keeps |translation| under the 16-bit field on this first present (the ghost
-                    // is not settled yet, so the backstop is armed at either sampling). The next
-                    // tick computes the walls for the transform as usual.
-                    if (auto* tmIn = dynamic_cast<TransformModel*>(t.model)) {
-                        const bool exposedIn = !g_mpoDisabled;
-                        tmIn->setMpoBusterWanted(exposedIn && t.cfg.mpoBuster != 0 && !liftIfTransform);
-                        tmIn->setMpoExposed(exposedIn && !liftIfTransform);
-                    }
-                    t.restAfterReveal = old;
-                    t.restOverlapTicks = TicksAtHz(3, t.hz);
-                }
-                // Name the trigger: if another transient surface ever ping-pongs the engine the
-                // way the taskbar flyout did (issue #180), the log identifies it directly.
-                wchar_t fgCls[64]{};
-                if (fgTick) GetClassNameW(fgTick, fgCls, 64);
-                wind::Log(wind::LogLevel::Info, "hybrid",
-                          "instant switch -> %s (level preserved; fg cls=%ls exe=%ls)",
-                          dynamic_cast<RenderModel*>(t.model) ? "render" : "transform",
-                          fgCls, ExeNameOf(fgTick).c_str());
-            }
-        }
+        InstantHybridSwitch(t, enterActive, inspect, fgTick, fsCover, fgBorderless, liftIfTransform);
         // Per-tick render-only overrides go through PresentExtras; the model's present() runs
         // FillRenderParams and applies these on top. ex.outline seeds with the same base value
         // FillRenderParams would compute, so the dwell/idle logic below reads an identical start.
