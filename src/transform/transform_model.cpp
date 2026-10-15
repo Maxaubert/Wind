@@ -65,6 +65,8 @@ static void DeliverOwedNudge() {
 }
 void TransformModel::resetTransformState() {
     nativePrimed_ = false;  // a rebuilt context needs its own public prime (#369)
+    panelPrimed_ = false;   // ...and so does a shell panel's real pointer (#283, review #284)
+    panelLens_ = false;
     forceWrite_ = false;    // lastLevel_ = 0 already forces the next write
     ixPubLevel_ = 0.0;
     ladderReq_ = 0.0; ladderOut_ = 0.0;
@@ -452,7 +454,9 @@ void TransformModel::setActive(bool active) {
     const double parkMs = double(pb.QuadPart - pa.QuadPart) * 1000.0 / fr.QuadPart;
     if (parkMs > 5.0)
         wind::Log(wind::LogLevel::Info, "transform", "identity park took %.1fms", parkMs);
-    if (nativeSession_ && host_.cursorLensReady()) {
+    const bool panelLensWasOn = panelLens_;
+    endPanelPointer();   // a Wind session that ended with a shell panel open (#492)
+    if ((nativeSession_ || panelLensWasOn) && host_.cursorLensReady()) {
         // Native cursor: back to the hardware pointer at 1x (the composed one taxes every cursor
         // change a game makes). The hardware plane repaints only on the next cursor EVENT, so
         // nudge the pointer a pixel and back.
@@ -930,7 +934,19 @@ void TransformModel::weldPointer(const MapResult& r, const PresentExtras& ex) {
     // whether SetCursorPos REALLY ran, so RunTick can baseline on the weld point only when it did
     // (#169 measured-baseline law; assuming it landed is the unstable-servo bug).
     weldedLastFrame_ = false;
-    if (!ex.suppressCursorSync) {
+    if (ex.realPointer) {
+        // Shell panel freeze (#283, #492): the pointer is pinned by a 1px clip; moving that clip
+        // moves the pointer, right after the view write, so DWM never draws one without the other.
+        const int cx = r.clickDesktopX + mon_.x, cy = r.clickDesktopY + mon_.y;
+        RECT have{};
+        GetClipCursor(&have);
+        if (have.left != cx || have.top != cy || have.right != cx + 1 || have.bottom != cy + 1) {
+            const RECT pin{ cx, cy, cx + 1, cy + 1 };
+            ClipCursor(&pin);
+            weldedLastFrame_ = true;
+        }
+        lastClickX_ = cx; lastClickY_ = cy; haveLastClick_ = true;
+    } else if (!ex.suppressCursorSync) {
         int cx = ex.clickOverride ? ex.clickDesktopX : (r.clickDesktopX + mon_.x);
         int cy = ex.clickOverride ? ex.clickDesktopY : (r.clickDesktopY + mon_.y);
         if (!haveLastClick_ || cx != lastClickX_ || cy != lastClickY_) {
@@ -939,6 +955,15 @@ void TransformModel::weldPointer(const MapResult& r, const PresentExtras& ex) {
             weldedLastFrame_ = true;
         }
     }
+}
+
+// A Wind session's shell-panel pointer ends (#492): the lens style goes back off, so the hardware
+// pointer returns for the sprite to blank (a native session owns the lens style itself and never
+// sets panelLens_). A public prime cannot be undone; forgetting it lets the next panel prime again.
+void TransformModel::endPanelPointer() {
+    if (panelLens_) host_.setCursorLens(false);
+    panelLens_ = false;
+    panelPrimed_ = false;
 }
 
 void TransformModel::presentCursor(const MapResult& r, double level, const PresentExtras& ex) {
@@ -954,7 +979,44 @@ void TransformModel::presentCursor(const MapResult& r, double level, const Prese
         sprite_->moveTo(r.clickDesktopX + mon_.x, r.clickDesktopY + mon_.y);
         lastSpriteX_ = INT_MIN;   // the legacy sprite's move dedupe must not skip its next move
         sprite_->keepOnTop();
+    } else if (!nativeSession_ && ex.realPointer && ex.drawCursor && level > 1.001) {
+        // SHELL INPUT PANEL in a Wind session (#283, #492). The emoji picker and its siblings are
+        // composed by the shell above every window band, so the sprite goes under them; the real
+        // pointer is the one thing drawn above. The cursor lens style makes DWM draw it magnified
+        // (the native session's mechanism, 0.2 ms once built; the public write is only the fallback,
+        // it blocks 200-260 ms). RunTick has frozen the pointer and the weld above moves it with the view.
+        sprite_->hide();
+        lastSpriteX_ = INT_MIN;
+        bool repaint = false;
+        // Give the pointer back whichever way it was hidden: setActive() blanks the cursor set at
+        // zoom-in without cursorHidden_, so a panel open at zoom-in stayed invisible (field, #284).
+        if (cursorHidden_) { ShowSystemCursor(TRUE); cursorHidden_ = false; }
+        if (blanker_->blanked()) {
+            blanker_->restoreSync();   // the clip nudge below needs the restored shape in place
+            repaint = true;
+        }
+        if (!panelLens_ && !panelPrimed_) {
+            if (host_.createCursorLens() && host_.setCursorLens(true)) {
+                panelLens_ = true;
+            } else if (lastLevel_ > 1.0) {
+                host_.setTransform((float)lastLevel_, lastOffX_, lastOffY_, lastTxX_, lastTxY_, false);
+                panelPrimed_ = true;
+            }
+            wind::Log(wind::LogLevel::Info, "transform", "shell panel: real pointer (%s)",
+                      panelLens_ ? "cursor lens" : "public prime");
+            repaint = true;
+        }
+        // The pointer repaints (and takes the lens mode) only on the next cursor EVENT, and a
+        // same-position SetCursorPos is none; it is pinned by its 1px clip, so nudge the clip a
+        // pixel and back (review #284). The weld above has already placed the pin this frame.
+        if (repaint && haveLastClick_) {
+            const RECT off{ lastClickX_ + 1, lastClickY_, lastClickX_ + 2, lastClickY_ + 1 };
+            const RECT pin{ lastClickX_, lastClickY_, lastClickX_ + 1, lastClickY_ + 1 };
+            ClipCursor(&off);
+            ClipCursor(&pin);
+        }
     } else if (!nativeSession_ && ex.drawCursor && level > 1.001) {
+        endPanelPointer();   // a panel just closed: the sprite takes over again
         // LEGACY SPRITE SESSION (txNativeCursor=0, issue #463): the pre-#369 cursor. The real pointer
         // is hidden (blanker for standard shapes, MagShowSystemCursor for app-custom ones) and its
         // shape is drawn into the sprite window, placed in DESKTOP coordinates at the lens point:
@@ -963,8 +1025,7 @@ void TransformModel::presentCursor(const MapResult& r, double level, const Prese
         // own pointer (games, video) refreshShape() reports Hidden every tick, and hiding before
         // checking ran a full blank and restore of every system cursor per tick. No lockstep gate:
         // the sprite follows the mapper always, or it froze in the edge zones (field 2026-08-26).
-        // Shell input panels (emoji picker, Win+V) draw above the sprite here: the pre-#369 panel
-        // pointer freeze (#283) is not part of this fallback.
+        // A shell input panel takes the real-pointer branch above instead (#492).
         updateSpriteLayer();
         if (sprite_->refreshShape() == CursorSprite::ShapeStatus::Rendered) {
             if (!cursorHidden_) {
@@ -984,6 +1045,7 @@ void TransformModel::presentCursor(const MapResult& r, double level, const Prese
             if (cursorHidden_) { ShowSystemCursor(TRUE); blanker_->restore(); cursorHidden_ = false; }
         }
     } else {
+        endPanelPointer();   // no-op unless a Wind session's panel pointer was on
         sprite_->hide();
         if (level > 1.001) {
             // NATIVE CURSOR (issue #369): DWM draws the real pointer into the magnified frame, above
@@ -1111,7 +1173,9 @@ void TransformModel::present(const MapResult& r, double level, const Config& cfg
     // whose 1px freeze clip must never be disturbed - ex.clickOverride marks it).
     // Hot like the other knobs: switched off mid-zoom, give the clip back now rather than at the
     // end of the session (issue #274). Gated so an unused edgeClip costs no per-tick syscall.
-    if (cfg.edgeClip != 0 || edgeClipActive_)
+    // (Not while a shell panel froze the pointer: its 1px clip is RunTick's, and restoring the edge
+    // clip here would free it. RunTick gives the saved clip back when the panel closes.)
+    if ((cfg.edgeClip != 0 || edgeClipActive_) && !ex.realPointer)
         edgeClipManage(cfg.edgeClip != 0 && applyLevel > 1.001 && !ex.clickOverride);
 
     weldPointer(r, ex);

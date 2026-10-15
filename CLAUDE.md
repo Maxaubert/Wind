@@ -93,8 +93,10 @@ Chapter numbers refer to `docs/architecture/NN-*.md`.
 - Tracking never moves the pointer: detached views (`t.viewDetached`); the pointer comes to the view
   on a mouse move. Never poll the Java Access Bridge at a fixed rate (reads follow bridge events,
   a window switch or a backed-off retry); load only Authenticode-signed bridge DLLs.
-- Shell input panels need nothing special in the transform engine: DWM draws its pointer above them.
-  Do not bring back pointer freezing or hook-thread view writes.
+- Shell input panels (emoji picker, Win+V) need nothing in a Native session: DWM draws its pointer
+  above them. A Wind session shows the real pointer through the cursor lens while one is open, frozen
+  by a 1 px clip that Wind moves with the view (#492); keep that freeze hidden from the lock tell.
+  Never use hook-thread view writes for it.
 
 **Input (06)**
 - Bound keys are swallowed by LL hooks with balanced down/up; release swallowed keys on teardown.

@@ -10,20 +10,68 @@
 #include <oleacc.h>
 #include <oleauto.h>
 #include <UIAutomation.h>
+#include <dwmapi.h>
 #include <chrono>
 #include <algorithm>
 #include <condition_variable>
 #include <memory>
 #include <string>
 #pragma comment(lib, "oleacc.lib")
+#pragma comment(lib, "dwmapi.lib")
 namespace wind {
 
 static const UINT kWakeMsg = WM_APP + 0x61;       // an event arrived: resolve after coalescing
 static const UINT kActiveMsg = WM_APP + 0x62;     // active_ changed (wParam = new value): retune (#71)
 static const UINT_PTR kCoalesceTimer = 1;
 static FocusTracker* g_self = nullptr;            // WinEvent callbacks have no context pointer
+static UINT_PTR g_panelTimer = 0;                 // re-checks a panel marked open (tracker thread only)
+
+// The shell's input panels (emoji picker, clipboard history, touch keyboard) are hosted by
+// TextInputHost.exe and composed by the shell ABOVE every app window, so no band Wind can create
+// covers them (#283, measured 2026-09-29). They never change as windows either: the only reliable
+// signal is TextInputHost's "IME" window, uncloaked while a panel shows and cloaked when it closes.
+// "IME" is a common class name (every GUI thread has one), so the owning process is checked too.
+static bool IsShellPanelWindow(HWND h) {
+    wchar_t cls[16] = {};
+    if (!GetClassNameW(h, cls, 16) || wcscmp(cls, L"IME") != 0) return false;
+    DWORD pid = 0; GetWindowThreadProcessId(h, &pid);
+    HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!p) return false;
+    wchar_t path[MAX_PATH]; DWORD n = MAX_PATH;
+    bool yes = false;
+    if (QueryFullProcessImageNameW(p, 0, path, &n)) {
+        const wchar_t* base = wcsrchr(path, L'\\');
+        yes = _wcsicmp(base ? base + 1 : path, L"TextInputHost.exe") == 0;
+    }
+    CloseHandle(p);
+    return yes;
+}
 
 struct FocusTrackImpl {
+    // Tracker thread only (the cloak hook, the start-up scan and the timer all run there).
+    static void SetPanel(bool open, HWND h) {
+        if (!g_self) return;
+        g_self->panelHwnd_.store(open ? h : nullptr);
+        if (g_self->panelOpen_.exchange(open) != open)
+            wind::Log(wind::LogLevel::Info, "track", "shell input panel %s", open ? "open" : "closed");
+        // A missed close (TextInputHost restarted, an event dropped) must not leave the real pointer
+        // on for good: a 250 ms timer re-checks the remembered window while it is marked open.
+        if (open && !g_panelTimer) g_panelTimer = SetTimer(nullptr, 0, 250, nullptr);
+        if (!open && g_panelTimer) { KillTimer(nullptr, g_panelTimer); g_panelTimer = 0; }
+    }
+    static void CheckPanel() {
+        if (!g_self || !g_self->panelOpen_.load()) return;
+        HWND ph = static_cast<HWND>(g_self->panelHwnd_.load());
+        DWORD cloaked = 0;
+        if (!ph || !IsWindow(ph) ||
+            (SUCCEEDED(DwmGetWindowAttribute(ph, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked))
+            SetPanel(false, nullptr);
+    }
+    static void CALLBACK OnCloak(HWINEVENTHOOK, DWORD ev, HWND h, LONG obj, LONG, DWORD, DWORD) {
+        if (!g_self || !h || obj != OBJID_WINDOW) return;
+        if (!IsShellPanelWindow(h)) return;
+        SetPanel(ev == EVENT_OBJECT_UNCLOAKED, h);
+    }
     static void CALLBACK OnWinEvent(HWINEVENTHOOK, DWORD ev, HWND, LONG obj, LONG, DWORD, DWORD) {
         if (!g_self || !g_self->active_.load()) return;
         if (ev == EVENT_OBJECT_LOCATIONCHANGE && obj != OBJID_CARET) return;
@@ -328,6 +376,7 @@ struct FocusRun {
     // LOCATIONCHANGE fires for every moving window and caret system-wide: installed only while the
     // tracker is active (zoomed), never at 1x (#71). The 16 ms caret backstop likewise.
     HWINEVENTHOOK h4 = nullptr;
+    HWINEVENTHOOK h5 = nullptr;   // shell input panels (#283, #492): always on, it fires only on cloaking
     UINT_PTR pollTimer = 0;
     void retune(bool on) {
         if (on && !h4)
@@ -692,6 +741,16 @@ void FocusRun::setUp() {
     h1 = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr, FocusTrackImpl::OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     h2 = SetWinEventHook(EVENT_SYSTEM_MENUPOPUPSTART, EVENT_SYSTEM_MENUPOPUPSTART, nullptr, FocusTrackImpl::OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
     h3 = SetWinEventHook(EVENT_OBJECT_FOCUS, EVENT_OBJECT_FOCUS, nullptr, FocusTrackImpl::OnWinEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    h5 = SetWinEventHook(EVENT_OBJECT_CLOAKED, EVENT_OBJECT_UNCLOAKED, nullptr, FocusTrackImpl::OnCloak, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    // A panel already open when we start raised its UNCLOAKED before the hook existed (review #284).
+    EnumWindows([](HWND h, LPARAM) -> BOOL {
+        DWORD cloaked = 1;
+        if (IsShellPanelWindow(h) && SUCCEEDED(DwmGetWindowAttribute(h, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && !cloaked) {
+            FocusTrackImpl::SetPanel(true, h);
+            return FALSE;
+        }
+        return TRUE;
+    }, 0);
     retune(active_.load());   // an activation that raced thread start-up is picked up here
 }
 
@@ -727,6 +786,8 @@ void FocusRun::messageLoop(MSG& m) {
                 pendingFocus = false;
                 focusRetries = 0;
             }
+        } else if (m.message == WM_TIMER && m.wParam == g_panelTimer && g_panelTimer) {
+            FocusTrackImpl::CheckPanel();
         } else if (m.message == WM_TIMER) {
             if (active_.load() && wantCaret_.load()) resolve(false, true);              // backstop poll
         }
@@ -736,7 +797,8 @@ void FocusRun::messageLoop(MSG& m) {
 
 void FocusRun::tearDown() {
     if (pollTimer) KillTimer(nullptr, pollTimer);
-    for (HWINEVENTHOOK h : { h1, h2, h3, h4 }) if (h) UnhookWinEvent(h);
+    if (g_panelTimer) { KillTimer(nullptr, g_panelTimer); g_panelTimer = 0; }
+    for (HWINEVENTHOOK h : { h1, h2, h3, h4, h5 }) if (h) UnhookWinEvent(h);
     if (uia && fh) uia->RemoveFocusChangedEventHandler(fh);
     if (fh) fh->Release();
     focusLookup.reset();

@@ -188,9 +188,9 @@ from the blanker's copies of the standard cursors), placed at the lens point in 
 coordinates so DWM magnifies it with the content. At zoom-in the sprite is stood up on the pointer
 before the blank (two `DwmFlush` passes) so the hand-off does not blink. The lock rule is the old
 one: a locked session stays locked with the pointer shown (`LockApplies` gets `nativeSession()`).
-Read at zoom-in, so a change applies to the next session. Not ported: the shell-panel pointer
-freeze (#283), so the emoji picker and Win+V draw above the sprite; the hook write path, cadence
-gates and idle context release, all off or superseded before #369.
+Read at zoom-in, so a change applies to the next session. Shell input panels get the real pointer
+(below, #492). Not ported: the hook write path, cadence gates and idle context release, all off or
+superseded before #369.
 
 ## Hiding the real pointer: blanker and crosshair
 
@@ -389,10 +389,20 @@ turns held pan keys into a view delta in screen space, so the feel does not chan
 
 ## Shell input panels
 
-The emoji picker, clipboard history and touch keyboard are composed above every window band. The
-transform engine needs nothing for them: DWM draws the native pointer above the panels and keeps it
-centred, so the hand moves the pointer directly. The earlier workaround for the sprite cursor (a
-frozen real pointer moved by Wind after each view write, driven by `TextInputHost` cloak events)
-was removed with the sprite. The render engine's pointer sits under the panels, as before.
+The emoji picker, clipboard history and touch keyboard are composed above every window band, so
+only the real pointer shows over them. A Native session needs nothing: DWM draws its pointer above
+the panels and keeps it centred, so the hand moves the pointer directly.
+
+A Wind session (#283, ported back in #492) switches to the real pointer while a panel is open.
+`FocusTracker::shellPanelOpen` follows `TextInputHost`'s `IME` window (UNCLOAKED = open, CLOAKED =
+closed, a 250 ms re-check while open, a scan at start-up). `MapPointer` then freezes the pointer with
+a 1 px clip and moves it from raw mickeys at the learned desktop gain (Inspect's replay); the model
+hides the sprite, restores the cursor set, turns the cursor lens style on (the public prime only if
+no lens could be built) and moves the pin right after the view write (`ex.realPointer`), so DWM never
+draws one without the other. The freeze is hidden from the lock tell and the gain learner, tracking,
+keyboard pan, edge mode and the pan glide pause, and the saved clip goes back on close, Inspect entry
+and teardown (only while the clip is still the 1 px pin). Limitation: pens, touch and remote pointers
+set absolute positions, which the pin blocks, so they cannot steer over an open panel.
+The render engine's pointer sits under the panels, as before.
 Evidence and the rejected hook-write variant:
 [../history/SHELL-PANEL-CURSOR-FINDINGS.md](../history/SHELL-PANEL-CURSOR-FINDINGS.md).

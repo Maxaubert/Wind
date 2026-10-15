@@ -132,6 +132,11 @@ private:
     // draw the real pointer magnified (the fallback when the cursor lens could not be built).
     // dwmCentreOn_: DWM owns the pan (DWMUpdated TRUE).
     bool nativePrimed_ = false;
+    // Shell panel (#492): the lens style is on for a Wind session's real pointer (panelLens_), or
+    // the public prime was written because no lens could be built (panelPrimed_).
+    bool panelLens_ = false;
+    bool panelPrimed_ = false;
+    void endPanelPointer();                          // lens style back off (sprite or teardown)
     bool dwmCentreOn_ = false;
     bool dwmCentreBroken_ = false;                   // the export is missing or refused: never retry, log once
     bool forceWrite_ = false;                        // a centring switch owes DWM one real write
