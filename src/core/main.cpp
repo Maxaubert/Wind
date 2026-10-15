@@ -302,6 +302,9 @@ struct TickState {
     wind::ViewOwnerState viewOwner;
     double viewCx = 0.0, viewCy = 0.0;
     bool   viewDetached = false;   // last tick drew a detached frame
+    bool   panelFreeze = false;    // #283/#492: a Wind session's real pointer is frozen and moved by Wind
+    double panelX = 0, panelY = 0; // its desktop position (sub-pixel)
+    RECT   panelSavedClip{};       // the clip to give back when the panel closes
     wind::KeyPan keyPan;           // keyboard panning motion (#287)
     // Event-driven idle (#71): the loop slept before this tick (clamp the motion dt, keep the raw
     // one for wall-clock gates), and when the view was last active (the settle window).
@@ -1614,9 +1617,23 @@ static void EnterSession(TickState& t, bool zoomed, bool inspect) {
     { wind::SpanScope span_(wind::kSpanActivate); t.model->onActivate(); }     // grab a live frame, not a stale cached one
 }
 
+// Leave the shell-panel freeze (#283, #492): give the saved clip back. Runs from the in-session
+// exit, Inspect entry (before Inspect pins its own 1px clip) AND the active -> idle teardown: a
+// quick-zoom snap-out drops the level to 1x in one tick, skipping the in-session branch, which left
+// the pointer pinned to one pixel (review #284). The clip is restored only while it is still our
+// 1px pin: anything that took the clip since (a game, another tool) wins over a stale snapshot.
+static void EndPanelFreeze(TickState& t) {
+    if (!t.panelFreeze) return;
+    RECT cur{};
+    if (GetClipCursor(&cur) && cur.right - cur.left <= 1 && cur.bottom - cur.top <= 1)
+        ClipCursor(&t.panelSavedClip);
+    t.panelFreeze = false;
+}
+
 // Inspect enter: freeze the real cursor, seed the look point, and decide game-inspect.
 // Zeroes this tick's raw motion so the first tick after entry pans by zero.
 static void EnterInspect(TickState& t, bool zoomed, int& rawDx, int& rawDy) {
+    EndPanelFreeze(t);   // Inspect reads the clip below and pins its own
     // Freeze the real cursor where it is; the look point (mapper center) starts there.
     POINT pt; GetCursorPos(&pt);
     // Read before the freeze clip below replaces the clip (M4, InspectLockTell).
@@ -1739,6 +1756,11 @@ static PanDelta ResolvePanDelta(TickState& t, bool inspect, double lvl, double d
         if (t.cfg.mouseAlign == 1 && t.viewDetached && !clipConfined &&
             wind::PointerPinnedAtEdge(cur.x, cur.y, clip.left, clip.top, clip.right, clip.bottom))
             rawMag = 0;
+        // Shell panel freeze (#283, #492): the 1px clip and the frozen pointer are OURS, and they look
+        // exactly like mouselook. Fed to the tell, it flapped LOCKED/free every ~20 ms, each flip
+        // leaving and re-entering the panel regime (sprite and real pointer swapped per flip): the
+        // field flicker. Hide both while the freeze is ours.
+        if (t.panelFreeze) { clipConfined = false; rawMag = 0; }
         bool locked = t.detector.update(clipConfined,
                                         rawMag,
                                         std::abs(curDx) + std::abs(curDy),
@@ -1823,7 +1845,8 @@ static PanDelta ResolvePanDelta(TickState& t, bool inspect, double lvl, double d
             // under-reports output and would teach a too-low gain.
         // Also skip a pointer pinned against the clip bound: it cannot move, so the output
         // under-reports exactly like a confined clip (modest downward bias otherwise).
-        if (!clipConfined && (std::abs(rawDx) + std::abs(rawDy)) >= wind::GainLearner::kMinCounts &&
+        // Not during the shell-panel freeze: the pointer moves only by Wind then (review #284).
+        if (!clipConfined && !t.panelFreeze && (std::abs(rawDx) + std::abs(rawDy)) >= wind::GainLearner::kMinCounts &&
             !wind::PointerPinnedAtEdge(cur.x, cur.y, clip.left, clip.top, clip.right, clip.bottom)) {
                 const double dtMs_ = dt * 1000.0;
                 const double inC  = std::sqrt((double)rawDx * rawDx + (double)rawDy * rawDy);
@@ -1913,7 +1936,7 @@ static TickForeground ReadForegroundAndArmWall(TickState& t, double lvl) {
 // mapper to the real pointer, and the mapper step. The glide may move the pointer (cur follows).
 struct PointerMap { MapResult r; bool freeCursor, gameCursor; };
 static PointerMap MapPointer(TickState& t, bool inspect, double lvl, double dt, bool fsCover,
-                             POINT& cur, int curDx, int curDy, int dx, int dy) {
+                             POINT& cur, int curDx, int curDy, int dx, int dy, int rawDx, int rawDy) {
     // FREE CURSOR (issue #205) - native Magnifier's model, measured not assumed.
     //
     // tools/mag_formula_probe.ps1 + mag_trackmode_probe.ps1 drove the real Magnifier and read
@@ -1940,8 +1963,32 @@ static PointerMap MapPointer(TickState& t, bool inspect, double lvl, double dt, 
     //     integrates raw deltas instead (issue #3 / #158).
     const bool freeCursor = !inspect && !t.lockEff &&
                             dynamic_cast<TransformModel*>(t.model) != nullptr;
-    // (A shell input panel needs nothing special: DWM draws its pointer above the panels and
-    // keeps it centred, so the hand moves the pointer directly.)
+    // SHELL INPUT PANEL, Wind session (#283, #492): while the emoji picker (or clipboard history,
+    // touch keyboard) is open, the real pointer replaces the sprite (the shell composes its panels
+    // above every window band; only the real pointer is drawn above them). A real pointer the hand
+    // moves between ticks drifts off the view by speed x tick x level (the wobble, 44 px at 10.7x),
+    // so it is FROZEN with a 1px clip and moved only by Wind, in the same tick and right next to the
+    // view write, from raw mickeys at the learned desktop gain (Inspect's replay). Hook-thread
+    // writes were tried and rejected (#284: hitches). Tracking and edge mode pause meanwhile.
+    // A native session needs none of this: DWM draws its pointer above the panels and keeps it
+    // centred, so the hand moves the pointer directly.
+    const auto* tmPanel = freeCursor ? dynamic_cast<TransformModel*>(t.model) : nullptr;
+    const bool panel = tmPanel && !tmPanel->nativeSession() && lvl > 1.001 && g_track.shellPanelOpen();
+    if (panel && !t.panelFreeze) {
+        GetClipCursor(&t.panelSavedClip);
+        t.panelX = cur.x; t.panelY = cur.y;
+        t.panelFreeze = true;
+    } else if (!panel && t.panelFreeze) {
+        EndPanelFreeze(t);                                          // this rig keeps a work-area clip
+    }
+    if (panel) {
+        const double inC = std::sqrt((double)rawDx * rawDx + (double)rawDy * rawDy);
+        const double g = t.gainLearner.gainFor(inC, dt * 1000.0);
+        t.panelX += rawDx * g * t.cfg.cursorSensitivity;
+        t.panelY += rawDy * g * t.cfg.cursorSensitivity;
+        t.panelX = (std::min)((std::max)(t.panelX, (double)t.mon.x), (double)(t.mon.x + t.mon.w - 1));
+        t.panelY = (std::min)((std::max)(t.panelY, (double)t.mon.y), (double)(t.mon.y + t.mon.h - 1));
+    }
     // PAN GLIDE (issue #430, src/cursor/pan_glide.h): a soft stop, a few screen px at most. The pointer
     // itself eases on and the view follows by DWM centring. curDx/curDy is this tick's HAND motion: during a
     // glide the previous tick ended with the baseline on Wind's own step, so any motion here is
@@ -1950,7 +1997,7 @@ static PointerMap MapPointer(TickState& t, bool inspect, double lvl, double dt, 
         const bool btn = ((GetAsyncKeyState(VK_LBUTTON) | GetAsyncKeyState(VK_RBUTTON) |
                            GetAsyncKeyState(VK_MBUTTON)) & 0x8000) != 0;
         const bool glideOk = t.cfg.panGlideMaxPx > 0 && freeCursor && lvl > 1.001 && !fsCover &&
-                             !t.viewDetached && !btn;
+                             !t.viewDetached && !btn && !t.panelFreeze;
         if (t.glide.active && (!glideOk || curDx != 0 || curDy != 0)) wind::PanGlideCancel(t.glide);
         if (!t.glide.active)
             wind::PanGlideObserve(t.glide, curDx, curDy, dt, cur.x, cur.y, wind::PanGlideTauS(t.cfg.panGlideMaxPx),
@@ -1987,7 +2034,10 @@ static PointerMap MapPointer(TickState& t, bool inspect, double lvl, double dt, 
                   gameCursor ? "on" : "off", gameLagMs, lvl);
         t.gameCursor = gameCursor;
     }
-    if (freeCursor) {
+    if (panel) {
+        t.ptrHist.clear();
+        t.mapper.reset(t.panelX - t.mon.x, t.panelY - t.mon.y);
+    } else if (freeCursor) {
         POINT cp;
         if (GetCursorPos(&cp)) {
             LARGE_INTEGER qc; QueryPerformanceCounter(&qc);
@@ -2013,7 +2063,7 @@ static void StepTracking(TickState& t, double lvl, bool inspect, bool fsCover, b
     // fsCover (read once above, see the "Foreground facts for this tick" comment) is the
     // borderless-fullscreen-game tell; reused here rather than a second ForegroundCoversMonitor
     // call (it is also what fsGame below aliases).
-    const bool trackEnabled = lvl > 1.001 && !inspect && !t.lockEff && !fsCover &&
+    const bool trackEnabled = lvl > 1.001 && !inspect && !t.lockEff && !fsCover && !t.panelFreeze &&
                               (t.cfg.trackCaret != 0 || t.cfg.trackFocus != 0);
     { wind::SpanScope span_(wind::kSpanTrack); g_track.setActive(trackEnabled, t.cfg.trackCaret != 0, t.cfg.trackFocus != 0, t.cfg.trackLog != 0); }
     if (t.cfg.trackLog) {   // #326: why tracking is on or off, logged on every change
@@ -2028,7 +2078,7 @@ static void StepTracking(TickState& t, double lvl, bool inspect, bool fsCover, b
     }
     // Keyboard panning (#287): only presses the hook swallowed count (a key that went to the app
     // at 1x never pans after a zoom-in mid-press); without the hook, the polled combo.
-    const bool panEnabled = panArmed;
+    const bool panEnabled = panArmed && !t.panelFreeze;   // a shell panel freeze owns the view (#492)
     double panDx = 0, panDy = 0;
     if (panEnabled) {
         const bool kb = g_input.kbHookActive();
@@ -2140,7 +2190,7 @@ static void StepTracking(TickState& t, double lvl, bool inspect, bool fsCover, b
             t.lastSetVirtual = cur;
             r = wind::DetachedMap(t.viewCx, t.viewCy, px, py, lvl, t.mon.w, t.mon.h);
             t.viewDetached = edges;               // edge mode keeps the view where it is
-        } else if (t.cfg.mouseAlign == 1 && lvl > 1.001 && !inspect && !t.lockEff) {
+        } else if (t.cfg.mouseAlign == 1 && lvl > 1.001 && !inspect && !t.lockEff && !t.panelFreeze) {
             // MOUSE EDGE MODE (issue #276 phase 2): the pointer roams freely inside the view and
             // the view moves only when it reaches the margin band, just far enough. No weld:
             // the pointer is real, so clicks are native. Mouselook (locked) and Inspect keep the
@@ -2425,6 +2475,7 @@ static PresentExtras BuildPresentExtras(TickState& t, double lvl, double dt, boo
                         t.zoom.hasTarget();
     }
     if (quiesceHold) ex.suppressCursorSync = true;
+    ex.realPointer = t.panelFreeze;   // #492: the weld moves the frozen real pointer with the view
     // Native cursor (issue #369): DWM may own the pan only where the view is a pure function of
     // the pointer.
     {
@@ -2714,6 +2765,7 @@ static void UpdateCursorBaseline(TickState& t, bool inspect, bool doPresent, boo
 
 // Session exit (active -> idle): tear the overlay down, restore the cursor and leave Inspect.
 static void TeardownSession(TickState& t) {
+    EndPanelFreeze(t);                            // #283: never leave the pointer pinned (review #284)
     // The caret/focus watcher is switched off only from the zoomed view block; a zoom-out that
     // snaps straight to 1.0 skipped it and left the watcher polling at 1x (#71).
     { wind::SpanScope span_(wind::kSpanTrack); g_track.setActive(false, t.cfg.trackCaret != 0, t.cfg.trackFocus != 0, t.cfg.trackLog != 0); }
@@ -2786,7 +2838,7 @@ static void RunActiveTick(TickState& t, double lvl, double dt, bool zoomed, bool
     const HWND fgTick = tf.fgTick;
     const bool fsCover = tf.fsCover, fgBorderless = tf.fgBorderless;
     const bool wallNeeded = tf.wallNeeded, liftIfTransform = tf.liftIfTransform;
-    const PointerMap pm = MapPointer(t, inspect, lvl, dt, fsCover, cur, curDx, curDy, dx, dy);
+    const PointerMap pm = MapPointer(t, inspect, lvl, dt, fsCover, cur, curDx, curDy, dx, dy, rawDx, rawDy);
     const bool freeCursor = pm.freeCursor, gameCursor = pm.gameCursor;
     MapResult r = pm.r;
     StepTracking(t, lvl, inspect, fsCover, panArmed, kbHook, dt, wallNeeded, cur, curDx, curDy, r);
