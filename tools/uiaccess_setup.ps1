@@ -5,6 +5,33 @@ $ErrorActionPreference = 'Stop'
 # Derive paths from the script's own location ($PSScriptRoot = the tools\ dir) so this runs
 # from any clone, not just the original dev machine.
 $log = Join-Path $PSScriptRoot 'uiaccess_setup.log'
+
+# Stop this session's Wind the way the installer does (installer\app.nsh, WIND_QUIT_RUNNING): set
+# its quit event so it exits CLEANLY, restoring the OS cursor, releasing any ClipCursor and the
+# Magnification runtime, and force-kill only what is still running after a few seconds. A kill
+# alone can leave the pointer hidden or pinned to one pixel. This session only: Get-Process from
+# an elevated shell sees every session, and another user's Wind is theirs to close.
+function Stop-WindHere {
+    $sid = (Get-Process -Id $PID).SessionId
+    $mine = { param($names) @(Get-Process $names -ErrorAction SilentlyContinue | Where-Object SessionId -eq $sid) }
+    # WindConfig first and by force, as setup does: it holds no OS state, and a close with unsaved
+    # settings would open a confirm dialog.
+    & $mine 'WindConfig' | Stop-Process -Force -ErrorAction SilentlyContinue
+    $ev = $null
+    if ([System.Threading.EventWaitHandle]::TryOpenExisting('Local\Wind_QuitRequest', [ref]$ev)) {
+        try { [void]$ev.Set() } finally { $ev.Dispose() }
+    }
+    foreach ($w in @(@{ Name = 'Wind'; Ms = 5000 }, @{ Name = 'WindTray'; Ms = 2000 })) {
+        foreach ($p in (& $mine $w.Name)) {
+            if (-not $p.WaitForExit($w.Ms)) {
+                Write-Output "$($w.Name) (pid $($p.Id)) did not exit; stopping it."
+                Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+    Start-Sleep -Milliseconds 300
+}
+
 Start-Transcript -Path $log -Force
 try {
     $root = Split-Path -Parent $PSScriptRoot
@@ -15,9 +42,8 @@ try {
     $traySrc = "$root\build\WindTray.exe"   # built by build.bat uiaccess; plain manifest, NO uiAccess (#291)
     $uiSrc = "$root\ui\dist"
 
-    Write-Output "=== 0a. stop any running Wind / WindConfig (dev or deployed) so the exes are not locked ==="
-    Get-Process Wind,WindTray,WindConfig -ErrorAction SilentlyContinue | Stop-Process -Force
-    Start-Sleep -Milliseconds 400
+    Write-Output "=== 0a. stop this session's Wind / WindConfig (dev or deployed) so the exes are not locked ==="
+    Stop-WindHere
 
     Write-Output "=== 0b. build the UIAccess variant (uiAccess=true manifest) ==="
     & cmd /c "`"$root\build.bat`" uiaccess"
@@ -56,15 +82,19 @@ try {
     }
 
     Write-Output "=== 2. trust it (LocalMachine Root + TrustedPublisher, if not already) ==="
-    $cer = "$env:TEMP\winddev.cer"
-    Export-Certificate -Cert $cert -FilePath $cer | Out-Null
+    # Straight into the stores, with no .cer round trip: a file in %TEMP% is writable by every
+    # unelevated process of this user, which could swap its own root in between export and import.
+    # Only the public part goes in (no private key in Root or TrustedPublisher).
+    $public = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($cert.RawData)
     foreach ($store in 'Root','TrustedPublisher') {
         $present = Get-ChildItem "Cert:\LocalMachine\$store" |
             Where-Object { $_.Thumbprint -eq $cert.Thumbprint }
         if ($present) {
             Write-Output "$store : already trusted"
         } else {
-            Import-Certificate -FilePath $cer -CertStoreLocation "Cert:\LocalMachine\$store" | Out-Null
+            $st = [System.Security.Cryptography.X509Certificates.X509Store]::new($store, 'LocalMachine')
+            $st.Open('ReadWrite')
+            try { $st.Add($public) } finally { $st.Close() }
             Write-Output "$store : imported"
         }
     }
@@ -82,8 +112,7 @@ try {
     Write-Output "WindTray.exe sign status=$($sigTray.Status)"
 
     Write-Output "=== 4. deploy Wind.exe, WindTray.exe, WindConfig.exe and ui\dist to C:\Program Files\Wind ==="
-    Get-Process Wind,WindTray,WindConfig -ErrorAction SilentlyContinue | Stop-Process -Force
-    Start-Sleep -Milliseconds 300
+    Stop-WindHere
     $dst = "C:\Program Files\Wind"
     New-Item -ItemType Directory -Force $dst | Out-Null
     Copy-Item $src "$dst\Wind.exe" -Force

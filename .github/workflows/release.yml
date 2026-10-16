@@ -19,18 +19,23 @@ name: release
 on:
   push:
     branches: [ main ]
-    # Docs cannot change the installer, so they do not need to republish it.
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - '.github/ISSUE_TEMPLATE/**'
-      # Licence text cannot change the binary, and republishing would hand the current
-      # release a new asset hash for no reason, resetting what little SmartScreen
-      # reputation the existing download has earned.
+    # Docs cannot change the installer, so they do not need to republish it: a republish gives
+    # the current release a new asset hash for nothing, resetting what little SmartScreen
+    # reputation the existing download has earned. A `paths` list rather than paths-ignore,
+    # because only it can take a file back after a broader pattern dropped it (later lines win).
+    paths:
+      - '**'
+      - '!**.md'
+      - '!docs/**'
+      - '!.github/ISSUE_TEMPLATE/**'
+      # Test harness only. It cannot change the shipped binary.
+      - '!tools/testenv/**'
+      # Text that ships IN the installer, so a change to it must republish: the licence it
+      # shows and installs (wind.nsi, LICENSE.txt), the notices it installs, and the release
+      # notes this workflow publishes with it.
       - 'LICENSE'
-      # Test harness only. It cannot change the shipped binary, and a republish would give
-      # the current release a new asset hash for nothing.
-      - 'tools/testenv/**'
+      - 'THIRD-PARTY-NOTICES.md'
+      - '.github/release-notes.md'
   workflow_dispatch:
 
 permissions:
