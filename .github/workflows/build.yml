@@ -15,27 +15,11 @@ jobs:
       - name: Build app (compile + link + manifest)
         shell: cmd
         run: build.bat
-      - name: Build and run unit tests
-        shell: cmd
-        run: build.bat test
-      # Everything release.yml builds must also break the PR, not main (review 2026-10-09 M7): the
-      # settings host and UI (build.bat config), the signed-variant compile (uiaccess) and the
-      # settings UI's Playwright suite. Node comes with the runner image, as in release.yml.
-      - name: Install UI dependencies
-        shell: cmd
-        working-directory: ui
-        run: npm ci
-      - name: Keybind rules, JS half (node --test)
-        shell: cmd
-        working-directory: ui
-        run: npm run test:rules
-      - name: Build settings host and UI (build/WindConfig.exe, ui/dist)
-        shell: cmd
-        run: build.bat config
-      - name: Build the UIAccess variant
-        shell: cmd
-        run: build.bat uiaccess
-      - name: UI tests (Playwright, headless)
-        shell: cmd
-        working-directory: ui
-        run: npx playwright install chromium && npx playwright test --reporter=line
+      # Everything release.yml builds must also break the PR, not main (review 2026-10-09 M7, and
+      # 2026-10-16: the installer itself). So the PR runs the same shared action release.yml and
+      # alpha.yml publish from: the unit tests, the keybind JS test, the Playwright UI suite and tools/release.ps1,
+      # which builds the UIAccess variant, the standard build, the settings host and UI, compiles
+      # the installer (makensis /WX) and runs tools/installer_check.ps1. The runner is
+      # administrator, so the silent install/uninstall round-trip runs too. Nothing is published.
+      - name: Build installer (shared with release.yml and alpha.yml)
+        uses: ./.github/actions/build-installer
