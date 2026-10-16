@@ -310,7 +310,10 @@ void TransformModel::hideSystemCursor(bool hide) {
 void TransformModel::edgeClipManage(bool wantActive) {
     RECT cur{};
     if (!GetClipCursor(&cur)) return;
-    const RECT inset{ mon_.x + 1, mon_.y + 1, mon_.x + mon_.w - 1, mon_.y + mon_.h - 1 };
+    // Left and top only: the contested pixel (shell edge zones, edge hooks) is the outermost column and
+    // row there. The right and bottom stay open so the pointer can slide off the screen as at 1x
+    // (owner, 2026-10-16: insetting them left part of the cursor showing at those edges).
+    const RECT inset{ mon_.x + 1, mon_.y + 1, mon_.x + mon_.w, mon_.y + mon_.h };
     if (!wantActive) {
         if (edgeClipActive_) {
             // Restore the snapshot unless someone else took the clip meanwhile (theirs wins).

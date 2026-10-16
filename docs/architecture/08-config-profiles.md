@@ -203,7 +203,7 @@ Every key works in the ini whether or not Settings shows it. Keys hot-reload unl
 | Keys | Meaning |
 |---|---|
 | `txSamplingMode` (0) | Transform sampling: 0 nearest, 1 smooth (Settings: Transform scaling, formerly "High resolution cursor", [05](05-transform-engine.md)) |
-| `edgeClip` (1, hot) | While a transform session is zoomed, clips the pointer 1 px inside the monitor so it cannot rest on the contested outermost pixel (cursor-shape flicker at the left/top edge). Side effect: in a native-cursor session the pointer cannot reach the last pixel row and column. A tighter existing clip (game confine, Inspect) always wins; 0 turns it off. Rationale: `Config::edgeClip` in `src/config/config.h`, mechanics in `TransformModel::edgeClipManage` |
+| `edgeClip` (1, hot) | While a transform session is zoomed, clips the pointer 1 px inside the monitor's left and top edges so it cannot rest on the contested outermost pixel (cursor-shape flicker there). The right and bottom stay open so the cursor can slide off the screen, as at 1x. A tighter existing clip (game confine, Inspect) always wins; 0 turns it off. Rationale: `Config::edgeClip` in `src/config/config.h`, mechanics in `TransformModel::edgeClipManage` |
 | `renderScaling` (1), `upscaleTiming` (0) | Render engine scaling: 0 nearest, 1 xBR, 2 NVIDIA Image Scaling (Settings: Render scaling, [04](04-render-engine.md)); `bilinear` is retired and only migrates (0 keeps nearest). `upscaleTiming=1` logs the filter's GPU time |
 | `sharpness`, `brightness`, `hdrTonemap` (1) | Render engine image |
 | `cursorConstantSize` (0), `cursorVisibility` (`auto`) | Render cursor size and when it is drawn |
@@ -233,7 +233,7 @@ failed to init.
 
 | Keys | Meaning |
 |---|---|
-| `edgeClip` (1) | While a transform session is zoomed, `ClipCursor` 1 px inside the monitor keeps the pointer off the contested outermost pixels (edge cursor-shape flicker); 0 lets the pointer reach the corner pixel. The trade-off is recorded at `Config::edgeClip` in `src/config/config.h` |
+| `edgeClip` (1) | While a transform session is zoomed, `ClipCursor` 1 px inside the monitor's left and top edges keeps the pointer off the contested outermost pixels (edge cursor-shape flicker); 0 lets the pointer reach the top-left corner pixel. The trade-off is recorded at `Config::edgeClip` in `src/config/config.h` |
 | `lockedBallistics` (1) | Locked games pan with the learned input-to-output gain (`GainLearner`); 0 pans with plain raw mickeys |
 | `smoothPan` (0, restart) | Hold the display composited while zoomed (a 1 px pin) so flip-model games keep DWM's pan path |
 | `fastPan` (1, restart) | Pan through the private `SetMagnificationDesktopMagnification` channel (finer than the public write) |
