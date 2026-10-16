@@ -993,7 +993,7 @@ void TransformModel::presentCursor(const MapResult& r, double level, const Prese
         sprite_->moveTo(r.clickDesktopX + mon_.x, r.clickDesktopY + mon_.y);
         lastSpriteX_ = INT_MIN;   // the legacy sprite's move dedupe must not skip its next move
         sprite_->keepOnTop();
-    } else if (!nativeSession_ && ex.realPointer && ex.drawCursor && level > 1.001) {
+    } else if (!nativeSession_ && ex.realPointer && ex.drawCursor && level > 1.0) {
         // SHELL INPUT PANEL in a Wind session (#283, #492). The emoji picker and its siblings are
         // composed by the shell above every window band, so the sprite goes under them; the real
         // pointer is the one thing drawn above. The cursor lens style makes DWM draw it magnified

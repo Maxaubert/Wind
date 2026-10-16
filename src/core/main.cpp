@@ -1997,7 +1997,7 @@ static PointerMap MapPointer(TickState& t, bool inspect, double lvl, double dt, 
     // A native session needs none of this: DWM draws its pointer above the panels and keeps it
     // centred, so the hand moves the pointer directly.
     const auto* tmPanel = freeCursor ? dynamic_cast<TransformModel*>(t.model) : nullptr;
-    const bool panel = tmPanel && !tmPanel->nativeSession() && lvl > 1.001 && g_track.shellPanelOpen();
+    const bool panel = tmPanel && !tmPanel->nativeSession() && lvl > 1.0 && g_track.shellPanelOpen();
     if (panel && !t.panelFreeze) {
         GetClipCursor(&t.panelSavedClip);
         t.panelX = cur.x; t.panelY = cur.y;
