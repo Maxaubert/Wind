@@ -13,6 +13,7 @@
   // listening and says why, on screen and to screen readers.
   import { checkKeyBind, checkClickBind, refusalText } from './keybindRules.js';
   import { MOD_BITS, vkName, BUTTON_NAMES, shortButtonName } from './bindNames.js';
+  import { onDestroy } from 'svelte';
   // row.modsOnly = the arrow-key pan row: only the modifiers are captured (modsKey is a virtual key the
   // owner translates into the four real binds); the arrow keys are fixed and drawn by the owner.
   // `onClear` (optional) replaces the right-click clear patch.
@@ -117,6 +118,8 @@
     onChange(clearPatch);
     armed = true;
   }
+  // Leaving onboarding while armed must put the old binding back.
+  onDestroy(() => { if (armed) cancel(); });
   function cancel() {
     if (preCapture) onChange(preCapture);
     armed = false; preCapture = null; refusal = '';
@@ -176,10 +179,17 @@
     if (!btn) return;
     const mods = eventMods(e);
     if (btn === 4 && mods === 0) return;        // a plain right-click clears the row (contextmenu)
-    e.preventDefault();
-    if (btn === 4) skipContextMenu = true;
     const what = [modsName(mods), BUTTON_NAMES[btn]].filter(Boolean).join('+');
     const verdict = checkClickBind(btn, mods);
+    // A refused press on the armed keycap stays armed and says why. Anywhere else (Next, the other
+    // row) it is the user leaving: cancel and let it through, since preventDefault would also keep
+    // the focus and the blur that cancels would never come.
+    if (verdict !== 'ok' && !(e.target instanceof Element && e.target.closest('button') === document.activeElement)) {
+      cancel();
+      return;
+    }
+    e.preventDefault();
+    if (btn === 4) skipContextMenu = true;
     if (verdict !== 'ok') { refuse(verdict, what); return; }
     const patch = { [row.buttonKey]: String(btn), [row.vkKey]: '0' };
     if (row.modsKey) patch[row.modsKey] = '0';

@@ -322,6 +322,48 @@ test('Hotkeys: click a binding to record it again; Escape puts the old one back'
   await expect(boxes(page, '__zoomIn')).toHaveText(['Mouse 5', 'PageUp']);
 });
 
+test('Hotkeys: Ctrl+Q and Ctrl+F while recording bind the key, not the page shortcut (#495)', async ({ page }) => {
+  await page.goto('/');
+  await key(page, '__cursorLock').locator('.kchg').click();
+  await page.keyboard.press('Control+q');
+  expect(await persisted(page, 'cursorLockVk')).toBe('81');
+  expect(await persisted(page, 'cursorLockMods')).toBe('1');
+  expect((await sent(page, 'window')).filter((m) => m.action === 'quitWind')).toHaveLength(0);
+  await key(page, '__cursorLock').locator('.kchg').click();
+  await page.keyboard.press('Control+f');
+  expect(await persisted(page, 'cursorLockVk')).toBe('70');
+  await expect(page.locator('.side .search input')).not.toBeFocused();
+  await page.keyboard.press('Control+f');   // not recording any more: the shortcut is back
+  await expect(page.locator('.side .search input')).toBeFocused();
+});
+
+test('Hotkeys: clicking away from a recording zoom box puts the old binding back (#495)', async ({ page }) => {
+  await page.goto('/');
+  const zin = key(page, '__zoomIn').locator('.kchg').first();   // Mouse 5
+  await zin.click();
+  expect(await persisted(page, 'zoomInButton')).toBe('0');
+  await key(page, '__zoomOut').locator('.kchg').first().click();   // a plain click elsewhere is leaving
+  expect(await persisted(page, 'zoomInButton')).toBe('2');
+  await expect(key(page, '__zoomIn').locator('.kc.live')).toHaveCount(0);
+  await expect(page.locator('.kc.live')).toHaveCount(1);   // only Zoom out records
+  await page.keyboard.press('Escape');
+  await zin.click();
+  await go(page, 'zoom');   // the page unmounts while recording
+  expect(await persisted(page, 'zoomInButton')).toBe('2');
+  await go(page, 'hotkeys');
+  await expect(boxes(page, '__zoomIn')).toHaveText(['Mouse 5', 'PageUp']);
+});
+
+test('Hotkeys: a refused click on the recording box itself stays armed and says why', async ({ page }) => {
+  await page.goto('/');
+  const zin = key(page, '__zoomIn').locator('.kchg').first();
+  await zin.click();
+  await zin.click();   // a plain left click needs a modifier
+  await expect(zin).toHaveAccessibleName(/Recording/);
+  await expect(key(page, '__zoomIn').locator('.refusal')).toBeVisible();
+  await page.keyboard.press('Escape');
+});
+
 test('Hotkeys: recording a key over a binding replaces it', async ({ page }) => {
   await page.goto('/');
   await key(page, '__cursorLock').locator('.kchg').click();
