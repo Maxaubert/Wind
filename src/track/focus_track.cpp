@@ -340,15 +340,15 @@ void FocusTracker::setActive(bool on, bool wantCaret, bool wantFocus, bool log) 
     if (t && on != was) PostThreadMessageW(t, kActiveMsg, on ? 1 : 0, 0);   // hooks + poll rate
     if (on && !was && t) PostThreadMessageW(t, kWakeMsg, 0, 0);
 }
-void FocusTracker::publish(TrackKind k, double l, double t, double r, double b, const char* src, unsigned gen) {
+bool FocusTracker::publish(TrackKind k, double l, double t, double r, double b, const char* src, bool missed) {
     {
         std::lock_guard<std::mutex> g(mu_);
-        if (TrackPublishIsRepeat(snap_, pubGen_, k, l, t, r, b, gen)) return;  // unchanged, same focus
+        if (TrackPublishIsRepeat(snap_, k, l, t, r, b, missed)) return false;  // unchanged
         snap_ = { k, ++seq_, l, t, r, b };
-        pubGen_ = gen;
     }
     if (log_) wind::Log(wind::LogLevel::Info, "track", "%s via %s: %.0f,%.0f %.0fx%.0f",
                         k == TrackKind::Caret ? "caret" : "focus", src, l, t, r - l, b - t);
+    return true;
 }
 
 // FocusTracker::run's state and steps, all on the tracker thread (#477: split out of run()). The
@@ -363,7 +363,15 @@ struct FocusRun {
     std::atomic<bool>& wantCaret_;
     std::atomic<bool>& wantFocus_;
     std::atomic<bool>& log_;
-    void publish(TrackKind k, double l, double t, double r, double b, const char* src) { tracker.publish(k, l, t, r, b, src, focusGen); }
+    // A focus change since the last publish resolved to nothing published (a skipped container, an
+    // unanswered lookup), or the tracker was (re)activated: the next report is published even at
+    // the last snapshot's rect (TrackPublishIsRepeat).
+    bool missedFocus = true;
+    bool publish(TrackKind k, double l, double t, double r, double b, const char* src) {
+        const bool done = tracker.publish(k, l, t, r, b, src, missedFocus);
+        if (done) missedFocus = false;
+        return done;
+    }
 
     void setUp();                // COM, UIA and its timeouts, the focus lookup, the event hooks
     void messageLoop(MSG& m);    // wakes, coalescing and the backstop poll until WM_QUIT
@@ -624,6 +632,7 @@ struct FocusRun {
         const bool focusUnanswered = focusChanged && wantFocus_.load() && !win32Only && !java &&
                                      focusLookup && !el;
         if (el && FAILED(el->get_CurrentBoundingRectangle(&b))) b = RECT{};
+        bool focusPublished = false;   // this focus change reached publish() (a same-rect repeat counts)
         // 1. A focus change: follow the focused control (if wanted). Its caret becomes the baseline.
         //    A container-sized focus (the page after leaving a text box, a pane, the window) is not
         //    something the user moved to, so it is skipped (issue #278).
@@ -636,8 +645,10 @@ struct FocusRun {
                                            b.left, b.top, b.right - b.left, b.bottom - b.top);
             } else {
                 publish(TrackKind::Focus, b.left, b.top, b.right, b.bottom, "uia-focus");
+                focusPublished = true;
             }
         }
+        if (focusChanged && wantFocus_.load() && !focusPublished) missedFocus = true;
         followCaret(el, b, fg, java, fromPoll, rs0, rs1);
         if (el) el->Release();
         return focusUnanswered;
@@ -766,6 +777,7 @@ void FocusRun::messageLoop(MSG& m) {
                 pendingCaret = true;
                 ++focusGen;          // (re)activation: the caret found now is a baseline too
                 baseKey = wind::FocusKey{};   // never a "repeat" of a focus from before the zoom-in
+                missedFocus = true;           // nor a repeat of a report from before it
             } else if (m.wParam == JavaBridge::kJavaFocus) {
                 pendingFocus = true; javaDirty = true; ++javaEvents;
                 ++focusGen;          // a Java focus change: its caret is a baseline, like any other

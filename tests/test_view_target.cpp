@@ -10,14 +10,14 @@ static TrackSnapshot Snap(TrackKind k, unsigned seq) {
     TrackSnapshot s; s.kind = k; s.seq = seq; s.l = 100; s.t = 100; s.r = 102; s.b = 120; return s;
 }
 
-TEST_CASE("publish dedupe holds within one focus generation only (review 2026-10-16 #30)") {
+TEST_CASE("publish dedupe is bypassed only after an unpublished focus change (review 2026-10-16 #30)") {
     TrackSnapshot last; last.kind = TrackKind::Focus; last.seq = 4; last.l = 10; last.t = 20; last.r = 110; last.b = 40;
-    CHECK(TrackPublishIsRepeat(last, 7, TrackKind::Focus, 10, 20, 110, 40, 7));        // same focus, same rect
-    CHECK_FALSE(TrackPublishIsRepeat(last, 7, TrackKind::Focus, 10, 20, 110, 40, 8));  // focus came back: publish
-    CHECK_FALSE(TrackPublishIsRepeat(last, 7, TrackKind::Caret, 10, 20, 110, 40, 7));  // another kind
-    CHECK_FALSE(TrackPublishIsRepeat(last, 7, TrackKind::Focus, 11, 20, 110, 40, 7));  // moved
-    TrackSnapshot none;                                                                 // nothing published yet
-    CHECK_FALSE(TrackPublishIsRepeat(none, ~0u, TrackKind::Focus, 0, 0, 0, 0, 0));
+    CHECK(TrackPublishIsRepeat(last, TrackKind::Focus, 10, 20, 110, 40, false));        // repeat focus event, same control
+    CHECK_FALSE(TrackPublishIsRepeat(last, TrackKind::Focus, 10, 20, 110, 40, true));   // back after a skipped focus: publish
+    CHECK_FALSE(TrackPublishIsRepeat(last, TrackKind::Caret, 10, 20, 110, 40, false));  // another kind
+    CHECK_FALSE(TrackPublishIsRepeat(last, TrackKind::Focus, 11, 20, 110, 40, false));  // moved
+    TrackSnapshot none;                                                                  // nothing published yet
+    CHECK_FALSE(TrackPublishIsRepeat(none, TrackKind::Focus, 1, 1, 2, 2, false));
 }
 
 TEST_CASE("a new caret event takes the view; a repeat of the same seq does not re-trigger") {

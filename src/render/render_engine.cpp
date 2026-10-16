@@ -77,6 +77,7 @@ struct RenderEngine::State {
     DuplRetry duplRetry;         // paces re-creating a duplication that keeps failing (review 2026-10-16 #21)
     bool duplNoOutput = false;   // the last recreateDupl found no output for targetDevice on our adapter
     CropDebt cropDebt;           // a cropped copy left the cache outside the view stale (review 2026-10-16 #5)
+    bool quietRecreate = false;  // the next recreateDupl is a crop-debt refresh: no settle diagnostics
     LONGLONG primeQpc = 0;             // QPC at the last primeReveal() (evidence gate, issue #140)
     LONGLONG lastCopiedPresentQpc = 0; // LastPresentTime of the newest desktop frame we copied
     ComPtr<ID3D11Query> revealFence;   // event query: has the reveal frame's Present executed on the GPU?
@@ -264,8 +265,12 @@ bool RenderEngine::State::recreateDupl() {
         RLog("dwm restarted: overlay exclusions re-applied (affinity=0x%lx)", (unsigned long)aff);
     }
     dupl.Reset();
+    // A crop-debt refresh re-creates the duplication on every settle; its success diagnostics would
+    // repeat the session's first ones each time, so it logs nothing (refreshSdrWhite still runs).
+    const bool settle = quietRecreate;
+    quietRecreate = false;
     // A retry after a failure stays quiet until it succeeds (capture() logs the failures, paced).
-    const bool quiet = duplRetry.failures > 0;
+    const bool quiet = duplRetry.failures > 0 || settle;
     // Capture the target monitor's output (matched by device name). Only the legacy
     // single-monitor path (empty targetDevice) falls back to the first output: a NAMED monitor
     // that is not on our adapter (multi-GPU) fails, as retarget() does, rather than silently
@@ -299,7 +304,7 @@ bool RenderEngine::State::recreateDupl() {
             DXGI_FORMAT fmts[] = { DXGI_FORMAT_R16G16B16A16_FLOAT };
             hr = output5->DuplicateOutput1(device.Get(), 0, ARRAYSIZE(fmts), fmts, dupl.ReleaseAndGetAddressOf());
             output5->Release();
-            if (SUCCEEDED(hr) && dupl) { capFp16 = true; RLog("recreateDupl: DuplicateOutput1 FP16 OK"); }
+            if (SUCCEEDED(hr) && dupl) { capFp16 = true; if (!settle) RLog("recreateDupl: DuplicateOutput1 FP16 OK"); }
             else if (!quiet) RLog("recreateDupl: DuplicateOutput1 FP16 failed hr=0x%08lX", (unsigned long)hr);
         }
     }
@@ -307,7 +312,8 @@ bool RenderEngine::State::recreateDupl() {
         IDXGIOutput1* output1 = nullptr;
         output->QueryInterface(__uuidof(IDXGIOutput1), (void**)&output1);
         if (output1) { hr = output1->DuplicateOutput(device.Get(), dupl.ReleaseAndGetAddressOf()); output1->Release(); }
-        if (!quiet || SUCCEEDED(hr)) RLog("recreateDupl: DuplicateOutput hr=0x%08lX capFp16=0", (unsigned long)hr);
+        if (!quiet || (SUCCEEDED(hr) && !settle))
+            RLog("recreateDupl: DuplicateOutput hr=0x%08lX capFp16=0", (unsigned long)hr);
     }
     waitOutput = output;          // keep a ref for waitVBlank (released with the device set)
     SafeRelease(output);
@@ -324,7 +330,7 @@ bool RenderEngine::State::recreateDupl() {
         // The duplication is rebuilt on every zoom-in (invalidateCapture) and on ACCESS_LOST, so
         // this is where a session picks up the current slider position before its first frame.
         if (capFp16) refreshSdrWhite();
-        RLog("recreateDupl: ddaModeFormat=%u colorSpace=%d isHdr=%d wantTonemap=%d rotation=%d%s",
+        if (!settle) RLog("recreateDupl: ddaModeFormat=%u colorSpace=%d isHdr=%d wantTonemap=%d rotation=%d%s",
              ddaFormat, outColorSpace, (int)isHdr, (int)wantHdrTonemap, (int)dd.Rotation,
              rotated ? " (ROTATED - capture unsupported, image may be wrong)" : "");
     }
@@ -462,6 +468,20 @@ bool RenderEngine::State::capture(const RECT& view, bool crop) {
         return (double)(qn.QuadPart - from.QuadPart) * 1000.0 / (double)qf.QuadPart;
     };
     bool gotThisCall = false;
+    // A settled screen with crop debt owed: ask for a fresh grab (the next capture re-creates the
+    // duplication, whose first frame is the whole current desktop). The cached copy stays on screen
+    // meanwhile; haveDesktop is kept so nothing goes black. Quiet means no desktop image change:
+    // a timeout, or a pointer-only frame (while panning DDA keeps returning those).
+    auto askCropRefresh = [&]() {
+        if (fresh) return false;
+        const unsigned long long nowMs = GetTickCount64();
+        if (!cropDebt.refreshDue(nowMs, 250)) return false;
+        cropDebt.refreshAsked(nowMs);
+        dupl.Reset();
+        quietRecreate = true;
+        freshCapture = true;
+        return true;
+    };
 
     for (int a = 0; a < firstAttempts; ++a) {
         if (fresh && !FreshDrainContinue(gotThisCall, msSince(q0), gotThisCall ? msSince(qFirst) : 0.0))
@@ -472,22 +492,11 @@ bool RenderEngine::State::capture(const RECT& view, bool crop) {
         HRESULT hr = dupl->AcquireNextFrame(to, &fi, &res);
         if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
             SafeRelease(res);
-            // A settled screen with crop debt owed: ask for a fresh grab (the next capture re-creates
-            // the duplication, whose first frame is the whole current desktop). The cached copy
-            // stays on screen meanwhile; haveDesktop is kept so nothing goes black.
-            if (!fresh) {
-                const unsigned long long nowMs = GetTickCount64();
-                if (cropDebt.refreshDue(nowMs, 250)) {
-                    cropDebt.refreshAsked(nowMs);
-                    dupl.Reset();
-                    freshCapture = true;
-                    return haveDesktop;
-                }
-            }
+            if (askCropRefresh()) return haveDesktop;
             if (gotThisCall) break;
             continue;
         }
-        if (hr == DXGI_ERROR_ACCESS_LOST) { SafeRelease(res); dupl.Reset(); return gotThisCall || haveDesktop; }
+        if (hr == DXGI_ERROR_ACCESS_LOST) { SafeRelease(res); dupl.Reset(); quietRecreate = false; return gotThisCall || haveDesktop; }
         if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
             SafeRelease(res); deviceLost = true; RLog("capture: device lost hr=0x%08lX", (unsigned long)hr);
             return gotThisCall || haveDesktop;
@@ -499,7 +508,8 @@ bool RenderEngine::State::capture(const RECT& view, bool crop) {
         // LastPresentTime == 0 means only the pointer moved (no desktop image change). We ignore
         // the OS pointer (drawn from GetCursorInfo), so the cached copy is still valid - copy
         // nothing. This keeps a busy-pointer-but-static desktop from forcing any copy at all.
-        if (tex && fi.LastPresentTime.QuadPart != 0) {
+        const bool desktopChanged = tex && fi.LastPresentTime.QuadPart != 0;
+        if (desktopChanged) {
             // Match the copy texture to the captured format so the copy never mismatches (incl.
             // after a runtime HDR toggle changes the duplication format). The tonemap is gated on
             // capFp16, not on the format, so BGRA8 captures stay passthrough.
@@ -546,7 +556,10 @@ bool RenderEngine::State::capture(const RECT& view, bool crop) {
         SafeRelease(res);
         dupl->ReleaseFrame();
 
-        if (!fresh) return true;          // settled desktop: the single frame is enough
+        if (!fresh) {                     // settled desktop: the single frame is enough
+            if (!desktopChanged && askCropRefresh()) return haveDesktop;   // pointer-only = quiet
+            return true;
+        }
         // fresh: keep looping to drain to the latest frame (the short `to` breaks us out)
     }
     return gotThisCall || haveDesktop;   // no frame within budget; keep whatever we had
@@ -820,6 +833,7 @@ bool RenderEngine::State::buildDeviceResources() {
     // while, and capture() re-creates it lazily, paced by duplRetry. Failing here made a start during
     // a UAC prompt transform-only until Wind restarted, and a device rebuild loop every 0.5 s. Only
     // a target output missing from our adapter stays fatal: no retry can capture it.
+    quietRecreate = false;
     duplRetry.reset();
     if (!recreateDupl()) {
         if (duplNoOutput) { RLog("buildDeviceResources: recreateDupl failed (no output)"); return false; }
@@ -984,6 +998,7 @@ bool RenderEngine::revealFrameDone(double spinBudgetMs) {
 void RenderEngine::invalidateCapture() {
     if (!s_) return;
     s_->dupl.Reset();
+    s_->quietRecreate = false;
     s_->duplRetry.reset();   // a deliberate fresh start (zoom-in/out) tries at once
     s_->haveDesktop = false;
     s_->freshCapture = true;
@@ -1108,6 +1123,7 @@ bool RenderEngine::retarget(const MonitorTarget& m) {
     SetWindowPos(s_->hwnd, HWND_TOPMOST, px, m.y, m.w, m.h, SWP_NOACTIVATE);
     lstrcpynW(s_->targetDevice, m.device, 32);
     s_->dupl.Reset();
+    s_->quietRecreate = false;
     s_->duplRetry.reset();
     s_->haveDesktop = false;
     s_->freshCapture = true;

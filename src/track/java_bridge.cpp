@@ -175,6 +175,7 @@ static HMODULE LoadVerified(const std::wstring& path, bool log) {
     const std::wstring dir = cut == std::wstring::npos ? std::wstring() : path.substr(0, cut);
     std::vector<std::string> pending;    // dependency names still to look for in the folder
     std::set<std::string> seen;          // lower-case names already handled
+    size_t fromFolder = 0;               // dependencies actually opened from the bridge folder
     seen.insert("windowsaccessbridge-64.dll");
     // Signed, and its import table read: the names go on the pending list.
     auto verify = [&](const std::wstring& p, HANDLE h) {
@@ -200,10 +201,16 @@ static HMODULE LoadVerified(const std::wstring& path, bool log) {
         const std::string name = pending.back();
         pending.pop_back();
         if (!seen.insert(LowerAscii(name)).second) continue;
-        if (seen.size() > 64) { ok = false; break; }   // a dependency tree no bridge has
         if (IsApiSetName(name)) continue;
         const std::wstring d = dir + L"\\" + std::wstring(name.begin(), name.end());
         if (GetFileAttributesW(d.c_str()) == INVALID_FILE_ATTRIBUTES) continue;   // not from the folder
+        // Only files taken from the folder count: system and API-set names are free, so a real
+        // signed JBR/Temurin bridge (a handful of bundled DLLs) is never refused for its import list.
+        if (++fromFolder > 32) {
+            ok = false;
+            wind::Log(wind::LogLevel::Warn, "track", "java: %ls pulls over 32 DLLs from its folder; refused", path.c_str());
+            break;
+        }
         HANDLE h = hold(d);
         ok = h != INVALID_HANDLE_VALUE && verify(d, h);
         if (!ok) wind::Log(wind::LogLevel::Warn, "track", "java: %ls needs %ls from its folder, which is unsigned or unreadable",
