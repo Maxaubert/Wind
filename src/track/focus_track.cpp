@@ -340,11 +340,12 @@ void FocusTracker::setActive(bool on, bool wantCaret, bool wantFocus, bool log) 
     if (t && on != was) PostThreadMessageW(t, kActiveMsg, on ? 1 : 0, 0);   // hooks + poll rate
     if (on && !was && t) PostThreadMessageW(t, kWakeMsg, 0, 0);
 }
-void FocusTracker::publish(TrackKind k, double l, double t, double r, double b, const char* src) {
+void FocusTracker::publish(TrackKind k, double l, double t, double r, double b, const char* src, unsigned gen) {
     {
         std::lock_guard<std::mutex> g(mu_);
-        if (snap_.kind == k && snap_.l == l && snap_.t == t && snap_.r == r && snap_.b == b) return;  // unchanged
+        if (TrackPublishIsRepeat(snap_, pubGen_, k, l, t, r, b, gen)) return;  // unchanged, same focus
         snap_ = { k, ++seq_, l, t, r, b };
+        pubGen_ = gen;
     }
     if (log_) wind::Log(wind::LogLevel::Info, "track", "%s via %s: %.0f,%.0f %.0fx%.0f",
                         k == TrackKind::Caret ? "caret" : "focus", src, l, t, r - l, b - t);
@@ -362,7 +363,7 @@ struct FocusRun {
     std::atomic<bool>& wantCaret_;
     std::atomic<bool>& wantFocus_;
     std::atomic<bool>& log_;
-    void publish(TrackKind k, double l, double t, double r, double b, const char* src) { tracker.publish(k, l, t, r, b, src); }
+    void publish(TrackKind k, double l, double t, double r, double b, const char* src) { tracker.publish(k, l, t, r, b, src, focusGen); }
 
     void setUp();                // COM, UIA and its timeouts, the focus lookup, the event hooks
     void messageLoop(MSG& m);    // wakes, coalescing and the backstop poll until WM_QUIT

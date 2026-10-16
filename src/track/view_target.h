@@ -21,6 +21,15 @@ namespace wind {
 enum class ViewOwner { Mouse, Caret, Focus, Keys };   // Keys: keyboard panning (#287)
 enum class TrackKind { None = 0, Caret = 1, Focus = 2 };
 struct TrackSnapshot { TrackKind kind = TrackKind::None; unsigned seq = 0; double l = 0, t = 0, r = 0, b = 0; };
+// The tracker publishes a report only when it differs from the last one, but only WITHIN one focus
+// generation (gen: the tracker's focusGen when the report was made). A report from a new focus is
+// always published, even at the same rect: returning to the same text box after a focus that was
+// never published (a skipped container, a timed-out lookup) must still reach StepViewOwner, which
+// acts on a seq change only (review 2026-10-16 #30).
+inline bool TrackPublishIsRepeat(const TrackSnapshot& last, unsigned lastGen, TrackKind k,
+                                 double l, double t, double r, double b, unsigned gen) {
+    return lastGen == gen && last.kind == k && last.l == l && last.t == t && last.r == r && last.b == b;
+}
 struct ViewOwnerState {
     ViewOwner owner = ViewOwner::Mouse;
     unsigned lastSeq = 0;
