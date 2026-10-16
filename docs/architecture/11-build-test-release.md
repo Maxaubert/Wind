@@ -87,11 +87,12 @@ headlessly, so the unit tests are the only verification loop that runs everywher
 the host's messages and records them in `window.__msgs`. When you add a bridge message to
 `HandleWebMessage`, extend the mocks of the specs that use it in the same change. Details in [09](09-settings-ui.md).
 
-**CI** (`.github/workflows/build.yml`, on pull requests and pushes to `main`) builds the app and
-runs the doctest suite, the JS node tests (`npm run test:rules`: keybind rules, config defaults and
-global keys) and the Playwright UI suite. Run the Playwright suite locally too when anything under
-`ui/` changes. The release and alpha workflows run the same gates before they publish (see Release
-automation).
+**CI** (`.github/workflows/build.yml`, on pull requests and pushes to `main`) builds the app, then
+runs the same `.github/actions/build-installer` the release and alpha workflows publish from: the
+doctest suite, the JS node tests (`npm run test:rules`: keybind rules, config defaults and global
+keys), the Playwright UI suite and `tools/release.ps1`, so an NSIS compile error or a failing
+`installer_check.ps1` breaks the PR, not main. Nothing is published from it. Run the Playwright suite
+locally too when anything under `ui/` changes.
 
 ## Local UIAccess deploy
 
@@ -100,7 +101,8 @@ elevated windows and the opt-in band-16 overlay. Windows grants it only to a bin
 locally trusted certificate and run from a secure location, in practice `C:\Program Files\Wind`.
 Without it, Wind reads `TokenUIAccess` at init and Auto keeps the desktop on Render.
 
-`tools/uiaccess_setup.ps1` (elevated) stops Wind, builds `uiaccess` and `config`, creates or reuses
+`tools/uiaccess_setup.ps1` (elevated) stops this session's Wind the way setup does (quit event,
+wait, kill only as a fallback; another session's Wind is left alone), builds `uiaccess` and `config`, creates or reuses
 a self-signed "Wind Dev Test Cert", trusts it, signs all three exes in `build\` (unsigned fresh
 builds trip a Defender false positive) and copies them with `ui\dist` to Program Files. It does not deploy an
 ini. It logs to `tools\uiaccess_setup.log`; a good deploy ends with `status=Valid` and `DONE`.
@@ -126,11 +128,15 @@ install-location chooser, because UIAccess is granted only in a secure location.
 3. **Stop Wind by asking, not killing.** `WIND_QUIT_RUNNING` sets `Local\Wind_QuitRequest` and waits
    for the process to exit; only a clean exit restores the OS cursor and releases `ClipCursor`. The
    single-instance mutex frees ~3 ms into teardown, long before the process is gone, so the macro
-   polls for the process before falling back to `taskkill`.
+   polls for the process before falling back to `taskkill`. That quit reaches this session only; a
+   Wind in another user's session would keep the exes locked, so the macro then asks to force-close
+   it (a silent run does) and stops setup without changes on a No.
 
 `tools/installer_check.ps1` checks what a compile cannot: every `File` source exists, every
 hit-tested rectangle was generated into `over.nsh`, and a silent install/uninstall round-trips
-(needs elevation; skipped from a normal shell, runs in CI).
+(needs elevation; skipped from a normal shell, runs in CI). It installs into
+`%ProgramFiles%\Wind-installer-check` (admin-only, because setup runs a staged script there as admin)
+and saves and restores a real install's registry values, signing roots and all-users shortcuts.
 
 ## Release automation
 
@@ -141,7 +147,7 @@ mechanical.
 
 ```mermaid
 flowchart TD
-    P[push to main] --> F{only docs, LICENSE or tools/testenv?}
+    P[push to main] --> F{only docs or tools/testenv?}
     F -- yes --> S[skip]
     F -- no --> V[read version from src/version.h]
     V --> T[build.bat test]
@@ -159,7 +165,8 @@ flowchart TD
 - Each release carries the installer twice: `Wind-Setup-x64-<ver>.exe` and the stable name
   `Wind-Setup-x64.exe`, so `releases/latest/download/Wind-Setup-x64.exe` always serves the newest.
 - Release notes come from `.github/release-notes.md`; the workflow fills `__VERSION__`,
-  `__SHA256__` and `__COMMIT__`.
+  `__SHA256__` and `__COMMIT__`. The trigger skips `*.md`, `docs/**` and `tools/testenv/**`, but takes
+  back what ships with the installer: `LICENSE`, `THIRD-PARTY-NOTICES.md` and the release notes.
 - Tests gate the build: the doctest suite, the JS keybind-rule test and the Playwright UI suite
   must all pass before anything is published. A concurrency group serializes runs.
 - The build itself (version read, test gates, `tools/release.ps1`) is the composite action
@@ -174,6 +181,9 @@ environment-driven: `WIND_SIGN_THUMBPRINT`, or `WIND_SIGN_PFX` plus `WIND_SIGN_P
 - Without one (CI today) it packs both variants: the ordinary build and the UIAccess build as
   `build\WindUA.exe` (the `uiaccess` build's `build\Wind.exe`, renamed). Setup signs `WindUA.exe` on each PC with a per-machine certificate whose private key
   it deletes at once (`installer/local-sign.ps1`). If that fails, setup keeps the ordinary build, says signing failed and does not start Wind: without UIAccess, Wind refuses to start ("Wind can't start", `src/core/uiaccess_gate.h`).
+  `WindUA.exe` is never left stale: every `Wind.exe` build deletes it (`build.bat :core_exe`) except
+  the one `release.ps1` makes from the same tree (`WIND_KEEP_UA=1`), and a certificate run deletes it
+  even with `-SkipBuild`.
 - **Never put the self-signed dev certificate in CI**: it is trusted by nobody and looks worse than
   no signature.
 
