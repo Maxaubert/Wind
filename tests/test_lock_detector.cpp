@@ -1,6 +1,19 @@
 #include "doctest.h"
 #include "lock_detector.h"
 
+TEST_CASE("SavedClipWorthRestoring: only a real confinement is given back after Inspect") {
+    using wind::SavedClipWorthRestoring;
+    // No clip: GetClipCursor reports the whole virtual screen.
+    CHECK_FALSE(SavedClipWorthRestoring(0, 0, 3840, 1080, 0, 0, 3840, 1080));
+    CHECK_FALSE(SavedClipWorthRestoring(-1920, 0, 1920, 1080, -1920, 0, 3840, 1080));
+    // A work-area clip (desktop minus the taskbar) and a windowed game's clip.
+    CHECK(SavedClipWorthRestoring(0, 0, 1920, 1032, 0, 0, 1920, 1080));
+    CHECK(SavedClipWorthRestoring(400, 300, 1200, 900, 0, 0, 1920, 1080));
+    // A 1px pin (another freeze) or an empty rect: nothing worth restoring.
+    CHECK_FALSE(SavedClipWorthRestoring(500, 500, 501, 501, 0, 0, 1920, 1080));
+    CHECK_FALSE(SavedClipWorthRestoring(0, 0, 0, 0, 0, 0, 1920, 1080));
+}
+
 using wind::LockDetector;
 
 // Mirrors the constants in lock_detector.cpp: kLockTicks=6, kFreeTicks=3, kRawActive=4, kCursorMoved=1.
