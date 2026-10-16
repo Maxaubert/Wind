@@ -39,8 +39,8 @@ MapResult CursorMapper::update(int dx, int dy, double level) {
     // source rect clamps against the desktop boundary so corners stay reachable.
     r.cursorScreenX = (cx_ - o.x) * level;
     r.cursorScreenY = (cy_ - o.y) * level;
-    r.clickDesktopX = PointerPixel(cx_, sw_);   // never one past the monitor (review #494)
-    r.clickDesktopY = PointerPixel(cy_, sh_);
+    r.clickDesktopX = static_cast<int>(cx_ + 0.5);
+    r.clickDesktopY = static_cast<int>(cy_ + 0.5);
     r.centerX = cx_;   // un-rounded, for the transform model's fixed-point anchor
     r.centerY = cy_;
     return r;
