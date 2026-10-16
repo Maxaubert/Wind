@@ -4,6 +4,37 @@
 using wind::PickSpriteLayer;
 using wind::SpriteLayer;
 
+TEST_CASE("sprite shape fit: small shapes keep their size on the base canvas") {
+    const auto f = wind::FitSpriteShape(32, 32, 0, 0);
+    CHECK(f.canvas == 64);
+    CHECK(f.drawW == 32); CHECK(f.drawH == 32);
+    CHECK(f.hotX == 0);   CHECK(f.hotY == 0);
+}
+
+TEST_CASE("sprite shape fit: a large pointer draws at its native size with its native hotspot") {
+    const auto f = wind::FitSpriteShape(96, 96, 48, 48);   // pointer size 5, centred I-beam hotspot
+    CHECK(f.canvas == 96);
+    CHECK(f.drawW == 96); CHECK(f.drawH == 96);
+    CHECK(f.hotX == 48);  CHECK(f.hotY == 48);
+    const auto g = wind::FitSpriteShape(256, 256, 10, 20);  // the largest shape that fits unscaled
+    CHECK(g.canvas == 256);
+    CHECK(g.drawW == 256); CHECK(g.hotX == 10); CHECK(g.hotY == 20);
+}
+
+TEST_CASE("sprite shape fit: over the cap, shape and hotspot scale together") {
+    const auto f = wind::FitSpriteShape(512, 512, 256, 100);
+    CHECK(f.canvas == 256);
+    CHECK(f.drawW == 256); CHECK(f.drawH == 256);
+    CHECK(f.hotX == 128);  CHECK(f.hotY == 50);
+}
+
+TEST_CASE("sprite shape fit: an unreadable size falls back to 32 px") {
+    const auto f = wind::FitSpriteShape(0, -1, 5, 5);
+    CHECK(f.canvas == 64);
+    CHECK(f.drawW == 32); CHECK(f.drawH == 32);
+    CHECK(f.hotX == 5);   CHECK(f.hotY == 5);
+}
+
 TEST_CASE("sprite layer: auto off or no band-16 window always means the low window") {
     CHECK(PickSpriteLayer(false, true, 0) == SpriteLayer::Low);
     CHECK(PickSpriteLayer(false, true, 17) == SpriteLayer::Low);

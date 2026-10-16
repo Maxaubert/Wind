@@ -305,6 +305,7 @@ struct TickState {
     bool   panelFreeze = false;    // #283/#492: a Wind session's real pointer is frozen and moved by Wind
     double panelX = 0, panelY = 0; // its desktop position (sub-pixel)
     RECT   panelSavedClip{};       // the clip to give back when the panel closes
+    RECT   inspectSavedClip{};     // the clip Inspect's 1px freeze replaced, given back at its exit
     wind::KeyPan keyPan;           // keyboard panning motion (#287)
     // Event-driven idle (#71): the loop slept before this tick (clamp the motion dt, keep the raw
     // one for wall-clock gates), and when the view was last active (the settle window).
@@ -1630,6 +1631,21 @@ static void EndPanelFreeze(TickState& t) {
     t.panelFreeze = false;
 }
 
+// Inspect exit: give back the clip its freeze replaced (review #494), as EndPanelFreeze does. A
+// work-area utility or a windowed game owned it, and dropping it to NULL lost that confinement.
+// Inspect re-asserts its pin every tick, so the clip here is ours; with nothing worth restoring
+// (no clip, or a pin) it stays released. Runs after the exit warp, which must reach the look
+// point: the restored clip may move the pointer back inside it, so the baseline is re-read.
+static void RestoreInspectClip(TickState& t) {
+    const RECT s = t.inspectSavedClip;
+    t.inspectSavedClip = RECT{};   // used once: a later exit must not re-apply a stale clip
+    const VirtualBounds vb = QueryVirtualBounds();
+    if (!wind::SavedClipWorthRestoring(s.left, s.top, s.right, s.bottom, vb.x, vb.y, vb.w, vb.h)) return;
+    ClipCursor(&s);
+    POINT p{};
+    if (GetCursorPos(&p)) t.lastSetVirtual = p;
+}
+
 // Inspect enter: freeze the real cursor, seed the look point, and decide game-inspect.
 // Zeroes this tick's raw motion so the first tick after entry pans by zero.
 static void EnterInspect(TickState& t, bool zoomed, int& rawDx, int& rawDy) {
@@ -1643,6 +1659,13 @@ static void EnterInspect(TickState& t, bool zoomed, int& rawDx, int& rawDy) {
                                 (int)(preClip.bottom - preClip.top), t.mon.w, t.mon.h) &&
         wind::PointerPinnedAtEdge(pt.x, pt.y, preClip.left, preClip.top,
                                   preClip.right, preClip.bottom);
+    // The clip to give back at the exit: the one beneath Wind's edge clip when that holds the
+    // pointer (a session clip the transform model manages itself), else the one found.
+    t.inspectSavedClip = preClip;
+    if (auto* tmClip = dynamic_cast<TransformModel*>(t.model)) {
+        RECT beneath{};
+        if (tmClip->clipBeneathEdgeClip(preClip, &beneath)) t.inspectSavedClip = beneath;
+    }
     t.frozenCursor = pt;
     t.clickReleaseTicks = 0;   // start frozen (clear any stale click-release window)
     // Zero the sub-pixel carry and this tick's raw motion so the first tick after entry
@@ -1693,8 +1716,8 @@ static void ExitInspect(TickState& t) {
     // position (which the transform model used to do, because it was forbidden from
     // placing the cursor) throws away the aim the user just spent the mode establishing.
     ClipCursor(nullptr);
-    POINT lp{ (int)(t.mapper.centerX() + 0.5) + t.mon.x,
-              (int)(t.mapper.centerY() + 0.5) + t.mon.y };
+    POINT lp{ wind::PointerPixel(t.mapper.centerX(), t.mon.w) + t.mon.x,
+              wind::PointerPixel(t.mapper.centerY(), t.mon.h) + t.mon.y };
     const bool transformTx = dynamic_cast<TransformModel*>(t.model) != nullptr;
     const bool warp = wind::InspectExitWarps(t.inspectLookMoved, transformTx);
     t.postInspectHold = wind::HoldWindViewAfterInspect(t.inspectLookMoved, transformTx);
@@ -1710,6 +1733,7 @@ static void ExitInspect(TickState& t) {
         SetCursorPos(lp.x + 1, lp.y);
         SetCursorPos(lp.x, lp.y);
     }
+    RestoreInspectClip(t);
 }
 
 // Active tick: the pan delta in one of three regimes (free, locked, Inspect), with the lock
@@ -1973,7 +1997,7 @@ static PointerMap MapPointer(TickState& t, bool inspect, double lvl, double dt, 
     // A native session needs none of this: DWM draws its pointer above the panels and keeps it
     // centred, so the hand moves the pointer directly.
     const auto* tmPanel = freeCursor ? dynamic_cast<TransformModel*>(t.model) : nullptr;
-    const bool panel = tmPanel && !tmPanel->nativeSession() && lvl > 1.001 && g_track.shellPanelOpen();
+    const bool panel = tmPanel && !tmPanel->nativeSession() && lvl > 1.0 && g_track.shellPanelOpen();
     if (panel && !t.panelFreeze) {
         GetClipCursor(&t.panelSavedClip);
         t.panelX = cur.x; t.panelY = cur.y;
@@ -2791,9 +2815,11 @@ static void TeardownSession(TickState& t) {
         // must not survive into the next activation.
         g_input.state().commitLeft.exchange(0);
         g_input.state().commitRight.exchange(0);
-        POINT lp{ (int)(t.mapper.centerX() + 0.5) + t.mon.x, (int)(t.mapper.centerY() + 0.5) + t.mon.y };
+        POINT lp{ wind::PointerPixel(t.mapper.centerX(), t.mon.w) + t.mon.x,
+                  wind::PointerPixel(t.mapper.centerY(), t.mon.h) + t.mon.y };
         SetCursorPos(lp.x, lp.y);                  // resume at the look point
         t.lastSetVirtual = lp;
+        RestoreInspectClip(t);
     }
     t.revealPending = 0;                          // a quick tap may zoom out before the deferred reveal
     g_tint.invalidate();                          // the engines put the scheme back: re-tint when idle
@@ -3049,7 +3075,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == WM_DISPLAYCHANGE) g_hdrOn.store(PrimaryHdrOn());   // colour space (#288); falls through
     // A pointer-scheme reload (the user changed scheme or size, or an engine healed it) leaves the
     // clean scheme in place: take fresh pristine copies; the next idle tick re-tints (#288).
-    if (msg == WM_SETTINGCHANGE && wp == SPI_SETCURSORS) g_tint.capture();
+    // The legacy sprite draws standard shapes from the blanker's copies, which must follow too.
+    if (msg == WM_SETTINGCHANGE && wp == SPI_SETCURSORS) {
+        g_tint.capture();
+        if (auto* tm = g_tick ? dynamic_cast<TransformModel*>(g_tick->mTransform) : nullptr)
+            tm->cursorSchemeChanged();
+    }
     if (msg == WM_HOTKEY && wp == kQuitHotkeyId) { PostQuitMessage(0); return 0; }
     if (msg == WM_HOTKEY && wp == kHideCursorHotkeyId) {
         if (g_tick) g_tick->cursorHidden = !g_tick->cursorHidden;
@@ -3695,6 +3726,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             // the post-recovery tick can't re-clip the cursor to the stale frozen pixel (honors the
             // documented "released on device-lost recovery" invariant; recovery returns to a clean 1x).
             ClipCursor(nullptr);
+            RestoreInspectClip(ts);   // the clip an Inspect freeze replaced, if any (no-op otherwise)
             if (ts.restAfterReveal) { ts.restAfterReveal->setActive(false); ts.restAfterReveal = nullptr; }
             if (ts.cursorLock.locked()) {
                 ts.cursorLock.reset(); ts.clickReleaseTicks = 0;

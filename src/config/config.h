@@ -290,8 +290,9 @@ struct Config {
     // pixel is contested by shell edge zones and third-party edge hooks. Two weld-side fixes
     // failed: an inset target alone cannot hold (the hand re-pins the pointer past the deduped
     // weld), and re-asserting the weld per tick fights the hand everywhere (field-rejected hard).
-    // So the OS does it instead: while a transform session is zoomed, a ClipCursor 1px INSIDE the
-    // monitor keeps the pointer off the contested pixels with ZERO writes. Snapshot-and-restore
+    // So the OS does it instead: while a transform session is zoomed, a ClipCursor 1px inside the
+    // monitor's LEFT and TOP edges keeps the pointer off the contested pixels with ZERO writes (right
+    // and bottom stay open, 2026-10-16, so the cursor can leave the screen there as at 1x). Snapshot-and-restore
     // (this rig has a permanent external work-area clip that a nullptr release would destroy),
     // intersected with whatever clip already exists, and never fighting a TIGHTER clip (a game
     // confine, Inspect's 1px freeze). 0 = off (hot).

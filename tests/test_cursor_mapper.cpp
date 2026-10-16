@@ -46,6 +46,33 @@ TEST_CASE("lens center clamps to the desktop bounds") {
     CHECK(m.centerY() == doctest::Approx(1080.0));
 }
 
+TEST_CASE("the click point stays on the monitor when the centre clamps to its far edge") {
+    CursorMapper m(1920, 1080);
+    m.reset(1920, 1080);
+    auto r = m.update(500, 500, 2.0);    // centre on w/h: the first pixel of the next monitor
+    CHECK(r.centerX == doctest::Approx(1920.0));   // the anchor keeps the un-rounded edge
+    CHECK(r.clickDesktopX == 1919);
+    CHECK(r.clickDesktopY == 1079);
+    m.reset(1919.6, 1079.6);             // rounds up onto w/h
+    r = m.update(0, 0, 2.0);
+    CHECK(r.clickDesktopX == 1919);
+    CHECK(r.clickDesktopY == 1079);
+    r = m.update(-5000, -5000, 2.0);
+    CHECK(r.clickDesktopX == 0);
+    CHECK(r.clickDesktopY == 0);
+}
+
+TEST_CASE("PointerPixel rounds and holds a centre to the monitor's pixels") {
+    using wind::PointerPixel;
+    CHECK(PointerPixel(10.4, 1920) == 10);
+    CHECK(PointerPixel(10.5, 1920) == 11);
+    CHECK(PointerPixel(1919.4, 1920) == 1919);
+    CHECK(PointerPixel(1919.5, 1920) == 1919);
+    CHECK(PointerPixel(1920.0, 1920) == 1919);
+    CHECK(PointerPixel(0.0, 1920) == 0);
+    CHECK(PointerPixel(-3.0, 1920) == 0);
+}
+
 TEST_CASE("update integrates the pixel delta directly; zoom level does NOT change desktop speed") {
     CursorMapper m(1920, 1080);
     m.reset(960, 540);

@@ -29,4 +29,25 @@ inline SpriteLayer PickSpriteLayer(bool autoEnabled, bool highAvailable, int for
     return SpriteLayer::High;
 }
 
+// The legacy sprite's canvas for a cursor shape of native size natW x natH with its hotspot
+// (review #494). Pointer sizes above 64 px are common for magnifier users (Mouse pointer size 4+,
+// high DPI), and clamping only the size drew them at 32 px with the native hotspot, so the shape
+// shrank and centred hotspots (I-beam, cross) sat away from the click point. The canvas grows to
+// the shape (never under baseSize, the crosshair's canvas); a shape over maxSize is scaled down
+// to fit with its hotspot scaled by the same ratio. An unreadable size falls back to 32 px.
+struct SpriteShapeFit {
+    int canvas;        // square canvas side (px)
+    int drawW, drawH;  // size to draw the shape at
+    int hotX, hotY;    // hotspot in drawn pixels
+};
+inline SpriteShapeFit FitSpriteShape(int natW, int natH, int hotX, int hotY,
+                                     int baseSize = 64, int maxSize = 256) {
+    if (natW <= 0) natW = 32;
+    if (natH <= 0) natH = 32;
+    const int big = natW > natH ? natW : natH;
+    if (big <= maxSize)
+        return { big > baseSize ? big : baseSize, natW, natH, hotX, hotY };
+    return { maxSize, natW * maxSize / big, natH * maxSize / big, hotX * maxSize / big, hotY * maxSize / big };
+}
+
 }  // namespace wind

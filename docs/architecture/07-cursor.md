@@ -130,7 +130,8 @@ slightly during zoom ramps, nearest keeps it pixelated and steady. Pure rules:
   at 1x (`idleTick`), so a zoom bound to a mouse button never leaves a still pointer invisible. The
   session-end reset of `ixPubLevel_` keeps a quick zoom back to the same level from skipping the
   publish nudge, and the hide-cursor hotkey's show-again transition nudges after the blanker
-  restore like the zoom-out does.
+  restore like the zoom-out does. A nudge steps to a pixel the clip allows (`PickNudgeStep`, #494):
+  at the edge clip's right column a +1 x step is clamped back onto the pointer, which is no event.
 - **Game-drawn cursor (#443, `gameCursorLagMs`, -1 = one display frame, 0 = off).** Some games
   hide the pointer and draw their own cursor at its position (Cyberpunk 2077 menus). That cursor
   reaches the screen about a display frame after the pointer moved, while DWM centring shows the
@@ -184,8 +185,11 @@ Settings > View > Mouse tracking picks Native (above) or Wind (#463), the transf
 was before the native cursor (#369), and the default since the owner chose it on 2026-10-14:
 Wind writes every view itself (no DWM centring, no cursor lens), hides the real pointer (blanker plus
 `MagShowSystemCursor`) and paints its shape into the sprite window (`CursorSprite::refreshShape`,
-from the blanker's copies of the standard cursors), placed at the lens point in desktop
-coordinates so DWM magnifies it with the content. At zoom-in the sprite is stood up on the pointer
+from the blanker's copies of the standard cursors, re-taken at the next idle tick after a pointer
+scheme or size change), placed at the lens point in desktop coordinates so DWM magnifies it with
+the content. Its canvas grows with the pointer up to 256 px, and a larger shape scales with its
+hotspot (`FitSpriteShape`, #494). The sprite shows at every level above 1x, since the cursor set is
+blanked from the first tick of the session. At zoom-in the sprite is stood up on the pointer
 before the blank (two `DwmFlush` passes) so the hand-off does not blink. The lock rule is the old
 one: a locked session stays locked with the pointer shown (`LockApplies` gets `nativeSession()`).
 Read at zoom-in, so a change applies to the next session. Shell input panels get the real pointer
@@ -198,7 +202,8 @@ Inspect and the hide-cursor hotkey (`cursorVisibility=never`) hide DWM's pointer
 session; the Inspect crosshair is then a window of Wind's.
 
 - **`CursorBlanker`** (`src/cursor/cursor_blanker.*`) swaps the 14 system cursors for transparent ones and
-  restores them by reloading the user's scheme (no cached originals). The constructor reloads it
+  restores them by reloading the user's scheme (the copies it keeps are only the Wind sprite's shape
+  source, re-taken by `recapture()` after a scheme change). The constructor reloads it
   first, so a previously killed Wind's blanks never outlive it. `MagShowSystemCursor(FALSE)` covers
   app-custom cursors. The swaps run in order on the `Wind cursor swaps` worker thread (#363): the restore is a full
   `SPI_SETCURSORS` scheme reload (8 ms median, up to 90 ms under load) and the blank 14
@@ -313,8 +318,11 @@ the mouse hook only swallows clicks.
   detector-only: a raw-input game may never clip or recentre the pointer (issue #158). Clicks are
   discarded, and foreground is handed back on every exit.
 - **Every exit releases the clip**: toggle-off, teardown to idle, device-lost recovery, `shutdown`,
-  the crash filter and the `atexit` restore. Exits warp the cursor to the look point and drain
-  pending click counts.
+  the crash filter and the `atexit` restore. Toggle-off, teardown and device-lost give back the
+  clip the freeze replaced when it confined something (a work-area utility, a windowed game;
+  `SavedClipWorthRestoring`, #494), as the shell-panel freeze does; Wind's own edge clip is never
+  saved, the clip beneath it is. Exits warp the cursor to the look point (held to the monitor's
+  last pixel, `PointerPixel`) and drain pending click counts.
 
 ## Tracking: caret, focus and mouse edge mode
 

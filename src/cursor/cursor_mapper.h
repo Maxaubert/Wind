@@ -9,6 +9,15 @@ struct MapResult {
     // SetCursorPos); kept separately so sub-pixel consumers never re-derive it from the rounded pair.
     double centerX, centerY;
 };
+// A lens-centre coordinate as a POINTER pixel on a monitor `n` px wide: rounded, then held to
+// [0, n-1]. The centre itself may sit on n (the transform anchor's right edge), but n is the first
+// column of the monitor to the right, so a weld, click or warp there leaves the session monitor.
+inline int PointerPixel(double c, int n) {
+    int p = static_cast<int>(c + 0.5);
+    if (p > n - 1) p = n - 1;
+    if (p < 0) p = 0;
+    return p;
+}
 // Pure centered-mode mapper. Integrates per-tick pixel deltas into a float lens center
 // (desktop px), so the world pans with sub-pixel precision while the cursor stays at
 // screen center - shifting toward an edge only when the view clamps at the desktop edge.

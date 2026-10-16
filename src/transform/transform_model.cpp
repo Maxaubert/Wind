@@ -57,7 +57,14 @@ static void NudgePointer() {
     if (NudgeBlocked()) { g_nudgeOwed.store(true, std::memory_order_relaxed); return; }
     g_nudgeOwed.store(false, std::memory_order_relaxed);
     POINT np;
-    if (GetCursorPos(&np)) { SetCursorPos(np.x + 1, np.y); SetCursorPos(np.x, np.y); }
+    RECT clip{};
+    if (!GetCursorPos(&np) || !GetClipCursor(&clip)) return;
+    // Step to a pixel the clip allows (review #494): at the edge clip's right column a +1 x step
+    // is clamped back onto the pointer, which is no cursor event at all.
+    const NudgeStep s = PickNudgeStep(np.x, np.y, clip.left, clip.top, clip.right, clip.bottom);
+    if (s.dx == 0 && s.dy == 0) return;
+    SetCursorPos(np.x + s.dx, np.y + s.dy);
+    SetCursorPos(np.x, np.y);
 }
 static void DeliverOwedNudge() {
     if (!NudgeDue(g_nudgeOwed.load(std::memory_order_relaxed), NudgeBlocked())) return;
@@ -303,7 +310,10 @@ void TransformModel::hideSystemCursor(bool hide) {
 void TransformModel::edgeClipManage(bool wantActive) {
     RECT cur{};
     if (!GetClipCursor(&cur)) return;
-    const RECT inset{ mon_.x + 1, mon_.y + 1, mon_.x + mon_.w - 1, mon_.y + mon_.h - 1 };
+    // Left and top only: the contested pixel (shell edge zones, edge hooks) is the outermost column and
+    // row there. The right and bottom stay open so the pointer can slide off the screen as at 1x
+    // (owner, 2026-10-16: insetting them left part of the cursor showing at those edges).
+    const RECT inset{ mon_.x + 1, mon_.y + 1, mon_.x + mon_.w, mon_.y + mon_.h };
     if (!wantActive) {
         if (edgeClipActive_) {
             // Restore the snapshot unless someone else took the clip meanwhile (theirs wins).
@@ -489,6 +499,13 @@ void TransformModel::setActive(bool active) {
 
 void TransformModel::idleTick() {
     DeliverOwedNudge();   // a nudge a click skipped at the zoom-out is still owed at 1x
+    // A pointer scheme or size change since the copies were taken (review #494): re-take them while
+    // the set is ours to read (not blanked), and make the sprite repaint from the new ones. One
+    // attempt per change, so a wedged blanker worker cannot stall every idle tick.
+    if (shapesStale_ && !active_ && !blanker_->blanked()) {
+        shapesStale_ = false;
+        if (blanker_->recapture()) sprite_->invalidateShape();
+    }
     // NATIVE CURSOR (issue #369): keep the context and the cursor lens alive at 1x instead of
     // releasing them. With the lens style OFF this costs nothing (measured: a pointer-toggling
     // full-screen app keeps Independent Flip, 0 spike frames), and it moves the one-time 60-125 ms
@@ -979,7 +996,7 @@ void TransformModel::presentCursor(const MapResult& r, double level, const Prese
         sprite_->moveTo(r.clickDesktopX + mon_.x, r.clickDesktopY + mon_.y);
         lastSpriteX_ = INT_MIN;   // the legacy sprite's move dedupe must not skip its next move
         sprite_->keepOnTop();
-    } else if (!nativeSession_ && ex.realPointer && ex.drawCursor && level > 1.001) {
+    } else if (!nativeSession_ && ex.realPointer && ex.drawCursor && level > 1.0) {
         // SHELL INPUT PANEL in a Wind session (#283, #492). The emoji picker and its siblings are
         // composed by the shell above every window band, so the sprite goes under them; the real
         // pointer is the one thing drawn above. The cursor lens style makes DWM draw it magnified
@@ -1010,12 +1027,22 @@ void TransformModel::presentCursor(const MapResult& r, double level, const Prese
         // same-position SetCursorPos is none; it is pinned by its 1px clip, so nudge the clip a
         // pixel and back (review #284). The weld above has already placed the pin this frame.
         if (repaint && haveLastClick_) {
-            const RECT off{ lastClickX_ + 1, lastClickY_, lastClickX_ + 2, lastClickY_ + 1 };
+            // The step stays on the virtual screen (review #494): ClipCursor clamps the rect to the
+            // screen, so a +1 x clip at the last column landed on the pin itself, which is no event.
+            const int vx = GetSystemMetrics(SM_XVIRTUALSCREEN), vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+            const NudgeStep s = PickNudgeStep(lastClickX_, lastClickY_, vx, vy,
+                                              vx + GetSystemMetrics(SM_CXVIRTUALSCREEN),
+                                              vy + GetSystemMetrics(SM_CYVIRTUALSCREEN));
+            const int ox = lastClickX_ + s.dx, oy = lastClickY_ + s.dy;
+            const RECT off{ ox, oy, ox + 1, oy + 1 };
             const RECT pin{ lastClickX_, lastClickY_, lastClickX_ + 1, lastClickY_ + 1 };
             ClipCursor(&off);
             ClipCursor(&pin);
         }
-    } else if (!nativeSession_ && ex.drawCursor && level > 1.001) {
+    } else if (!nativeSession_ && ex.drawCursor && level > 1.0) {
+        // Any level above 1x, not just above 1.001 (review #494): the session is active from the
+        // first tick above 1.0 with the cursor set blanked, and a zoom can settle just above 1.0, so
+        // a gap here left neither the sprite nor the real pointer on screen.
         endPanelPointer();   // a panel just closed: the sprite takes over again
         // LEGACY SPRITE SESSION (txNativeCursor=0, issue #463): the pre-#369 cursor. The real pointer
         // is hidden (blanker for standard shapes, MagShowSystemCursor for app-custom ones) and its

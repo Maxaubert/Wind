@@ -19,6 +19,14 @@ inline bool ClipRectConfines(int clipW, int clipH, int monW, int monH) {
     if (monW  <= 0 || monH  <= 0) return false;            // no monitor info: never claim a lock
     return clipW < monW * 9 / 10 || clipH < monH * 9 / 10;
 }
+// Inspect replaces whatever clip held the pointer with its 1px freeze. Is the clip it found
+// (left/top/right/bottom, right/bottom exclusive as GetClipCursor reports) worth giving back at
+// the exit (review #494)? Only a real confinement is: a rect inside the virtual screen (vx, vy,
+// vw, vh; no clip reads as the whole virtual screen) that is wider than a 1px pin.
+inline bool SavedClipWorthRestoring(int l, int t, int r, int b, int vx, int vy, int vw, int vh) {
+    if (r - l <= 1 || b - t <= 1) return false;        // empty, or a pin (nothing to give back)
+    return l > vx || t > vy || r < vx + vw || b < vy + vh;
+}
 // Decides whether the OS cursor is "locked" by a game (so the magnifier must pan from raw mouse
 // input rather than the OS cursor's own motion). Pure, with hysteresis so a single contrary tick
 // never flips the state - panning never flickers. Fed per-tick Win32 signals by main.cpp.
