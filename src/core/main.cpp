@@ -1487,13 +1487,20 @@ static void RetargetSessionMonitor(TickState& t, bool zoomed, bool inspect) {
     if (zoomed || inspect) {
         MonitorTarget nt = t.cfg.multiMonitor ? MonitorUnderCursor() : PrimaryMonitor();
         IMagnifierModel* rt = t.mRender ? t.mRender : t.model;
-        bool ok = SameMonitor(nt, t.mon) ? false : rt->retarget(nt);
-        const bool renderOk = ok;
+        // The transform engine magnifies the primary only (engine_pick.h): a transform-only
+        // process (rt is the transform) never moves a session to another monitor.
+        const bool ntPrimary = nt.x == 0 && nt.y == 0;
+        const bool rtIsRender = dynamic_cast<RenderModel*>(rt) != nullptr;
+        bool ok = SameMonitor(nt, t.mon) ? false
+                : (wind::MayRetargetSession(ntPrimary, rtIsRender) && rt->retarget(nt));
+        const bool renderOk = ok && rtIsRender;
         const bool hadTransformHalf = t.mTransform && t.mTransform != rt;
         // The transform half owns its own bounds and must follow even when the render
         // half refuses (retarget returns false across adapters, where the overlay cannot
-        // move but the transform is still valid on the new geometry).
-        if (!SameMonitor(nt, t.mon) && t.mTransform && t.mTransform != rt) {
+        // move but the transform is still valid on the new geometry), but only onto the
+        // primary: on any other monitor it would magnify the wrong region (review 2026-10-16 #11).
+        if (!SameMonitor(nt, t.mon) && t.mTransform && t.mTransform != rt &&
+            wind::MayRetargetSession(ntPrimary, renderOk)) {
             if (t.mTransform->retarget(nt)) ok = true;
         }
         // Hybrid with a render half that refused while the transform half took it: the
@@ -3741,7 +3748,13 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
                 // transform engine all ride RunTick): end the dead render session, hand the view
                 // to the transform engine at a clean 1x and keep ticking. Picks stay on transform
                 // while the device is lost (EnginePickInputs::renderLost); recovery below retries.
-                if (ts.prevLvl > 1.0) ts.model->setActive(false);   // parks the overlay; safe when lost
+                // Any active render session ends here, a 1x Inspect one included (gating on the
+                // level left its overlay up, frozen), and the next active tick starts a fresh
+                // transform session through EnterSession (a held zoom bind otherwise ramped on
+                // without the transform's enter: review 2026-10-16 #8). Teardown hides the overlay
+                // by layer alpha, which is safe while the device is lost.
+                if (ts.prevActive) TeardownSession(ts);
+                ts.prevActive = false; ts.prevInspect = false;
                 ts.model = ts.mTransform;
                 ts.prevLvl = 1.0; ts.zoom = ZoomController(1.0, ts.cfg.maxLevel);
             }

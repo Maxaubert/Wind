@@ -1,11 +1,14 @@
 #include "java_bridge.h"
 #include "java_bridge_util.h"
+#include "pe_imports.h"    // PeImportNames: the bridge DLL's folder-supplied dependencies
 #include "logging.h"
 #include <shellscalingapi.h>   // GetDpiForMonitor: Java caret user space to device px
 #pragma comment(lib, "shcore.lib")
 #include <softpub.h>
 #include <wintrust.h>
 #pragma comment(lib, "wintrust.lib")
+#include <cstdint>
+#include <set>
 #include <string>
 #include <vector>
 namespace wind {
@@ -126,28 +129,92 @@ static bool SignedFile(const std::wstring& path) {
     return r == ERROR_SUCCESS;
 }
 
+// The whole file behind an open handle (a bridge DLL and its runtime are well under 64 MB).
+static bool ReadHeldFile(HANDLE h, std::vector<uint8_t>& out) {
+    LARGE_INTEGER sz{};
+    if (!GetFileSizeEx(h, &sz) || sz.QuadPart <= 0 || sz.QuadPart > (64ll << 20)) return false;
+    out.resize((size_t)sz.QuadPart);
+    LARGE_INTEGER zero{};
+    if (!SetFilePointerEx(h, zero, nullptr, FILE_BEGIN)) return false;
+    DWORD got = 0;
+    return ReadFile(h, out.data(), (DWORD)out.size(), &got, nullptr) && got == out.size();
+}
+
+static std::string LowerAscii(const std::string& a) {
+    std::string o = a;
+    for (char& c : o) if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+    return o;
+}
+
+// System32 is writable by administrators only, and its DLLs are mostly catalog-signed (an embedded
+// signature check would refuse them), so a bridge there needs no dependency walk.
+static bool IsSystemDir(const std::wstring& dir) {
+    wchar_t sys[MAX_PATH];
+    const UINT n = GetSystemDirectoryW(sys, MAX_PATH);
+    return n > 0 && n < MAX_PATH && CompareStringOrdinal(dir.c_str(), -1, sys, -1, TRUE) == CSTR_EQUAL;
+}
+
 // Loads one candidate bridge DLL, safely. Wind is a UIAccess process, and the candidate's folder is
 // chosen by whatever process owns a window with a Java class name, which any program can register
 // (review #281). So: the DLL must carry a valid Authenticode signature (every real one does: JetBrains,
-// Oracle, Microsoft, Amazon, ...), its only non-system dependency (the MSVC runtime a bundled JRE ships
-// beside it) must be signed too, both files are held open against replacement while verified and
-// loaded, and dependencies resolve only from that folder and System32.
+// Oracle, Microsoft, Amazon, ...), and so must every DLL the loader would take from that folder: the
+// candidate is loaded with its folder on the search path, so each of its imports (and delay imports)
+// that also sits in the folder is checked, and that file's own imports in turn. A fixed list of the
+// MSVC runtime names missed a JDK 8 bridge's MSVCR100.dll (review 2026-10-16 #15). API sets resolve
+// from the system; a name with no file in the folder resolves from System32 or KnownDLLs. Every
+// checked file is held open against replacement while verified and loaded.
 static HMODULE LoadVerified(const std::wstring& path, bool log) {
     std::vector<HANDLE> held;
     auto hold = [&](const std::wstring& p) {
         HANDLE h = CreateFileW(p.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
         if (h != INVALID_HANDLE_VALUE) held.push_back(h);
-        return h != INVALID_HANDLE_VALUE;
+        return h;
     };
     auto release = [&] { for (HANDLE h : held) CloseHandle(h); };
-    if (!hold(path)) { release(); return nullptr; }
-    bool ok = SignedFile(path);
     const size_t cut = path.find_last_of(L"\\/");
     const std::wstring dir = cut == std::wstring::npos ? std::wstring() : path.substr(0, cut);
-    for (const wchar_t* dep : { L"vcruntime140.dll", L"vcruntime140_1.dll", L"msvcp140.dll", L"ucrtbase.dll" }) {
-        const std::wstring d = dir + L"\\" + dep;
-        if (ok && GetFileAttributesW(d.c_str()) != INVALID_FILE_ATTRIBUTES)
-            ok = hold(d) && SignedFile(d);
+    std::vector<std::string> pending;    // dependency names still to look for in the folder
+    std::set<std::string> seen;          // lower-case names already handled
+    size_t fromFolder = 0;               // dependencies actually opened from the bridge folder
+    seen.insert("windowsaccessbridge-64.dll");
+    // Signed, and its import table read: the names go on the pending list.
+    auto verify = [&](const std::wstring& p, HANDLE h) {
+        std::vector<uint8_t> bytes;
+        std::vector<std::string> names;
+        if (!SignedFile(p)) return false;
+        if (!ReadHeldFile(h, bytes) || !PeImportNames(bytes, names)) {
+            wind::Log(wind::LogLevel::Warn, "track", "java: cannot read the import table of %ls", p.c_str());
+            return false;
+        }
+        for (const std::string& n : names) pending.push_back(n);
+        return true;
+    };
+    HANDLE root = hold(path);
+    if (root == INVALID_HANDLE_VALUE) { release(); return nullptr; }
+    bool ok = verify(path, root);
+    // The runtime a bundled JRE ships beside the bridge stays checked even when it is reached only
+    // through an API set (ucrtbase) rather than imported by name.
+    for (const char* dep : { "vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll", "ucrtbase.dll" })
+        pending.push_back(dep);
+    if (IsSystemDir(dir)) pending.clear();
+    while (ok && !pending.empty()) {
+        const std::string name = pending.back();
+        pending.pop_back();
+        if (!seen.insert(LowerAscii(name)).second) continue;
+        if (IsApiSetName(name)) continue;
+        const std::wstring d = dir + L"\\" + std::wstring(name.begin(), name.end());
+        if (GetFileAttributesW(d.c_str()) == INVALID_FILE_ATTRIBUTES) continue;   // not from the folder
+        // Only files taken from the folder count: system and API-set names are free, so a real
+        // signed JBR/Temurin bridge (a handful of bundled DLLs) is never refused for its import list.
+        if (++fromFolder > 32) {
+            ok = false;
+            wind::Log(wind::LogLevel::Warn, "track", "java: %ls pulls over 32 DLLs from its folder; refused", path.c_str());
+            break;
+        }
+        HANDLE h = hold(d);
+        ok = h != INVALID_HANDLE_VALUE && verify(d, h);
+        if (!ok) wind::Log(wind::LogLevel::Warn, "track", "java: %ls needs %ls from its folder, which is unsigned or unreadable",
+                           path.c_str(), d.c_str());
     }
     // Any validly signed DLL passes the check above, and loading runs its DllMain. So look for the
     // bridge's entry points in a copy mapped WITHOUT running DllMain or resolving imports first; only
@@ -190,9 +257,17 @@ bool JavaBridge::ensure(HWND javaWindow, DWORD wakeTid, UINT wakeMsg, bool log) 
     };
     const std::wstring dir = ProcessDir(javaWindow);
     if (dir.empty()) { noteFail(); return false; }          // retry after the backoff
-    // A miss is remembered per app folder, never for the whole session: one Java app without a
-    // bridge DLL must not switch Java tracking off for IntelliJ later (review #281).
-    if (failedDirs_.count(dir)) { noteFail(); return false; }
+    // A miss is remembered per app folder, never for the whole process: one Java app without a
+    // bridge DLL must not switch Java tracking off for IntelliJ later (review #281), and the folder
+    // itself is tried again after its backoff (failedDirs_).
+    auto dirFail = failedDirs_.find(dir);
+    if (dirFail != failedDirs_.end() && now < dirFail->second.until) { noteFail(); return false; }
+    auto noteDirFail = [&] {
+        if (failedDirs_.size() > 64) failedDirs_.clear();
+        ProbeFail& f = failedDirs_[dir];
+        f.backoffMs = BackoffMs(f.backoffMs, 5000, 300000);
+        f.until = now + f.backoffMs;
+    };
     for (const std::wstring& c : JavaBridgeDllCandidates(dir)) {
         if (GetFileAttributesW(c.c_str()) == INVALID_FILE_ATTRIBUTES) continue;
         mod_ = LoadVerified(c, log);
@@ -207,7 +282,7 @@ bool JavaBridge::ensure(HWND javaWindow, DWORD wakeTid, UINT wakeMsg, bool log) 
         }
     }
     if (!mod_) {
-        failedDirs_.insert(dir);
+        noteDirFail();
         noteFail();
         wind::Log(wind::LogLevel::Info, "track", "java: no usable Access Bridge DLL near %ls", dir.c_str());
         return false;
@@ -225,7 +300,7 @@ bool JavaBridge::ensure(HWND javaWindow, DWORD wakeTid, UINT wakeMsg, bool log) 
         wind::Log(wind::LogLevel::Warn, "track", "java: bridge DLL is missing exports; skipped");
         FreeLibrary(mod_); mod_ = nullptr;
         s_isJava = nullptr; s_withFocus = nullptr; s_textInfo = nullptr; s_textRect = nullptr; s_release = nullptr;
-        failedDirs_.insert(dir);
+        noteDirFail();
         noteFail();
         return false;
     }
@@ -273,20 +348,32 @@ bool JavaBridge::caret(HWND javaWindow, RECT& out) {
         // Java answers in its user space (see JavaUserToPx). A DPI-unaware Java app is stretched by
         // the same monitor scale, so the monitor DPI converts every answer, the character-bounds
         // fallbacks included (they used to come back unscaled, off by the scale at 150-225%).
+        // On a monitor away from (0,0) the JDK's mapping matters (JavaUserToPx): both are computed
+        // and the one inside the Java window is kept.
         UINT dx = 96, dy = 96;
-        GetDpiForMonitor(MonitorFromWindow(javaWindow, MONITOR_DEFAULTTONEAREST), MDT_EFFECTIVE_DPI, &dx, &dy);
+        const HMONITOR mon = MonitorFromWindow(javaWindow, MONITOR_DEFAULTTONEAREST);
+        GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &dx, &dy);
         const double s = dx / 96.0;
-        auto set = [&](const JavaRectPx& p) { out = { p.left, p.top, p.right, p.bottom }; ok = true; };
+        MONITORINFO mi{ sizeof(mi) };
+        const bool haveMon = GetMonitorInfoW(mon, &mi) != 0;
+        const long ox = haveMon ? mi.rcMonitor.left : 0, oy = haveMon ? mi.rcMonitor.top : 0;
+        RECT wr{};
+        const bool haveWin = GetWindowRect(javaWindow, &wr) != 0;
+        auto set = [&](const JavaRectPx& anchored, const JavaRectPx& legacy) {
+            const JavaRectPx p = haveWin ? JavaPickCaretPx(anchored, legacy, wr.left, wr.top, wr.right, wr.bottom)
+                                         : anchored;
+            out = { p.left, p.top, p.right, p.bottom }; ok = true;
+        };
         if (s_caretLoc && s_caretLoc(vm, ac, &r, ti.caretIndex) && good()) {
-            set(JavaSpanRectPx(r.x, r.y, r.width, r.height, s));
+            set(JavaSpanRectPx(r.x, r.y, r.width, r.height, s, ox, oy), JavaSpanRectPx(r.x, r.y, r.width, r.height, s));
             lastSrc_ = "caretloc";
         } else if (s_textRect(vm, ac, &r, ti.caretIndex) && good()) {
             lastSrc_ = "charrect";
-            set(JavaSpanRectPx(r.x, r.y, r.width, r.height, s));
+            set(JavaSpanRectPx(r.x, r.y, r.width, r.height, s, ox, oy), JavaSpanRectPx(r.x, r.y, r.width, r.height, s));
         } else if (ti.caretIndex > 0 && s_textRect(vm, ac, &r, ti.caretIndex - 1) && good()) {
             // At the very end of the text there is no character under the caret: use the right edge
             // of the one before it.
-            set(JavaAfterRectPx(r.x, r.y, r.width, r.height, s));
+            set(JavaAfterRectPx(r.x, r.y, r.width, r.height, s, ox, oy), JavaAfterRectPx(r.x, r.y, r.width, r.height, s));
             lastSrc_ = "charrect-prev";
         }
         lastIndex_ = ti.caretIndex;

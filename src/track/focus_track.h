@@ -31,6 +31,7 @@ private:
     mutable std::mutex mu_;
     TrackSnapshot snap_;
     unsigned seq_ = 0;
-    void publish(TrackKind k, double l, double t, double r, double b, const char* src);
+    // false when it was a repeat of snap_ (TrackPublishIsRepeat; missed bypasses that)
+    bool publish(TrackKind k, double l, double t, double r, double b, const char* src, bool missed);
 };
 }  // namespace wind

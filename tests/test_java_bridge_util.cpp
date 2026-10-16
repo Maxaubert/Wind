@@ -70,3 +70,34 @@ TEST_CASE("bridge retries back off: first delay, doubling, capped, never polling
     CHECK(BackoffMs(0, 2000, 60000) == 2000);   // the per-process probe uses its own curve
     CHECK(BackoffMs(40000, 2000, 60000) == 60000);
 }
+TEST_CASE("a failed bridge folder is retried on a 5 s to 5 min curve, never written off (review 2026-10-16 #31)") {
+    unsigned long long b = 0;
+    b = BackoffMs(b, 5000, 300000); CHECK(b == 5000);
+    b = BackoffMs(b, 5000, 300000); CHECK(b == 10000);
+    for (int i = 0; i < 20; ++i) b = BackoffMs(b, 5000, 300000);
+    CHECK(b == 300000);
+}
+TEST_CASE("a caret on a scaled monitor away from (0,0): anchored at the monitor origin (review 2026-10-16 #16)") {
+    // Primary 3840 px at 100%; IntelliJ on a 150% monitor at device x=3840. A caret at device
+    // x=4000 is user x = 3840 + 160 / 1.5 = 3946.67, reported as 3947.
+    CHECK(JavaUserToPx(3947, 1.5, 3840) == 4001);
+    CHECK(JavaUserToPx(3947, 1.5) == 5921);            // the old mapping: ~1920 px too far right
+    CHECK(JavaUserToPx(59, 2.25, 0) == 133);           // a monitor at (0,0): both agree
+    CHECK(JavaUserToPx(-1000, 1.5, -1920) == -540);    // a monitor left of the primary
+    const JavaRectPx a = JavaSpanRectPx(3947, 120, 1, 16, 1.5, 3840, 0);
+    CHECK(a.left == 4001); CHECK(a.top == 180); CHECK(a.bottom == 204);
+    CHECK(a.right == a.left + 2);
+    const JavaRectPx after = JavaAfterRectPx(3940, 120, 4, 16, 1.5, 3840, 0);
+    CHECK(after.left == 3996); CHECK(after.right == 3998);
+}
+TEST_CASE("the caret mapping whose centre is inside the Java window wins; anchored on a tie") {
+    const JavaRectPx anchored{ 4001, 180, 4003, 204 }, legacy{ 5921, 180, 5923, 204 };
+    // The window on the secondary (3840..7680): the anchored mapping is inside it.
+    CHECK(JavaPickCaretPx(anchored, legacy, 3840, 0, 7680, 2160).left == 4001);
+    // A JDK that scales around (0,0): only its answer lands in the window.
+    CHECK(JavaPickCaretPx({ 9000, 180, 9002, 204 }, legacy, 3840, 0, 7680, 2160).left == 5921);
+    // Neither inside (a caret scrolled out of view): the modern mapping.
+    CHECK(JavaPickCaretPx({ 9000, 180, 9002, 204 }, { 9500, 180, 9502, 204 }, 3840, 0, 7680, 2160).left == 9000);
+    // Both inside (the monitor at (0,0) gives the same rect anyway): anchored.
+    CHECK(JavaPickCaretPx(anchored, { 4100, 180, 4102, 204 }, 3840, 0, 7680, 2160).left == 4001);
+}

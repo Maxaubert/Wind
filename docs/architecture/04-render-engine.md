@@ -120,14 +120,24 @@ flowchart TD
   because the cursor comes from `GetCursorInfo`.
 - **Fresh grabs** (zoom-in, `invalidateCapture()`) drain to the latest frame, not the first: the
   first frame after recreating a duplication can be a transitional composite, which flashed the
-  window underneath. Bounded at ~3 ms per attempt and 100 ms in total.
+  window underneath. Bounded at 100 ms until the first frame is copied, then ~3 ms per attempt and
+  12 ms of draining (`FreshDrainContinue`, `src/render/capture_policy.h`): a 360-500 Hz panel
+  delivers a frame inside every wait, which once ran all 40 attempts.
+- **A duplication that cannot be created** (secure desktop, recorders holding the output's
+  duplication slots) is retried lazily by `capture()`, 250 ms doubling to 2 s (`DuplRetry`), logging
+  only the 1st, 2nd, 4th... failure; the cached frame stays on screen. A zoom-in, retarget or device
+  rebuild resets the pace. It is not fatal at `initialize` either: only a target output missing from
+  the adapter is.
 - **Dirty rects.** `copyChangedRegions` patches only the rects DDA reports and falls back to a full
   `CopyResource` whenever a partial update is not provably safe (no previous frame, move rects,
   missing metadata, out-of-range rect).
 - **Crop to the view.** On a near-full repaint the copy can be cropped to the magnified view.
   `cropCapture=0` by default (a desktop window switch would leave stale pixels outside the view);
   `gameCrop=1` (default) crops while the foreground covers the monitor, where every pixel is dirty
-  again next frame.
+  again next frame. That stops holding once the screen settles (a page turn in a fullscreen
+  viewer, Win+D), so a crop leaves a debt (`CropDebt`): the next uncropped frame is copied in full,
+  and a screen quiet for 250 ms with the debt owed gets a fresh grab (the duplication is re-created;
+  its first frame is the whole desktop).
 - Rotated outputs are not supported: `recreateDupl` logs them, the engine pick sends them to
   Transform, and a captured surface whose size differs from the desktop is never copied (the last
   good frame stays, logged once).
@@ -245,7 +255,8 @@ engage by default on the desktop.
 - `DXGI_ERROR_DEVICE_REMOVED/RESET` latches `deviceLost()`. `recoverDeviceLost()` rebuilds through
   the same `buildDeviceResources` as `initialize`, so the paths cannot drift.
 - **Always restore the OS cursor.** `shutdown` and the shared crash filter (`wind::CursorCrashFilter`, `mag_host.cpp`: report first, then restore) restore
-  the pointer and release any `ClipCursor`. Cursor hiding goes through
+  the pointer and release any `ClipCursor`; on the tick thread the filter also puts an input
+  transform Wind enabled back to identity. Cursor hiding goes through
   `MagApiAcquire`/`MagApiRelease`; see [05](05-transform-engine.md) for why the pairing must be
   shared.
 

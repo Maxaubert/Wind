@@ -21,6 +21,16 @@ namespace wind {
 enum class ViewOwner { Mouse, Caret, Focus, Keys };   // Keys: keyboard panning (#287)
 enum class TrackKind { None = 0, Caret = 1, Focus = 2 };
 struct TrackSnapshot { TrackKind kind = TrackKind::None; unsigned seq = 0; double l = 0, t = 0, r = 0, b = 0; };
+// The tracker publishes a report only when it differs from the last one. The exception is a focus
+// change that resolved to something NOT published since then (missed: a skipped container, a
+// timed-out or empty lookup): returning to the same text box after it must still reach
+// StepViewOwner, which acts on a seq change only (review 2026-10-16 #30). A plain repeat focus
+// event on the same control (Chromium re-firing, a menu or tooltip closing) stays a repeat, so it
+// cannot take the view from the mouse.
+inline bool TrackPublishIsRepeat(const TrackSnapshot& last, TrackKind k,
+                                 double l, double t, double r, double b, bool missed) {
+    return !missed && last.kind == k && last.l == l && last.t == t && last.r == r && last.b == b;
+}
 struct ViewOwnerState {
     ViewOwner owner = ViewOwner::Mouse;
     unsigned lastSeq = 0;

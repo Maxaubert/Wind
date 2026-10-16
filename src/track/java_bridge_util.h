@@ -73,18 +73,37 @@ inline std::string EnableAccessBridgeText(const std::string& text, bool& changed
 // Java answers in its own user space: device px divided by the monitor scale (at 225%, x=59 for a
 // caret at device x=134, field 2026-10-04). Every bridge answer, the caret location AND the character
 // bounds the fallbacks use, goes through these so they land in the same (device px) space.
+// The scale is applied around an origin (ox, oy). JDKs with per-monitor user spaces (JDK-8211999:
+// JDK 17+ and the JetBrains runtime) anchor each monitor's user space at its DEVICE origin,
+// user = origin + (device - origin) / scale, so the monitor's top-left is the origin there; older and
+// DPI-unaware ones scale around (0,0). Both agree on a monitor at (0,0), which is where the field
+// numbers above come from; JavaPickCaretPx chooses between them elsewhere (review 2026-10-16 #16).
 struct JavaRectPx { long left, top, right, bottom; };
-inline long JavaUserToPx(int v, double scale) { return (long)(v * scale + (v >= 0 ? 0.5 : -0.5)); }
+inline long JavaUserToPx(int v, double scale, long origin = 0) {
+    const double d = origin + ((double)v - origin) * scale;
+    return (long)(d + (d >= 0 ? 0.5 : -0.5));
+}
 // A span (the caret, or the character at it): at least 2 px wide.
-inline JavaRectPx JavaSpanRectPx(int x, int y, int w, int h, double scale) {
-    const long pw = JavaUserToPx(w, scale);
-    return { JavaUserToPx(x, scale), JavaUserToPx(y, scale),
-             JavaUserToPx(x, scale) + (pw > 2 ? pw : 2), JavaUserToPx(y + h, scale) };
+inline JavaRectPx JavaSpanRectPx(int x, int y, int w, int h, double scale, long ox = 0, long oy = 0) {
+    const long pw = JavaUserToPx(w, scale);   // a length: no origin
+    const long l = JavaUserToPx(x, scale, ox);
+    return { l, JavaUserToPx(y, scale, oy), l + (pw > 2 ? pw : 2), JavaUserToPx(y + h, scale, oy) };
 }
 // The right edge of a character (the caret after the last one): a 2 px sliver.
-inline JavaRectPx JavaAfterRectPx(int x, int y, int w, int h, double scale) {
-    const long r = JavaUserToPx(x + w, scale);
-    return { r, JavaUserToPx(y, scale), r + 2, JavaUserToPx(y + h, scale) };
+inline JavaRectPx JavaAfterRectPx(int x, int y, int w, int h, double scale, long ox = 0, long oy = 0) {
+    const long r = JavaUserToPx(x + w, scale, ox);
+    return { r, JavaUserToPx(y, scale, oy), r + 2, JavaUserToPx(y + h, scale, oy) };
+}
+// The bridge does not say which user space its JDK uses, so the caret is converted both ways
+// (anchored at the monitor origin, and around (0,0)) and the one whose centre lies in the Java
+// window (device px) wins. The anchored one, the modern JDKs' mapping, wins a tie either way.
+inline JavaRectPx JavaPickCaretPx(const JavaRectPx& anchored, const JavaRectPx& legacy,
+                                  long wl, long wt, long wr, long wb) {
+    auto inside = [&](const JavaRectPx& r) {
+        const long cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
+        return cx >= wl && cx < wr && cy >= wt && cy < wb;
+    };
+    return (!inside(anchored) && inside(legacy)) ? legacy : anchored;
 }
 
 // Retry delay that doubles per consecutive failure (`first` on the first, capped at `cap`): the Java

@@ -370,11 +370,17 @@ leaves the caret to `followCaret` (sources in `findCaret`: xterm input, Win32, U
   (`src/track/java_bridge.*`). UIPI drops the JVM's handshake to a UIAccess process, so the bridge's
   hidden windows get a narrow `ChangeWindowMessageFilterEx` allowance. Never poll the bridge (each
   read runs on the Java app's UI thread); read only after bridge callbacks. Load only
-  Authenticode-signed bridge DLLs. Read the caret with `getCaretLocation`, scaled by the monitor
-  DPI (Java answers in its user space, device px / scale). The older character bounds
+  Authenticode-signed bridge DLLs, and only when every DLL the loader would take from the bridge's
+  folder is signed too: its import and delay-import tables are read (`PeImportNames`,
+  `src/track/pe_imports.h`) and walked through the folder (API sets and names with no file there
+  resolve from the system). Read the caret with `getCaretLocation`, scaled by the monitor
+  DPI (Java answers in its user space, device px / scale). Modern JDKs anchor each monitor's user
+  space at its device origin; older ones scale around (0,0). The two agree only on a monitor at
+  (0,0), so both are computed and the one inside the Java window wins (`JavaPickCaretPx`). The older character bounds
   (`getAccessibleTextRect`) gave x=2 for every Swing caret and stay only as a fallback, scaled the
   same way (`JavaSpanRectPx`). A bridge probe that fails backs off per process (2 s doubling to
-  60 s), and the retry after a failed read backs off 250 ms doubling to 4 s; a bridge event or a
+  60 s) and per app folder (5 s doubling to 5 min; a load failure can be transient, so a folder is
+  never written off), and the retry after a failed read backs off 250 ms doubling to 4 s; a bridge event or a
   window switch resets it. The MSAA caret (`MsaaCaret`) skips windows Windows reports as hung and
   sits out 2 s after a call over 250 ms.
 - **Mouse edge mode** (`mouseAlign=1`, free-pointer sessions only): the pointer is unwelded and
