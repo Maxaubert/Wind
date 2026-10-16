@@ -1,7 +1,7 @@
 # Release smoke checklist
 
 Install the build under test, launch Wind from a normal (non-elevated) shell, and work through the
-list. Ctrl+Alt+Q quits cleanly at any time. Settings live in `%LOCALAPPDATA%\Wind\magnifier.ini`.
+list. Win+Esc quits cleanly at any time. Settings live in `%LOCALAPPDATA%\Wind\magnifier.ini`.
 `build.bat installer` already checks the installer's files, generated layout and a silent
 install/uninstall round trip (`tools\installer_check.ps1`).
 
@@ -22,7 +22,7 @@ install/uninstall round trip (`tools\installer_check.ps1`).
 - [ ] Wheel zoom with the chosen modifiers; plain scrolling is unaffected.
 - [ ] Keyboard panning while zoomed; at 1x the keys reach the app.
 - [ ] Clicks, hover, drag and text selection land under the cursor while zoomed.
-- [ ] Ctrl+Alt+Q and tray Quit both leave the screen at 1x with a visible cursor.
+- [ ] Win+Esc and tray Quit both leave the screen at 1x with a visible cursor.
 
 ## Game (borderless)
 - [ ] Zoom in a game that hides or centre-locks the cursor: the view pans with the mouse.

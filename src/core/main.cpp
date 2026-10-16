@@ -3032,7 +3032,7 @@ static void RunTick(TickState& t) {
 }
 
 // Message-handler: decodes raw mouse movement (survives cursor lock) and routes tray msgs.
-// Global panic/quit hotkey id (Ctrl+Alt+Q). Quits cleanly from anywhere - even while the
+// Global panic/quit hotkey id (Win+Esc, #499; Ctrl+Alt+Q only as the fallback). Quits cleanly from anywhere - even while the
 // render overlay covers the screen and the OS cursor is hidden - so there's always a
 // keyboard-only escape. The clean exit path restores the cursor and resets zoom to 1x.
 static const int kQuitHotkeyId = 0xB001;
@@ -3404,9 +3404,15 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     rid[1].dwFlags = RIDEV_INPUTSINK; rid[1].hwndTarget = hwnd;
     RegisterRawInputDevices(rid, 2, sizeof(rid[0]));
 
-    // Safety: global Ctrl+Alt+Q quits cleanly from anywhere (works even with the overlay up
-    // and the cursor hidden). If the combo is already taken, the tray Quit still works.
-    RegisterHotKey(hwnd, kQuitHotkeyId, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'Q');
+    // Safety: global Win+Esc quits cleanly from anywhere (works even with the overlay up and the
+    // cursor hidden); it is Windows Magnifier's own exit shortcut (#499). If another program holds
+    // it (Magnifier running), Ctrl+Alt+Q takes its place; failing both, the tray Quit still works.
+    if (!RegisterHotKey(hwnd, kQuitHotkeyId, MOD_WIN | MOD_NOREPEAT, VK_ESCAPE)) {
+        const DWORD err = GetLastError();
+        const bool fallback = RegisterHotKey(hwnd, kQuitHotkeyId, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'Q') != FALSE;
+        wind::Log(wind::LogLevel::Warn, "core", "quit hotkey Win+Esc taken (err %lu); %s", err,
+                  fallback ? "using Ctrl+Alt+Q" : "Ctrl+Alt+Q taken too, tray Quit only");
+    }
     g_hdrOn.store(PrimaryHdrOn());   // colour filter space (#288), refreshed on WM_DISPLAYCHANGE + 1 Hz while on
     RegisterHideCursorHotkey(hwnd, cfg.hideCursorVk, cfg.hideCursorMods);
     RegisterQuickZoomHotkey(hwnd, (cfg.quickZoomHotkeyMode && cfg.quickZoomVk) ? cfg.quickZoomVk : 0,
