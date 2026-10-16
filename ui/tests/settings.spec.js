@@ -175,6 +175,29 @@ test('Zoom engine: the engine row, per-window rows follow Auto, the share-keys a
   expect((await sent(page, 'setConfig')).some((m) => m.key === 'noSwallowApps' && m.value.includes('RDR2.exe'))).toBe(true);
 });
 
+test('an app list with a hand-edited duplicate still opens, listing it once (#495)', async ({ page }) => {
+  await page.addInitScript(() => { window.__cfgExtra = { showAdvanced: '1', noSwallowApps: 'doom.exe, Doom.exe,doom.exe,b.exe' }; });
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto('/');
+  await go(page, 'hotkeys');
+  const apps = key(page, 'noSwallowApps');
+  await expect(apps.locator('.sum')).toHaveText('2 apps');
+  await apps.getByRole('button', { name: /Manage/ }).click();
+  await expect(page.getByRole('dialog').getByRole('button', { name: /^Remove / })).toHaveCount(2);
+  await page.getByRole('button', { name: 'Remove b.exe' }).click();
+  expect((await sent(page, 'setConfig')).filter((m) => m.key === 'noSwallowApps').at(-1).value).toBe('doom.exe');
+  expect(errors).toEqual([]);
+});
+
+test('a legacy model=magnify shows Auto with its per-window rows (#495)', async ({ page }) => {
+  await page.addInitScript(() => { window.__cfgExtra = { showAdvanced: '1', model: 'magnify' }; });
+  await page.goto('/');
+  await go(page, 'zoom');
+  await expect(key(page, 'model').locator('select')).toHaveValue('hybrid');
+  await expect(key(page, 'engineGame')).toBeVisible();
+});
+
 // ---- other pages -----------------------------------------------------------------------------------
 
 test('View: the edge margin shows only when the pointer is kept within the edges', async ({ page }) => {

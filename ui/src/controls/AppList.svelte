@@ -6,13 +6,22 @@
   let { value = '', title = '', onChange = () => {}, disabled = false, labelledby, describedby, valueId,
         pick = pickExe } = $props();
   let open = $state(false);
-  const items = $derived(String(value ?? '').split(',').map((s) => s.trim()).filter(Boolean));
+  // The core matches exe names case-insensitively, so two spellings are one entry; a hand-edited ini can
+  // repeat one, and the keyed list below throws on a duplicate key, so the first spelling wins.
+  const items = $derived.by(() => {
+    const seen = new Set();
+    return String(value ?? '').split(',').map((s) => s.trim()).filter((s) => {
+      const k = s.toLowerCase();
+      if (!s || seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  });
   const summary = $derived(items.length === 0 ? 'None' : items.length === 1 ? items[0] : `${items.length} apps`);
   const uid = 'al-' + Math.random().toString(36).slice(2, 8);
   async function add() {
     const name = await pick();
     if (!name) return;
-    // The core matches exe names case-insensitively, so two spellings are one entry.
     if (items.some((i) => i.toLowerCase() === name.toLowerCase())) return;
     onChange([...items, name].join(','));
   }
