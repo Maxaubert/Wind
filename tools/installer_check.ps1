@@ -138,8 +138,21 @@ if (-not (Test-Path $setup)) {
     $wasRunning = @(Get-Process -Name Wind, WindTray -ErrorAction SilentlyContinue |
         ForEach-Object { $_.Path } | Where-Object { $_ })
 
-    $scratch = Join-Path $env:TEMP 'wind-installer-check'
+    # Not under %TEMP%: with local signing, setup stages local-sign.ps1 and the uiAccess build in
+    # $INSTDIR\.stage and runs the script as admin, which is only safe in an admin-only folder
+    # (wind.nsi). A new folder in Program Files inherits its ACL, so nothing unelevated can write
+    # there, or create it in advance.
+    $scratch = Join-Path $env:ProgramFiles 'Wind-installer-check'
     if (Test-Path $scratch) { Remove-Item -LiteralPath $scratch -Recurse -Force }
+
+    # The smoke install points the all-users Start menu shortcut at $scratch, and the smoke
+    # uninstall deletes it and the all-users desktop one, so a real install's shortcuts are saved
+    # and put back like its registry values. (Bytes in memory: no file to restore from.)
+    $links = @(foreach ($f in 'CommonPrograms', 'CommonDesktopDirectory') {
+        $lnk = Join-Path ([Environment]::GetFolderPath($f)) 'Wind.lnk'
+        $raw = if (Test-Path -LiteralPath $lnk) { [IO.File]::ReadAllBytes($lnk) } else { $null }
+        [pscustomobject]@{ Path = $lnk; Raw = $raw }
+    })
 
     # The uninstaller must KEEP the user's settings unless they say otherwise, and a silent
     # uninstall answers its prompt with /SD IDNO. Testing that needs something to preserve: on a
@@ -220,6 +233,12 @@ if (-not (Test-Path $setup)) {
         }
 
         if (Test-Path $scratch) { Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue }
+
+        # A shortcut that was here is put back; one that was not came from the smoke install.
+        foreach ($l in $links) {
+            if ($null -ne $l.Raw) { [IO.File]::WriteAllBytes($l.Path, [byte[]]$l.Raw) }
+            elseif (Test-Path -LiteralPath $l.Path) { Remove-Item -LiteralPath $l.Path -Force -ErrorAction SilentlyContinue }
+        }
 
         # Put back whatever was here before the smoke test.
         if ($savedArp) {
