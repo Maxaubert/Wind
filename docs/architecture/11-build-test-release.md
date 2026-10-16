@@ -129,8 +129,8 @@ install-location chooser, because UIAccess is granted only in a secure location.
    for the process to exit; only a clean exit restores the OS cursor and releases `ClipCursor`. The
    single-instance mutex frees ~3 ms into teardown, long before the process is gone, so the macro
    polls for the process before falling back to `taskkill`. That quit reaches this session only; a
-   Wind in another user's session would keep the exes locked, so the macro then asks to force-close
-   it (a silent run does) and stops setup without changes on a No.
+   Wind in another user's session would keep the exes locked, so the macro first asks to force-close
+   it (a silent run does), before touching this session's Wind, and stops setup without changes on a No.
 
 `tools/installer_check.ps1` checks what a compile cannot: every `File` source exists, every
 hit-tested rectangle was generated into `over.nsh`, and a silent install/uninstall round-trips

@@ -44,10 +44,38 @@ Var LicenceDir   ; where "Read the full licence" put its copy, empty until then
 
   ; Every Wind object here is session-local (the quit event, the mutex), and an HKLM Run entry
   ; starts one Wind per logged-on user. So the clean quit and its force-kill fallback below are
-  ; limited to this session; another user's Wind is handled at the end, by asking first.
+  ; limited to this session; another user's Wind is handled first, by asking.
   System::Call 'kernel32::GetCurrentProcessId() i .r0'
   System::Call 'kernel32::ProcessIdToSessionId(i r0, *i .r1)'
   StrCpy $WindSession $1
+
+  ; Another signed-in user's Wind runs the same exes from the same folder (the Run entry is
+  ; HKLM), so it keeps them locked: the copy or delete below would fail and leave a broken
+  ; install. Its quit event is in that session's namespace, out of reach from here, so the only
+  ; way to free the files is a forced close, and that is the user's call. A silent run closes it.
+  ; Asked FIRST, before this session's Wind is touched, so a No (or giving up) really does leave
+  ; everything as it was. Three tries, then stop: a close that keeps failing must not loop a
+  ; silent run forever.
+  StrCpy $3 0
+  ${Do}
+    nsExec::Exec 'cmd /c tasklist /FI "SESSION ne $WindSession" /NH | findstr /I /B "Wind.exe WindTray.exe WindConfig.exe"'
+    Pop $4
+    ${If} $4 != 0
+      ${Break}                 ; nothing running in any other session
+    ${EndIf}
+    ${If} $3 >= 3
+      MessageBox MB_ICONSTOP|MB_OK "Setup couldn't close Wind for another user signed in to this PC. Ask them to quit Wind, then run Setup again." /SD IDOK
+      Abort "Wind is still running for another user."
+    ${EndIf}
+    IntOp $3 $3 + 1
+    MessageBox MB_YESNO|MB_ICONEXCLAMATION "Wind is also running for another user signed in to this PC, and Setup can't update or remove it while it runs.$\r$\n$\r$\nClose it for them now? If you choose No, Setup stops without changing anything." /SD IDYES IDYES windCloseOthers
+    Abort "Wind is running for another user."
+    windCloseOthers:
+    DetailPrint "Closing Wind in other sessions..."
+    nsExec::Exec 'taskkill /IM WindConfig.exe /IM Wind.exe /IM WindTray.exe /FI "SESSION ne $WindSession" /F'
+    Pop $0
+    Sleep 500
+  ${Loop}
 
   ; WindConfig first, so it cannot relaunch Wind while we are stopping it. Force, because
   ; a WM_CLOSE with unsaved settings opens a confirm dialog that would hang setup
@@ -123,31 +151,6 @@ Var LicenceDir   ; where "Read the full licence" put its copy, empty until then
     Pop $0
   ${EndIf}
 
-  ; Another signed-in user's Wind runs the same exes from the same folder (the Run entry is
-  ; HKLM), so it keeps them locked: the copy or delete below would fail and leave a broken
-  ; install. Its quit event is in that session's namespace, out of reach from here, so the only
-  ; way to free the files is a forced close, and that is the user's call. A silent run closes it.
-  ; Three tries, then stop: a close that keeps failing must not loop a silent run forever.
-  StrCpy $3 0
-  ${Do}
-    nsExec::Exec 'cmd /c tasklist /FI "SESSION ne $WindSession" /NH | findstr /I /B "Wind.exe WindTray.exe WindConfig.exe"'
-    Pop $4
-    ${If} $4 != 0
-      ${Break}                 ; nothing running in any other session
-    ${EndIf}
-    ${If} $3 >= 3
-      MessageBox MB_ICONSTOP|MB_OK "Setup couldn't close Wind for another user signed in to this PC. Ask them to quit Wind, then run Setup again." /SD IDOK
-      Abort "Wind is still running for another user."
-    ${EndIf}
-    IntOp $3 $3 + 1
-    MessageBox MB_YESNO|MB_ICONEXCLAMATION "Wind is also running for another user signed in to this PC, and Setup can't update or remove it while it runs.$\r$\n$\r$\nClose it for them now? If you choose No, Setup stops without changing anything." /SD IDYES IDYES windCloseOthers
-    Abort "Wind is running for another user."
-    windCloseOthers:
-    DetailPrint "Closing Wind in other sessions..."
-    nsExec::Exec 'taskkill /IM WindConfig.exe /IM Wind.exe /IM WindTray.exe /FI "SESSION ne $WindSession" /F'
-    Pop $0
-    Sleep 500
-  ${Loop}
   Sleep 300
 !macroend
 
