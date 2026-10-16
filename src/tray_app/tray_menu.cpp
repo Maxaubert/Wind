@@ -35,6 +35,13 @@ void OpenSettings() {
 // Save writes the session to the active profile; Discard drops it (a switch resets the live ini to
 // the profile right here, so the switch's own capture of the outgoing live settings cannot save
 // them after all). Returns false when the user cancels.
+// The prompt's own modal loop never sees the served Wind exit (the main loop's wait does), so a
+// timer callback cancels it when Wind is gone: a restarted Wind needs this tray's mutex, and a late
+// Save or Discard would act on the NEW Wind's session (and RequestWindQuit would quit it).
+static HRESULT CALLBACK PromptCallback(HWND h, UINT msg, WPARAM, LPARAM, LONG_PTR) {
+    if (msg == TDN_TIMER && ServedWindExited()) SendMessageW(h, TDM_CLICK_BUTTON, IDCANCEL, 0);
+    return S_OK;
+}
 static bool ConfirmUnsaved(const std::wstring& ini, bool forSwitch) {
     // An unreadable ini is not a clean one: skipping the prompt would let Quit or a switch drop the
     // session unasked. Stop and let the user retry (a missing ini reads as empty and passes).
@@ -56,7 +63,8 @@ static bool ConfirmUnsaved(const std::wstring& ini, bool forSwitch) {
     const TASKDIALOG_BUTTON buttons[] = { { ID_SAVE, L"Save" }, { ID_DISCARD, L"Discard" } };
     TASKDIALOGCONFIG cfg{};
     cfg.cbSize = sizeof(cfg);
-    cfg.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION;
+    cfg.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_CALLBACK_TIMER;
+    cfg.pfCallback = PromptCallback;
     cfg.dwCommonButtons = TDCBF_CANCEL_BUTTON;
     cfg.pszWindowTitle = L"Wind";
     cfg.pszMainInstruction = L"You have unsaved settings";
@@ -66,7 +74,18 @@ static bool ConfirmUnsaved(const std::wstring& ini, bool forSwitch) {
     cfg.pButtons = buttons;
     cfg.nDefaultButton = ID_SAVE;
     int pressed = 0;
-    if (FAILED(TaskDialogIndirect(&cfg, &pressed, nullptr, nullptr))) return true;
+    const HRESULT hr = TaskDialogIndirect(&cfg, &pressed, nullptr, nullptr);
+    if (FAILED(hr)) {
+        // The session differs and the user was never asked: going ahead would drop it unasked.
+        wind::Log(wind::LogLevel::Warn, "profile", "unsaved prompt failed (hr=0x%08lx)", static_cast<unsigned long>(hr));
+        Notify(L"Wind", forSwitch ? L"Could not ask about the unsaved settings; profile not switched."
+                                  : L"Could not ask about the unsaved settings; Wind keeps running.");
+        return false;
+    }
+    if (ServedWindExited()) {
+        wind::Log(wind::LogLevel::Info, "profile", "unsaved prompt dropped: the served Wind exited");
+        return false;
+    }
     if (pressed != ID_SAVE && pressed != ID_DISCARD) return false;
     // The dialog blocks for as long as the user takes; Settings, the flyout or a hand edit may have
     // written the ini meanwhile. Act on the CURRENT text, not the snapshot the prompt was built from
@@ -75,6 +94,18 @@ static bool ConfirmUnsaved(const std::wstring& ini, bool forSwitch) {
     if (!wind::ReadLiveIni(ini, live)) {
         Notify(L"Wind", L"Could not read the settings (config file is locked); nothing was changed.");
         return false;
+    }
+    // `pp` and the profile snapshot belong to the profile that was active when the prompt opened.
+    // If Settings switched profile meanwhile, Save would store the new session in the OLD profile
+    // and Discard would undo the switch: stop instead.
+    {
+        auto now = wind::ReadIniValues(live);
+        auto nit = now.find("profile");
+        if (nit == now.end() || !wind::SameProfileName(nit->second, it->second)) {
+            wind::Log(wind::LogLevel::Info, "profile", "unsaved prompt: the active profile changed meanwhile");
+            Notify(L"Wind", L"The active profile changed while you were asked; nothing was changed.");
+            return false;
+        }
     }
     if (pressed == ID_SAVE) {
         if (!wind::WriteTextFileAtomic(pp, wind::MakeProfileText(live))) {
@@ -85,7 +116,11 @@ static bool ConfirmUnsaved(const std::wstring& ini, bool forSwitch) {
         }
         return true;
     }
-    if (forSwitch && !wind::WriteTextFileAtomic(ini, wind::MakeLiveText(profile, live, it->second))) {
+    if (!forSwitch) return true;
+    // Discard resets the live ini to the profile as saved NOW (a keybind capture in Settings writes
+    // straight into the profile file, so the pre-prompt snapshot may be stale).
+    if (!wind::ReadTextFileOk(pp, profile) ||
+        !wind::WriteTextFileAtomic(ini, wind::MakeLiveText(profile, live, it->second))) {
         Notify(L"Wind", L"Could not discard the settings; the profile stays as it is.");
         return false;
     }
