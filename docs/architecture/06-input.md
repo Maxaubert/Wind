@@ -43,7 +43,11 @@ Bound inputs are eaten so they never also fire in the focused app.
 
 - **Balanced down/up.** A DOWN of a bound input is swallowed and recorded (`g_swallowedDown`,
   `g_kbSwallowedDown`); an UP is swallowed only if its DOWN was. Swallowing an UP whose DOWN the
-  system saw leaves the input held system-wide (the stuck side-button bug, issue #113).
+  system saw leaves the input held system-wide (the stuck side-button bug, issue #113). A key the
+  system already holds down is never swallowed (#494): a reinstalled or resumed hook meets a held
+  key at its auto-repeat, and `GetAsyncKeyState` (the pre-event state inside an LL hook) shows the
+  system saw its DOWN. Any DOWN that is not swallowed, key, click or side button, clears a stale
+  record so its UP passes.
 - **No stranded keys.** Key records are cleared on a key remap (`setKeys`; `setPanKeys` keeps the
   swallow records). Button records are NOT cleared by a remap (`setButtonBinds`, #301): an UP whose
   DOWN was swallowed must still be swallowed, or the app sees a lone XBUTTONUP (browser Back).

@@ -296,8 +296,13 @@ static LRESULT CALLBACK KbProc(int code, WPARAM wParam, LPARAM lParam) {
                     // Decide ONCE per press: swallow only if a bind on this key has all its modifiers
                     // held now (#285: Ctrl+F1 must not eat a plain F1). Auto-repeat then follows that
                     // decision, so a key the app already saw going down is never swallowed mid-press.
+                    // A (re)installed or resumed hook can meet a key mid-press: its first event is
+                    // an auto-repeat whose DOWN the system already saw unhooked. Inside an LL hook
+                    // GetAsyncKeyState is the pre-event state, so "already down" means exactly that,
+                    // and swallowing now would eat the UP and leave the key stuck down (review #494).
+                    const bool systemSawDown = (GetAsyncKeyState(vk) & 0x8000) != 0;
                     const int held = HeldModsNow();
-                    if (g_router->swallowEnabled() && g_router->keyBindMatches(vk, held)) {
+                    if (!systemSawDown && g_router->swallowEnabled() && g_router->keyBindMatches(vk, held)) {
                         g_kbSwallowedDown.markDown(vk);
                         g_router->notePanPress(vk);   // a tap between two tick samples still nudges
                         // Alt or Win held: mask it so its release is not a lone tap (Start / menu bar).
@@ -429,6 +434,8 @@ static LRESULT CALLBACK MouseProc(int code, WPARAM wParam, LPARAM lParam) {
                     swallow = true;
                     const int held = HeldModsNow();
                     if (NeedsMaskKey(held)) InjectMaskKey();
+                } else {
+                    g_swallowedDown.clear(id);   // a stale record must not eat this press's UP
                 }
             } else { // up: swallow iff we swallowed its DOWN. Never swallow an UP whose DOWN the
                      // system already saw - that is exactly what left the button stuck-down.
