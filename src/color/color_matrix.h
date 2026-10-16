@@ -35,7 +35,7 @@ inline bool SameMatrix(const ColorMatrix& a, const ColorMatrix& b) {
 
 // Lowest brightness the dim control reaches: 1% (owner, 2026-09-30: 0 made the screen completely
 // black, so the floor stays just above it; under HDR 1% decodes to ~0.08% light, still readable on an
-// OLED in the dark). Quitting Wind (Ctrl+Alt+Q) always clears the effect; so does a crash.
+// OLED in the dark). Quitting Wind (Win+Esc) always clears the effect; so does a crash.
 inline constexpr double kMinDim01 = 0.01;
 
 // Channel gains for a blackbody colour temperature, in LINEAR light, normalised so 6500 K is white

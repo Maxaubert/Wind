@@ -508,7 +508,7 @@ static void HandleWebMessage(ICoreWebView2* wv, const std::wstring& jsonW) {
         ShellExecuteW(nullptr, L"open", L"https://github.com/Maxaubert/Wind", nullptr, nullptr, SW_SHOWNORMAL);
     }
 }
-// Poll for the magnifier's exit (Ctrl+Alt+Q, tray Quit, or a crash) and take this window down with
+// Poll for the magnifier's exit (Win+Esc, tray Quit, or a crash) and take this window down with
 // it: "the config window should not exist if the magnifier is offline". A poll rather than an event
 // because a crash never signals an event, and rather than a process handle wait because that needs
 // OpenProcess against a higher-integrity UIAccess process. <= 1s latency is imperceptible here.

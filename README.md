@@ -56,7 +56,7 @@ The first launch walks you through choosing zoom keys: mouse side buttons, keybo
 - **Keyboard panning:** optional arrow-key binds move the view while zoomed.
 - **Quick zoom:** Ctrl plus a zoom key toggles between 1x and your last level.
 - **Inspect mode:** an optional key freezes the pointer and lets you look around with a crosshair.
-- **Ctrl+Alt+Q** quits Wind from anywhere.
+- **Win+Esc** quits Wind from anywhere (Ctrl+Alt+Q if another program holds Win+Esc).
 
 Bound keys are not passed on to the app you are using. Wind refuses binds that would break normal
 typing or Windows shortcuts and tells you why.

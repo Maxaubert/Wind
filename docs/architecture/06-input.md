@@ -13,7 +13,7 @@ hooks. The code is `src/input/input_router.*`, the `WM_INPUT` handling in `src/c
 | `WH_MOUSE_LL` (`MouseProc`) | Mouse button and click binds, wheel binds, Inspect click interception | The only user-mode way to swallow a mouse event |
 | `WH_KEYBOARD_LL` (`KbProc`) | Keyboard binds: down-state and swallowing | Same for keys; also the authority for bound-key state, since a swallowed key never reaches `GetAsyncKeyState` |
 | Raw Input (`RIDEV_INPUTSINK`, `WM_INPUT` in `WndProc`) | HID mouse deltas for locked and Inspect panning; UP-event safety nets | HID level: unaffected by `ClipCursor`, `SetCursorPos` and `ShowCursor`, and not subject to the hook timeout |
-| `RegisterHotKey` | Hide pointer, hotkey-mode quick zoom, Ctrl+Alt+Q quit | The OS suppresses a registered hotkey from other apps; these are toggles, not held keys |
+| `RegisterHotKey` | Hide pointer, hotkey-mode quick zoom, Win+Esc quit (Ctrl+Alt+Q when Win+Esc is taken) | The OS suppresses a registered hotkey from other apps; these are toggles, not held keys |
 
 **The view must keep moving when a game locks the cursor.** A mouselook game clips or recentres
 the pointer every frame, so `GetCursorPos` deltas read zero. HID mickeys keep arriving, so
