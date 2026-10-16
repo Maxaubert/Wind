@@ -119,6 +119,22 @@ inline bool NudgeDue(bool owed, bool clickInProgress) {
     return owed && !clickInProgress;
 }
 
+// WHICH WAY THE NUDGE GOES (review #494). SetCursorPos is clamped to the clip (and the screen),
+// and a same-position SetCursorPos is no cursor event, so a +1 x nudge at the right edge of the
+// clip did nothing. The session edge clip holds the pointer at most at its right edge, exactly
+// where +1 is clamped, so every nudge the composed pointer needs went silent there. The step goes
+// +1 x when that pixel is inside the clip (left/top/right/bottom, right/bottom exclusive as
+// GetClipCursor reports; no clip reads as the virtual screen), else -1 x, else +1 y, else -1 y.
+// {0, 0}: a 1px clip, nowhere to go.
+struct NudgeStep { int dx, dy; };
+inline NudgeStep PickNudgeStep(int x, int y, int clipL, int clipT, int clipR, int clipB) {
+    if (x + 1 < clipR && x + 1 >= clipL) return { 1, 0 };
+    if (x - 1 >= clipL && x - 1 < clipR) return { -1, 0 };
+    if (y + 1 < clipB && y + 1 >= clipT) return { 0, 1 };
+    if (y - 1 >= clipT && y - 1 < clipB) return { 0, -1 };
+    return { 0, 0 };
+}
+
 // A PRESS HELD PAST THE CLICK WINDOW IS A DRAG (field report 2026-10-08: zooming while holding a
 // drag-select made the view jump about 90 px back and forth every frame). A level write still goes
 // out during a click (HoldWriteForClick), and without its nudge DWM showed Wind's centre for that

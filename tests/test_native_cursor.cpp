@@ -117,6 +117,21 @@ TEST_CASE("a press held past the click window is a drag and may be nudged") {
     CHECK(NudgeBlockedByClick(true, 1000, 1003) == true);     // stamp newer than the clock read
 }
 
+TEST_CASE("the pointer nudge steps inside the clip, so the edge clip cannot swallow it (#494)") {
+    auto step = [](int x, int y, int l, int t, int r, int b) {
+        const NudgeStep s = PickNudgeStep(x, y, l, t, r, b);
+        return s.dx * 10 + s.dy;   // 10 = +x, -10 = -x, 1 = +y, -1 = -y
+    };
+    CHECK(step(500, 500, 0, 0, 1920, 1080) == 10);     // open desktop: +1 x as before
+    // The edge clip (1 px inside a 1920 monitor) holds the pointer at x = 1918, its last column.
+    CHECK(step(1918, 500, 1, 1, 1919, 1079) == -10);
+    CHECK(step(1919, 500, 0, 0, 1920, 1080) == -10);   // the virtual screen's last column, no clip
+    CHECK(step(1, 500, 1, 1, 1919, 1079) == 10);       // the left edge still steps right
+    CHECK(step(700, 300, 700, 300, 701, 600) == 1);    // a one-column clip: step in y
+    CHECK(step(700, 599, 700, 300, 701, 600) == -1);
+    CHECK(step(700, 300, 700, 300, 701, 301) == 0);    // a 1px pin: nowhere to go
+}
+
 TEST_CASE("Inspect keeps DWM's view until the look point moves (#445)") {
     CHECK(InspectKeepsDwmView(true, false));
     CHECK_FALSE(InspectKeepsDwmView(true, true));

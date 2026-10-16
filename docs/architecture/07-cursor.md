@@ -130,7 +130,8 @@ slightly during zoom ramps, nearest keeps it pixelated and steady. Pure rules:
   at 1x (`idleTick`), so a zoom bound to a mouse button never leaves a still pointer invisible. The
   session-end reset of `ixPubLevel_` keeps a quick zoom back to the same level from skipping the
   publish nudge, and the hide-cursor hotkey's show-again transition nudges after the blanker
-  restore like the zoom-out does.
+  restore like the zoom-out does. A nudge steps to a pixel the clip allows (`PickNudgeStep`, #494):
+  at the edge clip's right column a +1 x step is clamped back onto the pointer, which is no event.
 - **Game-drawn cursor (#443, `gameCursorLagMs`, -1 = one display frame, 0 = off).** Some games
   hide the pointer and draw their own cursor at its position (Cyberpunk 2077 menus). That cursor
   reaches the screen about a display frame after the pointer moved, while DWM centring shows the
@@ -185,7 +186,8 @@ was before the native cursor (#369), and the default since the owner chose it on
 Wind writes every view itself (no DWM centring, no cursor lens), hides the real pointer (blanker plus
 `MagShowSystemCursor`) and paints its shape into the sprite window (`CursorSprite::refreshShape`,
 from the blanker's copies of the standard cursors), placed at the lens point in desktop
-coordinates so DWM magnifies it with the content. At zoom-in the sprite is stood up on the pointer
+coordinates so DWM magnifies it with the content. The sprite shows at every level above 1x, since
+the cursor set is blanked from the first tick of the session. At zoom-in the sprite is stood up on the pointer
 before the blank (two `DwmFlush` passes) so the hand-off does not blink. The lock rule is the old
 one: a locked session stays locked with the pointer shown (`LockApplies` gets `nativeSession()`).
 Read at zoom-in, so a change applies to the next session. Shell input panels get the real pointer

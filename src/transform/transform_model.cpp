@@ -57,7 +57,14 @@ static void NudgePointer() {
     if (NudgeBlocked()) { g_nudgeOwed.store(true, std::memory_order_relaxed); return; }
     g_nudgeOwed.store(false, std::memory_order_relaxed);
     POINT np;
-    if (GetCursorPos(&np)) { SetCursorPos(np.x + 1, np.y); SetCursorPos(np.x, np.y); }
+    RECT clip{};
+    if (!GetCursorPos(&np) || !GetClipCursor(&clip)) return;
+    // Step to a pixel the clip allows (review #494): at the edge clip's right column a +1 x step
+    // is clamped back onto the pointer, which is no cursor event at all.
+    const NudgeStep s = PickNudgeStep(np.x, np.y, clip.left, clip.top, clip.right, clip.bottom);
+    if (s.dx == 0 && s.dy == 0) return;
+    SetCursorPos(np.x + s.dx, np.y + s.dy);
+    SetCursorPos(np.x, np.y);
 }
 static void DeliverOwedNudge() {
     if (!NudgeDue(g_nudgeOwed.load(std::memory_order_relaxed), NudgeBlocked())) return;
@@ -1010,12 +1017,22 @@ void TransformModel::presentCursor(const MapResult& r, double level, const Prese
         // same-position SetCursorPos is none; it is pinned by its 1px clip, so nudge the clip a
         // pixel and back (review #284). The weld above has already placed the pin this frame.
         if (repaint && haveLastClick_) {
-            const RECT off{ lastClickX_ + 1, lastClickY_, lastClickX_ + 2, lastClickY_ + 1 };
+            // The step stays on the virtual screen (review #494): ClipCursor clamps the rect to the
+            // screen, so a +1 x clip at the last column landed on the pin itself, which is no event.
+            const int vx = GetSystemMetrics(SM_XVIRTUALSCREEN), vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+            const NudgeStep s = PickNudgeStep(lastClickX_, lastClickY_, vx, vy,
+                                              vx + GetSystemMetrics(SM_CXVIRTUALSCREEN),
+                                              vy + GetSystemMetrics(SM_CYVIRTUALSCREEN));
+            const int ox = lastClickX_ + s.dx, oy = lastClickY_ + s.dy;
+            const RECT off{ ox, oy, ox + 1, oy + 1 };
             const RECT pin{ lastClickX_, lastClickY_, lastClickX_ + 1, lastClickY_ + 1 };
             ClipCursor(&off);
             ClipCursor(&pin);
         }
-    } else if (!nativeSession_ && ex.drawCursor && level > 1.001) {
+    } else if (!nativeSession_ && ex.drawCursor && level > 1.0) {
+        // Any level above 1x, not just above 1.001 (review #494): the session is active from the
+        // first tick above 1.0 with the cursor set blanked, and a zoom can settle just above 1.0, so
+        // a gap here left neither the sprite nor the real pointer on screen.
         endPanelPointer();   // a panel just closed: the sprite takes over again
         // LEGACY SPRITE SESSION (txNativeCursor=0, issue #463): the pre-#369 cursor. The real pointer
         // is hidden (blanker for standard shapes, MagShowSystemCursor for app-custom ones) and its
