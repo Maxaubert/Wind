@@ -143,19 +143,22 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
     // (needed to scale DrawIconEx) and the hotspot, then free them immediately - otherwise they
     // leak every tick the cursor shape changes. Mask-only cursors report a double-height mask.
     BITMAP bm{};
+    int nw = 0, nh = 0;
     if (iconInfo.hbmColor && GetObjectW(iconInfo.hbmColor, sizeof(bm), &bm)) {
-        natW_ = bm.bmWidth; natH_ = bm.bmHeight;
+        nw = bm.bmWidth; nh = bm.bmHeight;
     } else if (iconInfo.hbmMask && GetObjectW(iconInfo.hbmMask, sizeof(bm), &bm)) {
-        natW_ = bm.bmWidth; natH_ = bm.bmHeight / 2;
+        nw = bm.bmWidth; nh = bm.bmHeight / 2;
     }
-    if (natW_ <= 0 || natW_ > kSize) natW_ = 32;
-    if (natH_ <= 0 || natH_ > kSize) natH_ = 32;
     if (iconInfo.hbmMask) DeleteObject(iconInfo.hbmMask);
     if (iconInfo.hbmColor) DeleteObject(iconInfo.hbmColor);
-    int hotX = (int)iconInfo.xHotspot * scale_;   // hotspots live in FINAL (scaled) pixels
-    int hotY = (int)iconInfo.yHotspot * scale_;
+    // The canvas grows with the pointer (review #494: a >64 px pointer was drawn at 32 px with its
+    // native hotspot); a shape over the cap scales with its hotspot (FitSpriteShape, tested).
+    const SpriteShapeFit fit = FitSpriteShape(nw, nh, (int)iconInfo.xHotspot, (int)iconInfo.yHotspot, kSize);
+    natW_ = fit.drawW; natH_ = fit.drawH;
+    int hotX = fit.hotX * scale_;   // hotspots live in FINAL (scaled) pixels
+    int hotY = fit.hotY * scale_;
 
-    const int S = bufSize();
+    const int S = fit.canvas * scale_;
     HDC screenDc = GetDC(nullptr);
     HDC memDc = CreateCompatibleDC(screenDc);
     BITMAPINFO bmi{};
@@ -209,6 +212,7 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
         iconCopy_ = hIconCopy;
         hotX_ = hotX;
         hotY_ = hotY;
+        shapeSize_ = fit.canvas;
         lastCursor_ = info.hCursor;
         lastVerdict_ = ShapeStatus::Rendered;
         renderMaskShape();
@@ -239,6 +243,7 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
     iconCopy_ = hIconCopy;
     hotX_ = hotX;
     hotY_ = hotY;
+    shapeSize_ = fit.canvas;
     lastCursor_ = info.hCursor;
     lastVerdict_ = ShapeStatus::Rendered;
     crosshairMode_ = false;   // the window now holds the cursor shape again
@@ -265,7 +270,7 @@ CursorSprite::ShapeStatus CursorSprite::refreshShape() {
 // underneath, so the caret is legible on any background and there is no verdict
 // left to oscillate.
 void CursorSprite::renderMaskShape() {
-    const int S = bufSize();
+    const int S = shapeSize_ * scale_;   // the shape's canvas (refreshShape sized it)
     HDC screenDc = GetDC(nullptr);
     HDC memDc = CreateCompatibleDC(screenDc);
     BITMAPINFO bmi{};
@@ -303,7 +308,7 @@ void CursorSprite::renderMaskShape() {
     // shape[i] = 1 for every opaque pixel of the cursor: a baked colour pixel, or an inverting
     // pixel we are inking white. The outline pass below dilates this, so it must be recorded
     // BEFORE the outline is drawn, or the outline would feed on itself and keep growing.
-    std::vector<uint8_t> shape((size_t)S * S);   // heap: S*S is up to 512x512 at max scale
+    std::vector<uint8_t> shape((size_t)S * S);   // heap: S*S is up to 256x256 (the canvas cap)
     for (int i = 0; i < S * S; i++) {
         uint32_t rgbB = black[i] & 0x00FFFFFFu;
         uint32_t rgbW = white[i] & 0x00FFFFFFu;

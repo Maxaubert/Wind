@@ -3075,7 +3075,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == WM_DISPLAYCHANGE) g_hdrOn.store(PrimaryHdrOn());   // colour space (#288); falls through
     // A pointer-scheme reload (the user changed scheme or size, or an engine healed it) leaves the
     // clean scheme in place: take fresh pristine copies; the next idle tick re-tints (#288).
-    if (msg == WM_SETTINGCHANGE && wp == SPI_SETCURSORS) g_tint.capture();
+    // The legacy sprite draws standard shapes from the blanker's copies, which must follow too.
+    if (msg == WM_SETTINGCHANGE && wp == SPI_SETCURSORS) {
+        g_tint.capture();
+        if (auto* tm = g_tick ? dynamic_cast<TransformModel*>(g_tick->mTransform) : nullptr)
+            tm->cursorSchemeChanged();
+    }
     if (msg == WM_HOTKEY && wp == kQuitHotkeyId) { PostQuitMessage(0); return 0; }
     if (msg == WM_HOTKEY && wp == kHideCursorHotkeyId) {
         if (g_tick) g_tick->cursorHidden = !g_tick->cursorHidden;

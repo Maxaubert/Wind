@@ -29,6 +29,9 @@ public:
     // Legacy sprite session: repaint from the current system cursor when its handle changed.
     // Hidden = the app hides its pointer (or the shape could not be read): show nothing of ours.
     ShapeStatus refreshShape();
+    // The shape source changed under an unchanged handle (a pointer scheme or size change, review
+    // #494): the next refreshShape() repaints.
+    void invalidateShape() { lastCursor_ = nullptr; }
     void moveTo(int desktopX, int desktopY);
     void reapplyPosition();   // re-place after a hotspot change (the crosshair centres its hotspot)
     void show();
@@ -55,6 +58,7 @@ private:
     void renderCrosshair();
     bool displaced() const;            // a visible, overlapping window sits above us in z-order
     static const int kSize = 64;       // base (1x) logical canvas; buffers are kSize * scale_
+    int shapeSize_ = kSize;            // the cursor shape's canvas: grows with the pointer (FitSpriteShape)
     int bufSize() const { return kSize * scale_; }
     const std::unordered_map<HCURSOR, HCURSOR>* originals_ = nullptr;
     HWND    hwnd_ = nullptr;           // the active window: hwndLow_ or hwndHigh_

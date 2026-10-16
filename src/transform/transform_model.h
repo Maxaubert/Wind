@@ -60,6 +60,9 @@ public:
         *beneath = edgeClipSaved_;
         return true;
     }
+    // A pointer scheme or size change (WM_SETTINGCHANGE / SPI_SETCURSORS): the legacy sprite's
+    // shape copies are re-taken at the next idle tick (review #494).
+    void cursorSchemeChanged() { shapesStale_ = true; }
     // Whether MagSetInputTransform is usable (probed once at initialize; needs UIAccess). The
     // hybrid DESKTOP pick requires this: without the source-rect input transform, transform
     // desktop sessions have the pointer-framework hover dead zones (POINTER-HITTEST-FINDINGS.md).
@@ -104,6 +107,7 @@ private:
     bool edgeClipActive_ = false;
     RECT edgeClipSaved_{};                            // the clip that existed before ours
     RECT edgeClipApplied_{};                          // what we set (dedupe + foreign-change test)
+    bool shapesStale_ = false;                        // the blanker's shape copies predate a scheme change
     void edgeClipManage(bool wantActive);
     unsigned long long ghostSessionStartMs_ = 0;     // 0 = not started; drives the opening burst
     bool mpoExposed_ = false;                        // apply the 16-bit write clamp

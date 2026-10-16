@@ -31,17 +31,40 @@ static void RestoreAll() {
     SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, 0);
 }
 
-CursorBlanker::CursorBlanker() : st_(std::make_shared<State>()) {
-    // If a previous Wind was hard-killed while cursors were blanked, the desktop still has blank
-    // shared cursors; reload the user's scheme FIRST, or the blanks get captured as "originals".
-    RestoreAll();
+// Copies of the standard cursors as they are now, keyed by their shared handle.
+static void CaptureOriginals(std::unordered_map<HCURSOR, HCURSOR>& out) {
     for (UINT id : kStandardIds) {
         HCURSOR shared = LoadCursorW(nullptr, MAKEINTRESOURCEW(id));
         if (!shared) continue;
         HCURSOR copy = CopyCursor(shared);
-        if (copy) originals_[shared] = copy;
+        if (copy) out[shared] = copy;
     }
+}
+static void DestroyCopies(std::unordered_map<HCURSOR, HCURSOR>& m) {
+    for (auto& kv : m) DestroyCursor(kv.second);
+    m.clear();
+}
+
+CursorBlanker::CursorBlanker() : st_(std::make_shared<State>()) {
+    // If a previous Wind was hard-killed while cursors were blanked, the desktop still has blank
+    // shared cursors; reload the user's scheme FIRST, or the blanks get captured as "originals".
+    RestoreAll();
+    CaptureOriginals(originals_);
     worker_ = std::thread([st = st_] { run(st); });
+}
+
+bool CursorBlanker::recapture() {
+    if (blanked_) return false;
+    // Owned by a shared set so a worker that answers after the 2 s wait still frees its copies.
+    struct Copies {
+        std::unordered_map<HCURSOR, HCURSOR> m;
+        ~Copies() { DestroyCopies(m); }
+    };
+    auto fresh = std::make_shared<Copies>();
+    if (!runSync([fresh] { CaptureOriginals(fresh->m); })) return false;
+    if (fresh->m.empty()) return false;   // nothing captured: keep the old copies
+    originals_.swap(fresh->m);            // the old copies are destroyed with `fresh`
+    return true;
 }
 
 CursorBlanker::~CursorBlanker() {
@@ -54,7 +77,7 @@ CursorBlanker::~CursorBlanker() {
     const bool exited = st_->exitCv.wait_for(lk, std::chrono::seconds(2), [this] { return st_->exited; });
     lk.unlock();
     if (worker_.joinable()) { if (exited) worker_.join(); else worker_.detach(); }
-    for (auto& kv : originals_) DestroyCursor(kv.second);
+    DestroyCopies(originals_);
 }
 
 void CursorBlanker::run(std::shared_ptr<State> st) {

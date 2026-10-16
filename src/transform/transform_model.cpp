@@ -496,6 +496,13 @@ void TransformModel::setActive(bool active) {
 
 void TransformModel::idleTick() {
     DeliverOwedNudge();   // a nudge a click skipped at the zoom-out is still owed at 1x
+    // A pointer scheme or size change since the copies were taken (review #494): re-take them while
+    // the set is ours to read (not blanked), and make the sprite repaint from the new ones. One
+    // attempt per change, so a wedged blanker worker cannot stall every idle tick.
+    if (shapesStale_ && !active_ && !blanker_->blanked()) {
+        shapesStale_ = false;
+        if (blanker_->recapture()) sprite_->invalidateShape();
+    }
     // NATIVE CURSOR (issue #369): keep the context and the cursor lens alive at 1x instead of
     // releasing them. With the lens style OFF this costs nothing (measured: a pointer-toggling
     // full-screen app keeps Independent Flip, 0 spike frames), and it moves the one-time 60-125 ms

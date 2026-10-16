@@ -25,6 +25,12 @@ public:
     // set is blanked GetCursorInfo still returns the shared handle, so the legacy sprite (#463) draws
     // the shape from the copy.
     const std::unordered_map<HCURSOR, HCURSOR>& originals() const { return originals_; }
+    // Re-take those copies after a pointer scheme or size change (review #494): the shared handles
+    // survive a scheme reload, so the sprite kept finding the old copies and drew the old scheme
+    // and size until Wind restarted. Only while not blanked (the shared cursors would be blanks).
+    // The copies are taken on the worker, behind any queued restore, and swapped in on the caller's
+    // thread (the sprite reads the map there). False when blanked or the worker did not answer.
+    bool recapture();
     bool blanked() const { return blanked_; }
     void blank();
     // after (optional) runs on the worker once the cursors are back: the repaint nudge, which
