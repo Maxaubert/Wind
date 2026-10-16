@@ -340,20 +340,27 @@ static void OnDiscardSession(ICoreWebView2* wv) {
     // the outgoing profile and turn Discard into Save. No active profile or no profile file means
     // there is no saved state to go back to (and nothing a switch would mirror into): not a failure.
     bool ok = false;
+    DWORD err = 0;   // captured under the lock: the lock release and later calls overwrite it
     {
         wind::IniWriteLock iniLock;   // item 71
         std::string live;
-        if (ReadIni(live)) {
+        if (!ReadIni(live)) {
+            err = GetLastError();
+        } else {
             const std::string active = ActiveProfileName(live);
             std::string prof;
             if (active.empty() || !SafeName(active) ||
                 GetFileAttributesW(ProfilePath(active).c_str()) == INVALID_FILE_ATTRIBUTES)
                 ok = true;
-            else if (wind::ReadTextFileOk(ProfilePath(active), prof))
+            else if (!wind::ReadTextFileOk(ProfilePath(active), prof))
+                err = GetLastError();
+            else {
                 ok = WriteFileAtomic(IniPath(), wind::MakeLiveText(prof, live, active));
+                if (!ok) err = GetLastError();
+            }
         }
     }
-    if (!ok) wind::Log(wind::LogLevel::Warn, "config", "discardSession failed (err=%lu)", GetLastError());
+    if (!ok) wind::Log(wind::LogLevel::Warn, "config", "discardSession failed (err=%lu)", err);
     PostConfig(wv, ok ? ",\"discarded\":true" : ",\"discarded\":false");
 }
 static void OnWindowAction(ICoreWebView2* wv, const std::string& j) {

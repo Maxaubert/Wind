@@ -226,7 +226,8 @@ inline bool EnsureProfilesSeeded(const std::wstring& iniPath) {
     SweepStaleIniTmp(iniPath);
     std::wstring dir = ProfilesDirFromIni(iniPath);
     if (GetFileAttributesW(dir.c_str()) != INVALID_FILE_ATTRIBUTES) return true;
-    if (!CreateDirectoryW(dir.c_str(), nullptr)) return false;
+    // ERROR_ALREADY_EXISTS: another process created the dir in the race; it owns the seed.
+    if (!CreateDirectoryW(dir.c_str(), nullptr)) return GetLastError() == ERROR_ALREADY_EXISTS;
     std::string live;
     // First run: no ini yet. Seed from the documented default template (what LoadConfig would have
     // created), so the live ini is the commented file users expect rather than the single line
