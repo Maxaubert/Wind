@@ -9,7 +9,6 @@
 // Authenticode-signed (Wind is UIAccess; see LoadVerified).
 #include <windows.h>
 #include <map>
-#include <set>
 #include <string>
 namespace wind {
 class JavaBridge {
@@ -29,10 +28,13 @@ private:
     const char* lastSrc_ = "";
     int lastIndex_ = -1;
     HMODULE mod_ = nullptr;
-    std::set<std::wstring> failedDirs_;      // app folders with no usable bridge DLL (retried per folder)
     // Per-process probe backoff: ensure() is asked on every poll of a Java foreground window.
     struct ProbeFail { unsigned long long until = 0, backoffMs = 0; };
     std::map<DWORD, ProbeFail> probeFail_;
+    // App folders whose bridge DLL did not load, retried after a backoff (5 s doubling to 5 min): a
+    // failure can be transient (an antivirus scan or an IDE update holding the file, a certificate
+    // not cached yet), so a folder is never written off for the session (review 2026-10-16 #31).
+    std::map<std::wstring, ProbeFail> failedDirs_;
     bool enabledDone_ = false;
     unsigned long long enableRetryAt_ = 0;
 };
