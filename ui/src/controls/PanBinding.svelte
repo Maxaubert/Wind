@@ -7,6 +7,7 @@
   import { checkKeyBind, refusalText } from '../lib/keybindRules.js';
   import { modList, popcount } from '../lib/bindNames.js';
   import { PAN_ARROWS, panState, panPatch } from '../lib/bindings.js';
+  import { setCapturing } from '../lib/capture.js';
   let { row, values = {}, live = () => {}, disabled = false, labelledby, describedby, valueId } = $props();
 
   const now = $derived(panState(values));
@@ -18,6 +19,7 @@
   let refusal = $state('');
   let liveMsg = $state('');
   const uid = 'pan-' + Math.random().toString(36).slice(2, 8);
+  $effect(() => { setCapturing(uid, armed); return () => setCapturing(uid, false); });
   const mods = (e) => (e.ctrlKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.shiftKey ? 4 : 0) | (e.metaKey ? 8 : 0);
 
   function arm() {

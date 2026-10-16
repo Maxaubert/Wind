@@ -10,6 +10,8 @@
   import { checkKeyBind, checkClickBind, refusalText } from '../lib/keybindRules.js';
   import { vkName, BUTTON_NAMES, modList, popcount, WHEEL_UP, WHEEL_DOWN } from '../lib/bindNames.js';
   import { unitsOf, clearUnit, placeBinding, maxOf } from '../lib/bindings.js';
+  import { setCapturing } from '../lib/capture.js';
+  import { onDestroy } from 'svelte';
   let { row, values = {}, live = () => {}, disabled = false, labelledby, describedby, valueId } = $props();
 
   const units = $derived(unitsOf(row, values));
@@ -27,6 +29,9 @@
   const list = $derived(armed && armed.list ? armed.list : units);
   const showGhost = $derived(armed ? !!armed.add : units.length < max);
   const uid = 'bx-' + Math.random().toString(36).slice(2, 8);
+  $effect(() => { setCapturing(uid, !!armed); return () => setCapturing(uid, false); });
+  // Leaving the page while armed (the sidebar re-keys it) must put the old binding back.
+  onDestroy(() => cancel());
 
   const mods = (e) => (e.ctrlKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.shiftKey ? 4 : 0) | (e.metaKey ? 8 : 0);
   const text = (m, name) => [...modList(m), name].join('+');
@@ -82,11 +87,17 @@
     if (!btn) return;
     const m = mods(e);
     if (btn === 4 && m === 0) return;   // a plain right-click removes the binding (contextmenu)
+    const name = text(m, BUTTON_NAMES[btn]);
+    const v = popcount(m) > 2 ? 'twomods' : checkClickBind(btn, m);
+    // A refused press on the box being recorded stays armed and says why. Anywhere else it is the
+    // user leaving (Close, another row, the sidebar): cancel and let it through. preventDefault
+    // there would also keep the focus, so the blur that cancels would never come.
+    if (v !== 'ok' && !(e.target instanceof Element && e.target.closest('button') === document.activeElement)) {
+      cancel();
+      return;
+    }
     e.preventDefault();
     if (btn === 4) skipContext = true;
-    const name = text(m, BUTTON_NAMES[btn]);
-    if (popcount(m) > 2) { refuse('twomods', name); return; }
-    const v = checkClickBind(btn, m);
     if (v !== 'ok') { refuse(v, name); return; }
     capturedAt = performance.now();
     commit({ kind: 'btn', code: btn, mods: m }, name);

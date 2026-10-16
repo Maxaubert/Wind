@@ -82,6 +82,6 @@ test('pan: none, arrows with one shared mask, custom for anything else', () => {
 
 test('hotkeys files contain no em-dash', () => {
   for (const f of ['../src/lib/bindings.js', '../src/lib/bindNames.js', '../src/controls/Bindings.svelte',
-    '../src/controls/PanBinding.svelte', '../src/controls/bindings.css'])
+    '../src/controls/PanBinding.svelte', '../src/controls/bindings.css', '../src/lib/capture.js'])
     expect(readFileSync(new URL(f, import.meta.url), 'utf8')).not.toContain(String.fromCharCode(0x2014));
 });

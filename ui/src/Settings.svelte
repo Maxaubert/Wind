@@ -15,6 +15,7 @@
   import { fill, changedKeys } from './session.js';
   import { themes, normalizePalette } from './design/themes.js';
   import { droppedBinds } from './lib/keybindRules.js';
+  import { capturing } from './lib/capture.js';
   import TitleBar from './shell/TitleBar.svelte';
   import Sidebar from './shell/Sidebar.svelte';
   import ScrollChip from './shell/ScrollChip.svelte';
@@ -235,6 +236,7 @@
     if (c) c.focus();
   }
   function onKeydown(e) {
+    if (capturing()) return;   // the keys belong to the binding being recorded
     const mod = e.ctrlKey && !e.altKey && !e.shiftKey;
     if (mod && e.key.toLowerCase() === 'f') { e.preventDefault(); const i = searchInput(); if (i) { i.focus(); i.select(); } return; }
     if (e.key === 'Escape' && (searching || e.target === searchInput())) {

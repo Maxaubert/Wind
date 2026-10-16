@@ -59,6 +59,15 @@ test('session helpers: global keys never count, defaults fill both sides', () =>
   expect(changedKeys(f.values, f.saved)).toEqual(['maxLevel']);
 });
 
+test('session helpers: an unknown model (the retired magnify) reads as hybrid, like the core', () => {
+  const f = fill({ values: { model: 'magnify' }, saved: { model: 'magnify' } });
+  expect(f.values.model).toBe('hybrid');
+  expect(f.saved.model).toBe('hybrid');
+  expect(changedKeys(f.values, f.saved)).toEqual([]);
+  expect(fill({ values: { model: 'transform' } }).values.model).toBe('transform');
+  expect(fill({ values: { model: 'render' } }).values.model).toBe('render');
+});
+
 test('session files contain no em-dash', () => {
   for (const f of ['../src/session.js', '../src/Settings.svelte', '../src/prompts/Prompt.svelte', '../src/bridge.js'])
     expect(readFileSync(new URL(f, import.meta.url), 'utf8')).not.toContain(String.fromCharCode(0x2014));
