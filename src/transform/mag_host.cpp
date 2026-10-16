@@ -10,6 +10,11 @@ namespace wind {
 // Process-wide Magnification runtime refcount (see mag_host.h). Single-threaded by contract:
 // only the tick thread touches the Magnification API (it is thread-affine anyway).
 static int g_magRefs = 0;
+static DWORD g_magThread = 0;   // the thread that ran MagInitialize (the only one whose calls count)
+// The input transform Wind last published, for the crash filter: an enabled one left in the single
+// system-wide slot keeps hit-testing through a zoomed rect after Wind is gone (review 2026-10-16 #37).
+static bool g_ixOn = false;
+static RECT g_ixDst{};
 
 // The Magnification API is thread-affine: a call from any thread but the one that ran MagInitialize
 // returns FALSE and changes nothing (measured, issue #206). That thread is the tick thread; nothing
@@ -25,6 +30,7 @@ bool MagApiAcquire() {
         return false;
     }
     g_magRefs = 1;
+    g_magThread = GetCurrentThreadId();
     wind::Log(wind::LogLevel::Info, "magapi", "MagInitialize -> refs=1 (DWM now magnification-aware)");
     return true;
 }
@@ -33,6 +39,7 @@ void MagApiRelease() {
     if (g_magRefs <= 0) return;
     if (--g_magRefs == 0) {
         MagUninitialize();
+        g_ixOn = false;
         wind::Log(wind::LogLevel::Info, "magapi", "MagUninitialize -> refs=0 (runtime released)");
     } else {
         wind::Log(wind::LogLevel::Info, "magapi", "release -> refs=%d (still held)", g_magRefs);
@@ -46,6 +53,13 @@ LONG WINAPI CursorCrashFilter(EXCEPTION_POINTERS* ep) {
     if (InterlockedExchange(&s_inHandler, 1)) return EXCEPTION_CONTINUE_SEARCH;
     wind::WriteCrashReport(ep);          // minidump + text summary into the log dir
     MagShowSystemCursor(TRUE);           // no-op if the Magnification API was never initialized this run
+    // An enabled input transform Wind published goes back to identity. Thread-affine like every
+    // Magnification call, so only a crash on the tick thread can do it; an off slot is left alone
+    // (it may be native Magnifier's).
+    if (g_magRefs > 0 && g_ixOn && GetCurrentThreadId() == g_magThread) {
+        RECT r = g_ixDst;
+        MagSetInputTransform(FALSE, &r, &r);
+    }
     ClipCursor(nullptr);                 // never leave the cursor clipped if we crash while Inspect-locked
     SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, 0);   // heals a blanked cursor scheme, no broadcast
     return EXCEPTION_CONTINUE_SEARCH;
@@ -154,7 +168,12 @@ bool MagHost::setInputTransform(bool active, const RECT& src, const RECT& dst) {
     if (!initialized_) return false;
     SpanScope span(kSpanIx);
     RECT s = src, d = dst;   // API takes non-const LPRECT
-    return MagSetInputTransform(active ? TRUE : FALSE, &s, &d) != FALSE;
+    const bool ok = MagSetInputTransform(active ? TRUE : FALSE, &s, &d) != FALSE;
+    // An enable is remembered even when the call says FALSE (a publish can land anyway, see
+    // getInputTransform); a disable clears it only when it took.
+    if (active) { g_ixOn = true; g_ixDst = dst; }
+    else if (ok) g_ixOn = false;
+    return ok;
 }
 
 bool MagHost::getInputTransform(bool& active, RECT& src, RECT& dst) {

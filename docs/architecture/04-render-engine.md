@@ -255,7 +255,8 @@ engage by default on the desktop.
 - `DXGI_ERROR_DEVICE_REMOVED/RESET` latches `deviceLost()`. `recoverDeviceLost()` rebuilds through
   the same `buildDeviceResources` as `initialize`, so the paths cannot drift.
 - **Always restore the OS cursor.** `shutdown` and the shared crash filter (`wind::CursorCrashFilter`, `mag_host.cpp`: report first, then restore) restore
-  the pointer and release any `ClipCursor`. Cursor hiding goes through
+  the pointer and release any `ClipCursor`; on the tick thread the filter also puts an input
+  transform Wind enabled back to identity. Cursor hiding goes through
   `MagApiAcquire`/`MagApiRelease`; see [05](05-transform-engine.md) for why the pairing must be
   shared.
 
