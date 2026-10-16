@@ -51,17 +51,20 @@ export function saveSession() {
     post({ type: 'saveSession' });
   });
 }
-// Discard: the host rewrites the live ini from the active profile; resolves the fresh session.
+// Discard: the host rewrites the live ini from the active profile; resolves the fresh session plus
+// `discarded` (false when the host could not reset the session, so the unsaved changes are still live).
 export function discardSession() {
   return new Promise(resolve => {
     const off = onMessage(m => {
       if (m && m.type === 'config') {
         off();
         resolve({ values: m.values || {}, saved: m.saved || m.values || {}, runningModel: m.runningModel || '',
-                  profiles: m.profiles || { names: [], active: '' } });
+                  profiles: m.profiles || { names: [], active: '' }, discarded: m.discarded !== false });
       } else if (m && m.type === 'configUnreadable') {
         off();
-        resolve(getSession());   // nothing was discarded; fetch the state with getSession's retries
+        // The ini could not be re-read: fetch the state with getSession's retries.
+        const discarded = m.discarded !== false;
+        resolve(getSession().then(s => ({ ...s, discarded })));
       }
     });
     post({ type: 'discardSession' });

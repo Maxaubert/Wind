@@ -38,8 +38,11 @@ inline std::vector<std::wstring> ListProfileFiles(const std::wstring& dir) {
     if (h == INVALID_HANDLE_VALUE) return names;
     do {
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+        // The pattern also matches 8.3 short names, so "Work.ini_bak" (short name WORK~1.INI) would
+        // come back here: accept only a long name that really ends in ".ini".
         std::wstring n = fd.cFileName;
-        if (n.size() > 4) names.push_back(n.substr(0, n.size() - 4));  // strip ".ini"
+        if (n.size() > 4 && _wcsicmp(n.c_str() + n.size() - 4, L".ini") == 0)
+            names.push_back(n.substr(0, n.size() - 4));  // strip ".ini"
     } while (FindNextFileW(h, &fd));
     FindClose(h);
     std::sort(names.begin(), names.end(),
@@ -216,12 +219,15 @@ inline void MirrorLiveToActiveProfile(const std::wstring& iniPath, const std::st
 // ini gets profile=Default. Runs before the tick loop records the ini mtime, so the write does not
 // trigger a spurious hot-reload. Idempotent: the dir existing (even empty) means never seed again -
 // which is why a failed Default.ini capture rolls the (still empty) dir back, so the seed retries on
-// the next launch instead of leaving a permanent half-migrated state.
-inline void EnsureProfilesSeeded(const std::wstring& iniPath) {
+// the next launch instead of leaving a permanent half-migrated state. Returns true when the profiles
+// dir exists afterwards (already seeded, or seeded now); false when the seed failed and was rolled
+// back, so a caller must not create the dir itself (that would set the latch with no Default.ini).
+inline bool EnsureProfilesSeeded(const std::wstring& iniPath) {
     SweepStaleIniTmp(iniPath);
     std::wstring dir = ProfilesDirFromIni(iniPath);
-    if (GetFileAttributesW(dir.c_str()) != INVALID_FILE_ATTRIBUTES) return;
-    if (!CreateDirectoryW(dir.c_str(), nullptr)) return;
+    if (GetFileAttributesW(dir.c_str()) != INVALID_FILE_ATTRIBUTES) return true;
+    // ERROR_ALREADY_EXISTS: another process created the dir in the race; it owns the seed.
+    if (!CreateDirectoryW(dir.c_str(), nullptr)) return GetLastError() == ERROR_ALREADY_EXISTS;
     std::string live;
     // First run: no ini yet. Seed from the documented default template (what LoadConfig would have
     // created), so the live ini is the commented file users expect rather than the single line
@@ -232,9 +238,10 @@ inline void EnsureProfilesSeeded(const std::wstring& iniPath) {
     if (!readOk ||
         !WriteTextFileAtomic(dir + L"\\Default.ini", MakeProfileText(live))) {
         RemoveDirectoryW(dir.c_str());   // dir is still empty; retry the whole seed next launch
-        return;
+        return false;
     }
     WriteTextFileAtomic(iniPath, UpdateIniText(live, "profile", "Default"));
+    return true;
 }
 // One-time ini migrations (#318), run at start before ResetSessionToProfile: zoomWheelMods moves into
 // the zoom button slots (MigrateWheelMods) in the live ini AND in every profile file, so the session

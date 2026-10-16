@@ -95,3 +95,37 @@ TEST_CASE("ListProfileFiles lists .ini names case-insensitively sorted") {
     CHECK(n[0] == L"Alpha");
     CHECK(n[1] == L"beta");
 }
+
+TEST_CASE("ListProfileFiles skips names that match *.ini only through their 8.3 short name") {
+    TempDir d;
+    WriteTextFileAtomic(d.path + L"\\Work.ini", "x");
+    WriteTextFileAtomic(d.path + L"\\Gaming.INI", "x");
+    // Editor backups: with 8.3 names on, these get short names like WORK~1.INI that match "*.ini".
+    WriteTextFileAtomic(d.path + L"\\Work.ini_bak", "x");
+    WriteTextFileAtomic(d.path + L"\\Gaming.ini~", "x");
+    auto n = ListProfileFiles(d.path);
+    REQUIRE(n.size() == 2);
+    CHECK(n[0] == L"Gaming");
+    CHECK(n[1] == L"Work");
+}
+
+TEST_CASE("EnsureProfilesSeeded reports whether the profiles dir is in place") {
+    TempDir d; const std::wstring ini = d.path + L"\\magnifier.ini";
+    const std::wstring dir = d.path + L"\\profiles";
+    REQUIRE(WriteTextFileAtomic(ini, "maxLevel=7\r\n"));
+    {
+        // A locked live ini: the seed rolls back and says so, leaving no dir (the latch) behind.
+        HANDLE h = CreateFileW(ini.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        REQUIRE(h != INVALID_HANDLE_VALUE);
+        CHECK_FALSE(EnsureProfilesSeeded(ini));
+        CHECK(GetFileAttributesW(dir.c_str()) == INVALID_FILE_ATTRIBUTES);
+        CloseHandle(h);
+    }
+    CHECK(EnsureProfilesSeeded(ini));
+    std::string def;
+    CHECK(ReadTextFileOk(dir + L"\\Default.ini", def));
+    CHECK(def.find("maxLevel=7") != std::string::npos);
+    CHECK(EnsureProfilesSeeded(ini));   // already seeded
+    DeleteFileW((dir + L"\\Default.ini").c_str());
+    RemoveDirectoryW(dir.c_str());
+}

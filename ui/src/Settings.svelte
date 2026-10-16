@@ -119,6 +119,7 @@
   let restartError = $state(false);
   let writeError = $state('');
   let saveError = $state(false);
+  let discardError = $state(false);
   onMount(() => {
     const offs = [
       onMessage((m) => { if (m && m.type === 'configWriteFailed') { writeError = m.key || 'a setting'; refresh(); } }),
@@ -154,10 +155,14 @@
     announce('Settings saved');
     return true;
   }
+  // False when the host could not reset the session: the caller must stop (a following profile switch
+  // would otherwise save the "discarded" changes into the outgoing profile).
   async function discard() {
     const s = await discardSession();
     await load(s);
+    if (!s.discarded) { discardError = true; return false; }
     announce('Changes discarded');
+    return true;
   }
 
   // --- Profiles -------------------------------------------------------------------------------
@@ -177,7 +182,7 @@
   async function resolveProfilePrompt(how) {
     const p = profilePrompt; profilePrompt = null;
     if (how === 'save') { if (!(await save())) return; }
-    else await discard();
+    else if (!(await discard())) return;
     runProfileAction(p.kind, p.payload);
   }
   async function runProfileAction(kind, payload) {
@@ -211,13 +216,13 @@
   async function closeWith(how) {
     closePrompt = false;
     if (how === 'save') { if (!(await save())) return; }
-    else if (how === 'discard') await discard();
+    else if (how === 'discard') { if (!(await discard())) return; }
     windowControl('close', true);   // 'keep' leaves the session live until Wind quits
   }
   async function quitWith(how) {
     quitPrompt = false;
     if (how === 'save') { if (!(await save())) return; }
-    else await discard();
+    else if (!(await discard())) return;
     doQuit();
   }
   // --- Search ---------------------------------------------------------------------------------
@@ -381,6 +386,12 @@
             text="Wind could not write the profile file, so your changes are still unsaved. Another program may be holding the file. Try again in a moment."
             onEsc={() => (saveError = false)}
             buttons={[{ label: 'Close', kind: 'primary', onClick: () => (saveError = false) }]} />
+  {/if}
+  {#if discardError}
+    <Prompt id="dc" title="Couldn't discard"
+            text="Wind could not reset the settings to the saved profile, so your changes are still there, unsaved. Another program may be holding the file. Try again in a moment."
+            onEsc={() => (discardError = false)}
+            buttons={[{ label: 'Close', kind: 'primary', onClick: () => (discardError = false) }]} />
   {/if}
   {#if profileError}
     <Prompt id="pe" title="Profile action failed" text={profileError}

@@ -259,14 +259,15 @@ static bool g_loggedNav = false, g_loggedReady = false;
 
 // Reply to getConfig / discardSession with the session, or with configUnreadable when the ini cannot
 // be read right now (the page retries; it must never be handed an empty ini as "all defaults").
-static void PostConfig(ICoreWebView2* wv) {
+// `extra` is appended to either reply as further JSON fields (discardSession's "discarded").
+static void PostConfig(ICoreWebView2* wv, const std::string& extra = std::string()) {
     std::string live;
     if (!ReadIni(live)) {
         wind::Log(wind::LogLevel::Warn, "config", "getConfig: ini unreadable");
-        wv->PostWebMessageAsJson(L"{\"type\":\"configUnreadable\"}");
+        wv->PostWebMessageAsJson(Widen("{\"type\":\"configUnreadable\"" + extra + "}").c_str());
         return;
     }
-    wv->PostWebMessageAsJson(Widen("{\"type\":\"config\"," + SessionPayload(live) + "}").c_str());
+    wv->PostWebMessageAsJson(Widen("{\"type\":\"config\"," + SessionPayload(live) + extra + "}").c_str());
 }
 // Diagnostics export (flush, copy every log and minidump, zip through PowerShell) takes seconds and
 // up to ~31 s worst case, so it runs on a worker thread; the window thread gets the result by message.
@@ -334,17 +335,33 @@ static void OnSaveSession(ICoreWebView2* wv) {
 }
 static void OnDiscardSession(ICoreWebView2* wv) {
     // Discard: the live ini goes back to the saved profile (globals kept); reply with fresh state.
-    wind::IniWriteLock iniLock;   // item 71
-    std::string live;
-    if (ReadIni(live)) {
-        const std::string active = ActiveProfileName(live);
-        std::string prof;
-        if (!active.empty() && SafeName(active) &&
-            GetFileAttributesW(ProfilePath(active).c_str()) != INVALID_FILE_ATTRIBUTES &&
-            wind::ReadTextFileOk(ProfilePath(active), prof))
-            WriteFileAtomic(IniPath(), wind::MakeLiveText(prof, live, active));
+    // "discarded":false when the session is still there (ini or profile unreadable, or the write
+    // failed): the page must then stop, or a following switch would mirror the unsaved session into
+    // the outgoing profile and turn Discard into Save. No active profile or no profile file means
+    // there is no saved state to go back to (and nothing a switch would mirror into): not a failure.
+    bool ok = false;
+    DWORD err = 0;   // captured under the lock: the lock release and later calls overwrite it
+    {
+        wind::IniWriteLock iniLock;   // item 71
+        std::string live;
+        if (!ReadIni(live)) {
+            err = GetLastError();
+        } else {
+            const std::string active = ActiveProfileName(live);
+            std::string prof;
+            if (active.empty() || !SafeName(active) ||
+                GetFileAttributesW(ProfilePath(active).c_str()) == INVALID_FILE_ATTRIBUTES)
+                ok = true;
+            else if (!wind::ReadTextFileOk(ProfilePath(active), prof))
+                err = GetLastError();
+            else {
+                ok = WriteFileAtomic(IniPath(), wind::MakeLiveText(prof, live, active));
+                if (!ok) err = GetLastError();
+            }
+        }
     }
-    PostConfig(wv);
+    if (!ok) wind::Log(wind::LogLevel::Warn, "config", "discardSession failed (err=%lu)", err);
+    PostConfig(wv, ok ? ",\"discarded\":true" : ",\"discarded\":false");
 }
 static void OnWindowAction(ICoreWebView2* wv, const std::string& j) {
     std::string action = JsonField(j, "action");
@@ -431,11 +448,12 @@ static void OnCreateProfile(ICoreWebView2* wv, const std::string& j) {
         // Pre-migration guard: creating a profile before the core ever seeded would create the
         // profiles dir (the seed latch) and then wipe the user's settings with no Default.ini
         // capture, permanently. Seed Default from the CURRENT settings first; no-op once seeded.
-        wind::EnsureProfilesSeeded(IniPath());
-        CreateDirectoryW(wind::ProfilesDirFromIni(IniPath()).c_str(), nullptr);
+        // A failed seed rolls the dir back; creating it here would set the latch with no Default.ini.
+        if (!wind::EnsureProfilesSeeded(IniPath()))
+            err = "Could not set up profiles (the config file may be locked); try again in a moment";
         std::string seed = "; Wind profile. Keys absent here fall back to Wind's built-in defaults.\n"
                            "model=hybrid\n";
-        if (fromCurrent) {
+        if (err.empty() && fromCurrent) {
             std::string live;
             if (!ReadIni(live)) err = "Could not read the config file";
             else seed = wind::MakeProfileText(live);

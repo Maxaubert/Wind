@@ -50,6 +50,7 @@ void OpenSettings();
 // main.cpp
 TrayShared* Block();          // the shared status block, or nullptr when Wind did not create one
 void RequestWindQuit();       // sets Local\Wind_QuitRequest: Wind's clean-exit path
+bool ServedWindExited();      // the Wind this tray serves has exited (a modal prompt's loop never sees it)
 
 }  // namespace TrayApp
 }  // namespace wind

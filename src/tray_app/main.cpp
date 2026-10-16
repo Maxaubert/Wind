@@ -18,8 +18,11 @@
 namespace wind { namespace TrayApp {
 
 static TrayShared*  g_block = nullptr;
+static HANDLE       g_hWind = nullptr;   // the Wind we serve (SYNCHRONIZE)
 
 TrayShared* Block() { return g_block; }
+
+bool ServedWindExited() { return g_hWind && WaitForSingleObject(g_hWind, 0) == WAIT_OBJECT_0; }
 
 void RequestWindQuit() {
     // The same clean-exit path the installer and Settings use: Wind restores cursor, clip and
@@ -116,6 +119,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR cmdLine, int) {
         wind::LogShutdown();
         return 0;
     }
+
+    TrayApp::g_hWind = hWind;
 
     // Single instance. On a model relaunch the old Wind's tray is still exiting when the new Wind
     // starts us, so wait for it rather than giving up (it exits as soon as its Wind is gone).

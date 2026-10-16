@@ -132,7 +132,10 @@ a node test (`npm run test:rules`) both read.
   unless `%LOCALAPPDATA%\Wind\session.keep` marks a restart Wind triggered itself (Restart Wind, or
   an engine change or profile switch with a model change while Wind runs one engine). It is
   consumed once.
-- Tray Quit compares the files and prompts Save, Discard or Cancel.
+- Tray Quit compares the files and prompts Save, Discard or Cancel. After the prompt it re-reads the
+  live ini under the write lock and stops if the active profile changed meanwhile; Discard re-reads
+  the profile file. A prompt that fails to open stops Quit (never a silent drop), and the prompt
+  cancels itself when the served Wind exits (`ServedWindExited`), so it never acts on a new Wind.
 
 **Switching** (Settings or the tray flyout, one implementation: `wind::SwitchProfile` in
 `src/config/profile_switch.h`; each surface only maps its result to its own messages):
@@ -161,10 +164,14 @@ outgoing profile is not mirrored into (`DoSwitchProfile(name, mirrorOutgoing=fal
 
 **Seeding.** `EnsureProfilesSeeded` runs at startup before the ini mtime is recorded. With no
 `profiles\` directory it creates one, saves the current settings as `Default.ini` and writes
-`profile=Default`. The directory is the latch, so a failed `Default.ini` write removes it again. On a
+`profile=Default`. The directory is the latch, so a failed `Default.ini` write removes it again, and
+the function returns false: `createProfile` then fails rather than create the directory itself. On a
 first run with no ini at all the seed text is `DefaultIniText()` (the commented template), so the
 live ini is the template plus `profile=Default`, not a one-line file that `LoadConfig` would accept
 as complete.
+
+**Listing** (`ListProfileFiles`) keeps only long names ending in `.ini`: `*.ini` also matches 8.3
+short names, so a backup such as `Work.ini_bak` would otherwise list as a phantom profile.
 
 **Names** become file names: `ProfileNameError` rejects path and control characters, leading or
 trailing dots and spaces, reserved device names and names over 40 characters. Matching is
