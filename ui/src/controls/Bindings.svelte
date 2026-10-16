@@ -10,6 +10,7 @@
   import { checkKeyBind, checkClickBind, refusalText } from '../lib/keybindRules.js';
   import { vkName, BUTTON_NAMES, modList, popcount, WHEEL_UP, WHEEL_DOWN } from '../lib/bindNames.js';
   import { unitsOf, clearUnit, placeBinding, maxOf } from '../lib/bindings.js';
+  import { setCapturing } from '../lib/capture.js';
   let { row, values = {}, live = () => {}, disabled = false, labelledby, describedby, valueId } = $props();
 
   const units = $derived(unitsOf(row, values));
@@ -27,6 +28,7 @@
   const list = $derived(armed && armed.list ? armed.list : units);
   const showGhost = $derived(armed ? !!armed.add : units.length < max);
   const uid = 'bx-' + Math.random().toString(36).slice(2, 8);
+  $effect(() => { setCapturing(uid, !!armed); return () => setCapturing(uid, false); });
 
   const mods = (e) => (e.ctrlKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.shiftKey ? 4 : 0) | (e.metaKey ? 8 : 0);
   const text = (m, name) => [...modList(m), name].join('+');
