@@ -60,7 +60,7 @@ newline makes the reply invalid and the page waits forever.
 | `setConfig` | fire | Atomic write of one key to the live ini |
 | `setConfigPersist` | fire | Same, and the key in the active profile file (keybind captures) |
 | `saveSession` | reply `sessionSaved` | Write `MakeProfileText(live)` over the profile |
-| `discardSession` | reply `config` | Rewrite the live ini from the profile |
+| `discardSession` | reply `config` | Rewrite the live ini from the profile. The reply carries `discarded` (`false` when the ini or profile could not be read or the write failed; the page then shows "Couldn't discard" and stops the switch, close or quit it was for) |
 | `ready` | fire | Two frames after mount; the host logs launch-to-paint |
 | `window` | fire | `minimize`, `maximize` (toggles restore), `close`, `quitWind`, `restartWind` (writes `session.keep` first; replies `restartFailed` when Wind cannot be launched) |
 | `dirty` | fire | Unsaved flag, so `WM_CLOSE` can prompt |
