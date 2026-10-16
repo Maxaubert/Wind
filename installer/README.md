@@ -56,7 +56,9 @@ which makes `wind.nsi` define `LOCAL_SIGN`. Setup then runs `local-sign.ps1`:
   over only after its signature verifies. An unsigned UIAccess `Wind.exe` does not start at all, so
   any failure leaves the ordinary build. Wind refuses to start without UIAccess (issue #460), so
   setup then shows an error and does not launch it.
-- A release signed with a real certificate has no `WindUA.exe` and skips this.
+- A release signed with a real certificate has no `WindUA.exe` and skips this. Any `Wind.exe` build
+  deletes `WindUA.exe` (`build.bat :core_exe`) unless `release.ps1` just made both, so `build.bat
+  installer` never packs a stale one.
 
 ## Licence screen
 

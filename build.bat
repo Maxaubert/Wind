@@ -68,6 +68,11 @@ rem --- Wind.exe itself, shared by the app and uiaccess targets. %1 = extra defi
 rem    %2 = the manifest to embed, %3 = its object dir under build\obj. Everything else (sources,
 rem    flags, libraries) is the same. Output: build\Wind.exe and build\Wind.pdb.
 :core_exe
+rem A new Wind.exe makes any build\WindUA.exe stale: the installer packs WindUA.exe as the
+rem Wind.exe it installs whenever the file exists (installer\wind.nsi, LOCAL_SIGN), so a leftover
+rem one would ship old code. tools\release.ps1 sets WIND_KEEP_UA for the one build that must keep
+rem the WindUA.exe it has just made from the same tree.
+if not "%WIND_KEEP_UA%"=="1" if exist "%BUILD%\WindUA.exe" del /q "%BUILD%\WindUA.exe"
 set "CORE_OBJ=%OBJ%\%~3"
 if not exist "%CORE_OBJ%" mkdir "%CORE_OBJ%"
 rem Compile the app-icon resource (rc.exe ships with the Windows SDK, on PATH via vcvars).

@@ -89,11 +89,14 @@ if ($cert) {
 # build.bat puts every binary in build\ (never the repo root); the installer packs them from there.
 $bin = "$root\build"
 $ua = "$bin\WindUA.exe"
+# With a certificate the signed uiAccess build IS Wind.exe, so a WindUA.exe left over from an
+# earlier run must never reach the installer, -SkipBuild or not: its presence turns local
+# signing on, and setup would install it over the properly signed Wind.exe.
+if ($cert -and (Test-Path $ua)) { Remove-Item $ua -Force }
 if (-not $SkipBuild) {
     # No certificate: build the uiAccess variant as well, as WindUA.exe. Setup signs it on the
     # PC it installs to (installer\local-sign.ps1, issue #261) and keeps the standard build as
-    # the fallback. With a certificate the signed uiAccess build IS Wind.exe, so a WindUA.exe
-    # left over from an earlier run must not reach the installer.
+    # the fallback.
     if (Test-Path $ua) { Remove-Item $ua -Force }
     if (-not $cert) {
         Write-Host "=== building WindUA.exe (uiaccess, signed at install) ==="
@@ -101,7 +104,10 @@ if (-not $SkipBuild) {
         Move-Item "$bin\Wind.exe" $ua -Force
     }
     Write-Host "=== building Wind.exe ($(if ($variant) { $variant } else { 'standard' })) ==="
-    Invoke-Build $variant
+    # Every Wind.exe build deletes build\WindUA.exe as stale (build.bat :core_exe); this one is
+    # from the same tree as the WindUA.exe just made, so it keeps it.
+    $env:WIND_KEEP_UA = '1'
+    try { Invoke-Build $variant } finally { Remove-Item Env:WIND_KEEP_UA -ErrorAction SilentlyContinue }
     Write-Host "=== building WindConfig.exe + ui\dist ==="
     Invoke-Build 'config'
 }
