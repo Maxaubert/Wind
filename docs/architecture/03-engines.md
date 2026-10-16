@@ -50,12 +50,20 @@ and only then does an engine change relaunch Wind (Settings' Restart Wind button
 If the transform half fails to initialize, Auto logs a warning and runs render only; every pick
 site checks `t.mTransform`.
 
+**Transform is primary-only.** Its visual offsets are monitor-local while its input transform, edge
+clip and sprite add the monitor origin, so on another monitor the picture and the input mapping
+would describe different rects (review 2026-10-16 #11). Every pick off the primary returns Render,
+except while the render device is lost. A session moves to a non-primary monitor only when the
+render engine took the retarget (`MayRetargetSession`): a render engine on another adapter, or a
+transform-only process, keeps the session where it was.
+
 ## The pick
 
 `wind::ShouldPickTransform` (`src/engine/engine_pick.h`) is header-only, has no `<windows.h>` and is
 doctested. It runs at the zoom-in edge and every zoomed tick, with the same `EnginePickInputs`.
 In order:
 
+0. **A lost render device forces Transform; otherwise a non-primary monitor forces Render.**
 1. **Protected content forces Transform.** `captureProtected` (the foreground or a child window
    has display-affinity capture protection: Netflix, Apple TV, PlayReady) or an exe on
    `renderExclude`. On Render such a window is a black rectangle, so this beats every other rule.
@@ -64,8 +72,8 @@ In order:
 2. **The per-category preference applies next.** `ClassifyWindow` sorts the foreground into Game,
    Acrylic, Desktop or Other, and `engineGame`, `engineAcrylic`, `engineDesktop` and `engineOther`
    (each Auto, Transform or Render) choose for it. Render is honoured outright; Transform still
-   needs the primary monitor and an exe not on `transformExclude`.
-3. **Auto rule.** Transform when the session is on the primary monitor, the exe is not on
+   needs an exe not on `transformExclude`.
+3. **Auto rule.** Transform when the exe is not on
    `transformExclude` or in `churny_apps.txt` (unless `tdrTest` is on), and either:
    - **game path**: the foreground covers the monitor, is borderless and is not the shell desktop
      (Win+D reads as a borderless cover, issue #172); or
@@ -78,16 +86,20 @@ In order:
 
 ```mermaid
 flowchart TD
-    A[Zoom-in edge or foreground change while zoomed] --> D{capture-protected, renderExclude or rotated output?}
+    A[Zoom-in edge or foreground change while zoomed] --> L{render device lost?}
+    L -- yes --> T
+    L -- no --> M{primary monitor?}
+    M -- no --> R
+    M -- yes --> D{capture-protected, renderExclude or rotated output?}
     D -- yes --> T[TRANSFORM]
     D -- no --> PR{category preference}
     PR -- Render --> R[RENDER]
-    PR -- Transform --> PX{primary and not transformExclude?}
+    PR -- Transform --> PX{not transformExclude?}
     PX -- yes --> T
     PX -- no --> R
     PR -- Auto --> B{game path or desktop path?}
     B -- no --> R
-    B -- yes --> P{primary, not excluded, not churny?}
+    B -- yes --> P{not excluded, not churny?}
     P -- yes --> T
     P -- no --> R
 ```

@@ -3,8 +3,18 @@
 // predicate in the app is unit-tested (issues #148 exclusion, #172 shell desktop) instead of
 // living inline in two RunTick sites that had to stay identical by hand.
 //
-// Order of the rules (see ShouldPickTransform): capture-protected, renderExclude or rotated output
-// -> transform always; then the per-window-category preference; then the Auto rule.
+// Order of the rules (see ShouldPickTransform): a lost render device -> transform; then a non-primary
+// monitor -> render; then capture-protected, renderExclude or rotated output -> transform; then the
+// per-window-category preference; then the Auto rule.
+//
+// The transform engine magnifies the PRIMARY monitor only. Its visual offsets are monitor-local
+// (ComputeMagTransform gets the mapper's source rect without the monitor origin) while its input
+// transform, edge clip and sprite add the origin, so on another monitor the picture and the input
+// mapping describe two different rects (review 2026-10-16 #11). Nothing in the repo pins down DWM's
+// coordinate convention for MagSetFullscreenTransform off the primary, so no offset is added there:
+// a non-primary session gets render (a rotated or protected secondary shows its known render limits
+// instead of a wrong region), and a session only moves to a non-primary monitor when the render
+// engine took the retarget (MayRetargetSession).
 //
 // Auto picks transform on the PRIMARY target monitor for (a) a borderless foreground that covers
 // the monitor (games, F11 video: compositor-internal magnification survives a heavy game's present
@@ -75,7 +85,11 @@ inline bool ShouldPickTransform(const EnginePickInputs& in) {
     //    already mitigate. Netflix inside a browser is both at once, and this is the case that
     //    ordering resolves: black video every time beats an occasional crash risk.
     //    A lost render device is the same hard limit: it cannot draw anything, so transform it is.
-    if (in.renderLost || in.captureProtected || in.renderExcluded || in.rotatedOutput) return true;
+    //    The one exception to the primary-only rule: a lost device cannot draw at all, and the
+    //    device-lost failover hands every session to transform until recovery.
+    if (in.renderLost) return true;
+    if (!in.primaryMonitor) return false;   // transform is primary-only (header note)
+    if (in.captureProtected || in.renderExcluded || in.rotatedOutput) return true;
     // 2. An explicit user preference for this window category. Transform is still refused off the
     //    primary monitor (no cross-adapter transform chase) and on an excluded exe, because those
     //    are correctness limits rather than taste. The churny list and the input-transform check
@@ -83,15 +97,14 @@ inline bool ShouldPickTransform(const EnginePickInputs& in) {
     //    explicit per-category Transform choice is the user accepting that trade (review
     //    2026-10-09 #44).
     if (in.pref == EnginePref::Render) return false;
-    if (in.pref == EnginePref::Transform) return in.primaryMonitor && !in.excluded;
+    if (in.pref == EnginePref::Transform) return !in.excluded;
     // 3. Auto: the historical behaviour, unchanged.
     //    The GAME path: a borderless cover that is not the shell desktop (issue #172 - Win+D is
     //    not a game). The DESKTOP path: explicit opt-in + verified input transform; the shell
     //    desktop is fine there (that IS the desktop). Exclusions and the churny list veto both.
     const bool game    = in.coversMonitor && in.borderless && !in.shellDesktop;
     const bool desktop = in.desktopTransformOptIn && in.inputTransformOk;
-    return (game || desktop) && in.primaryMonitor &&
-           !in.excluded && (in.tdrHarness || !in.churny);
+    return (game || desktop) && !in.excluded && (in.tdrHarness || !in.churny);
 }
 
 // Which category a foreground falls into, from signals the caller has already read. Order is
@@ -107,12 +120,22 @@ inline WindowCategory ClassifyWindow(bool coversMonitor, bool borderless, bool s
 
 // THE ENGINE SETTING (`model`), applied live. Both engines are built at startup whatever `model`
 // says, so a change takes effect on the next pick without a restart. Auto: the automatic rule above.
-// A pinned engine: Transform always; Render unless the render engine cannot draw at all (device
-// lost) or its overlay sits on the wrong monitor (renderStale), where showing nothing is worse.
+// A pinned engine: Transform on the primary monitor (render elsewhere, see the header note); Render
+// unless the render engine cannot draw at all (device lost) or its overlay sits on the wrong monitor
+// (renderStale), where showing nothing is worse. renderStale only happens on the primary
+// (MayRetargetSession keeps a session off a non-primary monitor the render engine refused).
 inline bool PickTransformFor(const std::string& model, const EnginePickInputs& in, bool renderStale) {
-    if (model == "transform") return true;
+    if (model == "transform") return in.primaryMonitor || in.renderLost;
     if (model == "render") return in.renderLost || renderStale;
     return ShouldPickTransform(in) || renderStale;
+}
+
+// Whether a zoom session may move to another monitor (multiMonitor=1). The primary is always fine:
+// either engine can magnify it. A non-primary monitor needs the render engine to have taken the
+// retarget; a render engine on another adapter refuses it, and a transform-only process (the render
+// engine failed to start) has none, so the session stays where it is.
+inline bool MayRetargetSession(bool targetPrimary, bool renderTookIt) {
+    return targetPrimary || renderTookIt;
 }
 
 }  // namespace wind

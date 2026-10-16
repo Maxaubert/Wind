@@ -7,6 +7,7 @@ using wind::ClassifyWindow;
 using wind::WindowCategory;
 using wind::EnginePref;
 using wind::ParseEnginePref;
+using wind::MayRetargetSession;
 
 static EnginePickInputs game() {
     EnginePickInputs in;
@@ -152,10 +153,12 @@ TEST_CASE("an explicit transform preference still respects the correctness limit
 
 TEST_CASE("a rotated output never gets render: duplication cannot capture it (review M3)") {
     EnginePickInputs in;
+    in.primaryMonitor = true;
     in.rotatedOutput = true;
     in.pref = EnginePref::Render;
     CHECK(ShouldPickTransform(in));
     EnginePickInputs flat;               // the same inputs on a landscape output: render
+    flat.primaryMonitor = true;
     flat.pref = EnginePref::Render;
     CHECK_FALSE(ShouldPickTransform(flat));
 }
@@ -163,12 +166,12 @@ TEST_CASE("a rotated output never gets render: duplication cannot capture it (re
 TEST_CASE("protected content never gets render, whatever anything else says") {
     // Desktop Duplication captures DRM surfaces as black, so render shows nothing at all.
     EnginePickInputs in;
+    in.primaryMonitor = true;
     in.captureProtected = true;
     in.pref = EnginePref::Render;        // the user explicitly asked for render
     CHECK(ShouldPickTransform(in));      // and still does not get it
-    in.primaryMonitor = false;           // not even off the primary monitor
-    CHECK(ShouldPickTransform(in));
     EnginePickInputs man;
+    man.primaryMonitor = true;
     man.renderExcluded = true;           // the manual escape hatch behaves identically
     man.pref = EnginePref::Render;
     CHECK(ShouldPickTransform(man));
@@ -196,6 +199,35 @@ TEST_CASE("a lost render device sends every pick to the transform engine (review
     CHECK(ShouldPickTransform(in));
     in.pref = wind::EnginePref::Render;  // even an explicit render pin cannot be honoured
     CHECK(ShouldPickTransform(in));
+}
+
+TEST_CASE("transform is primary-only: off the primary every non-lost pick is render (review 2026-10-16 #11)") {
+    // Transform's visual offsets are monitor-local while its input mapping adds the origin, so on
+    // a secondary it would show the primary's region. Protected, excluded and rotated secondaries
+    // get render with its known limits instead.
+    EnginePickInputs in;
+    in.primaryMonitor = false;
+    in.coversMonitor = true; in.borderless = true;            // a game
+    CHECK_FALSE(ShouldPickTransform(in));
+    in.captureProtected = true;                               // DRM on the secondary
+    CHECK_FALSE(ShouldPickTransform(in));
+    in.captureProtected = false; in.rotatedOutput = true;     // a portrait secondary
+    CHECK_FALSE(ShouldPickTransform(in));
+    in.rotatedOutput = false; in.renderExcluded = true;
+    CHECK_FALSE(ShouldPickTransform(in));
+    CHECK_FALSE(PickTransformFor("transform", in, false));    // a pinned transform too
+    CHECK_FALSE(PickTransformFor("hybrid", in, false));
+    // A lost render device is the exception: render cannot draw anything until it recovers.
+    in.renderLost = true;
+    CHECK(ShouldPickTransform(in));
+    CHECK(PickTransformFor("transform", in, false));
+}
+
+TEST_CASE("a session moves to a non-primary monitor only when the render engine took it") {
+    CHECK(MayRetargetSession(true, false));    // the primary: either engine can magnify it
+    CHECK(MayRetargetSession(true, true));
+    CHECK(MayRetargetSession(false, true));    // a secondary the render overlay moved to
+    CHECK_FALSE(MayRetargetSession(false, false));   // render refused (other adapter) or transform-only
 }
 
 TEST_CASE("the engine setting applies live: a pinned engine wins, Auto keeps its rule") {

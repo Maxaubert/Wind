@@ -199,8 +199,9 @@ Device-lost recovery lives in the main loop: restore the cursor, clean Inspect s
 churny backstop if a transform game session was live in the last 30 s, rebuild on a 500 ms backoff.
 While a transform session runs the idle render engine cannot notice a TDR itself, so the loop polls
 `GetDeviceRemovedReason` (`RenderEngine::pollDeviceRemoved`). A render session that loses its device
-ends at 1x and hands over to the transform engine instead of freezing the loop; picks go to
-Transform while the device stays lost (`EnginePickInputs::renderLost`).
+is torn down (`TeardownSession`, a 1x Inspect session included) and the view goes to the transform
+engine at 1x instead of freezing the loop; the next active tick enters a fresh transform session.
+Picks go to Transform while the device stays lost (`EnginePickInputs::renderLost`).
 
 ## Idle: the loop sleeps at 1x
 
