@@ -1716,8 +1716,8 @@ static void ExitInspect(TickState& t) {
     // position (which the transform model used to do, because it was forbidden from
     // placing the cursor) throws away the aim the user just spent the mode establishing.
     ClipCursor(nullptr);
-    POINT lp{ (int)(t.mapper.centerX() + 0.5) + t.mon.x,
-              (int)(t.mapper.centerY() + 0.5) + t.mon.y };
+    POINT lp{ wind::PointerPixel(t.mapper.centerX(), t.mon.w) + t.mon.x,
+              wind::PointerPixel(t.mapper.centerY(), t.mon.h) + t.mon.y };
     const bool transformTx = dynamic_cast<TransformModel*>(t.model) != nullptr;
     const bool warp = wind::InspectExitWarps(t.inspectLookMoved, transformTx);
     t.postInspectHold = wind::HoldWindViewAfterInspect(t.inspectLookMoved, transformTx);
@@ -2815,7 +2815,8 @@ static void TeardownSession(TickState& t) {
         // must not survive into the next activation.
         g_input.state().commitLeft.exchange(0);
         g_input.state().commitRight.exchange(0);
-        POINT lp{ (int)(t.mapper.centerX() + 0.5) + t.mon.x, (int)(t.mapper.centerY() + 0.5) + t.mon.y };
+        POINT lp{ wind::PointerPixel(t.mapper.centerX(), t.mon.w) + t.mon.x,
+                  wind::PointerPixel(t.mapper.centerY(), t.mon.h) + t.mon.y };
         SetCursorPos(lp.x, lp.y);                  // resume at the look point
         t.lastSetVirtual = lp;
         RestoreInspectClip(t);

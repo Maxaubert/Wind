@@ -321,9 +321,8 @@ the mouse hook only swallows clicks.
   the crash filter and the `atexit` restore. Toggle-off, teardown and device-lost give back the
   clip the freeze replaced when it confined something (a work-area utility, a windowed game;
   `SavedClipWorthRestoring`, #494), as the shell-panel freeze does; Wind's own edge clip is never
-  saved, the clip beneath it is. Exits warp the cursor to the look point and drain pending click
-  counts. The look point may sit one pixel past the last column or row: that is what lets the
-  cursor slide fully off the right and bottom edges, as it does at 1x (owner, 2026-10-16).
+  saved, the clip beneath it is. Exits warp the cursor to the look point (held to the monitor's
+  last pixel, `PointerPixel`) and drain pending click counts.
 
 ## Tracking: caret, focus and mouse edge mode
 
