@@ -28,8 +28,9 @@ test.beforeEach(async ({ page }) => {
           for (const k of Object.keys(window.__live)) if (k !== 'uiTheme') window.__saved[k] = window.__live[k];
           send({ type: 'sessionSaved', ok: window.__saveOk !== false });
         } else if (msg.type === 'discardSession') {
+          if (window.__discardOk === false) { send({ ...cfg(), discarded: false }); return; }
           for (const k of Object.keys(window.__saved)) window.__live[k] = window.__saved[k];
-          send(cfg());
+          send({ ...cfg(), discarded: true });
         } else if (msg.type === 'mpoState') send({ type: 'mpoState', disabled: false, bootKnown: true, atBoot: false });
         else if (msg.type === 'listProfiles') reply();
         else if (msg.type === 'switchProfile') { window.__profiles.active = msg.name; reply(); }
@@ -219,6 +220,20 @@ test('profile switch prompt: Save saves then switches; Discard discards then swi
   const order = await page.evaluate(() => window.__msgs.map((m) => m.type).filter((t) => t === 'saveSession' || t === 'switchProfile'));
   expect(order).toEqual(['saveSession', 'switchProfile']);
   expect(await page.evaluate(() => window.__saved.maxLevel)).toBe('20');
+});
+
+test('a failed Discard says so and stops the profile switch it was for', async ({ page }) => {
+  await page.addInitScript(() => { window.__discardOk = false; });
+  await page.goto('/');
+  await go(page, 'zoom');
+  await maxLevel(page).fill('20');
+  await go(page, 'prefs');
+  await pickProfile(page, 'Gaming');
+  await page.getByRole('dialog').getByRole('button', { name: 'Discard' }).click();
+  await expect(page.getByRole('dialog', { name: "Couldn't discard" })).toBeVisible();
+  expect(await sent(page, 'discardSession')).toHaveLength(1);
+  expect(await sent(page, 'switchProfile')).toHaveLength(0);
+  await expect(capsule(page)).toContainText('1 unsaved change');
 });
 
 test('switching with nothing unsaved goes straight through', async ({ page }) => {
