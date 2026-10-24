@@ -6,7 +6,7 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     window.__skipSplash = true;
     window.__msgs = [];
-    window.__live = { maxLevel: '12', model: 'transform', txSamplingMode: '0', uiTheme: 'dark' };
+    window.__live = { maxLevel: '12', model: 'transform', uiTheme: 'dark' };
     window.__saved = { ...window.__live };
     const listeners = new Set();
     const send = (data) => listeners.forEach((fn) => fn({ data }));

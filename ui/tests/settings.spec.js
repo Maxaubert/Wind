@@ -214,7 +214,6 @@ test('View: the edge margin shows only when the pointer is kept within the edges
 });
 
 test('Smooth transform scaling is tagged Experimental and keeps the release glide (#439)', async ({ page }) => {
-  await page.addInitScript(() => { window.__cfgExtra = { txSamplingMode: '0' }; });
   await page.goto('/');
   await go(page, 'zoom');
   await expect(key(page, 'txSamplingMode').locator('.tag')).toHaveText('Experimental');
