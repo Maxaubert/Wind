@@ -284,7 +284,6 @@ test('a Wind with both engines up switches engine live: no Restart Wind button',
 });
 
 test('Smooth transform scaling applies live: no MPO registry write, no restart prompt (#369)', async ({ page }) => {
-  await page.addInitScript(() => { window.__live.txSamplingMode = '0'; window.__saved.txSamplingMode = '0'; });
   await page.goto('/');
   await go(page, 'zoom');
   const sel = page.locator('[data-key="txSamplingMode"] select');

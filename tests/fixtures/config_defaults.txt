@@ -49,8 +49,8 @@ panKeysOn	-	-	1
 hideCursorOn	-	-	1
 cursorLockOn	-	-	1
 maxLevel	1	30	30
-zoomInSpeed	0.25	4	1.5
-zoomOutSpeed	0.25	4	1.5
+zoomInSpeed	0.25	4	1.75
+zoomOutSpeed	0.25	4	1.75
 smoothZoom	-	-	1
 smoothZoomAccel	1	8	3
 smoothZoomRamp	0.1	3	0.6
@@ -96,7 +96,7 @@ mouseMarginPct	0	40	0
 trackLog	-	-	0
 ixDecimate	1	16	4
 mpoBuster	-	-	1
-txSamplingMode	-	-	1
+txSamplingMode	-	-	0
 txWarmMode	0	1	1
 txTrace	-	-	0
 txRestLevel	1	1.01	1

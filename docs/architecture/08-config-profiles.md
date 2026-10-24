@@ -198,7 +198,7 @@ Every key works in the ini whether or not Settings shows it. Keys hot-reload unl
 
 | Keys | Meaning |
 |---|---|
-| `maxLevel` (30), `zoomInSpeed` and `zoomOutSpeed` (1.5), `zoomEaseOutMs` (115), `smoothZoom*` | Range and feel of the zoom |
+| `maxLevel` (30), `zoomInSpeed` and `zoomOutSpeed` (1.75), `zoomEaseOutMs` (115), `smoothZoom*` | Range and feel of the zoom |
 | `cursorSensitivity` (1.0), `panSpeed` (1.0), `panGlideMaxPx` (0) | Mouse and arrow-key pan speed; the pan glide's distance, which also sets its ease (#430, #434) |
 | `gameCursorLagMs` (-1) | How late the view follows the pointer while a full-screen game hides it and draws its own cursor; -1 = one display frame, 0 = off (#443). Ini only |
 | `mouseAlign` (0 centred, 1 within the edges), `mouseMarginPct` | Where the pointer sits while the view moves |
@@ -210,7 +210,7 @@ Every key works in the ini whether or not Settings shows it. Keys hot-reload unl
 
 | Keys | Meaning |
 |---|---|
-| `txSamplingMode` (1) | Transform sampling: 0 nearest, 1 smooth (Settings: Transform scaling, formerly "High resolution cursor", [05](05-transform-engine.md)) |
+| `txSamplingMode` (0) | Transform sampling: 0 nearest, 1 smooth (Settings: Transform scaling, formerly "High resolution cursor", [05](05-transform-engine.md)) |
 | `edgeClip` (1, hot) | While a transform session is zoomed, clips the pointer 1 px inside the monitor's left and top edges so it cannot rest on the contested outermost pixel (cursor-shape flicker there). The right and bottom stay open so the cursor can slide off the screen, as at 1x. A tighter existing clip (game confine, Inspect) always wins; 0 turns it off. Rationale: `Config::edgeClip` in `src/config/config.h`, mechanics in `TransformModel::edgeClipManage` |
 | `renderScaling` (0), `upscaleTiming` (0) | Render engine scaling: 0 nearest, 1 xBR, 2 NVIDIA Image Scaling (Settings: Render scaling, [04](04-render-engine.md)); `bilinear` is retired and only migrates (0 keeps nearest). `upscaleTiming=1` logs the filter's GPU time |
 | `sharpness`, `brightness`, `hdrTonemap` (1) | Render engine image |

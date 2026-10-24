@@ -66,8 +66,8 @@ struct Config {
     // --- Zoom experience (see docs/specs/2026-05-26-configurable-zoom-design.md) ---
     // Per-direction rate multipliers (1.0 = default speed); apply in BOTH linear and smooth modes.
     // Speed is independent of maxLevel (a fixed doublings/sec base inside ZoomController).
-    double zoomInSpeed  = 1.5;       // 0.25-4.0
-    double zoomOutSpeed = 1.5;       // 0.25-4.0
+    double zoomInSpeed  = 1.75;      // 0.25-4.0
+    double zoomOutSpeed = 1.75;      // 0.25-4.0
     int    zoomTrace    = 0;         // 1 = log a zoom-in/zoom-out timeline per zoom (#310, diagnostics)
     // Hitch recorder (#361): log every long zoomed frame with its classified cause, plus a
     // per-minute summary. On by default: the record costs ~0.5 us per tick and logs nothing on a
@@ -210,7 +210,7 @@ struct Config {
     // to come and go between builds; it is re-applied per magnification context. KNOWN
     // INTERACTION: the 1px warm pulse (txWarmMode=1) puts the view 1px off-true on rest ticks;
     // nearest masks that as sub-block noise, smoothing can render it as visible shaking.
-    int txSamplingMode = 1;
+    int txSamplingMode = 0;   // nearest (owner pick 2026-10-24, #510)
     // MPO buster (issue #191, hot): 1 (default) = during transform GAME sessions on MPO-ENABLED
     // machines, show a fullscreen alpha-1 click-through ghost that demotes the game off its
     // hardware overlay plane - off the plane there is no 16-bit translation field to overflow,

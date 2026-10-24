@@ -7,7 +7,7 @@ TEST_CASE("defaults when text is empty") {
     Config c = ParseConfig("");
     CHECK(c.zoomInButton  == 0);   // shipped unbound (onboarding captures it)
     CHECK(c.zoomOutButton == 0);   // shipped unbound
-    CHECK(c.maxLevel == doctest::Approx(30.0));   // owner pick (#508)
+    CHECK(c.maxLevel == doctest::Approx(30.0));   // owner pick (#508, #510)
     CHECK(c.diagnostics == 0);
     // Ramp step cap ships ON (issue #219): uncapped, ~15% of high-level zoom-ins stall 35-43ms
     // then snap 1.2-1.9 levels; capped at 2.5%/tick every measured ramp was even. 0 would
@@ -81,8 +81,8 @@ TEST_CASE("renderer knobs have sane defaults") {
     CHECK(c.multiMonitor == 1);                // follows the cursor's monitor (#508)
     CHECK(c.cropCapture == 0);                 // shipped off: always copy all changed regions (no edge staleness)
     CHECK(c.smoothZoom == 1);                  // shipped on (eased-in zoom)
-    CHECK(c.zoomInSpeed == doctest::Approx(1.5));   // owner pick (#508)
-    CHECK(c.zoomOutSpeed == doctest::Approx(1.5));
+    CHECK(c.zoomInSpeed == doctest::Approx(1.75));   // owner pick (#508, #510)
+    CHECK(c.zoomOutSpeed == doctest::Approx(1.75));
     CHECK(c.zoomEaseOutMs == 115);
     CHECK(c.smoothZoomAccel == doctest::Approx(3.0));
     CHECK(c.smoothZoomRamp == doctest::Approx(0.6));
@@ -174,7 +174,7 @@ TEST_CASE("parses overrides and ignores comments/blank lines") {
     CHECK(c.maxLevel == doctest::Approx(12.5));
     CHECK(c.zoomInButton == 1);
     CHECK(c.cursorSensitivity == doctest::Approx(0.5));
-    CHECK(c.zoomInSpeed == doctest::Approx(1.5)); // untouched default
+    CHECK(c.zoomInSpeed == doctest::Approx(1.75)); // untouched default
 }
 TEST_CASE("malformed lines are ignored, keep defaults") {
     Config c = ParseConfig("garbage line\nmaxLevel\n=5\n");
@@ -640,7 +640,7 @@ TEST_CASE("the first-run ini carries the new keys and parses to the struct defau
 }
 
 TEST_CASE("txSamplingMode folds the nearest aliases 2..4 to 0 (review 2026-10-09 #23)") {
-    CHECK(ParseConfig("").txSamplingMode == 1);   // Smooth by default (#508)
+    CHECK(ParseConfig("").txSamplingMode == 0);   // Nearest by default (#510)
     CHECK(ParseConfig("txSamplingMode=0\n").txSamplingMode == 0);
     CHECK(ParseConfig("txSamplingMode=1\n").txSamplingMode == 1);
     CHECK(ParseConfig("txSamplingMode=-1\n").txSamplingMode == -1);   // leave DWM alone stays valid
