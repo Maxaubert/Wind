@@ -8,7 +8,7 @@ const boot = (extra = {}) => async (page) => {
   await page.addInitScript((extra) => {
     const listeners = new Set();
     const live = { maxLevel: '12', zoomInVk: '33', zoomInButton: '2', zoomOutVk: '114', cursorLockVk: '113',
-      model: 'hybrid', uiTheme: 'dark', showAdvanced: '1', ...extra };
+      model: 'transform', uiTheme: 'dark', showAdvanced: '1', ...extra };
     window.chrome = { webview: {
       addEventListener: (_e, fn) => listeners.add(fn),
       postMessage: (msg) => {

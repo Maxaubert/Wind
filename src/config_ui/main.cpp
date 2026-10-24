@@ -203,7 +203,7 @@ static std::string SessionPayload(const std::string& live) {
     if (WindRunning() && wind::ReadTextFileOk(wind::RunningModelPath(), running)) {
         while (!running.empty() && (running.back() == '\r' || running.back() == '\n' || running.back() == ' ')) running.pop_back();
         // "live": both engines are up and any engine applies without a restart (no Restart button).
-        if (running != "render" && running != "transform" && running != "hybrid" && running != "live") running.clear();
+        if (running != "render" && running != "transform" && running != "live") running.clear();
     }
     return "\"values\":" + JsonObjectOf(values) + ",\"saved\":" + JsonObjectOf(saved) +
            (running.empty() ? std::string() : ",\"runningModel\":\"" + running + "\"") +
@@ -436,7 +436,7 @@ static void OnExportDiagnostics() {
 static void OnCreateProfile(ICoreWebView2* wv, const std::string& j) {
     // Factory defaults by design (spec): absent keys fall back to built-in defaults. `model` is
     // seeded EXPLICITLY so a fresh profile file always names its engine (the
-    // core's own missing-key default is hybrid, the same as the UI schema's "Auto"). Globals (onboarded=1, uiPalette, showAdvanced) carry over in MakeLiveText.
+    // core's own missing-key default is transform, the same as the UI schema's). Globals (onboarded=1, uiPalette, showAdvanced) carry over in MakeLiveText.
     // fromCurrent ("Duplicate current"): the new profile is the live session as it stands, unsaved
     // changes included, built here from the live text so `model` (and everything else) is exactly
     // what is running: no restart, no write-back by the page, and the outgoing profile is NOT
@@ -452,7 +452,7 @@ static void OnCreateProfile(ICoreWebView2* wv, const std::string& j) {
         if (!wind::EnsureProfilesSeeded(IniPath()))
             err = "Could not set up profiles (the config file may be locked); try again in a moment";
         std::string seed = "; Wind profile. Keys absent here fall back to Wind's built-in defaults.\n"
-                           "model=hybrid\n";
+                           "model=transform\n";
         if (err.empty() && fromCurrent) {
             std::string live;
             if (!ReadIni(live)) err = "Could not read the config file";

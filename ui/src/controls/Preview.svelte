@@ -15,7 +15,7 @@
   const group = groups.find((g) => g.id === q.get('group')) || groups[0];
   const calls = (window.__calls = []);
 
-  let values = $state({ model: q.get('model') || 'hybrid', zoomInVk: '33', zoomInButton: '2', noSwallowApps: 'netflix.exe' });
+  let values = $state({ model: q.get('model') || 'transform', zoomInVk: '33', zoomInButton: '2', noSwallowApps: 'netflix.exe' });
   for (const r of groups.flatMap(groupRows)) {
     if (!r.key.startsWith('__') && !(r.key in values)) values[r.key] = r.def ?? '';
     for (const k of bindKeys(r)) if (!(k in values)) values[k] = '0';
@@ -23,7 +23,7 @@
   const visible = (r) => !r.showIf || (r.showIf.ne !== undefined ? String(values[r.showIf.key]) !== String(r.showIf.ne) : String(values[r.showIf.key]) === String(r.showIf.eq));
   const set = (key, val) => { values[key] = val; calls.push([key, val]); };
   const extra = {
-    runningModel: 'hybrid', version: '0.22.5',
+    runningModel: 'transform', version: '0.22.5',
     onRestart: () => calls.push('restart'), onAction: (a) => calls.push(['action', a]),
     onRepo: () => calls.push('repo'),
     pick: async () => 'RDR2.exe',

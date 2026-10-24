@@ -34,7 +34,7 @@ inline INT_PTR LaunchWindExe() {
 }
 
 // A relaunch for a model change failed: keep "ini model == running model" by writing the old model
-// back (an empty one means the key was unset, which reads as hybrid) and dropping session.keep.
+// back (an empty one means the key was unset, which reads as transform) and dropping session.keep.
 // Re-reads the live ini, since another surface may have written since; `fallbackLive` (may be
 // null) is used when that read fails.
 inline void RevertModelAfterFailedRelaunch(const std::wstring& ini, const std::string& oldModel,
@@ -46,7 +46,7 @@ inline void RevertModelAfterFailedRelaunch(const std::wstring& ini, const std::s
         if (!fallbackLive) return;
         cur = *fallbackLive;
     }
-    WriteTextFileAtomic(ini, UpdateIniText(cur, "model", oldModel.empty() ? "hybrid" : oldModel));
+    WriteTextFileAtomic(ini, UpdateIniText(cur, "model", oldModel.empty() ? "transform" : oldModel));
 }
 
 enum class ProfileSwitchError {
@@ -110,7 +110,7 @@ inline ProfileSwitchResult SwitchProfile(const std::wstring& ini, const std::wst
         r.error = ProfileSwitchError::WriteFailed;
         return r;
     }
-    // ParseConfig canonicalizes (unknown or retired models -> hybrid), so every surface agrees on
+    // ParseConfig canonicalizes (unknown or retired models -> transform), so every surface agrees on
     // whether the model changed.
     r.oldModel = ParseConfig(oldLive).model;
     r.newModel = ParseConfig(newLive).model;

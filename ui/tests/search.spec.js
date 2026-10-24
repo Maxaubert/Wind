@@ -10,7 +10,7 @@ test.beforeEach(async ({ page }) => {
     window.__msgs = [];
     const listeners = new Set();
     const send = (data) => listeners.forEach((fn) => fn({ data }));
-    window.__live = { maxLevel: '12', model: 'hybrid', uiTheme: 'dark' };
+    window.__live = { maxLevel: '12', model: 'transform', uiTheme: 'dark' };
     window.chrome = { webview: {
       addEventListener: (_e, fn) => listeners.add(fn),
       postMessage: (msg) => {
@@ -118,7 +118,7 @@ test('meta keywords reach rows without their label words, incl. the centred-curs
   expect(keys('night light')[0]).toBe('colorWarmPct');
   expect(keys('blue light')[0]).toBe('colorWarmPct');
   expect(keys('dim')).toContain('colorDimPct');
-  expect(keys('renderer')).toEqual(expect.arrayContaining(['model', 'engineGame']));
+  expect(keys('renderer')).toEqual(expect.arrayContaining(['model']));
   expect(keys('freeze')).toContain('__cursorLock');
   expect(keys('crosshair')).toContain('__cursorLock');
   expect(keys('arrows')).toContain('__pan');
@@ -138,10 +138,9 @@ test('every searchable row has meta keywords, and no keyword is empty or has an 
 
 test('advanced rows are searchable and say so; removed and hero rows are not indexed', () => {
   const engine = search(groups, 'engine');
-  expect(engine.find((h) => h.key === 'model').adv).toBe(true);
-  expect(engine.find((h) => h.key === 'engineGame').adv).toBe(true);
+  expect(engine.find((h) => h.key === 'model').adv).toBeFalsy();   // a plain row since #508
   expect(search(groups, 'maximum').every((h) => !h.adv)).toBe(true);
-  expect(keys('advanced')).toEqual(expect.arrayContaining(['model', 'noSwallowApps', 'lockApps', 'smoothZoomAccel']));
+  expect(keys('advanced')).toEqual(expect.arrayContaining(['noSwallowApps', 'lockApps', 'smoothZoomAccel']));
   expect(keys('advanced')).not.toContain('maxLevel');
   expect(keys('render')).not.toContain('renderExclude');
   expect(keys('logo')).not.toContain('__about');

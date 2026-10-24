@@ -7,7 +7,7 @@ import { changedKeys, fill, GLOBAL_KEYS } from '../src/session.js';
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     window.__msgs = [];
-    window.__live = { maxLevel: '12', zoomInVk: '33', zoomInButton: '2', model: 'hybrid', uiTheme: 'dark', ...(window.__liveExtra || {}) };
+    window.__live = { maxLevel: '12', zoomInVk: '33', zoomInButton: '2', model: 'transform', uiTheme: 'dark', ...(window.__liveExtra || {}) };
     window.__saved = { ...window.__live };
     window.__profiles = { names: ['Default', 'Gaming'], active: 'Default' };
     const listeners = new Set();
@@ -60,10 +60,10 @@ test('session helpers: global keys never count, defaults fill both sides', () =>
   expect(changedKeys(f.values, f.saved)).toEqual(['maxLevel']);
 });
 
-test('session helpers: an unknown model (the retired magnify) reads as hybrid, like the core', () => {
-  const f = fill({ values: { model: 'magnify' }, saved: { model: 'magnify' } });
-  expect(f.values.model).toBe('hybrid');
-  expect(f.saved.model).toBe('hybrid');
+test('session helpers: an unknown model (the retired hybrid and magnify) reads as transform, like the core', () => {
+  const f = fill({ values: { model: 'magnify' }, saved: { model: 'hybrid' } });
+  expect(f.values.model).toBe('transform');
+  expect(f.saved.model).toBe('transform');
   expect(changedKeys(f.values, f.saved)).toEqual([]);
   expect(fill({ values: { model: 'transform' } }).values.model).toBe('transform');
   expect(fill({ values: { model: 'render' } }).values.model).toBe('render');
@@ -266,8 +266,8 @@ test('engine change writes the ini, then Restart Wind relaunches; a failed relau
   await page.evaluate(() => window.__hostSend({ type: 'restartFailed' }));
   await expect(page.getByRole('dialog', { name: "Couldn't restart Wind" })).toBeVisible();
   await page.getByRole('button', { name: 'Close' }).last().click();
-  await expect(page.locator('[data-key="model"] select')).toHaveValue('hybrid');
-  expect(await page.evaluate(() => window.__live.model)).toBe('hybrid');
+  await expect(page.locator('[data-key="model"] select')).toHaveValue('transform');
+  expect(await page.evaluate(() => window.__live.model)).toBe('transform');
 });
 
 test('a Wind with both engines up switches engine live: no Restart Wind button', async ({ page }) => {
@@ -276,7 +276,7 @@ test('a Wind with both engines up switches engine live: no Restart Wind button',
   await go(page, 'prefs');
   await page.locator('[data-key="showAdvanced"]').getByRole('switch').check({ force: true });   // the engine row is advanced
   await go(page, 'zoom');
-  for (const m of ['render', 'transform', 'hybrid']) {
+  for (const m of ['render', 'transform']) {
     await page.locator('[data-key="model"] select').selectOption(m);
     expect(await page.evaluate(() => window.__live.model)).toBe(m);
     await expect(page.getByRole('button', { name: 'Restart Wind' })).toHaveCount(0);
@@ -284,6 +284,7 @@ test('a Wind with both engines up switches engine live: no Restart Wind button',
 });
 
 test('Smooth transform scaling applies live: no MPO registry write, no restart prompt (#369)', async ({ page }) => {
+  await page.addInitScript(() => { window.__live.txSamplingMode = '0'; window.__saved.txSamplingMode = '0'; });
   await page.goto('/');
   await go(page, 'zoom');
   const sel = page.locator('[data-key="txSamplingMode"] select');
@@ -298,7 +299,10 @@ test('Smooth transform scaling applies live: no MPO registry write, no restart p
 });
 
 test('an ini from before renderScaling keeps Nearest when it had bilinear=0 (#456)', async ({ page }) => {
-  await page.addInitScript(() => { window.__live.bilinear = '0'; window.__saved.bilinear = '0'; });
+  await page.addInitScript(() => {
+    window.__live.bilinear = '0'; window.__saved.bilinear = '0';
+    window.__live.model = 'render'; window.__saved.model = 'render';   // the row shows for the render engine
+  });
   await page.goto('/');
   await go(page, 'zoom');
   await expect(page.locator('[data-key="renderScaling"] select')).toHaveValue('0');

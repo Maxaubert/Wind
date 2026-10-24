@@ -16,17 +16,18 @@ namespace wind { namespace Flyout {
 inline constexpr const char* kEngineKey = "model";
 
 // The options, in the order and with the labels of the Settings row (ui/src/settings-schema.js:
-// hybrid = Auto, render, transform). The core reads the retired model=magnify as Auto.
-inline constexpr int kEngineCount = 3;
+// transform, render). Auto (hybrid) was removed in #508; the core reads it, like the retired
+// model=magnify, as Transform.
+inline constexpr int kEngineCount = 2;
 inline const char* EngineValue(int i) {
-    switch (i) { case 1: return "render"; case 2: return "transform"; default: return "hybrid"; }
+    switch (i) { case 1: return "render"; default: return "transform"; }
 }
 inline const wchar_t* EngineLabel(int i) {
-    switch (i) { case 1: return L"Render"; case 2: return L"Transform"; default: return L"Auto"; }
+    switch (i) { case 1: return L"Render"; default: return L"Transform"; }
 }
 
-// The option a `model` value means. Missing or unknown reads as Auto, exactly like the core's config
-// parse (src/config/config.cpp falls back to "hybrid").
+// The option a `model` value means. Missing or unknown reads as Transform, exactly like the core's
+// config parse (src/config/config.cpp falls back to "transform").
 inline int EngineIndex(const std::string& model) {
     const std::string m = TrimWs(model);
     for (int i = 0; i < kEngineCount; ++i) if (m == EngineValue(i)) return i;

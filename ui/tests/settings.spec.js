@@ -10,7 +10,7 @@ test.beforeEach(async ({ page }) => {
     const init = () => {
       if (window.__live) return;
       window.__live = { maxLevel: '12', zoomInVk: '33', zoomInButton: '2', zoomOutVk: '114',
-        cursorLockVk: '113', model: 'hybrid', uiTheme: 'dark', ...(window.__cfgExtra || {}) };
+        cursorLockVk: '113', model: 'transform', uiTheme: 'dark', ...(window.__cfgExtra || {}) };
       window.__saved = { ...window.__live };
     };
     const listeners = new Set();
@@ -67,7 +67,7 @@ test('pages show their sections; a section with nothing to show is dropped', asy
   await expect(page.locator('main .card')).toHaveCount(2);                // Zoom, Extra keys
   await expect(page.locator('main .cap')).toHaveText(['Zoom', 'Extra keys']);
   await go(page, 'zoom');
-  await expect(page.locator('main .cap')).toHaveText(['Level and speed', 'Engine']);   // Easing is advanced; Engine keeps its scaling rows
+  await expect(page.locator('main .cap')).toHaveText(['Level and speed', 'Engine']);   // Easing is advanced; Engine keeps its row and scaling
   await go(page, 'view');
   await expect(page.locator('main .cap')).toHaveText(['Movement', 'Typing and focus']);
   await go(page, 'prefs');
@@ -90,7 +90,6 @@ test('copy: the row names and descriptions follow the table, and "Never use Rend
   await go(page, 'zoom');
   await expect(page.locator('main .cap')).toHaveText(['Level and speed', 'Easing', 'Engine']);
   await expect(page.locator('[data-key="smoothZoomAccel"] .label')).toHaveText('Soft start');
-  await expect(page.locator('[data-key="engineGame"] .desc')).toHaveText('Full screen and borderless games');
   await expect(page.getByText('Never use Render for')).toHaveCount(0);
   await expect(key(page, 'renderExclude')).toHaveCount(0);
 });
@@ -119,7 +118,8 @@ test('Show advanced settings reveals the advanced rows inline, with no marker, a
   await page.goto('/');
   await expect(key(page, 'noSwallowApps')).toHaveCount(0);
   await go(page, 'zoom');
-  for (const k of ['model', 'engineGame', 'smoothZoomAccel', 'smoothZoomRamp']) await expect(key(page, k)).toHaveCount(0);
+  await expect(key(page, 'model')).toBeVisible();   // the engine row is a plain row since #508
+  for (const k of ['smoothZoomAccel', 'smoothZoomRamp']) await expect(key(page, k)).toHaveCount(0);
   await go(page, 'view');
   await expect(key(page, 'lockApps')).toHaveCount(0);
   await expect(key(page, 'panGlideMaxPx')).toBeVisible();   // Pan glide is a plain row (#430)
@@ -132,7 +132,7 @@ test('Show advanced settings reveals the advanced rows inline, with no marker, a
   expect((await sent(page, 'setConfig')).some((m) => m.key === 'showAdvanced' && String(m.value) === '1')).toBe(true);
   await expect(page.locator('.capsule')).toHaveCount(0);
   await go(page, 'zoom');
-  for (const k of ['model', 'engineGame', 'smoothZoomAccel', 'smoothZoomRamp']) await expect(key(page, k)).toBeVisible();
+  for (const k of ['model', 'smoothZoomAccel', 'smoothZoomRamp']) await expect(key(page, k)).toBeVisible();
   await expect(page.locator('main .cap')).toHaveText(['Level and speed', 'Easing', 'Engine']);
   await go(page, 'view');
   await expect(key(page, 'lockApps')).toBeVisible();
@@ -154,16 +154,19 @@ test('an advanced switch left on in the ini shows the advanced rows at launch', 
   await expect(key(page, 'showAdvanced').getByRole('switch')).toBeChecked();
 });
 
-test('Zoom engine: the engine row, per-window rows follow Auto, the share-keys app list writes through the session', async ({ page }) => {
+test('Zoom engine: Transform and Render only, each with its scaling row; the share-keys app list writes through the session', async ({ page }) => {
   await page.addInitScript(() => { window.__cfgExtra = { showAdvanced: '1' }; });
   await page.goto('/');
   await go(page, 'zoom');
+  await expect(key(page, 'model').locator('option')).toHaveText(['Transform', 'Render']);
+  await expect(key(page, 'txSamplingMode')).toBeVisible();
+  await expect(key(page, 'renderScaling')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Restart Wind' })).toHaveCount(0);
   await key(page, 'model').locator('select').selectOption('render');
   await expect(page.getByRole('button', { name: 'Restart Wind' })).toBeVisible();
-  await expect(key(page, 'engineGame')).toHaveCount(0);
-  await key(page, 'model').locator('select').selectOption('hybrid');
-  await expect(key(page, 'engineGame')).toBeVisible();
+  await expect(key(page, 'renderScaling')).toBeVisible();
+  await expect(key(page, 'txSamplingMode')).toHaveCount(0);
+  await key(page, 'model').locator('select').selectOption('transform');
   await go(page, 'hotkeys');
   const apps = key(page, 'noSwallowApps');
   await apps.getByRole('button', { name: /Manage/ }).click();
@@ -190,12 +193,14 @@ test('an app list with a hand-edited duplicate still opens, listing it once (#49
   expect(errors).toEqual([]);
 });
 
-test('a legacy model=magnify shows Auto with its per-window rows (#495)', async ({ page }) => {
-  await page.addInitScript(() => { window.__cfgExtra = { showAdvanced: '1', model: 'magnify' }; });
-  await page.goto('/');
-  await go(page, 'zoom');
-  await expect(key(page, 'model').locator('select')).toHaveValue('hybrid');
-  await expect(key(page, 'engineGame')).toBeVisible();
+test('a legacy model=magnify or hybrid shows Transform (#495, #508)', async ({ page }) => {
+  for (const legacy of ['magnify', 'hybrid']) {
+    await page.addInitScript((m) => { window.__cfgExtra = { showAdvanced: '1', model: m }; }, legacy);
+    await page.goto('/');
+    await go(page, 'zoom');
+    await expect(key(page, 'model').locator('select')).toHaveValue('transform');
+    await expect(page.locator('.capsule')).toHaveCount(0);
+  }
 });
 
 // ---- other pages -----------------------------------------------------------------------------------
@@ -209,6 +214,7 @@ test('View: the edge margin shows only when the pointer is kept within the edges
 });
 
 test('Smooth transform scaling is tagged Experimental and keeps the release glide (#439)', async ({ page }) => {
+  await page.addInitScript(() => { window.__cfgExtra = { txSamplingMode: '0' }; });
   await page.goto('/');
   await go(page, 'zoom');
   await expect(key(page, 'txSamplingMode').locator('.tag')).toHaveText('Experimental');

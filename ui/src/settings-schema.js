@@ -21,10 +21,6 @@
 // Copy rules: one short plain line, no punctuation or symbols, no references, no toggle labels starting with "Enable",
 // no description that restates its label, no product names.
 
-const hybrid = { key: 'model', eq: 'hybrid' };
-const engineOpts = ['auto', 'transform', 'render'];
-const engineLabels = { auto: 'Auto', transform: 'Transform', render: 'Render' };
-
 export const groups = [
   { id: 'hotkeys', label: 'Hotkeys', icon: 'hotkeys',
     desc: 'Keys that control zooming',
@@ -63,10 +59,10 @@ export const groups = [
     desc: 'How far and how fast to zoom',
     cards: [
       { caption: 'Level and speed', rows: [
-        { key: 'maxLevel', type: 'slider', label: 'Max zoom', keywords: ['maximum', 'limit', 'highest', 'magnification', 'level', 'cap', 'zoom level', 'factor', 'times', 'upper'], desc: 'The highest zoom level', min: 2, max: 30, step: 1, def: 12.0, unit: 'times' },
-        { key: 'zoomInSpeed', type: 'slider', label: 'Zoom-in speed', keywords: ['faster', 'slower', 'rate', 'magnify speed', 'zoom rate', 'acceleration', 'velocity', 'how fast'], desc: 'How fast the view zooms in', min: 0.25, max: 4, step: 0.05, def: 1.0, unit: 'times' },
-        { key: 'zoomOutSpeed', type: 'slider', label: 'Zoom-out speed', keywords: ['faster', 'slower', 'rate', 'zoom rate', 'velocity', 'how fast'], desc: 'How fast the view zooms out', min: 0.25, max: 4, step: 0.05, def: 1.0, unit: 'times' },
-        { key: 'zoomEaseOutMs', type: 'slider', label: 'Release glide', keywords: ['inertia', 'coast', 'momentum', 'ease out', 'easing', 'smooth stop', 'slow down', 'deceleration', 'stop', 'let go', 'release', 'delay', 'milliseconds'], desc: 'How long the zoom coasts after you let go', min: 0, max: 300, step: 5, def: 45, unit: 'ms' },
+        { key: 'maxLevel', type: 'slider', label: 'Max zoom', keywords: ['maximum', 'limit', 'highest', 'magnification', 'level', 'cap', 'zoom level', 'factor', 'times', 'upper'], desc: 'The highest zoom level', min: 2, max: 30, step: 1, def: 30.0, unit: 'times' },
+        { key: 'zoomInSpeed', type: 'slider', label: 'Zoom-in speed', keywords: ['faster', 'slower', 'rate', 'magnify speed', 'zoom rate', 'acceleration', 'velocity', 'how fast'], desc: 'How fast the view zooms in', min: 0.25, max: 4, step: 0.05, def: 1.5, unit: 'times' },
+        { key: 'zoomOutSpeed', type: 'slider', label: 'Zoom-out speed', keywords: ['faster', 'slower', 'rate', 'zoom rate', 'velocity', 'how fast'], desc: 'How fast the view zooms out', min: 0.25, max: 4, step: 0.05, def: 1.5, unit: 'times' },
+        { key: 'zoomEaseOutMs', type: 'slider', label: 'Release glide', keywords: ['inertia', 'coast', 'momentum', 'ease out', 'easing', 'smooth stop', 'slow down', 'deceleration', 'stop', 'let go', 'release', 'delay', 'milliseconds'], desc: 'How long the zoom coasts after you let go', min: 0, max: 300, step: 5, def: 115, unit: 'ms' },
       ] },
       { caption: 'Easing', rows: [
         // Smooth zoom is always on (core default 1); its shape sliders are advanced.
@@ -74,37 +70,23 @@ export const groups = [
         { key: 'smoothZoomRamp', type: 'slider', adv: true, label: 'Soft start length', keywords: ['ease', 'duration', 'time', 'ramp', 'seconds', 'how long', 'smooth', 'smoothing', 'animation', 'curve'], desc: 'How long the soft start lasts', min: 0.1, max: 3, step: 0.1, def: 0.6, unit: 'seconds' },
       ] },
       { caption: 'Engine', rows: [
-        { key: 'model', type: 'engine', adv: true, label: 'Engine', keywords: ['renderer', 'render', 'mode', 'transform', 'auto', 'hybrid', 'model', 'backend', 'method', 'magnifier', 'gpu', 'capture', 'dwm', 'restart', 'compositor'], desc: 'How the screen is zoomed',
-          options: ['hybrid', 'render', 'transform'],
-          optionLabels: { hybrid: 'Auto', render: 'Render', transform: 'Transform' },
-          def: 'hybrid' },
-        // SCALING: how each engine enlarges the screen, under the engine it belongs to (Auto uses
-        // both, so it shows both). Not advanced, so the card stays reachable without them.
+        // Not advanced since #508: with Auto gone the card would otherwise show one scaling row alone.
+        { key: 'model', type: 'engine', label: 'Engine', keywords: ['renderer', 'render', 'mode', 'transform', 'model', 'backend', 'method', 'magnifier', 'gpu', 'capture', 'dwm', 'restart', 'compositor'], desc: 'How the screen is zoomed',
+          options: ['transform', 'render'],
+          optionLabels: { transform: 'Transform', render: 'Render' },
+          def: 'transform' },
+        // SCALING: how each engine enlarges the screen, under the engine it belongs to. Not advanced, so the card stays reachable without them.
         // Transform: txSamplingMode, DWM's own filter (0 nearest / 1 smooth = Lanczos, the former High
         // resolution cursor toggle, #227). It applies live (#369) and turning Smooth on asks first (#441).
         { key: 'txSamplingMode', type: 'select', label: 'Transform scaling', tag: 'Experimental', keywords: ['scaling', 'upscaling', 'filter', 'sharp', 'crisp', 'smooth', 'blurry', 'pixelated', 'hidpi', 'sampling', 'quality', 'nearest', 'lanczos', 'bitmap smoothing', 'high resolution cursor', 'mpo', 'overlay', 'cursor', 'pointer', 'resolution', '4k', 'antialiasing'],
-          desc: 'Smooth also sharpens the pointer at high zoom', options: ['0', '1'], optionLabels: { '0': 'Nearest', '1': 'Smooth' }, def: '0',
+          desc: 'Smooth also sharpens the pointer at high zoom', options: ['0', '1'], optionLabels: { '0': 'Nearest', '1': 'Smooth' }, def: '1',
           showIf: { key: 'model', ne: 'render' } },
-        // Render: renderScaling (issue #456), the engine's scaling filter: nearest, xBR (default) or
-        // NVIDIA Image Scaling, picked in the 2026-10-12 upscaler A/B. Applies on the config reload.
+        // Render: renderScaling (issue #456), the engine's scaling filter: nearest (default, #508), xBR
+        // or NVIDIA Image Scaling, picked in the 2026-10-12 upscaler A/B. Applies on the config reload.
         { key: 'renderScaling', type: 'select', label: 'Render scaling', keywords: ['scaling', 'upscaling', 'filter', 'sharp', 'crisp', 'smooth', 'blurry', 'pixelated', 'sampling', 'quality', 'nearest', 'xbr', 'nis', 'nvidia', 'image scaling', 'bilinear', 'point', 'resolution', 'antialiasing'],
           desc: 'How the image is enlarged', options: ['0', '1', '2'],
-          optionLabels: { '0': 'Nearest', '1': 'xBR', '2': 'NVIDIA Image Scaling' }, def: '1',
+          optionLabels: { '0': 'Nearest', '1': 'xBR', '2': 'NVIDIA Image Scaling' }, def: '0',
           showIf: { key: 'model', ne: 'transform' } },
-        // PER-WINDOW-TYPE ENGINE (2026-08-24). Every row defaults to Auto so an untouched install
-        // behaves as before. They only apply when the engine above is Auto, so showIf hides them
-        // when a single engine is pinned. ("Never use Render for" left Settings in #318; the
-        // renderExclude ini key and the core's own detection stay.)
-        { key: 'engineGame', type: 'select', adv: true, label: 'Engine for games', keywords: ['renderer', 'render', 'transform', 'auto', 'fullscreen', 'borderless', 'video games', 'gaming', 'mode', 'per window', 'per app'], desc: 'Full screen and borderless games',
-          options: engineOpts, optionLabels: engineLabels, def: 'auto', showIf: hybrid },
-        { key: 'engineAcrylic', type: 'select', adv: true, label: 'Engine for blurred windows', keywords: ['renderer', 'render', 'transform', 'auto', 'acrylic', 'mica', 'transparent', 'translucent', 'glass', 'blur', 'mode', 'per window'],
-          desc: 'Windows with blurred see through backgrounds',
-          options: engineOpts, optionLabels: engineLabels, def: 'auto', showIf: hybrid },
-        { key: 'engineDesktop', type: 'select', adv: true, label: 'Engine for the desktop', keywords: ['renderer', 'render', 'transform', 'auto', 'taskbar', 'explorer', 'file windows', 'shell', 'mode', 'per window'],
-          desc: 'The desktop taskbar and file windows',
-          options: engineOpts, optionLabels: engineLabels, def: 'auto', showIf: hybrid },
-        { key: 'engineOther', type: 'select', adv: true, label: 'Engine for other windows', keywords: ['renderer', 'render', 'transform', 'auto', 'apps', 'programs', 'rest', 'everything else', 'default', 'mode', 'per window'], desc: 'All other windows',
-          options: engineOpts, optionLabels: engineLabels, def: 'auto', showIf: hybrid },
       ] },
     ] },
 
@@ -124,7 +106,7 @@ export const groups = [
         // view and draws the real pointer, #369); Wind = Wind writes every view and draws its own copy of
         // the pointer (the pre-#369 session). Transform engine only; read at the next zoom-in.
         { key: 'txNativeCursor', type: 'select', label: 'Mouse tracking', keywords: ['tracking', 'mouse', 'pointer', 'cursor', 'native', 'windows', 'magnifier', 'follow', 'centring', 'centering', 'sprite', 'dwm', 'smooth', 'lag', 'wind'],
-          desc: 'Who follows the mouse while zoomed', options: ['1', '0'], optionLabels: { '1': 'Native', '0': 'Wind' }, def: '0',
+          desc: 'Who follows the mouse while zoomed', options: ['1', '0'], optionLabels: { '1': 'Native', '0': 'Wind' }, def: '1',
           showIf: { key: 'model', ne: 'render' } },
         // Zoom lock detection (#221): games like DOOM pin the mouse to the screen centre, which would
         // pin the zoom view there too. Listed apps get the view UNLOCKED from the pointer.

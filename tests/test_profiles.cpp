@@ -113,7 +113,7 @@ TEST_CASE("MakeLiveText: empty profile means factory defaults (profile keys drop
     CHECK(v["onboarded"] == "1");             // global survives
     CHECK(v["profile"] == "Fresh");
     Config c = ParseConfig(live);
-    CHECK(c.maxLevel == doctest::Approx(12.0));   // built-in default
+    CHECK(c.maxLevel == doctest::Approx(30.0));   // built-in default
     CHECK(c.zoomInVk == 0);
 }
 
@@ -270,13 +270,15 @@ TEST_CASE("profile names: a device name is reserved with any extension, and the 
 }
 
 TEST_CASE("SessionDiffers: UI keys outside the first-run template read as their built-in default (review #70, #76)") {
-    CHECK_FALSE(SessionDiffers("zoomEaseOutMs=45\n", "maxLevel=12\n"));
-    CHECK(SessionDiffers("zoomEaseOutMs=100\n", "maxLevel=12\n"));
-    CHECK_FALSE(SessionDiffers("txSamplingMode=0\n", ""));
-    CHECK(SessionDiffers("txSamplingMode=1\n", ""));
+    CHECK_FALSE(SessionDiffers("zoomEaseOutMs=115\n", "maxLevel=30\n"));
+    CHECK(SessionDiffers("zoomEaseOutMs=100\n", "maxLevel=30\n"));
+    CHECK_FALSE(SessionDiffers("txSamplingMode=1\n", ""));
+    CHECK(SessionDiffers("txSamplingMode=0\n", ""));
     CHECK_FALSE(SessionDiffers("lockApps=\n", ""));
     CHECK(SessionDiffers("lockApps=game.exe\n", ""));
-    // The core's missing-key engine is hybrid, the template's too: no special case for `model`.
+    // The core's missing-key engine is transform, the template's too; the retired hybrid reads as it.
+    CHECK_FALSE(SessionDiffers("model=transform\n", ""));
     CHECK_FALSE(SessionDiffers("model=hybrid\n", ""));
+    CHECK_FALSE(SessionDiffers("model=hybrid\n", "model=transform\n"));
     CHECK(SessionDiffers("model=render\n", ""));
 }

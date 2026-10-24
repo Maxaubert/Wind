@@ -5,7 +5,7 @@ Developer documentation for Wind. The code is authoritative; specs and findings 
 ## The system at a glance
 
 One paced tick loop in `Wind.exe` reads input from hooks and Raw Input, turns it into a view with
-pure mapper logic, and hands the view to one of two engines. Auto picks the engine per session.
+pure mapper logic, and hands the view to one of two engines: Transform (the default) or Render.
 
 ```mermaid
 flowchart LR
@@ -33,8 +33,8 @@ flowchart LR
   TX --> DWM[DWM compositor] --> SCREEN
 ```
 
-There are three engines (Auto, Render, Transform); Auto is the default and switches between the
-other two.
+There are two engines, Transform (the default) and Render. Auto, which switched between them per
+window, was removed as an option in #508 ([03](03-engines.md)).
 
 ## Chapters
 

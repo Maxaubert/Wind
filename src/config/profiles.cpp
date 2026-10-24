@@ -99,8 +99,11 @@ bool SessionDiffers(const std::string& liveText, const std::string& profileText)
     // Issue #456: renderScaling replaced bilinear; a side without it reads as ParseConfig migrates it.
     for (auto* m : { &a, &b }) {
         auto bl = m->find("bilinear");
-        if (!m->count("renderScaling") && bl != m->end() && bl->second == "0") (*m)["renderScaling"] = "0";
+        if (!m->count("renderScaling") && bl != m->end()) (*m)["renderScaling"] = bl->second == "0" ? "0" : "1";
         if (bl != m->end()) m->erase("bilinear");
+        // #508: a retired or unknown engine (hybrid = Auto, magnify) runs Transform, as ParseConfig reads it.
+        auto mo = m->find("model");
+        if (mo != m->end() && mo->second != "render") mo->second = "transform";
     }
     // A key one side lacks reads as the built-in default (the first-run template carries each
     // templated key's default), so a tray drag that wrote an explicit default back (Warmth 0 -> 40

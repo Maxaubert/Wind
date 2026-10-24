@@ -9,7 +9,7 @@ test.beforeEach(async ({ page }) => {
     window.__msgs = [];
     const init = () => {
       if (window.__live) return;
-      window.__live = { maxLevel: '12', model: 'hybrid', uiTheme: 'dark', ...(window.__cfgExtra || {}) };
+      window.__live = { maxLevel: '12', model: 'transform', uiTheme: 'dark', ...(window.__cfgExtra || {}) };
       window.__saved = { ...window.__live };
     };
     const listeners = new Set();

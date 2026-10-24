@@ -1,9 +1,12 @@
 # 03. Engines and the hybrid pick
 
-Wind has three engines: Auto (`hybrid`, the default), Render and Transform. Auto holds the other
-two alive and picks one per zoom session with a pure, unit-tested predicate. This chapter covers
-the model interface, what each engine is for, how the pick decides and how a mid-zoom handover
-avoids a bare frame.
+Wind has two engines: Transform (the default) and Render. Both stay alive, and a pure,
+unit-tested predicate picks one per zoom session. Auto (`hybrid`), which picked per window type,
+was removed as an option in #508: `model=hybrid` now reads as Transform, and the Auto rule below
+(`ShouldPickTransform`, the per-window-type keys, `transformExclude`) is dormant code, unreachable
+from Settings and the ini, kept until a follow-up deletes it. This chapter covers the model
+interface, what each engine is for, how the pick decides and how a mid-zoom handover avoids a
+bare frame.
 
 ## Where pixels can be scaled
 
@@ -33,8 +36,8 @@ whatever `TickState::model` points at:
 | `idleTick()` | Every idle tick. The transform builds its Magnification context and cursor lens here and keeps them warm, see [05](05-transform-engine.md). |
 | `retarget(MonitorTarget)` | Both engines, at activation (`multiMonitor` picks the monitor; a changed resolution is followed either way). Render returns false across adapters. |
 
-`model` in `magnifier.ini` takes `hybrid`, `render` or `transform`. Anything else, including an old
-`model=magnify`, reads as `hybrid`. Both engines are built at startup whatever it says (`mRender`,
+`model` in `magnifier.ini` takes `transform` (the default) or `render`. Anything else, including an
+old `model=hybrid` or `model=magnify`, reads as `transform`. Both engines are built at startup whatever it says (`mRender`,
 `mTransform`), and `model` only decides the pick (`PickTransformFor`, `src/engine/engine_pick.h`): a change
 applies on the config reload, at the next zoom-in or, while zoomed, through the instant switch. A
 pinned Render still falls back to transform when the render device is lost or its overlay could not
@@ -43,9 +46,9 @@ and only then does an engine change relaunch Wind (Settings' Restart Wind button
 
 | Model | What it is | For |
 |---|---|---|
-| `hybrid` ("Auto") | `TickState` holds a `RenderModel` (`mRender`) and a `TransformModel` (`mTransform`) and points `model` at one per session | The default |
+| `hybrid` ("Auto", removed in #508) | `TickState` holds a `RenderModel` (`mRender`) and a `TransformModel` (`mTransform`) and points `model` at one per session | No longer reachable: reads as `transform` |
 | `render` | DXGI Desktop Duplication + D3D11 onto a click-through, capture-excluded overlay (`src/render/render_engine.*`) | Sub-pixel pan, cursor in the same frame, shell coverage. [04](04-render-engine.md) |
-| `transform` | The DWM fullscreen transform, no presents of its own (`src/transform/transform_model.cpp`) | Games, protected video and rotated outputs, plus the desktop when `desktopTransform=1` and the input transform is verified. [05](05-transform-engine.md) |
+| `transform` | The DWM fullscreen transform, no presents of its own (`src/transform/transform_model.cpp`) | The default. Every session on the primary monitor; other monitors fall back to render. [05](05-transform-engine.md) |
 
 If the transform half fails to initialize, Auto logs a warning and runs render only; every pick
 site checks `t.mTransform`.

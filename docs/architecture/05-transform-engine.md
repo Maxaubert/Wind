@@ -226,7 +226,7 @@ Defences (wall arming in `RunTick`'s `ReadForegroundAndArmWall`, write clamp in 
 
 DWM magnifies with nearest neighbour unless something calls
 `MagSetFullscreenUseBitmapSmoothing` (Magnification.dll, undocumented, resolved BY NAME).
-`txSamplingMode`: 0 nearest (default), 1 smooth.
+`txSamplingMode`: 0 nearest, 1 smooth (default since #508).
 
 - Until 0.24.0 it was resolved by ordinal 1, which does not exist (the export ordinals start at
   100), so Wind never set the filter: the image showed whatever state another process had left.

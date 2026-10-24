@@ -4,7 +4,7 @@ import { test, expect } from '@playwright/test';
 // switches off under prefers-reduced-motion.
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
-    const live = { maxLevel: '12', model: 'hybrid', uiTheme: 'dark' };
+    const live = { maxLevel: '12', model: 'transform', uiTheme: 'dark' };
     const saved = { ...live };
     const listeners = new Set();
     const send = (data) => listeners.forEach((fn) => fn({ data }));

@@ -70,7 +70,8 @@ flowchart LR
 as an initializer, so a missing or malformed key keeps the default; parsing never fails.
 
 - Numeric values are clamped to tested ranges.
-- `model` must be `render`, `transform` or `hybrid`; anything else becomes `hybrid`.
+- `model` must be `render` or `transform`; anything else (the retired `hybrid` and `magnify` too)
+  becomes `transform`.
 - Unsafe binds read as unbound (`src/input/keybind_rules.h`, [06](06-input.md)).
 - `LoadConfig` is the I/O wrapper, excluded from the test build by `WIND_TESTS`.
 - Structure: per line `SplitIniLine` (key and value), `ApplyEmptyableKey` (the exe lists and
@@ -157,7 +158,7 @@ single-instance mutex held, sets `Local\Wind_QuitRequest` and waits for the old 
 clean exit restores the OS cursor and releases `ClipCursor`.
 
 **An empty profile file means factory defaults**: every profile key falls back to its `ParseConfig`
-default. "New profile" writes a near-empty file (a comment plus `model=hybrid`) and switches to it.
+default. "New profile" writes a near-empty file (a comment plus `model=transform`) and switches to it.
 "Duplicate current" (`createProfile` with `fromCurrent=1`) instead writes `MakeProfileText(live)`: the
 session as it stands, unsaved changes included, so `model` is unchanged (no restart) and the
 outgoing profile is not mirrored into (`DoSwitchProfile(name, mirrorOutgoing=false)`).
@@ -197,21 +198,21 @@ Every key works in the ini whether or not Settings shows it. Keys hot-reload unl
 
 | Keys | Meaning |
 |---|---|
-| `maxLevel` (12), `zoomInSpeed`, `zoomOutSpeed`, `zoomEaseOutMs`, `smoothZoom*` | Range and feel of the zoom |
+| `maxLevel` (30), `zoomInSpeed` and `zoomOutSpeed` (1.5), `zoomEaseOutMs` (115), `smoothZoom*` | Range and feel of the zoom |
 | `cursorSensitivity` (1.0), `panSpeed` (1.0), `panGlideMaxPx` (0) | Mouse and arrow-key pan speed; the pan glide's distance, which also sets its ease (#430, #434) |
 | `gameCursorLagMs` (-1) | How late the view follows the pointer while a full-screen game hides it and draws its own cursor; -1 = one display frame, 0 = off (#443). Ini only |
 | `mouseAlign` (0 centred, 1 within the edges), `mouseMarginPct` | Where the pointer sits while the view moves |
 | `trackCaret` (1), `trackFocus` (0), `trackAlign`, `trackGlideMs` (200), `trackMarginPct` (15) | Follow the text caret and keyboard focus; `trackMarginPct` is the within-edges margin, % of the view on each side |
 | `lockApps`, `warpLock` (0) | Games whose sessions pan from raw mouse motion; heuristics for unlisted games |
-| `multiMonitor` (0) | 1 follows the cursor's monitor at each zoom-in |
+| `multiMonitor` (1) | 1 follows the cursor's monitor at each zoom-in; 0 keeps the primary |
 
 **Image and cursor.**
 
 | Keys | Meaning |
 |---|---|
-| `txSamplingMode` (0) | Transform sampling: 0 nearest, 1 smooth (Settings: Transform scaling, formerly "High resolution cursor", [05](05-transform-engine.md)) |
+| `txSamplingMode` (1) | Transform sampling: 0 nearest, 1 smooth (Settings: Transform scaling, formerly "High resolution cursor", [05](05-transform-engine.md)) |
 | `edgeClip` (1, hot) | While a transform session is zoomed, clips the pointer 1 px inside the monitor's left and top edges so it cannot rest on the contested outermost pixel (cursor-shape flicker there). The right and bottom stay open so the cursor can slide off the screen, as at 1x. A tighter existing clip (game confine, Inspect) always wins; 0 turns it off. Rationale: `Config::edgeClip` in `src/config/config.h`, mechanics in `TransformModel::edgeClipManage` |
-| `renderScaling` (1), `upscaleTiming` (0) | Render engine scaling: 0 nearest, 1 xBR, 2 NVIDIA Image Scaling (Settings: Render scaling, [04](04-render-engine.md)); `bilinear` is retired and only migrates (0 keeps nearest). `upscaleTiming=1` logs the filter's GPU time |
+| `renderScaling` (0), `upscaleTiming` (0) | Render engine scaling: 0 nearest, 1 xBR, 2 NVIDIA Image Scaling (Settings: Render scaling, [04](04-render-engine.md)); `bilinear` is retired and only migrates (0 keeps nearest). `upscaleTiming=1` logs the filter's GPU time |
 | `sharpness`, `brightness`, `hdrTonemap` (1) | Render engine image |
 | `cursorConstantSize` (0), `cursorVisibility` (`auto`) | Render cursor size and when it is drawn |
 | `colorWarmPct` (0), `colorDimPct` (100) | Warmth and brightness filter |
@@ -222,10 +223,10 @@ failed to init.
 
 | Keys | Meaning |
 |---|---|
-| `model` | `hybrid` (Auto, default), `render` or `transform`; anything else reads as `hybrid` |
-| `engineGame`, `engineAcrylic`, `engineDesktop`, `engineOther` | `auto`, `transform` or `render` per window category, Auto only |
+| `model` | `transform` (default) or `render`; anything else, the retired `hybrid` (Auto) included, reads as `transform` |
+| `engineGame`, `engineAcrylic`, `engineDesktop`, `engineOther` | Dormant since #508: read only by the removed Auto pick |
 | `desktopTransform` (1) | Let Auto use the transform on the desktop when UIAccess is available |
-| `transformExclude`, `renderExclude` | Exes that never get Transform, or never get Render |
+| `transformExclude`, `renderExclude` | Dormant since #508: read only by the removed Auto pick |
 | `vsync` (1), `dwmFlush` (0), `gameFpsCap`, `gpuPriority` (restart) | Render pacing and game coexistence |
 | `zorderBand` (0, restart) | 16 covers the shell in the UIAccess build, at the cost of the Snipping Tool ([04](04-render-engine.md)) |
 
@@ -247,7 +248,7 @@ failed to init.
 | `mpoGuard` (1), `mpoGuardLiftWall` (1), `mpoGuardTest` (0) | The MPO guard effect, whether it lifts the pan walls while plane-free, and a diagnostic that applies it on an MPO-off boot |
 | `mpoNearestGuard` (1) | Allow nearest sampling on an MPO-on boot, relying on the guard; 0 turns nearest into smooth on such boots ([05](05-transform-engine.md)) |
 | `txRestLevel` (1.0) | Level the transform rests at when idle; above 1.0 parks a hair off identity (costs a composed desktop) |
-| `txNativeCursor` (0) | Mouse tracking (Settings > View, transform engine): 0 = Wind, Wind moves the view and draws its own pointer; 1 = Native, Windows' magnifier logic ([07](07-cursor.md#wind-mouse-tracking-txnativecursor0-the-default)); read at zoom-in |
+| `txNativeCursor` (1) | Mouse tracking (Settings > View, transform engine): 0 = Wind, Wind moves the view and draws its own pointer; 1 = Native, Windows' magnifier logic ([07](07-cursor.md#wind-mouse-tracking-txnativecursor0-the-default)); read at zoom-in |
 | `txTrace` (0) | 1 records a per-tick trace and writes `txtrace-<ms>.csv` to the log folder at each session end |
 | `zoomTrace` (0) | 1 logs a zoom-in/zoom-out timeline per zoom (#310) |
 

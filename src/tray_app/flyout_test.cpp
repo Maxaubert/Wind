@@ -6,7 +6,7 @@
 //   --hover K[:I]      hover state: toggle:1, engine, settings, quit, profile
 //   --tools            adds the #315 engine dropdown under the toggle group
 //   --toggles a,b,c    the enabled toggle keys, in order (trackCaret, trackFocus, keepEdges, engine)
-//   --model M          the main engine shown on the dropdown: hybrid (Auto), render, transform
+//   --model M          the main engine shown on the dropdown: transform, render
 //   --engine-open      the dropdown drawn open (chevron up, ring)
 //   --engine-list      renders the engine list popup instead of the flyout (the active row is --model)
 // Fake data: zoom 7.4x at 144 fps, Warmth 40%, Brightness 72%, all three toggles shown (text cursor
@@ -29,7 +29,7 @@ int RunRenderTest(const wchar_t*) {
     int palette = 0;
     Flyout::Hit hover;
     bool tools = false, engineList = false, engineOpen = false;
-    std::string toggles, model = "hybrid";
+    std::string toggles, model = "transform";
     auto narrow = [](const wchar_t* c) { std::string o; for (; *c; ++c) o.push_back((char)*c); return o; };
     for (int i = 1; i < argc; ++i) {
         const std::wstring a = argv[i];

@@ -13,7 +13,7 @@ test.beforeEach(async ({ page }) => {
     window.__msgs = [];
     // Built on the first getConfig so a test's own init script is already set.
     let live, saved;
-    const init = () => { if (live) return; live = { maxLevel: '12', zoomInVk: '33', zoomInButton: '2', cursorLockVk: '113', model: 'hybrid',
+    const init = () => { if (live) return; live = { maxLevel: '12', zoomInVk: '33', zoomInButton: '2', cursorLockVk: '113', model: 'transform',
       uiTheme: 'dark', trackCaret: '1', noSwallowApps: 'netflix.exe', showAdvanced: '1' };
       saved = { ...live }; };
     const listeners = new Set();

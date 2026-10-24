@@ -7,7 +7,7 @@ TEST_CASE("defaults when text is empty") {
     Config c = ParseConfig("");
     CHECK(c.zoomInButton  == 0);   // shipped unbound (onboarding captures it)
     CHECK(c.zoomOutButton == 0);   // shipped unbound
-    CHECK(c.maxLevel == doctest::Approx(12.0));
+    CHECK(c.maxLevel == doctest::Approx(30.0));   // owner pick (#508)
     CHECK(c.diagnostics == 0);
     // Ramp step cap ships ON (issue #219): uncapped, ~15% of high-level zoom-ins stall 35-43ms
     // then snap 1.2-1.9 levels; capped at 2.5%/tick every measured ramp was even. 0 would
@@ -43,15 +43,16 @@ TEST_CASE("parses renderer knobs") {
     CHECK(c.cursorConstantSize == 1);
     CHECK(c.bilinear == 1);
 }
-// Issue #456: bilinear is retired. An ini that never had renderScaling keeps nearest when it chose
-// bilinear=0, and every other one gets the new default, xBR; an explicit renderScaling wins.
+// Issue #456: bilinear is retired. An ini that never had renderScaling keeps what its bilinear chose
+// (0 nearest, else xBR); one with neither key gets the default, nearest (#508); an explicit
+// renderScaling wins.
 TEST_CASE("renderScaling migrates from the retired bilinear key") {
     CHECK(ParseConfig("bilinear=0\n").renderScaling == 0);
     CHECK(ParseConfig("bilinear=1\n").renderScaling == 1);
-    CHECK(ParseConfig("").renderScaling == 1);
+    CHECK(ParseConfig("").renderScaling == 0);
     CHECK(ParseConfig("bilinear=0\nrenderScaling=2\n").renderScaling == 2);
     CHECK(ParseConfig("renderScaling=1\nbilinear=0\n").renderScaling == 1);   // order does not matter
-    CHECK(ParseConfig("renderScaling=7\n").renderScaling == 1);               // out of range: default
+    CHECK(ParseConfig("renderScaling=7\n").renderScaling == 0);               // out of range: default
     CHECK(ParseConfig("upscaleTiming=1\n").upscaleTiming == 1);
 }
 // Issue #253: every ini written before 0.6.3 carries an explicit cursorScaleWithZoom=0 from the
@@ -66,7 +67,7 @@ TEST_CASE("renderer knobs have sane defaults") {
     Config c = ParseConfig("");
     CHECK(c.cursorSensitivity == doctest::Approx(1.0));
     CHECK(c.cursorConstantSize == 0);          // cursor grows with the zoom, like transform (issue #253)
-    CHECK(c.renderScaling == 1);                  // xBR (issue #456)
+    CHECK(c.renderScaling == 0);                  // nearest (issues #456, #508)
     CHECK(c.upscaleTiming == 0);
     CHECK(c.sharpness == doctest::Approx(0.0));   // off by default
     CHECK(c.panGlideMaxPx == 0);
@@ -77,11 +78,12 @@ TEST_CASE("renderer knobs have sane defaults") {
     CHECK(c.cursorVisibility == "auto");       // follow the focused app by default
     CHECK(c.vsync == 1);                       // vsync on by default
     CHECK(c.dwmFlush == 0);                     // plain vsync pacing by default (fewer stutters)
-    CHECK(c.multiMonitor == 0);                // shipped primary-only (follow-cursor opt-in)
+    CHECK(c.multiMonitor == 1);                // follows the cursor's monitor (#508)
     CHECK(c.cropCapture == 0);                 // shipped off: always copy all changed regions (no edge staleness)
     CHECK(c.smoothZoom == 1);                  // shipped on (eased-in zoom)
-    CHECK(c.zoomInSpeed == doctest::Approx(1.0));
-    CHECK(c.zoomOutSpeed == doctest::Approx(1.0));
+    CHECK(c.zoomInSpeed == doctest::Approx(1.5));   // owner pick (#508)
+    CHECK(c.zoomOutSpeed == doctest::Approx(1.5));
+    CHECK(c.zoomEaseOutMs == 115);
     CHECK(c.smoothZoomAccel == doctest::Approx(3.0));
     CHECK(c.smoothZoomRamp == doctest::Approx(0.6));
 }
@@ -172,11 +174,11 @@ TEST_CASE("parses overrides and ignores comments/blank lines") {
     CHECK(c.maxLevel == doctest::Approx(12.5));
     CHECK(c.zoomInButton == 1);
     CHECK(c.cursorSensitivity == doctest::Approx(0.5));
-    CHECK(c.zoomInSpeed == doctest::Approx(1.0)); // untouched default
+    CHECK(c.zoomInSpeed == doctest::Approx(1.5)); // untouched default
 }
 TEST_CASE("malformed lines are ignored, keep defaults") {
     Config c = ParseConfig("garbage line\nmaxLevel\n=5\n");
-    CHECK(c.maxLevel == doctest::Approx(12.0));
+    CHECK(c.maxLevel == doctest::Approx(30.0));
 }
 TEST_CASE("numeric fields are clamped to documented ranges") {
     // maxLevel < 1 would invert ZoomController's clamp and disable zoom; must clamp up to 1.0.
@@ -439,9 +441,9 @@ TEST_CASE("the high-res/MPO option is atomic at restart (issue #242)") {
     CHECK(ParseConfig("mpoNearestGuard=1\n").mpoNearestGuard == 1);
 }
 
-TEST_CASE("txNativeCursor (Mouse tracking) defaults to Wind and parses Native (issue #463)") {
-    CHECK(ParseConfig("").txNativeCursor == 0);
-    CHECK(ParseConfig("txNativeCursor=1\n").txNativeCursor == 1);
+TEST_CASE("txNativeCursor (Mouse tracking) defaults to Native and parses Wind (issues #463, #508)") {
+    CHECK(ParseConfig("").txNativeCursor == 1);
+    CHECK(ParseConfig("txNativeCursor=0\n").txNativeCursor == 0);
 }
 
 TEST_CASE("cursorBandAuto defaults on and parses off (issue #269)") {
@@ -638,6 +640,7 @@ TEST_CASE("the first-run ini carries the new keys and parses to the struct defau
 }
 
 TEST_CASE("txSamplingMode folds the nearest aliases 2..4 to 0 (review 2026-10-09 #23)") {
+    CHECK(ParseConfig("").txSamplingMode == 1);   // Smooth by default (#508)
     CHECK(ParseConfig("txSamplingMode=0\n").txSamplingMode == 0);
     CHECK(ParseConfig("txSamplingMode=1\n").txSamplingMode == 1);
     CHECK(ParseConfig("txSamplingMode=-1\n").txSamplingMode == -1);   // leave DWM alone stays valid
@@ -649,10 +652,10 @@ TEST_CASE("txSamplingMode folds the nearest aliases 2..4 to 0 (review 2026-10-09
 }
 
 TEST_CASE("ParseConfig rejects NaN, infinity, hex and trailing junk, and keeps the default (review 2026-10-09 #72)") {
-    CHECK(ParseConfig("maxLevel=nan\n").maxLevel == doctest::Approx(12.0));
-    CHECK(ParseConfig("maxLevel=inf\n").maxLevel == doctest::Approx(12.0));
-    CHECK(ParseConfig("maxLevel=0x10\n").maxLevel == doctest::Approx(12.0));
-    CHECK(ParseConfig("maxLevel=8abc\n").maxLevel == doctest::Approx(12.0));
+    CHECK(ParseConfig("maxLevel=nan\n").maxLevel == doctest::Approx(30.0));
+    CHECK(ParseConfig("maxLevel=inf\n").maxLevel == doctest::Approx(30.0));
+    CHECK(ParseConfig("maxLevel=0x10\n").maxLevel == doctest::Approx(30.0));
+    CHECK(ParseConfig("maxLevel=8abc\n").maxLevel == doctest::Approx(30.0));
     CHECK(ParseConfig("txMaxStepPct=0x10\n").txMaxStepPct == 25);
     CHECK(ParseConfig("txMaxStepPct=7junk\n").txMaxStepPct == 25);
     CHECK(ParseConfig("maxLevel=8\n").maxLevel == doctest::Approx(8.0));
