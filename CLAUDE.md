@@ -27,9 +27,10 @@ are frozen history cited from code, not kept in step with it.
   header by bare name (`"config.h"`, never a path); `build.bat`'s `WIND_INC` puts every folder on the
   include path, and a new folder goes there (and in `CORE_SRC` if Wind.exe compiles it). `version.h`,
   `resource.h` and `wind.rc` stay in `src/` itself. See 11.
-- Engines behind `IMagnifierModel`, chosen by `model=` (applies live: both engines are always built): `hybrid` (Auto, default)
-  picks `render` or `transform` per session via the pure `src/engine/engine_pick.h`. `model=magnify` is
-  parsed as `hybrid`; the magnify engine is retired, do not revive it. See 03, 04, 05.
+- Engines behind `IMagnifierModel`, chosen by `model=` (applies live: both engines are always built):
+  `transform` (default) or `render`, picked per session by the pure `src/engine/engine_pick.h`. Auto
+  (`hybrid`) was removed as an option (#508) and, like the retired `magnify`, parses as `transform`;
+  do not revive either. See 03, 04, 05.
 - Profiles: `profiles\<Name>.ini` next to the live ini; the live ini is the session, the profile file
   the saved state. See 08.
 - Settings UI: schema-driven Svelte (`ui/src/settings-schema.js`); `HandleWebMessage` in
@@ -76,9 +77,9 @@ Chapter numbers refer to `docs/architecture/NN-*.md`.
   thread at idle) and centres the view itself (`SetFullscreenMagnifierOffsetsDWMUpdated`). While DWM
   centres, never write a same-level transform or warm pulse. Never use a public write to get the
   composed pointer: it blocks 200-260 ms. `MagGetFullscreenTransform` cannot see DWM's centring.
-  In a native session the only window Wind draws is the Inspect crosshair. Mouse tracking = Wind
-  (`txNativeCursor=0`, the DEFAULT) is the pre-#369 sprite session (07): gate native-only paths on
-  `nativeSession_`.
+  In a native session the only window Wind draws is the Inspect crosshair. Native
+  (`txNativeCursor=1`) is the DEFAULT (#508); Mouse tracking = Wind (`txNativeCursor=0`) is the
+  pre-#369 sprite session (07): gate native-only paths on `nativeSession_`.
 - The cursor grows with the zoom in every engine (#253). Do not restore constant size;
   `cursorConstantSize=1` is the render-only opt-in. Test defaults on a wiped `%LOCALAPPDATA%\Wind`:
   the dev ini differs from a clean install.

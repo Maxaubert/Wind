@@ -173,7 +173,7 @@ TEST_CASE("every first-run ini template key parses to its struct default (issue 
         CHECK(SameValue(kv.second, want.text));               // and the literal itself, not a clamp of it
         ++compared;
     }
-    CHECK(compared > 90);
+    CHECK(compared > 85);
     for (const auto& kv : kIntendedDifferences) CHECK(seen.count(kv.first) == 1);
 }
 

@@ -22,7 +22,7 @@ a game hides, clips or center-locks the cursor, and clicks pass through to the a
 - Smooth sub-pixel zoom and pan.
 - Clicks, hover and dragging keep working while zoomed.
 - Tracks the mouse in games through raw input, without injecting into the game.
-- Auto picks the best engine for each window and switches when you alt-tab.
+- Zooms inside the compositor (Transform), so it stays smooth over heavy games; Render is there as an alternative.
 - The real cursor shapes, sharp at every zoom level.
 - HDR aware: the zoomed view matches the desktop's brightness.
 - Follows the text caret as you type, and optionally the keyboard focus.
@@ -70,11 +70,11 @@ profile. Preferences > Show advanced settings shows the rest. Every setting is a
 
 ## Limits
 
-- Magnifies the primary monitor unless `multiMonitor=1` is set.
+- Magnifies the monitor the cursor is on at each zoom-in (`multiMonitor=0` keeps the primary).
 - Games must run borderless or windowed. Switch exclusive-fullscreen games to borderless.
 - The Start menu, taskbar and tray flyouts are not magnified by default.
-- Protected video (Netflix and similar) shows normally in Auto, which switches to the transform
-  engine for it. Forcing the Render engine shows it black.
+- Protected video (Netflix and similar) shows normally with the Transform engine (the default).
+  The Render engine shows it black.
 
 ## Development
 

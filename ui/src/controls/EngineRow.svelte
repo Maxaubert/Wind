@@ -4,7 +4,7 @@
   // until it restarts: once the chosen value differs from it, an inline "Restart Wind" appears
   // beside the select. `running` empty = unknown, no button.
   import Select from './Select.svelte';
-  let { value = 'hybrid', options = [], labels = null, running = '', onChange = () => {},
+  let { value = 'transform', options = [], labels = null, running = '', onChange = () => {},
         onRestart = () => {}, disabled = false, labelledby, describedby } = $props();
   const pending = $derived(!!running && running !== 'live' && value !== running);
 </script>

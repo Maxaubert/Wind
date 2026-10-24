@@ -2,10 +2,11 @@ import { test, expect } from '@playwright/test';
 import { readFileSync, readdirSync } from 'node:fs';
 import { groups, allRows, groupRows, bindKeys } from '../src/settings-schema.js';
 
-// Row keys of the #303 schema. Every one must still appear exactly once after #318, except the two
-// REMOVED rows: the scroll-wheel row (the wheel is a Zoom in / Zoom out binding now) and "Never use
-// Render for" (renderExclude stays in the ini and the core, not in Settings).
-const REMOVED = ['__zoomWheel', 'renderExclude'];
+// Row keys of the #303 schema. Every one must still appear exactly once after #318, except the
+// REMOVED rows: the scroll-wheel row (the wheel is a Zoom in / Zoom out binding now), "Never use
+// Render for" (renderExclude stays in the ini and the core, not in Settings) and the per-window
+// engine rows, which only applied to the removed Auto engine (#508).
+const REMOVED = ['__zoomWheel', 'renderExclude', 'engineGame', 'engineAcrylic', 'engineDesktop', 'engineOther'];
 const OLD_KEYS = [
   '__zoomIn', '__zoomOut', '__zoomWheel', '__pan',  // was four rows (Pan left/right/up/down); their ini keys live in OLD_BIND_KEYS
   'noSwallowApps', 'maxLevel', 'zoomInSpeed', 'zoomOutSpeed', 'panSpeed', 'smoothZoomAccel',
@@ -57,7 +58,7 @@ test('a captioned section has two or more rows, and the advanced rows are the on
     if (base.length) expect(base.length, g.id + ' / ' + c.caption + ' (advanced off)').toBeGreaterThanOrEqual(2);
   }
   expect(allRows.filter((r) => r.adv).map((r) => r.key).sort()).toEqual(
-    ['engineAcrylic', 'engineDesktop', 'engineGame', 'engineOther', 'lockApps', 'model', 'noSwallowApps', 'smoothZoomAccel', 'smoothZoomRamp'].sort());
+    ['lockApps', 'noSwallowApps', 'smoothZoomAccel', 'smoothZoomRamp'].sort());
   // Troubleshooting is never advanced, and the extra keys carry their switch key.
   for (const k of ['diagnostics', '__diagnostics', '__openIni']) expect(allRows.find((r) => r.key === k).adv).toBeUndefined();
   expect(Object.fromEntries(allRows.filter((r) => r.onKey).map((r) => [r.key, r.onKey]))).toEqual(
@@ -111,10 +112,12 @@ test('rows land in the groups the spec names', () => {
   expect(where('__about')).toBe('about');
 });
 
-test('per-window engines show only when the engine is Auto', () => {
-  for (const k of ['engineGame', 'engineAcrylic', 'engineDesktop', 'engineOther'])
-    expect(allRows.find((r) => r.key === k).showIf).toEqual({ key: 'model', eq: 'hybrid' });
-  expect(allRows.find((r) => r.key === 'model').type).toBe('engine');
+test('the engine row offers Transform (the default) and Render only; Auto is gone (#508)', () => {
+  const m = allRows.find((r) => r.key === 'model');
+  expect(m.type).toBe('engine');
+  expect(m.options).toEqual(['transform', 'render']);
+  expect(m.def).toBe('transform');
+  expect(JSON.stringify(allRows)).not.toMatch(/hybrid/);
   expect(allRows.find((r) => r.key === 'mouseMarginPct').showIf).toEqual({ key: 'mouseAlign', eq: '1' });   // the margin only matters when the pointer is kept within the edges
 });
 
@@ -149,10 +152,10 @@ test('hotkeys page: one box per binding, "or" between them, and the old keybind 
   // slider: end-cap thumb and value readout
   await page.goto('/controls.html?group=zoom');
   const sl = ctl(page, 'maxLevel').locator('input[type=range]');
-  await expect(sl).toHaveAttribute('aria-valuetext', '12 times');
+  await expect(sl).toHaveAttribute('aria-valuetext', '30 times');   // the default (#508)
+  await sl.fill('12');
+  await expect(ctl(page, 'maxLevel').locator('.val')).toHaveText('12x');
   expect(parseFloat(await css(sl, '--pct'))).toBeCloseTo(35.71, 1);   // 12x on the 2-30x range (#429)
-  await sl.fill('30');
-  await expect(ctl(page, 'maxLevel').locator('.val')).toHaveText('30x');
 });
 
 test('toggle and select drive their row value', async ({ page }) => {
@@ -165,15 +168,13 @@ test('toggle and select drive their row value', async ({ page }) => {
   await expect(ctl(page, 'trackAlign').locator('select')).toHaveValue('1');
 });
 
-test('engine row offers Restart Wind and per-window rows follow Auto; the share-keys app list manages apps', async ({ page }) => {
+test('engine row offers Restart Wind; the share-keys app list manages apps', async ({ page }) => {
   await page.goto('/controls.html?group=zoom');
-  await expect(ctl(page, 'engineGame')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Restart Wind' })).toHaveCount(0);
   await ctl(page, 'model').locator('select').selectOption('render');
   await expect(page.getByRole('button', { name: 'Restart Wind' })).toBeVisible();
-  await expect(ctl(page, 'engineGame')).toHaveCount(0);
   await page.getByRole('button', { name: 'Restart Wind' }).click();
-  await ctl(page, 'model').locator('select').selectOption('hybrid');
+  await ctl(page, 'model').locator('select').selectOption('transform');
   await expect(page.getByRole('button', { name: 'Restart Wind' })).toHaveCount(0);
   await page.goto('/controls.html?group=hotkeys');
   const apps = ctl(page, 'noSwallowApps');

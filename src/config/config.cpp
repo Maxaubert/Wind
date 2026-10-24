@@ -182,8 +182,8 @@ static void ClampConfig(Config& c, bool haveRenderScaling) {
     if (c.gameCursorLagMs < -1) c.gameCursorLagMs = -1;
     if (c.gameCursorLagMs > 100) c.gameCursorLagMs = 100;
     c.sharpness       = clampd(c.sharpness,       0.0, 1.0);
-    if (!haveRenderScaling) c.renderScaling = c.bilinear == 0 ? 0 : 1;   // bilinear retired (#456)
-    if (c.renderScaling < 0 || c.renderScaling > 2) c.renderScaling = 1;
+    if (!haveRenderScaling && c.bilinear >= 0) c.renderScaling = c.bilinear == 0 ? 0 : 1;   // bilinear retired (#456)
+    if (c.renderScaling < 0 || c.renderScaling > 2) c.renderScaling = 0;
     c.brightness      = clampd(c.brightness,      0.5, 1.5);
     c.colorWarmPct    = (int)clampd(c.colorWarmPct, 0, 100);
     c.colorDimPct     = (int)clampd(c.colorDimPct, 1, 100);
@@ -216,12 +216,11 @@ static void ClampConfig(Config& c, bool haveRenderScaling) {
     if (c.txEdgeMargin < 0.0) c.txEdgeMargin = 0.0;
     if (c.txEdgeMargin > 8.0) c.txEdgeMargin = 8.0;   // beyond this the lost border is the bug
     c.outlineIdleSeconds = clampd(c.outlineIdleSeconds, 0.5, 60.0);
-    // "transform" is a first-class model again (revived for issue #148: the compositor-internal
-    // zoom that stays smooth over heavy games); anything unknown falls back to hybrid, the
-    // product default ("Auto" in the UI) - same fallback as a missing key (struct default).
-    // "magnify" (the retired Windows Magnifier driver) is unknown too, so an old ini that still
-    // says so runs Auto.
-    if (c.model != "render" && c.model != "transform" && c.model != "hybrid") c.model = "hybrid";
+    // Two engines: "transform" (the product default, the compositor-internal zoom revived for
+    // issue #148) and "render". Anything else falls back to transform, the same as a missing key
+    // (struct default): the retired "hybrid" (Auto, removed as an option in #508) and "magnify"
+    // (the retired Windows Magnifier driver), so an old ini that still says either runs Transform.
+    if (c.model != "render" && c.model != "transform") c.model = "transform";
     // (The old transform/hybrid maxLevel<=12 clamp is GONE: the "TDR territory above 12x" was
     // root-caused 2026-07-26 to NVIDIA's 16-bit MPO plane-programming overflow - see issue
     // #148 - which the mapper's MPO-aware pan wall now guards at ANY level, so maxLevel is one
@@ -526,10 +525,10 @@ std::string DefaultIniText() {
                "panLeftVk=0\npanLeftMods=0\npanRightVk=0\npanRightMods=0\n"
                "panUpVk=0\npanUpMods=0\npanDownVk=0\npanDownMods=0\npanSpeed=1.0\n"
                "; maxLevel: how far you can zoom (does not affect zoom speed)\n"
-               "maxLevel=12.0\n"
-               "; zoomInSpeed/zoomOutSpeed: zoom rate multipliers (1.0=default, 2.0=twice as fast, 0.5=half);\n"
+               "maxLevel=30.0\n"
+               "; zoomInSpeed/zoomOutSpeed: zoom rate multipliers (1.5=default, 3.0=twice as fast, 0.75=half);\n"
                ";   speed is independent of maxLevel\n"
-               "zoomInSpeed=1.0\nzoomOutSpeed=1.0\n"
+               "zoomInSpeed=1.5\nzoomOutSpeed=1.5\n"
                "; smoothZoom: 0=linear constant speed; 1=zoom-IN soft-starts, easing up to linear (shipped on)\n"
                "smoothZoom=1\n"
                "; smoothZoomAccel: ease-in depth - zoom-in starts at zoomInSpeed/this and climbs to\n"
@@ -577,9 +576,9 @@ std::string DefaultIniText() {
                "; cursorVisibility: auto=hide our cursor when the focused app hides its own (games);\n"
                ";   always=always draw it; never=never draw it\n"
                "cursorVisibility=auto\n"
-               "; renderScaling: render engine filter, 0=nearest (crisp pixels), 1=xBR (smooth, default),\n"
+               "; renderScaling: render engine filter, 0=nearest (crisp pixels, default), 1=xBR (smooth),\n"
                ";   2=NVIDIA Image Scaling (smooth and sharpened)\n"
-               "renderScaling=1\n"
+               "renderScaling=0\n"
                "; sharpness: 0=off; 0.1-1.0 sharpens the magnified image (crisper text/detail)\n"
                "sharpness=0.0\n"
                "; zorderBand: z-band of the render engine's overlay and the Inspect crosshair. 0=ordinary\n"
@@ -601,8 +600,8 @@ std::string DefaultIniText() {
                "trackAlign=0\n"
                "; mouseAlign: mouse pointer, 0=keep centred, 1=keep within the edges\n"
                "mouseAlign=0\n"
-               "; txNativeCursor: mouse tracking (transform engine), 0=Wind (Wind moves the view and draws the pointer), 1=Native (Windows' magnifier logic)\n"
-               "txNativeCursor=0\n"
+               "; txNativeCursor: mouse tracking (transform engine), 0=Wind (Wind moves the view and draws the pointer), 1=Native (Windows' magnifier logic, default)\n"
+               "txNativeCursor=1\n"
                "; trackGlideMs: how long the view takes to glide to the caret/focus/pointer (ms)\n"
                "trackGlideMs=200\n"
                "; trackMarginPct: within-the-edges margin, percent of the view on each side\n"
@@ -616,37 +615,10 @@ std::string DefaultIniText() {
                "colorDimPct=100\n"
                "; hdrTonemap: 1=HDR10->SDR tonemap when Windows HDR is on (no-op on SDR); 0=off\n"
                "hdrTonemap=1\n"
-               "; model: hybrid = Auto (default): picks render or transform per zoom-in (games get\n"
-               ";   the compositor-internal transform, everything else the GPU overlay).\n"
-               ";   render = GPU capture+overlay (high fidelity). transform = DWM fullscreen\n"
-               ";   transform only. Anything else runs hybrid. Restart to switch.\n"
-               "model=hybrid\n"
-               "; transformExclude (Auto/hybrid only): exe names that must never get the transform\n"
-               ";   engine even when fullscreen+borderless. Fullscreen browser video looks exactly\n"
-               ";   like a game to the foreground test but wants the render engine. Comma-separated,\n"
-               ";   case-insensitive, exact name match. Empty = exclude nothing.\n"
-               "transformExclude=zen.exe,firefox.exe,chrome.exe,msedge.exe,brave.exe,opera.exe,opera_gx.exe,vivaldi.exe\n"
-               "; renderExclude (Auto/hybrid only): exe names that must never get the RENDER engine.\n"
-               ";   For DRM/protected apps (Netflix, Apple TV): Desktop Duplication captures those as\n"
-               ";   BLACK, so render shows nothing. Wind detects most of them automatically via the\n"
-               ";   window's display affinity; this is the escape hatch for the ones it misses.\n"
-               "renderExclude=\n"
-               "; engineGame / engineAcrylic / engineDesktop / engineOther (Auto/hybrid only):\n"
-               ";   which engine to use per window type. auto|transform|render; auto = Wind decides\n"
-               ";   exactly as it always has, so leaving these alone changes nothing.\n"
-               ";     game    = borderless and covering the monitor (games, F11 video)\n"
-               ";     acrylic = the window declares a DWM backdrop (Mica/acrylic/tabbed). Only\n"
-               ";               windows that OPT IN are detectable, so this is a subset of what\n"
-               ";               looks blurred on screen - third-party blur is invisible to it.\n"
-               ";     desktop = the shell desktop (Win+D)\n"
-               ";     other   = everything else\n"
-               ";   Two rules always win over these: protected/DRM content never gets render, and\n"
-               ";   transformExclude apps never get transform (except when protected, where black\n"
-               ";   video is the worse failure).\n"
-               "engineGame=auto\n"
-               "engineAcrylic=auto\n"
-               "engineDesktop=auto\n"
-               "engineOther=auto\n"
+               "; model: transform = DWM fullscreen transform (default; the compositor zooms, smooth\n"
+               ";   over heavy games). render = GPU capture+overlay. Anything else runs transform.\n"
+               ";   Applies live.\n"
+               "model=transform\n"
                "; noSwallowApps: programs where Wind stops intercepting its keyboard binds.\n"
                ";   Watching the keyboard makes Windows hand us every keystroke and WAIT before it\n"
                ";   delivers anything else - including mouse movement to the game. Holding a key\n"
@@ -660,7 +632,7 @@ std::string DefaultIniText() {
                ";   manages this list (Keybinds -> Release keys in these apps).\n"
                "noSwallowApps=\n"
                "; multiMonitor: 1=magnify whichever monitor the cursor is on at zoom-in; 0=primary only\n"
-               "multiMonitor=0\n"
+               "multiMonitor=1\n"
                "; cropCapture (opt-in): 0=always copy all changed regions (cache never stale, default);\n"
                ";   1=on a full-screen repaint (games) copy only the magnified region (cuts 4K HDR GPU\n"
                ";   copy ~zoom^2) but screen edges can briefly show a previous window after a switch.\n"

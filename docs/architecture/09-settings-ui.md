@@ -82,7 +82,8 @@ unless another setting has a value), `offIf` (kept in place but dimmed and inert
 setting has a value: Release glide while Smooth transform scaling is on) and `tag` (a small label
 after the name: Transform scaling is tagged Experimental). The Engine card's two Scaling rows
 follow the engine: Transform scaling (`txSamplingMode`) unless it is Render, Render scaling
-(`renderScaling`: Nearest, xBR, NVIDIA Image Scaling) unless it is Transform, so Auto shows both. Six groups: Hotkeys, Zoom,
+(`renderScaling`: Nearest, xBR, NVIDIA Image Scaling) unless it is Transform. The Engine row offers
+Transform and Render (Auto was removed in #508) and is a plain row, not an advanced one. Six groups: Hotkeys, Zoom,
 View, then below a divider Preferences (with the Screen light card), Tray menu and About. Each group has a label, an
 icon, a banner description and cards of rows; each row names its ini key, type, label, description
 and default. `Settings.svelte` is the shell (title bar, sidebar, banner, save capsule, search), and
@@ -102,8 +103,8 @@ and default. `Settings.svelte` is the shell (title bar, sidebar, banner, save ca
 
 - **Advanced rows** (`adv: true`) show inline while the global `showAdvanced` key is on
   (Preferences > Show advanced settings). Search always finds them.
-- **`showIf: {key, eq}`** hides a row unless another key has that value; the per-category engine
-  rows show only while `model` is `hybrid`.
+- **`showIf: {key, eq}`** (or `ne`) hides a row unless another key has that value; each engine's
+  scaling row shows only for its engine.
 - **Removed from the UI is not removed from the product.** Many keys have no row (quick zoom
   setup, outline, `sharpness`, `multiMonitor`, the `tx*` knobs). The core still parses
   them, and Open settings file is the way to edit them.

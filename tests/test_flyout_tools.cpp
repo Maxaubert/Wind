@@ -13,14 +13,12 @@ using namespace wind::Flyout;
 // ---------------------------------------------------------------- engine dropdown
 
 TEST_CASE("engine: the options are the Settings main-engine row, same order and labels") {
-    CHECK(kEngineCount == 3);
+    CHECK(kEngineCount == 2);
     CHECK(std::string(kEngineKey) == "model");
-    CHECK(std::string(EngineValue(0)) == "hybrid");
+    CHECK(std::string(EngineValue(0)) == "transform");
     CHECK(std::string(EngineValue(1)) == "render");
-    CHECK(std::string(EngineValue(2)) == "transform");
-    CHECK(std::wstring(EngineLabel(0)) == L"Auto");
+    CHECK(std::wstring(EngineLabel(0)) == L"Transform");
     CHECK(std::wstring(EngineLabel(1)) == L"Render");
-    CHECK(std::wstring(EngineLabel(2)) == L"Transform");
 }
 
 TEST_CASE("engine: every option value is one the core accepts as is") {
@@ -30,19 +28,19 @@ TEST_CASE("engine: every option value is one the core accepts as is") {
     }
 }
 
-TEST_CASE("engine: a model value maps to its option, unknown reads as Auto like the core") {
-    CHECK(EngineIndex("hybrid") == 0);
+TEST_CASE("engine: a model value maps to its option, unknown reads as Transform like the core") {
+    CHECK(EngineIndex("transform") == 0);
     CHECK(EngineIndex("render") == 1);
-    CHECK(EngineIndex("transform") == 2);
-    CHECK(EngineIndex("magnify") == 0);      // the retired engine reads as Auto
-    CHECK(EngineIndex(" transform ") == 2);
+    CHECK(EngineIndex("hybrid") == 0);       // the retired Auto reads as Transform (#508)
+    CHECK(EngineIndex("magnify") == 0);      // so does the retired magnify engine
+    CHECK(EngineIndex(" render ") == 1);
     CHECK(EngineIndex("") == 0);
     CHECK(EngineIndex("junk") == 0);
 }
 
 TEST_CASE("engine: only a different pick changes anything (and so restarts Wind)") {
-    CHECK_FALSE(EnginePickChanges(2, 2));
-    CHECK(EnginePickChanges(0, 2));
+    CHECK_FALSE(EnginePickChanges(1, 1));
+    CHECK(EnginePickChanges(0, 1));
     CHECK(EnginePickChanges(3, 0));
     CHECK_FALSE(EnginePickChanges(0, -1));
     CHECK_FALSE(EnginePickChanges(0, kEngineCount));
@@ -64,10 +62,10 @@ TEST_CASE("view: the engine item is the dropdown, not a toggle segment, and show
     CHECK_FALSE(IsEngineKey("trackCaret"));
 }
 
-TEST_CASE("view: a missing or unknown model reads Auto, and the dropdown is never disabled by it") {
-    CHECK(ViewWith("engine").engine.value == L"Auto");
-    CHECK(ViewWith("engine", { { "model", "junk" } }).engine.value == L"Auto");
-    CHECK(ViewWith("engine", { { "model", "magnify" } }).engine.value == L"Auto");
+TEST_CASE("view: a missing or unknown model reads Transform, and the dropdown is never disabled by it") {
+    CHECK(ViewWith("engine").engine.value == L"Transform");
+    CHECK(ViewWith("engine", { { "model", "junk" } }).engine.value == L"Transform");
+    CHECK(ViewWith("engine", { { "model", "hybrid" } }).engine.value == L"Transform");
     CHECK(ViewWith("engine", { { "model", "render" } }).engine.value == L"Render");
     CHECK(ViewWith("engine", { { "model", "junk" } }).hasEngine);
 }

@@ -62,12 +62,12 @@ struct Config {
     // uses the same bit layout as the zoom combos.
     int    hideCursorVk     = 0;
     int    hideCursorMods   = 0;
-    double maxLevel         = 12.0;  // how FAR you can zoom (does not affect zoom SPEED)
+    double maxLevel         = 30.0;  // how FAR you can zoom (does not affect zoom SPEED)
     // --- Zoom experience (see docs/specs/2026-05-26-configurable-zoom-design.md) ---
     // Per-direction rate multipliers (1.0 = default speed); apply in BOTH linear and smooth modes.
     // Speed is independent of maxLevel (a fixed doublings/sec base inside ZoomController).
-    double zoomInSpeed  = 1.0;       // 0.25-4.0
-    double zoomOutSpeed = 1.0;       // 0.25-4.0
+    double zoomInSpeed  = 1.5;       // 0.25-4.0
+    double zoomOutSpeed = 1.5;       // 0.25-4.0
     int    zoomTrace    = 0;         // 1 = log a zoom-in/zoom-out timeline per zoom (#310, diagnostics)
     // Hitch recorder (#361): log every long zoomed frame with its classified cause, plus a
     // per-minute summary. On by default: the record costs ~0.5 us per tick and logs nothing on a
@@ -84,9 +84,9 @@ struct Config {
     double smoothZoomRamp = 0.6;
     // Release ease-out (2026-08-28, hot): the applied zoom rate glides to a stop over roughly
     // 3x this time constant instead of freezing the instant the button lifts (the square-wave
-    // stop read as harsh). ~45ms tau = ~150ms felt glide. 0 = off (the old dead stop).
-    // Not applied with the high resolution cursor (txSamplingMode=1), which stops on release (#427).
-    int zoomEaseOutMs = 45;
+    // stop read as harsh). ~45ms tau = ~150ms felt glide; the default 115 (owner pick, #508) is a
+    // longer coast. 0 = off (the old dead stop).
+    int zoomEaseOutMs = 115;
     // Present sync while zoomed (render engine): 1 = vsync (Present sync-interval 1, locked to
     // the display refresh); 0 = no vsync (Present 0), with the loop paced by the timer instead.
     int    vsync            = 1;
@@ -98,14 +98,15 @@ struct Config {
     int    diagnostics      = 0;     // 1 = log frame-timing as "diag" lines in wind-core.log
 
     // --- Model selection ----------------------------------------------------
-    // Which magnification model runs. "hybrid" (DEFAULT, "Auto" in the UI) constructs render +
-    // transform and picks per zoom-in (engine_pick.h). "render" = the DXGI capture + D3D11
-    // overlay. "transform" = the DWM fullscreen-transform model (MagSetFullscreenTransform, no
-    // Magnify.exe) - revived for issue #148: it magnifies inside the compositor with zero app
-    // presents, the only path that stays smooth while a heavy game renders. Missing or unknown
-    // values fall back to "hybrid" (the product default; the UI schema and new-profile seeding
-    // agree - keep all three in sync). Applied at launch (restart to switch; not hot-swapped).
-    std::string model = "hybrid";
+    // Which magnification model runs. "transform" (DEFAULT) = the DWM fullscreen-transform model
+    // (MagSetFullscreenTransform, no Magnify.exe) - revived for issue #148: it magnifies inside
+    // the compositor with zero app presents, the only path that stays smooth while a heavy game
+    // renders. "render" = the DXGI capture + D3D11 overlay. Missing or unknown values, including
+    // the retired "hybrid" (Auto, removed as an option in #508) and "magnify", fall back to
+    // "transform" (the UI schema, the tray dropdown and new-profile seeding agree - keep them in
+    // sync). Applied live (engine_pick.h).
+    std::string model = "transform";
+    // DORMANT since #508 (Auto removed; read by the hybrid pick only, kept until that code goes).
     // Auto/hybrid exclusion list: exe names (comma-separated, case-insensitive) that must NEVER
     // get the transform engine, even when they are fullscreen and borderless. Fullscreen browser
     // video looks exactly like a game to the foreground test, but it wants the render engine (a
@@ -209,7 +210,7 @@ struct Config {
     // to come and go between builds; it is re-applied per magnification context. KNOWN
     // INTERACTION: the 1px warm pulse (txWarmMode=1) puts the view 1px off-true on rest ticks;
     // nearest masks that as sub-block noise, smoothing can render it as visible shaking.
-    int txSamplingMode = 0;
+    int txSamplingMode = 1;
     // MPO buster (issue #191, hot): 1 (default) = during transform GAME sessions on MPO-ENABLED
     // machines, show a fullscreen alpha-1 click-through ghost that demotes the game off its
     // hardware overlay plane - off the plane there is no 16-bit translation field to overflow,
@@ -304,11 +305,11 @@ struct Config {
     // config load (EffectiveSamplingMode).
     int mpoNearestGuard = 1;
     // Mouse tracking (Settings > View, issues #369, #463; src/transform/native_cursor.h). Transform
-    // engine only. 0 (DEFAULT, owner pick 2026-10-14) = Wind: Wind writes every view and hides the
-    // real pointer, drawing its shape in a sprite welded to the view (the pre-#369 session).
-    // 1 = Native: DWM's own magnified pointer and DWM's centring, as Windows Magnifier does.
+    // engine only. 0 = Wind: Wind writes every view and hides the real pointer, drawing its shape
+    // in a sprite welded to the view (the pre-#369 session). 1 (DEFAULT, owner pick 2026-10-24,
+    // #508) = Native: DWM's own magnified pointer and DWM's centring, as Windows Magnifier does.
     // Read at zoom-in (hot for the next session).
-    int txNativeCursor = 0;
+    int txNativeCursor = 1;
     // Smooth-zoom ladder (issue #369, src/transform/zoom_ladder.h): with smooth sampling, zoom only through
     // levels where DWM's per-frame scratch rounding predicts under 1 px of movement (the zoom shake:
     // 11 px p95 -> 0.7 px measured at 10-25x). 0 = off (hot).
@@ -418,10 +419,11 @@ struct Config {
     // CURSOR_SHOWING flag, which our own MagShowSystemCursor hide does NOT affect);
     // "always" = always draw it; "never" = never draw it.
     std::string cursorVisibility = "auto";
-    int    bilinear = 1;             // RETIRED (issue #456): read only to migrate to renderScaling
-    // Render engine scaling filter (issue #456, upscale_shaders.h): 0 nearest, 1 xBR, 2 NVIDIA Image
-    // Scaling. An ini without the key migrates from `bilinear` (0 keeps nearest, else xBR).
-    int    renderScaling = 1;
+    int    bilinear = -1;            // RETIRED (issue #456): read only to migrate; -1 = not in the ini
+    // Render engine scaling filter (issue #456, upscale_shaders.h): 0 nearest (DEFAULT, #508), 1 xBR,
+    // 2 NVIDIA Image Scaling. An ini without the key migrates from `bilinear` when it has that
+    // (0 keeps nearest, else xBR).
+    int    renderScaling = 0;
     int    upscaleTiming = 0;        // 1 = log the magnify pass's GPU time every 2 s while zoomed
     // Adaptive sharpening of the magnified image (counters upscale blur; crisps text/detail).
     // 0 = off (cheapest, single tap). 0.1-1.0 = strength. Folded into the magnify pass (no extra pass).
@@ -455,9 +457,9 @@ struct Config {
     // on SDR it's a no-op (plain BGRA8 passthrough), so it's safe on by default. Set 0 to
     // force the legacy BGRA8 capture even on HDR. Applied at startup + on HDR toggle.
     int    hdrTonemap = 1;
-    // Multi-monitor: 0 (the shipped default) = primary monitor only; 1 = on each zoom-in,
-    // magnify whichever monitor the cursor is on. Hot-reloadable (applies on the next zoom-in).
-    int    multiMonitor = 0;
+    // Multi-monitor: 0 = primary monitor only; 1 (DEFAULT, #508) = on each zoom-in, magnify
+    // whichever monitor the cursor is on. Hot-reloadable (applies on the next zoom-in).
+    int    multiMonitor = 1;
     // Capture optimization (opt-in). 0 (default) = always copy all changed regions, so the cached
     // desktop copy is never stale. 1 = on a near-full repaint (a game redrawing the whole screen),
     // copy only the magnified source region (cuts the GPU copy ~zoom^2 at 4K HDR). Caveat: with 1,

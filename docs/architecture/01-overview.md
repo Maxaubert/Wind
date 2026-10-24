@@ -24,7 +24,7 @@ These are commitments. Code that breaks one is a bug even if it works.
   hides the cursor ([07](07-cursor.md)).
 - **Tracking never moves the pointer.** Caret, focus and edge-mode views detach from the pointer;
   the next real mouse move places the pointer in the view ([07](07-cursor.md)).
-- **Scope.** Primary monitor by default (`multiMonitor=1` follows the cursor's monitor per
+- **Scope.** The cursor's monitor by default (`multiMonitor=1` follows the cursor's monitor per
   zoom-in); desktop, apps and borderless or windowed games. Exclusive fullscreen is out of scope.
 
 ## Three binaries

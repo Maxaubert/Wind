@@ -11,7 +11,7 @@ test.beforeEach(async ({ page }) => {
     window.__msgs = [];
     const init = () => {
       if (window.__live) return;
-      window.__live = { maxLevel: '12', model: 'hybrid', uiTheme: 'dark', ...(window.__cfgExtra || {}) };
+      window.__live = { maxLevel: '12', model: 'transform', uiTheme: 'dark', ...(window.__cfgExtra || {}) };
       window.__saved = { ...window.__live };
       window.__profiles = { names: window.__names || ['Default', 'Gaming'], active: 'Default' };
     };
@@ -42,7 +42,7 @@ test.beforeEach(async ({ page }) => {
           window.__profiles.names.push(msg.name); window.__profiles.active = msg.name;
           // fromCurrent: the host builds the profile from the live session, unsaved changes included.
           if (msg.fromCurrent === '1') window.__saved = { ...window.__live };
-          else { window.__live = { model: 'hybrid', uiTheme: window.__live.uiTheme }; window.__saved = { ...window.__live }; }
+          else { window.__live = { model: 'transform', uiTheme: window.__live.uiTheme }; window.__saved = { ...window.__live }; }
           reply();
         } else if (msg.type === 'deleteProfile') {
           window.__profiles.names = window.__profiles.names.filter((n) => n !== msg.name);

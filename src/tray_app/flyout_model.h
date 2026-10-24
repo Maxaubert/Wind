@@ -203,12 +203,12 @@ inline const SliderSpec* SliderSpecs(int* count) {
     static const SliderSpec k[] = {
         { "colorWarmPct",   L"Warmth",         0,    100,  0,    ValueFmt::Percent,  "warm", 5 },
         { "colorDimPct",    L"Brightness",     1,    100,  100,  ValueFmt::Percent,  "bright", 1 },
-        { "maxLevel",       L"Max zoom",       2,    30,   12,   ValueFmt::TimesInt, "maxz", 1 },
-        { "zoomInSpeed",    L"Zoom-in speed",  0.25, 4,    1,    ValueFmt::Times2,   "zin", 0.05 },
-        { "zoomOutSpeed",   L"Zoom-out speed", 0.25, 4,    1,    ValueFmt::Times2,   "zout", 0.05 },
+        { "maxLevel",       L"Max zoom",       2,    30,   30,   ValueFmt::TimesInt, "maxz", 1 },
+        { "zoomInSpeed",    L"Zoom-in speed",  0.25, 4,    1.5,  ValueFmt::Times2,   "zin", 0.05 },
+        { "zoomOutSpeed",   L"Zoom-out speed", 0.25, 4,    1.5,  ValueFmt::Times2,   "zout", 0.05 },
         { "panSpeed",       L"Arrow key speed", 0.25, 4,    1,    ValueFmt::Times2,   "pan", 0.05 },
         { "panGlideMaxPx",  L"Pan glide",      0,    200,  0,    ValueFmt::Pixels,   "smooth", 5 },
-        { "zoomEaseOutMs",  L"Release glide",  0,    300,  45,   ValueFmt::Millis,   "glide", 5 },
+        { "zoomEaseOutMs",  L"Release glide",  0,    300,  115,  ValueFmt::Millis,   "glide", 5 },
     };
     if (count) *count = (int)(sizeof(k) / sizeof(k[0]));
     return k;

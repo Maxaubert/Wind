@@ -34,14 +34,16 @@ function schemaDefaults() {
 }
 
 // Issue #456: renderScaling replaced bilinear. An ini (or profile) without it reads the way the core
-// migrates it (ParseConfig): bilinear=0 keeps Nearest, anything else is the xBR default.
-// A model the core does not know (the retired model=magnify) runs Auto (ClampConfig), so it reads
-// as hybrid here too, or the Engine select shows blank and the Auto-only rows hide.
-const MODELS = new Set(['render', 'transform', 'hybrid']);
+// migrates it (ParseConfig): bilinear=0 keeps Nearest, any other bilinear value xBR, and no bilinear
+// either the Nearest default.
+// A model the core does not know (the retired hybrid and magnify) runs Transform (ClampConfig), so
+// it reads as transform here too, or the Engine select shows blank.
+const MODELS = new Set(['render', 'transform']);
 function migrate(m) {
   let out = m;
-  if (m.renderScaling === undefined && String(m.bilinear) === '0') out = { ...out, renderScaling: '0' };
-  if (m.model !== undefined && !MODELS.has(String(m.model).trim())) out = { ...out, model: 'hybrid' };
+  if (m.renderScaling === undefined && m.bilinear !== undefined)
+    out = { ...out, renderScaling: String(m.bilinear) === '0' ? '0' : '1' };
+  if (m.model !== undefined && !MODELS.has(String(m.model).trim())) out = { ...out, model: 'transform' };
   return out;
 }
 

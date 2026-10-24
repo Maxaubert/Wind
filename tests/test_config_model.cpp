@@ -3,19 +3,21 @@
 
 using namespace wind;
 
-TEST_CASE("model defaults to hybrid (the product default, 'Auto' in the UI)") {
+TEST_CASE("model defaults to transform (the product default, #508)") {
     Config c = ParseConfig("");
-    CHECK(c.model == "hybrid");
+    CHECK(c.model == "transform");
 }
 
-TEST_CASE("model=magnify (the retired engine) and unknown models read as hybrid") {
-    CHECK(ParseConfig("model=magnify\n").model == "hybrid");
-    CHECK(ParseConfig("model=bogus\n").model == "hybrid");
+TEST_CASE("the retired engines (hybrid = Auto, magnify) and unknown models read as transform") {
+    CHECK(ParseConfig("model=hybrid\n").model == "transform");
+    CHECK(ParseConfig("model=magnify\n").model == "transform");
+    CHECK(ParseConfig("model=bogus\n").model == "transform");
+    CHECK(ParseConfig("model=render\n").model == "render");
 }
 
 TEST_CASE("an old ini with retired keys still loads") {
     Config c = ParseConfig("model=magnify\nmagnifyStep=25\ntxKeepAliveMaxLevel=0\nmaxLevel=6\n");
-    CHECK(c.model == "hybrid");
+    CHECK(c.model == "transform");
     CHECK(c.maxLevel == doctest::Approx(6.0));
 }
 
@@ -92,8 +94,8 @@ TEST_CASE("keys of the removed sprite cursor are ignored, and change nothing els
     CHECK(c.model == d.model);
 }
 
-TEST_CASE("unknown model value falls back to hybrid, same as a missing key") {
-    CHECK(ParseConfig("model=bogus\n").model == "hybrid");
+TEST_CASE("unknown model value falls back to transform, same as a missing key") {
+    CHECK(ParseConfig("model=bogus\n").model == "transform");
     // The three-way default (core struct, unknown-value fallback, UI schema def) must never
     // fork again: an ini without a model key runs the same engine the UI displays.
     CHECK(ParseConfig("model=bogus\n").model == ParseConfig("").model);
