@@ -115,6 +115,11 @@ export const groups = [
       ] },
       { caption: 'Typing and focus', rows: [
         { key: 'trackCaret', type: 'toggle', label: 'Follow the text cursor', keywords: ['caret', 'typing', 'type', 'text', 'keyboard', 'insertion point', 'track', 'tracking', 'editor', 'notepad', 'word', 'input', 'write', 'follow'], desc: 'The view moves to where you type', def: 1 },
+        // Java apps report their text cursor only through the Java Access Bridge, which Wind loads into
+        // its own process (#281). Off = never load it (#515: a crash entering a Java app with NVDA running).
+        { key: 'trackJava', type: 'toggle', label: 'Follow text in Java apps', keywords: ['java', 'jab', 'access bridge', 'intellij', 'pycharm', 'jetbrains', 'netbeans', 'eclipse', 'swing', 'caret', 'typing', 'text', 'cursor', 'follow', 'crash', 'nvda', 'screen reader'],
+          desc: 'IntelliJ, PyCharm and other Java apps. Turn off if one makes Wind close', def: 1,
+          showIf: { key: 'trackCaret', eq: '1' } },
         { key: 'trackFocus', type: 'toggle', label: 'Follow keyboard focus', keywords: ['focus', 'tab', 'tab key', 'navigate', 'selected', 'control', 'button', 'accessibility', 'keyboard', 'track', 'tracking', 'highlight', 'follow'], desc: 'The view moves to the selected control', def: 0 },
         { key: 'trackAlign', type: 'select', label: 'Text cursor position', keywords: ['mouse position', 'caret', 'typing', 'where', 'centred', 'centered', 'center', 'centre', 'middle', 'edge', 'edges', 'within the edges', 'align', 'alignment', 'focus', 'placement', 'mouse', 'cursor'], desc: 'Where the text cursor and focus sit', options: ['0', '1'], optionLabels: { '0': 'Centred', '1': 'Within the edges' }, def: '0' },
       ] },

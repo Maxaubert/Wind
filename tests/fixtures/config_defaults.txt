@@ -88,6 +88,7 @@ desktopTransform	-	-	1
 cursorBandAuto	-	-	1
 trackCaret	-	-	1
 trackFocus	-	-	0
+trackJava	-	-	1
 trackAlign	-	-	0
 mouseAlign	-	-	0
 trackGlideMs	0	5000	200

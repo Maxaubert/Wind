@@ -116,6 +116,20 @@ inline unsigned long long BackoffMs(unsigned long long current, unsigned long lo
     return next > cap ? cap : next;
 }
 
+// The bridge protocol's fixed window messages (OpenJDK AccessBridgeMessages.h): WM_COPYDATA (0x004A)
+// for the packages, then AB_MEMORY_MAPPED_FILE_SETUP, AB_MESSAGE_WAITING, AB_MESSAGE_QUEUED and
+// AB_DLL_GOING_AWAY = WM_USER (0x0400) + 0x1000..0x1003. The two registered hellos come on top
+// (RegisterWindowMessageW, so not constant). Wind is UIAccess and UIPI drops these from the Java app
+// unless they are allowed (#281, #515).
+inline constexpr unsigned kJabFixedMessages[] = { 0x004A, 0x1400, 0x1401, 0x1402, 0x1403 };
+
+// A file version (VS_FIXEDFILEINFO dwFileVersionMS/LS) as "major.minor.build.revision", for the
+// bridge DLL's load log (#515: which bridge build was in the process when a Java app crashed it).
+inline std::string FormatFileVersion(unsigned long ms, unsigned long ls) {
+    return std::to_string((ms >> 16) & 0xFFFF) + "." + std::to_string(ms & 0xFFFF) + "." +
+           std::to_string((ls >> 16) & 0xFFFF) + "." + std::to_string(ls & 0xFFFF);
+}
+
 // A Java top-level window: AWT/Swing frames and dialogs (IntelliJ, PyCharm, NetBeans, ...).
 inline bool IsJavaWindowClass(const std::wstring& cls) {
     return cls == L"SunAwtFrame" || cls == L"SunAwtDialog";

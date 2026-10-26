@@ -312,6 +312,7 @@ static void ApplyValueKey(Config& c, const std::string& key, const std::string& 
     else if (key == "cursorBandAuto")     c.cursorBandAuto = ParseIntStrict(val);
     else if (key == "trackCaret")         c.trackCaret = ParseIntStrict(val);
     else if (key == "trackFocus")         c.trackFocus = ParseIntStrict(val);
+    else if (key == "trackJava")          c.trackJava = ParseIntStrict(val);
     else if (key == "trackAlign")         c.trackAlign = ParseIntStrict(val);
     else if (key == "mouseAlign")         c.mouseAlign = ParseIntStrict(val);
     else if (key == "trackGlideMs")       c.trackGlideMs = ParseIntStrict(val);
@@ -596,6 +597,9 @@ std::string DefaultIniText() {
                "trackCaret=1\n"
                "; trackFocus: 1=the zoomed view follows keyboard focus (Tab, menus); 0=off\n"
                "trackFocus=0\n"
+               "; trackJava: 1=in Java apps (IntelliJ, PyCharm, ...) the text cursor is read through the\n"
+               ";   Java Access Bridge; 0=never load the bridge (Java apps are then read like any other)\n"
+               "trackJava=1\n"
                "; trackAlign: text cursor and focus, 0=keep centred, 1=keep within the edges\n"
                "trackAlign=0\n"
                "; mouseAlign: mouse pointer, 0=keep centred, 1=keep within the edges\n"

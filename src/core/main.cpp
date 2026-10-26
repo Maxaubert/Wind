@@ -2096,7 +2096,7 @@ static void StepTracking(TickState& t, double lvl, bool inspect, bool fsCover, b
     // call (it is also what fsGame below aliases).
     const bool trackEnabled = lvl > 1.001 && !inspect && !t.lockEff && !fsCover && !t.panelFreeze &&
                               (t.cfg.trackCaret != 0 || t.cfg.trackFocus != 0);
-    { wind::SpanScope span_(wind::kSpanTrack); g_track.setActive(trackEnabled, t.cfg.trackCaret != 0, t.cfg.trackFocus != 0, t.cfg.trackLog != 0); }
+    { wind::SpanScope span_(wind::kSpanTrack); g_track.setActive(trackEnabled, t.cfg.trackCaret != 0, t.cfg.trackFocus != 0, t.cfg.trackJava != 0, t.cfg.trackLog != 0); }
     if (t.cfg.trackLog) {   // #326: why tracking is on or off, logged on every change
         const int bits = (lvl > 1.001 ? 1 : 0) | (inspect ? 4 : 0) |
                          (t.lockEff ? 8 : 0) | (fsCover ? 16 : 0);
@@ -2799,7 +2799,7 @@ static void TeardownSession(TickState& t) {
     EndPanelFreeze(t);                            // #283: never leave the pointer pinned (review #284)
     // The caret/focus watcher is switched off only from the zoomed view block; a zoom-out that
     // snaps straight to 1.0 skipped it and left the watcher polling at 1x (#71).
-    { wind::SpanScope span_(wind::kSpanTrack); g_track.setActive(false, t.cfg.trackCaret != 0, t.cfg.trackFocus != 0, t.cfg.trackLog != 0); }
+    { wind::SpanScope span_(wind::kSpanTrack); g_track.setActive(false, t.cfg.trackCaret != 0, t.cfg.trackFocus != 0, t.cfg.trackJava != 0, t.cfg.trackLog != 0); }
     if (t.restAfterReveal) { t.restAfterReveal->setActive(false); t.restAfterReveal = nullptr; }
     // DWM effect back BEFORE the overlay hides: worst case one double-filtered frame, never a
     // bright unfiltered one (review 2026-09-30).

@@ -7,8 +7,15 @@
 // read, backing off from 250 ms to 4 s), never on the 60 Hz poll, so Wind adds no steady load to the
 // Java app's own UI thread. A window Windows reports as not responding is skipped. The client DLL must be
 // Authenticode-signed (Wind is UIAccess; see LoadVerified).
+// Fault containment (#515): every call into the bridge DLL (and the bridge's window procedures, run by
+// the tracker's message pump through dispatch()) goes through an SEH-only thunk. A fault is logged
+// with its code and address, the bridge is marked broken for the session, its windows are retired and
+// it is never called again (the callbacks become no-ops). This catches access violations and the
+// like, not fail-fast or heap corruption. Each setup step is logged and flushed, so the last line on
+// disk names the step that died.
 #include <windows.h>
 #include <map>
+#include <set>
 #include <string>
 namespace wind {
 class JavaBridge {
@@ -21,6 +28,11 @@ public:
     bool ensure(HWND javaWindow, DWORD wakeTid, UINT wakeMsg, bool log);
     // The caret of the focused Java text component, screen px. False when there is none.
     bool caret(HWND javaWindow, RECT& out);
+    // The tracker's DispatchMessageW. While a bridge is loaded the dispatch runs inside an SEH thunk
+    // (the bridge's hidden windows live on this thread); a fault there breaks the bridge.
+    void dispatch(const MSG& m);
+    // A fault was caught in the bridge this session: it is never called or reloaded again.
+    static bool broken();
     // The last successful read: which bridge call answered and the caret index (trackLog).
     const char* lastSrc() const { return lastSrc_; }
     int lastIndex() const { return lastIndex_; }
@@ -35,6 +47,10 @@ private:
     // failure can be transient (an antivirus scan or an IDE update holding the file, a certificate
     // not cached yet), so a folder is never written off for the session (review 2026-10-16 #31).
     std::map<std::wstring, ProbeFail> failedDirs_;
+    std::set<DWORD> seenPids_;      // Java processes already logged (path, bitness) on first contact
+    bool retired_ = false;          // the broken bridge's windows were neutered and destroyed
+    void retireIfBroken();
+    void logJavaProcess(HWND javaWindow);
     bool enabledDone_ = false;
     unsigned long long enableRetryAt_ = 0;
 };

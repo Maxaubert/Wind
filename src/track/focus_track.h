@@ -12,7 +12,9 @@ public:
     ~FocusTracker() { stop(); }
     bool start();
     void stop();
-    void setActive(bool on, bool wantCaret, bool wantFocus, bool log);
+    // wantJava: Java apps may be read through the Java Access Bridge (trackJava, #515); when false the
+    // bridge DLL is never loaded.
+    void setActive(bool on, bool wantCaret, bool wantFocus, bool wantJava, bool log);
     TrackSnapshot snapshot() const { std::lock_guard<std::mutex> g(mu_); return snap_; }
     // A shell input panel (emoji picker Win+., clipboard Win+V, touch keyboard) is open (#283, #492).
     // Watched always, independent of setActive: a Wind (sprite) session shows the real pointer then.
@@ -25,7 +27,7 @@ private:
     std::thread th_;
     std::atomic<unsigned long> tid_{0};
     std::atomic<bool> stopRequested_{false};
-    std::atomic<bool> active_{false}, wantCaret_{false}, wantFocus_{false}, log_{false};
+    std::atomic<bool> active_{false}, wantCaret_{false}, wantFocus_{false}, wantJava_{false}, log_{false};
     std::atomic<bool> panelOpen_{false};
     std::atomic<void*> panelHwnd_{nullptr};
     mutable std::mutex mu_;
