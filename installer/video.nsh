@@ -47,6 +47,7 @@ Var OverImg
 Var BackImg     ; the shade and caption scrim, loaded once per page
 Var Hot         ; control under the pointer
 Var WasDown
+Var SpaceDown   ; Space's state last tick, so one press ticks the licence box once
 Var Leaving     ; an action is posted; this page is finished
 Var BoxOn       ; the two states of a checkbox, stamped rather than baked
 Var BoxOff
@@ -161,6 +162,7 @@ Function WindCanvas
   ; assume the button may still be down from the click that brought us here, so the next page
   ; needs a real release before it accepts anything
   StrCpy $WasDown 1
+  StrCpy $SpaceDown 1
 FunctionEnd
 
 Function WindCanvasFree
@@ -368,6 +370,28 @@ Function WindInput
     StrCpy $WasDown 0
   ${Else}
     StrCpy $WasDown 1
+  ${EndIf}
+
+  ; The one key this picture answers (issue #513): Space ticks the licence box, so the
+  ; keyboard is not stuck on the one screen that cannot be passed without it. Edge-triggered
+  ; on the high bit like the click, and only while setup is the foreground window ($2).
+  ${If} $Screen = 4
+    System::Call 'user32::GetAsyncKeyState(i 0x20) i .r1'
+    IntOp $3 $1 & 0x8000
+    ${If} $3 <> 0
+    ${AndIf} $SpaceDown = 0
+    ${AndIf} $2 = $HWNDPARENT
+      ${If} $Accepted = 1
+        StrCpy $Accepted 0
+      ${Else}
+        StrCpy $Accepted 1
+      ${EndIf}
+    ${EndIf}
+    ${If} $3 = 0
+      StrCpy $SpaceDown 0
+    ${Else}
+      StrCpy $SpaceDown 1
+    ${EndIf}
   ${EndIf}
 FunctionEnd
 
