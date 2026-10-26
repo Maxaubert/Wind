@@ -30,6 +30,48 @@ Var ArtDir
 Var Dialog
 Var Gdip        ; GDI+ token, started once and never stopped: setup outlives it
 Var Font
+Var Plain       ; 1: the accessible stock pages (plain.nsh) instead of the picture
+
+; ---- accessible plain mode (issue #513) ----------------------------------------------------
+; The picture has no controls a screen reader can name and no keyboard operation, so setup
+; also carries a plain set of stock MUI pages (plain.nsh) and picks one set at startup. Plain
+; when any of these holds:
+;   /ACCESSIBLE on the command line (GetOptions is case-insensitive)
+;   a screen reader says it is running (SPI_GETSCREENREADER; NVDA, JAWS and Narrator set it)
+;   NVDA's own window exists (the same FindWindow its nvda.exe uses to find a running copy),
+;     in case the flag was cleared by another app
+;   high contrast is on: the art is fixed colours and ignores the user's scheme
+; Never under /S: a silent install shows no pages, and keeping $Plain at 0 there keeps every
+; silent code path exactly as it was.
+!macro WIND_PICK_PLAIN
+  StrCpy $Plain 0
+  ${IfNot} ${Silent}
+    ${GetParameters} $0
+    ClearErrors
+    ${GetOptions} $0 "/ACCESSIBLE" $1
+    ${IfNot} ${Errors}
+      StrCpy $Plain 1
+    ${EndIf}
+    StrCpy $1 0
+    System::Call 'user32::SystemParametersInfoW(i 0x46, i 0, *i .r1, i 0)'
+    ${If} $1 <> 0
+      StrCpy $Plain 1
+    ${EndIf}
+    FindWindow $1 "wxWindowClassNR" "NVDA"
+    ${If} $1 <> 0
+      StrCpy $Plain 1
+    ${EndIf}
+    ; HIGHCONTRAST { cbSize, dwFlags, lpszDefaultScheme }, 12 bytes in this 32-bit process
+    System::Call '*(i 12, i 0, p 0) p .r0'
+    System::Call 'user32::SystemParametersInfoW(i 0x42, i 12, p r0, i 0)'
+    System::Call '*$0(i, i .r1)'
+    System::Free $0
+    IntOp $1 $1 & 1               ; HCF_HIGHCONTRASTON
+    ${If} $1 <> 0
+      StrCpy $Plain 1
+    ${EndIf}
+  ${EndIf}
+!macroend
 
 !macro HIDE_CHILD ID
   GetDlgItem $0 $HWNDPARENT ${ID}
@@ -49,6 +91,12 @@ Var Font
 !define MUI_CUSTOMFUNCTION_GUIINIT windGuiInit
 
 Function windGuiInit
+  ; Plain mode keeps NSIS's own window as it is: frame, caption, header and buttons are what
+  ; a screen reader and the keyboard use. None of the picture's setup below is needed.
+  ${If} $Plain = 1
+    Return
+  ${EndIf}
+
   ; --- what are we drawing at? ------------------------------------------------------------
   System::Call 'user32::GetDpiForSystem() i .r0 ? e'
   Pop $1

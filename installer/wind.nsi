@@ -71,15 +71,50 @@ VIAddVersionKey "LegalCopyright"  "Copyright (c) 2026 ${PUBLISHER}"
 
 !include "screens.nsh"
 
-; Welcome, licence, setup, copying, done. Only the copying page is MUI's, because it is the one that
+; Two page sets, one per run (issue #513). WIND_PICK_PLAIN in .onInit chooses: the accessible
+; stock pages (plain.nsh) for a screen reader, high contrast or /ACCESSIBLE, otherwise the
+; picture. Each page skips itself when its set is not the one running (the plain MUI pages
+; through windPlainOnly as their PRE, the picture's creators through their own $Plain check),
+; and NSIS walks past a skipped page in either direction, so Back works in both sets.
+;
+; Plain: welcome, licence, setup.
+!define MUI_PAGE_CUSTOMFUNCTION_PRE windPlainOnly
+!define MUI_WELCOMEPAGE_TEXT "Setup will install Wind, a fullscreen magnifier that keeps tracking the mouse, even when a game hides it.$\r$\n$\r$\nWind installs for everyone on this PC.$\r$\n$\r$\nClick Next to continue."
+!insertmacro MUI_PAGE_WELCOME
+!define MUI_PAGE_CUSTOMFUNCTION_PRE windPlainOnly
+!define MUI_LICENSEPAGE_CHECKBOX
+!insertmacro MUI_PAGE_LICENSE "..\LICENSE"
+Page custom windPlainSetupCreate windPlainSetupLeave
+
+; The picture: welcome, licence, setup. Only its copying page is MUI's, because it is the one that
 ; has to be driven by the section; the SHOW define has to sit immediately before it, which is
 ; the only way to hand that page a show function without an earlier page swallowing it.
 Page custom windWelcomeCreate windPageLeave
 Page custom windLicenceCreate windLicenceLeave
 Page custom windSetupCreate   windPageLeave
+
+; Copying, shared: windCopyShow dresses it as the picture, and leaves it stock in plain mode.
 !define MUI_PAGE_CUSTOMFUNCTION_SHOW windCopyShow
 !insertmacro MUI_PAGE_INSTFILES
+
+; Done. Plain: MUI's finish page, its two boxes standing in for the picture's. NOAUTOCLOSE, or
+; MUI's own init would SetAutoClose true for both sets and walk past the install log; the
+; picture's section sets autoclose itself.
+!define MUI_PAGE_CUSTOMFUNCTION_PRE windPlainOnly
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW windPlainFinishShow
+!define MUI_FINISHPAGE_NOAUTOCLOSE
+!define MUI_FINISHPAGE_RUN
+!define MUI_FINISHPAGE_RUN_TEXT "&Open Wind now"
+!define MUI_FINISHPAGE_RUN_FUNCTION windPlainRun
+!define MUI_FINISHPAGE_SHOWREADME
+!define MUI_FINISHPAGE_SHOWREADME_TEXT "Create &desktop shortcut"
+!define MUI_FINISHPAGE_SHOWREADME_NOTCHECKED
+!define MUI_FINISHPAGE_SHOWREADME_FUNCTION windPlainDesktop
+!insertmacro MUI_PAGE_FINISH
+; The picture.
 Page custom windDoneCreate    windDoneLeave
+
+!include "plain.nsh"
 
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
@@ -88,6 +123,11 @@ Page custom windDoneCreate    windDoneLeave
 ; Setup writes nothing to %LOCALAPPDATA%\Wind: the app seeds and owns that directory,
 ; including magnifier.ini, which it resolves through wind::ResolveIniPath().
 Section "Wind" SEC_WIND
+  ; Plain mode (issue #513) shows the log as it goes: NVDA reads each new line, and the
+  ; picture's hidden log is the reason it was silent.
+  ${If} $Plain = 1
+    SetDetailsView show
+  ${EndIf}
   !insertmacro WIND_QUIT_RUNNING
 
   SetOutPath "$INSTDIR"
@@ -173,12 +213,15 @@ Section "Wind" SEC_WIND
   !insertmacro WIND_APPLY_AUTOSTART
 
   ; The done screen is walked to by autoclose: the Next button it would otherwise wait for has
-  ; been hidden since .onGUIInit.
-  SetAutoClose true
-  ; That walk is a page swap no click started, so freeze here as a click would (issue #263);
-  ; the done screen thaws after its first frame. Last, so a failure above never leaves it on.
-  ${IfNot} ${Silent}
-    !insertmacro WIND_FREEZE
+  ; been hidden since .onGUIInit. Plain mode keeps its Next button and its log, so it stops
+  ; here and waits for the user, like any stock installer.
+  ${If} $Plain <> 1
+    SetAutoClose true
+    ; That walk is a page swap no click started, so freeze here as a click would (issue #263);
+    ; the done screen thaws after its first frame. Last, so a failure above never leaves it on.
+    ${IfNot} ${Silent}
+      !insertmacro WIND_FREEZE
+    ${EndIf}
   ${EndIf}
 SectionEnd
 
@@ -252,6 +295,8 @@ Function .onInit
   StrCpy $SignFailed 0
   ; the licence starts unaccepted; only the licence screen's box sets it
   StrCpy $Accepted 0
+  ; which page set runs: the picture, or the accessible stock pages (kit.nsh)
+  !insertmacro WIND_PICK_PLAIN
 FunctionEnd
 
 Function un.onInit

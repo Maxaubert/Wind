@@ -3,7 +3,8 @@
 Wind's installer is NSIS with a custom-drawn UI: a looping video with the screens composited over
 it. NSIS cannot play video, so every tick it decodes a JPEG frame through GDI+, alpha-blends the
 screen's overlay on top and copies the result into one static control; the same tick hit-tests the
-pointer. There are no native buttons.
+pointer. There are no native buttons, so setup also carries an accessible plain mode built from stock
+pages (see [Accessible setup](#accessible-setup)).
 
 Wind installs per-machine and elevated, and there is no install-location screen: UIAccess is granted
 only to a signed binary in a secure location, so an install elsewhere could not get it, and Wind refuses to start without it.
@@ -18,6 +19,7 @@ The elevation rules (HKLM autostart, launching through `explorer.exe`, stopping 
 | `wind.nsi` | Entry point: metadata, page order, install and uninstall sections |
 | `app.nsh` | Wind-specific logic: quitting a running Wind, WebView2, autostart, launching |
 | `screens.nsh` | The five screens and what each click does |
+| `plain.nsh` | The accessible plain mode: stock MUI pages for screen readers and the keyboard |
 | `kit.nsh` | The frameless window: size, DPI, GDI+, unpacking |
 | `video.nsh` | The player: decode, composite, hover, clicks, dragging |
 | `over.html` | The foreground: type, buttons, caption. The only place copy lives |
@@ -68,6 +70,32 @@ ticked. "Read the full licence" copies `LICENSE.txt` to a fresh folder in the us
 and opens it through `explorer.exe`, so the viewer is not elevated (an elevated NSIS locks
 `$PLUGINSDIR` to Administrators). A silent install skips the page; `LICENSE.txt` is installed next to
 `Wind.exe` either way.
+
+## Accessible setup
+
+The picture is pixels: a screen reader finds nothing to name on it and the keyboard has nothing to
+focus (issue #513). So `wind.nsi` lists two page sets and `.onInit` (`WIND_PICK_PLAIN` in `kit.nsh`)
+picks one per run. The plain set is stock NSIS: MUI's welcome page, MUI's licence page with the full
+`LICENSE` text and a real "I accept" checkbox, an nsDialogs page with the install folder as a label
+and a "Start Wind when I sign in" checkbox, the stock install page with its status line and log
+shown, and MUI's finish page with "Open Wind now" (launched through `explorer.exe`, like the picture)
+and "Create desktop shortcut". NVDA, JAWS and Narrator read these, and Tab, Space and Enter work.
+
+Setup runs plain when any of these holds:
+
+- `/ACCESSIBLE` is on the command line (any case): `Wind-Setup-x64-<ver>.exe /ACCESSIBLE`.
+- A screen reader has set the system flag (`SPI_GETSCREENREADER`).
+- NVDA is running (its `wxWindowClassNR` / `NVDA` window exists).
+- High contrast is on (the art ignores the user's colours).
+
+A silent install (`/S`) never runs plain mode and behaves exactly as before. Plain mode skips
+everything the picture needs: the frameless window, the media unpack, GDI+ and the timer, the hidden
+log and the autoclose. Each plain MUI page has `windPlainOnly` as its PRE function, and each picture
+creator aborts when `$Plain` is 1, so NSIS walks past the other set in both directions.
+
+The picture itself answers one key: Space ticks the licence box, and pressing Enter on the licence
+screen before ticking it shows a message box saying so and pointing at `/ACCESSIBLE`, rather than
+doing nothing.
 
 ## Editing the overlay
 

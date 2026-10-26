@@ -118,6 +118,11 @@ and local signing are described in `installer/README.md`; the design spec is
 [../specs/2026-08-20-installer-design.md](../specs/2026-08-20-installer-design.md). There is no
 install-location chooser, because UIAccess is granted only in a secure location.
 
+The picture has no controls a screen reader or the keyboard can use, so setup also carries an
+accessible plain mode of stock MUI pages (`installer/plain.nsh`, issue #513). `.onInit` picks it on
+`/ACCESSIBLE`, `SPI_GETSCREENREADER`, a running NVDA or high contrast, never under `/S`; both page
+sets are listed and each skips itself when the other runs. Details in `installer/README.md`.
+
 **Elevation rules** (`installer/app.nsh`):
 
 1. **HKCU and `%LOCALAPPDATA%` belong to the wrong user under elevation.** An elevated process's

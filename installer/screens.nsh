@@ -5,6 +5,8 @@
 ; differs is $Screen, which picks the overlay and decides what the clicks mean. There is not a
 ; single button control in this file.
 ;
+; In plain mode (kit.nsh, plain.nsh, issue #513) every page here skips itself.
+;
 ; Prism has a "where it goes" page with a Browse button. Wind does not, and the omission is
 ; deliberate: UIAccess is only granted to a signed binary in a secure location, so an install
 ; to D:\Apps\Wind would silently disable the elevated-window shortcuts and the desktop
@@ -17,6 +19,11 @@ Function windPageStart
   ; show never returns: /S would hang here forever. Abort in a creator means "skip this page",
   ; which is exactly right.
   ${If} ${Silent}
+    Abort
+  ${EndIf}
+  ; Plain mode (kit.nsh, plain.nsh) shows the stock pages instead; skipping here skips every
+  ; picture screen that runs through this.
+  ${If} $Plain = 1
     Abort
   ${EndIf}
   ; Back runs no leave function, so the page we came from may still hold its canvas: the
@@ -47,6 +54,7 @@ FunctionEnd
 ; ---- 1. welcome --------------------------------------------------------------
 Function windWelcomeCreate
   ${If} ${Silent}
+  ${OrIf} $Plain = 1
     Abort
   ${EndIf}
   ; once per run: Back returns here, and the art is already unpacked
@@ -81,6 +89,10 @@ Function windLicenceLeave
     ; staying on this page: undo what the click set up for leaving it
     StrCpy $Leaving 0
     !insertmacro WIND_THAW
+    ; Not silently (issue #513): someone on the keyboard pressed Enter and got nothing. A
+    ; message box is a real dialog, so it is also the one thing on this screen a screen
+    ; reader can read. Space ticks the box (WindInput).
+    MessageBox MB_ICONINFORMATION|MB_OK "To continue, accept the licence agreement: press Space or click the box.$\r$\n$\r$\nFor a setup that works with a screen reader and the keyboard, close Setup and run it again with /ACCESSIBLE."
     Abort
   ${EndIf}
   Call windPageLeave
@@ -125,7 +137,9 @@ FunctionEnd
 ; script while files are being written. This screen draws one frame and hands the motion to
 ; the progress bar, which Windows paints for us.
 Function windCopyShow
+  ; Plain mode keeps the stock page: status line, log and buttons, all readable.
   ${If} ${Silent}
+  ${OrIf} $Plain = 1
     Return
   ${EndIf}
   FindWindow $R4 "#32770" "" $HWNDPARENT

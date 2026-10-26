@@ -14,6 +14,8 @@ install/uninstall round trip (`tools\installer_check.ps1`).
 - [ ] Upgrade while Wind runs zoomed: no "file in use" error, the OS cursor is visible afterwards. Upgrade with Settings open: WindConfig closes.
 - [ ] Uninstall keeping settings: `magnifier.ini` survives. Uninstall removing settings: it does not.
 - [ ] At 100% and 225% DPI the setup window is sharp and its hit targets line up.
+- [ ] Accessible setup (`/ACCESSIBLE`, or with NVDA running): stock pages with a title bar; NVDA reads each page, Tab reaches every button and box, Space ticks the licence box, Install shows the log, and Finish starts an unelevated Wind only when "Open Wind now" is ticked.
+- [ ] The picture's licence screen: Space ticks the box; Enter before ticking shows the hint message box.
 - [ ] Without UIAccess Wind refuses to start: a plain `build.bat` `build\Wind.exe` (no `WIND_ALLOW_NO_UIACCESS`) shows the "Wind can't start" dialog telling you to run the installer again, then exits with no tray icon and no magnifier.
 
 ## Desktop zoom
