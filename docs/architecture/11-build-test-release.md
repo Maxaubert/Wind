@@ -120,7 +120,8 @@ install-location chooser, because UIAccess is granted only in a secure location.
 
 The picture has no controls a screen reader or the keyboard can use, so setup also carries an
 accessible plain mode of stock MUI pages (`installer/plain.nsh`, issue #513). `.onInit` picks it on
-`/ACCESSIBLE`, `SPI_GETSCREENREADER`, a running NVDA or high contrast, never under `/S`; both page
+`/ACCESSIBLE`, a running NVDA, JAWS or Narrator, or high contrast, never under `/S` (not
+`SPI_GETSCREENREADER`: other apps leave it set); both page
 sets are listed and each skips itself when the other runs. Details in `installer/README.md`.
 
 **Elevation rules** (`installer/app.nsh`):

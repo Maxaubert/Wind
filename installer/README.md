@@ -84,8 +84,9 @@ and "Create desktop shortcut". NVDA, JAWS and Narrator read these, and Tab, Spac
 Setup runs plain when any of these holds:
 
 - `/ACCESSIBLE` is on the command line (any case): `Wind-Setup-x64-<ver>.exe /ACCESSIBLE`.
-- A screen reader has set the system flag (`SPI_GETSCREENREADER`).
-- NVDA is running (its `wxWindowClassNR` / `NVDA` window exists).
+- A screen reader is running: NVDA (its `wxWindowClassNR` / `NVDA` window, or `nvda.exe`), JAWS
+  (`jfw.exe`) or Narrator (`Narrator.exe`). The system flag `SPI_GETSCREENREADER` is deliberately
+  not used: other apps leave it set with no screen reader running.
 - High contrast is on (the art ignores the user's colours).
 
 A silent install (`/S`) never runs plain mode and behaves exactly as before. Plain mode skips

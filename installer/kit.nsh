@@ -37,9 +37,8 @@ Var Plain       ; 1: the accessible stock pages (plain.nsh) instead of the pictu
 ; also carries a plain set of stock MUI pages (plain.nsh) and picks one set at startup. Plain
 ; when any of these holds:
 ;   /ACCESSIBLE on the command line (GetOptions is case-insensitive)
-;   a screen reader says it is running (SPI_GETSCREENREADER; NVDA, JAWS and Narrator set it)
-;   NVDA's own window exists (the same FindWindow its nvda.exe uses to find a running copy),
-;     in case the flag was cleared by another app
+;   a screen reader is running: NVDA's own window exists (the FindWindow nvda.exe uses to find
+;     a running copy), or tasklist shows nvda.exe, jfw.exe (JAWS) or Narrator.exe
 ;   high contrast is on: the art is fixed colours and ignores the user's scheme
 ; Never under /S: a silent install shows no pages, and keeping $Plain at 0 there keeps every
 ; silent code path exactly as it was.
@@ -52,14 +51,17 @@ Var Plain       ; 1: the accessible stock pages (plain.nsh) instead of the pictu
     ${IfNot} ${Errors}
       StrCpy $Plain 1
     ${EndIf}
-    StrCpy $1 0
-    System::Call 'user32::SystemParametersInfoW(i 0x46, i 0, *i .r1, i 0)'
-    ${If} $1 <> 0
-      StrCpy $Plain 1
-    ${EndIf}
+    ; A running screen reader. Not SPI_GETSCREENREADER: other apps leave that flag set with no
+    ; screen reader running, which would hide the animated UI from sighted users (#513).
     FindWindow $1 "wxWindowClassNR" "NVDA"
     ${If} $1 <> 0
       StrCpy $Plain 1
+    ${Else}
+      nsExec::Exec 'cmd /c tasklist /NH | findstr /I /B "nvda.exe jfw.exe Narrator.exe"'
+      Pop $1
+      ${If} $1 == 0
+        StrCpy $Plain 1
+      ${EndIf}
     ${EndIf}
     ; HIGHCONTRAST { cbSize, dwFlags, lpszDefaultScheme }, 12 bytes in this 32-bit process
     System::Call '*(i 12, i 0, p 0) p .r0'

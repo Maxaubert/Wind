@@ -41,8 +41,8 @@ and run it. It always points at the latest release.
 - Adds the WebView2 runtime if Settings needs it.
 - Settings, profiles and logs stay in `%LOCALAPPDATA%\Wind`, also after an uninstall unless you
   choose otherwise.
-- Works with screen readers: setup switches to plain, standard pages when a screen reader (such as
-  NVDA) or high contrast is on. To ask for them yourself, run `Wind-Setup-x64.exe /ACCESSIBLE`.
+- Works with screen readers: setup switches to plain, standard pages when a screen reader (NVDA,
+  JAWS or Narrator) or high contrast is on. To ask for them yourself, run `Wind-Setup-x64.exe /ACCESSIBLE`.
 
 The installer is not signed, so SmartScreen warns on first run: choose **More info**, then **Run
 anyway**. Some browsers and work computers block the download. Setup signs Wind locally for your PC,
