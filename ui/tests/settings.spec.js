@@ -103,7 +103,7 @@ test('About: Star on GitHub asks the host to open the repo', async ({ page }) =>
 
 test('the title bar has only minimize, maximize and close; Maximize asks the host', async ({ page }) => {
   await page.goto('/');
-  await expect(page.locator('header.tb button')).toHaveCount(3);
+  await expect(page.locator('.tb button')).toHaveCount(3);
   await expect(page.locator('[data-theme-cycle]')).toHaveCount(0);
   await expect(page.getByRole('button', { name: /^Theme:/ })).toHaveCount(0);
   await page.getByRole('button', { name: 'Maximize' }).click();
@@ -252,29 +252,31 @@ test('the save capsule reads on the dark surfaces', async ({ page }) => {
   expect(bg).not.toBe('rgba(0, 0, 0, 0)');
 });
 
-test('focus order: Tab goes title bar, search, sidebar, then the page, and focus is visible', async ({ page }) => {
+test('focus order: Settings opens on the page; Tab walks the page, then the window buttons, then search and sidebar', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('h1')).toHaveText('Hotkeys');
+  // #514: initial focus is the page region (named after its heading), never the window buttons.
+  await expect(page.locator('main')).toBeFocused();
+  await expect(page.locator('main')).toHaveAttribute('aria-label', 'Hotkeys');
   const where = () => page.evaluate(() => {
     const a = document.activeElement;
     if (!a) return '';
-    if (a.closest('header.tb')) return 'tb';
+    if (a.closest('.tb')) return 'tb';
     if (a.closest('.side .search')) return 'search';
     if (a.closest('.side')) return 'side';
     if (a.closest('main')) return 'main';
     return a.tagName;
   });
   const seen = [];
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 60; i++) {
     await page.keyboard.press('Tab');
     const w = await where();
     if (seen.at(-1) !== w) seen.push(w);
   }
   const order = seen.filter((w) => ['tb', 'search', 'side', 'main'].includes(w));
-  const uniq = [...new Set(order)];
-  expect(uniq).toEqual(expect.arrayContaining(['tb', 'search', 'side', 'main']));
-  expect(uniq.indexOf('search')).toBeLessThan(uniq.indexOf('side'));
-  expect(uniq.indexOf('side')).toBeLessThan(uniq.indexOf('main'));
+  // The title bar follows the page in the DOM (drawn on top by grid-row), so its buttons come last.
+  expect(order.slice(0, 2)).toEqual(['main', 'tb']);
+  expect(order.slice(2, 5)).toEqual(['search', 'side', 'main']);
   const ring = await page.evaluate(() => {
     const s = getComputedStyle(document.activeElement);
     return s.outlineStyle !== 'none' || s.boxShadow !== 'none';

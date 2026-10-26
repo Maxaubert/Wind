@@ -22,6 +22,12 @@ window), picks settings or onboarding mode, creates a frameless `WS_POPUP` with 
   a `dxgi.dll` that WebView2 already unloaded). On `ProcessFailed` the host recreates the engine,
   at most 3 times a minute (`src/config_ui/webview_recover.h`), and hands back the page's unapplied
   edits.
+- **Keyboard focus lives in the page** (#514). WebView2 never takes focus by itself, so the host
+  calls `MoveFocus` (`FocusPage`, only while the window is active) on first paint (`ready`), after
+  each navigation, on `WM_ACTIVATE`/`WM_SETFOCUS`, and when a second launch re-opens the window
+  (`WM_APP_FOCUS_PAGE`). `MoveFocusRequested` (Tab past either end) cycles back into the page instead
+  of leaving focus on the empty host. `WS_SYSMENU` gives the captionless window Alt+Space and the
+  taskbar menu; it draws nothing because `WM_NCCALCSIZE` removes the whole caption.
 - **Watchdog.** A 1 s timer closes Settings when Wind is gone. `ShouldCloseOnWindGone`
   (`src/config_ui/wind_watchdog.h`, pure) requires Wind to have been seen running first and two
   consecutive misses. The probe is a Toolhelp process-name scan, because a mutex open or process
@@ -250,9 +256,18 @@ Labels and descriptions are sibling elements of their controls, so naming is wir
 text is their value (select, keycap, app list) list both label and value.
 
 - One polite `aria-live` region announces changes that do not move focus (engine restarts,
-  Save/Discard, profile switches).
-- Sidebar navigation moves focus to the section heading.
-- Every modal uses `lib/dialog.js` (focus trap, Escape, focus restore).
+  Save/Discard, profile switches, the first unsaved change). The save capsule is a labelled
+  `region`, not a live region: a live region holding buttons made NVDA read it on every change.
+- Settings opens with focus on `main` (named after the page heading, "Search results" while
+  searching). Sidebar navigation moves focus there too.
+- The title bar is a plain `div`, not a `banner` landmark, and is rendered AFTER the page in the DOM
+  (`grid-row: 1` draws it on top), so its window buttons come last in Tab and reading order; the
+  brand text, which repeats the window title, is `aria-hidden`. NVDA otherwise read the page as a
+  second window over Settings (#514).
+- Every modal uses `lib/dialog.js` (focus trap, Escape, focus restore). While one is open, the
+  siblings of every ancestor of the top dialog are `inert` (layers that appear meanwhile too; the
+  live region is kept), so only the dialog is in the accessibility tree. This works for the app-list
+  dialog that sits inside the page as well as for full-window prompts.
 - `ui/tests/a11y.spec.js` asserts against the accessibility tree, including "no unnamed controls".
 
 ## Testing

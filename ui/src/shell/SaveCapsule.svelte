@@ -3,6 +3,9 @@
   // as it appears and eases back down when it goes. After a successful Save it stays for a moment
   // showing a "Saved" check, then eases away. The motion is a JS transition, so it checks
   // prefers-reduced-motion itself.
+  // Not a live region (#514): role=status on a box holding buttons made NVDA read "2 unsaved changes,
+  // Discard, button, Save, button" on every change. The page announces the first unsaved change and
+  // Save / Discard through its own live region instead.
   import { cubicOut } from 'svelte/easing';
   let { count = 0, onSave = () => {}, onDiscard = () => {} } = $props();
 
@@ -31,7 +34,7 @@
 </script>
 
 {#if visible}
-  <div class="capsule" role="status" transition:rise>
+  <div class="capsule" role="region" aria-label="Unsaved changes" transition:rise>
     {#if saved}
       <b class="ok"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="M3 8.5 6.5 12 13 4.5"/></svg>Saved</b>
     {:else}

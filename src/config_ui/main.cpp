@@ -49,6 +49,9 @@ static std::wstring g_initScriptId;   // AddScriptToExecuteOnDocumentCreated id 
 static bool g_onboard = false;   // launched with --onboard; cleared once onboarding is done (ini)
 static const UINT WM_APP_WV_FAILED = WM_APP + 0x31;
 static const UINT WM_APP_DIAG_DONE = WM_APP + 0x32;   // lParam = new std::wstring (zip path, "" = failed)
+// Hand keyboard focus to the page (#514); wParam = COREWEBVIEW2_MOVE_FOCUS_REASON. Posted by the
+// MoveFocusRequested handler and by a second launch (the single-instance path, another process).
+static const UINT WM_APP_FOCUS_PAGE = WM_APP + 0x33;
 static bool g_exporting = false;                       // a diagnostics export is running (UI thread only)
 static void CreateWebView(HWND hwnd);
 static HWND g_hwnd = nullptr;
@@ -277,6 +280,15 @@ static DWORD WINAPI ExportDiagnosticsThread(LPVOID) {
     return 0;
 }
 
+// Keyboard focus belongs in the page (#514). WebView2 never takes it on its own: without this the
+// focus sat on the empty host window, so NVDA announced "Wind Settings" and then nothing until a
+// click, and the page read as a separate layer over the window. Only while this window is active,
+// so a page that finishes loading behind another app never activates Settings.
+static void FocusPage(COREWEBVIEW2_MOVE_FOCUS_REASON reason) {
+    if (!g_controller || !g_hwnd || GetActiveWindow() != g_hwnd || IsIconic(g_hwnd)) return;
+    g_controller->MoveFocus(reason);
+}
+
 // Bridge message handlers, one per message, in dispatch order. HandleWebMessage below is the
 // authoritative message list; a one- or two-line branch stays inline there.
 static void OnReady() {
@@ -285,6 +297,7 @@ static void OnReady() {
         wind::Log(wind::LogLevel::Info, "config", "startup: first paint %llu ms after launch",
                   (unsigned long long)(GetTickCount64() - g_launchTick));
     }
+    FocusPage(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);   // the page is painted: put the keyboard in it
 }
 static void OnSetConfig(ICoreWebView2* wv, const std::string& j, const std::string& type) {
     std::string key = JsonField(j, "key"), value = JsonField(j, "value");
@@ -623,6 +636,22 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         return 0;
     }
+    if (m == WM_APP_FOCUS_PAGE) {
+        const WPARAM r = w;
+        FocusPage(r == COREWEBVIEW2_MOVE_FOCUS_REASON_NEXT || r == COREWEBVIEW2_MOVE_FOCUS_REASON_PREVIOUS
+                  ? (COREWEBVIEW2_MOVE_FOCUS_REASON)r : COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+        return 0;
+    }
+    // Activation and focus go straight on to the page (#514): DefWindowProc would park the keyboard
+    // on this empty host window. PROGRAMMATIC keeps the element that had focus inside the page.
+    if (m == WM_ACTIVATE && g_controller && LOWORD(w) != WA_INACTIVE && !HIWORD(w)) {
+        FocusPage(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+        return 0;
+    }
+    if (m == WM_SETFOCUS && g_controller) {
+        FocusPage(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+        return 0;
+    }
     if (m == WM_APP_DIAG_DONE) {
         std::unique_ptr<std::wstring> zip(reinterpret_cast<std::wstring*>(l));
         g_exporting = false;
@@ -792,6 +821,18 @@ static void CreateWebView(HWND hwnd) {
                                 wind::Log(wind::LogLevel::Info, "config", "startup: navigation completed %llu ms after launch",
                                           (unsigned long long)(GetTickCount64() - g_launchTick));
                             }
+                            FocusPage(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);   // also after a recovery reload
+                            return S_OK;
+                        }).Get(), &tok);
+                    // Tab past the last control (or Shift+Tab before the first) would leave focus on the
+                    // empty host window: cycle back into the page instead (#514). Posted, so MoveFocus never
+                    // runs inside the controller's own event.
+                    g_controller->add_MoveFocusRequested(
+                        Callback<ICoreWebView2MoveFocusRequestedEventHandler>(
+                        [](ICoreWebView2Controller*, ICoreWebView2MoveFocusRequestedEventArgs* args) -> HRESULT {
+                            COREWEBVIEW2_MOVE_FOCUS_REASON reason = COREWEBVIEW2_MOVE_FOCUS_REASON_NEXT;
+                            if (args) { args->get_Reason(&reason); args->put_Handled(TRUE); }
+                            PostMessageW(g_hwnd, WM_APP_FOCUS_PAGE, (WPARAM)reason, 0);
                             return S_OK;
                         }).Get(), &tok);
                     g_webview->add_WebMessageReceived(
@@ -831,6 +872,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
         if (existing) {
             if (IsIconic(existing)) ShowWindow(existing, SW_RESTORE);
             SetForegroundWindow(existing);
+            // Activation moves focus into the page, but an already-active window gets no WM_ACTIVATE:
+            // ask it directly as well (#514).
+            PostMessageW(existing, WM_APP_FOCUS_PAGE, (WPARAM)COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC, 0);
         }
         CloseHandle(mtx);
         return 0;
@@ -879,7 +923,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR lpCmdLine, int) {
     wc.hIcon = LoadIconW(hInst, MAKEINTRESOURCEW(IDI_WIND));  // logo badge for taskbar/alt-tab
     RegisterClassW(&wc);
     HWND hwnd = CreateWindowExW(0, wc.lpszClassName, L"Wind Settings",
-        WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CLIPCHILDREN,
+        // WS_SYSMENU (#514) gives the captionless window the system menu (Alt+Space, taskbar right-click:
+        // Move, Size, Minimize, Maximize, Close) for keyboard and screen-reader users. It draws nothing:
+        // WM_NCCALCSIZE removes the whole caption, and without WS_CAPTION there is no icon or button.
+        WS_POPUP | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CLIPCHILDREN,
         CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, nullptr, nullptr, hInst, nullptr);
     SetTimer(hwnd, kWindWatchTimerId, kWindWatchPeriodMs, nullptr);
     // Size to a sensible default (scaled for this monitor's DPI) and center on the work area.

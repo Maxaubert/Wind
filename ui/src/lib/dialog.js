@@ -14,10 +14,14 @@
 // onClose is optional. Omit it for a dialog that must be answered by pressing one of its buttons
 // (Escape then does nothing, which is the correct behaviour for a prompt with no cancel path).
 //
-// aria-modal="true" is what keeps a screen reader's browse cursor inside the dialog; this action
-// supplies the other half, the Tab loop, so keyboard-only users are held too. We deliberately do
-// NOT set `inert` on the rest of the page: the app-list dialog is rendered inside the settings
-// pane it would have to inert, so an inert-based trap would disable that dialog itself.
+// aria-modal="true" alone did not keep the page out of a screen reader (#514): NVDA read the
+// prompt and the whole settings page behind it as one document, "a window over the page". So while
+// a dialog is open everything outside it is made `inert` (unfocusable, unclickable and dropped from
+// the accessibility tree), and the Tab loop below holds keyboard users as well. The app-list dialog
+// is rendered inside the settings pane, so the page cannot simply be inerted wholesale: instead the
+// SIBLINGS of every ancestor of the dialog, up to <body>, are inerted. The dialog's own ancestor
+// chain stays live, the rest of the app does not. The polite live region stays live so Save and
+// profile announcements still reach a screen reader.
 const FOCUSABLE = [
   'a[href]', 'button:not([disabled])', 'input:not([disabled])', 'select:not([disabled])',
   'textarea:not([disabled])', '[tabindex]:not([tabindex="-1"])',
@@ -27,12 +31,47 @@ const FOCUSABLE = [
 // stack (the app-list dialog sits inside the settings pane that a profile prompt also covers).
 const stack = [];
 
+// Only the TOP dialog's surroundings are inert: whenever the stack changes, the previous set is
+// released and the new top inerts everything around itself (a dialog under another one included).
+// An element that was inert in the markup is never touched.
+let applied = null;
+function inertOutside(node) {
+  const mine = [];
+  const add = (el) => {
+    if (!(el instanceof HTMLElement) || el.inert || el.matches('[aria-live], script, style')) return;
+    el.inert = true;
+    mine.push(el);
+  };
+  const observers = [];
+  for (let el = node; el && el.parentElement && el !== document.body; el = el.parentElement) {
+    const parent = el.parentElement;
+    for (const sib of parent.children) if (sib !== el) add(sib);
+    // Layers that appear while the dialog is open (the save capsule, a page swap) are inerted too.
+    // A dialog that mounts on top re-runs this for itself, which releases these first.
+    const mo = new MutationObserver((list) => {
+      for (const r of list) for (const a of r.addedNodes) if (a !== el) add(a);
+    });
+    mo.observe(parent, { childList: true });
+    observers.push(mo);
+  }
+  return () => {
+    observers.forEach((mo) => mo.disconnect());
+    for (const el of mine) el.inert = false;
+  };
+}
+function reapplyInert() {
+  if (applied) { applied(); applied = null; }
+  const top = stack[stack.length - 1];
+  if (top && top.isConnected) applied = inertOutside(top);
+}
+
 export function dialog(node, opts = {}) {
   let options = opts || {};
   // Where focus came from, so it can be handed back when the dialog closes. Read at mount, before
   // anything is moved.
   const opener = document.activeElement;
   stack.push(node);
+  reapplyInert();
 
   const focusable = () => [...node.querySelectorAll(FOCUSABLE)]
     .filter(el => el.offsetWidth > 0 || el.offsetHeight > 0 || el === document.activeElement);
@@ -96,6 +135,7 @@ export function dialog(node, opts = {}) {
       if (t) clearTimeout(t);
       const i = stack.indexOf(node);
       if (i >= 0) stack.splice(i, 1);
+      reapplyInert();   // before the focus hand-back: an inert opener cannot take focus
       document.removeEventListener('keydown', onDocKey);
       node.removeEventListener('keydown', onKey);
       // Hand focus back to whatever opened the dialog. Guard on isConnected: a dialog whose opener
