@@ -36,8 +36,8 @@ test('dark tokens and shell components render in isolation', async ({ page }) =>
 
 test('the title bar carries only the window buttons and the sidebar has a divider but no labels', async ({ page }) => {
   await page.goto('/preview.html');
-  await expect(page.locator('header.tb button')).toHaveText(['', '', '']);
-  await expect(page.locator('header.tb button')).toHaveCount(3);
+  await expect(page.locator('.tb button')).toHaveText(['', '', '']);
+  await expect(page.locator('.tb button')).toHaveCount(3);
   await expect(page.locator('[data-theme-cycle]')).toHaveCount(0);
   await expect(page.locator('.side .lbl')).toHaveCount(0);
   await expect(page.locator('.side nav:not(.bottom) .it')).toHaveCount(3);

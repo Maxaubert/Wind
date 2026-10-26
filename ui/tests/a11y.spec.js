@@ -57,7 +57,7 @@ test('every control on every page has an accessible name', async ({ page }) => {
     await expect(page.locator('.side .it.sel')).toHaveAttribute('data-g', g);
     expect(await unnamedIn(page, 'main'), g).toEqual([]);
   }
-  expect(await unnamedIn(page, 'header.tb')).toEqual([]);
+  expect(await unnamedIn(page, '.tb')).toEqual([]);
   expect(await unnamedIn(page, '.side')).toEqual([]);
 });
 
@@ -92,7 +92,7 @@ test('focus is visible', async ({ page }) => {
   {
     await page.goto('/');
     await page.keyboard.press('Tab');   // keyboard modality: the ring is for keyboard users only
-    for (const sel of ['.side .it', '.side .search input', 'header.tb .wc', 'main .kchg']) {
+    for (const sel of ['.side .it', '.side .search input', '.tb .wc', 'main .kchg']) {
       await page.locator(sel).first().focus();
       const ring = await page.locator(sel).first().evaluate((el) => {
         const s = getComputedStyle(el);
@@ -165,7 +165,7 @@ test('the page has a lang, one h1, and hierarchical headings', async ({ page }) 
 
 test('decorative icons are hidden from the accessibility tree', async ({ page }) => {
   await page.goto('/');
-  const exposed = await page.locator('.wnd').evaluate((r) => [...r.querySelectorAll('.side svg, header.tb svg')]
+  const exposed = await page.locator('.wnd').evaluate((r) => [...r.querySelectorAll('.side svg, .tb svg')]
     .filter((s) => !s.closest('[aria-hidden=true]') && s.getAttribute('aria-hidden') !== 'true' && !s.getAttribute('aria-label')
       && !s.closest('button[aria-label]')).length);
   expect(exposed).toBe(0);
@@ -218,4 +218,89 @@ test('the profile selector has an accessible name and the search box is a labell
   await expect(page.getByRole('searchbox', { name: 'Search settings' })).toBeVisible();
   await go(page, 'prefs');
   await expect(page.locator('[data-key="__profiles"] .trig')).toHaveAccessibleName(/profile/i);
+});
+
+// ---- #514: NVDA read Settings as "an overlaid window" ----------------------------------------------
+
+test('while a prompt is open the rest of the app is inert, and it comes back on close', async ({ page }) => {
+  await page.goto('/');
+  await go(page, 'zoom');
+  await page.locator('[data-key="maxLevel"] input[type=range]').fill('20');
+  const closeBtn = page.locator('.tb').getByRole('button', { name: 'Close' });
+  await closeBtn.click();
+  const dlg = page.getByRole('dialog', { name: 'Unsaved changes' });
+  await expect(dlg).toBeVisible();
+  // Every app layer behind the prompt is inert; the live region stays live for announcements.
+  for (const sel of ['.body', '.tb', '.capsule']) await expect(page.locator(sel)).toHaveJSProperty('inert', true);
+  await expect(page.locator('.wnd > [role=status][aria-live=polite]')).toHaveJSProperty('inert', false);
+  expect(await dlg.evaluate((d) => !!d.closest('[inert]'))).toBe(false);
+  // Chromium's own accessibility tree (what NVDA reads) holds only the dialog: no page landmark,
+  // sidebar, window button or capsule button.
+  const cdp = await page.context().newCDPSession(page);
+  const { nodes } = await cdp.send('Accessibility.getFullAXTree');
+  const shown = nodes.filter((n) => !n.ignored).map((n) => [n.role && n.role.value, n.name && n.name.value]);
+  expect(shown.filter(([r]) => r === 'main' || r === 'navigation')).toEqual([]);
+  expect(shown.filter(([r]) => r === 'button').map(([, nm]) => nm).sort())
+    .toEqual(['Discard', 'Keep for this session', 'Save']);
+  await page.keyboard.press('Escape');
+  await expect(dlg).toHaveCount(0);
+  expect(await page.evaluate(() => document.querySelectorAll('[inert]').length)).toBe(0);
+  await expect(closeBtn).toBeFocused();
+});
+
+test('a dialog inside the page (app list) inerts the rest of the app but not itself', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('[data-key="noSwallowApps"]').getByRole('button', { name: /Manage/ }).click();
+  const dlg = page.getByRole('dialog');
+  await expect(dlg).toBeVisible();
+  expect(await dlg.evaluate((d) => !!d.closest('[inert]'))).toBe(false);
+  await expect(page.locator('.side')).toHaveJSProperty('inert', true);
+  await expect(page.locator('.tb')).toHaveJSProperty('inert', true);
+  await expect(page.locator('main .banner')).toHaveJSProperty('inert', true);
+  await expect(dlg.getByRole('button', { name: 'Add program...' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(dlg).toHaveCount(0);
+  expect(await page.evaluate(() => document.querySelectorAll('[inert]').length)).toBe(0);
+});
+
+test('the save capsule is a labelled region, not a live region, and the first change is announced once', async ({ page }) => {
+  await page.goto('/');
+  await go(page, 'zoom');
+  const live = page.locator('.wnd > [role=status][aria-live=polite]');
+  await page.locator('[data-key="maxLevel"] input[type=range]').fill('20');
+  const cap = page.locator('.capsule');
+  await expect(cap).toBeVisible();
+  expect(await cap.getAttribute('role')).toBe('region');
+  expect(await cap.getAttribute('aria-live')).toBeNull();
+  expect(await cap.evaluate((c) => !!c.querySelector('[role=status], [aria-live]'))).toBe(false);
+  await expect(page.getByRole('region', { name: 'Unsaved changes' })).toBeVisible();
+  await expect(live).toContainText('Unsaved changes');
+  // A second change does not repeat it.
+  await page.evaluate(() => { document.querySelector('.wnd > [role=status]').textContent = ''; });
+  await page.locator('[data-key="maxLevel"] input[type=range]').fill('18');
+  await expect(cap).toContainText('1 unsaved change');
+  await expect(live).toHaveText('');
+});
+
+test('the title bar is no banner landmark and follows the page in the DOM', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('h1')).toHaveText('Hotkeys');
+  await expect(page.getByRole('banner')).toHaveCount(0);
+  const after = await page.evaluate(() => {
+    const tb = document.querySelector('.tb'), main = document.querySelector('main');
+    return !!(main.compareDocumentPosition(tb) & Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+  expect(after).toBe(true);
+  // Drawn on top all the same.
+  const y = await page.evaluate(() => [document.querySelector('.tb').getBoundingClientRect().top,
+                                       document.querySelector('.body').getBoundingClientRect().top]);
+  expect(y[0]).toBe(0);
+  expect(y[1]).toBeGreaterThanOrEqual(38);
+  await expect(page.locator('.tb .brand')).toHaveAttribute('aria-hidden', 'true');
+});
+
+test('main is named "Search results" while searching', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('.side .search input').fill('zoom');
+  await expect(page.locator('main')).toHaveAttribute('aria-label', 'Search results');
 });

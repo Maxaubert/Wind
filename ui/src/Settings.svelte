@@ -5,7 +5,7 @@
   //   saved   what the active profile file holds. The capsule counts the keys where the two differ.
   // Keybind captures are the exception: they write the live ini AND the profile (setConfigPersist),
   // so they are never "unsaved" and a later Save cannot lose them.
-  import { onMount, tick } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
   import './design/tokens.css';
   import './design/themes.css';
   import { groups } from './settings-schema.js';
@@ -46,6 +46,14 @@
   const count = $derived(loaded ? changedKeys(values, saved).length : 0);
   const dirty = $derived(count > 0);
   $effect(() => { if (loaded) setDirty(dirty); });   // the host's WM_CLOSE guard follows the UI
+  // The first unsaved change is announced once (the capsule is no live region, #514); Save and Discard
+  // announce themselves. A session that opens with unsaved changes is not announced.
+  let wasDirty = null;
+  $effect(() => {
+    if (!loaded) return;
+    if (wasDirty === false && dirty) untrack(() => announce('Unsaved changes. Save or Discard them at the bottom of the window.'));
+    wasDirty = dirty;
+  });
 
   // The built-in theme (uiPalette, a global key) picks the token block in design/themes.css. Always dark (#324).
   // Until the session is loaded, use the palette the host injected with the first-paint config (window.__windInit),
@@ -142,6 +150,10 @@
     ];
     (async () => {
       await load();
+      // Start on the page, not on the window buttons (#514): focus the page region, named after its
+      // heading, unless the user already put focus somewhere.
+      await tick();
+      if (main && (!document.activeElement || document.activeElement === document.body)) main.focus({ preventScroll: true });
     })();
     window.addEventListener('focus', refresh);
     return () => { offs.forEach((o) => o()); window.removeEventListener('focus', refresh); };
@@ -286,11 +298,10 @@
 <svelte:window onkeydown={onKeydown} />
 
 <div class="wnd app" class:pending={!loaded} data-palette={palette}>
-  <TitleBar {maximized} onMinimize={() => windowControl('minimize')} onMaximize={() => windowControl('maximize')} onClose={requestClose} />
   <div class="body">
     <Sidebar groups={top} {bottom} active={searching ? '' : activeId} version={VERSION} {query} {onSearch}
              onSelect={(id) => { clearSearch(); select(id); }} />
-    <main class="main" data-page={searching ? 'search' : group.id} bind:this={main} tabindex="-1" aria-label={group.label}>
+    <main class="main" data-page={searching ? 'search' : group.id} bind:this={main} tabindex="-1" aria-label={searching ? 'Search results' : group.label}>
       {#key searching ? '?search' : activeId}
       <div class="page" class:fade={navigated}>
       {#if searching}
@@ -318,6 +329,8 @@
     </main>
     <ScrollChip target={main} />
   </div>
+  <!-- After the page in the DOM, drawn on top by grid-row (#514): see TitleBar.svelte. -->
+  <TitleBar {maximized} onMinimize={() => windowControl('minimize')} onMaximize={() => windowControl('maximize')} onClose={requestClose} />
   <SaveCapsule {count} onSave={save} onDiscard={discard} />
   <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">{announcement}</div>
 
@@ -404,7 +417,8 @@
   /* Hidden until the session is loaded, so no empty controls flash; the host paints the theme background behind it. */
   .app.pending { visibility: hidden; }
   .app { --side-w: 240px; width: 100vw; height: 100vh; display: grid; grid-template-rows: 38px 1fr; position: relative; overflow: hidden; }
-  .body { display: grid; grid-template-columns: var(--side-w) minmax(0, 1fr); min-height: 0; }
+  .body { display: grid; grid-template-columns: var(--side-w) minmax(0, 1fr); min-height: 0; grid-row: 2; }
+  .app > :global(.tb) { grid-row: 1; }   /* the title bar follows the page in the DOM but sits on top */
   /* Narrow window: the sidebar moves above the page as a wrapped strip instead of eating the content. */
   @media (max-width: 700px) {
     .app { --side-w: 0px; }
