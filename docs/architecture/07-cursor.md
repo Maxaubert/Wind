@@ -382,7 +382,8 @@ leaves the caret to `followCaret` (sources in `findCaret`: xterm input, Win32, U
   60 s) and per app folder (5 s doubling to 5 min; a load failure can be transient, so a folder is
   never written off), and the retry after a failed read backs off 250 ms doubling to 4 s; a bridge event or a
   window switch resets it. `trackJava=0` (default 1, Settings "Follow text in Java apps") never loads
-  the bridge DLL; Java apps are then read like any other app.
+  the bridge DLL; Java apps are then read like any other app. The MSAA caret (`MsaaCaret`) skips
+  windows Windows reports as hung and sits out 2 s after a call over 250 ms.
 - **The bridge runs third-party code in Wind's process (#515).** Every call into the DLL
   (`Windows_run`, `setCaretUpdateFP`/`setFocusGainedFP`, `isJavaWindow`,
   `getAccessibleContextWithFocus`, `getAccessibleTextInfo`, `getCaretLocation`,
@@ -400,8 +401,7 @@ leaves the caret to `followCaret` (sources in `findCaret`: xterm input, Win32, U
   registered hellos) is added process-wide with `ChangeWindowMessageFilter` just before
   `Windows_run`, because a live JVM (always the case with NVDA running) answers the handshake at
   once; afterwards the same messages are allowed per window on the windows `Windows_run` created and
-  the process-wide allowance is removed. The MSAA caret (`MsaaCaret`) skips windows Windows reports as hung and
-  sits out 2 s after a call over 250 ms.
+  the process-wide allowance is removed.
 - **Mouse edge mode** (`mouseAlign=1`, free-pointer sessions only): the pointer is unwelded and
   `EdgePanCenter` (`src/track/edge_pan.h`) moves the view only when the cursor's visible body leaves the
   margin band (`mouseMarginPct`). Edge-pinned motion is hidden from the lock detector

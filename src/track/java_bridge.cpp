@@ -493,6 +493,7 @@ void JavaBridge::logJavaProcess(HWND javaWindow) {
     CloseHandle(p);
     wind::Log(wind::LogLevel::Info, "track", "java: Java window of pid %lu: %ls (%s)", pid, buf,
               !haveBits ? "bitness unknown" : wow ? "32-bit" : "64-bit");
+    wind::LogFlush(200);   // once per process: on disk before the bridge is touched for it
 }
 
 // After a fault: the bridge's windows get DefWindowProcW as their procedure (nothing in the DLL runs
