@@ -78,6 +78,11 @@ Function windLicenceCreate
   ${EndIf}
   StrCpy $Screen 4
   Call windPageStart
+  ; NSIS leaves the keyboard focus on its Next button, hidden but still live. Space ticks the
+  ; box (WindInput), and the same Space would then click that Next on key-up and leave the
+  ; page the moment the box is ticked (or show the hint after an untick). The canvas is a
+  ; static, which ignores keys; Enter still reaches Next through the dialog's default button.
+  System::Call 'user32::SetFocus(p $Canvas)'
   nsDialogs::Show
 FunctionEnd
 
