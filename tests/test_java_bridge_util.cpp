@@ -2,6 +2,18 @@
 #include "java_bridge_util.h"
 using namespace wind;
 
+TEST_CASE("file version: VS_FIXEDFILEINFO halves format as major.minor.build.revision (#515)") {
+    CHECK(FormatFileVersion(0x00150000ul, 0x00050008ul) == "21.0.5.8");
+    CHECK(FormatFileVersion(0ul, 0ul) == "0.0.0.0");
+    CHECK(FormatFileVersion(0xFFFFFFFFul, 0x0001FFFFul) == "65535.65535.1.65535");
+}
+
+TEST_CASE("bridge protocol messages: WM_COPYDATA and WM_USER+0x1000..0x1003 (#515)") {
+    REQUIRE(sizeof(kJabFixedMessages) / sizeof(kJabFixedMessages[0]) == 5);
+    CHECK(kJabFixedMessages[0] == 0x004Au);                 // WM_COPYDATA
+    for (unsigned i = 0; i < 4; ++i) CHECK(kJabFixedMessages[1 + i] == 0x0400u + 0x1000u + i);
+}
+
 TEST_CASE("bridge DLL candidates: JetBrains bundled runtime comes right after the exe's own folder") {
     auto c = JavaBridgeDllCandidates(L"C:\\Program Files\\JetBrains\\IntelliJ IDEA 2026.2.1\\bin");
     REQUIRE(c.size() >= 2);

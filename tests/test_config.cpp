@@ -463,6 +463,8 @@ TEST_CASE("tracking settings: defaults and parsing (issue #276)") {
     Config d = ParseConfig("");
     CHECK(d.trackCaret == 1);
     CHECK(d.trackFocus == 0);
+    CHECK(d.trackJava == 1);
+    CHECK(ParseConfig("trackJava=0\n").trackJava == 0);   // #515: never load the Java bridge
     CHECK(d.trackAlign == 0);
     CHECK(d.mouseAlign == 0);
     CHECK(d.trackGlideMs == 200);

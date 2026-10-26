@@ -203,6 +203,7 @@ Every key works in the ini whether or not Settings shows it. Keys hot-reload unl
 | `gameCursorLagMs` (-1) | How late the view follows the pointer while a full-screen game hides it and draws its own cursor; -1 = one display frame, 0 = off (#443). Ini only |
 | `mouseAlign` (0 centred, 1 within the edges), `mouseMarginPct` | Where the pointer sits while the view moves |
 | `trackCaret` (1), `trackFocus` (0), `trackAlign`, `trackGlideMs` (200), `trackMarginPct` (15) | Follow the text caret and keyboard focus; `trackMarginPct` is the within-edges margin, % of the view on each side |
+| `trackJava` (1) | Read Java apps' caret through the Java Access Bridge; 0 never loads the bridge DLL (#515, see 07) |
 | `lockApps`, `warpLock` (0) | Games whose sessions pan from raw mouse motion; heuristics for unlisted games |
 | `multiMonitor` (1) | 1 follows the cursor's monitor at each zoom-in; 0 keeps the primary |
 

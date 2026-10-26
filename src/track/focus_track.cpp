@@ -333,8 +333,8 @@ void FocusTracker::stop() {
     if (th_.joinable()) th_.join();
     if (g_self == this) g_self = nullptr;
 }
-void FocusTracker::setActive(bool on, bool wantCaret, bool wantFocus, bool log) {
-    wantCaret_ = wantCaret; wantFocus_ = wantFocus; log_ = log;
+void FocusTracker::setActive(bool on, bool wantCaret, bool wantFocus, bool wantJava, bool log) {
+    wantCaret_ = wantCaret; wantFocus_ = wantFocus; wantJava_ = wantJava; log_ = log;
     const bool was = active_.exchange(on);
     const unsigned long t = tid_.load();
     if (t && on != was) PostThreadMessageW(t, kActiveMsg, on ? 1 : 0, 0);   // hooks + poll rate
@@ -356,12 +356,13 @@ bool FocusTracker::publish(TrackKind k, double l, double t, double r, double b, 
 struct FocusRun {
     explicit FocusRun(FocusTracker& tracker)
         : tracker(tracker), tid_(tracker.tid_), active_(tracker.active_), wantCaret_(tracker.wantCaret_),
-          wantFocus_(tracker.wantFocus_), log_(tracker.log_) {}
+          wantFocus_(tracker.wantFocus_), wantJava_(tracker.wantJava_), log_(tracker.log_) {}
     FocusTracker& tracker;
     std::atomic<unsigned long>& tid_;
     std::atomic<bool>& active_;
     std::atomic<bool>& wantCaret_;
     std::atomic<bool>& wantFocus_;
+    std::atomic<bool>& wantJava_;
     std::atomic<bool>& log_;
     // A focus change since the last publish resolved to nothing published (a skipped container, an
     // unanswered lookup), or the tracker was (re)activated: the next report is published even at
@@ -574,7 +575,9 @@ struct FocusRun {
     // Java app: the bridge is the only caret source (its Win32/UIA views have no caret). True when the
     // foreground window is a Java window with a bridge; the read lands in javaHave/javaCaret.
     bool readJavaCaret(HWND fg, bool fromPoll) {
-        const bool java = wantCaret_.load() && IsJavaWindow(fg) && jab.ensure(fg, tid_.load(), kWakeMsg, log_.load());
+        // trackJava=0 (#515): the bridge DLL is never loaded, and a Java app is read like any other.
+        const bool java = wantCaret_.load() && wantJava_.load() && IsJavaWindow(fg) &&
+                          jab.ensure(fg, tid_.load(), kWakeMsg, log_.load());
         if (java) {
             if (fg != javaWnd) { javaWnd = fg; javaDirty = true; }
             const ULONGLONG now = GetTickCount64();
@@ -804,7 +807,7 @@ void FocusRun::messageLoop(MSG& m) {
         } else if (m.message == WM_TIMER) {
             if (active_.load() && wantCaret_.load()) resolve(false, true);              // backstop poll
         }
-        TranslateMessage(&m); DispatchMessageW(&m);
+        TranslateMessage(&m); jab.dispatch(m);   // SEH-guarded while a Java bridge is loaded (#515)
     }
 }
 

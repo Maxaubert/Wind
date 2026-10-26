@@ -172,6 +172,9 @@ struct Config {
     // the pointer is never moved by tracking. Caret on by default, focus off.
     int trackCaret = 1;
     int trackFocus = 0;
+    // Java apps (IntelliJ, PyCharm, ...): read their caret through the Java Access Bridge (#281). 0 =
+    // the bridge DLL is never loaded into Wind (#515: a crash entering a Java app with NVDA running).
+    int trackJava = 1;
     int trackAlign = 0;      // caret + focus: 0 = centred, 1 = within the edges
     int mouseAlign = 0;      // mouse: 0 = centred (today), 1 = within the edges (phase 2)
     int trackGlideMs = 200;  // glide time to 95% of the distance (field pick 2026-09-29, spring)

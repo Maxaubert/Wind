@@ -49,7 +49,7 @@ const Field kFields[] = {
     F(sharpness), F(zorderBand), F(brightness), F(colorWarmPct), F(colorDimPct), F(hdrTonemap),
     F(multiMonitor), F(cropCapture), F(lowGpuPriority), F(gpuPriority), F(gameCrop), F(tdrTest),
     F(probeClicks), F(desktopTransform), F(cursorBandAuto),
-    F(trackCaret), F(trackFocus), F(trackAlign), F(mouseAlign), F(trackGlideMs), F(trackMarginPct),
+    F(trackCaret), F(trackFocus), F(trackJava), F(trackAlign), F(mouseAlign), F(trackGlideMs), F(trackMarginPct),
     F(mouseMarginPct), F(trackLog), F(ixDecimate), F(mpoBuster),
     F(txSamplingMode), F(txWarmMode), F(txTrace), F(txRestLevel), F(launchQuiesce), F(txWarmHz),
     F(mpoNearestGuard), F(txNativeCursor), F(txSmoothLadder), F(txRampMinStep), F(txRampMinFrom),

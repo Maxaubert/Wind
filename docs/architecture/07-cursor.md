@@ -381,7 +381,26 @@ leaves the caret to `followCaret` (sources in `findCaret`: xterm input, Win32, U
   same way (`JavaSpanRectPx`). A bridge probe that fails backs off per process (2 s doubling to
   60 s) and per app folder (5 s doubling to 5 min; a load failure can be transient, so a folder is
   never written off), and the retry after a failed read backs off 250 ms doubling to 4 s; a bridge event or a
-  window switch resets it. The MSAA caret (`MsaaCaret`) skips windows Windows reports as hung and
+  window switch resets it. `trackJava=0` (default 1, Settings "Follow text in Java apps") never loads
+  the bridge DLL; Java apps are then read like any other app.
+- **The bridge runs third-party code in Wind's process (#515).** Every call into the DLL
+  (`Windows_run`, `setCaretUpdateFP`/`setFocusGainedFP`, `isJavaWindow`,
+  `getAccessibleContextWithFocus`, `getAccessibleTextInfo`, `getCaretLocation`,
+  `getAccessibleTextRect`, `releaseJavaObject`), Wind's own callback bodies and the tracker's
+  `DispatchMessageW` (the bridge's hidden windows live on the tracker thread; `JavaBridge::dispatch`)
+  go through SEH-only thunks (`__try`/`__except`, no C++ objects in the frame). A fault logs code,
+  address and module, marks the bridge broken for the session (callbacks become no-ops, it is never
+  called or reloaded) and `retireIfBroken` gives its windows `DefWindowProcW` and destroys them. Not
+  covered: `LoadLibraryExW` itself (a fault caught in DllMain would leave the loader lock held, so it
+  is left to crash), fail-fast, later heap corruption, and messages sent to the bridge windows while
+  the tracker waits in `GetMessageW` (kernel callbacks). Each setup step (DLL path and file version,
+  before and after the load, the message filter, `Windows_run`, callback registration, the first
+  event) and each Java process's path and bitness on first contact are logged with `LogFlush`, so the
+  last line on disk names the step that died. The UIPI allowance (`kJabFixedMessages` plus the two
+  registered hellos) is added process-wide with `ChangeWindowMessageFilter` just before
+  `Windows_run`, because a live JVM (always the case with NVDA running) answers the handshake at
+  once; afterwards the same messages are allowed per window on the windows `Windows_run` created and
+  the process-wide allowance is removed. The MSAA caret (`MsaaCaret`) skips windows Windows reports as hung and
   sits out 2 s after a call over 250 ms.
 - **Mouse edge mode** (`mouseAlign=1`, free-pointer sessions only): the pointer is unwelded and
   `EdgePanCenter` (`src/track/edge_pan.h`) moves the view only when the cursor's visible body leaves the
