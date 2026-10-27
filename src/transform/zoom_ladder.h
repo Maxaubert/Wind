@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // Smooth-zoom ladder (issue #369) - PURE, no <windows.h>, tests/test_zoom_ladder.cpp.
 //

@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # MEASURE THE WOBBLE (issue #206).
 #
 # Latency and write rate are not the wobble. Three builds proved that by measuring well and feeling

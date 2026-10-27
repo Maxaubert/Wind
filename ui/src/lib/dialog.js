@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // Modal focus management (issue #201).
 //
 // Every dialog in this app already carried role="dialog" aria-modal="true", which is why the

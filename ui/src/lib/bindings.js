@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // Pure model of the hotkeys page (#318): how a keybind row's ini slots read as "bindings" and how a
 // captured press is written back. No DOM, no bridge, so Playwright can import it directly.
 //

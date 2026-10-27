@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // "Pin to taskbar" (#436): keeps WindTray's notification-area icon on the taskbar next to the clock
 // instead of in the hidden-icons overflow. Windows stores the choice per icon under

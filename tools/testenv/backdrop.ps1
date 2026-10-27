@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # One proving-ground backdrop window (issue #225). Launched as a child process by run.ps1 -
 # each backdrop owns its own message pump and dies on process exit, so the runner never has to
 # manage WinForms lifetimes across runspaces.

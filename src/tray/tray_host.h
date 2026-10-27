@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // Wind.exe's side of the tray split (issue #291). Wind no longer owns a tray icon: it creates the
 // shared status block (tray_ipc.h) and keeps WindTray.exe running next to it. See

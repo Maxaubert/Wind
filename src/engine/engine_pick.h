@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // Pure hybrid engine-pick decision (no <windows.h>), extracted so the most regression-prone
 // predicate in the app is unit-tested (issues #148 exclusion, #172 shell desktop) instead of

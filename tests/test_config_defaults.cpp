@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // Config defaults, checked from two sides (review 2026-10-13):
 //  - the first-run ini template (DefaultIniText) against Config{}, key by key, for EVERY template key;
 //  - Config{} and the parser's clamp ranges against tests/fixtures/config_defaults.txt, which the

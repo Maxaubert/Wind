@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 import { defineConfig } from '@playwright/test';
 // Own dev server on its own port, never a reused one: several worktrees of this repo run tests on
 // this machine, and reusing another checkout's server on 5173 tested the wrong code (13 false

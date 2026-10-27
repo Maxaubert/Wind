@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // Mouse edge mode (issue #276, phase 2): the view moves only when the pointer leaves the comfortable
 // band (the view minus a margin on each side), and then just far enough. Pure; tests/test_edge_pan.cpp.

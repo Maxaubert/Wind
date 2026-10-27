@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // Pure tray quick-control list model (no <windows.h>): which sliders and toggles the tray flyout
 // shows and in what order, parsed from / written to the global (non-profile) ini keys
 // trayPerf, traySliders, traySliderOrder, trayToggles, trayToggleOrder. Shared by WindTray and the

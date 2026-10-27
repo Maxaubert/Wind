@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #include "input_router.h"
 #include "config.h"     // IsForbiddenBindVk (keyboard-bind safety blocklist)
 #include "pointer_binds.h" // button/wheel bind matching, the mask keystroke (#285)

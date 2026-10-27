@@ -1,3 +1,5 @@
+<!-- Copyright (c) 2026 Max Aubert. All rights reserved.
+     Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
 <script>
   // Dev/test harness for the regrouped pages: every group's cards rendered with SettingRow and fake
   // values, no bridge. Served at /controls.html (not part of the production build).

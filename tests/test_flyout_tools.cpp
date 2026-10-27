@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // The tray tools (issue #315): the main-engine dropdown (values, labels, restart rule, view), the
 // segmented toggle group and engine dropdown (stretched geometry, hit testing, list alignment, arrow-key
 // navigation). All pure; engine_dropdown.cpp / flyout_window.cpp wire them to Win32.

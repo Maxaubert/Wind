@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // Tinted system pointers at 1x (spec 2026-09-30-cursor-tint-design.md). Windows draws the pointer on
 // a hardware plane the DWM colour effect never reaches, so while Warmth/Brightness are on Wind swaps

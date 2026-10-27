@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // src/core/tick_span.h
 // Time a part of the tick into the current TickRec (#361). The tick loop points tl_tickSpans at
 // the record it is filling; anywhere on the tick thread can then wrap a call in

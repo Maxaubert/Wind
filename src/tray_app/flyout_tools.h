@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // The tray tools' PURE logic (issue #315, no <windows.h>, unit-tested): the main-engine dropdown's
 // values, labels and restart rule, and the stretched segmented toggle group's layout.

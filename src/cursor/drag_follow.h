@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // Pure decision: should the active model stop welding the OS cursor and FOLLOW it instead,
 // because the user is mid-drag? (issue #169)

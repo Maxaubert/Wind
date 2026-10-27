@@ -1,4 +1,6 @@
 @echo off
+rem Copyright (c) 2026 Max Aubert. All rights reserved.
+rem Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 setlocal enabledelayedexpansion
 set "ROOT=%~dp0"
 cd /d "%ROOT%"

@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # Distinguish native Magnifier's two FullScreenTrackingMode designs (issue #205).
 #
 # The grid probe fitted `offset = clamp(cursor - screen/level/2)` at 92/99 in BOTH modes - but it

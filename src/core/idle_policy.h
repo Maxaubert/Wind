@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // Event-driven idle (issue #71): may the main loop sleep until an input event or the ~100 ms
 // housekeeping timeout, instead of ticking at the monitor refresh? Pure; tests/test_idle_policy.cpp.

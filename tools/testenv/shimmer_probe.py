@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # Ramp-shimmer probe (issue #229): measures how much the CURSOR's rendered pixels churn while
 # the zoom level changes, which is the artifact the field report describes on the high-resolution cursor.
 #

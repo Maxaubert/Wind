@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // Settings page layout (#318, round 2 of the redesign #303). Seven groups: Hotkeys (Settings opens
 // here), Zoom, View, Screen, then below a divider Preferences, Tray menu, About. Each group has a
 // label, a sidebar icon (src/design/icons.js), a one-line description for its banner and cards of

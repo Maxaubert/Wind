@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // Screen-reader and keyboard regression tests (issue #201), rewritten for the redesigned shell (#303).
 //
 // The original finding: nothing in the settings list had an accessible name, so the accessibility

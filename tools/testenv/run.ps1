@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # Wind proving ground (issue #225): consistent, reusable, fully automated test scenarios.
 #
 #   powershell -File tools\testenv\run.ps1 -Suite rapid          # ~1 min smoke (iterating)

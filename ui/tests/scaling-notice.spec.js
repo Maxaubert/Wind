@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // Smooth transform scaling notice (#441, formerly the High resolution cursor toggle): choosing Smooth asks first; "Don't show this again" is the
 // global UI-only key uiHighResNoticeOff. Mock host: window.__live is the live ini, window.__msgs every post.
 import { test, expect } from '@playwright/test';

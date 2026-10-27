@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # Ramp-shimmer A/B (issue #229): does a configuration reduce the cursor churn seen in the field while
 # zooming with the high-resolution cursor?
 #

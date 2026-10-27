@@ -1,3 +1,5 @@
+<!-- Copyright (c) 2026 Max Aubert. All rights reserved.
+     Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
 <script>
   // One schema row: label and description left, the control for row.type right-aligned to the card
   // edge. Props only, no bridge calls: the page passes values and handlers.

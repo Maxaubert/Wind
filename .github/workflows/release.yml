@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # Keep the published release in step with main.
 #
 # The problem this exists for: v0.1.0 shipped, a fix landed on main, and the release kept

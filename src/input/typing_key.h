@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // src/input/typing_key.h - which keystrokes count as typing for the click quiet period (#328, review #349).
 //
 // #328 ends the 1 s click quiet period early when a key goes down after the click (clicking into Notepad

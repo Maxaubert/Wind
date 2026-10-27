@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // Wind needs UIAccess (issue #460). Without it the transform engine has hover dead zones, and
 // neither engine can magnify over the shell or elevated windows, so a Wind without it refuses to

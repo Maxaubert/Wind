@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // Pure profile logic (no <windows.h>): what belongs in a profile file vs the live magnifier.ini,
 // profile-name validation, and the text transforms used on every switch/mirror. I/O lives in
 // src/config/profiles_io.h (Win32) and the callers. See docs/specs/2026-08-12-profiles-design.md.

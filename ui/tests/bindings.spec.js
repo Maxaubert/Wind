@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // The pure binding model of the Hotkeys page (#318): how slots read as boxes and where a capture lands.
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // `WindTray.exe --render-test out.png [--palette ID] [--dpi N] [--hover kind[:i]]` (issue #313): renders
 // the flyout with fake status to a PNG and exits, so the drawing can be compared with the j01
 // references in docs/design/tray-2026-10 without a desktop session or a running Wind.

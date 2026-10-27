@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # Autonomous candidate sweep (#229). Runs a list of configurations through the gates and logs
 # every result, so an overnight session leaves evidence rather than recollection.
 #

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // The tray flyout's painter (see flyout_draw.h). Everything is laid out in DIPs from flyout_model.h;
 // colours and metrics are the j01-calm-tint tokens.
 #include "flyout_draw.h"

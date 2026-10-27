@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // Pure helpers for the Java Access Bridge caret source (issue #281). Tests: tests/test_java_bridge_util.cpp.
 #include <string>

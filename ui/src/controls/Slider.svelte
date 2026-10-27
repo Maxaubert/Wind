@@ -1,3 +1,5 @@
+<!-- Copyright (c) 2026 Max Aubert. All rights reserved.
+     Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
 <script>
   // Range input with a teal fill left of the thumb and a bright end-cap knob (3x9px, no shadow).
   // The value is right-aligned in tabular numbers. `unit` is spoken, not drawn.

@@ -1,3 +1,5 @@
+<!-- Copyright (c) 2026 Max Aubert. All rights reserved.
+     Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
 <script>
   // Dev/test harness: every shell component rendered with props only, no bridge. Served by Vite
   // dev at /preview.html (not part of the production build).

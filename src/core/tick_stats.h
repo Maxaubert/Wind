@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // Recent tick intervals, for the tray's frame-pacing readout. PURE (no <windows.h>) so the
 // statistics are unit-testable without a desktop.

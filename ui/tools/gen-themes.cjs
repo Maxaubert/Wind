@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // Generates ui/src/design/themes.css and ui/src/design/themes.js from the mockup palette files
 // (wind-settings-mockups/ia/palettes08.cjs, palettes-b1.cjs, palettes-b2.cjs, the owner's final pick of 2026-10-02).
 //

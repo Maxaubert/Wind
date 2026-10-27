@@ -1,3 +1,5 @@
+<!-- Copyright (c) 2026 Max Aubert. All rights reserved.
+     Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
 <script>
   // A card of reorderable rows. Reusable: the caller owns the order and renders each row's content.
   //   items       [{ key, ... }] in display order (key is unique)

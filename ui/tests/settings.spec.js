@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // Settings window against the mock bridge: the seven pages and navigation, instant apply, the
 // advanced switch and the Hotkeys page (one-box bindings, wheel capture, limits, extra-key switches).
 // Redesign #303, structure and hotkeys #318.

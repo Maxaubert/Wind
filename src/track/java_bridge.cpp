@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #include "java_bridge.h"
 #include "java_bridge_util.h"
 #include "pe_imports.h"    // PeImportNames: the bridge DLL's folder-supplied dependencies

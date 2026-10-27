@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // The tray flyout's PURE model (no <windows.h>, so it is unit-tested): where the window opens
 // (at the click point, any monitor, any DPI), the layout of its rows in DIPs, hit-testing, the

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // The settings host's JSON, both directions of the WebView2 bridge. Pure (no <windows.h>), so it
 // compiles into the WIND_TESTS build; tests/test_bridge_json.cpp.
 //

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 import { test, expect } from '@playwright/test';
 
 // Interaction polish (#303): no text selection, no focus box on mouse click, calm motion that

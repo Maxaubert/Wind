@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # GPU cost A/B: Wind vs native Magnifier, per scenario, per process (dwm.exe / Wind.exe), on the
 # controlled solid target (tools/test_target_window.ps1).
 #

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // Render scaling filters (issue #456). See upscale_pass.h.
 #include "upscale_pass.h"
 #include "upscale_shaders.h"

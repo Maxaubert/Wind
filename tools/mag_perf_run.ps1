@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # One controlled perf run for issue #219: zoom to a target level over the FOCUSED foreground
 # window (the acrylic Prism repro), pan with RELATIVE mickeys (real ballistics), and measure:
 #   - DWM composition pacing (DwmGetCompositionTimingInfo screen-wide: displayed fps, late,

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // Settings search (#317): the pure ranker/fuzzy matcher, then the results page against the mock bridge
 // (ranked list, the real controls edited in place, advanced rows, tray lists never indexed).
 import { test, expect } from '@playwright/test';

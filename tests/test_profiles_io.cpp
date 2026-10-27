@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // tests/test_profiles_io.cpp - the Win32 file layer behind profiles (profiles_io.h): paths, UTF-8,
 // atomic write/read, the missing-vs-unreadable contract and profile listing.
 #include "doctest.h"

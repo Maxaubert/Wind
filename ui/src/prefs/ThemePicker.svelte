@@ -1,3 +1,5 @@
+<!-- Copyright (c) 2026 Max Aubert. All rights reserved.
+     Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
 <script>
   // Theme picker (mockup option A, owner decision): ONE row of mini window preview cards with the theme name
   // under each and the selected card outlined. There are four themes, so they always fit: no scrolling, no

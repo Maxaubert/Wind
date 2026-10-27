@@ -1,3 +1,5 @@
+<!-- Copyright (c) 2026 Max Aubert. All rights reserved.
+     Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
 <script>
   // "Pan with the arrow keys" (Hotkeys page, #318): ONE binding of one or two modifiers plus the fixed
   // arrow keys, drawn as a single box [Ctrl + Alt + Arrow keys] with the arrow part dimmer. Unset it

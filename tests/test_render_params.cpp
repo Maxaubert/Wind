@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // tests/test_render_params.cpp - FillRenderParams / CursorModeFromCfg (render_params.cpp) and the
 // pure MPO ghost settle decision (mpo_guard.h).
 #include "doctest.h"

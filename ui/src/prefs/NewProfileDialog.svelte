@@ -1,3 +1,5 @@
+<!-- Copyright (c) 2026 Max Aubert. All rights reserved.
+     Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
 <script>
   // "New profile" dialog (ia07, buttons by owner decision): a name, then Cancel, New (the default settings) or
   // Duplicate current (a copy of the current settings, unsaved changes included). Enter in the name field

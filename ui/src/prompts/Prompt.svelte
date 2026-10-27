@@ -1,3 +1,5 @@
+<!-- Copyright (c) 2026 Max Aubert. All rights reserved.
+     Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
 <script>
   // One modal prompt. buttons: [{ label, kind: 'primary' | 'danger' | '', onClick }]. Esc calls onEsc (omit to
   // make Esc do nothing). Focus moves into the box and Tab is held there by the dialog action.

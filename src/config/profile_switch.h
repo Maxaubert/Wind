@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // Profile switching and "relaunch Wind, put the model back if that fails", shared by the tray
 // (WindTray.exe) and the settings host (WindConfig.exe). Win32: MUST be included AFTER <windows.h>.
 // Each surface keeps only its own messages and logging; the steps and their order live here once.

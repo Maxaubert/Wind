@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // One safety rule set for every keybind (issue #285; spec 2026-09-30-wheel-zoom-and-safe-keybinds).
 // Pure; tests/test_keybind_rules.cpp checks it against tests/fixtures/keybind_cases.txt, and the
