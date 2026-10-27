@@ -1,0 +1,9 @@
+Wind source provenance record
+Owner: Max Aubert
+Repository: https://github.com/Maxaubert/Wind
+Created: 2026-10-27
+Commit: 8566da33cca4846bd38910df6211148fa78dfacb
+Tree: 3211c430a169aa66e9d7a40d2da6bc8552164292
+First commit: a09a5ad2de62095b47d8a46b34808529bf7bc06c (2026-05-24)
+Commit count: 760
+Source archive (git archive --format=tar 8566da33cca4846bd38910df6211148fa78dfacb) SHA-256: 72b98b9e6714261a42508a9417b5febc73b1021f8ae83f4220b952031ee9273b

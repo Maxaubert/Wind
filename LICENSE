@@ -47,8 +47,8 @@ opphavsrett til andsverk mv.) and the Berne Convention.
 
    Any permission granted by this licence ends automatically, without notice, if
    you breach any of its terms. On termination you must stop using the Software
-   and delete every copy of it in your possession or control. Sections 3, 6 and 7
-   survive termination.
+   and delete every copy of it in your possession or control. Sections 3, 6, 7, 8,
+   10, 11 and 12 survive termination.
 
 6. PRIOR RELEASES
 
@@ -63,5 +63,41 @@ opphavsrett til andsverk mv.) and the Berne Convention.
    conflict-of-law rules. Any dispute arising out of or in connection with this
    licence or the Software shall be subject to the exclusive jurisdiction of the
    Norwegian courts.
+
+8. NOTICES
+
+   You may not remove, alter or obscure any copyright notice, licence notice,
+   SPDX identifier, authorship record or other rights-management information in
+   the Software, in source files, in the version information of its binaries or
+   in its installer, nor distribute any copy from which such information has
+   been removed or altered.
+
+9. PUBLIC REPOSITORY
+
+   The source code is published for reference only. Viewing it, or forking it on
+   GitHub to the extent GitHub's Terms of Service require, grants no right to
+   use, build, run, copy, modify or distribute it outside GitHub, and no other
+   licence is implied by its publication.
+
+10. MACHINE LEARNING
+
+   No permission is granted to use the Software or any part of it to train,
+   fine-tune or evaluate any machine learning model, or to build any dataset for
+   such purposes.
+
+11. TRADEMARKS
+
+   "Wind", the Wind logo and the related names and artwork are trademarks of Max
+   Aubert. This licence grants no right to use them. A modified or derived
+   version, where permitted in writing, may not be distributed under the Wind
+   name or with the Wind logo.
+
+12. AUTHORSHIP
+
+   The Software was created by Max Aubert, who directed, selected, arranged,
+   reviewed and tested its contents, in part with the assistance of AI software
+   tools used under his direction. All rights in the Software, including in its
+   selection, arrangement, structure and design, belong to Max Aubert. See
+   docs/AUTHORSHIP.md.
 
 Enquiries about commercial licensing: aubert@post.com
