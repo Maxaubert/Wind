@@ -1,5 +1,5 @@
 <!-- Copyright (c) 2026 Max Aubert. All rights reserved.
-     Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
+     Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
 <script>
   // Native select drawn flat to match the cards (chevron, soft fill). Native keeps the keyboard and
   // screen-reader contract for free; the colours come from the tokens.

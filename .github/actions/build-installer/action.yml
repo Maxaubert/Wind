@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Max Aubert. All rights reserved.
-# Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # The installer build shared by release.yml and alpha.yml, so a build step is changed in one place.
 #
 # Runs after actions/checkout. It reads the version from src/version.h, runs every test gate and

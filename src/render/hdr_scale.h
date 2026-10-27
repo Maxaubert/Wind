@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Max Aubert. All rights reserved.
-// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 namespace wind {
 // Pure logic (no <windows.h>) for the HDR->SDR tonemap scale. See render_shaders.h for the shader

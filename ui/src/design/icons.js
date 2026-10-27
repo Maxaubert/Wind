@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Max Aubert. All rights reserved.
-// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // Terminal icon set from the final mockup (square caps, mitred joins), plus the few window
 // glyphs the shell needs. Static literals, injected with {@html iconSvg(name)}.
 const paths = {

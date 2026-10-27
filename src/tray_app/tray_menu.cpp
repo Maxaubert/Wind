@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Max Aubert. All rights reserved.
-// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // What the tray flyout's buttons do (WindTray.exe, issue #291 / #313): the theme choice, the Quit
 // guard, the profile switch and opening Settings. No UI of its own; the flyout (flyout_window.cpp)
 // owns the window. The old owner-drawn HMENU that lived here is gone (menus cannot host sliders).

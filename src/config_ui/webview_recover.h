@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Max Aubert. All rights reserved.
-// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // What Settings does when a WebView2 process dies (field 2026-09-29: RTSS's global hook crashes the
 // WebView2 browser process at start-up, a use-after-unload of dxgi.dll inside RTSSHooks64, and the

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Max Aubert. All rights reserved.
-// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // tests/test_hitch_record.cpp - hitch classification and the hitch line (#361).
 #include "doctest.h"
 #include "hitch_record.h"

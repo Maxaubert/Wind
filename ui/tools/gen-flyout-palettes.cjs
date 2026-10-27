@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Max Aubert. All rights reserved.
-// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // Generates src/tray_app/flyout_palettes.h (the tray flyout's 4 themes, dark only since 0.20.0 / #324) from the same mockup palettes
 // as ui/tools/gen-themes.cjs, evaluating the tokens tray08.css derives (all color-mix(in srgb) done here):
 //   off = chip, offh = fg 6% over chip, ton = segon || swon (solid), tonh = segon || fg 12% over swon,

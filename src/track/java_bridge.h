@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Max Aubert. All rights reserved.
-// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // Java Access Bridge caret source (issue #281). Java apps (IntelliJ, PyCharm, ...) report their caret
 // only through the bridge, not the Win32 caret or UI Automation. Every call here runs on the

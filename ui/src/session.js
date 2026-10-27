@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Max Aubert. All rights reserved.
-// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // Pure helpers for the session model (spec 2026-10-01): the live ini is the session, the active
 // profile file is the saved state. No bridge, no DOM, so Playwright can import it directly.
 import { groups, groupRows, bindKeys } from './settings-schema.js';

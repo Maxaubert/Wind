@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Max Aubert. All rights reserved.
-# Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 """A static test card for comparing the render scaling filters (issue #456).
 
 Shows a full-screen, topmost card (text at several sizes, light and dark, thin and diagonal lines,

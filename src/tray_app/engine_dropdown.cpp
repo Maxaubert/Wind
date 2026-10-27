@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Max Aubert. All rights reserved.
-// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // The tray flyout's main-engine dropdown, the Win32 half (WindTray.exe, issue #315). The options,
 // labels and the "does this pick change anything" rule are pure and unit-tested (flyout_tools.h).
 //

@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Max Aubert. All rights reserved.
-# Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # Wind UIAccess setup (run elevated). Creates a local self-signed code-signing cert,
 # trusts it, signs Wind.exe, and deploys Wind.exe + WindTray.exe + WindConfig.exe + ui/dist to
 # C:\Program Files\Wind so UIAccess activates and the config UI is reachable.

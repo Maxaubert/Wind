@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Max Aubert. All rights reserved.
-// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // Settings search (pure, no DOM). Ranks every searchable row against a query, best match first.
 //
 // Each row is scored from its own text, best field first: label (exact > word-prefix > substring >

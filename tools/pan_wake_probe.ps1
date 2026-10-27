@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Max Aubert. All rights reserved.
-# Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # Pan-wake probe: does a hitch land on the FIRST movement after the hand pauses?
 #
 # Field report (2026-08-26): zoomed and holding still is smooth; the first movement after any

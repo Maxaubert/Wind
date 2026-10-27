@@ -1,5 +1,5 @@
 <!-- Copyright (c) 2026 Max Aubert. All rights reserved.
-     Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
+     Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
 <script>
   // The bindings of one hotkey row (Hotkeys page, #318): one box per binding with the plus inside
   // ([Ctrl + Wheel up]), click a box to record it again, a small x on hover removes it. A row takes

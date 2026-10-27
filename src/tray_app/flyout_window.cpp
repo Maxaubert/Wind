@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Max Aubert. All rights reserved.
-// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // The tray flyout window (WindTray.exe, issue #313): a layered popup (true per-pixel alpha, exact
 // rounded corners) painted by flyout_draw.cpp, placed by flyout_model.h next to the tray icon.
 // It lives on the main thread: there is no modal loop any more, so Wind's tick, the tray icon and

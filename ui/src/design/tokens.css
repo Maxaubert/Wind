@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Max Aubert. All rights reserved.
-   Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary */
+   Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary */
 /* Design tokens for the redesigned Settings window.
    Source of truth: docs/design/settings-2026-10/FINAL-v10-grey.html (baseline + the v10 overrides
    at the end of its stylesheet). Scoped to .wnd; the global theme.css keeps the page-wide rules

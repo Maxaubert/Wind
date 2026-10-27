@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Max Aubert. All rights reserved.
-// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // Pure half of the MPO boot record (no <windows.h>): the record format and the "is this record
 // still about the compositor that is running now" decision, so both are unit-tested

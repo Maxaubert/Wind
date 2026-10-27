@@ -1,5 +1,5 @@
 <!-- Copyright (c) 2026 Max Aubert. All rights reserved.
-     Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
+     Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
 <script>
   // Floating unsaved-changes pill. Renders nothing when there is nothing to save. It rises a few px
   // as it appears and eases back down when it goes. After a successful Save it stays for a moment

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Max Aubert. All rights reserved.
-// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // src/version.h - single source of truth for the Wind version.
 // Used by the system snapshot, every log line's session header, and src/wind.rc (VERSIONINFO).
 #pragma once

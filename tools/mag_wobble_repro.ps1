@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Max Aubert. All rights reserved.
-# Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # Automated wobble repro (stale-input-transform hypothesis).
 #
 # Control run:  .\mag_wobble_repro.ps1                -> zoom Wind + pan, no wm involved

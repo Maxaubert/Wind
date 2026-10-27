@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Max Aubert. All rights reserved.
-# Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # Registers (or removes) the nightly full-suite proving-ground run as a scheduled task.
 # The task runs at 04:00 when the machine is on and idle, against whatever build is deployed
 # in C:\Program Files\Wind - i.e. latest deployed main. Results land in tools\testenv\results.

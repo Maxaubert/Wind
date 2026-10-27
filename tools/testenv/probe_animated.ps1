@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Max Aubert. All rights reserved.
-# Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # One-off probe: why does the animated backdrop block zoom-in? (testenv shakedown)
 param([string]$Kind = 'animated', [int]$SettleS = 3, [double]$HoldS = 0.6)
 . (Join-Path $PSScriptRoot 'lib.ps1')

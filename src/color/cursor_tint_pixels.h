@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Max Aubert. All rights reserved.
-// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // Pixel work for the tinted 1x pointer (spec 2026-09-30-cursor-tint-design.md). Pure; tests in
 // tests/test_cursor_tint.cpp. Pixels are 32bpp BI_RGB DIB values: 0xAARRGGBB, straight (not

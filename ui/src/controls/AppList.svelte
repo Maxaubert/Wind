@@ -1,5 +1,5 @@
 <!-- Copyright (c) 2026 Max Aubert. All rights reserved.
-     Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
+     Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
 <script>
   // An exe list kept as one comma-separated ini string. The row shows a summary and a Manage button;
   // the dialog lists the apps with Remove and adds through the host's file picker (`pick`).

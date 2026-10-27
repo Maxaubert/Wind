@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Max Aubert. All rights reserved.
-# Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # Wind vs native Magnifier, measured against an IDENTICAL controlled target (issue #206).
 #
 # Prior comparisons were taken against whatever was on screen at the time - Zen with a live acrylic

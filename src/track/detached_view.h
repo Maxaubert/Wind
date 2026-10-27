@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Max Aubert. All rights reserved.
-// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // A frame whose view is NOT centred on the pointer (issue #276): caret/focus tracking and, later,
 // mouse edge mode. The view comes from (viewCx, viewCy); the cursor fields report the REAL pointer,

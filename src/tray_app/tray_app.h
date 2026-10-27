@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Max Aubert. All rights reserved.
-// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // WindTray.exe (issue #291): the tray icon and its flyout (#313), in a process WITHOUT UIAccess so
 // the flyout stacks like any app's window (below the magnified cursor and the Snipping Tool overlay). Wind.exe

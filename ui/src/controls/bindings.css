@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Max Aubert. All rights reserved.
-   Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary */
+   Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary */
 /* Binding boxes of the Hotkeys page (mockup ia07 .kc / .kb / .kx). One box per binding with the plus
    inside it; "or" separates two bindings; a small x appears on hover or focus to remove one. */
 .bx { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }

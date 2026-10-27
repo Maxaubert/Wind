@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Max Aubert. All rights reserved.
-// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // src/core/sched_priority.h - keep the tick loop on time when the rest of the PC is busy (issue #334).
 //
 // The tick thread ran at normal priority, so under heavy background CPU load (renders, builds) it

@@ -95,7 +95,7 @@ keys), the Playwright UI suite and `tools/release.ps1`, so an NSIS compile error
 locally too when anything under `ui/` changes.
 
 **Copyright headers.** Every tracked first-party source file opens with a two-line notice,
-`Copyright (c) 2026 Max Aubert. All rights reserved.` and `Proprietary and confidential
+`Copyright (c) 2026 Max Aubert. All rights reserved.` and `Proprietary
 source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary`, in
 the file's own comment syntax (`//`, `#`, `;`, `rem` after `@echo off`, `/* */`, `<!-- -->` after
 `<!doctype html>`). `tools/check_copyright.ps1` fails when a covered file lacks the SPDX line in its

@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Max Aubert. All rights reserved.
-# Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # Can Wind's zoom be driven programmatically? (prerequisite for automated cadence A/B)
 #
 # Wind binds zoom-in to mouse button 5 (zoomInButton=2 -> XBUTTON2) and reads side buttons through

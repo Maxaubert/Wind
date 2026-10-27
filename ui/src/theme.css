@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Max Aubert. All rights reserved.
-   Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary */
+   Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary */
 :root {
   --bg:#0e0e12; --text:#f3f3f6; --line:#1f1f25; --hover:rgba(255,255,255,.07); --accent:#5b5bd6;
   --track:rgba(255,255,255,.16); --chip:rgba(255,255,255,.06); --focus:#a5a5ff;

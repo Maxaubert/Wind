@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Max Aubert. All rights reserved.
-// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // Settings "Tray menu" tab (#313): the Performance switch, the Sliders and Toggles lists with
 // check, drag and keyboard reorder, the four-slider cap, and the five global ini keys written
 // through the mock bridge. Plus the pure list model that mirrors src/tray/tray_items.cpp.

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Max Aubert. All rights reserved.
-// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { changedKeys, fill, GLOBAL_KEYS } from '../src/session.js';

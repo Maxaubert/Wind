@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Max Aubert. All rights reserved.
-// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // Preferences page (#318, Task 4): the Mode switch, the built-in themes (tokens change with uiPalette and the
 // resolved mode) and the profile dropdown with its New and delete dialogs, against a mock host that
 // implements the session and profile messages.

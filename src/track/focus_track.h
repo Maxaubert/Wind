@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Max Aubert. All rights reserved.
-// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // Caret and keyboard-focus watcher (issue #276). One thread owns every accessibility call:
 // WinEvents (out of context), GetGUIThreadInfo, and UI Automation on a COM MTA. The tick thread only

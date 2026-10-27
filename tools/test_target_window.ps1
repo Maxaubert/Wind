@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Max Aubert. All rights reserved.
-# Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # A deliberately boring fullscreen target window, so magnifier measurements are comparable.
 #
 # Every A/B so far was taken against whatever happened to be on screen - Zen with a live acrylic

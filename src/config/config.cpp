@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Max Aubert. All rights reserved.
-// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #include "config.h"
 #include "keybind_rules.h"   // one safety rule set for every bind (#285)
 #include "ini_edit.h"   // wheel migration (#318): pure text edits

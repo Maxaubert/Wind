@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Max Aubert. All rights reserved.
-// Proprietary and confidential source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // src/track/caret_rect.h - trim a caret rect that spans more than the caret's own line (issue #337).
 //
 // Chromium web editors (Outlook on the web) report the caret as one line right after Enter
