@@ -18,6 +18,7 @@ are frozen history cited from code, not kept in step with it.
 - `build.bat installer`: NSIS setup (needs `winget install NSIS.NSIS`), then `tools\installer_check.ps1`.
 - `pwsh -File tools\release.ps1`: release installer into `dist\` (what CI runs).
 - UI tests: `npx playwright test` in `ui/` (run when anything under `ui/` changes).
+- `pwsh -File tools\check_copyright.ps1`: CI gate; every new source file needs the copyright/SPDX header. See 11.
 
 ## Stack and map
 - Three binaries: `Wind.exe` (core, UIAccess when installed), `WindConfig.exe` (WebView2 settings),

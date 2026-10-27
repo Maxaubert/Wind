@@ -45,7 +45,7 @@ VIAddVersionKey "FileDescription" "Wind setup"
 VIAddVersionKey "FileVersion"     "${WIND_VERSION}"
 VIAddVersionKey "ProductVersion"  "${WIND_VERSION}"
 VIAddVersionKey "CompanyName"     "${PUBLISHER}"
-VIAddVersionKey "LegalCopyright"  "Copyright (c) 2026 ${PUBLISHER}"
+VIAddVersionKey "LegalCopyright"  "Copyright (c) 2026 ${PUBLISHER}. All rights reserved."
 
 !include "MUI2.nsh"
 !include "LogicLib.nsh"

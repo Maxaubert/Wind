@@ -27,6 +27,11 @@ runs:
         . ./tools/version.ps1      # Get-WindVersion: the one src/version.h reader
         "version=$(Get-WindVersion (Get-Location).Path)" >> $env:GITHUB_OUTPUT
 
+    # Cheap provenance gate first: every first-party source file carries the copyright header.
+    - name: Copyright headers
+      shell: pwsh
+      run: pwsh -File tools/check_copyright.ps1
+
     - name: Install NSIS
       shell: pwsh
       run: choco install nsis --no-progress -y
