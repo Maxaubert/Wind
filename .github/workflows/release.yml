@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # Keep the published release in step with main.
 #
 # The problem this exists for: v0.1.0 shipped, a fix landed on main, and the release kept
@@ -108,6 +110,43 @@ jobs:
             gh release create $tag $exe $stable --target '${{ github.sha }}' --title "Wind $v" --notes-file notes.md
             if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
           }
+
+      # Provenance: a record of this commit, its tree and the SHA-256 of its source
+      # archive and installer, stamped with OpenTimestamps (Bitcoin-anchored, cannot be backdated).
+      # The proof starts pending; docs/provenance/README.md says how to upgrade and verify it. A
+      # calendar outage must never block a release, hence continue-on-error.
+      - name: Timestamp provenance
+        continue-on-error: true
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $v = '${{ steps.ver.outputs.version }}'
+          $sha = '${{ github.sha }}'
+          git archive --format=tar -o src.tar $sha
+          $rec = "provenance-$v.txt"
+          @(
+            'Wind release provenance record'
+            'Owner: Max Aubert'
+            "Repository: https://github.com/${{ github.repository }}"
+            "Version: $v"
+            "Commit: $sha"
+            "Tree: $(git rev-parse "$sha^{tree}")"
+            "Source archive (git archive --format=tar $sha) SHA-256: $((Get-FileHash src.tar -Algorithm SHA256).Hash.ToLower())"
+            "Installer Wind-Setup-x64-$v.exe SHA-256: $('${{ steps.notes.outputs.sha }}'.ToLower())"
+          ) | Set-Content $rec -Encoding utf8NoBOM
+          python -m pip install --quiet opentimestamps-client
+          # python-bitcoinlib cannot find OpenSSL on Windows by name (the plain `ots` command dies
+          # at import), so point it at Python's own libcrypto and call the client's main directly.
+          $dll = Get-ChildItem (Join-Path (python -c "import sys;print(sys.base_prefix)") 'DLLs') -Filter 'libcrypto*.dll' | Select-Object -First 1
+          $shim = "import sys,ctypes.util as u;o=u.find_library;u.find_library=lambda n: r'$($dll.FullName)' if n in ('ssl','libeay32','crypto') else o(n);from otsclient.ots import main;sys.argv[0]='ots';main()"
+          python -c $shim stamp $rec
+          if (-not (Test-Path "$rec.ots")) { throw 'ots stamp failed' }
+          gh release upload "v$v" $rec "$rec.ots" --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'provenance upload failed' }
 
       - name: Summary
         shell: pwsh

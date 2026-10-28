@@ -1,3 +1,5 @@
+<!-- Copyright (c) 2026 Max Aubert. All rights reserved.
+     Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
 <script>
   // On/off switch. `value` is the ini number (1 = on). A real checkbox with role=switch sits over
   // the drawn track, so keyboard and screen readers get a native control.

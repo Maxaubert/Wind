@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // src/core/log_queue.h
 // Bounded multi-producer / single-consumer queue for log lines (#361). Pure (no <windows.h>).
 //

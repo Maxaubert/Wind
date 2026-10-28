@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # Cursor-move -> view-update LATENCY, for Wind and for native Magnifier (issue #206).
 #
 # Every "feels laggy / feels smooth" judgement so far has been an impression, and the two numbers we

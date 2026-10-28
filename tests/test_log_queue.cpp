@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // tests/test_log_queue.cpp - the non-blocking log queue (#361).
 #include "doctest.h"
 #include "log_queue.h"

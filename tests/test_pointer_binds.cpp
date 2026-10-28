@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #include <cmath>
 #include "doctest.h"
 #include "pointer_binds.h"

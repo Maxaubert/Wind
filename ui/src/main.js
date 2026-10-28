@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 import './theme.css';
 import { mount } from 'svelte';
 import App from './App.svelte';

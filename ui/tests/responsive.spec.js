@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // Responsive layout: no horizontal overflow of the page and no control sticking out of its card at
 // window sizes from a narrow strip to a very wide monitor, on every page, search and onboarding.
 import { test, expect } from '@playwright/test';

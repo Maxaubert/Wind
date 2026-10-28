@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // Pure Desktop Duplication capture policies (no <windows.h>), used by RenderEngine::State::capture.
 // Tests: tests/test_capture_policy.cpp.

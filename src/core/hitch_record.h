@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // src/core/hitch_record.h
 // Per-tick flight recorder and hitch classifier (#361). Pure (no <windows.h>): the tick loop fills
 // TickRec with QPC spans and thread CPU time; this file decides what a long frame was and renders

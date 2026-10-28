@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // Event ordering for the Raw Input safety nets (input_router.cpp rawKeyUp / rawButtonUp). Pure: no
 // <windows.h>, tests/test_event_order.cpp.

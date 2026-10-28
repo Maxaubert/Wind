@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // Generate assets/wind.ico from assets/wind-badge-taskbar.svg.
 //
 // Renders the SVG at each icon size with Playwright's bundled Chromium (faithful

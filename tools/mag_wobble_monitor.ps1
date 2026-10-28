@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # PASSIVE wobble monitor. Injects NOTHING, shows NOTHING - the user drives Wind/wm/apps with the
 # real mouse; this only samples and logs, one CSV line per second, so the second the cursor
 # degenerates is visible in the series and can be correlated with what the user was doing.

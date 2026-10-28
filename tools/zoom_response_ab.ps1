@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # Zoom response A/B harness (issue #310). MEASURES WHAT THE USER SEES, not just Wind's own ticks.
 #
 #   powershell -ExecutionPolicy Bypass -File tools\zoom_response_ab.ps1 -Label new -Scenario desktop

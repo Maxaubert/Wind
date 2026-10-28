@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // Glide and target geometry for tracking (issue #276). Pure; tests/test_view_glide.cpp.
 #include <cmath>

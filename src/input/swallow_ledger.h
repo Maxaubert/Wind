@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // Swallow ledger (pure, no <windows.h>; tests/test_swallow_ledger.cpp). The LL hooks swallow a
 // button/key DOWN only when a bind matches, and must then swallow exactly its matching UP so the

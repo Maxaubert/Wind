@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 namespace wind {
 // Pure decision (no <windows.h>): should this Inspect entry engage GAME-INSPECT, i.e. treat the

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // Is the WebView2 Evergreen runtime installed? The answer is a registry string, and the
 // only subtlety is that Microsoft's uninstaller leaves the value behind set to "0.0.0.0"

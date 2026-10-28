@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // WindTray.exe (issue #291): owns Wind's notification-area icon and quick-controls flyout (#313),
 // WITHOUT UIAccess.
 //

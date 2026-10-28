@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // Profile name rules, mirroring the host's ValidateNewName (src/config_ui/main.cpp, src/config/profiles.*): a
 // profile is a file, so the name must be a legal Windows file name. Pure, no DOM, so tests import it.
 const forbidden = /[\\/:*?"<>|]/;

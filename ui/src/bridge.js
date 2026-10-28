@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 const wv = window.chrome && window.chrome.webview;
 const listeners = new Set();
 if (wv) wv.addEventListener('message', e => listeners.forEach(fn => fn(e.data)));

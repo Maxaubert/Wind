@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # Warm-keeping cadence sweep (issue #246): for each txWarmHz, score the two things the knob
 # trades against each other -
 #   1. the pan-start hitch, via tools/pan_wake_probe.ps1 -Drive (composition stalls on the WAKE

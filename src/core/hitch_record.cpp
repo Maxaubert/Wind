@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // src/core/hitch_record.cpp - see hitch_record.h. Pure: compiled into the WIND_TESTS build.
 #include "hitch_record.h"
 #include <cstdio>

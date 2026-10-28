@@ -1,3 +1,5 @@
+<!-- Copyright (c) 2026 Max Aubert. All rights reserved.
+     Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
 <script>
   // The two item lists of the "Tray menu" tab: Sliders (at most four on) and Toggles. The
   // Performance switch above them is an ordinary schema row. Each change writes that list's two ini

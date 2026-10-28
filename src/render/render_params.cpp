@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // Pure render-parameter fill (no engine, no Win32): split out of render_model.cpp so the test build
 // can compile it (tests/test_render_params.cpp).
 #include "render_model.h"

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // Win32 I/O for profiles (thin; paths, UTF-8, atomic read/write and listing: tests/test_profiles_io.cpp).
 // MUST be included AFTER <windows.h>. Shared by Wind.exe (tray + migration) and WindConfig.exe
 // (bridge handlers) so both always resolve the same profiles directory next to the resolved ini.

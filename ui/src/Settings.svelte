@@ -1,3 +1,5 @@
+<!-- Copyright (c) 2026 Max Aubert. All rights reserved.
+     Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
 <script>
   // Settings window: instant apply with an explicit Save (spec 2026-10-01).
   //   values  the session: what the live ini holds right now. Every change is written at once

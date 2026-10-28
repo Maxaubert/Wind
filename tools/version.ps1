@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # The one reader of src/version.h for scripts and CI (release.ps1, installer_check.ps1, the release
 # and alpha workflows). Dot-source it, then call Get-WindVersion. installer/wind.nsi reads the same
 # three defines with !searchparse.

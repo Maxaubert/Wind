@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // The tray flyout's interaction logic (issue #313, plan task 4): the write throttle, slider value
 // maths and ini formatting, the toggle writes (incl. "Keep within the edges" = two keys), keyboard
 // focus order and the profile list popup. All pure; flyout_window.cpp wires them to messages.

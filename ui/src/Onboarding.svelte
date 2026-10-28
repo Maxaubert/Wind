@@ -1,3 +1,5 @@
+<!-- Copyright (c) 2026 Max Aubert. All rights reserved.
+     Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
 <script>
   import { onMount } from 'svelte';
   import { setConfig, setConfigPersist, windowControl } from './bridge.js';

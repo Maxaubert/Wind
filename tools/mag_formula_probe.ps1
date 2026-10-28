@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # Derive native Magnifier's fullscreen-transform geometry EMPIRICALLY (issue #205).
 #
 # We are about to copy native's cursor model, and the whole design rests on one formula: given the

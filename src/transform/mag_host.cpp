@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #include "mag_host.h"
 #include "tick_span.h"   // #361: per-tick spans
 #include "logging.h"

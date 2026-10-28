@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # Proving-ground shared library (issue #225). Dot-sourced by run.ps1.
 # Interop + protocol primitives + telemetry analysis. PS 5.1 compatible.
 #

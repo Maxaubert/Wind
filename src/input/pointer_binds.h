@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // Mouse-button and wheel zoom binds (issue #285). Pure; tests/test_pointer_binds.cpp. The WH_MOUSE_LL
 // hook calls these with the held-modifier mask read at the event (bit 1 Ctrl, 2 Alt, 4 Shift, 8 Win),

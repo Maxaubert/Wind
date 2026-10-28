@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // Pure decision logic for "the magnifier is gone, so close the config window".
 // Deliberately free of <windows.h> so it compiles into the WIND_TESTS build.
 #pragma once

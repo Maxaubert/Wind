@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // Pure PE import-table reader (no <windows.h>) for the Java bridge DLL check (review 2026-10-16 #15):
 // LoadVerified loads a signed bridge DLL with its folder on the search path, so every DLL it imports

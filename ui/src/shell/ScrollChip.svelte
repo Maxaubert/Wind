@@ -1,3 +1,5 @@
+<!-- Copyright (c) 2026 Max Aubert. All rights reserved.
+     Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
 <script>
   // The Settings page's scroll indicator (#329, owner decision): one small fixed-size chip on the right
   // edge instead of a scrollbar. It shows only when the page has more to scroll, its position follows

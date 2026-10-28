@@ -1,3 +1,5 @@
+<!-- Copyright (c) 2026 Max Aubert. All rights reserved.
+     Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
 <script>
   // The Engine select. A running Wind with both engines up applies a change live on its reload
   // (`running` is "live": no button). One whose other engine failed to start runs that one engine

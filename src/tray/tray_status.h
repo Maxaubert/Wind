@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // What the tray shows about the running magnifier. PURE (no <windows.h>): the label decisions are
 // where the bugs live, so they are unit-tested rather than eyeballed in a menu.

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // Game-sim window for the proving ground (issue #225): a borderless fullscreen D3D11 app that
 // renders fast-moving content through a real flip-model swapchain - the present pressure and
 // engine-pick shape of an actual game, which no GDI-timer backdrop reproduces. Content is a

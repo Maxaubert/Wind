@@ -1,3 +1,5 @@
+<!-- Copyright (c) 2026 Max Aubert. All rights reserved.
+     Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
 <script>
   import { iconSvg } from '../design/icons.js';
   // Props only. The bar carries the window buttons and nothing else: minimize, maximize (restore when

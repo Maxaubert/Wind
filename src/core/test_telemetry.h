@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // Per-tick test telemetry (issue #225): the proving-ground harness (tools/testenv) sets
 // WIND_TESTLOG=<path> and Wind appends one CSV line per tick - ground truth for centering,

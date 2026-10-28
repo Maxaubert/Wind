@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // Resource IDs for Wind.exe (see src/wind.rc). IDI_WIND is the app/tray icon; as the
 // only/lowest icon resource it is also what Explorer, alt-tab, and the taskbar display.

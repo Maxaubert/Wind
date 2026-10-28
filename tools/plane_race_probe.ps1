@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # Does the magnifier RELIABLY pull a fullscreen game off its hardware overlay plane?
 #
 # The pan-start stutter tracks one variable above all others: whether the game is riding a hardware

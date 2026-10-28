@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // The render engine's scaling filters (issue #456): xBR and NVIDIA Image Scaling, one full-screen
 // pass straight into the back buffer. Nearest stays in the engine's own pass. draw() returning false

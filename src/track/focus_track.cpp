@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #include "focus_track.h"
 #include "focus_identity.h"   // repeat focus events keep the caret followed
 #include "logging.h"

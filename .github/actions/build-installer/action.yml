@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # The installer build shared by release.yml and alpha.yml, so a build step is changed in one place.
 #
 # Runs after actions/checkout. It reads the version from src/version.h, runs every test gate and
@@ -24,6 +26,11 @@ runs:
       run: |
         . ./tools/version.ps1      # Get-WindVersion: the one src/version.h reader
         "version=$(Get-WindVersion (Get-Location).Path)" >> $env:GITHUB_OUTPUT
+
+    # Cheap provenance gate first: every first-party source file carries the copyright header.
+    - name: Copyright headers
+      shell: pwsh
+      run: pwsh -File tools/check_copyright.ps1
 
     - name: Install NSIS
       shell: pwsh

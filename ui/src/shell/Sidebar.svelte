@@ -1,3 +1,5 @@
+<!-- Copyright (c) 2026 Max Aubert. All rights reserved.
+     Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
 <script>
   import { iconSvg } from '../design/icons.js';
   // groups: the pages above the divider, bottom: the pages below it ([{ id, label, icon }]). `version` shows beside the row with id 'about'.

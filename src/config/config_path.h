@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // Shared helper to resolve magnifier.ini's runtime path. MUST be included AFTER <windows.h>.
 //
 // Returns the exe's directory if it is writable (dev workflow, repo dir), else

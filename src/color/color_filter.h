@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // Colour filter controller (issue #288). Applies the DWM colour effect (MagSetFullscreenColorEffect)
 // on the tick thread, deduped so an unchanged filter costs one compare

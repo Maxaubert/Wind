@@ -1,3 +1,5 @@
+<!-- Copyright (c) 2026 Max Aubert. All rights reserved.
+     Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
 <script>
   // Profile row: a dropdown of the profiles plus one New button (ia07 mockup). Each profile in the open
   // list carries a trash icon that asks to delete it; with one profile left there is no trash at all, and

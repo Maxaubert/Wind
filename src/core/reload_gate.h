@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // Config hot-reload gate (pure, no <windows.h>; tests/test_reload_gate.cpp). RunTick reads the ini
 // and asks this what to do, so the retry/skip/reload rules are testable without a tick loop.

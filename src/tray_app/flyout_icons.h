@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // The flyout's line icons as SVG path data on a 16x16 grid (stroke only, no background box).
 // Drawn from the terminal line-icon set in docs/design/tray-2026-10/k01-sliders-toggles.html (TIC)

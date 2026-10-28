@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // Sanity filters for what the focus/caret watcher reports (issue #278). Pure; tests/test_track_filter.cpp.
 namespace wind {

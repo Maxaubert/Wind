@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // The process token's UIAccess bit (Win32). MUST be included AFTER <windows.h>. The pure start-up
 // rule that uses it is uiaccess_gate.h; this is the one place Wind reads the bit (issues #185, #460).
 //

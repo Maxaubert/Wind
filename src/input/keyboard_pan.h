@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #pragma once
 // Keyboard panning (issue #287). A press starts panning at once (short ease-in, no jump). A press
 // released within 250 ms is a TAP: that axis stops and is topped up to exactly one nudge (1/8 of

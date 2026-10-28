@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 /**
  * Renders installer/over.html into the alpha overlays the installer composites over its
  * video loop, plus the rectangles NSIS needs to know about.

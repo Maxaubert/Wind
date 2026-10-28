@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 #include "transform_model.h"
 #include "transform.h"   // ComputeMagTransform
 #include "tx_warm.h"     // WarmAction (pure, tested): the pan-start hitch fix

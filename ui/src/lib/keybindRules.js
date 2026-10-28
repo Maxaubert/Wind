@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // Mirror of src/input/keybind_rules.h (issue #285). Both are tested against tests/fixtures/keybind_cases.txt
 // (ui/tests/keybind-rules.nodetest.mjs and tests/test_keybind_rules.cpp), so a rule changed in one place
 // fails the other's tests until it is changed there too.

@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # DWM memory probe - diagnostic for the dwmcore STATUS_FATAL_MEMORY_EXHAUSTION crash.
 #
 # Two dwm.exe crashes on 2026-08-17 faulted at dwmcore.dll+0x1a0bd8 with exception 0xc00001ad

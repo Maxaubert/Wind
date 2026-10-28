@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Max Aubert. All rights reserved.
+// Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 // Readable names for bindings, shared by the Settings hotkeys page and the onboarding capture.
 export const MOD_BITS = [{ bit: 1, name: 'Ctrl' }, { bit: 2, name: 'Alt' }, { bit: 4, name: 'Shift' }, { bit: 8, name: 'Win' }];
 export const modList = (m) => MOD_BITS.filter((b) => m & b.bit).map((b) => b.name);

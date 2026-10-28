@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # Multi-config screen for the acrylic-hitching defect (issue #229). Runs N configurations through
 # the short acrylic suite, ROUND-ROBIN rather than one config at a time, so a slow drift on the
 # machine spreads across all of them instead of favouring whichever ran first. Reports the hitch

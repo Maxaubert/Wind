@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Max Aubert. All rights reserved.
+# Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 # Magnifier benchmark v2 (issue #225): drive DIFFERENT magnifiers through the SAME harsh
 # scenarios and produce a game-benchmark scoreboard, catalogued per run.
 #

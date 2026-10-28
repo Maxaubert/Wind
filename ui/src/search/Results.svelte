@@ -1,3 +1,5 @@
+<!-- Copyright (c) 2026 Max Aubert. All rights reserved.
+     Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
 <script>
   // Search results: ONE ranked list, best match first. Each result is the setting's real row (the same
   // SettingRow, with the same value and handlers as on its page), so it is edited right here and

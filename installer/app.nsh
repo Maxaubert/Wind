@@ -1,3 +1,5 @@
+; Copyright (c) 2026 Max Aubert. All rights reserved.
+; Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary
 ;
 ; Wind setup, the parts that are about Wind rather than about installing.
 ;

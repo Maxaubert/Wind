@@ -1,3 +1,5 @@
+<!-- Copyright (c) 2026 Max Aubert. All rights reserved.
+     Proprietary source-available software; see LICENSE. SPDX-License-Identifier: LicenseRef-Wind-Proprietary -->
 <script>
   // row.buttonKey = 'zoomInButton'|'zoomOutButton' (omit for keyboard-only slots);
   // row.vkKey = main VK ('zoomInVk' etc.); row.modsKey = modifier mask ('zoomInMods' etc., optional).
