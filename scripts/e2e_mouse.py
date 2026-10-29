@@ -37,6 +37,17 @@ for lv in (4, 10):
     check(f"{lv}x keepPointerSpeed matches 1x", abs(fast - base) < base * 0.08, f"{fast:.1f} pt, 1x {base:.1f}")
     check(f"{lv}x view stays centred on the pointer", abs(s["center"][1] - s["pointer"][1]) < 1, f"center {s['center']} pointer {s['pointer']}")
 
+# Near the edges the view is clamped: the pointer must still move at 1x speed (owner report 2026-10-29).
+set_config(keepPointerSpeed=True)
+for name, x, d in (("right", 1700, 10), ("left", 220, -10)):
+    ctl("level 1"); time.sleep(0.3); ctl(f"warp {x} 540"); time.sleep(0.2); ctl("level 4"); time.sleep(0.4)
+    mv(d, 0); time.sleep(0.15)
+    a = ctl("state")["pointer"][0]
+    mv(d, 0); time.sleep(0.15)
+    b = ctl("state")
+    check(f"{name} edge keeps 1x speed", abs(abs(b["pointer"][0] - a) - base) < base * 0.15 or b["pointer"][0] in (0, 1919),
+          f"moved {b['pointer'][0] - a:.1f}, 1x {base:.1f}, view {b['center']}")
+
 # Sweep right then left at 6x: every step the same direction and size, no snaps.
 set_config(keepPointerSpeed=True)
 ctl("level 1"); time.sleep(0.3); ctl("warp 300 540"); time.sleep(0.2); ctl("level 6"); time.sleep(0.4)
@@ -74,8 +85,12 @@ else:
     for _ in range(4): mv(10, 0); time.sleep(0.05)
     b = ctl("state")
     check("game lock detected", b["locked"], f"locked {b['locked']}")
-    check("game lock: pointer stays, view pans", abs(b["pointer"][0] - a["pointer"][0]) < 2 and b["center"][0] > a["center"][0] + 50,
-          f"pointer {a['pointer']} -> {b['pointer']}, view {a['center']} -> {b['center']}")
+    # The game holds the pointer's screen position, so on macOS its (hidden) desktop position
+    # follows the view. The view pans from raw HID counts (4 moves x 10 reports x 10 counts) at
+    # cursorSensitivity 1, like Wind's Raw Input panning on Windows.
+    pan = b["center"][0] - a["center"][0]
+    check("game lock: the view pans from raw mouse counts", abs(pan - 400) < 400 * 0.2,
+          f"view {a['center']} -> {b['center']}, 400 raw counts")
     g.wait(); time.sleep(0.5)
     mv(-10, 0); time.sleep(0.4)
     c = ctl("state")

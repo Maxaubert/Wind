@@ -12,9 +12,12 @@ if [[ "${1:-}" == "test" ]]; then
   FLAGS+=(-Xswiftc -DWIND_TEST_CHANNEL --scratch-path .build/test)
   APP=build/test/Wind.app
 fi
-swift build "${FLAGS[@]}" 2>&1 | grep -vE '^\[[0-9]+/[0-9]+\]' || true
+# A failed compile must stop here: never package a stale binary from an earlier build.
+if ! swift build "${FLAGS[@]}" > .build/last-build.log 2>&1; then
+  grep -E 'error' .build/last-build.log | head -20
+  echo "build failed (full log: .build/last-build.log)"; exit 1
+fi
 BIN=$(swift build "${FLAGS[@]}" --show-bin-path)/Wind
-[[ -x "$BIN" ]] || { echo "build failed"; exit 1; }
 
 rm -rf "$APP"
 mkdir -p "${APP:h}"

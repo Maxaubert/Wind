@@ -25,7 +25,13 @@ enum SkyLight {
     private static let getZoom = sym("SLSGetZoomParameters", GetZoomFn.self)
     private static let isZoomedFn = sym("SLSIsZoomed", IsZoomedFn.self)
 
+    private typealias CursorVisibleFn = @convention(c) (Int32) -> Bool
+    private static let cursorVisibleFn = sym("SLSCursorIsVisible", CursorVisibleFn.self)
+
     static let cid: Int32 = mainConn?() ?? 0
+
+    /// Whether the system cursor is shown, whichever app hid it (a game hides it for mouse-look).
+    static var cursorVisible: Bool { cursorVisibleFn?(cid) ?? true }
 
     static var available: Bool { setZoom != nil && getZoom != nil && cid != 0 }
 

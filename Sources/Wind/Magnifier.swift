@@ -13,6 +13,8 @@ final class Magnifier {
     private var lock = LockDetector()
     private var owner = ViewOwnerState()
     let caret = CaretTracker()
+    private let raw = RawMouse()
+    private var askedRawAccess = false
     private let crosshair = Crosshair()
 
     private var tap: CFMachPort?
@@ -223,12 +225,8 @@ final class Magnifier {
                 }
             }
             lastLoc = loc
-            let dt = (now - lastMoveAt) * 1000
             lastMoveAt = now
             mouseDx += dx; mouseDy += dy
-            // Off the main display (the one Wind zooms) or pushed into its edge never counts as a lock.
-            let pinned = loc.x <= 0 || loc.y <= 0 || loc.x >= screen.w - 1 || loc.y >= screen.h - 1
-            lock.feed(dx: dx, dy: dy, pos: Pt(loc.x, loc.y), dtMs: dt, pinned: pinned, level: zoom.level)
             pendingLockDx += dx; pendingLockDy += dy
             if zoom.level > 1.0001 || inspect { wake() }
             return pass
@@ -353,6 +351,19 @@ final class Magnifier {
             Log.info("zoom session start at \(Int(ptr.x)),\(Int(ptr.y))")
         }
 
+        // A game holding the pointer: the cursor stays hidden while the hand keeps moving. While it
+        // holds it, pan from raw HID counts: Wind's own view writes drag the held pointer around and
+        // WindowServer reports that as moves with large unrelated deltas, so tap deltas run away.
+        let rawOn = config.lockTracking && raw.start()
+        let r = raw.take()
+        let motion = rawOn ? abs(r.dx) + abs(r.dy) : abs(ldx) + abs(ldy)
+        lock.feed(cursorVisible: SkyLight.cursorVisible, motion: motion)
+        if lock.locked && !rawOn && config.lockTracking && !askedRawAccess {
+            askedRawAccess = true
+            Log.info("game lock: asking for Input Monitoring to follow the mouse in games")
+            RawMouse.requestAccess()
+        }
+
         // Who owns the view this tick.
         let locked = config.lockTracking && lock.locked
         if wasLocked && !locked { returning = true }
@@ -400,7 +411,9 @@ final class Magnifier {
             }
             target = clampCenter(virtualPtr, level: lv, screen: screen)
         } else if locked {
-            virtualPtr = Pt(virtualPtr.x + ldx * config.cursorSensitivity, virtualPtr.y + ldy * config.cursorSensitivity)
+            // Without Input Monitoring there is no trustworthy hand motion: hold the view still.
+            let gx = rawOn ? r.dx : 0, gy = rawOn ? r.dy : 0
+            virtualPtr = Pt(virtualPtr.x + gx * config.cursorSensitivity, virtualPtr.y + gy * config.cursorSensitivity)
             virtualPtr = Pt(min(max(virtualPtr.x, 0), screen.w), min(max(virtualPtr.y, 0), screen.h))
             target = mouseTarget(virtualPtr, lv)
         } else {
@@ -483,15 +496,31 @@ final class Magnifier {
 
     /// Move the pointer to a desktop point while zoomed. A warp is reinterpreted in screen space by
     /// the zoom, but a view write that keeps the pointer's SCREEN position carries it across the
-    /// desktop by exactly the view's shift; the next normal write recentres. Near a screen edge the
-    /// zoom clamps the view, so the pointer can land short; the real position is returned.
+    /// desktop by exactly the view's shift; the next normal write recentres.
+    /// Near a screen edge the view cannot shift outward (the zoom clamps it). Then the shift is
+    /// done the other way round: first move the view inward keeping the pointer's DESKTOP position,
+    /// then move it back keeping its SCREEN position. The view ends where it was and the pointer has
+    /// moved outward by the same amount. Writes use the scale the compositor shows (`liveLevel`):
+    /// a new level here would rescale the pointer's screen offset; the normal write applies it.
     private func placePointer(at t: Pt, level lv: Double) -> Pt {
         let want = Pt(min(max(t.x, 0), screen.w - 1), min(max(t.y, 0), screen.h - 1))
         let p = CGEvent(source: nil)?.location ?? CGPoint(x: want.x, y: want.y)
-        let shifted = Pt(center.x + (want.x - p.x), center.y + (want.y - p.y))
-        // At the scale the compositor shows now: a new level here would rescale the pointer's
-        // screen offset and land it wrong; the normal write that follows applies the new level.
-        SkyLight.set(center: CGPoint(x: shifted.x, y: shifted.y), scale: liveLevel, smooth: config.smoothImages, keepPointer: false)
+        let live = max(1, liveLevel)
+        let halfW = screen.w / live / 2, halfH = screen.h / live / 2
+        // Per axis: (start, end) of the screen-position-keeping shift.
+        func axis(_ c: Double, _ d: Double, _ half: Double, _ size: Double) -> (Double, Double) {
+            let lo = half, hi = size - half
+            if c + d >= lo && c + d <= hi { return (c, c + d) }        // room to shift: one write
+            let d2 = max(min(d, c - lo), c - hi)                        // the shift must fit inward
+            return (c - d2, c)
+        }
+        let c = clampCenter(center, level: live, screen: screen)
+        let (ax, bx) = axis(c.x, want.x - p.x, halfW, screen.w)
+        let (ay, by) = axis(c.y, want.y - p.y, halfH, screen.h)
+        if ax != c.x || ay != c.y {
+            SkyLight.set(center: CGPoint(x: ax, y: ay), scale: live, smooth: config.smoothImages, keepPointer: true)
+        }
+        SkyLight.set(center: CGPoint(x: bx, y: by), scale: live, smooth: config.smoothImages, keepPointer: false)
         lastWritten = nil
         wroteThisTick = true
         let got = CGEvent(source: nil)?.location ?? CGPoint(x: want.x, y: want.y)
