@@ -52,7 +52,7 @@ game takes the pointer, Wind also asks for **Input Monitoring**, which it needs 
 |---|---|
 | Zoom in (hold) | mouse forward button, or Ctrl+Opt+= |
 | Zoom out (hold) | mouse back button, or Ctrl+Opt+- |
-| Wheel zoom | Ctrl + scroll wheel or two-finger scroll |
+| Wheel zoom | Ctrl + scroll wheel or two-finger scroll (each notch is one step; speed in Settings) |
 | Quick zoom (toggle 1x and last level) | Ctrl+Opt+Z |
 | Pan with the keyboard | Ctrl+Opt+arrows |
 | Inspect mode | Ctrl+Opt+I |

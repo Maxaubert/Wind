@@ -48,6 +48,16 @@ for name, x, d in (("right", 1700, 10), ("left", 220, -10)):
     check(f"{name} edge keeps 1x speed", abs(abs(b["pointer"][0] - a) - base) < base * 0.15 or b["pointer"][0] in (0, 1919),
           f"moved {b['pointer'][0] - a:.1f}, 1x {base:.1f}, view {b['center']}")
 
+# Wheel: real notches, slow and fast, zoom the same amount per notch (no macOS acceleration).
+ctl("level 1"); time.sleep(0.3); ctl("mods ctrl")
+def notches(n, ms):
+    ctl("level 2"); time.sleep(0.3); a = ctl("state")["level"]
+    vm.stdin.write(f"wheel 1 {n} {ms}\n"); vm.stdin.flush(); vm.stdout.readline(); time.sleep(0.5)
+    return (ctl("state")["level"] / a) ** (1 / n)
+slow, fast = notches(3, 300), notches(6, 30)
+check("wheel: slow and fast notches zoom alike", abs(slow - fast) < 0.02 and slow > 1.05, f"slow x{slow:.3f}, fast x{fast:.3f} per notch")
+ctl("mods"); ctl("level 1")
+
 # Sweep right then left at 6x: every step the same direction and size, no snaps.
 set_config(keepPointerSpeed=True)
 ctl("level 1"); time.sleep(0.3); ctl("warp 300 540"); time.sleep(0.2); ctl("level 6"); time.sleep(0.4)

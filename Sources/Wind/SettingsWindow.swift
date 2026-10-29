@@ -72,6 +72,7 @@ struct SettingsView: View {
         Form {
             slider("Zoom-in speed", \.zoomInSpeed, 0.25...4, step: 0.05, format: "%.2f")
             slider("Zoom-out speed", \.zoomOutSpeed, 0.25...4, step: 0.05, format: "%.2f")
+            slider("Wheel zoom speed", \.wheelZoomSpeed, 0.1...3, step: 0.05, format: "%.2f")
             slider("Maximum zoom", \.maxLevel, 2...64, step: 1, format: "%.0fx")
             slider("Quick zoom level", \.quickZoomDefault, 1.5...16, step: 0.5, format: "%.1fx")
             slider("Release ease-out", \.zoomEaseOutMs, 0...400, step: 5, format: "%.0f ms")
