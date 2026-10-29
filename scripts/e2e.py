@@ -36,9 +36,12 @@ lv = s["level"]
 ctl("post mouse 3 down"); time.sleep(0.3); s = ctl("post mouse 3 up", wait=0.5)
 check("mouse3 bind zooms out", s["level"] < lv - 0.3, f"{lv:.2f} -> {s['level']:.2f}")
 
+# One notch is one step whatever size macOS reports (it accelerates wheel deltas).
 lv = s["level"]
-s = ctl("post scroll 3 ctrl", wait=0.5)
-check("ctrl+scroll zooms in", s["level"] > lv * 1.2, f"{lv:.2f} -> {s['level']:.2f}")
+s = ctl("post scroll 1 ctrl", wait=0.5); one = s["level"] / lv
+s = ctl("post scroll 3 ctrl", wait=0.5); three = s["level"] / (lv * one)
+check("ctrl+scroll zooms in", one > 1.05, f"x{one:.3f} per notch")
+check("a big wheel delta is still one notch", abs(three - one) < 0.01, f"x{one:.3f} vs x{three:.3f}")
 
 # Game lock: deltas pan the view while the pointer stays put.
 ctl("level 1"); time.sleep(0.2); ctl("warp 960 540"); ctl("level 4"); time.sleep(0.2)

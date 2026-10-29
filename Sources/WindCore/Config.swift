@@ -9,6 +9,7 @@ public struct Config: Codable, Equatable {
     public var zoomIn = ["mouse4", "ctrl+opt+equal"]
     public var zoomOut = ["mouse3", "ctrl+opt+minus"]
     public var wheelZoomMods = "ctrl"            // modifier(s) + scroll wheel/trackpad zooms; "" = off
+    public var wheelZoomSpeed = 0.6               // zoom per wheel notch, relative to the hold speed
     public var quickZoom = ["ctrl+opt+z"]
     public var panLeft = ["ctrl+opt+left"]
     public var panRight = ["ctrl+opt+right"]
@@ -93,6 +94,7 @@ public struct Config: Codable, Equatable {
         maxLevel = min(64, max(1.5, maxLevel))
         zoomInSpeed = min(4, max(0.25, zoomInSpeed))
         zoomOutSpeed = min(4, max(0.25, zoomOutSpeed))
+        wheelZoomSpeed = min(3, max(0.1, wheelZoomSpeed))
         smoothZoomAccel = min(10, max(1, smoothZoomAccel))
         smoothZoomRamp = min(3, max(0, smoothZoomRamp))
         zoomEaseOutMs = min(1000, max(0, zoomEaseOutMs))

@@ -1,5 +1,6 @@
 // vmouse: real HID pointer motion through Karabiner's virtual HID device (test harness for Wind).
-// Run as root. Reads stdin lines: "move <dx> <dy> <count> <interval_ms>", "button <n> down|up", "quit".
+// Run as root. Reads stdin lines: "move <dx> <dy> <count> <interval_ms>", "wheel <notches> <count> <interval_ms>",
+// "button <n> down|up", "quit".
 #include <atomic>
 #include <iostream>
 #include <sstream>
@@ -34,6 +35,16 @@ int main() {
       }
       report.x = 0; report.y = 0;
       client->async_post_report(report);
+    } else if (cmd == "wheel") {
+      // wheel <notches> <count> <interval_ms>: one report per notch step
+      int w = 1, n = 1, ms = 50; in >> w >> n >> ms;
+      for (int i = 0; i < n; ++i) {
+        report.vertical_wheel = static_cast<uint8_t>(static_cast<int8_t>(w));
+        client->async_post_report(report);
+        report.vertical_wheel = 0;
+        client->async_post_report(report);
+        std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+      }
     } else if (cmd == "button") {
       int b = 1; std::string st; in >> b >> st;
       if (st == "down") report.buttons.insert(b); else report.buttons.erase(b);

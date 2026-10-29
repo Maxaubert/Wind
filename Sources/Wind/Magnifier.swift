@@ -53,6 +53,7 @@ final class Magnifier {
     private var wasLocked = false
     private var paused = false                  // the user switched Wind off from the menu
     private var simHeld = Set<Action>()         // holds from the command channel (tests)
+    var testMods: Mods?                         // modifiers forced by the command channel (tests)
 
     var onLevelChange: ((Double) -> Void)?
     var onQuitRequested: (() -> Void)?
@@ -233,7 +234,7 @@ final class Magnifier {
 
         case .scrollWheel:
             let continuous = e.getIntegerValueField(.scrollWheelEventIsContinuous) != 0
-            let modsOK = config.wheelMods.map { modsMatch(mods, $0) } ?? false
+            let modsOK = config.wheelMods.map { modsMatch(testMods ?? mods, $0) } ?? false
             var steps: Double
             if continuous {
                 // A trackpad gesture is decided once, when it begins, and its momentum follows that
@@ -246,8 +247,14 @@ final class Magnifier {
                 steps = e.getDoubleValueField(.scrollWheelEventPointDeltaAxis1) / 12.0
             } else {
                 guard modsOK else { return pass }
-                steps = max(-4, min(4, e.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1)))
+                // One notch is one step, as in Wind on Windows. macOS accelerates wheel deltas
+                // (measured: a slow notch reports 0.1, quick notches ramp to 3.9), which made the
+                // zoom crawl on slow scrolls and leap on fast ones.
+                let line = e.getIntegerValueField(.scrollWheelEventDeltaAxis1)
+                let fixed = e.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1)
+                steps = line != 0 ? (line > 0 ? 1 : -1) : (fixed > 0 ? 1 : fixed < 0 ? -1 : 0)
             }
+            steps *= config.wheelZoomSpeed
             // Natural scrolling flips the reported direction; undo it so wheel/fingers up zooms in.
             if let ns = NSEvent(cgEvent: e), ns.isDirectionInvertedFromDevice { steps = -steps }
             if steps != 0 {
