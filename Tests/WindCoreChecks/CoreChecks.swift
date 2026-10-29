@@ -97,39 +97,27 @@ struct ViewTests {
 }
 
 struct LockTests {
-    func deltasWithoutTravelLock() {
+    func hiddenWhileMovingLocks() {
         var d = LockDetector()
-        for _ in 0..<10 { d.feed(dx: 5, dy: 0, pos: Pt(500, 500), dtMs: 8, pinned: false) }
+        for _ in 0..<5 { d.feed(cursorVisible: false, motion: 6) }
         expect(d.locked)
-        // pointer moves with the hand again: unlock
-        var x = 500.0
-        for _ in 0..<10 { x += 5; d.feed(dx: 5, dy: 0, pos: Pt(x, 500), dtMs: 8, pinned: false) }
+        d.feed(cursorVisible: true, motion: 6)
         expect(!d.locked)
     }
 
-    func normalMovementNeverLocks() {
+    func typingHideDoesNotLock() {
+        // Typing hides the cursor; the first move shows it again.
         var d = LockDetector()
-        var x = 100.0
-        for _ in 0..<50 { x += 4; d.feed(dx: 4, dy: 0, pos: Pt(x, 300), dtMs: 8, pinned: false) }
+        d.feed(cursorVisible: false, motion: 0)
+        d.feed(cursorVisible: false, motion: 7)
+        d.feed(cursorVisible: true, motion: 7)
+        for _ in 0..<10 { d.feed(cursorVisible: true, motion: 7) }
         expect(!d.locked)
     }
 
-    func zoomedTravelIsJudgedAt1x() {
-        // At 6x the pointer moves 1/6 as far: that is normal movement, not a lock, and a lock
-        // that is held releases once the pointer moves with the hand again.
+    func hiddenButStillIsNotALock() {
         var d = LockDetector()
-        var x = 100.0
-        for _ in 0..<50 { x += 1; d.feed(dx: 6, dy: 0, pos: Pt(x, 300), dtMs: 8, pinned: false, level: 6) }
-        expect(!d.locked)
-        for _ in 0..<10 { d.feed(dx: 6, dy: 0, pos: Pt(x, 300), dtMs: 8, pinned: false, level: 6) }
-        expect(d.locked)
-        for _ in 0..<10 { x += 1; d.feed(dx: 6, dy: 0, pos: Pt(x, 300), dtMs: 8, pinned: false, level: 6) }
-        expect(!d.locked)
-    }
-
-    func pinnedAtEdgeIsNotALock() {
-        var d = LockDetector()
-        for _ in 0..<20 { d.feed(dx: 6, dy: 0, pos: Pt(1919, 300), dtMs: 8, pinned: true) }
+        for _ in 0..<100 { d.feed(cursorVisible: false, motion: 0) }
         expect(!d.locked)
     }
 }

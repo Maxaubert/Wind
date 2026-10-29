@@ -43,7 +43,8 @@ This builds `Wind.app`, copies it to `/Applications` and starts it. It needs the
 Line Tools (`xcode-select --install`).
 
 On first launch, macOS asks for the **Accessibility** permission. Turn Wind on in System
-Settings > Privacy & Security > Accessibility; Wind starts by itself once it is on.
+Settings > Privacy & Security > Accessibility; Wind starts by itself once it is on. The first time a
+game takes the pointer, Wind also asks for **Input Monitoring**, which it needs to follow the mouse in games.
 
 ## Usage
 

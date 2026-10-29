@@ -52,11 +52,32 @@ So Wind moves the pointer only through the zoom itself (`placePointer`):
    pointer to the target.
 2. The tick's normal `keepPointer=true` write then recentres the view.
 
+Near a screen edge the zoom clamps the view, so it cannot shift outward. `placePointer` then
+shifts it inward with `keepPointer=true` and back with `keepPointer=false`: the view ends where it
+was and the pointer has moved outward. Without that, the pointer fell back to macOS's slow speed
+near edges (owner report 2026-10-29).
+
 Pointer speed compensation (`keepPointerSpeed`, default on) uses this every tick: the pointer
 moves `level` times the step macOS gave it, so it covers the 1x distance. Inspect uses it to hold
 the pointer still, and leaving Inspect or the caret uses it to bring the pointer to the view.
 Placement snaps to a grid (for example x.19), so movement is always measured from where the
 pointer really landed, never from the ideal target.
+
+## Game lock
+
+A macOS game takes the pointer by hiding the cursor and disassociating it from the mouse. Wind
+detects that as **the cursor staying hidden while the hand keeps moving** (`SLSCursorIsVisible`,
+which reports any app's hiding). Typing hides the cursor too, but the first movement shows it again.
+
+While a game holds the pointer, Wind pans from **raw HID counts** (`RawMouse`, IOHIDManager), like
+Raw Input on Windows. Pointer travel and event-tap deltas both fail here: the held pointer keeps its
+screen position, so every view write drags its desktop position along, and WindowServer reports
+those as moves with large, unrelated deltas. That made the view run into the screen edges.
+
+Raw input needs **Input Monitoring**. Wind asks for it the first time it sees a game lock; without
+it, the view holds still during the lock. Karabiner-Elements seizes the physical mice
+(`kIOReturnExclusiveAccess`) and re-posts through its virtual mouse, which Wind still reads. Match
+mice only: a mouse's Pointer collection repeats X/Y.
 
 ## macOS Zoom clash (issue #1)
 
