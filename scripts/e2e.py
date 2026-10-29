@@ -4,7 +4,8 @@ Drives it through the command channel: synthetic input goes through Wind's real 
 The screen visibly zooms while this runs. Exit 0 = every check passed."""
 import os, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from windtest import ctl, check, finish, relaunch_with_channel
+import subprocess
+from windtest import ROOT, ctl, check, finish, relaunch_with_channel, set_config
 
 relaunch_with_channel()
 
@@ -56,5 +57,19 @@ check("quick zoom back in to the remembered level", abs(s["level"] - 4) < 0.05, 
 
 s = ctl("hold zoomOut 2500", wait=3.0)
 check("zoom out ends at 1x", s["level"] == 1 and s["sky"]["scale"] == 1, f"level {s['level']} sky {s['sky']['scale']}")
+
+# Colour filter: the display's transfer formula follows warmth and dim, and resets when off.
+def gamma():
+    return [float(x) for x in subprocess.check_output(["python3", os.path.join(ROOT, "scripts/gamma.py")], text=True).split()]
+saved = set_config(warmthPct=50, dimPct=100); time.sleep(0.4)
+g = gamma()
+check("warmth lowers blue more than green", g[0] == 1 and 0.6 < g[2] < g[1] < 1, f"rgb max {g}")
+set_config(warmthPct=0, dimPct=60); time.sleep(0.4)
+g = gamma()
+check("dim scales all channels", all(abs(x - 0.6) < 0.01 for x in g), f"rgb max {g}")
+set_config(warmthPct=0, dimPct=100); time.sleep(0.4)
+g = gamma()
+check("filter off restores the display", all(abs(x - 1) < 0.01 for x in g), f"rgb max {g}")
+set_config(**saved)
 
 finish()

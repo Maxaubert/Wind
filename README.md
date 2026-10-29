@@ -28,7 +28,8 @@ mouse when a game locks the pointer.
 - Keeps panning from mouse movement when a game locks the pointer.
 - Follows the text caret as you type (and, optionally, keyboard focus), steady even in terminal apps.
 - Inspect mode: freezes the pointer so a tooltip stays open, pans the view with the mouse and shows a crosshair.
-- Quick zoom toggle, keyboard panning, warmth filter.
+- Quick zoom toggle, keyboard panning, warmth and brightness filter.
+- A Settings window, Open at login.
 - Detects macOS Zoom's shortcuts, which fight Wind, and switches them off in one click.
 - A crash watchdog that puts the screen back to 1x if Wind dies.
 
@@ -60,8 +61,8 @@ Bound keys and buttons are not passed on to the app you are using.
 
 ## Settings
 
-The menu-bar icon holds the common switches: caret and focus following, edge mode, pixel
-smoothing, game tracking, pointer speed, warmth and zoom speed. Every setting is a key in
+Open **Settings…** from the menu-bar icon: zoom, mouse, tracking, binds and macOS tabs. The menu
+itself holds the common switches. Every setting is a key in
 `~/Library/Application Support/Wind/config.json`; the file reloads live when you save it. The log
 is `~/Library/Logs/Wind/wind.log`.
 
@@ -82,7 +83,8 @@ would break typing, such as a letter key without Ctrl, Opt or Cmd.
 swift run wind-checks          # unit checks for the pure logic (Sources/WindCore)
 scripts/build.sh install       # build, install and relaunch
 python3 scripts/e2e.py         # end-to-end checks against the installed app (the screen zooms)
-python3 scripts/e2e_mouse.py   # pointer checks with real HID motion (needs Karabiner-Elements, sudo)
+python3 scripts/e2e_mouse.py   # pointer checks with real HID motion (needs Karabiner-Elements, sudo);
+                               # the game-lock check needs an unlocked screen
 ```
 
 How the macOS zoom behaves, and why Wind does what it does, is in

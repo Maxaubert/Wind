@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import ServiceManagement
 import WindCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -10,10 +11,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var started = false
     private var signalSources: [DispatchSourceSignal] = []
     /// The command channel lets any process running as this user drive Wind's Accessibility-backed
-    /// input, so it only exists when Wind is launched for testing (`--test-channel`).
-    private let commandChannel = CommandLine.arguments.contains("--test-channel")
+    /// input, so it is compiled only into test builds (`scripts/build.sh test`, WIND_TEST_CHANNEL).
+    #if WIND_TEST_CHANNEL
+    private let commandChannel = true
+    #else
+    private let commandChannel = false
+    #endif
+    private var configInvalid = false        // config.json failed to parse: back it up before writing
     private var zoomShortcuts: [String] = []     // macOS Zoom shortcuts that are on (issue #1)
     private var polls = 0
+    private let settingsWindow = SettingsWindowController()
 
     func applicationDidFinishLaunching(_ n: Notification) {
         Log.info("Wind \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev") starting, pid \(getpid())")
@@ -78,7 +85,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if polls % 8 == 0 { checkSystemZoom() }
         polls += 1
         loadConfig(force: false)
+        #if WIND_TEST_CHANNEL
         if commandChannel { runCommandFile() }
+        #endif
     }
 
     // MARK: macOS Zoom clash (issue #1)
@@ -121,11 +130,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !force && m == configMTime { return }
         configMTime = m
         do {
-            let c = try Config.load(from: Data(contentsOf: Paths.config))
+            var dropped: [String] = []
+            let c = try Config.load(from: Data(contentsOf: Paths.config), dropped: &dropped)
+            for k in dropped { Log.error("config.json: \"\(k)\" has the wrong type, using the default") }
+            configInvalid = false
             mag.apply(c)
+            settingsWindow.update(c)
             Log.info("config loaded")
         } catch {
             Log.error("config.json unreadable, keeping the previous settings: \(error.localizedDescription)")
+            configInvalid = true
             if force { mag.apply(Config()) }
         }
     }
@@ -134,8 +148,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var c = mag.config
         edit(&c)
         c.clamp()
-        // Write only the keys that differ from the defaults plus what the file already had, so the
-        // file stays readable; simplest faithful form is the full config.
+        if configInvalid {
+            // Keep the user's broken file instead of silently replacing it.
+            let f = DateFormatter(); f.dateFormat = "yyyyMMdd-HHmmss"
+            let bad = Paths.support.appendingPathComponent("config.json.bad-\(f.string(from: Date()))")
+            try? FileManager.default.copyItem(at: Paths.config, to: bad)
+            Log.error("config.json was unreadable; saved it as \(bad.lastPathComponent) before writing")
+            configInvalid = false
+        }
         try? c.encoded().write(to: Paths.config)
         loadConfig(force: true)
         configMTime = (try? FileManager.default.attributesOfItem(atPath: Paths.config.path))?[.modificationDate] as? Date
@@ -204,6 +224,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(bi)
         menu.addItem(item("Keep pointer speed when zoomed", #selector(toggleKeepSpeed), on: c.keepPointerSpeed))
         menu.addItem(item("macOS: enlarge pointer when shaken", #selector(toggleShake), on: SystemZoom.shakeToLocateOn))
+        menu.addItem(item("Open at login", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled))
+        menu.addItem(item("Settings…", #selector(openSettings)))
         menu.addItem(item("Edit settings file…", #selector(openConfig)))
         menu.addItem(item("Show log", #selector(openLog)))
         menu.addItem(.separator())
@@ -216,6 +238,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func toggleFocus() { saveConfig { $0.trackFocus.toggle() } }
     @objc private func toggleEdge() { saveConfig { $0.mouseAlign = $0.mouseAlign == 1 ? 0 : 1 } }
     @objc private func toggleSmooth() { saveConfig { $0.smoothImages.toggle() } }
+    @objc private func openSettings() {
+        settingsWindow.show(config: mag.config, save: { [weak self] c in
+            self?.saveConfig { $0 = c }
+        }, fixZoom: { [weak self] in self?.turnOffSystemZoom() })
+    }
+
+    @objc private func toggleLogin() {
+        let svc = SMAppService.mainApp
+        do {
+            if svc.status == .enabled { try svc.unregister() } else { try svc.register() }
+            Log.info("open at login: \(svc.status == .enabled ? "on" : "off")")
+        } catch {
+            Log.error("open at login: \(error.localizedDescription)")
+            alert("Could not change Open at login", error.localizedDescription)
+        }
+    }
+
     @objc private func toggleKeepSpeed() { saveConfig { $0.keepPointerSpeed.toggle() } }
     @objc private func toggleLock() { saveConfig { $0.lockTracking.toggle() } }
     @objc private func setWarmth(_ s: NSMenuItem) { saveConfig { $0.warmthPct = Double(s.tag) } }
@@ -233,6 +272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let a = NSAlert(); a.messageText = title; a.informativeText = text; a.runModal()
     }
 
+    #if WIND_TEST_CHANNEL
     // MARK: command channel (tests and diagnostics)
 
     private func runCommandFile() {
@@ -260,4 +300,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             try? d.write(to: Paths.state)
         }
     }
+    #endif
 }

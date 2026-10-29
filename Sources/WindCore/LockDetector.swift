@@ -28,10 +28,11 @@ public struct LockDetector {
         locked = forced; windowMs = 0; deltaSum = 0; travelSum = 0; lastPos = nil
     }
 
-    /// Feed one mouse-move event. dtMs is the time since the previous event.
-    public mutating func feed(dx: Double, dy: Double, pos: Pt, dtMs: Double, pinned: Bool) {
+    /// Feed one mouse-move event. dtMs is the time since the previous event. level is the zoom:
+    /// while zoomed macOS moves the pointer only 1/level as far, so travel is judged at 1x scale.
+    public mutating func feed(dx: Double, dy: Double, pos: Pt, dtMs: Double, pinned: Bool, level: Double = 1) {
         let travel: Double
-        if let lp = lastPos { travel = abs(pos.x - lp.x) + abs(pos.y - lp.y) } else { travel = 0 }
+        if let lp = lastPos { travel = (abs(pos.x - lp.x) + abs(pos.y - lp.y)) * max(1, level) } else { travel = 0 }
         lastPos = pos
         if forced { locked = true; return }
         if pinned && !locked { windowMs = 0; deltaSum = 0; travelSum = 0; return }

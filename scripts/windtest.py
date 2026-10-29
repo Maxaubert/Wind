@@ -7,9 +7,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 fails = []
 
 def relaunch_with_channel():
-    """The command channel exists only with --test-channel; relaunch Wind normally on exit."""
+    """The command channel exists only in test builds: build build/test/Wind.app, run it instead of
+    the installed Wind, and bring the installed one back on exit."""
+    subprocess.run([os.path.join(ROOT, "scripts/build.sh"), "test"], check=True, stdout=subprocess.DEVNULL)
     subprocess.run(["pkill", "-x", "Wind"]); time.sleep(0.8)
-    subprocess.run(["open", "-a", "/Applications/Wind.app", "--args", "--test-channel"]); time.sleep(2.0)
+    subprocess.run(["open", "-n", os.path.join(ROOT, "build/test/Wind.app")]); time.sleep(2.0)
     atexit.register(lambda: (subprocess.run(["pkill", "-x", "Wind"]), time.sleep(0.8),
                              subprocess.run(["open", "-a", "/Applications/Wind.app"])))
 
@@ -45,3 +47,15 @@ def check(name, ok, detail=""):
 def finish():
     print("all checks passed" if not fails else f"{len(fails)} failed: {', '.join(fails)}")
     sys.exit(1 if fails else 0)
+
+def screen_locked():
+    """True while the login window is in front (nothing can take focus then)."""
+    import ctypes as C
+    CG = C.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+    CF = C.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+    CG.CGSessionCopyCurrentDictionary.restype = C.c_void_p
+    CF.CFCopyDescription.restype = C.c_void_p; CF.CFCopyDescription.argtypes = [C.c_void_p]
+    CF.CFStringGetCString.argtypes = [C.c_void_p, C.c_char_p, C.c_long, C.c_uint32]
+    b = C.create_string_buffer(8000)
+    CF.CFStringGetCString(CF.CFCopyDescription(CG.CGSessionCopyCurrentDictionary()), b, 8000, 0x08000100)
+    return "CGSSessionScreenIsLocked = 1" in b.value.decode()

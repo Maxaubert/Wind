@@ -56,14 +56,27 @@ public struct Config: Codable, Equatable {
 
     /// Decode a possibly partial JSON object on top of the defaults.
     public static func load(from data: Data) throws -> Config {
+        var dropped: [String] = []
+        return try load(from: data, dropped: &dropped)
+    }
+
+    /// As load(from:), and keys whose value has the wrong type are dropped back to their default
+    /// (named in `dropped`) instead of rejecting the whole file.
+    public static func load(from data: Data, dropped: inout [String]) throws -> Config {
         let defaults = try JSONSerialization.jsonObject(with: JSONEncoder().encode(Config())) as! [String: Any]
         guard let user = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw NSError(domain: "Wind", code: 1, userInfo: [NSLocalizedDescriptionKey: "config.json is not a JSON object"])
         }
         var merged = defaults
-        for (k, v) in user where defaults[k] != nil {
+        for (k, v) in user.sorted(by: { $0.key < $1.key }) where defaults[k] != nil {
             // A single string where a list is expected is accepted as a one-item list.
-            if defaults[k] is [Any], let s = v as? String { merged[k] = [s] } else { merged[k] = v }
+            var trial = merged
+            if defaults[k] is [Any], let s = v as? String { trial[k] = [s] } else { trial[k] = v }
+            if (try? JSONDecoder().decode(Config.self, from: JSONSerialization.data(withJSONObject: trial))) != nil {
+                merged = trial
+            } else {
+                dropped.append(k)
+            }
         }
         var c = try JSONDecoder().decode(Config.self, from: JSONSerialization.data(withJSONObject: merged))
         c.clamp()

@@ -25,6 +25,7 @@ enum SettingsToggle {
                 return
             }
             let root = AXUIElementCreateApplication(app.processIdentifier)
+            AXUIElementSetMessagingTimeout(root, 0.5)
             guard let sw = findSwitch(in: root, label: label.lowercased()) else {
                 if tries > 0 { attempt(label: label, on: on, tries: tries - 1, completion: completion) }
                 else { completion(.notFound("no switch labelled \"\(label)\"")) }
@@ -36,22 +37,6 @@ enum SettingsToggle {
             Log.info("settings: pressed \"\(label)\" -> \(on) (\(err.rawValue))")
             completion(err == .success ? .changed : .notFound("press failed \(err.rawValue)"))
         }
-    }
-
-    /// Diagnostics: the System Settings AX tree, one element per line.
-    static func dump() -> String {
-        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.systempreferences").first else { return "not running" }
-        var out = ""
-        func walk(_ el: AXUIElement, _ d: Int) {
-            if d > 30 { return }
-            let role = value(el, kAXRoleAttribute) as? String ?? "?"
-            let sub = value(el, kAXSubroleAttribute) as? String ?? ""
-            let v = value(el, kAXValueAttribute).map { "\($0)" } ?? ""
-            out += String(repeating: " ", count: d) + "\(role)/\(sub) [\(text(el).prefix(80))] v=\(v.prefix(30))\n"
-            for k in children(el) { walk(k, d + 1) }
-        }
-        walk(AXUIElementCreateApplication(app.processIdentifier), 0)
-        return out
     }
 
     private static func value(_ el: AXUIElement, _ attr: String) -> AnyObject? {
@@ -80,10 +65,14 @@ enum SettingsToggle {
         if depth > 40 { return nil }
         let kids = children(el)
         if isSwitch(el) && text(el).contains(label) { return el }
-        // Settings lays a pane out flat: each label is followed by its own switch, so take the
-        // first switch after the label (the one before it belongs to the previous row).
-        if let i = kids.firstIndex(where: { !isSwitch($0) && text($0).contains(label) }),
-           let sw = kids[(i + 1)...].first(where: isSwitch) ?? kids[..<i].last(where: isSwitch) { return sw }
+        // Settings lays a pane out flat: each label is followed by its own switch. Take the first
+        // switch after the label, but only if no other label comes first (that row has no switch).
+        if let i = kids.firstIndex(where: { !isSwitch($0) && text($0).contains(label) }) {
+            for k in kids[(i + 1)...] {
+                if isSwitch(k) { return k }
+                if !text(k).isEmpty { break }
+            }
+        }
         for k in kids {
             if let f = findSwitch(in: k, label: label, depth: depth + 1) { return f }
         }
