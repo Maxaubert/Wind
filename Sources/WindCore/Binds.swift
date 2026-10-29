@@ -69,12 +69,11 @@ let modNames: [String: Mods] = [
 public let modifierKeyCodes: Set<UInt16> = [0x36, 0x37, 0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F]
 
 public func parseBind(_ text: String) -> Bind? {
-    let parts = text.lowercased().split(separator: "+").map { $0.trimmingCharacters(in: .whitespaces) }
-    if parts.isEmpty || parts.contains(where: { $0.isEmpty }) {
-        // "ctrl++" style: the key itself is "+"
-        if text.hasSuffix("++") { return parseBind(String(text.dropLast(2)) + "+plus") }
-        return nil
-    }
+    // "ctrl++" style: the key itself is "+".
+    if text.hasSuffix("++") { return parseBind(String(text.dropLast(2)) + "+plus") }
+    let parts = text.lowercased().split(separator: "+", omittingEmptySubsequences: false)
+        .map { $0.trimmingCharacters(in: .whitespaces) }
+    if parts.isEmpty || parts.contains(where: { $0.isEmpty }) { return nil }
     var mods: Mods = []
     var trigger: Trigger = .none
     for (i, p) in parts.enumerated() {

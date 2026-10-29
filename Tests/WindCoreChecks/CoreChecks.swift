@@ -114,6 +114,19 @@ struct LockTests {
         expect(!d.locked)
     }
 
+    func zoomedTravelIsJudgedAt1x() {
+        // At 6x the pointer moves 1/6 as far: that is normal movement, not a lock, and a lock
+        // that is held releases once the pointer moves with the hand again.
+        var d = LockDetector()
+        var x = 100.0
+        for _ in 0..<50 { x += 1; d.feed(dx: 6, dy: 0, pos: Pt(x, 300), dtMs: 8, pinned: false, level: 6) }
+        expect(!d.locked)
+        for _ in 0..<10 { d.feed(dx: 6, dy: 0, pos: Pt(x, 300), dtMs: 8, pinned: false, level: 6) }
+        expect(d.locked)
+        for _ in 0..<10 { x += 1; d.feed(dx: 6, dy: 0, pos: Pt(x, 300), dtMs: 8, pinned: false, level: 6) }
+        expect(!d.locked)
+    }
+
     func pinnedAtEdgeIsNotALock() {
         var d = LockDetector()
         for _ in 0..<20 { d.feed(dx: 6, dy: 0, pos: Pt(1919, 300), dtMs: 8, pinned: true) }
@@ -184,6 +197,23 @@ struct BindTests {
         expect(!r.triggerDown(.key(0x18), mods: [.ctrl]).0)              // wrong mods pass through
         expect(r.triggerDown(.mouse(3), mods: []).1 == .down(.zoomOut))
     }
+
+    func timeoutStopsButKeepsSwallowing() {
+        var r = InputRouter()
+        r.setBinds([.zoomIn: [parseBind("ctrl+opt+equal")!]])
+        _ = r.triggerDown(.key(0x18), mods: [.ctrl, .opt])
+        expect(r.stopAll() == [.zoomIn])
+        expect(!r.isHeld(.zoomIn))
+        expect(r.triggerDown(.key(0x18), mods: [], isRepeat: true) == (true, nil))   // repeat still swallowed
+        expect(r.triggerUp(.key(0x18)) == (true, nil))                               // up swallowed, no edge
+        expect(r.triggerUp(.key(0x18)).0 == false)
+    }
+
+    func plusKeyBinds() {
+        expect(parseBind("ctrl++") == Bind(mods: [.ctrl], trigger: .key(0x18)))
+        expect(parseBind("ctrl+") == nil)
+        expect(parseBind("ctrl++opt") == nil)
+    }
 }
 
 struct ConfigTests {
@@ -192,6 +222,14 @@ struct ConfigTests {
         expect(c.maxLevel == 12)
         expect(c.zoomIn == ["f13"])
         expect(c.zoomOut == Config().zoomOut)
+    }
+
+    func wrongTypeDropsOnlyThatKey() throws {
+        var dropped: [String] = []
+        let c = try Config.load(from: Data(#"{"maxLevel": "big", "zoomInSpeed": 2}"#.utf8), dropped: &dropped)
+        expect(dropped == ["maxLevel"])
+        expect(c.maxLevel == Config().maxLevel)
+        expect(c.zoomInSpeed == 2)
     }
 
     func clampsValues() throws {

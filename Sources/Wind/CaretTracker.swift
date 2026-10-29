@@ -13,6 +13,8 @@ final class CaretTracker {
     private var pid: pid_t = 0
     private var seq: UInt = 0
     var enabled = true { didSet { if enabled != oldValue { attachFrontmost() } } }
+    /// Called on the main thread when a new caret or focus is published (wakes the magnifier).
+    var onChange: (() -> Void)?
 
     init() {
         NSWorkspace.shared.notificationCenter.addObserver(
@@ -27,6 +29,8 @@ final class CaretTracker {
               app.processIdentifier != getpid() else { return }
         pid = app.processIdentifier
         let el = AXUIElementCreateApplication(pid)
+        // A hung app must not stall the main thread, which also runs the event tap.
+        AXUIElementSetMessagingTimeout(el, 0.25)
         appElement = el
         // Electron apps build their accessibility tree only when asked.
         AXUIElementSetAttributeValue(el, "AXManualAccessibility" as CFString, kCFBooleanTrue)
@@ -55,6 +59,8 @@ final class CaretTracker {
         }
         observer = nil
         appElement = nil
+        settleTimer?.invalidate(); settleTimer = nil
+        pending = nil; pendingSince = nil
     }
 
     private func handle(_ notification: String, element: AXUIElement) {
@@ -72,14 +78,22 @@ final class CaretTracker {
     /// A caret must hold still this long before it is published. Terminal apps (and TUIs inside
     /// them) move the cursor around in bursts while redrawing; only where it settles counts.
     static let settleMs = 60.0
+    /// A caret that never holds still (a busy TUI) is still published after this long.
+    static let maxWaitMs = 250.0
     private var pending: (TrackKind, Rc)?
+    private var pendingSince: Date?
     private var settleTimer: Timer?
 
     private func publish(_ kind: TrackKind, _ r: Rc) {
+        if let p = pending, p.0 == kind, p.1 == r { return }    // a repeat does not restart the wait
         Log.verbose("caret raw: \(kind) \(Int(r.l)),\(Int(r.t)) \(Int(r.width))x\(Int(r.height))")
         pending = (kind, r)
+        let since = pendingSince ?? Date()
+        pendingSince = since
+        let waited = Date().timeIntervalSince(since) * 1000
+        let delay = max(0, min(CaretTracker.settleMs, CaretTracker.maxWaitMs - waited)) / 1000
         settleTimer?.invalidate()
-        settleTimer = Timer.scheduledTimer(withTimeInterval: CaretTracker.settleMs / 1000, repeats: false) { [weak self] _ in
+        settleTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             self?.commit()
         }
     }
@@ -87,9 +101,11 @@ final class CaretTracker {
     private func commit() {
         guard let (kind, r) = pending else { return }
         pending = nil
+        pendingSince = nil
         if snapshot.kind == kind && snapshot.rect == r { return }
         seq &+= 1
         snapshot = TrackSnapshot(kind: kind, seq: seq, rect: r)
+        onChange?()
         Log.verbose("caret: \(kind) \(Int(r.l)),\(Int(r.t)) \(Int(r.width))x\(Int(r.height))")
     }
 

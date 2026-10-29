@@ -21,7 +21,6 @@ final class Magnifier {
 
     // Input state, written by the tap.
     private var mods: Mods = []
-    private var buttonsDown = 0
     private var lastButtonAt: CFTimeInterval = -1e9
     private var lastKeyAt: CFTimeInterval = -1e9
     private var keyAfterButton = false
@@ -39,6 +38,10 @@ final class Magnifier {
     private var springVel = (x: 0.0, y: 0.0)
     private var zoomedSession = false
     private var lastWritten: (c: Pt, level: Double)?
+    private var liveLevel = 1.0                 // the scale the compositor is showing (last write)
+    private var wroteThisTick = false
+    private var idleTicks = 0
+    private var scrollGestureZooms = false      // the current trackpad gesture (and momentum) zooms
     private var storedQuickLevel = 0.0
     private(set) var inspect = false
     private var inspectAnchor = CGPoint.zero
@@ -80,6 +83,9 @@ final class Magnifier {
 
     func start() -> Bool {
         updateScreen()
+        caret.onChange = { [weak self] in
+            if let self, self.zoom.level > 1.0001 { self.wake() }
+        }
         if SkyLight.isZoomed { SkyLight.reset() }
         guard installTap() else { return false }
         if let s = NSScreen.screens.first {
@@ -107,7 +113,8 @@ final class Magnifier {
             _ = router.releaseAll()
             zoom.reset()
             endInspect()
-            SkyLight.reset(); lastWritten = nil; zoomedSession = false
+            SkyLight.reset(); lastWritten = nil; liveLevel = 1; zoomedSession = false
+            clearSessionFlags()
             reportLevel()
         }
     }
@@ -115,6 +122,7 @@ final class Magnifier {
     private func updateScreen() {
         let b = CGDisplayBounds(CGMainDisplayID())
         screen = Sz(b.width, b.height)
+        lastWritten = nil                       // a display change may have reset the zoom: re-assert it
         Log.info("display \(Int(b.width))x\(Int(b.height)) pt")
     }
 
@@ -149,7 +157,7 @@ final class Magnifier {
         let pass = Unmanaged.passUnretained(e)
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             Log.error("event tap disabled (\(type.rawValue)), re-enabling")
-            for a in router.releaseAll() { edge(.up(a)) }
+            for a in router.stopAll() { edge(.up(a)) }
             if let t = tap { CGEvent.tapEnable(tap: t, enable: true) }
             return pass
         }
@@ -178,10 +186,11 @@ final class Magnifier {
             return pass
 
         case .leftMouseDown, .rightMouseDown:
-            buttonsDown += 1; lastButtonAt = now; keyAfterButton = false
+            lastButtonAt = now; keyAfterButton = false
+            wake()
             return pass
         case .leftMouseUp, .rightMouseUp:
-            buttonsDown = max(0, buttonsDown - 1); lastButtonAt = now
+            lastButtonAt = now
             return pass
 
         case .otherMouseDown:
@@ -189,14 +198,14 @@ final class Magnifier {
             let (sw, ed) = router.triggerDown(.mouse(n), mods: mods)
             if let ed { edge(ed); return nil }
             if sw { return nil }
-            buttonsDown += 1; lastButtonAt = now; keyAfterButton = false
+            lastButtonAt = now; keyAfterButton = false
             return pass
         case .otherMouseUp:
             let n = Int(e.getIntegerValueField(.mouseEventButtonNumber))
             let (sw, ed) = router.triggerUp(.mouse(n))
             if let ed { edge(ed) }
             if sw { return nil }
-            buttonsDown = max(0, buttonsDown - 1); lastButtonAt = now
+            lastButtonAt = now
             return pass
 
         case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
@@ -217,21 +226,29 @@ final class Magnifier {
             let dt = (now - lastMoveAt) * 1000
             lastMoveAt = now
             mouseDx += dx; mouseDy += dy
+            // Off the main display (the one Wind zooms) or pushed into its edge never counts as a lock.
             let pinned = loc.x <= 0 || loc.y <= 0 || loc.x >= screen.w - 1 || loc.y >= screen.h - 1
-            lock.feed(dx: dx, dy: dy, pos: Pt(loc.x, loc.y), dtMs: dt, pinned: pinned)
+            lock.feed(dx: dx, dy: dy, pos: Pt(loc.x, loc.y), dtMs: dt, pinned: pinned, level: zoom.level)
             pendingLockDx += dx; pendingLockDy += dy
             if zoom.level > 1.0001 || inspect { wake() }
             return pass
 
         case .scrollWheel:
-            guard let want = config.wheelMods, modsMatch(mods, want) else { return pass }
             let continuous = e.getIntegerValueField(.scrollWheelEventIsContinuous) != 0
+            let modsOK = config.wheelMods.map { modsMatch(mods, $0) } ?? false
             var steps: Double
             if continuous {
+                // A trackpad gesture is decided once, when it begins, and its momentum follows that
+                // decision: otherwise releasing the modifier mid-gesture splits it between zoom and app.
+                let phase = e.getIntegerValueField(CGEventField(rawValue: 99)!)       // scroll phase
+                let momentum = e.getIntegerValueField(CGEventField(rawValue: 123)!)   // momentum phase
+                if momentum != 0 { return scrollGestureZooms ? nil : pass }
+                if phase == 1 || phase == 128 || phase == 0 { scrollGestureZooms = modsOK }
+                guard scrollGestureZooms else { return pass }
                 steps = e.getDoubleValueField(.scrollWheelEventPointDeltaAxis1) / 12.0
             } else {
-                steps = e.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1)
-                steps = max(-4, min(4, steps))
+                guard modsOK else { return pass }
+                steps = max(-4, min(4, e.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1)))
             }
             // Natural scrolling flips the reported direction; undo it so wheel/fingers up zooms in.
             if let ns = NSEvent(cgEvent: e), ns.isDirectionInvertedFromDevice { steps = -steps }
@@ -303,20 +320,23 @@ final class Magnifier {
         let ptr = CGEvent(source: nil)?.location ?? CGPoint(x: center.x, y: center.y)
         let ldx = pendingLockDx, ldy = pendingLockDy
         pendingLockDx = 0; pendingLockDy = 0
+        wroteThisTick = false
 
-        if lv <= 1.0001 && !zoom.isMoving {
+        // Holding zoom-out at 1x is not a zoom.
+        let moving = zoom.isMoving && !(zoom.direction == .zoomOut && lv <= 1.0001 && !zoom.hasTarget)
+        if lv <= 1.0001 && !moving {
             if zoomedSession {
                 SkyLight.reset()
+                liveLevel = 1
                 zoomedSession = false
                 lastWritten = nil
                 endInspect()
+                clearSessionFlags()
                 Log.info("zoom session end")
             }
             mouseDx = 0; mouseDy = 0
             reportLevel()
-            if !held(.panLeft) && !held(.panRight) && !held(.panUp) && !held(.panDown) {
-                l.isPaused = true
-            }
+            l.isPaused = true
             return
         }
 
@@ -326,7 +346,7 @@ final class Magnifier {
             center = clampCenter(Pt(ptr.x, ptr.y), level: lv, screen: screen)
             virtualPtr = Pt(ptr.x, ptr.y)
             springVel = (0, 0)
-            returning = false
+            clearSessionFlags()
             lastPtr = Pt(ptr.x, ptr.y)
             resetViewOwnerForSession(&owner)
             lock.reset()
@@ -336,6 +356,7 @@ final class Magnifier {
         // Who owns the view this tick.
         let locked = config.lockTracking && lock.locked
         if wasLocked && !locked { returning = true }
+        if locked && !wasLocked { virtualPtr = center }   // keep panning from what is on screen
         if locked != wasLocked { Log.info(locked ? "game lock: panning from mouse deltas" : "game lock released") }
         wasLocked = locked
         var oi = ViewOwnerInputs()
@@ -343,7 +364,9 @@ final class Magnifier {
         oi.trackCaret = config.trackCaret
         oi.trackFocus = config.trackFocus
         oi.mouseDx = mouseDx; oi.mouseDy = mouseDy
-        oi.buttonDown = buttonsDown > 0
+        oi.buttonDown = [CGMouseButton.left, .right, .center].contains {
+            CGEventSource.buttonState(.combinedSessionState, button: $0)
+        }
         let nowT = CACurrentMediaTime()
         oi.msSinceButton = (nowT - lastButtonAt) * 1000
         oi.msSinceKey = (nowT - lastKeyAt) * 1000
@@ -369,7 +392,10 @@ final class Magnifier {
             if abs(ptr.x - ref.x) + abs(ptr.y - ref.y) > 0.001 {
                 virtualPtr = Pt(virtualPtr.x + (ptr.x - ref.x) * lv * config.cursorSensitivity,
                                 virtualPtr.y + (ptr.y - ref.y) * lv * config.cursorSensitivity)
-                virtualPtr = Pt(min(max(virtualPtr.x, 0), screen.w), min(max(virtualPtr.y, 0), screen.h))
+                // The frozen pointer must stay inside the view: a zoomed pointer off screen is pulled
+                // back by WindowServer, which would read as hand movement and feed back.
+                let hx = screen.w / lv / 2 * 0.9, hy = screen.h / lv / 2 * 0.9
+                virtualPtr = Pt(min(max(virtualPtr.x, a.x - hx), a.x + hx), min(max(virtualPtr.y, a.y - hy), a.y + hy))
                 inspectRef = placePointer(at: a, level: lv)
             }
             target = clampCenter(virtualPtr, level: lv, screen: screen)
@@ -386,7 +412,10 @@ final class Magnifier {
                 if owner.warpPointer { pointerToView = true }
                 else if prevOwner != .mouse { returning = true }
                 virtualPtr = Pt(ptr.x, ptr.y)
-                if pointerToView {
+                let onZoomedDisplay = ptr.x >= 0 && ptr.y >= 0 && ptr.x < screen.w && ptr.y < screen.h
+                if !onZoomedDisplay {
+                    pointerToView = false               // never drag the pointer across displays
+                } else if pointerToView {
                     pointerToView = false
                     returning = false
                     virtualPtr = placePointer(at: center, level: lv)
@@ -424,6 +453,20 @@ final class Magnifier {
         crosshair.show(at: inspect ? CGPoint(x: center.x, y: center.y) : nil, level: lv)
         lastPtr = (owner.owner == .mouse && !locked && !inspect) ? (CGEvent(source: nil)?.location).map { Pt($0.x, $0.y) } : nil
         reportLevel()
+
+        // Sleep while nothing changes; mouse moves, binds, the wheel and caret events wake it.
+        let busy = wroteThisTick || moving || returning || oi.panning || abs(springVel.x) + abs(springVel.y) > 0.01
+            || held(.zoomIn) || held(.zoomOut)
+        idleTicks = busy ? 0 : idleTicks + 1
+        if idleTicks > 30 { idleTicks = 0; l.isPaused = true }
+    }
+
+    private func clearSessionFlags() {
+        pointerToView = false
+        returning = false
+        wasLocked = false
+        inspectRef = nil
+        idleTicks = 0
     }
 
     /// While zoomed, WindowServer moves the pointer in SCREEN space, so a hand movement crosses
@@ -446,8 +489,11 @@ final class Magnifier {
         let want = Pt(min(max(t.x, 0), screen.w - 1), min(max(t.y, 0), screen.h - 1))
         let p = CGEvent(source: nil)?.location ?? CGPoint(x: want.x, y: want.y)
         let shifted = Pt(center.x + (want.x - p.x), center.y + (want.y - p.y))
-        SkyLight.set(center: CGPoint(x: shifted.x, y: shifted.y), scale: lv, smooth: config.smoothImages, keepPointer: false)
+        // At the scale the compositor shows now: a new level here would rescale the pointer's
+        // screen offset and land it wrong; the normal write that follows applies the new level.
+        SkyLight.set(center: CGPoint(x: shifted.x, y: shifted.y), scale: liveLevel, smooth: config.smoothImages, keepPointer: false)
         lastWritten = nil
+        wroteThisTick = true
         let got = CGEvent(source: nil)?.location ?? CGPoint(x: want.x, y: want.y)
         return Pt(got.x, got.y)
     }
@@ -464,6 +510,8 @@ final class Magnifier {
         if let w = lastWritten, abs(w.c.x - center.x) < 0.01, abs(w.c.y - center.y) < 0.01, abs(w.level - lv) < 1e-5 { return }
         SkyLight.set(center: CGPoint(x: center.x, y: center.y), scale: lv, smooth: config.smoothImages)
         lastWritten = (center, lv)
+        liveLevel = lv
+        wroteThisTick = true
     }
 
     private func reportLevel() {

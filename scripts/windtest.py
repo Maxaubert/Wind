@@ -7,9 +7,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 fails = []
 
 def relaunch_with_channel():
-    """The command channel exists only with --test-channel; relaunch Wind normally on exit."""
+    """The command channel exists only in test builds: build build/test/Wind.app, run it instead of
+    the installed Wind, and bring the installed one back on exit."""
+    subprocess.run([os.path.join(ROOT, "scripts/build.sh"), "test"], check=True, stdout=subprocess.DEVNULL)
     subprocess.run(["pkill", "-x", "Wind"]); time.sleep(0.8)
-    subprocess.run(["open", "-a", "/Applications/Wind.app", "--args", "--test-channel"]); time.sleep(2.0)
+    subprocess.run(["open", "-n", os.path.join(ROOT, "build/test/Wind.app")]); time.sleep(2.0)
     atexit.register(lambda: (subprocess.run(["pkill", "-x", "Wind"]), time.sleep(0.8),
                              subprocess.run(["open", "-a", "/Applications/Wind.app"])))
 

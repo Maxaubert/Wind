@@ -52,7 +52,11 @@ enum Log {
 enum Watchdog {
     static func spawn() {
         let p = Process()
-        p.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
+        // A copy named WindGuard (scripts/build.sh): `pkill -x Wind` or killall must not take the
+        // guard down with Wind, since recovering from exactly that is its job.
+        let guardURL = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/WindGuard")
+        p.executableURL = FileManager.default.isExecutableFile(atPath: guardURL.path)
+            ? guardURL : URL(fileURLWithPath: CommandLine.arguments[0])
         p.arguments = ["--watchdog", String(getpid())]
         do { try p.run() } catch { Log.error("watchdog spawn failed: \(error)") }
     }

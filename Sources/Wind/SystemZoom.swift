@@ -46,7 +46,12 @@ enum SystemZoom {
         func next(_ i: Int) {
             guard i < labels.count else {
                 if !wasRunning { closeSettings() }
-                completion(ok && shortcutsOn().isEmpty)
+                // System Settings writes the preferences a moment after the press.
+                func verify(_ tries: Int) {
+                    if shortcutsOn().isEmpty || tries == 0 { completion(ok && shortcutsOn().isEmpty); return }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { verify(tries - 1) }
+                }
+                verify(8)
                 return
             }
             SettingsToggle.set(pane: SettingsToggle.zoomPane, label: labels[i], on: false) { r in

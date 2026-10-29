@@ -1,18 +1,26 @@
 #!/bin/zsh
 # Build Wind.app into build/. `scripts/build.sh install` also installs it to /Applications and
-# relaunches it. Signs with the local "Wind Mac Dev" identity when present (a stable identity keeps
+# relaunches it. `scripts/build.sh test` builds build/test/Wind.app with the e2e command channel
+# compiled in (WIND_TEST_CHANNEL); the installed app never has it. Signs with the local "Wind Mac Dev" identity when present (a stable identity keeps
 # the Accessibility grant across rebuilds), otherwise ad-hoc.
 set -euo pipefail
 cd "${0:A:h}/.."
 VERSION=$(cat VERSION 2>/dev/null || echo 0.1.0)
-swift build -c release --product Wind 2>&1 | grep -vE '^\[[0-9]+/[0-9]+\]' || true
-BIN=$(swift build -c release --product Wind --show-bin-path)/Wind
+FLAGS=(-c release --product Wind)
+APP=build/Wind.app
+if [[ "${1:-}" == "test" ]]; then
+  FLAGS+=(-Xswiftc -DWIND_TEST_CHANNEL --scratch-path .build/test)
+  APP=build/test/Wind.app
+fi
+swift build "${FLAGS[@]}" 2>&1 | grep -vE '^\[[0-9]+/[0-9]+\]' || true
+BIN=$(swift build "${FLAGS[@]}" --show-bin-path)/Wind
 [[ -x "$BIN" ]] || { echo "build failed"; exit 1; }
 
-APP=build/Wind.app
 rm -rf "$APP"
+mkdir -p "${APP:h}"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Wind"
+cp "$BIN" "$APP/Contents/MacOS/WindGuard"     # the crash watchdog runs under its own name
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

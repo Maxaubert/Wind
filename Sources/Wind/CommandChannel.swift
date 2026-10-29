@@ -1,8 +1,9 @@
+#if WIND_TEST_CHANNEL
 import AppKit
 import WindCore
 
 // Commands written to ~/Library/Application Support/Wind/command (one per line) by scripts/windctl.
-// Active only when Wind runs with --test-channel (scripts/e2e.py relaunches it that way).
+// Compiled only into test builds (scripts/build.sh test); the installed app has no channel.
 // Used by the end-to-end tests: Wind has the Accessibility grant, so the synthetic input it posts
 // goes through the real event tap exactly like hardware input.
 //
@@ -88,3 +89,4 @@ enum CommandChannel {
         }
     }
 }
+#endif

@@ -11,8 +11,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var started = false
     private var signalSources: [DispatchSourceSignal] = []
     /// The command channel lets any process running as this user drive Wind's Accessibility-backed
-    /// input, so it only exists when Wind is launched for testing (`--test-channel`).
-    private let commandChannel = CommandLine.arguments.contains("--test-channel")
+    /// input, so it is compiled only into test builds (`scripts/build.sh test`, WIND_TEST_CHANNEL).
+    #if WIND_TEST_CHANNEL
+    private let commandChannel = true
+    #else
+    private let commandChannel = false
+    #endif
+    private var configInvalid = false        // config.json failed to parse: back it up before writing
     private var zoomShortcuts: [String] = []     // macOS Zoom shortcuts that are on (issue #1)
     private var polls = 0
     private let settingsWindow = SettingsWindowController()
@@ -80,7 +85,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if polls % 8 == 0 { checkSystemZoom() }
         polls += 1
         loadConfig(force: false)
+        #if WIND_TEST_CHANNEL
         if commandChannel { runCommandFile() }
+        #endif
     }
 
     // MARK: macOS Zoom clash (issue #1)
@@ -123,12 +130,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !force && m == configMTime { return }
         configMTime = m
         do {
-            let c = try Config.load(from: Data(contentsOf: Paths.config))
+            var dropped: [String] = []
+            let c = try Config.load(from: Data(contentsOf: Paths.config), dropped: &dropped)
+            for k in dropped { Log.error("config.json: \"\(k)\" has the wrong type, using the default") }
+            configInvalid = false
             mag.apply(c)
             settingsWindow.update(c)
             Log.info("config loaded")
         } catch {
             Log.error("config.json unreadable, keeping the previous settings: \(error.localizedDescription)")
+            configInvalid = true
             if force { mag.apply(Config()) }
         }
     }
@@ -137,6 +148,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var c = mag.config
         edit(&c)
         c.clamp()
+        if configInvalid {
+            // Keep the user's broken file instead of silently replacing it.
+            let f = DateFormatter(); f.dateFormat = "yyyyMMdd-HHmmss"
+            let bad = Paths.support.appendingPathComponent("config.json.bad-\(f.string(from: Date()))")
+            try? FileManager.default.copyItem(at: Paths.config, to: bad)
+            Log.error("config.json was unreadable; saved it as \(bad.lastPathComponent) before writing")
+            configInvalid = false
+        }
         try? c.encoded().write(to: Paths.config)
         loadConfig(force: true)
         configMTime = (try? FileManager.default.attributesOfItem(atPath: Paths.config.path))?[.modificationDate] as? Date
@@ -253,6 +272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let a = NSAlert(); a.messageText = title; a.informativeText = text; a.runModal()
     }
 
+    #if WIND_TEST_CHANNEL
     // MARK: command channel (tests and diagnostics)
 
     private func runCommandFile() {
@@ -280,4 +300,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             try? d.write(to: Paths.state)
         }
     }
+    #endif
 }
