@@ -69,7 +69,24 @@ final class CaretTracker {
         }
     }
 
+    /// A caret must hold still this long before it is published. Terminal apps (and TUIs inside
+    /// them) move the cursor around in bursts while redrawing; only where it settles counts.
+    static let settleMs = 60.0
+    private var pending: (TrackKind, Rc)?
+    private var settleTimer: Timer?
+
     private func publish(_ kind: TrackKind, _ r: Rc) {
+        Log.verbose("caret raw: \(kind) \(Int(r.l)),\(Int(r.t)) \(Int(r.width))x\(Int(r.height))")
+        pending = (kind, r)
+        settleTimer?.invalidate()
+        settleTimer = Timer.scheduledTimer(withTimeInterval: CaretTracker.settleMs / 1000, repeats: false) { [weak self] _ in
+            self?.commit()
+        }
+    }
+
+    private func commit() {
+        guard let (kind, r) = pending else { return }
+        pending = nil
         if snapshot.kind == kind && snapshot.rect == r { return }
         seq &+= 1
         snapshot = TrackSnapshot(kind: kind, seq: seq, rect: r)

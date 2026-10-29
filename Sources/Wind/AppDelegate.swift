@@ -9,6 +9,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var configMTime: Date?
     private var started = false
     private var signalSources: [DispatchSourceSignal] = []
+    /// The command channel lets any process running as this user drive Wind's Accessibility-backed
+    /// input, so it only exists when Wind is launched for testing (`--test-channel`).
+    private let commandChannel = CommandLine.arguments.contains("--test-channel")
+    private var zoomShortcuts: [String] = []     // macOS Zoom shortcuts that are on (issue #1)
+    private var polls = 0
 
     func applicationDidFinishLaunching(_ n: Notification) {
         Log.info("Wind \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev") starting, pid \(getpid())")
@@ -63,14 +68,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         started = true
         statusItem.button?.title = ""
+        checkSystemZoom()
         Log.info("started; binds: " + Action.allCases.map { a in
             "\(a)=\((mag.config.binds().binds[a] ?? []).map { $0.description }.joined(separator: "|"))" }.joined(separator: " "))
     }
 
     private func poll() {
         if !started { tryStart(prompt: false) }
+        if polls % 8 == 0 { checkSystemZoom() }
+        polls += 1
         loadConfig(force: false)
-        runCommandFile()
+        if commandChannel { runCommandFile() }
+    }
+
+    // MARK: macOS Zoom clash (issue #1)
+
+    private func checkSystemZoom() {
+        let on = SystemZoom.shortcutsOn()
+        if on != zoomShortcuts {
+            zoomShortcuts = on
+            if on.isEmpty { Log.info("macOS Zoom shortcuts: all off") }
+            else { Log.info("macOS Zoom shortcuts on (they clash with Wind): \(on.joined(separator: ", "))") }
+            showLevel(mag.level)
+        }
+    }
+
+    @objc private func turnOffSystemZoom() {
+        SystemZoom.turnOffShortcuts { [weak self] ok in
+            Log.info("turn off macOS Zoom shortcuts: \(ok ? "done" : "incomplete")")
+            self?.checkSystemZoom()
+            if !ok {
+                self?.alert("Could not switch off every macOS Zoom shortcut",
+                            "Open System Settings > Accessibility > Zoom and switch off the keyboard shortcuts, trackpad gesture and scroll gesture.")
+            }
+        }
+    }
+
+    @objc private func toggleShake() {
+        SystemZoom.setShakeToLocate(!SystemZoom.shakeToLocateOn) { ok in
+            if !ok { Log.error("shake to locate: switch not found") }
+        }
     }
 
     // MARK: config
@@ -108,7 +145,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func showLevel(_ lv: Double) {
         guard started else { return }
-        statusItem.button?.title = lv > 1.01 ? String(format: " %.1fx", lv) : ""
+        let warn = zoomShortcuts.isEmpty ? "" : " ⚠︎"
+        statusItem.button?.title = (lv > 1.01 ? String(format: " %.1fx", lv) : "") + warn
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
@@ -126,6 +164,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else {
             let st = item(String(format: "Zoom %.1fx%@", mag.level, mag.isLocked ? " (game lock)" : ""), nil)
             menu.addItem(st)
+            menu.addItem(.separator())
+        }
+        if !zoomShortcuts.isEmpty {
+            menu.addItem(item("⚠︎ macOS Zoom shortcuts are on and clash with Wind", nil))
+            menu.addItem(item("Turn off macOS Zoom shortcuts", #selector(turnOffSystemZoom)))
             menu.addItem(.separator())
         }
         menu.addItem(item("Enabled", #selector(togglePaused), on: !mag.isPaused))
@@ -159,6 +202,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for p in problems { binds.addItem(item("⚠︎ \(p)", nil)) }
         let bi = item("Binds", nil); bi.submenu = binds
         menu.addItem(bi)
+        menu.addItem(item("Keep pointer speed when zoomed", #selector(toggleKeepSpeed), on: c.keepPointerSpeed))
+        menu.addItem(item("macOS: enlarge pointer when shaken", #selector(toggleShake), on: SystemZoom.shakeToLocateOn))
         menu.addItem(item("Edit settings file…", #selector(openConfig)))
         menu.addItem(item("Show log", #selector(openLog)))
         menu.addItem(.separator())
@@ -171,6 +216,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func toggleFocus() { saveConfig { $0.trackFocus.toggle() } }
     @objc private func toggleEdge() { saveConfig { $0.mouseAlign = $0.mouseAlign == 1 ? 0 : 1 } }
     @objc private func toggleSmooth() { saveConfig { $0.smoothImages.toggle() } }
+    @objc private func toggleKeepSpeed() { saveConfig { $0.keepPointerSpeed.toggle() } }
     @objc private func toggleLock() { saveConfig { $0.lockTracking.toggle() } }
     @objc private func setWarmth(_ s: NSMenuItem) { saveConfig { $0.warmthPct = Double(s.tag) } }
     @objc private func setSpeed(_ s: NSMenuItem) {

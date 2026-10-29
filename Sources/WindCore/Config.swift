@@ -46,6 +46,10 @@ public struct Config: Codable, Equatable {
     public var warmthPct = 0.0                    // 0 = off, 100 = strongest
     public var dimPct = 100.0                     // 100 = no dimming
 
+    /// macOS slows the pointer by the zoom level (it moves in screen space). true = Wind's
+    /// behaviour: the pointer covers the same desktop distance per hand movement at any zoom.
+    public var keepPointerSpeed = true
+
     public var logLevel = 1                       // 0 = quiet, 1 = sessions, 2 = verbose
 
     public init() {}

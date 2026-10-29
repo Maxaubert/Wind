@@ -1,7 +1,8 @@
 import AppKit
 import WindCore
 
-// Commands written to ~/Library/Application Support/Wind/command (one per line) by tools/windctl.
+// Commands written to ~/Library/Application Support/Wind/command (one per line) by scripts/windctl.
+// Active only when Wind runs with --test-channel (scripts/e2e.py relaunches it that way).
 // Used by the end-to-end tests: Wind has the Accessibility grant, so the synthetic input it posts
 // goes through the real event tap exactly like hardware input.
 //
@@ -35,6 +36,16 @@ enum CommandChannel {
                 CGAssociateMouseAndMouseCursorPosition(1)
             }
         case "lock": mag.forceLock(w.count > 1 && w[1] == "on")
+        case "settoggle":
+            // settoggle zoom|display on|off <label words...>
+            if w.count > 3 {
+                let pane = w[1] == "display" ? SettingsToggle.displayPane : SettingsToggle.zoomPane
+                SettingsToggle.set(pane: pane, label: w[3...].joined(separator: " "), on: w[2] == "on") { r in
+                    Log.info("settoggle result: \(r)")
+                }
+            }
+        case "fixzoom": app.perform(Selector(("turnOffSystemZoom")))
+        case "axdump": try? SettingsToggle.dump().write(to: Paths.support.appendingPathComponent("axdump.txt"), atomically: true, encoding: .utf8)
         case "quit": NSApp.terminate(nil)
         default: break
         }

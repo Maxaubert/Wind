@@ -31,10 +31,10 @@ enum SkyLight {
 
     /// Set the view: centre in global points, scale >= 1. smooth = interpolated (blurry) pixels.
     @discardableResult
-    static func set(center: CGPoint, scale: Double, smooth: Bool) -> Bool {
+    static func set(center: CGPoint, scale: Double, smooth: Bool, keepPointer: Bool = true) -> Bool {
         guard let f = setZoom else { return false }
         var c = center
-        return f(cid, &c, scale, smooth, true, 0) == 0
+        return f(cid, &c, scale, smooth, keepPointer, 0) == 0
     }
 
     struct State { var center: CGPoint; var scale: Double; var smooth: Bool }

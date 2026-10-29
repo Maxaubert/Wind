@@ -13,6 +13,7 @@ final class Magnifier {
     private var lock = LockDetector()
     private var owner = ViewOwnerState()
     let caret = CaretTracker()
+    private let crosshair = Crosshair()
 
     private var tap: CFMachPort?
     private var link: CADisplayLink?
@@ -27,6 +28,9 @@ final class Magnifier {
     private var mouseDx = 0.0, mouseDy = 0.0        // movement since the last tick (for the owner)
     private var lastMoveAt: CFTimeInterval = 0
     private var pendingLockDx = 0.0, pendingLockDy = 0.0
+    private var lastLoc: CGPoint?
+    private var lastPtr: Pt?                    // pointer after the last tick's writes (speed compensation)
+    private var speedTravel = 0.0, speedDelta = 0.0, speedSince: CFTimeInterval = 0
 
     // View state.
     private var screen = Sz(1920, 1080)
@@ -38,7 +42,9 @@ final class Magnifier {
     private var storedQuickLevel = 0.0
     private(set) var inspect = false
     private var inspectAnchor = CGPoint.zero
+    private var inspectRef: Pt?                 // where the frozen pointer really sits
     private var returning = false               // the view is gliding back to the pointer
+    private var pointerToView = false           // next tick: bring the pointer to the view centre
     private var wasLocked = false
     private var paused = false                  // the user switched Wind off from the menu
     private var simHeld = Set<Action>()         // holds from the command channel (tests)
@@ -197,6 +203,17 @@ final class Magnifier {
             let dx = Double(e.getIntegerValueField(.mouseEventDeltaX))
             let dy = Double(e.getIntegerValueField(.mouseEventDeltaY))
             let loc = e.location
+            if let last = lastLoc, config.logLevel >= 2 {
+                speedTravel += abs(loc.x - last.x) + abs(loc.y - last.y)
+                speedDelta += abs(dx) + abs(dy)
+                if now - speedSince > 0.5 {
+                    if speedDelta > 20 {
+                        Log.verbose(String(format: "ptrrate level %.2f desktop %.0f pt/s", zoom.level, speedTravel / (now - speedSince)))
+                    }
+                    speedSince = now; speedTravel = 0; speedDelta = 0
+                }
+            }
+            lastLoc = loc
             let dt = (now - lastMoveAt) * 1000
             lastMoveAt = now
             mouseDx += dx; mouseDy += dy
@@ -251,17 +268,19 @@ final class Magnifier {
     private func beginInspect() {
         guard zoom.level > 1.0001 else { return }
         inspect = true
-        inspectAnchor = CGEvent(source: nil)?.location ?? .zero
-        CGAssociateMouseAndMouseCursorPosition(0)
-        Log.info("inspect on at \(Int(inspectAnchor.x)),\(Int(inspectAnchor.y))")
+        let p = CGEvent(source: nil)?.location ?? .zero
+        inspectAnchor = p
+        inspectRef = Pt(p.x, p.y)
+        virtualPtr = center
+        Log.info("inspect on at \(Int(p.x)),\(Int(p.y))")
     }
 
     private func endInspect() {
         guard inspect else { return }
         inspect = false
-        CGAssociateMouseAndMouseCursorPosition(1)
-        // The view glides back to the pointer (warps are unreliable under the compositor zoom).
-        returning = true
+        crosshair.show(at: nil, level: 1)
+        // The pointer comes to what the user was looking at (applied on the next tick).
+        pointerToView = zoomedSession
         Log.info("inspect off")
     }
 
@@ -308,6 +327,7 @@ final class Magnifier {
             virtualPtr = Pt(ptr.x, ptr.y)
             springVel = (0, 0)
             returning = false
+            lastPtr = Pt(ptr.x, ptr.y)
             resetViewOwnerForSession(&owner)
             lock.reset()
             Log.info("zoom session start at \(Int(ptr.x)),\(Int(ptr.y))")
@@ -341,9 +361,17 @@ final class Magnifier {
 
         var target = center
         if inspect {
-            // The pointer is frozen; the hand pans the view.
-            virtualPtr = Pt(virtualPtr.x + ldx * config.cursorSensitivity, virtualPtr.y + ldy * config.cursorSensitivity)
-            virtualPtr = Pt(min(max(virtualPtr.x, 0), screen.w), min(max(virtualPtr.y, 0), screen.h))
+            // The pointer stays frozen (a tooltip stays open); the hand pans the view at 1x speed.
+            // Movement is measured from where the pointer really landed last tick (placement snaps
+            // to a grid), so the snap is never counted as hand movement.
+            let a = Pt(inspectAnchor.x, inspectAnchor.y)
+            let ref = inspectRef ?? a
+            if abs(ptr.x - ref.x) + abs(ptr.y - ref.y) > 0.001 {
+                virtualPtr = Pt(virtualPtr.x + (ptr.x - ref.x) * lv * config.cursorSensitivity,
+                                virtualPtr.y + (ptr.y - ref.y) * lv * config.cursorSensitivity)
+                virtualPtr = Pt(min(max(virtualPtr.x, 0), screen.w), min(max(virtualPtr.y, 0), screen.h))
+                inspectRef = placePointer(at: a, level: lv)
+            }
             target = clampCenter(virtualPtr, level: lv, screen: screen)
         } else if locked {
             virtualPtr = Pt(virtualPtr.x + ldx * config.cursorSensitivity, virtualPtr.y + ldy * config.cursorSensitivity)
@@ -352,11 +380,19 @@ final class Magnifier {
         } else {
             switch owner.owner {
             case .mouse:
-                // The mouse took the view back from the caret, keys or Inspect: the view glides
-                // back to the pointer. (Wind warps the pointer to the view instead; a warp while
-                // zoomed is reinterpreted in screen space at the next zoom write, so it lands wrong.)
-                if owner.warpPointer || prevOwner != .mouse { returning = true }
+                // The mouse moved while the view showed the caret, keys or Inspect: the pointer
+                // comes to the view (Wind's rule). A button press instead gives the view back to
+                // the pointer, which glides there.
+                if owner.warpPointer { pointerToView = true }
+                else if prevOwner != .mouse { returning = true }
                 virtualPtr = Pt(ptr.x, ptr.y)
+                if pointerToView {
+                    pointerToView = false
+                    returning = false
+                    virtualPtr = placePointer(at: center, level: lv)
+                } else if config.keepPointerSpeed && !returning, let prev = lastPtr {
+                    virtualPtr = compensatePointerSpeed(from: prev, now: virtualPtr, level: lv)
+                }
                 let want = mouseTarget(virtualPtr, lv)
                 if returning {
                     var vx = springVel.x, vy = springVel.y
@@ -385,7 +421,35 @@ final class Magnifier {
         }
         center = clampCenter(target, level: lv, screen: screen)
         write(lv)
+        crosshair.show(at: inspect ? CGPoint(x: center.x, y: center.y) : nil, level: lv)
+        lastPtr = (owner.owner == .mouse && !locked && !inspect) ? (CGEvent(source: nil)?.location).map { Pt($0.x, $0.y) } : nil
         reportLevel()
+    }
+
+    /// While zoomed, WindowServer moves the pointer in SCREEN space, so a hand movement crosses
+    /// only 1/level of the desktop it would at 1x (measured with a virtual HID mouse 2026-10-29:
+    /// 68.8 pt at 1x, 17.2 at 4x, 6.9 at 10x). Wind keeps the 1x desktop speed: move the view
+    /// with the screen position kept (the pointer rides along the missing (level-1) part of the
+    /// step), then the normal write (desktop position kept) recentres. Rewriting event locations
+    /// or warping instead is reinterpreted by the zoom and snaps the pointer.
+    private func compensatePointerSpeed(from prev: Pt, now p: Pt, level lv: Double) -> Pt {
+        let dx = p.x - prev.x, dy = p.y - prev.y
+        if abs(dx) + abs(dy) < 0.001 || lv <= 1.0001 { return p }
+        return placePointer(at: Pt(prev.x + dx * lv, prev.y + dy * lv), level: lv)
+    }
+
+    /// Move the pointer to a desktop point while zoomed. A warp is reinterpreted in screen space by
+    /// the zoom, but a view write that keeps the pointer's SCREEN position carries it across the
+    /// desktop by exactly the view's shift; the next normal write recentres. Near a screen edge the
+    /// zoom clamps the view, so the pointer can land short; the real position is returned.
+    private func placePointer(at t: Pt, level lv: Double) -> Pt {
+        let want = Pt(min(max(t.x, 0), screen.w - 1), min(max(t.y, 0), screen.h - 1))
+        let p = CGEvent(source: nil)?.location ?? CGPoint(x: want.x, y: want.y)
+        let shifted = Pt(center.x + (want.x - p.x), center.y + (want.y - p.y))
+        SkyLight.set(center: CGPoint(x: shifted.x, y: shifted.y), scale: lv, smooth: config.smoothImages, keepPointer: false)
+        lastWritten = nil
+        let got = CGEvent(source: nil)?.location ?? CGPoint(x: want.x, y: want.y)
+        return Pt(got.x, got.y)
     }
 
     private func mouseTarget(_ p: Pt, _ lv: Double) -> Pt {

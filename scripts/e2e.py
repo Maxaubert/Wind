@@ -2,30 +2,11 @@
 """End-to-end checks against the running, installed Wind (it must have the Accessibility grant).
 Drives it through the command channel: synthetic input goes through Wind's real event tap.
 The screen visibly zooms while this runs. Exit 0 = every check passed."""
-import json, os, subprocess, sys, time
+import os, sys, time
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from windtest import ctl, check, finish, relaunch_with_channel
 
-D = os.path.expanduser("~/Library/Application Support/Wind")
-fails = []
-
-def ctl(cmd, wait=0.0):
-    p = os.path.join(D, "state.json")
-    if os.path.exists(p): os.remove(p)
-    with open(os.path.join(D, "command"), "w") as f: f.write(cmd + "\n")
-    for _ in range(60):
-        if os.path.exists(p):
-            try:
-                with open(p) as f: s = json.load(f)
-                break
-            except json.JSONDecodeError: pass
-        time.sleep(0.05)
-    else:
-        sys.exit("Wind did not answer: is it running?")
-    if wait: time.sleep(wait); return ctl("state")
-    return s
-
-def check(name, ok, detail=""):
-    print(("PASS " if ok else "FAIL ") + name + (f"  ({detail})" if detail else ""))
-    if not ok: fails.append(name)
+relaunch_with_channel()
 
 s = ctl("state")
 check("started with tap and Accessibility", s["started"] and s["tap"] and s["axTrusted"])
@@ -76,5 +57,4 @@ check("quick zoom back in to the remembered level", abs(s["level"] - 4) < 0.05, 
 s = ctl("hold zoomOut 2500", wait=3.0)
 check("zoom out ends at 1x", s["level"] == 1 and s["sky"]["scale"] == 1, f"level {s['level']} sky {s['sky']['scale']}")
 
-print("all e2e checks passed" if not fails else f"{len(fails)} failed: {', '.join(fails)}")
-sys.exit(1 if fails else 0)
+finish()

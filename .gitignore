@@ -2,3 +2,5 @@
 build/
 .DS_Store
 .claude/worktrees/
+tools/vmouse/vmouse
+__pycache__/
