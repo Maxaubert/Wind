@@ -46,7 +46,9 @@ ctl("lock on")
 c0 = ctl("state", wait=0.2)["center"]
 for _ in range(10): ctl("post move 20 0"); time.sleep(0.02)
 s = ctl("state", wait=0.2)
-check("locked: deltas pan the view", s["locked"] and s["center"][0] > c0[0] + 100, f"{c0[0]:.0f} -> {s['center'][0]:.0f}")
+# Locked panning reads raw HID counts only (scripts/e2e_mouse.py covers it with real input);
+# synthetic tap deltas, like the echoes of Wind's own writes, must not pan the view.
+check("locked: synthetic deltas do not pan", s["locked"] and abs(s["center"][0] - c0[0]) < 2, f"{c0[0]:.0f} -> {s['center'][0]:.0f}")
 ctl("lock off")
 
 # Quick zoom out and back in.
