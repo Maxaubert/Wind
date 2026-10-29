@@ -30,6 +30,7 @@ enum SystemZoom {
     static let keyboardLabel = "Use keyboard shortcuts to zoom"
     static let trackpadLabel = "Use trackpad gesture to zoom"
     static let scrollLabel = "Use scroll gesture with modifier keys to zoom"
+    static let shakeLabel = "Shake mouse pointer to locate"
 
     /// Shake-to-locate enlarges the pointer on fast movement, which zoomed panning triggers a lot.
     static var shakeToLocateOn: Bool {
@@ -58,7 +59,7 @@ enum SystemZoom {
 
     static func setShakeToLocate(_ on: Bool, completion: @escaping (Bool) -> Void) {
         let wasRunning = !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.systempreferences").isEmpty
-        SettingsToggle.set(pane: SettingsToggle.displayPane, label: "Shake mouse pointer to locate", on: on) { r in
+        SettingsToggle.set(pane: SettingsToggle.displayPane, label: shakeLabel, on: on) { r in
             if !wasRunning { closeSettings() }
             if case .notFound = r { completion(false) } else { completion(true) }
         }

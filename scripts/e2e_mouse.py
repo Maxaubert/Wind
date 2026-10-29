@@ -5,7 +5,7 @@ keepPointerSpeed, and sweeps across the screen looking for snaps. Needs sudo (vm
 Karabiner-Elements. The screen visibly zooms while this runs."""
 import os, subprocess, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from windtest import ROOT, ctl, check, finish, relaunch_with_channel, set_config
+from windtest import ROOT, ctl, check, finish, relaunch_with_channel, screen_locked, set_config
 
 VM = os.path.join(ROOT, "tools/vmouse/vmouse")
 if not os.path.exists(VM):
@@ -61,6 +61,25 @@ ctl("post key ctrl+opt+i down"); ctl("post key ctrl+opt+i up"); time.sleep(0.3)
 c = ctl("state")
 check("leaving inspect brings the pointer to the view", abs(c["pointer"][0] - b["center"][0]) < 2, f"pointer {c['pointer']} view was {b['center']}")
 check("the view stays put when inspect ends", abs(c["center"][0] - b["center"][0]) < 2, f"view {b['center']} -> {c['center']}")
+
+# A game locks the pointer (hidden, disassociated): the view keeps panning from mouse deltas.
+GAME = os.path.join(ROOT, "tools/fakegame/FakeGame.app")
+if screen_locked():
+    print("SKIP game lock (the screen is locked, so no app can come to the front)")
+else:
+    if not os.path.exists(GAME): subprocess.run([os.path.join(ROOT, "tools/fakegame/build.sh")], check=True)
+    ctl("level 1"); time.sleep(0.3); ctl("warp 800 500"); time.sleep(0.2); ctl("level 4"); time.sleep(0.4)
+    g = subprocess.Popen(["open", "-W", GAME, "--args", "5"]); time.sleep(1.5)
+    a = ctl("state")
+    for _ in range(4): mv(10, 0); time.sleep(0.05)
+    b = ctl("state")
+    check("game lock detected", b["locked"], f"locked {b['locked']}")
+    check("game lock: pointer stays, view pans", abs(b["pointer"][0] - a["pointer"][0]) < 2 and b["center"][0] > a["center"][0] + 50,
+          f"pointer {a['pointer']} -> {b['pointer']}, view {a['center']} -> {b['center']}")
+    g.wait(); time.sleep(0.5)
+    mv(-10, 0); time.sleep(0.4)
+    c = ctl("state")
+    check("game lock released afterwards", not c["locked"], f"locked {c['locked']}")
 
 ctl("level 1")
 set_config(**saved)

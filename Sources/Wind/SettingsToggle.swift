@@ -38,22 +38,6 @@ enum SettingsToggle {
         }
     }
 
-    /// Diagnostics: the System Settings AX tree, one element per line.
-    static func dump() -> String {
-        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.systempreferences").first else { return "not running" }
-        var out = ""
-        func walk(_ el: AXUIElement, _ d: Int) {
-            if d > 30 { return }
-            let role = value(el, kAXRoleAttribute) as? String ?? "?"
-            let sub = value(el, kAXSubroleAttribute) as? String ?? ""
-            let v = value(el, kAXValueAttribute).map { "\($0)" } ?? ""
-            out += String(repeating: " ", count: d) + "\(role)/\(sub) [\(text(el).prefix(80))] v=\(v.prefix(30))\n"
-            for k in children(el) { walk(k, d + 1) }
-        }
-        walk(AXUIElementCreateApplication(app.processIdentifier), 0)
-        return out
-    }
-
     private static func value(_ el: AXUIElement, _ attr: String) -> AnyObject? {
         var v: CFTypeRef?
         return AXUIElementCopyAttributeValue(el, attr as CFString, &v) == .success ? v : nil

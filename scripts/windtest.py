@@ -45,3 +45,15 @@ def check(name, ok, detail=""):
 def finish():
     print("all checks passed" if not fails else f"{len(fails)} failed: {', '.join(fails)}")
     sys.exit(1 if fails else 0)
+
+def screen_locked():
+    """True while the login window is in front (nothing can take focus then)."""
+    import ctypes as C
+    CG = C.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+    CF = C.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+    CG.CGSessionCopyCurrentDictionary.restype = C.c_void_p
+    CF.CFCopyDescription.restype = C.c_void_p; CF.CFCopyDescription.argtypes = [C.c_void_p]
+    CF.CFStringGetCString.argtypes = [C.c_void_p, C.c_char_p, C.c_long, C.c_uint32]
+    b = C.create_string_buffer(8000)
+    CF.CFStringGetCString(CF.CFCopyDescription(CG.CGSessionCopyCurrentDictionary()), b, 8000, 0x08000100)
+    return "CGSSessionScreenIsLocked = 1" in b.value.decode()

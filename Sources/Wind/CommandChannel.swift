@@ -11,6 +11,8 @@ import WindCore
 //   post key <bind> down|up    synthetic key event    post mouse <n> down|up
 //   post move <dx> <dy>        synthetic mouse move   post scroll <lines> [mods]
 //   warp <x> <y>               move the pointer       lock on|off   force the game-lock regime
+//   settoggle on|off <label>   a macOS Zoom shortcut or shake-to-locate switch (exact label)
+//   fixzoom                    switch every macOS Zoom shortcut off
 //   state                      just write state.json  quit
 
 enum CommandChannel {
@@ -37,15 +39,16 @@ enum CommandChannel {
             }
         case "lock": mag.forceLock(w.count > 1 && w[1] == "on")
         case "settoggle":
-            // settoggle zoom|display on|off <label words...>
-            if w.count > 3 {
-                let pane = w[1] == "display" ? SettingsToggle.displayPane : SettingsToggle.zoomPane
-                SettingsToggle.set(pane: pane, label: w[3...].joined(separator: " "), on: w[2] == "on") { r in
-                    Log.info("settoggle result: \(r)")
-                }
+            // settoggle on|off <label>: only the switches Wind itself manages (security review:
+            // the channel must not become a general System Settings remote).
+            let allowed = [SystemZoom.keyboardLabel, SystemZoom.trackpadLabel, SystemZoom.scrollLabel, SystemZoom.shakeLabel]
+            if w.count > 2, let label = allowed.first(where: { $0.lowercased() == w[2...].joined(separator: " ").lowercased() }) {
+                let pane = label == SystemZoom.shakeLabel ? SettingsToggle.displayPane : SettingsToggle.zoomPane
+                SettingsToggle.set(pane: pane, label: label, on: w[1] == "on") { r in Log.info("settoggle result: \(r)") }
             }
+        case "settings": app.perform(Selector(("openSettings")))
+        case "login": app.perform(Selector(("toggleLogin")))
         case "fixzoom": app.perform(Selector(("turnOffSystemZoom")))
-        case "axdump": try? SettingsToggle.dump().write(to: Paths.support.appendingPathComponent("axdump.txt"), atomically: true, encoding: .utf8)
         case "quit": NSApp.terminate(nil)
         default: break
         }

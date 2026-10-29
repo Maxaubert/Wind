@@ -13,7 +13,9 @@ feasibility research behind it is in `~/Documents/Claude/research/wind-mac/2026-
 | `Sources/Wind/CaretTracker.swift` | Caret and focus following through the Accessibility API. |
 | `Sources/Wind/SystemZoom.swift`, `SettingsToggle.swift` | macOS Zoom clash detection and fixing by pressing System Settings switches. |
 | `Sources/Wind/CommandChannel.swift` | Test-only command file (`--test-channel`), used by `scripts/e2e*.py`. |
+| `Sources/Wind/SettingsWindow.swift` | SwiftUI Settings window; edits the same `config.json`. |
 | `tools/vmouse` | Real HID mouse motion through Karabiner's virtual HID device, for `scripts/e2e_mouse.py`. |
+| `tools/fakegame` | A foreground app that hides and disassociates the pointer like a game's mouse-look. |
 
 Everything runs on the main thread: the event tap (HID level, head insert) and the display link are
 both main-run-loop sources.
@@ -79,4 +81,8 @@ where the cursor settles. The view-owner rules are a port of Wind's `view_target
   socket) for real HID motion: pointer speed at 1x/4x/10x, a sweep for snaps, Inspect.
   `CGEventPost`, `IOHIDPostEvent` and `IOHIDEventSystemClientDispatchEvent` relative motion either do
   not count as hardware motion or are refused.
+- `tools/fakegame` must be an app bundle launched with `open`: a background command-line binary
+  cannot take focus, and disassociation only applies to the frontmost app. Skipped while the screen
+  is locked (`loginwindow` in front).
+- The colour filter is checked by reading the display transfer formula back (`scripts/gamma.py`).
 - `screencapture` captures the desktop before the zoom, so screenshots never show the zoomed view.

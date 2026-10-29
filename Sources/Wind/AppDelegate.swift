@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import ServiceManagement
 import WindCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -14,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let commandChannel = CommandLine.arguments.contains("--test-channel")
     private var zoomShortcuts: [String] = []     // macOS Zoom shortcuts that are on (issue #1)
     private var polls = 0
+    private let settingsWindow = SettingsWindowController()
 
     func applicationDidFinishLaunching(_ n: Notification) {
         Log.info("Wind \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev") starting, pid \(getpid())")
@@ -123,6 +125,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do {
             let c = try Config.load(from: Data(contentsOf: Paths.config))
             mag.apply(c)
+            settingsWindow.update(c)
             Log.info("config loaded")
         } catch {
             Log.error("config.json unreadable, keeping the previous settings: \(error.localizedDescription)")
@@ -134,8 +137,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var c = mag.config
         edit(&c)
         c.clamp()
-        // Write only the keys that differ from the defaults plus what the file already had, so the
-        // file stays readable; simplest faithful form is the full config.
         try? c.encoded().write(to: Paths.config)
         loadConfig(force: true)
         configMTime = (try? FileManager.default.attributesOfItem(atPath: Paths.config.path))?[.modificationDate] as? Date
@@ -204,6 +205,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(bi)
         menu.addItem(item("Keep pointer speed when zoomed", #selector(toggleKeepSpeed), on: c.keepPointerSpeed))
         menu.addItem(item("macOS: enlarge pointer when shaken", #selector(toggleShake), on: SystemZoom.shakeToLocateOn))
+        menu.addItem(item("Open at login", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled))
+        menu.addItem(item("Settings…", #selector(openSettings)))
         menu.addItem(item("Edit settings file…", #selector(openConfig)))
         menu.addItem(item("Show log", #selector(openLog)))
         menu.addItem(.separator())
@@ -216,6 +219,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func toggleFocus() { saveConfig { $0.trackFocus.toggle() } }
     @objc private func toggleEdge() { saveConfig { $0.mouseAlign = $0.mouseAlign == 1 ? 0 : 1 } }
     @objc private func toggleSmooth() { saveConfig { $0.smoothImages.toggle() } }
+    @objc private func openSettings() {
+        settingsWindow.show(config: mag.config, save: { [weak self] c in
+            self?.saveConfig { $0 = c }
+        }, fixZoom: { [weak self] in self?.turnOffSystemZoom() })
+    }
+
+    @objc private func toggleLogin() {
+        let svc = SMAppService.mainApp
+        do {
+            if svc.status == .enabled { try svc.unregister() } else { try svc.register() }
+            Log.info("open at login: \(svc.status == .enabled ? "on" : "off")")
+        } catch {
+            Log.error("open at login: \(error.localizedDescription)")
+            alert("Could not change Open at login", error.localizedDescription)
+        }
+    }
+
     @objc private func toggleKeepSpeed() { saveConfig { $0.keepPointerSpeed.toggle() } }
     @objc private func toggleLock() { saveConfig { $0.lockTracking.toggle() } }
     @objc private func setWarmth(_ s: NSMenuItem) { saveConfig { $0.warmthPct = Double(s.tag) } }

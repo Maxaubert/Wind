@@ -4,3 +4,4 @@ build/
 .claude/worktrees/
 tools/vmouse/vmouse
 __pycache__/
+tools/fakegame/FakeGame.app/
