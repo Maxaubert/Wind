@@ -327,3 +327,27 @@ Explorer, full run: 336 issues before, 162 after. Speed while zooming matches a 
 - Explorer, full run (7 levels): 336 issues at the start of the day, 162 after the one-read
   design, then see the commit for the final count. Natural turns are not flagged; snaps and
   back-steps are spikes that resume the earlier direction.
+
+### Panning while zooming (2026-10-30, third round)
+
+- **The view follows the hand's exact path (handTarget), not where each carry landed the pointer.**
+  Carries come in whole points, so following them stepped the view 1, 3, 1, 2, 3 points per frame
+  for an even hand; zooming in magnified that into a visible shake (owner: diagonal up-left while
+  zooming in). Fixed-zoom unevenness fell from 0.60 to 0.22 points per frame. The pointer trails the
+  view by under a point.
+- Against the way the raw counts say the hand is going, the view holds rather than stepping back
+  a point for a fractional target correction; with the hand still (no counts this or last frame),
+  the target is kept while the pointer is within 2 pt of it.
+- **The raw-count bound learns points per count** (macOS acceleration, EMA) and allows 2x that on the larger of this and the last tick's counts,
+  between 1.2 and 6. A fixed 6 let a one-point carry error through at 30x (30 screen pt on 6
+  counts). Motion over the bound but with the hand is taken 1:1, so the target never falls behind
+  the pointer.
+- A write that would only move the centre within the same whole point at the same level is
+  skipped (the zoom would show the same picture).
+- **Dropped frames:** zooming makes macOS drop frames (3% zooming with the hand still, 7-9% when
+  panning at the same time, 14% zooming out, against 0-1% panning alone). A dropped frame doubles
+  one step; that stutter is the compositor's. Folding the level into the carry's first write cut
+  drops to 4% but a carry at a level changing in the same frame lands off the model (back-steps),
+  so it was not kept.
+- The explorer's `uneven` check measures whole-point view steps per 7 ms at 2x and above during
+  diagonal pans while zooming in and out, all four directions.

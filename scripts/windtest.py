@@ -92,3 +92,13 @@ def screen_locked():
     b = C.create_string_buffer(8000)
     CF.CFStringGetCString(CF.CFCopyDescription(CG.CGSessionCopyCurrentDictionary()), b, 8000, 0x08000100)
     return "CGSSessionScreenIsLocked = 1" in b.value.decode()
+
+def assert_zoom_live():
+    """The display must be awake: asleep, Wind's display link stops and the compositor zoom stays at
+    1x while Wind thinks it is zoomed, so pointer checks pass without testing anything (2026-10-30).
+    Keep it awake for unattended runs with `caffeinate -d`."""
+    ctl("level 1"); time.sleep(0.3); ctl("level 3"); time.sleep(0.5)
+    s = ctl("state")
+    if not s.get("sky") or abs(s["sky"]["scale"] - 3) > 0.01:
+        sys.exit("the zoom is not running (display asleep?): run with `caffeinate -d` and the display on")
+    ctl("level 1"); time.sleep(0.3)

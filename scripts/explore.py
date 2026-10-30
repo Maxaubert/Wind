@@ -11,14 +11,16 @@ then reads Wind's per-frame log and flags what a person would see as a bug:
 - lock: a game lock (nothing here is a game).
 
 The screen visibly zooms while it runs. Needs sudo (vmouse) and Karabiner-Elements.
-Usage: python3 scripts/explore.py [--quick]  (report also written to build/explore-report.txt)"""
+Usage: python3 scripts/explore.py [--quick] [--only <name part>] [--levels 7.3,15.7]  (report also written to build/explore-report.txt)"""
 import math, os, subprocess, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from windtest import ROOT, ctl, relaunch_with_channel, set_config
+from windtest import assert_zoom_live, ROOT, ctl, relaunch_with_channel, set_config
 
 LOG = os.path.expanduser("~/Library/Logs/Wind/wind.log")
 W, H = 1920, 1080
 QUICK = "--quick" in sys.argv
+ONLY = sys.argv[sys.argv.index("--only") + 1] if "--only" in sys.argv else ""
+LEVELS = [float(x) for x in sys.argv[sys.argv.index("--levels") + 1].split(",")] if "--levels" in sys.argv else None
 
 VM = os.path.join(ROOT, "tools/vmouse/vmouse")
 if not os.path.exists(VM):
@@ -27,6 +29,7 @@ relaunch_with_channel()
 vm = subprocess.Popen(["sudo", VM], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
 if vm.stdout.readline().strip() != "ready": sys.exit("vmouse: Karabiner virtual HID device not ready")
 set_config(logLevel=2)
+assert_zoom_live()
 
 def send(cmd):
     vm.stdin.write(cmd + "\n"); vm.stdin.flush(); vm.stdout.readline()
@@ -94,7 +97,10 @@ def analyse(name, F, hand_still=False):
         resumes = nx * ax + ny * ay > 0 or i + 1 >= len(F)
         if sp > 0.3 and st * lv > 12 and sx * ax + sy * ay < -0.5 * st * sp and resumes:
             issues.append(("snap", F[i]["t"], f"back {sx:.1f},{sy:.1f} vs {ax:.1f},{ay:.1f} at {q[0]:.0f},{q[1]:.0f} lv {lv:.1f}"))
-        elif sp > 0.3 and st > 4 * sp + 3:
+        elif sp > 0.3 and st > 4 * sp + 3 and math.hypot(nx, ny) < st / 2 and all(
+                math.hypot(F[k]["p"][0] - F[k - 1]["p"][0], F[k]["p"][1] - F[k - 1]["p"][1]) > 0.2 for k in range(i - 3, i)):
+            # A spike: far bigger than the moving frames before it and the frame after (the first
+            # step out of stillness is not one).
             issues.append(("snap", F[i]["t"], f"fwd {sx:.1f},{sy:.1f} vs {ax:.1f},{ay:.1f} at {q[0]:.0f},{q[1]:.0f} lv {lv:.1f}"))
     # Glue: 4+ ticks of hand counts with the pointer still, away from edges.
     run = 0
@@ -115,8 +121,9 @@ def analyse(name, F, hand_still=False):
     return issues
 
 report, counts = [], {}
-def scenario(name, setup, actions, hand_still=False, expect=None):
+def scenario(name, setup, actions, hand_still=False, expect=None, uneven=False):
     """setup: (x, y, level). actions: list of ('vm', cmd) | ('press'|'release', action) | ('sleep', s)."""
+    if ONLY and ONLY not in name: return
     x, y, lv = setup
     ctl("level 1"); time.sleep(0.25); ctl(f"warp {x} {y}"); time.sleep(0.15); ctl(f"level {lv}"); time.sleep(0.45)
     a = ctl("state")["pointer"]
@@ -129,6 +136,18 @@ def scenario(name, setup, actions, hand_still=False, expect=None):
     b = ctl("state")["pointer"]
     F = frames(lines_from(n0))
     issues = analyse(name, F, hand_still)
+    if uneven and len(F) > 20:
+        # Per axis: whole-point view steps per unit time (a dropped frame's double step is the
+        # compositor's late frame, not Wind's path), at 2x and above (below, a point is ~1 px).
+        def secs(t): h, m, x = t.split(":"); return int(h) * 3600 + int(m) * 60 + float(x)
+        drops = sum(1 for a, b in zip(F, F[1:]) if 0.0105 < secs(b["t"]) - secs(a["t"]) < 0.04)
+        for ax in (0, 1):
+            st = [(math.floor(b["v"][ax]) - math.floor(a["v"][ax])) * 0.007 / max(0.004, secs(b["t"]) - secs(a["t"]))
+                  for a, b in zip(F, F[1:]) if b["lv"] >= 2]
+            if st and any(st): st = st[next(i for i, x in enumerate(st) if x):]
+            if len(st) > 10:
+                dev = sum(abs(st[i] - sum(st[i - 2:i + 3]) / 5) for i in range(2, len(st) - 2)) / (len(st) - 4)
+                if dev > 0.45: issues.append(("uneven", F[-1]["t"], f"axis {'xy'[ax]} {dev:.2f} per 7 ms (fixed-zoom pans ~0.22); dropped frames {drops}/{len(F)}"))
     if expect is not None:
         moved = math.hypot(b[0] - a[0], b[1] - a[1])
         lo, hi = expect
@@ -144,7 +163,7 @@ a = ctl("state")["pointer"]; send("move 4 0 30 6"); time.sleep(0.2); ref = ctl("
 print(f"1x reference: {ref:.1f} pt for 'move 4 0 30 6'")
 lo, hi = ref * 0.75, ref * 1.3
 
-levels = (3.3, 7.3) if QUICK else (2.2, 3.3, 5.1, 7.3, 11.6, 15.7, 23.0)
+levels = LEVELS or ((3.3, 7.3) if QUICK else (2.2, 3.3, 5.1, 7.3, 11.6, 15.7, 23.0))
 corners = {"top-left": (5, 5, -1, -1), "top-right": (W - 6, 5, 1, -1), "bottom-left": (5, H - 6, -1, 1), "bottom-right": (W - 6, H - 6, 1, 1)}
 edges = {"left": (3, 540, -1, 0), "right": (W - 4, 540, 1, 0), "top": (960, 3, 0, -1), "bottom": (960, H - 4, 0, 1)}
 
@@ -173,6 +192,12 @@ for lv in levels:
                  [("vm", f"move {dx * 2} {dy * 2} 5 6"), ("press", "zoomIn"), ("vm", f"move {along[0]} {along[1]} 40 6"), ("release", "zoomIn")])
         scenario(f"lv {lv} {ename}: edge -> centre while zooming out", (x, y, lv),
                  [("press", "zoomOut"), ("vm", f"move {-dx * 3} {-dy * 3} 40 6"), ("release", "zoomOut")])
+    # Diagonal pans while zooming, all four directions (owner report 2026-10-30: up-left while
+    # zooming in shook). 'uneven' flags whole-point view steps that vary more than the hand does.
+    for (dx, dy), start in (((-1, -1), (1300, 800)), ((1, 1), (600, 300)), ((-1, 1), (1300, 300)), ((1, -1), (600, 800))):
+        for zoom in ("zoomIn", "zoomOut"):
+            scenario(f"lv {lv} diagonal {dx:+d},{dy:+d} while {zoom}", (start[0], start[1], lv),
+                     [("press", zoom), ("vm", f"move {dx} {dy} 300 2"), ("release", zoom)], uneven=True)
     scenario(f"lv {lv} middle: circles while zooming in", (960, 540, lv), [("press", "zoomIn"), ("vm", "circle 3 120 3 2"), ("release", "zoomIn")])
     scenario(f"lv {lv} middle: slow diagonal", (900, 500, lv), [("vm", "move 1 1 150 6")])
 

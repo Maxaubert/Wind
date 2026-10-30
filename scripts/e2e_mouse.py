@@ -5,7 +5,7 @@ keepPointerSpeed, and sweeps across the screen looking for snaps. Needs sudo (vm
 Karabiner-Elements. The screen visibly zooms while this runs."""
 import math, os, subprocess, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from windtest import ROOT, ctl, check, finish, relaunch_with_channel, screen_locked, set_config
+from windtest import assert_zoom_live, ROOT, ctl, check, finish, relaunch_with_channel, screen_locked, set_config
 
 VM = os.path.join(ROOT, "tools/vmouse/vmouse")
 if not os.path.exists(VM):
@@ -13,6 +13,7 @@ if not os.path.exists(VM):
 relaunch_with_channel()
 vm = subprocess.Popen(["sudo", VM], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
 if vm.stdout.readline().strip() != "ready": sys.exit("vmouse: Karabiner virtual HID device not ready")
+assert_zoom_live()
 
 def mv(dx, dy, n=10, ms=8):
     vm.stdin.write(f"move {dx} {dy} {n} {ms}\n"); vm.stdin.flush(); vm.stdout.readline()

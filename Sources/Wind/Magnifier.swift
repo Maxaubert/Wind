@@ -46,6 +46,8 @@ final class Magnifier {
     private var prevRawStep: Pt?
     private var pushX = 0.0, pushY = 0.0       // rejected non-hand pointer pushes awaiting their return
     private var redoX = 0.0, redoY = 0.0, redoAge = 0   // an undone carry macOS may re-apply
+    private var ptsPerCount = 1.5                 // screen pt the pointer moves per raw count (learnt)
+    private var rawMismatch = 0.0, rawDistrusted = false   // how often counts fall short (EMA)
     private var userHidCursor = false           // the hide-cursor bind is on
     private var ptrVel = (x: 0.0, y: 0.0)
     private var lastShift = Pt(0, 0)            // how far the last tick moved the view
@@ -604,8 +606,11 @@ final class Magnifier {
                     // The raw counts say the hand is still (this and last frame; counts can land a
                     // frame late): whatever moved the pointer, it was not the hand. Take it as it is,
                     // never times the level (2026-10-30: at the right edge the read flipped
-                    // 1920.000 / 1919.15 every frame while zooming with the hand still).
-                    handTarget = nil
+                    // 1920.000 / 1919.15 every frame while zooming with the hand still). The target is
+                    // kept while the pointer is near it: dropping it recentred the view on the pointer,
+                    // up to a point behind, which stepped back a point mid-pan whenever a frame got no
+                    // counts (e2e 'zooming while panning', 2026-10-30).
+                    if let t = handTarget, abs(t.x - ptr.x) > 2 || abs(t.y - ptr.y) > 2 { handTarget = nil }
                 } else if rawOn, nowT - lastRawAt < 1, let prev = lastPtr, lv > 1.0001,
                           ((ptr.x - prev.x) * (ptr.x - prev.x) + (ptr.y - prev.y) * (ptr.y - prev.y)).squareRoot() * lv > 24 + 8 * (motion + prevRawMotion) {
                     // The pointer jumped further than the hand moved (raw counts): something else
@@ -626,7 +631,19 @@ final class Magnifier {
                 } else {
                     handTarget = nil
                 }
-                var want = mouseTarget(virtualPtr, lv)
+                // The view follows the hand's exact path (handTarget), which moves evenly, and the
+                // pointer trails it by under a point. Following where each carry landed the pointer
+                // stepped the view 1, 3, 1, 2, 3 points a frame for an even hand, which zooming in
+                // magnified into a visible shake (owner report 2026-10-30, diagonal while zooming).
+                var want = mouseTarget(handTarget ?? virtualPtr, lv)
+                // Small corrections to the target (a bounded read, a discounted push) can pull it back a
+                // fraction across a whole point, which showed as a one-point back-step against the pan.
+                // Against the way the raw counts say the hand is going, the view holds instead.
+                if let rs = rawStep, !returning {
+                    let dir = Pt(rs.x != 0 ? rs.x : (prevRawStep?.x ?? 0), rs.y != 0 ? rs.y : (prevRawStep?.y ?? 0))
+                    if dir.x != 0 && (want.x - center.x) * dir.x < 0 && abs(want.x - center.x) < 1.5 { want.x = center.x }
+                    if dir.y != 0 && (want.y - center.y) * dir.y < 0 && abs(want.y - center.y) < 1.5 { want.y = center.y }
+                }
                 // After a carry the view already sits where it should, on whole points. A
                 // keepPointer=true write that moved the floored centre after the carry, in the same
                 // frame, left the next read off (8% of such frames against 0.4%, Wind logs
@@ -714,6 +731,7 @@ final class Magnifier {
     private func clearSessionFlags() {
         handTarget = nil; ptrVel = (0, 0)
         pushX = 0; pushY = 0; redoX = 0; redoY = 0; rawStep = nil; prevRawStep = nil; pendingJump = nil
+        rawMismatch = 0; rawDistrusted = false
         if pointerHiddenForCaret { pointerHiddenForCaret = false; if !inspect && !userHidCursor { SkyLight.setCursorHidden(false) } }
         afterWrites = nil
         pointerToView = false
@@ -732,10 +750,18 @@ final class Magnifier {
     /// or warping instead is reinterpreted by the zoom and snaps the pointer.
     private func compensatePointerSpeed(from prev: Pt, now p: Pt, level lv: Double, dt: Double) -> Pt {
         var dx = p.x - prev.x, dy = p.y - prev.y
+        var withHand = Pt(0, 0)                          // clipped motion with the hand, taken 1:1
         // Bounded by the hand: on each axis a step can be no bigger on screen than the raw counts of
         // this and the last tick allow (macOS moves ~0.7 pt per count, up to ~3 with acceleration).
         // Anything more is Wind's own carry landing a point off its model, and multiplied by the
         // level it snapped the view back and forth (explorer 2026-10-30: +-5 pt at 7.3x on 0-4 counts).
+        // Raw counts that keep explaining less motion than the pointer made, with the hand, are not
+        // trusted: a run where the counts arrived incompletely clipped real motion to 61% speed.
+        if rawStep != nil, rawMismatch > 0.35 {
+            rawStep = nil
+            rawMismatch *= exp(-dt / 0.5)                // try the counts again after a while
+            if rawMismatch <= 0.35 { rawDistrusted = false; Log.info("raw counts trusted again") }
+        }
         if let a = rawStep, lv > 1.0001 {
             let b = prevRawStep ?? Pt(0, 0)
             // Signed: the counts also say which way the hand went; against them only a hair passes
@@ -746,22 +772,41 @@ final class Magnifier {
             // out), up to 6 pt per count with the hand; excess with the hand is dropped, not kept.
             // A carry macOS undid and then re-applied a tick later is taken off only when the step
             // matches it (a looser rule ate genuine hand motion; review 2026-10-30).
-            func bound(_ d: Double, _ a: Double, _ b: Double, _ pend: inout Double, _ redo: inout Double) -> Double {
+            func bound(_ d: Double, _ a: Double, _ b: Double, _ pend: inout Double, _ redo: inout Double, _ excess: inout Double) -> Double {
                 var d = d
                 if redo != 0 && d * redo > 0 && abs(d - redo) <= 0.5 + 0.3 * abs(redo) { d -= redo; redo = 0 }
                 if d * pend < 0 {                                   // moving back the way it was pushed
                     let take = d > 0 ? min(d, -pend) : max(d, -pend)
                     d -= take; pend += take
                 }
-                let lo = (6 * min(0, a) + 6 * min(0, b) - 2) / lv, hi = (6 * max(0, a) + 6 * max(0, b) + 2) / lv
+                // The larger of this and the last tick's counts (they can land a tick late), learnt
+                // points per count with 2x headroom: summed counts with 2.5x let a 0.4 pt carry error
+                // through as a 12 screen pt snap at 30x.
+                let k = min(6, max(1.2, 2 * ptsPerCount))
+                let lo = (k * min(0, a, b) - 2) / lv, hi = (k * max(0, a, b) + 2) / lv
                 let kept = min(max(d, lo), hi)
                 let against = (a + b) == 0 ? 0 : (d - kept) * (a + b) < 0 ? d - kept : 0
                 pend += against
+                // Over the bound but with the hand: the hand sped up faster than the learnt rate. It
+                // is taken as macOS moved it (1:1, not times the level), so the target never falls
+                // behind the pointer and the carry never pulls it back.
+                excess = d - kept - against
                 return kept
             }
-            dx = bound(dx, a.x, b.x, &pushX, &redoX); dy = bound(dy, a.y, b.y, &pushY, &redoY)
+            dx = bound(dx, a.x, b.x, &pushX, &redoX, &withHand.x); dy = bound(dy, a.y, b.y, &pushY, &redoY, &withHand.y)
+            let over = (abs(withHand.x) + abs(withHand.y)) * lv > 2 ? 1.0 : 0.0
+            rawMismatch += (over - rawMismatch) * 0.1
+            if rawMismatch > 0.35 && !rawDistrusted { rawDistrusted = true; Log.info("raw counts explain too little pointer motion: hand bound off") }
+            // Learn how far the pointer moves per count (macOS acceleration) from steps with the hand.
+            // A fixed 6 pt per count let a one-point carry error through at 30x: 30 screen pt on 6
+            // counts, a jump the hand was moving 0.7 pt per count for (explorer 2026-10-30).
+            let c = abs(a.x) + abs(a.y)
+            if c >= 2 {
+                let seen = (abs(dx) + abs(dy)) * lv / c
+                ptsPerCount += (min(seen, 2 * ptsPerCount + 1) - ptsPerCount) * 0.15
+            }
         }
-        if abs(dx) + abs(dy) < 0.001 || lv <= 1.0001 { return p }
+        if abs(dx) + abs(dy) + abs(withHand.x) + abs(withHand.y) < 0.001 || lv <= 1.0001 { return p }
         let g = handGain(level: lv)
         if g <= 1.0001 { return p }
         // An exact target collects the hand motion; the pointer can only be placed to whole points
@@ -769,13 +814,12 @@ final class Magnifier {
         // over- or under-shot and corrected next frame (that back-and-forth shook the view,
         // most while zooming: measured 2026-10-30).
         var t = handTarget ?? prev
-        t = Pt(min(max(t.x + dx * g, 0), screen.w - 1), min(max(t.y + dy * g, 0), screen.h - 1))
+        t = Pt(min(max(t.x + dx * g + withHand.x, 0), screen.w - 1), min(max(t.y + dy * g + withHand.y, 0), screen.h - 1))
         handTarget = t
-        // The view ends centred where the carry lands the pointer (whole points toward the target),
-        // not on the target: ending on the target's floor left the pointer a point short and the
-        // next frame recentred a point back (back-steps while zooming and panning).
-        let land = Pt(p.x + (t.x - p.x).rounded(.towardZero), p.y + (t.y - p.y).rounded(.towardZero))
-        let got = placePointer(at: t, from: p, level: lv, view: config.mouseAlign == 0 ? mouseTarget(land, lv) : nil)
+        // The view ends on the target (the hand's exact path) and every frame's view follows the
+        // same target, so a pointer a point short is never recentred back (that stepped back while
+        // zooming and panning when the next frame followed the pointer instead).
+        let got = placePointer(at: t, from: p, level: lv, view: config.mouseAlign == 0 ? mouseTarget(t, lv) : nil)
         if config.logLevel >= 2 {
             Log.verbose(String(format: "comp prev %.2f p %.2f want %.2f got %.2f centre %.2f", prev.x, p.x, t.x, got.x, center.x))
         }
@@ -885,6 +929,7 @@ final class Magnifier {
         }
         SkyLight.set(center: CGPoint(x: bx, y: by), scale: live, smooth: config.smoothImages, keepPointer: false)
         liveCenter = Pt(bx, by)
+        liveLevel = live
         lastWritten = (Pt(bx, by), live)
         carryView = Pt(bx, by)
         wroteThisTick = true
@@ -902,6 +947,13 @@ final class Magnifier {
 
     private func write(_ lv: Double) {
         if let w = lastWritten, abs(w.c.x - center.x) < 0.01, abs(w.c.y - center.y) < 0.01, abs(w.level - lv) < 1e-5 { return }
+        // Same level and the same whole-point centre (away from the edge clamps): the zoom would show
+        // exactly the same picture. Skipping the write saves a composite; while panning and zooming
+        // at once, extra writes tripled the dropped frames (9% against 3% zooming alone).
+        if let w = lastWritten, abs(w.level - lv) < 1e-5, floor(w.c.x) == floor(center.x), floor(w.c.y) == floor(center.y) {
+            let hw = screen.w / lv / 2, hh = screen.h / lv / 2
+            if center.x > hw + 1 && center.x < screen.w - hw - 1 && center.y > hh + 1 && center.y < screen.h - hh - 1 { return }
+        }
         send(center, level: lv, keepPointer: true)
         lastWritten = (center, lv)
     }
