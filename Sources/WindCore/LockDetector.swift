@@ -30,12 +30,12 @@ public struct LockDetector {
     }
 
     /// Feed one tick: whether the system cursor is visible, the hand motion since the last tick,
-    /// and how far the pointer itself moved (desktop points, Wind's own writes excluded).
+    /// and how far the pointer itself moved (SCREEN points, Wind's own writes excluded).
     public mutating func feed(cursorVisible: Bool, motion: Double, pointerMoved: Double = 0) {
         if forced { locked = true; return }
         // Following the hand must hold for two ticks in a row: a single tick can still carry an
         // echo of Wind's own view writes.
-        followTicks = (motion > 0 && pointerMoved > 0.25) ? followTicks + 1 : 0
+        followTicks = (motion > 0 && pointerMoved > 0.5) ? followTicks + 1 : 0
         if cursorVisible || followTicks >= 2 {
             locked = false; hiddenMotion = 0
             return

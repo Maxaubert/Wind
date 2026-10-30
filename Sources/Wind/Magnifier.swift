@@ -411,7 +411,10 @@ final class Magnifier {
             let candidates = [Pt(0, 0), lastShift, prevShift, Pt(lastShift.x + prevShift.x, lastShift.y + prevShift.y)]
             return candidates.map { abs(mx - $0.x) + abs(my - $0.y) }.min() ?? 0
         } ?? 0
-        if !inspect { lock.feed(cursorVisible: SkyLight.cursorVisible, motion: motion, pointerMoved: moved) }  // Inspect hides it itself
+        // In screen points: at a high zoom a slow hand moves the pointer a tiny fraction of a desktop
+        // point per frame, which read as held and flipped a false game lock on and off (it pulled
+        // the view into a corner, owner recording 2026-10-30).
+        if !inspect { lock.feed(cursorVisible: SkyLight.cursorVisible, motion: motion, pointerMoved: moved * max(lv, 1)) }  // Inspect hides it itself
         if config.logLevel >= 2 && (motion > 0 || lock.locked) {
             Log.verbose(String(format: "lockdbg vis %d motion %.0f moved %.2f shift %.2f locked %d", SkyLight.cursorVisible ? 1 : 0, motion, moved, lastShift.x, lock.locked ? 1 : 0))
         }
@@ -576,7 +579,10 @@ final class Magnifier {
             handTarget = nt
             // A whole point or more arrived during the write: place it now, not next frame (the
             // view stalled one frame, then jumped twice as far).
-            if !returning && (abs(nt.x - e.x) >= 1 || abs(nt.y - e.y) >= 1) {
+            // Only for motion that arrived during the write: a gap the placement cannot close
+            // (at an edge) re-placed the pointer every frame and it shook in place.
+            let late = Pt((e.x - virtualPtr.x) * g, (e.y - virtualPtr.y) * g)
+            if !returning && (abs(late.x) >= 1 || abs(late.y) >= 1) && (abs(nt.x - e.x) >= 1 || abs(nt.y - e.y) >= 1) {
                 virtualPtr = placePointer(at: nt, level: lv)
                 takeSlip(gain: g)
                 center = clampCenter(mouseTarget(virtualPtr, lv), level: lv, screen: screen)
@@ -702,27 +708,34 @@ final class Magnifier {
         if kx == 0 && ky == 0 { return Pt(p.x, p.y) }
         let live = max(1, liveLevel)
         let halfW = screen.w / live / 2, halfH = screen.h / live / 2
-        let a = Pt(floor(liveCenter.x), floor(liveCenter.y))       // the centre the compositor shows
-        // Per axis: (start, end) whole-point centres of the screen-position-keeping shift.
-        func axis(_ c: Double, _ k: Double, _ half: Double, _ size: Double) -> (Double, Double) {
+        // Per axis: the centres (as written) before and after the screen-position-keeping shift,
+        // and whether the shift is exact. An axis that does not move is left as it is: rewriting
+        // it at an edge, where the zoom clamps the view to a fractional centre, moved the pointer
+        // and pinned it against the edge (a "wall" along the Dock, owner report 2026-10-30).
+        func axis(_ live: Double, _ k: Double, _ half: Double, _ size: Double) -> (Double, Double, Bool) {
+            if k == 0 { return (live, live, true) }
             let lo = ceil(half), hi = floor(size - half)
-            if c + k >= lo && c + k <= hi { return (c, c + k) }        // room to shift: one write
-            let k2 = max(min(k, c - lo), c - hi)                        // the shift must fit inward
-            return (c - k2, c)
+            let shown = floor(live)
+            let c = min(max(shown, lo), hi)
+            let exact = c == shown                                   // not clamped at an edge
+            if c + k >= lo && c + k <= hi { return (c + 0.5, c + k + 0.5, exact) }   // room: one write
+            let k2 = max(min(k, c - lo), c - hi)                     // the shift must fit inward
+            return (c - k2 + 0.5, c + 0.5, exact)
         }
-        let (ax, bx) = axis(a.x, kx, halfW, screen.w)
-        let (ay, by) = axis(a.y, ky, halfH, screen.h)
-        if ax != a.x || ay != a.y {
-            SkyLight.set(center: CGPoint(x: ax + 0.5, y: ay + 0.5), scale: live, smooth: config.smoothImages, keepPointer: true)
+        let (ax, bx, ex) = axis(liveCenter.x, kx, halfW, screen.w)
+        let (ay, by, ey) = axis(liveCenter.y, ky, halfH, screen.h)
+        if ax != liveCenter.x || ay != liveCenter.y {
+            SkyLight.set(center: CGPoint(x: ax, y: ay), scale: live, smooth: config.smoothImages, keepPointer: true)
         }
-        SkyLight.set(center: CGPoint(x: bx + 0.5, y: by + 0.5), scale: live, smooth: config.smoothImages, keepPointer: false)
-        liveCenter = Pt(bx + 0.5, by + 0.5)
+        SkyLight.set(center: CGPoint(x: bx, y: by), scale: live, smooth: config.smoothImages, keepPointer: false)
+        liveCenter = Pt(bx, by)
         lastWritten = nil
         wroteThisTick = true
         let got = CGEvent(source: nil)?.location ?? CGPoint(x: want.x, y: want.y)
-        // The shift carries the pointer exactly bx - ax; anything more is hand motion WindowServer
-        // applied during the writes (most while the level changes).
-        placeSlip = Pt(got.x - (p.x + bx - ax), got.y - (p.y + by - ay))
+        // An exact shift carries the pointer bx - ax; anything more is hand motion WindowServer
+        // applied during the writes (most while the level changes). At a clamped edge the shift
+        // is not exact, so nothing is read from it.
+        if ex && ey { placeSlip = Pt(got.x - (p.x + bx - ax), got.y - (p.y + by - ay)) }
         return Pt(got.x, got.y)
     }
 
