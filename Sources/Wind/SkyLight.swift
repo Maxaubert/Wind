@@ -31,7 +31,31 @@ enum SkyLight {
     static let cid: Int32 = mainConn?() ?? 0
 
     /// Whether the system cursor is shown, whichever app hid it (a game hides it for mouse-look).
-    static var cursorVisible: Bool { cursorVisibleFn?(cid) ?? true }
+    /// SLSCursorIsVisible also reports the "obscured while typing" flag, and that cached byte goes
+    /// stale: a zoom write or a warp reveals the cursor without rewriting it, so it read hidden for
+    /// seconds while the cursor was visibly moving (false game locks after typing). Read the hide
+    /// flag alone from WindowServer's shared scoreboard page (reverse-engineered 2026-10-31, see
+    /// docs/architecture.md); fall back to SLSCursorIsVisible if the layout is not the one checked.
+    static var cursorVisible: Bool {
+        if let s = scoreboard?(), let page = s.pointee { return page.load(fromByteOffset: 0x2f, as: UInt8.self) == 0 }
+        return cursorVisibleFn?(cid) ?? true
+    }
+
+    private typealias ScoreboardFn = @convention(c) () -> UnsafeMutablePointer<UnsafeMutableRawPointer?>?
+    /// CGSScoreboard is internal: its address is taken from the `bl` in exported SLCursorIsVisible,
+    /// after checking every instruction word around it (macOS 27.2 layout).
+    private static let scoreboard: ScoreboardFn? = {
+        guard let h = handle, let f = dlsym(h, "SLCursorIsVisible") else { return nil }
+        let a = UInt(bitPattern: f) & 0x0000_7FFF_FFFF_FFFF
+        guard let w = UnsafePointer<UInt32>(bitPattern: a) else { return nil }
+        // The function's prologue, its call and its flag load, checked before the call target is used.
+        guard w[0] == 0xdac1a7fe, w[3] >> 26 == 0x25, w[5] == 0xf9400008, w[6] == 0x3940bd08 else { return nil }
+        let imm = Int(Int32(bitPattern: w[3] << 6) >> 6)
+        let t = UInt(bitPattern: Int(a) + 12 + imm * 4)
+        guard let tw = UnsafePointer<UInt32>(bitPattern: t), tw.pointee == 0xdac1a7fe,
+              let raw = UnsafeRawPointer(bitPattern: t) else { return nil }
+        return unsafeBitCast(raw, to: ScoreboardFn.self)
+    }()
 
     static var available: Bool { setZoom != nil && getZoom != nil && cid != 0 }
 

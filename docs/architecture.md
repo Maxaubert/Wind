@@ -351,3 +351,29 @@ Explorer, full run: 336 issues before, 162 after. Speed while zooming matches a 
   so it was not kept.
 - The explorer's `uneven` check measures whole-point view steps per 7 ms at 2x and above during
   diagonal pans while zooming in and out, all four directions.
+
+## What macOS does inside (reverse-engineered 2026-10-31)
+
+Static analysis of SkyLight in the macOS 27.2 shared cache (`ipsw dyld disass`), plus experiments.
+Full report: `~/Documents/Claude/research/wind-mac/2026-10-31-macos-zoom-re.md` (notes and
+disassembly in `research/wind-mac/re/`).
+
+- **Whole points come from the client stub.** `SLSSetZoomParameters` truncates the centre to int32
+  before the MIG message; WindowServer itself works in doubles. The sixth argument (Wind passes 0)
+  is an animation speed: with it > 0, WindowServer glides the view through FRACTIONAL centres on a
+  10 ms timer with a cosine ease (measured: speed 0.05 = 16 steps over 160 ms, 960.03, 960.13, ...).
+  A speed-0 write during a glide is overwritten by the timer. Not used yet (see the issue).
+- **The pointer moves in screen space by design.** WindowServer adds HID deltas to the screen-space
+  cursor and unzooms it; there is no setting to change that. Setting the HID pointer resolution is
+  refused (even as root, and through hidutil it does not stick).
+- **Two zoom modes.** `SLSSetZoomParameters` sets global zoom; `...ForDisplay` with a display id sets
+  per-display zoom, where a warp lands on the exact desktop point (whole points) and survives a level
+  change. In global mode a warp is misread (Wind's old "never warp" rule). Any absolute placement
+  races with HID motion (1-2 of 10 reports lost in a prototype), so carries stay.
+- **Warps freeze hardware motion** for the local events suppression interval (0.25 s default).
+- **Cursor visibility:** `SLSCursorIsVisible` = !hidden && !obscured from the shared scoreboard page.
+  The obscured byte (typing) goes stale when a zoom write or warp reveals the cursor, so it read
+  hidden for seconds while the cursor was drawn. Wind reads the hide byte alone (scoreboard +0x2f via
+  the internal CGSScoreboard, found through SLCursorIsVisible's instruction words, checked first).
+- **Testing:** a stuck SecurityAgent dialog (from an lldb attempt) holds Secure Input and blocks
+  posted keystrokes: Inspect and bind checks fail. Use `ipsw`, not lldb, for static work.
