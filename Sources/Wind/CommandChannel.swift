@@ -39,6 +39,7 @@ enum CommandChannel {
                 CGAssociateMouseAndMouseCursorPosition(1)
             }
         case "lock": mag.forceLock(w.count > 1 && w[1] == "on")
+        case "cursor": SkyLight.setCursorHidden(w.count > 1 && w[1] == "hide")   // like macOS hiding it after typing
         case "mods": mag.testMods = w.count > 1 ? parseBind(w[1])?.mods : nil   // mods ctrl | mods (clear)
         case "settoggle":
             // settoggle on|off <label>: only the switches Wind itself manages (security review:

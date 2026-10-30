@@ -3,7 +3,7 @@
 Measures how far the pointer travels per hand movement at 1x and zoomed, with and without
 keepPointerSpeed, and sweeps across the screen looking for snaps. Needs sudo (vmouse) and
 Karabiner-Elements. The screen visibly zooms while this runs."""
-import os, subprocess, sys, time
+import math, os, subprocess, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from windtest import ROOT, ctl, check, finish, relaunch_with_channel, screen_locked, set_config
 
@@ -119,7 +119,8 @@ ctl("press zoomIn"); vm.stdin.write("move 1 1 120 6\n"); vm.stdin.flush(); vm.st
 zr = [l.split() for l in open(LOG).readlines()[n0:] if " view " in l][2:-20]
 back = []
 for ax in (2, 3):
-    steps = [((float(b[ax]) - float(a[ax])) * float(b[8]), i) for i, (a, b) in enumerate(zip(zr, zr[1:]))]
+    # The zoom shows whole-point centres: a step is visible only when the floor changes.
+    steps = [((math.floor(float(b[ax])) - math.floor(float(a[ax]))) * float(b[8]), i) for i, (a, b) in enumerate(zip(zr, zr[1:]))]
     steps = [(x, i) for x, i in steps if abs(x) > 0.1]
     back += [(i, round(a, 1), round(b, 1)) for (a, _), (b, i) in zip(steps, steps[1:]) if a * b < 0]
 check("zooming while panning never steps backwards", not back, f"{len(back)} visible back-steps over {len(zr)} frames: {back[:4]}")
@@ -173,13 +174,36 @@ for name, start in (("middle", (800, 500)), ("edge", (60, 1040))):
         for _ in range(12): mv(10, 0)                    # pan several view widths
         time.sleep(0.2)
         c = ctl("state")
-        check("inspect: pointer stays frozen across a long pan", abs(c["pointer"][0] - a["pointer"][0]) < 1, f"{a['pointer']} -> {c['pointer']}, view {c['center']}")
+        # Within the whole-point placement grid: re-placing it moves it by whole points only.
+        check("inspect: pointer stays frozen across a long pan", abs(c["pointer"][0] - a["pointer"][0]) < 1.5, f"{a['pointer']} -> {c['pointer']}, view {c['center']}")
         b = c
     inspect_key(); time.sleep(0.2)
     d = ctl("state")
     check(f"inspect ({name}): view does not move on leaving", max(abs(d["center"][0] - b["center"][0]), abs(d["center"][1] - b["center"][1])) < 2, f"{b['center']} -> {d['center']}")
     check(f"inspect ({name}): pointer lands on the crosshair", max(abs(d["pointer"][0] - b["look"][0]), abs(d["pointer"][1] - b["look"][1])) < 2, f"pointer {d['pointer']} crosshair was {b['look']}")
     check(f"inspect ({name}): pointer shown again", d["cursorVisible"] and not d["inspect"], f"visible {d['cursorVisible']}")
+
+# Inspect's crosshair sits where the zoom's whole-point centre really is, so it does not wobble
+# around the screen centre while panning (owner report 2026-10-30).
+ctl("level 1"); time.sleep(0.3); ctl("warp 800 500"); time.sleep(0.2); ctl("level 7.3"); time.sleep(0.5)
+inspect_key()
+off = []
+for _ in range(15):
+    vm.stdin.write("move 1 1 6 4\n"); vm.stdin.flush(); vm.stdout.readline()
+    s = ctl("state")
+    if s["cross"]: off.append((s["cross"][0] - s["sky"]["center"][0], s["cross"][1] - s["sky"]["center"][1]))
+inspect_key()
+check("inspect: crosshair stays on the view centre while panning", off and max(abs(a) + abs(b) for a, b in off) < 1.01, f"crosshair minus shown centre {off[:5]}")
+
+# Pushing into a screen edge while macOS reports the cursor hidden (as it does after typing) is
+# not a game holding the pointer (owner recording 2026-10-30: false locks at x = 0).
+ctl("level 1"); time.sleep(0.3); ctl("warp 200 600"); time.sleep(0.2); ctl("level 12"); time.sleep(0.5)
+ctl("cursor hide"); time.sleep(0.1)
+locks = []
+for _ in range(8):
+    mv(-10, 0); locks.append(ctl("state")["locked"])
+ctl("cursor show")
+check("pushing into an edge with the cursor hidden is no game lock", not any(locks), f"locked {locks}")
 
 # A game locks the pointer (hidden, disassociated): the view keeps panning from mouse deltas.
 GAME = os.path.join(ROOT, "tools/fakegame/FakeGame.app")

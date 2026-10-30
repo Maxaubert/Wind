@@ -16,6 +16,7 @@ public struct Config: Codable, Equatable {
     public var panUp = ["ctrl+opt+up"]
     public var panDown = ["ctrl+opt+down"]
     public var inspect = ["ctrl+opt+i"]
+    public var hideCursor: [String] = []          // toggles hiding the pointer (Wind's hideCursor hotkey)
     public var quit = ["ctrl+opt+escape"]
 
     // Zoom feel.
@@ -56,7 +57,7 @@ public struct Config: Codable, Equatable {
     /// behaviour: the pointer covers the same desktop distance per hand movement at any zoom.
     public var keepPointerSpeed = true
 
-    public var logLevel = 1                       // 0 = quiet, 1 = sessions, 2 = verbose
+    public var logLevel = 1                       // 0 = quiet, 1 = sessions, 2 = verbose, 3 = + every zoom write
 
     public init() {}
 
@@ -124,7 +125,7 @@ public struct Config: Codable, Equatable {
         let table: [(Action, [String])] = [
             (.zoomIn, zoomIn), (.zoomOut, zoomOut), (.quickZoom, quickZoom),
             (.panLeft, panLeft), (.panRight, panRight), (.panUp, panUp), (.panDown, panDown),
-            (.inspect, inspect), (.quit, quit),
+            (.inspect, inspect), (.hideCursor, hideCursor), (.quit, quit),
         ]
         for (action, texts) in table {
             for t in texts where !t.isEmpty {
@@ -144,5 +145,5 @@ public struct Config: Codable, Equatable {
 }
 
 public enum Action: String, CaseIterable {
-    case zoomIn, zoomOut, quickZoom, panLeft, panRight, panUp, panDown, inspect, quit
+    case zoomIn, zoomOut, quickZoom, panLeft, panRight, panUp, panDown, inspect, hideCursor, quit
 }

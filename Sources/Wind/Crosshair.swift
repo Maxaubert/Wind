@@ -35,6 +35,7 @@ final class Crosshair {
         panel.setFrame(NSRect(x: p.x - size / 2, y: primaryH - p.y - size / 2, width: size, height: size), display: false)
         if let v = panel.contentView as? View, v.level != level { v.level = level; v.needsDisplay = true }
         if !panel.isVisible { panel.orderFrontRegardless() }
+        CATransaction.flush()                                // commit the move now, before the zoom write
     }
 
     private func make() -> NSPanel {

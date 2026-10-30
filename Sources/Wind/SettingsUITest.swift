@@ -48,12 +48,12 @@ enum SettingsUITest {
                 AXUIElementPerformAction(mouse, kAXPressAction as CFString)
                 Thread.sleep(forTimeInterval: 0.5)
                 if let sw = all(win, { role($0) == "AXCheckBox" && label($0).contains("Keep pointer speed") }).first {
-                    let before = configBool("keepPointerSpeed")
+                    let before = configBool("keepPointerSpeed") ?? true   // absent = the default
                     AXUIElementPerformAction(sw, kAXPressAction as CFString); Thread.sleep(forTimeInterval: 0.6)
                     let after = configBool("keepPointerSpeed")
                     AXUIElementPerformAction(sw, kAXPressAction as CFString); Thread.sleep(forTimeInterval: 0.6)
                     let restored = configBool("keepPointerSpeed")
-                    note((before != nil && after == !before! && restored == before ? "PASS" : "FAIL") + " switch writes config: \(String(describing: before)) -> \(String(describing: after)) -> \(String(describing: restored))")
+                    note((after == !before && restored == before ? "PASS" : "FAIL") + " switch writes config: \(String(describing: before)) -> \(String(describing: after)) -> \(String(describing: restored))")
                 } else { note("FAIL keep-speed switch not found") }
             } else { note("FAIL Mouse tab not found") }
 

@@ -11,8 +11,31 @@ def relaunch_with_channel():
     the installed Wind, and bring the installed one back on exit."""
     subprocess.run([os.path.join(ROOT, "scripts/build.sh"), "test"], check=True, stdout=subprocess.DEVNULL)
     kill_all_wind()
+    # Checks assume Wind's defaults for the feel settings, not the owner's own (a slowed zoom made the
+    # zoom checks fail): run on defaults, and put the owner's config file back exactly on exit.
+    cfg = os.path.join(D, "config.json")
+    # A run killed before its exit handler leaves the test config behind: the owner's own config is
+    # kept in a backup until a run ends cleanly, and put back first if one is found.
+    bak = os.path.join(D, "config.owner-backup.json")
+    if os.path.exists(bak):
+        os.replace(bak, cfg)
+    with open(cfg) as f: own = f.read()
+    with open(bak, "w") as f: f.write(own)
+    c = json.loads(own)
+    for k in TEST_DEFAULTS_DROP: c.pop(k, None)
+    with open(cfg, "w") as f: json.dump(c, f, indent=2)
     subprocess.run(["open", "-n", os.path.join(ROOT, "build/test/Wind.app")]); time.sleep(2.0)
-    atexit.register(lambda: (kill_all_wind(), subprocess.run(["open", "-a", "/Applications/Wind.app"])))
+    def restore():
+        kill_all_wind()
+        with open(cfg, "w") as f: f.write(own)
+        if os.path.exists(bak): os.remove(bak)
+        subprocess.run(["open", "-a", "/Applications/Wind.app"])
+    atexit.register(restore)
+
+# Feel settings the checks expect at their defaults (removed from the config while tests run).
+TEST_DEFAULTS_DROP = ["zoomInSpeed", "zoomOutSpeed", "wheelZoomSpeed", "smoothZoom", "smoothZoomAccel",
+                      "smoothZoomRamp", "zoomEaseOutMs", "keepPointerSpeed", "panSmoothMs", "slowPrecision",
+                      "mouseAlign", "lockTracking", "cursorSensitivity", "hidePointerWhileTracking", "logLevel"]
 
 def kill_all_wind():
     """Every Wind (installed or test build) must be gone before another starts: a test copy whose

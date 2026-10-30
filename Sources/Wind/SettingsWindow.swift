@@ -138,6 +138,7 @@ struct SettingsView: View {
             TextField("Pan up", text: m.bindText(\.panUp))
             TextField("Pan down", text: m.bindText(\.panDown))
             TextField("Inspect", text: m.bindText(\.inspect))
+            TextField("Hide cursor", text: m.bindText(\.hideCursor))
             TextField("Quit Wind", text: m.bindText(\.quit))
             Text("Comma-separated, like \"mouse4, ctrl+opt+equal\". Modifiers: ctrl, opt, shift, cmd. Mouse buttons: mouse3 (back), mouse4 (forward), mouse2 (middle).")
                 .font(.caption).foregroundStyle(.secondary)

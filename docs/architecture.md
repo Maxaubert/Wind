@@ -130,6 +130,12 @@ A macOS game takes the pointer by hiding the cursor and disassociating it from t
   two ticks.
 - **Wind's own drag.** Wind's own view writes drag a held pointer by exactly the view shift, up to
   two ticks late, so those shifts are discounted.
+- **Following is measured in screen points** (2026-10-30). At high zoom a slow hand moves the
+  pointer a tiny fraction of a desktop point per frame, which read as held: with the cursor
+  reported hidden after typing, a false lock flipped on and off and pulled the view into a corner.
+- **A pointer at a screen edge is no evidence** (2026-10-30). Pushed into an edge it stays put while
+  the hand moves, exactly like a held one; every false lock in the owner's recording began at x = 0.
+  macOS also reported the cursor hidden for a whole zoom session there.
 
 While a game holds the pointer, Wind pans from **raw HID counts** (`RawMouse`, IOHIDManager), like
 Raw Input on Windows. Pointer travel and event-tap deltas both fail here: the held pointer keeps its
@@ -199,6 +205,29 @@ followed by its own switch.
   the hidden pointer every tick makes pointer readback timing unreliable for measuring the hand.
 - While Inspect hides the pointer, game-lock detection is paused, so Wind's own hiding is never
   taken for a game.
+- The crosshair is drawn at the centre the zoom really shows (its whole-point centre), not at the
+  exact look point, and only leaves the centre where the view is held at a screen edge. Its window
+  is moved and committed before the zoom write, so both land in the same frame (owner report
+  2026-10-30: it wobbled around the centre while panning, as on Windows before its fix).
+- The hide-cursor bind (`hideCursor`, Wind's hideCursor hotkey) keeps the pointer hidden until
+  pressed again; game-lock detection is paused meanwhile, as in Inspect.
+
+## Pointer jumps the hand did not make
+
+After typing, macOS sometimes undid Wind's "pointer comes to the view" placement a frame later: the
+pointer snapped back 82 points on 1 raw count, and speed compensation multiplied that by the level
+and flung the view across the screen (recorded 2026-10-30). A pointer step far beyond what the raw
+counts of this and the last frame allow (24 screen pt + 8 per count) is taken as it is, never as
+hand motion. Only while raw counts are flowing (a trackpad sends none).
+
+## Screen edges
+
+At an edge the zoom clamps the view to a fractional centre, so whole-point placement cannot be
+exact there. `placePointer` leaves an axis that does not move untouched (rewriting it pinned the
+pointer: a "wall" along the Dock), reads no slip from a clamped shift, and the same-frame second
+pass runs only for motion that arrived during the write (an unclosable gap re-placed the pointer
+every frame and it shook in place). Measured at 5.3x to 24x: moves along and away from every edge
+keep the 1x distance.
 
 ## Wobble (measured 2026-10-29)
 
@@ -252,3 +281,49 @@ when it never settles), so the view follows where the cursor settles. The view-o
   Claude Code is started with `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` so the window keeps its
   WINDTEST title.
 - `screencapture` captures the desktop before the zoom, so screenshots never show the zoomed view.
+
+## The owner's mouse (Razer Basilisk V3 Pro, 2026-10-30)
+
+Its onboard profile (from Windows) sends: side buttons = mouse 4/5 (Wind zoom), wheel tilt =
+Ctrl+C / Ctrl+V, the two buttons behind the wheel = F9 (front) / F8 (rear). Karabiner's default
+function keys turn F8/F9 into play/pause and fast-forward AFTER complex modifications, so match the
+plain `f8`/`f9`. A Karabiner rule limited to vendor 5426 / product 170 maps F9 -> F18 (Wind
+`inspect`), F8 -> F19 (Wind `hideCursor`) and wheel tilt -> Cmd+C / Cmd+V in every app (in Terminal,
+Ctrl+C would interrupt). The rule lives in `~/.config/karabiner/karabiner.json`, not in this repo.
+
+## One read per tick (2026-10-30, after the explorer)
+
+`scripts/explore.py` drives the virtual mouse through corners, edges, edge <-> centre and zooming
+at 7 levels and flags snaps, back-steps, glue, shake and speed from the frame log. It found that
+every layered fix (same-frame second pass, slip, post-write absorb, settled reads) fed pointer
+reads taken right after a zoom write into the hand target at the level gain. Those reads can be a
+whole point off (a keepPointer=true recentre after a keepPointer=false carry changes the floored
+centre) or tens of points off for a few ms near edges while the level changes. Three independent
+analyses and a review (workflow) led to one mechanism:
+- the level is written first everywhere (at the new level's clamp), then the pointer is read ONCE;
+- the hand is measured against Wind's computed carry (`p + whole points`), never a read-back;
+- a carry is keepPointer=true to `a`, then keepPointer=false to `b`, and the view ends centred where
+  the carry lands the pointer, so no later write changes the floor in the same frame;
+- at the far edges Wind writes a centre one point past the clamp, so the compositor's
+  floor-then-clamp lands exactly on the edge (the pointer no longer flips 1920 / 1919.15).
+Explorer, full run: 336 issues before, 162 after. Speed while zooming matches a fixed zoom.
+
+### Edges and the hand bound (2026-10-30, second round)
+
+- **Both edges are written past the clamp**: a centre at or past the clamp is written a point
+  beyond it, so the compositor's own clamp lands exactly on the edge. A centre even a fraction
+  inside the near clamp pushed a pointer on the edge inward at every level step (probe: steady at
+  0 with `half` or `half - 1`, drifting 0 -> 1 pt with `ceil(half)`).
+- **The level-first write re-pins an edge-pinned view at the new level's edge** (centred mode
+  only). Last frame's "one past the old clamp" centre is inside the new clamp when zooming in;
+  traced with `logLevel` 3 (every zoom write): the pointer crept 0.04 -> 0.48 -> 2.5 pt.
+- **Edge-pinned axes measure from a read**: there the frame's last write puts the view back on
+  the clamp after the carry, and the carry comes out short (0.54 of 2 pt). On such an axis the
+  next tick measures from a read after the writes, when raw counts flow and it is within 2 pt.
+- **Hand steps are bounded by raw counts, per axis and signed**: each tick's counts (this and the
+  last) allow up to 6 screen pt per count with the hand and 2 pt against it. A step against the
+  counts is a push (macOS, a clamp) and its return a frame or two later is discounted too; a carry
+  macOS undid and re-applied a tick later is discounted only when the step matches it.
+- Explorer, full run (7 levels): 336 issues at the start of the day, 162 after the one-read
+  design, then see the commit for the final count. Natural turns are not flagged; snaps and
+  back-steps are spikes that resume the earlier direction.
