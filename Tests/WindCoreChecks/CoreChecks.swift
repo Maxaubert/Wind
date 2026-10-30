@@ -115,6 +115,19 @@ struct LockTests {
         expect(!d.locked)
     }
 
+    func hiddenButFollowingTheHandIsNotALock() {
+        // After typing macOS may report the cursor hidden while it moves with the hand.
+        var d = LockDetector()
+        for _ in 0..<20 { d.feed(cursorVisible: false, motion: 8, pointerMoved: 3) }
+        expect(!d.locked)
+        for _ in 0..<5 { d.feed(cursorVisible: false, motion: 8, pointerMoved: 0) }
+        expect(d.locked)
+        d.feed(cursorVisible: false, motion: 8, pointerMoved: 3)
+        expect(d.locked)                                   // one tick could be an echo
+        d.feed(cursorVisible: false, motion: 8, pointerMoved: 3)
+        expect(!d.locked)
+    }
+
     func hiddenButStillIsNotALock() {
         var d = LockDetector()
         for _ in 0..<100 { d.feed(cursorVisible: false, motion: 0) }

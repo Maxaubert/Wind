@@ -58,6 +58,24 @@ enum SkyLight {
         return f(cid, &z) == 0 && z
     }
 
+    private typealias SetConnPropFn = @convention(c) (Int32, Int32, CFString, CFTypeRef) -> Int32
+    private static let setConnProp = sym("SLSSetConnectionProperty", SetConnPropFn.self)
+    private static var cursorHidden = false
+
+    /// Hide or show the system cursor from a background app (Inspect mode). Needs the
+    /// SetsCursorInBackground connection property; hide and show stay balanced.
+    static func setCursorHidden(_ hide: Bool, force: Bool = false) {
+        if hide == cursorHidden && !force { return }
+        _ = setConnProp?(cid, cid, "SetsCursorInBackground" as CFString, kCFBooleanTrue)
+        if hide {
+            if cursorHidden { CGDisplayShowCursor(CGMainDisplayID()) }   // re-hide after the Dock showed it
+            CGDisplayHideCursor(CGMainDisplayID())
+        } else {
+            CGDisplayShowCursor(CGMainDisplayID())
+        }
+        cursorHidden = hide
+    }
+
     /// Back to 1x (used on quit, on crash and by the watchdog).
     static func reset() {
         let b = CGDisplayBounds(CGMainDisplayID())

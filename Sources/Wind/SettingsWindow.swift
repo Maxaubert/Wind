@@ -63,7 +63,13 @@ struct SettingsView: View {
     private func slider(_ title: String, _ kp: WritableKeyPath<Config, Double>, _ range: ClosedRange<Double>, step: Double, format: String) -> some View {
         HStack {
             Text(title).frame(width: 170, alignment: .leading)
-            Slider(value: m.bind(kp), in: range, step: step)
+            // Continuous slider (a stepped one draws a dense row of ticks); the value is rounded.
+            Slider(value: Binding(get: { m.config[keyPath: kp] }, set: { v in
+                // Write only when the rounded value changes (a drag sends many events), and keep
+                // the stored number clean (no 1.1500000000000001).
+                let q = ((v / step).rounded() * step * 1e6).rounded() / 1e6
+                if abs(q - m.config[keyPath: kp]) >= step / 2 { m.bind(kp).wrappedValue = q }
+            }), in: range)
             Text(String(format: format, m.config[keyPath: kp])).monospacedDigit().frame(width: 56, alignment: .trailing)
         }
     }
@@ -76,8 +82,8 @@ struct SettingsView: View {
             slider("Maximum zoom", \.maxLevel, 2...64, step: 1, format: "%.0fx")
             slider("Quick zoom level", \.quickZoomDefault, 1.5...16, step: 0.5, format: "%.1fx")
             slider("Release ease-out", \.zoomEaseOutMs, 0...400, step: 5, format: "%.0f ms")
-            Toggle("Smooth start when zooming in", isOn: m.bind(\.smoothZoom))
-            Toggle("Smooth pixels (off = sharp)", isOn: m.bind(\.smoothImages))
+            Toggle("Smooth zoom start (ease in)", isOn: m.bind(\.smoothZoom))
+            Toggle("Smooth images (off = sharp pixels)", isOn: m.bind(\.smoothImages))
             Divider()
             slider("Warmth", \.warmthPct, 0...100, step: 5, format: "%.0f%%")
             slider("Brightness", \.dimPct, 10...100, step: 5, format: "%.0f%%")
@@ -93,6 +99,8 @@ struct SettingsView: View {
             if m.config.mouseAlign == 1 {
                 slider("Edge margin", \.mouseMarginPct, 0...40, step: 1, format: "%.0f%%")
             }
+            slider("Pan smoothing", \.panSmoothMs, 0...150, step: 5, format: "%.0f ms")
+            Toggle("Fine steps when moving slowly (slows down on turns)", isOn: m.bind(\.slowPrecision))
             Toggle("Keep pointer speed when zoomed", isOn: m.bind(\.keepPointerSpeed))
             Text("macOS slows the pointer by the zoom level; Wind keeps the speed you have at 1x.")
                 .font(.caption).foregroundStyle(.secondary)
@@ -106,6 +114,7 @@ struct SettingsView: View {
         Form {
             Toggle("Follow the text caret", isOn: m.bind(\.trackCaret))
             Toggle("Follow keyboard focus", isOn: m.bind(\.trackFocus))
+            Toggle("Hide the pointer while following the caret", isOn: m.bind(\.hidePointerWhileTracking))
             Picker("Show the caret", selection: m.bind(\.trackAlign)) {
                 Text("Centred").tag(0)
                 Text("Within the edges").tag(1)

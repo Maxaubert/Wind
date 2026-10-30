@@ -26,11 +26,11 @@ mouse when a game locks the pointer.
 - The pointer moves as fast across the desktop at 10x as at 1x (macOS's own Zoom slows it down by the zoom level).
 - The view stays centred on the pointer, or moves only near the edges.
 - Keeps panning from mouse movement when a game locks the pointer.
-- Follows the text caret as you type (and, optionally, keyboard focus), steady even in terminal apps.
-- Inspect mode: freezes the pointer so a tooltip stays open, pans the view with the mouse and shows a crosshair.
+- Follows the text caret as you type (and, optionally, keyboard focus), tested in TextEdit, Terminal, Safari, Chrome and Claude Code.
+- Inspect mode: hides and freezes the pointer so a tooltip stays open; the mouse moves a crosshair and the view, which never jumps on entering or leaving.
 - Quick zoom toggle, keyboard panning, warmth and brightness filter.
 - A Settings window, Open at login.
-- Detects macOS Zoom's shortcuts, which fight Wind, and switches them off in one click.
+- Detects macOS Zoom's shortcuts, which fight Wind, and switches them off in one click (releasing macOS Zoom if it is stuck zoomed in).
 - A crash watchdog that puts the screen back to 1x if Wind dies.
 
 ## Install
@@ -77,6 +77,7 @@ would break typing, such as a letter key without Ctrl, Opt or Cmd.
   you (⚠︎ in the menu bar) and can switch them off for you.
 - Keyboard binds do not work while a password field has secure input on (a macOS rule).
 - The colour filter has not been checked on every display type.
+- For caret tracking, Wind turns on Chromium browsers' full accessibility mode (`AXEnhancedUserInterface`).
 
 ## Development
 
@@ -86,6 +87,8 @@ scripts/build.sh install       # build, install and relaunch
 python3 scripts/e2e.py         # end-to-end checks against the installed app (the screen zooms)
 python3 scripts/e2e_mouse.py   # pointer checks with real HID motion (needs Karabiner-Elements, sudo);
                                # the game-lock check needs an unlocked screen
+python3 scripts/e2e_caret.py   # caret following with real typing in five apps
+python3 scripts/e2e_syszoom.py # the macOS Zoom clash and Wind's fix (opens System Settings)
 ```
 
 How the macOS zoom behaves, and why Wind does what it does, is in

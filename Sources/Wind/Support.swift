@@ -24,12 +24,14 @@ enum Log {
     private static let queue = DispatchQueue(label: "wind.log")
     private static var handle: FileHandle? = {
         let p = Paths.log.path
-        // Keep one previous log; start fresh each launch.
-        if FileManager.default.fileExists(atPath: p) {
-            let old = Paths.logDir.appendingPathComponent("wind.prev.log")
-            try? FileManager.default.removeItem(at: old)
-            try? FileManager.default.moveItem(at: Paths.log, to: old)
-        }
+        // Keep the last five logs (wind.1.log is the previous launch): test runs relaunch Wind
+        // several times, and one previous log lost a user's session before it could be read.
+        let fm = FileManager.default
+        func numbered(_ i: Int) -> URL { Paths.logDir.appendingPathComponent("wind.\(i).log") }
+        try? fm.removeItem(at: numbered(5))
+        for i in stride(from: 4, through: 1, by: -1) { try? fm.moveItem(at: numbered(i), to: numbered(i + 1)) }
+        if fm.fileExists(atPath: p) { try? fm.moveItem(at: Paths.log, to: numbered(1)) }
+        try? fm.removeItem(at: Paths.logDir.appendingPathComponent("wind.prev.log"))
         FileManager.default.createFile(atPath: p, contents: nil)
         return FileHandle(forWritingAtPath: p)
     }()

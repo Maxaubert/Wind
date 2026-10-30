@@ -27,7 +27,9 @@ def travel(level, keep):
     b = ctl("state")
     return b["pointer"][1] - a[1], b
 
-saved = set_config(keepPointerSpeed=True)
+saved = set_config(keepPointerSpeed=True, logLevel=1, slowPrecision=False, panSmoothMs=0)
+import atexit
+atexit.register(lambda: set_config(**saved))
 base, _ = travel(1, False)
 check("1x moves the pointer", base > 20, f"{base:.1f} pt")
 for lv in (4, 10):
@@ -58,6 +60,86 @@ slow, fast = notches(3, 300), notches(6, 30)
 check("wheel: slow and fast notches zoom alike", abs(slow - fast) < 0.02 and slow > 1.05, f"slow x{slow:.3f}, fast x{fast:.3f} per notch")
 ctl("mods"); ctl("level 1")
 
+# Wobble: where the real pointer sits on screen against the view, per frame, during sweeps.
+LOG = os.path.expanduser("~/Library/Logs/Wind/wind.log")
+for lv in (4, 10):
+    saved_w = set_config(logLevel=2, keepPointerSpeed=True)
+    ctl("level 1"); time.sleep(0.3); ctl("warp 700 540"); time.sleep(0.2); ctl(f"level {lv}"); time.sleep(0.4)
+    n0 = sum(1 for _ in open(LOG))
+    for d in [6] * 12 + [-6] * 12: mv(d, 3, 5, 8)
+    time.sleep(0.2)
+    mags = sorted((float(l.split()[2]) ** 2 + float(l.split()[3]) ** 2) ** 0.5 for l in open(LOG).readlines()[n0:] if " wobble " in l)
+    p95 = mags[int(len(mags) * 0.95) - 1] if mags else 99
+    # The pan glide lets the view trail by up to about one mouse step (1.5 desktop pt).
+    check(f"wobble at {lv}x stays within a frame of motion", p95 <= max(8, 1.5 * lv + 2), f"p95 {p95:.2f}, max {mags[-1] if mags else 0:.2f} screen pt over {len(mags)} frames")
+    set_config(**saved_w)
+
+# Slow pans: single mouse steps must glide, not jump-and-pause (owner report 2026-10-30: shaking
+# when moving slowly, worst diagonally). Judder = change in screen step between frames.
+for lv in (4, 10):
+    for label, d in (("straight", (1, 0)), ("diagonal", (1, 1))):
+        saved_s = set_config(logLevel=2, keepPointerSpeed=True, slowPrecision=False, panSmoothMs=0)
+        ctl("level 1"); time.sleep(0.3); ctl("warp 500 400"); time.sleep(0.2); ctl(f"level {lv}"); time.sleep(0.5)
+        n0 = sum(1 for _ in open(LOG))
+        vm.stdin.write(f"move {d[0]} {d[1]} 90 16\n"); vm.stdin.flush(); vm.stdout.readline(); time.sleep(0.3)
+        rows = [l.split() for l in open(LOG).readlines()[n0:] if " view " in l][5:]
+        cx = [float(r[2]) for r in rows]; cy = [float(r[3]) for r in rows]
+        st = [((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5 * lv for x1, y1, x2, y2 in zip(cx, cy, cx[1:], cy[1:])][:-25]
+        jud = sorted(abs(b - a) for a, b in zip(st, st[1:]))
+        p90 = jud[int(len(jud) * 0.9)] if jud else 99
+        # The zoom moves in whole desktop points, so a slow pan steps `lv` screen points at best.
+        check(f"slow {label} pan at {lv}x steps no more than the zoom allows", p90 <= lv * 1.6 + 0.5, f"judder p90 {p90:.2f} screen pt (whole-point steps: {lv})")
+        set_config(**saved_s)
+
+# No "held" pointer on turns (owner report 2026-10-30: going side to side then up and down felt
+# held until pushed hard). Each slow arm of a plus sign must cover the 1x distance (slow precision
+# covered a quarter of it).
+saved_p = set_config(keepPointerSpeed=True, slowPrecision=False, panSmoothMs=0)
+def arms(lv):
+    ctl("level 1"); time.sleep(0.3); ctl("warp 960 540"); time.sleep(0.2)
+    if lv > 1: ctl(f"level {lv}"); time.sleep(0.5)
+    out = []
+    for d in ("1 0", "0 1", "-1 0", "0 -1"):
+        a = ctl("state")["pointer"]
+        vm.stdin.write(f"move {d} 60 6\n"); vm.stdin.flush(); vm.stdout.readline(); time.sleep(0.15)
+        b = ctl("state")["pointer"]
+        out.append(((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2) ** 0.5)
+    return out
+base_arms, zoom_arms = arms(1), arms(4)
+ratios = [z / b if b else 0 for z, b in zip(zoom_arms, base_arms)]
+check("plus sign: no held pointer on turns", min(ratios) >= 0.8, f"4x / 1x distance per arm {[round(r, 2) for r in ratios]}")
+set_config(**saved_p)
+
+# Zooming while panning (owner report 2026-10-30: the screen shook): a diagonal pan during a slow
+# zoom-in must never step visibly backwards.
+saved_z = set_config(logLevel=2, keepPointerSpeed=True, zoomInSpeed=0.5)
+ctl("level 1"); time.sleep(0.3); ctl("warp 960 540"); time.sleep(0.2); ctl("level 3"); time.sleep(0.5)
+n0 = sum(1 for _ in open(LOG))
+ctl("press zoomIn"); vm.stdin.write("move 1 1 120 6\n"); vm.stdin.flush(); vm.stdout.readline(); ctl("release zoomIn"); time.sleep(0.3)
+zr = [l.split() for l in open(LOG).readlines()[n0:] if " view " in l][2:-20]
+back = []
+for ax in (2, 3):
+    steps = [((float(b[ax]) - float(a[ax])) * float(b[8]), i) for i, (a, b) in enumerate(zip(zr, zr[1:]))]
+    steps = [(x, i) for x, i in steps if abs(x) > 0.1]
+    back += [(i, round(a, 1), round(b, 1)) for (a, _), (b, i) in zip(steps, steps[1:]) if a * b < 0]
+check("zooming while panning never steps backwards", not back, f"{len(back)} visible back-steps over {len(zr)} frames: {back[:4]}")
+set_config(**saved_z)
+
+# While the level changes, WindowServer applies hand motion during Wind's level write; it must
+# count at the zoomed gain like any other (it counted 1:1, so the pan slowed and stalled while
+# zooming, owner report 2026-10-30). The same hand movement covers the same distance as at a
+# fixed zoom.
+def pan_travel(dirn):
+    ctl("level 1"); time.sleep(0.3); ctl("warp 700 400"); time.sleep(0.2); ctl("level 3"); time.sleep(0.5)
+    a = ctl("state")["pointer"][0]
+    if dirn: ctl(f"press {dirn}")
+    vm.stdin.write("move 1 1 400 1\n"); vm.stdin.flush(); vm.stdout.readline()
+    if dirn: ctl(f"release {dirn}")
+    time.sleep(0.3)
+    return ctl("state")["pointer"][0] - a
+fixed_t, zoom_t = pan_travel(None), pan_travel("zoomIn")
+check("zooming while panning keeps the pointer speed", abs(zoom_t / fixed_t - 1) < 0.08, f"{zoom_t:.0f} pt while zooming, {fixed_t:.0f} at a fixed level")
+
 # Sweep right then left at 6x: every step the same direction and size, no snaps.
 set_config(keepPointerSpeed=True)
 ctl("level 1"); time.sleep(0.3); ctl("warp 300 540"); time.sleep(0.2); ctl("level 6"); time.sleep(0.4)
@@ -70,18 +152,34 @@ check("sweep has no snaps", not snaps, f"snaps {snaps}")
 s = ctl("state")
 check("compositor agrees with Wind after the sweep", abs(s["sky"]["center"][0] - s["center"][0]) <= 1, f"sky {s['sky']['center']} wind {s['center']}")
 
-# Inspect: the pointer stays frozen while the hand pans the view; on exit the pointer comes to the view.
-ctl("level 1"); time.sleep(0.3); ctl("warp 800 500"); time.sleep(0.2); ctl("level 4"); time.sleep(0.4)
-ctl("post key ctrl+opt+i down"); ctl("post key ctrl+opt+i up"); time.sleep(0.2)
-a = ctl("state")
-mv(10, 0); time.sleep(0.2)
-b = ctl("state")
-check("inspect freezes the pointer", a["inspect"] and abs(b["pointer"][0] - a["pointer"][0]) < 1, f"{a['pointer']} -> {b['pointer']}")
-check("inspect pans the view at 1x speed", abs((b["center"][0] - a["center"][0]) - base) < base * 0.1, f"view moved {b['center'][0] - a['center'][0]:.1f}, 1x {base:.1f}")
-ctl("post key ctrl+opt+i down"); ctl("post key ctrl+opt+i up"); time.sleep(0.3)
-c = ctl("state")
-check("leaving inspect brings the pointer to the view", abs(c["pointer"][0] - b["center"][0]) < 2, f"pointer {c['pointer']} view was {b['center']}")
-check("the view stays put when inspect ends", abs(c["center"][0] - b["center"][0]) < 2, f"view {b['center']} -> {c['center']}")
+# Inspect: the crosshair starts at the pointer, the real pointer is hidden and frozen, the hand
+# moves the crosshair at 1x speed, and the view never moves on entering or leaving (owner list).
+def inspect_key():
+    ctl("post key ctrl+opt+i down"); ctl("post key ctrl+opt+i up"); time.sleep(0.25)
+for name, start in (("middle", (800, 500)), ("edge", (60, 1040))):
+    ctl("level 1"); time.sleep(0.3); ctl(f"warp {start[0]} {start[1]}"); time.sleep(0.2); ctl("level 4"); time.sleep(0.4)
+    before = ctl("state")
+    inspect_key()
+    a = ctl("state")
+    check(f"inspect ({name}): view does not move on entering", max(abs(a["center"][0] - before["center"][0]), abs(a["center"][1] - before["center"][1])) < 1, f"{before['center']} -> {a['center']}")
+    check(f"inspect ({name}): crosshair starts at the pointer", max(abs(a["look"][0] - a["pointer"][0]), abs(a["look"][1] - a["pointer"][1])) < 1, f"look {a['look']} pointer {a['pointer']}")
+    check(f"inspect ({name}): the real pointer is hidden", a["inspect"] and not a["cursorVisible"], f"visible {a['cursorVisible']}")
+    mv(10, -10 if name == "edge" else 0); time.sleep(0.2)
+    b = ctl("state")
+    check(f"inspect ({name}): pointer frozen", max(abs(b["pointer"][0] - a["pointer"][0]), abs(b["pointer"][1] - a["pointer"][1])) < 1, f"{a['pointer']} -> {b['pointer']}")
+    # Like Wind's Inspect on Windows, the crosshair moves by raw mouse counts (10 reports x 10).
+    check(f"inspect ({name}): crosshair moves with the raw mouse", abs((b["look"][0] - a["look"][0]) - 100) < 12, f"look moved {b['look'][0] - a['look'][0]:.1f} for 100 counts")
+    if name == "middle":
+        for _ in range(12): mv(10, 0)                    # pan several view widths
+        time.sleep(0.2)
+        c = ctl("state")
+        check("inspect: pointer stays frozen across a long pan", abs(c["pointer"][0] - a["pointer"][0]) < 1, f"{a['pointer']} -> {c['pointer']}, view {c['center']}")
+        b = c
+    inspect_key(); time.sleep(0.2)
+    d = ctl("state")
+    check(f"inspect ({name}): view does not move on leaving", max(abs(d["center"][0] - b["center"][0]), abs(d["center"][1] - b["center"][1])) < 2, f"{b['center']} -> {d['center']}")
+    check(f"inspect ({name}): pointer lands on the crosshair", max(abs(d["pointer"][0] - b["look"][0]), abs(d["pointer"][1] - b["look"][1])) < 2, f"pointer {d['pointer']} crosshair was {b['look']}")
+    check(f"inspect ({name}): pointer shown again", d["cursorVisible"] and not d["inspect"], f"visible {d['cursorVisible']}")
 
 # A game locks the pointer (hidden, disassociated): the view keeps panning from mouse deltas.
 GAME = os.path.join(ROOT, "tools/fakegame/FakeGame.app")

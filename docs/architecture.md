@@ -57,6 +57,61 @@ shifts it inward with `keepPointer=true` and back with `keepPointer=false`: the 
 was and the pointer has moved outward. Without that, the pointer fell back to macOS's slow speed
 near edges (owner report 2026-10-29).
 
+**The zoom moves in whole desktop points (measured 2026-10-30).** `SLSSetZoomParameters` and
+`...ForDisplay` floor the centre to whole points: 700.25, 700.5 and 700.75 all show 700. A pan
+therefore steps `level` screen points at a time (4 at 4x, 10 at 10x), which is the shake the owner
+sees when panning slowly. No smoothing in Wind gets below it. Windows' compositor takes fractional
+offsets, so it is smoother there. A capture-and-draw engine (issue) would be the real fix.
+
+So the default is plain 1x speed: no glide, no slow precision. Both stay as options.
+
+**Placing the pointer in whole points.** A view shift can only carry the pointer by whole points
+(the floor), so `placePointer`:
+- plans in the compositor's integer centre, passing centres at .5 so the floor lands exactly;
+- shifts only whole points toward the target, never past it.
+
+Speed compensation keeps an exact target (`handTarget`) that collects the hand motion times the
+level. The remainder stays there.
+
+Before this, rounding to the nearest point overshot by up to half a point, the next frame stepped
+back, and panning while zooming shook (owner report 2026-10-30). Now a diagonal pan while zooming
+in or out has no visible back-steps (`e2e_mouse`).
+
+**While the level changes, the level is written first (measured 2026-10-30).** A level write that
+came after a placement in the same frame sometimes undid it: the pointer snapped back the whole
+placed shift. WindowServer also applies queued hand motion during a level write. With the hand
+still, a level write moves the pointer by 0.000 pt, so any motion seen across a write is the hand.
+Counting it 1:1 (as a "nudge") slowed the pan by 23% while zooming, and the view stalled for a
+frame, then jumped. The tick now writes the new level at the current view before it reads the
+pointer, so placement runs at a steady level, as at a fixed zoom. Hand motion that still lands
+during a placement or the final write counts at the zoomed gain (`placeSlip`, the post-write
+step), and a whole point of it is placed in the same frame. Measured: the pointer's speed while
+zooming matches a fixed zoom (275 vs 272 pt), with no back-steps or stalls in a diagonal pan.
+
+**Pan glide** (`panSmoothMs`, now OFF by default). The pointer, not the view, glides toward an
+exact hand target. Gliding the view left the pointer off-centre, where rounding jumps were
+multiplied by the zoom level (speed varied by up to 30%). Neither variant beats the whole-point
+steps. Earlier measurements, kept for reference:
+- **The problem.** At 1x speed, slow motion arrives as single mouse steps of 4.7 screen pt at 4x,
+  10.7 at 10x, with idle frames between: jump-and-pause.
+- **What Wind does.** A 45 ms spring spreads each step over the frames, and the view may trail the
+  pointer by up to 24 screen pt.
+- **Measured** on slow plus-sign and circle paths with 1 kHz reports: judder p90 dropped from 4.0
+  to 0.84 screen pt at 4x and from 8.0 to 1.5 at 8x. The pointer sits within about 6 (4x) to 11
+  (8x) screen pt of centre.
+
+**Slow precision** (`slowPrecision`, now OFF by default). The owner felt the pointer "held" on
+every turn (a plus sign, circles), because the speed drops through zero at each direction change.
+Kept as an option:
+- **The problem.** With full compensation, slow hand motion arrives as single mouse steps, each a
+  whole 1x step (4.7 screen pt at 4x, 10.7 at 10x), then idle frames. The view jumped and paused,
+  which the owner saw as shaking, worst diagonally (measured 2026-10-30).
+- **What Wind does.** Below `precisionBelow` (100 pt/s of hand speed at 1x, averaged over 80 ms),
+  the pointer keeps macOS's fine zoomed steps (0.7 screen pt, no lag). The gain blends to the full
+  1x speed by twice that.
+- **The alternative.** A glide (`panSmoothMs`) also smooths slow pans, but the pointer then trails
+  the view by up to about 12 screen pt and had spikes at 10x, so it is off by default.
+
 Pointer speed compensation (`keepPointerSpeed`, default on) uses this every tick: the pointer
 moves `level` times the step macOS gave it, so it covers the 1x distance. Inspect uses it to hold
 the pointer still, and leaving Inspect or the caret uses it to bring the pointer to the view.
@@ -65,9 +120,16 @@ pointer really landed, never from the ideal target.
 
 ## Game lock
 
-A macOS game takes the pointer by hiding the cursor and disassociating it from the mouse. Wind
-detects that as **the cursor staying hidden while the hand keeps moving** (`SLSCursorIsVisible`,
-which reports any app's hiding). Typing hides the cursor too, but the first movement shows it again.
+A macOS game takes the pointer by hiding the cursor and disassociating it from the mouse.
+
+- **Detection.** Wind needs **the cursor hidden** (`SLSCursorIsVisible`, which reports any app's
+  hiding) **and the pointer held still while the hand moves**.
+- **Why hidden is not enough.** After typing, macOS kept reporting the cursor hidden for 14 s while
+  it visibly moved, and a hidden-only rule took that for a game (recorded 2026-10-30 in Claude Code).
+- **Release.** A lock is released when the cursor shows, or when the pointer follows the hand for
+  two ticks.
+- **Wind's own drag.** Wind's own view writes drag a held pointer by exactly the view shift, up to
+  two ticks late, so those shifts are discounted.
 
 While a game holds the pointer, Wind pans from **raw HID counts** (`RawMouse`, IOHIDManager), like
 Raw Input on Windows. Pointer travel and event-tap deltas both fail here: the held pointer keeps its
@@ -79,7 +141,22 @@ it, the view holds still during the lock. Karabiner-Elements seizes the physical
 (`kIOReturnExclusiveAccess`) and re-posts through its virtual mouse, which Wind still reads. Match
 mice only: a mouse's Pointer collection repeats X/Y.
 
-## macOS Zoom clash (issue #1)
+## macOS Zoom clash (issue #1, measured with real HID 2026-10-29)
+
+- **Ctrl+scroll goes to macOS Zoom.** With macOS Zoom's scroll gesture on, a real Ctrl+scroll
+  engages macOS Zoom and never reaches Wind's tap.
+- **A 1x write does not release it.** It clears the screen, but `closeViewZoomedIn` stays 1.
+- **What releases it:** macOS Zoom's own Ctrl+scroll down, or its toggle shortcut
+  (Option-Command-8) posted by Wind. The shortcut works only while "Use keyboard shortcuts to zoom"
+  is on.
+- **Wind's fix (menu or Settings):**
+  1. If macOS Zoom is zoomed in, switch its keyboard shortcuts on if needed and send the toggle.
+  2. Switch all three shortcuts off.
+- **Switch lookup.** In Settings, a switch row is the label, then its description lines, then the
+  switch. The lookup skips text and stops at any other control.
+- **Test.** `scripts/e2e_syszoom.py` covers the whole flow.
+
+### Background
 
 macOS Zoom drives the same WindowServer zoom. Its scroll gesture (Ctrl+scroll by default) is
 handled before Wind's tap can swallow it, so it engages macOS Zoom under Wind and panning breaks
@@ -101,7 +178,53 @@ followed by its own switch.
   up before Wind writes over it.
 - Accessibility calls time out after 0.25 s (0.5 s in System Settings) so a hung app cannot stall the tap.
 
+## Pointer while the caret owns the view
+
+- macOS cannot keep a zoomed pointer outside the visible area: while the caret moves the view away,
+  it drags the pointer along the view's edge.
+- Wind hides it (`hidePointerWhileTracking`, default on) until the mouse takes the view back, when
+  it reappears at the view centre.
+- Works in Terminal, Chrome and Claude Code. TextEdit shows the cursor again as it handles keys
+  (known limitation).
+
+## Inspect
+
+- Inspect follows a **look point** (the crosshair), which starts exactly at the pointer.
+- The view follows the look point the same way it follows the pointer, so it does not move on
+  entering, and on leaving the pointer is placed on the crosshair, so it does not move then either.
+- The real pointer stays frozen and hidden. Hiding it from a background app needs the
+  `SetsCursorInBackground` connection property, then `CGDisplayHideCursor`. Wind re-hides it if
+  something such as the Dock shows it again.
+- The crosshair moves by raw mouse counts (`RawMouse`), like Wind's Inspect on Windows. Re-placing
+  the hidden pointer every tick makes pointer readback timing unreliable for measuring the hand.
+- While Inspect hides the pointer, game-lock detection is paused, so Wind's own hiding is never
+  taken for a game.
+
+## Wobble (measured 2026-10-29)
+
+The real pointer's screen offset from where the view puts it was measured each frame during
+real-HID sweeps (a `wobble` line in the verbose log), at 4x and 10x:
+- Typical (p95): 4.6 screen points while moving, which is one frame of hand motion before the
+  next view write, with or without `keepPointerSpeed`.
+- Largest single frame: 18.6 points.
+- At rest: 0.
+
+`e2e_mouse` fails if p95 rises above 8. A Wind-drawn cursor would not help: the compositor
+magnifies it like any window, while the system pointer stays sharp. See
+`~/Documents/Claude/research/wind-mac/2026-10-29-smooth-upscaling-and-cursor.md`.
+
 ## Caret following
+
+- **Parked TUI cursors.** In terminals, a caret in the last two columns of the text area is a TUI's
+  parked cursor and is ignored. Claude Code parks it at the right edge on every space.
+- **Chromium.** Chromium browsers get `AXEnhancedUserInterface` while they are frontmost (switched
+  off when they lose focus and when Wind quits). Without it Chrome sent no caret after a zoom-in;
+  turning it on only at zoom-in was too late for the first keys.
+- **Key-press poll.** Every key press while zoomed also polls the focused element 40 ms later, so
+  tracking never depends on an app's notifications alone.
+- **Tests.** `scripts/e2e_caret.py` types real keys (the Karabiner virtual keyboard in
+  `tools/vmouse`) into TextEdit, Terminal, Safari, Chrome and Claude Code, and checks the caret
+  stays in view on every key.
 
 Terminal apps move the AX caret around in bursts while redrawing (Claude Code's status line,
 hints). The tracker publishes a caret only after it has held still for 60 ms (at most 250 ms
@@ -119,4 +242,13 @@ when it never settles), so the view follows where the cursor settles. The view-o
   cannot take focus, and disassociation only applies to the frontmost app. Skipped while the screen
   is locked (`loginwindow` in front).
 - The colour filter is checked by reading the display transfer formula back (`scripts/gamma.py`).
+- The Settings window is checked by Wind driving its own window through Accessibility
+  (`SettingsUITest`, test builds only). The calls must run off the main thread, since the main
+  thread answers them.
+- **Typing tests:** macOS opens Keyboard Setup Assistant for Karabiner's virtual keyboard. Register
+  its type once with `sudo defaults write /Library/Preferences/com.apple.keyboardtype keyboardtype
+  -dict-add "592-1452-0" -int 40`. The harness also closes the assistant and refocuses the window.
+  The harness types only when the focused window is the test's own (`focusedWindow` in state.json).
+  Claude Code is started with `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` so the window keeps its
+  WINDTEST title.
 - `screencapture` captures the desktop before the zoom, so screenshots never show the zoomed view.

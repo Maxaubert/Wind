@@ -35,12 +35,17 @@ public struct Config: Codable, Equatable {
     public var lockTracking = true                // pan from raw deltas when a game locks the pointer
     public var cursorSensitivity = 1.0            // delta gain while locked
     public var panSpeed = 1.0
+    public var panSmoothMs = 0.0                  // pointer glide (off: the zoom moves in whole points anyway)
+    public var slowPrecision = false              // very slow motion keeps macOS's fine zoomed steps (speed changes on turns)
+    public var precisionBelow = 100.0             // hand speed (pt/s at 1x) below which it applies; full 1x speed at twice that
+    public var panMaxLagPt = 24.0                 // most the view may trail the pointer, screen points
 
     // Caret and focus tracking.
     public var trackCaret = true
     public var trackFocus = false
     public var trackAlign = 0                     // 0 = centred, 1 = within the edges
     public var trackGlideMs = 200.0
+    public var hidePointerWhileTracking = true    // hide the pointer while the caret owns the view
     public var trackMarginPct = 15.0
 
     // Colour.
@@ -103,6 +108,8 @@ public struct Config: Codable, Equatable {
         mouseMarginPct = min(40, max(0, mouseMarginPct))
         cursorSensitivity = min(8, max(0.1, cursorSensitivity))
         panSpeed = min(4, max(0.25, panSpeed))
+        panSmoothMs = min(200, max(0, panSmoothMs))
+        panMaxLagPt = min(40, max(0, panMaxLagPt))
         trackAlign = trackAlign == 1 ? 1 : 0
         trackGlideMs = min(2000, max(0, trackGlideMs))
         trackMarginPct = min(40, max(0, trackMarginPct))

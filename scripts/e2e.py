@@ -77,4 +77,18 @@ g = gamma()
 check("filter off restores the display", all(abs(x - 1) < 0.01 for x in g), f"rgb max {g}")
 set_config(**saved)
 
+# Settings window: Wind drives its own window through Accessibility like a person would.
+import json as _json
+_cfg = _json.load(open(os.path.join(os.path.expanduser("~/Library/Application Support/Wind"), "config.json")))
+saved_ui = {k: _cfg[k] for k in ("keepPointerSpeed", "zoomInSpeed") if k in _cfg}
+up = os.path.join(os.path.expanduser("~/Library/Application Support/Wind"), "uitest.txt")
+if os.path.exists(up): os.remove(up)
+ctl("uitest")
+for _ in range(240):                            # up to 60 s
+    if os.path.exists(up): break
+    time.sleep(0.25)
+lines = open(up).read().splitlines() if os.path.exists(up) else ["FAIL no result"]
+for l in lines: check("settings UI: " + l[5:], l.startswith("PASS"))
+set_config(**saved_ui)                          # whatever happened, the user's values come back
+
 finish()

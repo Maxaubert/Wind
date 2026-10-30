@@ -93,7 +93,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: macOS Zoom clash (issue #1)
 
     private func checkSystemZoom() {
-        let on = SystemZoom.shortcutsOn()
+        var on = SystemZoom.shortcutsOn()
+        if SystemZoom.engaged && mag.level <= 1.0001 { on.append("macOS Zoom is zoomed in") }
         if on != zoomShortcuts {
             zoomShortcuts = on
             if on.isEmpty { Log.info("macOS Zoom shortcuts: all off") }
@@ -105,6 +106,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func turnOffSystemZoom() {
         SystemZoom.turnOffShortcuts { [weak self] ok in
             Log.info("turn off macOS Zoom shortcuts: \(ok ? "done" : "incomplete")")
+            self?.mag.reassert()                                 // releasing macOS Zoom resets the shared zoom
             self?.checkSystemZoom()
             if !ok {
                 self?.alert("Could not switch off every macOS Zoom shortcut",
@@ -195,7 +197,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(item("Follow text caret", #selector(toggleCaret), on: c.trackCaret))
         menu.addItem(item("Follow keyboard focus", #selector(toggleFocus), on: c.trackFocus))
         menu.addItem(item("Mouse within edges (instead of centred)", #selector(toggleEdge), on: c.mouseAlign == 1))
-        menu.addItem(item("Smooth pixels", #selector(toggleSmooth), on: c.smoothImages))
+        menu.addItem(item("Smooth images", #selector(toggleSmooth), on: c.smoothImages))
         menu.addItem(item("Follow the mouse in games", #selector(toggleLock), on: c.lockTracking))
 
         let warm = NSMenu()
@@ -284,6 +286,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         writeState()
     }
 
+    /// Title of the focused window of the frontmost app (tests type only into their own window).
+    private func focusedWindowTitle() -> String {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return "" }
+        let el = AXUIElementCreateApplication(app.processIdentifier)
+        AXUIElementSetMessagingTimeout(el, 0.25)
+        var w: CFTypeRef?, t: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(el, kAXFocusedWindowAttribute as CFString, &w) == .success, let w,
+              AXUIElementCopyAttributeValue(w as! AXUIElement, kAXTitleAttribute as CFString, &t) == .success else { return "" }
+        return (app.localizedName ?? "") + ": " + ((t as? String) ?? "")
+    }
+
     func writeState() {
         let z = SkyLight.get()
         let p = CGEvent(source: nil)?.location ?? .zero
@@ -292,6 +305,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             "level": mag.level, "center": [mag.currentCenter.x, mag.currentCenter.y],
             "owner": "\(mag.viewOwner)", "locked": mag.isLocked, "inspect": mag.inspect, "paused": mag.isPaused,
             "pointer": [p.x, p.y],
+            "focusedWindow": focusedWindowTitle(),
+            "cursorVisible": SkyLight.cursorVisible, "look": [mag.inspectLookPoint.x, mag.inspectLookPoint.y],
             "sky": z.map { ["center": [$0.center.x, $0.center.y], "scale": $0.scale, "smooth": $0.smooth] } ?? NSNull(),
             "caret": ["kind": "\(mag.caret.snapshot.kind)", "seq": mag.caret.snapshot.seq,
                       "rect": [mag.caret.snapshot.rect.l, mag.caret.snapshot.rect.t, mag.caret.snapshot.rect.r, mag.caret.snapshot.rect.b]],

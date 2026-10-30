@@ -12,6 +12,10 @@ How the macOS zoom behaves and why: `docs/architecture.md`. Keep it in step with
 - `scripts/build.sh test`: `build/test/Wind.app` with the e2e command channel compiled in.
 - `python3 scripts/e2e.py`: e2e checks; builds and runs the test app in place of the installed one, restores it after.
 - `python3 scripts/e2e_mouse.py`: real-HID pointer e2e via `tools/vmouse` (Karabiner, sudo).
+- `python3 scripts/e2e_caret.py`: real typing in TextEdit, Terminal, Safari, Chrome, Claude Code
+  (unlocked screen; types only into its own WINDTEST window, never presses Enter).
+- `python3 scripts/e2e_syszoom.py`: macOS Zoom clash and Wind's fix (opens System Settings, leaves
+  every macOS Zoom shortcut off).
 - Run all three after touching `Magnifier.swift`, `SkyLight.swift` or `CaretTracker.swift`.
 
 ## Gotchas

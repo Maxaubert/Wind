@@ -37,10 +37,57 @@ enum SystemZoom {
         bool("CGDisableCursorLocationMagnification", kCFPreferencesAnyApplication) != true
     }
 
-    /// Switch every macOS Zoom shortcut off, one switch at a time, then close System Settings
-    /// if Wind opened it.
+    /// Release an engaged macOS Zoom: its own toggle shortcut (Option-Command-8) works when posted
+    /// by Wind, but only while "Use keyboard shortcuts to zoom" is on (measured 2026-10-29).
+    /// A 1x zoom write clears the screen but leaves macOS Zoom believing it is zoomed in.
+    static func releaseEngaged(completion: @escaping () -> Void) {
+        guard engaged else { completion(); return }
+        // Only the default toggle (Option-Command-8, symbolic hotkey 15) is sent; a remapped or
+        // disabled one would go to the frontmost app instead.
+        guard toggleShortcutIsDefault else {
+            Log.error("macOS Zoom is zoomed in but its toggle shortcut is remapped or off; release it with Ctrl+scroll down")
+            completion(); return
+        }
+        let press = {
+            let src = CGEventSource(stateID: .hidSystemState)
+            for down in [true, false] {
+                let e = CGEvent(keyboardEventSource: src, virtualKey: 0x1C, keyDown: down)   // the 8 key
+                e?.flags = [.maskAlternate, .maskCommand]
+                e?.post(tap: .cghidEventTap)
+            }
+            Log.info("macOS Zoom was zoomed in: sent its toggle shortcut")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { completion() }
+        }
+        if bool("closeViewHotkeysEnabled") == true { press(); return }
+        SettingsToggle.set(pane: SettingsToggle.zoomPane, label: keyboardLabel, on: true) { r in
+            if case .notFound = r { completion(); return }        // never send it into another app
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { press() }
+        }
+    }
+
+    /// Symbolic hotkey 15 (Zoom on/off) keeps its default key, Option-Command-8. Whether it is
+    /// enabled follows the "Use keyboard shortcuts to zoom" switch, which the release turns on.
+    static var toggleShortcutIsDefault: Bool {
+        guard let all = UserDefaults(suiteName: "com.apple.symbolichotkeys")?.dictionary(forKey: "AppleSymbolicHotKeys"),
+              let hk = all["15"] as? [String: Any] else { return true }
+        guard let value = hk["value"] as? [String: Any], let p = value["parameters"] as? [Int], p.count == 3 else { return true }
+        return p[1] == 28 && p[2] == 0x180000                  // the 8 key (kVK_ANSI_8), Option+Command
+    }
+
+    private static var inFlight = false
+
+    /// Release macOS Zoom if it is zoomed in, then switch every macOS Zoom shortcut off, one
+    /// switch at a time, and close System Settings if Wind opened it.
     static func turnOffShortcuts(completion: @escaping (Bool) -> Void) {
+        guard !inFlight else { return }                         // a second click while one runs
+        inFlight = true
         let wasRunning = !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.systempreferences").isEmpty
+        releaseEngaged {
+            turnOffSwitches(wasRunning: wasRunning) { ok in inFlight = false; completion(ok) }
+        }
+    }
+
+    private static func turnOffSwitches(wasRunning: Bool, completion: @escaping (Bool) -> Void) {
         let labels = [keyboardLabel, trackpadLabel, scrollLabel]
         var ok = true
         func next(_ i: Int) {
@@ -48,7 +95,7 @@ enum SystemZoom {
                 if !wasRunning { closeSettings() }
                 // System Settings writes the preferences a moment after the press.
                 func verify(_ tries: Int) {
-                    if shortcutsOn().isEmpty || tries == 0 { completion(ok && shortcutsOn().isEmpty); return }
+                    if (shortcutsOn().isEmpty && !engaged) || tries == 0 { completion(ok && shortcutsOn().isEmpty && !engaged); return }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { verify(tries - 1) }
                 }
                 verify(8)

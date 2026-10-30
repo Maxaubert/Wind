@@ -65,12 +65,15 @@ enum SettingsToggle {
         if depth > 40 { return nil }
         let kids = children(el)
         if isSwitch(el) && text(el).contains(label) { return el }
-        // Settings lays a pane out flat: each label is followed by its own switch. Take the first
-        // switch after the label, but only if no other label comes first (that row has no switch).
+        // Settings lays a pane out flat: each label is followed by its description lines and then
+        // its own switch. Take the first switch after the label, skipping text, but stop at any
+        // other control (a row with a pop-up instead of a switch must not borrow the next row's).
         if let i = kids.firstIndex(where: { !isSwitch($0) && text($0).contains(label) }) {
-            for k in kids[(i + 1)...] {
+            // A row has a few description lines at most: never walk into the next rows.
+            for k in kids[(i + 1)...].prefix(5) {
                 if isSwitch(k) { return k }
-                if !text(k).isEmpty { break }
+                let role = value(k, kAXRoleAttribute) as? String ?? ""
+                if role != (kAXStaticTextRole as String) && role != (kAXGroupRole as String) { break }
             }
         }
         for k in kids {

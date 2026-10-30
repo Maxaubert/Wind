@@ -10,10 +10,17 @@ def relaunch_with_channel():
     """The command channel exists only in test builds: build build/test/Wind.app, run it instead of
     the installed Wind, and bring the installed one back on exit."""
     subprocess.run([os.path.join(ROOT, "scripts/build.sh"), "test"], check=True, stdout=subprocess.DEVNULL)
-    subprocess.run(["pkill", "-x", "Wind"]); time.sleep(0.8)
+    kill_all_wind()
     subprocess.run(["open", "-n", os.path.join(ROOT, "build/test/Wind.app")]); time.sleep(2.0)
-    atexit.register(lambda: (subprocess.run(["pkill", "-x", "Wind"]), time.sleep(0.8),
-                             subprocess.run(["open", "-a", "/Applications/Wind.app"])))
+    atexit.register(lambda: (kill_all_wind(), subprocess.run(["open", "-a", "/Applications/Wind.app"])))
+
+def kill_all_wind():
+    """Every Wind (installed or test build) must be gone before another starts: a test copy whose
+    main thread hung ignores SIGTERM (its handler runs on main) and survived a night next to the
+    installed one. SIGTERM first, then SIGKILL."""
+    subprocess.run(["pkill", "-x", "Wind"]); time.sleep(0.8)
+    if subprocess.run(["pgrep", "-x", "Wind"], capture_output=True).returncode == 0:
+        subprocess.run(["pkill", "-9", "-x", "Wind"]); time.sleep(0.5)
 
 def ctl(cmd, wait=0.0):
     p = os.path.join(D, "state.json")
@@ -36,6 +43,9 @@ def set_config(**kw):
     with open(p) as f: c = json.load(f)
     saved = {k: c.get(k) for k in kw}
     c.update(kw)
+    # Restoring a key that was absent must remove it, not write null (a null broke config parsing).
+    for k, v in kw.items():
+        if v is None: c.pop(k, None)
     with open(p, "w") as f: json.dump(c, f, indent=2)
     time.sleep(0.5)
     return saved

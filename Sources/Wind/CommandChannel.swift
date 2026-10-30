@@ -49,8 +49,28 @@ enum CommandChannel {
                 SettingsToggle.set(pane: pane, label: label, on: w[1] == "on") { r in Log.info("settoggle result: \(r)") }
             }
         case "settings": app.perform(Selector(("openSettings")))
+        case "uitest": SettingsUITest.run(openSettings: { app.perform(Selector(("openSettings"))) })
         case "login": app.perform(Selector(("toggleLogin")))
         case "fixzoom": app.perform(Selector(("turnOffSystemZoom")))
+        case "pressbutton":
+            // pressbutton <bundle id> <button title>: dismiss a dialog a test left behind.
+            if w.count > 2, let app = NSRunningApplication.runningApplications(withBundleIdentifier: w[1]).first {
+                let title = w[2...].joined(separator: " ")
+                let root = AXUIElementCreateApplication(app.processIdentifier)
+                AXUIElementSetMessagingTimeout(root, 0.5)
+                func find(_ el: AXUIElement, _ d: Int) -> AXUIElement? {
+                    if d > 12 { return nil }
+                    var r: CFTypeRef?, t: CFTypeRef?, k: CFTypeRef?
+                    AXUIElementCopyAttributeValue(el, kAXRoleAttribute as CFString, &r)
+                    AXUIElementCopyAttributeValue(el, kAXTitleAttribute as CFString, &t)
+                    if (r as? String) == "AXButton", (t as? String) == title { return el }
+                    AXUIElementCopyAttributeValue(el, kAXChildrenAttribute as CFString, &k)
+                    for c in (k as? [AXUIElement]) ?? [] { if let f = find(c, d + 1) { return f } }
+                    return nil
+                }
+                if let b = find(root, 0) { Log.info("press \(title): \(AXUIElementPerformAction(b, kAXPressAction as CFString).rawValue)") }
+                else { Log.info("press \(title): not found") }
+            }
         case "quit": NSApp.terminate(nil)
         default: break
         }
