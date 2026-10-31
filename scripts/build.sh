@@ -12,6 +12,7 @@ if [[ "${1:-}" == "test" ]]; then
   FLAGS+=(-Xswiftc -DWIND_TEST_CHANNEL --scratch-path .build/test)
   APP=build/test/Wind.app
 fi
+mkdir -p .build                                 # a fresh checkout or worktree has none yet
 # A failed compile must stop here: never package a stale binary from an earlier build.
 if ! swift build "${FLAGS[@]}" > .build/last-build.log 2>&1; then
   grep -E 'error' .build/last-build.log | head -20
