@@ -535,3 +535,10 @@ magnified in a click-through overlay (level screenSaver+1) above everything (`Dr
   - Both ways the other engine shows the same view at once. Restarting from "1x" made the next level
     write pin the view to the top-left corner, and macOS took the pointer to (0, 0).
 - Not done yet: multiple displays, DRM video (captured black).
+
+## macOS's text caret grows for a moment (not Wind, 2026-10-31)
+Clicking into a text field, macOS's caret briefly grows and shows the input-language / Caps Lock
+indicator; the zoom magnifies it. Turned off on the owner's Mac with
+`defaults write kCFPreferencesAnyApplication TSMLanguageIndicatorEnabled 0` (no password; apps pick it up
+as they restart, or after logging out; undo with 1). The whole newer caret is a system feature flag
+(`redesigned_text_cursor` in /Library/Preferences/FeatureFlags/Domain/UIKit.plist, admin and restart).
