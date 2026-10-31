@@ -256,6 +256,19 @@ not.
 - Measured: `edge_truth` passes at 3x, 5.25x and 8x on both edges; the edges keep 1x speed (69.5 pt
   against 68.8). The explorer's edge scenarios show 1 snap of 0.8 screen pt per run, as before.
 
+### Zoom-pan at a pinned edge (2026-10-31)
+Owner report: panning while zooming with the pointer near an edge shook much more than elsewhere.
+- **Cause.** The view holds against the hand's direction rather than step back a fraction (a rule
+  against one-point back-steps). Zooming in at a pinned edge, the edge's clamp itself moves outward,
+  which reads as "against the hand" when the hand moves toward the centre. The view held a fraction
+  inside the new clamp; the next frame's level write pinned it to the edge again. So the view went
+  back and forth every frame (writes 1683.49, 1681.88, 1684.96, ... at 4x).
+- **Fix.** The hold does not apply where the target is an edge's clamp.
+- **Detector.** `edge_truth.py` also zooms in while panning from near each edge toward the centre.
+  With the view pinned, each frame is the last one scaled about that edge. A pair that a scale plus
+  a free shift fits twice as well as the scale about the edge alone is a sideways jump. Main had 7
+  such frames at the left edge at 4x; with the fix, 0-1 at 2.5x, 4x and 8x on both edges.
+
 ## Wobble (measured 2026-10-29)
 
 The real pointer's screen offset from where the view puts it was measured each frame during

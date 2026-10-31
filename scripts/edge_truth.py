@@ -65,6 +65,38 @@ def run(name, warp, lv, move):
     moved = [x for x in sh if x != 0]
     return len(F), sh, moved, s
 
+def zoom_fit(p, q, edge_right):
+    """For a frame pair: (residual scaling about the edge, residual with a free shift, scale)."""
+    n = len(p); x = np.arange(n, dtype=np.float64)
+    fx = float(n - 1) if edge_right else 0.0
+    def err(r, sh):
+        src = (x - fx - sh) / r + fx                       # where q[x] comes from in p
+        ok = (src >= 0) & (src <= n - 1)
+        if ok.sum() < n * 0.5: return 1e18
+        return np.abs(q[ok] - np.interp(src[ok], x, p)).mean()
+    rs = np.arange(0.990, 1.0301, 0.001)
+    pin = min((err(r, 0.0), r) for r in rs)
+    free = min(err(r, sh) for r in rs[max(0, int(round((pin[1] - 0.990) / 0.001)) - 4):][:9] for sh in np.arange(-8, 8.5, 1.0) if sh)
+    return pin[0], free, pin[1]
+
+def zoom_run(name, warp, lv, move, edge_right):
+    W.ctl("level 1"); time.sleep(0.3); W.ctl(f"warp {warp[0]} {warp[1]}"); time.sleep(0.2); W.ctl(f"level {lv}"); time.sleep(0.6)
+    out = os.path.join(OUT, f"{name}_{lv}.bin")
+    cap = subprocess.Popen([CAP, str(a.secs), out], stdout=subprocess.PIPE, text=True)
+    cap.stdout.readline(); time.sleep(0.2)
+    W.ctl("press zoomIn")
+    vm.stdin.write(move + "\n"); vm.stdin.flush(); vm.stdout.readline()
+    W.ctl("release zoomIn")
+    cap.wait()
+    F = load(out)
+    bad = total = 0
+    for k in range(len(F) - 1):
+        e_pin, e_free, r = zoom_fit(F[k][1].astype(np.float64), F[k + 1][1].astype(np.float64), edge_right)
+        if r <= 1.0005: continue                          # not zooming in this pair
+        total += 1
+        if e_free < 0.5 * e_pin: bad += 1
+    return len(F), bad, total
+
 ok_all = True
 for lv in [float(x) for x in a.levels.split(",")]:
     half = 1920 / lv / 2
@@ -76,6 +108,14 @@ for lv in [float(x) for x in a.levels.split(",")]:
         pinned_ok = abs(s["sky"]["center"][0] - (half if d > 0 else 1920 - half)) < 1.5
         W.check(f"{name} edge at {lv}x: the pinned view does not move on screen", len(moved) <= 1 and frames > 50 and pinned_ok,
                 f"{frames} frames, {len(moved)} shifted ({pct:.1f}%) by {sorted(set(moved))[:8]} px; view {s['sky']['center']} pinned {pinned_ok}")
+    # Zoom-pan at a pinned edge (owner 2026-10-31: "zoom-pan near edges way more shaking"): pointer
+    # near the edge, pan toward the centre while zooming in. The view stays pinned, so each frame is
+    # the last one scaled about that edge; a frame the view jumps sideways is fit much better by a
+    # scale plus a free shift than by the scale about the edge alone.
+    for name, warp, d in (("left", (int(0.3 * half), 540), 1), ("right", (int(1920 - 0.3 * half), 540), -1)):
+        frames, bad, total = zoom_run(f"zoom{name}", warp, lv, f"move {d} 0 90 16", 0 if d > 0 else 1)
+        W.check(f"{name} edge zooming in at {lv}x: the pinned view only scales about the edge", bad <= 1 and total > 30,
+                f"{frames} frames, {total} zooming pairs, {bad} with a sideways jump")
     # Control: mid-screen pan, the view must move.
     frames, sh, moved, s = run("mid", (900, 540), lv, "move 2 0 60 8")
     W.check(f"control at {lv}x: a mid-screen pan moves the view on screen", len(moved) > 10, f"{frames} frames, {len(moved)} shifted")

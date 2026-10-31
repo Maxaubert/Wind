@@ -710,10 +710,18 @@ final class Magnifier {
                 // Small corrections to the target (a bounded read, a discounted push) can pull it back a
                 // fraction across a whole point, which showed as a one-point back-step against the pan.
                 // Against the way the raw counts say the hand is going, the view holds instead.
+                // Not where the target is a screen edge's clamp: zooming, the clamp itself moves (out
+                // toward the edge when zooming in), and holding against it left the view a fraction
+                // inside the new clamp while the next level write pinned it again; at a pinned edge
+                // while zooming and panning the view went back and forth every frame (owner 2026-10-31:
+                // "near edges way more shaking").
                 if let rs = rawStep, !returning, !DrawZoom.enabled {   // whole-point zoom only
                     let dir = Pt(rs.x != 0 ? rs.x : (prevRawStep?.x ?? 0), rs.y != 0 ? rs.y : (prevRawStep?.y ?? 0))
-                    if dir.x != 0 && (want.x - center.x) * dir.x < 0 && abs(want.x - center.x) < 1.5 { want.x = center.x }
-                    if dir.y != 0 && (want.y - center.y) * dir.y < 0 && abs(want.y - center.y) < 1.5 { want.y = center.y }
+                    let hw = screen.w / lv / 2, hh = screen.h / lv / 2
+                    let edgeX = want.x <= hw + 1e-6 || want.x >= screen.w - hw - 1e-6
+                    let edgeY = want.y <= hh + 1e-6 || want.y >= screen.h - hh - 1e-6
+                    if !edgeX && dir.x != 0 && (want.x - center.x) * dir.x < 0 && abs(want.x - center.x) < 1.5 { want.x = center.x }
+                    if !edgeY && dir.y != 0 && (want.y - center.y) * dir.y < 0 && abs(want.y - center.y) < 1.5 { want.y = center.y }
                 }
                 // After a carry the view already sits where it should, on whole points. A
                 // keepPointer=true write that moved the floored centre after the carry, in the same
