@@ -41,6 +41,7 @@ public struct Config: Codable, Equatable {
     public var slowPrecision = false              // very slow motion keeps macOS's fine zoomed steps (speed changes on turns)
     public var precisionBelow = 100.0             // hand speed (pt/s at 1x) below which it applies; full 1x speed at twice that
     public var panMaxLagPt = 24.0                 // most the view may trail the pointer, screen points
+    public var cursor = "system"                 // "system" = the real cursor; "wind" = Wind draws it (steady on whole-point zoom)
     public var slowPanGlide = false               // experimental: WindowServer glides each whole-point step of slow pans (issue #13)
 
     // Caret and focus tracking.

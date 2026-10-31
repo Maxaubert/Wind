@@ -14,11 +14,13 @@ def take_screen():
     global _lock
     if _lock: return                           # this run already holds it
     import fcntl
-    _lock = open(os.path.join(ROOT, "build", ".e2e.lock"), "w")
+    # One lock for the whole machine (worktrees have their own build/), and runs queue for it.
+    _lock = open(os.path.expanduser("~/Library/Caches/windtest-screen.lock"), "w")
     try:
         fcntl.flock(_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
-        sys.exit("another Wind test run is using the screen; wait for it to finish")
+        print("another Wind test run is using the screen; waiting for it", flush=True)
+        fcntl.flock(_lock, fcntl.LOCK_EX)
 
 def relaunch_with_channel(direct=False, extra=None):
     """The command channel exists only in test builds: build build/test/Wind.app, run it instead of
@@ -28,6 +30,8 @@ def relaunch_with_channel(direct=False, extra=None):
     # WIND_ENGINE=draw runs any suite on the draw engine (started directly: no permission prompt).
     if os.environ.get("WIND_ENGINE"):
         extra = dict(extra or {}, engine=os.environ["WIND_ENGINE"]); direct = True
+    if os.environ.get("WIND_CURSOR"):              # WIND_CURSOR=wind: Wind's own cursor
+        extra = dict(extra or {}, cursor=os.environ["WIND_CURSOR"])
     subprocess.run([os.path.join(ROOT, "scripts/build.sh"), "test"], check=True, stdout=subprocess.DEVNULL)
     kill_all_wind()
     # Checks assume Wind's defaults for the feel settings, not the owner's own (a slowed zoom made the
@@ -62,7 +66,8 @@ def relaunch_with_channel(direct=False, extra=None):
 # Feel settings the checks expect at their defaults (removed from the config while tests run).
 TEST_DEFAULTS_DROP = ["zoomInSpeed", "zoomOutSpeed", "wheelZoomSpeed", "smoothZoom", "smoothZoomAccel",
                       "smoothZoomRamp", "zoomEaseOutMs", "keepPointerSpeed", "panSmoothMs", "slowPrecision",
-                      "mouseAlign", "lockTracking", "cursorSensitivity", "hidePointerWhileTracking", "logLevel"]
+                      "mouseAlign", "lockTracking", "cursorSensitivity", "hidePointerWhileTracking", "logLevel",
+                      "engine", "slowPanGlide", "cursor"]   # transform engine unless WIND_ENGINE says otherwise
 
 def kill_all_wind():
     """Every Wind (installed or test build) must be gone before another starts: a test copy whose

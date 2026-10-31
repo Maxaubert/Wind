@@ -299,7 +299,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func writeState() {
         let z = SkyLight.get()
-        let p = CGEvent(source: nil)?.location ?? .zero
+        let p = Magnifier.pointer() ?? .zero
         let s: [String: Any] = [
             "started": started, "axTrusted": AXIsProcessTrusted(), "tap": mag.tapActive,
             "level": mag.level, "center": [mag.currentCenter.x, mag.currentCenter.y],
@@ -307,6 +307,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             "pointer": [p.x, p.y],
             "focusedWindow": focusedWindowTitle(),
             "cursorVisible": SkyLight.cursorVisible, "look": [mag.inspectLookPoint.x, mag.inspectLookPoint.y],
+            "realCursorVisible": SkyLight.realCursorVisible,
+            "windCursor": mag.windCursorAt.map { [$0.x, $0.y] } ?? [],
+            "windCursorWindow": mag.windCursor.serverBounds.map { [$0.minX, $0.minY, $0.width, $0.height] } ?? [],
             "cross": mag.crosshairAt.map { [$0.x, $0.y] } ?? [],
             "sky": z.map { ["center": [$0.center.x, $0.center.y], "scale": $0.scale, "smooth": $0.smooth] } ?? NSNull(),
             "caret": ["kind": "\(mag.caret.snapshot.kind)", "seq": mag.caret.snapshot.seq,

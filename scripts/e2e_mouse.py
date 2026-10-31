@@ -84,7 +84,8 @@ for lv in (4, 10):
         n0 = sum(1 for _ in open(LOG))
         vm.stdin.write(f"move {d[0]} {d[1]} 90 16\n"); vm.stdin.flush(); vm.stdout.readline(); time.sleep(0.3)
         rows = [l.split() for l in open(LOG).readlines()[n0:] if " view " in l][5:]
-        cx = [float(r[2]) for r in rows]; cy = [float(r[3]) for r in rows]
+        # What is drawn: the zoom floors the centre (Wind logs its exact, fractional one).
+        cx = [math.floor(float(r[2])) for r in rows]; cy = [math.floor(float(r[3])) for r in rows]
         st = [((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5 * lv for x1, y1, x2, y2 in zip(cx, cy, cx[1:], cy[1:])][:-25]
         jud = sorted(abs(b - a) for a, b in zip(st, st[1:]))
         p90 = jud[int(len(jud) * 0.9)] if jud else 99
@@ -228,6 +229,30 @@ else:
     mv(-10, 0); time.sleep(0.4)
     c = ctl("state")
     check("game lock released afterwards", not c["locked"], f"locked {c['locked']}")
+
+# Wind's own cursor (cursor = "wind"): the real cursor is hidden while zoomed and Wind draws the
+# current one in a window, steady on the view centre while the view follows the pointer.
+saved_c = set_config(cursor="wind", logLevel=2)
+ctl("level 1"); time.sleep(0.3); ctl("warp 800 500"); time.sleep(0.2); ctl("level 8"); time.sleep(0.5)
+offs = []
+for _ in range(12):
+    mv(3, 2, 2, 8); s = ctl("state")
+    if s["windCursor"]: offs.append(((s["windCursor"][0] - math.floor(s["sky"]["center"][0])) * 8, (s["windCursor"][1] - math.floor(s["sky"]["center"][1])) * 8))
+check("wind cursor: the real cursor is hidden while zoomed", not ctl("state")["realCursorVisible"])
+spread = max((max(o[i] for o in offs) - min(o[i] for o in offs)) for i in (0, 1)) if offs else 99
+check("wind cursor: drawn steady on the shown view while panning", len(offs) >= 10 and spread < 0.5, f"{len(offs)} reads, screen offset spread {spread:.2f} px")
+s = ctl("state"); b = s["windCursorWindow"]
+check("wind cursor: its window is on screen at the drawn point", bool(b) and b[0] <= s["windCursor"][0] <= b[0] + b[2] and b[1] <= s["windCursor"][1] <= b[1] + b[3], f"window {b} cursor {s['windCursor']}")
+ctl("level 1"); time.sleep(0.5)
+check("wind cursor: the real cursor is back at 1x", ctl("state")["realCursorVisible"])
+if not screen_locked():
+    ctl("level 1"); time.sleep(0.3); ctl("warp 800 500"); time.sleep(0.2); ctl("level 4"); time.sleep(0.4)
+    g = subprocess.Popen(["open", "-W", GAME, "--args", "4"]); time.sleep(1.5)
+    for _ in range(4): mv(10, 0); time.sleep(0.05)
+    check("wind cursor: game lock still detected", ctl("state")["locked"])
+    g.wait(); time.sleep(0.5); mv(-10, 0); time.sleep(0.4)
+    check("wind cursor: game lock released afterwards", not ctl("state")["locked"])
+set_config(**saved_c)
 
 ctl("level 1")
 set_config(**saved)

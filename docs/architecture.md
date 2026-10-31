@@ -229,6 +229,33 @@ pass runs only for motion that arrived during the write (an unclosable gap re-pl
 every frame and it shook in place). Measured at 5.3x to 24x: moves along and away from every edge
 keep the 1x distance.
 
+### Pinned edges: warp carries (2026-10-31)
+Owner report: with the view pinned to an edge and the pointer off centre, panning back toward the
+centre shook, "like the window wants to move but isn't allowed"; with Wind's compensation off it did
+not.
+- **Cause.** A carry by view writes must move the view off the edge and back within the tick
+  (183.5, 184.5, then 181.8 at 5.25x, where the edge is 182.86; 1800.5, 1799.5, 1800 at the right
+  edge at 8x). When those writes reached different frames, the pinned view jumped out and back.
+- **Detector.** `scripts/edge_truth.py` + `tools/viewcap` capture the zoomed screen and compare
+  per-frame column profiles. A shift only counts when it explains the change: a real view move leaves
+  0.06-0.22 of the unshifted difference, content changing in place (a scrollbar fading in under the
+  pointer) 0.8-1. It fails while the old carries run (1-4 shifted frames per 2 s at the right edge).
+  With compensation off (`EDGE_BASELINE=1`) one content frame remains at the right edge at 8x, and
+  with the fix it is the same.
+- **A zoomed warp sets the cursor's SCREEN position.** From the next hand motion on, the pointer reads
+  view origin + target / level, exact to 1/level of a point, and the view does not move. Until that
+  motion a read returns the target itself (`Magnifier.pointer()` corrects that). Warps are whole
+  numbers on the wire (`SLSWarpCursorPosition` converts with fcvtzs), and the 250 ms event
+  suppression after a warp is turned off through `CGEventSource.localEventsSuppressionInterval`.
+- **So at a pinned edge, on a carried axis, the carry is a warp** to the target's screen position:
+  no view write at all. A warp is absolute, so hand motion that arrived since the tick's read is
+  added from a fresh read (it was lost as a small step back). It is used only where the view shows
+  the target (Inspect pans away from its frozen pointer; a warp there threw it to x = 0).
+- Dead ends: a write past the clamp does not move the pointer (macOS carries by the shown centre),
+  and running the frame's work 3 ms after the display link did not reduce the shake.
+- Measured: `edge_truth` passes at 3x, 5.25x and 8x on both edges; the edges keep 1x speed (69.5 pt
+  against 68.8). The explorer's edge scenarios show 1 snap of 0.8 screen pt per run, as before.
+
 ## Wobble (measured 2026-10-29)
 
 The real pointer's screen offset from where the view puts it was measured each frame during
@@ -238,9 +265,71 @@ real-HID sweeps (a `wobble` line in the verbose log), at 4x and 10x:
 - Largest single frame: 18.6 points.
 - At rest: 0.
 
-`e2e_mouse` fails if p95 rises above 8. A Wind-drawn cursor would not help: the compositor
-magnifies it like any window, while the system pointer stays sharp. See
-`~/Documents/Claude/research/wind-mac/2026-10-29-smooth-upscaling-and-cursor.md`.
+`e2e_mouse` fails if p95 rises above 8.
+
+### Wind's own cursor (experimental, `cursor = "wind"`, 2026-10-31)
+With the view locked on the pointer, the real cursor still wobbles: the zoom shows the whole-point
+centre, so the cursor sits `frac(pointer) * level` pixels off the screen centre and that changes
+every frame (owner: "zoom-pan still wobbles"). Measured as the per-frame change of the cursor's
+screen offset divided by the level: mean 0.25-0.65 pt, p95 1.0-1.6 pt, panning or zooming.
+- Wind hides the real cursor (as the draw engine does) and draws the current one (`NSCursor.currentSystem`,
+  pixel-compared every 0.1 s) in a click-through window at `pointer - exact centre + shown centre`:
+  where the cursor would be if the zoom showed the exact centre. Following the pointer, the exact
+  centre is the pointer itself, so the cursor stays on the screen centre: 0.00 by the same measure.
+  Clicks still land at the real pointer, under one desktop point from the drawn hotspot.
+- It is an image layer in a click-through window that covers the screen and never moves; only the
+  layer moves. Before EVERY view write of a frame (carries and level writes come before the frame's
+  last write) the layer is moved to where that write shows the cursor and the move is flushed
+  (`SkyLight.beforeWrite`), except a carry's first write. Inspect's crosshair is built the same way. See "Seeing the zoomed screen".
+- Cost: the compositor magnifies it like any window, so it is softer than the system pointer at
+  high zoom (`research/wind-mac/2026-10-29-smooth-upscaling-and-cursor.md`).
+- Game lock: "hidden" cannot tell a game any more, so it uses the draw engine's rule (the pointer
+  stops while counts come, 6 ticks), and once locked it lets go only after 3 ticks of the pointer
+  following the hand (a view shift drags the held pointer, sometimes a tick late).
+- `e2e_mouse` checks it against WindowServer (window bounds, real cursor hidden and back at 1x,
+  game lock); `WIND_CURSOR=wind` runs any suite with it.
+
+### Seeing the zoomed screen (ground truth, 2026-10-31)
+Wind's model said its cursor was steady (0.00) while the owner saw it wobble a lot. The zoomed
+picture CAN be captured: a ScreenCaptureKit stream with `showsCursor = true` whose filter excludes
+only a process without windows is WindowServer's zoomed output, one frame per refresh (144 Hz). A
+filter that excludes any app with a window on screen, or `showsCursor = false`, gives the unzoomed
+desktop, as does `screencapture` (`SLSSetZoomScreenShareOptions` changes nothing here).
+`scripts/cursor_truth.py` uses it: the test build draws a magenta block for Wind's cursor and the
+crosshair (`WIND_CURSOR_PROBE`), `tools/cursorcap` finds it in every frame, and the run fails when
+more than 3% of frames jump by over half a desktop point. Findings (virtual mouse, 4x/7.3x/12x):
+- **A moved window reaches the screen 1-2 frames after the zoom write.** The old cursor (a small
+  window moved with `setFrame` and flushed before the write) jumped whole points times the level on
+  90-97% of frames while panning (mean 1.4-5.7 pt per frame), the crosshair on 31-90%. A layer
+  moved inside a window that never moves lands with the zoom.
+- **Every write needs the cursor moved first.** Carries and level writes come before the cursor
+  was moved, so a frame could show the new view with the old cursor place (0.3-6% of frames).
+- `+[CATransaction synchronize]` after the flush made it worse (the zoom write then missed the frame
+  the layer made: 1-6% of frames jumped ahead).
+- A carry's first write (keepPointer=true, overwritten at once) is not followed: two cursor moves
+  in one frame let the second miss it (a 95 pt crosshair flash in Inspect).
+- Now: cursor and crosshair 0-1.2% of frames, all one-frame blips that come straight back. Wind's display
+  link fires about 0.4 ms before the frame's display time, at the moment WindowServer starts its
+  update, so the layer commit and the zoom write race it. Running the frame's work 2-4 ms after the
+  link fires (`wcur delay 2`, test channel) left 1 blip in 4 runs against 9; not on by default
+  (its effect on latency is not measured).
+- The native cursor CAN be measured this way when it has a findable shape. Test-only, a set cursor
+  that is a magenta block (Wind sets it with SetsCursorInBackground, as the nudge experiment on
+  branch `try/native-cursor-subpoint` did) shows the real cursor's wobble on screen: 21-41% of frames
+  jump at 4x and 7.3x (slow and medium pans, zoom-pan 15-24%). That is the owner's report, now seen.
+  Nudging the cursor's hotspot each frame by the fractional offset (that branch) made it WORSE, at
+  40-58%: a cursor image change and the zoom change reach the screen on different frames. Not kept.
+- An unzoomed cursor window is not possible: `kCGSWindowIsMagicZoomTagBit` is bit 43 (SkyLight's
+  tag-name table is indexed by bit, 16 bytes per entry), and `SLSSetWindowTags` on an own window
+  returns 0 but leaves the tags unchanged (measured: the block stayed magnified).
+
+### Whole drawn points (2026-10-31)
+The carry places the pointer on the aim's whole point (`floor(aim) - floor(pointer)`) in the hand's
+direction once the aim is half a point away; toward-zero left it up to a point behind, and native
+motion plus a carry then crossed two drawn points in one frame (slow pan at 4x: 0,2,0,1 instead of
+1,1,1). The smoothed aim used while the level changes trails the hand target by at most 1.5 pt (from
+rest it trailed by 9 pt and carried it in one frame). Explorer, zooming scenarios at 2.2/7.3/15.7x:
+12 flags against main's 24, no snaps or back-steps.
 
 ## Caret following
 

@@ -109,6 +109,10 @@ struct SettingsView: View {
             Toggle("Fine steps when moving slowly (slows down on turns)", isOn: m.bind(\.slowPrecision))
             Toggle("Keep pointer speed when zoomed", isOn: m.bind(\.keepPointerSpeed))
             Toggle("Smooth slow pans (experimental)", isOn: m.bind(\.slowPanGlide))
+            Picker("Cursor while zoomed", selection: m.bind(\.cursor)) {
+                Text("macOS cursor").tag("system")
+                Text("Wind's cursor (experimental)").tag("wind")
+            }
             Text("macOS slows the pointer by the zoom level; Wind keeps the speed you have at 1x.")
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("Follow the mouse when a game locks the pointer", isOn: m.bind(\.lockTracking))

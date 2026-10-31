@@ -40,7 +40,13 @@ enum CommandChannel {
             }
         case "lock": mag.forceLock(w.count > 1 && w[1] == "on")
         case "cursor": SkyLight.setCursorHidden(w.count > 1 && w[1] == "hide")   // like macOS hiding it after typing
-        case "mods": mag.testMods = w.count > 1 ? parseBind(w[1])?.mods : nil   // mods ctrl | mods (clear)
+        case "wcur":                                    // wcur sync|pre on|off: Wind's cursor timing (A/B tests)
+            if w.count > 2 {
+                if w[1] == "sync" { WindCursor.syncCommit = w[2] == "on" }
+                if w[1] == "pre" { WindCursor.preCommit = w[2] == "on" }
+                if w[1] == "delay", let ms = Double(w[2]) { Magnifier.tickDelay = ms / 1000 }
+            }
+        case "mods":mag.testMods = w.count > 1 ? parseBind(w[1])?.mods : nil   // mods ctrl | mods (clear)
         case "settoggle":
             // settoggle on|off <label>: only the switches Wind itself manages (security review:
             // the channel must not become a general System Settings remote).
@@ -89,14 +95,14 @@ enum CommandChannel {
             e?.post(tap: .cghidEventTap)
         case "mouse":
             guard w.count > 2, let n = Int(w[1]) else { return }
-            let p = CGEvent(source: nil)?.location ?? .zero
+            let p = Magnifier.pointer() ?? .zero
             let e = CGEvent(mouseEventSource: source, mouseType: w[2] == "down" ? .otherMouseDown : .otherMouseUp,
                             mouseCursorPosition: p, mouseButton: CGMouseButton(rawValue: UInt32(n)) ?? .center)
             e?.setIntegerValueField(.mouseEventButtonNumber, value: Int64(n))
             e?.post(tap: .cghidEventTap)
         case "move":
             guard w.count > 2, let dx = Double(w[1]), let dy = Double(w[2]) else { return }
-            let p = CGEvent(source: nil)?.location ?? .zero
+            let p = Magnifier.pointer() ?? .zero
             let e = CGEvent(mouseEventSource: source, mouseType: .mouseMoved,
                             mouseCursorPosition: CGPoint(x: p.x + dx, y: p.y + dy), mouseButton: .left)
             e?.setIntegerValueField(.mouseEventDeltaX, value: Int64(dx))

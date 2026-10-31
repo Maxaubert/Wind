@@ -19,6 +19,11 @@ How the macOS zoom behaves and why: `docs/architecture.md`. Keep it in step with
 - Run all three after touching `Magnifier.swift`, `SkyLight.swift` or `CaretTracker.swift`.
 - `python3 scripts/e2e_draw.py`: the experimental draw engine (`engine = "draw"`); `WIND_ENGINE=draw`
   runs any suite on it. Both start the test build directly so it inherits Screen Recording from the terminal.
+  `WIND_CURSOR=wind` runs any suite with Wind's own cursor.
+- `python3 scripts/edge_truth.py`: the pinned view at screen edges on the zoomed screen (edge shake).
+- `python3 scripts/wobble_from_log.py [HH:MM:SS]`: cursor wobble from a real session in the log (logLevel 2).
+- `python3 scripts/cursor_truth.py`: Wind's cursor and Inspect's crosshair measured on the ZOOMED screen
+  (what the owner sees, frame by frame); run it after touching either or the write order.
 
 ## Gotchas
 - Never warp the pointer, rewrite event locations or use `CGAssociateMouseAndMouseCursorPosition`
@@ -33,6 +38,9 @@ How the macOS zoom behaves and why: `docs/architecture.md`. Keep it in step with
   include Wind's own echoes and run away. Game lock = cursor hidden while the mouse moves.
 - `scripts/build.sh` fails on a compile error. Never mask it: a stale binary passed tests before.
 - `screencapture` shows the unzoomed desktop; verify the view with `SLSGetZoomParameters` readback.
+  An SCK stream with the cursor that excludes only a windowless process shows the zoomed screen.
+- A window moved with `setFrame` reaches the screen 1-2 frames after a zoom write: anything drawn
+  to match the zoom is a layer in a window that never moves, moved before every view write.
 - macOS Zoom's shortcuts must stay off (issue #1); its prefs are not writable, use `SettingsToggle`.
 - The command channel lets any same-user process drive Wind's Accessibility grant: it is compiled
   only into test builds (`#if WIND_TEST_CHANNEL`). Never compile it into the installed app.

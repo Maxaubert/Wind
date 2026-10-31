@@ -5,3 +5,5 @@ build/
 tools/vmouse/vmouse
 __pycache__/
 tools/fakegame/FakeGame.app/
+tools/cursorcap/cursorcap
+tools/viewcap/viewcap

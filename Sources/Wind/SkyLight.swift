@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import QuartzCore
 
 // The compositor zoom: private SkyLight calls that drive the same WindowServer zoom macOS's own
 // Accessibility Zoom uses. Verified on macOS 27.2 (2026-10-29): callable from an ordinary process,
@@ -37,7 +38,12 @@ enum SkyLight {
     /// flag alone from WindowServer's shared scoreboard page (reverse-engineered 2026-10-31, see
     /// docs/architecture.md); fall back to SLSCursorIsVisible if the layout is not the one checked.
     static var cursorVisible: Bool {
-        if forceHidden { return !DrawZoom.shared.pointerHidden }   // draw engine: the cursor Wind draws
+        if forceHidden { return !wantHidden }   // the cursor Wind draws (draw engine, Wind's own cursor)
+        return realCursorVisible
+    }
+
+    /// The real cursor, also while Wind draws its own (tests).
+    static var realCursorVisible: Bool {
         if let s = scoreboard?(), let page = s.pointee { return page.load(fromByteOffset: 0x2f, as: UInt8.self) == 0 }
         return cursorVisibleFn?(cid) ?? true
     }
@@ -62,16 +68,23 @@ enum SkyLight {
 
     /// Set the view: centre in global points, scale >= 1. smooth = interpolated (blurry) pixels.
     nonisolated(unsafe) static var traceWrites = false
+    /// Called just before each immediate view write with the centre and scale as written: Wind's
+    /// own cursor moves to match it first, so the cursor and the zoom change reach the same frame.
+    /// (`drawnFollow: false` skips it for a write that the same frame overwrites at once: a carry's
+    /// first write. Following it as well meant two commits per frame, and the second could miss.)
+    nonisolated(unsafe) static var beforeWrite: ((CGPoint, Double) -> Void)?
     @discardableResult
     /// `glide` > 0 makes WindowServer animate to the new centre through fractional positions on a
     /// 10 ms timer with a cosine ease (the sixth argument; reverse-engineered 2026-10-31). Its
     /// duration is about pi * sqrt(scale * distance) / (1500 * glide), clamped to 0.01-0.5 s.
-    static func set(center: CGPoint, scale: Double, smooth: Bool, keepPointer: Bool = true, glide: Double = 0) -> Bool {
+    static func set(center: CGPoint, scale: Double, smooth: Bool, keepPointer: Bool = true, glide: Double = 0, drawnFollow: Bool = true) -> Bool {
         if DrawZoom.enabled { DrawZoom.shared.set(center: center, scale: scale, smooth: smooth); return true }
         guard let f = setZoom else { return false }
+        if glide == 0 && drawnFollow { beforeWrite?(center, scale) }
         var c = center
         let r = f(cid, &c, scale, smooth, keepPointer, glide) == 0
-        if traceWrites { let q = CGEvent(source: nil)?.location ?? .zero; Log.verbose(String(format: "W %.4f %.4f L %.5f keep %d -> ptr %.4f %.4f", center.x, center.y, scale, keepPointer ? 1 : 0, q.x, q.y)) }
+        if WindCursor.probe { Log.verbose(String(format: "zw %.6f %.2f %.2f", CACurrentMediaTime(), center.x, center.y)) }
+        if traceWrites { let q = Magnifier.pointer() ?? .zero; Log.verbose(String(format: "W %.4f %.4f L %.5f keep %d -> ptr %.4f %.4f", center.x, center.y, scale, keepPointer ? 1 : 0, q.x, q.y)) }
         return r
     }
 
