@@ -84,6 +84,12 @@ struct SettingsView: View {
             slider("Release ease-out", \.zoomEaseOutMs, 0...400, step: 5, format: "%.0f ms")
             Toggle("Smooth zoom start (ease in)", isOn: m.bind(\.smoothZoom))
             Toggle("Smooth images (off = sharp pixels)", isOn: m.bind(\.smoothImages))
+            Picker("Engine", selection: m.bind(\.engine)) {
+                Text("macOS zoom").tag("zoom")
+                Text("Wind draws (experimental)").tag("draw")
+            }
+            Text("Wind draws: sub-pixel smooth panning at 1x pointer speed; needs Screen Recording permission and about one frame more delay for screen content.")
+                .font(.caption).foregroundStyle(.secondary)
             Divider()
             slider("Warmth", \.warmthPct, 0...100, step: 5, format: "%.0f%%")
             slider("Brightness", \.dimPct, 10...100, step: 5, format: "%.0f%%")

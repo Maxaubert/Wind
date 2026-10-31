@@ -48,6 +48,7 @@ final class Magnifier {
     private var redoX = 0.0, redoY = 0.0, redoAge = 0   // an undone carry macOS may re-apply
     private var ptsPerCount = 1.5                 // screen pt the pointer moves per raw count (learnt)
     private var rawMismatch = 0.0, rawDistrusted = false   // how often counts fall short (EMA)
+    private var drawHeldTicks = 0               // draw engine: ticks with counts and a still pointer
     private var userHidCursor = false           // the hide-cursor bind is on
     private var ptrVel = (x: 0.0, y: 0.0)
     private var lastShift = Pt(0, 0)            // how far the last tick moved the view
@@ -96,6 +97,14 @@ final class Magnifier {
 
     func apply(_ c: Config) {
         config = c
+        let draw = c.engine == "draw" && !DrawZoom.failed
+        DrawZoom.shared.onFailure = { [weak self] in self?.lastWritten = nil; self?.wake() }   // re-zoom with macOS's zoom
+        if draw != DrawZoom.enabled {
+            if zoomedSession { SkyLight.reset() }      // leave the old engine at 1x first
+            DrawZoom.enabled = draw
+            lastWritten = nil
+            Log.info("engine: \(draw ? "draw (capture and draw, experimental)" : "zoom (macOS)")")
+        }
         Log.level = c.logLevel
         let (b, problems) = c.binds()
         router.setBinds(b)
@@ -452,7 +461,7 @@ final class Magnifier {
         // Read there twice in a row, the pointer really is there (a warp, macOS undoing a
         // placement) and it is taken.
         if let prev = lastPtr, zoomedSession, lv > 1.0001, owner.owner == .mouse, !inspect, !lock.locked,
-           rawOn, CACurrentMediaTime() - lastRawAt < 1 {
+           !DrawZoom.enabled, rawOn, CACurrentMediaTime() - lastRawAt < 1 {
             let far = ((ptr.x - prev.x) * (ptr.x - prev.x) + (ptr.y - prev.y) * (ptr.y - prev.y)).squareRoot() * lv
                 > 24 + 8 * (motion + prevRawMotion)
             if far, !(pendingJump.map { abs($0.x - ptr.x) + abs($0.y - ptr.y) < 2 } ?? false) {
@@ -474,7 +483,8 @@ final class Magnifier {
         // The drag can land up to two ticks late (measured), so the last two shifts are discounted.
         let moved = afterWrites.map { a -> Double in
             let mx = ptr.x - a.x, my = ptr.y - a.y
-            let candidates = [Pt(0, 0), lastShift, prevShift, Pt(lastShift.x + prevShift.x, lastShift.y + prevShift.y)]
+            // (Draw engine: the view does not drag the pointer, so no shift is discounted.)
+            let candidates = DrawZoom.enabled ? [Pt(0, 0)] : [Pt(0, 0), lastShift, prevShift, Pt(lastShift.x + prevShift.x, lastShift.y + prevShift.y)]
             return candidates.map { abs(mx - $0.x) + abs(my - $0.y) }.min() ?? 0
         } ?? 0
         // In screen points: at a high zoom a slow hand moves the pointer a tiny fraction of a desktop
@@ -484,7 +494,10 @@ final class Magnifier {
         // game holds: that is no evidence (every false lock in the owner's recording, 2026-10-30,
         // began with the pointer at x = 0 and macOS reporting the cursor hidden).
         let atEdge = ptr.x < 2 || ptr.y < 2 || ptr.x > screen.w - 3 || ptr.y > screen.h - 3
-        if !inspect && !userHidCursor { lock.feed(cursorVisible: SkyLight.cursorVisible, motion: atEdge && !lock.locked ? 0 : motion, pointerMoved: moved * max(lv, 1)) }  // Inspect hides it itself
+        // Draw engine: Wind hides the real cursor itself, so "hidden" cannot tell a game. A game holds
+        // the pointer: it does not move at all for several ticks while counts keep coming.
+        drawHeldTicks = motion > 0 && moved < 0.01 && !atEdge ? drawHeldTicks + 1 : (moved >= 0.01 ? 0 : drawHeldTicks)
+        if !inspect && !userHidCursor { lock.feed(cursorVisible: DrawZoom.enabled ? drawHeldTicks < 6 : SkyLight.cursorVisible, motion: atEdge && !lock.locked ? 0 : motion, pointerMoved: moved * max(lv, 1)) }  // Inspect hides it itself
         if config.logLevel >= 2 && (motion > 0 || lock.locked) {
             Log.verbose(String(format: "lockdbg vis %d motion %.0f moved %.2f shift %.2f locked %d", SkyLight.cursorVisible ? 1 : 0, motion, moved, lastShift.x, lock.locked ? 1 : 0))
         }
@@ -594,6 +607,9 @@ final class Magnifier {
                     returning = false
                     virtualPtr = placePointer(at: center, from: virtualPtr, level: lv, view: center)
                     handTarget = nil
+                } else if DrawZoom.enabled {
+                    // Drawn zoom: macOS is not zoomed, the pointer already moves at 1x.
+                    handTarget = nil
                 } else if let prev0 = lastPtr, lv > 1.0001, let prev = undonePlacement(prev0, ptr),
                           config.keepPointerSpeed && !returning {
                     // macOS undid last tick's placement: the pointer is back where it was, give or
@@ -639,7 +655,7 @@ final class Magnifier {
                 // Small corrections to the target (a bounded read, a discounted push) can pull it back a
                 // fraction across a whole point, which showed as a one-point back-step against the pan.
                 // Against the way the raw counts say the hand is going, the view holds instead.
-                if let rs = rawStep, !returning {
+                if let rs = rawStep, !returning, !DrawZoom.enabled {   // whole-point zoom only
                     let dir = Pt(rs.x != 0 ? rs.x : (prevRawStep?.x ?? 0), rs.y != 0 ? rs.y : (prevRawStep?.y ?? 0))
                     if dir.x != 0 && (want.x - center.x) * dir.x < 0 && abs(want.x - center.x) < 1.5 { want.x = center.x }
                     if dir.y != 0 && (want.y - center.y) * dir.y < 0 && abs(want.y - center.y) < 1.5 { want.y = center.y }
@@ -690,6 +706,7 @@ final class Magnifier {
         // A plain read after the writes, for the game-lock detector only (a held pointer is dragged
         // by Wind's writes). It is never used to measure the hand.
         let endPtr = CGEvent(source: nil).map { Pt($0.location.x, $0.location.y) }
+        if DrawZoom.enabled, let e = endPtr { DrawZoom.shared.lockHidden = locked; DrawZoom.shared.updateCursor(CGPoint(x: e.x, y: e.y)) }
         prevShift = lastShift
         lastShift = Pt(center.x - tickStartCenter.x, center.y - tickStartCenter.y)
         // Where Wind's writes left the pointer: this tick's read plus the whole points carried
@@ -721,6 +738,8 @@ final class Magnifier {
     /// to a point times the level while panning (owner report 2026-10-30, as fixed in Wind on
     /// Windows). Only where the view is held at a screen edge does it leave the centre.
     private func crosshairPoint(_ lv: Double, centre: Pt) -> CGPoint {
+        // Draw engine: the view shows the exact (fractional) centre.
+        if DrawZoom.enabled { return CGPoint(x: centre.x, y: centre.y) }
         func axis(_ c: Double, _ look: Double, _ size: Double) -> Double {
             let half = size / lv / 2, shown = floor(writeAxis(c, half, size))
             return shown >= half && shown <= size - half ? shown : look
@@ -887,6 +906,11 @@ final class Magnifier {
     /// (`liveLevel`). `p` is the tick's own read: a read here, after the level write, can be off.
     /// Returns where the pointer is now (p plus the whole points carried), computed, not read.
     private func placePointer(at t: Pt, from p: Pt, level lv: Double, view: Pt? = nil) -> Pt {
+        if DrawZoom.enabled {                           // macOS is not zoomed: a warp is exact
+            let w = CGPoint(x: min(max(t.x, 0), screen.w - 1), y: min(max(t.y, 0), screen.h - 1))
+            CGWarpMouseCursorPosition(w); CGAssociateMouseAndMouseCursorPosition(1)
+            return Pt(w.x, w.y)
+        }
         // The zoom floors its centre to whole desktop points (measured 2026-10-30), so a view shift
         // can only carry the pointer by whole points. Plan in the compositor's integer centre and
         // pass centres at .5 so the floor lands exactly. Shift only whole points TOWARD the target,
@@ -950,7 +974,7 @@ final class Magnifier {
         // Same level and the same whole-point centre (away from the edge clamps): the zoom would show
         // exactly the same picture. Skipping the write saves a composite; while panning and zooming
         // at once, extra writes tripled the dropped frames (9% against 3% zooming alone).
-        if let w = lastWritten, abs(w.level - lv) < 1e-5, floor(w.c.x) == floor(center.x), floor(w.c.y) == floor(center.y) {
+        if !DrawZoom.enabled, let w = lastWritten, abs(w.level - lv) < 1e-5, floor(w.c.x) == floor(center.x), floor(w.c.y) == floor(center.y) {
             let hw = screen.w / lv / 2, hh = screen.h / lv / 2
             if center.x > hw + 1 && center.x < screen.w - hw - 1 && center.y > hh + 1 && center.y < screen.h - hh - 1 { return }
         }
@@ -961,7 +985,7 @@ final class Magnifier {
     /// One view write. `liveCenter` keeps the value as written (the compositor floors it).
     private func send(_ c: Pt, level lv: Double, keepPointer: Bool) {
         let l = max(1, lv)
-        let w = Pt(writeAxis(c.x, screen.w / l / 2, screen.w), writeAxis(c.y, screen.h / l / 2, screen.h))
+        let w = DrawZoom.enabled ? c : Pt(writeAxis(c.x, screen.w / l / 2, screen.w), writeAxis(c.y, screen.h / l / 2, screen.h))
         SkyLight.set(center: CGPoint(x: w.x, y: w.y), scale: lv, smooth: config.smoothImages, keepPointer: keepPointer)
         liveCenter = w
         liveLevel = lv

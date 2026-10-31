@@ -29,6 +29,7 @@ public struct Config: Codable, Equatable {
     public var zoomEaseOutMs = 115.0
     public var quickZoomDefault = 4.0
     public var smoothImages = false               // false = nearest (sharp pixels), true = smoothed
+    public var engine = "zoom"                    // "zoom" = macOS's zoom; "draw" = experimental capture-and-draw (sub-pixel, issue #8)
 
     // Mouse tracking.
     public var mouseAlign = 0                     // 0 = centred on the pointer, 1 = within the edges

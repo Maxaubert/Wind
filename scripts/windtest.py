@@ -6,9 +6,28 @@ D = os.path.expanduser("~/Library/Application Support/Wind")
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 fails = []
 
-def relaunch_with_channel():
+_lock = None
+
+def take_screen():
+    """Only one test run may drive the screen and the virtual mouse at a time (two at once fought over
+    Wind and the pointer and both reported nonsense, 2026-10-31)."""
+    global _lock
+    if _lock: return                           # this run already holds it
+    import fcntl
+    _lock = open(os.path.join(ROOT, "build", ".e2e.lock"), "w")
+    try:
+        fcntl.flock(_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        sys.exit("another Wind test run is using the screen; wait for it to finish")
+
+def relaunch_with_channel(direct=False, extra=None):
     """The command channel exists only in test builds: build build/test/Wind.app, run it instead of
     the installed Wind, and bring the installed one back on exit."""
+    os.makedirs(os.path.join(ROOT, "build"), exist_ok=True)
+    take_screen()
+    # WIND_ENGINE=draw runs any suite on the draw engine (started directly: no permission prompt).
+    if os.environ.get("WIND_ENGINE"):
+        extra = dict(extra or {}, engine=os.environ["WIND_ENGINE"]); direct = True
     subprocess.run([os.path.join(ROOT, "scripts/build.sh"), "test"], check=True, stdout=subprocess.DEVNULL)
     kill_all_wind()
     # Checks assume Wind's defaults for the feel settings, not the owner's own (a slowed zoom made the
@@ -23,8 +42,16 @@ def relaunch_with_channel():
     with open(bak, "w") as f: f.write(own)
     c = json.loads(own)
     for k in TEST_DEFAULTS_DROP: c.pop(k, None)
+    c.update(extra or {})
     with open(cfg, "w") as f: json.dump(c, f, indent=2)
-    subprocess.run(["open", "-n", os.path.join(ROOT, "build/test/Wind.app")]); time.sleep(2.0)
+    if direct:
+        # Started from this shell so it inherits the terminal's permissions (Screen Recording for
+        # the draw engine) instead of prompting for its own.
+        subprocess.Popen([os.path.join(ROOT, "build/test/Wind.app/Contents/MacOS/Wind")],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    else:
+        subprocess.run(["open", "-n", os.path.join(ROOT, "build/test/Wind.app")])
+    time.sleep(2.0)
     def restore():
         kill_all_wind()
         with open(cfg, "w") as f: f.write(own)

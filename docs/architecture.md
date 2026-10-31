@@ -377,3 +377,38 @@ disassembly in `research/wind-mac/re/`).
   the internal CGSScoreboard, found through SLCursorIsVisible's instruction words, checked first).
 - **Testing:** a stuck SecurityAgent dialog (from an lldb attempt) holds Secure Input and blocks
   posted keystrokes: Inspect and bind checks fail. Use `ipsw`, not lldb, for static work.
+
+## Draw engine (experimental, `engine = "draw"`, issue #8)
+
+Instead of zooming macOS, Wind captures the main display with ScreenCaptureKit and draws it
+magnified in a click-through overlay (level screenSaver+1) above everything (`DrawZoom.swift`).
+- **Sub-pixel panning**: the captured IOSurface is a layer placed at any fractional offset and
+  scale (nearest filter for sharp pixels, linear when Smooth images is on). The view centre is the
+  pointer itself, fractional (measured: slow pans move by 0.688 / 1.375 pt steps, not whole points).
+- **1x pointer**: macOS is not zoomed, so the pointer moves at its own speed (measured 68.8 pt at
+  4x and 10x, the 1x distance). Speed compensation, carries, read guards and the whole-point tricks
+  are all off in this engine; placement is a plain warp (exact at 1x).
+- **Cursor**: the real cursor is hidden (`SkyLight.forceHidden`) and the current system cursor
+  (`NSCursor.currentSystem`: arrow, I-beam, ...) is drawn, scaled by the level, at the pointer.
+  Wind's other hide/show calls only decide whether the drawn cursor shows.
+- **Capture**: the overlay window is excluded from its own stream (`excludingWindows`), so normal
+  screenshots still show it (useful for testing). Frames come only when the screen changes;
+  measured delivery 1-2 ms after WindowServer composites them, so content is about one frame later
+  than with macOS's zoom. Wind's CPU while panning: ~7% (2.5% with macOS's zoom).
+- **Games**: Wind hides the cursor itself, so "hidden" cannot tell a game; in this engine a game is a
+  pointer that does not move at all for 6 ticks while raw counts come (away from edges).
+- **Permission**: Screen Recording. Tests start the test build directly from the shell so it
+  inherits the terminal's permission (`relaunch_with_channel(direct=True)`, or `WIND_ENGINE=draw`
+  for any suite); started with `open`, macOS would prompt for Wind's own.
+- **Safety** (review 2026-10-31): the overlay hides the real screen, so it never stays up frozen. A
+  capture failure (permission), no first frame within 1.5 s, a stream that keeps stopping, or more
+  than one display switches the engine off for the run and macOS's zoom takes over (Settings still
+  says draw). A stopped stream is restarted first. A display change resizes the overlay and
+  recaptures. A watchdog thread quits Wind if the main thread stops answering for 3 s while the
+  overlay is up (the overlay and the cursor hiding die with the process). Frames from a stopped
+  stream are dropped. The capture stays warm for a minute after zooming out (a cold start takes
+  ~80 ms, which showed as a pop at the start of each zoom-in).
+- **Cursor state** carries over: what Wind wants hidden (caret tracking, Inspect, the hide-cursor
+  bind) decides the drawn cursor and is restored on the real one when the overlay goes; the drawn
+  cursor is also hidden while a game holds the pointer; its shape is compared by pixels.
+- Not done yet: multiple displays, DRM video (captured black).

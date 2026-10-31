@@ -37,6 +37,7 @@ enum SkyLight {
     /// flag alone from WindowServer's shared scoreboard page (reverse-engineered 2026-10-31, see
     /// docs/architecture.md); fall back to SLSCursorIsVisible if the layout is not the one checked.
     static var cursorVisible: Bool {
+        if forceHidden { return !DrawZoom.shared.pointerHidden }   // draw engine: the cursor Wind draws
         if let s = scoreboard?(), let page = s.pointee { return page.load(fromByteOffset: 0x2f, as: UInt8.self) == 0 }
         return cursorVisibleFn?(cid) ?? true
     }
@@ -63,6 +64,7 @@ enum SkyLight {
     nonisolated(unsafe) static var traceWrites = false
     @discardableResult
     static func set(center: CGPoint, scale: Double, smooth: Bool, keepPointer: Bool = true) -> Bool {
+        if DrawZoom.enabled { DrawZoom.shared.set(center: center, scale: scale, smooth: smooth); return true }
         guard let f = setZoom else { return false }
         var c = center
         let r = f(cid, &c, scale, smooth, keepPointer, 0) == 0
@@ -73,6 +75,10 @@ enum SkyLight {
     struct State { var center: CGPoint; var scale: Double; var smooth: Bool }
 
     static func get() -> State? {
+        if DrawZoom.enabled {
+            let d = DrawZoom.shared
+            return State(center: d.center, scale: d.visible ? d.scale : 1, smooth: false)
+        }
         guard let f = getZoom else { return nil }
         var c = CGPoint.zero, s = 0.0, sm = false
         guard f(cid, &c, &s, &sm) == 0 else { return nil }
@@ -80,6 +86,7 @@ enum SkyLight {
     }
 
     static var isZoomed: Bool {
+        if DrawZoom.enabled { return DrawZoom.shared.visible }
         guard let f = isZoomedFn else { return (get()?.scale ?? 1) > 1.0001 }
         var z = false
         return f(cid, &z) == 0 && z
@@ -91,7 +98,29 @@ enum SkyLight {
 
     /// Hide or show the system cursor from a background app (Inspect mode). Needs the
     /// SetsCursorInBackground connection property; hide and show stay balanced.
+    /// The draw engine keeps the real cursor hidden while it draws its own; Wind's other hide and show
+    /// calls then only decide whether the drawn cursor shows.
+    nonisolated(unsafe) static var forceHidden = false
+
+    /// What Wind itself wants (caret tracking, Inspect, the hide-cursor bind), in either engine.
+    nonisolated(unsafe) private(set) static var wantHidden = false
+
     static func setCursorHidden(_ hide: Bool, force: Bool = false) {
+        wantHidden = hide
+        if forceHidden { DrawZoom.shared.pointerHidden = hide; return }   // decides the drawn cursor only
+        realHide(hide, force: force)
+    }
+
+    /// Draw engine: the real cursor stays hidden while Wind draws its own; re-hidden if macOS showed it.
+    static func hideRealCursor() {
+        let shown = scoreboard.flatMap { $0() }.flatMap { $0.pointee }.map { $0.load(fromByteOffset: 0x2f, as: UInt8.self) == 0 } ?? false
+        realHide(true, force: !cursorHidden || shown)
+    }
+
+    /// Draw engine off: the real cursor as Wind wants it.
+    static func restoreWanted() { realHide(wantHidden) }
+
+    private static func realHide(_ hide: Bool, force: Bool = false) {
         if hide == cursorHidden && !force { return }
         _ = setConnProp?(cid, cid, "SetsCursorInBackground" as CFString, kCFBooleanTrue)
         if hide {
