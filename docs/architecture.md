@@ -518,4 +518,20 @@ magnified in a click-through overlay (level screenSaver+1) above everything (`Dr
 - **Cursor state** carries over: what Wind wants hidden (caret tracking, Inspect, the hide-cursor
   bind) decides the drawn cursor and is restored on the real one when the overlay goes; the drawn
   cursor is also hidden while a game holds the pointer; its shape is compared by pixels.
+- **System prompts** (owner report 2026-10-31, the same as UIAccess prompts on Windows). Measured
+  2026-10-31 with real prompts:
+  - ScreenCaptureKit captures them, the admin password prompt (SecurityAgent) included.
+  - Most prompts sit under the overlay (now at the shield level minus 1), so they are drawn magnified,
+    once. Clicks land on them where drawn, because the drawn cursor maps onto the real pointer. An
+    example is the Screen Recording prompt (universalAccessAuthWarn, layer 0, which this morning sat
+    behind other windows).
+  - Password and Touch ID prompts (SecurityAgent reports layer 1000) are stacked above every app
+    window, even at the maximum level and with any SkyLight tag bit (all 64 tried), so the drawn
+    zoom would show them twice. Only macOS's zoom can magnify them.
+  - Four times a second while zoomed, Wind hands over to macOS's zoom (`DrawZoom.handedOver`) while
+    one of these is up: a window stacked above the overlay (CGWindowList is front to back), a window
+    that opts out of capture (sharing state none, e.g. password managers), or the lock screen.
+    Drawing resumes when it is gone.
+  - Both ways the other engine shows the same view at once. Restarting from "1x" made the next level
+    write pin the view to the top-left corner, and macOS took the pointer to (0, 0).
 - Not done yet: multiple displays, DRM video (captured black).

@@ -104,8 +104,23 @@ final class Magnifier {
 
     func apply(_ c: Config) {
         config = c
-        let draw = c.engine == "draw" && !DrawZoom.failed
+        let draw = c.engine == "draw" && !DrawZoom.failed && !DrawZoom.handedOver
         DrawZoom.shared.onFailure = { [weak self] in self?.lastWritten = nil; self?.wake() }   // re-zoom with macOS's zoom
+        DrawZoom.shared.onHandover = { [weak self] _ in
+            // The other engine draws from the next tick: write the view again, and start the
+            // pointer model afresh (the two engines move the pointer differently).
+            // The other engine shows the same view at once. Starting it from "1x" made the next level
+            // write treat the view as pinned to an edge: it jumped to the top-left corner and macOS
+            // took the pointer to (0, 0) (traced 2026-10-31).
+            guard let self else { return }
+            let lv = self.zoom.level
+            if self.zoomedSession && lv > 1.0001 {
+                self.send(self.center, level: lv, keepPointer: true)
+                self.lastWritten = (self.center, lv)
+            } else { self.lastWritten = nil; self.liveLevel = 1 }
+            self.handTarget = nil; self.lastPtr = nil; self.wake()
+        }
+        if c.engine != "draw" { DrawZoom.handedOver = false }
         if draw != DrawZoom.enabled {
             if zoomedSession { SkyLight.reset() }      // leave the old engine at 1x first
             DrawZoom.enabled = draw

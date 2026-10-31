@@ -28,6 +28,13 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     nonisolated(unsafe) static var failed = false
     /// Called on the main thread after a failure switched the engine off.
     var onFailure: (() -> Void)?
+    /// Called on the main thread when a system prompt makes Wind hand the zoom to macOS (true) or
+    /// take it back (false).
+    var onHandover: ((Bool) -> Void)?
+    /// A system prompt is up: macOS's zoom shows it (prompts sit above the overlay or cannot be
+    /// captured, so they showed twice or not at all). The config still selects the draw engine.
+    nonisolated(unsafe) static var handedOver = false
+    private var promptTimer: Timer?
 
     private var window: NSWindow?
     private let image = CALayer()
@@ -81,6 +88,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
             SkyLight.forceHidden = true
             SkyLight.hideRealCursor()
             if stream == nil { startStream() }
+            startPromptWatch()
             let gen = generation
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 guard let self, self.visible, !self.haveFrame, self.generation == gen else { return }
@@ -108,6 +116,74 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         DispatchQueue.main.asyncAfter(deadline: .now() + 60, execute: stop)
         Log.info("draw engine: off after \(frames) frames")
         frames = 0
+    }
+
+    /// The overlay's window level: above every app and almost every prompt; below the lock-screen
+    /// shield. (Password and Touch ID prompts, SecurityAgent and coreautha, are stacked above any
+    /// app window whatever its level: measured 2026-10-31 at the maximum level and with every
+    /// SkyLight tag bit. Only macOS's zoom can magnify them.)
+    static let overlayLevel = Int(CGShieldingWindowLevel()) - 1
+
+    /// The lock screen and screen saver: not captured, so macOS's zoom shows them.
+    private static let lockOwners: Set<String> = ["loginwindow", "ScreenSaverEngine"]
+
+    /// Whether something is on screen the drawn zoom cannot show right: a window stacked above the
+    /// overlay (it would show twice, unzoomed on top of its magnified copy), a window that opts out
+    /// of screen capture (it would be hidden), or the lock screen. Every other window, prompts
+    /// included, is captured and drawn magnified, and clicks land on it where it is drawn (the
+    /// Screen Recording prompt, universalAccessAuthWarn, sits under the overlay: it stays drawn).
+    static func promptOnScreen() -> Bool {
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return false }
+        let me = ProcessInfo.processInfo.processIdentifier
+        var ignore = Set<String>()
+        #if WIND_TEST_CHANNEL
+        // Tests can ignore a real window left on screen (owner away).
+        if let v = ProcessInfo.processInfo.environment["WIND_IGNORE_PROMPTS"] { ignore = Set(v.split(separator: ",").map(String.init)) }
+        #endif
+        var aboveOverlay = true                         // the list runs front to back
+        for w in list {
+            let layer = w[kCGWindowLayer as String] as? Int ?? 0
+            if (w[kCGWindowOwnerPID as String] as? Int32) == me {
+                if layer == overlayLevel { aboveOverlay = false }
+                continue
+            }
+            let owner = w[kCGWindowOwnerName as String] as? String ?? ""
+            let alpha = w[kCGWindowAlpha as String] as? Double ?? 1
+            let sharing = w[kCGWindowSharingState as String] as? Int ?? 1
+            let b = w[kCGWindowBounds as String] as? [String: Double] ?? [:]
+            let big = (b["Width"] ?? 0) > 60 && (b["Height"] ?? 0) > 40
+            if alpha < 0.05 || !big || owner == "Window Server" { continue }   // the recording indicator is 28x28
+            if ignore.contains(owner) { continue }
+            if lockOwners.contains(owner) || sharing == 0 { return true }
+            // Above the overlay. Before the overlay is first shown, judge by level: prompts that
+            // macOS stacks over everything are the ones at or above the screen-saver level.
+            if aboveOverlay && layer >= NSWindow.Level.screenSaver.rawValue { return true }
+        }
+        return false
+    }
+
+    /// While the engine is wanted and Wind is zoomed, look for prompts 4 times a second.
+    private func startPromptWatch() {
+        guard promptTimer == nil else { return }
+        promptTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            let zoomed = self.visible || DrawZoom.handedOver
+            if !zoomed { self.promptTimer?.invalidate(); self.promptTimer = nil; return }
+            let prompt = DrawZoom.promptOnScreen()
+            if prompt && !DrawZoom.handedOver {
+                Log.info("draw engine: a window the capture cannot show is up (lock screen or capture-protected); macOS zoom shows it")
+                DrawZoom.handedOver = true
+                self.hide()
+                DrawZoom.enabled = false
+                self.onHandover?(true)
+            } else if !prompt && DrawZoom.handedOver {
+                Log.info("draw engine: it is gone; back to drawing")
+                DrawZoom.handedOver = false
+                SkyLight.resetCompositor()              // leave macOS's zoom before drawing again
+                DrawZoom.enabled = true
+                self.onHandover?(false)
+            }
+        }
     }
 
     /// Switch the engine off for this run and let macOS's zoom take over.
@@ -170,7 +246,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     private func makeWindow() {
         guard let screen = NSScreen.screens.first else { return }
         let w = NSWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
-        w.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
+        w.level = NSWindow.Level(rawValue: DrawZoom.overlayLevel)
         w.ignoresMouseEvents = true
         w.isOpaque = true
         w.backgroundColor = .black

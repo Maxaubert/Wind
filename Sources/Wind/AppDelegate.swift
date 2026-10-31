@@ -307,6 +307,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             "pointer": [p.x, p.y],
             "focusedWindow": focusedWindowTitle(),
             "cursorVisible": SkyLight.cursorVisible, "look": [mag.inspectLookPoint.x, mag.inspectLookPoint.y],
+            "drawn": DrawZoom.shared.visible,
             "realCursorVisible": SkyLight.realCursorVisible,
             "windCursor": mag.windCursorAt.map { [$0.x, $0.y] } ?? [],
             "windCursorWindow": mag.windCursor.serverBounds.map { [$0.minX, $0.minY, $0.width, $0.height] } ?? [],

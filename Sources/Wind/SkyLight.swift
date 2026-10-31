@@ -148,6 +148,14 @@ enum SkyLight {
         cursorHidden = hide
     }
 
+    /// macOS's own zoom back to 1x, whichever engine is selected (draw engine handover).
+    static func resetCompositor() {
+        guard let f = setZoom else { return }
+        let b = CGDisplayBounds(CGMainDisplayID())
+        var c = CGPoint(x: b.midX, y: b.midY)
+        _ = f(cid, &c, 1.0, false, true, 0)
+    }
+
     /// Back to 1x (used on quit, on crash and by the watchdog).
     static func reset() {
         let b = CGDisplayBounds(CGMainDisplayID())

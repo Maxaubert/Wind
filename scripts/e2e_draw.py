@@ -94,6 +94,40 @@ check("draw engine: game lock detected", s["locked"], f"locked {s['locked']}")
 g.wait(); time.sleep(0.5)
 ctl("level 1"); time.sleep(0.4)
 
+# Windows under the overlay stay drawn, prompts included: they are captured, so they show magnified
+# once and clicks land on them where drawn (tools/fakeprompt stands in at layer 1500). A window that
+# opts out of capture (noshare) would be hidden: the zoom goes to macOS until it is gone.
+PROMPT = os.path.join(ROOT, "tools/fakeprompt/fakeprompt")
+subprocess.run([os.path.join(ROOT, "tools/fakeprompt/build.sh")], check=True, stdout=subprocess.DEVNULL)
+def prompt_run(*args):
+    ctl("level 1"); time.sleep(0.4); ctl("warp 900 500"); time.sleep(0.2); ctl("level 4"); time.sleep(1.0)
+    n0 = nlines(); before = ctl("state")
+    p = subprocess.Popen([PROMPT, "2.5", *args]); time.sleep(1.2)
+    during = ctl("state")
+    p.wait(); time.sleep(1.0)
+    after = ctl("state")
+    ctl("level 1"); time.sleep(0.5)
+    return before, during, after, log_since(n0)
+b, d, a, L = prompt_run()
+check("draw engine: a prompt under the overlay stays drawn (magnified, once)", b["drawn"] and d["drawn"] and a["drawn"] and not any("macOS zoom shows it" in l for l in L), f"drawn {b['drawn']} {d['drawn']} {a['drawn']}")
+b, d, a, L = prompt_run("noshare")
+check("draw engine: a capture-protected window hands the zoom to macOS", b["drawn"] and not d["drawn"] and d["sky"]["scale"] == 4, f"drawn {d['drawn']} sky {d['sky']}")
+check("draw engine: the handover keeps the view and the pointer", d["sky"]["center"] == b["sky"]["center"] and d["pointer"] == b["pointer"] and a["sky"]["center"] == b["sky"]["center"], f"view {b['sky']['center']} -> {d['sky']['center']} -> {a['sky']['center']}, pointer {b['pointer']} -> {d['pointer']}")
+check("draw engine: the handover is logged both ways", any("macOS zoom shows it" in l for l in L) and any("back to drawing" in l for l in L))
+check("draw engine: drawing again after it is gone", a["drawn"] and a["sky"]["scale"] == 4, f"drawn {a['drawn']} {a['sky']}")
+
+# A real password prompt (SecurityAgent): macOS stacks it above every app window, so the drawn zoom
+# would show it twice. It hands over and comes back. The prompt asks for nothing: it is closed by
+# ending the osascript that asked (nothing is typed or clicked in it).
+ctl("level 1"); time.sleep(0.4); ctl("warp 900 500"); time.sleep(0.2); ctl("level 3"); time.sleep(1.0)
+b = ctl("state")
+o = subprocess.Popen(["osascript", "-e", 'do shell script "true" with administrator privileges'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+time.sleep(2.0); d = ctl("state")
+o.kill(); o.wait(); time.sleep(1.5); a = ctl("state")
+check("draw engine: a password prompt hands over (it is stacked above every app)", b["drawn"] and not d["drawn"] and d["sky"]["scale"] == 3, f"drawn {b['drawn']} -> {d['drawn']}, sky {d['sky']}")
+check("draw engine: back to drawing after the password prompt, view kept", a["drawn"] and a["sky"]["center"] == b["sky"]["center"], f"drawn {a['drawn']}, view {b['sky']['center']} -> {a['sky']['center']}")
+ctl("level 1"); time.sleep(0.5)
+
 # Capture failing (no Screen Recording permission) falls back to macOS's zoom (simulated).
 os.environ["WIND_DRAW_FAIL"] = "1"
 relaunch_with_channel(direct=True, extra={"engine": "draw", "logLevel": 2})
