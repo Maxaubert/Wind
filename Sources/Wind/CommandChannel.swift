@@ -44,7 +44,7 @@ enum CommandChannel {
             if w.count > 2 {
                 if w[1] == "sync" { WindCursor.syncCommit = w[2] == "on" }
                 if w[1] == "pre" { WindCursor.preCommit = w[2] == "on" }
-                if w[1] == "delay", let ms = Double(w[2]) { Magnifier.tickDelay = ms / 1000 }
+                if w[1] == "delay" { Magnifier.tickDelay = Double(w[2]).map { $0 / 1000 } }   // "default": the engine's
             }
         case "mods":mag.testMods = w.count > 1 ? parseBind(w[1])?.mods : nil   // mods ctrl | mods (clear)
         case "settoggle":

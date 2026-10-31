@@ -45,6 +45,8 @@ public struct ZoomController {
     public var hasTarget: Bool { target > 0 }
     /// True while the level is still changing on its own (wheel glide or release ease-out).
     public var isMoving: Bool { hasTarget || rate != 0 || direction != .none }
+    /// The zoom is about to go up: zoom-in held or a wheel target above the level.
+    public var wantsZoomIn: Bool { direction == .zoomIn || target > level }
 
     public mutating func setMaxLevel(_ m: Double) {
         maxLevel = max(minLevel, m)

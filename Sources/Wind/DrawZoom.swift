@@ -80,16 +80,27 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
             idleStop?.cancel(); idleStop = nil
             // A warm stream already has the screen: show it at once (a cold start takes ~80 ms).
             haveFrame = latest != nil
+            pendingSurface = nil
             if let l = latest { CATransaction.begin(); CATransaction.setDisableActions(true); image.contents = l; CATransaction.commit() }
             window?.alphaValue = haveFrame ? 1 : 0      // else shown with the first captured frame
+            layout()                                    // the right scale before the window is ordered in
+            // The real cursor goes when the picture comes: hidden over a still-transparent overlay it
+            // left the unzoomed screen with no cursor for 90-136 ms on a cold start (2026-10-31).
+            // Cursor shape and hiding come BEFORE the order-in: right after it, CGDisplayHideCursor
+            // and NSCursor.currentSystem each waited 2-8 ms on WindowServer in the first zoom tick.
+            if haveFrame { cursorShape(); lastCursorCheck = CACurrentMediaTime(); takeCursor() }
             window?.orderFrontRegardless()
             // Above password prompts too: they are captured like any window and then drawn magnified
             // once, and clicks land on them where drawn (the drawn cursor maps onto the real pointer).
-            if let n = window?.windowNumber { DrawZoom.abovePrompts = SkyLight.placeAbovePrompts(windowNumber: n) }
+            // Off the main thread: the two WindowServer calls took 3-6 ms in the first zoom tick, which
+            // then came 11-14 ms late (2026-10-31).
+            if let n = window?.windowNumber {
+                DrawZoom.placeQueue.async {
+                    let ok = SkyLight.placeAbovePrompts(windowNumber: n)
+                    DispatchQueue.main.async { DrawZoom.abovePrompts = ok }
+                }
+            }
             shownAt = CACurrentMediaTime()
-            pointerHidden = SkyLight.wantHidden         // carry Wind's own hide state over
-            SkyLight.forceHidden = true
-            SkyLight.hideRealCursor()
             if stream == nil { startStream() }
             startPromptWatch()
             let gen = generation
@@ -101,13 +112,50 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         layout()
     }
 
-    func hide() {
-        guard visible else { return }
-        visible = false
-        DrawZoom.overlayUp = false
-        window?.orderOut(nil)
-        SkyLight.forceHidden = false
-        SkyLight.restoreWanted()                        // the real cursor as Wind wants it at 1x
+    /// The overlay shows a picture: hide the real cursor, Wind draws it from now on.
+    private func takeCursor() {
+        guard !SkyLight.forceHidden else { return }
+        pointerHidden = SkyLight.wantHidden             // carry Wind's own hide state over
+        SkyLight.forceHidden = true
+        SkyLight.hideRealCursor()
+        cursorTakenAt = CACurrentMediaTime()
+    }
+    private var cursorTakenAt = 0.0
+    private var lastTickAt = 0.0                      // the last updateCursor (one per zoom tick)
+    private var pendingSurface: IOSurface?            // a captured frame for the next tick's commit
+
+    /// A captured frame is at hand, so the overlay can show the zoom from its first frame.
+    var hasFrame: Bool { latest != nil }
+
+    /// Cold start (render engine): start capturing before the zoom moves, overlay still ordered out.
+    /// Magnifier holds the level at 1x until `hasFrame`, so the first zoomed frame is at ~1.0004
+    /// instead of popping in at 1.05-1.14 after the stream's 90-136 ms start (measured 2026-10-31).
+    func prewarm() {
+        guard !visible else { return }
+        if stream == nil && !starting {
+            if NSScreen.screens.count > 1 { fail("more than one display (not supported yet)"); return }
+            if window == nil { makeWindow() }
+            scheduleIdleStop()                          // also lets startStream keep the stream
+            startStream()
+            warmingSince = CACurrentMediaTime()
+        }
+        // Whenever the zoom waits for a first frame, it waits at most 1.5 s (also for a stream that
+        // already exists without one: review 2026-10-31).
+        guard latest == nil, !noFrameArmed else { return }
+        noFrameArmed = true
+        let gen = generation
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self else { return }
+            self.noFrameArmed = false
+            guard self.latest == nil, self.generation == gen, DrawZoom.enabled, !self.visible else { return }
+            self.fail("no captured frame within 1.5 s")
+        }
+    }
+    private var warmingSince = 0.0
+    private var noFrameArmed = false
+
+    private func scheduleIdleStop() {
+        idleStop?.cancel()
         // Keep capturing for a minute so the next zoom-in shows at once; then stop (power, and the
         // screen-recording indicator).
         let stop = DispatchWorkItem { [weak self] in
@@ -117,6 +165,16 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         }
         idleStop = stop
         DispatchQueue.main.asyncAfter(deadline: .now() + 60, execute: stop)
+    }
+
+    func hide() {
+        guard visible else { return }
+        visible = false
+        DrawZoom.overlayUp = false
+        window?.orderOut(nil)
+        SkyLight.forceHidden = false
+        SkyLight.restoreWanted()                        // the real cursor as Wind wants it at 1x
+        scheduleIdleStop()
         Log.info("draw engine: off after \(frames) frames")
         frames = 0
     }
@@ -140,6 +198,8 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         return []                                       // the overlay is not on screen
     }
 
+    /// Serial queue for SkyLight.placeAbovePrompts (its space is created once, on this queue).
+    static let placeQueue = DispatchQueue(label: "wind.draw.place", qos: .userInteractive)
     /// The overlay sits on a space above password prompts (SkyLight.placeAbovePrompts).
     nonisolated(unsafe) static var abovePrompts = false
 
@@ -223,30 +283,40 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         if let s = stream { stream = nil; s.stopCapture { _ in } }
     }
 
+    /// The current system cursor's image and hotspot, if it changed.
+    private func cursorShape() {
+        if let cur = NSCursor.currentSystem {
+            let img = cur.image
+            // Same size and hotspot can still be another cursor (resize, badges): compare pixels.
+            let key = img.tiffRepresentation
+            if key != cursorKey {
+                cursorKey = key; cursorSize = img.size; cursorHotSpot = cur.hotSpot
+                var r = CGRect(origin: .zero, size: img.size)
+                cursorLayer.contents = img.cgImage(forProposedRect: &r, context: nil, hints: nil)
+            }
+        }
+    }
+
     /// Called every tick with the pointer (desktop points): place the drawn cursor.
     func updateCursor(_ p: CGPoint) {
         DrawZoom.beat = CACurrentMediaTime()
         guard visible, let screen = NSScreen.screens.first else { return }
         let now = CACurrentMediaTime()
-        if now - lastCursorCheck > 0.1 {                // the shape (arrow, I-beam, ...) changes rarely
+        if now - lastCursorCheck > 0.1 && SkyLight.forceHidden {   // the shape (arrow, I-beam, ...) changes rarely
             lastCursorCheck = now
-            SkyLight.hideRealCursor()                   // macOS can show it again (Dock, app switch)
-            if let cur = NSCursor.currentSystem {
-                let img = cur.image
-                // Same size and hotspot can still be another cursor (resize, badges): compare pixels.
-                let key = img.tiffRepresentation
-                if key != cursorKey {
-                    cursorKey = key; cursorSize = img.size; cursorHotSpot = cur.hotSpot
-                    var r = CGRect(origin: .zero, size: img.size)
-                    cursorLayer.contents = img.cgImage(forProposedRect: &r, context: nil, hints: nil)
-                }
-            }
+            // macOS can show it again (Dock, app switch). Not in the 0.1 s after taking it: the
+            // scoreboard can still read shown then, and a forced show+hide right after the order-in
+            // blocked the first zoom tick 7 ms on WindowServer (2026-10-31).
+            if now - cursorTakenAt > 0.1 { SkyLight.hideRealCursor() }
+            cursorShape()
         }
         let W = screen.frame.width, H = screen.frame.height
         // Screen position of the pointer (top-left origin), then the layer frame (bottom-left).
         let sx = (p.x - center.x) * scale + W / 2, sy = (p.y - center.y) * scale + H / 2
         let w = cursorSize.width * scale, h = cursorSize.height * scale
+        lastTickAt = now
         CATransaction.begin(); CATransaction.setDisableActions(true)
+        if let p = pendingSurface { image.contents = p; pendingSurface = nil }
         cursorLayer.isHidden = pointerHidden || lockHidden
         cursorLayer.frame = CGRect(x: sx - cursorHotSpot.x * scale, y: H - sy - (h - cursorHotSpot.y * scale), width: w, height: h)
         CATransaction.commit()
@@ -272,6 +342,9 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         w.isOpaque = true
         w.backgroundColor = .black
         w.hasShadow = false
+        // No AppKit order-in animation: by default the overlay appeared 1.3-1.7% SMALLER than the
+        // screen and grew back over ~120 ms, the "push back" at every zoom-in start (2026-10-31).
+        w.animationBehavior = .none
         w.isReleasedWhenClosed = false
         w.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
         let v = NSView(frame: CGRect(origin: .zero, size: screen.frame.size))
@@ -353,14 +426,34 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
               let pb = CMSampleBufferGetImageBuffer(sb), let surf = CVPixelBufferGetIOSurface(pb)?.takeUnretainedValue() else { return }
         DispatchQueue.main.async {
             guard self.stream === s else { return }    // a stopped stream's late frames are dropped
+            if self.latest == nil && !self.visible && self.warmingSince > 0 {
+                Log.info(String(format: "draw engine: capture warm %.0f ms after the zoom was asked for", (CACurrentMediaTime() - self.warmingSince) * 1000))
+                self.warmingSince = 0
+            }
             self.latest = surf
             guard self.visible else { return }
+            self.frames += 1
+            // While the zoom ticks, a captured frame goes up with the tick's own commit: committed
+            // here, at a random phase, it was a second commit per refresh racing WindowServer.
+            if self.haveFrame && CACurrentMediaTime() - self.lastTickAt < 0.02 {
+                self.pendingSurface = surf
+                // Only if the link paused: this frame, still pending, and no tick since it arrived.
+                // (Committing whatever was pending put a newer frame up off-phase; review 2026-10-31.)
+                let arrived = CACurrentMediaTime()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.012) {
+                    guard let p = self.pendingSurface, p === surf, self.lastTickAt < arrived, self.visible else { return }
+                    self.pendingSurface = nil
+                    CATransaction.begin(); CATransaction.setDisableActions(true); self.image.contents = p; CATransaction.commit()
+                }
+                return
+            }
+            self.pendingSurface = nil
             CATransaction.begin(); CATransaction.setDisableActions(true)
             self.image.contents = surf
             CATransaction.commit()
-            self.frames += 1
             if !self.haveFrame {
                 self.haveFrame = true; self.window?.alphaValue = 1
+                self.takeCursor()
                 Log.info(String(format: "draw engine: first frame %.0f ms after zooming in", (CACurrentMediaTime() - self.shownAt) * 1000))
             }
         }
@@ -380,8 +473,8 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
             self.window?.alphaValue = 0
             self.startStream()
             let gen = self.generation
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                guard let self, self.visible, !self.haveFrame, self.generation == gen else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                guard self.visible, !self.haveFrame, self.generation == gen else { return }
                 self.fail("no captured frame after a restart")
             }
         }

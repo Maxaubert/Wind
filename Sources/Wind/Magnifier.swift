@@ -388,18 +388,35 @@ final class Magnifier {
         if let l = link, l.isPaused { lastTick = 0; l.isPaused = false }
     }
 
-    /// Test hook (A/B): run the frame's work this many seconds after the display link fires.
-    nonisolated(unsafe) static var tickDelay = 0.0
+    /// Test hook (A/B, `wcur delay N`): run the frame's work this many seconds after the display link
+    /// fires. nil: the engine's default (`drawTickDelay` on the render engine, none on macOS's zoom).
+    nonisolated(unsafe) static var tickDelay: Double?
+    /// Render engine: the display link fires about when WindowServer composites, and a commit made
+    /// then sometimes caught this refresh and sometimes the next: one refresh repeated, the next showed
+    /// a double step (4.1-4.3% at speed 1.75, the owner's "steps of about 5%"; 33 such hitches in 12
+    /// holds). Run 3 ms later the commit lands clear of the composite (2 in 8 holds, max step 2.2%).
+    static let drawTickDelay = 0.003
     private var delayedTickPending = false
+    private var delayedLink: CADisplayLink?
+    private lazy var tickTimer: DispatchSourceTimer = {
+        let t = DispatchSource.makeTimerSource(flags: .strict, queue: .main)
+        t.setEventHandler { [weak self] in
+            guard let self, let l = self.delayedLink else { return }
+            self.delayedTickPending = false
+            self.step(l)
+        }
+        t.resume()
+        return t
+    }()
 
     @objc private func tick(_ l: CADisplayLink) {
-        if Magnifier.tickDelay > 0 {
+        let delay = Magnifier.tickDelay ?? (DrawZoom.enabled ? Magnifier.drawTickDelay : 0)
+        if delay > 0 {
             if delayedTickPending { return }
             delayedTickPending = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + Magnifier.tickDelay) { [weak self] in
-                self?.delayedTickPending = false
-                self?.step(l)
-            }
+            delayedLink = l
+            // A timer with no leeway: asyncAfter may coalesce and fire late, back into the composite.
+            tickTimer.schedule(deadline: .now() + delay, leeway: .nanoseconds(0))
             return
         }
         step(l)
@@ -412,6 +429,15 @@ final class Magnifier {
         if paused { l.isPaused = true; return }
 
         zoom.direction = resolveDirection(inHeld: held(.zoomIn), outHeld: held(.zoomOut))
+        // Render engine, cold start (first zoom, or after a minute at 1x stopped the capture): hold the
+        // level at 1x until a captured frame is at hand, so the overlay shows the zoom from its first
+        // step. Zooming on meanwhile made the overlay pop in at 1.05-1.14 after 90-136 ms with no cursor
+        // (2026-10-31). The display link keeps running; lastTick moves on, so no stalled dt is integrated.
+        if DrawZoom.enabled && !zoomedSession && zoom.level <= 1.0001 && zoom.wantsZoomIn && !DrawZoom.shared.hasFrame {
+            DrawZoom.shared.prewarm()
+            if config.lockTracking { _ = raw.start() }  // its first open stalls a tick: here, not mid-zoom
+            if DrawZoom.enabled { return }              // a failed start falls through to macOS's zoom
+        }
         zoom.tick(dt)
         SkyLight.traceWrites = config.logLevel >= 3
         let lv = zoom.level
@@ -1300,6 +1326,11 @@ final class Magnifier {
     }
 
     private func reportLevel() {
+        // Render engine: the menu-bar readout waits for the zoom to stop. Retitling the variable-length
+        // status item (first "" -> " 1.1x" at lv 1.05) stalled the tick 11-31 ms at every 0.1x crossing
+        // while zooming in (owner's log 2026-10-31): a repeated frame, then a double step.
+        // (Not at 1x or at the maximum: a held key there leaves the readout stale until release.)
+        if DrawZoom.enabled && zoom.isMoving && zoom.level > 1.0001 && zoom.level < config.maxLevel - 1e-6 { return }
         let lv = (zoom.level * 10).rounded() / 10
         if lv != lastReportedLevel { lastReportedLevel = lv; onLevelChange?(lv) }
     }

@@ -568,6 +568,57 @@ magnified in a click-through overlay (level screenSaver+1) above everything (`Dr
     a CGDisplayCapture shield and a displayable CAContext stay under them.
 - Not done yet: multiple displays, DRM video (captured black).
 
+### Smooth zoom on the render engine (owner report 2026-10-31)
+
+Owner: "a jump at the start, a stutter and some push back" and "steps of about 5%". Measured on the
+zoomed screen (tools/viewcap includes the overlay) and in Wind's trace; the controller itself was
+smooth (per tick +0.10% at the start, 2.13% at full speed, 144 Hz, speed 1.75). Four causes:
+- **Push back**: the overlay window kept AppKit's default `animationBehavior`, so every warm zoom-in
+  from 1x played the window-open animation: the first frame was S 0.983-0.987 (SMALLER than 1x),
+  growing back over ~120 ms. A standalone window shows the same curve; `.none` gives 1.0000 at once.
+  Fix: `animationBehavior = .none` (Crosshair and WindCursor already had it).
+- **Cold-start pop**: the capture starts with the first zoom (and again after a minute at 1x). The
+  real cursor was hidden at once and the zoom kept going while the overlay waited 90-136 ms for its
+  first frame, then popped in at 1.06-1.14. Fix: at 1x with no captured frame, `Magnifier.step`
+  holds the level (no `zoom.tick`, `lastTick` moves on) and `DrawZoom.prewarm()` starts the stream
+  with the overlay ordered out; the zoom starts from 1.0 when the first frame is in. The real cursor
+  is hidden only when the overlay shows a picture. RawMouse's first open (a 11-37 ms stall) also
+  happens in a held tick. No frame within 1.5 s still falls back to macOS's zoom.
+- **Stall at every 0.1x crossing**: `reportLevel` retitled the variable-length menu-bar item each
+  time the rounded level changed (first `"" -> " 1.1x"` at lv 1.05, ~110 ms into every zoom-in);
+  the tick after it came 11-31 ms late (owner's log: every late tick in the first 300 ms of 11
+  sessions sat at lv 1.05, 1.15 or 1.25), shown as a repeated frame and then a double step. Fix: on
+  the render engine the readout updates when the zoom stops.
+- **Coarse steps**: the display link fires about when WindowServer composites; a commit made then
+  sometimes caught this refresh, sometimes the next. One refresh repeated, the next showed two
+  ticks at once (4.1-4.3% at full speed, the "5% steps"), although Wind's ticks were even. Fix: the
+  render engine runs the tick's frame work 3 ms after the link fires (`Magnifier.drawTickDelay`, a
+  strict DispatchSourceTimer with no leeway; `wcur delay N|default` overrides it in tests). macOS's
+  zoom engine keeps no delay. The delay alone still left 21 hitches in 12 holds: the capture
+  delivers a frame about every refresh (~140/s while anything on screen moves), and each was
+  committed in its own main-queue `CATransaction` at a random phase. While the zoom ticks
+  (a tick in the last 20 ms), a captured frame now waits for the tick and goes up in the drawn
+  cursor's commit; if no tick comes within 12 ms it is committed on its own.
+- **First zoom tick**: CGDisplayHideCursor, NSCursor.currentSystem and placeAbovePrompts each
+  waited 2-8 ms on WindowServer when called right after `orderFrontRegardless`. Cursor shape and
+  hiding now run before the order-in and placeAbovePrompts on a serial background queue; the
+  periodic re-hide skips the 0.1 s after taking the cursor (a forced show+hide there blocked 7 ms).
+  The first tick can still come 10-14 ms late (WindowServer is busy with the new window); its step
+  is 0.25% instead of 0.1%, not visible.
+
+Detectors (all hold the screen lock): `scripts/zoom_start_truth.py` (first ~300 ms of a zoom-in
+fit against the 1x frame: push back, pop, cursor gap), `scripts/zoom_steps.py` (per-refresh scale
+steps and hitches during holds), `scripts/tick_gaps.py` (late ticks in the first 600 ms from the
+log; `--analyze <log>` for any log). Before (main 3d24e24) and after:
+- zoom start: cold first frame S 1.064 after 90 ms with no cursor -> 1.001-1.002 after one frame
+  (once two); warm first frame 0.984 (push back) -> 1.0025, no backward frame.
+- steps: 13 hitches in 4 holds (investigator: 33 in 12), max 4.2-4.3% -> 11 hitches in 24 holds,
+  max <= 2.22% in 21 of them (4.0-4.3% in 3).
+- late ticks in the first 600 ms: 11 per 5 zoom-ins at the 0.1x crossings -> 6, mostly the first
+  tick, 10-12 ms.
+Left for the owner: the wheel glide is first order (a notch
+starts at full speed, +1.5% on its first tick, then decays ~6:1 before the next notch).
+
 ## macOS's text caret grows for a moment (not Wind, 2026-10-31)
 Clicking into a text field, macOS's caret briefly grows and shows the input-language / Caps Lock
 indicator; the zoom magnifies it. Turned off on the owner's Mac with
