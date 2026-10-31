@@ -12,7 +12,7 @@ block for the cursor and the crosshair (WIND_CURSOR_PROBE), and reports per run:
 Following the pointer the cursor should stay put on screen, so jumps should be ~0.
 FAIL when jumps exceed 3% of the frames in any run.
 
-usage: cursor_truth.py [--levels 4,7.3,12] [--scenarios longslow,longmed,fast,zoompan,hold,inspect]
+usage: cursor_truth.py [--levels 4,7.3,12] [--scenarios longslow,longmed,fast,zoompan,hold,inspect,edgehold,edgepan,edgestill,edgezoomin]
                        [--out DIR] [--variant "name=cmd;cmd"]
 WIND_CURSOR_MOVEWINDOW=1 runs the old way (a small window moved each frame) to see a failure.
 Needs sudo (vmouse) and Screen Recording for the terminal; zooms the real screen."""
@@ -47,7 +47,9 @@ W.assert_zoom_live()
 MOVES = {"slow": (2, 1), "med": (6, 2), "fast": (14, 4)}
 
 def run(scen, lv, path):
-    W.ctl("level 1"); time.sleep(0.3); W.ctl("warp 600 500"); time.sleep(0.2)
+    # edge*: off centre, the view pinned to the right edge (owner 2026-10-31: zoom-pan shakes most there)
+    start = (int(1920 - 0.3 * 1920 / lv / 2), 500) if scen.startswith("edge") else (600, 500)
+    W.ctl("level 1"); time.sleep(0.3); W.ctl(f"warp {start[0]} {start[1]}"); time.sleep(0.2)
     W.ctl(f"level {lv}"); time.sleep(0.6)
     mv(1, 0, 3); time.sleep(0.2)
     secs = 6.2 if scen.startswith("long") else 1.9
@@ -64,6 +66,14 @@ def run(scen, lv, path):
         W.ctl("mods")
     elif scen == "hold":                                      # zoom key held while panning
         W.ctl("press zoomIn"); mv(4, 1, 60); W.ctl("release zoomIn"); mv(-4, -1, 60)
+    elif scen == "edgehold":                                  # near the edge: zoom in, pan toward the centre
+        W.ctl("press zoomIn"); mv(-1, 0, 400, 2); W.ctl("release zoomIn")   # a report every 2 ms, like a real mouse
+    elif scen == "edgestill":                                 # near the edge, hand still, zooming out: the cursor glides
+        W.ctl("press zoomOut"); time.sleep(0.6); W.ctl("release zoomOut")   # toward the edge, as on Windows
+    elif scen == "edgezoomin":                                # near the edge, hand still, zooming in: into what the
+        W.ctl("press zoomIn"); time.sleep(0.6); W.ctl("release zoomIn")   # pointer is on; the cursor moves smoothly
+    elif scen == "edgepan":                                   # near the edge, steady level, pan toward the centre
+        mv(-1, 0, 400, 2)
     elif scen == "inspect":                                   # Inspect's crosshair
         W.ctl("post key ctrl+opt+i down"); W.ctl("post key ctrl+opt+i up"); time.sleep(0.25)
         for i in range(4): mv(6 if i % 2 == 0 else -6, 2 if i % 2 == 0 else -2, 60)
@@ -77,10 +87,22 @@ def stats(path, lv):
     d = [math.hypot(b[0] - a[0], b[1] - a[1]) / lv for a, b in zip(pts, pts[1:]) if a and b]
     blips = sum(1 for a, b, c in zip(pts, pts[1:], pts[2:]) if a and b and c
                 and math.hypot(c[0] - a[0], c[1] - a[1]) / lv < 0.25 and math.hypot(b[0] - a[0], b[1] - a[1]) / lv > 0.5)
+    # Off centre the cursor moves across the screen: there a shake is a sudden change of step
+    # (second difference over half a desktop point), not a move.
+    # The input itself is uneven per frame (a report every 2 ms is 3 or 4 per 144 Hz frame: steps of
+    # 1.5 and 2 pt), so a jerk is a moving frame's step off the median of its neighbours by more than
+    # half of it (whole-point carries hop: 0.2, 0.2, then a level's pixels).
+    st_ = [math.hypot(b[0] - a[0], b[1] - a[1]) / lv if a and b else None for a, b in zip(pts, pts[1:])]
+    acc = []
+    for i in range(2, len(st_) - 2):
+        win = [x for x in st_[i - 2:i + 3] if x is not None]
+        if st_[i] is None or len(win) < 4: continue
+        med = sorted(win)[len(win) // 2]
+        if med > 0.3: acc.append(1.0 if abs(st_[i] - med) > 0.5 * med else 0.0)
     if len(d) < 20: return None
     s = sorted(d)
     return dict(n=len(s), mean=sum(s) / len(s), p95=s[int(len(s) * 0.95) - 1], max=s[-1],
-                jumps=sum(1 for x in s if x > 0.5), blips=blips)
+                jumps=sum(1 for x in s if x > 0.5), blips=blips, jerks=sum(1 for x in acc if x > 0.5))
 
 variants = [v.split("=", 1) for v in a.variant] or [["default", ""]]
 for name, cmds in variants:
@@ -93,6 +115,11 @@ for name, cmds in variants:
             st = stats(path, lv)
             if st is None:
                 W.check(f"{name} {scen} at {lv}x: cursor seen on the zoomed screen", False, "too few frames with the probe block")
+                continue
+            if scen in ("edgepan", "edgehold", "edgezoomin", "edgestill"):
+                pct = 100 * st["jerks"] / st["n"]
+                W.check(f"{name} {scen} at {lv}x: moves smoothly on the zoomed screen", pct <= a.max_jumps_pct,
+                        f"{st['n']} frames, jerks {st['jerks']} ({pct:.1f}%), step mean {st['mean']:.3f} max {st['max']:.2f} pt")
                 continue
             pct = 100 * st["jumps"] / st["n"]
             W.check(f"{name} {scen} at {lv}x: steady on the zoomed screen", pct <= a.max_jumps_pct,

@@ -437,6 +437,10 @@ final class Magnifier {
                 return v
             }
             let c = clampCenter(Pt(pin(liveCenter.x, screen.w), pin(liveCenter.y, screen.h)), level: lv, screen: screen)
+            // At a pinned edge too the level write keeps the pointer's desktop spot: the view clamps
+            // per axis and the cursor glides off centre and back as the level changes, exactly as Wind
+            // on Windows does (it never moves the pointer; recording 2026-10-31). Keeping the screen
+            // spot instead (tried 2026-10-31) slid the pointer off what it was on.
             send(c, level: lv, keepPointer: true)
             lastWritten = (c, lv)
             levelWritten = true
@@ -979,7 +983,17 @@ final class Magnifier {
             let k = d == 0 || kf * d < 0 || abs(a - p) < 0.5 ? kt : kf
             return k == 0 ? p : p + k + (k > 0 ? 0.5 : -0.5)    // places exactly k (toward zero)
         }
-        aim = Pt(whole(aim.x, p.x, dx * g + withHand.x), whole(aim.y, p.y, dy * g + withHand.y))
+        // With the view pinned to an edge the cursor moves across the screen, and there whole-point
+        // carries showed as hops of a level's pixels every few frames (cursor_truth edgepan/edgehold:
+        // 29-66% of frames jerked). A pinned axis is placed on the exact aim by a warp instead
+        // (precise to 1/level of a point, see placePointer), so it keeps the aim as it is.
+        // Judged on the centre as written this frame (the level is written first): last frame's centre,
+        // a fraction inside the new level's edge while zooming in, read as not pinned and the carries
+        // went back to whole points (cursor hops of 20-30 px zooming at an edge, 2026-10-31).
+        let hwE = screen.w / lv / 2, hhE = screen.h / lv / 2
+        let pinX = (liveCenter.x <= hwE + 1e-6 && aim.x <= hwE) || (liveCenter.x >= screen.w - hwE - 1e-6 && aim.x >= screen.w - hwE)
+        let pinY = (liveCenter.y <= hhE + 1e-6 && aim.y <= hhE) || (liveCenter.y >= screen.h - hhE - 1e-6 && aim.y >= screen.h - hhE)
+        aim = Pt(pinX ? aim.x : whole(aim.x, p.x, dx * g + withHand.x), pinY ? aim.y : whole(aim.y, p.y, dy * g + withHand.y))
         let land = Pt(p.x + (aim.x - p.x).rounded(.towardZero), p.y + (aim.y - p.y).rounded(.towardZero))
         let got = placePointer(at: aim, from: p, level: lv, view: config.mouseAlign == 0 ? mouseTarget(land, lv) : nil)
         if config.logLevel >= 2 {
@@ -1154,7 +1168,6 @@ final class Magnifier {
         let want = Pt(min(max(t.x, 0), screen.w - 1), min(max(t.y, 0), screen.h - 1))
         let px = min(max(p.x, 0), screen.w - 1), py = min(max(p.y, 0), screen.h - 1)
         let kx = (want.x - px).rounded(.towardZero), ky = (want.y - py).rounded(.towardZero)
-        if kx == 0 && ky == 0 { return p }
         let live = max(1, liveLevel)
         let halfW = screen.w / live / 2, halfH = screen.h / live / 2
         // The view pinned to an edge on a carried axis, and staying pinned: a carry by view writes must
@@ -1168,6 +1181,13 @@ final class Magnifier {
             guard let v else { return false }
             return (live <= half + 1e-6 && v <= half + 1e-6) || (live >= size - half - 1e-6 && v >= size - half - 1e-6)
         }
+        // A pinned axis goes to the exact target (the cursor moves across the screen there, and whole
+        // points hopped by a level's pixels); a free axis by whole points as below.
+        let pinX = pinned(liveCenter.x, view?.x, halfW, screen.w), pinY = pinned(liveCenter.y, view?.y, halfH, screen.h)
+        let ex = pinX && abs(want.x - px) >= 0.5 / live ? want.x - px : 0
+        let ey = pinY && abs(want.y - py) >= 0.5 / live ? want.y - py : 0
+        let mx = pinX ? ex : kx, my = pinY ? ey : ky
+        if mx == 0 && my == 0 && kx == 0 && ky == 0 { return p }
         // The view's top-left corner as shown: the whole written centre, clamped by the compositor.
         let ox = min(max(floor(liveCenter.x), halfW), screen.w - halfW) - halfW
         let oy = min(max(floor(liveCenter.y), halfH), screen.h - halfH) - halfH
@@ -1176,12 +1196,12 @@ final class Magnifier {
         // step back, explorer 2026-10-31), so it is added from a fresh read (no zoom write since).
         let late = Magnifier.pointer().map { Pt($0.x - p.x, $0.y - p.y) } ?? Pt(0, 0)
         let lateOK = abs(late.x) < 3 && abs(late.y) < 3
-        let d = Pt(min(max(px + kx + (lateOK ? late.x : 0), 0), screen.w - 1), min(max(py + ky + (lateOK ? late.y : 0), 0), screen.h - 1))
+        let d = Pt(min(max(px + mx + (lateOK ? late.x : 0), 0), screen.w - 1), min(max(py + my + (lateOK ? late.y : 0), 0), screen.h - 1))
         let s = CGPoint(x: ((d.x - ox) * live).rounded(), y: ((d.y - oy) * live).rounded())
         // Only to a point the view shows: a warp reaches screen positions only (Inspect pans the view
         // away from its frozen pointer, and a warp there threw the pointer to x = 0).
         let onScreen = s.x >= 0 && s.y >= 0 && s.x <= screen.w - 1 && s.y <= screen.h - 1
-        if onScreen && ((kx != 0 && pinned(liveCenter.x, view?.x, halfW, screen.w)) || (ky != 0 && pinned(liveCenter.y, view?.y, halfH, screen.h))) {
+        if onScreen && ((pinX && mx != 0) || (pinY && my != 0)) {
             let got = CGPoint(x: ox + s.x / live, y: oy + s.y / live)
             Self.noSuppression?.localEventsSuppressionInterval = 0    // else the hand is held back 250 ms
             CGWarpMouseCursorPosition(s)
@@ -1190,6 +1210,7 @@ final class Magnifier {
             placedThisTick = Pt(placedThisTick.x + got.x - p.x - (lateOK ? late.x : 0), placedThisTick.y + got.y - p.y - (lateOK ? late.y : 0))
             return Pt(got.x - (lateOK ? late.x : 0), got.y - (lateOK ? late.y : 0))
         }
+        if kx == 0 && ky == 0 { return p }
         // Per axis: the centres (as written) before and after the carry, and the carry. An axis
         // that does not move is left as it is: rewriting it at an edge, where the zoom clamps the
         // view to a fractional centre, moved the pointer and pinned it against the edge (a "wall"
@@ -1264,7 +1285,11 @@ final class Magnifier {
     /// in turn; the explorer, 2026-10-30: ~150 shake reversals at right and bottom edges, ~11 at
     /// left and top). Written a point past it, the compositor's own clamp lands exactly on the edge.
     /// The near edges likewise (see below).
-    private func writeAxis(_ c: Double, _ half: Double, _ size: Double) -> Double {
+    private func writeAxis(_ c0: Double, _ half: Double, _ size: Double) -> Double {
+        // A centre within a hair of a whole point is that point (the zoom floors it): float noise from
+        // a screen-keeping write (a pointer at 500.0000 read back as 499.9991) dropped the view a whole
+        // point for a frame, and the drawn cursor, placed from the same value, must agree (2026-10-31).
+        let c = abs(c0 - c0.rounded()) < 0.002 ? c0.rounded() : c0
         // Both edges: a centre at (or past) the clamp is written a point past it, so the compositor's
         // own clamp lands exactly on the edge. A centre even a fraction inside it pushed a pointer
         // on the near edge inward at every level step while zooming (0 -> 2.5 pt, probe 2026-10-30).

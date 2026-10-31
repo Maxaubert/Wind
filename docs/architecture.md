@@ -269,6 +269,32 @@ Owner report: panning while zooming with the pointer near an edge shook much mor
   a free shift fits twice as well as the scale about the edge alone is a sideways jump. Main had 7
   such frames at the left edge at 4x; with the fix, 0-1 at 2.5x, 4x and 8x on both edges.
 
+### Zooming at a pinned edge: as Wind on Windows (2026-10-31)
+Reference recording from Wind on Windows (3 min, 250 Hz sampler plus Wind's trace): Wind never moves
+the pointer. The view origin is `clamp(cursor - view/2, 0, size - view)` per axis, so near an edge the
+view clamps and the cursor sits off centre at `(cursor - origin) * level`; zooming re-evaluates the
+clamp every tick, so the cursor glides between the centred and the edge position (zooming in it
+returns toward the centre, zooming out it slides toward the edge). The Mac does the same: the level
+write keeps the pointer's desktop spot. Keeping its screen spot while zooming out (tried) slid the
+pointer off what it was on, and near 1x (where every axis counts as pinned) it moved the zoom point.
+`cursor_truth` `edgestill` / `edgezoomin` check that this glide is smooth (jerk metric).
+`writeAxis` snaps a centre within 0.002 of a whole point onto it: float noise (500.0000 read back as
+499.9991) dropped the floored view a whole point for a frame, and the drawn cursor uses the same value.
+
+### The cursor near an edge: exact placement (2026-10-31)
+With the view pinned the cursor moves across the screen. Whole-point carries there showed as hops of
+a level's pixels every few frames. `cursor_truth.py` edge scenarios (`edgepan`, `edgehold`: near the
+right edge, pan toward the centre at a steady level / while zooming in, a report every 2 ms) flagged
+a frame as a jerk when its step was off its neighbours' median by more than half. Main: 2-13% of
+frames.
+- A pinned axis is now placed on the exact aim by the warp (1/level of a point), every frame the aim
+  is half a screen pixel away; a free axis still carries whole points.
+- "Pinned" is judged on the centre as written this frame (after the level write). Last frame's
+  centre sits a fraction inside the new level's edge while zooming in; read as not pinned, the carries
+  went back to whole points, and zooming at an edge hopped the cursor 20-30 px.
+- Now 0-1.8% at 4x and 8x (the input's own 3-or-4-reports-per-frame rhythm), centred zoom-pan
+  steady (0%).
+
 ## Wobble (measured 2026-10-29)
 
 The real pointer's screen offset from where the view puts it was measured each frame during
