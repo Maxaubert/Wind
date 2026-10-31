@@ -116,16 +116,16 @@ check("draw engine: the handover keeps the view and the pointer", d["sky"]["cent
 check("draw engine: the handover is logged both ways", any("macOS zoom shows it" in l for l in L) and any("back to drawing" in l for l in L))
 check("draw engine: drawing again after it is gone", a["drawn"] and a["sky"]["scale"] == 4, f"drawn {a['drawn']} {a['sky']}")
 
-# A real password prompt (SecurityAgent): macOS stacks it above every app window, so the drawn zoom
-# would show it twice. It hands over and comes back. The prompt asks for nothing: it is closed by
-# ending the osascript that asked (nothing is typed or clicked in it).
+# A real password prompt (SecurityAgent): render stays on and the prompt is drawn magnified once. The prompt asks for nothing: it is closed
+# by ending the osascript that asked (nothing is typed or clicked in it).
 ctl("level 1"); time.sleep(0.4); ctl("warp 900 500"); time.sleep(0.2); ctl("level 3"); time.sleep(1.0)
 b = ctl("state")
 o = subprocess.Popen(["osascript", "-e", 'do shell script "true" with administrator privileges'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 time.sleep(2.0); d = ctl("state")
+subprocess.run(["screencapture", "-x", os.path.join(ROOT, "build/e2e-draw-prompt.png")])
 o.kill(); o.wait(); time.sleep(1.5); a = ctl("state")
-check("draw engine: a password prompt hands over (it is stacked above every app)", b["drawn"] and not d["drawn"] and d["sky"]["scale"] == 3, f"drawn {b['drawn']} -> {d['drawn']}, sky {d['sky']}")
-check("draw engine: back to drawing after the password prompt, view kept", a["drawn"] and a["sky"]["center"] == b["sky"]["center"], f"drawn {a['drawn']}, view {b['sky']['center']} -> {a['sky']['center']}")
+check("draw engine: render stays on with a password prompt up", b["drawn"] and d["drawn"] and a["drawn"], f"drawn {b['drawn']} {d['drawn']} {a['drawn']}")
+check("draw engine: the overlay is above the password prompt", "SecurityAgent" not in d["aboveOverlay"], f"above the overlay: {d['aboveOverlay']} (screenshot build/e2e-draw-prompt.png)")
 ctl("level 1"); time.sleep(0.5)
 
 # Capture failing (no Screen Recording permission) falls back to macOS's zoom (simulated).

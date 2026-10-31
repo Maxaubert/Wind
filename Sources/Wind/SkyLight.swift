@@ -31,6 +31,41 @@ enum SkyLight {
 
     static let cid: Int32 = mainConn?() ?? 0
 
+    // Spaces.
+    private typealias SpaceCreateFn = @convention(c) (Int32, Int32, CFDictionary?) -> UInt64
+    private typealias SpaceSetAbsFn = @convention(c) (Int32, UInt64, Int32) -> Int32
+    private typealias SpaceGetAbsFn = @convention(c) (Int32, UInt64) -> Int32
+    private typealias SpaceAddWindowsFn = @convention(c) (Int32, UInt64, CFArray, Int32) -> Int32
+    private typealias ShowSpacesFn = @convention(c) (Int32, CFArray) -> Int32
+    private static let spaceCreate = sym("SLSSpaceCreate", SpaceCreateFn.self)
+    private static let spaceSetAbs = sym("SLSSpaceSetAbsoluteLevel", SpaceSetAbsFn.self)
+    private static let spaceGetAbs = sym("SLSSpaceGetAbsoluteLevel", SpaceGetAbsFn.self)
+    private static let spaceAddWindows = sym("SLSSpaceAddWindowsAndRemoveFromSpaces", SpaceAddWindowsFn.self)
+    private static let showSpaces = sym("SLSShowSpaces", ShowSpacesFn.self)
+    private static var promptTier: UInt64 = 0
+
+    /// Keep a window on top while a system prompt is up. True when it took effect.
+    static func placeAbovePrompts(windowNumber: Int) -> Bool {
+        guard let create = spaceCreate, let setAbs = spaceSetAbs, let getAbs = spaceGetAbs,
+              let add = spaceAddWindows, let show = showSpaces, windowNumber > 0 else { return false }
+        func const(_ n: String, _ d: Int32) -> Int32 {
+            guard let h = handle, let p = dlsym(h, "kSLSSpaceAbsoluteLevel" + n) else { return d }
+            return p.load(as: Int32.self)
+        }
+        let agent = const("SecurityAgent", 200), lock = const("ScreenLock", 300)
+        let level = min(agent + 50, lock - 1)
+        guard level > agent, level < 750 else { return false }
+        if promptTier == 0 {
+            promptTier = create(cid, 1, nil)
+            guard promptTier != 0, setAbs(cid, promptTier, level) == 0 else { promptTier = 0; return false }
+        }
+        guard getAbs(cid, promptTier) == level else { return false }
+        // Both return an asynchronous operation token, not an error code.
+        _ = add(cid, promptTier, [NSNumber(value: windowNumber)] as CFArray, 7)
+        _ = show(cid, [NSNumber(value: promptTier)] as CFArray)
+        return true
+    }
+
     /// Whether the system cursor is shown, whichever app hid it (a game hides it for mouse-look).
     /// SLSCursorIsVisible also reports the "obscured while typing" flag, and that cached byte goes
     /// stale: a zoom write or a warp reveals the cursor without rewriting it, so it read hidden for

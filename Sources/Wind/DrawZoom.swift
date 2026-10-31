@@ -83,6 +83,9 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
             if let l = latest { CATransaction.begin(); CATransaction.setDisableActions(true); image.contents = l; CATransaction.commit() }
             window?.alphaValue = haveFrame ? 1 : 0      // else shown with the first captured frame
             window?.orderFrontRegardless()
+            // Above password prompts too: they are captured like any window and then drawn magnified
+            // once, and clicks land on them where drawn (the drawn cursor maps onto the real pointer).
+            if let n = window?.windowNumber { DrawZoom.abovePrompts = SkyLight.placeAbovePrompts(windowNumber: n) }
             shownAt = CACurrentMediaTime()
             pointerHidden = SkyLight.wantHidden         // carry Wind's own hide state over
             SkyLight.forceHidden = true
@@ -124,6 +127,22 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
     /// SkyLight tag bit. Only macOS's zoom can magnify them.)
     static let overlayLevel = Int(CGShieldingWindowLevel()) - 1
 
+    /// Owners of the big windows WindowServer stacks above the overlay (tests).
+    static func ownersAboveOverlay() -> [String] {
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return [] }
+        let me = ProcessInfo.processInfo.processIdentifier
+        var out: [String] = []
+        for w in list {
+            if (w[kCGWindowOwnerPID as String] as? Int32) == me && (w[kCGWindowLayer as String] as? Int) == overlayLevel { return out }
+            let b = w[kCGWindowBounds as String] as? [String: Double] ?? [:]
+            if (b["Width"] ?? 0) > 60 && (b["Height"] ?? 0) > 40 { out.append(w[kCGWindowOwnerName as String] as? String ?? "?") }
+        }
+        return []                                       // the overlay is not on screen
+    }
+
+    /// The overlay sits on a space above password prompts (SkyLight.placeAbovePrompts).
+    nonisolated(unsafe) static var abovePrompts = false
+
     /// The lock screen and screen saver: not captured, so macOS's zoom shows them.
     private static let lockOwners: Set<String> = ["loginwindow", "ScreenSaverEngine"]
 
@@ -141,6 +160,7 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
         if let v = ProcessInfo.processInfo.environment["WIND_IGNORE_PROMPTS"] { ignore = Set(v.split(separator: ",").map(String.init)) }
         #endif
         var aboveOverlay = true                         // the list runs front to back
+        let overlayShown = list.contains { ($0[kCGWindowOwnerPID as String] as? Int32) == me && ($0[kCGWindowLayer as String] as? Int) == overlayLevel }
         for w in list {
             let layer = w[kCGWindowLayer as String] as? Int ?? 0
             if (w[kCGWindowOwnerPID as String] as? Int32) == me {
@@ -155,9 +175,10 @@ final class DrawZoom: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sen
             if alpha < 0.05 || !big || owner == "Window Server" { continue }   // the recording indicator is 28x28
             if ignore.contains(owner) { continue }
             if lockOwners.contains(owner) || sharing == 0 { return true }
-            // Above the overlay. Before the overlay is first shown, judge by level: prompts that
-            // macOS stacks over everything are the ones at or above the screen-saver level.
-            if aboveOverlay && layer >= NSWindow.Level.screenSaver.rawValue { return true }
+            // Above the overlay (listed before it). With the overlay not on screen, judge by level:
+            // prompts at or above the screen-saver level would stack over it, unless the overlay
+            // goes on its own space above them.
+            if aboveOverlay && (!overlayShown ? !abovePrompts && layer >= NSWindow.Level.screenSaver.rawValue : true) { return true }
         }
         return false
     }
