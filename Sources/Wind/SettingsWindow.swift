@@ -108,6 +108,7 @@ struct SettingsView: View {
             slider("Pan smoothing", \.panSmoothMs, 0...150, step: 5, format: "%.0f ms")
             Toggle("Fine steps when moving slowly (slows down on turns)", isOn: m.bind(\.slowPrecision))
             Toggle("Keep pointer speed when zoomed", isOn: m.bind(\.keepPointerSpeed))
+            Toggle("Smooth slow pans (experimental)", isOn: m.bind(\.slowPanGlide))
             Text("macOS slows the pointer by the zoom level; Wind keeps the speed you have at 1x.")
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("Follow the mouse when a game locks the pointer", isOn: m.bind(\.lockTracking))

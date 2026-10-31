@@ -63,11 +63,14 @@ enum SkyLight {
     /// Set the view: centre in global points, scale >= 1. smooth = interpolated (blurry) pixels.
     nonisolated(unsafe) static var traceWrites = false
     @discardableResult
-    static func set(center: CGPoint, scale: Double, smooth: Bool, keepPointer: Bool = true) -> Bool {
+    /// `glide` > 0 makes WindowServer animate to the new centre through fractional positions on a
+    /// 10 ms timer with a cosine ease (the sixth argument; reverse-engineered 2026-10-31). Its
+    /// duration is about pi * sqrt(scale * distance) / (1500 * glide), clamped to 0.01-0.5 s.
+    static func set(center: CGPoint, scale: Double, smooth: Bool, keepPointer: Bool = true, glide: Double = 0) -> Bool {
         if DrawZoom.enabled { DrawZoom.shared.set(center: center, scale: scale, smooth: smooth); return true }
         guard let f = setZoom else { return false }
         var c = center
-        let r = f(cid, &c, scale, smooth, keepPointer, 0) == 0
+        let r = f(cid, &c, scale, smooth, keepPointer, glide) == 0
         if traceWrites { let q = CGEvent(source: nil)?.location ?? .zero; Log.verbose(String(format: "W %.4f %.4f L %.5f keep %d -> ptr %.4f %.4f", center.x, center.y, scale, keepPointer ? 1 : 0, q.x, q.y)) }
         return r
     }

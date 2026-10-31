@@ -48,6 +48,8 @@ final class Magnifier {
     private var redoX = 0.0, redoY = 0.0, redoAge = 0   // an undone carry macOS may re-apply
     private var ptsPerCount = 1.5                 // screen pt the pointer moves per raw count (learnt)
     private var rawMismatch = 0.0, rawDistrusted = false   // how often counts fall short (EMA)
+    private var glideUntil = 0.0, glideEnd = Pt(0, 0), glideMode = false, glideFrame = false   // slow-pan glide
+    private var lastGlideRead = 0.0, rawSpeedAvg = 0.0, glideCooldown = 0.0
     private var drawHeldTicks = 0               // draw engine: ticks with counts and a still pointer
     private var userHidCursor = false           // the hide-cursor bind is on
     private var ptrVel = (x: 0.0, y: 0.0)
@@ -449,6 +451,7 @@ final class Magnifier {
 
         tickStartCenter = center
         placedLastTick = placedThisTick; placedThisTick = Pt(0, 0); carryView = nil
+        glideFrame = false
         // A game holding the pointer: the cursor stays hidden while the hand keeps moving. While it
         // holds it, pan from raw HID counts: Wind's own view writes drag the held pointer around and
         // WindowServer reports that as moves with large unrelated deltas, so tap deltas run away.
@@ -610,6 +613,8 @@ final class Magnifier {
                 } else if DrawZoom.enabled {
                     // Drawn zoom: macOS is not zoomed, the pointer already moves at 1x.
                     handTarget = nil
+                } else if config.keepPointerSpeed && !returning && slowPanGlide(ptr, lv, dt, r) {
+                    // handled: the pointer and view glide by WindowServer (issue #13)
                 } else if let prev0 = lastPtr, lv > 1.0001, let prev = undonePlacement(prev0, ptr),
                           config.keepPointerSpeed && !returning {
                     // macOS undid last tick's placement: the pointer is back where it was, give or
@@ -652,6 +657,7 @@ final class Magnifier {
                 // stepped the view 1, 3, 1, 2, 3 points a frame for an even hand, which zooming in
                 // magnified into a visible shake (owner report 2026-10-30, diagonal while zooming).
                 var want = mouseTarget(handTarget ?? virtualPtr, lv)
+                if glideFrame { want = liveCenter }        // a glide owns the view: no other write
                 // Small corrections to the target (a bounded read, a discounted push) can pull it back a
                 // fraction across a whole point, which showed as a one-point back-step against the pan.
                 // Against the way the raw counts say the hand is going, the view holds instead.
@@ -717,7 +723,7 @@ final class Magnifier {
         // after the carry and the carry comes out short: the model is wrong on that axis, so the
         // next frame measures from where the pointer really is (unless the read is a transient,
         // more than 3 points off). Measured 2026-10-30: corner -> centre snapped back ~10 pt.
-        if var m = lastPtr, let e = endPtr, rawStep != nil {
+        if var m = lastPtr, let e = endPtr, rawStep != nil, !glideFrame {
             let hw = screen.w / lv / 2, hh = screen.h / lv / 2
             if (center.x <= hw + 1e-6 || center.x >= screen.w - hw - 1e-6) && abs(e.x - m.x) < 2 { m = Pt(e.x, m.y) }
             if (center.y <= hh + 1e-6 || center.y >= screen.h - hh - 1e-6) && abs(e.y - m.y) < 2 { m = Pt(m.x, e.y) }
@@ -751,6 +757,7 @@ final class Magnifier {
         handTarget = nil; ptrVel = (0, 0)
         pushX = 0; pushY = 0; redoX = 0; redoY = 0; rawStep = nil; prevRawStep = nil; pendingJump = nil
         rawMismatch = 0; rawDistrusted = false
+        glideUntil = 0; glideMode = false; glideFrame = false
         if pointerHiddenForCaret { pointerHiddenForCaret = false; if !inspect && !userHidCursor { SkyLight.setCursorHidden(false) } }
         afterWrites = nil
         pointerToView = false
@@ -859,6 +866,78 @@ final class Magnifier {
         if uy { redoY = s.y }
         redoAge = 0
         return Pt(ux ? prev.x - s.x : prev.x, uy ? prev.y - s.y : prev.y)
+    }
+
+    /// Slow pans at high zoom step a whole point (level screen pixels) at a time, with idle frames
+    /// between. Experimental (config slowPanGlide, issue #13): each whole-point step is one
+    /// animated keepPointer=false write, so WindowServer glides the view and the pointer through the
+    /// fraction over about the time the hand takes per point. During a glide no other write is made
+    /// (a plain write would be overwritten by its timer) and the hand is measured from raw counts
+    /// (learnt points per count), since pointer reads include the glide.
+    private func slowPanGlide(_ ptr: CGPoint, _ lv: Double, _ dt: Double, _ r: (dx: Double, dy: Double)) -> Bool {
+        glideFrame = false
+        let now = CACurrentMediaTime()
+        let running = now < glideUntil
+        // Hand speed (1x points/s) as measured everywhere else (handSpeedAvg); hysteresis so the mode
+        // does not flap around the threshold (each switch cost motion).
+        // A fast hand shows in the raw counts at once (the glide reads come only every ~50 ms).
+        // Smoothed over ~50 ms: a single count landing in one 7 ms frame is not a fast hand.
+        let rk = exp(-dt / 0.05)
+        rawSpeedAvg = rawSpeedAvg * rk + (r.dx * r.dx + r.dy * r.dy).squareRoot() * min(max(ptsPerCount, 0.5), 1.5) / max(dt, 0.001) * (1 - rk)
+        let speed = max(handSpeedAvg, rawSpeedAvg > 150 ? rawSpeedAvg : 0)
+        let hw = screen.w / lv / 2, hh = screen.h / lv / 2
+        let free = liveCenter.x > hw + 3 && liveCenter.x < screen.w - hw - 3 && liveCenter.y > hh + 3 && liveCenter.y < screen.h - hh - 3
+        let want = config.slowPanGlide && lv >= 2.5 && abs(lv - liveLevel) < 1e-6 && !zoom.isMoving
+            && free && speed < (glideMode ? 80 : 50) && now >= glideCooldown
+        guard want || running else {
+            // Back to carries, measured from where the last glide put the pointer: the hand's motion
+            // during it is still to be counted (re-reading here dropped it).
+            if glideMode { glideMode = false; lastPtr = glideEnd }
+            return false
+        }
+        if !glideMode { glideEnd = lastPtr ?? Pt(ptr.x, ptr.y) }        // the model starts at the pointer
+        glideMode = true; glideFrame = true
+        if running { virtualPtr = glideEnd; return true }
+        // A finished glide lands the pointer exactly on its end plus the hand's motion meanwhile (in
+        // the zoomed scale): that difference is the hand, taken at the level gain as in a carry.
+        let p = Pt(ptr.x, ptr.y)
+        var t = handTarget ?? glideEnd
+        if config.logLevel >= 2 { Log.verbose(String(format: "gl read p %.3f end %.3f d %.3f t %.3f", p.x, glideEnd.x, p.x - glideEnd.x, t.x)) }
+        let g0 = handGain(level: lv)
+        t = Pt(min(max(t.x + (p.x - glideEnd.x) * g0, 0), screen.w - 1), min(max(t.y + (p.y - glideEnd.y) * g0, 0), screen.h - 1))
+        handTarget = t
+        let span = max(now - lastGlideRead, dt)
+        let kk = exp(-span / 0.08)                                             // weighted by the real time
+        let moved = ((p.x - glideEnd.x) * (p.x - glideEnd.x) + (p.y - glideEnd.y) * (p.y - glideEnd.y)).squareRoot() * g0
+        handSpeedAvg = handSpeedAvg * kk + moved / span * (1 - kk)
+        lastGlideRead = now
+        // The hand outran the glides (45 ms each, at most 2 points): back to carries for a while.
+        // This frame's motion is already in the target, so carries continue from the pointer as read
+        // (re-entering at once made the mode flap and the target ran away: 22 of 69 points).
+        if abs(t.x - p.x) > 4 || abs(t.y - p.y) > 4 {
+            glideMode = false; glideFrame = false; lastPtr = p; glideCooldown = now + 0.4; return false
+        }
+        // At most two points per glide (a 17-point glide outlasted its measured end); the rest stays
+        // in the target for the next one.
+        let kx = max(-2, min(2, (t.x - p.x).rounded(.towardZero))), ky = max(-2, min(2, (t.y - p.y).rounded(.towardZero)))
+        if kx == 0 && ky == 0 { virtualPtr = p; glideEnd = p; return true }
+        let c = Pt(floor(liveCenter.x), floor(liveCenter.y))
+        let a = Pt(c.x + 0.5, c.y + 0.5), b = Pt(c.x + kx + 0.5, c.y + ky + 0.5)
+        if abs(a.x - liveCenter.x) > 1e-9 || abs(a.y - liveCenter.y) > 1e-9 {
+            SkyLight.set(center: CGPoint(x: a.x, y: a.y), scale: lv, smooth: config.smoothImages, keepPointer: true)
+        }
+        // WindowServer picks the duration from a few coarse values: measured ~45 ms (its 0.041 s
+        // value plus the 10 ms timer) at 3x-30x for 1-2 point steps, whatever shorter one is asked.
+        let T = 0.041
+        let dist = (kx * kx + ky * ky).squareRoot()
+        let g = min(0.5, max(0.0005, Double.pi * (lv * dist).squareRoot() / (1500 * T)))
+        SkyLight.set(center: CGPoint(x: b.x, y: b.y), scale: lv, smooth: config.smoothImages, keepPointer: false, glide: g)
+        liveCenter = b; liveLevel = lv; lastWritten = (b, lv); wroteThisTick = true
+        glideUntil = now + 0.052                                            // measured end plus a margin
+        glideEnd = Pt(p.x + kx, p.y + ky)
+        virtualPtr = glideEnd
+        if config.logLevel >= 2 { Log.verbose(String(format: "glide k %.0f,%.0f speed %.1f pt/s g %.3f", kx, ky, speed, g)) }
+        return true
     }
 
     /// How much a zoomed pointer step is scaled to cover the 1x desktop distance.

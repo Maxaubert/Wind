@@ -378,6 +378,24 @@ disassembly in `research/wind-mac/re/`).
 - **Testing:** a stuck SecurityAgent dialog (from an lldb attempt) holds Secure Input and blocks
   posted keystrokes: Inspect and bind checks fail. Use `ipsw`, not lldb, for static work.
 
+### Smooth slow pans (experimental, `slowPanGlide`, issue #13)
+
+At 2.5x and above, with the level steady, away from edges and with the hand under ~50 pt/s (off
+again above 80), each whole-point step is one animated keepPointer=false write (sixth argument):
+WindowServer glides the view and the pointer together through the fraction. Measured facts it rests
+on (2026-10-31):
+- a glide lasts ~45 ms whatever shorter duration is asked (WindowServer's 0.041 s value + its 10 ms
+  timer), at 3x-30x for 1-2 point steps; Wind treats it as running for 52 ms and makes no other
+  write meanwhile (a plain write would be overwritten by the timer);
+- when it ends the pointer sits exactly on its end plus the hand's motion meanwhile (zoomed scale),
+  so the hand is measured there at the level gain, like a carry;
+- at most 2 points per glide; a target more than 4 points ahead (the hand outran 45 ms glides) goes
+  back to carries for 0.4 s, continuing from the pointer as read (re-entering at once made the mode
+  flap and lost motion).
+Measured with the virtual mouse: slow pans at 7.3x and 15.7x cover the exact 1x distance with 0
+whole-point jumps (29-32 without) and ~155 fractional pointer steps, no back-steps; medium and fast
+pans are within 7% of 1x and use carries. Remaining: a sub-point step at quick reversals.
+
 ## Draw engine (experimental, `engine = "draw"`, issue #8)
 
 Instead of zooming macOS, Wind captures the main display with ScreenCaptureKit and draws it
